@@ -16,9 +16,15 @@ import {
   analysisAggregate,
   analysisQuery,
   analysisTransactions,
+  listSavedAnalyses,
+  saveAnalysis,
+  deleteSavedAnalysis,
+  updateSavedAnalysis,
+  markSavedAnalysesSeen,
   type AnalysisAst,
   type AnalysisResult,
   type AnalysisTransaction,
+  type SavedAnalysisItem,
 } from '../../api/finance'
 import { useTagsStore } from '../../stores/finance/tags'
 
@@ -42,19 +48,123 @@ const astEditable = ref<AnalysisAst>({ tags: [], op: 'AND', kind: 'ongoing' })
 const fromDate = ref<Date | null>(null)
 const toDate = ref<Date | null>(null)
 
-// Monthly bars only make sense for ongoing/recurring spending. For a
-// bounded event (a single trip) they add no insight, so we hide them —
-// driven by the AI-detected `kind`, which the user can still override.
 const showMonthly = computed(() => astEditable.value.kind !== 'event')
+
+// --- Saved analyses (Rückblicke) ---
+const savedItems = ref<SavedAnalysisItem[]>([])
+const savedLoading = ref(false)
+const savedHasMore = ref(false)
+const savedFilter = ref<'all' | 'user' | 'ai'>('all')
+const saveName = ref('')
+const saveDialogVisible = ref(false)
+const saving = ref(false)
+const activeItemId = ref<number | null>(null)
 
 onMounted(async () => {
   if (tagsStore.items.length === 0) await tagsStore.refresh('user')
   darkMQ.addEventListener('change', onDarkChange)
+  await loadSaved()
 })
 
 onUnmounted(() => {
   darkMQ.removeEventListener('change', onDarkChange)
 })
+
+async function loadSaved() {
+  savedLoading.value = true
+  try {
+    const resp = await listSavedAnalyses({ limit: 20, source: savedFilter.value })
+    savedItems.value = resp.items
+    savedHasMore.value = resp.hasMore
+  } catch {
+    // silent
+  } finally {
+    savedLoading.value = false
+  }
+}
+
+async function loadMore() {
+  if (!savedHasMore.value || savedItems.value.length === 0) return
+  const lastItem = savedItems.value[savedItems.value.length - 1] as SavedAnalysisItem | undefined
+  if (!lastItem) return
+  savedLoading.value = true
+  try {
+    const resp = await listSavedAnalyses({
+      limit: 20,
+      before: lastItem.createdAt,
+      source: savedFilter.value,
+    })
+    savedItems.value = [...savedItems.value, ...resp.items]
+    savedHasMore.value = resp.hasMore
+  } catch {
+    // silent
+  } finally {
+    savedLoading.value = false
+  }
+}
+
+function openSaveDialog() {
+  saveName.value = question.value.trim() || ''
+  saveDialogVisible.value = true
+}
+
+async function doSave() {
+  if (!saveName.value.trim() || !result.value) return
+  saving.value = true
+  try {
+    const item = await saveAnalysis({
+      name: saveName.value.trim(),
+      question: question.value.trim() || undefined,
+      ast: result.value.ast,
+      summary: result.value.total,
+    })
+    savedItems.value = [item, ...savedItems.value]
+    activeItemId.value = item.id
+    saveDialogVisible.value = false
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    saving.value = false
+  }
+}
+
+async function runSavedItem(item: SavedAnalysisItem) {
+  activeItemId.value = item.id
+  aggregating.value = true
+  error.value = null
+  try {
+    const resp = await analysisAggregate({ ast: item.ast })
+    applyResult(resp)
+    question.value = item.question || item.name
+    // Update the cached summary
+    await updateSavedAnalysis({ id: item.id, summary: resp.total }).catch(() => {})
+    const idx = savedItems.value.findIndex((s) => s.id === item.id)
+    if (idx >= 0) {
+      savedItems.value[idx] = Object.assign({}, savedItems.value[idx], { summary: resp.total })
+    }
+    // Mark AI items as seen
+    if (item.source === 'ai' && !item.seenAt) {
+      await markSavedAnalysesSeen([item.id]).catch(() => {})
+      if (idx >= 0) {
+        savedItems.value[idx] = Object.assign({}, savedItems.value[idx], { seenAt: new Date().toISOString() })
+      }
+    }
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    aggregating.value = false
+  }
+}
+
+async function removeSavedItem(item: SavedAnalysisItem) {
+  try {
+    await deleteSavedAnalysis(item.id)
+    savedItems.value = savedItems.value.filter((s) => s.id !== item.id)
+    if (activeItemId.value === item.id) activeItemId.value = null
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  }
+}
 
 function searchTags(event: { query: string }) {
   const q = event.query.toLowerCase()
@@ -76,6 +186,7 @@ async function submitQuestion() {
   parsing.value = true
   error.value = null
   result.value = null
+  activeItemId.value = null
   try {
     const resp = await analysisQuery({ question: question.value.trim() })
     applyResult(resp)
@@ -127,6 +238,17 @@ function formatCurrency(sum: string): string {
 
 function formatDate(iso: string): string {
   return parseLocalDate(iso).toLocaleDateString('de-DE')
+}
+
+function formatRelativeDate(iso: string): string {
+  const d = new Date(iso)
+  const now = new Date()
+  const diffMs = now.getTime() - d.getTime()
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+  if (diffDays === 0) return 'Heute'
+  if (diffDays === 1) return 'Gestern'
+  if (diffDays < 7) return `Vor ${diffDays} Tagen`
+  return d.toLocaleDateString('de-DE')
 }
 
 // --- Drill-down: transactions behind a single tag of the breakdown ---
@@ -209,8 +331,6 @@ const tagChartOptions = computed(() => {
     plugins: { legend: { display: false } },
     scales: {
       x: { ticks: { color: tickColor }, grid: { color: gridColor } },
-      // autoSkip:false forces every tag label to render — otherwise
-      // Chart.js drops every other one when they look crowded.
       y: {
         ticks: { color: tickColor, autoSkip: false },
         grid: { color: gridColor },
@@ -227,6 +347,80 @@ const tagChartOptions = computed(() => {
     </header>
 
     <Message v-if="error" severity="error" :closable="true" @close="error = null">{{ error }}</Message>
+
+    <!-- Saved Analyses / Finanz-Rückblicke -->
+    <section class="card">
+      <div class="saved-header">
+        <h2>Finanz-Rückblicke</h2>
+        <div class="saved-filter">
+          <Button
+            :outlined="savedFilter !== 'all'"
+            size="small"
+            label="Alle"
+            @click="savedFilter = 'all'; loadSaved()"
+          />
+          <Button
+            :outlined="savedFilter !== 'user'"
+            size="small"
+            label="Eigene"
+            @click="savedFilter = 'user'; loadSaved()"
+          />
+          <Button
+            :outlined="savedFilter !== 'ai'"
+            size="small"
+            label="KI"
+            @click="savedFilter = 'ai'; loadSaved()"
+          />
+        </div>
+      </div>
+
+      <div v-if="savedLoading && savedItems.length === 0" class="saved-loading">
+        <ProgressSpinner style="width: 2rem; height: 2rem" />
+      </div>
+      <p v-else-if="savedItems.length === 0" class="hint">
+        Noch keine gespeicherten Analysen. Stelle eine Frage und speichere das Ergebnis.
+      </p>
+      <div v-else class="saved-grid">
+        <div
+          v-for="item in savedItems"
+          :key="item.id"
+          class="saved-card"
+          :class="{
+            active: activeItemId === item.id,
+            unseen: item.source === 'ai' && !item.seenAt,
+          }"
+          @click="runSavedItem(item)"
+        >
+          <div class="saved-card-header">
+            <span class="saved-card-name">{{ item.name }}</span>
+            <span class="saved-card-badge" v-if="item.source === 'ai'">KI</span>
+          </div>
+          <div class="saved-card-meta">
+            <span v-if="item.summary" class="saved-card-sum">
+              {{ formatCurrency(item.summary.sum) }}
+            </span>
+            <span v-if="item.summary" class="saved-card-count">
+              {{ item.summary.count }} Buchungen
+            </span>
+          </div>
+          <div class="saved-card-footer">
+            <span class="saved-card-date">{{ formatRelativeDate(item.createdAt) }}</span>
+            <Button
+              icon="pi pi-trash"
+              text
+              rounded
+              size="small"
+              severity="danger"
+              class="saved-card-delete"
+              @click.stop="removeSavedItem(item)"
+            />
+          </div>
+        </div>
+      </div>
+      <div v-if="savedHasMore" class="saved-more">
+        <Button label="Ältere laden" text size="small" :loading="savedLoading" @click="loadMore" />
+      </div>
+    </section>
 
     <section class="card">
       <label>
@@ -249,7 +443,16 @@ const tagChartOptions = computed(() => {
     </section>
 
     <section v-if="result" class="card">
-      <h2>Erkannt</h2>
+      <div class="result-header">
+        <h2>Erkannt</h2>
+        <Button
+          icon="pi pi-bookmark"
+          label="Speichern"
+          text
+          size="small"
+          @click="openSaveDialog"
+        />
+      </div>
 
       <div class="ast-row">
         <span class="ast-label">Tags</span>
@@ -378,6 +581,7 @@ const tagChartOptions = computed(() => {
       </DataTable>
     </section>
 
+    <!-- Tag drill-down dialog -->
     <Dialog
       v-model:visible="detailVisible"
       modal
@@ -414,6 +618,30 @@ const tagChartOptions = computed(() => {
           </template>
         </Column>
       </DataTable>
+    </Dialog>
+
+    <!-- Save dialog -->
+    <Dialog
+      v-model:visible="saveDialogVisible"
+      modal
+      header="Analyse speichern"
+      :style="{ width: '24rem', maxWidth: '90vw' }"
+    >
+      <div class="save-dialog-body">
+        <label>
+          <span>Name</span>
+          <InputText
+            v-model="saveName"
+            placeholder="z. B. Italien-Urlaub 2024"
+            class="full-width"
+            @keydown.enter="doSave"
+          />
+        </label>
+      </div>
+      <template #footer>
+        <Button label="Abbrechen" text @click="saveDialogVisible = false" />
+        <Button label="Speichern" :loading="saving" :disabled="!saveName.trim()" @click="doSave" />
+      </template>
     </Dialog>
   </div>
 </template>
@@ -536,5 +764,126 @@ const tagChartOptions = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* --- Saved analyses / Rückblicke --- */
+.saved-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.saved-filter {
+  display: flex;
+  gap: 0.25rem;
+}
+.saved-loading {
+  display: flex;
+  justify-content: center;
+  padding: 1rem;
+}
+.saved-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: 0.75rem;
+}
+.saved-card {
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+.saved-card:hover {
+  border-color: var(--p-primary-color);
+}
+.saved-card.active {
+  border-color: var(--p-primary-color);
+  box-shadow: 0 0 0 1px var(--p-primary-color);
+}
+.saved-card.unseen {
+  border-left: 3px solid var(--p-primary-color);
+}
+.saved-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.saved-card-name {
+  font-weight: 600;
+  font-size: 0.875rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.saved-card-badge {
+  font-size: 0.625rem;
+  text-transform: uppercase;
+  font-weight: 700;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  background: var(--p-primary-color);
+  color: var(--p-primary-contrast-color);
+}
+.saved-card-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-variant-numeric: tabular-nums;
+}
+.saved-card-sum {
+  font-size: 1rem;
+  font-weight: 600;
+}
+.saved-card-count {
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color);
+}
+.saved-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.saved-card-date {
+  font-size: 0.7rem;
+  color: var(--p-text-muted-color);
+}
+.saved-card-delete {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.saved-card:hover .saved-card-delete {
+  opacity: 1;
+}
+.saved-more {
+  display: flex;
+  justify-content: center;
+}
+
+/* Result header with save button */
+.result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Save dialog */
+.save-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.save-dialog-body label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.full-width {
+  width: 100%;
 }
 </style>
