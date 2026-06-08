@@ -768,6 +768,77 @@ export async function analysisTransactions(params: {
 }
 
 // ----------------------------------------------------------------------
+// Saved Analysis
+// ----------------------------------------------------------------------
+
+export interface SavedAnalysisSummary {
+  sum: string
+  count: number
+  avg: string
+}
+
+export interface SavedAnalysisItem {
+  id: number
+  name: string
+  question: string | null
+  ast: AnalysisAst
+  source: 'user' | 'ai'
+  summary: SavedAnalysisSummary | null
+  seenAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export async function listSavedAnalyses(params?: {
+  limit?: number
+  before?: string
+  source?: 'user' | 'ai' | 'all'
+}): Promise<{ items: SavedAnalysisItem[]; hasMore: boolean }> {
+  return apiFetch('/finance/saved-analysis/list', {
+    method: 'POST',
+    body: JSON.stringify(params ?? {}),
+  })
+}
+
+export async function saveAnalysis(params: {
+  name: string
+  question?: string
+  ast: AnalysisAst
+  summary?: SavedAnalysisSummary
+}): Promise<SavedAnalysisItem> {
+  return apiFetch('/finance/saved-analysis', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+}
+
+export async function updateSavedAnalysis(params: {
+  id: number
+  name?: string
+  ast?: AnalysisAst
+  summary?: SavedAnalysisSummary
+}): Promise<SavedAnalysisItem> {
+  return apiFetch(`/finance/saved-analysis/${params.id}`, {
+    method: 'PUT',
+    body: JSON.stringify(params),
+  })
+}
+
+export async function deleteSavedAnalysis(id: number): Promise<void> {
+  return apiFetch(`/finance/saved-analysis/${id}`, {
+    method: 'DELETE',
+    body: '{}',
+  })
+}
+
+export async function markSavedAnalysesSeen(ids: number[]): Promise<void> {
+  return apiFetch('/finance/saved-analysis/mark-seen', {
+    method: 'POST',
+    body: JSON.stringify({ ids }),
+  })
+}
+
+// ----------------------------------------------------------------------
 // Tag Queue (admin)
 // ----------------------------------------------------------------------
 
