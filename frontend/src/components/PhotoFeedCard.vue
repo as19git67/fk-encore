@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
+import Textarea from 'primevue/textarea'
 import PhotoLocationMenu from './PhotoLocationMenu.vue'
 import { getPhotoUrl, updatePhotoDescription } from '../api/photos'
 import { listCommentsPage, createComment, type PhotoComment } from '../api/reactions'
@@ -267,12 +268,14 @@ async function submitComment() {
     </div>
 
     <div v-if="editingDesc" class="desc-editor">
-      <InputText
+      <Textarea
         v-model="descDraft"
         placeholder="Beschreibung…"
         class="desc-input"
+        :rows="1"
+        autoResize
         @keydown.escape="cancelEditDescription"
-        @keyup.enter="saveDescription"
+        @keydown.enter.exact.prevent="saveDescription"
       />
       <button class="icon-btn small" :disabled="savingDesc" title="Speichern" @click="saveDescription">
         <i :class="savingDesc ? 'pi pi-spin pi-spinner' : 'pi pi-check'" />
@@ -456,13 +459,14 @@ async function submitComment() {
 
 .desc-editor {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 0.35rem;
   padding: 0.3rem 0.6rem;
 }
 .desc-input {
   flex: 1;
   min-width: 0;
+  resize: none;
 }
 
 .caption {
