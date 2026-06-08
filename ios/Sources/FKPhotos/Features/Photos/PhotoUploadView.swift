@@ -130,7 +130,17 @@ struct PhotoUploadView: View {
     private var selectionArea: some View {
         // No 50-item cap any more (issue #591): omitting maxSelectionCount lets
         // the system picker select an unlimited number of photos.
-        PhotosPicker(selection: $selectedItems, matching: .images) {
+        //
+        // `photoLibrary: .shared()` is REQUIRED for `PhotosPickerItem.itemIdentifier`
+        // to be populated (issue #591). Without it the identifier is always nil,
+        // so every selection fell through to `makeFallbackQueueItem` — which loads
+        // re-encoded bytes (HEIC → JPEG), drops the caption/favourite (they live on
+        // the PHAsset, not in EXIF) and carries no `X-Asset-Id`. The missing asset
+        // id also defeated the server's "replace on edit" dedup, so re-uploading an
+        // edited photo created a duplicate. Binding the picker to the shared library
+        // resolves each item to its PHAsset and routes it through the lossless
+        // `AssetUploadEnqueuer.makeQueueItem` path instead.
+        PhotosPicker(selection: $selectedItems, matching: .images, photoLibrary: .shared()) {
             pickerTile(
                 icon: "photo.badge.plus",
                 title: "Fotos auswählen",
