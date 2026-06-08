@@ -710,6 +710,11 @@ export interface RelativeTimespan {
   n?: number
 }
 
+export interface TagGroup {
+  tags: string[]
+  op: 'AND' | 'OR'
+}
+
 export interface AnalysisAst {
   tags: string[]
   op: 'AND' | 'OR'
@@ -721,6 +726,14 @@ export interface AnalysisAst {
   interval?: 'month' | 'year'
   /** Relative time reference for saved queries that auto-adjust over time. */
   relativeTimespan?: RelativeTimespan
+  /**
+   * Grouped tag expressions for complex filters (e.g. "Restaurant AND
+   * (TagA OR TagB)"). When present and non-empty, takes precedence over
+   * flat `tags`/`op`. UI-driven — the LLM continues producing flat format.
+   */
+  tagGroups?: TagGroup[]
+  /** Logical operator joining the tag groups. Defaults to 'AND'. */
+  groupOp?: 'AND' | 'OR'
 }
 
 export interface AnalysisResult {
