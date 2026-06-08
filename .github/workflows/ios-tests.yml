@@ -67,15 +67,7 @@ jobs:
         # separate resolve step is needed.
         run: |
           xcodebuild -list || true
-          SCHEME=$(xcodebuild -list -json 2>/dev/null | python3 -c '
-import sys, json
-raw = sys.stdin.read()
-data = json.loads(raw[raw.find("{"):])
-c = data.get("workspace") or data.get("project") or {}
-s = c.get("schemes", [])
-pkg = [x for x in s if x.endswith("-Package")]
-print(pkg[0] if pkg else (s[0] if s else ""))
-')
+          SCHEME=$(xcodebuild -list -json 2>/dev/null | python3 -c "import sys, json; r = sys.stdin.read(); d = json.loads(r[r.find('{'):]); c = d.get('workspace') or d.get('project') or {}; s = c.get('schemes', []); p = [x for x in s if x.endswith('-Package')]; print(p[0] if p else (s[0] if s else ''))")
           echo "Selected scheme: $SCHEME"
           echo "IOS_SCHEME=$SCHEME" >> "$GITHUB_ENV"
 
