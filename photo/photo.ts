@@ -126,26 +126,6 @@ function checkModule() {
 }
 
 /**
- * Normalise a SHA-256 hex value carried in an HTTP header (lower-cased,
- * trimmed). Returns null when the header is absent or malformed.
- */
-function normalizeHashHeader(raw: string | string[] | undefined): string | null {
-  if (typeof raw !== "string") return null;
-  const v = raw.trim().toLowerCase();
-  return /^[a-f0-9]{64}$/.test(v) ? v : null;
-}
-
-/**
- * Parse a finite floating-point GPS value (lat / lng / altitude) from an HTTP
- * header. Returns null when the header is absent, non-numeric, or NaN/∞.
- */
-function parseGpsHeader(raw: string | string[] | undefined): number | null {
-  if (typeof raw !== "string") return null;
-  const v = parseFloat(raw.trim());
-  return Number.isFinite(v) ? v : null;
-}
-
-/**
  * Upload a photo.
  * Expects the raw image data in the request body.
  * Filename should be provided in X-File-Name header.
@@ -172,44 +152,10 @@ export const uploadPhoto = api.raw(
       return;
     }
 
-    const rawFileName = (req.headers["x-file-name"] as string) || "photo.jpg";
-    // Client percent-encodes the filename to stay within ISO-8859-1 header limits.
-    let fileName = rawFileName;
-    try {
-      fileName = decodeURIComponent(rawFileName);
-    } catch {
-      fileName = rawFileName;
-    }
-    const mimeType = (req.headers["content-type"] as string) || "image/jpeg";
-    const isFavorite = req.headers["x-is-favorite"] === "true";
-    // Optional fallback when the file's EXIF carries no DateTimeOriginal —
-    // the iOS client forwards PHAsset.creationDate here.
-    const capturedAtHeader = req.headers["x-captured-at"];
-    const clientCapturedAt = typeof capturedAtHeader === "string" ? capturedAtHeader : null;
-
-    // Hash-based sync protocol (issue #432).
-    const imageDataHash = normalizeHashHeader(req.headers["x-image-data-hash"]);
-    const fullHash = normalizeHashHeader(req.headers["x-full-hash"]);
-    const descriptionHeader = req.headers["x-description"];
-    const hasDescriptionHeader = typeof descriptionHeader === "string";
-    let description: string | undefined;
-    if (hasDescriptionHeader) {
-      try {
-        description = decodeURIComponent(descriptionHeader as string);
-      } catch {
-        description = descriptionHeader as string;
-      }
-    }
-    const rawAssetId = req.headers["x-asset-id"];
-    const deviceAssetId = typeof rawAssetId === "string" ? rawAssetId : null;
-
-    // Optional GPS fallback. iOS's PHAssetResource bytes can come back with
-    // their EXIF stripped (observed for HEIC originals fetched in the
-    // background-upload context), so the client reads `PHAsset.location`
-    // separately and forwards it here when present. Same pattern as
-    // X-Captured-At for the missing DateTimeOriginal.
-    const clientLatitude = parseGpsHeader(req.headers["x-gps-lat"]);
-    const clientLongitude = parseGpsHeader(req.headers["x-gps-lng"]);
+    // Parse the X-* upload contract via the shared, unit-tested parser so the
+    // production path and the test path are the exact same code.
+    const { fileName, mimeType, isFavorite, clientCapturedAt, sync } =
+      service.parseUploadHeaders(req.headers);
 
     // A pure metadata edit (pixels unchanged) is NOT handled here: the client
     // detects it locally and calls the body-less POST /photos/sync/metadata
@@ -218,14 +164,7 @@ export const uploadPhoto = api.raw(
     // an in-flight upload surfaced as 502). This endpoint only ever creates a
     // new photo or replaces an existing one's content (an in-app edit).
     try {
-      const { photo, replaced } = await service.uploadPhotoStream(userId, req, fileName, mimeType, isFavorite, clientCapturedAt, {
-        imageDataHash,
-        fullHash,
-        description: hasDescriptionHeader ? description : undefined,
-        deviceAssetId,
-        clientLatitude,
-        clientLongitude,
-      });
+      const { photo, replaced } = await service.uploadPhotoStream(userId, req, fileName, mimeType, isFavorite, clientCapturedAt, sync);
 
       // `replaced` → a device_asset_id match updated an existing photo's file
       // in place (an in-app edit); otherwise a new photo was created.

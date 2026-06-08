@@ -104,10 +104,10 @@ public final class BackgroundSyncManager {
 
     @available(iOS 26.1, *)
     private func enqueuePHBackgroundJob(_ item: UploadQueueItem) {
-        guard let resource = item.assetLocalIdentifier.flatMap({ localId in
-            PHAsset.fetchAssets(withLocalIdentifiers: [localId], options: nil).firstObject
-                .flatMap { PHAssetResource.assetResources(for: $0).first(where: { $0.type == .photo }) }
-        }) else {
+        let asset = item.assetLocalIdentifier.flatMap {
+            PHAsset.fetchAssets(withLocalIdentifiers: [$0], options: nil).firstObject
+        }
+        guard let resource = asset.flatMap({ AssetUploadEnqueuer.bestResource(for: $0) }) else {
             // No PHAssetResource available (e.g. item came from Share Extension with file data only).
             // Fall back to UploadQueue for foreground processing.
             Task { await UploadQueue.shared.enqueue(item) }
@@ -130,6 +130,20 @@ public final class BackgroundSyncManager {
         request.setValue(percentEncodeHeaderValue(item.caption), forHTTPHeaderField: "X-Description")
         request.setValue(item.isFavorite ? "true" : "false", forHTTPHeaderField: "X-Is-Favorite")
         request.setValue(item.capturedAtString, forHTTPHeaderField: "X-Captured-At")
+        // Carry the asset id so the server dedups (and replaces on edit) by
+        // device_asset_id, and the GPS fallback so the coordinate survives the
+        // EXIF-stripped resource bytes — same contract as the foreground drain.
+        if let localId = item.assetLocalIdentifier, !localId.isEmpty {
+            request.setValue(localId, forHTTPHeaderField: "X-Asset-Id")
+        }
+        let latitude = asset?.location?.coordinate.latitude ?? item.latitude
+        let longitude = asset?.location?.coordinate.longitude ?? item.longitude
+        if let latitude, latitude.isFinite {
+            request.setValue(String(latitude), forHTTPHeaderField: "X-GPS-Lat")
+        }
+        if let longitude, longitude.isFinite {
+            request.setValue(String(longitude), forHTTPHeaderField: "X-GPS-Lng")
+        }
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
         do {

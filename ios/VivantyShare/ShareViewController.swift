@@ -486,9 +486,11 @@ struct ShareUploadView: View {
     }
 
     private func loadFromPhotoAsset(_ asset: PHAsset) async -> SharePhotoItem? {
+        // Prefer the edited render so crops/adjustments are shared at full
+        // quality, matching the main app's hash/upload selection (issue #591).
         guard let resource = PHAssetResource.assetResources(for: asset)
-            .first(where: { $0.type == .photo })
-            ?? PHAssetResource.assetResources(for: asset).first(where: { $0.type == .fullSizePhoto })
+            .first(where: { $0.type == .fullSizePhoto })
+            ?? PHAssetResource.assetResources(for: asset).first(where: { $0.type == .photo })
         else { return nil }
 
         let options = PHAssetResourceRequestOptions()

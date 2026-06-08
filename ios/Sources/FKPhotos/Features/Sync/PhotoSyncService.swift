@@ -116,29 +116,16 @@ actor PhotoSyncService {
                 }
 
                 for item in missing {
-                    let localId = item.asset.localIdentifier
-                    let caption = PhotoHasher.shared.captionFromAsset(item.asset) ?? ""
-                    let targetAlbumIds = resolveTargetAlbumIds(sourceAlbumId: item.sourceAlbumId)
-                    let resource = PHAssetResource.assetResources(for: item.asset)
-                        .first(where: { $0.type == .photo })
-                        ?? PHAssetResource.assetResources(for: item.asset).first(where: { $0.type == .fullSizePhoto })
-                    let mimeType = resource.map { Self.mimeType(for: $0.uniformTypeIdentifier) } ?? "image/jpeg"
-                    let uploadFilename = filenameMatchingMime(item.filename, mimeType: mimeType)
-
-                    let queueItem = UploadQueueItem(
-                        assetLocalIdentifier: localId,
-                        filename: uploadFilename,
-                        mimeType: mimeType,
-                        imageDataHash: item.hashResult.imageDataHash,
-                        fullHash: item.hashResult.fullHash,
-                        caption: caption,
-                        isFavorite: item.asset.isFavorite,
-                        capturedAtString: item.hashResult.capturedAtString,
-                        targetAlbumIds: targetAlbumIds,
-                        sourceIosAlbumId: item.sourceAlbumId,
-                        latitude: item.asset.location?.coordinate.latitude,
-                        longitude: item.asset.location?.coordinate.longitude
-                    )
+                    // Shared with the manual-album upload (Part A): identical
+                    // hash/metadata/resource selection so both paths dedup the
+                    // same way server-side (issue #591).
+                    guard let queueItem = await AssetUploadEnqueuer.makeQueueItem(
+                        for: item.asset,
+                        precomputedHash: item.hashResult,
+                        filenameHint: item.filename,
+                        targetAlbumIds: resolveTargetAlbumIds(sourceAlbumId: item.sourceAlbumId),
+                        sourceIosAlbumId: item.sourceAlbumId
+                    ) else { continue }
                     await UploadQueue.shared.enqueue(queueItem)
                 }
                 if !missing.isEmpty {
@@ -281,9 +268,9 @@ actor PhotoSyncService {
     /// (not PHImageManager-rendered bytes) ensures the uploaded content matches the
     /// imageDataHash and that caption/favorite edits don't cause re-uploads.
     static func loadAssetData(_ asset: PHAsset) async throws -> (Data, String) {
-        guard let resource = PHAssetResource.assetResources(for: asset)
-            .first(where: { $0.type == .photo })
-            ?? PHAssetResource.assetResources(for: asset).first(where: { $0.type == .fullSizePhoto })
+        // Upload the *edited* render when present (matches the hashed bytes),
+        // falling back to the original for never-edited assets (issue #591).
+        guard let resource = AssetUploadEnqueuer.bestResource(for: asset)
         else {
             throw SyncError.noImageData
         }
@@ -313,31 +300,6 @@ actor PhotoSyncService {
         if lower.contains("tiff") { return "image/tiff" }
         if lower.contains("webp") { return "image/webp" }
         return "image/jpeg"
-    }
-
-    /// Replace the filename's extension with one that matches *mimeType* when
-    /// the two disagree. Equivalent extensions (heic ↔ heif, jpg ↔ jpeg) are
-    /// considered matching and left alone so we don't churn user-recognisable
-    /// names unnecessarily.
-    nonisolated private func filenameMatchingMime(_ filename: String, mimeType: String) -> String {
-        let expectedExt: String
-        switch mimeType.lowercased() {
-        case "image/heic", "image/heif": expectedExt = "heic"
-        case "image/png":                expectedExt = "png"
-        case "image/tiff":               expectedExt = "tiff"
-        case "image/gif":                expectedExt = "gif"
-        case "image/webp":               expectedExt = "webp"
-        default:                         expectedExt = "jpg"
-        }
-        let ns = filename as NSString
-        let currentExt = ns.pathExtension.lowercased()
-        if currentExt == expectedExt { return filename }
-        let heicLike: Set<String> = ["heic", "heif"]
-        if expectedExt == "heic" && heicLike.contains(currentExt) { return filename }
-        let jpegLike: Set<String> = ["jpg", "jpeg"]
-        if expectedExt == "jpg" && jpegLike.contains(currentExt) { return filename }
-        let stem = ns.deletingPathExtension
-        return stem.isEmpty ? "photo.\(expectedExt)" : "\(stem).\(expectedExt)"
     }
 
     enum SyncError: LocalizedError {
