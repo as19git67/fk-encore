@@ -117,8 +117,14 @@ export function scanLibrary(id: number) {
   })
 }
 
-export function listLibrarySubdirs(id: number) {
-  return apiFetch<{ dirs: string[] }>(`/libraries/${id}/subdirs`)
+export interface SubdirEntry {
+  name: string
+  rel_path: string
+}
+
+export function listLibrarySubdirs(id: number, sub: string = '') {
+  const qs = sub ? `?sub=${encodeURIComponent(sub)}` : ''
+  return apiFetch<{ dirs: SubdirEntry[] }>(`/libraries/${id}/subdirs${qs}`)
 }
 
 export function reconcileLibrary(id: number) {
