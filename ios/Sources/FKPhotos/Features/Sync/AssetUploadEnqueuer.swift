@@ -29,6 +29,20 @@ enum AssetUploadEnqueuer {
             ?? resources.first(where: { $0.type == .photo })
     }
 
+    /// The asset's *original* filename (e.g. "IMG_1234.HEIC"). Read from the
+    /// `.photo` resource on purpose: `bestResource` prefers the **edited**
+    /// `.fullSizePhoto` render for the uploaded pixels, but that render is named
+    /// generically "FullSizeRender.heic" by Photos. Taking the name from there
+    /// made every edited album upload land as "FullSizeRender.heic" (issue #591).
+    /// The real per-asset name lives on the original `.photo` resource, so we read
+    /// it from there regardless of which resource supplies the bytes. Falls back
+    /// to any resource's name, then nil so the caller can synthesise one.
+    static func originalFilename(for asset: PHAsset) -> String? {
+        let resources = PHAssetResource.assetResources(for: asset)
+        return resources.first(where: { $0.type == .photo })?.originalFilename
+            ?? resources.first?.originalFilename
+    }
+
     /// Builds a fully-populated `UploadQueueItem` for *asset*, computing the
     /// hash/metadata via the shared `PhotoHasher` pipeline (caption, favourite,
     /// capture date) and carrying `PHAsset.location` for the GPS-fallback
@@ -60,7 +74,7 @@ enum AssetUploadEnqueuer {
         let resource = bestResource(for: asset)
         let mimeType = resource.map { PhotoSyncService.mimeType(for: $0.uniformTypeIdentifier) } ?? "image/jpeg"
         let baseName = filenameHint
-            ?? resource?.originalFilename
+            ?? originalFilename(for: asset)
             ?? "photo_\(asset.localIdentifier.prefix(8)).jpg"
         let filename = filenameMatchingMime(baseName, mimeType: mimeType)
         let caption = PhotoHasher.shared.captionFromAsset(asset) ?? ""

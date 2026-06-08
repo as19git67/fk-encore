@@ -232,8 +232,7 @@ actor PhotoSyncService {
         }
 
         return pairs.map { (asset, sourceAlbumId) in
-            let filename = PHAssetResource.assetResources(for: asset)
-                .first?.originalFilename
+            let filename = AssetUploadEnqueuer.originalFilename(for: asset)
                 ?? "photo_\(asset.localIdentifier.prefix(8)).jpg"
             return (asset, filename, sourceAlbumId)
         }
