@@ -248,6 +248,46 @@ function bboxAreaDeg(bbox: [number, number, number, number]): number {
 }
 
 /**
+ * All Geofabrik regions whose polygon contains `(lat, lon)`, in index
+ * order. Used both by `pickSmallestMatchingRegion` and by bulk-suggest's
+ * "already covered by an imported region" filter.
+ */
+export function findContainingRegions(
+  index: GeofabrikIndex,
+  lat: number,
+  lon: number,
+): GeofabrikRegion[] {
+  const out: GeofabrikRegion[] = [];
+  for (const r of index.regions) {
+    if (!bboxContains(r.bbox, lat, lon)) continue;
+    if (!pointInPolygon(lat, lon, r.geometry)) continue;
+    out.push(r);
+  }
+  return out;
+}
+
+/**
+ * Pick the smallest (most specific) region from a candidate list.
+ * "Smallest" is hierarchical: a region is preferred over its ancestors;
+ * among siblings the bbox area tie-breaks. Returns null for an empty
+ * list.
+ */
+export function pickSmallestRegion(
+  candidates: GeofabrikRegion[],
+): GeofabrikRegion | null {
+  if (candidates.length === 0) return null;
+
+  // Prefer regions whose id is not the parent of any other candidate.
+  const parents = new Set(candidates.map((r) => r.parent).filter((p): p is string => !!p));
+  const leaves = candidates.filter((r) => !parents.has(r.id));
+  const pool = leaves.length > 0 ? leaves : candidates;
+
+  return pool.reduce((best, r) =>
+    bboxAreaDeg(r.bbox) < bboxAreaDeg(best.bbox) ? r : best,
+  );
+}
+
+/**
  * Pick the smallest (most specific) Geofabrik region whose polygon
  * contains `(lat, lon)`. "Smallest" is defined hierarchically: a region
  * is preferred over its ancestors. Among siblings the bbox area
@@ -261,20 +301,5 @@ export function pickSmallestMatchingRegion(
   lat: number,
   lon: number,
 ): GeofabrikRegion | null {
-  const candidates: GeofabrikRegion[] = [];
-  for (const r of index.regions) {
-    if (!bboxContains(r.bbox, lat, lon)) continue;
-    if (!pointInPolygon(lat, lon, r.geometry)) continue;
-    candidates.push(r);
-  }
-  if (candidates.length === 0) return null;
-
-  // Prefer regions whose id is not the parent of any other candidate.
-  const parents = new Set(candidates.map((r) => r.parent).filter((p): p is string => !!p));
-  const leaves = candidates.filter((r) => !parents.has(r.id));
-  const pool = leaves.length > 0 ? leaves : candidates;
-
-  return pool.reduce((best, r) =>
-    bboxAreaDeg(r.bbox) < bboxAreaDeg(best.bbox) ? r : best,
-  );
+  return pickSmallestRegion(findContainingRegions(index, lat, lon));
 }

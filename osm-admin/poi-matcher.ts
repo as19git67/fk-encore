@@ -19,7 +19,11 @@
  * with synthetic inputs.
  */
 
-import { POI_AMBIGUITY_MARGIN, POI_MIN_MATCH_SCORE } from "./poi.config";
+import {
+  POI_AMBIGUITY_MARGIN,
+  POI_MIN_MATCH_SCORE,
+  POI_MIN_SIMILARITY,
+} from "./poi.config";
 
 export interface MatchCandidate {
   qid: string | null;
@@ -75,12 +79,21 @@ export function matchPhotoToPois(input: MatchInput): MatchResult {
     return { matches: [], reason: "no_photo_embedding" };
   }
 
+  let hadUsableEmbedding = false;
   const scored: ScoredMatch[] = [];
   for (const c of input.candidates) {
     if (!c.poiEmbedding || c.poiEmbedding.length === 0) continue;
     if (c.poiEmbedding.length !== input.photoEmbedding.length) continue;
+    hadUsableEmbedding = true;
 
-    const similarity = cosineSimilarity(input.photoEmbedding, c.poiEmbedding);
+    // Hard image-similarity gate on the RAW cosine: a candidate whose
+    // reference image doesn't actually resemble the photo is dropped
+    // before scoring, so proximity/heading can't carry it over the
+    // composite threshold. See POI_MIN_SIMILARITY for the rationale.
+    const rawCos = rawCosineSimilarity(input.photoEmbedding, c.poiEmbedding);
+    if (rawCos < POI_MIN_SIMILARITY) continue;
+
+    const similarity = Math.max(0, Math.min(1, (rawCos + 1) / 2));
     const bearing = bearingDeg(input.photoLat, input.photoLon, c.lat, c.lon);
     const heading = computeHeadingMatch(input.photoHeadingDeg, bearing);
     const proximity = proximityFactor(c.distanceM);
@@ -100,8 +113,13 @@ export function matchPhotoToPois(input: MatchInput): MatchResult {
     });
   }
 
-  if (scored.length === 0) {
+  if (!hadUsableEmbedding) {
     return { matches: [], reason: "no_embeddings_for_candidates" };
+  }
+  if (scored.length === 0) {
+    // Candidates existed and had embeddings, but none cleared the
+    // image-similarity gate — nothing nearby actually looks like the photo.
+    return { matches: [], reason: "below_similarity_gate" };
   }
 
   scored.sort((a, b) => b.matchScore - a.matchScore);
@@ -141,11 +159,12 @@ export function matchPhotoToPois(input: MatchInput): MatchResult {
 }
 
 /**
- * Cosine similarity in [-1, 1]. We clamp it into [0, 1] before
- * folding into the score; pgvector vectors are typically unit-norm
- * already which puts most similarities in [0.4, 1.0].
+ * Raw cosine similarity in [-1, 1]. This is the true measure of visual
+ * resemblance between two DINOv2 vectors and is what the hard
+ * similarity gate (`POI_MIN_SIMILARITY`) is compared against. Returns 0
+ * on length mismatch or a degenerate (zero-norm) vector.
  */
-export function cosineSimilarity(a: number[], b: number[]): number {
+export function rawCosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length) return 0;
   let dot = 0;
   let na = 0;
@@ -157,8 +176,20 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   }
   if (na === 0 || nb === 0) return 0;
   const raw = dot / Math.sqrt(na * nb);
-  if (!Number.isFinite(raw)) return 0;
-  return Math.max(0, Math.min(1, (raw + 1) / 2));
+  return Number.isFinite(raw) ? raw : 0;
+}
+
+/**
+ * Cosine similarity remapped from [-1, 1] into [0, 1] for use as the
+ * 0.6-weighted term in the composite score. Note this inflates the
+ * floor (raw 0 → 0.5), which is exactly why a separate raw-cosine gate
+ * (`rawCosineSimilarity` + `POI_MIN_SIMILARITY`) guards eligibility.
+ */
+export function cosineSimilarity(a: number[], b: number[]): number {
+  // Preserve the 0-on-mismatch contract: a length mismatch isn't a
+  // "raw cosine 0" (which would remap to 0.5) but "no comparison possible".
+  if (a.length !== b.length) return 0;
+  return Math.max(0, Math.min(1, (rawCosineSimilarity(a, b) + 1) / 2));
 }
 
 /**
