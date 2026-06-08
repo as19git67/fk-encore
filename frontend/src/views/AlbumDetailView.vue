@@ -28,6 +28,7 @@ import {
   type GalleryGridGroup,
   type GallerySortDir,
   type GallerySortField,
+  getGalleryIds,
 } from '../api/gallery'
 
 const TripMap = defineAsyncComponent(() => import('../components/TripMap.vue'))
@@ -406,6 +407,28 @@ function onToggleSelect(entry: GalleryGridEntry) {
   else next.add(entry.id)
   selectedIds.value = next
 }
+
+const selectAllBusy = ref(false)
+const galleryTotal = ref(0)
+const allSelected = computed(() => galleryTotal.value > 0 && selectedCount.value === galleryTotal.value)
+
+async function selectAll() {
+  selectAllBusy.value = true
+  try {
+    const res = await getGalleryIds({
+      filter: albumGridFilter.value,
+      sortBy: sortByForGallery.value,
+      sortDir: sortDirForGallery.value,
+      photoIds: searchPhotoIds.value ?? undefined,
+    })
+    selectedIds.value = new Set(res.ids)
+  } catch {
+    // silently ignore — user can retry
+  } finally {
+    selectAllBusy.value = false
+  }
+}
+
 function openAlbumDialog() {
   if (selectedIds.value.size === 0) return
   albumDialogVisible.value = true
@@ -1613,6 +1636,7 @@ async function onFullscreenOpenGroupReview() {
 
 async function onGalleryLoaded() {
   if (!galleryRef.value) return
+  galleryTotal.value = galleryRef.value.getTotal()
   // galleryAnchorPhotoId was set before this mount (initial load or map→grid
   // switch). VirtualGallery already loaded entries around it; findLoadedIndexById
   // will find it. Consume the anchor so subsequent reloads don't re-apply it.
@@ -2250,6 +2274,16 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
         }}
       </span>
       <div class="select-actions">
+        <Button
+          v-if="!allSelected"
+          :label="galleryTotal > 0 ? `Alle (${galleryTotal})` : 'Alle'"
+          icon="pi pi-check-double"
+          size="small"
+          severity="secondary"
+          outlined
+          :loading="selectAllBusy"
+          @click="selectAll"
+        />
         <Button
           v-if="selectedCount > 0 && canUploadPhotos && canReuseAlbumPhotos"
           label="Alben"
