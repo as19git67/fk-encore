@@ -40,6 +40,7 @@ export class InMemoryGeoClient implements GeoClient {
   private droppedRegions: string[] = [];
   private startImportCalls: GeoImportRequest[] = [];
   private refreshCalls: string[] = [];
+  private refreshPbfUrls: Array<string | undefined> = [];
 
   setHealthy(v: boolean): void { this.healthy = v; }
 
@@ -70,6 +71,8 @@ export class InMemoryGeoClient implements GeoClient {
   getStartImportCalls(): GeoImportRequest[] { return [...this.startImportCalls]; }
   getDroppedRegions(): string[] { return [...this.droppedRegions]; }
   getRefreshCalls(): string[] { return [...this.refreshCalls]; }
+  /** PBF URLs forwarded with each refresh call, positionally aligned. */
+  getRefreshPbfUrls(): Array<string | undefined> { return [...this.refreshPbfUrls]; }
 
   async health(): Promise<boolean> {
     return this.healthy;
@@ -116,8 +119,9 @@ export class InMemoryGeoClient implements GeoClient {
     return this.poiCandidates.get(postgresDb) ?? [];
   }
 
-  async refresh(postgresDb: string): Promise<GeoRefreshResult> {
+  async refresh(postgresDb: string, pbfUrl?: string): Promise<GeoRefreshResult> {
     this.refreshCalls.push(postgresDb);
+    this.refreshPbfUrls.push(pbfUrl);
     const cached = this.refreshResults.get(postgresDb);
     if (cached) return cached;
     return {

@@ -1321,9 +1321,6 @@ onBeforeUnmount(() => {
                     :class="`osm-status--${s.existingStatus}`"
                   >{{ osmStatusLabels[s.existingStatus ?? ''] ?? s.existingStatus }}</span>
                   <span v-else class="text-secondary">–</span>
-                  <span v-if="s.coveredByExisting" class="osm-bulk-covered">
-                    deckt diese Fotos bereits ab
-                  </span>
                 </td>
                 <td>
                   <Button
@@ -1891,12 +1888,6 @@ onBeforeUnmount(() => {
   display: block;
   font-size: 0.8rem;
   color: var(--p-text-muted-color);
-}
-.osm-bulk-covered {
-  display: block;
-  font-size: 0.8rem;
-  color: var(--p-text-muted-color);
-  font-style: italic;
 }
 
 .osm-redundant {

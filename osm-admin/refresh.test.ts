@@ -42,6 +42,8 @@ describe("refreshRegion", () => {
     expect(r.replicationSeq).toBe("4775");
     expect(r.detail).toContain("applied 7");
     expect(geo.getRefreshCalls()).toEqual(["nom_europe_germany_bayern"]);
+    // The PBF URL is forwarded so geo can auto-init replication if needed.
+    expect(geo.getRefreshPbfUrls()).toEqual(["https://example.com/x.pbf"]);
 
     const row = (
       await db.select().from(osmRegionImports)
