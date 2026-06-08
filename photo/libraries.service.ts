@@ -894,6 +894,10 @@ export async function reconcileLibrary(libraryId: number): Promise<{ removed: nu
   if (!library) throw new Error(`library ${libraryId} not found`);
   if (library.import_mode !== "link") return { removed: 0 };
 
+  const excludedPrefixes = library.excluded_dirs.map(
+    (d) => library.path + path.sep + d + path.sep,
+  );
+
   const rows = await dbAll<{ id: number; external_path: string | null }>(
     db
       .select({ id: photos.id, external_path: photos.external_path })
@@ -904,7 +908,8 @@ export async function reconcileLibrary(libraryId: number): Promise<{ removed: nu
   let removed = 0;
   for (const row of rows) {
     if (!row.external_path) continue;
-    if (!fs.existsSync(row.external_path)) {
+    const isExcluded = excludedPrefixes.some((p) => row.external_path!.startsWith(p));
+    if (isExcluded || !fs.existsSync(row.external_path)) {
       await dbExec(db.delete(photos).where(eq(photos.id, row.id)));
       removed++;
     }
