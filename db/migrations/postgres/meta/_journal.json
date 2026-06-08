@@ -687,6 +687,13 @@
       "when": 1779001436000,
       "tag": "0097_library_excluded_dirs",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1779001437000,
+      "tag": "0098_finance_saved_analysis",
+      "breakpoints": true
     }
   ]
 }

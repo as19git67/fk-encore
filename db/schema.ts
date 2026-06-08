@@ -1719,6 +1719,42 @@ export const financeAnomaly = pgTable(
   ]
 );
 
+// ---------- Saved Analysis Queries ----------
+
+export interface SavedAnalysisSummary {
+  sum: string;
+  count: number;
+  avg: string;
+}
+
+export const financeSavedAnalysis = pgTable(
+  "finance_saved_analysis",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    question: text("question"),
+    ast: jsonb("ast").notNull().$type<Record<string, unknown>>(),
+    source: text("source").notNull().default("user").$type<"user" | "ai">(),
+    summary: jsonb("summary").$type<SavedAnalysisSummary | null>(),
+    fingerprint: text("fingerprint"),
+    seen_at: timestamp("seen_at", { mode: "string", withTimezone: true }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("idx_finance_saved_analysis_user").on(table.user_id, table.created_at),
+    uniqueIndex("idx_finance_saved_analysis_fingerprint")
+      .on(table.user_id, table.fingerprint),
+  ]
+);
+
 // ---------- AI-tag block list ----------
 // Records (account, counterparty, tag) tuples that the user has rejected
 // from the AI suggestion list. The suggester consults this table before
