@@ -28,6 +28,8 @@ console.log("[boot] finance/encore.service.ts: begin");
 import "./statements-cron";
 import "./import-pending";
 import "./export-cron";
+// Side-effect: registers the daily AI analysis suggestion cron.
+import "./analysis-suggestions-cron";
 // Side-effect: starts the AI tag suggestion worker loop.
 import "./tag-worker";
 
