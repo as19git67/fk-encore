@@ -490,6 +490,16 @@ Zusätzliche Felder:
   anteil). Leere Liste = keine passende Sektion / nicht steuerrelevant.
   Format: [{"slug": "anlage-n", "confidence": 0.91}, ...]. Verwende nur
   Slugs aus der Liste; erfinde keine neuen.
+
+WICHTIGE ABGRENZUNGSREGEL – Handwerkerrechnungen:
+- Handwerkerrechnung / Reparaturrechnung für die SELBST BEWOHNTE Wohnung
+  oder das eigene Haus → „haushaltsnahe" (§35a EStG), NICHT anlage-n oder
+  werbungskosten-n.
+- Handwerkerrechnung für ein VERMIETETES Objekt → „werbungskosten-v".
+- Nur wenn aus dem Dokument eindeutig hervorgeht, dass die Leistung
+  beruflich veranlasst ist (z. B. Arbeitszimmer-Renovierung beim
+  Arbeitnehmer), kommt zusätzlich „werbungskosten-n" in Frage.
+  Im Zweifel: „haushaltsnahe".
 """
 
 
