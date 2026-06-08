@@ -97,28 +97,53 @@ function normaliseFavoriteRatingThreshold(v: unknown): number {
 function sanitiseExcludedDirs(raw: string[] | undefined): string[] {
   if (!raw || !Array.isArray(raw)) return [];
   return raw
-    .map((d) => d.trim().replace(/^\/+|\/+$/g, ""))
-    .filter((d) => d.length > 0 && !d.includes("/") && !d.startsWith("."));
+    .map((d) => {
+      const segments = d
+        .trim()
+        .replace(/\\/g, "/")
+        .replace(/^\/+|\/+$/g, "")
+        .split("/")
+        .filter((s) => s.length > 0 && s !== "." && s !== ".." && !s.startsWith("."));
+      return segments.join("/");
+    })
+    .filter((d) => d.length > 0);
 }
 
 /**
- * List first-level subdirectories of a library's root path. Used by the
- * "excluded dirs" picker in the admin UI. Returns sorted directory names
- * (not full paths); hidden directories (starting with ".") are skipped.
+ * List subdirectories of a library path. When `sub` is provided, lists entries
+ * inside that sub-path (relative to the library root). Returns objects with
+ * `name` (basename) and `rel_path` (full relative path from library root).
+ * Hidden directories (starting with ".") are skipped.
  */
-export async function listLibrarySubdirs(libraryId: number): Promise<string[]> {
+export async function listLibrarySubdirs(
+  libraryId: number,
+  sub?: string,
+): Promise<{ name: string; rel_path: string }[]> {
   const lib = await getLibrary(libraryId);
   if (!lib) throw new Error(`library ${libraryId} not found`);
+
+  const normalizedSub = sub ? sub.trim().replace(/^\/+|\/+$/g, "") : "";
+  const targetDir = normalizedSub ? path.join(lib.path, normalizedSub) : lib.path;
+
+  const resolved = path.resolve(targetDir);
+  const libRoot = lib.path.endsWith(path.sep) ? lib.path : lib.path + path.sep;
+  if (resolved !== lib.path && !resolved.startsWith(libRoot)) {
+    throw new Error("path escapes library root");
+  }
+
   let entries: fs.Dirent[];
   try {
-    entries = await fs.promises.readdir(lib.path, { withFileTypes: true });
+    entries = await fs.promises.readdir(resolved, { withFileTypes: true });
   } catch {
     return [];
   }
   return entries
     .filter((e) => e.isDirectory() && !e.name.startsWith("."))
-    .map((e) => e.name)
-    .sort((a, b) => a.localeCompare(b));
+    .map((e) => ({
+      name: e.name,
+      rel_path: normalizedSub ? `${normalizedSub}/${e.name}` : e.name,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export interface ScanReport {
@@ -650,20 +675,24 @@ export async function importFile(
  * further subdirectories instead of walking the whole tree to completion.
  */
 async function* walkSupportedFiles(
-  root: string,
+  dir: string,
   signal?: AbortSignal,
-  excludedDirs?: Set<string>,
+  excludedRelPaths?: Set<string>,
+  libraryRoot?: string,
 ): AsyncGenerator<string> {
   if (signal?.aborted) return;
-  const entries = await fs.promises.readdir(root, { withFileTypes: true });
+  const entries = await fs.promises.readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
     if (signal?.aborted) return;
     if (entry.name.startsWith(".")) continue;
-    const full = path.join(root, entry.name);
+    const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       if (entry.name === "node_modules") continue;
-      if (excludedDirs?.has(entry.name)) continue;
-      yield* walkSupportedFiles(full, signal);
+      if (excludedRelPaths && libraryRoot) {
+        const rel = path.relative(libraryRoot, full);
+        if (excludedRelPaths.has(rel)) continue;
+      }
+      yield* walkSupportedFiles(full, signal, excludedRelPaths, libraryRoot);
     } else if (entry.isFile()) {
       const ext = path.extname(entry.name).toLowerCase();
       if (SUPPORTED_EXTENSIONS.has(ext)) yield full;
@@ -735,7 +764,7 @@ export async function scanLibrary(
     if (jobId !== undefined) {
       (async () => {
         let total = 0;
-        for await (const _ of walkSupportedFiles(library.path, signal, excluded)) total++;
+        for await (const _ of walkSupportedFiles(library.path, signal, excluded, library.path)) total++;
         if (!signal.aborted) updateLibraryScanTotal(jobId, total).catch(() => {});
       })().catch(() => {});
     }
@@ -756,7 +785,7 @@ export async function scanLibrary(
         .finally(() => { flushInFlight = null; });
     };
 
-    for await (const file of walkSupportedFiles(library.path, signal, excluded)) {
+    for await (const file of walkSupportedFiles(library.path, signal, excluded, library.path)) {
       if (signal.aborted) throw new ScanCancelledError(libraryId);
       report.scanned++;
       try {
