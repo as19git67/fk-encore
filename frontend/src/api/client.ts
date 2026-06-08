@@ -2,7 +2,12 @@ export const API_BASE_URL = import.meta.env.PROD ? '' : '/api'
 
 let refreshPromise: Promise<boolean> | null = null
 
-async function tryRefresh(): Promise<boolean> {
+async function tryRefresh(staleToken: string | null): Promise<boolean> {
+  // Another tab may have already refreshed — check if the token
+  // in localStorage is newer than the one that triggered the 401.
+  const currentToken = localStorage.getItem('auth_token')
+  if (currentToken && currentToken !== staleToken) return true
+
   const refreshToken = localStorage.getItem('refresh_token')
   if (!refreshToken) return false
 
@@ -97,7 +102,7 @@ export async function apiFetch<T>(
 
     // On 401, try refreshing the access token and retry once
     if (response.status === 401 && path !== '/auth/refresh') {
-      const refreshed = await tryRefresh()
+      const refreshed = await tryRefresh(token)
       if (refreshed) {
         const newToken = localStorage.getItem('auth_token')
         headers['Authorization'] = `Bearer ${newToken}`
