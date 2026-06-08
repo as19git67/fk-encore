@@ -74,6 +74,18 @@ export interface BulkRegionSuggestion {
   coveredByExisting: boolean;
 }
 
+/**
+ * A tracked region whose entire photo footprint is already served by
+ * smaller imported sub-regions — no POI data from this region is
+ * exclusively needed. Safe to delete (Lösch-Kandidat).
+ */
+export interface RedundantRegion {
+  slug: string;
+  status: RegionStatus;
+  /** Tracked child-region slugs that collectively cover this region's photos. */
+  coveringChildren: string[];
+}
+
 export interface BulkSuggestResult {
   /** Total photos with a GPS fix that participated in the analysis. */
   geotaggedPhotoCount: number;
@@ -83,6 +95,12 @@ export interface BulkSuggestResult {
   coveredPhotoCount: number;
   /** Suggestions sorted by photoCount descending. */
   suggestions: BulkRegionSuggestion[];
+  /**
+   * Tracked covering regions that are fully superseded by imported
+   * sub-regions: every photo in their territory is attributed to a
+   * smaller child region instead. These are safe to delete.
+   */
+  redundantRegions: RedundantRegion[];
 }
 
 export interface BulkSuggestDeps {
@@ -107,6 +125,7 @@ export async function suggestRegionsFromPhotos(
       unmappedPhotoCount: 0,
       coveredPhotoCount: 0,
       suggestions: [],
+      redundantRegions: [],
     };
   }
 
@@ -195,11 +214,36 @@ export async function suggestRegionsFromPhotos(
     })
     .sort((a, b) => b.photoCount - a.photoCount);
 
+  // Covered child slugs: regions in counts that are themselves covered by a
+  // tracked parent. These are the "winners" that stole attribution from their
+  // ancestors — used to detect which ancestors became fully redundant.
+  const coveredChildSlugs = new Set(
+    [...counts.entries()]
+      .filter(([, v]) => v.covered)
+      .map(([slug]) => slug),
+  );
+
+  // A tracked covering region is redundant when:
+  //   1. It has NO directly-attributed photos (all were taken over by children)
+  //   2. At least one covered descendant slug proves photos actually exist there
+  const redundantRegions: RedundantRegion[] = [];
+  for (const slug of coveringSlugs) {
+    if (counts.has(slug)) continue; // still serving photos directly → not redundant
+    const coveringChildren = [...coveredChildSlugs].filter((child) =>
+      child.startsWith(slug + "/"),
+    );
+    if (coveringChildren.length === 0) continue; // no photos in territory at all
+    const rawStatus = statusBySlug.get(slug);
+    if (!rawStatus || !isRegionStatus(rawStatus)) continue;
+    redundantRegions.push({ slug, status: rawStatus as RegionStatus, coveringChildren });
+  }
+
   return {
     geotaggedPhotoCount: rows.length,
     unmappedPhotoCount: unmapped,
     coveredPhotoCount: covered,
     suggestions,
+    redundantRegions,
   };
 }
 

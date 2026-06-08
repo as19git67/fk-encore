@@ -37,7 +37,7 @@ import {
   approveOsmRegion, deleteOsmRegion, reverseGeocodeViaOsm,
   bulkSuggestOsmRegions, refreshOsmRegion,
   type OsmRegionImport, type RegionSuggestion,
-  type BulkSuggestResult, type BulkRegionSuggestion,
+  type BulkSuggestResult, type BulkRegionSuggestion, type RedundantRegion,
 } from '../api/osmAdmin'
 import { getBuildInfo } from '../api/system'
 import { useAuthStore } from '../stores/auth'
@@ -547,6 +547,11 @@ const reverseLoading = ref(false)
 
 const bulkSuggestResult = ref<BulkSuggestResult | null>(null)
 const bulkLoading = ref(false)
+
+const redundantSlugSet = computed<Set<string>>(() => {
+  if (!bulkSuggestResult.value) return new Set()
+  return new Set(bulkSuggestResult.value.redundantRegions.map((r: RedundantRegion) => r.slug))
+})
 
 const osmStatusLabels: Record<string, string> = {
   pending_approval: 'Wartet auf Freigabe',
@@ -1333,6 +1338,30 @@ onBeforeUnmount(() => {
               </tr>
             </tbody>
           </table>
+
+          <!-- Lösch-Kandidaten -->
+          <div v-if="bulkSuggestResult.redundantRegions.length > 0" class="osm-redundant">
+            <h4 class="osm-redundant__title">
+              <i class="pi pi-exclamation-triangle" />
+              Lösch-Kandidaten ({{ bulkSuggestResult.redundantRegions.length }})
+            </h4>
+            <p class="osm-redundant__desc">
+              Diese importierten Regionen sind vollständig durch Subregionen abgedeckt.
+              Alle Fotos in ihrem Gebiet werden bereits durch die aufgelisteten Unterregionen
+              versorgt — sie können entfernt werden, um Speicherplatz freizugeben.
+            </p>
+            <ul class="osm-redundant__list">
+              <li v-for="rr in bulkSuggestResult.redundantRegions" :key="rr.slug">
+                <code>{{ rr.slug }}</code>
+                <span class="osm-status osm-status--ready_running" style="margin-left:0.4rem">
+                  {{ osmStatusLabels[rr.status] ?? rr.status }}
+                </span>
+                <span class="osm-redundant__children">
+                  abgedeckt durch: {{ rr.coveringChildren.join(', ') }}
+                </span>
+              </li>
+            </ul>
+          </div>
         </div>
       </div>
 
@@ -1355,8 +1384,13 @@ onBeforeUnmount(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="r in osmRegions" :key="r.slug">
-              <td><code>{{ r.slug }}</code></td>
+            <tr v-for="r in osmRegions" :key="r.slug" :class="{ 'osm-row--redundant': redundantSlugSet.has(r.slug) }">
+              <td>
+                <code>{{ r.slug }}</code>
+                <span v-if="redundantSlugSet.has(r.slug)" class="osm-redundant-badge" title="Wird vollständig durch Subregionen abgedeckt — Lösch-Kandidat">
+                  <i class="pi pi-exclamation-triangle" /> redundant
+                </span>
+              </td>
               <td>
                 <span
                   class="osm-status"
@@ -1404,9 +1438,12 @@ onBeforeUnmount(() => {
       <!-- Region-Karten (Mobil) — visible only when osmRegions.length > 0;
            the desktop empty-state above also applies on mobile. -->
       <div v-if="osmRegions.length > 0" class="queue-cards mb-4">
-        <div v-for="r in osmRegions" :key="r.slug" class="queue-card osm-card">
+        <div v-for="r in osmRegions" :key="r.slug" class="queue-card osm-card" :class="{ 'osm-card--redundant': redundantSlugSet.has(r.slug) }">
           <div class="queue-card__header">
             <code>{{ r.slug }}</code>
+            <span v-if="redundantSlugSet.has(r.slug)" class="osm-redundant-badge" title="Wird vollständig durch Subregionen abgedeckt — Lösch-Kandidat">
+              <i class="pi pi-exclamation-triangle" /> redundant
+            </span>
           </div>
           <div class="osm-card__row">
             <span
@@ -1860,6 +1897,69 @@ onBeforeUnmount(() => {
   font-size: 0.8rem;
   color: var(--p-text-muted-color);
   font-style: italic;
+}
+
+.osm-redundant {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--p-tag-warn-background, rgba(255,160,0,0.3));
+  background: color-mix(in srgb, var(--p-tag-warn-background, rgba(255,160,0,0.15)) 40%, transparent);
+}
+.osm-redundant__title {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--p-tag-warn-color);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.osm-redundant__desc {
+  margin: 0 0 0.6rem;
+  font-size: 0.85rem;
+  color: var(--p-text-muted-color);
+}
+.osm-redundant__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.osm-redundant__list li {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+.osm-redundant__children {
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
+}
+
+.osm-redundant-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--p-tag-warn-background, rgba(255,160,0,0.2));
+  color: var(--p-tag-warn-color);
+  vertical-align: middle;
+  cursor: help;
+}
+
+.osm-row--redundant td:first-child {
+  opacity: 0.8;
+}
+.osm-card--redundant {
+  border-color: var(--p-tag-warn-background, rgba(255,160,0,0.4));
 }
 
 .osm-empty {

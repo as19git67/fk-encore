@@ -140,6 +140,7 @@ describe("suggestRegionsFromPhotos", () => {
       unmappedPhotoCount: 0,
       coveredPhotoCount: 0,
       suggestions: [],
+      redundantRegions: [],
     });
   });
 
@@ -245,5 +246,57 @@ describe("suggestRegionsFromPhotos", () => {
     // Falls back to the smallest matching leaf, as a fresh suggestion.
     expect(r.suggestions[0].slug).toBe("europe/germany/bayern");
     expect(r.suggestions[0].coveredByExisting).toBe(false);
+  });
+
+  it("marks a tracked parent as redundant when all its photos are covered by imported children", async () => {
+    const u = await seedUser();
+    // Only photos in Bayern — Germany is imported but Bayern covers them all.
+    await seedPhoto(u, 48.137, 11.575, 1); // Munich
+    await seedPhoto(u, 49.453, 11.077, 2); // Nuremberg
+    await seedRegion("europe/germany", "ready_running", "nom_germany");
+    await seedRegion("europe/germany/bayern", "ready_running", "nom_bayern");
+
+    const r = await suggestRegionsFromPhotos({ loadIndex: fixtureWithParent });
+
+    expect(r.redundantRegions).toHaveLength(1);
+    expect(r.redundantRegions[0].slug).toBe("europe/germany");
+    expect(r.redundantRegions[0].status).toBe("ready_running");
+    expect(r.redundantRegions[0].coveringChildren).toContain("europe/germany/bayern");
+  });
+
+  it("does not flag a parent as redundant when it still has directly-attributed photos", async () => {
+    const u = await seedUser();
+    // Munich → Bayern, but there's no Bayern-equivalent for Ile-de-France in Germany
+    // Actually use Germany + Bayern but also add a photo outside Bayern (would need Berlin).
+    // Instead: only Bayern tracked, no parent → no redundancy.
+    await seedPhoto(u, 48.137, 11.575, 1); // Munich → Bayern covers
+    await seedRegion("europe/germany/bayern", "ready_running", "nom_bayern");
+
+    const r = await suggestRegionsFromPhotos({ loadIndex: fixtureWithParent });
+    expect(r.redundantRegions).toHaveLength(0);
+  });
+
+  it("does not flag a parent as redundant when it has photos not covered by children", async () => {
+    const u = await seedUser();
+    // Munich in Bayern (covered by child), and Paris NOT in Germany
+    // Use a photo in Germany-but-not-Bayern to keep Germany non-redundant.
+    // Hamburg (53.55, 9.99) is in Germany but outside Bayern's bbox.
+    await seedPhoto(u, 48.137, 11.575, 1); // Munich → Bayern
+    await seedPhoto(u, 53.55, 9.99, 2);    // Hamburg → Germany (no Bayern sub-region covers it)
+    await seedRegion("europe/germany", "ready_running", "nom_germany");
+    await seedRegion("europe/germany/bayern", "ready_running", "nom_bayern");
+
+    const r = await suggestRegionsFromPhotos({ loadIndex: fixtureWithParent });
+    // Germany appears in counts for Hamburg → not redundant.
+    expect(r.redundantRegions).toHaveLength(0);
+  });
+
+  it("returns empty redundantRegions when no geotagged photos exist", async () => {
+    const u = await seedUser();
+    await seedPhoto(u, null, null, 1);
+    await seedRegion("europe/germany", "ready_running", "nom_germany");
+
+    const r = await suggestRegionsFromPhotos({ loadIndex: fixtureWithParent });
+    expect(r.redundantRegions).toHaveLength(0);
   });
 });

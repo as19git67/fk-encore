@@ -123,11 +123,21 @@ export interface BulkRegionSuggestion {
   coveredByExisting: boolean
 }
 
+/** A tracked region fully superseded by smaller imported sub-regions. */
+export interface RedundantRegion {
+  slug: string
+  status: RegionStatus
+  /** Child region slugs that collectively cover this region's photos. */
+  coveringChildren: string[]
+}
+
 export interface BulkSuggestResult {
   geotaggedPhotoCount: number
   unmappedPhotoCount: number
   coveredPhotoCount: number
   suggestions: BulkRegionSuggestion[]
+  /** Tracked regions safe to delete — all their photos are covered by sub-regions. */
+  redundantRegions: RedundantRegion[]
 }
 
 export async function bulkSuggestOsmRegions(): Promise<BulkSuggestResult> {
