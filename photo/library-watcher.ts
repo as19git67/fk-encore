@@ -48,7 +48,7 @@ export async function startWatcher(library: PhotoLibrary): Promise<void> {
       if (base.startsWith(".")) return true;
       if (stats?.isDirectory() && excluded) {
         const rel = path.relative(library.path, p);
-        if (!rel.includes(path.sep) && excluded.has(rel)) return true;
+        if (excluded.has(rel)) return true;
       }
       if (stats?.isFile()) return !(isSupportedImage(p) || isXmpSidecar(p));
       return false;
