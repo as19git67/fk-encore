@@ -26,6 +26,7 @@ import {
   resolveRelativeTimespan,
   LlmServiceUnavailableError,
   type AnalysisAst,
+  type TagGroup,
 } from "./llm-client";
 
 console.log("[boot] finance/analysis.ts: all imports resolved");
@@ -352,6 +353,20 @@ function validateAst(raw: unknown): AnalysisAst {
       }
     }
   }
+  // Tag groups (UI-driven complex tag expressions)
+  if (Array.isArray(o.tagGroups)) {
+    const groups = (o.tagGroups as any[])
+      .filter((g: any) => g && typeof g === "object" && Array.isArray(g.tags))
+      .map((g: any) => ({
+        tags: (g.tags as unknown[]).filter((t: unknown): t is string => typeof t === "string"),
+        op: g.op === "OR" ? "OR" as const : "AND" as const,
+      }))
+      .filter((g: { tags: string[] }) => g.tags.length > 0);
+    if (groups.length > 0) {
+      result.tagGroups = groups;
+      result.groupOp = o.groupOp === "OR" ? "OR" : "AND";
+    }
+  }
   return result;
 }
 
@@ -399,10 +414,13 @@ async function runAggregate(
   // are part of the filter itself are excluded, since every matching row
   // carries them and they'd dominate the breakdown uninformatively. This
   // is what powers "of my Japan trip, X went to transport, Y to food…".
+  const allFilterTags = ast.tagGroups && ast.tagGroups.length > 0
+    ? ast.tagGroups.flatMap((g) => g.tags)
+    : ast.tags;
   let tagExclusion = sql``;
-  if (ast.tags.length > 0) {
+  if (allFilterTags.length > 0) {
     const excludeList = sql.join(
-      ast.tags.map((t) => sql`${t}`),
+      allFilterTags.map((t) => sql`${t}`),
       sql`, `,
     );
     tagExclusion = sql` AND tg.name NOT IN (${excludeList})`;
@@ -472,8 +490,38 @@ async function buildFilter(
 ): Promise<SQLWrapper> {
   const parts: SQLWrapper[] = [sql`TRUE`];
 
-  // Tag filter
-  if (ast.tags.length > 0) {
+  // Tag filter — grouped expressions take precedence over flat tags/op
+  if (ast.tagGroups && ast.tagGroups.length > 0) {
+    const groupFragments: SQLWrapper[] = ast.tagGroups.map((g: TagGroup) => {
+      const tagList = sql.join(
+        g.tags.map((t) => sql`${t}`),
+        sql`, `,
+      );
+      if (g.op === "AND") {
+        return sql`t.id IN (
+          SELECT tt.transaction_id
+          FROM finance_tag_transaction tt
+          JOIN finance_tag tg ON tg.id = tt.tag_id
+          WHERE tg.source = 'user' AND tg.name IN (${tagList})
+          GROUP BY tt.transaction_id
+          HAVING COUNT(DISTINCT tg.name) = ${g.tags.length}
+        )`;
+      } else {
+        return sql`t.id IN (
+          SELECT tt.transaction_id
+          FROM finance_tag_transaction tt
+          JOIN finance_tag tg ON tg.id = tt.tag_id
+          WHERE tg.source = 'user' AND tg.name IN (${tagList})
+        )`;
+      }
+    });
+    const groupJoiner = ast.groupOp === "OR" ? sql` OR ` : sql` AND `;
+    if (groupFragments.length === 1) {
+      parts.push(groupFragments[0]);
+    } else {
+      parts.push(sql`(${sql.join(groupFragments, groupJoiner)})`);
+    }
+  } else if (ast.tags.length > 0) {
     const tagList = sql.join(
       ast.tags.map((t) => sql`${t}`),
       sql`, `,
