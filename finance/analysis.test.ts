@@ -13,7 +13,7 @@ import {
   financeTransaction,
   users,
 } from "../db/schema";
-import { aggregate, query } from "./analysis";
+import { aggregate, query, transactions } from "./analysis";
 import * as llmClient from "./llm-client";
 import { __resetRateLimiterForTests } from "../user/rateLimiter";
 
@@ -300,6 +300,70 @@ describe("finance/analysis — aggregate (kind round-trip)", () => {
       ast: { tags: [], op: "AND", kind: "nonsense" as any },
     });
     expect(result.ast.kind).toBeUndefined();
+  });
+});
+
+describe("finance/analysis — transactions (tag drill-down)", () => {
+  it("lists the transactions carrying a tag within the filter, newest first", async () => {
+    await seedFixture();
+    await grantAdmin();
+
+    const { transactions: rows } = await transactions({
+      ast: { tags: [], op: "AND" },
+      tag: "urlaub",
+    });
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0].counterparty).toBe("Trenitalia");
+    expect(rows[0].bookingDate).toBe("2024-08-12");
+    expect(rows[1].counterparty).toBe("Hotel Firenze");
+    expect(Number(rows[1].amount)).toBeCloseTo(-340, 2);
+  });
+
+  it("honours the surrounding AST filter (timespan)", async () => {
+    await seedFixture();
+    await grantAdmin();
+
+    const { transactions: rows } = await transactions({
+      ast: { tags: [], op: "AND", timespan: { from: "2024-08-11", to: "2024-08-31" } },
+      tag: "urlaub",
+    });
+
+    // Only Trenitalia (08-12) falls inside the window; Hotel (08-10) drops out.
+    expect(rows).toHaveLength(1);
+    expect(rows[0].counterparty).toBe("Trenitalia");
+  });
+
+  it("scopes to accessible accounts for non-admins", async () => {
+    const { accountAId } = await seedFixture();
+    await ensureUser(7);
+    await db.insert(financeAccountAccess).values({
+      account_id: accountAId,
+      user_id: 7,
+      level: "read",
+    });
+    setAuth("7", ["finance.view"]);
+
+    // gehalt lives on account B, which user 7 cannot read.
+    const { transactions: rows } = await transactions({
+      ast: { tags: [], op: "AND" },
+      tag: "gehalt",
+    });
+    expect(rows).toHaveLength(0);
+  });
+
+  it("rejects an empty tag", async () => {
+    await grantAdmin();
+    await expect(
+      transactions({ ast: { tags: [], op: "AND" }, tag: "  " }),
+    ).rejects.toThrow(/tag/);
+  });
+
+  it("requires finance.view", async () => {
+    setAuth("1", []);
+    await expect(
+      transactions({ ast: { tags: [], op: "AND" }, tag: "urlaub" }),
+    ).rejects.toThrow(/permission/);
   });
 });
 

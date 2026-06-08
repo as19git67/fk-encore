@@ -9,12 +9,16 @@ import Message from 'primevue/message'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Chart from 'primevue/chart'
+import Dialog from 'primevue/dialog'
+import ProgressSpinner from 'primevue/progressspinner'
 import { toLocalIsoDate, parseLocalDate } from '../../utils/dateFormat'
 import {
   analysisAggregate,
   analysisQuery,
+  analysisTransactions,
   type AnalysisAst,
   type AnalysisResult,
+  type AnalysisTransaction,
 } from '../../api/finance'
 import { useTagsStore } from '../../stores/finance/tags'
 
@@ -121,6 +125,38 @@ function formatCurrency(sum: string): string {
   }).format(Number(sum))
 }
 
+function formatDate(iso: string): string {
+  return parseLocalDate(iso).toLocaleDateString('de-DE')
+}
+
+// --- Drill-down: transactions behind a single tag of the breakdown ---
+const detailVisible = ref(false)
+const detailTag = ref('')
+const detailLoading = ref(false)
+const detailError = ref<string | null>(null)
+const detailRows = ref<AnalysisTransaction[]>([])
+
+async function openTagDetails(tag: string) {
+  if (!result.value) return
+  detailTag.value = tag
+  detailVisible.value = true
+  detailLoading.value = true
+  detailError.value = null
+  detailRows.value = []
+  try {
+    const resp = await analysisTransactions({ ast: result.value.ast, tag })
+    detailRows.value = resp.transactions
+  } catch (err) {
+    detailError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    detailLoading.value = false
+  }
+}
+
+function onTagRowClick(event: { data: { tag: string } }) {
+  openTagDetails(event.data.tag)
+}
+
 const chartData = computed(() => {
   if (!result.value) return null
   return {
@@ -173,7 +209,12 @@ const tagChartOptions = computed(() => {
     plugins: { legend: { display: false } },
     scales: {
       x: { ticks: { color: tickColor }, grid: { color: gridColor } },
-      y: { ticks: { color: tickColor }, grid: { color: gridColor } },
+      // autoSkip:false forces every tag label to render — otherwise
+      // Chart.js drops every other one when they look crowded.
+      y: {
+        ticks: { color: tickColor, autoSkip: false },
+        grid: { color: gridColor },
+      },
     },
   }
 })
@@ -289,10 +330,6 @@ const tagChartOptions = computed(() => {
 
     <section v-if="result && result.byTag.length > 0" class="card">
       <h2>Aufschlüsselung nach Tag</h2>
-      <p class="hint">
-        Jede gefilterte Buchung zählt in jeden Tag, den sie trägt. Tags aus dem Filter
-        sind ausgeblendet.
-      </p>
       <div
         v-if="tagChartData"
         class="chart-wrap"
@@ -300,12 +337,33 @@ const tagChartOptions = computed(() => {
       >
         <Chart type="bar" :data="tagChartData" :options="tagChartOptions" />
       </div>
-      <DataTable :value="result.byTag" stripedRows>
+      <DataTable
+        :value="result.byTag"
+        stripedRows
+        rowHover
+        class="clickable-rows"
+        @row-click="onTagRowClick"
+      >
         <Column field="tag" header="Tag" />
-        <Column header="Summe">
-          <template #body="{ data }">{{ formatCurrency(data.sum) }}</template>
+        <Column
+          header="Summe"
+          headerStyle="text-align:right"
+          bodyStyle="text-align:right"
+        >
+          <template #body="{ data }">
+            <span class="num">{{ formatCurrency(data.sum) }}</span>
+          </template>
         </Column>
-        <Column field="count" header="Anzahl" />
+        <Column
+          field="count"
+          header="Anzahl"
+          headerStyle="text-align:right"
+          bodyStyle="text-align:right"
+        >
+          <template #body="{ data }">
+            <span class="num">{{ data.count }}</span>
+          </template>
+        </Column>
       </DataTable>
     </section>
 
@@ -319,6 +377,44 @@ const tagChartOptions = computed(() => {
         <Column field="count" header="Anzahl" />
       </DataTable>
     </section>
+
+    <Dialog
+      v-model:visible="detailVisible"
+      modal
+      dismissableMask
+      :header="`Buchungen · ${detailTag}`"
+      :style="{ width: '46rem', maxWidth: '95vw' }"
+    >
+      <div v-if="detailLoading" class="detail-loading">
+        <ProgressSpinner style="width: 2.5rem; height: 2.5rem" />
+      </div>
+      <Message v-else-if="detailError" severity="error">{{ detailError }}</Message>
+      <p v-else-if="detailRows.length === 0" class="hint">Keine Buchungen.</p>
+      <DataTable v-else :value="detailRows" stripedRows scrollable scrollHeight="60vh">
+        <Column header="Datum">
+          <template #body="{ data }">
+            <span class="num">{{ formatDate(data.bookingDate) }}</span>
+          </template>
+        </Column>
+        <Column field="counterparty" header="Gegenseite">
+          <template #body="{ data }">{{ data.counterparty || '—' }}</template>
+        </Column>
+        <Column field="purpose" header="Verwendung">
+          <template #body="{ data }">
+            <span class="purpose">{{ data.purpose || '—' }}</span>
+          </template>
+        </Column>
+        <Column
+          header="Betrag"
+          headerStyle="text-align:right"
+          bodyStyle="text-align:right"
+        >
+          <template #body="{ data }">
+            <span class="num">{{ formatCurrency(data.amount) }}</span>
+          </template>
+        </Column>
+      </DataTable>
+    </Dialog>
   </div>
 </template>
 
@@ -421,5 +517,24 @@ const tagChartOptions = computed(() => {
 .hint {
   color: var(--p-text-muted-color);
   margin: 0;
+}
+.num {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.clickable-rows :deep(tbody tr) {
+  cursor: pointer;
+}
+.detail-loading {
+  display: flex;
+  justify-content: center;
+  padding: 1.5rem;
+}
+.purpose {
+  display: block;
+  max-width: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

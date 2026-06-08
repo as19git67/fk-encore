@@ -746,6 +746,27 @@ export async function analysisAggregate(params: {
   })
 }
 
+export interface AnalysisTransaction {
+  id: number
+  bookingDate: string
+  amount: string
+  currency: string
+  counterparty: string | null
+  purpose: string | null
+}
+
+export async function analysisTransactions(params: {
+  ast: AnalysisAst
+  tag: string
+  accountIds?: number[]
+  limit?: number
+}): Promise<{ transactions: AnalysisTransaction[] }> {
+  return apiFetch('/finance/analysis/transactions', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+}
+
 // ----------------------------------------------------------------------
 // Tag Queue (admin)
 // ----------------------------------------------------------------------

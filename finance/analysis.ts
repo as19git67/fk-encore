@@ -129,6 +129,96 @@ export const aggregate = api(
 );
 
 // -----------------------------------------------------------------------
+// /transactions — drill into the rows behind one tag of the breakdown
+// -----------------------------------------------------------------------
+
+interface TransactionsRequest {
+  ast: AnalysisAst;
+  /** The specific tag whose matching transactions to list. */
+  tag: string;
+  accountIds?: number[];
+  limit?: number;
+}
+
+export interface AnalysisTransaction {
+  id: number;
+  bookingDate: string;
+  amount: string;
+  currency: string;
+  counterparty: string | null;
+  purpose: string | null;
+}
+
+interface TransactionsResponse {
+  transactions: AnalysisTransaction[];
+}
+
+export const transactions = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/finance/analysis/transactions",
+    auth: true,
+  },
+  async (req: TransactionsRequest): Promise<TransactionsResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+
+    if (typeof req.tag !== "string" || req.tag.trim().length === 0) {
+      throw APIError.invalidArgument("tag must be a non-empty string");
+    }
+    const tag = req.tag.trim();
+    const ast = validateAst(req.ast);
+    const limit =
+      typeof req.limit === "number" && Number.isFinite(req.limit) && req.limit > 0
+        ? Math.min(Math.floor(req.limit), 500)
+        : 200;
+
+    // Same filter the aggregate uses (tags / timespan / amount / ACL),
+    // narrowed to the single tag the user clicked on.
+    const filter = await buildFilter(ast, auth, req.accountIds);
+
+    const rows = (await db.execute(sql`
+      SELECT
+        t.id,
+        TO_CHAR(t.booking_date, 'YYYY-MM-DD') AS booking_date,
+        t.amount,
+        t.currency_code,
+        t.counterparty,
+        t.purpose
+      FROM finance_transaction t
+      WHERE ${filter}
+        AND t.id IN (
+          SELECT tt.transaction_id
+          FROM finance_tag_transaction tt
+          JOIN finance_tag tg ON tg.id = tt.tag_id
+          WHERE tg.source = 'user' AND tg.name = ${tag}
+        )
+      ORDER BY t.booking_date DESC, t.id DESC
+      LIMIT ${limit}
+    `)).rows as Array<{
+      id: number | string;
+      booking_date: string;
+      amount: string | number;
+      currency_code: string;
+      counterparty: string | null;
+      purpose: string | null;
+    }>;
+
+    return {
+      transactions: rows.map((r) => ({
+        id: Number(r.id),
+        bookingDate: r.booking_date,
+        amount: String(r.amount),
+        currency: r.currency_code,
+        counterparty: r.counterparty,
+        purpose: r.purpose,
+      })),
+    };
+  },
+);
+
+// -----------------------------------------------------------------------
 // Internals
 // -----------------------------------------------------------------------
 
