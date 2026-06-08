@@ -387,7 +387,7 @@ export const MOCK_LIBRARIES: PhotoLibrary[] = [
     auto_import: true,
     auto_albums: true,
     favorite_rating_threshold: 4,
-    excluded_dirs: ['Thumbs', 'raw-rejects'],
+    excluded_dirs: ['Thumbs', 'raw-rejects', '2024/Juli/Ausflug'],
     created_at: '2024-06-01T08:00:00Z',
     last_scan_at: '2024-06-05T14:00:00Z',
     active_scan: null,

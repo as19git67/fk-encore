@@ -129,10 +129,10 @@ export const scanLibrary = api(
 
 export const listSubdirs = api(
   { expose: true, method: "GET", path: "/libraries/:id/subdirs", auth: true },
-  async ({ id }: { id: number }): Promise<{ dirs: string[] }> => {
+  async ({ id, sub }: { id: number; sub?: Query<string> }): Promise<{ dirs: { name: string; rel_path: string }[] }> => {
     checkPermission();
     try {
-      const dirs = await listLibrarySubdirs(id);
+      const dirs = await listLibrarySubdirs(id, sub ?? "");
       return { dirs };
     } catch (err) {
       toApiError(err);

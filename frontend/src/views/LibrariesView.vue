@@ -11,7 +11,6 @@ import InputNumber from 'primevue/inputnumber'
 import ToggleSwitch from 'primevue/toggleswitch'
 import Tag from 'primevue/tag'
 import Message from 'primevue/message'
-import AutoComplete from 'primevue/autocomplete'
 import Chip from 'primevue/chip'
 import {
   listLibraries,
@@ -63,10 +62,23 @@ const form = ref<{
 })
 const saving = ref(false)
 
-// Excluded dirs autocomplete state
-const allSubdirs = ref<string[]>([])
-const subdirSuggestions = ref<{ label: string; value: string }[]>([])
-const loadingSubdirs = ref(false)
+// Excluded dirs browser state
+const exclSub = ref('')
+const exclDirEntries = ref<{ name: string; rel_path: string }[]>([])
+const loadingExclDirs = ref(false)
+const exclManualInput = ref('')
+
+const exclSegments = computed<{ label: string; sub: string }[]>(() => {
+  if (!exclSub.value) return []
+  const parts = exclSub.value.split('/')
+  const segs: { label: string; sub: string }[] = []
+  let acc = ''
+  for (const p of parts) {
+    acc = acc ? `${acc}/${p}` : p
+    segs.push({ label: p, sub: acc })
+  }
+  return segs
+})
 
 // Path picker state (create mode) — supports deep navigation via `sub`.
 const availablePaths = ref<AvailableDirectory[]>([])
@@ -161,7 +173,6 @@ async function openCreateDialog() {
     favorite_rating_threshold: 0,
     excluded_dirs: [],
   }
-  allSubdirs.value = []
   showEditDialog.value = true
   await loadPickerAt('')
 }
@@ -177,30 +188,57 @@ async function openEditDialog(lib: PhotoLibrary) {
     favorite_rating_threshold: lib.favorite_rating_threshold ?? 0,
     excluded_dirs: lib.excluded_dirs ?? [],
   }
+  exclSub.value = ''
+  exclDirEntries.value = []
+  exclManualInput.value = ''
   showEditDialog.value = true
-  loadingSubdirs.value = true
+  loadExclDirs('')
+}
+
+async function loadExclDirs(sub: string) {
+  if (editingId.value === null) return
+  loadingExclDirs.value = true
   try {
-    const res = await listLibrarySubdirs(lib.id)
-    allSubdirs.value = res.dirs
+    const res = await listLibrarySubdirs(editingId.value, sub)
+    exclDirEntries.value = res.dirs
+    exclSub.value = sub
   } catch {
-    allSubdirs.value = []
+    exclDirEntries.value = []
   } finally {
-    loadingSubdirs.value = false
+    loadingExclDirs.value = false
   }
 }
 
-function searchSubdirs(event: { query: string }) {
-  const q = event.query.trim().toLowerCase()
-  const selected = new Set(form.value.excluded_dirs)
-  subdirSuggestions.value = allSubdirs.value
-    .filter((d) => !selected.has(d) && d.toLowerCase().includes(q))
-    .map((d) => ({ label: d, value: d }))
+function navigateExclTo(sub: string) {
+  loadExclDirs(sub)
 }
 
-function onExcludedDirsUpdate(raw: Array<string | { label: string; value: string }>) {
-  form.value.excluded_dirs = raw.map((item) =>
-    typeof item === 'string' ? item : item.value,
-  )
+function navigateExclInto(dir: { name: string; rel_path: string }) {
+  loadExclDirs(dir.rel_path)
+}
+
+function getExclStatus(relPath: string): 'excluded' | 'parent-excluded' | 'child-excluded' | 'none' {
+  if (form.value.excluded_dirs.includes(relPath)) return 'excluded'
+  if (form.value.excluded_dirs.some((d) => relPath.startsWith(d + '/'))) return 'parent-excluded'
+  if (form.value.excluded_dirs.some((d) => d.startsWith(relPath + '/'))) return 'child-excluded'
+  return 'none'
+}
+
+function addExcludedDir(relPath: string) {
+  if (!form.value.excluded_dirs.includes(relPath)) {
+    form.value.excluded_dirs = [
+      ...form.value.excluded_dirs.filter((d) => !d.startsWith(relPath + '/')),
+      relPath,
+    ]
+  }
+}
+
+function addManualExcludedDir() {
+  const cleaned = exclManualInput.value.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+  if (cleaned && !form.value.excluded_dirs.includes(cleaned)) {
+    form.value.excluded_dirs = [...form.value.excluded_dirs, cleaned]
+  }
+  exclManualInput.value = ''
 }
 
 function removeExcludedDir(dir: string) {
@@ -656,27 +694,100 @@ onMounted(loadData)
 
         <div v-if="editingId !== null" class="field">
           <label>Ausgeschlossene Verzeichnisse</label>
-          <AutoComplete
-            class="excluded-dirs-ac"
-            :model-value="form.excluded_dirs.map(d => ({ label: d, value: d }))"
-            :suggestions="subdirSuggestions"
-            option-label="label"
-            placeholder="Verzeichnis eingeben…"
-            multiple
-            force-selection
-            :loading="loadingSubdirs"
-            @complete="searchSubdirs"
-            @update:model-value="onExcludedDirsUpdate"
-          >
-            <template #option="{ option }">
-              <span><i class="pi pi-folder" style="margin-right: 0.4rem" />{{ option.label }}</span>
-            </template>
-            <template #chip="{ value }">
-              <Chip :label="value.label" removable @remove="removeExcludedDir(value.value)" />
-            </template>
-          </AutoComplete>
+
+          <div class="excl-input-row">
+            <InputText
+              v-model="exclManualInput"
+              placeholder="Pfad eingeben, z.B. 2020/urlaub"
+              @keydown.enter.prevent="addManualExcludedDir"
+            />
+            <Button
+              icon="pi pi-plus"
+              size="small"
+              :disabled="!exclManualInput.trim()"
+              @click="addManualExcludedDir"
+            />
+          </div>
+
+          <div class="excl-browser">
+            <div class="breadcrumb">
+              <button
+                type="button"
+                class="crumb home"
+                :disabled="!exclSub"
+                v-tooltip="'Bibliotheks-Wurzel'"
+                @click="navigateExclTo('')"
+              >
+                <i class="pi pi-home" />
+              </button>
+              <template v-for="(seg, i) in exclSegments" :key="seg.sub">
+                <span class="sep">/</span>
+                <button
+                  type="button"
+                  class="crumb"
+                  :disabled="i === exclSegments.length - 1"
+                  @click="navigateExclTo(seg.sub)"
+                >{{ seg.label }}</button>
+              </template>
+            </div>
+
+            <ul class="dir-list excl-dir-list">
+              <li v-if="loadingExclDirs" class="muted small">Lade Verzeichnisse…</li>
+              <li v-else-if="exclDirEntries.length === 0" class="muted small">
+                Keine Unterverzeichnisse.
+              </li>
+              <li
+                v-for="dir in exclDirEntries"
+                :key="dir.rel_path"
+                class="dir-item"
+                :class="{ 'excl-active': getExclStatus(dir.rel_path) !== 'none' }"
+              >
+                <button type="button" class="dir-name" v-tooltip="'Reingehen'" @click="navigateExclInto(dir)">
+                  <i class="pi pi-folder" />
+                  {{ dir.name }}
+                </button>
+                <Tag
+                  v-if="getExclStatus(dir.rel_path) === 'excluded'"
+                  value="ausgeschlossen"
+                  severity="warn"
+                  class="excl-tag"
+                />
+                <Tag
+                  v-else-if="getExclStatus(dir.rel_path) === 'parent-excluded'"
+                  value="übergeordnet"
+                  severity="warn"
+                  class="excl-tag"
+                />
+                <i
+                  v-else-if="getExclStatus(dir.rel_path) === 'child-excluded'"
+                  class="pi pi-info-circle muted"
+                  v-tooltip="'Unterverzeichnisse ausgeschlossen'"
+                />
+                <Button
+                  v-if="getExclStatus(dir.rel_path) === 'none' || getExclStatus(dir.rel_path) === 'child-excluded'"
+                  label="Ausschließen"
+                  size="small"
+                  severity="warn"
+                  text
+                  @click="addExcludedDir(dir.rel_path)"
+                />
+              </li>
+            </ul>
+          </div>
+
+          <div v-if="form.excluded_dirs.length > 0" class="excluded-chips">
+            <Chip
+              v-for="d in form.excluded_dirs"
+              :key="d"
+              :label="d"
+              removable
+              @remove="removeExcludedDir(d)"
+            />
+          </div>
+
           <small class="hint-small">
-            Verzeichnisse auf erster Ebene, die beim Scan übersprungen werden sollen.
+            Verzeichnisse, die beim Scan übersprungen werden sollen.
+            Beliebige Verschachtelungstiefe möglich.
           </small>
         </div>
       </div>
@@ -992,23 +1103,41 @@ onMounted(loadData)
   overflow-y: auto;
 }
 
+.excl-input-row {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.excl-input-row :deep(.p-inputtext) {
+  flex: 1;
+}
+
+.excl-browser {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 6px;
+  padding: 0.5rem;
+  background: var(--p-content-background);
+}
+
+.excl-dir-list {
+  max-height: 180px;
+}
+
+.excl-active {
+  opacity: 0.7;
+}
+
+.excl-tag {
+  font-size: 0.75rem;
+}
+
 .excluded-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem;
-}
-
-.excluded-chip {
-  font-size: 0.8rem;
-}
-
-.excluded-dirs-ac {
-  width: 100%;
-}
-
-.excluded-dirs-ac :deep(.p-autocomplete-multiple-container) {
-  gap: 0.375rem;
-  flex-wrap: wrap;
-  width: 100%;
 }
 </style>
