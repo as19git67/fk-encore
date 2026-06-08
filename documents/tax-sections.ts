@@ -95,7 +95,7 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     slug: "werbungskosten-n",
     group: "abzuege",
     name: "Werbungskosten (Anlage N)",
-    hint: "Arbeitnehmer-Werbungskosten: Fahrtenbuch/Pendler, Arbeitsmittel (PC, Literatur), Fortbildungsrechnungen, Reisekostenabrechnung, Arbeitszimmer, Gewerkschaftsbeitrag; nicht: haushaltsnahe Rechnungen der Privatwohnung.",
+    hint: "Arbeitnehmer-Werbungskosten: Fahrtenbuch/Pendler, Arbeitsmittel (PC, Literatur), Fortbildungsrechnungen, Reisekostenabrechnung, Arbeitszimmer, Gewerkschaftsbeitrag. NICHT: Handwerkerrechnungen für die Privatwohnung (→ haushaltsnahe) — es sei denn, die Rechnung betrifft explizit das häusliche Arbeitszimmer.",
   },
   {
     slug: "werbungskosten-v",
@@ -143,7 +143,7 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     slug: "haushaltsnahe",
     group: "abzuege",
     name: "Haushaltsnahe Aufwendungen / §35a",
-    hint: "Rechnung + Kontobeleg für Putzkraft, Gartenarbeit, Winterdienst, Schornsteinfeger, Handwerker (Lohnanteil) in der selbst genutzten Wohnung; nicht: Mietobjekt (werbungskosten-v).",
+    hint: "Handwerkerrechnungen (Lohnanteil) für die selbst bewohnte Wohnung / das eigene Haus: Maler, Sanitär, Elektriker, Heizungsbauer, Dachdecker, Schreiner, Fliesenleger, Schornsteinfeger, Gärtner, Winterdienst, Putzkraft, Haushaltshilfe. Immer mit Überweisung (kein Bargeld). Nicht: Mietobjekt (→ werbungskosten-v), nicht: Arbeitszimmer-Renovierung des Arbeitnehmers (→ werbungskosten-n).",
   },
   {
     slug: "anlage-kind",
