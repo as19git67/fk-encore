@@ -527,6 +527,11 @@ struct AlbumPickerView: View {
         let count: Int
         /// Disambiguates name collisions in the UI (e.g. "Aufnahmen (Smart)").
         let suffix: String?
+        /// True for a still-selected album that no longer exists in the photo
+        /// library (deleted in iOS). Surfaced only so the user can untick it —
+        /// otherwise the dangling selection (and its server mapping/watermark)
+        /// would be stuck forever, since deleted albums never appear in a fetch.
+        var isMissing: Bool = false
         var displayTitle: String {
             suffix.map { "\(title) (\($0))" } ?? title
         }
@@ -595,16 +600,25 @@ struct AlbumPickerView: View {
                             toggle(entry)
                         } label: {
                             HStack {
-                                if entry.collection == nil {
+                                if entry.isMissing {
+                                    Image(systemName: "exclamationmark.triangle")
+                                        .foregroundStyle(.orange)
+                                } else if entry.collection == nil {
                                     Image(systemName: "photo.stack")
                                         .foregroundStyle(Color.accentColor)
                                 }
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(entry.displayTitle)
-                                        .foregroundStyle(.primary)
-                                    Text("\(entry.count) Foto\(entry.count == 1 ? "" : "s")")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(entry.isMissing ? .secondary : .primary)
+                                    if entry.isMissing {
+                                        Text("Nicht mehr vorhanden – tippen zum Entfernen")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    } else {
+                                        Text("\(entry.count) Foto\(entry.count == 1 ? "" : "s")")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
                                 Spacer()
                                 if selectedIds.contains(entry.id) {
@@ -655,6 +669,10 @@ struct AlbumPickerView: View {
             status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
         }
         guard status == .authorized || status == .limited else { return [] }
+
+        // Snapshot the current selection so the background fetch can spot ids
+        // that no longer resolve to a live collection (deleted in iOS).
+        let selectedSnapshot = selectedIds
 
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
@@ -728,6 +746,25 @@ struct AlbumPickerView: View {
                         suffix: suffix
                     ))
                 }
+
+                // Still-selected albums that didn't show up in any fetch were
+                // deleted in iOS. Add a removable "deleted album" row for each so
+                // the user can untick the stuck selection (the sentinel is never
+                // an orphan — it isn't a real collection).
+                let orphanIds = selectedSnapshot
+                    .subtracting(seenIds)
+                    .subtracting([PhotoSyncPreferences.allLibrarySentinel])
+                for orphanId in orphanIds.sorted() {
+                    result.append(PickerEntry(
+                        id: orphanId,
+                        collection: nil,
+                        title: "Gelöschtes Album",
+                        count: 0,
+                        suffix: nil,
+                        isMissing: true
+                    ))
+                }
+
                 continuation.resume(returning: result)
             }
         }
