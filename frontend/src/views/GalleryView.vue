@@ -77,6 +77,7 @@ import {
   type GalleryGridGroup,
   type GallerySortDir,
   type GallerySortField,
+  getGalleryIds,
 } from '../api/gallery'
 import {
   listPhotoGroups,
@@ -295,6 +296,27 @@ function onToggleSelect(entry: GalleryGridEntry) {
   if (next.has(entry.id)) next.delete(entry.id)
   else next.add(entry.id)
   selectedIds.value = next
+}
+
+const selectAllBusy = ref(false)
+const galleryTotal = ref(0)
+const allSelected = computed(() => galleryTotal.value > 0 && selectedCount.value === galleryTotal.value)
+
+async function selectAll() {
+  selectAllBusy.value = true
+  try {
+    const res = await getGalleryIds({
+      filter: filter.value,
+      sortBy: sortByForGallery.value,
+      sortDir: sortDirForGallery.value,
+      photoIds: searchPhotoIds.value ?? undefined,
+    })
+    selectedIds.value = new Set(res.ids)
+  } catch {
+    // silently ignore — user can retry
+  } finally {
+    selectAllBusy.value = false
+  }
 }
 
 // ── Album batch dialog (entry point for the mobile select-bar where the
@@ -1057,6 +1079,7 @@ async function onPhotoClick(entry: GalleryGridEntry) {
 //      first paint (instead of the user having to click anything).
 async function onGalleryLoaded() {
   if (!galleryRef.value) return
+  galleryTotal.value = galleryRef.value.getTotal()
   if (pendingFullscreenId.value !== null) {
     const id = pendingFullscreenId.value
     pendingFullscreenId.value = null
@@ -1432,6 +1455,16 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
         }}
       </span>
       <div class="select-actions">
+        <Button
+          v-if="!allSelected"
+          :label="galleryTotal > 0 ? `Alle (${galleryTotal})` : 'Alle'"
+          icon="pi pi-check-double"
+          size="small"
+          severity="secondary"
+          outlined
+          :loading="selectAllBusy"
+          @click="selectAll"
+        />
         <Button
           v-if="selectedCount > 0 && canUpload"
           label="Alben"

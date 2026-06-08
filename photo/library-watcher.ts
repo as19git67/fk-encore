@@ -38,13 +38,18 @@ function isXmpSidecar(file: string): boolean {
 export async function startWatcher(library: PhotoLibrary): Promise<void> {
   if (watchers.has(library.id)) return;
 
+  const excluded = library.excluded_dirs.length > 0
+    ? new Set(library.excluded_dirs)
+    : undefined;
+
   const watcher = chokidar.watch(library.path, {
     ignored: (p, stats) => {
       const base = path.basename(p);
       if (base.startsWith(".")) return true;
-      // Only watch directories, supported image files and `.xmp` sidecars.
-      // Returning true for an unsupported file means chokidar will skip it;
-      // for directories we recurse normally.
+      if (stats?.isDirectory() && excluded) {
+        const rel = path.relative(library.path, p);
+        if (!rel.includes(path.sep) && excluded.has(rel)) return true;
+      }
       if (stats?.isFile()) return !(isSupportedImage(p) || isXmpSidecar(p));
       return false;
     },

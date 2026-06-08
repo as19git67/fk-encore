@@ -16,6 +16,7 @@ import type {
   UpdateLibraryRequest,
   LibraryRootInfo,
 } from "./libraries.service";
+import { listLibrarySubdirs } from "./libraries.service";
 import { startWatcher, stopWatcher } from "./library-watcher";
 import { enqueueLibraryScan } from "./library-scan-queue";
 import { triggerLibraryScanWorker } from "./scan-worker";
@@ -120,6 +121,19 @@ export const scanLibrary = api(
       // jobId === null means a scan was already pending/processing; from the
       // caller's perspective the request still succeeded — work is in flight.
       return { queued: jobId !== null };
+    } catch (err) {
+      toApiError(err);
+    }
+  }
+);
+
+export const listSubdirs = api(
+  { expose: true, method: "GET", path: "/libraries/:id/subdirs", auth: true },
+  async ({ id }: { id: number }): Promise<{ dirs: string[] }> => {
+    checkPermission();
+    try {
+      const dirs = await listLibrarySubdirs(id);
+      return { dirs };
     } catch (err) {
       toApiError(err);
     }

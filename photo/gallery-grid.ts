@@ -14,6 +14,7 @@ import { isInBackupMode } from "../backup/state";
 import { parsePhotoFilterQuery, type PhotoFilterQuery } from "./photo.filters";
 import {
   listGalleryGridLogic,
+  listGalleryIdsLogic,
   normalizeGallerySortDir,
   normalizeGallerySortField,
 } from "./gallery-grid.service";
@@ -185,6 +186,77 @@ export const listGalleryGrid = api(
       limit,
       offset,
       aroundPhotoId,
+      sortBy,
+      sortDir,
+      photoIds,
+    });
+  },
+);
+
+// ── Select-all helper ──────────────────────────────────────────────────────
+// Returns just the IDs matching the current filter so the frontend can
+// populate the multi-select set without iterating the sparse gallery array.
+
+type GalleryIdsQueryParams = {
+  hiddenMode?: Query<string>;
+  favorite?: Query<boolean>;
+  albumHighlight?: Query<boolean>;
+  groupHighlight?: Query<boolean>;
+  inGroup?: Query<boolean>;
+  othersFavorited?: Query<boolean>;
+  othersHidden?: Query<boolean>;
+  qualityMin?: Query<number>;
+  qualityMax?: Query<number>;
+  notInAnyAlbum?: Query<boolean>;
+  albumIds?: Query<string>;
+  albumMode?: Query<string>;
+  personIds?: Query<string>;
+  personMode?: Query<string>;
+  mediaTypes?: Query<string>;
+  hasGps?: Query<boolean>;
+  hasFaces?: Query<boolean>;
+  hasAssignedPerson?: Query<boolean>;
+  dateFrom?: Query<string>;
+  dateTo?: Query<string>;
+  importedDaysAgo?: Query<number>;
+  sizeMin?: Query<number>;
+  sizeMax?: Query<number>;
+  showAiHidden?: Query<boolean>;
+  aiHiddenMode?: Query<string>;
+  albumScopeId?: Query<number>;
+  sortBy?: Query<string>;
+  sortDir?: Query<string>;
+  photoIds?: Query<string>;
+};
+
+export const listGalleryIds = api(
+  { expose: true, method: "GET", path: "/gallery/ids", auth: true },
+  async (params: GalleryIdsQueryParams): Promise<{ ids: number[] }> => {
+    if (isInBackupMode()) {
+      throw APIError.unavailable("Wartungsmodus aktiv – bitte später nochmal versuchen.");
+    }
+    const authData = getAuthData()!;
+    requirePermission(authData, "module.photos");
+    requirePermission(authData, "photos.view");
+    const userId = getUserId();
+
+    const filter = parsePhotoFilterQuery(toFilterQuery(params));
+    const sortBy = normalizeGallerySortField(params.sortBy);
+    const sortDir = normalizeGallerySortDir(params.sortDir);
+
+    const MAX_PHOTO_IDS = 5000;
+    let photoIds: number[] | undefined;
+    if (typeof params.photoIds === "string" && params.photoIds.length > 0) {
+      const parsed = params.photoIds
+        .split(",")
+        .map((s) => parseInt(s, 10))
+        .filter((n) => Number.isFinite(n) && n > 0);
+      if (parsed.length > 0) {
+        photoIds = parsed.slice(0, MAX_PHOTO_IDS);
+      }
+    }
+
+    return await listGalleryIdsLogic(userId, filter, {
       sortBy,
       sortDir,
       photoIds,

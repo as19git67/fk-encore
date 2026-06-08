@@ -369,6 +369,54 @@ export async function listGalleryGridLogic(
  * comments are simply absent from the map. Returns an empty map for an empty
  * page.
  */
+/**
+ * Return all photo IDs matching the current filter, in sort order. Used by
+ * the "select all" UI action so the frontend can populate its selection set
+ * without iterating the sparse gallery array. Capped at 50 000 IDs to
+ * prevent runaway memory use on pathological filters.
+ */
+export async function listGalleryIdsLogic(
+  userId: number,
+  filter: PhotoFilterParams,
+  opts: {
+    sortBy: GallerySortField;
+    sortDir: GallerySortDir;
+    photoIds?: number[];
+  },
+): Promise<{ ids: number[] }> {
+  const MAX_SELECT_ALL = 50_000;
+  const effectiveFilter: PhotoFilterParams =
+    filter.albumScopeId !== undefined
+      ? { ...filter, aiHiddenMode: "include" }
+      : filter;
+  const filterConds = buildPhotoFilterConditions(userId, effectiveFilter);
+  const photoIdFilter = opts.photoIds && opts.photoIds.length > 0
+    ? inArray(photos.id, opts.photoIds)
+    : undefined;
+  const whereClause = and(
+    galleryScopeCondition(userId, effectiveFilter.albumScopeId),
+    ...filterConds,
+    ...(photoIdFilter ? [photoIdFilter] : []),
+  );
+  const orderBy = opts.photoIds && opts.photoIds.length > 0
+    ? [sql`array_position(${sql.raw(`ARRAY[${opts.photoIds.join(",")}]::int[]`)}, ${photos.id})`]
+    : orderByClauses(opts.sortBy, opts.sortDir);
+
+  const rows = await dbAll<{ id: number }>(
+    db
+      .select({ id: photos.id })
+      .from(photos)
+      .leftJoin(
+        photoCuration,
+        and(eq(photos.id, photoCuration.photo_id), eq(photoCuration.user_id, userId)),
+      )
+      .where(whereClause)
+      .orderBy(...orderBy)
+      .limit(MAX_SELECT_ALL),
+  );
+  return { ids: rows.map((r) => r.id) };
+}
+
 async function loadCommentCountsForPhotos(
   albumId: number,
   photoIds: number[],

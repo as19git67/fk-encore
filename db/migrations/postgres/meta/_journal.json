@@ -680,6 +680,13 @@
       "when": 1779001435000,
       "tag": "0096_photo_feed_entries",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1779001436000,
+      "tag": "0097_library_excluded_dirs",
+      "breakpoints": true
     }
   ]
 }
