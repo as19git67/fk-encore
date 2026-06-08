@@ -22,6 +22,7 @@ export interface PhotoLibrary {
   auto_albums: boolean
   /** 1..5 = auto-favourite photos whose XMP:Rating is at least this value. 0 = disabled. */
   favorite_rating_threshold: number
+  excluded_dirs: string[]
   created_at: string | null
   last_scan_at: string | null
   active_scan: ActiveLibraryScan | null
@@ -34,6 +35,7 @@ export interface CreateLibraryRequest {
   auto_import?: boolean
   auto_albums?: boolean
   favorite_rating_threshold?: number
+  excluded_dirs?: string[]
 }
 
 export interface UpdateLibraryRequest {
@@ -42,6 +44,7 @@ export interface UpdateLibraryRequest {
   auto_import?: boolean
   auto_albums?: boolean
   favorite_rating_threshold?: number
+  excluded_dirs?: string[]
 }
 
 export interface ScanReport {
@@ -112,6 +115,10 @@ export function scanLibrary(id: number) {
   return apiFetch<{ queued: boolean }>(`/libraries/${id}/scan`, {
     method: 'POST',
   })
+}
+
+export function listLibrarySubdirs(id: number) {
+  return apiFetch<{ dirs: string[] }>(`/libraries/${id}/subdirs`)
 }
 
 export function reconcileLibrary(id: number) {

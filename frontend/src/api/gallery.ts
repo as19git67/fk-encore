@@ -123,6 +123,29 @@ export function getGalleryGrid(
   })
 }
 
+export interface GalleryIdsQuery {
+  sortBy?: GallerySortField
+  sortDir?: GallerySortDir
+  filter?: PhotoFilter
+  photoIds?: number[]
+}
+
+export function getGalleryIds(
+  query: GalleryIdsQuery,
+  options?: { signal?: AbortSignal },
+): Promise<{ ids: number[] }> {
+  const sp = new URLSearchParams()
+  if (query.sortBy) sp.set('sortBy', query.sortBy)
+  if (query.sortDir) sp.set('sortDir', query.sortDir)
+  buildFilterParams(query.filter, sp)
+  if (query.photoIds && query.photoIds.length > 0) {
+    sp.set('photoIds', query.photoIds.join(','))
+  }
+  return apiFetch<{ ids: number[] }>(`/gallery/ids?${sp.toString()}`, {
+    signal: options?.signal,
+  })
+}
+
 /**
  * Build the URL for a thumbnail of a given photo at a given width. Mirrors
  * `/photos/file/<filename>?w=<width>` used by the legacy gallery; kept as

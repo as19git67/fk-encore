@@ -11,9 +11,12 @@ import InputNumber from 'primevue/inputnumber'
 import ToggleSwitch from 'primevue/toggleswitch'
 import Tag from 'primevue/tag'
 import Message from 'primevue/message'
+import AutoComplete from 'primevue/autocomplete'
+import Chip from 'primevue/chip'
 import {
   listLibraries,
   listAvailablePaths,
+  listLibrarySubdirs,
   createLibrary,
   updateLibrary,
   deleteLibrary,
@@ -48,6 +51,7 @@ const form = ref<{
   auto_import: boolean
   auto_albums: boolean
   favorite_rating_threshold: number
+  excluded_dirs: string[]
 }>({
   name: '',
   path: '',
@@ -55,8 +59,14 @@ const form = ref<{
   auto_import: false,
   auto_albums: false,
   favorite_rating_threshold: 0,
+  excluded_dirs: [],
 })
 const saving = ref(false)
+
+// Excluded dirs autocomplete state
+const allSubdirs = ref<string[]>([])
+const subdirSuggestions = ref<{ label: string; value: string }[]>([])
+const loadingSubdirs = ref(false)
 
 // Path picker state (create mode) — supports deep navigation via `sub`.
 const availablePaths = ref<AvailableDirectory[]>([])
@@ -149,12 +159,14 @@ async function openCreateDialog() {
     auto_import: false,
     auto_albums: false,
     favorite_rating_threshold: 0,
+    excluded_dirs: [],
   }
+  allSubdirs.value = []
   showEditDialog.value = true
   await loadPickerAt('')
 }
 
-function openEditDialog(lib: PhotoLibrary) {
+async function openEditDialog(lib: PhotoLibrary) {
   editingId.value = lib.id
   form.value = {
     name: lib.name,
@@ -163,8 +175,36 @@ function openEditDialog(lib: PhotoLibrary) {
     auto_import: lib.auto_import,
     auto_albums: lib.auto_albums,
     favorite_rating_threshold: lib.favorite_rating_threshold ?? 0,
+    excluded_dirs: lib.excluded_dirs ?? [],
   }
   showEditDialog.value = true
+  loadingSubdirs.value = true
+  try {
+    const res = await listLibrarySubdirs(lib.id)
+    allSubdirs.value = res.dirs
+  } catch {
+    allSubdirs.value = []
+  } finally {
+    loadingSubdirs.value = false
+  }
+}
+
+function searchSubdirs(event: { query: string }) {
+  const q = event.query.trim().toLowerCase()
+  const selected = new Set(form.value.excluded_dirs)
+  subdirSuggestions.value = allSubdirs.value
+    .filter((d) => !selected.has(d) && d.toLowerCase().includes(q))
+    .map((d) => ({ label: d, value: d }))
+}
+
+function onExcludedDirsUpdate(raw: Array<string | { label: string; value: string }>) {
+  form.value.excluded_dirs = raw.map((item) =>
+    typeof item === 'string' ? item : item.value,
+  )
+}
+
+function removeExcludedDir(dir: string) {
+  form.value.excluded_dirs = form.value.excluded_dirs.filter((d) => d !== dir)
 }
 
 function navigateInto(dir: AvailableDirectory) {
@@ -199,6 +239,7 @@ async function handleSave() {
         auto_import: form.value.auto_import,
         auto_albums: form.value.auto_albums,
         favorite_rating_threshold: form.value.favorite_rating_threshold,
+        excluded_dirs: form.value.excluded_dirs,
       })
       info.value = 'Bibliothek angelegt.'
     } else {
@@ -208,6 +249,7 @@ async function handleSave() {
         auto_import: form.value.auto_import,
         auto_albums: form.value.auto_albums,
         favorite_rating_threshold: form.value.favorite_rating_threshold,
+        excluded_dirs: form.value.excluded_dirs,
       })
       info.value = 'Bibliothek aktualisiert.'
     }
@@ -362,6 +404,20 @@ onMounted(loadData)
             severity="warn"
           />
           <Tag v-else value="aus" severity="secondary" />
+        </template>
+      </Column>
+      <Column header="Ausgeschlossen" class="mobile-hidden" headerClass="mobile-hidden">
+        <template #body="{ data }">
+          <div v-if="data.excluded_dirs && data.excluded_dirs.length > 0" class="excluded-chips">
+            <Tag
+              v-for="dir in data.excluded_dirs"
+              :key="dir"
+              :value="dir"
+              severity="warn"
+              class="excluded-chip"
+            />
+          </div>
+          <span v-else class="muted">—</span>
         </template>
       </Column>
       <Column header="Letzter Scan" style="width: 10rem" class="mobile-hidden" headerClass="mobile-hidden">
@@ -595,6 +651,32 @@ onMounted(loadData)
             0 deaktiviert die automatische Favoriten-Markierung. Beim Import wird
             zusätzlich ein Tag <code>Rating-1</code>…<code>Rating-5</code> aus
             dem XMP-Rating übernommen.
+          </small>
+        </div>
+
+        <div v-if="editingId !== null" class="field">
+          <label>Ausgeschlossene Verzeichnisse</label>
+          <AutoComplete
+            class="excluded-dirs-ac"
+            :model-value="form.excluded_dirs.map(d => ({ label: d, value: d }))"
+            :suggestions="subdirSuggestions"
+            option-label="label"
+            placeholder="Verzeichnis eingeben…"
+            multiple
+            force-selection
+            :loading="loadingSubdirs"
+            @complete="searchSubdirs"
+            @update:model-value="onExcludedDirsUpdate"
+          >
+            <template #option="{ option }">
+              <span><i class="pi pi-folder" style="margin-right: 0.4rem" />{{ option.label }}</span>
+            </template>
+            <template #chip="{ value }">
+              <Chip :label="value.label" removable @remove="removeExcludedDir(value.value)" />
+            </template>
+          </AutoComplete>
+          <small class="hint-small">
+            Verzeichnisse auf erster Ebene, die beim Scan übersprungen werden sollen.
           </small>
         </div>
       </div>
@@ -908,5 +990,25 @@ onMounted(loadData)
   padding: 0.75rem;
   max-height: 60vh;
   overflow-y: auto;
+}
+
+.excluded-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.excluded-chip {
+  font-size: 0.8rem;
+}
+
+.excluded-dirs-ac {
+  width: 100%;
+}
+
+.excluded-dirs-ac :deep(.p-autocomplete-multiple-container) {
+  gap: 0.375rem;
+  flex-wrap: wrap;
+  width: 100%;
 }
 </style>

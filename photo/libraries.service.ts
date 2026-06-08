@@ -57,6 +57,7 @@ export interface PhotoLibrary {
    * for the library owner. 0 disables the behaviour.
    */
   favorite_rating_threshold: number;
+  excluded_dirs: string[];
   created_at: string | null;
   last_scan_at: string | null;
   active_scan: ActiveLibraryScan | null;
@@ -71,6 +72,7 @@ export interface CreateLibraryRequest {
   auto_import?: boolean;
   auto_albums?: boolean;
   favorite_rating_threshold?: number;
+  excluded_dirs?: string[];
 }
 
 export interface UpdateLibraryRequest {
@@ -80,6 +82,7 @@ export interface UpdateLibraryRequest {
   auto_import?: boolean;
   auto_albums?: boolean;
   favorite_rating_threshold?: number;
+  excluded_dirs?: string[];
 }
 
 /** 0 disables the feature; otherwise must be a 1..5 star threshold. */
@@ -89,6 +92,33 @@ function normaliseFavoriteRatingThreshold(v: unknown): number {
   const r = Math.trunc(n);
   if (r < 0 || r > 5) throw new Error("favorite_rating_threshold must be between 0 and 5");
   return r;
+}
+
+function sanitiseExcludedDirs(raw: string[] | undefined): string[] {
+  if (!raw || !Array.isArray(raw)) return [];
+  return raw
+    .map((d) => d.trim().replace(/^\/+|\/+$/g, ""))
+    .filter((d) => d.length > 0 && !d.includes("/") && !d.startsWith("."));
+}
+
+/**
+ * List first-level subdirectories of a library's root path. Used by the
+ * "excluded dirs" picker in the admin UI. Returns sorted directory names
+ * (not full paths); hidden directories (starting with ".") are skipped.
+ */
+export async function listLibrarySubdirs(libraryId: number): Promise<string[]> {
+  const lib = await getLibrary(libraryId);
+  if (!lib) throw new Error(`library ${libraryId} not found`);
+  let entries: fs.Dirent[];
+  try {
+    entries = await fs.promises.readdir(lib.path, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((e) => e.isDirectory() && !e.name.startsWith("."))
+    .map((e) => e.name)
+    .sort((a, b) => a.localeCompare(b));
 }
 
 export interface ScanReport {
@@ -273,6 +303,7 @@ function rowToLibrary(row: typeof photoLibraries.$inferSelect, activeScan?: Acti
     auto_import: row.auto_import,
     auto_albums: row.auto_albums,
     favorite_rating_threshold: row.favorite_rating_threshold,
+    excluded_dirs: row.excluded_dirs ?? [],
     created_at: row.created_at ?? null,
     last_scan_at: row.last_scan_at ?? null,
     active_scan: activeScan ?? null,
@@ -305,6 +336,7 @@ export async function createLibrary(
         favorite_rating_threshold: normaliseFavoriteRatingThreshold(
           req.favorite_rating_threshold ?? 0
         ),
+        excluded_dirs: sanitiseExcludedDirs(req.excluded_dirs),
       })
       .returning()
   );
@@ -341,6 +373,9 @@ export async function updateLibrary(req: UpdateLibraryRequest): Promise<PhotoLib
     updates.favorite_rating_threshold = normaliseFavoriteRatingThreshold(
       req.favorite_rating_threshold
     );
+  }
+  if (req.excluded_dirs !== undefined) {
+    updates.excluded_dirs = sanitiseExcludedDirs(req.excluded_dirs);
   }
 
   if (Object.keys(updates).length > 0) {
@@ -617,6 +652,7 @@ export async function importFile(
 async function* walkSupportedFiles(
   root: string,
   signal?: AbortSignal,
+  excludedDirs?: Set<string>,
 ): AsyncGenerator<string> {
   if (signal?.aborted) return;
   const entries = await fs.promises.readdir(root, { withFileTypes: true });
@@ -626,6 +662,7 @@ async function* walkSupportedFiles(
     const full = path.join(root, entry.name);
     if (entry.isDirectory()) {
       if (entry.name === "node_modules") continue;
+      if (excludedDirs?.has(entry.name)) continue;
       yield* walkSupportedFiles(full, signal);
     } else if (entry.isFile()) {
       const ext = path.extname(entry.name).toLowerCase();
@@ -679,6 +716,10 @@ export async function scanLibrary(
     if (!library) throw new Error(`library ${libraryId} not found`);
     ensureReadableDirectory(library.path);
 
+    const excluded = library.excluded_dirs.length > 0
+      ? new Set(library.excluded_dirs)
+      : undefined;
+
     const report: ScanReport = {
       scanned: 0,
       imported: 0,
@@ -694,7 +735,7 @@ export async function scanLibrary(
     if (jobId !== undefined) {
       (async () => {
         let total = 0;
-        for await (const _ of walkSupportedFiles(library.path, signal)) total++;
+        for await (const _ of walkSupportedFiles(library.path, signal, excluded)) total++;
         if (!signal.aborted) updateLibraryScanTotal(jobId, total).catch(() => {});
       })().catch(() => {});
     }
@@ -715,7 +756,7 @@ export async function scanLibrary(
         .finally(() => { flushInFlight = null; });
     };
 
-    for await (const file of walkSupportedFiles(library.path, signal)) {
+    for await (const file of walkSupportedFiles(library.path, signal, excluded)) {
       if (signal.aborted) throw new ScanCancelledError(libraryId);
       report.scanned++;
       try {
@@ -853,6 +894,10 @@ export async function reconcileLibrary(libraryId: number): Promise<{ removed: nu
   if (!library) throw new Error(`library ${libraryId} not found`);
   if (library.import_mode !== "link") return { removed: 0 };
 
+  const excludedPrefixes = library.excluded_dirs.map(
+    (d) => library.path + path.sep + d + path.sep,
+  );
+
   const rows = await dbAll<{ id: number; external_path: string | null }>(
     db
       .select({ id: photos.id, external_path: photos.external_path })
@@ -863,7 +908,8 @@ export async function reconcileLibrary(libraryId: number): Promise<{ removed: nu
   let removed = 0;
   for (const row of rows) {
     if (!row.external_path) continue;
-    if (!fs.existsSync(row.external_path)) {
+    const isExcluded = excludedPrefixes.some((p) => row.external_path!.startsWith(p));
+    if (isExcluded || !fs.existsSync(row.external_path)) {
       await dbExec(db.delete(photos).where(eq(photos.id, row.id)));
       removed++;
     }
