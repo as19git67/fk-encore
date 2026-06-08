@@ -119,11 +119,14 @@ export interface BulkRegionSuggestion {
   photoCount: number
   existing: boolean
   existingStatus: RegionStatus | null
+  /** Photos already covered by this tracked region — no new import needed. */
+  coveredByExisting: boolean
 }
 
 export interface BulkSuggestResult {
   geotaggedPhotoCount: number
   unmappedPhotoCount: number
+  coveredPhotoCount: number
   suggestions: BulkRegionSuggestion[]
 }
 

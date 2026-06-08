@@ -7,17 +7,25 @@
  * uses this to show a single "import these regions and the rest of
  * the library is covered" list.
  *
+ * Coverage-aware: a photo that already falls inside a tracked region
+ * (in any non-failed state) is attributed to that existing region
+ * instead of generating a new, finer suggestion. This stops the list
+ * from proposing redundant sub-regions whose data is already on disk —
+ * e.g. once "europe" or "…/bayern" is imported, the photos beneath it
+ * no longer surface "…/bayern/schwaben" as a separate import.
+ *
  * Lookups are cached by Geohash-5 (~5 km cell) so 60 000 photos
  * typically resolve into a few thousand unique lookups against the
  * in-memory Geofabrik index — well under a second on a warm cache.
  */
 
-import { inArray, isNotNull } from "drizzle-orm";
+import { isNotNull } from "drizzle-orm";
 import dbDefault from "../db/database";
 import { osmRegionImports, photos } from "../db/schema";
 import {
+  findContainingRegions,
   loadGeofabrikIndex,
-  pickSmallestMatchingRegion,
+  pickSmallestRegion,
   type GeofabrikIndex,
   type GeofabrikRegion,
   type LoadOptions,
@@ -27,6 +35,19 @@ import { isRegionStatus, type RegionStatus } from "./state-machine";
 
 /** Geohash precision used for the lookup cache. 5 ≈ 5 km × 5 km cells. */
 const CACHE_GEOHASH_PRECISION = 5;
+
+/**
+ * Tracked-region statuses that count as "covering" a coordinate: the
+ * region's data is on disk or on its way there. `failed` and
+ * `blocked_disk` are excluded — those regions provide no coverage, so
+ * photos beneath them should still produce a (re-)import suggestion.
+ */
+const COVERING_STATUSES: readonly RegionStatus[] = [
+  "pending_approval",
+  "importing",
+  "ready_running",
+  "ready_stopped",
+];
 
 export interface BulkRegionSuggestion {
   slug: string;
@@ -44,6 +65,13 @@ export interface BulkRegionSuggestion {
   /** True when the region is already tracked in `osm_region_imports`. */
   existing: boolean;
   existingStatus: RegionStatus | null;
+  /**
+   * True when this entry only exists because its photos are already
+   * covered by this (tracked, non-failed) region — i.e. no new import
+   * is needed. New regions worth importing have `coveredByExisting:
+   * false` and `existing: false`.
+   */
+  coveredByExisting: boolean;
 }
 
 export interface BulkSuggestResult {
@@ -51,6 +79,8 @@ export interface BulkSuggestResult {
   geotaggedPhotoCount: number;
   /** Photos whose GPS lies outside every Geofabrik polygon (oceans, …). */
   unmappedPhotoCount: number;
+  /** Photos already covered by an existing (non-failed) tracked region. */
+  coveredPhotoCount: number;
   /** Suggestions sorted by photoCount descending. */
   suggestions: BulkRegionSuggestion[];
 }
@@ -72,53 +102,77 @@ export async function suggestRegionsFromPhotos(
     .where(isNotNull(photos.latitude));
 
   if (rows.length === 0) {
-    return { geotaggedPhotoCount: 0, unmappedPhotoCount: 0, suggestions: [] };
+    return {
+      geotaggedPhotoCount: 0,
+      unmappedPhotoCount: 0,
+      coveredPhotoCount: 0,
+      suggestions: [],
+    };
   }
 
   const index = await load();
+
+  // All tracked regions up front — both to flag "existing" suggestions
+  // and to suppress redundant sub-region proposals for areas an
+  // imported (or in-progress) region already covers.
+  const trackedRows = await db
+    .select({ slug: osmRegionImports.slug, status: osmRegionImports.status })
+    .from(osmRegionImports);
+  const statusBySlug = new Map(trackedRows.map((t) => [t.slug, t.status]));
+  const coveringSlugs = new Set(
+    trackedRows
+      .filter(
+        (t) =>
+          isRegionStatus(t.status) &&
+          COVERING_STATUSES.includes(t.status as RegionStatus),
+      )
+      .map((t) => t.slug),
+  );
+
+  interface Resolved {
+    region: GeofabrikRegion;
+    /** Already covered by a tracked, non-failed region. */
+    covered: boolean;
+  }
+
   /** geohash cell → resolved region (or null = explicit "no match") */
-  const cellCache = new Map<string, GeofabrikRegion | null>();
-  /** region slug → accumulated count */
-  const counts = new Map<string, { region: GeofabrikRegion; count: number }>();
+  const cellCache = new Map<string, Resolved | null>();
+  /** region slug → accumulated count + coverage flag */
+  const counts = new Map<string, { region: GeofabrikRegion; count: number; covered: boolean }>();
 
   let unmapped = 0;
+  let covered = 0;
 
   for (const r of rows) {
     if (r.latitude === null || r.longitude === null) continue;
     const cell = geohash7(r.latitude, r.longitude, CACHE_GEOHASH_PRECISION);
-    let region: GeofabrikRegion | null;
+    let resolved: Resolved | null;
     if (cellCache.has(cell)) {
-      region = cellCache.get(cell)!;
+      resolved = cellCache.get(cell)!;
     } else {
-      region = pickSmallestMatchingRegion(index, r.latitude, r.longitude);
-      cellCache.set(cell, region);
+      resolved = resolveCell(index, r.latitude, r.longitude, coveringSlugs);
+      cellCache.set(cell, resolved);
     }
-    if (!region) {
+    if (!resolved) {
       unmapped++;
       continue;
     }
-    const slot = counts.get(region.id);
+    if (resolved.covered) covered++;
+    const slot = counts.get(resolved.region.id);
     if (slot) {
       slot.count++;
     } else {
-      counts.set(region.id, { region, count: 1 });
+      counts.set(resolved.region.id, {
+        region: resolved.region,
+        count: 1,
+        covered: resolved.covered,
+      });
     }
   }
 
-  // Merge in the existing osm_region_imports rows so the UI can show
-  // which regions are already tracked (and skip the "Anlegen" button).
-  const slugs = [...counts.keys()];
-  const existingRows = slugs.length === 0
-    ? []
-    : await db
-        .select({ slug: osmRegionImports.slug, status: osmRegionImports.status })
-        .from(osmRegionImports)
-        .where(inArray(osmRegionImports.slug, slugs));
-  const existingBySlug = new Map(existingRows.map((e) => [e.slug, e.status]));
-
   const suggestions: BulkRegionSuggestion[] = [...counts.values()]
-    .map(({ region, count }) => {
-      const status = existingBySlug.get(region.id);
+    .map(({ region, count, covered: isCovered }) => {
+      const status = statusBySlug.get(region.id);
       const existing = status !== undefined;
       const existingStatus =
         status !== undefined && isRegionStatus(status) ? status : null;
@@ -136,6 +190,7 @@ export async function suggestRegionsFromPhotos(
         photoCount: count,
         existing,
         existingStatus,
+        coveredByExisting: isCovered,
       };
     })
     .sort((a, b) => b.photoCount - a.photoCount);
@@ -143,7 +198,36 @@ export async function suggestRegionsFromPhotos(
   return {
     geotaggedPhotoCount: rows.length,
     unmappedPhotoCount: unmapped,
+    coveredPhotoCount: covered,
     suggestions,
   };
+}
+
+/**
+ * Resolve a coordinate to the region we want to attribute it to:
+ *   - If a tracked, non-failed region already contains the point, use
+ *     the smallest such region (the photo is already covered — no new
+ *     import needed).
+ *   - Otherwise fall back to the smallest Geofabrik region overall
+ *     (the genuine new-import suggestion).
+ * Returns null when no region polygon contains the point.
+ */
+function resolveCell(
+  index: GeofabrikIndex,
+  lat: number,
+  lon: number,
+  coveringSlugs: Set<string>,
+): { region: GeofabrikRegion; covered: boolean } | null {
+  const containing = findContainingRegions(index, lat, lon);
+  if (containing.length === 0) return null;
+
+  if (coveringSlugs.size > 0) {
+    const coveringHere = containing.filter((r) => coveringSlugs.has(r.id));
+    const coveringPick = pickSmallestRegion(coveringHere);
+    if (coveringPick) return { region: coveringPick, covered: true };
+  }
+
+  const region = pickSmallestRegion(containing);
+  return region ? { region, covered: false } : null;
 }
 
