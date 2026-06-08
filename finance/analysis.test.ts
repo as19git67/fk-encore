@@ -647,3 +647,124 @@ describe("finance/analysis — periodTransactions", () => {
     expect(rows).toHaveLength(2);
   });
 });
+
+// ======================================================================
+// /aggregate — tagGroups (complex tag expressions)
+// ======================================================================
+
+describe("finance/analysis — aggregate (tagGroups)", () => {
+  it("supports a single group (equivalent to flat tags)", async () => {
+    await seedFixture();
+    await grantAdmin();
+
+    const result = await aggregate({
+      ast: {
+        tags: [],
+        op: "AND",
+        tagGroups: [{ tags: ["urlaub", "italien-2024"], op: "AND" }],
+        groupOp: "AND",
+      },
+    });
+
+    expect(result.total.count).toBe(2);
+    expect(Number(result.total.sum)).toBeCloseTo(-429.5, 2);
+  });
+
+  it("supports AND between groups: Restaurant AND (urlaub OR alltag)", async () => {
+    await seedFixture();
+    await grantAdmin();
+
+    // urlaub-tagged rows also carry italien-2024 — testing:
+    // Group 1: [urlaub] AND  Group 2: [italien-2024]
+    // → only rows carrying BOTH urlaub AND italien-2024
+    const result = await aggregate({
+      ast: {
+        tags: [],
+        op: "AND",
+        tagGroups: [
+          { tags: ["urlaub"], op: "AND" },
+          { tags: ["italien-2024"], op: "AND" },
+        ],
+        groupOp: "AND",
+      },
+    });
+
+    expect(result.total.count).toBe(2);
+  });
+
+  it("supports OR between groups", async () => {
+    await seedFixture();
+    await grantAdmin();
+
+    // Group 1: [urlaub] OR Group 2: [gehalt]
+    // → rows tagged urlaub (2) + rows tagged gehalt (1) = 3
+    const result = await aggregate({
+      ast: {
+        tags: [],
+        op: "AND",
+        tagGroups: [
+          { tags: ["urlaub"], op: "AND" },
+          { tags: ["gehalt"], op: "AND" },
+        ],
+        groupOp: "OR",
+      },
+    });
+
+    expect(result.total.count).toBe(3);
+  });
+
+  it("supports OR within a group and AND between groups", async () => {
+    await seedFixture();
+    await grantAdmin();
+
+    // (urlaub OR alltag) → 4 rows, AND with timespan 2024-08 → 2 rows (only urlaub)
+    const result = await aggregate({
+      ast: {
+        tags: [],
+        op: "AND",
+        tagGroups: [{ tags: ["urlaub", "alltag"], op: "OR" }],
+        groupOp: "AND",
+        timespan: { from: "2024-08-01", to: "2024-08-31" },
+      },
+    });
+
+    expect(result.total.count).toBe(2);
+  });
+
+  it("excludes all group tags from byTag breakdown", async () => {
+    await seedFixture();
+    await grantAdmin();
+
+    const result = await aggregate({
+      ast: {
+        tags: [],
+        op: "AND",
+        tagGroups: [
+          { tags: ["urlaub"], op: "AND" },
+          { tags: ["italien-2024"], op: "AND" },
+        ],
+        groupOp: "AND",
+      },
+    });
+
+    const tagNames = result.byTag.map((r) => r.tag);
+    expect(tagNames).not.toContain("urlaub");
+    expect(tagNames).not.toContain("italien-2024");
+  });
+
+  it("falls back to flat tags when tagGroups is empty", async () => {
+    await seedFixture();
+    await grantAdmin();
+
+    const result = await aggregate({
+      ast: {
+        tags: ["urlaub"],
+        op: "AND",
+        tagGroups: [],
+        groupOp: "AND",
+      },
+    });
+
+    expect(result.total.count).toBe(2);
+  });
+});
