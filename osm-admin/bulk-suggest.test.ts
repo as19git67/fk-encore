@@ -85,6 +85,45 @@ function fixtureWithParent(): GeofabrikIndex {
   return parseIndex(raw, new Date("2026-01-01T00:00:00Z"));
 }
 
+/**
+ * Mirrors the REAL Geofabrik index shape, where region ids are flat
+ * tokens (`germany`, `bayern`) linked only via the `parent` pointer —
+ * not nested slug paths. Redundancy detection must follow `parent`,
+ * not string-prefix the slug, or European hierarchies never surface as
+ * Lösch-Kandidaten.
+ */
+function fixtureFlatIds(): GeofabrikIndex {
+  const raw = JSON.stringify({
+    features: [
+      {
+        properties: {
+          id: "germany",
+          name: "Germany",
+          parent: "europe",
+          urls: { pbf: "https://example.com/germany.osm.pbf" },
+        },
+        geometry: {
+          type: "Polygon",
+          coordinates: [[[5, 47], [15.5, 47], [15.5, 55.5], [5, 55.5], [5, 47]]],
+        },
+      },
+      {
+        properties: {
+          id: "bayern",
+          name: "Bayern",
+          parent: "germany",
+          urls: { pbf: "https://example.com/bayern.osm.pbf" },
+        },
+        geometry: {
+          type: "Polygon",
+          coordinates: [[[9, 47.5], [13.5, 47.5], [13.5, 50.5], [9, 50.5], [9, 47.5]]],
+        },
+      },
+    ],
+  });
+  return parseIndex(raw, new Date("2026-01-01T00:00:00Z"));
+}
+
 async function seedRegion(
   slug: string,
   status: string,
@@ -303,6 +342,24 @@ describe("suggestRegionsFromPhotos", () => {
     expect(rr.parentSizeMb).toBe(500);
     expect(rr.childrenSizeMb).toBe(900);
     expect(rr.recommendation).toBe("keep_parent");
+  });
+
+  it("detects redundancy across flat Geofabrik ids linked by parent pointers", async () => {
+    const u = await seedUser();
+    // All photos in Bayern; both Germany and Bayern tracked. With flat
+    // ids (`germany`/`bayern`) a slug-prefix test would miss this — only
+    // following the `parent` pointer surfaces Germany as a Lösch-Kandidat.
+    await seedPhoto(u, 48.137, 11.575, 1); // Munich → Bayern
+    await seedPhoto(u, 49.453, 11.077, 2); // Nuremberg → Bayern
+    await seedRegion("germany", "ready_running", "nom_germany", 3600);
+    await seedRegion("bayern", "ready_running", "nom_bayern", 600);
+
+    const r = await suggestRegionsFromPhotos({ loadIndex: fixtureFlatIds });
+    expect(r.redundantRegions).toHaveLength(1);
+    const rr = r.redundantRegions[0];
+    expect(rr.slug).toBe("germany");
+    expect(rr.coveringChildren).toContain("bayern");
+    expect(rr.recommendation).toBe("delete_parent");
   });
 
   it("does not flag a parent as redundant when it still has directly-attributed photos", async () => {
