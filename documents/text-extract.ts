@@ -183,12 +183,12 @@ export async function extractPdfText(
   const textLayerLooksGood =
     textLayer.length >= MIN_TEXT_LAYER_CHARS && !hasPoorSpacing(textLayer);
 
-  if (!options.forceOcr && textLayerLooksGood) {
-    return { text: textLayer, source: "text_layer", pageCount };
-  }
-
   if (options.forceOcr) {
     console.log(`[documents.text-extract] force_ocr=true — skipping text layer`);
+  } else if (textLayerLooksGood) {
+    console.log(
+      `[documents.text-extract] text layer looks good — running OCR anyway for consistency`,
+    );
   } else if (textLayer.length >= MIN_TEXT_LAYER_CHARS) {
     console.log(
       `[documents.text-extract] text layer looks broken (low space ratio) — running OCR`,
@@ -197,11 +197,13 @@ export async function extractPdfText(
 
   const ocrText = await ocrPdf(absPath, { repairFirst: pdfParseBrokenXref });
 
-  // When we intentionally skipped a usable-length text layer (forceOcr
-  // or poor spacing), prefer the OCR result outright and don't pollute
-  // it with the broken text layer. Only fall back to "mixed" when the
-  // text layer was sub-threshold but non-empty and OCR succeeded — the
-  // original "some text is better than none" safety net.
+  // When forceOcr is set or the text layer is broken, prefer OCR outright.
+  // When the text layer looks good and OCR also succeeded, prefer the text
+  // layer — it's typically cleaner than OCR for born-digital PDFs.
+  if (!options.forceOcr && textLayerLooksGood) {
+    return { text: textLayer, source: "text_layer", pageCount };
+  }
+
   if (
     !options.forceOcr &&
     textLayer.length > 0 &&
