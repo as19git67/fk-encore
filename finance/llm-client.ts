@@ -508,3 +508,152 @@ ${hintBlock}
 Frage:
 "${question}"`;
 }
+
+// -----------------------------------------------------------------------
+// /json-prompt (analysis suggestions — automatic insight generation)
+// -----------------------------------------------------------------------
+
+export interface AnalysisSuggestion {
+  name: string;
+  question: string;
+  ast: AnalysisAst;
+}
+
+export interface SuggestAnalysesInput {
+  availableTags: string[];
+  tagSummary: Array<{ tag: string; sum: string; count: number }>;
+  topCounterparties: Array<{ name: string; sum: string; count: number }>;
+  existingNames: string[];
+  dataRange: { from: string; to: string };
+}
+
+export async function generateAnalysisSuggestions(
+  input: SuggestAnalysesInput,
+): Promise<AnalysisSuggestion[]> {
+  const prompt = buildSuggestionPrompt(input);
+
+  let resp: { suggestions?: unknown[] };
+  try {
+    resp = await postJson("/json-prompt", { prompt, temperature: 0.7 });
+  } catch {
+    return [];
+  }
+
+  if (!Array.isArray(resp?.suggestions)) return [];
+
+  const vocab = new Set(input.availableTags);
+  const results: AnalysisSuggestion[] = [];
+
+  for (const raw of resp.suggestions) {
+    if (!raw || typeof raw !== "object") continue;
+    const s = raw as Record<string, unknown>;
+    if (typeof s.name !== "string" || typeof s.question !== "string") continue;
+    if (!s.ast || typeof s.ast !== "object") continue;
+
+    const ast = s.ast as Record<string, unknown>;
+    const rawTags = Array.isArray(ast.tags) ? ast.tags : [];
+    const tags = [...new Set(
+      rawTags
+        .filter((t: unknown): t is string => typeof t === "string")
+        .map((t: string) => t.trim())
+        .filter((t: string) => t.length > 0 && vocab.has(t)),
+    )];
+
+    const op = ast.op === "OR" ? "OR" as const : "AND" as const;
+    const kind: AnalysisAst["kind"] = ast.kind === "event" ? "event" : "ongoing";
+    const interval: AnalysisAst["interval"] = ast.interval === "year" ? "year" : "month";
+
+    const result: AnalysisAst = { tags, op, kind, interval };
+
+    if (ast.timespan && typeof ast.timespan === "object" && !Array.isArray(ast.timespan)) {
+      const t = ast.timespan as Record<string, unknown>;
+      if (typeof t.from === "string" && typeof t.to === "string") {
+        result.timespan = { from: t.from.slice(0, 10), to: t.to.slice(0, 10) };
+      }
+    }
+
+    if (ast.relativeTimespan && typeof ast.relativeTimespan === "object") {
+      const rt = ast.relativeTimespan as Record<string, unknown>;
+      const validTypes = new Set([
+        "this_year", "last_year", "last_n_years", "last_n_months",
+        "this_month", "last_month",
+      ]);
+      if (typeof rt.type === "string" && validTypes.has(rt.type)) {
+        result.relativeTimespan = { type: rt.type as RelativeTimespan["type"] };
+        if (typeof rt.n === "number" && Number.isFinite(rt.n) && rt.n > 0) {
+          result.relativeTimespan.n = Math.floor(rt.n);
+        }
+      }
+    }
+
+    if (result.relativeTimespan && !result.timespan) {
+      result.timespan = resolveRelativeTimespan(result.relativeTimespan);
+    }
+
+    if (tags.length === 0 && !result.timespan) continue;
+
+    results.push({ name: s.name.trim(), question: s.question.trim(), ast: result });
+  }
+
+  return results;
+}
+
+function buildSuggestionPrompt(input: SuggestAnalysesInput): string {
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
+  const vocabBlock = input.availableTags.length > 0
+    ? input.availableTags.map((t) => `- ${t}`).join("\n")
+    : "(keine Tags vorhanden)";
+
+  const tagSummaryBlock = input.tagSummary.length > 0
+    ? input.tagSummary
+        .slice(0, 30)
+        .map((t) => `- ${t.tag}: ${t.count} Buchungen, Summe ${t.sum} €`)
+        .join("\n")
+    : "(keine Tag-Daten)";
+
+  const counterpartyBlock = input.topCounterparties.length > 0
+    ? input.topCounterparties
+        .slice(0, 15)
+        .map((c) => `- ${c.name}: ${c.count} Buchungen, Summe ${c.sum} €`)
+        .join("\n")
+    : "(keine Gegenseiten)";
+
+  const existingBlock = input.existingNames.length > 0
+    ? input.existingNames.map((n) => `- "${n}"`).join("\n")
+    : "(keine)";
+
+  return `Du bist ein Finanz-Analyst-Assistent. Analysiere die Transaktionsdaten eines Nutzers und schlage 3 bis 5 interessante Finanz-Rückblicke (Analysen) vor.
+Heutiges Datum: ${todayStr}
+Transaktionsdaten vorhanden von ${input.dataRange.from} bis ${input.dataRange.to}.
+
+Dein Ziel: Finde Muster, Trends und interessante Einsichten in den Finanzdaten. Vorschläge sollen dem Nutzer helfen, seine Ausgaben besser zu verstehen.
+
+Ideen für Vorschläge:
+- Ausgabentrends nach Kategorie (z.B. "Lebensmittel dieses Jahr" vs. letztes Jahr)
+- Auffällige oder hohe Ausgabenkategorien
+- Saisonale Muster (z.B. "Urlaubsausgaben im Sommer")
+- Entwicklung regelmäßiger Kosten über die Zeit
+- Vergleich verschiedener Ausgabenkategorien
+
+Strikte Regeln:
+- Verwende NUR Tags aus der Vokabelliste.
+- Schlage KEINE Analysen vor, die es bereits gibt (siehe "Bestehende Analysen").
+- Nutze 'relativeTimespan' für zeitbezogene Vorschläge, damit sie mitwandern.
+- Jeder Vorschlag braucht: name (kurzer deutscher Titel), question (deutsche Frage), ast (AnalysisAst).
+- Der AST hat dieselbe Struktur wie der Analyse-Filter: tags, op, timespan, relativeTimespan, kind, interval.
+- Antworte als JSON: { "suggestions": [ { "name": "...", "question": "...", "ast": {...} }, ... ] }
+
+Verfügbare Tags (Vokabular):
+${vocabBlock}
+
+Ausgabenverteilung nach Tags:
+${tagSummaryBlock}
+
+Häufigste Gegenseiten:
+${counterpartyBlock}
+
+Bestehende Analysen (NICHT erneut vorschlagen):
+${existingBlock}`;
+}
