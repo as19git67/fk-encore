@@ -249,11 +249,30 @@ export async function suggestRegionsFromPhotos(
   // A tracked covering region is redundant when:
   //   1. It has NO directly-attributed photos (all were taken over by children)
   //   2. At least one covered descendant slug proves photos actually exist there
+  //
+  // Ancestry is resolved through each region's `parent` pointer — NOT by
+  // string-prefixing the slug. Real Geofabrik ids are mostly flat
+  // (`england` with parent `great-britain`, `oberfranken` with parent
+  // `mittelfranken`/`bayern`, …); only a few use nested paths like
+  // `us/pennsylvania`. A `startsWith(slug + "/")` test would therefore
+  // miss every European hierarchy and never surface a Lösch-Kandidat.
+  const parentById = new Map(index.regions.map((r) => [r.id, r.parent]));
+  const isDescendantOf = (childId: string, ancestorId: string): boolean => {
+    let cur = parentById.get(childId) ?? null;
+    const seen = new Set<string>();
+    while (cur && !seen.has(cur)) {
+      if (cur === ancestorId) return true;
+      seen.add(cur);
+      cur = parentById.get(cur) ?? null;
+    }
+    return false;
+  };
+
   const redundantRegions: RedundantRegion[] = [];
   for (const slug of coveringSlugs) {
     if (counts.has(slug)) continue; // still serving photos directly → not redundant
     const coveringChildren = [...coveredChildSlugs].filter((child) =>
-      child.startsWith(slug + "/"),
+      isDescendantOf(child, slug),
     );
     if (coveringChildren.length === 0) continue; // no photos in territory at all
     const rawStatus = statusBySlug.get(slug);
