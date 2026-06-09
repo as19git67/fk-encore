@@ -1927,7 +1927,9 @@ useRealtimeEvent('photos', 'comment_deleted', (ev) => {
 // badges appear — all without the user having to leave and re-enter the
 // album. Debounced because a bulk upload settles in bursts.
 let scanRefreshTimer: ReturnType<typeof setTimeout> | null = null
-useRealtimeEvent('photos', 'scan.updated', () => {
+useRealtimeEvent('photos', 'scan.updated', (ev) => {
+  const affectedAlbums = ev.payload?.albumIds as number[] | undefined
+  if (affectedAlbums?.length && !affectedAlbums.includes(albumId.value)) return
   if (scanRefreshTimer) return
   scanRefreshTimer = setTimeout(() => {
     scanRefreshTimer = null
