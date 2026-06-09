@@ -711,7 +711,7 @@ function bumpIdleTimer(e?: Event) {
   // and the slideshow should keep running uninterrupted. Editing pauses via its
   // own watch on `transformEditorVisible`. Taps inside the open details flyout,
   // keyboard and wheel still count as activity and reset the timer.
-  if ((e?.type === 'pointerdown' || e?.type === 'pointermove') && isFullscreenToolbarTarget(e.target)) return
+  if (e?.type === 'pointerdown' && isFullscreenToolbarTarget(e.target)) return
   scheduleIdleAdvance()
 }
 
@@ -730,7 +730,6 @@ watch(currentLoaded, () => scheduleIdleAdvance())
 onMounted(() => {
   scheduleIdleAdvance()
   window.addEventListener('pointerdown', bumpIdleTimer, true)
-  window.addEventListener('pointermove', bumpIdleTimer, true)
   window.addEventListener('keydown', bumpIdleTimer, true)
   window.addEventListener('wheel', bumpIdleTimer, true)
 })
@@ -738,7 +737,6 @@ onMounted(() => {
 onUnmounted(() => {
   clearIdleTimer()
   window.removeEventListener('pointerdown', bumpIdleTimer, true)
-  window.removeEventListener('pointermove', bumpIdleTimer, true)
   window.removeEventListener('keydown', bumpIdleTimer, true)
   window.removeEventListener('wheel', bumpIdleTimer, true)
 })

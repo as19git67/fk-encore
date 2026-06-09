@@ -732,6 +732,13 @@ export async function getUsersWithPhotoAccess(photoId: number): Promise<number[]
   return rows.rows.map((r) => r.user_id);
 }
 
+export async function getAlbumIdsForPhoto(photoId: number): Promise<number[]> {
+  const rows = await db.execute<{ album_id: number }>(sql`
+    SELECT album_id FROM album_photos WHERE photo_id = ${photoId}
+  `);
+  return rows.rows.map((r) => r.album_id);
+}
+
 /**
  * Enqueue face_assignment for all users who have access to a photo.
  * Called after face_detection completes to ensure every user gets face assignments.
