@@ -752,6 +752,7 @@ const canWrite = computed(() => album.value?.role === 'owner' || album.value?.ro
 const isOwner = computed(() => album.value?.role === 'owner')
 const canDeletePhotos = computed(() => auth.hasPermission('photos.delete'))
 const canUploadPhotos = computed(() => auth.hasPermission('photos.upload'))
+const canReviewGroups = computed(() => auth.hasPermission('photos.delete'))
 const canManageData = computed(() => auth.hasPermission('data.manage'))
 const showPersons = computed(() => auth.hasPermission('people.view'))
 // Adding photos from THIS album to OTHER albums is gated server-side on the
@@ -2054,7 +2055,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
         <!-- 6. Action buttons -->
         <div class="header__actions">
           <Button
-            v-if="canManageData && unreviewedGroupCount > 0 && viewMode !== 'map'"
+            v-if="canReviewGroups && unreviewedGroupCount > 0 && viewMode !== 'map'"
             :label="`Gruppen bearbeiten (${unreviewedGroupCount} offen)`"
             icon="pi pi-images" severity="success" size="small"
             class="header__group-review-btn"
