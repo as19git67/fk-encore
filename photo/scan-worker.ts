@@ -47,6 +47,7 @@ import {
   enqueueFaceAssignmentForAllUsers,
   getPhotoOwnerId,
   getUsersWithPhotoAccess,
+  getAlbumIdsForPhoto,
 } from "./photo.service";
 import { scheduleRecapsRebuild } from "./recaps.service";
 import { notifyUserPhotosScanned } from "./scan-refresh-events";
@@ -305,15 +306,15 @@ class ScanWorker {
           console.error(`[scan-worker] recaps rebuild error after face_assignment job ${job.id}:`, err),
         );
       } else if (GLOBAL_RECAP_TRIGGER_SERVICES[this.service]) {
-        getUsersWithPhotoAccess(job.photo_id).then((userIds) => {
+        Promise.all([
+          getUsersWithPhotoAccess(job.photo_id),
+          this.service === "quality" ? getAlbumIdsForPhoto(job.photo_id) : Promise.resolve([] as number[]),
+        ]).then(([userIds, albumIds]) => {
           for (const uid of userIds) {
             scheduleRecapsRebuild(uid).catch((err) =>
               console.error(`[scan-worker] recaps rebuild error for user ${uid} after ${this.service} job ${job.id}:`, err),
             );
-            // Quality just produced a new ai_quality_score — tell viewers so the
-            // compare view's "?%" fills in live instead of after a remount.
-            // (Reuses this block's access lookup; grouping fires its own event.)
-            if (this.service === "quality") notifyUserPhotosScanned(uid);
+            if (this.service === "quality") notifyUserPhotosScanned(uid, albumIds);
           }
         }).catch((err) =>
           console.error(`[scan-worker] recaps rebuild lookup error after ${this.service} job ${job.id}:`, err),
