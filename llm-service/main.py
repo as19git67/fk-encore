@@ -474,8 +474,8 @@ Zusätzliche Felder:
 - tax_relevant (bool): true, wenn das Dokument üblicherweise als Beleg,
   Bescheinigung oder Bescheid für die Einkommensteuererklärung dient
   (Lohnsteuerbescheinigung, Jahressteuerbescheinigung der Bank, Spenden-
-  quittung, Handwerker-/Haushaltshilfe-Rechnung mit Kontobeleg, Krankheits-
-  kosten, Vermietungsbelege, Kinderbetreuung, Steuerbescheid,
+  quittung, Handwerker-/Haushaltshilfe-Rechnung, Krankheitskosten,
+  Vermietungsbelege, Kinderbetreuung, Steuerbescheid,
   Photovoltaik-Einspeiseabrechnungen, …). false bei rein privaten Belegen
   ohne Steuerbezug (Supermarktkassenbon, Werbung, privater Schriftverkehr).
 - tax_year (int | null): vierstelliges Kalenderjahr, für das der Beleg
@@ -509,6 +509,12 @@ WICHTIGE ABGRENZUNGSREGELN:
 - Handwerkerrechnung / Reparaturrechnung für die SELBST BEWOHNTE Wohnung
   oder das eigene Haus → „haushaltsnahe" (§35a EStG), NICHT anlage-n oder
   werbungskosten-n.
+- Enthält eine Rechnung einen ausgewiesenen „absetzbaren Anteil nach §35a
+  EStG" oder „Lohnkostenanteil nach §35a", ist sie IMMER steuerrelevant
+  (tax_relevant=true) → „haushaltsnahe". Dies gilt auch ohne beigefügten
+  Kontoauszug oder Überweisungsbeleg — die Rechnung allein ist der Beleg.
+- Typische Aussteller: Heizungsbauer, Haustechnik, Sanitär, Elektriker,
+  Maler, Dachdecker, Schreiner, Schornsteinfeger, Gärtner.
 - Handwerkerrechnung für ein VERMIETETES Objekt → „werbungskosten-v".
 - Nur wenn aus dem Dokument eindeutig hervorgeht, dass die Leistung
   beruflich veranlasst ist (z. B. Arbeitszimmer-Renovierung beim
