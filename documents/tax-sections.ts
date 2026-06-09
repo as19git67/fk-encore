@@ -69,7 +69,7 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     slug: "anlage-g",
     group: "einkuenfte",
     name: "Anlage G — Gewerbe",
-    hint: "Einkünfte aus Gewerbebetrieb: Gewerbesteuerbescheid, Bilanz, Gewinn-/Verlustrechnung, Beteiligungsmitteilungen, Photovoltaik-Abrechnungen.",
+    hint: "Einkünfte aus Gewerbebetrieb: Gewerbesteuerbescheid, Bilanz, Gewinn-/Verlustrechnung, Beteiligungsmitteilungen, Photovoltaik-Abrechnungen (Einspeisevergütung, Stromeinspeisung, kWp, Netzbetreiber-Abrechnung von z. B. Bayernwerk, E.ON, EnBW, Vattenfall). PV-Einspeiseabrechnungen sind IMMER steuerrelevant und gehören hierher.",
   },
   {
     slug: "anlage-s",

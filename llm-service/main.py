@@ -475,9 +475,9 @@ Zusätzliche Felder:
   Bescheinigung oder Bescheid für die Einkommensteuererklärung dient
   (Lohnsteuerbescheinigung, Jahressteuerbescheinigung der Bank, Spenden-
   quittung, Handwerker-/Haushaltshilfe-Rechnung mit Kontobeleg, Krankheits-
-  kosten, Vermietungsbelege, Kinderbetreuung, Steuerbescheid, …). false bei
-  rein privaten Belegen ohne Steuerbezug (Supermarktkassenbon, Werbung,
-  privater Schriftverkehr).
+  kosten, Vermietungsbelege, Kinderbetreuung, Steuerbescheid,
+  Photovoltaik-Einspeiseabrechnungen, …). false bei rein privaten Belegen
+  ohne Steuerbezug (Supermarktkassenbon, Werbung, privater Schriftverkehr).
 - tax_year (int | null): vierstelliges Kalenderjahr, für das der Beleg
   steuerlich zählt. Bei Jahresbescheinigungen ("Jahressteuerbescheinigung
   2024"): das genannte Jahr. Bei Einzelrechnungen: das Jahr des Leistungs-
@@ -514,6 +514,16 @@ WICHTIGE ABGRENZUNGSREGELN:
   beruflich veranlasst ist (z. B. Arbeitszimmer-Renovierung beim
   Arbeitnehmer), kommt zusätzlich „werbungskosten-n" in Frage.
   Im Zweifel: „haushaltsnahe".
+
+3) Photovoltaik / Stromeinspeisung:
+- Einspeisevergütungs-Abrechnungen eines Netzbetreibers (Bayernwerk,
+  E.ON, EnBW, Vattenfall u. a.) für eine PV-Anlage sind IMMER
+  steuerrelevant (tax_relevant=true) → „anlage-g" (Gewerbeeinkünfte).
+- Erkennungsmerkmale: Stromeinspeisung, Einspeisestelle, kWp,
+  EEG-Vergütung, Erzeugungsanlage, Abschlagszahlung an den Betreiber.
+- Auch wenn PV-Kleinanlagen (<30 kWp) seit 2023 einkommensteuerbefreit
+  sein können (§3 Nr. 72 EStG), bleibt das Dokument steuerrelevant und
+  gehört in anlage-g.
 """
 
 
