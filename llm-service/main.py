@@ -491,7 +491,15 @@ Zusätzliche Felder:
   Format: [{"slug": "anlage-n", "confidence": 0.91}, ...]. Verwende nur
   Slugs aus der Liste; erfinde keine neuen.
 
-WICHTIGE ABGRENZUNGSREGEL – Handwerkerrechnungen:
+WICHTIGE ABGRENZUNGSREGELN:
+
+1) Wertpapiere / Kapitalerträge:
+- Dividendengutschrift, Wertpapierabrechnung, Erträgnisaufstellung,
+  Jahressteuerbescheinigung einer Bank oder eines Brokers → IMMER
+  „anlage-kap", NIEMALS „anlage-n". Anlage N ist ausschließlich für
+  Arbeitseinkommen (Gehalt, Lohnsteuerbescheinigung vom Arbeitgeber).
+
+2) Handwerkerrechnungen:
 - Handwerkerrechnung / Reparaturrechnung für die SELBST BEWOHNTE Wohnung
   oder das eigene Haus → „haushaltsnahe" (§35a EStG), NICHT anlage-n oder
   werbungskosten-n.
