@@ -415,6 +415,7 @@ class ClassifyResponse(BaseModel):
     title: str
     doc_date: str | None = None
     sender: str | None = None
+    document_number: str | None = None
     summary: str
     tags: list[str]
     confidence: float = Field(..., ge=0.0, le=1.0)
@@ -437,6 +438,10 @@ Felder:
 - doc_date: das auf dem Dokument gedruckte Datum als ISO-8601 YYYY-MM-DD,
   oder null falls nicht erkennbar.
 - sender: Name des Absenders/Ausstellers (Firma, Behörde, Person), oder null.
+- document_number: Dokumentnummer, Rechnungsnummer, Aktenzeichen oder
+  Referenznummer auf dem Dokument, oder null. Erkenne Muster wie
+  #1234, Nr. 12345, Rechnungsnummer 2661160, Vertragskonto 123456,
+  Geschäftszeichen Az. 12/34. Nur die Nummer selbst, ohne Präfix.
 - summary: 1-2 Sätze, deutsch, nüchtern — "Worum geht es?".
 - tags: bis zu max_tags kurze, kleingeschriebene Stichwörter (keine Sätze).
 - confidence: dein Vertrauen in die Kategorisierung, 0..1.
@@ -742,7 +747,7 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
     # ``_repair_mojibake`` docstring above. Only the free-form German text
     # fields can contain the two-byte UTF-8 codepoints (ä/ö/ü/ß, umlauts) that
     # trigger the bug; slugs, dates and confidences are ASCII.
-    _repair_fields(data, ("title", "sender", "summary"))
+    _repair_fields(data, ("title", "sender", "document_number", "summary"))
     _repair_tags(data)
 
     # If tax detection is off, ignore any tax_* fields the LLM might have

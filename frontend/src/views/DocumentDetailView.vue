@@ -61,6 +61,7 @@ const form = ref({
   title: '' as string,
   doc_date: '' as string,
   sender: '' as string,
+  document_number: '' as string,
   summary: '' as string,
   category_slug: null as string | null,
   tagsText: '' as string,
@@ -143,6 +144,7 @@ function resetForm() {
     title: doc.value.title ?? '',
     doc_date: doc.value.doc_date ?? '',
     sender: doc.value.sender ?? '',
+    document_number: doc.value.document_number ?? '',
     summary: doc.value.summary ?? '',
     category_slug: doc.value.category_slug,
     tagsText: doc.value.tags.join(', '),
@@ -216,6 +218,7 @@ async function save() {
         title: form.value.title.trim() || null,
         doc_date: form.value.doc_date.trim() || null,
         sender: form.value.sender.trim() || null,
+        document_number: form.value.document_number.trim() || null,
         summary: form.value.summary.trim() || null,
         category_slug: form.value.category_slug,
         tags,
@@ -468,6 +471,10 @@ onBeforeUnmount(() => {
             <label>
               <span class="label">Absender</span>
               <InputText v-model="form.sender" :disabled="!auth.hasPermission('documents.edit')" />
+            </label>
+            <label>
+              <span class="label">Dok.-Nr.</span>
+              <InputText v-model="form.document_number" :disabled="!auth.hasPermission('documents.edit')" placeholder="#1234" />
             </label>
           </div>
           <label>
