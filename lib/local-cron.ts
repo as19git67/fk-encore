@@ -241,6 +241,18 @@ export async function runJobNow(name: string): Promise<JobInspectEntry | null> {
   return toInspect(entry);
 }
 
+/**
+ * Fire-and-forget variant of runJobNow. Starts the job and returns the
+ * entry immediately (status will be "running"). Callers get completion
+ * updates via the onStatusChange hook / WebSocket stream.
+ */
+export function fireJobNow(name: string): JobInspectEntry | null {
+  const entry = entries.find((e) => e.job.name === name);
+  if (!entry) return null;
+  runEntry(entry).catch(() => {});
+  return toInspect(entry);
+}
+
 /** Pause/resume a job. Persists via save hook and emits status event. */
 export async function setJobEnabled(
   name: string,
