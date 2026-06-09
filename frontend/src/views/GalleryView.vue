@@ -116,6 +116,7 @@ void fetchPersons() // module-cached; no-op on subsequent visits
 
 const canUpload = computed(() => auth.hasPermission('photos.upload'))
 const canDelete = computed(() => auth.hasPermission('photos.delete'))
+const canReviewGroups = computed(() => auth.hasPermission('photos.delete'))
 const canManageData = computed(() => auth.hasPermission('data.manage'))
 const showPersons = computed(() => auth.hasPermission('people.view'))
 
@@ -1188,7 +1189,7 @@ const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as
             @click="onJumpEnd"
           />
           <Button
-            v-if="canManageData && totalUnreviewed > 0"
+            v-if="canReviewGroups && totalUnreviewed > 0"
             :label="`Gruppen bearbeiten (${totalUnreviewed} offen)`"
             icon="pi pi-images"
             severity="success"
