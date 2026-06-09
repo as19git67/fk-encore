@@ -1585,10 +1585,9 @@ export const getScanQueueStatus = api(
   { expose: true, method: "GET", path: "/photos/scan-queue/status", auth: true },
   async (): Promise<QueueStatus> => {
     checkModule();
-    const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "data.manage");
-    return await service.getScanQueueStatusLogic(userId);
+    return await service.getScanQueueStatusLogic(null);
   }
 );
 
@@ -1605,12 +1604,11 @@ export const getScanQueueFailures = api(
   { expose: true, method: "GET", path: "/photos/scan-queue/failures", auth: true },
   async ({ service: svc }: ScanQueueFailuresParams): Promise<ScanQueueFailuresResponse> => {
     checkModule();
-    const userId = getUserId();
     requirePermission(getAuthData()!, "data.manage");
     if (!isScanService(svc)) {
       throw APIError.invalidArgument(`unknown scan service: ${svc}`);
     }
-    return await service.getScanQueueFailuresLogic(userId, svc);
+    return await service.getScanQueueFailuresLogic(null, svc);
   }
 );
 
@@ -1685,10 +1683,9 @@ export const retryFailedScans = api(
   { expose: true, method: "POST", path: "/photos/scan-queue/retry-failed", auth: true },
   async (): Promise<{ retried: number }> => {
     checkModule();
-    const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "data.manage");
-    return await service.retryFailedScansLogic(userId);
+    return await service.retryFailedScansLogic(null);
   }
 );
 
@@ -1696,10 +1693,9 @@ export const cancelPendingScans = api(
   { expose: true, method: "POST", path: "/photos/scan-queue/cancel", auth: true },
   async (): Promise<{ cancelled: number }> => {
     checkModule();
-    const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "data.manage");
-    return await service.cancelPendingScansLogic(userId);
+    return await service.cancelPendingScansLogic(null);
   }
 );
 
