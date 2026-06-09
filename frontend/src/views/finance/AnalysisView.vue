@@ -502,6 +502,20 @@ const chartOptions = computed(() => {
   }
 })
 
+const periodAvgLabel = computed(() => {
+  if (!result.value || editableKind.value === 'event') return 'Durchschnitt'
+  return editableInterval.value === 'year' ? 'Ø pro Jahr' : 'Ø pro Monat'
+})
+
+const periodAvgValue = computed(() => {
+  if (!result.value) return '0'
+  if (editableKind.value === 'event' || result.value.byPeriod.length === 0) {
+    return result.value.total.avg
+  }
+  const total = Number(result.value.total.sum)
+  return String(total / result.value.byPeriod.length)
+})
+
 const tagChartData = computed(() => {
   if (!result.value || result.value.byTag.length === 0) return null
   return {
@@ -778,8 +792,8 @@ const tagChartOptions = computed(() => {
           <span class="value">{{ result.total.count }}</span>
         </div>
         <div class="stat">
-          <span class="label">Durchschnitt</span>
-          <span class="value">{{ formatCurrency(result.total.avg) }}</span>
+          <span class="label">{{ periodAvgLabel }}</span>
+          <span class="value">{{ formatCurrency(periodAvgValue) }}</span>
         </div>
       </div>
 
@@ -884,30 +898,18 @@ const tagChartOptions = computed(() => {
       </div>
       <Message v-else-if="detailError" severity="error">{{ detailError }}</Message>
       <p v-else-if="detailRows.length === 0" class="hint">Keine Buchungen.</p>
-      <DataTable v-else :value="detailRows" stripedRows scrollable scrollHeight="60vh">
-        <Column header="Datum">
-          <template #body="{ data }">
-            <span class="num">{{ formatDate(data.bookingDate) }}</span>
-          </template>
-        </Column>
-        <Column field="counterparty" header="Gegenseite">
-          <template #body="{ data }">{{ data.counterparty || '—' }}</template>
-        </Column>
-        <Column field="purpose" header="Verwendung">
-          <template #body="{ data }">
-            <span class="purpose">{{ data.purpose || '—' }}</span>
-          </template>
-        </Column>
-        <Column
-          header="Betrag"
-          headerStyle="text-align:right"
-          bodyStyle="text-align:right"
-        >
-          <template #body="{ data }">
-            <span class="num">{{ formatCurrency(data.amount) }}</span>
-          </template>
-        </Column>
-      </DataTable>
+      <ul v-else class="detail-list">
+        <li v-for="tx in detailRows" :key="tx.id" class="detail-card">
+          <div class="detail-card-body">
+            <div class="detail-card-counterparty">{{ tx.counterparty || '—' }}</div>
+            <div v-if="tx.purpose" class="detail-card-purpose">{{ tx.purpose }}</div>
+            <div class="detail-card-date">{{ formatDate(tx.bookingDate) }}</div>
+          </div>
+          <div class="detail-card-amount" :class="Number(tx.amount) < 0 ? 'amount-negative' : ''">
+            {{ formatCurrency(tx.amount) }}
+          </div>
+        </li>
+      </ul>
     </Dialog>
 
     <!-- Period drill-down dialog -->
@@ -923,30 +925,18 @@ const tagChartOptions = computed(() => {
       </div>
       <Message v-else-if="periodDetailError" severity="error">{{ periodDetailError }}</Message>
       <p v-else-if="periodDetailRows.length === 0" class="hint">Keine Buchungen.</p>
-      <DataTable v-else :value="periodDetailRows" stripedRows scrollable scrollHeight="60vh">
-        <Column header="Datum">
-          <template #body="{ data }">
-            <span class="num">{{ formatDate(data.bookingDate) }}</span>
-          </template>
-        </Column>
-        <Column field="counterparty" header="Gegenseite">
-          <template #body="{ data }">{{ data.counterparty || '—' }}</template>
-        </Column>
-        <Column field="purpose" header="Verwendung">
-          <template #body="{ data }">
-            <span class="purpose">{{ data.purpose || '—' }}</span>
-          </template>
-        </Column>
-        <Column
-          header="Betrag"
-          headerStyle="text-align:right"
-          bodyStyle="text-align:right"
-        >
-          <template #body="{ data }">
-            <span class="num">{{ formatCurrency(data.amount) }}</span>
-          </template>
-        </Column>
-      </DataTable>
+      <ul v-else class="detail-list">
+        <li v-for="tx in periodDetailRows" :key="tx.id" class="detail-card">
+          <div class="detail-card-body">
+            <div class="detail-card-counterparty">{{ tx.counterparty || '—' }}</div>
+            <div v-if="tx.purpose" class="detail-card-purpose">{{ tx.purpose }}</div>
+            <div class="detail-card-date">{{ formatDate(tx.bookingDate) }}</div>
+          </div>
+          <div class="detail-card-amount" :class="Number(tx.amount) < 0 ? 'amount-negative' : ''">
+            {{ formatCurrency(tx.amount) }}
+          </div>
+        </li>
+      </ul>
     </Dialog>
 
     <!-- Save dialog -->
@@ -1092,12 +1082,56 @@ const tagChartOptions = computed(() => {
   justify-content: center;
   padding: 1.5rem;
 }
-.purpose {
-  display: block;
-  max-width: 18rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* --- Drill-down card list (mobile-friendly) --- */
+.detail-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.detail-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--p-content-border-color);
+}
+.detail-card:last-child {
+  border-bottom: none;
+}
+.detail-card-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.detail-card-counterparty {
+  font-weight: 600;
+  word-break: break-word;
+}
+.detail-card-purpose {
+  color: var(--p-text-muted-color);
+  font-size: 0.85rem;
+  word-break: break-word;
+}
+.detail-card-date {
+  color: var(--p-text-muted-color);
+  font-size: 0.75rem;
+}
+.detail-card-amount {
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.amount-negative {
+  color: var(--p-red-600, #c0392b);
 }
 
 /* --- Tag groups --- */
@@ -1151,7 +1185,7 @@ const tagChartOptions = computed(() => {
   min-width: 14rem;
 }
 .n-input {
-  max-width: 8rem;
+  max-width: 5rem;
 }
 
 /* --- Saved analyses / Rückblicke --- */
