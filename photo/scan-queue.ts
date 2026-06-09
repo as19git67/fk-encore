@@ -347,12 +347,16 @@ export async function markJobFailed(id: number, error: string): Promise<void> {
  * Global services: only count rows where user_id IS NULL (avoids double-counting legacy rows).
  * Per-user services: only count rows where user_id = userId.
  */
-export async function getQueueStatus(userId: number): Promise<QueueStatus> {
+export async function getQueueStatus(userId: number | null): Promise<QueueStatus> {
+  const faceAssignmentFilter = userId === null
+    ? sql`(user_id IS NOT NULL AND service = 'face_assignment')`
+    : sql`(user_id = ${userId} AND service = 'face_assignment')`;
+
   const rows = await db.execute<{ service: ScanService; status: ScanStatus; count: string }>(sql`
     SELECT service, status, COUNT(*)::int as count
     FROM photo_scan_queue
     WHERE (user_id IS NULL AND service IN ('face_detection', 'embedding', 'landmark', 'quality', 'geocoding', 'thumbnail', 'poi_detection'))
-       OR (user_id = ${userId} AND service = 'face_assignment')
+       OR ${faceAssignmentFilter}
     GROUP BY service, status
   `);
 
@@ -394,12 +398,14 @@ export interface FailedJobGroup {
  * miss their own).
  */
 export async function getFailedJobsGrouped(
-  userId: number,
+  userId: number | null,
   service: ScanService,
 ): Promise<FailedJobGroup[]> {
   const userScope = isGlobalService(service)
     ? sql`${photoScanQueue.user_id} IS NULL`
-    : sql`${photoScanQueue.user_id} = ${userId}`;
+    : userId === null
+      ? sql`${photoScanQueue.user_id} IS NOT NULL`
+      : sql`${photoScanQueue.user_id} = ${userId}`;
 
   const rows = await db.execute<{
     error_msg: string;
@@ -616,21 +622,26 @@ export async function enqueuePoiDetectionForEmptyMatches(userId: number): Promis
   return enqueued;
 }
 
-/** Reset all failed jobs for a user back to pending (low priority). */
-export async function requeueFailed(userId: number): Promise<number> {
-  // Reset per-user failed jobs
+/** Reset all failed jobs back to pending (low priority).
+ *  userId=null → all users (admin mode). */
+export async function requeueFailed(userId: number | null): Promise<number> {
+  const perUserFilter = userId === null
+    ? and(sql`${photoScanQueue.user_id} IS NOT NULL`, eq(photoScanQueue.status, "failed"))
+    : and(eq(photoScanQueue.user_id, userId), eq(photoScanQueue.status, "failed"));
+
   const perUserResult = await db
     .update(photoScanQueue)
     .set({ status: "pending", priority: 3, error_msg: null, started_at: null, finished_at: null })
-    .where(and(eq(photoScanQueue.user_id, userId), eq(photoScanQueue.status, "failed")));
+    .where(perUserFilter);
 
-  // Reset global failed jobs for this user's photos
+  const globalFilter = userId === null
+    ? sql`status = 'failed' AND user_id IS NULL`
+    : sql`status = 'failed' AND user_id IS NULL AND photo_id IN (SELECT id FROM photos WHERE user_id = ${userId})`;
+
   const globalResult = await db.execute(sql`
     UPDATE photo_scan_queue
     SET status = 'pending', priority = 3, error_msg = NULL, started_at = NULL, finished_at = NULL
-    WHERE status = 'failed'
-      AND user_id IS NULL
-      AND photo_id IN (SELECT id FROM photos WHERE user_id = ${userId})
+    WHERE ${globalFilter}
   `);
 
   const changed = ((perUserResult as any).rowCount ?? 0) + ((globalResult as any).rowCount ?? 0);
@@ -819,18 +830,22 @@ async function getMissingPhotoIds(userId: number, service: ScanService): Promise
  * Processing jobs are left alone (they will finish their current work).
  * Returns the number of cancelled jobs.
  */
-export async function cancelPendingScans(userId: number): Promise<number> {
-  // Cancel per-user pending jobs
+export async function cancelPendingScans(userId: number | null): Promise<number> {
+  const perUserFilter = userId === null
+    ? and(sql`${photoScanQueue.user_id} IS NOT NULL`, eq(photoScanQueue.status, "pending"))
+    : and(eq(photoScanQueue.user_id, userId), eq(photoScanQueue.status, "pending"));
+
   const perUserResult = await db
     .delete(photoScanQueue)
-    .where(and(eq(photoScanQueue.user_id, userId), eq(photoScanQueue.status, "pending")));
+    .where(perUserFilter);
 
-  // Cancel global pending jobs for this user's photos
+  const globalFilter = userId === null
+    ? sql`status = 'pending' AND user_id IS NULL`
+    : sql`status = 'pending' AND user_id IS NULL AND photo_id IN (SELECT id FROM photos WHERE user_id = ${userId})`;
+
   const globalResult = await db.execute(sql`
     DELETE FROM photo_scan_queue
-    WHERE status = 'pending'
-      AND user_id IS NULL
-      AND photo_id IN (SELECT id FROM photos WHERE user_id = ${userId})
+    WHERE ${globalFilter}
   `);
 
   const cancelled = ((perUserResult as any).rowCount ?? 0) + ((globalResult as any).rowCount ?? 0);
