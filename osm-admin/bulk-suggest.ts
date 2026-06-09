@@ -75,31 +75,49 @@ export interface BulkRegionSuggestion {
 }
 
 /**
- * A tracked region whose entire photo footprint is already served by
- * smaller imported sub-regions — no POI data from this region is
- * exclusively needed.
+ * A tracked region that is redundant — its POI coverage is fully
+ * provided by other tracked regions, so it can be removed. There are
+ * two shapes of redundancy:
  *
- * Whether deleting it actually saves disk depends on the PBF sizes:
- * keeping one larger extract can be cheaper than several overlapping
- * sub-regions. `recommendation` weighs that:
- *   - "delete_parent": the sub-regions together are ≤ the parent, so
- *     dropping the parent frees space.
- *   - "keep_parent": the sub-regions together cost MORE than the parent
- *     — the single larger extract is the space-efficient choice, so
- *     keep it (and consider dropping the redundant sub-regions instead).
- *   - "unknown": at least one PBF size is missing, no verdict possible.
+ *   - "superseded_by_children": every photo in this (larger) region's
+ *     territory is attributed to smaller imported sub-regions. Whether
+ *     deleting it saves disk depends on the PBF sizes — keeping one
+ *     larger extract can be cheaper than several overlapping sub-regions.
+ *
+ *   - "covered_by_ancestor": this region lies wholly inside a LARGER
+ *     tracked region that still serves photos of its own (so it stays).
+ *     The ancestor already covers this region's whole area, so deleting
+ *     it is always coverage-safe and frees its PBF space (e.g.
+ *     greater-london ⊂ great-britain).
+ *
+ * `recommendation` is the disk-aware verdict on deleting `slug`:
+ *   - "delete": removing `slug` frees space with no coverage loss.
+ *   - "keep": removing it would NOT save (the alternatives cost more) —
+ *     keep `slug` and consider removing the alternatives instead.
+ *   - "unknown": a PBF size is missing, no verdict possible.
  */
 export interface RedundantRegion {
+  /** The tracked region that is redundant and could be removed. */
   slug: string;
   status: RegionStatus;
-  /** Tracked child-region slugs that collectively cover this region's photos. */
-  coveringChildren: string[];
-  /** PBF download size of the larger (redundant) region in MB, if known. */
-  parentSizeMb: number | null;
-  /** Summed PBF size of the covering sub-regions in MB, if all are known. */
-  childrenSizeMb: number | null;
-  /** Disk-aware verdict; see interface docs. */
-  recommendation: "delete_parent" | "keep_parent" | "unknown";
+  /** Why `slug` is redundant; see interface docs. */
+  kind: "superseded_by_children" | "covered_by_ancestor";
+  /**
+   * The other tracked regions that provide the coverage: the covering
+   * sub-regions (superseded_by_children) or the single covering ancestor
+   * (covered_by_ancestor).
+   */
+  coveringRegions: string[];
+  /** PBF download size of `slug` in MB, if known. */
+  selfSizeMb: number | null;
+  /**
+   * Comparison size in MB: summed size of the covering sub-regions
+   * (superseded_by_children) or the ancestor's size (covered_by_ancestor).
+   * Null if a needed size is unknown.
+   */
+  alternativeSizeMb: number | null;
+  /** Disk-aware verdict on deleting `slug`; see interface docs. */
+  recommendation: "delete" | "keep" | "unknown";
 }
 
 export interface BulkSuggestResult {
@@ -246,16 +264,13 @@ export async function suggestRegionsFromPhotos(
       .map(([slug]) => slug),
   );
 
-  // A tracked covering region is redundant when:
-  //   1. It has NO directly-attributed photos (all were taken over by children)
-  //   2. At least one covered descendant slug proves photos actually exist there
-  //
   // Ancestry is resolved through each region's `parent` pointer — NOT by
   // string-prefixing the slug. Real Geofabrik ids are mostly flat
-  // (`england` with parent `great-britain`, `oberfranken` with parent
-  // `mittelfranken`/`bayern`, …); only a few use nested paths like
-  // `us/pennsylvania`. A `startsWith(slug + "/")` test would therefore
-  // miss every European hierarchy and never surface a Lösch-Kandidat.
+  // (`england` with parent `great-britain`, `greater-london` with parent
+  // `england`, …); only a few use nested paths like `us/pennsylvania`. A
+  // `startsWith(slug + "/")` test would miss every European hierarchy.
+  // Geofabrik's hierarchy is also geographic containment: a descendant's
+  // territory lies wholly inside each of its ancestors.
   const parentById = new Map(index.regions.map((r) => [r.id, r.parent]));
   const isDescendantOf = (childId: string, ancestorId: string): boolean => {
     let cur = parentById.get(childId) ?? null;
@@ -267,9 +282,52 @@ export async function suggestRegionsFromPhotos(
     }
     return false;
   };
+  // Nearest tracked covering ancestor of `slug` that still serves photos
+  // of its own (counts.has) — i.e. a region that will NOT be removed.
+  // Such an ancestor geographically contains `slug`, so it already covers
+  // everything `slug` does; `slug`'s photos would simply roll up to it.
+  const nearestStayingAncestor = (slug: string): string | null => {
+    let cur = parentById.get(slug) ?? null;
+    const seen = new Set<string>();
+    while (cur && !seen.has(cur)) {
+      if (coveringSlugs.has(cur) && counts.has(cur)) return cur;
+      seen.add(cur);
+      cur = parentById.get(cur) ?? null;
+    }
+    return null;
+  };
 
   const redundantRegions: RedundantRegion[] = [];
+  const flagged = new Set<string>();
+
+  // Redundancy A — "covered_by_ancestor": a tracked region wholly inside
+  // a LARGER tracked region that stays (serves its own photos). Deleting
+  // the inner region is always coverage-safe; the ancestor absorbs its
+  // photos. This is the greater-london ⊂ great-britain case.
   for (const slug of coveringSlugs) {
+    const ancestor = nearestStayingAncestor(slug);
+    if (!ancestor) continue;
+    const rawStatus = statusBySlug.get(slug);
+    if (!rawStatus || !isRegionStatus(rawStatus)) continue;
+    redundantRegions.push({
+      slug,
+      status: rawStatus as RegionStatus,
+      kind: "covered_by_ancestor",
+      coveringRegions: [ancestor],
+      selfSizeMb: sizeBySlug.get(slug) ?? null,
+      alternativeSizeMb: sizeBySlug.get(ancestor) ?? null,
+      // The ancestor stays regardless, so dropping `slug` only ever frees
+      // its own disk — always the right call.
+      recommendation: "delete",
+    });
+    flagged.add(slug);
+  }
+
+  // Redundancy B — "superseded_by_children": a tracked region with NO
+  // directly-attributed photos (all taken over by smaller imported
+  // sub-regions). Whether deleting it saves disk depends on PBF sizes.
+  for (const slug of coveringSlugs) {
+    if (flagged.has(slug)) continue;
     if (counts.has(slug)) continue; // still serving photos directly → not redundant
     const coveringChildren = [...coveredChildSlugs].filter((child) =>
       isDescendantOf(child, slug),
@@ -278,30 +336,31 @@ export async function suggestRegionsFromPhotos(
     const rawStatus = statusBySlug.get(slug);
     if (!rawStatus || !isRegionStatus(rawStatus)) continue;
 
-    // Disk-aware verdict: compare the parent's PBF size against the sum
+    // Disk-aware verdict: compare this region's PBF size against the sum
     // of its covering sub-regions. Only emit a delete/keep verdict when
     // every size is known; a single missing value makes the comparison
     // meaningless, so we fall back to "unknown".
-    const parentSizeMb = sizeBySlug.get(slug) ?? null;
+    const selfSizeMb = sizeBySlug.get(slug) ?? null;
     const childSizes = coveringChildren.map((c) => sizeBySlug.get(c) ?? null);
     const allChildSizesKnown = childSizes.every((s) => s !== null);
-    const childrenSizeMb = allChildSizesKnown
+    const alternativeSizeMb = allChildSizesKnown
       ? childSizes.reduce((sum, s) => sum + (s as number), 0)
       : null;
     let recommendation: RedundantRegion["recommendation"] = "unknown";
-    if (parentSizeMb !== null && childrenSizeMb !== null) {
-      recommendation =
-        childrenSizeMb <= parentSizeMb ? "delete_parent" : "keep_parent";
+    if (selfSizeMb !== null && alternativeSizeMb !== null) {
+      recommendation = alternativeSizeMb <= selfSizeMb ? "delete" : "keep";
     }
 
     redundantRegions.push({
       slug,
       status: rawStatus as RegionStatus,
-      coveringChildren,
-      parentSizeMb,
-      childrenSizeMb,
+      kind: "superseded_by_children",
+      coveringRegions: coveringChildren,
+      selfSizeMb,
+      alternativeSizeMb,
       recommendation,
     });
+    flagged.add(slug);
   }
 
   return {

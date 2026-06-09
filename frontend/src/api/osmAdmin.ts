@@ -123,23 +123,29 @@ export interface BulkRegionSuggestion {
   coveredByExisting: boolean
 }
 
-/** A tracked region fully superseded by smaller imported sub-regions. */
+/** A tracked region that is redundant and could be removed. */
 export interface RedundantRegion {
   slug: string
   status: RegionStatus
-  /** Child region slugs that collectively cover this region's photos. */
-  coveringChildren: string[]
-  /** PBF size of the larger (redundant) region in MB, if known. */
-  parentSizeMb: number | null
-  /** Summed PBF size of the covering sub-regions in MB, if all known. */
-  childrenSizeMb: number | null
   /**
-   * Disk-aware verdict:
-   * - `delete_parent`: sub-regions are ≤ the parent → dropping it frees space.
-   * - `keep_parent`: sub-regions cost MORE → the larger extract is cheaper.
+   * Why slug is redundant:
+   * - `superseded_by_children`: all its photos are served by smaller imported sub-regions.
+   * - `covered_by_ancestor`: it lies wholly inside a larger tracked region that stays.
+   */
+  kind: 'superseded_by_children' | 'covered_by_ancestor'
+  /** The tracked regions providing the coverage (sub-regions, or the single ancestor). */
+  coveringRegions: string[]
+  /** PBF size of this region in MB, if known. */
+  selfSizeMb: number | null
+  /** Comparison size in MB: summed sub-regions, or the ancestor's size. */
+  alternativeSizeMb: number | null
+  /**
+   * Disk-aware verdict on deleting this region:
+   * - `delete`: frees space with no coverage loss.
+   * - `keep`: the alternatives cost more — keep this one instead.
    * - `unknown`: a PBF size is missing, no verdict.
    */
-  recommendation: 'delete_parent' | 'keep_parent' | 'unknown'
+  recommendation: 'delete' | 'keep' | 'unknown'
 }
 
 export interface BulkSuggestResult {

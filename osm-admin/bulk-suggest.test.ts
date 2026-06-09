@@ -306,10 +306,11 @@ describe("suggestRegionsFromPhotos", () => {
     expect(r.redundantRegions).toHaveLength(1);
     expect(r.redundantRegions[0].slug).toBe("europe/germany");
     expect(r.redundantRegions[0].status).toBe("ready_running");
-    expect(r.redundantRegions[0].coveringChildren).toContain("europe/germany/bayern");
+    expect(r.redundantRegions[0].kind).toBe("superseded_by_children");
+    expect(r.redundantRegions[0].coveringRegions).toContain("europe/germany/bayern");
     // No PBF sizes seeded → disk verdict can't be computed.
-    expect(r.redundantRegions[0].parentSizeMb).toBeNull();
-    expect(r.redundantRegions[0].childrenSizeMb).toBeNull();
+    expect(r.redundantRegions[0].selfSizeMb).toBeNull();
+    expect(r.redundantRegions[0].alternativeSizeMb).toBeNull();
     expect(r.redundantRegions[0].recommendation).toBe("unknown");
   });
 
@@ -323,9 +324,10 @@ describe("suggestRegionsFromPhotos", () => {
     const r = await suggestRegionsFromPhotos({ loadIndex: fixtureWithParent });
     expect(r.redundantRegions).toHaveLength(1);
     const rr = r.redundantRegions[0];
-    expect(rr.parentSizeMb).toBe(3600);
-    expect(rr.childrenSizeMb).toBe(600);
-    expect(rr.recommendation).toBe("delete_parent");
+    expect(rr.kind).toBe("superseded_by_children");
+    expect(rr.selfSizeMb).toBe(3600);
+    expect(rr.alternativeSizeMb).toBe(600);
+    expect(rr.recommendation).toBe("delete");
   });
 
   it("recommends keeping the parent when the sub-regions cost more on disk", async () => {
@@ -339,9 +341,9 @@ describe("suggestRegionsFromPhotos", () => {
     const r = await suggestRegionsFromPhotos({ loadIndex: fixtureWithParent });
     expect(r.redundantRegions).toHaveLength(1);
     const rr = r.redundantRegions[0];
-    expect(rr.parentSizeMb).toBe(500);
-    expect(rr.childrenSizeMb).toBe(900);
-    expect(rr.recommendation).toBe("keep_parent");
+    expect(rr.selfSizeMb).toBe(500);
+    expect(rr.alternativeSizeMb).toBe(900);
+    expect(rr.recommendation).toBe("keep");
   });
 
   it("detects redundancy across flat Geofabrik ids linked by parent pointers", async () => {
@@ -358,8 +360,33 @@ describe("suggestRegionsFromPhotos", () => {
     expect(r.redundantRegions).toHaveLength(1);
     const rr = r.redundantRegions[0];
     expect(rr.slug).toBe("germany");
-    expect(rr.coveringChildren).toContain("bayern");
-    expect(rr.recommendation).toBe("delete_parent");
+    expect(rr.kind).toBe("superseded_by_children");
+    expect(rr.coveringRegions).toContain("bayern");
+    expect(rr.recommendation).toBe("delete");
+  });
+
+  it("flags a smaller region as redundant when a larger tracked region that stays already covers it", async () => {
+    const u = await seedUser();
+    // Munich (in Bayern) + Hamburg (in Germany, outside Bayern). Germany
+    // keeps serving Hamburg directly, so it stays — and it geographically
+    // contains Bayern, so the Bayern extract is redundant: deleting it
+    // lets Munich roll up to Germany. This is the greater-london ⊂
+    // great-britain case.
+    await seedPhoto(u, 48.137, 11.575, 1); // Munich → Bayern
+    await seedPhoto(u, 53.55, 9.99, 2);    // Hamburg → Germany (direct)
+    await seedRegion("europe/germany", "ready_running", "nom_germany", 3600);
+    await seedRegion("europe/germany/bayern", "ready_running", "nom_bayern", 600);
+
+    const r = await suggestRegionsFromPhotos({ loadIndex: fixtureWithParent });
+    expect(r.redundantRegions).toHaveLength(1);
+    const rr = r.redundantRegions[0];
+    expect(rr.slug).toBe("europe/germany/bayern");
+    expect(rr.kind).toBe("covered_by_ancestor");
+    expect(rr.coveringRegions).toEqual(["europe/germany"]);
+    expect(rr.selfSizeMb).toBe(600);
+    expect(rr.alternativeSizeMb).toBe(3600);
+    // Germany stays regardless → deleting the inner Bayern always frees its disk.
+    expect(rr.recommendation).toBe("delete");
   });
 
   it("does not flag a parent as redundant when it still has directly-attributed photos", async () => {
@@ -374,19 +401,20 @@ describe("suggestRegionsFromPhotos", () => {
     expect(r.redundantRegions).toHaveLength(0);
   });
 
-  it("does not flag a parent as redundant when it has photos not covered by children", async () => {
+  it("does not flag a parent as superseded when it has photos not covered by children", async () => {
     const u = await seedUser();
-    // Munich in Bayern (covered by child), and Paris NOT in Germany
-    // Use a photo in Germany-but-not-Bayern to keep Germany non-redundant.
-    // Hamburg (53.55, 9.99) is in Germany but outside Bayern's bbox.
+    // Hamburg (53.55, 9.99) is in Germany but outside Bayern's bbox, so
+    // Germany keeps serving it directly → Germany is NOT superseded by
+    // its children. (Bayern itself is still redundant via covered_by_ancestor,
+    // covered by its own dedicated test above.)
     await seedPhoto(u, 48.137, 11.575, 1); // Munich → Bayern
     await seedPhoto(u, 53.55, 9.99, 2);    // Hamburg → Germany (no Bayern sub-region covers it)
     await seedRegion("europe/germany", "ready_running", "nom_germany");
     await seedRegion("europe/germany/bayern", "ready_running", "nom_bayern");
 
     const r = await suggestRegionsFromPhotos({ loadIndex: fixtureWithParent });
-    // Germany appears in counts for Hamburg → not redundant.
-    expect(r.redundantRegions).toHaveLength(0);
+    // Germany serves Hamburg directly → never appears as a Lösch-Kandidat.
+    expect(r.redundantRegions.find((rr) => rr.slug === "europe/germany")).toBeUndefined();
   });
 
   it("returns empty redundantRegions when no geotagged photos exist", async () => {

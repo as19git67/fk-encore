@@ -555,10 +555,12 @@ const redundantSlugSet = computed<Set<string>>(() => {
 
 function redundantVerdictLabel(rr: RedundantRegion): string {
   switch (rr.recommendation) {
-    case 'delete_parent':
-      return 'große Region löschen spart Platz'
-    case 'keep_parent':
-      return 'große Region behalten — Subregionen brauchen mehr Platz'
+    case 'delete':
+      return rr.kind === 'covered_by_ancestor'
+        ? 'löschen — bereits durch übergeordnete Region abgedeckt'
+        : 'löschen spart Platz'
+    case 'keep':
+      return 'behalten — Subregionen brauchen mehr Platz'
     default:
       return 'Größe unbekannt — bitte prüfen'
   }
@@ -1354,10 +1356,10 @@ onBeforeUnmount(() => {
               Lösch-Kandidaten ({{ bulkSuggestResult.redundantRegions.length }})
             </h4>
             <p class="osm-redundant__desc">
-              Diese importierten Regionen sind vollständig durch Subregionen abgedeckt.
-              Alle Fotos in ihrem Gebiet werden bereits durch die aufgelisteten Unterregionen
-              versorgt. Ob ein Entfernen Speicherplatz spart, hängt von den PBF-Größen ab —
-              die Empfehlung berücksichtigt das.
+              Diese importierten Regionen werden bereits vollständig durch andere getrackte
+              Regionen abgedeckt — entweder durch kleinere Subregionen oder durch eine größere
+              übergeordnete Region. Ob ein Entfernen Speicherplatz spart, hängt von den
+              PBF-Größen ab; die Empfehlung berücksichtigt das.
             </p>
             <ul class="osm-redundant__list">
               <li v-for="rr in bulkSuggestResult.redundantRegions" :key="rr.slug">
@@ -1372,15 +1374,27 @@ onBeforeUnmount(() => {
                   >{{ redundantVerdictLabel(rr) }}</span>
                 </div>
                 <span class="osm-redundant__children">
-                  abgedeckt durch: {{ rr.coveringChildren.join(', ') }}
+                  <template v-if="rr.kind === 'covered_by_ancestor'">
+                    bereits enthalten in: {{ rr.coveringRegions.join(', ') }}
+                  </template>
+                  <template v-else>
+                    abgedeckt durch: {{ rr.coveringRegions.join(', ') }}
+                  </template>
                 </span>
                 <span
-                  v-if="rr.parentSizeMb !== null || rr.childrenSizeMb !== null"
+                  v-if="rr.selfSizeMb !== null || rr.alternativeSizeMb !== null"
                   class="osm-redundant__sizes"
                 >
-                  große Region: {{ rr.parentSizeMb !== null ? `${rr.parentSizeMb} MB` : '?' }}
-                  · Subregionen zusammen:
-                  {{ rr.childrenSizeMb !== null ? `${rr.childrenSizeMb} MB` : '?' }}
+                  <template v-if="rr.kind === 'covered_by_ancestor'">
+                    diese Region: {{ rr.selfSizeMb !== null ? `${rr.selfSizeMb} MB` : '?' }}
+                    · übergeordnet:
+                    {{ rr.alternativeSizeMb !== null ? `${rr.alternativeSizeMb} MB` : '?' }}
+                  </template>
+                  <template v-else>
+                    große Region: {{ rr.selfSizeMb !== null ? `${rr.selfSizeMb} MB` : '?' }}
+                    · Subregionen zusammen:
+                    {{ rr.alternativeSizeMb !== null ? `${rr.alternativeSizeMb} MB` : '?' }}
+                  </template>
                 </span>
               </li>
             </ul>
@@ -1963,11 +1977,11 @@ onBeforeUnmount(() => {
   padding: 0.05rem 0.45rem;
   border-radius: 4px;
 }
-.osm-redundant__verdict--delete_parent {
+.osm-redundant__verdict--delete {
   background: var(--p-tag-success-background, rgba(0,128,0,0.12));
   color: var(--p-tag-success-color);
 }
-.osm-redundant__verdict--keep_parent {
+.osm-redundant__verdict--keep {
   background: var(--p-tag-warn-background, rgba(255,160,0,0.18));
   color: var(--p-tag-warn-color);
 }
