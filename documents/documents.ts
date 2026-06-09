@@ -1491,10 +1491,13 @@ export const listTaxYears = api(
     const groupIds = await loadUserGroupIds(userId);
     const visibility = groupIds.length === 0
       ? sql`(visibility = 'private' AND user_id = ${userId})`
-      : sql`(
-          (visibility = 'private' AND user_id = ${userId})
-          OR (visibility = 'group' AND group_id = ANY(${groupIds}))
-        )`;
+      : (() => {
+          const groupIdArray = sql`ARRAY[${sql.join(groupIds.map((g) => sql`${g}`), sql`, `)}]::int[]`;
+          return sql`(
+            (visibility = 'private' AND user_id = ${userId})
+            OR (visibility = 'group' AND group_id = ANY(${groupIdArray}))
+          )`;
+        })();
     const rows = await db.execute<{ tax_year: number; count: string }>(sql`
       SELECT tax_year, COUNT(*)::text as count
       FROM documents
