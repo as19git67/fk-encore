@@ -33,13 +33,13 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     slug: "anlage-n",
     group: "einkuenfte",
     name: "Anlage N — Nichtselbstständige Arbeit",
-    hint: "Lohnsteuerbescheinigung, Gehaltsabrechnungen, Arbeitgeberbescheinigungen, Lohnersatzleistungen (Kurzarbeit, Elterngeld-Mitteilung); nicht: Rentenbezugsmitteilungen oder Honorarrechnungen.",
+    hint: "Lohnsteuerbescheinigung, Gehaltsabrechnungen, Arbeitgeberbescheinigungen, Lohnersatzleistungen (Kurzarbeit, Elterngeld-Mitteilung). NICHT: Rentenbezugsmitteilungen, Honorarrechnungen, Dividendengutschriften, Wertpapierabrechnungen, Bank-/Broker-Mitteilungen, Kapitalertragsteuer-Abrechnungen (→ anlage-kap).",
   },
   {
     slug: "anlage-kap",
     group: "einkuenfte",
     name: "Anlage KAP — Kapitalerträge",
-    hint: "Jahressteuerbescheinigung/Erträgnisaufstellung von Bank oder Broker (ING, DKB, Comdirect, Trade Republic, Scalable), Zins-, Dividenden- und Verlustbescheinigungen.",
+    hint: "Jahressteuerbescheinigung/Erträgnisaufstellung von Bank oder Broker (ING, DKB, Comdirect, Trade Republic, Scalable), Dividendengutschrift, Zins-/Dividenden-/Verlustbescheinigungen, Wertpapierabrechnungen (Kauf/Verkauf), Erträgnisaufstellungen. Auch Dokumente, die Kapitalertragsteuer (KESt), Solidaritätszuschlag oder Kirchensteuer im Kontext von Wertpapieren/Dividenden/Bank ausweisen, gehören hierher. NICHT in Anlage N.",
   },
   {
     slug: "anlage-v",
@@ -69,7 +69,7 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     slug: "anlage-g",
     group: "einkuenfte",
     name: "Anlage G — Gewerbe",
-    hint: "Einkünfte aus Gewerbebetrieb: Gewerbesteuerbescheid, Bilanz, Gewinn-/Verlustrechnung, Beteiligungsmitteilungen, Photovoltaik-Abrechnungen.",
+    hint: "Einkünfte aus Gewerbebetrieb: Gewerbesteuerbescheid, Bilanz, Gewinn-/Verlustrechnung, Beteiligungsmitteilungen, Photovoltaik-Abrechnungen (Einspeisevergütung, Stromeinspeisung, kWp, Netzbetreiber-Abrechnung von z. B. Bayernwerk, E.ON, EnBW, Vattenfall). PV-Einspeiseabrechnungen sind IMMER steuerrelevant und gehören hierher.",
   },
   {
     slug: "anlage-s",
