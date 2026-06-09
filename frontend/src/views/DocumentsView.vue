@@ -245,13 +245,19 @@ function openDocument(doc: DocumentSummary) {
 // After the list is rendered, bring the previously opened document back
 // into view. Runs once on mount; clears the marker so later visits start
 // at the top. No-op when the document is filtered out of the current list.
+// Two nextTick() calls are needed: one for the v-if/v-else swap (loading →
+// list), one for the v-for items to be actually placed in the DOM.
 async function restoreScrollToLastOpened() {
   const id = lastOpenedDocId
   lastOpenedDocId = null
   if (id == null) return
   await nextTick()
+  await nextTick()
   const el = document.querySelector<HTMLElement>(`[data-doc-id="${id}"]`)
-  el?.scrollIntoView({ block: 'center' })
+  if (!el) return
+  el.scrollIntoView({ block: 'center' })
+  el.classList.add('document-card--highlight')
+  setTimeout(() => el.classList.remove('document-card--highlight'), 1500)
 }
 
 function statusSeverity(status: DocumentStatus): 'success' | 'info' | 'warn' | 'danger' | 'secondary' {
@@ -651,6 +657,13 @@ onMounted(async () => {
   outline: 2px solid var(--p-primary-color);
   outline-offset: 2px;
   background: color-mix(in srgb, var(--p-primary-color) 6%, var(--p-surface-card));
+}
+.document-card--highlight {
+  animation: card-flash 1.5s ease-out;
+}
+@keyframes card-flash {
+  0%   { box-shadow: 0 0 0 3px var(--p-primary-color); }
+  100% { box-shadow: none; }
 }
 
 /* Top row: checkbox, MIME-type icon and the (clickable) document name,
