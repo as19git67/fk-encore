@@ -33,13 +33,13 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     slug: "anlage-n",
     group: "einkuenfte",
     name: "Anlage N — Nichtselbstständige Arbeit",
-    hint: "Lohnsteuerbescheinigung, Gehaltsabrechnungen, Arbeitgeberbescheinigungen, Lohnersatzleistungen (Kurzarbeit, Elterngeld-Mitteilung). NICHT: Rentenbezugsmitteilungen, Honorarrechnungen, Dividendengutschriften, Wertpapierabrechnungen oder Bank-/Broker-Mitteilungen (→ anlage-kap).",
+    hint: "Lohnsteuerbescheinigung, Gehaltsabrechnungen, Arbeitgeberbescheinigungen, Lohnersatzleistungen (Kurzarbeit, Elterngeld-Mitteilung). NICHT: Rentenbezugsmitteilungen, Honorarrechnungen, Dividendengutschriften, Wertpapierabrechnungen, Bank-/Broker-Mitteilungen, Kapitalertragsteuer-Abrechnungen (→ anlage-kap).",
   },
   {
     slug: "anlage-kap",
     group: "einkuenfte",
     name: "Anlage KAP — Kapitalerträge",
-    hint: "Jahressteuerbescheinigung/Erträgnisaufstellung von Bank oder Broker (ING, DKB, Comdirect, Trade Republic, Scalable), Dividendengutschrift, Zins-/Dividenden-/Verlustbescheinigungen, Wertpapierabrechnungen (Kauf/Verkauf), Erträgnisaufstellungen. Jedes Dokument von Bank oder Broker zu Kapitalerträgen gehört hierher, NICHT in Anlage N.",
+    hint: "Jahressteuerbescheinigung/Erträgnisaufstellung von Bank oder Broker (ING, DKB, Comdirect, Trade Republic, Scalable), Dividendengutschrift, Zins-/Dividenden-/Verlustbescheinigungen, Wertpapierabrechnungen (Kauf/Verkauf), Erträgnisaufstellungen. Auch Dokumente, die Kapitalertragsteuer (KESt), Solidaritätszuschlag oder Kirchensteuer im Kontext von Wertpapieren/Dividenden/Bank ausweisen, gehören hierher. NICHT in Anlage N.",
   },
   {
     slug: "anlage-v",

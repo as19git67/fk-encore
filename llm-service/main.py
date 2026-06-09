@@ -496,8 +496,14 @@ WICHTIGE ABGRENZUNGSREGELN:
 1) Wertpapiere / Kapitalerträge:
 - Dividendengutschrift, Wertpapierabrechnung, Erträgnisaufstellung,
   Jahressteuerbescheinigung einer Bank oder eines Brokers → IMMER
-  „anlage-kap", NIEMALS „anlage-n". Anlage N ist ausschließlich für
-  Arbeitseinkommen (Gehalt, Lohnsteuerbescheinigung vom Arbeitgeber).
+  „anlage-kap", NIEMALS „anlage-n".
+- Dokumente, die Kapitalertragsteuer (KESt), Solidaritätszuschlag oder
+  Kirchensteuer im Zusammenhang mit Dividenden, Zinsen oder Wertpapieren
+  ausweisen (z. B. Steueraufstellung von Comdirect, ING, Trade Republic)
+  → „anlage-kap". Diese Steuerabzüge beziehen sich auf Kapitalerträge,
+  nicht auf Arbeitseinkommen.
+- Anlage N ist ausschließlich für Arbeitseinkommen (Gehalt,
+  Lohnsteuerbescheinigung vom Arbeitgeber).
 
 2) Handwerkerrechnungen:
 - Handwerkerrechnung / Reparaturrechnung für die SELBST BEWOHNTE Wohnung
