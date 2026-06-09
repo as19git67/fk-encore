@@ -5982,12 +5982,12 @@ import {
   cancelPendingLibraryScans,
 } from "./library-scan-queue";
 
-export async function getScanQueueStatusLogic(userId: number) {
+export async function getScanQueueStatusLogic(userId: number | null) {
   return getQueueStatus(userId);
 }
 
 export async function getScanQueueFailuresLogic(
-  userId: number,
+  userId: number | null,
   service: ScanService,
 ): Promise<{ groups: FailedJobGroup[] }> {
   return { groups: await getFailedJobsGrouped(userId, service) };
@@ -6028,7 +6028,7 @@ export async function redetectEmptyPoisLogic(userId: number): Promise<{ queued: 
   return { queued };
 }
 
-export async function retryFailedScansLogic(userId: number): Promise<{ retried: number }> {
+export async function retryFailedScansLogic(userId: number | null): Promise<{ retried: number }> {
   const retried = await requeueFailed(userId);
   // Also retry any failed library-scan jobs so the "Fehler wiederholen"
   // button in Datenverwaltung covers the whole status table.
@@ -6037,7 +6037,7 @@ export async function retryFailedScansLogic(userId: number): Promise<{ retried: 
   return { retried: retried + retriedLib };
 }
 
-export async function cancelPendingScansLogic(userId: number): Promise<{ cancelled: number }> {
+export async function cancelPendingScansLogic(userId: number | null): Promise<{ cancelled: number }> {
   const cancelled = await cancelPendingScans(userId);
   const cancelledLib = await cancelPendingLibraryScans();
   return { cancelled: cancelled + cancelledLib };
