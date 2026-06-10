@@ -34,6 +34,7 @@ import {
 } from '../api/finance'
 import {
   getDocumentQueueStatus, reclassifyAllDocuments,
+  cancelDocumentQueue, retryDocumentQueue,
   type DocQueueStatus,
   type ReclassifyAllMode,
 } from '../api/documents'
@@ -532,6 +533,8 @@ const docQueueStatus = ref<DocQueueStatus>({ services: [] })
 const docReclassifyLoading = ref(false)
 const docReclassifyError = ref('')
 const docReclassifyResult = ref<number | null>(null)
+const docCancelLoading = ref(false)
+const docRetryLoading = ref(false)
 
 const docQueueServiceLabels: Record<string, string> = {
   text_extract: 'OCR / Text',
@@ -539,8 +542,17 @@ const docQueueServiceLabels: Record<string, string> = {
   embed: 'Embedding',
 }
 
-const docIsActive = computed(() =>
-  docQueueStatus.value.services.some((svc) => svc.pending > 0 || svc.processing > 0)
+const docTotalPending = computed(() =>
+  docQueueStatus.value.services.reduce((s, svc) => s + svc.pending, 0)
+)
+const docTotalProcessing = computed(() =>
+  docQueueStatus.value.services.reduce((s, svc) => s + svc.processing, 0)
+)
+const docTotalFailed = computed(() =>
+  docQueueStatus.value.services.reduce((s, svc) => s + svc.failed, 0)
+)
+const docIsActive = computed(
+  () => docTotalPending.value > 0 || docTotalProcessing.value > 0
 )
 
 async function fetchDocQueueStatus() {
@@ -563,6 +575,32 @@ async function handleDocReclassifyAll(mode: ReclassifyAllMode) {
     docReclassifyError.value = err.message || 'Fehler beim Einreihen'
   } finally {
     docReclassifyLoading.value = false
+  }
+}
+
+async function handleDocCancel() {
+  docReclassifyError.value = ''
+  docCancelLoading.value = true
+  try {
+    await cancelDocumentQueue()
+    await fetchDocQueueStatus()
+  } catch (err: any) {
+    docReclassifyError.value = err.message || 'Fehler beim Abbrechen'
+  } finally {
+    docCancelLoading.value = false
+  }
+}
+
+async function handleDocRetry() {
+  docReclassifyError.value = ''
+  docRetryLoading.value = true
+  try {
+    await retryDocumentQueue()
+    await fetchDocQueueStatus()
+  } catch (err: any) {
+    docReclassifyError.value = err.message || 'Fehler beim Wiederholen'
+  } finally {
+    docRetryLoading.value = false
   }
 }
 
@@ -1106,6 +1144,25 @@ onBeforeUnmount(() => {
           :loading="docReclassifyLoading"
           :disabled="docReclassifyLoading || docIsActive"
           @click="handleDocReclassifyAll('full')"
+        />
+        <Button
+          v-if="docTotalFailed > 0"
+          label="Fehlgeschlagene wiederholen"
+          icon="pi pi-replay"
+          severity="warn"
+          :loading="docRetryLoading"
+          :disabled="docRetryLoading"
+          @click="handleDocRetry"
+        />
+        <Button
+          v-if="docIsActive"
+          label="Abbrechen"
+          icon="pi pi-times"
+          severity="danger"
+          outlined
+          :loading="docCancelLoading"
+          :disabled="docCancelLoading"
+          @click="handleDocCancel"
         />
       </div>
     </div>
