@@ -70,6 +70,7 @@ export function parseFilterFromQuery(q: Record<string, unknown>): PhotoFilter {
 
   const albumIds = parseIntList(q.albumIds);   if (albumIds)  f.albumIds  = albumIds
   const personIds = parseIntList(q.personIds); if (personIds) f.personIds = personIds
+  const ownerIds = parseIntList(q.ownerIds);   if (ownerIds)  f.ownerIds  = ownerIds
   const mts = parseMediaTypes(q.mediaTypes);   if (mts)       f.mediaTypes = mts
 
   const am = q.albumMode
@@ -117,6 +118,7 @@ export function filterToQuery(f: PhotoFilter): Record<string, string> {
     out.personIds = f.personIds.join(',')
     if (f.personMode && f.personMode !== 'include') out.personMode = f.personMode
   }
+  if (f.ownerIds?.length) out.ownerIds = f.ownerIds.join(',')
   if (f.mediaTypes?.length) out.mediaTypes = f.mediaTypes.join(',')
   if (f.hasGps !== undefined) out.hasGps = String(f.hasGps)
   if (f.hasFaces !== undefined) out.hasFaces = String(f.hasFaces)
@@ -147,6 +149,7 @@ export function countActiveFilters(f: PhotoFilter): number {
   if (f.qualityMin !== undefined || f.qualityMax !== undefined) n++
   if (f.albumIds?.length) n++
   if (f.personIds?.length) n++
+  if (f.ownerIds?.length) n++
   if (f.mediaTypes?.length) n++
   if (f.hasGps !== undefined) n++
   if (f.hasFaces !== undefined) n++

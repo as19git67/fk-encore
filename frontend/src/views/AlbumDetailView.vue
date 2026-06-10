@@ -213,6 +213,7 @@ const FILTER_AVAILABLE = computed<Array<keyof PhotoFilter | 'dateRange' | 'quali
   const arr: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'> = [
     'hiddenMode', 'favorite', 'inGroup',
     'othersFavorited', 'othersHidden',
+    'ownerIds',
     'qualityRange', 'mediaTypes', 'hasGps',
     'dateRange', 'sizeRange',
   ]
@@ -1987,7 +1988,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 
         <!-- 2. Metadata -->
         <div class="header__meta">
-          {{ album.photo_count }}<span class="header__meta-unit">&nbsp;{{ album.photo_count === 1 ? 'Foto' : 'Fotos' }}</span>
+          {{ galleryTotal || album.photo_count }}<span class="header__meta-unit">&nbsp;{{ (galleryTotal || album.photo_count) === 1 ? 'Foto' : 'Fotos' }}</span>
           <template v-if="album.oldest_photo_at && album.newest_photo_at">
             &bull; {{ headerDateRange }}
           </template>

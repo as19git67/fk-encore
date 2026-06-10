@@ -95,6 +95,7 @@ export interface PhotoFilter {
   importedDaysAgo?: number
   sizeMin?: number
   sizeMax?: number
+  ownerIds?: number[]
   // AI auto-pick visibility (Track I). false (default) → AI-hidden
   // photos are excluded from the grid; true → they are shown alongside
   // the AI picks. Maps to the backend `aiHiddenMode=include` query.
@@ -138,6 +139,7 @@ function buildPhotoFilterQuery(filter: PhotoFilter | boolean | undefined): strin
   if (f.importedDaysAgo !== undefined) add('importedDaysAgo', f.importedDaysAgo)
   if (f.sizeMin !== undefined) add('sizeMin', f.sizeMin)
   if (f.sizeMax !== undefined) add('sizeMax', f.sizeMax)
+  if (f.ownerIds && f.ownerIds.length) add('ownerIds', f.ownerIds.join(','))
   if (f.showAiHidden) add('showAiHidden', true)
 
   const s = params.toString()
