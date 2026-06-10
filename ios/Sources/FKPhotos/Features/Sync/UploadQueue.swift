@@ -267,6 +267,16 @@ actor UploadQueue {
         persist()
     }
 
+    func requeueAllFailed() {
+        var changed = false
+        for idx in items.indices where items[idx].status == .failed {
+            items[idx].status = .pending
+            items[idx].lastError = nil
+            changed = true
+        }
+        if changed { persist() }
+    }
+
     func purgeDone() {
         let before = items.count
         items.removeAll { $0.status == .done }
@@ -379,6 +389,13 @@ final class UploadQueueObserver {
 
     func removeAllFailed() {
         Task { await UploadQueue.shared.removeAllFailed() }
+    }
+
+    func requeueAllFailed() {
+        Task {
+            await UploadQueue.shared.requeueAllFailed()
+            BackgroundSyncManager.shared.drainUploadQueue()
+        }
     }
 
     func remove(id: UUID) {
