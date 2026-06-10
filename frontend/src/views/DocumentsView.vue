@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref, computed, watch, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
 import InputText from 'primevue/inputtext'
@@ -27,6 +27,7 @@ import {
 } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
 import { useRealtimeEvent } from '../composables/useRealtime'
+import { useScrollRestore } from '../composables/useScrollRestore'
 
 // Remembers the document the user last opened so returning from the
 // detail view (which re-mounts this list — there is no keep-alive) can
@@ -35,7 +36,9 @@ import { useRealtimeEvent } from '../composables/useRealtime'
 let lastOpenedDocId: number | null = null
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
+const { restore: restoreScroll } = useScrollRestore('documents-list')
 
 const items = ref<DocumentSummary[]>([])
 const categories = ref<DocumentCategory[]>([])
@@ -160,10 +163,18 @@ function loadStoredSearchMode(): SearchMode {
   return raw === 'fts' || raw === 'semantic' || raw === 'hybrid' ? raw : 'hybrid'
 }
 
-const q = ref('')
-const selectedCategory = ref<string | null>(null)
-const selectedStatus = ref<DocumentStatus | null>(null)
-const needsReviewOnly = ref(false)
+function initFromQuery<T>(key: string, valid: T[], fallback: T): T {
+  const raw = route.query[key]
+  const v = typeof raw === 'string' ? raw : null
+  return v && (valid as unknown[]).includes(v) ? v as T : fallback
+}
+
+const q = ref(typeof route.query.q === 'string' ? route.query.q : '')
+const selectedCategory = ref<string | null>(typeof route.query.category === 'string' ? route.query.category : null)
+const selectedStatus = ref<DocumentStatus | null>(
+  initFromQuery<DocumentStatus | null>('status', ['ready', 'classifying', 'failed', 'pending', 'extracting'], null)
+)
+const needsReviewOnly = ref(route.query.review === '1')
 const searchMode = ref<SearchMode>(loadStoredSearchMode())
 
 const LOW_CONFIDENCE_THRESHOLD = 0.6
@@ -231,10 +242,19 @@ async function loadCategories() {
   }
 }
 
+function syncQueryParams() {
+  const query: Record<string, string> = {}
+  if (q.value.trim()) query.q = q.value.trim()
+  if (selectedCategory.value) query.category = selectedCategory.value
+  if (selectedStatus.value) query.status = selectedStatus.value
+  if (needsReviewOnly.value) query.review = '1'
+  router.replace({ query })
+}
+
 let searchDebounce: ReturnType<typeof setTimeout> | null = null
 watch([q, selectedCategory, selectedStatus, needsReviewOnly, searchMode], () => {
   if (searchDebounce) clearTimeout(searchDebounce)
-  searchDebounce = setTimeout(load, 300)
+  searchDebounce = setTimeout(() => { syncQueryParams(); load() }, 300)
 })
 
 function openDocument(doc: DocumentSummary) {
@@ -330,7 +350,10 @@ async function loadGroups() {
 
 onMounted(async () => {
   await Promise.all([loadCategories(), loadGroups(), load()])
-  await restoreScrollToLastOpened()
+  if (lastOpenedDocId != null) {
+    await restoreScrollToLastOpened()
+  }
+  restoreScroll()
 })
 </script>
 

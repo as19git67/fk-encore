@@ -197,3 +197,20 @@ export async function resetStuckJobs(): Promise<void> {
     .set({ status: "pending", started_at: null })
     .where(eq(documentScanQueue.status, "processing"));
 }
+
+/** Cancel all pending jobs. Returns the number of cancelled rows. */
+export async function cancelPendingJobs(): Promise<number> {
+  const result = await db
+    .delete(documentScanQueue)
+    .where(eq(documentScanQueue.status, "pending"));
+  return result.rowCount ?? 0;
+}
+
+/** Retry all failed jobs by resetting them to pending. Returns the count. */
+export async function retryFailedJobs(): Promise<number> {
+  const result = await db
+    .update(documentScanQueue)
+    .set({ status: "pending", started_at: null, error_msg: null })
+    .where(eq(documentScanQueue.status, "failed"));
+  return result.rowCount ?? 0;
+}
