@@ -1152,3 +1152,7 @@ export function getExternalServiceHealth(signal?: AbortSignal) {
   )
 }
 
+export function listPhotoUploaders() {
+  return apiFetch<{ uploaders: { id: number; name: string }[] }>('/photos/uploaders')
+}
+

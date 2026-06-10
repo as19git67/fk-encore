@@ -53,6 +53,7 @@ type GalleryGridQueryParams = {
   sizeMax?: Query<number>;
   showAiHidden?: Query<boolean>;
   aiHiddenMode?: Query<string>;
+  ownerIds?: Query<string>;
 
   /**
    * Album-detail context. When set, the grid is scoped to this album's
@@ -117,6 +118,7 @@ function toFilterQuery(p: GalleryGridQueryParams): PhotoFilterQuery {
     sizeMax: p.sizeMax,
     showAiHidden: p.showAiHidden,
     aiHiddenMode: p.aiHiddenMode,
+    ownerIds: p.ownerIds,
     albumScopeId: p.albumScopeId,
   };
 }
@@ -223,6 +225,7 @@ type GalleryIdsQueryParams = {
   sizeMax?: Query<number>;
   showAiHidden?: Query<boolean>;
   aiHiddenMode?: Query<string>;
+  ownerIds?: Query<string>;
   albumScopeId?: Query<number>;
   sortBy?: Query<string>;
   sortDir?: Query<string>;
