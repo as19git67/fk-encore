@@ -26,7 +26,7 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "finanzen-wertpapiere",
         name: "Wertpapiere & Dividenden",
-        hint: "Dividendengutschriften, Steuermitteilungen / steuerliche Behandlung zu Wertpapieren (auch 'KEINE STEUERBESCHEINIGUNG'), Erträgnisaufstellungen, Depot- und Wertpapierabrechnungen (Kauf/Verkauf) von Bank oder Broker.",
+        hint: "Dividendengutschriften, Steuermitteilungen / steuerliche Behandlung zu Wertpapieren (auch 'KEINE STEUERBESCHEINIGUNG'), Erträgnisaufstellungen, Depot- und Wertpapierabrechnungen (Kauf/Verkauf) von Bank oder Broker. NICHT: Einspeisevergütungs-Abrechnungen / Stromeinspeisung von Netzbetreibern für PV-Anlagen (→ wohnen-haus-photovoltaik).",
       },
       {
         slug: "finanzen-steuern",
@@ -55,6 +55,11 @@ export const categoryTaxonomy: CategorySeed[] = [
           { slug: "wohnen-haus-instandhaltung", name: "Instandhaltung / Handwerker" },
           { slug: "wohnen-haus-finanzierung", name: "Finanzierung / Darlehen" },
           { slug: "wohnen-haus-kaufvertrag", name: "Kaufvertrag / Grundbuch" },
+          {
+            slug: "wohnen-haus-photovoltaik",
+            name: "Photovoltaik",
+            hint: "Einspeisevergütungs-Abrechnungen eines Netzbetreibers (Bayernwerk, E.ON, EnBW, Vattenfall u. a.), EEG-Abrechnungen, Stromeinspeisung, Erzeugungsanlage, kWp, Abschlagszahlungen für PV-Einspeisung, Inbetriebnahme-Protokolle, Anmeldung beim Marktstammdatenregister. NICHT: Stromlieferverträge oder Stromrechnungen für den Eigenverbrauch (→ vertraege-strom).",
+          },
         ],
       },
     ],
