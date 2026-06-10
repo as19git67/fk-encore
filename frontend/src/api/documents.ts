@@ -96,11 +96,16 @@ export interface UpdateDocumentPayload {
   tags?: string[]
 }
 
-export interface QueueStatus {
-  counts: Array<{ service: string; status: string; count: number }>
-  totalPending: number
-  totalProcessing: number
-  totalFailed: number
+export interface DocQueueServiceStatus {
+  service: string
+  pending: number
+  processing: number
+  failed: number
+  done: number
+}
+
+export interface DocQueueStatus {
+  services: DocQueueServiceStatus[]
 }
 
 function buildQuery(params: Record<string, unknown>): string {
@@ -126,7 +131,7 @@ export function listDocumentCategories() {
 }
 
 export function getDocumentQueueStatus() {
-  return apiFetch<QueueStatus>('/document-queue/status')
+  return apiFetch<DocQueueStatus>('/document-queue/status')
 }
 
 export function searchDocuments(q: string, mode: SearchMode = 'hybrid', limit = 20) {
