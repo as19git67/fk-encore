@@ -213,6 +213,7 @@ const FILTER_AVAILABLE = computed<Array<keyof PhotoFilter | 'dateRange' | 'quali
   const arr: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'> = [
     'hiddenMode', 'favorite', 'inGroup',
     'othersFavorited', 'othersHidden',
+    'ownerIds',
     'qualityRange', 'mediaTypes', 'hasGps',
     'dateRange', 'sizeRange',
   ]
