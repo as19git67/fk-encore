@@ -134,6 +134,14 @@ export function getDocumentQueueStatus() {
   return apiFetch<DocQueueStatus>('/document-queue/status')
 }
 
+export function cancelDocumentQueue() {
+  return apiFetch<{ cancelled: number }>('/document-queue/cancel', { method: 'POST' })
+}
+
+export function retryDocumentQueue() {
+  return apiFetch<{ retried: number }>('/document-queue/retry', { method: 'POST' })
+}
+
 export function searchDocuments(q: string, mode: SearchMode = 'hybrid', limit = 20) {
   return apiFetch<SearchDocumentsResponse>(
     `/documents/search${buildQuery({ q, mode, limit })}`,

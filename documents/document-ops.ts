@@ -176,6 +176,11 @@ export async function runClassify(documentId: number): Promise<{ classification:
     subject_persons,
   });
 
+  if (!classification.document_number) {
+    const m = clipped.match(/#(\d{4,})/);
+    if (m) classification.document_number = m[1]!;
+  }
+
   const catSlug = classification.category_slug;
   const cat = await dbFirst<{ id: number }>(
     db.select({ id: documentCategories.id }).from(documentCategories).where(eq(documentCategories.slug, catSlug)),

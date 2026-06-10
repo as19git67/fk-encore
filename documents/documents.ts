@@ -56,7 +56,7 @@ import {
   loadVisibleDocument,
   visibleDocumentsWhere,
 } from "./visibility";
-import { enqueueDocumentScan, getQueueStatus, requeueDocument, type QueueStatus } from "./scan-queue";
+import { enqueueDocumentScan, getQueueStatus, requeueDocument, cancelPendingJobs, retryFailedJobs, type QueueStatus } from "./scan-queue";
 import { triggerWorkers } from "./scan-worker";
 import { searchDocuments, type SearchMode } from "./search";
 import {
@@ -1900,6 +1900,29 @@ export const getDocumentQueueStatus = api(
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
     return await getQueueStatus();
+  },
+);
+
+export const cancelDocumentQueue = api(
+  { expose: true, method: "POST", path: "/document-queue/cancel", auth: true },
+  async (): Promise<{ cancelled: number }> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "data.manage");
+    const cancelled = await cancelPendingJobs();
+    return { cancelled };
+  },
+);
+
+export const retryDocumentQueue = api(
+  { expose: true, method: "POST", path: "/document-queue/retry", auth: true },
+  async (): Promise<{ retried: number }> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "data.manage");
+    const retried = await retryFailedJobs();
+    triggerWorkers();
+    return { retried };
   },
 );
 
