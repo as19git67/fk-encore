@@ -837,6 +837,12 @@ struct UploadQueueDetailView: View {
                     HStack {
                         Text("Fehlgeschlagen (\(observer.failedItems.count))")
                         Spacer()
+                        Button {
+                            observer.requeueAllFailed()
+                        } label: {
+                            Text("Alle erneut")
+                                .font(.caption)
+                        }
                         Button(role: .destructive) {
                             observer.removeAllFailed()
                         } label: {
