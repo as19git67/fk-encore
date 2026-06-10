@@ -200,13 +200,16 @@ actor PhotoSyncService {
         let albumIds = PhotoSyncPreferences.selectedAlbumIds
         guard !albumIds.isEmpty else { return [] }
 
+        let confirmed = PhotoSyncPreferences.confirmedMappingIds
+
         var pairs: [(PHAsset, String?)] = []
         var seen = Set<String>()
 
         // "Gesamte Mediathek" sentinel: enumerate every image asset directly,
         // bypassing per-album collections. Other selections are ignored when
         // the sentinel is present so the user can't accidentally double-sync.
-        if albumIds.contains(PhotoSyncPreferences.allLibrarySentinel) {
+        if albumIds.contains(PhotoSyncPreferences.allLibrarySentinel),
+           confirmed.contains(PhotoSyncPreferences.allLibrarySentinel) {
             let lastSync = PhotoSyncPreferences.albumSyncDate(for: PhotoSyncPreferences.allLibrarySentinel)
             let options = buildFetchOptions(lastSync: lastSync)
             PHAsset.fetchAssets(with: .image, options: options)
@@ -216,8 +219,9 @@ actor PhotoSyncService {
                     }
                 }
         } else {
+            let confirmedAlbumIds = albumIds.filter { confirmed.contains($0) }
             PHAssetCollection
-                .fetchAssetCollections(withLocalIdentifiers: Array(albumIds), options: nil)
+                .fetchAssetCollections(withLocalIdentifiers: Array(confirmedAlbumIds), options: nil)
                 .enumerateObjects { collection, _, _ in
                     let albumLastSync = PhotoSyncPreferences.albumSyncDate(for: collection.localIdentifier)
                     let options = buildFetchOptions(lastSync: albumLastSync)
