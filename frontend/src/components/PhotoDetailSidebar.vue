@@ -73,7 +73,10 @@ const editDate = defineModel<Date | null>('editDate', { default: null })
 
 const auth = useAuthStore()
 
-const { albums, albumsLoaded, fetchAlbums } = useReferenceData()
+const { albums, albumsLoaded, fetchAlbums, users, fetchUsers } = useReferenceData()
+const ownerName = computed(() => users.value.find(u => u.id === props.photo.user_id)?.name)
+fetchUsers()
+
 const loadingAlbums = ref(false)
 const photoAlbumMap = ref<Record<number, number[]>>({}) // photoId -> albumIds[]
 const albumDialogVisible = ref(false)
@@ -645,8 +648,10 @@ watch(() => props.readOnly, (ro) => {
           <i class="pi pi-database meta-icon" />
           <span class="meta-value">{{ (photo.size / 1024 / 1024).toFixed(2) }} MB</span>
         </div>
-        <!-- Stored filename on disk (UUID-ish) – useful when tracking a photo
-             down inside the Docker volume. -->
+        <div v-if="ownerName" class="meta-row">
+          <i class="pi pi-user meta-icon" />
+          <span class="meta-value">{{ ownerName }}</span>
+        </div>
         <div v-if="photo.filename" class="meta-row">
           <i class="pi pi-hashtag meta-icon" />
           <span class="meta-value meta-value--mono" :title="photo.filename">{{ photo.filename }}</span>
