@@ -70,83 +70,91 @@ actor PhotoSyncService {
             return
         }
 
-        // Step 1: Drain whatever's already queued — Share-Extension items, or
-        // pending items from a prior interrupted sync. This used to happen only
-        // AFTER the (potentially minute-long) library scan, so the user stared
-        // at a spinner thinking nothing was happening.
-        await drainQueueWithProgress()
+        do {
+            // Step 1: Drain whatever's already queued — Share-Extension items, or
+            // pending items from a prior interrupted sync. This used to happen only
+            // AFTER the (potentially minute-long) library scan, so the user stared
+            // at a spinner thinking nothing was happening.
+            await drainQueueWithProgress()
 
-        await SyncProgress.shared.update(.scanningLibrary)
-        let syncStartDate = Date()
-        let assets = await fetchAssets()
-        await SyncProgress.shared.setTotalAssets(assets.count)
+            await SyncProgress.shared.update(.scanningLibrary)
+            let syncStartDate = Date()
+            let assets = await fetchAssets()
+            await SyncProgress.shared.setTotalAssets(assets.count)
 
-        guard !assets.isEmpty else {
+            guard !assets.isEmpty else {
+                PhotoSyncPreferences.lastSyncDate = syncStartDate
+                await SyncProgress.shared.reset()
+                return
+            }
+
+            let processingBatchSize = 500
+            var processedCount = 0
+            for batchStart in stride(from: 0, to: assets.count, by: processingBatchSize) {
+                try Task.checkCancellation()
+                let assetBatch = assets[batchStart..<min(batchStart + processingBatchSize, assets.count)]
+
+                // Step 2: Compute full-hash for each asset (PhotoHasher caches by modificationDate).
+                await SyncProgress.shared.update(.hashingBatch(done: processedCount, total: assets.count))
+                var hashPairs: [(asset: PHAsset, filename: String, sourceAlbumId: String?, hashResult: PhotoHashResult)] = []
+                for (asset, filename, sourceAlbumId) in assetBatch {
+                    guard let result = await PhotoHasher.shared.hashes(for: asset) else { continue }
+                    hashPairs.append((asset, filename, sourceAlbumId, result))
+                }
+
+                if !hashPairs.isEmpty {
+                    // Step 3: Sync-check to find which full-hashes the server already has.
+                    await SyncProgress.shared.update(.checkingServer(batchSize: hashPairs.count))
+                    let batchHashes = hashPairs.map { $0.hashResult.fullHash }
+                    let serverHas = Set((try? await APIClient.shared.syncCheck(hashes: batchHashes)) ?? [])
+
+                    // Step 4: Enqueue assets whose full-hash the server doesn't have.
+                    let alreadyQueued = Set(await UploadQueue.shared.pendingItems().map(\.fullHash))
+
+                    let missing = hashPairs.filter {
+                        !serverHas.contains($0.hashResult.fullHash)
+                        && !alreadyQueued.contains($0.hashResult.fullHash)
+                    }
+
+                    for item in missing {
+                        // Shared with the manual-album upload (Part A): identical
+                        // hash/metadata/resource selection so both paths dedup the
+                        // same way server-side (issue #591).
+                        guard let queueItem = await AssetUploadEnqueuer.makeQueueItem(
+                            for: item.asset,
+                            precomputedHash: item.hashResult,
+                            filenameHint: item.filename,
+                            targetAlbumIds: resolveTargetAlbumIds(sourceAlbumId: item.sourceAlbumId),
+                            sourceIosAlbumId: item.sourceAlbumId
+                        ) else { continue }
+                        await UploadQueue.shared.enqueue(queueItem)
+                    }
+                    if !missing.isEmpty {
+                        await drainQueueWithProgress()
+                    }
+                }
+
+                // Step 5: Advance the per-album watermark to the newest
+                // creationDate among assets we successfully processed (hash
+                // computed). We deliberately exclude assets whose hash failed
+                // (typically because iCloud bytes weren't available) so they get
+                // retried on the next run instead of being silently skipped.
+                advanceWatermarksForProcessed(hashPairs)
+                processedCount += assetBatch.count
+            }
+
+            // Final pass: drain anything still pending plus mark the overall sync
+            // timestamp. The per-album watermarks were already advanced above.
+            await drainQueueWithProgress()
             PhotoSyncPreferences.lastSyncDate = syncStartDate
             await SyncProgress.shared.reset()
-            return
+        } catch {
+            // Ensure the progress indicator is always cleared on any exit path
+            // (e.g. Task cancellation when a BGProcessingTask time limit expires),
+            // so the spinner never stays visible after the sync has stopped.
+            await SyncProgress.shared.reset()
+            throw
         }
-
-        let processingBatchSize = 500
-        var processedCount = 0
-        for batchStart in stride(from: 0, to: assets.count, by: processingBatchSize) {
-            try Task.checkCancellation()
-            let assetBatch = assets[batchStart..<min(batchStart + processingBatchSize, assets.count)]
-
-            // Step 2: Compute full-hash for each asset (PhotoHasher caches by modificationDate).
-            await SyncProgress.shared.update(.hashingBatch(done: processedCount, total: assets.count))
-            var hashPairs: [(asset: PHAsset, filename: String, sourceAlbumId: String?, hashResult: PhotoHashResult)] = []
-            for (asset, filename, sourceAlbumId) in assetBatch {
-                guard let result = await PhotoHasher.shared.hashes(for: asset) else { continue }
-                hashPairs.append((asset, filename, sourceAlbumId, result))
-            }
-
-            if !hashPairs.isEmpty {
-                // Step 3: Sync-check to find which full-hashes the server already has.
-                await SyncProgress.shared.update(.checkingServer(batchSize: hashPairs.count))
-                let batchHashes = hashPairs.map { $0.hashResult.fullHash }
-                let serverHas = Set((try? await APIClient.shared.syncCheck(hashes: batchHashes)) ?? [])
-
-                // Step 4: Enqueue assets whose full-hash the server doesn't have.
-                let alreadyQueued = Set(await UploadQueue.shared.pendingItems().map(\.fullHash))
-
-                let missing = hashPairs.filter {
-                    !serverHas.contains($0.hashResult.fullHash)
-                    && !alreadyQueued.contains($0.hashResult.fullHash)
-                }
-
-                for item in missing {
-                    // Shared with the manual-album upload (Part A): identical
-                    // hash/metadata/resource selection so both paths dedup the
-                    // same way server-side (issue #591).
-                    guard let queueItem = await AssetUploadEnqueuer.makeQueueItem(
-                        for: item.asset,
-                        precomputedHash: item.hashResult,
-                        filenameHint: item.filename,
-                        targetAlbumIds: resolveTargetAlbumIds(sourceAlbumId: item.sourceAlbumId),
-                        sourceIosAlbumId: item.sourceAlbumId
-                    ) else { continue }
-                    await UploadQueue.shared.enqueue(queueItem)
-                }
-                if !missing.isEmpty {
-                    await drainQueueWithProgress()
-                }
-            }
-
-            // Step 5: Advance the per-album watermark to the newest
-            // creationDate among assets we successfully processed (hash
-            // computed). We deliberately exclude assets whose hash failed
-            // (typically because iCloud bytes weren't available) so they get
-            // retried on the next run instead of being silently skipped.
-            advanceWatermarksForProcessed(hashPairs)
-            processedCount += assetBatch.count
-        }
-
-        // Final pass: drain anything still pending plus mark the overall sync
-        // timestamp. The per-album watermarks were already advanced above.
-        await drainQueueWithProgress()
-        PhotoSyncPreferences.lastSyncDate = syncStartDate
-        await SyncProgress.shared.reset()
     }
 
     /// Wraps `BackgroundSyncManager.drainUploadQueue` so the progress observer
