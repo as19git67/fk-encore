@@ -36,6 +36,7 @@ import {
   isLlmServiceHealthy,
 } from "./llm-client";
 import { withAiSlot, AiSlotTimeoutError, type AiModel } from "../ai-queue/slot-helper";
+import { notifyDocScanQueueChanged } from "./scan-queue-events";
 
 console.log("[boot] documents/scan-worker.ts: all imports resolved");
 
@@ -103,6 +104,7 @@ class DocumentScanWorker {
       const msg = err?.message ?? String(err);
       console.error(`[documents.scan-worker] ${this.service} job ${job.id} failed:`, msg);
       await markJobFailed(job.id, msg).catch(() => {});
+      notifyDocScanQueueChanged();
       // Only mark the document failed for the first-stage (text_extract)
       // and classify failures — a missing embedding is not worth
       // blocking the document from appearing in the UI.
@@ -161,6 +163,7 @@ const ALL_WORKERS = [textExtractWorker, classifyWorker, embedWorker];
 /** Wake every worker. Non-blocking; call after enqueueing new jobs. */
 export function triggerWorkers(): void {
   for (const w of ALL_WORKERS) w.tick();
+  notifyDocScanQueueChanged();
 }
 
 async function startWorkers(): Promise<void> {
