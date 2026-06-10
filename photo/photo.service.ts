@@ -7949,3 +7949,13 @@ export async function purgeAllPhotosLogic(deleteFiles: boolean): Promise<PurgeRe
 
   return { success: true, dbCounts, files, embeddingService };
 }
+
+export async function listPhotoUploadersLogic(): Promise<{ uploaders: { id: number; name: string }[] }> {
+  const rows = await dbAll<{ id: number; name: string }>(
+    db.selectDistinctOn([users.id], { id: users.id, name: users.name })
+      .from(photos)
+      .innerJoin(users, eq(photos.user_id, users.id))
+      .orderBy(users.id)
+  );
+  return { uploaders: rows };
+}
