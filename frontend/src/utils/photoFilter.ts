@@ -84,6 +84,8 @@ export function matchesPhotoFilter(
     }
   }
 
+  if (filter.ownerIds?.length && !filter.ownerIds.includes(photo.user_id)) return false
+
   if (filter.sizeMin !== undefined && (photo.size ?? 0) < filter.sizeMin) return false
   if (filter.sizeMax !== undefined && (photo.size ?? 0) > filter.sizeMax) return false
 

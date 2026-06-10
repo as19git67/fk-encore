@@ -71,6 +71,11 @@ watch(() => props.visible, (v) => {
   selectedPersons.value = props.draft.personIds?.length && persons.value.length
     ? persons.value.filter(p => props.draft.personIds!.includes(p.id))
     : []
+  selectedOwners.value = props.draft.ownerIds?.length && users.value.length
+    ? users.value
+        .filter(u => props.draft.ownerIds!.includes(u.id))
+        .map(u => ({ id: u.id, name: u.name }))
+    : []
 })
 
 const hiddenOptions: Array<{ label: string; value: HiddenMode }> = [
@@ -132,11 +137,13 @@ function setTri(key: 'hasGps' | 'hasFaces' | 'hasAssignedPerson', v: 'any' | 'ye
 // --- Album / Person autocomplete -------------------------------------------
 // Listen kommen aus dem app-weiten Composable, sodass parallele Aufrufer
 // (GalleryView, FilterChips, PhotoDetailSidebar) sich denselben Request teilen.
-const { albums, persons, fetchAlbums, fetchPersons } = useReferenceData()
+const { albums, persons, users, fetchAlbums, fetchPersons, fetchUsers } = useReferenceData()
 const selectedAlbums = ref<Album[]>([])
 const selectedPersons = ref<Person[]>([])
+const selectedOwners = ref<{ id: number; name: string }[]>([])
 const albumSuggestions = ref<Album[]>([])
 const personSuggestions = ref<Person[]>([])
+const ownerSuggestions = ref<{ id: number; name: string }[]>([])
 
 async function loadAlbumsIfNeeded() {
   try {
@@ -154,10 +161,21 @@ async function loadPersonsIfNeeded() {
     }
   } catch { /* ignore */ }
 }
+async function loadUsersIfNeeded() {
+  try {
+    await fetchUsers()
+    if (props.draft.ownerIds?.length) {
+      selectedOwners.value = users.value
+        .filter(u => props.draft.ownerIds!.includes(u.id))
+        .map(u => ({ id: u.id, name: u.name }))
+    }
+  } catch { /* ignore */ }
+}
 
 onMounted(() => {
   if (has('albumIds')) loadAlbumsIfNeeded()
   if (has('personIds')) loadPersonsIfNeeded()
+  if (has('ownerIds')) loadUsersIfNeeded()
 })
 
 function searchAlbums(event: { query: string }) {
@@ -172,6 +190,14 @@ function searchPersons(event: { query: string }) {
   personSuggestions.value = persons.value
     .filter(p => !selectedPersons.value.some(s => s.id === p.id))
     .filter(p => p.name && (!q || p.name.toLowerCase().includes(q)))
+    .slice(0, 20)
+}
+function searchOwners(event: { query: string }) {
+  const q = event.query.toLowerCase()
+  ownerSuggestions.value = users.value
+    .filter(u => !selectedOwners.value.some(s => s.id === u.id))
+    .filter(u => !q || u.name.toLowerCase().includes(q))
+    .map(u => ({ id: u.id, name: u.name }))
     .slice(0, 20)
 }
 
@@ -189,6 +215,12 @@ watch(selectedPersons, (list) => {
     personMode: list.length ? (local.value.personMode ?? 'include') : undefined,
   }
 })
+watch(selectedOwners, (list) => {
+  local.value = {
+    ...local.value,
+    ownerIds: list.length ? list.map(u => u.id) : undefined,
+  }
+})
 
 function handleApply() {
   emit('apply')
@@ -201,6 +233,7 @@ function handleReset() {
   dateTo.value = null
   selectedAlbums.value = []
   selectedPersons.value = []
+  selectedOwners.value = []
   emit('reset')
 }
 
@@ -321,6 +354,21 @@ function close() {
           :options="membershipOptions" option-label="label" option-value="value"
           :allow-empty="false"
           @update:model-value="(v: MembershipMode) => local = { ...local, personMode: v }"
+        />
+      </div>
+
+      <!-- Owners multi-select -->
+      <div v-if="has('ownerIds')" class="filter-row">
+        <label class="filter-label">Hochgeladen von</label>
+        <AutoComplete
+          v-model="selectedOwners"
+          :suggestions="ownerSuggestions"
+          multiple
+          option-label="name"
+          :input-style="{ width: '100%' }"
+          placeholder="Benutzer suchen …"
+          @complete="searchOwners"
+          @focus="loadUsersIfNeeded"
         />
       </div>
 
