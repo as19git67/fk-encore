@@ -22,7 +22,7 @@ import type {
   DocumentSummary,
   DocumentDetail,
   DocumentCategory,
-  QueueStatus as DocumentQueueStatus,
+  DocQueueStatus as DocumentQueueStatus,
 } from '../api/documents'
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -609,24 +609,17 @@ export const MOCK_DOCUMENT_DETAIL_FAILED: DocumentDetail = {
 }
 
 export const MOCK_DOCUMENT_QUEUE_IDLE: DocumentQueueStatus = {
-  counts: [
-    { service: 'extract',   status: 'done', count: 120 },
-    { service: 'classify',  status: 'done', count: 120 },
+  services: [
+    { service: 'text_extract', pending: 0, processing: 0, failed: 0, done: 120 },
+    { service: 'classify',     pending: 0, processing: 0, failed: 0, done: 120 },
+    { service: 'embed',        pending: 0, processing: 0, failed: 0, done: 120 },
   ],
-  totalPending: 0,
-  totalProcessing: 0,
-  totalFailed: 0,
 }
 
 export const MOCK_DOCUMENT_QUEUE_BUSY: DocumentQueueStatus = {
-  counts: [
-    { service: 'extract',   status: 'processing', count: 2 },
-    { service: 'extract',   status: 'pending',    count: 4 },
-    { service: 'classify',  status: 'processing', count: 1 },
-    { service: 'classify',  status: 'pending',    count: 5 },
-    { service: 'classify',  status: 'failed',     count: 1 },
+  services: [
+    { service: 'text_extract', pending: 4, processing: 2, failed: 0, done: 114 },
+    { service: 'classify',     pending: 5, processing: 1, failed: 1, done: 113 },
+    { service: 'embed',        pending: 0, processing: 0, failed: 0, done: 120 },
   ],
-  totalPending: 9,
-  totalProcessing: 3,
-  totalFailed: 1,
 }
