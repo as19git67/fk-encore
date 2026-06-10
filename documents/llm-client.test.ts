@@ -25,6 +25,17 @@ describe("parseClassification (base fields)", () => {
     expect(c.tax_sections).toEqual([]);
   });
 
+  it("parses document_number when present", () => {
+    const c = parseClassification(baseRaw({ document_number: "2661160" }));
+    expect(c.document_number).toBe("2661160");
+  });
+
+  it("treats empty/missing document_number as null", () => {
+    expect(parseClassification(baseRaw()).document_number).toBeNull();
+    expect(parseClassification(baseRaw({ document_number: "" })).document_number).toBeNull();
+    expect(parseClassification(baseRaw({ document_number: "  " })).document_number).toBeNull();
+  });
+
   it("rejects a payload without category_slug", () => {
     expect(() => parseClassification(baseRaw({ category_slug: "" }))).toThrow(/category_slug/);
   });

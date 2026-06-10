@@ -723,6 +723,7 @@ export const documents = pgTable("documents", {
   // ISO date-only (YYYY-MM-DD) — date printed on the document itself, if detected.
   doc_date: text("doc_date"),
   sender: text("sender"),
+  document_number: text("document_number"),
   summary: text("summary"),
   extracted_text: text("extracted_text"),
   classification_confidence: real("classification_confidence"),
@@ -753,9 +754,9 @@ export const documents = pgTable("documents", {
   // into the full-text index without referencing other tables.
   tags_text: text("tags_text").notNull().default(""),
   // NOTE: the generated `text_tsv tsvector` column and its GIN index are
-  // (re)defined by migration 0090 over title || sender || tags_text ||
-  // extracted_text and accessed only via raw SQL (drizzle-orm has no
-  // first-class tsvector support).
+  // (re)defined by migration 0099 over title || sender || document_number ||
+  // tags_text || extracted_text and accessed only via raw SQL (drizzle-orm
+  // has no first-class tsvector support).
 });
 
 // N:M mapping of a document to one or more German tax-return sections

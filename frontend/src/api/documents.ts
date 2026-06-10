@@ -24,6 +24,7 @@ export interface DocumentSummary {
   uploaded_at: string | null
   doc_date: string | null
   sender: string | null
+  document_number: string | null
   category_id: number | null
   category_slug: string | null
   classification_confidence: number | null
@@ -89,6 +90,7 @@ export interface UpdateDocumentPayload {
   title?: string | null
   doc_date?: string | null
   sender?: string | null
+  document_number?: string | null
   summary?: string | null
   category_slug?: string | null
   tags?: string[]
@@ -241,6 +243,15 @@ export function setUploadDefaults(payload: UploadDefaults) {
   return apiFetch<UploadDefaults>(`/documents/upload-defaults`, {
     method: 'PUT',
     body: JSON.stringify(payload),
+  })
+}
+
+export type ReclassifyAllMode = 'classify_only' | 'full'
+
+export function reclassifyAllDocuments(mode: ReclassifyAllMode) {
+  return apiFetch<{ queued: number }>('/documents/reclassify-all', {
+    method: 'POST',
+    body: JSON.stringify({ mode }),
   })
 }
 

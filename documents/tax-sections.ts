@@ -143,7 +143,7 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     slug: "haushaltsnahe",
     group: "abzuege",
     name: "Haushaltsnahe Aufwendungen / §35a",
-    hint: "Handwerkerrechnungen (Lohnanteil) für die selbst bewohnte Wohnung / das eigene Haus: Maler, Sanitär, Elektriker, Heizungsbauer, Dachdecker, Schreiner, Fliesenleger, Schornsteinfeger, Gärtner, Winterdienst, Putzkraft, Haushaltshilfe. Immer mit Überweisung (kein Bargeld). Nicht: Mietobjekt (→ werbungskosten-v), nicht: Arbeitszimmer-Renovierung des Arbeitnehmers (→ werbungskosten-n).",
+    hint: "Handwerkerrechnungen (Lohnanteil) für die selbst bewohnte Wohnung / das eigene Haus: Maler, Sanitär, Elektriker, Heizungsbauer, Haustechnik, Dachdecker, Schreiner, Fliesenleger, Schornsteinfeger, Gärtner, Winterdienst, Putzkraft, Haushaltshilfe. Rechnungen mit ausgewiesenem 'absetzbarem Anteil nach §35a EStG' gehören IMMER hierher. Nicht: Mietobjekt (→ werbungskosten-v), nicht: Arbeitszimmer-Renovierung des Arbeitnehmers (→ werbungskosten-n).",
   },
   {
     slug: "anlage-kind",
