@@ -246,6 +246,15 @@ export function setUploadDefaults(payload: UploadDefaults) {
   })
 }
 
+export type ReclassifyAllMode = 'classify_only' | 'full'
+
+export function reclassifyAllDocuments(mode: ReclassifyAllMode) {
+  return apiFetch<{ queued: number }>('/documents/reclassify-all', {
+    method: 'POST',
+    body: JSON.stringify({ mode }),
+  })
+}
+
 export function reclassifyDocument(
   id: number,
   options: { forceOcr?: boolean } = {},

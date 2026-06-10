@@ -951,6 +951,51 @@ export const batchReclassify = api(
   },
 );
 
+// ─── Reclassify all documents ───────────────────────────────────────────────
+
+export interface ReclassifyAllRequest {
+  mode: "classify_only" | "full";
+}
+
+export interface ReclassifyAllResponse {
+  queued: number;
+}
+
+export const reclassifyAll = api(
+  { expose: true, method: "POST", path: "/documents/reclassify-all", auth: true },
+  async (req: ReclassifyAllRequest): Promise<ReclassifyAllResponse> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "data.manage");
+
+    const full = req.mode === "full";
+    const services: readonly import("./scan-queue").DocumentScanService[] =
+      full ? ["text_extract", "classify", "embed"] : ["classify", "embed"];
+    const newStatus = full ? "pending" : "classifying";
+
+    const rows = await dbAll<{ id: number }>(
+      db.select({ id: documents.id }).from(documents),
+    );
+
+    if (rows.length === 0) return { queued: 0 };
+
+    const ids = rows.map((r) => r.id);
+    const patch: Partial<typeof documents.$inferInsert> = {
+      status: newStatus as any,
+      last_error: null,
+    };
+    if (full) patch.force_ocr = true;
+    await db.update(documents).set(patch).where(inArray(documents.id, ids));
+
+    for (const id of ids) {
+      await requeueDocument(id, services);
+    }
+    triggerWorkers();
+
+    return { queued: ids.length };
+  },
+);
+
 // ─── Upload defaults (per-user preference) ─────────────────────────────────
 
 export interface UploadDefaultsResponse {
