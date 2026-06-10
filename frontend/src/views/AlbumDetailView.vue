@@ -16,6 +16,7 @@ import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
 import PhotoAlbumDialog from '../components/PhotoAlbumDialog.vue'
+import CollageDialog from '../components/CollageDialog.vue'
 import NaturalSearchBar from '../components/NaturalSearchBar.vue'
 import FilterMenu from '../components/FilterMenu.vue'
 import FilterChips from '../components/FilterChips.vue'
@@ -89,6 +90,7 @@ import {
 } from '../utils/albumsViewState'
 import { toLocalIsoDateTime } from '../utils/dateFormat'
 import { newestIndex, jumpTargetIndex } from '../utils/galleryJump'
+import { canCollage } from '../utils/collageLayouts'
 
 const route = useRoute()
 const router = useRouter()
@@ -433,6 +435,16 @@ async function selectAll() {
 function openAlbumDialog() {
   if (selectedIds.value.size === 0) return
   albumDialogVisible.value = true
+}
+
+// ── Collage (2..9 selected photos) ──────────────────────────────────────────
+const collageDialogVisible = ref(false)
+const collagePhotoIds = ref<number[]>([])
+const canShowCollage = computed(() => canCollage(selectedCount.value))
+function openCollageDialog() {
+  if (!canShowCollage.value) return
+  collagePhotoIds.value = Array.from(selectedIds.value)
+  collageDialogVisible.value = true
 }
 
 async function applyCurationToSelection(target: CurationStatus) {
@@ -2332,6 +2344,14 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           @click="deleteFromSelection"
         />
         <Button
+          v-if="canShowCollage"
+          label="Collage"
+          icon="pi pi-images"
+          size="small"
+          severity="secondary"
+          @click="openCollageDialog"
+        />
+        <Button
           v-if="selectedCount > 0"
           label="Auswahl aufheben"
           icon="pi pi-replay"
@@ -2641,6 +2661,12 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
     <PhotoAlbumDialog
       v-model:visible="albumDialogVisible"
       :photo-ids="albumDialogPhotoIds"
+    />
+
+    <!-- Collage creator (album select-bar entry point) -->
+    <CollageDialog
+      v-model:visible="collageDialogVisible"
+      :photo-ids="collagePhotoIds"
     />
 
     <!-- Warning dialog when a batch delete skipped some photos -->
