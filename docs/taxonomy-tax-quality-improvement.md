@@ -32,6 +32,38 @@ Steuer-Einordnung ableiten. Bevorzugt lokal; Cloud nur für wenige hundert
 **Konsequenz:** Wir müssen die tausenden PDFs **nicht neu durch OCR/LLM jagen**. Alles
 für Clustering, Repräsentanten-Auswahl und Hint-Mining liegt schon in der DB.
 
+### 0.1 Wie stark hängt der Plan an manuell korrigierten Dokumenten?
+
+**Antwort: wenig — und bewusst asymmetrisch.** Die Taxonomie-Ableitung (Etappe B/C)
+ist **unsupervised** und braucht überhaupt keine manuellen Labels; sie arbeitet nur
+auf den Embeddings. Manuelle Korrekturen nutzt der Plan ausschließlich dort, wo das
+Schema sie sauber als „vom Menschen bestätigt" markiert — und das ist ungleich verteilt:
+
+| Feld | Manuelles Signal im Schema | Als „Wahrheit" nutzbar? |
+|------|----------------------------|-------------------------|
+| Steuer-Relevanz / `tax_year` | `documents.tax_reviewed` (→ true bei Nutzer-Edit) | **Ja, sauber** |
+| Steuer-Sektionen | `document_tax_sections.source ∈ {ai, user}` | **Ja, sauber** |
+| Kategorie | **kein** `source`/`reviewed`-Flag auf `category_id` — Nutzerkorrektur überschreibt den AI-Wert ununterscheidbar | **Nein** |
+| Tags | `document_tag_links` hat **keine** `source`-Spalte (anders als Finance-Tags) | **Nein** |
+
+**Folgen für den Plan:**
+- Die manuelle Abhängigkeit beschränkt sich auf das **Steuer-Gold-Set** (Etappe A/F:
+  `tax_reviewed=true`, `source='user'`) und die **Few-Shot-Positiv-Beispiele** (Etappe E).
+  Ist dieses Set klein, ist nur das Eval-Gate schwächer — die Taxonomie-Ableitung bleibt
+  davon unberührt.
+- Für **Kategorie und Tags** lässt sich aus der DB **kein** Gold-Set automatisch bauen
+  (kein Marker). Deshalb dient die Handprüfung der ~150–400 Repräsentanten (Etappe C/F)
+  bewusst als Ersatz für das fehlende Signal.
+- **Etappe A zählt als Allererstes** die vorhandenen Mengen (`tax_reviewed=true`,
+  `source='user'`-Sektionen, korrigierte Anteile), damit wir wissen, ob das Gold-Set
+  fürs Eval-Gate reicht oder per Handprüfung aufgestockt werden muss.
+
+**Optionaler Zukunfts-Fix (nicht Voraussetzung für diesen Einmal-Lauf):** eine
+`category_source`-Spalte (`ai`/`user`) auf `documents` und eine `source`-Spalte auf
+`document_tag_links` — analog zu den Steuer-Sektionen. Dann werden *künftige* Kategorie-/
+Tag-Korrekturen mineable, und das Reclassify überschreibt sie nicht mehr. Macht die
+nächste Iteration deutlich stärker.
+
 ---
 
 ## 1. Leitprinzipien

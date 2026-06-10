@@ -11,6 +11,7 @@
     "db:generate": "drizzle-kit generate",
     "dev:frontend": "cd frontend && npm run dev",
     "check:sfc": "node scripts/check-sfc.mjs",
+    "diagnose:taxonomy": "node scripts/taxonomy/diagnose.mjs",
     "prepare": "husky"
   },
   "devDependencies": {
