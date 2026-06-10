@@ -2233,3 +2233,12 @@ export const searchPhotosNatural = api(
     return await service.searchPhotosNaturalLogic(userId, query, limit ?? 500, threshold ?? 0.18);
   }
 );
+
+export const listPhotoUploaders = api(
+  { expose: true, method: "GET", path: "/photos/uploaders", auth: true },
+  async (): Promise<{ uploaders: { id: number; name: string }[] }> => {
+    checkModule();
+    requirePermission(getAuthData()!, "photos.view");
+    return await service.listPhotoUploadersLogic();
+  }
+);

@@ -1,6 +1,5 @@
 import { ref, type Ref } from 'vue'
-import { listAlbums, listPersons, type Album, type Person } from '../api/photos'
-import { listUsers, type User } from '../api/users'
+import { listAlbums, listPersons, listPhotoUploaders, type Album, type Person } from '../api/photos'
 
 /**
  * App-weiter Cache für die Listen, die mehrere Galerie-Komponenten parallel
@@ -26,9 +25,11 @@ const albums = ref<Album[]>([])
 const albumsLoaded = ref(false)
 let albumsInFlight: Promise<Album[]> | null = null
 
-const users = ref<User[]>([])
+export interface Uploader { id: number; name: string }
+
+const users = ref<Uploader[]>([])
 const usersLoaded = ref(false)
-let usersInFlight: Promise<User[]> | null = null
+let usersInFlight: Promise<Uploader[]> | null = null
 
 async function fetchPersons(force = false): Promise<Person[]> {
   if (!force && personsLoaded.value) return persons.value
@@ -62,15 +63,15 @@ async function fetchAlbums(force = false): Promise<Album[]> {
   return albumsInFlight
 }
 
-async function fetchUsers(force = false): Promise<User[]> {
+async function fetchUsers(force = false): Promise<Uploader[]> {
   if (!force && usersLoaded.value) return users.value
   if (usersInFlight) return usersInFlight
   usersInFlight = (async () => {
     try {
-      const res = await listUsers()
-      users.value = res.users
+      const res = await listPhotoUploaders()
+      users.value = res.uploaders
       usersLoaded.value = true
-      return res.users
+      return res.uploaders
     } finally {
       usersInFlight = null
     }
@@ -93,13 +94,13 @@ function invalidateUsers() {
 export interface UseReferenceData {
   persons: Ref<Person[]>
   albums: Ref<Album[]>
-  users: Ref<User[]>
+  users: Ref<Uploader[]>
   personsLoaded: Ref<boolean>
   albumsLoaded: Ref<boolean>
   usersLoaded: Ref<boolean>
   fetchPersons: (force?: boolean) => Promise<Person[]>
   fetchAlbums: (force?: boolean) => Promise<Album[]>
-  fetchUsers: (force?: boolean) => Promise<User[]>
+  fetchUsers: (force?: boolean) => Promise<Uploader[]>
   invalidatePersons: () => void
   invalidateAlbums: () => void
   invalidateUsers: () => void
