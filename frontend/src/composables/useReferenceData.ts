@@ -1,5 +1,6 @@
 import { ref, type Ref } from 'vue'
 import { listAlbums, listPersons, type Album, type Person } from '../api/photos'
+import { listUsers, type User } from '../api/users'
 
 /**
  * App-weiter Cache für die Listen, die mehrere Galerie-Komponenten parallel
@@ -24,6 +25,10 @@ let personsInFlight: Promise<Person[]> | null = null
 const albums = ref<Album[]>([])
 const albumsLoaded = ref(false)
 let albumsInFlight: Promise<Album[]> | null = null
+
+const users = ref<User[]>([])
+const usersLoaded = ref(false)
+let usersInFlight: Promise<User[]> | null = null
 
 async function fetchPersons(force = false): Promise<Person[]> {
   if (!force && personsLoaded.value) return persons.value
@@ -57,6 +62,22 @@ async function fetchAlbums(force = false): Promise<Album[]> {
   return albumsInFlight
 }
 
+async function fetchUsers(force = false): Promise<User[]> {
+  if (!force && usersLoaded.value) return users.value
+  if (usersInFlight) return usersInFlight
+  usersInFlight = (async () => {
+    try {
+      const res = await listUsers()
+      users.value = res.users
+      usersLoaded.value = true
+      return res.users
+    } finally {
+      usersInFlight = null
+    }
+  })()
+  return usersInFlight
+}
+
 function invalidatePersons() {
   personsLoaded.value = false
 }
@@ -65,26 +86,38 @@ function invalidateAlbums() {
   albumsLoaded.value = false
 }
 
+function invalidateUsers() {
+  usersLoaded.value = false
+}
+
 export interface UseReferenceData {
   persons: Ref<Person[]>
   albums: Ref<Album[]>
+  users: Ref<User[]>
   personsLoaded: Ref<boolean>
   albumsLoaded: Ref<boolean>
+  usersLoaded: Ref<boolean>
   fetchPersons: (force?: boolean) => Promise<Person[]>
   fetchAlbums: (force?: boolean) => Promise<Album[]>
+  fetchUsers: (force?: boolean) => Promise<User[]>
   invalidatePersons: () => void
   invalidateAlbums: () => void
+  invalidateUsers: () => void
 }
 
 export function useReferenceData(): UseReferenceData {
   return {
     persons,
     albums,
+    users,
     personsLoaded,
     albumsLoaded,
+    usersLoaded,
     fetchPersons,
     fetchAlbums,
+    fetchUsers,
     invalidatePersons,
     invalidateAlbums,
+    invalidateUsers,
   }
 }
