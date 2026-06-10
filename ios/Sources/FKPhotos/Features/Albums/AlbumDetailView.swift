@@ -12,7 +12,7 @@ struct AlbumDetailView: View {
     @State private var showDeleteConfirm = false
     @State private var isDeleting = false
     @State private var fullscreenIndex: Int = 0
-    @State private var isFullscreenPresented = false
+    @State private var fullscreenNav: FullscreenNav? = nil
     @State private var filterSort = FilterSortViewModel()
     @State private var isSelecting = false
     @State private var selectedIds: Set<Int> = []
@@ -61,7 +61,7 @@ struct AlbumDetailView: View {
                                     toggleSelection(photo.id)
                                 } else {
                                     fullscreenIndex = displayedPhotos.firstIndex(where: { $0.id == photo.id }) ?? 0
-                                    isFullscreenPresented = true
+                                    fullscreenNav = FullscreenNav(startIndex: fullscreenIndex)
                                 }
                             }
                             .onLongPressGesture {
@@ -81,7 +81,7 @@ struct AlbumDetailView: View {
         }
         .navigationTitle(isSelecting ? "\(selectedIds.count) ausgewählt" : (album?.name ?? "Album"))
         .navigationBarTitleDisplayMode(.large)
-        .navigationDestination(isPresented: $isFullscreenPresented) {
+        .navigationDestination(item: $fullscreenNav) { _ in
             PhotoFullscreenView(photos: displayedPhotos, currentIndex: $fullscreenIndex)
         }
         .sheet(isPresented: $filterSort.isMenuPresented) {
@@ -253,5 +253,9 @@ struct AlbumDetailView: View {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+    }
+
+    private struct FullscreenNav: Hashable {
+        let startIndex: Int
     }
 }
