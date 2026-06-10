@@ -1,0 +1,61 @@
+/**
+ * Realtime fan-out for document scan-queue state changes.
+ *
+ * Mirrors photo/scan-queue-events.ts: every queue mutation calls
+ * `notifyDocScanQueueChanged()` which debounces into a single
+ * "scan-queue/state.changed" event. The DataManagementView already
+ * listens on that channel and will refetch `/document-queue/status`.
+ */
+import { realtime, user } from "~encore/clients";
+
+const DEBOUNCE_MS = 500;
+const ADMIN_CACHE_MS = 30_000;
+
+let pendingTimer: ReturnType<typeof setTimeout> | null = null;
+let cachedAdminIds: string[] | null = null;
+let cachedAdminAt = 0;
+
+async function loadAdminIds(): Promise<string[]> {
+  const now = Date.now();
+  if (cachedAdminIds && now - cachedAdminAt < ADMIN_CACHE_MS) {
+    return cachedAdminIds;
+  }
+  try {
+    const { userIds } = await user.listUserIdsWithPermission({
+      permission: "data.manage",
+    });
+    cachedAdminIds = userIds.map((id: number) => String(id));
+    cachedAdminAt = now;
+  } catch (err) {
+    console.warn(
+      `[doc-scan-queue-events] admin lookup failed: ${(err as Error).message}`,
+    );
+  }
+  return cachedAdminIds ?? [];
+}
+
+async function flush(): Promise<void> {
+  const userIds = await loadAdminIds();
+  if (userIds.length === 0) return;
+  try {
+    await realtime.publishEvent({
+      userIds,
+      channel: "scan-queue",
+      type: "state.changed",
+      resourceId: "doc-queue",
+      payload: {},
+    });
+  } catch (err) {
+    console.warn(
+      `[doc-scan-queue-events] publish failed: ${(err as Error).message}`,
+    );
+  }
+}
+
+export function notifyDocScanQueueChanged(): void {
+  if (pendingTimer) return;
+  pendingTimer = setTimeout(() => {
+    pendingTimer = null;
+    flush().catch(() => {});
+  }, DEBOUNCE_MS);
+}

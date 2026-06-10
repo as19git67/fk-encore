@@ -34,7 +34,7 @@ import {
 } from '../api/finance'
 import {
   getDocumentQueueStatus, reclassifyAllDocuments,
-  type QueueStatus as DocQueueStatus,
+  type DocQueueStatus,
   type ReclassifyAllMode,
 } from '../api/documents'
 import {
@@ -487,6 +487,7 @@ async function fetchFinanceTagQueueStatus() {
 
 useRealtimeEvent('scan-queue', 'state.changed', () => {
   fetchFinanceTagQueueStatus()
+  fetchDocQueueStatus()
 })
 
 async function handleFinanceTagRetry() {
@@ -525,53 +526,30 @@ async function handleFinanceTagReenqueue() {
   }
 }
 
-// ── Document Reclassify-All ───────────────────────────────────────────────────
+// ── Document Scan-Queue & Reclassify-All ─────────────────────────────────────
 
-const docQueueStatus = ref<DocQueueStatus>({ counts: [], totalPending: 0, totalProcessing: 0, totalFailed: 0 })
+const docQueueStatus = ref<DocQueueStatus>({ services: [] })
 const docReclassifyLoading = ref(false)
 const docReclassifyError = ref('')
 const docReclassifyResult = ref<number | null>(null)
 
-const docQueueIsActive = computed(
-  () => docQueueStatus.value.totalPending > 0 || docQueueStatus.value.totalProcessing > 0
-)
-
-const docServiceLabels: Record<string, string> = {
-  text_extract: 'OCR-Textextraktion',
+const docQueueServiceLabels: Record<string, string> = {
+  text_extract: 'OCR / Text',
   classify: 'KI-Klassifikation',
   embed: 'Embedding',
 }
 
-const docQueueByService = computed(() => {
-  const map = new Map<string, { pending: number; processing: number; failed: number }>()
-  for (const row of docQueueStatus.value.counts) {
-    let entry = map.get(row.service)
-    if (!entry) {
-      entry = { pending: 0, processing: 0, failed: 0 }
-      map.set(row.service, entry)
-    }
-    if (row.status === 'pending') entry.pending += row.count
-    else if (row.status === 'processing') entry.processing += row.count
-    else if (row.status === 'failed') entry.failed += row.count
-  }
-  return [...map.entries()].map(([service, counts]) => ({
-    service,
-    label: docServiceLabels[service] ?? service,
-    ...counts,
-  }))
-})
+const docIsActive = computed(() =>
+  docQueueStatus.value.services.some((svc) => svc.pending > 0 || svc.processing > 0)
+)
 
 async function fetchDocQueueStatus() {
   try {
     docQueueStatus.value = await getDocumentQueueStatus()
   } catch {
-    // ignore transient errors
+    // ignore transient errors — next push event will refresh
   }
 }
-
-useRealtimeEvent('scan-queue', 'state.changed', () => {
-  fetchDocQueueStatus()
-})
 
 async function handleDocReclassifyAll(mode: ReclassifyAllMode) {
   docReclassifyError.value = ''
@@ -1061,12 +1039,12 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Document Reclassify-All -->
+    <!-- Dokument-Verarbeitung -->
     <div class="data-management-group">
-      <h3>Dokumente neu klassifizieren</h3>
+      <h3>Dokument-Verarbeitung</h3>
       <p>
-        Startet die KI-Klassifikation (Kategorie, Tags, Steuerrelevanz) für alle Dokumente neu.
-        Mit „OCR + Klassifikation" wird zusätzlich der Text neu extrahiert.
+        Neue und neu klassifizierte Dokumente durchlaufen drei Schritte:
+        OCR / Text-Extraktion, KI-Klassifikation und Embedding.
       </p>
 
       <Message v-if="docReclassifyError" severity="error" class="mb-3" @close="docReclassifyError = ''">
@@ -1079,26 +1057,38 @@ onBeforeUnmount(() => {
         </Message>
       </div>
 
-      <div v-if="docQueueByService.length > 0" class="queue-table-wrapper">
-        <table class="queue-table mb-4">
+      <div class="queue-table-wrapper">
+        <table class="queue-table">
           <thead>
             <tr>
-              <th>Dienst</th>
+              <th>Service</th>
               <th>Ausstehend</th>
-              <th>In Bearbeitung</th>
-              <th>Fehlgeschlagen</th>
+              <th>In Arbeit</th>
+              <th>Fehler</th>
+              <th>Fertig</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in docQueueByService" :key="row.service">
-              <td>{{ row.label }}</td>
-              <td>{{ row.pending }}</td>
-              <td>{{ row.processing }}</td>
-              <td>{{ row.failed }}</td>
+            <tr v-for="svc in docQueueStatus.services" :key="svc.service">
+              <td>{{ docQueueServiceLabels[svc.service] ?? svc.service }}</td>
+              <td>{{ svc.pending }}</td>
+              <td>{{ svc.processing }}</td>
+              <td :class="{ 'text-danger': svc.failed > 0 }">{{ svc.failed }}</td>
+              <td class="text-secondary">{{ svc.done }}</td>
+            </tr>
+            <tr v-if="docQueueStatus.services.length === 0">
+              <td colspan="5" class="text-secondary" style="text-align:center">Keine Daten</td>
             </tr>
           </tbody>
         </table>
       </div>
+
+      <ProgressBar
+        v-if="docIsActive"
+        mode="indeterminate"
+        class="mb-3"
+        style="height: 4px"
+      />
 
       <div class="queue-actions">
         <Button
@@ -1106,7 +1096,7 @@ onBeforeUnmount(() => {
           icon="pi pi-sparkles"
           severity="secondary"
           :loading="docReclassifyLoading"
-          :disabled="docReclassifyLoading || docQueueIsActive"
+          :disabled="docReclassifyLoading || docIsActive"
           @click="handleDocReclassifyAll('classify_only')"
         />
         <Button
@@ -1114,7 +1104,7 @@ onBeforeUnmount(() => {
           icon="pi pi-refresh"
           severity="secondary"
           :loading="docReclassifyLoading"
-          :disabled="docReclassifyLoading || docQueueIsActive"
+          :disabled="docReclassifyLoading || docIsActive"
           @click="handleDocReclassifyAll('full')"
         />
       </div>
