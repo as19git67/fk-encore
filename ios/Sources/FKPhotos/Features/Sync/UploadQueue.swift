@@ -394,7 +394,7 @@ final class UploadQueueObserver {
     func requeueAllFailed() {
         Task {
             await UploadQueue.shared.requeueAllFailed()
-            BackgroundSyncManager.shared.drainUploadQueue()
+            await BackgroundSyncManager.shared.drainUploadQueue()
         }
     }
 
