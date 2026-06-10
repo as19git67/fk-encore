@@ -186,6 +186,7 @@ export async function runClassify(documentId: number): Promise<{ classification:
     title: classification.title || row.title || row.original_filename,
     doc_date: classification.doc_date,
     sender: classification.sender,
+    document_number: classification.document_number,
     summary: classification.summary,
     classification_confidence: classification.confidence,
     status: "ready",

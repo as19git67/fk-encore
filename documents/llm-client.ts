@@ -57,6 +57,7 @@ export interface Classification {
   title: string;
   doc_date: string | null;
   sender: string | null;
+  document_number: string | null;
   summary: string;
   tags: string[];
   confidence: number;
@@ -194,6 +195,7 @@ export function parseClassification(raw: unknown): Classification {
   const title = typeof r.title === "string" ? r.title.trim() : "";
   const docDate = typeof r.doc_date === "string" && r.doc_date.trim() !== "" ? r.doc_date.trim() : null;
   const sender = typeof r.sender === "string" && r.sender.trim() !== "" ? r.sender.trim() : null;
+  const documentNumber = typeof r.document_number === "string" && r.document_number.trim() !== "" ? r.document_number.trim() : null;
   const summary = typeof r.summary === "string" ? r.summary.trim() : "";
   const tagsRaw = Array.isArray(r.tags) ? r.tags : [];
   const tags = tagsRaw
@@ -207,6 +209,7 @@ export function parseClassification(raw: unknown): Classification {
     title,
     doc_date: docDate,
     sender,
+    document_number: documentNumber,
     summary,
     tags,
     confidence: conf,

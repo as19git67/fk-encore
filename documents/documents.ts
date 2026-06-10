@@ -93,6 +93,7 @@ export interface DocumentSummary {
   uploaded_at: string | null;
   doc_date: string | null;
   sender: string | null;
+  document_number: string | null;
   category_id: number | null;
   category_slug: string | null;
   classification_confidence: number | null;
@@ -438,6 +439,7 @@ export const listDocuments = api(
           title: documents.title,
           doc_date: documents.doc_date,
           sender: documents.sender,
+          document_number: documents.document_number,
           summary: documents.summary,
           extracted_text: documents.extracted_text,
           classification_confidence: documents.classification_confidence,
@@ -580,6 +582,7 @@ export interface UpdateDocumentRequest {
   title?: string | null;
   doc_date?: string | null;
   sender?: string | null;
+  document_number?: string | null;
   summary?: string | null;
   category_slug?: string | null;
   tags?: string[];
@@ -599,6 +602,7 @@ export const updateDocument = api(
     if (req.title !== undefined) patch.title = req.title?.trim() || null;
     if (req.doc_date !== undefined) patch.doc_date = req.doc_date?.trim() || null;
     if (req.sender !== undefined) patch.sender = req.sender?.trim() || null;
+    if (req.document_number !== undefined) patch.document_number = req.document_number?.trim() || null;
     if (req.summary !== undefined) patch.summary = req.summary?.trim() || null;
 
     if (req.category_slug !== undefined) {
@@ -944,6 +948,51 @@ export const batchReclassify = api(
     triggerWorkers();
 
     return { affected_documents: docIds.length };
+  },
+);
+
+// ─── Reclassify all documents ───────────────────────────────────────────────
+
+export interface ReclassifyAllRequest {
+  mode: "classify_only" | "full";
+}
+
+export interface ReclassifyAllResponse {
+  queued: number;
+}
+
+export const reclassifyAll = api(
+  { expose: true, method: "POST", path: "/documents/reclassify-all", auth: true },
+  async (req: ReclassifyAllRequest): Promise<ReclassifyAllResponse> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "data.manage");
+
+    const full = req.mode === "full";
+    const services: readonly import("./scan-queue").DocumentScanService[] =
+      full ? ["text_extract", "classify", "embed"] : ["classify", "embed"];
+    const newStatus = full ? "pending" : "classifying";
+
+    const rows = await dbAll<{ id: number }>(
+      db.select({ id: documents.id }).from(documents),
+    );
+
+    if (rows.length === 0) return { queued: 0 };
+
+    const ids = rows.map((r) => r.id);
+    const patch: Partial<typeof documents.$inferInsert> = {
+      status: newStatus as any,
+      last_error: null,
+    };
+    if (full) patch.force_ocr = true;
+    await db.update(documents).set(patch).where(inArray(documents.id, ids));
+
+    for (const id of ids) {
+      await requeueDocument(id, services);
+    }
+    triggerWorkers();
+
+    return { queued: ids.length };
   },
 );
 
@@ -1491,10 +1540,13 @@ export const listTaxYears = api(
     const groupIds = await loadUserGroupIds(userId);
     const visibility = groupIds.length === 0
       ? sql`(visibility = 'private' AND user_id = ${userId})`
-      : sql`(
-          (visibility = 'private' AND user_id = ${userId})
-          OR (visibility = 'group' AND group_id = ANY(${groupIds}))
-        )`;
+      : (() => {
+          const groupIdArray = sql`ARRAY[${sql.join(groupIds.map((g) => sql`${g}`), sql`, `)}]::int[]`;
+          return sql`(
+            (visibility = 'private' AND user_id = ${userId})
+            OR (visibility = 'group' AND group_id = ANY(${groupIdArray}))
+          )`;
+        })();
     const rows = await db.execute<{ tax_year: number; count: string }>(sql`
       SELECT tax_year, COUNT(*)::text as count
       FROM documents
@@ -1592,6 +1644,7 @@ export const listTaxDocuments = api(
           title: documents.title,
           doc_date: documents.doc_date,
           sender: documents.sender,
+          document_number: documents.document_number,
           summary: documents.summary,
           extracted_text: documents.extracted_text,
           classification_confidence: documents.classification_confidence,
@@ -1803,6 +1856,7 @@ export const searchDocumentsEndpoint = api(
           title: documents.title,
           doc_date: documents.doc_date,
           sender: documents.sender,
+          document_number: documents.document_number,
           summary: documents.summary,
           extracted_text: documents.extracted_text,
           classification_confidence: documents.classification_confidence,
@@ -2153,6 +2207,7 @@ function toSummary(
     uploaded_at: row.uploaded_at ?? null,
     doc_date: row.doc_date,
     sender: row.sender,
+    document_number: row.document_number ?? null,
     category_id: row.category_id,
     category_slug: categorySlug,
     classification_confidence: row.classification_confidence,
