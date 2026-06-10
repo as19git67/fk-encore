@@ -56,7 +56,7 @@ import {
   loadVisibleDocument,
   visibleDocumentsWhere,
 } from "./visibility";
-import { enqueueDocumentScan, getQueueStatus, requeueDocument } from "./scan-queue";
+import { enqueueDocumentScan, getQueueStatus, requeueDocument, type QueueStatus } from "./scan-queue";
 import { triggerWorkers } from "./scan-worker";
 import { searchDocuments, type SearchMode } from "./search";
 import {
@@ -1895,7 +1895,7 @@ export const searchDocumentsEndpoint = api(
 
 export const getDocumentQueueStatus = api(
   { expose: true, method: "GET", path: "/document-queue/status", auth: true },
-  async () => {
+  async (): Promise<QueueStatus> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
