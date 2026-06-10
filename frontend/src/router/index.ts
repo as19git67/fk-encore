@@ -90,6 +90,19 @@ router.beforeEach((to) => {
   }
 })
 
+// After a deployment Vite chunk hashes change. If a stale tab tries to
+// lazy-load a route whose chunk no longer exists on the server, vue-router
+// emits a navigation error. Catch it and do a full reload so the browser
+// picks up the new index.html with current chunk references.
+router.onError((err, to) => {
+  if (
+    err.message?.includes('Failed to fetch dynamically imported module') ||
+    err.message?.includes('Importing a module script failed')
+  ) {
+    window.location.assign(to.fullPath)
+  }
+})
+
 // Persist the last successfully-visited authenticated route so it can be
 // restored by the `/` redirect above. Runs after the navigation is
 // committed, so redirected / aborted navigations never end up stored.
