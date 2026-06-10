@@ -70,6 +70,35 @@ struct PhotoSyncPreferences {
         set { UserDefaults.standard.set(newValue, forKey: albumMappingsKey) }
     }
 
+    // MARK: - Confirmed album mappings
+    //
+    // Tracks which iOS albums have an explicit user decision for the server
+    // album mapping (including "no album"). Albums not in this set are skipped
+    // during auto-sync until the user makes a choice.
+
+    private static let confirmedMappingsKey = "sync.confirmedMappings"
+
+    static var confirmedMappingIds: Set<String> {
+        get { Set(UserDefaults.standard.stringArray(forKey: confirmedMappingsKey) ?? []) }
+        set { UserDefaults.standard.set(Array(newValue), forKey: confirmedMappingsKey) }
+    }
+
+    static func confirmMapping(for albumId: String) {
+        var ids = confirmedMappingIds
+        ids.insert(albumId)
+        confirmedMappingIds = ids
+    }
+
+    static func unconfirmMapping(for albumId: String) {
+        var ids = confirmedMappingIds
+        ids.remove(albumId)
+        confirmedMappingIds = ids
+    }
+
+    static func isMappingConfirmed(for albumId: String) -> Bool {
+        confirmedMappingIds.contains(albumId)
+    }
+
     // MARK: - Per-album sync dates
 
     private static func loadAlbumSyncDates() -> [String: Date] {

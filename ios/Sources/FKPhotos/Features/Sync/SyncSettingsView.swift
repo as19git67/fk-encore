@@ -56,11 +56,15 @@ struct SyncSettingsView: View {
                                 PhotoSyncPreferences.selectedAlbumIds = newValue
                                 let added = newValue.subtracting(oldValue)
                                 if !added.isEmpty {
-                                    // Surface the "full sync vs. only new"
-                                    // decision via the confirmation dialog
-                                    // instead of silently locking the user
-                                    // into "only new" — see issue #N.
+                                    // "Gesamte Mediathek" is auto-confirmed
+                                    if added.contains(PhotoSyncPreferences.allLibrarySentinel) {
+                                        PhotoSyncPreferences.confirmMapping(for: PhotoSyncPreferences.allLibrarySentinel)
+                                    }
                                     enqueueInitialSyncDecisions(for: added)
+                                }
+                                let deselected = oldValue.subtracting(newValue)
+                                for id in deselected {
+                                    PhotoSyncPreferences.unconfirmMapping(for: id)
                                 }
                                 let removed = albumServerMappings.keys.filter { !newValue.contains($0) }
                                 if !removed.isEmpty {
@@ -87,15 +91,13 @@ struct SyncSettingsView: View {
                 if !selectedAlbumIds.isEmpty {
                     Section {
                         ForEach(sortedSelectedAlbumIds, id: \.self) { iosId in
+                            let isConfirmed = PhotoSyncPreferences.isMappingConfirmed(for: iosId)
                             NavigationLink {
                                 ServerAlbumPickerView(
                                     title: displayName(for: iosId),
                                     selectedAlbumId: serverAlbumBinding(for: iosId),
                                     disabledIds: cycleDisabledIds(forIosAlbum: iosId),
                                     onAlbumCreated: { album in
-                                        // Append immediately so the parent's
-                                        // name lookup succeeds before the
-                                        // next /albums refresh completes.
                                         if !serverAlbums.contains(where: { $0.id == album.id }) {
                                             serverAlbums.append(album)
                                         }
@@ -104,12 +106,26 @@ struct SyncSettingsView: View {
                             } label: {
                                 VStack(alignment: .leading, spacing: 4) {
                                     HStack {
+                                        if !isConfirmed {
+                                            Image(systemName: "exclamationmark.triangle.fill")
+                                                .foregroundStyle(.orange)
+                                                .font(.caption)
+                                        }
                                         Text(displayName(for: iosId))
                                         Spacer()
-                                        Text(serverAlbumName(for: albumServerMappings[iosId]) ?? "Kein Album")
-                                            .foregroundStyle(albumServerMappings[iosId] != nil ? .secondary : .tertiary)
+                                        if isConfirmed {
+                                            Text(serverAlbumName(for: albumServerMappings[iosId]) ?? "Kein Album")
+                                                .foregroundStyle(albumServerMappings[iosId] != nil ? .secondary : .tertiary)
+                                        } else {
+                                            Text("Nicht zugeordnet")
+                                                .foregroundStyle(.orange)
+                                        }
                                     }
-                                    if let syncDate = PhotoSyncPreferences.albumSyncDate(for: iosId) {
+                                    if !isConfirmed {
+                                        Text("Bitte Ziel-Album wählen – wird sonst nicht synchronisiert")
+                                            .font(.caption)
+                                            .foregroundStyle(.orange)
+                                    } else if let syncDate = PhotoSyncPreferences.albumSyncDate(for: iosId) {
                                         Text("Letzter Sync: \(syncDate, style: .relative)")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
@@ -146,31 +162,6 @@ struct SyncSettingsView: View {
                     } footer: {
                         Text("Nach links wischen → alle Fotos erneut synchronisieren. Nach rechts wischen → nur zukünftige Fotos synchronisieren.")
                     }
-                }
-
-                // ── Media types ────────────────────────────────────────
-                Section {
-                    Toggle("Screenshots ausschliessen", isOn: $excludeScreenshots)
-                    HStack {
-                        Text("Videos")
-                        Spacer()
-                        Text("Noch nicht unterstützt")
-                            .font(.footnote)
-                            .foregroundStyle(.tertiary)
-                    }
-                } header: {
-                    Text("Medientypen")
-                } footer: {
-                    Text("Screenshots werden standardmässig nicht hochgeladen. Video-Upload wird in einer zukünftigen Version unterstützt.")
-                }
-
-                // ── Network ────────────────────────────────────────────
-                Section {
-                    Toggle("Nur WLAN", isOn: $wifiOnly)
-                } header: {
-                    Text("Netzwerk")
-                } footer: {
-                    Text("Wenn aktiviert, werden Fotos nur über WLAN hochgeladen.")
                 }
 
                 // ── Manual trigger ─────────────────────────────────────
@@ -211,6 +202,31 @@ struct SyncSettingsView: View {
                             .foregroundStyle(.red)
                     }
                 }
+            }
+
+            // ── Media types (always visible — also applies to manual uploads) ──
+            Section {
+                Toggle("Screenshots ausschliessen", isOn: $excludeScreenshots)
+                HStack {
+                    Text("Videos")
+                    Spacer()
+                    Text("Noch nicht unterstützt")
+                        .font(.footnote)
+                        .foregroundStyle(.tertiary)
+                }
+            } header: {
+                Text("Medientypen")
+            } footer: {
+                Text("Screenshots werden standardmässig nicht hochgeladen. Video-Upload wird in einer zukünftigen Version unterstützt.")
+            }
+
+            // ── Network (always visible — also applies to manual uploads) ──
+            Section {
+                Toggle("Nur WLAN", isOn: $wifiOnly)
+            } header: {
+                Text("Netzwerk")
+            } footer: {
+                Text("Wenn aktiviert, werden Fotos nur über WLAN hochgeladen.")
             }
 
             // ── Debug ──────────────────────────────────────────────────
@@ -469,6 +485,8 @@ struct SyncSettingsView: View {
                     albumServerMappings.removeValue(forKey: iosId)
                 }
                 PhotoSyncPreferences.albumMappings = albumServerMappings
+                PhotoSyncPreferences.confirmMapping(for: iosId)
+                refreshTick += 1
                 Task { await loadServerAlbums() }
             }
         )
@@ -727,7 +745,7 @@ struct AlbumPickerView: View {
                     }
                 }
                 collect(from: PHAssetCollection.fetchAssetCollections(with: .smartAlbum, subtype: .any, options: nil), isSmart: true)
-                collect(from: PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: nil), isSmart: false)
+                collect(from: PHAssetCollection.fetchAssetCollections(with: .album, subtype: .albumRegular, options: nil), isSmart: false)
 
                 // Build a name-occurrence map so we only suffix-disambiguate
                 // when there's an actual collision. A unique title stays
