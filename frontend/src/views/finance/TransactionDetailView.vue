@@ -11,6 +11,7 @@ import TagAutoComplete from '../../components/finance/TagAutoComplete.vue'
 import Textarea from 'primevue/textarea'
 import Dialog from 'primevue/dialog'
 import { toLocalIsoDate } from '../../utils/dateFormat'
+import { useModuleBack } from '../../composables/useModuleBack'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useAccountsStore } from '../../stores/finance/accounts'
 import { useTagsStore } from '../../stores/finance/tags'
@@ -20,6 +21,7 @@ import { lookupBtcCodeDe } from '../../utils/btcCodes'
 
 const route = useRoute()
 const router = useRouter()
+const { goBack } = useModuleBack('/finanzen', 'finance-overview')
 const txStore = useTransactionsStore()
 const accountsStore = useAccountsStore()
 const tagsStore = useTagsStore()
@@ -204,7 +206,7 @@ async function rejectAll() {
 
 function cancel() {
   syncForm()
-  router.back()
+  goBack()
 }
 
 async function save() {
@@ -222,7 +224,7 @@ async function save() {
     }
     tx.value = await api.updateTransaction(tx.value.id, input)
     syncForm()
-    router.back()
+    goBack()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -236,7 +238,7 @@ async function deleteTx() {
   deleting.value = true
   try {
     await api.deleteTransaction(tx.value.id)
-    router.back()
+    goBack()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
     deleting.value = false
@@ -426,7 +428,7 @@ const extractedFields = computed(() => {
         severity="secondary"
         rounded
         aria-label="Zurück"
-        @click="router.back()"
+        @click="goBack"
       />
       <h1>{{ tx?.counterparty || 'Buchung' }}</h1>
       <Button
