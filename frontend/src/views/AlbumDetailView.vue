@@ -1823,19 +1823,32 @@ async function handleGroupNext(reviewedGroupId: number) {
   // Resolve the next group along the grid-ordered sequence BEFORE the
   // reload drops the just-reviewed group from it, so we keep our place in
   // grid order (wrapping to the first pending group when started mid-grid).
+  // Capture the whole group OBJECT, not just its id: loadData() refetches
+  // the album WITHOUT photos and rehydrates the photo array in the
+  // background, so for a moment album.photos — and therefore
+  // albumPhotoGroups — is empty. Looking the next group up from
+  // albumPhotoGroups only after the reload would then find nothing and
+  // strand the user back in the thumbnail grid mid-streak.
   const candidateId = nextGroupInSequence(
     reviewSequence.value,
     reviewedGroupId,
     id => albumPhotoGroups.value.some(g => g.id === id && !g.reviewed_at),
   )
+  const candidateGroup = candidateId !== null
+    ? albumPhotoGroups.value.find(g => g.id === candidateId) ?? null
+    : null
   await loadData()
   // Anchor on a still-visible photo of the just-reviewed group (see
   // handleGroupClose); harmless when we immediately open the next group.
   const anchorId = postReviewAnchorId(activeGroup.value)
   await galleryRef.value?.reload(anchorId !== null ? { aroundPhotoId: anchorId } : undefined)
-  if (candidateId !== null) {
-    const refreshed = albumPhotoGroups.value.find(g => g.id === candidateId && !g.reviewed_at)
-    activeGroup.value = refreshed ?? null
+  if (candidateGroup !== null) {
+    // Prefer the freshly-trimmed group once the photo array has rehydrated;
+    // fall back to the pre-captured object while that hydration is still in
+    // flight so the next group always opens. PhotoCompareView fetches its
+    // own members, so the captured (possibly slightly stale) group is fine.
+    const refreshed = albumPhotoGroups.value.find(g => g.id === candidateGroup.id && !g.reviewed_at)
+    activeGroup.value = refreshed ?? candidateGroup
   } else {
     const group = activeGroup.value
     activeGroup.value = null
