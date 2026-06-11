@@ -335,8 +335,8 @@ function confidenceBarFraction(g: ReviewQueueGroup): number {
 
 const activeGroup = ref<PhotoGroup | null>(null)
 
-function openManual(group: ReviewQueueGroup) {
-  activeGroup.value = {
+function toPhotoGroup(group: ReviewQueueGroup): PhotoGroup {
+  return {
     id: group.id,
     user_id: 0,
     cover_photo_id: group.cover_photo_id ?? undefined,
@@ -348,21 +348,34 @@ function openManual(group: ReviewQueueGroup) {
   }
 }
 
+function openManual(group: ReviewQueueGroup) {
+  activeGroup.value = toPhotoGroup(group)
+}
+
 function onCompareClose() {
   activeGroup.value = null
+}
+
+function removeFromQueue(groupId: number) {
+  const reviewedGroup = groups.value.find((g) => g.id === groupId)
+  groups.value = groups.value.filter((g) => g.id !== groupId)
+  total.value = Math.max(0, total.value - 1)
+  if (reviewedGroup?.ai_picked_confidence === 'high') {
+    highConfidenceTotal.value = Math.max(0, highConfidenceTotal.value - 1)
+  }
 }
 
 function onCompareReviewed() {
   const reviewedId = activeGroup.value?.id
   activeGroup.value = null
-  if (reviewedId !== undefined) {
-    const reviewedGroup = groups.value.find((g) => g.id === reviewedId)
-    groups.value = groups.value.filter((g) => g.id !== reviewedId)
-    total.value = Math.max(0, total.value - 1)
-    if (reviewedGroup?.ai_picked_confidence === 'high') {
-      highConfidenceTotal.value = Math.max(0, highConfidenceTotal.value - 1)
-    }
-  }
+  if (reviewedId !== undefined) removeFromQueue(reviewedId)
+}
+
+function onCompareNext(reviewedGroupId: number) {
+  removeFromQueue(reviewedGroupId)
+  // Open the next still-pending group in queue order.
+  const next = groups.value[0]
+  activeGroup.value = next ? toPhotoGroup(next) : null
 }
 
 // ── Card rendering helpers ──
@@ -712,9 +725,9 @@ onMounted(() => {
       :group="activeGroup"
       :all-photos="[]"
       :total-unreviewed="total"
-      :single-group-mode="true"
       @close="onCompareClose"
       @reviewed="onCompareReviewed"
+      @next="onCompareNext"
     />
 
     <!-- Bulk-Accept disclaimer (Stufe D). Shows the user's actual
