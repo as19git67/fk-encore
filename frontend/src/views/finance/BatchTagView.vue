@@ -21,6 +21,7 @@
 
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useModuleBack } from '../../composables/useModuleBack'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Checkbox from 'primevue/checkbox'
@@ -30,6 +31,7 @@ import { useTxSelectionStore } from '../../stores/finance/selection'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 
 const router = useRouter()
+const { goBack } = useModuleBack('/finanzen', 'finance-overview')
 const tagsStore = useTagsStore()
 const selectionStore = useTxSelectionStore()
 const txStore = useTransactionsStore()
@@ -122,9 +124,6 @@ const dirtyRows = computed(() =>
 
 const hasChanges = computed(() => dirtyRows.value.length > 0)
 
-function goBack() {
-  router.back()
-}
 
 async function save() {
   if (!hasChanges.value || saving.value) return
@@ -164,7 +163,7 @@ async function save() {
       }
       return { ...tx, tags }
     }))
-    void router.back()
+    goBack()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
