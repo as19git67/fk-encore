@@ -538,9 +538,6 @@ async function openTagDetails(tag: string) {
   }
 }
 
-function onTagRowClick(event: { data: { tag: string } }) {
-  openTagDetails(event.data.tag)
-}
 
 // --- Drill-down: transactions behind a single period row ---
 const periodDetailVisible = ref(false)
@@ -638,7 +635,12 @@ const chartOptions = computed(() => {
   return {
     responsive: true,
     maintainAspectRatio: false,
-    plugins: { legend: { display: false } },
+    plugins: {
+      legend: {
+        display: editableKind.value === 'ongoing',
+        labels: { color: tickColor, boxWidth: 12, padding: 12 },
+      },
+    },
     scales: {
       x: { ticks: { color: tickColor }, grid: { color: gridColor } },
       y: { ticks: { color: tickColor }, grid: { color: gridColor } },
@@ -682,10 +684,16 @@ const tagChartOptions = computed(() => {
     responsive: true,
     maintainAspectRatio: false,
     plugins: { legend: { display: false } },
+    onClick: (_evt: unknown, elements: Array<{ index: number }>) => {
+      if (elements.length > 0) {
+        const tag = result.value?.byTag[elements[0]!.index]?.tag
+        if (tag) openTagDetails(tag)
+      }
+    },
     scales: {
       x: { ticks: { color: tickColor }, grid: { color: gridColor } },
       y: {
-        ticks: { color: tickColor, autoSkip: false },
+        ticks: { color: tickColor, autoSkip: false, font: { size: 12 } },
         grid: { color: gridColor },
       },
     },
@@ -995,42 +1003,14 @@ const tagChartOptions = computed(() => {
     </section>
 
     <section v-if="result && result.byTag.length > 0" class="card">
-      <h2>Aufschlüsselung nach Tag</h2>
+      <h2>Aufschlüsselung nach Schlagwort</h2>
       <div
         v-if="tagChartData"
-        class="chart-wrap"
-        :style="{ height: `${Math.max(8, result.byTag.length * 2)}rem` }"
+        class="chart-wrap tag-chart-wrap"
+        :style="{ height: `${Math.max(12, result.byTag.length * 3.5)}rem` }"
       >
         <Chart type="bar" :data="tagChartData" :options="tagChartOptions" />
       </div>
-      <DataTable
-        :value="result.byTag"
-        stripedRows
-        rowHover
-        class="clickable-rows"
-        @row-click="onTagRowClick"
-      >
-        <Column field="tag" header="Tag" />
-        <Column
-          header="Summe"
-          headerStyle="text-align:right"
-          bodyStyle="text-align:right"
-        >
-          <template #body="{ data }">
-            <span class="num">{{ formatCurrency(data.sum) }}</span>
-          </template>
-        </Column>
-        <Column
-          field="count"
-          header="Anzahl"
-          headerStyle="text-align:right"
-          bodyStyle="text-align:right"
-        >
-          <template #body="{ data }">
-            <span class="num">{{ data.count }}</span>
-          </template>
-        </Column>
-      </DataTable>
     </section>
 
     <section v-if="result && result.topCounterparties.length > 0" class="card">
@@ -1294,6 +1274,9 @@ const tagChartOptions = computed(() => {
 }
 .chart-wrap {
   height: 16rem;
+}
+.tag-chart-wrap {
+  cursor: pointer;
 }
 .hint {
   color: var(--p-text-muted-color);
