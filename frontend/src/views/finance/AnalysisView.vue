@@ -638,7 +638,12 @@ const chartOptions = computed(() => {
   return {
     responsive: true,
     maintainAspectRatio: false,
-    plugins: { legend: { display: false } },
+    plugins: {
+      legend: {
+        display: editableKind.value === 'ongoing',
+        labels: { color: tickColor, boxWidth: 12, padding: 12 },
+      },
+    },
     scales: {
       x: { ticks: { color: tickColor }, grid: { color: gridColor } },
       y: { ticks: { color: tickColor }, grid: { color: gridColor } },
