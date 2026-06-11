@@ -31,6 +31,7 @@ import {
   type GallerySortField,
   getGalleryIds,
 } from '../api/gallery'
+import { orderedUnreviewedGroupIds, nextGroupInSequence } from '../utils/reviewOrder'
 
 const TripMap = defineAsyncComponent(() => import('../components/TripMap.vue'))
 import {
@@ -559,10 +560,6 @@ const albumPhotoGroups = computed<PhotoGroup[]>(() => {
   return result
 })
 
-const unreviewedGroupCount = computed(() =>
-  albumPhotoGroups.value.filter(g => !g.reviewed_at).length
-)
-
 // Album photos after applying the FilterMenu criteria. Used by the map view
 // and filter chip display (not by the VirtualGallery grid).
 const groupCoverIds = computed<Set<number>>(() =>
@@ -622,6 +619,24 @@ const albumPhotosFiltered = computed<Photo[]>(() => {
   const hitSet = new Set(ids)
   return albumPhotos.value.filter(p => hitSet.has(p.id))
 })
+
+// ── Manual group review order ──
+// Photo ids in the exact order the grid shows them: search ranking when a
+// search is active, otherwise the filtered album in sort order. Drives the
+// grid-ordered, grid-scoped review sequence below.
+const gridOrderedPhotoIds = computed<number[]>(() => {
+  const ids = searchResultIds.value
+  if (ids !== null) return ids.filter(id => albumPhotoIds.value.has(id))
+  return albumPhotos.value.map(p => p.id)
+})
+
+// Unreviewed groups to offer for manual review — only those present in the
+// current grid, ordered by where they appear in it.
+const reviewSequence = computed<number[]>(() =>
+  orderedUnreviewedGroupIds(gridOrderedPhotoIds.value, albumPhotoGroups.value),
+)
+
+const unreviewedGroupCount = computed(() => reviewSequence.value.length)
 
 // ── Grid cursor hydration (#304) ─────────────────────────────────────────────
 function entryToMinimalPhoto(entry: GalleryGridEntry): Photo {
@@ -1803,13 +1818,20 @@ async function handleGroupNext(reviewedGroupId: number) {
   // reviewed group's badge off here before the reload — same optimistic
   // update as handleGroupReviewed.
   galleryRef.value?.markGroupReviewed(reviewedGroupId)
-  const candidateId = albumPhotoGroups.value.find(g => !g.reviewed_at && g.id !== reviewedGroupId)?.id
+  // Resolve the next group along the grid-ordered sequence BEFORE the
+  // reload drops the just-reviewed group from it, so we keep our place in
+  // grid order (wrapping to the first pending group when started mid-grid).
+  const candidateId = nextGroupInSequence(
+    reviewSequence.value,
+    reviewedGroupId,
+    id => albumPhotoGroups.value.some(g => g.id === id && !g.reviewed_at),
+  )
   await loadData()
   // Anchor on a still-visible photo of the just-reviewed group (see
   // handleGroupClose); harmless when we immediately open the next group.
   const anchorId = postReviewAnchorId(activeGroup.value)
   await galleryRef.value?.reload(anchorId !== null ? { aroundPhotoId: anchorId } : undefined)
-  if (candidateId !== undefined) {
+  if (candidateId !== null) {
     const refreshed = albumPhotoGroups.value.find(g => g.id === candidateId && !g.reviewed_at)
     activeGroup.value = refreshed ?? null
   } else {
@@ -1820,7 +1842,10 @@ async function handleGroupNext(reviewedGroupId: number) {
 }
 
 function handleStartGroupReview() {
-  const first = albumPhotoGroups.value.find(g => !g.reviewed_at)
+  const firstId = reviewSequence.value[0]
+  const first = firstId !== undefined
+    ? albumPhotoGroups.value.find(g => g.id === firstId)
+    : undefined
   if (first) {
     preReviewPhotoId.value = cursorPhoto.value?.id ?? null
     activeGroup.value = first

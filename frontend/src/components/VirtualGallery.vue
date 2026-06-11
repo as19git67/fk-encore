@@ -424,11 +424,27 @@ function scrollToIndex(index: number, align: 'start' | 'center' | 'end' | 'auto'
   virtualizer.value.scrollToIndex(row, { align })
 }
 
+// Parent-triggered reload. `source.reload` re-inits the sparse entries
+// array (a fresh window around the anchor) but, unlike the mount-time
+// `loadAndScroll`, does NOT re-fetch the CURRENT viewport — and the
+// prefetch watcher only fires on a `virtualRows` change, which a reload
+// that keeps the same scroll position doesn't produce. The result was a
+// band of permanently-blank skeletons (the user's "erstes Drittel bleibt
+// leer, bis man scrollt") after a curation reload. Explicitly prefetch the
+// visible window once the new total has settled so those cells fill
+// without waiting for a scroll.
+async function reload(opts?: { aroundPhotoId?: number | null }): Promise<void> {
+  await source.reload(opts)
+  await new Promise<void>((r) => requestAnimationFrame(() => r()))
+  runPrefetch()
+  updateScrollEnds()
+}
+
 defineExpose({
   updateEntry: source.updateEntry,
   markGroupReviewed: source.markGroupReviewed,
   bumpCommentCount: source.bumpCommentCount,
-  reload: source.reload,
+  reload,
   loadEntryAt: source.loadEntryAt,
   findLoadedIndexById,
   scrollToIndex,
