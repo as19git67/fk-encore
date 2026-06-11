@@ -11,6 +11,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useScrollRestore } from '../../composables/useScrollRestore'
+import { useModuleBack } from '../../composables/useModuleBack'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import InputText from 'primevue/inputtext'
@@ -465,6 +466,8 @@ function openBatchTagEditor() {
   void router.push({ name: 'finance-batch-tag' })
 }
 
+const { goBack: moduleBack } = useModuleBack('/finanzen', 'finance-overview')
+
 function goBack() {
   if (selectMode.value) {
     // Leaving select mode is the more useful action than navigating
@@ -473,8 +476,7 @@ function goBack() {
     selectionStore.clear()
     return
   }
-  if (window.history.length > 1) router.back()
-  else void router.push({ name: 'finance-overview' })
+  moduleBack()
 }
 </script>
 
