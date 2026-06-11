@@ -11,6 +11,41 @@ import './style.css'
 import Tooltip from 'primevue/tooltip'
 import { deviceSupportsHoverTooltips } from './utils/tooltips'
 
+function getFirstDayOfWeek(): number {
+  try {
+    const locale = new Intl.Locale(navigator.language)
+    if ('weekInfo' in locale) {
+      // Intl.Locale.weekInfo.firstDay: 1=Mon … 6=Sat, 7=Sun
+      // PrimeVue firstDayOfWeek:       0=Sun, 1=Mon … 6=Sat
+      const firstDay = (locale as unknown as { weekInfo: { firstDay: number } }).weekInfo.firstDay
+      return firstDay === 7 ? 0 : firstDay
+    }
+  } catch {}
+  // Fallback for browsers without weekInfo
+  const lang = navigator.language.split('-')[0].toLowerCase()
+  const mondayLocales = ['de', 'fr', 'es', 'it', 'pt', 'nl', 'pl', 'sv', 'da', 'no', 'fi', 'ru', 'cs', 'hu', 'ro', 'tr']
+  return mondayLocales.includes(lang) ? 1 : 0
+}
+
+function buildPrimeVueLocale() {
+  const firstDayOfWeek = getFirstDayOfWeek()
+  const lang = navigator.language.split('-')[0].toLowerCase()
+  if (lang === 'de') {
+    return {
+      firstDayOfWeek,
+      dayNames: ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'],
+      dayNamesShort: ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'],
+      dayNamesMin: ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'],
+      monthNames: ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'],
+      monthNamesShort: ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'],
+      today: 'Heute',
+      clear: 'Löschen',
+      weekHeader: 'KW',
+    }
+  }
+  return { firstDayOfWeek }
+}
+
 const app = createApp(App)
 
 app.use(createPinia())
@@ -34,6 +69,7 @@ const VivantyPreset = definePreset(Aura, {
 })
 
 app.use(PrimeVue, {
+  locale: buildPrimeVueLocale(),
   theme: {
     preset: VivantyPreset,
     options: {
