@@ -451,6 +451,31 @@ actor APIClient {
         return result
     }
 
+    /// Proactively refreshes the access token when it expires within the next 2 minutes.
+    /// Call before starting a long-running operation (e.g. drain loop) to avoid
+    /// mid-session 401 logouts during upload queues that exceed the 15-minute token
+    /// lifetime (issue #625).
+    func ensureFreshToken() async {
+        guard let manager = authManager else { return }
+        if let token = manager.token {
+            let parts = token.split(separator: ".")
+            if parts.count >= 2 {
+                var base64 = String(parts[1])
+                    .replacingOccurrences(of: "-", with: "+")
+                    .replacingOccurrences(of: "_", with: "/")
+                let rem = base64.count % 4
+                if rem != 0 { base64 += String(repeating: "=", count: 4 - rem) }
+                if let data = Data(base64Encoded: base64),
+                   let payload = try? JSONDecoder().decode(JWTPayload.self, from: data),
+                   let exp = payload.exp,
+                   Date(timeIntervalSince1970: exp).timeIntervalSinceNow > 120 {
+                    return
+                }
+            }
+        }
+        _ = await refreshOnce(manager: manager)
+    }
+
     private func parseErrorMessage(_ data: Data) -> String? {
         // Try JSON error body first (Encore error format)
         if let errorBody = try? JSONDecoder().decode(APIErrorBody.self, from: data) {
@@ -496,4 +521,8 @@ enum APIError: Error, LocalizedError {
 private struct APIErrorBody: Decodable {
     let code: String?
     let message: String
+}
+
+private struct JWTPayload: Decodable {
+    let exp: Double?
 }
