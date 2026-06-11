@@ -440,11 +440,13 @@ function openAlbumDialog() {
 
 // ── Collage (2..9 selected photos) ──────────────────────────────────────────
 const collageDialogVisible = ref(false)
-const collagePhotoIds = ref<number[]>([])
+// Computed so the prop is always in sync with the current selection when
+// the dialog opens — avoids a timing window where the ref snapshot could
+// be read before Vue propagates the update to the child component.
+const collagePhotoIds = computed(() => Array.from(selectedIds.value))
 const canShowCollage = computed(() => canCollage(selectedCount.value))
 function openCollageDialog() {
   if (!canShowCollage.value) return
-  collagePhotoIds.value = Array.from(selectedIds.value)
   collageDialogVisible.value = true
 }
 
