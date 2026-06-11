@@ -3126,13 +3126,19 @@ export async function getPhotoDetailsBatchLogic(
           or(
             // own photos
             eq(photos.user_id, userId),
-            // photos in albums shared with this user
+            // photos in albums owned by or shared with this user
             sql`EXISTS (
               SELECT 1 FROM ${albumPhotos}
-              INNER JOIN ${albumShares}
-                ON ${albumShares.album_id} = ${albumPhotos.album_id}
+              INNER JOIN ${albums} ON ${albums.id} = ${albumPhotos.album_id}
               WHERE ${albumPhotos.photo_id} = ${photos.id}
-                AND ${albumShares.user_id} = ${userId}
+                AND (
+                  ${albums.user_id} = ${userId}
+                  OR EXISTS (
+                    SELECT 1 FROM ${albumShares}
+                    WHERE ${albumShares.album_id} = ${albumPhotos.album_id}
+                      AND ${albumShares.user_id} = ${userId}
+                  )
+                )
             )`
           )
         )
