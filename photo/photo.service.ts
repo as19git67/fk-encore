@@ -3120,7 +3120,23 @@ export async function getPhotoDetailsBatchLogic(
         photoCuration,
         and(eq(photos.id, photoCuration.photo_id), eq(photoCuration.user_id, userId))
       )
-      .where(and(eq(photos.user_id, userId), inArray(photos.id, ids)))
+      .where(
+        and(
+          inArray(photos.id, ids),
+          or(
+            // own photos
+            eq(photos.user_id, userId),
+            // photos in albums shared with this user
+            sql`EXISTS (
+              SELECT 1 FROM ${albumPhotos}
+              INNER JOIN ${albumShares}
+                ON ${albumShares.album_id} = ${albumPhotos.album_id}
+              WHERE ${albumPhotos.photo_id} = ${photos.id}
+                AND ${albumShares.user_id} = ${userId}
+            )`
+          )
+        )
+      )
   );
 
   return {
