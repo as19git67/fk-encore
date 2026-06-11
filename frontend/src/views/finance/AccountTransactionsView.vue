@@ -8,7 +8,7 @@
  * Logik folgt später, derzeit Dummy).
  */
 
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useScrollRestore } from '../../composables/useScrollRestore'
 import { useModuleBack } from '../../composables/useModuleBack'
@@ -158,6 +158,37 @@ function formatShortDate(iso: string | null): string | null {
 // and back does not reset the user's search criteria.
 
 const filterPanelOpen = ref(false)
+const filterPanelRef = ref<HTMLElement | null>(null)
+const filterPanelHeight = ref(0)
+
+let filterRO: ResizeObserver | undefined
+watch(filterPanelOpen, async (open) => {
+  if (open) {
+    await nextTick()
+    if (filterPanelRef.value) {
+      filterPanelHeight.value = filterPanelRef.value.offsetHeight
+      filterRO?.disconnect()
+      filterRO = new ResizeObserver(() => {
+        filterPanelHeight.value = filterPanelRef.value?.offsetHeight ?? 0
+      })
+      filterRO.observe(filterPanelRef.value)
+    }
+  } else {
+    filterRO?.disconnect()
+    filterRO = undefined
+    filterPanelHeight.value = 0
+  }
+})
+onBeforeUnmount(() => filterRO?.disconnect())
+
+// Top offset for tx-select-bar: when filter is open, select-bar moves below it.
+const SELECT_BAR_BASE_TOP = 120
+const selectBarStyle = computed(() => ({
+  top: filterPanelOpen.value
+    ? `${SELECT_BAR_BASE_TOP + filterPanelHeight.value + 12}px`
+    : `${SELECT_BAR_BASE_TOP}px`,
+}))
+
 const formQuery = computed({ get: () => filtersStore.formQuery, set: (v) => { filtersStore.formQuery = v } })
 const formTags = computed({ get: () => filtersStore.formTags, set: (v) => { filtersStore.formTags = v } })
 const formFrom = computed({ get: () => filtersStore.formFrom, set: (v) => { filtersStore.formFrom = v } })
@@ -221,6 +252,7 @@ function applyFilters() {
 
 function clearFilters() {
   filtersStore.clear()
+  filterPanelOpen.value = false
   void loadTransactions()
 }
 
@@ -588,44 +620,10 @@ function goBack() {
       </ul>
     </Popover>
 
-    <!--
-      Tristate "select all" + batch action row, only in select mode.
-    -->
-    <div v-if="selectMode" class="tx-select-bar">
-      <div class="tx-select-bar-left">
-        <Checkbox
-          :model-value="selectAllState === true"
-          :indeterminate="selectAllState === null"
-          :binary="true"
-          aria-label="Alle Buchungen auswählen"
-          @update:model-value="toggleSelectAll"
-        />
-        <span class="tx-select-count">
-          {{ selectionStore.count }} ausgewählt
-        </span>
-      </div>
-      <div class="tx-select-bar-actions">
-        <Button
-            icon="pi pi-tag"
-            severity="secondary"
-            aria-label="Tags auf Auswahl anwenden"
-            :disabled="selectionStore.count === 0"
-            @click="openBatchTagEditor"
-        />
-        <Button
-            icon="pi pi-times"
-            severity="secondary"
-            aria-label="Nichts auswählen"
-            :disabled="selectionStore.count === 0"
-            @click="clearSelection"
-        />
-      </div>
-    </div>
-
     <section
       v-if="filterPanelOpen"
+      ref="filterPanelRef"
       class="tx-filter-panel"
-      :class="{ 'tx-filter-panel--below-select-bar': selectMode }"
     >
       <div class="tx-filter-fields">
         <div class="tx-filter-row">
@@ -642,7 +640,7 @@ function goBack() {
             text
             rounded
             aria-label="Suchtext leeren"
-            @click="formQuery = ''"
+            @click="() => { formQuery = ''; if (!formTags.length && !formFrom && !formTo) filterPanelOpen = false }"
           />
         </div>
         <MultiSelect
@@ -676,6 +674,41 @@ function goBack() {
         />
       </div>
     </section>
+
+    <!--
+      Tristate "select all" + batch action row, only in select mode.
+      Sits below the filter panel (if open) via dynamic top offset.
+    -->
+    <div v-if="selectMode" class="tx-select-bar" :style="selectBarStyle">
+      <div class="tx-select-bar-left">
+        <Checkbox
+          :model-value="selectAllState === true"
+          :indeterminate="selectAllState === null"
+          :binary="true"
+          aria-label="Alle Buchungen auswählen"
+          @update:model-value="toggleSelectAll"
+        />
+        <span class="tx-select-count">
+          {{ selectionStore.count }} ausgewählt
+        </span>
+      </div>
+      <div class="tx-select-bar-actions">
+        <Button
+            icon="pi pi-tag"
+            severity="secondary"
+            aria-label="Tags auf Auswahl anwenden"
+            :disabled="selectionStore.count === 0"
+            @click="openBatchTagEditor"
+        />
+        <Button
+            icon="pi pi-times"
+            severity="secondary"
+            aria-label="Nichts auswählen"
+            :disabled="selectionStore.count === 0"
+            @click="clearSelection"
+        />
+      </div>
+    </div>
 
     <!-- ── Holdings table (depot accounts only) ─────────────────────── -->
     <section v-if="isDepot" class="holdings-section">
@@ -931,21 +964,11 @@ function goBack() {
   font-size: 0.85rem;
 }
 
-/* ── Filter panel (expands below the sticky header) ───────────────── */
+/* ── Filter panel (expands below the sticky tx-header) ────────────── */
 .tx-filter-panel {
   position: sticky;
-  top: 3.4rem;
+  top: 120px;
   z-index: 1;
-}
-/* When the select-bar is also visible it stacks above the filter
-   panel — shift the filter panel down by the select-bar height. */
-.tx-filter-panel--below-select-bar {
-  top: 6.2rem;
-}
-@media (max-width: 480px) {
-  .tx-filter-panel--below-select-bar {
-    top: 6rem;
-  }
 }
 .tx-filter-panel {
   display: grid;
@@ -981,11 +1004,6 @@ function goBack() {
 .tx-filter-actions :deep(.p-button) {
   min-width: 2.5rem;
   height: 2.5rem;
-}
-@media (max-width: 480px) {
-  .tx-filter-panel {
-    top: 3.2rem;
-  }
 }
 .tx-header > :first-child {
   grid-area: back;

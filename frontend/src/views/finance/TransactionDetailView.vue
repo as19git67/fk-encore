@@ -56,6 +56,7 @@ function toIso(d: Date): string {
 
 const isDirty = computed(() => {
   if (!tx.value) return false
+  if (newTag.value.length > 0) return true
   if (formNotice.value !== (tx.value.notice ?? '')) return true
   if (!isCash.value) return false
   return (
@@ -213,6 +214,14 @@ async function save() {
   if (!tx.value || !isDirty.value) return
   saving.value = true
   try {
+    if (newTag.value.length > 0) {
+      await api.batchTag({
+        transaction_ids: [tx.value.id],
+        add: newTag.value,
+      })
+      tagsStore.addLocal(newTag.value)
+      newTag.value = []
+    }
     const input: api.UpdateTransactionInput = {
       notice: formNotice.value || null,
     }
@@ -545,6 +554,7 @@ const extractedFields = computed(() => {
         <div v-if="aiTags().length > 1" class="ai-bulk-actions">
           <Button
             label="Alle übernehmen"
+            icon="pi pi-check-circle"
             size="small"
             :loading="promotingAll"
             :disabled="rejectingAll"
@@ -552,6 +562,7 @@ const extractedFields = computed(() => {
           />
           <Button
             label="Alle ablehnen"
+            icon="pi pi-times-circle"
             severity="secondary"
             size="small"
             :loading="rejectingAll"
@@ -569,6 +580,7 @@ const extractedFields = computed(() => {
           <span class="ai-actions">
             <Button
               label="Übernehmen"
+              icon="pi pi-check"
               size="small"
               :loading="promoting === t.name"
               :disabled="rejecting === t.name || promotingAll || rejectingAll"
@@ -576,6 +588,7 @@ const extractedFields = computed(() => {
             />
             <Button
               label="Ablehnen"
+              icon="pi pi-times"
               severity="secondary"
               size="small"
               :loading="rejecting === t.name"
@@ -910,6 +923,16 @@ const extractedFields = computed(() => {
   display: flex;
   gap: 0.5rem;
   flex-shrink: 0;
+}
+@media (max-width: 480px) {
+  .ai-actions :deep(.p-button-label),
+  .ai-bulk-actions :deep(.p-button-label) {
+    display: none;
+  }
+  .ai-actions :deep(.p-button),
+  .ai-bulk-actions :deep(.p-button) {
+    padding: 0.4rem;
+  }
 }
 .hint {
   color: var(--p-text-muted-color);
