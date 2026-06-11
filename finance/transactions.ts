@@ -800,6 +800,7 @@ interface BatchTagParams {
   add?: string[];
   remove?: string[];
   replace?: boolean; // when true, clear all existing user-tags before adding
+  promote_ai_tags?: boolean; // when true, promote AI tags to user tags; when false/absent, remove them
 }
 
 interface BatchTagResponse {
@@ -859,6 +860,62 @@ export const batchTag = api(
 
     return await db.transaction(async (tx) => {
       let removedLinks = 0;
+
+      // Handle AI tags when explicitly requested.
+      // promote_ai_tags === true  → promote all AI tags to user tags
+      // promote_ai_tags === false → remove all AI tag joins
+      // promote_ai_tags === undefined → leave AI tags untouched (backward-compat)
+      if (p.promote_ai_tags === true) {
+        for (const txId of txIds) {
+          const aiJoins = await tx
+            .select({ tagName: financeTag.name })
+            .from(financeTagTransaction)
+            .innerJoin(financeTag, eq(financeTag.id, financeTagTransaction.tag_id))
+            .where(
+              and(
+                eq(financeTagTransaction.transaction_id, txId),
+                eq(financeTag.source, "ai"),
+              ),
+            );
+          for (const { tagName } of aiJoins) {
+            const [aiTagRow] = await tx
+              .select({ id: financeTag.id })
+              .from(financeTag)
+              .where(and(eq(financeTag.name, tagName), eq(financeTag.source, "ai")))
+              .limit(1);
+            if (aiTagRow) {
+              await tx
+                .delete(financeTagTransaction)
+                .where(
+                  and(
+                    eq(financeTagTransaction.tag_id, aiTagRow.id),
+                    eq(financeTagTransaction.transaction_id, txId),
+                  ),
+                );
+            }
+            await applyUserTagsTx(tx, txId, [tagName]);
+          }
+        }
+      } else if (p.promote_ai_tags === false) {
+        // Explicitly reject: remove all AI-tag joins from affected transactions
+        const deletedAi = await tx
+          .delete(financeTagTransaction)
+          .where(
+            and(
+              inArray(financeTagTransaction.transaction_id, txIds),
+              inArray(
+                financeTagTransaction.tag_id,
+                tx
+                  .select({ id: financeTag.id })
+                  .from(financeTag)
+                  .where(eq(financeTag.source, "ai")),
+              ),
+            ),
+          )
+          .returning({ id: financeTagTransaction.transaction_id });
+        removedLinks += deletedAi.length;
+      }
+
       if (p.replace) {
         // drop ALL user-tags from these transactions (keep AI suggestions)
         const delRes = await tx
