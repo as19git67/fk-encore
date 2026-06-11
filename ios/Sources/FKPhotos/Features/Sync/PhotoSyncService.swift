@@ -153,7 +153,7 @@ actor PhotoSyncService {
             // (e.g. Task cancellation when a BGProcessingTask time limit expires),
             // so the spinner never stays visible after the sync has stopped.
             await SyncProgress.shared.reset()
-            throw
+            throw error
         }
     }
 
