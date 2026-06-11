@@ -146,10 +146,24 @@ async function save() {
       remove,
       promote_ai_tags: promoteAiTags.value,
     })
-    // Pop back to the list. The list view re-renders from the txStore
-    // which we deliberately don't refresh here — the next load (e.g.
-    // closing select mode) will pick up the new tags. Doing a
-    // refresh-on-pop would also work but is more network traffic.
+    // Update selectionStore so re-entering this view shows current state.
+    selectionStore.set(selectionStore.items.map((tx) => {
+      let tags = tx.tags.filter((t) => {
+        if (t.source === 'user' && remove.includes(t.name)) return false
+        if (t.source === 'ai' && promoteAiTags.value === false) return false
+        return true
+      })
+      // Promote: convert remaining ai tags to user
+      if (promoteAiTags.value === true) {
+        tags = tags.map((t) => t.source === 'ai' ? { ...t, source: 'user' as const, confidence: null } : t)
+      }
+      // Add new user tags (avoid duplicates)
+      const existingNames = new Set(tags.map((t) => t.name))
+      for (const name of add) {
+        if (!existingNames.has(name)) tags.push({ name, source: 'user', confidence: null })
+      }
+      return { ...tx, tags }
+    }))
     void router.back()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
