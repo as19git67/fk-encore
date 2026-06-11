@@ -15,6 +15,7 @@ const emit = defineEmits<{
 
 const year = ref<number | null>(null)
 const month = ref<number | null>(null)
+const presetKey = ref(0)
 let applyingPreset = false
 
 const currentYear = new Date().getFullYear()
@@ -51,6 +52,7 @@ function computeRange(y: number | null, m: number | null): { from: Date | null; 
 function applyPreset(y: number | null, m: number | null) {
   const { from, to } = computeRange(y, m)
   applyingPreset = true
+  presetKey.value++
   emit('update:from', from)
   emit('update:to', to)
   nextTick(() => { applyingPreset = false })
@@ -114,6 +116,7 @@ watch(() => [props.from, props.to], () => {
     </div>
     <div class="picker-row">
       <DatePicker
+        :key="`from-${presetKey}`"
         :model-value="props.from"
         date-format="dd.mm.yy"
         placeholder="Von"
@@ -121,6 +124,7 @@ watch(() => [props.from, props.to], () => {
         @update:model-value="onFromChange"
       />
       <DatePicker
+        :key="`to-${presetKey}`"
         :model-value="props.to"
         date-format="dd.mm.yy"
         placeholder="Bis"
