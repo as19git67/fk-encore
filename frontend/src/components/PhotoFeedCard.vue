@@ -12,6 +12,13 @@ const props = defineProps<{
   item: FeedPhotoItem
   /** Current user id — only the photo's owner may edit its description. */
   currentUserId?: number | null
+  /**
+   * Hide the "Öffnen in…" (location/navigate) action. Set in contexts
+   * where navigating away would abort an in-progress flow — e.g. the
+   * group-review confirmation, where leaving the overlay cancels the
+   * review.
+   */
+  hideOpenIn?: boolean
 }>()
 const emit = defineEmits<{
   (e: 'like', item: FeedPhotoItem): void
@@ -240,6 +247,7 @@ async function submitComment() {
         <span v-if="item.commentCount > 0" class="count">{{ item.commentCount }}</span>
       </button>
       <PhotoLocationMenu
+        v-if="!hideOpenIn"
         :photo-id="item.photoId"
         select-in-grid
         :extra-query="{ from: 'stream' }"

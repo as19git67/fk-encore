@@ -25,11 +25,13 @@ import {
   deleteSavedAnalysis,
   updateSavedAnalysis,
   markSavedAnalysesSeen,
+  getTransaction,
   type AnalysisAst,
   type AnalysisResult,
   type AnalysisTransaction,
   type RelativeTimespan,
   type SavedAnalysisItem,
+  type Transaction,
 } from '../../api/finance'
 import { useTagsStore } from '../../stores/finance/tags'
 
@@ -46,6 +48,80 @@ const parsing = ref(false)
 const aggregating = ref(false)
 const error = ref<string | null>(null)
 const result = ref<AnalysisResult | null>(null)
+
+// --- LLM retry (unavailable) ---
+const retrying = ref(false)
+const retryCountdown = ref(0)
+let retryTimer: ReturnType<typeof setInterval> | null = null
+
+function isUnavailableError(err: unknown): boolean {
+  return err instanceof Error && err.message.toLowerCase().includes('unavailable')
+}
+
+function startRetry() {
+  retrying.value = true
+  retryCountdown.value = 15
+  scheduleRetryTick()
+}
+
+function scheduleRetryTick() {
+  retryTimer = setInterval(() => {
+    retryCountdown.value--
+    if (retryCountdown.value <= 0) {
+      clearInterval(retryTimer!)
+      retryTimer = null
+      void doRetry()
+    }
+  }, 1000)
+}
+
+async function doRetry() {
+  if (!retrying.value) return
+  parsing.value = true
+  try {
+    const resp = await analysisQuery({ question: question.value.trim() })
+    retrying.value = false
+    applyResult(resp)
+  } catch (err) {
+    if (isUnavailableError(err)) {
+      retryCountdown.value = 15
+      scheduleRetryTick()
+    } else {
+      retrying.value = false
+      error.value = err instanceof Error ? err.message : String(err)
+    }
+  } finally {
+    parsing.value = false
+  }
+}
+
+function cancelRetry() {
+  retrying.value = false
+  if (retryTimer) {
+    clearInterval(retryTimer)
+    retryTimer = null
+  }
+}
+
+// --- Transaction detail popup ---
+const txDetailVisible = ref(false)
+const txDetailLoading = ref(false)
+const txDetailError = ref<string | null>(null)
+const txDetail = ref<Transaction | null>(null)
+
+async function openTxDetail(id: number) {
+  txDetail.value = null
+  txDetailError.value = null
+  txDetailVisible.value = true
+  txDetailLoading.value = true
+  try {
+    txDetail.value = await getTransaction(id)
+  } catch (err) {
+    txDetailError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    txDetailLoading.value = false
+  }
+}
 
 const tagSuggestions = ref<string[]>([])
 
@@ -190,6 +266,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   darkMQ.removeEventListener('change', onDarkChange)
+  cancelRetry()
 })
 
 async function loadSaved() {
@@ -225,8 +302,15 @@ async function loadMore() {
   }
 }
 
+const isUpdate = computed(() => activeItemId.value !== null)
+
 function openSaveDialog() {
-  saveName.value = question.value.trim() || ''
+  if (isUpdate.value) {
+    const existing = savedItems.value.find((s) => s.id === activeItemId.value)
+    saveName.value = existing?.name ?? question.value.trim()
+  } else {
+    saveName.value = question.value.trim() || ''
+  }
   saveDialogVisible.value = true
 }
 
@@ -234,14 +318,25 @@ async function doSave() {
   if (!saveName.value.trim() || !result.value) return
   saving.value = true
   try {
-    const item = await saveAnalysis({
-      name: saveName.value.trim(),
-      question: question.value.trim() || undefined,
-      ast: result.value.ast,
-      summary: result.value.total,
-    })
-    savedItems.value = [item, ...savedItems.value]
-    activeItemId.value = item.id
+    if (isUpdate.value && activeItemId.value !== null) {
+      const updated = await updateSavedAnalysis({
+        id: activeItemId.value,
+        name: saveName.value.trim(),
+        ast: result.value.ast,
+        summary: result.value.total,
+      })
+      const idx = savedItems.value.findIndex((s) => s.id === activeItemId.value)
+      if (idx >= 0) savedItems.value[idx] = updated
+    } else {
+      const item = await saveAnalysis({
+        name: saveName.value.trim(),
+        question: question.value.trim() || undefined,
+        ast: result.value.ast,
+        summary: result.value.total,
+      })
+      savedItems.value = [item, ...savedItems.value]
+      activeItemId.value = item.id
+    }
     saveDialogVisible.value = false
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -303,6 +398,7 @@ function fromIso(s: string | undefined): Date | null {
 
 async function submitQuestion() {
   if (!question.value.trim()) return
+  cancelRetry()
   parsing.value = true
   error.value = null
   result.value = null
@@ -311,7 +407,11 @@ async function submitQuestion() {
     const resp = await analysisQuery({ question: question.value.trim() })
     applyResult(resp)
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
+    if (isUnavailableError(err)) {
+      startRetry()
+    } else {
+      error.value = err instanceof Error ? err.message : String(err)
+    }
   } finally {
     parsing.value = false
   }
@@ -438,9 +538,6 @@ async function openTagDetails(tag: string) {
   }
 }
 
-function onTagRowClick(event: { data: { tag: string } }) {
-  openTagDetails(event.data.tag)
-}
 
 // --- Drill-down: transactions behind a single period row ---
 const periodDetailVisible = ref(false)
@@ -474,17 +571,61 @@ const periodLabel = computed(() => {
   return editableInterval.value === 'year' ? 'Jahresverlauf' : 'Monatsverlauf'
 })
 
+function computeTrend(values: number[]): number[] {
+  const n = values.length
+  if (n < 2) return values.map(() => (values[0] ?? 0))
+  const xMean = (n - 1) / 2
+  const yMean = values.reduce((a, b) => a + b, 0) / n
+  const num = values.reduce((acc, y, x) => acc + (x - xMean) * (y - yMean), 0)
+  const den = values.reduce((acc, _, x) => acc + (x - xMean) ** 2, 0)
+  const slope = den === 0 ? 0 : num / den
+  const intercept = yMean - slope * xMean
+  return values.map((_, x) => intercept + slope * x)
+}
+
 const chartData = computed(() => {
   if (!result.value) return null
+  const values = result.value.byPeriod.map((p) => Number(p.sum))
+  const datasets: object[] = [
+    {
+      type: 'bar',
+      label: 'Summe',
+      data: values,
+      backgroundColor: isDark.value ? 'rgba(251, 191, 36, 0.7)' : 'rgba(59, 130, 246, 0.6)',
+      order: 2,
+    },
+  ]
+  if (editableKind.value === 'ongoing' && values.length > 0) {
+    const avg = Number(periodAvgValue.value)
+    datasets.push({
+      type: 'line',
+      label: periodAvgLabel.value,
+      data: values.map(() => avg),
+      borderColor: isDark.value ? 'rgba(251, 146, 60, 0.9)' : 'rgba(234, 88, 12, 0.8)',
+      borderWidth: 2,
+      borderDash: [6, 3],
+      pointRadius: 0,
+      fill: false,
+      tension: 0,
+      order: 1,
+    })
+    if (values.length >= 3) {
+      datasets.push({
+        type: 'line',
+        label: 'Trend',
+        data: computeTrend(values),
+        borderColor: isDark.value ? 'rgba(167, 243, 208, 0.7)' : 'rgba(16, 185, 129, 0.7)',
+        borderWidth: 2,
+        pointRadius: 0,
+        fill: false,
+        tension: 0,
+        order: 1,
+      })
+    }
+  }
   return {
     labels: result.value.byPeriod.map((p) => p.period),
-    datasets: [
-      {
-        label: 'Summe',
-        data: result.value.byPeriod.map((p) => Number(p.sum)),
-        backgroundColor: isDark.value ? 'rgba(251, 191, 36, 0.7)' : 'rgba(59, 130, 246, 0.6)',
-      },
-    ],
+    datasets,
   }
 })
 
@@ -494,7 +635,12 @@ const chartOptions = computed(() => {
   return {
     responsive: true,
     maintainAspectRatio: false,
-    plugins: { legend: { display: false } },
+    plugins: {
+      legend: {
+        display: editableKind.value === 'ongoing',
+        labels: { color: tickColor, boxWidth: 12, padding: 12 },
+      },
+    },
     scales: {
       x: { ticks: { color: tickColor }, grid: { color: gridColor } },
       y: { ticks: { color: tickColor }, grid: { color: gridColor } },
@@ -538,10 +684,16 @@ const tagChartOptions = computed(() => {
     responsive: true,
     maintainAspectRatio: false,
     plugins: { legend: { display: false } },
+    onClick: (_evt: unknown, elements: Array<{ index: number }>) => {
+      if (elements.length > 0) {
+        const tag = result.value?.byTag[elements[0]!.index]?.tag
+        if (tag) openTagDetails(tag)
+      }
+    },
     scales: {
       x: { ticks: { color: tickColor }, grid: { color: gridColor } },
       y: {
-        ticks: { color: tickColor, autoSkip: false },
+        ticks: { color: tickColor, autoSkip: false, font: { size: 12 } },
         grid: { color: gridColor },
       },
     },
@@ -556,6 +708,13 @@ const tagChartOptions = computed(() => {
     </header>
 
     <Message v-if="error" severity="error" :closable="true" @close="error = null">{{ error }}</Message>
+
+    <Message v-if="retrying" severity="warn" :closable="false">
+      <div class="retry-row">
+        <span>LLM-Service ausgelastet — wird automatisch in {{ retryCountdown }} s erneut versucht.</span>
+        <Button label="Abbrechen" size="small" severity="secondary" @click="cancelRetry" />
+      </div>
+    </Message>
 
     <!-- Saved Analyses / Finanz-Rückblicke -->
     <section class="card">
@@ -783,17 +942,25 @@ const tagChartOptions = computed(() => {
     <section v-if="result" class="card">
       <h2>Ergebnis</h2>
       <div class="summary">
-        <div class="stat">
-          <span class="label">Summe</span>
-          <span class="value">{{ formatCurrency(result.total.sum) }}</span>
-        </div>
+        <template v-if="editableKind === 'ongoing'">
+          <div class="stat stat-primary">
+            <span class="label">{{ periodAvgLabel }}</span>
+            <span class="value">{{ formatCurrency(periodAvgValue) }}</span>
+          </div>
+          <div class="stat">
+            <span class="label">Summe gesamt</span>
+            <span class="value">{{ formatCurrency(result.total.sum) }}</span>
+          </div>
+        </template>
+        <template v-else>
+          <div class="stat">
+            <span class="label">Summe</span>
+            <span class="value">{{ formatCurrency(result.total.sum) }}</span>
+          </div>
+        </template>
         <div class="stat">
           <span class="label">Anzahl</span>
           <span class="value">{{ result.total.count }}</span>
-        </div>
-        <div class="stat">
-          <span class="label">{{ periodAvgLabel }}</span>
-          <span class="value">{{ formatCurrency(periodAvgValue) }}</span>
         </div>
       </div>
 
@@ -836,42 +1003,14 @@ const tagChartOptions = computed(() => {
     </section>
 
     <section v-if="result && result.byTag.length > 0" class="card">
-      <h2>Aufschlüsselung nach Tag</h2>
+      <h2>Aufschlüsselung nach Schlagwort</h2>
       <div
         v-if="tagChartData"
-        class="chart-wrap"
-        :style="{ height: `${Math.max(8, result.byTag.length * 2)}rem` }"
+        class="chart-wrap tag-chart-wrap"
+        :style="{ height: `${Math.max(12, result.byTag.length * 3.5)}rem` }"
       >
         <Chart type="bar" :data="tagChartData" :options="tagChartOptions" />
       </div>
-      <DataTable
-        :value="result.byTag"
-        stripedRows
-        rowHover
-        class="clickable-rows"
-        @row-click="onTagRowClick"
-      >
-        <Column field="tag" header="Tag" />
-        <Column
-          header="Summe"
-          headerStyle="text-align:right"
-          bodyStyle="text-align:right"
-        >
-          <template #body="{ data }">
-            <span class="num">{{ formatCurrency(data.sum) }}</span>
-          </template>
-        </Column>
-        <Column
-          field="count"
-          header="Anzahl"
-          headerStyle="text-align:right"
-          bodyStyle="text-align:right"
-        >
-          <template #body="{ data }">
-            <span class="num">{{ data.count }}</span>
-          </template>
-        </Column>
-      </DataTable>
     </section>
 
     <section v-if="result && result.topCounterparties.length > 0" class="card">
@@ -899,7 +1038,12 @@ const tagChartOptions = computed(() => {
       <Message v-else-if="detailError" severity="error">{{ detailError }}</Message>
       <p v-else-if="detailRows.length === 0" class="hint">Keine Buchungen.</p>
       <ul v-else class="detail-list">
-        <li v-for="tx in detailRows" :key="tx.id" class="detail-card">
+        <li
+          v-for="tx in detailRows"
+          :key="tx.id"
+          class="detail-card detail-card-clickable"
+          @click="openTxDetail(tx.id)"
+        >
           <div class="detail-card-body">
             <div class="detail-card-counterparty">{{ tx.counterparty || '—' }}</div>
             <div v-if="tx.purpose" class="detail-card-purpose">{{ tx.purpose }}</div>
@@ -926,7 +1070,12 @@ const tagChartOptions = computed(() => {
       <Message v-else-if="periodDetailError" severity="error">{{ periodDetailError }}</Message>
       <p v-else-if="periodDetailRows.length === 0" class="hint">Keine Buchungen.</p>
       <ul v-else class="detail-list">
-        <li v-for="tx in periodDetailRows" :key="tx.id" class="detail-card">
+        <li
+          v-for="tx in periodDetailRows"
+          :key="tx.id"
+          class="detail-card detail-card-clickable"
+          @click="openTxDetail(tx.id)"
+        >
           <div class="detail-card-body">
             <div class="detail-card-counterparty">{{ tx.counterparty || '—' }}</div>
             <div v-if="tx.purpose" class="detail-card-purpose">{{ tx.purpose }}</div>
@@ -939,11 +1088,76 @@ const tagChartOptions = computed(() => {
       </ul>
     </Dialog>
 
+    <!-- Transaction full detail popup -->
+    <Dialog
+      v-model:visible="txDetailVisible"
+      modal
+      dismissableMask
+      header="Buchungsdetails"
+      :style="{ width: '38rem', maxWidth: '95vw' }"
+    >
+      <div v-if="txDetailLoading" class="detail-loading">
+        <ProgressSpinner style="width: 2.5rem; height: 2.5rem" />
+      </div>
+      <Message v-else-if="txDetailError" severity="error">{{ txDetailError }}</Message>
+      <template v-else-if="txDetail">
+        <div class="tx-detail-grid">
+          <div class="tx-detail-amount" :class="Number(txDetail.amount) < 0 ? 'amount-negative' : ''">
+            {{ formatCurrency(txDetail.amount) }}
+          </div>
+          <table class="tx-detail-table">
+            <tbody>
+              <tr v-if="txDetail.counterparty">
+                <th>Gegenseite</th>
+                <td>{{ txDetail.counterparty }}</td>
+              </tr>
+              <tr v-if="txDetail.counterparty_iban">
+                <th>IBAN</th>
+                <td class="mono">{{ txDetail.counterparty_iban }}</td>
+              </tr>
+              <tr>
+                <th>Buchungsdatum</th>
+                <td>{{ formatDate(txDetail.booking_date) }}</td>
+              </tr>
+              <tr v-if="txDetail.value_date">
+                <th>Wertstellung</th>
+                <td>{{ formatDate(txDetail.value_date) }}</td>
+              </tr>
+              <tr v-if="txDetail.purpose">
+                <th>Verwendungszweck</th>
+                <td>{{ txDetail.purpose }}</td>
+              </tr>
+              <tr v-if="txDetail.entry_text">
+                <th>Buchungstext</th>
+                <td>{{ txDetail.entry_text }}</td>
+              </tr>
+              <tr v-if="txDetail.mandate_ref">
+                <th>Mandatsreferenz</th>
+                <td class="mono">{{ txDetail.mandate_ref }}</td>
+              </tr>
+              <tr v-if="txDetail.creditor_id">
+                <th>Gläubiger-ID</th>
+                <td class="mono">{{ txDetail.creditor_id }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-if="txDetail.tags.length > 0" class="tx-detail-tags">
+            <span
+              v-for="t in txDetail.tags"
+              :key="t.name + t.source"
+              class="p-tag tag-chip"
+              :class="`p-tag-${t.source === 'ai' ? 'success' : 'info'}`"
+            >{{ t.name }}</span>
+          </div>
+        </div>
+      </template>
+    </Dialog>
+
     <!-- Save dialog -->
     <Dialog
       v-model:visible="saveDialogVisible"
       modal
-      header="Analyse speichern"
+      :header="isUpdate ? 'Analyse aktualisieren' : 'Analyse speichern'"
       :style="{ width: '24rem', maxWidth: '90vw' }"
     >
       <div class="save-dialog-body">
@@ -959,7 +1173,7 @@ const tagChartOptions = computed(() => {
       </div>
       <template #footer>
         <Button label="Abbrechen" text @click="saveDialogVisible = false" />
-        <Button label="Speichern" :loading="saving" :disabled="!saveName.trim()" @click="doSave" />
+        <Button :label="isUpdate ? 'Aktualisieren' : 'Speichern'" :loading="saving" :disabled="!saveName.trim()" @click="doSave" />
       </template>
     </Dialog>
   </div>
@@ -1061,6 +1275,9 @@ const tagChartOptions = computed(() => {
 .chart-wrap {
   height: 16rem;
 }
+.tag-chart-wrap {
+  cursor: pointer;
+}
 .hint {
   color: var(--p-text-muted-color);
   margin: 0;
@@ -1104,6 +1321,13 @@ const tagChartOptions = computed(() => {
 .detail-card:last-child {
   border-bottom: none;
 }
+.detail-card-clickable {
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.detail-card-clickable:hover {
+  background: var(--p-content-hover-background);
+}
 .detail-card-body {
   flex: 1;
   min-width: 0;
@@ -1132,6 +1356,61 @@ const tagChartOptions = computed(() => {
 }
 .amount-negative {
   color: var(--p-red-600, #c0392b);
+}
+
+/* --- stat-primary (avg prominent for ongoing) --- */
+.stat-primary .label {
+  color: var(--p-primary-color);
+}
+.stat-primary .value {
+  font-size: 1.75rem;
+}
+
+/* --- Retry message --- */
+.retry-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+/* --- Transaction full detail --- */
+.tx-detail-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.tx-detail-amount {
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.tx-detail-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.tx-detail-table th {
+  text-align: left;
+  color: var(--p-text-muted-color);
+  font-weight: 500;
+  padding: 0.2rem 0.5rem 0.2rem 0;
+  white-space: nowrap;
+  width: 10rem;
+  vertical-align: top;
+}
+.tx-detail-table td {
+  padding: 0.2rem 0;
+  word-break: break-word;
+}
+.tx-detail-table .mono {
+  font-family: monospace;
+  font-size: 0.8rem;
+}
+.tx-detail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
 }
 
 /* --- Tag groups --- */

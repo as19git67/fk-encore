@@ -21,6 +21,7 @@
 
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useModuleBack } from '../../composables/useModuleBack'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Checkbox from 'primevue/checkbox'
@@ -30,6 +31,7 @@ import { useTxSelectionStore } from '../../stores/finance/selection'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 
 const router = useRouter()
+const { goBack } = useModuleBack('/finanzen', 'finance-overview')
 const tagsStore = useTagsStore()
 const selectionStore = useTxSelectionStore()
 const txStore = useTransactionsStore()
@@ -47,6 +49,7 @@ interface TagRow {
 
 const search = ref('')
 const tagRows = ref<TagRow[]>([])
+const promoteAiTags = ref(false)
 const saving = ref(false)
 const error = ref<string | null>(null)
 
@@ -121,9 +124,6 @@ const dirtyRows = computed(() =>
 
 const hasChanges = computed(() => dirtyRows.value.length > 0)
 
-function goBack() {
-  router.back()
-}
 
 async function save() {
   if (!hasChanges.value || saving.value) return
@@ -143,12 +143,27 @@ async function save() {
       transaction_ids: selectionStore.ids,
       add,
       remove,
+      promote_ai_tags: promoteAiTags.value,
     })
-    // Pop back to the list. The list view re-renders from the txStore
-    // which we deliberately don't refresh here — the next load (e.g.
-    // closing select mode) will pick up the new tags. Doing a
-    // refresh-on-pop would also work but is more network traffic.
-    void router.back()
+    // Update selectionStore so re-entering this view shows current state.
+    selectionStore.set(selectionStore.items.map((tx) => {
+      let tags = tx.tags.filter((t) => {
+        if (t.source === 'user' && remove.includes(t.name)) return false
+        if (t.source === 'ai' && promoteAiTags.value === false) return false
+        return true
+      })
+      // Promote: convert remaining ai tags to user
+      if (promoteAiTags.value === true) {
+        tags = tags.map((t) => t.source === 'ai' ? { ...t, source: 'user' as const, confidence: null } : t)
+      }
+      // Add new user tags (avoid duplicates)
+      const existingNames = new Set(tags.map((t) => t.name))
+      for (const name of add) {
+        if (!existingNames.has(name)) tags.push({ name, source: 'user', confidence: null })
+      }
+      return { ...tx, tags }
+    }))
+    goBack()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -181,6 +196,12 @@ async function save() {
     <Message v-if="error" severity="error" :closable="false">
       {{ error }}
     </Message>
+
+    <div class="bt-ai-row">
+      <Checkbox v-model="promoteAiTags" inputId="promote-ai" binary />
+      <label for="promote-ai" class="bt-ai-label">KI-Tags übernehmen</label>
+      <span class="bt-ai-hint">{{ promoteAiTags ? 'KI-Tags werden zu manuellen Tags hochgestuft' : 'KI-Tags werden entfernt' }}</span>
+    </div>
 
     <div class="bt-search-row">
       <InputText
@@ -290,6 +311,24 @@ async function save() {
 }
 .bt-header :deep(.p-button:disabled) {
   opacity: 0.5;
+}
+
+.bt-ai-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 0.5rem;
+}
+.bt-ai-label {
+  font-weight: 500;
+  cursor: pointer;
+}
+.bt-ai-hint {
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
 }
 
 .bt-search-row {
