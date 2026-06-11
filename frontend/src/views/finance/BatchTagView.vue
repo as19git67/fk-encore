@@ -47,6 +47,7 @@ interface TagRow {
 
 const search = ref('')
 const tagRows = ref<TagRow[]>([])
+const promoteAiTags = ref(false)
 const saving = ref(false)
 const error = ref<string | null>(null)
 
@@ -143,6 +144,7 @@ async function save() {
       transaction_ids: selectionStore.ids,
       add,
       remove,
+      promote_ai_tags: promoteAiTags.value,
     })
     // Pop back to the list. The list view re-renders from the txStore
     // which we deliberately don't refresh here — the next load (e.g.
@@ -181,6 +183,12 @@ async function save() {
     <Message v-if="error" severity="error" :closable="false">
       {{ error }}
     </Message>
+
+    <div class="bt-ai-row">
+      <Checkbox v-model="promoteAiTags" inputId="promote-ai" binary />
+      <label for="promote-ai" class="bt-ai-label">KI-Tags übernehmen</label>
+      <span class="bt-ai-hint">{{ promoteAiTags ? 'KI-Tags werden zu manuellen Tags hochgestuft' : 'KI-Tags werden entfernt' }}</span>
+    </div>
 
     <div class="bt-search-row">
       <InputText
@@ -290,6 +298,24 @@ async function save() {
 }
 .bt-header :deep(.p-button:disabled) {
   opacity: 0.5;
+}
+
+.bt-ai-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 0.5rem;
+}
+.bt-ai-label {
+  font-weight: 500;
+  cursor: pointer;
+}
+.bt-ai-hint {
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
 }
 
 .bt-search-row {
