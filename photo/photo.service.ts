@@ -3126,19 +3126,16 @@ export async function getPhotoDetailsBatchLogic(
           or(
             // own photos
             eq(photos.user_id, userId),
-            // photos in albums owned by or shared with this user
+            // photos in albums the user can access (as owner or via share row) —
+            // mirrors galleryScopeCondition so the batch returns the same photos
+            // the grid already showed (album owner viewing contributor uploads,
+            // or a shared viewer seeing any album member's photos)
             sql`EXISTS (
-              SELECT 1 FROM ${albumPhotos}
-              INNER JOIN ${albums} ON ${albums.id} = ${albumPhotos.album_id}
-              WHERE ${albumPhotos.photo_id} = ${photos.id}
-                AND (
-                  ${albums.user_id} = ${userId}
-                  OR EXISTS (
-                    SELECT 1 FROM ${albumShares}
-                    WHERE ${albumShares.album_id} = ${albumPhotos.album_id}
-                      AND ${albumShares.user_id} = ${userId}
-                  )
-                )
+              SELECT 1 FROM ${albumPhotos} ap
+              JOIN ${albums} a ON a.id = ap.album_id
+              LEFT JOIN ${albumShares} s ON s.album_id = a.id AND s.user_id = ${userId}
+              WHERE ap.photo_id = ${photos.id}
+                AND (a.user_id = ${userId} OR s.user_id IS NOT NULL)
             )`
           )
         )
