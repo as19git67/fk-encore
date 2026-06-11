@@ -22,14 +22,14 @@ function getFirstDayOfWeek(): number {
     }
   } catch {}
   // Fallback for browsers without weekInfo
-  const lang = navigator.language.split('-')[0].toLowerCase()
+  const lang = (navigator.language.split('-')[0] ?? '').toLowerCase()
   const mondayLocales = ['de', 'fr', 'es', 'it', 'pt', 'nl', 'pl', 'sv', 'da', 'no', 'fi', 'ru', 'cs', 'hu', 'ro', 'tr']
   return mondayLocales.includes(lang) ? 1 : 0
 }
 
 function buildPrimeVueLocale() {
   const firstDayOfWeek = getFirstDayOfWeek()
-  const lang = navigator.language.split('-')[0].toLowerCase()
+  const lang = (navigator.language.split('-')[0] ?? '').toLowerCase()
   if (lang === 'de') {
     return {
       firstDayOfWeek,
