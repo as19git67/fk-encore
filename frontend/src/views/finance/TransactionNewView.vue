@@ -13,9 +13,11 @@ import { useAccountsStore } from '../../stores/finance/accounts'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useTagsStore } from '../../stores/finance/tags'
 import { recentCashRecipients, searchRecipients, type RecentRecipient } from '../../api/finance'
+import { useModuleBack } from '../../composables/useModuleBack'
 
 const route = useRoute()
 const router = useRouter()
+const { goBack } = useModuleBack('/finanzen', 'finance-overview')
 const accountsStore = useAccountsStore()
 const txStore = useTransactionsStore()
 const tagsStore = useTagsStore()
@@ -261,7 +263,7 @@ async function save() {
         severity="secondary"
         outlined
         class="cancel-btn"
-        @click="router.back()"
+        @click="goBack"
       />
     </div>
 

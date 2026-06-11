@@ -1,16 +1,8 @@
 <script setup lang="ts">
-import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
+import { useModuleBack } from '../../composables/useModuleBack'
 
-const router = useRouter()
-
-function goBack() {
-  if (window.history.state?.back) {
-    router.back()
-  } else {
-    router.push({ name: 'finance-bankcontacts' })
-  }
-}
+const { goBack } = useModuleBack('/finanzen', 'finance-bankcontacts')
 </script>
 
 <template>
