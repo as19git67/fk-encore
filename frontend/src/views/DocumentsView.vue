@@ -5,7 +5,6 @@ import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
-import Select from 'primevue/select'
 import SelectButton from 'primevue/selectbutton'
 import Chip from 'primevue/chip'
 import Tag from 'primevue/tag'
@@ -13,6 +12,9 @@ import MultiSelectDialog from '../components/MultiSelectDialog.vue'
 import DocumentBatchVisibilityDialog from '../components/DocumentBatchVisibilityDialog.vue'
 import DocumentBatchReprocessDialog from '../components/DocumentBatchReprocessDialog.vue'
 import DocumentUploadDefaultsDialog from '../components/DocumentUploadDefaultsDialog.vue'
+import DocumentFilterMenu from '../components/DocumentFilterMenu.vue'
+import DocumentScanQueuePanel from '../components/DocumentScanQueuePanel.vue'
+import SortMenu from '../components/SortMenu.vue'
 import {
   listDocuments,
   listDocumentCategories,
@@ -28,11 +30,9 @@ import {
 import { useAuthStore } from '../stores/auth'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import { useScrollRestore } from '../composables/useScrollRestore'
+import { useSort, type SortField } from '../composables/useSort'
+import { useDocumentFilter } from '../composables/useDocumentFilter'
 
-// Remembers the document the user last opened so returning from the
-// detail view (which re-mounts this list — there is no keep-alive) can
-// scroll back to it instead of snapping to the top. Module-scoped so it
-// survives the unmount/remount; the lazy-loaded module stays in memory.
 let lastOpenedDocId: number | null = null
 
 const router = useRouter()
@@ -47,6 +47,93 @@ const loading = ref(true)
 const error = ref('')
 const info = ref('')
 
+// ─── View mode ──────────────────────────────────────────────────────────────
+type ViewMode = 'list' | 'grid'
+const VIEW_MODE_KEY = 'documents.viewMode'
+const viewMode = ref<ViewMode>((localStorage.getItem(VIEW_MODE_KEY) as ViewMode) || 'list')
+watch(viewMode, (v) => localStorage.setItem(VIEW_MODE_KEY, v))
+
+// ─── Search ─────────────────────────────────────────────────────────────────
+const SEARCH_MODE_STORAGE_KEY = 'documents.searchMode'
+function loadStoredSearchMode(): SearchMode {
+  const raw = localStorage.getItem(SEARCH_MODE_STORAGE_KEY)
+  return raw === 'fts' || raw === 'semantic' || raw === 'hybrid' ? raw : 'hybrid'
+}
+
+const q = ref(typeof route.query.q === 'string' ? route.query.q : '')
+const searchMode = ref<SearchMode>(loadStoredSearchMode())
+watch(searchMode, (v) => localStorage.setItem(SEARCH_MODE_STORAGE_KEY, v))
+
+const searchModeOptions = [
+  { label: 'Hybrid', value: 'hybrid' },
+  { label: 'Text', value: 'fts' },
+  { label: 'Bedeutung', value: 'semantic' },
+]
+
+function triggerSearch() {
+  syncQueryParams()
+  load()
+}
+
+function handleSearchKeydown(ev: KeyboardEvent) {
+  if (ev.key === 'Enter') triggerSearch()
+}
+
+function clearSearch() {
+  q.value = ''
+  triggerSearch()
+}
+
+// ─── Sort ───────────────────────────────────────────────────────────────────
+const sortFields: SortField[] = [
+  { value: 'uploaded_at', label: 'Hochgeladen' },
+  { value: 'doc_date', label: 'Dokumentdatum' },
+  { value: 'title', label: 'Titel' },
+  { value: 'sender', label: 'Absender' },
+  { value: 'size_bytes', label: 'Dateigröße' },
+]
+
+const sort = useSort({
+  fields: sortFields,
+  defaultState: { field: 'uploaded_at', direction: 'desc' },
+})
+const sortMenuVisible = ref(false)
+
+function openSortMenu() {
+  sort.openEdit()
+  sortMenuVisible.value = true
+}
+function applySortMenu() {
+  sort.apply()
+  sortMenuVisible.value = false
+  load()
+}
+function resetSortMenu() {
+  sort.reset()
+  sortMenuVisible.value = false
+  load()
+}
+
+// ─── Filter ─────────────────────────────────────────────────────────────────
+const filter = useDocumentFilter({ preserveKeys: ['q', 'sortBy', 'sortDir'] })
+const filterMenuVisible = ref(false)
+
+function openFilterMenu() {
+  filter.openEdit()
+  filterMenuVisible.value = true
+}
+function applyFilterMenu() {
+  filter.apply()
+  filterMenuVisible.value = false
+  load()
+}
+function resetFilterMenu() {
+  filter.reset()
+  filterMenuVisible.value = false
+  load()
+}
+
+// ─── Selection & batch ─────────────────────────────────────────────────────
 const selectedIds = ref<Set<number>>(new Set())
 const tagsDialogVisible = ref(false)
 const visibilityDialogVisible = ref(false)
@@ -88,10 +175,6 @@ const selectedDocs = computed(() =>
   items.value.filter((d) => selectedIds.value.has(d.id)),
 )
 
-/**
- * Tristate per known tag, materialised as a Map. Re-evaluated
- * whenever the selection or the document list changes.
- */
 const tagInitialStates = computed<Map<string, boolean | null>>(() => {
   const docs = selectedDocs.value
   const out = new Map<string, boolean | null>()
@@ -152,31 +235,10 @@ function handleBatchVisibilityDone(payload: { affected: number; skipped: number 
 function handleBatchReprocessDone(payload: { affected: number }) {
   info.value = `OCR & KI für ${payload.affected} Dokument(e) neu gestartet.`
   clearSelection()
-  // Re-runs reset documents to "pending"; reload so the status badges
-  // reflect that the pipeline is running again.
   load()
 }
 
-const SEARCH_MODE_STORAGE_KEY = 'documents.searchMode'
-function loadStoredSearchMode(): SearchMode {
-  const raw = localStorage.getItem(SEARCH_MODE_STORAGE_KEY)
-  return raw === 'fts' || raw === 'semantic' || raw === 'hybrid' ? raw : 'hybrid'
-}
-
-function initFromQuery<T>(key: string, valid: T[], fallback: T): T {
-  const raw = route.query[key]
-  const v = typeof raw === 'string' ? raw : null
-  return v && (valid as unknown[]).includes(v) ? v as T : fallback
-}
-
-const q = ref(typeof route.query.q === 'string' ? route.query.q : '')
-const selectedCategory = ref<string | null>(typeof route.query.category === 'string' ? route.query.category : null)
-const selectedStatus = ref<DocumentStatus | null>(
-  initFromQuery<DocumentStatus | null>('status', ['ready', 'classifying', 'failed', 'pending', 'extracting'], null)
-)
-const needsReviewOnly = ref(route.query.review === '1')
-const searchMode = ref<SearchMode>(loadStoredSearchMode())
-
+// ─── Helpers ────────────────────────────────────────────────────────────────
 const LOW_CONFIDENCE_THRESHOLD = 0.6
 function isLowConfidence(doc: DocumentSummary): boolean {
   return (
@@ -184,100 +246,6 @@ function isLowConfidence(doc: DocumentSummary): boolean {
     doc.classification_confidence != null &&
     doc.classification_confidence < LOW_CONFIDENCE_THRESHOLD
   )
-}
-watch(searchMode, (v) => localStorage.setItem(SEARCH_MODE_STORAGE_KEY, v))
-
-const searchModeOptions = [
-  { label: 'Hybrid', value: 'hybrid' },
-  { label: 'Text', value: 'fts' },
-  { label: 'Bedeutung', value: 'semantic' },
-]
-
-const statusOptions: Array<{ label: string; value: DocumentStatus | null }> = [
-  { label: 'Alle', value: null },
-  { label: 'Fertig', value: 'ready' },
-  { label: 'In Arbeit', value: 'classifying' },
-  { label: 'Fehler', value: 'failed' },
-]
-
-const categoryOptions = computed(() => {
-  const opts: Array<{ label: string; value: string | null }> = [{ label: 'Alle Kategorien', value: null }]
-  for (const c of categories.value) {
-    const prefix = c.parent_id == null ? '' : '— '
-    opts.push({ label: `${prefix}${c.name}`, value: c.slug })
-  }
-  return opts
-})
-
-async function load() {
-  loading.value = true
-  error.value = ''
-  try {
-    if (q.value.trim().length > 0) {
-      const res = await searchDocuments(q.value.trim(), searchMode.value, 50)
-      items.value = res.items
-    } else {
-      const res = await listDocuments({
-        category: selectedCategory.value ?? undefined,
-        status: selectedStatus.value ?? undefined,
-        needs_review: needsReviewOnly.value || undefined,
-        limit: 100,
-      })
-      items.value = res.items
-    }
-  } catch (err: any) {
-    error.value = err.message || 'Fehler beim Laden der Dokumente'
-  } finally {
-    loading.value = false
-  }
-}
-
-async function loadCategories() {
-  try {
-    const res = await listDocumentCategories()
-    categories.value = res.items
-  } catch (err: any) {
-    // Non-fatal: list still loads without the filter.
-    console.warn('[documents] failed to load categories:', err)
-  }
-}
-
-function syncQueryParams() {
-  const query: Record<string, string> = {}
-  if (q.value.trim()) query.q = q.value.trim()
-  if (selectedCategory.value) query.category = selectedCategory.value
-  if (selectedStatus.value) query.status = selectedStatus.value
-  if (needsReviewOnly.value) query.review = '1'
-  router.replace({ query })
-}
-
-let searchDebounce: ReturnType<typeof setTimeout> | null = null
-watch([q, selectedCategory, selectedStatus, needsReviewOnly, searchMode], () => {
-  if (searchDebounce) clearTimeout(searchDebounce)
-  searchDebounce = setTimeout(() => { syncQueryParams(); load() }, 300)
-})
-
-function openDocument(doc: DocumentSummary) {
-  lastOpenedDocId = doc.id
-  router.push({ name: 'dokumente-detail', params: { id: doc.id } })
-}
-
-// After the list is rendered, bring the previously opened document back
-// into view. Runs once on mount; clears the marker so later visits start
-// at the top. No-op when the document is filtered out of the current list.
-// Two nextTick() calls are needed: one for the v-if/v-else swap (loading →
-// list), one for the v-for items to be actually placed in the DOM.
-async function restoreScrollToLastOpened() {
-  const id = lastOpenedDocId
-  lastOpenedDocId = null
-  if (id == null) return
-  await nextTick()
-  await nextTick()
-  const el = document.querySelector<HTMLElement>(`[data-doc-id="${id}"]`)
-  if (!el) return
-  el.scrollIntoView({ block: 'center' })
-  el.classList.add('document-card--highlight')
-  setTimeout(() => el.classList.remove('document-card--highlight'), 1500)
 }
 
 function statusSeverity(status: DocumentStatus): 'success' | 'info' | 'warn' | 'danger' | 'secondary' {
@@ -316,12 +284,89 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-// Live-update the status badge when the backend pipeline progresses.
-// For intermediate states (extracting, classifying) we only patch the
-// status so the tag re-renders. When a document reaches a terminal
-// state (ready / failed) the classifier has filled in category, title,
-// sender, tags, etc. — fields the payload does not carry — so we
-// reload the list to reflect them without a manual refresh.
+// ─── Data loading ───────────────────────────────────────────────────────────
+
+function syncQueryParams() {
+  const query: Record<string, string> = {}
+  if (q.value.trim()) query.q = q.value.trim()
+  // Merge filter and sort into query
+  const fq = filter.applied.value
+  if (fq.category) query.category = fq.category
+  if (fq.tag) query.tag = fq.tag
+  if (fq.status) query.status = fq.status
+  if (fq.needs_review) query.review = '1'
+  if (fq.sender) query.sender = fq.sender
+  if (fq.dateFrom) query.dateFrom = fq.dateFrom
+  if (fq.dateTo) query.dateTo = fq.dateTo
+  if (fq.taxRelevant !== undefined) query.taxRelevant = String(fq.taxRelevant)
+  const s = sort.applied.value
+  if (s.field !== 'uploaded_at' || s.direction !== 'desc') {
+    query.sortBy = s.field
+    query.sortDir = s.direction
+  }
+  router.replace({ query })
+}
+
+async function load() {
+  loading.value = true
+  error.value = ''
+  try {
+    const isSearch = q.value.trim().length > 0
+    if (isSearch) {
+      const res = await searchDocuments(q.value.trim(), searchMode.value, 100)
+      items.value = res.items
+    } else {
+      const f = filter.applied.value
+      const s = sort.applied.value
+      const res = await listDocuments({
+        category: f.category,
+        tag: f.tag,
+        status: f.status as DocumentStatus | undefined,
+        needs_review: f.needs_review,
+        sender: f.sender,
+        date_from: f.dateFrom,
+        date_to: f.dateTo,
+        tax_relevant: f.taxRelevant,
+        sort_by: s.field,
+        sort_dir: s.direction,
+        limit: 200,
+      })
+      items.value = res.items
+    }
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Laden der Dokumente'
+  } finally {
+    loading.value = false
+  }
+}
+
+async function loadCategories() {
+  try {
+    const res = await listDocumentCategories()
+    categories.value = res.items
+  } catch (err: any) {
+    console.warn('[documents] failed to load categories:', err)
+  }
+}
+
+function openDocument(doc: DocumentSummary) {
+  lastOpenedDocId = doc.id
+  router.push({ name: 'dokumente-detail', params: { id: doc.id } })
+}
+
+async function restoreScrollToLastOpened() {
+  const id = lastOpenedDocId
+  lastOpenedDocId = null
+  if (id == null) return
+  await nextTick()
+  await nextTick()
+  const el = document.querySelector<HTMLElement>(`[data-doc-id="${id}"]`)
+  if (!el) return
+  el.scrollIntoView({ block: 'center' })
+  el.classList.add('document-card--highlight')
+  setTimeout(() => el.classList.remove('document-card--highlight'), 1500)
+}
+
 useRealtimeEvent('documents', 'status.changed', (ev) => {
   const id = Number(ev.resourceId)
   if (!Number.isFinite(id)) return
@@ -343,10 +388,15 @@ async function loadGroups() {
     const res = await listGroups()
     groups.value = res.items
   } catch (err: any) {
-    // Non-fatal — batch UI shows "no groups available" if this fails.
     console.warn('[documents] failed to load groups:', err)
   }
 }
+
+// ─── Filter change watcher (when URL changes externally) ────────────────────
+watch(
+  () => filter.applied.value,
+  () => load(),
+)
 
 onMounted(async () => {
   await Promise.all([loadCategories(), loadGroups(), load()])
@@ -391,6 +441,10 @@ onMounted(async () => {
     <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
     <Message v-if="info" severity="success" @close="info = ''">{{ info }}</Message>
 
+    <!-- Scan queue status panel -->
+    <DocumentScanQueuePanel />
+
+    <!-- Batch actions bar -->
     <div v-if="selectedIds.size > 0" class="batch-bar">
       <span class="batch-count">
         <i class="pi pi-check-square" />
@@ -431,58 +485,148 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div class="filters">
-      <span class="p-input-icon-left search-wrapper">
-        <i class="pi pi-search" />
-        <InputText
-          v-model="q"
-          placeholder="Suche in Dokumenten…"
-          class="search-input"
+    <!-- Toolbar: search + filter/sort/view controls -->
+    <div class="toolbar">
+      <div class="search-row">
+        <span class="p-input-icon-left search-wrapper">
+          <i class="pi pi-search" />
+          <InputText
+            v-model="q"
+            placeholder="Suche in Dokumenten…"
+            class="search-input"
+            @keydown="handleSearchKeydown"
+          />
+        </span>
+        <Button
+          icon="pi pi-search"
+          aria-label="Suche starten"
+          :disabled="q.trim().length === 0"
+          @click="triggerSearch"
         />
-      </span>
-
-      <SelectButton
-        v-model="searchMode"
-        :options="searchModeOptions"
-        optionLabel="label"
-        optionValue="value"
-        :allowEmpty="false"
-        v-tooltip.bottom="'Suchmodus: Text = genaue Wörter, Bedeutung = Paraphrasen, Hybrid = beides kombiniert'"
-      />
-
-      <Select
-        v-model="selectedCategory"
-        :options="categoryOptions"
-        optionLabel="label"
-        optionValue="value"
-        placeholder="Kategorie"
-        class="filter-select"
-        :disabled="q.trim().length > 0"
-      />
-
-      <Select
-        v-model="selectedStatus"
-        :options="statusOptions"
-        optionLabel="label"
-        optionValue="value"
-        placeholder="Status"
-        class="filter-select"
-        :disabled="q.trim().length > 0"
-      />
-
-      <label
-        class="needs-review-toggle"
-        v-tooltip.bottom="'Zeigt nur Dokumente, die geprüft werden sollten: fehlgeschlagen oder mit niedriger KI-Konfidenz.'"
-      >
-        <Checkbox
-          v-model="needsReviewOnly"
-          :binary="true"
-          :disabled="q.trim().length > 0"
+        <Button
+          v-if="q.trim().length > 0"
+          icon="pi pi-times"
+          text
+          rounded
+          severity="secondary"
+          aria-label="Suche löschen"
+          @click="clearSearch"
         />
-        <span>Nur zu prüfen</span>
-      </label>
+      </div>
+
+      <div class="toolbar-controls">
+        <SelectButton
+          v-if="q.trim().length > 0"
+          v-model="searchMode"
+          :options="searchModeOptions"
+          optionLabel="label"
+          optionValue="value"
+          :allowEmpty="false"
+          class="search-mode-btn"
+          v-tooltip.bottom="'Suchmodus'"
+          @update:model-value="triggerSearch"
+        />
+
+        <Button
+          :icon="filter.activeCount.value > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'"
+          text
+          rounded
+          aria-label="Filter"
+          v-tooltip.bottom="filter.activeCount.value > 0 ? `${filter.activeCount.value} Filter aktiv` : 'Filter'"
+          :badge="filter.activeCount.value > 0 ? String(filter.activeCount.value) : undefined"
+          badge-severity="info"
+          @click="openFilterMenu"
+        />
+
+        <Button
+          :icon="sort.isDefault.value ? 'pi pi-sort-amount-down' : 'pi pi-sort-amount-down'"
+          text
+          rounded
+          aria-label="Sortierung"
+          v-tooltip.bottom="sort.isDefault.value ? 'Sortierung' : `Sortiert: ${sort.fieldLabel.value}`"
+          :severity="sort.isDefault.value ? 'secondary' : undefined"
+          @click="openSortMenu"
+        />
+
+        <div class="view-toggle">
+          <Button
+            icon="pi pi-list"
+            :text="viewMode !== 'list'"
+            :outlined="viewMode === 'list'"
+            size="small"
+            :severity="viewMode === 'list' ? undefined : 'secondary'"
+            aria-label="Listenansicht"
+            v-tooltip.bottom="'Liste'"
+            @click="viewMode = 'list'"
+          />
+          <Button
+            icon="pi pi-th-large"
+            :text="viewMode !== 'grid'"
+            :outlined="viewMode === 'grid'"
+            size="small"
+            :severity="viewMode === 'grid' ? undefined : 'secondary'"
+            aria-label="Kachelansicht"
+            v-tooltip.bottom="'Kacheln'"
+            @click="viewMode = 'grid'"
+          />
+        </div>
+      </div>
     </div>
 
+    <!-- Active filter chips -->
+    <div v-if="filter.activeCount.value > 0" class="filter-chips">
+      <Chip
+        v-if="filter.applied.value.category"
+        :label="`Kategorie: ${filter.applied.value.category}`"
+        removable
+        @remove="filter.removeKey(['category'])"
+      />
+      <Chip
+        v-if="filter.applied.value.status"
+        :label="`Status: ${filter.applied.value.status}`"
+        removable
+        @remove="filter.removeKey(['status'])"
+      />
+      <Chip
+        v-if="filter.applied.value.tag"
+        :label="`Tag: ${filter.applied.value.tag}`"
+        removable
+        @remove="filter.removeKey(['tag'])"
+      />
+      <Chip
+        v-if="filter.applied.value.sender"
+        :label="`Absender: ${filter.applied.value.sender}`"
+        removable
+        @remove="filter.removeKey(['sender'])"
+      />
+      <Chip
+        v-if="filter.applied.value.dateFrom || filter.applied.value.dateTo"
+        :label="`Datum: ${filter.applied.value.dateFrom ?? '…'} – ${filter.applied.value.dateTo ?? '…'}`"
+        removable
+        @remove="filter.removeKey(['dateFrom', 'dateTo'])"
+      />
+      <Chip
+        v-if="filter.applied.value.taxRelevant !== undefined"
+        :label="`Steuerrelevant: ${filter.applied.value.taxRelevant ? 'Ja' : 'Nein'}`"
+        removable
+        @remove="filter.removeKey(['taxRelevant'])"
+      />
+      <Chip
+        v-if="filter.applied.value.needs_review"
+        label="Nur zu prüfen"
+        removable
+        @remove="filter.removeKey(['needs_review'])"
+      />
+      <Button
+        label="Alle Filter löschen"
+        text
+        size="small"
+        severity="secondary"
+        @click="() => { filter.reset(); load() }"
+      />
+    </div>
+
+    <!-- Loading / empty state -->
     <div v-if="loading" class="info-text">
       <i class="pi pi-spin pi-spinner" /> Dokumente werden geladen…
     </div>
@@ -491,7 +635,8 @@ onMounted(async () => {
       <template v-else>Noch keine Dokumente vorhanden.</template>
     </div>
 
-    <div v-else class="document-list">
+    <!-- List view -->
+    <div v-else-if="viewMode === 'list'" class="document-list">
       <div
         v-for="doc in items"
         :key="doc.id"
@@ -535,6 +680,7 @@ onMounted(async () => {
             <span v-if="doc.sender"><i class="pi pi-user" /> {{ doc.sender }}</span>
             <span v-if="doc.doc_date"><i class="pi pi-calendar" /> {{ formatDate(doc.doc_date) }}</span>
             <span class="document-size"><i class="pi pi-database" /> {{ formatSize(doc.size_bytes) }}</span>
+            <span v-if="doc.tax_relevant" class="tax-badge"><i class="pi pi-calculator" /> Steuer</span>
           </div>
           <div v-if="doc.status === 'failed' && doc.last_error" class="document-error">
             <i class="pi pi-times-circle" /> {{ doc.last_error }}
@@ -546,6 +692,50 @@ onMounted(async () => {
       </div>
     </div>
 
+    <!-- Grid / card view -->
+    <div v-else class="document-grid">
+      <div
+        v-for="doc in items"
+        :key="doc.id"
+        :data-doc-id="doc.id"
+        class="grid-card"
+        :class="{ 'grid-card--selected': isSelected(doc.id) }"
+        tabindex="0"
+        @click="openDocument(doc)"
+        @keydown.enter="openDocument(doc)"
+      >
+        <div class="grid-card-checkbox" @click.stop>
+          <Checkbox
+            :modelValue="isSelected(doc.id)"
+            :binary="true"
+            :aria-label="`Dokument ${doc.title || doc.original_filename} auswählen`"
+            @update:modelValue="(val: boolean) => toggleSelected(doc.id, val)"
+          />
+        </div>
+        <div class="grid-card-icon">
+          <i class="pi pi-file-pdf" />
+        </div>
+        <Tag
+          class="grid-card-status"
+          :severity="statusSeverity(doc.status)"
+          :value="statusLabel(doc.status)"
+        />
+        <div class="grid-card-title">{{ doc.title || doc.original_filename }}</div>
+        <div class="grid-card-meta">
+          <span v-if="doc.sender">{{ doc.sender }}</span>
+          <span v-if="doc.doc_date">{{ formatDate(doc.doc_date) }}</span>
+        </div>
+        <div v-if="doc.category_slug" class="grid-card-category">
+          <i class="pi pi-folder" /> {{ doc.category_slug }}
+        </div>
+        <div v-if="doc.tags.length > 0" class="grid-card-tags">
+          <Chip v-for="tag in doc.tags.slice(0, 3)" :key="tag" :label="tag" />
+          <span v-if="doc.tags.length > 3" class="more-tags">+{{ doc.tags.length - 3 }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Dialogs -->
     <MultiSelectDialog
       v-model:visible="tagsDialogVisible"
       title="Tags auf Auswahl anwenden"
@@ -580,6 +770,23 @@ onMounted(async () => {
       :groups="groups"
       @saved="info = 'Standard für neue Dokumente gespeichert.'"
     />
+
+    <DocumentFilterMenu
+      v-model:visible="filterMenuVisible"
+      v-model:draft="filter.draft.value"
+      :categories="categories"
+      :known-tags="allKnownTags"
+      @apply="applyFilterMenu"
+      @reset="resetFilterMenu"
+    />
+
+    <SortMenu
+      v-model:visible="sortMenuVisible"
+      v-model:draft="sort.draft.value"
+      :fields="sortFields"
+      @apply="applySortMenu"
+      @reset="resetSortMenu"
+    />
   </div>
 </template>
 
@@ -587,7 +794,7 @@ onMounted(async () => {
 .documents-view {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.75rem;
   width: 100%;
   padding-inline: 0.5em;
 }
@@ -606,7 +813,7 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-block: 0.25rem 0.5rem;
+  margin-block: 0.25rem 0;
 }
 
 .header-actions {
@@ -615,16 +822,22 @@ onMounted(async () => {
   gap: 0.25rem;
 }
 
-.filters {
+/* ── Toolbar ────────────────────────────────────────────────────── */
+.toolbar {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 0.5rem;
+}
+
+.search-row {
+  display: flex;
+  gap: 0.4rem;
   align-items: center;
 }
 
 .search-wrapper {
   flex: 1;
-  min-width: 220px;
+  min-width: 180px;
   position: relative;
 }
 .search-wrapper i {
@@ -640,70 +853,30 @@ onMounted(async () => {
   padding-left: 2rem;
 }
 
-.filter-select { min-width: 180px; }
-
-.needs-review-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  cursor: pointer;
-  user-select: none;
-}
-.needs-review-toggle span { font-size: 0.9rem; }
-
-.info-text {
-  text-align: center;
-  margin-top: 4rem;
-  color: var(--p-text-muted-color);
-}
-
-.document-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.document-card {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 0.75rem 1rem;
-  background: var(--p-surface-card);
-  border: 1px solid var(--p-content-border-color);
-  border-radius: 8px;
-  transition: box-shadow 0.1s;
-}
-.document-card:hover {
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
-}
-.document-card--selected {
-  outline: 2px solid var(--p-primary-color);
-  outline-offset: 2px;
-  background: color-mix(in srgb, var(--p-primary-color) 6%, var(--p-surface-card));
-}
-.document-card--highlight {
-  animation: card-flash 1.5s ease-out;
-}
-@keyframes card-flash {
-  0%   { box-shadow: 0 0 0 3px var(--p-primary-color); }
-  100% { box-shadow: none; }
-}
-
-/* Top row: checkbox, MIME-type icon and the (clickable) document name,
-   all vertically centered against each other. */
-.document-header {
+.toolbar-controls {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.25rem;
   flex-wrap: wrap;
 }
 
-.document-checkbox {
-  flex-shrink: 0;
+.search-mode-btn { flex-shrink: 0; }
+
+.view-toggle {
+  display: inline-flex;
+  margin-left: auto;
+  gap: 0;
+}
+
+/* ── Filter chips ──────────────────────────────────────────────── */
+.filter-chips {
   display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
   align-items: center;
 }
 
+/* ── Batch bar ─────────────────────────────────────────────────── */
 .batch-bar {
   display: flex;
   align-items: center;
@@ -729,6 +902,59 @@ onMounted(async () => {
   margin-left: auto;
 }
 
+/* ── Loading / empty ───────────────────────────────────────────── */
+.info-text {
+  text-align: center;
+  margin-top: 4rem;
+  color: var(--p-text-muted-color);
+}
+
+/* ── List view ─────────────────────────────────────────────────── */
+.document-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.document-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 8px;
+  transition: box-shadow 0.1s;
+}
+.document-card:hover {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+.document-card--selected {
+  outline: 2px solid var(--p-primary-color);
+  outline-offset: 2px;
+  background: color-mix(in srgb, var(--p-primary-color) 6%, var(--p-content-background));
+}
+.document-card--highlight {
+  animation: card-flash 1.5s ease-out;
+}
+@keyframes card-flash {
+  0%   { box-shadow: 0 0 0 3px var(--p-primary-color); }
+  100% { box-shadow: none; }
+}
+
+.document-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.document-checkbox {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
 .document-icon {
   font-size: 2rem;
   line-height: 1;
@@ -744,9 +970,6 @@ onMounted(async () => {
   gap: 0.4rem;
 }
 
-/* The document name is the only tap target that opens the document. Styled
-   as an inline button so it stays keyboard-accessible (Enter/Space) while
-   reading like the surrounding text. */
 .document-title {
   appearance: none;
   background: none;
@@ -779,6 +1002,8 @@ onMounted(async () => {
 }
 .document-meta span { display: inline-flex; align-items: center; gap: 0.25rem; }
 
+.tax-badge { color: var(--p-primary-color); font-weight: 500; }
+
 .document-error {
   display: inline-flex;
   align-items: center;
@@ -795,5 +1020,105 @@ onMounted(async () => {
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem;
+}
+
+/* ── Grid / card view ──────────────────────────────────────────── */
+.document-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.grid-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.75rem;
+  background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: box-shadow 0.15s, transform 0.1s;
+  position: relative;
+}
+.grid-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transform: translateY(-1px);
+}
+.grid-card:focus-visible {
+  outline: 2px solid var(--p-primary-color);
+  outline-offset: 2px;
+}
+.grid-card--selected {
+  outline: 2px solid var(--p-primary-color);
+  outline-offset: 2px;
+  background: color-mix(in srgb, var(--p-primary-color) 6%, var(--p-content-background));
+}
+
+.grid-card-checkbox {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 1;
+}
+
+.grid-card-icon {
+  font-size: 2.5rem;
+  color: var(--p-primary-color);
+  text-align: center;
+  padding: 0.5rem 0;
+}
+
+.grid-card-status {
+  align-self: flex-start;
+}
+
+.grid-card-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.grid-card-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
+}
+
+.grid-card-category {
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.grid-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+  margin-top: auto;
+}
+.grid-card-tags :deep(.p-chip) { font-size: 0.75rem; }
+.more-tags {
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color);
+  align-self: center;
+}
+
+/* ── Mobile adjustments ────────────────────────────────────────── */
+@media (max-width: 600px) {
+  .document-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 0.5rem;
+  }
+  .toolbar-controls {
+    width: 100%;
+    justify-content: flex-start;
+  }
 }
 </style>

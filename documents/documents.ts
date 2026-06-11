@@ -11,7 +11,7 @@ import crypto from "crypto";
 import { api, APIError, type Query } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
-import { and, desc, eq, ilike, inArray, lt, or, sql } from "drizzle-orm";
+import { asc, and, desc, eq, gte, ilike, inArray, lte, lt, or, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbFirst } from "../db/adapter";
 import {
@@ -148,6 +148,12 @@ interface ListQuery {
    * low-confidence ready ones).
    */
   needs_review?: Query<boolean>;
+  sender?: Query<string>;
+  date_from?: Query<string>;
+  date_to?: Query<string>;
+  tax_relevant?: Query<boolean>;
+  sort_by?: Query<string>;
+  sort_dir?: Query<string>;
   limit?: Query<number>;
   offset?: Query<number>;
 }
@@ -363,7 +369,7 @@ async function loadDefaultGroupForUser(userId: number): Promise<number | null> {
 
 export const listDocuments = api(
   { expose: true, method: "GET", path: "/documents", auth: true },
-  async ({ category, tag, q, status, needs_review, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
+  async ({ category, tag, q, status, needs_review, sender, date_from, date_to, tax_relevant, sort_by, sort_dir, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -403,6 +409,20 @@ export const listDocuments = api(
       );
       if (matchedByTitle) conds.push(matchedByTitle);
     }
+    if (sender && sender.trim().length > 0) {
+      conds.push(ilike(documents.sender, `%${sender.trim()}%`));
+    }
+    if (date_from) {
+      conds.push(gte(documents.doc_date, date_from));
+    }
+    if (date_to) {
+      conds.push(lte(documents.doc_date, date_to));
+    }
+    if (tax_relevant === true) {
+      conds.push(eq(documents.tax_relevant, true));
+    } else if (tax_relevant === false) {
+      conds.push(eq(documents.tax_relevant, false));
+    }
 
     let docIdFilter: number[] | null = null;
     if (tag && tag.length > 0) {
@@ -422,6 +442,16 @@ export const listDocuments = api(
       if (docIdFilter.length === 0) return { items: [], total: 0 };
       conds.push(inArray(documents.id, docIdFilter));
     }
+
+    const VALID_SORT_FIELDS: Record<string, any> = {
+      uploaded_at: documents.uploaded_at,
+      doc_date: documents.doc_date,
+      title: documents.title,
+      sender: documents.sender,
+      size_bytes: documents.size_bytes,
+    };
+    const sortCol = VALID_SORT_FIELDS[sort_by ?? ""] ?? documents.uploaded_at;
+    const sortFn = sort_dir === "asc" ? asc : desc;
 
     const rows = await dbAll<typeof documents.$inferSelect & { cat_slug: string | null }>(
       db
@@ -456,7 +486,7 @@ export const listDocuments = api(
         .from(documents)
         .leftJoin(documentCategories, eq(documents.category_id, documentCategories.id))
         .where(and(...conds))
-        .orderBy(desc(documents.uploaded_at))
+        .orderBy(sortFn(sortCol))
         .limit(lim)
         .offset(off),
     );

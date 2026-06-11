@@ -82,6 +82,12 @@ export interface ListDocumentsQuery {
    * status='ready' with classification_confidence below 0.6.
    */
   needs_review?: boolean
+  sender?: string
+  date_from?: string
+  date_to?: string
+  tax_relevant?: boolean
+  sort_by?: string
+  sort_dir?: 'asc' | 'desc'
   limit?: number
   offset?: number
 }
