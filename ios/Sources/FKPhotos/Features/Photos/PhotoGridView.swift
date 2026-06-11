@@ -3,7 +3,7 @@ import SwiftUI
 struct PhotoGridView: View {
     @State private var viewModel      = PhotosViewModel()
     @State private var filterSort     = FilterSortViewModel(persistenceKey: "photos.filterSort")
-    @State private var isFullscreenPresented = false
+    @State private var fullscreenNav: FullscreenNav? = nil
     @State private var selectedIndex  = 0
     @State private var scrollTarget: Int?
     @State private var showUpload     = false
@@ -55,7 +55,7 @@ struct PhotoGridView: View {
                                         toggleSelection(photo.id)
                                     } else {
                                         selectedIndex = viewModel.photos.firstIndex(where: { $0.id == photo.id }) ?? 0
-                                        isFullscreenPresented = true
+                                        fullscreenNav = FullscreenNav(startIndex: selectedIndex)
                                     }
                                 }
                                 .onLongPressGesture {
@@ -135,11 +135,11 @@ struct PhotoGridView: View {
             FilterSortMenuView(viewModel: filterSort)
                 .presentationDetents([.medium, .large])
         }
-        .navigationDestination(isPresented: $isFullscreenPresented) {
+        .navigationDestination(item: $fullscreenNav) { _ in
             PhotoFullscreenView(photos: viewModel.photos, currentIndex: $selectedIndex)
         }
-        .onChange(of: isFullscreenPresented) { _, isPresented in
-            if !isPresented, !viewModel.photos.isEmpty {
+        .onChange(of: fullscreenNav) { _, nav in
+            if nav == nil, !viewModel.photos.isEmpty {
                 let idx = min(selectedIndex, viewModel.photos.count - 1)
                 let photoId = viewModel.photos[idx].id
                 // Delay until the dismiss animation completes so the grid is fully visible.
@@ -187,6 +187,10 @@ struct PhotoGridView: View {
         } else {
             selectedIds.insert(id)
         }
+    }
+
+    private struct FullscreenNav: Hashable {
+        let startIndex: Int
     }
 
     private var dragSelectGesture: some Gesture {
