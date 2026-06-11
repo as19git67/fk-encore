@@ -610,26 +610,43 @@ async function handleConfirm() {
     committing.value = false
     return
   }
-  if (isLastGroup.value) {
-    // Emit `reviewed` first so the parent's local-state mirror runs
-    // (flipping group.reviewed in its cache) before `close` tears the
-    // overlay down. The overlay stays up until unmount.
+  if (props.singleGroupMode) {
+    // No next-group hand-off in single-group mode (the review queue manages
+    // its own navigation). Emit `reviewed` first so the parent's local-state
+    // mirror runs before `close` tears the overlay down.
     emit('reviewed')
     emit('close')
   } else {
-    // Hand off to the parent, which swaps in the next group. The
-    // group-id watcher below loads its members and only then clears the
-    // overlay — so the spinner spans the whole gap.
+    // Always hand off to the parent — it owns the decision of whether a
+    // next group exists (and closes when none do). Letting the child decide
+    // from a possibly-stale `totalUnreviewed` count was what made the last
+    // "OK & Weiter" of an album drop straight back to the grid. The
+    // group-id watcher below clears the overlay once the next group is
+    // ready; if the parent closes instead, unmounting clears it.
     emit('next', props.group.id)
   }
+}
+
+// Cancel must always be possible — even mid-commit. Clears the overlay and
+// closes; the parent reloads the grid. The commit (if already in flight)
+// completes server-side, which is fine: a confirmed selection was applied.
+function handleCancel() {
+  committing.value = false
+  emit('close')
 }
 
 // ── Keyboard shortcuts ──
 
 function handleKeydown(e: KeyboardEvent) {
-  // While committing the overlay is modal — swallow shortcuts so a stray
-  // key can't kick off a second action mid-transition.
-  if (committing.value) return
+  // While committing only Escape is live (cancel) — swallow everything else
+  // so a stray key can't kick off a second action mid-transition.
+  if (committing.value) {
+    if (e.key === 'Escape') {
+      handleCancel()
+      e.preventDefault()
+    }
+    return
+  }
 
   if (e.key === 'Escape') {
     if (anyZoomActive.value) {
@@ -1048,11 +1065,16 @@ onUnmounted(() => {
 watch(() => props.group.id, () => {
   syncCuration()
   initScores()
-  // The members load is the slow part of a "OK & Weiter" hand-off; keep
-  // the progress overlay (committing) up until it resolves so the user
-  // never stares at a half-built compare view.
+  // Clear the progress overlay as soon as the next group is actually
+  // usable. When the parent already supplies the members (album view's
+  // `allPhotos`), that's immediately — don't keep the user waiting on the
+  // background metadata refresh (getPhotoDetailsBatch), which can lag and
+  // otherwise leaves the overlay stuck even though the photos are visible.
+  if (groupPhotos.value.length > 0) committing.value = false
   loadMissingMembers()
     .then(() => { initScores(); if (phase.value === 'review') seedReviewItems() })
+    // Gallery view starts with no members until this resolves — only then
+    // is the compare view real, so clear here for that path.
     .finally(() => { committing.value = false })
 })
 
@@ -1097,6 +1119,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
               v-tooltip.bottom="{ value: isVeryNarrow ? 'Linkes ausblenden (1)' : undefined, disabled: isTouch }"
               severity="warn"
               size="small"
+              :disabled="committing"
               @click="chooseHide(currentPair[0])"
             />
           </div>
@@ -1107,6 +1130,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
               v-tooltip.bottom="{ value: isVeryNarrow ? 'Unentschieden (U)' : undefined, disabled: isTouch }"
               severity="info"
               size="small"
+              :disabled="committing"
               @click="chooseDraw"
             />
             <Button
@@ -1115,6 +1139,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
               v-tooltip.bottom="{ value: isVeryNarrow ? 'Überspringen (S)' : undefined, disabled: isTouch }"
               severity="info"
               size="small"
+              :disabled="committing"
               @click="skipPair"
             />
             <Button
@@ -1123,6 +1148,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
               severity="warn"
               size="small"
               v-tooltip.bottom="{ value: 'Vergleich überspringen und Fotos nach KI-Qualitätsbewertung vorauswählen', disabled: isTouch }"
+              :disabled="committing"
               @click="applyAiPreselection"
             />
             <Button
@@ -1138,6 +1164,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
                   : 'Doppelklick zoomt nur das angeklickte Foto — anklicken zum Synchronisieren',
                 disabled: isTouch,
               }"
+              :disabled="committing"
               @click="onSyncToggleClick"
             />
             <Button
@@ -1147,6 +1174,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
               rounded
               severity="secondary"
               size="small"
+              :disabled="committing"
               @click="helpPopover.toggle($event)"
               aria-label="Hilfe"
             />
@@ -1202,6 +1230,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
               v-tooltip.bottom="{ value: isVeryNarrow ? 'Rechtes ausblenden (2)' : undefined, disabled: isTouch }"
               severity="warn"
               size="small"
+              :disabled="committing"
               @click="chooseHide(currentPair[1])"
             />
             <Button
@@ -1210,9 +1239,9 @@ function compareTileSrc(photo: Photo, width?: number): string {
               rounded
               severity="secondary"
               size="small"
-              v-tooltip.bottom="{ value: 'Schließen', disabled: isTouch }"
-              @click="$emit('close')"
-              aria-label="Schließen"
+              v-tooltip.bottom="{ value: committing ? 'Abbrechen' : 'Schließen', disabled: isTouch }"
+              @click="committing ? handleCancel() : $emit('close')"
+              :aria-label="committing ? 'Abbrechen' : 'Schließen'"
             />
           </div>
         </div>
@@ -1327,14 +1356,15 @@ function compareTileSrc(photo: Photo, width?: number): string {
               :disabled="committing"
               @click="handleConfirm"
             />
+            <!-- Cancel stays enabled even while committing — leaving must
+                 always be possible. -->
             <Button
               icon="pi pi-times"
               text
               rounded
               severity="secondary"
-              :disabled="committing"
-              v-tooltip.bottom="{ value: 'Schließen', disabled: isTouch }"
-              @click="$emit('close')"
+              v-tooltip.bottom="{ value: 'Abbrechen', disabled: isTouch }"
+              @click="handleCancel"
             />
           </div>
         </div>
@@ -1342,7 +1372,8 @@ function compareTileSrc(photo: Photo, width?: number): string {
         <!-- Confirmation: the final selection rendered as feed cards.
              Each card's thumb-down is pre-filled from the compare result
              (suggested-hide → dimmed); toggling is local and only takes
-             effect when the user confirms. -->
+             effect when the user confirms. The "Öffnen in…" action is
+             suppressed — navigating away would cancel the review. -->
         <div class="review-feed-scroll">
           <div class="review-feed">
             <PhotoFeedCard
@@ -1350,6 +1381,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
               :key="item.photoId"
               :item="item"
               :current-user-id="auth.user?.id ?? null"
+              :hide-open-in="true"
               @hide="onReviewHide"
               @like="onReviewLike"
             />
@@ -1359,15 +1391,16 @@ function compareTileSrc(photo: Photo, width?: number): string {
 
       <!-- Progress overlay: shown while the confirmed selection is being
            applied AND while the next group's members load, so the gap
-           before the next compare view never looks like a freeze. -->
-      <div v-if="committing" class="compare-progress" role="status" aria-live="polite">
+           before the next compare view never looks like a freeze. Covers
+           only below the toolbar; the toolbar's Cancel stays usable. -->
+      <div v-if="committing" class="compare-commit-overlay" role="status" aria-live="polite">
         <ProgressSpinner
           style="width: 56px; height: 56px"
           strokeWidth="4"
           animationDuration=".8s"
         />
-        <span class="compare-progress-label">
-          {{ isLastGroup ? 'Wird übernommen…' : 'Wird übernommen — nächste Gruppe wird geladen…' }}
+        <span class="compare-commit-overlay-label">
+          {{ singleGroupMode ? 'Wird übernommen…' : 'Wird übernommen — nächste Gruppe wird geladen…' }}
         </span>
       </div>
 
@@ -1542,10 +1575,17 @@ function compareTileSrc(photo: Photo, width?: number): string {
   gap: 1.25rem;
 }
 
-/* ── Progress overlay (commit + next-group load) ── */
-.compare-progress {
+/* ── Progress overlay (commit + next-group load) ──
+   Covers only the area BELOW the toolbar (top offset = header height) so
+   the toolbar — and its always-live Cancel button — stays reachable. NB:
+   distinct class from the compare-phase `.compare-progress` counter span;
+   reusing that name turned the counter into a stuck fullscreen overlay. */
+.compare-commit-overlay {
   position: absolute;
-  inset: 0;
+  top: 2.5rem; /* matches .compare-header height */
+  left: 0;
+  right: 0;
+  bottom: 0;
   z-index: 30;
   display: flex;
   flex-direction: column;
@@ -1557,7 +1597,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
   text-align: center;
   padding: 1.5rem;
 }
-.compare-progress-label {
+.compare-commit-overlay-label {
   color: #f4f4f5;
   font-size: 0.95rem;
   max-width: 22rem;

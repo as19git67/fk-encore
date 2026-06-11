@@ -602,8 +602,16 @@ async function onCompareNext(reviewedGroupId: number) {
   if (nextId === null && reviewSequence.value.length === 0) {
     nextId = groups.find((g) => !g.reviewed_at && g.id !== reviewedGroupId)?.id ?? null
   }
-  activeGroup.value =
-    nextId !== null ? groups.find((g) => g.id === nextId) ?? null : null
+  const next = nextId !== null ? groups.find((g) => g.id === nextId) ?? null : null
+  activeGroup.value = next
+  // No further group: the streak ends here. Setting activeGroup to null
+  // unmounts the overlay WITHOUT a `close` emit, so onCompareClose's
+  // deferred grid reload would never run and the just-hidden photos would
+  // linger as ghosts. Run the reload here instead.
+  if (next === null && compareNeedsReload.value) {
+    compareNeedsReload.value = false
+    await galleryRef.value?.reload()
+  }
 }
 
 // ── Upload ──────────────────────────────────────────────────────────────────
