@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import Button from 'primevue/button'
+import ProgressSpinner from 'primevue/progressspinner'
 import Popover from 'primevue/popover'
 import HeicImage from './HeicImage.vue'
+import PhotoFeedCard from './PhotoFeedCard.vue'
 import {
   updatePhotoCuration,
   reviewPhotoGroup,
-  acceptAiPick,
+  pickPhotosInGroup,
   getPhotoDetailsBatch,
   getPhotoFaces,
   getPhotoLandmarks,
@@ -16,6 +18,7 @@ import {
   type Face,
   type LandmarkItem,
 } from '../api/photos'
+import type { FeedPhotoItem } from '../api/photoFeed'
 import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
 import { useAuthStore } from '../stores/auth'
 import { discardFlingDirection, flingOffscreenTranslate } from '../utils/compareSwipe'
@@ -125,17 +128,6 @@ function getCuration(id: number): CurationStatus {
   return localCuration.value.get(id) ?? 'visible'
 }
 
-async function setCuration(id: number, status: CurationStatus) {
-  const current = getCuration(id)
-  const newStatus = current === status ? 'visible' : status
-  localCuration.value = new Map(localCuration.value).set(id, newStatus)
-  try {
-    await updatePhotoCuration(id, newStatus)
-  } catch {
-    localCuration.value = new Map(localCuration.value).set(id, current)
-  }
-}
-
 // ── AI quality score helpers ──
 
 /** Returns the ai_quality_score for a photo, or null if not yet scored. */
@@ -210,20 +202,6 @@ function hasClosedEyesVsPartner(photoId: number): boolean {
   const other = eyesOpenScore(otherId)
   if (my === null || other === null) return false
   return other - my > EYES_DELTA_THRESHOLD
-}
-
-/** Review-phase variant: badge fires when this photo's eyes_open sits
- *  notably below the best-eyes photo of the displayed group. */
-function hasClosedEyesInGroup(photoId: number): boolean {
-  const my = eyesOpenScore(photoId)
-  if (my === null) return false
-  let best = -Infinity
-  for (const p of groupPhotos.value) {
-    const s = p.ai_quality_details?.eyes_open
-    if (typeof s === 'number' && s > best) best = s
-  }
-  if (best === -Infinity) return false
-  return best - my > EYES_DELTA_THRESHOLD
 }
 
 function eyesClosedTooltip(photoId: number): string {
@@ -318,10 +296,8 @@ const scores = ref(new Map<number, number>())
 const comparedPairs = ref(new Set<string>())
 // Current pair being compared
 const currentPair = ref<[number, number] | null>(null)
-// Phase: 'compare' = pairwise phase, 'review' = summary phase
+// Phase: 'compare' = pairwise phase, 'review' = confirmation phase
 const phase = ref<'compare' | 'review'>('compare')
-// Whether the user has accepted or rejected the suggestion
-const reviewDecided = ref(false)
 // Total comparisons done (for progress display)
 const comparisonsDone = ref(0)
 
@@ -380,7 +356,6 @@ function initScores() {
   comparedPairs.value = new Set()
   comparisonsDone.value = 0
   phase.value = 'compare'
-  reviewDecided.value = false
   currentPair.value = pickNextPair()
   // If only 1 photo or no pairs possible, go straight to review
   if (!currentPair.value) {
@@ -495,59 +470,85 @@ const sortedPhotos = computed(() => {
   })
 })
 
-// Suggested hide threshold: photos with negative score
+// Suggested hide threshold: photos with negative score. Drives the
+// pre-fill of the confirmation phase (these get the thumb-down toggled
+// and are rendered dimmed) — but NOTHING is hidden server-side until the
+// user confirms.
 const suggestedHideIds = computed(() => {
   return sortedPhotos.value
     .filter(p => (scores.value.get(p.id) ?? 0) < 0)
     .map(p => p.id)
 })
 
-const hasSuggestions = computed(() => suggestedHideIds.value.length > 0)
+// ── Confirmation phase (deferred selection) ──
+//
+// The confirmation reuses the feed card (PhotoFeedCard) so the photos are
+// presented exactly like in the stream. Each card owns a `hiddenByMe`
+// flag — pre-filled from the compare result (suggested-hide → dimmed +
+// thumb-down) — that the user can still flip. Crucially the toggle is
+// LOCAL: it only mutates the card item here, never the server. The actual
+// hide/keep is applied in a single transaction when the user confirms,
+// so the photos stay visible in the grid until then.
+const auth = useAuthStore()
+const reviewItems = ref<FeedPhotoItem[]>([])
 
-function applySuggestions() {
-  for (const id of suggestedHideIds.value) {
-    if (getCuration(id) !== 'hidden') {
-      setCuration(id, 'hidden')
-    }
+function toFeedItem(photo: Photo): FeedPhotoItem {
+  return {
+    photoId: photo.id,
+    filename: photo.filename,
+    width: null,
+    height: null,
+    description: photo.description ?? null,
+    takenAt: photo.taken_at ?? null,
+    lastActivityAt: photo.taken_at ?? photo.created_at,
+    album: null,
+    owner: { id: photo.user_id ?? auth.user?.id ?? null, name: auth.user?.name ?? null },
+    likeCount: 0,
+    likedByMe: getCuration(photo.id) === 'favorite',
+    commentCount: 0,
+    latestComment: null,
+    hiddenByMe: suggestedHideIds.value.includes(photo.id),
   }
-  reviewDecided.value = true
 }
 
-function rejectSuggestions() {
-  reviewDecided.value = true
+/**
+ * (Re)build the confirmation card list from the current compare result.
+ * Called whenever the confirmation phase is entered so the pre-fill
+ * reflects the latest scores. Best photos (highest score) first so the
+ * keepers sit at the top of the scroll and the suggested-hide candidates
+ * trail below.
+ */
+function seedReviewItems() {
+  reviewItems.value = [...sortedPhotos.value]
+    .reverse()
+    .map(toFeedItem)
 }
 
-// ── KI-Auto-Pick (Track I) ──
-// The server pre-computed `ai_picked_photo_ids` for unreviewed groups
-// (see /photos/find-groups + /photos/groups/recompute-ai-picks). When
-// the user clicks "KI-Vorschlag übernehmen" we delegate to the backend
-// endpoint, which hides every non-picked member via photo_curation
-// (skipping favorites) and marks the group reviewed in a single
-// transaction. After it returns we emit `reviewed` so the parent
-// gallery refreshes its caches.
-const hasAiPick = computed(() => {
-  const ids = props.group.ai_picked_photo_ids
-  return Array.isArray(ids) && ids.length > 0 && !props.group.reviewed_at
-})
-const aiPickButsy = ref(false)
+const reviewHideCount = computed(
+  () => reviewItems.value.filter((it) => it.hiddenByMe).length,
+)
 
-async function acceptAiPickAction() {
-  if (aiPickButsy.value) return
-  aiPickButsy.value = true
-  try {
-    await acceptAiPick(props.group.id)
-    emit('reviewed')
-    emit('close')
-  } catch (err) {
-    console.error('[PhotoCompareView] acceptAiPick failed', err)
-  } finally {
-    aiPickButsy.value = false
+// Feed-card actions in the confirmation. Both are purely local — the
+// commit happens on confirm. `like` doubles as the favorite toggle.
+function onReviewHide(item: FeedPhotoItem) {
+  item.hiddenByMe = !item.hiddenByMe
+  // Hiding a photo clears a stray favorite (the two are mutually
+  // exclusive curation states); keeping it leaves the favorite intact.
+  if (item.hiddenByMe && item.likedByMe) {
+    item.likedByMe = false
+    item.likeCount = Math.max(0, item.likeCount - 1)
   }
+}
+
+function onReviewLike(item: FeedPhotoItem) {
+  item.likedByMe = !item.likedByMe
+  item.likeCount = Math.max(0, item.likeCount + (item.likedByMe ? 1 : -1))
+  // Favoriting a photo can never also hide it.
+  if (item.likedByMe && item.hiddenByMe) item.hiddenByMe = false
 }
 
 function goBackToCompare() {
   phase.value = 'compare'
-  reviewDecided.value = false
   currentPair.value = pickNextPair()
   if (!currentPair.value) {
     // All pairs exhausted, stay in review
@@ -555,35 +556,81 @@ function goBackToCompare() {
   }
 }
 
-// ── Done / Next ──
+// ── Confirm (commit + advance) ──
+//
+// `committing` drives the full-screen progress overlay. It stays up for
+// the whole transition — the commit round-trip AND the load of the next
+// group's members — because that load (getPhotoDetailsBatch over every
+// member) is what makes the gap before the next compare view appears.
+const committing = ref(false)
 
-async function handleDone() {
-  try {
+const isLastGroup = computed(
+  () => props.singleGroupMode || props.totalUnreviewed <= 1,
+)
+const confirmLabel = computed(() =>
+  isLastGroup.value ? 'OK' : 'OK & Weiter',
+)
+
+/**
+ * Apply the confirmed selection in as few round-trips as possible:
+ *   - favorites first (deferred from the feed-card hearts),
+ *   - then keep/hide in one transaction via pickPhotosInGroup, which
+ *     hides every non-kept member and marks the group reviewed.
+ * Edge cases: nothing hidden → just mark reviewed; everything hidden →
+ * hide each then mark reviewed (pickPhotosInGroup needs ≥1 keeper).
+ */
+async function commitReview() {
+  for (const item of reviewItems.value) {
+    if (item.likedByMe && !item.hiddenByMe) {
+      await updatePhotoCuration(item.photoId, 'favorite')
+    }
+  }
+  const allIds = reviewItems.value.map((it) => it.photoId)
+  const keepIds = reviewItems.value
+    .filter((it) => !it.hiddenByMe)
+    .map((it) => it.photoId)
+
+  if (keepIds.length === allIds.length) {
     await reviewPhotoGroup(props.group.id, props.group.photo_ids)
-    // Emit `reviewed` first so the parent's local-state mirror runs
-    // (e.g. flipping group.reviewed in the cache) before the overlay
-    // tears down on `close`. Without this, plain `close` covers both
-    // "user finished review" and "user dismissed via X" — the parent
-    // can't tell them apart.
-    emit('reviewed')
-    emit('close')
-  } catch (err: any) {
-    console.error('Failed to review group:', err)
+  } else if (keepIds.length > 0) {
+    await pickPhotosInGroup(props.group.id, keepIds)
+  } else {
+    for (const id of allIds) await updatePhotoCuration(id, 'hidden')
+    await reviewPhotoGroup(props.group.id, props.group.photo_ids)
   }
 }
 
-async function handleDoneAndNext() {
+async function handleConfirm() {
+  if (committing.value) return
+  committing.value = true
   try {
-    await reviewPhotoGroup(props.group.id, props.group.photo_ids)
-    emit('next', props.group.id)
+    await commitReview()
   } catch (err: any) {
-    console.error('Failed to review group:', err)
+    console.error('Failed to confirm group review:', err)
+    committing.value = false
+    return
+  }
+  if (isLastGroup.value) {
+    // Emit `reviewed` first so the parent's local-state mirror runs
+    // (flipping group.reviewed in its cache) before `close` tears the
+    // overlay down. The overlay stays up until unmount.
+    emit('reviewed')
+    emit('close')
+  } else {
+    // Hand off to the parent, which swaps in the next group. The
+    // group-id watcher below loads its members and only then clears the
+    // overlay — so the spinner spans the whole gap.
+    emit('next', props.group.id)
   }
 }
 
 // ── Keyboard shortcuts ──
 
 function handleKeydown(e: KeyboardEvent) {
+  // While committing the overlay is modal — swallow shortcuts so a stray
+  // key can't kick off a second action mid-transition.
+  if (committing.value) return
+
   if (e.key === 'Escape') {
     if (anyZoomActive.value) {
       resetZoom()
@@ -595,6 +642,13 @@ function handleKeydown(e: KeyboardEvent) {
     } else {
       emit('close')
     }
+    return
+  }
+
+  // Confirmation phase: Enter confirms the selection (OK / OK & Weiter).
+  if (phase.value === 'review' && (e.key === 'Enter')) {
+    void handleConfirm()
+    e.preventDefault()
     return
   }
 
@@ -980,7 +1034,8 @@ onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
   window.addEventListener('resize', onResize)
   hoverlessMql.addEventListener('change', onHoverCapabilityChange)
-  loadMissingMembers().then(() => initScores())
+  loadMissingMembers()
+    .then(() => { initScores(); if (phase.value === 'review') seedReviewItems() })
 })
 
 onUnmounted(() => {
@@ -993,15 +1048,24 @@ onUnmounted(() => {
 watch(() => props.group.id, () => {
   syncCuration()
   initScores()
-  loadMissingMembers().then(() => initScores())
+  // The members load is the slow part of a "OK & Weiter" hand-off; keep
+  // the progress overlay (committing) up until it resolves so the user
+  // never stares at a half-built compare view.
+  loadMissingMembers()
+    .then(() => { initScores(); if (phase.value === 'review') seedReviewItems() })
+    .finally(() => { committing.value = false })
+})
+
+// Rebuild the confirmation cards from the freshest compare result every
+// time we enter (or re-enter) the confirmation phase.
+watch(phase, (p) => {
+  if (p === 'review') seedReviewItems()
 })
 
 function getPhotoById(id: number): Photo | undefined {
   const base = props.allPhotos.find(p => p.id === id) ?? fetchedMembers.value.get(id)
   return base ? mergeFreshScore(base, freshScores.value.get(id)) : undefined
 }
-
-const auth = useAuthStore()
 
 /**
  * Photo URL aware of the caller's saved transform. Compare-view tiles
@@ -1234,168 +1298,78 @@ function compareTileSrc(photo: Photo, width?: number): string {
               v-tooltip.bottom="{ value: isVeryNarrow ? 'Weiter vergleichen' : undefined, disabled: isTouch }"
               text
               size="small"
+              :disabled="committing"
               @click="goBackToCompare"
             />
           </div>
           <div class="compare-header-center">
             <span class="review-title" v-if="!isVeryNarrow">
-              <template v-if="hasSuggestions">
-                Vorschlag: {{ suggestedHideIds.length }} von {{ groupPhotos.length }} ausblenden
+              <template v-if="reviewHideCount > 0">
+                {{ reviewHideCount }} von {{ reviewItems.length }} ausblenden
               </template>
               <template v-else>
-                Kein Ausblenden vorgeschlagen (0 von {{ groupPhotos.length }})
+                Alle {{ reviewItems.length }} behalten
               </template>
-            </span>
-            <span v-if="aiPreselectionIsRelative" class="relative-score-hint"
-              v-tooltip.bottom="'Die KI-Scores lagen nah beieinander — die Vorauswahl basiert auf dem relativen Vergleich innerhalb der Gruppe.'">
-              <i class="pi pi-info-circle" /> <span v-if="!isVeryNarrow">Relative Bewertung</span>
             </span>
           </div>
           <div class="compare-header-right">
+            <!-- Single confirm action (replaces the old OK / OK+Weiter
+                 split). Applies the selection on click; the progress
+                 overlay covers the commit + next-group load. -->
             <Button
-              v-if="hasAiPick && !reviewDecided"
-              :label="isVeryNarrow ? undefined : isNarrow ? 'KI' : 'KI-Vorschlag übernehmen'"
-              icon="pi pi-sparkles"
-              v-tooltip.bottom="{ value: isVeryNarrow ? 'KI-Vorschlag übernehmen' : 'Behält die KI-Auswahl und blendet die übrigen aus', disabled: isTouch }"
+              :label="isVeryNarrow ? undefined : confirmLabel"
+              :icon="isLastGroup ? 'pi pi-check' : 'pi pi-arrow-right'"
+              :iconPos="isLastGroup ? 'left' : 'right'"
+              v-tooltip.bottom="{ value: isVeryNarrow ? confirmLabel : undefined, disabled: isTouch }"
               severity="success"
-              outlined
               size="small"
-              :loading="aiPickButsy"
-              @click="acceptAiPickAction"
+              :loading="committing"
+              :disabled="committing"
+              @click="handleConfirm"
             />
-            <template v-if="!reviewDecided">
-              <template v-if="hasSuggestions">
-                <Button
-                  :label="isVeryNarrow ? undefined : isNarrow ? 'OK' : 'Vorschlag übernehmen'"
-                  icon="pi pi-check"
-                  v-tooltip.bottom="{ value: isVeryNarrow ? 'Vorschlag übernehmen' : undefined, disabled: isTouch }"
-                  severity="warn"
-                  size="small"
-                  @click="applySuggestions"
-                />
-                <Button
-                  :label="isVeryNarrow ? undefined : isNarrow ? 'Nein' : 'Vorschlag ablehnen'"
-                  icon="pi pi-times"
-                  v-tooltip.bottom="{ value: isVeryNarrow ? 'Vorschlag ablehnen' : undefined, disabled: isTouch }"
-                  severity="secondary"
-                  outlined
-                  size="small"
-                  @click="rejectSuggestions"
-                />
-              </template>
-              <template v-else>
-                <span class="no-suggestion-hint" v-if="!isNarrow">Keine Aktion erforderlich</span>
-                <Button
-                  :label="isVeryNarrow ? undefined : 'Fertig'"
-                  icon="pi pi-check"
-                  v-tooltip.bottom="{ value: isVeryNarrow ? 'Fertig' : undefined, disabled: isTouch }"
-                  @click="handleDone"
-                  severity="success"
-                  size="small"
-                />
-                <Button
-                  v-if="totalUnreviewed > 1 && !singleGroupMode"
-                  :label="isVeryNarrow ? undefined : isNarrow ? 'Weiter' : 'Fertig + Weiter'"
-                  icon="pi pi-arrow-right"
-                  iconPos="right"
-                  v-tooltip.bottom="{ value: isVeryNarrow ? 'Fertig + Weiter' : undefined, disabled: isTouch }"
-                  @click="handleDoneAndNext"
-                  severity="success"
-                  outlined
-                  size="small"
-                />
-              </template>
-            </template>
-            <template v-else>
-              <Button
-                :label="isVeryNarrow ? undefined : 'Fertig'"
-                icon="pi pi-check"
-                v-tooltip.bottom="{ value: isVeryNarrow ? 'Fertig' : undefined, disabled: isTouch }"
-                @click="handleDone"
-                severity="success"
-                size="small"
-              />
-              <Button
-                v-if="totalUnreviewed > 1 && !singleGroupMode"
-                :label="isVeryNarrow ? undefined : isNarrow ? 'Weiter' : 'Fertig + Weiter'"
-                icon="pi pi-arrow-right"
-                iconPos="right"
-                v-tooltip.bottom="{ value: isVeryNarrow ? 'Fertig + Weiter' : undefined, disabled: isTouch }"
-                @click="handleDoneAndNext"
-                severity="success"
-                outlined
-                size="small"
-              />
-            </template>
-            <Button icon="pi pi-times" @click="$emit('close')" text rounded severity="secondary" v-tooltip.bottom="{ value: 'Schließen', disabled: isTouch }" />
+            <Button
+              icon="pi pi-times"
+              text
+              rounded
+              severity="secondary"
+              :disabled="committing"
+              v-tooltip.bottom="{ value: 'Schließen', disabled: isTouch }"
+              @click="$emit('close')"
+            />
           </div>
         </div>
 
-        <!-- Review grid -->
-        <div class="review-scroll">
-          <div class="review-grid">
-            <div
-              v-for="photo in sortedPhotos"
-              :key="photo.id"
-              class="review-photo"
-              :class="{
-                'is-hidden': getCuration(photo.id) === 'hidden',
-                'is-suggested-hide': suggestedHideIds.includes(photo.id) && getCuration(photo.id) !== 'hidden',
-                'is-favorite': getCuration(photo.id) === 'favorite'
-              }"
-            >
-              <div class="review-photo-image">
-                <HeicImage :src="compareTileSrc(photo)" :alt="photo.original_name" />
-                <div class="review-score" :class="{ negative: (scores.get(photo.id) ?? 0) < 0 }">
-                  {{ (scores.get(photo.id) ?? 0) > 0 ? '+' : '' }}{{ scores.get(photo.id) ?? 0 }}
-                </div>
-                <div
-                  v-if="photo.ai_quality_score !== undefined"
-                  class="review-ai-score"
-                  :class="aiScoreClass(photo.id)"
-                  v-tooltip.right="aiScoreTooltip(photo.id)"
-                >
-                  <i class="pi pi-sparkles" style="font-size: 0.6rem" />
-                  {{ aiScoreLabel(photo.id) }}
-                </div>
-                <div
-                  v-if="showAiPickBadge(photo.id)"
-                  class="review-ai-pick"
-                  v-tooltip.right="'Dieses Foto würde die KI behalten'"
-                >
-                  <i class="pi pi-check-circle" style="font-size: 0.6rem" />
-                  KI-Pick
-                </div>
-                <div
-                  v-if="hasClosedEyesInGroup(photo.id)"
-                  class="review-eyes-closed"
-                  v-tooltip.right="`Augen wirken geschlossen (${Math.round((eyesOpenScore(photo.id) ?? 0) * 100)}%) — deutlich weniger offen als das beste Foto der Gruppe.`"
-                >
-                  <i class="pi pi-eye-slash" style="font-size: 0.6rem" />
-                  Augen zu
-                </div>
-              </div>
-              <div class="review-photo-controls">
-                <Button
-                  icon="pi pi-eye-slash"
-                  :label="getCuration(photo.id) === 'hidden' ? 'Ausgeblendet' : 'Ausblenden'"
-                  :severity="getCuration(photo.id) === 'hidden' ? 'danger' : 'secondary'"
-                  :outlined="getCuration(photo.id) !== 'hidden'"
-                  size="small"
-                  @click="setCuration(photo.id, 'hidden')"
-                />
-                <Button
-                  icon="pi pi-heart"
-                  :severity="getCuration(photo.id) === 'favorite' ? 'warn' : 'secondary'"
-                  :outlined="getCuration(photo.id) !== 'favorite'"
-                  size="small"
-                  @click="setCuration(photo.id, 'favorite')"
-                />
-              </div>
-            </div>
+        <!-- Confirmation: the final selection rendered as feed cards.
+             Each card's thumb-down is pre-filled from the compare result
+             (suggested-hide → dimmed); toggling is local and only takes
+             effect when the user confirms. -->
+        <div class="review-feed-scroll">
+          <div class="review-feed">
+            <PhotoFeedCard
+              v-for="item in reviewItems"
+              :key="item.photoId"
+              :item="item"
+              :current-user-id="auth.user?.id ?? null"
+              @hide="onReviewHide"
+              @like="onReviewLike"
+            />
           </div>
         </div>
       </template>
+
+      <!-- Progress overlay: shown while the confirmed selection is being
+           applied AND while the next group's members load, so the gap
+           before the next compare view never looks like a freeze. -->
+      <div v-if="committing" class="compare-progress" role="status" aria-live="polite">
+        <ProgressSpinner
+          style="width: 56px; height: 56px"
+          strokeWidth="4"
+          animationDuration=".8s"
+        />
+        <span class="compare-progress-label">
+          {{ isLastGroup ? 'Wird übernommen…' : 'Wird übernommen — nächste Gruppe wird geladen…' }}
+        </span>
+      </div>
 
     </div>
   </Teleport>
@@ -1549,7 +1523,47 @@ function compareTileSrc(photo: Photo, width?: number): string {
   display: block;
 }
 
-/* ── Review phase ── */
+/* ── Confirmation phase (feed cards) ── */
+.review-feed-scroll {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 1rem 0.5rem 2rem;
+  /* The dark compare backdrop continues behind the cards so the
+     confirmation reads as part of the same overlay, not a new screen. */
+}
+.review-feed {
+  /* Single column, centred — mirrors the feed's reading layout so the
+     photos appear exactly as in the stream. */
+  max-width: 600px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+/* ── Progress overlay (commit + next-group load) ── */
+.compare-progress {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  background: rgba(10, 10, 10, 0.72);
+  backdrop-filter: blur(2px);
+  text-align: center;
+  padding: 1.5rem;
+}
+.compare-progress-label {
+  color: #f4f4f5;
+  font-size: 0.95rem;
+  max-width: 22rem;
+}
+
+/* ── Review phase (legacy grid — retained for reference) ── */
 .review-scroll {
   flex: 1;
   overflow-y: auto;

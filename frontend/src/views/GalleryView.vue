@@ -47,7 +47,7 @@
  * the fullscreen ⓘ flyout, which still receives a sidebar instance via
  * the `details-flyout` slot.
  */
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Chip from 'primevue/chip'
@@ -73,6 +73,7 @@ import { useRealtimeEvent } from '../composables/useRealtime'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
 import { usePhotoNavStore } from '../stores/photoNav'
+import { orderedUnreviewedGroupIds, nextGroupInSequence } from '../utils/reviewOrder'
 import {
   type GalleryGridEntry,
   type GalleryGridGroup,
@@ -422,8 +423,20 @@ async function performBatchDelete(ids: number[]) {
 const groupCache = ref<PhotoGroup[] | null>(null)
 const activeGroup = ref<PhotoGroup | null>(null)
 const stackBusy = ref(false)
+
+// Ordered review sequence: the unreviewed groups present in the CURRENT
+// grid (filter / search / sort), in grid order. Drives both the "N offen"
+// counter and the "OK & Weiter" hand-off, so the manual review only ever
+// offers what the user is actually looking at, in the order they see it.
+const reviewSequence = ref<number[]>([])
+
+function isGroupPending(id: number): boolean {
+  const g = groupCache.value?.find((x) => x.id === id)
+  return !!g && !g.reviewed_at
+}
+
 const totalUnreviewed = computed(
-  () => groupCache.value?.filter((g) => !g.reviewed_at).length ?? 0,
+  () => reviewSequence.value.filter(isGroupPending).length,
 )
 
 async function ensureGroupCache(): Promise<PhotoGroup[]> {
@@ -435,6 +448,33 @@ async function ensureGroupCache(): Promise<PhotoGroup[]> {
 // Fire-and-forget: a stale cache only delays the first stack-click by
 // one HTTP round-trip and the gallery still works without it.
 void ensureGroupCache()
+
+// Recompute the grid-scoped review sequence. Pairs the user's groups with
+// the grid's photo order (same query the "select all" action uses) so the
+// sequence stays in sync with whatever filter/search/sort is active.
+async function refreshReviewSequence(): Promise<void> {
+  if (!canReviewGroups.value) {
+    reviewSequence.value = []
+    return
+  }
+  try {
+    const groups = await ensureGroupCache()
+    // No unreviewed groups at all → skip the (potentially large) id fetch.
+    if (!groups.some((g) => !g.reviewed_at)) {
+      reviewSequence.value = []
+      return
+    }
+    const { ids } = await getGalleryIds({
+      filter: filter.value,
+      sortBy: sortByForGallery.value,
+      sortDir: sortDirForGallery.value,
+      photoIds: searchPhotoIds.value ?? undefined,
+    })
+    reviewSequence.value = orderedUnreviewedGroupIds(ids, groups)
+  } catch {
+    // Keep the previous sequence — the user can retry by re-applying a filter.
+  }
+}
 
 async function onFullscreenOpenGroupReview() {
   const g = cursorGroup.value
@@ -463,14 +503,19 @@ async function onStackClick(entry: GalleryGridEntry) {
   }
 }
 
-// Opens the review on the first unreviewed group — entry point for the
-// "Gruppen bearbeiten" header button, mirrors AlbumDetailView's flow.
+// Opens the review on the first unreviewed group of the CURRENT grid, in
+// grid order — entry point for the "Gruppen bearbeiten" header button.
 async function onStartGroupReview() {
   if (stackBusy.value) return
   stackBusy.value = true
   try {
+    // Refresh so the sequence reflects the grid the user is looking at
+    // right now (a filter may have changed since the last debounce).
+    await refreshReviewSequence()
     const groups = await ensureGroupCache()
-    const first = groups.find((g) => !g.reviewed_at) ?? null
+    const firstId = reviewSequence.value.find(isGroupPending)
+    const first =
+      firstId !== undefined ? groups.find((g) => g.id === firstId) ?? null : null
     if (first) activeGroup.value = first
   } finally {
     stackBusy.value = false
@@ -479,7 +524,7 @@ async function onStartGroupReview() {
 
 function applyLocalGroupReviewed(groupId: number) {
   // Optimistic local update — the server already marked the group reviewed
-  // (handleDone in PhotoCompareView calls reviewPhotoGroup before emitting
+  // (handleConfirm in PhotoCompareView commits before emitting
   // close/next). Mirroring it locally keeps the user's scroll position
   // and the loaded entries intact:
   //   - groupCache: flip the reviewed_at on the matching entry so
@@ -542,12 +587,23 @@ async function onCompareNext(reviewedGroupId: number) {
   // Mark so onCompareClose fires the deferred reload once the user
   // leaves the streak.
   compareNeedsReload.value = true
-  // Pick the next still-unreviewed group from the (now optimistically
-  // updated) cache. No refetch needed for the common case; the cache
-  // self-heals on the next stack click via ensureGroupCache.
-  const groups = groupCache.value ?? await ensureGroupCache()
-  const next = groups.find((g) => !g.reviewed_at && g.id !== reviewedGroupId)
-  activeGroup.value = next ?? null
+  // Advance along the grid-ordered sequence: the next still-pending group
+  // after the one just reviewed (wrapping to the first if the user started
+  // mid-grid). No refetch needed for the common case.
+  const groups = groupCache.value ?? (await ensureGroupCache())
+  let nextId = nextGroupInSequence(
+    reviewSequence.value,
+    reviewedGroupId,
+    isGroupPending,
+  )
+  // Fallback: the sequence hasn't loaded yet (e.g. stack-click straight to
+  // "OK & Weiter") — don't strand the user, fall back to the first
+  // still-unreviewed group in the cache.
+  if (nextId === null && reviewSequence.value.length === 0) {
+    nextId = groups.find((g) => !g.reviewed_at && g.id !== reviewedGroupId)?.id ?? null
+  }
+  activeGroup.value =
+    nextId !== null ? groups.find((g) => g.id === nextId) ?? null : null
 }
 
 // ── Upload ──────────────────────────────────────────────────────────────────
@@ -1143,6 +1199,21 @@ useRealtimeEvent('photos', 'metadata.changed', (ev) => {
 // ── Computed sort fields for VirtualGallery ─────────────────────────────────
 const sortByForGallery = computed<GallerySortField>(() => sort.value.field as GallerySortField)
 const sortDirForGallery = computed<GallerySortDir>(() => sort.value.direction as GallerySortDir)
+
+// Keep the grid-scoped review sequence in sync with the active query.
+// Declared down here (not next to the stacks logic) because it reads the
+// sort computeds above — referencing them earlier would hit the temporal
+// dead zone. Debounced so a burst of filter edits collapses into one fetch.
+let reviewSeqTimer: ReturnType<typeof setTimeout> | undefined
+watch(
+  [filter, sortByForGallery, sortDirForGallery, searchPhotoIds],
+  () => {
+    if (reviewSeqTimer) clearTimeout(reviewSeqTimer)
+    reviewSeqTimer = setTimeout(() => void refreshReviewSequence(), 300)
+  },
+  { deep: true },
+)
+void refreshReviewSequence()
 </script>
 
 <template>
