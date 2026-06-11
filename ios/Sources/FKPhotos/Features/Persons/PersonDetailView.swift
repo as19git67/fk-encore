@@ -9,7 +9,7 @@ struct PersonDetailView: View {
     @State private var fullscreenIndex: Int = 0
     @State private var fullscreenPhotos: [PhotoWithCuration] = []
     @State private var fullscreenBBoxes: [FaceBBox?] = []
-    @State private var isFullscreenPresented = false
+    @State private var fullscreenNav: FullscreenNav? = nil
     @State private var isIgnoringAll = false
     @State private var showIgnoreAllConfirmation = false
     @State private var faceIdToIgnore: Int? = nil
@@ -95,7 +95,7 @@ struct PersonDetailView: View {
                             fullscreenPhotos = photos
                             fullscreenBBoxes = bboxes
                             fullscreenIndex = displayedFaces.firstIndex(where: { $0.id == face.id }) ?? 0
-                            isFullscreenPresented = true
+                            fullscreenNav = FullscreenNav(startIndex: fullscreenIndex)
                         } label: {
                             FaceThumbnailView(filename: face.photo!.filename, bbox: face.bbox)
                         }
@@ -202,7 +202,7 @@ struct PersonDetailView: View {
         } message: {
             Text("Diese Gesichtserkennung wird ignoriert und nicht mehr angezeigt. Das Foto bleibt erhalten.")
         }
-        .navigationDestination(isPresented: $isFullscreenPresented) {
+        .navigationDestination(item: $fullscreenNav) { _ in
             if !fullscreenPhotos.isEmpty {
                 PhotoFullscreenView(
                     photos: fullscreenPhotos,
@@ -319,5 +319,9 @@ struct PersonDetailView: View {
             description: nil,
             keywords: nil
         )
+    }
+
+    private struct FullscreenNav: Hashable {
+        let startIndex: Int
     }
 }

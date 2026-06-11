@@ -341,6 +341,11 @@ public final class BackgroundSyncManager {
                 break
             }
 
+            // Proactively refresh the access token before it expires during long
+            // upload sessions. Checks the JWT exp claim; only hits the network when
+            // expiry is < 2 minutes away (issue #625).
+            await APIClient.shared.ensureFreshToken()
+
             // The Share Extension uploads with isFavorite = false and often
             // without a PHAsset identifier (iOS hands it only file bytes).
             // Recover the identifier by matching the photo back to the library,

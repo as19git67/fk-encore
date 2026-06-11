@@ -9,7 +9,7 @@ struct PhotoMonthGridView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var selectedIndex = 0
-    @State private var isFullscreenPresented = false
+    @State private var fullscreenNav: FullscreenNav? = nil
     @State private var scrollTarget: Int?
     @State private var showUpload = false
     @State private var isSelecting = false
@@ -90,7 +90,7 @@ struct PhotoMonthGridView: View {
                                         toggleSelection(photo.id)
                                     } else {
                                         selectedIndex = index
-                                        isFullscreenPresented = true
+                                        fullscreenNav = FullscreenNav(startIndex: index)
                                     }
                                 }
                                 .onLongPressGesture {
@@ -153,11 +153,11 @@ struct PhotoMonthGridView: View {
                 }
             }
         }
-        .navigationDestination(isPresented: $isFullscreenPresented) {
+        .navigationDestination(item: $fullscreenNav) { _ in
             PhotoFullscreenView(photos: photos, currentIndex: $selectedIndex)
         }
-        .onChange(of: isFullscreenPresented) { _, isPresented in
-            if !isPresented, !photos.isEmpty {
+        .onChange(of: fullscreenNav) { _, nav in
+            if nav == nil, !photos.isEmpty {
                 let idx = min(selectedIndex, photos.count - 1)
                 let photoId = photos[idx].id
                 Task {
@@ -244,5 +244,9 @@ struct PhotoMonthGridView: View {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+    }
+
+    private struct FullscreenNav: Hashable {
+        let startIndex: Int
     }
 }

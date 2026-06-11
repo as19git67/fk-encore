@@ -85,6 +85,7 @@ struct PhotoFullscreenView: View {
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
         .background(Color(.systemBackground))
+        .background(InteractivePopDisabler())
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .tabBar)
@@ -223,6 +224,35 @@ struct PhotoFullscreenView: View {
                     Text("\"\(conflict.name)\" existiert bereits. Die Fotos dieser Person werden zu \"\(conflict.name)\" verschoben.")
                 }
             }
+    }
+
+    // MARK: - Swipe-back gesture
+
+    // Disables the UINavigationController's interactive pop gesture while this
+    // view is on screen. Without this, the system swipe-right gesture competes
+    // with the horizontal TabView pager, and a half-cancelled swipe can leave
+    // UIKit's navigation state inconsistent so the next back-button tap is lost.
+    private struct InteractivePopDisabler: UIViewControllerRepresentable {
+        class Coordinator {
+            weak var navigationController: UINavigationController?
+        }
+
+        func makeCoordinator() -> Coordinator { Coordinator() }
+
+        func makeUIViewController(context: Context) -> UIViewController { UIViewController() }
+
+        func updateUIViewController(_ vc: UIViewController, context: Context) {
+            DispatchQueue.main.async {
+                context.coordinator.navigationController = vc.navigationController
+                vc.navigationController?.interactivePopGestureRecognizer?.isEnabled = false
+            }
+        }
+
+        static func dismantleUIViewController(_ vc: UIViewController, coordinator: Coordinator) {
+            DispatchQueue.main.async {
+                coordinator.navigationController?.interactivePopGestureRecognizer?.isEnabled = true
+            }
+        }
     }
 
     // MARK: - Person rename/merge

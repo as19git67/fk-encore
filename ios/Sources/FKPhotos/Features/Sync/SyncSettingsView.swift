@@ -188,7 +188,7 @@ struct SyncSettingsView: View {
                         }
                     }
                     .buttonStyle(.borderless)
-                    .disabled(isSyncing)
+                    .disabled(isSyncing || progress.isActive)
 
                     if progress.isActive, !progress.label.isEmpty {
                         Text(progress.label)

@@ -12,7 +12,7 @@ struct PhotoTimelineView: View {
     // Used only in filtered mode
     @State private var photosVM = PhotosViewModel()
     @State private var fullscreenIndex = 0
-    @State private var isFullscreenPresented = false
+    @State private var fullscreenNav: FullscreenNav? = nil
     @State private var scrollTarget: Int?
 
     private let tileColumns = [
@@ -43,7 +43,7 @@ struct PhotoTimelineView: View {
         .navigationDestination(for: TimelineYear.self) { year in
             PhotoYearView(year: year)
         }
-        .navigationDestination(isPresented: $isFullscreenPresented) {
+        .navigationDestination(item: $fullscreenNav) { _ in
             PhotoFullscreenView(photos: photosVM.photos, currentIndex: $fullscreenIndex)
         }
         .toolbar {
@@ -63,8 +63,8 @@ struct PhotoTimelineView: View {
         .sheet(isPresented: $showUpload) {
             PhotoUploadView { Task { await reload() } }
         }
-        .onChange(of: isFullscreenPresented) { _, isPresented in
-            if !isPresented, !photosVM.photos.isEmpty {
+        .onChange(of: fullscreenNav) { _, nav in
+            if nav == nil, !photosVM.photos.isEmpty {
                 let idx = min(fullscreenIndex, photosVM.photos.count - 1)
                 let photoId = photosVM.photos[idx].id
                 Task {
@@ -143,7 +143,7 @@ struct PhotoTimelineView: View {
                 ForEach(photosVM.photos) { photo in
                     Button {
                         fullscreenIndex = photosVM.photos.firstIndex(where: { $0.id == photo.id }) ?? 0
-                        isFullscreenPresented = true
+                        fullscreenNav = FullscreenNav(startIndex: fullscreenIndex)
                     } label: {
                         PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop)
                     }
@@ -172,6 +172,10 @@ struct PhotoTimelineView: View {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+    }
+
+    private struct FullscreenNav: Hashable {
+        let startIndex: Int
     }
 }
 
