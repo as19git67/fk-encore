@@ -2,6 +2,7 @@
 import { ref, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
+import Checkbox from 'primevue/checkbox'
 import RadioButton from 'primevue/radiobutton'
 import TagAutoComplete from './TagAutoComplete.vue'
 import Message from 'primevue/message'
@@ -24,6 +25,7 @@ const tagsStore = useTagsStore()
 const addTags = ref<string[]>([])
 const removeTags = ref<string[]>([])
 const mode = ref<'add' | 'replace'>('add')
+const promoteAiTags = ref(false)
 const saving = ref(false)
 const error = ref<string | null>(null)
 watch(
@@ -36,6 +38,7 @@ watch(
       addTags.value = []
       removeTags.value = []
       mode.value = 'add'
+      promoteAiTags.value = false
       error.value = null
     }
   },
@@ -54,6 +57,7 @@ async function apply() {
       add: addTags.value,
       remove: mode.value === 'replace' ? undefined : removeTags.value,
       replace: mode.value === 'replace',
+      promote_ai_tags: promoteAiTags.value,
     })
     tagsStore.addLocal(addTags.value)
     emit('done')
@@ -102,6 +106,12 @@ async function apply() {
       </div>
     </div>
 
+    <div class="ai-option">
+      <Checkbox v-model="promoteAiTags" inputId="promote-ai" binary />
+      <label for="promote-ai">KI-Tags übernehmen</label>
+      <span class="ai-hint">{{ promoteAiTags ? 'KI-Tags werden zu manuellen Tags hochgestuft' : 'KI-Tags werden entfernt' }}</span>
+    </div>
+
     <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
 
     <template #footer>
@@ -140,5 +150,17 @@ async function apply() {
   display: flex;
   gap: 0.5rem;
   align-items: center;
+}
+.ai-option {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--p-content-border-color);
+}
+.ai-hint {
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
 }
 </style>

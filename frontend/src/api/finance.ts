@@ -622,6 +622,7 @@ export interface BatchTagInput {
   add?: string[]
   remove?: string[]
   replace?: boolean
+  promote_ai_tags?: boolean
 }
 
 export async function batchTag(input: BatchTagInput): Promise<{
