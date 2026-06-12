@@ -272,3 +272,5 @@ struct PhotoMonthRef: Hashable {
     let year: Int
     let month: Int
 }
+
+struct AllPhotosRef: Hashable {}

@@ -51,9 +51,7 @@ struct AlbumsListView: View {
             } else {
                 // "Alle Fotos" virtual album at the top
                 Section {
-                    NavigationLink {
-                        PhotoTimelineView()
-                    } label: {
+                    NavigationLink(value: AllPhotosRef()) {
                         HStack(spacing: 12) {
                             RoundedRectangle(cornerRadius: 8)
                                 .fill(Color.accentColor.opacity(0.15))
@@ -145,6 +143,9 @@ struct AlbumsListView: View {
         .navigationTitle("Alben")
         .navigationDestination(for: Int.self) { albumId in
             AlbumDetailView(albumId: albumId)
+        }
+        .navigationDestination(for: AllPhotosRef.self) { _ in
+            PhotoTimelineView()
         }
         .navigationDestination(for: TimelineYear.self) { year in
             PhotoYearView(year: year)
