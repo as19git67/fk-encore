@@ -8,6 +8,7 @@ final class FeedViewModel {
     var isLoadingMore = false
     var hasMore = true
     var unreadCount = 0
+    var hiddenPhotoIds: Set<Int> = []
     var errorMessage: String?
 
     private var nextCursor: PhotoFeedCursor?
@@ -105,22 +106,30 @@ final class FeedViewModel {
     }
 
     @MainActor
-    func hidePhoto(photoId: Int) async {
-        guard let index = items.firstIndex(where: { $0.photoId == photoId }) else { return }
-        let item = items[index]
+    func toggleHide(photoId: Int) async {
+        let wasHidden = hiddenPhotoIds.contains(photoId)
+        let newStatus = wasHidden ? "visible" : "hidden"
 
-        withAnimation(.easeOut(duration: 0.3)) {
-            _ = items.remove(at: index)
+        withAnimation(.easeInOut(duration: 0.3)) {
+            if wasHidden {
+                hiddenPhotoIds.remove(photoId)
+            } else {
+                hiddenPhotoIds.insert(photoId)
+            }
         }
 
         do {
             let _: CurationResponse = try await APIClient.shared.patch(
                 "/photos/\(photoId)/curation",
-                body: CurationRequest(status: "hidden")
+                body: CurationRequest(status: newStatus)
             )
         } catch {
             withAnimation {
-                items.insert(item, at: min(index, items.count))
+                if wasHidden {
+                    hiddenPhotoIds.insert(photoId)
+                } else {
+                    hiddenPhotoIds.remove(photoId)
+                }
             }
         }
     }
