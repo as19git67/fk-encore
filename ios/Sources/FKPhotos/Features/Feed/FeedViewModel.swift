@@ -1,0 +1,124 @@
+import Foundation
+
+@Observable
+final class FeedViewModel {
+    var items: [FeedPhotoItem] = []
+    var isLoading = false
+    var isLoadingMore = false
+    var hasMore = true
+    var unreadCount = 0
+    var errorMessage: String?
+
+    private var nextCursor: PhotoFeedCursor?
+    private let pageSize = 12
+
+    @MainActor
+    func loadInitial() async {
+        guard !isLoading else { return }
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+
+        do {
+            var query: [String: String] = ["limit": "\(pageSize)"]
+            // No cursor for initial load
+            let response: ListPhotoFeedResponse = try await APIClient.shared.get(
+                "/feed/photos", query: query
+            )
+            items = response.items
+            nextCursor = response.nextCursor
+            hasMore = response.nextCursor != nil
+
+            if let firstId = response.items.first?.photoId {
+                let _: MarkSeenResponse = try await APIClient.shared.post(
+                    "/feed/mark-seen",
+                    body: MarkSeenRequest(upToId: firstId)
+                )
+                unreadCount = 0
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    func loadMore() async {
+        guard !isLoadingMore, hasMore, let cursor = nextCursor else { return }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
+
+        do {
+            let query: [String: String] = [
+                "cursorTs": cursor.ts,
+                "cursorId": "\(cursor.id)",
+                "limit": "\(pageSize)",
+            ]
+            let response: ListPhotoFeedResponse = try await APIClient.shared.get(
+                "/feed/photos", query: query
+            )
+            items.append(contentsOf: response.items)
+            nextCursor = response.nextCursor
+            hasMore = response.nextCursor != nil
+        } catch {
+            // Silently fail on pagination errors
+        }
+    }
+
+    @MainActor
+    func refreshUnreadCount() async {
+        do {
+            let response: UnreadCountResponse = try await APIClient.shared.get("/feed/unread-count")
+            unreadCount = response.count
+        } catch {
+            // Badge count is best-effort
+        }
+    }
+
+    @MainActor
+    func toggleLike(photoId: Int) async {
+        guard let index = items.firstIndex(where: { $0.photoId == photoId }) else { return }
+        let item = items[index]
+        let newStatus = item.likedByMe ? "visible" : "favorite"
+        let newCount = item.likedByMe ? max(0, item.likeCount - 1) : item.likeCount + 1
+        let newLiked = !item.likedByMe
+
+        // Optimistic update
+        items[index] = FeedPhotoItem(
+            photoId: item.photoId, filename: item.filename,
+            width: item.width, height: item.height,
+            description: item.description, takenAt: item.takenAt,
+            lastActivityAt: item.lastActivityAt, album: item.album,
+            owner: item.owner, likeCount: newCount, likedByMe: newLiked,
+            commentCount: item.commentCount, latestComment: item.latestComment
+        )
+
+        do {
+            let _: CurationResponse = try await APIClient.shared.patch(
+                "/photos/\(photoId)/curation",
+                body: CurationRequest(status: newStatus)
+            )
+        } catch {
+            // Revert on error
+            items[index] = item
+        }
+    }
+
+    @MainActor
+    func hidePhoto(photoId: Int) async {
+        guard let index = items.firstIndex(where: { $0.photoId == photoId }) else { return }
+        let item = items[index]
+
+        // Remove from feed immediately
+        items.remove(at: index)
+
+        do {
+            let _: CurationResponse = try await APIClient.shared.patch(
+                "/photos/\(photoId)/curation",
+                body: CurationRequest(status: "hidden")
+            )
+        } catch {
+            // Revert on error
+            items.insert(item, at: min(index, items.count))
+        }
+    }
+}
