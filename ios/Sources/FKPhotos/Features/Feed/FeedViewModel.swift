@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 @Observable
 final class FeedViewModel {
@@ -108,8 +109,9 @@ final class FeedViewModel {
         guard let index = items.firstIndex(where: { $0.photoId == photoId }) else { return }
         let item = items[index]
 
-        // Remove from feed immediately
-        items.remove(at: index)
+        withAnimation(.easeOut(duration: 0.3)) {
+            _ = items.remove(at: index)
+        }
 
         do {
             let _: CurationResponse = try await APIClient.shared.patch(
@@ -117,8 +119,9 @@ final class FeedViewModel {
                 body: CurationRequest(status: "hidden")
             )
         } catch {
-            // Revert on error
-            items.insert(item, at: min(index, items.count))
+            withAnimation {
+                items.insert(item, at: min(index, items.count))
+            }
         }
     }
 }

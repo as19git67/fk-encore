@@ -10,11 +10,7 @@ struct FeedView: View {
                     FeedCardView(
                         item: item,
                         onLike: { Task { await viewModel.toggleLike(photoId: item.photoId) } },
-                        onHide: {
-                            withAnimation(.easeOut(duration: 0.3)) {
-                                Task { await viewModel.hidePhoto(photoId: item.photoId) }
-                            }
-                        }
+                        onHide: { Task { await viewModel.hidePhoto(photoId: item.photoId) } }
                     )
 
                     Divider()
