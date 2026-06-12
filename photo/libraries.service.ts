@@ -576,6 +576,40 @@ export async function importFile(
   );
   if (dup) return { kind: "skipped_duplicate" };
 
+  // Same external path → file was re-scanned after content changed (different
+  // hash). Update the existing row's metadata instead of inserting a duplicate
+  // that would violate the uq_photos_external_path unique index.
+  if (library.import_mode === "link") {
+    const existing = await dbFirst<{ id: number }>(
+      db
+        .select({ id: photos.id })
+        .from(photos)
+        .where(eq(photos.external_path, absFilePath))
+    );
+    if (existing) {
+      const exifMeta = await getExifMetadata(absFilePath, path.basename(absFilePath));
+      const description = combineDescription(exifMeta);
+      const keywords = mergeRatingKeyword(exifMeta.keywords, exifMeta.rating);
+      const iptcLoc = iptcLocationUpdate(exifMeta);
+      await dbExec(
+        db
+          .update(photos)
+          .set({
+            hash: digest,
+            size,
+            taken_at: exifMeta.takenAt,
+            latitude: exifMeta.latitude,
+            longitude: exifMeta.longitude,
+            description,
+            keywords,
+            ...(iptcLoc ?? {}),
+          })
+          .where(eq(photos.id, existing.id))
+      );
+      return { kind: "skipped_duplicate" };
+    }
+  }
+
   const originalName = path.basename(absFilePath);
   const exifMeta = await getExifMetadata(absFilePath, originalName);
   const storageTs = pickStorageTimestamp(exifMeta.takenAt);
@@ -796,7 +830,9 @@ export async function scanLibrary(
         else report.skipped_unsupported++;
       } catch (err: any) {
         report.errors++;
-        console.error(`[libraries] import failed for ${file}:`, err?.message ?? err);
+        const cause = err?.cause;
+        const detail = cause?.message ?? cause?.detail ?? "";
+        console.error(`[libraries] import failed for ${file}:`, detail || err?.message || err);
       }
       flushProgress(false);
     }
