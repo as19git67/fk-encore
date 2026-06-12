@@ -22,14 +22,19 @@ import os from "os";
 import path from "path";
 import { spawn } from "child_process";
 import sharp from "sharp";
-import { assertPathUnderDocumentsRoot } from "./documents.service";
+import { assertPathUnderDocumentsRoot, DOCUMENTS_DIR } from "./documents.service";
 
 console.log("[boot] documents/thumbnail.ts: all imports resolved");
 
-/** On-disk cache for rendered preview thumbnails. */
-export const DOCUMENTS_THUMBS_DIR = path.resolve(
-  process.env.DOCUMENTS_THUMBS_DIR || "uploads/documents-thumbs",
-);
+/**
+ * On-disk cache for rendered preview thumbnails.
+ * Lives inside DOCUMENTS_DIR (which the process can write to) as a
+ * `_thumbs` subdirectory, avoiding permission issues with a separate
+ * top-level directory that may not be writable.
+ */
+export const DOCUMENTS_THUMBS_DIR = process.env.DOCUMENTS_THUMBS_DIR
+  ? path.resolve(process.env.DOCUMENTS_THUMBS_DIR)
+  : path.join(DOCUMENTS_DIR, "_thumbs");
 
 /** Target width of the cached thumbnail in CSS pixels (×DPR handled client-side). */
 const THUMB_WIDTH = parseInt(process.env.DOCUMENTS_THUMB_WIDTH ?? "480", 10);
