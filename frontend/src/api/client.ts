@@ -52,6 +52,13 @@ async function tryRefresh(staleToken: string | null): Promise<boolean> {
   return refreshPromise
 }
 
+export async function ensureFreshToken(): Promise<void> {
+  const token = localStorage.getItem('auth_token')
+  if (token && tokenExpiresWithin(token, REFRESH_BUFFER_SECONDS)) {
+    await tryRefresh(token)
+  }
+}
+
 export interface ApiFetchOptions extends RequestInit {
   /**
    * Abort the request after this many milliseconds. Prevents hanging requests

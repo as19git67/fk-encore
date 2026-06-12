@@ -5,6 +5,7 @@ import * as usersApi from '../api/users'
 import { startAuthentication } from '@simplewebauthn/browser'
 import { passkeyAuthOptions, passkeyAuthVerify } from '../api/passkeys'
 import { realtimeBus, type RealtimeChannel } from '../composables/useRealtime'
+import { ensureFreshToken } from '../api/client'
 
 const REALTIME_CHANNELS: RealtimeChannel[] = ['documents', 'photos', 'albums', 'feed', 'scan-queue']
 
@@ -33,6 +34,16 @@ export const useAuthStore = defineStore('auth', () => {
       }
       if (token.value) connectRealtime()
     }
+  }
+
+  // When the tab becomes visible again after being idle, proactively
+  // refresh the token so the first request doesn't trigger a 401.
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && token.value) {
+        ensureFreshToken()
+      }
+    })
   }
 
   // Cross-tab sync: pick up token changes made by another tab
