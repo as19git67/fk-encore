@@ -17,6 +17,7 @@ import {
   documents,
 } from "../db/schema";
 import { extractPdfText } from "./text-extract";
+import { buildThumbnail } from "./thumbnail";
 import {
   assertPathUnderDocumentsRoot,
 } from "./documents.service";
@@ -129,6 +130,10 @@ export async function runTextExtract(documentId: number): Promise<void> {
     .set({ status: "extracting" })
     .where(eq(documents.id, documentId));
   await publishStatusChanged(documentId, row.user_id, "extracting");
+
+  // Warm the preview-thumbnail cache while we already hold the PDF on
+  // disk. Best-effort: a failed render must never block text extraction.
+  await buildThumbnail(documentId, row.disk_path).catch(() => null);
 
   const result = await extractPdfText(row.disk_path, {
     forceOcr: row.force_ocr ?? false,

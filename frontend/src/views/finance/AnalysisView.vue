@@ -1233,10 +1233,14 @@ const tagChartOptions = computed(() => {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  flex-wrap: wrap;
 }
 .ast-label {
   min-width: 6rem;
   color: var(--p-text-muted-color);
+}
+@media (max-width: 480px) {
+  .ast-label { min-width: 4rem; }
 }
 .op-options {
   display: flex;
@@ -1464,7 +1468,10 @@ const tagChartOptions = computed(() => {
   min-width: 14rem;
 }
 .n-input {
-  max-width: 5rem;
+  width: 5rem;
+}
+.n-input :deep(.p-inputnumber-input) {
+  width: 100%;
 }
 
 /* --- Saved analyses / Rückblicke --- */
