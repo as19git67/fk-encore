@@ -218,7 +218,10 @@ final class FeedImageLoader: @unchecked Sendable {
         defer { isLoading = false }
 
         do {
-            let data = try await APIClient.shared.downloadData("/photos/file/\(filename)?w=1280")
+            let data = try await APIClient.shared.downloadData(
+                "/photos/file/\(filename)",
+                query: ["w": "1280"]
+            )
             guard let loaded = UIImage(data: data) else { return }
             image = loaded
             await ImageCache.shared.store(loaded, forKey: cacheKey)
