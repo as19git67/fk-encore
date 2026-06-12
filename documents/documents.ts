@@ -58,6 +58,7 @@ import {
 } from "./visibility";
 import { enqueueDocumentScan, getQueueStatus, requeueDocument, cancelPendingJobs, retryFailedJobs, type QueueStatus } from "./scan-queue";
 import { triggerWorkers } from "./scan-worker";
+import { ensureThumbnail, removeThumbnail } from "./thumbnail";
 import { searchDocuments, type SearchMode } from "./search";
 import {
   findTaxSection,
@@ -605,6 +606,76 @@ export const getDocumentFile = api.raw(
   },
 );
 
+/**
+ * Serve a small WebP preview thumbnail of page 1 of the document.
+ * Used by the documents grid view (#632). Mirrors `getDocumentFile`'s
+ * auth handling; the thumbnail is built lazily and cached on disk.
+ *
+ * Auth is accepted via the `Authorization` header or a `?token=` query
+ * param so the URL can be used directly in an `<img src>` tag (browsers
+ * cannot attach custom headers to image requests).
+ */
+export const getDocumentThumbnail = api.raw(
+  { expose: true, method: "GET", path: "/documents/:id/thumbnail", auth: true },
+  async (req, res) => {
+    try {
+      checkModule();
+    } catch {
+      res.statusCode = 403;
+      res.end("Forbidden");
+      return;
+    }
+
+    const authData = getAuthData();
+    if (!authData) {
+      res.statusCode = 401;
+      res.end("Unauthorized");
+      return;
+    }
+    try {
+      requirePermission(authData, "documents.view");
+    } catch {
+      res.statusCode = 403;
+      res.end("Forbidden");
+      return;
+    }
+
+    const userId = parseInt(authData.userID, 10);
+    const m = /\/documents\/(\d+)\/thumbnail/.exec(req.url ?? "");
+    const docId = m ? parseInt(m[1], 10) : NaN;
+    if (!Number.isFinite(docId)) {
+      res.statusCode = 400;
+      res.end("Invalid id");
+      return;
+    }
+
+    try {
+      const row = await loadVisibleDocument(userId, docId);
+      const thumbPath = await ensureThumbnail(docId, row.disk_path);
+      if (!thumbPath) {
+        res.statusCode = 404;
+        res.end("No thumbnail");
+        return;
+      }
+      const stat = await fs.promises.stat(thumbPath);
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "image/webp");
+      res.setHeader("Content-Length", String(stat.size));
+      res.setHeader("Cache-Control", "private, max-age=86400");
+      const stream = fs.createReadStream(thumbPath);
+      stream.pipe(res);
+      stream.on("error", (err) => {
+        console.error("[documents] thumbnail stream error:", err);
+        res.end();
+      });
+    } catch (err: any) {
+      const code = err instanceof APIError ? (err as any).statusCode ?? 500 : 500;
+      res.statusCode = code === 500 ? 404 : code;
+      res.end(err?.message ?? "Not found");
+    }
+  },
+);
+
 // ─── Mutations ──────────────────────────────────────────────────────────────
 
 export interface UpdateDocumentRequest {
@@ -1118,6 +1189,7 @@ export const deleteDocument = api(
     } catch (err) {
       console.warn(`[documents] delete: failed to unlink ${row.disk_path}: ${(err as Error).message}`);
     }
+    await removeThumbnail(id);
     return { success: true };
   },
 );

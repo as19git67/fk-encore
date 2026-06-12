@@ -298,6 +298,17 @@ export function getDocumentFileUrl(id: number): string {
 }
 
 /**
+ * Build the URL for a document's page-1 preview thumbnail (#632).
+ * Usable directly in an `<img src>`; the token rides along as a query
+ * parameter the same way as {@link getDocumentFileUrl}.
+ */
+export function getDocumentThumbnailUrl(id: number): string {
+  const token = localStorage.getItem('auth_token') ?? ''
+  const qs = token ? `?token=${encodeURIComponent(token)}` : ''
+  return `${API_BASE_URL}/documents/${id}/thumbnail${qs}`
+}
+
+/**
  * Fetch the PDF as raw bytes for the in-app pdfjs viewer.
  * pdfjs takes ownership of the buffer, so we always return a fresh copy.
  */

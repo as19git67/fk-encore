@@ -14,6 +14,7 @@ import DocumentBatchReprocessDialog from '../components/DocumentBatchReprocessDi
 import DocumentUploadDefaultsDialog from '../components/DocumentUploadDefaultsDialog.vue'
 import DocumentFilterMenu from '../components/DocumentFilterMenu.vue'
 import DocumentScanQueuePanel from '../components/DocumentScanQueuePanel.vue'
+import DocumentThumbnail from '../components/DocumentThumbnail.vue'
 import SortMenu from '../components/SortMenu.vue'
 import {
   listDocuments,
@@ -712,8 +713,8 @@ onMounted(async () => {
             @update:modelValue="(val: boolean) => toggleSelected(doc.id, val)"
           />
         </div>
-        <div class="grid-card-icon">
-          <i class="pi pi-file-pdf" />
+        <div class="grid-card-thumb">
+          <DocumentThumbnail :id="doc.id" :alt="doc.title || doc.original_filename" />
         </div>
         <Tag
           class="grid-card-status"
@@ -1062,11 +1063,8 @@ onMounted(async () => {
   z-index: 1;
 }
 
-.grid-card-icon {
-  font-size: 2.5rem;
-  color: var(--p-primary-color);
-  text-align: center;
-  padding: 0.5rem 0;
+.grid-card-thumb {
+  margin-bottom: 0.1rem;
 }
 
 .grid-card-status {
