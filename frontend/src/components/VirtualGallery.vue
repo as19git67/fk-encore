@@ -505,7 +505,7 @@ defineExpose({
             />
             <!-- Track-I marker. Shows on every member of an unreviewed
                  group so the user can launch the review from any tile.
-                 The icon differentiates AI-hiding-siblings (pi-eye-slash,
+                 The icon differentiates AI-hiding-siblings (pi-thumbs-down-fill,
                  high confidence) from the medium / low confidence cases
                  (no icon, just +N). -->
             <span
@@ -517,7 +517,7 @@ defineExpose({
               }"
               :title="badgeTitle(slot.group)"
             >
-              <i v-if="isAiHidingSiblings(slot.group)" class="pi pi-eye-slash vg-stack-badge-icon" />
+              <i v-if="isAiHidingSiblings(slot.group)" class="pi pi-thumbs-down-fill vg-stack-badge-icon" />
               +{{ slot.group.member_count - 1 }}
             </span>
             <i
@@ -526,7 +526,7 @@ defineExpose({
             />
             <i
               v-if="slot.curation === 'hidden'"
-              class="pi pi-eye-slash vg-hidden-icon"
+              class="pi pi-thumbs-down-fill vg-hidden-icon"
             />
             <!-- Album-only marker: the photo has comments in this album.
                  Comments are album-bound, so comment_count is only set when

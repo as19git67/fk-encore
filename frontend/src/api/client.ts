@@ -1,5 +1,18 @@
 export const API_BASE_URL = import.meta.env.PROD ? '' : '/api'
 
+const REFRESH_BUFFER_SECONDS = 60
+
+function tokenExpiresWithin(token: string, seconds: number): boolean {
+  try {
+    const part = token.split('.')[1]
+    if (!part) return false
+    const payload = JSON.parse(atob(part))
+    return payload.exp * 1000 - Date.now() < seconds * 1000
+  } catch {
+    return false
+  }
+}
+
 let refreshPromise: Promise<boolean> | null = null
 
 async function tryRefresh(staleToken: string | null): Promise<boolean> {
@@ -75,7 +88,13 @@ export async function apiFetch<T>(
   path: string,
   options: ApiFetchOptions = {}
 ): Promise<T> {
-  const token = localStorage.getItem('auth_token')
+  let token = localStorage.getItem('auth_token')
+
+  // Proactively refresh before the token expires to avoid 401 round-trips
+  if (token && tokenExpiresWithin(token, REFRESH_BUFFER_SECONDS) && path !== '/auth/refresh') {
+    const refreshed = await tryRefresh(token)
+    if (refreshed) token = localStorage.getItem('auth_token')
+  }
 
   const headers: Record<string, string> = {
     ...(options.headers as Record<string, string> || {}),
