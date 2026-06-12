@@ -207,6 +207,7 @@ actor APIClient {
     ) async throws -> UploadResult {
         var request = URLRequest(url: buildURL(path: "/photos"), timeoutInterval: 120)
         request.httpMethod = "POST"
+        request.allowsCellularAccess = !PhotoSyncPreferences.wifiOnly
         request.setValue(mimeType, forHTTPHeaderField: "Content-Type")
         request.setValue(percentEncodeHeaderValue(filename), forHTTPHeaderField: "X-File-Name")
         request.setValue(imageDataHash, forHTTPHeaderField: "X-Image-Data-Hash")
