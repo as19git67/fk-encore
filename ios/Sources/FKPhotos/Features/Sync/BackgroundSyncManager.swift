@@ -327,6 +327,13 @@ public final class BackgroundSyncManager {
     /// The inner work of `drainUploadQueue`, factored out so the lock can be
     /// released exactly once at the call site (no defer-with-Task indirection).
     private func drainLoop() async {
+        // Respect the WiFi-only preference (#653).
+        if PhotoSyncPreferences.wifiOnly {
+            guard await PhotoSyncService.shared.isWifiConnected else { return }
+        } else {
+            guard await PhotoSyncService.shared.isNetworkAvailable else { return }
+        }
+
         await UploadQueue.shared.load()
 
         // Process items one at a time via claim → upload → mark. The claim
