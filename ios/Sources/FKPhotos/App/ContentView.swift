@@ -22,13 +22,16 @@ public struct ContentView: View {
 }
 
 struct MainTabView: View {
+    @State private var feedViewModel = FeedViewModel()
+
     var body: some View {
         TabView {
-            Tab("Fotos", systemImage: "photo.on.rectangle") {
+            Tab("Feed", systemImage: "house") {
                 NavigationStack {
-                    PhotoTimelineView()
+                    FeedView()
                 }
             }
+            .badge(feedViewModel.unreadCount)
 
             Tab("Alben", systemImage: "rectangle.stack") {
                 NavigationStack {
@@ -48,11 +51,14 @@ struct MainTabView: View {
                 }
             }
 
-            Tab("Profil", systemImage: "person.circle") {
+            Tab("Einstellungen", systemImage: "gearshape") {
                 NavigationStack {
                     AdminView()
                 }
             }
+        }
+        .task {
+            await feedViewModel.refreshUnreadCount()
         }
     }
 }
