@@ -123,6 +123,7 @@ public final class BackgroundSyncManager {
 
         var request = URLRequest(url: baseURL.appendingPathComponent("/photos"))
         request.httpMethod = "POST"
+        request.allowsCellularAccess = !PhotoSyncPreferences.wifiOnly
         request.setValue(item.mimeType, forHTTPHeaderField: "Content-Type")
         request.setValue(percentEncodeHeaderValue(item.filename), forHTTPHeaderField: "X-File-Name")
         request.setValue(item.imageDataHash, forHTTPHeaderField: "X-Image-Data-Hash")
