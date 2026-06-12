@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
+import AutoComplete from 'primevue/autocomplete'
 import Select from 'primevue/select'
 import InputText from 'primevue/inputtext'
 import ToggleSwitch from 'primevue/toggleswitch'
@@ -9,6 +10,8 @@ import DateRangePresets from './DateRangePresets.vue'
 import { toLocalIsoDate, parseLocalDate } from '../utils/dateFormat'
 import type { DocumentFilter } from '../composables/useDocumentFilter'
 import type { DocumentCategory } from '../api/documents'
+
+interface CatOption { label: string; slug: string }
 
 const props = defineProps<{
   visible: boolean
@@ -33,6 +36,8 @@ watch(() => props.visible, (v) => {
   local.value = { ...props.draft }
   dateFrom.value = props.draft.dateFrom ? parseLocalDate(props.draft.dateFrom) : null
   dateTo.value = props.draft.dateTo ? parseLocalDate(props.draft.dateTo) : null
+  syncCategorySelection()
+  syncTagSelection()
 })
 
 const dateFrom = ref<Date | null>(props.draft.dateFrom ? parseLocalDate(props.draft.dateFrom) : null)
@@ -46,13 +51,65 @@ watch([dateFrom, dateTo], ([from, to]) => {
   }
 })
 
-const categoryOptions = [
-  { label: 'Alle Kategorien', value: '' },
-  ...props.categories.map((c) => ({
+// ── Category AutoComplete ──────────────────────────────────────────────────
+
+const allCatOptions = computed<CatOption[]>(() =>
+  props.categories.map((c) => ({
     label: (c.parent_id == null ? '' : '— ') + c.name,
-    value: c.slug,
+    slug: c.slug,
   })),
-]
+)
+
+const categorySuggestions = ref<CatOption[]>([])
+const selectedCategory = ref<CatOption | null>(null)
+
+function syncCategorySelection() {
+  const slug = local.value.category
+  selectedCategory.value = slug
+    ? allCatOptions.value.find((o) => o.slug === slug) ?? null
+    : null
+}
+syncCategorySelection()
+
+function searchCategories(event: { query: string }) {
+  const q = event.query.toLowerCase()
+  categorySuggestions.value = q
+    ? allCatOptions.value.filter((o) => o.label.toLowerCase().includes(q))
+    : allCatOptions.value
+}
+
+watch(selectedCategory, (v) => {
+  const slug = v && typeof v === 'object' ? v.slug : undefined
+  if (slug !== (local.value.category ?? undefined)) {
+    local.value = { ...local.value, category: slug || undefined }
+  }
+})
+
+// ── Tag AutoComplete ───────────────────────────────────────────────────────
+
+const tagSuggestions = ref<string[]>([])
+const selectedTag = ref<string | null>(null)
+
+function syncTagSelection() {
+  selectedTag.value = local.value.tag ?? null
+}
+syncTagSelection()
+
+function searchTags(event: { query: string }) {
+  const q = event.query.toLowerCase()
+  tagSuggestions.value = q
+    ? props.knownTags.filter((t) => t.toLowerCase().includes(q))
+    : [...props.knownTags]
+}
+
+watch(selectedTag, (v) => {
+  const tag = v && typeof v === 'string' ? v : undefined
+  if (tag !== (local.value.tag ?? undefined)) {
+    local.value = { ...local.value, tag: tag || undefined }
+  }
+})
+
+// ── Static option lists ────────────────────────────────────────────────────
 
 const statusOptions: Array<{ label: string; value: string }> = [
   { label: 'Alle', value: '' },
@@ -61,11 +118,6 @@ const statusOptions: Array<{ label: string; value: string }> = [
   { label: 'Fehler', value: 'failed' },
   { label: 'Warteschlange', value: 'pending' },
   { label: 'Text-Extraktion', value: 'extracting' },
-]
-
-const tagOptions = [
-  { label: 'Alle Tags', value: '' },
-  ...props.knownTags.map((t) => ({ label: t, value: t })),
 ]
 
 const taxOptions = [
@@ -83,6 +135,8 @@ function handleReset() {
   local.value = {}
   dateFrom.value = null
   dateTo.value = null
+  selectedCategory.value = null
+  selectedTag.value = null
   emit('reset')
 }
 </script>
@@ -98,12 +152,14 @@ function handleReset() {
     <div class="filter-menu">
       <div class="filter-row">
         <label class="filter-label">Kategorie</label>
-        <Select
-          :model-value="local.category ?? ''"
-          :options="categoryOptions"
+        <AutoComplete
+          v-model="selectedCategory"
+          :suggestions="categorySuggestions"
           option-label="label"
-          option-value="value"
-          @update:model-value="(v: string) => local = { ...local, category: v || undefined }"
+          :input-style="{ width: '100%' }"
+          placeholder="Kategorie suchen…"
+          dropdown
+          @complete="searchCategories"
         />
       </div>
 
@@ -120,12 +176,13 @@ function handleReset() {
 
       <div class="filter-row">
         <label class="filter-label">Tag</label>
-        <Select
-          :model-value="local.tag ?? ''"
-          :options="tagOptions"
-          option-label="label"
-          option-value="value"
-          @update:model-value="(v: string) => local = { ...local, tag: v || undefined }"
+        <AutoComplete
+          v-model="selectedTag"
+          :suggestions="tagSuggestions"
+          :input-style="{ width: '100%' }"
+          placeholder="Tag suchen…"
+          dropdown
+          @complete="searchTags"
         />
       </div>
 
