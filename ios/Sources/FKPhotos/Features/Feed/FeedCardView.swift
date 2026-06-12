@@ -122,7 +122,7 @@ struct FeedCardView: View {
                 .buttonStyle(.plain)
 
                 Button(action: onHide) {
-                    Image(systemName: "eye.slash")
+                    Image(systemName: "hand.thumbsdown.fill")
                 }
                 .buttonStyle(.plain)
 

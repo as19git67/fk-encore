@@ -124,7 +124,7 @@ struct PhotoFullscreenView: View {
                             curationOverrides[photo.id] = next
                         }
                     } label: {
-                        Image(systemName: currentCuration == .hidden ? "eye.slash" : "eye")
+                        Image(systemName: currentCuration == .hidden ? "hand.thumbsdown.fill" : "hand.thumbsdown")
                             .foregroundStyle(currentCuration == .hidden ? Color.red : Color.accentColor)
                     }
                 }

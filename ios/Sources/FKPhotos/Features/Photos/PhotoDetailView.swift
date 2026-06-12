@@ -70,8 +70,8 @@ struct PhotoDetailView: View {
                         // Curation status
                         HStack(spacing: 12) {
                             curationButton(.favorite, icon: "heart.fill", activeColor: .red)
-                            curationButton(.visible, icon: "eye.fill", activeColor: .green)
-                            curationButton(.hidden, icon: "eye.slash.fill", activeColor: .gray)
+                            curationButton(.visible, icon: "hand.thumbsdown", activeColor: .green)
+                            curationButton(.hidden, icon: "hand.thumbsdown.fill", activeColor: .gray)
                         }
                         .padding(.top, 8)
 
