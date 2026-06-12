@@ -1046,6 +1046,21 @@ async function applyUserTags(
       added++;
     }
   }
+
+  // User tags take precedence — remove any AI-tag joins that still exist
+  // on this transaction so they don't reappear in the UI.
+  await db
+    .delete(financeTagTransaction)
+    .where(
+      and(
+        eq(financeTagTransaction.transaction_id, transactionId),
+        inArray(
+          financeTagTransaction.tag_id,
+          db.select({ id: financeTag.id }).from(financeTag).where(eq(financeTag.source, "ai")),
+        ),
+      ),
+    );
+
   return added;
 }
 
@@ -1103,6 +1118,21 @@ async function applyUserTagsTx(
       added++;
     }
   }
+
+  // User tags take precedence — remove any AI-tag joins that still exist
+  // on this transaction so they don't reappear in the UI.
+  await tx
+    .delete(financeTagTransaction)
+    .where(
+      and(
+        eq(financeTagTransaction.transaction_id, transactionId),
+        inArray(
+          financeTagTransaction.tag_id,
+          tx.select({ id: financeTag.id }).from(financeTag).where(eq(financeTag.source, "ai")),
+        ),
+      ),
+    );
+
   return added;
 }
 
