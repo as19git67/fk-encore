@@ -287,7 +287,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
               @click="openPlayer"
             />
             <Button
-              icon="pi pi-eye-slash"
+              icon="pi pi-thumbs-down-fill"
               label="Ausblenden"
               severity="secondary"
               text
