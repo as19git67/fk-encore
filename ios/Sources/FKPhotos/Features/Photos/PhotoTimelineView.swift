@@ -40,6 +40,9 @@ struct PhotoTimelineView: View {
             }
         }
         .navigationTitle("Fotos")
+        .navigationDestination(for: TimelineYear.self) { year in
+            PhotoYearView(year: year)
+        }
         .navigationDestination(item: $fullscreenNav) { _ in
             PhotoFullscreenView(photos: photosVM.photos, currentIndex: $fullscreenIndex)
         }
@@ -210,6 +213,9 @@ struct PhotoYearView: View {
         }
         .navigationTitle(String(year.year))
         .navigationBarTitleDisplayMode(.large)
+        .navigationDestination(for: PhotoMonthRef.self) { ref in
+            PhotoMonthGridView(year: ref.year, month: ref.month)
+        }
     }
 
     private static func monthName(_ month: Int) -> String {
