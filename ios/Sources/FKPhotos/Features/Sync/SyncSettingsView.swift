@@ -335,6 +335,11 @@ struct SyncSettingsView: View {
         } message: {
             Text("Bitte erlaube den Zugriff auf die Fotos in den Einstellungen der App.")
         }
+        .onChange(of: wifiOnly) { _, wifiRequired in
+            if !wifiRequired {
+                Task { await BackgroundSyncManager.shared.drainUploadQueue() }
+            }
+        }
         .onChange(of: syncEnabled) { _, enabled in
             if enabled {
                 Task {
