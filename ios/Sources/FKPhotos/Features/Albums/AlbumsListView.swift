@@ -49,6 +49,32 @@ struct AlbumsListView: View {
                 }
                 .listRowSeparator(.hidden)
             } else {
+                // "Alle Fotos" virtual album at the top
+                Section {
+                    NavigationLink {
+                        PhotoTimelineView()
+                    } label: {
+                        HStack(spacing: 12) {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.accentColor.opacity(0.15))
+                                .frame(width: 60, height: 60)
+                                .overlay {
+                                    Image(systemName: "photo.on.rectangle")
+                                        .font(.title2)
+                                        .foregroundStyle(Color.accentColor)
+                                }
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Alle Fotos")
+                                    .font(.headline)
+                                Text("Gesamte Fotomediathek")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+
                 if !pinnedAlbums.isEmpty {
                     Section {
                         ForEach(pinnedAlbums) { album in
