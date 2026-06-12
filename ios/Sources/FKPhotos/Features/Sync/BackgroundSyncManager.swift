@@ -123,6 +123,7 @@ public final class BackgroundSyncManager {
 
         var request = URLRequest(url: baseURL.appendingPathComponent("/photos"))
         request.httpMethod = "POST"
+        request.allowsCellularAccess = !PhotoSyncPreferences.wifiOnly
         request.setValue(item.mimeType, forHTTPHeaderField: "Content-Type")
         request.setValue(percentEncodeHeaderValue(item.filename), forHTTPHeaderField: "X-File-Name")
         request.setValue(item.imageDataHash, forHTTPHeaderField: "X-Image-Data-Hash")
@@ -327,6 +328,13 @@ public final class BackgroundSyncManager {
     /// The inner work of `drainUploadQueue`, factored out so the lock can be
     /// released exactly once at the call site (no defer-with-Task indirection).
     private func drainLoop() async {
+        // Respect the WiFi-only preference (#653).
+        if PhotoSyncPreferences.wifiOnly {
+            guard await PhotoSyncService.shared.isWifiConnected else { return }
+        } else {
+            guard await PhotoSyncService.shared.isNetworkAvailable else { return }
+        }
+
         await UploadQueue.shared.load()
 
         // Process items one at a time via claim → upload → mark. The claim

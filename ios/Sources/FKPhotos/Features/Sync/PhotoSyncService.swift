@@ -34,7 +34,7 @@ actor PhotoSyncService {
         monitor.currentPath.usesInterfaceType(.wifi)
     }
 
-    private var isNetworkAvailable: Bool {
+    var isNetworkAvailable: Bool {
         monitor.currentPath.status == .satisfied
     }
 
