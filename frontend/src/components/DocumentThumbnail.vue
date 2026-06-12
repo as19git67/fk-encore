@@ -1,41 +1,66 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
-import { getDocumentThumbnailUrl } from '../api/documents'
+import { ref, watch, onBeforeUnmount } from 'vue'
+import { API_BASE_URL } from '../api/client'
 
 const props = defineProps<{
   id: number
   alt?: string
 }>()
 
-// Falls back to a generic PDF icon when the preview hasn't been
-// rendered yet (document still processing, or imported before the
-// thumbnail cache existed) or the request fails.
+const blobSrc = ref<string | null>(null)
 const failed = ref(false)
-const loaded = ref(false)
+let abortCtrl: AbortController | null = null
 
-watch(
-  () => props.id,
-  () => {
-    failed.value = false
-    loaded.value = false
-  },
-)
+async function loadThumb(id: number) {
+  abortCtrl?.abort()
+  blobSrc.value = null
+  failed.value = false
+
+  const token = localStorage.getItem('auth_token')
+  const ctrl = new AbortController()
+  abortCtrl = ctrl
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/documents/${id}/thumbnail`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      signal: ctrl.signal,
+    })
+    if (!res.ok) { failed.value = true; return }
+    const blob = await res.blob()
+    if (ctrl.signal.aborted) return
+    blobSrc.value = URL.createObjectURL(blob)
+  } catch {
+    if (!ctrl.signal.aborted) failed.value = true
+  }
+}
+
+function revoke() {
+  if (blobSrc.value) {
+    URL.revokeObjectURL(blobSrc.value)
+    blobSrc.value = null
+  }
+}
+
+watch(() => props.id, (id) => {
+  revoke()
+  loadThumb(id)
+}, { immediate: true })
+
+onBeforeUnmount(() => {
+  abortCtrl?.abort()
+  revoke()
+})
 </script>
 
 <template>
   <div class="doc-thumb" :class="{ 'doc-thumb--placeholder': failed }">
     <img
-      v-if="!failed"
-      :src="getDocumentThumbnailUrl(id)"
+      v-if="blobSrc"
+      :src="blobSrc"
       :alt="alt || 'Dokumentvorschau'"
-      loading="lazy"
-      decoding="async"
       class="doc-thumb-img"
-      :class="{ 'doc-thumb-img--loaded': loaded }"
-      @load="loaded = true"
-      @error="failed = true"
     />
-    <i v-if="failed || !loaded" class="pi pi-file-pdf doc-thumb-fallback" />
+    <i v-else class="pi pi-file-pdf doc-thumb-fallback" />
   </div>
 </template>
 
@@ -56,14 +81,8 @@ watch(
   height: 100%;
   object-fit: cover;
   object-position: top center;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-.doc-thumb-img--loaded {
-  opacity: 1;
 }
 .doc-thumb-fallback {
-  position: absolute;
   font-size: 2.5rem;
   color: var(--p-text-muted-color);
 }
