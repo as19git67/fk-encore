@@ -146,12 +146,6 @@ struct AlbumsListView: View {
         .navigationDestination(for: Int.self) { albumId in
             AlbumDetailView(albumId: albumId)
         }
-        .navigationDestination(for: TimelineYear.self) { year in
-            PhotoYearView(year: year)
-        }
-        .navigationDestination(for: PhotoMonthRef.self) { ref in
-            PhotoMonthGridView(year: ref.year, month: ref.month)
-        }
         .sheet(isPresented: $filterSort.isMenuPresented) {
             AlbumFilterSortMenuView(viewModel: filterSort)
                 .presentationDetents([.medium, .large])

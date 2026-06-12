@@ -2,18 +2,19 @@ import SwiftUI
 
 struct FeedCardView: View {
     let item: FeedPhotoItem
+    let isHiddenByMe: Bool
     let onLike: () -> Void
-    let onHide: () -> Void
+    let onToggleHide: () -> Void
 
     @State private var showComments = false
     @State private var doubleTapScale: CGFloat = 0
-    @State private var isHiding = false
     @State private var imageLoader: FeedImageLoader
 
-    init(item: FeedPhotoItem, onLike: @escaping () -> Void, onHide: @escaping () -> Void) {
+    init(item: FeedPhotoItem, isHiddenByMe: Bool, onLike: @escaping () -> Void, onToggleHide: @escaping () -> Void) {
         self.item = item
+        self.isHiddenByMe = isHiddenByMe
         self.onLike = onLike
-        self.onHide = onHide
+        self.onToggleHide = onToggleHide
         _imageLoader = State(initialValue: FeedImageLoader(filename: item.filename))
     }
 
@@ -74,7 +75,7 @@ struct FeedCardView: View {
                         }
                 }
 
-                if isHiding {
+                if isHiddenByMe {
                     Color.black.opacity(0.45)
                 }
 
@@ -126,16 +127,9 @@ struct FeedCardView: View {
                 }
                 .buttonStyle(.plain)
 
-                Button {
-                    guard !isHiding else { return }
-                    withAnimation(.easeInOut(duration: 0.3)) { isHiding = true }
-                    Task {
-                        try? await Task.sleep(for: .milliseconds(600))
-                        onHide()
-                    }
-                } label: {
-                    Image(systemName: isHiding ? "hand.thumbsdown.fill" : "hand.thumbsdown")
-                        .foregroundStyle(isHiding ? .gray : .primary)
+                Button(action: onToggleHide) {
+                    Image(systemName: isHiddenByMe ? "hand.thumbsdown.fill" : "hand.thumbsdown")
+                        .foregroundStyle(isHiddenByMe ? .gray : .primary)
                 }
                 .buttonStyle(.plain)
 
@@ -178,9 +172,8 @@ struct FeedCardView: View {
                     .padding(.bottom, 8)
             }
         }
-        .opacity(isHiding ? 0.5 : 1.0)
+        .opacity(isHiddenByMe ? 0.5 : 1.0)
         .background(Color(.systemBackground))
-        .transition(.opacity.combined(with: .move(edge: .leading)))
         .task {
             await imageLoader.load()
         }

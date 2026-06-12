@@ -9,8 +9,9 @@ struct FeedView: View {
                 ForEach(viewModel.items) { item in
                     FeedCardView(
                         item: item,
+                        isHiddenByMe: viewModel.hiddenPhotoIds.contains(item.photoId),
                         onLike: { Task { await viewModel.toggleLike(photoId: item.photoId) } },
-                        onHide: { Task { await viewModel.hidePhoto(photoId: item.photoId) } }
+                        onToggleHide: { Task { await viewModel.toggleHide(photoId: item.photoId) } }
                     )
 
                     Divider()
