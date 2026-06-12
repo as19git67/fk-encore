@@ -182,10 +182,10 @@ watch(filterPanelOpen, async (open) => {
 onBeforeUnmount(() => filterRO?.disconnect())
 
 // Top offset for tx-select-bar: when filter is open, select-bar moves below it.
-const SELECT_BAR_BASE_TOP = 120
+const SELECT_BAR_BASE_TOP = 130
 const selectBarStyle = computed(() => ({
   top: filterPanelOpen.value
-    ? `${SELECT_BAR_BASE_TOP + filterPanelHeight.value + 12}px`
+    ? `${SELECT_BAR_BASE_TOP + filterPanelHeight.value}px`
     : `${SELECT_BAR_BASE_TOP}px`,
 }))
 
@@ -967,7 +967,7 @@ function goBack() {
 /* ── Filter panel (expands below the sticky tx-header) ────────────── */
 .tx-filter-panel {
   position: sticky;
-  top: 120px;
+  top: 130px;
   z-index: 1;
 }
 .tx-filter-panel {
