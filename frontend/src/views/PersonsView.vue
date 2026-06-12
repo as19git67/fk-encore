@@ -858,7 +858,7 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
       <template #actions>
         <Button icon="pi pi-images" rounded text severity="secondary" v-tooltip.bottom="'In Fotos anzeigen'" @click.stop="navigateToPhoto(selectedPhoto.id)" />
         <Button icon="pi pi-info-circle" rounded text severity="secondary" v-tooltip.bottom="'Details'" @click.stop="isFullscreen = false; mobileSidebarOpen = true" />
-        <Button v-if="canDelete" :icon="selectedPhoto.curation_status === 'hidden' ? 'pi pi-eye-slash' : 'pi pi-eye'" rounded text :severity="selectedPhoto.curation_status === 'hidden' ? 'danger' : 'secondary'" @click.stop="selectedPhoto.curation_status === 'hidden' ? handleRestorePhoto(selectedPhoto.id) : handleHidePhoto(selectedPhoto.id)" />
+        <Button v-if="canDelete" :icon="selectedPhoto.curation_status === 'hidden' ? 'pi pi-thumbs-down-fill' : 'pi pi-thumbs-down'" rounded text :severity="selectedPhoto.curation_status === 'hidden' ? 'danger' : 'secondary'" @click.stop="selectedPhoto.curation_status === 'hidden' ? handleRestorePhoto(selectedPhoto.id) : handleHidePhoto(selectedPhoto.id)" />
         <Button v-if="canDelete" :icon="selectedPhoto.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'" rounded text :severity="selectedPhoto.curation_status === 'favorite' ? 'warn' : 'secondary'" @click.stop="handleToggleFavorite(selectedPhoto.id, selectedPhoto.curation_status)" />
         <Button v-if="selectedPersonFace" icon="pi pi-trash" rounded text severity="danger" v-tooltip.bottom="'Gesicht ignorieren'" @click.stop="handleIgnoreFace(selectedPersonFace.id)" />
       </template>

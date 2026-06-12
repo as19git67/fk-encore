@@ -1578,7 +1578,7 @@ void refreshReviewSequence()
         <Button
           v-if="selectedCount > 0 && canDelete"
           label="Ausblenden"
-          icon="pi pi-eye-slash"
+          icon="pi pi-thumbs-down-fill"
           size="small"
           severity="warn"
           :disabled="curationBusy"
