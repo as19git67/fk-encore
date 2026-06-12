@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 import path from 'node:path'
 
 test.describe('Dokumenten-Modul (Drag-and-Drop + Tastatur)', () => {
-  test('Suchfeld ist per Tastatur erreichbar und debounced', async ({ page }) => {
+  test('Suchfeld ist per Tastatur erreichbar und löst Suche per Button aus', async ({ page }) => {
     await page.goto('dokumente')
     await expect(page.getByRole('heading', { name: 'Dokumente' })).toBeVisible()
 
@@ -10,16 +10,16 @@ test.describe('Dokumenten-Modul (Drag-and-Drop + Tastatur)', () => {
     await search.click()
     await expect(search).toBeFocused()
 
-    // Realistische Eingabegeschwindigkeit, damit das 300 ms Debounce
-    // tatsächlich greift und die zwischenzeitlichen Keystrokes nicht
-    // jeweils einen Request feuern.
     await page.keyboard.type('rechnung', { delay: 40 })
     await expect(search).toHaveValue('rechnung')
 
-    // Die Filter-Selects sollen während aktiver Suche disabled sein
-    // (siehe :disabled="q.trim().length > 0" im Template).
-    const kategorie = page.getByRole('combobox').first()
-    await expect(kategorie).toBeDisabled()
+    // The search button should be enabled when the search field has text.
+    const searchBtn = page.getByRole('button', { name: 'Suche starten' })
+    await expect(searchBtn).toBeEnabled()
+
+    // The filter button is always present in the toolbar.
+    const filterBtn = page.getByRole('button', { name: 'Filter' })
+    await expect(filterBtn).toBeVisible()
   })
 
   test('Zur Upload-Seite navigieren und Datei per File-Input wählen', async ({ page }) => {

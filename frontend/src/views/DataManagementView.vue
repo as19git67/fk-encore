@@ -1121,6 +1121,40 @@ onBeforeUnmount(() => {
         </table>
       </div>
 
+      <!-- Status-Karten (Mobil) -->
+      <div class="queue-cards mb-3">
+        <div v-for="svc in docQueueStatus.services" :key="svc.service" class="queue-card">
+          <div class="queue-card__header">{{ docQueueServiceLabels[svc.service] ?? svc.service }}</div>
+          <div class="queue-card__stats">
+            <div class="queue-card__stat">
+              <span class="queue-card__label">Ausstehend</span>
+              <span v-if="svc.pending > 0" class="badge badge-pending">{{ svc.pending }}</span>
+              <span v-else class="text-secondary">—</span>
+            </div>
+            <div class="queue-card__stat">
+              <span class="queue-card__label">In Arbeit</span>
+              <span v-if="svc.processing > 0" class="badge badge-processing">
+                <i class="pi pi-spin pi-spinner" style="font-size:0.7rem" />
+                {{ svc.processing }}
+              </span>
+              <span v-else class="text-secondary">—</span>
+            </div>
+            <div class="queue-card__stat">
+              <span class="queue-card__label">Fehler</span>
+              <span v-if="svc.failed > 0" class="badge badge-failed">{{ svc.failed }}</span>
+              <span v-else class="text-secondary">—</span>
+            </div>
+            <div class="queue-card__stat">
+              <span class="queue-card__label">Fertig</span>
+              <span class="text-secondary">{{ svc.done }}</span>
+            </div>
+          </div>
+        </div>
+        <div v-if="docQueueStatus.services.length === 0" class="text-secondary" style="text-align:center">
+          Keine Daten
+        </div>
+      </div>
+
       <ProgressBar
         v-if="docIsActive"
         mode="indeterminate"

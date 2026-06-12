@@ -24,6 +24,7 @@ export interface SortField {
 export interface UseSortOptions {
   fields: SortField[]
   defaultState: SortState
+  storageKey?: string
 }
 
 export interface UseSortReturn {
@@ -55,8 +56,35 @@ export function useSort(opts: UseSortOptions): UseSortReturn {
     return { field, direction: dir }
   }
 
-  const applied = ref<SortState>(parseFromQuery(route.query as Record<string, unknown>))
+  function loadStored(): SortState | null {
+    if (!opts.storageKey) return null
+    try {
+      const raw = localStorage.getItem(opts.storageKey)
+      if (!raw) return null
+      const parsed = JSON.parse(raw) as SortState
+      if (opts.fields.some((f) => f.value === parsed.field) &&
+          (parsed.direction === 'asc' || parsed.direction === 'desc')) {
+        return parsed
+      }
+    } catch { /* ignore */ }
+    return null
+  }
+
+  function saveSort(s: SortState) {
+    if (!opts.storageKey) return
+    try { localStorage.setItem(opts.storageKey, JSON.stringify(s)) } catch { /* ignore */ }
+  }
+
+  const fromQuery = parseFromQuery(route.query as Record<string, unknown>)
+  const hasQuerySort = route.query.sortBy !== undefined
+  const initial = hasQuerySort ? fromQuery : (loadStored() ?? fromQuery)
+
+  const applied = ref<SortState>(initial)
   const draft = ref<SortState>({ ...applied.value })
+
+  if (!hasQuerySort && (initial.field !== opts.defaultState.field || initial.direction !== opts.defaultState.direction)) {
+    void syncUrl(initial)
+  }
 
   const isDefault = computed(() =>
     applied.value.field === opts.defaultState.field &&
@@ -78,8 +106,6 @@ export function useSort(opts: UseSortOptions): UseSortReturn {
   )
 
   async function syncUrl(s: SortState) {
-    // Preserve all other query keys (filter state, photoId, …) by starting from
-    // the current query and rewriting only our own two keys.
     const next: Record<string, unknown> = { ...route.query }
     delete next.sortBy
     delete next.sortDir
@@ -98,12 +124,14 @@ export function useSort(opts: UseSortOptions): UseSortReturn {
 
   function apply() {
     applied.value = { ...draft.value }
+    saveSort(applied.value)
     void syncUrl(applied.value)
   }
 
   function reset() {
     draft.value = { ...opts.defaultState }
     applied.value = { ...opts.defaultState }
+    saveSort(applied.value)
     void syncUrl(applied.value)
   }
 
