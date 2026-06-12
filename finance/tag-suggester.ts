@@ -80,6 +80,21 @@ export async function suggestTagsForTransaction(
       .limit(1);
     if (!tx) return false;
 
+    // Skip if the transaction already has user tags — manual tagging
+    // takes precedence and AI suggestions would just be noise.
+    const [hasUserTag] = await db
+      .select({ n: sql<number>`1` })
+      .from(financeTagTransaction)
+      .innerJoin(financeTag, eq(financeTag.id, financeTagTransaction.tag_id))
+      .where(
+        and(
+          eq(financeTagTransaction.transaction_id, transactionId),
+          eq(financeTag.source, "user"),
+        ),
+      )
+      .limit(1);
+    if (hasUserTag) return true;
+
     const inputText = buildEmbedText(tx);
 
     // 1 + 2 — embed + persist

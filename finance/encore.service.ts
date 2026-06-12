@@ -20,11 +20,12 @@ import "../lib/scheduled-jobs-hooks";
 console.log("[boot] finance/encore.service.ts: begin");
 
 // Side-effect imports — each module calls schedule() at top-level:
-//   - statements-cron:  finance-sync-statements (5m), finance-tan-cleanup (1h)
-//   - export-cron:      finance-export-snapshot (daily 03:00 UTC)
-//   - import-pending:   no scheduled job (chokidar watcher handles it),
-//                       but the module also exposes the internal scan
-//                       endpoint, so we still need it loaded.
+//   - statements-cron:    finance-sync-statements (5m), finance-tan-cleanup (1h)
+//   - export-cron:        finance-export-snapshot (daily 03:00 UTC)
+//   - tag-cleanup-cron:   finance-ai-tag-cleanup (daily 05:00 UTC)
+//   - import-pending:     no scheduled job (chokidar watcher handles it),
+//                         but the module also exposes the internal scan
+//                         endpoint, so we still need it loaded.
 import "./statements-cron";
 import "./import-pending";
 import "./export-cron";
@@ -32,6 +33,8 @@ import "./export-cron";
 import "./analysis-suggestions-cron";
 // Side-effect: starts the AI tag suggestion worker loop.
 import "./tag-worker";
+// Side-effect: registers the daily AI-tag cleanup cron.
+import "./tag-cleanup-cron";
 
 import { startFinanceImportWatcher } from "./import-pending";
 
