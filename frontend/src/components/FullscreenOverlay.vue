@@ -1049,7 +1049,7 @@ onUnmounted(() => {
         :title="groupBadgeTitle"
         @click.stop="emit('open-group-review')"
       >
-        <i v-if="isAiHidingSiblings" class="pi pi-eye-slash" />
+        <i v-if="isAiHidingSiblings" class="pi pi-thumbs-down-fill" />
         <i v-else class="pi pi-images" />
         <span class="fs-stack-badge-count">+{{ group.member_count - 1 }}</span>
       </button>
@@ -1098,7 +1098,7 @@ onUnmounted(() => {
             />
             <Button
               v-if="canDelete"
-              :icon="photo.curation_status === 'hidden' ? 'pi pi-eye-slash' : 'pi pi-eye'"
+              :icon="photo.curation_status === 'hidden' ? 'pi pi-thumbs-down-fill' : 'pi pi-thumbs-down'"
               rounded text
               :severity="photo.curation_status === 'hidden' ? 'danger' : 'secondary'"
               @click="photo.curation_status === 'hidden' ? emit('restore', photo.id) : emit('hide', photo.id)"

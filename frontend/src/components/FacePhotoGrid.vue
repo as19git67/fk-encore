@@ -169,7 +169,7 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
           </div>
 
           <i v-if="item.photo.curation_status === 'favorite'" class="pi pi-heart-fill favorite-badge" />
-          <i v-if="item.photo.curation_status === 'hidden'" class="pi pi-eye-slash hidden-badge" />
+          <i v-if="item.photo.curation_status === 'hidden'" class="pi pi-thumbs-down-fill hidden-badge" />
 
           <div class="photo-info">
             <div class="photo-actions">
@@ -184,7 +184,7 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
               <Button
                 v-if="canDelete"
                 size="small"
-                :icon="item.photo.curation_status === 'hidden' ? 'pi pi-eye-slash' : 'pi pi-eye'"
+                :icon="item.photo.curation_status === 'hidden' ? 'pi pi-thumbs-down-fill' : 'pi pi-thumbs-down'"
                 :severity="item.photo.curation_status === 'hidden' ? 'danger' : 'secondary'"
                 text rounded
                 @click.stop="item.photo.curation_status === 'hidden' ? emit('restore', item.photo.id) : emit('hide', item.photo.id)"
