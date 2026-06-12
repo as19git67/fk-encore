@@ -97,6 +97,7 @@ const sortFields: SortField[] = [
 const sort = useSort({
   fields: sortFields,
   defaultState: { field: 'uploaded_at', direction: 'desc' },
+  storageKey: 'documents.sort',
 })
 const sortMenuVisible = ref(false)
 
@@ -293,7 +294,7 @@ function syncQueryParams() {
   // Merge filter and sort into query
   const fq = filter.applied.value
   if (fq.category) query.category = fq.category
-  if (fq.tag) query.tag = fq.tag
+  if (fq.tags && fq.tags.length > 0) query.tags = fq.tags.join(',')
   if (fq.status) query.status = fq.status
   if (fq.needs_review) query.review = '1'
   if (fq.sender) query.sender = fq.sender
@@ -321,7 +322,7 @@ async function load() {
       const s = sort.applied.value
       const res = await listDocuments({
         category: f.category,
-        tag: f.tag,
+        tags: f.tags?.join(','),
         status: f.status as DocumentStatus | undefined,
         needs_review: f.needs_review,
         sender: f.sender,
@@ -589,10 +590,19 @@ onMounted(async () => {
         @remove="filter.removeKey(['status'])"
       />
       <Chip
-        v-if="filter.applied.value.tag"
-        :label="`Tag: ${filter.applied.value.tag}`"
+        v-for="tag in (filter.applied.value.tags ?? [])"
+        :key="'tag-' + tag"
+        :label="`Tag: ${tag}`"
         removable
-        @remove="filter.removeKey(['tag'])"
+        @remove="() => {
+          const next = (filter.applied.value.tags ?? []).filter(t => t !== tag)
+          if (next.length > 0) {
+            filter.applied.value = { ...filter.applied.value, tags: next }
+            filter.draft.value = { ...filter.applied.value }
+          } else {
+            filter.removeKey(['tags'])
+          }
+        }"
       />
       <Chip
         v-if="filter.applied.value.sender"

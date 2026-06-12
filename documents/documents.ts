@@ -138,7 +138,7 @@ export interface ListDocumentsResponse {
 
 interface ListQuery {
   category?: Query<string>;
-  tag?: Query<string>;
+  tags?: Query<string>;
   q?: Query<string>;
   status?: Query<string>;
   /**
@@ -370,7 +370,7 @@ async function loadDefaultGroupForUser(userId: number): Promise<number | null> {
 
 export const listDocuments = api(
   { expose: true, method: "GET", path: "/documents", auth: true },
-  async ({ category, tag, q, status, needs_review, sender, date_from, date_to, tax_relevant, sort_by, sort_dir, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
+  async ({ category, tags, q, status, needs_review, sender, date_from, date_to, tax_relevant, sort_by, sort_dir, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -425,23 +425,29 @@ export const listDocuments = api(
       conds.push(eq(documents.tax_relevant, false));
     }
 
-    let docIdFilter: number[] | null = null;
-    if (tag && tag.length > 0) {
-      const tagRow = await dbFirst<{ id: number }>(
-        db.select({ id: documentTags.id }).from(documentTags).where(eq(documentTags.name, tag.toLowerCase())),
+    const tagList = tags
+      ? tags.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean)
+      : [];
+    if (tagList.length > 0) {
+      const tagRows = await dbAll<{ id: number; name: string }>(
+        db.select({ id: documentTags.id, name: documentTags.name })
+          .from(documentTags)
+          .where(inArray(documentTags.name, tagList)),
       );
-      if (!tagRow) {
+      if (tagRows.length < tagList.length) {
         return { items: [], total: 0 };
       }
-      const links = await dbAll<{ document_id: number }>(
-        db
-          .select({ document_id: documentTagLinks.document_id })
-          .from(documentTagLinks)
-          .where(eq(documentTagLinks.tag_id, tagRow.id)),
-      );
-      docIdFilter = links.map((l) => l.document_id);
-      if (docIdFilter.length === 0) return { items: [], total: 0 };
-      conds.push(inArray(documents.id, docIdFilter));
+      // AND logic: a document must have ALL requested tags.
+      // For each tag, add EXISTS(link for that tag_id).
+      for (const tagRow of tagRows) {
+        conds.push(
+          sql`EXISTS (
+            SELECT 1 FROM ${documentTagLinks}
+            WHERE ${documentTagLinks.document_id} = ${documents.id}
+              AND ${documentTagLinks.tag_id} = ${tagRow.id}
+          )`,
+        );
+      }
     }
 
     const VALID_SORT_FIELDS: Record<string, any> = {

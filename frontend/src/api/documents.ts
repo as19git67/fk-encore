@@ -74,7 +74,7 @@ export interface SearchDocumentsResponse {
 
 export interface ListDocumentsQuery {
   category?: string
-  tag?: string
+  tags?: string
   q?: string
   status?: DocumentStatus
   /**

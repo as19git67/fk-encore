@@ -85,29 +85,32 @@ watch(selectedCategory, (v) => {
   }
 })
 
-// ── Tag AutoComplete ───────────────────────────────────────────────────────
+// ── Tag AutoComplete (multiple) ───────────────────────────────────────────
 
 const tagSuggestions = ref<string[]>([])
-const selectedTag = ref<string | null>(null)
+const selectedTags = ref<string[]>([])
 
 function syncTagSelection() {
-  selectedTag.value = local.value.tag ?? null
+  selectedTags.value = local.value.tags ? [...local.value.tags] : []
 }
 syncTagSelection()
 
 function searchTags(event: { query: string }) {
   const q = event.query.toLowerCase()
-  tagSuggestions.value = q
+  const already = new Set(selectedTags.value)
+  tagSuggestions.value = (q
     ? props.knownTags.filter((t) => t.toLowerCase().includes(q))
     : [...props.knownTags]
+  ).filter((t) => !already.has(t))
 }
 
-watch(selectedTag, (v) => {
-  const tag = v && typeof v === 'string' ? v : undefined
-  if (tag !== (local.value.tag ?? undefined)) {
-    local.value = { ...local.value, tag: tag || undefined }
+watch(selectedTags, (v) => {
+  const tags = v.length > 0 ? [...v] : undefined
+  const current = local.value.tags
+  if (JSON.stringify(tags) !== JSON.stringify(current)) {
+    local.value = { ...local.value, tags }
   }
-})
+}, { deep: true })
 
 // ── Static option lists ────────────────────────────────────────────────────
 
@@ -136,7 +139,7 @@ function handleReset() {
   dateFrom.value = null
   dateTo.value = null
   selectedCategory.value = null
-  selectedTag.value = null
+  selectedTags.value = []
   emit('reset')
 }
 </script>
@@ -175,12 +178,13 @@ function handleReset() {
       </div>
 
       <div class="filter-row">
-        <label class="filter-label">Tag</label>
+        <label class="filter-label">Tags</label>
         <AutoComplete
-          v-model="selectedTag"
+          v-model="selectedTags"
           :suggestions="tagSuggestions"
           :input-style="{ width: '100%' }"
-          placeholder="Tag suchen…"
+          placeholder="Tags suchen…"
+          multiple
           dropdown
           @complete="searchTags"
         />

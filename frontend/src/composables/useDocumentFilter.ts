@@ -3,9 +3,11 @@ import type { Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { LocationQueryRaw } from 'vue-router'
 
+const STORAGE_KEY = 'documents.filter'
+
 export interface DocumentFilter {
   category?: string
-  tag?: string
+  tags?: string[]
   status?: string
   needs_review?: boolean
   sender?: string
@@ -20,10 +22,20 @@ function parseBool(v: unknown): boolean | undefined {
   return undefined
 }
 
+function parseTags(v: unknown): string[] | undefined {
+  if (typeof v === 'string' && v) return v.split(',').map((t) => t.trim()).filter(Boolean)
+  return undefined
+}
+
+function cloneFilter(f: DocumentFilter): DocumentFilter {
+  return { ...f, tags: f.tags ? [...f.tags] : undefined }
+}
+
 export function parseDocFilterFromQuery(q: Record<string, unknown>): DocumentFilter {
   const f: DocumentFilter = {}
   if (typeof q.category === 'string' && q.category) f.category = q.category
-  if (typeof q.tag === 'string' && q.tag) f.tag = q.tag
+  const tags = parseTags(q.tags)
+  if (tags && tags.length > 0) f.tags = tags
   if (typeof q.status === 'string' && q.status) f.status = q.status
   const nr = parseBool(q.review)
   if (nr === true) f.needs_review = true
@@ -38,7 +50,7 @@ export function parseDocFilterFromQuery(q: Record<string, unknown>): DocumentFil
 export function docFilterToQuery(f: DocumentFilter): Record<string, string> {
   const out: Record<string, string> = {}
   if (f.category) out.category = f.category
-  if (f.tag) out.tag = f.tag
+  if (f.tags && f.tags.length > 0) out.tags = f.tags.join(',')
   if (f.status) out.status = f.status
   if (f.needs_review) out.review = '1'
   if (f.sender) out.sender = f.sender
@@ -51,13 +63,25 @@ export function docFilterToQuery(f: DocumentFilter): Record<string, string> {
 export function countActiveDocFilters(f: DocumentFilter): number {
   let n = 0
   if (f.category) n++
-  if (f.tag) n++
+  if (f.tags && f.tags.length > 0) n++
   if (f.status) n++
   if (f.needs_review) n++
   if (f.sender) n++
   if (f.dateFrom || f.dateTo) n++
   if (f.taxRelevant !== undefined) n++
   return n
+}
+
+function saveFilter(f: DocumentFilter) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(f)) } catch { /* ignore */ }
+}
+
+function loadFilter(): DocumentFilter | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return null
+    return JSON.parse(raw) as DocumentFilter
+  } catch { return null }
 }
 
 export interface UseDocumentFilterOptions {
@@ -78,9 +102,17 @@ export function useDocumentFilter(opts: UseDocumentFilterOptions = {}): UseDocum
   const route = useRoute()
   const router = useRouter()
 
-  const applied = ref<DocumentFilter>(parseDocFilterFromQuery(route.query as Record<string, unknown>))
-  const draft = ref<DocumentFilter>({ ...applied.value })
+  const fromQuery = parseDocFilterFromQuery(route.query as Record<string, unknown>)
+  const hasQueryFilter = Object.keys(docFilterToQuery(fromQuery)).length > 0
+  const initial = hasQueryFilter ? fromQuery : (loadFilter() ?? fromQuery)
+
+  const applied = ref<DocumentFilter>(initial)
+  const draft = ref<DocumentFilter>(cloneFilter(applied.value))
   const activeCount = computed(() => countActiveDocFilters(applied.value))
+
+  if (!hasQueryFilter && countActiveDocFilters(initial) > 0) {
+    void syncUrl(initial)
+  }
 
   watch(
     () => route.query,
@@ -107,25 +139,28 @@ export function useDocumentFilter(opts: UseDocumentFilterOptions = {}): UseDocum
   }
 
   function openEdit() {
-    draft.value = { ...applied.value }
+    draft.value = cloneFilter(applied.value)
   }
 
   function apply() {
-    applied.value = { ...draft.value }
+    applied.value = cloneFilter(draft.value)
+    saveFilter(applied.value)
     void syncUrl(applied.value)
   }
 
   function reset() {
     draft.value = {}
     applied.value = {}
+    saveFilter({})
     void syncUrl({})
   }
 
   function removeKey(keys: Array<keyof DocumentFilter>) {
-    const next = { ...applied.value }
+    const next = cloneFilter(applied.value)
     for (const k of keys) delete (next as Record<string, unknown>)[k as string]
     applied.value = next
-    draft.value = { ...next }
+    draft.value = cloneFilter(next)
+    saveFilter(next)
     void syncUrl(next)
   }
 
