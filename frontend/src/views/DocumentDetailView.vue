@@ -103,14 +103,15 @@ const categoryOptions = computed(() => {
 })
 
 async function load() {
+  const id = docId.value
+  if (!Number.isFinite(id)) return
+
   loading.value = true
   error.value = ''
   try {
     const [detail, cats, taxCats, houseItems] = await Promise.all([
-      getDocument(docId.value),
+      getDocument(id),
       listDocumentCategories(),
-      // Catalog is static-ish — a fresh fetch per detail view is fine and
-      // means new sections appear without a hard reload.
       listTaxSectionsCatalog(),
       listGroups(),
     ])
@@ -120,7 +121,7 @@ async function load() {
     groups.value = houseItems.items
     resetForm()
     resetTaxForm()
-    await loadPdf()
+    await loadPdf(id)
   } catch (err: any) {
     error.value = err.message || 'Dokument konnte nicht geladen werden'
   } finally {
@@ -128,11 +129,14 @@ async function load() {
   }
 }
 
-async function loadPdf() {
+async function loadPdf(id?: number) {
+  const resolvedId = id ?? docId.value
+  if (!Number.isFinite(resolvedId)) return
+
   pdfData.value = null
   pdfError.value = ''
   try {
-    pdfData.value = await fetchDocumentBytes(docId.value)
+    pdfData.value = await fetchDocumentBytes(resolvedId)
   } catch (err: any) {
     pdfError.value = err.message || 'PDF kann nicht geladen werden'
   }
