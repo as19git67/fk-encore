@@ -11,7 +11,7 @@ import crypto from "crypto";
 import { api, APIError, type Query } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
-import { and, desc, eq, ilike, inArray, lt, or, sql } from "drizzle-orm";
+import { asc, and, desc, eq, gte, ilike, inArray, lte, lt, or, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbFirst } from "../db/adapter";
 import {
@@ -58,6 +58,7 @@ import {
 } from "./visibility";
 import { enqueueDocumentScan, getQueueStatus, requeueDocument, cancelPendingJobs, retryFailedJobs, type QueueStatus } from "./scan-queue";
 import { triggerWorkers } from "./scan-worker";
+import { ensureThumbnail, removeThumbnail } from "./thumbnail";
 import { searchDocuments, type SearchMode } from "./search";
 import {
   findTaxSection,
@@ -137,7 +138,7 @@ export interface ListDocumentsResponse {
 
 interface ListQuery {
   category?: Query<string>;
-  tag?: Query<string>;
+  tags?: Query<string>;
   q?: Query<string>;
   status?: Query<string>;
   /**
@@ -148,6 +149,12 @@ interface ListQuery {
    * low-confidence ready ones).
    */
   needs_review?: Query<boolean>;
+  sender?: Query<string>;
+  date_from?: Query<string>;
+  date_to?: Query<string>;
+  tax_relevant?: Query<boolean>;
+  sort_by?: Query<string>;
+  sort_dir?: Query<string>;
   limit?: Query<number>;
   offset?: Query<number>;
 }
@@ -363,7 +370,7 @@ async function loadDefaultGroupForUser(userId: number): Promise<number | null> {
 
 export const listDocuments = api(
   { expose: true, method: "GET", path: "/documents", auth: true },
-  async ({ category, tag, q, status, needs_review, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
+  async ({ category, tags, q, status, needs_review, sender, date_from, date_to, tax_relevant, sort_by, sort_dir, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -403,25 +410,55 @@ export const listDocuments = api(
       );
       if (matchedByTitle) conds.push(matchedByTitle);
     }
+    if (sender && sender.trim().length > 0) {
+      conds.push(ilike(documents.sender, `%${sender.trim()}%`));
+    }
+    if (date_from) {
+      conds.push(gte(documents.doc_date, date_from));
+    }
+    if (date_to) {
+      conds.push(lte(documents.doc_date, date_to));
+    }
+    if (tax_relevant === true) {
+      conds.push(eq(documents.tax_relevant, true));
+    } else if (tax_relevant === false) {
+      conds.push(eq(documents.tax_relevant, false));
+    }
 
-    let docIdFilter: number[] | null = null;
-    if (tag && tag.length > 0) {
-      const tagRow = await dbFirst<{ id: number }>(
-        db.select({ id: documentTags.id }).from(documentTags).where(eq(documentTags.name, tag.toLowerCase())),
+    const tagList = tags
+      ? tags.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean)
+      : [];
+    if (tagList.length > 0) {
+      const tagRows = await dbAll<{ id: number; name: string }>(
+        db.select({ id: documentTags.id, name: documentTags.name })
+          .from(documentTags)
+          .where(inArray(documentTags.name, tagList)),
       );
-      if (!tagRow) {
+      if (tagRows.length < tagList.length) {
         return { items: [], total: 0 };
       }
-      const links = await dbAll<{ document_id: number }>(
-        db
-          .select({ document_id: documentTagLinks.document_id })
-          .from(documentTagLinks)
-          .where(eq(documentTagLinks.tag_id, tagRow.id)),
-      );
-      docIdFilter = links.map((l) => l.document_id);
-      if (docIdFilter.length === 0) return { items: [], total: 0 };
-      conds.push(inArray(documents.id, docIdFilter));
+      // AND logic: a document must have ALL requested tags.
+      // For each tag, add EXISTS(link for that tag_id).
+      for (const tagRow of tagRows) {
+        conds.push(
+          sql`EXISTS (
+            SELECT 1 FROM ${documentTagLinks}
+            WHERE ${documentTagLinks.document_id} = ${documents.id}
+              AND ${documentTagLinks.tag_id} = ${tagRow.id}
+          )`,
+        );
+      }
     }
+
+    const VALID_SORT_FIELDS: Record<string, any> = {
+      uploaded_at: documents.uploaded_at,
+      doc_date: documents.doc_date,
+      title: documents.title,
+      sender: documents.sender,
+      size_bytes: documents.size_bytes,
+    };
+    const sortCol = VALID_SORT_FIELDS[sort_by ?? ""] ?? documents.uploaded_at;
+    const sortFn = sort_dir === "asc" ? asc : desc;
 
     const rows = await dbAll<typeof documents.$inferSelect & { cat_slug: string | null }>(
       db
@@ -456,7 +493,7 @@ export const listDocuments = api(
         .from(documents)
         .leftJoin(documentCategories, eq(documents.category_id, documentCategories.id))
         .where(and(...conds))
-        .orderBy(desc(documents.uploaded_at))
+        .orderBy(sortFn(sortCol))
         .limit(lim)
         .offset(off),
     );
@@ -565,6 +602,76 @@ export const getDocumentFile = api.raw(
       stream.pipe(res);
       stream.on("error", (err) => {
         console.error("[documents] file stream error:", err);
+        res.end();
+      });
+    } catch (err: any) {
+      const code = err instanceof APIError ? (err as any).statusCode ?? 500 : 500;
+      res.statusCode = code === 500 ? 404 : code;
+      res.end(err?.message ?? "Not found");
+    }
+  },
+);
+
+/**
+ * Serve a small WebP preview thumbnail of page 1 of the document.
+ * Used by the documents grid view (#632). Mirrors `getDocumentFile`'s
+ * auth handling; the thumbnail is built lazily and cached on disk.
+ *
+ * Auth is accepted via the `Authorization` header or a `?token=` query
+ * param so the URL can be used directly in an `<img src>` tag (browsers
+ * cannot attach custom headers to image requests).
+ */
+export const getDocumentThumbnail = api.raw(
+  { expose: true, method: "GET", path: "/documents/:id/thumbnail", auth: true },
+  async (req, res) => {
+    try {
+      checkModule();
+    } catch {
+      res.statusCode = 403;
+      res.end("Forbidden");
+      return;
+    }
+
+    const authData = getAuthData();
+    if (!authData) {
+      res.statusCode = 401;
+      res.end("Unauthorized");
+      return;
+    }
+    try {
+      requirePermission(authData, "documents.view");
+    } catch {
+      res.statusCode = 403;
+      res.end("Forbidden");
+      return;
+    }
+
+    const userId = parseInt(authData.userID, 10);
+    const m = /\/documents\/(\d+)\/thumbnail/.exec(req.url ?? "");
+    const docId = m ? parseInt(m[1], 10) : NaN;
+    if (!Number.isFinite(docId)) {
+      res.statusCode = 400;
+      res.end("Invalid id");
+      return;
+    }
+
+    try {
+      const row = await loadVisibleDocument(userId, docId);
+      const thumbPath = await ensureThumbnail(docId, row.disk_path);
+      if (!thumbPath) {
+        res.statusCode = 404;
+        res.end("No thumbnail");
+        return;
+      }
+      const stat = await fs.promises.stat(thumbPath);
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "image/webp");
+      res.setHeader("Content-Length", String(stat.size));
+      res.setHeader("Cache-Control", "private, max-age=86400");
+      const stream = fs.createReadStream(thumbPath);
+      stream.pipe(res);
+      stream.on("error", (err) => {
+        console.error("[documents] thumbnail stream error:", err);
         res.end();
       });
     } catch (err: any) {
@@ -1088,6 +1195,7 @@ export const deleteDocument = api(
     } catch (err) {
       console.warn(`[documents] delete: failed to unlink ${row.disk_path}: ${(err as Error).message}`);
     }
+    await removeThumbnail(id);
     return { success: true };
   },
 );
