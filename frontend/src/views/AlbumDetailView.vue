@@ -2359,7 +2359,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
         <Button
           v-if="selectedCount > 0 && (canDeletePhotos || canWrite)"
           label="Ausblenden"
-          icon="pi pi-eye-slash"
+          icon="pi pi-thumbs-down-fill"
           size="small"
           severity="warn"
           :disabled="curationBusy"

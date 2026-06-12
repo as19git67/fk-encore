@@ -1114,7 +1114,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
         <div class="compare-header">
           <div class="compare-header-left">
             <Button
-              icon="pi pi-eye-slash"
+              icon="pi pi-thumbs-down-fill"
               :label="isVeryNarrow ? undefined : isNarrow ? '1' : 'ausblenden (1)'"
               v-tooltip.bottom="{ value: isVeryNarrow ? 'Linkes ausblenden (1)' : undefined, disabled: isTouch }"
               severity="warn"
@@ -1225,7 +1225,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
           </div>
           <div class="compare-header-right">
             <Button
-              icon="pi pi-eye-slash"
+              icon="pi pi-thumbs-down-fill"
               :label="isVeryNarrow ? undefined : isNarrow ? '2' : 'ausblenden (2)'"
               v-tooltip.bottom="{ value: isVeryNarrow ? 'Rechtes ausblenden (2)' : undefined, disabled: isTouch }"
               severity="warn"
