@@ -211,7 +211,7 @@ async function submitComment() {
     <div class="media" :class="{ 'media--hidden': item.hiddenByMe }" :style="{ aspectRatio }" @dblclick="onDoubleTap">
       <img :src="getPhotoUrl(item.filename, 1280)" :alt="item.description ?? item.filename" loading="lazy" @load="onImageLoad" />
       <i v-if="burst" class="pi pi-heart-fill burst" aria-hidden="true" />
-      <i v-if="item.hiddenByMe" class="pi pi-eye-slash hidden-badge" aria-hidden="true" />
+      <i v-if="item.hiddenByMe" class="pi pi-thumbs-down-fill hidden-badge" aria-hidden="true" />
     </div>
 
     <div class="actions">

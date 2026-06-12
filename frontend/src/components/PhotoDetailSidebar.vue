@@ -378,7 +378,7 @@ watch(() => props.readOnly, (ro) => {
         <Button v-if="showNavigateToPhoto" icon="pi pi-images" v-tooltip.bottom="'In Fotos anzeigen'" @click="emit('navigate-to-photo', photo.id)" severity="secondary" text rounded />
         <template v-if="canDelete">
           <Button :icon="photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'" v-tooltip.bottom="photo.curation_status === 'favorite' ? 'Kein Favorit' : 'Favorit'" @click="emit('toggle-favorite', photo.id, photo.curation_status)" :severity="photo.curation_status === 'favorite' ? 'warn' : 'secondary'" text rounded />
-          <Button :icon="photo.curation_status === 'hidden' ? 'pi pi-eye-slash' : 'pi pi-eye'" v-tooltip.bottom="photo.curation_status === 'hidden' ? 'Wiederherstellen' : 'Ausblenden'" @click="photo.curation_status === 'hidden' ? emit('restore', photo.id) : emit('hide', photo.id)" :severity="photo.curation_status === 'hidden' ? 'danger' : 'secondary'" text rounded />
+          <Button :icon="photo.curation_status === 'hidden' ? 'pi pi-thumbs-down-fill' : 'pi pi-thumbs-down'" v-tooltip.bottom="photo.curation_status === 'hidden' ? 'Wiederherstellen' : 'Ausblenden'" @click="photo.curation_status === 'hidden' ? emit('restore', photo.id) : emit('hide', photo.id)" :severity="photo.curation_status === 'hidden' ? 'danger' : 'secondary'" text rounded />
         </template>
         <template v-if="albumId" class="meta-row cover-action">
           <Button
@@ -438,7 +438,7 @@ watch(() => props.readOnly, (ro) => {
               <span class="opinion-count">{{ effectiveCurationStats.fav_count }} von {{ effectiveCurationStats.member_count }}</span>
             </div>
             <div v-if="effectiveCurationStats.hide_count > 0" class="opinion-row">
-              <span class="opinion-label"><i class="pi pi-eye-slash opinion-icon opinion-icon--hide" /> Ausgeblendet</span>
+              <span class="opinion-label"><i class="pi pi-thumbs-down-fill opinion-icon opinion-icon--hide" /> Ausgeblendet</span>
               <div class="opinion-bar-track">
                 <div class="opinion-bar-fill opinion-bar-fill--hide" :style="{ width: `${(effectiveCurationStats.hide_count / effectiveCurationStats.member_count) * 100}%` }" />
               </div>
