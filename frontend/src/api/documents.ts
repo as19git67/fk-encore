@@ -265,7 +265,7 @@ export function setUploadDefaults(payload: UploadDefaults) {
   })
 }
 
-export type ReclassifyAllMode = 'classify_only' | 'full'
+export type ReclassifyAllMode = 'classify_only' | 'full' | 'resume'
 
 export function reclassifyAllDocuments(mode: ReclassifyAllMode) {
   return apiFetch<{ queued: number }>('/documents/reclassify-all', {
