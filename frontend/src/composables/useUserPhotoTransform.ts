@@ -89,6 +89,14 @@ export function useUserPhotoTransform(photoIdRef: Ref<number | null | undefined>
         recipe.value = null
         return
       }
+      // Never carry the previous photo's recipe into the new one while
+      // its fetch is in flight. A stale recipe here would build a render
+      // URL for a photo the user has no recipe for (→ /photos/:id/render
+      // 404, the image fails to load and the fullscreen viewer shows a
+      // darkened frame that the slideshow then skips) and would apply the
+      // wrong colour filter. Cache hits are restored synchronously inside
+      // load(); only uncached navigation needs the eager reset.
+      if (!cache.has(id)) recipe.value = null
       load(id)
     },
     { immediate: true },
@@ -131,7 +139,11 @@ export function useUserPhotoTransform(photoIdRef: Ref<number | null | undefined>
   function buildRenderedUrl(width?: number): string | null {
     const r = recipe.value
     const id = photoIdRef.value
-    if (!r || !id) return null
+    // Guard against a stale recipe belonging to a previously-viewed photo:
+    // only build a render URL when the loaded recipe is for THIS photo.
+    // Otherwise the URL would 404 (or render the wrong photo) — callers
+    // fall back to the original /photos/file/* URL.
+    if (!r || !id || r.photo_id !== id) return null
     const params = new URLSearchParams({
       v: 'user',
       user: String(r.user_id),
