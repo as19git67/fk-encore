@@ -44,6 +44,13 @@ export interface DocumentTaxSection {
   source: TaxAssignmentSource
 }
 
+export interface DocumentSubjectPerson {
+  id: number
+  full_name: string
+  relation_tag: string
+  source: TaxAssignmentSource
+}
+
 export interface DocumentDetail extends DocumentSummary {
   summary: string | null
   extracted_text_preview: string | null
@@ -52,6 +59,8 @@ export interface DocumentDetail extends DocumentSummary {
   tax_sections: DocumentTaxSection[]
   /** True when a human pinned the editable attributes against re-classify. */
   attributes_reviewed: boolean
+  /** Bezugspersonen this document concerns. */
+  subject_persons: DocumentSubjectPerson[]
 }
 
 export interface DocumentCategory {
@@ -88,6 +97,8 @@ export interface ListDocumentsQuery {
   date_from?: string
   date_to?: string
   tax_relevant?: boolean
+  /** Keep only documents linked to this Bezugsperson. */
+  subject_person_id?: number
   sort_by?: string
   sort_dir?: 'asc' | 'desc'
   limit?: number
@@ -108,6 +119,8 @@ export interface UpdateDocumentPayload {
    * to the classifier ("let the AI decide again").
    */
   attributes_reviewed?: boolean
+  /** Replace the user-curated Bezugsperson links (subject-person ids). */
+  subject_person_ids?: number[]
 }
 
 export interface DocQueueServiceStatus {

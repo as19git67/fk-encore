@@ -9,7 +9,7 @@ import ToggleSwitch from 'primevue/toggleswitch'
 import DateRangePresets from './DateRangePresets.vue'
 import { toLocalIsoDate, parseLocalDate } from '../utils/dateFormat'
 import type { DocumentFilter } from '../composables/useDocumentFilter'
-import type { DocumentCategory } from '../api/documents'
+import type { DocumentCategory, SubjectPerson } from '../api/documents'
 
 interface CatOption { label: string; slug: string }
 
@@ -18,6 +18,7 @@ const props = defineProps<{
   draft: DocumentFilter
   categories: DocumentCategory[]
   knownTags: string[]
+  subjectPeople: SubjectPerson[]
 }>()
 
 const emit = defineEmits<{
@@ -129,6 +130,11 @@ const taxOptions = [
   { label: 'Nein', value: 'false' },
 ]
 
+const subjectOptions = computed<Array<{ label: string; value: number | null }>>(() => [
+  { label: 'Alle', value: null },
+  ...props.subjectPeople.map((p) => ({ label: p.full_name, value: p.id })),
+])
+
 function handleApply() {
   emit('apply')
   emit('update:visible', false)
@@ -212,6 +218,17 @@ function handleReset() {
           option-label="label"
           option-value="value"
           @update:model-value="(v: string) => local = { ...local, taxRelevant: v === '' ? undefined : v === 'true' }"
+        />
+      </div>
+
+      <div v-if="props.subjectPeople.length > 0" class="filter-row">
+        <label class="filter-label">Bezugsperson</label>
+        <Select
+          :model-value="local.subjectPersonId ?? null"
+          :options="subjectOptions"
+          option-label="label"
+          option-value="value"
+          @update:model-value="(v: number | null) => local = { ...local, subjectPersonId: v ?? undefined }"
         />
       </div>
 

@@ -589,6 +589,7 @@ export const MOCK_DOCUMENT_DETAIL: DocumentDetail = {
   tax_year_confidence: null,
   tax_sections: [],
   attributes_reviewed: false,
+  subject_persons: [],
 }
 
 export const MOCK_DOCUMENT_DETAIL_CLASSIFYING: DocumentDetail = {
@@ -599,6 +600,7 @@ export const MOCK_DOCUMENT_DETAIL_CLASSIFYING: DocumentDetail = {
   tax_year_confidence: null,
   tax_sections: [],
   attributes_reviewed: false,
+  subject_persons: [],
 }
 
 export const MOCK_DOCUMENT_DETAIL_FAILED: DocumentDetail = {
@@ -609,6 +611,7 @@ export const MOCK_DOCUMENT_DETAIL_FAILED: DocumentDetail = {
   tax_year_confidence: null,
   tax_sections: [],
   attributes_reviewed: false,
+  subject_persons: [],
 }
 
 export const MOCK_DOCUMENT_QUEUE_IDLE: DocumentQueueStatus = {
