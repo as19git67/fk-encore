@@ -119,13 +119,13 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     slug: "sonderausgaben",
     group: "abzuege",
     name: "Sonderausgaben",
-    hint: "Spendenquittung/Zuwendungsbestätigung, Kirchensteuerbescheinigung, Steuerberaterrechnung, gezahlter Unterhalt (Realsplitting, Anlage U); nicht: Versicherungsbeiträge (vorsorgeaufwand).",
+    hint: "Spendenquittung/Zuwendungsbestätigung, Kirchensteuerbescheid/-bescheinigung (z. B. Kath./Ev. Kirchensteueramt), Steuerberaterrechnung, gezahlter Unterhalt (Realsplitting, Anlage U); nicht: Versicherungsbeiträge (vorsorgeaufwand).",
   },
   {
     slug: "vorsorgeaufwand",
     group: "abzuege",
     name: "Anlage Vorsorgeaufwand",
-    hint: "Beitragsbescheinigungen zu Personenversicherungen: Kranken-, Pflege-, Haftpflicht-, Unfall-, Risikolebens- und Rürup-/Basisrenten-Versicherung; nicht: Sachversicherungen (Wohngebäude-, Hausrat-, Kfz-Kasko, Rechtsschutz), Riester (anlage-av) oder Krankheitsrechnungen (aussergewoehnliche).",
+    hint: "Beitragsbescheinigungen/Beitragsrechnungen zu Personenversicherungen: private Kranken- und Pflegeversicherung (z. B. HALLESCHE, DKV), gesetzliche Krankenkasse, Haftpflicht-, Unfall-, Risikolebens- und Rürup-/Basisrenten-Versicherung; nicht: Sachversicherungen (Wohngebäude-, Hausrat-, Kfz-Kasko, Rechtsschutz), Riester (anlage-av) oder Krankheitsrechnungen (aussergewoehnliche).",
   },
   {
     slug: "anlage-av",
@@ -137,13 +137,13 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     slug: "aussergewoehnliche",
     group: "abzuege",
     name: "Außergewöhnliche Belastungen",
-    hint: "Selbst getragene Krankheitskosten: Arzt-/Zahnarztrechnung, Rezeptgebühren, Brille/Hörgerät, Pflegeheimkosten, Kur, Beerdigungskosten; nicht: laufende Versicherungsbeiträge.",
+    hint: "Selbst getragene Krankheitskosten: privatärztliche/zahnärztliche Liquidation (GOÄ/GOZ), Rezeptgebühren, Brille/Hörgerät, Pflegeheim-/Pflegekosten, Kur, Beerdigungskosten; nicht: laufende Versicherungsbeiträge (vorsorgeaufwand).",
   },
   {
     slug: "haushaltsnahe",
     group: "abzuege",
     name: "Haushaltsnahe Aufwendungen / §35a",
-    hint: "Handwerkerrechnungen (Lohnanteil) für die selbst bewohnte Wohnung / das eigene Haus: Maler, Sanitär, Elektriker, Heizungsbauer, Haustechnik, Dachdecker, Schreiner, Fliesenleger, Schornsteinfeger, Gärtner, Winterdienst, Putzkraft, Haushaltshilfe. Rechnungen mit ausgewiesenem 'absetzbarem Anteil nach §35a EStG' gehören IMMER hierher. Nicht: Mietobjekt (→ werbungskosten-v), nicht: Arbeitszimmer-Renovierung des Arbeitnehmers (→ werbungskosten-n).",
+    hint: "Lohnanteil von Leistungen für die selbst bewohnte Wohnung / das eigene Haus: Handwerker (Maler, Sanitär, Elektriker, Heizungsbauer, Haustechnik, Dachdecker, Schreiner, Fliesenleger), Schornsteinfeger, Gärtner, Winterdienst, Putzkraft, Haushaltshilfe sowie haushaltsnahe Dienstleistungen wie ambulante Pflege/Sozialstation (z. B. Caritas). Immer mit Überweisung (kein Bargeld). Rechnungen mit ausgewiesenem 'absetzbarem Anteil nach §35a EStG' gehören IMMER hierher. Nicht: Mietobjekt (→ werbungskosten-v), nicht: Arbeitszimmer-Renovierung des Arbeitnehmers (→ werbungskosten-n).",
   },
   {
     slug: "anlage-kind",

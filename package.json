@@ -11,6 +11,9 @@
     "db:generate": "drizzle-kit generate",
     "dev:frontend": "cd frontend && npm run dev",
     "check:sfc": "node scripts/check-sfc.mjs",
+    "diagnose:taxonomy": "node scripts/taxonomy/diagnose.mjs",
+    "cluster:taxonomy": "python3 scripts/taxonomy/cluster.py",
+    "mine-hints:taxonomy": "python3 scripts/taxonomy/mine_hints.py",
     "prepare": "husky"
   },
   "devDependencies": {

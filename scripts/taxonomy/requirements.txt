@@ -1,0 +1,6 @@
+# Offline-Analyse-Skripte für Taxonomie & Steuer-Hints (Etappe B/C + D).
+# Nur für die einmaligen scripts/taxonomy/*.py — NICHT Teil der Laufzeit.
+# Installation:  pip3 install -r scripts/taxonomy/requirements.txt
+scikit-learn>=1.3   # bringt sklearn.cluster.HDBSCAN mit (kein separates hdbscan)
+numpy
+psycopg2-binary

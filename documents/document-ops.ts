@@ -33,6 +33,7 @@ import {
 import { loadEffectiveTaxSections } from "./tax-hint-overrides";
 import { loadSubjectPersonHints } from "./subject-persons";
 import { flattenTaxonomy, taxonomyHints } from "./taxonomy";
+import { matchSenderRule } from "./sender-rules";
 import { realtime, push } from "~encore/clients";
 
 console.log("[boot] documents/document-ops.ts: all imports resolved");
@@ -186,7 +187,21 @@ export async function runClassify(documentId: number): Promise<{ classification:
     if (m) classification.document_number = m[1]!;
   }
 
-  const catSlug = classification.category_slug;
+  // Deterministic sender → category routing (see sender-rules.ts). A known
+  // recurring institution overrides the LLM's category guess, which otherwise
+  // funnels most documents into the generic "finanzen-rechnungen" bucket.
+  const ruleSlug = matchSenderRule({
+    sender: classification.sender,
+    title: classification.title,
+    text: clipped,
+  });
+  if (ruleSlug && ruleSlug !== classification.category_slug) {
+    console.log(
+      `[documents] sender rule override(${documentId}): ` +
+        `"${classification.sender}" ${classification.category_slug} → ${ruleSlug}`,
+    );
+  }
+  const catSlug = ruleSlug ?? classification.category_slug;
   const cat = await dbFirst<{ id: number }>(
     db.select({ id: documentCategories.id }).from(documentCategories).where(eq(documentCategories.slug, catSlug)),
   );

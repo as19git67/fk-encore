@@ -389,11 +389,11 @@ describe("documents.taxonomy seed shape", () => {
     const wertpapiere = flat.find((r) => r.slug === "finanzen-wertpapiere");
     expect(wertpapiere?.hint).toMatch(/Dividendengutschriften/);
     // Un-hinted leaves carry null, not undefined.
-    expect(flat.find((r) => r.slug === "finanzen-kontoauszuege")?.hint).toBeNull();
+    expect(flat.find((r) => r.slug === "wohnen-miete")?.hint).toBeNull();
 
     const hints = taxonomyHints();
     expect(hints.get("finanzen-wertpapiere")).toMatch(/Dividendengutschriften/);
-    expect(hints.has("finanzen-kontoauszuege")).toBe(false);
+    expect(hints.has("wohnen-miete")).toBe(false);
   });
 
   it("includes the new top-level Betreuung branch with its sections", () => {
