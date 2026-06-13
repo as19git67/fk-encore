@@ -906,11 +906,27 @@ export const batchUpdateTags = api(
         for (const tag of tagRows) {
           const inserted = await db
             .insert(documentTagLinks)
-            .values({ document_id: docId, tag_id: tag.id })
+            .values({ document_id: docId, tag_id: tag.id, source: "user" })
             .onConflictDoNothing()
             .returning({ document_id: documentTagLinks.document_id });
           if (inserted.length > 0) addedLinks++;
         }
+      }
+      // Tags the user explicitly added are human-curated: promote even
+      // pre-existing AI links for these (document, tag) pairs to source='user'
+      // so a later re-classify (which only replaces source='ai') cannot drop
+      // them.
+      const tagIds = tagRows.map((t) => t.id);
+      if (tagIds.length > 0) {
+        await db
+          .update(documentTagLinks)
+          .set({ source: "user" })
+          .where(
+            and(
+              inArray(documentTagLinks.document_id, docIds),
+              inArray(documentTagLinks.tag_id, tagIds),
+            ),
+          );
       }
     }
 
@@ -2397,6 +2413,10 @@ async function fetchTagsForDocuments(ids: number[]): Promise<Map<number, string[
   return map;
 }
 
+// Manual tag editing (PATCH /documents/:id): the caller submits the full
+// desired tag set, so every resulting link is human-curated and written with
+// source='user'. That marks them as owned by the user, so a later re-classify
+// (replaceTagLinks, which only touches source='ai') leaves them intact.
 async function replaceTags(documentId: number, tags: readonly string[]): Promise<void> {
   await db.delete(documentTagLinks).where(eq(documentTagLinks.document_id, documentId));
   const seen = new Set<string>();
@@ -2419,7 +2439,7 @@ async function replaceTags(documentId: number, tags: readonly string[]): Promise
     if (tagId === undefined) continue;
     await db
       .insert(documentTagLinks)
-      .values({ document_id: documentId, tag_id: tagId })
+      .values({ document_id: documentId, tag_id: tagId, source: "user" })
       .onConflictDoNothing();
   }
 }
