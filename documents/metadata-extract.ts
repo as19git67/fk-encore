@@ -23,12 +23,14 @@ function nameTokens(value: string | null | undefined): string[] {
 }
 
 /**
- * The document number is authoritative only from an explicit "#1234" marker in
- * the text. The LLM's free-form guess (often a contract/insurance/customer
- * number) is discarded. Returns the digits without the leading '#', or null.
+ * The document number is authoritative only from an explicit "#" marker in the
+ * text. The LLM's free-form guess (often a contract/insurance/customer number)
+ * is discarded. A single optional separator (space, '.', '-', ':' or '/') may
+ * sit between the '#' and the digits, so "#1234", "#.1234", "# 1234" and
+ * "#-1234" all yield "1234". Returns the digits without the '#', or null. (#651)
  */
 export function extractDocumentNumber(text: string): string | null {
-  return text.match(/#(\d{4,})/)?.[1] ?? null;
+  return text.match(/#[\s.\-:/]?(\d{4,})/)?.[1] ?? null;
 }
 
 /**
