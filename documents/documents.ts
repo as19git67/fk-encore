@@ -11,7 +11,7 @@ import crypto from "crypto";
 import { api, APIError, type Query } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
-import { asc, and, desc, eq, gte, ilike, inArray, lte, lt, or, sql } from "drizzle-orm";
+import { asc, and, desc, eq, gte, ilike, inArray, lte, lt, ne, or, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbFirst } from "../db/adapter";
 import {
@@ -1061,7 +1061,7 @@ export const batchReclassify = api(
 // ─── Reclassify all documents ───────────────────────────────────────────────
 
 export interface ReclassifyAllRequest {
-  mode: "classify_only" | "full";
+  mode: "classify_only" | "full" | "resume";
 }
 
 export interface ReclassifyAllResponse {
@@ -1076,12 +1076,18 @@ export const reclassifyAll = api(
     requirePermission(authData, "data.manage");
 
     const full = req.mode === "full";
+    const resume = req.mode === "resume";
     const services: readonly import("./scan-queue").DocumentScanService[] =
-      full ? ["text_extract", "classify", "embed"] : ["classify", "embed"];
-    const newStatus = full ? "pending" : "classifying";
+      full ? ["text_extract", "classify", "embed"]
+      : resume ? ["text_extract", "classify", "embed"]
+      : ["classify", "embed"];
+    const newStatus = (full || resume) ? "pending" : "classifying";
 
+    const baseQuery = db.select({ id: documents.id }).from(documents);
     const rows = await dbAll<{ id: number }>(
-      db.select({ id: documents.id }).from(documents),
+      resume
+        ? baseQuery.where(ne(documents.status, "ready"))
+        : baseQuery,
     );
 
     if (rows.length === 0) return { queued: 0 };
