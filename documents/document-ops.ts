@@ -11,6 +11,7 @@ import db from "../db/database";
 import { dbFirst } from "../db/adapter";
 import {
   documentCategories,
+  documentSubjectPersons,
   documentTagLinks,
   documentTags,
   documentTaxSections,
@@ -31,10 +32,11 @@ import {
   type TaxonomyEntry,
 } from "./llm-client";
 import { loadEffectiveTaxSections } from "./tax-hint-overrides";
-import { loadSubjectPersonHints } from "./subject-persons";
+import { loadSubjectPersonsForMatch } from "./subject-persons";
 import { flattenTaxonomy, taxonomyHints } from "./taxonomy";
 import { matchSenderRule } from "./sender-rules";
 import {
+  detectSubjectPersonIds,
   extractDocumentNumber,
   extractReferenceNumberTags,
   isSubjectPersonSender,
@@ -179,7 +181,11 @@ export async function runClassify(documentId: number): Promise<{ classification:
     group: s.group,
     hint: s.hint,
   }));
-  const subject_persons = await loadSubjectPersonHints(row.user_id);
+  const subjectPersons = await loadSubjectPersonsForMatch(row.user_id);
+  const subject_persons = subjectPersons.map(({ full_name, relation_tag }) => ({
+    full_name,
+    relation_tag,
+  }));
   const classification = await classifyDocument({
     text: clipped,
     taxonomy,
@@ -202,6 +208,8 @@ export async function runClassify(documentId: number): Promise<{ classification:
   if (referenceTags.length > 0) {
     classification.tags = [...classification.tags, ...referenceTags];
   }
+  // 4. Deterministically link the Bezugspersonen mentioned in the text.
+  const subjectPersonIds = detectSubjectPersonIds(clipped, subjectPersons);
 
   // Deterministic sender → category routing (see sender-rules.ts). A known
   // recurring institution overrides the LLM's category guess, which otherwise
@@ -271,6 +279,7 @@ export async function runClassify(documentId: number): Promise<{ classification:
   });
 
   await replaceTagLinks(documentId, classification.tags);
+  await replaceAiSubjectPersons(documentId, subjectPersonIds);
 
   if (!row.tax_reviewed) {
     await replaceAiTaxSections(documentId, classification.tax_sections);
@@ -341,6 +350,33 @@ async function replaceAiTaxSections(
         confidence: a.confidence,
         source: "ai",
       })
+      .onConflictDoNothing();
+  }
+}
+
+/**
+ * Replace the AI-source Bezugsperson links for a document. Like the tax
+ * sections, user-source rows (`source='user'`) are left untouched so a manual
+ * assignment survives a re-classify; the composite primary key blocks an AI
+ * insert over an existing user row via `onConflictDoNothing`.
+ */
+async function replaceAiSubjectPersons(
+  documentId: number,
+  subjectPersonIds: readonly number[],
+): Promise<void> {
+  await db
+    .delete(documentSubjectPersons)
+    .where(
+      and(
+        eq(documentSubjectPersons.document_id, documentId),
+        eq(documentSubjectPersons.source, "ai"),
+      ),
+    );
+
+  for (const id of subjectPersonIds) {
+    await db
+      .insert(documentSubjectPersons)
+      .values({ document_id: documentId, subject_person_id: id, source: "ai" })
       .onConflictDoNothing();
   }
 }

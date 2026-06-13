@@ -55,6 +55,26 @@ export function isSubjectPersonSender(
   return false;
 }
 
+/**
+ * Detect which of the user's Bezugspersonen are mentioned in the document text.
+ * A person matches when every (de-noised) token of their full name appears in
+ * the text — so "Erika Mustermann" matches whether the document writes
+ * "Mustermann, Erika" or "Frau Erika Mustermann". Returns the matching ids.
+ */
+export function detectSubjectPersonIds(
+  text: string,
+  persons: readonly { id: number; full_name: string }[],
+): number[] {
+  const textTokens = new Set(nameTokens(text));
+  const out: number[] = [];
+  for (const person of persons) {
+    const tokens = nameTokens(person.full_name);
+    if (tokens.length === 0) continue;
+    if (tokens.every((t) => textTokens.has(t))) out.push(person.id);
+  }
+  return out;
+}
+
 /** Reference-number labels → tag prefix. Order matters only for readability. */
 const REFERENCE_LABELS: ReadonlyArray<{ prefix: string; label: string }> = [
   { prefix: "versicherungsnr", label: String.raw`versicherungs(?:schein)?[\s-]*(?:nummer|nr\.?|konto)` },

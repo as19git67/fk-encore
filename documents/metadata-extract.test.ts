@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  detectSubjectPersonIds,
   extractDocumentNumber,
   extractReferenceNumberTags,
   isSubjectPersonSender,
@@ -41,6 +42,26 @@ describe("isSubjectPersonSender", () => {
     expect(isSubjectPersonSender("Erika", persons)).toBe(false);
     expect(isSubjectPersonSender(null, persons)).toBe(false);
     expect(isSubjectPersonSender("", persons)).toBe(false);
+  });
+});
+
+describe("detectSubjectPersonIds", () => {
+  const persons = [
+    { id: 1, full_name: "Erika Mustermann" },
+    { id: 2, full_name: "Anton Schegg" },
+  ];
+
+  it("matches a person whose full name appears in any order", () => {
+    expect(detectSubjectPersonIds("Patientin: Erika Mustermann, geb. 1950", persons)).toEqual([1]);
+    expect(detectSubjectPersonIds("Rechnung an Mustermann, Erika", persons)).toEqual([1]);
+    expect(detectSubjectPersonIds("Betreff Anton Schegg und Erika Mustermann", persons)).toEqual([
+      1, 2,
+    ]);
+  });
+
+  it("requires every name token and ignores partial mentions", () => {
+    expect(detectSubjectPersonIds("nur Erika wird erwähnt", persons)).toEqual([]);
+    expect(detectSubjectPersonIds("kein Name hier", persons)).toEqual([]);
   });
 });
 
