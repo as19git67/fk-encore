@@ -6,7 +6,12 @@
 
 import fs from "fs";
 import { createRequire } from "module";
-import { getHeicDecodeCached, setHeicDecodeCached } from "./heic-cache";
+import {
+  getHeicDecodeCached,
+  setHeicDecodeCached,
+  getHeicDecodeDisk,
+  setHeicDecodeDisk,
+} from "./heic-cache";
 
 // heic-convert is a CJS module without TS types; load via createRequire
 // in the same way photo.service did, so the runtime semantics are
@@ -56,6 +61,14 @@ export async function convertHeicToJpeg(filePath: string): Promise<Buffer> {
     mtimeMs = st.mtimeMs;
     const cached = getHeicDecodeCached(filePath, mtimeMs);
     if (cached) return cached;
+    // In-memory miss: try the persistent disk cache (survives restarts and
+    // covers libraries larger than the in-memory budget). On a hit, promote
+    // back into memory so subsequent calls are pure memcpy.
+    const onDisk = await getHeicDecodeDisk(filePath, mtimeMs);
+    if (onDisk) {
+      setHeicDecodeCached(filePath, mtimeMs, onDisk);
+      return onDisk;
+    }
   } catch {
     // stat failed — fall through, readFile below will report the real error
   }
@@ -78,6 +91,9 @@ export async function convertHeicToJpeg(filePath: string): Promise<Buffer> {
       .jpeg({ quality: 90 })
       .toBuffer();
   }
-  if (mtimeMs > 0) setHeicDecodeCached(filePath, mtimeMs, decoded);
+  if (mtimeMs > 0) {
+    setHeicDecodeCached(filePath, mtimeMs, decoded);
+    setHeicDecodeDisk(filePath, mtimeMs, decoded);
+  }
   return decoded;
 }

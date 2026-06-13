@@ -145,7 +145,7 @@ import type {
   Face,
   FaceBBox,
 } from "../db/types";
-import { resizeImageInPool } from "./image-pool";
+import { resizeImageInPool, type ImagePoolPriority } from "./image-pool";
 import { getHeicDecodeCached, setHeicDecodeCached } from "./heic-cache";
 import { fetchWithTimeout, ML_RPC_QUICK_TIMEOUT_MS } from "./rpc-timeout";
 import {
@@ -470,7 +470,8 @@ async function callEmbeddingServiceUpload(
   const sourceBuffer = (ext === '.heic' || ext === '.heif')
     ? await convertHeicToJpeg(filePath)
     : await fs.promises.readFile(filePath);
-  const fileData = await resizeImage(sourceBuffer, EMBED_UPLOAD_WIDTH);
+  // Background scan job — yield the reserved pool workers to user-facing serving.
+  const fileData = await resizeImage(sourceBuffer, EMBED_UPLOAD_WIDTH, "low");
   const blob = new Blob([fileData], { type: 'image/jpeg' });
 
   const uploadFilename = path.basename(filePath, path.extname(filePath)) + '.jpg';
@@ -3765,11 +3766,17 @@ export function getPhotoFileLogic(filename: string): { data: string; mimeType: s
  * Always outputs JPEG. If the image is already smaller than targetWidth, it is
  * returned as-is (no upscaling). Returns a JPEG buffer.
  */
-export async function resizeImage(imageBuffer: Buffer, targetWidth: number): Promise<Buffer> {
+export async function resizeImage(
+  imageBuffer: Buffer,
+  targetWidth: number,
+  priority: ImagePoolPriority = "high",
+): Promise<Buffer> {
   // Route through the sharp worker pool when available so the main thread
   // never blocks on libvips decode/encode. Falls back to an in-process call
   // when the pool is disabled (see resizeImageInPool implementation).
-  return resizeImageInPool(imageBuffer, targetWidth);
+  // `priority` defaults to high (user-facing serving); background callers
+  // pass "low" so they don't starve photos a user is actively viewing.
+  return resizeImageInPool(imageBuffer, targetWidth, { priority });
 }
 
 /**
@@ -3852,7 +3859,9 @@ export async function indexPhotoThumbnails(photoId: number): Promise<void> {
   for (const width of targets) {
     const { shardPath, cachePath } = thumbnailCacheKey(photo.filename, width);
     try {
-      const resized = await resizeImage(sourceBuffer, width);
+      // Prewarm is background work — low priority so it can't occupy the
+      // whole sharp pool while someone is browsing (see image-pool reserve).
+      const resized = await resizeImage(sourceBuffer, width, "low");
       await fs.promises.mkdir(shardPath, { recursive: true });
       await fs.promises.writeFile(cachePath, resized);
     } catch (err) {
