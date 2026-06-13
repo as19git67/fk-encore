@@ -12,7 +12,6 @@ import type {
   ScanQueueStatus,
   ExternalServiceHealth,
   ServerPressureStatus,
-  LandmarkItem,
   Face,
 } from '../api/photos'
 import type { RoleWithPermissions, Permission } from '../api/roles'
@@ -222,7 +221,7 @@ export const MOCK_PERSONS: Person[] = [
   },
 ]
 
-// ── Faces & Landmarks ─────────────────────────────────────────────────────────
+// ── Faces ─────────────────────────────────────────────────────────────────────
 
 export const MOCK_FACES: Face[] = [
   {
@@ -242,15 +241,6 @@ export const MOCK_FACES: Face[] = [
     bbox: { x: 0.55, y: 0.2, width: 0.06, height: 0.1 },
     ignored: false,
     created_at: '2024-03-15T10:30:00Z',
-  },
-]
-
-export const MOCK_LANDMARKS: LandmarkItem[] = [
-  {
-    id: 201,
-    label: 'Deutsches Museum',
-    confidence: 0.92,
-    bbox: { x: 0.1, y: 0.2, width: 0.7, height: 0.6 },
   },
 ]
 
