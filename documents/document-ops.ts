@@ -433,10 +433,23 @@ async function loadDocumentTagNames(documentId: number): Promise<string[]> {
   return rows.map((r) => r.name);
 }
 
-async function replaceTagLinks(documentId: number, tagNames: readonly string[]): Promise<void> {
+/**
+ * Replace the AI-suggested tag links of a document.
+ *
+ * Only `source='ai'` rows are touched: human-curated (`source='user'`) tags
+ * survive a re-classify. The `onConflictDoNothing` on the (document_id,
+ * tag_id) primary key means an AI tag that the user has already pinned stays
+ * a user row rather than being demoted to 'ai'. Exported for tests.
+ */
+export async function replaceTagLinks(documentId: number, tagNames: readonly string[]): Promise<void> {
   await db
     .delete(documentTagLinks)
-    .where(eq(documentTagLinks.document_id, documentId));
+    .where(
+      and(
+        eq(documentTagLinks.document_id, documentId),
+        eq(documentTagLinks.source, "ai"),
+      ),
+    );
 
   const seen = new Set<string>();
   for (const raw of tagNames) {
@@ -460,7 +473,7 @@ async function replaceTagLinks(documentId: number, tagNames: readonly string[]):
 
     await db
       .insert(documentTagLinks)
-      .values({ document_id: documentId, tag_id: tagId })
+      .values({ document_id: documentId, tag_id: tagId, source: "ai" })
       .onConflictDoNothing();
   }
 }
