@@ -286,6 +286,18 @@ export function reclassifyDocument(
   })
 }
 
+export function replaceDocumentFile(id: number, file: File, signal?: AbortSignal) {
+  return apiFetch<{ success: boolean }>(`/documents/${id}/replace-file`, {
+    method: 'POST',
+    body: file,
+    signal,
+    headers: {
+      'Content-Type': file.type || 'application/pdf',
+      'X-File-Name': encodeURIComponent(file.name),
+    },
+  })
+}
+
 /**
  * Build the URL the `<iframe>` in the detail view points at.
  * Auth is cookie-less, so we append the token as a query parameter —

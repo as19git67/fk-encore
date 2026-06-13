@@ -17,6 +17,7 @@ import {
   listDocumentCategories,
   listTaxSectionsCatalog,
   reclassifyDocument,
+  replaceDocumentFile,
   updateDocument,
   updateDocumentTax,
   updateDocumentVisibility,
@@ -280,6 +281,32 @@ async function onDelete() {
   }
 }
 
+const replaceFileInput = ref<HTMLInputElement | null>(null)
+const replacing = ref(false)
+
+function onReplaceFileClick() {
+  replaceFileInput.value?.click()
+}
+
+async function onReplaceFileSelected(event: Event) {
+  if (!doc.value) return
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  replacing.value = true
+  error.value = ''
+  info.value = ''
+  try {
+    await replaceDocumentFile(doc.value.id, file)
+    info.value = 'Datei ersetzt — Verarbeitung läuft.'
+    setTimeout(load, 1500)
+  } catch (err: any) {
+    error.value = err.message || 'Datei konnte nicht ersetzt werden'
+  } finally {
+    replacing.value = false
+    if (replaceFileInput.value) replaceFileInput.value.value = ''
+  }
+}
+
 /**
  * "Zurück" should return to wherever the user came from — Steuer-View,
  * normal list, search result, etc. `window.history.state.back` is set by
@@ -450,8 +477,26 @@ onBeforeUnmount(() => {
           :closable="false"
           icon="pi pi-times-circle"
         >
-          <strong>Verarbeitung fehlgeschlagen:</strong> {{ doc.last_error }}
+          <div class="replace-file-error">
+            <span><strong>Verarbeitung fehlgeschlagen:</strong> {{ doc.last_error }}</span>
+            <Button
+              v-if="auth.hasPermission('documents.edit')"
+              label="Datei ersetzen"
+              icon="pi pi-upload"
+              size="small"
+              severity="secondary"
+              :loading="replacing"
+              @click="onReplaceFileClick"
+            />
+          </div>
         </Message>
+        <input
+          ref="replaceFileInput"
+          type="file"
+          accept=".pdf,application/pdf"
+          style="display:none"
+          @change="onReplaceFileSelected"
+        />
 
         <div class="meta-summary" v-if="doc.summary">
           <i class="pi pi-info-circle" />
@@ -813,6 +858,13 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 .doc-title { font-size: 1.25rem; font-weight: 600; flex: 1; min-width: 0; }
+
+.replace-file-error {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
 
 .meta-summary {
   display: flex;
