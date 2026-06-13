@@ -807,6 +807,10 @@ export const documentTagLinks = pgTable(
     tag_id: integer("tag_id")
       .notNull()
       .references(() => documentTags.id, { onDelete: "cascade" }),
+    // Origin of the link: 'ai' rows are owned by the classifier and replaced
+    // on every re-classify; 'user' rows are human-curated and must survive a
+    // re-classify. See migration 0100 and documents/document-ops.ts.
+    source: text("source").$type<"ai" | "user">().notNull().default("ai"),
   },
   (table) => [primaryKey({ columns: [table.document_id, table.tag_id] })]
 );
