@@ -120,6 +120,8 @@ export interface DocumentDetail extends DocumentSummary {
   tax_reviewed: boolean;
   tax_year_confidence: number | null;
   tax_sections: DocumentTaxSectionDTO[];
+  /** True when a human pinned the editable attributes (see migration 0101). */
+  attributes_reviewed: boolean;
 }
 
 export interface DocumentCategoryDTO {
@@ -547,6 +549,7 @@ export const getDocument = api(
       tax_reviewed: row.tax_reviewed ?? false,
       tax_year_confidence: row.tax_year_confidence ?? null,
       tax_sections: taxSections,
+      attributes_reviewed: row.attributes_reviewed ?? false,
     };
   },
 );
@@ -696,6 +699,12 @@ export interface UpdateDocumentRequest {
   summary?: string | null;
   category_slug?: string | null;
   tags?: string[];
+  /**
+   * Explicitly set the "human-pinned attributes" flag. Editing any attribute
+   * above already sets it to true implicitly; send `false` to hand the
+   * document back to the classifier ("let the AI decide again").
+   */
+  attributes_reviewed?: boolean;
 }
 
 export const updateDocument = api(
@@ -727,6 +736,17 @@ export const updateDocument = api(
       }
     }
 
+    // Editing any of the attributes above pins them: a re-classify must not
+    // overwrite human-asserted values (mirrors tax_reviewed). The client can
+    // also flip the flag explicitly — "let the AI decide again" sends
+    // attributes_reviewed=false.
+    const attributesChanged = Object.keys(patch).length > 0;
+    if (req.attributes_reviewed !== undefined) {
+      patch.attributes_reviewed = req.attributes_reviewed;
+    } else if (attributesChanged) {
+      patch.attributes_reviewed = true;
+    }
+
     if (Object.keys(patch).length > 0) {
       await db.update(documents).set(patch).where(eq(documents.id, existing.id));
     }
@@ -737,8 +757,9 @@ export const updateDocument = api(
 
     // Metadata that contributes to the canonical path may have changed;
     // move the file and rebuild tax hardlinks. `relocateDocument` is
-    // idempotent when nothing actually moved.
-    if (Object.keys(patch).length > 0) {
+    // idempotent when nothing actually moved. Only needed when a
+    // path-affecting attribute changed, not when merely toggling the flag.
+    if (attributesChanged) {
       try {
         await relocateDocument(existing.id);
       } catch (err) {
@@ -2392,6 +2413,7 @@ async function loadDetail(userId: number, id: number): Promise<DocumentDetail> {
     tax_reviewed: row.tax_reviewed ?? false,
     tax_year_confidence: row.tax_year_confidence ?? null,
     tax_sections: taxSections,
+    attributes_reviewed: row.attributes_reviewed ?? false,
   };
 }
 

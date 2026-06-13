@@ -50,6 +50,8 @@ export interface DocumentDetail extends DocumentSummary {
   tax_reviewed: boolean
   tax_year_confidence: number | null
   tax_sections: DocumentTaxSection[]
+  /** True when a human pinned the editable attributes against re-classify. */
+  attributes_reviewed: boolean
 }
 
 export interface DocumentCategory {
@@ -100,6 +102,12 @@ export interface UpdateDocumentPayload {
   summary?: string | null
   category_slug?: string | null
   tags?: string[]
+  /**
+   * Explicitly set/clear the "human-pinned attributes" flag. Editing any
+   * attribute already pins implicitly; send `false` to hand the document back
+   * to the classifier ("let the AI decide again").
+   */
+  attributes_reviewed?: boolean
 }
 
 export interface DocQueueServiceStatus {
