@@ -12,6 +12,13 @@ describe("extractDocumentNumber", () => {
     expect(extractDocumentNumber("Auftrag #4711 erteilt")).toBe("4711");
   });
 
+  it("allows a single separator between the # and the digits", () => {
+    expect(extractDocumentNumber("Beleg #.2661160")).toBe("2661160");
+    expect(extractDocumentNumber("Beleg # 4711")).toBe("4711");
+    expect(extractDocumentNumber("Beleg #-4711")).toBe("4711");
+    expect(extractDocumentNumber("Beleg #/4711")).toBe("4711");
+  });
+
   it("ignores numbers that are not marked with #", () => {
     expect(extractDocumentNumber("Rechnungsnummer 2661160")).toBeNull();
     expect(extractDocumentNumber("Vertragskonto 123456")).toBeNull();

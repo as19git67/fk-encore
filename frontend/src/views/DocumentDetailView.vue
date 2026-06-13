@@ -35,6 +35,7 @@ import {
 } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
 import { useRealtimeEvent } from '../composables/useRealtime'
+import { useModuleBack } from '../composables/useModuleBack'
 import PdfViewer from '../components/PdfViewer.vue'
 
 const route = useRoute()
@@ -336,18 +337,13 @@ async function onReplaceFileSelected(event: Event) {
 }
 
 /**
- * "Zurück" should return to wherever the user came from — Steuer-View,
- * normal list, search result, etc. `window.history.state.back` is set by
- * vue-router whenever the previous entry was an SPA navigation; if it is
- * null (deep link or reload) we fall back to the document list.
+ * "Zurück" should return to wherever the user came from *within Dokumente* —
+ * Steuer-View, normal list, search result, etc. `useModuleBack` only calls
+ * `router.back()` when the previous entry is under `/dokumente`; otherwise
+ * (deep link, reload, or arriving from another module like Finanzen) it falls
+ * back to the document list so back never leaves the module. (#651)
  */
-function goBack() {
-  if (window.history.state?.back) {
-    router.back()
-  } else {
-    router.push({ name: 'dokumente-list' })
-  }
-}
+const { goBack } = useModuleBack('/dokumente', 'dokumente-list')
 
 function statusSeverity(status: DocumentStatus): 'success' | 'info' | 'warn' | 'danger' | 'secondary' {
   switch (status) {
