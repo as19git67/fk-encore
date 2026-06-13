@@ -7,14 +7,9 @@
  */
 
 export const ENABLE_LOCAL_FACES = process.env.ENABLE_LOCAL_FACES === "true";
-/**
- * @deprecated Retired in Epic #383. The Grounding-DINO landmark-service
- * is no longer maintained; per-photo landmark detection runs through
- * the osm-admin POI matcher (ENABLE_POI_DETECTION) instead. The env
- * variable is still read for shape-compatibility with old configs but
- * the value is ignored — no new `landmark` jobs are enqueued.
- */
-export const ENABLE_LANDMARKS = false;
+// Landmark detection retired in Epic #383 (Grounding-DINO service removed,
+// photo_landmarks table dropped). Per-photo "Sehenswürdigkeiten" run
+// through the osm-admin POI matcher (ENABLE_POI_DETECTION) instead.
 /**
  * Enable per-photo POI detection (Epic #383): for each geotagged
  * upload, query the local geo service for nearby POIs, score the

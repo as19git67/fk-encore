@@ -99,7 +99,6 @@ import {
   photoCuration,
   photoGroups,
   photoGroupMembers,
-  photoLandmarks,
   photoPoiMatches,
   poiReferences,
   photoScanQueue,
@@ -145,7 +144,6 @@ import type {
   FindGroupsResponse,
   Face,
   FaceBBox,
-  LandmarkBBox,
 } from "../db/types";
 import { resizeImageInPool } from "./image-pool";
 import { getHeicDecodeCached, setHeicDecodeCached } from "./heic-cache";
@@ -519,9 +517,9 @@ export async function indexPhotoEmbeddings(photoId: number, force: boolean = fal
 }
 
 /**
- * Compute the auto-crop focus point for a photo based on detected faces and landmarks.
- * Faces take priority; if none exist, the largest/most confident landmark is used.
- * The result is a normalized {x, y} center (0..1) stored on the photo row.
+ * Compute the auto-crop focus point for a photo based on detected faces.
+ * The result is a normalized {x, y} center (0..1) stored on the photo row;
+ * when no faces exist the auto_crop is cleared so default centering is used.
  */
 export async function computeAndStoreAutoCrop(userId: number, photoId: number): Promise<void> {
   // Collect non-ignored face bboxes (join faces + user_face_assignments)
@@ -560,28 +558,7 @@ export async function computeAndStoreAutoCrop(userId: number, photoId: number): 
     return;
   }
 
-  // Fallback: use landmark with highest confidence (global — no user filter)
-  const landmarkRows = await dbAll<{ bbox: string; confidence: number }>(
-    db.select({ bbox: photoLandmarks.bbox, confidence: photoLandmarks.confidence })
-      .from(photoLandmarks)
-      .where(eq(photoLandmarks.photo_id, photoId))
-  );
-
-  if (landmarkRows.length > 0) {
-    // Pick the landmark with the highest confidence
-    const best = landmarkRows.reduce((a, b) => (b.confidence > a.confidence ? b : a));
-    const bbox = JSON.parse(best.bbox) as { x: number; y: number; width: number; height: number };
-    const cx = bbox.x + bbox.width / 2;
-    const cy = bbox.y + bbox.height / 2;
-
-    await dbExec(
-      db.update(photos).set({ auto_crop: { x: Math.round(cx * 1000) / 1000, y: Math.round(cy * 1000) / 1000 } })
-        .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
-    );
-    return;
-  }
-
-  // No faces or landmarks – clear auto_crop so default centering is used
+  // No faces – clear auto_crop so default centering is used
   await dbExec(
     db.update(photos).set({ auto_crop: null })
       .where(and(eq(photos.id, photoId), eq(photos.user_id, userId)))
@@ -6063,7 +6040,7 @@ export async function cancelPendingScansLogic(userId: number | null): Promise<{ 
 }
 
 /**
- * Recompute auto_crop for all photos of a user based on existing face/landmark data.
+ * Recompute auto_crop for all photos of a user based on existing face data.
  */
 export async function recomputeAllAutoCropsLogic(userId: number): Promise<{ updated: number }> {
   const allPhotos = await dbAll<{ id: number }>(
@@ -7020,33 +6997,12 @@ export async function searchByLocationLogic(
   };
 }
 
-// ---------- Landmark Detection & Search ----------
-
-export interface LandmarkItem {
-  id: number;
-  label: string;
-  confidence: number;
-  bbox: LandmarkBBox;
-}
-
-export interface LandmarkSearchResult {
-  photoId: number;
-  filename: string;
-  taken_at?: string;
-  created_at: string;
-  landmarks: Array<{ label: string; confidence: number; bbox: LandmarkBBox }>;
-}
-
-// `callLandmarkService` + `indexPhotoLandmarks` retired (Epic #383).
-// The Grounding-DINO container no longer ships; landmark category
-// detection is replaced by osm-admin's POI matcher. Existing rows in
-// `photo_landmarks` stay readable via getLandmarksForPhotoLogic so the
-// photo-detail sidebar's legacy chips keep working until the POI
-// pipeline has covered every photo. Auto-crop recomputation (which
-// used to fire at the tail of indexPhotoLandmarks) still happens
-// inside detectPhotoFaces when faces are present; photos with no
-// faces keep the auto-crop computed at the time of their last face
-// scan.
+// Landmark detection & search retired (Epic #383). The Grounding-DINO
+// container no longer ships and the `photo_landmarks` table was dropped;
+// landmark category detection is replaced by osm-admin's POI matcher
+// (see getPoiMatchesForPhotoLogic). Auto-crop recomputation happens inside
+// detectPhotoFaces when faces are present; photos with no faces keep the
+// auto-crop computed at the time of their last face scan.
 
 // ---------- AI Quality Scoring ----------
 
@@ -7241,12 +7197,6 @@ export async function indexPhotoQuality(photoId: number): Promise<void> {
   }
 }
 
-export interface PhotoLocation {
-  name?: string;
-  city?: string;
-  country?: string;
-}
-
 export interface PoiMatchRow {
   id: number;
   qid: string | null;
@@ -7326,101 +7276,6 @@ export async function getPoiMatchesForPhotoLogic(
       createdAt: r.created_at,
     })),
   };
-}
-
-export async function getLandmarksForPhotoLogic(
-  userId: number,
-  photoId: number
-): Promise<{ landmarks: LandmarkItem[]; location?: PhotoLocation }> {
-  // Allow access for photo owner OR users with shared album access
-  const photo = await dbFirst<{ id: number; location_name: string | null; location_city: string | null; location_country: string | null }>(
-    db.select({ id: photos.id, location_name: photos.location_name, location_city: photos.location_city, location_country: photos.location_country })
-      .from(photos)
-      .where(eq(photos.id, photoId))
-  );
-  if (!photo) throw new Error("Photo not found");
-
-  const accessibleUsers = await getUsersWithPhotoAccess(photoId);
-  if (!accessibleUsers.includes(userId)) throw new Error("Photo not found");
-
-  const rows = await dbAll<{ id: number; label: string; confidence: number; bbox: string }>(
-    db.select({ id: photoLandmarks.id, label: photoLandmarks.label, confidence: photoLandmarks.confidence, bbox: photoLandmarks.bbox })
-      .from(photoLandmarks)
-      .where(eq(photoLandmarks.photo_id, photoId))
-      .orderBy(sql`${photoLandmarks.confidence} DESC`)
-  );
-
-  const hasLocation = photo.location_name || photo.location_city || photo.location_country;
-
-  return {
-    landmarks: rows.map(r => ({
-      id: r.id,
-      label: r.label,
-      confidence: r.confidence,
-      bbox: JSON.parse(r.bbox) as LandmarkBBox,
-    })),
-    location: hasLocation ? {
-      name: photo.location_name ?? undefined,
-      city: photo.location_city ?? undefined,
-      country: photo.location_country ?? undefined,
-    } : undefined,
-  };
-}
-
-export async function searchByLandmarkLogic(
-  userId: number,
-  query: string,
-  limit: number = 50
-): Promise<{ results: LandmarkSearchResult[] }> {
-  // Join with photos to filter by user ownership (landmarks are global, access is per-user)
-  const lmRows = await dbAll<{ photo_id: number; label: string; confidence: number; bbox: string }>(
-    db.select({
-      photo_id: photoLandmarks.photo_id,
-      label: photoLandmarks.label,
-      confidence: photoLandmarks.confidence,
-      bbox: photoLandmarks.bbox,
-    })
-    .from(photoLandmarks)
-    .innerJoin(photos, eq(photos.id, photoLandmarks.photo_id))
-    .where(and(eq(photos.user_id, userId), ilike(photoLandmarks.label, `%${query}%`)))
-    .orderBy(sql`${photoLandmarks.confidence} DESC`)
-  );
-
-  if (lmRows.length === 0) return { results: [] };
-
-  const uniquePhotoIds = [...new Set(lmRows.map(r => r.photo_id))].slice(0, limit);
-  const userPhotos = await dbAll<{ id: number; filename: string; taken_at: string | null; created_at: string | null }>(
-    db.select({ id: photos.id, filename: photos.filename, taken_at: photos.taken_at, created_at: photos.created_at })
-      .from(photos)
-      .where(and(eq(photos.user_id, userId), inArray(photos.id, uniquePhotoIds)))
-  );
-
-  const photoMap = new Map(userPhotos.map(p => [p.id, p]));
-  const grouped = new Map<number, typeof lmRows>();
-  for (const lm of lmRows) {
-    if (!grouped.has(lm.photo_id)) grouped.set(lm.photo_id, []);
-    grouped.get(lm.photo_id)!.push(lm);
-  }
-
-  const results: LandmarkSearchResult[] = [];
-  for (const photoId of uniquePhotoIds) {
-    const photo = photoMap.get(photoId);
-    if (!photo) continue;
-    const landmarks = grouped.get(photoId) ?? [];
-    results.push({
-      photoId,
-      filename: photo.filename,
-      taken_at: photo.taken_at ?? undefined,
-      created_at: photo.created_at ?? "",
-      landmarks: landmarks.map(lm => ({
-        label: lm.label,
-        confidence: lm.confidence,
-        bbox: JSON.parse(lm.bbox) as LandmarkBBox,
-      })),
-    });
-  }
-
-  return { results };
 }
 
 // ---------- Natural Language Query Parser ----------
@@ -7884,7 +7739,7 @@ async function emptyDirectory(dir: string): Promise<{ removed: number; failed: n
  * Purge ALL photo-related data for the whole installation.
  *
  * Tables cleared (in FK-safe order):
- *   photo_scan_queue → photo_landmarks → user_face_assignments → faces
+ *   photo_scan_queue → user_face_assignments → faces
  *   → photo_group_members → photo_groups
  *   → album_photos → album_shares → album_public_links → album_user_settings
  *   → albums → persons → photo_curation → photos
@@ -7905,7 +7760,6 @@ export async function purgeAllPhotosLogic(deleteFiles: boolean): Promise<PurgeRe
 
   // FK-safe deletion order. Child tables first, then parents.
   await runDelete("photo_scan_queue", dbExec(db.delete(photoScanQueue)));
-  await runDelete("photo_landmarks", dbExec(db.delete(photoLandmarks)));
   await runDelete("user_face_assignments", dbExec(db.delete(userFaceAssignments)));
   await runDelete("faces", dbExec(db.delete(faces)));
 

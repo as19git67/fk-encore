@@ -5,7 +5,7 @@ import {
   MOCK_ALBUMS, MOCK_ALBUM_DETAIL, MOCK_ALBUM_SHARES, MOCK_ALBUM_PUBLIC_LINK,
   MOCK_PUBLIC_ALBUM, MOCK_LIBRARIES, MOCK_AVAILABLE_PATHS,
   MOCK_SCAN_QUEUE_IDLE, MOCK_SERVICES_OK, MOCK_SERVER_PRESSURE_OK,
-  MOCK_FACES, MOCK_LANDMARKS,
+  MOCK_FACES,
   MOCK_DOCUMENTS, MOCK_DOCUMENT_CATEGORIES, MOCK_DOCUMENT_DETAIL,
   MOCK_DOCUMENT_QUEUE_IDLE,
 } from './mock-data'
@@ -189,9 +189,6 @@ export const defaultHandlers = [
   http.post('/api/faces/:id/ignore', () => HttpResponse.json({ success: true })),
   http.post('/api/persons/:id/ignore', () => HttpResponse.json({ success: true })),
   http.get('/api/photos/:id/faces', () => HttpResponse.json({ faces: MOCK_FACES })),
-  http.get('/api/photos/:id/landmarks', () =>
-    HttpResponse.json({ landmarks: MOCK_LANDMARKS, location: undefined }),
-  ),
   http.post('/api/photos/:id/reindex', () => HttpResponse.json({ success: true })),
 
   // ── Albums ─────────────────────────────────────────────────────────────────

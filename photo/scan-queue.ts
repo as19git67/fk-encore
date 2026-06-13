@@ -11,7 +11,7 @@
 
 import { eq, and, inArray, sql, not, isNull } from "drizzle-orm";
 import db from "../db/database";
-import { photoScanQueue, photos, faces, photoLandmarks } from "../db/schema";
+import { photoScanQueue, photos, faces } from "../db/schema";
 import { ENABLE_LOCAL_FACES, ENABLE_POI_DETECTION, ENABLE_QUALITY, ENABLE_THUMBNAIL_PREWARM } from "./scan-config";
 import { notifyScanQueueChanged } from "./scan-queue-events";
 
@@ -19,8 +19,8 @@ import { notifyScanQueueChanged } from "./scan-queue-events";
 // pre-existing rows in `photo_scan_queue` (and the `scan_service`
 // postgres enum) remain valid. Production no longer enqueues new
 // landmark jobs — the Grounding-DINO worker has been retired in favour
-// of osm-admin POI detection (Epic #383). See ENABLE_LANDMARKS comment
-// in scan-config.ts.
+// of osm-admin POI detection (Epic #383); the photo_landmarks table has
+// been dropped.
 export type ScanService = "embedding" | "face_detection" | "face_assignment" | "landmark" | "quality" | "geocoding" | "thumbnail" | "poi_detection";
 export type ScanStatus = "pending" | "processing" | "failed" | "done";
 
