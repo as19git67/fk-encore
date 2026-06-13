@@ -20,18 +20,40 @@ export const categoryTaxonomy: CategorySeed[] = [
     name: "Finanzen",
     icon: "pi-euro",
     children: [
-      { slug: "finanzen-kontoauszuege", name: "Kontoauszüge" },
-      { slug: "finanzen-gehalt", name: "Gehaltsabrechnungen" },
-      { slug: "finanzen-rechnungen", name: "Rechnungen" },
+      {
+        slug: "finanzen-kontoauszuege",
+        name: "Kontoauszüge",
+        hint: "Kontoauszüge und Rechnungsabschlüsse von Giro-, Tagesgeld- oder Darlehenskonten (z. B. MLP, Commerzbank).",
+      },
+      {
+        slug: "finanzen-gehalt",
+        name: "Gehaltsabrechnungen",
+        hint: "Entgelt-/Gehaltsabrechnung, Verdienstbescheinigung, Lohnsteuerbescheinigung, Sozialversicherungsnachweis / Entgeltnachweis zur Sozialversicherung — ausgestellt vom Arbeitgeber (z. B. Open Text Software, IXOS). NICHT als allgemeine Rechnung einordnen. Steuerlich Anlage N.",
+      },
+      {
+        slug: "finanzen-bausparen",
+        name: "Bausparen",
+        hint: "Bausparverträge: Kontoauszüge, Jahresmeldungen, Zuteilungsmitteilungen (z. B. Wüstenrot Bausparkasse).",
+      },
+      {
+        slug: "finanzen-rechnungen",
+        name: "Rechnungen",
+        hint: "Sammelkategorie — NUR wählen, wenn keine spezifischere Kategorie und kein bekannter Absender passt. NICHT für: Gehaltsabrechnungen (finanzen-gehalt), Arzt-/Zahnarztrechnungen (gesundheit-arzt), Pflege (gesundheit-pflege), Versicherungsbeiträge (versicherungen-*, altersvorsorge-*), Renten (altersvorsorge-gesetzlich), Steuerbescheide (behoerden-steuerbescheid), Kirchensteuer (finanzen-kirchensteuer).",
+      },
       {
         slug: "finanzen-wertpapiere",
         name: "Wertpapiere & Dividenden",
-        hint: "Dividendengutschriften, Steuermitteilungen / steuerliche Behandlung zu Wertpapieren (auch 'KEINE STEUERBESCHEINIGUNG'), Erträgnisaufstellungen, Depot- und Wertpapierabrechnungen (Kauf/Verkauf) von Bank oder Broker. NICHT: Einspeisevergütungs-Abrechnungen / Stromeinspeisung von Netzbetreibern für PV-Anlagen (→ wohnen-haus-photovoltaik).",
+        hint: "Dividendengutschriften, Steuermitteilungen / steuerliche Behandlung zu Wertpapieren (auch 'KEINE STEUERBESCHEINIGUNG'), Erträgnisaufstellungen, Depot- und Wertpapierabrechnungen (Kauf/Verkauf) von Bank oder Broker (z. B. Comdirect). Steuerlich Anlage KAP. NICHT: Einspeisevergütungs-Abrechnungen / Stromeinspeisung von Netzbetreibern für PV-Anlagen (→ wohnen-haus-photovoltaik).",
       },
       {
         slug: "finanzen-steuern",
         name: "Steuern",
-        hint: "Allgemeine Steuerunterlagen: Steuererklärung, Korrespondenz mit dem Finanzamt, Lohnsteuerbescheinigung. NICHT für Wertpapier-/Dividenden-Steuermitteilungen (siehe finanzen-wertpapiere) oder Steuerbescheide (siehe behoerden-steuerbescheid).",
+        hint: "Allgemeine Steuerunterlagen: Steuererklärung, Korrespondenz mit dem Finanzamt/Steuerberater. NICHT für Wertpapier-/Dividenden-Steuermitteilungen (siehe finanzen-wertpapiere), Steuerbescheide (siehe behoerden-steuerbescheid) oder Kirchensteuer (finanzen-kirchensteuer).",
+      },
+      {
+        slug: "finanzen-kirchensteuer",
+        name: "Kirchensteuer",
+        hint: "Kirchensteuerbescheid, Kirchensteuer-Festsetzung/-Erstattung (z. B. Katholisches/Evangelisches Kirchensteueramt). Steuerlich Sonderausgaben.",
       },
     ],
   },
@@ -42,7 +64,16 @@ export const categoryTaxonomy: CategorySeed[] = [
     children: [
       { slug: "wohnen-miete", name: "Miete" },
       { slug: "wohnen-nebenkosten", name: "Nebenkosten" },
-      { slug: "wohnen-versicherung", name: "Versicherungen" },
+      {
+        slug: "wohnen-kommunale-abgaben",
+        name: "Kommunale Abgaben",
+        hint: "Kommunale Gebührenbescheide: Wasser/Abwasser, Müll/Abfall, Straßenreinigung, Benutzungsgebühren (Gemeinde/Stadt).",
+      },
+      {
+        slug: "wohnen-versicherung",
+        name: "Versicherungen",
+        hint: "Wohngebäude- und Hausratversicherung zur selbst bewohnten Wohnung.",
+      },
       {
         slug: "wohnen-haus",
         name: "Haus & Grund",
@@ -88,10 +119,18 @@ export const categoryTaxonomy: CategorySeed[] = [
     name: "Altersvorsorge",
     icon: "pi-shield",
     children: [
-      { slug: "altersvorsorge-lebensversicherung", name: "Kapital-Lebensversicherung" },
+      {
+        slug: "altersvorsorge-lebensversicherung",
+        name: "Kapital-Lebensversicherung",
+        hint: "Kapital-Lebensversicherung: Kostenbescheinigungen, Statusreports, Leistungsübersichten, Beitrags-/Wertmitteilungen (z. B. Heidelberger Leben, AXA Lebensversicherung).",
+      },
       { slug: "altersvorsorge-rentenversicherung", name: "Private Rentenversicherung (inkl. Riester/Rürup)" },
       { slug: "altersvorsorge-betrieblich", name: "Betriebliche Altersvorsorge (bAV)" },
-      { slug: "altersvorsorge-gesetzlich", name: "Gesetzliche Rente (DRV)" },
+      {
+        slug: "altersvorsorge-gesetzlich",
+        name: "Gesetzliche Rente (DRV)",
+        hint: "Renteninformation, Rentenbescheid, Rentenanpassungsmitteilung, Renten(bezugs)mitteilung der Deutschen Rentenversicherung (DRV).",
+      },
     ],
   },
   {
@@ -99,10 +138,22 @@ export const categoryTaxonomy: CategorySeed[] = [
     name: "Gesundheit",
     icon: "pi-heart",
     children: [
-      { slug: "gesundheit-arzt", name: "Arztrechnungen" },
+      {
+        slug: "gesundheit-arzt",
+        name: "Arztrechnungen",
+        hint: "Privatärztliche/zahnärztliche Rechnungen (GOÄ/GOZ), Liquidationen niedergelassener Ärzte/Zahnärzte, Heil- und Kostenpläne. Steuerlich außergewöhnliche Belastungen (Krankheitskosten).",
+      },
       { slug: "gesundheit-rezepte", name: "Rezepte" },
-      { slug: "gesundheit-kasse", name: "Krankenkasse" },
-      { slug: "gesundheit-pflege", name: "Pflegeleistungen (Sozialstation)" },
+      {
+        slug: "gesundheit-kasse",
+        name: "Krankenkasse",
+        hint: "Gesetzliche Krankenkasse (z. B. AOK, Techniker, Barmer): Mitgliedsbescheinigungen, Kostenübernahmen, Bescheide. NICHT private Krankenversicherung (versicherungen-kranken).",
+      },
+      {
+        slug: "gesundheit-pflege",
+        name: "Pflegeleistungen (Sozialstation)",
+        hint: "Rechnungen/Leistungsnachweise ambulanter Pflege/Sozialstationen (z. B. Caritas-Sozialstation), häusliche Krankenpflege. Steuerlich haushaltsnahe Aufwendungen / außergewöhnliche Belastungen.",
+      },
       { slug: "gesundheit-pflegekasse", name: "Pflegekasse" },
     ],
   },
@@ -121,10 +172,36 @@ export const categoryTaxonomy: CategorySeed[] = [
     name: "Verträge",
     icon: "pi-file-edit",
     children: [
-      { slug: "vertraege-telekom", name: "Telekommunikation" },
+      {
+        slug: "vertraege-telekom",
+        name: "Telekommunikation",
+        hint: "Telefon, Internet, Mobilfunk, Kabel (z. B. Telekom, Vodafone, LEW TelNet).",
+      },
       { slug: "vertraege-strom", name: "Strom" },
       { slug: "vertraege-gas", name: "Gas" },
-      { slug: "vertraege-abos", name: "Abonnements" },
+      {
+        slug: "vertraege-abos",
+        name: "Abonnements",
+        hint: "Mitgliedschaften und Abos: Fitnessstudio, Vereine, Streaming, Zeitschriften (z. B. Clever Fit).",
+      },
+    ],
+  },
+  {
+    slug: "versicherungen",
+    name: "Versicherungen",
+    icon: "pi-shield",
+    hint: "Personen- und Sachversicherungen, die nicht zu Wohnen, Fahrzeug oder Altersvorsorge gehören.",
+    children: [
+      {
+        slug: "versicherungen-kranken",
+        name: "Private Kranken-/Zusatzversicherung",
+        hint: "Private Kranken-, Pflege- und Krankenzusatzversicherung: Beitragsrechnungen, Beitragsanpassungen, Beitragsbescheinigungen, Leistungsabrechnungen (z. B. HALLESCHE, DKV). Steuerlich Vorsorgeaufwand. NICHT gesetzliche Krankenkasse (gesundheit-kasse).",
+      },
+      {
+        slug: "versicherungen-sach",
+        name: "Sach- & Haftpflichtversicherung",
+        hint: "Haftpflicht-, Hausrat-, Rechtsschutz-, Unfallversicherung: Beiträge, Policen, Schadenfälle (z. B. Privatschutz; Makler wie Marsh, HVS). NICHT Wohngebäude (wohnen-versicherung) oder Kfz (fahrzeug).",
+      },
     ],
   },
   {
@@ -143,7 +220,11 @@ export const categoryTaxonomy: CategorySeed[] = [
     children: [
       { slug: "familie-urkunden", name: "Urkunden" },
       { slug: "familie-ausweise", name: "Ausweise" },
-      { slug: "familie-schule", name: "Schule" },
+      {
+        slug: "familie-schule",
+        name: "Schule",
+        hint: "Schul-Korrespondenz: Elternbriefe, Anmeldungen, Klassenfahrten (z. B. Gymnasium).",
+      },
     ],
   },
   {
@@ -152,7 +233,11 @@ export const categoryTaxonomy: CategorySeed[] = [
     icon: "pi-building",
     children: [
       { slug: "behoerden-bescheide", name: "Bescheide" },
-      { slug: "behoerden-steuerbescheid", name: "Steuerbescheide" },
+      {
+        slug: "behoerden-steuerbescheid",
+        name: "Steuerbescheide",
+        hint: "Einkommensteuerbescheid/-bescheinigung, Vorauszahlungsbescheid vom Finanzamt. NICHT Lohnsteuerbescheinigung (finanzen-gehalt) oder Kirchensteuerbescheid (finanzen-kirchensteuer).",
+      },
     ],
   },
   {
