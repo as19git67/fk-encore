@@ -416,10 +416,14 @@ watch(
 
 onMounted(async () => {
   await Promise.all([loadCategories(), loadGroups(), loadSubjectPeople(), load()])
+  // Returning from a document detail: center+highlight that card. Only fall
+  // back to the generic saved-scroll restore otherwise — running both made the
+  // generic restore (rAF window.scrollTo) clobber the scrollIntoView. (#651)
   if (lastOpenedDocId != null) {
     await restoreScrollToLastOpened()
+  } else {
+    restoreScroll()
   }
-  restoreScroll()
 })
 </script>
 
@@ -608,15 +612,7 @@ onMounted(async () => {
         :key="'tag-' + tag"
         :label="`Tag: ${tag}`"
         removable
-        @remove="() => {
-          const next = (filter.applied.value.tags ?? []).filter(t => t !== tag)
-          if (next.length > 0) {
-            filter.applied.value = { ...filter.applied.value, tags: next }
-            filter.draft.value = { ...filter.applied.value }
-          } else {
-            filter.removeKey(['tags'])
-          }
-        }"
+        @remove="filter.removeTag(tag)"
       />
       <Chip
         v-if="filter.applied.value.sender"
@@ -849,10 +845,28 @@ onMounted(async () => {
 }
 
 /* ── Toolbar ────────────────────────────────────────────────────── */
+/* Sticks below the app navbar so the search/filter/sort controls stay
+   reachable while the list scrolls. The negative inline margin + matching
+   padding bleed the background across the container's inline padding so list
+   rows scroll cleanly underneath. (#651) */
 .toolbar {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  position: sticky;
+  top: var(--menubar-height, 3.5rem);
+  z-index: 900;
+  background: var(--p-content-background);
+  margin-inline: -0.5em;
+  padding: 0.4rem 0.5em;
+  border-bottom: 1px solid var(--p-content-border-color);
+}
+
+@media (min-width: 800px) {
+  .toolbar {
+    margin-inline: -1em;
+    padding-inline: 1em;
+  }
 }
 
 .search-row {

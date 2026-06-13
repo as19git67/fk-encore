@@ -103,6 +103,8 @@ export interface UseDocumentFilterReturn {
   apply: () => void
   reset: () => void
   removeKey: (keys: Array<keyof DocumentFilter>) => void
+  /** Remove a single tag from the applied filter, persisting + syncing the URL. */
+  removeTag: (tag: string) => void
 }
 
 export function useDocumentFilter(opts: UseDocumentFilterOptions = {}): UseDocumentFilterReturn {
@@ -171,5 +173,16 @@ export function useDocumentFilter(opts: UseDocumentFilterOptions = {}): UseDocum
     void syncUrl(next)
   }
 
-  return { applied, draft, activeCount, openEdit, apply, reset, removeKey }
+  function removeTag(tag: string) {
+    const remaining = (applied.value.tags ?? []).filter((t) => t !== tag)
+    const next = cloneFilter(applied.value)
+    if (remaining.length > 0) next.tags = remaining
+    else delete next.tags
+    applied.value = next
+    draft.value = cloneFilter(next)
+    saveFilter(next)
+    void syncUrl(next)
+  }
+
+  return { applied, draft, activeCount, openEdit, apply, reset, removeKey, removeTag }
 }
