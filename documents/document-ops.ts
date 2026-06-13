@@ -34,6 +34,11 @@ import { loadEffectiveTaxSections } from "./tax-hint-overrides";
 import { loadSubjectPersonHints } from "./subject-persons";
 import { flattenTaxonomy, taxonomyHints } from "./taxonomy";
 import { matchSenderRule } from "./sender-rules";
+import {
+  extractDocumentNumber,
+  extractReferenceNumberTags,
+  isSubjectPersonSender,
+} from "./metadata-extract";
 import { realtime, push } from "~encore/clients";
 
 console.log("[boot] documents/document-ops.ts: all imports resolved");
@@ -182,9 +187,20 @@ export async function runClassify(documentId: number): Promise<{ classification:
     subject_persons,
   });
 
-  if (!classification.document_number) {
-    const m = clipped.match(/#(\d{4,})/);
-    if (m) classification.document_number = m[1]!;
+  // Deterministic metadata cleanup (see metadata-extract.ts, #664):
+  // 1. The document number comes only from an explicit "#1234" marker; the
+  //    LLM's free-form guess (often a contract/insurance number) is dropped.
+  classification.document_number = extractDocumentNumber(clipped);
+  // 2. A recipient/Bezugsperson is never the sender — drop it if the
+  //    classifier echoed a known subject person into the sender field.
+  if (isSubjectPersonSender(classification.sender, subject_persons)) {
+    classification.sender = null;
+  }
+  // 3. Labelled contract/insurance/order numbers become searchable tags (the
+  //    '#'-only document number no longer carries them).
+  const referenceTags = extractReferenceNumberTags(clipped);
+  if (referenceTags.length > 0) {
+    classification.tags = [...classification.tags, ...referenceTags];
   }
 
   // Deterministic sender → category routing (see sender-rules.ts). A known

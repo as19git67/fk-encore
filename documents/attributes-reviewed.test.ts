@@ -47,7 +47,7 @@ async function seedDocument(reviewed: boolean): Promise<void> {
         VALUES
           (${DOC_ID}, ${USER_ID}, ${`sha-${DOC_ID}`}, 'doc.pdf', 'application/pdf', 1,
            ${`/tmp/doc-${DOC_ID}.pdf`}, 'classifying', 'Mein Titel', 'Meine Quelle',
-           'Meine Zusammenfassung', 'irgendein extrahierter Text', ${reviewed})`,
+           'Meine Zusammenfassung', 'irgendein extrahierter Text #9999', ${reviewed})`,
   );
 }
 

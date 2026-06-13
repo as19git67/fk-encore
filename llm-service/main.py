@@ -437,11 +437,14 @@ Felder:
 - title: kurzer, sprechender Dokumenttitel (max. 80 Zeichen).
 - doc_date: das auf dem Dokument gedruckte Datum als ISO-8601 YYYY-MM-DD,
   oder null falls nicht erkennbar.
-- sender: Name des Absenders/Ausstellers (Firma, Behörde, Person), oder null.
-- document_number: Dokumentnummer, Rechnungsnummer, Aktenzeichen oder
-  Referenznummer auf dem Dokument, oder null. Erkenne Muster wie
-  #1234, Nr. 12345, Rechnungsnummer 2661160, Vertragskonto 123456,
-  Geschäftszeichen Az. 12/34. Nur die Nummer selbst, ohne Präfix.
+- sender: die ausstellende Institution/Organisation oder Person, die das
+  Dokument VERSCHICKT bzw. erstellt hat — erkennbar an Briefkopf, Logo oder
+  Footer/Impressum (z. B. Versicherung, Behörde, Arztpraxis, Bank). NICHT der
+  Empfänger/Adressat und NICHT eine Bezugsperson. Bei Unsicherheit null.
+- document_number: die eigene Dokument-/Rechnungs-/Akten-Nummer des Dokuments,
+  bevorzugt das mit "#" markierte Muster (#1234). NICHT Vertrags-,
+  Versicherungs-, Kunden- oder Auftragsnummern. Nur die Nummer selbst, ohne
+  Präfix, oder null.
 - summary: 1-2 Sätze, deutsch, nüchtern — "Worum geht es?".
 - tags: bis zu max_tags kurze, kleingeschriebene Stichwörter (keine Sätze).
 - confidence: dein Vertrauen in die Kategorisierung, 0..1.
@@ -466,6 +469,9 @@ Adressmatching ist tolerant: Vor- und Nachname in beliebiger Reihenfolge,
 mit oder ohne Anrede ("Frau Erika Mustermann", "Mustermann, Erika"),
 zählt als Treffer. Reine Teiltreffer ("nur ein Vorname Erika") nur dann,
 wenn aus dem Kontext zweifelsfrei dieselbe Person gemeint ist.
+
+Eine Bezugsperson ist der Empfänger/Betroffene, NIE der Absender/Aussteller —
+trage ihren Namen niemals in `sender` ein.
 """
 
 
