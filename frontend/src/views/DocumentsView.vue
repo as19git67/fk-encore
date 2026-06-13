@@ -121,6 +121,15 @@ function resetSortMenu() {
 
 // ─── Filter ─────────────────────────────────────────────────────────────────
 const filter = useDocumentFilter({ preserveKeys: ['q', 'sortBy', 'sortDir'] })
+
+// `useSort` and `useDocumentFilter` each restore from localStorage and write
+// their slice of the URL on mount. Written separately they race: the filter's
+// write lands last and drops `?sortBy/?sortDir`, after which the sort watcher
+// resets to the default — so returning from another view (e.g. Kategorie-
+// Vorschläge) lost the sorting while the filter survived. Writing the *combined*
+// query once here makes it the final navigation, so both are preserved. (#651)
+syncQueryParams()
+
 const filterMenuVisible = ref(false)
 
 function openFilterMenu() {
