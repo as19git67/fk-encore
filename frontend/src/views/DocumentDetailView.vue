@@ -251,6 +251,25 @@ async function save() {
   }
 }
 
+async function onUnpinAttributes() {
+  if (!doc.value) return
+  saving.value = true
+  error.value = ''
+  info.value = ''
+  try {
+    // Clear the pin, then re-run the classifier so it re-derives the fields.
+    doc.value = await updateDocument(doc.value.id, { attributes_reviewed: false })
+    await reclassifyDocument(doc.value.id, {})
+    resetForm()
+    info.value = 'Felder wieder freigegeben — KI-Neuanalyse läuft.'
+    setTimeout(load, 1500)
+  } catch (err: any) {
+    error.value = err.message || 'Aktion fehlgeschlagen'
+  } finally {
+    saving.value = false
+  }
+}
+
 async function onReclassify(options: { forceOcr?: boolean } = {}) {
   if (!doc.value) return
   saving.value = true
@@ -579,6 +598,30 @@ onBeforeUnmount(() => {
           <div v-if="doc.tags.length > 0" class="current-tags">
             <Chip v-for="t in doc.tags" :key="t" :label="t" />
           </div>
+
+          <Message
+            v-if="doc.attributes_reviewed"
+            severity="info"
+            :closable="false"
+            icon="pi pi-lock"
+            class="pinned-notice"
+          >
+            <div class="pinned-notice-body">
+              <span>
+                Diese Felder wurden manuell festgelegt und werden bei einer
+                KI-Neuanalyse nicht überschrieben.
+              </span>
+              <Button
+                v-if="auth.hasPermission('documents.edit')"
+                label="Wieder von KI bestimmen lassen"
+                icon="pi pi-sparkles"
+                size="small"
+                severity="secondary"
+                :loading="saving"
+                @click="onUnpinAttributes"
+              />
+            </div>
+          </Message>
 
           <div v-if="auth.hasPermission('documents.edit')" class="save-row">
             <Button label="Zurücksetzen" text @click="resetForm" />
@@ -929,6 +972,13 @@ onBeforeUnmount(() => {
   justify-content: flex-end;
   gap: 0.5rem;
   margin-top: 0.25rem;
+}
+
+.pinned-notice-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
 }
 
 .extra-info {
