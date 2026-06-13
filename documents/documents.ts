@@ -378,8 +378,11 @@ export const listDocuments = api(
 
     const lim = Math.min(Math.max(limit ?? 50, 1), 200);
     const off = Math.max(offset ?? 0, 0);
-    const groupIds = await loadUserGroupIds(userId);
-    const conds = [visibleDocumentsWhere(userId, groupIds)];
+    const isAdmin = authData.permissions.includes("data.manage");
+    const groupIds = isAdmin ? [] : await loadUserGroupIds(userId);
+    const conds: ReturnType<typeof and>[] = isAdmin
+      ? []
+      : [visibleDocumentsWhere(userId, groupIds)];
 
     if (status && status.length > 0) {
       conds.push(eq(documents.status, status as any));
@@ -492,7 +495,7 @@ export const listDocuments = api(
         })
         .from(documents)
         .leftJoin(documentCategories, eq(documents.category_id, documentCategories.id))
-        .where(and(...conds))
+        .where(conds.length > 0 ? and(...conds) : undefined)
         .orderBy(sortFn(sortCol))
         .limit(lim)
         .offset(off),
@@ -501,12 +504,12 @@ export const listDocuments = api(
     const ids = rows.map((r) => r.id);
     const tagsByDoc = await fetchTagsForDocuments(ids);
 
+    const countWhere = conds.length > 0
+      ? sql.join(conds.map((c) => sql`(${c})`), sql` AND `)
+      : sql`true`;
     const total = (
       await db.execute<{ count: string }>(
-        sql`SELECT COUNT(*)::text as count FROM documents WHERE ${sql.join(
-          conds.map((c) => sql`(${c})`),
-          sql` AND `,
-        )}`,
+        sql`SELECT COUNT(*)::text as count FROM documents WHERE ${countWhere}`,
       )
     ).rows[0];
 
@@ -1235,6 +1238,98 @@ export const reclassifyDocument = api(
     await requeueDocument(req.id);
     triggerWorkers();
     return { success: true };
+  },
+);
+
+// ─── Replace file ───────────────────────────────────────────────────────────
+
+/**
+ * Replace the PDF on disk for an existing document. Preserves the document
+ * record (id, title, category, tags) but overwrites the file and re-queues
+ * for full processing. Useful when the original file was lost on disk.
+ */
+export const replaceDocumentFile = api.raw(
+  { expose: true, method: "POST", path: "/documents/:id/replace-file", auth: true, bodyLimit: null },
+  async (req, res) => {
+    try { checkModule(); } catch {
+      res.statusCode = 403; res.end(JSON.stringify({ error: "Forbidden" })); return;
+    }
+    const authData = getAuthData()!;
+    try { requirePermission(authData, "documents.edit"); } catch {
+      res.statusCode = 403; res.end(JSON.stringify({ error: "Missing permission: documents.edit" })); return;
+    }
+    const userId = getUserId();
+    const idMatch = (req.url ?? "").match(/\/documents\/(\d+)\/replace-file/);
+    const docId = parseInt(idMatch?.[1] ?? "", 10);
+    if (!docId || isNaN(docId)) {
+      res.statusCode = 400; res.end(JSON.stringify({ error: "Invalid document id" })); return;
+    }
+    let row: typeof documents.$inferSelect;
+    try {
+      row = await loadAdministrableDocument(userId, docId);
+    } catch {
+      res.statusCode = 404; res.end(JSON.stringify({ error: "Document not found" })); return;
+    }
+
+    const rawFileName = (req.headers["x-file-name"] as string) || row.original_filename;
+    let originalName = rawFileName;
+    try { originalName = decodeURIComponent(rawFileName); } catch { /* keep raw */ }
+    const mimeType = ((req.headers["content-type"] as string) || "application/pdf")
+      .toLowerCase().split(";")[0].trim();
+    if (!SUPPORTED_MIME_TYPES.has(mimeType)) {
+      res.statusCode = 415; res.end(JSON.stringify({ error: "Unsupported file type" })); return;
+    }
+
+    const hash = crypto.createHash("sha256");
+    const chunks: Buffer[] = [];
+    let size = 0;
+    try {
+      for await (const raw of req) {
+        const chunk = Buffer.isBuffer(raw) ? raw : Buffer.from(raw as Uint8Array);
+        size += chunk.length;
+        if (size > DOCUMENTS_MAX_BYTES) throw new Error("DOCUMENT_TOO_LARGE");
+        hash.update(chunk); chunks.push(chunk);
+      }
+    } catch (err: any) {
+      const code = err.message === "DOCUMENT_TOO_LARGE" ? 413 : 500;
+      res.statusCode = code; res.end(JSON.stringify({ error: err.message })); return;
+    }
+    const digest = hash.digest("hex");
+    const buffer = Buffer.concat(chunks, size);
+
+    // Reject if a DIFFERENT document already has this exact content.
+    const duplicate = await dbFirst<{ id: number }>(
+      db.select({ id: documents.id }).from(documents)
+        .where(and(eq(documents.sha256, digest), ne(documents.id, docId))),
+    );
+    if (duplicate) {
+      res.statusCode = 409;
+      res.end(JSON.stringify({ error: "Duplicate", message: "Diese Datei existiert bereits als anderes Dokument." }));
+      return;
+    }
+
+    try {
+      assertPathUnderDocumentsRoot(row.disk_path);
+      await ensureDir(path.dirname(row.disk_path));
+      await fs.promises.writeFile(row.disk_path, buffer);
+    } catch (err: any) {
+      res.statusCode = 500; res.end(JSON.stringify({ error: err?.message ?? "Write failed" })); return;
+    }
+
+    await db.update(documents).set({
+      sha256: digest,
+      size_bytes: size,
+      original_filename: originalName,
+      mime_type: mimeType,
+      status: "pending",
+      last_error: null,
+    }).where(eq(documents.id, docId));
+    await requeueDocument(docId);
+    triggerWorkers();
+
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ success: true }));
   },
 );
 
