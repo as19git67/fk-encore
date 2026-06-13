@@ -715,6 +715,13 @@
       "when": 1779001440000,
       "tag": "0101_documents_attributes_reviewed",
       "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1779001441000,
+      "tag": "0102_document_subject_persons",
+      "breakpoints": true
     }
   ]
 }

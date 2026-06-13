@@ -7,6 +7,7 @@ import InputNumber from 'primevue/inputnumber'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import Select from 'primevue/select'
+import MultiSelect from 'primevue/multiselect'
 import Tag from 'primevue/tag'
 import Chip from 'primevue/chip'
 import Popover from 'primevue/popover'
@@ -22,11 +23,13 @@ import {
   updateDocumentTax,
   updateDocumentVisibility,
   listGroups,
+  listSubjectPersons,
   type DocumentCategory,
   type DocumentDetail,
   type DocumentStatus,
   type DocumentVisibility,
   type GroupSummary,
+  type SubjectPerson,
   type TaxSectionCatalogEntry,
   type TaxSectionGroup,
 } from '../api/documents'
@@ -44,6 +47,7 @@ const doc = ref<DocumentDetail | null>(null)
 const categories = ref<DocumentCategory[]>([])
 const groups = ref<GroupSummary[]>([])
 const taxCatalog = ref<TaxSectionCatalogEntry[]>([])
+const subjectPeople = ref<SubjectPerson[]>([])
 const loading = ref(true)
 const saving = ref(false)
 const savingTax = ref(false)
@@ -66,6 +70,7 @@ const form = ref({
   summary: '' as string,
   category_slug: null as string | null,
   tagsText: '' as string,
+  subject_person_ids: [] as number[],
   visibility: 'private' as DocumentVisibility,
   group_id: null as number | null,
 })
@@ -110,16 +115,18 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [detail, cats, taxCats, houseItems] = await Promise.all([
+    const [detail, cats, taxCats, houseItems, people] = await Promise.all([
       getDocument(id),
       listDocumentCategories(),
       listTaxSectionsCatalog(),
       listGroups(),
+      listSubjectPersons(),
     ])
     doc.value = detail
     categories.value = cats.items
     taxCatalog.value = taxCats.items
     groups.value = houseItems.items
+    subjectPeople.value = people.items
     resetForm()
     resetTaxForm()
     await loadPdf(id)
@@ -153,6 +160,7 @@ function resetForm() {
     summary: doc.value.summary ?? '',
     category_slug: doc.value.category_slug,
     tagsText: doc.value.tags.join(', '),
+    subject_person_ids: doc.value.subject_persons.map((p) => p.id),
     visibility: doc.value.visibility,
     group_id: doc.value.group_id,
   }
@@ -227,6 +235,7 @@ async function save() {
         summary: form.value.summary.trim() || null,
         category_slug: form.value.category_slug,
         tags,
+        subject_person_ids: form.value.subject_person_ids,
       })
     ]
 
@@ -558,6 +567,26 @@ onBeforeUnmount(() => {
           <label>
             <span class="label">Tags (Komma-getrennt)</span>
             <InputText v-model="form.tagsText" :disabled="!auth.hasPermission('documents.edit')" />
+          </label>
+          <label>
+            <span class="label">Bezugspersonen</span>
+            <MultiSelect
+              v-model="form.subject_person_ids"
+              :options="subjectPeople"
+              optionLabel="full_name"
+              optionValue="id"
+              display="chip"
+              filter
+              :showToggleAll="false"
+              :disabled="!auth.hasPermission('documents.edit')"
+              placeholder="Keine"
+              :emptyMessage="'Noch keine Bezugspersonen angelegt'"
+            />
+            <small v-if="doc.subject_persons.some((p) => p.source === 'ai')" class="hint">
+              Automatisch erkannte sind mit
+              <i class="pi pi-sparkles" /> markiert; deine Auswahl bleibt bei einer
+              Neuanalyse erhalten.
+            </small>
           </label>
 
           <div v-if="auth.hasPermission('documents.edit')" class="visibility-section">
