@@ -207,15 +207,21 @@ export async function runClassify(documentId: number): Promise<{ classification:
   );
 
   const patch: Partial<typeof documents.$inferInsert> = {
-    category_id: cat?.id ?? null,
-    title: classification.title || row.title || row.original_filename,
-    doc_date: classification.doc_date,
-    sender: classification.sender,
-    document_number: classification.document_number,
-    summary: classification.summary,
-    classification_confidence: classification.confidence,
     status: "ready",
   };
+  // Only overwrite the human-editable attributes when the user has not pinned
+  // them via the edit dialog. `attributes_reviewed=true` means a human has
+  // asserted these values and the classifier must not undo them (mirrors the
+  // `tax_reviewed` guard below for the tax fields).
+  if (!row.attributes_reviewed) {
+    patch.category_id = cat?.id ?? null;
+    patch.title = classification.title || row.title || row.original_filename;
+    patch.doc_date = classification.doc_date;
+    patch.sender = classification.sender;
+    patch.document_number = classification.document_number;
+    patch.summary = classification.summary;
+    patch.classification_confidence = classification.confidence;
+  }
   // Only overwrite tax fields when the user has not pinned them via the
   // /documents/:id/tax endpoint. `tax_reviewed=true` means the human has
   // asserted the ground truth and the classifier must not undo it.
@@ -226,8 +232,25 @@ export async function runClassify(documentId: number): Promise<{ classification:
   }
 
   await db.update(documents).set(patch).where(eq(documents.id, documentId));
+
+  // Report the category the document actually carries now: the fresh guess
+  // when applied, or the pinned existing one when attributes are reviewed.
+  let effectiveCatSlug: string | null = catSlug;
+  if (row.attributes_reviewed) {
+    effectiveCatSlug =
+      row.category_id == null
+        ? null
+        : (
+            await dbFirst<{ slug: string }>(
+              db
+                .select({ slug: documentCategories.slug })
+                .from(documentCategories)
+                .where(eq(documentCategories.id, row.category_id)),
+            )
+          )?.slug ?? null;
+  }
   await publishStatusChanged(documentId, row.user_id, "ready", {
-    category_slug: catSlug,
+    category_slug: effectiveCatSlug,
     confidence: classification.confidence,
   });
 
@@ -248,7 +271,10 @@ export async function runClassify(documentId: number): Promise<{ classification:
     );
   }
 
-  const lowConfidence = classification.confidence < LOW_CONFIDENCE_THRESHOLD;
+  // A reviewed document's attributes weren't touched, so there is nothing to
+  // flag for review even if the (ignored) guess was low-confidence.
+  const lowConfidence =
+    !row.attributes_reviewed && classification.confidence < LOW_CONFIDENCE_THRESHOLD;
   if (lowConfidence) {
     // Best-effort — push must never block the pipeline.
     push

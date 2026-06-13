@@ -739,6 +739,11 @@ export const documents = pgTable("documents", {
   tax_year: integer("tax_year"),
   tax_year_confidence: real("tax_year_confidence"),
   tax_reviewed: boolean("tax_reviewed").notNull().default(false),
+  // When true, a human has pinned the editable attributes (title, doc_date,
+  // sender, document_number, summary, category) via the edit dialog and a
+  // re-classify must not overwrite them (migration 0101). Mirrors
+  // `tax_reviewed` for the tax fields.
+  attributes_reviewed: boolean("attributes_reviewed").notNull().default(false),
   // Access control (migration 0036/0069). `visibility` drives who can see
   // the document; `group_id` must be set iff visibility='group'
   // (DB CHECK constraint). `user_id` stays as the uploader regardless.
