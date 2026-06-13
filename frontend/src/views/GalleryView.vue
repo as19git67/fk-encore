@@ -828,6 +828,47 @@ let curationVersion = 0
 // `hydrateToken` from above gates these loaders too so a stale fetch from
 // the previous photo can't overwrite the current one's lists.
 const detailsActive = ref(false)
+
+// The persistent desktop detail panel is mounted on ≥768px viewports
+// (hidden via CSS below the breakpoint). Track that reactively so we only
+// fetch faces / landmarks / POI matches when something will actually show
+// them — see `detailsVisible`.
+const DESKTOP_SIDEBAR_MQ = '(min-width: 769px)'
+const desktopSidebarVisible = ref(
+  typeof window !== 'undefined' && window.matchMedia(DESKTOP_SIDEBAR_MQ).matches,
+)
+let sidebarMql: MediaQueryList | null = null
+function onSidebarMqChange(e: MediaQueryListEvent) {
+  desktopSidebarVisible.value = e.matches
+}
+onMounted(() => {
+  sidebarMql = window.matchMedia(DESKTOP_SIDEBAR_MQ)
+  desktopSidebarVisible.value = sidebarMql.matches
+  sidebarMql.addEventListener('change', onSidebarMqChange)
+})
+onUnmounted(() => {
+  sidebarMql?.removeEventListener('change', onSidebarMqChange)
+})
+
+// Whether the per-photo details (faces / landmarks / POI) are currently
+// on screen for the cursor photo. In fullscreen the desktop sidebar is
+// occluded by the overlay, so only the flyout counts; otherwise the
+// persistent desktop sidebar does.
+const detailsVisible = computed(() =>
+  isFullscreen.value ? detailsActive.value : desktopSidebarVisible.value,
+)
+
+// Load the per-photo details on demand the moment the panel becomes visible
+// (flyout opened, fullscreen closed back to the desktop sidebar, or the
+// viewport crossed the breakpoint). Navigation while it's already open is
+// handled by hydrateCursor's own gated call, so this fires only on the
+// false→true transition.
+watch(detailsVisible, (visible) => {
+  if (visible && cursorPhoto.value) {
+    void loadFacesAndLandmarks(cursorPhoto.value.id, hydrateToken)
+  }
+})
+
 const detectedFaces = ref<Face[]>([])
 const loadingFaces = ref(false)
 const detectedLandmarks = ref<LandmarkItem[]>([])
@@ -915,9 +956,22 @@ async function hydrateCursor(index: number, options?: { skipNeighbors?: boolean 
   // Cancel any in-progress date edit when the photo changes.
   isEditingDate.value = false
 
-  // Faces / landmarks fire in parallel with the details batch — they hit
-  // separate endpoints and the sidebar can render each independently.
-  void loadFacesAndLandmarks(curEntry.id, myToken)
+  // Faces / landmarks / POI matches are only shown in the details panel
+  // (desktop sidebar or fullscreen flyout). Fetch them only when that panel
+  // is actually visible: during a fullscreen slideshow the desktop sidebar
+  // is occluded by the overlay, so these (sometimes slow) landmark/POI
+  // lookups would be wasted work and, worse, saturate the browser's per-host
+  // connection pool — queuing the actual image fetch behind them so the photo
+  // shows a loading spinner until the load-fallback kicks in, and leaving
+  // stale requests in flight when the user navigates quickly. Opening the
+  // flyout loads them on demand (see onShowDetails).
+  if (detailsVisible.value) {
+    void loadFacesAndLandmarks(curEntry.id, myToken)
+  } else {
+    detectedFaces.value = []
+    detectedLandmarks.value = []
+    detectedPoiMatches.value = []
+  }
 
   const ids = [curEntry.id]
   if (prevEntry) ids.push(prevEntry.id)
