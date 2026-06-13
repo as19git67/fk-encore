@@ -8,7 +8,6 @@ import { eq, sql } from "drizzle-orm";
 import db from "../db/database";
 import {
   faces,
-  photoLandmarks,
   photos,
   photoTransforms,
   photoTransformSuggestions,
@@ -272,27 +271,18 @@ describe("suggestion compute — pure math", () => {
   });
 
   describe("computeSubjectHull", () => {
-    it("returns null when neither faces nor landmarks exist", () => {
-      expect(computeSubjectHull([], [])).toBeNull();
+    it("returns null when no faces exist", () => {
+      expect(computeSubjectHull([])).toBeNull();
     });
-    it("prefers faces over landmarks", () => {
-      const face: BboxNorm = { x: 0.4, y: 0.4, width: 0.2, height: 0.2 };
-      const landmark = {
-        bbox: { x: 0, y: 0, width: 1, height: 1 } as BboxNorm,
-        confidence: 0.99,
-      };
-      expectBboxClose(computeSubjectHull([face], [landmark]), face);
-    });
-    it("falls back to highest-confidence landmark", () => {
-      const lmA = {
-        bbox: { x: 0.1, y: 0.1, width: 0.2, height: 0.2 } as BboxNorm,
-        confidence: 0.3,
-      };
-      const lmB = {
-        bbox: { x: 0.6, y: 0.6, width: 0.3, height: 0.3 } as BboxNorm,
-        confidence: 0.9,
-      };
-      expectBboxClose(computeSubjectHull([], [lmA, lmB]), lmB.bbox);
+    it("returns the union of the face bboxes", () => {
+      const faceA: BboxNorm = { x: 0.4, y: 0.4, width: 0.2, height: 0.2 };
+      const faceB: BboxNorm = { x: 0.7, y: 0.7, width: 0.1, height: 0.1 };
+      expectBboxClose(computeSubjectHull([faceA, faceB]), {
+        x: 0.4,
+        y: 0.4,
+        width: 0.4,
+        height: 0.4,
+      });
     });
   });
 
@@ -439,7 +429,6 @@ describe("computePhotoTransformSuggestions", () => {
 
   beforeEach(async () => {
     await db.delete(faces);
-    await db.delete(photoLandmarks);
     await db.delete(photoTransformSuggestions);
     await db.delete(photos);
     await db.delete(users);
@@ -529,7 +518,7 @@ describe("computePhotoTransformSuggestions", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("produces no crop suggestions when no faces or landmarks exist", async () => {
+  it("produces no crop suggestions when no faces exist", async () => {
     const payload = await computePhotoTransformSuggestions(photoId);
     // The payload is still stored (exposure/contrast are face-independent),
     // but crops are only suggested when there is a face to align to.
@@ -544,7 +533,6 @@ describe("recomputeAllTransformSuggestionsLogic", () => {
 
   beforeEach(async () => {
     await db.delete(faces);
-    await db.delete(photoLandmarks);
     await db.delete(photoTransformSuggestions);
     await db.delete(photos);
     await db.delete(users);

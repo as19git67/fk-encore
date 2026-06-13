@@ -56,7 +56,6 @@ import {
   getAlbumShares,
   getPhotoDetailsBatch,
   getPhotoFaces,
-  getPhotoLandmarks,
   getPhotoPoiMatches,
   ignoreFace,
   leaveAlbum,
@@ -66,7 +65,6 @@ import {
   shareAlbum,
   type CurationStatus,
   type Face,
-  type LandmarkItem,
   type PoiMatchItem,
   type Photo,
   type PhotoFilter,
@@ -910,8 +908,6 @@ const mapNextPhoto = computed(() =>
 // ── Sidebar state ─────────────────────────────────────────────────────────────
 const detectedFaces = ref<Face[]>([])
 const loadingFaces = ref(false)
-const detectedLandmarks = ref<LandmarkItem[]>([])
-const loadingLandmarks = ref(false)
 const detectedPoiMatches = ref<PoiMatchItem[]>([])
 const loadingPoiMatches = ref(false)
 const reindexingPhoto = ref(false)
@@ -920,7 +916,7 @@ const { persons, fetchPersons, invalidateAlbums } = useReferenceData()
 // The sidebar (including the fullscreen details flyout) follows either
 // the grid selection or, when the map fullscreen is open, the photo
 // currently shown in the map overlay. Watch the effective photo so
-// faces/landmarks reflect what the user actually sees.
+// faces/POI reflect what the user actually sees.
 const activeDetailPhoto = computed(() =>
   isMapFullscreen.value ? mapSelectedPhoto.value : cursorPhoto.value
 )
@@ -931,7 +927,6 @@ watch(activeDetailPhoto, (photo) => {
     if (showPersons.value) void loadPersons()
   } else {
     detectedFaces.value = []
-    detectedLandmarks.value = []
   }
 })
 
@@ -1032,28 +1027,23 @@ async function refreshGroupsAndPhotos() {
 
 async function loadSidebarData(photoId: number) {
   loadingFaces.value = true
-  loadingLandmarks.value = true
   loadingPoiMatches.value = true
   try {
-    // POI matches load alongside faces + landmarks. Each call falls back to
+    // POI matches load alongside faces. Each call falls back to
     // an empty result on error (e.g. osm-admin down) so the rest of the
     // sidebar still renders. Previously POIs weren't loaded here at all, so
     // they never showed in the album detail / split-screen sidebar.
-    const [facesRes, landmarksRes, poisRes] = await Promise.all([
+    const [facesRes, poisRes] = await Promise.all([
       getPhotoFaces(photoId).catch(() => ({ faces: [] })),
-      getPhotoLandmarks(photoId).catch(() => ({ landmarks: [] })),
       getPhotoPoiMatches(photoId).catch(() => ({ matches: [] })),
     ])
     detectedFaces.value = facesRes.faces ?? []
-    detectedLandmarks.value = landmarksRes.landmarks ?? []
     detectedPoiMatches.value = poisRes.matches ?? []
   } catch {
     detectedFaces.value = []
-    detectedLandmarks.value = []
     detectedPoiMatches.value = []
   } finally {
     loadingFaces.value = false
-    loadingLandmarks.value = false
     loadingPoiMatches.value = false
   }
 }
@@ -1919,7 +1909,6 @@ watch(albumId, (id) => {
   cursorGroup.value = null
   activeGroup.value = null
   detectedFaces.value = []
-  detectedLandmarks.value = []
   pendingMapSelectPhotoId.value = null
   void loadData()
 })
@@ -2287,9 +2276,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           :faces="detectedFaces"
           :is-editing-date="isEditingDate"
           v-model:editDate="editDate"
-          :landmarks="detectedLandmarks"
           :loading-faces="loadingFaces"
-          :loading-landmarks="loadingLandmarks"
           :poi-matches="detectedPoiMatches"
           :loading-poi-matches="loadingPoiMatches"
           :persons="persons"
@@ -2464,9 +2451,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           :faces="detectedFaces"
           :is-editing-date="isEditingDate"
           v-model:editDate="editDate"
-          :landmarks="detectedLandmarks"
           :loading-faces="loadingFaces"
-          :loading-landmarks="loadingLandmarks"
           :poi-matches="detectedPoiMatches"
           :loading-poi-matches="loadingPoiMatches"
           :persons="persons"
@@ -2536,9 +2521,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           :faces="detectedFaces"
           :is-editing-date="isEditingDate"
           v-model:editDate="editDate"
-          :landmarks="detectedLandmarks"
           :loading-faces="loadingFaces"
-          :loading-landmarks="loadingLandmarks"
           :poi-matches="detectedPoiMatches"
           :loading-poi-matches="loadingPoiMatches"
           :persons="persons"

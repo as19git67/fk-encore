@@ -9,7 +9,7 @@ import PhotoAlbumDialog from './PhotoAlbumDialog.vue'
 import PhotoTransformEditor from './PhotoTransformEditor.vue'
 import { getPhotoUrl, getPhotosAlbums, updateAlbum, updateAlbumUserSettings, updatePhotoDescription } from '../api/photos'
 import { getAlbumCheckState as calculateAlbumCheckState } from '../utils/albumSelection'
-import type { Photo, Face, LandmarkItem, PoiMatchItem, Person, CurationStatus } from '../api/photos'
+import type { Photo, Face, PoiMatchItem, Person, CurationStatus } from '../api/photos'
 import { useReferenceData } from '../composables/useReferenceData'
 import { useUserPhotoTransform } from '../composables/useUserPhotoTransform'
 import { useAuthStore } from '../stores/auth'
@@ -28,12 +28,9 @@ const props = defineProps<{
   selectedPhotoIds?: number[]
   faces: Face[]
   loadingFaces: boolean
-  landmarks: LandmarkItem[]
-  loadingLandmarks: boolean
   /** POI matches produced by the osm-admin pipeline (Epic #383).
    *  When the matches array is non-empty the sidebar shows them in
-   *  the location section, alongside (or instead of) the generic
-   *  landmark category chips. */
+   *  the location section. */
   poiMatches?: PoiMatchItem[]
   loadingPoiMatches?: boolean
   persons: Person[]
@@ -489,7 +486,7 @@ watch(() => props.readOnly, (ro) => {
         </div>
       </div>
 
-      <template v-if="photo.location_city || photo.location_name || loadingLandmarks || landmarks.length > 0 || (poiMatches && poiMatches.length > 0) || loadingPoiMatches || (inFlyout && photo.latitude != null && photo.longitude != null)">
+      <template v-if="photo.location_city || photo.location_name || (poiMatches && poiMatches.length > 0) || loadingPoiMatches || (inFlyout && photo.latitude != null && photo.longitude != null)">
         <div class="sidebar-divider" />
         <div class="sidebar-section">
           <div v-if="photo.location_name || photo.location_city" class="meta-row location-row">
@@ -539,18 +536,6 @@ watch(() => props.readOnly, (ro) => {
                 </div>
               </div>
             </div>
-          </div>
-          <!-- Fallback: when no POI match exists, fall back to the
-               generic landmark category chips from the old Grounding
-               DINO worker. Will retire entirely once POI coverage is
-               broad enough. -->
-          <div v-else-if="loadingLandmarks" class="loading-row"><i class="pi pi-spin pi-spinner" /> Gebäude werden erkannt…</div>
-          <div v-else-if="landmarks.some(lm => lm.confidence >= 0.6)" class="landmark-chips">
-            <template v-for="lm in landmarks" :key="lm.id">
-              <span v-if="lm.confidence >= 0.6" class="landmark-tag" :title="`${Math.round(lm.confidence * 100)}%`">
-                <i class="pi pi-building" /> {{ lm.label }} <span class="landmark-confidence">{{ Math.round(lm.confidence * 100) }}%</span>
-              </span>
-            </template>
           </div>
         </div>
       </template>
@@ -908,22 +893,6 @@ watch(() => props.readOnly, (ro) => {
   color: var(--p-text-muted-color);
 }
 .poi-score { font-variant-numeric: tabular-nums; }
-
-.landmark-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-
-.landmark-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  background: var(--p-content-hover-background);
-  border: 1px solid var(--p-content-border-color);
-  border-radius: 1rem;
-  padding: 0.2rem 0.6rem;
-  font-size: 0.8rem;
-  cursor: default;
-}
-.landmark-tag .pi-building { font-size: 0.7rem; color: var(--p-text-muted-color); }
-.landmark-confidence { font-size: 0.7rem; color: var(--p-text-muted-color); }
 
 .keyword-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 .keyword-tag {

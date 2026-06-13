@@ -25,9 +25,9 @@ import { toLocalIsoDate, parseLocalDate } from '../utils/dateFormat'
 import {
   listPersons, updatePerson, mergePersons, getPersonDetails,
   ignoreFace, ignorePersonFaces, updatePhotoCuration, reindexPhoto,
-  getPhotoFaces, getPhotoLandmarks,
+  getPhotoFaces,
   type CurationStatus, type Person, type Photo, type PersonDetails,
-  type Face, type LandmarkItem, type PhotoFilter,
+  type Face, type PhotoFilter,
 } from '../api/photos'
 import { faceBoxStyle } from '../utils/faceBbox'
 import { useAuthStore } from '../stores/auth'
@@ -343,26 +343,22 @@ const nextPersonPhoto = computed(() => selectedIndex.value < personPhotos.value.
 // ── Sidebar state ─────────────────────────────────────────────────────────────
 const detectedFaces = ref<Face[]>([])
 const loadingFaces = ref(false)
-const detectedLandmarks = ref<LandmarkItem[]>([])
-const loadingLandmarks = ref(false)
 const reindexingPhoto = ref(false)
 
 async function loadSidebarData(photoId: number) {
   loadingFaces.value = true
-  loadingLandmarks.value = true
   try {
-    const [facesRes, landmarksRes] = await Promise.all([getPhotoFaces(photoId), getPhotoLandmarks(photoId)])
+    const facesRes = await getPhotoFaces(photoId)
     detectedFaces.value = facesRes.faces
-    detectedLandmarks.value = landmarksRes.landmarks
-  } catch { detectedFaces.value = []; detectedLandmarks.value = [] }
-  finally { loadingFaces.value = false; loadingLandmarks.value = false }
+  } catch { detectedFaces.value = [] }
+  finally { loadingFaces.value = false }
 }
 
 watch(selectedPhoto, (photo) => {
   if (photo) {
     loadSidebarData(photo.id)
     photoNav.selectPhoto(photo.id)
-  } else { detectedFaces.value = []; detectedLandmarks.value = [] }
+  } else { detectedFaces.value = [] }
 })
 
 // ── Keyboard navigation (via composable) ─────────────────────────────────────
@@ -501,7 +497,6 @@ async function selectPersonItem(person: Person, focusPhotoId?: number) {
     localStorage.setItem(LAST_PERSON_KEY, String(person.id))
     selectedIndex.value = -1
     detectedFaces.value = []
-    detectedLandmarks.value = []
     loadingDetails.value = true
     try {
       selectedPersonDetail.value = await getPersonDetails(person.id)
@@ -546,7 +541,6 @@ function backToGrid() {
   selectedPersonDetail.value = null
   selectedIndex.value = -1
   detectedFaces.value = []
-  detectedLandmarks.value = []
   // After Vue re-renders (grid visible again), scroll to and highlight the
   // person the user just came back from.
   if (lastId) {
@@ -801,8 +795,6 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
           :photo="selectedPhoto"
           :faces="detectedFaces"
           :loading-faces="loadingFaces"
-          :landmarks="detectedLandmarks"
-          :loading-landmarks="loadingLandmarks"
           :persons="persons"
           :can-delete="canDelete"
           :can-upload="false"

@@ -4,11 +4,11 @@
  *
  * Builds on Phase 3a (fullscreen + photoId deeplink) by adding the
  * `<PhotoDetailSidebar>` flyout: detected faces with person names,
- * landmarks, EXIF date editing, album membership, keywords, file
+ * POI matches, EXIF date editing, album membership, keywords, file
  * metadata. The sidebar self-manages its album section (lazy-fetches
  * the album list, owns pending changes, calls the batch-update API on
  * save), so the parent only needs to feed it the per-photo state
- * (faces, landmarks, edit-date refs) and the auth-derived booleans.
+ * (faces, POI, edit-date refs) and the auth-derived booleans.
  *
  * Detail flyout flow:
  *   - The `I` keyboard shortcut and the ⓘ toolbar button toggle
@@ -16,7 +16,7 @@
  *     `details-flyout` slot; the flyout's open/closed CSS class is
  *     driven by the same boolean.
  *   - When `cursorPhoto.id` changes (open / prev / next), we load
- *     faces + landmarks for that photo in parallel with the existing
+ *     faces + POI matches for that photo in parallel with the existing
  *     `getPhotoDetailsBatch` hydration. Loaders are guarded by the
  *     same `hydrateToken` so out-of-order navigation can't strand a
  *     stale list of faces on the wrong photo.
@@ -89,7 +89,6 @@ import {
   uploadPhotoWithProgress,
   getPhotoDetailsBatch,
   getPhotoFaces,
-  getPhotoLandmarks,
   getPhotoPoiMatches,
   ignoreFace,
   reindexPhoto,
@@ -100,7 +99,6 @@ import {
   type PhotoGroup,
   type CurationStatus,
   type Face,
-  type LandmarkItem,
   type PoiMatchItem,
 } from '../api/photos'
 import { toLocalIsoDateTime } from '../utils/dateFormat'
@@ -823,7 +821,7 @@ let curationVersion = 0
 
 // ── Detail flyout state ─────────────────────────────────────────────────────
 // Per-photo metadata loaded on top of the batch-hydrated `Photo`. Faces and
-// landmarks are not part of the bulk details endpoint — they're fetched per
+// POI matches are not part of the bulk details endpoint — they're fetched per
 // photo when the sidebar opens (or the user advances to a neighbour). The
 // `hydrateToken` from above gates these loaders too so a stale fetch from
 // the previous photo can't overwrite the current one's lists.
@@ -831,8 +829,8 @@ const detailsActive = ref(false)
 
 // The persistent desktop detail panel is mounted on ≥768px viewports
 // (hidden via CSS below the breakpoint). Track that reactively so we only
-// fetch faces / landmarks / POI matches when something will actually show
-// them — see `detailsVisible`.
+// fetch faces / POI matches when something will actually show them —
+// see `detailsVisible`.
 const DESKTOP_SIDEBAR_MQ = '(min-width: 769px)'
 const desktopSidebarVisible = ref(
   typeof window !== 'undefined' && window.matchMedia(DESKTOP_SIDEBAR_MQ).matches,
@@ -850,7 +848,7 @@ onUnmounted(() => {
   sidebarMql?.removeEventListener('change', onSidebarMqChange)
 })
 
-// Whether the per-photo details (faces / landmarks / POI) are currently
+// Whether the per-photo details (faces / POI) are currently
 // on screen for the cursor photo. In fullscreen the desktop sidebar is
 // occluded by the overlay, so only the flyout counts; otherwise the
 // persistent desktop sidebar does.
@@ -865,14 +863,12 @@ const detailsVisible = computed(() =>
 // false→true transition.
 watch(detailsVisible, (visible) => {
   if (visible && cursorPhoto.value) {
-    void loadFacesAndLandmarks(cursorPhoto.value.id, hydrateToken)
+    void loadPhotoDetails(cursorPhoto.value.id, hydrateToken)
   }
 })
 
 const detectedFaces = ref<Face[]>([])
 const loadingFaces = ref(false)
-const detectedLandmarks = ref<LandmarkItem[]>([])
-const loadingLandmarks = ref(false)
 const detectedPoiMatches = ref<PoiMatchItem[]>([])
 const loadingPoiMatches = ref(false)
 const reindexingPhoto = ref(false)
@@ -880,30 +876,25 @@ const isEditingDate = ref(false)
 const editDate = ref<Date | null>(null)
 const updatingDate = ref(false)
 
-async function loadFacesAndLandmarks(photoId: number, token: number): Promise<void> {
+async function loadPhotoDetails(photoId: number, token: number): Promise<void> {
   loadingFaces.value = true
-  loadingLandmarks.value = true
   loadingPoiMatches.value = true
   detectedFaces.value = []
-  detectedLandmarks.value = []
   detectedPoiMatches.value = []
   try {
-    // POI matches load alongside faces + landmarks. A 5xx on the POI
-    // endpoint (e.g. osm-admin service down) falls back to an empty
-    // list so the rest of the sidebar still renders.
-    const [facesRes, landmarksRes, poisRes] = await Promise.all([
+    // POI matches load alongside faces. A 5xx on the POI endpoint (e.g.
+    // osm-admin service down) falls back to an empty list so the rest of
+    // the sidebar still renders.
+    const [facesRes, poisRes] = await Promise.all([
       getPhotoFaces(photoId).catch(() => ({ faces: [] })),
-      getPhotoLandmarks(photoId).catch(() => ({ landmarks: [] })),
       getPhotoPoiMatches(photoId).catch(() => ({ matches: [] })),
     ])
     if (token !== hydrateToken) return
     detectedFaces.value = facesRes.faces ?? []
-    detectedLandmarks.value = landmarksRes.landmarks ?? []
     detectedPoiMatches.value = poisRes.matches ?? []
   } finally {
     if (token === hydrateToken) {
       loadingFaces.value = false
-      loadingLandmarks.value = false
       loadingPoiMatches.value = false
     }
   }
@@ -956,20 +947,19 @@ async function hydrateCursor(index: number, options?: { skipNeighbors?: boolean 
   // Cancel any in-progress date edit when the photo changes.
   isEditingDate.value = false
 
-  // Faces / landmarks / POI matches are only shown in the details panel
-  // (desktop sidebar or fullscreen flyout). Fetch them only when that panel
+  // Faces / POI matches are only shown in the details panel (desktop
+  // sidebar or fullscreen flyout). Fetch them only when that panel
   // is actually visible: during a fullscreen slideshow the desktop sidebar
-  // is occluded by the overlay, so these (sometimes slow) landmark/POI
+  // is occluded by the overlay, so these (sometimes slow) POI
   // lookups would be wasted work and, worse, saturate the browser's per-host
   // connection pool — queuing the actual image fetch behind them so the photo
   // shows a loading spinner until the load-fallback kicks in, and leaving
   // stale requests in flight when the user navigates quickly. Opening the
   // flyout loads them on demand (see onShowDetails).
   if (detailsVisible.value) {
-    void loadFacesAndLandmarks(curEntry.id, myToken)
+    void loadPhotoDetails(curEntry.id, myToken)
   } else {
     detectedFaces.value = []
-    detectedLandmarks.value = []
     detectedPoiMatches.value = []
   }
 
@@ -1011,7 +1001,7 @@ async function openFullscreenAt(index: number): Promise<void> {
 }
 
 function closeFullscreen() {
-  // Deliberately keep `cursorIndex / cursorPhoto / faces / landmarks`
+  // Deliberately keep `cursorIndex / cursorPhoto / faces / POI`
   // around so the desktop sidebar continues showing the last-viewed
   // photo's details. Only the fullscreen-specific UI bits get reset.
   isFullscreen.value = false
@@ -1107,7 +1097,7 @@ async function onSidebarIgnoreFace(faceId: number) {
   try {
     await ignoreFace(faceId)
     // Reload faces so the ignored one disappears from the list.
-    await loadFacesAndLandmarks(photo.id, hydrateToken)
+    await loadPhotoDetails(photo.id, hydrateToken)
   } catch { /* keep silent — user can retry */ }
 }
 
@@ -1117,7 +1107,7 @@ async function onSidebarReindex() {
   reindexingPhoto.value = true
   try {
     await reindexPhoto(photo.id)
-    await loadFacesAndLandmarks(photo.id, hydrateToken)
+    await loadPhotoDetails(photo.id, hydrateToken)
   } catch { /* user can retry */ }
   finally { reindexingPhoto.value = false }
 }
@@ -1497,8 +1487,6 @@ void refreshReviewSequence()
           :selected-photo-ids="selectMode && selectedCount > 1 ? Array.from(selectedIds) : undefined"
           :faces="detectedFaces"
           :loading-faces="loadingFaces"
-          :landmarks="detectedLandmarks"
-          :loading-landmarks="loadingLandmarks"
           :poi-matches="detectedPoiMatches"
           :loading-poi-matches="loadingPoiMatches"
           :persons="persons"
@@ -1564,8 +1552,6 @@ void refreshReviewSequence()
           :photo="cursorPhoto"
           :faces="detectedFaces"
           :loading-faces="loadingFaces"
-          :landmarks="detectedLandmarks"
-          :loading-landmarks="loadingLandmarks"
           :poi-matches="detectedPoiMatches"
           :loading-poi-matches="loadingPoiMatches"
           :persons="persons"

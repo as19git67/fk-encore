@@ -60,7 +60,6 @@ All endpoints live in [`photo/photo.ts`](../photo/photo.ts) and delegate to
 | `/photos/search` | `POST` | Pure CLIP semantic search over the user's library. |
 | `/photos/search/date` | `GET`  | Date range / year / year+month filter (structured parameters). |
 | `/photos/search/location` | `GET`  | City/country text search or GPS radius search. |
-| `/photos/search/landmarks` | `POST` | Label-based match against detected landmarks (e.g. `"kirche"`, `"eiffel"`). |
 
 In practice the frontend talks to `/photos/search/natural` only. The other
 endpoints are kept for API consumers (mobile clients, tests, future UI pieces

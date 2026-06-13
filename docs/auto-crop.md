@@ -43,10 +43,8 @@ and computed according to the following priority:
 
 1. **Faces** (priority): weighted centroid of all detected faces.
    Larger faces carry more weight so that the main face determines the crop.
-2. **Landmarks** (fallback): if no faces are present, the landmark with the
-   highest confidence is used (e.g. a building or a bridge).
-3. **No crop**: if neither faces nor landmarks were detected, `auto_crop`
-   stays empty and the browser uses the default centering (50% / 50%).
+2. **No crop**: if no faces were detected, `auto_crop` stays empty and the
+   browser uses the default centering (50% / 50%).
 
 ### Example
 
@@ -72,10 +70,10 @@ Migration: `db/migrations/postgres/0010_auto_crop.sql`
 ### Backend
 
 - **`computeAndStoreAutoCrop(userId, photoId)`** in `photo/photo.service.ts`
-  - Reads all non-ignored faces and landmarks from the DB
+  - Reads all non-ignored faces from the DB
   - Computes the weighted focus point
   - Stores the result in `photos.auto_crop`
-- Called automatically at the end of `indexPhotoFaces()` and `indexPhotoLandmarks()`
+- Called automatically at the end of `indexPhotoFaces()`
 - **Bulk endpoint**: `POST /photos/recompute-auto-crops` recomputes the focus
   point for all existing photos based on existing detection data
 
@@ -84,7 +82,7 @@ Migration: `db/migrations/postgres/0010_auto_crop.sql`
 - `VirtualGallery.vue` reads `slot.auto_crop` from the gallery entry and
   feeds it into the `autoCropThumbnailStyle()` helper
   (`frontend/src/utils/faceBbox.ts`). The helper combines two effects so
-  the face / landmark sits prominently in the tile (Track N / #73):
+  the face sits prominently in the tile (Track N / #73):
   - `object-position` shifts the cropped region of the photo under
     `object-fit: cover` so the focal point stays visible, and
   - a modest `scale(1.18)` anchored at the same point makes the focal
@@ -107,6 +105,6 @@ Migration: `db/migrations/postgres/0010_auto_crop.sql`
 
 In the data management view (DataManagementView) there is a button
 **"Recompute auto-crop"** that recomputes the focus point for all photos
-based on the existing face / landmark data.
+based on the existing face data.
 This is needed once for photos that were uploaded before the feature was
 introduced.
