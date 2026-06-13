@@ -496,6 +496,12 @@ Zusätzliche Felder:
   Format: [{"slug": "anlage-n", "confidence": 0.91}, ...]. Verwende nur
   Slugs aus der Liste; erfinde keine neuen.
 
+PRÄZISION (sehr wichtig): Ordne eine Sektion NUR zu, wenn der Beleg sie
+konkret betrifft. Die meisten Belege gehören zu genau EINER Sektion, viele
+zu KEINER. Vergib niemals mehrere Abzugs-Sektionen pauschal „auf Verdacht"
+(eine Renteninformation gehört z. B. nur zu anlage-r, NICHT zusätzlich zu
+Werbungskosten, Sonderausgaben usw.). Im Zweifel: leere Liste.
+
 WICHTIGE ABGRENZUNGSREGELN:
 
 1) Wertpapiere / Kapitalerträge:
