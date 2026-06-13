@@ -378,8 +378,11 @@ export const listDocuments = api(
 
     const lim = Math.min(Math.max(limit ?? 50, 1), 200);
     const off = Math.max(offset ?? 0, 0);
-    const groupIds = await loadUserGroupIds(userId);
-    const conds = [visibleDocumentsWhere(userId, groupIds)];
+    const isAdmin = authData.permissions.includes("data.manage");
+    const groupIds = isAdmin ? [] : await loadUserGroupIds(userId);
+    const conds: ReturnType<typeof and>[] = isAdmin
+      ? []
+      : [visibleDocumentsWhere(userId, groupIds)];
 
     if (status && status.length > 0) {
       conds.push(eq(documents.status, status as any));
@@ -492,7 +495,7 @@ export const listDocuments = api(
         })
         .from(documents)
         .leftJoin(documentCategories, eq(documents.category_id, documentCategories.id))
-        .where(and(...conds))
+        .where(conds.length > 0 ? and(...conds) : undefined)
         .orderBy(sortFn(sortCol))
         .limit(lim)
         .offset(off),
@@ -501,12 +504,12 @@ export const listDocuments = api(
     const ids = rows.map((r) => r.id);
     const tagsByDoc = await fetchTagsForDocuments(ids);
 
+    const countWhere = conds.length > 0
+      ? sql.join(conds.map((c) => sql`(${c})`), sql` AND `)
+      : sql`true`;
     const total = (
       await db.execute<{ count: string }>(
-        sql`SELECT COUNT(*)::text as count FROM documents WHERE ${sql.join(
-          conds.map((c) => sql`(${c})`),
-          sql` AND `,
-        )}`,
+        sql`SELECT COUNT(*)::text as count FROM documents WHERE ${countWhere}`,
       )
     ).rows[0];
 
