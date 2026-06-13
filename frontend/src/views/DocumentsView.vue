@@ -20,6 +20,7 @@ import {
   listDocuments,
   listDocumentCategories,
   listGroups,
+  listSubjectPersons,
   searchDocuments,
   batchUpdateDocumentTags,
   type DocumentSummary,
@@ -27,6 +28,7 @@ import {
   type DocumentStatus,
   type GroupSummary,
   type SearchMode,
+  type SubjectPerson,
 } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
 import { useRealtimeEvent } from '../composables/useRealtime'
@@ -43,6 +45,7 @@ const { restore: restoreScroll } = useScrollRestore('documents-list')
 
 const items = ref<DocumentSummary[]>([])
 const categories = ref<DocumentCategory[]>([])
+const subjectPeople = ref<SubjectPerson[]>([])
 const groups = ref<GroupSummary[]>([])
 const loading = ref(true)
 const error = ref('')
@@ -301,6 +304,7 @@ function syncQueryParams() {
   if (fq.dateFrom) query.dateFrom = fq.dateFrom
   if (fq.dateTo) query.dateTo = fq.dateTo
   if (fq.taxRelevant !== undefined) query.taxRelevant = String(fq.taxRelevant)
+  if (fq.subjectPersonId) query.subjectPerson = String(fq.subjectPersonId)
   const s = sort.applied.value
   if (s.field !== 'uploaded_at' || s.direction !== 'desc') {
     query.sortBy = s.field
@@ -329,6 +333,7 @@ async function load() {
         date_from: f.dateFrom,
         date_to: f.dateTo,
         tax_relevant: f.taxRelevant,
+        subject_person_id: f.subjectPersonId,
         sort_by: s.field,
         sort_dir: s.direction,
         limit: 200,
@@ -348,6 +353,15 @@ async function loadCategories() {
     categories.value = res.items
   } catch (err: any) {
     console.warn('[documents] failed to load categories:', err)
+  }
+}
+
+async function loadSubjectPeople() {
+  try {
+    const res = await listSubjectPersons()
+    subjectPeople.value = res.items
+  } catch (err: any) {
+    console.warn('[documents] failed to load subject persons:', err)
   }
 }
 
@@ -401,7 +415,7 @@ watch(
 )
 
 onMounted(async () => {
-  await Promise.all([loadCategories(), loadGroups(), load()])
+  await Promise.all([loadCategories(), loadGroups(), loadSubjectPeople(), load()])
   if (lastOpenedDocId != null) {
     await restoreScrollToLastOpened()
   }
@@ -787,6 +801,7 @@ onMounted(async () => {
       v-model:draft="filter.draft.value"
       :categories="categories"
       :known-tags="allKnownTags"
+      :subject-people="subjectPeople"
       @apply="applyFilterMenu"
       @reset="resetFilterMenu"
     />

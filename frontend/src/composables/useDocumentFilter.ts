@@ -14,6 +14,7 @@ export interface DocumentFilter {
   dateFrom?: string
   dateTo?: string
   taxRelevant?: boolean
+  subjectPersonId?: number
 }
 
 function parseBool(v: unknown): boolean | undefined {
@@ -44,6 +45,10 @@ export function parseDocFilterFromQuery(q: Record<string, unknown>): DocumentFil
   if (typeof q.dateTo === 'string' && q.dateTo) f.dateTo = q.dateTo
   const tr = parseBool(q.taxRelevant)
   if (tr !== undefined) f.taxRelevant = tr
+  if (typeof q.subjectPerson === 'string' && q.subjectPerson) {
+    const n = Number(q.subjectPerson)
+    if (Number.isFinite(n)) f.subjectPersonId = n
+  }
   return f
 }
 
@@ -57,6 +62,7 @@ export function docFilterToQuery(f: DocumentFilter): Record<string, string> {
   if (f.dateFrom) out.dateFrom = f.dateFrom
   if (f.dateTo) out.dateTo = f.dateTo
   if (f.taxRelevant !== undefined) out.taxRelevant = String(f.taxRelevant)
+  if (f.subjectPersonId) out.subjectPerson = String(f.subjectPersonId)
   return out
 }
 
@@ -69,6 +75,7 @@ export function countActiveDocFilters(f: DocumentFilter): number {
   if (f.sender) n++
   if (f.dateFrom || f.dateTo) n++
   if (f.taxRelevant !== undefined) n++
+  if (f.subjectPersonId) n++
   return n
 }
 
