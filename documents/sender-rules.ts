@@ -59,12 +59,30 @@ export const SENDER_RULES: readonly SenderRule[] = [
     senders: ["opentext", "ixos"],
     category: "finanzen-gehalt",
   },
+  {
+    note: "Kirchlicher Arbeitgeber (Erzb. Ordinariat / St. Ulrich) → SV-/Entgeltnachweis",
+    senders: ["ordinariat", "stulrich"],
+    requireAny: [
+      "sozialversicherung",
+      "entgeltnachweis",
+      "entgeltabrechnung",
+      "verdienstbescheinigung",
+      "beitragsnachweis",
+    ],
+    category: "finanzen-gehalt",
+  },
 
   // ── Banks / brokers ─────────────────────────────────────────────────────
   {
     note: "Comdirect → Wertpapiere & Dividenden",
     senders: ["comdirect"],
     category: "finanzen-wertpapiere",
+  },
+  {
+    note: "MLP / Commerzbank Darlehens-/Kontoauszüge → Kontoauszüge",
+    senders: ["mlpbank", "mlpbanking", "commerzbank"],
+    requireAny: ["darlehen", "kontoauszug", "rechnungsabschluss", "kontonachweis"],
+    category: "finanzen-kontoauszuege",
   },
   {
     note: "Bausparkasse → Bausparen",
@@ -117,6 +135,11 @@ export const SENDER_RULES: readonly SenderRule[] = [
     note: "Kirchensteueramt → Kirchensteuer",
     senders: ["kirchensteueramt", "kirchensteuer"],
     category: "finanzen-kirchensteuer",
+  },
+  {
+    note: "Steuerberater Treukontax → allgemeine Steuerunterlagen",
+    senders: ["treukontax"],
+    category: "finanzen-steuern",
   },
   {
     note: "Gemeinde (Wasser/Abwasser/Müll/Gebühren) → kommunale Abgaben",

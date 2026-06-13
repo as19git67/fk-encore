@@ -50,6 +50,34 @@ describe("matchSenderRule", () => {
     expect(matchSenderRule({ sender: "Clever Fit Mering" })).toBe("vertraege-abos");
   });
 
+  it("routes the tax advisor, church-employer SV notices and bank statements", () => {
+    expect(
+      matchSenderRule({
+        sender: "Treukontax Steuerberatungsgesellschaft mbH",
+        title: "Einkommensteuererklärung 2022",
+      }),
+    ).toBe("finanzen-steuern");
+    expect(
+      matchSenderRule({
+        sender: "Erzbischöfliches Ordinariat München",
+        title: "Entgeltnachweis zur Sozialversicherung",
+      }),
+    ).toBe("finanzen-gehalt");
+    expect(matchSenderRule({ sender: "MLP Banking AG", title: "Darlehenskontoauszug" })).toBe(
+      "finanzen-kontoauszuege",
+    );
+    expect(
+      matchSenderRule({ sender: "Commerzbank", title: "Kontoauszug und Rechnungsabschluss" }),
+    ).toBe("finanzen-kontoauszuege");
+  });
+
+  it("keeps the bank-statement and church-employer rules from over-grabbing", () => {
+    // MLP life insurance is a different sender token and lacks statement keywords.
+    expect(matchSenderRule({ sender: "MLP Lebensversicherung AG", title: "Beitragsmitteilung" })).toBeNull();
+    // Church mail without an SV/payslip keyword is left to the LLM.
+    expect(matchSenderRule({ sender: "Erzb. Ordinariat München", title: "Rundschreiben" })).toBeNull();
+  });
+
   it("honours requireAny: DRV only routes to gesetzliche Rente for pension docs", () => {
     expect(
       matchSenderRule({ sender: "Deutsche Rentenversicherung Bund", title: "Renteninformation" }),
