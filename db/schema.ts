@@ -803,6 +803,25 @@ export const userSubjectPersons = pgTable("user_subject_persons", {
   updated_at: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
 });
 
+// N:M mapping of a document to the owner's Bezugspersonen. Populated
+// deterministically at classify time (name found in the text → source='ai')
+// and manually via the edit dialog (source='user'). User rows survive a
+// re-classify; AI rows are replaced. Added by migration 0102.
+export const documentSubjectPersons = pgTable(
+  "document_subject_persons",
+  {
+    document_id: integer("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    subject_person_id: integer("subject_person_id")
+      .notNull()
+      .references(() => userSubjectPersons.id, { onDelete: "cascade" }),
+    source: text("source").$type<"ai" | "user">().notNull().default("ai"),
+    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.document_id, table.subject_person_id] })]
+);
+
 export const documentTagLinks = pgTable(
   "document_tag_links",
   {

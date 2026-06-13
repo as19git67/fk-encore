@@ -17,11 +17,13 @@ import { dbAll, dbFirst } from "../db/adapter";
 import {
   documentCategories,
   documentCategorySuggestions,
+  documentSubjectPersons,
   documentTagLinks,
   documentTags,
   documentTaxSections,
   documents,
   documentsUserPref,
+  userSubjectPersons,
 } from "../db/schema";
 import {
   DOCUMENTS_MAX_BYTES,
@@ -114,6 +116,13 @@ export interface DocumentTaxSectionDTO {
   source: "ai" | "user";
 }
 
+export interface DocumentSubjectPersonDTO {
+  id: number;
+  full_name: string;
+  relation_tag: string;
+  source: "ai" | "user";
+}
+
 export interface DocumentDetail extends DocumentSummary {
   summary: string | null;
   extracted_text_preview: string | null;
@@ -122,6 +131,8 @@ export interface DocumentDetail extends DocumentSummary {
   tax_sections: DocumentTaxSectionDTO[];
   /** True when a human pinned the editable attributes (see migration 0101). */
   attributes_reviewed: boolean;
+  /** Bezugspersonen this document concerns (see migration 0102). */
+  subject_persons: DocumentSubjectPersonDTO[];
 }
 
 export interface DocumentCategoryDTO {
@@ -155,6 +166,8 @@ interface ListQuery {
   date_from?: Query<string>;
   date_to?: Query<string>;
   tax_relevant?: Query<boolean>;
+  /** Keep only documents linked to this Bezugsperson (see migration 0102). */
+  subject_person_id?: Query<number>;
   sort_by?: Query<string>;
   sort_dir?: Query<string>;
   limit?: Query<number>;
@@ -372,7 +385,7 @@ async function loadDefaultGroupForUser(userId: number): Promise<number | null> {
 
 export const listDocuments = api(
   { expose: true, method: "GET", path: "/documents", auth: true },
-  async ({ category, tags, q, status, needs_review, sender, date_from, date_to, tax_relevant, sort_by, sort_dir, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
+  async ({ category, tags, q, status, needs_review, sender, date_from, date_to, tax_relevant, subject_person_id, sort_by, sort_dir, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -428,6 +441,15 @@ export const listDocuments = api(
       conds.push(eq(documents.tax_relevant, true));
     } else if (tax_relevant === false) {
       conds.push(eq(documents.tax_relevant, false));
+    }
+    if (subject_person_id != null) {
+      conds.push(
+        sql`EXISTS (
+          SELECT 1 FROM ${documentSubjectPersons}
+          WHERE ${documentSubjectPersons.document_id} = ${documents.id}
+            AND ${documentSubjectPersons.subject_person_id} = ${subject_person_id}
+        )`,
+      );
     }
 
     const tagList = tags
@@ -540,6 +562,7 @@ export const getDocument = api(
     const tagsMap = await fetchTagsForDocuments([id]);
     const tags = tagsMap.get(id) ?? [];
     const taxSections = await fetchTaxSectionsForDocument(id);
+    const subjectPersons = await fetchSubjectPersonsForDocument(id);
 
     const preview = (row.extracted_text ?? "").slice(0, 2000);
     return {
@@ -550,6 +573,7 @@ export const getDocument = api(
       tax_year_confidence: row.tax_year_confidence ?? null,
       tax_sections: taxSections,
       attributes_reviewed: row.attributes_reviewed ?? false,
+      subject_persons: subjectPersons,
     };
   },
 );
@@ -705,6 +729,11 @@ export interface UpdateDocumentRequest {
    * document back to the classifier ("let the AI decide again").
    */
   attributes_reviewed?: boolean;
+  /**
+   * Replace the user-curated Bezugsperson links with these subject-person ids
+   * (must belong to the caller). AI-detected links are kept alongside.
+   */
+  subject_person_ids?: number[];
 }
 
 export const updateDocument = api(
@@ -753,6 +782,10 @@ export const updateDocument = api(
 
     if (req.tags !== undefined) {
       await replaceTags(existing.id, req.tags);
+    }
+
+    if (req.subject_person_ids !== undefined) {
+      await replaceUserSubjectPersons(existing.id, userId, req.subject_person_ids);
     }
 
     // Metadata that contributes to the canonical path may have changed;
@@ -2405,6 +2438,7 @@ async function loadDetail(userId: number, id: number): Promise<DocumentDetail> {
     : undefined;
   const tagsMap = await fetchTagsForDocuments([id]);
   const taxSections = await fetchTaxSectionsForDocument(id);
+  const subjectPersons = await fetchSubjectPersonsForDocument(id);
   const preview = (row.extracted_text ?? "").slice(0, 2000);
   return {
     ...toSummary(row, cat?.slug ?? null, tagsMap.get(id) ?? []),
@@ -2414,6 +2448,7 @@ async function loadDetail(userId: number, id: number): Promise<DocumentDetail> {
     tax_year_confidence: row.tax_year_confidence ?? null,
     tax_sections: taxSections,
     attributes_reviewed: row.attributes_reviewed ?? false,
+    subject_persons: subjectPersons,
   };
 }
 
@@ -2530,4 +2565,79 @@ async function fetchTaxSectionsForDocument(documentId: number): Promise<Document
     return a.slug.localeCompare(b.slug);
   });
   return items;
+}
+
+async function fetchSubjectPersonsForDocument(
+  documentId: number,
+): Promise<DocumentSubjectPersonDTO[]> {
+  const rows = await dbAll<DocumentSubjectPersonDTO>(
+    db
+      .select({
+        id: userSubjectPersons.id,
+        full_name: userSubjectPersons.full_name,
+        relation_tag: userSubjectPersons.relation_tag,
+        source: documentSubjectPersons.source,
+      })
+      .from(documentSubjectPersons)
+      .innerJoin(
+        userSubjectPersons,
+        eq(userSubjectPersons.id, documentSubjectPersons.subject_person_id),
+      )
+      .where(eq(documentSubjectPersons.document_id, documentId))
+      .orderBy(asc(userSubjectPersons.full_name)),
+  );
+  // User-curated links first, then by name.
+  rows.sort((a, b) => {
+    if (a.source !== b.source) return a.source === "user" ? -1 : 1;
+    return a.full_name.localeCompare(b.full_name);
+  });
+  return rows;
+}
+
+/**
+ * Replace the user-source Bezugsperson links of a document with `ids`. Only ids
+ * that belong to `userId` are accepted; AI-source links are left untouched so a
+ * re-classify's detections remain alongside the manual selection.
+ */
+async function replaceUserSubjectPersons(
+  documentId: number,
+  userId: number,
+  ids: readonly number[],
+): Promise<void> {
+  const unique = [...new Set(ids)];
+  const owned =
+    unique.length === 0
+      ? []
+      : (
+          await dbAll<{ id: number }>(
+            db
+              .select({ id: userSubjectPersons.id })
+              .from(userSubjectPersons)
+              .where(
+                and(
+                  eq(userSubjectPersons.user_id, userId),
+                  inArray(userSubjectPersons.id, unique),
+                ),
+              ),
+          )
+        ).map((r) => r.id);
+
+  await db
+    .delete(documentSubjectPersons)
+    .where(
+      and(
+        eq(documentSubjectPersons.document_id, documentId),
+        eq(documentSubjectPersons.source, "user"),
+      ),
+    );
+
+  for (const id of owned) {
+    await db
+      .insert(documentSubjectPersons)
+      .values({ document_id: documentId, subject_person_id: id, source: "user" })
+      .onConflictDoUpdate({
+        target: [documentSubjectPersons.document_id, documentSubjectPersons.subject_person_id],
+        set: { source: "user" },
+      });
+  }
 }
