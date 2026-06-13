@@ -181,6 +181,28 @@ export interface SubjectPersonHint {
   relation_tag: string;
 }
 
+/** Id + name of the user's Bezugspersonen, for deterministic in-text matching
+ *  at classify time (see metadata-extract.detectSubjectPersonIds). */
+export interface SubjectPersonMatch {
+  id: number;
+  full_name: string;
+  relation_tag: string;
+}
+
+export async function loadSubjectPersonsForMatch(userId: number): Promise<SubjectPersonMatch[]> {
+  return dbAll<SubjectPersonMatch>(
+    db
+      .select({
+        id: userSubjectPersons.id,
+        full_name: userSubjectPersons.full_name,
+        relation_tag: userSubjectPersons.relation_tag,
+      })
+      .from(userSubjectPersons)
+      .where(eq(userSubjectPersons.user_id, userId))
+      .orderBy(asc(userSubjectPersons.full_name)),
+  );
+}
+
 export async function loadSubjectPersonHints(userId: number): Promise<SubjectPersonHint[]> {
   const rows = await dbAll<SubjectPersonHint>(
     db
