@@ -1180,6 +1180,14 @@ onBeforeUnmount(() => {
           @click="handleDocReclassifyAll('full')"
         />
         <Button
+          label="Fehlende fortsetzen"
+          icon="pi pi-play"
+          severity="secondary"
+          :loading="docReclassifyLoading"
+          :disabled="docReclassifyLoading || docIsActive"
+          @click="handleDocReclassifyAll('resume')"
+        />
+        <Button
           v-if="docTotalFailed > 0"
           label="Fehlgeschlagene wiederholen"
           icon="pi pi-replay"
