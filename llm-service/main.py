@@ -492,13 +492,11 @@ trage ihren Namen niemals in `sender` ein.
 
 _EXAMPLES_SYSTEM_PROMPT = """
 
-ÄHNLICHE DOKUMENTE (nur wenn dir unten eine Liste von Beispielen gezeigt wird)
-Du bekommst eine kurze Liste bereits eingeordneter, inhaltlich ähnlicher
-Dokumente desselben Haushalts — jeweils Absender, Titel und die damals
-gewählte Kategorie. Nutze sie als Orientierung: wiederkehrende Absender und
-Dokumenttypen landen meist in derselben Kategorie. Die Beispiele sind aber
-NICHT bindend — entscheide anhand des konkreten Dokumenttextes. Wenn der Text
-klar zu einer anderen Kategorie passt, weiche begründet ab."""
+ÄHNLICHE DOKUMENTE (nur wenn unten eine Beispielliste steht)
+Die Liste zeigt bereits eingeordnete, ähnliche Dokumente desselben Haushalts
+(Absender, Titel → Kategorie) als Orientierung. Wiederkehrende Absender landen
+meist in derselben Kategorie. Nicht bindend — entscheide nach dem Dokumenttext
+und weiche bei klarer Abweichung ab."""
 
 
 _TAX_SYSTEM_PROMPT = """
@@ -711,12 +709,6 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
     tax_active = bool(req.tax_sections)
     subjects_active = bool(req.subject_persons)
     examples_active = bool(req.examples)
-    system_prompt = (
-        _SYSTEM_PROMPT
-        + (_TAX_SYSTEM_PROMPT if tax_active else "")
-        + (_SUBJECT_PERSONS_SYSTEM_PROMPT if subjects_active else "")
-        + (_EXAMPLES_SYSTEM_PROMPT if examples_active else "")
-    )
 
     tax_block = (
         f"\n\nSteuer-Sektionen (slug: Name — Hinweis):\n{_tax_sections_outline(req.tax_sections)}"
@@ -736,14 +728,29 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
         else ""
     )
 
-    def _build_user_prompt(body: str) -> str:
-        return (
-            f"Taxonomie (slug: Name — Hinweis):\n{_taxonomy_outline(req.taxonomy)}"
-            f"{tax_block}{subjects_block}{examples_block}\n\n"
-            f"Max. Tags: {req.max_tags}\n\n"
-            f"Dokumenttext:\n---\n{body}\n---"
+    # The few-shot examples are orientation only and must never be the reason a
+    # classification fails: when the prompt overflows the context window they
+    # are shed first (below), so the document still gets classified zero-shot.
+    def _assemble(with_examples: bool) -> tuple[str, Callable[[str], str]]:
+        system_prompt = (
+            _SYSTEM_PROMPT
+            + (_TAX_SYSTEM_PROMPT if tax_active else "")
+            + (_SUBJECT_PERSONS_SYSTEM_PROMPT if subjects_active else "")
+            + (_EXAMPLES_SYSTEM_PROMPT if with_examples else "")
         )
+        ex_block = examples_block if with_examples else ""
 
+        def build(body: str) -> str:
+            return (
+                f"Taxonomie (slug: Name — Hinweis):\n{_taxonomy_outline(req.taxonomy)}"
+                f"{tax_block}{subjects_block}{ex_block}\n\n"
+                f"Max. Tags: {req.max_tags}\n\n"
+                f"Dokumenttext:\n---\n{body}\n---"
+            )
+
+        return system_prompt, build
+
+    system_prompt, _build_user_prompt = _assemble(examples_active)
     user_prompt = _build_user_prompt(text)
 
     # Token-budget guard. The taxonomy + tax_sections outline can be several
@@ -755,11 +762,25 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
     budget = LLM_CTX - _CLASSIFY_MAX_TOKENS - _CLASSIFY_TEMPLATE_HEADROOM
     overhead_tokens = _count_tokens(llm, system_prompt + _build_user_prompt(""))
     if overhead_tokens is not None:
+        # Few-shot first: if the examples push the prompt past the window, drop
+        # them and recompute before considering the document itself too big.
+        if examples_active and budget - overhead_tokens < 64:
+            log.info(
+                "classify: dropping few-shot examples to fit n_ctx "
+                "(overhead=%d budget=%d)",
+                overhead_tokens, budget,
+            )
+            examples_active = False
+            system_prompt, _build_user_prompt = _assemble(False)
+            user_prompt = _build_user_prompt(text)
+            overhead_tokens = _count_tokens(llm, system_prompt + _build_user_prompt(""))
+
+    if overhead_tokens is not None:
         text_token_budget = budget - overhead_tokens
         if text_token_budget < 64:
-            # Even with empty text we'd overflow — taxonomy/tax_sections alone
-            # are too large. Surface a 413 so the caller can act on it instead
-            # of hitting llama.cpp's 500.
+            # Even with empty text (and no examples) we'd overflow —
+            # taxonomy/tax_sections alone are too large. Surface a 413 so the
+            # caller can act on it instead of hitting llama.cpp's 500.
             raise HTTPException(
                 status_code=413,
                 detail=(
