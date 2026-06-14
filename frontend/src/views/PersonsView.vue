@@ -36,6 +36,7 @@ import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 import { useReferenceData } from '../composables/useReferenceData'
 import {
   getPhotoFacesCached,
+  refreshPhotoFaces,
   peekPhotoFacesCached,
   invalidatePhotoFaces,
 } from '../composables/usePhotoMetaCache'
@@ -352,14 +353,15 @@ const reindexingPhoto = ref(false)
 let sidebarToken = 0
 async function loadSidebarData(photoId: number) {
   const token = ++sidebarToken
-  // Cache hit → show instantly without flashing the faces spinner; only fetch
-  // (and show the spinner) when the photo's faces aren't cached yet.
+  // Cache hit → show instantly without flashing the faces spinner. A non-empty
+  // cache is authoritative; an empty/missing one is revalidated (a prefetch may
+  // have cached an empty result before face detection finished).
   const cachedFaces = peekPhotoFacesCached(photoId)
   detectedFaces.value = cachedFaces ?? []
   loadingFaces.value = cachedFaces === undefined
-  if (cachedFaces !== undefined) return
+  if (cachedFaces && cachedFaces.length > 0) return
   try {
-    const faces = await getPhotoFacesCached(photoId)
+    const faces = await refreshPhotoFaces(photoId)
     if (token !== sidebarToken) return
     detectedFaces.value = faces
   } catch {
