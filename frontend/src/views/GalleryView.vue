@@ -78,6 +78,7 @@ import {
   prefetchPhotoMeta,
   invalidatePhotoFaces,
   invalidatePhotoMeta,
+  clearScanDerivedCaches,
 } from '../composables/usePhotoMetaCache'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
@@ -1278,6 +1279,16 @@ useRealtimeEvent('photos', 'metadata.changed', (ev) => {
   const updates = ev.payload as Record<string, unknown>
   if (cursorPhoto.value?.id === photoId) {
     cursorPhoto.value = { ...cursorPhoto.value, ...updates }
+  }
+})
+
+// Background scans (POI / face detection) finished and produced new derived
+// data. Drop the scan-derived caches so prematurely-cached empty faces/POI
+// don't stick, and re-hydrate the photo currently shown in the sidebar.
+useRealtimeEvent('photos', 'scan.updated', () => {
+  clearScanDerivedCaches()
+  if (detailsVisible.value && cursorPhoto.value) {
+    void loadPhotoDetails(cursorPhoto.value.id, hydrateToken)
   }
 })
 
