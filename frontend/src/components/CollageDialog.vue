@@ -7,7 +7,7 @@
  *   1. Layout picker — three layout variants for the current photo count;
  *      tapping one advances to the editor.
  *   2. Editor — the chosen layout rendered large, each placeholder filled
- *      with a photo. Faces / landmarks are nudged toward the visible centre
+ *      with a photo. Faces are nudged toward the visible centre
  *      of every cell using the gallery's `auto_crop` focal point (the same
  *      algorithm as the thumbnail grid, see `collageObjectPosition` /
  *      `coverCropRect`). Two photos can be swapped by dragging one onto the

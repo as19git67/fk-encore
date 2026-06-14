@@ -71,7 +71,6 @@ Content-Type: application/json
   "success": true,
   "dbCounts": {
     "photo_scan_queue": 12,
-    "photo_landmarks": 84,
     "user_face_assignments": 31,
     "faces": 119,
     "photo_group_members": 22,
@@ -127,7 +126,6 @@ all foreign-key dependencies (children before parents):
 
 ```
 photo_scan_queue
-photo_landmarks
 user_face_assignments
 faces
 photo_group_members

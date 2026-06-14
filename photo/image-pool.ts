@@ -65,6 +65,25 @@ const POOL_SIZE = (() => {
   return n;
 })();
 
+/**
+ * Workers kept free for high-priority (user-facing) resizes. Background work
+ * — thumbnail prewarm, embedding-upload resize — runs at low priority and may
+ * occupy at most POOL_SIZE - RESERVE workers, so a large prewarm pass can
+ * never starve photos a user is actively viewing. Only meaningful when the
+ * pool has more than one worker. Override with IMAGE_POOL_RESERVE.
+ */
+const LOW_PRIORITY_RESERVE = (() => {
+  const def = POOL_SIZE > 1 ? 1 : 0;
+  const raw = process.env.IMAGE_POOL_RESERVE;
+  if (raw === undefined) return def;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 0) return def;
+  return Math.min(n, Math.max(0, POOL_SIZE - 1));
+})();
+const LOW_PRIORITY_CAP = Math.max(0, POOL_SIZE - LOW_PRIORITY_RESERVE);
+
+export type ImagePoolPriority = "high" | "low";
+
 interface PendingJob {
   id: number;
   resolve: (buf: Buffer) => void;
@@ -74,37 +93,78 @@ interface PendingJob {
 interface PooledWorker {
   worker: Worker;
   busy: boolean;
+  /** True while running a low-priority (background) job — tracked so the
+   *  reserve cap can be enforced when the worker is freed. */
+  low: boolean;
   pending: Map<number, PendingJob>;
 }
 
 let workers: PooledWorker[] = [];
 let started = false;
 let nextJobId = 1;
-const waitingQueue: Array<(w: PooledWorker) => void> = [];
+// Separate queues so high-priority waiters are always served before any
+// low-priority ones, regardless of arrival order.
+const highQueue: Array<(w: PooledWorker) => void> = [];
+const lowQueue: Array<(w: PooledWorker) => void> = [];
+let lowActive = 0;
+
+/**
+ * Hand idle workers to waiters: all high-priority ones first, then low —
+ * but low only up to LOW_PRIORITY_CAP concurrent jobs so the reserve stays
+ * available for high-priority work.
+ */
+function dispatch(): void {
+  while (highQueue.length > 0) {
+    const w = workers.find((x) => !x.busy);
+    if (!w) return;
+    w.busy = true;
+    w.low = false;
+    (highQueue.shift()!)(w);
+  }
+  while (lowQueue.length > 0 && lowActive < LOW_PRIORITY_CAP) {
+    const w = workers.find((x) => !x.busy);
+    if (!w) return;
+    w.busy = true;
+    w.low = true;
+    lowActive++;
+    (lowQueue.shift()!)(w);
+  }
+}
+
+function releaseWorker(w: PooledWorker): void {
+  w.busy = false;
+  if (w.low) {
+    w.low = false;
+    lowActive = Math.max(0, lowActive - 1);
+  }
+  dispatch();
+}
 
 function spawnWorker(): PooledWorker {
   const worker = new Worker(WORKER_SOURCE, { eval: true });
-  const w: PooledWorker = { worker, busy: false, pending: new Map() };
+  const w: PooledWorker = { worker, busy: false, low: false, pending: new Map() };
 
   worker.on("message", (msg: { id: number; ok: boolean; result?: ArrayBuffer; error?: string }) => {
     const pending = w.pending.get(msg.id);
     if (!pending) return;
     w.pending.delete(msg.id);
-    w.busy = false;
     if (msg.ok && msg.result) {
       pending.resolve(Buffer.from(msg.result));
     } else {
       pending.reject(new Error(msg.error ?? "worker returned no result"));
     }
-    // Hand the freed worker to the next waiter, if any.
-    const next = waitingQueue.shift();
-    if (next) next(w);
+    // Free the worker and hand it (and any other idle ones) to waiters.
+    releaseWorker(w);
   });
 
   worker.on("error", (err) => {
     console.error("[image-pool] worker error:", err);
     for (const job of w.pending.values()) job.reject(err);
     w.pending.clear();
+    if (w.low) {
+      w.low = false;
+      lowActive = Math.max(0, lowActive - 1);
+    }
     w.busy = false;
     // Respawn on crash so the pool stays at capacity.
     const idx = workers.indexOf(w);
@@ -114,6 +174,7 @@ function spawnWorker(): PooledWorker {
     } catch (spawnErr) {
       console.error("[image-pool] respawn failed:", spawnErr);
     }
+    dispatch();
   });
 
   worker.on("exit", (code) => {
@@ -135,22 +196,17 @@ function ensureStarted(): void {
   for (let i = 0; i < POOL_SIZE; i++) {
     workers.push(spawnWorker());
   }
-  console.log(`[image-pool] started with ${POOL_SIZE} worker(s)`);
+  console.log(
+    `[image-pool] started with ${POOL_SIZE} worker(s), ${LOW_PRIORITY_RESERVE} reserved for high-priority`,
+  );
 }
 
-function acquire(): Promise<PooledWorker | null> {
+function acquire(priority: ImagePoolPriority): Promise<PooledWorker | null> {
   if (POOL_SIZE === 0) return Promise.resolve(null);
   ensureStarted();
-  const idle = workers.find((w) => !w.busy);
-  if (idle) {
-    idle.busy = true;
-    return Promise.resolve(idle);
-  }
   return new Promise((resolve) => {
-    waitingQueue.push((w) => {
-      w.busy = true;
-      resolve(w);
-    });
+    (priority === "low" ? lowQueue : highQueue).push((w) => resolve(w));
+    dispatch();
   });
 }
 
@@ -159,11 +215,19 @@ function acquire(): Promise<PooledWorker | null> {
  * the worker pool when available; falls back to an in-process sharp() call
  * when IMAGE_POOL_SIZE=0 or the pool fails to spawn.
  *
+ * `priority` defaults to "high" (user-facing serving). Background callers
+ * (thumbnail prewarm, embedding-upload resize) pass "low" so they yield the
+ * reserved workers to anyone actively viewing photos.
+ *
  * Always outputs JPEG (quality 85). No upscaling: images already smaller
  * than `targetWidth` are returned unchanged.
  */
-export async function resizeImageInPool(imageBuffer: Buffer, targetWidth: number): Promise<Buffer> {
-  const w = await acquire();
+export async function resizeImageInPool(
+  imageBuffer: Buffer,
+  targetWidth: number,
+  opts?: { priority?: ImagePoolPriority },
+): Promise<Buffer> {
+  const w = await acquire(opts?.priority ?? "high");
   if (!w) {
     // Pool disabled — do the work inline. Same semantics as the original
     // resizeImage so callers can rely on identical output.
@@ -198,6 +262,9 @@ export async function stopImagePool(): Promise<void> {
   const toStop = workers;
   workers = [];
   started = false;
+  highQueue.length = 0;
+  lowQueue.length = 0;
+  lowActive = 0;
   await Promise.all(toStop.map((w) => w.worker.terminate().catch(() => {})));
 }
 

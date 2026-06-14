@@ -8,7 +8,7 @@
 //
 // The cover-crop helpers replicate CSS `object-fit: cover` + `object-position`
 // so the on-canvas JPEG matches the DOM preview pixel-for-pixel, and reuse the
-// gallery's `auto_crop` focal point to nudge faces / landmarks toward the
+// gallery's `auto_crop` focal point to nudge faces toward the
 // visible centre of each cell (the "same algorithm as the thumbnail grid").
 
 export interface CollageCell {

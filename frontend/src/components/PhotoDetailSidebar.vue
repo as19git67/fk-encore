@@ -9,9 +9,14 @@ import PhotoAlbumDialog from './PhotoAlbumDialog.vue'
 import PhotoTransformEditor from './PhotoTransformEditor.vue'
 import { getPhotoUrl, getPhotosAlbums, updateAlbum, updateAlbumUserSettings, updatePhotoDescription } from '../api/photos'
 import { getAlbumCheckState as calculateAlbumCheckState } from '../utils/albumSelection'
-import type { Photo, Face, LandmarkItem, PoiMatchItem, Person, CurationStatus } from '../api/photos'
+import type { Photo, Face, PoiMatchItem, Person, CurationStatus } from '../api/photos'
 import { useReferenceData } from '../composables/useReferenceData'
 import { useUserPhotoTransform } from '../composables/useUserPhotoTransform'
+import {
+  peekPhotoAlbumsCached,
+  primePhotoAlbumsCache,
+  invalidatePhotoAlbums,
+} from '../composables/usePhotoMetaCache'
 import { useAuthStore } from '../stores/auth'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -28,12 +33,9 @@ const props = defineProps<{
   selectedPhotoIds?: number[]
   faces: Face[]
   loadingFaces: boolean
-  landmarks: LandmarkItem[]
-  loadingLandmarks: boolean
   /** POI matches produced by the osm-admin pipeline (Epic #383).
    *  When the matches array is non-empty the sidebar shows them in
-   *  the location section, alongside (or instead of) the generic
-   *  landmark category chips. */
+   *  the location section. */
   poiMatches?: PoiMatchItem[]
   loadingPoiMatches?: boolean
   persons: Person[]
@@ -54,10 +56,20 @@ const props = defineProps<{
   /** Hide the "Alle Fotos" entry in the location menu (we're already there). */
   locationMenuExcludeAllPhotos?: boolean
   /** When true, the sidebar is rendered inside the fullscreen details
-   *  flyout: it fills the available width, the photo preview is hidden
-   *  (the user already sees the photo in the fullscreen view), and a
-   *  small map with a pin is shown under the location section. */
+   *  flyout: it fills the available width and the photo preview is hidden
+   *  (the user already sees the photo in the fullscreen view). The location
+   *  mini-map renders in both modes (flyout and the desktop side panel);
+   *  in the flyout it additionally waits for flyoutOpen + imageReady. */
   inFlyout?: boolean
+  /** Whether the fullscreen flyout is actually open. The flyout stays mounted
+   *  across photo changes (to preserve scroll state), so without this the
+   *  embedded OSM mini-map would load tiles even while the panel is closed,
+   *  competing with the main image. Defaults to true for non-flyout hosts. */
+  flyoutOpen?: boolean
+  /** Whether the current fullscreen image has finished decoding. Gates the
+   *  mini-map so its OSM tiles load only after the photo is on screen — never
+   *  racing the image for the browser's per-host connections. Defaults true. */
+  imageReady?: boolean
   /** Album-scoped curation opinions (fav/hide across album participants).
    *  Supplied by the album views because the fullscreen/split cursor photo —
    *  hydrated from the grid + photo-details batch — doesn't carry this
@@ -141,15 +153,35 @@ const albumPhotoIds = computed<number[]>(() => (
 async function loadPhotosAlbums() {
   const photoIds = albumPhotoIds.value
   try {
-    const res = await getPhotosAlbums(photoIds)
     const map: Record<number, number[]> = {}
-    res.results.forEach(r => {
-      map[r.photoId] = r.albumIds
-    })
+    // Serve ids already in the shared cache (warmed by neighbour prefetch in
+    // fullscreen) without a request; only fetch the misses. This is what makes
+    // album chips appear instantly when stepping to a prefetched neighbour.
+    const missing: number[] = []
+    for (const id of photoIds) {
+      const hit = peekPhotoAlbumsCached(id)
+      if (hit !== undefined) map[id] = hit
+      else missing.push(id)
+    }
+    if (missing.length > 0) {
+      const res = await getPhotosAlbums(missing)
+      res.results.forEach(r => {
+        map[r.photoId] = r.albumIds
+        primePhotoAlbumsCache(r.photoId, r.albumIds)
+      })
+    }
     photoAlbumMap.value = map
   } catch (err) {
     console.error('Failed to load photos albums:', err)
   }
+}
+
+// After the album dialog persists membership changes, the shared cache is
+// stale for those photos — drop them so the reload (and any later neighbour
+// read) fetches fresh data.
+function onAlbumMembershipSaved() {
+  for (const id of albumPhotoIds.value) invalidatePhotoAlbums(id)
+  loadPhotosAlbums()
 }
 
 // Watch a stable key derived from the IDs currently shown in the sidebar.
@@ -489,7 +521,7 @@ watch(() => props.readOnly, (ro) => {
         </div>
       </div>
 
-      <template v-if="photo.location_city || photo.location_name || loadingLandmarks || landmarks.length > 0 || (poiMatches && poiMatches.length > 0) || loadingPoiMatches || (inFlyout && photo.latitude != null && photo.longitude != null)">
+      <template v-if="photo.location_city || photo.location_name || (poiMatches && poiMatches.length > 0) || loadingPoiMatches || (photo.latitude != null && photo.longitude != null)">
         <div class="sidebar-divider" />
         <div class="sidebar-section">
           <div v-if="photo.location_name || photo.location_city" class="meta-row location-row">
@@ -501,7 +533,7 @@ watch(() => props.readOnly, (ro) => {
             </span>
           </div>
           <PhotoMiniMap
-            v-if="inFlyout && photo.latitude != null && photo.longitude != null"
+            v-if="photo.latitude != null && photo.longitude != null && (!inFlyout || (flyoutOpen !== false && imageReady !== false))"
             :key="photo.id"
             :latitude="photo.latitude"
             :longitude="photo.longitude"
@@ -539,18 +571,6 @@ watch(() => props.readOnly, (ro) => {
                 </div>
               </div>
             </div>
-          </div>
-          <!-- Fallback: when no POI match exists, fall back to the
-               generic landmark category chips from the old Grounding
-               DINO worker. Will retire entirely once POI coverage is
-               broad enough. -->
-          <div v-else-if="loadingLandmarks" class="loading-row"><i class="pi pi-spin pi-spinner" /> Gebäude werden erkannt…</div>
-          <div v-else-if="landmarks.some(lm => lm.confidence >= 0.6)" class="landmark-chips">
-            <template v-for="lm in landmarks" :key="lm.id">
-              <span v-if="lm.confidence >= 0.6" class="landmark-tag" :title="`${Math.round(lm.confidence * 100)}%`">
-                <i class="pi pi-building" /> {{ lm.label }} <span class="landmark-confidence">{{ Math.round(lm.confidence * 100) }}%</span>
-              </span>
-            </template>
           </div>
         </div>
       </template>
@@ -662,7 +682,7 @@ watch(() => props.readOnly, (ro) => {
     <PhotoAlbumDialog
       v-model:visible="albumDialogVisible"
       :photo-ids="albumPhotoIds"
-      @saved="loadPhotosAlbums"
+      @saved="onAlbumMembershipSaved"
     />
     <PhotoTransformEditor
       v-model:visible="transformEditorVisible"
@@ -908,22 +928,6 @@ watch(() => props.readOnly, (ro) => {
   color: var(--p-text-muted-color);
 }
 .poi-score { font-variant-numeric: tabular-nums; }
-
-.landmark-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-
-.landmark-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  background: var(--p-content-hover-background);
-  border: 1px solid var(--p-content-border-color);
-  border-radius: 1rem;
-  padding: 0.2rem 0.6rem;
-  font-size: 0.8rem;
-  cursor: default;
-}
-.landmark-tag .pi-building { font-size: 0.7rem; color: var(--p-text-muted-color); }
-.landmark-confidence { font-size: 0.7rem; color: var(--p-text-muted-color); }
 
 .keyword-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 .keyword-tag {

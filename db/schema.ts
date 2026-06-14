@@ -541,22 +541,6 @@ export const photoTransforms = pgTable(
   ]
 );
 
-// ========== Photo Landmarks (Grounding DINO detection results) ==========
-
-// ========== Photo Landmarks (global detection results — one set per photo) ==========
-
-export const photoLandmarks = pgTable("photo_landmarks", {
-  id: serial("id").primaryKey(),
-  photo_id: integer("photo_id")
-    .notNull()
-    .references(() => photos.id, { onDelete: "cascade" }),
-  label: text("label").notNull(),
-  confidence: real("confidence").notNull(),
-  // Bounding box as JSON string: { x, y, width, height } normalized to image size (0..1)
-  bbox: text("bbox").notNull(),
-  created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
-});
-
 // Per-photo POI matches produced by the osm-admin POI matcher (Epic #383).
 // The (photo_id, qid|osm_ref) uniqueness + the score-sorted index are
 // declared in raw SQL (migration 0087) — drizzle's coalesce-in-index

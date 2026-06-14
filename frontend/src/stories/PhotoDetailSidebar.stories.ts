@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/vue3'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import { defaultHandlers } from './handlers'
-import { MOCK_PHOTOS, MOCK_FACES, MOCK_LANDMARKS, MOCK_PERSONS } from './mock-data'
+import { MOCK_PHOTOS, MOCK_FACES, MOCK_PERSONS } from './mock-data'
 
 const meta: Meta<typeof PhotoDetailSidebar> = {
   title: 'Components/PhotoDetailSidebar',
@@ -23,8 +23,6 @@ const meta: Meta<typeof PhotoDetailSidebar> = {
     updatingDate: false,
     faces: [],
     loadingFaces: false,
-    landmarks: [],
-    loadingLandmarks: false,
     persons: MOCK_PERSONS,
     showPersons: true,
     limitAlbumsShown: false,
@@ -41,7 +39,6 @@ export const FotoMitOrt: Story = {
   args: {
     photo: MOCK_PHOTOS[0]!,
     faces: MOCK_FACES,
-    landmarks: MOCK_LANDMARKS,
   },
 }
 
@@ -57,7 +54,6 @@ export const LaedtGesichter: Story = {
   args: {
     photo: MOCK_PHOTOS[0]!,
     loadingFaces: true,
-    loadingLandmarks: true,
   },
 }
 
@@ -86,7 +82,6 @@ export const InFlyout: Story = {
   args: {
     photo: MOCK_PHOTOS[0]!,
     faces: MOCK_FACES,
-    landmarks: MOCK_LANDMARKS,
     inFlyout: true,
   },
 }
