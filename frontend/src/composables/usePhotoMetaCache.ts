@@ -117,6 +117,20 @@ export function invalidatePhotoMeta(id: number): void {
   poiInFlight.delete(id)
 }
 
+/** Drop every cached faces / POI entry. POI detection and face detection run as
+ *  asynchronous background scans, so a photo can return empty matches when first
+ *  read (or prefetched) and only get them once the scan finishes. The coarse
+ *  `photos/scan.updated` realtime event carries no photo id, so when it fires we
+ *  clear all scan-derived caches and let the visible photo re-fetch fresh data —
+ *  otherwise the prematurely-cached empty result would hide POIs until reload.
+ *  Album membership is untouched (scans never change it). */
+export function clearScanDerivedCaches(): void {
+  facesCache.clear()
+  facesInFlight.clear()
+  poiCache.clear()
+  poiInFlight.clear()
+}
+
 /** Warm faces + POI + album membership for a photo. Fire-and-forget: errors
  *  are swallowed so a failed prefetch just means the next real read retries. */
 export function prefetchPhotoMeta(id: number): void {
