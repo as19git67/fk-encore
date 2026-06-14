@@ -73,6 +73,8 @@ import { useRealtimeEvent } from '../composables/useRealtime'
 import {
   getPhotoFacesCached,
   getPhotoPoiMatchesCached,
+  peekPhotoFacesCached,
+  peekPhotoPoiMatchesCached,
   prefetchPhotoMeta,
   invalidatePhotoFaces,
   invalidatePhotoMeta,
@@ -882,16 +884,23 @@ const editDate = ref<Date | null>(null)
 const updatingDate = ref(false)
 
 async function loadPhotoDetails(photoId: number, token: number): Promise<void> {
-  loadingFaces.value = true
-  loadingPoiMatches.value = true
-  detectedFaces.value = []
-  detectedPoiMatches.value = []
+  // Serve cache hits synchronously and only flip the loading flags for data we
+  // actually have to fetch. Without this, a prefetched neighbour still flashed
+  // the "Sehenswürdigkeit wird erkannt…" / faces spinner for one microtask —
+  // the await on an already-resolved cached promise resolves a tick later, and
+  // that tick had loading=true with an empty list.
+  const cachedFaces = peekPhotoFacesCached(photoId)
+  const cachedPois = peekPhotoPoiMatchesCached(photoId)
+  detectedFaces.value = cachedFaces ?? []
+  detectedPoiMatches.value = cachedPois ?? []
+  loadingFaces.value = cachedFaces === undefined
+  loadingPoiMatches.value = cachedPois === undefined
+  if (cachedFaces !== undefined && cachedPois !== undefined) return
   try {
     // POI matches load alongside faces. Both go through the shared per-photo
-    // cache so a neighbour prefetched while the current image was decoding is
-    // an instant hit here. A 5xx on either endpoint (e.g. osm-admin service
-    // down) falls back to an empty list so the rest of the sidebar still
-    // renders.
+    // cache; the already-cached side returns instantly. A 5xx on either
+    // endpoint (e.g. osm-admin service down) falls back to an empty list so
+    // the rest of the sidebar still renders.
     const [facesRes, poisRes] = await Promise.all([
       getPhotoFacesCached(photoId).catch(() => [] as Face[]),
       getPhotoPoiMatchesCached(photoId).catch(() => [] as PoiMatchItem[]),

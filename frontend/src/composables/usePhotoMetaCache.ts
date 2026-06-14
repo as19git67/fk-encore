@@ -77,6 +77,17 @@ export function getPhotoAlbumsCached(id: number): Promise<number[]> {
   })
 }
 
+/** Synchronously read a cached faces entry, if present. Lets the host skip the
+ *  loading flash when a prefetched neighbour is already available. */
+export function peekPhotoFacesCached(id: number): Face[] | undefined {
+  return facesCache.get(id)
+}
+
+/** Synchronously read a cached POI-matches entry, if present. */
+export function peekPhotoPoiMatchesCached(id: number): PoiMatchItem[] | undefined {
+  return poiCache.get(id)
+}
+
 /** Synchronously read a cached album-membership entry, if present. Lets the
  *  sidebar render instantly from a prefetched neighbour without awaiting. */
 export function peekPhotoAlbumsCached(id: number): number[] | undefined {
