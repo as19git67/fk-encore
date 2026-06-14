@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import Button from 'primevue/button'
 import * as pdfjsLib from 'pdfjs-dist'
+import { TextLayer } from 'pdfjs-dist'
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
@@ -21,7 +22,10 @@ const FIT_WIDTH = -1 as const
 
 const pdfDoc = shallowRef<PDFDocumentProxy | null>(null)
 const renderTask = shallowRef<RenderTask | null>(null)
+const textLayer = shallowRef<TextLayer | null>(null)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
+const textLayerRef = ref<HTMLDivElement | null>(null)
+const pageLayerRef = ref<HTMLDivElement | null>(null)
 const containerRef = ref<HTMLDivElement | null>(null)
 
 const totalPages = ref(0)
@@ -35,11 +39,20 @@ const internalError = ref<string | null>(null)
 let resizeObserver: ResizeObserver | null = null
 let resizeRaf = 0
 
+function cancelTextLayer() {
+  if (textLayer.value) {
+    try { textLayer.value.cancel() } catch { /* ignore */ }
+    textLayer.value = null
+  }
+  if (textLayerRef.value) textLayerRef.value.replaceChildren()
+}
+
 async function destroyDoc() {
   if (renderTask.value) {
     try { renderTask.value.cancel() } catch { /* ignore */ }
     renderTask.value = null
   }
+  cancelTextLayer()
   if (pdfDoc.value) {
     try { await pdfDoc.value.destroy() } catch { /* ignore */ }
     pdfDoc.value = null
@@ -87,6 +100,7 @@ async function renderPage() {
     try { renderTask.value.cancel() } catch { /* ignore */ }
     renderTask.value = null
   }
+  cancelTextLayer()
 
   const page = await doc.getPage(currentPage.value)
   const cssScale = computeScale(page)
@@ -95,10 +109,23 @@ async function renderPage() {
   const dpr = Math.max(1, window.devicePixelRatio || 1)
   const viewport = page.getViewport({ scale: cssScale * dpr })
 
+  // CSS-pixel dimensions of the rendered page. The canvas is rasterised at
+  // device-pixel resolution for sharpness but laid out (and overlaid by the
+  // text layer) in CSS pixels.
+  const cssWidth = Math.floor(viewport.width / dpr)
+  const cssHeight = Math.floor(viewport.height / dpr)
+
   canvas.width = Math.floor(viewport.width)
   canvas.height = Math.floor(viewport.height)
-  canvas.style.width = `${Math.floor(viewport.width / dpr)}px`
-  canvas.style.height = `${Math.floor(viewport.height / dpr)}px`
+  canvas.style.width = `${cssWidth}px`
+  canvas.style.height = `${cssHeight}px`
+
+  // Size the positioning wrapper so the absolutely-positioned text layer
+  // lines up exactly with the canvas and the wrapper scrolls as a unit.
+  if (pageLayerRef.value) {
+    pageLayerRef.value.style.width = `${cssWidth}px`
+    pageLayerRef.value.style.height = `${cssHeight}px`
+  }
 
   const ctx = canvas.getContext('2d')
   if (!ctx) return
@@ -111,8 +138,45 @@ async function renderPage() {
     if (err?.name !== 'RenderingCancelledException') {
       internalError.value = err?.message || 'Seite konnte nicht gerendert werden'
     }
+    return
   } finally {
     if (renderTask.value === task) renderTask.value = null
+  }
+
+  await renderTextLayer(page, cssScale)
+}
+
+/**
+ * Overlay a transparent, selectable text layer on top of the rendered page
+ * so users can select and copy text directly on the PDF image. pdf.js
+ * positions each text run from the document's text content, which covers
+ * born-digital PDFs and scans that carry an OCR text layer. Image-only PDFs
+ * with no text content simply render an empty (harmless) layer.
+ */
+async function renderTextLayer(page: PDFPageProxy, cssScale: number) {
+  const container = textLayerRef.value
+  if (!container) return
+
+  container.replaceChildren()
+  // pdf.js scales text-run geometry by this CSS variable.
+  container.style.setProperty('--scale-factor', String(cssScale))
+
+  const textViewport = page.getViewport({ scale: cssScale })
+  const layer = new TextLayer({
+    textContentSource: page.streamTextContent(),
+    container,
+    viewport: textViewport,
+  })
+  textLayer.value = layer
+  try {
+    await layer.render()
+  } catch (err: any) {
+    // Cancellation during rapid zoom/page changes is expected; ignore it.
+    // Image-only scans render an empty layer (no error). Anything else is
+    // logged but never fails the page — the canvas is already shown.
+    if (err?.name !== 'AbortException') {
+      console.warn('[PdfViewer] text layer render failed:', err)
+    }
   }
 }
 
@@ -259,7 +323,10 @@ onBeforeUnmount(() => {
         <i class="pi pi-spin pi-spinner" />
         <span>PDF wird geladen…</span>
       </div>
-      <canvas ref="canvasRef" class="pdf-canvas" />
+      <div ref="pageLayerRef" class="page-layer">
+        <canvas ref="canvasRef" class="pdf-canvas" />
+        <div ref="textLayerRef" class="textLayer" />
+      </div>
     </div>
   </div>
 </template>
@@ -340,15 +407,68 @@ onBeforeUnmount(() => {
   background: var(--p-surface-ground, #2a2a2a);
 }
 
-.pdf-canvas {
-  display: block;
+.page-layer {
+  position: relative;
   /* `margin: auto` centers the page while it fits the wrapper, but
      collapses to 0 once the page is wider than the wrapper so the left
      edge stays reachable by scrolling. A plain `justify-content: center`
      would push the overflow off the left, out of reach. */
   margin: auto;
+  /* Size is set in JS to the rendered page's CSS dimensions; until then
+     it has no intrinsic size. flex-shrink:0 keeps it from being squeezed
+     by the flex parent so the overlay stays aligned with the canvas. */
+  flex-shrink: 0;
+}
+
+.pdf-canvas {
+  display: block;
   background: white;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* Transparent selectable text overlay — geometry comes from pdf.js, which
+   sizes runs relative to the --scale-factor set on the container in JS.
+   Mirrors pdfjs-dist/web/pdf_viewer.css; spans are created dynamically so
+   they need :deep() to escape Vue's scoped-style attribute. */
+.textLayer {
+  position: absolute;
+  inset: 0;
+  text-align: initial;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  z-index: 1;
+}
+
+.textLayer :deep(span),
+.textLayer :deep(br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+
+.textLayer :deep(span.markedContent) {
+  top: 0;
+  height: 0;
+}
+
+.textLayer :deep(.endOfContent) {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: 0;
+  cursor: default;
+  user-select: none;
+}
+
+.textLayer :deep(::selection) {
+  background: color-mix(in srgb, var(--p-primary-color) 35%, transparent);
 }
 
 .state-overlay {
