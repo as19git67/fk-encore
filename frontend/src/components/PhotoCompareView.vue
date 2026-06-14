@@ -10,7 +10,6 @@ import {
   reviewPhotoGroup,
   pickPhotosInGroup,
   getPhotoDetailsBatch,
-  getPhotoFaces,
   type Photo,
   type PhotoGroup,
   type CurationStatus,
@@ -18,6 +17,7 @@ import {
 } from '../api/photos'
 import type { FeedPhotoItem } from '../api/photoFeed'
 import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
+import { getPhotoFacesCached } from '../composables/usePhotoMetaCache'
 import { useAuthStore } from '../stores/auth'
 import { discardFlingDirection, flingOffscreenTranslate } from '../utils/compareSwipe'
 import { mergeFreshScore, type FreshScore } from '../utils/comparePhotoScore'
@@ -740,8 +740,11 @@ function getViewport(photoId: number) {
 async function ensureBboxData(photoId: number): Promise<{ faces: Face[] }> {
   if (!facesCache.value.has(photoId)) {
     try {
-      const res = await getPhotoFaces(photoId)
-      facesCache.value = new Map(facesCache.value).set(photoId, res.faces ?? [])
+      // Route through the shared per-photo cache so faces fetched here also
+      // warm the gallery/album sidebars (and vice versa), and stay consistent
+      // with global invalidation after reindex / ignore-face.
+      const faces = await getPhotoFacesCached(photoId)
+      facesCache.value = new Map(facesCache.value).set(photoId, faces)
     } catch (err) {
       console.warn('[PhotoCompareView] face load failed', photoId, err)
       facesCache.value = new Map(facesCache.value).set(photoId, [])

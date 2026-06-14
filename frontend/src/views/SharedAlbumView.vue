@@ -699,7 +699,7 @@ onUnmounted(() => {
            auth-bound PhotoDetailSidebar is NOT reused — guests get this
            read-only panel (date, location, map, description, comments)
            instead, but the surrounding split layout is shared. -->
-      <template #details-flyout>
+      <template #details-flyout="{ detailsOpen, imageReady }">
         <div v-if="currentPhoto" class="guest-photo-details">
           <div class="info-row info-date">
             <i class="pi pi-calendar" />
@@ -713,7 +713,7 @@ onUnmounted(() => {
             <span v-else>{{ formatSharedLocation(currentPhoto) }}</span>
           </div>
           <div
-            v-if="currentPhoto.latitude != null && currentPhoto.longitude != null"
+            v-if="detailsOpen !== false && imageReady !== false && currentPhoto.latitude != null && currentPhoto.longitude != null"
             class="info-row info-map"
           >
             <PhotoMiniMap

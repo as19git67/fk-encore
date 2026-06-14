@@ -25,7 +25,6 @@ import { toLocalIsoDate, parseLocalDate } from '../utils/dateFormat'
 import {
   listPersons, updatePerson, mergePersons, getPersonDetails,
   ignoreFace, ignorePersonFaces, updatePhotoCuration, reindexPhoto,
-  getPhotoFaces,
   type CurationStatus, type Person, type Photo, type PersonDetails,
   type Face, type PhotoFilter,
 } from '../api/photos'
@@ -35,6 +34,11 @@ import { useServiceHealthStore } from '../stores/serviceHealth'
 import { usePhotoNavStore } from '../stores/photoNav'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 import { useReferenceData } from '../composables/useReferenceData'
+import {
+  getPhotoFacesCached,
+  peekPhotoFacesCached,
+  invalidatePhotoFaces,
+} from '../composables/usePhotoMetaCache'
 
 // Eigene gefilterte Liste (nur Personen mit faceCount > 1) — wir teilen sie
 // nicht mit dem app-weiten Composable, invalidieren aber dessen Cache nach
@@ -345,13 +349,32 @@ const detectedFaces = ref<Face[]>([])
 const loadingFaces = ref(false)
 const reindexingPhoto = ref(false)
 
+let sidebarToken = 0
 async function loadSidebarData(photoId: number) {
-  loadingFaces.value = true
+  const token = ++sidebarToken
+  // Cache hit → show instantly without flashing the faces spinner; only fetch
+  // (and show the spinner) when the photo's faces aren't cached yet.
+  const cachedFaces = peekPhotoFacesCached(photoId)
+  detectedFaces.value = cachedFaces ?? []
+  loadingFaces.value = cachedFaces === undefined
+  if (cachedFaces !== undefined) return
   try {
-    const facesRes = await getPhotoFaces(photoId)
-    detectedFaces.value = facesRes.faces
-  } catch { detectedFaces.value = [] }
-  finally { loadingFaces.value = false }
+    const faces = await getPhotoFacesCached(photoId)
+    if (token !== sidebarToken) return
+    detectedFaces.value = faces
+  } catch {
+    if (token === sidebarToken) detectedFaces.value = []
+  } finally {
+    if (token === sidebarToken) loadingFaces.value = false
+  }
+}
+
+// Once the fullscreen image is decoded, warm the neighbours' faces so the next
+// prev/next selection renders instantly. Faces are the only per-photo metadata
+// this view shows, so we prefetch just those (not POI / albums).
+function onFullscreenImageLoaded() {
+  if (nextPersonPhoto.value) void getPhotoFacesCached(nextPersonPhoto.value.id).catch(() => {})
+  if (prevPersonPhoto.value) void getPhotoFacesCached(prevPersonPhoto.value.id).catch(() => {})
 }
 
 watch(selectedPhoto, (photo) => {
@@ -417,6 +440,7 @@ async function handleIgnoreFaceInSidebar(faceId: number) {
   try {
     await ignoreFace(faceId)
     detectedFaces.value = detectedFaces.value.filter(f => f.id !== faceId)
+    if (selectedPhoto.value) invalidatePhotoFaces(selectedPhoto.value.id)
     if (selectedPersonDetail.value) {
       selectedPersonDetail.value.faces = selectedPersonDetail.value.faces.filter(f => f.id !== faceId)
     }
@@ -433,6 +457,7 @@ async function handleIgnoreFace(faceId: number) {
     accept: async () => {
       try {
         await ignoreFace(faceId)
+        if (selectedPhoto.value) invalidatePhotoFaces(selectedPhoto.value.id)
         if (selectedPersonDetail.value) {
           selectedPersonDetail.value.faces = selectedPersonDetail.value.faces.filter(f => f.id !== faceId)
           if (selectedIndex.value >= uniquePhotoFaceItems.value.length) {
@@ -836,6 +861,7 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
       @close="isFullscreen = false"
       @prev="selectedIndex--"
       @next="selectedIndex++"
+      @current-loaded="onFullscreenImageLoaded"
       @toggle-favorite="handleToggleFavorite"
       @hide="handleHidePhoto"
       @restore="handleRestorePhoto"
