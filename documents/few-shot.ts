@@ -30,8 +30,13 @@ import { embedTexts, type ClassifyExample } from "./llm-client";
  */
 const CANDIDATE_CHUNK_LIMIT = 60;
 
-/** Default number of distinct-category examples rendered into the prompt. */
-const DEFAULT_MAX_EXAMPLES = 5;
+/**
+ * Default number of distinct-category examples rendered into the prompt.
+ * Kept small: the taxonomy + tax-section outline already fills most of the
+ * 8k context window, so a large example block would be shed by the
+ * llm-service token-budget guard anyway (see `_assemble` in `main.py`).
+ */
+const DEFAULT_MAX_EXAMPLES = 3;
 
 /**
  * Probe text length sent to the embedder. The first ~2k characters carry the
