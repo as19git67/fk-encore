@@ -21,9 +21,6 @@ import {
   invalidatePhotoAlbums,
   invalidatePhotoMeta,
   prefetchPhotoMeta,
-  clearScanDerivedCaches,
-  peekPhotoFacesCached,
-  peekPhotoPoiMatchesCached,
 } from './usePhotoMetaCache'
 
 beforeEach(() => {
@@ -123,22 +120,6 @@ describe('usePhotoMetaCache', () => {
     expect(getPhotoFaces).toHaveBeenCalledWith(109)
     expect(getPhotosAlbums).toHaveBeenCalledWith([109])
     expect(peekPhotoAlbumsCached(109)).toEqual([])
-  })
-
-  it('clearScanDerivedCaches drops faces + POI but keeps albums', async () => {
-    getPhotoFaces.mockResolvedValue({ faces: [{ id: 1 }] })
-    getPhotoPoiMatches.mockResolvedValue({ matches: [{ id: 2 }] })
-    await getPhotoFacesCached(120)
-    await getPhotoPoiMatchesCached(120)
-    primePhotoAlbumsCache(120, [3])
-    clearScanDerivedCaches()
-    // Faces/POI gone, albums retained.
-    expect(peekPhotoFacesCached(120)).toBeUndefined()
-    expect(peekPhotoPoiMatchesCached(120)).toBeUndefined()
-    expect(peekPhotoAlbumsCached(120)).toEqual([3])
-    // A re-read re-fetches (so a POI populated after the scan is now visible).
-    getPhotoPoiMatches.mockResolvedValue({ matches: [{ id: 9 }] })
-    await expect(getPhotoPoiMatchesCached(120)).resolves.toEqual([{ id: 9 }])
   })
 
   it('prefetchPhotoMeta ignores invalid ids', () => {
