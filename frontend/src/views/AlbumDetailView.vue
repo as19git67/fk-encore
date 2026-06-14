@@ -89,7 +89,6 @@ import {
   prefetchPhotoMeta,
   invalidatePhotoFaces,
   invalidatePhotoMeta,
-  clearScanDerivedCaches,
 } from '../composables/usePhotoMetaCache'
 import {
   albumsViewQueryFromStorage,
@@ -2016,11 +2015,6 @@ let scanRefreshTimer: ReturnType<typeof setTimeout> | null = null
 useRealtimeEvent('photos', 'scan.updated', (ev) => {
   const affectedAlbums = ev.payload?.albumIds as number[] | undefined
   if (affectedAlbums?.length && !affectedAlbums.includes(albumId.value)) return
-  // Scans (POI / face detection) can produce metadata after we already cached
-  // an empty result for a photo — drop the scan-derived caches and re-hydrate
-  // the photo currently shown in the sidebar so POIs/faces appear live.
-  clearScanDerivedCaches()
-  if (activeDetailPhoto.value) void loadSidebarData(activeDetailPhoto.value.id)
   if (scanRefreshTimer) return
   scanRefreshTimer = setTimeout(() => {
     scanRefreshTimer = null
