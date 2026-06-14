@@ -56,9 +56,10 @@ const props = defineProps<{
   /** Hide the "Alle Fotos" entry in the location menu (we're already there). */
   locationMenuExcludeAllPhotos?: boolean
   /** When true, the sidebar is rendered inside the fullscreen details
-   *  flyout: it fills the available width, the photo preview is hidden
-   *  (the user already sees the photo in the fullscreen view), and a
-   *  small map with a pin is shown under the location section. */
+   *  flyout: it fills the available width and the photo preview is hidden
+   *  (the user already sees the photo in the fullscreen view). The location
+   *  mini-map renders in both modes (flyout and the desktop side panel);
+   *  in the flyout it additionally waits for flyoutOpen + imageReady. */
   inFlyout?: boolean
   /** Whether the fullscreen flyout is actually open. The flyout stays mounted
    *  across photo changes (to preserve scroll state), so without this the
@@ -520,7 +521,7 @@ watch(() => props.readOnly, (ro) => {
         </div>
       </div>
 
-      <template v-if="photo.location_city || photo.location_name || (poiMatches && poiMatches.length > 0) || loadingPoiMatches || (inFlyout && photo.latitude != null && photo.longitude != null)">
+      <template v-if="photo.location_city || photo.location_name || (poiMatches && poiMatches.length > 0) || loadingPoiMatches || (photo.latitude != null && photo.longitude != null)">
         <div class="sidebar-divider" />
         <div class="sidebar-section">
           <div v-if="photo.location_name || photo.location_city" class="meta-row location-row">
@@ -532,7 +533,7 @@ watch(() => props.readOnly, (ro) => {
             </span>
           </div>
           <PhotoMiniMap
-            v-if="inFlyout && flyoutOpen !== false && imageReady !== false && photo.latitude != null && photo.longitude != null"
+            v-if="photo.latitude != null && photo.longitude != null && (!inFlyout || (flyoutOpen !== false && imageReady !== false))"
             :key="photo.id"
             :latitude="photo.latitude"
             :longitude="photo.longitude"
