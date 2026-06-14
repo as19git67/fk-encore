@@ -70,6 +70,13 @@ import { useNaturalSearch } from '../composables/useNaturalSearch'
 import { useReferenceData } from '../composables/useReferenceData'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 import { useRealtimeEvent } from '../composables/useRealtime'
+import {
+  getPhotoFacesCached,
+  getPhotoPoiMatchesCached,
+  prefetchPhotoMeta,
+  invalidatePhotoFaces,
+  invalidatePhotoMeta,
+} from '../composables/usePhotoMetaCache'
 import { useAuthStore } from '../stores/auth'
 import { useServiceHealthStore } from '../stores/serviceHealth'
 import { usePhotoNavStore } from '../stores/photoNav'
@@ -88,8 +95,6 @@ import {
   checkPhotoHash,
   uploadPhotoWithProgress,
   getPhotoDetailsBatch,
-  getPhotoFaces,
-  getPhotoPoiMatches,
   ignoreFace,
   reindexPhoto,
   updatePhotoDate,
@@ -882,22 +887,36 @@ async function loadPhotoDetails(photoId: number, token: number): Promise<void> {
   detectedFaces.value = []
   detectedPoiMatches.value = []
   try {
-    // POI matches load alongside faces. A 5xx on the POI endpoint (e.g.
-    // osm-admin service down) falls back to an empty list so the rest of
-    // the sidebar still renders.
+    // POI matches load alongside faces. Both go through the shared per-photo
+    // cache so a neighbour prefetched while the current image was decoding is
+    // an instant hit here. A 5xx on either endpoint (e.g. osm-admin service
+    // down) falls back to an empty list so the rest of the sidebar still
+    // renders.
     const [facesRes, poisRes] = await Promise.all([
-      getPhotoFaces(photoId).catch(() => ({ faces: [] })),
-      getPhotoPoiMatches(photoId).catch(() => ({ matches: [] })),
+      getPhotoFacesCached(photoId).catch(() => [] as Face[]),
+      getPhotoPoiMatchesCached(photoId).catch(() => [] as PoiMatchItem[]),
     ])
     if (token !== hydrateToken) return
-    detectedFaces.value = facesRes.faces ?? []
-    detectedPoiMatches.value = poisRes.matches ?? []
+    detectedFaces.value = facesRes
+    detectedPoiMatches.value = poisRes
   } finally {
     if (token === hydrateToken) {
       loadingFaces.value = false
       loadingPoiMatches.value = false
     }
   }
+}
+
+// Once the fullscreen image is actually decoded, warm the prev/next photo's
+// "light" metadata (faces, POI matches, album membership) so navigating to a
+// neighbour is an instant cache hit instead of a fresh round-trip with a
+// spinner. Gated on the image being loaded — and on the details panel being
+// open — so the prefetch never competes with the visible image for the
+// browser's per-host connection budget (the same reasoning as hydrateCursor).
+function onFullscreenImageLoaded(): void {
+  if (!detailsVisible.value) return
+  if (cursorNext.value) prefetchPhotoMeta(cursorNext.value.id)
+  if (cursorPrev.value) prefetchPhotoMeta(cursorPrev.value.id)
 }
 
 // Synthesize a minimal Photo from the grid entry. Used as a fallback when
@@ -1096,7 +1115,8 @@ async function onSidebarIgnoreFace(faceId: number) {
   if (!photo) return
   try {
     await ignoreFace(faceId)
-    // Reload faces so the ignored one disappears from the list.
+    // Drop the cached faces so the ignored one disappears, then reload.
+    invalidatePhotoFaces(photo.id)
     await loadPhotoDetails(photo.id, hydrateToken)
   } catch { /* keep silent — user can retry */ }
 }
@@ -1107,6 +1127,8 @@ async function onSidebarReindex() {
   reindexingPhoto.value = true
   try {
     await reindexPhoto(photo.id)
+    // Reindex can change faces and POI matches — drop all cached meta.
+    invalidatePhotoMeta(photo.id)
     await loadPhotoDetails(photo.id, hydrateToken)
   } catch { /* user can retry */ }
   finally { reindexingPhoto.value = false }
@@ -1540,6 +1562,7 @@ void refreshReviewSequence()
       @close="closeFullscreen"
       @prev="goPrev"
       @next="goNext"
+      @current-loaded="onFullscreenImageLoaded"
       @toggle-favorite="onFullscreenToggleFavorite"
       @hide="onFullscreenHide"
       @restore="onFullscreenRestore"
