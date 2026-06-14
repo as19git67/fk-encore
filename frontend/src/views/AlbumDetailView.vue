@@ -680,7 +680,9 @@ async function hydrateCursor(index: number): Promise<void> {
 
   photoNav.selectPhotoInAlbum(curEntry.id, albumId.value)
 
-  void loadSidebarData(curEntry.id)
+  // Only fetch per-photo metadata when the details panel can show it (always
+  // on desktop; only with the flyout open in fullscreen).
+  if (detailsVisible.value) void loadSidebarData(curEntry.id)
 
   const ids = [curEntry.id]
   if (prevEntry) ids.push(prevEntry.id)
@@ -928,13 +930,28 @@ const activeDetailPhoto = computed(() =>
   isMapFullscreen.value ? mapSelectedPhoto.value : cursorPhoto.value
 )
 
+// Whether the details panel is actually on screen. On desktop the right
+// sidebar is always present, so outside fullscreen this is simply true; in
+// either fullscreen overlay it tracks the flyout toggle. Mirrors GalleryView's
+// `detailsVisible` so per-photo metadata is only fetched when it can be seen.
+const detailsVisible = computed(() =>
+  (isFullscreen.value || isMapFullscreen.value) ? fullscreenDetailsOpen.value : true
+)
+
 watch(activeDetailPhoto, (photo) => {
   if (photo) {
-    loadSidebarData(photo.id)
+    if (detailsVisible.value) loadSidebarData(photo.id)
     if (showPersons.value) void loadPersons()
   } else {
     detectedFaces.value = []
   }
+})
+
+// Lazily load the active photo's metadata the moment the panel becomes visible
+// (flyout opened in fullscreen, or fullscreen closed back to the desktop
+// sidebar). Nothing is fetched while the flyout is closed.
+watch(detailsVisible, (visible) => {
+  if (visible && activeDetailPhoto.value) loadSidebarData(activeDetailPhoto.value.id)
 })
 
 
