@@ -1569,9 +1569,11 @@ void refreshReviewSequence()
       @show-details="onShowDetails"
       @open-group-review="onFullscreenOpenGroupReview"
     >
-      <template #details-flyout="{ readOnly }">
+      <template #details-flyout="{ readOnly, detailsOpen, imageReady }">
         <PhotoDetailSidebar
           :read-only="readOnly"
+          :flyout-open="detailsOpen"
+          :image-ready="imageReady"
           :photo="cursorPhoto"
           :faces="detectedFaces"
           :loading-faces="loadingFaces"

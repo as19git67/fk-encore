@@ -60,6 +60,15 @@ const props = defineProps<{
    *  (the user already sees the photo in the fullscreen view), and a
    *  small map with a pin is shown under the location section. */
   inFlyout?: boolean
+  /** Whether the fullscreen flyout is actually open. The flyout stays mounted
+   *  across photo changes (to preserve scroll state), so without this the
+   *  embedded OSM mini-map would load tiles even while the panel is closed,
+   *  competing with the main image. Defaults to true for non-flyout hosts. */
+  flyoutOpen?: boolean
+  /** Whether the current fullscreen image has finished decoding. Gates the
+   *  mini-map so its OSM tiles load only after the photo is on screen — never
+   *  racing the image for the browser's per-host connections. Defaults true. */
+  imageReady?: boolean
   /** Album-scoped curation opinions (fav/hide across album participants).
    *  Supplied by the album views because the fullscreen/split cursor photo —
    *  hydrated from the grid + photo-details batch — doesn't carry this
@@ -523,7 +532,7 @@ watch(() => props.readOnly, (ro) => {
             </span>
           </div>
           <PhotoMiniMap
-            v-if="inFlyout && photo.latitude != null && photo.longitude != null"
+            v-if="inFlyout && flyoutOpen !== false && imageReady !== false && photo.latitude != null && photo.longitude != null"
             :key="photo.id"
             :latitude="photo.latitude"
             :longitude="photo.longitude"

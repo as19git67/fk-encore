@@ -1020,7 +1020,7 @@ onUnmounted(() => {
           @touchmove.stop
           @wheel.stop
         >
-          <slot name="details-flyout" :read-only="slideshowActive" />
+          <slot name="details-flyout" :read-only="slideshowActive" :details-open="props.detailsActive" :image-ready="currentLoaded" />
         </div>
       </div>
 
@@ -1256,7 +1256,7 @@ onUnmounted(() => {
         @touchmove.stop
         @wheel.stop
       >
-        <slot name="details-flyout" :read-only="slideshowActive" />
+        <slot name="details-flyout" :read-only="slideshowActive" :details-open="props.detailsActive" :image-ready="currentLoaded" />
       </div>
 
       <!-- Vertical-centered prev/next arrows. Hidden on touch-only
