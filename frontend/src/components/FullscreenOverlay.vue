@@ -169,6 +169,9 @@ const emit = defineEmits<{
   'toggle-cover': [id: number]
   /** Fired when the user clicks the +N marker → parent opens review. */
   'open-group-review': []
+  /** Fired once the current photo's image is actually decoded on screen, so
+   *  the host can warm neighbour metadata without competing with the image. */
+  'current-loaded': [id: number]
 }>()
 
 // Per-user photo recipe — applies the caller's exposure/contrast/gamma
@@ -744,7 +747,11 @@ watch(() => props.nextPhoto, () => scheduleIdleAdvance())
 // contrast, lets the slideshow keep running.
 watch(transformEditorVisible, (open) => { if (open) playing.value = false })
 // Start the countdown only once the current photo is fully loaded.
-watch(currentLoaded, () => scheduleIdleAdvance())
+watch(currentLoaded, (loaded) => {
+  scheduleIdleAdvance()
+  // Tell the host the image is on screen so it can prefetch neighbour metadata.
+  if (loaded) emit('current-loaded', props.photo.id)
+})
 
 onMounted(() => {
   scheduleIdleAdvance()
