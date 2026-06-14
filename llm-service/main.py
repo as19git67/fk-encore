@@ -386,6 +386,18 @@ class SubjectPersonEntry(BaseModel):
     relation_tag: str
 
 
+class ExampleEntry(BaseModel):
+    """One already-classified, content-similar document of the same household,
+    retrieved by embedding similarity and rendered into the prompt as a
+    few-shot anchor. Orientation only — the classifier still decides from the
+    document text. Empty list = few-shot disabled; prompt section is omitted."""
+
+    category_slug: str
+    category_name: str = ""
+    title: str = ""
+    sender: str | None = None
+
+
 class ClassifyRequest(BaseModel):
     text: str = Field(..., min_length=1)
     taxonomy: list[TaxonomyNode] = Field(..., min_length=1)
@@ -397,6 +409,9 @@ class ClassifyRequest(BaseModel):
     # the prompt so address/recipient matches auto-tag the document.
     # Empty list = no Bezugsperson hints; prompt section is omitted.
     subject_persons: list[SubjectPersonEntry] = Field(default_factory=list)
+    # Nearest already-classified documents (retrieval-augmented few-shot).
+    # Empty list = no examples; prompt section is omitted.
+    examples: list[ExampleEntry] = Field(default_factory=list)
     # Optional hints: sender hint from OCR, upload filename, user locale.
     locale: str = "de"
     max_tags: int = 6
@@ -473,6 +488,17 @@ wenn aus dem Kontext zweifelsfrei dieselbe Person gemeint ist.
 Eine Bezugsperson ist der Empfänger/Betroffene, NIE der Absender/Aussteller —
 trage ihren Namen niemals in `sender` ein.
 """
+
+
+_EXAMPLES_SYSTEM_PROMPT = """
+
+ÄHNLICHE DOKUMENTE (nur wenn dir unten eine Liste von Beispielen gezeigt wird)
+Du bekommst eine kurze Liste bereits eingeordneter, inhaltlich ähnlicher
+Dokumente desselben Haushalts — jeweils Absender, Titel und die damals
+gewählte Kategorie. Nutze sie als Orientierung: wiederkehrende Absender und
+Dokumenttypen landen meist in derselben Kategorie. Die Beispiele sind aber
+NICHT bindend — entscheide anhand des konkreten Dokumenttextes. Wenn der Text
+klar zu einer anderen Kategorie passt, weiche begründet ab."""
 
 
 _TAX_SYSTEM_PROMPT = """
@@ -584,6 +610,19 @@ def _subject_persons_outline(entries: list[SubjectPersonEntry]) -> str:
     return "\n".join(f"- {e.full_name} → {e.relation_tag}" for e in entries)
 
 
+def _examples_outline(entries: list[ExampleEntry]) -> str:
+    """Render the few-shot examples as 'Absender X | Titel Y → slug (Name)'.
+    Empty input yields '' so the caller can omit the prompt section."""
+    if not entries:
+        return ""
+    lines: list[str] = []
+    for e in entries:
+        sender = e.sender if e.sender else "unbekannt"
+        cat = f"{e.category_slug} ({e.category_name})" if e.category_name else e.category_slug
+        lines.append(f"- Absender: {sender} | Titel: {e.title} → {cat}")
+    return "\n".join(lines)
+
+
 def _tax_sections_outline(entries: list[TaxSectionEntry]) -> str:
     """Render the tax-section list grouped by ``group`` in a stable order.
     Empty input yields an empty string (caller must gate on that)."""
@@ -671,10 +710,12 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
 
     tax_active = bool(req.tax_sections)
     subjects_active = bool(req.subject_persons)
+    examples_active = bool(req.examples)
     system_prompt = (
         _SYSTEM_PROMPT
         + (_TAX_SYSTEM_PROMPT if tax_active else "")
         + (_SUBJECT_PERSONS_SYSTEM_PROMPT if subjects_active else "")
+        + (_EXAMPLES_SYSTEM_PROMPT if examples_active else "")
     )
 
     tax_block = (
@@ -689,10 +730,16 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
         else ""
     )
 
+    examples_block = (
+        f"\n\nÄhnliche, bereits eingeordnete Dokumente (Orientierung):\n{_examples_outline(req.examples)}"
+        if examples_active
+        else ""
+    )
+
     def _build_user_prompt(body: str) -> str:
         return (
             f"Taxonomie (slug: Name — Hinweis):\n{_taxonomy_outline(req.taxonomy)}"
-            f"{tax_block}{subjects_block}\n\n"
+            f"{tax_block}{subjects_block}{examples_block}\n\n"
             f"Max. Tags: {req.max_tags}\n\n"
             f"Dokumenttext:\n---\n{body}\n---"
         )
