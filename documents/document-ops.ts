@@ -35,6 +35,7 @@ import { loadEffectiveTaxSections } from "./tax-hint-overrides";
 import { loadSubjectPersonsForMatch } from "./subject-persons";
 import { flattenTaxonomy, taxonomyHints } from "./taxonomy";
 import { matchSenderRule } from "./sender-rules";
+import { buildClassifyExamples } from "./few-shot";
 import {
   detectSubjectPersonIds,
   extractDocumentNumber,
@@ -186,11 +187,20 @@ export async function runClassify(documentId: number): Promise<{ classification:
     full_name,
     relation_tag,
   }));
+  // Retrieval-augmented few-shot: anchor the LLM with the nearest already-
+  // classified documents of this household. Best-effort — degrades to plain
+  // zero-shot when the embedder is down or no prior corpus exists.
+  const examples = await buildClassifyExamples({
+    documentId,
+    userId: row.user_id,
+    text: clipped,
+  });
   const classification = await classifyDocument({
     text: clipped,
     taxonomy,
     tax_sections,
     subject_persons,
+    examples,
   });
 
   // Deterministic metadata cleanup (see metadata-extract.ts, #664):

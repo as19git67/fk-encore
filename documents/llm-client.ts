@@ -75,6 +75,19 @@ export interface SubjectPersonRequestEntry {
   relation_tag: string;
 }
 
+/**
+ * One already-classified, content-similar document of the same household,
+ * sent to the classifier as a few-shot anchor (retrieval-augmented
+ * classification, see `few-shot.ts`). The model is told to treat these as
+ * orientation, not as a binding label.
+ */
+export interface ClassifyExample {
+  sender: string | null;
+  title: string;
+  category_slug: string;
+  category_name: string;
+}
+
 export interface ClassifyRequest {
   text: string;
   taxonomy: TaxonomyEntry[];
@@ -86,6 +99,9 @@ export interface ClassifyRequest {
   // instructed to add the corresponding relation_tag to its `tags`
   // output. Omit/empty to disable that behaviour entirely.
   subject_persons?: SubjectPersonRequestEntry[];
+  // The k nearest already-classified documents (by embedding similarity),
+  // rendered into the prompt as orientation. Omit/empty to disable few-shot.
+  examples?: ClassifyExample[];
 }
 
 /**
