@@ -12,6 +12,11 @@ import { getAlbumCheckState as calculateAlbumCheckState } from '../utils/albumSe
 import type { Photo, Face, PoiMatchItem, Person, CurationStatus } from '../api/photos'
 import { useReferenceData } from '../composables/useReferenceData'
 import { useUserPhotoTransform } from '../composables/useUserPhotoTransform'
+import {
+  peekPhotoAlbumsCached,
+  primePhotoAlbumsCache,
+  invalidatePhotoAlbums,
+} from '../composables/usePhotoMetaCache'
 import { useAuthStore } from '../stores/auth'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -138,15 +143,35 @@ const albumPhotoIds = computed<number[]>(() => (
 async function loadPhotosAlbums() {
   const photoIds = albumPhotoIds.value
   try {
-    const res = await getPhotosAlbums(photoIds)
     const map: Record<number, number[]> = {}
-    res.results.forEach(r => {
-      map[r.photoId] = r.albumIds
-    })
+    // Serve ids already in the shared cache (warmed by neighbour prefetch in
+    // fullscreen) without a request; only fetch the misses. This is what makes
+    // album chips appear instantly when stepping to a prefetched neighbour.
+    const missing: number[] = []
+    for (const id of photoIds) {
+      const hit = peekPhotoAlbumsCached(id)
+      if (hit !== undefined) map[id] = hit
+      else missing.push(id)
+    }
+    if (missing.length > 0) {
+      const res = await getPhotosAlbums(missing)
+      res.results.forEach(r => {
+        map[r.photoId] = r.albumIds
+        primePhotoAlbumsCache(r.photoId, r.albumIds)
+      })
+    }
     photoAlbumMap.value = map
   } catch (err) {
     console.error('Failed to load photos albums:', err)
   }
+}
+
+// After the album dialog persists membership changes, the shared cache is
+// stale for those photos — drop them so the reload (and any later neighbour
+// read) fetches fresh data.
+function onAlbumMembershipSaved() {
+  for (const id of albumPhotoIds.value) invalidatePhotoAlbums(id)
+  loadPhotosAlbums()
 }
 
 // Watch a stable key derived from the IDs currently shown in the sidebar.
@@ -647,7 +672,7 @@ watch(() => props.readOnly, (ro) => {
     <PhotoAlbumDialog
       v-model:visible="albumDialogVisible"
       :photo-ids="albumPhotoIds"
-      @saved="loadPhotosAlbums"
+      @saved="onAlbumMembershipSaved"
     />
     <PhotoTransformEditor
       v-model:visible="transformEditorVisible"
