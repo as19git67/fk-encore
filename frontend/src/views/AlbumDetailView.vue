@@ -55,8 +55,6 @@ import {
   getAlbumShareableUsers,
   getAlbumShares,
   getPhotoDetailsBatch,
-  getPhotoFaces,
-  getPhotoPoiMatches,
   ignoreFace,
   leaveAlbum,
   listPhotoGroups,
@@ -83,6 +81,15 @@ import { useNaturalSearch } from '../composables/useNaturalSearch'
 import { useReferenceData } from '../composables/useReferenceData'
 import { onMounted, onUnmounted } from 'vue'
 import { useRealtimeEvent } from '../composables/useRealtime'
+import {
+  getPhotoFacesCached,
+  getPhotoPoiMatchesCached,
+  peekPhotoFacesCached,
+  peekPhotoPoiMatchesCached,
+  prefetchPhotoMeta,
+  invalidatePhotoFaces,
+  invalidatePhotoMeta,
+} from '../composables/usePhotoMetaCache'
 import {
   albumsViewQueryFromStorage,
   rememberFocusedAlbumId,
@@ -1025,27 +1032,51 @@ async function refreshGroupsAndPhotos() {
   } catch { /* keep current data on failure */ }
 }
 
+let sidebarToken = 0
 async function loadSidebarData(photoId: number) {
-  loadingFaces.value = true
-  loadingPoiMatches.value = true
+  const token = ++sidebarToken
+  // Serve cache hits synchronously and only flip the loading flags for data we
+  // actually have to fetch — a prefetched neighbour shows instantly without the
+  // faces / "Sehenswürdigkeit wird erkannt…" spinner flashing. The cache also
+  // dedups against the neighbour prefetch warmed while the image decoded.
+  const cachedFaces = peekPhotoFacesCached(photoId)
+  const cachedPois = peekPhotoPoiMatchesCached(photoId)
+  detectedFaces.value = cachedFaces ?? []
+  detectedPoiMatches.value = cachedPois ?? []
+  loadingFaces.value = cachedFaces === undefined
+  loadingPoiMatches.value = cachedPois === undefined
+  if (cachedFaces !== undefined && cachedPois !== undefined) return
   try {
-    // POI matches load alongside faces. Each call falls back to
-    // an empty result on error (e.g. osm-admin down) so the rest of the
-    // sidebar still renders. Previously POIs weren't loaded here at all, so
-    // they never showed in the album detail / split-screen sidebar.
+    // POI matches load alongside faces; the already-cached side returns
+    // instantly. Each call falls back to an empty result on error (e.g.
+    // osm-admin down) so the rest of the sidebar still renders.
     const [facesRes, poisRes] = await Promise.all([
-      getPhotoFaces(photoId).catch(() => ({ faces: [] })),
-      getPhotoPoiMatches(photoId).catch(() => ({ matches: [] })),
+      getPhotoFacesCached(photoId).catch(() => [] as Face[]),
+      getPhotoPoiMatchesCached(photoId).catch(() => [] as PoiMatchItem[]),
     ])
-    detectedFaces.value = facesRes.faces ?? []
-    detectedPoiMatches.value = poisRes.matches ?? []
-  } catch {
-    detectedFaces.value = []
-    detectedPoiMatches.value = []
+    if (token !== sidebarToken) return
+    detectedFaces.value = facesRes
+    detectedPoiMatches.value = poisRes
   } finally {
-    loadingFaces.value = false
-    loadingPoiMatches.value = false
+    if (token === sidebarToken) {
+      loadingFaces.value = false
+      loadingPoiMatches.value = false
+    }
   }
+}
+
+// Once a fullscreen image is decoded, warm the neighbours' faces/POI/album
+// metadata so the next prev/next is an instant cache hit. Gated on the details
+// panel being open so the prefetch never competes with the visible image.
+function onGridImageLoaded() {
+  if (!fullscreenDetailsOpen.value) return
+  if (cursorNext.value) prefetchPhotoMeta(cursorNext.value.id)
+  if (cursorPrev.value) prefetchPhotoMeta(cursorPrev.value.id)
+}
+function onMapImageLoaded() {
+  if (!fullscreenDetailsOpen.value) return
+  if (mapNextPhoto.value) prefetchPhotoMeta(mapNextPhoto.value.id)
+  if (mapPrevPhoto.value) prefetchPhotoMeta(mapPrevPhoto.value.id)
 }
 
 // ── Curation ──────────────────────────────────────────────────────────────────
@@ -1111,7 +1142,14 @@ function handleToggleFavorite(id: number, currentStatus: CurationStatus) {
 }
 
 async function handleIgnoreFaceInSidebar(faceId: number) {
-  try { await ignoreFace(faceId); detectedFaces.value = detectedFaces.value.filter(f => f.id !== faceId) }
+  try {
+    await ignoreFace(faceId)
+    detectedFaces.value = detectedFaces.value.filter(f => f.id !== faceId)
+    // Drop the cached faces so a later return to this photo doesn't resurrect
+    // the ignored one from the prefetch cache.
+    const activeId = activeDetailPhoto.value?.id
+    if (activeId) invalidatePhotoFaces(activeId)
+  }
   catch (err: any) { error.value = err.message || 'Fehler' }
 }
 
@@ -1152,7 +1190,11 @@ async function handleUpdateDate() {
 async function handleReindexPhoto() {
   if (!cursorPhoto.value) return
   reindexingPhoto.value = true
-  try { await reindexPhoto(cursorPhoto.value.id); await loadSidebarData(cursorPhoto.value.id) }
+  try {
+    await reindexPhoto(cursorPhoto.value.id)
+    invalidatePhotoMeta(cursorPhoto.value.id)
+    await loadSidebarData(cursorPhoto.value.id)
+  }
   catch (err: any) { error.value = err.message || 'Fehler' }
   finally { reindexingPhoto.value = false }
 }
@@ -2423,6 +2465,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       @close="closeGridFullscreen"
       @prev="gridGoPrev"
       @next="gridGoNext"
+      @current-loaded="onGridImageLoaded"
       @toggle-favorite="handleToggleFavorite"
       @hide="handleHidePhoto"
       @restore="handleRestorePhoto"
@@ -2440,10 +2483,12 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           @click="handleSetMapCover(cursorPhoto.id)"
         />
       </template>
-      <template #details-flyout="{ readOnly }">
+      <template #details-flyout="{ readOnly, detailsOpen, imageReady }">
         <PhotoDetailSidebar
           :in-flyout="true"
           :read-only="readOnly"
+          :flyout-open="detailsOpen"
+          :image-ready="imageReady"
           :photo="cursorPhoto"
           :curation-stats="cursorCurationStats"
           :can-delete="canDeletePhotos || canWrite"
@@ -2495,6 +2540,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       @close="closeMapFullscreen(); fullscreenDetailsOpen = false"
       @prev="mapFullscreenIndex--"
       @next="mapFullscreenIndex++"
+      @current-loaded="onMapImageLoaded"
       @toggle-favorite="handleToggleFavorite"
       @hide="handleHidePhoto"
       @restore="handleRestorePhoto"
@@ -2511,10 +2557,12 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           @click="handleSetMapCover(mapSelectedPhoto.id)"
         />
       </template>
-      <template #details-flyout="{ readOnly }">
+      <template #details-flyout="{ readOnly, detailsOpen, imageReady }">
         <PhotoDetailSidebar
           :in-flyout="true"
           :read-only="readOnly"
+          :flyout-open="detailsOpen"
+          :image-ready="imageReady"
           :photo="mapSelectedPhoto"
           :can-delete="canDeletePhotos || canWrite"
           :can-upload="canUploadPhotos"
