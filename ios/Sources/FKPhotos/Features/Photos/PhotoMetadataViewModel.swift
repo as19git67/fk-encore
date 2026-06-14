@@ -13,15 +13,8 @@ final class PhotoMetadataViewModel {
     private(set) var description: String?
     private(set) var keywords: [String] = []
 
-    struct LandmarkEntry: Identifiable {
-        let id: Int
-        let label: String
-        let confidence: Double
-    }
-
     var namedFaces: [NamedFace] = []
     var facesLoadFailed = false
-    var landmarks: [LandmarkEntry] = []
     var sortedAlbums: [Album] = []
     var photoAlbumIds: Set<Int> = []
     var pendingAdds: Set<Int> = []
@@ -60,9 +53,8 @@ final class PhotoMetadataViewModel {
         hasLoaded = true
         async let facesTask: Void = loadFaces()
         async let albumsTask: Void = loadAlbums()
-        async let landmarksTask: Void = loadLandmarks()
         async let detailsTask: Void = loadDetails()
-        _ = await (facesTask, albumsTask, landmarksTask, detailsTask)
+        _ = await (facesTask, albumsTask, detailsTask)
     }
 
     @MainActor
@@ -111,20 +103,6 @@ final class PhotoMetadataViewModel {
         } catch {
             // silently ignore
         }
-    }
-
-    @MainActor
-    private func loadLandmarks() async {
-        struct Item: Codable {
-            let id: Int; let label: String; let confidence: Double
-        }
-        struct LandmarksResponse: Codable { let landmarks: [Item] }
-        do {
-            let response: LandmarksResponse = try await APIClient.shared.get("/photos/\(photo.id)/landmarks")
-            landmarks = response.landmarks
-                .filter { $0.confidence >= 0.6 }
-                .map { LandmarkEntry(id: $0.id, label: $0.label, confidence: $0.confidence) }
-        } catch {}
     }
 
     func albumCheckState(for albumId: Int) -> Bool {

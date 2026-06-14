@@ -1,9 +1,9 @@
 /**
- * Pure zoom math for the compare-view's "zoom to face / landmark" feature
- * (Track N / #79). Given a normalized bbox (face or landmark) and a
- * viewport that hosts a photo rendered with `object-fit: contain`, returns
- * the CSS `transform` + `transform-origin` that brings the bbox centre to
- * the viewport centre at a chosen zoom level.
+ * Pure zoom math for the compare-view's "zoom to face" feature
+ * (Track N / #79). Given a normalized face bbox and a viewport that hosts
+ * a photo rendered with `object-fit: contain`, returns the CSS `transform`
+ * + `transform-origin` that brings the bbox centre to the viewport centre
+ * at a chosen zoom level.
  *
  * Designed to be consumed by `PhotoCompareView.vue`. Kept side-effect-free
  * so the math is unit-testable without a DOM.
@@ -182,10 +182,10 @@ export function computeSyncBboxZoom(
 }
 
 /**
- * Pick the best bbox for a "zoom to face" gesture. Faces with a
+ * Pick the best face bbox for a "zoom to face" gesture. Faces with a
  * `person_id` (the user has tagged them) beat unassigned faces; among
- * those, higher quality and larger bboxes win. Falls back to the top
- * landmark by confidence. Returns `null` when nothing is suitable.
+ * those, higher quality and larger bboxes win. Returns `null` when no
+ * usable face is present.
  */
 export interface PickFaceInput {
   bbox: BBox
@@ -194,15 +194,9 @@ export interface PickFaceInput {
   ignored?: boolean
 }
 
-export interface PickLandmarkInput {
-  bbox: BBox
-  confidence: number
-}
-
 export function pickPrimaryBbox(
   faces: PickFaceInput[],
-  landmarks: PickLandmarkInput[],
-): { source: 'face' | 'landmark'; bbox: BBox; person_id?: number | null } | null {
+): { source: 'face'; bbox: BBox; person_id?: number | null } | null {
   const usable = faces.filter((f) => !f.ignored && isValidBbox(f.bbox))
   if (usable.length > 0) {
     const scored = usable
@@ -216,11 +210,6 @@ export function pickPrimaryBbox(
       .sort((a, b) => b.score - a.score)
     const top = scored[0]!.f
     return { source: 'face', bbox: top.bbox, person_id: top.person_id ?? null }
-  }
-  const usableLm = landmarks.filter((l) => isValidBbox(l.bbox))
-  if (usableLm.length > 0) {
-    const top = [...usableLm].sort((a, b) => b.confidence - a.confidence)[0]!
-    return { source: 'landmark', bbox: top.bbox }
   }
   return null
 }
@@ -261,10 +250,9 @@ export function findFaceForPerson(
  */
 export function pickBboxAtPoint(
   faces: PickFaceInput[],
-  landmarks: PickLandmarkInput[],
   point: { x: number; y: number },
   opts: { nearRadius?: number } = {},
-): { source: 'face' | 'landmark'; bbox: BBox; person_id?: number | null } | null {
+): { source: 'face'; bbox: BBox; person_id?: number | null } | null {
   if (
     !Number.isFinite(point.x) ||
     !Number.isFinite(point.y) ||
@@ -273,10 +261,10 @@ export function pickBboxAtPoint(
     point.y < 0 ||
     point.y > 1
   ) {
-    return pickPrimaryBbox(faces, landmarks)
+    return pickPrimaryBbox(faces)
   }
   const usable = faces.filter((f) => !f.ignored && isValidBbox(f.bbox))
-  if (usable.length === 0) return pickPrimaryBbox(faces, landmarks)
+  if (usable.length === 0) return pickPrimaryBbox(faces)
 
   const containing = usable.filter(
     (f) =>
@@ -306,7 +294,7 @@ export function pickBboxAtPoint(
     return { source: 'face', bbox: closest.f.bbox, person_id: closest.f.person_id ?? null }
   }
 
-  return pickPrimaryBbox(faces, landmarks)
+  return pickPrimaryBbox(faces)
 }
 
 /**

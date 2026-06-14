@@ -1700,7 +1700,7 @@ export const cancelPendingScans = api(
 );
 
 /**
- * Recompute auto-crop focus points for all photos based on existing face/landmark data.
+ * Recompute auto-crop focus points for all photos based on existing face data.
  */
 export const recomputeAutoCrops = api(
   { expose: true, method: "POST", path: "/photos/recompute-auto-crops", auth: true },
@@ -2117,39 +2117,12 @@ export const searchPhotosByLocation = api(
   }
 );
 
-/**
- * Search photos by landmark label (e.g. "kirche", "brücke", "eiffel").
- */
-export const searchPhotosByLandmark = api(
-  { expose: true, method: "POST", path: "/photos/search/landmarks", auth: true },
-  async ({ query, limit }: { query: string; limit?: number }): Promise<{ results: service.LandmarkSearchResult[] }> => {
-    checkModule();
-    const userId = getUserId();
-    const authData = getAuthData()!;
-    requirePermission(authData, "photos.view");
-    return await service.searchByLandmarkLogic(userId, query, limit ?? 500);
-  }
-);
-
-/**
- * Get all detected landmarks for a specific photo.
- */
-export const getPhotoLandmarks = api(
-  { expose: true, method: "GET", path: "/photos/:id/landmarks", auth: true },
-  async ({ id }: { id: number }): Promise<{ landmarks: service.LandmarkItem[] }> => {
-    checkModule();
-    const userId = getUserId();
-    const authData = getAuthData()!;
-    requirePermission(authData, "photos.view");
-    return await service.getLandmarksForPhotoLogic(userId, id);
-  }
-);
-
-// `POST /photos/:id/index-landmarks` was retired in Epic #383. The
-// Grounding-DINO landmark-service container no longer ships, so a
-// trigger to re-detect "Sehenswürdigkeiten" via that worker has
-// nothing to call. POI re-detection happens via the osm-admin
-// `poi_detection` scan service (force-rescan from data management).
+// Landmark detection & search were retired in Epic #383. The
+// Grounding-DINO landmark-service container no longer ships and the
+// `photo_landmarks` table was dropped; "Sehenswürdigkeiten" are now
+// surfaced via the osm-admin `poi_detection` pipeline (see
+// getPhotoPoiMatches below) and re-detected through a force-rescan from
+// data management.
 
 export interface PoiMatchItem {
   id: number;

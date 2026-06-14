@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/vue3'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import { defaultHandlers } from './handlers'
-import { MOCK_PHOTOS, MOCK_FACES, MOCK_LANDMARKS, MOCK_PERSONS } from './mock-data'
+import { MOCK_PHOTOS, MOCK_FACES, MOCK_PERSONS } from './mock-data'
 
 // Phone viewports used to exercise the split-detail layout. The split's
 // portrait/landscape branch keys off the `(orientation: …)` media query, i.e.
@@ -82,7 +82,6 @@ const renderWithSidebar: Story['render'] = (args) => ({
       args,
       sidebarPhoto: MOCK_PHOTOS[0]!,
       faces: MOCK_FACES,
-      landmarks: MOCK_LANDMARKS,
       persons: MOCK_PERSONS,
     }
   },
@@ -92,7 +91,6 @@ const renderWithSidebar: Story['render'] = (args) => ({
         <PhotoDetailSidebar
           :photo="sidebarPhoto"
           :faces="faces"
-          :landmarks="landmarks"
           :persons="persons"
           :can-delete="true"
           :can-upload="true"

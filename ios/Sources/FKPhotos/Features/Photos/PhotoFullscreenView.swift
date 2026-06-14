@@ -568,23 +568,6 @@ private struct PhotoPageView: View {
                     }
                 }
 
-                // Landmarks
-                if !viewModel.landmarks.isEmpty {
-                    sectionHeader("Sehenswürdigkeiten")
-                    ForEach(viewModel.landmarks) { landmark in
-                        detailRow {
-                            HStack {
-                                Label(landmark.label, systemImage: "mappin")
-                                    .font(.subheadline)
-                                Spacer()
-                                Text("\(Int((landmark.confidence * 100).rounded()))%")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-
                 // Albums
                 sectionHeader("Alben")
                 if viewModel.isLoadingAlbums {

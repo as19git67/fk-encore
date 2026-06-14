@@ -169,6 +169,9 @@ const emit = defineEmits<{
   'toggle-cover': [id: number]
   /** Fired when the user clicks the +N marker → parent opens review. */
   'open-group-review': []
+  /** Fired once the current photo's image is actually decoded on screen, so
+   *  the host can warm neighbour metadata without competing with the image. */
+  'current-loaded': [id: number]
 }>()
 
 // Per-user photo recipe — applies the caller's exposure/contrast/gamma
@@ -242,23 +245,42 @@ const groupBadgeTitle = computed(() => {
 
 // ── Preload erst nach Laden des aktuellen Bildes ────────────────────────────
 const currentLoaded = ref(false)
+const zoomWrapperRef = ref<HTMLElement | null>(null)
 
-// Safety net for the occasional black-screen bug: if the <img> `load` event
-// is missed (cached-image race on fast navigation, HEIC decode quirks) the
-// fade-in wrapper would stay at opacity 0 forever and the photo never
-// appears. Arm a fallback on every photo change that reveals the image after
-// a short grace period regardless, so the overlay never gets stuck black.
-const LOAD_FALLBACK_MS = 2500
-let loadFallbackTimer: ReturnType<typeof setTimeout> | null = null
+// Reveal the photo only once the NEW image is actually decoded.
+//
+// The `<img>` keeps displaying the *previous* photo until the new bytes
+// arrive. A blind timer used to flip `currentLoaded` after a fixed grace
+// period regardless — on slow transfers that fired before the new image
+// loaded, so the wrapper faded back in showing the OLD image dimmed and
+// then swapped to the new one (the "halb wieder erscheinen" glitch).
+//
+// Instead we poll the real <img>.complete state: this reveals the moment
+// the new image is genuinely ready, never shows stale content, and still
+// covers the cached-image race / occasionally-missed `load` event the old
+// fallback was written for (those resolve on the first poll). A genuinely
+// slow load just keeps the spinner up until the bytes arrive — which is
+// the desired behaviour.
+const LOAD_POLL_MS = 150
+let loadPollTimer: ReturnType<typeof setTimeout> | null = null
 function clearLoadFallback() {
-  if (loadFallbackTimer !== null) { clearTimeout(loadFallbackTimer); loadFallbackTimer = null }
+  if (loadPollTimer !== null) { clearTimeout(loadPollTimer); loadPollTimer = null }
+}
+function mainImageDecoded(): boolean {
+  const img = zoomWrapperRef.value?.querySelector('img')
+  return !!img && img.complete && img.naturalWidth > 0
 }
 function armLoadFallback() {
   clearLoadFallback()
-  loadFallbackTimer = setTimeout(() => {
-    loadFallbackTimer = null
-    currentLoaded.value = true
-  }, LOAD_FALLBACK_MS)
+  const poll = () => {
+    if (mainImageDecoded()) {
+      loadPollTimer = null
+      currentLoaded.value = true
+      return
+    }
+    loadPollTimer = setTimeout(poll, LOAD_POLL_MS)
+  }
+  loadPollTimer = setTimeout(poll, LOAD_POLL_MS)
 }
 
 watch(() => props.photo.id, () => {
@@ -725,7 +747,11 @@ watch(() => props.nextPhoto, () => scheduleIdleAdvance())
 // contrast, lets the slideshow keep running.
 watch(transformEditorVisible, (open) => { if (open) playing.value = false })
 // Start the countdown only once the current photo is fully loaded.
-watch(currentLoaded, () => scheduleIdleAdvance())
+watch(currentLoaded, (loaded) => {
+  scheduleIdleAdvance()
+  // Tell the host the image is on screen so it can prefetch neighbour metadata.
+  if (loaded) emit('current-loaded', props.photo.id)
+})
 
 onMounted(() => {
   scheduleIdleAdvance()
@@ -994,7 +1020,7 @@ onUnmounted(() => {
           @touchmove.stop
           @wheel.stop
         >
-          <slot name="details-flyout" :read-only="slideshowActive" />
+          <slot name="details-flyout" :read-only="slideshowActive" :details-open="props.detailsActive" :image-ready="currentLoaded" />
         </div>
       </div>
 
@@ -1004,6 +1030,7 @@ onUnmounted(() => {
            linger on screen during navigation (#371). -->
       <div
         v-if="!splitMode"
+        ref="zoomWrapperRef"
         class="fs-zoom-wrapper"
         :class="{ 'fs-zoom-wrapper--loading': !currentLoaded }"
         :style="zoomTransformStyle"
@@ -1229,7 +1256,7 @@ onUnmounted(() => {
         @touchmove.stop
         @wheel.stop
       >
-        <slot name="details-flyout" :read-only="slideshowActive" />
+        <slot name="details-flyout" :read-only="slideshowActive" :details-open="props.detailsActive" :image-ready="currentLoaded" />
       </div>
 
       <!-- Vertical-centered prev/next arrows. Hidden on touch-only
