@@ -71,8 +71,8 @@ import { useReferenceData } from '../composables/useReferenceData'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import {
-  getPhotoFacesCached,
-  getPhotoPoiMatchesCached,
+  refreshPhotoFaces,
+  refreshPhotoPoiMatches,
   peekPhotoFacesCached,
   peekPhotoPoiMatchesCached,
   prefetchPhotoMeta,
@@ -884,26 +884,31 @@ const editDate = ref<Date | null>(null)
 const updatingDate = ref(false)
 
 async function loadPhotoDetails(photoId: number, token: number): Promise<void> {
-  // Serve cache hits synchronously and only flip the loading flags for data we
-  // actually have to fetch. Without this, a prefetched neighbour still flashed
-  // the "Sehenswürdigkeit wird erkannt…" / faces spinner for one microtask —
-  // the await on an already-resolved cached promise resolves a tick later, and
-  // that tick had loading=true with an empty list.
+  // Show any cached data instantly so a prefetched neighbour never flashes the
+  // "Sehenswürdigkeit wird erkannt…" / faces spinner. A non-empty cache entry
+  // is authoritative; an empty or missing one is (re)validated below — it may be
+  // a stale empty cached by a prefetch issued before this photo's face/POI
+  // detection had finished, which previously left the POIs hidden.
   const cachedFaces = peekPhotoFacesCached(photoId)
   const cachedPois = peekPhotoPoiMatchesCached(photoId)
   detectedFaces.value = cachedFaces ?? []
   detectedPoiMatches.value = cachedPois ?? []
   loadingFaces.value = cachedFaces === undefined
   loadingPoiMatches.value = cachedPois === undefined
-  if (cachedFaces !== undefined && cachedPois !== undefined) return
+  const facesReady = !!cachedFaces && cachedFaces.length > 0
+  const poisReady = !!cachedPois && cachedPois.length > 0
+  if (facesReady && poisReady) return
   try {
-    // POI matches load alongside faces. Both go through the shared per-photo
-    // cache; the already-cached side returns instantly. A 5xx on either
-    // endpoint (e.g. osm-admin service down) falls back to an empty list so
-    // the rest of the sidebar still renders.
+    // Re-fetch only the side that isn't already populated from cache. A 5xx on
+    // either endpoint (e.g. osm-admin down) keeps whatever we had so the rest
+    // of the sidebar still renders.
     const [facesRes, poisRes] = await Promise.all([
-      getPhotoFacesCached(photoId).catch(() => [] as Face[]),
-      getPhotoPoiMatchesCached(photoId).catch(() => [] as PoiMatchItem[]),
+      facesReady
+        ? Promise.resolve(cachedFaces as Face[])
+        : refreshPhotoFaces(photoId).catch(() => cachedFaces ?? []),
+      poisReady
+        ? Promise.resolve(cachedPois as PoiMatchItem[])
+        : refreshPhotoPoiMatches(photoId).catch(() => cachedPois ?? []),
     ])
     if (token !== hydrateToken) return
     detectedFaces.value = facesRes
