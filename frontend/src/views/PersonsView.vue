@@ -38,6 +38,7 @@ import {
   getPhotoFacesCached,
   peekPhotoFacesCached,
   invalidatePhotoFaces,
+  clearScanDerivedCaches,
 } from '../composables/usePhotoMetaCache'
 
 // Eigene gefilterte Liste (nur Personen mit faceCount > 1) — wir teilen sie
@@ -670,6 +671,14 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
   } catch {
     // Ignore — next reload will re-sync.
   }
+})
+
+// Face detection runs as an async scan, so a photo can cache empty faces before
+// it completes. Drop the scan-derived caches on completion and re-hydrate the
+// faces for the photo currently shown.
+useRealtimeEvent('photos', 'scan.updated', () => {
+  clearScanDerivedCaches()
+  if (selectedPhoto.value) void loadSidebarData(selectedPhoto.value.id)
 })
 </script>
 
