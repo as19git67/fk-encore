@@ -82,8 +82,8 @@ import { useReferenceData } from '../composables/useReferenceData'
 import { onMounted, onUnmounted } from 'vue'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import {
-  getPhotoFacesCached,
-  getPhotoPoiMatchesCached,
+  refreshPhotoFaces,
+  refreshPhotoPoiMatches,
   peekPhotoFacesCached,
   peekPhotoPoiMatchesCached,
   prefetchPhotoMeta,
@@ -1062,14 +1062,23 @@ async function loadSidebarData(photoId: number) {
   detectedPoiMatches.value = cachedPois ?? []
   loadingFaces.value = cachedFaces === undefined
   loadingPoiMatches.value = cachedPois === undefined
-  if (cachedFaces !== undefined && cachedPois !== undefined) return
+  // A non-empty cache is authoritative; an empty/missing entry is revalidated —
+  // it may be a stale empty cached by a prefetch issued before this photo's
+  // face/POI detection finished, which previously kept the POIs hidden.
+  const facesReady = !!cachedFaces && cachedFaces.length > 0
+  const poisReady = !!cachedPois && cachedPois.length > 0
+  if (facesReady && poisReady) return
   try {
-    // POI matches load alongside faces; the already-cached side returns
-    // instantly. Each call falls back to an empty result on error (e.g.
-    // osm-admin down) so the rest of the sidebar still renders.
+    // Re-fetch only the not-yet-populated side. Each call falls back to what we
+    // had on error (e.g. osm-admin down) so the rest of the sidebar still
+    // renders.
     const [facesRes, poisRes] = await Promise.all([
-      getPhotoFacesCached(photoId).catch(() => [] as Face[]),
-      getPhotoPoiMatchesCached(photoId).catch(() => [] as PoiMatchItem[]),
+      facesReady
+        ? Promise.resolve(cachedFaces as Face[])
+        : refreshPhotoFaces(photoId).catch(() => cachedFaces ?? []),
+      poisReady
+        ? Promise.resolve(cachedPois as PoiMatchItem[])
+        : refreshPhotoPoiMatches(photoId).catch(() => cachedPois ?? []),
     ])
     if (token !== sidebarToken) return
     detectedFaces.value = facesRes

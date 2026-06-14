@@ -125,3 +125,19 @@ export function prefetchPhotoMeta(id: number): void {
   void getPhotoPoiMatchesCached(id).catch(() => {})
   void getPhotoAlbumsCached(id).catch(() => {})
 }
+
+// Force a fresh fetch, discarding any cached (possibly stale-empty) entry first.
+// Faces and POI are produced by asynchronous background detection, so a prefetch
+// issued before detection finished can cache an empty result; revalidating an
+// empty hit when the details panel is opened surfaces matches that exist now.
+export function refreshPhotoFaces(id: number): Promise<Face[]> {
+  facesCache.delete(id)
+  facesInFlight.delete(id)
+  return getPhotoFacesCached(id)
+}
+
+export function refreshPhotoPoiMatches(id: number): Promise<PoiMatchItem[]> {
+  poiCache.delete(id)
+  poiInFlight.delete(id)
+  return getPhotoPoiMatchesCached(id)
+}

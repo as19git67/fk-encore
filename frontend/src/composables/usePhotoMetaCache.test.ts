@@ -21,6 +21,10 @@ import {
   invalidatePhotoAlbums,
   invalidatePhotoMeta,
   prefetchPhotoMeta,
+  refreshPhotoFaces,
+  refreshPhotoPoiMatches,
+  peekPhotoFacesCached,
+  peekPhotoPoiMatchesCached,
 } from './usePhotoMetaCache'
 
 beforeEach(() => {
@@ -120,6 +124,27 @@ describe('usePhotoMetaCache', () => {
     expect(getPhotoFaces).toHaveBeenCalledWith(109)
     expect(getPhotosAlbums).toHaveBeenCalledWith([109])
     expect(peekPhotoAlbumsCached(109)).toEqual([])
+  })
+
+  it('refreshPhotoPoiMatches replaces a stale empty cache with fresh matches', async () => {
+    // Simulate a prefetch that ran before POI detection finished → cached empty.
+    getPhotoPoiMatches.mockResolvedValueOnce({ matches: [] })
+    await getPhotoPoiMatchesCached(130)
+    expect(peekPhotoPoiMatchesCached(130)).toEqual([])
+    // Detection has since produced matches; a refresh surfaces them.
+    getPhotoPoiMatches.mockResolvedValueOnce({ matches: [{ id: 5 }] })
+    await expect(refreshPhotoPoiMatches(130)).resolves.toEqual([{ id: 5 }])
+    expect(peekPhotoPoiMatchesCached(130)).toEqual([{ id: 5 }])
+    expect(getPhotoPoiMatches).toHaveBeenCalledTimes(2)
+  })
+
+  it('refreshPhotoFaces forces a fresh fetch over any cached entry', async () => {
+    getPhotoFaces.mockResolvedValueOnce({ faces: [] })
+    await getPhotoFacesCached(131)
+    getPhotoFaces.mockResolvedValueOnce({ faces: [{ id: 1 }] })
+    await expect(refreshPhotoFaces(131)).resolves.toEqual([{ id: 1 }])
+    expect(peekPhotoFacesCached(131)).toEqual([{ id: 1 }])
+    expect(getPhotoFaces).toHaveBeenCalledTimes(2)
   })
 
   it('prefetchPhotoMeta ignores invalid ids', () => {
