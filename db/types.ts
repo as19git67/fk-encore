@@ -748,20 +748,6 @@ export interface FindGroupsResponse {
   total_photos_grouped: number;
 }
 
-// ========== Landmark Types ==========
-
-export interface LandmarkBBox { x: number; y: number; width: number; height: number; }
-
-export interface Landmark {
-  id: number;
-  photo_id: number;
-  user_id: number;
-  label: string;
-  confidence: number;
-  bbox: LandmarkBBox;
-  created_at?: string;
-}
-
 export interface UpdateCurationRequest {
   id: number;
   status: CurationStatus;

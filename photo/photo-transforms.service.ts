@@ -1,7 +1,7 @@
 // Photo transformations — Phase 2: suggestion compute.
 //
-// computePhotoTransformSuggestions(photoId) reads the existing face and
-// landmark detection results for a photo, derives a "subject hull",
+// computePhotoTransformSuggestions(photoId) reads the existing face
+// detection results for a photo, derives a "subject hull",
 // snap-fits an aspect-aware crop rectangle for each supported aspect
 // ratio (rule-of-thirds aware), and writes the result to
 // photo_transform_suggestions. Auto-exposure / contrast values come from
@@ -18,7 +18,6 @@ import db from "../db/database";
 import { dbAll, dbFirst, dbExec } from "../db/adapter";
 import {
   faces,
-  photoLandmarks,
   photos,
   photoTransformSuggestions,
   type PhotoTransformAspectRatio,
@@ -191,20 +190,12 @@ export function fitCropToAspect(
 }
 
 /**
- * Combine face bboxes and landmark bboxes into a single subject hull.
- * Faces take precedence; if none, the highest-confidence landmark wins.
- * Returns null if there is nothing to crop around.
+ * Combine face bboxes into a single subject hull. Returns null if there
+ * is nothing to crop around.
  */
-export function computeSubjectHull(
-  faceBboxes: BboxNorm[],
-  landmarks: { bbox: BboxNorm; confidence: number }[],
-): BboxNorm | null {
+export function computeSubjectHull(faceBboxes: BboxNorm[]): BboxNorm | null {
   if (faceBboxes.length > 0) {
     return unionBbox(faceBboxes);
-  }
-  if (landmarks.length > 0) {
-    const best = landmarks.reduce((a, b) => (b.confidence > a.confidence ? b : a));
-    return best.bbox;
   }
   return null;
 }
@@ -266,7 +257,6 @@ export function computeAutoExposureFromStats(
 // ----------------- I/O wrappers -----------------
 
 interface RawFaceRow { bbox: string }
-interface RawLandmarkRow { bbox: string; confidence: number }
 
 async function readFaceBboxes(photoId: number): Promise<BboxNorm[]> {
   const rows = await dbAll<RawFaceRow>(
@@ -275,24 +265,6 @@ async function readFaceBboxes(photoId: number): Promise<BboxNorm[]> {
   return rows
     .map((r) => safeParseBbox(r.bbox))
     .filter((b): b is BboxNorm => b != null);
-}
-
-async function readLandmarkBboxes(
-  photoId: number,
-): Promise<{ bbox: BboxNorm; confidence: number }[]> {
-  const rows = await dbAll<RawLandmarkRow>(
-    db
-      .select({ bbox: photoLandmarks.bbox, confidence: photoLandmarks.confidence })
-      .from(photoLandmarks)
-      .where(eq(photoLandmarks.photo_id, photoId)),
-  );
-  return rows
-    .map((r) => {
-      const b = safeParseBbox(r.bbox);
-      if (!b) return null;
-      return { bbox: b, confidence: r.confidence };
-    })
-    .filter((x): x is { bbox: BboxNorm; confidence: number } => x != null);
 }
 
 function safeParseBbox(raw: string): BboxNorm | null {
@@ -383,11 +355,8 @@ export async function computePhotoTransformSuggestions(
     return null;
   }
 
-  const [faceBboxes, landmarks] = await Promise.all([
-    readFaceBboxes(photoId),
-    readLandmarkBboxes(photoId),
-  ]);
-  const hull = computeSubjectHull(faceBboxes, landmarks);
+  const faceBboxes = await readFaceBboxes(photoId);
+  const hull = computeSubjectHull(faceBboxes);
   const crops = computeSuggestionCrops(hull, photo.width, photo.height);
 
   const resolvedPath =

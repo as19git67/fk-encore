@@ -55,9 +55,6 @@ import {
   getAlbumShareableUsers,
   getAlbumShares,
   getPhotoDetailsBatch,
-  getPhotoFaces,
-  getPhotoLandmarks,
-  getPhotoPoiMatches,
   ignoreFace,
   leaveAlbum,
   listPhotoGroups,
@@ -66,7 +63,6 @@ import {
   shareAlbum,
   type CurationStatus,
   type Face,
-  type LandmarkItem,
   type PoiMatchItem,
   type Photo,
   type PhotoFilter,
@@ -85,6 +81,15 @@ import { useNaturalSearch } from '../composables/useNaturalSearch'
 import { useReferenceData } from '../composables/useReferenceData'
 import { onMounted, onUnmounted } from 'vue'
 import { useRealtimeEvent } from '../composables/useRealtime'
+import {
+  refreshPhotoFaces,
+  refreshPhotoPoiMatches,
+  peekPhotoFacesCached,
+  peekPhotoPoiMatchesCached,
+  prefetchPhotoMeta,
+  invalidatePhotoFaces,
+  invalidatePhotoMeta,
+} from '../composables/usePhotoMetaCache'
 import {
   albumsViewQueryFromStorage,
   rememberFocusedAlbumId,
@@ -675,7 +680,9 @@ async function hydrateCursor(index: number): Promise<void> {
 
   photoNav.selectPhotoInAlbum(curEntry.id, albumId.value)
 
-  void loadSidebarData(curEntry.id)
+  // Only fetch per-photo metadata when the details panel can show it (always
+  // on desktop; only with the flyout open in fullscreen).
+  if (detailsVisible.value) void loadSidebarData(curEntry.id)
 
   const ids = [curEntry.id]
   if (prevEntry) ids.push(prevEntry.id)
@@ -910,8 +917,6 @@ const mapNextPhoto = computed(() =>
 // ── Sidebar state ─────────────────────────────────────────────────────────────
 const detectedFaces = ref<Face[]>([])
 const loadingFaces = ref(false)
-const detectedLandmarks = ref<LandmarkItem[]>([])
-const loadingLandmarks = ref(false)
 const detectedPoiMatches = ref<PoiMatchItem[]>([])
 const loadingPoiMatches = ref(false)
 const reindexingPhoto = ref(false)
@@ -920,19 +925,33 @@ const { persons, fetchPersons, invalidateAlbums } = useReferenceData()
 // The sidebar (including the fullscreen details flyout) follows either
 // the grid selection or, when the map fullscreen is open, the photo
 // currently shown in the map overlay. Watch the effective photo so
-// faces/landmarks reflect what the user actually sees.
+// faces/POI reflect what the user actually sees.
 const activeDetailPhoto = computed(() =>
   isMapFullscreen.value ? mapSelectedPhoto.value : cursorPhoto.value
 )
 
+// Whether the details panel is actually on screen. On desktop the right
+// sidebar is always present, so outside fullscreen this is simply true; in
+// either fullscreen overlay it tracks the flyout toggle. Mirrors GalleryView's
+// `detailsVisible` so per-photo metadata is only fetched when it can be seen.
+const detailsVisible = computed(() =>
+  (isFullscreen.value || isMapFullscreen.value) ? fullscreenDetailsOpen.value : true
+)
+
 watch(activeDetailPhoto, (photo) => {
   if (photo) {
-    loadSidebarData(photo.id)
+    if (detailsVisible.value) loadSidebarData(photo.id)
     if (showPersons.value) void loadPersons()
   } else {
     detectedFaces.value = []
-    detectedLandmarks.value = []
   }
+})
+
+// Lazily load the active photo's metadata the moment the panel becomes visible
+// (flyout opened in fullscreen, or fullscreen closed back to the desktop
+// sidebar). Nothing is fetched while the flyout is closed.
+watch(detailsVisible, (visible) => {
+  if (visible && activeDetailPhoto.value) loadSidebarData(activeDetailPhoto.value.id)
 })
 
 
@@ -1030,32 +1049,60 @@ async function refreshGroupsAndPhotos() {
   } catch { /* keep current data on failure */ }
 }
 
+let sidebarToken = 0
 async function loadSidebarData(photoId: number) {
-  loadingFaces.value = true
-  loadingLandmarks.value = true
-  loadingPoiMatches.value = true
+  const token = ++sidebarToken
+  // Serve cache hits synchronously and only flip the loading flags for data we
+  // actually have to fetch — a prefetched neighbour shows instantly without the
+  // faces / "Sehenswürdigkeit wird erkannt…" spinner flashing. The cache also
+  // dedups against the neighbour prefetch warmed while the image decoded.
+  const cachedFaces = peekPhotoFacesCached(photoId)
+  const cachedPois = peekPhotoPoiMatchesCached(photoId)
+  detectedFaces.value = cachedFaces ?? []
+  detectedPoiMatches.value = cachedPois ?? []
+  loadingFaces.value = cachedFaces === undefined
+  loadingPoiMatches.value = cachedPois === undefined
+  // A non-empty cache is authoritative; an empty/missing entry is revalidated —
+  // it may be a stale empty cached by a prefetch issued before this photo's
+  // face/POI detection finished, which previously kept the POIs hidden.
+  const facesReady = !!cachedFaces && cachedFaces.length > 0
+  const poisReady = !!cachedPois && cachedPois.length > 0
+  if (facesReady && poisReady) return
   try {
-    // POI matches load alongside faces + landmarks. Each call falls back to
-    // an empty result on error (e.g. osm-admin down) so the rest of the
-    // sidebar still renders. Previously POIs weren't loaded here at all, so
-    // they never showed in the album detail / split-screen sidebar.
-    const [facesRes, landmarksRes, poisRes] = await Promise.all([
-      getPhotoFaces(photoId).catch(() => ({ faces: [] })),
-      getPhotoLandmarks(photoId).catch(() => ({ landmarks: [] })),
-      getPhotoPoiMatches(photoId).catch(() => ({ matches: [] })),
+    // Re-fetch only the not-yet-populated side. Each call falls back to what we
+    // had on error (e.g. osm-admin down) so the rest of the sidebar still
+    // renders.
+    const [facesRes, poisRes] = await Promise.all([
+      facesReady
+        ? Promise.resolve(cachedFaces as Face[])
+        : refreshPhotoFaces(photoId).catch(() => cachedFaces ?? []),
+      poisReady
+        ? Promise.resolve(cachedPois as PoiMatchItem[])
+        : refreshPhotoPoiMatches(photoId).catch(() => cachedPois ?? []),
     ])
-    detectedFaces.value = facesRes.faces ?? []
-    detectedLandmarks.value = landmarksRes.landmarks ?? []
-    detectedPoiMatches.value = poisRes.matches ?? []
-  } catch {
-    detectedFaces.value = []
-    detectedLandmarks.value = []
-    detectedPoiMatches.value = []
+    if (token !== sidebarToken) return
+    detectedFaces.value = facesRes
+    detectedPoiMatches.value = poisRes
   } finally {
-    loadingFaces.value = false
-    loadingLandmarks.value = false
-    loadingPoiMatches.value = false
+    if (token === sidebarToken) {
+      loadingFaces.value = false
+      loadingPoiMatches.value = false
+    }
   }
+}
+
+// Once a fullscreen image is decoded, warm the neighbours' faces/POI/album
+// metadata so the next prev/next is an instant cache hit. Gated on the details
+// panel being open so the prefetch never competes with the visible image.
+function onGridImageLoaded() {
+  if (!fullscreenDetailsOpen.value) return
+  if (cursorNext.value) prefetchPhotoMeta(cursorNext.value.id)
+  if (cursorPrev.value) prefetchPhotoMeta(cursorPrev.value.id)
+}
+function onMapImageLoaded() {
+  if (!fullscreenDetailsOpen.value) return
+  if (mapNextPhoto.value) prefetchPhotoMeta(mapNextPhoto.value.id)
+  if (mapPrevPhoto.value) prefetchPhotoMeta(mapPrevPhoto.value.id)
 }
 
 // ── Curation ──────────────────────────────────────────────────────────────────
@@ -1121,7 +1168,14 @@ function handleToggleFavorite(id: number, currentStatus: CurationStatus) {
 }
 
 async function handleIgnoreFaceInSidebar(faceId: number) {
-  try { await ignoreFace(faceId); detectedFaces.value = detectedFaces.value.filter(f => f.id !== faceId) }
+  try {
+    await ignoreFace(faceId)
+    detectedFaces.value = detectedFaces.value.filter(f => f.id !== faceId)
+    // Drop the cached faces so a later return to this photo doesn't resurrect
+    // the ignored one from the prefetch cache.
+    const activeId = activeDetailPhoto.value?.id
+    if (activeId) invalidatePhotoFaces(activeId)
+  }
   catch (err: any) { error.value = err.message || 'Fehler' }
 }
 
@@ -1162,7 +1216,11 @@ async function handleUpdateDate() {
 async function handleReindexPhoto() {
   if (!cursorPhoto.value) return
   reindexingPhoto.value = true
-  try { await reindexPhoto(cursorPhoto.value.id); await loadSidebarData(cursorPhoto.value.id) }
+  try {
+    await reindexPhoto(cursorPhoto.value.id)
+    invalidatePhotoMeta(cursorPhoto.value.id)
+    await loadSidebarData(cursorPhoto.value.id)
+  }
   catch (err: any) { error.value = err.message || 'Fehler' }
   finally { reindexingPhoto.value = false }
 }
@@ -1919,7 +1977,6 @@ watch(albumId, (id) => {
   cursorGroup.value = null
   activeGroup.value = null
   detectedFaces.value = []
-  detectedLandmarks.value = []
   pendingMapSelectPhotoId.value = null
   void loadData()
 })
@@ -2287,9 +2344,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           :faces="detectedFaces"
           :is-editing-date="isEditingDate"
           v-model:editDate="editDate"
-          :landmarks="detectedLandmarks"
           :loading-faces="loadingFaces"
-          :loading-landmarks="loadingLandmarks"
           :poi-matches="detectedPoiMatches"
           :loading-poi-matches="loadingPoiMatches"
           :persons="persons"
@@ -2436,6 +2491,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       @close="closeGridFullscreen"
       @prev="gridGoPrev"
       @next="gridGoNext"
+      @current-loaded="onGridImageLoaded"
       @toggle-favorite="handleToggleFavorite"
       @hide="handleHidePhoto"
       @restore="handleRestorePhoto"
@@ -2453,10 +2509,12 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           @click="handleSetMapCover(cursorPhoto.id)"
         />
       </template>
-      <template #details-flyout="{ readOnly }">
+      <template #details-flyout="{ readOnly, detailsOpen, imageReady }">
         <PhotoDetailSidebar
           :in-flyout="true"
           :read-only="readOnly"
+          :flyout-open="detailsOpen"
+          :image-ready="imageReady"
           :photo="cursorPhoto"
           :curation-stats="cursorCurationStats"
           :can-delete="canDeletePhotos || canWrite"
@@ -2464,9 +2522,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           :faces="detectedFaces"
           :is-editing-date="isEditingDate"
           v-model:editDate="editDate"
-          :landmarks="detectedLandmarks"
           :loading-faces="loadingFaces"
-          :loading-landmarks="loadingLandmarks"
           :poi-matches="detectedPoiMatches"
           :loading-poi-matches="loadingPoiMatches"
           :persons="persons"
@@ -2510,6 +2566,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       @close="closeMapFullscreen(); fullscreenDetailsOpen = false"
       @prev="mapFullscreenIndex--"
       @next="mapFullscreenIndex++"
+      @current-loaded="onMapImageLoaded"
       @toggle-favorite="handleToggleFavorite"
       @hide="handleHidePhoto"
       @restore="handleRestorePhoto"
@@ -2526,19 +2583,19 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           @click="handleSetMapCover(mapSelectedPhoto.id)"
         />
       </template>
-      <template #details-flyout="{ readOnly }">
+      <template #details-flyout="{ readOnly, detailsOpen, imageReady }">
         <PhotoDetailSidebar
           :in-flyout="true"
           :read-only="readOnly"
+          :flyout-open="detailsOpen"
+          :image-ready="imageReady"
           :photo="mapSelectedPhoto"
           :can-delete="canDeletePhotos || canWrite"
           :can-upload="canUploadPhotos"
           :faces="detectedFaces"
           :is-editing-date="isEditingDate"
           v-model:editDate="editDate"
-          :landmarks="detectedLandmarks"
           :loading-faces="loadingFaces"
-          :loading-landmarks="loadingLandmarks"
           :poi-matches="detectedPoiMatches"
           :loading-poi-matches="loadingPoiMatches"
           :persons="persons"

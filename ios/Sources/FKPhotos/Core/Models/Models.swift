@@ -205,18 +205,6 @@ struct PersonDetailsResponse: Codable, Identifiable, Sendable {
     let faces: [Face]
 }
 
-// MARK: - Landmark
-
-struct Landmark: Codable, Identifiable, Sendable {
-    let id: Int
-    let photo_id: Int
-    let user_id: Int
-    let label: String
-    let confidence: Double
-    let bbox: FaceBBox
-    let created_at: String?
-}
-
 // MARK: - Album With Photos (download sync)
 
 struct PhotoCurationStats: Codable, Sendable {

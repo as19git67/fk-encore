@@ -25,9 +25,8 @@ import { toLocalIsoDate, parseLocalDate } from '../utils/dateFormat'
 import {
   listPersons, updatePerson, mergePersons, getPersonDetails,
   ignoreFace, ignorePersonFaces, updatePhotoCuration, reindexPhoto,
-  getPhotoFaces, getPhotoLandmarks,
   type CurationStatus, type Person, type Photo, type PersonDetails,
-  type Face, type LandmarkItem, type PhotoFilter,
+  type Face, type PhotoFilter,
 } from '../api/photos'
 import { faceBoxStyle } from '../utils/faceBbox'
 import { useAuthStore } from '../stores/auth'
@@ -35,6 +34,12 @@ import { useServiceHealthStore } from '../stores/serviceHealth'
 import { usePhotoNavStore } from '../stores/photoNav'
 import { useGalleryKeyboard } from '../composables/useGalleryKeyboard'
 import { useReferenceData } from '../composables/useReferenceData'
+import {
+  getPhotoFacesCached,
+  refreshPhotoFaces,
+  peekPhotoFacesCached,
+  invalidatePhotoFaces,
+} from '../composables/usePhotoMetaCache'
 
 // Eigene gefilterte Liste (nur Personen mit faceCount > 1) — wir teilen sie
 // nicht mit dem app-weiten Composable, invalidieren aber dessen Cache nach
@@ -343,26 +348,42 @@ const nextPersonPhoto = computed(() => selectedIndex.value < personPhotos.value.
 // ── Sidebar state ─────────────────────────────────────────────────────────────
 const detectedFaces = ref<Face[]>([])
 const loadingFaces = ref(false)
-const detectedLandmarks = ref<LandmarkItem[]>([])
-const loadingLandmarks = ref(false)
 const reindexingPhoto = ref(false)
 
+let sidebarToken = 0
 async function loadSidebarData(photoId: number) {
-  loadingFaces.value = true
-  loadingLandmarks.value = true
+  const token = ++sidebarToken
+  // Cache hit → show instantly without flashing the faces spinner. A non-empty
+  // cache is authoritative; an empty/missing one is revalidated (a prefetch may
+  // have cached an empty result before face detection finished).
+  const cachedFaces = peekPhotoFacesCached(photoId)
+  detectedFaces.value = cachedFaces ?? []
+  loadingFaces.value = cachedFaces === undefined
+  if (cachedFaces && cachedFaces.length > 0) return
   try {
-    const [facesRes, landmarksRes] = await Promise.all([getPhotoFaces(photoId), getPhotoLandmarks(photoId)])
-    detectedFaces.value = facesRes.faces
-    detectedLandmarks.value = landmarksRes.landmarks
-  } catch { detectedFaces.value = []; detectedLandmarks.value = [] }
-  finally { loadingFaces.value = false; loadingLandmarks.value = false }
+    const faces = await refreshPhotoFaces(photoId)
+    if (token !== sidebarToken) return
+    detectedFaces.value = faces
+  } catch {
+    if (token === sidebarToken) detectedFaces.value = []
+  } finally {
+    if (token === sidebarToken) loadingFaces.value = false
+  }
+}
+
+// Once the fullscreen image is decoded, warm the neighbours' faces so the next
+// prev/next selection renders instantly. Faces are the only per-photo metadata
+// this view shows, so we prefetch just those (not POI / albums).
+function onFullscreenImageLoaded() {
+  if (nextPersonPhoto.value) void getPhotoFacesCached(nextPersonPhoto.value.id).catch(() => {})
+  if (prevPersonPhoto.value) void getPhotoFacesCached(prevPersonPhoto.value.id).catch(() => {})
 }
 
 watch(selectedPhoto, (photo) => {
   if (photo) {
     loadSidebarData(photo.id)
     photoNav.selectPhoto(photo.id)
-  } else { detectedFaces.value = []; detectedLandmarks.value = [] }
+  } else { detectedFaces.value = [] }
 })
 
 // ── Keyboard navigation (via composable) ─────────────────────────────────────
@@ -421,6 +442,7 @@ async function handleIgnoreFaceInSidebar(faceId: number) {
   try {
     await ignoreFace(faceId)
     detectedFaces.value = detectedFaces.value.filter(f => f.id !== faceId)
+    if (selectedPhoto.value) invalidatePhotoFaces(selectedPhoto.value.id)
     if (selectedPersonDetail.value) {
       selectedPersonDetail.value.faces = selectedPersonDetail.value.faces.filter(f => f.id !== faceId)
     }
@@ -437,6 +459,7 @@ async function handleIgnoreFace(faceId: number) {
     accept: async () => {
       try {
         await ignoreFace(faceId)
+        if (selectedPhoto.value) invalidatePhotoFaces(selectedPhoto.value.id)
         if (selectedPersonDetail.value) {
           selectedPersonDetail.value.faces = selectedPersonDetail.value.faces.filter(f => f.id !== faceId)
           if (selectedIndex.value >= uniquePhotoFaceItems.value.length) {
@@ -501,7 +524,6 @@ async function selectPersonItem(person: Person, focusPhotoId?: number) {
     localStorage.setItem(LAST_PERSON_KEY, String(person.id))
     selectedIndex.value = -1
     detectedFaces.value = []
-    detectedLandmarks.value = []
     loadingDetails.value = true
     try {
       selectedPersonDetail.value = await getPersonDetails(person.id)
@@ -546,7 +568,6 @@ function backToGrid() {
   selectedPersonDetail.value = null
   selectedIndex.value = -1
   detectedFaces.value = []
-  detectedLandmarks.value = []
   // After Vue re-renders (grid visible again), scroll to and highlight the
   // person the user just came back from.
   if (lastId) {
@@ -801,8 +822,6 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
           :photo="selectedPhoto"
           :faces="detectedFaces"
           :loading-faces="loadingFaces"
-          :landmarks="detectedLandmarks"
-          :loading-landmarks="loadingLandmarks"
           :persons="persons"
           :can-delete="canDelete"
           :can-upload="false"
@@ -844,6 +863,7 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
       @close="isFullscreen = false"
       @prev="selectedIndex--"
       @next="selectedIndex++"
+      @current-loaded="onFullscreenImageLoaded"
       @toggle-favorite="handleToggleFavorite"
       @hide="handleHidePhoto"
       @restore="handleRestorePhoto"

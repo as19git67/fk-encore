@@ -158,13 +158,12 @@ describe('computeSyncBboxZoom', () => {
 })
 
 describe('pickPrimaryBbox', () => {
-  it('returns null when no faces and no landmarks', () => {
-    expect(pickPrimaryBbox([], [])).toBeNull()
+  it('returns null when no faces', () => {
+    expect(pickPrimaryBbox([])).toBeNull()
   })
-  it('prefers faces over landmarks', () => {
+  it('returns the face when one is present', () => {
     const r = pickPrimaryBbox(
       [{ bbox: { x: 0.3, y: 0.3, width: 0.2, height: 0.2 } }],
-      [{ bbox: { x: 0.1, y: 0.1, width: 0.4, height: 0.4 }, confidence: 0.99 }],
     )!
     expect(r.source).toBe('face')
   })
@@ -174,28 +173,14 @@ describe('pickPrimaryBbox', () => {
         { bbox: { x: 0.3, y: 0.3, width: 0.5, height: 0.5 }, quality: 0.5 },
         { bbox: { x: 0.4, y: 0.4, width: 0.1, height: 0.1 }, person_id: 7, quality: 0.1 },
       ],
-      [],
     )!
     expect(r.source).toBe('face')
     expect(r.person_id).toBe(7)
   })
-  it('skips ignored faces', () => {
-    const r = pickPrimaryBbox(
-      [{ bbox: { x: 0.3, y: 0.3, width: 0.5, height: 0.5 }, ignored: true }],
-      [{ bbox: { x: 0.1, y: 0.1, width: 0.4, height: 0.4 }, confidence: 0.5 }],
-    )!
-    expect(r.source).toBe('landmark')
-  })
-  it('returns top landmark by confidence', () => {
-    const r = pickPrimaryBbox(
-      [],
-      [
-        { bbox: { x: 0.1, y: 0.1, width: 0.2, height: 0.2 }, confidence: 0.3 },
-        { bbox: { x: 0.3, y: 0.3, width: 0.2, height: 0.2 }, confidence: 0.9 },
-      ],
-    )!
-    expect(r.source).toBe('landmark')
-    expect(r.bbox.x).toBe(0.3)
+  it('returns null when the only face is ignored', () => {
+    expect(
+      pickPrimaryBbox([{ bbox: { x: 0.3, y: 0.3, width: 0.5, height: 0.5 }, ignored: true }]),
+    ).toBeNull()
   })
 })
 
@@ -232,37 +217,37 @@ describe('pickBboxAtPoint', () => {
   const carol = { bbox: { x: 0.35, y: 0.55, width: 0.18, height: 0.22 }, person_id: 3 }
 
   it('falls back to global pick when the click point is out of range', () => {
-    const r = pickBboxAtPoint([alice, bob], [], { x: -0.1, y: 0.5 })!
+    const r = pickBboxAtPoint([alice, bob], { x: -0.1, y: 0.5 })!
     // Out-of-range click is treated as "no specific signal" — global pick wins.
     expect(r.source).toBe('face')
   })
 
   it('picks the face whose bbox contains the click', () => {
-    const r = pickBboxAtPoint([alice, bob, carol], [], { x: 0.62, y: 0.4 })!
+    const r = pickBboxAtPoint([alice, bob, carol], { x: 0.62, y: 0.4 })!
     expect(r.person_id).toBe(2) // bob
   })
 
   it('picks the tightest face when click sits in overlapping bboxes', () => {
     const big = { bbox: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 }, person_id: 9 }
     const small = { bbox: { x: 0.4, y: 0.4, width: 0.2, height: 0.2 }, person_id: 10 }
-    const r = pickBboxAtPoint([big, small], [], { x: 0.5, y: 0.5 })!
+    const r = pickBboxAtPoint([big, small], { x: 0.5, y: 0.5 })!
     expect(r.person_id).toBe(10)
   })
 
   it('picks the nearest face within the radius when no bbox contains the click', () => {
-    const r = pickBboxAtPoint([alice, bob, carol], [], { x: 0.34, y: 0.5 })!
+    const r = pickBboxAtPoint([alice, bob, carol], { x: 0.34, y: 0.5 })!
     // Click is near carol (centred at (0.44, 0.66)) and alice (0.2, 0.325).
     // Distance: carol ~ 0.187, alice ~ 0.225. carol wins within default 0.15? No,
     // 0.187 > 0.15 — should fall back to pickPrimaryBbox.
     // Use a generous radius to force the near-match path.
-    const r2 = pickBboxAtPoint([alice, bob, carol], [], { x: 0.34, y: 0.5 }, { nearRadius: 0.3 })!
+    const r2 = pickBboxAtPoint([alice, bob, carol], { x: 0.34, y: 0.5 }, { nearRadius: 0.3 })!
     expect(r2.person_id).toBe(3) // carol
     // Sanity: with default radius we get fallback (one of the tagged faces).
     expect(r.source).toBe('face')
   })
 
   it('falls back to global pick when no face is anywhere near the click', () => {
-    const r = pickBboxAtPoint([alice], [], { x: 0.9, y: 0.9 })!
+    const r = pickBboxAtPoint([alice], { x: 0.9, y: 0.9 })!
     // Default radius (0.15) doesn't catch alice (~0.75 away) → fallback returns alice anyway.
     expect(r.source).toBe('face')
     expect(r.person_id).toBe(1)
@@ -271,17 +256,12 @@ describe('pickBboxAtPoint', () => {
   it('skips ignored faces but still inspects others', () => {
     const ignored = { bbox: { x: 0.4, y: 0.4, width: 0.2, height: 0.2 }, ignored: true, person_id: 99 }
     const real = { bbox: { x: 0.45, y: 0.45, width: 0.1, height: 0.1 }, person_id: 7 }
-    const r = pickBboxAtPoint([ignored, real], [], { x: 0.5, y: 0.5 })!
+    const r = pickBboxAtPoint([ignored, real], { x: 0.5, y: 0.5 })!
     expect(r.person_id).toBe(7)
   })
 
-  it('falls back to landmarks via pickPrimaryBbox when there are no faces', () => {
-    const r = pickBboxAtPoint(
-      [],
-      [{ bbox: { x: 0.3, y: 0.3, width: 0.2, height: 0.2 }, confidence: 0.8 }],
-      { x: 0.5, y: 0.5 },
-    )!
-    expect(r.source).toBe('landmark')
+  it('returns null when there are no faces', () => {
+    expect(pickBboxAtPoint([], { x: 0.5, y: 0.5 })).toBeNull()
   })
 })
 

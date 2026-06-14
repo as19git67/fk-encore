@@ -10,16 +10,14 @@ import {
   reviewPhotoGroup,
   pickPhotosInGroup,
   getPhotoDetailsBatch,
-  getPhotoFaces,
-  getPhotoLandmarks,
   type Photo,
   type PhotoGroup,
   type CurationStatus,
   type Face,
-  type LandmarkItem,
 } from '../api/photos'
 import type { FeedPhotoItem } from '../api/photoFeed'
 import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
+import { getPhotoFacesCached } from '../composables/usePhotoMetaCache'
 import { useAuthStore } from '../stores/auth'
 import { discardFlingDirection, flingOffscreenTranslate } from '../utils/compareSwipe'
 import { mergeFreshScore, type FreshScore } from '../utils/comparePhotoScore'
@@ -693,9 +691,9 @@ interface ActiveZoom {
   computation: ZoomComputation
 }
 
-// ── Zoom-to-face / landmark (Track N / #79) ───────────────────────────────
-// Double-clicking a photo zooms it so the primary face (or landmark) is
-// centred. The sync-zoom toggle is a persistent mode setting — when on,
+// ── Zoom-to-face (Track N / #79) ──────────────────────────────────────────
+// Double-clicking a photo zooms it so the primary face is centred. The
+// sync-zoom toggle is a persistent mode setting — when on,
 // double-tap / reset apply to BOTH photos; when off, they apply only to
 // the clicked photo. Toggling sync ON propagates an existing single-photo
 // zoom to the partner. Toggling OFF leaves the zoom state untouched.
@@ -706,7 +704,6 @@ interface ActiveZoom {
 const syncZoomEnabled = ref(true)
 const zoomByPhoto = ref(new Map<number, ActiveZoom>())
 const facesCache = ref(new Map<number, Face[]>())
-const landmarksCache = ref(new Map<number, LandmarkItem[]>())
 
 const ZOOM_TARGET_FRACTION = 0.45
 const ZOOM_MAX = 5
@@ -740,32 +737,20 @@ function getViewport(photoId: number) {
   }
 }
 
-async function ensureBboxData(photoId: number): Promise<{ faces: Face[]; landmarks: LandmarkItem[] }> {
+async function ensureBboxData(photoId: number): Promise<{ faces: Face[] }> {
   if (!facesCache.value.has(photoId)) {
     try {
-      const res = await getPhotoFaces(photoId)
-      facesCache.value = new Map(facesCache.value).set(photoId, res.faces ?? [])
+      // Route through the shared per-photo cache so faces fetched here also
+      // warm the gallery/album sidebars (and vice versa), and stay consistent
+      // with global invalidation after reindex / ignore-face.
+      const faces = await getPhotoFacesCached(photoId)
+      facesCache.value = new Map(facesCache.value).set(photoId, faces)
     } catch (err) {
       console.warn('[PhotoCompareView] face load failed', photoId, err)
       facesCache.value = new Map(facesCache.value).set(photoId, [])
     }
   }
-  // Only fetch landmarks if no usable faces are around — saves a round-trip.
-  let faces = facesCache.value.get(photoId) ?? []
-  const haveUsableFaces = faces.some((f) => !f.ignored)
-  if (!haveUsableFaces && !landmarksCache.value.has(photoId)) {
-    try {
-      const res = await getPhotoLandmarks(photoId)
-      landmarksCache.value = new Map(landmarksCache.value).set(photoId, res.landmarks ?? [])
-    } catch (err) {
-      console.warn('[PhotoCompareView] landmark load failed', photoId, err)
-      landmarksCache.value = new Map(landmarksCache.value).set(photoId, [])
-    }
-  }
-  return {
-    faces,
-    landmarks: landmarksCache.value.get(photoId) ?? [],
-  }
+  return { faces: facesCache.value.get(photoId) ?? [] }
 }
 
 function resetZoom() {
@@ -820,7 +805,7 @@ async function pickPartnerBbox(
       return { source: 'face', bbox: matched, person_id: srcPick.person_id }
     }
   }
-  const fallback = pickPrimaryBbox(data.faces, data.landmarks)
+  const fallback = pickPrimaryBbox(data.faces)
   return fallback
 }
 
@@ -885,11 +870,11 @@ async function onPhotoDoubleClick(
       click.clientY,
     )
     if (point) {
-      clickedPick = pickBboxAtPoint(clickedData.faces, clickedData.landmarks, point)
+      clickedPick = pickBboxAtPoint(clickedData.faces, point)
     }
   }
   if (!clickedPick) {
-    clickedPick = pickPrimaryBbox(clickedData.faces, clickedData.landmarks)
+    clickedPick = pickPrimaryBbox(clickedData.faces)
   }
   if (!clickedPick) return
 

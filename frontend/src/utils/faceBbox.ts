@@ -43,10 +43,10 @@ export function thumbnailSrcWidth(bbox: FaceBBox | undefined | null): number {
 
 /**
  * Gallery-tile style for thumbnails that have an `auto_crop` centre but no
- * bbox. `auto_crop` is the server-computed focal point (face or landmark
- * centre, normalized 0..1) that the gallery uses to pick the visible crop
+ * bbox. `auto_crop` is the server-computed focal point (face centre,
+ * normalized 0..1) that the gallery uses to pick the visible crop
  * under `object-fit: cover`. Combined with a moderate scale anchored at
- * that same point, the face/landmark ends up both *visible* (via
+ * that same point, the face ends up both *visible* (via
  * `object-position`) and *more prominent* (via the scale) — the
  * "zoom and move" requested by issue #73 / Track N.
  *
