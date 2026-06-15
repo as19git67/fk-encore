@@ -92,6 +92,10 @@ export interface LoginResponse {
   user: UserWithRolesAndPermissions;
   token: string;
   refreshToken: string;
+  /** ISO-8601 timestamp when the access token expires. Lets clients refresh
+   *  proactively instead of guessing — the access token is an opaque random
+   *  string, not a JWT, so its expiry cannot be derived from the token itself. */
+  expiresAt: string;
 }
 
 export interface RefreshRequest {
@@ -102,6 +106,8 @@ export interface RefreshResponse {
   token: string;
   refreshToken: string;
   user: UserWithRolesAndPermissions;
+  /** ISO-8601 timestamp when the new access token expires. See LoginResponse. */
+  expiresAt: string;
 }
 
 export interface LogoutResponse {
