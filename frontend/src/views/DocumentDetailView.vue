@@ -20,6 +20,7 @@ import {
   listTaxSectionsCatalog,
   reclassifyDocument,
   replaceDocumentFile,
+  unlockDocument,
   updateDocument,
   updateDocumentTax,
   updateDocumentVisibility,
@@ -301,6 +302,30 @@ async function onReclassify(options: { forceOcr?: boolean } = {}) {
 }
 
 const downloading = ref(false)
+const unlockPassword = ref('')
+const unlocking = ref(false)
+
+async function onUnlock() {
+  if (!doc.value) return
+  if (unlockPassword.value.length === 0) {
+    error.value = 'Bitte ein Passwort eingeben.'
+    return
+  }
+  unlocking.value = true
+  error.value = ''
+  info.value = ''
+  try {
+    doc.value = await unlockDocument(doc.value.id, unlockPassword.value)
+    unlockPassword.value = ''
+    info.value = 'Dokument entschlüsselt und unverschlüsselt gespeichert — Verarbeitung läuft.'
+    await loadPdf(doc.value.id)
+    setTimeout(load, 1500)
+  } catch (err: any) {
+    error.value = err.message || 'Entsperren fehlgeschlagen'
+  } finally {
+    unlocking.value = false
+  }
+}
 
 async function onDownload() {
   if (!doc.value) return
@@ -366,6 +391,7 @@ function statusSeverity(status: DocumentStatus): 'success' | 'info' | 'warn' | '
   switch (status) {
     case 'ready': return 'success'
     case 'failed': return 'danger'
+    case 'encrypted': return 'warn'
     case 'pending': return 'secondary'
     case 'extracting':
     case 'classifying':
@@ -378,6 +404,7 @@ function statusLabel(status: DocumentStatus): string {
   switch (status) {
     case 'ready': return 'Fertig'
     case 'failed': return 'Fehler'
+    case 'encrypted': return 'Passwortgeschützt'
     case 'pending': return 'Warteschlange'
     case 'extracting': return 'Text-Extraktion'
     case 'classifying': return 'KI-Analyse'
@@ -546,6 +573,45 @@ onBeforeUnmount(() => {
               :loading="replacing"
               @click="onReplaceFileClick"
             />
+          </div>
+        </Message>
+
+        <Message
+          v-if="doc.status === 'encrypted'"
+          severity="warn"
+          :closable="false"
+          icon="pi pi-lock"
+        >
+          <div class="unlock-box">
+            <span>
+              <strong>Passwortgeschützt:</strong> Dieses PDF benötigt ein Passwort.
+              Nach Eingabe wird es entschlüsselt und unverschlüsselt gespeichert –
+              danach ist kein Passwort mehr nötig.
+            </span>
+            <form
+              v-if="auth.hasPermission('documents.edit')"
+              class="unlock-row"
+              @submit.prevent="onUnlock"
+            >
+              <InputText
+                v-model="unlockPassword"
+                type="password"
+                placeholder="PDF-Passwort"
+                autocomplete="off"
+                :disabled="unlocking"
+              />
+              <Button
+                type="submit"
+                label="Entsperren & speichern"
+                icon="pi pi-unlock"
+                size="small"
+                :loading="unlocking"
+                :disabled="unlockPassword.length === 0"
+              />
+            </form>
+            <span v-else class="hint">
+              Zum Entsperren wird die Berechtigung „documents.edit" benötigt.
+            </span>
           </div>
         </Message>
         <input
@@ -966,6 +1032,22 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 0.75rem;
   flex-wrap: wrap;
+}
+
+.unlock-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.unlock-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.unlock-row :deep(.p-inputtext) {
+  flex: 1 1 12rem;
+  min-width: 0;
 }
 
 .meta-summary {

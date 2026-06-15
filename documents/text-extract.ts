@@ -125,6 +125,99 @@ export interface ExtractOptions {
 }
 
 /**
+ * Thrown by `extractPdfText` when the PDF needs an open ("user") password
+ * that we don't have. The pipeline catches this to move the document into
+ * the `encrypted` state and prompt the user, rather than failing it with a
+ * cryptic poppler error.
+ */
+export class PdfPasswordRequiredError extends Error {
+  constructor(message = "PDF requires a password to open") {
+    super(message);
+    this.name = "PdfPasswordRequiredError";
+  }
+}
+
+export type PdfEncryption = "none" | "restrictions" | "password";
+
+/**
+ * Classify a PDF's encryption with `qpdf --requires-password`:
+ *   - exit 0 → an open password is required (we can't read it)
+ *   - exit 3 → encrypted but opens without a password (owner/permission
+ *              restrictions only — removable with `qpdf --decrypt`)
+ *   - exit 2 (or anything else) → not encrypted / unknown → treat as none
+ * A missing qpdf binary resolves to "none" so detection never blocks the
+ * pipeline on environments without it.
+ */
+export function inspectPdfEncryption(absPath: string): Promise<PdfEncryption> {
+  return new Promise((resolve) => {
+    const proc = spawn("qpdf", ["--requires-password", absPath], {
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    proc.on("error", () => resolve("none"));
+    proc.on("close", (code) => {
+      if (code === 0) resolve("password");
+      else if (code === 3) resolve("restrictions");
+      else resolve("none");
+    });
+  });
+}
+
+/**
+ * Run `qpdf --decrypt` into `tmpDir`, optionally supplying a password.
+ * Returns the decrypted file path, or null when qpdf is missing, the
+ * password is wrong, or the file can't be decrypted. `--warning-exit-0`
+ * keeps benign warnings (very common on real-world PDFs) from being read
+ * as failures.
+ */
+function runQpdfDecrypt(
+  srcPath: string,
+  tmpDir: string,
+  password?: string,
+): Promise<string | null> {
+  const dst = path.join(tmpDir, "decrypted.pdf");
+  const args = ["--warning-exit-0", "--decrypt"];
+  if (password != null) args.push(`--password=${password}`);
+  args.push(srcPath, dst);
+  return new Promise((resolve) => {
+    const proc = spawn("qpdf", args, { stdio: ["ignore", "ignore", "pipe"] });
+    let stderr = "";
+    proc.stderr.on("data", (d) => {
+      stderr += d.toString();
+    });
+    proc.on("error", () => resolve(null));
+    proc.on("close", (code) => {
+      if (code === 0) resolve(dst);
+      else {
+        console.warn(
+          `[documents.text-extract] qpdf --decrypt exited ${code}: ${stderr.trim()}`,
+        );
+        resolve(null);
+      }
+    });
+  });
+}
+
+/**
+ * Decrypt the PDF at `absPath` with `password` and return the plaintext
+ * bytes, or null when the password is wrong / decryption fails. Used by the
+ * unlock endpoint to persist a decrypted copy so no password is needed
+ * thereafter.
+ */
+export async function decryptPdfWithPassword(
+  absPath: string,
+  password: string,
+): Promise<Buffer | null> {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "fk-docdec-"));
+  try {
+    const dst = await runQpdfDecrypt(absPath, tmpDir, password);
+    if (!dst) return null;
+    return await fs.promises.readFile(dst);
+  } finally {
+    fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
  * Heuristic: does `text` look like a text layer that lost its spaces?
  * Returns true when either the overall whitespace ratio is implausibly
  * low or an unusual share of tokens is very long.
@@ -169,71 +262,99 @@ export async function extractPdfText(
   absPath: string,
   options: ExtractOptions = {},
 ): Promise<ExtractResult> {
-  const buffer = await fs.promises.readFile(absPath);
+  // Encryption gate. A document needing an open password can't be read at
+  // all — surface that distinctly so the pipeline can prompt the user.
+  // Owner/permission-only encryption opens without a password; transparently
+  // strip it into a temp copy so pdf-parse/poppler/tesseract see plain bytes.
+  const encryption = await inspectPdfEncryption(absPath);
+  if (encryption === "password") {
+    throw new PdfPasswordRequiredError();
+  }
 
-  let textLayer = "";
-  let pageCount = 0;
-  let pdfParseBrokenXref = false;
+  let tmpDir: string | null = null;
+  let workPath = absPath;
   try {
-    const parsed = await pdfParseQuiet(buffer);
-    textLayer = stripNulBytes((parsed.text ?? "").trim());
-    pageCount = parsed.numpages ?? 0;
-  } catch (err) {
-    // pdf-parse throws on malformed PDFs; treat as "no text layer" and
-    // fall through to OCR. Remember whether the failure smells like a
-    // broken xref so the OCR path can repair the file up front instead
-    // of paying for a pdftoppm round-trip that's certain to fail.
-    const msg = (err as Error).message;
-    pdfParseBrokenXref = looksLikeBrokenXref(msg);
-    console.warn(`[documents.text-extract] pdf-parse failed: ${msg}`);
+    if (encryption === "restrictions") {
+      tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "fk-docdec-"));
+      const decrypted = await runQpdfDecrypt(absPath, tmpDir);
+      if (decrypted) {
+        workPath = decrypted;
+        console.log(
+          `[documents.text-extract] stripped owner/permission encryption before extraction`,
+        );
+      }
+    }
+
+    const buffer = await fs.promises.readFile(workPath);
+
+    let textLayer = "";
+    let pageCount = 0;
+    let pdfParseBrokenXref = false;
+    try {
+      const parsed = await pdfParseQuiet(buffer);
+      textLayer = stripNulBytes((parsed.text ?? "").trim());
+      pageCount = parsed.numpages ?? 0;
+    } catch (err) {
+      // pdf-parse throws on malformed PDFs; treat as "no text layer" and
+      // fall through to OCR. Remember whether the failure smells like a
+      // broken xref so the OCR path can repair the file up front instead
+      // of paying for a pdftoppm round-trip that's certain to fail.
+      const msg = (err as Error).message;
+      pdfParseBrokenXref = looksLikeBrokenXref(msg);
+      console.warn(`[documents.text-extract] pdf-parse failed: ${msg}`);
+    }
+
+    const textLayerLooksGood =
+      textLayer.length >= MIN_TEXT_LAYER_CHARS && !hasPoorSpacing(textLayer);
+
+    if (options.forceOcr) {
+      console.log(`[documents.text-extract] force_ocr=true — skipping text layer`);
+    } else if (textLayerLooksGood) {
+      console.log(
+        `[documents.text-extract] text layer looks good — running OCR anyway for consistency`,
+      );
+    } else if (textLayer.length >= MIN_TEXT_LAYER_CHARS) {
+      console.log(
+        `[documents.text-extract] text layer looks broken (low space ratio) — running OCR`,
+      );
+    }
+
+    // Only spend the extra tesseract PDF-rendering pass when the original
+    // lacks a usable text layer — born-digital PDFs are already selectable in
+    // the viewer, so a sandwich PDF would just duplicate them.
+    const wantSearchablePdf = options.forceOcr || !textLayerLooksGood;
+    const ocr = await ocrPdf(workPath, {
+      repairFirst: pdfParseBrokenXref,
+      wantSearchablePdf,
+    });
+    const ocrText = ocr.text;
+
+    // When forceOcr is set or the text layer is broken, prefer OCR outright.
+    // When the text layer looks good and OCR also succeeded, prefer the text
+    // layer — it's typically cleaner than OCR for born-digital PDFs.
+    if (!options.forceOcr && textLayerLooksGood) {
+      return { text: textLayer, source: "text_layer", pageCount, searchablePdf: null };
+    }
+
+    if (
+      !options.forceOcr &&
+      textLayer.length > 0 &&
+      textLayer.length < MIN_TEXT_LAYER_CHARS &&
+      ocrText.length > 0
+    ) {
+      return {
+        text: `${textLayer}\n\n${ocrText}`.trim(),
+        source: "mixed",
+        pageCount,
+        searchablePdf: ocr.searchablePdf,
+      };
+    }
+    return { text: ocrText, source: "ocr", pageCount, searchablePdf: ocr.searchablePdf };
+  } finally {
+    if (tmpDir) {
+      fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    }
   }
-
-  const textLayerLooksGood =
-    textLayer.length >= MIN_TEXT_LAYER_CHARS && !hasPoorSpacing(textLayer);
-
-  if (options.forceOcr) {
-    console.log(`[documents.text-extract] force_ocr=true — skipping text layer`);
-  } else if (textLayerLooksGood) {
-    console.log(
-      `[documents.text-extract] text layer looks good — running OCR anyway for consistency`,
-    );
-  } else if (textLayer.length >= MIN_TEXT_LAYER_CHARS) {
-    console.log(
-      `[documents.text-extract] text layer looks broken (low space ratio) — running OCR`,
-    );
-  }
-
-  // Only spend the extra tesseract PDF-rendering pass when the original
-  // lacks a usable text layer — born-digital PDFs are already selectable in
-  // the viewer, so a sandwich PDF would just duplicate them.
-  const wantSearchablePdf = options.forceOcr || !textLayerLooksGood;
-  const ocr = await ocrPdf(absPath, {
-    repairFirst: pdfParseBrokenXref,
-    wantSearchablePdf,
-  });
-  const ocrText = ocr.text;
-
-  // When forceOcr is set or the text layer is broken, prefer OCR outright.
-  // When the text layer looks good and OCR also succeeded, prefer the text
-  // layer — it's typically cleaner than OCR for born-digital PDFs.
-  if (!options.forceOcr && textLayerLooksGood) {
-    return { text: textLayer, source: "text_layer", pageCount, searchablePdf: null };
-  }
-
-  if (
-    !options.forceOcr &&
-    textLayer.length > 0 &&
-    textLayer.length < MIN_TEXT_LAYER_CHARS &&
-    ocrText.length > 0
-  ) {
-    return {
-      text: `${textLayer}\n\n${ocrText}`.trim(),
-      source: "mixed",
-      pageCount,
-      searchablePdf: ocr.searchablePdf,
-    };
-  }
-  return { text: ocrText, source: "ocr", pageCount, searchablePdf: ocr.searchablePdf };
 }
 
 export interface OcrResult {

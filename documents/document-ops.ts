@@ -17,9 +17,10 @@ import {
   documentTaxSections,
   documents,
 } from "../db/schema";
-import { extractPdfText } from "./text-extract";
+import { extractPdfText, PdfPasswordRequiredError } from "./text-extract";
 import { buildThumbnail } from "./thumbnail";
 import { removeOcrPdf, writeOcrPdf } from "./ocr-pdf";
+import { deleteJobsForDocument } from "./scan-queue";
 import {
   assertPathUnderDocumentsRoot,
 } from "./documents.service";
@@ -47,7 +48,7 @@ import { realtime, push } from "~encore/clients";
 
 console.log("[boot] documents/document-ops.ts: all imports resolved");
 
-type DocumentStatus = "pending" | "extracting" | "classifying" | "ready" | "failed";
+type DocumentStatus = "pending" | "extracting" | "classifying" | "ready" | "failed" | "encrypted";
 
 /**
  * Fire-and-forget realtime notification for a document status change.
@@ -145,9 +146,27 @@ export async function runTextExtract(documentId: number): Promise<void> {
   // disk. Best-effort: a failed render must never block text extraction.
   await buildThumbnail(documentId, row.disk_path).catch(() => null);
 
-  const result = await extractPdfText(row.disk_path, {
-    forceOcr: row.force_ocr ?? false,
-  });
+  let result;
+  try {
+    result = await extractPdfText(row.disk_path, {
+      forceOcr: row.force_ocr ?? false,
+    });
+  } catch (err) {
+    if (err instanceof PdfPasswordRequiredError) {
+      // The file needs an open password we don't have. Park it in the
+      // `encrypted` state so the UI can prompt for the password, and drop
+      // the downstream classify/embed jobs so they don't spin deferring on
+      // a document that will never have extracted text until it's unlocked.
+      await db
+        .update(documents)
+        .set({ status: "encrypted", last_error: null })
+        .where(eq(documents.id, documentId));
+      await publishStatusChanged(documentId, row.user_id, "encrypted");
+      await deleteJobsForDocument(documentId);
+      return;
+    }
+    throw err;
+  }
   const text = result.text ?? "";
 
   // Persist (or clear) the searchable OCR sidecar so the viewer and the
