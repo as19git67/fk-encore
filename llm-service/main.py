@@ -58,6 +58,14 @@ LLM_CTX = _env_int("LLM_CTX", 8192)
 LLM_THREADS = _env_int("LLM_THREADS", os.cpu_count() or 4)
 LLM_GPU_LAYERS = _env_int("LLM_GPU_LAYERS", 0)
 
+# Upper bound (characters) on the document text considered by /classify. This
+# is a cheap pre-cap before the token-budget guard further shrinks the text to
+# fit n_ctx. Keep it >= the caller's DOCUMENTS_CLASSIFY_CHAR_LIMIT, otherwise a
+# raised app-side limit would be silently re-clipped here. Configurable so the
+# document char budget can be raised in lockstep without a code change once a
+# larger LLM_CTX gives the context window room for longer documents.
+CLASSIFY_TEXT_CHAR_LIMIT = _env_int("CLASSIFY_TEXT_CHAR_LIMIT", 6000)
+
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "intfloat/multilingual-e5-base")
 # sentence-transformers respects this env var as its on-disk cache location.
 os.environ.setdefault("SENTENCE_TRANSFORMERS_HOME", str(MODELS_DIR / "st-cache"))
@@ -704,7 +712,7 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
     # Initial char-cap remains as a cheap upper bound. A token-budget pass
     # below shrinks `text` further when the taxonomy + tax_sections outline
     # bloat the prompt past n_ctx (issue #325).
-    text = req.text[:6000]
+    text = req.text[:CLASSIFY_TEXT_CHAR_LIMIT]
 
     tax_active = bool(req.tax_sections)
     subjects_active = bool(req.subject_persons)
