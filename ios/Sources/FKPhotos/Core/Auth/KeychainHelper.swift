@@ -4,7 +4,17 @@ import Security
 enum KeychainHelper {
     private static let service = "dev.fk-encore.FKPhotos"
 
-    static func save(_ data: Data, forKey key: String) throws {
+    /// Stores `data` under `key`. `accessible` controls when the item is
+    /// readable; it defaults to `kSecAttrAccessibleAfterFirstUnlock` so tokens
+    /// remain available to background tasks after the first unlock. Pass
+    /// `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` for more sensitive
+    /// items (e.g. a stored password) that must never sync to iCloud or appear
+    /// in encrypted backups.
+    static func save(
+        _ data: Data,
+        forKey key: String,
+        accessible: CFString = kSecAttrAccessibleAfterFirstUnlock
+    ) throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -16,7 +26,7 @@ enum KeychainHelper {
 
         var addQuery = query
         addQuery[kSecValueData as String] = data
-        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        addQuery[kSecAttrAccessible as String] = accessible
 
         let status = SecItemAdd(addQuery as CFDictionary, nil)
         guard status == errSecSuccess else {
@@ -49,9 +59,13 @@ enum KeychainHelper {
         SecItemDelete(query as CFDictionary)
     }
 
-    static func saveString(_ value: String, forKey key: String) throws {
+    static func saveString(
+        _ value: String,
+        forKey key: String,
+        accessible: CFString = kSecAttrAccessibleAfterFirstUnlock
+    ) throws {
         guard let data = value.data(using: .utf8) else { return }
-        try save(data, forKey: key)
+        try save(data, forKey: key, accessible: accessible)
     }
 
     static func loadString(forKey key: String) -> String? {
