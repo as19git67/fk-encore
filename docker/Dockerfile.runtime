@@ -33,10 +33,13 @@ USER root
 # pipeline:
 #   - `pdftoppm` (poppler-utils) rasterizes scanned PDFs into PNGs.
 #   - `tesseract` reads those PNGs (deu+eng) when the PDF has no text layer.
+#     It also emits a per-page searchable PDF (image + invisible positioned
+#     text layer) that `pdfunite` (poppler-utils) merges into one sandwich
+#     PDF, so scans become selectable in the viewer and on download.
 #   - `qpdf` rewrites PDFs whose cross-reference table is missing or
 #     truncated so poppler can rasterize them. See the repair fallback in
 #     `documents/text-extract.ts`.
-# All three are invoked by `documents/text-extract.ts`.
+# All of these are invoked by `documents/text-extract.ts`.
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl gnupg; \

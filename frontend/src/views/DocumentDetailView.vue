@@ -13,6 +13,7 @@ import Chip from 'primevue/chip'
 import Popover from 'primevue/popover'
 import {
   deleteDocument,
+  downloadDocument,
   fetchDocumentBytes,
   getDocument,
   listDocumentCategories,
@@ -299,6 +300,22 @@ async function onReclassify(options: { forceOcr?: boolean } = {}) {
   }
 }
 
+const downloading = ref(false)
+
+async function onDownload() {
+  if (!doc.value) return
+  downloading.value = true
+  error.value = ''
+  try {
+    const name = doc.value.original_filename || `${doc.value.title || 'dokument'}.pdf`
+    await downloadDocument(doc.value.id, name)
+  } catch (err: any) {
+    error.value = err.message || 'Download fehlgeschlagen'
+  } finally {
+    downloading.value = false
+  }
+}
+
 async function onDelete() {
   if (!doc.value) return
   if (!window.confirm('Dokument wirklich endgültig löschen?')) return
@@ -424,6 +441,16 @@ onBeforeUnmount(() => {
           @click="onReclassify({ forceOcr: true })"
         />
         <Button
+          v-if="doc"
+          icon="pi pi-download"
+          label="Herunterladen"
+          aria-label="Herunterladen"
+          text
+          :loading="downloading"
+          title="Dokument herunterladen — mit durchsuchbarer Textebene (wird bei reinen Scans bei Bedarf erzeugt)."
+          @click="onDownload"
+        />
+        <Button
           v-if="auth.hasPermission('documents.delete') && doc"
           icon="pi pi-trash"
           severity="danger"
@@ -462,6 +489,13 @@ onBeforeUnmount(() => {
                 <div>
                   <strong>OCR erzwingen</strong>
                   <span>Text-Layer der PDF ignorieren und komplett per OCR neu einlesen — hilft bei Scans mit fehlenden Leerzeichen.</span>
+                </div>
+              </li>
+              <li>
+                <i class="pi pi-download" aria-hidden="true" />
+                <div>
+                  <strong>Herunterladen</strong>
+                  <span>Dokument als Datei speichern — mit durchsuchbarer Textebene. Bei reinen Scans wird die Textebene bei Bedarf per OCR erzeugt.</span>
                 </div>
               </li>
               <li v-if="auth.hasPermission('documents.delete')">
