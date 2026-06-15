@@ -344,6 +344,32 @@ export async function fetchDocumentBytes(id: number): Promise<Uint8Array> {
   return new Uint8Array(buf)
 }
 
+/**
+ * Download a document as a file. The backend serves a searchable
+ * (OCR-layered) PDF when the original lacked a text layer, building it on
+ * demand for documents imported before that feature existed — so the
+ * downloaded file is always selectable. Triggers a browser "Save as".
+ */
+export async function downloadDocument(id: number, filename: string): Promise<void> {
+  const token = localStorage.getItem('auth_token')
+  const res = await fetch(`${API_BASE_URL}/documents/${id}/download`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) throw new Error(`Download ${id}: HTTP ${res.status}`)
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  try {
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename || `dokument-${id}.pdf`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
 // ─── Tax-return helpers ───────────────────────────────────────────────────
 
 export interface TaxSectionCatalogEntry {
