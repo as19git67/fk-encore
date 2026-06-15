@@ -93,6 +93,13 @@ services:
       DOCUMENTS_INBOX_USER_EMAIL: ${DOCUMENTS_INBOX_USER_EMAIL:-}
       DOCUMENTS_OCR_LANG: ${DOCUMENTS_OCR_LANG:-deu+eng}
       DOCUMENTS_OCR_DPI: ${DOCUMENTS_OCR_DPI:-200}
+      # Max document characters sent to /classify. Keep <= the llm-service's
+      # CLASSIFY_TEXT_CHAR_LIMIT (raise both in lockstep with LLM_CTX).
+      DOCUMENTS_CLASSIFY_CHAR_LIMIT: ${DOCUMENTS_CLASSIFY_CHAR_LIMIT:-6000}
+      # Retrieval-augmented few-shot classification. Off by default: a small
+      # local model copies example documents' title/sender/category into the
+      # output. Opt in only after validating example safety on the model.
+      DOCUMENTS_FEWSHOT_ENABLED: ${DOCUMENTS_FEWSHOT_ENABLED:-false}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
       ADMIN_NAME: ${ADMIN_NAME:-Admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-changeme}   # override in .env!
