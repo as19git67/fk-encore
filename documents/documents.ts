@@ -61,6 +61,7 @@ import {
 import { enqueueDocumentScan, getQueueStatus, requeueDocument, cancelPendingJobs, retryFailedJobs, type QueueStatus } from "./scan-queue";
 import { triggerWorkers } from "./scan-worker";
 import { ensureThumbnail, removeThumbnail } from "./thumbnail";
+import { ensureSearchablePdf, ocrPdfFilePath, removeOcrPdf } from "./ocr-pdf";
 import { searchDocuments, type SearchMode } from "./search";
 import {
   findTaxSection,
@@ -620,18 +621,114 @@ export const getDocumentFile = api.raw(
     try {
       const row = await loadVisibleDocument(userId, docId);
       assertPathUnderDocumentsRoot(row.disk_path);
-      const stat = await fs.promises.stat(row.disk_path);
+      // Prefer the generated searchable ("sandwich") PDF when one exists so
+      // the in-app viewer can select/copy text on scanned pages. It is only
+      // present for documents whose original lacked a usable text layer; the
+      // sidecar is always a PDF regardless of the original's mime type.
+      const ocrPath = ocrPdfFilePath(docId);
+      let servePath = row.disk_path;
+      let serveType = row.mime_type || "application/pdf";
+      try {
+        await fs.promises.access(ocrPath, fs.constants.R_OK);
+        servePath = ocrPath;
+        serveType = "application/pdf";
+      } catch {
+        /* no sidecar — serve the original */
+      }
+      const stat = await fs.promises.stat(servePath);
       res.statusCode = 200;
-      res.setHeader("Content-Type", row.mime_type || "application/pdf");
+      res.setHeader("Content-Type", serveType);
       res.setHeader("Content-Length", String(stat.size));
       res.setHeader(
         "Content-Disposition",
         `inline; filename="${encodeURIComponent(row.original_filename)}"`,
       );
-      const stream = fs.createReadStream(row.disk_path);
+      const stream = fs.createReadStream(servePath);
       stream.pipe(res);
       stream.on("error", (err) => {
         console.error("[documents] file stream error:", err);
+        res.end();
+      });
+    } catch (err: any) {
+      const code = err instanceof APIError ? (err as any).statusCode ?? 500 : 500;
+      res.statusCode = code === 500 ? 404 : code;
+      res.end(err?.message ?? "Not found");
+    }
+  },
+);
+
+/**
+ * Download a document as an attachment. Unlike `/file` (which serves the
+ * bytes inline for the viewer), this sets `Content-Disposition: attachment`
+ * so the browser saves it under the original filename.
+ *
+ * The downloaded file always carries a selectable text layer: when the
+ * original lacks one (image-only scan), a searchable ("sandwich") PDF is
+ * built on demand and cached, so even documents imported before the OCR
+ * pipeline gained this feature export with a text layer. Born-digital PDFs
+ * are served as-is (already selectable).
+ */
+export const downloadDocument = api.raw(
+  { expose: true, method: "GET", path: "/documents/:id/download", auth: true },
+  async (req, res) => {
+    try {
+      checkModule();
+    } catch {
+      res.statusCode = 403;
+      res.end("Forbidden");
+      return;
+    }
+
+    const authData = getAuthData();
+    if (!authData) {
+      res.statusCode = 401;
+      res.end("Unauthorized");
+      return;
+    }
+    try {
+      requirePermission(authData, "documents.view");
+    } catch {
+      res.statusCode = 403;
+      res.end("Forbidden");
+      return;
+    }
+
+    const userId = parseInt(authData.userID, 10);
+    const m = /\/documents\/(\d+)\/download/.exec(req.url ?? "");
+    const docId = m ? parseInt(m[1], 10) : NaN;
+    if (!Number.isFinite(docId)) {
+      res.statusCode = 400;
+      res.end("Invalid id");
+      return;
+    }
+
+    try {
+      const row = await loadVisibleDocument(userId, docId);
+      assertPathUnderDocumentsRoot(row.disk_path);
+
+      // Build (or reuse) the searchable sidecar so the exported file always
+      // has a text layer. Returns null for born-digital PDFs (already
+      // selectable) or when OCR produced nothing — fall back to the original.
+      let servePath = row.disk_path;
+      let serveType = row.mime_type || "application/pdf";
+      const ocrPath = await ensureSearchablePdf(docId, row.disk_path);
+      if (ocrPath) {
+        servePath = ocrPath;
+        serveType = "application/pdf";
+      }
+
+      const stat = await fs.promises.stat(servePath);
+      res.statusCode = 200;
+      res.setHeader("Content-Type", serveType);
+      res.setHeader("Content-Length", String(stat.size));
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename*=UTF-8''${encodeURIComponent(row.original_filename)}`,
+      );
+      const stream = fs.createReadStream(servePath);
+      stream.pipe(res);
+      stream.on("error", (err) => {
+        console.error("[documents] download stream error:", err);
         res.end();
       });
     } catch (err: any) {
@@ -1275,6 +1372,7 @@ export const deleteDocument = api(
       console.warn(`[documents] delete: failed to unlink ${row.disk_path}: ${(err as Error).message}`);
     }
     await removeThumbnail(id);
+    await removeOcrPdf(id);
     return { success: true };
   },
 );
@@ -1385,6 +1483,11 @@ export const replaceDocumentFile = api.raw(
     } catch (err: any) {
       res.statusCode = 500; res.end(JSON.stringify({ error: err?.message ?? "Write failed" })); return;
     }
+
+    // The content changed — drop the cached searchable sidecar and preview so
+    // they don't serve stale bytes. The pipeline rebuilds both on reprocess.
+    await removeOcrPdf(docId);
+    await removeThumbnail(docId);
 
     await db.update(documents).set({
       sha256: digest,
