@@ -45,6 +45,22 @@ const DEFAULT_MAX_EXAMPLES = 3;
  */
 const PROBE_CHARS = 2000;
 
+/**
+ * Kill switch for retrieval-augmented few-shot. **Default off.**
+ *
+ * A small local model (Llama-3.2-3B) tends to copy the example documents'
+ * literal title/sender/category into the output instead of extracting them
+ * from the document at hand — contaminating metadata with values from
+ * unrelated prior documents. Until the example format is proven safe on the
+ * target model, few-shot is opt-in via `DOCUMENTS_FEWSHOT_ENABLED=true`.
+ *
+ * Read at call time (not module load) so tests and runtime config changes
+ * take effect without a process restart.
+ */
+function fewShotEnabled(): boolean {
+  return (process.env.DOCUMENTS_FEWSHOT_ENABLED ?? "false").trim().toLowerCase() === "true";
+}
+
 /** One neighbour row as returned by the SQL below, before dedup. */
 export interface NeighborRow {
   category_slug: string;
@@ -173,6 +189,9 @@ export interface BuildExamplesParams {
 export async function buildClassifyExamples(
   params: BuildExamplesParams,
 ): Promise<ClassifyExample[]> {
+  // Off by default — see `fewShotEnabled`. Returns before touching the
+  // embedder or DB so a disabled deployment pays nothing.
+  if (!fewShotEnabled()) return [];
   const probe = params.text.trim().slice(0, PROBE_CHARS);
   if (probe.length === 0) return [];
   try {
