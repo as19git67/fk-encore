@@ -36,8 +36,22 @@ const effectiveZoom = ref(1)
 const loading = ref(false)
 const internalError = ref<string | null>(null)
 
+const passwordPrompt = ref(false)
+const passwordWrong = ref(false)
+const passwordInput = ref('')
+let passwordCallback: ((pw: string) => void) | null = null
+
 let resizeObserver: ResizeObserver | null = null
 let resizeRaf = 0
+
+function submitPassword() {
+  if (!passwordCallback || passwordInput.value.length === 0) return
+  loading.value = true
+  passwordPrompt.value = false
+  const cb = passwordCallback
+  passwordCallback = null
+  cb(passwordInput.value)
+}
 
 function cancelTextLayer() {
   if (textLayer.value) {
@@ -62,17 +76,35 @@ async function destroyDoc() {
 async function loadDocument(bytes: Uint8Array) {
   await destroyDoc()
   internalError.value = null
+  passwordPrompt.value = false
+  passwordWrong.value = false
+  passwordCallback = null
   loading.value = true
   try {
     const task = pdfjsLib.getDocument({ data: bytes })
+    // pdf.js asks for a password on encrypted PDFs. Surface an inline prompt
+    // so the user can view the document client-side; the typed password is
+    // never sent anywhere (use the document's "Entsperren" action to persist
+    // a decrypted copy).
+    task.onPassword = (updatePassword: (pw: string) => void, reason: number) => {
+      // reason 2 == INCORRECT_PASSWORD (1 == NEED_PASSWORD).
+      passwordWrong.value = reason === 2
+      passwordCallback = updatePassword
+      passwordInput.value = ''
+      passwordPrompt.value = true
+      loading.value = false
+    }
     const doc = await task.promise
+    passwordPrompt.value = false
     pdfDoc.value = doc
     totalPages.value = doc.numPages
     currentPage.value = 1
     pageInput.value = '1'
     await renderPage()
   } catch (err: any) {
-    internalError.value = err?.message || 'PDF konnte nicht geladen werden'
+    if (err?.name !== 'PasswordException') {
+      internalError.value = err?.message || 'PDF konnte nicht geladen werden'
+    }
   } finally {
     loading.value = false
   }
@@ -315,7 +347,25 @@ onBeforeUnmount(() => {
     </div>
 
     <div ref="containerRef" class="canvas-wrapper">
-      <div v-if="errorMessage || internalError" class="state-overlay error">
+      <div v-if="passwordPrompt" class="state-overlay password">
+        <i class="pi pi-lock" />
+        <span>Dieses PDF ist passwortgeschützt.</span>
+        <span v-if="passwordWrong" class="password-error">Falsches Passwort — bitte erneut versuchen.</span>
+        <form class="password-form" @submit.prevent="submitPassword">
+          <input
+            v-model="passwordInput"
+            type="password"
+            class="password-input"
+            placeholder="Passwort"
+            autocomplete="off"
+            autofocus
+          />
+          <button type="submit" class="password-submit" :disabled="passwordInput.length === 0">
+            Anzeigen
+          </button>
+        </form>
+      </div>
+      <div v-else-if="errorMessage || internalError" class="state-overlay error">
         <i class="pi pi-exclamation-triangle" />
         <span>{{ errorMessage || internalError }}</span>
       </div>
@@ -483,4 +533,33 @@ onBeforeUnmount(() => {
   background: color-mix(in srgb, var(--p-surface-ground, #000) 60%, transparent);
 }
 .state-overlay.error { color: var(--p-red-400, #f87171); }
+
+/* The password prompt is interactive, so it opts back into pointer events
+   and stacks its controls vertically. */
+.state-overlay.password {
+  flex-direction: column;
+  pointer-events: auto;
+  color: var(--p-text-color);
+  text-align: center;
+  padding: 1rem;
+}
+.state-overlay.password i { font-size: 1.5rem; }
+.password-error { color: var(--p-red-400, #f87171); font-size: 0.85rem; }
+.password-form { display: flex; gap: 0.5rem; margin-top: 0.25rem; flex-wrap: wrap; justify-content: center; }
+.password-input {
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 4px;
+  background: var(--p-surface-card);
+  color: var(--p-text-color);
+}
+.password-submit {
+  padding: 0.35rem 0.85rem;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: var(--p-primary-color);
+  color: var(--p-primary-contrast-color, #fff);
+  cursor: pointer;
+}
+.password-submit:disabled { opacity: 0.5; cursor: default; }
 </style>
