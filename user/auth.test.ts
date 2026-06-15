@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import db from "../db/database";
 import { sessions, refreshTokens, rolePermissions, userRoles, users, permissions, roles } from "../db/schema";
-import { loginLogic, logoutLogic, validateToken } from "./auth.service";
+import { loginLogic, logoutLogic, refreshTokenLogic, validateToken } from "./auth.service";
 import { createUserLogic, getPermissionsForUser } from "./user.service";
 import { createRoleLogic } from "../role/role.service";
 import { assignRoleLogic } from "./user-roles.service";
@@ -95,5 +95,47 @@ describe("Auth Logic", () => {
 
     const authData = await validateToken(token);
     expect(authData.permissions).toHaveLength(0);
+  });
+
+  it("returns an access-token expiry roughly 15 minutes in the future", async () => {
+    await createUserLogic({ email: "u@test.com", name: "User", password: "pw" });
+    const result = await loginLogic({ email: "u@test.com", password: "pw" });
+
+    expect(result.expiresAt).toBeDefined();
+    const ms = new Date(result.expiresAt).getTime() - Date.now();
+    // 15-minute TTL; allow a generous lower bound for slow CI.
+    expect(ms).toBeGreaterThan(13 * 60 * 1000);
+    expect(ms).toBeLessThanOrEqual(15 * 60 * 1000 + 2000);
+  });
+
+  it("refresh rotates the token pair and returns a fresh expiry", async () => {
+    await createUserLogic({ email: "u@test.com", name: "User", password: "pw" });
+    const login = await loginLogic({ email: "u@test.com", password: "pw" });
+
+    const refreshed = await refreshTokenLogic({ refreshToken: login.refreshToken });
+
+    expect(refreshed.token).toBeDefined();
+    expect(refreshed.token).not.toBe(login.token);
+    expect(refreshed.refreshToken).not.toBe(login.refreshToken);
+    expect(refreshed.expiresAt).toBeDefined();
+    // The newly issued access token must validate.
+    const authData = await validateToken(refreshed.token);
+    expect(authData.userID).toBeDefined();
+  });
+
+  it("keeps the old refresh token valid during the grace period after rotation", async () => {
+    // Guards the lost-response race: when a rotation's response never reaches
+    // the client (e.g. a suspended iOS background task), the client still holds
+    // the previous refresh token. It must keep working long enough to retry,
+    // otherwise the next launch fails to refresh and the user is logged out.
+    await createUserLogic({ email: "u@test.com", name: "User", password: "pw" });
+    const login = await loginLogic({ email: "u@test.com", password: "pw" });
+
+    await refreshTokenLogic({ refreshToken: login.refreshToken });
+    // Reuse the original (now-rotated) refresh token within the grace period.
+    const second = await refreshTokenLogic({ refreshToken: login.refreshToken });
+
+    expect(second.token).toBeDefined();
+    expect(second.expiresAt).toBeDefined();
   });
 });

@@ -28,7 +28,12 @@ const nowSql = sql`NOW()`
 
 const ACCESS_TOKEN_TTL = 15 * 60 * 1000;          // 15 minutes
 const REFRESH_TOKEN_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
-const REFRESH_GRACE_PERIOD = 30 * 1000;            // 30 s — old refresh token stays valid to absorb multi-tab races
+// Old refresh token stays valid after rotation to absorb races. 5 minutes
+// (was 30 s) so a rotation whose response never reaches the client — common
+// when an iOS background task is suspended mid-refresh — doesn't strand the
+// client with a refresh token the server already retired, which forced a
+// visible logout on the next app launch.
+const REFRESH_GRACE_PERIOD = 5 * 60 * 1000;        // 5 minutes
 
 // ---------- Helpers ----------
 
@@ -45,15 +50,16 @@ async function cleanupExpiredRefreshTokens(): Promise<void> {
 }
 
 /** Creates a short-lived access token + a long-lived refresh token for a user. */
-export async function createSessionTokens(userId: number): Promise<{ token: string; refreshToken: string }> {
+export async function createSessionTokens(userId: number): Promise<{ token: string; refreshToken: string; expiresAt: string }> {
   const token = crypto.randomBytes(32).toString("base64url");
   const refresh = crypto.randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + ACCESS_TOKEN_TTL).toISOString();
 
   await dbExec(
     db.insert(sessions).values({
       token,
       user_id: userId,
-      expires_at: new Date(Date.now() + ACCESS_TOKEN_TTL).toISOString(),
+      expires_at: expiresAt,
     })
   );
 
@@ -65,7 +71,7 @@ export async function createSessionTokens(userId: number): Promise<{ token: stri
     })
   );
 
-  return { token, refreshToken: refresh };
+  return { token, refreshToken: refresh, expiresAt };
 }
 
 // ---------- Business Logic ----------
@@ -97,7 +103,7 @@ export async function loginLogic(req: LoginRequest): Promise<LoginResponse> {
   await cleanupExpiredSessions();
   await cleanupExpiredRefreshTokens();
 
-  const { token, refreshToken } = await createSessionTokens(row.id);
+  const { token, refreshToken, expiresAt } = await createSessionTokens(row.id);
 
   const user: UserWithRolesAndPermissions = {
     ...toUser(row),
@@ -105,7 +111,7 @@ export async function loginLogic(req: LoginRequest): Promise<LoginResponse> {
     permissions: await getPermissionsForUser(row.id),
   };
 
-  return { user, token, refreshToken };
+  return { user, token, refreshToken, expiresAt };
 }
 
 export async function logoutLogic(token: string, refreshToken?: string): Promise<LogoutResponse> {
@@ -144,7 +150,7 @@ export async function refreshTokenLogic(req: RefreshRequest): Promise<RefreshRes
   );
 
   // Create new token pair
-  const { token, refreshToken } = await createSessionTokens(row.user_id);
+  const { token, refreshToken, expiresAt } = await createSessionTokens(row.user_id);
 
   const userRow = await dbFirst<typeof users.$inferSelect>(
     db.select().from(users).where(eq(users.id, row.user_id))
@@ -160,7 +166,7 @@ export async function refreshTokenLogic(req: RefreshRequest): Promise<RefreshRes
     permissions: await getPermissionsForUser(userRow.id),
   };
 
-  return { token, refreshToken, user };
+  return { token, refreshToken, user, expiresAt };
 }
 
 export async function validateToken(token: string): Promise<{ userID: string; permissions: string[] }> {

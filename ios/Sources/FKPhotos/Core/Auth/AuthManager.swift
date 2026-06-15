@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import SwiftUI
 
 @Observable
@@ -10,6 +11,7 @@ public final class AuthManager: @unchecked Sendable {
     private let tokenKey = "auth_token"
     private let refreshTokenKey = "refresh_token"
     private let userKey = "auth_user"
+    private let passwordKey = "saved_login_password"
     static let savedEmailKey = "saved_login_email"
 
     var token: String? {
@@ -18,6 +20,15 @@ public final class AuthManager: @unchecked Sendable {
 
     var refreshToken: String? {
         KeychainHelper.loadString(forKey: refreshTokenKey)
+    }
+
+    /// When the current access token expires, as reported by the server at
+    /// login/refresh. `nil` when unknown (older server, or not yet refreshed
+    /// since the app was updated). Stored in the App Group so the APIClient and
+    /// the Share Extension share the same view.
+    var accessTokenExpiry: Date? {
+        let epoch = SharedStorage.defaults.double(forKey: SharedStorage.tokenExpiryKey)
+        return epoch > 0 ? Date(timeIntervalSince1970: epoch) : nil
     }
 
     public init() {
@@ -52,8 +63,21 @@ public final class AuthManager: @unchecked Sendable {
         let request = LoginRequest(email: email, password: password)
         let response: LoginResponse = try await APIClient.shared.post("/auth/login", body: request)
 
-        try saveTokens(accessToken: response.token, refreshToken: response.refreshToken, user: response.user)
+        try saveTokens(
+            accessToken: response.token,
+            refreshToken: response.refreshToken,
+            user: response.user,
+            expiresAt: response.expiresAt
+        )
         UserDefaults.standard.set(email, forKey: AuthManager.savedEmailKey)
+        // Persist the password in the Keychain (device-only) so the app can
+        // silently re-authenticate when both tokens are gone — avoids a visible
+        // logout after long background gaps. Cleared on explicit logout.
+        try? KeychainHelper.saveString(
+            password,
+            forKey: passwordKey,
+            accessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        )
     }
 
     @MainActor
@@ -73,13 +97,48 @@ public final class AuthManager: @unchecked Sendable {
         let rt = SharedStorage.defaults.string(forKey: SharedStorage.refreshTokenKey)
             ?? KeychainHelper.loadString(forKey: refreshTokenKey)
         guard let rt, !rt.isEmpty else {
-            return false
+            return await silentRelogin()
         }
 
         do {
             let body = RefreshRequest(refreshToken: rt)
             let response: RefreshResponse = try await APIClient.shared.postWithoutRetry("/auth/refresh", body: body)
-            try saveTokens(accessToken: response.token, refreshToken: response.refreshToken, user: response.user)
+            try saveTokens(
+                accessToken: response.token,
+                refreshToken: response.refreshToken,
+                user: response.user,
+                expiresAt: response.expiresAt
+            )
+            return true
+        } catch {
+            // Refresh token rejected (rotated-away or expired). Fall back to a
+            // silent re-login with the stored credentials before giving up.
+            return await silentRelogin()
+        }
+    }
+
+    /// Last-resort re-authentication: when the refresh token is missing or
+    /// rejected, use the email + password persisted in the Keychain to log in
+    /// again without showing the login screen. Returns `false` when no stored
+    /// credentials exist (user logged in before this feature or via passkey).
+    private func silentRelogin() async -> Bool {
+        guard let email = UserDefaults.standard.string(forKey: AuthManager.savedEmailKey),
+              !email.isEmpty,
+              let password = KeychainHelper.loadString(forKey: passwordKey),
+              !password.isEmpty
+        else {
+            return false
+        }
+
+        do {
+            let request = LoginRequest(email: email, password: password)
+            let response: LoginResponse = try await APIClient.shared.postWithoutRetry("/auth/login", body: request)
+            try saveTokens(
+                accessToken: response.token,
+                refreshToken: response.refreshToken,
+                user: response.user,
+                expiresAt: response.expiresAt
+            )
             return true
         } catch {
             return false
@@ -96,7 +155,12 @@ public final class AuthManager: @unchecked Sendable {
 
     // MARK: - Private
 
-    private func saveTokens(accessToken: String, refreshToken: String, user: UserWithRolesAndPermissions) throws {
+    private func saveTokens(
+        accessToken: String,
+        refreshToken: String,
+        user: UserWithRolesAndPermissions,
+        expiresAt: String?
+    ) throws {
         try KeychainHelper.saveString(accessToken, forKey: tokenKey)
         try KeychainHelper.saveString(refreshToken, forKey: refreshTokenKey)
         let userData = try JSONEncoder().encode(user)
@@ -106,6 +170,7 @@ public final class AuthManager: @unchecked Sendable {
         // authenticate and refresh the access token on its own.
         SharedStorage.defaults.set(accessToken, forKey: SharedStorage.tokenKey)
         SharedStorage.defaults.set(refreshToken, forKey: SharedStorage.refreshTokenKey)
+        Self.storeAccessTokenExpiry(expiresAt)
 
         Task { @MainActor in
             currentUser = user
@@ -113,12 +178,35 @@ public final class AuthManager: @unchecked Sendable {
         }
     }
 
+    /// Persists the access-token expiry (ISO-8601 string) as epoch seconds in
+    /// the App Group, or clears it when `nil`/unparseable.
+    private static func storeAccessTokenExpiry(_ iso: String?) {
+        guard let iso, let date = parseISO(iso) else {
+            SharedStorage.defaults.removeObject(forKey: SharedStorage.tokenExpiryKey)
+            return
+        }
+        SharedStorage.defaults.set(date.timeIntervalSince1970, forKey: SharedStorage.tokenExpiryKey)
+    }
+
+    /// Parses a server ISO-8601 timestamp, with or without fractional seconds
+    /// (`Date.toISOString()` emits milliseconds, but be lenient just in case).
+    private static func parseISO(_ iso: String) -> Date? {
+        let withFractional = ISO8601DateFormatter()
+        withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = withFractional.date(from: iso) { return date }
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        return plain.date(from: iso)
+    }
+
     private func clearSession() {
         KeychainHelper.delete(forKey: tokenKey)
         KeychainHelper.delete(forKey: refreshTokenKey)
         KeychainHelper.delete(forKey: userKey)
+        KeychainHelper.delete(forKey: passwordKey)
         SharedStorage.defaults.removeObject(forKey: SharedStorage.tokenKey)
         SharedStorage.defaults.removeObject(forKey: SharedStorage.refreshTokenKey)
+        SharedStorage.defaults.removeObject(forKey: SharedStorage.tokenExpiryKey)
         Task { @MainActor in
             currentUser = nil
             isAuthenticated = false
@@ -138,4 +226,6 @@ private struct RefreshResponse: Codable {
     let token: String
     let refreshToken: String
     let user: UserWithRolesAndPermissions
+    /// Optional so decoding still succeeds against an older server. See LoginResponse.
+    let expiresAt: String?
 }

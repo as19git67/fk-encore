@@ -456,23 +456,20 @@ actor APIClient {
     /// Call before starting a long-running operation (e.g. drain loop) to avoid
     /// mid-session 401 logouts during upload queues that exceed the 15-minute token
     /// lifetime (issue #625).
+    ///
+    /// The access token is an opaque random string, not a JWT, so its expiry
+    /// can't be read from the token itself — it comes from the server's
+    /// `expiresAt` saved at login/refresh. When the expiry is known and more
+    /// than 2 minutes away, do nothing. When it's unknown (older server, or not
+    /// refreshed since the app updated), refresh once to establish it. This
+    /// replaces the old JWT-parsing path that never matched and therefore
+    /// force-rotated the refresh token on every call — each rotation was a
+    /// chance to lose the new token if the background task was suspended,
+    /// which surfaced as a logout after long background gaps.
     func ensureFreshToken() async {
         guard let manager = authManager else { return }
-        if let token = manager.token {
-            let parts = token.split(separator: ".")
-            if parts.count >= 2 {
-                var base64 = String(parts[1])
-                    .replacingOccurrences(of: "-", with: "+")
-                    .replacingOccurrences(of: "_", with: "/")
-                let rem = base64.count % 4
-                if rem != 0 { base64 += String(repeating: "=", count: 4 - rem) }
-                if let data = Data(base64Encoded: base64),
-                   let payload = try? JSONDecoder().decode(JWTPayload.self, from: data),
-                   let exp = payload.exp,
-                   Date(timeIntervalSince1970: exp).timeIntervalSinceNow > 120 {
-                    return
-                }
-            }
+        if let expiry = manager.accessTokenExpiry, expiry.timeIntervalSinceNow > 120 {
+            return
         }
         _ = await refreshOnce(manager: manager)
     }
@@ -522,8 +519,4 @@ enum APIError: Error, LocalizedError {
 private struct APIErrorBody: Decodable {
     let code: String?
     let message: String
-}
-
-private struct JWTPayload: Decodable {
-    let exp: Double?
 }
