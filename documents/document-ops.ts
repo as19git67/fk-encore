@@ -19,6 +19,7 @@ import {
 } from "../db/schema";
 import { extractPdfText } from "./text-extract";
 import { buildThumbnail } from "./thumbnail";
+import { removeOcrPdf, writeOcrPdf } from "./ocr-pdf";
 import {
   assertPathUnderDocumentsRoot,
 } from "./documents.service";
@@ -148,6 +149,22 @@ export async function runTextExtract(documentId: number): Promise<void> {
     forceOcr: row.force_ocr ?? false,
   });
   const text = result.text ?? "";
+
+  // Persist (or clear) the searchable OCR sidecar so the viewer and the
+  // download endpoint can serve a version with a selectable text layer.
+  // A born-digital PDF returns no sidecar; remove any stale one left over
+  // from a previous file (e.g. after replaceDocumentFile reuses the id).
+  try {
+    if (result.searchablePdf && result.searchablePdf.length > 0) {
+      await writeOcrPdf(documentId, result.searchablePdf);
+    } else {
+      await removeOcrPdf(documentId);
+    }
+  } catch (err) {
+    console.warn(
+      `[documents] persisting OCR sidecar for doc=${documentId} failed: ${(err as Error).message}`,
+    );
+  }
 
   await db
     .update(documents)
