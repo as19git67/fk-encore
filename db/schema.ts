@@ -620,6 +620,10 @@ export const documentStatusEnum = pgEnum("document_status", [
   "classifying",
   "ready",
   "failed",
+  // The PDF needs an open ("user") password we don't have. The pipeline
+  // parks the document here until the user supplies it via the unlock
+  // endpoint (migration 0104).
+  "encrypted",
 ]);
 
 export const documentJobServiceEnum = pgEnum("document_job_service", [

@@ -729,6 +729,13 @@
       "when": 1779001442000,
       "tag": "0103_drop_photo_landmarks",
       "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1779001443000,
+      "tag": "0104_document_status_encrypted",
+      "breakpoints": true
     }
   ]
 }

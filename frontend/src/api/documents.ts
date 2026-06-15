@@ -8,7 +8,7 @@
 
 import { API_BASE_URL, apiFetch } from './client'
 
-export type DocumentStatus = 'pending' | 'extracting' | 'classifying' | 'ready' | 'failed'
+export type DocumentStatus = 'pending' | 'extracting' | 'classifying' | 'ready' | 'failed' | 'encrypted'
 export type SearchMode = 'fts' | 'semantic' | 'hybrid'
 export type TaxSectionGroup = 'einkuenfte' | 'abzuege' | 'bescheid' | 'rahmen'
 export type TaxAssignmentSource = 'ai' | 'user'
@@ -304,6 +304,19 @@ export function reclassifyDocument(
   return apiFetch<{ success: boolean }>(`/documents/${id}/reclassify`, {
     method: 'POST',
     body: JSON.stringify(body),
+  })
+}
+
+/**
+ * Decrypt a password-protected document and store it unencrypted. The
+ * password is sent once to the backend (qpdf decrypt) and never stored;
+ * afterwards the document is re-processed and no longer asks for a password.
+ * Returns the refreshed document detail.
+ */
+export function unlockDocument(id: number, password: string) {
+  return apiFetch<DocumentDetail>(`/documents/${id}/unlock`, {
+    method: 'POST',
+    body: JSON.stringify({ id, password }),
   })
 }
 

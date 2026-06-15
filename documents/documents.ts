@@ -62,6 +62,7 @@ import { enqueueDocumentScan, getQueueStatus, requeueDocument, cancelPendingJobs
 import { triggerWorkers } from "./scan-worker";
 import { ensureThumbnail, removeThumbnail } from "./thumbnail";
 import { ensureSearchablePdf, ocrPdfFilePath, removeOcrPdf } from "./ocr-pdf";
+import { decryptPdfWithPassword } from "./text-extract";
 import { searchDocuments, type SearchMode } from "./search";
 import {
   findTaxSection,
@@ -1503,6 +1504,88 @@ export const replaceDocumentFile = api.raw(
     res.statusCode = 200;
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify({ success: true }));
+  },
+);
+
+// ─── Unlock (decrypt password-protected PDF) ─────────────────────────────────
+
+export interface UnlockDocumentRequest {
+  id: number;
+  password: string;
+}
+
+/**
+ * Decrypt a password-protected document and store it unencrypted, so no
+ * password is needed from this point on. The supplied password is used only
+ * to decrypt (via qpdf) and is never persisted. On success the file is
+ * replaced with its plaintext form and re-run through the pipeline
+ * (text-extract → classify → embed), moving it out of the `encrypted` state.
+ *
+ * Returns `invalid_argument` when the password is wrong or the file can't be
+ * decrypted, and `already_exists` when the decrypted content collides with a
+ * different document.
+ */
+export const unlockDocument = api(
+  { expose: true, method: "POST", path: "/documents/:id/unlock", auth: true },
+  async (req: UnlockDocumentRequest): Promise<DocumentDetail> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.edit");
+    const userId = getUserId();
+
+    const password = req.password ?? "";
+    if (password.length === 0) {
+      throw APIError.invalidArgument("Bitte ein Passwort eingeben.");
+    }
+
+    const row = await loadAdministrableDocument(userId, req.id);
+    assertPathUnderDocumentsRoot(row.disk_path);
+
+    const decrypted = await decryptPdfWithPassword(row.disk_path, password);
+    if (!decrypted) {
+      throw APIError.invalidArgument(
+        "Falsches Passwort oder die Datei konnte nicht entschlüsselt werden.",
+      );
+    }
+
+    const digest = crypto.createHash("sha256").update(decrypted).digest("hex");
+    const size = decrypted.length;
+
+    // The decrypted bytes hash differently than the encrypted original; guard
+    // against colliding with another document just like replaceDocumentFile.
+    const duplicate = await dbFirst<{ id: number }>(
+      db
+        .select({ id: documents.id })
+        .from(documents)
+        .where(and(eq(documents.sha256, digest), ne(documents.id, req.id))),
+    );
+    if (duplicate) {
+      throw APIError.alreadyExists(
+        "Die entschlüsselte Datei existiert bereits als anderes Dokument.",
+      );
+    }
+
+    await ensureDir(path.dirname(row.disk_path));
+    await fs.promises.writeFile(row.disk_path, decrypted);
+
+    await db
+      .update(documents)
+      .set({
+        sha256: digest,
+        size_bytes: size,
+        status: "pending",
+        last_error: null,
+      })
+      .where(eq(documents.id, req.id));
+
+    // Derived artifacts were built from the encrypted/old content — drop them.
+    await removeOcrPdf(req.id);
+    await removeThumbnail(req.id);
+
+    await requeueDocument(req.id);
+    triggerWorkers();
+
+    return loadDetail(userId, req.id);
   },
 );
 

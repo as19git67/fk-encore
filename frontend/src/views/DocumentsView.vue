@@ -266,6 +266,7 @@ function statusSeverity(status: DocumentStatus): 'success' | 'info' | 'warn' | '
   switch (status) {
     case 'ready': return 'success'
     case 'failed': return 'danger'
+    case 'encrypted': return 'warn'
     case 'pending': return 'secondary'
     case 'extracting':
     case 'classifying':
@@ -278,6 +279,7 @@ function statusLabel(status: DocumentStatus): string {
   switch (status) {
     case 'ready': return 'Fertig'
     case 'failed': return 'Fehler'
+    case 'encrypted': return 'Passwortgeschützt'
     case 'pending': return 'Warteschlange'
     case 'extracting': return 'Text-Extraktion'
     case 'classifying': return 'KI-Analyse'
