@@ -109,7 +109,7 @@ function toPasskeyInfo(row: typeof passkeys.$inferSelect): PasskeyInfo {
   };
 }
 
-async function createSession(userId: number): Promise<{ token: string; refreshToken: string }> {
+async function createSession(userId: number): Promise<{ token: string; refreshToken: string; expiresAt: string }> {
   return createSessionTokens(userId);
 }
 
@@ -272,7 +272,7 @@ export async function passkeyAuthVerifyLogic(
     db.select().from(users).where(eq(users.id, passkey.user_id))
   ))!;
 
-  const { token, refreshToken } = await createSession(userRow.id);
+  const { token, refreshToken, expiresAt } = await createSession(userRow.id);
 
   return {
     user: {
@@ -282,6 +282,7 @@ export async function passkeyAuthVerifyLogic(
     },
     token,
     refreshToken,
+    expiresAt,
   };
 }
 

@@ -40,6 +40,9 @@ struct LoginResponse: Codable, Sendable {
     let user: UserWithRolesAndPermissions
     let token: String
     let refreshToken: String
+    /// ISO-8601 instant the access token expires. Optional so decoding still
+    /// succeeds against an older server that doesn't send it yet.
+    let expiresAt: String?
 }
 
 struct RegisterRequest: Codable, Sendable {

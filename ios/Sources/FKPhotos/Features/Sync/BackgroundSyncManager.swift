@@ -96,28 +96,38 @@ public final class BackgroundSyncManager {
     public func enqueueForBackgroundUpload(_ item: UploadQueueItem) {
         let item = refreshMetadataFromLibrary(item)
         if #available(iOS 26.1, *) {
-            enqueuePHBackgroundJob(item)
+            Task { await enqueuePHBackgroundJob(item) }
         } else {
             Task { await UploadQueue.shared.enqueue(item) }
         }
     }
 
     @available(iOS 26.1, *)
-    private func enqueuePHBackgroundJob(_ item: UploadQueueItem) {
+    private func enqueuePHBackgroundJob(_ item: UploadQueueItem) async {
+        // The system runs this upload job later — possibly hours from now — but
+        // the access token is baked into the request below and only lives 15
+        // minutes. Refresh it right before baking so the token carries its full
+        // lifetime into the system queue. (The system upload extension cannot
+        // refresh on its own; that would require a dedicated
+        // PHBackgroundResourceUploadExtension target. Until then this maximises
+        // the odds the job runs before the token expires; if it still expires,
+        // the job fails silently and the foreground drain re-uploads later.)
+        await APIClient.shared.ensureFreshToken()
+
         let asset = item.assetLocalIdentifier.flatMap {
             PHAsset.fetchAssets(withLocalIdentifiers: [$0], options: nil).firstObject
         }
         guard let resource = asset.flatMap({ AssetUploadEnqueuer.bestResource(for: $0) }) else {
             // No PHAssetResource available (e.g. item came from Share Extension with file data only).
             // Fall back to UploadQueue for foreground processing.
-            Task { await UploadQueue.shared.enqueue(item) }
+            await UploadQueue.shared.enqueue(item)
             return
         }
 
         guard let baseURL = URL(string: SharedStorage.defaults.string(forKey: SharedStorage.serverURLKey) ?? ""),
               let token = KeychainHelper.loadString(forKey: "auth_token"),
               !token.isEmpty else {
-            Task { await UploadQueue.shared.enqueue(item) }
+            await UploadQueue.shared.enqueue(item)
             return
         }
 
@@ -153,7 +163,7 @@ public final class BackgroundSyncManager {
             }
         } catch {
             print("[BGSync] PHAssetResourceUploadJobChangeRequest failed: \(error) — falling back to UploadQueue")
-            Task { await UploadQueue.shared.enqueue(item) }
+            await UploadQueue.shared.enqueue(item)
         }
     }
 
