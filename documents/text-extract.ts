@@ -26,7 +26,6 @@ import os from "os";
 import path from "path";
 import { createRequire } from "module";
 import { spawn } from "child_process";
-import tesseract from "node-tesseract-ocr";
 
 // pdf-parse is CJS and its default import pulls in a debug routine that
 // tries to read `test/05-versions-space.pdf` when `module.parent` is
@@ -105,6 +104,15 @@ export interface ExtractResult {
   text: string;
   source: "text_layer" | "ocr" | "mixed";
   pageCount: number;
+  /**
+   * A searchable ("sandwich") PDF — the rasterized pages with an
+   * invisible, positioned OCR text layer baked in — produced whenever the
+   * original lacked a usable text layer (source "ocr"/"mixed" or
+   * `forceOcr`). Lets the in-app viewer select/copy text directly on
+   * scanned pages. Null for born-digital PDFs (the original already carries
+   * a selectable text layer) or when the OCR-PDF build failed.
+   */
+  searchablePdf: Buffer | null;
 }
 
 export interface ExtractOptions {
@@ -195,13 +203,21 @@ export async function extractPdfText(
     );
   }
 
-  const ocrText = await ocrPdf(absPath, { repairFirst: pdfParseBrokenXref });
+  // Only spend the extra tesseract PDF-rendering pass when the original
+  // lacks a usable text layer — born-digital PDFs are already selectable in
+  // the viewer, so a sandwich PDF would just duplicate them.
+  const wantSearchablePdf = options.forceOcr || !textLayerLooksGood;
+  const ocr = await ocrPdf(absPath, {
+    repairFirst: pdfParseBrokenXref,
+    wantSearchablePdf,
+  });
+  const ocrText = ocr.text;
 
   // When forceOcr is set or the text layer is broken, prefer OCR outright.
   // When the text layer looks good and OCR also succeeded, prefer the text
   // layer — it's typically cleaner than OCR for born-digital PDFs.
   if (!options.forceOcr && textLayerLooksGood) {
-    return { text: textLayer, source: "text_layer", pageCount };
+    return { text: textLayer, source: "text_layer", pageCount, searchablePdf: null };
   }
 
   if (
@@ -214,9 +230,20 @@ export async function extractPdfText(
       text: `${textLayer}\n\n${ocrText}`.trim(),
       source: "mixed",
       pageCount,
+      searchablePdf: ocr.searchablePdf,
     };
   }
-  return { text: ocrText, source: "ocr", pageCount };
+  return { text: ocrText, source: "ocr", pageCount, searchablePdf: ocr.searchablePdf };
+}
+
+export interface OcrResult {
+  text: string;
+  /**
+   * Merged searchable PDF (rasterized pages + invisible OCR text layer),
+   * present only when `wantSearchablePdf` was requested and the build
+   * succeeded. Null otherwise.
+   */
+  searchablePdf: Buffer | null;
 }
 
 /**
@@ -224,14 +251,20 @@ export async function extractPdfText(
  * PNGs to tesseract. Concatenates the page texts with blank lines in
  * between so tesseract sentence boundaries survive the join.
  *
+ * When `wantSearchablePdf` is set, tesseract additionally emits a
+ * single-page searchable PDF per page (the image with an invisible,
+ * positioned text layer); these are merged with `pdfunite` into one
+ * sandwich PDF and returned. This is best-effort: a failure to build the
+ * PDF never affects the extracted text.
+ *
  * When `repairFirst` is true (set by the caller after pdf-parse already
  * rejected the file as having a broken xref), we run qpdf eagerly so
  * pdftoppm doesn't have to fail first.
  */
 async function ocrPdf(
   absPath: string,
-  options: { repairFirst?: boolean } = {},
-): Promise<string> {
+  options: { repairFirst?: boolean; wantSearchablePdf?: boolean } = {},
+): Promise<OcrResult> {
   const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "fk-docscan-"));
   try {
     let pdfPath = absPath;
@@ -267,34 +300,162 @@ async function ocrPdf(
     const entries = (await fs.promises.readdir(tmpDir))
       .filter((n) => n.toLowerCase().endsWith(".png"))
       .sort();
-    if (entries.length === 0) return "";
+    if (entries.length === 0) return { text: "", searchablePdf: null };
 
     const parts: string[] = [];
+    const pagePdfs: string[] = [];
     const started = Date.now();
-    for (const entry of entries) {
+    for (let i = 0; i < entries.length; i++) {
       if (Date.now() - started > OCR_TIMEOUT_MS) {
         console.warn("[documents.text-extract] OCR timeout reached, truncating");
         break;
       }
-      const pagePath = path.join(tmpDir, entry);
+      const pagePath = path.join(tmpDir, entries[i]);
+      const outBase = path.join(tmpDir, `ocr-${String(i).padStart(4, "0")}`);
+      // tesseract appends the extension per output config (`txt`, `pdf`).
+      const configs = options.wantSearchablePdf ? ["txt", "pdf"] : ["txt"];
       try {
-        const text = await tesseract.recognize(pagePath, {
-          lang: process.env.DOCUMENTS_OCR_LANG ?? "deu+eng",
-          oem: 1,
-          psm: 3,
-        });
-        if (text && text.trim().length > 0) parts.push(text.trim());
+        await runTesseract(pagePath, outBase, configs);
+        const txt = await fs.promises
+          .readFile(`${outBase}.txt`, "utf8")
+          .catch(() => "");
+        if (txt.trim().length > 0) parts.push(txt.trim());
+        if (options.wantSearchablePdf) {
+          const pdf = `${outBase}.pdf`;
+          if (await fileReadable(pdf)) pagePdfs.push(pdf);
+        }
       } catch (err) {
         console.warn(
-          `[documents.text-extract] tesseract failed on ${entry}: ${(err as Error).message}`,
+          `[documents.text-extract] tesseract failed on ${entries[i]}: ${(err as Error).message}`,
         );
       }
     }
-    return parts.join("\n\n").trim();
+
+    let searchablePdf: Buffer | null = null;
+    if (options.wantSearchablePdf && pagePdfs.length > 0) {
+      searchablePdf = await mergePdfs(pagePdfs, tmpDir).catch((err) => {
+        console.warn(
+          `[documents.text-extract] merging OCR page PDFs failed: ${(err as Error).message}`,
+        );
+        return null;
+      });
+    }
+
+    return { text: parts.join("\n\n").trim(), searchablePdf };
   } finally {
     // Best-effort cleanup — never throw from the finally block.
     fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+/**
+ * Build a searchable ("sandwich") PDF for `absPath` on demand — used to
+ * give documents imported before the OCR-layer feature (or that simply
+ * never went through OCR) a selectable text layer at download time.
+ * Returns the merged PDF bytes, or null when the document has no
+ * rasterizable pages or the OCR build failed. Never throws.
+ */
+export async function buildSearchablePdf(absPath: string): Promise<Buffer | null> {
+  let brokenXref = false;
+  try {
+    const buffer = await fs.promises.readFile(absPath);
+    try {
+      await pdfParseQuiet(buffer);
+    } catch (err) {
+      brokenXref = looksLikeBrokenXref((err as Error).message);
+    }
+  } catch {
+    return null;
+  }
+  try {
+    const result = await ocrPdf(absPath, {
+      repairFirst: brokenXref,
+      wantSearchablePdf: true,
+    });
+    return result.searchablePdf;
+  } catch (err) {
+    console.warn(
+      `[documents.text-extract] buildSearchablePdf failed: ${(err as Error).message}`,
+    );
+    return null;
+  }
+}
+
+/**
+ * Does the PDF at `absPath` already carry a usable text layer? Mirrors the
+ * fast-path decision in `extractPdfText` so the download endpoint can skip
+ * the expensive OCR pass for born-digital PDFs (which are already
+ * selectable in the viewer). Returns false on any read/parse failure.
+ */
+export async function hasUsableTextLayer(absPath: string): Promise<boolean> {
+  try {
+    const buffer = await fs.promises.readFile(absPath);
+    const parsed = await pdfParseQuiet(buffer);
+    const text = stripNulBytes((parsed.text ?? "").trim());
+    return text.length >= MIN_TEXT_LAYER_CHARS && !hasPoorSpacing(text);
+  } catch {
+    return false;
+  }
+}
+
+async function fileReadable(p: string): Promise<boolean> {
+  try {
+    await fs.promises.access(p, fs.constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Run tesseract on a single image, writing the requested output formats
+ * (`txt`, `pdf`, …) to `<outBase>.<ext>`.
+ */
+function runTesseract(imagePath: string, outBase: string, configs: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const lang = process.env.DOCUMENTS_OCR_LANG ?? "deu+eng";
+    const proc = spawn(
+      "tesseract",
+      [imagePath, outBase, "-l", lang, "--oem", "1", "--psm", "3", ...configs],
+      { stdio: ["ignore", "ignore", "pipe"] },
+    );
+    let stderr = "";
+    proc.stderr.on("data", (d) => {
+      stderr += d.toString();
+    });
+    proc.on("error", reject);
+    proc.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`tesseract exited ${code}: ${stderr.trim()}`));
+    });
+  });
+}
+
+/**
+ * Merge per-page PDFs into one with `pdfunite` and return the bytes.
+ * A single page is read back directly — pdfunite needs at least two
+ * input files.
+ */
+async function mergePdfs(pagePdfs: string[], tmpDir: string): Promise<Buffer> {
+  if (pagePdfs.length === 1) {
+    return fs.promises.readFile(pagePdfs[0]);
+  }
+  const merged = path.join(tmpDir, "searchable.pdf");
+  await new Promise<void>((resolve, reject) => {
+    const proc = spawn("pdfunite", [...pagePdfs, merged], {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    proc.stderr.on("data", (d) => {
+      stderr += d.toString();
+    });
+    proc.on("error", reject);
+    proc.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`pdfunite exited ${code}: ${stderr.trim()}`));
+    });
+  });
+  return fs.promises.readFile(merged);
 }
 
 function runPdftoppm(pdfPath: string, outPrefix: string): Promise<void> {
