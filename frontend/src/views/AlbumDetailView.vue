@@ -906,6 +906,14 @@ function handleMapStopSelected(coverPhotoId: number) {
 const mapSelectedPhoto = computed(() =>
   mapFullscreenIndex.value >= 0 ? mapFullscreenPhotos.value[mapFullscreenIndex.value] ?? null : null
 )
+
+// Live slideshow → map/timeline sync: while paging the map fullscreen, report
+// the current photo back to TripMap so it re-derives the stop, re-highlights
+// the active pin and re-centres the timeline on every step.
+watch(mapSelectedPhoto, (photo) => {
+  if (!isMapFullscreen.value || !photo) return
+  tripMapRef.value?.selectStopByPhotoId(photo.id)
+})
 const mapPrevPhoto = computed(() =>
   mapFullscreenIndex.value > 0 ? mapFullscreenPhotos.value[mapFullscreenIndex.value - 1] ?? null : null
 )
