@@ -39,7 +39,6 @@ const {
   uniqueDays,
   bounds,
   overviewClusters,
-  boundsForDay,
 } = usePhotoStops(toRef(props, 'photos'), clusterRadiusMeters)
 
 const mapContainer = ref<HTMLElement | null>(null)
@@ -48,30 +47,17 @@ let map: L.Map | null = null
 const markers: L.Marker[] = []
 const polylines: L.Polyline[] = []
 
-const OVERVIEW = '__overview__'
-type DaySelection = typeof OVERVIEW | string
-
-/** Currently selected timeline entry. Defaults to the overview so the
- *  user lands on a full-trip view. */
-const selectedDay = ref<DaySelection>(OVERVIEW)
-/** Highlighted stop within the selected day. Only meaningful when a
- *  specific day is selected; null in overview mode. */
+/** The currently highlighted stop's id, or null for the overview entry.
+ *  Stop ids are reassigned whenever the zoom-driven clustering recomputes,
+ *  so the *stable* selection is `selectedAnchorPhotoId`; `selectedStopId` is
+ *  re-resolved from it on every re-cluster (see watch on `stops`). */
 const selectedStopId = ref<number | null>(null)
-/** Cover-photo id of the selected stop. Stop ids are reassigned whenever the
- *  zoom-driven clustering recomputes, so we re-resolve the selection by this
- *  stable photo id instead of losing it on every zoom (see watch on `stops`). */
+/** The "current photo" — the single source of truth for the selection. The
+ *  highlighted stop, the active map pin and the centred timeline card are all
+ *  derived from it. `null` = the overview entry. When the fullscreen slideshow
+ *  pages through the photo list, the parent reports the new current photo here
+ *  so the map + timeline follow along. */
 const selectedAnchorPhotoId = ref<number | null>(null)
-/** A specific pre-selected photo (deep link, last-viewed restore).
- *  When set, clicking the pin of the containing stop opens fullscreen
- *  at THIS photo instead of the stop's first photo. Cleared as soon
- *  as the user navigates somewhere else. */
-const activePhotoId = ref<number | null>(null)
-
-function formatDayLabel(day: string): string {
-  // day = YYYY-MM-DD → DD. Mon
-  const d = new Date(day + 'T00:00:00')
-  return d.toLocaleDateString('de-DE', { day: '2-digit', month: 'short' })
-}
 
 function getStopLabel(stop: Stop): string {
   if (stop.locationLabel) return stop.locationLabel
@@ -85,16 +71,15 @@ function formatStopDate(stop: Stop): string {
 
 // ── Selection ────────────────────────────────────────────────────────────────
 //
-// The whole timeline is scroll-driven: whichever card is closest to the
-// viewport centre becomes the active selection. Tapping a card simply
-// scrolls it to centre, which then triggers the same selection logic.
+// One source of truth: `selectedAnchorPhotoId` (the "current photo"). The
+// highlighted stop, the active map pin and the centred timeline card all
+// derive from it; `null` = the overview entry.
 //
-// To avoid yanking cards out from under the user's finger when a day
-// collapses/expands, day changes are deferred until the scroll
-// SETTLES ('scrollend' or fallback timer). While the user is still
-// dragging we only update within-day state — `selectedStopId` — so the
-// map's pin highlight tracks the scroll live but the timeline DOM
-// stays put.
+// Manual horizontal timeline scrolling updates the selection (and therefore
+// the map) but never scrolls the timeline back — that would fight the user's
+// finger. The timeline is only re-centred programmatically when the selection
+// originates OUTSIDE the timeline: a map pin tap, the fullscreen slideshow, or
+// an explicit tap / keyboard action on a card.
 
 let scrollRaf = 0
 let scrollEndFallbackTimer: ReturnType<typeof setTimeout> | null = null
@@ -102,45 +87,48 @@ let scrollEndFallbackTimer: ReturnType<typeof setTimeout> | null = null
  *  approximation: after this long with no further scroll event we
  *  assume the scroll has settled. */
 const SCROLL_END_FALLBACK_MS = 180
+/** True while a programmatic timeline scroll is settling, so the scroll
+ *  listener doesn't mistake it for a manual drag and re-derive the selection. */
+let programmaticScroll = false
+let programmaticScrollTimer: ReturnType<typeof setTimeout> | null = null
 
-function applySelection(
-  day: DaySelection,
+/**
+ * Core selection update. `stopId === null` selects the overview entry and
+ * zooms the map to fit all locations. Otherwise the stop is highlighted and
+ * the map pans to its pin only when it sits off-screen — selecting a stop
+ * never changes the zoom (and thus never re-clusters); only the user's own
+ * zoom does that.
+ *
+ * `recenterTimeline` re-centres the timeline on the selection (used for taps,
+ * pin clicks and slideshow sync — never for manual drags).
+ */
+function setSelection(
   stopId: number | null,
-  opts: { silent?: boolean } = {},
+  anchorPhotoId: number | null,
+  opts: { recenterTimeline?: boolean; silent?: boolean } = {},
 ) {
-  const dayChanged = selectedDay.value !== day
-  const stopChanged = selectedStopId.value !== stopId
-  if (!dayChanged && !stopChanged) return
-  // Drop the active-photo hint whenever we move to a stop that doesn't
-  // contain it. The hint only applies to the stop that owns the photo
-  // — every other navigation cancels it so subsequent pin clicks open
-  // at the stop's first photo instead.
-  if (stopChanged && activePhotoId.value != null) {
-    const targetStop = stopId != null ? stops.value.find(s => s.id === stopId) : null
-    if (!targetStop || !targetStop.photos.some(p => p.id === activePhotoId.value)) {
-      activePhotoId.value = null
-    }
-  }
-  selectedDay.value = day
   selectedStopId.value = stopId
-  // Remember the stop's cover photo so the selection survives a zoom-driven
-  // re-clustering (which reassigns stop ids).
-  selectedAnchorPhotoId.value = stopId != null
-    ? (stops.value.find(s => s.id === stopId)?.coverPhoto.id ?? null)
-    : null
-  renderContent()
-  if (dayChanged) fitMapToSelection()
-  if (!opts.silent && stopId != null) {
+  selectedAnchorPhotoId.value = anchorPhotoId
+  // Pin rendering reacts to the selection via `watch(visiblePins)` (batched by
+  // Vue's scheduler), so paging photos within the same stop doesn't re-draw
+  // the markers. Here we only drive the map view + timeline.
+  if (stopId === null) {
+    fitMapToAll()
+  } else {
     const stop = stops.value.find(s => s.id === stopId)
-    if (stop) emit('stop-selected', stop.coverPhoto.id)
+    if (stop) ensureStopPinVisible(stop)
+  }
+  if (opts.recenterTimeline) {
+    nextTick(() => scrollItemIntoCenter(stopId))
+  }
+  if (!opts.silent && stopId !== null && anchorPhotoId != null) {
+    emit('stop-selected', anchorPhotoId)
   }
 }
 
-function fitMapToSelection() {
+function fitMapToAll() {
   if (!map) return
-  const b = selectedDay.value === OVERVIEW
-    ? bounds.value
-    : boundsForDay(selectedDay.value)
+  const b = bounds.value
   if (b) {
     map.fitBounds(b, { padding: [24, 24], maxZoom: 16 })
   } else {
@@ -191,18 +179,16 @@ function findCenteredItem(): { type: 'overview' } | { type: 'stop'; stop: Stop }
 }
 
 function onTimelineScroll() {
+  if (programmaticScroll) return
   if (!scrollRaf) {
     scrollRaf = requestAnimationFrame(() => {
       scrollRaf = 0
-      // Live: only follow within the already-active day. Day-level
-      // changes wait for the scroll to settle.
-      applyScrollDrivenSelection(false)
+      applyScrollDrivenSelection()
     })
   }
   // Native scrollend isn't universally supported yet — use a debounce
   // timer as a fallback. When native scrollend fires it will also call
-  // onTimelineScrollEnd, which clears this timer to avoid a double
-  // apply.
+  // onTimelineScrollEnd, which clears this timer to avoid a double apply.
   if (scrollEndFallbackTimer != null) clearTimeout(scrollEndFallbackTimer)
   scrollEndFallbackTimer = setTimeout(() => {
     scrollEndFallbackTimer = null
@@ -215,68 +201,43 @@ function onTimelineScrollEnd() {
     clearTimeout(scrollEndFallbackTimer)
     scrollEndFallbackTimer = null
   }
-  applyScrollDrivenSelection(true)
+  if (programmaticScroll) return
+  applyScrollDrivenSelection()
 }
 
-function applyScrollDrivenSelection(allowDayChange: boolean) {
+/**
+ * Manual timeline drag: snap the selection to the stop (or overview) nearest
+ * the viewport centre and update the map — but never re-centre the timeline
+ * (no feedback onto the user's drag). Selecting the overview zooms the map to
+ * fit all; selecting a stop only re-highlights / pans, never re-zooms.
+ */
+function applyScrollDrivenSelection() {
   const centered = findCenteredItem()
   if (!centered) return
 
   if (centered.type === 'overview') {
-    if (selectedDay.value === OVERVIEW) return
-    if (!allowDayChange) return
-    applySelection(OVERVIEW, null)
+    if (selectedStopId.value !== null || selectedAnchorPhotoId.value !== null) {
+      setSelection(null, null)
+    }
     return
   }
 
   const stop = centered.stop
-  const dayChanged = selectedDay.value !== stop.day
-
-  if (!dayChanged) {
-    if (selectedStopId.value !== stop.id) applySelection(stop.day, stop.id)
-    return
+  if (stop.id !== selectedStopId.value) {
+    // The selected photo is always the first of a stop.
+    setSelection(stop.id, stop.photos[0]?.id ?? stop.coverPhoto.id)
   }
-
-  // Day-level changes (which trigger collapse/expand) are deferred until
-  // the scroll has settled. Mid-drag we leave the timeline DOM alone so
-  // cards don't shift out from under the user's finger.
-  if (!allowDayChange) return
-
-  // Day transition: the old day's siblings will collapse and the new
-  // day's siblings will expand, shifting cards horizontally. Capture
-  // the new active card's position before the re-render so we can
-  // adjust scrollLeft afterwards and keep it visually centred.
-  const container = timelineContainer.value!
-  const oldEl = container.querySelector(`[data-stop-id="${stop.id}"]`) as HTMLElement | null
-  const cRect = container.getBoundingClientRect()
-  const oldScrollPos = oldEl
-    ? container.scrollLeft + (oldEl.getBoundingClientRect().left - cRect.left)
-    : null
-
-  applySelection(stop.day, stop.id)
-
-  if (oldScrollPos === null) return
-  nextTick(() => {
-    const newEl = container.querySelector(`[data-stop-id="${stop.id}"]`) as HTMLElement | null
-    if (!newEl) return
-    const newCRect = container.getBoundingClientRect()
-    const newScrollPos = container.scrollLeft + (newEl.getBoundingClientRect().left - newCRect.left)
-    const delta = newScrollPos - oldScrollPos
-    if (Math.abs(delta) > 1) {
-      container.scrollTo({ left: container.scrollLeft + delta, behavior: 'auto' })
-    }
-  })
 }
 
-/** Programmatically scroll the timeline so the named card ends up
- *  centred. Used by tap handlers and by `selectStopByPhotoId` after
- *  the user returns from fullscreen. Uses instant scrolling — smooth
- *  scrolls fire a flood of scroll events that briefly highlight each
- *  card the animation sweeps across. */
-function scrollItemIntoCenter(target: number | typeof OVERVIEW) {
+/** Programmatically scroll the timeline so the given entry ends up centred
+ *  (`null` = the overview card). Uses instant scrolling — smooth scrolls fire
+ *  a flood of scroll events that briefly highlight each card the animation
+ *  sweeps across. Guards the scroll listener via `programmaticScroll` so this
+ *  re-centre isn't mistaken for a manual drag. */
+function scrollItemIntoCenter(target: number | null) {
   const container = timelineContainer.value
   if (!container) return
-  const el = target === OVERVIEW
+  const el = target === null
     ? container.querySelector('[data-overview]') as HTMLElement | null
     : container.querySelector(`[data-stop-id="${target}"]`) as HTMLElement | null
   if (!el) return
@@ -287,6 +248,9 @@ function scrollItemIntoCenter(target: number | typeof OVERVIEW) {
   const maxScroll = Math.max(0, container.scrollWidth - container.clientWidth)
   const clamped = Math.max(0, Math.min(targetScroll, maxScroll))
   if (Math.abs(clamped - container.scrollLeft) < 1) return
+  programmaticScroll = true
+  if (programmaticScrollTimer != null) clearTimeout(programmaticScrollTimer)
+  programmaticScrollTimer = setTimeout(() => { programmaticScroll = false }, 250)
   // Explicit 'auto' — instant scroll. Without this any external CSS
   // `scroll-behavior: smooth` would re-introduce the animated scroll
   // that lets the scroll handler briefly see intermediate cards as
@@ -295,19 +259,13 @@ function scrollItemIntoCenter(target: number | typeof OVERVIEW) {
 }
 
 function handleOverviewTap() {
-  applySelection(OVERVIEW, null)
-  nextTick(() => scrollItemIntoCenter(OVERVIEW))
+  setSelection(null, null, { recenterTimeline: true })
 }
 
 function handleStopTap(stop: Stop) {
-  const dayChanged = selectedDay.value !== stop.day
-  applySelection(stop.day, stop.id)
-  nextTick(() => {
-    scrollItemIntoCenter(stop.id)
-    // A day change already reframed the map to the whole day (pin in view).
-    // Within the same day, recentre only if the pin scrolled off screen.
-    if (!dayChanged) ensureStopPinVisible(stop)
-  })
+  // An explicit tap (unlike a drag) is allowed to move the timeline, so the
+  // tapped stop is centred. The selected photo is the stop's first photo.
+  setSelection(stop.id, stop.photos[0]?.id ?? stop.coverPhoto.id, { recenterTimeline: true })
 }
 
 /**
@@ -323,18 +281,11 @@ function ensureStopPinVisible(stop: Stop) {
 }
 
 /**
- * Activation (Enter / Space on a focused stop card): select the stop and, if
- * its pin is off screen, centre the map on it. In day mode every stop is
- * already its own pin (zoom-driven clustering keeps pins and stops 1:1), so
- * there is nothing to "unmerge".
+ * Activation (Enter / Space on a focused stop card) behaves exactly like a
+ * tap: select the stop and centre it in the timeline.
  */
 function handleStopActivate(stop: Stop) {
-  const dayChanged = selectedDay.value !== stop.day
-  applySelection(stop.day, stop.id)
-  nextTick(() => {
-    scrollItemIntoCenter(stop.id)
-    if (!dayChanged) ensureStopPinVisible(stop)
-  })
+  handleStopTap(stop)
 }
 
 // ── Pin rendering ────────────────────────────────────────────────────────────
@@ -350,7 +301,8 @@ interface Pin {
 }
 
 const visiblePins = computed<Pin[]>(() => {
-  if (selectedDay.value === OVERVIEW) {
+  if (selectedStopId.value === null) {
+    // Overview: merged region clusters ("geclustert wie bisher").
     return overviewClusters.value.map<Pin>(c => ({
       key: `o-${c.id}`,
       lat: c.lat,
@@ -361,9 +313,9 @@ const visiblePins = computed<Pin[]>(() => {
       onClick: () => handleOverviewPinClick(c),
     }))
   }
-  const day = selectedDay.value
-  const dayStops = stopsByDay.value.get(day) ?? []
-  return dayStops.map<Pin>(s => ({
+  // A stop is selected: render every stop of the trip as its own pin and
+  // highlight the selected one (the active pin derives from the selection).
+  return stops.value.map<Pin>(s => ({
     key: `s-${s.id}`,
     lat: s.lat,
     lng: s.lng,
@@ -375,37 +327,29 @@ const visiblePins = computed<Pin[]>(() => {
 })
 
 function handleOverviewPinClick(c: OverviewCluster) {
-  // Drill into the day of the cluster's cover photo. This switches the
-  // map into day mode so the user can then click an individual stop.
-  const day = (() => {
-    const cover = c.coverPhoto
-    const fromStop = stops.value.find(s => s.id === c.stopIds[0])
-    return fromStop?.day ?? (cover.taken_at || cover.created_at).slice(0, 10)
-  })()
-  if (!uniqueDays.value.includes(day)) return
-  const first = stopsByDay.value.get(day)?.[0]
-  if (!first) return
-  applySelection(day, first.id)
-  nextTick(() => scrollItemIntoCenter(first.id))
+  // An overview cluster bundles several stops. Resolve it to the stop that
+  // owns its cover photo and open that stop like a normal pin tap.
+  const stop = stops.value.find(s => s.photos.some(p => p.id === c.coverPhoto.id))
+    ?? stops.value.find(s => s.id === c.stopIds[0])
+  if (stop) handleStopPinClick(stop)
 }
 
 function handleStopPinClick(stop: Stop) {
-  applySelection(stop.day, stop.id)
-  nextTick(() => scrollItemIntoCenter(stop.id))
-  // Open fullscreen with the entire trip's photos so paging and the idle
-  // slideshow run continuously across day/stop boundaries. If we have a
-  // pre-selected photo (deep link, last-viewed restore) AND this stop
-  // contains it, start at THAT photo instead of the stop's first. Then
-  // consume the hint — subsequent clicks default to first-photo behaviour.
+  // Tapping a stop's pin jumps into the fullscreen slideshow at the stop's
+  // FIRST photo and centres the stop in the timeline. The slideshow then pages
+  // the whole photo list; the parent reports the current photo back (via
+  // `selectStopByPhotoId`) so the map + timeline keep following along.
+  openStopInFullscreen(stop, stop.photos[0]?.id)
+}
+
+/** Select the stop, centre the timeline on it, and emit the fullscreen-open
+ *  request scoped to the whole trip, starting at `startPhotoId`. */
+function openStopInFullscreen(stop: Stop, startPhotoId: number | undefined) {
+  setSelection(stop.id, startPhotoId ?? stop.coverPhoto.id, { recenterTimeline: true, silent: true })
   const allPhotos = allStopPhotos.value
-  const startId = activePhotoId.value != null
-      && stop.photos.some(p => p.id === activePhotoId.value)
-    ? activePhotoId.value
-    : stop.photos[0]?.id
-  const startIndex = startId != null
-    ? Math.max(0, allPhotos.findIndex(p => p.id === startId))
+  const startIndex = startPhotoId != null
+    ? Math.max(0, allPhotos.findIndex(p => p.id === startPhotoId))
     : 0
-  activePhotoId.value = null
   emit('open-fullscreen', allPhotos, startIndex, stop.day)
 }
 
@@ -579,16 +523,18 @@ function initMap() {
 
   // Establish the initial view BEFORE deriving the cluster radius / first
   // render so projections and zoom-to-meters run against a real zoom level.
-  fitMapToSelection()
+  fitMapToAll()
   updateClusterRadius()
   renderContent()
 
-  // Day mode: the zoom drives the cluster radius, so stops (pins AND timeline)
-  // re-cluster on zoom — recompute the radius and let the `stops` watcher
-  // re-render. Overview mode keeps the pixel-space pin merge, so just re-render.
+  // The zoom always drives the cluster radius so the continuous timeline's
+  // stop count (and photos per stop) follows the zoom factor. The `stops`
+  // watcher re-renders the stop pins; overview mode additionally needs an
+  // explicit re-render because its pins use the pixel-space merge, which
+  // depends on the current zoom.
   map.on('zoomend', () => {
-    if (selectedDay.value === OVERVIEW) renderContent()
-    else updateClusterRadius()
+    updateClusterRadius()
+    if (selectedStopId.value === null) renderContent()
   })
 }
 
@@ -618,15 +564,10 @@ function renderContent() {
   if (!map) return
   clearContent()
 
-  // Always-dashed lines for the top-10 % of consecutive jumps. In day
-  // mode we further restrict to the active day's intra-day jumps —
-  // inter-day jumps would extend out of the day's bounds and confuse
-  // the focused view.
-  const day = selectedDay.value
+  // Always-dashed lines for the top-10 % of consecutive jumps across the
+  // whole trip — the timeline and the map now show every stop continuously,
+  // so the jumps are no longer restricted to a single day.
   for (const jump of longJumps.value) {
-    if (day !== OVERVIEW) {
-      if (jump.fromDay !== day || jump.toDay !== day) continue
-    }
     const line = L.polyline(jump.coordinates, {
       color: jump.color,
       weight: 2,
@@ -636,10 +577,10 @@ function renderContent() {
     polylines.push(line)
   }
 
-  // Day mode: one marker per stop (zoom-driven clustering already de-clutters,
-  // so pins match the timeline 1:1). Overview mode (no timeline) keeps the
-  // pixel-space merge to avoid a wall of overlapping thumbnails.
-  const drawables = day === OVERVIEW
+  // Stop mode: one marker per stop (zoom-driven clustering already de-clutters,
+  // so pins match the timeline 1:1). Overview mode keeps the pixel-space merge
+  // to avoid a wall of overlapping thumbnails.
+  const drawables = selectedStopId.value === null
     ? mergeOverlappingPins(visiblePins.value)
     : visiblePins.value
   for (const pin of drawables) {
@@ -660,9 +601,7 @@ function navigateToPrev() {
   }
   const idx = all.findIndex(s => s.id === selectedStopId.value)
   // Walk one step backwards across the whole chronological list — day
-  // boundaries are not a stopping point. When crossing into the
-  // previous day handleStopTap takes care of switching `selectedDay`
-  // and refitting the map.
+  // boundaries are not a stopping point.
   if (idx > 0) handleStopTap(all[idx - 1]!)
 }
 
@@ -695,7 +634,7 @@ onMounted(async () => {
   }
   // Land on overview at start. The end-spacers (see CSS) make scrollLeft
   // = 0 actually centre the overview card under the viewport centre.
-  nextTick(() => scrollItemIntoCenter(OVERVIEW))
+  nextTick(() => scrollItemIntoCenter(null))
 })
 
 onUnmounted(() => {
@@ -707,30 +646,29 @@ onUnmounted(() => {
   }
   if (scrollRaf) cancelAnimationFrame(scrollRaf)
   if (scrollEndFallbackTimer) clearTimeout(scrollEndFallbackTimer)
+  if (programmaticScrollTimer) clearTimeout(programmaticScrollTimer)
 })
 
 watch(() => props.photos, () => {
-  selectedDay.value = OVERVIEW
   selectedStopId.value = null
   selectedAnchorPhotoId.value = null
   renderContent()
-  fitMapToSelection()
-  nextTick(() => scrollItemIntoCenter(OVERVIEW))
+  fitMapToAll()
+  nextTick(() => scrollItemIntoCenter(null))
 }, { deep: true })
 
 // The zoom-driven clustering reassigns stop ids on every recompute, so a held
-// selection must be re-resolved by its (stable) cover photo — otherwise the
-// id would silently point at a different cluster after a zoom. Resolves within
-// the selected day; clears the selection if the photo no longer exists.
+// selection must be re-resolved by its (stable) anchor photo — otherwise the
+// id would silently point at a different cluster after a zoom. Keeps the anchor
+// photo unchanged so the selection survives further re-clusters; clears it only
+// if the photo vanished entirely. The timeline is NOT re-centred here: a zoom
+// change is the user's own action and must not yank the timeline.
 watch(stops, () => {
   const anchor = selectedAnchorPhotoId.value
   if (anchor == null) { selectedStopId.value = null; return }
-  const next = stops.value.find(
-    s => s.day === selectedDay.value && s.photos.some(p => p.id === anchor),
-  )
+  const next = stops.value.find(s => s.photos.some(p => p.id === anchor))
   selectedStopId.value = next ? next.id : null
-  if (next) selectedAnchorPhotoId.value = next.coverPhoto.id
-  else selectedAnchorPhotoId.value = null
+  if (!next) selectedAnchorPhotoId.value = null
 })
 
 // Re-render when selection or the underlying clustering changes.
@@ -741,21 +679,16 @@ watch(visiblePins, () => {
 // ── External API ─────────────────────────────────────────────────────────────
 
 /**
- * Select the stop that contains the given photo, if any. Used by the
- * parent view to sync the map selection with the photo the user ended on
- * in the fullscreen overlay. Switches to the matching day and centres
- * the timeline on the stop.
+ * Select the stop that contains the given photo and centre the timeline on it.
+ * Driven from OUTSIDE the timeline — the fullscreen slideshow (live, on every
+ * page), a deep-link, or the fullscreen-close sync — so re-centring the
+ * timeline is the wanted feedback. The anchor is the exact photo so the active
+ * pin and centred stop follow the current photo precisely.
  */
 function selectStopByPhotoId(photoId: number): boolean {
   const stop = stops.value.find((s) => s.photos.some((p) => p.id === photoId))
   if (!stop) return false
-  // Record the specific photo BEFORE applySelection so the stop-change
-  // logic inside applySelection sees that the new stop contains the
-  // active photo and keeps the hint alive. Without this order the
-  // hint would be cleared by the very call that brought us here.
-  activePhotoId.value = photoId
-  applySelection(stop.day, stop.id, { silent: true })
-  nextTick(() => scrollItemIntoCenter(stop.id))
+  setSelection(stop.id, photoId, { recenterTimeline: true, silent: true })
   return true
 }
 
@@ -768,12 +701,9 @@ function selectStopByPhotoId(photoId: number): boolean {
 function openFullscreenByPhotoId(photoId: number): boolean {
   const stop = stops.value.find((s) => s.photos.some((p) => p.id === photoId))
   if (!stop) return false
-  activePhotoId.value = photoId
-  applySelection(stop.day, stop.id, { silent: true })
-  nextTick(() => scrollItemIntoCenter(stop.id))
+  setSelection(stop.id, photoId, { recenterTimeline: true, silent: true })
   const allPhotos = allStopPhotos.value
   const startIndex = Math.max(0, allPhotos.findIndex((p) => p.id === photoId))
-  activePhotoId.value = null
   emit('open-fullscreen', allPhotos, startIndex, stop.day)
   return true
 }
@@ -812,7 +742,7 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
           :class="[
             'trip-timeline-item',
             'trip-timeline-item--overview',
-            { 'trip-timeline-item--selected': selectedDay === '__overview__' },
+            { 'trip-timeline-item--selected': selectedStopId === null },
           ]"
           :title="'Ganze Reise auf der Karte'"
           @click="handleOverviewTap"
@@ -830,103 +760,56 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
           </div>
         </div>
 
+        <!-- Stops are always shown fully expanded: one continuous,
+             chronological sequence of every stop across all days. Same-day
+             stops are grouped into a subtly-shaded block, with the day's
+             colour marking the first stop of each day so day boundaries stay
+             readable. The number of stops (and photos per stop) still follows
+             the map's zoom-driven clustering. -->
         <template v-for="day in uniqueDays" :key="day">
           <div
-            class="trip-timeline-day-group"
-            :class="{ 'trip-timeline-day-group--expanded': selectedDay === day }"
+            class="trip-timeline-day-group trip-timeline-day-group--expanded"
             :data-day="day"
           >
-            <!-- Day cover card -->
             <div
-              v-if="stopsByDay.get(day) && stopsByDay.get(day)!.length > 0"
-              :data-stop-id="stopsByDay.get(day)![0]!.id"
+              v-for="(stop, sIdx) in stopsByDay.get(day)!"
+              :key="stop.id"
+              :data-stop-id="stop.id"
               role="button"
               tabindex="0"
               :class="[
                 'trip-timeline-item',
-                'trip-timeline-item--day',
+                'trip-timeline-item--stop',
                 {
-                  'trip-timeline-item--selected':
-                    selectedDay === day && stopsByDay.get(day)![0]!.id === selectedStopId,
-                  'trip-timeline-item--day-active': selectedDay === day,
-                  'trip-timeline-item--expandable': stopsByDay.get(day)!.length > 1,
+                  'trip-timeline-item--selected': stop.id === selectedStopId,
+                  'trip-timeline-item--day-first': sIdx === 0,
                 },
               ]"
-              :title="formatDayLabel(day)"
-              @click="handleStopTap(stopsByDay.get(day)![0]!)"
-              @keydown.enter.prevent="handleStopActivate(stopsByDay.get(day)![0]!)"
-              @keydown.space.prevent="handleStopActivate(stopsByDay.get(day)![0]!)"
+              :title="getStopLabel(stop)"
+              :style="{ '--day-color': dayColorMap.get(day) }"
+              @click="handleStopTap(stop)"
+              @keydown.enter.prevent="handleStopActivate(stop)"
+              @keydown.space.prevent="handleStopActivate(stop)"
             >
-              <div class="trip-timeline-thumb-wrap">
-                <div
-                  v-if="stopsByDay.get(day)!.length > 1 && selectedDay !== day"
-                  class="trip-timeline-stack-hint"
-                  :style="{ borderColor: dayColorMap.get(day) }"
-                />
-                <div class="trip-timeline-thumb">
-                  <img
-                    :src="getPhotoUrl(stopsByDay.get(day)![0]!.coverPhoto.filename, 96)"
-                    :alt="formatDayLabel(day)"
-                  />
-                </div>
-                <span
-                  v-if="stopsByDay.get(day)!.length > 1"
-                  class="trip-timeline-day-badge"
-                  :style="{ background: dayColorMap.get(day) }"
-                >{{ stopsByDay.get(day)!.length }}</span>
+              <!-- Connector to the previous stop of the same day. -->
+              <div
+                v-if="sIdx > 0"
+                class="trip-timeline-connector trip-timeline-connector--sibling"
+                :style="{ background: dayColorMap.get(day) }"
+              />
+              <div class="trip-timeline-thumb">
+                <img :src="getPhotoUrl(stop.coverPhoto.filename, 96)" :alt="getStopLabel(stop)" />
               </div>
               <div class="trip-timeline-info">
-                <span class="trip-timeline-label">{{ formatDayLabel(day) }}</span>
-                <span class="trip-timeline-date">
-                  <template v-if="selectedDay === day && stopsByDay.get(day)!.length > 1">
-                    <!-- Expanded: the cover represents only the FIRST stop
-                         of the day, so show that stop's photo count.
-                         Siblings render their own counts next to it. -->
-                    {{ stopsByDay.get(day)![0]!.photos.length }}
-                    {{ stopsByDay.get(day)![0]!.photos.length === 1 ? 'Foto' : 'Fotos' }}
-                  </template>
-                  <template v-else>
-                    {{ stopsByDay.get(day)!.length }}
-                    {{ stopsByDay.get(day)!.length === 1 ? 'Stopp' : 'Stopps' }}
-                  </template>
+                <!-- Every stop — including the first of a day — shows the bold
+                     stop label and the date on the line below. -->
+                <span class="trip-timeline-label">{{ getStopLabel(stop) }}</span>
+                <span class="trip-timeline-date">{{ formatStopDate(stop) }}</span>
+                <span class="trip-timeline-count">
+                  {{ stop.photos.length }} {{ stop.photos.length === 1 ? 'Foto' : 'Fotos' }}
                 </span>
               </div>
             </div>
-
-            <!-- Sibling stops of the active day -->
-            <template v-if="selectedDay === day && (stopsByDay.get(day)?.length ?? 0) > 1">
-              <div
-                v-for="(stop, sIdx) in stopsByDay.get(day)!.slice(1)"
-                :key="stop.id"
-                :data-stop-id="stop.id"
-                role="button"
-                tabindex="0"
-                :class="[
-                  'trip-timeline-item',
-                  'trip-timeline-item--sibling',
-                  { 'trip-timeline-item--selected': stop.id === selectedStopId },
-                ]"
-                @click="handleStopTap(stop)"
-                @keydown.enter.prevent="handleStopActivate(stop)"
-                @keydown.space.prevent="handleStopActivate(stop)"
-              >
-                <div
-                  class="trip-timeline-connector trip-timeline-connector--sibling"
-                  :style="{ background: dayColorMap.get(day) }"
-                />
-                <div class="trip-timeline-thumb">
-                  <img :src="getPhotoUrl(stop.coverPhoto.filename, 96)" :alt="getStopLabel(stop)" />
-                </div>
-                <div class="trip-timeline-info">
-                  <span class="trip-timeline-label">{{ getStopLabel(stop) }}</span>
-                  <span class="trip-timeline-date">{{ formatStopDate(stop) }}</span>
-                  <span class="trip-timeline-count">
-                    {{ stop.photos.length }} {{ stop.photos.length === 1 ? 'Foto' : 'Fotos' }}
-                  </span>
-                </div>
-                <span class="sr-only">Stopp {{ sIdx + 2 }}</span>
-              </div>
-            </template>
           </div>
         </template>
       </div>
@@ -1089,10 +972,6 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
   outline-offset: -2px;
 }
 
-.trip-timeline-item--day-active:not(.trip-timeline-item--selected) {
-  background: var(--p-content-hover-background, rgba(0,0,0,0.03));
-}
-
 .trip-timeline-thumb {
   width: 56px;
   height: 56px;
@@ -1103,6 +982,14 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
   margin-bottom: 0.3rem;
 }
 
+/* First stop of a day: ring the cover in the day's colour so day
+   boundaries stay readable in the continuous, always-expanded sequence. */
+.trip-timeline-item--day-first .trip-timeline-thumb {
+  border-color: var(--day-color, var(--p-content-border-color, #dee2e6));
+}
+
+/* Selection wins over the day-colour ring (declared afterwards, equal
+   specificity). */
 .trip-timeline-item--selected .trip-timeline-thumb {
   border-color: var(--p-primary-color, #4285F4);
 }
@@ -1163,59 +1050,6 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
   opacity: 0.7;
 }
 
-.trip-timeline-item--expandable {
-  cursor: pointer;
-}
-
-.trip-timeline-item--expandable .trip-timeline-thumb {
-  border-color: var(--p-primary-color, #4285F4);
-}
-
-.trip-timeline-thumb-wrap {
-  position: relative;
-  width: 56px;
-  height: 56px;
-  margin-bottom: 0.3rem;
-  flex-shrink: 0;
-}
-
-.trip-timeline-thumb-wrap .trip-timeline-thumb {
-  margin-bottom: 0;
-  position: relative;
-  z-index: 1;
-}
-
-.trip-timeline-stack-hint {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  border: 2px solid var(--p-primary-color, #4285F4);
-  opacity: 0.55;
-  z-index: 0;
-  pointer-events: none;
-}
-
-.trip-timeline-day-badge {
-  position: absolute;
-  top: -3px;
-  right: -3px;
-  z-index: 2;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: 9px;
-  background: var(--p-primary-color, #4285F4);
-  color: #fff;
-  font-size: 0.65rem;
-  font-weight: 700;
-  line-height: 18px;
-  text-align: center;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-}
-
 /* ── Overview card ──────────────────────────────────────────────────────── */
 .trip-timeline-item--overview .trip-timeline-overview-icon {
   width: 56px;
@@ -1259,16 +1093,6 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
   }
 
   .trip-timeline-thumb {
-    width: 44px;
-    height: 44px;
-  }
-
-  .trip-timeline-thumb-wrap {
-    width: 44px;
-    height: 44px;
-  }
-
-  .trip-timeline-stack-hint {
     width: 44px;
     height: 44px;
   }
