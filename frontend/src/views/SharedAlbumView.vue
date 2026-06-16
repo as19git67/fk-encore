@@ -2,7 +2,6 @@
 import { ref, computed, watch, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Message from 'primevue/message'
-import HeicImage from '../components/HeicImage.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import FilterMenu from '../components/FilterMenu.vue'
 import GuestStatusBanner from '../components/GuestStatusBanner.vue'
@@ -10,7 +9,8 @@ import GuestRegisterDialog from '../components/GuestRegisterDialog.vue'
 import GuestAccountDialog from '../components/GuestAccountDialog.vue'
 import GuestPhotoReactions from '../components/GuestPhotoReactions.vue'
 import PhotoMiniMap from '../components/PhotoMiniMap.vue'
-import { getPublicAlbum, getPhotoUrl, type PhotoFilter, type PublicAlbumResponse, type PublicAlbumPhoto, type Photo } from '../api/photos'
+import VirtualPhotoGrid from '../components/VirtualPhotoGrid.vue'
+import { getPublicAlbum, type PhotoFilter, type PublicAlbumResponse, type PublicAlbumPhoto, type Photo } from '../api/photos'
 import { matchesPhotoFilter } from '../utils/photoFilter'
 import { countActiveFilters } from '../composables/useFilter'
 import { formatPhotoDate, formatLocationLabel } from '../utils/dateFormat'
@@ -63,9 +63,10 @@ watch(album, (a) => {
   if (viewModeInitialized) return
   viewModeInitialized = true
   // Map disabled → lock to grid. Map enabled → restore the visitor's last
-  // choice for this share, falling back to map view (the curated experience).
+  // choice for this share, falling back to grid: Raster is the default view
+  // even when the album has the map enabled.
   viewMode.value = a.display_mode === 'map'
-    ? (loadPersistedViewMode() ?? 'map')
+    ? (loadPersistedViewMode() ?? 'grid')
     : 'grid'
 }, { immediate: true })
 
@@ -629,23 +630,12 @@ onUnmounted(() => {
         </template>
       </TripMap>
 
-      <!-- Grid mode -->
-      <div v-else class="photo-grid-scroll">
-        <div class="photo-grid">
-          <div
-            v-for="photo in albumPhotosAsPhoto"
-            :key="photo.id"
-            class="grid-item"
-            @click="openFullscreen(photo)"
-          >
-            <HeicImage
-              :src="getPhotoUrl(photo.filename, 400)"
-              :alt="photo.original_name"
-              objectFit="cover"
-            />
-          </div>
-        </div>
-      </div>
+      <!-- Grid mode (virtualized — only the visible rows are mounted) -->
+      <VirtualPhotoGrid
+        v-else
+        :photos="albumPhotosAsPhoto"
+        @open="openFullscreen"
+      />
     </template>
 
     <FilterMenu
@@ -955,34 +945,12 @@ onUnmounted(() => {
   border-color: var(--p-amber-500);
 }
 
-.photo-grid-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: var(--grid-gap-compact);
-}
-
-.photo-grid {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--grid-min-col), 1fr));
-  grid-auto-rows: min-content;
-  align-content: start;
-  gap: var(--grid-gap-compact);
-}
+/* Grid mode is rendered by the virtualized VirtualPhotoGrid, which owns its
+   own bounded-height scroll container — so the grid view keeps the
+   fixed-height flex-column layout (no whole-page scroll) on every viewport,
+   which row virtualization requires. */
 
 @media (max-width: 768px) {
-  .photo-grid {
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-    gap: var(--spacing-sm, 4px);
-  }
-
-  .photo-grid-scroll {
-    padding: var(--spacing-sm, 4px);
-  }
-
   /* Shared header on phones: hide the view-mode button labels (icons
      stay) and tighten the description so the whole header stays on
      one or two lines. */
@@ -998,42 +966,6 @@ onUnmounted(() => {
   .shared-view-mode-btn { padding: 0.25rem 0.5rem; }
   .shared-view-mode-btn span { display: none; }
   .shared-view-mode-btn .pi { font-size: 1em; }
-
-  /* On phones the grid view scrolls the whole page instead of a
-     fixed-height inner container: banner + album title scroll away
-     once the grid is tall enough, freeing the viewport for photos.
-     Desktop keeps the sticky-header layout (inner scroll container)
-     because there's horizontal room for both at once. Map mode is
-     untouched — it still needs a constrained-height flex column. */
-  .shared-album-view--grid {
-    height: auto;
-    min-height: 100dvh;
-    overflow: visible;
-  }
-  .shared-album-view--grid .photo-grid-scroll {
-    flex: 0 0 auto;
-    overflow: visible;
-  }
-}
-
-.grid-item {
-  position: relative;
-  aspect-ratio: 1;
-  overflow: hidden;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  background: var(--p-content-hover-background, #eee);
-}
-
-.grid-item :deep(.heic-image-container) {
-  width: 100%;
-  height: 100%;
-}
-
-@media (hover: hover) {
-  .grid-item:hover {
-    opacity: 0.85;
-  }
 }
 
 .info-text {

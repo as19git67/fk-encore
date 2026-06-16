@@ -67,12 +67,6 @@ const selectedAnchorPhotoId = ref<number | null>(null)
  *  as the user navigates somewhere else. */
 const activePhotoId = ref<number | null>(null)
 
-function formatDayLabel(day: string): string {
-  // day = YYYY-MM-DD → DD. Mon
-  const d = new Date(day + 'T00:00:00')
-  return d.toLocaleDateString('de-DE', { day: '2-digit', month: 'short' })
-}
-
 function getStopLabel(stop: Stop): string {
   if (stop.locationLabel) return stop.locationLabel
   return `Stopp ${stop.id + 1}`
@@ -583,12 +577,14 @@ function initMap() {
   updateClusterRadius()
   renderContent()
 
-  // Day mode: the zoom drives the cluster radius, so stops (pins AND timeline)
-  // re-cluster on zoom — recompute the radius and let the `stops` watcher
-  // re-render. Overview mode keeps the pixel-space pin merge, so just re-render.
+  // The zoom always drives the cluster radius so the always-expanded
+  // timeline's stop count (and photos per stop) follows the zoom factor in
+  // both day and overview mode. The `stops` watcher re-renders day-mode pins;
+  // overview mode additionally needs an explicit re-render because its pins
+  // use the pixel-space merge, which depends on the current zoom.
   map.on('zoomend', () => {
+    updateClusterRadius()
     if (selectedDay.value === OVERVIEW) renderContent()
-    else updateClusterRadius()
   })
 }
 
@@ -830,103 +826,56 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
           </div>
         </div>
 
+        <!-- Stops are always shown fully expanded: one continuous,
+             chronological sequence of every stop across all days. Same-day
+             stops are grouped into a subtly-shaded block, with the day's
+             colour marking the first stop of each day so day boundaries stay
+             readable. The number of stops (and photos per stop) still follows
+             the map's zoom-driven clustering. -->
         <template v-for="day in uniqueDays" :key="day">
           <div
-            class="trip-timeline-day-group"
-            :class="{ 'trip-timeline-day-group--expanded': selectedDay === day }"
+            class="trip-timeline-day-group trip-timeline-day-group--expanded"
             :data-day="day"
           >
-            <!-- Day cover card -->
             <div
-              v-if="stopsByDay.get(day) && stopsByDay.get(day)!.length > 0"
-              :data-stop-id="stopsByDay.get(day)![0]!.id"
+              v-for="(stop, sIdx) in stopsByDay.get(day)!"
+              :key="stop.id"
+              :data-stop-id="stop.id"
               role="button"
               tabindex="0"
               :class="[
                 'trip-timeline-item',
-                'trip-timeline-item--day',
+                'trip-timeline-item--stop',
                 {
-                  'trip-timeline-item--selected':
-                    selectedDay === day && stopsByDay.get(day)![0]!.id === selectedStopId,
-                  'trip-timeline-item--day-active': selectedDay === day,
-                  'trip-timeline-item--expandable': stopsByDay.get(day)!.length > 1,
+                  'trip-timeline-item--selected': stop.id === selectedStopId,
+                  'trip-timeline-item--day-first': sIdx === 0,
                 },
               ]"
-              :title="formatDayLabel(day)"
-              @click="handleStopTap(stopsByDay.get(day)![0]!)"
-              @keydown.enter.prevent="handleStopActivate(stopsByDay.get(day)![0]!)"
-              @keydown.space.prevent="handleStopActivate(stopsByDay.get(day)![0]!)"
+              :title="getStopLabel(stop)"
+              :style="{ '--day-color': dayColorMap.get(day) }"
+              @click="handleStopTap(stop)"
+              @keydown.enter.prevent="handleStopActivate(stop)"
+              @keydown.space.prevent="handleStopActivate(stop)"
             >
-              <div class="trip-timeline-thumb-wrap">
-                <div
-                  v-if="stopsByDay.get(day)!.length > 1 && selectedDay !== day"
-                  class="trip-timeline-stack-hint"
-                  :style="{ borderColor: dayColorMap.get(day) }"
-                />
-                <div class="trip-timeline-thumb">
-                  <img
-                    :src="getPhotoUrl(stopsByDay.get(day)![0]!.coverPhoto.filename, 96)"
-                    :alt="formatDayLabel(day)"
-                  />
-                </div>
-                <span
-                  v-if="stopsByDay.get(day)!.length > 1"
-                  class="trip-timeline-day-badge"
-                  :style="{ background: dayColorMap.get(day) }"
-                >{{ stopsByDay.get(day)!.length }}</span>
+              <!-- Connector to the previous stop of the same day. -->
+              <div
+                v-if="sIdx > 0"
+                class="trip-timeline-connector trip-timeline-connector--sibling"
+                :style="{ background: dayColorMap.get(day) }"
+              />
+              <div class="trip-timeline-thumb">
+                <img :src="getPhotoUrl(stop.coverPhoto.filename, 96)" :alt="getStopLabel(stop)" />
               </div>
               <div class="trip-timeline-info">
-                <span class="trip-timeline-label">{{ formatDayLabel(day) }}</span>
-                <span class="trip-timeline-date">
-                  <template v-if="selectedDay === day && stopsByDay.get(day)!.length > 1">
-                    <!-- Expanded: the cover represents only the FIRST stop
-                         of the day, so show that stop's photo count.
-                         Siblings render their own counts next to it. -->
-                    {{ stopsByDay.get(day)![0]!.photos.length }}
-                    {{ stopsByDay.get(day)![0]!.photos.length === 1 ? 'Foto' : 'Fotos' }}
-                  </template>
-                  <template v-else>
-                    {{ stopsByDay.get(day)!.length }}
-                    {{ stopsByDay.get(day)!.length === 1 ? 'Stopp' : 'Stopps' }}
-                  </template>
+                <!-- Every stop — including the first of a day — shows the bold
+                     stop label and the date on the line below. -->
+                <span class="trip-timeline-label">{{ getStopLabel(stop) }}</span>
+                <span class="trip-timeline-date">{{ formatStopDate(stop) }}</span>
+                <span class="trip-timeline-count">
+                  {{ stop.photos.length }} {{ stop.photos.length === 1 ? 'Foto' : 'Fotos' }}
                 </span>
               </div>
             </div>
-
-            <!-- Sibling stops of the active day -->
-            <template v-if="selectedDay === day && (stopsByDay.get(day)?.length ?? 0) > 1">
-              <div
-                v-for="(stop, sIdx) in stopsByDay.get(day)!.slice(1)"
-                :key="stop.id"
-                :data-stop-id="stop.id"
-                role="button"
-                tabindex="0"
-                :class="[
-                  'trip-timeline-item',
-                  'trip-timeline-item--sibling',
-                  { 'trip-timeline-item--selected': stop.id === selectedStopId },
-                ]"
-                @click="handleStopTap(stop)"
-                @keydown.enter.prevent="handleStopActivate(stop)"
-                @keydown.space.prevent="handleStopActivate(stop)"
-              >
-                <div
-                  class="trip-timeline-connector trip-timeline-connector--sibling"
-                  :style="{ background: dayColorMap.get(day) }"
-                />
-                <div class="trip-timeline-thumb">
-                  <img :src="getPhotoUrl(stop.coverPhoto.filename, 96)" :alt="getStopLabel(stop)" />
-                </div>
-                <div class="trip-timeline-info">
-                  <span class="trip-timeline-label">{{ getStopLabel(stop) }}</span>
-                  <span class="trip-timeline-date">{{ formatStopDate(stop) }}</span>
-                  <span class="trip-timeline-count">
-                    {{ stop.photos.length }} {{ stop.photos.length === 1 ? 'Foto' : 'Fotos' }}
-                  </span>
-                </div>
-                <span class="sr-only">Stopp {{ sIdx + 2 }}</span>
-              </div>
-            </template>
           </div>
         </template>
       </div>
@@ -1089,10 +1038,6 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
   outline-offset: -2px;
 }
 
-.trip-timeline-item--day-active:not(.trip-timeline-item--selected) {
-  background: var(--p-content-hover-background, rgba(0,0,0,0.03));
-}
-
 .trip-timeline-thumb {
   width: 56px;
   height: 56px;
@@ -1103,6 +1048,14 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
   margin-bottom: 0.3rem;
 }
 
+/* First stop of a day: ring the cover in the day's colour so day
+   boundaries stay readable in the continuous, always-expanded sequence. */
+.trip-timeline-item--day-first .trip-timeline-thumb {
+  border-color: var(--day-color, var(--p-content-border-color, #dee2e6));
+}
+
+/* Selection wins over the day-colour ring (declared afterwards, equal
+   specificity). */
 .trip-timeline-item--selected .trip-timeline-thumb {
   border-color: var(--p-primary-color, #4285F4);
 }
@@ -1163,59 +1116,6 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
   opacity: 0.7;
 }
 
-.trip-timeline-item--expandable {
-  cursor: pointer;
-}
-
-.trip-timeline-item--expandable .trip-timeline-thumb {
-  border-color: var(--p-primary-color, #4285F4);
-}
-
-.trip-timeline-thumb-wrap {
-  position: relative;
-  width: 56px;
-  height: 56px;
-  margin-bottom: 0.3rem;
-  flex-shrink: 0;
-}
-
-.trip-timeline-thumb-wrap .trip-timeline-thumb {
-  margin-bottom: 0;
-  position: relative;
-  z-index: 1;
-}
-
-.trip-timeline-stack-hint {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  border: 2px solid var(--p-primary-color, #4285F4);
-  opacity: 0.55;
-  z-index: 0;
-  pointer-events: none;
-}
-
-.trip-timeline-day-badge {
-  position: absolute;
-  top: -3px;
-  right: -3px;
-  z-index: 2;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: 9px;
-  background: var(--p-primary-color, #4285F4);
-  color: #fff;
-  font-size: 0.65rem;
-  font-weight: 700;
-  line-height: 18px;
-  text-align: center;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-}
-
 /* ── Overview card ──────────────────────────────────────────────────────── */
 .trip-timeline-item--overview .trip-timeline-overview-icon {
   width: 56px;
@@ -1259,16 +1159,6 @@ defineExpose({ selectStopByPhotoId, openFullscreenByPhotoId })
   }
 
   .trip-timeline-thumb {
-    width: 44px;
-    height: 44px;
-  }
-
-  .trip-timeline-thumb-wrap {
-    width: 44px;
-    height: 44px;
-  }
-
-  .trip-timeline-stack-hint {
     width: 44px;
     height: 44px;
   }
