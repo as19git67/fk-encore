@@ -93,12 +93,21 @@ onBeforeUnmount(() => {
 const rowCount = computed(() => Math.ceil(props.photos.length / Math.max(1, cols.value)))
 
 const virtualizer = useVirtualizer(
-  computed(() => ({
-    count: rowCount.value,
-    getScrollElement: () => scrollRef.value,
-    estimateSize: () => rowHeight.value,
-    overscan: 4,
-  })),
+  computed(() => {
+    // Read `rowHeight` here so it becomes a dependency of this computed.
+    // Otherwise the options only re-evaluate when `rowCount` changes — and on
+    // a phone the portrait column count (3) equals the initial default, so a
+    // portrait load changes only the cell size, not `rowCount`. Without this
+    // the virtualizer would keep its initial row-height estimate and space the
+    // rows far too tall (landscape works by chance: cols 3 → 5 bumps rowCount).
+    const estimatedRowHeight = rowHeight.value
+    return {
+      count: rowCount.value,
+      getScrollElement: () => scrollRef.value,
+      estimateSize: () => estimatedRowHeight,
+      overscan: 4,
+    }
+  }),
 )
 
 const virtualRows = computed(() => virtualizer.value.getVirtualItems())
