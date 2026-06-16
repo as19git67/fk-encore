@@ -277,6 +277,16 @@ const fullscreenFromMap = ref(false)
 const tripMapRef = ref<{ selectStopByPhotoId: (id: number) => boolean } | null>(null)
 
 const currentPhoto = computed<Photo | null>(() => fullscreenPhotos.value[fullscreenIndex.value] ?? null)
+
+// Live slideshow → map/timeline sync: while paging a fullscreen that was
+// opened from the map, report the current photo back to TripMap so it
+// re-derives the stop, re-highlights the active pin and re-centres the
+// timeline on every step.
+watch(currentPhoto, (photo) => {
+  if (!isFullscreen.value || !fullscreenFromMap.value || !photo) return
+  tripMapRef.value?.selectStopByPhotoId(photo.id)
+})
+
 const prevPhoto = computed<Photo | null>(() => {
   const idx = fullscreenIndex.value - 1
   return idx >= 0 ? (fullscreenPhotos.value[idx] ?? null) : null
