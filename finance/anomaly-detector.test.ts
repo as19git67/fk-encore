@@ -389,4 +389,142 @@ describe("finance/anomaly-detector — missing_transaction", () => {
     expect(second).toHaveLength(1);
     expect((second[0].details as Record<string, unknown>).expected_date).toBe(firstExpected);
   });
+
+  it("suppresses missing_transaction when the same counterparty has activity under a new mandate identity (e.g. creditor changed banks)", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+
+    // 8 monthly bookings under the OLD mandate_ref. last_seen ~120
+    // days ago → would normally fire missing.
+    for (let i = 0; i < 8; i++) {
+      await insertTx({
+        accountId,
+        bookingDate: daysAgo(120 + i * 30),
+        amount: "-49.90",
+        counterparty: "Provider GmbH",
+        mandateRef: "M-OLD-REF",
+        creditorId: "DE99ZZZ9990",
+      });
+    }
+    // Recent bookings with a NEW mandate_ref + creditor_id but the
+    // SAME counterparty name. The user's recurring series simply
+    // continued elsewhere — no "missing" alert should fire.
+    for (let i = 0; i < 3; i++) {
+      await insertTx({
+        accountId,
+        bookingDate: daysAgo(90 - i * 30),
+        amount: "-52.00",
+        counterparty: "Provider GmbH",
+        mandateRef: "M-NEW-REF",
+        creditorId: "DE99ZZZ9991",
+      });
+    }
+
+    await runAnomalyDetection([accountId]);
+
+    const missing = await db
+      .select()
+      .from(financeAnomaly)
+      .where(
+        and(
+          eq(financeAnomaly.account_id, accountId),
+          eq(financeAnomaly.type, "missing_transaction"),
+          isNull(financeAnomaly.acknowledged_at),
+        ),
+      );
+    expect(missing).toHaveLength(0);
+  });
+
+  it("suppresses missing_transaction when the same counterparty has activity under a new IBAN (no mandate_ref)", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+
+    for (let i = 0; i < 8; i++) {
+      await insertTx({
+        accountId,
+        bookingDate: daysAgo(120 + i * 30),
+        amount: "1500.00",
+        counterparty: "Arbeitgeber AG",
+        counterpartyIban: "DE11OLDBANK000000001",
+      });
+    }
+    // Salary moved to a new payroll bank.
+    for (let i = 0; i < 3; i++) {
+      await insertTx({
+        accountId,
+        bookingDate: daysAgo(90 - i * 30),
+        amount: "1600.00",
+        counterparty: "Arbeitgeber AG",
+        counterpartyIban: "DE22NEWBANK000000002",
+      });
+    }
+
+    await runAnomalyDetection([accountId]);
+
+    const missing = await db
+      .select()
+      .from(financeAnomaly)
+      .where(
+        and(
+          eq(financeAnomaly.account_id, accountId),
+          eq(financeAnomaly.type, "missing_transaction"),
+          isNull(financeAnomaly.acknowledged_at),
+        ),
+      );
+    expect(missing).toHaveLength(0);
+  });
+
+  it("auto-acknowledges a stale missing_transaction once a successor booking appears for the same counterparty", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+
+    // First run: only the old mandate exists → missing alert fires.
+    for (let i = 0; i < 8; i++) {
+      await insertTx({
+        accountId,
+        bookingDate: daysAgo(120 + i * 30),
+        amount: "-49.90",
+        counterparty: "Versicherung XY",
+        mandateRef: "M-OLD",
+        creditorId: "DE88ZZZ8880",
+      });
+    }
+    await runAnomalyDetection([accountId]);
+    const open = await db
+      .select()
+      .from(financeAnomaly)
+      .where(
+        and(
+          eq(financeAnomaly.account_id, accountId),
+          eq(financeAnomaly.type, "missing_transaction"),
+          isNull(financeAnomaly.acknowledged_at),
+        ),
+      );
+    expect(open).toHaveLength(1);
+    const staleId = open[0].id;
+
+    // The creditor's payment bank changes; a successor booking with
+    // the new mandate_ref arrives a few days ago.
+    await insertTx({
+      accountId,
+      bookingDate: daysAgo(5),
+      amount: "-52.00",
+      counterparty: "Versicherung XY",
+      mandateRef: "M-NEW",
+      creditorId: "DE88ZZZ8881",
+    });
+
+    await runAnomalyDetection([accountId]);
+
+    const stillOpen = await db
+      .select()
+      .from(financeAnomaly)
+      .where(
+        and(
+          eq(financeAnomaly.id, staleId),
+          isNull(financeAnomaly.acknowledged_at),
+        ),
+      );
+    expect(stillOpen).toHaveLength(0);
+  });
 });
