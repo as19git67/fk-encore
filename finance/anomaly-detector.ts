@@ -610,6 +610,19 @@ async function detectMissingForAccount(accountId: number): Promise<number> {
     // Not yet overdue past the grace window — nothing to flag.
     if (todayStr < dueDate) continue;
 
+    // Successor-activity guard: a creditor that switches banks /
+    // SEPA mandate identifiers shows up as a fresh transaction under
+    // the same counterparty name but a new mandate_ref / IBAN. The
+    // old mandate then goes silent through no fault of the user.
+    // If any transaction with this counterparty has hit the account
+    // after the mandate's last_seen, the recurring series has
+    // effectively continued elsewhere — suppress the missing alert
+    // AND auto-acknowledge any stale one already in the inbox.
+    if (await hasSuccessorActivity(mandate)) {
+      await acknowledgeStaleMissingForMandate(mandate.id);
+      continue;
+    }
+
     // Interval stability: if the historical intervals between bookings
     // already vary a lot, a single skipped period is unreliable signal.
     const intervalCv = await getMandateIntervalCV(mandate.id);
@@ -633,6 +646,50 @@ async function detectMissingForAccount(accountId: number): Promise<number> {
   }
 
   return inserted;
+}
+
+/**
+ * True when this account has seen a transaction with the same
+ * counterparty (case-insensitive, trimmed) AFTER the mandate's
+ * last_seen — i.e. the recurring series with that counterparty has
+ * continued under a different mandate identity. Used to suppress
+ * false-positive missing alerts when a creditor changes their SEPA
+ * mandate reference, creditor id or IBAN.
+ *
+ * Returns false for mandates without a counterparty (we have no
+ * stable key to match a successor on).
+ */
+async function hasSuccessorActivity(
+  mandate: typeof financeRecurringMandate.$inferSelect,
+): Promise<boolean> {
+  if (!mandate.counterparty || !mandate.last_seen) return false;
+  const rows = await db.execute<{ id: number }>(sql`
+    SELECT ft.id
+    FROM finance_transaction ft
+    WHERE ft.account_id = ${mandate.account_id}
+      AND LOWER(TRIM(ft.counterparty)) = LOWER(TRIM(${mandate.counterparty}))
+      AND ft.booking_date > ${mandate.last_seen}
+    LIMIT 1
+  `);
+  return rows.rows.length > 0;
+}
+
+/**
+ * Auto-acknowledge open missing_transaction anomalies for a mandate
+ * whose recurring series has been resumed under a different mandate
+ * identity. Idempotent — if nothing is open, this is a no-op.
+ */
+async function acknowledgeStaleMissingForMandate(mandateId: number): Promise<void> {
+  await db
+    .update(financeAnomaly)
+    .set({ acknowledged_at: sql`NOW()` })
+    .where(
+      and(
+        eq(financeAnomaly.mandate_id, mandateId),
+        eq(financeAnomaly.type, "missing_transaction"),
+        isNull(financeAnomaly.acknowledged_at),
+      ),
+    );
 }
 
 /**
