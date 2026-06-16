@@ -58,10 +58,11 @@ actor PhotoSyncService {
         guard PhotoSyncPreferences.syncEnabled else { return }
 
         await SyncProgress.shared.update(.waitingForNetwork)
-        if PhotoSyncPreferences.wifiOnly {
-            guard isWifiConnected else { await SyncProgress.shared.reset(); return }
-        } else {
-            guard isNetworkAvailable else { await SyncProgress.shared.reset(); return }
+        // Single source of truth for the WiFi-only / connectivity gate, shared
+        // with the queue drain so both honour a live preference toggle.
+        guard await BackgroundSyncManager.networkAllowsUpload() else {
+            await SyncProgress.shared.reset()
+            return
         }
 
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
