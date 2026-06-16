@@ -170,6 +170,15 @@ struct SyncSettingsView: View {
                         syncError = nil
                         isSyncing = true
                         Task {
+                            // Surface why the tap does nothing instead of a
+                            // silent no-op when the WiFi-only gate blocks it.
+                            guard await BackgroundSyncManager.networkAllowsUpload() else {
+                                syncError = PhotoSyncPreferences.wifiOnly
+                                    ? "Kein WLAN verfügbar. „Nur WLAN“ ist aktiv – verbinde dich mit einem WLAN oder deaktiviere die Einstellung."
+                                    : "Keine Netzwerkverbindung verfügbar."
+                                isSyncing = false
+                                return
+                            }
                             do {
                                 try await PhotoSyncService.shared.sync()
                             } catch {

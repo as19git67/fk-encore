@@ -335,15 +335,25 @@ public final class BackgroundSyncManager {
         }
     }
 
+    /// Whether the current network state permits uploading queue items.
+    /// With "Nur WLAN" enabled, uploads require an active WiFi path; otherwise
+    /// any satisfied path (incl. cellular) suffices. Both inputs are read fresh
+    /// on every call — `PhotoSyncPreferences.wifiOnly` straight from
+    /// UserDefaults and the live `NWPath` from `PhotoSyncService` — so a
+    /// preference toggle or connectivity change takes effect immediately,
+    /// including mid-drain.
+    public static func networkAllowsUpload() async -> Bool {
+        if PhotoSyncPreferences.wifiOnly {
+            return await PhotoSyncService.shared.isWifiConnected
+        }
+        return await PhotoSyncService.shared.isNetworkAvailable
+    }
+
     /// The inner work of `drainUploadQueue`, factored out so the lock can be
     /// released exactly once at the call site (no defer-with-Task indirection).
     private func drainLoop() async {
         // Respect the WiFi-only preference (#653).
-        if PhotoSyncPreferences.wifiOnly {
-            guard await PhotoSyncService.shared.isWifiConnected else { return }
-        } else {
-            guard await PhotoSyncService.shared.isNetworkAvailable else { return }
-        }
+        guard await Self.networkAllowsUpload() else { return }
 
         await UploadQueue.shared.load()
 
@@ -351,6 +361,17 @@ public final class BackgroundSyncManager {
         // step is the concurrency boundary; from this point on the item is
         // invisible to other `pendingItems()` callers.
         while let claimed = await UploadQueue.shared.claimNextPending() {
+            // Re-evaluate the network precondition before every item. The guard
+            // at the top only covers the *start* of the drain; without this
+            // re-check, toggling "Nur WLAN" back on (or dropping off WiFi)
+            // mid-drain would let the loop barrel through all queued items over
+            // cellular. Put the claimed item back as pending so it resumes once
+            // WiFi returns.
+            guard await Self.networkAllowsUpload() else {
+                await UploadQueue.shared.markPending(id: claimed.id)
+                break
+            }
+
             // Cooperate with task cancellation (app suspension, BG-task
             // expiry). Put the item back so the next foreground wake-up
             // retries it instead of marking it as failed.
