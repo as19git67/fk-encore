@@ -47,6 +47,20 @@ function has(key: string): boolean {
   return (props.available as string[]).includes(key)
 }
 
+function isPersonDetailPhotoFilter(): boolean {
+  const available = props.available as string[]
+  return available.includes('sizeRange')
+    && available.includes('hasGps')
+    && available.includes('mediaTypes')
+    && available.includes('favorite')
+    && available.includes('qualityRange')
+    && available.includes('dateRange')
+    && !available.includes('albumIds')
+    && !available.includes('personIds')
+    && !available.includes('ownerIds')
+    && !available.includes('importedDaysAgo')
+}
+
 const local = ref<PhotoFilter>({ ...props.draft })
 
 // Mirror local → parent on every edit. The draft → local sync happens only
@@ -431,7 +445,7 @@ function close() {
       </div>
 
       <!-- Size range -->
-      <div v-if="has('sizeRange')" class="filter-row">
+      <div v-if="has('sizeRange') && !isPersonDetailPhotoFilter()" class="filter-row">
         <label class="filter-label">Dateigröße (MB)</label>
         <div class="filter-daterange">
           <InputNumber
