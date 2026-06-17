@@ -1,21 +1,19 @@
 <script setup lang="ts">
 /**
- * Virtualised grid of face-annotated photo thumbnails for a single person.
+ * Virtualized grid of face-annotated photo thumbnails for a single person.
  *
- * Mirrors the architecture of VirtualAlbumGrid / PersonsGrid: TanStack
- * useVirtualizer virtualises ROWS with a fixed CELL_HEIGHT so the browser
- * only mounts cells inside (or near) the viewport.
- *
- * The face bounding-box overlay and curation badges stay on every visible
- * cell; since only viewport cells are in the DOM the IntersectionObserver
- * lazy-load trick is no longer needed — images are mounted only when their
- * row is virtual-visible.
+ * Mirrors the architecture of VirtualGallery / VirtualAlbumGrid: TanStack
+ * useVirtualizer virtualizes ROWS (not individual cells). Each rendered row is
+ * a CSS grid containing `cols` photos, and the fixed square row height lets the
+ * virtualizer compute the scroll area without measuring every thumbnail.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
-import { getPhotoUrl, type CurationStatus, type FaceBBox } from '../api/photos'
+import { getPhotoDetailsBatch, type CurationStatus, type FaceBBox } from '../api/photos'
+import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
+import { useAuthStore } from '../stores/auth'
 import { thumbnailImageStyle, faceBoxStyle, thumbnailSrcWidth } from '../utils/faceBbox'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -31,9 +29,11 @@ export interface FacePhotoItem {
     id: number
     filename: string
     original_name: string
-    curation_status: CurationStatus
+    curation_status?: CurationStatus
   }
 }
+
+type VirtualRow = { key: string | number | bigint; index: number; start: number; size: number }
 
 const props = defineProps<{
   items: FacePhotoItem[]
@@ -50,31 +50,37 @@ const emit = defineEmits<{
   'restore': [id: number]
 }>()
 
-// ── Layout ───────────────────────────────────────────────────────────────────
+// ── Layout: column count + row height ─────────────────────────────────────────
+// Keep the constants aligned with VirtualGallery / VirtualAlbumGrid so the
+// person detail grid uses the same breakpoints and visual density.
 const TARGET_CELL_MIN_PX = 140
 const GAP_PX = 4
-const CELL_HEIGHT = 200
 
+const auth = useAuthStore()
 const cols = ref(3)
 const cellSize = ref(TARGET_CELL_MIN_PX)
-const rowHeight = computed(() => CELL_HEIGHT + GAP_PX)
+const rowHeight = computed(() => cellSize.value + GAP_PX)
 
 const scrollRef = ref<HTMLElement | null>(null)
 let resizeObs: ResizeObserver | null = null
 
 function recalcLayout(width: number) {
   const totalGap = (n: number) => GAP_PX * Math.max(0, n - 1)
-  const n = Math.max(1, Math.floor((width + GAP_PX) / (TARGET_CELL_MIN_PX + GAP_PX)))
+  let n = Math.max(1, Math.floor((width + GAP_PX) / (TARGET_CELL_MIN_PX + GAP_PX)))
+  if (n < 1) n = 1
+  const cell = Math.floor((width - totalGap(n)) / n)
   cols.value = n
-  cellSize.value = Math.floor((width - totalGap(n)) / n)
+  cellSize.value = cell
 }
 
 onMounted(() => {
   if (scrollRef.value) {
-    recalcLayout(scrollRef.value.clientWidth)
+    const style = getComputedStyle(scrollRef.value)
+    const hPad = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
+    recalcLayout(scrollRef.value.clientWidth - hPad)
     resizeObs = new ResizeObserver((entries) => {
-      const e = entries[0]
-      if (e) recalcLayout(e.contentRect.width)
+      const entry = entries[0]
+      if (entry) recalcLayout(entry.contentRect.width)
     })
     resizeObs.observe(scrollRef.value)
   }
@@ -83,9 +89,13 @@ onMounted(() => {
 onBeforeUnmount(() => {
   resizeObs?.disconnect()
   resizeObs = null
+  if (renderRowsTimer) {
+    clearTimeout(renderRowsTimer)
+    renderRowsTimer = null
+  }
 })
 
-// ── Virtualizer ──────────────────────────────────────────────────────────────
+// ── Virtualizer over rows ─────────────────────────────────────────────────────
 const rowCount = computed(() => Math.ceil(props.items.length / Math.max(1, cols.value)))
 
 const virtualizer = useVirtualizer(
@@ -97,14 +107,81 @@ const virtualizer = useVirtualizer(
   })),
 )
 
-const virtualRows = computed(() => virtualizer.value.getVirtualItems())
+const virtualRows = computed(() => virtualizer.value.getVirtualItems() as VirtualRow[])
 const totalSize = computed(() => virtualizer.value.getTotalSize())
+
+// The Virtualizer updates on every scroll tick. If we render those rows
+// immediately, HeicImage mounts for every intermediate row during a long fling
+// and starts thumbnail/render requests that the user never actually sees. Keep
+// the virtual scroll geometry instant, but debounce which rows are committed to
+// the DOM so only the settled viewport fetches thumbnails.
+const renderedRows = ref<VirtualRow[]>([])
+const RENDER_ROWS_DEBOUNCE_MS = 150
+let renderRowsTimer: ReturnType<typeof setTimeout> | null = null
+
+function commitRenderedRows(rows: VirtualRow[]) {
+  renderedRows.value = rows.slice()
+}
+
+function scheduleRenderedRows(rows: VirtualRow[]) {
+  if (renderedRows.value.length === 0) {
+    commitRenderedRows(rows)
+    return
+  }
+  if (renderRowsTimer) clearTimeout(renderRowsTimer)
+  renderRowsTimer = setTimeout(() => {
+    renderRowsTimer = null
+    commitRenderedRows(virtualRows.value)
+  }, RENDER_ROWS_DEBOUNCE_MS)
+}
+
+watch(virtualRows, scheduleRenderedRows, { flush: 'post' })
 
 function rowItems(rowIndex: number): { item: FacePhotoItem; idx: number }[] {
   const start = rowIndex * cols.value
   const end = Math.min(start + cols.value, props.items.length)
   return props.items.slice(start, end).map((item, i) => ({ item, idx: start + i }))
 }
+
+// ── Visible-row curation hydration ────────────────────────────────────────────
+// /persons/:id embeds only a light photo object for each face. Hydrate the rows
+// that actually render with the same details endpoint used elsewhere, so
+// favorite/hidden badges reflect the real curation state without fetching every
+// person photo up front.
+const hydratedCuration = ref<Map<number, CurationStatus>>(new Map())
+const requestedCurationIds = new Set<number>()
+
+function effectiveStatus(item: FacePhotoItem): CurationStatus {
+  return item.photo.curation_status ?? hydratedCuration.value.get(item.photo.id) ?? 'visible'
+}
+
+async function hydrateRenderedCuration(rows: VirtualRow[]) {
+  const ids: number[] = []
+  for (const row of rows) {
+    for (const { item } of rowItems(row.index)) {
+      if (item.photo.curation_status !== undefined) continue
+      if (requestedCurationIds.has(item.photo.id)) continue
+      requestedCurationIds.add(item.photo.id)
+      ids.push(item.photo.id)
+    }
+  }
+  if (ids.length === 0) return
+  try {
+    const res = await getPhotoDetailsBatch(ids)
+    const next = new Map(hydratedCuration.value)
+    for (const photo of res.photos) next.set(photo.id, photo.curation_status)
+    hydratedCuration.value = next
+  } catch {
+    for (const id of ids) requestedCurationIds.delete(id)
+  }
+}
+
+watch(renderedRows, (rows) => { void hydrateRenderedCuration(rows) }, { flush: 'post' })
+
+watch(() => props.items, () => {
+  requestedCurationIds.clear()
+  hydratedCuration.value = new Map()
+})
 
 // ── Scroll to selected ───────────────────────────────────────────────────────
 function scrollToItemIndex(idx: number, align: 'center' | 'auto' = 'auto') {
@@ -114,14 +191,21 @@ function scrollToItemIndex(idx: number, align: 'center' | 'auto' = 'auto') {
 
 watch(() => props.selectedIndex, (idx) => scrollToItemIndex(idx, 'auto'))
 
-watch(() => props.items, async () => {
-  // Items changed (filter or reload): ensure the selected photo stays visible.
+watch(() => [props.items, cols.value] as const, () => {
+  // Items changed (filter or reload), or a resize changed the row mapping:
+  // keep the selected photo visible in the virtualized viewport.
   scrollToItemIndex(props.selectedIndex, 'auto')
+  commitRenderedRows(virtualRows.value)
 })
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): string {
-  return getPhotoUrl(filename, thumbnailSrcWidth(bbox))
+function thumbnailSrc(item: FacePhotoItem): string {
+  return photoThumbnailSrc({
+    photoId: item.photo.id,
+    filename: item.photo.filename,
+    width: thumbnailSrcWidth(item.face.bbox),
+    userId: auth.user?.id,
+  })
 }
 </script>
 
@@ -134,33 +218,35 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
 
     <div v-else class="pg-inner" :style="{ height: `${totalSize}px` }">
       <div
-        v-for="row in virtualRows"
+        v-for="row in renderedRows"
         :key="String(row.key)"
         class="pg-row"
         :style="{
           transform: `translateY(${row.start}px)`,
-          height: `${CELL_HEIGHT}px`,
+          height: `${row.size}px`,
           gridTemplateColumns: `repeat(${cols}, 1fr)`,
         }"
       >
-        <div
+        <button
           v-for="{ item, idx } in rowItems(row.index)"
           :key="item.photo.id"
+          type="button"
           :data-photo-id="item.photo.id"
           class="photo-item"
-          tabindex="0"
           :class="{
             selected: idx === selectedIndex,
-            'is-hidden': item.photo.curation_status === 'hidden',
-            'is-favorite': item.photo.curation_status === 'favorite',
+            'is-hidden': effectiveStatus(item) === 'hidden',
+            'is-favorite': effectiveStatus(item) === 'favorite',
           }"
+          :style="{ height: `${cellSize}px` }"
           @click="emit('update:selectedIndex', idx)"
           @dblclick="emit('open-fullscreen')"
         >
           <div class="photo-thumb">
             <HeicImage
-              :src="thumbnailSrc(item.photo.filename, item.face.bbox)"
+              :src="thumbnailSrc(item)"
               :alt="item.photo.original_name"
+              loading="lazy"
               objectFit="cover"
               :imageStyle="thumbnailImageStyle(item.face.bbox)"
             >
@@ -168,30 +254,30 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
             </HeicImage>
           </div>
 
-          <i v-if="item.photo.curation_status === 'favorite'" class="pi pi-heart-fill favorite-badge" />
-          <i v-if="item.photo.curation_status === 'hidden'" class="pi pi-thumbs-down-fill hidden-badge" />
+          <i v-if="effectiveStatus(item) === 'favorite'" class="pi pi-heart-fill favorite-badge" />
+          <i v-if="effectiveStatus(item) === 'hidden'" class="pi pi-thumbs-down-fill hidden-badge" />
 
           <div class="photo-info">
             <div class="photo-actions">
               <Button
                 v-if="canDelete"
                 size="small"
-                :icon="item.photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
-                :severity="item.photo.curation_status === 'favorite' ? 'warn' : 'secondary'"
+                :icon="effectiveStatus(item) === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
+                :severity="effectiveStatus(item) === 'favorite' ? 'warn' : 'secondary'"
                 text rounded
-                @click.stop="emit('toggle-favorite', item.photo.id, item.photo.curation_status)"
+                @click.stop="emit('toggle-favorite', item.photo.id, effectiveStatus(item))"
               />
               <Button
                 v-if="canDelete"
                 size="small"
-                :icon="item.photo.curation_status === 'hidden' ? 'pi pi-thumbs-down-fill' : 'pi pi-thumbs-down'"
-                :severity="item.photo.curation_status === 'hidden' ? 'danger' : 'secondary'"
+                :icon="effectiveStatus(item) === 'hidden' ? 'pi pi-thumbs-down-fill' : 'pi pi-thumbs-down'"
+                :severity="effectiveStatus(item) === 'hidden' ? 'danger' : 'secondary'"
                 text rounded
-                @click.stop="item.photo.curation_status === 'hidden' ? emit('restore', item.photo.id) : emit('hide', item.photo.id)"
+                @click.stop="effectiveStatus(item) === 'hidden' ? emit('restore', item.photo.id) : emit('hide', item.photo.id)"
               />
             </div>
           </div>
-        </div>
+        </button>
       </div>
     </div>
   </div>
@@ -201,11 +287,15 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
 .photo-grid-scroll {
   flex: 1;
   min-width: 0;
+  width: 100%;
+  height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  contain: strict;
-  padding: 0;
+  contain: layout size style;
+  scrollbar-gutter: stable;
+  padding: 6px;
+  box-sizing: border-box;
 }
 
 .info-text {
@@ -227,34 +317,38 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
   left: 0;
   right: 0;
   display: grid;
-  gap: 4px;
+  column-gap: 4px;
+  padding-bottom: 4px;
+  box-sizing: border-box;
 }
 
 .photo-item {
   position: relative;
-  border-radius: var(--radius-md);
+  display: block;
+  width: 100%;
+  border-radius: 4px;
   overflow: hidden;
-  background: var(--p-content-background);
+  background: var(--p-content-hover-background);
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
   cursor: pointer;
-  transition: transform 0.2s;
-  border: 4px solid transparent;
+  border: none;
   outline: none;
-  height: 100%;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  contain: layout paint;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.photo-item:hover { transform: scale(1.02); }
-
-.photo-item:focus-visible {
-  outline: 2px solid var(--p-primary-300);
-  outline-offset: -2px;
-}
-
-.photo-item.selected {
-  border-color: var(--p-primary-color);
-  transform: scale(1.05);
-  box-shadow: 0 0 15px var(--p-primary-color);
-  z-index: 10;
+.photo-item.selected::after,
+.photo-item:focus-visible::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 3px solid var(--p-focus-ring-color);
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 20;
 }
 
 .photo-thumb {
@@ -285,18 +379,18 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
 
 .photo-actions { display: flex; gap: 0; }
 
-.photo-item.is-hidden { opacity: 0.35; }
-.photo-item.is-hidden:hover { opacity: 0.7; }
+.photo-item.is-hidden .photo-thumb { opacity: 0.55; filter: grayscale(0.4); }
 
 .favorite-badge, .hidden-badge {
   position: absolute;
-  top: 8px; right: 8px;
-  font-size: 1.2rem;
-  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
+  top: 6px; right: 6px;
+  font-size: 0.85rem;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.7);
   z-index: 5;
+  pointer-events: none;
 }
 .favorite-badge { color: var(--p-yellow-400, #facc15); }
-.hidden-badge { color: white; }
+.hidden-badge { color: rgba(255, 255, 255, 0.85); }
 
 /* ── Face bbox overlay ───────────────────────────────────────────────────── */
 .face-box {
