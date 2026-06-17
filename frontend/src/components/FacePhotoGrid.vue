@@ -187,12 +187,12 @@ function thumbnailSrc(item: FacePhotoItem): string {
           gridTemplateColumns: `repeat(${cols}, 1fr)`,
         }"
       >
-        <div
+        <button
           v-for="{ item, idx } in rowItems(row.index)"
           :key="item.photo.id"
+          type="button"
           :data-photo-id="item.photo.id"
           class="photo-item"
-          tabindex="0"
           :class="{
             selected: idx === selectedIndex,
             'is-hidden': item.photo.curation_status === 'hidden',
@@ -237,7 +237,7 @@ function thumbnailSrc(item: FacePhotoItem): string {
               />
             </div>
           </div>
-        </div>
+        </button>
       </div>
     </div>
   </div>
@@ -284,24 +284,34 @@ function thumbnailSrc(item: FacePhotoItem): string {
 
 .photo-item {
   position: relative;
+  display: block;
+  width: 100%;
   border-radius: 4px;
   overflow: hidden;
-  background: var(--p-content-background);
+  background: var(--p-content-hover-background);
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
   cursor: pointer;
   transition: transform 0.2s;
   border: none;
   outline: none;
+  padding: 0;
+  margin: 0;
+  color: inherit;
   contain: layout paint;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .photo-item:hover { transform: scale(1.02); }
 
-.photo-item:focus-visible,
-.photo-item.selected {
-  outline: 3px solid var(--p-focus-ring-color);
-  outline-offset: -3px;
-  z-index: 10;
+.photo-item.selected::after,
+.photo-item:focus-visible::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 3px solid var(--p-focus-ring-color);
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 20;
 }
 
 .photo-thumb {
@@ -337,13 +347,14 @@ function thumbnailSrc(item: FacePhotoItem): string {
 
 .favorite-badge, .hidden-badge {
   position: absolute;
-  top: 8px; right: 8px;
-  font-size: 1.2rem;
-  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
+  top: 6px; right: 6px;
+  font-size: 0.85rem;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.7);
   z-index: 5;
+  pointer-events: none;
 }
 .favorite-badge { color: var(--p-yellow-400, #facc15); }
-.hidden-badge { color: white; }
+.hidden-badge { color: rgba(255, 255, 255, 0.85); }
 
 /* ── Face bbox overlay ───────────────────────────────────────────────────── */
 .face-box {
