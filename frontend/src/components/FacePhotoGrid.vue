@@ -1,21 +1,19 @@
 <script setup lang="ts">
 /**
- * Virtualised grid of face-annotated photo thumbnails for a single person.
+ * Virtualized grid of face-annotated photo thumbnails for a single person.
  *
- * Mirrors the architecture of VirtualAlbumGrid / PersonsGrid: TanStack
- * useVirtualizer virtualises ROWS with a fixed CELL_HEIGHT so the browser
- * only mounts cells inside (or near) the viewport.
- *
- * The face bounding-box overlay and curation badges stay on every visible
- * cell; since only viewport cells are in the DOM the IntersectionObserver
- * lazy-load trick is no longer needed — images are mounted only when their
- * row is virtual-visible.
+ * Mirrors the architecture of VirtualGallery / VirtualAlbumGrid: TanStack
+ * useVirtualizer virtualizes ROWS (not individual cells). Each rendered row is
+ * a CSS grid containing `cols` photos, and the fixed square row height lets the
+ * virtualizer compute the scroll area without measuring every thumbnail.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
-import { getPhotoUrl, type CurationStatus, type FaceBBox } from '../api/photos'
+import { type CurationStatus, type FaceBBox } from '../api/photos'
+import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
+import { useAuthStore } from '../stores/auth'
 import { thumbnailImageStyle, faceBoxStyle, thumbnailSrcWidth } from '../utils/faceBbox'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -50,31 +48,37 @@ const emit = defineEmits<{
   'restore': [id: number]
 }>()
 
-// ── Layout ───────────────────────────────────────────────────────────────────
+// ── Layout: column count + row height ─────────────────────────────────────────
+// Keep the constants aligned with VirtualGallery / VirtualAlbumGrid so the
+// person detail grid uses the same breakpoints and visual density.
 const TARGET_CELL_MIN_PX = 140
 const GAP_PX = 4
-const CELL_HEIGHT = 200
 
+const auth = useAuthStore()
 const cols = ref(3)
 const cellSize = ref(TARGET_CELL_MIN_PX)
-const rowHeight = computed(() => CELL_HEIGHT + GAP_PX)
+const rowHeight = computed(() => cellSize.value + GAP_PX)
 
 const scrollRef = ref<HTMLElement | null>(null)
 let resizeObs: ResizeObserver | null = null
 
 function recalcLayout(width: number) {
   const totalGap = (n: number) => GAP_PX * Math.max(0, n - 1)
-  const n = Math.max(1, Math.floor((width + GAP_PX) / (TARGET_CELL_MIN_PX + GAP_PX)))
+  let n = Math.max(1, Math.floor((width + GAP_PX) / (TARGET_CELL_MIN_PX + GAP_PX)))
+  if (n < 1) n = 1
+  const cell = Math.floor((width - totalGap(n)) / n)
   cols.value = n
-  cellSize.value = Math.floor((width - totalGap(n)) / n)
+  cellSize.value = cell
 }
 
 onMounted(() => {
   if (scrollRef.value) {
-    recalcLayout(scrollRef.value.clientWidth)
+    const style = getComputedStyle(scrollRef.value)
+    const hPad = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
+    recalcLayout(scrollRef.value.clientWidth - hPad)
     resizeObs = new ResizeObserver((entries) => {
-      const e = entries[0]
-      if (e) recalcLayout(e.contentRect.width)
+      const entry = entries[0]
+      if (entry) recalcLayout(entry.contentRect.width)
     })
     resizeObs.observe(scrollRef.value)
   }
@@ -85,7 +89,7 @@ onBeforeUnmount(() => {
   resizeObs = null
 })
 
-// ── Virtualizer ──────────────────────────────────────────────────────────────
+// ── Virtualizer over rows ─────────────────────────────────────────────────────
 const rowCount = computed(() => Math.ceil(props.items.length / Math.max(1, cols.value)))
 
 const virtualizer = useVirtualizer(
@@ -114,14 +118,20 @@ function scrollToItemIndex(idx: number, align: 'center' | 'auto' = 'auto') {
 
 watch(() => props.selectedIndex, (idx) => scrollToItemIndex(idx, 'auto'))
 
-watch(() => props.items, async () => {
-  // Items changed (filter or reload): ensure the selected photo stays visible.
+watch(() => [props.items, cols.value] as const, () => {
+  // Items changed (filter or reload), or a resize changed the row mapping:
+  // keep the selected photo visible in the virtualized viewport.
   scrollToItemIndex(props.selectedIndex, 'auto')
 })
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): string {
-  return getPhotoUrl(filename, thumbnailSrcWidth(bbox))
+function thumbnailSrc(item: FacePhotoItem): string {
+  return photoThumbnailSrc({
+    photoId: item.photo.id,
+    filename: item.photo.filename,
+    width: thumbnailSrcWidth(item.face.bbox),
+    userId: auth.user?.id,
+  })
 }
 </script>
 
@@ -139,7 +149,7 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
         class="pg-row"
         :style="{
           transform: `translateY(${row.start}px)`,
-          height: `${CELL_HEIGHT}px`,
+          height: `${row.size}px`,
           gridTemplateColumns: `repeat(${cols}, 1fr)`,
         }"
       >
@@ -154,12 +164,13 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
             'is-hidden': item.photo.curation_status === 'hidden',
             'is-favorite': item.photo.curation_status === 'favorite',
           }"
+          :style="{ height: `${cellSize}px` }"
           @click="emit('update:selectedIndex', idx)"
           @dblclick="emit('open-fullscreen')"
         >
           <div class="photo-thumb">
             <HeicImage
-              :src="thumbnailSrc(item.photo.filename, item.face.bbox)"
+              :src="thumbnailSrc(item)"
               :alt="item.photo.original_name"
               objectFit="cover"
               :imageStyle="thumbnailImageStyle(item.face.bbox)"
@@ -201,11 +212,15 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
 .photo-grid-scroll {
   flex: 1;
   min-width: 0;
+  width: 100%;
+  height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  contain: strict;
-  padding: 0;
+  contain: layout size style;
+  scrollbar-gutter: stable;
+  padding: 6px;
+  box-sizing: border-box;
 }
 
 .info-text {
@@ -227,33 +242,30 @@ function thumbnailSrc(filename: string, bbox: FaceBBox | undefined | null): stri
   left: 0;
   right: 0;
   display: grid;
-  gap: 4px;
+  column-gap: 4px;
+  padding-bottom: 4px;
+  box-sizing: border-box;
 }
 
 .photo-item {
   position: relative;
-  border-radius: var(--radius-md);
+  border-radius: 4px;
   overflow: hidden;
   background: var(--p-content-background);
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
   cursor: pointer;
   transition: transform 0.2s;
-  border: 4px solid transparent;
+  border: none;
   outline: none;
-  height: 100%;
+  contain: layout paint;
 }
 
 .photo-item:hover { transform: scale(1.02); }
 
-.photo-item:focus-visible {
-  outline: 2px solid var(--p-primary-300);
-  outline-offset: -2px;
-}
-
+.photo-item:focus-visible,
 .photo-item.selected {
-  border-color: var(--p-primary-color);
-  transform: scale(1.05);
-  box-shadow: 0 0 15px var(--p-primary-color);
+  outline: 3px solid var(--p-focus-ring-color);
+  outline-offset: -3px;
   z-index: 10;
 }
 
