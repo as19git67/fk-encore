@@ -17,16 +17,6 @@ export interface PhotoFilterContext {
   inGroupIds?: Set<number>
 }
 
-function hasGpsData(photo: Photo): boolean {
-  // Full photo payloads carry exact GPS coordinates. Some client-side views
-  // (notably person detail) can operate on face-embedded photo payloads where
-  // coordinates may be absent while already-derived location fields are present.
-  // Treat those location fields as location/GPS-positive for the UI filter so
-  // the tri-state does not collapse to "no matches" in that view.
-  if (photo.latitude != null && photo.longitude != null) return true
-  return !!(photo.location_name || photo.location_city || photo.location_country || photo.location_short)
-}
-
 /**
  * Test whether a photo matches a PhotoFilter on the client.
  *
@@ -80,11 +70,8 @@ export function matchesPhotoFilter(
     if (!ok) return false
   }
 
-  if (filter.hasGps !== undefined) {
-    const hasGps = hasGpsData(photo)
-    if (filter.hasGps && !hasGps) return false
-    if (!filter.hasGps && hasGps) return false
-  }
+  if (filter.hasGps === true && (photo.latitude == null || photo.longitude == null)) return false
+  if (filter.hasGps === false && photo.latitude != null && photo.longitude != null) return false
 
   if (filter.dateFrom || filter.dateTo) {
     const iso = photo.taken_at || photo.created_at
