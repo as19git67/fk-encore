@@ -13,6 +13,7 @@ final class FeedViewModel {
 
     private var nextCursor: PhotoFeedCursor?
     private let pageSize = 12
+    private var newestSeenFeedItemId: Int?
 
     @MainActor
     func loadInitial() async {
@@ -22,8 +23,7 @@ final class FeedViewModel {
         defer { isLoading = false }
 
         do {
-            var query: [String: String] = ["limit": "\(pageSize)"]
-            // No cursor for initial load
+            let query: [String: String] = ["limit": "\(pageSize)"]
             let response: ListPhotoFeedResponse = try await APIClient.shared.get(
                 "/feed/photos", query: query
             )
@@ -31,13 +31,7 @@ final class FeedViewModel {
             nextCursor = response.nextCursor
             hasMore = response.nextCursor != nil
 
-            if let firstId = response.items.first?.photoId {
-                let _: MarkSeenResponse = try await APIClient.shared.post(
-                    "/feed/mark-seen",
-                    body: MarkSeenRequest(upToId: firstId)
-                )
-                unreadCount = 0
-            }
+            await markDisplayedFeedSeen()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -47,11 +41,12 @@ final class FeedViewModel {
     func loadMore() async {
         guard !isLoadingMore, hasMore, let cursor = nextCursor else { return }
         isLoadingMore = true
+        errorMessage = nil
         defer { isLoadingMore = false }
 
         do {
             let query: [String: String] = [
-                "cursorTs": cursor.ts,
+                "cursorTs": normalizedCursorTimestamp(cursor.ts),
                 "cursorId": "\(cursor.id)",
                 "limit": "\(pageSize)",
             ]
@@ -62,7 +57,7 @@ final class FeedViewModel {
             nextCursor = response.nextCursor
             hasMore = response.nextCursor != nil
         } catch {
-            // Silently fail on pagination errors
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -73,6 +68,42 @@ final class FeedViewModel {
             unreadCount = response.count
         } catch {
             // Badge count is best-effort
+        }
+    }
+
+    private func normalizedCursorTimestamp(_ raw: String) -> String {
+        var value = raw.replacingOccurrences(of: " ", with: "T")
+        if value.hasSuffix("+00") {
+            value.removeLast(3)
+            value.append("Z")
+        }
+        return value
+    }
+
+    @MainActor
+    private func markDisplayedFeedSeen() async {
+        guard !items.isEmpty else { return }
+        do {
+            let response: ListActivityFeedResponse = try await APIClient.shared.get(
+                "/feed",
+                query: ["limit": "1"]
+            )
+            guard let newestId = response.items.first?.id else {
+                unreadCount = 0
+                return
+            }
+            guard newestSeenFeedItemId != newestId || response.unreadCount > 0 else {
+                unreadCount = 0
+                return
+            }
+            let _: MarkSeenResponse = try await APIClient.shared.post(
+                "/feed/mark-seen",
+                body: MarkSeenRequest(upToId: newestId)
+            )
+            newestSeenFeedItemId = newestId
+            unreadCount = 0
+        } catch {
+            await refreshUnreadCount()
         }
     }
 

@@ -28,7 +28,7 @@ struct MainTabView: View {
         TabView {
             Tab("Feed", systemImage: "house") {
                 NavigationStack {
-                    FeedView()
+                    FeedView(viewModel: feedViewModel)
                 }
             }
             .badge(feedViewModel.unreadCount)

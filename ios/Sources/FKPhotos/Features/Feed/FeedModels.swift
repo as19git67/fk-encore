@@ -43,6 +43,16 @@ struct ListPhotoFeedResponse: Codable, Sendable {
     let nextCursor: PhotoFeedCursor?
 }
 
+struct ActivityFeedItemSummary: Codable, Sendable {
+    let id: Int
+}
+
+struct ListActivityFeedResponse: Codable, Sendable {
+    let items: [ActivityFeedItemSummary]
+    let nextCursor: Int?
+    let unreadCount: Int
+}
+
 struct UnreadCountResponse: Codable, Sendable {
     let count: Int
 }
