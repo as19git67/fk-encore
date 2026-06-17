@@ -178,7 +178,7 @@ watch(
         class="pg-row"
         :style="{
           transform: `translateY(${row.start}px)`,
-          height: `${CELL_HEIGHT}px`,
+          height: `${row.size}px`,
           gridTemplateColumns: `repeat(${cols}, 1fr)`,
         }"
       >
@@ -189,6 +189,7 @@ watch(
           :data-person-id="person.id"
           class="person-card"
           :class="{ 'person-card--focus': restoredFocusId === person.id }"
+          :style="{ height: `${CELL_HEIGHT}px` }"
           @click="emit('person-click', person)"
         >
           <div class="person-card-thumb">
@@ -258,19 +259,15 @@ watch(
   border: none;
   border-radius: 4px;
   overflow: hidden;
-  background: var(--p-content-background);
+  background: var(--p-content-hover-background);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   cursor: pointer;
-  transition: transform 0.2s;
   outline: none;
   color: inherit;
   text-align: left;
-  height: 100%;
   contain: layout paint;
   -webkit-tap-highlight-color: transparent;
 }
-
-.person-card:hover { transform: scale(1.02); }
 
 .person-card:focus-visible::after,
 .person-card--focus::after {
