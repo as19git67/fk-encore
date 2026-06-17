@@ -14,7 +14,7 @@
  *   - tablet / desktop → width-driven (~200px target cell, matches the
  *     `--grid-min-col` gallery thumbnail width).
  */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import HeicImage from './HeicImage.vue'
 import { getPhotoUrl, type Photo } from '../api/photos'
@@ -58,6 +58,10 @@ function recalcLayout(width: number) {
   const totalGap = GAP_PX * Math.max(0, n - 1)
   cols.value = n
   cellSize.value = Math.floor((width - totalGap) / n)
+
+  // Row measurements are cached by the virtualizer. When the first usable
+  // width arrives after mount, remeasure after Vue applies the new row height.
+  void nextTick(() => virtualizer.value.measure())
 }
 
 function measure() {
