@@ -11,7 +11,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import Button from 'primevue/button'
 import HeicImage from './HeicImage.vue'
-import { type CurationStatus, type FaceBBox } from '../api/photos'
+import { getPhotoDetailsBatch, type CurationStatus, type FaceBBox } from '../api/photos'
 import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
 import { useAuthStore } from '../stores/auth'
 import { thumbnailImageStyle, faceBoxStyle, thumbnailSrcWidth } from '../utils/faceBbox'
@@ -29,7 +29,7 @@ export interface FacePhotoItem {
     id: number
     filename: string
     original_name: string
-    curation_status: CurationStatus
+    curation_status?: CurationStatus
   }
 }
 
@@ -143,6 +143,46 @@ function rowItems(rowIndex: number): { item: FacePhotoItem; idx: number }[] {
   return props.items.slice(start, end).map((item, i) => ({ item, idx: start + i }))
 }
 
+// ── Visible-row curation hydration ────────────────────────────────────────────
+// /persons/:id embeds only a light photo object for each face. Hydrate the rows
+// that actually render with the same details endpoint used elsewhere, so
+// favorite/hidden badges reflect the real curation state without fetching every
+// person photo up front.
+const hydratedCuration = ref<Map<number, CurationStatus>>(new Map())
+const requestedCurationIds = new Set<number>()
+
+function effectiveStatus(item: FacePhotoItem): CurationStatus {
+  return item.photo.curation_status ?? hydratedCuration.value.get(item.photo.id) ?? 'visible'
+}
+
+async function hydrateRenderedCuration(rows: VirtualRow[]) {
+  const ids: number[] = []
+  for (const row of rows) {
+    for (const { item } of rowItems(row.index)) {
+      if (item.photo.curation_status !== undefined) continue
+      if (requestedCurationIds.has(item.photo.id)) continue
+      requestedCurationIds.add(item.photo.id)
+      ids.push(item.photo.id)
+    }
+  }
+  if (ids.length === 0) return
+  try {
+    const res = await getPhotoDetailsBatch(ids)
+    const next = new Map(hydratedCuration.value)
+    for (const photo of res.photos) next.set(photo.id, photo.curation_status)
+    hydratedCuration.value = next
+  } catch {
+    for (const id of ids) requestedCurationIds.delete(id)
+  }
+}
+
+watch(renderedRows, (rows) => { void hydrateRenderedCuration(rows) }, { flush: 'post' })
+
+watch(() => props.items, () => {
+  requestedCurationIds.clear()
+  hydratedCuration.value = new Map()
+})
+
 // ── Scroll to selected ───────────────────────────────────────────────────────
 function scrollToItemIndex(idx: number, align: 'center' | 'auto' = 'auto') {
   if (idx < 0 || idx >= props.items.length || cols.value <= 0) return
@@ -195,8 +235,8 @@ function thumbnailSrc(item: FacePhotoItem): string {
           class="photo-item"
           :class="{
             selected: idx === selectedIndex,
-            'is-hidden': item.photo.curation_status === 'hidden',
-            'is-favorite': item.photo.curation_status === 'favorite',
+            'is-hidden': effectiveStatus(item) === 'hidden',
+            'is-favorite': effectiveStatus(item) === 'favorite',
           }"
           :style="{ height: `${cellSize}px` }"
           @click="emit('update:selectedIndex', idx)"
@@ -214,26 +254,26 @@ function thumbnailSrc(item: FacePhotoItem): string {
             </HeicImage>
           </div>
 
-          <i v-if="item.photo.curation_status === 'favorite'" class="pi pi-heart-fill favorite-badge" />
-          <i v-if="item.photo.curation_status === 'hidden'" class="pi pi-thumbs-down-fill hidden-badge" />
+          <i v-if="effectiveStatus(item) === 'favorite'" class="pi pi-heart-fill favorite-badge" />
+          <i v-if="effectiveStatus(item) === 'hidden'" class="pi pi-thumbs-down-fill hidden-badge" />
 
           <div class="photo-info">
             <div class="photo-actions">
               <Button
                 v-if="canDelete"
                 size="small"
-                :icon="item.photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
-                :severity="item.photo.curation_status === 'favorite' ? 'warn' : 'secondary'"
+                :icon="effectiveStatus(item) === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'"
+                :severity="effectiveStatus(item) === 'favorite' ? 'warn' : 'secondary'"
                 text rounded
-                @click.stop="emit('toggle-favorite', item.photo.id, item.photo.curation_status)"
+                @click.stop="emit('toggle-favorite', item.photo.id, effectiveStatus(item))"
               />
               <Button
                 v-if="canDelete"
                 size="small"
-                :icon="item.photo.curation_status === 'hidden' ? 'pi pi-thumbs-down-fill' : 'pi pi-thumbs-down'"
-                :severity="item.photo.curation_status === 'hidden' ? 'danger' : 'secondary'"
+                :icon="effectiveStatus(item) === 'hidden' ? 'pi pi-thumbs-down-fill' : 'pi pi-thumbs-down'"
+                :severity="effectiveStatus(item) === 'hidden' ? 'danger' : 'secondary'"
                 text rounded
-                @click.stop="item.photo.curation_status === 'hidden' ? emit('restore', item.photo.id) : emit('hide', item.photo.id)"
+                @click.stop="effectiveStatus(item) === 'hidden' ? emit('restore', item.photo.id) : emit('hide', item.photo.id)"
               />
             </div>
           </div>
@@ -291,7 +331,6 @@ function thumbnailSrc(item: FacePhotoItem): string {
   background: var(--p-content-hover-background);
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
   cursor: pointer;
-  transition: transform 0.2s;
   border: none;
   outline: none;
   padding: 0;
@@ -300,8 +339,6 @@ function thumbnailSrc(item: FacePhotoItem): string {
   contain: layout paint;
   -webkit-tap-highlight-color: transparent;
 }
-
-.photo-item:hover { transform: scale(1.02); }
 
 .photo-item.selected::after,
 .photo-item:focus-visible::after {
@@ -342,8 +379,7 @@ function thumbnailSrc(item: FacePhotoItem): string {
 
 .photo-actions { display: flex; gap: 0; }
 
-.photo-item.is-hidden { opacity: 0.35; }
-.photo-item.is-hidden:hover { opacity: 0.7; }
+.photo-item.is-hidden .photo-thumb { opacity: 0.55; filter: grayscale(0.4); }
 
 .favorite-badge, .hidden-badge {
   position: absolute;
