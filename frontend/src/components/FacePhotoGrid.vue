@@ -33,6 +33,8 @@ export interface FacePhotoItem {
   }
 }
 
+type VirtualRow = { key: string | number | bigint; index: number; start: number; size: number }
+
 const props = defineProps<{
   items: FacePhotoItem[]
   selectedIndex: number
@@ -87,6 +89,10 @@ onMounted(() => {
 onBeforeUnmount(() => {
   resizeObs?.disconnect()
   resizeObs = null
+  if (renderRowsTimer) {
+    clearTimeout(renderRowsTimer)
+    renderRowsTimer = null
+  }
 })
 
 // ── Virtualizer over rows ─────────────────────────────────────────────────────
@@ -101,8 +107,35 @@ const virtualizer = useVirtualizer(
   })),
 )
 
-const virtualRows = computed(() => virtualizer.value.getVirtualItems())
+const virtualRows = computed(() => virtualizer.value.getVirtualItems() as VirtualRow[])
 const totalSize = computed(() => virtualizer.value.getTotalSize())
+
+// The Virtualizer updates on every scroll tick. If we render those rows
+// immediately, HeicImage mounts for every intermediate row during a long fling
+// and starts thumbnail/render requests that the user never actually sees. Keep
+// the virtual scroll geometry instant, but debounce which rows are committed to
+// the DOM so only the settled viewport fetches thumbnails.
+const renderedRows = ref<VirtualRow[]>([])
+const RENDER_ROWS_DEBOUNCE_MS = 150
+let renderRowsTimer: ReturnType<typeof setTimeout> | null = null
+
+function commitRenderedRows(rows: VirtualRow[]) {
+  renderedRows.value = rows.slice()
+}
+
+function scheduleRenderedRows(rows: VirtualRow[]) {
+  if (renderedRows.value.length === 0) {
+    commitRenderedRows(rows)
+    return
+  }
+  if (renderRowsTimer) clearTimeout(renderRowsTimer)
+  renderRowsTimer = setTimeout(() => {
+    renderRowsTimer = null
+    commitRenderedRows(virtualRows.value)
+  }, RENDER_ROWS_DEBOUNCE_MS)
+}
+
+watch(virtualRows, scheduleRenderedRows, { flush: 'post' })
 
 function rowItems(rowIndex: number): { item: FacePhotoItem; idx: number }[] {
   const start = rowIndex * cols.value
@@ -122,6 +155,7 @@ watch(() => [props.items, cols.value] as const, () => {
   // Items changed (filter or reload), or a resize changed the row mapping:
   // keep the selected photo visible in the virtualized viewport.
   scrollToItemIndex(props.selectedIndex, 'auto')
+  commitRenderedRows(virtualRows.value)
 })
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -144,7 +178,7 @@ function thumbnailSrc(item: FacePhotoItem): string {
 
     <div v-else class="pg-inner" :style="{ height: `${totalSize}px` }">
       <div
-        v-for="row in virtualRows"
+        v-for="row in renderedRows"
         :key="String(row.key)"
         class="pg-row"
         :style="{
@@ -172,6 +206,7 @@ function thumbnailSrc(item: FacePhotoItem): string {
             <HeicImage
               :src="thumbnailSrc(item)"
               :alt="item.photo.original_name"
+              loading="lazy"
               objectFit="cover"
               :imageStyle="thumbnailImageStyle(item.face.bbox)"
             >
