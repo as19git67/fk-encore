@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct FeedView: View {
-    @State private var viewModel = FeedViewModel()
+    let viewModel: FeedViewModel
 
     var body: some View {
         ScrollView {
@@ -18,17 +18,18 @@ struct FeedView: View {
                         .padding(.vertical, 4)
                 }
 
+                if viewModel.hasMore {
+                    Color.clear
+                        .frame(height: 80)
+                        .onAppear {
+                            Task { await viewModel.loadMore() }
+                        }
+                }
+
                 if viewModel.isLoadingMore {
                     ProgressView()
                         .padding()
                 }
-
-                // Sentinel for infinite scroll
-                Color.clear
-                    .frame(height: 1)
-                    .onAppear {
-                        Task { await viewModel.loadMore() }
-                    }
             }
         }
         .navigationTitle("Feed")
