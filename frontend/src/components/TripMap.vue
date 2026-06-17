@@ -59,6 +59,20 @@ const selectedStopId = ref<number | null>(null)
  *  so the map + timeline follow along. */
 const selectedAnchorPhotoId = ref<number | null>(null)
 
+/** Default map zoom applied the moment the timeline leaves the overview.
+ *  Computed lazily (and cached) as the average of every stop's "fit my own
+ *  photos" zoom, so the map lands at a granularity that typically shows a
+ *  single stop's spread — not the whole trip, not pinned to max zoom. From
+ *  there the user owns the zoom (and thus the stop granularity); selecting
+ *  other stops only pans. `null` until first computed / no GPS photos. */
+let defaultStopZoom: number | null = null
+/** Set when leaving the overview triggers a zoom change: the resulting
+ *  re-cluster reassigns stop ids, so the timeline re-centre on the picked
+ *  stop must wait until the new clustering lands (see watch on `stops`).
+ *  Holds the anchor photo id to re-centre on, or `null` for no pending
+ *  re-centre (e.g. a manual drag, which must not fight the user's finger). */
+let pendingRecenterAnchor: number | null = null
+
 function getStopLabel(stop: Stop): string {
   if (stop.locationLabel) return stop.locationLabel
   return `Stopp ${stop.id + 1}`
@@ -107,23 +121,73 @@ function setSelection(
   anchorPhotoId: number | null,
   opts: { recenterTimeline?: boolean; silent?: boolean } = {},
 ) {
+  const wasOverview = selectedStopId.value === null
   selectedStopId.value = stopId
   selectedAnchorPhotoId.value = anchorPhotoId
   // Pin rendering reacts to the selection via `watch(visiblePins)` (batched by
   // Vue's scheduler), so paging photos within the same stop doesn't re-draw
   // the markers. Here we only drive the map view + timeline.
+  let zoomedLeavingOverview = false
   if (stopId === null) {
     fitMapToAll()
   } else {
     const stop = stops.value.find(s => s.id === stopId)
-    if (stop) ensureStopPinVisible(stop)
+    if (stop) {
+      // Leaving the overview lands the map at the computed default stop zoom,
+      // centred on the stop. This one zoom change re-clusters (like a user
+      // zoom); afterwards selecting other stops only pans (ensureStopPinVisible).
+      if (wasOverview && map) {
+        if (defaultStopZoom === null) defaultStopZoom = computeDefaultStopZoom()
+        if (defaultStopZoom !== null && defaultStopZoom !== map.getZoom()) {
+          zoomedLeavingOverview = true
+          // Defer the timeline re-centre to the post-recluster watch: the zoom
+          // change reassigns stop ids, so `stopId` is about to go stale. Manual
+          // drags (no recenterTimeline) pass null so the finger isn't fought.
+          pendingRecenterAnchor = opts.recenterTimeline ? anchorPhotoId : null
+          map.setView([stop.lat, stop.lng], defaultStopZoom)
+        } else {
+          ensureStopPinVisible(stop)
+        }
+      } else {
+        ensureStopPinVisible(stop)
+      }
+    }
   }
-  if (opts.recenterTimeline) {
+  // When the zoom changed, the immediate re-centre would target the soon-stale
+  // stop id — the watch on `stops` handles it once the re-cluster settles.
+  if (opts.recenterTimeline && !zoomedLeavingOverview) {
     nextTick(() => scrollItemIntoCenter(stopId))
   }
   if (!opts.silent && stopId !== null && anchorPhotoId != null) {
     emit('stop-selected', anchorPhotoId)
   }
+}
+
+/**
+ * Average, over every stop, the largest zoom at which that stop's own photos
+ * still fit the map viewport (Leaflet's getBoundsZoom does the Web-Mercator
+ * projection for us). Single-point stops would fit at max zoom, so each stop's
+ * value is capped at 16 before averaging — the same cap fitMapToAll uses — to
+ * keep a few GPS-tight stops from dragging the average to the deepest zoom.
+ * Returns null when no stop has GPS-tagged photos. Computed once and cached:
+ * `stops` is zoom-dependent, so we snapshot it at the (coarse) overview zoom
+ * where this first runs, giving a stable, predictable default.
+ */
+function computeDefaultStopZoom(): number | null {
+  if (!map) return null
+  let sum = 0
+  let n = 0
+  for (const stop of stops.value) {
+    const pts = stop.photos
+      .filter(p => p.latitude != null && p.longitude != null)
+      .map(p => [p.latitude as number, p.longitude as number] as [number, number])
+    if (pts.length === 0) continue
+    const z = map.getBoundsZoom(L.latLngBounds(pts), false, L.point(24, 24))
+    sum += Math.min(z, 16)
+    n++
+  }
+  if (n === 0) return null
+  return Math.round(sum / n)
 }
 
 function fitMapToAll() {
@@ -652,6 +716,10 @@ onUnmounted(() => {
 watch(() => props.photos, () => {
   selectedStopId.value = null
   selectedAnchorPhotoId.value = null
+  // New photo set → the cached default zoom no longer reflects it; recompute
+  // on the next overview exit.
+  defaultStopZoom = null
+  pendingRecenterAnchor = null
   renderContent()
   fitMapToAll()
   nextTick(() => scrollItemIntoCenter(null))
@@ -668,7 +736,14 @@ watch(stops, () => {
   if (anchor == null) { selectedStopId.value = null; return }
   const next = stops.value.find(s => s.photos.some(p => p.id === anchor))
   selectedStopId.value = next ? next.id : null
-  if (!next) selectedAnchorPhotoId.value = null
+  if (!next) { selectedAnchorPhotoId.value = null; pendingRecenterAnchor = null; return }
+  // A re-cluster triggered by leaving the overview (zoom change) deferred the
+  // timeline re-centre to here, once the picked stop has its new id. Manual
+  // drags leave pendingRecenterAnchor null so the timeline isn't yanked.
+  if (pendingRecenterAnchor != null && pendingRecenterAnchor === anchor) {
+    pendingRecenterAnchor = null
+    nextTick(() => scrollItemIntoCenter(next.id))
+  }
 })
 
 // Re-render when selection or the underlying clustering changes.
