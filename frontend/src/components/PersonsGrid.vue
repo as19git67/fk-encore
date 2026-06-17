@@ -52,7 +52,9 @@ function recalcLayout(width: number) {
 
 onMounted(() => {
   if (scrollRef.value) {
-    recalcLayout(scrollRef.value.clientWidth)
+    const style = getComputedStyle(scrollRef.value)
+    const hPad = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
+    recalcLayout(scrollRef.value.clientWidth - hPad)
     resizeObs = new ResizeObserver((entries) => {
       const e = entries[0]
       if (e) recalcLayout(e.contentRect.width)
@@ -219,7 +221,10 @@ watch(
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  contain: strict;
+  contain: layout size style;
+  scrollbar-gutter: stable;
+  padding: 6px;
+  box-sizing: border-box;
 }
 
 .pg-empty {
@@ -239,14 +244,19 @@ watch(
   left: 0;
   right: 0;
   display: grid;
-  gap: 4px;
+  column-gap: 4px;
+  padding-bottom: 4px;
+  box-sizing: border-box;
 }
 
 .person-card {
   position: relative;
+  display: block;
+  width: 100%;
   padding: 0;
+  margin: 0;
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: 4px;
   overflow: hidden;
   background: var(--p-content-background);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
@@ -256,14 +266,21 @@ watch(
   color: inherit;
   text-align: left;
   height: 100%;
+  contain: layout paint;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .person-card:hover { transform: scale(1.02); }
 
-.person-card:focus-visible,
-.person-card--focus {
-  outline: 3px solid var(--p-primary-color, #3b82f6);
-  outline-offset: 2px;
+.person-card:focus-visible::after,
+.person-card--focus::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 3px solid var(--p-focus-ring-color);
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 20;
 }
 
 .person-card-thumb {
