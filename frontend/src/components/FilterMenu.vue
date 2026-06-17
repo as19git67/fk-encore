@@ -398,7 +398,7 @@ function close() {
       </div>
 
       <!-- GPS / Faces / Person tri-states -->
-      <div v-if="has('hasGps')" class="filter-row">
+      <div v-if="has('hasGps') && !isPersonDetailPhotoFilter()" class="filter-row">
         <label class="filter-label">GPS-Daten</label>
         <SelectButton
           :model-value="triValue(local.hasGps)"
