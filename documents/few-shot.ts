@@ -62,7 +62,7 @@ function fewShotEnabled(): boolean {
 }
 
 /** One neighbour row as returned by the SQL below, before dedup. */
-export interface NeighborRow extends Record<string, unknown> {
+export interface NeighborRow {
   category_slug: string;
   category_name: string;
   title: string | null;

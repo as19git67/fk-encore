@@ -112,10 +112,7 @@ similar_groups_stub = types.ModuleType("app.services.similar_groups")
 similar_groups_stub.find_similar_groups = lambda rows, threshold, time_window_seconds: []
 sys.modules["app.services.similar_groups"] = similar_groups_stub
 
-services_stub = types.ModuleType("app.services")
-services_stub.embedding_service = embed_stub
-services_stub.similar_groups = similar_groups_stub
-sys.modules["app.services"] = services_stub
+sys.modules["app.services"] = types.ModuleType("app.services")
 
 # ---------------------------------------------------------------------------
 # Now it is safe to import FastAPI test client and the router
@@ -127,9 +124,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from app.api.endpoints import router
 import app.api.endpoints as endpoints_module
-import app as app_package
-
-app_package.services = services_stub
 
 app = FastAPI()
 app.include_router(router)

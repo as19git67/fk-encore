@@ -931,6 +931,8 @@ export interface ExifMetadata {
   description: string | null;
   /** IPTC Keywords / XMP dc:subject — candidate tags. */
   keywords: string[];
+  /** XMP xmp:Rating (0–5). >= 4 is treated as favourite on import. */
+  rating: number | null;
   /** IPTC By-line / XMP dc:creator — creator/photographer name. */
   author: string | null;
   /** IPTC Headline. */
@@ -1459,6 +1461,7 @@ export async function getExifMetadata(filePath: string, originalFilename?: strin
     longitude: null,
     description: null,
     keywords: [],
+    rating: null,
     author: null,
     headline: null,
     title: null,
@@ -1549,6 +1552,7 @@ export async function getExifMetadata(filePath: string, originalFilename?: strin
       longitude: finiteOrNull(data?.longitude),
       description,
       keywords,
+      rating,
       author,
       headline,
       title,
@@ -3919,7 +3923,6 @@ export async function createAlbumLogic(userId: number, req: CreateAlbumRequest):
     cover_filename: undefined,
     display_mode: (row!.display_mode as "grid" | "map") ?? "grid",
     photo_count: 0,
-    is_shared: false,
     created_at: row!.created_at ?? "",
     updated_at: row!.updated_at ?? "",
   };
@@ -4074,7 +4077,7 @@ export async function getAlbumLogic(
   if (!settings) {
     // Create default settings if they don't exist
     await dbExec(db.insert(albumUserSettings).values({ album_id: albumId, user_id: userId, hide_mode: "mine", active_view: "all", cover_photo_id: null }));
-    settings = { album_id: albumId, user_id: userId, hide_mode: "mine", active_view: "all", view_config: null, cover_photo_id: null };
+    settings = { album_id: albumId, user_id: userId, hide_mode: "mine", active_view: "all", view_config: null, cover_photo_id: undefined };
   }
 
   const viewConfig = resolveViewConfig(settings.active_view, settings.view_config as ViewConfig | null, settings.hide_mode);
@@ -4186,7 +4189,7 @@ export async function getAlbumLogic(
         WHERE TRUE${hideCond}${favCond}
         ORDER BY COALESCE(p.taken_at, p.created_at) DESC NULLS LAST, p.id DESC
         LIMIT 1
-      `)).rows[0] as { filename?: string } | undefined;
+      `)).rows[0] as any;
       coverFilename = covRow?.filename;
     }
     return {
@@ -4233,7 +4236,7 @@ export async function getAlbumLogic(
     FROM photos p
     INNER JOIN album_photos ap ON ap.photo_id = p.id AND ap.album_id = ${albumId}
     LEFT JOIN photo_curation my_pc ON my_pc.photo_id = p.id AND my_pc.user_id = ${userId}${allPcJoin}${groupByClause}
-  `)).rows as any[];
+  `)).rows;
 
   // Apply view filters in JS (cleaner than building dynamic HAVING clauses).
   // fav_count / hide_count only exist when the participant aggregate ran; the
@@ -4457,7 +4460,6 @@ export async function updateAlbumLogic(userId: number, req: UpdateAlbumRequest):
     newest_photo_at: stats.newest_photo_at,
     oldest_photo_at: stats.oldest_photo_at,
     photo_count: stats.photo_count,
-    is_shared: false,
     created_at: updated.created_at ?? "",
     updated_at: updated.updated_at ?? "",
   };
@@ -5281,7 +5283,7 @@ export async function createAlbumPublicLinkLogic(userId: number, albumId: number
           .where(eq(albumPublicLinks.id, existing.id))
           .returning()
       );
-      return toPublicLinkResponse(updated!);
+      return toPublicLinkResponse(updated);
     }
     return toPublicLinkResponse(existing);
   }
@@ -5296,7 +5298,7 @@ export async function createAlbumPublicLinkLogic(userId: number, albumId: number
     }).returning()
   );
 
-  return toPublicLinkResponse(row!);
+  return toPublicLinkResponse(row);
 }
 
 export async function deleteAlbumPublicLinkLogic(userId: number, albumId: number): Promise<{ success: boolean }> {
