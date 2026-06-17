@@ -6,19 +6,24 @@ struct FeedView: View {
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 1) {
-                ForEach(Array(viewModel.items.enumerated()), id: \.element.id) { index, item in
+                ForEach(viewModel.items) { item in
                     FeedCardView(
                         item: item,
                         isHiddenByMe: viewModel.hiddenPhotoIds.contains(item.photoId),
                         onLike: { Task { await viewModel.toggleLike(photoId: item.photoId) } },
                         onToggleHide: { Task { await viewModel.toggleHide(photoId: item.photoId) } }
                     )
-                    .onAppear {
-                        Task { await viewModel.loadMoreIfNeeded(visibleIndex: index) }
-                    }
 
                     Divider()
                         .padding(.vertical, 4)
+                }
+
+                if viewModel.hasMore {
+                    Color.clear
+                        .frame(height: 80)
+                        .onAppear {
+                            Task { await viewModel.loadMore() }
+                        }
                 }
 
                 if viewModel.isLoadingMore {
