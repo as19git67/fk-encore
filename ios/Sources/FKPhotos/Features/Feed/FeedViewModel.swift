@@ -46,7 +46,7 @@ final class FeedViewModel {
 
         do {
             let query: [String: String] = [
-                "cursorTs": cursor.ts,
+                "cursorTs": normalizedCursorTimestamp(cursor.ts),
                 "cursorId": "\(cursor.id)",
                 "limit": "\(pageSize)",
             ]
@@ -69,6 +69,15 @@ final class FeedViewModel {
         } catch {
             // Badge count is best-effort
         }
+    }
+
+    private func normalizedCursorTimestamp(_ raw: String) -> String {
+        var value = raw.replacingOccurrences(of: " ", with: "T")
+        if value.hasSuffix("+00") {
+            value.removeLast(3)
+            value.append("Z")
+        }
+        return value
     }
 
     @MainActor
