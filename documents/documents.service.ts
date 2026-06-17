@@ -120,7 +120,7 @@ export interface DocumentLocationContext {
    */
   categorySlugs: string[] | null;
   /** Current document status — non-`ready` documents live in _inbox. */
-  status: "pending" | "extracting" | "classifying" | "ready" | "failed";
+  status: "pending" | "extracting" | "classifying" | "ready" | "failed" | "encrypted";
   /** Date on the document (YYYY-MM-DD) if the classifier found one. */
   docDate: string | null;
   /** Upload timestamp — used as fallback when docDate is missing. */

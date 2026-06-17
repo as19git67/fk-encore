@@ -1,18 +1,21 @@
 import SwiftUI
 
 struct FeedView: View {
-    @State private var viewModel = FeedViewModel()
+    let viewModel: FeedViewModel
 
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 1) {
-                ForEach(viewModel.items) { item in
+                ForEach(Array(viewModel.items.enumerated()), id: \.element.id) { index, item in
                     FeedCardView(
                         item: item,
                         isHiddenByMe: viewModel.hiddenPhotoIds.contains(item.photoId),
                         onLike: { Task { await viewModel.toggleLike(photoId: item.photoId) } },
                         onToggleHide: { Task { await viewModel.toggleHide(photoId: item.photoId) } }
                     )
+                    .onAppear {
+                        Task { await viewModel.loadMoreIfNeeded(visibleIndex: index) }
+                    }
 
                     Divider()
                         .padding(.vertical, 4)
@@ -22,13 +25,6 @@ struct FeedView: View {
                     ProgressView()
                         .padding()
                 }
-
-                // Sentinel for infinite scroll
-                Color.clear
-                    .frame(height: 1)
-                    .onAppear {
-                        Task { await viewModel.loadMore() }
-                    }
             }
         }
         .navigationTitle("Feed")

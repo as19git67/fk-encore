@@ -7,6 +7,11 @@ import {
   __resetFeedPush,
   type FeedPushEvent,
 } from "./feed-push-debounce";
+import type { PushPayload } from "./push.service";
+
+function sendMock() {
+  return vi.fn(async (_userId: number, _payload: PushPayload) => ({ sent: 1, pruned: 0 }));
+}
 
 function ev(over: Partial<FeedPushEvent> = {}): FeedPushEvent {
   return {
@@ -26,7 +31,7 @@ describe("feed-push-debounce", () => {
   });
 
   it("suppresses the push entirely while the recipient is online", async () => {
-    const send = vi.fn(async () => ({ sent: 1, pruned: 0 }));
+    const send = sendMock();
     __setFeedPushDeps({ isOnline: async () => true, send });
 
     await scheduleFeedPush(1, ev());
@@ -36,7 +41,7 @@ describe("feed-push-debounce", () => {
   });
 
   it("delivers a single buffered event as a normal notification", async () => {
-    const send = vi.fn(async () => ({ sent: 1, pruned: 0 }));
+    const send = sendMock();
     __setFeedPushDeps({ isOnline: async () => false, send, quietMs: 60_000, maxWaitMs: 120_000 });
 
     await scheduleFeedPush(1, ev({ kind: "photo_favorited" }));
@@ -49,7 +54,7 @@ describe("feed-push-debounce", () => {
   });
 
   it("coalesces multiple events for one recipient into a single digest", async () => {
-    const send = vi.fn(async () => ({ sent: 1, pruned: 0 }));
+    const send = sendMock();
     __setFeedPushDeps({ isOnline: async () => false, send });
 
     await scheduleFeedPush(1, ev({ kind: "photo_favorited", photoId: 9 }));
@@ -66,7 +71,7 @@ describe("feed-push-debounce", () => {
 
   it("drops the push if the recipient comes back online before the flush", async () => {
     let online = false;
-    const send = vi.fn(async () => ({ sent: 1, pruned: 0 }));
+    const send = sendMock();
     __setFeedPushDeps({ isOnline: async () => online, send });
 
     await scheduleFeedPush(1, ev()); // enqueued while offline
@@ -77,7 +82,7 @@ describe("feed-push-debounce", () => {
   });
 
   it("buffers events per recipient independently", async () => {
-    const send = vi.fn(async () => ({ sent: 1, pruned: 0 }));
+    const send = sendMock();
     __setFeedPushDeps({ isOnline: async () => false, send });
 
     await scheduleFeedPush(1, ev());

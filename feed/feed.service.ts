@@ -199,7 +199,7 @@ export interface ListPhotoFeedResponse {
   nextCursor: PhotoFeedCursor | null;
 }
 
-interface PhotoFeedRow {
+interface PhotoFeedRow extends Record<string, unknown> {
   photo_id: number;
   last_activity_at: string;
   filename: string;

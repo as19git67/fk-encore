@@ -27,7 +27,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, TypeVar
+from typing import Any, AsyncIterator, Callable, Optional, TypeVar
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -367,9 +367,9 @@ async def embed(req: EmbedRequest) -> EmbedResponse:
 class TaxonomyNode(BaseModel):
     slug: str
     name: str
-    parent_slug: str | None = None
+    parent_slug: Optional[str] = None
     # Optional disambiguation hint, rendered as "slug: Name — Hinweis".
-    hint: str | None = None
+    hint: Optional[str] = None
 
 
 class TaxSectionEntry(BaseModel):
@@ -381,7 +381,7 @@ class TaxSectionEntry(BaseModel):
     slug: str
     name: str
     group: str  # "einkuenfte" | "abzuege" | "bescheid" | "rahmen"
-    hint: str | None = None
+    hint: Optional[str] = None
 
 
 class SubjectPersonEntry(BaseModel):
@@ -403,7 +403,7 @@ class ExampleEntry(BaseModel):
     category_slug: str
     category_name: str = ""
     title: str = ""
-    sender: str | None = None
+    sender: Optional[str] = None
 
 
 class ClassifyRequest(BaseModel):
@@ -436,16 +436,16 @@ class TaxAssignment(BaseModel):
 class ClassifyResponse(BaseModel):
     category_slug: str
     title: str
-    doc_date: str | None = None
-    sender: str | None = None
-    document_number: str | None = None
+    doc_date: Optional[str] = None
+    sender: Optional[str] = None
+    document_number: Optional[str] = None
     summary: str
     tags: list[str]
     confidence: float = Field(..., ge=0.0, le=1.0)
     # Tax-return fields — default "not relevant" so existing callers that
     # don't send ``tax_sections`` still get a valid response.
     tax_relevant: bool = False
-    tax_year: int | None = Field(default=None, ge=2000, le=2100)
+    tax_year: Optional[int] = Field(default=None, ge=2000, le=2100)
     tax_year_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     tax_sections: list[TaxAssignment] = Field(default_factory=list)
 
@@ -882,7 +882,7 @@ class JsonPromptRequest(BaseModel):
     """
 
     prompt: str = Field(..., min_length=1)
-    system: str | None = None
+    system: Optional[str] = None
     max_tokens: int = Field(default=768, gt=0, le=4096)
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
 
@@ -946,14 +946,14 @@ class RecapTitleRequest(BaseModel):
 
     kind: str = Field(..., min_length=1)
     locale: str = "de"
-    place_city: str | None = None
-    place_country: str | None = None
-    date_range: str | None = None
-    years_ago: int | None = None
-    person_name: str | None = None
-    year: int | None = None
-    month_label: str | None = None
-    photo_count: int | None = None
+    place_city: Optional[str] = None
+    place_country: Optional[str] = None
+    date_range: Optional[str] = None
+    years_ago: Optional[int] = None
+    person_name: Optional[str] = None
+    year: Optional[int] = None
+    month_label: Optional[str] = None
+    photo_count: Optional[int] = None
     # Optional free-form keywords from image tags / embedding clusters —
     # helpful for "theme" recaps, harmless for the others.
     keywords: list[str] = Field(default_factory=list)
@@ -961,7 +961,7 @@ class RecapTitleRequest(BaseModel):
 
 class RecapTitleResponse(BaseModel):
     title: str
-    subtitle: str | None = None
+    subtitle: Optional[str] = None
 
 
 _RECAP_SYSTEM_PROMPT = """Du erzeugst kurze, warmherzige Titel für private Foto-Rückblicke.

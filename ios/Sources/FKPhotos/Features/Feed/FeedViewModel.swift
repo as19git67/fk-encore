@@ -13,6 +13,8 @@ final class FeedViewModel {
 
     private var nextCursor: PhotoFeedCursor?
     private let pageSize = 12
+    private let prefetchThreshold = 3
+    private var newestSeenFeedItemId: Int?
 
     @MainActor
     func loadInitial() async {
@@ -22,8 +24,7 @@ final class FeedViewModel {
         defer { isLoading = false }
 
         do {
-            var query: [String: String] = ["limit": "\(pageSize)"]
-            // No cursor for initial load
+            let query: [String: String] = ["limit": "\(pageSize)"]
             let response: ListPhotoFeedResponse = try await APIClient.shared.get(
                 "/feed/photos", query: query
             )
@@ -31,13 +32,7 @@ final class FeedViewModel {
             nextCursor = response.nextCursor
             hasMore = response.nextCursor != nil
 
-            if let firstId = response.items.first?.photoId {
-                let _: MarkSeenResponse = try await APIClient.shared.post(
-                    "/feed/mark-seen",
-                    body: MarkSeenRequest(upToId: firstId)
-                )
-                unreadCount = 0
-            }
+            await markDisplayedFeedSeen()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -67,12 +62,46 @@ final class FeedViewModel {
     }
 
     @MainActor
+    func loadMoreIfNeeded(visibleIndex index: Int) async {
+        guard hasMore, !isLoadingMore, !isLoading else { return }
+        guard index >= max(0, items.count - prefetchThreshold) else { return }
+        await loadMore()
+    }
+
+    @MainActor
     func refreshUnreadCount() async {
         do {
             let response: UnreadCountResponse = try await APIClient.shared.get("/feed/unread-count")
             unreadCount = response.count
         } catch {
             // Badge count is best-effort
+        }
+    }
+
+    @MainActor
+    private func markDisplayedFeedSeen() async {
+        guard !items.isEmpty else { return }
+        do {
+            let response: ListActivityFeedResponse = try await APIClient.shared.get(
+                "/feed",
+                query: ["limit": "1"]
+            )
+            guard let newestId = response.items.first?.id else {
+                unreadCount = 0
+                return
+            }
+            guard newestSeenFeedItemId != newestId || response.unreadCount > 0 else {
+                unreadCount = 0
+                return
+            }
+            let _: MarkSeenResponse = try await APIClient.shared.post(
+                "/feed/mark-seen",
+                body: MarkSeenRequest(upToId: newestId)
+            )
+            newestSeenFeedItemId = newestId
+            unreadCount = 0
+        } catch {
+            await refreshUnreadCount()
         }
     }
 

@@ -94,7 +94,7 @@ export interface DocumentSummary {
   original_filename: string;
   mime_type: string;
   size_bytes: number;
-  status: "pending" | "extracting" | "classifying" | "ready" | "failed";
+  status: "pending" | "extracting" | "classifying" | "ready" | "failed" | "encrypted";
   uploaded_at: string | null;
   doc_date: string | null;
   sender: string | null;

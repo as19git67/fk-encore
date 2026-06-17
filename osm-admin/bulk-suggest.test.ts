@@ -41,7 +41,7 @@ function fixture(): GeofabrikIndex {
  * encompasses the leaf europe/germany/bayern — used to test the
  * "already covered by an imported parent" suppression.
  */
-function fixtureWithParent(): GeofabrikIndex {
+async function fixtureWithParent(): Promise<GeofabrikIndex> {
   const raw = JSON.stringify({
     features: [
       {
@@ -92,7 +92,7 @@ function fixtureWithParent(): GeofabrikIndex {
  * not string-prefix the slug, or European hierarchies never surface as
  * Lösch-Kandidaten.
  */
-function fixtureFlatIds(): GeofabrikIndex {
+async function fixtureFlatIds(): Promise<GeofabrikIndex> {
   const raw = JSON.stringify({
     features: [
       {
