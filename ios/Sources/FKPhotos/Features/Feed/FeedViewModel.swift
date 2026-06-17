@@ -13,7 +13,6 @@ final class FeedViewModel {
 
     private var nextCursor: PhotoFeedCursor?
     private let pageSize = 12
-    private let prefetchThreshold = 3
     private var newestSeenFeedItemId: Int?
 
     @MainActor
@@ -42,6 +41,7 @@ final class FeedViewModel {
     func loadMore() async {
         guard !isLoadingMore, hasMore, let cursor = nextCursor else { return }
         isLoadingMore = true
+        errorMessage = nil
         defer { isLoadingMore = false }
 
         do {
@@ -57,15 +57,8 @@ final class FeedViewModel {
             nextCursor = response.nextCursor
             hasMore = response.nextCursor != nil
         } catch {
-            // Silently fail on pagination errors
+            errorMessage = error.localizedDescription
         }
-    }
-
-    @MainActor
-    func loadMoreIfNeeded(visibleIndex index: Int) async {
-        guard hasMore, !isLoadingMore, !isLoading else { return }
-        guard index >= max(0, items.count - prefetchThreshold) else { return }
-        await loadMore()
     }
 
     @MainActor
