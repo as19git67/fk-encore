@@ -175,7 +175,7 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     slug: "steuerbescheid",
     group: "bescheid",
     name: "Steuerbescheid",
-    hint: "Einkommensteuerbescheid oder Vorauszahlungsbescheid vom Finanzamt (Briefkopf Finanzamt, Steuernummer, Festsetzung).",
+    hint: "Einkommensteuerbescheid des Finanzamts (Ergebnis der Steuererklärung): Finanzamt-Briefkopf, Steuernummer/Identifikationsnummer, Wortlaut „Bescheid für 20XX über Einkommensteuer…\", Festsetzungstabelle mit festgesetzter Einkommensteuer, Solidaritätszuschlag und Kirchensteuer sowie ausgewiesener Erstattung/Nachzahlung; auch Vorauszahlungsbescheid zur Einkommensteuer. NICHT: Grundsteuer-, Gewerbesteuer- oder sonstige kommunale Abgabenbescheide (Stadt/Gemeinde/Landratsamt), Gerichts-/Amtsgerichtsbescheide, einzelne Kirchensteuerbescheinigungen.",
   },
 
   // ─── Rahmen / Stammdaten ────────────────────────────────────────────
