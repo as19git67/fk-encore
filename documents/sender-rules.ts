@@ -44,8 +44,29 @@ export function normalizeForMatch(value: string | null | undefined): string {
   return (value ?? "").toLowerCase().replace(/[^a-z0-9äöüß]/g, "");
 }
 
+/**
+ * Document-type keywords that mark an employer document as a *Meldung zur
+ * Sozialversicherung* (DEÜV annual SV notification), as opposed to a monthly
+ * payslip. Written as space-less fragments because `normalizeForMatch` strips
+ * whitespace. Deliberately excludes the bare word "sozialversicherung", which
+ * also appears on ordinary payslips (the SV-deduction line) and would pull
+ * those into the wrong category.
+ */
+const SV_MELDUNG_KEYWORDS: string[] = [
+  "entgeltnachweis",
+  "sozialversicherungsnachweis",
+  "sozialversicherungsmeldung",
+  "meldungzursozialversicherung",
+  "meldebescheinigungzursozialversicherung",
+  "beitragsnachweis",
+  "deüv",
+];
+
 export const SENDER_RULES: readonly SenderRule[] = [
-  // ── Employer: payslips vs. a forwarded income-tax assessment ────────────
+  // ── Employer: payslips vs. forwarded tax assessment vs. SV notification ──
+  // Order matters (first match wins): the most specific document types come
+  // first, the unguarded payslip fallback last.
+  //
   // Specific case first: the employer occasionally forwards an
   // Einkommensteuerbescheid — that is a tax assessment, not a payslip.
   {
@@ -55,20 +76,26 @@ export const SENDER_RULES: readonly SenderRule[] = [
     category: "behoerden-steuerbescheid",
   },
   {
-    note: "Arbeitgeber → Entgelt-/Gehaltsabrechnung, Sozialversicherungsnachweis",
+    note: "Arbeitgeber → jährliche Meldung/Entgeltnachweis zur Sozialversicherung (DEÜV)",
+    senders: ["opentext", "ixos"],
+    requireAny: SV_MELDUNG_KEYWORDS,
+    category: "finanzen-sozialversicherung",
+  },
+  {
+    note: "Arbeitgeber → monatliche Entgelt-/Gehaltsabrechnung (Fallback)",
     senders: ["opentext", "ixos"],
     category: "finanzen-gehalt",
   },
   {
-    note: "Kirchlicher Arbeitgeber (Erzb. Ordinariat / St. Ulrich) → SV-/Entgeltnachweis",
+    note: "Kirchlicher Arbeitgeber (Erzb. Ordinariat / St. Ulrich) → Meldung zur Sozialversicherung",
     senders: ["ordinariat", "stulrich"],
-    requireAny: [
-      "sozialversicherung",
-      "entgeltnachweis",
-      "entgeltabrechnung",
-      "verdienstbescheinigung",
-      "beitragsnachweis",
-    ],
+    requireAny: SV_MELDUNG_KEYWORDS,
+    category: "finanzen-sozialversicherung",
+  },
+  {
+    note: "Kirchlicher Arbeitgeber (Erzb. Ordinariat / St. Ulrich) → Entgelt-/Gehaltsabrechnung",
+    senders: ["ordinariat", "stulrich"],
+    requireAny: ["entgeltabrechnung", "gehaltsabrechnung", "lohnabrechnung", "verdienstbescheinigung"],
     category: "finanzen-gehalt",
   },
 

@@ -24,8 +24,25 @@ describe("matchSenderRule", () => {
   it("routes the employer to payslips regardless of OCR spacing/case", () => {
     expect(matchSenderRule({ sender: "Open Text Software GmbH", title: "Entgeltabrechnung 04/2024" }))
       .toBe("finanzen-gehalt");
-    expect(matchSenderRule({ sender: "IXOS", title: "Sozialversicherungsnachweis" }))
+    expect(matchSenderRule({ sender: "IXOS", title: "Gehaltsabrechnung 12/2019" }))
       .toBe("finanzen-gehalt");
+    // The unguarded employer fallback still catches plain payslips.
+    expect(matchSenderRule({ sender: "Open Text Software GmbH", title: "Lohnabrechnung" }))
+      .toBe("finanzen-gehalt");
+  });
+
+  it("splits employer SV notifications from monthly payslips", () => {
+    // Annual DEÜV social-insurance notice → its own category, not payslips.
+    expect(
+      matchSenderRule({ sender: "IXOS", title: "Sozialversicherungsnachweis" }),
+    ).toBe("finanzen-sozialversicherung");
+    expect(
+      matchSenderRule({ sender: "Open Text Software GmbH", title: "Meldung zur Sozialversicherung" }),
+    ).toBe("finanzen-sozialversicherung");
+    // The monthly payslip from the same employer stays in finanzen-gehalt.
+    expect(
+      matchSenderRule({ sender: "Open Text Software GmbH", title: "Entgeltabrechnung 03/2024" }),
+    ).toBe("finanzen-gehalt");
   });
 
   it("disambiguates a forwarded tax assessment from the same employer (rule order)", () => {
@@ -61,6 +78,13 @@ describe("matchSenderRule", () => {
       matchSenderRule({
         sender: "Erzbischöfliches Ordinariat München",
         title: "Entgeltnachweis zur Sozialversicherung",
+      }),
+    ).toBe("finanzen-sozialversicherung");
+    // …but a monthly payslip from the same church employer stays gehalt.
+    expect(
+      matchSenderRule({
+        sender: "Pfarramt St. Ulrich",
+        title: "Entgeltabrechnung 06/2023",
       }),
     ).toBe("finanzen-gehalt");
     expect(matchSenderRule({ sender: "MLP Banking AG", title: "Darlehenskontoauszug" })).toBe(
