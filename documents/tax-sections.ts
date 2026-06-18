@@ -45,7 +45,7 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     slug: "anlage-v",
     group: "einkuenfte",
     name: "Anlage V — Vermietung & Verpachtung",
-    hint: "Mieteinnahmen-Nachweise, Mietverträge, Nebenkostenabrechnungen an Mieter; nicht: Belege zu Werbungskosten am Mietobjekt (diese gehören zu werbungskosten-v).",
+    hint: "Mieteinnahmen-Nachweise, Mietverträge, Nebenkostenabrechnungen an Mieter; nicht: Belege zu Werbungskosten am Mietobjekt (diese gehören zu werbungskosten-v); nicht: Verpachtung eines land-/forstwirtschaftlichen Betriebs oder land-/forstwirtschaftlicher Flächen (→ anlage-l).",
   },
   {
     slug: "anlage-r",
@@ -78,10 +78,16 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     hint: "Einkünfte aus freiberuflicher/selbstständiger Tätigkeit: ausgestellte Honorarrechnungen, Gewinnermittlung von Ärzten, Anwälten, Künstlern, IT-Freelancern.",
   },
   {
+    slug: "anlage-l",
+    group: "einkuenfte",
+    name: "Anlage L — Land- und Forstwirtschaft",
+    hint: "Einkünfte aus Land- und Forstwirtschaft (§13 EStG): Pachteinnahmen und Pachtverträge für verpachtete land-/forstwirtschaftliche Flächen oder Betriebe, Gewinnermittlung/EÜR der Land- und Forstwirtschaft, zugehörige Betriebsausgabenbelege; nicht: Vermietung/Verpachtung von Wohn-/Gewerbeimmobilien (→ anlage-v), nicht: Gewerbebetrieb (→ anlage-g).",
+  },
+  {
     slug: "anlage-euer",
     group: "einkuenfte",
     name: "Anlage EÜR",
-    hint: "Formular Einnahmen-Überschuss-Rechnung (EÜR) zur Gewinnermittlung; gehört als Anhang zu Anlage G oder Anlage S.",
+    hint: "Formular Einnahmen-Überschuss-Rechnung (EÜR) zur Gewinnermittlung; gehört als Anhang zu Anlage G, Anlage S oder Anlage L.",
   },
   {
     slug: "anlage-so",
