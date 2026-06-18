@@ -16,7 +16,6 @@ import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
 import { useAuthStore } from '../stores/auth'
 import { thumbnailImageStyle, faceBoxStyle, thumbnailSrcWidth } from '../utils/faceBbox'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
 export interface FaceItem {
   id: number
   bbox?: FaceBBox | null
@@ -50,9 +49,6 @@ const emit = defineEmits<{
   'restore': [id: number]
 }>()
 
-// ── Layout: column count + row height ─────────────────────────────────────────
-// Keep the constants aligned with VirtualGallery / VirtualAlbumGrid so the
-// person detail grid uses the same breakpoints and visual density.
 const TARGET_CELL_MIN_PX = 140
 const GAP_PX = 4
 
@@ -95,7 +91,6 @@ onBeforeUnmount(() => {
   }
 })
 
-// ── Virtualizer over rows ─────────────────────────────────────────────────────
 const rowCount = computed(() => Math.ceil(props.items.length / Math.max(1, cols.value)))
 
 const virtualizer = useVirtualizer(
@@ -110,11 +105,6 @@ const virtualizer = useVirtualizer(
 const virtualRows = computed(() => virtualizer.value.getVirtualItems() as VirtualRow[])
 const totalSize = computed(() => virtualizer.value.getTotalSize())
 
-// The Virtualizer updates on every scroll tick. If we render those rows
-// immediately, HeicImage mounts for every intermediate row during a long fling
-// and starts thumbnail/render requests that the user never actually sees. Keep
-// the virtual scroll geometry instant, but debounce which rows are committed to
-// the DOM so only the settled viewport fetches thumbnails.
 const renderedRows = ref<VirtualRow[]>([])
 const RENDER_ROWS_DEBOUNCE_MS = 150
 let renderRowsTimer: ReturnType<typeof setTimeout> | null = null
@@ -143,16 +133,17 @@ function rowItems(rowIndex: number): { item: FacePhotoItem; idx: number }[] {
   return props.items.slice(start, end).map((item, i) => ({ item, idx: start + i }))
 }
 
-// ── Visible-row curation hydration ────────────────────────────────────────────
-// /persons/:id embeds only a light photo object for each face. Hydrate the rows
-// that actually render with the same details endpoint used elsewhere, so
-// favorite/hidden badges reflect the real curation state without fetching every
-// person photo up front.
 const hydratedCuration = ref<Map<number, CurationStatus>>(new Map())
 const requestedCurationIds = new Set<number>()
 
 function effectiveStatus(item: FacePhotoItem): CurationStatus {
   return item.photo.curation_status ?? hydratedCuration.value.get(item.photo.id) ?? 'visible'
+}
+
+function applyHydratedStatus(id: number, status: CurationStatus) {
+  for (const item of props.items) {
+    if (item.photo.id === id) item.photo.curation_status = status
+  }
 }
 
 async function hydrateRenderedCuration(rows: VirtualRow[]) {
@@ -169,7 +160,10 @@ async function hydrateRenderedCuration(rows: VirtualRow[]) {
   try {
     const res = await getPhotoDetailsBatch(ids)
     const next = new Map(hydratedCuration.value)
-    for (const photo of res.photos) next.set(photo.id, photo.curation_status)
+    for (const photo of res.photos) {
+      next.set(photo.id, photo.curation_status)
+      applyHydratedStatus(photo.id, photo.curation_status)
+    }
     hydratedCuration.value = next
   } catch {
     for (const id of ids) requestedCurationIds.delete(id)
@@ -183,7 +177,6 @@ watch(() => props.items, () => {
   hydratedCuration.value = new Map()
 })
 
-// ── Scroll to selected ───────────────────────────────────────────────────────
 function scrollToItemIndex(idx: number, align: 'center' | 'auto' = 'auto') {
   if (idx < 0 || idx >= props.items.length || cols.value <= 0) return
   virtualizer.value.scrollToIndex(Math.floor(idx / cols.value), { align })
@@ -192,13 +185,10 @@ function scrollToItemIndex(idx: number, align: 'center' | 'auto' = 'auto') {
 watch(() => props.selectedIndex, (idx) => scrollToItemIndex(idx, 'auto'))
 
 watch(() => [props.items, cols.value] as const, () => {
-  // Items changed (filter or reload), or a resize changed the row mapping:
-  // keep the selected photo visible in the virtualized viewport.
   scrollToItemIndex(props.selectedIndex, 'auto')
   commitRenderedRows(virtualRows.value)
 })
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
 function thumbnailSrc(item: FacePhotoItem): string {
   return photoThumbnailSrc({
     photoId: item.photo.id,
@@ -392,7 +382,6 @@ function thumbnailSrc(item: FacePhotoItem): string {
 .favorite-badge { color: var(--p-yellow-400, #facc15); }
 .hidden-badge { color: rgba(255, 255, 255, 0.85); }
 
-/* ── Face bbox overlay ───────────────────────────────────────────────────── */
 .face-box {
   position: absolute;
   border: 2px solid var(--p-yellow-500, #eab308);
