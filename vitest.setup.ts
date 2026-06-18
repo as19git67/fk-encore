@@ -59,8 +59,12 @@ vi.mock("encore.dev/api", () => {
     static unknown(msg: string) { return new APIError("unknown", msg); }
   }
 
+  const api: any = (options: any, handler: any) => handler;
+  // api.raw is a top-level helper on `api` in the real runtime — mock
+  // it so raw-endpoint modules can be imported under vitest.
+  api.raw = (options: any, handler: any) => handler;
   return {
-    api: (options: any, handler: any) => handler,
+    api,
     APIError,
     Gateway: class Gateway {},
   };

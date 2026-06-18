@@ -79,12 +79,18 @@ async function grantAcl(accountId: number, userId: number, level: "read" | "writ
   });
 }
 
-async function insertBalance(accountId: number, balance: string, asOf: string) {
+async function insertBalance(
+  accountId: number,
+  balance: string,
+  asOf: string,
+  currency: string = "EUR",
+) {
   await db.insert(financeAccountBalance).values({
     account_id: accountId,
     as_of: asOf,
     balance,
     source: "manual",
+    currency_code: currency,
   });
 }
 

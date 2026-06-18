@@ -38,6 +38,8 @@ import {
 } from "../db/schema";
 import { runFetchAccounts, runSynchronize, type FintsClientSurface } from "./fints-client";
 import { persistFetchResult } from "./statement-persist";
+import { runPaypalSync } from "./statements";
+import { cleanupExpiredPaypalOauthStates } from "./paypal-oauth";
 import { cleanupExpiredTanSessions } from "./tan-sessions";
 import { sendToUser, type PushPayload } from "../push/push.service";
 import type { FinanceSyncSlot } from "../db/schema";
@@ -91,16 +93,41 @@ export const syncStatements = api(
     let errored = 0;
 
     for (const bc of bankcontacts) {
-      // PayPal-Routing folgt in Etappe 6 von Issue #427. Solange das
-      // nicht implementiert ist, überspringt die Cron paypal-Zugänge,
-      // damit der FinTS-Client nicht mit nullable blz/login/server_url
-      // aufgerufen wird.
-      if (bc.access_type !== "fints") continue;
       const slots = Array.isArray(bc.sync_times)
         ? (bc.sync_times as FinanceSyncSlot[])
         : [];
       if (!isAnySlotDue(now, slots)) continue;
       due++;
+
+      // PayPal contacts run a separate connector that has no TAN
+      // flow — branch out before we touch fints-client.ts.
+      if (bc.access_type === "paypal") {
+        try {
+          const result = await runPaypalSync(bc.id);
+          if (result.state === "idle") {
+            ok++;
+            console.log(
+              `[finance.cron] paypal bankcontact=${bc.id} (${bc.name}) → ok: ` +
+                `tx=${result.transactions_inserted ?? 0} ` +
+                `balances=${result.balances_written ?? 0}`,
+            );
+          } else {
+            errored++;
+            console.log(
+              `[finance.cron] paypal bankcontact=${bc.id} (${bc.name}) → ` +
+                `error: ${result.errorMessage ?? "unknown"}`,
+            );
+          }
+        } catch (err) {
+          errored++;
+          console.error(
+            `[finance.cron] paypal bankcontact=${bc.id} (${bc.name}) → ` +
+              `unexpected error:`,
+            err,
+          );
+        }
+        continue;
+      }
 
       try {
         const result = await runSynchronize(bc.id);
@@ -416,9 +443,12 @@ schedule({
 
 schedule({
   name: "finance-tan-cleanup",
-  description: "Delete expired TAN sessions",
+  description: "Delete expired TAN sessions and PayPal OAuth state rows",
   service: "finance",
   scheduleLabel: "every 1h",
   nextFire: everyMs(60 * 60_000),
-  run: () => cleanupExpiredTanSessions(),
+  run: async () => {
+    await cleanupExpiredTanSessions();
+    await cleanupExpiredPaypalOauthStates();
+  },
 });

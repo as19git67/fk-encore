@@ -38,7 +38,14 @@ import {
   runSynchronize,
   type FintsClientSurface,
 } from "./fints-client";
-import { persistFetchResult } from "./statement-persist";
+import {
+  fetchPaypalBalances,
+  fetchPaypalTransactions,
+} from "./paypal-client";
+import {
+  persistFetchResult,
+  persistPaypalSnapshot,
+} from "./statement-persist";
 
 console.log("[boot] finance/statements.ts: all imports resolved");
 
@@ -141,7 +148,11 @@ export const triggerSync = api(
       message: "Too many manual syncs for this bank contact.",
     });
 
-    await assertBankcontactExists(p.bankcontactId);
+    const row = await loadBankcontactRow(p.bankcontactId);
+
+    if (row.access_type === "paypal") {
+      return await runPaypalSync(p.bankcontactId);
+    }
 
     const result = await runSynchronize(p.bankcontactId);
 
@@ -394,11 +405,85 @@ export async function fetchAndPersist(
 
 // -----------------------------------------------------------------------
 
-async function assertBankcontactExists(id: number): Promise<void> {
+async function loadBankcontactRow(
+  id: number,
+): Promise<typeof financeBankcontact.$inferSelect> {
   const [row] = await db
-    .select({ id: financeBankcontact.id })
+    .select()
     .from(financeBankcontact)
     .where(eq(financeBankcontact.id, id))
     .limit(1);
   if (!row) throw APIError.notFound(`bankcontact ${id} not found`);
+  return row;
+}
+
+/**
+ * Default PayPal reporting window. The reporting API enforces a 31-day
+ * maximum span per call; we use 30 to give a one-day safety margin and
+ * to cover the typical ~3h reporting lag on the latest events.
+ */
+const PAYPAL_SYNC_WINDOW_MS = 30 * 24 * 60 * 60_000;
+
+/**
+ * PayPal sync — no TAN flow, fetch balances + the last 30 days of
+ * transactions in one go and persist. Per-account dedupe is handled in
+ * statement-persist.persistPaypalSnapshot.
+ */
+export async function runPaypalSync(
+  bankcontactId: number,
+): Promise<SyncApiResponse> {
+  const now = new Date();
+  const startDate = new Date(now.getTime() - PAYPAL_SYNC_WINDOW_MS);
+
+  try {
+    const [balances, transactions] = await Promise.all([
+      fetchPaypalBalances(bankcontactId),
+      fetchPaypalTransactions(bankcontactId, startDate, now),
+    ]);
+    const stats = await persistPaypalSnapshot(bankcontactId, {
+      balances,
+      transactions,
+    });
+
+    await db
+      .update(financeBankcontact)
+      .set({
+        last_sync_at: now.toISOString(),
+        last_sync_status: stats.accounts_unknown > 0 ? "partial" : "ok",
+      })
+      .where(eq(financeBankcontact.id, bankcontactId));
+
+    return {
+      state: "idle",
+      accounts_seen: stats.accounts_seen,
+      accounts_matched: stats.accounts_matched,
+      accounts_closed: stats.accounts_closed,
+      accounts_unknown: stats.accounts_unknown,
+      unknown_accounts: stats.unknown.map((u) => ({
+        accountNumber: u.accountNumber,
+        iban: u.iban,
+        accountKind: u.accountKind,
+        currency: u.currency,
+        label: u.label,
+      })),
+      transactions_inserted: stats.transactions_inserted,
+      balances_written: stats.balances_written,
+      partial: stats.accounts_unknown > 0 || undefined,
+      errors: stats.errors.length > 0 ? stats.errors : undefined,
+    };
+  } catch (err) {
+    const message = (err as Error).message ?? String(err);
+    await db
+      .update(financeBankcontact)
+      .set({
+        last_sync_at: now.toISOString(),
+        last_sync_status: `error:paypal`,
+      })
+      .where(eq(financeBankcontact.id, bankcontactId));
+    return {
+      state: "error",
+      errorCode: "paypal",
+      errorMessage: message,
+    };
+  }
 }

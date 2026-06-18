@@ -403,19 +403,30 @@ async function loadAccessibleAccounts(
 
   const accountIds = rows.map((r) => r.id);
 
-  // Step 2 — latest balance per account.
+  // Step 2 — latest balance per account, filtered to the account's
+  // home currency. With multi-currency PayPal wallets (Issue #427)
+  // there can be several balance rows per as_of (one per held
+  // currency); the overview UI shows the account's primary balance
+  // only — secondary currencies surface in a dedicated drill-down
+  // view once Etappe 7 lands.
+  const accountCurrencyById = new Map(
+    rows.map((r) => [r.id, r.currency_code as string]),
+  );
   const latestBalances = new Map<number, { balance: string; as_of: string }>();
   const balanceRows = await db
     .select({
       account_id: financeAccountBalance.account_id,
       balance: financeAccountBalance.balance,
       as_of: financeAccountBalance.as_of,
+      currency_code: financeAccountBalance.currency_code,
     })
     .from(financeAccountBalance)
     .where(inArray(financeAccountBalance.account_id, accountIds))
     .orderBy(desc(financeAccountBalance.as_of));
   for (const row of balanceRows) {
     if (latestBalances.has(row.account_id)) continue;
+    const homeCurrency = accountCurrencyById.get(row.account_id);
+    if (homeCurrency && row.currency_code !== homeCurrency) continue;
     latestBalances.set(row.account_id, {
       balance: row.balance,
       as_of: row.as_of,

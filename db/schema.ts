@@ -1490,9 +1490,48 @@ export const financeAccountBalance = pgTable(
       .references(() => financeAccount.id, { onDelete: "cascade" }),
     as_of: timestamp("as_of", { mode: "string", withTimezone: true }).notNull(),
     balance: numeric("balance", { precision: 14, scale: 2 }).notNull(),
-    source: text("source").notNull(), // "fints" | "manual" | "import"
+    source: text("source").notNull(), // "fints" | "manual" | "import" | "paypal"
+    // Issue #427 (Etappe 6): PayPal-Wallets halten Salden in mehreren
+    // Währungen gleichzeitig — der Primärschlüssel enthält daher die
+    // Währung, sodass z. B. EUR- und USD-Stände zum selben Zeitstempel
+    // koexistieren können. Für FinTS-Konten gleich der Konto-Währung.
+    currency_code: text("currency_code")
+      .notNull()
+      .references(() => financeCurrency.code, { onDelete: "restrict" }),
   },
-  (table) => [primaryKey({ columns: [table.account_id, table.as_of] })]
+  (table) => [
+    primaryKey({
+      columns: [table.account_id, table.as_of, table.currency_code],
+    }),
+  ]
+);
+
+// PayPal OAuth state for the Authorization-Code flow. Each /paypal/start
+// call mints a random token, persists it here together with the
+// bankcontact / user that started the flow, and looks it up on the
+// /paypal/callback so a forged callback can't connect somebody else's
+// bankcontact. Cleaned up by the daily TAN-cleanup job once `expires_at`
+// is in the past.
+export const financePaypalOauthState = pgTable(
+  "finance_paypal_oauth_state",
+  {
+    state: text("state").primaryKey(),
+    bankcontact_id: integer("bankcontact_id")
+      .notNull()
+      .references(() => financeBankcontact.id, { onDelete: "cascade" }),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    environment: text("environment").notNull(), // "sandbox" | "live"
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    expires_at: timestamp("expires_at", { mode: "string", withTimezone: true })
+      .notNull(),
+  },
+  (table) => [
+    index("idx_finance_paypal_oauth_state_expires").on(table.expires_at),
+  ]
 );
 
 // ---------- Depot Holdings ----------

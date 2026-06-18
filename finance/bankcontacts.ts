@@ -45,14 +45,21 @@ interface TanMethodCacheEntry {
 interface BankcontactView {
   id: number;
   name: string;
-  // FinTS-Pflichtfelder. Mit Issue #427 (PayPal) nullable, weil PayPal-
-  // Bankkontakte diese Felder nicht setzen. Bestehende FinTS-Zeilen
-  // liefern unverändert Strings — die Discriminator-Validierung greift
-  // erst in Etappe 5 (PayPal-OAuth-Endpoints).
+  /**
+   * Discriminator. "fints" rows use blz/login/server_url + a stored
+   * PIN/TAN flow; "paypal" rows use the OAuth tokens in
+   * credentials_encrypted + the paypal_* columns below. The frontend
+   * switches the form layout on this field.
+   */
+  access_type: "fints" | "paypal";
+  // FinTS-Felder. Bei access_type="paypal" alle null.
   blz: string | null;
   login: string | null;
   server_url: string | null;
   tan_method: string | null;
+  // PayPal-Felder. Bei access_type="fints" alle null.
+  paypal_environment: "sandbox" | "live" | null;
+  paypal_client_id: string | null;
   credentials_set: boolean;
   last_sync_at: string | null;
   last_sync_status: string | null;
@@ -71,13 +78,23 @@ interface BankcontactView {
 }
 
 function toView(row: typeof financeBankcontact.$inferSelect): BankcontactView {
+  const accessType = (row.access_type === "paypal" ? "paypal" : "fints") as
+    | "fints"
+    | "paypal";
+  const paypalEnv =
+    row.paypal_environment === "sandbox" || row.paypal_environment === "live"
+      ? row.paypal_environment
+      : null;
   return {
     id: row.id,
     name: row.name,
+    access_type: accessType,
     blz: row.blz,
     login: row.login,
     server_url: row.server_url,
     tan_method: row.tan_method,
+    paypal_environment: paypalEnv,
+    paypal_client_id: row.paypal_client_id,
     credentials_set: !!row.credentials_encrypted,
     last_sync_at: row.last_sync_at,
     last_sync_status: row.last_sync_status,
@@ -133,10 +150,15 @@ export const getBankcontact = api(
 
 interface CreateParams {
   name: string;
-  blz: string;
-  login: string;
-  server_url: string;
+  /** Defaults to "fints" when omitted, for backwards compatibility. */
+  access_type?: "fints" | "paypal";
+  // FinTS-only fields. Required when access_type="fints".
+  blz?: string;
+  login?: string;
+  server_url?: string;
   tan_method?: string;
+  // PayPal-only fields. Required when access_type="paypal".
+  paypal_environment?: "sandbox" | "live";
 }
 
 export const createBankcontact = api(
@@ -149,8 +171,27 @@ export const createBankcontact = api(
   async (p: CreateParams): Promise<BankcontactView> => {
     const auth = getAuthData()!;
     requirePermission(auth, "finance.accounts.manage");
+    const accessType = p.access_type ?? "fints";
+    assertRequiredStrings({ name: p.name });
+
+    if (accessType === "paypal") {
+      if (p.paypal_environment !== "sandbox" && p.paypal_environment !== "live") {
+        throw APIError.invalidArgument(
+          'paypal_environment must be "sandbox" or "live"',
+        );
+      }
+      const [row] = await db
+        .insert(financeBankcontact)
+        .values({
+          name: p.name.trim(),
+          access_type: "paypal",
+          paypal_environment: p.paypal_environment,
+        })
+        .returning();
+      return toView(row);
+    }
+
     assertRequiredStrings({
-      name: p.name,
       blz: p.blz,
       login: p.login,
       server_url: p.server_url,
@@ -159,9 +200,10 @@ export const createBankcontact = api(
       .insert(financeBankcontact)
       .values({
         name: p.name.trim(),
-        blz: p.blz.trim(),
-        login: p.login.trim(),
-        server_url: p.server_url.trim(),
+        access_type: "fints",
+        blz: p.blz!.trim(),
+        login: p.login!.trim(),
+        server_url: p.server_url!.trim(),
         tan_method: p.tan_method?.trim() || null,
       })
       .returning();
@@ -178,6 +220,7 @@ interface UpdateParams {
   login?: string;
   server_url?: string;
   tan_method?: string | null;
+  paypal_environment?: "sandbox" | "live";
 }
 
 export const updateBankcontact = api(
@@ -190,15 +233,39 @@ export const updateBankcontact = api(
   async (p: UpdateParams): Promise<BankcontactView> => {
     const auth = getAuthData()!;
     requirePermission(auth, "finance.accounts.manage");
-    await loadBankcontact(p.id);
+    const existing = await loadBankcontact(p.id);
 
     const patch: Partial<typeof financeBankcontact.$inferInsert> = {};
     if (p.name !== undefined) patch.name = p.name.trim();
-    if (p.blz !== undefined) patch.blz = p.blz.trim();
-    if (p.login !== undefined) patch.login = p.login.trim();
-    if (p.server_url !== undefined) patch.server_url = p.server_url.trim();
-    if (p.tan_method !== undefined) {
-      patch.tan_method = p.tan_method === null ? null : p.tan_method.trim() || null;
+    if (existing.access_type === "fints") {
+      // Only the FinTS Stammdaten apply to a FinTS bankcontact —
+      // accept paypal fields with a 400 rather than silently storing
+      // them on the wrong row.
+      if (p.paypal_environment !== undefined) {
+        throw APIError.invalidArgument(
+          "paypal_environment is only valid for access_type=paypal",
+        );
+      }
+      if (p.blz !== undefined) patch.blz = p.blz.trim();
+      if (p.login !== undefined) patch.login = p.login.trim();
+      if (p.server_url !== undefined) patch.server_url = p.server_url.trim();
+      if (p.tan_method !== undefined) {
+        patch.tan_method = p.tan_method === null ? null : p.tan_method.trim() || null;
+      }
+    } else {
+      if (
+        p.blz !== undefined
+        || p.login !== undefined
+        || p.server_url !== undefined
+        || p.tan_method !== undefined
+      ) {
+        throw APIError.invalidArgument(
+          "FinTS fields (blz/login/server_url/tan_method) are not valid for access_type=paypal",
+        );
+      }
+      if (p.paypal_environment !== undefined) {
+        patch.paypal_environment = p.paypal_environment;
+      }
     }
     if (Object.keys(patch).length === 0) {
       throw APIError.invalidArgument("no fields to update");
@@ -318,7 +385,12 @@ export const setBankcontactCredentials = api(
     if (typeof p.pin !== "string" || p.pin.length === 0) {
       throw APIError.invalidArgument("pin must be a non-empty string");
     }
-    await loadBankcontact(p.id);
+    const existing = await loadBankcontact(p.id);
+    if (existing.access_type !== "fints") {
+      throw APIError.failedPrecondition(
+        "this endpoint is for FinTS only — connect a PayPal bankcontact via /paypal/start",
+      );
+    }
 
     const blob = encryptCredentials(p.pin);
     await db
@@ -375,6 +447,11 @@ export const probeBankcontactTanMethods = api(
     });
 
     const row = await loadBankcontact(p.id);
+    if (row.access_type !== "fints") {
+      throw APIError.failedPrecondition(
+        "TAN methods are a FinTS-only concept; this bankcontact is access_type=paypal",
+      );
+    }
     if (!row.credentials_encrypted) {
       throw APIError.failedPrecondition(
         "set credentials via POST /finance/bankcontacts/:id/credentials first",

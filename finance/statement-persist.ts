@@ -41,6 +41,7 @@ import {
 import type { FetchResult, FintsHoldingData, FintsTransactionData } from "./types";
 import { enqueueTagSuggestion } from "./tag-queue";
 import { triggerTagWorker } from "./tag-worker";
+import type { PaypalBalance, PaypalTransaction } from "./paypal-client";
 
 console.log("[boot] finance/statement-persist.ts: all imports resolved");
 
@@ -256,11 +257,13 @@ export async function persistFetchResult(
             as_of: nowIso,
             balance: snapshot.balance.amount,
             source: "fints",
+            currency_code: snapshot.balance.currency.toUpperCase(),
           })
           .onConflictDoNothing({
             target: [
               financeAccountBalance.account_id,
               financeAccountBalance.as_of,
+              financeAccountBalance.currency_code,
             ],
           });
         stats.balances_written++;
@@ -324,4 +327,190 @@ function computeDedupeHash(tx: FintsTransactionData): string {
     tx.bankRef ?? "",
   ].join("|");
   return createHash("sha256").update(canonical).digest("hex");
+}
+
+// ---------------------------------------------------------------------------
+// PayPal persistence (Issue #427, Etappe 6).
+//
+// PayPal returns the *wallet* state: balances per held currency and a
+// flat list of transactions. We match the wallet to its single
+// finance_account via `bankcontact_id` (the OAuth callback ensures one
+// such row exists on first connect) and treat the run like a per-
+// account FinTS persist:
+//
+//   - one finance_transaction row per PayPal transaction, dedupe_hash
+//     = PayPal's `transaction_id` (stable, opaque, globally unique).
+//   - one finance_account_balance row per currency, source="paypal".
+// ---------------------------------------------------------------------------
+
+export interface PaypalSnapshot {
+  balances: PaypalBalance[];
+  transactions: PaypalTransaction[];
+}
+
+/**
+ * Persists a PayPal sync result for a single bankcontact. Returns the
+ * same PersistStats shape as FinTS so the API caller's existing
+ * response mapping continues to work.
+ */
+export async function persistPaypalSnapshot(
+  bankcontactId: number,
+  snapshot: PaypalSnapshot,
+): Promise<PersistStats> {
+  const stats: PersistStats = {
+    accounts_seen: 1,
+    accounts_matched: 0,
+    accounts_closed: 0,
+    accounts_unknown: 0,
+    transactions_inserted: 0,
+    transactions_skipped_duplicate: 0,
+    balances_written: 0,
+    holdings_written: 0,
+    unknown: [],
+    errors: [],
+  };
+
+  const [account] = await db
+    .select({
+      id: financeAccount.id,
+      closed_at: financeAccount.closed_at,
+      currency_code: financeAccount.currency_code,
+    })
+    .from(financeAccount)
+    .where(eq(financeAccount.bankcontact_id, bankcontactId))
+    .limit(1);
+
+  if (!account) {
+    stats.accounts_unknown = 1;
+    const primary = snapshot.balances.find((b) => b.primary) ?? snapshot.balances[0];
+    stats.unknown.push({
+      accountNumber: "",
+      iban: null,
+      accountKind: "giro",
+      currency: primary?.currency ?? "EUR",
+      label: "PayPal",
+      balance: primary
+        ? { asOf: primary.asOf, amount: primary.total, currency: primary.currency }
+        : null,
+      errors: [],
+    });
+    return stats;
+  }
+  if (account.closed_at) {
+    stats.accounts_closed = 1;
+    stats.errors.push("PayPal wallet: skipped, account is closed");
+    return stats;
+  }
+  stats.accounts_matched = 1;
+  const accountId = account.id;
+
+  // ---- Insert transactions ----
+  const freshlyInsertedIds: number[] = [];
+  for (const tx of snapshot.transactions) {
+    try {
+      const inserted = await db
+        .insert(financeTransaction)
+        .values({
+          account_id: accountId,
+          booking_date: dateOnly(tx.bookingDate),
+          value_date: tx.valueDate ? dateOnly(tx.valueDate) : null,
+          amount: normalizeAmount(tx.amount),
+          currency_code: tx.currency.toUpperCase(),
+          purpose: tx.purpose,
+          counterparty: tx.counterparty,
+          counterparty_iban: null,
+          counterparty_bic: null,
+          counterparty_bank_id: null,
+          end_to_end_ref: null,
+          mandate_ref: null,
+          creditor_id: null,
+          originator_name: null,
+          recipient_name: null,
+          funds_code: null,
+          transaction_type: tx.eventCode,
+          transaction_code: null,
+          entry_text: null,
+          prima_nota_no: null,
+          bank_ref: tx.transactionId,
+          dedupe_hash: tx.transactionId,
+          raw: tx.raw,
+        })
+        .onConflictDoNothing({
+          target: [
+            financeTransaction.account_id,
+            financeTransaction.dedupe_hash,
+          ],
+        })
+        .returning({ id: financeTransaction.id });
+      if (inserted.length > 0) {
+        stats.transactions_inserted++;
+        freshlyInsertedIds.push(inserted[0].id);
+      } else {
+        stats.transactions_skipped_duplicate++;
+      }
+    } catch (err) {
+      stats.errors.push(
+        `paypal tx ${tx.transactionId}: insert failed: ` +
+          ((err as Error).message ?? String(err)),
+      );
+    }
+  }
+
+  // Same fire-and-forget tag suggestion as FinTS.
+  try {
+    for (const id of freshlyInsertedIds) {
+      await enqueueTagSuggestion(id);
+    }
+    if (freshlyInsertedIds.length > 0) triggerTagWorker();
+  } catch (err) {
+    console.error(`[finance] failed to enqueue tag suggestions:`, (err as Error).message);
+  }
+
+  // ---- Write balances ----
+  // PayPal can return several currencies under one as_of. We persist
+  // each as its own row keyed by (account_id, as_of, currency_code).
+  const nowIso = new Date().toISOString();
+  for (const b of snapshot.balances) {
+    try {
+      await db
+        .insert(financeAccountBalance)
+        .values({
+          account_id: accountId,
+          as_of: nowIso,
+          balance: normalizeAmount(b.total),
+          source: "paypal",
+          currency_code: b.currency.toUpperCase(),
+        })
+        .onConflictDoNothing({
+          target: [
+            financeAccountBalance.account_id,
+            financeAccountBalance.as_of,
+            financeAccountBalance.currency_code,
+          ],
+        });
+      stats.balances_written++;
+    } catch (err) {
+      stats.errors.push(
+        `paypal balance (${b.currency}): insert failed: ` +
+          ((err as Error).message ?? String(err)),
+      );
+    }
+  }
+
+  return stats;
+}
+
+/** PayPal sends ISO-8601 datetimes; finance_transaction.booking_date
+ *  stores the date part (mode:"string"), so we slice. */
+function dateOnly(iso: string): string {
+  return iso.slice(0, 10);
+}
+
+/** finance_transaction.amount is numeric(12,2) — coerce PayPal's
+ *  free-form decimal strings (which may have any precision) into a
+ *  two-decimal representation so insert doesn't trip over precision. */
+function normalizeAmount(value: string): string {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return value;
+  return n.toFixed(2);
 }

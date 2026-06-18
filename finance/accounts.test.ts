@@ -414,6 +414,7 @@ describe("finance/accounts — delete", () => {
       as_of: new Date().toISOString(),
       balance: "1234.56",
       source: "manual",
+      currency_code: "EUR",
     });
     return { bcId, accountId, txCount: 3 };
   }
