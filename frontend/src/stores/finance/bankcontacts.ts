@@ -101,6 +101,32 @@ export const useBankcontactsStore = defineStore('finance.bankcontacts', () => {
     pendingTan.value = null
   }
 
+  // -------------------------------------------------------------------
+  // PayPal connect/disconnect (Issue #427, Etappe 5)
+  // -------------------------------------------------------------------
+
+  /**
+   * Kicks off the PayPal Authorization-Code flow. The caller is expected
+   * to navigate the user's browser to the returned URL — PayPal redirects
+   * back to /finance/bankcontacts/paypal/callback once the user
+   * authorises, the backend exchanges the code for tokens, and finally
+   * 302s the browser to /finanzen/bankkontakte/:id with the result in
+   * the query string.
+   */
+  async function startPaypalConnect(id: number) {
+    return api.startPaypalConnect(id)
+  }
+
+  async function disconnectPaypal(id: number) {
+    const resp = await api.disconnectPaypal(id)
+    items.value = items.value.map((b) =>
+      b.id === id
+        ? { ...b, credentials_set: false, last_sync_status: 'disconnected' }
+        : b,
+    )
+    return resp
+  }
+
   return {
     items,
     loading,
@@ -114,5 +140,7 @@ export const useBankcontactsStore = defineStore('finance.bankcontacts', () => {
     syncNow,
     submitTan,
     cancelTan,
+    startPaypalConnect,
+    disconnectPaypal,
   }
 })

@@ -6,12 +6,15 @@ import Password from 'primevue/password'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import Select from 'primevue/select'
+import SelectButton from 'primevue/selectbutton'
 import Tag from 'primevue/tag'
 import { useBankcontactsStore } from '../../stores/finance/bankcontacts'
 import { useAccountsStore } from '../../stores/finance/accounts'
 import {
   probeTanMethods,
   type Bankcontact,
+  type BankcontactAccessType,
+  type PaypalEnvironment,
   type TanMethodOption,
   type UnknownBankAccount,
 } from '../../api/finance'
@@ -24,31 +27,52 @@ const accountsStore = useAccountsStore()
 
 const isNew = computed(() => route.name === 'finance-bankcontact-new')
 
+const accessTypeOptions: Array<{ label: string; value: BankcontactAccessType }> = [
+  { label: 'FinTS-Bank', value: 'fints' },
+  { label: 'PayPal', value: 'paypal' },
+]
+const paypalEnvOptions: Array<{ label: string; value: PaypalEnvironment }> = [
+  { label: 'Sandbox', value: 'sandbox' },
+  { label: 'Live', value: 'live' },
+]
+
+const isPaypal = computed(() => form.value.access_type === 'paypal')
+
 const isDirty = computed(() => {
   if (isNew.value) return true
   if (!bc.value) return false
+  if (isPaypal.value) {
+    return form.value.name.trim() !== bc.value.name
+      || form.value.paypal_environment !== (bc.value.paypal_environment ?? 'sandbox')
+  }
   return (
     form.value.name.trim() !== bc.value.name ||
-    form.value.blz.trim() !== bc.value.blz ||
-    form.value.login.trim() !== bc.value.login ||
-    form.value.server_url.trim() !== bc.value.server_url ||
+    form.value.blz.trim() !== (bc.value.blz ?? '') ||
+    form.value.login.trim() !== (bc.value.login ?? '') ||
+    form.value.server_url.trim() !== (bc.value.server_url ?? '') ||
     (form.value.tan_method.trim() || null) !== (bc.value.tan_method ?? null)
   )
 })
 
 const form = ref<{
   name: string
+  access_type: BankcontactAccessType
   blz: string
   login: string
   server_url: string
   tan_method: string
+  paypal_environment: PaypalEnvironment
 }>({
   name: '',
+  access_type: 'fints',
   blz: '',
   login: '',
   server_url: '',
   tan_method: '',
+  paypal_environment: 'sandbox',
 })
+
+const connectingPaypal = ref(false)
 
 const pin = ref('')
 const saving = ref(false)
@@ -142,10 +166,12 @@ onMounted(async () => {
   if (existing) {
     bc.value = existing
     form.value.name = existing.name
-    form.value.blz = existing.blz
-    form.value.login = existing.login
-    form.value.server_url = existing.server_url
+    form.value.access_type = existing.access_type
+    form.value.blz = existing.blz ?? ''
+    form.value.login = existing.login ?? ''
+    form.value.server_url = existing.server_url ?? ''
     form.value.tan_method = existing.tan_method ?? ''
+    form.value.paypal_environment = existing.paypal_environment ?? 'sandbox'
     // Seed the fresh-probe ref from the cache so the picker is
     // populated immediately on page load.
     tanMethodOptions.value = existing.available_tan_methods ?? []
@@ -153,6 +179,18 @@ onMounted(async () => {
   // Populate the accounts store so the "Konten" section can filter
   // by bankcontact_id without each view re-fetching.
   if (accountsStore.items.length === 0) await accountsStore.refresh()
+
+  // PayPal callback redirected the browser back with the outcome in
+  // the query string. Surface it as a normal success/error message.
+  const paypalParam = String(route.query.paypal ?? '')
+  if (paypalParam === 'connected') {
+    syncInfo.value = 'PayPal verbunden — die Konfiguration wurde gespeichert.'
+    void router.replace({ query: {} })
+  } else if (paypalParam === 'error') {
+    const reason = String(route.query.reason ?? 'unbekannt')
+    errorMsg.value = `PayPal-Verbindung fehlgeschlagen: ${reason}`
+    void router.replace({ query: {} })
+  }
 })
 
 async function save() {
@@ -160,28 +198,40 @@ async function save() {
   errorMsg.value = null
   try {
     if (isNew.value) {
-      const created = await store.create({
-        name: form.value.name.trim(),
-        blz: form.value.blz.trim(),
-        login: form.value.login.trim(),
-        server_url: form.value.server_url.trim(),
-        tan_method: form.value.tan_method.trim() || undefined,
-      })
-      if (pin.value) {
+      const created = isPaypal.value
+        ? await store.create({
+            name: form.value.name.trim(),
+            access_type: 'paypal',
+            paypal_environment: form.value.paypal_environment,
+          })
+        : await store.create({
+            name: form.value.name.trim(),
+            access_type: 'fints',
+            blz: form.value.blz.trim(),
+            login: form.value.login.trim(),
+            server_url: form.value.server_url.trim(),
+            tan_method: form.value.tan_method.trim() || undefined,
+          })
+      if (!isPaypal.value && pin.value) {
         await store.setCredentials(created.id, pin.value)
         pin.value = ''
       }
       void router.push({ name: 'finance-bankcontact-detail', params: { id: created.id } })
     } else if (bc.value) {
-      const updated = await store.update(bc.value.id, {
-        name: form.value.name.trim(),
-        blz: form.value.blz.trim(),
-        login: form.value.login.trim(),
-        server_url: form.value.server_url.trim(),
-        tan_method: form.value.tan_method.trim() || null,
-      })
+      const updated = isPaypal.value
+        ? await store.update(bc.value.id, {
+            name: form.value.name.trim(),
+            paypal_environment: form.value.paypal_environment,
+          })
+        : await store.update(bc.value.id, {
+            name: form.value.name.trim(),
+            blz: form.value.blz.trim(),
+            login: form.value.login.trim(),
+            server_url: form.value.server_url.trim(),
+            tan_method: form.value.tan_method.trim() || null,
+          })
       bc.value = updated
-      if (pin.value) {
+      if (!isPaypal.value && pin.value) {
         await store.setCredentials(bc.value.id, pin.value)
         pin.value = ''
         bc.value = { ...bc.value, credentials_set: true }
@@ -191,6 +241,34 @@ async function save() {
     errorMsg.value = err instanceof Error ? err.message : String(err)
   } finally {
     saving.value = false
+  }
+}
+
+async function connectPaypal() {
+  if (!bc.value) return
+  connectingPaypal.value = true
+  errorMsg.value = null
+  try {
+    const resp = await store.startPaypalConnect(bc.value.id)
+    // Hand control over to PayPal; the OAuth callback redirects the
+    // browser back to this view with ?paypal=connected (or =error).
+    window.location.href = resp.auth_url
+  } catch (err) {
+    errorMsg.value = err instanceof Error ? err.message : String(err)
+    connectingPaypal.value = false
+  }
+}
+
+async function disconnectPaypalAction() {
+  if (!bc.value) return
+  if (!confirm('PayPal-Verbindung wirklich trennen? Konten und Buchungen bleiben erhalten.')) return
+  errorMsg.value = null
+  try {
+    await store.disconnectPaypal(bc.value.id)
+    bc.value = { ...bc.value, credentials_set: false, last_sync_status: 'disconnected' }
+    syncInfo.value = 'PayPal-Verbindung getrennt.'
+  } catch (err) {
+    errorMsg.value = err instanceof Error ? err.message : String(err)
   }
 }
 
@@ -409,55 +487,134 @@ async function del() {
 
     <section class="card">
       <h2>Stammdaten</h2>
-      <div class="field"><label>Name</label><InputText v-model="form.name" /></div>
-      <div class="field"><label>BLZ</label><InputText v-model="form.blz" /></div>
-      <div class="field"><label>Login</label><InputText v-model="form.login" /></div>
-      <div class="field"><label>Server-URL</label><InputText v-model="form.server_url" /></div>
-      <div class="field">
-        <label>
-          Passwort / PIN
-          <Tag
-            v-if="!isNew && bc"
-            class="cred-tag"
-            :severity="bc.credentials_set ? 'success' : 'warn'"
-            :value="bc.credentials_set ? 'gesetzt' : 'nicht gesetzt'"
-          />
-        </label>
-        <Password v-model="pin" :feedback="false" toggle-mask :placeholder="(!isNew && bc?.credentials_set) ? '(unverändert lassen)' : 'PIN eingeben'" />
-      </div>
-      <div class="field">
-        <label>TAN-Verfahren</label>
-        <div v-if="!isNew && bc?.credentials_set" class="tan-method-row">
-          <Select
-            v-model="form.tan_method"
-            :options="tanMethodSelectOptions"
-            option-label="label"
-            option-value="id"
-            placeholder="Zuerst 'Abrufen' klicken"
-            :disabled="tanMethodSelectOptions.length === 0"
-            class="tan-method-select"
-            panel-class="tan-method-panel"
-          />
-          <Button
-            label="Abrufen"
-            icon="pi pi-refresh"
-            severity="secondary"
-            :loading="probingMethods"
-            @click="probeMethods"
-          />
-        </div>
-        <InputText
-          v-else
-          v-model="form.tan_method"
-          placeholder="z. B. 942 — nach Credential-Set abrufbar"
+      <div v-if="isNew" class="field">
+        <label>Zugangsart</label>
+        <SelectButton
+          v-model="form.access_type"
+          :options="accessTypeOptions"
+          option-label="label"
+          option-value="value"
         />
-        <small v-if="tanProbeInfo" class="probe-info">{{ tanProbeInfo }}</small>
-        <small v-else-if="!isNew && !bc?.credentials_set" class="probe-info">
-          Passwort setzen, um die Verfahren bei der Bank abzufragen.
-        </small>
       </div>
+      <div class="field"><label>Name</label><InputText v-model="form.name" /></div>
+
+      <!-- FinTS-Felder -->
+      <template v-if="!isPaypal">
+        <div class="field"><label>BLZ</label><InputText v-model="form.blz" /></div>
+        <div class="field"><label>Login</label><InputText v-model="form.login" /></div>
+        <div class="field"><label>Server-URL</label><InputText v-model="form.server_url" /></div>
+        <div class="field">
+          <label>
+            Passwort / PIN
+            <Tag
+              v-if="!isNew && bc"
+              class="cred-tag"
+              :severity="bc.credentials_set ? 'success' : 'warn'"
+              :value="bc.credentials_set ? 'gesetzt' : 'nicht gesetzt'"
+            />
+          </label>
+          <Password v-model="pin" :feedback="false" toggle-mask :placeholder="(!isNew && bc?.credentials_set) ? '(unverändert lassen)' : 'PIN eingeben'" />
+        </div>
+        <div class="field">
+          <label>TAN-Verfahren</label>
+          <div v-if="!isNew && bc?.credentials_set" class="tan-method-row">
+            <Select
+              v-model="form.tan_method"
+              :options="tanMethodSelectOptions"
+              option-label="label"
+              option-value="id"
+              placeholder="Zuerst 'Abrufen' klicken"
+              :disabled="tanMethodSelectOptions.length === 0"
+              class="tan-method-select"
+              panel-class="tan-method-panel"
+            />
+            <Button
+              label="Abrufen"
+              icon="pi pi-refresh"
+              severity="secondary"
+              :loading="probingMethods"
+              @click="probeMethods"
+            />
+          </div>
+          <InputText
+            v-else
+            v-model="form.tan_method"
+            placeholder="z. B. 942 — nach Credential-Set abrufbar"
+          />
+          <small v-if="tanProbeInfo" class="probe-info">{{ tanProbeInfo }}</small>
+          <small v-else-if="!isNew && !bc?.credentials_set" class="probe-info">
+            Passwort setzen, um die Verfahren bei der Bank abzufragen.
+          </small>
+        </div>
+      </template>
+
+      <!-- PayPal-Felder -->
+      <template v-else>
+        <div class="field">
+          <label>Umgebung</label>
+          <SelectButton
+            v-model="form.paypal_environment"
+            :options="paypalEnvOptions"
+            option-label="label"
+            option-value="value"
+          />
+          <small class="probe-info">
+            „Sandbox" testet gegen den PayPal-Sandbox-Account, „Live" gegen das produktive PayPal-Konto.
+          </small>
+        </div>
+        <div v-if="!isNew && bc" class="field">
+          <label>
+            PayPal-Verbindung
+            <Tag
+              class="cred-tag"
+              :severity="bc.credentials_set ? 'success' : 'warn'"
+              :value="bc.credentials_set ? 'verbunden' : 'nicht verbunden'"
+            />
+          </label>
+          <div class="paypal-connect-row">
+            <Button
+              v-if="!bc.credentials_set"
+              label="Mit PayPal verbinden"
+              icon="pi pi-external-link"
+              severity="primary"
+              :loading="connectingPaypal"
+              :disabled="isDirty"
+              @click="connectPaypal"
+            />
+            <Button
+              v-else
+              label="Erneut verbinden"
+              icon="pi pi-refresh"
+              severity="secondary"
+              outlined
+              :loading="connectingPaypal"
+              @click="connectPaypal"
+            />
+            <Button
+              v-if="bc.credentials_set"
+              label="Verbindung trennen"
+              icon="pi pi-times"
+              severity="danger"
+              outlined
+              @click="disconnectPaypalAction"
+            />
+          </div>
+          <small v-if="isDirty" class="probe-info">
+            Nicht gespeicherte Änderungen — zuerst „Speichern" klicken, dann verbinden.
+          </small>
+          <small v-else-if="bc.paypal_client_id" class="probe-info">
+            PayPal-Konto-ID: {{ bc.paypal_client_id }}
+          </small>
+        </div>
+      </template>
+
       <div class="actions">
-        <Button label="Speichern" :loading="saving" :disabled="!isDirty && !pin" @click="save" />
+        <Button
+          label="Speichern"
+          :loading="saving"
+          :disabled="!isDirty && !pin"
+          @click="save"
+        />
       </div>
     </section>
 

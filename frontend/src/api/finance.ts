@@ -12,13 +12,24 @@ import { apiFetch } from './client'
 // Bankcontacts
 // ----------------------------------------------------------------------
 
+export type BankcontactAccessType = 'fints' | 'paypal'
+export type PaypalEnvironment = 'sandbox' | 'live'
+
 export interface Bankcontact {
   id: number
   name: string
-  blz: string
-  login: string
-  server_url: string
+  /** Discriminator. "fints" rows use blz/login/server_url; "paypal" rows
+   *  use the paypal_* fields + an OAuth-stored refresh token. The
+   *  Bankcontact-Detail-View switches the form layout on this. */
+  access_type: BankcontactAccessType
+  blz: string | null
+  login: string | null
+  server_url: string | null
   tan_method: string | null
+  /** PayPal-only: "sandbox" or "live". null for FinTS contacts. */
+  paypal_environment: PaypalEnvironment | null
+  /** PayPal-only: payer_id captured during the OAuth callback. */
+  paypal_client_id: string | null
   credentials_set: boolean
   last_sync_at: string | null
   last_sync_status: string | null
@@ -40,10 +51,14 @@ export interface Bankcontact {
 
 export interface CreateBankcontactInput {
   name: string
-  blz: string
-  login: string
-  server_url: string
+  access_type?: BankcontactAccessType
+  // FinTS — required when access_type = 'fints' (default).
+  blz?: string
+  login?: string
+  server_url?: string
   tan_method?: string
+  // PayPal — required when access_type = 'paypal'.
+  paypal_environment?: PaypalEnvironment
 }
 
 export interface UpdateBankcontactInput {
@@ -52,6 +67,7 @@ export interface UpdateBankcontactInput {
   login?: string
   server_url?: string
   tan_method?: string | null
+  paypal_environment?: PaypalEnvironment
 }
 
 export async function listBankcontacts(): Promise<{ items: Bankcontact[] }> {
@@ -102,6 +118,35 @@ export async function setBankcontactCredentials(
   return apiFetch(`/finance/bankcontacts/${id}/credentials`, {
     method: 'POST',
     body: JSON.stringify({ id, pin }),
+  })
+}
+
+// ----------------------------------------------------------------------
+// PayPal OAuth flow (Issue #427, Etappe 5)
+// ----------------------------------------------------------------------
+
+export interface StartPaypalConnectResponse {
+  /** Full PayPal authorize URL the browser should navigate to. */
+  auth_url: string
+  /** CSRF state token persisted server-side, echoed by PayPal. */
+  state: string
+  /** ISO timestamp at which the persisted state row becomes invalid. */
+  expires_at: string
+}
+
+export async function startPaypalConnect(
+  id: number,
+): Promise<StartPaypalConnectResponse> {
+  return apiFetch(`/finance/bankcontacts/${id}/paypal/start`, {
+    method: 'POST',
+  })
+}
+
+export async function disconnectPaypal(
+  id: number,
+): Promise<{ disconnected: true }> {
+  return apiFetch(`/finance/bankcontacts/${id}/paypal/disconnect`, {
+    method: 'POST',
   })
 }
 

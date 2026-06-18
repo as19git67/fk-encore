@@ -53,6 +53,9 @@ tax categories, and banking.
 ### Personal finance
 - Bank-account integration over **FinTS/HBCI** with the German TAN/2FA
   challenge flow
+- **PayPal** support via OAuth 2.0 Authorization-Code flow — balances
+  per currency and transactions of the user's wallet ride the same sync
+  pipeline as a FinTS bankcontact
 - Automated statement sync plus a manual dropbox watcher for MT940 / CSV
   imports; SEPA field extraction and SHA-256 transaction de-duplication
 - Manual bookings and per-transaction tagging, with AI tag suggestions from
