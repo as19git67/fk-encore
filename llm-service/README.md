@@ -106,6 +106,7 @@ Generates warm, personal titles and subtitles for private photo recaps (e.g., "A
 | `LLM_CTX` | `8192` | Context window size |
 | `LLM_THREADS` | `$(nproc)` | CPU threads for inference |
 | `CLASSIFY_TEXT_CHAR_LIMIT` | `6000` | Max document characters fed to `/classify` (cheap pre-cap before the n_ctx token guard). Keep ≥ the app's `DOCUMENTS_CLASSIFY_CHAR_LIMIT`; raise both in lockstep with `LLM_CTX` to classify longer documents. |
+| `TAX_SECTIONS_MAX` | `4` | Dump-all backstop: when `/classify` returns more than this many tax sections at once it is treated as a confused small-model output and the entire tax assignment is dropped. Set to `0` to disable. |
 | `EMBEDDING_MODEL` | `intfloat/multilingual-e5-base` | Sentence-Transformers repo or path |
 | `LOG_LEVEL` | `INFO` | Logging verbosity |
 
