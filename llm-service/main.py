@@ -58,6 +58,15 @@ LLM_CTX = _env_int("LLM_CTX", 8192)
 LLM_THREADS = _env_int("LLM_THREADS", os.cpu_count() or 4)
 LLM_GPU_LAYERS = _env_int("LLM_GPU_LAYERS", 0)
 
+# Deterministic backstop for a known small-model failure mode: when the
+# classifier doesn't actually see a tax-section match, it sometimes returns
+# the *entire* list of sections it was offered (high-confidence "dump-all").
+# Almost every legitimate document belongs to one section, very rarely to
+# two or three. More than this threshold is treated as a confused output —
+# we drop the tax assignment so it doesn't contaminate the user's tax view.
+# Set to 0 to disable the backstop.
+TAX_SECTIONS_MAX = _env_int("TAX_SECTIONS_MAX", 4)
+
 # Upper bound (characters) on the document text considered by /classify. This
 # is a cheap pre-cap before the token-budget guard further shrinks the text to
 # fit n_ctx. Keep it >= the caller's DOCUMENTS_CLASSIFY_CHAR_LIMIT, otherwise a
@@ -855,6 +864,21 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
                 s for s in raw_sections
                 if isinstance(s, dict) and s.get("slug") in allowed
             ]
+        # Dump-all backstop: a small classifier sometimes returns the entire
+        # offered section list at high confidence when no real match exists
+        # (observed: a Grundsteuerbescheid and a Renteninformation each tagged
+        # with all 18 sections). Drop the entire tax assignment in that case —
+        # better to surface "no tax sections" than poison the user's tax view.
+        n = len(data.get("tax_sections") or [])
+        if TAX_SECTIONS_MAX > 0 and n > TAX_SECTIONS_MAX:
+            log.warning(
+                "classify: dump-all tax_sections (%d > %d) — dropping tax assignment",
+                n, TAX_SECTIONS_MAX,
+            )
+            data["tax_sections"] = []
+            data["tax_relevant"] = False
+            data["tax_year"] = None
+            data["tax_year_confidence"] = 0.0
         # LLM sometimes emits null for numeric confidence fields — coerce to defaults.
         if data.get("tax_year_confidence") is None:
             data["tax_year_confidence"] = 0.0

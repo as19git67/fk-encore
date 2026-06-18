@@ -246,6 +246,7 @@ services:
       LLM_GPU_LAYERS: ${LLM_GPU_LAYERS:-0}
       LLM_THREADS: ${LLM_THREADS:-}
       CLASSIFY_TEXT_CHAR_LIMIT: ${CLASSIFY_TEXT_CHAR_LIMIT:-6000}
+      TAX_SECTIONS_MAX: ${TAX_SECTIONS_MAX:-4}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       - llm_models:/models
