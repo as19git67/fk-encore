@@ -4,8 +4,8 @@ import { toLocalIsoDate, parseLocalDate } from '../../utils/dateFormat'
 
 /**
  * Persists the filter form and applied-filter state for the transaction
- * list view so that navigating to BatchTagView and back does not reset
- * the user's search criteria.
+ * list view so that opening the batch-tag dialog (or any other modal /
+ * navigation) does not reset the user's search criteria.
  */
 export const useTxFiltersStore = defineStore('finance.txFilters', () => {
   // Form state (what is currently in the filter inputs)

@@ -194,12 +194,6 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'finance.view' },
       },
       {
-        path: 'uebersicht/batch-tags',
-        name: 'finance-batch-tag',
-        component: () => import('../views/finance/BatchTagView.vue'),
-        meta: { permission: 'finance.view' },
-      },
-      {
         path: 'umsaetze',
         name: 'finance-transactions',
         redirect: { name: 'finance-overview' },

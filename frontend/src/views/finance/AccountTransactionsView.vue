@@ -25,6 +25,7 @@ import { useTagsStore } from '../../stores/finance/tags'
 import { useTxSelectionStore } from '../../stores/finance/selection'
 import { useTxFiltersStore } from '../../stores/finance/txFilters'
 import DateRangePresets from '../../components/DateRangePresets.vue'
+import BatchTagDialog from '../../components/finance/BatchTagDialog.vue'
 import type {
   Holding,
   HoldingsHistoryPosition,
@@ -157,8 +158,9 @@ function formatShortDate(iso: string | null): string | null {
 
 // ── Filter state ──────────────────────────────────────────────────────
 //
-// Persisted in useTxFiltersStore so that navigating to BatchTagView
-// and back does not reset the user's search criteria.
+// Persisted in useTxFiltersStore so that opening the batch-tag
+// dialog (or any subsequent route navigation) does not reset the
+// user's search criteria.
 
 const filterPanelOpen = ref(false)
 const filterPanelRef = ref<HTMLElement | null>(null)
@@ -668,10 +670,12 @@ function formatFilteredSum(): string {
   }).format(filteredSum.value)
 }
 
+const batchTagDialogVisible = ref(false)
+
 function openBatchTagEditor() {
   if (selectionStore.count === 0) return
   selectionPopover.value?.hide()
-  void router.push({ name: 'finance-batch-tag' })
+  batchTagDialogVisible.value = true
 }
 
 const { goBack: moduleBack } = useModuleBack('/finanzen', 'finance-overview')
@@ -1071,6 +1075,8 @@ function goBack() {
         Buchungen verwende den Filter.
       </p>
     </template>
+
+    <BatchTagDialog v-model:visible="batchTagDialogVisible" />
   </div>
 </template>
 
