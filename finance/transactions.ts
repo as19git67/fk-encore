@@ -978,6 +978,110 @@ export const batchTag = api(
 );
 
 // -----------------------------------------------------------------------
+// Batch-Notice — set the same notice text on a selection
+// -----------------------------------------------------------------------
+
+interface BatchNoticeParams {
+  transaction_ids: number[];
+  notice: string;
+  /** `replace` overwrites the existing notice; `append` joins onto it
+   *  with a blank-line separator when the existing notice is non-empty. */
+  mode: "replace" | "append";
+}
+
+interface BatchNoticeResponse {
+  affected_transactions: number;
+  /** Number of input ids that didn't end up updated — covers both the
+   *  "outside ACL" and "doesn't exist" cases. The UI uses this to warn
+   *  the user that some of their basket items were skipped. */
+  skipped_unauthorized: number;
+}
+
+export const batchNotice = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/finance/transactions/batch-notice",
+    auth: true,
+  },
+  async (p: BatchNoticeParams): Promise<BatchNoticeResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+
+    if (!Array.isArray(p.transaction_ids) || p.transaction_ids.length === 0) {
+      throw APIError.invalidArgument("transaction_ids required");
+    }
+    if (p.mode !== "replace" && p.mode !== "append") {
+      throw APIError.invalidArgument("mode must be 'replace' or 'append'");
+    }
+    const trimmed = (p.notice ?? "").trim();
+    if (p.mode === "append" && trimmed.length === 0) {
+      // Append-with-empty is a no-op; reject early so the caller sees
+      // a clear error instead of "0 updated, why".
+      throw APIError.invalidArgument("notice must be non-empty in append mode");
+    }
+    // updateTransaction lets any caller with read-level set a notice
+    // (notes are personal annotations, not write-protected account
+    // data), so we use the same ACL filter as batchTag.
+    const visibleIds = await readableAccountIds(auth);
+    let accessibleTxRows: Array<{ id: number }>;
+    if (visibleIds === null) {
+      accessibleTxRows = await db
+        .select({ id: financeTransaction.id })
+        .from(financeTransaction)
+        .where(inArray(financeTransaction.id, p.transaction_ids));
+    } else if (visibleIds.length === 0) {
+      accessibleTxRows = [];
+    } else {
+      accessibleTxRows = await db
+        .select({ id: financeTransaction.id })
+        .from(financeTransaction)
+        .where(
+          and(
+            inArray(financeTransaction.id, p.transaction_ids),
+            inArray(financeTransaction.account_id, visibleIds),
+          ),
+        );
+    }
+    const txIds = accessibleTxRows.map((r) => r.id);
+    const skipped = p.transaction_ids.length - txIds.length;
+
+    if (txIds.length === 0) {
+      return { affected_transactions: 0, skipped_unauthorized: skipped };
+    }
+
+    if (p.mode === "replace") {
+      const next = trimmed.length === 0 ? null : trimmed;
+      await db
+        .update(financeTransaction)
+        .set({ notice: next })
+        .where(inArray(financeTransaction.id, txIds));
+    } else {
+      // append: keep existing text, separate with a blank line, fall
+      // through to "just the new text" when the existing notice is
+      // empty or NULL. A single UPDATE keeps it atomic across the
+      // selection.
+      await db
+        .update(financeTransaction)
+        .set({
+          notice: sql`CASE
+            WHEN ${financeTransaction.notice} IS NULL
+              OR length(trim(${financeTransaction.notice})) = 0
+            THEN ${trimmed}
+            ELSE ${financeTransaction.notice} || E'\n\n' || ${trimmed}
+          END`,
+        })
+        .where(inArray(financeTransaction.id, txIds));
+    }
+
+    return {
+      affected_transactions: txIds.length,
+      skipped_unauthorized: skipped,
+    };
+  },
+);
+
+// -----------------------------------------------------------------------
 // Shared internals
 // -----------------------------------------------------------------------
 
