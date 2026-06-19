@@ -8,12 +8,15 @@ import {
   listAnomalies,
   acknowledgeAnomaly,
   getMandateHistory,
+  getTransaction,
   type AnomalyItem,
   type DuplicateTransactionInfo,
   type MandateHistoryItem,
 } from '../../api/finance'
+import { useTxSelectionStore } from '../../stores/finance/selection'
 
 const router = useRouter()
+const selectionStore = useTxSelectionStore()
 
 const anomalies = ref<AnomalyItem[]>([])
 const loading = ref(false)
@@ -77,6 +80,36 @@ function openTransactionId(id: number) {
     name: 'finance-transaction-detail',
     params: { id },
   })
+}
+
+// ── Basket toggle ────────────────────────────────────────────────────
+// The anomaly list only carries ids; the basket store wants full
+// Transaction objects (the batch-tag editor needs the per-tx tags to
+// compute its tristate). We fetch on demand the first time an id is
+// added — cheap because the user clicks at human speed.
+const basketLoading = ref<Set<number>>(new Set())
+const basketError = ref<string | null>(null)
+
+function isInBasket(id: number): boolean {
+  return selectionStore.has(id)
+}
+
+async function toggleBasket(id: number) {
+  if (selectionStore.has(id)) {
+    selectionStore.remove(id)
+    return
+  }
+  if (basketLoading.value.has(id)) return
+  basketLoading.value.add(id)
+  basketError.value = null
+  try {
+    const tx = await getTransaction(id)
+    selectionStore.add(tx)
+  } catch (e: any) {
+    basketError.value = e?.message ?? 'Buchung konnte nicht zum Basket hinzugefügt werden'
+  } finally {
+    basketLoading.value.delete(id)
+  }
 }
 
 async function toggleHistory(item: AnomalyItem) {
@@ -187,6 +220,14 @@ function formatAmountChange(item: AnomalyItem): string | null {
     </header>
 
     <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
+    <Message
+      v-if="basketError"
+      severity="error"
+      :closable="true"
+      @close="basketError = null"
+    >
+      {{ basketError }}
+    </Message>
 
     <div class="filter-row">
       <Select
@@ -284,10 +325,39 @@ function formatAmountChange(item: AnomalyItem): string | null {
               <span class="history-date">{{ formatDate(tx.booking_date) }}</span>
               <span class="history-amount">{{ formatAmount(tx.amount) }}</span>
               <span class="history-purpose">{{ tx.purpose ?? '' }}</span>
+              <button
+                type="button"
+                class="dup-basket"
+                :class="{ 'in-basket': isInBasket(tx.id) }"
+                :aria-label="isInBasket(tx.id) ? 'Aus Basket entfernen' : 'In Basket legen'"
+                :aria-pressed="isInBasket(tx.id)"
+                @click.stop="toggleBasket(tx.id)"
+              >
+                <i
+                  v-if="basketLoading.has(tx.id)"
+                  class="pi pi-spin pi-spinner"
+                />
+                <i
+                  v-else
+                  :class="isInBasket(tx.id) ? 'pi pi-times-circle' : 'pi pi-shopping-cart'"
+                />
+              </button>
             </li>
           </ul>
 
           <div class="card-actions">
+            <Button
+              v-if="singleTransactionId(item)"
+              v-tooltip.bottom="isInBasket(singleTransactionId(item)!) ? 'Aus Basket entfernen' : 'In Basket legen'"
+              :icon="isInBasket(singleTransactionId(item)!) ? 'pi pi-times-circle' : 'pi pi-shopping-cart'"
+              :severity="isInBasket(singleTransactionId(item)!) ? 'success' : 'secondary'"
+              :aria-label="isInBasket(singleTransactionId(item)!) ? 'Aus Basket entfernen' : 'In Basket legen'"
+              :aria-pressed="isInBasket(singleTransactionId(item)!)"
+              text
+              size="small"
+              :loading="basketLoading.has(singleTransactionId(item)!)"
+              @click="toggleBasket(singleTransactionId(item)!)"
+            />
             <Button
               v-if="singleTransactionId(item)"
               icon="pi pi-external-link"
@@ -457,16 +527,35 @@ function formatAmountChange(item: AnomalyItem): string | null {
 
 .dup-row {
   display: grid;
-  grid-template-columns: 4.5rem 6.5rem 6.5rem 1fr;
+  grid-template-columns: 4.5rem 6.5rem 6.5rem 1fr auto;
   gap: 0.5rem;
   padding: 0.35rem 0.25rem;
   border-radius: 0.25rem;
   cursor: pointer;
-  align-items: baseline;
+  align-items: center;
   font-size: 0.9rem;
 }
 .dup-row:hover {
   background: var(--p-content-hover-background);
+}
+
+.dup-basket {
+  background: none;
+  border: none;
+  padding: 0.25rem;
+  cursor: pointer;
+  color: var(--p-text-muted-color);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.25rem;
+}
+.dup-basket:hover {
+  color: var(--p-text-color);
+  background: var(--p-content-hover-background);
+}
+.dup-basket.in-basket {
+  color: var(--p-primary-color);
 }
 
 .dup-label {
