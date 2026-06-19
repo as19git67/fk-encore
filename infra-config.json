@@ -6,6 +6,11 @@
     "VapidSubject": { "$env": "VAPID_SUBJECT" },
     "FinanceCredentialsKey": { "$env": "FINANCE_CREDENTIALS_KEY" },
     "FinanceFintsProductId": { "$env": "FINANCE_FINTS_PRODUCT_ID" },
-    "FinanceFintsProductVersion": { "$env": "FINANCE_FINTS_PRODUCT_VERSION" }
+    "FinanceFintsProductVersion": { "$env": "FINANCE_FINTS_PRODUCT_VERSION" },
+    "PaypalAppClientIdSandbox": { "$env": "PAYPAL_APP_CLIENT_ID_SANDBOX" },
+    "PaypalAppClientSecretSandbox": { "$env": "PAYPAL_APP_CLIENT_SECRET_SANDBOX" },
+    "PaypalAppClientIdLive": { "$env": "PAYPAL_APP_CLIENT_ID_LIVE" },
+    "PaypalAppClientSecretLive": { "$env": "PAYPAL_APP_CLIENT_SECRET_LIVE" },
+    "PaypalRedirectUri": { "$env": "PAYPAL_REDIRECT_URI" }
   }
 }

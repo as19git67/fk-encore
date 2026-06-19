@@ -104,23 +104,35 @@ Die Cron in `statements-cron.ts` arbeitet beide Pfade ab — gleiche
 
 ---
 
-## 5. Encore-Secrets
+## 5. Secrets & Environment
 
-Pro Umgebung ein Paar PayPal-App-Credentials plus die Callback-URL:
+Pro Umgebung ein Paar PayPal-App-Credentials plus Callback- und
+Frontend-URL. Die Encore-`secret()`-Namen sind in `infra-config.json`
+auf Environment-Variablen gemappt — im Self-Host-Setup landen die
+Werte ganz normal in der `.env` / `docker-compose.env`, der Code greift
+nur über den Encore-Secret-Namen darauf zu.
 
-| Secret | Zweck |
-|---|---|
-| `PaypalAppClientIdSandbox` / `PaypalAppClientSecretSandbox` | OAuth-Identität gegen die PayPal-Sandbox |
-| `PaypalAppClientIdLive` / `PaypalAppClientSecretLive` | OAuth-Identität gegen Live PayPal |
-| `PaypalRedirectUri` | öffentliche URL des `paypal/callback`-Endpoints |
+| Secret-Name (Code) | Env-Variable (docker-compose) | Zweck |
+|---|---|---|
+| `PaypalAppClientIdSandbox`     | `PAYPAL_APP_CLIENT_ID_SANDBOX`     | Client-ID der Sandbox-App |
+| `PaypalAppClientSecretSandbox` | `PAYPAL_APP_CLIENT_SECRET_SANDBOX` | Client-Secret der Sandbox-App |
+| `PaypalAppClientIdLive`        | `PAYPAL_APP_CLIENT_ID_LIVE`        | Client-ID der Live-App |
+| `PaypalAppClientSecretLive`    | `PAYPAL_APP_CLIENT_SECRET_LIVE`    | Client-Secret der Live-App |
+| `PaypalRedirectUri`            | `PAYPAL_REDIRECT_URI`              | öffentliche URL des `paypal/callback`-Endpoints |
 
-Anlegen via `encore secret set --type local/preview/development/production`.
+Zusätzlich liest `paypal-oauth.ts` `FRONTEND_BASE_URL` aus `process.env`
+für das 302-Redirect zurück in die UI nach dem Token-Tausch.
+
 Die PayPal-App registriert man unter dem PayPal Developer Dashboard mit
 den Scopes:
 
 - `openid` + `profile` (für Refresh-Token + `payer_id`)
 - `https://uri.paypal.com/services/reporting/balances.read`
 - `https://uri.paypal.com/services/reporting/search.read`
+
+Für lokales `encore run` ohne Docker funktionieren stattdessen
+`encore secret set --type local Paypal…`-Aufrufe (Werte landen
+verschlüsselt in `.secrets.local.cue`).
 
 ---
 
