@@ -1,27 +1,27 @@
 <script setup lang="ts">
 /**
- * Tags-für-N-Buchungen: tristate-Editor für die Mehrfachauswahl.
+ * Tags-für-N-Buchungen — tristate editor for the current basket
+ * selection, served as a modal dialog. Replaces the previous
+ * route-based BatchTagView so the user stays in the calling list view
+ * (preserving scroll position, filters, etc.).
  *
- * Zustand pro Tag:
- *   • checked   — alle ausgewählten Buchungen haben den Tag
- *   • tristate  — manche haben ihn, andere nicht
- *   • unchecked — keine Buchung hat den Tag
+ * Per-tag state:
+ *   • checked   — every selected transaction has the tag
+ *   • tristate  — some have it, others don't
+ *   • unchecked — none have it
  *
- * Beim Speichern werden nur die Diffs gegen den Initialzustand
- * verschickt:
- *   • unchecked → checked   ⇒ add (alle bekommen ihn)
- *   • checked   → unchecked ⇒ remove (alle verlieren ihn)
- *   • tristate  → checked   ⇒ add (die ohne bekommen ihn dazu)
- *   • tristate  → unchecked ⇒ remove (die mit verlieren ihn)
- *   • tristate  → tristate (unverändert) ⇒ keine Änderung
+ * Save sends only the diff against the initial state:
+ *   • unchecked → checked   ⇒ add
+ *   • checked   → unchecked ⇒ remove
+ *   • tristate  → checked   ⇒ add (the missing ones get it)
+ *   • tristate  → unchecked ⇒ remove (the ones with it lose it)
+ *   • tristate  → tristate  ⇒ no-op (filtered out of dirtyRows)
  *
- * Backend-Aufruf läuft in einer DB-Transaction, also alles oder
- * nichts.
+ * The server runs the whole batch inside one DB transaction.
  */
 
-import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { useModuleBack } from '../../composables/useModuleBack'
+import { computed, ref, watch } from 'vue'
+import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Checkbox from 'primevue/checkbox'
@@ -30,8 +30,14 @@ import { useTagsStore } from '../../stores/finance/tags'
 import { useTxSelectionStore } from '../../stores/finance/selection'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 
-const router = useRouter()
-const { goBack } = useModuleBack('/finanzen', 'finance-overview')
+const props = defineProps<{
+  visible: boolean
+}>()
+const emit = defineEmits<{
+  'update:visible': [value: boolean]
+  applied: []
+}>()
+
 const tagsStore = useTagsStore()
 const selectionStore = useTxSelectionStore()
 const txStore = useTransactionsStore()
@@ -42,8 +48,9 @@ interface TagRow {
   name: string
   initial: CheckState
   state: CheckState
-  /** True when at least one selected transaction already carries this
-   *  tag — used to sort "in use" tags above the rest. */
+  /** At least one selected tx already carries this tag — used to
+   *  push these tags above the rest so a user scanning a long tag
+   *  list sees what's currently in use first. */
   inUse: boolean
 }
 
@@ -68,49 +75,51 @@ function computeInitialState(tagName: string): {
   return { state: 'tristate', inUse: true }
 }
 
-onMounted(async () => {
-  if (selectionStore.count === 0) {
-    // No selection — there's nothing to edit. Bounce back to the
-    // overview rather than rendering an empty list.
-    void router.push({ name: 'finance-overview' })
-    return
-  }
+async function refreshRows() {
   if (tagsStore.items.length === 0) {
     await tagsStore.refresh('all')
   }
-  // Build the working set: every known tag plus any tag that's already
-  // on a selected transaction (in case the tag store is stale).
   const knownNames = new Set(tagsStore.items.map((t) => t.name))
   for (const tx of selectionStore.items) {
     for (const t of tx.tags) knownNames.add(t.name)
   }
-  tagRows.value = [...knownNames].sort((a, b) => a.localeCompare(b)).map(
-    (name) => {
+  tagRows.value = [...knownNames]
+    .sort((a, b) => a.localeCompare(b))
+    .map((name) => {
       const init = computeInitialState(name)
       return { name, initial: init.state, state: init.state, inUse: init.inUse }
-    },
-  )
-})
+    })
+}
+
+watch(
+  () => props.visible,
+  async (open) => {
+    if (!open) return
+    search.value = ''
+    promoteAiTags.value = false
+    error.value = null
+    saving.value = false
+    tagRows.value = []
+    if (selectionStore.count > 0) {
+      await refreshRows()
+    }
+  },
+)
 
 const filteredTagRows = computed(() => {
   const q = search.value.trim().toLowerCase()
   const matches = (r: TagRow) =>
     q.length === 0 || r.name.toLowerCase().includes(q)
-  // "In Use"-Tags zuerst, danach der Rest. Innerhalb jeder Gruppe
-  // alphabetisch (oben schon sortiert).
   const inUse = tagRows.value.filter((r) => r.inUse && matches(r))
   const others = tagRows.value.filter((r) => !r.inUse && matches(r))
   return { inUse, others }
 })
 
 function cycleState(row: TagRow, checked: boolean | null) {
-  // PrimeVue's binary checkbox emits true/false. We translate that
-  // into our 3-state model:
-  //   • clicking from `tristate` → checked
-  //   • clicking from `unchecked` → checked
-  //   • clicking from `checked` → unchecked
-  // Re-reaching `tristate` is only possible by clicking again on a
-  // tag that started out tristate (toggle back to keep-as-is).
+  // PrimeVue's binary checkbox emits true/false. Translate to our
+  // 3-state model: clicking unchecked/tristate → checked, clicking
+  // checked → unchecked. Re-reaching tristate is only possible by
+  // clicking a tristate-initial tag back to "keep as is".
   if (row.initial === 'tristate' && row.state === 'unchecked') {
     row.state = 'tristate'
     return
@@ -121,22 +130,22 @@ function cycleState(row: TagRow, checked: boolean | null) {
 const dirtyRows = computed(() =>
   tagRows.value.filter((r) => r.state !== r.initial),
 )
-
 const hasChanges = computed(() => dirtyRows.value.length > 0)
 
+function close() {
+  if (saving.value) return
+  emit('update:visible', false)
+}
 
 async function save() {
   if (!hasChanges.value || saving.value) return
   saving.value = true
   error.value = null
-  // Diff against the initial state and translate to add/remove.
   const add: string[] = []
   const remove: string[] = []
   for (const row of dirtyRows.value) {
     if (row.state === 'checked') add.push(row.name)
     else if (row.state === 'unchecked') remove.push(row.name)
-    // 'tristate' as a target (initial=='tristate' && state=='tristate')
-    // is a no-op and isn't even in dirtyRows.
   }
   try {
     await txStore.batchTag({
@@ -145,25 +154,33 @@ async function save() {
       remove,
       promote_ai_tags: promoteAiTags.value,
     })
-    // Update selectionStore so re-entering this view shows current state.
-    selectionStore.set(selectionStore.items.map((tx) => {
-      let tags = tx.tags.filter((t) => {
-        if (t.source === 'user' && remove.includes(t.name)) return false
-        if (t.source === 'ai' && promoteAiTags.value === false) return false
-        return true
-      })
-      // Promote: convert remaining ai tags to user
-      if (promoteAiTags.value === true) {
-        tags = tags.map((t) => t.source === 'ai' ? { ...t, source: 'user' as const, confidence: null } : t)
-      }
-      // Add new user tags (avoid duplicates)
-      const existingNames = new Set(tags.map((t) => t.name))
-      for (const name of add) {
-        if (!existingNames.has(name)) tags.push({ name, source: 'user', confidence: null })
-      }
-      return { ...tx, tags }
-    }))
-    goBack()
+    // Keep the in-memory selection in sync with what the server now
+    // sees so reopening the dialog reflects the new tristate.
+    selectionStore.set(
+      selectionStore.items.map((tx) => {
+        let tags = tx.tags.filter((t) => {
+          if (t.source === 'user' && remove.includes(t.name)) return false
+          if (t.source === 'ai' && promoteAiTags.value === false) return false
+          return true
+        })
+        if (promoteAiTags.value === true) {
+          tags = tags.map((t) =>
+            t.source === 'ai'
+              ? { ...t, source: 'user' as const, confidence: null }
+              : t,
+          )
+        }
+        const existingNames = new Set(tags.map((t) => t.name))
+        for (const name of add) {
+          if (!existingNames.has(name)) {
+            tags.push({ name, source: 'user', confidence: null })
+          }
+        }
+        return { ...tx, tags }
+      }),
+    )
+    emit('applied')
+    emit('update:visible', false)
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -173,34 +190,35 @@ async function save() {
 </script>
 
 <template>
-  <div class="page">
-    <header class="bt-header">
-      <Button
-        label="Zurück"
-        icon="pi pi-chevron-left"
-        severity="secondary"
-        @click="goBack"
-      />
-      <h1 class="bt-title">
-        Tags für {{ selectionStore.count }} Buchung{{ selectionStore.count === 1 ? '' : 'en' }}
-      </h1>
-      <Button
-        label="Speichern"
-        icon="pi pi-check"
-        :disabled="!hasChanges"
-        :loading="saving"
-        @click="save"
-      />
-    </header>
+  <Dialog
+    :visible="visible"
+    modal
+    :style="{ width: '32rem', maxHeight: '85vh' }"
+    :closable="!saving"
+    :dismissable-mask="!saving"
+    @update:visible="emit('update:visible', $event)"
+  >
+    <template #header>
+      <span class="dlg-title">
+        Tags für {{ selectionStore.count }}
+        Buchung{{ selectionStore.count === 1 ? '' : 'en' }}
+      </span>
+    </template>
 
-    <Message v-if="error" severity="error" :closable="false">
+    <Message v-if="error" severity="error" :closable="true" @close="error = null">
       {{ error }}
     </Message>
 
     <div class="bt-ai-row">
-      <Checkbox v-model="promoteAiTags" inputId="promote-ai" binary />
-      <label for="promote-ai" class="bt-ai-label">KI-Tags übernehmen</label>
-      <span class="bt-ai-hint">{{ promoteAiTags ? 'KI-Tags werden zu manuellen Tags hochgestuft' : 'KI-Tags werden entfernt' }}</span>
+      <Checkbox v-model="promoteAiTags" inputId="bt-promote-ai" binary />
+      <label for="bt-promote-ai" class="bt-ai-label">KI-Tags übernehmen</label>
+      <span class="bt-ai-hint">
+        {{
+          promoteAiTags
+            ? 'KI-Tags werden zu manuellen Tags hochgestuft'
+            : 'KI-Tags werden entfernt'
+        }}
+      </span>
     </div>
 
     <div class="bt-search-row">
@@ -262,65 +280,41 @@ async function save() {
         Keine Tags gefunden.
       </li>
     </ul>
-  </div>
+
+    <template #footer>
+      <Button
+        label="Abbrechen"
+        severity="secondary"
+        text
+        :disabled="saving"
+        @click="close"
+      />
+      <Button
+        label="Speichern"
+        icon="pi pi-check"
+        :disabled="!hasChanges"
+        :loading="saving"
+        @click="save"
+      />
+    </template>
+  </Dialog>
 </template>
 
 <style scoped>
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  padding: 1rem;
-}
-@media (max-width: 640px) {
-  .page {
-    padding: 0.5rem;
-  }
-}
-
-.bt-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  background: var(--p-primary-700, #1f6e3a);
-  color: var(--p-primary-contrast-color, #fff);
-  padding: 0.6rem 0.75rem;
-  border-radius: 0.5rem;
-  position: sticky;
-  top: 0;
-  z-index: 1;
-}
-.bt-title {
-  margin: 0;
-  font-size: 1rem;
+.dlg-title {
   font-weight: 600;
-  text-align: center;
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.bt-header :deep(.p-button) {
-  background: rgba(255, 255, 255, 0.18);
-  border: 1px solid transparent;
-  color: var(--p-primary-contrast-color, #fff);
-}
-.bt-header :deep(.p-button:hover) {
-  background: rgba(255, 255, 255, 0.3);
-}
-.bt-header :deep(.p-button:disabled) {
-  opacity: 0.5;
 }
 
 .bt-ai-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
   padding: 0.6rem 0.75rem;
   background: var(--p-content-background);
   border: 1px solid var(--p-content-border-color);
   border-radius: 0.5rem;
+  margin-bottom: 0.5rem;
 }
 .bt-ai-label {
   font-weight: 500;
@@ -335,6 +329,7 @@ async function save() {
   display: flex;
   align-items: center;
   gap: 0.25rem;
+  margin-bottom: 0.5rem;
 }
 .bt-search-input {
   width: 100%;
@@ -348,12 +343,14 @@ async function save() {
   border: 1px solid var(--p-content-border-color);
   border-radius: 0.5rem;
   overflow: hidden;
+  max-height: 50vh;
+  overflow-y: auto;
 }
 .bt-tag-row {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.75rem 1rem;
+  padding: 0.6rem 0.75rem;
   border-bottom: 1px solid var(--p-content-border-color);
 }
 .bt-tag-row:last-child {
