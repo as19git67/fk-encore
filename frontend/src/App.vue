@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import Button from 'primevue/button'
 import Menu from 'primevue/menu'
 import ConfirmDialog from 'primevue/confirmdialog'
+import TxBasketIndicator from './components/finance/TxBasketIndicator.vue'
 import { useAuthStore } from './stores/auth'
 import { useAnomalyStore } from './stores/finance/anomalies'
 import { modules, detectModule, moduleEntryPath } from './config/modules'
@@ -110,6 +111,7 @@ async function handleLogout() {
 
       <!-- Right: profile + logout (icons only) -->
       <div class="navbar-end">
+        <TxBasketIndicator v-if="activeModule?.id === 'finanzen'" />
         <Button
           icon="pi pi-user"
           severity="secondary"
