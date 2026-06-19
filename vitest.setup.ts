@@ -59,8 +59,18 @@ vi.mock("encore.dev/api", () => {
     static unknown(msg: string) { return new APIError("unknown", msg); }
   }
 
+  const api: any = (options: any, handler: any) => handler;
+  // `api.raw` / `api.streamIn` / `api.streamOut` / `api.streamInOut`
+  // mirror the same "unwrap the handler" semantics so unit tests can
+  // call them directly without the Encore runtime.
+  api.raw = (options: any, handler: any) => handler;
+  api.streamIn = (options: any, handler: any) => handler;
+  api.streamOut = (options: any, handler: any) => handler;
+  api.streamInOut = (options: any, handler: any) => handler;
+  api.static = (options: any) => options;
+
   return {
-    api: (options: any, handler: any) => handler,
+    api,
     APIError,
     Gateway: class Gateway {},
   };
