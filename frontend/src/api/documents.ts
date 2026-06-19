@@ -169,9 +169,32 @@ export function retryDocumentQueue() {
   return apiFetch<{ retried: number }>('/document-queue/retry', { method: 'POST' })
 }
 
-export function searchDocuments(q: string, mode: SearchMode = 'hybrid', limit = 20) {
+/**
+ * Filter-panel parameters shared by `listDocuments` and `searchDocuments`,
+ * so an active filter narrows the result set whether or not a search term is
+ * present.
+ */
+export type DocumentFilterParams = Pick<
+  ListDocumentsQuery,
+  | 'category'
+  | 'tags'
+  | 'status'
+  | 'needs_review'
+  | 'sender'
+  | 'date_from'
+  | 'date_to'
+  | 'tax_relevant'
+  | 'subject_person_id'
+>
+
+export function searchDocuments(
+  q: string,
+  mode: SearchMode = 'hybrid',
+  limit = 20,
+  filters: DocumentFilterParams = {},
+) {
   return apiFetch<SearchDocumentsResponse>(
-    `/documents/search${buildQuery({ q, mode, limit })}`,
+    `/documents/search${buildQuery({ q, mode, limit, ...filters })}`,
   )
 }
 
