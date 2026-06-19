@@ -28,7 +28,12 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "finanzen-gehalt",
         name: "Gehaltsabrechnungen",
-        hint: "Entgelt-/Gehaltsabrechnung, Verdienstbescheinigung, Lohnsteuerbescheinigung, Sozialversicherungsnachweis / Entgeltnachweis zur Sozialversicherung — ausgestellt vom Arbeitgeber (z. B. Contoso Software, Contoso). NICHT als allgemeine Rechnung einordnen. Steuerlich Anlage N.",
+        hint: "Monatliche Entgelt-/Gehalts-/Lohnabrechnung, Verdienstbescheinigung, Lohnsteuerbescheinigung — ausgestellt vom Arbeitgeber (z. B. Contoso Software, Contoso). NICHT als allgemeine Rechnung einordnen. NICHT: jährliche Meldung/Entgeltnachweis zur Sozialversicherung (→ finanzen-sozialversicherung). Steuerlich Anlage N.",
+      },
+      {
+        slug: "finanzen-sozialversicherung",
+        name: "Meldung zur Sozialversicherung",
+        hint: "Meldebescheinigung bzw. Entgeltnachweis/Jahresmeldung zur Sozialversicherung nach DEÜV — vom Arbeitgeber ausgestellter Nachweis der gemeldeten SV-Entgelte (Renten-, Kranken-, Pflege-, Arbeitslosenversicherung). NICHT die monatliche Gehaltsabrechnung (→ finanzen-gehalt). „Sozialversicherung\" NICHT mit „Sozialstation\" verwechseln: Pflegeleistungen einer Sozialstation gehören zu gesundheit-pflege.",
       },
       {
         slug: "finanzen-bausparen",
@@ -152,7 +157,7 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "gesundheit-pflege",
         name: "Pflegeleistungen (Sozialstation)",
-        hint: "Rechnungen/Leistungsnachweise ambulanter Pflege/Sozialstationen (z. B. Caritas-Sozialstation), häusliche Krankenpflege. Steuerlich haushaltsnahe Aufwendungen / außergewöhnliche Belastungen.",
+        hint: "Rechnungen/Leistungsnachweise ambulanter Pflege/Sozialstationen (z. B. Caritas-Sozialstation), häusliche Krankenpflege. NICHT: Meldung/Entgeltnachweis zur Sozialversicherung vom Arbeitgeber (→ finanzen-sozialversicherung) — „Sozialstation\" ≠ „Sozialversicherung\". Steuerlich haushaltsnahe Aufwendungen / außergewöhnliche Belastungen.",
       },
       { slug: "gesundheit-pflegekasse", name: "Pflegekasse" },
     ],
