@@ -35,6 +35,8 @@ export interface SelectionState<T extends { id: number | string }> {
 export interface UseSelectionOptions {
   /** sessionStorage key; when omitted the selection lives only in memory. */
   storageKey?: string
+  /** Optional domain-specific guard for items restored from storage. */
+  isValidItem?: (item: unknown) => boolean
 }
 
 function hasStorage(): boolean {
@@ -43,6 +45,7 @@ function hasStorage(): boolean {
 
 function loadFromStorage<T extends { id: number | string }>(
   storageKey: string,
+  isValidItem?: (item: unknown) => boolean,
 ): T[] {
   if (!hasStorage()) return []
   try {
@@ -53,7 +56,10 @@ function loadFromStorage<T extends { id: number | string }>(
     return parsed.items.filter((t): t is T => {
       if (!t || typeof t !== 'object') return false
       const id = (t as T).id
-      return typeof id === 'number' || typeof id === 'string'
+      return (
+        (typeof id === 'number' || typeof id === 'string') &&
+        (!isValidItem || isValidItem(t))
+      )
     })
   } catch {
     return []
@@ -78,9 +84,9 @@ function saveToStorage<T>(storageKey: string, items: T[]): void {
 export function useSelection<T extends { id: number | string }>(
   opts: UseSelectionOptions = {},
 ): SelectionState<T> {
-  const { storageKey } = opts
+  const { storageKey, isValidItem } = opts
 
-  const initial = storageKey ? loadFromStorage<T>(storageKey) : []
+  const initial = storageKey ? loadFromStorage<T>(storageKey, isValidItem) : []
   const items = ref(initial) as Ref<T[]>
 
   const ids = computed(() => items.value.map((t) => t.id))
