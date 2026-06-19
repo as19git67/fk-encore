@@ -15,6 +15,7 @@ import { useModuleBack } from '../../composables/useModuleBack'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useAccountsStore } from '../../stores/finance/accounts'
 import { useTagsStore } from '../../stores/finance/tags'
+import { useTxSelectionStore } from '../../stores/finance/selection'
 import type { MandateHistoryItem, Transaction } from '../../api/finance'
 import * as api from '../../api/finance'
 import { lookupBtcCodeDe } from '../../utils/btcCodes'
@@ -25,6 +26,7 @@ const { goBack } = useModuleBack('/finanzen', 'finance-overview')
 const txStore = useTransactionsStore()
 const accountsStore = useAccountsStore()
 const tagsStore = useTagsStore()
+const selectionStore = useTxSelectionStore()
 
 const tx = ref<Transaction | null>(null)
 const newTag = ref<string[]>([])
@@ -49,6 +51,13 @@ const numFormAmount = computed({
 
 const account = computed(() => tx.value ? accountsStore.byId(tx.value.account_id) : undefined)
 const isCash = computed(() => account.value?.type_kind === 'bargeld')
+
+const inBasket = computed(() => !!tx.value && selectionStore.has(tx.value.id))
+
+function toggleBasket() {
+  if (!tx.value) return
+  selectionStore.toggle(tx.value)
+}
 
 function toIso(d: Date): string {
   return toLocalIsoDate(d)
@@ -440,6 +449,18 @@ const extractedFields = computed(() => {
         @click="goBack"
       />
       <h1>{{ tx?.counterparty || 'Buchung' }}</h1>
+      <Button
+        v-if="tx"
+        v-tooltip.bottom="inBasket ? 'Aus Basket entfernen' : 'In Basket legen'"
+        :icon="inBasket ? 'pi pi-times-circle' : 'pi pi-shopping-cart'"
+        :severity="inBasket ? 'success' : 'secondary'"
+        :aria-label="inBasket ? 'Aus Basket entfernen' : 'In Basket legen'"
+        :aria-pressed="inBasket"
+        size="small"
+        text
+        rounded
+        @click="toggleBasket"
+      />
       <Button
         v-if="tx"
         label="Speichern"

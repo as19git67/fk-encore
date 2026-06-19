@@ -13,9 +13,14 @@ import { useSelection } from '../../composables/useSelection'
  * display currency) stay here because they only make sense for
  * transactions.
  */
+
 export const useTxSelectionStore = defineStore('finance.txSelection', () => {
   const selection = useSelection<Transaction>({
     storageKey: 'finance.txSelection.v1',
+    isValidItem: (item) =>
+      !!item &&
+      typeof item === 'object' &&
+      typeof (item as Transaction).id === 'number',
   })
 
   const sum = computed(() =>
