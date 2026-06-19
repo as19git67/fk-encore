@@ -628,6 +628,26 @@ export async function deleteTransaction(id: number): Promise<{ deleted: boolean 
   return apiFetch(`/finance/transactions/${id}`, { method: 'DELETE' })
 }
 
+export interface BatchNoticeInput {
+  transaction_ids: number[]
+  notice: string
+  mode: 'replace' | 'append'
+}
+
+export interface BatchNoticeResponse {
+  affected_transactions: number
+  skipped_unauthorized: number
+}
+
+export async function batchNotice(
+  input: BatchNoticeInput,
+): Promise<BatchNoticeResponse> {
+  return apiFetch('/finance/transactions/batch-notice', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
 export interface RecentRecipient {
   counterparty: string
   tags: string[]
