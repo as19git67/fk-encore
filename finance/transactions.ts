@@ -1081,6 +1081,166 @@ export const batchNotice = api(
   },
 );
 
+// CSV-Export — pull the basket out as a spreadsheet
+// -----------------------------------------------------------------------
+
+const CSV_COLUMNS = [
+  "id",
+  "booking_date",
+  "account_iban",
+  "counterparty",
+  "purpose",
+  "amount",
+  "currency_code",
+  "tags",
+] as const;
+
+/** RFC 4180 escaping: wrap in quotes when needed, double internal quotes. */
+export function csvEscapeField(value: string | null | undefined): string {
+  if (value === null || value === undefined) return "";
+  const s = String(value);
+  if (/[",\n\r]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+export function formatCsvRow(values: Array<string | null | undefined>): string {
+  return values.map(csvEscapeField).join(",") + "\n";
+}
+
+function parseIdsParam(raw: string | null): number[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isInteger(n) && n > 0);
+}
+
+export const exportTransactions = api.raw(
+  {
+    expose: true,
+    method: "GET",
+    path: "/finance/transactions/export",
+    auth: true,
+  },
+  async (req, res) => {
+    const auth = getAuthData();
+    if (!auth) {
+      res.statusCode = 401;
+      res.end("Unauthorized");
+      return;
+    }
+    try {
+      requirePermission(auth, "finance.view");
+    } catch {
+      res.statusCode = 403;
+      res.end("Forbidden");
+      return;
+    }
+
+    const url = new URL(req.url ?? "/", "http://localhost");
+    const ids = parseIdsParam(url.searchParams.get("ids"));
+    if (ids.length === 0) {
+      res.statusCode = 400;
+      res.end("ids required");
+      return;
+    }
+
+    // ACL filter — readableAccountIds is fine here; CSV export only
+    // reveals what the caller could already see in the list view.
+    const visibleIds = await readableAccountIds(auth);
+    let rows: Array<{
+      id: number;
+      booking_date: string | null;
+      counterparty: string | null;
+      purpose: string | null;
+      amount: string;
+      currency_code: string;
+      account_iban: string | null;
+    }>;
+    if (visibleIds === null) {
+      rows = await db
+        .select({
+          id: financeTransaction.id,
+          booking_date: financeTransaction.booking_date,
+          counterparty: financeTransaction.counterparty,
+          purpose: financeTransaction.purpose,
+          amount: financeTransaction.amount,
+          currency_code: financeTransaction.currency_code,
+          account_iban: financeAccount.iban,
+        })
+        .from(financeTransaction)
+        .innerJoin(
+          financeAccount,
+          eq(financeAccount.id, financeTransaction.account_id),
+        )
+        .where(inArray(financeTransaction.id, ids))
+        .orderBy(desc(financeTransaction.booking_date), desc(financeTransaction.id));
+    } else if (visibleIds.length === 0) {
+      rows = [];
+    } else {
+      rows = await db
+        .select({
+          id: financeTransaction.id,
+          booking_date: financeTransaction.booking_date,
+          counterparty: financeTransaction.counterparty,
+          purpose: financeTransaction.purpose,
+          amount: financeTransaction.amount,
+          currency_code: financeTransaction.currency_code,
+          account_iban: financeAccount.iban,
+        })
+        .from(financeTransaction)
+        .innerJoin(
+          financeAccount,
+          eq(financeAccount.id, financeTransaction.account_id),
+        )
+        .where(
+          and(
+            inArray(financeTransaction.id, ids),
+            inArray(financeTransaction.account_id, visibleIds),
+          ),
+        )
+        .orderBy(desc(financeTransaction.booking_date), desc(financeTransaction.id));
+    }
+
+    const tagsByTx = await annotateTags(rows.map((r) => r.id));
+
+    const today = new Date().toISOString().slice(0, 10);
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="basket-${today}.csv"`,
+    );
+
+    // UTF-8 BOM so Excel opens umlauts correctly without the user
+    // having to pick the encoding manually.
+    res.write("﻿");
+    res.write(formatCsvRow([...CSV_COLUMNS]));
+
+    for (const row of rows) {
+      const userTags = (tagsByTx.get(row.id) ?? [])
+        .filter((t) => t.source === "user")
+        .map((t) => t.name)
+        .join("; ");
+      res.write(
+        formatCsvRow([
+          String(row.id),
+          toDateString(row.booking_date),
+          row.account_iban,
+          row.counterparty,
+          row.purpose,
+          row.amount,
+          row.currency_code,
+          userTags,
+        ]),
+      );
+    }
+    res.end();
+  },
+);
+
 // -----------------------------------------------------------------------
 // Shared internals
 // -----------------------------------------------------------------------
