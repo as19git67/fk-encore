@@ -376,6 +376,50 @@ export async function listHoldings(
   return apiFetch(`/finance/accounts/${accountId}/holdings${qs ? '?' + qs : ''}`)
 }
 
+// Holdings history (Phase 1 of #439 / #428)
+
+export interface HoldingsHistoryPoint {
+  as_of: string
+  amount: string | null
+  price: string | null
+  value: string | null
+}
+
+export interface HoldingsHistoryPosition {
+  key: string
+  isin: string | null
+  wkn: string | null
+  name: string | null
+  currency: string | null
+  points: HoldingsHistoryPoint[]
+}
+
+export interface HoldingsHistoryTotal {
+  as_of: string
+  total_value: string
+  currency: string | null
+}
+
+export interface HoldingsHistoryResponse {
+  totals: HoldingsHistoryTotal[]
+  positions: HoldingsHistoryPosition[]
+  from: string | null
+  to: string | null
+}
+
+export async function getHoldingsHistory(
+  accountId: number,
+  opts: { from?: string; to?: string } = {},
+): Promise<HoldingsHistoryResponse> {
+  const params = new URLSearchParams()
+  if (opts.from) params.set('from', opts.from)
+  if (opts.to) params.set('to', opts.to)
+  const qs = params.toString()
+  return apiFetch(
+    `/finance/accounts/${accountId}/holdings/history${qs ? '?' + qs : ''}`,
+  )
+}
+
 // ----------------------------------------------------------------------
 // Overview (configurable landing page)
 // ----------------------------------------------------------------------
