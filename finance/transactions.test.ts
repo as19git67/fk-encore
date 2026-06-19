@@ -14,6 +14,7 @@ import {
   users,
 } from "../db/schema";
 import {
+  batchNotice,
   batchTag,
   createTransaction,
   getTransaction,
@@ -677,6 +678,128 @@ describe("finance/transactions — batchTag", () => {
     await expect(
       batchTag({ transaction_ids: [1] }),
     ).rejects.toThrow(/add \/ remove \/ replace/);
+  });
+});
+
+// ================= BATCH-NOTICE =================
+
+describe("finance/transactions — batchNotice", () => {
+  it("replace mode overwrites the notice on every selected transaction", async () => {
+    const { a } = await createAccounts();
+    const t1 = await insertTx(a);
+    const t2 = await insertTx(a, { booking_date: "2024-08-16" });
+    await db
+      .update(financeTransaction)
+      .set({ notice: "previous" })
+      .where(eq(financeTransaction.id, t1));
+    setAuth("7", ["finance.view"]);
+    await grant(a, 7, "read");
+
+    const res = await batchNotice({
+      transaction_ids: [t1, t2],
+      notice: "Geschäftsessen",
+      mode: "replace",
+    });
+    expect(res).toEqual({
+      affected_transactions: 2,
+      skipped_unauthorized: 0,
+    });
+    const after = await db
+      .select({ id: financeTransaction.id, notice: financeTransaction.notice })
+      .from(financeTransaction)
+      .where(inArray(financeTransaction.id, [t1, t2]));
+    expect(after.every((r) => r.notice === "Geschäftsessen")).toBe(true);
+  });
+
+  it("replace mode with empty notice clears the field", async () => {
+    const { a } = await createAccounts();
+    const t1 = await insertTx(a);
+    await db
+      .update(financeTransaction)
+      .set({ notice: "alt" })
+      .where(eq(financeTransaction.id, t1));
+    setAuth("7", ["finance.view"]);
+    await grant(a, 7, "read");
+
+    await batchNotice({
+      transaction_ids: [t1],
+      notice: "   ",
+      mode: "replace",
+    });
+    const [row] = await db
+      .select({ notice: financeTransaction.notice })
+      .from(financeTransaction)
+      .where(eq(financeTransaction.id, t1));
+    expect(row?.notice).toBeNull();
+  });
+
+  it("append mode joins onto the existing notice with a blank-line separator", async () => {
+    const { a } = await createAccounts();
+    const tWithExisting = await insertTx(a);
+    const tEmpty = await insertTx(a, { booking_date: "2024-08-16" });
+    await db
+      .update(financeTransaction)
+      .set({ notice: "ursprünglich" })
+      .where(eq(financeTransaction.id, tWithExisting));
+    setAuth("7", ["finance.view"]);
+    await grant(a, 7, "read");
+
+    await batchNotice({
+      transaction_ids: [tWithExisting, tEmpty],
+      notice: "Nachtrag",
+      mode: "append",
+    });
+    const after = await db
+      .select({ id: financeTransaction.id, notice: financeTransaction.notice })
+      .from(financeTransaction)
+      .where(inArray(financeTransaction.id, [tWithExisting, tEmpty]));
+    const map = new Map(after.map((r) => [r.id, r.notice]));
+    expect(map.get(tWithExisting)).toBe("ursprünglich\n\nNachtrag");
+    // Empty-existing case falls through to just the new text.
+    expect(map.get(tEmpty)).toBe("Nachtrag");
+  });
+
+  it("reports skipped_unauthorized for ids outside the caller's ACL", async () => {
+    const { a, b } = await createAccounts();
+    const t1 = await insertTx(a);
+    const t2 = await insertTx(b);
+    setAuth("7", ["finance.view"]);
+    await grant(a, 7, "read");
+
+    const res = await batchNotice({
+      transaction_ids: [t1, t2],
+      notice: "Test",
+      mode: "replace",
+    });
+    expect(res).toEqual({
+      affected_transactions: 1,
+      skipped_unauthorized: 1,
+    });
+  });
+
+  it("rejects empty append notice", async () => {
+    setAuth("1", ["finance.view", "finance.admin"]);
+    await expect(
+      batchNotice({ transaction_ids: [1], notice: "  ", mode: "append" }),
+    ).rejects.toThrow(/non-empty/);
+  });
+
+  it("rejects empty transaction_ids", async () => {
+    setAuth("1", ["finance.view", "finance.admin"]);
+    await expect(
+      batchNotice({ transaction_ids: [], notice: "x", mode: "replace" }),
+    ).rejects.toThrow(/transaction_ids required/);
+  });
+
+  it("rejects invalid mode", async () => {
+    setAuth("1", ["finance.view", "finance.admin"]);
+    await expect(
+      batchNotice({
+        transaction_ids: [1],
+        notice: "x",
+        mode: "wat" as "replace",
+      }),
+    ).rejects.toThrow(/mode must be/);
   });
 });
 
