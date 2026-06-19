@@ -6,7 +6,7 @@
  * the DTOs in finance/*.ts.
  */
 
-import { apiFetch } from './client'
+import { apiFetch, API_BASE_URL } from './client'
 
 // ----------------------------------------------------------------------
 // Bankcontacts
@@ -646,6 +646,37 @@ export async function batchNotice(
     method: 'POST',
     body: JSON.stringify(input),
   })
+}
+
+/**
+ * Fetches the CSV export for `ids` and triggers a browser download.
+ * The endpoint streams text/csv with a UTF-8 BOM so Excel opens
+ * umlauts correctly; we read it as a Blob, build an object URL, and
+ * click a hidden anchor.
+ */
+export async function downloadTransactionsCsv(ids: number[]): Promise<void> {
+  if (ids.length === 0) return
+  const token = localStorage.getItem('auth_token')
+  const url = `${API_BASE_URL}/finance/transactions/export?ids=${ids.join(',')}`
+  const resp = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  })
+  if (!resp.ok) {
+    throw new Error(`Export fehlgeschlagen (${resp.status})`)
+  }
+  const blob = await resp.blob()
+  const disposition = resp.headers.get('Content-Disposition') ?? ''
+  const match = /filename="([^"]+)"/.exec(disposition)
+  const filename =
+    match?.[1] ?? `basket-${new Date().toISOString().slice(0, 10)}.csv`
+  const objectUrl = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = objectUrl
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(objectUrl)
 }
 
 export interface RecentRecipient {
