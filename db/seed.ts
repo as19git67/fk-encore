@@ -26,6 +26,7 @@ export async function seed(db: any): Promise<void> {
     { name: "Photo User", description: "Access to the photos module" },
     { name: "Dokumente User", description: "Access to the documents module" },
     { name: "Finance User", description: "Access to the finance module" },
+    { name: "Label User", description: "Access to the label printing module" },
   ];
 
   for (const role of defaultRoles) {
@@ -77,6 +78,10 @@ export async function seed(db: any): Promise<void> {
     { key: "finance.admin", description: "Finance admin (ACL bypass, data import)" },
     // --- POI detection / OSM admin (Epic #383) ---
     { key: "osm.admin", description: "Manage self-hosted PostGIS region imports for reverse geocoding + POI lookup" },
+    // --- Label module ---
+    { key: "module.label", description: "Enable label printing module" },
+    { key: "label.view", description: "View label module and select a printer" },
+    { key: "label.print", description: "Print labels to a CUPS printer" },
   ];
 
   // Permissions that are NEVER auto-assigned to the Admin role.
@@ -156,6 +161,11 @@ export async function seed(db: any): Promise<void> {
       "module.finance",
       "finance.view",
       "finance.accounts.manage",
+    ],
+    "Label User": [
+      "module.label",
+      "label.view",
+      "label.print",
     ],
   };
 
