@@ -404,6 +404,12 @@ function togglePositionHistory(h: Holding) {
   expandedPositionKey.value = expandedPositionKey.value === key ? null : key
 }
 
+const expandedPosition = computed<Holding | null>(() => {
+  const key = expandedPositionKey.value
+  if (!key) return null
+  return holdings.value.find((h) => (h.isin || h.wkn || h.name || '') === key) ?? null
+})
+
 function positionSeries(h: Holding): HoldingsHistoryPosition | null {
   if (!history.value) return null
   const key = h.isin || h.wkn || h.name || ''
@@ -921,63 +927,25 @@ function goBack() {
             </tr>
           </thead>
           <tbody>
-            <template v-for="h in holdings" :key="h.id">
-              <tr
-                class="holdings-row"
-                :class="{
-                  'holdings-row-expanded':
-                    expandedPositionKey === (h.isin || h.wkn || h.name || ''),
-                }"
-                @click="togglePositionHistory(h)"
-              >
-                <td class="holdings-col-name">
-                  <span class="holdings-name">{{ h.name || '–' }}</span>
-                  <span class="holdings-isin">{{ h.isin || h.wkn || '' }}</span>
-                </td>
-                <td class="holdings-col-num">{{ formatAmount(h.amount) }}</td>
-                <td class="holdings-col-num">{{ formatCurrency(h.price, h.currency ?? undefined) }}</td>
-                <td class="holdings-col-num holdings-value">{{ formatCurrency(h.value, h.currency ?? undefined) }}</td>
-                <td class="holdings-col-num">{{ holdingShare(h) }}</td>
-              </tr>
-              <tr
-                v-if="expandedPositionKey === (h.isin || h.wkn || h.name || '')"
-                class="holdings-history-row"
-              >
-                <td colspan="5">
-                  <div class="holdings-history-head">
-                    <span class="holdings-history-label">Verlauf</span>
-                    <div class="holdings-history-toggle">
-                      <Button
-                        :label="sparklineMetric === 'value' ? 'Wert' : 'Kurs'"
-                        size="small"
-                        text
-                        @click.stop="
-                          sparklineMetric =
-                            sparklineMetric === 'value' ? 'price' : 'value'
-                        "
-                      />
-                    </div>
-                  </div>
-                  <div
-                    v-if="
-                      sparklineData(positionSeries(h)) &&
-                      positionSeries(h)!.points.length >= 2
-                    "
-                    class="holdings-sparkline-wrap"
-                  >
-                    <Chart
-                      type="line"
-                      :data="sparklineData(positionSeries(h))!"
-                      :options="sparklineOptions(positionSeries(h))"
-                      class="holdings-sparkline"
-                    />
-                  </div>
-                  <p v-else class="holdings-history-empty">
-                    Noch keine Verlaufs-Datenpunkte für diese Position.
-                  </p>
-                </td>
-              </tr>
-            </template>
+            <tr
+              v-for="h in holdings"
+              :key="h.id"
+              class="holdings-row"
+              :class="{
+                'holdings-row-expanded':
+                  expandedPositionKey === (h.isin || h.wkn || h.name || ''),
+              }"
+              @click="togglePositionHistory(h)"
+            >
+              <td class="holdings-col-name">
+                <span class="holdings-name">{{ h.name || '–' }}</span>
+                <span class="holdings-isin">{{ h.isin || h.wkn || '' }}</span>
+              </td>
+              <td class="holdings-col-num">{{ formatAmount(h.amount) }}</td>
+              <td class="holdings-col-num">{{ formatCurrency(h.price, h.currency ?? undefined) }}</td>
+              <td class="holdings-col-num holdings-value">{{ formatCurrency(h.value, h.currency ?? undefined) }}</td>
+              <td class="holdings-col-num">{{ holdingShare(h) }}</td>
+            </tr>
           </tbody>
           <tfoot>
             <tr>
@@ -987,6 +955,48 @@ function goBack() {
             </tr>
           </tfoot>
         </table>
+      </div>
+
+      <!-- Per-position history panel (rendered outside the scrollable
+           table-wrap so the chart sizes to the viewport rather than the
+           table's intrinsic width on narrow screens). -->
+      <div
+        v-if="expandedPosition"
+        class="holdings-history-panel"
+      >
+        <div class="holdings-history-head">
+          <span class="holdings-history-label">
+            Verlauf — {{ expandedPosition.name || expandedPosition.isin || expandedPosition.wkn || '' }}
+          </span>
+          <div class="holdings-history-toggle">
+            <Button
+              :label="sparklineMetric === 'value' ? 'Wert' : 'Kurs'"
+              size="small"
+              text
+              @click.stop="
+                sparklineMetric =
+                  sparklineMetric === 'value' ? 'price' : 'value'
+              "
+            />
+          </div>
+        </div>
+        <div
+          v-if="
+            sparklineData(positionSeries(expandedPosition)) &&
+            positionSeries(expandedPosition)!.points.length >= 2
+          "
+          class="holdings-sparkline-wrap"
+        >
+          <Chart
+            type="line"
+            :data="sparklineData(positionSeries(expandedPosition))!"
+            :options="sparklineOptions(positionSeries(expandedPosition))"
+            class="holdings-sparkline"
+          />
+        </div>
+        <p v-else class="holdings-history-empty">
+          Noch keine Verlaufs-Datenpunkte für diese Position.
+        </p>
       </div>
     </section>
 
@@ -1407,6 +1417,10 @@ function goBack() {
 
 .holdings-section {
   margin-bottom: 1.5rem;
+  /* Flex children default to min-width:auto (= content size). Without
+     this the nowrap number cells would force the section — and the
+     whole .page column — wider than the viewport on portrait. */
+  min-width: 0;
 }
 .holdings-title {
   font-size: 1rem;
@@ -1419,13 +1433,15 @@ function goBack() {
   font-size: 0.85rem;
 }
 .holdings-table-wrap {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
+  /* No horizontal scroll — narrow viewports shrink the table via the
+     mobile rules below (smaller font/padding, hidden share column). */
+  width: 100%;
 }
 .holdings-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.85rem;
+  table-layout: auto;
 }
 .holdings-table th {
   text-align: left;
@@ -1448,12 +1464,10 @@ function goBack() {
   text-align: right !important;
   white-space: nowrap;
 }
-.holdings-col-name {
-  min-width: 120px;
-}
 .holdings-name {
   display: block;
   font-weight: 500;
+  word-break: break-word;
 }
 .holdings-isin {
   display: block;
@@ -1472,9 +1486,38 @@ function goBack() {
 .holdings-row-expanded {
   background: var(--p-content-hover-background);
 }
-.holdings-history-row td {
+
+@media (max-width: 640px) {
+  .holdings-table {
+    font-size: 0.78rem;
+  }
+  .holdings-table th,
+  .holdings-table td {
+    padding: 0.35rem 0.35rem;
+  }
+  /* "Anteil" is redundant with "Wert" on the smallest screens and is
+     the first thing to drop to fit the table without horizontal scroll. */
+  .holdings-table th:nth-child(5),
+  .holdings-table td:nth-child(5) {
+    display: none;
+  }
+  /* Allow numeric cells to break onto a second line in portrait — without
+     this, nowrap forces the table wider than the viewport. */
+  .holdings-table .holdings-col-num {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .holdings-isin {
+    font-size: 0.7rem;
+    overflow-wrap: anywhere;
+  }
+}
+
+.holdings-history-panel {
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.75rem 0.75rem;
   background: var(--p-content-hover-background);
-  padding: 0.5rem 0.6rem 0.75rem;
+  border-radius: 0.4rem;
 }
 .holdings-history-head {
   display: flex;
