@@ -11,7 +11,7 @@ import crypto from "crypto";
 import { api, APIError, type Query } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
-import { asc, and, desc, eq, gte, ilike, inArray, lte, lt, ne, or, sql } from "drizzle-orm";
+import { asc, and, desc, eq, gte, ilike, inArray, lte, lt, ne, or, sql, type SQL } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbFirst } from "../db/adapter";
 import {
@@ -178,6 +178,106 @@ interface ListQuery {
 
 /** Mirrors documents/document-ops.ts — keep in sync. */
 const LOW_CONFIDENCE_THRESHOLD = 0.6;
+
+/** Fields driving the document filter panel (category, tags, status, …). */
+interface DocumentFilterArgs {
+  category?: string;
+  tags?: string;
+  status?: string;
+  needs_review?: boolean;
+  sender?: string;
+  date_from?: string;
+  date_to?: string;
+  tax_relevant?: boolean;
+  subject_person_id?: number;
+}
+
+/**
+ * Translate the document filter panel into Drizzle WHERE conditions.
+ *
+ * Shared by `listDocuments` and `searchDocumentsEndpoint` so the same
+ * category/tag/status/sender/date/tax/Bezugsperson filters apply whether or
+ * not a full-text search term is present. The free-text `q` matching is left
+ * to each caller (list uses ILIKE, search uses FTS/embeddings).
+ *
+ * Returns `null` when a requested tag doesn't exist — the filter can then
+ * never match, so callers should short-circuit to an empty result.
+ */
+async function buildDocumentFilterConditions(
+  f: DocumentFilterArgs,
+): Promise<SQL[] | null> {
+  const conds: SQL[] = [];
+
+  if (f.status && f.status.length > 0) {
+    conds.push(eq(documents.status, f.status as any));
+  }
+  if (f.needs_review === true) {
+    const reviewCond = or(
+      eq(documents.status, "failed" as any),
+      and(
+        eq(documents.status, "ready" as any),
+        lt(documents.classification_confidence, LOW_CONFIDENCE_THRESHOLD),
+      ),
+    );
+    if (reviewCond) conds.push(reviewCond);
+  }
+  if (f.category && f.category.length > 0) {
+    const cat = await dbFirst<{ id: number }>(
+      db.select({ id: documentCategories.id }).from(documentCategories).where(eq(documentCategories.slug, f.category)),
+    );
+    conds.push(eq(documents.category_id, cat?.id ?? -1));
+  }
+  if (f.sender && f.sender.trim().length > 0) {
+    conds.push(ilike(documents.sender, `%${f.sender.trim()}%`));
+  }
+  if (f.date_from) {
+    conds.push(gte(documents.doc_date, f.date_from));
+  }
+  if (f.date_to) {
+    conds.push(lte(documents.doc_date, f.date_to));
+  }
+  if (f.tax_relevant === true) {
+    conds.push(eq(documents.tax_relevant, true));
+  } else if (f.tax_relevant === false) {
+    conds.push(eq(documents.tax_relevant, false));
+  }
+  if (f.subject_person_id != null) {
+    conds.push(
+      sql`EXISTS (
+        SELECT 1 FROM ${documentSubjectPersons}
+        WHERE ${documentSubjectPersons.document_id} = ${documents.id}
+          AND ${documentSubjectPersons.subject_person_id} = ${f.subject_person_id}
+      )`,
+    );
+  }
+
+  const tagList = f.tags
+    ? f.tags.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean)
+    : [];
+  if (tagList.length > 0) {
+    const tagRows = await dbAll<{ id: number; name: string }>(
+      db.select({ id: documentTags.id, name: documentTags.name })
+        .from(documentTags)
+        .where(inArray(documentTags.name, tagList)),
+    );
+    if (tagRows.length < tagList.length) {
+      return null;
+    }
+    // AND logic: a document must have ALL requested tags, so add one
+    // EXISTS(link for that tag_id) per tag.
+    for (const tagRow of tagRows) {
+      conds.push(
+        sql`EXISTS (
+          SELECT 1 FROM ${documentTagLinks}
+          WHERE ${documentTagLinks.document_id} = ${documents.id}
+            AND ${documentTagLinks.tag_id} = ${tagRow.id}
+        )`,
+      );
+    }
+  }
+
+  return conds;
+}
 
 // ─── Upload (raw) ───────────────────────────────────────────────────────────
 
@@ -401,25 +501,15 @@ export const listDocuments = api(
       ? []
       : [visibleDocumentsWhere(userId, groupIds)];
 
-    if (status && status.length > 0) {
-      conds.push(eq(documents.status, status as any));
+    const filterConds = await buildDocumentFilterConditions({
+      category, tags, status, needs_review, sender, date_from, date_to, tax_relevant, subject_person_id,
+    });
+    if (filterConds === null) {
+      // A requested tag doesn't exist — nothing can match.
+      return { items: [], total: 0 };
     }
-    if (needs_review === true) {
-      const reviewCond = or(
-        eq(documents.status, "failed" as any),
-        and(
-          eq(documents.status, "ready" as any),
-          lt(documents.classification_confidence, LOW_CONFIDENCE_THRESHOLD),
-        ),
-      );
-      if (reviewCond) conds.push(reviewCond);
-    }
-    if (category && category.length > 0) {
-      const cat = await dbFirst<{ id: number }>(
-        db.select({ id: documentCategories.id }).from(documentCategories).where(eq(documentCategories.slug, category)),
-      );
-      conds.push(eq(documents.category_id, cat?.id ?? -1));
-    }
+    conds.push(...filterConds);
+
     if (q && q.trim().length > 0) {
       const pat = `%${q.trim()}%`;
       const matchedByTitle = or(
@@ -429,54 +519,6 @@ export const listDocuments = api(
         ilike(documents.summary, pat),
       );
       if (matchedByTitle) conds.push(matchedByTitle);
-    }
-    if (sender && sender.trim().length > 0) {
-      conds.push(ilike(documents.sender, `%${sender.trim()}%`));
-    }
-    if (date_from) {
-      conds.push(gte(documents.doc_date, date_from));
-    }
-    if (date_to) {
-      conds.push(lte(documents.doc_date, date_to));
-    }
-    if (tax_relevant === true) {
-      conds.push(eq(documents.tax_relevant, true));
-    } else if (tax_relevant === false) {
-      conds.push(eq(documents.tax_relevant, false));
-    }
-    if (subject_person_id != null) {
-      conds.push(
-        sql`EXISTS (
-          SELECT 1 FROM ${documentSubjectPersons}
-          WHERE ${documentSubjectPersons.document_id} = ${documents.id}
-            AND ${documentSubjectPersons.subject_person_id} = ${subject_person_id}
-        )`,
-      );
-    }
-
-    const tagList = tags
-      ? tags.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean)
-      : [];
-    if (tagList.length > 0) {
-      const tagRows = await dbAll<{ id: number; name: string }>(
-        db.select({ id: documentTags.id, name: documentTags.name })
-          .from(documentTags)
-          .where(inArray(documentTags.name, tagList)),
-      );
-      if (tagRows.length < tagList.length) {
-        return { items: [], total: 0 };
-      }
-      // AND logic: a document must have ALL requested tags.
-      // For each tag, add EXISTS(link for that tag_id).
-      for (const tagRow of tagRows) {
-        conds.push(
-          sql`EXISTS (
-            SELECT 1 FROM ${documentTagLinks}
-            WHERE ${documentTagLinks.document_id} = ${documents.id}
-              AND ${documentTagLinks.tag_id} = ${tagRow.id}
-          )`,
-        );
-      }
     }
 
     const VALID_SORT_FIELDS: Record<string, any> = {
@@ -2265,6 +2307,17 @@ interface SearchQuery {
   q: Query<string>;
   mode?: Query<string>;
   limit?: Query<number>;
+  // Filter-panel parameters, mirrored from `ListQuery` so the filter applies
+  // to search results too (otherwise searching ignored every active filter).
+  category?: Query<string>;
+  tags?: Query<string>;
+  status?: Query<string>;
+  needs_review?: Query<boolean>;
+  sender?: Query<string>;
+  date_from?: Query<string>;
+  date_to?: Query<string>;
+  tax_relevant?: Query<boolean>;
+  subject_person_id?: Query<number>;
 }
 
 /**
@@ -2279,7 +2332,7 @@ interface SearchQuery {
  */
 export const searchDocumentsEndpoint = api(
   { expose: true, method: "GET", path: "/documents/search", auth: true },
-  async ({ q, mode, limit }: SearchQuery): Promise<SearchDocumentsResponse> => {
+  async ({ q, mode, limit, category, tags, status, needs_review, sender, date_from, date_to, tax_relevant, subject_person_id }: SearchQuery): Promise<SearchDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -2290,6 +2343,14 @@ export const searchDocumentsEndpoint = api(
     const lim = Math.min(Math.max(limit ?? 20, 1), 100);
     const query = (q ?? "").trim();
     if (query.length === 0) {
+      return { items: [], mode: resolvedMode, query };
+    }
+
+    const filterConds = await buildDocumentFilterConditions({
+      category, tags, status, needs_review, sender, date_from, date_to, tax_relevant, subject_person_id,
+    });
+    if (filterConds === null) {
+      // A requested tag doesn't exist — nothing can match.
       return { items: [], mode: resolvedMode, query };
     }
 
@@ -2337,7 +2398,7 @@ export const searchDocumentsEndpoint = api(
         })
         .from(documents)
         .leftJoin(documentCategories, eq(documents.category_id, documentCategories.id))
-        .where(and(visibleDocumentsWhere(userId, groupIds), inArray(documents.id, ids))),
+        .where(and(visibleDocumentsWhere(userId, groupIds), inArray(documents.id, ids), ...filterConds)),
     );
 
     const byId = new Map<number, (typeof rows)[number]>();

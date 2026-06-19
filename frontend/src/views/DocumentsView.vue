@@ -328,23 +328,28 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
+    const f = filter.applied.value
+    // Single source for the filter params so search and list stay in sync —
+    // searching used to drop every filter here. (#vxd1qh)
+    const filterParams = {
+      category: f.category,
+      tags: f.tags?.join(','),
+      status: f.status as DocumentStatus | undefined,
+      needs_review: f.needs_review,
+      sender: f.sender,
+      date_from: f.dateFrom,
+      date_to: f.dateTo,
+      tax_relevant: f.taxRelevant,
+      subject_person_id: f.subjectPersonId,
+    }
     const isSearch = q.value.trim().length > 0
     if (isSearch) {
-      const res = await searchDocuments(q.value.trim(), searchMode.value, 100)
+      const res = await searchDocuments(q.value.trim(), searchMode.value, 100, filterParams)
       items.value = res.items
     } else {
-      const f = filter.applied.value
       const s = sort.applied.value
       const res = await listDocuments({
-        category: f.category,
-        tags: f.tags?.join(','),
-        status: f.status as DocumentStatus | undefined,
-        needs_review: f.needs_review,
-        sender: f.sender,
-        date_from: f.dateFrom,
-        date_to: f.dateTo,
-        tax_relevant: f.taxRelevant,
-        subject_person_id: f.subjectPersonId,
+        ...filterParams,
         sort_by: s.field,
         sort_dir: s.direction,
         limit: 200,
