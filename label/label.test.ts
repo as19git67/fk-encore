@@ -219,7 +219,16 @@ describe("label endpoints", () => {
     const sent = recorded[0].body.toString("latin1");
     expect(sent).toContain("Hallo"); // document body
     expect(sent).toContain("copies"); // copies > 1 → job attribute
+    expect(sent).toContain("page-left"); // default left margin
     expect(await getLabelPrefs(userId)).toEqual({ printer: "A" });
+  });
+
+  it("omits the left margin when CUPS_LABEL_LEFT_MARGIN_PT=0", async () => {
+    process.env.CUPS_LABEL_LEFT_MARGIN_PT = "0";
+    await startStub(() => ({ body: ippHeader(0x0000) }));
+    await endpoints.print({ text: "Hallo", printer: "A" });
+    expect(recorded[0].body.toString("latin1")).not.toContain("page-left");
+    delete process.env.CUPS_LABEL_LEFT_MARGIN_PT;
   });
 
   it("print requires the label.print permission", async () => {

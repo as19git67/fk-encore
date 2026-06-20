@@ -118,6 +118,16 @@ describe("ipp — request encoding", () => {
     });
     expect(many.toString("latin1")).toContain("copies");
   });
+
+  it("emits a page-left job attribute only when leftMarginPt > 0", () => {
+    const base = { printerUri: "ipp://h/printers/p", user: "u", jobName: "j", text: "x" };
+    expect(buildPrintJobRequest({ ...base }).toString("latin1")).not.toContain(
+      "page-left",
+    );
+    expect(
+      buildPrintJobRequest({ ...base, leftMarginPt: 1 }).toString("latin1"),
+    ).toContain("page-left");
+  });
 });
 
 describe("ipp — response parsing", () => {

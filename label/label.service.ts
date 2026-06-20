@@ -205,6 +205,20 @@ export interface PrintLabelInput {
   user: string;
 }
 
+const DEFAULT_LEFT_MARGIN_PT = 1;
+
+/**
+ * Left print margin in points (1 pt ≈ 4 px at 300 dpi) so the text isn't
+ * flush against the label's left edge. Configurable via
+ * CUPS_LABEL_LEFT_MARGIN_PT; set it to 0 to disable. Defaults to 1 pt.
+ */
+export function getLeftMarginPt(): number {
+  const raw = process.env.CUPS_LABEL_LEFT_MARGIN_PT?.trim();
+  if (raw === undefined || raw === "") return DEFAULT_LEFT_MARGIN_PT;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 /** Submit a text label to a CUPS queue. Throws on rejection. */
 export async function printLabel(input: PrintLabelInput): Promise<void> {
   const base = getCupsBaseUrl();
@@ -217,6 +231,7 @@ export async function printLabel(input: PrintLabelInput): Promise<void> {
     jobName: "fk-encore label",
     text: input.text,
     copies: input.copies,
+    leftMarginPt: getLeftMarginPt(),
     requestId: nextRequestId(),
   });
 

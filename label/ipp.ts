@@ -147,6 +147,12 @@ export interface PrintJobOptions {
   text: string;
   /** Number of copies (≥ 1). Emitted as the IPP `copies` job attribute. */
   copies?: number;
+  /**
+   * Left print margin in points (1 pt = 1/72"). Emitted as the CUPS
+   * `page-left` option so the text isn't flush against the label edge.
+   * Omitted/0 → no margin attribute.
+   */
+  leftMarginPt?: number;
   requestId?: number;
 }
 
@@ -167,9 +173,11 @@ export function buildPrintJobRequest(opts: PrintJobOptions): Buffer {
   w.strAttr(VTAG_MIME_MEDIA_TYPE, "document-format", "text/plain");
 
   const copies = opts.copies ?? 1;
-  if (copies > 1) {
+  const leftMargin = opts.leftMarginPt ?? 0;
+  if (copies > 1 || leftMargin > 0) {
     w.delimiter(TAG_JOB_ATTRIBUTES);
-    w.intAttr(VTAG_INTEGER, "copies", copies);
+    if (copies > 1) w.intAttr(VTAG_INTEGER, "copies", copies);
+    if (leftMargin > 0) w.intAttr(VTAG_INTEGER, "page-left", leftMargin);
   }
 
   w.delimiter(TAG_END_OF_ATTRIBUTES);
