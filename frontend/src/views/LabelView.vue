@@ -89,6 +89,10 @@ const labelOptions = computed(() =>
   })),
 )
 
+// Live preview in the textarea: font size scales inversely with cpi (10 cpi ≈
+// base size), and the alignment mirrors the print alignment.
+const previewFontRem = computed(() => Math.round((10 / selectedFont.value.cpi) * 110) / 100)
+
 // Enforce the line cap: trim extra lines when the user types/pastes too many
 // or switches to a larger font that allows fewer lines.
 watch([text, maxLines], () => {
@@ -218,6 +222,7 @@ onMounted(() => {
           :rows="maxLines"
           placeholder="Text für das Label…"
           :disabled="printing"
+          :style="{ fontSize: previewFontRem + 'rem', textAlign: align, lineHeight: '1.25' }"
         />
         <small class="hint-muted">max. {{ maxLines }} Zeilen bei dieser Schriftgröße</small>
       </label>
