@@ -29,10 +29,18 @@ import {
 
 const DEFAULT_CUPS_URL = "http://localhost:631";
 
-/** Base URL of the CUPS server, normalized without a trailing slash. */
+/**
+ * Base URL of the CUPS server, normalized: a scheme is added when missing
+ * (CUPS speaks HTTP) and any trailing slash is stripped. So a bare
+ * `scanner.schegg.net:631` becomes `http://scanner.schegg.net:631` rather
+ * than a malformed URL that makes fetch() fail.
+ */
 export function getCupsBaseUrl(): string {
   const raw = process.env.CUPS_SERVER_URL?.trim();
-  const url = raw && raw.length > 0 ? raw : DEFAULT_CUPS_URL;
+  let url = raw && raw.length > 0 ? raw : DEFAULT_CUPS_URL;
+  if (!/^https?:\/\//i.test(url)) {
+    url = "http://" + url;
+  }
   return url.replace(/\/+$/, "");
 }
 
@@ -68,8 +76,13 @@ async function ippRequest(path: string, body: Buffer): Promise<Buffer> {
       body,
     });
   } catch (err) {
+    // undici wraps the real failure ("fetch failed") and keeps the useful
+    // detail (ENOTFOUND / ECONNREFUSED / ETIMEDOUT …) on `.cause`. Surface
+    // it so DNS vs. connection vs. timeout is distinguishable.
+    const e = err as { message?: string; cause?: { code?: string; message?: string } };
+    const detail = e?.cause?.code || e?.cause?.message || e?.message || String(err);
     throw APIError.unavailable(
-      `CUPS-Server nicht erreichbar (${getCupsBaseUrl()}): ${(err as Error).message}`,
+      `CUPS-Server nicht erreichbar (${getCupsBaseUrl()}): ${detail}`,
     );
   }
   if (!res.ok) {

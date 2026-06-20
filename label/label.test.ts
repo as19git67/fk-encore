@@ -4,7 +4,7 @@ import { getAuthData } from "~encore/auth";
 import db from "../db/database";
 import { users } from "../db/schema";
 import { eq } from "drizzle-orm";
-import { getLabelPrefs, setLabelPrefs, listPrinters } from "./label.service";
+import { getLabelPrefs, setLabelPrefs, listPrinters, getCupsBaseUrl } from "./label.service";
 import * as endpoints from "./label";
 
 function setAuth(userID: string, perms: string[]) {
@@ -115,6 +115,32 @@ describe("label.service — listPrinters", () => {
   it("throws unavailable when the CUPS server is unreachable", async () => {
     global.fetch = vi.fn(() => Promise.reject(new Error("ECONNREFUSED"))) as any;
     await expect(listPrinters()).rejects.toThrow(/nicht erreichbar/);
+  });
+
+  it("surfaces the underlying cause code (e.g. ENOTFOUND)", async () => {
+    const wrapped = Object.assign(new Error("fetch failed"), {
+      cause: { code: "ENOTFOUND" },
+    });
+    global.fetch = vi.fn(() => Promise.reject(wrapped)) as any;
+    await expect(listPrinters()).rejects.toThrow(/ENOTFOUND/);
+  });
+});
+
+describe("label.service — getCupsBaseUrl", () => {
+  const original = process.env.CUPS_SERVER_URL;
+  afterEach(() => {
+    if (original === undefined) delete process.env.CUPS_SERVER_URL;
+    else process.env.CUPS_SERVER_URL = original;
+  });
+
+  it("prepends http:// when the scheme is missing", () => {
+    process.env.CUPS_SERVER_URL = "scanner.schegg.net:631";
+    expect(getCupsBaseUrl()).toBe("http://scanner.schegg.net:631");
+  });
+
+  it("keeps an explicit scheme and strips a trailing slash", () => {
+    process.env.CUPS_SERVER_URL = "https://cups.local:631/";
+    expect(getCupsBaseUrl()).toBe("https://cups.local:631");
   });
 });
 
