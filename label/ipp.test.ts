@@ -128,6 +128,17 @@ describe("ipp — request encoding", () => {
       buildPrintJobRequest({ ...base, leftMarginPt: 1 }).toString("latin1"),
     ).toContain("page-left");
   });
+
+  it("emits cpi/lpi job attributes only when set", () => {
+    const base = { printerUri: "ipp://h/printers/p", user: "u", jobName: "j", text: "x" };
+    const none = buildPrintJobRequest({ ...base }).toString("latin1");
+    expect(none).not.toContain("cpi");
+    expect(none).not.toContain("lpi");
+
+    const sized = buildPrintJobRequest({ ...base, cpi: 7, lpi: 4 }).toString("latin1");
+    expect(sized).toContain("cpi");
+    expect(sized).toContain("lpi");
+  });
 });
 
 describe("ipp — response parsing", () => {

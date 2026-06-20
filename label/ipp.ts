@@ -153,6 +153,16 @@ export interface PrintJobOptions {
    * Omitted/0 → no margin attribute.
    */
   leftMarginPt?: number;
+  /**
+   * Characters per inch (CUPS `cpi` text option). Lower = larger font.
+   * Omitted/0 → CUPS default (10).
+   */
+  cpi?: number;
+  /**
+   * Lines per inch (CUPS `lpi` text option). Lower = taller lines / fewer
+   * lines per label. Omitted/0 → CUPS default (6).
+   */
+  lpi?: number;
   requestId?: number;
 }
 
@@ -174,10 +184,14 @@ export function buildPrintJobRequest(opts: PrintJobOptions): Buffer {
 
   const copies = opts.copies ?? 1;
   const leftMargin = opts.leftMarginPt ?? 0;
-  if (copies > 1 || leftMargin > 0) {
+  const cpi = opts.cpi ?? 0;
+  const lpi = opts.lpi ?? 0;
+  if (copies > 1 || leftMargin > 0 || cpi > 0 || lpi > 0) {
     w.delimiter(TAG_JOB_ATTRIBUTES);
     if (copies > 1) w.intAttr(VTAG_INTEGER, "copies", copies);
     if (leftMargin > 0) w.intAttr(VTAG_INTEGER, "page-left", leftMargin);
+    if (cpi > 0) w.intAttr(VTAG_INTEGER, "cpi", cpi);
+    if (lpi > 0) w.intAttr(VTAG_INTEGER, "lpi", lpi);
   }
 
   w.delimiter(TAG_END_OF_ATTRIBUTES);
