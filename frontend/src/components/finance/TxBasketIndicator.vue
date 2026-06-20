@@ -2,7 +2,6 @@
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
-import Badge from 'primevue/badge'
 import Drawer from 'primevue/drawer'
 import { useTxSelectionStore } from '../../stores/finance/selection'
 import type { Transaction } from '../../api/finance'
@@ -62,17 +61,12 @@ function openBatchTagEditor() {
       severity="secondary"
       text
       rounded
+      :badge="count > 0 ? String(count) : undefined"
+      badge-severity="info"
       aria-label="Basket öffnen"
       class="basket-button"
       @click="drawerVisible = true"
-    >
-      <Badge
-        v-if="count > 0"
-        :value="String(count)"
-        severity="info"
-        class="basket-badge"
-      />
-    </Button>
+    />
 
     <Drawer
       v-model:visible="drawerVisible"
@@ -158,13 +152,6 @@ function openBatchTagEditor() {
 .basket-indicator {
   position: relative;
   display: inline-flex;
-}
-
-.basket-button :deep(.p-badge) {
-  position: absolute;
-  top: -0.15rem;
-  right: -0.15rem;
-  pointer-events: none;
 }
 
 .drawer-header {

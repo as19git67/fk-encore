@@ -98,6 +98,21 @@ describe('useTxSelectionStore — session persistence', () => {
     expect(parsed.items.map((t) => t.id)).toEqual([7])
   })
 
+  it('keeps existing basket entries when another transaction is added', async () => {
+    const store = useTxSelectionStore()
+    store.add(makeTx(7))
+    store.add(makeTx(8))
+
+    expect(store.ids).toEqual([7, 8])
+    expect(store.count).toBe(2)
+
+    await nextTick()
+    const parsed = JSON.parse(window.sessionStorage.getItem(STORAGE_KEY)!) as {
+      items: Transaction[]
+    }
+    expect(parsed.items.map((t) => t.id)).toEqual([7, 8])
+  })
+
   it('persists on toggle/remove and clears storage on empty', async () => {
     const store = useTxSelectionStore()
     store.add(makeTx(1))
