@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed, watch } from 'vue'
 import Button from 'primevue/button'
 import Textarea from 'primevue/textarea'
 import InputNumber from 'primevue/inputnumber'
 import Select from 'primevue/select'
+import SelectButton from 'primevue/selectbutton'
 import Message from 'primevue/message'
 import { useAuthStore } from '../stores/auth'
 import {
@@ -16,15 +17,74 @@ import {
 const auth = useAuthStore()
 const canPrint = auth.hasPermission('label.print')
 
+// Font-size presets. Larger font (lower cpi/lpi) → fewer lines fit on the
+// label, so each preset caps the textarea line count accordingly. sampleRem
+// only scales the "Aa" preview on the selector button.
+interface FontPreset {
+  key: 'small' | 'medium' | 'large'
+  label: string
+  cpi: number
+  lpi: number
+  maxLines: number
+  sampleRem: number
+}
+const FONT_PRESETS: FontPreset[] = [
+  { key: 'small', label: 'Klein', cpi: 14, lpi: 8, maxLines: 8, sampleRem: 0.9 },
+  { key: 'medium', label: 'Mittel', cpi: 10, lpi: 6, maxLines: 6, sampleRem: 1.3 },
+  { key: 'large', label: 'Groß', cpi: 7, lpi: 4, maxLines: 4, sampleRem: 1.8 },
+]
+
+const ALIGN_OPTIONS = [
+  { label: 'Links', value: 'left', icon: 'pi pi-align-left' },
+  { label: 'Zentriert', value: 'center', icon: 'pi pi-align-center' },
+]
+
 const printers = ref<LabelPrinter[]>([])
 const selectedPrinter = ref<string | null>(null)
 const text = ref('')
 const copies = ref(1)
+const fontKey = ref<FontPreset['key']>('medium')
+const align = ref<'left' | 'center'>('left')
 
 const loading = ref(false)
 const printing = ref(false)
 const error = ref('')
 const info = ref('')
+
+const selectedFont = computed(
+  () => FONT_PRESETS.find((p) => p.key === fontKey.value) ?? FONT_PRESETS[1]!,
+)
+const maxLines = computed(() => selectedFont.value.maxLines)
+
+// Enforce the line cap: trim extra lines when the user types/pastes too many
+// or switches to a larger font that allows fewer lines.
+watch([text, maxLines], () => {
+  const lines = text.value.split('\n')
+  if (lines.length > maxLines.value) {
+    text.value = lines.slice(0, maxLines.value).join('\n')
+  }
+})
+
+// Remember the formatting choices locally (no backend round-trip needed).
+const LS_KEY = 'label_ui_prefs'
+function loadUiPrefs() {
+  try {
+    const raw = localStorage.getItem(LS_KEY)
+    if (!raw) return
+    const p = JSON.parse(raw)
+    if (FONT_PRESETS.some((f) => f.key === p.fontKey)) fontKey.value = p.fontKey
+    if (p.align === 'left' || p.align === 'center') align.value = p.align
+  } catch {
+    /* ignore corrupt prefs */
+  }
+}
+watch([fontKey, align], () => {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify({ fontKey: fontKey.value, align: align.value }))
+  } catch {
+    /* storage unavailable — non-fatal */
+  }
+})
 
 async function loadPrinters() {
   loading.value = true
@@ -77,6 +137,9 @@ async function handlePrint() {
       text: text.value,
       copies: copies.value || 1,
       printer: selectedPrinter.value,
+      cpi: selectedFont.value.cpi,
+      lpi: selectedFont.value.lpi,
+      align: align.value,
     })
     info.value =
       res.printed > 1
@@ -89,7 +152,10 @@ async function handlePrint() {
   }
 }
 
-onMounted(loadPrinters)
+onMounted(() => {
+  loadUiPrefs()
+  loadPrinters()
+})
 </script>
 
 <template>
@@ -97,9 +163,9 @@ onMounted(loadPrinters)
     <header class="page-header">
       <h1>Label drucken</h1>
       <p class="page-hint">
-        Text eingeben, Anzahl und Drucker wählen und auf <strong>Drucken</strong>
-        tippen. Der Text wird an den ausgewählten CUPS-Drucker gesendet
-        (z.&nbsp;B. DYMO LabelWriter&nbsp;450).
+        Text eingeben, Schriftgröße, Ausrichtung, Anzahl und Drucker wählen und
+        auf <strong>Drucken</strong> tippen. Der Text wird an den ausgewählten
+        CUPS-Drucker gesendet (z.&nbsp;B. DYMO LabelWriter&nbsp;450).
       </p>
     </header>
 
@@ -111,12 +177,52 @@ onMounted(loadPrinters)
         <span class="label">Text</span>
         <Textarea
           v-model="text"
-          :rows="5"
-          auto-resize
+          :rows="maxLines"
           placeholder="Text für das Label…"
           :disabled="printing"
         />
+        <small class="hint-muted">max. {{ maxLines }} Zeilen bei dieser Schriftgröße</small>
       </label>
+
+      <div class="field-row">
+        <div class="field field--font">
+          <span class="label">Schriftgröße</span>
+          <SelectButton
+            v-model="fontKey"
+            :options="FONT_PRESETS"
+            option-label="label"
+            option-value="key"
+            :allow-empty="false"
+            :disabled="printing"
+            aria-label="Schriftgröße"
+          >
+            <template #option="{ option }">
+              <span class="font-sample">
+                <span :style="{ fontSize: option.sampleRem + 'rem' }">Aa</span>
+                <small>{{ option.label }}</small>
+              </span>
+            </template>
+          </SelectButton>
+        </div>
+
+        <div class="field field--align">
+          <span class="label">Ausrichtung</span>
+          <SelectButton
+            v-model="align"
+            :options="ALIGN_OPTIONS"
+            option-label="label"
+            option-value="value"
+            :allow-empty="false"
+            :disabled="printing"
+            aria-label="Ausrichtung"
+          >
+            <template #option="{ option }">
+              <i :class="option.icon" aria-hidden="true" />
+              <span class="align-label">{{ option.label }}</span>
+            </template>
+          </SelectButton>
+        </div>
+      </div>
 
       <div class="field-row">
         <label class="field field--count">
@@ -240,6 +346,28 @@ onMounted(loadPrinters)
 .field--printer {
   flex: 1 1 16rem;
   min-width: 0;
+}
+.field--font,
+.field--align {
+  flex: 1 1 auto;
+}
+
+/* "Aa" sample on the font-size selector, scaled per preset. */
+.font-sample {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.1rem;
+  line-height: 1;
+  min-width: 2.5rem;
+}
+.font-sample small {
+  font-size: 0.7rem;
+  color: var(--p-text-muted-color);
+}
+.align-label {
+  margin-left: 0.4rem;
 }
 
 .printer-option {

@@ -30,6 +30,12 @@ export interface PrintLabelRequest {
   text: string
   copies?: number
   printer?: string
+  /** Characters per inch (font width). Lower = larger font. */
+  cpi?: number
+  /** Lines per inch (line height). Lower = fewer lines per label. */
+  lpi?: number
+  /** Horizontal text alignment on the label. */
+  align?: 'left' | 'center'
 }
 
 export function printLabel(req: PrintLabelRequest) {

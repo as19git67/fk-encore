@@ -203,9 +203,17 @@ export interface PrintLabelInput {
   text: string;
   copies: number;
   user: string;
+  /** Characters per inch (font width). Clamped to [4, 30]. */
+  cpi?: number;
+  /** Lines per inch (line height). Clamped to [2, 16]. */
+  lpi?: number;
+  /** Horizontal alignment of the text on the label. */
+  align?: "left" | "center";
 }
 
 const DEFAULT_LEFT_MARGIN_PT = 1;
+const DEFAULT_LABEL_WIDTH_MM = 85; // ~ DYMO large address label printable width
+const DEFAULT_CPI = 10; // CUPS text-filter default
 
 /**
  * Left print margin in points (1 pt ≈ 4 px at 300 dpi) so the text isn't
@@ -219,19 +227,63 @@ export function getLeftMarginPt(): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+/**
+ * Printable label width in millimetres, used to center text (columns =
+ * width × cpi). Configurable via CUPS_LABEL_WIDTH_MM. Defaults to 85 mm.
+ */
+export function getLabelWidthMm(): number {
+  const raw = process.env.CUPS_LABEL_WIDTH_MM?.trim();
+  const n = raw ? parseFloat(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_LABEL_WIDTH_MM;
+}
+
+function clampInt(value: number | undefined, min: number, max: number): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  const n = Math.floor(value);
+  if (!Number.isFinite(n)) return undefined;
+  return Math.min(Math.max(n, min), max);
+}
+
+/** Center each line by left-padding with spaces to the given column width. */
+export function centerText(text: string, columns: number): string {
+  if (columns <= 0) return text;
+  return text
+    .split("\n")
+    .map((line) => {
+      const len = line.length;
+      if (len >= columns) return line;
+      return " ".repeat(Math.floor((columns - len) / 2)) + line;
+    })
+    .join("\n");
+}
+
 /** Submit a text label to a CUPS queue. Throws on rejection. */
 export async function printLabel(input: PrintLabelInput): Promise<void> {
   const base = getCupsBaseUrl();
   const host = new URL(base).host;
   const printerUri = `ipp://${host}/printers/${input.printer}`;
 
+  const cpi = clampInt(input.cpi, 4, 30);
+  const lpi = clampInt(input.lpi, 2, 16);
+  const centered = input.align === "center";
+
+  let text = input.text;
+  if (centered) {
+    const columns = Math.floor((getLabelWidthMm() / 25.4) * (cpi ?? DEFAULT_CPI));
+    text = centerText(text, columns);
+  }
+
   const reqBuf = buildPrintJobRequest({
     printerUri,
     user: input.user,
     jobName: "fk-encore label",
-    text: input.text,
+    text,
     copies: input.copies,
-    leftMarginPt: getLeftMarginPt(),
+    cpi,
+    lpi,
+    // A left margin would offset the space-based centering, so drop it when
+    // centering.
+    leftMarginPt: centered ? 0 : getLeftMarginPt(),
     requestId: nextRequestId(),
   });
 

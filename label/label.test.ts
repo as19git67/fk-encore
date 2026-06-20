@@ -6,7 +6,13 @@ import { getAuthData } from "~encore/auth";
 import db from "../db/database";
 import { users } from "../db/schema";
 import { eq } from "drizzle-orm";
-import { getLabelPrefs, setLabelPrefs, listPrinters, getCupsBaseUrl } from "./label.service";
+import {
+  getLabelPrefs,
+  setLabelPrefs,
+  listPrinters,
+  getCupsBaseUrl,
+  centerText,
+} from "./label.service";
 import * as endpoints from "./label";
 
 function setAuth(userID: string, perms: string[]) {
@@ -229,6 +235,39 @@ describe("label endpoints", () => {
     await endpoints.print({ text: "Hallo", printer: "A" });
     expect(recorded[0].body.toString("latin1")).not.toContain("page-left");
     delete process.env.CUPS_LABEL_LEFT_MARGIN_PT;
+  });
+
+  it("forwards cpi/lpi font attributes", async () => {
+    await startStub(() => ({ body: ippHeader(0x0000) }));
+    await endpoints.print({ text: "Hi", printer: "A", cpi: 7, lpi: 4 });
+    const sent = recorded[0].body.toString("latin1");
+    expect(sent).toContain("cpi");
+    expect(sent).toContain("lpi");
+  });
+
+  it("center-pads the text and drops the left margin when align=center", async () => {
+    await startStub(() => ({ body: ippHeader(0x0000) }));
+    await endpoints.print({ text: "Hi", printer: "A", cpi: 10, align: "center" });
+    const sent = recorded[0].body.toString("latin1");
+    // The document body (after end-of-attributes) is indented with spaces.
+    expect(sent).toMatch(/ {2,}Hi/);
+    // Centering replaces the fixed left margin.
+    expect(sent).not.toContain("page-left");
+  });
+});
+
+describe("label.service — centerText", () => {
+  it("left-pads each line to center within the column count", () => {
+    expect(centerText("Hi", 10)).toBe("    Hi");
+    expect(centerText("abcd", 6)).toBe(" abcd");
+  });
+
+  it("leaves lines that are at least as wide as the columns untouched", () => {
+    expect(centerText("abcdef", 4)).toBe("abcdef");
+  });
+
+  it("centers each line independently", () => {
+    expect(centerText("Hi\nabcd", 8)).toBe("   Hi\n  abcd");
   });
 
   it("print requires the label.print permission", async () => {
