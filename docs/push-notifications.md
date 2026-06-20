@@ -199,7 +199,7 @@ active and independently prunable.
 - On `push`, parse the JSON payload and call
   `self.registration.showNotification(title, options)` with the icon,
   tag and `data.url` from the payload. Missing or malformed payloads
-  fall back to a generic "Vivanty" notification.
+  fall back to a generic "F4mil" notification.
 - On `notificationclick`, close the notification, then focus an
   existing window on our origin (navigating it to the payload's URL if
   the `navigate` method is available) or open a new one.

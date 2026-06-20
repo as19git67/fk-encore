@@ -5,7 +5,7 @@ import Foundation
 struct PhotoSyncPreferences {
     private init() {}
 
-    static let taskIdentifier = "dev.fk-encore.VivantyPhotos.photoSync"
+    static let taskIdentifier = "dev.fk-encore.F4milPhotos.photoSync"
 
     /// Sentinel id stored in `selectedAlbumIds` when the user picked the
     /// synthetic "Gesamte Mediathek" entry. `PhotoSyncService` treats it as

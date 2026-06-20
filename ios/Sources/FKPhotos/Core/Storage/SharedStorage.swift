@@ -1,12 +1,12 @@
 import Foundation
 
 /// Shared UserDefaults suite accessible by both the main app and the Share Extension
-/// via the App Group `group.dev.fk-encore.VivantyPhotos`.
+/// via the App Group `group.dev.fk-encore.F4milPhotos`.
 ///
 /// The main app mirrors the auth token and server URL here so the extension can
 /// make API calls without needing access to the main app's Keychain items.
 enum SharedStorage {
-    static let appGroupID        = "group.dev.fk-encore.VivantyPhotos"
+    static let appGroupID        = "group.dev.fk-encore.F4milPhotos"
     static let tokenKey          = "shared.auth_token"
     static let refreshTokenKey   = "shared.refresh_token"
     /// Access-token expiry as epoch seconds (Double). Lets the APIClient and the

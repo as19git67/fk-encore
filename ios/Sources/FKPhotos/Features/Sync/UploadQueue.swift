@@ -106,11 +106,11 @@ public struct UploadQueueItem: Codable, Identifiable, Sendable {
 /// Persistent upload queue shared between the main app and the Share Extension via the App Group container.
 ///
 /// The queue is stored as a JSON file in the App Group container so it survives app restarts
-/// and is accessible to both the main app and the VivantyShare extension.
+/// and is accessible to both the main app and the F4milShare extension.
 actor UploadQueue {
     static let shared = UploadQueue()
 
-    private static let appGroupID = "group.dev.fk-encore.VivantyPhotos"
+    private static let appGroupID = "group.dev.fk-encore.F4milPhotos"
     private static let queueFilename = "upload_queue.json"
     private static let tempDirName = "pending_uploads"
 

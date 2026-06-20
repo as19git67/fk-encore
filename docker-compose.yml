@@ -104,7 +104,7 @@ services:
       ADMIN_NAME: ${ADMIN_NAME:-Admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-changeme}   # override in .env!
       RP_ID: ${DEPLOY_RP_ID:-localhost}
-      RP_NAME: ${DEPLOY_RP_NAME:-Vivanty App}
+      RP_NAME: ${DEPLOY_RP_NAME:-F4mil App}
       RP_ORIGIN: ${DEPLOY_RP_ORIGIN:-http://localhost:8080}
       ENABLE_LOCAL_FACES: "true"
       FACE_DISTANCE_THRESHOLD: "0.42"

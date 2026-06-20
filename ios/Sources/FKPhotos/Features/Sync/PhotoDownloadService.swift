@@ -8,13 +8,13 @@ import ImageIO
 ///
 /// **Sync semantics**
 /// - New server photos are downloaded and added to the iOS album (same name).
-/// - Photos removed from a server album are moved to the "Vivanty Trash" iOS album.
+/// - Photos removed from a server album are moved to the "F4mil Trash" iOS album.
 /// - Favorite status is kept up to date on every run.
 /// - Description is embedded in the image's IPTC metadata on first download.
 actor PhotoDownloadService {
     static let shared = PhotoDownloadService()
 
-    static let trashAlbumName = "Vivanty Trash"
+    static let trashAlbumName = "F4mil Trash"
 
     private let monitor = NWPathMonitor()
     private let monitorQueue = DispatchQueue(label: "dev.fk-encore.DownloadNetworkMonitor")
