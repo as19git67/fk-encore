@@ -50,7 +50,7 @@ const app = createApp(App)
 
 app.use(createPinia())
 app.use(router)
-const VivantyPreset = definePreset(Aura, {
+const F4milPreset = definePreset(Aura, {
   semantic: {
     primary: {
       50: '{amber.50}',
@@ -71,7 +71,7 @@ const VivantyPreset = definePreset(Aura, {
 app.use(PrimeVue, {
   locale: buildPrimeVueLocale(),
   theme: {
-    preset: VivantyPreset,
+    preset: F4milPreset,
     options: {
       darkModeSelector: 'system',
     },

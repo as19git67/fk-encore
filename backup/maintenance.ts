@@ -32,7 +32,7 @@ export const MAINTENANCE_HTML = `<!DOCTYPE html>
 <html lang="de">
   <head>
     <meta charset="utf-8" />
-    <title>Wartung läuft — Vivanty</title>
+    <title>Wartung läuft — F4mil</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
       body { font-family: system-ui, -apple-system, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 1rem; color: #1f2937; }

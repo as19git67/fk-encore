@@ -33,7 +33,7 @@
 #   FK_BACKUP_TOKEN_FILE    path to token file,  default: ./backup-token next to
 #                           this script (that is where install-backup-hook.sh
 #                           places it — on a ZFS dataset, upgrade-safe)
-#   ZFS_DATASET             dataset for snapshot, default tank/vivanty
+#   ZFS_DATASET             dataset for snapshot, default tank/f4mil
 #   LABEL                   snapshot + dump label, default daily-<UTC timestamp>
 #   CURL_TIMEOUT            seconds per HTTP call, default 60
 #   READY_TIMEOUT_SEC       overall deadline for prep to reach phase=ready,
@@ -75,7 +75,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 FK_ENCORE_URL="${FK_ENCORE_URL:-http://localhost:8080}"
 FK_BACKUP_TOKEN_FILE="${FK_BACKUP_TOKEN_FILE:-$SCRIPT_DIR/backup-token}"
-ZFS_DATASET="${ZFS_DATASET:-tank/vivanty}"
+ZFS_DATASET="${ZFS_DATASET:-tank/f4mil}"
 LABEL="${LABEL:-daily-$(date -u +%Y%m%d-%H%M%S)}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-60}"
 READY_TIMEOUT_SEC="${READY_TIMEOUT_SEC:-7200}"

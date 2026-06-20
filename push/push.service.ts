@@ -284,7 +284,7 @@ export function buildFeedNotification(input: {
   const actor = input.actorName ?? "Jemand";
   const album = input.albumName ?? "einem Album";
 
-  let title = "Vivanty";
+  let title = "F4mil";
   let body = "";
   switch (input.kind) {
     case "photo_added": {

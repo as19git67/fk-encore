@@ -60,7 +60,7 @@ The full list of `DEPLOY_*` overrides:
 | `DEPLOY_HOST_PORT_WATCHTOWER` | `9000` | dito. |
 | `DEPLOY_PG_DATABASE` | `encore` | Application's primary DB. |
 | `DEPLOY_PG_EMBEDDINGS_DATABASE` | `embeddings` | Embedding service's DB. |
-| `DEPLOY_RP_ID` / `DEPLOY_RP_NAME` / `DEPLOY_RP_ORIGIN` / `DEPLOY_APP_URL` | `localhost` / `Vivanty App` / `http://localhost:8080` / `http://localhost:8080` | Passkey identity — don't change `RP_ID` after first user registers. |
+| `DEPLOY_RP_ID` / `DEPLOY_RP_NAME` / `DEPLOY_RP_ORIGIN` / `DEPLOY_APP_URL` | `localhost` / `F4mil App` / `http://localhost:8080` / `http://localhost:8080` | Passkey identity — don't change `RP_ID` after first user registers. |
 | `DEPLOY_DATA_ROOT` | `./data` | Bind-mount root for every persisted volume. |
 | `DEPLOY_INSIGHTFACE_START_PERIOD` | `180s` | Healthcheck grace for insightface — covers cold buffalo_l load. |
 | `DEPLOY_EMBEDDING_START_PERIOD` | `600s` | Healthcheck grace for embedding_service — covers CLIP + DINOv2 first-time download. |
@@ -180,7 +180,7 @@ Flow:
 1. The host cron calls `POST /internal/backup/start` — fk-encore pauses the
    scan workers, puts the cluster into backup mode via `pg_backup_start()`,
    and writes a `pg_dump` to `/mnt/backup/encore-<label>.dump`.
-2. The host runs `zfs snapshot -r tank/vivanty@<label>` — pgdata + photos
+2. The host runs `zfs snapshot -r tank/f4mil@<label>` — pgdata + photos
    + the dump that was just written are all consistently captured in the
    snapshot.
 3. The host cron calls `POST /internal/backup/stop` — `pg_backup_stop()`,
@@ -209,7 +209,7 @@ Run the installer from there:
 sudo /mnt/<dataset>/<backup-dir>/host-scripts/install-backup-hook.sh
 # or non-interactive:
 sudo /mnt/<dataset>/<backup-dir>/host-scripts/install-backup-hook.sh \
-    --dataset tank/vivanty
+    --dataset tank/f4mil
 ```
 
 Why this layout? TrueNAS SCALE replaces the entire root filesystem on
@@ -276,7 +276,7 @@ Two paths are supported:
 
 ```bash
 docker compose down
-sudo zfs rollback -r tank/vivanty@daily-20260413-030000
+sudo zfs rollback -r tank/f4mil@daily-20260413-030000
 docker compose up -d
 ```
 

@@ -1,4 +1,4 @@
-/* Vivanty Web Push service worker.
+/* F4mil Web Push service worker.
  *
  * Receives `push` events from the browser's push service and shows a
  * notification with the payload the backend sent. Clicking the
@@ -20,10 +20,10 @@ self.addEventListener('push', (event) => {
   try {
     payload = event.data ? event.data.json() : {}
   } catch (err) {
-    payload = { title: 'Vivanty', body: event.data ? event.data.text() : '' }
+    payload = { title: 'F4mil', body: event.data ? event.data.text() : '' }
   }
 
-  const title = payload.title || 'Vivanty'
+  const title = payload.title || 'F4mil'
   const options = {
     body: payload.body || '',
     icon: '/app/icon-192.png',

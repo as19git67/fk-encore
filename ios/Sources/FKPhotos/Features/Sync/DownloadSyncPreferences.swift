@@ -22,7 +22,7 @@ enum DownloadFavoritesFilter: String, CaseIterable {
 struct DownloadSyncPreferences {
     private init() {}
 
-    static let taskIdentifier = "dev.fk-encore.VivantyPhotos.photoDownload"
+    static let taskIdentifier = "dev.fk-encore.F4milPhotos.photoDownload"
 
     // MARK: - Keys
 
@@ -90,7 +90,7 @@ struct DownloadSyncPreferences {
     //   [albumId (String) : [serverPhotoId (String) : iOS localIdentifier (String)]]
     //
     // This lets us detect photos removed from a server album so we can move the
-    // corresponding iOS asset to "Vivanty Trash" rather than silently leaving it
+    // corresponding iOS asset to "F4mil Trash" rather than silently leaving it
     // in the synced album.
 
     static func loadDownloadedPhotos() -> [String: [String: String]] {

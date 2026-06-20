@@ -48,7 +48,7 @@ setup((app) => {
   const pinia = createPinia()
   app.use(pinia)
   app.use(router)
-  const VivantyPreset = definePreset(Aura, {
+  const F4milPreset = definePreset(Aura, {
     semantic: {
       primary: {
         50: '{amber.50}',
@@ -65,7 +65,7 @@ setup((app) => {
       },
     },
   })
-  app.use(PrimeVue, { theme: { preset: VivantyPreset } })
+  app.use(PrimeVue, { theme: { preset: F4milPreset } })
   app.use(ConfirmationService)
   app.directive('tooltip', Tooltip)
 
