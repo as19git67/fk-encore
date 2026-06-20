@@ -52,6 +52,7 @@ import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Chip from 'primevue/chip'
 import Dialog from 'primevue/dialog'
+import Menu from 'primevue/menu'
 import Message from 'primevue/message'
 import { useConfirm } from 'primevue/useconfirm'
 import VirtualGallery from '../components/VirtualGallery.vue'
@@ -307,6 +308,14 @@ function onToggleSelect(entry: GalleryGridEntry) {
   selectedIds.value = next
 }
 
+// Keep the selection controls present without permanently reserving a full
+// button row. The popup contains the same actions as the former action bar;
+// permissions and selection-dependent availability remain unchanged.
+const selectionMenu = ref<{ toggle: (event: Event) => void } | null>(null)
+function toggleSelectionMenu(event: Event) {
+  selectionMenu.value?.toggle(event)
+}
+
 const selectAllBusy = ref(false)
 const galleryTotal = ref(0)
 const allSelected = computed(() => galleryTotal.value > 0 && selectedCount.value === galleryTotal.value)
@@ -419,6 +428,34 @@ async function performBatchDelete(ids: number[]) {
     exitSelectMode()
   }
 }
+
+const selectionMenuItems = computed(() => {
+  const items: Array<Record<string, unknown>> = []
+  if (!allSelected.value) {
+    items.push({
+      label: galleryTotal.value > 0 ? `Alle (${galleryTotal.value}) auswählen` : 'Alle auswählen',
+      icon: 'pi pi-check-double',
+      disabled: selectAllBusy.value,
+      command: () => void selectAll(),
+    })
+  }
+  if (selectedCount.value === 0) return items
+
+  if (canUpload.value) items.push({ label: 'Zu Alben hinzufügen', icon: 'pi pi-book', command: openAlbumDialog })
+  if (canDelete.value) {
+    items.push(
+      { label: 'Als Favorit markieren', icon: 'pi pi-heart', disabled: curationBusy.value, command: () => void applyCurationToSelection('favorite') },
+      { label: 'Ausblenden', icon: 'pi pi-thumbs-down-fill', disabled: curationBusy.value, command: () => void applyCurationToSelection('hidden') },
+    )
+  }
+  if (canShowCollage.value) items.push({ label: 'Collage erstellen', icon: 'pi pi-images', command: openCollageDialog })
+  items.push({ label: 'Auswahl aufheben', icon: 'pi pi-replay', command: clearSelection })
+  if (canManageData.value) {
+    items.push({ separator: true })
+    items.push({ label: 'Ausgewählte Fotos löschen', icon: 'pi pi-trash', disabled: deleteBusy.value || curationBusy.value, command: deleteFromSelection })
+  }
+  return items
+})
 
 // ── Stacks (compare view) ───────────────────────────────────────────────────
 // The cache backs the per-stack click handler (tap on a stacked tile in
@@ -1617,87 +1654,38 @@ void refreshReviewSequence()
       </template>
     </FullscreenOverlay>
 
-    <!-- Selection action bar (mobile + desktop) -->
+    <!-- Compact selection tray. Actions stay available in the popup without
+         taking a full, multi-row strip away from the photo grid. -->
     <div v-if="selectMode" class="select-bar">
       <span class="select-count">
         <i class="pi pi-check-square" />
         {{
           selectedCount > 0
-            ? `${selectedCount} ausgewählt`
-            : 'Fotos antippen zum Auswählen'
+          ? `${selectedCount} ausgewählt`
+          : 'Fotos antippen zum Auswählen'
         }}
       </span>
       <div class="select-actions">
         <Button
-          v-if="!allSelected"
-          :label="galleryTotal > 0 ? `Alle (${galleryTotal})` : 'Alle'"
-          icon="pi pi-check-double"
+          label="Aktionen"
+          icon="pi pi-ellipsis-v"
           size="small"
           severity="secondary"
           outlined
-          :loading="selectAllBusy"
-          @click="selectAll"
+          @click="toggleSelectionMenu"
         />
         <Button
-          v-if="selectedCount > 0 && canUpload"
-          label="Alben"
-          icon="pi pi-book"
-          size="small"
-          severity="secondary"
-          @click="openAlbumDialog"
-        />
-        <Button
-          v-if="selectedCount > 0 && canDelete"
-          label="Favorit"
-          icon="pi pi-heart"
-          size="small"
-          :disabled="curationBusy"
-          @click="applyCurationToSelection('favorite')"
-        />
-        <Button
-          v-if="selectedCount > 0 && canDelete"
-          label="Ausblenden"
-          icon="pi pi-thumbs-down-fill"
-          size="small"
-          severity="warn"
-          :disabled="curationBusy"
-          @click="applyCurationToSelection('hidden')"
-        />
-        <Button
-          v-if="selectedCount > 0 && canManageData"
-          label="Löschen"
-          icon="pi pi-trash"
-          size="small"
-          severity="danger"
-          :disabled="deleteBusy || curationBusy"
-          @click="deleteFromSelection"
-        />
-        <Button
-          v-if="canShowCollage"
-          label="Collage"
-          icon="pi pi-images"
-          size="small"
-          severity="secondary"
-          @click="openCollageDialog"
-        />
-        <Button
-          v-if="selectedCount > 0"
-          label="Auswahl aufheben"
-          icon="pi pi-replay"
-          size="small"
-          severity="secondary"
-          outlined
-          @click="clearSelection"
-        />
-        <Button
-          label="Beenden"
           icon="pi pi-times"
           size="small"
           severity="secondary"
-          outlined
+          text
+          rounded
+          aria-label="Auswahl beenden"
+          v-tooltip.top="'Auswahl beenden'"
           @click="exitSelectMode"
         />
       </div>
+      <Menu ref="selectionMenu" :model="selectionMenuItems" :popup="true" />
     </div>
 
     <!-- Mobile entry point for the album batch dialog. Reused on desktop
@@ -1757,6 +1745,7 @@ void refreshReviewSequence()
      sticky bottom select-bar off-screen until the page itself scrolled. */
   height: calc(100dvh - var(--menubar-height, 3.5rem));
   overflow: hidden;
+  position: relative;
 }
 
 /* ── Content row: grid + persistent desktop sidebar ──────────────────── */
@@ -2047,16 +2036,23 @@ void refreshReviewSequence()
 
 .error-flyout-list li:last-child { border-bottom: none; }
 
-/* ── Selection action bar ─────────────────────────────────────────────── */
+/* ── Compact selection tray ────────────────────────────────────────────── */
 .select-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0.6rem 1rem;
+  justify-content: center;
+  padding: 0.35rem 0.45rem 0.35rem 0.75rem;
   background: var(--p-primary-50, #eff6ff);
-  border-top: 1px solid var(--p-primary-200, #bfdbfe);
-  gap: 0.75rem;
-  flex-wrap: wrap;
+  border: 1px solid var(--p-primary-200, #bfdbfe);
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
+  gap: 0.6rem;
+  position: absolute;
+  z-index: 30;
+  bottom: calc(0.9rem + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100% - 1.5rem);
 }
 
 .select-count {
@@ -2070,8 +2066,8 @@ void refreshReviewSequence()
 
 .select-actions {
   display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
+  gap: 0.2rem;
+  flex-shrink: 0;
 }
 
 .p-dark .select-bar {
@@ -2097,22 +2093,13 @@ void refreshReviewSequence()
     min-width: 2.25rem;
   }
   .select-bar {
-    position: sticky;
-    bottom: 0;
-    z-index: 10;
-    /* Pad clear of the iOS home indicator so the bottom row of buttons
-       isn't cramped against the screen edge (#373). */
-    padding: 0.7rem 0.85rem calc(0.7rem + env(safe-area-inset-bottom, 0px));
-    gap: 0.5rem;
+    bottom: calc(0.65rem + env(safe-area-inset-bottom, 0px));
   }
-  /* Action buttons fill the bar width and get a 44px-tall touch target
-     each — the small-size buttons were hard to tap on phones (#373). */
-  .select-actions {
-    width: 100%;
-  }
-  .select-actions :deep(.p-button) {
-    flex: 1 1 7rem;
-    min-height: 2.75rem;
+  .select-count {
+    max-width: calc(100vw - 11.5rem);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 </style>

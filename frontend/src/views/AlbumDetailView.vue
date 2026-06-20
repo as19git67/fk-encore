@@ -6,6 +6,7 @@ import Checkbox from 'primevue/checkbox'
 import Chip from 'primevue/chip'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
+import Menu from 'primevue/menu'
 import Message from 'primevue/message'
 import Select from 'primevue/select'
 import SelectButton from 'primevue/selectbutton'
@@ -417,6 +418,11 @@ function onToggleSelect(entry: GalleryGridEntry) {
   selectedIds.value = next
 }
 
+const selectionMenu = ref<{ toggle: (event: Event) => void } | null>(null)
+function toggleSelectionMenu(event: Event) {
+  selectionMenu.value?.toggle(event)
+}
+
 const selectAllBusy = ref(false)
 const galleryTotal = ref(0)
 const allSelected = computed(() => galleryTotal.value > 0 && selectedCount.value === galleryTotal.value)
@@ -535,6 +541,41 @@ async function performRemoveFromAlbum(ids: number[]) {
     exitSelectMode()
   }
 }
+
+// The popup preserves every batch action from the former multi-row bar, but
+// lets the photo grid retain its height while selection mode is active.
+const selectionMenuItems = computed(() => {
+  const items: Array<Record<string, unknown>> = []
+  if (!allSelected.value) {
+    items.push({
+      label: galleryTotal.value > 0 ? `Alle (${galleryTotal.value}) auswählen` : 'Alle auswählen',
+      icon: 'pi pi-check-double',
+      disabled: selectAllBusy.value,
+      command: () => void selectAll(),
+    })
+  }
+  if (selectedCount.value === 0) return items
+
+  if (canUploadPhotos.value && canReuseAlbumPhotos.value) {
+    items.push({ label: 'Zu Alben hinzufügen', icon: 'pi pi-book', command: openAlbumDialog })
+  }
+  if (canDeletePhotos.value || canWrite.value) {
+    items.push(
+      { label: 'Als Favorit markieren', icon: 'pi pi-heart', disabled: curationBusy.value, command: () => void applyCurationToSelection('favorite') },
+      { label: 'Ausblenden', icon: 'pi pi-thumbs-down-fill', disabled: curationBusy.value, command: () => void applyCurationToSelection('hidden') },
+    )
+  }
+  if (canWrite.value) {
+    items.push({ label: 'Aus diesem Album entfernen', icon: 'pi pi-minus-circle', disabled: removeBusy.value, command: removeFromAlbumSelection })
+  }
+  if (canShowCollage.value) items.push({ label: 'Collage erstellen', icon: 'pi pi-images', command: openCollageDialog })
+  items.push({ label: 'Auswahl aufheben', icon: 'pi pi-replay', command: clearSelection })
+  if (canManageData.value) {
+    items.push({ separator: true })
+    items.push({ label: 'Ausgewählte Fotos löschen', icon: 'pi pi-trash', disabled: deleteBusy.value || curationBusy.value, command: deleteFromSelection })
+  }
+  return items
+})
 
 const albumPhotoIds = computed(() => new Set(rawAlbumPhotos.value.map(p => p.id)))
 
@@ -2381,97 +2422,38 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 
     <div v-else-if="album" class="info-text">Keine Fotos in dieser Ansicht.</div>
 
-    <!-- Selection action bar (grid mode only). Mirrors GalleryView but adds
-         "Aus Album entfernen" as the album-context primary action. -->
+    <!-- Compact selection tray (grid mode only). Its popup holds the batch
+         actions, so selecting photos no longer consumes a multi-row footer. -->
     <div v-if="selectMode && viewMode === 'grid'" class="select-bar">
       <span class="select-count">
         <i class="pi pi-check-square" />
         {{
           selectedCount > 0
-            ? `${selectedCount} ausgewählt`
-            : 'Fotos antippen zum Auswählen'
+          ? `${selectedCount} ausgewählt`
+          : 'Fotos antippen zum Auswählen'
         }}
       </span>
       <div class="select-actions">
         <Button
-          v-if="!allSelected"
-          :label="galleryTotal > 0 ? `Alle (${galleryTotal})` : 'Alle'"
-          icon="pi pi-check-double"
+          label="Aktionen"
+          icon="pi pi-ellipsis-v"
           size="small"
           severity="secondary"
           outlined
-          :loading="selectAllBusy"
-          @click="selectAll"
+          @click="toggleSelectionMenu"
         />
         <Button
-          v-if="selectedCount > 0 && canUploadPhotos && canReuseAlbumPhotos"
-          label="Alben"
-          icon="pi pi-book"
-          size="small"
-          severity="secondary"
-          @click="openAlbumDialog"
-        />
-        <Button
-          v-if="selectedCount > 0 && (canDeletePhotos || canWrite)"
-          label="Favorit"
-          icon="pi pi-heart"
-          size="small"
-          :disabled="curationBusy"
-          @click="applyCurationToSelection('favorite')"
-        />
-        <Button
-          v-if="selectedCount > 0 && (canDeletePhotos || canWrite)"
-          label="Ausblenden"
-          icon="pi pi-thumbs-down-fill"
-          size="small"
-          severity="warn"
-          :disabled="curationBusy"
-          @click="applyCurationToSelection('hidden')"
-        />
-        <Button
-          v-if="selectedCount > 0 && canWrite"
-          label="Aus Album"
-          icon="pi pi-minus-circle"
-          size="small"
-          severity="warn"
-          :disabled="removeBusy"
-          @click="removeFromAlbumSelection"
-        />
-        <Button
-          v-if="selectedCount > 0 && canManageData"
-          label="Löschen"
-          icon="pi pi-trash"
-          size="small"
-          severity="danger"
-          :disabled="deleteBusy || curationBusy"
-          @click="deleteFromSelection"
-        />
-        <Button
-          v-if="canShowCollage"
-          label="Collage"
-          icon="pi pi-images"
-          size="small"
-          severity="secondary"
-          @click="openCollageDialog"
-        />
-        <Button
-          v-if="selectedCount > 0"
-          label="Auswahl aufheben"
-          icon="pi pi-replay"
-          size="small"
-          severity="secondary"
-          outlined
-          @click="clearSelection"
-        />
-        <Button
-          label="Beenden"
           icon="pi pi-times"
           size="small"
           severity="secondary"
-          outlined
+          text
+          rounded
+          aria-label="Auswahl beenden"
+          v-tooltip.top="'Auswahl beenden'"
           @click="exitSelectMode"
         />
       </div>
+      <Menu ref="selectionMenu" :model="selectionMenuItems" :popup="true" />
     </div>
 
     <!-- Mobile: Backdrop zum Schließen von Drawern -->
@@ -2814,6 +2796,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
   flex-direction: column;
   height: calc(100dvh - var(--menubar-height, 3.5em));
   overflow: hidden;
+  position: relative;
 }
 
 @media (min-width: 800px) {
@@ -3186,32 +3169,35 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
   .header__upload-btn :deep(.p-button-label) { display: none; }
   .header__upload-btn :deep(.p-button-icon) { margin-right: 0; }
 
-  /* Selection action bar — clear of the iOS home indicator and with
-     44px-tall touch targets so the buttons are easy to tap (#373). */
+  /* Keep the tray clear of the iOS home indicator. */
   .select-bar {
-    position: sticky;
-    bottom: 0;
-    z-index: 10;
-    padding: 0.7rem 0.85rem calc(0.7rem + env(safe-area-inset-bottom, 0px));
-    gap: 0.5rem;
+    bottom: calc(0.65rem + env(safe-area-inset-bottom, 0px));
   }
-  .select-actions { width: 100%; }
-  .select-actions :deep(.p-button) {
-    flex: 1 1 7rem;
-    min-height: 2.75rem;
+  .select-count {
+    max-width: calc(100vw - 11.5rem);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 
-/* ── Selection action bar (desktop + mobile base) ────────────────────────── */
+/* ── Compact selection tray ─────────────────────────────────────────────── */
 .select-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0.6rem 1rem;
+  justify-content: center;
+  padding: 0.35rem 0.45rem 0.35rem 0.75rem;
   background: var(--p-primary-50, #eff6ff);
-  border-top: 1px solid var(--p-primary-200, #bfdbfe);
-  gap: 0.75rem;
-  flex-wrap: wrap;
+  border: 1px solid var(--p-primary-200, #bfdbfe);
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
+  gap: 0.6rem;
+  position: absolute;
+  z-index: 30;
+  bottom: calc(0.9rem + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100% - 1.5rem);
 }
 .select-count {
   display: flex;
@@ -3223,8 +3209,8 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 }
 .select-actions {
   display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
+  gap: 0.2rem;
+  flex-shrink: 0;
 }
 .p-dark .select-bar {
   background: var(--p-primary-900, #1e3a8a);
