@@ -35,7 +35,10 @@ test.describe('Foto-Galerie (Maus-fokus)', () => {
     test.skip(count < 3, 'Weniger als 3 Fotos — Multi-Select-Test übersprungen')
 
     await page.getByRole('button', { name: /Auswählen/ }).click()
-    await expect(page.getByRole('button', { name: /Auswahl beenden/ })).toBeVisible()
+    // The compact tray also offers "Auswahl beenden". Assert the header
+    // control specifically, rather than relying on an accessible-name match
+    // that is intentionally shared by both exit controls.
+    await expect(page.locator('.desktop-select-toggle')).toBeVisible()
 
     // Erste Cell anklicken, dritte mit Shift dazu (PrimeVue/Vue-Logik
     // toggelt aktuell pro Klick — dieser Test dokumentiert das Verhalten,
