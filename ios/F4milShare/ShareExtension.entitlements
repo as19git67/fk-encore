@@ -4,7 +4,7 @@
 <dict>
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.dev.fk-encore.F4milPhotos</string>
+		<string>group.de.f4mil.photos</string>
 	</array>
 </dict>
 </plist>
