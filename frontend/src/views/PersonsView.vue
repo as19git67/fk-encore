@@ -18,6 +18,7 @@ import SortMenu from '../components/SortMenu.vue'
 import DateRangePresets from '../components/DateRangePresets.vue'
 import FilterMenu from '../components/FilterMenu.vue'
 import FilterChips from '../components/FilterChips.vue'
+import ResponsiveToolbar, { type ToolbarItem } from '../components/ResponsiveToolbar.vue'
 import { useFilter } from '../composables/useFilter'
 import { matchesPhotoFilter } from '../utils/photoFilter'
 import type { SortField, SortState } from '../composables/useSort'
@@ -100,6 +101,48 @@ function onResetPhotoFilter() {
 function onRemovePhotoFilterKey(keys: Array<keyof PhotoFilter>) {
   removePhotoFilterKey(keys)
 }
+
+// ── Responsive toolbar ────────────────────────────────────────────────────────
+// Person-detail actions (Filter / Umbenennen / Ignorieren) share the available
+// width and overflow into a dropdown when tight. Order = reading order.
+const toolbarItems = computed<ToolbarItem[]>(() => {
+  const items: ToolbarItem[] = []
+
+  if (selectedPersonDetail.value) {
+    items.push({
+      key: 'filter',
+      label: photoFilterActiveCount.value > 0 ? `Filter (${photoFilterActiveCount.value})` : 'Filter',
+      title: photoFilterActiveCount.value > 0 ? `Filter (${photoFilterActiveCount.value})` : 'Filter',
+      icon: photoFilterActiveCount.value > 0 ? 'pi pi-filter-fill' : 'pi pi-filter',
+      severity: photoFilterActiveCount.value > 0 ? 'primary' : 'secondary',
+      outlined: photoFilterActiveCount.value === 0,
+      command: openPhotoFilterMenu,
+    })
+  }
+
+  const person = selectedPerson.value
+  if (person) {
+    items.push({
+      key: 'rename',
+      label: 'Umbenennen',
+      title: 'Umbenennen',
+      icon: 'pi pi-pencil',
+      outlined: true,
+      command: () => openRename(person),
+    })
+    items.push({
+      key: 'ignore',
+      label: 'Ignorieren',
+      title: 'Person und alle Gesichter dauerhaft ignorieren',
+      icon: 'pi pi-trash',
+      severity: 'danger',
+      outlined: true,
+      command: () => void handleIgnorePerson(person),
+    })
+  }
+
+  return items
+})
 
 // ── Person filter menu ──────────────────────────────────────────────────────
 type PersonNamedFilter = 'all' | 'named' | 'unnamed'
@@ -692,23 +735,13 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
           />
           <h1 class="title">{{ selectedPersonDetail ? selectedPersonDetail.name : 'Personen' }}</h1>
         </div>
-        <div class="actions">
-          <Button
-            v-if="selectedPersonDetail"
-            :icon="photoFilterActiveCount > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'"
-            :label="photoFilterActiveCount > 0 ? `Filter (${photoFilterActiveCount})` : 'Filter'"
-            size="small"
-            :severity="photoFilterActiveCount > 0 ? 'primary' : 'secondary'"
-            :outlined="photoFilterActiveCount === 0"
-            @click="openPhotoFilterMenu"
-          />
-          <template v-if="selectedPerson">
-            <Button icon="pi pi-pencil" label="Umbenennen" outlined @click="openRename(selectedPerson)" />
-            <Button icon="pi pi-trash" label="Ignorieren" outlined severity="danger"
-              v-tooltip="'Person und alle Gesichter dauerhaft ignorieren'"
-              @click="handleIgnorePerson(selectedPerson)" />
-          </template>
-        </div>
+        <!-- Person-detail actions: filter + actions share the remaining width
+             and overflow into a dropdown when tight. -->
+        <ResponsiveToolbar
+          v-if="selectedPersonDetail || selectedPerson"
+          class="header__toolbar"
+          :items="toolbarItems"
+        />
       </div>
       <div v-if="selectedPersonDetail && photoFilterActiveCount > 0" class="person-photo-filter-chips">
         <FilterChips :filter="photoFilter" @remove="onRemovePhotoFilterKey" />
@@ -976,6 +1009,13 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
 
 .actions { display: flex; gap: 0.5rem; align-items: center; }
 
+/* Toolbar fills the row beside the title; min-width:0 lets it shrink and
+   spill items into its overflow dropdown instead of wrapping. */
+.header__toolbar {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .person-photo-filter-chips {
   display: flex;
   flex-wrap: wrap;
@@ -1145,14 +1185,6 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
     font-size: 1.2rem;
   }
 
-  /* Actions: Labels ausblenden, nur Icons */
-  .subheader .actions :deep(.p-button-label) {
-    display: none;
-  }
-  .subheader .actions :deep(.p-button) {
-    padding: 0.5rem;
-    min-width: 2.25rem;
-  }
 }
 
 /* ── Face bbox overlay (fullscreen only) ─────────────────────────────────── */
