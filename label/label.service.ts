@@ -18,6 +18,7 @@ import https from "node:https";
 import net from "node:net";
 import dns from "node:dns/promises";
 import { APIError } from "encore.dev/api";
+import log from "encore.dev/log";
 import { eq } from "drizzle-orm";
 import db from "../db/database";
 import { dbExec, dbFirst } from "../db/adapter";
@@ -180,7 +181,21 @@ async function ippRequest(path: string, body: Buffer): Promise<Buffer> {
 /** List the printers the configured CUPS server exposes. */
 export async function listPrinters(): Promise<CupsPrinter[]> {
   const respBuf = await ippRequest("/", buildGetPrintersRequest(nextRequestId()));
-  return parsePrinters(parseIppResponse(respBuf));
+  const resp = parseIppResponse(respBuf);
+  const printers = parsePrinters(resp);
+  if (printers.length === 0) {
+    // Diagnostic: distinguishes "CUPS has no queues" (IPP 0x0406 / no
+    // printer-attributes groups) from a parsing mismatch. The hex head lets
+    // us inspect the exact wire format of older CUPS versions if needed.
+    log.warn("CUPS-Get-Printers returned no printers", {
+      cups_url: getCupsBaseUrl(),
+      ipp_status: "0x" + resp.statusCode.toString(16).padStart(4, "0"),
+      group_tags: resp.groups.map((g) => g.tag),
+      response_bytes: respBuf.length,
+      response_hex_head: respBuf.subarray(0, 96).toString("hex"),
+    });
+  }
+  return printers;
 }
 
 export interface PrintLabelInput {

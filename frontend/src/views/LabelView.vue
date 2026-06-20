@@ -152,6 +152,12 @@ onMounted(loadPrinters)
         </label>
       </div>
 
+      <p v-if="!loading && !error && printers.length === 0" class="hint-muted">
+        Der CUPS-Server ist erreichbar, meldet aber keine Drucker. Prüfe, ob auf
+        diesem Server eine Drucker-Warteschlange existiert (z.&nbsp;B. unter
+        <code>/printers/</code> der CUPS-Weboberfläche).
+      </p>
+
       <div class="actions">
         <Button
           icon="pi pi-refresh"
