@@ -36,6 +36,8 @@ export interface PrintLabelRequest {
   lpi?: number
   /** Horizontal text alignment on the label. */
   align?: 'left' | 'center'
+  /** Printable label width in mm (from the selected label type). */
+  labelWidthMm?: number
 }
 
 export function printLabel(req: PrintLabelRequest) {

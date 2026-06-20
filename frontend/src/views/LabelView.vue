@@ -17,21 +17,40 @@ import {
 const auth = useAuthStore()
 const canPrint = auth.hasPermission('label.print')
 
-// Font-size presets. Larger font (lower cpi/lpi) → fewer lines fit on the
-// label, so each preset caps the textarea line count accordingly. sampleRem
-// only scales the "Aa" preview on the selector button.
+// Font-size presets → CUPS cpi/lpi (lower = larger font). sampleRem only
+// scales the "Aa" preview on the selector button.
 interface FontPreset {
   key: 'small' | 'medium' | 'large'
   label: string
   cpi: number
   lpi: number
-  maxLines: number
   sampleRem: number
 }
 const FONT_PRESETS: FontPreset[] = [
-  { key: 'small', label: 'Klein', cpi: 14, lpi: 8, maxLines: 8, sampleRem: 0.9 },
-  { key: 'medium', label: 'Mittel', cpi: 10, lpi: 6, maxLines: 6, sampleRem: 1.3 },
-  { key: 'large', label: 'Groß', cpi: 7, lpi: 4, maxLines: 4, sampleRem: 1.8 },
+  { key: 'small', label: 'Klein', cpi: 14, lpi: 8, sampleRem: 0.9 },
+  { key: 'medium', label: 'Mittel', cpi: 10, lpi: 6, sampleRem: 1.3 },
+  { key: 'large', label: 'Groß', cpi: 7, lpi: 4, sampleRem: 1.8 },
+]
+
+// DYMO LabelWriter 450 compatible labels (media width ≤ 56 mm). widthMm is the
+// long edge (text line direction → centering), heightMm the short edge across
+// the print head (→ how many lines fit).
+interface LabelType {
+  code: string
+  name: string
+  widthMm: number
+  heightMm: number
+}
+const LABELS: LabelType[] = [
+  { code: '99012', name: 'Adresse groß', widthMm: 89, heightMm: 36 },
+  { code: '99010', name: 'Adresse standard', widthMm: 89, heightMm: 28 },
+  { code: '99014', name: 'Versand', widthMm: 101, heightMm: 54 },
+  { code: '11356', name: 'Namensschild', widthMm: 89, heightMm: 41 },
+  { code: '11354', name: 'Vielzweck', widthMm: 57, heightMm: 32 },
+  { code: '11352', name: 'Rücksendeadresse', widthMm: 54, heightMm: 25 },
+  { code: '99015', name: 'Medien / Diskette', widthMm: 70, heightMm: 54 },
+  { code: '11355', name: 'Vielzweck klein', widthMm: 51, heightMm: 19 },
+  { code: '99017', name: 'Hängeregister', widthMm: 50, heightMm: 12 },
 ]
 
 const ALIGN_OPTIONS = [
@@ -45,6 +64,7 @@ const text = ref('')
 const copies = ref(1)
 const fontKey = ref<FontPreset['key']>('medium')
 const align = ref<'left' | 'center'>('left')
+const labelCode = ref<string>('99012')
 
 const loading = ref(false)
 const printing = ref(false)
@@ -54,7 +74,20 @@ const info = ref('')
 const selectedFont = computed(
   () => FONT_PRESETS.find((p) => p.key === fontKey.value) ?? FONT_PRESETS[1]!,
 )
-const maxLines = computed(() => selectedFont.value.maxLines)
+const selectedLabel = computed(
+  () => LABELS.find((l) => l.code === labelCode.value) ?? LABELS[0]!,
+)
+// Lines that fit ≈ printable height (short edge) × lines-per-inch.
+const maxLines = computed(() =>
+  Math.max(1, Math.floor((selectedLabel.value.heightMm / 25.4) * selectedFont.value.lpi)),
+)
+// Dropdown labels: "99012 · Adresse groß · 89×36 mm"
+const labelOptions = computed(() =>
+  LABELS.map((l) => ({
+    code: l.code,
+    text: `${l.code} · ${l.name} · ${l.widthMm}×${l.heightMm} mm`,
+  })),
+)
 
 // Enforce the line cap: trim extra lines when the user types/pastes too many
 // or switches to a larger font that allows fewer lines.
@@ -74,13 +107,17 @@ function loadUiPrefs() {
     const p = JSON.parse(raw)
     if (FONT_PRESETS.some((f) => f.key === p.fontKey)) fontKey.value = p.fontKey
     if (p.align === 'left' || p.align === 'center') align.value = p.align
+    if (LABELS.some((l) => l.code === p.labelCode)) labelCode.value = p.labelCode
   } catch {
     /* ignore corrupt prefs */
   }
 }
-watch([fontKey, align], () => {
+watch([fontKey, align, labelCode], () => {
   try {
-    localStorage.setItem(LS_KEY, JSON.stringify({ fontKey: fontKey.value, align: align.value }))
+    localStorage.setItem(
+      LS_KEY,
+      JSON.stringify({ fontKey: fontKey.value, align: align.value, labelCode: labelCode.value }),
+    )
   } catch {
     /* storage unavailable — non-fatal */
   }
@@ -140,6 +177,7 @@ async function handlePrint() {
       cpi: selectedFont.value.cpi,
       lpi: selectedFont.value.lpi,
       align: align.value,
+      labelWidthMm: selectedLabel.value.widthMm,
     })
     info.value =
       res.printed > 1
@@ -182,6 +220,17 @@ onMounted(() => {
           :disabled="printing"
         />
         <small class="hint-muted">max. {{ maxLines }} Zeilen bei dieser Schriftgröße</small>
+      </label>
+
+      <label class="field">
+        <span class="label">Etikett</span>
+        <Select
+          v-model="labelCode"
+          :options="labelOptions"
+          option-label="text"
+          option-value="code"
+          :disabled="printing"
+        />
       </label>
 
       <div class="field-row">

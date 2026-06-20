@@ -209,6 +209,8 @@ export interface PrintLabelInput {
   lpi?: number;
   /** Horizontal alignment of the text on the label. */
   align?: "left" | "center";
+  /** Printable label width in mm; overrides CUPS_LABEL_WIDTH_MM for centering. */
+  labelWidthMm?: number;
 }
 
 const DEFAULT_LEFT_MARGIN_PT = 1;
@@ -269,7 +271,8 @@ export async function printLabel(input: PrintLabelInput): Promise<void> {
 
   let text = input.text;
   if (centered) {
-    const columns = Math.floor((getLabelWidthMm() / 25.4) * (cpi ?? DEFAULT_CPI));
+    const widthMm = clampInt(input.labelWidthMm, 10, 300) ?? getLabelWidthMm();
+    const columns = Math.floor((widthMm / 25.4) * (cpi ?? DEFAULT_CPI));
     text = centerText(text, columns);
   }
 

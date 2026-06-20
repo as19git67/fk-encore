@@ -254,6 +254,21 @@ describe("label endpoints", () => {
     // Centering replaces the fixed left margin.
     expect(sent).not.toContain("page-left");
   });
+
+  it("uses labelWidthMm for the centering column count", async () => {
+    await startStub(() => ({ body: ippHeader(0x0000) }));
+    // 50 mm / 25.4 * 10 cpi = 19 cols → pad = floor((19-2)/2) = 8 spaces.
+    await endpoints.print({
+      text: "Hi",
+      printer: "A",
+      cpi: 10,
+      align: "center",
+      labelWidthMm: 50,
+    });
+    const sent = recorded[0].body.toString("latin1");
+    expect(sent).toContain(" ".repeat(8) + "Hi");
+    expect(sent).not.toContain(" ".repeat(9) + "Hi");
+  });
 });
 
 describe("label.service — centerText", () => {
