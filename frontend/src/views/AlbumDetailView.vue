@@ -2448,8 +2448,8 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           severity="secondary"
           text
           rounded
-          aria-label="Auswahl beenden"
-          v-tooltip.top="'Auswahl beenden'"
+          aria-label="Auswahl schließen"
+          v-tooltip.top="'Auswahl schließen'"
           @click="exitSelectMode"
         />
       </div>
