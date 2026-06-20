@@ -269,6 +269,24 @@ export const modules: ModuleConfig[] = [
     ],
   },
   {
+    id: 'label',
+    label: 'Label',
+    icon: 'pi pi-tag',
+    basePath: '/label',
+    permission: 'module.label',
+    routes: [
+      {
+        path: '',
+        name: 'label-print',
+        component: () => import('../views/LabelView.vue'),
+        meta: { permission: 'label.view' },
+      },
+    ],
+    menuItems: [
+      { label: 'Drucken', icon: 'pi pi-print', routeName: 'label-print', permission: 'label.view' },
+    ],
+  },
+  {
     id: 'admin',
     label: 'Admin',
     icon: 'pi pi-cog',
