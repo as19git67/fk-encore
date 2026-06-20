@@ -824,15 +824,17 @@ function triggerFileSelect() {
 const toolbarItems = computed<ToolbarItem[]>(() => {
   const items: ToolbarItem[] = []
 
-  items.push({
-    key: 'select',
-    label: selectMode.value ? 'Auswahl beenden' : 'Auswählen',
-    title: selectMode.value ? 'Auswahl beenden' : 'Auswählen',
-    icon: selectMode.value ? 'pi pi-times' : 'pi pi-check-square',
-    severity: selectMode.value ? 'danger' : 'secondary',
-    outlined: !selectMode.value,
-    command: () => (selectMode.value ? exitSelectMode() : enterSelectMode()),
-  })
+  if (jumpButton.value) {
+    items.push({
+      key: 'jump',
+      label: jumpButton.value.label,
+      title: jumpButton.value.label,
+      icon: jumpButton.value.icon,
+      severity: 'secondary',
+      outlined: true,
+      command: onJumpEnd,
+    })
+  }
 
   items.push({
     key: 'filter',
@@ -854,17 +856,15 @@ const toolbarItems = computed<ToolbarItem[]>(() => {
     command: openSortMenu,
   })
 
-  if (jumpButton.value) {
-    items.push({
-      key: 'jump',
-      label: jumpButton.value.label,
-      title: jumpButton.value.label,
-      icon: jumpButton.value.icon,
-      severity: 'secondary',
-      outlined: true,
-      command: onJumpEnd,
-    })
-  }
+  items.push({
+    key: 'select',
+    label: selectMode.value ? 'Auswahl beenden' : 'Auswählen',
+    title: selectMode.value ? 'Auswahl beenden' : 'Auswählen',
+    icon: selectMode.value ? 'pi pi-times' : 'pi pi-check-square',
+    severity: selectMode.value ? 'danger' : 'secondary',
+    outlined: !selectMode.value,
+    command: () => (selectMode.value ? exitSelectMode() : enterSelectMode()),
+  })
 
   if (canReviewGroups.value && totalUnreviewed.value > 0) {
     items.push({
