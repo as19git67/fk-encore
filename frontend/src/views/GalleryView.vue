@@ -59,6 +59,7 @@ import VirtualGallery from '../components/VirtualGallery.vue'
 import FilterMenu from '../components/FilterMenu.vue'
 import FilterChips from '../components/FilterChips.vue'
 import SortMenu from '../components/SortMenu.vue'
+import ResponsiveToolbar, { type ToolbarItem } from '../components/ResponsiveToolbar.vue'
 import NaturalSearchBar from '../components/NaturalSearchBar.vue'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
@@ -809,6 +810,97 @@ function onFileInputChange(ev: Event) {
   }
 }
 
+// ── Responsive toolbar ────────────────────────────────────────────────────────
+// Hidden file input behind the "Hochladen" toolbar item, so the upload action
+// can collapse into the overflow dropdown like every other item.
+const fileInputRef = ref<HTMLInputElement | null>(null)
+function triggerFileSelect() {
+  fileInputRef.value?.click()
+}
+
+// Filter/sort controls and gallery actions as a single flat list. The
+// ResponsiveToolbar lays them out across the full width and pushes whatever
+// does not fit into an overflow dropdown. Order = reading order.
+const toolbarItems = computed<ToolbarItem[]>(() => {
+  const items: ToolbarItem[] = []
+
+  items.push({
+    key: 'select',
+    label: selectMode.value ? 'Auswahl beenden' : 'Auswählen',
+    title: selectMode.value ? 'Auswahl beenden' : 'Auswählen',
+    icon: selectMode.value ? 'pi pi-times' : 'pi pi-check-square',
+    severity: selectMode.value ? 'danger' : 'secondary',
+    outlined: !selectMode.value,
+    command: () => (selectMode.value ? exitSelectMode() : enterSelectMode()),
+  })
+
+  items.push({
+    key: 'filter',
+    label: activeCount.value > 0 ? `Filter (${activeCount.value})` : 'Filter',
+    title: activeCount.value > 0 ? `Filter (${activeCount.value})` : 'Filter',
+    icon: activeCount.value > 0 ? 'pi pi-filter-fill' : 'pi pi-filter',
+    severity: activeCount.value > 0 ? 'primary' : 'secondary',
+    outlined: activeCount.value === 0,
+    command: openFilterMenu,
+  })
+
+  items.push({
+    key: 'sort',
+    label: isSortDefault.value ? 'Sortierung' : `Sortierung: ${sortFieldLabel.value}`,
+    title: isSortDefault.value ? 'Sortierung' : `Sortierung: ${sortFieldLabel.value}`,
+    icon: 'pi pi-sort-alt',
+    severity: isSortDefault.value ? 'secondary' : 'primary',
+    outlined: isSortDefault.value,
+    command: openSortMenu,
+  })
+
+  if (jumpButton.value) {
+    items.push({
+      key: 'jump',
+      label: jumpButton.value.label,
+      title: jumpButton.value.label,
+      icon: jumpButton.value.icon,
+      severity: 'secondary',
+      outlined: true,
+      command: onJumpEnd,
+    })
+  }
+
+  if (canReviewGroups.value && totalUnreviewed.value > 0) {
+    items.push({
+      key: 'group-review',
+      label: `Gruppen bearbeiten (${totalUnreviewed.value} offen)`,
+      title: `Gruppen bearbeiten (${totalUnreviewed.value} offen)`,
+      icon: 'pi pi-images',
+      severity: 'success',
+      command: onStartGroupReview,
+    })
+  }
+
+  if (canUpload.value) {
+    items.push(
+      uploading.value
+        ? {
+            key: 'upload',
+            label: 'Abbrechen',
+            title: 'Hochladen abbrechen',
+            icon: 'pi pi-times',
+            severity: 'danger',
+            command: cancelUpload,
+          }
+        : {
+            key: 'upload',
+            label: 'Hochladen',
+            title: 'Fotos hochladen',
+            icon: 'pi pi-upload',
+            command: triggerFileSelect,
+          },
+    )
+  }
+
+  return items
+})
+
 function onDragEnter(e: DragEvent) {
   if (!canUpload.value || uploading.value) return
   e.preventDefault()
@@ -1363,70 +1455,19 @@ void refreshReviewSequence()
     <div class="subheader">
       <div class="header">
         <h1 class="title">Fotos</h1>
-        <div class="actions">
-          <Button
-            class="desktop-select-toggle"
-            :icon="selectMode ? 'pi pi-times' : 'pi pi-check-square'"
-            :label="selectMode ? 'Auswahl beenden' : 'Auswählen'"
-            size="small"
-            :severity="selectMode ? 'danger' : 'secondary'"
-            :outlined="!selectMode"
-            @click="selectMode ? exitSelectMode() : enterSelectMode()"
-          />
-          <Button
-            :icon="activeCount > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'"
-            :label="activeCount > 0 ? `Filter (${activeCount})` : 'Filter'"
-            size="small"
-            :severity="activeCount > 0 ? 'primary' : 'secondary'"
-            :outlined="activeCount === 0"
-            @click="openFilterMenu"
-          />
-          <Button
-            icon="pi pi-sort-alt"
-            :label="isSortDefault ? 'Sortierung' : `Sortierung: ${sortFieldLabel}`"
-            size="small"
-            :severity="isSortDefault ? 'secondary' : 'primary'"
-            :outlined="isSortDefault"
-            @click="openSortMenu"
-          />
-          <Button
-            v-if="jumpButton"
-            :icon="jumpButton.icon"
-            :label="jumpButton.label"
-            size="small"
-            severity="secondary"
-            outlined
-            @click="onJumpEnd"
-          />
-          <Button
-            v-if="canReviewGroups && totalUnreviewed > 0"
-            :label="`Gruppen bearbeiten (${totalUnreviewed} offen)`"
-            icon="pi pi-images"
-            severity="success"
-            size="small"
-            v-tooltip.bottom="`Gruppen bearbeiten (${totalUnreviewed} offen)`"
-            @click="onStartGroupReview"
-          />
-          <template v-if="canUpload">
-            <Button
-              v-if="uploading"
-              label="Abbrechen"
-              icon="pi pi-times"
-              severity="danger"
-              @click="cancelUpload"
-            />
-            <label v-else class="upload-button-label">
-              <input
-                type="file"
-                accept="image/*"
-                multiple
-                class="upload-input-hidden"
-                @change="onFileInputChange"
-              />
-              <Button label="Hochladen" icon="pi pi-upload" as="span" size="small" />
-            </label>
-          </template>
-        </div>
+        <!-- Combined toolbar: filter/sort controls and actions share the
+             remaining width and overflow into a dropdown when tight. -->
+        <ResponsiveToolbar class="header__toolbar" :items="toolbarItems" />
+        <!-- Hidden file input driven by the "Hochladen" toolbar item. -->
+        <input
+          v-if="canUpload"
+          ref="fileInputRef"
+          type="file"
+          accept="image/*"
+          multiple
+          class="upload-input-hidden"
+          @change="onFileInputChange"
+        />
       </div>
 
       <NaturalSearchBar
@@ -1811,6 +1852,13 @@ void refreshReviewSequence()
   align-items: center;
 }
 
+/* Toolbar fills the row beside the title; min-width:0 lets it shrink and
+   spill items into its overflow dropdown instead of wrapping. */
+.header__toolbar {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .chip-row {
   display: flex;
   flex-wrap: wrap;
@@ -2085,12 +2133,6 @@ void refreshReviewSequence()
   }
   .title {
     font-size: 1.2rem;
-  }
-  /* Action buttons: icons only on small screens */
-  .subheader .actions :deep(.p-button-label) { display: none; }
-  .subheader .actions :deep(.p-button) {
-    padding: 0.5rem;
-    min-width: 2.25rem;
   }
   .select-bar {
     bottom: calc(0.65rem + env(safe-area-inset-bottom, 0px));
