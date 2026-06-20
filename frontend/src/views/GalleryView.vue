@@ -1680,8 +1680,8 @@ void refreshReviewSequence()
           severity="secondary"
           text
           rounded
-          aria-label="Auswahl schließen"
-          v-tooltip.top="'Auswahl schließen'"
+          aria-label="Auswahl beenden"
+          v-tooltip.top="'Auswahl beenden'"
           @click="exitSelectMode"
         />
       </div>
