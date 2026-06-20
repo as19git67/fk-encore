@@ -863,6 +863,7 @@ const toolbarItems = computed<ToolbarItem[]>(() => {
     icon: selectMode.value ? 'pi pi-times' : 'pi pi-check-square',
     severity: selectMode.value ? 'danger' : 'secondary',
     outlined: !selectMode.value,
+    itemClass: 'desktop-select-toggle',
     command: () => (selectMode.value ? exitSelectMode() : enterSelectMode()),
   })
 

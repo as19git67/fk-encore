@@ -22,6 +22,8 @@ export interface ToolbarItem {
   severity?: string
   outlined?: boolean
   text?: boolean
+  /** Extra class applied to the *inline* button only (e.g. test hooks). */
+  itemClass?: string
   command: () => void
 }
 
@@ -120,7 +122,7 @@ watch(
       :severity="item.severity"
       :outlined="item.outlined"
       :text="item.text"
-      class="responsive-toolbar__item"
+      :class="['responsive-toolbar__item', item.itemClass]"
       v-tooltip.bottom="item.title"
       @click="item.command"
     />
