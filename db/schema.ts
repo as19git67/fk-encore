@@ -13,6 +13,8 @@ export const users = pgTable("users", {
   // Per-user push notification preferences: maps FeedItemKind → boolean.
   // Absent keys default to true (enabled). false = explicitly disabled.
   notification_prefs: jsonb("notification_prefs").notNull().default({}),
+  // Per-user label-printing preferences (e.g. the selected CUPS printer).
+  label_prefs: jsonb("label_prefs").notNull().default({}),
 });
 
 // ========== Roles ==========
