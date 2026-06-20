@@ -71,6 +71,15 @@ function okResponse(buf: Buffer) {
   } as unknown as Response);
 }
 
+function errorResponse(status: number, statusText: string, body: string) {
+  return Promise.resolve({
+    ok: false,
+    status,
+    statusText,
+    text: () => Promise.resolve(body),
+  } as unknown as Response);
+}
+
 let userId: number;
 const originalFetch = global.fetch;
 
@@ -123,6 +132,15 @@ describe("label.service — listPrinters", () => {
     });
     global.fetch = vi.fn(() => Promise.reject(wrapped)) as any;
     await expect(listPrinters()).rejects.toThrow(/ENOTFOUND/);
+  });
+
+  it("includes the HTTP status and response body on an error response", async () => {
+    global.fetch = vi.fn(() =>
+      errorResponse(400, "Bad Request", "Bad Request from proxy"),
+    ) as any;
+    await expect(listPrinters()).rejects.toThrow(
+      /HTTP 400 Bad Request: Bad Request from proxy/,
+    );
   });
 });
 

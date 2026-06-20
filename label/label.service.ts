@@ -72,7 +72,7 @@ async function ippRequest(path: string, body: Buffer): Promise<Buffer> {
   try {
     res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/ipp" },
+      headers: { "Content-Type": "application/ipp", Accept: "application/ipp" },
       body,
     });
   } catch (err) {
@@ -86,8 +86,18 @@ async function ippRequest(path: string, body: Buffer): Promise<Buffer> {
     );
   }
   if (!res.ok) {
+    // CUPS and most IPP servers put a human-readable reason in the HTTP
+    // error body. Include a short snippet so e.g. a reverse-proxy 400 or a
+    // "Bad Request" explanation is visible instead of just the status code.
+    let detail = "";
+    try {
+      const text = (await res.text()).trim().replace(/\s+/g, " ");
+      if (text) detail = `: ${text.slice(0, 200)}`;
+    } catch {
+      /* body not readable — fall back to status only */
+    }
     throw APIError.unavailable(
-      `CUPS-Server antwortete mit HTTP ${res.status} ${res.statusText}`,
+      `CUPS-Server antwortete mit HTTP ${res.status} ${res.statusText}${detail}`,
     );
   }
   const arr = await res.arrayBuffer();
