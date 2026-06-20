@@ -118,6 +118,12 @@ services:
       # optional but recommended in shared-host deployments.
       GEO_SERVICE_URL: ${GEO_SERVICE_URL:-http://geo:8080}
       GEO_SHARED_SECRET: ${GEO_SHARED_SECRET:-}
+      # Label module — base URL of the CUPS server that exposes the label
+      # printer (e.g. a Raspberry Pi with a DYMO LabelWriter 450). Set this
+      # in your .env; if unset the backend falls back to localhost:631.
+      CUPS_SERVER_URL: ${CUPS_SERVER_URL:-}
+      # Left print margin in points (1 pt ≈ 4 px at 300 dpi); 0 disables.
+      CUPS_LABEL_LEFT_MARGIN_PT: ${CUPS_LABEL_LEFT_MARGIN_PT:-1}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
