@@ -22,6 +22,7 @@ import NaturalSearchBar from '../components/NaturalSearchBar.vue'
 import FilterMenu from '../components/FilterMenu.vue'
 import FilterChips from '../components/FilterChips.vue'
 import SortMenu from '../components/SortMenu.vue'
+import ResponsiveToolbar, { type ToolbarItem } from '../components/ResponsiveToolbar.vue'
 import { useFilter } from '../composables/useFilter'
 import { useSort, type SortField, type SortState } from '../composables/useSort'
 import { matchesPhotoFilter, type PhotoFilterContext } from '../utils/photoFilter'
@@ -1995,6 +1996,153 @@ async function scrollToCover() {
   }
 }
 
+// ── Responsive toolbar ────────────────────────────────────────────────────────
+// Hidden file input behind the "Hochladen" toolbar item. Keeping the input out
+// of the toolbar (rather than wrapping a Button in a <label>) lets the upload
+// action collapse into the overflow dropdown like every other item.
+const fileInputRef = ref<HTMLInputElement | null>(null)
+function triggerFileSelect() {
+  fileInputRef.value?.click()
+}
+
+// All toolbar buttons — filter/sort controls *and* album actions — as a single
+// flat list. ResponsiveToolbar lays them out across the full width and pushes
+// whatever does not fit into an overflow dropdown. Order = reading order.
+const toolbarItems = computed<ToolbarItem[]>(() => {
+  const items: ToolbarItem[] = []
+
+  if (jumpButton.value && viewMode.value !== 'map') {
+    items.push({
+      key: 'jump',
+      label: jumpButton.value.label,
+      title: jumpButton.value.label,
+      icon: jumpButton.value.icon,
+      severity: 'secondary',
+      outlined: true,
+      command: onJumpEnd,
+    })
+  }
+
+  items.push({
+    key: 'filter',
+    label: activeCount.value > 0 ? `Filter (${activeCount.value})` : 'Filter',
+    title: activeCount.value > 0 ? `Filter (${activeCount.value})` : 'Filter',
+    icon: activeCount.value > 0 ? 'pi pi-filter-fill' : 'pi pi-filter',
+    severity: activeCount.value > 0 ? 'primary' : 'secondary',
+    outlined: activeCount.value === 0,
+    command: openFilterMenu,
+  })
+
+  items.push({
+    key: 'sort',
+    label: isSortDefault.value ? 'Sortierung' : `Sortierung: ${sortFieldLabel.value}`,
+    title: isSortDefault.value ? 'Sortierung' : `Sortierung: ${sortFieldLabel.value}`,
+    icon: 'pi pi-sort-alt',
+    severity: isSortDefault.value ? 'secondary' : 'primary',
+    outlined: isSortDefault.value,
+    command: openSortMenu,
+  })
+
+  if (viewMode.value !== 'map') {
+    items.push({
+      key: 'select',
+      label: selectMode.value ? 'Auswahl beenden' : 'Auswählen',
+      title: selectMode.value ? 'Auswahl beenden' : 'Auswählen',
+      icon: selectMode.value ? 'pi pi-times' : 'pi pi-check-square',
+      severity: selectMode.value ? 'danger' : 'secondary',
+      outlined: !selectMode.value,
+      command: () => (selectMode.value ? exitSelectMode() : enterSelectMode()),
+    })
+  }
+
+  if (canReviewGroups.value && unreviewedGroupCount.value > 0 && viewMode.value !== 'map') {
+    items.push({
+      key: 'group-review',
+      label: `Gruppen bearbeiten (${unreviewedGroupCount.value} offen)`,
+      title: `Gruppen bearbeiten (${unreviewedGroupCount.value} offen)`,
+      icon: 'pi pi-images',
+      severity: 'success',
+      command: handleStartGroupReview,
+    })
+  }
+
+  if (mapEnabled.value) {
+    items.push({
+      key: 'view-mode',
+      title: viewMode.value === 'map' ? 'Rasteransicht anzeigen' : 'Kartenansicht anzeigen',
+      icon: viewMode.value === 'map' ? 'pi pi-th-large' : 'pi pi-map',
+      text: true,
+      command: toggleViewMode,
+    })
+  }
+
+  if (effectiveCoverPhotoId.value && viewMode.value !== 'map') {
+    items.push({
+      key: 'cover',
+      title: 'Cover fokussieren',
+      icon: 'pi pi-image',
+      text: true,
+      command: scrollToCover,
+    })
+  }
+
+  if (canShareAlbum.value) {
+    items.push({
+      key: 'share',
+      title: 'Freigeben',
+      icon: 'pi pi-share-alt',
+      text: true,
+      command: openShareDialogLocal,
+    })
+  }
+
+  if (canWrite.value) {
+    items.push({
+      key: 'settings',
+      title: 'Album-Einstellungen',
+      icon: 'pi pi-cog',
+      text: true,
+      command: openAlbumSettingsDialog,
+    })
+  }
+
+  if (canUpload.value) {
+    items.push(
+      uploading.value
+        ? {
+            key: 'upload',
+            label: 'Abbrechen',
+            title: 'Hochladen abbrechen',
+            icon: 'pi pi-times',
+            severity: 'danger',
+            command: cancelUpload,
+          }
+        : {
+            key: 'upload',
+            label: 'Hochladen',
+            title: 'Fotos hochladen',
+            icon: 'pi pi-upload',
+            command: triggerFileSelect,
+          },
+    )
+  }
+
+  if (!isOwner.value) {
+    items.push({
+      key: 'leave',
+      title: 'Freigabe verlassen',
+      icon: 'pi pi-sign-out',
+      severity: 'danger',
+      text: true,
+      command: () => {
+        showLeaveDialog.value = true
+      },
+    })
+  }
+
+  return items
+})
+
 
 // ── Mobile drawer state ───────────────────────────────────────────────────────
 const mobileSidebarOpen = ref(false)
@@ -2152,47 +2300,20 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           </template>
         </div>
 
-        <!-- 5. Filter -->
-        <div class="header__filter">
-          <Button
-            v-if="viewMode !== 'map'"
-            :icon="selectMode ? 'pi pi-times' : 'pi pi-check-square'"
-            :label="selectMode ? 'Auswahl beenden' : 'Auswählen'"
-            size="small"
-            :severity="selectMode ? 'danger' : 'secondary'"
-            :outlined="!selectMode"
-            class="header__filter-btn"
-            @click="selectMode ? exitSelectMode() : enterSelectMode()"
-          />
-          <Button
-            :icon="activeCount > 0 ? 'pi pi-filter-fill' : 'pi pi-filter'"
-            :label="activeCount > 0 ? `Filter (${activeCount})` : 'Filter'"
-            size="small"
-            :severity="activeCount > 0 ? 'primary' : 'secondary'"
-            :outlined="activeCount === 0"
-            class="header__filter-btn"
-            @click="openFilterMenu"
-          />
-          <Button
-            icon="pi pi-sort-alt"
-            :label="isSortDefault ? 'Sortierung' : `Sortierung: ${sortFieldLabel}`"
-            size="small"
-            :severity="isSortDefault ? 'secondary' : 'primary'"
-            :outlined="isSortDefault"
-            class="header__filter-btn"
-            @click="openSortMenu"
-          />
-          <Button
-            v-if="jumpButton && viewMode !== 'map'"
-            :icon="jumpButton.icon"
-            :label="jumpButton.label"
-            size="small"
-            severity="secondary"
-            outlined
-            class="header__filter-btn"
-            @click="onJumpEnd"
-          />
-        </div>
+        <!-- 5./6. Combined toolbar: filter/sort controls and album actions
+             share the full width and overflow into a dropdown when tight. -->
+        <ResponsiveToolbar class="header__toolbar" :items="toolbarItems" />
+
+        <!-- Hidden file input driven by the "Hochladen" toolbar item. -->
+        <input
+          v-if="canUpload"
+          ref="fileInputRef"
+          type="file"
+          accept="image/*"
+          multiple
+          class="upload-input-hidden"
+          @change="onFileInputChange"
+        />
 
         <!-- Natural-language search: global search, results filtered to this album -->
         <div v-if="albumPhotos.length > 0" class="album-search">
@@ -2209,54 +2330,6 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
             @clear="clearSearch"
           />
           <Message v-if="searchError" severity="error" :closable="false">{{ searchError }}</Message>
-        </div>
-
-        <!-- 6. Action buttons -->
-        <div class="header__actions">
-          <Button
-            v-if="canReviewGroups && unreviewedGroupCount > 0 && viewMode !== 'map'"
-            :label="`Gruppen bearbeiten (${unreviewedGroupCount} offen)`"
-            icon="pi pi-images" severity="success" size="small"
-            class="header__group-review-btn"
-            v-tooltip.bottom="`Gruppen bearbeiten (${unreviewedGroupCount} offen)`"
-            @click="handleStartGroupReview"
-          />
-          <Button
-            v-if="mapEnabled"
-            :icon="viewMode === 'map' ? 'pi pi-th-large' : 'pi pi-map'"
-            size="small"
-            text
-            class="view-mode-switch"
-            :aria-label="viewMode === 'map' ? 'Rasteransicht anzeigen' : 'Kartenansicht anzeigen'"
-            v-tooltip.bottom="viewMode === 'map' ? 'Rasteransicht anzeigen' : 'Kartenansicht anzeigen'"
-            @click="toggleViewMode"
-          />
-          <Button v-if="effectiveCoverPhotoId && viewMode !== 'map'" icon="pi pi-image" size="small" text v-tooltip="'Cover fokussieren'" @click="scrollToCover" />
-          <Button v-if="canShareAlbum" icon="pi pi-share-alt" size="small" text v-tooltip="'Freigeben'" @click="openShareDialogLocal" />
-          <Button v-if="canWrite" icon="pi pi-cog" size="small" text v-tooltip="'Album-Einstellungen'" @click="openAlbumSettingsDialog" />
-          <template v-if="canUpload">
-            <Button
-              v-if="uploading"
-              label="Abbrechen"
-              icon="pi pi-times"
-              size="small"
-              severity="danger"
-              class="header__upload-btn"
-              v-tooltip="'Hochladen abbrechen'"
-              @click="cancelUpload"
-            />
-            <label v-else class="header__upload-btn upload-button-label" v-tooltip="'Fotos hochladen'">
-              <input
-                type="file"
-                accept="image/*"
-                multiple
-                class="upload-input-hidden"
-                @change="onFileInputChange"
-              />
-              <Button label="Hochladen" icon="pi pi-upload" size="small" as="span" />
-            </label>
-          </template>
-          <Button v-if="!isOwner" icon="pi pi-sign-out" size="small" text severity="danger" v-tooltip="'Freigabe verlassen'" @click="showLeaveDialog = true" />
         </div>
       </div>
 
@@ -3029,6 +3102,10 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 
 .header__filter { display: flex; align-items: center; gap: 0.5em; }
 
+/* The responsive toolbar takes its own full-width row inside the wrapping
+   header, so its items span the whole width and overflow into a dropdown. */
+.header__toolbar { flex-basis: 100%; }
+
 .chip-row {
   display: flex;
   flex-wrap: wrap;
@@ -3042,6 +3119,8 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
+  /* Own full-width row below the toolbar inside the wrapping header. */
+  flex-basis: 100%;
 }
 
 /* ── Two-column layout ──────────────────────────────────────────────────── */
