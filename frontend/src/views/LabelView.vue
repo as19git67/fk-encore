@@ -222,7 +222,12 @@ onMounted(() => {
           :rows="maxLines"
           placeholder="Text für das Label…"
           :disabled="printing"
-          :style="{ fontSize: previewFontRem + 'rem', textAlign: align, lineHeight: '1.25' }"
+          :style="{
+            fontFamily: '\'Courier New\', Courier, monospace',
+            fontSize: previewFontRem + 'rem',
+            textAlign: align,
+            lineHeight: '1.25',
+          }"
         />
         <small class="hint-muted">max. {{ maxLines }} Zeilen bei dieser Schriftgröße</small>
       </label>
