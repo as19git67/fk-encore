@@ -18,9 +18,9 @@
 # `set -o pipefail` in the caller (or $PIPESTATUS). The TrueNAS cron-job
 # command line should therefore be wrapped in bash -c, e.g.:
 #
-#   bash -c 'set -o pipefail; ZFS_DATASET=tank/vivanty \
-#       /mnt/tank/vivanty/backup/host-scripts/fk-encore-backup.sh 2>&1 \
-#       | /mnt/tank/vivanty/backup/host-scripts/format-backup-log.sh'
+#   bash -c 'set -o pipefail; ZFS_DATASET=tank/f4mil \
+#       /mnt/tank/f4mil/backup/host-scripts/fk-encore-backup.sh 2>&1 \
+#       | /mnt/tank/f4mil/backup/host-scripts/format-backup-log.sh'
 #
 # Design notes:
 #   - The formatter is best-effort. Any line it does not recognise is still
