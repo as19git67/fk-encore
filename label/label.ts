@@ -103,6 +103,15 @@ interface PrintRequest {
   copies?: number & (Min<1> & Max<typeof MAX_COPIES>);
   /** Override the saved printer for this job (also becomes the new default). */
   printer?: string;
+  /** Characters per inch (font width). Lower = larger font. */
+  cpi?: number & (Min<4> & Max<30>);
+  /** Lines per inch (line height). Lower = fewer lines per label. */
+  lpi?: number & (Min<2> & Max<16>);
+  /** Horizontal text alignment on the label. Defaults to "left". */
+  align?: "left" | "center";
+  /** Printable label width in mm (from the selected label type), used to
+   *  center text. Falls back to CUPS_LABEL_WIDTH_MM when omitted. */
+  labelWidthMm?: number & (Min<10> & Max<300>);
 }
 
 interface PrintResponse {
@@ -137,6 +146,10 @@ export const print = api(
       text,
       copies,
       user: `fk-encore-user-${userId}`,
+      cpi: req.cpi,
+      lpi: req.lpi,
+      align: req.align === "center" ? "center" : "left",
+      labelWidthMm: req.labelWidthMm,
     });
 
     // If the caller passed an explicit printer, remember it as the new
