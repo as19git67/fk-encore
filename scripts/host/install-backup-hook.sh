@@ -78,7 +78,7 @@ if [[ -z "$DATASET" ]]; then
     read -r -p "Dataset [$DEFAULT_DATASET]: " DATASET
     DATASET="${DATASET:-$DEFAULT_DATASET}"
   else
-    read -r -p "Dataset (e.g. tank/vivanty): " DATASET
+    read -r -p "Dataset (e.g. tank/f4mil): " DATASET
   fi
 fi
 

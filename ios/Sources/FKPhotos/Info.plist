@@ -7,7 +7,7 @@
 	<key>CFBundleName</key>
 	<string>$(PRODUCT_NAME)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Vivanty Photos</string>
+	<string>F4mil Photos</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>CFBundleShortVersionString</key>
@@ -26,7 +26,7 @@
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Zum Hochladen von Fotos in Vivanty Photos</string>
+	<string>Zum Hochladen von Fotos in F4mil Photos</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Zum Speichern aufgenommener Fotos in deiner Mediathek</string>
 	<key>NSCameraUsageDescription</key>
@@ -47,7 +47,7 @@
 	</array>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
-		<string>dev.fk-encore.VivantyPhotos.photoSync</string>
+		<string>dev.fk-encore.F4milPhotos.photoSync</string>
 	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>

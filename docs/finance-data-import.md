@@ -246,10 +246,10 @@ Beide Verzeichnisse sind als bind-Mounts auf den Host gehängt:
 ```yaml
 finance_import:
   driver: local
-  driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/finance-import }
+  driver_opts: { type: none, o: bind, device: /Users/anton/f4mil_data/finance-import }
 finance_export:
   driver: local
-  driver_opts: { type: none, o: bind, device: /Users/anton/vivanty_data/finance-export }
+  driver_opts: { type: none, o: bind, device: /Users/anton/f4mil_data/finance-export }
 ```
 
 Die Hostpfade kannst du anpassen. Für Multi-Host-Backups einfach den
