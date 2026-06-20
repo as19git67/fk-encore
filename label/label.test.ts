@@ -141,9 +141,12 @@ describe("label.service — listPrinters", () => {
     servers.push(server);
     process.env.CUPS_SERVER_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
+    const port = (server.address() as AddressInfo).port;
     await listPrinters();
     expect(headers["content-type"]).toBe("application/ipp");
     expect(headers["content-length"]).toBeDefined();
+    // Host is the resolved server IP (passes CUPS' rebinding check), not a name.
+    expect(headers["host"]).toBe(`127.0.0.1:${port}`);
     // None of undici's browser headers must leak through.
     expect(headers["sec-fetch-mode"]).toBeUndefined();
     expect(headers["accept-language"]).toBeUndefined();

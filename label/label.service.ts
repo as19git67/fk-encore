@@ -15,6 +15,8 @@
 
 import http from "node:http";
 import https from "node:https";
+import net from "node:net";
+import dns from "node:dns/promises";
 import { APIError } from "encore.dev/api";
 import { eq } from "drizzle-orm";
 import db from "../db/database";
@@ -70,28 +72,63 @@ function nextRequestId(): number {
 const REQUEST_TIMEOUT_MS = 15_000;
 
 /**
+ * Resolve the CUPS host to an IP. CUPS protects against DNS rebinding by
+ * rejecting any request (HTTP 400 Bad Request) whose Host header is not one
+ * of: a loopback name *on a loopback connection*, the server's own listening
+ * IP addresses, or a configured ServerName/ServerAlias. A remote client that
+ * sends `Host: scanner.schegg.net` is therefore refused unless the admin adds
+ * a ServerAlias. By connecting to the resolved IP, node sets `Host: <ip>:<port>`
+ * — the server's own address — which CUPS accepts without any server config.
+ */
+async function resolveHost(hostname: string): Promise<{ ip: string; family: number }> {
+  const literal = net.isIP(hostname);
+  if (literal) return { ip: hostname, family: literal };
+  const { address, family } = await dns.lookup(hostname);
+  return { ip: address, family };
+}
+
+/**
  * POST an IPP message to the CUPS server and return the raw response bytes.
  *
  * Uses node:http(s) rather than fetch on purpose: the global fetch (undici)
- * injects browser-oriented headers — `Accept-Language: *`, `Sec-Fetch-Mode`,
- * `Connection: keep-alive` — that older CUPS versions (e.g. 2.2.10 on a
- * Raspberry Pi) reject with HTTP 400 Bad Request. node:http lets us send a
- * minimal, IPP-client-style request with exactly the headers CUPS expects.
+ * injects browser-oriented headers — Accept-Language: *, Sec-Fetch-Mode,
+ * Connection: keep-alive — that older CUPS versions reject with HTTP 400.
+ * node:http lets us send a minimal, IPP-client-style request, and connecting
+ * by IP makes the Host header pass CUPS' rebinding check (see resolveHost).
  */
-function ippRequest(path: string, body: Buffer): Promise<Buffer> {
+async function ippRequest(path: string, body: Buffer): Promise<Buffer> {
   const base = getCupsBaseUrl();
   const url = new URL(base + path);
-  const transport = url.protocol === "https:" ? https : http;
+  const isHttps = url.protocol === "https:";
+  const transport = isHttps ? https : http;
+  const port = Number(url.port) || (isHttps ? 443 : 631);
+
+  let ip: string;
+  let family: number;
+  try {
+    ({ ip, family } = await resolveHost(url.hostname));
+  } catch (err) {
+    const e = err as { code?: string; message?: string };
+    throw APIError.unavailable(
+      `CUPS-Server nicht erreichbar (${base}): ${e?.code || e?.message || String(err)}`,
+    );
+  }
+
+  const hostHeader = family === 6 ? `[${ip}]:${port}` : `${ip}:${port}`;
 
   return new Promise<Buffer>((resolve, reject) => {
     const req = transport.request(
       {
-        protocol: url.protocol,
-        hostname: url.hostname,
-        port: url.port || (url.protocol === "https:" ? 443 : 631),
+        host: ip,
+        port,
         method: "POST",
         path: url.pathname + url.search,
+        // Connect by IP but keep TLS SNI / cert validation against the real
+        // name for https.
+        servername: isHttps ? url.hostname : undefined,
         headers: {
+          // The server's own IP — accepted by CUPS' Host validation.
+          Host: hostHeader,
           "Content-Type": "application/ipp",
           "Content-Length": body.length,
           // Single short-lived request per call — avoids keep-alive pooling
