@@ -60,6 +60,11 @@ export const categoryTaxonomy: CategorySeed[] = [
         name: "Kirchensteuer",
         hint: "Kirchensteuerbescheid, Kirchensteuer-Festsetzung/-Erstattung (z. B. Katholisches/Evangelisches Kirchensteueramt). Steuerlich Sonderausgaben.",
       },
+      {
+        slug: "finanzen-spenden",
+        name: "Spenden & Zuwendungen",
+        hint: "Spendenquittungen, Zuwendungsbestätigungen und Sammelbestätigungen gemeinnütziger Organisationen (z. B. UNICEF, Deutsches Rotes Kreuz, Caritas). Steuerlich Sonderausgaben. NICHT: Meldungen oder Entgeltnachweise zur Sozialversicherung (→ finanzen-sozialversicherung).",
+      },
     ],
   },
   {
