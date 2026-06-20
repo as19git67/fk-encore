@@ -13,6 +13,8 @@
  * persisted in users.label_prefs.
  */
 
+import http from "node:http";
+import https from "node:https";
 import { APIError } from "encore.dev/api";
 import { eq } from "drizzle-orm";
 import db from "../db/database";
@@ -65,43 +67,77 @@ function nextRequestId(): number {
   return requestCounter + 1;
 }
 
-/** POST an IPP message to the CUPS server and return the raw response bytes. */
-async function ippRequest(path: string, body: Buffer): Promise<Buffer> {
-  const url = getCupsBaseUrl() + path;
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/ipp", Accept: "application/ipp" },
-      body,
+const REQUEST_TIMEOUT_MS = 15_000;
+
+/**
+ * POST an IPP message to the CUPS server and return the raw response bytes.
+ *
+ * Uses node:http(s) rather than fetch on purpose: the global fetch (undici)
+ * injects browser-oriented headers — `Accept-Language: *`, `Sec-Fetch-Mode`,
+ * `Connection: keep-alive` — that older CUPS versions (e.g. 2.2.10 on a
+ * Raspberry Pi) reject with HTTP 400 Bad Request. node:http lets us send a
+ * minimal, IPP-client-style request with exactly the headers CUPS expects.
+ */
+function ippRequest(path: string, body: Buffer): Promise<Buffer> {
+  const base = getCupsBaseUrl();
+  const url = new URL(base + path);
+  const transport = url.protocol === "https:" ? https : http;
+
+  return new Promise<Buffer>((resolve, reject) => {
+    const req = transport.request(
+      {
+        protocol: url.protocol,
+        hostname: url.hostname,
+        port: url.port || (url.protocol === "https:" ? 443 : 631),
+        method: "POST",
+        path: url.pathname + url.search,
+        headers: {
+          "Content-Type": "application/ipp",
+          "Content-Length": body.length,
+          // Single short-lived request per call — avoids keep-alive pooling
+          // quirks with embedded/older IPP servers.
+          Connection: "close",
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c) => chunks.push(c as Buffer));
+        res.on("end", () => {
+          const buf = Buffer.concat(chunks);
+          const status = res.statusCode ?? 0;
+          if (status < 200 || status >= 300) {
+            // CUPS/IPP servers put a human-readable reason in the error body.
+            const text = buf.toString("utf8").trim().replace(/\s+/g, " ");
+            const detail = text ? `: ${text.slice(0, 200)}` : "";
+            reject(
+              APIError.unavailable(
+                `CUPS-Server antwortete mit HTTP ${status} ${res.statusMessage ?? ""}`.trim() +
+                  detail,
+              ),
+            );
+            return;
+          }
+          resolve(buf);
+        });
+      },
+    );
+
+    req.on("error", (err) => {
+      // ENOTFOUND (DNS) / ECONNREFUSED (port closed) / ETIMEDOUT (firewall).
+      const e = err as { code?: string; message?: string };
+      const detail = e?.code || e?.message || String(err);
+      reject(
+        APIError.unavailable(`CUPS-Server nicht erreichbar (${base}): ${detail}`),
+      );
     });
-  } catch (err) {
-    // undici wraps the real failure ("fetch failed") and keeps the useful
-    // detail (ENOTFOUND / ECONNREFUSED / ETIMEDOUT …) on `.cause`. Surface
-    // it so DNS vs. connection vs. timeout is distinguishable.
-    const e = err as { message?: string; cause?: { code?: string; message?: string } };
-    const detail = e?.cause?.code || e?.cause?.message || e?.message || String(err);
-    throw APIError.unavailable(
-      `CUPS-Server nicht erreichbar (${getCupsBaseUrl()}): ${detail}`,
-    );
-  }
-  if (!res.ok) {
-    // CUPS and most IPP servers put a human-readable reason in the HTTP
-    // error body. Include a short snippet so e.g. a reverse-proxy 400 or a
-    // "Bad Request" explanation is visible instead of just the status code.
-    let detail = "";
-    try {
-      const text = (await res.text()).trim().replace(/\s+/g, " ");
-      if (text) detail = `: ${text.slice(0, 200)}`;
-    } catch {
-      /* body not readable — fall back to status only */
-    }
-    throw APIError.unavailable(
-      `CUPS-Server antwortete mit HTTP ${res.status} ${res.statusText}${detail}`,
-    );
-  }
-  const arr = await res.arrayBuffer();
-  return Buffer.from(arr);
+
+    req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+      req.destroy(Object.assign(new Error("ETIMEDOUT"), { code: "ETIMEDOUT" }));
+    });
+
+    req.write(body);
+    req.end();
+  });
 }
 
 /** List the printers the configured CUPS server exposes. */

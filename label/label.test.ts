@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import { getAuthData } from "~encore/auth";
 
 import db from "../db/database";
@@ -11,10 +13,7 @@ function setAuth(userID: string, perms: string[]) {
   vi.mocked(getAuthData).mockReturnValue({ userID, permissions: perms });
 }
 
-// Minimal IPP response fixtures.
-function toArrayBuffer(buf: Buffer): ArrayBuffer {
-  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
-}
+// ── IPP response byte fixtures ───────────────────────────────────────────────
 
 function ippHeader(status: number): Buffer {
   const b = Buffer.alloc(8);
@@ -41,47 +40,53 @@ function getPrintersResponse(names: string[]): Buffer {
   for (const name of names) {
     parts.push(Buffer.from([0x04])); // printer-attributes group
     parts.push(strAttr(0x42, "printer-name", name));
-    const stateBuf = Buffer.concat([
-      Buffer.from([0x23]),
-      (() => {
-        const nl = Buffer.alloc(2);
-        nl.writeUInt16BE("printer-state".length);
-        return Buffer.concat([nl, Buffer.from("printer-state")]);
-      })(),
-      (() => {
-        const vl = Buffer.alloc(2);
-        vl.writeUInt16BE(4);
-        const v = Buffer.alloc(4);
-        v.writeInt32BE(3);
-        return Buffer.concat([vl, v]);
-      })(),
-    ]);
-    parts.push(stateBuf);
+    const nl = Buffer.alloc(2);
+    nl.writeUInt16BE("printer-state".length);
+    const vl = Buffer.alloc(2);
+    vl.writeUInt16BE(4);
+    const v = Buffer.alloc(4);
+    v.writeInt32BE(3);
+    parts.push(
+      Buffer.concat([Buffer.from([0x23]), nl, Buffer.from("printer-state"), vl, v]),
+    );
   }
   parts.push(Buffer.from([0x03]));
   return Buffer.concat(parts);
 }
 
-function okResponse(buf: Buffer) {
-  return Promise.resolve({
-    ok: true,
-    status: 200,
-    statusText: "OK",
-    arrayBuffer: () => Promise.resolve(toArrayBuffer(buf)),
-  } as unknown as Response);
-}
+// ── Local CUPS stub (exercises the real node:http transport) ─────────────────
 
-function errorResponse(status: number, statusText: string, body: string) {
-  return Promise.resolve({
-    ok: false,
-    status,
-    statusText,
-    text: () => Promise.resolve(body),
-  } as unknown as Response);
+interface StubReply {
+  status?: number;
+  statusMessage?: string;
+  body?: Buffer | string;
+}
+type StubHandler = (ctx: { method: string; url: string; body: Buffer }) => StubReply;
+
+const servers: http.Server[] = [];
+let recorded: Array<{ method: string; url: string; body: Buffer }> = [];
+
+async function startStub(handler: StubHandler): Promise<void> {
+  const server = http.createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (c) => chunks.push(c as Buffer));
+    req.on("end", () => {
+      const body = Buffer.concat(chunks);
+      recorded.push({ method: req.method ?? "", url: req.url ?? "", body });
+      const r = handler({ method: req.method ?? "", url: req.url ?? "", body });
+      res.statusCode = r.status ?? 200;
+      if (r.statusMessage) res.statusMessage = r.statusMessage;
+      res.end(r.body ?? Buffer.alloc(0));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  servers.push(server);
+  const { port } = server.address() as AddressInfo;
+  process.env.CUPS_SERVER_URL = `http://127.0.0.1:${port}`;
 }
 
 let userId: number;
-const originalFetch = global.fetch;
+const ORIGINAL_CUPS = process.env.CUPS_SERVER_URL;
 
 beforeEach(async () => {
   const [row] = await db
@@ -98,7 +103,11 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await db.delete(users).where(eq(users.id, userId));
-  global.fetch = originalFetch;
+  await Promise.all(servers.map((s) => new Promise<void>((r) => s.close(() => r()))));
+  servers.length = 0;
+  recorded = [];
+  if (ORIGINAL_CUPS === undefined) delete process.env.CUPS_SERVER_URL;
+  else process.env.CUPS_SERVER_URL = ORIGINAL_CUPS;
   vi.restoreAllMocks();
 });
 
@@ -115,42 +124,43 @@ describe("label.service — preferences", () => {
 
 describe("label.service — listPrinters", () => {
   it("parses the CUPS printer list", async () => {
-    global.fetch = vi.fn(() => okResponse(getPrintersResponse(["A", "B"]))) as any;
+    await startStub(() => ({ body: getPrintersResponse(["A", "B"]) }));
     const printers = await listPrinters();
     expect(printers.map((p) => p.name)).toEqual(["A", "B"]);
     expect(printers[0].state).toBe(3);
   });
 
+  it("sends a clean POST without browser headers", async () => {
+    let headers: http.IncomingHttpHeaders = {};
+    const server = http.createServer((req, res) => {
+      headers = req.headers;
+      req.on("data", () => {});
+      req.on("end", () => res.end(getPrintersResponse([])));
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    servers.push(server);
+    process.env.CUPS_SERVER_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+    await listPrinters();
+    expect(headers["content-type"]).toBe("application/ipp");
+    expect(headers["content-length"]).toBeDefined();
+    // None of undici's browser headers must leak through.
+    expect(headers["sec-fetch-mode"]).toBeUndefined();
+    expect(headers["accept-language"]).toBeUndefined();
+  });
+
   it("throws unavailable when the CUPS server is unreachable", async () => {
-    global.fetch = vi.fn(() => Promise.reject(new Error("ECONNREFUSED"))) as any;
+    process.env.CUPS_SERVER_URL = "http://127.0.0.1:1"; // nothing listening
     await expect(listPrinters()).rejects.toThrow(/nicht erreichbar/);
   });
 
-  it("surfaces the underlying cause code (e.g. ENOTFOUND)", async () => {
-    const wrapped = Object.assign(new Error("fetch failed"), {
-      cause: { code: "ENOTFOUND" },
-    });
-    global.fetch = vi.fn(() => Promise.reject(wrapped)) as any;
-    await expect(listPrinters()).rejects.toThrow(/ENOTFOUND/);
-  });
-
   it("includes the HTTP status and response body on an error response", async () => {
-    global.fetch = vi.fn(() =>
-      errorResponse(400, "Bad Request", "Bad Request from proxy"),
-    ) as any;
-    await expect(listPrinters()).rejects.toThrow(
-      /HTTP 400 Bad Request: Bad Request from proxy/,
-    );
+    await startStub(() => ({ status: 400, statusMessage: "Bad Request", body: "Bad Request" }));
+    await expect(listPrinters()).rejects.toThrow(/HTTP 400 Bad Request: Bad Request/);
   });
 });
 
 describe("label.service — getCupsBaseUrl", () => {
-  const original = process.env.CUPS_SERVER_URL;
-  afterEach(() => {
-    if (original === undefined) delete process.env.CUPS_SERVER_URL;
-    else process.env.CUPS_SERVER_URL = original;
-  });
-
   it("prepends http:// when the scheme is missing", () => {
     process.env.CUPS_SERVER_URL = "scanner.schegg.net:631";
     expect(getCupsBaseUrl()).toBe("http://scanner.schegg.net:631");
@@ -165,7 +175,7 @@ describe("label.service — getCupsBaseUrl", () => {
 describe("label endpoints", () => {
   it("listPrinters returns printers and the saved selection", async () => {
     await setLabelPrefs(userId, { printer: "A" });
-    global.fetch = vi.fn(() => okResponse(getPrintersResponse(["A", "B"]))) as any;
+    await startStub(() => ({ body: getPrintersResponse(["A", "B"]) }));
     const res = await endpoints.listPrinters();
     expect(res.printers.map((p) => p.name)).toEqual(["A", "B"]);
     expect(res.selected).toBe("A");
@@ -173,7 +183,7 @@ describe("label endpoints", () => {
   });
 
   it("listPrinters surfaces a CUPS error instead of throwing", async () => {
-    global.fetch = vi.fn(() => Promise.reject(new Error("boom"))) as any;
+    process.env.CUPS_SERVER_URL = "http://127.0.0.1:1";
     const res = await endpoints.listPrinters();
     expect(res.printers).toEqual([]);
     expect(res.cupsError).toContain("nicht erreichbar");
@@ -197,12 +207,15 @@ describe("label endpoints", () => {
     });
   });
 
-  it("print submits the job and remembers an explicit printer", async () => {
-    const fetchMock = vi.fn(() => okResponse(ippHeader(0x0000)));
-    global.fetch = fetchMock as any;
+  it("print submits the job to the printer path and remembers an explicit printer", async () => {
+    await startStub(() => ({ body: ippHeader(0x0000) }));
     const res = await endpoints.print({ text: "Hallo", copies: 2, printer: "A" });
     expect(res).toEqual({ printed: 2, printer: "A" });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0].url).toBe("/printers/A");
+    const sent = recorded[0].body.toString("latin1");
+    expect(sent).toContain("Hallo"); // document body
+    expect(sent).toContain("copies"); // copies > 1 → job attribute
     expect(await getLabelPrefs(userId)).toEqual({ printer: "A" });
   });
 
