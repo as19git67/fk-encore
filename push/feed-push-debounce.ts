@@ -191,11 +191,11 @@ export function buildFeedDigest(events: FeedPushEvent[]): PushPayload {
   const body = parts.length > 0 ? parts.join(", ") : `${events.length} neue Benachrichtigungen`;
 
   return {
-    title: "Vivanty",
+    title: "F4mil",
     body,
     url,
     // Single tag so a refreshed digest replaces the previous one instead of stacking.
-    tag: "vivanty-feed-digest",
+    tag: "f4mil-feed-digest",
     data: { kind: "digest", count: events.length },
   };
 }

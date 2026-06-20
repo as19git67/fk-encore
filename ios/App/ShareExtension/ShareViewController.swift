@@ -113,7 +113,7 @@ struct ShareUploadView: View {
                     }
                 }
             }
-            .navigationTitle("In Vivanty teilen")
+            .navigationTitle("In F4mil teilen")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -166,7 +166,7 @@ struct ShareUploadView: View {
                 .map { ShareAlbum(id: $0.id, name: $0.name, photoCount: $0.photo_count) }
                 .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         } catch {
-            errorMessage = "Alben konnten nicht geladen werden. Bitte stelle sicher, dass du in Vivanty angemeldet bist."
+            errorMessage = "Alben konnten nicht geladen werden. Bitte stelle sicher, dass du in F4mil angemeldet bist."
         }
         isLoadingAlbums = false
     }
@@ -466,7 +466,7 @@ enum ShareHasher {
 // MARK: - Lightweight queue writer
 
 enum ShareUploadQueueWriter {
-    private static let appGroupID  = "group.dev.fk-encore.VivantyPhotos"
+    private static let appGroupID  = "group.dev.fk-encore.F4milPhotos"
     private static let queueFile   = "upload_queue.json"
     private static let tempDirName = "pending_uploads"
 
@@ -552,7 +552,7 @@ enum ShareUploadQueueWriter {
 // MARK: - Shared configuration
 
 enum ShareConfig {
-    static let appGroupID        = "group.dev.fk-encore.VivantyPhotos"
+    static let appGroupID        = "group.dev.fk-encore.F4milPhotos"
     static let tokenKey          = "shared.auth_token"
     static let serverURLKey      = "shared.serverURL"
     static let recentAlbumIdsKey = "shared.recentAlbumIds"
@@ -580,8 +580,8 @@ enum ShareAPIError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .notConfigured:   return "Vivanty ist nicht eingerichtet. Bitte öffne die App und melde dich an."
-        case .notAuthenticated: return "Nicht angemeldet – bitte öffne Vivanty und melde dich an."
+        case .notConfigured:   return "F4mil ist nicht eingerichtet. Bitte öffne die App und melde dich an."
+        case .notAuthenticated: return "Nicht angemeldet – bitte öffne F4mil und melde dich an."
         case .httpError(let c): return "HTTP-Fehler \(c)"
         case .duplicate:       return "Foto bereits vorhanden"
         }

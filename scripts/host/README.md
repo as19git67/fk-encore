@@ -66,7 +66,7 @@ upgrade-safe too.
    ```bash
    sudo /mnt/<dataset>/<backup-dir>/host-scripts/install-backup-hook.sh
    # or non-interactive:
-   sudo /mnt/<dataset>/<backup-dir>/host-scripts/install-backup-hook.sh --dataset tank/vivanty
+   sudo /mnt/<dataset>/<backup-dir>/host-scripts/install-backup-hook.sh --dataset tank/f4mil
    ```
 
    The installer will:
@@ -115,10 +115,10 @@ copy.
 Run the driver manually as root:
 
 ```bash
-sudo ZFS_DATASET=tank/vivanty \
-     /mnt/tank/vivanty/backup/host-scripts/fk-encore-backup.sh
-zfs list -t snapshot | grep "tank/vivanty@" | tail
-ls -la /mnt/tank/vivanty/backup/   # should contain encore-<label>.dump
+sudo ZFS_DATASET=tank/f4mil \
+     /mnt/tank/f4mil/backup/host-scripts/fk-encore-backup.sh
+zfs list -t snapshot | grep "tank/f4mil@" | tail
+ls -la /mnt/tank/f4mil/backup/   # should contain encore-<label>.dump
 ```
 
 When run manually, logs go to stderr. When invoked by the TrueNAS cron
@@ -132,9 +132,9 @@ Pipe the raw log through `format-backup-log.sh` to get a compact protocol
 the raw log. In the TrueNAS UI cron-job **Command** field:
 
 ```bash
-bash -c 'set -o pipefail; ZFS_DATASET=tank/vivanty \
-    /mnt/tank/vivanty/backup/host-scripts/fk-encore-backup.sh 2>&1 \
-    | /mnt/tank/vivanty/backup/host-scripts/format-backup-log.sh'
+bash -c 'set -o pipefail; ZFS_DATASET=tank/f4mil \
+    /mnt/tank/f4mil/backup/host-scripts/fk-encore-backup.sh 2>&1 \
+    | /mnt/tank/f4mil/backup/host-scripts/format-backup-log.sh'
 ```
 
 `set -o pipefail` ensures the overall exit code is non-zero when
@@ -152,7 +152,7 @@ On the host, stop the stack and roll the dataset back to the snapshot:
 
 ```bash
 docker compose down
-sudo zfs rollback -r tank/vivanty@daily-20260413-030000
+sudo zfs rollback -r tank/f4mil@daily-20260413-030000
 docker compose up -d
 ```
 
@@ -173,8 +173,8 @@ another mechanism) but the database needs to roll back.
    the `restore-` prefix:
 
    ```bash
-   cp /mnt/tank/vivanty/backup/encore-daily-20260413-030000.dump \
-      /mnt/tank/vivanty/backup/restore-20260414-rollback.dump
+   cp /mnt/tank/f4mil/backup/encore-daily-20260413-030000.dump \
+      /mnt/tank/f4mil/backup/restore-20260414-rollback.dump
    ```
 
 2. Restart the container:
@@ -200,7 +200,7 @@ another mechanism) but the database needs to roll back.
 |---------------------------|--------------------------------|--------|
 | `FK_ENCORE_URL`           | `http://localhost:8080`        | Where to reach the app. |
 | `FK_BACKUP_TOKEN_FILE`    | `<script-dir>/backup-token`    | Path to the shared secret. The default is the file the installer writes next to the script. |
-| `ZFS_DATASET`             | `tank/vivanty`                 | Dataset for `zfs snapshot -r`. Override via the cron-job command line. |
+| `ZFS_DATASET`             | `tank/f4mil`                 | Dataset for `zfs snapshot -r`. Override via the cron-job command line. |
 | `LABEL`                   | `daily-<UTC timestamp>`        | Snapshot and dump label. |
 | `CURL_TIMEOUT`            | `30`                           | Per-HTTP-call timeout in seconds. |
 | `SNAPSHOT_RETENTION_DAYS` | `30`                           | After a successful backup, destroy `daily-*` snapshots of `$ZFS_DATASET` whose `creation` timestamp is older than N days. Set `0` to disable. Only labels starting with `daily-` are touched — manual snapshots are preserved. The current run's snapshot is always kept. Prune errors are logged as `WARN` and do not fail the backup. |
@@ -208,8 +208,8 @@ another mechanism) but the database needs to roll back.
 Override by editing the cron-job **Command** field in the TrueNAS UI:
 
 ```
-ZFS_DATASET=tank/vivanty FK_ENCORE_URL=http://localhost:8080 \
-    /mnt/tank/vivanty/backup/host-scripts/fk-encore-backup.sh
+ZFS_DATASET=tank/f4mil FK_ENCORE_URL=http://localhost:8080 \
+    /mnt/tank/f4mil/backup/host-scripts/fk-encore-backup.sh
 ```
 
 ## Configuration (app side)

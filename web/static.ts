@@ -81,7 +81,7 @@ function buildOgTags(
     `<meta property="og:type" content="website" />`,
     `<meta property="og:title" content="${escapeHtml(albumName)}" />`,
     `<meta property="og:description" content="${escapeHtml(description)}" />`,
-    `<meta property="og:site_name" content="Vivanty" />`,
+    `<meta property="og:site_name" content="F4mil" />`,
     `<meta property="og:url" content="${escapeHtml(pageUrl)}" />`,
   ];
   if (imageUrl) {
@@ -119,7 +119,7 @@ export const frontend = api.raw(
     }
 
     // For shared album URLs, inject Open Graph meta tags so iMessage/social
-    // previews show the album name and cover image instead of just "Vivanty".
+    // previews show the album name and cover image instead of just "F4mil".
     const shareToken = extractShareToken(rawPath);
     if (shareToken && filePath.endsWith("index.html")) {
       try {
@@ -139,7 +139,7 @@ export const frontend = api.raw(
         const ogTags = buildOgTags(album.name, desc, album.photo_count, imageUrl, pageUrl);
 
         let html = await fs.promises.readFile(filePath, "utf-8");
-        html = html.replace("<title>Vivanty</title>", `<title>${escapeHtml(album.name)} — Vivanty</title>\n    ${ogTags}`);
+        html = html.replace("<title>F4mil</title>", `<title>${escapeHtml(album.name)} — F4mil</title>\n    ${ogTags}`);
 
         res.statusCode = 200;
         res.setHeader("Content-Type", "text/html; charset=utf-8");

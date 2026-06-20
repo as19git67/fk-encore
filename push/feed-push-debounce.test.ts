@@ -61,7 +61,7 @@ describe("feed-push-debounce", () => {
     const payload = send.mock.calls[0]![1];
     expect(payload.body).toContain("2 neue Favoriten");
     expect(payload.body).toContain("1 neuer Kommentar");
-    expect(payload.tag).toBe("vivanty-feed-digest");
+    expect(payload.tag).toBe("f4mil-feed-digest");
   });
 
   it("drops the push if the recipient comes back online before the flush", async () => {

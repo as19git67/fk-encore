@@ -106,7 +106,7 @@ actor PhotoHasher {
     /// pixel change moves the hash.
     ///
     /// This MUST stay byte-identical to `ShareHasher.imageDataHash` in the share
-    /// extension (VivantyShare/ShareViewController.swift): a photo first
+    /// extension (F4milShare/ShareViewController.swift): a photo first
     /// uploaded via the share extension and later re-sent by the library
     /// auto-sync only deduplicates server-side when both paths derive the same
     /// `image_data_hash`.
