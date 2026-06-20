@@ -144,7 +144,7 @@ struct ShareUploadView: View {
                     .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Album suchen")
                 }
             }
-            .navigationTitle("In Vivanty teilen")
+            .navigationTitle("In F4mil teilen")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -797,7 +797,7 @@ struct ShareQueueEntry: Codable {
 }
 
 enum ShareUploadQueueWriter {
-    private static let appGroupID   = "group.dev.fk-encore.VivantyPhotos"
+    private static let appGroupID   = "group.dev.fk-encore.F4milPhotos"
     private static let queueFile    = "upload_queue.json"
     private static let tempDirName  = "pending_uploads"
 
@@ -970,7 +970,7 @@ enum ShareSyncedState {
 // MARK: - Shared configuration
 
 enum ShareConfig {
-    static let appGroupID        = "group.dev.fk-encore.VivantyPhotos"
+    static let appGroupID        = "group.dev.fk-encore.F4milPhotos"
     static let tokenKey          = "shared.auth_token"
     static let refreshTokenKey   = "shared.refresh_token"
     static let serverURLKey      = "shared.serverURL"
@@ -1000,9 +1000,9 @@ enum ShareAPIError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notConfigured:
-            return "Vivanty ist nicht eingerichtet. Bitte öffne die App und melde dich an."
+            return "F4mil ist nicht eingerichtet. Bitte öffne die App und melde dich an."
         case .notAuthenticated:
-            return "Nicht angemeldet – bitte öffne Vivanty und melde dich an."
+            return "Nicht angemeldet – bitte öffne F4mil und melde dich an."
         case .httpError(let code):
             return "HTTP-Fehler \(code)"
         case .duplicate:
