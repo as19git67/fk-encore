@@ -588,6 +588,18 @@ WICHTIGE ABGRENZUNGSREGELN:
 - Auch wenn PV-Kleinanlagen (<30 kWp) seit 2023 einkommensteuerbefreit
   sein können (§3 Nr. 72 EStG), bleibt das Dokument steuerrelevant und
   gehört in anlage-g.
+
+4) Spenden und Zuwendungen:
+- Eine Spendenquittung, Zuwendungsbestätigung oder Sammelbestätigung einer
+  gemeinnützigen Organisation ist IMMER steuerrelevant (tax_relevant=true)
+  und gehört zu „sonderausgaben".
+- Erkennungsmerkmale sind „Spendenquittung", „Zuwendungsbestätigung",
+  „Sammelbestätigung", „§ 10b EStG", ein Gesamtbetrag der Zuwendung oder
+  eine Bestätigung über die steuerbegünstigte Verwendung. Das gilt auch für
+  Organisationen wie UNICEF, Deutsches Rotes Kreuz oder Caritas.
+- Verwechsle solche Belege niemals mit einer Meldung zur Sozialversicherung;
+  diese stammt typischerweise vom Arbeitgeber und bezieht sich auf gemeldete
+  Sozialversicherungsentgelte.
 """
 
 
