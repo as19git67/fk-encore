@@ -590,7 +590,11 @@ function openTransaction(tx: Transaction) {
 
 // ── Select mode + multi-selection state ───────────────────────────────
 
-const selectMode = ref(selectionStore.count > 0)
+// The basket is global and deliberately survives navigation.  Entering this
+// view must therefore not implicitly switch its local list interaction into
+// select mode just because there are already basket items; otherwise a normal
+// tap on the next transaction cannot open its detail view.
+const selectMode = ref(false)
 const selectionPopover = ref<InstanceType<typeof Popover> | null>(null)
 
 function toggleSelectMode() {
