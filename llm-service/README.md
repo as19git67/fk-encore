@@ -1,6 +1,6 @@
 # LLM Service
 
-A FastAPI-based microservice that hosts a local **Llama-3.2-3B** (GGUF) model for structured document classification and a **multilingual-e5-base** transformer for high-quality text embeddings.
+A FastAPI-based microservice that hosts a local **Qwen2.5-7B-Instruct** (GGUF) model for structured document classification and a **multilingual-e5-base** transformer for high-quality text embeddings.
 
 ---
 
@@ -101,8 +101,8 @@ Generates warm, personal titles and subtitles for private photo recaps (e.g., "A
 | Variable | Default | Description |
 |---|---|---|
 | `MODELS_DIR` | `/models` | Root directory for model artefacts |
-| `LLM_MODEL_URL` | `https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q6_K_L.gguf` | Download source for the LLM GGUF file |
-| `LLM_MODEL_PATH` | `/models/llama.gguf` | Local path to the GGUF model file |
+| `LLM_MODEL_URL` | `https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf` | Download source for the LLM GGUF file |
+| `LLM_MODEL_PATH` | `/models/qwen2.5-7b-instruct-q4_k_m.gguf` | Local path to the GGUF model file |
 | `LLM_CTX` | `8192` | Context window size |
 | `LLM_THREADS` | `$(nproc)` | CPU threads for inference |
 | `CLASSIFY_TEXT_CHAR_LIMIT` | `6000` | Max document characters fed to `/classify` (cheap pre-cap before the n_ctx token guard). Keep ≥ the app's `DOCUMENTS_CLASSIFY_CHAR_LIMIT`; raise both in lockstep with `LLM_CTX` to classify longer documents. |
