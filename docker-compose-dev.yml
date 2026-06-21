@@ -87,7 +87,7 @@ services:
       com.centurylinklabs.watchtower.scope: fktest
     environment:
       MODELS_DIR: /models
-      LLM_MODEL_PATH: /models/llama.gguf
+      LLM_MODEL_PATH: /models/qwen2.5-7b-instruct-q4_k_m.gguf
       EMBEDDING_MODEL: intfloat/multilingual-e5-base
       LLM_CTX: "8192"
       LLM_GPU_LAYERS: "0"

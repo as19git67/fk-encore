@@ -2,7 +2,7 @@
 # Idempotent downloader for the llm-service model files.
 #
 # Pulls two artifacts into ${MODELS_DIR}:
-#   1. the Llama GGUF file (quantised instruction-tuned weights),
+#   1. the LLM GGUF file (Qwen2.5-7B-Instruct, quantised instruction-tuned weights),
 #   2. the sentence-transformers embedding model repository.
 #
 # Re-running is safe — existing files are kept (curl --continue) and an
@@ -14,8 +14,8 @@
 set -euo pipefail
 
 MODELS_DIR="${MODELS_DIR:-/models}"
-LLM_MODEL_PATH="${LLM_MODEL_PATH:-${MODELS_DIR}/llama.gguf}"
-LLM_MODEL_URL="${LLM_MODEL_URL:-https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf}"
+LLM_MODEL_PATH="${LLM_MODEL_PATH:-${MODELS_DIR}/qwen2.5-7b-instruct-q4_k_m.gguf}"
+LLM_MODEL_URL="${LLM_MODEL_URL:-https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf}"
 LLM_MODEL_SHA256="${LLM_MODEL_SHA256:-}"  # optional integrity check
 
 EMBEDDING_MODEL="${EMBEDDING_MODEL:-intfloat/multilingual-e5-base}"
