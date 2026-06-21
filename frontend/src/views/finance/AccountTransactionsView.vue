@@ -24,6 +24,7 @@ import { useOverviewStore } from '../../stores/finance/overview'
 import { useTagsStore } from '../../stores/finance/tags'
 import { useTxSelectionStore } from '../../stores/finance/selection'
 import { useTxFiltersStore } from '../../stores/finance/txFilters'
+import { useAuthStore } from '../../stores/auth'
 import DateRangePresets from '../../components/DateRangePresets.vue'
 import BatchTagDialog from '../../components/finance/BatchTagDialog.vue'
 import type {
@@ -45,6 +46,7 @@ const tagsStore = useTagsStore()
 const { restore: restoreScroll } = useScrollRestore('finance-transactions')
 const selectionStore = useTxSelectionStore()
 const filtersStore = useTxFiltersStore()
+const authStore = useAuthStore()
 
 const PAGE_LIMIT = 500
 
@@ -290,6 +292,20 @@ const isDepot = computed(() => {
   if (!mode.value || mode.value.kind !== 'account') return false
   return resolvedAccount.value?.type_kind === 'depot'
 })
+
+const canAddCashTransaction = computed(() =>
+  mode.value?.kind === 'account' &&
+  resolvedAccount.value?.type_kind === 'bargeld' &&
+  authStore.hasPermission('finance.accounts.manage'),
+)
+
+function openCashTransactionForm() {
+  if (!mode.value || mode.value.kind !== 'account') return
+  void router.push({
+    name: 'finance-transaction-new',
+    query: { accountId: mode.value.accountId },
+  })
+}
 
 const holdings = ref<Holding[]>([])
 const holdingsAsOf = ref<string | null>(null)
@@ -733,6 +749,15 @@ function goBack() {
       </template>
       <div v-if="!isDepot" class="tx-header-actions">
         <Button
+          v-if="canAddCashTransaction"
+          icon="pi pi-money-bill"
+          severity="secondary"
+          rounded
+          aria-label="Bargeldbuchung erfassen"
+          title="Bargeldbuchung erfassen"
+          @click="openCashTransactionForm"
+        />
+        <Button
           icon="pi pi-filter"
           severity="secondary"
           rounded
@@ -1093,7 +1118,7 @@ function goBack() {
 /* ── Header ─────────────────────────────────────────────────────────── */
 .tx-header {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   grid-template-areas:
     'back title actions'
     'back meta  actions';
