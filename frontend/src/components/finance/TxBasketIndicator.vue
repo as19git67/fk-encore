@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Drawer from 'primevue/drawer'
+import Message from 'primevue/message'
 import { useTxSelectionStore } from '../../stores/finance/selection'
-import type { Transaction } from '../../api/finance'
+import { downloadTransactionsCsv, type Transaction } from '../../api/finance'
+import BatchTagDialog from './BatchTagDialog.vue'
+import BatchNoticeDialog from './BatchNoticeDialog.vue'
 
 /**
  * Header indicator + slide-out drawer for the transaction basket.
@@ -16,8 +18,11 @@ import type { Transaction } from '../../api/finance'
  */
 
 const selectionStore = useTxSelectionStore()
-const router = useRouter()
 const drawerVisible = ref(false)
+const tagDialogVisible = ref(false)
+const noticeDialogVisible = ref(false)
+const exporting = ref(false)
+const actionError = ref<string | null>(null)
 
 const count = computed(() => selectionStore.count)
 const items = computed(() => selectionStore.items)
@@ -48,8 +53,28 @@ function formatDate(iso: string): string {
 }
 
 function openBatchTagEditor() {
-  drawerVisible.value = false
-  void router.push({ name: 'finance-batch-tag' })
+  if (count.value === 0) return
+  actionError.value = null
+  tagDialogVisible.value = true
+}
+
+function openBatchNoticeEditor() {
+  if (count.value === 0) return
+  actionError.value = null
+  noticeDialogVisible.value = true
+}
+
+async function exportCsv() {
+  if (count.value === 0 || exporting.value) return
+  actionError.value = null
+  exporting.value = true
+  try {
+    await downloadTransactionsCsv(selectionStore.ids)
+  } catch (err) {
+    actionError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    exporting.value = false
+  }
 }
 </script>
 
@@ -126,25 +151,63 @@ function openBatchTagEditor() {
 
       <template #footer>
         <div class="drawer-footer">
-          <Button
-            label="Alles leeren"
-            icon="pi pi-times"
-            severity="secondary"
-            text
-            size="small"
-            :disabled="count === 0"
-            @click="selectionStore.clear()"
-          />
-          <Button
-            label="Tags"
-            icon="pi pi-tag"
-            size="small"
-            :disabled="count === 0"
-            @click="openBatchTagEditor"
-          />
+          <Message
+            v-if="actionError"
+            severity="error"
+            :closable="true"
+            class="action-error"
+            @close="actionError = null"
+          >
+            {{ actionError }}
+          </Message>
+          <div class="action-row">
+            <Button
+              label="Tags"
+              icon="pi pi-tag"
+              size="small"
+              :disabled="count === 0"
+              @click="openBatchTagEditor"
+            />
+            <Button
+              label="Notiz"
+              icon="pi pi-comment"
+              size="small"
+              severity="secondary"
+              outlined
+              :disabled="count === 0"
+              @click="openBatchNoticeEditor"
+            />
+            <Button
+              label="CSV"
+              icon="pi pi-download"
+              size="small"
+              severity="secondary"
+              outlined
+              :disabled="count === 0"
+              :loading="exporting"
+              @click="exportCsv"
+            />
+          </div>
+          <div class="clear-row">
+            <Button
+              label="Alles leeren"
+              icon="pi pi-times"
+              severity="secondary"
+              text
+              size="small"
+              :disabled="count === 0"
+              @click="selectionStore.clear()"
+            />
+          </div>
         </div>
       </template>
     </Drawer>
+
+    <BatchTagDialog v-model:visible="tagDialogVisible" />
+    <BatchNoticeDialog
+      v-model:visible="noticeDialogVisible"
+      :transaction-ids="selectionStore.ids"
+    />
   </div>
 </template>
 
@@ -255,7 +318,21 @@ function openBatchTagEditor() {
 
 .drawer-footer {
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
   gap: 0.5rem;
+}
+.action-error {
+  margin: 0;
+}
+.action-row {
+  display: flex;
+  gap: 0.5rem;
+}
+.action-row :deep(.p-button) {
+  flex: 1;
+}
+.clear-row {
+  display: flex;
+  justify-content: flex-end;
 }
 </style>
