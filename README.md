@@ -70,7 +70,7 @@ tax categories, and banking.
   refreshed hourly), matched against a photo's DINOv2 embedding to identify
   concrete points of interest (Brandenburger Tor, Marienplatz, …) with a
   Wikipedia link and a Wikimedia Commons reference image
-- **Document classification & embeddings** – local Llama-3.2-3B (GGUF) plus a
+- **Document classification & embeddings** – local Qwen2.5-7B-Instruct (GGUF) plus a
   multilingual-e5 sentence-transformer
 - **Semantic image search** – OpenCLIP embeddings
 - **Visual similarity** – DINOv2 embeddings, plus a hybrid CLIP + DINOv2 mode
