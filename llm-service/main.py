@@ -53,7 +53,7 @@ def _env_int(name: str, default: int) -> int:
 
 
 MODELS_DIR = Path(os.environ.get("MODELS_DIR") or "/models")
-LLM_MODEL_PATH = Path(os.environ.get("LLM_MODEL_PATH") or str(MODELS_DIR / "llama.gguf"))
+LLM_MODEL_PATH = Path(os.environ.get("LLM_MODEL_PATH") or str(MODELS_DIR / "qwen2.5-7b-instruct-q4_k_m.gguf"))
 LLM_CTX = _env_int("LLM_CTX", 8192)
 LLM_THREADS = _env_int("LLM_THREADS", os.cpu_count() or 4)
 LLM_GPU_LAYERS = _env_int("LLM_GPU_LAYERS", 0)
