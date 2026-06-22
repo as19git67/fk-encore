@@ -177,8 +177,22 @@ export const SENDER_RULES: readonly SenderRule[] = [
 
   // ── Telecom / memberships / vehicle ─────────────────────────────────────
   {
-    note: "LEW TelNet / Telekom-Provider → Telekommunikation",
-    senders: ["telnet"],
+    note: "Telekom-Provider (LEW TelNet, Telefónica/O2, Vodafone, Telekom) → Telekommunikation",
+    // 'telefnica' matches the normalized 'Telefónica' (the ó is stripped by
+    // normalizeForMatch); 'telefonica' covers OCR without the accent.
+    senders: ["telnet", "telefnica", "telefonica", "vodafone", "telekom"],
+    // Guard: a Deutsche-Telekom share/dividend statement names the provider
+    // but belongs to securities — keep those out of the telecom bucket.
+    excludeAny: [
+      "dividende",
+      "aktie",
+      "wertpapier",
+      "depot",
+      "isin",
+      "erträgnis",
+      "ausschüttung",
+      "kapitalertrag",
+    ],
     category: "vertraege-telekom",
   },
   {
