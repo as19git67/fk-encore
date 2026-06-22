@@ -43,6 +43,7 @@ import {
   extractDocumentNumber,
   extractReferenceNumberTags,
   isSubjectPersonSender,
+  reconcileSubjectPersonTags,
 } from "./metadata-extract";
 import { realtime, push } from "~encore/clients";
 
@@ -256,6 +257,15 @@ export async function runClassify(documentId: number): Promise<{ classification:
   }
   // 4. Deterministically link the Bezugspersonen mentioned in the text.
   const subjectPersonIds = detectSubjectPersonIds(clipped, subjectPersons);
+  // 5. Person identity is deterministic, not the LLM's guess: strip any
+  //    Bezugspersonen relation tag the classifier hallucinated (e.g. a
+  //    sibling/parent not actually named in the document) and ensure the
+  //    detected persons' relation tags are present.
+  classification.tags = reconcileSubjectPersonTags(
+    classification.tags,
+    subjectPersons,
+    subjectPersonIds,
+  );
 
   // Deterministic sender → category routing (see sender-rules.ts). A known
   // recurring institution overrides the LLM's category guess, which otherwise
