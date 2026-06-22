@@ -497,6 +497,25 @@ export async function deleteDepotTransaction(
   return apiFetch(`/finance/depot-transactions/${txId}`, { method: 'DELETE' })
 }
 
+export interface DeriveDepotTransactionsResponse {
+  derived: number
+  skipped: number
+  duplicates: number
+  errors: string[]
+}
+
+export async function deriveDepotTransactionsFromGiro(
+  accountId: number,
+): Promise<DeriveDepotTransactionsResponse> {
+  return apiFetch(
+    `/finance/accounts/${accountId}/depot-transactions/derive`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ id: accountId }),
+    },
+  )
+}
+
 // ----------------------------------------------------------------------
 // Overview (configurable landing page)
 // ----------------------------------------------------------------------
