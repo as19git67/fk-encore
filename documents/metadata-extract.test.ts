@@ -4,6 +4,7 @@ import {
   extractDocumentNumber,
   extractReferenceNumberTags,
   isSubjectPersonSender,
+  reconcileSubjectPersonTags,
 } from "./metadata-extract";
 
 describe("extractDocumentNumber", () => {
@@ -93,5 +94,47 @@ describe("extractReferenceNumberTags", () => {
     expect(
       extractReferenceNumberTags("Vertragskonto 123456 … Vertragsnummer 123456"),
     ).toEqual(["vertragsnr:123456"]);
+  });
+});
+
+describe("reconcileSubjectPersonTags", () => {
+  const persons = [
+    { id: 1, relation_tag: "Manuel" },
+    { id: 2, relation_tag: "Isabella" },
+    { id: 3, relation_tag: "Vater" },
+    { id: 4, relation_tag: "Mutter" },
+  ];
+
+  it("drops relation tags the detector did not confirm (the reported bug)", () => {
+    // LLM hallucinated Isabella + Vater; only Manuel was actually detected.
+    const out = reconcileSubjectPersonTags(
+      ["Manuel", "Isabella", "Vater", "sprachreise"],
+      persons,
+      [1],
+    );
+    expect(out).toContain("Manuel");
+    expect(out).toContain("sprachreise"); // content tag untouched
+    expect(out).not.toContain("Isabella");
+    expect(out).not.toContain("Vater");
+  });
+
+  it("drops all person tags when the detector confirms none (OCR-garbled names)", () => {
+    const out = reconcileSubjectPersonTags(["Manuel", "Isabella", "Vater"], persons, []);
+    expect(out).toEqual([]);
+  });
+
+  it("adds the relation tag of a detected person the LLM missed", () => {
+    const out = reconcileSubjectPersonTags(["plymouth"], persons, [4]);
+    expect(out).toEqual(["plymouth", "Mutter"]);
+  });
+
+  it("leaves documents without Bezugspersonen untouched", () => {
+    const out = reconcileSubjectPersonTags(["rechnung", "o2"], [], []);
+    expect(out).toEqual(["rechnung", "o2"]);
+  });
+
+  it("matches relation tags case-insensitively and de-duplicates", () => {
+    const out = reconcileSubjectPersonTags(["manuel", "Manuel", "MANUEL"], persons, [1]);
+    expect(out).toEqual(["manuel"]);
   });
 });
