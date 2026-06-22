@@ -58,6 +58,12 @@ export interface ListPhotoIndexResponse {
   photos: PhotoIndexEntry[]
 }
 
+export interface LocationSuggestion {
+  label: string
+  latitude: number
+  longitude: number
+}
+
 export interface PhotoDetailsBatchResponse {
   photos: Photo[]
 }
@@ -95,6 +101,9 @@ export interface PhotoFilter {
   importedDaysAgo?: number
   sizeMin?: number
   sizeMax?: number
+  nearLat?: number
+  nearLon?: number
+  nearRadiusKm?: number
   ownerIds?: number[]
   // AI auto-pick visibility (Track I). false (default) → AI-hidden
   // photos are excluded from the grid; true → they are shown alongside
@@ -139,6 +148,11 @@ function buildPhotoFilterQuery(filter: PhotoFilter | boolean | undefined): strin
   if (f.importedDaysAgo !== undefined) add('importedDaysAgo', f.importedDaysAgo)
   if (f.sizeMin !== undefined) add('sizeMin', f.sizeMin)
   if (f.sizeMax !== undefined) add('sizeMax', f.sizeMax)
+  if (f.nearLat !== undefined && f.nearLon !== undefined) {
+    add('nearLat', f.nearLat)
+    add('nearLon', f.nearLon)
+    add('nearRadiusKm', f.nearRadiusKm ?? 10)
+  }
   if (f.ownerIds && f.ownerIds.length) add('ownerIds', f.ownerIds.join(','))
   if (f.showAiHidden) add('showAiHidden', true)
 
@@ -158,6 +172,12 @@ export function listPhotos(filter?: PhotoFilter | boolean) {
  */
 export function listPhotoIndex(filter?: PhotoFilter | boolean) {
   return apiFetch<ListPhotoIndexResponse>(`/photos/index${buildPhotoFilterQuery(filter)}`)
+}
+
+export function autocompletePhotoLocations(query: string) {
+  return apiFetch<{ locations: LocationSuggestion[] }>(
+    `/photos/locations/autocomplete?query=${encodeURIComponent(query)}`,
+  )
 }
 
 /**
@@ -1134,4 +1154,3 @@ export function getExternalServiceHealth(signal?: AbortSignal) {
 export function listPhotoUploaders() {
   return apiFetch<{ uploaders: { id: number; name: string }[] }>('/photos/uploaders')
 }
-

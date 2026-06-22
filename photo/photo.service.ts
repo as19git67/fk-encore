@@ -146,6 +146,7 @@ import type {
   FaceBBox,
 } from "../db/types";
 import { resizeImageInPool, type ImagePoolPriority } from "./image-pool";
+import { writeCacheFileAtomically } from "./cache-file";
 import { getHeicDecodeCached, setHeicDecodeCached } from "./heic-cache";
 import { fetchWithTimeout, ML_RPC_QUICK_TIMEOUT_MS } from "./rpc-timeout";
 import {
@@ -3857,13 +3858,12 @@ export async function indexPhotoThumbnails(photoId: number): Promise<void> {
   // across widths on a single worker would fight with other scan workers
   // for the libuv thread pool and is not worth the complexity.
   for (const width of targets) {
-    const { shardPath, cachePath } = thumbnailCacheKey(photo.filename, width);
+    const { cachePath } = thumbnailCacheKey(photo.filename, width);
     try {
       // Prewarm is background work — low priority so it can't occupy the
       // whole sharp pool while someone is browsing (see image-pool reserve).
       const resized = await resizeImage(sourceBuffer, width, "low");
-      await fs.promises.mkdir(shardPath, { recursive: true });
-      await fs.promises.writeFile(cachePath, resized);
+      await writeCacheFileAtomically(cachePath, resized);
     } catch (err) {
       console.error(`[thumbnail] generate w=${width} for photo ${photoId} failed:`, err);
     }
@@ -6943,6 +6943,81 @@ export async function searchByDateRangeLogic(
 }
 
 // ---------- Location Search ----------
+
+export interface LocationSuggestion {
+  label: string;
+  latitude: number;
+  longitude: number;
+}
+
+const locationSearchCache = new Map<string, { expiresAt: number; results: LocationSuggestion[] }>();
+let locationSearchTail: Promise<void> = Promise.resolve();
+let lastLocationSearchAt = 0;
+
+/**
+ * Forward-geocode a place name for the gallery's proximity filter. Requests
+ * are cached and serialized to stay within the public Nominatim 1 req/s
+ * policy; the browser never talks to that service directly.
+ */
+export async function autocompleteLocationLogic(query: string): Promise<LocationSuggestion[]> {
+  const normalized = query.trim().replace(/\s+/g, " ");
+  if (normalized.length < 3 || normalized.length > 200) return [];
+
+  const cacheKey = normalized.toLocaleLowerCase("de");
+  const cached = locationSearchCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.results;
+
+  const previous = locationSearchTail;
+  let release!: () => void;
+  locationSearchTail = new Promise<void>((resolve) => { release = resolve; });
+  await previous;
+  try {
+    const waitMs = Math.max(0, 1_000 - (Date.now() - lastLocationSearchAt));
+    if (waitMs) await new Promise((resolve) => setTimeout(resolve, waitMs));
+    lastLocationSearchAt = Date.now();
+
+    const params = new URLSearchParams({
+      q: normalized,
+      format: "jsonv2",
+      limit: "5",
+      addressdetails: "1",
+      "accept-language": "de,en",
+    });
+    const response = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
+      headers: { "User-Agent": "fk-encore-photo-app/1.0" },
+    });
+    if (!response.ok) return [];
+
+    const data = await response.json() as Array<{ display_name?: string; lat?: string; lon?: string }>;
+    const seen = new Set<string>();
+    const results = data
+      .map((item) => ({
+        label: item.display_name?.trim() ?? "",
+        latitude: Number(item.lat),
+        longitude: Number(item.lon),
+      }))
+      .filter((item) => item.label.length > 0
+        && Number.isFinite(item.latitude) && item.latitude >= -90 && item.latitude <= 90
+        && Number.isFinite(item.longitude) && item.longitude >= -180 && item.longitude <= 180)
+      // Nominatim can return several feature types for the same point. Show
+      // one unambiguous choice instead of visually identical duplicates.
+      .filter((item) => {
+        const key = `${item.latitude.toFixed(5)},${item.longitude.toFixed(5)}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+    if (locationSearchCache.size >= 100) locationSearchCache.delete(locationSearchCache.keys().next().value!);
+    locationSearchCache.set(cacheKey, { expiresAt: Date.now() + 10 * 60_000, results });
+    return results;
+  } catch (err) {
+    console.warn("Location autocomplete failed:", (err as Error).message ?? err);
+    return [];
+  } finally {
+    release();
+  }
+}
 
 export async function searchByLocationLogic(
   userId: number,

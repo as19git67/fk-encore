@@ -219,13 +219,13 @@ const { applied: filter, draft: filterDraft, activeCount, openEdit, apply: apply
 const filterMenuOpen = ref(false)
 // Lazy-Mount: siehe GalleryView. Spart /persons + /albums beim Album-Öffnen.
 const filterMenuMounted = ref(false)
-const FILTER_AVAILABLE = computed<Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'>>(() => {
-  const arr: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'> = [
+const FILTER_AVAILABLE = computed<Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'nearLocation'>>(() => {
+  const arr: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'nearLocation'> = [
     'hiddenMode', 'favorite', 'inGroup',
     'othersFavorited', 'othersHidden',
     'ownerIds',
     'qualityRange', 'mediaTypes', 'hasGps',
-    'dateRange', 'sizeRange',
+    'dateRange', 'nearLocation',
   ]
   // Group-Highlight toggle only when the album actually has enough of
   // them — otherwise the choice would be either empty or invisible.
@@ -2353,6 +2353,9 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       v-model:visible="filterMenuOpen"
       v-model:draft="filterDraft"
       :available="FILTER_AVAILABLE"
+      :reference-location="cursorPhoto?.latitude != null && cursorPhoto?.longitude != null
+        ? { latitude: cursorPhoto.latitude, longitude: cursorPhoto.longitude, label: cursorPhoto.original_name }
+        : undefined"
       @apply="onApplyFilter"
       @reset="onResetFilter"
     />

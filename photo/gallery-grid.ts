@@ -51,6 +51,9 @@ type GalleryGridQueryParams = {
   importedDaysAgo?: Query<number>;
   sizeMin?: Query<number>;
   sizeMax?: Query<number>;
+  nearLat?: Query<number>;
+  nearLon?: Query<number>;
+  nearRadiusKm?: Query<number>;
   showAiHidden?: Query<boolean>;
   aiHiddenMode?: Query<string>;
   ownerIds?: Query<string>;
@@ -116,6 +119,9 @@ function toFilterQuery(p: GalleryGridQueryParams): PhotoFilterQuery {
     importedDaysAgo: p.importedDaysAgo,
     sizeMin: p.sizeMin,
     sizeMax: p.sizeMax,
+    nearLat: p.nearLat,
+    nearLon: p.nearLon,
+    nearRadiusKm: p.nearRadiusKm,
     showAiHidden: p.showAiHidden,
     aiHiddenMode: p.aiHiddenMode,
     ownerIds: p.ownerIds,
