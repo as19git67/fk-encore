@@ -750,6 +750,13 @@
       "when": 1781905140606,
       "tag": "0106_user_label_prefs",
       "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1781905140607,
+      "tag": "0107_finance_depot_transaction",
+      "breakpoints": true
     }
   ]
 }
