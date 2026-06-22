@@ -6,6 +6,7 @@ import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import { writeMaintenanceResponseIfActive } from "../backup/maintenance";
 import * as service from "./photo.service";
+import { writeCacheFileAtomically } from "./cache-file";
 import { UPLOAD_DIR, THUMBNAIL_DIR, thumbnailShardPath } from "./photo.service";
 import { PHOTO_LIBRARIES_ROOT } from "./libraries.service";
 import { eq } from "drizzle-orm";
@@ -716,6 +717,9 @@ export const getPhotoFile = api.raw(
 
       const widthStr = url.searchParams.get("w");
       const shouldConvert = url.searchParams.get("convert") === "true";
+      // Used only after an <img> reports a failed decode. It bypasses a
+      // possibly truncated legacy cache entry and regenerates it once.
+      const retryThumbnail = url.searchParams.get("retry") === "1";
       const targetWidth = widthStr ? parseInt(widthStr, 10) : null;
 
       const isHeicFile = ext === ".heic" || ext === ".heif";
@@ -766,7 +770,7 @@ export const getPhotoFile = api.raw(
               } catch {
                   // cache miss — fall through to regeneration below
               }
-              if (cacheHit) {
+              if (cacheHit && !retryThumbnail) {
                   res.setHeader("Content-Type", "image/jpeg");
                   res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
                   res.setHeader("ETag", etag);
@@ -786,9 +790,10 @@ export const getPhotoFile = api.raw(
                   buffer = await service.resizeImage(buffer, targetWidth!);
               }
 
-              // Persist to thumbnail cache (fire-and-forget, don't block the response)
-              fs.promises.mkdir(shardPath, { recursive: true })
-                .then(() => fs.promises.writeFile(cachePath, buffer))
+              // Persist to thumbnail cache (fire-and-forget, don't block the response).
+              // Atomic publication prevents a parallel request from reading a
+              // partially-written JPEG and displaying a broken thumbnail.
+              writeCacheFileAtomically(cachePath, buffer)
                 .catch(err => console.error("Failed to write thumbnail cache:", err));
 
               res.setHeader("Content-Type", "image/jpeg");

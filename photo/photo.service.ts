@@ -146,6 +146,7 @@ import type {
   FaceBBox,
 } from "../db/types";
 import { resizeImageInPool, type ImagePoolPriority } from "./image-pool";
+import { writeCacheFileAtomically } from "./cache-file";
 import { getHeicDecodeCached, setHeicDecodeCached } from "./heic-cache";
 import { fetchWithTimeout, ML_RPC_QUICK_TIMEOUT_MS } from "./rpc-timeout";
 import {
@@ -3857,13 +3858,12 @@ export async function indexPhotoThumbnails(photoId: number): Promise<void> {
   // across widths on a single worker would fight with other scan workers
   // for the libuv thread pool and is not worth the complexity.
   for (const width of targets) {
-    const { shardPath, cachePath } = thumbnailCacheKey(photo.filename, width);
+    const { cachePath } = thumbnailCacheKey(photo.filename, width);
     try {
       // Prewarm is background work — low priority so it can't occupy the
       // whole sharp pool while someone is browsing (see image-pool reserve).
       const resized = await resizeImage(sourceBuffer, width, "low");
-      await fs.promises.mkdir(shardPath, { recursive: true });
-      await fs.promises.writeFile(cachePath, resized);
+      await writeCacheFileAtomically(cachePath, resized);
     } catch (err) {
       console.error(`[thumbnail] generate w=${width} for photo ${photoId} failed:`, err);
     }
