@@ -6989,6 +6989,7 @@ export async function autocompleteLocationLogic(query: string): Promise<Location
     if (!response.ok) return [];
 
     const data = await response.json() as Array<{ display_name?: string; lat?: string; lon?: string }>;
+    const seen = new Set<string>();
     const results = data
       .map((item) => ({
         label: item.display_name?.trim() ?? "",
@@ -6997,7 +6998,15 @@ export async function autocompleteLocationLogic(query: string): Promise<Location
       }))
       .filter((item) => item.label.length > 0
         && Number.isFinite(item.latitude) && item.latitude >= -90 && item.latitude <= 90
-        && Number.isFinite(item.longitude) && item.longitude >= -180 && item.longitude <= 180);
+        && Number.isFinite(item.longitude) && item.longitude >= -180 && item.longitude <= 180)
+      // Nominatim can return several feature types for the same point. Show
+      // one unambiguous choice instead of visually identical duplicates.
+      .filter((item) => {
+        const key = `${item.latitude.toFixed(5)},${item.longitude.toFixed(5)}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
 
     if (locationSearchCache.size >= 100) locationSearchCache.delete(locationSearchCache.keys().next().value!);
     locationSearchCache.set(cacheKey, { expiresAt: Date.now() + 10 * 60_000, results });
