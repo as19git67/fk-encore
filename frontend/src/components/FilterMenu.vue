@@ -268,6 +268,9 @@ async function toggleLocationMap() {
   mapOpen.value = !mapOpen.value
   if (!mapOpen.value) return
   await nextTick()
+  // The map is kept mounted while hidden. Leaflet otherwise retains a map
+  // bound to the removed v-if node and reopens as an empty white rectangle.
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
   if (!locationMapContainer.value) return
   const lat = local.value.nearLat ?? 48.1372
   const lon = local.value.nearLon ?? 11.5756
@@ -279,7 +282,7 @@ async function toggleLocationMap() {
     }).addTo(locationMap)
     locationMap.on('click', (event: L.LeafletMouseEvent) => setLocationFromMap(event.latlng.lat, event.latlng.lng))
   }
-  locationMap.invalidateSize()
+  locationMap.invalidateSize(true)
   locationMap.setView([lat, lon])
   if (local.value.nearLat !== undefined && local.value.nearLon !== undefined) {
     setLocationMarker(lat, lon)
@@ -593,14 +596,14 @@ function close() {
             @click="clearNearLocation"
           />
         </div>
-        <div v-if="mapOpen" ref="locationMapContainer" class="location-picker-map" />
+        <div v-show="mapOpen" ref="locationMapContainer" class="location-picker-map" />
         <template v-if="local.nearLat !== undefined && local.nearLon !== undefined">
           <div class="filter-daterange">
             <InputNumber
               :model-value="local.nearRadiusKm ?? 10"
-              :min="0.1" :max="20000" :min-fraction-digits="1" :max-fraction-digits="1"
+              :min="1" :max="20000" :min-fraction-digits="0" :max-fraction-digits="0" :step="1"
               suffix=" km" show-buttons
-              @update:model-value="(v: number | null) => local = { ...local, nearRadiusKm: v && v > 0 ? v : 10 }"
+              @update:model-value="(v: number | null) => local = { ...local, nearRadiusKm: v && v > 0 ? Math.round(v) : 10 }"
             />
           </div>
           <small class="filter-hint">Fotos im Umkreis dieses Radius werden angezeigt.</small>
