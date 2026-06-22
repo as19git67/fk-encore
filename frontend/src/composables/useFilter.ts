@@ -64,8 +64,6 @@ export function parseFilterFromQuery(q: Record<string, unknown>): PhotoFilter {
 
   const qMin = parseNum(q.qualityMin); if (qMin !== undefined) f.qualityMin = qMin
   const qMax = parseNum(q.qualityMax); if (qMax !== undefined) f.qualityMax = qMax
-  const sMin = parseNum(q.sizeMin);    if (sMin !== undefined) f.sizeMin = sMin
-  const sMax = parseNum(q.sizeMax);    if (sMax !== undefined) f.sizeMax = sMax
   const imp  = parseNum(q.importedDaysAgo); if (imp !== undefined) f.importedDaysAgo = imp
   const nearLat = parseNum(q.nearLat)
   const nearLon = parseNum(q.nearLon)
@@ -134,8 +132,6 @@ export function filterToQuery(f: PhotoFilter): Record<string, string> {
   if (f.dateFrom) out.dateFrom = f.dateFrom
   if (f.dateTo) out.dateTo = f.dateTo
   if (f.importedDaysAgo !== undefined) out.importedDaysAgo = String(f.importedDaysAgo)
-  if (f.sizeMin !== undefined) out.sizeMin = String(f.sizeMin)
-  if (f.sizeMax !== undefined) out.sizeMax = String(f.sizeMax)
   if (f.nearLat !== undefined && f.nearLon !== undefined) {
     out.nearLat = String(f.nearLat)
     out.nearLon = String(f.nearLon)
@@ -169,7 +165,6 @@ export function countActiveFilters(f: PhotoFilter): number {
   if (f.hasAssignedPerson !== undefined) n++
   if (f.dateFrom || f.dateTo) n++
   if (f.importedDaysAgo !== undefined) n++
-  if (f.sizeMin !== undefined || f.sizeMax !== undefined) n++
   if (f.nearLat !== undefined && f.nearLon !== undefined) n++
   if (f.showAiHidden) n++
   return n

@@ -219,13 +219,13 @@ const { applied: filter, draft: filterDraft, activeCount, openEdit, apply: apply
 const filterMenuOpen = ref(false)
 // Lazy-Mount: siehe GalleryView. Spart /persons + /albums beim Album-Öffnen.
 const filterMenuMounted = ref(false)
-const FILTER_AVAILABLE = computed<Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange' | 'nearLocation'>>(() => {
-  const arr: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange' | 'nearLocation'> = [
+const FILTER_AVAILABLE = computed<Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'nearLocation'>>(() => {
+  const arr: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'nearLocation'> = [
     'hiddenMode', 'favorite', 'inGroup',
     'othersFavorited', 'othersHidden',
     'ownerIds',
     'qualityRange', 'mediaTypes', 'hasGps',
-    'dateRange', 'sizeRange', 'nearLocation',
+    'dateRange', 'nearLocation',
   ]
   // Group-Highlight toggle only when the album actually has enough of
   // them — otherwise the choice would be either empty or invisible.
