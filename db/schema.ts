@@ -1507,6 +1507,62 @@ export const financeAccountHolding = pgTable(
   ]
 );
 
+// ---------- Depot Transactions ----------
+//
+// Per-position buys / sells / dividends / corporate actions. A position
+// is identified the same way as in finance_account_holding:
+// COALESCE(isin, wkn, name). `executed_at` is a DATE (stored as string).
+// `linked_transaction_id` ties a derived row back to the giro/clearing
+// booking it came from; manual rows leave it NULL. `dedupe_hash` enables
+// idempotent imports (NULL for manual rows).
+
+export const financeDepotTransaction = pgTable(
+  "finance_depot_transaction",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    account_id: integer("account_id")
+      .notNull()
+      .references(() => financeAccount.id, { onDelete: "cascade" }),
+    isin: text("isin"),
+    wkn: text("wkn"),
+    name: text("name"),
+    /** buy | sell | in | out | dividend | split | corp_action */
+    kind: text("kind").notNull(),
+    executed_at: timestamp("executed_at", { mode: "string" }).notNull(),
+    amount: numeric("amount", { precision: 20, scale: 8 }),
+    price: numeric("price", { precision: 20, scale: 6 }),
+    gross_amount: numeric("gross_amount", { precision: 18, scale: 2 }),
+    fees: numeric("fees", { precision: 18, scale: 2 }),
+    tax: numeric("tax", { precision: 18, scale: 2 }),
+    net_amount: numeric("net_amount", { precision: 18, scale: 2 }),
+    currency: text("currency"),
+    /** fints-mt536 | giro-derived | csv-import | manual */
+    source: text("source").notNull().default("manual"),
+    linked_transaction_id: bigint("linked_transaction_id", {
+      mode: "number",
+    }).references(() => financeTransaction.id, { onDelete: "set null" }),
+    note: text("note"),
+    dedupe_hash: text("dedupe_hash"),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("finance_depot_transaction_account_idx").on(
+      table.account_id,
+      table.executed_at,
+    ),
+    index("finance_depot_transaction_position_idx").on(
+      table.account_id,
+      table.isin,
+      table.wkn,
+    ),
+    uniqueIndex("finance_depot_transaction_dedupe_unique")
+      .on(table.account_id, table.dedupe_hash)
+      .where(sql`${table.dedupe_hash} IS NOT NULL`),
+  ]
+);
+
 // ---------- Tags ----------
 //
 // Same tag name can exist once as source='user' and once as source='ai'
