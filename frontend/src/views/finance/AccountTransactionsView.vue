@@ -44,6 +44,7 @@ import type {
 import {
   createDepotTransaction,
   deleteDepotTransaction,
+  deriveDepotTransactionsFromGiro,
   getHoldingsHistory,
   listDepotTransactions,
   listHoldings,
@@ -702,6 +703,59 @@ watch(expandedPositionKey, (key) => {
   if (h) void loadDepotTransactions(h)
 })
 
+// ── Derive depot transactions from giro bookings (Phase 2b) ──────────
+//
+// One-click backfill: scans SECU-flagged giro bookings on the same
+// bankcontact, matches via ISIN to holdings, writes source='giro-derived'
+// rows. Idempotent — safe to call after each sync.
+
+const deriveLoading = ref(false)
+const deriveMessage = ref<{ severity: 'success' | 'info' | 'error'; text: string } | null>(null)
+
+// Backend gates this strictly (write ACL + linked bankcontact); the
+// frontend only hides the button on non-depot screens. Manual depots
+// will see a server-side error if they trigger it, which surfaces in
+// `deriveMessage` — acceptable for a rarely-used backfill action.
+const canDeriveDepotTx = computed(() => isDepot.value)
+
+async function runDerivation() {
+  if (!mode.value || mode.value.kind !== 'account') return
+  deriveLoading.value = true
+  deriveMessage.value = null
+  try {
+    const resp = await deriveDepotTransactionsFromGiro(mode.value.accountId)
+    if (resp.derived > 0) {
+      deriveMessage.value = {
+        severity: 'success',
+        text: `${resp.derived} neue Transaktion${resp.derived === 1 ? '' : 'en'} aus Giro-Buchungen abgeleitet.`,
+      }
+    } else if (resp.duplicates > 0) {
+      deriveMessage.value = {
+        severity: 'info',
+        text: 'Keine neuen Transaktionen — bereits alles abgeleitet.',
+      }
+    } else {
+      deriveMessage.value = {
+        severity: 'info',
+        text: 'Keine passenden Wertpapier-Buchungen im Giro-Konto gefunden.',
+      }
+    }
+    // Refresh per-position lists that are already loaded so the new
+    // rows show up immediately.
+    for (const key of Object.keys(depotTxByKey.value)) {
+      const h = holdings.value.find((x) => positionKeyOf(x) === key)
+      if (h) await loadDepotTransactions(h)
+    }
+  } catch (e) {
+    deriveMessage.value = {
+      severity: 'error',
+      text: e instanceof Error ? e.message : String(e),
+    }
+  } finally {
+    deriveLoading.value = false
+  }
+}
+
 // ── Transaction grouping (by booking_date) ───────────────────────────
 
 interface DayGroup {
@@ -1079,12 +1133,32 @@ function goBack() {
 
     <!-- ── Holdings table (depot accounts only) ─────────────────────── -->
     <section v-if="isDepot" class="holdings-section">
-      <h2 class="holdings-title">
-        Positionen
-        <span v-if="holdingsAsOf" class="holdings-date">
-          ({{ formatShortDate(holdingsAsOf) }})
-        </span>
-      </h2>
+      <div class="holdings-section-head">
+        <h2 class="holdings-title">
+          Positionen
+          <span v-if="holdingsAsOf" class="holdings-date">
+            ({{ formatShortDate(holdingsAsOf) }})
+          </span>
+        </h2>
+        <Button
+          v-if="canDeriveDepotTx"
+          label="Aus Giro ableiten"
+          icon="pi pi-sync"
+          size="small"
+          severity="secondary"
+          :loading="deriveLoading"
+          aria-label="Wertpapier-Transaktionen aus Giro-Buchungen ableiten"
+          @click="runDerivation"
+        />
+      </div>
+      <Message
+        v-if="deriveMessage"
+        :severity="deriveMessage.severity"
+        :closable="true"
+        @close="deriveMessage = null"
+      >
+        {{ deriveMessage.text }}
+      </Message>
 
       <!-- Depot value over time -->
       <div v-if="historyLoading" class="tx-loading">Lädt Wertverlauf …</div>
@@ -1742,10 +1816,17 @@ function goBack() {
      whole .page column — wider than the viewport on portrait. */
   min-width: 0;
 }
+.holdings-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
 .holdings-title {
   font-size: 1rem;
   font-weight: 600;
-  margin: 0 0 0.75rem;
+  margin: 0;
 }
 .holdings-date {
   font-weight: 400;

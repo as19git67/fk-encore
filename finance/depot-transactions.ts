@@ -24,6 +24,7 @@ import {
   financeAccountAccess,
   financeDepotTransaction,
 } from "../db/schema";
+import { deriveDepotTransactionsForBankcontact } from "./depot-derivation";
 
 console.log("[boot] finance/depot-transactions.ts: all imports resolved");
 
@@ -362,5 +363,68 @@ export const deleteDepotTransaction = api(
       .where(eq(financeDepotTransaction.id, txId));
 
     return { deleted: true };
+  },
+);
+
+// ----------------------------------------------------------------------
+// Re-derive from giro bookings (Phase 2b)
+//
+// Triggers `deriveDepotTransactionsForBankcontact` for the bankcontact
+// owning the target account. Idempotent — only adds rows for SECU giro
+// bookings that don't yet have a derived counterpart. Useful for
+// backfilling history that predates Phase 2.
+// ----------------------------------------------------------------------
+
+interface DeriveDepotTransactionsParams {
+  id: number;
+}
+
+interface DeriveDepotTransactionsResponse {
+  derived: number;
+  skipped: number;
+  duplicates: number;
+  errors: string[];
+}
+
+export const deriveDepotTransactionsFromGiro = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/finance/accounts/:id/depot-transactions/derive",
+    auth: true,
+  },
+  async ({
+    id,
+  }: DeriveDepotTransactionsParams): Promise<DeriveDepotTransactionsResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+
+    const [account] = await db
+      .select({
+        id: financeAccount.id,
+        bankcontact_id: financeAccount.bankcontact_id,
+      })
+      .from(financeAccount)
+      .where(eq(financeAccount.id, id))
+      .limit(1);
+    if (!account) throw APIError.notFound(`account ${id} not found`);
+
+    const level = await accountAccessLevel(auth, id);
+    if (level === null) throw APIError.notFound(`account ${id} not found`);
+    if (level !== "write") {
+      throw APIError.permissionDenied(
+        `write access required on account ${id}`,
+      );
+    }
+    if (account.bankcontact_id === null) {
+      throw APIError.failedPrecondition(
+        `account ${id} has no bankcontact — derivation only works for bank-linked depots`,
+      );
+    }
+
+    const stats = await deriveDepotTransactionsForBankcontact(
+      account.bankcontact_id,
+    );
+    return stats;
   },
 );
