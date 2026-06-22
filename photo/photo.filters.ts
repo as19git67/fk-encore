@@ -40,6 +40,10 @@ export interface PhotoFilterParams {
   importedDaysAgo?: number;
   sizeMin?: number;
   sizeMax?: number;
+  /** Centre and radius (in km) for a precise proximity search. */
+  nearLat?: number;
+  nearLon?: number;
+  nearRadiusKm?: number;
   ownerIds?: number[];
   // AI auto-pick filter (Track I, see migration 0075):
   //   "exclude" (default) — hide non-picked members of high-confidence
@@ -85,6 +89,9 @@ export interface PhotoFilterQuery {
   importedDaysAgo?: number;
   sizeMin?: number;
   sizeMax?: number;
+  nearLat?: number;
+  nearLon?: number;
+  nearRadiusKm?: number;
   showAiHidden?: boolean;
   aiHiddenMode?: string;
   ownerIds?: string;
@@ -135,6 +142,15 @@ export function parsePhotoFilterQuery(q: PhotoFilterQuery): PhotoFilterParams {
   if (q.importedDaysAgo !== undefined) f.importedDaysAgo = Number(q.importedDaysAgo);
   if (q.sizeMin !== undefined) f.sizeMin = Number(q.sizeMin);
   if (q.sizeMax !== undefined) f.sizeMax = Number(q.sizeMax);
+  const nearLat = q.nearLat === undefined ? undefined : Number(q.nearLat);
+  const nearLon = q.nearLon === undefined ? undefined : Number(q.nearLon);
+  if (Number.isFinite(nearLat) && Number.isFinite(nearLon)
+    && nearLat! >= -90 && nearLat! <= 90 && nearLon! >= -180 && nearLon! <= 180) {
+    f.nearLat = nearLat;
+    f.nearLon = nearLon;
+    const radius = q.nearRadiusKm === undefined ? 10 : Number(q.nearRadiusKm);
+    f.nearRadiusKm = Number.isFinite(radius) ? Math.min(Math.max(radius, 0.1), 20_000) : 10;
+  }
   if (q.ownerIds) f.ownerIds = parseIntArray(q.ownerIds);
   if (q.aiHiddenMode === "exclude" || q.aiHiddenMode === "include" || q.aiHiddenMode === "only") {
     f.aiHiddenMode = q.aiHiddenMode;
@@ -330,6 +346,30 @@ export function buildPhotoFilterConditions(
   }
   if (filter.sizeMax !== undefined) {
     conds.push(sql`${photos.size} <= ${filter.sizeMax}`);
+  }
+
+  if (filter.nearLat !== undefined && filter.nearLon !== undefined) {
+    const radiusKm = filter.nearRadiusKm ?? 10;
+    // A cheap bounding box narrows the candidate set; Haversine below makes
+    // the result exact, including at the anti-meridian.
+    const latDelta = radiusKm / 111.0;
+    const lonDelta = Math.min(180, radiusKm / (111.0 * Math.max(0.01, Math.abs(Math.cos(filter.nearLat * Math.PI / 180)))));
+    conds.push(sql`${photos.latitude} IS NOT NULL AND ${photos.longitude} IS NOT NULL`);
+    conds.push(sql`${photos.latitude} BETWEEN ${filter.nearLat - latDelta} AND ${filter.nearLat + latDelta}`);
+    if (filter.nearLon - lonDelta < -180 || filter.nearLon + lonDelta > 180) {
+      const minLon = ((filter.nearLon - lonDelta + 540) % 360) - 180;
+      const maxLon = ((filter.nearLon + lonDelta + 540) % 360) - 180;
+      conds.push(sql`(${photos.longitude} >= ${minLon} OR ${photos.longitude} <= ${maxLon})`);
+    } else {
+      conds.push(sql`${photos.longitude} BETWEEN ${filter.nearLon - lonDelta} AND ${filter.nearLon + lonDelta}`);
+    }
+    conds.push(sql`
+      6371 * ACOS(LEAST(1, GREATEST(-1,
+        COS(RADIANS(${filter.nearLat})) * COS(RADIANS(${photos.latitude}))
+        * COS(RADIANS(${photos.longitude}) - RADIANS(${filter.nearLon}))
+        + SIN(RADIANS(${filter.nearLat})) * SIN(RADIANS(${photos.latitude}))
+      ))) <= ${radiusKm}
+    `);
   }
 
   if (filter.ownerIds && filter.ownerIds.length > 0) {

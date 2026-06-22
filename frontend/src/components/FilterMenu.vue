@@ -9,7 +9,16 @@ import InputNumber from 'primevue/inputnumber'
 import AutoComplete from 'primevue/autocomplete'
 import DateRangePresets from './DateRangePresets.vue'
 import { toLocalIsoDate, parseLocalDate } from '../utils/dateFormat'
-import type { PhotoFilter, HiddenMode, MembershipMode, MediaType, Album, Person } from '../api/photos'
+import {
+  autocompletePhotoLocations,
+  type PhotoFilter,
+  type HiddenMode,
+  type MembershipMode,
+  type MediaType,
+  type Album,
+  type Person,
+  type LocationSuggestion,
+} from '../api/photos'
 import { useReferenceData } from '../composables/useReferenceData'
 
 /**
@@ -25,14 +34,14 @@ const props = withDefaults(defineProps<{
   visible: boolean
   draft: PhotoFilter
   /** Criteria to show. Default: all photo-level criteria. */
-  available?: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'>
+  available?: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange' | 'nearLocation'>
 }>(), {
   available: () => [
     'hiddenMode', 'showAiHidden', 'favorite', 'albumHighlight', 'groupHighlight', 'inGroup',
     'othersFavorited', 'othersHidden', 'notInAnyAlbum',
     'qualityRange', 'albumIds', 'personIds', 'mediaTypes',
     'hasGps', 'hasFaces', 'hasAssignedPerson',
-    'dateRange', 'importedDaysAgo', 'sizeRange',
+    'dateRange', 'importedDaysAgo', 'sizeRange', 'nearLocation',
   ],
 })
 
@@ -62,6 +71,10 @@ function isPersonDetailPhotoFilter(): boolean {
 }
 
 const local = ref<PhotoFilter>({ ...props.draft })
+const locationError = ref('')
+const locationPlace = ref<LocationSuggestion | null>(null)
+const locationSuggestions = ref<LocationSuggestion[]>([])
+let locationSearchSequence = 0
 
 // Mirror local → parent on every edit. The draft → local sync happens only
 // when the dialog opens (see the visible watcher below). Watching the draft
@@ -90,6 +103,10 @@ watch(() => props.visible, (v) => {
         .filter(u => props.draft.ownerIds!.includes(u.id))
         .map(u => ({ id: u.id, name: u.name }))
     : []
+  locationPlace.value = props.draft.nearLat !== undefined && props.draft.nearLon !== undefined
+    ? { label: 'Ausgewählter Standort', latitude: props.draft.nearLat, longitude: props.draft.nearLon }
+    : null
+  locationError.value = ''
 })
 
 const hiddenOptions: Array<{ label: string; value: HiddenMode }> = [
@@ -146,6 +163,73 @@ function setTri(key: 'hasGps' | 'hasFaces' | 'hasAssignedPerson', v: 'any' | 'ye
   if (v === 'any') delete next[key]
   else next[key] = v === 'yes'
   local.value = next
+}
+
+function useCurrentLocation() {
+  locationError.value = ''
+  if (!navigator.geolocation) {
+    locationError.value = 'Dein Browser unterstützt keine Standortabfrage.'
+    return
+  }
+  navigator.geolocation.getCurrentPosition(
+    ({ coords }) => {
+      local.value = {
+        ...local.value,
+        nearLat: coords.latitude,
+        nearLon: coords.longitude,
+        nearRadiusKm: local.value.nearRadiusKm ?? 10,
+      }
+      locationPlace.value = {
+        label: 'Aktueller Standort',
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+      }
+    },
+    () => { locationError.value = 'Standort konnte nicht abgerufen werden. Bitte erlaube den Zugriff.' },
+    { enableHighAccuracy: false, timeout: 10_000, maximumAge: 5 * 60_000 },
+  )
+}
+
+async function searchLocations(event: { query: string }) {
+  const query = event.query.trim()
+  const sequence = ++locationSearchSequence
+  if (query.length < 3) {
+    locationSuggestions.value = []
+    return
+  }
+  // PrimeVue invokes this for every keypress; wait briefly and only search
+  // for the most recent input before hitting the rate-limited backend.
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  if (sequence !== locationSearchSequence) return
+  try {
+    const { locations } = await autocompletePhotoLocations(query)
+    if (sequence === locationSearchSequence) locationSuggestions.value = locations
+  } catch {
+    if (sequence === locationSearchSequence) locationSuggestions.value = []
+  }
+}
+
+function selectLocation(event: { value: LocationSuggestion }) {
+  const place = event.value
+  locationPlace.value = place
+  local.value = {
+    ...local.value,
+    nearLat: place.latitude,
+    nearLon: place.longitude,
+    nearRadiusKm: local.value.nearRadiusKm ?? 10,
+  }
+  locationError.value = ''
+}
+
+function clearNearLocation() {
+  const next = { ...local.value }
+  delete next.nearLat
+  delete next.nearLon
+  delete next.nearRadiusKm
+  local.value = next
+  locationPlace.value = null
+  locationSuggestions.value = []
+  locationError.value = ''
 }
 
 // --- Album / Person autocomplete -------------------------------------------
@@ -407,6 +491,43 @@ function close() {
           @update:model-value="(v: 'any' | 'yes' | 'no') => setTri('hasGps', v)"
         />
       </div>
+
+      <!-- Current location / proximity -->
+      <div v-if="has('nearLocation')" class="filter-row">
+        <label class="filter-label">In der Nähe meines Standorts</label>
+        <AutoComplete
+          v-model="locationPlace"
+          :suggestions="locationSuggestions"
+          option-label="label"
+          placeholder="Ort oder Adresse suchen …"
+          :min-length="3"
+          force-selection
+          dropdown
+          @complete="searchLocations"
+          @item-select="selectLocation"
+        />
+        <div class="near-location-controls">
+          <Button label="Aktuellen Standort verwenden" icon="pi pi-map-marker" outlined @click="useCurrentLocation" />
+          <Button
+            v-if="local.nearLat !== undefined && local.nearLon !== undefined"
+            label="Entfernen" icon="pi pi-times" text severity="secondary"
+            @click="clearNearLocation"
+          />
+        </div>
+        <template v-if="local.nearLat !== undefined && local.nearLon !== undefined">
+          <div class="filter-daterange">
+            <InputNumber
+              :model-value="local.nearRadiusKm ?? 10"
+              :min="0.1" :max="20000" :min-fraction-digits="1" :max-fraction-digits="1"
+              suffix=" km" show-buttons
+              @update:model-value="(v: number | null) => local = { ...local, nearRadiusKm: v && v > 0 ? v : 10 }"
+            />
+          </div>
+          <small class="filter-hint">Fotos im Umkreis dieses Radius werden angezeigt.</small>
+        </template>
+        <small class="filter-hint">Ortssuche: © OpenStreetMap-Mitwirkende</small>
+        <small v-if="locationError" class="location-error">{{ locationError }}</small>
+      </div>
       <div v-if="has('hasFaces')" class="filter-row">
         <label class="filter-label">Gesichter erkannt</label>
         <SelectButton
@@ -480,4 +601,7 @@ function close() {
 .filter-daterange { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .filter-daterange > * { flex: 1 1 140px; }
 .mode-toggle { margin-top: 0.4rem; align-self: flex-start; }
+.near-location-controls { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.filter-hint { color: var(--text-color-secondary, #555); }
+.location-error { color: var(--red-500, #d32f2f); }
 </style>

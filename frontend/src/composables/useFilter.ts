@@ -67,6 +67,14 @@ export function parseFilterFromQuery(q: Record<string, unknown>): PhotoFilter {
   const sMin = parseNum(q.sizeMin);    if (sMin !== undefined) f.sizeMin = sMin
   const sMax = parseNum(q.sizeMax);    if (sMax !== undefined) f.sizeMax = sMax
   const imp  = parseNum(q.importedDaysAgo); if (imp !== undefined) f.importedDaysAgo = imp
+  const nearLat = parseNum(q.nearLat)
+  const nearLon = parseNum(q.nearLon)
+  if (nearLat !== undefined && nearLon !== undefined
+    && nearLat >= -90 && nearLat <= 90 && nearLon >= -180 && nearLon <= 180) {
+    f.nearLat = nearLat
+    f.nearLon = nearLon
+    f.nearRadiusKm = Math.min(20_000, Math.max(0.1, parseNum(q.nearRadiusKm) ?? 10))
+  }
 
   const albumIds = parseIntList(q.albumIds);   if (albumIds)  f.albumIds  = albumIds
   const personIds = parseIntList(q.personIds); if (personIds) f.personIds = personIds
@@ -128,6 +136,11 @@ export function filterToQuery(f: PhotoFilter): Record<string, string> {
   if (f.importedDaysAgo !== undefined) out.importedDaysAgo = String(f.importedDaysAgo)
   if (f.sizeMin !== undefined) out.sizeMin = String(f.sizeMin)
   if (f.sizeMax !== undefined) out.sizeMax = String(f.sizeMax)
+  if (f.nearLat !== undefined && f.nearLon !== undefined) {
+    out.nearLat = String(f.nearLat)
+    out.nearLon = String(f.nearLon)
+    out.nearRadiusKm = String(f.nearRadiusKm ?? 10)
+  }
   if (f.showAiHidden) out.showAiHidden = 'true'
   return out
 }
@@ -157,6 +170,7 @@ export function countActiveFilters(f: PhotoFilter): number {
   if (f.dateFrom || f.dateTo) n++
   if (f.importedDaysAgo !== undefined) n++
   if (f.sizeMin !== undefined || f.sizeMax !== undefined) n++
+  if (f.nearLat !== undefined && f.nearLon !== undefined) n++
   if (f.showAiHidden) n++
   return n
 }
