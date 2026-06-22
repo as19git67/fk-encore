@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import SelectButton from 'primevue/selectbutton'
@@ -9,7 +11,16 @@ import InputNumber from 'primevue/inputnumber'
 import AutoComplete from 'primevue/autocomplete'
 import DateRangePresets from './DateRangePresets.vue'
 import { toLocalIsoDate, parseLocalDate } from '../utils/dateFormat'
-import type { PhotoFilter, HiddenMode, MembershipMode, MediaType, Album, Person } from '../api/photos'
+import {
+  autocompletePhotoLocations,
+  type PhotoFilter,
+  type HiddenMode,
+  type MembershipMode,
+  type MediaType,
+  type Album,
+  type Person,
+  type LocationSuggestion,
+} from '../api/photos'
 import { useReferenceData } from '../composables/useReferenceData'
 
 /**
@@ -24,15 +35,17 @@ import { useReferenceData } from '../composables/useReferenceData'
 const props = withDefaults(defineProps<{
   visible: boolean
   draft: PhotoFilter
+  /** GPS point of the photo currently selected by the surrounding view. */
+  referenceLocation?: { latitude: number; longitude: number; label?: string }
   /** Criteria to show. Default: all photo-level criteria. */
-  available?: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'>
+  available?: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange' | 'nearLocation'>
 }>(), {
   available: () => [
     'hiddenMode', 'showAiHidden', 'favorite', 'albumHighlight', 'groupHighlight', 'inGroup',
     'othersFavorited', 'othersHidden', 'notInAnyAlbum',
     'qualityRange', 'albumIds', 'personIds', 'mediaTypes',
     'hasGps', 'hasFaces', 'hasAssignedPerson',
-    'dateRange', 'importedDaysAgo', 'sizeRange',
+    'dateRange', 'importedDaysAgo', 'nearLocation',
   ],
 })
 
@@ -62,6 +75,26 @@ function isPersonDetailPhotoFilter(): boolean {
 }
 
 const local = ref<PhotoFilter>({ ...props.draft })
+const locationError = ref('')
+const locationPlace = ref<LocationSuggestion | null>(null)
+const locationSuggestions = ref<LocationSuggestion[]>([])
+let locationSearchSequence = 0
+const mapOpen = ref(false)
+const locationMapContainer = ref<HTMLElement | null>(null)
+let locationMap: L.Map | null = null
+let locationMarker: L.Marker | null = null
+const LOCATION_PICKER_ZOOM = 13
+
+function locationPickerIcon(): L.DivIcon {
+  return L.divIcon({
+    className: 'location-picker-pin-icon',
+    iconSize: [24, 32],
+    iconAnchor: [12, 32],
+    // Keep the marker entirely self-contained. Leaflet's default marker
+    // depends on image assets whose URL is not reliable after bundling.
+    html: '<svg viewBox="0 0 24 32" width="24" height="32" aria-hidden="true"><path d="M12 1C6.5 1 2 5.5 2 11c0 7.5 10 20 10 20s10-12.5 10-20C22 5.5 17.5 1 12 1Z" fill="#3b82f6" stroke="#fff" stroke-width="3"/><circle cx="12" cy="11" r="3.5" fill="#fff"/></svg>',
+  })
+}
 
 // Mirror local → parent on every edit. The draft → local sync happens only
 // when the dialog opens (see the visible watcher below). Watching the draft
@@ -90,6 +123,10 @@ watch(() => props.visible, (v) => {
         .filter(u => props.draft.ownerIds!.includes(u.id))
         .map(u => ({ id: u.id, name: u.name }))
     : []
+  locationPlace.value = props.draft.nearLat !== undefined && props.draft.nearLon !== undefined
+    ? { label: 'Ausgewählter Standort', latitude: props.draft.nearLat, longitude: props.draft.nearLon }
+    : null
+  locationError.value = ''
 })
 
 const hiddenOptions: Array<{ label: string; value: HiddenMode }> = [
@@ -147,6 +184,145 @@ function setTri(key: 'hasGps' | 'hasFaces' | 'hasAssignedPerson', v: 'any' | 'ye
   else next[key] = v === 'yes'
   local.value = next
 }
+
+function useCurrentLocation() {
+  locationError.value = ''
+  if (!navigator.geolocation) {
+    locationError.value = 'Dein Browser unterstützt keine Standortabfrage.'
+    return
+  }
+  navigator.geolocation.getCurrentPosition(
+    ({ coords }) => {
+      local.value = {
+        ...local.value,
+        nearLat: coords.latitude,
+        nearLon: coords.longitude,
+        nearRadiusKm: local.value.nearRadiusKm ?? 10,
+      }
+      locationPlace.value = {
+        label: 'Aktueller Standort',
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+      }
+      setLocationMarker(coords.latitude, coords.longitude)
+    },
+    () => { locationError.value = 'Standort konnte nicht abgerufen werden. Bitte erlaube den Zugriff.' },
+    { enableHighAccuracy: false, timeout: 10_000, maximumAge: 5 * 60_000 },
+  )
+}
+
+function useReferenceLocation() {
+  const location = props.referenceLocation
+  if (!location) return
+  local.value = {
+    ...local.value,
+    nearLat: location.latitude,
+    nearLon: location.longitude,
+    nearRadiusKm: local.value.nearRadiusKm ?? 10,
+  }
+  locationPlace.value = {
+    label: location.label ? `Ort von ${location.label}` : 'Ort des ausgewählten Fotos',
+    latitude: location.latitude,
+    longitude: location.longitude,
+  }
+  setLocationMarker(location.latitude, location.longitude)
+  locationError.value = ''
+}
+
+async function searchLocations(event: { query: string }) {
+  const query = event.query.trim()
+  const sequence = ++locationSearchSequence
+  if (query.length < 3) {
+    locationSuggestions.value = []
+    return
+  }
+  // PrimeVue invokes this for every keypress; wait briefly and only search
+  // for the most recent input before hitting the rate-limited backend.
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  if (sequence !== locationSearchSequence) return
+  try {
+    const { locations } = await autocompletePhotoLocations(query)
+    if (sequence === locationSearchSequence) locationSuggestions.value = locations
+  } catch {
+    if (sequence === locationSearchSequence) locationSuggestions.value = []
+  }
+}
+
+function selectLocation(event: { value: LocationSuggestion }) {
+  const place = event.value
+  locationPlace.value = place
+  local.value = {
+    ...local.value,
+    nearLat: place.latitude,
+    nearLon: place.longitude,
+    nearRadiusKm: local.value.nearRadiusKm ?? 10,
+  }
+  locationError.value = ''
+  setLocationMarker(place.latitude, place.longitude)
+}
+
+function clearNearLocation() {
+  const next = { ...local.value }
+  delete next.nearLat
+  delete next.nearLon
+  delete next.nearRadiusKm
+  local.value = next
+  locationPlace.value = null
+  locationSuggestions.value = []
+  if (locationMarker) {
+    locationMap?.removeLayer(locationMarker)
+    locationMarker = null
+  }
+  locationError.value = ''
+}
+
+async function toggleLocationMap() {
+  mapOpen.value = !mapOpen.value
+  if (!mapOpen.value) return
+  await nextTick()
+  // The map is kept mounted while hidden. Leaflet otherwise retains a map
+  // bound to the removed v-if node and reopens as an empty white rectangle.
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+  if (!locationMapContainer.value) return
+  const lat = local.value.nearLat ?? 48.1372
+  const lon = local.value.nearLon ?? 11.5756
+  const zoom = local.value.nearLat === undefined ? 5 : LOCATION_PICKER_ZOOM
+  if (!locationMap) {
+    locationMap = L.map(locationMapContainer.value).setView([lat, lon], zoom)
+    L.tileLayer('https://tile.openstreetmap.de/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap-Mitwirkende',
+    }).addTo(locationMap)
+    locationMap.on('click', (event: L.LeafletMouseEvent) => setLocationFromMap(event.latlng.lat, event.latlng.lng))
+  }
+  locationMap.invalidateSize(true)
+  // Always restore the selected point and its useful inspection zoom when
+  // reopening; a former manual pan/zoom must not hide the active pin.
+  locationMap.setView([lat, lon], zoom)
+  if (local.value.nearLat !== undefined && local.value.nearLon !== undefined) {
+    setLocationMarker(lat, lon)
+  }
+}
+
+function setLocationMarker(latitude: number, longitude: number) {
+  if (!locationMap) return
+  if (locationMarker) locationMarker.setLatLng([latitude, longitude])
+  else locationMarker = L.marker([latitude, longitude], { icon: locationPickerIcon() }).addTo(locationMap)
+}
+
+function setLocationFromMap(latitude: number, longitude: number) {
+  local.value = { ...local.value, nearLat: latitude, nearLon: longitude, nearRadiusKm: local.value.nearRadiusKm ?? 10 }
+  locationPlace.value = { label: 'Punkt auf der Karte', latitude, longitude }
+  setLocationMarker(latitude, longitude)
+  locationMap?.setView([latitude, longitude], LOCATION_PICKER_ZOOM)
+  locationError.value = ''
+}
+
+onUnmounted(() => {
+  locationMap?.remove()
+  locationMap = null
+  locationMarker = null
+})
 
 // --- Album / Person autocomplete -------------------------------------------
 // Listen kommen aus dem app-weiten Composable, sodass parallele Aufrufer
@@ -407,6 +583,50 @@ function close() {
           @update:model-value="(v: 'any' | 'yes' | 'no') => setTri('hasGps', v)"
         />
       </div>
+
+      <!-- Current location / proximity -->
+      <div v-if="has('nearLocation')" class="filter-row">
+        <label class="filter-label">In der Nähe meines Standorts</label>
+        <AutoComplete
+          v-model="locationPlace"
+          :suggestions="locationSuggestions"
+          option-label="label"
+          placeholder="Ort oder Adresse suchen …"
+          :min-length="3"
+          force-selection
+          dropdown
+          @complete="searchLocations"
+          @item-select="selectLocation"
+        />
+        <div class="near-location-controls">
+          <Button label="Punkt auf Karte setzen" icon="pi pi-map" outlined @click="toggleLocationMap" />
+          <Button
+            v-if="props.referenceLocation"
+            label="Ort des ausgewählten Fotos verwenden" icon="pi pi-image" outlined
+            @click="useReferenceLocation"
+          />
+          <Button label="Aktuellen Standort verwenden" icon="pi pi-map-marker" outlined @click="useCurrentLocation" />
+          <Button
+            v-if="local.nearLat !== undefined && local.nearLon !== undefined"
+            label="Entfernen" icon="pi pi-times" text severity="secondary"
+            @click="clearNearLocation"
+          />
+        </div>
+        <div v-show="mapOpen" ref="locationMapContainer" class="location-picker-map" />
+        <template v-if="local.nearLat !== undefined && local.nearLon !== undefined">
+          <div class="filter-daterange">
+            <InputNumber
+              :model-value="local.nearRadiusKm ?? 10"
+              :min="1" :max="20000" :min-fraction-digits="0" :max-fraction-digits="0" :step="1"
+              suffix=" km" show-buttons
+              @update:model-value="(v: number | null) => local = { ...local, nearRadiusKm: v && v > 0 ? Math.round(v) : 10 }"
+            />
+          </div>
+          <small class="filter-hint">Fotos im Umkreis dieses Radius werden angezeigt.</small>
+        </template>
+        <small class="filter-hint">Ortssuche: © OpenStreetMap-Mitwirkende</small>
+        <small v-if="locationError" class="location-error">{{ locationError }}</small>
+      </div>
       <div v-if="has('hasFaces')" class="filter-row">
         <label class="filter-label">Gesichter erkannt</label>
         <SelectButton
@@ -444,22 +664,6 @@ function close() {
         />
       </div>
 
-      <!-- Size range -->
-      <div v-if="has('sizeRange') && !isPersonDetailPhotoFilter()" class="filter-row">
-        <label class="filter-label">Dateigröße (MB)</label>
-        <div class="filter-daterange">
-          <InputNumber
-            :model-value="local.sizeMin !== undefined ? Math.round(local.sizeMin / (1024 * 1024)) : null"
-            :min="0" placeholder="Min"
-            @update:model-value="(v: number | null) => local = { ...local, sizeMin: v && v > 0 ? v * 1024 * 1024 : undefined }"
-          />
-          <InputNumber
-            :model-value="local.sizeMax !== undefined ? Math.round(local.sizeMax / (1024 * 1024)) : null"
-            :min="0" placeholder="Max"
-            @update:model-value="(v: number | null) => local = { ...local, sizeMax: v && v > 0 ? v * 1024 * 1024 : undefined }"
-          />
-        </div>
-      </div>
     </div>
 
     <template #footer>
@@ -480,4 +684,9 @@ function close() {
 .filter-daterange { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .filter-daterange > * { flex: 1 1 140px; }
 .mode-toggle { margin-top: 0.4rem; align-self: flex-start; }
+.near-location-controls { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.filter-hint { color: var(--text-color-secondary, #555); }
+.location-error { color: var(--red-500, #d32f2f); }
+.location-picker-map { height: 260px; border: 1px solid var(--p-content-border-color, #dee2e6); border-radius: 6px; }
+:deep(.location-picker-pin-icon) { background: transparent; border: 0; }
 </style>

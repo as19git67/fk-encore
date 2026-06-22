@@ -112,6 +112,17 @@ function thumbnailSrc(slot: GalleryGridEntry): string {
   })
 }
 
+/** A failed decode can be an old, truncated cache entry. Regenerate it once
+ * without adding requests to the normal (successful) gallery path. */
+function retryBrokenThumbnail(event: Event) {
+  const image = event.currentTarget as HTMLImageElement
+  if (image.dataset.thumbnailRetried === '1') return
+  image.dataset.thumbnailRetried = '1'
+  const url = new URL(image.src)
+  url.searchParams.set('retry', '1')
+  image.src = url.toString()
+}
+
 // ── Layout: column count + row height ───────────────────────────────────────
 // Tracking column count here (rather than via CSS auto-fill) is the only
 // way to pre-compute row heights for the virtualizer — auto-fill would
@@ -502,6 +513,7 @@ defineExpose({
               decoding="async"
               :style="autoCropThumbnailStyle(slot.auto_crop)"
               class="vg-thumb"
+              @error="retryBrokenThumbnail"
             />
             <!-- Track-I marker. Shows on every member of an unreviewed
                  group so the user can launch the review from any tile.

@@ -91,6 +91,7 @@ import {
   type GallerySortDir,
   type GallerySortField,
   getGalleryIds,
+  getGalleryGrid,
 } from '../api/gallery'
 import {
   listPhotoGroups,
@@ -319,6 +320,8 @@ function toggleSelectionMenu(event: Event) {
 
 const selectAllBusy = ref(false)
 const galleryTotal = ref(0)
+const unfilteredGalleryTotal = ref<number | null>(null)
+let galleryTotalRequest = 0
 const allSelected = computed(() => galleryTotal.value > 0 && selectedCount.value === galleryTotal.value)
 
 async function selectAll() {
@@ -1369,6 +1372,7 @@ async function onPhotoClick(entry: GalleryGridEntry) {
 async function onGalleryLoaded() {
   if (!galleryRef.value) return
   galleryTotal.value = galleryRef.value.getTotal()
+  void refreshUnfilteredGalleryTotal()
   if (pendingFullscreenId.value !== null) {
     const id = pendingFullscreenId.value
     pendingFullscreenId.value = null
@@ -1390,6 +1394,27 @@ async function onGalleryLoaded() {
       await hydrateCursor(idx, { skipNeighbors: true })
       galleryRef.value?.scrollToIndex(idx)
     }
+  }
+}
+
+async function refreshUnfilteredGalleryTotal() {
+  const request = ++galleryTotalRequest
+  // A natural-language search already has its own result count. The badge is
+  // specifically for ordinary gallery filters, matching the album view.
+  if (activeCount.value === 0 || searchResultIds.value !== null) {
+    unfilteredGalleryTotal.value = null
+    return
+  }
+  try {
+    const { total } = await getGalleryGrid({
+      limit: 1,
+      offset: 0,
+      sortBy: sortByForGallery.value,
+      sortDir: sortDirForGallery.value,
+    })
+    if (request === galleryTotalRequest) unfilteredGalleryTotal.value = total
+  } catch {
+    if (request === galleryTotalRequest) unfilteredGalleryTotal.value = null
   }
 }
 
@@ -1486,6 +1511,10 @@ void refreshReviewSequence()
       <div class="chip-row">
         <FilterChips :filter="filter" @remove="onRemoveFilterKey" />
         <Chip v-if="!isSortDefault" :label="sortChipLabel" removable @remove="onResetSort" />
+        <Chip
+          v-if="activeCount > 0 && searchResultIds === null && unfilteredGalleryTotal !== null"
+          :label="`${galleryTotal} von ${unfilteredGalleryTotal}`"
+        />
       </div>
     </div>
 
@@ -1493,6 +1522,9 @@ void refreshReviewSequence()
       v-if="filterMenuMounted"
       v-model:visible="filterMenuOpen"
       v-model:draft="filterDraft"
+      :reference-location="cursorPhoto?.latitude != null && cursorPhoto?.longitude != null
+        ? { latitude: cursorPhoto.latitude, longitude: cursorPhoto.longitude, label: cursorPhoto.original_name }
+        : undefined"
       @apply="onApplyFilter"
       @reset="onResetFilter"
     />
