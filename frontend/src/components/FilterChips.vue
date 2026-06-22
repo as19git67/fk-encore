@@ -99,6 +99,9 @@ const chips = computed<ChipDef[]>(() => {
     const max = f.sizeMax !== undefined ? `${Math.round(f.sizeMax / (1024 * 1024))} MB` : '…'
     out.push({ label: `Größe ${min} – ${max}`, keys: ['sizeMin', 'sizeMax'] })
   }
+  if (f.nearLat !== undefined && f.nearLon !== undefined) {
+    out.push({ label: `In der Nähe (${f.nearRadiusKm ?? 10} km)`, keys: ['nearLat', 'nearLon', 'nearRadiusKm'] })
+  }
   return out
 })
 </script>

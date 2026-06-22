@@ -72,6 +72,9 @@ type PhotoFilterQueryParams = {
   importedDaysAgo?: Query<number>;
   sizeMin?: Query<number>;
   sizeMax?: Query<number>;
+  nearLat?: Query<number>;
+  nearLon?: Query<number>;
+  nearRadiusKm?: Query<number>;
   showAiHidden?: Query<boolean>;
   aiHiddenMode?: Query<string>;
   /** Maximum number of rows to return. Omit for "all". */
@@ -106,6 +109,9 @@ function toFilterQuery(p: PhotoFilterQueryParams): PhotoFilterQuery {
     importedDaysAgo: p.importedDaysAgo,
     sizeMin: p.sizeMin,
     sizeMax: p.sizeMax,
+    nearLat: p.nearLat,
+    nearLon: p.nearLon,
+    nearRadiusKm: p.nearRadiusKm,
     showAiHidden: p.showAiHidden,
     aiHiddenMode: p.aiHiddenMode,
   };
@@ -354,6 +360,9 @@ function parsePhotoIndexQuery(url: URL): PhotoFilterQueryParams {
     importedDaysAgo: readNum("importedDaysAgo"),
     sizeMin: readNum("sizeMin"),
     sizeMax: readNum("sizeMax"),
+    nearLat: readNum("nearLat"),
+    nearLon: readNum("nearLon"),
+    nearRadiusKm: readNum("nearRadiusKm"),
     showAiHidden: readBool("showAiHidden"),
     aiHiddenMode: readStr("aiHiddenMode"),
     limit: readNum("limit"),
@@ -2115,6 +2124,17 @@ export const searchPhotosByLocation = api(
     requirePermission(authData, "photos.view");
     return await service.searchByLocationLogic(userId, { city, country, lat, lon, radius, limit });
   }
+);
+
+/** Search place names for the gallery's proximity filter. */
+export const autocompletePhotoLocations = api(
+  { expose: true, method: "GET", path: "/photos/locations/autocomplete", auth: true },
+  async ({ query }: { query: Query<string> }): Promise<{ locations: service.LocationSuggestion[] }> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    return { locations: await service.autocompleteLocationLogic(query ?? "") };
+  },
 );
 
 // Landmark detection & search were retired in Epic #383. The
