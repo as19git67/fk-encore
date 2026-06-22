@@ -102,6 +102,23 @@ describe("matchSenderRule", () => {
     expect(matchSenderRule({ sender: "Erzb. Verwaltungsstelle München", title: "Rundschreiben" })).toBeNull();
   });
 
+  it("routes telecom providers to Telekommunikation, but not their shares", () => {
+    expect(
+      matchSenderRule({ sender: "Telefónica Germany GmbH & Co. OHG", title: "Ihre Rechnung" }),
+    ).toBe("vertraege-telekom");
+    expect(
+      matchSenderRule({ sender: "Vodafone GmbH", title: "Mobilfunkrechnung" }),
+    ).toBe("vertraege-telekom");
+    expect(
+      matchSenderRule({ sender: "LEW TelNet GmbH", title: "Rechnung" }),
+    ).toBe("vertraege-telekom");
+    // Guard: a Deutsche-Telekom dividend statement names the provider but is
+    // a securities document — the excludeAny keyword keeps it out of telecom.
+    expect(
+      matchSenderRule({ sender: "Deutsche Telekom AG", title: "Dividendengutschrift" }),
+    ).toBeNull();
+  });
+
   it("honours requireAny: DRV only routes to gesetzliche Rente for pension docs", () => {
     expect(
       matchSenderRule({ sender: "Deutsche Rentenversicherung Bund", title: "Renteninformation" }),
