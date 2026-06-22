@@ -100,6 +100,11 @@ function buildFilterParams(filter: PhotoFilter | undefined, sp: URLSearchParams)
   if (filter.importedDaysAgo !== undefined) add('importedDaysAgo', filter.importedDaysAgo)
   if (filter.sizeMin !== undefined) add('sizeMin', filter.sizeMin)
   if (filter.sizeMax !== undefined) add('sizeMax', filter.sizeMax)
+  if (filter.nearLat !== undefined && filter.nearLon !== undefined) {
+    add('nearLat', filter.nearLat)
+    add('nearLon', filter.nearLon)
+    add('nearRadiusKm', filter.nearRadiusKm ?? 10)
+  }
   if (filter.showAiHidden) add('showAiHidden', true)
   if (filter.ownerIds && filter.ownerIds.length) add('ownerIds', filter.ownerIds.join(','))
   if (filter.albumScopeId !== undefined) add('albumScopeId', filter.albumScopeId)

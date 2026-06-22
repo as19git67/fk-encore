@@ -25,6 +25,7 @@ import {
 } from "../db/schema";
 import { computeAutoExposureFromStats, type BboxNorm } from "./photo-transforms.service";
 import { convertHeicToJpeg } from "./heic-convert.service";
+import { writeCacheFileAtomically } from "./cache-file";
 
 // Mirror of THUMBNAIL_DIR / UPLOAD_DIR in photo.service. Inlined to avoid a
 // circular import — the existing file already imports our suggestion-compute
@@ -284,8 +285,7 @@ export async function renderSuggestedAndCache(
   );
 
   // Best-effort cache write; never fail the request on a cache write error.
-  fs.mkdir(shardPath, { recursive: true })
-    .then(() => fs.writeFile(cachePath, buffer))
+  writeCacheFileAtomically(cachePath, buffer)
     .catch((err) =>
       console.error(`[photo-transforms-render] cache write failed for ${cachePath}:`, err),
     );
@@ -382,8 +382,7 @@ export async function renderUserAndCache(
     targetWidth ?? undefined,
   );
 
-  fs.mkdir(shardPath, { recursive: true })
-    .then(() => fs.writeFile(cachePath, buffer))
+  writeCacheFileAtomically(cachePath, buffer)
     .catch((err) =>
       console.error(`[photo-transforms-render] user cache write failed for ${cachePath}:`, err),
     );
