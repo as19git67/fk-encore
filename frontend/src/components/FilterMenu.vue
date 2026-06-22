@@ -35,6 +35,8 @@ import { useReferenceData } from '../composables/useReferenceData'
 const props = withDefaults(defineProps<{
   visible: boolean
   draft: PhotoFilter
+  /** GPS point of the photo currently selected by the surrounding view. */
+  referenceLocation?: { latitude: number; longitude: number; label?: string }
   /** Criteria to show. Default: all photo-level criteria. */
   available?: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange' | 'nearLocation'>
 }>(), {
@@ -195,6 +197,24 @@ function useCurrentLocation() {
     () => { locationError.value = 'Standort konnte nicht abgerufen werden. Bitte erlaube den Zugriff.' },
     { enableHighAccuracy: false, timeout: 10_000, maximumAge: 5 * 60_000 },
   )
+}
+
+function useReferenceLocation() {
+  const location = props.referenceLocation
+  if (!location) return
+  local.value = {
+    ...local.value,
+    nearLat: location.latitude,
+    nearLon: location.longitude,
+    nearRadiusKm: local.value.nearRadiusKm ?? 10,
+  }
+  locationPlace.value = {
+    label: location.label ? `Ort von ${location.label}` : 'Ort des ausgewählten Fotos',
+    latitude: location.latitude,
+    longitude: location.longitude,
+  }
+  setLocationMarker(location.latitude, location.longitude)
+  locationError.value = ''
 }
 
 async function searchLocations(event: { query: string }) {
@@ -561,6 +581,11 @@ function close() {
         />
         <div class="near-location-controls">
           <Button label="Punkt auf Karte setzen" icon="pi pi-map" outlined @click="toggleLocationMap" />
+          <Button
+            v-if="props.referenceLocation"
+            label="Ort des ausgewählten Fotos verwenden" icon="pi pi-image" outlined
+            @click="useReferenceLocation"
+          />
           <Button label="Aktuellen Standort verwenden" icon="pi pi-map-marker" outlined @click="useCurrentLocation" />
           <Button
             v-if="local.nearLat !== undefined && local.nearLon !== undefined"
