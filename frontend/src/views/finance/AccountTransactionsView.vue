@@ -17,6 +17,8 @@ import Chart from 'primevue/chart'
 import Message from 'primevue/message'
 import InputText from 'primevue/inputtext'
 import MultiSelect from 'primevue/multiselect'
+import Select from 'primevue/select'
+import DatePicker from 'primevue/datepicker'
 import Checkbox from 'primevue/checkbox'
 import Popover from 'primevue/popover'
 import { useTransactionsStore } from '../../stores/finance/transactions'
@@ -27,7 +29,10 @@ import { useTxFiltersStore } from '../../stores/finance/txFilters'
 import { useAuthStore } from '../../stores/auth'
 import DateRangePresets from '../../components/DateRangePresets.vue'
 import BatchTagDialog from '../../components/finance/BatchTagDialog.vue'
+import { toLocalIsoDate } from '../../utils/dateFormat'
 import type {
+  DepotTransaction,
+  DepotTransactionKind,
   Holding,
   HoldingsHistoryPosition,
   HoldingsHistoryResponse,
@@ -36,7 +41,13 @@ import type {
   OverviewSection,
   Transaction,
 } from '../../api/finance'
-import { getHoldingsHistory, listHoldings } from '../../api/finance'
+import {
+  createDepotTransaction,
+  deleteDepotTransaction,
+  getHoldingsHistory,
+  listDepotTransactions,
+  listHoldings,
+} from '../../api/finance'
 
 const route = useRoute()
 const router = useRouter()
@@ -538,6 +549,159 @@ function sparklineOptions(series: HoldingsHistoryPosition | null) {
   }
 }
 
+// ── Depot transactions per position (Phase 2 of #439 / #428) ─────────
+//
+// Loaded lazily when a position row is expanded. Keyed by the same
+// COALESCE(isin, wkn, name) identity used elsewhere.
+
+const depotTxByKey = ref<Record<string, DepotTransaction[]>>({})
+const depotTxLoadingKey = ref<string | null>(null)
+const depotTxError = ref<string | null>(null)
+
+const KIND_LABELS: Record<string, string> = {
+  buy: 'Kauf',
+  sell: 'Verkauf',
+  in: 'Einbuchung',
+  out: 'Ausbuchung',
+  dividend: 'Ertrag',
+  split: 'Split',
+  corp_action: 'Kapitalmaßnahme',
+}
+
+function kindLabel(kind: string): string {
+  return KIND_LABELS[kind] ?? kind
+}
+
+function positionKeyOf(h: Holding): string {
+  return h.isin || h.wkn || h.name || ''
+}
+
+async function loadDepotTransactions(h: Holding) {
+  if (!mode.value || mode.value.kind !== 'account') return
+  const key = positionKeyOf(h)
+  if (!key) return
+  depotTxLoadingKey.value = key
+  depotTxError.value = null
+  try {
+    const resp = await listDepotTransactions(mode.value.accountId, {
+      ...(h.isin ? { isin: h.isin } : h.wkn ? { wkn: h.wkn } : {}),
+    })
+    depotTxByKey.value = { ...depotTxByKey.value, [key]: resp.items }
+  } catch (e) {
+    depotTxError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    depotTxLoadingKey.value = null
+  }
+}
+
+function depotTransactionsFor(h: Holding): DepotTransaction[] {
+  return depotTxByKey.value[positionKeyOf(h)] ?? []
+}
+
+// ── Add-transaction form ──────────────────────────────────────────────
+
+const addFormKey = ref<string | null>(null)
+const addFormSaving = ref(false)
+const addForm = ref<{
+  kind: DepotTransactionKind
+  executed_at: Date | null
+  amount: string
+  price: string
+  fees: string
+  net_amount: string
+  note: string
+}>({
+  kind: 'buy',
+  executed_at: new Date(),
+  amount: '',
+  price: '',
+  fees: '',
+  net_amount: '',
+  note: '',
+})
+
+const KIND_OPTIONS: { label: string; value: DepotTransactionKind }[] = [
+  { label: 'Kauf', value: 'buy' },
+  { label: 'Verkauf', value: 'sell' },
+  { label: 'Ertrag', value: 'dividend' },
+  { label: 'Einbuchung', value: 'in' },
+  { label: 'Ausbuchung', value: 'out' },
+  { label: 'Split', value: 'split' },
+  { label: 'Kapitalmaßnahme', value: 'corp_action' },
+]
+
+function openAddForm(h: Holding) {
+  addFormKey.value = positionKeyOf(h)
+  addForm.value = {
+    kind: 'buy',
+    executed_at: new Date(),
+    amount: '',
+    price: '',
+    fees: '',
+    net_amount: '',
+    note: '',
+  }
+}
+
+function cancelAddForm() {
+  addFormKey.value = null
+}
+
+function numOrNull(s: string): number | null {
+  const t = s.trim().replace(',', '.')
+  if (!t) return null
+  const n = Number(t)
+  return Number.isFinite(n) ? n : null
+}
+
+async function submitAddForm(h: Holding) {
+  if (!mode.value || mode.value.kind !== 'account') return
+  if (!addForm.value.executed_at) {
+    depotTxError.value = 'Datum erforderlich'
+    return
+  }
+  addFormSaving.value = true
+  depotTxError.value = null
+  try {
+    await createDepotTransaction(mode.value.accountId, {
+      isin: h.isin,
+      wkn: h.wkn,
+      name: h.name,
+      kind: addForm.value.kind,
+      executed_at: toLocalIsoDate(addForm.value.executed_at),
+      amount: numOrNull(addForm.value.amount),
+      price: numOrNull(addForm.value.price),
+      fees: numOrNull(addForm.value.fees),
+      net_amount: numOrNull(addForm.value.net_amount),
+      note: addForm.value.note.trim() || null,
+    })
+    addFormKey.value = null
+    await loadDepotTransactions(h)
+  } catch (e) {
+    depotTxError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    addFormSaving.value = false
+  }
+}
+
+async function removeDepotTransaction(h: Holding, tx: DepotTransaction) {
+  depotTxError.value = null
+  try {
+    await deleteDepotTransaction(tx.id)
+    await loadDepotTransactions(h)
+  } catch (e) {
+    depotTxError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+// When a position is expanded, fetch its transactions once.
+watch(expandedPositionKey, (key) => {
+  if (!key) return
+  if (depotTxByKey.value[key]) return
+  const h = holdings.value.find((x) => positionKeyOf(x) === key)
+  if (h) void loadDepotTransactions(h)
+})
+
 // ── Transaction grouping (by booking_date) ───────────────────────────
 
 interface DayGroup {
@@ -1011,6 +1175,134 @@ function goBack() {
                   <p v-else class="holdings-history-empty">
                     Noch keine Verlaufs-Datenpunkte für diese Position.
                   </p>
+
+                  <!-- Per-position transactions (Phase 2) -->
+                  <div class="depot-tx">
+                    <div class="depot-tx-head">
+                      <span class="holdings-history-label">Transaktionen</span>
+                      <Button
+                        v-if="addFormKey !== (h.isin || h.wkn || h.name || '')"
+                        label="Hinzufügen"
+                        icon="pi pi-plus"
+                        size="small"
+                        text
+                        @click.stop="openAddForm(h)"
+                      />
+                    </div>
+
+                    <Message
+                      v-if="depotTxError"
+                      severity="error"
+                      :closable="true"
+                      @close="depotTxError = null"
+                    >
+                      {{ depotTxError }}
+                    </Message>
+
+                    <!-- Add form -->
+                    <div
+                      v-if="addFormKey === (h.isin || h.wkn || h.name || '')"
+                      class="depot-tx-form"
+                      @click.stop
+                    >
+                      <div class="depot-tx-form-grid">
+                        <label class="depot-tx-field">
+                          <span>Art</span>
+                          <Select
+                            v-model="addForm.kind"
+                            :options="KIND_OPTIONS"
+                            option-label="label"
+                            option-value="value"
+                            size="small"
+                          />
+                        </label>
+                        <label class="depot-tx-field">
+                          <span>Datum</span>
+                          <DatePicker
+                            v-model="addForm.executed_at"
+                            date-format="dd.mm.yy"
+                            show-icon
+                            size="small"
+                          />
+                        </label>
+                        <label class="depot-tx-field">
+                          <span>Stück</span>
+                          <InputText v-model="addForm.amount" inputmode="decimal" placeholder="z. B. 5" />
+                        </label>
+                        <label class="depot-tx-field">
+                          <span>Kurs</span>
+                          <InputText v-model="addForm.price" inputmode="decimal" placeholder="z. B. 200" />
+                        </label>
+                        <label class="depot-tx-field">
+                          <span>Gebühren</span>
+                          <InputText v-model="addForm.fees" inputmode="decimal" placeholder="z. B. 9,90" />
+                        </label>
+                        <label class="depot-tx-field">
+                          <span>Betrag (netto)</span>
+                          <InputText v-model="addForm.net_amount" inputmode="decimal" placeholder="z. B. 1009,90" />
+                        </label>
+                        <label class="depot-tx-field depot-tx-field-wide">
+                          <span>Notiz</span>
+                          <InputText v-model="addForm.note" placeholder="optional" />
+                        </label>
+                      </div>
+                      <div class="depot-tx-form-actions">
+                        <Button label="Abbrechen" severity="secondary" text size="small" @click="cancelAddForm" />
+                        <Button label="Speichern" size="small" :loading="addFormSaving" @click="submitAddForm(h)" />
+                      </div>
+                    </div>
+
+                    <div
+                      v-if="depotTxLoadingKey === (h.isin || h.wkn || h.name || '')"
+                      class="holdings-history-empty"
+                    >
+                      Lädt Transaktionen …
+                    </div>
+                    <table
+                      v-else-if="depotTransactionsFor(h).length > 0"
+                      class="depot-tx-table"
+                    >
+                      <thead>
+                        <tr>
+                          <th>Datum</th>
+                          <th>Art</th>
+                          <th class="holdings-col-num">Stück</th>
+                          <th class="holdings-col-num">Kurs</th>
+                          <th class="holdings-col-num">Betrag</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="tx in depotTransactionsFor(h)" :key="tx.id">
+                          <td>{{ formatShortDate(tx.executed_at) }}</td>
+                          <td>
+                            {{ kindLabel(tx.kind) }}
+                            <span v-if="tx.source !== 'manual'" class="depot-tx-source">{{ tx.source }}</span>
+                          </td>
+                          <td class="holdings-col-num">{{ formatAmount(tx.amount) }}</td>
+                          <td class="holdings-col-num">{{ formatCurrency(tx.price, tx.currency ?? undefined) }}</td>
+                          <td class="holdings-col-num">{{ formatCurrency(tx.net_amount ?? tx.gross_amount, tx.currency ?? undefined) }}</td>
+                          <td class="holdings-col-num">
+                            <Button
+                              v-if="tx.source === 'manual'"
+                              icon="pi pi-trash"
+                              severity="danger"
+                              text
+                              size="small"
+                              aria-label="Transaktion löschen"
+                              @click.stop="removeDepotTransaction(h, tx)"
+                            />
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    <p
+                      v-else-if="addFormKey !== (h.isin || h.wkn || h.name || '')"
+                      class="holdings-history-empty"
+                    >
+                      Noch keine Transaktionen erfasst.
+                    </p>
+                  </div>
                 </td>
               </tr>
             </template>
@@ -1579,6 +1871,74 @@ function goBack() {
   margin: 0.25rem 0 0;
   font-size: 0.8rem;
   color: var(--p-text-muted-color);
+}
+
+/* Per-position depot transactions (Phase 2) */
+.depot-tx {
+  margin-top: 0.85rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--p-content-border-color);
+}
+.depot-tx-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+.depot-tx-form {
+  margin: 0.25rem 0 0.6rem;
+}
+.depot-tx-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: 0.5rem;
+}
+.depot-tx-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color);
+}
+.depot-tx-field :deep(.p-inputtext),
+.depot-tx-field :deep(.p-select),
+.depot-tx-field :deep(.p-datepicker-input) {
+  width: 100%;
+}
+.depot-tx-field-wide {
+  grid-column: 1 / -1;
+}
+.depot-tx-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.depot-tx-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  margin-top: 0.25rem;
+}
+.depot-tx-table th {
+  text-align: left;
+  font-weight: 600;
+  padding: 0.3rem 0.4rem;
+  border-bottom: 1px solid var(--p-content-border-color);
+  white-space: nowrap;
+}
+.depot-tx-table td {
+  padding: 0.3rem 0.4rem;
+  border-bottom: 1px solid var(--p-content-border-color);
+}
+.depot-tx-source {
+  display: inline-block;
+  margin-left: 0.35rem;
+  font-size: 0.65rem;
+  color: var(--p-text-muted-color);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 /* Depot value-over-time chart */
