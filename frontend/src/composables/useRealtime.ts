@@ -1,5 +1,5 @@
 import { onMounted, onUnmounted } from 'vue'
-import { API_BASE_URL } from '../api/client'
+import { API_BASE_URL, ensureFreshToken } from '../api/client'
 
 export type RealtimeChannel =
   | 'documents'
@@ -193,14 +193,38 @@ class RealtimeBus {
     return this.ws?.readyState === WebSocket.OPEN
   }
 
-  private open(): void {
+  private async open(): Promise<void> {
     if (this.connecting || !this.opts) return
+    // Set connecting=true before the await so concurrent calls from
+    // scheduleReconnect and connect() don't both open a socket.
+    this.connecting = true
+
+    // Proactively refresh the access token before each (re)connect.
+    // Without this, a reconnect after token expiry reuses the stale
+    // token from localStorage and gets an immediate 401, causing the
+    // exponential-backoff loop to run with the wrong token until the
+    // user navigates (which triggers the HTTP 401 → login redirect).
+    try {
+      await ensureFreshToken()
+    } catch {
+      // If the refresh itself fails unexpectedly, proceed — the WS
+      // will close with 401 and we'll retry via scheduleReconnect.
+    }
+
+    // Re-check intentional-close and opts after the await in case
+    // disconnect() was called while the refresh was in flight.
+    if (!this.opts || this.intentionalClose) {
+      this.connecting = false
+      return
+    }
+
     const token = this.opts.getToken()
     if (!token) {
       // No token yet — give up; caller must reconnect after login.
+      this.connecting = false
       return
     }
-    this.connecting = true
+
     const url = buildWsUrl(this.opts.channels, token, this.lastSeq)
     const ws = new WebSocket(url)
     this.ws = ws
