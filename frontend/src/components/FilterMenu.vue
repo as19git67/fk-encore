@@ -83,6 +83,16 @@ const mapOpen = ref(false)
 const locationMapContainer = ref<HTMLElement | null>(null)
 let locationMap: L.Map | null = null
 let locationMarker: L.Marker | null = null
+const LOCATION_PICKER_ZOOM = 13
+
+function locationPickerIcon(): L.DivIcon {
+  return L.divIcon({
+    className: 'location-picker-pin-icon',
+    iconSize: [24, 32],
+    iconAnchor: [12, 32],
+    html: '<span class="location-picker-pin" />',
+  })
+}
 
 // Mirror local → parent on every edit. The draft → local sync happens only
 // when the dialog opens (see the visible watcher below). Watching the draft
@@ -274,8 +284,9 @@ async function toggleLocationMap() {
   if (!locationMapContainer.value) return
   const lat = local.value.nearLat ?? 48.1372
   const lon = local.value.nearLon ?? 11.5756
+  const zoom = local.value.nearLat === undefined ? 5 : LOCATION_PICKER_ZOOM
   if (!locationMap) {
-    locationMap = L.map(locationMapContainer.value).setView([lat, lon], local.value.nearLat === undefined ? 5 : 13)
+    locationMap = L.map(locationMapContainer.value).setView([lat, lon], zoom)
     L.tileLayer('https://tile.openstreetmap.de/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '&copy; OpenStreetMap-Mitwirkende',
@@ -283,7 +294,9 @@ async function toggleLocationMap() {
     locationMap.on('click', (event: L.LeafletMouseEvent) => setLocationFromMap(event.latlng.lat, event.latlng.lng))
   }
   locationMap.invalidateSize(true)
-  locationMap.setView([lat, lon])
+  // Always restore the selected point and its useful inspection zoom when
+  // reopening; a former manual pan/zoom must not hide the active pin.
+  locationMap.setView([lat, lon], zoom)
   if (local.value.nearLat !== undefined && local.value.nearLon !== undefined) {
     setLocationMarker(lat, lon)
   }
@@ -292,13 +305,14 @@ async function toggleLocationMap() {
 function setLocationMarker(latitude: number, longitude: number) {
   if (!locationMap) return
   if (locationMarker) locationMarker.setLatLng([latitude, longitude])
-  else locationMarker = L.marker([latitude, longitude]).addTo(locationMap)
+  else locationMarker = L.marker([latitude, longitude], { icon: locationPickerIcon() }).addTo(locationMap)
 }
 
 function setLocationFromMap(latitude: number, longitude: number) {
   local.value = { ...local.value, nearLat: latitude, nearLon: longitude, nearRadiusKm: local.value.nearRadiusKm ?? 10 }
   locationPlace.value = { label: 'Punkt auf der Karte', latitude, longitude }
   setLocationMarker(latitude, longitude)
+  locationMap?.setView([latitude, longitude], LOCATION_PICKER_ZOOM)
   locationError.value = ''
 }
 
@@ -672,4 +686,6 @@ function close() {
 .filter-hint { color: var(--text-color-secondary, #555); }
 .location-error { color: var(--red-500, #d32f2f); }
 .location-picker-map { height: 260px; border: 1px solid var(--p-content-border-color, #dee2e6); border-radius: 6px; }
+:deep(.location-picker-pin-icon) { background: transparent; border: 0; }
+:deep(.location-picker-pin) { display: block; width: 20px; height: 20px; background: var(--p-primary-color, #3b82f6); border: 3px solid white; border-radius: 50% 50% 50% 0; box-shadow: 0 1px 4px rgb(0 0 0 / 35%); transform: rotate(-45deg); }
 </style>
