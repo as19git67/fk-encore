@@ -73,6 +73,19 @@ export function matchesPhotoFilter(
   if (filter.hasGps === true && (photo.latitude == null || photo.longitude == null)) return false
   if (filter.hasGps === false && photo.latitude != null && photo.longitude != null) return false
 
+  if (filter.nearLat !== undefined && filter.nearLon !== undefined) {
+    if (photo.latitude == null || photo.longitude == null) return false
+    const radians = Math.PI / 180
+    const lat1 = filter.nearLat * radians
+    const lat2 = photo.latitude * radians
+    const deltaLat = (photo.latitude - filter.nearLat) * radians
+    const deltaLon = (photo.longitude - filter.nearLon) * radians
+    const a = Math.sin(deltaLat / 2) ** 2
+      + Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon / 2) ** 2
+    const distanceKm = 2 * 6371 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+    if (distanceKm > (filter.nearRadiusKm ?? 10)) return false
+  }
+
   if (filter.dateFrom || filter.dateTo) {
     const iso = photo.taken_at || photo.created_at
     if (!iso) return false
