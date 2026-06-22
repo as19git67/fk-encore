@@ -41,6 +41,7 @@ import {
 import type { FetchResult, FintsHoldingData, FintsTransactionData } from "./types";
 import { enqueueTagSuggestion } from "./tag-queue";
 import { triggerTagWorker } from "./tag-worker";
+import { deriveDepotTransactionsForBankcontact } from "./depot-derivation";
 
 console.log("[boot] finance/statement-persist.ts: all imports resolved");
 
@@ -307,6 +308,19 @@ export async function persistFetchResult(
         }
       }
     }
+  }
+
+  // ---- Phase 2b: derive depot-transactions from SECU giro bookings ----
+  // Best-effort, never fail the sync over derivation hiccups. Re-runs are
+  // idempotent (dedupe_hash on (account_id, dedupe_hash)).
+  try {
+    const derived = await deriveDepotTransactionsForBankcontact(bankcontactId);
+    if (derived.errors.length > 0) stats.errors.push(...derived.errors);
+  } catch (err) {
+    console.error(
+      `[finance] depot derivation failed for bankcontact ${bankcontactId}:`,
+      (err as Error).message,
+    );
   }
 
   return stats;
