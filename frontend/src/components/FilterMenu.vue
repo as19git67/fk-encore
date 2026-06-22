@@ -90,7 +90,9 @@ function locationPickerIcon(): L.DivIcon {
     className: 'location-picker-pin-icon',
     iconSize: [24, 32],
     iconAnchor: [12, 32],
-    html: '<span class="location-picker-pin" />',
+    // Keep the marker entirely self-contained. Leaflet's default marker
+    // depends on image assets whose URL is not reliable after bundling.
+    html: '<svg viewBox="0 0 24 32" width="24" height="32" aria-hidden="true"><path d="M12 1C6.5 1 2 5.5 2 11c0 7.5 10 20 10 20s10-12.5 10-20C22 5.5 17.5 1 12 1Z" fill="#3b82f6" stroke="#fff" stroke-width="3"/><circle cx="12" cy="11" r="3.5" fill="#fff"/></svg>',
   })
 }
 
@@ -687,5 +689,4 @@ function close() {
 .location-error { color: var(--red-500, #d32f2f); }
 .location-picker-map { height: 260px; border: 1px solid var(--p-content-border-color, #dee2e6); border-radius: 6px; }
 :deep(.location-picker-pin-icon) { background: transparent; border: 0; }
-:deep(.location-picker-pin) { display: block; width: 20px; height: 20px; background: var(--p-primary-color, #3b82f6); border: 3px solid white; border-radius: 50% 50% 50% 0; box-shadow: 0 1px 4px rgb(0 0 0 / 35%); transform: rotate(-45deg); }
 </style>
