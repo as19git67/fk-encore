@@ -110,3 +110,54 @@ export function extractReferenceNumberTags(text: string): string[] {
   }
   return [...tags];
 }
+
+/**
+ * Reconcile the classifier's Bezugspersonen relation tags against the
+ * deterministic name detector.
+ *
+ * The LLM is prompted to append a person's `relation_tag` to `tags` when their
+ * name appears — but even a strong model hallucinates related family members
+ * (e.g. tagging a sibling or parent who is not named in the document). Person
+ * identity must be deterministic: drop any relation tag the detector did not
+ * confirm, and add the relation tags of every detected person. Non-person
+ * ("content") tags pass through untouched. Also de-duplicates case-insensitively.
+ *
+ * `detectedIds` is the output of `detectSubjectPersonIds` for the same text.
+ */
+export function reconcileSubjectPersonTags(
+  tags: readonly string[],
+  subjectPersons: readonly { id: number; relation_tag: string }[],
+  detectedIds: readonly number[],
+): string[] {
+  const norm = (s: string) => s.trim().toLowerCase();
+  const allRelationTags = new Set(
+    subjectPersons.map((p) => norm(p.relation_tag)).filter((t) => t.length > 0),
+  );
+  const detected = new Set(detectedIds);
+  const confirmedRelationTags = new Set(
+    subjectPersons
+      .filter((p) => detected.has(p.id))
+      .map((p) => norm(p.relation_tag))
+      .filter((t) => t.length > 0),
+  );
+
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const tag of tags) {
+    const n = norm(tag);
+    if (n.length === 0 || seen.has(n)) continue;
+    // Drop a relation tag the deterministic detector didn't confirm.
+    if (allRelationTags.has(n) && !confirmedRelationTags.has(n)) continue;
+    seen.add(n);
+    out.push(tag.trim());
+  }
+  // Make sure every confirmed person's relation tag is present.
+  for (const p of subjectPersons) {
+    if (!detected.has(p.id)) continue;
+    const rt = p.relation_tag.trim();
+    if (rt.length === 0 || seen.has(norm(rt))) continue;
+    seen.add(norm(rt));
+    out.push(rt);
+  }
+  return out;
+}
