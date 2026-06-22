@@ -45,7 +45,7 @@ const props = withDefaults(defineProps<{
     'othersFavorited', 'othersHidden', 'notInAnyAlbum',
     'qualityRange', 'albumIds', 'personIds', 'mediaTypes',
     'hasGps', 'hasFaces', 'hasAssignedPerson',
-    'dateRange', 'importedDaysAgo', 'sizeRange', 'nearLocation',
+    'dateRange', 'importedDaysAgo', 'nearLocation',
   ],
 })
 
@@ -645,22 +645,6 @@ function close() {
         />
       </div>
 
-      <!-- Size range -->
-      <div v-if="has('sizeRange') && !isPersonDetailPhotoFilter()" class="filter-row">
-        <label class="filter-label">Dateigröße (MB)</label>
-        <div class="filter-daterange">
-          <InputNumber
-            :model-value="local.sizeMin !== undefined ? Math.round(local.sizeMin / (1024 * 1024)) : null"
-            :min="0" placeholder="Min"
-            @update:model-value="(v: number | null) => local = { ...local, sizeMin: v && v > 0 ? v * 1024 * 1024 : undefined }"
-          />
-          <InputNumber
-            :model-value="local.sizeMax !== undefined ? Math.round(local.sizeMax / (1024 * 1024)) : null"
-            :min="0" placeholder="Max"
-            @update:model-value="(v: number | null) => local = { ...local, sizeMax: v && v > 0 ? v * 1024 * 1024 : undefined }"
-          />
-        </div>
-      </div>
     </div>
 
     <template #footer>

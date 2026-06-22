@@ -94,11 +94,6 @@ const chips = computed<ChipDef[]>(() => {
   if (f.importedDaysAgo !== undefined) {
     out.push({ label: `Letzte ${f.importedDaysAgo} Tage`, keys: ['importedDaysAgo'] })
   }
-  if (f.sizeMin !== undefined || f.sizeMax !== undefined) {
-    const min = f.sizeMin !== undefined ? `${Math.round(f.sizeMin / (1024 * 1024))} MB` : '…'
-    const max = f.sizeMax !== undefined ? `${Math.round(f.sizeMax / (1024 * 1024))} MB` : '…'
-    out.push({ label: `Größe ${min} – ${max}`, keys: ['sizeMin', 'sizeMax'] })
-  }
   if (f.nearLat !== undefined && f.nearLon !== undefined) {
     out.push({ label: `In der Nähe (${f.nearRadiusKm ?? 10} km)`, keys: ['nearLat', 'nearLon', 'nearRadiusKm'] })
   }
