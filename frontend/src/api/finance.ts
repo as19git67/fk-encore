@@ -420,6 +420,83 @@ export async function getHoldingsHistory(
   )
 }
 
+// Depot transactions (Phase 2 of #439 / #428)
+
+export type DepotTransactionKind =
+  | 'buy'
+  | 'sell'
+  | 'in'
+  | 'out'
+  | 'dividend'
+  | 'split'
+  | 'corp_action'
+
+export interface DepotTransaction {
+  id: number
+  account_id: number
+  isin: string | null
+  wkn: string | null
+  name: string | null
+  kind: string
+  executed_at: string
+  amount: string | null
+  price: string | null
+  gross_amount: string | null
+  fees: string | null
+  tax: string | null
+  net_amount: string | null
+  currency: string | null
+  source: string
+  linked_transaction_id: number | null
+  note: string | null
+  created_at: string | null
+}
+
+export interface CreateDepotTransactionInput {
+  isin?: string | null
+  wkn?: string | null
+  name?: string | null
+  kind: DepotTransactionKind
+  executed_at: string
+  amount?: number | string | null
+  price?: number | string | null
+  gross_amount?: number | string | null
+  fees?: number | string | null
+  tax?: number | string | null
+  net_amount?: number | string | null
+  currency?: string | null
+  note?: string | null
+}
+
+export async function listDepotTransactions(
+  accountId: number,
+  opts: { isin?: string; wkn?: string } = {},
+): Promise<{ items: DepotTransaction[] }> {
+  const params = new URLSearchParams()
+  if (opts.isin) params.set('isin', opts.isin)
+  if (opts.wkn) params.set('wkn', opts.wkn)
+  const qs = params.toString()
+  return apiFetch(
+    `/finance/accounts/${accountId}/depot-transactions${qs ? '?' + qs : ''}`,
+  )
+}
+
+export async function createDepotTransaction(
+  accountId: number,
+  input: CreateDepotTransactionInput,
+): Promise<DepotTransaction> {
+  return apiFetch(`/finance/accounts/${accountId}/depot-transactions`, {
+    method: 'POST',
+    body: JSON.stringify({ id: accountId, ...input }),
+  })
+}
+
+export async function deleteDepotTransaction(
+  txId: number,
+): Promise<{ deleted: true }> {
+  return apiFetch(`/finance/depot-transactions/${txId}`, { method: 'DELETE' })
+}
+
 // ----------------------------------------------------------------------
 // Overview (configurable landing page)
 // ----------------------------------------------------------------------
