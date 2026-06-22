@@ -2353,6 +2353,9 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       v-model:visible="filterMenuOpen"
       v-model:draft="filterDraft"
       :available="FILTER_AVAILABLE"
+      :reference-location="cursorPhoto?.latitude != null && cursorPhoto?.longitude != null
+        ? { latitude: cursorPhoto.latitude, longitude: cursorPhoto.longitude, label: cursorPhoto.original_name }
+        : undefined"
       @apply="onApplyFilter"
       @reset="onResetFilter"
     />
