@@ -16,10 +16,13 @@
  *       amount < 0                    → 'buy'
  *       amount > 0                    → 'sell'
  *   - ISIN extracted via the ISO 6166 regex from the purpose field.
+ *   - WKN extracted via a prefix-anchored "WKN …" pattern. Many German
+ *     banks (e.g. MLP) book only WKNs and leave the ISIN field on the
+ *     holdings side blank, so we need both identifiers.
  *   - The derived row is attached to a *depot* account on the same
- *     bankcontact whose holdings currently contain that ISIN. When
- *     multiple depots qualify, the one with the most recent matching
- *     holding wins. Unmatched SECU bookings are skipped silently
+ *     bankcontact whose holdings currently contain the matching ISIN or
+ *     WKN. When multiple depots qualify, the one with the most recent
+ *     matching holding wins. Unmatched SECU bookings are skipped silently
  *     (counted, not errored — re-running after the next sync may match).
  *
  * Idempotency: `dedupe_hash = "giro:<linked_transaction_id>"` and the
@@ -27,7 +30,7 @@
  * NOT NULL` makes re-runs no-ops.
  */
 
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 
 import db from "../db/database";
 import {
@@ -47,6 +50,21 @@ export function extractIsin(text: string | null | undefined): string | null {
   if (!text) return null;
   const m = text.match(ISIN_RE);
   return m ? m[0] : null;
+}
+
+/**
+ * German Wertpapierkennnummer: always 6 alphanumeric characters. The
+ * shape alone is too generic (matches dates, amounts, fragments of
+ * IBANs), so we require an explicit "WKN" prefix to avoid false
+ * positives. Handles "WKN 930921", "WKN: 930921", "WKN/ISIN 930921/LU…".
+ */
+const WKN_RE = /\bWKN[:\s/]+([A-Z0-9]{6})\b/i;
+
+/** Extract the first prefixed WKN appearing in a free-text field, or null. */
+export function extractWkn(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const m = text.match(WKN_RE);
+  return m ? m[1].toUpperCase() : null;
 }
 
 export type DerivedKind = "buy" | "sell" | "dividend";
@@ -131,18 +149,25 @@ export async function deriveDepotTransactionsForBankcontact(
       continue;
     }
 
-    const isin =
-      extractIsin(tx.purpose) ?? extractIsin(tx.counterparty);
-    if (!isin) {
+    const isin = extractIsin(tx.purpose) ?? extractIsin(tx.counterparty);
+    const wkn = extractWkn(tx.purpose) ?? extractWkn(tx.counterparty);
+    if (!isin && !wkn) {
       stats.skipped++;
       continue;
     }
 
     // Find a depot account on the same bankcontact whose holdings
-    // include this ISIN. Pick the most recent snapshot to break ties.
+    // include this ISIN or WKN. Pick the most recent snapshot to break
+    // ties. We accept either identifier because some banks only fill in
+    // WKN on the holdings side (or only ISIN on the booking side).
+    const idMatches = [];
+    if (isin) idMatches.push(eq(financeAccountHolding.isin, isin));
+    if (wkn) idMatches.push(eq(financeAccountHolding.wkn, wkn));
+
     const [holding] = await db
       .select({
         account_id: financeAccountHolding.account_id,
+        isin: financeAccountHolding.isin,
         wkn: financeAccountHolding.wkn,
         name: financeAccountHolding.name,
         currency: financeAccountHolding.currency,
@@ -155,7 +180,7 @@ export async function deriveDepotTransactionsForBankcontact(
       .where(
         and(
           eq(financeAccount.bankcontact_id, bankcontactId),
-          eq(financeAccountHolding.isin, isin),
+          or(...idMatches),
         ),
       )
       .orderBy(desc(financeAccountHolding.as_of))
@@ -174,13 +199,20 @@ export async function deriveDepotTransactionsForBankcontact(
     const net = netSigned.toFixed(2);
     const dedupeHash = `giro:${tx.id}`;
 
+    // Prefer the value we actually extracted from the booking; fall
+    // back to whatever the holding carries so the row always has the
+    // best identifier we know about (UI filters per-position by isin
+    // OR wkn, whichever is non-null on the holding).
+    const rowIsin = isin ?? holding.isin;
+    const rowWkn = wkn ?? holding.wkn;
+
     try {
       const inserted = await db
         .insert(financeDepotTransaction)
         .values({
           account_id: holding.account_id,
-          isin,
-          wkn: holding.wkn,
+          isin: rowIsin,
+          wkn: rowWkn,
           name: holding.name,
           kind,
           executed_at: (tx.value_date ?? tx.booking_date).slice(0, 10),
@@ -213,7 +245,7 @@ export async function deriveDepotTransactionsForBankcontact(
       }
     } catch (err) {
       stats.errors.push(
-        `tx ${tx.id} (${isin}): derivation insert failed: ` +
+        `tx ${tx.id} (${rowIsin ?? rowWkn}): derivation insert failed: ` +
           ((err as Error).message ?? String(err)),
       );
     }

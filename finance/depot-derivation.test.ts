@@ -19,6 +19,7 @@ import {
   classifySecuTransaction,
   deriveDepotTransactionsForBankcontact,
   extractIsin,
+  extractWkn,
 } from "./depot-derivation";
 import { deriveDepotTransactionsFromGiro } from "./depot-transactions";
 
@@ -84,14 +85,14 @@ async function insertAccount(
 async function insertHolding(opts: {
   accountId: number;
   asOf: string;
-  isin: string;
-  wkn?: string;
+  isin?: string | null;
+  wkn?: string | null;
   name: string;
 }): Promise<void> {
   await db.insert(financeAccountHolding).values({
     account_id: opts.accountId,
     as_of: opts.asOf,
-    isin: opts.isin,
+    isin: opts.isin ?? null,
     wkn: opts.wkn ?? null,
     name: opts.name,
     amount: "5",
@@ -157,6 +158,39 @@ describe("extractIsin", () => {
     expect(extractIsin(null)).toBeNull();
     expect(extractIsin("")).toBeNull();
     expect(extractIsin(undefined)).toBeNull();
+  });
+});
+
+describe("extractWkn", () => {
+  it("pulls a WKN after the 'WKN' prefix", () => {
+    expect(extractWkn("WERTPAPIERABRECHNUNG KAUF WKN 930921 ANTEILE 5"))
+      .toBe("930921");
+  });
+
+  it("handles colon separator", () => {
+    expect(extractWkn("Kursabrechnung WKN: A1EWWW Stk 5")).toBe("A1EWWW");
+  });
+
+  it("handles the WKN/ISIN combined form", () => {
+    // Real MLP booking format: "WKN 930921 / LU0106280919"
+    expect(extractWkn("WERTPAPIER WKN 930921 / LU0106280919 SAUREN GLOB"))
+      .toBe("930921");
+  });
+
+  it("uppercases mixed-case WKN payloads", () => {
+    expect(extractWkn("wkn a1ewww trades")).toBe("A1EWWW");
+  });
+
+  it("returns null when no 'WKN' prefix is present (avoid false positives)", () => {
+    // 6-digit number in the purpose without the WKN anchor must not be
+    // mistaken for a WKN — could be a reference, date, or amount.
+    expect(extractWkn("AUFTRAGSNR 930921 KURS 56,19")).toBeNull();
+  });
+
+  it("returns null on null/empty input", () => {
+    expect(extractWkn(null)).toBeNull();
+    expect(extractWkn("")).toBeNull();
+    expect(extractWkn(undefined)).toBeNull();
   });
 });
 
@@ -426,6 +460,105 @@ describe("deriveDepotTransactionsForBankcontact", () => {
     const rows = await db.select().from(financeDepotTransaction);
     expect(rows).toHaveLength(1);
     expect(rows[0].account_id).toBe(depotNew);
+  });
+
+  it("matches a holding by WKN when the holding has no ISIN (MLP case)", async () => {
+    const bcId = await insertBankcontact();
+    const giro = await insertAccount(bcId, "giro", "GIRO-1");
+    const depot = await insertAccount(bcId, "depot", "DEPOT-1");
+    // Real-world MLP holdings: ISIN column blank, only WKN populated.
+    await insertHolding({
+      accountId: depot,
+      asOf: "2026-04-21",
+      isin: null,
+      wkn: "930921",
+      name: "SAUREN GLOB.OPPS A",
+    });
+    // Real MLP booking text: WKN before "/", ISIN after.
+    const giroTxId = await insertTx({
+      accountId: giro,
+      bookingDate: "2026-04-21",
+      amount: "234.32",
+      purpose:
+        "WERTPAPIERABRECHNUNG VERKAUF WKN 930921 / LU0106280919 SAUREN GLOB.OPPS A",
+      funds_code: "SECU",
+      transaction_code: "TRAD",
+    });
+
+    const stats = await deriveDepotTransactionsForBankcontact(bcId);
+    expect(stats.derived).toBe(1);
+    expect(stats.skipped).toBe(0);
+
+    const [row] = await db
+      .select()
+      .from(financeDepotTransaction)
+      .where(eq(financeDepotTransaction.account_id, depot));
+    expect(row.kind).toBe("sell");
+    // ISIN was present in the booking text — keep it on the row even
+    // though the holding had none, so future syncs can backfill it.
+    expect(row.isin).toBe("LU0106280919");
+    expect(row.wkn).toBe("930921");
+    expect(row.linked_transaction_id).toBe(giroTxId);
+  });
+
+  it("matches by WKN when the booking has no ISIN but holding has it", async () => {
+    const bcId = await insertBankcontact();
+    const giro = await insertAccount(bcId, "giro", "GIRO-1");
+    const depot = await insertAccount(bcId, "depot", "DEPOT-1");
+    await insertHolding({
+      accountId: depot,
+      asOf: "2026-05-15",
+      isin: "DE000A1EWWW0",
+      wkn: "A1EWWW",
+      name: "ADIDAS",
+    });
+    await insertTx({
+      accountId: giro,
+      bookingDate: "2026-05-10",
+      amount: "-500.00",
+      purpose: "WERTPAPIERABRECHNUNG KAUF WKN A1EWWW STK 5",
+      funds_code: "SECU",
+      transaction_code: "TRAD",
+    });
+
+    const stats = await deriveDepotTransactionsForBankcontact(bcId);
+    expect(stats.derived).toBe(1);
+    const [row] = await db
+      .select()
+      .from(financeDepotTransaction)
+      .where(eq(financeDepotTransaction.account_id, depot));
+    expect(row.kind).toBe("buy");
+    // WKN drove the match — fall back to the holding's ISIN for the row.
+    expect(row.isin).toBe("DE000A1EWWW0");
+    expect(row.wkn).toBe("A1EWWW");
+  });
+
+  it("does not match on a stray 6-digit number without a 'WKN' prefix", async () => {
+    const bcId = await insertBankcontact();
+    const giro = await insertAccount(bcId, "giro", "GIRO-1");
+    const depot = await insertAccount(bcId, "depot", "DEPOT-1");
+    await insertHolding({
+      accountId: depot,
+      asOf: "2026-05-15",
+      isin: null,
+      wkn: "930921",
+      name: "SAUREN GLOB.OPPS A",
+    });
+    // 930921 appears as an "AUFTRAGSNR" — not as a WKN. Without a WKN
+    // prefix the extraction must skip it, and since the booking has no
+    // ISIN either there's nothing to match.
+    await insertTx({
+      accountId: giro,
+      bookingDate: "2026-05-10",
+      amount: "-50.00",
+      purpose: "GEBÜHR AUFTRAGSNR 930921",
+      funds_code: "SECU",
+      transaction_code: "TRAD",
+    });
+
+    const stats = await deriveDepotTransactionsForBankcontact(bcId);
+    expect(stats.derived).toBe(0);
+    expect(stats.skipped).toBe(1);
   });
 
   it("stays within the bankcontact — does not match a depot on another bank", async () => {
