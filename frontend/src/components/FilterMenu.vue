@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import SelectButton from 'primevue/selectbutton'
@@ -75,6 +77,10 @@ const locationError = ref('')
 const locationPlace = ref<LocationSuggestion | null>(null)
 const locationSuggestions = ref<LocationSuggestion[]>([])
 let locationSearchSequence = 0
+const mapOpen = ref(false)
+const locationMapContainer = ref<HTMLElement | null>(null)
+let locationMap: L.Map | null = null
+let locationMarker: L.Marker | null = null
 
 // Mirror local → parent on every edit. The draft → local sync happens only
 // when the dialog opens (see the visible watcher below). Watching the draft
@@ -184,6 +190,7 @@ function useCurrentLocation() {
         latitude: coords.latitude,
         longitude: coords.longitude,
       }
+      setLocationMarker(coords.latitude, coords.longitude)
     },
     () => { locationError.value = 'Standort konnte nicht abgerufen werden. Bitte erlaube den Zugriff.' },
     { enableHighAccuracy: false, timeout: 10_000, maximumAge: 5 * 60_000 },
@@ -219,6 +226,7 @@ function selectLocation(event: { value: LocationSuggestion }) {
     nearRadiusKm: local.value.nearRadiusKm ?? 10,
   }
   locationError.value = ''
+  setLocationMarker(place.latitude, place.longitude)
 }
 
 function clearNearLocation() {
@@ -229,8 +237,53 @@ function clearNearLocation() {
   local.value = next
   locationPlace.value = null
   locationSuggestions.value = []
+  if (locationMarker) {
+    locationMap?.removeLayer(locationMarker)
+    locationMarker = null
+  }
   locationError.value = ''
 }
+
+async function toggleLocationMap() {
+  mapOpen.value = !mapOpen.value
+  if (!mapOpen.value) return
+  await nextTick()
+  if (!locationMapContainer.value) return
+  const lat = local.value.nearLat ?? 48.1372
+  const lon = local.value.nearLon ?? 11.5756
+  if (!locationMap) {
+    locationMap = L.map(locationMapContainer.value).setView([lat, lon], local.value.nearLat === undefined ? 5 : 13)
+    L.tileLayer('https://tile.openstreetmap.de/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap-Mitwirkende',
+    }).addTo(locationMap)
+    locationMap.on('click', (event: L.LeafletMouseEvent) => setLocationFromMap(event.latlng.lat, event.latlng.lng))
+  }
+  locationMap.invalidateSize()
+  locationMap.setView([lat, lon])
+  if (local.value.nearLat !== undefined && local.value.nearLon !== undefined) {
+    setLocationMarker(lat, lon)
+  }
+}
+
+function setLocationMarker(latitude: number, longitude: number) {
+  if (!locationMap) return
+  if (locationMarker) locationMarker.setLatLng([latitude, longitude])
+  else locationMarker = L.marker([latitude, longitude]).addTo(locationMap)
+}
+
+function setLocationFromMap(latitude: number, longitude: number) {
+  local.value = { ...local.value, nearLat: latitude, nearLon: longitude, nearRadiusKm: local.value.nearRadiusKm ?? 10 }
+  locationPlace.value = { label: 'Punkt auf der Karte', latitude, longitude }
+  setLocationMarker(latitude, longitude)
+  locationError.value = ''
+}
+
+onUnmounted(() => {
+  locationMap?.remove()
+  locationMap = null
+  locationMarker = null
+})
 
 // --- Album / Person autocomplete -------------------------------------------
 // Listen kommen aus dem app-weiten Composable, sodass parallele Aufrufer
@@ -507,6 +560,7 @@ function close() {
           @item-select="selectLocation"
         />
         <div class="near-location-controls">
+          <Button label="Punkt auf Karte setzen" icon="pi pi-map" outlined @click="toggleLocationMap" />
           <Button label="Aktuellen Standort verwenden" icon="pi pi-map-marker" outlined @click="useCurrentLocation" />
           <Button
             v-if="local.nearLat !== undefined && local.nearLon !== undefined"
@@ -514,6 +568,7 @@ function close() {
             @click="clearNearLocation"
           />
         </div>
+        <div v-if="mapOpen" ref="locationMapContainer" class="location-picker-map" />
         <template v-if="local.nearLat !== undefined && local.nearLon !== undefined">
           <div class="filter-daterange">
             <InputNumber
@@ -604,4 +659,5 @@ function close() {
 .near-location-controls { display: flex; gap: 0.4rem; flex-wrap: wrap; }
 .filter-hint { color: var(--text-color-secondary, #555); }
 .location-error { color: var(--red-500, #d32f2f); }
+.location-picker-map { height: 260px; border: 1px solid var(--p-content-border-color, #dee2e6); border-radius: 6px; }
 </style>
