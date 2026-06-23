@@ -445,6 +445,7 @@ const selectionMenuItems = computed(() => {
   }
   if (selectedCount.value === 0) return items
 
+  if (canShowCollage.value) items.push({ label: 'Collage erstellen', icon: 'pi pi-images', command: openCollageDialog })
   if (canUpload.value) items.push({ label: 'Zu Alben hinzufügen', icon: 'pi pi-book', command: openAlbumDialog })
   if (canDelete.value) {
     items.push(
@@ -452,7 +453,6 @@ const selectionMenuItems = computed(() => {
       { label: 'Ausblenden', icon: 'pi pi-thumbs-down-fill', disabled: curationBusy.value, command: () => void applyCurationToSelection('hidden') },
     )
   }
-  if (canShowCollage.value) items.push({ label: 'Collage erstellen', icon: 'pi pi-images', command: openCollageDialog })
   items.push({ label: 'Auswahl aufheben', icon: 'pi pi-replay', command: clearSelection })
   if (canManageData.value) {
     items.push({ separator: true })
@@ -1759,7 +1759,7 @@ void refreshReviewSequence()
           @click="exitSelectMode"
         />
       </div>
-      <Menu ref="selectionMenu" :model="selectionMenuItems" :popup="true" />
+      <Menu ref="selectionMenu" :model="selectionMenuItems" :popup="true" :pt="{ root: { class: 'selection-actions-menu' } }" />
     </div>
 
     <!-- Mobile entry point for the album batch dialog. Reused on desktop
