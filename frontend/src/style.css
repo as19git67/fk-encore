@@ -61,6 +61,13 @@ a:hover {
  * long ("SecureGo plus (Direktfreigabe) — Push-Freigabe") — without these
  * rules the panel grows wider than the trigger and on mobile pushes past
  * the viewport edge. */
+/* ── Photos: selection-actions popup menu ────────────────────────────────────
+ * The PrimeVue Menu is teleported to <body>, so scoped styles can't reach it.
+ * Larger padding makes the touch targets more comfortable on mobile. */
+.selection-actions-menu .p-menu-item-link {
+  padding-block: 0.75rem;
+}
+
 .tan-method-panel .p-select-option {
   white-space: normal;
   word-break: break-word;
