@@ -24,7 +24,7 @@ import Popover from 'primevue/popover'
 import Textarea from 'primevue/textarea'
 import SelectButton from 'primevue/selectbutton'
 import ColorPicker from 'primevue/colorpicker'
-import { getPhotoDetailsBatch, getPhotoUrl, type Photo } from '../api/photos'
+import { getPhotoDetailsBatch, getPhotoUrl, uploadPhoto, addPhotoToAlbum, type Photo } from '../api/photos'
 import {
   collageLayouts,
   collageObjectPosition,
@@ -45,6 +45,8 @@ import {
 const props = defineProps<{
   visible: boolean
   photoIds: number[]
+  /** When set, a "Speichern" button appears to upload the collage into this album. */
+  albumId?: number
 }>()
 
 const emit = defineEmits<{
@@ -63,12 +65,18 @@ type Step = 'layouts' | 'editor'
 
 const step = ref<Step>('layouts')
 const loading = ref(false)
+/** Fatal error during photo loading — replaces the dialog content. */
+const loadError = ref<string | null>(null)
+/** Transient action error (save / share) shown in the footer. */
 const errorMsg = ref<string | null>(null)
+const successMsg = ref<string | null>(null)
+let successTimer: ReturnType<typeof setTimeout> | null = null
 const photos = ref<CollagePhoto[]>([])
 const selectedLayout = ref<CollageLayout | null>(null)
 // `order[cellIndex]` = index into `photos` shown in that cell.
 const order = ref<number[]>([])
 const sharing = ref(false)
+const saving = ref(false)
 
 const layouts = computed(() => collageLayouts(photos.value.length))
 
@@ -116,6 +124,7 @@ function loadImage(filename: string): Promise<{ img: HTMLImageElement; url: stri
 
 async function loadPhotos() {
   loading.value = true
+  loadError.value = null
   errorMsg.value = null
   photos.value = []
   selectedLayout.value = null
@@ -147,7 +156,7 @@ async function loadPhotos() {
     order.value = loaded.map((_, i) => i)
     photoPresetColors.value = extractDominantColors(loaded.map((p) => p.img))
   } catch (err) {
-    errorMsg.value =
+    loadError.value =
       err instanceof Error ? err.message : 'Die Fotos konnten nicht geladen werden.'
   } finally {
     loading.value = false
@@ -506,6 +515,31 @@ async function shareCollage() {
   }
 }
 
+function showSuccess(msg: string) {
+  successMsg.value = msg
+  if (successTimer) clearTimeout(successTimer)
+  successTimer = setTimeout(() => { successMsg.value = null }, 3000)
+}
+
+async function uploadCollage() {
+  if (saving.value || !props.albumId) return
+  saving.value = true
+  errorMsg.value = null
+  successMsg.value = null
+  try {
+    const blob = await buildCollageBlob()
+    const file = new File([blob], `collage-${Date.now()}.jpg`, { type: 'image/jpeg' })
+    const photo = await uploadPhoto(file)
+    await addPhotoToAlbum(props.albumId, photo.id)
+    showSuccess('Collage wurde im Album gespeichert.')
+  } catch (err) {
+    errorMsg.value =
+      err instanceof Error ? err.message : 'Die Collage konnte nicht gespeichert werden.'
+  } finally {
+    saving.value = false
+  }
+}
+
 const dialogHeader = computed(() =>
   step.value === 'layouts' ? 'Layout wählen' : 'Collage bearbeiten',
 )
@@ -524,6 +558,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointermove', onTextPointerMove)
   window.removeEventListener('pointerup', onTextPointerUp)
   window.removeEventListener('pointercancel', onTextPointerUp)
+  if (successTimer) clearTimeout(successTimer)
 })
 </script>
 
@@ -541,8 +576,8 @@ onBeforeUnmount(() => {
       <span>Fotos werden geladen …</span>
     </div>
 
-    <Message v-else-if="errorMsg" severity="error" :closable="false">
-      {{ errorMsg }}
+    <Message v-else-if="loadError" severity="error" :closable="false">
+      {{ loadError }}
     </Message>
 
     <!-- Step 1: layout picker -->
@@ -709,6 +744,21 @@ onBeforeUnmount(() => {
 
     <template #footer>
       <div class="collage-footer">
+        <Transition name="collage-msg">
+          <Message
+            v-if="successMsg"
+            severity="success"
+            :closable="false"
+            class="collage-footer__msg"
+          >{{ successMsg }}</Message>
+          <Message
+            v-else-if="errorMsg"
+            severity="error"
+            :closable="false"
+            class="collage-footer__msg"
+          >{{ errorMsg }}</Message>
+        </Transition>
+        <div class="collage-footer__buttons">
         <Button
           v-if="step === 'editor'"
           class="collage-footer__back"
@@ -743,12 +793,25 @@ onBeforeUnmount(() => {
           @click="close"
         />
         <Button
+          v-if="step === 'editor' && albumId"
+          class="collage-footer__save"
+          label="Speichern"
+          icon="pi pi-upload"
+          severity="secondary"
+          outlined
+          :loading="saving"
+          v-tooltip.top="'Collage im Album speichern'"
+          @click="uploadCollage"
+        />
+        <Button
           v-if="step === 'editor'"
+          class="collage-footer__share"
           label="Teilen"
           icon="pi pi-share-alt"
           :loading="sharing"
           @click="shareCollage"
         />
+        </div>
       </div>
     </template>
 
@@ -862,7 +925,19 @@ onBeforeUnmount(() => {
 /* ── Text overlay ─────────────────────────────────────────────────────────── */
 .collage-text-overlay {
   position: absolute;
-  /* Natural width for short text; wraps only when content exceeds 90% of canvas. */
+  /* Expand to the full natural (unwrapped) text width so short text sits on
+     one line; max-width caps it at 90% of the canvas, where pre-wrap +
+     overflow-wrap break long text at word boundaries. The wrap width is thus
+     independent of the box's horizontal position.
+
+     The -webkit- fallback is essential: this project has no autoprefixer, and
+     WebKit/older iOS Safari drop the unprefixed `max-content`, which silently
+     reverts the box to `width:auto` (shrink-to-fit). Shrink-to-fit's available
+     width is `stageWidth − left`, so the box would narrow — and wrap sooner —
+     the further right it is dragged. */
+  width: -webkit-max-content;
+  width: -moz-max-content;
+  width: max-content;
   max-width: 90%;
   padding: 0.05em 0.3em;
   transform: translate(-50%, -50%);
@@ -948,12 +1023,32 @@ onBeforeUnmount(() => {
 
 .collage-footer {
   display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  width: 100%;
+}
+.collage-footer__msg {
+  width: 100%;
+}
+.collage-footer__buttons {
+  display: flex;
   align-items: center;
   gap: 0.5rem;
   width: 100%;
 }
 .collage-footer-spacer {
   flex: 1;
+}
+
+/* Slide-in / fade-out for transient messages */
+.collage-msg-enter-active,
+.collage-msg-leave-active {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.collage-msg-enter-from,
+.collage-msg-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 
 .collage-ghost {
@@ -985,7 +1080,9 @@ onBeforeUnmount(() => {
 @media (max-width: 480px) {
   .collage-footer__back :deep(.p-button-label),
   .collage-footer__text :deep(.p-button-label),
-  .collage-footer__cancel :deep(.p-button-label) {
+  .collage-footer__cancel :deep(.p-button-label),
+  .collage-footer__save :deep(.p-button-label),
+  .collage-footer__share :deep(.p-button-label) {
     display: none;
   }
 }

@@ -2830,6 +2830,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
     <CollageDialog
       v-model:visible="collageDialogVisible"
       :photo-ids="collagePhotoIds"
+      :album-id="albumId"
     />
 
     <!-- Warning dialog when a batch delete skipped some photos -->
