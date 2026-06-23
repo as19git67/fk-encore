@@ -557,6 +557,7 @@ const selectionMenuItems = computed(() => {
   }
   if (selectedCount.value === 0) return items
 
+  if (canShowCollage.value) items.push({ label: 'Collage erstellen', icon: 'pi pi-images', command: openCollageDialog })
   if (canUploadPhotos.value && canReuseAlbumPhotos.value) {
     items.push({ label: 'Zu Alben hinzufügen', icon: 'pi pi-book', command: openAlbumDialog })
   }
@@ -569,7 +570,6 @@ const selectionMenuItems = computed(() => {
   if (canWrite.value) {
     items.push({ label: 'Aus diesem Album entfernen', icon: 'pi pi-minus-circle', disabled: removeBusy.value, command: removeFromAlbumSelection })
   }
-  if (canShowCollage.value) items.push({ label: 'Collage erstellen', icon: 'pi pi-images', command: openCollageDialog })
   items.push({ label: 'Auswahl aufheben', icon: 'pi pi-replay', command: clearSelection })
   if (canManageData.value) {
     items.push({ separator: true })
@@ -2529,7 +2529,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           @click="exitSelectMode"
         />
       </div>
-      <Menu ref="selectionMenu" :model="selectionMenuItems" :popup="true" />
+      <Menu ref="selectionMenu" :model="selectionMenuItems" :popup="true" :pt="{ root: { class: 'selection-actions-menu' } }" />
     </div>
 
     <!-- Mobile: Backdrop zum Schließen von Drawern -->

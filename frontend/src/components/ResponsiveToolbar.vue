@@ -138,7 +138,7 @@ watch(
       v-tooltip.bottom="moreLabel"
       @click="toggleMenu"
     />
-    <Menu ref="menuRef" :model="menuModel" :popup="true" />
+    <Menu ref="menuRef" :model="menuModel" :popup="true" :pt="{ root: { class: 'selection-actions-menu' } }" />
 
     <!-- Hidden measurement row: always renders every item (plus a sample
          overflow toggle) at natural width so the visible row can be measured
@@ -171,10 +171,12 @@ watch(
 }
 
 /* Push the overflow toggle to the far right so the inline items use the
-   full available width. */
+   full available width. Minimum 44×44 px touch target (WCAG 2.5.5). */
 .responsive-toolbar__more {
   margin-left: auto;
   flex-shrink: 0;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
 }
 
 .responsive-toolbar__item {
