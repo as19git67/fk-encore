@@ -366,6 +366,10 @@ export interface Holding {
   cost_basis_source: CostBasisSource
   unrealized_gain: string | null
   unrealized_gain_pct: string | null
+  /** Sum of realized G/V from past sells, WAC-based (scale 2, signed). null when no sells. */
+  realized_gain: string | null
+  /** False when some buy/sell txs lacked qty/price/net_amount data. */
+  realized_gain_complete: boolean
 }
 
 export interface ListHoldingsResponse {

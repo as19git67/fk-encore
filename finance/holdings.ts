@@ -47,6 +47,19 @@ interface HoldingView {
   unrealized_gain: string | null;
   /** unrealized_gain / cost_basis × 100 (scale 2, signed). */
   unrealized_gain_pct: string | null;
+  /**
+   * Sum of realized gains/losses from past sells on this position,
+   * computed via chronological WAC walk (scale 2, signed). null when
+   * no sells exist or none could be evaluated.
+   */
+  realized_gain: string | null;
+  /**
+   * False when some buy/sell transactions on this position lacked the
+   * amount/price/net_amount data needed to fold them into the WAC walk
+   * (e.g. giro-derived buys with only net_amount). The realized number
+   * is still useful but partial — the UI flags this.
+   */
+  realized_gain_complete: boolean;
 }
 
 interface ListHoldingsParams {
@@ -131,10 +144,12 @@ export const listHoldings = api(
       .orderBy(desc(sql`CAST(${financeAccountHolding.value} AS NUMERIC)`));
 
     const wacByPosition = await buildBuyWacIndex(id);
+    const realizedByPosition = await buildRealizedGainIndex(id);
 
     return {
       items: rows.map((r) => {
         const valuation = computeCostBasis(r, wacByPosition);
+        const realized = lookupRealized(r, realizedByPosition);
         return {
           id: r.id,
           account_id: r.account_id,
@@ -157,6 +172,8 @@ export const listHoldings = api(
           cost_basis_source: valuation.source,
           unrealized_gain: valuation.unrealizedGain,
           unrealized_gain_pct: valuation.unrealizedGainPct,
+          realized_gain: realized.realized,
+          realized_gain_complete: realized.complete,
         };
       }),
       as_of: resolvedAsOf.slice(0, 10),
@@ -315,6 +332,193 @@ export function computeCostBasis(
     unrealizedGain,
     unrealizedGainPct,
   };
+}
+
+// ----------------------------------------------------------------------
+// Realized gain derivation (chronological WAC walk)
+// ----------------------------------------------------------------------
+//
+// For each position we replay every depot transaction in order:
+//   - buy/in:  fold quantity and cost into the running WAC
+//   - sell:    realized += proceeds − soldQty × currentWac
+//   - out:     reduce inventory at WAC (no realized G/V — transfer)
+//   - other:   ignored (dividend/split/corp_action have separate
+//              tax treatment; not part of position G/V)
+//
+// "proceeds" prefers `net_amount` (after fees/tax — closer to what the
+// user actually received). Falls back to amount × price.
+//
+// `complete` is false when any buy/sell on the position lacked the
+// quantitative data needed (typical for giro-derived rows with only
+// net_amount). The number we return is still useful, just partial.
+
+export interface RealizedAggregate {
+  realized: number;
+  complete: boolean;
+  /** True if any sell contributed to `realized`. */
+  hasData: boolean;
+}
+
+export interface RealizedIndex {
+  byIsin: Map<string, RealizedAggregate>;
+  byWkn: Map<string, RealizedAggregate>;
+  byName: Map<string, RealizedAggregate>;
+}
+
+interface DepotTx {
+  id: number;
+  isin: string | null;
+  wkn: string | null;
+  name: string | null;
+  kind: string;
+  executed_at: string;
+  amount: string | null;
+  price: string | null;
+  net_amount: string | null;
+}
+
+export async function buildRealizedGainIndex(
+  accountId: number,
+): Promise<RealizedIndex> {
+  const txs = await db
+    .select({
+      id: financeDepotTransaction.id,
+      isin: financeDepotTransaction.isin,
+      wkn: financeDepotTransaction.wkn,
+      name: financeDepotTransaction.name,
+      kind: financeDepotTransaction.kind,
+      executed_at: financeDepotTransaction.executed_at,
+      amount: financeDepotTransaction.amount,
+      price: financeDepotTransaction.price,
+      net_amount: financeDepotTransaction.net_amount,
+    })
+    .from(financeDepotTransaction)
+    .where(eq(financeDepotTransaction.account_id, accountId));
+
+  // Bucket transactions by stable position key. Same matching rule used
+  // throughout (isin > wkn > name) — see statement-persist.ts.
+  function positionKey(tx: { isin: string | null; wkn: string | null; name: string | null }): string | null {
+    return tx.isin || tx.wkn || tx.name || null;
+  }
+  const buckets = new Map<string, DepotTx[]>();
+  for (const tx of txs) {
+    const key = positionKey(tx);
+    if (!key) continue;
+    const list = buckets.get(key) ?? [];
+    list.push(tx);
+    buckets.set(key, list);
+  }
+
+  const byIsin = new Map<string, RealizedAggregate>();
+  const byWkn = new Map<string, RealizedAggregate>();
+  const byName = new Map<string, RealizedAggregate>();
+
+  for (const [, list] of buckets) {
+    const agg = computeRealizedForPosition(list);
+    // Index under every identifier that appears in this bucket, so a
+    // holding can be matched by whatever identifier it carries.
+    const seenIsin = new Set<string>();
+    const seenWkn = new Set<string>();
+    const seenName = new Set<string>();
+    for (const tx of list) {
+      if (tx.isin && !seenIsin.has(tx.isin)) {
+        seenIsin.add(tx.isin);
+        byIsin.set(tx.isin, agg);
+      }
+      if (tx.wkn && !seenWkn.has(tx.wkn)) {
+        seenWkn.add(tx.wkn);
+        byWkn.set(tx.wkn, agg);
+      }
+      if (tx.name && !seenName.has(tx.name)) {
+        seenName.add(tx.name);
+        byName.set(tx.name, agg);
+      }
+    }
+  }
+
+  return { byIsin, byWkn, byName };
+}
+
+export function computeRealizedForPosition(txs: DepotTx[]): RealizedAggregate {
+  const sorted = [...txs].sort((a, b) => {
+    if (a.executed_at !== b.executed_at) {
+      return a.executed_at < b.executed_at ? -1 : 1;
+    }
+    return a.id - b.id;
+  });
+
+  let qty = 0;
+  let costTotal = 0; // qty × current WAC
+  let realized = 0;
+  let complete = true;
+  let hasData = false;
+
+  for (const tx of sorted) {
+    if (tx.kind === "buy" || tx.kind === "in") {
+      const a = tx.amount === null ? null : Number(tx.amount);
+      const p = tx.price === null ? null : Number(tx.price);
+      if (a === null || p === null || !Number.isFinite(a) || !Number.isFinite(p) || a <= 0 || p <= 0) {
+        complete = false;
+        continue;
+      }
+      qty += a;
+      costTotal += a * p;
+    } else if (tx.kind === "sell") {
+      const a = tx.amount === null ? null : Number(tx.amount);
+      if (a === null || !Number.isFinite(a) || a <= 0) {
+        complete = false;
+        continue;
+      }
+      // Proceeds: prefer net_amount (after fees/tax), else gross via price.
+      let proceeds: number | null = null;
+      if (tx.net_amount !== null) {
+        const n = Number(tx.net_amount);
+        if (Number.isFinite(n)) proceeds = n;
+      }
+      if (proceeds === null && tx.price !== null) {
+        const p = Number(tx.price);
+        if (Number.isFinite(p)) proceeds = a * p;
+      }
+      const wac = qty > 0 ? costTotal / qty : 0;
+      const soldQty = Math.min(a, qty);
+      const costPortion = soldQty * wac;
+      if (proceeds === null) {
+        complete = false;
+      } else {
+        realized += proceeds - costPortion;
+        hasData = true;
+      }
+      qty -= soldQty;
+      costTotal -= costPortion;
+    } else if (tx.kind === "out") {
+      const a = tx.amount === null ? null : Number(tx.amount);
+      if (a === null || !Number.isFinite(a) || a <= 0) {
+        complete = false;
+        continue;
+      }
+      const wac = qty > 0 ? costTotal / qty : 0;
+      const soldQty = Math.min(a, qty);
+      qty -= soldQty;
+      costTotal -= soldQty * wac;
+    }
+    // dividend / split / corp_action: ignored for realized G/V.
+  }
+
+  return { realized, complete, hasData };
+}
+
+function lookupRealized(
+  holding: { isin: string | null; wkn: string | null; name: string | null },
+  index: RealizedIndex,
+): { realized: string | null; complete: boolean } {
+  const agg =
+    (holding.isin ? index.byIsin.get(holding.isin) : null) ??
+    (holding.wkn ? index.byWkn.get(holding.wkn) : null) ??
+    (holding.name ? index.byName.get(holding.name) : null);
+  if (!agg || !agg.hasData) {
+    return { realized: null, complete: agg ? agg.complete : true };
+  }
+  return { realized: agg.realized.toFixed(2), complete: agg.complete };
 }
 
 // ----------------------------------------------------------------------

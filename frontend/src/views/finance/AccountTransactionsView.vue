@@ -386,6 +386,27 @@ const holdingsGainPctTotal = computed(() => {
   return (gain / cost) * 100
 })
 
+const holdingsRealizedTotal = computed(() => {
+  let sum = 0
+  let any = false
+  for (const h of holdings.value) {
+    if (h.realized_gain === null) continue
+    const v = Number(h.realized_gain)
+    if (Number.isFinite(v)) {
+      sum += v
+      any = true
+    }
+  }
+  return any ? sum : null
+})
+
+const holdingsRealizedComplete = computed(() => {
+  for (const h of holdings.value) {
+    if (h.realized_gain !== null && !h.realized_gain_complete) return false
+  }
+  return true
+})
+
 function formatCurrency(val: string | number | null, currency?: string): string {
   if (val === null) return '–'
   const n = typeof val === 'number' ? val : Number(val)
@@ -1259,6 +1280,7 @@ function goBack() {
               <th class="holdings-col-num">Wert</th>
               <th class="holdings-col-num holdings-col-cost">Einstand</th>
               <th class="holdings-col-num holdings-col-gain">G/V</th>
+              <th class="holdings-col-num holdings-col-realized">Realisiert</th>
               <th class="holdings-col-num holdings-col-share">Anteil</th>
             </tr>
           </thead>
@@ -1294,13 +1316,24 @@ function goBack() {
                   <span class="holdings-gain-amount">{{ formatSignedCurrency(h.unrealized_gain, h.currency ?? undefined) }}</span>
                   <span v-if="h.unrealized_gain_pct !== null" class="holdings-gain-pct">{{ formatSignedPercent(h.unrealized_gain_pct) }}</span>
                 </td>
+                <td
+                  class="holdings-col-num holdings-col-realized"
+                  :class="`holdings-gain-${gainSign(h.realized_gain)}`"
+                >
+                  <span class="holdings-gain-amount">{{ formatSignedCurrency(h.realized_gain, h.currency ?? undefined) }}</span>
+                  <span
+                    v-if="h.realized_gain !== null && !h.realized_gain_complete"
+                    class="holdings-cost-source"
+                    title="Einige Käufe ohne Stück/Kurs — die Zahl kann ungenau sein"
+                  >*</span>
+                </td>
                 <td class="holdings-col-num holdings-col-share">{{ holdingShare(h) }}</td>
               </tr>
               <tr
                 v-if="expandedPositionKey === (h.isin || h.wkn || h.name || '')"
                 class="holdings-history-row"
               >
-                <td colspan="7">
+                <td colspan="8">
                   <div class="holdings-history-head">
                     <span class="holdings-history-label">Verlauf</span>
                     <div class="holdings-history-toggle">
@@ -1475,6 +1508,17 @@ function goBack() {
               >
                 <span class="holdings-gain-amount">{{ formatSignedCurrency(holdingsGainTotal) }}</span>
                 <span v-if="holdingsGainPctTotal !== null" class="holdings-gain-pct">{{ formatSignedPercent(holdingsGainPctTotal) }}</span>
+              </td>
+              <td
+                class="holdings-col-num holdings-col-realized"
+                :class="`holdings-gain-${gainSign(holdingsRealizedTotal)}`"
+              >
+                <span class="holdings-gain-amount">{{ formatSignedCurrency(holdingsRealizedTotal) }}</span>
+                <span
+                  v-if="holdingsRealizedTotal !== null && !holdingsRealizedComplete"
+                  class="holdings-cost-source"
+                  title="Einige Käufe ohne Stück/Kurs — die Zahl kann ungenau sein"
+                >*</span>
               </td>
               <td class="holdings-col-num holdings-col-share">100 %</td>
             </tr>
@@ -1970,7 +2014,8 @@ function goBack() {
   font-weight: 600;
 }
 .holdings-col-cost,
-.holdings-col-gain {
+.holdings-col-gain,
+.holdings-col-realized {
   white-space: nowrap;
 }
 .holdings-cost-source {

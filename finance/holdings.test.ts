@@ -581,6 +581,255 @@ describe("finance/holdings — cost basis & unrealized gain", () => {
     expect(h.unrealized_gain_pct).toBeNull();
   });
 
+  it("computes realized gain via chronological WAC walk", async () => {
+    setAuth("1", ["finance.view", "finance.admin"]);
+    const bcId = await insertBankcontact();
+    const accountId = await insertDepot(bcId);
+
+    // Buy 10 @ 100 → WAC 100. Buy 10 @ 200 → WAC 150 (qty 20, cost 3000).
+    // Sell 5 @ 250 net 1230 → realized = 1230 − 5×150 = 480.
+    // Sell 5 @ 300 net 1490 → WAC still 150, realized = 1490 − 5×150 = 740.
+    // Total realized = 1220.
+    await insertHolding({
+      accountId,
+      asOf: "2026-05-10",
+      isin: "DE000A1EWWW0",
+      name: "ADIDAS",
+      amount: "10",
+      price: "260.00",
+      value: "2600.00",
+    });
+    await insertDepotBuy({
+      accountId,
+      executedAt: "2026-01-10",
+      isin: "DE000A1EWWW0",
+      amount: "10",
+      price: "100",
+    });
+    await insertDepotBuy({
+      accountId,
+      executedAt: "2026-02-10",
+      isin: "DE000A1EWWW0",
+      amount: "10",
+      price: "200",
+    });
+    await db.insert(financeDepotTransaction).values({
+      account_id: accountId,
+      isin: "DE000A1EWWW0",
+      kind: "sell",
+      executed_at: "2026-03-10",
+      amount: "5",
+      price: "250",
+      gross_amount: "1250",
+      fees: "15",
+      tax: "5",
+      net_amount: "1230",
+      currency: "EUR",
+      source: "manual",
+    });
+    await db.insert(financeDepotTransaction).values({
+      account_id: accountId,
+      isin: "DE000A1EWWW0",
+      kind: "sell",
+      executed_at: "2026-04-10",
+      amount: "5",
+      price: "300",
+      gross_amount: "1500",
+      fees: "5",
+      tax: "5",
+      net_amount: "1490",
+      currency: "EUR",
+      source: "manual",
+    });
+
+    const resp = await listHoldings({ id: accountId });
+    const h = resp.items[0];
+    expect(h.realized_gain).toBe("1220.00");
+    expect(h.realized_gain_complete).toBe(true);
+    // Unrealized still works: remaining 10 @ WAC 150 → cost 1500, value 2600 → +1100
+    expect(h.cost_basis).toBe("1500.00");
+    expect(h.unrealized_gain).toBe("1100.00");
+  });
+
+  it("returns null realized_gain for positions with no sells", async () => {
+    setAuth("1", ["finance.view", "finance.admin"]);
+    const bcId = await insertBankcontact();
+    const accountId = await insertDepot(bcId);
+
+    await insertHolding({
+      accountId,
+      asOf: "2026-05-10",
+      isin: "DE000A1EWWW0",
+      name: "ADIDAS",
+      amount: "10",
+      price: "260.00",
+      value: "2600.00",
+    });
+    await insertDepotBuy({
+      accountId,
+      executedAt: "2026-01-10",
+      isin: "DE000A1EWWW0",
+      amount: "10",
+      price: "100",
+    });
+
+    const resp = await listHoldings({ id: accountId });
+    expect(resp.items[0].realized_gain).toBeNull();
+    expect(resp.items[0].realized_gain_complete).toBe(true);
+  });
+
+  it("falls back to gross proceeds when net_amount missing on sell", async () => {
+    setAuth("1", ["finance.view", "finance.admin"]);
+    const bcId = await insertBankcontact();
+    const accountId = await insertDepot(bcId);
+
+    await insertHolding({
+      accountId,
+      asOf: "2026-05-10",
+      isin: "DE000A1EWWW0",
+      name: "ADIDAS",
+      amount: "5",
+      price: "260.00",
+      value: "1300.00",
+    });
+    await insertDepotBuy({
+      accountId,
+      executedAt: "2026-01-10",
+      isin: "DE000A1EWWW0",
+      amount: "10",
+      price: "100",
+    });
+    // Sell with price but no net_amount → proceeds = 5 × 250 = 1250
+    // realized = 1250 − 5 × 100 = 750
+    await db.insert(financeDepotTransaction).values({
+      account_id: accountId,
+      isin: "DE000A1EWWW0",
+      kind: "sell",
+      executed_at: "2026-03-10",
+      amount: "5",
+      price: "250",
+      gross_amount: null,
+      fees: null,
+      tax: null,
+      net_amount: null,
+      currency: "EUR",
+      source: "manual",
+    });
+
+    const resp = await listHoldings({ id: accountId });
+    expect(resp.items[0].realized_gain).toBe("750.00");
+    expect(resp.items[0].realized_gain_complete).toBe(true);
+  });
+
+  it("marks realized_gain_complete=false when buys lack quantitative data", async () => {
+    setAuth("1", ["finance.view", "finance.admin"]);
+    const bcId = await insertBankcontact();
+    const accountId = await insertDepot(bcId);
+
+    await insertHolding({
+      accountId,
+      asOf: "2026-05-10",
+      isin: "DE000A1EWWW0",
+      name: "ADIDAS",
+      amount: "5",
+      price: "260.00",
+      value: "1300.00",
+    });
+    // Giro-derived buy with no shares/price — the walker can't fold it
+    // into WAC, so realized G/V on later sells will be over-stated.
+    await insertDepotBuy({
+      accountId,
+      executedAt: "2026-01-10",
+      isin: "DE000A1EWWW0",
+      amount: null,
+      price: null,
+      netAmount: "1000",
+    });
+    // Then a "real" buy and a sell — both fully priced.
+    await insertDepotBuy({
+      accountId,
+      executedAt: "2026-02-10",
+      isin: "DE000A1EWWW0",
+      amount: "10",
+      price: "150",
+    });
+    await db.insert(financeDepotTransaction).values({
+      account_id: accountId,
+      isin: "DE000A1EWWW0",
+      kind: "sell",
+      executed_at: "2026-03-10",
+      amount: "5",
+      price: "250",
+      gross_amount: null,
+      fees: null,
+      tax: null,
+      net_amount: "1240",
+      currency: "EUR",
+      source: "manual",
+    });
+
+    const resp = await listHoldings({ id: accountId });
+    // Only the priced buy contributed: WAC=150, sell 5 net 1240 → 490
+    expect(resp.items[0].realized_gain).toBe("490.00");
+    expect(resp.items[0].realized_gain_complete).toBe(false);
+  });
+
+  it("ignores dividends and corporate actions in realized walk", async () => {
+    setAuth("1", ["finance.view", "finance.admin"]);
+    const bcId = await insertBankcontact();
+    const accountId = await insertDepot(bcId);
+
+    await insertHolding({
+      accountId,
+      asOf: "2026-05-10",
+      isin: "DE000A1EWWW0",
+      name: "ADIDAS",
+      amount: "5",
+      price: "260.00",
+      value: "1300.00",
+    });
+    await insertDepotBuy({
+      accountId,
+      executedAt: "2026-01-10",
+      isin: "DE000A1EWWW0",
+      amount: "10",
+      price: "100",
+    });
+    await db.insert(financeDepotTransaction).values({
+      account_id: accountId,
+      isin: "DE000A1EWWW0",
+      kind: "dividend",
+      executed_at: "2026-02-10",
+      amount: null,
+      price: null,
+      gross_amount: "50",
+      fees: null,
+      tax: "10",
+      net_amount: "40",
+      currency: "EUR",
+      source: "manual",
+    });
+    await db.insert(financeDepotTransaction).values({
+      account_id: accountId,
+      isin: "DE000A1EWWW0",
+      kind: "sell",
+      executed_at: "2026-03-10",
+      amount: "5",
+      price: "150",
+      gross_amount: null,
+      fees: null,
+      tax: null,
+      net_amount: "740",
+      currency: "EUR",
+      source: "manual",
+    });
+
+    const resp = await listHoldings({ id: accountId });
+    // WAC=100 (dividend ignored); sell 5 net 740 → 740 − 5×100 = 240
+    expect(resp.items[0].realized_gain).toBe("240.00");
+    expect(resp.items[0].realized_gain_complete).toBe(true);
+  });
+
   it("ignores non-buy transactions when computing WAC", async () => {
     setAuth("1", ["finance.view", "finance.admin"]);
     const bcId = await insertBankcontact();
