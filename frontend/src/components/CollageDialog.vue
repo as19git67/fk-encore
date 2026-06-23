@@ -349,7 +349,6 @@ function onTextPointerMove(ev: PointerEvent) {
     textPopover.value?.hide()
   }
   ev.preventDefault()
-  overlay.x = clampUnit((ev.clientX - stageRect.left) / stageRect.width)
   overlay.y = clampUnit((ev.clientY - stageRect.top) / stageRect.height)
 }
 
@@ -382,22 +381,22 @@ function drawSingleTextOverlay(
   if (!(fontPx > 0)) return
   ctx.font = `700 ${fontPx}px ${TEXT_FONT_STACK}`
   ctx.textBaseline = 'alphabetic'
+  // 5 % margin each side → 90 % text width, identical to the CSS padding.
+  const margin = width * 0.05
   const maxWidth = width * 0.9
   const lines = wrapLines(overlay.text, maxWidth, (s) => ctx.measureText(s).width)
   const lineHeight = fontPx * 1.25
   const blockHeight = lineHeight * lines.length
-  const blockWidth = lines.reduce((m, l) => Math.max(m, ctx.measureText(l).width), 0)
-  const cx = clampUnit(overlay.x) * width
   const cy = clampUnit(overlay.y) * height
 
-  // Horizontal anchor mirrors the preview's centred flex box.
+  // Anchor matches the CSS text-align inside the full-width padded box.
   ctx.textAlign = overlay.align
   const anchorX =
     overlay.align === 'left'
-      ? cx - blockWidth / 2
+      ? margin
       : overlay.align === 'right'
-        ? cx + blockWidth / 2
-        : cx
+        ? margin + maxWidth
+        : margin + maxWidth / 2
 
   // Dark stroke for legibility over any background + user-chosen fill colour.
   ctx.lineJoin = 'round'
@@ -621,7 +620,6 @@ onBeforeUnmount(() => {
             'collage-text-overlay--dragging': textDragging && activeTextIndex === i,
           }"
           :style="{
-            left: `${overlay.x * 100}%`,
             top: `${overlay.y * 100}%`,
             fontSize: overlayFontSize(overlay),
             textAlign: overlay.align,
@@ -860,10 +858,14 @@ onBeforeUnmount(() => {
 /* ── Text overlay ─────────────────────────────────────────────────────────── */
 .collage-text-overlay {
   position: absolute;
-  transform: translate(-50%, -50%);
-  max-width: 90%;
+  left: 0;
+  width: 100%;
+  /* 5 % padding each side → 90 % text width, identical to the export's
+     maxWidth = canvasWidth * 0.9. Only Y is used for positioning. */
+  padding: 0.05em 5%;
+  box-sizing: border-box;
+  transform: translateY(-50%);
   margin: 0;
-  padding: 0.05em 0.15em;
   color: #fff;
   font-weight: 700;
   line-height: 1.25;
@@ -873,7 +875,7 @@ onBeforeUnmount(() => {
     0 0 2px rgba(0, 0, 0, 0.85);
   white-space: pre-wrap;
   overflow-wrap: break-word;
-  cursor: move;
+  cursor: ns-resize;
   user-select: none;
   touch-action: none;
   z-index: 5;
