@@ -894,9 +894,18 @@ onBeforeUnmount(() => {
 /* ── Text overlay ─────────────────────────────────────────────────────────── */
 .collage-text-overlay {
   position: absolute;
-  /* max-content: expand to the full natural (unwrapped) text width so short
-     text sits on one line. max-width caps it at 90% of canvas; once capped,
-     pre-wrap + overflow-wrap handle line breaking at word boundaries. */
+  /* Expand to the full natural (unwrapped) text width so short text sits on
+     one line; max-width caps it at 90% of the canvas, where pre-wrap +
+     overflow-wrap break long text at word boundaries. The wrap width is thus
+     independent of the box's horizontal position.
+
+     The -webkit- fallback is essential: this project has no autoprefixer, and
+     WebKit/older iOS Safari drop the unprefixed `max-content`, which silently
+     reverts the box to `width:auto` (shrink-to-fit). Shrink-to-fit's available
+     width is `stageWidth − left`, so the box would narrow — and wrap sooner —
+     the further right it is dragged. */
+  width: -webkit-max-content;
+  width: -moz-max-content;
   width: max-content;
   max-width: 90%;
   padding: 0.05em 0.3em;
