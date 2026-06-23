@@ -24,7 +24,7 @@ import Popover from 'primevue/popover'
 import Textarea from 'primevue/textarea'
 import SelectButton from 'primevue/selectbutton'
 import ColorPicker from 'primevue/colorpicker'
-import { getPhotoDetailsBatch, getPhotoUrl, type Photo } from '../api/photos'
+import { getPhotoDetailsBatch, getPhotoUrl, uploadPhoto, addPhotoToAlbum, type Photo } from '../api/photos'
 import {
   collageLayouts,
   collageObjectPosition,
@@ -45,6 +45,8 @@ import {
 const props = defineProps<{
   visible: boolean
   photoIds: number[]
+  /** When set, a "Speichern" button appears to upload the collage into this album. */
+  albumId?: number
 }>()
 
 const emit = defineEmits<{
@@ -69,6 +71,7 @@ const selectedLayout = ref<CollageLayout | null>(null)
 // `order[cellIndex]` = index into `photos` shown in that cell.
 const order = ref<number[]>([])
 const sharing = ref(false)
+const saving = ref(false)
 
 const layouts = computed(() => collageLayouts(photos.value.length))
 
@@ -506,6 +509,23 @@ async function shareCollage() {
   }
 }
 
+async function uploadCollage() {
+  if (saving.value || !props.albumId) return
+  saving.value = true
+  errorMsg.value = null
+  try {
+    const blob = await buildCollageBlob()
+    const file = new File([blob], `collage-${Date.now()}.jpg`, { type: 'image/jpeg' })
+    const photo = await uploadPhoto(file)
+    await addPhotoToAlbum(props.albumId, photo.id)
+  } catch (err) {
+    errorMsg.value =
+      err instanceof Error ? err.message : 'Die Collage konnte nicht gespeichert werden.'
+  } finally {
+    saving.value = false
+  }
+}
+
 const dialogHeader = computed(() =>
   step.value === 'layouts' ? 'Layout wählen' : 'Collage bearbeiten',
 )
@@ -743,7 +763,19 @@ onBeforeUnmount(() => {
           @click="close"
         />
         <Button
+          v-if="step === 'editor' && albumId"
+          class="collage-footer__save"
+          label="Speichern"
+          icon="pi pi-upload"
+          severity="secondary"
+          outlined
+          :loading="saving"
+          v-tooltip.top="'Collage im Album speichern'"
+          @click="uploadCollage"
+        />
+        <Button
           v-if="step === 'editor'"
+          class="collage-footer__share"
           label="Teilen"
           icon="pi pi-share-alt"
           :loading="sharing"
@@ -862,7 +894,10 @@ onBeforeUnmount(() => {
 /* ── Text overlay ─────────────────────────────────────────────────────────── */
 .collage-text-overlay {
   position: absolute;
-  /* Natural width for short text; wraps only when content exceeds 90% of canvas. */
+  /* max-content: expand to the full natural (unwrapped) text width so short
+     text sits on one line. max-width caps it at 90% of canvas; once capped,
+     pre-wrap + overflow-wrap handle line breaking at word boundaries. */
+  width: max-content;
   max-width: 90%;
   padding: 0.05em 0.3em;
   transform: translate(-50%, -50%);
@@ -985,7 +1020,9 @@ onBeforeUnmount(() => {
 @media (max-width: 480px) {
   .collage-footer__back :deep(.p-button-label),
   .collage-footer__text :deep(.p-button-label),
-  .collage-footer__cancel :deep(.p-button-label) {
+  .collage-footer__cancel :deep(.p-button-label),
+  .collage-footer__save :deep(.p-button-label),
+  .collage-footer__share :deep(.p-button-label) {
     display: none;
   }
 }
