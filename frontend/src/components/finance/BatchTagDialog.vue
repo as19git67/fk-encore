@@ -1,9 +1,16 @@
 <script setup lang="ts">
 /**
- * Tags-für-N-Buchungen — tristate editor for the current basket
- * selection, served as a modal dialog. Replaces the previous
- * route-based BatchTagView so the user stays in the calling list view
- * (preserving scroll position, filters, etc.).
+ * Tags-für-N-Buchungen — tristate editor for a set of transactions,
+ * served as a modal dialog. Replaces the previous route-based
+ * BatchTagView so the user stays in the calling list view (preserving
+ * scroll position, filters, etc.).
+ *
+ * The source of the working set is either:
+ *   • the basket store (default, when no `transactions` prop is given) —
+ *     used by the basket drawer; mutations are mirrored back so the
+ *     basket reflects the new tristate immediately.
+ *   • an explicit `transactions` prop — used by list views that keep
+ *     their own local selection and don't want the basket touched.
  *
  * Per-tag state:
  *   • checked   — every selected transaction has the tag
@@ -29,9 +36,13 @@ import Message from 'primevue/message'
 import { useTagsStore } from '../../stores/finance/tags'
 import { useTxSelectionStore } from '../../stores/finance/selection'
 import { useTransactionsStore } from '../../stores/finance/transactions'
+import type { Transaction } from '../../api/finance'
 
 const props = defineProps<{
   visible: boolean
+  /** Optional explicit working set; when omitted the basket store
+   *  provides it (drawer usage). */
+  transactions?: Transaction[]
 }>()
 const emit = defineEmits<{
   'update:visible': [value: boolean]
@@ -41,6 +52,12 @@ const emit = defineEmits<{
 const tagsStore = useTagsStore()
 const selectionStore = useTxSelectionStore()
 const txStore = useTransactionsStore()
+
+/** Whichever source the caller picked — list-local or basket. */
+const workingSet = computed<Transaction[]>(() =>
+  props.transactions ?? selectionStore.items,
+)
+const workingCount = computed(() => workingSet.value.length)
 
 type CheckState = 'checked' | 'tristate' | 'unchecked'
 
@@ -64,10 +81,10 @@ function computeInitialState(tagName: string): {
   state: CheckState
   inUse: boolean
 } {
-  const total = selectionStore.items.length
+  const total = workingSet.value.length
   if (total === 0) return { state: 'unchecked', inUse: false }
   let withTag = 0
-  for (const tx of selectionStore.items) {
+  for (const tx of workingSet.value) {
     if (tx.tags.some((t) => t.name === tagName)) withTag++
   }
   if (withTag === 0) return { state: 'unchecked', inUse: false }
@@ -80,7 +97,7 @@ async function refreshRows() {
     await tagsStore.refresh('all')
   }
   const knownNames = new Set(tagsStore.items.map((t) => t.name))
-  for (const tx of selectionStore.items) {
+  for (const tx of workingSet.value) {
     for (const t of tx.tags) knownNames.add(t.name)
   }
   tagRows.value = [...knownNames]
@@ -100,7 +117,7 @@ watch(
     error.value = null
     saving.value = false
     tagRows.value = []
-    if (selectionStore.count > 0) {
+    if (workingCount.value > 0) {
       await refreshRows()
     }
   },
@@ -149,36 +166,41 @@ async function save() {
   }
   try {
     await txStore.batchTag({
-      transaction_ids: selectionStore.ids,
+      transaction_ids: workingSet.value.map((tx) => tx.id),
       add,
       remove,
       promote_ai_tags: promoteAiTags.value,
     })
-    // Keep the in-memory selection in sync with what the server now
-    // sees so reopening the dialog reflects the new tristate.
-    selectionStore.set(
-      selectionStore.items.map((tx) => {
-        let tags = tx.tags.filter((t) => {
-          if (t.source === 'user' && remove.includes(t.name)) return false
-          if (t.source === 'ai' && promoteAiTags.value === false) return false
-          return true
-        })
-        if (promoteAiTags.value === true) {
-          tags = tags.map((t) =>
-            t.source === 'ai'
-              ? { ...t, source: 'user' as const, confidence: null }
-              : t,
-          )
-        }
-        const existingNames = new Set(tags.map((t) => t.name))
-        for (const name of add) {
-          if (!existingNames.has(name)) {
-            tags.push({ name, source: 'user', confidence: null })
+    // When the basket store is the source, keep its in-memory items in
+    // sync with what the server now sees so reopening the dialog
+    // reflects the new tristate. For list-local working sets the
+    // calling view owns the data and refreshes it via the `applied`
+    // event.
+    if (!props.transactions) {
+      selectionStore.set(
+        selectionStore.items.map((tx) => {
+          let tags = tx.tags.filter((t) => {
+            if (t.source === 'user' && remove.includes(t.name)) return false
+            if (t.source === 'ai' && promoteAiTags.value === false) return false
+            return true
+          })
+          if (promoteAiTags.value === true) {
+            tags = tags.map((t) =>
+              t.source === 'ai'
+                ? { ...t, source: 'user' as const, confidence: null }
+                : t,
+            )
           }
-        }
-        return { ...tx, tags }
-      }),
-    )
+          const existingNames = new Set(tags.map((t) => t.name))
+          for (const name of add) {
+            if (!existingNames.has(name)) {
+              tags.push({ name, source: 'user', confidence: null })
+            }
+          }
+          return { ...tx, tags }
+        }),
+      )
+    }
     emit('applied')
     emit('update:visible', false)
   } catch (err) {
@@ -200,8 +222,8 @@ async function save() {
   >
     <template #header>
       <span class="dlg-title">
-        Tags für {{ selectionStore.count }}
-        Buchung{{ selectionStore.count === 1 ? '' : 'en' }}
+        Tags für {{ workingCount }}
+        Buchung{{ workingCount === 1 ? '' : 'en' }}
       </span>
     </template>
 
