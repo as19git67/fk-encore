@@ -33,11 +33,13 @@ export interface CollageTextOverlay {
   y: number
   fontKey: CollageTextFontPreset['key']
   align: CollageTextAlign
+  /** Fill colour as a CSS hex string, e.g. `"#ffffff"`. */
+  color: string
 }
 
 /** A fresh, centred, medium overlay with no text. */
 export function defaultTextOverlay(): CollageTextOverlay {
-  return { text: '', x: 0.5, y: 0.5, fontKey: 'medium', align: 'center' }
+  return { text: '', x: 0.5, y: 0.5, fontKey: 'medium', align: 'center', color: '#ffffff' }
 }
 
 /** The preset for `key`, falling back to the medium preset. */
@@ -51,6 +53,77 @@ export function clampUnit(v: number | undefined | null): number {
   if (v < 0) return 0
   if (v > 1) return 1
   return v
+}
+
+/**
+ * Extract up to `maxColors` visually distinct, vivid colours from a set of
+ * images. Each image is drawn onto a tiny off-screen canvas; pixels are
+ * quantised into 16-step buckets and scored by frequency × saturation² so
+ * that frequently occurring vivid hues win. Similar colours (Euclidean RGB
+ * distance < 60) are deduplicated so the result is visually diverse.
+ *
+ * Not unit-tested — requires the Canvas API (unavailable in jsdom).
+ */
+export function extractDominantColors(imgs: HTMLImageElement[], maxColors = 6): string[] {
+  const SIZE = 64
+  const canvas = document.createElement('canvas')
+  canvas.width = SIZE
+  canvas.height = SIZE
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return []
+
+  const scores = new Map<string, number>()
+
+  for (const img of imgs) {
+    ctx.clearRect(0, 0, SIZE, SIZE)
+    try {
+      ctx.drawImage(img, 0, 0, SIZE, SIZE)
+    } catch {
+      continue
+    }
+    const { data } = ctx.getImageData(0, 0, SIZE, SIZE)
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i]!
+      const g = data[i + 1]!
+      const b = data[i + 2]!
+      // 16-step quantisation (step of 16)
+      const qr = Math.round(r / 16) * 16
+      const qg = Math.round(g / 16) * 16
+      const qb = Math.round(b / 16) * 16
+      // HSV-style saturation: (max−min)/max
+      const max = Math.max(qr, qg, qb)
+      const min = Math.min(qr, qg, qb)
+      const sat = max === 0 ? 0 : (max - min) / max
+      // Skip near-grey and very dark pixels — they make poor text colours
+      if (sat < 0.2 || max < 40) continue
+      const key = `${qr},${qg},${qb}`
+      scores.set(key, (scores.get(key) ?? 0) + sat * sat)
+    }
+  }
+
+  const sorted = [...scores.entries()].sort((a, b) => b[1] - a[1])
+  const result: string[] = []
+
+  for (const [key] of sorted) {
+    if (result.length >= maxColors) break
+    const parts = key.split(',')
+    const r = Number(parts[0])
+    const g = Number(parts[1])
+    const b = Number(parts[2])
+    const tooClose = result.some((hex) => {
+      const pr = parseInt(hex.slice(1, 3), 16)
+      const pg = parseInt(hex.slice(3, 5), 16)
+      const pb = parseInt(hex.slice(5, 7), 16)
+      return Math.sqrt((r - pr) ** 2 + (g - pg) ** 2 + (b - pb) ** 2) < 60
+    })
+    if (!tooClose) {
+      result.push(
+        `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`,
+      )
+    }
+  }
+
+  return result
 }
 
 /**

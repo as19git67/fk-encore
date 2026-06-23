@@ -8,9 +8,9 @@ import {
 } from './collageText'
 
 describe('defaultTextOverlay', () => {
-  it('is empty, centred and medium', () => {
+  it('is empty, centred, medium and white', () => {
     const o = defaultTextOverlay()
-    expect(o).toEqual({ text: '', x: 0.5, y: 0.5, fontKey: 'medium', align: 'center' })
+    expect(o).toEqual({ text: '', x: 0.5, y: 0.5, fontKey: 'medium', align: 'center', color: '#ffffff' })
   })
 
   it('returns a fresh object each call (no shared reference)', () => {

@@ -23,6 +23,7 @@ import Message from 'primevue/message'
 import Popover from 'primevue/popover'
 import Textarea from 'primevue/textarea'
 import SelectButton from 'primevue/selectbutton'
+import ColorPicker from 'primevue/colorpicker'
 import { getPhotoDetailsBatch, getPhotoUrl, type Photo } from '../api/photos'
 import {
   collageLayouts,
@@ -36,6 +37,7 @@ import {
   collageFontPreset,
   clampUnit,
   defaultTextOverlay,
+  extractDominantColors,
   wrapLines,
   type CollageTextOverlay,
 } from '../utils/collageText'
@@ -119,8 +121,10 @@ async function loadPhotos() {
   selectedLayout.value = null
   order.value = []
   step.value = 'layouts'
-  textEnabled.value = false
-  textOverlay.value = defaultTextOverlay()
+  textOverlays.value = []
+  activeTextIndex.value = null
+  textElRefs.value = []
+  photoPresetColors.value = []
   const ids = props.photoIds.slice()
   try {
     const { photos: details } = await getPhotoDetailsBatch(ids)
@@ -141,6 +145,7 @@ async function loadPhotos() {
     )
     photos.value = loaded
     order.value = loaded.map((_, i) => i)
+    photoPresetColors.value = extractDominantColors(loaded.map((p) => p.img))
   } catch (err) {
     errorMsg.value =
       err instanceof Error ? err.message : 'Die Fotos konnten nicht geladen werden.'
@@ -243,14 +248,16 @@ function onPointerUp(ev: PointerEvent) {
   ghostUrl.value = null
 }
 
-// ── Text overlay (one caption laid over the whole collage) ──────────────────
-// Positioned by its normalized centre so it survives layout switches and
-// renders identically in the preview and the exported JPEG. A press starts a
-// drag; a tap (no movement) opens the editor popover anchored to the text.
-const textEnabled = ref(false)
-const textOverlay = ref<CollageTextOverlay>(defaultTextOverlay())
+// ── Text overlays (multiple captions, each draggable + editable) ────────────
+// Each overlay is positioned by its normalised centre (0..1) inside the canvas
+// so positions survive layout switches and render identically in the DOM
+// preview and the exported JPEG. A pointer-press starts a drag; a tap opens
+// the editor popover for that overlay.
+const textOverlays = ref<CollageTextOverlay[]>([])
+const activeTextIndex = ref<number | null>(null)
+const textElRefs = ref<(HTMLElement | null)[]>([])
+const photoPresetColors = ref<string[]>([])
 const textPopover = ref<InstanceType<typeof Popover> | null>(null)
-const textElRef = ref<HTMLElement | null>(null)
 const stageRef = ref<HTMLElement | null>(null)
 const textDragging = ref(false)
 let textStartX = 0
@@ -264,33 +271,60 @@ const ALIGN_OPTIONS = [
   { label: 'Rechts', value: 'right', icon: 'pi pi-align-right' },
 ]
 
-// Font size as a `cqh` length so the preview scales with the rendered stage
-// height — the same fraction the export applies to the canvas height.
-const overlayFontSize = computed(
-  () => `${collageFontPreset(textOverlay.value.fontKey).heightFraction * 100}cqh`,
+// White and black are always available as base presets; photo colours follow.
+const colorPresets = computed(() => ['#ffffff', '#000000', ...photoPresetColors.value])
+
+const activeOverlay = computed(() =>
+  activeTextIndex.value != null ? (textOverlays.value[activeTextIndex.value] ?? null) : null,
 )
 
-const overlayDisplayText = computed(() =>
-  textOverlay.value.text.trim() ? textOverlay.value.text : 'Text eingeben …',
-)
+// PrimeVue ColorPicker uses hex without '#'; adapt with a computed w/ setter.
+const activeColor = computed({
+  get: () => (activeOverlay.value?.color ?? '#ffffff').replace('#', ''),
+  set: (val: string) => {
+    const o = activeOverlay.value
+    if (o) o.color = `#${val}`
+  },
+})
+
+function overlayFontSize(overlay: CollageTextOverlay): string {
+  return `${collageFontPreset(overlay.fontKey).heightFraction * 100}cqh`
+}
+
+function setTextElRef(i: number, el: unknown) {
+  textElRefs.value[i] = el instanceof HTMLElement ? el : null
+}
+
+function setColor(hex: string) {
+  const o = activeOverlay.value
+  if (o) o.color = hex
+}
 
 function addText(ev: MouseEvent) {
-  textEnabled.value = true
-  textOverlay.value = defaultTextOverlay()
+  // Stagger new overlays slightly so they don't stack exactly on top of each other.
+  const offset = textOverlays.value.length * 0.1
+  textOverlays.value.push({ ...defaultTextOverlay(), y: clampUnit(0.5 + offset) })
+  activeTextIndex.value = textOverlays.value.length - 1
   void nextTick(() => {
-    if (textElRef.value) textPopover.value?.show(ev, textElRef.value)
+    const el = textElRefs.value[activeTextIndex.value!]
+    textPopover.value?.show(ev, el ?? (ev.currentTarget as HTMLElement))
   })
 }
 
 function removeText() {
-  textEnabled.value = false
+  const idx = activeTextIndex.value
+  if (idx == null) return
+  textOverlays.value.splice(idx, 1)
+  textElRefs.value.splice(idx, 1)
+  activeTextIndex.value = null
   textPopover.value?.hide()
 }
 
-function onTextPointerDown(ev: PointerEvent) {
+function onTextPointerDown(index: number, ev: PointerEvent) {
   if (ev.button != null && ev.button !== 0) return
-  // Keep the press off the photo cells underneath — text owns this gesture.
+  // Claim the pointer so photo-swap drag underneath doesn't fire.
   ev.stopPropagation()
+  activeTextIndex.value = index
   const stage = stageRef.value
   if (!stage) return
   stageRect = stage.getBoundingClientRect()
@@ -304,17 +338,19 @@ function onTextPointerDown(ev: PointerEvent) {
 }
 
 function onTextPointerMove(ev: PointerEvent) {
-  if (!textDragging.value || !stageRect) return
+  if (!textDragging.value || !stageRect || activeTextIndex.value == null) return
+  const overlay = textOverlays.value[activeTextIndex.value]
+  if (!overlay) return
   if (!textMoved) {
     const moved = Math.hypot(ev.clientX - textStartX, ev.clientY - textStartY)
     if (moved < 6) return
     textMoved = true
-    // A drag has begun — close the editor so it doesn't hang at the old anchor.
+    // Close the editor so it doesn't hang at the old anchor position.
     textPopover.value?.hide()
   }
   ev.preventDefault()
-  textOverlay.value.x = clampUnit((ev.clientX - stageRect.left) / stageRect.width)
-  textOverlay.value.y = clampUnit((ev.clientY - stageRect.top) / stageRect.height)
+  overlay.x = clampUnit((ev.clientX - stageRect.left) / stageRect.width)
+  overlay.y = clampUnit((ev.clientY - stageRect.top) / stageRect.height)
 }
 
 function onTextPointerUp() {
@@ -323,20 +359,23 @@ function onTextPointerUp() {
   window.removeEventListener('pointercancel', onTextPointerUp)
   textDragging.value = false
   stageRect = null
-  // `textMoved` is consumed by the click handler that follows a tap so a drag
-  // doesn't also open the editor; a genuine tap leaves it false → click opens.
+  // `textMoved` is read by the click handler that fires after a tap; a real
+  // drag sets it true → click is suppressed. A genuine tap leaves it false.
 }
 
-function onTextClick(ev: MouseEvent) {
-  if (textMoved) {
-    textMoved = false
-    return
-  }
-  textPopover.value?.toggle(ev, textElRef.value)
+function onTextClick(index: number, ev: MouseEvent) {
+  if (textMoved) { textMoved = false; return }
+  activeTextIndex.value = index
+  const el = textElRefs.value[index]
+  textPopover.value?.toggle(ev, el ?? (ev.currentTarget as HTMLElement))
 }
 
-function drawTextOverlay(ctx: CanvasRenderingContext2D, width: number, height: number) {
-  const overlay = textOverlay.value
+function drawSingleTextOverlay(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  overlay: CollageTextOverlay,
+) {
   const text = overlay.text.trim()
   if (!text) return
   const fontPx = collageFontPreset(overlay.fontKey).heightFraction * height
@@ -351,8 +390,7 @@ function drawTextOverlay(ctx: CanvasRenderingContext2D, width: number, height: n
   const cx = clampUnit(overlay.x) * width
   const cy = clampUnit(overlay.y) * height
 
-  // Horizontal anchor mirrors the shrink-to-fit, centred preview box: each
-  // line aligns within a block whose centre sits at `cx`.
+  // Horizontal anchor mirrors the preview's centred flex box.
   ctx.textAlign = overlay.align
   const anchorX =
     overlay.align === 'left'
@@ -361,11 +399,11 @@ function drawTextOverlay(ctx: CanvasRenderingContext2D, width: number, height: n
         ? cx + blockWidth / 2
         : cx
 
-  // Dark stroke + white fill keeps the caption legible over any photo.
+  // Dark stroke for legibility over any background + user-chosen fill colour.
   ctx.lineJoin = 'round'
   ctx.lineWidth = Math.max(2, fontPx * 0.08)
   ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)'
-  ctx.fillStyle = '#ffffff'
+  ctx.fillStyle = overlay.color
 
   // First baseline ≈ top of the block + one ascent (~0.8em).
   let baseline = cy - blockHeight / 2 + fontPx * 0.8
@@ -410,14 +448,16 @@ async function buildCollageBlob(): Promise<Blob> {
     ctx.drawImage(photo.img, src.sx, src.sy, src.sw, src.sh, dx, dy, dw, dh)
   })
 
-  if (textEnabled.value) {
-    // Wait for the web font so the caption isn't drawn with a fallback face.
+  if (textOverlays.value.some((o) => o.text.trim())) {
+    // Wait for the web font so captions aren't drawn in a fallback face.
     try {
       await (document as Document & { fonts?: FontFaceSet }).fonts?.ready
     } catch {
       /* fonts API unavailable — fall back to whatever is loaded */
     }
-    drawTextOverlay(ctx, width, height)
+    for (const overlay of textOverlays.value) {
+      drawSingleTextOverlay(ctx, width, height, overlay)
+    }
   }
 
   return await new Promise<Blob>((resolve, reject) => {
@@ -540,8 +580,8 @@ onBeforeUnmount(() => {
     <!-- Step 2: editor -->
     <div v-else-if="step === 'editor' && selectedLayout" class="collage-editor">
       <p class="collage-hint">
-        Zum Tauschen ein Foto auf ein anderes ziehen.<template v-if="textEnabled">
-          Den Text ziehen zum Verschieben, antippen zum Bearbeiten.</template>
+        Zum Tauschen ein Foto auf ein anderes ziehen.<template v-if="textOverlays.length > 0">
+          Textfeld ziehen zum Verschieben, antippen zum Bearbeiten.</template>
       </p>
       <div
         ref="stageRef"
@@ -569,33 +609,35 @@ onBeforeUnmount(() => {
           />
         </div>
 
-        <!-- Free text overlay laid over the whole collage. Drag to position
-             (initially centred), tap to open the editor popover. -->
+        <!-- Text overlays — each independently draggable and editable. -->
         <div
-          v-if="textEnabled"
-          ref="textElRef"
+          v-for="(overlay, i) in textOverlays"
+          :key="i"
+          :ref="(el) => setTextElRef(i, el)"
           class="collage-text-overlay"
           :class="{
-            'collage-text-overlay--empty': !textOverlay.text.trim(),
-            'collage-text-overlay--dragging': textDragging,
+            'collage-text-overlay--empty': !overlay.text.trim(),
+            'collage-text-overlay--active': activeTextIndex === i && !textDragging,
+            'collage-text-overlay--dragging': textDragging && activeTextIndex === i,
           }"
           :style="{
-            left: `${textOverlay.x * 100}%`,
-            top: `${textOverlay.y * 100}%`,
-            fontSize: overlayFontSize,
-            textAlign: textOverlay.align,
+            left: `${overlay.x * 100}%`,
+            top: `${overlay.y * 100}%`,
+            fontSize: overlayFontSize(overlay),
+            textAlign: overlay.align,
+            color: overlay.color,
           }"
-          @pointerdown="onTextPointerDown"
-          @click="onTextClick"
-        >{{ overlayDisplayText }}</div>
+          @pointerdown="onTextPointerDown(i, $event)"
+          @click="onTextClick(i, $event)"
+        >{{ overlay.text.trim() || 'Text eingeben …' }}</div>
       </div>
     </div>
 
-    <!-- Text editor popover (anchored to the overlay) -->
+    <!-- Text editor popover (anchored to the active overlay) -->
     <Popover ref="textPopover">
-      <div class="collage-text-editor">
+      <div v-if="activeOverlay" class="collage-text-editor">
         <Textarea
-          v-model="textOverlay.text"
+          v-model="activeOverlay.text"
           auto-resize
           rows="2"
           placeholder="Text über die Collage …"
@@ -604,7 +646,7 @@ onBeforeUnmount(() => {
         <div class="collage-text-editor__field">
           <span class="collage-text-editor__label">Schriftgröße</span>
           <SelectButton
-            v-model="textOverlay.fontKey"
+            v-model="activeOverlay.fontKey"
             :options="COLLAGE_TEXT_FONTS"
             option-label="label"
             option-value="key"
@@ -615,7 +657,7 @@ onBeforeUnmount(() => {
         <div class="collage-text-editor__field">
           <span class="collage-text-editor__label">Ausrichtung</span>
           <SelectButton
-            v-model="textOverlay.align"
+            v-model="activeOverlay.align"
             :options="ALIGN_OPTIONS"
             option-label="label"
             option-value="value"
@@ -626,6 +668,22 @@ onBeforeUnmount(() => {
               <i :class="option.icon" :title="option.label" aria-hidden="true" />
             </template>
           </SelectButton>
+        </div>
+        <div class="collage-text-editor__field">
+          <span class="collage-text-editor__label">Farbe</span>
+          <div class="collage-text-color-row">
+            <ColorPicker v-model="activeColor" />
+            <button
+              v-for="preset in colorPresets"
+              :key="preset"
+              type="button"
+              class="collage-color-swatch"
+              :class="{ 'collage-color-swatch--active': activeOverlay.color === preset }"
+              :style="{ background: preset }"
+              :title="preset"
+              @click="setColor(preset)"
+            />
+          </div>
         </div>
         <div class="collage-text-editor__actions">
           <Button
@@ -660,7 +718,7 @@ onBeforeUnmount(() => {
           @click="backToLayouts"
         />
         <Button
-          v-if="step === 'editor' && !textEnabled"
+          v-if="step === 'editor'"
           class="collage-footer__text"
           icon="pi pi-pencil"
           label="Text"
@@ -821,8 +879,12 @@ onBeforeUnmount(() => {
   font-style: italic;
   opacity: 0.85;
 }
+.collage-text-overlay--active {
+  outline: 1px dashed rgba(255, 255, 255, 0.75);
+  outline-offset: 3px;
+}
 .collage-text-overlay--dragging {
-  outline: 2px dashed rgba(255, 255, 255, 0.85);
+  outline: 2px dashed rgba(255, 255, 255, 0.9);
   outline-offset: 2px;
 }
 
@@ -831,7 +893,33 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  width: min(20rem, 80vw);
+  width: min(22rem, 85vw);
+}
+
+.collage-text-color-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.collage-color-swatch {
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  border: 2px solid var(--p-content-border-color);
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: transform 0.1s, border-color 0.1s;
+}
+.collage-color-swatch:hover {
+  transform: scale(1.2);
+  border-color: var(--p-primary-color);
+}
+.collage-color-swatch--active {
+  border-color: var(--p-primary-color);
+  box-shadow: 0 0 0 2px var(--p-primary-color);
 }
 .collage-text-editor__area {
   width: 100%;
