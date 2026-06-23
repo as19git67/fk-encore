@@ -65,7 +65,12 @@ type Step = 'layouts' | 'editor'
 
 const step = ref<Step>('layouts')
 const loading = ref(false)
+/** Fatal error during photo loading — replaces the dialog content. */
+const loadError = ref<string | null>(null)
+/** Transient action error (save / share) shown in the footer. */
 const errorMsg = ref<string | null>(null)
+const successMsg = ref<string | null>(null)
+let successTimer: ReturnType<typeof setTimeout> | null = null
 const photos = ref<CollagePhoto[]>([])
 const selectedLayout = ref<CollageLayout | null>(null)
 // `order[cellIndex]` = index into `photos` shown in that cell.
@@ -119,6 +124,7 @@ function loadImage(filename: string): Promise<{ img: HTMLImageElement; url: stri
 
 async function loadPhotos() {
   loading.value = true
+  loadError.value = null
   errorMsg.value = null
   photos.value = []
   selectedLayout.value = null
@@ -150,7 +156,7 @@ async function loadPhotos() {
     order.value = loaded.map((_, i) => i)
     photoPresetColors.value = extractDominantColors(loaded.map((p) => p.img))
   } catch (err) {
-    errorMsg.value =
+    loadError.value =
       err instanceof Error ? err.message : 'Die Fotos konnten nicht geladen werden.'
   } finally {
     loading.value = false
@@ -509,15 +515,23 @@ async function shareCollage() {
   }
 }
 
+function showSuccess(msg: string) {
+  successMsg.value = msg
+  if (successTimer) clearTimeout(successTimer)
+  successTimer = setTimeout(() => { successMsg.value = null }, 3000)
+}
+
 async function uploadCollage() {
   if (saving.value || !props.albumId) return
   saving.value = true
   errorMsg.value = null
+  successMsg.value = null
   try {
     const blob = await buildCollageBlob()
     const file = new File([blob], `collage-${Date.now()}.jpg`, { type: 'image/jpeg' })
     const photo = await uploadPhoto(file)
     await addPhotoToAlbum(props.albumId, photo.id)
+    showSuccess('Collage wurde im Album gespeichert.')
   } catch (err) {
     errorMsg.value =
       err instanceof Error ? err.message : 'Die Collage konnte nicht gespeichert werden.'
@@ -544,6 +558,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointermove', onTextPointerMove)
   window.removeEventListener('pointerup', onTextPointerUp)
   window.removeEventListener('pointercancel', onTextPointerUp)
+  if (successTimer) clearTimeout(successTimer)
 })
 </script>
 
@@ -561,8 +576,8 @@ onBeforeUnmount(() => {
       <span>Fotos werden geladen …</span>
     </div>
 
-    <Message v-else-if="errorMsg" severity="error" :closable="false">
-      {{ errorMsg }}
+    <Message v-else-if="loadError" severity="error" :closable="false">
+      {{ loadError }}
     </Message>
 
     <!-- Step 1: layout picker -->
@@ -729,6 +744,21 @@ onBeforeUnmount(() => {
 
     <template #footer>
       <div class="collage-footer">
+        <Transition name="collage-msg">
+          <Message
+            v-if="successMsg"
+            severity="success"
+            :closable="false"
+            class="collage-footer__msg"
+          >{{ successMsg }}</Message>
+          <Message
+            v-else-if="errorMsg"
+            severity="error"
+            :closable="false"
+            class="collage-footer__msg"
+          >{{ errorMsg }}</Message>
+        </Transition>
+        <div class="collage-footer__buttons">
         <Button
           v-if="step === 'editor'"
           class="collage-footer__back"
@@ -781,6 +811,7 @@ onBeforeUnmount(() => {
           :loading="sharing"
           @click="shareCollage"
         />
+        </div>
       </div>
     </template>
 
@@ -992,12 +1023,32 @@ onBeforeUnmount(() => {
 
 .collage-footer {
   display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  width: 100%;
+}
+.collage-footer__msg {
+  width: 100%;
+}
+.collage-footer__buttons {
+  display: flex;
   align-items: center;
   gap: 0.5rem;
   width: 100%;
 }
 .collage-footer-spacer {
   flex: 1;
+}
+
+/* Slide-in / fade-out for transient messages */
+.collage-msg-enter-active,
+.collage-msg-leave-active {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.collage-msg-enter-from,
+.collage-msg-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 
 .collage-ghost {
