@@ -346,6 +346,8 @@ export async function unlinkAccount(id: number): Promise<Account> {
 // Holdings (depot accounts)
 // ----------------------------------------------------------------------
 
+export type CostBasisSource = 'bank' | 'tx-wac' | null
+
 export interface Holding {
   id: number
   account_id: number
@@ -359,6 +361,11 @@ export interface Holding {
   currency: string | null
   acquisition_date: string | null
   acquisition_price: string | null
+  cost_basis_per_unit: string | null
+  cost_basis: string | null
+  cost_basis_source: CostBasisSource
+  unrealized_gain: string | null
+  unrealized_gain_pct: string | null
 }
 
 export interface ListHoldingsResponse {

@@ -10,6 +10,7 @@ import {
   financeAccountHolding,
   financeAccountType,
   financeBankcontact,
+  financeDepotTransaction,
   financeTagTransaction,
   financeTanSession,
   financeTransaction,
@@ -31,6 +32,7 @@ beforeEach(async () => {
   await db.execute(sql`DELETE FROM finance_transaction_embedding`);
   await db.delete(financeTagTransaction);
   await db.delete(financeTransaction);
+  await db.delete(financeDepotTransaction);
   await db.delete(financeAccountHolding);
   await db.delete(financeAccountBalance);
   await db.delete(financeTanSession);
@@ -92,6 +94,7 @@ async function insertHolding(opts: {
   price: string;
   value: string;
   currency?: string;
+  acquisitionPrice?: string | null;
 }): Promise<void> {
   await db.insert(financeAccountHolding).values({
     account_id: opts.accountId,
@@ -103,6 +106,34 @@ async function insertHolding(opts: {
     price: opts.price,
     value: opts.value,
     currency: opts.currency ?? "EUR",
+    acquisition_price: opts.acquisitionPrice ?? null,
+  });
+}
+
+async function insertDepotBuy(opts: {
+  accountId: number;
+  executedAt: string;
+  isin?: string | null;
+  wkn?: string | null;
+  amount: string | null;
+  price: string | null;
+  netAmount?: string | null;
+}): Promise<void> {
+  await db.insert(financeDepotTransaction).values({
+    account_id: opts.accountId,
+    isin: opts.isin ?? null,
+    wkn: opts.wkn ?? null,
+    name: null,
+    kind: "buy",
+    executed_at: opts.executedAt,
+    amount: opts.amount,
+    price: opts.price,
+    gross_amount: null,
+    fees: null,
+    tax: null,
+    net_amount: opts.netAmount ?? null,
+    currency: "EUR",
+    source: "manual",
   });
 }
 
@@ -382,5 +413,213 @@ describe("finance/holdings — getHoldingsHistory", () => {
       "1000.00",
       "1050.00",
     ]);
+  });
+});
+
+describe("finance/holdings — cost basis & unrealized gain", () => {
+  it("uses bank-reported acquisition_price when available", async () => {
+    setAuth("1", ["finance.view", "finance.admin"]);
+    const bcId = await insertBankcontact();
+    const accountId = await insertDepot(bcId);
+
+    await insertHolding({
+      accountId,
+      asOf: "2026-05-10",
+      isin: "DE000A1EWWW0",
+      name: "ADIDAS",
+      amount: "5",
+      price: "210.00",
+      value: "1050.00",
+      acquisitionPrice: "180.00",
+    });
+
+    const resp = await listHoldings({ id: accountId });
+    expect(resp.items).toHaveLength(1);
+    const h = resp.items[0];
+    expect(h.cost_basis_source).toBe("bank");
+    expect(h.cost_basis_per_unit).toBe("180.000000");
+    expect(h.cost_basis).toBe("900.00");
+    expect(h.unrealized_gain).toBe("150.00");
+    expect(h.unrealized_gain_pct).toBe("16.67");
+  });
+
+  it("falls back to WAC from buy transactions when bank price missing", async () => {
+    setAuth("1", ["finance.view", "finance.admin"]);
+    const bcId = await insertBankcontact();
+    const accountId = await insertDepot(bcId);
+
+    // Holding with no acquisition_price — typical for some banks.
+    await insertHolding({
+      accountId,
+      asOf: "2026-05-10",
+      isin: "DE000A1EWWW0",
+      name: "ADIDAS",
+      amount: "10",
+      price: "210.00",
+      value: "2100.00",
+    });
+
+    // Two buys → WAC = (5*200 + 5*220) / 10 = 210, cost basis 10*210 = 2100
+    // so gain = 0
+    await insertDepotBuy({
+      accountId,
+      executedAt: "2026-01-10",
+      isin: "DE000A1EWWW0",
+      amount: "5",
+      price: "200",
+    });
+    await insertDepotBuy({
+      accountId,
+      executedAt: "2026-03-10",
+      isin: "DE000A1EWWW0",
+      amount: "5",
+      price: "220",
+    });
+
+    const resp = await listHoldings({ id: accountId });
+    const h = resp.items[0];
+    expect(h.cost_basis_source).toBe("tx-wac");
+    expect(h.cost_basis_per_unit).toBe("210.000000");
+    expect(h.cost_basis).toBe("2100.00");
+    expect(h.unrealized_gain).toBe("0.00");
+    expect(h.unrealized_gain_pct).toBe("0.00");
+  });
+
+  it("prefers bank acquisition_price over WAC when both exist", async () => {
+    setAuth("1", ["finance.view", "finance.admin"]);
+    const bcId = await insertBankcontact();
+    const accountId = await insertDepot(bcId);
+
+    await insertHolding({
+      accountId,
+      asOf: "2026-05-10",
+      isin: "DE000A1EWWW0",
+      name: "ADIDAS",
+      amount: "10",
+      price: "210.00",
+      value: "2100.00",
+      acquisitionPrice: "150.00", // bank says 150
+    });
+    await insertDepotBuy({
+      accountId,
+      executedAt: "2026-01-10",
+      isin: "DE000A1EWWW0",
+      amount: "10",
+      price: "190", // tx-wac would say 190
+    });
+
+    const resp = await listHoldings({ id: accountId });
+    expect(resp.items[0].cost_basis_source).toBe("bank");
+    expect(resp.items[0].cost_basis_per_unit).toBe("150.000000");
+  });
+
+  it("matches WAC by WKN when holding has no ISIN (MLP case)", async () => {
+    setAuth("1", ["finance.view", "finance.admin"]);
+    const bcId = await insertBankcontact();
+    const accountId = await insertDepot(bcId);
+
+    // MLP-style: holding carries WKN only, no ISIN.
+    await insertHolding({
+      accountId,
+      asOf: "2026-05-10",
+      isin: null,
+      wkn: "930921",
+      name: "SAUREN GLOB.OPPS A",
+      amount: "100",
+      price: "60.00",
+      value: "6000.00",
+    });
+    // Buy tx with both identifiers (as giro-derivation now writes them).
+    await insertDepotBuy({
+      accountId,
+      executedAt: "2026-01-10",
+      isin: "LU0106280919",
+      wkn: "930921",
+      amount: "100",
+      price: "50",
+    });
+
+    const resp = await listHoldings({ id: accountId });
+    const h = resp.items[0];
+    expect(h.cost_basis_source).toBe("tx-wac");
+    expect(h.cost_basis_per_unit).toBe("50.000000");
+    expect(h.cost_basis).toBe("5000.00");
+    expect(h.unrealized_gain).toBe("1000.00");
+    expect(h.unrealized_gain_pct).toBe("20.00");
+  });
+
+  it("returns null cost basis when neither bank price nor quantitative buys exist", async () => {
+    setAuth("1", ["finance.view", "finance.admin"]);
+    const bcId = await insertBankcontact();
+    const accountId = await insertDepot(bcId);
+
+    await insertHolding({
+      accountId,
+      asOf: "2026-05-10",
+      isin: "DE000A1EWWW0",
+      name: "ADIDAS",
+      amount: "10",
+      price: "210.00",
+      value: "2100.00",
+    });
+    // Giro-derived style buy: only net_amount, no shares/price.
+    await insertDepotBuy({
+      accountId,
+      executedAt: "2026-01-10",
+      isin: "DE000A1EWWW0",
+      amount: null,
+      price: null,
+      netAmount: "1500.00",
+    });
+
+    const resp = await listHoldings({ id: accountId });
+    const h = resp.items[0];
+    expect(h.cost_basis_source).toBeNull();
+    expect(h.cost_basis_per_unit).toBeNull();
+    expect(h.cost_basis).toBeNull();
+    expect(h.unrealized_gain).toBeNull();
+    expect(h.unrealized_gain_pct).toBeNull();
+  });
+
+  it("ignores non-buy transactions when computing WAC", async () => {
+    setAuth("1", ["finance.view", "finance.admin"]);
+    const bcId = await insertBankcontact();
+    const accountId = await insertDepot(bcId);
+
+    await insertHolding({
+      accountId,
+      asOf: "2026-05-10",
+      isin: "DE000A1EWWW0",
+      name: "ADIDAS",
+      amount: "5",
+      price: "210.00",
+      value: "1050.00",
+    });
+    await insertDepotBuy({
+      accountId,
+      executedAt: "2026-01-10",
+      isin: "DE000A1EWWW0",
+      amount: "5",
+      price: "200",
+    });
+    // A dividend (not a buy) — must not pollute WAC.
+    await db.insert(financeDepotTransaction).values({
+      account_id: accountId,
+      isin: "DE000A1EWWW0",
+      kind: "dividend",
+      executed_at: "2026-03-01",
+      amount: null,
+      price: null,
+      gross_amount: "25.00",
+      fees: null,
+      tax: null,
+      net_amount: "20.00",
+      currency: "EUR",
+      source: "manual",
+    });
+
+    const resp = await listHoldings({ id: accountId });
+    expect(resp.items[0].cost_basis_per_unit).toBe("200.000000");
+    expect(resp.items[0].unrealized_gain).toBe("50.00");
   });
 });

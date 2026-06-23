@@ -8,9 +8,22 @@ import {
   financeAccount,
   financeAccountAccess,
   financeAccountHolding,
+  financeDepotTransaction,
 } from "../db/schema";
 
 console.log("[boot] finance/holdings.ts: all imports resolved");
+
+/**
+ * Source of the cost-basis figure on a HoldingView:
+ *   - "bank": acquisition_price as reported by the bank (FinTS HISAL),
+ *     multiplied by the current holding amount.
+ *   - "tx-wac": weighted average cost from this account's buy
+ *     transactions on the same position (sum(amount*price) / sum(amount),
+ *     buys with known amount and price only).
+ *   - null: no usable input — neither acquisition_price nor matching
+ *     buy txs with quantitative data.
+ */
+export type CostBasisSource = "bank" | "tx-wac" | null;
 
 interface HoldingView {
   id: number;
@@ -25,6 +38,15 @@ interface HoldingView {
   currency: string | null;
   acquisition_date: string | null;
   acquisition_price: string | null;
+  /** Per-unit cost basis applied to the current holding (scale 6). */
+  cost_basis_per_unit: string | null;
+  /** Total cost basis = amount × cost_basis_per_unit (scale 2). */
+  cost_basis: string | null;
+  cost_basis_source: CostBasisSource;
+  /** value − cost_basis (scale 2, signed). */
+  unrealized_gain: string | null;
+  /** unrealized_gain / cost_basis × 100 (scale 2, signed). */
+  unrealized_gain_pct: string | null;
 }
 
 interface ListHoldingsParams {
@@ -108,29 +130,192 @@ export const listHoldings = api(
       )
       .orderBy(desc(sql`CAST(${financeAccountHolding.value} AS NUMERIC)`));
 
+    const wacByPosition = await buildBuyWacIndex(id);
+
     return {
-      items: rows.map((r) => ({
-        id: r.id,
-        account_id: r.account_id,
-        as_of: typeof r.as_of === "string" ? r.as_of.slice(0, 10) : r.as_of,
-        isin: r.isin,
-        wkn: r.wkn,
-        name: r.name,
-        amount: r.amount,
-        price: r.price,
-        value: r.value,
-        currency: r.currency,
-        acquisition_date: r.acquisition_date
-          ? (typeof r.acquisition_date === "string"
-              ? r.acquisition_date.slice(0, 10)
-              : r.acquisition_date)
-          : null,
-        acquisition_price: r.acquisition_price,
-      })),
+      items: rows.map((r) => {
+        const valuation = computeCostBasis(r, wacByPosition);
+        return {
+          id: r.id,
+          account_id: r.account_id,
+          as_of: typeof r.as_of === "string" ? r.as_of.slice(0, 10) : r.as_of,
+          isin: r.isin,
+          wkn: r.wkn,
+          name: r.name,
+          amount: r.amount,
+          price: r.price,
+          value: r.value,
+          currency: r.currency,
+          acquisition_date: r.acquisition_date
+            ? (typeof r.acquisition_date === "string"
+                ? r.acquisition_date.slice(0, 10)
+                : r.acquisition_date)
+            : null,
+          acquisition_price: r.acquisition_price,
+          cost_basis_per_unit: valuation.costBasisPerUnit,
+          cost_basis: valuation.costBasisTotal,
+          cost_basis_source: valuation.source,
+          unrealized_gain: valuation.unrealizedGain,
+          unrealized_gain_pct: valuation.unrealizedGainPct,
+        };
+      }),
       as_of: resolvedAsOf.slice(0, 10),
     };
   },
 );
+
+// ----------------------------------------------------------------------
+// Cost-basis derivation
+// ----------------------------------------------------------------------
+//
+// Strategy per position (#439 — Track AC follow-up):
+//   1. If the bank reports `acquisition_price` (FinTS HISAL Einstandskurs),
+//      use it × current `amount`. This matches what the user sees in their
+//      bank's UI.
+//   2. Otherwise, derive a weighted average cost from the account's
+//      `kind='buy'` depot transactions where both `amount` and `price`
+//      are known. Sells under WAC accounting don't change the per-unit
+//      basis, so multiplying by current `amount` is correct.
+//   3. If neither input is available (e.g. the bank doesn't ship an
+//      Einstandskurs and all buys are giro-derived with null unit data),
+//      return null. The UI shows "—" rather than guessing.
+
+/** Aggregated buy data per position, keyed by isin or wkn. */
+interface BuyAggregate {
+  /** Sum of (amount × price) across qualifying buy txs. */
+  weightedCost: number;
+  /** Sum of amount across qualifying buy txs. */
+  totalQty: number;
+}
+
+/**
+ * Returns two maps so we can look up by isin OR wkn — the same matching
+ * rule used by depot-derivation: holdings on some banks (e.g. MLP) carry
+ * only a WKN, while transactions may identify by either or both.
+ */
+export interface WacIndex {
+  byIsin: Map<string, BuyAggregate>;
+  byWkn: Map<string, BuyAggregate>;
+}
+
+export async function buildBuyWacIndex(accountId: number): Promise<WacIndex> {
+  const byIsin = new Map<string, BuyAggregate>();
+  const byWkn = new Map<string, BuyAggregate>();
+
+  const buys = await db
+    .select({
+      isin: financeDepotTransaction.isin,
+      wkn: financeDepotTransaction.wkn,
+      amount: financeDepotTransaction.amount,
+      price: financeDepotTransaction.price,
+    })
+    .from(financeDepotTransaction)
+    .where(
+      and(
+        eq(financeDepotTransaction.account_id, accountId),
+        eq(financeDepotTransaction.kind, "buy"),
+      ),
+    );
+
+  for (const tx of buys) {
+    if (!tx.amount || !tx.price) continue;
+    const qty = Number(tx.amount);
+    const price = Number(tx.price);
+    if (!Number.isFinite(qty) || !Number.isFinite(price)) continue;
+    if (qty <= 0 || price <= 0) continue;
+    const cost = qty * price;
+    if (tx.isin) {
+      const agg = byIsin.get(tx.isin) ?? { weightedCost: 0, totalQty: 0 };
+      agg.weightedCost += cost;
+      agg.totalQty += qty;
+      byIsin.set(tx.isin, agg);
+    }
+    if (tx.wkn) {
+      const agg = byWkn.get(tx.wkn) ?? { weightedCost: 0, totalQty: 0 };
+      agg.weightedCost += cost;
+      agg.totalQty += qty;
+      byWkn.set(tx.wkn, agg);
+    }
+  }
+
+  return { byIsin, byWkn };
+}
+
+interface ValuationResult {
+  costBasisPerUnit: string | null;
+  costBasisTotal: string | null;
+  source: CostBasisSource;
+  unrealizedGain: string | null;
+  unrealizedGainPct: string | null;
+}
+
+export function computeCostBasis(
+  holding: {
+    isin: string | null;
+    wkn: string | null;
+    amount: string | null;
+    value: string | null;
+    acquisition_price: string | null;
+  },
+  wacIndex: WacIndex,
+): ValuationResult {
+  const empty: ValuationResult = {
+    costBasisPerUnit: null,
+    costBasisTotal: null,
+    source: null,
+    unrealizedGain: null,
+    unrealizedGainPct: null,
+  };
+
+  const qty = holding.amount === null ? null : Number(holding.amount);
+  if (qty === null || !Number.isFinite(qty)) return empty;
+
+  // Prefer the bank-reported Einstandskurs when available.
+  let perUnit: number | null = null;
+  let source: CostBasisSource = null;
+  if (holding.acquisition_price !== null) {
+    const p = Number(holding.acquisition_price);
+    if (Number.isFinite(p) && p > 0) {
+      perUnit = p;
+      source = "bank";
+    }
+  }
+
+  // Fallback: WAC from buy transactions on this account+position.
+  if (perUnit === null) {
+    const agg =
+      (holding.isin ? wacIndex.byIsin.get(holding.isin) : null) ??
+      (holding.wkn ? wacIndex.byWkn.get(holding.wkn) : null);
+    if (agg && agg.totalQty > 0) {
+      perUnit = agg.weightedCost / agg.totalQty;
+      source = "tx-wac";
+    }
+  }
+
+  if (perUnit === null) return empty;
+
+  const total = qty * perUnit;
+  let unrealizedGain: string | null = null;
+  let unrealizedGainPct: string | null = null;
+  if (holding.value !== null) {
+    const v = Number(holding.value);
+    if (Number.isFinite(v)) {
+      const gain = v - total;
+      unrealizedGain = gain.toFixed(2);
+      if (total !== 0) {
+        unrealizedGainPct = ((gain / total) * 100).toFixed(2);
+      }
+    }
+  }
+
+  return {
+    costBasisPerUnit: perUnit.toFixed(6),
+    costBasisTotal: total.toFixed(2),
+    source,
+    unrealizedGain,
+    unrealizedGainPct,
+  };
+}
 
 // ----------------------------------------------------------------------
 // Holdings history (Phase 1 of #428 / #439)
