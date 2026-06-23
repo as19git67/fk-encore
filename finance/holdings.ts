@@ -8,9 +8,22 @@ import {
   financeAccount,
   financeAccountAccess,
   financeAccountHolding,
+  financeDepotTransaction,
 } from "../db/schema";
 
 console.log("[boot] finance/holdings.ts: all imports resolved");
+
+/**
+ * Source of the cost-basis figure on a HoldingView:
+ *   - "bank": acquisition_price as reported by the bank (FinTS HISAL),
+ *     multiplied by the current holding amount.
+ *   - "tx-wac": weighted average cost from this account's buy
+ *     transactions on the same position (sum(amount*price) / sum(amount),
+ *     buys with known amount and price only).
+ *   - null: no usable input — neither acquisition_price nor matching
+ *     buy txs with quantitative data.
+ */
+export type CostBasisSource = "bank" | "tx-wac" | null;
 
 interface HoldingView {
   id: number;
@@ -25,6 +38,28 @@ interface HoldingView {
   currency: string | null;
   acquisition_date: string | null;
   acquisition_price: string | null;
+  /** Per-unit cost basis applied to the current holding (scale 6). */
+  cost_basis_per_unit: string | null;
+  /** Total cost basis = amount × cost_basis_per_unit (scale 2). */
+  cost_basis: string | null;
+  cost_basis_source: CostBasisSource;
+  /** value − cost_basis (scale 2, signed). */
+  unrealized_gain: string | null;
+  /** unrealized_gain / cost_basis × 100 (scale 2, signed). */
+  unrealized_gain_pct: string | null;
+  /**
+   * Sum of realized gains/losses from past sells on this position,
+   * computed via chronological WAC walk (scale 2, signed). null when
+   * no sells exist or none could be evaluated.
+   */
+  realized_gain: string | null;
+  /**
+   * False when some buy/sell transactions on this position lacked the
+   * amount/price/net_amount data needed to fold them into the WAC walk
+   * (e.g. giro-derived buys with only net_amount). The realized number
+   * is still useful but partial — the UI flags this.
+   */
+  realized_gain_complete: boolean;
 }
 
 interface ListHoldingsParams {
@@ -108,26 +143,494 @@ export const listHoldings = api(
       )
       .orderBy(desc(sql`CAST(${financeAccountHolding.value} AS NUMERIC)`));
 
+    const wacByPosition = await buildBuyWacIndex(id);
+    const realizedByPosition = await buildRealizedGainIndex(id);
+
     return {
-      items: rows.map((r) => ({
-        id: r.id,
-        account_id: r.account_id,
-        as_of: typeof r.as_of === "string" ? r.as_of.slice(0, 10) : r.as_of,
-        isin: r.isin,
-        wkn: r.wkn,
-        name: r.name,
-        amount: r.amount,
-        price: r.price,
-        value: r.value,
-        currency: r.currency,
-        acquisition_date: r.acquisition_date
-          ? (typeof r.acquisition_date === "string"
-              ? r.acquisition_date.slice(0, 10)
-              : r.acquisition_date)
-          : null,
-        acquisition_price: r.acquisition_price,
-      })),
+      items: rows.map((r) => {
+        const valuation = computeCostBasis(r, wacByPosition);
+        const realized = lookupRealized(r, realizedByPosition);
+        return {
+          id: r.id,
+          account_id: r.account_id,
+          as_of: typeof r.as_of === "string" ? r.as_of.slice(0, 10) : r.as_of,
+          isin: r.isin,
+          wkn: r.wkn,
+          name: r.name,
+          amount: r.amount,
+          price: r.price,
+          value: r.value,
+          currency: r.currency,
+          acquisition_date: r.acquisition_date
+            ? (typeof r.acquisition_date === "string"
+                ? r.acquisition_date.slice(0, 10)
+                : r.acquisition_date)
+            : null,
+          acquisition_price: r.acquisition_price,
+          cost_basis_per_unit: valuation.costBasisPerUnit,
+          cost_basis: valuation.costBasisTotal,
+          cost_basis_source: valuation.source,
+          unrealized_gain: valuation.unrealizedGain,
+          unrealized_gain_pct: valuation.unrealizedGainPct,
+          realized_gain: realized.realized,
+          realized_gain_complete: realized.complete,
+        };
+      }),
       as_of: resolvedAsOf.slice(0, 10),
+    };
+  },
+);
+
+// ----------------------------------------------------------------------
+// Cost-basis derivation
+// ----------------------------------------------------------------------
+//
+// Strategy per position (#439 — Track AC follow-up):
+//   1. If the bank reports `acquisition_price` (FinTS HISAL Einstandskurs),
+//      use it × current `amount`. This matches what the user sees in their
+//      bank's UI.
+//   2. Otherwise, derive a weighted average cost from the account's
+//      `kind='buy'` depot transactions where both `amount` and `price`
+//      are known. Sells under WAC accounting don't change the per-unit
+//      basis, so multiplying by current `amount` is correct.
+//   3. If neither input is available (e.g. the bank doesn't ship an
+//      Einstandskurs and all buys are giro-derived with null unit data),
+//      return null. The UI shows "—" rather than guessing.
+
+/** Aggregated buy data per position, keyed by isin or wkn. */
+interface BuyAggregate {
+  /** Sum of (amount × price) across qualifying buy txs. */
+  weightedCost: number;
+  /** Sum of amount across qualifying buy txs. */
+  totalQty: number;
+}
+
+/**
+ * Returns two maps so we can look up by isin OR wkn — the same matching
+ * rule used by depot-derivation: holdings on some banks (e.g. MLP) carry
+ * only a WKN, while transactions may identify by either or both.
+ */
+export interface WacIndex {
+  byIsin: Map<string, BuyAggregate>;
+  byWkn: Map<string, BuyAggregate>;
+}
+
+export async function buildBuyWacIndex(accountId: number): Promise<WacIndex> {
+  const byIsin = new Map<string, BuyAggregate>();
+  const byWkn = new Map<string, BuyAggregate>();
+
+  const buys = await db
+    .select({
+      isin: financeDepotTransaction.isin,
+      wkn: financeDepotTransaction.wkn,
+      amount: financeDepotTransaction.amount,
+      price: financeDepotTransaction.price,
+    })
+    .from(financeDepotTransaction)
+    .where(
+      and(
+        eq(financeDepotTransaction.account_id, accountId),
+        eq(financeDepotTransaction.kind, "buy"),
+      ),
+    );
+
+  for (const tx of buys) {
+    if (!tx.amount || !tx.price) continue;
+    const qty = Number(tx.amount);
+    const price = Number(tx.price);
+    if (!Number.isFinite(qty) || !Number.isFinite(price)) continue;
+    if (qty <= 0 || price <= 0) continue;
+    const cost = qty * price;
+    if (tx.isin) {
+      const agg = byIsin.get(tx.isin) ?? { weightedCost: 0, totalQty: 0 };
+      agg.weightedCost += cost;
+      agg.totalQty += qty;
+      byIsin.set(tx.isin, agg);
+    }
+    if (tx.wkn) {
+      const agg = byWkn.get(tx.wkn) ?? { weightedCost: 0, totalQty: 0 };
+      agg.weightedCost += cost;
+      agg.totalQty += qty;
+      byWkn.set(tx.wkn, agg);
+    }
+  }
+
+  return { byIsin, byWkn };
+}
+
+interface ValuationResult {
+  costBasisPerUnit: string | null;
+  costBasisTotal: string | null;
+  source: CostBasisSource;
+  unrealizedGain: string | null;
+  unrealizedGainPct: string | null;
+}
+
+export function computeCostBasis(
+  holding: {
+    isin: string | null;
+    wkn: string | null;
+    amount: string | null;
+    value: string | null;
+    acquisition_price: string | null;
+  },
+  wacIndex: WacIndex,
+): ValuationResult {
+  const empty: ValuationResult = {
+    costBasisPerUnit: null,
+    costBasisTotal: null,
+    source: null,
+    unrealizedGain: null,
+    unrealizedGainPct: null,
+  };
+
+  const qty = holding.amount === null ? null : Number(holding.amount);
+  if (qty === null || !Number.isFinite(qty)) return empty;
+
+  // Prefer the bank-reported Einstandskurs when available.
+  let perUnit: number | null = null;
+  let source: CostBasisSource = null;
+  if (holding.acquisition_price !== null) {
+    const p = Number(holding.acquisition_price);
+    if (Number.isFinite(p) && p > 0) {
+      perUnit = p;
+      source = "bank";
+    }
+  }
+
+  // Fallback: WAC from buy transactions on this account+position.
+  if (perUnit === null) {
+    const agg =
+      (holding.isin ? wacIndex.byIsin.get(holding.isin) : null) ??
+      (holding.wkn ? wacIndex.byWkn.get(holding.wkn) : null);
+    if (agg && agg.totalQty > 0) {
+      perUnit = agg.weightedCost / agg.totalQty;
+      source = "tx-wac";
+    }
+  }
+
+  if (perUnit === null) return empty;
+
+  const total = qty * perUnit;
+  let unrealizedGain: string | null = null;
+  let unrealizedGainPct: string | null = null;
+  if (holding.value !== null) {
+    const v = Number(holding.value);
+    if (Number.isFinite(v)) {
+      const gain = v - total;
+      unrealizedGain = gain.toFixed(2);
+      if (total !== 0) {
+        unrealizedGainPct = ((gain / total) * 100).toFixed(2);
+      }
+    }
+  }
+
+  return {
+    costBasisPerUnit: perUnit.toFixed(6),
+    costBasisTotal: total.toFixed(2),
+    source,
+    unrealizedGain,
+    unrealizedGainPct,
+  };
+}
+
+// ----------------------------------------------------------------------
+// Realized gain derivation (chronological WAC walk)
+// ----------------------------------------------------------------------
+//
+// For each position we replay every depot transaction in order:
+//   - buy/in:  fold quantity and cost into the running WAC
+//   - sell:    realized += proceeds − soldQty × currentWac
+//   - out:     reduce inventory at WAC (no realized G/V — transfer)
+//   - other:   ignored (dividend/split/corp_action have separate
+//              tax treatment; not part of position G/V)
+//
+// "proceeds" prefers `net_amount` (after fees/tax — closer to what the
+// user actually received). Falls back to amount × price.
+//
+// `complete` is false when any buy/sell on the position lacked the
+// quantitative data needed (typical for giro-derived rows with only
+// net_amount). The number we return is still useful, just partial.
+
+export interface RealizedAggregate {
+  realized: number;
+  complete: boolean;
+  /** True if any sell contributed to `realized`. */
+  hasData: boolean;
+  /**
+   * Per-tax-year breakdown (calendar year, Germany). Sells with no
+   * usable proceeds are skipped (and flip `complete` to false instead
+   * of contributing to a bucket).
+   */
+  byYear: Map<number, { realized: number; sellCount: number }>;
+}
+
+export interface RealizedIndex {
+  byIsin: Map<string, RealizedAggregate>;
+  byWkn: Map<string, RealizedAggregate>;
+  byName: Map<string, RealizedAggregate>;
+}
+
+interface DepotTx {
+  id: number;
+  isin: string | null;
+  wkn: string | null;
+  name: string | null;
+  kind: string;
+  executed_at: string;
+  amount: string | null;
+  price: string | null;
+  net_amount: string | null;
+}
+
+export async function buildRealizedGainIndex(
+  accountId: number,
+): Promise<RealizedIndex> {
+  const txs = await db
+    .select({
+      id: financeDepotTransaction.id,
+      isin: financeDepotTransaction.isin,
+      wkn: financeDepotTransaction.wkn,
+      name: financeDepotTransaction.name,
+      kind: financeDepotTransaction.kind,
+      executed_at: financeDepotTransaction.executed_at,
+      amount: financeDepotTransaction.amount,
+      price: financeDepotTransaction.price,
+      net_amount: financeDepotTransaction.net_amount,
+    })
+    .from(financeDepotTransaction)
+    .where(eq(financeDepotTransaction.account_id, accountId));
+
+  // Bucket transactions by stable position key. Same matching rule used
+  // throughout (isin > wkn > name) — see statement-persist.ts.
+  function positionKey(tx: { isin: string | null; wkn: string | null; name: string | null }): string | null {
+    return tx.isin || tx.wkn || tx.name || null;
+  }
+  const buckets = new Map<string, DepotTx[]>();
+  for (const tx of txs) {
+    const key = positionKey(tx);
+    if (!key) continue;
+    const list = buckets.get(key) ?? [];
+    list.push(tx);
+    buckets.set(key, list);
+  }
+
+  const byIsin = new Map<string, RealizedAggregate>();
+  const byWkn = new Map<string, RealizedAggregate>();
+  const byName = new Map<string, RealizedAggregate>();
+
+  for (const [, list] of buckets) {
+    const agg = computeRealizedForPosition(list);
+    // Index under every identifier that appears in this bucket, so a
+    // holding can be matched by whatever identifier it carries.
+    const seenIsin = new Set<string>();
+    const seenWkn = new Set<string>();
+    const seenName = new Set<string>();
+    for (const tx of list) {
+      if (tx.isin && !seenIsin.has(tx.isin)) {
+        seenIsin.add(tx.isin);
+        byIsin.set(tx.isin, agg);
+      }
+      if (tx.wkn && !seenWkn.has(tx.wkn)) {
+        seenWkn.add(tx.wkn);
+        byWkn.set(tx.wkn, agg);
+      }
+      if (tx.name && !seenName.has(tx.name)) {
+        seenName.add(tx.name);
+        byName.set(tx.name, agg);
+      }
+    }
+  }
+
+  return { byIsin, byWkn, byName };
+}
+
+export function computeRealizedForPosition(txs: DepotTx[]): RealizedAggregate {
+  const sorted = [...txs].sort((a, b) => {
+    if (a.executed_at !== b.executed_at) {
+      return a.executed_at < b.executed_at ? -1 : 1;
+    }
+    return a.id - b.id;
+  });
+
+  let qty = 0;
+  let costTotal = 0; // qty × current WAC
+  let realized = 0;
+  let complete = true;
+  let hasData = false;
+  const byYear = new Map<number, { realized: number; sellCount: number }>();
+
+  for (const tx of sorted) {
+    if (tx.kind === "buy" || tx.kind === "in") {
+      const a = tx.amount === null ? null : Number(tx.amount);
+      const p = tx.price === null ? null : Number(tx.price);
+      if (a === null || p === null || !Number.isFinite(a) || !Number.isFinite(p) || a <= 0 || p <= 0) {
+        complete = false;
+        continue;
+      }
+      qty += a;
+      costTotal += a * p;
+    } else if (tx.kind === "sell") {
+      const a = tx.amount === null ? null : Number(tx.amount);
+      if (a === null || !Number.isFinite(a) || a <= 0) {
+        complete = false;
+        continue;
+      }
+      // Proceeds: prefer net_amount (after fees/tax), else gross via price.
+      let proceeds: number | null = null;
+      if (tx.net_amount !== null) {
+        const n = Number(tx.net_amount);
+        if (Number.isFinite(n)) proceeds = n;
+      }
+      if (proceeds === null && tx.price !== null) {
+        const p = Number(tx.price);
+        if (Number.isFinite(p)) proceeds = a * p;
+      }
+      const wac = qty > 0 ? costTotal / qty : 0;
+      const soldQty = Math.min(a, qty);
+      const costPortion = soldQty * wac;
+      if (proceeds === null) {
+        complete = false;
+      } else {
+        const sellGain = proceeds - costPortion;
+        realized += sellGain;
+        hasData = true;
+        const year = yearOf(tx.executed_at);
+        if (year !== null) {
+          const bucket = byYear.get(year) ?? { realized: 0, sellCount: 0 };
+          bucket.realized += sellGain;
+          bucket.sellCount += 1;
+          byYear.set(year, bucket);
+        }
+      }
+      qty -= soldQty;
+      costTotal -= costPortion;
+    } else if (tx.kind === "out") {
+      const a = tx.amount === null ? null : Number(tx.amount);
+      if (a === null || !Number.isFinite(a) || a <= 0) {
+        complete = false;
+        continue;
+      }
+      const wac = qty > 0 ? costTotal / qty : 0;
+      const soldQty = Math.min(a, qty);
+      qty -= soldQty;
+      costTotal -= soldQty * wac;
+    }
+    // dividend / split / corp_action: ignored for realized G/V.
+  }
+
+  return { realized, complete, hasData, byYear };
+}
+
+function yearOf(date: string): number | null {
+  if (!date || date.length < 4) return null;
+  const y = Number(date.slice(0, 4));
+  return Number.isFinite(y) ? y : null;
+}
+
+function lookupRealized(
+  holding: { isin: string | null; wkn: string | null; name: string | null },
+  index: RealizedIndex,
+): { realized: string | null; complete: boolean } {
+  const agg =
+    (holding.isin ? index.byIsin.get(holding.isin) : null) ??
+    (holding.wkn ? index.byWkn.get(holding.wkn) : null) ??
+    (holding.name ? index.byName.get(holding.name) : null);
+  if (!agg || !agg.hasData) {
+    return { realized: null, complete: agg ? agg.complete : true };
+  }
+  return { realized: agg.realized.toFixed(2), complete: agg.complete };
+}
+
+// ----------------------------------------------------------------------
+// Realized G/V per tax year (account-wide aggregation)
+// ----------------------------------------------------------------------
+
+interface RealizedByYearParams {
+  id: number;
+}
+
+interface YearBucket {
+  year: number;
+  realized: string;
+  sell_count: number;
+  /** False if any position contributing to this year had incomplete buy/sell data. */
+  complete: boolean;
+}
+
+interface RealizedByYearResponse {
+  years: YearBucket[];
+  /** True if every contributing position had complete buy/sell data. */
+  complete: boolean;
+  currency: string;
+}
+
+export const getRealizedByYear = api(
+  {
+    expose: true,
+    method: "GET",
+    path: "/finance/accounts/:id/realized-by-year",
+    auth: true,
+  },
+  async ({ id }: RealizedByYearParams): Promise<RealizedByYearResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+
+    const [account] = await db
+      .select({
+        id: financeAccount.id,
+        currency_code: financeAccount.currency_code,
+      })
+      .from(financeAccount)
+      .where(eq(financeAccount.id, id))
+      .limit(1);
+    if (!account) throw APIError.notFound(`account ${id} not found`);
+    if (!hasAdmin(auth)) {
+      await assertAclRead(id, Number(auth.userID));
+    }
+
+    const index = await buildRealizedGainIndex(id);
+    // Walk the deduplicated set of position aggregates. The index has
+    // the same aggregate object indexed under multiple identifier maps
+    // (isin/wkn/name), so collect by object identity.
+    const seen = new Set<RealizedAggregate>();
+    const buckets = new Map<
+      number,
+      { realized: number; sellCount: number; complete: boolean }
+    >();
+    let overallComplete = true;
+    for (const agg of [
+      ...index.byIsin.values(),
+      ...index.byWkn.values(),
+      ...index.byName.values(),
+    ]) {
+      if (seen.has(agg)) continue;
+      seen.add(agg);
+      if (!agg.hasData) continue;
+      if (!agg.complete) overallComplete = false;
+      for (const [year, posBucket] of agg.byYear) {
+        const b =
+          buckets.get(year) ?? { realized: 0, sellCount: 0, complete: true };
+        b.realized += posBucket.realized;
+        b.sellCount += posBucket.sellCount;
+        if (!agg.complete) b.complete = false;
+        buckets.set(year, b);
+      }
+    }
+
+    const years: YearBucket[] = [...buckets.entries()]
+      .sort(([a], [b]) => b - a) // newest year first
+      .map(([year, b]) => ({
+        year,
+        realized: b.realized.toFixed(2),
+        sell_count: b.sellCount,
+        complete: b.complete,
+      }));
+
+    return {
+      years,
+      complete: overallComplete,
+      currency: account.currency_code ?? "EUR",
     };
   },
 );
