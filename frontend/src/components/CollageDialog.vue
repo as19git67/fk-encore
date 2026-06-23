@@ -720,13 +720,16 @@ onBeforeUnmount(() => {
         <Button
           v-if="step === 'editor'"
           class="collage-footer__text"
-          icon="pi pi-pencil"
           label="Text"
           severity="secondary"
           outlined
           v-tooltip.top="'Text hinzufügen'"
           @click="addText"
-        />
+        >
+          <template #icon>
+            <span class="collage-text-icon" aria-hidden="true">T</span>
+          </template>
+        </Button>
         <span class="collage-footer-spacer" />
         <Button
           class="collage-footer__cancel"
@@ -964,6 +967,13 @@ onBeforeUnmount(() => {
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+.collage-text-icon {
+  font-family: 'Times New Roman', Times, serif;
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
 /* On narrow screens the footer has little horizontal room. Hide button labels
