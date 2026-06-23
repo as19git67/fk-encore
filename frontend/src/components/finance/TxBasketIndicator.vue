@@ -7,6 +7,7 @@ import { useTxSelectionStore } from '../../stores/finance/selection'
 import { downloadTransactionsCsv, type Transaction } from '../../api/finance'
 import BatchTagDialog from './BatchTagDialog.vue'
 import BatchNoticeDialog from './BatchNoticeDialog.vue'
+import { basketTags, basketCounterparties, basketMonths, hasMixedCurrencies, type BasketAggregate } from '../../utils/financeBasketAnalysis'
 
 /**
  * Header indicator + slide-out drawer for the transaction basket.
@@ -23,9 +24,12 @@ const tagDialogVisible = ref(false)
 const noticeDialogVisible = ref(false)
 const exporting = ref(false)
 const actionError = ref<string | null>(null)
+const analysisView = ref<'tags' | 'counterparties' | 'months'>('tags')
 
 const count = computed(() => selectionStore.count)
 const items = computed(() => selectionStore.items)
+const analysisRows = computed<BasketAggregate[]>(() => analysisView.value === 'tags' ? basketTags(items.value) : analysisView.value === 'counterparties' ? basketCounterparties(items.value) : basketMonths(items.value))
+const mixedCurrencies = computed(() => hasMixedCurrencies(items.value))
 
 const sumLabel = computed(() => {
   if (count.value === 0) return ''
@@ -50,6 +54,15 @@ function formatDate(iso: string): string {
     month: '2-digit',
     year: 'numeric',
   })
+}
+
+function formatAnalysisAmount(amount: number): string {
+  return new Intl.NumberFormat('de-DE', { style: 'currency', currency: selectionStore.currency }).format(amount)
+}
+
+function monthLabel(month: string): string {
+  if (!/^\d{4}-\d{2}$/.test(month)) return month
+  return new Date(`${month}-01T12:00:00`).toLocaleDateString('de-DE', { month: 'short', year: 'numeric' })
 }
 
 function openBatchTagEditor() {
@@ -116,6 +129,18 @@ async function exportCsv() {
       </div>
 
       <ul v-else class="basket-list">
+        <section class="basket-analysis" aria-label="Auswertung der Auswahl">
+          <div class="basket-analysis-tabs" role="tablist" aria-label="Auswertung gruppieren nach">
+            <button v-for="view in [{ id: 'tags', label: 'Tags' }, { id: 'counterparties', label: 'Gegenseite' }, { id: 'months', label: 'Monat' }]" :key="view.id" type="button" class="basket-analysis-tab" :class="{ active: analysisView === view.id }" @click="analysisView = view.id as 'tags' | 'counterparties' | 'months'">{{ view.label }}</button>
+          </div>
+          <p v-if="mixedCurrencies" class="basket-analysis-hint">Mehrere Währungen: Summen werden in der Basket-Währung angezeigt.</p>
+          <ul class="basket-analysis-list">
+            <li v-for="row in analysisRows" :key="row.label" class="basket-analysis-row">
+              <span>{{ analysisView === 'months' ? monthLabel(row.label) : row.label }} <small v-if="row.aiOnly" class="ai-tag">KI</small><small>· {{ row.count }}</small></span>
+              <strong :class="row.amount < 0 ? 'amount-neg' : 'amount-pos'">{{ formatAnalysisAmount(row.amount) }}</strong>
+            </li>
+          </ul>
+        </section>
         <li
           v-for="tx in items"
           :key="tx.id"
@@ -256,6 +281,15 @@ async function exportCsv() {
   display: flex;
   flex-direction: column;
 }
+.basket-analysis { margin: 0 0 .75rem; padding: .6rem; border: 1px solid var(--p-content-border-color); border-radius: .4rem; }
+.basket-analysis-tabs { display: flex; gap: .25rem; margin-bottom: .5rem; }
+.basket-analysis-tab { border: 0; border-radius: .3rem; background: transparent; padding: .25rem .45rem; cursor: pointer; color: var(--p-text-muted-color); }
+.basket-analysis-tab.active { color: var(--p-primary-color); background: var(--p-highlight-background); font-weight: 600; }
+.basket-analysis-list { list-style: none; padding: 0; margin: 0; }
+.basket-analysis-row { display: flex; justify-content: space-between; gap: .5rem; padding: .18rem 0; font-size: .85rem; }
+.basket-analysis-row small { color: var(--p-text-muted-color); }
+.basket-analysis-hint { margin: 0 0 .4rem; color: var(--p-text-muted-color); font-size: .78rem; }
+.ai-tag { color: var(--p-primary-color) !important; }
 .basket-row {
   display: flex;
   gap: 0.5rem;
