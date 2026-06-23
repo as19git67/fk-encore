@@ -807,7 +807,7 @@ function txAmountClass(tx: Transaction): string {
 
 function openTransaction(tx: Transaction) {
   if (selectMode.value) {
-    selectionStore.toggle(tx)
+    toggleLocalSelection(tx)
     return
   }
   void router.push({
@@ -817,18 +817,36 @@ function openTransaction(tx: Transaction) {
 }
 
 // ── Select mode + multi-selection state ───────────────────────────────
+//
+// Local, transient selection — deliberately decoupled from the global
+// basket. Picking/un-picking transactions here only affects the list's
+// own working set; nothing flows into the basket until the user
+// explicitly hits the "in den Warenkorb" action.
 
-// The basket is global and deliberately survives navigation.  Entering this
-// view must therefore not implicitly switch its local list interaction into
-// select mode just because there are already basket items; otherwise a normal
-// tap on the next transaction cannot open its detail view.
 const selectMode = ref(false)
 const selectionPopover = ref<InstanceType<typeof Popover> | null>(null)
+const localSelectedIds = ref<Set<number>>(new Set())
+
+function isLocallySelected(id: number): boolean {
+  return localSelectedIds.value.has(id)
+}
+
+function toggleLocalSelection(tx: Transaction) {
+  const next = new Set(localSelectedIds.value)
+  if (next.has(tx.id)) next.delete(tx.id)
+  else next.add(tx.id)
+  localSelectedIds.value = next
+}
+
+const localSelectedItems = computed<Transaction[]>(() =>
+  txStore.items.filter((tx) => localSelectedIds.value.has(tx.id)),
+)
+const localSelectionCount = computed(() => localSelectedItems.value.length)
 
 function toggleSelectMode() {
   selectMode.value = !selectMode.value
   if (!selectMode.value) {
-    selectionStore.clear()
+    localSelectedIds.value = new Set()
     selectionPopover.value?.hide()
   }
 }
@@ -843,7 +861,7 @@ function toggleSelectMode() {
 const selectAllState = computed<boolean | null>(() => {
   const visibleCount = txStore.items.length
   const selectedCount = txStore.items.filter((tx) =>
-    selectionStore.has(tx.id),
+    localSelectedIds.value.has(tx.id),
   ).length
   if (selectedCount === 0) return false
   if (selectedCount === visibleCount && visibleCount > 0) return true
@@ -854,28 +872,49 @@ function toggleSelectAll(checked: boolean | null) {
   // PrimeVue's binary checkbox emits true/false; we never expect null
   // here. Treat anything truthy as "select all visible", else clear.
   if (checked) {
-    selectionStore.set(txStore.items)
+    localSelectedIds.value = new Set(txStore.items.map((tx) => tx.id))
   } else {
-    selectionStore.clear()
+    localSelectedIds.value = new Set()
   }
 }
 
 function clearSelection() {
-  selectionStore.clear()
+  localSelectedIds.value = new Set()
   selectionPopover.value?.hide()
   selectMode.value = false
 }
 
 function openSelectionPopover(event: Event) {
-  if (selectionStore.count === 0) return
+  if (localSelectionCount.value === 0) return
   selectionPopover.value?.toggle(event)
 }
+
+const localSelectionSum = computed(() =>
+  localSelectedItems.value.reduce(
+    (acc, t) => acc + Number(t.amount || 0),
+    0,
+  ),
+)
+const localSelectionCurrency = computed(
+  () => localSelectedItems.value[0]?.currency_code ?? 'EUR',
+)
 
 function formatSelectionSum(): string {
   return new Intl.NumberFormat('de-DE', {
     style: 'currency',
-    currency: selectionStore.currency,
-  }).format(selectionStore.sum)
+    currency: localSelectionCurrency.value,
+  }).format(localSelectionSum.value)
+}
+
+function addLocalSelectionToBasket() {
+  if (localSelectionCount.value === 0) return
+  for (const tx of localSelectedItems.value) {
+    selectionStore.add(tx)
+  }
+  // Keep the list selection — the user might want to follow up with
+  // tagging or another action. Just close the popover so the change in
+  // basket count is visible.
+  selectionPopover.value?.hide()
 }
 
 // Sum + currency over the currently displayed (= filtered) listing.
@@ -905,9 +944,17 @@ function formatFilteredSum(): string {
 const batchTagDialogVisible = ref(false)
 
 function openBatchTagEditor() {
-  if (selectionStore.count === 0) return
+  if (localSelectionCount.value === 0) return
   selectionPopover.value?.hide()
   batchTagDialogVisible.value = true
+}
+
+async function refreshAfterTagChange() {
+  // Tags changed server-side — reload the list so cards reflect the
+  // new tag set. Local selection survives because the ids are kept;
+  // anything that left the page after the refresh simply drops out of
+  // the visible selection but doesn't trigger any other side effect.
+  await loadTransactions()
 }
 
 const { goBack: moduleBack } = useModuleBack('/finanzen', 'finance-overview')
@@ -917,7 +964,7 @@ function goBack() {
     // Leaving select mode is the more useful action than navigating
     // away when the user expects "Zurück" → list-without-selection.
     selectMode.value = false
-    selectionStore.clear()
+    localSelectedIds.value = new Set()
     return
   }
   moduleBack()
@@ -940,7 +987,7 @@ function goBack() {
         </div>
         <div class="tx-header-meta">
           <span class="tx-header-date">
-            {{ selectionStore.count }} Buchung{{ selectionStore.count === 1 ? '' : 'en' }}
+            {{ localSelectionCount }} Buchung{{ localSelectionCount === 1 ? '' : 'en' }}
           </span>
         </div>
       </template>
@@ -991,8 +1038,8 @@ function goBack() {
           severity="secondary"
           rounded
           aria-label="Liste der ausgewählten Buchungen"
-          :disabled="!selectMode || selectionStore.count === 0"
-          :class="{ 'tx-icon-active': selectMode && selectionStore.count > 0 }"
+          :disabled="!selectMode || localSelectionCount === 0"
+          :class="{ 'tx-icon-active': selectMode && localSelectionCount > 0 }"
           @click="openSelectionPopover"
         />
         <Button
@@ -1015,7 +1062,7 @@ function goBack() {
       <h3 class="tx-selection-title">Ausgewählte Buchungen:</h3>
       <ul class="tx-selection-list">
         <li
-          v-for="tx in selectionStore.items"
+          v-for="tx in localSelectedItems"
           :key="tx.id"
           class="tx-selection-row"
         >
@@ -1034,7 +1081,7 @@ function goBack() {
               text
               rounded
               aria-label="Buchung aus Auswahl entfernen"
-              @click="selectionStore.remove(tx.id)"
+              @click="toggleLocalSelection(tx)"
             />
           </div>
         </li>
@@ -1110,7 +1157,7 @@ function goBack() {
           @update:model-value="toggleSelectAll"
         />
         <span class="tx-select-count">
-          {{ selectionStore.count }} ausgewählt
+          {{ localSelectionCount }} ausgewählt
         </span>
       </div>
       <div class="tx-select-bar-actions">
@@ -1118,14 +1165,22 @@ function goBack() {
             icon="pi pi-tag"
             severity="secondary"
             aria-label="Tags auf Auswahl anwenden"
-            :disabled="selectionStore.count === 0"
+            :disabled="localSelectionCount === 0"
             @click="openBatchTagEditor"
+        />
+        <Button
+            icon="pi pi-shopping-cart"
+            severity="secondary"
+            aria-label="Auswahl in den Warenkorb geben"
+            title="Auswahl in den Warenkorb geben"
+            :disabled="localSelectionCount === 0"
+            @click="addLocalSelectionToBasket"
         />
         <Button
             icon="pi pi-times"
             severity="secondary"
             aria-label="Nichts auswählen"
-            :disabled="selectionStore.count === 0"
+            :disabled="localSelectionCount === 0"
             @click="clearSelection"
         />
       </div>
@@ -1418,17 +1473,17 @@ function goBack() {
             :key="tx.id"
             class="tx-card"
             :class="{
-              'tx-card-selected': selectionStore.has(tx.id),
+              'tx-card-selected': isLocallySelected(tx.id),
               'tx-card-select-mode': selectMode,
             }"
             @click="openTransaction(tx)"
           >
             <div v-if="selectMode" class="tx-card-lead" @click.stop>
               <Checkbox
-                :model-value="selectionStore.has(tx.id)"
+                :model-value="isLocallySelected(tx.id)"
                 :binary="true"
                 aria-label="Buchung auswählen"
-                @update:model-value="selectionStore.toggle(tx)"
+                @update:model-value="toggleLocalSelection(tx)"
               />
             </div>
             <div class="tx-card-body">
@@ -1464,7 +1519,11 @@ function goBack() {
       </p>
     </template>
 
-    <BatchTagDialog v-model:visible="batchTagDialogVisible" />
+    <BatchTagDialog
+      v-model:visible="batchTagDialogVisible"
+      :transactions="localSelectedItems"
+      @applied="refreshAfterTagChange"
+    />
   </div>
 </template>
 
