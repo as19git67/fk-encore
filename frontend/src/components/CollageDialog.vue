@@ -651,26 +651,32 @@ onBeforeUnmount(() => {
       <div class="collage-footer">
         <Button
           v-if="step === 'editor'"
-          label="Zurück"
+          class="collage-footer__back"
           icon="pi pi-arrow-left"
+          label="Zurück"
           severity="secondary"
           text
+          v-tooltip.top="'Zurück'"
           @click="backToLayouts"
         />
         <Button
           v-if="step === 'editor' && !textEnabled"
+          class="collage-footer__text"
+          icon="pi pi-pencil"
           label="Text"
-          icon="pi pi-plus"
           severity="secondary"
           outlined
+          v-tooltip.top="'Text hinzufügen'"
           @click="addText"
         />
         <span class="collage-footer-spacer" />
         <Button
-          label="Abbrechen"
+          class="collage-footer__cancel"
           icon="pi pi-times"
+          label="Abbrechen"
           severity="secondary"
           text
+          v-tooltip.top="'Abbrechen'"
           @click="close"
         />
         <Button
@@ -870,5 +876,16 @@ onBeforeUnmount(() => {
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+/* On narrow screens the footer has little horizontal room. Hide button labels
+   and keep only the icons so everything fits in one row. The tooltip still
+   shows the full label on hover/long-press. */
+@media (max-width: 480px) {
+  .collage-footer__back :deep(.p-button-label),
+  .collage-footer__text :deep(.p-button-label),
+  .collage-footer__cancel :deep(.p-button-label) {
+    display: none;
+  }
 }
 </style>
