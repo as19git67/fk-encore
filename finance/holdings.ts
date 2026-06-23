@@ -357,6 +357,12 @@ export interface RealizedAggregate {
   complete: boolean;
   /** True if any sell contributed to `realized`. */
   hasData: boolean;
+  /**
+   * Per-tax-year breakdown (calendar year, Germany). Sells with no
+   * usable proceeds are skipped (and flip `complete` to false instead
+   * of contributing to a bucket).
+   */
+  byYear: Map<number, { realized: number; sellCount: number }>;
 }
 
 export interface RealizedIndex {
@@ -452,6 +458,7 @@ export function computeRealizedForPosition(txs: DepotTx[]): RealizedAggregate {
   let realized = 0;
   let complete = true;
   let hasData = false;
+  const byYear = new Map<number, { realized: number; sellCount: number }>();
 
   for (const tx of sorted) {
     if (tx.kind === "buy" || tx.kind === "in") {
@@ -485,8 +492,16 @@ export function computeRealizedForPosition(txs: DepotTx[]): RealizedAggregate {
       if (proceeds === null) {
         complete = false;
       } else {
-        realized += proceeds - costPortion;
+        const sellGain = proceeds - costPortion;
+        realized += sellGain;
         hasData = true;
+        const year = yearOf(tx.executed_at);
+        if (year !== null) {
+          const bucket = byYear.get(year) ?? { realized: 0, sellCount: 0 };
+          bucket.realized += sellGain;
+          bucket.sellCount += 1;
+          byYear.set(year, bucket);
+        }
       }
       qty -= soldQty;
       costTotal -= costPortion;
@@ -504,7 +519,13 @@ export function computeRealizedForPosition(txs: DepotTx[]): RealizedAggregate {
     // dividend / split / corp_action: ignored for realized G/V.
   }
 
-  return { realized, complete, hasData };
+  return { realized, complete, hasData, byYear };
+}
+
+function yearOf(date: string): number | null {
+  if (!date || date.length < 4) return null;
+  const y = Number(date.slice(0, 4));
+  return Number.isFinite(y) ? y : null;
 }
 
 function lookupRealized(
@@ -520,6 +541,99 @@ function lookupRealized(
   }
   return { realized: agg.realized.toFixed(2), complete: agg.complete };
 }
+
+// ----------------------------------------------------------------------
+// Realized G/V per tax year (account-wide aggregation)
+// ----------------------------------------------------------------------
+
+interface RealizedByYearParams {
+  id: number;
+}
+
+interface YearBucket {
+  year: number;
+  realized: string;
+  sell_count: number;
+  /** False if any position contributing to this year had incomplete buy/sell data. */
+  complete: boolean;
+}
+
+interface RealizedByYearResponse {
+  years: YearBucket[];
+  /** True if every contributing position had complete buy/sell data. */
+  complete: boolean;
+  currency: string;
+}
+
+export const getRealizedByYear = api(
+  {
+    expose: true,
+    method: "GET",
+    path: "/finance/accounts/:id/realized-by-year",
+    auth: true,
+  },
+  async ({ id }: RealizedByYearParams): Promise<RealizedByYearResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+
+    const [account] = await db
+      .select({
+        id: financeAccount.id,
+        currency_code: financeAccount.currency_code,
+      })
+      .from(financeAccount)
+      .where(eq(financeAccount.id, id))
+      .limit(1);
+    if (!account) throw APIError.notFound(`account ${id} not found`);
+    if (!hasAdmin(auth)) {
+      await assertAclRead(id, Number(auth.userID));
+    }
+
+    const index = await buildRealizedGainIndex(id);
+    // Walk the deduplicated set of position aggregates. The index has
+    // the same aggregate object indexed under multiple identifier maps
+    // (isin/wkn/name), so collect by object identity.
+    const seen = new Set<RealizedAggregate>();
+    const buckets = new Map<
+      number,
+      { realized: number; sellCount: number; complete: boolean }
+    >();
+    let overallComplete = true;
+    for (const agg of [
+      ...index.byIsin.values(),
+      ...index.byWkn.values(),
+      ...index.byName.values(),
+    ]) {
+      if (seen.has(agg)) continue;
+      seen.add(agg);
+      if (!agg.hasData) continue;
+      if (!agg.complete) overallComplete = false;
+      for (const [year, posBucket] of agg.byYear) {
+        const b =
+          buckets.get(year) ?? { realized: 0, sellCount: 0, complete: true };
+        b.realized += posBucket.realized;
+        b.sellCount += posBucket.sellCount;
+        if (!agg.complete) b.complete = false;
+        buckets.set(year, b);
+      }
+    }
+
+    const years: YearBucket[] = [...buckets.entries()]
+      .sort(([a], [b]) => b - a) // newest year first
+      .map(([year, b]) => ({
+        year,
+        realized: b.realized.toFixed(2),
+        sell_count: b.sellCount,
+        complete: b.complete,
+      }));
+
+    return {
+      years,
+      complete: overallComplete,
+      currency: account.currency_code ?? "EUR",
+    };
+  },
+);
 
 // ----------------------------------------------------------------------
 // Holdings history (Phase 1 of #428 / #439)

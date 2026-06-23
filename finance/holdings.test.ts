@@ -16,7 +16,11 @@ import {
   financeTransaction,
   users,
 } from "../db/schema";
-import { getHoldingsHistory, listHoldings } from "./holdings";
+import {
+  getHoldingsHistory,
+  getRealizedByYear,
+  listHoldings,
+} from "./holdings";
 
 function setAuth(userID: string, perms: string[]) {
   vi.mocked(getAuthData).mockReturnValue({ userID, permissions: perms });
@@ -870,5 +874,154 @@ describe("finance/holdings — cost basis & unrealized gain", () => {
     const resp = await listHoldings({ id: accountId });
     expect(resp.items[0].cost_basis_per_unit).toBe("200.000000");
     expect(resp.items[0].unrealized_gain).toBe("50.00");
+  });
+});
+
+describe("finance/holdings — getRealizedByYear", () => {
+  it("returns empty years for a depot without sells", async () => {
+    setAuth("1", ["finance.view", "finance.admin"]);
+    const bcId = await insertBankcontact();
+    const accountId = await insertDepot(bcId);
+
+    await insertDepotBuy({
+      accountId,
+      executedAt: "2024-01-10",
+      isin: "DE000A1EWWW0",
+      amount: "10",
+      price: "100",
+    });
+
+    const resp = await getRealizedByYear({ id: accountId });
+    expect(resp.years).toEqual([]);
+    expect(resp.complete).toBe(true);
+    expect(resp.currency).toBe("EUR");
+  });
+
+  it("buckets realized G/V across positions and years, newest first", async () => {
+    setAuth("1", ["finance.view", "finance.admin"]);
+    const bcId = await insertBankcontact();
+    const accountId = await insertDepot(bcId);
+
+    // Position A: buy 2024, sell 2024 (+200) and 2025 (+300)
+    await insertDepotBuy({
+      accountId,
+      executedAt: "2024-01-10",
+      isin: "DE000A1EWWW0",
+      amount: "10",
+      price: "100",
+    });
+    await db.insert(financeDepotTransaction).values({
+      account_id: accountId,
+      isin: "DE000A1EWWW0",
+      kind: "sell",
+      executed_at: "2024-06-10",
+      amount: "2",
+      price: "200",
+      gross_amount: null,
+      fees: null,
+      tax: null,
+      net_amount: "400",
+      currency: "EUR",
+      source: "manual",
+    });
+    await db.insert(financeDepotTransaction).values({
+      account_id: accountId,
+      isin: "DE000A1EWWW0",
+      kind: "sell",
+      executed_at: "2025-03-10",
+      amount: "3",
+      price: "200",
+      gross_amount: null,
+      fees: null,
+      tax: null,
+      net_amount: "600",
+      currency: "EUR",
+      source: "manual",
+    });
+
+    // Position B (different ISIN): sell 2025 (+100)
+    await insertDepotBuy({
+      accountId,
+      executedAt: "2024-02-10",
+      isin: "US0378331005",
+      amount: "5",
+      price: "100",
+    });
+    await db.insert(financeDepotTransaction).values({
+      account_id: accountId,
+      isin: "US0378331005",
+      kind: "sell",
+      executed_at: "2025-08-10",
+      amount: "1",
+      price: "200",
+      gross_amount: null,
+      fees: null,
+      tax: null,
+      net_amount: "200",
+      currency: "EUR",
+      source: "manual",
+    });
+
+    const resp = await getRealizedByYear({ id: accountId });
+    // Newest year first.
+    expect(resp.years).toEqual([
+      { year: 2025, realized: "400.00", sell_count: 2, complete: true },
+      { year: 2024, realized: "200.00", sell_count: 1, complete: true },
+    ]);
+    expect(resp.complete).toBe(true);
+  });
+
+  it("flags incomplete years when contributing positions are incomplete", async () => {
+    setAuth("1", ["finance.view", "finance.admin"]);
+    const bcId = await insertBankcontact();
+    const accountId = await insertDepot(bcId);
+
+    // Giro-derived buy without amount/price — flips position to incomplete.
+    await insertDepotBuy({
+      accountId,
+      executedAt: "2024-01-01",
+      isin: "DE000A1EWWW0",
+      amount: null,
+      price: null,
+      netAmount: "1000",
+    });
+    await insertDepotBuy({
+      accountId,
+      executedAt: "2024-02-10",
+      isin: "DE000A1EWWW0",
+      amount: "10",
+      price: "100",
+    });
+    await db.insert(financeDepotTransaction).values({
+      account_id: accountId,
+      isin: "DE000A1EWWW0",
+      kind: "sell",
+      executed_at: "2024-06-10",
+      amount: "2",
+      price: "150",
+      gross_amount: null,
+      fees: null,
+      tax: null,
+      net_amount: "300",
+      currency: "EUR",
+      source: "manual",
+    });
+
+    const resp = await getRealizedByYear({ id: accountId });
+    expect(resp.years).toHaveLength(1);
+    expect(resp.years[0].year).toBe(2024);
+    expect(resp.years[0].realized).toBe("100.00");
+    expect(resp.years[0].complete).toBe(false);
+    expect(resp.complete).toBe(false);
+  });
+
+  it("rejects access when caller has no ACL entry", async () => {
+    setAuth("1", ["finance.view", "finance.admin"]);
+    const bcId = await insertBankcontact();
+    const accountId = await insertDepot(bcId);
+
+    // Caller without admin and without an ACL row.
+    setAuth("999", ["finance.view"]);
+    await expect(getRealizedByYear({ id: accountId })).rejects.toThrow();
   });
 });

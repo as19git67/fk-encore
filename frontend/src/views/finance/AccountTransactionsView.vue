@@ -39,6 +39,7 @@ import type {
   ListTransactionsQuery,
   OverviewAccount,
   OverviewSection,
+  RealizedYearBucket,
   Transaction,
 } from '../../api/finance'
 import {
@@ -46,6 +47,7 @@ import {
   deleteDepotTransaction,
   deriveDepotTransactionsFromGiro,
   getHoldingsHistory,
+  getRealizedByYear,
   listDepotTransactions,
   listHoldings,
 } from '../../api/finance'
@@ -322,21 +324,42 @@ function openCashTransactionForm() {
 const holdings = ref<Holding[]>([])
 const holdingsAsOf = ref<string | null>(null)
 const holdingsLoading = ref(false)
+const realizedYears = ref<RealizedYearBucket[]>([])
+const realizedYearsComplete = ref(true)
+const realizedYearsCurrency = ref<string>('EUR')
 
 async function loadHoldings() {
   if (!isDepot.value || !mode.value || mode.value.kind !== 'account') {
     holdings.value = []
     holdingsAsOf.value = null
+    realizedYears.value = []
+    realizedYearsComplete.value = true
     return
   }
   holdingsLoading.value = true
   try {
-    const resp = await listHoldings(mode.value.accountId)
-    holdings.value = resp.items
-    holdingsAsOf.value = resp.as_of
+    // Load holdings and yearly realized G/V in parallel — they share the
+    // same underlying tx table but compute different aggregates.
+    const accountId = mode.value.accountId
+    const [holdingsResp, realizedResp] = await Promise.all([
+      listHoldings(accountId),
+      getRealizedByYear(accountId).catch(() => null),
+    ])
+    holdings.value = holdingsResp.items
+    holdingsAsOf.value = holdingsResp.as_of
+    if (realizedResp) {
+      realizedYears.value = realizedResp.years
+      realizedYearsComplete.value = realizedResp.complete
+      realizedYearsCurrency.value = realizedResp.currency
+    } else {
+      realizedYears.value = []
+      realizedYearsComplete.value = true
+    }
   } catch {
     holdings.value = []
     holdingsAsOf.value = null
+    realizedYears.value = []
+    realizedYearsComplete.value = true
   } finally {
     holdingsLoading.value = false
   }
@@ -1527,6 +1550,38 @@ function goBack() {
       </div>
     </section>
 
+    <section
+      v-if="isDepot && realizedYears.length > 0"
+      class="realized-year-section"
+    >
+      <h2 class="realized-year-title">Realisierter G/V pro Steuerjahr</h2>
+      <ul class="realized-year-list">
+        <li
+          v-for="bucket in realizedYears"
+          :key="bucket.year"
+          class="realized-year-row"
+          :class="`holdings-gain-${gainSign(bucket.realized)}`"
+        >
+          <span class="realized-year-year">{{ bucket.year }}</span>
+          <span class="realized-year-amount">
+            {{ formatSignedCurrency(bucket.realized, realizedYearsCurrency) }}
+            <span
+              v-if="!bucket.complete"
+              class="holdings-cost-source"
+              title="Einige Käufe ohne Stück/Kurs — die Zahl kann ungenau sein"
+            >*</span>
+          </span>
+          <span class="realized-year-count">
+            {{ bucket.sell_count }} {{ bucket.sell_count === 1 ? 'Verkauf' : 'Verkäufe' }}
+          </span>
+        </li>
+      </ul>
+      <p v-if="!realizedYearsComplete" class="realized-year-note">
+        * Einige Positionen haben Käufe ohne Stück/Kurs (z.B. aus Giro abgeleitet) —
+        die Jahressummen können dadurch ungenau sein.
+      </p>
+    </section>
+
     <Message v-if="txStore.error" severity="error" :closable="false">
       {{ txStore.error }}
     </Message>
@@ -1950,6 +2005,54 @@ function goBack() {
      this the nowrap number cells would force the section — and the
      whole .page column — wider than the viewport on portrait. */
   min-width: 0;
+}
+
+.realized-year-section {
+  margin: -0.5rem 0 1.5rem;
+  min-width: 0;
+}
+.realized-year-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+}
+.realized-year-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+.realized-year-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--p-content-border-color);
+}
+.realized-year-row:last-child {
+  border-bottom: none;
+}
+.realized-year-year {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.realized-year-amount {
+  text-align: right;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.realized-year-count {
+  color: var(--p-text-muted-color);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.realized-year-note {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
 }
 .holdings-section-head {
   display: flex;

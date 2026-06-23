@@ -387,6 +387,28 @@ export async function listHoldings(
   return apiFetch(`/finance/accounts/${accountId}/holdings${qs ? '?' + qs : ''}`)
 }
 
+// Realized G/V per tax year
+
+export interface RealizedYearBucket {
+  year: number
+  realized: string
+  sell_count: number
+  /** False if any contributing position had incomplete buy/sell data. */
+  complete: boolean
+}
+
+export interface RealizedByYearResponse {
+  years: RealizedYearBucket[]
+  complete: boolean
+  currency: string
+}
+
+export async function getRealizedByYear(
+  accountId: number,
+): Promise<RealizedByYearResponse> {
+  return apiFetch(`/finance/accounts/${accountId}/realized-by-year`)
+}
+
 // Holdings history (Phase 1 of #439 / #428)
 
 export interface HoldingsHistoryPoint {
