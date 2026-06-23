@@ -39,6 +39,7 @@ import type {
   ListTransactionsQuery,
   OverviewAccount,
   OverviewSection,
+  RealizedYearBucket,
   Transaction,
 } from '../../api/finance'
 import {
@@ -46,6 +47,7 @@ import {
   deleteDepotTransaction,
   deriveDepotTransactionsFromGiro,
   getHoldingsHistory,
+  getRealizedByYear,
   listDepotTransactions,
   listHoldings,
 } from '../../api/finance'
@@ -322,21 +324,42 @@ function openCashTransactionForm() {
 const holdings = ref<Holding[]>([])
 const holdingsAsOf = ref<string | null>(null)
 const holdingsLoading = ref(false)
+const realizedYears = ref<RealizedYearBucket[]>([])
+const realizedYearsComplete = ref(true)
+const realizedYearsCurrency = ref<string>('EUR')
 
 async function loadHoldings() {
   if (!isDepot.value || !mode.value || mode.value.kind !== 'account') {
     holdings.value = []
     holdingsAsOf.value = null
+    realizedYears.value = []
+    realizedYearsComplete.value = true
     return
   }
   holdingsLoading.value = true
   try {
-    const resp = await listHoldings(mode.value.accountId)
-    holdings.value = resp.items
-    holdingsAsOf.value = resp.as_of
+    // Load holdings and yearly realized G/V in parallel — they share the
+    // same underlying tx table but compute different aggregates.
+    const accountId = mode.value.accountId
+    const [holdingsResp, realizedResp] = await Promise.all([
+      listHoldings(accountId),
+      getRealizedByYear(accountId).catch(() => null),
+    ])
+    holdings.value = holdingsResp.items
+    holdingsAsOf.value = holdingsResp.as_of
+    if (realizedResp) {
+      realizedYears.value = realizedResp.years
+      realizedYearsComplete.value = realizedResp.complete
+      realizedYearsCurrency.value = realizedResp.currency
+    } else {
+      realizedYears.value = []
+      realizedYearsComplete.value = true
+    }
   } catch {
     holdings.value = []
     holdingsAsOf.value = null
+    realizedYears.value = []
+    realizedYearsComplete.value = true
   } finally {
     holdingsLoading.value = false
   }
@@ -349,6 +372,62 @@ const holdingsTotal = computed(() => {
     if (Number.isFinite(v)) sum += v
   }
   return sum
+})
+
+const holdingsCostTotal = computed(() => {
+  let sum = 0
+  let any = false
+  for (const h of holdings.value) {
+    if (h.cost_basis === null) continue
+    const v = Number(h.cost_basis)
+    if (Number.isFinite(v)) {
+      sum += v
+      any = true
+    }
+  }
+  return any ? sum : null
+})
+
+const holdingsGainTotal = computed(() => {
+  let sum = 0
+  let any = false
+  for (const h of holdings.value) {
+    if (h.unrealized_gain === null) continue
+    const v = Number(h.unrealized_gain)
+    if (Number.isFinite(v)) {
+      sum += v
+      any = true
+    }
+  }
+  return any ? sum : null
+})
+
+const holdingsGainPctTotal = computed(() => {
+  const cost = holdingsCostTotal.value
+  const gain = holdingsGainTotal.value
+  if (cost === null || gain === null || cost === 0) return null
+  return (gain / cost) * 100
+})
+
+const holdingsRealizedTotal = computed(() => {
+  let sum = 0
+  let any = false
+  for (const h of holdings.value) {
+    if (h.realized_gain === null) continue
+    const v = Number(h.realized_gain)
+    if (Number.isFinite(v)) {
+      sum += v
+      any = true
+    }
+  }
+  return any ? sum : null
+})
+
+const holdingsRealizedComplete = computed(() => {
+  for (const h of holdings.value) {
+    if (h.realized_gain !== null && !h.realized_gain_complete) return false
+  }
+  return true
 })
 
 function formatCurrency(val: string | number | null, currency?: string): string {
@@ -375,6 +454,37 @@ function holdingShare(h: Holding): string {
   if (holdingsTotal.value === 0 || h.value === null) return '–'
   const pct = (Number(h.value) / holdingsTotal.value) * 100
   return pct.toFixed(1) + ' %'
+}
+
+function formatSignedPercent(pct: number | string | null): string {
+  if (pct === null) return '–'
+  const n = typeof pct === 'number' ? pct : Number(pct)
+  if (!Number.isFinite(n)) return '–'
+  const sign = n > 0 ? '+' : ''
+  return sign + n.toFixed(2).replace('.', ',') + ' %'
+}
+
+function formatSignedCurrency(
+  val: string | number | null,
+  currency?: string,
+): string {
+  if (val === null) return '–'
+  const n = typeof val === 'number' ? val : Number(val)
+  if (!Number.isFinite(n)) return String(val)
+  const formatted = new Intl.NumberFormat('de-DE', {
+    style: 'currency',
+    currency: currency || 'EUR',
+  }).format(n)
+  // Intl always prefixes a minus on negatives; prepend '+' on positives so
+  // gains/losses read at a glance.
+  return n > 0 ? '+' + formatted : formatted
+}
+
+function gainSign(val: string | number | null): 'pos' | 'neg' | 'flat' {
+  if (val === null) return 'flat'
+  const n = typeof val === 'number' ? val : Number(val)
+  if (!Number.isFinite(n) || n === 0) return 'flat'
+  return n > 0 ? 'pos' : 'neg'
 }
 
 watch(isDepot, (v) => { if (v) void loadHoldings() }, { immediate: true })
@@ -1246,6 +1356,9 @@ function goBack() {
               </th>
               <th class="holdings-col-num">Kurs</th>
               <th class="holdings-col-num">Wert</th>
+              <th class="holdings-col-num holdings-col-cost">Einstand</th>
+              <th class="holdings-col-num holdings-col-gain">G/V</th>
+              <th class="holdings-col-num holdings-col-realized">Realisiert</th>
               <th class="holdings-col-num holdings-col-share">Anteil</th>
             </tr>
           </thead>
@@ -1266,13 +1379,39 @@ function goBack() {
                 <td class="holdings-col-num">{{ formatAmount(h.amount) }}</td>
                 <td class="holdings-col-num">{{ formatCurrency(h.price, h.currency ?? undefined) }}</td>
                 <td class="holdings-col-num holdings-value">{{ formatCurrency(h.value, h.currency ?? undefined) }}</td>
+                <td class="holdings-col-num holdings-col-cost">
+                  {{ formatCurrency(h.cost_basis, h.currency ?? undefined) }}
+                  <span
+                    v-if="h.cost_basis_source === 'tx-wac'"
+                    class="holdings-cost-source"
+                    title="Aus Käufen berechnet (gewichteter Durchschnitt) — die Bank liefert keinen Einstandskurs"
+                  >∅</span>
+                </td>
+                <td
+                  class="holdings-col-num holdings-col-gain"
+                  :class="`holdings-gain-${gainSign(h.unrealized_gain)}`"
+                >
+                  <span class="holdings-gain-amount">{{ formatSignedCurrency(h.unrealized_gain, h.currency ?? undefined) }}</span>
+                  <span v-if="h.unrealized_gain_pct !== null" class="holdings-gain-pct">{{ formatSignedPercent(h.unrealized_gain_pct) }}</span>
+                </td>
+                <td
+                  class="holdings-col-num holdings-col-realized"
+                  :class="`holdings-gain-${gainSign(h.realized_gain)}`"
+                >
+                  <span class="holdings-gain-amount">{{ formatSignedCurrency(h.realized_gain, h.currency ?? undefined) }}</span>
+                  <span
+                    v-if="h.realized_gain !== null && !h.realized_gain_complete"
+                    class="holdings-cost-source"
+                    title="Einige Käufe ohne Stück/Kurs — die Zahl kann ungenau sein"
+                  >*</span>
+                </td>
                 <td class="holdings-col-num holdings-col-share">{{ holdingShare(h) }}</td>
               </tr>
               <tr
                 v-if="expandedPositionKey === (h.isin || h.wkn || h.name || '')"
                 class="holdings-history-row"
               >
-                <td colspan="5">
+                <td colspan="8">
                   <div class="holdings-history-head">
                     <span class="holdings-history-label">Verlauf</span>
                     <div class="holdings-history-toggle">
@@ -1440,11 +1579,62 @@ function goBack() {
             <tr>
               <td class="holdings-col-name" colspan="3">Gesamt</td>
               <td class="holdings-col-num holdings-value">{{ formatCurrency(holdingsTotal) }}</td>
+              <td class="holdings-col-num holdings-col-cost">{{ formatCurrency(holdingsCostTotal) }}</td>
+              <td
+                class="holdings-col-num holdings-col-gain"
+                :class="`holdings-gain-${gainSign(holdingsGainTotal)}`"
+              >
+                <span class="holdings-gain-amount">{{ formatSignedCurrency(holdingsGainTotal) }}</span>
+                <span v-if="holdingsGainPctTotal !== null" class="holdings-gain-pct">{{ formatSignedPercent(holdingsGainPctTotal) }}</span>
+              </td>
+              <td
+                class="holdings-col-num holdings-col-realized"
+                :class="`holdings-gain-${gainSign(holdingsRealizedTotal)}`"
+              >
+                <span class="holdings-gain-amount">{{ formatSignedCurrency(holdingsRealizedTotal) }}</span>
+                <span
+                  v-if="holdingsRealizedTotal !== null && !holdingsRealizedComplete"
+                  class="holdings-cost-source"
+                  title="Einige Käufe ohne Stück/Kurs — die Zahl kann ungenau sein"
+                >*</span>
+              </td>
               <td class="holdings-col-num holdings-col-share">100 %</td>
             </tr>
           </tfoot>
         </table>
       </div>
+    </section>
+
+    <section
+      v-if="isDepot && realizedYears.length > 0"
+      class="realized-year-section"
+    >
+      <h2 class="realized-year-title">Realisierter G/V pro Steuerjahr</h2>
+      <ul class="realized-year-list">
+        <li
+          v-for="bucket in realizedYears"
+          :key="bucket.year"
+          class="realized-year-row"
+          :class="`holdings-gain-${gainSign(bucket.realized)}`"
+        >
+          <span class="realized-year-year">{{ bucket.year }}</span>
+          <span class="realized-year-amount">
+            {{ formatSignedCurrency(bucket.realized, realizedYearsCurrency) }}
+            <span
+              v-if="!bucket.complete"
+              class="holdings-cost-source"
+              title="Einige Käufe ohne Stück/Kurs — die Zahl kann ungenau sein"
+            >*</span>
+          </span>
+          <span class="realized-year-count">
+            {{ bucket.sell_count }} {{ bucket.sell_count === 1 ? 'Verkauf' : 'Verkäufe' }}
+          </span>
+        </li>
+      </ul>
+      <p v-if="!realizedYearsComplete" class="realized-year-note">
+        * Einige Positionen haben Käufe ohne Stück/Kurs (z.B. aus Giro abgeleitet) —
+        die Jahressummen können dadurch ungenau sein.
+      </p>
     </section>
 
     <Message v-if="txStore.error" severity="error" :closable="false">
@@ -1875,6 +2065,54 @@ function goBack() {
      whole .page column — wider than the viewport on portrait. */
   min-width: 0;
 }
+
+.realized-year-section {
+  margin: -0.5rem 0 1.5rem;
+  min-width: 0;
+}
+.realized-year-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+}
+.realized-year-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+.realized-year-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--p-content-border-color);
+}
+.realized-year-row:last-child {
+  border-bottom: none;
+}
+.realized-year-year {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.realized-year-amount {
+  text-align: right;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.realized-year-count {
+  color: var(--p-text-muted-color);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.realized-year-note {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
+}
 .holdings-section-head {
   display: flex;
   align-items: center;
@@ -1936,6 +2174,34 @@ function goBack() {
 }
 .holdings-value {
   font-weight: 600;
+}
+.holdings-col-cost,
+.holdings-col-gain,
+.holdings-col-realized {
+  white-space: nowrap;
+}
+.holdings-cost-source {
+  margin-left: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color);
+  cursor: help;
+}
+.holdings-gain-amount {
+  display: block;
+}
+.holdings-gain-pct {
+  display: block;
+  font-size: 0.75rem;
+  opacity: 0.85;
+}
+.holdings-gain-pos {
+  color: var(--p-green-600, #16a34a);
+}
+.holdings-gain-neg {
+  color: var(--p-red-600, #dc2626);
+}
+.holdings-gain-flat {
+  color: var(--p-text-muted-color);
 }
 .holdings-row {
   cursor: pointer;
