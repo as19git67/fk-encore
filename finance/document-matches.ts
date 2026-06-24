@@ -38,13 +38,19 @@ export const transactionDocumentLinks = api({ expose: true, method: 'GET', path:
   const auth = getAuthData()!; requirePermission(auth, 'finance.view')
   const ids = await readableTransactionIds(Number(auth.userID), [transactionId])
   if (!ids.length) throw APIError.permissionDenied('Keine Berechtigung für diese Buchung')
-  const rows = await db.execute<{ document_id: number; title: string | null; original_filename: string }>(`SELECT d.id AS document_id, d.title, d.original_filename FROM finance_transaction_document l JOIN documents d ON d.id = l.document_id WHERE l.transaction_id = ${transactionId}`)
-  return rows.rows
+  try {
+    const rows = await db.execute<{ document_id: number; title: string | null; original_filename: string }>(`SELECT d.id AS document_id, d.title, d.original_filename FROM finance_transaction_document l JOIN documents d ON d.id = l.document_id WHERE l.transaction_id = ${transactionId}`)
+    return rows.rows
+  } catch (err: any) {
+    if (err?.code === '42P01' || err?.cause?.code === '42P01') return []
+    throw err
+  }
 })
 
 export const documentTransactionLinks = api({ expose: true, method: 'GET', path: '/finance/documents/:documentId/transactions', auth: true }, async ({ documentId }: { documentId: number }) => {
   const auth = getAuthData()!; requirePermission(auth, 'finance.view')
-  const rows = await db.execute<{ transaction_id: number; booking_date: string; amount: string; counterparty: string | null }>(`SELECT t.id AS transaction_id, t.booking_date, t.amount, t.counterparty FROM finance_transaction_document l JOIN finance_transaction t ON t.id = l.transaction_id WHERE l.document_id = ${documentId}`)
+  let rows
+  try { rows = await db.execute<{ transaction_id: number; booking_date: string; amount: string; counterparty: string | null }>(`SELECT t.id AS transaction_id, t.booking_date, t.amount, t.counterparty FROM finance_transaction_document l JOIN finance_transaction t ON t.id = l.transaction_id WHERE l.document_id = ${documentId}`) } catch (err: any) { if (err?.code === '42P01' || err?.cause?.code === '42P01') return []; throw err }
   const allowed = await readableTransactionIds(Number(auth.userID), rows.rows.map(row => row.transaction_id))
   return rows.rows.filter(row => allowed.includes(row.transaction_id))
 })
