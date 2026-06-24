@@ -10,6 +10,7 @@ import DatePicker from 'primevue/datepicker'
 import TagAutoComplete from '../../components/finance/TagAutoComplete.vue'
 import Textarea from 'primevue/textarea'
 import Dialog from 'primevue/dialog'
+import { useConfirm } from 'primevue/useconfirm'
 import { toLocalIsoDate } from '../../utils/dateFormat'
 import { useModuleBack } from '../../composables/useModuleBack'
 import { useTransactionsStore } from '../../stores/finance/transactions'
@@ -27,6 +28,7 @@ const txStore = useTransactionsStore()
 const accountsStore = useAccountsStore()
 const tagsStore = useTagsStore()
 const selectionStore = useTxSelectionStore()
+const confirmDialog = useConfirm()
 
 const tx = ref<Transaction | null>(null)
 const newTag = ref<string[]>([])
@@ -37,7 +39,25 @@ const saving = ref(false)
 const deleting = ref(false)
 const copyToast = ref<string | null>(null)
 const linkedDocuments = ref<Array<{ document_id: number; title: string | null; original_filename: string }>>([])
-async function unlinkDocument(documentId: number) { if (!tx.value) return; await api.unlinkTransactionDocument(tx.value.id, documentId); linkedDocuments.value = linkedDocuments.value.filter(d => d.document_id !== documentId) }
+async function unlinkDocument(documentId: number) {
+  if (!tx.value) return
+  try {
+    await api.unlinkTransactionDocument(tx.value.id, documentId)
+    linkedDocuments.value = linkedDocuments.value.filter(d => d.document_id !== documentId)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  }
+}
+function requestUnlinkDocument(documentId: number) {
+  confirmDialog.require({
+    message: 'Verknüpfung zu diesem Beleg wirklich trennen?',
+    header: 'Belegverknüpfung trennen',
+    icon: 'pi pi-exclamation-triangle',
+    rejectProps: { label: 'Abbrechen', severity: 'secondary', outlined: true },
+    acceptProps: { label: 'Trennen', severity: 'danger' },
+    accept: () => { void unlinkDocument(documentId) },
+  })
+}
 
 // Editable form state (kept in sync with tx)
 const formNotice = ref('')
@@ -255,7 +275,7 @@ async function save() {
 
 async function deleteTx() {
   if (!tx.value) return
-  if (!confirm('Diese Buchung wirklich löschen?')) return
+  if (!window.confirm('Diese Buchung wirklich löschen?')) return
   deleting.value = true
   try {
     await api.deleteTransaction(tx.value.id)
@@ -481,7 +501,15 @@ const extractedFields = computed(() => {
 
     <section v-if="tx" class="card">
       <dl class="details">
-        <dt>Verknüpfte Belege</dt><dd><span v-for="document in linkedDocuments" :key="document.document_id"><Button :label="document.title ?? document.original_filename" size="small" text @click="router.push({ name: 'dokumente-detail', params: { id: document.document_id } })" /><Button icon="pi pi-times" size="small" text aria-label="Belegverknüpfung trennen" @click="unlinkDocument(document.document_id)" /></span></dd>
+        <template v-if="linkedDocuments.length">
+          <dt>Verknüpfte Belege</dt>
+          <dd class="linked-documents">
+            <span v-for="document in linkedDocuments" :key="document.document_id" class="linked-document">
+              <Button :label="document.title ?? document.original_filename" size="small" text @click="router.push({ name: 'dokumente-detail', params: { id: document.document_id }, query: { fromTransaction: String(tx.id) } })" />
+              <Button icon="pi pi-times" size="small" text aria-label="Belegverknüpfung trennen" @click="requestUnlinkDocument(document.document_id)" />
+            </span>
+          </dd>
+        </template>
         <dt>Buchungsdatum</dt>
         <dd v-if="isCash">
           <DatePicker v-model="formBookingDate" date-format="dd.mm.yy" show-icon fluid />
@@ -832,6 +860,20 @@ const extractedFields = computed(() => {
 .details dd {
   margin: 0;
   word-break: break-word;
+}
+.linked-documents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .25rem .5rem;
+}
+.linked-document {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: .35rem;
+}
+.linked-document :deep(.p-button) {
+  padding-block: .25rem;
 }
 .field-input {
   width: 100%;
