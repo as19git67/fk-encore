@@ -18,7 +18,10 @@ export const suggestDocuments = api({ expose: true, method: 'POST', path: '/fina
   const auth = getAuthData()!; requirePermission(auth, 'finance.view')
   const ids = await readableTransactionIds(Number(auth.userID), transaction_ids)
   if (ids.length !== transaction_ids.length) throw APIError.permissionDenied('Keine Berechtigung für eine oder mehrere Buchungen')
-  return Promise.all(ids.map(createSuggestionsForTransaction))
+  await Promise.all(ids.map(createSuggestionsForTransaction))
+  const rows = await db.select().from(financeDocumentMatchSuggestion).where(inArray(financeDocumentMatchSuggestion.transaction_id, ids))
+  const visible = await Promise.all(rows.map(async row => { try { await loadVisibleDocument(Number(auth.userID), row.document_id); return row } catch { return null } }))
+  return visible.filter((row): row is NonNullable<typeof row> => row !== null)
 })
 
 export const decideDocumentSuggestion = api({ expose: true, method: 'POST', path: '/finance/document-matches/:id/decision', auth: true }, async ({ id, outcome }: { id: number; outcome: 'accepted' | 'rejected' | 'ignored' }) => {
@@ -41,7 +44,8 @@ export const transactionDocumentLinks = api({ expose: true, method: 'GET', path:
   if (!ids.length) throw APIError.permissionDenied('Keine Berechtigung für diese Buchung')
   try {
     const rows = await db.execute<{ document_id: number; title: string | null; original_filename: string }>(`SELECT d.id AS document_id, d.title, d.original_filename FROM finance_transaction_document l JOIN documents d ON d.id = l.document_id WHERE l.transaction_id = ${transactionId}`)
-    return rows.rows
+    const visible = await Promise.all(rows.rows.map(async row => { try { await loadVisibleDocument(Number(auth.userID), row.document_id); return row } catch { return null } }))
+    return visible.filter((row): row is NonNullable<typeof row> => row !== null)
   } catch (err: any) {
     if (err?.code === '42P01' || err?.cause?.code === '42P01') return []
     throw err
