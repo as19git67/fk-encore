@@ -26,6 +26,7 @@ const tagDialogVisible = ref(false)
 const noticeDialogVisible = ref(false)
 const exporting = ref(false)
 const actionError = ref<string | null>(null)
+const actionInfo = ref<string | null>(null)
 const documentSuggestions = ref<DocumentMatchSuggestion[]>([])
 const loadingSuggestions = ref(false)
 const documentQuery = ref('')
@@ -78,13 +79,20 @@ async function searchBasketDocuments() {
   actionError.value = null
   documentResults.value = (await searchDocuments(query)).items
 }
-async function linkDocument(documentId: number) { await linkDocumentsToTransactions(selectionStore.ids, [documentId]); documentResults.value = documentResults.value.filter(d => d.id !== documentId) }
+async function linkDocument(documentId: number) {
+  try {
+    actionError.value = null
+    const result = await linkDocumentsToTransactions(selectionStore.ids, [documentId])
+    documentResults.value = documentResults.value.filter(d => d.id !== documentId)
+    actionInfo.value = `${result.linked} Verknüpfung${result.linked === 1 ? '' : 'en'} erstellt.`
+  } catch (err) { actionError.value = err instanceof Error ? err.message : String(err) }
+}
 
 async function loadDocumentSuggestions() {
   if (!count.value || loadingSuggestions.value) return
   loadingSuggestions.value = true
   try { documentSuggestions.value = await suggestDocumentsForTransactions(selectionStore.ids) }
-  catch (err) { actionError.value = err instanceof Error ? err.message : String(err) }
+  catch (err) { actionError.value = `Belegvorschläge konnten nicht geladen werden: ${err instanceof Error ? err.message : String(err)}` }
   finally { loadingSuggestions.value = false }
   matchMetrics.value = await getDocumentMatchMetrics().catch(() => null)
 }
@@ -207,6 +215,7 @@ async function exportCsv() {
 
       <template #footer>
         <div class="drawer-footer">
+          <Message v-if="actionInfo" severity="success" :closable="true" class="action-error" @close="actionInfo = null">{{ actionInfo }}</Message>
           <Message
             v-if="actionError"
             severity="error"
