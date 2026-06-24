@@ -33,3 +33,12 @@ export async function markExpiredSuggestionsIgnored(now = new Date()) {
   const cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString()
   return db.update(financeDocumentMatchSuggestion).set({ outcome: 'ignored', decided_at: now.toISOString() }).where(and(eq(financeDocumentMatchSuggestion.outcome, 'pending'), lte(financeDocumentMatchSuggestion.created_at, cutoff)))
 }
+
+export async function createSuggestionsForDocument(documentId: number) {
+  const [document] = await db.select().from(documents).where(eq(documents.id, documentId)).limit(1)
+  if (!document || document.status !== 'ready') return []
+  const transactions = await db.select().from(financeTransaction).limit(500)
+  const matches = transactions.map(transaction => ({ transaction, score: scoreDocumentMatch({ amount: Number(transaction.amount), bookingDate: transaction.booking_date, counterparty: transaction.counterparty, purpose: transaction.purpose }, { documentDate: document.doc_date, sender: document.sender, text: document.extracted_text }) })).filter(match => match.score.total >= .45)
+  for (const { transaction, score } of matches) await db.insert(financeDocumentMatchSuggestion).values({ transaction_id: transaction.id, document_id: documentId, score: score.total, amount_score: score.amount, date_score: score.date, text_score: score.text }).onConflictDoNothing()
+  return matches
+}
