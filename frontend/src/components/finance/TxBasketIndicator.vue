@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import Button from 'primevue/button'
+import InputText from 'primevue/inputtext'
 import Drawer from 'primevue/drawer'
 import Message from 'primevue/message'
 import { useTxSelectionStore } from '../../stores/finance/selection'
-import { downloadTransactionsCsv, suggestDocumentsForTransactions, decideDocumentMatch, getDocumentMatchMetrics, type DocumentMatchSuggestion, type Transaction } from '../../api/finance'
+import { downloadTransactionsCsv, suggestDocumentsForTransactions, decideDocumentMatch, getDocumentMatchMetrics, linkDocumentsToTransactions, type DocumentMatchSuggestion, type Transaction } from '../../api/finance'
 import BatchTagDialog from './BatchTagDialog.vue'
 import BatchNoticeDialog from './BatchNoticeDialog.vue'
+import { searchDocuments, type DocumentSummary } from '../../api/documents'
 import { basketTags, basketCounterparties, basketMonths, hasMixedCurrencies, type BasketAggregate } from '../../utils/financeBasketAnalysis'
 
 /**
@@ -26,6 +28,8 @@ const exporting = ref(false)
 const actionError = ref<string | null>(null)
 const documentSuggestions = ref<DocumentMatchSuggestion[]>([])
 const loadingSuggestions = ref(false)
+const documentQuery = ref('')
+const documentResults = ref<DocumentSummary[]>([])
 const matchMetrics = ref<{ high: Record<string, number>; medium: Record<string, number>; low: Record<string, number> } | null>(null)
 const analysisView = ref<'tags' | 'counterparties' | 'months'>('tags')
 
@@ -67,6 +71,9 @@ function monthLabel(month: string): string {
   if (!/^\d{4}-\d{2}$/.test(month)) return month
   return new Date(`${month}-01T12:00:00`).toLocaleDateString('de-DE', { month: 'short', year: 'numeric' })
 }
+
+async function searchBasketDocuments() { documentResults.value = (await searchDocuments(documentQuery.value)).items }
+async function linkDocument(documentId: number) { await linkDocumentsToTransactions(selectionStore.ids, [documentId]); documentResults.value = documentResults.value.filter(d => d.id !== documentId) }
 
 async function loadDocumentSuggestions() {
   if (!count.value || loadingSuggestions.value) return
@@ -145,7 +152,7 @@ async function exportCsv() {
       </div>
 
       <div v-else>
-      <section class="basket-matches"><Button label="Belegvorschläge" icon="pi pi-file" size="small" outlined :loading="loadingSuggestions" @click="loadDocumentSuggestions" /><p v-for="suggestion in documentSuggestions" :key="suggestion.id">Beleg #{{ suggestion.document_id }} · {{ Math.round(suggestion.score * 100) }}% <Button label="Annehmen" size="small" text @click="decideSuggestion(suggestion, 'accepted')" /><Button label="Ablehnen" size="small" text @click="decideSuggestion(suggestion, 'rejected')" /></p><p v-if="matchMetrics" class="basket-match-metrics">Trefferquote (hoch): {{ matchMetrics.high.accepted }} angenommen / {{ matchMetrics.high.rejected }} abgelehnt</p></section>
+      <section class="basket-matches"><div><InputText v-model="documentQuery" placeholder="Dokument suchen" @keyup.enter="searchBasketDocuments" /><Button label="Verknüpfen" size="small" @click="searchBasketDocuments" /></div><p v-for="document in documentResults" :key="document.id">{{ document.title ?? document.original_filename }} <Button label="Verbinden" size="small" text @click="linkDocument(document.id)" /></p><Button label="Belegvorschläge" icon="pi pi-file" size="small" outlined :loading="loadingSuggestions" @click="loadDocumentSuggestions" /><p v-for="suggestion in documentSuggestions" :key="suggestion.id">Beleg #{{ suggestion.document_id }} · {{ Math.round(suggestion.score * 100) }}% <Button label="Annehmen" size="small" text @click="decideSuggestion(suggestion, 'accepted')" /><Button label="Ablehnen" size="small" text @click="decideSuggestion(suggestion, 'rejected')" /></p><p v-if="matchMetrics" class="basket-match-metrics">Trefferquote (hoch): {{ matchMetrics.high.accepted }} angenommen / {{ matchMetrics.high.rejected }} abgelehnt</p></section>
       <ul class="basket-list">
         <section class="basket-analysis" aria-label="Auswertung der Auswahl">
           <div class="basket-analysis-tabs" role="tablist" aria-label="Auswertung gruppieren nach">
