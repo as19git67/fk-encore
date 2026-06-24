@@ -25,3 +25,11 @@ export const decideDocumentSuggestion = api({ expose: true, method: 'POST', path
   await decideSuggestion(id, outcome)
   return { ok: true }
 })
+
+export const documentMatchMetrics = api({ expose: true, method: 'GET', path: '/finance/document-matches/metrics', auth: true }, async () => {
+  const auth = getAuthData()!; requirePermission(auth, 'finance.view')
+  const rows = await db.select({ outcome: financeDocumentMatchSuggestion.outcome, score: financeDocumentMatchSuggestion.score }).from(financeDocumentMatchSuggestion)
+  const buckets = { high: { accepted: 0, rejected: 0, ignored: 0, pending: 0 }, medium: { accepted: 0, rejected: 0, ignored: 0, pending: 0 }, low: { accepted: 0, rejected: 0, ignored: 0, pending: 0 } }
+  for (const row of rows) { const bucket = row.score >= .8 ? buckets.high : row.score >= .6 ? buckets.medium : buckets.low; bucket[row.outcome as keyof typeof bucket]++ }
+  return buckets
+})
