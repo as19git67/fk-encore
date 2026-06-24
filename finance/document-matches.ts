@@ -33,3 +33,11 @@ export const documentMatchMetrics = api({ expose: true, method: 'GET', path: '/f
   for (const row of rows) { const bucket = row.score >= .8 ? buckets.high : row.score >= .6 ? buckets.medium : buckets.low; bucket[row.outcome as keyof typeof bucket]++ }
   return buckets
 })
+
+export const transactionDocumentLinks = api({ expose: true, method: 'GET', path: '/finance/transactions/:transactionId/documents', auth: true }, async ({ transactionId }: { transactionId: number }) => {
+  const auth = getAuthData()!; requirePermission(auth, 'finance.view')
+  const ids = await readableTransactionIds(Number(auth.userID), [transactionId])
+  if (!ids.length) throw APIError.permissionDenied('Keine Berechtigung für diese Buchung')
+  const rows = await db.execute<{ document_id: number; title: string | null; original_filename: string }>(`SELECT d.id AS document_id, d.title, d.original_filename FROM finance_transaction_document l JOIN documents d ON d.id = l.document_id WHERE l.transaction_id = ${transactionId}`)
+  return rows.rows
+})
