@@ -91,7 +91,7 @@ async function loadTransaction(id: number) {
   try {
     error.value = null
     tx.value = await api.getTransaction(id)
-    linkedDocuments.value = await api.getTransactionDocumentLinks(id)
+    linkedDocuments.value = await api.getTransactionDocumentLinks(id).catch(() => [])
     syncForm()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
