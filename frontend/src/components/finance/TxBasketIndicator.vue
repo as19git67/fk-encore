@@ -31,6 +31,7 @@ const documentSuggestions = ref<DocumentMatchSuggestion[]>([])
 const loadingSuggestions = ref(false)
 const documentQuery = ref('')
 const documentResults = ref<DocumentSummary[]>([])
+const manualLinkOpen = ref(false)
 const matchMetrics = ref<{ high: Record<string, number>; medium: Record<string, number>; low: Record<string, number> } | null>(null)
 const analysisView = ref<'tags' | 'counterparties' | 'months'>('tags')
 
@@ -73,11 +74,21 @@ function monthLabel(month: string): string {
   return new Date(`${month}-01T12:00:00`).toLocaleDateString('de-DE', { month: 'short', year: 'numeric' })
 }
 
+function openManualLink() {
+  manualLinkOpen.value = true
+  actionError.value = null
+}
+
 async function searchBasketDocuments() {
   const query = documentQuery.value.trim()
   if (!query) { actionError.value = 'Bitte einen Suchbegriff für das Dokument eingeben.'; return }
   actionError.value = null
-  documentResults.value = (await searchDocuments(query)).items
+  actionInfo.value = null
+  try {
+    documentResults.value = (await searchDocuments(query)).items
+  } catch (err) {
+    actionError.value = `Dokumentsuche konnte nicht geladen werden: ${err instanceof Error ? err.message : String(err)}`
+  }
 }
 async function linkDocument(documentId: number) {
   try {
@@ -165,7 +176,26 @@ async function exportCsv() {
       </div>
 
       <div v-else>
-      <section class="basket-matches"><div class="basket-match-actions"><Button label="Verknüpfen" icon="pi pi-link" size="small" @click="searchBasketDocuments" /><Button label="Belegvorschläge" icon="pi pi-file" size="small" outlined :loading="loadingSuggestions" @click="loadDocumentSuggestions" /></div><div class="basket-document-search"><InputText v-model="documentQuery" placeholder="Dokument suchen" @keyup.enter="searchBasketDocuments" /><Button label="Suchen" size="small" @click="searchBasketDocuments" /></div><p v-for="document in documentResults" :key="document.id">{{ document.title ?? document.original_filename }} <Button label="Verbinden" size="small" text @click="linkDocument(document.id)" /></p><p v-for="suggestion in documentSuggestions" :key="suggestion.id">Beleg #{{ suggestion.document_id }} · {{ Math.round(suggestion.score * 100) }}% <Button label="Annehmen" size="small" text @click="decideSuggestion(suggestion, 'accepted')" /><Button label="Ablehnen" size="small" text @click="decideSuggestion(suggestion, 'rejected')" /></p><p v-if="matchMetrics" class="basket-match-metrics">Trefferquote (hoch): {{ matchMetrics.high.accepted }} angenommen / {{ matchMetrics.high.rejected }} abgelehnt</p></section>
+      <section class="basket-matches">
+        <div class="basket-match-actions">
+          <Button label="Verknüpfen" icon="pi pi-link" size="small" @click="openManualLink" />
+          <Button label="Belegvorschläge" icon="pi pi-file" size="small" outlined :loading="loadingSuggestions" @click="loadDocumentSuggestions" />
+        </div>
+        <div v-if="manualLinkOpen" class="basket-document-search">
+          <InputText v-model="documentQuery" placeholder="Dokument suchen" @keyup.enter="searchBasketDocuments" />
+          <Button label="Suchen" size="small" @click="searchBasketDocuments" />
+        </div>
+        <p v-for="document in documentResults" :key="document.id" class="basket-document-result">
+          {{ document.title ?? document.original_filename }}
+          <Button label="Verbinden" size="small" text @click="linkDocument(document.id)" />
+        </p>
+        <p v-for="suggestion in documentSuggestions" :key="suggestion.id">
+          Beleg #{{ suggestion.document_id }} · {{ Math.round(suggestion.score * 100) }}%
+          <Button label="Annehmen" size="small" text @click="decideSuggestion(suggestion, 'accepted')" />
+          <Button label="Ablehnen" size="small" text @click="decideSuggestion(suggestion, 'rejected')" />
+        </p>
+        <p v-if="matchMetrics" class="basket-match-metrics">Trefferquote (hoch): {{ matchMetrics.high.accepted }} angenommen / {{ matchMetrics.high.rejected }} abgelehnt</p>
+      </section>
       <ul class="basket-list">
         <section class="basket-analysis" aria-label="Auswertung der Auswahl">
           <div class="basket-analysis-tabs" role="tablist" aria-label="Auswertung gruppieren nach">
@@ -315,6 +345,7 @@ async function exportCsv() {
 }
 
 .basket-match-actions { display: flex; gap: .5rem; margin-bottom: .5rem; }
+.basket-match-actions :deep(.p-button) { flex: 1; min-width: 0; }
 .basket-document-search { display: flex; gap: .5rem; margin-bottom: .5rem; }
 .basket-document-search :first-child { flex: 1; }
 .basket-list {

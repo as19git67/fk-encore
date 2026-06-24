@@ -2,7 +2,7 @@ import { api, APIError } from 'encore.dev/api'
 import { getAuthData } from '~encore/auth'
 import { and, eq, inArray } from 'drizzle-orm'
 import db from '../db/database'
-import { financeAccount, financeAccountAccess, financeDocumentMatchSuggestion, financeTransaction } from '../db/schema'
+import { financeAccountAccess, financeDocumentMatchSuggestion, financeTransaction } from '../db/schema'
 import { decideSuggestion, createSuggestionsForTransaction } from './document-match.service'
 import { requirePermission } from '../user/auth-handler'
 import { loadVisibleDocument } from '../documents/visibility'
@@ -16,6 +16,8 @@ interface MatchMetricBucket { accepted: number; rejected: number; ignored: numbe
 interface MatchMetricsResponse { high: MatchMetricBucket; medium: MatchMetricBucket; low: MatchMetricBucket }
 interface LinkResponse { linked: number }
 interface OkResponse { ok: boolean }
+interface TransactionDocumentLinkDTO { document_id: number; title: string | null; original_filename: string }
+interface DocumentTransactionLinkDTO { transaction_id: number; booking_date: string; amount: string; counterparty: string | null }
 
 async function readableTransactionIds(userId: number, ids: number[]) {
   const auth = getAuthData()!
@@ -55,7 +57,7 @@ export const documentMatchMetrics = api({ expose: true, method: 'GET', path: '/f
   return buckets
 })
 
-export const transactionDocumentLinks = api({ expose: true, method: 'GET', path: '/finance/transactions/:transactionId/documents', auth: true }, async ({ transactionId }: { transactionId: number }) => {
+export const transactionDocumentLinks = api({ expose: true, method: 'GET', path: '/finance/transactions/:transactionId/documents', auth: true }, async ({ transactionId }: { transactionId: number }): Promise<TransactionDocumentLinkDTO[]> => {
   const auth = getAuthData()!; requirePermission(auth, 'finance.view')
   const ids = await readableTransactionIds(Number(auth.userID), [transactionId])
   if (!ids.length) throw APIError.permissionDenied('Keine Berechtigung für diese Buchung')
@@ -69,8 +71,9 @@ export const transactionDocumentLinks = api({ expose: true, method: 'GET', path:
   }
 })
 
-export const documentTransactionLinks = api({ expose: true, method: 'GET', path: '/finance/documents/:documentId/transactions', auth: true }, async ({ documentId }: { documentId: number }) => {
+export const documentTransactionLinks = api({ expose: true, method: 'GET', path: '/finance/documents/:documentId/transactions', auth: true }, async ({ documentId }: { documentId: number }): Promise<DocumentTransactionLinkDTO[]> => {
   const auth = getAuthData()!; requirePermission(auth, 'finance.view')
+  await loadVisibleDocument(Number(auth.userID), documentId)
   let rows
   try { rows = await db.execute<{ transaction_id: number; booking_date: string; amount: string; counterparty: string | null }>(`SELECT t.id AS transaction_id, t.booking_date, t.amount, t.counterparty FROM finance_transaction_document l JOIN finance_transaction t ON t.id = l.transaction_id WHERE l.document_id = ${documentId}`) } catch (err: any) { if (err?.code === '42P01' || err?.cause?.code === '42P01') return []; throw err }
   const allowed = await readableTransactionIds(Number(auth.userID), rows.rows.map(row => row.transaction_id))
@@ -89,6 +92,7 @@ export const linkDocuments = api({ expose: true, method: 'POST', path: '/finance
 export const unlinkDocument = api({ expose: true, method: 'POST', path: '/finance/document-matches/unlink', auth: true }, async ({ transaction_id, document_id }: ManualUnlinkParams): Promise<OkResponse> => {
   const auth = getAuthData()!; requirePermission(auth, 'finance.view')
   if (!(await readableTransactionIds(Number(auth.userID), [transaction_id])).length) throw APIError.permissionDenied('Keine Berechtigung für diese Buchung')
+  await loadVisibleDocument(Number(auth.userID), document_id)
   await db.execute(`DELETE FROM finance_transaction_document WHERE transaction_id = ${transaction_id} AND document_id = ${document_id}`)
   return { ok: true }
 })
