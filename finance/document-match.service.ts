@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { and, eq, lte } from 'drizzle-orm'
 import db from '../db/database'
 import { documents, financeDocumentMatchSuggestion, financeTransaction, financeTransactionDocument } from '../db/schema'
 import { scoreDocumentMatch, type MatchScore } from './document-matcher'
@@ -27,3 +27,9 @@ export async function decideSuggestion(id: number, outcome: Exclude<MatchOutcome
 }
 
 export function explainMatchScore(score: MatchScore) { return { amount: Math.round(score.amount * 100), date: Math.round(score.date * 100), text: Math.round(score.text * 100), total: Math.round(score.total * 100) } }
+
+/** Pending suggestions older than 30 days count as ignored for quality metrics. */
+export async function markExpiredSuggestionsIgnored(now = new Date()) {
+  const cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString()
+  return db.update(financeDocumentMatchSuggestion).set({ outcome: 'ignored', decided_at: now.toISOString() }).where(and(eq(financeDocumentMatchSuggestion.outcome, 'pending'), lte(financeDocumentMatchSuggestion.created_at, cutoff)))
+}
