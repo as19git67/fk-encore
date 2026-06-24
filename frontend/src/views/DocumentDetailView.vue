@@ -127,7 +127,7 @@ async function load() {
       listTaxSectionsCatalog(),
       listGroups(),
       listSubjectPersons(),
-      getDocumentTransactionLinks(id),
+      getDocumentTransactionLinks(id).catch(() => []),
     ])
     doc.value = detail
     categories.value = cats.items
