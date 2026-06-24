@@ -48,3 +48,18 @@ export const documentTransactionLinks = api({ expose: true, method: 'GET', path:
   const allowed = await readableTransactionIds(Number(auth.userID), rows.rows.map(row => row.transaction_id))
   return rows.rows.filter(row => allowed.includes(row.transaction_id))
 })
+
+export const linkDocuments = api({ expose: true, method: 'POST', path: '/finance/document-matches/link', auth: true }, async ({ transaction_ids, document_ids }: { transaction_ids: number[]; document_ids: number[] }) => {
+  const auth = getAuthData()!; requirePermission(auth, 'finance.view')
+  const allowed = await readableTransactionIds(Number(auth.userID), transaction_ids)
+  if (allowed.length !== transaction_ids.length) throw APIError.permissionDenied('Keine Berechtigung für eine oder mehrere Buchungen')
+  for (const transaction_id of allowed) for (const document_id of document_ids) await db.execute(`INSERT INTO finance_transaction_document (transaction_id, document_id) VALUES (${transaction_id}, ${document_id}) ON CONFLICT DO NOTHING`)
+  return { linked: allowed.length * document_ids.length }
+})
+
+export const unlinkDocument = api({ expose: true, method: 'POST', path: '/finance/document-matches/unlink', auth: true }, async ({ transaction_id, document_id }: { transaction_id: number; document_id: number }) => {
+  const auth = getAuthData()!; requirePermission(auth, 'finance.view')
+  if (!(await readableTransactionIds(Number(auth.userID), [transaction_id])).length) throw APIError.permissionDenied('Keine Berechtigung für diese Buchung')
+  await db.execute(`DELETE FROM finance_transaction_document WHERE transaction_id = ${transaction_id} AND document_id = ${document_id}`)
+  return { ok: true }
+})
