@@ -481,7 +481,7 @@ const extractedFields = computed(() => {
 
     <section v-if="tx" class="card">
       <dl class="details">
-        <dt>Verknüpfte Belege</dt><dd><span v-for="document in linkedDocuments" :key="document.document_id"><Button :label="document.title ?? document.original_filename" size="small" text @click="router.push({ name: 'document-detail', params: { id: document.document_id } })" /><Button icon="pi pi-times" size="small" text aria-label="Belegverknüpfung trennen" @click="unlinkDocument(document.document_id)" /></span></dd>
+        <dt>Verknüpfte Belege</dt><dd><span v-for="document in linkedDocuments" :key="document.document_id"><Button :label="document.title ?? document.original_filename" size="small" text @click="router.push({ name: 'dokumente-detail', params: { id: document.document_id } })" /><Button icon="pi pi-times" size="small" text aria-label="Belegverknüpfung trennen" @click="unlinkDocument(document.document_id)" /></span></dd>
         <dt>Buchungsdatum</dt>
         <dd v-if="isCash">
           <DatePicker v-model="formBookingDate" date-format="dd.mm.yy" show-icon fluid />
@@ -708,7 +708,7 @@ const extractedFields = computed(() => {
       <div v-if="recurringPopupLoading" class="hint">Lädt …</div>
       <template v-if="recurringPopupTx">
         <dl class="details">
-          <dt>Verknüpfte Belege</dt><dd><span v-for="document in linkedDocuments" :key="document.document_id"><Button :label="document.title ?? document.original_filename" size="small" text @click="router.push({ name: 'document-detail', params: { id: document.document_id } })" /><Button icon="pi pi-times" size="small" text aria-label="Belegverknüpfung trennen" @click="unlinkDocument(document.document_id)" /></span></dd>
+          <dt>Verknüpfte Belege</dt><dd><span v-for="document in linkedDocuments" :key="document.document_id"><Button :label="document.title ?? document.original_filename" size="small" text @click="router.push({ name: 'dokumente-detail', params: { id: document.document_id } })" /><Button icon="pi pi-times" size="small" text aria-label="Belegverknüpfung trennen" @click="unlinkDocument(document.document_id)" /></span></dd>
         <dt>Buchungsdatum</dt>
           <dd>{{ recurringPopupTx.booking_date }}</dd>
           <template v-if="recurringPopupTx.value_date">
