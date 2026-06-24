@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { scoreDocumentMatch } from './document-matcher'
+import { extractDocumentAmount, scoreDocumentMatch } from './document-matcher'
 
 describe('scoreDocumentMatch', () => {
   const transaction = { amount: -42.5, bookingDate: '2026-06-10', counterparty: 'Bäckerei Müller', purpose: 'Rechnung 4711' }
+  it('extracts explicitly labelled German invoice totals', () => { expect(extractDocumentAmount('Gesamtbetrag: 1.234,56 EUR')).toBe(1234.56) })
   it('scores an exact amount, near date and matching OCR text highly', () => {
     const score = scoreDocumentMatch(transaction, { amount: 42.5, documentDate: '2026-06-11', sender: 'Bäckerei Müller', text: 'Rechnung 4711' })
     expect(score.amount).toBe(1)

@@ -6,6 +6,16 @@ function tokens(value: string | null | undefined): Set<string> {
   return new Set((value ?? '').toLocaleLowerCase('de-DE').split(/[^\p{L}\p{N}]+/u).filter(token => token.length >= 3))
 }
 
+
+/** Extract a German invoice total only when it is explicitly labelled. */
+export function extractDocumentAmount(text: string | null | undefined): number | null {
+  const match = (text ?? '').match(/(?:gesamt(?:betrag|summe)|rechnungsbetrag|zu\s+zahlen)\D{0,24}([0-9]{1,3}(?:[. ][0-9]{3})*(?:,[0-9]{2})|[0-9]+(?:[.,][0-9]{2}))/iu)
+  if (!match) return null
+  const normalized = match[1].replace(/[. ](?=\d{3}(?:\D|$))/g, '').replace(',', '.')
+  const amount = Number(normalized)
+  return Number.isFinite(amount) ? amount : null
+}
+
 export function scoreDocumentMatch(transaction: MatchTransaction, document: MatchDocument): MatchScore {
   const transactionAmount = Math.abs(transaction.amount)
   const documentAmount = document.amount == null ? null : Math.abs(document.amount)

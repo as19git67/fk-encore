@@ -1,7 +1,7 @@
 import { and, eq, lte } from 'drizzle-orm'
 import db from '../db/database'
 import { documents, financeDocumentMatchSuggestion, financeTransaction, financeTransactionDocument } from '../db/schema'
-import { scoreDocumentMatch, type MatchScore } from './document-matcher'
+import { extractDocumentAmount, scoreDocumentMatch, type MatchScore } from './document-matcher'
 
 export type MatchOutcome = 'pending' | 'accepted' | 'rejected' | 'ignored'
 
@@ -9,7 +9,7 @@ export async function createSuggestionsForTransaction(transactionId: number) {
   const [transaction] = await db.select().from(financeTransaction).where(eq(financeTransaction.id, transactionId)).limit(1)
   if (!transaction) return []
   const candidates = await db.select().from(documents).where(eq(documents.status, 'ready')).limit(200)
-  const suggestions = candidates.map(document => ({ document, score: scoreDocumentMatch({ amount: Number(transaction.amount), bookingDate: transaction.booking_date, counterparty: transaction.counterparty, purpose: transaction.purpose }, { documentDate: document.doc_date, sender: document.sender, text: document.extracted_text }) })).filter(candidate => candidate.score.total >= 0.45)
+  const suggestions = candidates.map(document => ({ document, score: scoreDocumentMatch({ amount: Number(transaction.amount), bookingDate: transaction.booking_date, counterparty: transaction.counterparty, purpose: transaction.purpose }, { amount: extractDocumentAmount(document.extracted_text), documentDate: document.doc_date, sender: document.sender, text: document.extracted_text }) })).filter(candidate => candidate.score.total >= 0.45)
   for (const { document, score } of suggestions) {
     await db.insert(financeDocumentMatchSuggestion).values({ transaction_id: transactionId, document_id: document.id, score: score.total, amount_score: score.amount, date_score: score.date, text_score: score.text }).onConflictDoNothing()
   }
@@ -38,7 +38,7 @@ export async function createSuggestionsForDocument(documentId: number) {
   const [document] = await db.select().from(documents).where(eq(documents.id, documentId)).limit(1)
   if (!document || document.status !== 'ready') return []
   const transactions = await db.select().from(financeTransaction).limit(500)
-  const matches = transactions.map(transaction => ({ transaction, score: scoreDocumentMatch({ amount: Number(transaction.amount), bookingDate: transaction.booking_date, counterparty: transaction.counterparty, purpose: transaction.purpose }, { documentDate: document.doc_date, sender: document.sender, text: document.extracted_text }) })).filter(match => match.score.total >= .45)
+  const matches = transactions.map(transaction => ({ transaction, score: scoreDocumentMatch({ amount: Number(transaction.amount), bookingDate: transaction.booking_date, counterparty: transaction.counterparty, purpose: transaction.purpose }, { amount: extractDocumentAmount(document.extracted_text), documentDate: document.doc_date, sender: document.sender, text: document.extracted_text }) })).filter(match => match.score.total >= .45)
   for (const { transaction, score } of matches) await db.insert(financeDocumentMatchSuggestion).values({ transaction_id: transaction.id, document_id: documentId, score: score.total, amount_score: score.amount, date_score: score.date, text_score: score.text }).onConflictDoNothing()
   return matches
 }
