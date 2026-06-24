@@ -1211,3 +1211,5 @@ export async function decideDocumentMatch(id: number, outcome: 'accepted' | 'rej
 export async function getTransactionDocumentLinks(transactionId: number) { return apiFetch<Array<{ document_id: number; title: string | null; original_filename: string }>>(`/finance/transactions/${transactionId}/documents`) }
 export async function getDocumentTransactionLinks(documentId: number) { return apiFetch<Array<{ transaction_id: number; booking_date: string; amount: string; counterparty: string | null }>>(`/finance/documents/${documentId}/transactions`) }
 export async function getDocumentMatchMetrics() { return apiFetch<{ high: Record<string, number>; medium: Record<string, number>; low: Record<string, number> }>('/finance/document-matches/metrics') }
+
+export async function unlinkTransactionDocument(transaction_id: number, document_id: number) { return apiFetch<{ ok: boolean }>('/finance/document-matches/unlink', { method: 'POST', body: JSON.stringify({ transaction_id, document_id }) }) }
