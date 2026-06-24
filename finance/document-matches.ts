@@ -5,6 +5,7 @@ import db from '../db/database'
 import { financeAccount, financeAccountAccess, financeDocumentMatchSuggestion, financeTransaction } from '../db/schema'
 import { decideSuggestion, createSuggestionsForTransaction } from './document-match.service'
 import { requirePermission } from '../user/auth-handler'
+import { loadVisibleDocument } from '../documents/visibility'
 
 async function readableTransactionIds(userId: number, ids: number[]) {
   const auth = getAuthData()!
@@ -59,6 +60,7 @@ export const linkDocuments = api({ expose: true, method: 'POST', path: '/finance
   const auth = getAuthData()!; requirePermission(auth, 'finance.view')
   const allowed = await readableTransactionIds(Number(auth.userID), transaction_ids)
   if (allowed.length !== transaction_ids.length) throw APIError.permissionDenied('Keine Berechtigung für eine oder mehrere Buchungen')
+  await Promise.all(document_ids.map(id => loadVisibleDocument(Number(auth.userID), id)))
   for (const transaction_id of allowed) for (const document_id of document_ids) await db.execute(`INSERT INTO finance_transaction_document (transaction_id, document_id) VALUES (${transaction_id}, ${document_id}) ON CONFLICT DO NOTHING`)
   return { linked: allowed.length * document_ids.length }
 })
