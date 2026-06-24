@@ -26,8 +26,11 @@ export const suggestDocuments = api({ expose: true, method: 'POST', path: '/fina
 
 export const decideDocumentSuggestion = api({ expose: true, method: 'POST', path: '/finance/document-matches/:id/decision', auth: true }, async ({ id, outcome }: { id: number; outcome: 'accepted' | 'rejected' | 'ignored' }) => {
   const auth = getAuthData()!; requirePermission(auth, 'finance.view')
-  await decideSuggestion(id, outcome)
-  return { ok: true }
+  const [suggestion] = await db.select().from(financeDocumentMatchSuggestion).where(eq(financeDocumentMatchSuggestion.id, id)).limit(1)
+  if (!suggestion || !(await readableTransactionIds(Number(auth.userID), [suggestion.transaction_id])).length) throw APIError.notFound('suggestion not found')
+  await loadVisibleDocument(Number(auth.userID), suggestion.document_id)
+  const updated = await decideSuggestion(id, outcome)
+  return { ok: updated }
 })
 
 export const documentMatchMetrics = api({ expose: true, method: 'GET', path: '/finance/document-matches/metrics', auth: true }, async () => {
