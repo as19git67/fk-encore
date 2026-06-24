@@ -21,7 +21,11 @@ export const suggestDocuments = api({ expose: true, method: 'POST', path: '/fina
   await Promise.all(ids.map(createSuggestionsForTransaction))
   const rows = await db.select().from(financeDocumentMatchSuggestion).where(inArray(financeDocumentMatchSuggestion.transaction_id, ids))
   const visible = await Promise.all(rows.map(async row => { try { await loadVisibleDocument(Number(auth.userID), row.document_id); return row } catch { return null } }))
-  return visible.filter((row): row is NonNullable<typeof row> => row !== null)
+  return visible.filter((row): row is NonNullable<typeof row> => row !== null).map(row => ({
+    id: Number(row.id), transaction_id: Number(row.transaction_id), document_id: Number(row.document_id),
+    score: Number(row.score), amount_score: Number(row.amount_score), date_score: Number(row.date_score),
+    text_score: Number(row.text_score), outcome: String(row.outcome),
+  }))
 })
 
 export const decideDocumentSuggestion = api({ expose: true, method: 'POST', path: '/finance/document-matches/:id/decision', auth: true }, async ({ id, outcome }: { id: number; outcome: 'accepted' | 'rejected' | 'ignored' }) => {
