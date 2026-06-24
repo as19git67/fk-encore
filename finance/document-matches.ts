@@ -7,6 +7,11 @@ import { decideSuggestion, createSuggestionsForTransaction } from './document-ma
 import { requirePermission } from '../user/auth-handler'
 import { loadVisibleDocument } from '../documents/visibility'
 
+interface SuggestDocumentsParams { transaction_ids: number[] }
+interface DecideSuggestionParams { id: number; outcome: 'accepted' | 'rejected' | 'ignored' }
+interface ManualLinkParams { transaction_ids: number[]; document_ids: number[] }
+interface ManualUnlinkParams { transaction_id: number; document_id: number }
+
 async function readableTransactionIds(userId: number, ids: number[]) {
   const auth = getAuthData()!
   if (auth.permissions.includes('finance.admin')) return ids
@@ -14,7 +19,7 @@ async function readableTransactionIds(userId: number, ids: number[]) {
   return rows.map(row => row.id)
 }
 
-export const suggestDocuments = api({ expose: true, method: 'POST', path: '/finance/document-matches/suggest', auth: true }, async ({ transaction_ids }: { transaction_ids: number[] }) => {
+export const suggestDocuments = api({ expose: true, method: 'POST', path: '/finance/document-matches/suggest', auth: true }, async ({ transaction_ids }: SuggestDocumentsParams) => {
   const auth = getAuthData()!; requirePermission(auth, 'finance.view')
   const ids = await readableTransactionIds(Number(auth.userID), transaction_ids)
   if (ids.length !== transaction_ids.length) throw APIError.permissionDenied('Keine Berechtigung für eine oder mehrere Buchungen')
@@ -28,7 +33,7 @@ export const suggestDocuments = api({ expose: true, method: 'POST', path: '/fina
   }))
 })
 
-export const decideDocumentSuggestion = api({ expose: true, method: 'POST', path: '/finance/document-matches/:id/decision', auth: true }, async ({ id, outcome }: { id: number; outcome: 'accepted' | 'rejected' | 'ignored' }) => {
+export const decideDocumentSuggestion = api({ expose: true, method: 'POST', path: '/finance/document-matches/:id/decision', auth: true }, async ({ id, outcome }: DecideSuggestionParams) => {
   const auth = getAuthData()!; requirePermission(auth, 'finance.view')
   const [suggestion] = await db.select().from(financeDocumentMatchSuggestion).where(eq(financeDocumentMatchSuggestion.id, id)).limit(1)
   if (!suggestion || !(await readableTransactionIds(Number(auth.userID), [suggestion.transaction_id])).length) throw APIError.notFound('suggestion not found')
@@ -67,7 +72,7 @@ export const documentTransactionLinks = api({ expose: true, method: 'GET', path:
   return rows.rows.filter(row => allowed.includes(row.transaction_id))
 })
 
-export const linkDocuments = api({ expose: true, method: 'POST', path: '/finance/document-matches/link', auth: true }, async ({ transaction_ids, document_ids }: { transaction_ids: number[]; document_ids: number[] }) => {
+export const linkDocuments = api({ expose: true, method: 'POST', path: '/finance/document-matches/link', auth: true }, async ({ transaction_ids, document_ids }: ManualLinkParams) => {
   const auth = getAuthData()!; requirePermission(auth, 'finance.view')
   const allowed = await readableTransactionIds(Number(auth.userID), transaction_ids)
   if (allowed.length !== transaction_ids.length) throw APIError.permissionDenied('Keine Berechtigung für eine oder mehrere Buchungen')
@@ -76,7 +81,7 @@ export const linkDocuments = api({ expose: true, method: 'POST', path: '/finance
   return { linked: allowed.length * document_ids.length }
 })
 
-export const unlinkDocument = api({ expose: true, method: 'POST', path: '/finance/document-matches/unlink', auth: true }, async ({ transaction_id, document_id }: { transaction_id: number; document_id: number }) => {
+export const unlinkDocument = api({ expose: true, method: 'POST', path: '/finance/document-matches/unlink', auth: true }, async ({ transaction_id, document_id }: ManualUnlinkParams) => {
   const auth = getAuthData()!; requirePermission(auth, 'finance.view')
   if (!(await readableTransactionIds(Number(auth.userID), [transaction_id])).length) throw APIError.permissionDenied('Keine Berechtigung für diese Buchung')
   await db.execute(`DELETE FROM finance_transaction_document WHERE transaction_id = ${transaction_id} AND document_id = ${document_id}`)
