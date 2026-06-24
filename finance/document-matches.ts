@@ -18,6 +18,9 @@ interface LinkResponse { linked: number }
 interface OkResponse { ok: boolean }
 interface TransactionDocumentLinkDTO { document_id: number; title: string | null; original_filename: string }
 interface DocumentTransactionLinkDTO { transaction_id: number; booking_date: string; amount: string; counterparty: string | null }
+interface DocumentSuggestionsResponse { items: DocumentSuggestionDTO[] }
+interface TransactionDocumentLinksResponse { items: TransactionDocumentLinkDTO[] }
+interface DocumentTransactionLinksResponse { items: DocumentTransactionLinkDTO[] }
 
 async function readableTransactionIds(userId: number, ids: number[]) {
   const auth = getAuthData()!
@@ -26,18 +29,18 @@ async function readableTransactionIds(userId: number, ids: number[]) {
   return rows.map(row => row.id)
 }
 
-export const suggestDocuments = api({ expose: true, method: 'POST', path: '/finance/document-matches/suggest', auth: true }, async ({ transaction_ids }: SuggestDocumentsParams): Promise<DocumentSuggestionDTO[]> => {
+export const suggestDocuments = api({ expose: true, method: 'POST', path: '/finance/document-matches/suggest', auth: true }, async ({ transaction_ids }: SuggestDocumentsParams): Promise<DocumentSuggestionsResponse> => {
   const auth = getAuthData()!; requirePermission(auth, 'finance.view')
   const ids = await readableTransactionIds(Number(auth.userID), transaction_ids)
   if (ids.length !== transaction_ids.length) throw APIError.permissionDenied('Keine Berechtigung für eine oder mehrere Buchungen')
   await Promise.all(ids.map(createSuggestionsForTransaction))
   const rows = await db.select().from(financeDocumentMatchSuggestion).where(inArray(financeDocumentMatchSuggestion.transaction_id, ids))
   const visible = await Promise.all(rows.map(async row => { try { await loadVisibleDocument(Number(auth.userID), row.document_id); return row } catch { return null } }))
-  return visible.filter((row): row is NonNullable<typeof row> => row !== null).map(row => ({
+  return { items: visible.filter((row): row is NonNullable<typeof row> => row !== null).map(row => ({
     id: Number(row.id), transaction_id: Number(row.transaction_id), document_id: Number(row.document_id),
     score: Number(row.score), amount_score: Number(row.amount_score), date_score: Number(row.date_score),
     text_score: Number(row.text_score), outcome: String(row.outcome),
-  }))
+  })) }
 })
 
 export const decideDocumentSuggestion = api({ expose: true, method: 'POST', path: '/finance/document-matches/:id/decision', auth: true }, async ({ id, outcome }: DecideSuggestionParams): Promise<OkResponse> => {
@@ -57,27 +60,27 @@ export const documentMatchMetrics = api({ expose: true, method: 'GET', path: '/f
   return buckets
 })
 
-export const transactionDocumentLinks = api({ expose: true, method: 'GET', path: '/finance/transactions/:transactionId/documents', auth: true }, async ({ transactionId }: { transactionId: number }): Promise<TransactionDocumentLinkDTO[]> => {
+export const transactionDocumentLinks = api({ expose: true, method: 'GET', path: '/finance/transactions/:transactionId/documents', auth: true }, async ({ transactionId }: { transactionId: number }): Promise<TransactionDocumentLinksResponse> => {
   const auth = getAuthData()!; requirePermission(auth, 'finance.view')
   const ids = await readableTransactionIds(Number(auth.userID), [transactionId])
   if (!ids.length) throw APIError.permissionDenied('Keine Berechtigung für diese Buchung')
   try {
     const rows = await db.execute<{ document_id: number; title: string | null; original_filename: string }>(`SELECT d.id AS document_id, d.title, d.original_filename FROM finance_transaction_document l JOIN documents d ON d.id = l.document_id WHERE l.transaction_id = ${transactionId}`)
     const visible = await Promise.all(rows.rows.map(async row => { try { await loadVisibleDocument(Number(auth.userID), row.document_id); return row } catch { return null } }))
-    return visible.filter((row): row is NonNullable<typeof row> => row !== null)
+    return { items: visible.filter((row): row is NonNullable<typeof row> => row !== null) }
   } catch (err: any) {
-    if (err?.code === '42P01' || err?.cause?.code === '42P01') return []
+    if (err?.code === '42P01' || err?.cause?.code === '42P01') return { items: [] }
     throw err
   }
 })
 
-export const documentTransactionLinks = api({ expose: true, method: 'GET', path: '/finance/documents/:documentId/transactions', auth: true }, async ({ documentId }: { documentId: number }): Promise<DocumentTransactionLinkDTO[]> => {
+export const documentTransactionLinks = api({ expose: true, method: 'GET', path: '/finance/documents/:documentId/transactions', auth: true }, async ({ documentId }: { documentId: number }): Promise<DocumentTransactionLinksResponse> => {
   const auth = getAuthData()!; requirePermission(auth, 'finance.view')
   await loadVisibleDocument(Number(auth.userID), documentId)
   let rows
-  try { rows = await db.execute<{ transaction_id: number; booking_date: string; amount: string; counterparty: string | null }>(`SELECT t.id AS transaction_id, t.booking_date, t.amount, t.counterparty FROM finance_transaction_document l JOIN finance_transaction t ON t.id = l.transaction_id WHERE l.document_id = ${documentId}`) } catch (err: any) { if (err?.code === '42P01' || err?.cause?.code === '42P01') return []; throw err }
+  try { rows = await db.execute<{ transaction_id: number; booking_date: string; amount: string; counterparty: string | null }>(`SELECT t.id AS transaction_id, t.booking_date, t.amount, t.counterparty FROM finance_transaction_document l JOIN finance_transaction t ON t.id = l.transaction_id WHERE l.document_id = ${documentId}`) } catch (err: any) { if (err?.code === '42P01' || err?.cause?.code === '42P01') return { items: [] }; throw err }
   const allowed = await readableTransactionIds(Number(auth.userID), rows.rows.map(row => row.transaction_id))
-  return rows.rows.filter(row => allowed.includes(row.transaction_id))
+  return { items: rows.rows.filter(row => allowed.includes(row.transaction_id)) }
 })
 
 export const linkDocuments = api({ expose: true, method: 'POST', path: '/finance/document-matches/link', auth: true }, async ({ transaction_ids, document_ids }: ManualLinkParams): Promise<LinkResponse> => {
