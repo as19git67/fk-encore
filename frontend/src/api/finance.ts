@@ -1204,3 +1204,7 @@ export async function getRelatedRecurringTransactions(
 ): Promise<RelatedRecurringResponse> {
   return apiFetch(`/finance/transactions/${transactionId}/recurring`)
 }
+
+export interface DocumentMatchSuggestion { id: number; transaction_id: number; document_id: number; score: number; amount_score: number; date_score: number; text_score: number; outcome: 'pending' | 'accepted' | 'rejected' | 'ignored' }
+export async function suggestDocumentsForTransactions(transaction_ids: number[]) { return apiFetch<DocumentMatchSuggestion[][]>('/finance/document-matches/suggest', { method: 'POST', body: JSON.stringify({ transaction_ids }) }) }
+export async function decideDocumentMatch(id: number, outcome: 'accepted' | 'rejected' | 'ignored') { return apiFetch<{ ok: boolean }>(`/finance/document-matches/${id}/decision`, { method: 'POST', body: JSON.stringify({ outcome }) }) }
