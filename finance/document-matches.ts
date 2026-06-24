@@ -63,3 +63,10 @@ export const unlinkDocument = api({ expose: true, method: 'POST', path: '/financ
   await db.execute(`DELETE FROM finance_transaction_document WHERE transaction_id = ${transaction_id} AND document_id = ${document_id}`)
   return { ok: true }
 })
+
+export const expireDocumentSuggestions = api({ expose: true, method: 'POST', path: '/finance/document-matches/expire', auth: true }, async () => {
+  const auth = getAuthData()!; requirePermission(auth, 'finance.admin')
+  const { markExpiredSuggestionsIgnored } = await import('./document-match.service')
+  await markExpiredSuggestionsIgnored()
+  return { ok: true }
+})
