@@ -4,7 +4,7 @@ import Button from 'primevue/button'
 import Drawer from 'primevue/drawer'
 import Message from 'primevue/message'
 import { useTxSelectionStore } from '../../stores/finance/selection'
-import { downloadTransactionsCsv, type Transaction } from '../../api/finance'
+import { downloadTransactionsCsv, suggestDocumentsForTransactions, decideDocumentMatch, type DocumentMatchSuggestion, type Transaction } from '../../api/finance'
 import BatchTagDialog from './BatchTagDialog.vue'
 import BatchNoticeDialog from './BatchNoticeDialog.vue'
 import { basketTags, basketCounterparties, basketMonths, hasMixedCurrencies, type BasketAggregate } from '../../utils/financeBasketAnalysis'
@@ -24,6 +24,8 @@ const tagDialogVisible = ref(false)
 const noticeDialogVisible = ref(false)
 const exporting = ref(false)
 const actionError = ref<string | null>(null)
+const documentSuggestions = ref<DocumentMatchSuggestion[]>([])
+const loadingSuggestions = ref(false)
 const analysisView = ref<'tags' | 'counterparties' | 'months'>('tags')
 
 const count = computed(() => selectionStore.count)
@@ -63,6 +65,18 @@ function formatAnalysisAmount(amount: number): string {
 function monthLabel(month: string): string {
   if (!/^\d{4}-\d{2}$/.test(month)) return month
   return new Date(`${month}-01T12:00:00`).toLocaleDateString('de-DE', { month: 'short', year: 'numeric' })
+}
+
+async function loadDocumentSuggestions() {
+  if (!count.value || loadingSuggestions.value) return
+  loadingSuggestions.value = true
+  try { documentSuggestions.value = (await suggestDocumentsForTransactions(selectionStore.ids)).flat() }
+  catch (err) { actionError.value = err instanceof Error ? err.message : String(err) }
+  finally { loadingSuggestions.value = false }
+}
+async function decideSuggestion(suggestion: DocumentMatchSuggestion, outcome: 'accepted' | 'rejected') {
+  await decideDocumentMatch(suggestion.id, outcome)
+  documentSuggestions.value = documentSuggestions.value.filter(item => item.id !== suggestion.id)
 }
 
 function openBatchTagEditor() {
@@ -128,7 +142,9 @@ async function exportCsv() {
         </p>
       </div>
 
-      <ul v-else class="basket-list">
+      <div v-else>
+      <section class="basket-matches"><Button label="Belegvorschläge" icon="pi pi-file" size="small" outlined :loading="loadingSuggestions" @click="loadDocumentSuggestions" /><p v-for="suggestion in documentSuggestions" :key="suggestion.id">Beleg #{{ suggestion.document_id }} · {{ Math.round(suggestion.score * 100) }}% <Button label="Annehmen" size="small" text @click="decideSuggestion(suggestion, 'accepted')" /><Button label="Ablehnen" size="small" text @click="decideSuggestion(suggestion, 'rejected')" /></p></section>
+      <ul class="basket-list">
         <section class="basket-analysis" aria-label="Auswertung der Auswahl">
           <div class="basket-analysis-tabs" role="tablist" aria-label="Auswertung gruppieren nach">
             <button v-for="view in [{ id: 'tags', label: 'Tags' }, { id: 'counterparties', label: 'Gegenseite' }, { id: 'months', label: 'Monat' }]" :key="view.id" type="button" class="basket-analysis-tab" :class="{ active: analysisView === view.id }" @click="analysisView = view.id as 'tags' | 'counterparties' | 'months'">{{ view.label }}</button>
@@ -173,6 +189,7 @@ async function exportCsv() {
           </button>
         </li>
       </ul>
+      </div>
 
       <template #footer>
         <div class="drawer-footer">
