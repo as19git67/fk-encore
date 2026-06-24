@@ -120,18 +120,20 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [detail, cats, taxCats, houseItems, people] = await Promise.all([
+    const [detail, cats, taxCats, houseItems, people, links] = await Promise.all([
       getDocument(id),
       listDocumentCategories(),
       listTaxSectionsCatalog(),
       listGroups(),
       listSubjectPersons(),
+      getDocumentTransactionLinks(id),
     ])
     doc.value = detail
     categories.value = cats.items
     taxCatalog.value = taxCats.items
     groups.value = houseItems.items
     subjectPeople.value = people.items
+    linkedTransactions.value = links
     resetForm()
     resetTaxForm()
     await loadPdf(id)
