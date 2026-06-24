@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm'
 import db from '../db/database'
-import { documents, financeDocumentMatchSuggestion, financeTransaction } from '../db/schema'
+import { documents, financeDocumentMatchSuggestion, financeTransaction, financeTransactionDocument } from '../db/schema'
 import { scoreDocumentMatch, type MatchScore } from './document-matcher'
 
 export type MatchOutcome = 'pending' | 'accepted' | 'rejected' | 'ignored'
@@ -17,7 +17,13 @@ export async function createSuggestionsForTransaction(transactionId: number) {
 }
 
 export async function decideSuggestion(id: number, outcome: Exclude<MatchOutcome, 'pending'>) {
-  await db.update(financeDocumentMatchSuggestion).set({ outcome, decided_at: new Date().toISOString() }).where(eq(financeDocumentMatchSuggestion.id, id))
+  const [suggestion] = await db.select().from(financeDocumentMatchSuggestion).where(eq(financeDocumentMatchSuggestion.id, id)).limit(1)
+  if (!suggestion) return false
+  await db.transaction(async (tx) => {
+    await tx.update(financeDocumentMatchSuggestion).set({ outcome, decided_at: new Date().toISOString() }).where(eq(financeDocumentMatchSuggestion.id, id))
+    if (outcome === 'accepted') await tx.insert(financeTransactionDocument).values({ transaction_id: suggestion.transaction_id, document_id: suggestion.document_id }).onConflictDoNothing()
+  })
+  return true
 }
 
 export function explainMatchScore(score: MatchScore) { return { amount: Math.round(score.amount * 100), date: Math.round(score.date * 100), text: Math.round(score.text * 100), total: Math.round(score.total * 100) } }
