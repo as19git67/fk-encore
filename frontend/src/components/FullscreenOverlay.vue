@@ -1445,12 +1445,13 @@ onUnmounted(() => {
   /* The pill-icon colour is white for the dark floating bar; on the (light in
      light theme) topbar background that would be invisible, so fall back to
      the themed text colour like the back button. */
-  .fullscreen-content--split .fs-actions-bar :deep(.p-button-rounded),
-  .fullscreen-content .fs-actions-bar :deep(.p-button-rounded) {
+  .fullscreen-content--split .fs-actions-bar :deep(.p-button-rounded:not(.fs-toolbar-btn--active)),
+  .fullscreen-content .fs-actions-bar :deep(.p-button-rounded:not(.fs-toolbar-btn--active)) {
     color: var(--p-text-color);
   }
   .fullscreen-content--split .fs-actions-bar :deep(.fs-toolbar-btn--active),
   .fullscreen-content .fs-actions-bar :deep(.fs-toolbar-btn--active) {
+    color: var(--p-primary-color);
     background: var(--p-content-hover-background);
   }
 }
