@@ -1213,3 +1213,4 @@ export async function getDocumentTransactionLinks(documentId: number) { return a
 export async function getDocumentMatchMetrics() { return apiFetch<{ high: Record<string, number>; medium: Record<string, number>; low: Record<string, number> }>('/finance/document-matches/metrics') }
 
 export async function unlinkTransactionDocument(transaction_id: number, document_id: number) { return apiFetch<{ ok: boolean }>('/finance/document-matches/unlink', { method: 'POST', body: JSON.stringify({ transaction_id, document_id }) }) }
+export async function linkDocumentsToTransactions(transaction_ids: number[], document_ids: number[]) { return apiFetch<{ linked: number }>('/finance/document-matches/link', { method: 'POST', body: JSON.stringify({ transaction_ids, document_ids }) }) }
