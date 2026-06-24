@@ -4,7 +4,7 @@ import Button from 'primevue/button'
 import Drawer from 'primevue/drawer'
 import Message from 'primevue/message'
 import { useTxSelectionStore } from '../../stores/finance/selection'
-import { downloadTransactionsCsv, suggestDocumentsForTransactions, decideDocumentMatch, type DocumentMatchSuggestion, type Transaction } from '../../api/finance'
+import { downloadTransactionsCsv, suggestDocumentsForTransactions, decideDocumentMatch, getDocumentMatchMetrics, type DocumentMatchSuggestion, type Transaction } from '../../api/finance'
 import BatchTagDialog from './BatchTagDialog.vue'
 import BatchNoticeDialog from './BatchNoticeDialog.vue'
 import { basketTags, basketCounterparties, basketMonths, hasMixedCurrencies, type BasketAggregate } from '../../utils/financeBasketAnalysis'
@@ -26,6 +26,7 @@ const exporting = ref(false)
 const actionError = ref<string | null>(null)
 const documentSuggestions = ref<DocumentMatchSuggestion[]>([])
 const loadingSuggestions = ref(false)
+const matchMetrics = ref<{ high: Record<string, number>; medium: Record<string, number>; low: Record<string, number> } | null>(null)
 const analysisView = ref<'tags' | 'counterparties' | 'months'>('tags')
 
 const count = computed(() => selectionStore.count)
@@ -73,6 +74,7 @@ async function loadDocumentSuggestions() {
   try { documentSuggestions.value = (await suggestDocumentsForTransactions(selectionStore.ids)).flat() }
   catch (err) { actionError.value = err instanceof Error ? err.message : String(err) }
   finally { loadingSuggestions.value = false }
+  matchMetrics.value = await getDocumentMatchMetrics().catch(() => null)
 }
 async function decideSuggestion(suggestion: DocumentMatchSuggestion, outcome: 'accepted' | 'rejected') {
   await decideDocumentMatch(suggestion.id, outcome)
@@ -143,7 +145,7 @@ async function exportCsv() {
       </div>
 
       <div v-else>
-      <section class="basket-matches"><Button label="Belegvorschläge" icon="pi pi-file" size="small" outlined :loading="loadingSuggestions" @click="loadDocumentSuggestions" /><p v-for="suggestion in documentSuggestions" :key="suggestion.id">Beleg #{{ suggestion.document_id }} · {{ Math.round(suggestion.score * 100) }}% <Button label="Annehmen" size="small" text @click="decideSuggestion(suggestion, 'accepted')" /><Button label="Ablehnen" size="small" text @click="decideSuggestion(suggestion, 'rejected')" /></p></section>
+      <section class="basket-matches"><Button label="Belegvorschläge" icon="pi pi-file" size="small" outlined :loading="loadingSuggestions" @click="loadDocumentSuggestions" /><p v-for="suggestion in documentSuggestions" :key="suggestion.id">Beleg #{{ suggestion.document_id }} · {{ Math.round(suggestion.score * 100) }}% <Button label="Annehmen" size="small" text @click="decideSuggestion(suggestion, 'accepted')" /><Button label="Ablehnen" size="small" text @click="decideSuggestion(suggestion, 'rejected')" /></p><p v-if="matchMetrics" class="basket-match-metrics">Trefferquote (hoch): {{ matchMetrics.high.accepted }} angenommen / {{ matchMetrics.high.rejected }} abgelehnt</p></section>
       <ul class="basket-list">
         <section class="basket-analysis" aria-label="Auswertung der Auswahl">
           <div class="basket-analysis-tabs" role="tablist" aria-label="Auswertung gruppieren nach">
