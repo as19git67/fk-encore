@@ -108,6 +108,8 @@ export interface DocumentSummary {
   last_error: string | null;
   visibility: "private" | "group";
   group_id: number | null;
+  /** Free-form human notes (shared document metadata, issue #750). */
+  notes: string | null;
 }
 
 export interface DocumentTaxSectionDTO {
@@ -177,7 +179,7 @@ interface ListQuery {
 }
 
 /** Mirrors documents/document-ops.ts — keep in sync. */
-const LOW_CONFIDENCE_THRESHOLD = 0.6;
+export const LOW_CONFIDENCE_THRESHOLD = 0.6;
 
 /** Fields driving the document filter panel (category, tags, status, …). */
 interface DocumentFilterArgs {
@@ -559,6 +561,7 @@ export const listDocuments = api(
           visibility: documents.visibility,
           group_id: documents.group_id,
           last_error: documents.last_error,
+          notes: documents.notes,
           cat_slug: documentCategories.slug,
         })
         .from(documents)
@@ -874,6 +877,11 @@ export interface UpdateDocumentRequest {
    * (must belong to the caller). AI-detected links are kept alongside.
    */
   subject_person_ids?: number[];
+  /**
+   * Free-form notes on the document (issue #750). Independent metadata —
+   * editing it never pins the AI attributes and never relocates the file.
+   */
+  notes?: string | null;
 }
 
 export const updateDocument = api(
@@ -915,6 +923,11 @@ export const updateDocument = api(
     } else if (attributesChanged) {
       patch.attributes_reviewed = true;
     }
+
+    // Notes are independent metadata: applied after `attributesChanged` is
+    // computed so editing only the notes neither pins the AI attributes nor
+    // triggers a file relocate.
+    if (req.notes !== undefined) patch.notes = req.notes?.trim() || null;
 
     if (Object.keys(patch).length > 0) {
       await db.update(documents).set(patch).where(eq(documents.id, existing.id));
@@ -2163,6 +2176,7 @@ export const listTaxDocuments = api(
           visibility: documents.visibility,
           group_id: documents.group_id,
           last_error: documents.last_error,
+          notes: documents.notes,
           cat_slug: documentCategories.slug,
         })
         .from(documents)
@@ -2394,6 +2408,7 @@ export const searchDocumentsEndpoint = api(
           visibility: documents.visibility,
           group_id: documents.group_id,
           last_error: documents.last_error,
+          notes: documents.notes,
           cat_slug: documentCategories.slug,
         })
         .from(documents)
@@ -2699,7 +2714,7 @@ async function loadDetail(userId: number, id: number): Promise<DocumentDetail> {
   };
 }
 
-async function fetchTagsForDocuments(ids: number[]): Promise<Map<number, string[]>> {
+export async function fetchTagsForDocuments(ids: number[]): Promise<Map<number, string[]>> {
   const map = new Map<number, string[]>();
   if (ids.length === 0) return map;
   const rows = await dbAll<{ document_id: number; name: string }>(
@@ -2748,7 +2763,7 @@ async function replaceTags(documentId: number, tags: readonly string[]): Promise
   }
 }
 
-function toSummary(
+export function toSummary(
   row: typeof documents.$inferSelect,
   categorySlug: string | null,
   tags: string[],
@@ -2773,6 +2788,7 @@ function toSummary(
     last_error: row.last_error ?? null,
     visibility: row.visibility,
     group_id: row.group_id,
+    notes: row.notes ?? null,
   };
 }
 

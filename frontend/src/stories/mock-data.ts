@@ -482,6 +482,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     last_error: null,
     visibility: 'private',
     group_id: null,
+    notes: null,
   },
   {
     id: 2,
@@ -503,6 +504,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     last_error: null,
     visibility: 'private',
     group_id: null,
+    notes: null,
   },
   {
     id: 3,
@@ -524,6 +526,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     last_error: null,
     visibility: 'private',
     group_id: null,
+    notes: null,
   },
   {
     id: 4,
@@ -545,6 +548,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     last_error: 'OCR fehlgeschlagen: Text-Layer konnte nicht extrahiert werden (tesseract: page 1 segmentation failed).',
     visibility: 'private',
     group_id: null,
+    notes: null,
   },
   {
     id: 5,
@@ -566,6 +570,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     last_error: null,
     visibility: 'private',
     group_id: null,
+    notes: null,
   },
 ]
 

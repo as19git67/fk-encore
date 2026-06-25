@@ -40,6 +40,7 @@ import { useAuthStore } from '../stores/auth'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import { useModuleBack } from '../composables/useModuleBack'
 import PdfViewer from '../components/PdfViewer.vue'
+import DocumentFollowUpDialog from '../components/DocumentFollowUpDialog.vue'
 import { getDocumentTransactionLinks, unlinkTransactionDocument } from '../api/finance'
 
 const route = useRoute()
@@ -97,6 +98,7 @@ const form = ref({
   sender: '' as string,
   document_number: '' as string,
   summary: '' as string,
+  notes: '' as string,
   category_slug: null as string | null,
   tagsText: '' as string,
   subject_person_ids: [] as number[],
@@ -109,6 +111,13 @@ const taxForm = ref({
   tax_year: null as number | null,
   sections: new Set<string>(),
 })
+
+const followUpOpen = ref(false)
+
+function onFollowUpDone() {
+  followUpOpen.value = false
+  info.value = 'Dokument auf Wiedervorlage gelegt.'
+}
 
 const TAX_GROUP_LABELS: Record<TaxSectionGroup, string> = {
   einkuenfte: 'Einkünfte',
@@ -189,6 +198,7 @@ function resetForm() {
     sender: doc.value.sender ?? '',
     document_number: doc.value.document_number ?? '',
     summary: doc.value.summary ?? '',
+    notes: doc.value.notes ?? '',
     category_slug: doc.value.category_slug,
     tagsText: doc.value.tags.join(', '),
     subject_person_ids: doc.value.subject_persons.map((p) => p.id),
@@ -264,6 +274,7 @@ async function save() {
         sender: form.value.sender.trim() || null,
         document_number: form.value.document_number.trim() || null,
         summary: form.value.summary.trim() || null,
+        notes: form.value.notes.trim() || null,
         category_slug: form.value.category_slug,
         tags,
         subject_person_ids: form.value.subject_person_ids,
@@ -519,6 +530,15 @@ onBeforeUnmount(() => {
           @click="onDownload"
         />
         <Button
+          v-if="doc"
+          icon="pi pi-clock"
+          label="Wiedervorlage"
+          aria-label="Wiedervorlage"
+          text
+          title="Dokument auf Wiedervorlage legen — es taucht am gewählten Datum wieder im Arbeitskorb auf."
+          @click="followUpOpen = true"
+        />
+        <Button
           v-if="auth.hasPermission('documents.delete') && doc"
           icon="pi pi-trash"
           severity="danger"
@@ -761,6 +781,17 @@ onBeforeUnmount(() => {
             />
           </label>
 
+          <label>
+            <span class="label">Notizen</span>
+            <textarea
+              v-model="form.notes"
+              class="p-inputtextarea p-inputtext"
+              rows="3"
+              placeholder="Eigene Notizen zu diesem Dokument…"
+              :disabled="!auth.hasPermission('documents.edit')"
+            />
+          </label>
+
           <div v-if="doc.tags.length > 0" class="current-tags">
             <Chip v-for="t in doc.tags" :key="t" :label="t" />
           </div>
@@ -931,6 +962,13 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
+
+    <DocumentFollowUpDialog
+      v-if="doc"
+      v-model:visible="followUpOpen"
+      :document-ids="[doc.id]"
+      @done="onFollowUpDone"
+    />
   </div>
 </template>
 

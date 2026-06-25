@@ -217,7 +217,11 @@ export const notifyDocumentReview = api(
     // independently of the album/photo feed kinds.
     const prefs = await svc.getNotificationPrefs(req.userId);
     const prefsKind: svc.NotificationKind =
-      req.kind === "low_confidence" ? "document_low_confidence" : "document_failed";
+      req.kind === "low_confidence"
+        ? "document_low_confidence"
+        : req.kind === "follow_up"
+          ? "document_follow_up"
+          : "document_failed";
     if (!svc.isKindEnabled(prefs, prefsKind)) {
       return { sent: 0, pruned: 0 };
     }
