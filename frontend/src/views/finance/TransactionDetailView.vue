@@ -41,7 +41,6 @@ const deleting = ref(false)
 const copyToast = ref<string | null>(null)
 const linkedDocuments = ref<Array<{ document_id: number; title: string | null; original_filename: string }>>([])
 const documentLinkPanelOpen = ref(false)
-const documentSuggestionPanelOpen = ref(false)
 const documentQuery = ref('')
 const documentResults = ref<DocumentSummary[]>([])
 const documentSuggestions = ref<api.DocumentMatchSuggestion[]>([])
@@ -78,11 +77,11 @@ function requestUnlinkDocument(documentId: number) {
   })
 }
 
-function openDocumentSearch() {
+async function toggleDocumentLinkPanel() {
   documentLinkPanelOpen.value = !documentLinkPanelOpen.value
   if (documentLinkPanelOpen.value) {
-    documentSuggestionPanelOpen.value = false
     error.value = null
+    await loadDocumentSuggestions()
   }
 }
 
@@ -121,8 +120,6 @@ async function linkDocumentToTransaction(documentId: number) {
 
 async function loadDocumentSuggestions() {
   if (!tx.value || documentSuggestionsLoading.value) return
-  documentSuggestionPanelOpen.value = true
-  documentLinkPanelOpen.value = false
   documentSuggestionsLoading.value = true
   error.value = null
   try {
@@ -205,7 +202,6 @@ async function loadTransaction(id: number) {
     documentResults.value = []
     documentSuggestions.value = []
     documentLinkPanelOpen.value = false
-    documentSuggestionPanelOpen.value = false
     documentQuery.value = ''
     syncForm()
   } catch (err) {
@@ -608,81 +604,78 @@ const extractedFields = computed(() => {
 
           <div class="document-link-actions">
             <Button
-              label="Dokument suchen"
-              icon="pi pi-search"
-              size="small"
-              severity="secondary"
-              outlined
-              @click="openDocumentSearch"
-            />
-            <Button
-              label="Belegvorschläge"
-              icon="pi pi-file"
+              :label="documentLinkPanelOpen ? 'Verknüpfen schließen' : 'Beleg verknüpfen'"
+              icon="pi pi-link"
               size="small"
               severity="secondary"
               outlined
               :loading="documentSuggestionsLoading"
-              @click="loadDocumentSuggestions"
+              @click="toggleDocumentLinkPanel"
             />
           </div>
 
           <div v-if="documentLinkPanelOpen" class="document-link-panel">
-            <div class="document-search-row">
-              <InputText
-                v-model="documentQuery"
-                placeholder="Dokument suchen"
-                @keyup.enter="searchTransactionDocuments"
-              />
-              <Button
-                label="Suchen"
-                size="small"
-                :loading="documentSearchLoading"
-                @click="searchTransactionDocuments"
-              />
-            </div>
-            <p v-if="!documentSearchLoading && documentResults.length === 0 && documentQuery.trim()" class="hint">
-              Keine passenden Dokumente gefunden.
-            </p>
-            <ul v-if="documentResults.length" class="document-result-list">
-              <li v-for="document in documentResults" :key="document.id" class="document-result-row">
-                <span>{{ document.title ?? document.original_filename }}</span>
-                <Button
-                  label="Verbinden"
-                  size="small"
-                  text
-                  :loading="documentLinkingId === document.id"
-                  @click="linkDocumentToTransaction(document.id)"
+            <div class="document-panel-section">
+              <h3>Dokument suchen</h3>
+              <div class="document-search-row">
+                <InputText
+                  v-model="documentQuery"
+                  placeholder="Dokument suchen"
+                  @keyup.enter="searchTransactionDocuments"
                 />
-              </li>
-            </ul>
+                <Button
+                  label="Suchen"
+                  size="small"
+                  :loading="documentSearchLoading"
+                  @click="searchTransactionDocuments"
+                />
+              </div>
+              <p v-if="!documentSearchLoading && documentResults.length === 0 && documentQuery.trim()" class="hint">
+                Keine passenden Dokumente gefunden.
+              </p>
+              <ul v-if="documentResults.length" class="document-result-list">
+                <li v-for="document in documentResults" :key="document.id" class="document-result-row">
+                  <span>{{ document.title ?? document.original_filename }}</span>
+                  <Button
+                    label="Verbinden"
+                    size="small"
+                    text
+                    :loading="documentLinkingId === document.id"
+                    @click="linkDocumentToTransaction(document.id)"
+                  />
+                </li>
+              </ul>
+            </div>
+
+            <div class="document-panel-section">
+              <h3>Mögliche Treffer</h3>
+              <p v-if="documentSuggestionsLoading" class="hint">Belegvorschläge werden geladen …</p>
+              <p v-else-if="documentSuggestions.length === 0" class="hint">Keine Belegvorschläge gefunden.</p>
+              <ul v-else class="document-result-list">
+                <li v-for="suggestion in documentSuggestions" :key="suggestion.id" class="document-result-row">
+                  <span>Beleg #{{ suggestion.document_id }} · {{ Math.round(suggestion.score * 100) }}%</span>
+                  <span class="document-result-actions">
+                    <Button
+                      label="Annehmen"
+                      size="small"
+                      text
+                      :loading="documentDecisionId === suggestion.id"
+                      @click="decideDocumentSuggestion(suggestion, 'accepted')"
+                    />
+                    <Button
+                      label="Ablehnen"
+                      size="small"
+                      severity="secondary"
+                      text
+                      :disabled="documentDecisionId === suggestion.id"
+                      @click="decideDocumentSuggestion(suggestion, 'rejected')"
+                    />
+                  </span>
+                </li>
+              </ul>
+            </div>
           </div>
 
-          <div v-if="documentSuggestionPanelOpen" class="document-link-panel">
-            <p v-if="documentSuggestionsLoading" class="hint">Belegvorschläge werden geladen …</p>
-            <p v-else-if="documentSuggestions.length === 0" class="hint">Keine Belegvorschläge gefunden.</p>
-            <ul v-else class="document-result-list">
-              <li v-for="suggestion in documentSuggestions" :key="suggestion.id" class="document-result-row">
-                <span>Beleg #{{ suggestion.document_id }} · {{ Math.round(suggestion.score * 100) }}%</span>
-                <span class="document-result-actions">
-                  <Button
-                    label="Annehmen"
-                    size="small"
-                    text
-                    :loading="documentDecisionId === suggestion.id"
-                    @click="decideDocumentSuggestion(suggestion, 'accepted')"
-                  />
-                  <Button
-                    label="Ablehnen"
-                    size="small"
-                    severity="secondary"
-                    text
-                    :disabled="documentDecisionId === suggestion.id"
-                    @click="decideDocumentSuggestion(suggestion, 'rejected')"
-                  />
-                </span>
-              </li>
-            </ul>
-          </div>
         </dd>
         <dt>Buchungsdatum</dt>
         <dd v-if="isCash">
@@ -1064,6 +1057,20 @@ const extractedFields = computed(() => {
   border-radius: 0.5rem;
   padding: 0.75rem;
   background: var(--p-content-hover-background);
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.document-panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.document-panel-section h3 {
+  margin: 0;
+  color: var(--p-text-muted-color);
+  font-size: 0.85rem;
+  font-weight: 600;
 }
 .document-search-row {
   display: flex;
