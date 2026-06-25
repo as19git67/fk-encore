@@ -103,6 +103,18 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'documents.view' },
       },
       {
+        path: 'korb',
+        name: 'dokumente-korb',
+        component: () => import('../views/DocumentsBasketView.vue'),
+        meta: { permission: 'documents.view' },
+      },
+      {
+        path: 'spaeter',
+        name: 'dokumente-spaeter',
+        component: () => import('../views/DocumentsLaterView.vue'),
+        meta: { permission: 'documents.view' },
+      },
+      {
         path: 'upload',
         name: 'dokumente-upload',
         component: () => import('../views/DocumentUploadView.vue'),
@@ -153,6 +165,8 @@ export const modules: ModuleConfig[] = [
     ],
     menuItems: [
       { label: 'Alle Dokumente', icon: 'pi pi-file', routeName: 'dokumente-list', permission: 'documents.view' },
+      { label: 'Arbeitskorb', icon: 'pi pi-inbox', routeName: 'dokumente-korb', permission: 'documents.view' },
+      { label: 'Später', icon: 'pi pi-clock', routeName: 'dokumente-spaeter', permission: 'documents.view' },
       { label: 'Steuer', icon: 'pi pi-receipt', routeName: 'dokumente-steuer', permission: 'documents.view' },
       { label: 'Steuer-Hints', icon: 'pi pi-sparkles', routeName: 'dokumente-steuer-hints', permission: 'documents.manage_taxonomy' },
       { label: 'Hochladen', icon: 'pi pi-upload', routeName: 'dokumente-upload', permission: 'documents.upload' },
