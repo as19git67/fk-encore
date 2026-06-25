@@ -101,6 +101,7 @@ import {
   photoGroupMembers,
   photoPoiMatches,
   poiReferences,
+  photoComments,
   photoScanQueue,
   albumUserSettings,
   photoTransformSuggestions,
@@ -7581,11 +7582,9 @@ export async function searchPhotosNaturalLogic(
   const hasSemanticQuery = parsed.semanticQuery.length > 0;
 
   // Text token search: every whitespace-separated token of the semantic query
-  // must appear (case-insensitive substring) in EITHER the photo description
-  // OR the imported IPTC keywords. This is what makes "Mariens Geburtstag"
-  // find a photo whose description is "Mariens 30. Geburtstag im Garten" or
-  // whose keywords contain "Geburtstag" – CLIP alone wouldn't reliably get
-  // there.
+  // must appear (case-insensitive substring) in at least one of: description,
+  // IPTC keywords, location fields, assigned person name, comment body, or
+  // POI name. This covers the expanded search scope from issue #78.
   const descriptionTokens = parsed.semanticQuery
     .split(/\s+/)
     .map(t => t.trim())
@@ -7600,8 +7599,23 @@ export async function searchPhotosNaturalLogic(
       base.push(
         or(
           ilike(photos.description, pattern),
-          // Any single keyword contains the token (case-insensitive substring).
           sql`EXISTS (SELECT 1 FROM unnest(${photos.keywords}) AS k WHERE k ILIKE ${pattern})`,
+          ilike(photos.location_city, pattern),
+          ilike(photos.location_country, pattern),
+          ilike(photos.location_name, pattern),
+          sql`EXISTS (
+            SELECT 1 FROM ${faces} f
+            JOIN ${userFaceAssignments} ufa ON ufa.face_id = f.id AND ufa.user_id = ${userId}
+            JOIN ${persons} p ON p.id = ufa.person_id
+            WHERE f.photo_id = ${photos.id} AND ufa.ignored = false AND p.name ILIKE ${pattern}
+          )`,
+          sql`EXISTS (
+            SELECT 1 FROM ${photoComments} pc WHERE pc.photo_id = ${photos.id} AND pc.body ILIKE ${pattern}
+          )`,
+          sql`EXISTS (
+            SELECT 1 FROM ${photoPoiMatches} ppm
+            WHERE ppm.photo_id = ${photos.id} AND (ppm.name ILIKE ${pattern} OR ppm.name_de ILIKE ${pattern})
+          )`,
         )
       );
     }
