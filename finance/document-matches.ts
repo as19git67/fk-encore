@@ -11,7 +11,22 @@ interface SuggestDocumentsParams { transaction_ids: number[] }
 interface DecideSuggestionParams { id: number; outcome: 'accepted' | 'rejected' | 'ignored' }
 interface ManualLinkParams { transaction_ids: number[]; document_ids: number[] }
 interface ManualUnlinkParams { transaction_id: number; document_id: number }
-interface DocumentSuggestionDTO { id: number; transaction_id: number; document_id: number; score: number; amount_score: number; date_score: number; text_score: number; outcome: string }
+interface DocumentSuggestionDTO {
+  id: number
+  transaction_id: number
+  document_id: number
+  score: number
+  amount_score: number
+  date_score: number
+  text_score: number
+  outcome: string
+  title: string | null
+  original_filename: string
+  sender: string | null
+  doc_date: string | null
+  summary: string | null
+  extracted_text_preview: string | null
+}
 interface MatchMetricBucket { accepted: number; rejected: number; ignored: number; pending: number }
 interface MatchMetricsResponse { high: MatchMetricBucket; medium: MatchMetricBucket; low: MatchMetricBucket }
 interface LinkResponse { linked: number }
@@ -21,6 +36,13 @@ interface DocumentTransactionLinkDTO { transaction_id: number; booking_date: str
 interface DocumentSuggestionsResponse { items: DocumentSuggestionDTO[] }
 interface TransactionDocumentLinksResponse { items: TransactionDocumentLinkDTO[] }
 interface DocumentTransactionLinksResponse { items: DocumentTransactionLinkDTO[] }
+
+function textPreview(value: string | null | undefined, maxLength = 420): string | null {
+  const normalized = (value ?? '').replace(/\s+/g, ' ').trim()
+  if (!normalized) return null
+  if (normalized.length <= maxLength) return normalized
+  return `${normalized.slice(0, maxLength).trim()}…`
+}
 
 async function readableTransactionIds(userId: number, ids: number[]) {
   const auth = getAuthData()!
@@ -35,11 +57,24 @@ export const suggestDocuments = api({ expose: true, method: 'POST', path: '/fina
   if (ids.length !== transaction_ids.length) throw APIError.permissionDenied('Keine Berechtigung für eine oder mehrere Buchungen')
   await Promise.all(ids.map(createSuggestionsForTransaction))
   const rows = await db.select().from(financeDocumentMatchSuggestion).where(inArray(financeDocumentMatchSuggestion.transaction_id, ids))
-  const visible = await Promise.all(rows.map(async row => { try { await loadVisibleDocument(Number(auth.userID), row.document_id); return row } catch { return null } }))
-  return { items: visible.filter((row): row is NonNullable<typeof row> => row !== null).map(row => ({
+  const visible = await Promise.all(rows.map(async row => {
+    try {
+      const document = await loadVisibleDocument(Number(auth.userID), row.document_id)
+      return { row, document }
+    } catch {
+      return null
+    }
+  }))
+  return { items: visible.filter((item): item is NonNullable<typeof item> => item !== null).map(({ row, document }) => ({
     id: Number(row.id), transaction_id: Number(row.transaction_id), document_id: Number(row.document_id),
     score: Number(row.score), amount_score: Number(row.amount_score), date_score: Number(row.date_score),
     text_score: Number(row.text_score), outcome: String(row.outcome),
+    title: document.title,
+    original_filename: document.original_filename,
+    sender: document.sender,
+    doc_date: document.doc_date,
+    summary: document.summary,
+    extracted_text_preview: textPreview(document.summary ?? document.extracted_text),
   })) }
 })
 

@@ -48,6 +48,7 @@ const documentSearchLoading = ref(false)
 const documentSuggestionsLoading = ref(false)
 const documentLinkingId = ref<number | null>(null)
 const documentDecisionId = ref<number | null>(null)
+const expandedSuggestionId = ref<number | null>(null)
 
 async function refreshLinkedDocuments() {
   if (!tx.value) {
@@ -110,6 +111,9 @@ async function linkDocumentToTransaction(documentId: number) {
     await api.linkDocumentsToTransactions([tx.value.id], [documentId])
     documentResults.value = documentResults.value.filter(document => document.id !== documentId)
     documentSuggestions.value = documentSuggestions.value.filter(suggestion => suggestion.document_id !== documentId)
+    if (documentSuggestions.value.every(suggestion => suggestion.id !== expandedSuggestionId.value)) {
+      expandedSuggestionId.value = null
+    }
     await refreshLinkedDocuments()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -138,12 +142,25 @@ async function decideDocumentSuggestion(suggestion: api.DocumentMatchSuggestion,
   try {
     await api.decideDocumentMatch(suggestion.id, outcome)
     documentSuggestions.value = documentSuggestions.value.filter(item => item.id !== suggestion.id)
+    if (expandedSuggestionId.value === suggestion.id) expandedSuggestionId.value = null
     if (outcome === 'accepted') await refreshLinkedDocuments()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
     documentDecisionId.value = null
   }
+}
+
+function suggestionTitle(suggestion: api.DocumentMatchSuggestion): string {
+  return suggestion.title ?? suggestion.original_filename
+}
+
+function toggleSuggestionPreview(suggestionId: number) {
+  expandedSuggestionId.value = expandedSuggestionId.value === suggestionId ? null : suggestionId
+}
+
+function formatScore(score: number): string {
+  return `${Math.round(score * 100)}%`
 }
 
 // Editable form state (kept in sync with tx)
@@ -201,6 +218,7 @@ async function loadTransaction(id: number) {
     linkedDocuments.value = await api.getTransactionDocumentLinks(id).catch(() => [])
     documentResults.value = []
     documentSuggestions.value = []
+    expandedSuggestionId.value = null
     documentLinkPanelOpen.value = false
     documentQuery.value = ''
     syncForm()
@@ -652,25 +670,58 @@ const extractedFields = computed(() => {
               <p v-if="documentSuggestionsLoading" class="hint">Belegvorschläge werden geladen …</p>
               <p v-else-if="documentSuggestions.length === 0" class="hint">Keine Belegvorschläge gefunden.</p>
               <ul v-else class="document-result-list">
-                <li v-for="suggestion in documentSuggestions" :key="suggestion.id" class="document-result-row">
-                  <span>Beleg #{{ suggestion.document_id }} · {{ Math.round(suggestion.score * 100) }}%</span>
-                  <span class="document-result-actions">
-                    <Button
-                      label="Annehmen"
-                      size="small"
-                      text
-                      :loading="documentDecisionId === suggestion.id"
-                      @click="decideDocumentSuggestion(suggestion, 'accepted')"
-                    />
-                    <Button
-                      label="Ablehnen"
-                      size="small"
-                      severity="secondary"
-                      text
-                      :disabled="documentDecisionId === suggestion.id"
-                      @click="decideDocumentSuggestion(suggestion, 'rejected')"
-                    />
-                  </span>
+                <li v-for="suggestion in documentSuggestions" :key="suggestion.id" class="document-suggestion">
+                  <div class="document-result-row">
+                    <button
+                      type="button"
+                      class="document-suggestion-title"
+                      :aria-expanded="expandedSuggestionId === suggestion.id"
+                      @click="toggleSuggestionPreview(suggestion.id)"
+                    >
+                      <span>{{ suggestionTitle(suggestion) }}</span>
+                      <small>{{ formatScore(suggestion.score) }}</small>
+                    </button>
+                    <span class="document-result-actions">
+                      <Button
+                        label="Annehmen"
+                        size="small"
+                        text
+                        :loading="documentDecisionId === suggestion.id"
+                        @click="decideDocumentSuggestion(suggestion, 'accepted')"
+                      />
+                      <Button
+                        label="Ablehnen"
+                        size="small"
+                        severity="secondary"
+                        text
+                        :disabled="documentDecisionId === suggestion.id"
+                        @click="decideDocumentSuggestion(suggestion, 'rejected')"
+                      />
+                    </span>
+                  </div>
+                  <div v-if="expandedSuggestionId === suggestion.id" class="document-suggestion-preview">
+                    <dl class="document-preview-meta">
+                      <template v-if="suggestion.sender">
+                        <dt>Absender</dt>
+                        <dd>{{ suggestion.sender }}</dd>
+                      </template>
+                      <template v-if="suggestion.doc_date">
+                        <dt>Datum</dt>
+                        <dd>{{ suggestion.doc_date }}</dd>
+                      </template>
+                      <dt>Match</dt>
+                      <dd>
+                        Gesamt {{ formatScore(suggestion.score) }}
+                        · Betrag {{ formatScore(suggestion.amount_score) }}
+                        · Datum {{ formatScore(suggestion.date_score) }}
+                        · Text {{ formatScore(suggestion.text_score) }}
+                      </dd>
+                    </dl>
+                    <p v-if="suggestion.extracted_text_preview" class="document-preview-text">
+                      {{ suggestion.extracted_text_preview }}
+                    </p>
+                    <p v-else class="hint">Keine Textvorschau verfügbar.</p>
+                  </div>
                 </li>
               </ul>
             </div>
@@ -1099,6 +1150,67 @@ const extractedFields = computed(() => {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.document-suggestion {
+  border-top: 1px solid var(--p-content-border-color);
+  padding-top: 0.35rem;
+}
+.document-suggestion:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+.document-suggestion-title {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--p-text-color);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+.document-suggestion-title:hover span {
+  text-decoration: underline;
+}
+.document-suggestion-title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.document-suggestion-title small {
+  color: var(--p-text-muted-color);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.document-suggestion-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-top: 0.45rem;
+  border-radius: 0.45rem;
+  background: var(--p-content-background);
+  padding: 0.65rem 0.75rem;
+}
+.document-preview-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 0.6rem;
+  margin: 0;
+  font-size: 0.85rem;
+}
+.document-preview-meta dt {
+  color: var(--p-text-muted-color);
+}
+.document-preview-meta dd {
+  margin: 0;
+}
+.document-preview-text {
+  margin: 0;
+  color: var(--p-text-muted-color);
+  font-size: 0.9rem;
+  line-height: 1.35;
 }
 .document-result-actions {
   display: inline-flex;

@@ -1205,7 +1205,22 @@ export async function getRelatedRecurringTransactions(
   return apiFetch(`/finance/transactions/${transactionId}/recurring`)
 }
 
-export interface DocumentMatchSuggestion { id: number; transaction_id: number; document_id: number; score: number; amount_score: number; date_score: number; text_score: number; outcome: 'pending' | 'accepted' | 'rejected' | 'ignored' }
+export interface DocumentMatchSuggestion {
+  id: number
+  transaction_id: number
+  document_id: number
+  score: number
+  amount_score: number
+  date_score: number
+  text_score: number
+  outcome: 'pending' | 'accepted' | 'rejected' | 'ignored'
+  title: string | null
+  original_filename: string
+  sender: string | null
+  doc_date: string | null
+  summary: string | null
+  extracted_text_preview: string | null
+}
 export async function suggestDocumentsForTransactions(transaction_ids: number[]) { const response = await apiFetch<{ items: DocumentMatchSuggestion[] }>('/finance/document-matches/suggest', { method: 'POST', body: JSON.stringify({ transaction_ids }) }); return response.items }
 export async function decideDocumentMatch(id: number, outcome: 'accepted' | 'rejected' | 'ignored') { return apiFetch<{ ok: boolean }>(`/finance/document-matches/${id}/decision`, { method: 'POST', body: JSON.stringify({ outcome }) }) }
 export async function getTransactionDocumentLinks(transactionId: number) { const response = await apiFetch<{ items: Array<{ document_id: number; title: string | null; original_filename: string }> }>(`/finance/transactions/${transactionId}/documents`); return response.items }
