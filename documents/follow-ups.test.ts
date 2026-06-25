@@ -176,6 +176,7 @@ describe("documents.follow-ups processDueFollowUps", () => {
     );
 
     const res = await processDueFollowUps();
+    expect(res.cleared).toBe(1);
     expect(res.surfaced).toBe(1);
 
     // The due document is back in the basket; the future one is still snoozed.
@@ -183,5 +184,26 @@ describe("documents.follow-ups processDueFollowUps", () => {
     expect(basketIds).toContain(dueDoc);
     expect(basketIds).not.toContain(futureDoc);
     expect((await listFollowUps(USER_ID)).map((f) => f.document.id)).toEqual([futureDoc]);
+  });
+
+  it("clears a due follow-up the user already handled but does not count it as surfaced", async () => {
+    // Low-confidence document that the user pins (attributes_reviewed) while it
+    // is snoozed — it is no longer review-worthy when the follow-up comes due.
+    const handled = await insertDoc({ status: "ready", confidence: 0.2, reviewed: true });
+    await setFollowUps(USER_ID, [handled], futureDate(2), null);
+    await db.execute(
+      sql`UPDATE document_follow_ups SET follow_up_date = '2000-01-01' WHERE document_id = ${handled}`,
+    );
+
+    const res = await processDueFollowUps();
+    // Row is deleted (no stale snooze) but nothing surfaces / gets notified.
+    expect(res.cleared).toBe(1);
+    expect(res.surfaced).toBe(0);
+    expect(res.notified).toBe(0);
+
+    // Follow-up is gone, and the handled document stays out of the basket.
+    expect(await listFollowUps(USER_ID)).toHaveLength(0);
+    const basketIds = (await listBasket(USER_ID, false, 50, 0)).items.map((i) => i.id);
+    expect(basketIds).not.toContain(handled);
   });
 });

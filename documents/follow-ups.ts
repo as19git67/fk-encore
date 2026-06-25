@@ -311,14 +311,25 @@ export async function removeFollowUp(userId: number, documentId: number): Promis
 // ─── due processing (called by the daily cron) ───────────────────────────────
 
 export interface ProcessDueResult {
+  /** Total due follow-up rows deleted (whether or not still review-worthy). */
+  cleared: number;
+  /** Of those, the documents that actually return to the basket. */
   surfaced: number;
+  /** Push notifications actually sent for surfaced documents. */
   notified: number;
 }
 
 /**
  * Delete every follow-up whose date has arrived (≤ today) so the documents
- * re-enter their owners' baskets, and fire a per-document notification. Best
- * effort: a failed push never blocks the deletion.
+ * re-enter their owners' baskets, and notify the owner.
+ *
+ * Notifications are sent only for documents that are *still* review-worthy:
+ * a document the user handled while it was snoozed (pinned its attributes, or
+ * a re-classify lifted the confidence) no longer reappears in the basket, so
+ * a "back in your basket" push would be misleading. The follow-up rows are
+ * deleted in either case — leaving stale rows behind would keep handled
+ * documents permanently snoozed. Best effort: a failed push never blocks the
+ * deletion.
  */
 export async function processDueFollowUps(today: string = todayIsoDate()): Promise<ProcessDueResult> {
   const due = await dbAll<{
@@ -326,6 +337,9 @@ export async function processDueFollowUps(today: string = todayIsoDate()): Promi
     user_id: number;
     title: string | null;
     original_filename: string;
+    status: string;
+    attributes_reviewed: boolean;
+    classification_confidence: number | null;
   }>(
     db
       .select({
@@ -333,20 +347,35 @@ export async function processDueFollowUps(today: string = todayIsoDate()): Promi
         user_id: documentFollowUps.user_id,
         title: documents.title,
         original_filename: documents.original_filename,
+        status: documents.status,
+        attributes_reviewed: documents.attributes_reviewed,
+        classification_confidence: documents.classification_confidence,
       })
       .from(documentFollowUps)
       .innerJoin(documents, eq(documentFollowUps.document_id, documents.id))
       .where(lte(documentFollowUps.follow_up_date, today)),
   );
 
-  if (due.length === 0) return { surfaced: 0, notified: 0 };
+  if (due.length === 0) return { cleared: 0, surfaced: 0, notified: 0 };
 
+  // Delete all due rows so handled documents don't stay snoozed forever.
   await db
     .delete(documentFollowUps)
     .where(lte(documentFollowUps.follow_up_date, today));
 
+  // Mirror the basket's `reviewWorthyWhere` so we only notify for documents
+  // that actually come back into view.
+  const stillReviewWorthy = due.filter(
+    (r) =>
+      r.status === "failed" ||
+      (r.status === "ready" &&
+        !r.attributes_reviewed &&
+        r.classification_confidence != null &&
+        r.classification_confidence < LOW_CONFIDENCE_THRESHOLD),
+  );
+
   let notified = 0;
-  for (const row of due) {
+  for (const row of stillReviewWorthy) {
     try {
       const res = await push.notifyDocumentReview({
         userId: row.user_id,
@@ -363,7 +392,7 @@ export async function processDueFollowUps(today: string = todayIsoDate()): Promi
     }
   }
 
-  return { surfaced: due.length, notified };
+  return { cleared: due.length, surfaced: stillReviewWorthy.length, notified };
 }
 
 // ─── API endpoints ───────────────────────────────────────────────────────────
