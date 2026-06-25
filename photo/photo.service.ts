@@ -7636,13 +7636,14 @@ export async function searchPhotosNaturalLogic(
     }
     return base;
   };
-  const fetchDescriptionMatchIds = async (): Promise<number[]> => {
+  const fetchTextMatchIds = async (): Promise<number[]> => {
     if (descriptionTokens.length === 0) return [];
     const rows = await dbAll<{ id: number }>(
       db.select({ id: photos.id })
         .from(photos)
         .leftJoin(photoCuration, and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)))
         .where(and(...buildTextMatchConditions()))
+        .orderBy(sql`${photoDateOrder} DESC`)
         .limit(limit)
     );
     return rows.map(r => r.id);
@@ -7691,7 +7692,7 @@ export async function searchPhotosNaturalLogic(
         }),
         timeoutMs: ML_RPC_QUICK_TIMEOUT_MS,
       }),
-      fetchDescriptionMatchIds(),
+      fetchTextMatchIds(),
     ]);
     if (!clipResp.ok) throw new Error(`Embedding service error: ${clipResp.status}`);
     const clipData = await clipResp.json() as { results: Array<{ photo_id: string; score: number }> };
@@ -7745,9 +7746,9 @@ export async function searchPhotosNaturalLogic(
       }),
       timeoutMs: ML_RPC_QUICK_TIMEOUT_MS,
     }),
-    // fetchDescriptionMatchIds already applies the same structural filter,
+    // fetchTextMatchIds already applies the same structural filter,
     // so we don't need to intersect manually.
-    fetchDescriptionMatchIds(),
+    fetchTextMatchIds(),
   ]);
   if (!clipResp.ok) throw new Error(`Embedding service error: ${clipResp.status}`);
   const clipData = await clipResp.json() as { results: Array<{ photo_id: string; score: number }> };
