@@ -10,10 +10,10 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import db from "../db/database";
 import { dbFirst } from "../db/adapter";
-import { documents, users } from "../db/schema";
+import { documents, documentsUserPref, users } from "../db/schema";
 import {
   DOCUMENTS_MAX_BYTES,
   assertPathUnderDocumentsRoot,
@@ -23,7 +23,9 @@ import {
   guessExtension,
   slugifyUserLogin,
 } from "./documents.service";
+import { relocateDocument } from "./relocate";
 import { enqueueDocumentScan } from "./scan-queue";
+import { assertGroupMember } from "./visibility";
 
 export interface ImportedDocument {
   id: number;
@@ -55,6 +57,36 @@ export class EmptySourceFileError extends Error {
     this.name = "EmptySourceFileError";
     this.sourcePath = sourcePath;
   }
+}
+
+const UPLOAD_DEFAULTS_PREF_KEY = "upload_defaults";
+
+interface UploadDefaultsPref {
+  group_id: number | null;
+}
+
+async function loadDefaultGroupForUser(userId: number): Promise<number | null> {
+  const row = await dbFirst<{ value: unknown }>(
+    db
+      .select({ value: documentsUserPref.value })
+      .from(documentsUserPref)
+      .where(
+        and(
+          eq(documentsUserPref.user_id, userId),
+          eq(documentsUserPref.key, UPLOAD_DEFAULTS_PREF_KEY),
+        ),
+      ),
+  );
+  if (!row) return null;
+  const v = row.value as UploadDefaultsPref | null;
+  const groupId = v?.group_id ?? null;
+  if (groupId == null) return null;
+  try {
+    await assertGroupMember(userId, groupId);
+  } catch {
+    return null;
+  }
+  return groupId;
 }
 
 /**
@@ -106,6 +138,7 @@ export async function importDocumentFromPath(params: {
     uploader?.email ?? `user-${userId}@local`,
     userId,
   );
+  const defaultGroupId = await loadDefaultGroupForUser(userId);
   const ownerRootSeg = composeOwnerRootSegment({
     visibility: "private",
     userLoginSlug,
@@ -131,11 +164,22 @@ export async function importDocumentFromPath(params: {
         mime_type: mimeType,
         size_bytes: stat.size,
         disk_path: absPath,
-        visibility: "private",
+        visibility: defaultGroupId != null ? "group" : "private",
+        group_id: defaultGroupId,
       })
       .returning(),
   );
   if (!row) throw new Error("insert documents: no row returned");
+
+  if (defaultGroupId != null) {
+    try {
+      await relocateDocument(row.id);
+    } catch (err) {
+      console.warn(
+        `[documents] inbox import: relocate after default-group(${row.id}) failed: ${(err as Error).message}`,
+      );
+    }
+  }
 
   await enqueueDocumentScan(row.id);
 
