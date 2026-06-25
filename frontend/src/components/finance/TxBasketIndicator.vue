@@ -179,11 +179,11 @@ async function exportCsv() {
       <section class="basket-matches">
         <div class="basket-match-actions">
           <Button label="Verknüpfen" icon="pi pi-link" size="small" @click="openManualLink" />
-          <Button label="Belegvorschläge" icon="pi pi-file" size="small" outlined :loading="loadingSuggestions" @click="loadDocumentSuggestions" />
+          <Button label="Vorschläge" icon="pi pi-file" size="small" outlined :loading="loadingSuggestions" @click="loadDocumentSuggestions" />
         </div>
         <div v-if="manualLinkOpen" class="basket-document-search">
           <InputText v-model="documentQuery" placeholder="Dokument suchen" @keyup.enter="searchBasketDocuments" />
-          <Button label="Suchen" size="small" @click="searchBasketDocuments" />
+          <Button icon="pi pi-search" size="small" aria-label="Dokument suchen" @click="searchBasketDocuments" />
         </div>
         <p v-for="document in documentResults" :key="document.id" class="basket-document-result">
           {{ document.title ?? document.original_filename }}
@@ -344,10 +344,12 @@ async function exportCsv() {
   margin-top: 0.25rem;
 }
 
-.basket-match-actions { display: flex; gap: .5rem; margin-bottom: .5rem; }
-.basket-match-actions :deep(.p-button) { flex: 1; min-width: 0; }
-.basket-document-search { display: flex; gap: .5rem; margin-bottom: .5rem; }
-.basket-document-search :first-child { flex: 1; }
+.basket-match-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .5rem; margin-bottom: .5rem; }
+.basket-match-actions :deep(.p-button) { min-width: 0; }
+.basket-match-actions :deep(.p-button-label) { overflow: hidden; text-overflow: ellipsis; }
+.basket-document-search { display: flex; gap: .5rem; margin-bottom: .5rem; min-width: 0; }
+.basket-document-search :deep(.p-inputtext) { flex: 1; min-width: 0; }
+.basket-document-search :deep(.p-button) { flex-shrink: 0; }
 .basket-list {
   list-style: none;
   padding: 0;

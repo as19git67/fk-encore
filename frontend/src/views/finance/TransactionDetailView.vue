@@ -683,6 +683,15 @@ const extractedFields = computed(() => {
                     </button>
                     <span class="document-result-actions">
                       <Button
+                        label="Vorschau"
+                        icon="pi pi-eye"
+                        size="small"
+                        severity="secondary"
+                        text
+                        :aria-expanded="expandedSuggestionId === suggestion.id"
+                        @click="toggleSuggestionPreview(suggestion.id)"
+                      />
+                      <Button
                         label="Annehmen"
                         size="small"
                         text
@@ -1066,7 +1075,7 @@ const extractedFields = computed(() => {
 }
 .details {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: max-content minmax(0, 1fr);
   gap: 0.5rem 1rem;
   margin: 0;
 }
@@ -1077,6 +1086,7 @@ const extractedFields = computed(() => {
 }
 .details dd {
   margin: 0;
+  min-width: 0;
   word-break: break-word;
 }
 .document-links {
@@ -1106,6 +1116,9 @@ const extractedFields = computed(() => {
 .document-link-panel {
   border: 1px solid var(--p-content-border-color);
   border-radius: 0.5rem;
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
   padding: 0.75rem;
   background: var(--p-content-hover-background);
   display: flex;
@@ -1144,6 +1157,7 @@ const extractedFields = computed(() => {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
+  min-width: 0;
   padding: 0.25rem 0;
 }
 .document-result-row > span:first-child {
@@ -1162,6 +1176,7 @@ const extractedFields = computed(() => {
 .document-suggestion-title {
   display: inline-flex;
   align-items: baseline;
+  flex: 1;
   gap: 0.5rem;
   min-width: 0;
   border: none;
@@ -1214,10 +1229,18 @@ const extractedFields = computed(() => {
 }
 .document-result-actions {
   display: inline-flex;
+  flex-wrap: wrap;
   flex-shrink: 0;
+  justify-content: flex-end;
   gap: 0.25rem;
 }
 @media (max-width: 520px) {
+  .details {
+    grid-template-columns: 1fr;
+  }
+  .details dt {
+    align-self: auto;
+  }
   .document-search-row,
   .document-result-row {
     align-items: stretch;
@@ -1225,6 +1248,9 @@ const extractedFields = computed(() => {
   }
   .document-result-actions {
     justify-content: flex-end;
+  }
+  .document-result-actions :deep(.p-button-label) {
+    display: none;
   }
 }
 .field-input {
