@@ -3,8 +3,11 @@ import type { RouteRecordRaw } from 'vue-router'
 export interface ModuleMenuItem {
   label: string
   icon: string
-  routeName: string
+  /** Omitted for group headers that only open a submenu (see `children`). */
+  routeName?: string
   permission?: string
+  /** When set, this item renders as a submenu (e.g. a "settings" group). */
+  children?: ModuleMenuItem[]
 }
 
 export interface ModuleConfig {
@@ -168,12 +171,18 @@ export const modules: ModuleConfig[] = [
       { label: 'Arbeitskorb', icon: 'pi pi-inbox', routeName: 'dokumente-korb', permission: 'documents.view' },
       { label: 'Später', icon: 'pi pi-clock', routeName: 'dokumente-spaeter', permission: 'documents.view' },
       { label: 'Steuer', icon: 'pi pi-receipt', routeName: 'dokumente-steuer', permission: 'documents.view' },
-      { label: 'Steuer-Hints', icon: 'pi pi-sparkles', routeName: 'dokumente-steuer-hints', permission: 'documents.manage_taxonomy' },
       { label: 'Hochladen', icon: 'pi pi-upload', routeName: 'dokumente-upload', permission: 'documents.upload' },
       { label: 'Kategorie-Vorschläge', icon: 'pi pi-folder-open', routeName: 'dokumente-kategorie-vorschlaege', permission: 'documents.manage_taxonomy' },
-      { label: 'Bezugspersonen', icon: 'pi pi-id-card', routeName: 'dokumente-bezugspersonen', permission: 'documents.view' },
-      { label: 'Gruppen', icon: 'pi pi-users', routeName: 'dokumente-gruppen', permission: 'groups.view' },
       { label: 'Hilfe', icon: 'pi pi-question-circle', routeName: 'dokumente-hilfe', permission: 'documents.view' },
+      {
+        label: 'Einstellungen',
+        icon: 'pi pi-cog',
+        children: [
+          { label: 'Steuer-Hints', icon: 'pi pi-sparkles', routeName: 'dokumente-steuer-hints', permission: 'documents.manage_taxonomy' },
+          { label: 'Bezugspersonen', icon: 'pi pi-id-card', routeName: 'dokumente-bezugspersonen', permission: 'documents.view' },
+          { label: 'Gruppen', icon: 'pi pi-users', routeName: 'dokumente-gruppen', permission: 'groups.view' },
+        ],
+      },
     ],
   },
   {
