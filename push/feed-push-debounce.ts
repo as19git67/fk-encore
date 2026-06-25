@@ -26,6 +26,7 @@
 
 import { realtime } from "~encore/clients";
 import type { FeedItemKind } from "../feed/feed.service";
+import { countUnread } from "../feed/feed.service";
 import { buildFeedNotification, sendToUser, type PushPayload } from "./push.service";
 
 export interface FeedPushEvent {
@@ -124,6 +125,10 @@ export async function flushUser(userId: number): Promise<void> {
   const payload =
     p.events.length === 1 ? buildFeedNotification(p.events[0]!) : buildFeedDigest(p.events);
   try {
+    const unread = await countUnread(userId).catch(() => 0);
+    if (unread > 0) {
+      payload.data = { ...payload.data, badgeCount: unread };
+    }
     await deps.send(userId, payload);
   } catch (err) {
     console.warn(`[push] debounced feed push failed user=${userId}: ${(err as Error).message}`);
