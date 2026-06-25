@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import Button from 'primevue/button'
+import InputText from 'primevue/inputtext'
 import Drawer from 'primevue/drawer'
 import Message from 'primevue/message'
 import { useTxSelectionStore } from '../../stores/finance/selection'
-import { downloadTransactionsCsv, type Transaction } from '../../api/finance'
+import { downloadTransactionsCsv, suggestDocumentsForTransactions, decideDocumentMatch, getDocumentMatchMetrics, linkDocumentsToTransactions, type DocumentMatchSuggestion, type Transaction } from '../../api/finance'
 import BatchTagDialog from './BatchTagDialog.vue'
 import BatchNoticeDialog from './BatchNoticeDialog.vue'
+import { searchDocuments, type DocumentSummary } from '../../api/documents'
 import { basketTags, basketCounterparties, basketMonths, hasMixedCurrencies, type BasketAggregate } from '../../utils/financeBasketAnalysis'
 
 /**
@@ -24,6 +26,13 @@ const tagDialogVisible = ref(false)
 const noticeDialogVisible = ref(false)
 const exporting = ref(false)
 const actionError = ref<string | null>(null)
+const actionInfo = ref<string | null>(null)
+const documentSuggestions = ref<DocumentMatchSuggestion[]>([])
+const loadingSuggestions = ref(false)
+const documentQuery = ref('')
+const documentResults = ref<DocumentSummary[]>([])
+const manualLinkOpen = ref(false)
+const matchMetrics = ref<{ high: Record<string, number>; medium: Record<string, number>; low: Record<string, number> } | null>(null)
 const analysisView = ref<'tags' | 'counterparties' | 'months'>('tags')
 
 const count = computed(() => selectionStore.count)
@@ -63,6 +72,44 @@ function formatAnalysisAmount(amount: number): string {
 function monthLabel(month: string): string {
   if (!/^\d{4}-\d{2}$/.test(month)) return month
   return new Date(`${month}-01T12:00:00`).toLocaleDateString('de-DE', { month: 'short', year: 'numeric' })
+}
+
+function openManualLink() {
+  manualLinkOpen.value = true
+  actionError.value = null
+}
+
+async function searchBasketDocuments() {
+  const query = documentQuery.value.trim()
+  if (!query) { actionError.value = 'Bitte einen Suchbegriff für das Dokument eingeben.'; return }
+  actionError.value = null
+  actionInfo.value = null
+  try {
+    documentResults.value = (await searchDocuments(query)).items
+  } catch (err) {
+    actionError.value = `Dokumentsuche konnte nicht geladen werden: ${err instanceof Error ? err.message : String(err)}`
+  }
+}
+async function linkDocument(documentId: number) {
+  try {
+    actionError.value = null
+    const result = await linkDocumentsToTransactions(selectionStore.ids, [documentId])
+    documentResults.value = documentResults.value.filter(d => d.id !== documentId)
+    actionInfo.value = `${result.linked} Verknüpfung${result.linked === 1 ? '' : 'en'} erstellt.`
+  } catch (err) { actionError.value = err instanceof Error ? err.message : String(err) }
+}
+
+async function loadDocumentSuggestions() {
+  if (!count.value || loadingSuggestions.value) return
+  loadingSuggestions.value = true
+  try { documentSuggestions.value = await suggestDocumentsForTransactions(selectionStore.ids) }
+  catch (err) { actionError.value = `Belegvorschläge konnten nicht geladen werden: ${err instanceof Error ? err.message : String(err)}` }
+  finally { loadingSuggestions.value = false }
+  matchMetrics.value = await getDocumentMatchMetrics().catch(() => null)
+}
+async function decideSuggestion(suggestion: DocumentMatchSuggestion, outcome: 'accepted' | 'rejected') {
+  await decideDocumentMatch(suggestion.id, outcome)
+  documentSuggestions.value = documentSuggestions.value.filter(item => item.id !== suggestion.id)
 }
 
 function openBatchTagEditor() {
@@ -128,7 +175,28 @@ async function exportCsv() {
         </p>
       </div>
 
-      <ul v-else class="basket-list">
+      <div v-else>
+      <section class="basket-matches">
+        <div class="basket-match-actions">
+          <Button label="Verknüpfen" icon="pi pi-link" size="small" @click="openManualLink" />
+          <Button label="Vorschläge" icon="pi pi-file" size="small" outlined :loading="loadingSuggestions" @click="loadDocumentSuggestions" />
+        </div>
+        <div v-if="manualLinkOpen" class="basket-document-search">
+          <InputText v-model="documentQuery" placeholder="Dokument suchen" @keyup.enter="searchBasketDocuments" />
+          <Button icon="pi pi-search" size="small" aria-label="Dokument suchen" @click="searchBasketDocuments" />
+        </div>
+        <p v-for="document in documentResults" :key="document.id" class="basket-document-result">
+          {{ document.title ?? document.original_filename }}
+          <Button label="Verbinden" size="small" text @click="linkDocument(document.id)" />
+        </p>
+        <p v-for="suggestion in documentSuggestions" :key="suggestion.id">
+          Beleg #{{ suggestion.document_id }} · {{ Math.round(suggestion.score * 100) }}%
+          <Button label="Annehmen" size="small" text @click="decideSuggestion(suggestion, 'accepted')" />
+          <Button label="Ablehnen" size="small" text @click="decideSuggestion(suggestion, 'rejected')" />
+        </p>
+        <p v-if="matchMetrics" class="basket-match-metrics">Trefferquote (hoch): {{ matchMetrics.high.accepted }} angenommen / {{ matchMetrics.high.rejected }} abgelehnt</p>
+      </section>
+      <ul class="basket-list">
         <section class="basket-analysis" aria-label="Auswertung der Auswahl">
           <div class="basket-analysis-tabs" role="tablist" aria-label="Auswertung gruppieren nach">
             <button v-for="view in [{ id: 'tags', label: 'Tags' }, { id: 'counterparties', label: 'Gegenseite' }, { id: 'months', label: 'Monat' }]" :key="view.id" type="button" class="basket-analysis-tab" :class="{ active: analysisView === view.id }" @click="analysisView = view.id as 'tags' | 'counterparties' | 'months'">{{ view.label }}</button>
@@ -173,9 +241,11 @@ async function exportCsv() {
           </button>
         </li>
       </ul>
+      </div>
 
       <template #footer>
         <div class="drawer-footer">
+          <Message v-if="actionInfo" severity="success" :closable="true" class="action-error" @close="actionInfo = null">{{ actionInfo }}</Message>
           <Message
             v-if="actionError"
             severity="error"
@@ -274,6 +344,12 @@ async function exportCsv() {
   margin-top: 0.25rem;
 }
 
+.basket-match-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .5rem; margin-bottom: .5rem; }
+.basket-match-actions :deep(.p-button) { min-width: 0; }
+.basket-match-actions :deep(.p-button-label) { overflow: hidden; text-overflow: ellipsis; }
+.basket-document-search { display: flex; gap: .5rem; margin-bottom: .5rem; min-width: 0; }
+.basket-document-search :deep(.p-inputtext) { flex: 1; min-width: 0; }
+.basket-document-search :deep(.p-button) { flex-shrink: 0; }
 .basket-list {
   list-style: none;
   padding: 0;

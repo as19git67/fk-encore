@@ -10,6 +10,7 @@ import DatePicker from 'primevue/datepicker'
 import TagAutoComplete from '../../components/finance/TagAutoComplete.vue'
 import Textarea from 'primevue/textarea'
 import Dialog from 'primevue/dialog'
+import { useConfirm } from 'primevue/useconfirm'
 import { toLocalIsoDate } from '../../utils/dateFormat'
 import { useModuleBack } from '../../composables/useModuleBack'
 import { useTransactionsStore } from '../../stores/finance/transactions'
@@ -18,6 +19,7 @@ import { useTagsStore } from '../../stores/finance/tags'
 import { useTxSelectionStore } from '../../stores/finance/selection'
 import type { MandateHistoryItem, Transaction } from '../../api/finance'
 import * as api from '../../api/finance'
+import { searchDocuments, type DocumentSummary } from '../../api/documents'
 import { lookupBtcCodeDe } from '../../utils/btcCodes'
 
 const route = useRoute()
@@ -27,6 +29,7 @@ const txStore = useTransactionsStore()
 const accountsStore = useAccountsStore()
 const tagsStore = useTagsStore()
 const selectionStore = useTxSelectionStore()
+const confirmDialog = useConfirm()
 
 const tx = ref<Transaction | null>(null)
 const newTag = ref<string[]>([])
@@ -36,6 +39,129 @@ const rejecting = ref<string | null>(null)
 const saving = ref(false)
 const deleting = ref(false)
 const copyToast = ref<string | null>(null)
+const linkedDocuments = ref<Array<{ document_id: number; title: string | null; original_filename: string }>>([])
+const documentLinkPanelOpen = ref(false)
+const documentQuery = ref('')
+const documentResults = ref<DocumentSummary[]>([])
+const documentSuggestions = ref<api.DocumentMatchSuggestion[]>([])
+const documentSearchLoading = ref(false)
+const documentSuggestionsLoading = ref(false)
+const documentLinkingId = ref<number | null>(null)
+const documentDecisionId = ref<number | null>(null)
+const expandedSuggestionId = ref<number | null>(null)
+
+async function refreshLinkedDocuments() {
+  if (!tx.value) {
+    linkedDocuments.value = []
+    return
+  }
+  linkedDocuments.value = await api.getTransactionDocumentLinks(tx.value.id).catch(() => [])
+}
+
+async function unlinkDocument(documentId: number) {
+  if (!tx.value) return
+  try {
+    await api.unlinkTransactionDocument(tx.value.id, documentId)
+    linkedDocuments.value = linkedDocuments.value.filter(d => d.document_id !== documentId)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  }
+}
+function requestUnlinkDocument(documentId: number) {
+  confirmDialog.require({
+    message: 'Verknüpfung zu diesem Beleg wirklich trennen?',
+    header: 'Belegverknüpfung trennen',
+    icon: 'pi pi-exclamation-triangle',
+    rejectProps: { label: 'Abbrechen', severity: 'secondary', outlined: true },
+    acceptProps: { label: 'Trennen', severity: 'danger' },
+    accept: () => { void unlinkDocument(documentId) },
+  })
+}
+
+async function toggleDocumentLinkPanel() {
+  documentLinkPanelOpen.value = !documentLinkPanelOpen.value
+  if (documentLinkPanelOpen.value) {
+    error.value = null
+    await loadDocumentSuggestions()
+  }
+}
+
+async function searchTransactionDocuments() {
+  const query = documentQuery.value.trim()
+  if (!query) {
+    error.value = 'Bitte einen Suchbegriff für das Dokument eingeben.'
+    return
+  }
+  documentSearchLoading.value = true
+  error.value = null
+  try {
+    documentResults.value = (await searchDocuments(query)).items
+  } catch (err) {
+    error.value = `Dokumentsuche konnte nicht geladen werden: ${err instanceof Error ? err.message : String(err)}`
+  } finally {
+    documentSearchLoading.value = false
+  }
+}
+
+async function linkDocumentToTransaction(documentId: number) {
+  if (!tx.value) return
+  documentLinkingId.value = documentId
+  error.value = null
+  try {
+    await api.linkDocumentsToTransactions([tx.value.id], [documentId])
+    documentResults.value = documentResults.value.filter(document => document.id !== documentId)
+    documentSuggestions.value = documentSuggestions.value.filter(suggestion => suggestion.document_id !== documentId)
+    if (documentSuggestions.value.every(suggestion => suggestion.id !== expandedSuggestionId.value)) {
+      expandedSuggestionId.value = null
+    }
+    await refreshLinkedDocuments()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    documentLinkingId.value = null
+  }
+}
+
+async function loadDocumentSuggestions() {
+  if (!tx.value || documentSuggestionsLoading.value) return
+  documentSuggestionsLoading.value = true
+  error.value = null
+  try {
+    documentSuggestions.value = await api.suggestDocumentsForTransactions([tx.value.id])
+  } catch (err) {
+    error.value = `Belegvorschläge konnten nicht geladen werden: ${err instanceof Error ? err.message : String(err)}`
+  } finally {
+    documentSuggestionsLoading.value = false
+  }
+}
+
+async function decideDocumentSuggestion(suggestion: api.DocumentMatchSuggestion, outcome: 'accepted' | 'rejected') {
+  if (!tx.value) return
+  documentDecisionId.value = suggestion.id
+  error.value = null
+  try {
+    await api.decideDocumentMatch(suggestion.id, outcome)
+    documentSuggestions.value = documentSuggestions.value.filter(item => item.id !== suggestion.id)
+    if (expandedSuggestionId.value === suggestion.id) expandedSuggestionId.value = null
+    if (outcome === 'accepted') await refreshLinkedDocuments()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    documentDecisionId.value = null
+  }
+}
+
+function suggestionTitle(suggestion: api.DocumentMatchSuggestion): string {
+  return suggestion.title ?? suggestion.original_filename
+}
+
+function toggleSuggestionPreview(suggestionId: number) {
+  expandedSuggestionId.value = expandedSuggestionId.value === suggestionId ? null : suggestionId
+}
+
+function formatScore(score: number): string {
+  return `${Math.round(score * 100)}%`
+}
 
 // Editable form state (kept in sync with tx)
 const formNotice = ref('')
@@ -89,6 +215,12 @@ async function loadTransaction(id: number) {
   try {
     error.value = null
     tx.value = await api.getTransaction(id)
+    linkedDocuments.value = await api.getTransactionDocumentLinks(id).catch(() => [])
+    documentResults.value = []
+    documentSuggestions.value = []
+    expandedSuggestionId.value = null
+    documentLinkPanelOpen.value = false
+    documentQuery.value = ''
     syncForm()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -252,7 +384,7 @@ async function save() {
 
 async function deleteTx() {
   if (!tx.value) return
-  if (!confirm('Diese Buchung wirklich löschen?')) return
+  if (!window.confirm('Diese Buchung wirklich löschen?')) return
   deleting.value = true
   try {
     await api.deleteTransaction(tx.value.id)
@@ -478,6 +610,133 @@ const extractedFields = computed(() => {
 
     <section v-if="tx" class="card">
       <dl class="details">
+        <dt>Verknüpfte Belege</dt>
+        <dd class="document-links">
+          <div v-if="linkedDocuments.length" class="linked-documents">
+            <span v-for="document in linkedDocuments" :key="document.document_id" class="linked-document">
+              <Button :label="document.title ?? document.original_filename" size="small" text @click="router.push({ name: 'dokumente-detail', params: { id: document.document_id }, query: { fromTransaction: String(tx.id) } })" />
+              <Button icon="pi pi-times" size="small" text aria-label="Belegverknüpfung trennen" @click="requestUnlinkDocument(document.document_id)" />
+            </span>
+          </div>
+          <span v-else class="hint">Keine Belege verknüpft.</span>
+
+          <div class="document-link-actions">
+            <Button
+              :label="documentLinkPanelOpen ? 'Verknüpfen schließen' : 'Beleg verknüpfen'"
+              icon="pi pi-link"
+              size="small"
+              severity="secondary"
+              outlined
+              :loading="documentSuggestionsLoading"
+              @click="toggleDocumentLinkPanel"
+            />
+          </div>
+
+          <div v-if="documentLinkPanelOpen" class="document-link-panel">
+            <div class="document-panel-section">
+              <h3>Dokument suchen</h3>
+              <div class="document-search-row">
+                <InputText
+                  v-model="documentQuery"
+                  placeholder="Dokument suchen"
+                  @keyup.enter="searchTransactionDocuments"
+                />
+                <Button
+                  label="Suchen"
+                  size="small"
+                  :loading="documentSearchLoading"
+                  @click="searchTransactionDocuments"
+                />
+              </div>
+              <p v-if="!documentSearchLoading && documentResults.length === 0 && documentQuery.trim()" class="hint">
+                Keine passenden Dokumente gefunden.
+              </p>
+              <ul v-if="documentResults.length" class="document-result-list">
+                <li v-for="document in documentResults" :key="document.id" class="document-result-row">
+                  <span>{{ document.title ?? document.original_filename }}</span>
+                  <Button
+                    label="Verbinden"
+                    size="small"
+                    text
+                    :loading="documentLinkingId === document.id"
+                    @click="linkDocumentToTransaction(document.id)"
+                  />
+                </li>
+              </ul>
+            </div>
+
+            <div class="document-panel-section">
+              <h3>Mögliche Treffer</h3>
+              <p v-if="documentSuggestionsLoading" class="hint">Belegvorschläge werden geladen …</p>
+              <p v-else-if="documentSuggestions.length === 0" class="hint">Keine Belegvorschläge gefunden.</p>
+              <ul v-else class="document-result-list">
+                <li v-for="suggestion in documentSuggestions" :key="suggestion.id" class="document-suggestion">
+                  <div class="document-result-row">
+                    <button
+                      type="button"
+                      class="document-suggestion-title"
+                      :aria-expanded="expandedSuggestionId === suggestion.id"
+                      @click="toggleSuggestionPreview(suggestion.id)"
+                    >
+                      <span>{{ suggestionTitle(suggestion) }}</span>
+                      <small>{{ formatScore(suggestion.score) }}</small>
+                    </button>
+                    <span class="document-result-actions">
+                      <Button
+                        label="Vorschau"
+                        icon="pi pi-eye"
+                        size="small"
+                        severity="secondary"
+                        text
+                        :aria-expanded="expandedSuggestionId === suggestion.id"
+                        @click="toggleSuggestionPreview(suggestion.id)"
+                      />
+                      <Button
+                        label="Annehmen"
+                        size="small"
+                        text
+                        :loading="documentDecisionId === suggestion.id"
+                        @click="decideDocumentSuggestion(suggestion, 'accepted')"
+                      />
+                      <Button
+                        label="Ablehnen"
+                        size="small"
+                        severity="secondary"
+                        text
+                        :disabled="documentDecisionId === suggestion.id"
+                        @click="decideDocumentSuggestion(suggestion, 'rejected')"
+                      />
+                    </span>
+                  </div>
+                  <div v-if="expandedSuggestionId === suggestion.id" class="document-suggestion-preview">
+                    <dl class="document-preview-meta">
+                      <template v-if="suggestion.sender">
+                        <dt>Absender</dt>
+                        <dd>{{ suggestion.sender }}</dd>
+                      </template>
+                      <template v-if="suggestion.doc_date">
+                        <dt>Datum</dt>
+                        <dd>{{ suggestion.doc_date }}</dd>
+                      </template>
+                      <dt>Match</dt>
+                      <dd>
+                        Gesamt {{ formatScore(suggestion.score) }}
+                        · Betrag {{ formatScore(suggestion.amount_score) }}
+                        · Datum {{ formatScore(suggestion.date_score) }}
+                        · Text {{ formatScore(suggestion.text_score) }}
+                      </dd>
+                    </dl>
+                    <p v-if="suggestion.extracted_text_preview" class="document-preview-text">
+                      {{ suggestion.extracted_text_preview }}
+                    </p>
+                    <p v-else class="hint">Keine Textvorschau verfügbar.</p>
+                  </div>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+        </dd>
         <dt>Buchungsdatum</dt>
         <dd v-if="isCash">
           <DatePicker v-model="formBookingDate" date-format="dd.mm.yy" show-icon fluid />
@@ -704,7 +963,7 @@ const extractedFields = computed(() => {
       <div v-if="recurringPopupLoading" class="hint">Lädt …</div>
       <template v-if="recurringPopupTx">
         <dl class="details">
-          <dt>Buchungsdatum</dt>
+        <dt>Buchungsdatum</dt>
           <dd>{{ recurringPopupTx.booking_date }}</dd>
           <template v-if="recurringPopupTx.value_date">
             <dt>Wertstellung</dt>
@@ -816,7 +1075,7 @@ const extractedFields = computed(() => {
 }
 .details {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: max-content minmax(0, 1fr);
   gap: 0.5rem 1rem;
   margin: 0;
 }
@@ -827,7 +1086,172 @@ const extractedFields = computed(() => {
 }
 .details dd {
   margin: 0;
+  min-width: 0;
   word-break: break-word;
+}
+.document-links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.linked-documents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .25rem .5rem;
+}
+.linked-document {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: .35rem;
+}
+.linked-document :deep(.p-button) {
+  padding-block: .25rem;
+}
+.document-link-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.document-link-panel {
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 0.5rem;
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0.75rem;
+  background: var(--p-content-hover-background);
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.document-panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.document-panel-section h3 {
+  margin: 0;
+  color: var(--p-text-muted-color);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.document-search-row {
+  display: flex;
+  gap: 0.5rem;
+}
+.document-search-row :deep(.p-inputtext) {
+  flex: 1;
+  min-width: 0;
+}
+.document-result-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0;
+  margin: 0.5rem 0 0;
+}
+.document-result-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.25rem 0;
+}
+.document-result-row > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.document-suggestion {
+  border-top: 1px solid var(--p-content-border-color);
+  padding-top: 0.35rem;
+}
+.document-suggestion:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+.document-suggestion-title {
+  display: inline-flex;
+  align-items: baseline;
+  flex: 1;
+  gap: 0.5rem;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--p-text-color);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+.document-suggestion-title:hover span {
+  text-decoration: underline;
+}
+.document-suggestion-title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.document-suggestion-title small {
+  color: var(--p-text-muted-color);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.document-suggestion-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-top: 0.45rem;
+  border-radius: 0.45rem;
+  background: var(--p-content-background);
+  padding: 0.65rem 0.75rem;
+}
+.document-preview-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 0.6rem;
+  margin: 0;
+  font-size: 0.85rem;
+}
+.document-preview-meta dt {
+  color: var(--p-text-muted-color);
+}
+.document-preview-meta dd {
+  margin: 0;
+}
+.document-preview-text {
+  margin: 0;
+  color: var(--p-text-muted-color);
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+.document-result-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  justify-content: flex-end;
+  gap: 0.25rem;
+}
+@media (max-width: 520px) {
+  .details {
+    grid-template-columns: 1fr;
+  }
+  .details dt {
+    align-self: auto;
+  }
+  .document-search-row,
+  .document-result-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .document-result-actions {
+    justify-content: flex-end;
+  }
+  .document-result-actions :deep(.p-button-label) {
+    display: none;
+  }
 }
 .field-input {
   width: 100%;
