@@ -10,15 +10,16 @@ import {
 } from '../api/feed'
 import { getPhotoUrl } from '../api/photos'
 import { useRealtimeEvent } from '../composables/useRealtime'
+import { useFeedBadgeStore } from '../stores/feedBadge'
 
 const router = useRouter()
+const feedBadgeStore = useFeedBadgeStore()
 
 const items = ref<FeedItem[]>([])
 const loading = ref(true)
 const loadingMore = ref(false)
 const error = ref('')
 const nextCursor = ref<number | null>(null)
-const unreadCount = ref(0)
 
 const hasMore = computed(() => nextCursor.value !== null)
 
@@ -29,14 +30,10 @@ async function loadInitial() {
     const res = await listFeed({ limit: 25 })
     items.value = res.items
     nextCursor.value = res.nextCursor
-    unreadCount.value = res.unreadCount
-    // Mark everything we just showed as seen. The server does the
-    // actual "<= upToId" update; we only keep the local counter in
-    // sync so the badge disappears immediately.
     const highestId = res.items[0]?.id
     if (highestId) {
       await markFeedSeen(highestId).catch(() => {})
-      unreadCount.value = 0
+      feedBadgeStore.reset()
       for (const item of items.value) {
         if (item.seen_at === null) item.seen_at = new Date().toISOString()
       }
@@ -134,7 +131,7 @@ onMounted(() => {
   <div class="feed-view">
     <div class="header">
       <h1 class="title">Feed</h1>
-      <span v-if="unreadCount > 0" class="badge">{{ unreadCount }} neu</span>
+      <span v-if="feedBadgeStore.count > 0" class="badge">{{ feedBadgeStore.count }} neu</span>
     </div>
 
     <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
