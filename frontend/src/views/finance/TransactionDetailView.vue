@@ -19,6 +19,7 @@ import { useTagsStore } from '../../stores/finance/tags'
 import { useTxSelectionStore } from '../../stores/finance/selection'
 import type { MandateHistoryItem, Transaction } from '../../api/finance'
 import * as api from '../../api/finance'
+import { searchDocuments, type DocumentSummary } from '../../api/documents'
 import { lookupBtcCodeDe } from '../../utils/btcCodes'
 
 const route = useRoute()
@@ -39,6 +40,24 @@ const saving = ref(false)
 const deleting = ref(false)
 const copyToast = ref<string | null>(null)
 const linkedDocuments = ref<Array<{ document_id: number; title: string | null; original_filename: string }>>([])
+const documentLinkPanelOpen = ref(false)
+const documentSuggestionPanelOpen = ref(false)
+const documentQuery = ref('')
+const documentResults = ref<DocumentSummary[]>([])
+const documentSuggestions = ref<api.DocumentMatchSuggestion[]>([])
+const documentSearchLoading = ref(false)
+const documentSuggestionsLoading = ref(false)
+const documentLinkingId = ref<number | null>(null)
+const documentDecisionId = ref<number | null>(null)
+
+async function refreshLinkedDocuments() {
+  if (!tx.value) {
+    linkedDocuments.value = []
+    return
+  }
+  linkedDocuments.value = await api.getTransactionDocumentLinks(tx.value.id).catch(() => [])
+}
+
 async function unlinkDocument(documentId: number) {
   if (!tx.value) return
   try {
@@ -57,6 +76,77 @@ function requestUnlinkDocument(documentId: number) {
     acceptProps: { label: 'Trennen', severity: 'danger' },
     accept: () => { void unlinkDocument(documentId) },
   })
+}
+
+function openDocumentSearch() {
+  documentLinkPanelOpen.value = !documentLinkPanelOpen.value
+  if (documentLinkPanelOpen.value) {
+    documentSuggestionPanelOpen.value = false
+    error.value = null
+  }
+}
+
+async function searchTransactionDocuments() {
+  const query = documentQuery.value.trim()
+  if (!query) {
+    error.value = 'Bitte einen Suchbegriff für das Dokument eingeben.'
+    return
+  }
+  documentSearchLoading.value = true
+  error.value = null
+  try {
+    documentResults.value = (await searchDocuments(query)).items
+  } catch (err) {
+    error.value = `Dokumentsuche konnte nicht geladen werden: ${err instanceof Error ? err.message : String(err)}`
+  } finally {
+    documentSearchLoading.value = false
+  }
+}
+
+async function linkDocumentToTransaction(documentId: number) {
+  if (!tx.value) return
+  documentLinkingId.value = documentId
+  error.value = null
+  try {
+    await api.linkDocumentsToTransactions([tx.value.id], [documentId])
+    documentResults.value = documentResults.value.filter(document => document.id !== documentId)
+    documentSuggestions.value = documentSuggestions.value.filter(suggestion => suggestion.document_id !== documentId)
+    await refreshLinkedDocuments()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    documentLinkingId.value = null
+  }
+}
+
+async function loadDocumentSuggestions() {
+  if (!tx.value || documentSuggestionsLoading.value) return
+  documentSuggestionPanelOpen.value = true
+  documentLinkPanelOpen.value = false
+  documentSuggestionsLoading.value = true
+  error.value = null
+  try {
+    documentSuggestions.value = await api.suggestDocumentsForTransactions([tx.value.id])
+  } catch (err) {
+    error.value = `Belegvorschläge konnten nicht geladen werden: ${err instanceof Error ? err.message : String(err)}`
+  } finally {
+    documentSuggestionsLoading.value = false
+  }
+}
+
+async function decideDocumentSuggestion(suggestion: api.DocumentMatchSuggestion, outcome: 'accepted' | 'rejected') {
+  if (!tx.value) return
+  documentDecisionId.value = suggestion.id
+  error.value = null
+  try {
+    await api.decideDocumentMatch(suggestion.id, outcome)
+    documentSuggestions.value = documentSuggestions.value.filter(item => item.id !== suggestion.id)
+    if (outcome === 'accepted') await refreshLinkedDocuments()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    documentDecisionId.value = null
+  }
 }
 
 // Editable form state (kept in sync with tx)
@@ -112,6 +202,11 @@ async function loadTransaction(id: number) {
     error.value = null
     tx.value = await api.getTransaction(id)
     linkedDocuments.value = await api.getTransactionDocumentLinks(id).catch(() => [])
+    documentResults.value = []
+    documentSuggestions.value = []
+    documentLinkPanelOpen.value = false
+    documentSuggestionPanelOpen.value = false
+    documentQuery.value = ''
     syncForm()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -501,15 +596,94 @@ const extractedFields = computed(() => {
 
     <section v-if="tx" class="card">
       <dl class="details">
-        <template v-if="linkedDocuments.length">
-          <dt>Verknüpfte Belege</dt>
-          <dd class="linked-documents">
+        <dt>Verknüpfte Belege</dt>
+        <dd class="document-links">
+          <div v-if="linkedDocuments.length" class="linked-documents">
             <span v-for="document in linkedDocuments" :key="document.document_id" class="linked-document">
               <Button :label="document.title ?? document.original_filename" size="small" text @click="router.push({ name: 'dokumente-detail', params: { id: document.document_id }, query: { fromTransaction: String(tx.id) } })" />
               <Button icon="pi pi-times" size="small" text aria-label="Belegverknüpfung trennen" @click="requestUnlinkDocument(document.document_id)" />
             </span>
-          </dd>
-        </template>
+          </div>
+          <span v-else class="hint">Keine Belege verknüpft.</span>
+
+          <div class="document-link-actions">
+            <Button
+              label="Dokument suchen"
+              icon="pi pi-search"
+              size="small"
+              severity="secondary"
+              outlined
+              @click="openDocumentSearch"
+            />
+            <Button
+              label="Belegvorschläge"
+              icon="pi pi-file"
+              size="small"
+              severity="secondary"
+              outlined
+              :loading="documentSuggestionsLoading"
+              @click="loadDocumentSuggestions"
+            />
+          </div>
+
+          <div v-if="documentLinkPanelOpen" class="document-link-panel">
+            <div class="document-search-row">
+              <InputText
+                v-model="documentQuery"
+                placeholder="Dokument suchen"
+                @keyup.enter="searchTransactionDocuments"
+              />
+              <Button
+                label="Suchen"
+                size="small"
+                :loading="documentSearchLoading"
+                @click="searchTransactionDocuments"
+              />
+            </div>
+            <p v-if="!documentSearchLoading && documentResults.length === 0 && documentQuery.trim()" class="hint">
+              Keine passenden Dokumente gefunden.
+            </p>
+            <ul v-if="documentResults.length" class="document-result-list">
+              <li v-for="document in documentResults" :key="document.id" class="document-result-row">
+                <span>{{ document.title ?? document.original_filename }}</span>
+                <Button
+                  label="Verbinden"
+                  size="small"
+                  text
+                  :loading="documentLinkingId === document.id"
+                  @click="linkDocumentToTransaction(document.id)"
+                />
+              </li>
+            </ul>
+          </div>
+
+          <div v-if="documentSuggestionPanelOpen" class="document-link-panel">
+            <p v-if="documentSuggestionsLoading" class="hint">Belegvorschläge werden geladen …</p>
+            <p v-else-if="documentSuggestions.length === 0" class="hint">Keine Belegvorschläge gefunden.</p>
+            <ul v-else class="document-result-list">
+              <li v-for="suggestion in documentSuggestions" :key="suggestion.id" class="document-result-row">
+                <span>Beleg #{{ suggestion.document_id }} · {{ Math.round(suggestion.score * 100) }}%</span>
+                <span class="document-result-actions">
+                  <Button
+                    label="Annehmen"
+                    size="small"
+                    text
+                    :loading="documentDecisionId === suggestion.id"
+                    @click="decideDocumentSuggestion(suggestion, 'accepted')"
+                  />
+                  <Button
+                    label="Ablehnen"
+                    size="small"
+                    severity="secondary"
+                    text
+                    :disabled="documentDecisionId === suggestion.id"
+                    @click="decideDocumentSuggestion(suggestion, 'rejected')"
+                  />
+                </span>
+              </li>
+            </ul>
+          </div>
+        </dd>
         <dt>Buchungsdatum</dt>
         <dd v-if="isCash">
           <DatePicker v-model="formBookingDate" date-format="dd.mm.yy" show-icon fluid />
@@ -861,6 +1035,11 @@ const extractedFields = computed(() => {
   margin: 0;
   word-break: break-word;
 }
+.document-links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
 .linked-documents {
   display: flex;
   flex-wrap: wrap;
@@ -874,6 +1053,60 @@ const extractedFields = computed(() => {
 }
 .linked-document :deep(.p-button) {
   padding-block: .25rem;
+}
+.document-link-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.document-link-panel {
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  background: var(--p-content-hover-background);
+}
+.document-search-row {
+  display: flex;
+  gap: 0.5rem;
+}
+.document-search-row :deep(.p-inputtext) {
+  flex: 1;
+  min-width: 0;
+}
+.document-result-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0;
+  margin: 0.5rem 0 0;
+}
+.document-result-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+.document-result-row > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.document-result-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 0.25rem;
+}
+@media (max-width: 520px) {
+  .document-search-row,
+  .document-result-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .document-result-actions {
+    justify-content: flex-end;
+  }
 }
 .field-input {
   width: 100%;
