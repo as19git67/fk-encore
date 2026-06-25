@@ -35,6 +35,7 @@ import "./analysis-suggestions-cron";
 import "./tag-worker";
 // Side-effect: registers the daily AI-tag cleanup cron.
 import "./tag-cleanup-cron";
+import "./document-match-cleanup-cron";
 
 import { startFinanceImportWatcher } from "./import-pending";
 
