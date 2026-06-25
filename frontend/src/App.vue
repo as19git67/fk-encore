@@ -7,13 +7,17 @@ import ConfirmDialog from 'primevue/confirmdialog'
 import TxBasketIndicator from './components/finance/TxBasketIndicator.vue'
 import { useAuthStore } from './stores/auth'
 import { useAnomalyStore } from './stores/finance/anomalies'
+import { useFeedBadgeStore } from './stores/feedBadge'
 import { modules, detectModule, moduleEntryPath } from './config/modules'
 import type { ModuleConfig } from './config/modules'
 
 const auth = useAuthStore()
 const anomalyStore = useAnomalyStore()
+const feedBadgeStore = useFeedBadgeStore()
 const router = useRouter()
 const route = useRoute()
+
+feedBadgeStore.init()
 
 watch(
   () => auth.isAuthenticated,
@@ -74,7 +78,9 @@ const subMenuItems = computed(() => {
         badge:
           item.routeName === 'finance-anomalies' && anomalyStore.count > 0
             ? String(anomalyStore.count)
-            : undefined,
+            : item.routeName === 'fotos-feed' && feedBadgeStore.count > 0
+              ? String(feedBadgeStore.count)
+              : undefined,
       }
     })
     .filter((item) => item.routeName || item.children)

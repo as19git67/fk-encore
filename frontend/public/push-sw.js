@@ -40,7 +40,15 @@ self.addEventListener('push', (event) => {
     },
   }
 
-  event.waitUntil(self.registration.showNotification(title, options))
+  const badgeCount = payload.data?.badgeCount ?? payload.badgeCount
+  const showPromise = self.registration.showNotification(title, options)
+  if (typeof badgeCount === 'number' && badgeCount > 0 && self.navigator?.setAppBadge) {
+    event.waitUntil(
+      Promise.all([showPromise, self.navigator.setAppBadge(badgeCount).catch(() => {})])
+    )
+  } else {
+    event.waitUntil(showPromise)
+  }
 })
 
 self.addEventListener('notificationclick', (event) => {
