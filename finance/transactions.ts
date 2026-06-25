@@ -40,6 +40,7 @@ import {
 import { enqueueTagSuggestion } from "./tag-queue";
 import { triggerTagWorker } from "./tag-worker";
 import { normalizeCounterparty } from "./tag-suggester";
+import { createSuggestionsForTransaction } from "./document-match.service";
 
 console.log("[boot] finance/transactions.ts: all imports resolved");
 
@@ -542,6 +543,9 @@ export const createTransaction = api(
     } catch (err) {
       console.error(`[finance] failed to enqueue tag suggestion for tx=${row.id}:`, (err as Error).message);
     }
+
+    // Document matching is advisory; never delay a newly created booking.
+    void createSuggestionsForTransaction(row.id).catch(err => console.error(`[finance] document matching failed for tx=${row.id}:`, err));
 
     const tags = (await annotateTags([row.id])).get(row.id) ?? [];
     return toView(row, tags);

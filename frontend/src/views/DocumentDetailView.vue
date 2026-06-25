@@ -11,6 +11,7 @@ import MultiSelect from 'primevue/multiselect'
 import Tag from 'primevue/tag'
 import Chip from 'primevue/chip'
 import Popover from 'primevue/popover'
+import { useConfirm } from 'primevue/useconfirm'
 import {
   deleteDocument,
   downloadDocument,
@@ -39,10 +40,12 @@ import { useAuthStore } from '../stores/auth'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import { useModuleBack } from '../composables/useModuleBack'
 import PdfViewer from '../components/PdfViewer.vue'
+import { getDocumentTransactionLinks, unlinkTransactionDocument } from '../api/finance'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const confirmDialog = useConfirm()
 
 const docId = computed(() => parseInt(route.params.id as string, 10))
 
@@ -52,6 +55,29 @@ const groups = ref<GroupSummary[]>([])
 const taxCatalog = ref<TaxSectionCatalogEntry[]>([])
 const subjectPeople = ref<SubjectPerson[]>([])
 const loading = ref(true)
+const linkedTransactions = ref<Array<{ transaction_id: number; booking_date: string; amount: string; counterparty: string | null }>>([])
+const openedFromTransactionId = computed(() => {
+  const value = Number(route.query.fromTransaction)
+  return Number.isSafeInteger(value) && value > 0 ? value : null
+})
+async function unlinkTransaction(transactionId: number) {
+  try {
+    await unlinkTransactionDocument(transactionId, docId.value)
+    linkedTransactions.value = linkedTransactions.value.filter(t => t.transaction_id !== transactionId)
+  } catch (err: any) {
+    error.value = err.message || 'Verknüpfung konnte nicht getrennt werden'
+  }
+}
+function requestUnlinkTransaction(transactionId: number) {
+  confirmDialog.require({
+    message: 'Verknüpfung zu dieser Buchung wirklich trennen?',
+    header: 'Buchungsverknüpfung trennen',
+    icon: 'pi pi-exclamation-triangle',
+    rejectProps: { label: 'Abbrechen', severity: 'secondary', outlined: true },
+    acceptProps: { label: 'Trennen', severity: 'danger' },
+    accept: () => { void unlinkTransaction(transactionId) },
+  })
+}
 const saving = ref(false)
 const savingTax = ref(false)
 const editingTax = ref(false)
@@ -118,18 +144,20 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [detail, cats, taxCats, houseItems, people] = await Promise.all([
+    const [detail, cats, taxCats, houseItems, people, links] = await Promise.all([
       getDocument(id),
       listDocumentCategories(),
       listTaxSectionsCatalog(),
       listGroups(),
       listSubjectPersons(),
+      getDocumentTransactionLinks(id).catch(() => []),
     ])
     doc.value = detail
     categories.value = cats.items
     taxCatalog.value = taxCats.items
     groups.value = houseItems.items
     subjectPeople.value = people.items
+    linkedTransactions.value = links
     resetForm()
     resetTaxForm()
     await loadPdf(id)
@@ -385,7 +413,14 @@ async function onReplaceFileSelected(event: Event) {
  * (deep link, reload, or arriving from another module like Finanzen) it falls
  * back to the document list so back never leaves the module. (#651)
  */
-const { goBack } = useModuleBack('/dokumente', 'dokumente-list')
+const { goBack: goModuleBack } = useModuleBack('/dokumente', 'dokumente-list')
+function goBack() {
+  if (openedFromTransactionId.value !== null) {
+    void router.push({ name: 'finance-transaction-detail', params: { id: openedFromTransactionId.value } })
+    return
+  }
+  goModuleBack()
+}
 
 function statusSeverity(status: DocumentStatus): 'success' | 'info' | 'warn' | 'danger' | 'secondary' {
   switch (status) {
@@ -446,6 +481,12 @@ onBeforeUnmount(() => {
 <template>
   <div class="document-detail-view">
     <div class="header">
+      <div v-if="linkedTransactions.length && openedFromTransactionId === null" class="linked-transactions">
+        <span v-for="transaction in linkedTransactions" :key="transaction.transaction_id">
+          <Button :label="`${transaction.counterparty ?? 'Buchung'} · ${transaction.amount}`" size="small" text @click="router.push({ name: 'finance-transaction-detail', params: { id: transaction.transaction_id } })" />
+          <Button icon="pi pi-times" size="small" text aria-label="Buchungsverknüpfung trennen" @click="requestUnlinkTransaction(transaction.transaction_id)" />
+        </span>
+      </div>
       <Button icon="pi pi-arrow-left" label="Zurück" aria-label="Zurück" text @click="goBack" />
       <div class="header-actions">
         <Button

@@ -42,6 +42,7 @@ import type { FetchResult, FintsHoldingData, FintsTransactionData } from "./type
 import { enqueueTagSuggestion } from "./tag-queue";
 import { triggerTagWorker } from "./tag-worker";
 import { deriveDepotTransactionsForBankcontact } from "./depot-derivation";
+import { createSuggestionsForTransaction } from "./document-match.service";
 
 console.log("[boot] finance/statement-persist.ts: all imports resolved");
 
@@ -245,6 +246,9 @@ export async function persistFetchResult(
     } catch (err) {
       console.error(`[finance] failed to enqueue tag suggestions:`, (err as Error).message);
     }
+
+    // Document matching is advisory; schedule it only for newly imported rows.
+    for (const id of freshlyInsertedIds) void createSuggestionsForTransaction(id).catch(err => console.error(`[finance] document matching failed for tx=${id}:`, err));
 
     // ---- Write the balance ----
     if (snapshot.balance) {

@@ -1204,3 +1204,28 @@ export async function getRelatedRecurringTransactions(
 ): Promise<RelatedRecurringResponse> {
   return apiFetch(`/finance/transactions/${transactionId}/recurring`)
 }
+
+export interface DocumentMatchSuggestion {
+  id: number
+  transaction_id: number
+  document_id: number
+  score: number
+  amount_score: number
+  date_score: number
+  text_score: number
+  outcome: 'pending' | 'accepted' | 'rejected' | 'ignored'
+  title: string | null
+  original_filename: string
+  sender: string | null
+  doc_date: string | null
+  summary: string | null
+  extracted_text_preview: string | null
+}
+export async function suggestDocumentsForTransactions(transaction_ids: number[]) { const response = await apiFetch<{ items: DocumentMatchSuggestion[] }>('/finance/document-matches/suggest', { method: 'POST', body: JSON.stringify({ transaction_ids }) }); return response.items }
+export async function decideDocumentMatch(id: number, outcome: 'accepted' | 'rejected' | 'ignored') { return apiFetch<{ ok: boolean }>(`/finance/document-matches/${id}/decision`, { method: 'POST', body: JSON.stringify({ outcome }) }) }
+export async function getTransactionDocumentLinks(transactionId: number) { const response = await apiFetch<{ items: Array<{ document_id: number; title: string | null; original_filename: string }> }>(`/finance/transactions/${transactionId}/documents`); return response.items }
+export async function getDocumentTransactionLinks(documentId: number) { const response = await apiFetch<{ items: Array<{ transaction_id: number; booking_date: string; amount: string; counterparty: string | null }> }>(`/finance/documents/${documentId}/transactions`); return response.items }
+export async function getDocumentMatchMetrics() { return apiFetch<{ high: Record<string, number>; medium: Record<string, number>; low: Record<string, number> }>('/finance/document-matches/metrics') }
+
+export async function unlinkTransactionDocument(transaction_id: number, document_id: number) { return apiFetch<{ ok: boolean }>('/finance/document-matches/unlink', { method: 'POST', body: JSON.stringify({ transaction_id, document_id }) }) }
+export async function linkDocumentsToTransactions(transaction_ids: number[], document_ids: number[]) { return apiFetch<{ linked: number }>('/finance/document-matches/link', { method: 'POST', body: JSON.stringify({ transaction_ids, document_ids }) }) }
