@@ -70,13 +70,27 @@ interface EnrichedField {
   suggested: string
 }
 
+function normalizeName(value: string | null | undefined): string {
+  return (value ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+/**
+ * The document amount is always positive; mirror the transaction's sign
+ * (expense = negative) so applying it doesn't flip an expense into income.
+ */
+function signedDocAmount(item: ReceiptEnrichmentItem): number | null {
+  if (item.doc_amount == null) return null
+  const magnitude = Math.abs(item.doc_amount)
+  return Number(item.amount) < 0 ? -magnitude : magnitude
+}
+
 function enrichedFields(item: ReceiptEnrichmentItem): EnrichedField[] {
   const fields: EnrichedField[] = []
-  if (item.doc_sender?.trim() && !item.counterparty?.trim()) {
+  if (item.doc_sender?.trim() && normalizeName(item.doc_sender) !== normalizeName(item.counterparty)) {
     fields.push({
       label: 'Zahlungsempfänger',
       field: 'counterparty',
-      current: item.counterparty ?? '–',
+      current: item.counterparty?.trim() || '–',
       suggested: item.doc_sender.trim(),
     })
   }
@@ -86,6 +100,15 @@ function enrichedFields(item: ReceiptEnrichmentItem): EnrichedField[] {
       field: 'booking_date',
       current: formatDate(item.booking_date),
       suggested: formatDate(item.doc_date),
+    })
+  }
+  if (item.doc_amount != null && Math.abs(item.doc_amount - Math.abs(Number(item.amount))) > 0.01) {
+    const signed = signedDocAmount(item)!
+    fields.push({
+      label: 'Betrag',
+      field: 'amount',
+      current: formatAmount(item.amount),
+      suggested: formatAmount(String(signed)),
     })
   }
   return fields
@@ -107,6 +130,10 @@ async function applyAll(item: ReceiptEnrichmentItem) {
     for (const f of fields) {
       if (f.field === 'counterparty') input.counterparty = f.suggested
       if (f.field === 'booking_date') input.booking_date = item.doc_date!
+      if (f.field === 'amount') {
+        const signed = signedDocAmount(item)
+        if (signed != null) input.amount = signed
+      }
     }
     await api.updateTransaction(item.transaction_id, input)
     items.value = items.value.filter(i => i.transaction_id !== item.transaction_id)
@@ -121,8 +148,9 @@ async function applyAll(item: ReceiptEnrichmentItem) {
 async function dismiss(item: ReceiptEnrichmentItem) {
   dismissing.value = item.transaction_id
   try {
-    // Clear the receipt link so this item won't appear again
-    await api.updateTransaction(item.transaction_id, {})
+    // Clears receipt_document_id so this item won't appear again; the
+    // document attachment itself stays linked to the transaction.
+    await api.dismissReceiptEnrichment(item.transaction_id)
     items.value = items.value.filter(i => i.transaction_id !== item.transaction_id)
   } catch (err: any) {
     loadError.value = err?.message ?? 'Fehler beim Verwerfen.'

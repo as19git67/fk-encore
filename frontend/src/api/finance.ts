@@ -1236,11 +1236,16 @@ export interface ReceiptEnrichmentItem {
   document_id: number
   doc_sender: string | null
   doc_date: string | null
+  doc_amount: number | null
   doc_status: string
 }
 
 export async function getPendingReceiptEnrichments(): Promise<{ items: ReceiptEnrichmentItem[] }> {
   return apiFetch('/finance/receipt-enrichments/pending')
+}
+
+export async function dismissReceiptEnrichment(transactionId: number): Promise<{ ok: boolean }> {
+  return apiFetch(`/finance/receipt-enrichments/${transactionId}/dismiss`, { method: 'POST', body: '{}' })
 }
 
 export async function unlinkTransactionDocument(transaction_id: number, document_id: number) { return apiFetch<{ ok: boolean }>('/finance/document-matches/unlink', { method: 'POST', body: JSON.stringify({ transaction_id, document_id }) }) }

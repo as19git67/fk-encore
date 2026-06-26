@@ -35,6 +35,45 @@ export async function markExpiredSuggestionsIgnored(now = new Date()) {
   return db.update(financeDocumentMatchSuggestion).set({ outcome: 'ignored', decided_at: now.toISOString() }).where(and(eq(financeDocumentMatchSuggestion.outcome, 'pending'), lte(financeDocumentMatchSuggestion.created_at, cutoff)))
 }
 
+export interface ReceiptEnrichmentDiff {
+  /** Document sender that differs from (or fills) the transaction counterparty. */
+  sender?: string
+  /** Document date (YYYY-MM-DD) that differs from the booking date. */
+  doc_date?: string
+  /** Absolute document amount that differs from the transaction amount. */
+  amount?: string
+}
+
+function normalizeName(value: string | null | undefined): string {
+  return (value ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+/**
+ * Compare a transaction with the fields a freshly-classified receipt
+ * document carries and return only the differences worth reviewing.
+ * Shared by the realtime notifier (`checkReceiptEnrichment`) and the
+ * pending-list endpoint so both surface exactly the same items.
+ */
+export function computeReceiptEnrichment(
+  tx: { counterparty: string | null; amount: string | number; booking_date: string | null },
+  doc: { sender: string | null; doc_date: string | null; amount: number | null },
+): ReceiptEnrichmentDiff {
+  const diff: ReceiptEnrichmentDiff = {}
+  if (doc.sender?.trim()) {
+    const docSender = normalizeName(doc.sender)
+    if (docSender && docSender !== normalizeName(tx.counterparty)) {
+      diff.sender = doc.sender.trim()
+    }
+  }
+  if (doc.doc_date && doc.doc_date !== (tx.booking_date ?? '').slice(0, 10)) {
+    diff.doc_date = doc.doc_date
+  }
+  if (doc.amount != null && Math.abs(doc.amount - Math.abs(Number(tx.amount))) > 0.01) {
+    diff.amount = String(doc.amount)
+  }
+  return diff
+}
+
 /**
  * After a receipt document finishes classification, check if it's linked
  * to a transaction via `receipt_document_id`. If so, compare the enriched
@@ -52,19 +91,15 @@ export async function checkReceiptEnrichment(documentId: number): Promise<void> 
 
   if (linkedTxs.length === 0) return
 
+  const docAmount = extractDocumentAmount(doc.extracted_text)
+
   for (const tx of linkedTxs) {
-    const enriched: Record<string, string> = {}
-    if (doc.sender?.trim() && !tx.counterparty?.trim()) {
-      enriched.sender = doc.sender.trim()
-    }
-    if (doc.doc_date && doc.doc_date !== tx.booking_date?.slice(0, 10)) {
-      enriched.doc_date = doc.doc_date
-    }
-    const docAmount = extractDocumentAmount(doc.extracted_text)
-    if (docAmount != null && Math.abs(docAmount - Math.abs(Number(tx.amount))) > 0.01) {
-      enriched.amount = String(docAmount)
-    }
-    if (Object.keys(enriched).length === 0) return
+    const enriched = computeReceiptEnrichment(tx, {
+      sender: doc.sender,
+      doc_date: doc.doc_date,
+      amount: docAmount,
+    })
+    if (Object.keys(enriched).length === 0) continue
 
     try {
       await realtime.publishEvent({

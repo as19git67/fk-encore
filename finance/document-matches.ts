@@ -3,7 +3,8 @@ import { getAuthData } from '~encore/auth'
 import { and, eq, inArray, isNotNull } from 'drizzle-orm'
 import db from '../db/database'
 import { documents, financeAccountAccess, financeDocumentMatchSuggestion, financeTransaction } from '../db/schema'
-import { decideSuggestion, createSuggestionsForTransaction } from './document-match.service'
+import { decideSuggestion, createSuggestionsForTransaction, computeReceiptEnrichment } from './document-match.service'
+import { extractDocumentAmount } from './document-matcher'
 import { requirePermission } from '../user/auth-handler'
 import { loadVisibleDocument } from '../documents/visibility'
 
@@ -143,6 +144,7 @@ interface ReceiptEnrichmentItem {
   document_id: number
   doc_sender: string | null
   doc_date: string | null
+  doc_amount: number | null
   doc_status: string
 }
 
@@ -160,6 +162,7 @@ export const pendingReceiptEnrichments = api(
         document_id: documents.id,
         doc_sender: documents.sender,
         doc_date: documents.doc_date,
+        doc_text: documents.extracted_text,
         doc_status: documents.status,
       })
       .from(financeTransaction)
@@ -170,13 +173,48 @@ export const pendingReceiptEnrichments = api(
     const readableSet = new Set(readableIds)
     const items = rows
       .filter(r => readableSet.has(r.transaction_id))
-      .filter(r => {
-        if (r.doc_status !== 'ready') return true
-        if (r.doc_sender?.trim() && !r.counterparty?.trim()) return true
-        if (r.doc_date && r.doc_date !== r.booking_date?.slice(0, 10)) return true
-        return false
+      .map(r => {
+        const docAmount = extractDocumentAmount(r.doc_text)
+        const diff = computeReceiptEnrichment(r, { sender: r.doc_sender, doc_date: r.doc_date, amount: docAmount })
+        return {
+          item: {
+            transaction_id: r.transaction_id,
+            booking_date: r.booking_date,
+            amount: r.amount,
+            counterparty: r.counterparty,
+            document_id: r.document_id,
+            doc_sender: r.doc_sender,
+            doc_date: r.doc_date,
+            doc_amount: docAmount,
+            doc_status: r.doc_status,
+          },
+          // Still-processing receipts are shown so the user sees progress;
+          // ready ones only when they actually carry something to review.
+          show: r.doc_status !== 'ready' || Object.keys(diff).length > 0,
+        }
       })
+      .filter(r => r.show)
+      .map(r => r.item)
     return { items }
+  },
+)
+
+/**
+ * Stop offering enrichment suggestions for a transaction by clearing its
+ * `receipt_document_id` pointer. The actual document attachment
+ * (finance_transaction_document) is left untouched — the receipt stays
+ * linked, only the "needs review" flag goes away.
+ */
+export const dismissReceiptEnrichment = api(
+  { expose: true, method: 'POST', path: '/finance/receipt-enrichments/:transactionId/dismiss', auth: true },
+  async ({ transactionId }: { transactionId: number }): Promise<OkResponse> => {
+    const auth = getAuthData()!
+    requirePermission(auth, 'finance.view')
+    if (!(await readableTransactionIds(Number(auth.userID), [transactionId])).length) {
+      throw APIError.permissionDenied('Keine Berechtigung für diese Buchung')
+    }
+    await db.update(financeTransaction).set({ receipt_document_id: null }).where(eq(financeTransaction.id, transactionId))
+    return { ok: true }
   },
 )
 

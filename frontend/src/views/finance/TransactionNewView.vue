@@ -463,10 +463,10 @@ async function save() {
     <div class="actions-row">
       <Button
         class="save-btn"
-        label="Speichern"
+        :label="receiptUploading ? 'Beleg wird verarbeitet …' : 'Speichern'"
         icon="pi pi-check"
         :loading="saving"
-        :disabled="!amount || !counterparty.trim() || !accountId"
+        :disabled="!amount || !counterparty.trim() || !accountId || receiptUploading"
         @click="save"
       />
       <Button
