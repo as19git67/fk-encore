@@ -171,7 +171,6 @@ export const modules: ModuleConfig[] = [
       { label: 'Arbeitskorb', icon: 'pi pi-inbox', routeName: 'dokumente-korb', permission: 'documents.view' },
       { label: 'Später', icon: 'pi pi-clock', routeName: 'dokumente-spaeter', permission: 'documents.view' },
       { label: 'Steuer', icon: 'pi pi-receipt', routeName: 'dokumente-steuer', permission: 'documents.view' },
-      { label: 'Hochladen', icon: 'pi pi-upload', routeName: 'dokumente-upload', permission: 'documents.upload' },
       { label: 'Kategorie-Vorschläge', icon: 'pi pi-folder-open', routeName: 'dokumente-kategorie-vorschlaege', permission: 'documents.manage_taxonomy' },
       { label: 'Hilfe', icon: 'pi pi-question-circle', routeName: 'dokumente-hilfe', permission: 'documents.view' },
       {
