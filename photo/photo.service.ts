@@ -5613,8 +5613,14 @@ export async function getPersonDetailsLogic(userId: number, personId: number): P
   );
   if (!person) throw new Error("Person not found");
 
+  // NOTE: The face embedding (a 512-dimensional float vector) is deliberately
+  // NOT selected here. Neither the web nor the iOS client uses it in the
+  // person-detail view, but for a person with thousands of photos serializing
+  // one embedding per face inflates the response to several megabytes and makes
+  // the iOS Persons screen sluggish (issue #391). We return an empty embedding
+  // to keep the `Face` shape intact without the payload cost.
   const faceRows = await dbAll<{
-    id: number; user_id: number; photo_id: number; bbox: string; embedding: string;
+    id: number; user_id: number; photo_id: number; bbox: string;
     person_id: number | null; quality: number | null; ignored: boolean | null;
     created_at: string | null; filename: string; original_name: string; taken_at: string | null;
   }>(
@@ -5624,7 +5630,6 @@ export async function getPersonDetailsLogic(userId: number, personId: number): P
         user_id: userFaceAssignments.user_id,
         photo_id: faces.photo_id,
         bbox: faces.bbox,
-        embedding: faces.embedding,
         person_id: userFaceAssignments.person_id,
         quality: faces.quality,
         ignored: userFaceAssignments.ignored,
@@ -5652,7 +5657,7 @@ export async function getPersonDetailsLogic(userId: number, personId: number): P
       user_id: r.user_id,
       photo_id: r.photo_id,
       bbox: JSON.parse(r.bbox),
-      embedding: JSON.parse(r.embedding),
+      embedding: [],
       person_id: r.person_id ?? undefined,
       quality: r.quality ?? undefined,
       ignored: !!r.ignored,

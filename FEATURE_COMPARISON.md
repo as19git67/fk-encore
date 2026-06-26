@@ -118,17 +118,24 @@ Status: April 2026 (updated)
 
 | Feature | Immich | FK-Encore |
 |---|---|---|
-| iOS app | ✅ Native | 🔶 SwiftUI app in development (read-only, no auto-backup) |
+| iOS app | ✅ Native | ✅ Native SwiftUI app (see `docs/ios-app.md`) |
 | Android app | ✅ Native | ❌ |
-| Auto-backup on app start | ✅ | ❌ |
-| Background backup | ✅ iOS & Android | ❌ |
-| Selective album backup | ✅ | ❌ |
-| Wi-Fi-only upload | ✅ | ❌ |
+| Auto-backup (background) | ✅ | ✅ Background upload (`PHBackgroundResourceUploadExtension` / `BGProcessingTask`) |
+| Selective album backup | ✅ | ✅ Device-album → server-album mapping |
+| Wi-Fi-only upload | ✅ | ✅ |
+| Exclude screenshots / media-type filter | 🔶 | ✅ |
+| Two-way sync (download to device) | ✅ | ✅ |
+| Share extension (upload from other apps) | ✅ | ✅ |
+| Passkeys on mobile | ❌ | ⚡ WebAuthn via `ASAuthorization` |
+| Comments & reactions in app | ✅ | ✅ |
 | "Free up space" | ✅ | ❌ |
-| Offline mode | ✅ | ❌ |
+| Offline mode | ✅ | 🔶 Thumbnail cache + two-way download sync |
 | Read-only mode | ✅ | ❌ |
 
-> **FK-Encore has no native Android app. The iOS app is under active development (SwiftUI, read-only so far) – no auto-backup yet.**
+> **FK-Encore has no native Android app. The iOS app (SwiftUI) is fully
+> functional: background auto-backup, two-way sync, selective album mapping,
+> Wi-Fi-only, a share extension, passkeys, and comments/reactions. See
+> `docs/ios-app.md` for the full inventory and the Web↔iOS parity plan.**
 
 ## 9. Authentication & User Management
 
@@ -215,7 +222,7 @@ Status: April 2026 (updated)
 ### Immich is superior at:
 
 - **Video support** – entirely missing in FK-Encore
-- **Mobile apps** with auto-backup (iOS & Android)
+- **Android app** (FK-Encore has a native iOS app with auto-backup, but no Android)
 - **Interactive world map**
 - **Memories** ("On this day")
 - **External libraries** – mount existing photo folders
@@ -264,10 +271,14 @@ and hybrid search are additional unique selling points.
 For the further development of FK-Encore, the following Immich features would
 be the most impactful:
 1. **Video support** – biggest functional gap
-2. **iOS auto-backup** – app exists but upload/sync still missing
-3. **Android app**
-4. **OAuth/OIDC** for enterprise use
-5. **Interactive map view**
-6. **XMP sidecar write-back** – sidecar read landed in Track K (#146);
+2. **Android app** – iOS exists (with auto-backup); Android does not
+3. **OAuth/OIDC** for enterprise use
+4. **Interactive map view**
+5. **XMP sidecar write-back** – sidecar read landed in Track K (#146);
    writing user edits into a `.xmp` instead of the image file itself is
    still pending
+
+For the iOS app specifically, the Web↔iOS feature gap and a prioritized
+parity plan (recaps viewer, album consensus/view-modes, group review,
+fullscreen photo actions, map/location editing) plus iOS-only enrichment
+ideas are tracked in **`docs/ios-app.md`**.
