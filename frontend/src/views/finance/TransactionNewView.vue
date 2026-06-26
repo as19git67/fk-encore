@@ -356,6 +356,7 @@ async function save() {
             <small v-if="formatDocumentMeta(document)">{{ formatDocumentMeta(document) }}</small>
           </div>
           <Button
+            class="document-select-button"
             label="Auswählen"
             icon="pi pi-plus"
             size="small"
@@ -577,6 +578,7 @@ async function save() {
 }
 .document-row-text {
   min-width: 0;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
@@ -593,6 +595,24 @@ async function save() {
 .selected-documents .document-row {
   border-color: color-mix(in srgb, var(--p-primary-color) 38%, var(--p-content-border-color));
   background: color-mix(in srgb, var(--p-primary-color) 8%, var(--p-content-background));
+}
+.document-select-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+@media (max-width: 420px) {
+  .document-row {
+    gap: 0.5rem;
+    padding-inline: 0.6rem;
+  }
+  .document-select-button {
+    width: 2.5rem;
+    min-width: 2.5rem;
+    padding-inline: 0;
+  }
+  .document-select-button :deep(.p-button-label) {
+    display: none;
+  }
 }
 .recent-badge {
   display: inline-flex;
