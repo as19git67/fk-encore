@@ -14,7 +14,6 @@ import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useTagsStore } from '../../stores/finance/tags'
 import { linkDocumentsToTransactions, recentCashRecipients, searchRecipients, type RecentRecipient } from '../../api/finance'
 import { searchDocuments, uploadReceiptCapture, type DocumentSummary } from '../../api/documents'
-import { recognizeReceipt } from '../../utils/receiptOcr'
 import { parseLocalDate } from '../../utils/dateFormat'
 import { useModuleBack } from '../../composables/useModuleBack'
 import { queuePendingTransaction } from '../../utils/offlineQueue'
@@ -201,6 +200,7 @@ async function onReceiptPicked(event: Event) {
   receiptUploading.value = true
   receiptStatus.value = 'Beleg wird erkannt …'
   try {
+    const { recognizeReceipt } = await import('../../utils/receiptOcr')
     const result = await recognizeReceipt(file)
     const applied = applyOcrResult(result)
     receiptProcessedBlob.value = result.processedImage
