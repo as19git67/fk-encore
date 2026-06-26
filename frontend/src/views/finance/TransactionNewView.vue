@@ -13,7 +13,7 @@ import { useAccountsStore } from '../../stores/finance/accounts'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useTagsStore } from '../../stores/finance/tags'
 import { linkDocumentsToTransactions, recentCashRecipients, searchRecipients, type RecentRecipient } from '../../api/finance'
-import { searchDocuments, uploadReceiptCapture, type DocumentSummary } from '../../api/documents'
+import { deleteDocument, searchDocuments, uploadReceiptCapture, type DocumentSummary } from '../../api/documents'
 import { parseLocalDate } from '../../utils/dateFormat'
 import { useModuleBack } from '../../composables/useModuleBack'
 import { queuePendingTransaction } from '../../utils/offlineQueue'
@@ -182,6 +182,12 @@ function selectDocument(document: DocumentSummary) {
 
 function removeSelectedDocument(documentId: number) {
   selectedDocuments.value = selectedDocuments.value.filter(document => document.id !== documentId)
+  if (documentId === receiptDocumentId.value) {
+    receiptDocumentId.value = null
+    receiptProcessedBlob.value = null
+    receiptSuggestion.value = null
+    deleteDocument(documentId).catch(() => {})
+  }
 }
 
 function openReceiptCapture() {
