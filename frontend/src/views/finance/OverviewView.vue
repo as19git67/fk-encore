@@ -51,20 +51,6 @@ function balanceClass(acc: OverviewAccount): string {
   return n < 0 ? 'balance balance-negative' : 'balance balance-positive'
 }
 
-function openAccount(account: OverviewAccount) {
-  void router.push({
-    name: 'finance-account-transactions',
-    params: { id: account.id },
-  })
-}
-
-function openSection(sectionName: string) {
-  void router.push({
-    name: 'finance-section-transactions',
-    params: { name: sectionName },
-  })
-}
-
 // ----- Konfigurations-Dialog -----------------------------------------
 
 interface DraftSection {
@@ -257,13 +243,12 @@ async function saveConfig() {
           Keine Konten in dieser Gruppe.
         </div>
         <ul v-else class="account-card">
-          <li class="account-row card-virtual" @click="openSection(section.name)">
+          <li class="account-row card-virtual">
             <div class="row-left">
               <div class="row-title">
                 <RouterLink
                   :to="{ name: 'finance-section-transactions', params: { name: section.name } }"
                   class="row-label row-link"
-                  @click.stop
                 >
                   Alle Buchungen
                 </RouterLink>
@@ -275,14 +260,12 @@ async function saveConfig() {
             v-for="acc in section.accounts"
             :key="acc.id"
             class="account-row"
-            @click="openAccount(acc)"
           >
             <div class="row-left">
               <div class="row-title">
                 <RouterLink
                   :to="{ name: 'finance-account-transactions', params: { id: acc.id } }"
                   class="row-label row-link"
-                  @click.stop
                 >
                   {{ acc.label }}
                 </RouterLink>
@@ -562,7 +545,6 @@ async function saveConfig() {
   justify-content: space-between;
   gap: 1rem;
   padding: 0.75rem 1rem;
-  cursor: pointer;
   transition: background 0.1s;
 }
 .account-row .row-sub > a {
@@ -597,6 +579,7 @@ async function saveConfig() {
 .row-link {
   color: inherit;
   text-decoration: none;
+  cursor: pointer;
 }
 .row-link:hover {
   text-decoration: underline;
