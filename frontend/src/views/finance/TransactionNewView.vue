@@ -12,7 +12,8 @@ import { toLocalIsoDate } from '../../utils/dateFormat'
 import { useAccountsStore } from '../../stores/finance/accounts'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useTagsStore } from '../../stores/finance/tags'
-import { recentCashRecipients, searchRecipients, type RecentRecipient } from '../../api/finance'
+import { linkDocumentsToTransactions, recentCashRecipients, searchRecipients, type RecentRecipient } from '../../api/finance'
+import { searchDocuments, type DocumentSummary } from '../../api/documents'
 import { useModuleBack } from '../../composables/useModuleBack'
 
 const route = useRoute()
@@ -36,6 +37,11 @@ const amountInput = ref<any>(null)
 
 const recentRecipients = ref<RecentRecipient[]>([])
 const recipientSuggestions = ref<RecentRecipient[]>([])
+const documentQuery = ref('')
+const documentResults = ref<DocumentSummary[]>([])
+const selectedDocuments = ref<DocumentSummary[]>([])
+const searchingDocuments = ref(false)
+const documentSearchError = ref<string | null>(null)
 
 const cashAccounts = computed(() =>
   accountsStore.items.filter(
@@ -119,6 +125,46 @@ function toIso(d: Date): string {
   return toLocalIsoDate(d)
 }
 
+function documentLabel(document: DocumentSummary): string {
+  return document.title?.trim() || document.original_filename
+}
+
+function formatDocumentMeta(document: DocumentSummary): string {
+  const parts = [document.sender, document.doc_date]
+    .map(part => part?.trim())
+    .filter((part): part is string => Boolean(part))
+  return parts.join(' · ')
+}
+
+async function findDocuments() {
+  const query = documentQuery.value.trim()
+  documentSearchError.value = null
+  if (!query) {
+    documentSearchError.value = 'Bitte einen Suchbegriff für das Dokument eingeben.'
+    return
+  }
+  searchingDocuments.value = true
+  try {
+    const selectedIds = new Set(selectedDocuments.value.map(document => document.id))
+    documentResults.value = (await searchDocuments(query)).items
+      .filter(document => !selectedIds.has(document.id))
+  } catch (err) {
+    documentSearchError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    searchingDocuments.value = false
+  }
+}
+
+function selectDocument(document: DocumentSummary) {
+  if (selectedDocuments.value.some(item => item.id === document.id)) return
+  selectedDocuments.value = [...selectedDocuments.value, document]
+  documentResults.value = documentResults.value.filter(item => item.id !== document.id)
+}
+
+function removeSelectedDocument(documentId: number) {
+  selectedDocuments.value = selectedDocuments.value.filter(document => document.id !== documentId)
+}
+
 async function save() {
   error.value = null
   if (!accountId.value) {
@@ -141,7 +187,7 @@ async function save() {
   const signedAmount = isExpense.value ? -Math.abs(amount.value) : Math.abs(amount.value)
   saving.value = true
   try {
-    await txStore.create({
+    const created = await txStore.create({
       account_id: accountId.value,
       booking_date: toIso(bookingDate.value),
       amount: signedAmount,
@@ -149,6 +195,15 @@ async function save() {
       purpose: purpose.value.trim() || undefined,
       tags: tags.value,
     })
+    const documentIds = selectedDocuments.value.map(document => document.id)
+    if (documentIds.length > 0) {
+      try {
+        await linkDocumentsToTransactions([created.id], documentIds)
+      } catch (err) {
+        error.value = `Buchung wurde erstellt, aber die Dokumente konnten nicht verknüpft werden: ${err instanceof Error ? err.message : String(err)}`
+        return
+      }
+    }
     tagsStore.addLocal(tags.value)
     void router.push({ name: 'finance-account-transactions', params: { id: accountId.value } })
   } catch (err) {
@@ -248,6 +303,70 @@ async function save() {
       />
     </div>
 
+    <!-- Dokumente -->
+    <section class="document-link-section" aria-labelledby="cash-document-links-title">
+      <div class="section-head">
+        <div>
+          <h2 id="cash-document-links-title" class="section-title">Dokumente verknüpfen</h2>
+          <p class="section-hint">Optional: Belege suchen und direkt mit dieser Bargeldbuchung speichern.</p>
+        </div>
+        <span v-if="selectedDocuments.length" class="document-count">
+          {{ selectedDocuments.length }}
+        </span>
+      </div>
+
+      <div class="document-search-row">
+        <InputText
+          v-model="documentQuery"
+          class="document-search-input"
+          placeholder="Dokument suchen …"
+          @keyup.enter="findDocuments"
+        />
+        <Button
+          icon="pi pi-search"
+          aria-label="Dokument suchen"
+          :loading="searchingDocuments"
+          @click="findDocuments"
+        />
+      </div>
+      <p v-if="documentSearchError" class="document-error">{{ documentSearchError }}</p>
+
+      <ul v-if="selectedDocuments.length" class="document-list selected-documents" aria-label="Ausgewählte Dokumente">
+        <li v-for="document in selectedDocuments" :key="document.id" class="document-row">
+          <div class="document-row-text">
+            <strong>{{ documentLabel(document) }}</strong>
+            <small v-if="formatDocumentMeta(document)">{{ formatDocumentMeta(document) }}</small>
+          </div>
+          <Button
+            icon="pi pi-times"
+            size="small"
+            text
+            rounded
+            severity="secondary"
+            :aria-label="`${documentLabel(document)} entfernen`"
+            @click="removeSelectedDocument(document.id)"
+          />
+        </li>
+      </ul>
+
+      <ul v-if="documentResults.length" class="document-list search-results" aria-label="Gefundene Dokumente">
+        <li v-for="document in documentResults" :key="document.id" class="document-row">
+          <div class="document-row-text">
+            <strong>{{ documentLabel(document) }}</strong>
+            <small v-if="formatDocumentMeta(document)">{{ formatDocumentMeta(document) }}</small>
+          </div>
+          <Button
+            class="document-select-button"
+            label="Auswählen"
+            icon="pi pi-plus"
+            size="small"
+            outlined
+            @click="selectDocument(document)"
+          />
+        </li>
+      </ul>
+    </section>
+
     <!-- Aktionen -->
     <div class="actions-row">
       <Button
@@ -290,7 +409,7 @@ async function save() {
   flex-direction: column;
   gap: 1rem;
   padding: 1.25rem;
-  max-width: 32rem;
+  max-width: 38rem;
 }
 @media (max-width: 480px) {
   .page {
@@ -390,6 +509,110 @@ async function save() {
   display: flex;
   gap: 0.75rem;
   margin-top: 0.5rem;
+}
+.document-link-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.85rem;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 0.85rem;
+  background: var(--p-content-background);
+}
+.section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.section-title {
+  margin: 0;
+  font-size: 1rem;
+}
+.section-hint {
+  margin: 0.2rem 0 0;
+  color: var(--p-text-muted-color);
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+.document-count {
+  min-width: 1.7rem;
+  height: 1.7rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--p-primary-color);
+  color: var(--p-primary-contrast-color);
+  font-weight: 700;
+}
+.document-search-row {
+  display: flex;
+  gap: 0.5rem;
+}
+.document-search-input {
+  flex: 1;
+}
+.document-error {
+  margin: 0;
+  color: var(--p-red-500);
+  font-size: 0.85rem;
+}
+.document-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.document-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 0.7rem;
+  background: var(--p-surface-50);
+}
+.document-row-text {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.document-row-text strong,
+.document-row-text small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.document-row-text small {
+  color: var(--p-text-muted-color);
+}
+.selected-documents .document-row {
+  border-color: color-mix(in srgb, var(--p-primary-color) 38%, var(--p-content-border-color));
+  background: color-mix(in srgb, var(--p-primary-color) 8%, var(--p-content-background));
+}
+.document-select-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+@media (max-width: 420px) {
+  .document-row {
+    gap: 0.5rem;
+    padding-inline: 0.6rem;
+  }
+  .document-select-button {
+    width: 2.5rem;
+    min-width: 2.5rem;
+    padding-inline: 0;
+  }
+  .document-select-button :deep(.p-button-label) {
+    display: none;
+  }
 }
 .recent-badge {
   display: inline-flex;
