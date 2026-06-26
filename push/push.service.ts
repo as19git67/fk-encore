@@ -354,7 +354,7 @@ export function buildFeedNotification(input: {
 
 // ---------- Document-event helpers ----------
 
-export type DocumentReviewKind = "low_confidence" | "failed";
+export type DocumentReviewKind = "low_confidence" | "failed" | "follow_up";
 
 /**
  * Build a notification telling the uploader that one of their documents
@@ -388,6 +388,10 @@ export function buildDocumentNotification(input: {
         ? `${docLabel}: ${input.reason}`
         : `${docLabel} konnte nicht verarbeitet werden.`;
       break;
+    case "follow_up":
+      title = "Wiedervorlage";
+      body = `${docLabel} liegt heute wieder im Arbeitskorb.`;
+      break;
   }
 
   return {
@@ -412,7 +416,8 @@ export type NotificationKind =
   | "photo_commented"
   | "album_left"
   | "document_low_confidence"
-  | "document_failed";
+  | "document_failed"
+  | "document_follow_up";
 
 export type NotificationPrefs = Partial<Record<NotificationKind, boolean>>;
 

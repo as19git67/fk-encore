@@ -743,6 +743,9 @@ export const documents = pgTable("documents", {
   // cleared whenever the document re-enters the pipeline (reclassify) so a
   // stale error never lingers on a healthy document.
   last_error: text("last_error"),
+  // Free-form human notes on the document. Shared document metadata —
+  // independent of the per-user follow-up feature (issue #750).
+  notes: text("notes"),
   // Cached, lowercase, space-separated list of the document's tag names.
   // Kept in sync by triggers on document_tag_links and document_tags
   // (migration 0090) so the generated text_tsv column can fold tags
@@ -843,6 +846,34 @@ export const documentScanQueue = pgTable("document_scan_queue", {
   started_at: timestamp("started_at", { mode: "string" }),
   finished_at: timestamp("finished_at", { mode: "string" }),
 });
+
+// Per-user follow-up ("Wiedervorlage") reminders for documents (issue #750).
+// A row means the user has snoozed a document out of their work-item basket
+// until `follow_up_date`. The daily follow-up cron deletes due rows so the
+// document re-surfaces in the basket and notifies the user. The basket itself
+// is derived (low-confidence / failed documents minus the user's active
+// follow-ups), so there is no separate basket table.
+export const documentFollowUps = pgTable(
+  "document_follow_ups",
+  {
+    document_id: integer("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // ISO date-only (YYYY-MM-DD) — the day the document returns to the basket.
+    follow_up_date: text("follow_up_date").notNull(),
+    // Optional reminder note the user attaches when scheduling the follow-up.
+    note: text("note"),
+    created_at: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.document_id, table.user_id] }),
+    index("document_follow_ups_user_date_idx").on(table.user_id, table.follow_up_date),
+  ],
+);
 
 // AI-proposed taxonomy refinements. Populated by the classifier when
 // confidence is low or documents end up in "sonstiges". Admin accepts /

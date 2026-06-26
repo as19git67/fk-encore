@@ -7,13 +7,17 @@ import ConfirmDialog from 'primevue/confirmdialog'
 import TxBasketIndicator from './components/finance/TxBasketIndicator.vue'
 import { useAuthStore } from './stores/auth'
 import { useAnomalyStore } from './stores/finance/anomalies'
+import { useFeedBadgeStore } from './stores/feedBadge'
 import { modules, detectModule, moduleEntryPath } from './config/modules'
 import type { ModuleConfig } from './config/modules'
 
 const auth = useAuthStore()
 const anomalyStore = useAnomalyStore()
+const feedBadgeStore = useFeedBadgeStore()
 const router = useRouter()
 const route = useRoute()
+
+feedBadgeStore.init()
 
 watch(
   () => auth.isAuthenticated,
@@ -55,20 +59,56 @@ function toggleHamburgerMenu(event: Event) {
 }
 
 // ── Sub-menu items for the active module ─────────────────────────────────────
+// Items may be plain links or a group (e.g. the Dokumente "Einstellungen"
+// gear) that opens a popup with `children`. Groups whose children are all
+// permission-filtered away are dropped entirely.
 const subMenuItems = computed(() => {
   if (!activeModule.value) return []
   return activeModule.value.menuItems
     .filter((item) => !item.permission || auth.hasPermission(item.permission))
-    .map((item) => ({
-      label: item.label,
-      icon: item.icon,
-      routeName: item.routeName,
-      badge:
-        item.routeName === 'finance-anomalies' && anomalyStore.count > 0
-          ? String(anomalyStore.count)
-          : undefined,
-    }))
+    .map((item) => {
+      const children = item.children
+        ?.filter((c) => !c.permission || auth.hasPermission(c.permission))
+        .map((c) => ({ label: c.label, icon: c.icon, routeName: c.routeName }))
+      return {
+        label: item.label,
+        icon: item.icon,
+        routeName: item.routeName,
+        children: children && children.length ? children : undefined,
+        badge:
+          item.routeName === 'finance-anomalies' && anomalyStore.count > 0
+            ? String(anomalyStore.count)
+            : item.routeName === 'fotos-feed' && feedBadgeStore.count > 0
+              ? String(feedBadgeStore.count)
+              : undefined,
+      }
+    })
+    .filter((item) => item.routeName || item.children)
 })
+
+// Shared popup for submenu groups. The model is rebuilt on each open so a
+// single <Menu> can back every group in the strip.
+const groupMenuRef = ref()
+const groupMenuModel = ref<Array<Record<string, unknown>>>([])
+
+function openGroupMenu(
+  event: Event,
+  children: Array<{ label: string; icon: string; routeName?: string }>,
+) {
+  groupMenuModel.value = children.map((c) => ({
+    label: c.label,
+    icon: c.icon,
+    command: () => {
+      if (c.routeName) router.push({ name: c.routeName })
+    },
+  }))
+  groupMenuRef.value?.toggle(event)
+}
+
+/** A group is "active" when the current route is one of its children. */
+function isGroupActive(children?: Array<{ routeName?: string }>): boolean {
+  return !!children?.some((c) => c.routeName && c.routeName === route.name)
+}
 
 async function handleLogout() {
   await auth.logout()
@@ -94,18 +134,32 @@ async function handleLogout() {
 
         <!-- Sub-menu items shown inline when inside a module -->
         <div v-if="activeModule && subMenuItems.length" class="submenu-strip">
-          <Button
-            v-for="item in subMenuItems"
-            :key="item.routeName"
-            :label="item.label"
-            :icon="item.icon"
-            :badge="item.badge"
-            text
-            size="small"
-            :severity="route.name === item.routeName ? 'primary' : 'secondary'"
-            :class="{ 'submenu-item--active': route.name === item.routeName }"
-            @click="router.push({ name: item.routeName })"
-          />
+          <template v-for="item in subMenuItems" :key="item.routeName || item.label">
+            <!-- Group header (e.g. the Dokumente "Einstellungen" gear) -->
+            <Button
+              v-if="item.children"
+              :label="item.label"
+              :icon="item.icon"
+              text
+              size="small"
+              :severity="isGroupActive(item.children) ? 'primary' : 'secondary'"
+              :class="{ 'submenu-item--active': isGroupActive(item.children) }"
+              @click="openGroupMenu($event, item.children)"
+            />
+            <!-- Plain link -->
+            <Button
+              v-else
+              :label="item.label"
+              :icon="item.icon"
+              :badge="item.badge"
+              text
+              size="small"
+              :severity="route.name === item.routeName ? 'primary' : 'secondary'"
+              :class="{ 'submenu-item--active': route.name === item.routeName }"
+              @click="item.routeName && router.push({ name: item.routeName })"
+            />
+          </template>
+          <Menu ref="groupMenuRef" :model="groupMenuModel" :popup="true" />
         </div>
       </div>
 

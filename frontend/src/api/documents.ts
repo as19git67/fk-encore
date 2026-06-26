@@ -34,6 +34,8 @@ export interface DocumentSummary {
   last_error: string | null
   visibility: DocumentVisibility
   group_id: number | null
+  /** Free-form human notes (shared document metadata). */
+  notes: string | null
 }
 
 export interface DocumentTaxSection {
@@ -121,6 +123,8 @@ export interface UpdateDocumentPayload {
   attributes_reviewed?: boolean
   /** Replace the user-curated Bezugsperson links (subject-person ids). */
   subject_person_ids?: number[]
+  /** Free-form notes; independent metadata (never pins attributes). */
+  notes?: string | null
 }
 
 export interface DocQueueServiceStatus {
@@ -644,5 +648,50 @@ export function rejectCategorySuggestion(id: number) {
   return apiFetch<{ success: boolean }>(`/document-category-suggestions/${id}/reject`, {
     method: 'POST',
     body: JSON.stringify({ id }),
+  })
+}
+
+// ─── Work-item basket & follow-ups ("Wiedervorlage", issue #750) ─────────────
+
+export interface DocumentBasketResponse {
+  items: DocumentSummary[]
+  total: number
+}
+
+export interface DocumentFollowUp {
+  document: DocumentSummary
+  follow_up_date: string
+  note: string | null
+  created_at: string
+}
+
+/** The current user's work-item basket: review-worthy, un-snoozed documents. */
+export function getDocumentBasket(params: { limit?: number; offset?: number } = {}) {
+  return apiFetch<DocumentBasketResponse>(
+    `/documents/basket${buildQuery(params as Record<string, unknown>)}`,
+  )
+}
+
+/** Every pending follow-up for the current user (the "Später" list). */
+export function listDocumentFollowUps() {
+  return apiFetch<{ items: DocumentFollowUp[] }>('/documents/follow-ups')
+}
+
+/** Schedule (or reschedule) a follow-up for one or more documents. */
+export function setDocumentFollowUp(payload: {
+  document_ids: number[]
+  follow_up_date: string
+  note?: string | null
+}) {
+  return apiFetch<{ scheduled: number }>('/documents/follow-ups', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+/** Cancel a follow-up, returning the document straight to the basket. */
+export function deleteDocumentFollowUp(documentId: number) {
+  return apiFetch<{ removed: boolean }>(`/documents/follow-ups/${documentId}`, {
+    method: 'DELETE',
   })
 }
