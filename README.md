@@ -96,6 +96,15 @@ tax categories, and banking.
 - WebSocket real-time delivery with channel subscriptions and reconnect replay
 - Web Push (VAPID) browser notifications with per-type preferences
 
+### iOS app (native SwiftUI)
+- Native app under `ios/` with Feed, Albums, People, Search and Settings tabs
+- **Background auto-backup** (upload), **two-way sync** (download to device),
+  device-album → server-album mapping, Wi-Fi-only, exclude-screenshots
+- **Share extension** to upload from other apps; **passkey** sign-in;
+  in-app comments & reactions
+- Full inventory, Web↔iOS comparison and parity roadmap:
+  [`docs/ios-app.md`](./docs/ios-app.md)
+
 ### Authentication & access control
 - Password login (bcrypt) and **WebAuthn / FIDO2 passkeys** with multi-passkey
   support
@@ -113,6 +122,7 @@ tax categories, and banking.
 |----------------------|----------------------------------------------------------------|
 | `app` (Encore.ts)    | Main application – REST API + static frontend SPA              |
 | `frontend`           | Vue 3 + PrimeVue + Pinia SPA (served under `/app/`)            |
+| `ios`                | Native SwiftUI app (see [`docs/ios-app.md`](./docs/ios-app.md)) |
 | `postgres`           | PostgreSQL 18 + `pgvector` – main application DB and the embeddings DB |
 | `insightface`        | Python – face detection & embeddings (InsightFace `buffalo_l`) |
 | `embedding_service`  | Python – CLIP + DINOv2 image embeddings                        |

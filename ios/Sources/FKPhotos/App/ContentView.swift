@@ -2,6 +2,7 @@ import SwiftUI
 
 public struct ContentView: View {
     @Environment(AuthManager.self) private var authManager
+    @Environment(\.scenePhase) private var scenePhase
 
     public init() {}
 
@@ -17,6 +18,14 @@ public struct ContentView: View {
         .task {
             // Inject the AuthManager into APIClient so requests can attach the token.
             await APIClient.shared.setAuthManager(authManager)
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            // If the initial restore ran while the device was locked (background
+            // launch / pre-first-unlock), recover the session when the user
+            // brings the app forward — instead of showing the login screen.
+            if newPhase == .active {
+                authManager.retryRestoreIfNeeded()
+            }
         }
     }
 }

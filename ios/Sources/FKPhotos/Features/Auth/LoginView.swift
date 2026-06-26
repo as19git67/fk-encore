@@ -82,18 +82,22 @@ struct LoginView: View {
                 .font(.footnote)
 
                 Spacer()
-
-                // Server selection
-                Button {
-                    showServerConfig = true
-                } label: {
-                    Label(serverURL, systemImage: "server.rack")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+            }
+            // Server selection lives in the top toolbar so it stays reachable
+            // when the keyboard is up — at the bottom of the screen it was
+            // hidden the moment the user started typing email/password.
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showServerConfig = true
+                    } label: {
+                        Label(serverURL, systemImage: "server.rack")
+                            .font(.caption)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .foregroundStyle(.secondary)
                 }
-                .padding(.bottom, 8)
             }
             .navigationDestination(isPresented: $showRegister) {
                 RegisterView()

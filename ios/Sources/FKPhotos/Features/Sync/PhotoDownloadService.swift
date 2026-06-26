@@ -19,6 +19,10 @@ actor PhotoDownloadService {
     private let monitor = NWPathMonitor()
     private let monitorQueue = DispatchQueue(label: "dev.fk-encore.DownloadNetworkMonitor")
     private var currentPath: NWPath?
+    /// Continuations waiting for the monitor's first path update. Without this
+    /// the first connectivity query after launch sees `currentPath == nil` and
+    /// wrongly reports "no WiFi" (same first-call race as `PhotoSyncService`).
+    private var firstPathWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
 
     private init() {
         monitor.pathUpdateHandler = { [weak self] path in
@@ -30,14 +34,41 @@ actor PhotoDownloadService {
 
     private func updatePath(_ path: NWPath) {
         currentPath = path
+        let waiters = firstPathWaiters
+        firstPathWaiters.removeAll()
+        for (_, cont) in waiters { cont.resume() }
+    }
+
+    /// Wait (briefly) for the monitor's first path update if it hasn't arrived
+    /// yet, bounded by a safety timeout.
+    private func awaitFirstPath() async {
+        if currentPath != nil { return }
+        let id = UUID()
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            firstPathWaiters[id] = cont
+            Task {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                await self.resumeFirstPathWaiter(id)
+            }
+        }
+    }
+
+    private func resumeFirstPathWaiter(_ id: UUID) {
+        firstPathWaiters.removeValue(forKey: id)?.resume()
     }
 
     var isWifiConnected: Bool {
-        currentPath?.usesInterfaceType(.wifi) ?? false
+        get async {
+            await awaitFirstPath()
+            return (currentPath ?? monitor.currentPath).usesInterfaceType(.wifi)
+        }
     }
 
     private var isNetworkAvailable: Bool {
-        currentPath?.status == .satisfied
+        get async {
+            await awaitFirstPath()
+            return (currentPath ?? monitor.currentPath).status == .satisfied
+        }
     }
 
     // MARK: - Public entry point
@@ -47,9 +78,9 @@ actor PhotoDownloadService {
         guard DownloadSyncPreferences.downloadEnabled else { return }
 
         if DownloadSyncPreferences.wifiOnly {
-            guard isWifiConnected else { return }
+            guard await isWifiConnected else { return }
         } else {
-            guard isNetworkAvailable else { return }
+            guard await isNetworkAvailable else { return }
         }
 
         let albumIds = DownloadSyncPreferences.selectedServerAlbumIds
