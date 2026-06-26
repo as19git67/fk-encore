@@ -13,7 +13,7 @@ import { useAccountsStore } from '../../stores/finance/accounts'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useTagsStore } from '../../stores/finance/tags'
 import { linkDocumentsToTransactions, recentCashRecipients, searchRecipients, type RecentRecipient } from '../../api/finance'
-import { getDocument, searchDocuments, uploadReceiptCapture, type DocumentDetail, type DocumentSummary } from '../../api/documents'
+import { getDocumentReceiptSuggestion, searchDocuments, uploadReceiptCapture, type DocumentReceiptSuggestion, type DocumentSummary } from '../../api/documents'
 import { useModuleBack } from '../../composables/useModuleBack'
 
 const route = useRoute()
@@ -190,18 +190,22 @@ async function onReceiptPicked(event: Event) {
     const uploaded = await uploadReceiptCapture(file)
     selectDocument(uploaded)
     receiptStatus.value = 'Beleg wird mit hoher Priorität gelesen …'
-    const detail = await waitForReceiptAnalysis(uploaded.id)
-    if (detail.status === 'ready') {
-      const applied = applyReceiptSuggestion(detail)
+    const suggestion = await waitForReceiptSuggestion(uploaded.id)
+    refreshSelectedDocument(suggestion.document)
+    if (suggestion.status === 'ready') {
+      const applied = applyReceiptSuggestion(suggestion)
       receiptStatus.value = null
       receiptSuggestion.value = applied.length > 0
         ? `Aus Beleg übernommen: ${applied.join(', ')}.`
         : 'Beleg wurde gelesen, aber es gab keine neuen Formularwerte.'
-    } else {
+    } else if (suggestion.status === 'failed') {
       receiptStatus.value = null
-      documentSearchError.value = detail.last_error
-        ? `Beleg konnte nicht gelesen werden: ${detail.last_error}`
+      documentSearchError.value = suggestion.last_error
+        ? `Beleg konnte nicht gelesen werden: ${suggestion.last_error}`
         : 'Beleg konnte nicht gelesen werden.'
+    } else {
+      receiptStatus.value = 'Beleg wird weiter verarbeitet. Vorschläge erscheinen, sobald die Analyse fertig ist.'
+      void continueReceiptSuggestionPolling(uploaded.id)
     }
   } catch (err) {
     receiptStatus.value = null
@@ -211,51 +215,72 @@ async function onReceiptPicked(event: Event) {
   }
 }
 
-async function waitForReceiptAnalysis(documentId: number): Promise<DocumentDetail> {
-  let last = await getDocument(documentId)
+async function waitForReceiptSuggestion(documentId: number): Promise<DocumentReceiptSuggestion> {
+  let last = await getDocumentReceiptSuggestion(documentId)
   for (let i = 0; i < 30; i += 1) {
     if (last.status === 'ready' || last.status === 'failed') return last
     await new Promise(resolve => setTimeout(resolve, 2000))
-    last = await getDocument(documentId)
+    last = await getDocumentReceiptSuggestion(documentId)
   }
   return last
 }
 
-function applyReceiptSuggestion(document: DocumentDetail): string[] {
+async function continueReceiptSuggestionPolling(documentId: number) {
+  try {
+    for (let i = 0; i < 24; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 5000))
+      const suggestion = await getDocumentReceiptSuggestion(documentId)
+      refreshSelectedDocument(suggestion.document)
+      if (suggestion.status === 'ready') {
+        const applied = applyReceiptSuggestion(suggestion)
+        receiptStatus.value = null
+        receiptSuggestion.value = applied.length > 0
+          ? `Aus Beleg übernommen: ${applied.join(', ')}.`
+          : 'Beleg wurde gelesen, aber es gab keine neuen Formularwerte.'
+        return
+      }
+      if (suggestion.status === 'failed') {
+        receiptStatus.value = null
+        documentSearchError.value = suggestion.last_error
+          ? `Beleg konnte nicht gelesen werden: ${suggestion.last_error}`
+          : 'Beleg konnte nicht gelesen werden.'
+        return
+      }
+    }
+    receiptStatus.value = 'Beleg bleibt in der Dokumenten-Warteschlange und wird später weiter verarbeitet.'
+  } catch (err) {
+    receiptStatus.value = null
+    documentSearchError.value = err instanceof Error ? err.message : String(err)
+  }
+}
+
+function refreshSelectedDocument(document: DocumentSummary) {
+  selectedDocuments.value = selectedDocuments.value.map(item => item.id === document.id ? document : item)
+}
+
+function applyReceiptSuggestion(suggestion: DocumentReceiptSuggestion): string[] {
   const applied: string[] = []
-  const detectedAmount = extractReceiptAmount(document.extracted_text_preview)
-  if (detectedAmount != null && (!amount.value || amount.value <= 0)) {
-    amount.value = detectedAmount
+  if (suggestion.amount != null && (!amount.value || amount.value <= 0)) {
+    amount.value = suggestion.amount
     isExpense.value = true
     applied.push('Betrag')
   }
-  if (document.doc_date && !dateTouched.value) {
-    const parsed = new Date(`${document.doc_date}T12:00:00`)
+  if (suggestion.doc_date && !dateTouched.value) {
+    const parsed = new Date(`${suggestion.doc_date}T12:00:00`)
     if (!Number.isNaN(parsed.getTime())) {
       bookingDate.value = parsed
       applied.push('Datum')
     }
   }
-  if (document.sender?.trim() && !counterparty.value.trim()) {
-    counterparty.value = document.sender.trim()
+  if (suggestion.sender?.trim() && !counterparty.value.trim()) {
+    counterparty.value = suggestion.sender.trim()
     applied.push('Empfänger')
   }
-  const note = document.title?.trim() || document.summary?.trim() || document.original_filename
-  if (note && !purpose.value.trim()) {
-    purpose.value = note
+  if (suggestion.note && !purpose.value.trim()) {
+    purpose.value = suggestion.note
     applied.push('Notiz')
   }
   return applied
-}
-
-function extractReceiptAmount(text: string | null | undefined): number | null {
-  const match = (text ?? '').match(/(?:gesamt(?:betrag|summe)?|summe|total|zu\s+zahlen|betrag)\D{0,32}([0-9]{1,3}(?:[. ][0-9]{3})*(?:,[0-9]{2})|[0-9]+(?:[.,][0-9]{2}))/iu)
-  if (!match) return null
-  const rawAmount = match[1]
-  if (!rawAmount) return null
-  const normalized = rawAmount.replace(/[. ](?=\d{3}(?:\D|$))/g, '').replace(',', '.')
-  const value = Number(normalized)
-  return Number.isFinite(value) && value > 0 ? value : null
 }
 
 async function save() {
@@ -424,7 +449,7 @@ async function save() {
         <input
           ref="receiptInput"
           type="file"
-          accept="image/*,application/pdf"
+          accept="image/*"
           capture="environment"
           class="receipt-input"
           @change="onReceiptPicked"

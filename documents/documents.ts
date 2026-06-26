@@ -162,6 +162,16 @@ export interface DocumentDetail extends DocumentSummary {
   subject_persons: DocumentSubjectPersonDTO[];
 }
 
+export interface DocumentReceiptSuggestion {
+  document: DocumentSummary;
+  status: DocumentSummary["status"];
+  last_error: string | null;
+  amount: number | null;
+  doc_date: string | null;
+  sender: string | null;
+  note: string | null;
+}
+
 export interface DocumentCategoryDTO {
   id: number;
   slug: string;
@@ -404,10 +414,11 @@ export const uploadReceiptCapture = api.raw(
     } catch {
       originalName = rawFileName;
     }
-    const mimeType = ((req.headers["content-type"] as string) || "application/octet-stream")
+    const rawMimeType = ((req.headers["content-type"] as string) || "application/octet-stream")
       .toLowerCase()
       .split(";")[0]
       .trim();
+    const mimeType = normalizeReceiptMimeType(originalName, rawMimeType);
 
     if (!RECEIPT_CAPTURE_MIME_TYPES.has(mimeType)) {
       res.statusCode = 415;
@@ -574,6 +585,19 @@ function receiptPdfFilename(originalName: string): string {
   return `${stem}.pdf`;
 }
 
+function normalizeReceiptMimeType(originalName: string, mimeType: string): string {
+  if (mimeType === "image/jpg" || mimeType === "image/pjpeg") return "image/jpeg";
+  if (mimeType && mimeType !== "application/octet-stream") return mimeType;
+  const ext = path.extname(originalName).toLowerCase();
+  if (ext === ".pdf") return "application/pdf";
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".png") return "image/png";
+  if (ext === ".webp") return "image/webp";
+  if (ext === ".heic") return "image/heic";
+  if (ext === ".heif") return "image/heif";
+  return mimeType;
+}
+
 function isHeicBuffer(buf: Buffer): boolean {
   if (buf.length < 12) return false;
   if (buf.toString("ascii", 4, 8) !== "ftyp") return false;
@@ -649,6 +673,32 @@ function buildPdf(objects: Array<string | { dict: string; stream: Buffer }>): Bu
   ];
   chunks.push(Buffer.from(xrefLines.join("\n"), "ascii"));
   return Buffer.concat(chunks);
+}
+
+function extractReceiptAmount(text: string | null | undefined): number | null {
+  const valuePattern = String.raw`([0-9]{1,3}(?:[. ][0-9]{3})*(?:,[0-9]{2})|[0-9]+(?:[.,][0-9]{2}))`;
+  const labelled = new RegExp(
+    String.raw`(?:gesamt(?:betrag|summe)?|summe|total|zu\s+zahlen|betrag|endsumme|karten(?:zahlung)?|ec-cash)\D{0,40}${valuePattern}`,
+    "iu",
+  );
+  const source = text ?? "";
+  const match = source.match(labelled);
+  if (match?.[1]) return parseGermanAmount(match[1]);
+
+  // Fallback for short receipt OCR where the label may be separated from
+  // the amount by line breaks/noise: use the last plausible money value.
+  const allAmounts = [...source.matchAll(new RegExp(valuePattern, "gu"))]
+    .map((m) => m[1])
+    .filter((value): value is string => Boolean(value))
+    .map(parseGermanAmount)
+    .filter((value): value is number => value != null && value > 0);
+  return allAmounts.length > 0 ? allAmounts[allAmounts.length - 1] : null;
+}
+
+function parseGermanAmount(value: string): number | null {
+  const normalized = value.replace(/[. ](?=\d{3}(?:\D|$))/g, "").replace(",", ".");
+  const amount = Number(normalized);
+  return Number.isFinite(amount) && amount > 0 ? amount : null;
 }
 
 const UPLOAD_DEFAULTS_PREF_KEY = "upload_defaults";
@@ -824,6 +874,38 @@ export const getDocument = api(
       tax_sections: taxSections,
       attributes_reviewed: row.attributes_reviewed ?? false,
       subject_persons: subjectPersons,
+    };
+  },
+);
+
+export const getDocumentReceiptSuggestion = api(
+  { expose: true, method: "GET", path: "/documents/:id/receipt-suggestion", auth: true },
+  async ({ id }: { id: number }): Promise<DocumentReceiptSuggestion> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.view");
+    const userId = getUserId();
+
+    const row = await loadVisibleDocument(userId, id);
+    const cat = row.category_id
+      ? await dbFirst<{ slug: string }>(
+          db.select({ slug: documentCategories.slug }).from(documentCategories).where(eq(documentCategories.id, row.category_id)),
+        )
+      : undefined;
+    const tagsMap = await fetchTagsForDocuments([id]);
+    const note = [row.title, row.summary, row.original_filename]
+      .map((value) => value?.trim())
+      .find((value): value is string => Boolean(value)) ?? null;
+    const document = toSummary(row, cat?.slug ?? null, tagsMap.get(id) ?? []);
+
+    return {
+      document,
+      status: document.status,
+      last_error: row.last_error ?? null,
+      amount: extractReceiptAmount(row.extracted_text),
+      doc_date: row.doc_date,
+      sender: row.sender?.trim() || null,
+      note,
     };
   },
 );

@@ -65,6 +65,16 @@ export interface DocumentDetail extends DocumentSummary {
   subject_persons: DocumentSubjectPerson[]
 }
 
+export interface DocumentReceiptSuggestion {
+  document: DocumentSummary
+  status: DocumentStatus
+  last_error: string | null
+  amount: number | null
+  doc_date: string | null
+  sender: string | null
+  note: string | null
+}
+
 export interface DocumentCategory {
   id: number
   slug: string
@@ -228,10 +238,26 @@ export function uploadReceiptCapture(file: File, signal?: AbortSignal) {
     body: file,
     signal,
     headers: {
-      'Content-Type': file.type || 'application/octet-stream',
+      'Content-Type': receiptContentType(file),
       'X-File-Name': encodeURIComponent(file.name || 'receipt.jpg'),
     },
   })
+}
+
+export function getDocumentReceiptSuggestion(id: number) {
+  return apiFetch<DocumentReceiptSuggestion>(`/documents/${id}/receipt-suggestion`)
+}
+
+function receiptContentType(file: File): string {
+  if (file.type) return file.type
+  const name = file.name.toLowerCase()
+  if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg'
+  if (name.endsWith('.png')) return 'image/png'
+  if (name.endsWith('.webp')) return 'image/webp'
+  if (name.endsWith('.heic')) return 'image/heic'
+  if (name.endsWith('.heif')) return 'image/heif'
+  if (name.endsWith('.pdf')) return 'application/pdf'
+  return 'application/octet-stream'
 }
 
 export function updateDocument(id: number, payload: UpdateDocumentPayload) {
