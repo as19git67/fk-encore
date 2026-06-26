@@ -1,6 +1,9 @@
 import Foundation
 import Security
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 @Observable
 public final class AuthManager: @unchecked Sendable {
@@ -32,6 +35,31 @@ public final class AuthManager: @unchecked Sendable {
     }
 
     public init() {
+        restoreSession()
+        #if canImport(UIKit)
+        // The first `restoreSession()` can run while the device is still locked
+        // — e.g. the app was launched in the background for a sync, or right
+        // after a reboot before the first unlock. The Keychain items are stored
+        // with `kSecAttrAccessibleAfterFirstUnlock`, so they're unreadable then
+        // and the user would be shown the login screen even though a valid
+        // session exists. Re-attempt the restore once the device is unlocked.
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.protectedDataDidBecomeAvailableNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.retryRestoreIfNeeded()
+        }
+        #endif
+    }
+
+    /// Re-attempt session restore when we're not currently authenticated. Safe
+    /// to call repeatedly: it no-ops once a session is restored. Invoked when
+    /// protected data becomes available and when the app returns to the
+    /// foreground, so unlocking the iPhone always regains access to the stored
+    /// token instead of prompting for the password again.
+    func retryRestoreIfNeeded() {
+        guard !isAuthenticated else { return }
         restoreSession()
     }
 

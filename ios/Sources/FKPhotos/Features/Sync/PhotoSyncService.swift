@@ -18,24 +18,64 @@ actor PhotoSyncService {
 
     private let monitor = NWPathMonitor()
     private let monitorQueue = DispatchQueue(label: "dev.fk-encore.NetworkMonitor")
+    /// Latest path delivered by the monitor. `nil` until the first update lands.
+    /// Reading `monitor.currentPath` synchronously right after `start` is not
+    /// reliable — interface types in particular aren't populated until the first
+    /// async update arrives, so the first "Jetzt synchronisieren" tap reported
+    /// "no WiFi" and the user had to tap twice. We now wait for that first update
+    /// (see `awaitFirstPath`).
+    private var currentPath: NWPath?
+    /// Continuations waiting for the monitor's first path update.
+    private var firstPathWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
 
     private init() {
-        // No path-update handler needed: `monitor.currentPath` is non-optional
-        // and reflects the live state after `start`. The previous cached `var
-        // currentPath: NWPath?` was nil until the first async update arrived,
-        // which made the first "Jetzt synchronisieren" tap silently no-op
-        // (issue: user had to tap twice).
+        monitor.pathUpdateHandler = { [weak self] path in
+            Task { await self?.updatePath(path) }
+        }
         monitor.start(queue: monitorQueue)
     }
 
-    /// True while connected via WiFi. Reads `monitor.currentPath` directly so
-    /// the value is correct on the very first call after launch.
+    private func updatePath(_ path: NWPath) {
+        currentPath = path
+        let waiters = firstPathWaiters
+        firstPathWaiters.removeAll()
+        for (_, cont) in waiters { cont.resume() }
+    }
+
+    /// Wait (briefly) for the monitor's first path update if it hasn't arrived
+    /// yet, so the first connectivity query after launch reflects reality
+    /// instead of a not-yet-populated path. Bounded by a safety timeout so a
+    /// sync tap can never hang.
+    private func awaitFirstPath() async {
+        if currentPath != nil { return }
+        let id = UUID()
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            firstPathWaiters[id] = cont
+            Task {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                await self.resumeFirstPathWaiter(id)
+            }
+        }
+    }
+
+    private func resumeFirstPathWaiter(_ id: UUID) {
+        firstPathWaiters.removeValue(forKey: id)?.resume()
+    }
+
+    /// True while connected via WiFi. Awaits the first monitor update so the
+    /// value is correct on the very first call after launch.
     var isWifiConnected: Bool {
-        monitor.currentPath.usesInterfaceType(.wifi)
+        get async {
+            await awaitFirstPath()
+            return (currentPath ?? monitor.currentPath).usesInterfaceType(.wifi)
+        }
     }
 
     var isNetworkAvailable: Bool {
-        monitor.currentPath.status == .satisfied
+        get async {
+            await awaitFirstPath()
+            return (currentPath ?? monitor.currentPath).status == .satisfied
+        }
     }
 
     // MARK: - Public sync entry point
