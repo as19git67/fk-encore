@@ -103,7 +103,8 @@ tax categories, and banking.
 - **Share extension** to upload from other apps; **passkey** sign-in;
   in-app comments & reactions
 - Full inventory, Web↔iOS comparison and parity roadmap:
-  [`docs/ios-app.md`](./docs/ios-app.md)
+  [`docs/ios-app.md`](./docs/ios-app.md); backup/sync architecture in
+  [`docs/ios-backup-sync.md`](./docs/ios-backup-sync.md)
 
 ### Authentication & access control
 - Password login (bcrypt) and **WebAuthn / FIDO2 passkeys** with multi-passkey

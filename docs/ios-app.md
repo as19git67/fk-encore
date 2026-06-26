@@ -283,6 +283,6 @@ eine echte Bereicherung:
 
 - `FEATURE_COMPARISON.md` Abschnitt 8 („Mobile Apps") und die Zusammenfassung
   wurden mit diesem Stand aktualisiert (iOS ist nicht mehr „read-only").
-- Für die Sync-Architektur (Upload-Queue, Hintergrund-Task, Hash-Abgleich)
-  lohnt sich perspektivisch ein eigenes Detail-Dokument
-  (`docs/ios-backup-sync.md`).
+- Die Sync-Architektur (Upload-Queue, Hintergrund-Task, Hash-Abgleich,
+  Zwei-Wege-Sync) ist in [`ios-backup-sync.md`](./ios-backup-sync.md)
+  dokumentiert.
