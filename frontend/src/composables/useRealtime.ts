@@ -6,6 +6,7 @@ export type RealtimeChannel =
   | 'photos'
   | 'albums'
   | 'feed'
+  | 'finance'
   | 'scan-queue'
   | 'system'
 
