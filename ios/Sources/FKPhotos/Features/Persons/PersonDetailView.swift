@@ -24,6 +24,18 @@ struct PersonDetailView: View {
     @State private var filterSort = FilterSortViewModel()
     @Environment(\.dismiss) private var dismiss
 
+    // Year tiles — for persons with thousands of photos we group the grid by
+    // year and, when there are many photos, default to showing only the most
+    // recent year so the initial render stays bounded (issue #391).
+    @State private var selectedYear: Int? = nil
+    /// faceId → year, computed once per load to avoid re-parsing dates on
+    /// every SwiftUI body evaluation.
+    @State private var yearByFaceId: [Int: Int] = [:]
+
+    /// Above this many photos the view defaults to the newest year instead of
+    /// rendering everything at once.
+    private let yearDefaultThreshold = 300
+
     private var isUnnamed: Bool { personName == "Unbenannt" }
 
     private struct EmptyBody: Codable {}
@@ -40,9 +52,26 @@ struct PersonDetailView: View {
         faces.filter { !$0.ignored && $0.photo != nil }
     }
 
+    /// Years that have at least one visible photo, newest first.
+    private var availableYears: [Int] {
+        Set(visibleFaces.compactMap { yearByFaceId[$0.id] }).sorted(by: >)
+    }
+
+    /// Number of visible photos per year.
+    private var yearCounts: [Int: Int] {
+        var counts: [Int: Int] = [:]
+        for face in visibleFaces {
+            if let y = yearByFaceId[face.id] { counts[y, default: 0] += 1 }
+        }
+        return counts
+    }
+
     private var displayedFaces: [Face] {
         let f = filterSort.appliedFilter
-        let filtered = visibleFaces.filter { face in
+        let yearScoped = selectedYear.map { year in
+            visibleFaces.filter { yearByFaceId[$0.id] == year }
+        } ?? visibleFaces
+        let filtered = yearScoped.filter { face in
             guard let photo = face.photo else { return false }
             // Date range — the only criterion available for FacePhoto
             if f.dateFrom != nil || f.dateTo != nil {
@@ -63,6 +92,56 @@ struct PersonDetailView: View {
             let vb = PhotoFilter.parseDate(pb.taken_at ?? pb.created_at)?.timeIntervalSince1970 ?? 0
             return filterSort.appliedSort.direction == .desc ? va > vb : va < vb
         }
+    }
+
+    @ViewBuilder
+    private var faceGrid: some View {
+        LazyVGrid(columns: columns, spacing: 2) {
+            ForEach(displayedFaces) { face in
+                Button {
+                    let photos = displayedFaces.compactMap { makePhotoStub($0) }
+                    let bboxes: [FaceBBox?] = displayedFaces.map { $0.bbox }
+                    fullscreenPhotos = photos
+                    fullscreenBBoxes = bboxes
+                    fullscreenIndex = displayedFaces.firstIndex(where: { $0.id == face.id }) ?? 0
+                    fullscreenNav = FullscreenNav(startIndex: fullscreenIndex)
+                } label: {
+                    FaceThumbnailView(filename: face.photo!.filename, bbox: face.bbox)
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    Button(role: .destructive) {
+                        faceIdToIgnore = face.id
+                    } label: {
+                        Label("Ignorieren", systemImage: "person.fill.xmark")
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 2)
+    }
+
+    private var yearSelector: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                YearChip(
+                    title: "Alle",
+                    count: visibleFaces.count,
+                    isSelected: selectedYear == nil
+                ) { selectedYear = nil }
+
+                ForEach(availableYears, id: \.self) { year in
+                    YearChip(
+                        title: String(year),
+                        count: yearCounts[year] ?? 0,
+                        isSelected: selectedYear == year
+                    ) { selectedYear = (selectedYear == year ? nil : year) }
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+        }
+        .background(.bar)
     }
 
     var body: some View {
@@ -87,29 +166,17 @@ struct PersonDetailView: View {
                     Text("Keine Fotos für diese Person gefunden.")
                 }
             } else {
-                LazyVGrid(columns: columns, spacing: 2) {
-                    ForEach(displayedFaces) { face in
-                        Button {
-                            let photos = displayedFaces.compactMap { makePhotoStub($0) }
-                            let bboxes: [FaceBBox?] = displayedFaces.map { $0.bbox }
-                            fullscreenPhotos = photos
-                            fullscreenBBoxes = bboxes
-                            fullscreenIndex = displayedFaces.firstIndex(where: { $0.id == face.id }) ?? 0
-                            fullscreenNav = FullscreenNav(startIndex: fullscreenIndex)
-                        } label: {
-                            FaceThumbnailView(filename: face.photo!.filename, bbox: face.bbox)
+                LazyVStack(spacing: 8, pinnedViews: [.sectionHeaders]) {
+                    if availableYears.count > 1 {
+                        Section {
+                            faceGrid
+                        } header: {
+                            yearSelector
                         }
-                        .buttonStyle(.plain)
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                faceIdToIgnore = face.id
-                            } label: {
-                                Label("Ignorieren", systemImage: "person.fill.xmark")
-                            }
-                        }
+                    } else {
+                        faceGrid
                     }
                 }
-                .padding(.horizontal, 2)
             }
         }
         .navigationTitle(isUnnamed ? "Unbekannt" : personName)
@@ -263,6 +330,23 @@ struct PersonDetailView: View {
         isMerging = false
     }
 
+    /// Maps each visible face to the year of its photo. Computed once per load
+    /// (and after face mutations) so date parsing doesn't run on every redraw.
+    private func rebuildYearIndex() {
+        var index: [Int: Int] = [:]
+        let calendar = Calendar.current
+        for face in faces where !face.ignored {
+            guard let photo = face.photo,
+                  let date = PhotoFilter.parseDate(photo.taken_at ?? photo.created_at) else { continue }
+            index[face.id] = calendar.component(.year, from: date)
+        }
+        yearByFaceId = index
+        // Drop a year selection that no longer has any photos.
+        if let year = selectedYear, !availableYears.contains(year) {
+            selectedYear = nil
+        }
+    }
+
     private func loadPerson() async {
         isLoading = true
         errorMessage = nil
@@ -270,6 +354,14 @@ struct PersonDetailView: View {
             let response: PersonDetailsResponse = try await APIClient.shared.get("/persons/\(personId)")
             personName = response.name
             faces = response.faces
+            rebuildYearIndex()
+            // For persons with many photos, default to the newest year so the
+            // grid doesn't render thousands of thumbnails at once (issue #391).
+            if visibleFaces.count > yearDefaultThreshold, availableYears.count > 1 {
+                selectedYear = availableYears.first
+            } else {
+                selectedYear = nil
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -282,6 +374,7 @@ struct PersonDetailView: View {
                 "/faces/\(faceId)/ignore", body: EmptyBody()
             )
             faces.removeAll { $0.id == faceId }
+            rebuildYearIndex()
         } catch {}
     }
 
@@ -293,6 +386,7 @@ struct PersonDetailView: View {
                 "/persons/\(personId)/ignore", body: EmptyBody()
             )
             faces.removeAll()
+            rebuildYearIndex()
         } catch {}
     }
 
@@ -323,5 +417,34 @@ struct PersonDetailView: View {
 
     private struct FullscreenNav: Hashable {
         let startIndex: Int
+    }
+}
+
+/// A selectable chip for the year selector in `PersonDetailView`.
+private struct YearChip: View {
+    let title: String
+    let count: Int
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Text(title)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                Text("\(count)")
+                    .font(.caption2)
+                    .foregroundStyle(isSelected ? .white.opacity(0.85) : .secondary)
+            }
+            .font(.subheadline)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(isSelected ? Color.accentColor : Color(.secondarySystemFill))
+            )
+            .foregroundStyle(isSelected ? .white : .primary)
+        }
+        .buttonStyle(.plain)
     }
 }
