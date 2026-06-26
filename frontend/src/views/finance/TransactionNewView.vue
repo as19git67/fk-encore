@@ -17,6 +17,8 @@ import { searchDocuments, uploadReceiptCapture, type DocumentSummary } from '../
 import { recognizeReceipt } from '../../utils/receiptOcr'
 import { parseLocalDate } from '../../utils/dateFormat'
 import { useModuleBack } from '../../composables/useModuleBack'
+import { queuePendingTransaction } from '../../utils/offlineQueue'
+import { useOfflineSync } from '../../composables/useOfflineSync'
 
 const route = useRoute()
 const router = useRouter()
@@ -49,7 +51,11 @@ const receiptUploading = ref(false)
 const receiptStatus = ref<string | null>(null)
 const receiptSuggestion = ref<string | null>(null)
 const receiptDocumentId = ref<number | null>(null)
+const receiptProcessedBlob = ref<Blob | null>(null)
 const dateTouched = ref(false)
+const isOnline = ref(navigator.onLine)
+
+const { pendingCount, draining, lastResult } = useOfflineSync()
 
 const cashAccounts = computed(() =>
   accountsStore.items.filter(
@@ -57,17 +63,22 @@ const cashAccounts = computed(() =>
   ),
 )
 
+function onOnlineChange() { isOnline.value = navigator.onLine }
+
 onMounted(async () => {
+  window.addEventListener('online', onOnlineChange)
+  window.addEventListener('offline', onOnlineChange)
+
   if (accountsStore.items.length === 0) await accountsStore.refresh()
   if (tagsStore.items.length === 0) await tagsStore.refresh('user')
-  
+
   const queryAccountId = Number(route.query.accountId)
   if (queryAccountId) {
     accountId.value = queryAccountId
   } else if (cashAccounts.value.length === 1) {
     accountId.value = cashAccounts.value[0]!.id
   }
-  
+
   try {
     const resp = await recentCashRecipients()
     recentRecipients.value = resp.items
@@ -192,19 +203,28 @@ async function onReceiptPicked(event: Event) {
   try {
     const result = await recognizeReceipt(file)
     const applied = applyOcrResult(result)
+    receiptProcessedBlob.value = result.processedImage
 
-    receiptStatus.value = 'Beleg wird hochgeladen …'
-    const processedFile = new File([result.processedImage], file.name || 'receipt.jpg', {
-      type: result.processedImage.type,
-    })
-    const uploaded = await uploadReceiptCapture(processedFile)
-    receiptDocumentId.value = uploaded.id
-    selectDocument(uploaded)
+    if (isOnline.value) {
+      receiptStatus.value = 'Beleg wird hochgeladen …'
+      const processedFile = new File([result.processedImage], file.name || 'receipt.jpg', {
+        type: result.processedImage.type,
+      })
+      const uploaded = await uploadReceiptCapture(processedFile)
+      receiptDocumentId.value = uploaded.id
+      selectDocument(uploaded)
+    }
 
     receiptStatus.value = null
-    receiptSuggestion.value = applied.length > 0
-      ? `Aus Beleg übernommen: ${applied.join(', ')}. Empfänger und Kategorie werden im Hintergrund ergänzt.`
-      : 'Beleg wurde erkannt, aber es gab keine neuen Formularwerte. Server-Analyse läuft im Hintergrund.'
+    if (!isOnline.value) {
+      receiptSuggestion.value = applied.length > 0
+        ? `Aus Beleg übernommen: ${applied.join(', ')}. Beleg wird hochgeladen, sobald du online bist.`
+        : 'Beleg wird hochgeladen, sobald du online bist.'
+    } else {
+      receiptSuggestion.value = applied.length > 0
+        ? `Aus Beleg übernommen: ${applied.join(', ')}. Empfänger und Kategorie werden im Hintergrund ergänzt.`
+        : 'Beleg wurde erkannt, aber es gab keine neuen Formularwerte. Server-Analyse läuft im Hintergrund.'
+    }
   } catch (err) {
     receiptStatus.value = null
     documentSearchError.value = err instanceof Error ? err.message : String(err)
@@ -240,9 +260,9 @@ async function save() {
     error.value = 'Bitte einen Betrag eingeben.'
     return
   }
-  
-  const counterpartyName = (typeof counterparty.value === 'string' 
-    ? counterparty.value 
+
+  const counterpartyName = (typeof counterparty.value === 'string'
+    ? counterparty.value
     : (counterparty.value as any).counterparty || '').trim()
 
   if (!counterpartyName) {
@@ -250,6 +270,11 @@ async function save() {
     return
   }
   const signedAmount = isExpense.value ? -Math.abs(amount.value) : Math.abs(amount.value)
+
+  if (!isOnline.value) {
+    return saveOffline(signedAmount, counterpartyName)
+  }
+
   saving.value = true
   try {
     const created = await txStore.create({
@@ -280,6 +305,32 @@ async function save() {
     saving.value = false
   }
 }
+
+async function saveOffline(signedAmount: number, counterpartyName: string) {
+  saving.value = true
+  try {
+    const entry: Parameters<typeof queuePendingTransaction>[0] = {
+      accountId: accountId.value!,
+      bookingDate: toIso(bookingDate.value),
+      amount: signedAmount,
+      counterparty: counterpartyName,
+      purpose: purpose.value.trim() || undefined,
+      tags: [...tags.value],
+    }
+    if (receiptProcessedBlob.value) {
+      entry.receiptBlob = await receiptProcessedBlob.value.arrayBuffer()
+      entry.receiptFileName = 'receipt.jpg'
+      entry.receiptMimeType = receiptProcessedBlob.value.type || 'image/jpeg'
+    }
+    await queuePendingTransaction(entry)
+    tagsStore.addLocal(tags.value)
+    void router.push({ name: 'finance-account-transactions', params: { id: accountId.value } })
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    saving.value = false
+  }
+}
 </script>
 
 <template>
@@ -291,6 +342,20 @@ async function save() {
       Kein Bargeldkonto (Typ „bargeld") vorhanden. Bitte zuerst ein Konto anlegen.
     </Message>
 
+    <Message v-if="!isOnline" severity="warn" :closable="false">
+      <i class="pi pi-wifi-off" /> Offline — Buchung wird lokal gespeichert und bei Verbindung gesendet.
+    </Message>
+    <Message v-if="pendingCount > 0 && isOnline" severity="info" :closable="false">
+      <template v-if="draining">
+        <i class="pi pi-spin pi-spinner" /> {{ pendingCount }} offline gespeicherte Buchung(en) werden gesendet …
+      </template>
+      <template v-else-if="lastResult?.failed">
+        {{ lastResult.success }} gesendet, {{ lastResult.failed }} fehlgeschlagen — wird beim nächsten Mal erneut versucht.
+      </template>
+      <template v-else>
+        {{ lastResult?.success ?? pendingCount }} offline gespeicherte Buchung(en) erfolgreich gesendet.
+      </template>
+    </Message>
     <Message v-if="error" severity="error" :closable="true" @close="error = null">
       {{ error }}
     </Message>
@@ -463,7 +528,7 @@ async function save() {
     <div class="actions-row">
       <Button
         class="save-btn"
-        :label="receiptUploading ? 'Beleg wird verarbeitet …' : 'Speichern'"
+        :label="receiptUploading ? 'Beleg wird verarbeitet …' : isOnline ? 'Speichern' : 'Offline speichern'"
         icon="pi pi-check"
         :loading="saving"
         :disabled="!amount || !counterparty.trim() || !accountId || receiptUploading"
@@ -680,7 +745,7 @@ async function save() {
   padding: 0.65rem 0.75rem;
   border: 1px solid var(--p-content-border-color);
   border-radius: 0.7rem;
-  background: var(--p-surface-50);
+  background: var(--p-content-hover-background);
 }
 .document-row-text {
   min-width: 0;
