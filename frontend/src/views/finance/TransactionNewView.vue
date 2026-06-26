@@ -48,6 +48,7 @@ const receiptInput = ref<HTMLInputElement | null>(null)
 const receiptUploading = ref(false)
 const receiptStatus = ref<string | null>(null)
 const receiptSuggestion = ref<string | null>(null)
+const receiptDocumentId = ref<number | null>(null)
 const dateTouched = ref(false)
 
 const cashAccounts = computed(() =>
@@ -197,6 +198,7 @@ async function onReceiptPicked(event: Event) {
       type: result.processedImage.type,
     })
     const uploaded = await uploadReceiptCapture(processedFile)
+    receiptDocumentId.value = uploaded.id
     selectDocument(uploaded)
 
     receiptStatus.value = null
@@ -257,11 +259,14 @@ async function save() {
       counterparty: counterpartyName,
       purpose: purpose.value.trim() || undefined,
       tags: tags.value,
+      receipt_document_id: receiptDocumentId.value ?? undefined,
     })
-    const documentIds = selectedDocuments.value.map(document => document.id)
-    if (documentIds.length > 0) {
+    const manualDocIds = selectedDocuments.value
+      .filter(document => document.id !== receiptDocumentId.value)
+      .map(document => document.id)
+    if (manualDocIds.length > 0) {
       try {
-        await linkDocumentsToTransactions([created.id], documentIds)
+        await linkDocumentsToTransactions([created.id], manualDocIds)
       } catch (err) {
         error.value = `Buchung wurde erstellt, aber die Dokumente konnten nicht verknüpft werden: ${err instanceof Error ? err.message : String(err)}`
         return

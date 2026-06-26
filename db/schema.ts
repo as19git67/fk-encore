@@ -1476,6 +1476,7 @@ export const financeTransaction = pgTable(
     original_currency_code: text("original_currency_code"),
     exchange_rate: numeric("exchange_rate", { precision: 12, scale: 6 }),
     notice: text("notice"),
+    receipt_document_id: integer("receipt_document_id").references(() => documents.id, { onDelete: "set null" }),
     dedupe_hash: text("dedupe_hash").notNull(),
     raw: jsonb("raw").$type<Record<string, unknown>>(),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true })
@@ -1491,6 +1492,7 @@ export const financeTransaction = pgTable(
       table.account_id,
       table.booking_date,
     ),
+    index("finance_transaction_receipt_doc_idx").on(table.receipt_document_id),
   ]
 );
 

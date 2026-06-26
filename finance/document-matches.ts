@@ -1,8 +1,8 @@
 import { api, APIError } from 'encore.dev/api'
 import { getAuthData } from '~encore/auth'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull } from 'drizzle-orm'
 import db from '../db/database'
-import { financeAccountAccess, financeDocumentMatchSuggestion, financeTransaction } from '../db/schema'
+import { documents, financeAccountAccess, financeDocumentMatchSuggestion, financeTransaction } from '../db/schema'
 import { decideSuggestion, createSuggestionsForTransaction } from './document-match.service'
 import { requirePermission } from '../user/auth-handler'
 import { loadVisibleDocument } from '../documents/visibility'
@@ -134,6 +134,51 @@ export const unlinkDocument = api({ expose: true, method: 'POST', path: '/financ
   await db.execute(`DELETE FROM finance_transaction_document WHERE transaction_id = ${transaction_id} AND document_id = ${document_id}`)
   return { ok: true }
 })
+
+interface ReceiptEnrichmentItem {
+  transaction_id: number
+  booking_date: string
+  amount: string
+  counterparty: string | null
+  document_id: number
+  doc_sender: string | null
+  doc_date: string | null
+  doc_status: string
+}
+
+export const pendingReceiptEnrichments = api(
+  { expose: true, method: 'GET', path: '/finance/receipt-enrichments/pending', auth: true },
+  async (): Promise<{ items: ReceiptEnrichmentItem[] }> => {
+    const auth = getAuthData()!
+    requirePermission(auth, 'finance.view')
+    const rows = await db
+      .select({
+        transaction_id: financeTransaction.id,
+        booking_date: financeTransaction.booking_date,
+        amount: financeTransaction.amount,
+        counterparty: financeTransaction.counterparty,
+        document_id: documents.id,
+        doc_sender: documents.sender,
+        doc_date: documents.doc_date,
+        doc_status: documents.status,
+      })
+      .from(financeTransaction)
+      .innerJoin(documents, eq(documents.id, financeTransaction.receipt_document_id))
+      .where(isNotNull(financeTransaction.receipt_document_id))
+      .limit(100)
+    const readableIds = await readableTransactionIds(Number(auth.userID), rows.map(r => r.transaction_id))
+    const readableSet = new Set(readableIds)
+    const items = rows
+      .filter(r => readableSet.has(r.transaction_id))
+      .filter(r => {
+        if (r.doc_status !== 'ready') return true
+        if (r.doc_sender?.trim() && !r.counterparty?.trim()) return true
+        if (r.doc_date && r.doc_date !== r.booking_date?.slice(0, 10)) return true
+        return false
+      })
+    return { items }
+  },
+)
 
 export const expireDocumentSuggestions = api({ expose: true, method: 'POST', path: '/finance/document-matches/expire', auth: true }, async (): Promise<OkResponse> => {
   const auth = getAuthData()!; requirePermission(auth, 'finance.admin')

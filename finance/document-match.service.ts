@@ -1,7 +1,8 @@
-import { and, eq, lte } from 'drizzle-orm'
+import { and, eq, lte, isNotNull } from 'drizzle-orm'
 import db from '../db/database'
 import { documents, financeDocumentMatchSuggestion, financeTransaction, financeTransactionDocument } from '../db/schema'
 import { extractDocumentAmount, scoreDocumentMatch, type MatchScore } from './document-matcher'
+import { realtime } from '~encore/clients'
 
 export type MatchOutcome = 'pending' | 'accepted' | 'rejected' | 'ignored'
 
@@ -32,6 +33,51 @@ export function explainMatchScore(score: MatchScore) { return { amount: Math.rou
 export async function markExpiredSuggestionsIgnored(now = new Date()) {
   const cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString()
   return db.update(financeDocumentMatchSuggestion).set({ outcome: 'ignored', decided_at: now.toISOString() }).where(and(eq(financeDocumentMatchSuggestion.outcome, 'pending'), lte(financeDocumentMatchSuggestion.created_at, cutoff)))
+}
+
+/**
+ * After a receipt document finishes classification, check if it's linked
+ * to a transaction via `receipt_document_id`. If so, compare the enriched
+ * fields (sender, date, amount) with the transaction and notify the user
+ * if there are differences worth reviewing.
+ */
+export async function checkReceiptEnrichment(documentId: number): Promise<void> {
+  const [doc] = await db.select().from(documents).where(eq(documents.id, documentId)).limit(1)
+  if (!doc || doc.status !== 'ready') return
+
+  const linkedTxs = await db
+    .select({ id: financeTransaction.id, counterparty: financeTransaction.counterparty, amount: financeTransaction.amount, booking_date: financeTransaction.booking_date })
+    .from(financeTransaction)
+    .where(eq(financeTransaction.receipt_document_id, documentId))
+
+  if (linkedTxs.length === 0) return
+
+  for (const tx of linkedTxs) {
+    const enriched: Record<string, string> = {}
+    if (doc.sender?.trim() && !tx.counterparty?.trim()) {
+      enriched.sender = doc.sender.trim()
+    }
+    if (doc.doc_date && doc.doc_date !== tx.booking_date?.slice(0, 10)) {
+      enriched.doc_date = doc.doc_date
+    }
+    const docAmount = extractDocumentAmount(doc.extracted_text)
+    if (docAmount != null && Math.abs(docAmount - Math.abs(Number(tx.amount))) > 0.01) {
+      enriched.amount = String(docAmount)
+    }
+    if (Object.keys(enriched).length === 0) return
+
+    try {
+      await realtime.publishEvent({
+        userIds: [String(doc.user_id)],
+        channel: 'finance',
+        type: 'receipt.enriched',
+        resourceId: String(tx.id),
+        payload: { transaction_id: tx.id, document_id: documentId, enriched },
+      })
+    } catch (err) {
+      console.warn(`[finance] receipt enrichment notify failed for tx=${tx.id}: ${(err as Error).message}`)
+    }
+  }
 }
 
 export async function createSuggestionsForDocument(documentId: number) {

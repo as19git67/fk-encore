@@ -21,7 +21,7 @@ import { extractPdfText, PdfPasswordRequiredError } from "./text-extract";
 import { buildThumbnail } from "./thumbnail";
 import { removeOcrPdf, writeOcrPdf } from "./ocr-pdf";
 import { deleteJobsForDocument } from "./scan-queue";
-import { createSuggestionsForDocument } from "../finance/document-match.service";
+import { checkReceiptEnrichment, createSuggestionsForDocument } from "../finance/document-match.service";
 import {
   assertPathUnderDocumentsRoot,
 } from "./documents.service";
@@ -315,6 +315,7 @@ export async function runClassify(documentId: number): Promise<{ classification:
   await db.update(documents).set(patch).where(eq(documents.id, documentId));
   // Advisory only: a document becoming OCR-ready must not delay the pipeline.
   void createSuggestionsForDocument(documentId).catch(err => console.error(`[documents] finance matching failed for document=${documentId}:`, err));
+  void checkReceiptEnrichment(documentId).catch(err => console.error(`[documents] receipt enrichment check failed for document=${documentId}:`, err));
 
   // Report the category the document actually carries now: the fresh guess
   // when applied, or the pinned existing one when attributes are reviewed.

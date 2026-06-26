@@ -723,6 +723,7 @@ export interface CreateTransactionInput {
   counterparty?: string
   counterparty_iban?: string
   tags?: string[]
+  receipt_document_id?: number
 }
 
 export async function createTransaction(
