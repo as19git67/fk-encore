@@ -13,7 +13,7 @@ import { useAccountsStore } from '../../stores/finance/accounts'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useTagsStore } from '../../stores/finance/tags'
 import { linkDocumentsToTransactions, recentCashRecipients, searchRecipients, type RecentRecipient } from '../../api/finance'
-import { searchDocuments, type DocumentSummary } from '../../api/documents'
+import { getDocumentReceiptSuggestion, searchDocuments, uploadReceiptCapture, type DocumentReceiptSuggestion, type DocumentSummary } from '../../api/documents'
 import { useModuleBack } from '../../composables/useModuleBack'
 
 const route = useRoute()
@@ -42,6 +42,11 @@ const documentResults = ref<DocumentSummary[]>([])
 const selectedDocuments = ref<DocumentSummary[]>([])
 const searchingDocuments = ref(false)
 const documentSearchError = ref<string | null>(null)
+const receiptInput = ref<HTMLInputElement | null>(null)
+const receiptUploading = ref(false)
+const receiptStatus = ref<string | null>(null)
+const receiptSuggestion = ref<string | null>(null)
+const dateTouched = ref(false)
 
 const cashAccounts = computed(() =>
   accountsStore.items.filter(
@@ -119,6 +124,7 @@ function setDate(days: number) {
   const d = new Date()
   d.setDate(d.getDate() + days)
   bookingDate.value = d
+  dateTouched.value = true
 }
 
 function toIso(d: Date): string {
@@ -163,6 +169,118 @@ function selectDocument(document: DocumentSummary) {
 
 function removeSelectedDocument(documentId: number) {
   selectedDocuments.value = selectedDocuments.value.filter(document => document.id !== documentId)
+}
+
+function openReceiptCapture() {
+  if (receiptUploading.value) return
+  receiptInput.value?.click()
+}
+
+async function onReceiptPicked(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+
+  documentSearchError.value = null
+  receiptSuggestion.value = null
+  receiptUploading.value = true
+  receiptStatus.value = 'Beleg wird hochgeladen …'
+  try {
+    const uploaded = await uploadReceiptCapture(file)
+    selectDocument(uploaded)
+    receiptStatus.value = 'Beleg wird mit hoher Priorität gelesen …'
+    const suggestion = await waitForReceiptSuggestion(uploaded.id)
+    refreshSelectedDocument(suggestion.document)
+    if (suggestion.status === 'ready') {
+      const applied = applyReceiptSuggestion(suggestion)
+      receiptStatus.value = null
+      receiptSuggestion.value = applied.length > 0
+        ? `Aus Beleg übernommen: ${applied.join(', ')}.`
+        : 'Beleg wurde gelesen, aber es gab keine neuen Formularwerte.'
+    } else if (suggestion.status === 'failed') {
+      receiptStatus.value = null
+      documentSearchError.value = suggestion.last_error
+        ? `Beleg konnte nicht gelesen werden: ${suggestion.last_error}`
+        : 'Beleg konnte nicht gelesen werden.'
+    } else {
+      receiptStatus.value = 'Beleg wird weiter verarbeitet. Vorschläge erscheinen, sobald die Analyse fertig ist.'
+      void continueReceiptSuggestionPolling(uploaded.id)
+    }
+  } catch (err) {
+    receiptStatus.value = null
+    documentSearchError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    receiptUploading.value = false
+  }
+}
+
+async function waitForReceiptSuggestion(documentId: number): Promise<DocumentReceiptSuggestion> {
+  let last = await getDocumentReceiptSuggestion(documentId)
+  for (let i = 0; i < 30; i += 1) {
+    if (last.status === 'ready' || last.status === 'failed') return last
+    await new Promise(resolve => setTimeout(resolve, 2000))
+    last = await getDocumentReceiptSuggestion(documentId)
+  }
+  return last
+}
+
+async function continueReceiptSuggestionPolling(documentId: number) {
+  try {
+    for (let i = 0; i < 24; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 5000))
+      const suggestion = await getDocumentReceiptSuggestion(documentId)
+      refreshSelectedDocument(suggestion.document)
+      if (suggestion.status === 'ready') {
+        const applied = applyReceiptSuggestion(suggestion)
+        receiptStatus.value = null
+        receiptSuggestion.value = applied.length > 0
+          ? `Aus Beleg übernommen: ${applied.join(', ')}.`
+          : 'Beleg wurde gelesen, aber es gab keine neuen Formularwerte.'
+        return
+      }
+      if (suggestion.status === 'failed') {
+        receiptStatus.value = null
+        documentSearchError.value = suggestion.last_error
+          ? `Beleg konnte nicht gelesen werden: ${suggestion.last_error}`
+          : 'Beleg konnte nicht gelesen werden.'
+        return
+      }
+    }
+    receiptStatus.value = 'Beleg bleibt in der Dokumenten-Warteschlange und wird später weiter verarbeitet.'
+  } catch (err) {
+    receiptStatus.value = null
+    documentSearchError.value = err instanceof Error ? err.message : String(err)
+  }
+}
+
+function refreshSelectedDocument(document: DocumentSummary) {
+  selectedDocuments.value = selectedDocuments.value.map(item => item.id === document.id ? document : item)
+}
+
+function applyReceiptSuggestion(suggestion: DocumentReceiptSuggestion): string[] {
+  const applied: string[] = []
+  if (suggestion.amount != null && (!amount.value || amount.value <= 0)) {
+    amount.value = suggestion.amount
+    isExpense.value = true
+    applied.push('Betrag')
+  }
+  if (suggestion.doc_date && !dateTouched.value) {
+    const parsed = new Date(`${suggestion.doc_date}T12:00:00`)
+    if (!Number.isNaN(parsed.getTime())) {
+      bookingDate.value = parsed
+      applied.push('Datum')
+    }
+  }
+  if (suggestion.sender?.trim() && !counterparty.value.trim()) {
+    counterparty.value = suggestion.sender.trim()
+    applied.push('Empfänger')
+  }
+  if (suggestion.note && !purpose.value.trim()) {
+    purpose.value = suggestion.note
+    applied.push('Notiz')
+  }
+  return applied
 }
 
 async function save() {
@@ -255,7 +373,13 @@ async function save() {
     <div class="field">
       <label class="field-label">Buchungsdatum <span class="req">*</span></label>
       <div class="date-row">
-        <DatePicker v-model="bookingDate" date-format="dd.mm.yy" show-icon fluid />
+        <DatePicker
+          v-model="bookingDate"
+          date-format="dd.mm.yy"
+          show-icon
+          fluid
+          @update:model-value="dateTouched = true"
+        />
         <div class="date-presets">
           <Button label="Heute" size="small" severity="primary" outlined @click="setDate(0)" />
           <Button label="Gestern" size="small" severity="primary" outlined @click="setDate(-1)" />
@@ -322,6 +446,22 @@ async function save() {
           placeholder="Dokument suchen …"
           @keyup.enter="findDocuments"
         />
+        <input
+          ref="receiptInput"
+          type="file"
+          accept="image/*"
+          capture="environment"
+          class="receipt-input"
+          @change="onReceiptPicked"
+        >
+        <Button
+          icon="pi pi-camera"
+          severity="secondary"
+          outlined
+          aria-label="Beleg fotografieren"
+          :loading="receiptUploading"
+          @click="openReceiptCapture"
+        />
         <Button
           icon="pi pi-search"
           aria-label="Dokument suchen"
@@ -329,6 +469,8 @@ async function save() {
           @click="findDocuments"
         />
       </div>
+      <p v-if="receiptStatus" class="document-info">{{ receiptStatus }}</p>
+      <p v-if="receiptSuggestion" class="document-success">{{ receiptSuggestion }}</p>
       <p v-if="documentSearchError" class="document-error">{{ documentSearchError }}</p>
 
       <ul v-if="selectedDocuments.length" class="document-list selected-documents" aria-label="Ausgewählte Dokumente">
@@ -552,11 +694,25 @@ async function save() {
 }
 .document-search-input {
   flex: 1;
+  min-width: 0;
 }
+.receipt-input {
+  display: none;
+}
+.document-info,
+.document-success,
 .document-error {
   margin: 0;
-  color: var(--p-red-500);
   font-size: 0.85rem;
+}
+.document-info {
+  color: var(--p-text-muted-color);
+}
+.document-success {
+  color: var(--p-green-600);
+}
+.document-error {
+  color: var(--p-red-500);
 }
 .document-list {
   display: flex;
