@@ -13,7 +13,9 @@ import { useAccountsStore } from '../../stores/finance/accounts'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useTagsStore } from '../../stores/finance/tags'
 import { linkDocumentsToTransactions, recentCashRecipients, searchRecipients, type RecentRecipient } from '../../api/finance'
-import { getDocumentReceiptSuggestion, searchDocuments, uploadReceiptCapture, type DocumentReceiptSuggestion, type DocumentSummary } from '../../api/documents'
+import { searchDocuments, uploadReceiptCapture, type DocumentSummary } from '../../api/documents'
+import { recognizeReceipt } from '../../utils/receiptOcr'
+import { parseLocalDate } from '../../utils/dateFormat'
 import { useModuleBack } from '../../composables/useModuleBack'
 
 const route = useRoute()
@@ -185,28 +187,22 @@ async function onReceiptPicked(event: Event) {
   documentSearchError.value = null
   receiptSuggestion.value = null
   receiptUploading.value = true
-  receiptStatus.value = 'Beleg wird hochgeladen …'
+  receiptStatus.value = 'Beleg wird erkannt …'
   try {
-    const uploaded = await uploadReceiptCapture(file)
+    const result = await recognizeReceipt(file)
+    const applied = applyOcrResult(result)
+
+    receiptStatus.value = 'Beleg wird hochgeladen …'
+    const processedFile = new File([result.processedImage], file.name || 'receipt.jpg', {
+      type: result.processedImage.type,
+    })
+    const uploaded = await uploadReceiptCapture(processedFile)
     selectDocument(uploaded)
-    receiptStatus.value = 'Beleg wird mit hoher Priorität gelesen …'
-    const suggestion = await waitForReceiptSuggestion(uploaded.id)
-    refreshSelectedDocument(suggestion.document)
-    if (suggestion.status === 'ready') {
-      const applied = applyReceiptSuggestion(suggestion)
-      receiptStatus.value = null
-      receiptSuggestion.value = applied.length > 0
-        ? `Aus Beleg übernommen: ${applied.join(', ')}.`
-        : 'Beleg wurde gelesen, aber es gab keine neuen Formularwerte.'
-    } else if (suggestion.status === 'failed') {
-      receiptStatus.value = null
-      documentSearchError.value = suggestion.last_error
-        ? `Beleg konnte nicht gelesen werden: ${suggestion.last_error}`
-        : 'Beleg konnte nicht gelesen werden.'
-    } else {
-      receiptStatus.value = 'Beleg wird weiter verarbeitet. Vorschläge erscheinen, sobald die Analyse fertig ist.'
-      void continueReceiptSuggestionPolling(uploaded.id)
-    }
+
+    receiptStatus.value = null
+    receiptSuggestion.value = applied.length > 0
+      ? `Aus Beleg übernommen: ${applied.join(', ')}. Empfänger und Kategorie werden im Hintergrund ergänzt.`
+      : 'Beleg wurde erkannt, aber es gab keine neuen Formularwerte. Server-Analyse läuft im Hintergrund.'
   } catch (err) {
     receiptStatus.value = null
     documentSearchError.value = err instanceof Error ? err.message : String(err)
@@ -215,70 +211,19 @@ async function onReceiptPicked(event: Event) {
   }
 }
 
-async function waitForReceiptSuggestion(documentId: number): Promise<DocumentReceiptSuggestion> {
-  let last = await getDocumentReceiptSuggestion(documentId)
-  for (let i = 0; i < 30; i += 1) {
-    if (last.status === 'ready' || last.status === 'failed') return last
-    await new Promise(resolve => setTimeout(resolve, 2000))
-    last = await getDocumentReceiptSuggestion(documentId)
-  }
-  return last
-}
-
-async function continueReceiptSuggestionPolling(documentId: number) {
-  try {
-    for (let i = 0; i < 24; i += 1) {
-      await new Promise(resolve => setTimeout(resolve, 5000))
-      const suggestion = await getDocumentReceiptSuggestion(documentId)
-      refreshSelectedDocument(suggestion.document)
-      if (suggestion.status === 'ready') {
-        const applied = applyReceiptSuggestion(suggestion)
-        receiptStatus.value = null
-        receiptSuggestion.value = applied.length > 0
-          ? `Aus Beleg übernommen: ${applied.join(', ')}.`
-          : 'Beleg wurde gelesen, aber es gab keine neuen Formularwerte.'
-        return
-      }
-      if (suggestion.status === 'failed') {
-        receiptStatus.value = null
-        documentSearchError.value = suggestion.last_error
-          ? `Beleg konnte nicht gelesen werden: ${suggestion.last_error}`
-          : 'Beleg konnte nicht gelesen werden.'
-        return
-      }
-    }
-    receiptStatus.value = 'Beleg bleibt in der Dokumenten-Warteschlange und wird später weiter verarbeitet.'
-  } catch (err) {
-    receiptStatus.value = null
-    documentSearchError.value = err instanceof Error ? err.message : String(err)
-  }
-}
-
-function refreshSelectedDocument(document: DocumentSummary) {
-  selectedDocuments.value = selectedDocuments.value.map(item => item.id === document.id ? document : item)
-}
-
-function applyReceiptSuggestion(suggestion: DocumentReceiptSuggestion): string[] {
+function applyOcrResult(result: { amount: number | null; date: string | null }): string[] {
   const applied: string[] = []
-  if (suggestion.amount != null && (!amount.value || amount.value <= 0)) {
-    amount.value = suggestion.amount
+  if (result.amount != null && (!amount.value || amount.value <= 0)) {
+    amount.value = result.amount
     isExpense.value = true
     applied.push('Betrag')
   }
-  if (suggestion.doc_date && !dateTouched.value) {
-    const parsed = new Date(`${suggestion.doc_date}T12:00:00`)
+  if (result.date && !dateTouched.value) {
+    const parsed = parseLocalDate(result.date)
     if (!Number.isNaN(parsed.getTime())) {
       bookingDate.value = parsed
       applied.push('Datum')
     }
-  }
-  if (suggestion.sender?.trim() && !counterparty.value.trim()) {
-    counterparty.value = suggestion.sender.trim()
-    applied.push('Empfänger')
-  }
-  if (suggestion.note && !purpose.value.trim()) {
-    purpose.value = suggestion.note
-    applied.push('Notiz')
   }
   return applied
 }
