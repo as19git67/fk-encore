@@ -13,7 +13,7 @@ import { useAccountsStore } from '../../stores/finance/accounts'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useTagsStore } from '../../stores/finance/tags'
 import { linkDocumentsToTransactions, recentCashRecipients, searchRecipients, type RecentRecipient } from '../../api/finance'
-import { searchDocuments, type DocumentSummary } from '../../api/documents'
+import { getDocument, searchDocuments, uploadReceiptCapture, type DocumentDetail, type DocumentSummary } from '../../api/documents'
 import { useModuleBack } from '../../composables/useModuleBack'
 
 const route = useRoute()
@@ -42,6 +42,11 @@ const documentResults = ref<DocumentSummary[]>([])
 const selectedDocuments = ref<DocumentSummary[]>([])
 const searchingDocuments = ref(false)
 const documentSearchError = ref<string | null>(null)
+const receiptInput = ref<HTMLInputElement | null>(null)
+const receiptUploading = ref(false)
+const receiptStatus = ref<string | null>(null)
+const receiptSuggestion = ref<string | null>(null)
+const dateTouched = ref(false)
 
 const cashAccounts = computed(() =>
   accountsStore.items.filter(
@@ -119,6 +124,7 @@ function setDate(days: number) {
   const d = new Date()
   d.setDate(d.getDate() + days)
   bookingDate.value = d
+  dateTouched.value = true
 }
 
 function toIso(d: Date): string {
@@ -163,6 +169,93 @@ function selectDocument(document: DocumentSummary) {
 
 function removeSelectedDocument(documentId: number) {
   selectedDocuments.value = selectedDocuments.value.filter(document => document.id !== documentId)
+}
+
+function openReceiptCapture() {
+  if (receiptUploading.value) return
+  receiptInput.value?.click()
+}
+
+async function onReceiptPicked(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+
+  documentSearchError.value = null
+  receiptSuggestion.value = null
+  receiptUploading.value = true
+  receiptStatus.value = 'Beleg wird hochgeladen …'
+  try {
+    const uploaded = await uploadReceiptCapture(file)
+    selectDocument(uploaded)
+    receiptStatus.value = 'Beleg wird mit hoher Priorität gelesen …'
+    const detail = await waitForReceiptAnalysis(uploaded.id)
+    if (detail.status === 'ready') {
+      const applied = applyReceiptSuggestion(detail)
+      receiptStatus.value = null
+      receiptSuggestion.value = applied.length > 0
+        ? `Aus Beleg übernommen: ${applied.join(', ')}.`
+        : 'Beleg wurde gelesen, aber es gab keine neuen Formularwerte.'
+    } else {
+      receiptStatus.value = null
+      documentSearchError.value = detail.last_error
+        ? `Beleg konnte nicht gelesen werden: ${detail.last_error}`
+        : 'Beleg konnte nicht gelesen werden.'
+    }
+  } catch (err) {
+    receiptStatus.value = null
+    documentSearchError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    receiptUploading.value = false
+  }
+}
+
+async function waitForReceiptAnalysis(documentId: number): Promise<DocumentDetail> {
+  let last = await getDocument(documentId)
+  for (let i = 0; i < 30; i += 1) {
+    if (last.status === 'ready' || last.status === 'failed') return last
+    await new Promise(resolve => setTimeout(resolve, 2000))
+    last = await getDocument(documentId)
+  }
+  return last
+}
+
+function applyReceiptSuggestion(document: DocumentDetail): string[] {
+  const applied: string[] = []
+  const detectedAmount = extractReceiptAmount(document.extracted_text_preview)
+  if (detectedAmount != null && (!amount.value || amount.value <= 0)) {
+    amount.value = detectedAmount
+    isExpense.value = true
+    applied.push('Betrag')
+  }
+  if (document.doc_date && !dateTouched.value) {
+    const parsed = new Date(`${document.doc_date}T12:00:00`)
+    if (!Number.isNaN(parsed.getTime())) {
+      bookingDate.value = parsed
+      applied.push('Datum')
+    }
+  }
+  if (document.sender?.trim() && !counterparty.value.trim()) {
+    counterparty.value = document.sender.trim()
+    applied.push('Empfänger')
+  }
+  const note = document.title?.trim() || document.summary?.trim() || document.original_filename
+  if (note && !purpose.value.trim()) {
+    purpose.value = note
+    applied.push('Notiz')
+  }
+  return applied
+}
+
+function extractReceiptAmount(text: string | null | undefined): number | null {
+  const match = (text ?? '').match(/(?:gesamt(?:betrag|summe)?|summe|total|zu\s+zahlen|betrag)\D{0,32}([0-9]{1,3}(?:[. ][0-9]{3})*(?:,[0-9]{2})|[0-9]+(?:[.,][0-9]{2}))/iu)
+  if (!match) return null
+  const rawAmount = match[1]
+  if (!rawAmount) return null
+  const normalized = rawAmount.replace(/[. ](?=\d{3}(?:\D|$))/g, '').replace(',', '.')
+  const value = Number(normalized)
+  return Number.isFinite(value) && value > 0 ? value : null
 }
 
 async function save() {
@@ -255,7 +348,13 @@ async function save() {
     <div class="field">
       <label class="field-label">Buchungsdatum <span class="req">*</span></label>
       <div class="date-row">
-        <DatePicker v-model="bookingDate" date-format="dd.mm.yy" show-icon fluid />
+        <DatePicker
+          v-model="bookingDate"
+          date-format="dd.mm.yy"
+          show-icon
+          fluid
+          @update:model-value="dateTouched = true"
+        />
         <div class="date-presets">
           <Button label="Heute" size="small" severity="primary" outlined @click="setDate(0)" />
           <Button label="Gestern" size="small" severity="primary" outlined @click="setDate(-1)" />
@@ -322,6 +421,22 @@ async function save() {
           placeholder="Dokument suchen …"
           @keyup.enter="findDocuments"
         />
+        <input
+          ref="receiptInput"
+          type="file"
+          accept="image/*,application/pdf"
+          capture="environment"
+          class="receipt-input"
+          @change="onReceiptPicked"
+        >
+        <Button
+          icon="pi pi-camera"
+          severity="secondary"
+          outlined
+          aria-label="Beleg fotografieren"
+          :loading="receiptUploading"
+          @click="openReceiptCapture"
+        />
         <Button
           icon="pi pi-search"
           aria-label="Dokument suchen"
@@ -329,6 +444,8 @@ async function save() {
           @click="findDocuments"
         />
       </div>
+      <p v-if="receiptStatus" class="document-info">{{ receiptStatus }}</p>
+      <p v-if="receiptSuggestion" class="document-success">{{ receiptSuggestion }}</p>
       <p v-if="documentSearchError" class="document-error">{{ documentSearchError }}</p>
 
       <ul v-if="selectedDocuments.length" class="document-list selected-documents" aria-label="Ausgewählte Dokumente">
@@ -552,11 +669,25 @@ async function save() {
 }
 .document-search-input {
   flex: 1;
+  min-width: 0;
 }
+.receipt-input {
+  display: none;
+}
+.document-info,
+.document-success,
 .document-error {
   margin: 0;
-  color: var(--p-red-500);
   font-size: 0.85rem;
+}
+.document-info {
+  color: var(--p-text-muted-color);
+}
+.document-success {
+  color: var(--p-green-600);
+}
+.document-error {
+  color: var(--p-red-500);
 }
 .document-list {
   display: flex;

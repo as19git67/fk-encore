@@ -222,6 +222,18 @@ export function uploadDocument(file: File, signal?: AbortSignal) {
   })
 }
 
+export function uploadReceiptCapture(file: File, signal?: AbortSignal) {
+  return apiFetch<DocumentSummary>('/documents/receipt-capture', {
+    method: 'POST',
+    body: file,
+    signal,
+    headers: {
+      'Content-Type': file.type || 'application/octet-stream',
+      'X-File-Name': encodeURIComponent(file.name || 'receipt.jpg'),
+    },
+  })
+}
+
 export function updateDocument(id: number, payload: UpdateDocumentPayload) {
   return apiFetch<DocumentDetail>(`/documents/${id}`, {
     method: 'PATCH',

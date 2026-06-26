@@ -8,6 +8,8 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
+import sharp from "sharp";
+import { createRequire } from "module";
 import { api, APIError, type Query } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
@@ -71,6 +73,27 @@ import {
   TAX_SECTIONS,
   type TaxSectionGroup,
 } from "./tax-sections";
+
+const _require = createRequire(import.meta.url);
+type HeicConvertFn = (opts: {
+  buffer: ArrayBuffer | Buffer;
+  format: "JPEG" | "PNG";
+  quality: number;
+}) => Promise<ArrayBuffer>;
+const heicConvert: HeicConvertFn = _require("heic-convert");
+
+const RECEIPT_CAPTURE_PRIORITY = 0;
+const RECEIPT_CAPTURE_MIME_TYPES = new Set([
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+]);
+const HEIC_BRANDS = new Set([
+  "heic", "heix", "hevc", "hevx", "heim", "heis", "hevm", "hevs", "mif1", "msf1", "mif2",
+]);
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -329,7 +352,7 @@ export const uploadDocument = api.raw(
     }
 
     try {
-      const result = await streamAndStorePdf(req, originalName, mimeType, userId);
+      const result = await streamAndStoreDocument(req, originalName, mimeType, userId);
       res.statusCode = 201;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(result));
@@ -353,30 +376,110 @@ export const uploadDocument = api.raw(
   },
 );
 
-async function streamAndStorePdf(
+export const uploadReceiptCapture = api.raw(
+  { expose: true, method: "POST", path: "/documents/receipt-capture", auth: true, bodyLimit: null },
+  async (req, res) => {
+    try {
+      checkModule();
+    } catch {
+      res.statusCode = 403;
+      res.end(JSON.stringify({ error: "Forbidden" }));
+      return;
+    }
+
+    const authData = getAuthData()!;
+    try {
+      requirePermission(authData, "documents.upload");
+    } catch {
+      res.statusCode = 403;
+      res.end(JSON.stringify({ error: "Missing permission: documents.upload" }));
+      return;
+    }
+
+    const userId = getUserId();
+    const rawFileName = (req.headers["x-file-name"] as string) || "receipt.jpg";
+    let originalName = rawFileName;
+    try {
+      originalName = decodeURIComponent(rawFileName);
+    } catch {
+      originalName = rawFileName;
+    }
+    const mimeType = ((req.headers["content-type"] as string) || "application/octet-stream")
+      .toLowerCase()
+      .split(";")[0]
+      .trim();
+
+    if (!RECEIPT_CAPTURE_MIME_TYPES.has(mimeType)) {
+      res.statusCode = 415;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({
+        error: "Unsupported file type",
+        message: "Bitte ein Foto (JPEG/PNG/WebP/HEIC) oder PDF auswählen.",
+      }));
+      return;
+    }
+
+    try {
+      const raw = await readRequestBuffer(req);
+      const file = mimeType === "application/pdf"
+        ? { buffer: raw, originalName, mimeType }
+        : {
+            buffer: await imageToReceiptPdf(raw),
+            originalName: receiptPdfFilename(originalName),
+            mimeType: "application/pdf",
+          };
+      const result = await storeDocumentBuffer({
+        buffer: file.buffer,
+        originalName: file.originalName,
+        mimeType: file.mimeType,
+        userId,
+        scanPriority: RECEIPT_CAPTURE_PRIORITY,
+      });
+      res.statusCode = 201;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify(result));
+    } catch (err: any) {
+      if (err.message === "DOCUMENT_ALREADY_EXISTS") {
+        res.statusCode = 409;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "Duplicate document", message: "Dokument wurde bereits hochgeladen." }));
+        return;
+      }
+      if (err.message === "DOCUMENT_TOO_LARGE") {
+        res.statusCode = 413;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "Payload too large", message: "Datei überschreitet die erlaubte Größe." }));
+        return;
+      }
+      console.error("[documents] receipt capture upload error:", err);
+      res.statusCode = 500;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: err?.message ?? "Internal Server Error" }));
+    }
+  },
+);
+
+async function streamAndStoreDocument(
   req: NodeJS.ReadableStream,
   originalName: string,
   mimeType: string,
   userId: number,
 ): Promise<DocumentSummary> {
-  const ext = guessExtension(originalName, mimeType);
-  const hash = crypto.createHash("sha256");
-  const chunks: Buffer[] = [];
-  let size = 0;
+  const buffer = await readRequestBuffer(req);
+  return storeDocumentBuffer({ buffer, originalName, mimeType, userId });
+}
 
-  for await (const raw of req) {
-    const chunk = Buffer.isBuffer(raw)
-      ? raw
-      : typeof raw === "string"
-        ? Buffer.from(raw, "utf8")
-        : Buffer.from(raw as Uint8Array);
-    size += chunk.length;
-    if (size > DOCUMENTS_MAX_BYTES) throw new Error("DOCUMENT_TOO_LARGE");
-    hash.update(chunk);
-    chunks.push(chunk);
-  }
-  const digest = hash.digest("hex");
-  const buffer = Buffer.concat(chunks, size);
+async function storeDocumentBuffer(params: {
+  buffer: Buffer;
+  originalName: string;
+  mimeType: string;
+  userId: number;
+  scanPriority?: number;
+}): Promise<DocumentSummary> {
+  const { buffer, originalName, mimeType, userId, scanPriority = 2 } = params;
+  if (buffer.length > DOCUMENTS_MAX_BYTES) throw new Error("DOCUMENT_TOO_LARGE");
+  const ext = guessExtension(originalName, mimeType);
+  const digest = crypto.createHash("sha256").update(buffer).digest("hex");
 
   const existing = await dbFirst<typeof documents.$inferSelect>(
     db.select().from(documents).where(eq(documents.sha256, digest)),
@@ -421,7 +524,7 @@ async function streamAndStorePdf(
         sha256: digest,
         original_filename: originalName,
         mime_type: mimeType,
-        size_bytes: size,
+        size_bytes: buffer.length,
         disk_path: absPath,
         visibility: defaultGroupId != null ? "group" : "private",
         group_id: defaultGroupId,
@@ -442,10 +545,110 @@ async function streamAndStorePdf(
     }
   }
 
-  await enqueueDocumentScan(row.id);
+  await enqueueDocumentScan(row.id, undefined, scanPriority);
   triggerWorkers();
 
   return toSummary(row, null, []);
+}
+
+async function readRequestBuffer(req: NodeJS.ReadableStream): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+
+  for await (const raw of req) {
+    const chunk = Buffer.isBuffer(raw)
+      ? raw
+      : typeof raw === "string"
+        ? Buffer.from(raw, "utf8")
+        : Buffer.from(raw as Uint8Array);
+    size += chunk.length;
+    if (size > DOCUMENTS_MAX_BYTES) throw new Error("DOCUMENT_TOO_LARGE");
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks, size);
+}
+
+function receiptPdfFilename(originalName: string): string {
+  const parsed = path.parse(originalName || "receipt");
+  const stem = parsed.name || "receipt";
+  return `${stem}.pdf`;
+}
+
+function isHeicBuffer(buf: Buffer): boolean {
+  if (buf.length < 12) return false;
+  if (buf.toString("ascii", 4, 8) !== "ftyp") return false;
+  return HEIC_BRANDS.has(buf.toString("ascii", 8, 12));
+}
+
+async function imageToReceiptPdf(input: Buffer): Promise<Buffer> {
+  const image = isHeicBuffer(input)
+    ? Buffer.from(await heicConvert({ buffer: input, format: "JPEG", quality: 0.9 }))
+    : input;
+  const normalized = sharp(image, { failOn: "none" }).rotate().flatten({ background: "#ffffff" });
+  const { data: jpeg, info } = await normalized
+    .jpeg({ quality: 90, mozjpeg: true })
+    .toBuffer({ resolveWithObject: true });
+  return singleJpegPagePdf(jpeg, info.width || 1000, info.height || 1000);
+}
+
+function singleJpegPagePdf(jpeg: Buffer, imageWidth: number, imageHeight: number): Buffer {
+  const pageWidth = 595.28; // A4 portrait in PDF points
+  const pageHeight = 841.89;
+  const margin = 24;
+  const scale = Math.min((pageWidth - margin * 2) / imageWidth, (pageHeight - margin * 2) / imageHeight);
+  const drawWidth = imageWidth * scale;
+  const drawHeight = imageHeight * scale;
+  const x = (pageWidth - drawWidth) / 2;
+  const y = (pageHeight - drawHeight) / 2;
+  const content = Buffer.from(
+    `q\n${drawWidth.toFixed(2)} 0 0 ${drawHeight.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm\n/Im0 Do\nQ\n`,
+    "ascii",
+  );
+  return buildPdf([
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>`,
+    {
+      dict: `<< /Type /XObject /Subtype /Image /Width ${imageWidth} /Height ${imageHeight} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>`,
+      stream: jpeg,
+    },
+    { dict: `<< /Length ${content.length} >>`, stream: content },
+  ]);
+}
+
+function buildPdf(objects: Array<string | { dict: string; stream: Buffer }>): Buffer {
+  const chunks: Buffer[] = [Buffer.from("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n", "binary")];
+  const offsets: number[] = [];
+  let offset = chunks[0].length;
+  objects.forEach((obj, index) => {
+    offsets.push(offset);
+    const prefix = Buffer.from(`${index + 1} 0 obj\n`, "ascii");
+    const body = typeof obj === "string"
+      ? Buffer.from(`${obj}\n`, "ascii")
+      : Buffer.concat([
+          Buffer.from(`${obj.dict}\nstream\n`, "ascii"),
+          obj.stream,
+          Buffer.from("\nendstream\n", "ascii"),
+        ]);
+    const suffix = Buffer.from("endobj\n", "ascii");
+    chunks.push(prefix, body, suffix);
+    offset += prefix.length + body.length + suffix.length;
+  });
+  const xrefOffset = offset;
+  const xrefLines = [
+    "xref",
+    `0 ${objects.length + 1}`,
+    "0000000000 65535 f ",
+    ...offsets.map((value) => `${String(value).padStart(10, "0")} 00000 n `),
+    "trailer",
+    `<< /Size ${objects.length + 1} /Root 1 0 R >>`,
+    "startxref",
+    String(xrefOffset),
+    "%%EOF",
+    "",
+  ];
+  chunks.push(Buffer.from(xrefLines.join("\n"), "ascii"));
+  return Buffer.concat(chunks);
 }
 
 const UPLOAD_DEFAULTS_PREF_KEY = "upload_defaults";
