@@ -6280,7 +6280,7 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
   // boundary, the computation happens in a separate process, and Node only
   // receives the final group structures.
   const photoIds = allPhotos.map((p) => p.id.toString());
-  let remoteGroups: Array<{ cover_photo_id: string; members: Array<{ photo_id: string; similarity_rank: number }> }>;
+  let remoteGroups: Array<{ cover_photo_id: string; members: Array<{ photo_id: string; similarity_rank: number; similarity_score: number }> }>;
   try {
     const response = await fetchWithTimeout(`${EMBEDDING_SERVICE_URL}/similar-groups`, {
       method: "POST",
@@ -6293,7 +6293,7 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
     });
     if (!response.ok) throw new Error(`Embedding service returned ${response.status}`);
     const data = await response.json() as {
-      groups: Array<{ cover_photo_id: string; members: Array<{ photo_id: string; similarity_rank: number }> }>;
+      groups: Array<{ cover_photo_id: string; members: Array<{ photo_id: string; similarity_rank: number; similarity_score: number }> }>;
     };
     remoteGroups = data.groups;
   } catch (err: any) {
@@ -6309,7 +6309,7 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
     .map((g) => ({
       coverPhotoId: parseInt(g.cover_photo_id, 10),
       members: g.members
-        .map((m) => ({ photoId: parseInt(m.photo_id, 10), rank: m.similarity_rank }))
+        .map((m) => ({ photoId: parseInt(m.photo_id, 10), rank: m.similarity_rank, score: m.similarity_score }))
         .filter((m) => accessibleIds.has(m.photoId))
         .sort((a, b) => a.rank - b.rank),
     }))
@@ -6383,6 +6383,7 @@ export async function findPhotoGroupsLogic(userId: number): Promise<FindGroupsRe
             group_id: inserted!.id,
             photo_id: member.photoId,
             similarity_rank: member.rank,
+            similarity_score: member.score,
           })
         );
       }

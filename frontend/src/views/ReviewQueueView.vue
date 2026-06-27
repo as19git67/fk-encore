@@ -147,6 +147,10 @@ function onChangeFilter() {
 }
 
 async function onAccept(group: ReviewQueueGroup) {
+  if (group.duplicate_candidate && group.duplicate_recommended_photo_id != null) {
+    await onPickOne(group, group.duplicate_recommended_photo_id)
+    return
+  }
   await runAcceptAction(group, () => acceptAiPick(group.id))
 }
 
@@ -522,6 +526,9 @@ onMounted(() => {
         :class="{ 'rq-card--pending': pendingAcceptIds.has(group.id) }"
       >
         <div class="rq-card-meta">
+          <span v-if="group.duplicate_candidate" class="rq-duplicate-badge">
+            <i class="pi pi-copy" /> Sehr wahrscheinliches Duplikat
+          </span>
           <span :class="confidenceClass(group.ai_picked_confidence)">
             {{ confidenceLabel(group.ai_picked_confidence) }}
           </span>
@@ -562,9 +569,12 @@ onMounted(() => {
             class="rq-oneclick-tile"
             :class="{
               'rq-oneclick-tile--ai-pick': photo.ai_picked,
+              'rq-oneclick-tile--duplicate-pick': group.duplicate_recommended_photo_id === photo.id,
             }"
             :title="photo.ai_picked
               ? 'KI-Vorschlag — Klick = dieses behalten, Rest verstecken'
+              : group.duplicate_recommended_photo_id === photo.id
+                ? 'Empfohlenes Duplikat-Original — Klick = dieses behalten, Rest verstecken'
               : 'Klick = dieses behalten, Rest verstecken'"
             :disabled="pendingAcceptIds.has(group.id)"
             @click="onPickOne(group, photo.id)"
@@ -632,6 +642,7 @@ onMounted(() => {
               :class="{
                 'rq-thumb--picked': photo.ai_picked,
                 'rq-thumb--non-pick': !photo.ai_picked && group.ai_picked_photo_ids.length > 0,
+                'rq-thumb--duplicate-pick': group.duplicate_recommended_photo_id === photo.id,
               }"
               :aria-label="photo.ai_picked
                 ? 'KI-Pick — bildschirmfüllend ansehen'
@@ -678,8 +689,8 @@ onMounted(() => {
           <Button
             icon="pi pi-check"
             severity="success"
-            label="KI-Pick übernehmen"
-            :disabled="pendingAcceptIds.has(group.id) || group.ai_picked_photo_ids.length === 0"
+            :label="group.duplicate_candidate ? 'Bestes Duplikat behalten' : 'KI-Pick übernehmen'"
+            :disabled="pendingAcceptIds.has(group.id) || (!group.duplicate_candidate && group.ai_picked_photo_ids.length === 0)"
             @click="onAccept(group)"
           />
           <Button
@@ -955,6 +966,14 @@ onMounted(() => {
   align-items: center;
   gap: 12px;
 }
+
+.rq-duplicate-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--p-orange-700, #c2410c);
+  font-weight: 700;
+}
 .rq-conf {
   font-size: 0.75rem;
   font-weight: 700;
@@ -1053,6 +1072,14 @@ onMounted(() => {
 }
 .rq-oneclick-tile--ai-pick {
   border-color: var(--p-green-500, #22c55e);
+}
+
+.rq-oneclick-tile--duplicate-pick {
+  box-shadow: inset 0 0 0 3px var(--p-orange-500, #f97316);
+}
+
+.rq-thumb--duplicate-pick {
+  box-shadow: 0 0 0 3px var(--p-orange-500, #f97316);
 }
 .rq-oneclick-check {
   position: absolute;

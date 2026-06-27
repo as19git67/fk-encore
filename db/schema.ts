@@ -332,6 +332,9 @@ export const photoGroupMembers = pgTable(
       .notNull()
       .references(() => photos.id, { onDelete: "cascade" }),
     similarity_rank: integer("similarity_rank").notNull().default(0),
+    // DINOv2 cosine similarity to the group medoid. Values near 1 are used
+    // together with matching metadata to flag format-independent duplicates.
+    similarity_score: real("similarity_score"),
   },
   (table) => [
     primaryKey({ columns: [table.group_id, table.photo_id] }),

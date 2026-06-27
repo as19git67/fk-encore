@@ -999,6 +999,8 @@ export interface ReviewQueueGroup {
   ai_picked_confidence: 'high' | 'medium' | 'low' | null
   /** Δ vs. runner-up; drives the confidence-bar render. */
   runner_up_delta: number | null
+  duplicate_candidate: boolean
+  duplicate_recommended_photo_id: number | null
   photos: ReviewQueuePhoto[]
 }
 
