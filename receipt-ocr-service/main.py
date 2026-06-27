@@ -246,6 +246,7 @@ def run_ocr(img: np.ndarray) -> tuple[str, list[dict[str, Any]]]:
 _VALUE_PATTERN = r"(\d{1,3}(?:[. ]\d{3})*(?:,\d{2})|\d+(?:[.,]\d{2}))"
 
 _TOTAL_LABELS = re.compile(
+    r"(?<![a-zA-ZäöüÄÖÜ])"
     r"(?:gesamt(?:betrag|summe)?|summe|total|zu\s*zahlen|betrag|endsumme|"
     r"karten(?:zahlung)?|ec[- ]?cash|bar|maestro|visa|mastercard|"
     r"girocard|v\s*pay|eur\b)"
@@ -327,7 +328,7 @@ Regeln:
 - Halluziniere keine Daten. Bei Unsicherheit: null."""
 
 
-_MOJIBAKE = re.compile(r"[ÂÃ][-¿]")
+_MOJIBAKE = re.compile(r"[ÂÃ][\x80-\xBF]")
 
 
 def _repair_mojibake(value: str | None) -> str | None:
