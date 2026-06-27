@@ -15,8 +15,13 @@ const RECEIPT_OCR_SERVICE_URL = (
   process.env.RECEIPT_OCR_SERVICE_URL || "http://localhost:8003"
 ).replace(/\/$/, "");
 
+// 120s default: PaddleOCR + the Qwen-3B extraction on a CPU-only box that
+// shares its cores with the other ML services can take well over the old 30s.
+// Keep this below the frontend's request timeout so a real timeout surfaces
+// as a meaningful 502 here rather than the browser aborting first. Override
+// via RECEIPT_OCR_TIMEOUT_MS on faster hardware.
 const DEFAULT_TIMEOUT_MS = parseInt(
-  process.env.RECEIPT_OCR_TIMEOUT_MS ?? "30000",
+  process.env.RECEIPT_OCR_TIMEOUT_MS ?? "120000",
   10,
 );
 

@@ -260,10 +260,11 @@ export function extractReceiptOcr(file: File, signal?: AbortSignal) {
     method: 'POST',
     body: file,
     signal,
-    // The backend caps the work itself (≈2s health probe + 30s extract),
-    // so 45s comfortably covers a slow extract while guaranteeing the UI
-    // never gets stuck on "Beleg wird erkannt …" if something upstream hangs.
-    timeoutMs: 45_000,
+    // Must exceed the backend's receipt-ocr client timeout (120s) so a slow
+    // CPU extraction surfaces as a meaningful 502 from the server rather than
+    // the browser aborting first — while still guaranteeing the UI can never
+    // get stuck on "Beleg wird erkannt …" indefinitely.
+    timeoutMs: 130_000,
     headers: {
       'Content-Type': receiptContentType(file),
       'X-File-Name': encodeURIComponent(file.name || 'receipt.jpg'),
