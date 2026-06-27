@@ -53,7 +53,14 @@ RUN chmod +x /usr/local/bin/download_model.sh /usr/local/bin/entrypoint.sh
 RUN mkdir -p /models \
     && chown -R 568:568 /models /app /home/apps
 
+# HOME points at the persisted /models volume so PaddleOCR's auto-downloaded
+# models (~/.paddleocr) and any HuggingFace cache land there instead of the
+# container's ephemeral home. Without this the PaddleOCR models are re-fetched
+# from Baidu's servers (slow/unreliable from the EU) on every container
+# recreate — i.e. after every Watchtower update — and the service answers 503
+# until that download finishes. Persisting them means a one-time download.
 ENV MODELS_DIR=/models \
+    HOME=/models \
     LLM_MODEL_PATH=/models/qwen2.5-3b-instruct-q4_k_m.gguf \
     LLM_CTX=4096 \
     LLM_GPU_LAYERS=0 \
