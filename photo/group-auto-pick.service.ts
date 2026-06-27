@@ -45,7 +45,7 @@ import {
   type PhotoSignals,
   type ScoringWeights,
 } from "./group-auto-pick";
-import { isHighConfidenceDuplicateGroup, recommendDuplicatePhoto } from "./duplicate-candidates";
+import { isHighConfidenceDuplicateGroup, recommendDuplicatePhoto, selectDeletableDuplicateMembers } from "./duplicate-candidates";
 
 interface PhotoSignalRow {
   photo_id: number;
@@ -778,6 +778,8 @@ export interface ReviewQueueGroup {
   runner_up_delta: number | null;
   duplicate_candidate: boolean;
   duplicate_recommended_photo_id: number | null;
+  duplicate_deletable_count: number;
+  duplicate_deletable_bytes: number;
   photos: ReviewQueuePhoto[];
 }
 
@@ -994,6 +996,9 @@ export async function listReviewQueueLogic(
     longitude: number | null;
     description: string | null;
     keywords: string[];
+    user_id: number;
+    external_path: string | null;
+    size: number;
   }>(
     db.select({
       group_id: photoGroupMembers.group_id,
@@ -1010,6 +1015,9 @@ export async function listReviewQueueLogic(
       longitude: photos.longitude,
       description: photos.description,
       keywords: photos.keywords,
+      user_id: photos.user_id,
+      external_path: photos.external_path,
+      size: photos.size,
     })
       .from(photoGroupMembers)
       .innerJoin(photos, eq(photos.id, photoGroupMembers.photo_id))
@@ -1099,6 +1107,9 @@ export async function listReviewQueueLogic(
     const duplicateRecommendedPhotoId = duplicateCandidate
       ? recommendDuplicatePhoto(members)
       : null;
+    const deletableDuplicates = duplicateCandidate && duplicateRecommendedPhotoId != null
+      ? selectDeletableDuplicateMembers(members, duplicateRecommendedPhotoId, userId)
+      : [];
     return {
       id: g.id,
       cover_photo_id: g.cover_photo_id,
@@ -1113,6 +1124,8 @@ export async function listReviewQueueLogic(
       runner_up_delta: g.runner_up_delta,
       duplicate_candidate: duplicateCandidate,
       duplicate_recommended_photo_id: duplicateRecommendedPhotoId,
+      duplicate_deletable_count: deletableDuplicates.length,
+      duplicate_deletable_bytes: deletableDuplicates.reduce((sum, member) => sum + member.size, 0),
       photos: members.map((m) => ({
         id: m.photo_id,
         filename: m.filename,

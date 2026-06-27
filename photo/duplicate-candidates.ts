@@ -52,3 +52,13 @@ export function recommendDuplicatePhoto<T extends {
     return Date.parse(b.created_at ?? "") - Date.parse(a.created_at ?? "") || b.photo_id - a.photo_id;
   })[0]?.photo_id ?? null;
 }
+
+export function selectDeletableDuplicateMembers<T extends {
+  photo_id: number; user_id: number; external_path: string | null;
+}>(members: T[], keptPhotoId: number, ownerId: number): T[] {
+  return members.filter((member) =>
+    member.photo_id !== keptPhotoId
+    && member.user_id === ownerId
+    && member.external_path == null
+  );
+}

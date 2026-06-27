@@ -156,6 +156,7 @@ import {
 } from "./photo.filters";
 import { repairMojibake } from "./text-encoding";
 import { computePhotoTransformSuggestions } from "./photo-transforms.service";
+import { isHighConfidenceDuplicateGroup, recommendDuplicatePhoto, selectDeletableDuplicateMembers } from "./duplicate-candidates";
 // HEIC decoding moved out of this module — see heic-convert.service.ts.
 // `convertHeicToJpeg` is used locally below, so it must be imported (a
 // bare `export … from` re-export does NOT create a local binding and
@@ -3270,6 +3271,162 @@ export async function batchDeletePhotosLogic(
   }
 
   return { deleted, skipped };
+}
+
+export interface DeleteDuplicateGroupResult {
+  deleted: number[];
+  kept_photo_id: number;
+  freed_bytes: number;
+  file_cleanup_failed: number;
+}
+
+/**
+ * Permanently remove only the caller-owned redundant copies of a group that
+ * still passes the strict duplicate test at deletion time. The client does
+ * not choose the survivor: favorite, quality, resolution and recency are
+ * evaluated again inside the transaction so a stale/tampered request cannot
+ * delete the best copy.
+ */
+export async function deleteDuplicateGroupLogic(
+  userId: number,
+  groupId: number,
+): Promise<DeleteDuplicateGroupResult> {
+  const isPg = process.env.DB_TYPE?.toLowerCase() === "postgres";
+  type DuplicateRow = {
+    photo_id: number;
+    user_id: number;
+    filename: string;
+    external_path: string | null;
+    size: number;
+    similarity_score: number | null;
+    taken_at: string | null;
+    width: number | null;
+    height: number | null;
+    latitude: number | null;
+    longitude: number | null;
+    description: string | null;
+    keywords: string[];
+    curation: string | null;
+    ai_quality_score: number | null;
+    created_at: string | null;
+  };
+
+  const run = async (tx: typeof db | any) => {
+    if (isPg) {
+      // Serialize deletion with regroup/review changes. Validation below then
+      // observes one stable group until its rows are removed and committed.
+      await tx.execute(sql`
+        SELECT id FROM photo_groups
+        WHERE id = ${groupId} AND user_id = ${userId}
+        FOR UPDATE
+      `);
+    }
+    const group = await dbFirst<{ id: number }>(
+      tx.select({ id: photoGroups.id })
+        .from(photoGroups)
+        .where(and(
+          eq(photoGroups.id, groupId),
+          eq(photoGroups.user_id, userId),
+          isNull(photoGroups.reviewed_at),
+        ))
+        .limit(1),
+    );
+    if (!group) throw APIError.notFound("duplicate group not found");
+
+    const members = await dbAll<DuplicateRow>(
+      tx.select({
+        photo_id: photos.id,
+        user_id: photos.user_id,
+        filename: photos.filename,
+        external_path: photos.external_path,
+        size: photos.size,
+        similarity_score: photoGroupMembers.similarity_score,
+        taken_at: photos.taken_at,
+        width: photos.width,
+        height: photos.height,
+        latitude: photos.latitude,
+        longitude: photos.longitude,
+        description: photos.description,
+        keywords: photos.keywords,
+        curation: photoCuration.status,
+        ai_quality_score: photos.ai_quality_score,
+        created_at: photos.created_at,
+      })
+        .from(photoGroupMembers)
+        .innerJoin(photos, eq(photos.id, photoGroupMembers.photo_id))
+        .leftJoin(photoCuration, and(
+          eq(photoCuration.photo_id, photos.id),
+          eq(photoCuration.user_id, userId),
+        ))
+        .where(eq(photoGroupMembers.group_id, groupId)),
+    );
+
+    const memberIds = members.map((member) => member.photo_id);
+    const albumRows = memberIds.length === 0
+      ? []
+      : await dbAll<{ photo_id: number; album_id: number }>(
+          tx.select({ photo_id: albumPhotos.photo_id, album_id: albumPhotos.album_id })
+            .from(albumPhotos)
+            .where(inArray(albumPhotos.photo_id, memberIds)),
+        );
+    const albumsByPhotoId = new Map<number, number[]>();
+    for (const row of albumRows) {
+      const ids = albumsByPhotoId.get(row.photo_id);
+      if (ids) ids.push(row.album_id);
+      else albumsByPhotoId.set(row.photo_id, [row.album_id]);
+    }
+    for (const ids of albumsByPhotoId.values()) ids.sort((a, b) => a - b);
+
+    if (!isHighConfidenceDuplicateGroup(members, albumsByPhotoId)) {
+      throw APIError.failedPrecondition("group is no longer a high-confidence duplicate");
+    }
+    const keptPhotoId = recommendDuplicatePhoto(members);
+    if (keptPhotoId == null || !members.some((member) => member.photo_id === keptPhotoId)) {
+      throw APIError.failedPrecondition("no safe duplicate survivor could be selected");
+    }
+
+    // Linked library originals are read-only. Photos owned by somebody else
+    // are never deletion candidates, even when visible through a shared album.
+    const targets = selectDeletableDuplicateMembers(members, keptPhotoId, userId);
+    if (targets.length === 0) {
+      throw APIError.failedPrecondition("no owned duplicate copies can be permanently deleted");
+    }
+
+    const targetIds = targets.map((target) => target.photo_id);
+    await dbExec(tx.delete(photos).where(inArray(photos.id, targetIds)));
+    // Remove the reviewed snapshot as part of the same transaction. Cascades
+    // have already removed target membership; deleting the group prevents a
+    // stale one-photo card from surviving until the next regroup.
+    await dbExec(tx.delete(photoGroups).where(eq(photoGroups.id, groupId)));
+    return {
+      targets,
+      keptPhotoId,
+      freedBytes: targets.reduce((sum, target) => sum + target.size, 0),
+    };
+  };
+
+  const result = isPg ? await (db as any).transaction(run) : await run(db);
+
+  let fileCleanupFailed = 0;
+  await Promise.all(result.targets.map(async (target: DuplicateRow) => {
+    try {
+      await fs.promises.unlink(path.join(UPLOAD_DIR, target.filename));
+    } catch (err: any) {
+      if (err?.code !== "ENOENT") {
+        fileCleanupFailed++;
+        console.error(`[duplicate-delete] failed to delete ${target.filename}:`, err);
+      }
+    }
+    await deleteCachedThumbnails(target.filename);
+  }));
+
+  void scheduleRegroup(userId);
+  return {
+    deleted: result.targets.map((target: DuplicateRow) => target.photo_id),
+    kept_photo_id: result.keptPhotoId,
+    freed_bytes: result.freedBytes,
+    file_cleanup_failed: fileCleanupFailed,
+  };
 }
 
 export async function updatePhotoCurationLogic(

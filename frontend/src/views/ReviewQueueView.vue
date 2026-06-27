@@ -23,6 +23,7 @@ import Button from 'primevue/button'
 import Message from 'primevue/message'
 import SelectButton from 'primevue/selectbutton'
 import Dialog from 'primevue/dialog'
+import { useConfirm } from 'primevue/useconfirm'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
 import {
   getReviewQueue,
@@ -31,14 +32,19 @@ import {
   reviewPhotoGroup,
   acceptPeerConsensus,
   bulkAcceptHighConfidenceAiPicks,
+  deleteDuplicatePhotoGroup,
   type ReviewQueueGroup,
   type ReviewQueuePhoto,
   type ReviewQueueUserCalibration,
   type PhotoGroup,
 } from '../api/photos'
 import { getThumbUrl } from '../api/gallery'
+import { useAuthStore } from '../stores/auth'
 
 const router = useRouter()
+const confirm = useConfirm()
+const auth = useAuthStore()
+const canManageData = computed(() => auth.hasPermission('data.manage'))
 
 const PAGE_SIZE = 30
 const groups = ref<ReviewQueueGroup[]>([])
@@ -66,6 +72,7 @@ const bulkBusy = ref(false)
 const bulkConfirmOpen = ref(false)
 const bulkResult = ref<{ groups_accepted: number; hidden_count: number } | null>(null)
 const pendingAcceptIds = ref<Set<number>>(new Set())
+const duplicateDeleteResult = ref<{ deleted: number; freedBytes: number } | null>(null)
 
 // Average top-1 accuracy across both branches, weighted by pair count.
 // Surfaced on the bulk-accept disclaimer so the user sees the actual
@@ -93,6 +100,12 @@ function fmtDate(iso: string): string {
   } catch {
     return iso
   }
+}
+
+function fmtBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 const reachedEnd = computed(() => groups.value.length >= total.value)
@@ -152,6 +165,49 @@ async function onAccept(group: ReviewQueueGroup) {
     return
   }
   await runAcceptAction(group, () => acceptAiPick(group.id))
+}
+
+function askDeleteDuplicates(group: ReviewQueueGroup) {
+  if (!group.duplicate_candidate || group.duplicate_deletable_count < 1) return
+  const count = group.duplicate_deletable_count
+  confirm.require({
+    header: 'Duplikate endgültig löschen',
+    message: `${count} ${count === 1 ? 'eigenes Duplikat' : 'eigene Duplikate'} endgültig löschen und ${fmtBytes(group.duplicate_deletable_bytes)} freigeben? Das empfohlene beste Foto bleibt erhalten. Diese Aktion kann nicht rückgängig gemacht werden.`,
+    icon: 'pi pi-exclamation-triangle',
+    rejectLabel: 'Abbrechen',
+    acceptLabel: 'Endgültig löschen',
+    acceptClass: 'p-button-danger',
+    accept: () => void performDeleteDuplicates(group),
+  })
+}
+
+async function performDeleteDuplicates(group: ReviewQueueGroup) {
+  if (pendingAcceptIds.value.has(group.id)) return
+  const pending = new Set(pendingAcceptIds.value)
+  pending.add(group.id)
+  pendingAcceptIds.value = pending
+  loadError.value = ''
+  try {
+    const result = await deleteDuplicatePhotoGroup(group.id)
+    groups.value = groups.value.filter((item) => item.id !== group.id)
+    total.value = Math.max(0, total.value - 1)
+    if (group.ai_picked_confidence === 'high') {
+      highConfidenceTotal.value = Math.max(0, highConfidenceTotal.value - 1)
+    }
+    duplicateDeleteResult.value = {
+      deleted: result.deleted.length,
+      freedBytes: result.freed_bytes,
+    }
+    if (result.file_cleanup_failed > 0) {
+      loadError.value = `${result.file_cleanup_failed} Originaldatei(en) konnten nach dem Datenbank-Löschen nicht vom Speicher entfernt werden.`
+    }
+  } catch (err: any) {
+    loadError.value = err?.message ?? 'Duplikate konnten nicht sicher gelöscht werden.'
+  } finally {
+    const next = new Set(pendingAcceptIds.value)
+    next.delete(group.id)
+    pendingAcceptIds.value = next
+  }
 }
 
 /**
@@ -504,6 +560,16 @@ onMounted(() => {
     </Message>
 
     <Message
+      v-if="duplicateDeleteResult"
+      severity="success"
+      :closable="true"
+      @close="duplicateDeleteResult = null"
+    >
+      {{ duplicateDeleteResult.deleted }} {{ duplicateDeleteResult.deleted === 1 ? 'Duplikat' : 'Duplikate' }}
+      endgültig gelöscht, {{ fmtBytes(duplicateDeleteResult.freedBytes) }} freigegeben.
+    </Message>
+
+    <Message
       v-if="loadError"
       severity="error"
       :closable="true"
@@ -692,6 +758,15 @@ onMounted(() => {
             :label="group.duplicate_candidate ? 'Bestes Duplikat behalten' : 'KI-Pick übernehmen'"
             :disabled="pendingAcceptIds.has(group.id) || (!group.duplicate_candidate && group.ai_picked_photo_ids.length === 0)"
             @click="onAccept(group)"
+          />
+          <Button
+            v-if="canManageData && group.duplicate_candidate && group.duplicate_deletable_count > 0"
+            icon="pi pi-trash"
+            outlined
+            severity="danger"
+            :label="`${group.duplicate_deletable_count} endgültig löschen`"
+            :disabled="pendingAcceptIds.has(group.id)"
+            @click="askDeleteDuplicates(group)"
           />
           <Button
             icon="pi pi-images"

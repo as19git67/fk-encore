@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isHighConfidenceDuplicateGroup, recommendDuplicatePhoto, type DuplicateCandidateMember } from "./duplicate-candidates";
+import { isHighConfidenceDuplicateGroup, recommendDuplicatePhoto, selectDeletableDuplicateMembers, type DuplicateCandidateMember } from "./duplicate-candidates";
 
 const member = (id: number, overrides: Partial<DuplicateCandidateMember> = {}): DuplicateCandidateMember => ({
   photo_id: id, similarity_score: 0.999, taken_at: "2026-01-02T03:04:05Z",
@@ -22,5 +22,15 @@ describe("duplicate candidates", () => {
       { photo_id: 2, curation: "favorite", ai_quality_score: 0.5, width: 2000, height: 1500, created_at: "2025-01-01" },
     ];
     expect(recommendDuplicatePhoto(candidates)).toBe(2);
+  });
+
+  it("only deletes owned writable copies and never the survivor", () => {
+    const candidates = [
+      { photo_id: 1, user_id: 7, external_path: null },
+      { photo_id: 2, user_id: 7, external_path: null },
+      { photo_id: 3, user_id: 8, external_path: null },
+      { photo_id: 4, user_id: 7, external_path: "/readonly/photo.jpg" },
+    ];
+    expect(selectDeletableDuplicateMembers(candidates, 1, 7).map((item) => item.photo_id)).toEqual([2]);
   });
 });
