@@ -269,6 +269,12 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'finance.view' },
       },
       {
+        path: 'belegabgleich',
+        name: 'finance-receipt-enrichment',
+        component: () => import('../views/finance/ReceiptEnrichmentView.vue'),
+        meta: { permission: 'finance.view' },
+      },
+      {
         path: 'admin/zugriff',
         name: 'finance-admin-access',
         component: () => import('../views/finance/AccountAssignmentView.vue'),
@@ -287,6 +293,7 @@ export const modules: ModuleConfig[] = [
       { label: 'Bankkontakte', icon: 'pi pi-building', routeName: 'finance-bankcontacts', permission: 'finance.accounts.manage' },
       { label: 'Analyse', icon: 'pi pi-chart-bar', routeName: 'finance-analysis', permission: 'finance.view' },
       { label: 'Anomalien', icon: 'pi pi-exclamation-triangle', routeName: 'finance-anomalies', permission: 'finance.view' },
+      { label: 'Belegabgleich', icon: 'pi pi-receipt', routeName: 'finance-receipt-enrichment', permission: 'finance.view' },
       { label: 'Konto-Zugriff', icon: 'pi pi-key', routeName: 'finance-admin-access', permission: 'finance.admin' },
     ],
   },

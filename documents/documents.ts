@@ -470,6 +470,66 @@ export const uploadReceiptCapture = api.raw(
   },
 );
 
+// ─── Fast receipt OCR extraction via dedicated service ───────────────────────
+
+export const extractReceiptOcr = api.raw(
+  { expose: true, method: "POST", path: "/documents/receipt-ocr", auth: true, bodyLimit: null },
+  async (req, res) => {
+    try {
+      checkModule();
+    } catch {
+      res.statusCode = 403;
+      res.end(JSON.stringify({ error: "Forbidden" }));
+      return;
+    }
+
+    const authData = getAuthData()!;
+    try {
+      requirePermission(authData, "documents.upload");
+    } catch {
+      res.statusCode = 403;
+      res.end(JSON.stringify({ error: "Missing permission: documents.upload" }));
+      return;
+    }
+
+    try {
+      // Consume the uploaded image FIRST, before any other await. Deferring
+      // the raw body read behind another async operation (the dynamic import
+      // or the health probe below) leaves the request body stream unread; the
+      // request then hangs indefinitely and never reaches extractReceipt — so
+      // nothing ever shows up in the receipt-ocr-service log. The sibling
+      // /documents/receipt-capture endpoint reads the body first for exactly
+      // this reason; keep the two in sync.
+      const raw = await readRequestBuffer(req);
+      const fileName = (req.headers["x-file-name"] as string) || "receipt.jpg";
+      const mimeType = ((req.headers["content-type"] as string) || "image/jpeg")
+        .toLowerCase()
+        .split(";")[0]
+        .trim();
+
+      const { extractReceipt, isReceiptOcrHealthy } = await import("./receipt-ocr-client");
+
+      const healthy = await isReceiptOcrHealthy();
+      if (!healthy) {
+        res.statusCode = 503;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "receipt-ocr-service unavailable" }));
+        return;
+      }
+
+      const result = await extractReceipt(Buffer.from(raw), fileName, mimeType);
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify(result));
+    } catch (err: any) {
+      console.error("[documents] receipt-ocr extraction error:", err);
+      res.statusCode = 502;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: err?.message ?? "receipt-ocr-service error" }));
+    }
+  },
+);
+
 async function streamAndStoreDocument(
   req: NodeJS.ReadableStream,
   originalName: string,

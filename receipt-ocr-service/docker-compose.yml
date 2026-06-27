@@ -1,0 +1,21 @@
+services:
+  receipt-ocr-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: receipt-ocr-service
+    restart: unless-stopped
+    environment:
+      MODELS_DIR: /models
+      LLM_CTX: 4096
+      OCR_LANG: latin
+      LOG_LEVEL: INFO
+    # Host port 8003 — distinct from the llm-service so both can run side by
+    # side locally without colliding.
+    ports:
+      - "8003:8000"
+    volumes:
+      - receipt_ocr_models:/models
+
+volumes:
+  receipt_ocr_models:

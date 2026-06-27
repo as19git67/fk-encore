@@ -1,0 +1,49 @@
+"""Pydantic schema validation — no model load required."""
+
+from __future__ import annotations
+
+import os
+import sys
+
+import pytest
+from pydantic import ValidationError
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from main import ReceiptResult  # noqa: E402
+
+
+class TestReceiptResult:
+    def test_defaults(self):
+        r = ReceiptResult()
+        assert r.amount is None
+        assert r.date is None
+        assert r.store is None
+        assert r.currency == "EUR"
+        assert r.items == []
+        assert r.raw_text == ""
+        assert r.ocr_confidence == 0.0
+        assert r.processing_ms == 0
+
+    def test_full_result(self):
+        r = ReceiptResult(
+            amount=12.99,
+            date="2025-03-15",
+            store="REWE",
+            currency="EUR",
+            items=[{"name": "Milch", "amount": 1.29}],
+            raw_text="REWE\nMilch 1,29\nGesamt 12,99",
+            ocr_confidence=0.95,
+            processing_ms=3500,
+        )
+        assert r.amount == 12.99
+        assert r.store == "REWE"
+        assert len(r.items) == 1
+
+    def test_none_amount(self):
+        r = ReceiptResult(amount=None)
+        assert r.amount is None
+
+    def test_zero_confidence(self):
+        r = ReceiptResult(ocr_confidence=0.0)
+        assert r.ocr_confidence == 0.0
