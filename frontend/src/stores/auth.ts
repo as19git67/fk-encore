@@ -7,7 +7,7 @@ import { passkeyAuthOptions, passkeyAuthVerify } from '../api/passkeys'
 import { realtimeBus, type RealtimeChannel } from '../composables/useRealtime'
 import { ensureFreshToken } from '../api/client'
 
-const REALTIME_CHANNELS: RealtimeChannel[] = ['documents', 'photos', 'albums', 'feed', 'scan-queue']
+const REALTIME_CHANNELS: RealtimeChannel[] = ['documents', 'photos', 'albums', 'feed', 'finance', 'scan-queue']
 
 function connectRealtime() {
   realtimeBus.connect({
