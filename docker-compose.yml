@@ -241,6 +241,10 @@ services:
     user: "568:568"
     # Pin to P-cores — see DEPLOY_ML_CPUSET in docker-compose.env.example.
     cpuset: "${DEPLOY_ML_CPUSET:-0-11}"
+    # Background/batch weight: under contention on the shared cpuset the CFS
+    # scheduler favours the interactive receipt_ocr_service over this one. See
+    # DEPLOY_*_CPU_SHARES in docker-compose.env.example.
+    cpu_shares: ${DEPLOY_LLM_CPU_SHARES:-512}
     labels:
       com.centurylinklabs.watchtower.scope: ${DEPLOY_WATCHTOWER_SCOPE:-fkprod}
     depends_on:
@@ -282,6 +286,11 @@ services:
     restart: unless-stopped
     user: "568:568"
     cpuset: "${DEPLOY_ML_CPUSET:-0-11}"
+    # Interactive weight: a receipt scan is bursty and latency-sensitive, so
+    # give it a high CPU weight to displace the background llm_service on the
+    # shared cpuset while it runs. See DEPLOY_*_CPU_SHARES in
+    # docker-compose.env.example.
+    cpu_shares: ${DEPLOY_RECEIPT_OCR_CPU_SHARES:-4096}
     labels:
       com.centurylinklabs.watchtower.scope: ${DEPLOY_WATCHTOWER_SCOPE:-fkprod}
     depends_on:
