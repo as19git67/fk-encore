@@ -272,6 +272,12 @@ export const categoryTaxonomy: CategorySeed[] = [
     ],
   },
   {
+    slug: "belege",
+    name: "Belege",
+    icon: "pi-receipt",
+    hint: "Kassenbons / Kaufbelege / Quittungen aus dem Einzelhandel (Supermarkt, Drogerie, Tankstelle, Restaurant), typischerweise per Foto erfasst und an eine Bargeldbuchung gehängt. NICHT für förmliche Rechnungen mit Briefkopf (→ finanzen-rechnungen) oder Arzt-/Handwerkerrechnungen.",
+  },
+  {
     slug: "sonstiges",
     name: "Sonstiges",
     icon: "pi-file",

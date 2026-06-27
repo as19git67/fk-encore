@@ -9,6 +9,7 @@ import {
   financeAccountType,
   financeBankcontact,
   financeDepotTransaction,
+  financeTransaction,
   users,
 } from "../db/schema";
 import {
@@ -29,6 +30,7 @@ async function ensureUser(id: number): Promise<void> {
 
 beforeEach(async () => {
   await db.delete(financeDepotTransaction);
+  await db.delete(financeTransaction);
   await db.delete(financeAccountAccess);
   await db.delete(financeAccount);
   await db.delete(financeBankcontact);

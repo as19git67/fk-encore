@@ -1,9 +1,10 @@
 import { api, APIError } from 'encore.dev/api'
 import { getAuthData } from '~encore/auth'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull } from 'drizzle-orm'
 import db from '../db/database'
-import { financeAccountAccess, financeDocumentMatchSuggestion, financeTransaction } from '../db/schema'
-import { decideSuggestion, createSuggestionsForTransaction } from './document-match.service'
+import { documents, financeAccountAccess, financeDocumentMatchSuggestion, financeTransaction } from '../db/schema'
+import { decideSuggestion, createSuggestionsForTransaction, computeReceiptEnrichment } from './document-match.service'
+import { extractDocumentAmount } from './document-matcher'
 import { requirePermission } from '../user/auth-handler'
 import { loadVisibleDocument } from '../documents/visibility'
 
@@ -134,6 +135,88 @@ export const unlinkDocument = api({ expose: true, method: 'POST', path: '/financ
   await db.execute(`DELETE FROM finance_transaction_document WHERE transaction_id = ${transaction_id} AND document_id = ${document_id}`)
   return { ok: true }
 })
+
+interface ReceiptEnrichmentItem {
+  transaction_id: number
+  booking_date: string
+  amount: string
+  counterparty: string | null
+  document_id: number
+  doc_sender: string | null
+  doc_date: string | null
+  doc_amount: number | null
+  doc_status: string
+}
+
+export const pendingReceiptEnrichments = api(
+  { expose: true, method: 'GET', path: '/finance/receipt-enrichments/pending', auth: true },
+  async (): Promise<{ items: ReceiptEnrichmentItem[] }> => {
+    const auth = getAuthData()!
+    requirePermission(auth, 'finance.view')
+    const rows = await db
+      .select({
+        transaction_id: financeTransaction.id,
+        booking_date: financeTransaction.booking_date,
+        amount: financeTransaction.amount,
+        counterparty: financeTransaction.counterparty,
+        document_id: documents.id,
+        doc_sender: documents.sender,
+        doc_date: documents.doc_date,
+        doc_text: documents.extracted_text,
+        doc_status: documents.status,
+      })
+      .from(financeTransaction)
+      .innerJoin(documents, eq(documents.id, financeTransaction.receipt_document_id))
+      .where(isNotNull(financeTransaction.receipt_document_id))
+      .limit(100)
+    const readableIds = await readableTransactionIds(Number(auth.userID), rows.map(r => r.transaction_id))
+    const readableSet = new Set(readableIds)
+    const items = rows
+      .filter(r => readableSet.has(r.transaction_id))
+      .map(r => {
+        const docAmount = extractDocumentAmount(r.doc_text)
+        const diff = computeReceiptEnrichment(r, { sender: r.doc_sender, doc_date: r.doc_date, amount: docAmount })
+        return {
+          item: {
+            transaction_id: r.transaction_id,
+            booking_date: r.booking_date,
+            amount: r.amount,
+            counterparty: r.counterparty,
+            document_id: r.document_id,
+            doc_sender: r.doc_sender,
+            doc_date: r.doc_date,
+            doc_amount: docAmount,
+            doc_status: r.doc_status,
+          },
+          // Still-processing receipts are shown so the user sees progress;
+          // ready ones only when they actually carry something to review.
+          show: r.doc_status !== 'ready' || Object.keys(diff).length > 0,
+        }
+      })
+      .filter(r => r.show)
+      .map(r => r.item)
+    return { items }
+  },
+)
+
+/**
+ * Stop offering enrichment suggestions for a transaction by clearing its
+ * `receipt_document_id` pointer. The actual document attachment
+ * (finance_transaction_document) is left untouched — the receipt stays
+ * linked, only the "needs review" flag goes away.
+ */
+export const dismissReceiptEnrichment = api(
+  { expose: true, method: 'POST', path: '/finance/receipt-enrichments/:transactionId/dismiss', auth: true },
+  async ({ transactionId }: { transactionId: number }): Promise<OkResponse> => {
+    const auth = getAuthData()!
+    requirePermission(auth, 'finance.view')
+    if (!(await readableTransactionIds(Number(auth.userID), [transactionId])).length) {
+      throw APIError.permissionDenied('Keine Berechtigung für diese Buchung')
+    }
+    await db.update(financeTransaction).set({ receipt_document_id: null }).where(eq(financeTransaction.id, transactionId))
+    return { ok: true }
+  },
+)
 
 export const expireDocumentSuggestions = api({ expose: true, method: 'POST', path: '/finance/document-matches/expire', auth: true }, async (): Promise<OkResponse> => {
   const auth = getAuthData()!; requirePermission(auth, 'finance.admin')

@@ -40,12 +40,13 @@ services:
     # chown files dropped later by other host users — for the finance
     # dropbox the operator needs to land files as 568:568 (or g+r with
     # the apps group set as primary on the dataset).
-    command: ["sh", "-c", "chown -R 568:568 /mnt/documents /mnt/documents-inbox /mnt/models /mnt/embedding-models /mnt/finance-import /mnt/finance-export /mnt/backup /mnt/geo"]
+    command: ["sh", "-c", "chown -R 568:568 /mnt/documents /mnt/documents-inbox /mnt/models /mnt/embedding-models /mnt/receipt-ocr-models /mnt/finance-import /mnt/finance-export /mnt/backup /mnt/geo"]
     volumes:
       - documents:/mnt/documents
       - documents_inbox:/mnt/documents-inbox
       - llm_models:/mnt/models
       - embedding_models:/mnt/embedding-models
+      - receipt_ocr_models:/mnt/receipt-ocr-models
       - finance_import:/mnt/finance-import
       - finance_export:/mnt/finance-export
       - backup:/mnt/backup
@@ -111,6 +112,7 @@ services:
       INSIGHTFACE_SERVICE_URL: http://insightface:8000
       EMBEDDING_SERVICE_URL: http://embedding_service:8000
       LLM_SERVICE_URL: http://llm_service:8000
+      RECEIPT_OCR_SERVICE_URL: http://receipt_ocr_service:8000
       # ENABLE_LANDMARKS retired (Epic #383) — use ENABLE_POI_DETECTION instead.
       ENABLE_POI_DETECTION: ${ENABLE_POI_DETECTION:-false}
       # Geo service (reverse geocoding + POI lookup). Talks to the geo
@@ -239,6 +241,10 @@ services:
     user: "568:568"
     # Pin to P-cores — see DEPLOY_ML_CPUSET in docker-compose.env.example.
     cpuset: "${DEPLOY_ML_CPUSET:-0-11}"
+    # Background/batch weight: under contention on the shared cpuset the CFS
+    # scheduler favours the interactive receipt_ocr_service over this one. See
+    # DEPLOY_*_CPU_SHARES in docker-compose.env.example.
+    cpu_shares: ${DEPLOY_LLM_CPU_SHARES:-512}
     labels:
       com.centurylinklabs.watchtower.scope: ${DEPLOY_WATCHTOWER_SCOPE:-fkprod}
     depends_on:
@@ -272,6 +278,43 @@ services:
       # Aligned with embedding_service to keep the cold-start envelope
       # consistent.
       start_period: ${DEPLOY_LLM_START_PERIOD:-600s}
+
+  # ── Receipt OCR Service (PaddleOCR + small LLM for fast receipt extraction) ─
+  receipt_ocr_service:
+    image: ghcr.io/as19git67/fk-encore-receipt-ocr:${DEPLOY_IMAGE_TAG:-latest}
+    container_name: fk-encore-receipt-ocr${DEPLOY_NAME_SUFFIX:-}
+    restart: unless-stopped
+    user: "568:568"
+    cpuset: "${DEPLOY_ML_CPUSET:-0-11}"
+    # Interactive weight: a receipt scan is bursty and latency-sensitive, so
+    # give it a high CPU weight to displace the background llm_service on the
+    # shared cpuset while it runs. See DEPLOY_*_CPU_SHARES in
+    # docker-compose.env.example.
+    cpu_shares: ${DEPLOY_RECEIPT_OCR_CPU_SHARES:-4096}
+    labels:
+      com.centurylinklabs.watchtower.scope: ${DEPLOY_WATCHTOWER_SCOPE:-fkprod}
+    depends_on:
+      chown-init:
+        condition: service_completed_successfully
+    environment:
+      MODELS_DIR: /models
+      LLM_MODEL_PATH: ${RECEIPT_OCR_LLM_MODEL_PATH:-/models/qwen2.5-3b-instruct-q4_k_m.gguf}
+      LLM_MODEL_URL: ${RECEIPT_OCR_LLM_MODEL_URL:-https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf}
+      LLM_CTX: ${RECEIPT_OCR_LLM_CTX:-4096}
+      LLM_GPU_LAYERS: ${RECEIPT_OCR_LLM_GPU_LAYERS:-0}
+      LLM_THREADS: ${RECEIPT_OCR_LLM_THREADS:-}
+      OCR_LANG: ${RECEIPT_OCR_LANG:-latin}
+      OCR_AUTOCROP: ${RECEIPT_OCR_AUTOCROP:-1}
+      REGEX_ONLY: ${RECEIPT_OCR_REGEX_ONLY:-0}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - receipt_ocr_models:/models
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: ${DEPLOY_RECEIPT_OCR_START_PERIOD:-600s}
 
   # ── PostgreSQL (shared instance for both app and embedding service) ─────────
   postgres:
@@ -369,6 +412,7 @@ services:
       fk-encore-insightface${DEPLOY_NAME_SUFFIX:-}
       fk-encore-embedding${DEPLOY_NAME_SUFFIX:-}
       fk-encore-llm${DEPLOY_NAME_SUFFIX:-}
+      fk-encore-receipt-ocr${DEPLOY_NAME_SUFFIX:-}
       fk-encore-geo${DEPLOY_NAME_SUFFIX:-}
     ports:
       - "${DEPLOY_HOST_PORT_WATCHTOWER:-9000}:8080"
@@ -448,6 +492,12 @@ volumes:
       type: none
       o: bind
       device: ${DEPLOY_DATA_ROOT:-./data}/geo-db
+  receipt_ocr_models:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DEPLOY_DATA_ROOT:-./data}/receipt-ocr-models
   geo_data:
     driver: local
     driver_opts:

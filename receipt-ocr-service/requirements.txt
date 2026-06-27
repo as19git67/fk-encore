@@ -1,0 +1,24 @@
+# Web framework
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+pydantic==2.9.2
+python-multipart==0.0.9
+
+# OCR engine — PaddleOCR with CPU-only PaddlePaddle
+paddlepaddle==3.0.0
+paddleocr==2.9.1
+# PaddlePaddle imports setuptools at runtime (paddle.utils.cpp_extension),
+# but python:3.12-slim no longer bundles it — pin it explicitly so it lands
+# in the /install prefix that gets copied into the runtime image.
+setuptools==75.6.0
+
+# Image preprocessing
+opencv-python-headless==4.10.0.84
+Pillow==10.4.0
+numpy>=1.24,<2
+
+# LLM runtime for structured extraction (CPU, same as llm-service)
+llama-cpp-python==0.3.2
+
+# HuggingFace download helper used by download_model.sh
+huggingface_hub==0.26.2

@@ -87,7 +87,11 @@ class DocumentScanWorker {
     try {
       const aiModel = AI_MODEL_MAP[this.service];
       if (aiModel) {
-        await withAiSlot(aiModel, 2, `documents:${this.service}`, () => this.runJob(job));
+        const aiPriority = Math.max(1, job.priority ?? 2);
+        const requester = job.priority === 0
+          ? `documents:${this.service}:receipt`
+          : `documents:${this.service}`;
+        await withAiSlot(aiModel, aiPriority, requester, () => this.runJob(job));
       } else {
         await this.runJob(job);
       }

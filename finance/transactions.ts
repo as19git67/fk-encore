@@ -36,6 +36,7 @@ import {
   financeTagBlocklist,
   financeTagTransaction,
   financeTransaction,
+  financeTransactionDocument,
 } from "../db/schema";
 import { enqueueTagSuggestion } from "./tag-queue";
 import { triggerTagWorker } from "./tag-worker";
@@ -435,6 +436,7 @@ interface CreateParams {
   counterparty?: string;
   counterparty_iban?: string;
   tags?: string[]; // user tags
+  receipt_document_id?: number;
 }
 
 export const createTransaction = api(
@@ -514,6 +516,7 @@ export const createTransaction = api(
           purpose: p.purpose?.trim() || null,
           counterparty: p.counterparty?.trim() || null,
           counterparty_iban: p.counterparty_iban?.trim() || null,
+          receipt_document_id: p.receipt_document_id ?? null,
           dedupe_hash: dedupeHash,
         })
         .returning();
@@ -530,6 +533,13 @@ export const createTransaction = api(
         );
       }
       throw err;
+    }
+
+    if (p.receipt_document_id) {
+      await db
+        .insert(financeTransactionDocument)
+        .values({ transaction_id: row.id, document_id: p.receipt_document_id })
+        .onConflictDoNothing();
     }
 
     if (p.tags && p.tags.length > 0) {
