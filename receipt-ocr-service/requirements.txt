@@ -7,6 +7,10 @@ python-multipart==0.0.9
 # OCR engine — PaddleOCR with CPU-only PaddlePaddle
 paddlepaddle==3.0.0
 paddleocr==2.9.1
+# PaddlePaddle imports setuptools at runtime (paddle.utils.cpp_extension),
+# but python:3.12-slim no longer bundles it — pin it explicitly so it lands
+# in the /install prefix that gets copied into the runtime image.
+setuptools==75.6.0
 
 # Image preprocessing
 opencv-python-headless==4.10.0.84
