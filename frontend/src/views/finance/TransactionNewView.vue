@@ -13,7 +13,7 @@ import { useAccountsStore } from '../../stores/finance/accounts'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useTagsStore } from '../../stores/finance/tags'
 import { linkDocumentsToTransactions, recentCashRecipients, searchRecipients, type RecentRecipient } from '../../api/finance'
-import { deleteDocument, searchDocuments, uploadReceiptCapture, type DocumentSummary } from '../../api/documents'
+import { deleteDocument, extractReceiptOcr, searchDocuments, uploadReceiptCapture, type DocumentSummary } from '../../api/documents'
 import { parseLocalDate } from '../../utils/dateFormat'
 import { useModuleBack } from '../../composables/useModuleBack'
 import { queuePendingTransaction } from '../../utils/offlineQueue'
@@ -206,30 +206,10 @@ async function onReceiptPicked(event: Event) {
   receiptUploading.value = true
   receiptStatus.value = 'Beleg wird erkannt …'
   try {
-    const { recognizeReceipt } = await import('../../utils/receiptOcr')
-    const result = await recognizeReceipt(file)
-    const applied = applyOcrResult(result)
-    receiptProcessedBlob.value = result.processedImage
-
     if (isOnline.value) {
-      receiptStatus.value = 'Beleg wird hochgeladen …'
-      const processedFile = new File([result.processedImage], file.name || 'receipt.jpg', {
-        type: result.processedImage.type,
-      })
-      const uploaded = await uploadReceiptCapture(processedFile)
-      receiptDocumentId.value = uploaded.id
-      selectDocument(uploaded)
-    }
-
-    receiptStatus.value = null
-    if (!isOnline.value) {
-      receiptSuggestion.value = applied.length > 0
-        ? `Aus Beleg übernommen: ${applied.join(', ')}. Beleg wird hochgeladen, sobald du online bist.`
-        : 'Beleg wird hochgeladen, sobald du online bist.'
+      await onReceiptPickedOnline(file)
     } else {
-      receiptSuggestion.value = applied.length > 0
-        ? `Aus Beleg übernommen: ${applied.join(', ')}. Empfänger und Kategorie werden im Hintergrund ergänzt.`
-        : 'Beleg wurde erkannt, aber es gab keine neuen Formularwerte. Server-Analyse läuft im Hintergrund.'
+      await onReceiptPickedOffline(file)
     }
   } catch (err) {
     receiptStatus.value = null
@@ -237,6 +217,51 @@ async function onReceiptPicked(event: Event) {
   } finally {
     receiptUploading.value = false
   }
+}
+
+async function onReceiptPickedOnline(file: File) {
+  // Run server OCR and upload in parallel for speed
+  const uploadPromise = uploadReceiptCapture(file)
+
+  let applied: string[] = []
+  try {
+    receiptStatus.value = 'Beleg wird erkannt (Server-OCR) …'
+    const result = await extractReceiptOcr(file)
+    applied = applyOcrResult(result)
+    if (result.store && !counterparty.value) {
+      counterparty.value = result.store
+      applied.push('Empfänger')
+    }
+  } catch {
+    // Server OCR unavailable — fall back to on-device OCR
+    receiptStatus.value = 'Server-OCR nicht verfügbar, nutze On-Device-Erkennung …'
+    const { recognizeReceipt } = await import('../../utils/receiptOcr')
+    const result = await recognizeReceipt(file)
+    applied = applyOcrResult(result)
+    receiptProcessedBlob.value = result.processedImage
+  }
+
+  receiptStatus.value = 'Beleg wird hochgeladen …'
+  const uploaded = await uploadPromise
+  receiptDocumentId.value = uploaded.id
+  selectDocument(uploaded)
+
+  receiptStatus.value = null
+  receiptSuggestion.value = applied.length > 0
+    ? `Aus Beleg übernommen: ${applied.join(', ')}. Empfänger und Kategorie werden im Hintergrund ergänzt.`
+    : 'Beleg wurde erkannt, aber es gab keine neuen Formularwerte. Server-Analyse läuft im Hintergrund.'
+}
+
+async function onReceiptPickedOffline(file: File) {
+  const { recognizeReceipt } = await import('../../utils/receiptOcr')
+  const result = await recognizeReceipt(file)
+  const applied = applyOcrResult(result)
+  receiptProcessedBlob.value = result.processedImage
+
+  receiptStatus.value = null
+  receiptSuggestion.value = applied.length > 0
+    ? `Aus Beleg übernommen: ${applied.join(', ')}. Beleg wird hochgeladen, sobald du online bist.`
+    : 'Beleg wird hochgeladen, sobald du online bist.'
 }
 
 function applyOcrResult(result: { amount: number | null; date: string | null }): string[] {

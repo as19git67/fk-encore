@@ -1,0 +1,19 @@
+services:
+  receipt-ocr-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: receipt-ocr-service
+    restart: unless-stopped
+    environment:
+      MODELS_DIR: /models
+      LLM_CTX: 4096
+      OCR_LANG: latin
+      LOG_LEVEL: INFO
+    ports:
+      - "8002:8000"
+    volumes:
+      - receipt_ocr_models:/models
+
+volumes:
+  receipt_ocr_models:

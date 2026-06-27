@@ -244,6 +244,29 @@ export function uploadReceiptCapture(file: File, signal?: AbortSignal) {
   })
 }
 
+export interface ReceiptOcrResult {
+  amount: number | null
+  date: string | null
+  store: string | null
+  currency: string
+  items: { name: string; amount: number }[]
+  raw_text: string
+  ocr_confidence: number
+  processing_ms: number
+}
+
+export function extractReceiptOcr(file: File, signal?: AbortSignal) {
+  return apiFetch<ReceiptOcrResult>('/documents/receipt-ocr', {
+    method: 'POST',
+    body: file,
+    signal,
+    headers: {
+      'Content-Type': receiptContentType(file),
+      'X-File-Name': encodeURIComponent(file.name || 'receipt.jpg'),
+    },
+  })
+}
+
 export function getDocumentReceiptSuggestion(id: number) {
   return apiFetch<DocumentReceiptSuggestion>(`/documents/${id}/receipt-suggestion`)
 }
