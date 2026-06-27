@@ -56,6 +56,8 @@ LLM_GPU_LAYERS = _env_int("LLM_GPU_LAYERS", 0)
 
 OCR_LANG = os.environ.get("OCR_LANG", "latin")
 OCR_MAX_LONG_SIDE = _env_int("OCR_MAX_LONG_SIDE", 2000)
+# Set to "0" to disable contour-based auto-crop + perspective correction.
+OCR_AUTOCROP = os.environ.get("OCR_AUTOCROP", "1") == "1"
 # Set to "1" to disable the LLM step and use regex-only extraction
 REGEX_ONLY = os.environ.get("REGEX_ONLY", "0") == "1"
 
@@ -163,6 +165,60 @@ async def _run_blocking(
 
 # ─── Image preprocessing ────────────────────────────────────────────────────
 
+def _order_quad(pts: np.ndarray) -> np.ndarray:
+    """Order four corner points as top-left, top-right, bottom-right, bottom-left."""
+    rect = np.zeros((4, 2), dtype=np.float32)
+    s = pts.sum(axis=1)
+    rect[0] = pts[np.argmin(s)]   # top-left: smallest x+y
+    rect[2] = pts[np.argmax(s)]   # bottom-right: largest x+y
+    d = np.diff(pts, axis=1).ravel()
+    rect[1] = pts[np.argmin(d)]   # top-right: smallest y-x
+    rect[3] = pts[np.argmax(d)]   # bottom-left: largest y-x
+    return rect
+
+
+def _find_document_quad(gray: np.ndarray) -> np.ndarray | None:
+    """Find the dominant rectangular region (receipt sitting on a contrasting
+    background). Returns its 4 corners as a (4,2) float32 array, or None when no
+    confident quadrilateral covering a meaningful share of the frame is found —
+    in which case the caller keeps the full frame."""
+    h, w = gray.shape[:2]
+    img_area = float(h * w)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges = cv2.Canny(blurred, 50, 150)
+    # Close small gaps so the receipt outline forms one continuous contour.
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
+    closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
+
+    contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    for cnt in sorted(contours, key=cv2.contourArea, reverse=True)[:5]:
+        area = cv2.contourArea(cnt)
+        if area < 0.20 * img_area:
+            # Largest remaining contour is too small to be the receipt — stop.
+            break
+        peri = cv2.arcLength(cnt, True)
+        approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
+        if len(approx) == 4 and cv2.isContourConvex(approx):
+            return approx.reshape(4, 2).astype(np.float32)
+    return None
+
+
+def _four_point_warp(img: np.ndarray, quad: np.ndarray) -> np.ndarray:
+    """Deskew + crop the image to the given quadrilateral via a perspective warp."""
+    rect = _order_quad(quad)
+    tl, tr, br, bl = rect
+    max_w = int(max(np.linalg.norm(br - bl), np.linalg.norm(tr - tl)))
+    max_h = int(max(np.linalg.norm(tr - br), np.linalg.norm(tl - bl)))
+    if max_w < 10 or max_h < 10:
+        return img
+    dst = np.array(
+        [[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]],
+        dtype=np.float32,
+    )
+    mat = cv2.getPerspectiveTransform(rect, dst)
+    return cv2.warpPerspective(img, mat, (max_w, max_h))
+
+
 def preprocess_image(img_bytes: bytes) -> np.ndarray:
     """Decode, resize, denoise, and prepare receipt image for OCR."""
     arr = np.frombuffer(img_bytes, dtype=np.uint8)
@@ -175,6 +231,14 @@ def preprocess_image(img_bytes: bytes) -> np.ndarray:
     if max_side > OCR_MAX_LONG_SIDE:
         scale = OCR_MAX_LONG_SIDE / max_side
         img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+
+    # Auto-crop + perspective-correct the receipt when it forms a detectable
+    # quadrilateral on a contrasting background. No-op (full frame kept) when no
+    # confident 4-corner contour is found, so a full-frame receipt is unaffected.
+    if OCR_AUTOCROP:
+        quad = _find_document_quad(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
+        if quad is not None:
+            img = _four_point_warp(img, quad)
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
