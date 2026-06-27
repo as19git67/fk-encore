@@ -13,7 +13,7 @@ import { useAccountsStore } from '../../stores/finance/accounts'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useTagsStore } from '../../stores/finance/tags'
 import { linkDocumentsToTransactions, recentCashRecipients, searchRecipients, type RecentRecipient } from '../../api/finance'
-import { deleteDocument, extractReceiptOcr, searchDocuments, uploadReceiptCapture, type DocumentSummary } from '../../api/documents'
+import { deleteDocument, extractReceiptOcr, searchDocuments, updateDocument, uploadReceiptCapture, type DocumentSummary, type ReceiptOcrResult } from '../../api/documents'
 import { parseLocalDate } from '../../utils/dateFormat'
 import { useModuleBack } from '../../composables/useModuleBack'
 
@@ -197,22 +197,30 @@ async function onReceiptPicked(event: Event) {
     // Run server OCR and upload in parallel for speed
     const uploadPromise = uploadReceiptCapture(file)
 
-    let applied: string[] = []
     const result = await extractReceiptOcr(file)
-    applied = applyOcrResult(result)
-    if (result.store && !counterparty.value) {
-      counterparty.value = result.store
-      applied.push('Empfänger')
-    }
+    const applied = applyOcrResult(result)
 
     receiptStatus.value = 'Beleg wird hochgeladen …'
     const uploaded = await uploadPromise
     receiptDocumentId.value = uploaded.id
     selectDocument(uploaded)
 
+    // Rename the stored receipt to "YYYY-MM-DD_Store", set sender/date and
+    // file it under the dedicated "Belege" category. Best-effort and fire-
+    // and-forget: it must never block the form. Setting these attributes pins
+    // the document so the background classifier won't refile the receipt.
+    void updateDocument(uploaded.id, {
+      title: buildReceiptTitle(result.date, result.store),
+      sender: result.store?.trim() || null,
+      doc_date: isIsoDate(result.date) ? result.date : null,
+      category_slug: 'belege',
+    }).catch((err) => {
+      console.warn('[receipt] document rename/categorize failed:', err)
+    })
+
     receiptStatus.value = null
     receiptSuggestion.value = applied.length > 0
-      ? `Aus Beleg übernommen: ${applied.join(', ')}. Empfänger und Kategorie werden im Hintergrund ergänzt.`
+      ? `Aus Beleg übernommen: ${applied.join(', ')}. Beleg wird als „${buildReceiptTitle(result.date, result.store)}" abgelegt.`
       : 'Beleg wurde erkannt, aber es gab keine neuen Formularwerte. Server-Analyse läuft im Hintergrund.'
   } catch (err) {
     receiptStatus.value = null
@@ -222,7 +230,7 @@ async function onReceiptPicked(event: Event) {
   }
 }
 
-function applyOcrResult(result: { amount: number | null; date: string | null }): string[] {
+function applyOcrResult(result: ReceiptOcrResult): string[] {
   const applied: string[] = []
   if (result.amount != null && (!amount.value || amount.value <= 0)) {
     amount.value = result.amount
@@ -236,7 +244,59 @@ function applyOcrResult(result: { amount: number | null; date: string | null }):
       applied.push('Datum')
     }
   }
+  if (result.store && !counterparty.value) {
+    // Reuse a known recipient (canonical spelling + its saved tags) when the
+    // recognized store matches one; otherwise take the raw store name.
+    const match = recentRecipients.value.find(
+      (r) => r.counterparty.toLowerCase() === result.store!.trim().toLowerCase(),
+    )
+    if (match) {
+      counterparty.value = match.counterparty
+      if (match.tags?.length && tags.value.length === 0) {
+        tags.value = [...match.tags]
+        applied.push('Tags')
+      }
+    } else {
+      counterparty.value = result.store
+    }
+    applied.push('Empfänger')
+  }
+  // Line items → note (only when the user hasn't typed one yet).
+  if (result.items?.length && !purpose.value.trim()) {
+    const note = formatItemsNote(result.items)
+    if (note) {
+      purpose.value = note
+      applied.push('Notiz')
+    }
+  }
   return applied
+}
+
+function isIsoDate(value: string | null): value is string {
+  return !!value && /^\d{4}-\d{2}-\d{2}$/.test(value)
+}
+
+function buildReceiptTitle(date: string | null, store: string | null): string {
+  const datePart = isIsoDate(date) ? date : toLocalIsoDate(bookingDate.value)
+  // Strip characters that are invalid in file paths — the title feeds the
+  // document's canonical filename on disk.
+  const storePart = (store ?? '')
+    .replace(/[\\/:*?"<>|]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return storePart ? `${datePart}_${storePart}` : `${datePart}_Beleg`
+}
+
+function formatItemsNote(items: { name: string; amount: number }[]): string {
+  return items
+    .filter((it) => it.name?.trim())
+    .map((it) => {
+      const amt = typeof it.amount === 'number' && it.amount > 0
+        ? ` ${it.amount.toFixed(2).replace('.', ',')}`
+        : ''
+      return `${it.name.trim()}${amt}`
+    })
+    .join(' · ')
 }
 
 async function save() {
