@@ -10,8 +10,10 @@ services:
       LLM_CTX: 4096
       OCR_LANG: latin
       LOG_LEVEL: INFO
+    # Host port 8003 — distinct from the llm-service so both can run side by
+    # side locally without colliding.
     ports:
-      - "8002:8000"
+      - "8003:8000"
     volumes:
       - receipt_ocr_models:/models
 

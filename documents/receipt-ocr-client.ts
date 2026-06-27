@@ -5,8 +5,14 @@
  * (amount, date, store, items) within seconds.
  */
 
+// Default port is 8003 — deliberately distinct from the LLM service's 8002
+// (see documents/llm-client.ts). They used to share localhost:8002, so an
+// unset RECEIPT_OCR_SERVICE_URL silently routed receipt OCR calls to the LLM
+// service, which answered 503/404. In Docker the URL is wired explicitly via
+// compose (http://receipt_ocr_service:8000); this default only applies to
+// local `encore run`.
 const RECEIPT_OCR_SERVICE_URL = (
-  process.env.RECEIPT_OCR_SERVICE_URL || "http://localhost:8002"
+  process.env.RECEIPT_OCR_SERVICE_URL || "http://localhost:8003"
 ).replace(/\/$/, "");
 
 const DEFAULT_TIMEOUT_MS = parseInt(
