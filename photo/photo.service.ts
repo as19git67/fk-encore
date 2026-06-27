@@ -3405,7 +3405,9 @@ export async function deleteDuplicateGroupLogic(
     };
   };
 
-  const result = isPg ? await (db as any).transaction(run) : await run(db);
+  const result = isPg
+    ? await (db as any).transaction(run, { isolationLevel: "serializable" })
+    : await run(db);
 
   let fileCleanupFailed = 0;
   await Promise.all(result.targets.map(async (target: DuplicateRow) => {
