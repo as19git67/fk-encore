@@ -16,8 +16,6 @@ import { linkDocumentsToTransactions, recentCashRecipients, searchRecipients, ty
 import { deleteDocument, extractReceiptOcr, searchDocuments, uploadReceiptCapture, type DocumentSummary } from '../../api/documents'
 import { parseLocalDate } from '../../utils/dateFormat'
 import { useModuleBack } from '../../composables/useModuleBack'
-import { queuePendingTransaction } from '../../utils/offlineQueue'
-import { useOfflineSync } from '../../composables/useOfflineSync'
 
 const route = useRoute()
 const router = useRouter()
@@ -50,11 +48,7 @@ const receiptUploading = ref(false)
 const receiptStatus = ref<string | null>(null)
 const receiptSuggestion = ref<string | null>(null)
 const receiptDocumentId = ref<number | null>(null)
-const receiptProcessedBlob = ref<Blob | null>(null)
 const dateTouched = ref(false)
-const isOnline = ref(navigator.onLine)
-
-const { pendingCount, draining, lastResult } = useOfflineSync()
 
 const cashAccounts = computed(() =>
   accountsStore.items.filter(
@@ -62,12 +56,7 @@ const cashAccounts = computed(() =>
   ),
 )
 
-function onOnlineChange() { isOnline.value = navigator.onLine }
-
 onMounted(async () => {
-  window.addEventListener('online', onOnlineChange)
-  window.addEventListener('offline', onOnlineChange)
-
   if (accountsStore.items.length === 0) await accountsStore.refresh()
   if (tagsStore.items.length === 0) await tagsStore.refresh('user')
 
@@ -184,7 +173,6 @@ function removeSelectedDocument(documentId: number) {
   selectedDocuments.value = selectedDocuments.value.filter(document => document.id !== documentId)
   if (documentId === receiptDocumentId.value) {
     receiptDocumentId.value = null
-    receiptProcessedBlob.value = null
     receiptSuggestion.value = null
     deleteDocument(documentId).catch(() => {})
   }
@@ -206,62 +194,32 @@ async function onReceiptPicked(event: Event) {
   receiptUploading.value = true
   receiptStatus.value = 'Beleg wird erkannt …'
   try {
-    if (isOnline.value) {
-      await onReceiptPickedOnline(file)
-    } else {
-      await onReceiptPickedOffline(file)
-    }
-  } catch (err) {
-    receiptStatus.value = null
-    documentSearchError.value = err instanceof Error ? err.message : String(err)
-  } finally {
-    receiptUploading.value = false
-  }
-}
+    // Run server OCR and upload in parallel for speed
+    const uploadPromise = uploadReceiptCapture(file)
 
-async function onReceiptPickedOnline(file: File) {
-  // Run server OCR and upload in parallel for speed
-  const uploadPromise = uploadReceiptCapture(file)
-
-  let applied: string[] = []
-  try {
-    receiptStatus.value = 'Beleg wird erkannt (Server-OCR) …'
+    let applied: string[] = []
     const result = await extractReceiptOcr(file)
     applied = applyOcrResult(result)
     if (result.store && !counterparty.value) {
       counterparty.value = result.store
       applied.push('Empfänger')
     }
-  } catch {
-    // Server OCR unavailable — fall back to on-device OCR
-    receiptStatus.value = 'Server-OCR nicht verfügbar, nutze On-Device-Erkennung …'
-    const { recognizeReceipt } = await import('../../utils/receiptOcr')
-    const result = await recognizeReceipt(file)
-    applied = applyOcrResult(result)
-    receiptProcessedBlob.value = result.processedImage
+
+    receiptStatus.value = 'Beleg wird hochgeladen …'
+    const uploaded = await uploadPromise
+    receiptDocumentId.value = uploaded.id
+    selectDocument(uploaded)
+
+    receiptStatus.value = null
+    receiptSuggestion.value = applied.length > 0
+      ? `Aus Beleg übernommen: ${applied.join(', ')}. Empfänger und Kategorie werden im Hintergrund ergänzt.`
+      : 'Beleg wurde erkannt, aber es gab keine neuen Formularwerte. Server-Analyse läuft im Hintergrund.'
+  } catch (err) {
+    receiptStatus.value = null
+    documentSearchError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    receiptUploading.value = false
   }
-
-  receiptStatus.value = 'Beleg wird hochgeladen …'
-  const uploaded = await uploadPromise
-  receiptDocumentId.value = uploaded.id
-  selectDocument(uploaded)
-
-  receiptStatus.value = null
-  receiptSuggestion.value = applied.length > 0
-    ? `Aus Beleg übernommen: ${applied.join(', ')}. Empfänger und Kategorie werden im Hintergrund ergänzt.`
-    : 'Beleg wurde erkannt, aber es gab keine neuen Formularwerte. Server-Analyse läuft im Hintergrund.'
-}
-
-async function onReceiptPickedOffline(file: File) {
-  const { recognizeReceipt } = await import('../../utils/receiptOcr')
-  const result = await recognizeReceipt(file)
-  const applied = applyOcrResult(result)
-  receiptProcessedBlob.value = result.processedImage
-
-  receiptStatus.value = null
-  receiptSuggestion.value = applied.length > 0
-    ? `Aus Beleg übernommen: ${applied.join(', ')}. Beleg wird hochgeladen, sobald du online bist.`
-    : 'Beleg wird hochgeladen, sobald du online bist.'
 }
 
 function applyOcrResult(result: { amount: number | null; date: string | null }): string[] {
@@ -302,10 +260,6 @@ async function save() {
   }
   const signedAmount = isExpense.value ? -Math.abs(amount.value) : Math.abs(amount.value)
 
-  if (!isOnline.value) {
-    return saveOffline(signedAmount, counterpartyName)
-  }
-
   saving.value = true
   try {
     const created = await txStore.create({
@@ -337,31 +291,7 @@ async function save() {
   }
 }
 
-async function saveOffline(signedAmount: number, counterpartyName: string) {
-  saving.value = true
-  try {
-    const entry: Parameters<typeof queuePendingTransaction>[0] = {
-      accountId: accountId.value!,
-      bookingDate: toIso(bookingDate.value),
-      amount: signedAmount,
-      counterparty: counterpartyName,
-      purpose: purpose.value.trim() || undefined,
-      tags: [...tags.value],
-    }
-    if (receiptProcessedBlob.value) {
-      entry.receiptBlob = await receiptProcessedBlob.value.arrayBuffer()
-      entry.receiptFileName = 'receipt.jpg'
-      entry.receiptMimeType = receiptProcessedBlob.value.type || 'image/jpeg'
-    }
-    await queuePendingTransaction(entry)
-    tagsStore.addLocal(tags.value)
-    void router.push({ name: 'finance-account-transactions', params: { id: accountId.value } })
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
-  } finally {
-    saving.value = false
-  }
-}
+
 </script>
 
 <template>
@@ -373,20 +303,6 @@ async function saveOffline(signedAmount: number, counterpartyName: string) {
       Kein Bargeldkonto (Typ „bargeld") vorhanden. Bitte zuerst ein Konto anlegen.
     </Message>
 
-    <Message v-if="!isOnline" severity="warn" :closable="false">
-      <i class="pi pi-wifi-off" /> Offline — Buchung wird lokal gespeichert und bei Verbindung gesendet.
-    </Message>
-    <Message v-if="pendingCount > 0 && isOnline" severity="info" :closable="false">
-      <template v-if="draining">
-        <i class="pi pi-spin pi-spinner" /> {{ pendingCount }} offline gespeicherte Buchung(en) werden gesendet …
-      </template>
-      <template v-else-if="lastResult?.failed">
-        {{ lastResult.success }} gesendet, {{ lastResult.failed }} fehlgeschlagen — wird beim nächsten Mal erneut versucht.
-      </template>
-      <template v-else>
-        {{ lastResult?.success ?? pendingCount }} offline gespeicherte Buchung(en) erfolgreich gesendet.
-      </template>
-    </Message>
     <Message v-if="error" severity="error" :closable="true" @close="error = null">
       {{ error }}
     </Message>
@@ -559,7 +475,7 @@ async function saveOffline(signedAmount: number, counterpartyName: string) {
     <div class="actions-row">
       <Button
         class="save-btn"
-        :label="receiptUploading ? 'Beleg wird verarbeitet …' : isOnline ? 'Speichern' : 'Offline speichern'"
+        :label="receiptUploading ? 'Beleg wird verarbeitet …' : 'Speichern'"
         icon="pi pi-check"
         :loading="saving"
         :disabled="!amount || !counterparty.trim() || !accountId || receiptUploading"
