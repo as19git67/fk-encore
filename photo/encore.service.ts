@@ -20,6 +20,9 @@ import "./library-cron";
 // Register the daily cron job that rebuilds Rueckblicke (recaps).
 import "./recaps-cron";
 
+// One-time, resumable duplicate-candidate backfill for existing libraries.
+import "./duplicate-backfill-cron";
+
 startLocalCron();
 
 import { startConfiguredWatchers } from "./library-watcher";

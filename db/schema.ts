@@ -332,12 +332,33 @@ export const photoGroupMembers = pgTable(
       .notNull()
       .references(() => photos.id, { onDelete: "cascade" }),
     similarity_rank: integer("similarity_rank").notNull().default(0),
+    // DINOv2 cosine similarity to the group medoid. Values near 1 are used
+    // together with matching metadata to flag format-independent duplicates.
+    similarity_score: real("similarity_score"),
   },
   (table) => [
     primaryKey({ columns: [table.group_id, table.photo_id] }),
     index("photo_group_members_photo_id_idx").on(table.photo_id),
   ]
 );
+
+// Persistent checkpoint for the format-independent duplicate backfill.
+// A versioned row lets a future detector revision deliberately reprocess the
+// library while completed installations remain a cheap no-op after restart.
+export const photoDuplicateBackfillState = pgTable("photo_duplicate_backfill_state", {
+  user_id: integer("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  version: integer("version").notNull().default(0),
+  processing_at: timestamp("processing_at", { mode: "string", withTimezone: true }),
+  next_attempt_at: timestamp("next_attempt_at", { mode: "string", withTimezone: true }),
+  completed_at: timestamp("completed_at", { mode: "string", withTimezone: true }),
+  attempts: integer("attempts").notNull().default(0),
+  last_error: text("last_error"),
+  updated_at: timestamp("updated_at", { mode: "string", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
 
 // Per-user weights for the AI auto-pick scoring formula. Fitted from
 // the user's reviewed groups via pairwise logistic regression (see

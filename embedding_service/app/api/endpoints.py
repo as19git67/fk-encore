@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import logging
+import math
 from datetime import datetime
 from typing import Annotated, List, Optional
 
@@ -644,11 +645,25 @@ async def similar_groups(request: SimilarGroupsRequest, db: DbDep) -> SimilarGro
         time_window_seconds=float(request.time_window_seconds),
     )
 
+    vectors = {photo_id: embedding for photo_id, _timestamp, embedding in rows}
+
+    def similarity_to_cover(cover_id: str, photo_id: str) -> float:
+        a = vectors[cover_id]
+        b = vectors[photo_id]
+        denominator = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(x * x for x in b))
+        if denominator <= 1e-12:
+            return 0.0
+        return max(-1.0, min(1.0, sum(x * y for x, y in zip(a, b)) / denominator))
+
     payload = [
         SimilarGroup(
             cover_photo_id=cover,
             members=[
-                SimilarGroupMember(photo_id=pid, similarity_rank=rank)
+                SimilarGroupMember(
+                    photo_id=pid,
+                    similarity_rank=rank,
+                    similarity_score=similarity_to_cover(cover, pid),
+                )
                 for rank, pid in enumerate(ranked_members)
             ],
         )

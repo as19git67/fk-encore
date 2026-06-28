@@ -527,6 +527,21 @@ export const batchDeletePhotos = api(
 );
 
 /**
+ * Permanently delete caller-owned redundant copies from a group that is
+ * revalidated as a high-confidence duplicate immediately before deletion.
+ */
+export const deleteDuplicatePhotoGroup = api(
+  { expose: true, method: "POST", path: "/photos/groups/:id/delete-duplicates", auth: true },
+  async ({ id }: { id: number }): Promise<service.DeleteDuplicateGroupResult> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "data.manage");
+    return await service.deleteDuplicateGroupLogic(userId, id);
+  },
+);
+
+/**
  * Update curation status for a photo (visible/hidden/favorite).
  */
 export const updatePhotoCuration = api(
