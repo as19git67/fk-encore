@@ -342,6 +342,24 @@ export const photoGroupMembers = pgTable(
   ]
 );
 
+// Persistent checkpoint for the format-independent duplicate backfill.
+// A versioned row lets a future detector revision deliberately reprocess the
+// library while completed installations remain a cheap no-op after restart.
+export const photoDuplicateBackfillState = pgTable("photo_duplicate_backfill_state", {
+  user_id: integer("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  version: integer("version").notNull().default(0),
+  processing_at: timestamp("processing_at", { mode: "string", withTimezone: true }),
+  next_attempt_at: timestamp("next_attempt_at", { mode: "string", withTimezone: true }),
+  completed_at: timestamp("completed_at", { mode: "string", withTimezone: true }),
+  attempts: integer("attempts").notNull().default(0),
+  last_error: text("last_error"),
+  updated_at: timestamp("updated_at", { mode: "string", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 // Per-user weights for the AI auto-pick scoring formula. Fitted from
 // the user's reviewed groups via pairwise logistic regression (see
 // photo/group-auto-pick.calibration.ts). Absent rows fall back to the
