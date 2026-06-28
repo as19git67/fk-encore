@@ -272,6 +272,21 @@ export function extractReceiptOcr(file: File, signal?: AbortSignal) {
   })
 }
 
+export interface ReceiptOcrItemsResult {
+  items: { name: string; amount: number }[]
+}
+
+// Second-stage line-item extraction from the raw_text returned by
+// extractReceiptOcr. Best-effort and asynchronous — never blocks saving.
+export function extractReceiptItems(text: string, signal?: AbortSignal) {
+  return apiFetch<ReceiptOcrItemsResult>('/documents/receipt-ocr-items', {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+    signal,
+    timeoutMs: 130_000,
+  })
+}
+
 export function getDocumentReceiptSuggestion(id: number) {
   return apiFetch<DocumentReceiptSuggestion>(`/documents/${id}/receipt-suggestion`)
 }

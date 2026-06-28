@@ -530,6 +530,40 @@ export const extractReceiptOcr = api.raw(
   },
 );
 
+interface ReceiptOcrItemsRequest {
+  /** The `raw_text` returned by /documents/receipt-ocr, so no re-OCR is needed. */
+  text: string;
+}
+
+interface ReceiptOcrItemsResponse {
+  items: { name: string; amount: number }[];
+}
+
+// Second-stage line-item extraction. Called asynchronously by the client after
+// the core fields (amount/date/store) have come back, so the heavy item
+// generation never blocks saving the transaction. Best-effort: any failure
+// yields an empty list rather than an error the UI has to handle.
+export const extractReceiptOcrItems = api(
+  { expose: true, method: "POST", path: "/documents/receipt-ocr-items", auth: true },
+  async (req: ReceiptOcrItemsRequest): Promise<ReceiptOcrItemsResponse> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.upload");
+
+    const text = (req.text || "").trim();
+    if (!text) return { items: [] };
+
+    try {
+      const { extractReceiptItems } = await import("./receipt-ocr-client");
+      const result = await extractReceiptItems(text);
+      return { items: result.items };
+    } catch (err: any) {
+      console.warn("[documents] receipt-ocr items extraction failed:", err?.message ?? err);
+      return { items: [] };
+    }
+  },
+);
+
 async function streamAndStoreDocument(
   req: NodeJS.ReadableStream,
   originalName: string,
