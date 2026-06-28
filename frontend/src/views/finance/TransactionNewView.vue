@@ -13,7 +13,7 @@ import { useAccountsStore } from '../../stores/finance/accounts'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useTagsStore } from '../../stores/finance/tags'
 import { linkDocumentsToTransactions, recentCashRecipients, searchRecipients, type RecentRecipient } from '../../api/finance'
-import { deleteDocument, extractReceiptOcr, searchDocuments, updateDocument, uploadReceiptCapture, type DocumentSummary, type ReceiptOcrResult } from '../../api/documents'
+import { deleteDocument, extractReceiptItems, extractReceiptOcr, searchDocuments, updateDocument, uploadReceiptCapture, type DocumentSummary, type ReceiptOcrResult } from '../../api/documents'
 import { parseLocalDate } from '../../utils/dateFormat'
 import { useModuleBack } from '../../composables/useModuleBack'
 
@@ -200,6 +200,21 @@ async function onReceiptPicked(event: Event) {
     const result = await extractReceiptOcr(file)
     const applied = applyOcrResult(result)
 
+    // Line items take the bulk of the LLM time, so the server extracts them in
+    // a second step. Fetch them asynchronously and drop them into the note when
+    // they arrive — never blocking the form or the save.
+    if (result.raw_text) {
+      void extractReceiptItems(result.raw_text)
+        .then(({ items }) => {
+          if (items.length && !purpose.value.trim()) {
+            purpose.value = formatItemsNote(items)
+          }
+        })
+        .catch((err) => {
+          console.warn('[receipt] line-item extraction failed:', err)
+        })
+    }
+
     receiptStatus.value = 'Beleg wird hochgeladen …'
     const uploaded = await uploadPromise
     receiptDocumentId.value = uploaded.id
@@ -261,14 +276,8 @@ function applyOcrResult(result: ReceiptOcrResult): string[] {
     }
     applied.push('Empfänger')
   }
-  // Line items → note (only when the user hasn't typed one yet).
-  if (result.items?.length && !purpose.value.trim()) {
-    const note = formatItemsNote(result.items)
-    if (note) {
-      purpose.value = note
-      applied.push('Notiz')
-    }
-  }
+  // Line items are no longer part of the synchronous result — they are fetched
+  // asynchronously in onReceiptPicked and dropped into the note when ready.
   return applied
 }
 

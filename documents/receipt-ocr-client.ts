@@ -1,8 +1,9 @@
 /**
  * Typed HTTP client for the `receipt-ocr-service` container.
  *
- * Sends a receipt image and receives structured extraction results
- * (amount, date, store, items) within seconds.
+ * Two-stage extraction: `extractReceipt` returns the save-critical core fields
+ * (amount, date, store, currency) fast; `extractReceiptItems` fetches the line
+ * items from the OCR text in a separate, asynchronous call.
  */
 
 // Default port is 8003 — deliberately distinct from the LLM service's 8002
@@ -32,14 +33,24 @@ export class ReceiptOcrUnavailableError extends Error {
   }
 }
 
+export interface ReceiptItem {
+  name: string;
+  amount: number;
+}
+
 export interface ReceiptOcrResult {
   amount: number | null;
   date: string | null;
   store: string | null;
   currency: string;
-  items: { name: string; amount: number }[];
+  items: ReceiptItem[];
   raw_text: string;
   ocr_confidence: number;
+  processing_ms: number;
+}
+
+export interface ReceiptItemsResult {
+  items: ReceiptItem[];
   processing_ms: number;
 }
 
@@ -82,6 +93,40 @@ export async function extractReceipt(
   }
 
   return (await res.json()) as ReceiptOcrResult;
+}
+
+/**
+ * Second-stage extraction: line items from the already-OCR'd text returned by
+ * `extractReceipt` (`raw_text`). Heavier than the core extraction, so it is run
+ * asynchronously and must never block saving a transaction.
+ */
+export async function extractReceiptItems(text: string): Promise<ReceiptItemsResult> {
+  const url = `${RECEIPT_OCR_SERVICE_URL}/extract/items`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    throw new ReceiptOcrUnavailableError(
+      `POST ${url} failed: ${err?.message ?? String(err)}`,
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!res.ok) {
+    const detail = await safeBody(res);
+    throw new Error(`POST ${url} returned ${res.status}: ${detail}`);
+  }
+
+  return (await res.json()) as ReceiptItemsResult;
 }
 
 export async function isReceiptOcrHealthy(timeoutMs = 2000): Promise<boolean> {
