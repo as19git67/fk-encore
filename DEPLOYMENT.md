@@ -66,6 +66,32 @@ The full list of `DEPLOY_*` overrides:
 | `DEPLOY_EMBEDDING_START_PERIOD` | `600s` | Healthcheck grace for embedding_service — covers CLIP + DINOv2 first-time download. |
 | `DEPLOY_LLM_START_PERIOD` | `600s` | Healthcheck grace for llm_service — covers Llama GGUF + embedder load (and download on a cold volume). |
 
+### NVIDIA document-AI profile
+
+The normal deployment remains CPU-only. To accelerate document
+classification on one NVIDIA GPU while leaving all photo services on CPU,
+install the NVIDIA driver and NVIDIA Container Toolkit on the host, then run:
+
+```bash
+docker compose --env-file .env \
+  -f docker-compose.yml -f docker-compose.gpu.yml \
+  up -d --pull always --force-recreate llm_service
+```
+
+The override selects the separate amd64 CUDA 12.8 image, Qwen3-14B Q4_K_M,
+all-layer llama.cpp offload, and CUDA embeddings. Verify the active runtime at
+`http://llm_service:8000/healthz`; it reports `llm_accelerator`,
+`llm_gpu_layers`, `embedder_device`, and the CUDA device name. Set
+`LLM_GPU_EMBED_DEVICE=cpu` if the card needs more VRAM headroom.
+
+Return to the portable Qwen2.5-7B CPU profile by recreating from only the base
+file:
+
+```bash
+docker compose --env-file .env -f docker-compose.yml \
+  up -d --force-recreate llm_service
+```
+
 ## Services
 
 | Service              | Description                                | Internal port | Default host port  |
