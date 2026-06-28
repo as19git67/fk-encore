@@ -82,7 +82,7 @@ const saving = ref(false)
 const layouts = computed(() => collageLayouts(photos.value.length))
 
 // Pixel long-edge of the exported JPEG; cells inherit their share of it.
-const EXPORT_LONG_EDGE = 2000
+const EXPORT_LONG_EDGE = 4000
 const GAP_FRACTION = 0.006 // gap between cells, fraction of the long edge
 
 function close() {
@@ -532,8 +532,8 @@ async function uploadCollage() {
   try {
     const blob = await buildCollageBlob()
     const file = new File([blob], `collage-${Date.now()}.jpg`, { type: 'image/jpeg' })
-    const oldestDate = getOldestPhotoDate()
-    const photo = await uploadPhoto(file, undefined, oldestDate)
+    const collageDate = getCollageDate()
+    const photo = await uploadPhoto(file, undefined, collageDate)
     await addPhotoToAlbum(props.albumId, photo.id)
     showSuccess('Collage wurde im Album gespeichert.')
   } catch (err) {
@@ -544,13 +544,29 @@ async function uploadCollage() {
   }
 }
 
-function getOldestPhotoDate(): string | undefined {
+/**
+ * Date assigned to the saved collage: the *newest* source photo's capture
+ * time plus one second, so the collage sorts directly after the photos it was
+ * made from (rather than at the upload "now"). The wall-clock components are
+ * preserved literally — the server discards any offset, same as for EXIF /
+ * X-Captured-At — so we manipulate the components in UTC to avoid a local
+ * timezone skew when adding the second.
+ */
+function getCollageDate(): string | undefined {
   if (photos.value.length === 0) return undefined
   const dates = photos.value
-    .map((p) => p.taken_at ?? p.filename)
+    .map((p) => p.taken_at)
     .filter((d): d is string => !!d)
   if (dates.length === 0) return undefined
-  return dates.sort()[0]
+  // Same-format, zero-padded date strings sort chronologically as text.
+  const sorted = dates.sort()
+  const newest = sorted[sorted.length - 1]!
+  const m = newest.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/)
+  if (!m) return undefined
+  const [, y, mo, d, h, mi, s] = m
+  const dt = new Date(Date.UTC(+y!, +mo! - 1, +d!, +h!, +mi!, s ? +s : 0))
+  dt.setUTCSeconds(dt.getUTCSeconds() + 1)
+  return dt.toISOString()
 }
 
 const dialogHeader = computed(() =>

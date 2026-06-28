@@ -2481,9 +2481,12 @@ export async function uploadPhotoStream(
   }
 
   // Collage date: use the explicitly provided date (oldest photo in the collage)
-  // if available. This overrides any EXIF date from the generated collage file.
+  // if available. This overrides any EXIF date from the generated collage file
+  // so the collage sorts alongside its source photos rather than at "now".
+  // Normalised the same way as X-Captured-At (wall-clock preserved, validated).
   if (clientDateTaken) {
-    exifMeta.takenAt = clientDateTaken;
+    const parsed = normalizeClientCapturedAt(clientDateTaken);
+    if (parsed) exifMeta.takenAt = parsed;
   }
 
   // GPS fallback — same pattern as X-Captured-At. iOS's PHAssetResource bytes

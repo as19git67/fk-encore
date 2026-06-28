@@ -505,7 +505,10 @@ export const hardDeletePhoto = api(
     checkModule();
     const userId = getUserId();
     const authData = getAuthData()!;
-    requirePermission(authData, "data.manage");
+    // Ownership is enforced in hardDeletePhotoLogic (the row is matched by
+    // user_id), so deleting one's own photo needs only `photos.delete`, not
+    // the admin `data.manage` permission.
+    requirePermission(authData, "photos.delete");
     return await service.hardDeletePhotoLogic(userId, id);
   }
 );
@@ -521,7 +524,11 @@ export const batchDeletePhotos = api(
     checkModule();
     const userId = getUserId();
     const authData = getAuthData()!;
-    requirePermission(authData, "data.manage");
+    // `photos.delete` (not `data.manage`): the batch logic only ever removes
+    // photos owned by the caller (others are skipped with reason 'not_owner'),
+    // so deleting one's own photos must not require the admin data-management
+    // permission. A "Photo User" role has photos.delete but not data.manage.
+    requirePermission(authData, "photos.delete");
     return await service.batchDeletePhotosLogic(userId, photoIds);
   }
 );
