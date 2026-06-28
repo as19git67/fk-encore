@@ -59,6 +59,7 @@ interface CollagePhoto {
   autoCrop?: { x: number; y: number } | null
   url: string
   img: HTMLImageElement
+  taken_at?: string
 }
 
 type Step = 'layouts' | 'editor'
@@ -149,6 +150,7 @@ async function loadPhotos() {
           autoCrop: p.auto_crop ?? null,
           url,
           img,
+          taken_at: p.taken_at,
         } satisfies CollagePhoto
       }),
     )
@@ -487,6 +489,7 @@ async function shareCollage() {
   try {
     const blob = await buildCollageBlob()
     const file = new File([blob], `collage-${Date.now()}.jpg`, { type: 'image/jpeg' })
+
     const nav = navigator as Navigator & {
       canShare?: (data?: ShareData) => boolean
     }
@@ -529,7 +532,8 @@ async function uploadCollage() {
   try {
     const blob = await buildCollageBlob()
     const file = new File([blob], `collage-${Date.now()}.jpg`, { type: 'image/jpeg' })
-    const photo = await uploadPhoto(file)
+    const oldestDate = getOldestPhotoDate()
+    const photo = await uploadPhoto(file, undefined, oldestDate)
     await addPhotoToAlbum(props.albumId, photo.id)
     showSuccess('Collage wurde im Album gespeichert.')
   } catch (err) {
@@ -538,6 +542,15 @@ async function uploadCollage() {
   } finally {
     saving.value = false
   }
+}
+
+function getOldestPhotoDate(): string | undefined {
+  if (photos.value.length === 0) return undefined
+  const dates = photos.value
+    .map((p) => p.taken_at ?? p.filename)
+    .filter((d): d is string => !!d)
+  if (dates.length === 0) return undefined
+  return dates.sort()[0]
 }
 
 const dialogHeader = computed(() =>

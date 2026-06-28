@@ -161,7 +161,7 @@ export const uploadPhoto = api.raw(
 
     // Parse the X-* upload contract via the shared, unit-tested parser so the
     // production path and the test path are the exact same code.
-    const { fileName, mimeType, isFavorite, clientCapturedAt, sync } =
+    const { fileName, mimeType, isFavorite, clientCapturedAt, sync, dateTaken } =
       service.parseUploadHeaders(req.headers);
 
     // A pure metadata edit (pixels unchanged) is NOT handled here: the client
@@ -171,7 +171,7 @@ export const uploadPhoto = api.raw(
     // an in-flight upload surfaced as 502). This endpoint only ever creates a
     // new photo or replaces an existing one's content (an in-app edit).
     try {
-      const { photo, replaced } = await service.uploadPhotoStream(userId, req, fileName, mimeType, isFavorite, clientCapturedAt, sync);
+      const { photo, replaced } = await service.uploadPhotoStream(userId, req, fileName, mimeType, isFavorite, clientCapturedAt, sync, dateTaken);
 
       // `replaced` → a device_asset_id match updated an existing photo's file
       // in place (an in-app edit); otherwise a new photo was created.
