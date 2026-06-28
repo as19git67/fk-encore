@@ -57,6 +57,13 @@ LLM_MODEL_PATH = Path(os.environ.get("LLM_MODEL_PATH") or str(MODELS_DIR / "qwen
 LLM_CTX = _env_int("LLM_CTX", 8192)
 LLM_THREADS = _env_int("LLM_THREADS", os.cpu_count() or 4)
 LLM_GPU_LAYERS = _env_int("LLM_GPU_LAYERS", 0)
+LLM_ACCELERATOR = (os.environ.get("LLM_ACCELERATOR") or "cpu").lower()
+LLM_EMBED_DEVICE = (os.environ.get("LLM_EMBED_DEVICE") or "cpu").lower()
+
+if LLM_ACCELERATOR not in {"cpu", "cuda"}:
+    raise ValueError("LLM_ACCELERATOR must be 'cpu' or 'cuda'")
+if LLM_EMBED_DEVICE not in {"cpu", "cuda", "auto"}:
+    raise ValueError("LLM_EMBED_DEVICE must be 'cpu', 'cuda', or 'auto'")
 
 # Deterministic backstop for a known small-model failure mode: when the
 # classifier doesn't actually see a tax-section match, it sometimes returns
@@ -83,7 +90,25 @@ os.environ.setdefault("HF_HOME", str(MODELS_DIR / "hf-cache"))
 
 # ─── Lifespan: load models once at startup ─────────────────────────────────────
 
-_state: dict[str, Any] = {"llm": None, "embedder": None}
+_state: dict[str, Any] = {
+    "llm": None,
+    "embedder": None,
+    "llm_accelerator": None,
+    "embedder_device": None,
+    "cuda_device_name": None,
+}
+
+
+def _resolve_embed_device(torch: Any) -> str:
+    """Resolve and validate the sentence-transformer execution device."""
+    cuda_available = bool(torch.cuda.is_available())
+    if LLM_EMBED_DEVICE == "cuda" and not cuda_available:
+        raise RuntimeError(
+            "LLM_EMBED_DEVICE=cuda was requested, but PyTorch cannot access CUDA"
+        )
+    if LLM_EMBED_DEVICE == "auto":
+        return "cuda" if cuda_available else "cpu"
+    return LLM_EMBED_DEVICE
 
 
 def _rss_mb() -> float:
@@ -167,8 +192,18 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
     # Lazy imports keep `python main.py --help`-style inspection cheap and
     # move the heavy native-library load into startup, after logging is set up.
+    import llama_cpp
+    import torch
     from llama_cpp import Llama
     from sentence_transformers import SentenceTransformer
+
+    if LLM_ACCELERATOR == "cuda":
+        supports_offload = getattr(llama_cpp, "llama_supports_gpu_offload", None)
+        if not callable(supports_offload) or not supports_offload():
+            raise RuntimeError(
+                "LLM_ACCELERATOR=cuda was requested, but llama-cpp-python "
+                "was built without CUDA offload support"
+            )
 
     log.info("Loading Llama from %s (ctx=%d, threads=%d, gpu_layers=%d)",
              LLM_MODEL_PATH, LLM_CTX, LLM_THREADS, LLM_GPU_LAYERS)
@@ -179,10 +214,15 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         n_gpu_layers=LLM_GPU_LAYERS,
         verbose=False,
     )
+    _state["llm_accelerator"] = LLM_ACCELERATOR
     log.info("Llama loaded (RSS=%.0f MB)", _rss_mb())
 
-    log.info("Loading embedder %s", EMBEDDING_MODEL)
-    _state["embedder"] = SentenceTransformer(EMBEDDING_MODEL)
+    embed_device = _resolve_embed_device(torch)
+    log.info("Loading embedder %s on %s", EMBEDDING_MODEL, embed_device)
+    _state["embedder"] = SentenceTransformer(EMBEDDING_MODEL, device=embed_device)
+    _state["embedder_device"] = embed_device
+    if torch.cuda.is_available():
+        _state["cuda_device_name"] = torch.cuda.get_device_name(0)
     log.info("Embedder loaded (RSS=%.0f MB)", _rss_mb())
 
     _install_shutdown_logging(startup_monotonic)
@@ -315,7 +355,11 @@ async def healthz() -> dict[str, Any]:
         "llm_loaded": _state["llm"] is not None,
         "embedder_loaded": _state["embedder"] is not None,
         "llm_model_path": str(LLM_MODEL_PATH),
+        "llm_accelerator": _state["llm_accelerator"] or LLM_ACCELERATOR,
+        "llm_gpu_layers": LLM_GPU_LAYERS,
         "embedding_model": EMBEDDING_MODEL,
+        "embedder_device": _state["embedder_device"] or LLM_EMBED_DEVICE,
+        "cuda_device_name": _state["cuda_device_name"],
         "rss_mb": round(_rss_mb(), 1),
         "uptime_s": round(uptime_s, 1) if uptime_s is not None else None,
     }
