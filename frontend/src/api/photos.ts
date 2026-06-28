@@ -232,22 +232,27 @@ export function checkPhotoHash(hash: string) {
   return apiFetch<{ exists: boolean; photoId?: number }>(`/photos/check-hash/${hash}`)
 }
 
-export async function uploadPhoto(file: File, signal?: AbortSignal) {
+export async function uploadPhoto(file: File, signal?: AbortSignal, dateTaken?: string) {
+  const headers: Record<string, string> = {
+    'Content-Type': file.type,
+    'X-File-Name': encodeURIComponent(file.name)
+  }
+  if (dateTaken) {
+    headers['X-Date-Taken'] = dateTaken
+  }
   return apiFetch<Photo>('/photos', {
     method: 'POST',
     body: file,
     signal,
-    headers: {
-      'Content-Type': file.type,
-      'X-File-Name': encodeURIComponent(file.name)
-    }
+    headers
   })
 }
 
 export function uploadPhotoWithProgress(
   file: File,
   signal?: AbortSignal,
-  onProgress?: (loaded: number, total: number) => void
+  onProgress?: (loaded: number, total: number) => void,
+  dateTaken?: string
 ): Promise<Photo> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
@@ -256,6 +261,7 @@ export function uploadPhotoWithProgress(
     xhr.open('POST', `${API_BASE_URL}/photos`)
     xhr.setRequestHeader('Content-Type', file.type)
     xhr.setRequestHeader('X-File-Name', encodeURIComponent(file.name))
+    if (dateTaken) xhr.setRequestHeader('X-Date-Taken', dateTaken)
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
 
     if (signal) {

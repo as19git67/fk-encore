@@ -1754,6 +1754,14 @@ describe("Photo Module", () => {
       expect(parsed.sync.deviceAssetId).toBeNull();
       expect(parsed.sync.clientLatitude).toBeNull();
       expect(parsed.sync.clientLongitude).toBeNull();
+      expect(parsed.dateTaken).toBeNull();
+    });
+
+    it("parses X-Date-Taken (collage upload sets it to the oldest photo's date)", () => {
+      const parsed = service.parseUploadHeaders(
+        iosHeaders({ "x-date-taken": "2019-07-04T10:00:00.000Z" }),
+      );
+      expect(parsed.dateTaken).toBe("2019-07-04T10:00:00.000Z");
     });
 
     it("honours an empty X-Description (device is authoritative over the file caption)", () => {
@@ -1765,6 +1773,24 @@ describe("Photo Module", () => {
     it("rejects a malformed hash header instead of forwarding garbage", () => {
       const parsed = service.parseUploadHeaders(iosHeaders({ "x-image-data-hash": "not-a-real-hash" }));
       expect(parsed.sync.imageDataHash).toBeNull();
+    });
+
+    it("applies clientDateTaken to taken_at (collage sits just after its source photos)", async () => {
+      // Client sends the newest source photo's wall-clock date + 1s; the server
+      // preserves the literal Y-M-D H:M:S (offset discarded, same as EXIF).
+      const stream = Readable.from(Buffer.from("collage-pixels")) as any;
+      const { photo } = await service.uploadPhotoStream(
+        user1.id, stream, "collage.jpg", "image/jpeg",
+        false, null, {}, "2015-06-01T09:30:01.000Z",
+      );
+      const row = await dbFirst<typeof photos.$inferSelect>(
+        db.select().from(photos).where(eq(photos.id, photo.id)),
+      );
+      expect(row?.taken_at).toBeTruthy();
+      // Stored as the literal wall-clock (format is TZ/driver dependent, so
+      // match the Y-M-D H:M:S components rather than an exact string).
+      expect(row!.taken_at).toMatch(/2015-06-01[T ]09:30:01/);
+      cleanup(row!.filename);
     });
 
     // MARK: - Contract flowing into the real dedup/metadata pipeline

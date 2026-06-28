@@ -2228,6 +2228,8 @@ export interface ParsedUploadHeaders {
    * makes the device authoritative over the file's embedded IPTC caption. */
   hasDescriptionHeader: boolean;
   sync: UploadSyncMeta;
+  /** Date taken provided by the client (e.g., for collages, the oldest photo date). */
+  dateTaken: string | null;
 }
 
 /**
@@ -2297,6 +2299,9 @@ export function parseUploadHeaders(
   const clientLatitude = parseGpsHeader(headers["x-gps-lat"]);
   const clientLongitude = parseGpsHeader(headers["x-gps-lng"]);
 
+  const dateTakenHeader = headers["x-date-taken"];
+  const dateTaken = typeof dateTakenHeader === "string" ? dateTakenHeader : null;
+
   return {
     fileName,
     mimeType,
@@ -2311,6 +2316,7 @@ export function parseUploadHeaders(
       clientLatitude,
       clientLongitude,
     },
+    dateTaken,
   };
 }
 
@@ -2414,6 +2420,7 @@ export async function uploadPhotoStream(
   isFavorite: boolean = false,
   clientCapturedAt: string | null = null,
   sync: UploadSyncMeta = {},
+  clientDateTaken: string | null = null,
 ): Promise<{ photo: Photo; replaced: boolean }> {
   const {
     imageDataHash = null,
@@ -2462,6 +2469,7 @@ export async function uploadPhotoStream(
     longitude: exifMeta.longitude,
     takenAt: exifMeta.takenAt,
     clientCapturedAt,
+    clientDateTaken,
   }));
 
   // iOS' PHImageManager strips EXIF DateTimeOriginal from rendered HEIC/JPEG. The
@@ -2469,6 +2477,15 @@ export async function uploadPhotoStream(
   // recover the real capture time when the file itself no longer carries it.
   if (!exifMeta.takenAt && clientCapturedAt) {
     const parsed = normalizeClientCapturedAt(clientCapturedAt);
+    if (parsed) exifMeta.takenAt = parsed;
+  }
+
+  // Collage date: use the explicitly provided date (oldest photo in the collage)
+  // if available. This overrides any EXIF date from the generated collage file
+  // so the collage sorts alongside its source photos rather than at "now".
+  // Normalised the same way as X-Captured-At (wall-clock preserved, validated).
+  if (clientDateTaken) {
+    const parsed = normalizeClientCapturedAt(clientDateTaken);
     if (parsed) exifMeta.takenAt = parsed;
   }
 

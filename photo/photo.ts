@@ -161,7 +161,7 @@ export const uploadPhoto = api.raw(
 
     // Parse the X-* upload contract via the shared, unit-tested parser so the
     // production path and the test path are the exact same code.
-    const { fileName, mimeType, isFavorite, clientCapturedAt, sync } =
+    const { fileName, mimeType, isFavorite, clientCapturedAt, sync, dateTaken } =
       service.parseUploadHeaders(req.headers);
 
     // A pure metadata edit (pixels unchanged) is NOT handled here: the client
@@ -171,7 +171,7 @@ export const uploadPhoto = api.raw(
     // an in-flight upload surfaced as 502). This endpoint only ever creates a
     // new photo or replaces an existing one's content (an in-app edit).
     try {
-      const { photo, replaced } = await service.uploadPhotoStream(userId, req, fileName, mimeType, isFavorite, clientCapturedAt, sync);
+      const { photo, replaced } = await service.uploadPhotoStream(userId, req, fileName, mimeType, isFavorite, clientCapturedAt, sync, dateTaken);
 
       // `replaced` → a device_asset_id match updated an existing photo's file
       // in place (an in-app edit); otherwise a new photo was created.
@@ -505,7 +505,10 @@ export const hardDeletePhoto = api(
     checkModule();
     const userId = getUserId();
     const authData = getAuthData()!;
-    requirePermission(authData, "data.manage");
+    // Ownership is enforced in hardDeletePhotoLogic (the row is matched by
+    // user_id), so deleting one's own photo needs only `photos.delete`, not
+    // the admin `data.manage` permission.
+    requirePermission(authData, "photos.delete");
     return await service.hardDeletePhotoLogic(userId, id);
   }
 );
@@ -521,7 +524,11 @@ export const batchDeletePhotos = api(
     checkModule();
     const userId = getUserId();
     const authData = getAuthData()!;
-    requirePermission(authData, "data.manage");
+    // `photos.delete` (not `data.manage`): the batch logic only ever removes
+    // photos owned by the caller (others are skipped with reason 'not_owner'),
+    // so deleting one's own photos must not require the admin data-management
+    // permission. A "Photo User" role has photos.delete but not data.manage.
+    requirePermission(authData, "photos.delete");
     return await service.batchDeletePhotosLogic(userId, photoIds);
   }
 );

@@ -99,6 +99,7 @@ import {
 import { toLocalIsoDateTime } from '../utils/dateFormat'
 import { newestIndex, jumpTargetIndex } from '../utils/galleryJump'
 import { canCollage } from '../utils/collageLayouts'
+import { sharePhotos } from '../utils/sharePhotos'
 
 const route = useRoute()
 const router = useRouter()
@@ -462,6 +463,28 @@ function openCollageDialog() {
   collageDialogVisible.value = true
 }
 
+// Collage was saved into this album → refresh metadata + grid so it shows up
+// instantly, just like after a delete.
+async function onCollageSaved() {
+  await loadData()
+  await galleryRef.value?.reload()
+}
+
+// ── Share selected photos (1..n) ─────────────────────────────────────────────
+const sharingPhotos = ref(false)
+async function shareSelectedPhotos() {
+  const ids = Array.from(selectedIds.value)
+  if (ids.length === 0 || sharingPhotos.value) return
+  sharingPhotos.value = true
+  try {
+    await sharePhotos(ids)
+  } catch (err: any) {
+    error.value = err?.message ?? 'Die Fotos konnten nicht geteilt werden.'
+  } finally {
+    sharingPhotos.value = false
+  }
+}
+
 async function applyCurationToSelection(target: CurationStatus) {
   const ids = Array.from(selectedIds.value)
   if (ids.length === 0) return
@@ -557,6 +580,7 @@ const selectionMenuItems = computed(() => {
   }
   if (selectedCount.value === 0) return items
 
+  items.push({ label: selectedCount.value === 1 ? 'Foto teilen' : 'Fotos teilen', icon: 'pi pi-share-alt', disabled: sharingPhotos.value, command: () => void shareSelectedPhotos() })
   if (canShowCollage.value) items.push({ label: 'Collage erstellen', icon: 'pi pi-images', command: openCollageDialog })
   if (canUploadPhotos.value && canReuseAlbumPhotos.value) {
     items.push({ label: 'Zu Alben hinzufügen', icon: 'pi pi-book', command: openAlbumDialog })
@@ -571,7 +595,7 @@ const selectionMenuItems = computed(() => {
     items.push({ label: 'Aus diesem Album entfernen', icon: 'pi pi-minus-circle', disabled: removeBusy.value, command: removeFromAlbumSelection })
   }
   items.push({ label: 'Auswahl aufheben', icon: 'pi pi-replay', command: clearSelection })
-  if (canManageData.value) {
+  if (canDeletePhotos.value) {
     items.push({ separator: true })
     items.push({ label: 'Ausgewählte Fotos löschen', icon: 'pi pi-trash', disabled: deleteBusy.value || curationBusy.value, command: deleteFromSelection })
   }
@@ -832,7 +856,6 @@ const isOwner = computed(() => album.value?.role === 'owner')
 const canDeletePhotos = computed(() => auth.hasPermission('photos.delete'))
 const canUploadPhotos = computed(() => auth.hasPermission('photos.upload'))
 const canReviewGroups = computed(() => auth.hasPermission('photos.delete'))
-const canManageData = computed(() => auth.hasPermission('data.manage'))
 const showPersons = computed(() => auth.hasPermission('people.view'))
 // Adding photos from THIS album to OTHER albums is gated server-side on the
 // caller owning the source photos OR having `write_share` on a containing
@@ -2831,6 +2854,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       v-model:visible="collageDialogVisible"
       :photo-ids="collagePhotoIds"
       :album-id="albumId"
+      @saved="onCollageSaved"
     />
 
     <!-- Warning dialog when a batch delete skipped some photos -->
