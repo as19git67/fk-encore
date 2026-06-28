@@ -463,6 +463,13 @@ function openCollageDialog() {
   collageDialogVisible.value = true
 }
 
+// Collage was saved into this album → refresh metadata + grid so it shows up
+// instantly, just like after a delete.
+async function onCollageSaved() {
+  await loadData()
+  await galleryRef.value?.reload()
+}
+
 // ── Share selected photos (1..n) ─────────────────────────────────────────────
 const sharingPhotos = ref(false)
 async function shareSelectedPhotos() {
@@ -2847,6 +2854,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       v-model:visible="collageDialogVisible"
       :photo-ids="collagePhotoIds"
       :album-id="albumId"
+      @saved="onCollageSaved"
     />
 
     <!-- Warning dialog when a batch delete skipped some photos -->

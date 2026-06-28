@@ -51,6 +51,9 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:visible': [value: boolean]
+  /** Emitted after the collage was uploaded and added to the album, so the
+   *  parent can refresh its grid to show the new photo instantly. */
+  saved: []
 }>()
 
 interface CollagePhoto {
@@ -536,6 +539,8 @@ async function uploadCollage() {
     const photo = await uploadPhoto(file, undefined, collageDate)
     await addPhotoToAlbum(props.albumId, photo.id)
     showSuccess('Collage wurde im Album gespeichert.')
+    // Let the parent refresh its grid so the collage appears instantly.
+    emit('saved')
   } catch (err) {
     errorMsg.value =
       err instanceof Error ? err.message : 'Die Collage konnte nicht gespeichert werden.'
