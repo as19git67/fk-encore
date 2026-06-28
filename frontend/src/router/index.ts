@@ -7,6 +7,7 @@ import RegisterView from '../views/RegisterView.vue'
 import ForgotPasswordView from '../views/ForgotPasswordView.vue'
 import ProfileView from '../views/ProfileView.vue'
 import SharedAlbumView from '../views/SharedAlbumView.vue'
+import { isStaleChunkLoadError } from '../utils/appUpdate'
 
 // ── Last-view persistence ────────────────────────────────────────────────────
 // We save the most recent authenticated route path to localStorage so that
@@ -95,11 +96,15 @@ router.beforeEach((to) => {
 // emits a navigation error. Catch it and do a full reload so the browser
 // picks up the new index.html with current chunk references.
 router.onError((err, to) => {
-  if (
-    err.message?.includes('Failed to fetch dynamically imported module') ||
-    err.message?.includes('Importing a module script failed')
-  ) {
-    window.location.assign(to.fullPath)
+  if (isStaleChunkLoadError(err)) {
+    const target = router.resolve(to).href
+    const reloadKey = 'stale_chunk_reload_target'
+    if (sessionStorage.getItem(reloadKey) !== target) {
+      sessionStorage.setItem(reloadKey, target)
+      // resolve().href retains Vite's /app/ base. Assigning to.fullPath here
+      // used to navigate to /fotos/... outside the SPA mount point.
+      window.location.assign(target)
+    }
   }
 })
 
@@ -107,6 +112,7 @@ router.onError((err, to) => {
 // restored by the `/` redirect above. Runs after the navigation is
 // committed, so redirected / aborted navigations never end up stored.
 router.afterEach((to) => {
+  sessionStorage.removeItem('stale_chunk_reload_target')
   if (PUBLIC_ROUTE_NAMES.has(to.name as string)) return
   if (to.path === '/') return
   localStorage.setItem(LAST_ROUTE_KEY, to.fullPath)
