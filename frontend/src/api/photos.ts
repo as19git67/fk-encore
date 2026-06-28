@@ -999,6 +999,10 @@ export interface ReviewQueueGroup {
   ai_picked_confidence: 'high' | 'medium' | 'low' | null
   /** Δ vs. runner-up; drives the confidence-bar render. */
   runner_up_delta: number | null
+  duplicate_candidate: boolean
+  duplicate_recommended_photo_id: number | null
+  duplicate_deletable_count: number
+  duplicate_deletable_bytes: number
   photos: ReviewQueuePhoto[]
 }
 
@@ -1031,6 +1035,19 @@ export function getReviewQueue(opts: {
   return apiFetch<ReviewQueueResponse>(
     `/photos/groups/review-queue${qs ? `?${qs}` : ''}`,
   )
+}
+
+export interface DeleteDuplicateGroupResult {
+  deleted: number[]
+  kept_photo_id: number
+  freed_bytes: number
+  file_cleanup_failed: number
+}
+
+export function deleteDuplicatePhotoGroup(groupId: number) {
+  return apiFetch<DeleteDuplicateGroupResult>(`/photos/groups/${groupId}/delete-duplicates`, {
+    method: 'POST',
+  })
 }
 
 export function backfillPhotoDimensions() {

@@ -778,6 +778,20 @@
       "when": 1781905140610,
       "tag": "0110_receipt_document_link",
       "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "7",
+      "when": 1782518400000,
+      "tag": "0111_photo_group_similarity_score",
+      "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "7",
+      "when": 1782604800000,
+      "tag": "0112_photo_duplicate_backfill",
+      "breakpoints": true
     }
   ]
 }
