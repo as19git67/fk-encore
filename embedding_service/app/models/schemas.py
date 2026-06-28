@@ -104,6 +104,7 @@ class SimilarGroupsRequest(BaseModel):
 class SimilarGroupMember(BaseModel):
     photo_id: str
     similarity_rank: int = Field(..., description="0 = cover photo (medoid)")
+    similarity_score: float = Field(..., ge=-1.0, le=1.0, description="Cosine similarity to the group medoid")
 
 
 class SimilarGroup(BaseModel):

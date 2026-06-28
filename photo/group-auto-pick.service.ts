@@ -45,6 +45,7 @@ import {
   type PhotoSignals,
   type ScoringWeights,
 } from "./group-auto-pick";
+import { isHighConfidenceDuplicateGroup, recommendDuplicatePhoto, selectDeletableDuplicateMembers } from "./duplicate-candidates";
 
 interface PhotoSignalRow {
   photo_id: number;
@@ -775,6 +776,10 @@ export interface ReviewQueueGroup {
   // practice; HIGH_CONFIDENCE_DELTA (0.10) is the auto-hide threshold.
   // `null` for groups that have never been scored.
   runner_up_delta: number | null;
+  duplicate_candidate: boolean;
+  duplicate_recommended_photo_id: number | null;
+  duplicate_deletable_count: number;
+  duplicate_deletable_bytes: number;
   photos: ReviewQueuePhoto[];
 }
 
@@ -983,6 +988,17 @@ export async function listReviewQueueLogic(
     taken_at: string | null;
     curation: string | null;
     ai_quality_score: number | null;
+    similarity_score: number | null;
+    width: number | null;
+    height: number | null;
+    created_at: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    description: string | null;
+    keywords: string[];
+    user_id: number;
+    external_path: string | null;
+    size: number;
   }>(
     db.select({
       group_id: photoGroupMembers.group_id,
@@ -991,6 +1007,17 @@ export async function listReviewQueueLogic(
       taken_at: photos.taken_at,
       curation: photoCuration.status,
       ai_quality_score: photos.ai_quality_score,
+      similarity_score: photoGroupMembers.similarity_score,
+      width: photos.width,
+      height: photos.height,
+      created_at: photos.created_at,
+      latitude: photos.latitude,
+      longitude: photos.longitude,
+      description: photos.description,
+      keywords: photos.keywords,
+      user_id: photos.user_id,
+      external_path: photos.external_path,
+      size: photos.size,
     })
       .from(photoGroupMembers)
       .innerJoin(photos, eq(photos.id, photoGroupMembers.photo_id))
@@ -1011,6 +1038,22 @@ export async function listReviewQueueLogic(
     else membersByGroupId.set(m.group_id, [m]);
   }
 
+  const photoIdsForPeers = memberRows.map((m) => m.photo_id);
+  const albumRows = photoIdsForPeers.length === 0
+    ? []
+    : await dbAll<{ photo_id: number; album_id: number }>(
+        db.select({ photo_id: albumPhotos.photo_id, album_id: albumPhotos.album_id })
+          .from(albumPhotos)
+          .where(inArray(albumPhotos.photo_id, photoIdsForPeers)),
+      );
+  const albumsByPhotoId = new Map<number, number[]>();
+  for (const row of albumRows) {
+    const ids = albumsByPhotoId.get(row.photo_id);
+    if (ids) ids.push(row.album_id);
+    else albumsByPhotoId.set(row.photo_id, [row.album_id]);
+  }
+  for (const ids of albumsByPhotoId.values()) ids.sort((a, b) => a - b);
+
   // Peer-curation aggregate. For every photo in the response, count
   // explicit curation rows from *other* users who currently share at
   // least one album with the requester that contains the photo. Photos
@@ -1021,7 +1064,6 @@ export async function listReviewQueueLogic(
   // ends: the requester must reach the album (via owner or share) AND
   // the peer must also reach the album. Otherwise stale curation rows
   // from un-shared albums would leak into the aggregate.
-  const photoIdsForPeers = memberRows.map((m) => m.photo_id);
   const peerByPhotoId = new Map<number, { hidden: number; favorite: number }>();
   if (photoIdsForPeers.length > 0) {
     const peerRows = await dbAll<{
@@ -1061,6 +1103,13 @@ export async function listReviewQueueLogic(
   const groups: ReviewQueueGroup[] = groupRows.map((g) => {
     const members = membersByGroupId.get(g.id) ?? [];
     const pickedSet = new Set(g.ai_picked_photo_ids ?? []);
+    const duplicateCandidate = isHighConfidenceDuplicateGroup(members, albumsByPhotoId);
+    const duplicateRecommendedPhotoId = duplicateCandidate
+      ? recommendDuplicatePhoto(members)
+      : null;
+    const deletableDuplicates = duplicateCandidate && duplicateRecommendedPhotoId != null
+      ? selectDeletableDuplicateMembers(members, duplicateRecommendedPhotoId, userId)
+      : [];
     return {
       id: g.id,
       cover_photo_id: g.cover_photo_id,
@@ -1073,6 +1122,10 @@ export async function listReviewQueueLogic(
           ? (g.ai_picked_confidence as AiConfidence)
           : null,
       runner_up_delta: g.runner_up_delta,
+      duplicate_candidate: duplicateCandidate,
+      duplicate_recommended_photo_id: duplicateRecommendedPhotoId,
+      duplicate_deletable_count: deletableDuplicates.length,
+      duplicate_deletable_bytes: deletableDuplicates.reduce((sum, member) => sum + member.size, 0),
       photos: members.map((m) => ({
         id: m.photo_id,
         filename: m.filename,

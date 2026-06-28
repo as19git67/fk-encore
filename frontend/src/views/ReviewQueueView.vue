@@ -23,6 +23,7 @@ import Button from 'primevue/button'
 import Message from 'primevue/message'
 import SelectButton from 'primevue/selectbutton'
 import Dialog from 'primevue/dialog'
+import { useConfirm } from 'primevue/useconfirm'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
 import {
   getReviewQueue,
@@ -31,14 +32,19 @@ import {
   reviewPhotoGroup,
   acceptPeerConsensus,
   bulkAcceptHighConfidenceAiPicks,
+  deleteDuplicatePhotoGroup,
   type ReviewQueueGroup,
   type ReviewQueuePhoto,
   type ReviewQueueUserCalibration,
   type PhotoGroup,
 } from '../api/photos'
 import { getThumbUrl } from '../api/gallery'
+import { useAuthStore } from '../stores/auth'
 
 const router = useRouter()
+const confirm = useConfirm()
+const auth = useAuthStore()
+const canManageData = computed(() => auth.hasPermission('data.manage'))
 
 const PAGE_SIZE = 30
 const groups = ref<ReviewQueueGroup[]>([])
@@ -66,6 +72,7 @@ const bulkBusy = ref(false)
 const bulkConfirmOpen = ref(false)
 const bulkResult = ref<{ groups_accepted: number; hidden_count: number } | null>(null)
 const pendingAcceptIds = ref<Set<number>>(new Set())
+const duplicateDeleteResult = ref<{ deleted: number; freedBytes: number } | null>(null)
 
 // Average top-1 accuracy across both branches, weighted by pair count.
 // Surfaced on the bulk-accept disclaimer so the user sees the actual
@@ -93,6 +100,12 @@ function fmtDate(iso: string): string {
   } catch {
     return iso
   }
+}
+
+function fmtBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 const reachedEnd = computed(() => groups.value.length >= total.value)
@@ -147,7 +160,54 @@ function onChangeFilter() {
 }
 
 async function onAccept(group: ReviewQueueGroup) {
+  if (group.duplicate_candidate && group.duplicate_recommended_photo_id != null) {
+    await onPickOne(group, group.duplicate_recommended_photo_id)
+    return
+  }
   await runAcceptAction(group, () => acceptAiPick(group.id))
+}
+
+function askDeleteDuplicates(group: ReviewQueueGroup) {
+  if (!group.duplicate_candidate || group.duplicate_deletable_count < 1) return
+  const count = group.duplicate_deletable_count
+  confirm.require({
+    header: 'Duplikate endgültig löschen',
+    message: `${count} ${count === 1 ? 'eigenes Duplikat' : 'eigene Duplikate'} endgültig löschen und ${fmtBytes(group.duplicate_deletable_bytes)} freigeben? Das empfohlene beste Foto bleibt erhalten. Diese Aktion kann nicht rückgängig gemacht werden.`,
+    icon: 'pi pi-exclamation-triangle',
+    rejectLabel: 'Abbrechen',
+    acceptLabel: 'Endgültig löschen',
+    acceptClass: 'p-button-danger',
+    accept: () => void performDeleteDuplicates(group),
+  })
+}
+
+async function performDeleteDuplicates(group: ReviewQueueGroup) {
+  if (pendingAcceptIds.value.has(group.id)) return
+  const pending = new Set(pendingAcceptIds.value)
+  pending.add(group.id)
+  pendingAcceptIds.value = pending
+  loadError.value = ''
+  try {
+    const result = await deleteDuplicatePhotoGroup(group.id)
+    groups.value = groups.value.filter((item) => item.id !== group.id)
+    total.value = Math.max(0, total.value - 1)
+    if (group.ai_picked_confidence === 'high') {
+      highConfidenceTotal.value = Math.max(0, highConfidenceTotal.value - 1)
+    }
+    duplicateDeleteResult.value = {
+      deleted: result.deleted.length,
+      freedBytes: result.freed_bytes,
+    }
+    if (result.file_cleanup_failed > 0) {
+      loadError.value = `${result.file_cleanup_failed} Originaldatei(en) konnten nach dem Datenbank-Löschen nicht vom Speicher entfernt werden.`
+    }
+  } catch (err: any) {
+    loadError.value = err?.message ?? 'Duplikate konnten nicht sicher gelöscht werden.'
+  } finally {
+    const next = new Set(pendingAcceptIds.value)
+    next.delete(group.id)
+    pendingAcceptIds.value = next
+  }
 }
 
 /**
@@ -500,6 +560,16 @@ onMounted(() => {
     </Message>
 
     <Message
+      v-if="duplicateDeleteResult"
+      severity="success"
+      :closable="true"
+      @close="duplicateDeleteResult = null"
+    >
+      {{ duplicateDeleteResult.deleted }} {{ duplicateDeleteResult.deleted === 1 ? 'Duplikat' : 'Duplikate' }}
+      endgültig gelöscht, {{ fmtBytes(duplicateDeleteResult.freedBytes) }} freigegeben.
+    </Message>
+
+    <Message
       v-if="loadError"
       severity="error"
       :closable="true"
@@ -522,6 +592,9 @@ onMounted(() => {
         :class="{ 'rq-card--pending': pendingAcceptIds.has(group.id) }"
       >
         <div class="rq-card-meta">
+          <span v-if="group.duplicate_candidate" class="rq-duplicate-badge">
+            <i class="pi pi-copy" /> Sehr wahrscheinliches Duplikat
+          </span>
           <span :class="confidenceClass(group.ai_picked_confidence)">
             {{ confidenceLabel(group.ai_picked_confidence) }}
           </span>
@@ -562,9 +635,12 @@ onMounted(() => {
             class="rq-oneclick-tile"
             :class="{
               'rq-oneclick-tile--ai-pick': photo.ai_picked,
+              'rq-oneclick-tile--duplicate-pick': group.duplicate_recommended_photo_id === photo.id,
             }"
             :title="photo.ai_picked
               ? 'KI-Vorschlag — Klick = dieses behalten, Rest verstecken'
+              : group.duplicate_recommended_photo_id === photo.id
+                ? 'Empfohlenes Duplikat-Original — Klick = dieses behalten, Rest verstecken'
               : 'Klick = dieses behalten, Rest verstecken'"
             :disabled="pendingAcceptIds.has(group.id)"
             @click="onPickOne(group, photo.id)"
@@ -632,6 +708,7 @@ onMounted(() => {
               :class="{
                 'rq-thumb--picked': photo.ai_picked,
                 'rq-thumb--non-pick': !photo.ai_picked && group.ai_picked_photo_ids.length > 0,
+                'rq-thumb--duplicate-pick': group.duplicate_recommended_photo_id === photo.id,
               }"
               :aria-label="photo.ai_picked
                 ? 'KI-Pick — bildschirmfüllend ansehen'
@@ -678,9 +755,18 @@ onMounted(() => {
           <Button
             icon="pi pi-check"
             severity="success"
-            label="KI-Pick übernehmen"
-            :disabled="pendingAcceptIds.has(group.id) || group.ai_picked_photo_ids.length === 0"
+            :label="group.duplicate_candidate ? 'Bestes Duplikat behalten' : 'KI-Pick übernehmen'"
+            :disabled="pendingAcceptIds.has(group.id) || (!group.duplicate_candidate && group.ai_picked_photo_ids.length === 0)"
             @click="onAccept(group)"
+          />
+          <Button
+            v-if="canManageData && group.duplicate_candidate && group.duplicate_deletable_count > 0"
+            icon="pi pi-trash"
+            outlined
+            severity="danger"
+            :label="`${group.duplicate_deletable_count} endgültig löschen`"
+            :disabled="pendingAcceptIds.has(group.id)"
+            @click="askDeleteDuplicates(group)"
           />
           <Button
             icon="pi pi-images"
@@ -955,6 +1041,14 @@ onMounted(() => {
   align-items: center;
   gap: 12px;
 }
+
+.rq-duplicate-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--p-orange-700, #c2410c);
+  font-weight: 700;
+}
 .rq-conf {
   font-size: 0.75rem;
   font-weight: 700;
@@ -1053,6 +1147,14 @@ onMounted(() => {
 }
 .rq-oneclick-tile--ai-pick {
   border-color: var(--p-green-500, #22c55e);
+}
+
+.rq-oneclick-tile--duplicate-pick {
+  box-shadow: inset 0 0 0 3px var(--p-orange-500, #f97316);
+}
+
+.rq-thumb--duplicate-pick {
+  box-shadow: 0 0 0 3px var(--p-orange-500, #f97316);
 }
 .rq-oneclick-check {
   position: absolute;
