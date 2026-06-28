@@ -1,6 +1,6 @@
 # LLM Service
 
-A FastAPI-based microservice that hosts a local **Qwen2.5-7B-Instruct** (GGUF) model for structured document classification and a **multilingual-e5-base** transformer for high-quality text embeddings.
+A FastAPI-based microservice that hosts a local GGUF model for structured document classification and a **multilingual-e5-base** transformer for high-quality text embeddings. The default image uses Qwen2.5-7B on CPU; the optional document-AI GPU profile uses Qwen3-14B on NVIDIA CUDA.
 
 ---
 
@@ -10,6 +10,7 @@ A FastAPI-based microservice that hosts a local **Qwen2.5-7B-Instruct** (GGUF) m
 llm-service/
   main.py               # FastAPI application, model lifecycle, and UTF-8 repair
   Dockerfile            # Python 3.12-slim base with llama-cpp-python
+  Dockerfile.gpu        # CUDA 12.8 / RTX 50-series image
   docker-compose.yml    # Service-local deployment config
   download_model.sh     # Idempotent downloader for GGUF and HF weights
   requirements.txt      # Core dependencies (torch, llama-cpp-python, etc.)
@@ -50,6 +51,29 @@ MODELS_DIR=./models ./download_model.sh
 # Start the service
 MODELS_DIR=./models uvicorn main:app --reload --port 8001
 ```
+
+### NVIDIA GPU profile
+
+The repository-level `docker-compose.gpu.yml` only replaces `llm_service`.
+InsightFace and photo embeddings remain on CPU. On a host with NVIDIA
+Container Toolkit installed, start the document-AI profile with:
+
+```bash
+docker compose --env-file .env \
+  -f docker-compose.yml -f docker-compose.gpu.yml \
+  up -d --pull always --force-recreate llm_service
+```
+
+The first start downloads Qwen3-14B Q4_K_M into the existing `llm_models`
+volume. To return to the CPU profile, omit the override and recreate:
+
+```bash
+docker compose --env-file .env -f docker-compose.yml \
+  up -d --force-recreate llm_service
+```
+
+If 16 GB VRAM becomes tight, keep llama.cpp on the GPU but move the E5
+embedder back to system RAM with `LLM_GPU_EMBED_DEVICE=cpu`.
 
 ---
 
@@ -105,6 +129,9 @@ Generates warm, personal titles and subtitles for private photo recaps (e.g., "A
 | `LLM_MODEL_PATH` | `/models/qwen2.5-7b-instruct-q4_k_m.gguf` | Local path to the GGUF model file |
 | `LLM_CTX` | `8192` | Context window size |
 | `LLM_THREADS` | `$(nproc)` | CPU threads for inference |
+| `LLM_ACCELERATOR` | `cpu` | Runtime guard: `cpu` or `cuda` |
+| `LLM_GPU_LAYERS` | `0` | llama.cpp layers offloaded to GPU; the GPU profile uses `-1` (all) |
+| `LLM_EMBED_DEVICE` | `cpu` | Sentence-Transformer device: `cpu`, `cuda`, or `auto` |
 | `CLASSIFY_TEXT_CHAR_LIMIT` | `6000` | Max document characters fed to `/classify` (cheap pre-cap before the n_ctx token guard). Keep ≥ the app's `DOCUMENTS_CLASSIFY_CHAR_LIMIT`; raise both in lockstep with `LLM_CTX` to classify longer documents. |
 | `TAX_SECTIONS_MAX` | `4` | Dump-all backstop: when `/classify` returns more than this many tax sections at once it is treated as a confused small-model output and the entire tax assignment is dropped. Set to `0` to disable. |
 | `EMBEDDING_MODEL` | `intfloat/multilingual-e5-base` | Sentence-Transformers repo or path |

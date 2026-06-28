@@ -67,6 +67,16 @@ jobs:
             type=raw,value=test,enable=${{ github.event_name == 'pull_request' }}
             type=semver,pattern={{version}}
 
+      - name: Extract metadata for CUDA image
+        id: meta-gpu
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-gpu
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+            type=raw,value=test,enable=${{ github.event_name == 'pull_request' }}
+            type=semver,pattern={{version}}
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
@@ -75,6 +85,16 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Build and push CUDA Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./llm-service
+          file: ./llm-service/Dockerfile.gpu
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta-gpu.outputs.tags }}
+          labels: ${{ steps.meta-gpu.outputs.labels }}
 
       - name: Deploy to TrueNAS (test)
         if: github.event_name == 'pull_request'

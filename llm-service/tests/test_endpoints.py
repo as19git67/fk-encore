@@ -16,6 +16,7 @@ import threading
 import time
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -37,6 +38,9 @@ def test_healthz_reports_starting_before_models_load():
     assert body["llm_loaded"] is False
     assert body["embedder_loaded"] is False
     assert body["embedding_model"] == main.EMBEDDING_MODEL
+    assert body["llm_accelerator"] == main.LLM_ACCELERATOR
+    assert body["llm_gpu_layers"] == main.LLM_GPU_LAYERS
+    assert body["embedder_device"] == main.LLM_EMBED_DEVICE
     # Diagnostic fields are always present so ops can spot memory growth /
     # tiny uptimes in a plain `curl` against /healthz.
     assert isinstance(body["rss_mb"], (int, float))
@@ -55,6 +59,33 @@ def test_healthz_reports_ok_when_both_models_present():
     finally:
         main._state["llm"] = None
         main._state["embedder"] = None
+
+
+def test_resolve_embed_device_auto_uses_cuda(monkeypatch):
+    class _Cuda:
+        @staticmethod
+        def is_available():
+            return True
+
+    class _Torch:
+        cuda = _Cuda()
+
+    monkeypatch.setattr(main, "LLM_EMBED_DEVICE", "auto")
+    assert main._resolve_embed_device(_Torch()) == "cuda"
+
+
+def test_resolve_embed_device_rejects_missing_cuda(monkeypatch):
+    class _Cuda:
+        @staticmethod
+        def is_available():
+            return False
+
+    class _Torch:
+        cuda = _Cuda()
+
+    monkeypatch.setattr(main, "LLM_EMBED_DEVICE", "cuda")
+    with pytest.raises(RuntimeError, match="cannot access CUDA"):
+        main._resolve_embed_device(_Torch())
 
 
 def test_embed_returns_503_when_embedder_missing():
