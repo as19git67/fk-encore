@@ -1106,6 +1106,11 @@ describe("Photo Module", () => {
       await dbExec(
         db.update(persons).set({ cover_face_id: olderFace!.id }).where(eq(persons.id, person!.id))
       );
+      await db.insert(photoCuration).values({
+        user_id: user1.id,
+        photo_id: newerPhoto!.id,
+        status: "hidden",
+      });
 
       const listRes = await service.listPersonsLogic(user1.id);
       const listedPerson = listRes.persons.find((p) => p.id === person!.id);
@@ -1118,6 +1123,14 @@ describe("Photo Module", () => {
       const details = await service.getPersonDetailsLogic(user1.id, person!.id);
       expect(details.faces.map((f) => f.id)).toEqual([newerFace!.id, olderFace!.id]);
       expect(details.faces[0].photo?.filename).toBe("newer.jpg");
+      expect(details.faces[0].photo).toMatchObject({
+        user_id: user1.id,
+        mime_type: "image/jpeg",
+        size: 456,
+        taken_at: "2025-06-15T12:30:00.000Z",
+        curation_status: "hidden",
+      });
+      expect(details.faces[1].photo?.curation_status).toBe("visible");
     });
 
     it("should ignore all faces of a person", async () => {
