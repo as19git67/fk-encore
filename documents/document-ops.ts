@@ -198,14 +198,23 @@ export async function runTextExtract(documentId: number): Promise<void> {
     );
   }
 
+  // Receipt captures (identified by a set receipt_ocr_state) run a trimmed
+  // pipeline — only text_extract + receipt_ocr, no classify/embed — so
+  // text_extract is their terminal step. Settle them on "ready" instead of
+  // "classifying"; otherwise they'd hang in "KI-Analyse" forever, because no
+  // classify job ever runs to move them on. (receipt_ocr tracks its own
+  // progress separately via receipt_ocr_state.)
+  const isReceiptCapture = row.receipt_ocr_state != null;
+  const nextStatus: DocumentStatus = isReceiptCapture ? "ready" : "classifying";
+
   await db
     .update(documents)
     .set({
       extracted_text: text.length === 0 ? null : text,
-      status: "classifying",
+      status: nextStatus,
     })
     .where(eq(documents.id, documentId));
-  await publishStatusChanged(documentId, row.user_id, "classifying");
+  await publishStatusChanged(documentId, row.user_id, nextStatus);
 }
 
 /**
