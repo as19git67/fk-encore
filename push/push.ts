@@ -234,3 +234,48 @@ export const notifyDocumentReview = api(
     return await svc.sendToUser(req.userId, notification);
   },
 );
+
+interface NotifyReceiptBookedRequest {
+  userId: number;
+  transactionId: number;
+  documentId: number;
+  amount: number;
+  store: string | null;
+}
+
+/** Called by `documents/document-ops.ts` after auto-booking a receipt transaction. */
+export const notifyReceiptBooked = api(
+  { expose: false },
+  async (req: NotifyReceiptBookedRequest): Promise<FanoutFeedResponse> => {
+    const prefs = await svc.getNotificationPrefs(req.userId);
+    if (!svc.isKindEnabled(prefs, "receipt_booked")) {
+      return { sent: 0, pruned: 0 };
+    }
+    const notification = svc.buildReceiptBookedNotification({
+      transactionId: req.transactionId,
+      amount: req.amount,
+      store: req.store,
+    });
+    return await svc.sendToUser(req.userId, notification);
+  },
+);
+
+interface NotifyReceiptIncompleteRequest {
+  userId: number;
+  documentId: number;
+}
+
+/** Called by `documents/document-ops.ts` when OCR found no reliable amount. */
+export const notifyReceiptIncomplete = api(
+  { expose: false },
+  async (req: NotifyReceiptIncompleteRequest): Promise<FanoutFeedResponse> => {
+    const prefs = await svc.getNotificationPrefs(req.userId);
+    if (!svc.isKindEnabled(prefs, "receipt_incomplete")) {
+      return { sent: 0, pruned: 0 };
+    }
+    const notification = svc.buildReceiptIncompleteNotification({
+      documentId: req.documentId,
+    });
+    return await svc.sendToUser(req.userId, notification);
+  },
+);

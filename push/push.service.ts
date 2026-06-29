@@ -407,6 +407,46 @@ export function buildDocumentNotification(input: {
   };
 }
 
+// ---------- Receipt-OCR notifications ----------
+
+/**
+ * Build the "Neue Buchung aus Beleg" push notification. Deep-links to
+ * the auto-created transaction so the user can review it without any
+ * mandatory confirmation step.
+ */
+export function buildReceiptBookedNotification(input: {
+  transactionId: number;
+  amount: number;
+  store: string | null;
+}): PushPayload {
+  const storeLabel = input.store?.trim() ? ` bei ${input.store.trim()}` : "";
+  const amountLabel = Math.abs(input.amount).toFixed(2).replace(".", ",") + " €";
+  return {
+    title: "Neue Buchung aus Beleg",
+    body: `${amountLabel}${storeLabel} wurde als Bar-Buchung angelegt.`,
+    url: `/app/finanzen/umsaetze/${input.transactionId}`,
+    tag: `receipt-booked:${input.transactionId}`,
+    data: { kind: "receipt_booked", transactionId: input.transactionId },
+  };
+}
+
+/**
+ * Build the "Beleg erkannt — Betrag bitte ergänzen" push notification.
+ * Shown when the OCR service could not extract a reliable total. Links
+ * to the manual transaction form.
+ */
+export function buildReceiptIncompleteNotification(input: {
+  documentId: number;
+}): PushPayload {
+  return {
+    title: "Beleg erkannt — Betrag fehlt",
+    body: "Der Gesamtbetrag konnte nicht sicher erkannt werden. Bitte manuell ergänzen.",
+    url: `/app/finanzen/umsaetze/neu`,
+    tag: `receipt-incomplete:${input.documentId}`,
+    data: { kind: "receipt_incomplete", documentId: input.documentId },
+  };
+}
+
 // ---------- Notification preferences ----------
 
 export type NotificationKind =
@@ -417,7 +457,9 @@ export type NotificationKind =
   | "album_left"
   | "document_low_confidence"
   | "document_failed"
-  | "document_follow_up";
+  | "document_follow_up"
+  | "receipt_booked"
+  | "receipt_incomplete";
 
 export type NotificationPrefs = Partial<Record<NotificationKind, boolean>>;
 
