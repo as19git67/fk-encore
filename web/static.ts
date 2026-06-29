@@ -1,9 +1,9 @@
 import fs from "fs";
 import path from "path";
-import { api, APIError } from "encore.dev/api";
+import { api } from "encore.dev/api";
 import { photo } from "~encore/clients";
-import { isInBackupMode } from "../backup/state";
 import { writeMaintenanceResponseIfActive } from "../backup/maintenance";
+import { cacheControlFor } from "./static-cache";
 
 // Where the pre-built SPA lives inside the container image. The runtime
 // wrapper (docker/Dockerfile.runtime) copies frontend/dist to this absolute
@@ -143,7 +143,7 @@ export const frontend = api.raw(
 
         res.statusCode = 200;
         res.setHeader("Content-Type", "text/html; charset=utf-8");
-        res.setHeader("Cache-Control", "public, max-age=3600");
+        res.setHeader("Cache-Control", cacheControlFor(filePath));
         res.end(html);
         return;
       } catch {
@@ -154,13 +154,7 @@ export const frontend = api.raw(
     res.statusCode = 200;
     res.setHeader("Content-Type", contentTypeFor(filePath));
 
-    // Add caching headers for static assets
-    // We use a shorter TTL for index.html than for hashed assets
-    if (requested === "index.html" || !filePath.includes("assets")) {
-      res.setHeader("Cache-Control", "public, max-age=3600"); // 1 hour for non-hashed files
-    } else {
-      res.setHeader("Cache-Control", "public, max-age=31536000, immutable"); // 1 year for hashed assets
-    }
+    res.setHeader("Cache-Control", cacheControlFor(filePath));
 
     fs.createReadStream(filePath).pipe(res);
   }
@@ -184,13 +178,14 @@ export const appRedirect = api.raw(
   }
 );
 
-export const buildInfo = api(
+export const buildInfo = api.raw(
   { expose: true, method: "GET", path: "/api/build-info" },
-  async (): Promise<{ build: string }> => {
-    if (isInBackupMode()) {
-      throw APIError.unavailable("Backup in progress — please retry in a few minutes.");
-    }
-    return { build: process.env.APP_BUILD_NUMBER ?? "dev" };
+  async (_req, res) => {
+    if (writeMaintenanceResponseIfActive(res)) return;
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
+    res.end(JSON.stringify({ build: process.env.APP_BUILD_NUMBER ?? "dev" }));
   }
 );
 
@@ -207,4 +202,3 @@ export const health = api.raw(
     sendHealthOk(res);
   }
 );
-
