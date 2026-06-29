@@ -523,6 +523,10 @@ Felder:
   Präfix, oder null.
 - summary: 1-2 Sätze, deutsch, nüchtern — "Worum geht es?".
 - tags: bis zu max_tags kurze, kleingeschriebene Stichwörter (keine Sätze).
+  Bei Kassenbons/Belegen: Tags NUR aus tatsächlich gekauften Artikeln ableiten.
+  Werbetext, Coupon-Aktionen, Prospekthinweise und Rabattangebote am Belegende
+  (z.B. "20% auf Sonnenpflege", "Sonnenbrillen Deal", App-Hinweise) NICHT in
+  Tags aufnehmen — diese sind Werbung, keine gekauften Produkte.
 - confidence: dein Vertrauen in die Kategorisierung, 0..1.
 
 Halluziniere keine Daten, Beträge oder Absender. Bei Unsicherheit: null bzw.
