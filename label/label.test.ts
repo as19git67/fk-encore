@@ -11,9 +11,13 @@ import {
   setLabelPrefs,
   listPrinters,
   getCupsBaseUrl,
-  centerText,
 } from "./label.service";
 import * as endpoints from "./label";
+
+// A minimal byte sequence that starts with the PNG signature — enough to pass
+// the endpoint's PNG validation. Base64-encoded as the API expects.
+const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+const PNG_B64 = PNG_BYTES.toString("base64");
 
 function setAuth(userID: string, perms: string[]) {
   vi.mocked(getAuthData).mockReturnValue({ userID, permissions: perms });
@@ -205,90 +209,42 @@ describe("label endpoints", () => {
   });
 
   it("print rejects when no printer is selected", async () => {
-    await expect(endpoints.print({ text: "hi" })).rejects.toMatchObject({
+    await expect(endpoints.print({ imageBase64: PNG_B64 })).rejects.toMatchObject({
       code: "failed_precondition",
     });
   });
 
-  it("print rejects empty text", async () => {
-    await expect(endpoints.print({ text: "   ", printer: "A" })).rejects.toMatchObject({
-      code: "invalid_argument",
-    });
+  it("print rejects an empty image", async () => {
+    await expect(
+      endpoints.print({ imageBase64: "", printer: "A" }),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
   });
 
-  it("print submits the job to the printer path and remembers an explicit printer", async () => {
+  it("print rejects a non-PNG image", async () => {
+    const notPng = Buffer.from("not a png at all").toString("base64");
+    await expect(
+      endpoints.print({ imageBase64: notPng, printer: "A" }),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+  });
+
+  it("print submits the image job to the printer path and remembers an explicit printer", async () => {
     await startStub(() => ({ body: ippHeader(0x0000) }));
-    const res = await endpoints.print({ text: "Hallo", copies: 2, printer: "A" });
+    const res = await endpoints.print({ imageBase64: PNG_B64, copies: 2, printer: "A" });
     expect(res).toEqual({ printed: 2, printer: "A" });
     expect(recorded).toHaveLength(1);
     expect(recorded[0].url).toBe("/printers/A");
     const sent = recorded[0].body.toString("latin1");
-    expect(sent).toContain("Hallo"); // document body
+    expect(sent).toContain("image/png"); // document-format
     expect(sent).toContain("copies"); // copies > 1 → job attribute
-    expect(sent).toContain("page-left"); // default left margin
+    // The raw PNG bytes are appended as the document body.
+    expect(recorded[0].body.includes(PNG_BYTES)).toBe(true);
     expect(await getLabelPrefs(userId)).toEqual({ printer: "A" });
-  });
-
-  it("omits the left margin when CUPS_LABEL_LEFT_MARGIN_PT=0", async () => {
-    process.env.CUPS_LABEL_LEFT_MARGIN_PT = "0";
-    await startStub(() => ({ body: ippHeader(0x0000) }));
-    await endpoints.print({ text: "Hallo", printer: "A" });
-    expect(recorded[0].body.toString("latin1")).not.toContain("page-left");
-    delete process.env.CUPS_LABEL_LEFT_MARGIN_PT;
-  });
-
-  it("forwards cpi/lpi font attributes", async () => {
-    await startStub(() => ({ body: ippHeader(0x0000) }));
-    await endpoints.print({ text: "Hi", printer: "A", cpi: 7, lpi: 4 });
-    const sent = recorded[0].body.toString("latin1");
-    expect(sent).toContain("cpi");
-    expect(sent).toContain("lpi");
-  });
-
-  it("center-pads the text and drops the left margin when align=center", async () => {
-    await startStub(() => ({ body: ippHeader(0x0000) }));
-    await endpoints.print({ text: "Hi", printer: "A", cpi: 10, align: "center" });
-    const sent = recorded[0].body.toString("latin1");
-    // The document body (after end-of-attributes) is indented with spaces.
-    expect(sent).toMatch(/ {2,}Hi/);
-    // Centering replaces the fixed left margin.
-    expect(sent).not.toContain("page-left");
-  });
-
-  it("uses labelWidthMm for the centering column count", async () => {
-    await startStub(() => ({ body: ippHeader(0x0000) }));
-    // 50 mm / 25.4 * 10 cpi = 19 cols → pad = floor((19-2)/2) = 8 spaces.
-    await endpoints.print({
-      text: "Hi",
-      printer: "A",
-      cpi: 10,
-      align: "center",
-      labelWidthMm: 50,
-    });
-    const sent = recorded[0].body.toString("latin1");
-    expect(sent).toContain(" ".repeat(8) + "Hi");
-    expect(sent).not.toContain(" ".repeat(9) + "Hi");
-  });
-});
-
-describe("label.service — centerText", () => {
-  it("left-pads each line to center within the column count", () => {
-    expect(centerText("Hi", 10)).toBe("    Hi");
-    expect(centerText("abcd", 6)).toBe(" abcd");
-  });
-
-  it("leaves lines that are at least as wide as the columns untouched", () => {
-    expect(centerText("abcdef", 4)).toBe("abcdef");
-  });
-
-  it("centers each line independently", () => {
-    expect(centerText("Hi\nabcd", 8)).toBe("   Hi\n  abcd");
   });
 
   it("print requires the label.print permission", async () => {
     setAuth(String(userId), ["label.view"]);
-    await expect(endpoints.print({ text: "x", printer: "A" })).rejects.toMatchObject({
-      code: "permission_denied",
-    });
+    await expect(
+      endpoints.print({ imageBase64: PNG_B64, printer: "A" }),
+    ).rejects.toMatchObject({ code: "permission_denied" });
   });
 });

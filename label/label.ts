@@ -3,7 +3,7 @@
  *
  *   GET /label/printers  → list CUPS printers + the user's saved selection.
  *   PUT /label/printer   → persist the user's selected printer.
- *   POST /label/print    → print a text label to a CUPS queue.
+ *   POST /label/print    → print a pre-rendered label image to a CUPS queue.
  *
  * Listing/selecting a printer needs `label.view`; printing needs
  * `label.print`. The CUPS server itself is configured via CUPS_SERVER_URL.
@@ -97,21 +97,16 @@ export const savePrinter = api(
 
 const MAX_COPIES = 50;
 
+// PNG magic number — the first 8 bytes of every PNG file.
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
 interface PrintRequest {
-  text: string & MinLen<1>;
+  /** The label rendered to a PNG image, base64-encoded (no data: prefix). */
+  imageBase64: string & MinLen<1>;
   /** Defaults to 1. Capped at 50. */
   copies?: number & (Min<1> & Max<typeof MAX_COPIES>);
   /** Override the saved printer for this job (also becomes the new default). */
   printer?: string;
-  /** Characters per inch (font width). Lower = larger font. */
-  cpi?: number & (Min<4> & Max<30>);
-  /** Lines per inch (line height). Lower = fewer lines per label. */
-  lpi?: number & (Min<2> & Max<16>);
-  /** Horizontal text alignment on the label. Defaults to "left". */
-  align?: "left" | "center";
-  /** Printable label width in mm (from the selected label type), used to
-   *  center text. Falls back to CUPS_LABEL_WIDTH_MM when omitted. */
-  labelWidthMm?: number & (Min<10> & Max<300>);
 }
 
 interface PrintResponse {
@@ -124,9 +119,9 @@ export const print = api(
   async (req: PrintRequest): Promise<PrintResponse> => {
     const userId = requireUser("label.print");
 
-    const text = req.text ?? "";
-    if (!text.trim()) {
-      throw APIError.invalidArgument("Text darf nicht leer sein");
+    const image = Buffer.from(req.imageBase64 ?? "", "base64");
+    if (image.length < PNG_SIGNATURE.length || !image.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
+      throw APIError.invalidArgument("Ungültiges Label-Bild (kein PNG)");
     }
 
     const copies =
@@ -143,13 +138,9 @@ export const print = api(
 
     await svc.printLabel({
       printer,
-      text,
+      image,
       copies,
       user: `fk-encore-user-${userId}`,
-      cpi: req.cpi,
-      lpi: req.lpi,
-      align: req.align === "center" ? "center" : "left",
-      labelWidthMm: req.labelWidthMm,
     });
 
     // If the caller passed an explicit printer, remember it as the new

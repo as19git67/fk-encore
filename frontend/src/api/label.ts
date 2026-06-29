@@ -27,17 +27,10 @@ export function saveLabelPrinter(printer: string) {
 }
 
 export interface PrintLabelRequest {
-  text: string
+  /** The label rendered to a PNG image, base64-encoded (no data: prefix). */
+  imageBase64: string
   copies?: number
   printer?: string
-  /** Characters per inch (font width). Lower = larger font. */
-  cpi?: number
-  /** Lines per inch (line height). Lower = fewer lines per label. */
-  lpi?: number
-  /** Horizontal text alignment on the label. */
-  align?: 'left' | 'center'
-  /** Printable label width in mm (from the selected label type). */
-  labelWidthMm?: number
 }
 
 export function printLabel(req: PrintLabelRequest) {
