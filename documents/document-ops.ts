@@ -6,20 +6,31 @@
  * layer.
  */
 
-import { and, eq, sql } from "drizzle-orm";
+import fs from "node:fs/promises";
+import crypto from "node:crypto";
+import { and, eq, ne, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbFirst } from "../db/adapter";
 import {
   documentCategories,
+  documentReceiptExtraction,
   documentSubjectPersons,
   documentTagLinks,
   documentTags,
   documentTaxSections,
   documents,
 } from "../db/schema";
+import { createReceiptAutoTransaction } from "../finance/receipt-booking";
+import {
+  extractReceipt,
+  extractReceiptItems,
+  isReceiptOcrHealthy,
+  ReceiptOcrUnavailableError,
+} from "./receipt-ocr-client";
 import { extractPdfText, PdfPasswordRequiredError } from "./text-extract";
-import { buildThumbnail } from "./thumbnail";
+import { buildThumbnail, removeThumbnail } from "./thumbnail";
 import { removeOcrPdf, writeOcrPdf } from "./ocr-pdf";
+import { jpegToReceiptPdf } from "./receipt-pdf";
 import { deleteJobsForDocument } from "./scan-queue";
 import { checkReceiptEnrichment, createSuggestionsForDocument } from "../finance/document-match.service";
 import {
@@ -187,14 +198,23 @@ export async function runTextExtract(documentId: number): Promise<void> {
     );
   }
 
+  // Receipt captures (identified by a set receipt_ocr_state) run a trimmed
+  // pipeline — only text_extract + receipt_ocr, no classify/embed — so
+  // text_extract is their terminal step. Settle them on "ready" instead of
+  // "classifying"; otherwise they'd hang in "KI-Analyse" forever, because no
+  // classify job ever runs to move them on. (receipt_ocr tracks its own
+  // progress separately via receipt_ocr_state.)
+  const isReceiptCapture = row.receipt_ocr_state != null;
+  const nextStatus: DocumentStatus = isReceiptCapture ? "ready" : "classifying";
+
   await db
     .update(documents)
     .set({
       extracted_text: text.length === 0 ? null : text,
-      status: "classifying",
+      status: nextStatus,
     })
     .where(eq(documents.id, documentId));
-  await publishStatusChanged(documentId, row.user_id, "classifying");
+  await publishStatusChanged(documentId, row.user_id, nextStatus);
 }
 
 /**
@@ -699,3 +719,269 @@ export async function replaceUserTaxSections(
 
 /** Exported for tests / seed completeness checks. */
 export { flattenTaxonomy };
+
+// ─── Receipt-OCR background job ───────────────────────────────────────────────
+
+/** Amount threshold for automatic booking (plan decision §3). */
+const RECEIPT_AUTO_BOOK_MIN = 0;
+const RECEIPT_AUTO_BOOK_MAX = 999;
+
+/**
+ * Return today's date as YYYY-MM-DD in local server time.
+ * Used to cap the booking date so a receipt can never be booked in the future.
+ */
+function localTodayIso(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Job: `receipt_ocr`.
+ *
+ * Runs only for documents captured via the `receipt-capture` endpoint
+ * with an `X-Account-Id` header (i.e. `receipt_ocr_state = 'pending'`).
+ *
+ * Pipeline:
+ * 1. Call receipt-ocr-service to extract amount / date / store / items.
+ * 2. Persist the raw extraction in `document_receipt_extraction`.
+ * 3. If the amount is reliable (>0 and <=999): auto-create a cash transaction.
+ * 4. If not reliable: mark the document as `incomplete`.
+ *
+ * Throws `ReceiptOcrUnavailableError` when the service is down so the
+ * worker defers the job (retry with exponential back-off, no permanent failure).
+ */
+export async function runReceiptOcr(documentId: number): Promise<void> {
+  const row = await getDocumentOrThrow(documentId);
+
+  // Guard: only process documents that are waiting for receipt OCR.
+  if (row.receipt_ocr_state !== "pending") return;
+  if (!row.receipt_account_id) {
+    // No account chosen — mark incomplete so UI can notify the user.
+    await db.update(documents)
+      .set({ receipt_ocr_state: "incomplete" })
+      .where(eq(documents.id, documentId));
+    return;
+  }
+
+  // Health check — defer the job if the service is cold/restarting.
+  const healthy = await isReceiptOcrHealthy().catch(() => false);
+  if (!healthy) {
+    throw new ReceiptOcrUnavailableError("receipt-ocr-service health check failed");
+  }
+
+  // Read the stored PDF/image from disk.
+  assertPathUnderDocumentsRoot(row.disk_path);
+  const buffer = await fs.readFile(row.disk_path);
+
+  // Receipt captures are stored as PDF (image wrapped in PDF by uploadReceiptCapture),
+  // but the receipt-ocr service expects an image. Extract the embedded JPEG so the
+  // service receives the same data the old synchronous path used to send.
+  let ocrBuffer: Buffer = buffer;
+  let ocrMimeType = row.mime_type;
+  let ocrFilename = row.original_filename;
+  if (row.mime_type === "application/pdf") {
+    const jpeg = extractJpegFromPdf(buffer);
+    if (jpeg) {
+      ocrBuffer = jpeg;
+      ocrMimeType = "image/jpeg";
+      ocrFilename = row.original_filename.replace(/\.pdf$/i, ".jpg");
+    }
+    // If no JPEG found (genuine PDF receipt), fall through — the service may handle PDFs.
+  }
+
+  // Stage 1: core extraction (amount / date / store).
+  const core = await extractReceipt(ocrBuffer, ocrFilename, ocrMimeType);
+
+  // If the service straightened/rotated the image, replace the stored PDF with
+  // the corrected version so the viewed document is upright and de-warped.
+  // Best-effort: failures here must never block booking.
+  if (core.corrected_image && row.mime_type === "application/pdf") {
+    try {
+      await replaceStoredReceiptImage(row, core.corrected_image);
+    } catch (err) {
+      console.warn(
+        `[documents] replacing corrected receipt image failed for doc=${documentId}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  // Stage 2: line-item extraction — best-effort, failures don't block booking.
+  let items: Array<{ name: string; amount: number }> = [];
+  if (core.raw_text) {
+    try {
+      const itemsResult = await extractReceiptItems(core.raw_text);
+      items = itemsResult.items;
+    } catch (err) {
+      console.warn(
+        `[documents] receipt items extraction failed for doc=${documentId}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  // Persist extraction result.
+  await db
+    .insert(documentReceiptExtraction)
+    .values({
+      document_id: documentId,
+      amount: core.amount != null ? String(core.amount) : null,
+      receipt_date: core.date,
+      store: core.store,
+      items,
+      ocr_confidence: core.ocr_confidence,
+    })
+    .onConflictDoUpdate({
+      target: documentReceiptExtraction.document_id,
+      set: {
+        amount: core.amount != null ? String(core.amount) : null,
+        receipt_date: core.date,
+        store: core.store,
+        items,
+        ocr_confidence: core.ocr_confidence,
+      },
+    });
+
+  // Determine if the amount is reliable enough for auto-booking.
+  const reliable =
+    core.amount != null &&
+    core.amount > RECEIPT_AUTO_BOOK_MIN &&
+    core.amount <= RECEIPT_AUTO_BOOK_MAX;
+
+  if (!reliable) {
+    await db.update(documents)
+      .set({ receipt_ocr_state: "incomplete" })
+      .where(eq(documents.id, documentId));
+    console.log(
+      `[documents] receipt OCR doc=${documentId}: amount=${core.amount} outside reliable range — marked incomplete`,
+    );
+    // Notify user that receipt was recognised but amount needs manual entry.
+    void realtime.publishEvent({
+      userIds: [String(row.user_id)],
+      channel: "finance",
+      type: "receipt.incomplete",
+      resourceId: String(documentId),
+      payload: { document_id: documentId },
+    }).catch(err => console.warn(`[documents] receipt.incomplete realtime failed doc=${documentId}: ${(err as Error).message}`));
+    void push.notifyReceiptIncomplete({ userId: row.user_id, documentId })
+      .catch(err => console.warn(`[documents] notifyReceiptIncomplete failed doc=${documentId}: ${(err as Error).message}`));
+    return;
+  }
+
+  // Clamp booking date: use receipt date, fall back to today, never in the future.
+  const today = localTodayIso();
+  let bookingDate = core.date ?? today;
+  if (bookingDate > today) bookingDate = today;
+
+  // Build a purpose string from items (e.g. "Milch, Joghurt, Brot").
+  const purpose =
+    items.length > 0
+      ? items.map((i) => i.name).join(", ").slice(0, 255)
+      : null;
+
+  const txId = await createReceiptAutoTransaction({
+    documentId,
+    accountId: row.receipt_account_id,
+    amount: -(core.amount!), // expenses are negative
+    bookingDate,
+    counterparty: core.store,
+    purpose,
+    currencyCode: core.currency ?? "EUR",
+  });
+
+  if (txId !== null) {
+    console.log(
+      `[documents] receipt OCR doc=${documentId}: auto-booked tx=${txId} amount=${core.amount} on account=${row.receipt_account_id}`,
+    );
+    // Notify user that a new transaction was automatically created.
+    void realtime.publishEvent({
+      userIds: [String(row.user_id)],
+      channel: "finance",
+      type: "receipt.booked",
+      resourceId: String(txId),
+      payload: { transaction_id: txId, document_id: documentId, amount: core.amount, store: core.store },
+    }).catch(err => console.warn(`[documents] receipt.booked realtime failed doc=${documentId}: ${(err as Error).message}`));
+    void push.notifyReceiptBooked({
+      userId: row.user_id,
+      transactionId: txId,
+      documentId,
+      amount: core.amount!,
+      store: core.store,
+    }).catch(err => console.warn(`[documents] notifyReceiptBooked failed doc=${documentId}: ${(err as Error).message}`));
+  }
+}
+
+/**
+ * Replace a receipt document's stored PDF with the service-corrected image.
+ *
+ * The receipt-ocr service returns a cropped, perspective-de-warped and
+ * upright-rotated JPEG (base64) when it changed the geometry. We wrap it back
+ * into the same single-page PDF the upload path produces, overwrite the file in
+ * place, and refresh the derived artifacts (searchable sidecar + thumbnail) so
+ * the viewer shows the straightened document.
+ *
+ * No-ops silently when the corrected image collides with another document's
+ * content (the unique sha256 constraint) — the original file is kept.
+ */
+async function replaceStoredReceiptImage(
+  row: typeof documents.$inferSelect,
+  correctedImageB64: string,
+): Promise<void> {
+  const jpeg = Buffer.from(correctedImageB64, "base64");
+  if (jpeg.length === 0) return;
+
+  const pdf = await jpegToReceiptPdf(jpeg);
+  const digest = crypto.createHash("sha256").update(pdf).digest("hex");
+
+  // Keep the original if the corrected content already exists as another doc —
+  // the unique sha256 constraint would otherwise reject the update.
+  const duplicate = await dbFirst<{ id: number }>(
+    db.select({ id: documents.id }).from(documents)
+      .where(and(eq(documents.sha256, digest), ne(documents.id, row.id))),
+  );
+  if (duplicate) return;
+
+  assertPathUnderDocumentsRoot(row.disk_path);
+  await fs.writeFile(row.disk_path, pdf);
+
+  await removeOcrPdf(row.id);
+  await removeThumbnail(row.id);
+
+  await db.update(documents)
+    .set({ sha256: digest, size_bytes: pdf.length })
+    .where(eq(documents.id, row.id));
+
+  // Rebuild the thumbnail eagerly from the new file (best-effort).
+  await buildThumbnail(row.id, row.disk_path).catch(() => {});
+}
+
+/**
+ * Extract the embedded JPEG from a hand-crafted receipt PDF (as built by
+ * `singleJpegPagePdf` in receipt-pdf.ts). The receipt-ocr service expects an
+ * image, not a PDF wrapper, so we recover the raw JPEG bytes by locating the
+ * SOI (FF D8) / EOI (FF D9) markers inside the PDF binary.
+ *
+ * Returns null for genuine PDFs that don't contain a raw JPEG stream.
+ */
+function extractJpegFromPdf(pdfBuf: Buffer): Buffer | null {
+  let start = -1;
+  for (let i = 0; i < pdfBuf.length - 1; i++) {
+    if (pdfBuf[i] === 0xff && pdfBuf[i + 1] === 0xd8) {
+      start = i;
+      break;
+    }
+  }
+  if (start === -1) return null;
+
+  let end = -1;
+  for (let i = pdfBuf.length - 2; i >= start; i--) {
+    if (pdfBuf[i] === 0xff && pdfBuf[i + 1] === 0xd9) {
+      end = i + 2;
+      break;
+    }
+  }
+  if (end === -1) return null;
+
+  return Buffer.from(pdfBuf.subarray(start, end));
+}

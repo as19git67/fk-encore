@@ -792,6 +792,20 @@
       "when": 1782604800000,
       "tag": "0112_photo_duplicate_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 113,
+      "version": "7",
+      "when": 1782691200000,
+      "tag": "0113_receipt_ocr_pipeline",
+      "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "7",
+      "when": 1782777600000,
+      "tag": "0114_document_job_receipt_ocr",
+      "breakpoints": true
     }
   ]
 }

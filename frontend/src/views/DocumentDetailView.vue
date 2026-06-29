@@ -380,15 +380,23 @@ async function onDownload() {
   }
 }
 
-async function onDelete() {
+function onDelete() {
   if (!doc.value) return
-  if (!window.confirm('Dokument wirklich endgültig löschen?')) return
-  try {
-    await deleteDocument(doc.value.id)
-    router.push({ name: 'dokumente-list' })
-  } catch (err: any) {
-    error.value = err.message || 'Löschen fehlgeschlagen'
-  }
+  confirmDialog.require({
+    message: 'Dokument wirklich endgültig löschen? Diese Aktion kann nicht rückgängig gemacht werden.',
+    header: 'Dokument löschen',
+    icon: 'pi pi-exclamation-triangle',
+    rejectProps: { label: 'Abbrechen', severity: 'secondary', outlined: true },
+    acceptProps: { label: 'Löschen', severity: 'danger' },
+    accept: async () => {
+      try {
+        await deleteDocument(doc.value!.id)
+        void router.push({ name: 'dokumente-list' })
+      } catch (err: any) {
+        error.value = err.message || 'Löschen fehlgeschlagen'
+      }
+    },
+  })
 }
 
 const replaceFileInput = ref<HTMLInputElement | null>(null)
@@ -492,12 +500,6 @@ onBeforeUnmount(() => {
 <template>
   <div class="document-detail-view">
     <div class="header">
-      <div v-if="linkedTransactions.length && openedFromTransactionId === null" class="linked-transactions">
-        <span v-for="transaction in linkedTransactions" :key="transaction.transaction_id">
-          <Button :label="`${transaction.counterparty ?? 'Buchung'} · ${transaction.amount}`" size="small" text @click="router.push({ name: 'finance-transaction-detail', params: { id: transaction.transaction_id } })" />
-          <Button icon="pi pi-times" size="small" text aria-label="Buchungsverknüpfung trennen" @click="requestUnlinkTransaction(transaction.transaction_id)" />
-        </span>
-      </div>
       <Button icon="pi pi-arrow-left" label="Zurück" aria-label="Zurück" text @click="goBack" />
       <div class="header-actions">
         <Button
@@ -686,6 +688,30 @@ onBeforeUnmount(() => {
         <div class="meta-summary" v-if="doc.summary">
           <i class="pi pi-info-circle" />
           <span>{{ doc.summary }}</span>
+        </div>
+
+        <div v-if="linkedTransactions.length && openedFromTransactionId === null" class="linked-tx-section">
+          <span class="label">Verknüpfte Buchungen</span>
+          <div class="linked-tx-list">
+            <div v-for="tx in linkedTransactions" :key="tx.transaction_id" class="linked-tx-row">
+              <Button
+                :label="`${tx.counterparty ?? 'Buchung'} · ${tx.amount}`"
+                size="small"
+                text
+                icon="pi pi-external-link"
+                class="linked-tx-btn"
+                @click="router.push({ name: 'finance-transaction-detail', params: { id: tx.transaction_id } })"
+              />
+              <Button
+                icon="pi pi-times"
+                size="small"
+                text
+                severity="secondary"
+                aria-label="Buchungsverknüpfung trennen"
+                @click="requestUnlinkTransaction(tx.transaction_id)"
+              />
+            </div>
+          </div>
         </div>
 
         <div class="meta-form">
@@ -1000,6 +1026,27 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 .header-actions { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+
+.linked-tx-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.6rem 0.75rem;
+  background: color-mix(in srgb, var(--p-primary-color) 6%, transparent);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 6px;
+}
+.linked-tx-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.linked-tx-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.linked-tx-btn { flex: 1; justify-content: flex-start; }
 
 .help-flyout {
   max-width: min(22rem, 90vw);

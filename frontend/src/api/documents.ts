@@ -232,7 +232,7 @@ export function uploadDocument(file: File, signal?: AbortSignal) {
   })
 }
 
-export function uploadReceiptCapture(file: File, signal?: AbortSignal) {
+export function uploadReceiptCapture(file: File, accountId?: number, signal?: AbortSignal) {
   return apiFetch<DocumentSummary>('/documents/receipt-capture', {
     method: 'POST',
     body: file,
@@ -240,6 +240,7 @@ export function uploadReceiptCapture(file: File, signal?: AbortSignal) {
     headers: {
       'Content-Type': receiptContentType(file),
       'X-File-Name': encodeURIComponent(file.name || 'receipt.jpg'),
+      ...(accountId != null ? { 'X-Account-Id': String(accountId) } : {}),
     },
   })
 }

@@ -28,6 +28,7 @@ import {
 import {
   runClassify,
   runEmbed,
+  runReceiptOcr,
   runTextExtract,
   markDocumentFailed,
 } from "./document-ops";
@@ -35,6 +36,7 @@ import {
   LlmServiceUnavailableError,
   isLlmServiceHealthy,
 } from "./llm-client";
+import { ReceiptOcrUnavailableError } from "./receipt-ocr-client";
 import { withAiSlot, AiSlotTimeoutError, type AiModel } from "../ai-queue/slot-helper";
 import { notifyDocScanQueueChanged } from "./scan-queue-events";
 
@@ -100,7 +102,7 @@ class DocumentScanWorker {
       // on the poll timer (text_extract → classify → embed).
       triggerWorkers();
     } catch (err: any) {
-      if (err instanceof DeferJobError || err instanceof LlmServiceUnavailableError || err instanceof AiSlotTimeoutError) {
+      if (err instanceof DeferJobError || err instanceof LlmServiceUnavailableError || err instanceof AiSlotTimeoutError || err instanceof ReceiptOcrUnavailableError) {
         console.log(`[documents.scan-worker] deferring ${this.service} job ${job.id}: ${err.message}`);
         await deferJob(job.id).catch(() => {});
         return false;
@@ -138,6 +140,9 @@ class DocumentScanWorker {
         }
         return;
       }
+      case "receipt_ocr":
+        await runReceiptOcr(job.document_id);
+        return;
     }
   }
 
@@ -157,12 +162,14 @@ class DocumentScanWorker {
 const textConcurrency = parseInt(process.env.DOC_SCAN_TEXT_CONCURRENCY ?? "1", 10);
 const classifyConcurrency = parseInt(process.env.DOC_SCAN_CLASSIFY_CONCURRENCY ?? "1", 10);
 const embedConcurrency = parseInt(process.env.DOC_SCAN_EMBED_CONCURRENCY ?? "1", 10);
+const receiptOcrConcurrency = parseInt(process.env.DOC_SCAN_RECEIPT_OCR_CONCURRENCY ?? "1", 10);
 
 const textExtractWorker = new DocumentScanWorker("text_extract", textConcurrency);
 const classifyWorker = new DocumentScanWorker("classify", classifyConcurrency);
 const embedWorker = new DocumentScanWorker("embed", embedConcurrency);
+const receiptOcrWorker = new DocumentScanWorker("receipt_ocr", receiptOcrConcurrency);
 
-const ALL_WORKERS = [textExtractWorker, classifyWorker, embedWorker];
+const ALL_WORKERS = [textExtractWorker, classifyWorker, embedWorker, receiptOcrWorker];
 
 /** Wake every worker. Non-blocking; call after enqueueing new jobs. */
 export function triggerWorkers(): void {
@@ -173,7 +180,7 @@ export function triggerWorkers(): void {
 async function startWorkers(): Promise<void> {
   await resetStuckJobs();
   console.log(
-    `[documents.scan-worker] starting — text_extract(c=${textConcurrency}), classify(c=${classifyConcurrency}), embed(c=${embedConcurrency})`,
+    `[documents.scan-worker] starting — text_extract(c=${textConcurrency}), classify(c=${classifyConcurrency}), embed(c=${embedConcurrency}), receipt_ocr(c=${receiptOcrConcurrency})`,
   );
   for (const w of ALL_WORKERS) w.start();
 }
