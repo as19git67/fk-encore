@@ -5798,7 +5798,10 @@ export async function getPersonDetailsLogic(userId: number, personId: number): P
   const faceRows = await dbAll<{
     id: number; user_id: number; photo_id: number; bbox: string;
     person_id: number | null; quality: number | null; ignored: boolean | null;
-    created_at: string | null; filename: string; original_name: string; taken_at: string | null;
+    created_at: string | null; photo_user_id: number; filename: string; original_name: string;
+    mime_type: string; size: number; photo_created_at: string | null; taken_at: string | null;
+    latitude: number | null; longitude: number | null; ai_quality_score: number | null;
+    curation_status: string | null;
   }>(
     db
       .select({
@@ -5810,13 +5813,25 @@ export async function getPersonDetailsLogic(userId: number, personId: number): P
         quality: faces.quality,
         ignored: userFaceAssignments.ignored,
         created_at: faces.created_at,
+        photo_user_id: photos.user_id,
         filename: photos.filename,
         original_name: photos.original_name,
+        mime_type: photos.mime_type,
+        size: photos.size,
+        photo_created_at: photos.created_at,
         taken_at: photos.taken_at,
+        latitude: photos.latitude,
+        longitude: photos.longitude,
+        ai_quality_score: photos.ai_quality_score,
+        curation_status: photoCuration.status,
       })
       .from(userFaceAssignments)
       .innerJoin(faces, eq(faces.id, userFaceAssignments.face_id))
       .innerJoin(photos, eq(faces.photo_id, photos.id))
+      .leftJoin(
+        photoCuration,
+        and(eq(photoCuration.photo_id, photos.id), eq(photoCuration.user_id, userId)),
+      )
       .where(and(eq(userFaceAssignments.person_id, personId), eq(userFaceAssignments.user_id, userId)))
       .orderBy(sql`${photoDateOrder} DESC NULLS LAST`, sql`${faces.id} DESC`)
   );
@@ -5840,11 +5855,17 @@ export async function getPersonDetailsLogic(userId: number, personId: number): P
       created_at: r.created_at ?? "",
       photo: {
         id: r.photo_id,
-        user_id: r.user_id,
+        user_id: r.photo_user_id,
         filename: r.filename,
         original_name: r.original_name,
+        mime_type: r.mime_type,
+        size: r.size,
         taken_at: r.taken_at ?? undefined,
-        created_at: "",
+        created_at: r.photo_created_at ?? "",
+        curation_status: (r.curation_status as "visible" | "hidden" | "favorite") ?? "visible",
+        latitude: r.latitude ?? undefined,
+        longitude: r.longitude ?? undefined,
+        ai_quality_score: r.ai_quality_score ?? undefined,
       },
     })),
   };
