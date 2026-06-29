@@ -3,7 +3,6 @@ import {
   clampFeedZoom,
   feedPinchZoom,
   isFeedFullscreenTap,
-  shouldUseNativeFeedFullscreen,
 } from './feedFullscreen'
 
 describe('feed fullscreen gestures', () => {
@@ -18,10 +17,5 @@ describe('feed fullscreen gestures', () => {
     expect(isFeedFullscreenTap(3, 4, false)).toBe(true)
     expect(isFeedFullscreenTap(20, 0, false)).toBe(false)
     expect(isFeedFullscreenTap(0, 0, true)).toBe(false)
-  })
-
-  it('uses native fullscreen only for desktop-like pointers', () => {
-    expect(shouldUseNativeFeedFullscreen(() => true)).toBe(true)
-    expect(shouldUseNativeFeedFullscreen(() => false)).toBe(false)
   })
 })

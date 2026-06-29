@@ -19,9 +19,3 @@ export function feedPinchZoom(
 export function isFeedFullscreenTap(dx: number, dy: number, pinched: boolean): boolean {
   return !pinched && Math.hypot(dx, dy) < FEED_FULLSCREEN_TAP_SLOP
 }
-
-export function shouldUseNativeFeedFullscreen(
-  matches: (query: string) => boolean = (query) => window.matchMedia(query).matches,
-): boolean {
-  return matches('(hover: hover) and (pointer: fine)')
-}

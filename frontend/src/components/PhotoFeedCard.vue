@@ -204,6 +204,7 @@ async function submitComment() {
       :style="{ aspectRatio }"
       role="button"
       tabindex="0"
+      :data-feed-photo-id="item.photoId"
       aria-label="Foto im Vollbild öffnen"
       @click="emit('open', item)"
       @keydown.enter.prevent="emit('open', item)"

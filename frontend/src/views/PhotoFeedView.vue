@@ -30,9 +30,21 @@ const error = ref('')
 const nextCursor = ref<PhotoFeedCursor | null>(null)
 const hasNew = ref(false)
 const fullscreenItem = ref<FeedPhotoItem | null>(null)
+let fullscreenFocusPhotoId: number | null = null
 
 function openFullscreen(item: FeedPhotoItem) {
+  fullscreenFocusPhotoId = item.photoId
   fullscreenItem.value = item
+}
+
+async function closeFullscreen() {
+  const photoId = fullscreenFocusPhotoId
+  fullscreenItem.value = null
+  await nextTick()
+  if (photoId == null) return
+  const selector = `[data-feed-photo-id="${photoId}"]`
+  const target = document.querySelector<HTMLElement>(selector)
+  target?.focus({ preventScroll: true })
 }
 
 // ── Upload ──────────────────────────────────────────────────────────────────
@@ -338,7 +350,7 @@ onBeforeUnmount(() => {
       v-if="fullscreenItem"
       :filename="fullscreenItem.filename"
       :alt="fullscreenItem.description ?? fullscreenItem.filename"
-      @close="fullscreenItem = null"
+      @close="closeFullscreen"
     />
   </div>
 </template>
