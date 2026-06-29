@@ -10,6 +10,7 @@ import router from './router'
 import './style.css'
 import Tooltip from 'primevue/tooltip'
 import { deviceSupportsHoverTooltips } from './utils/tooltips'
+import { installAppUpdateMonitor } from './utils/appUpdate'
 
 function getFirstDayOfWeek(): number {
   try {
@@ -94,3 +95,4 @@ app.use(ConfirmationService)
 app.directive('tooltip', deviceSupportsHoverTooltips() ? Tooltip : {})
 
 app.mount('#app')
+installAppUpdateMonitor()
