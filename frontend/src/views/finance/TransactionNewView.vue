@@ -13,8 +13,7 @@ import { useAccountsStore } from '../../stores/finance/accounts'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useTagsStore } from '../../stores/finance/tags'
 import { linkDocumentsToTransactions, recentCashRecipients, searchRecipients, type RecentRecipient } from '../../api/finance'
-import { deleteDocument, extractReceiptItems, extractReceiptOcr, searchDocuments, updateDocument, uploadReceiptCapture, type DocumentSummary, type ReceiptOcrResult } from '../../api/documents'
-import { parseLocalDate } from '../../utils/dateFormat'
+import { deleteDocument, searchDocuments, updateDocument, uploadReceiptCapture, type DocumentSummary } from '../../api/documents'
 import { useModuleBack } from '../../composables/useModuleBack'
 
 const route = useRoute()
@@ -46,7 +45,6 @@ const documentSearchError = ref<string | null>(null)
 const receiptInput = ref<HTMLInputElement | null>(null)
 const receiptUploading = ref(false)
 const receiptStatus = ref<string | null>(null)
-const receiptSuggestion = ref<string | null>(null)
 const receiptDocumentId = ref<number | null>(null)
 const dateTouched = ref(false)
 
@@ -173,13 +171,16 @@ function removeSelectedDocument(documentId: number) {
   selectedDocuments.value = selectedDocuments.value.filter(document => document.id !== documentId)
   if (documentId === receiptDocumentId.value) {
     receiptDocumentId.value = null
-    receiptSuggestion.value = null
     deleteDocument(documentId).catch(() => {})
   }
 }
 
 function openReceiptCapture() {
   if (receiptUploading.value) return
+  if (!accountId.value) {
+    documentSearchError.value = 'Bitte zuerst ein Konto auswählen.'
+    return
+  }
   receiptInput.value?.click()
 }
 
@@ -190,122 +191,20 @@ async function onReceiptPicked(event: Event) {
   if (!file) return
 
   documentSearchError.value = null
-  receiptSuggestion.value = null
   receiptUploading.value = true
-  receiptStatus.value = 'Beleg wird erkannt …'
+  receiptStatus.value = 'Beleg wird hochgeladen …'
   try {
-    // Run server OCR and upload in parallel for speed
-    const uploadPromise = uploadReceiptCapture(file)
-
-    const result = await extractReceiptOcr(file)
-    const applied = applyOcrResult(result)
-
-    // Line items take the bulk of the LLM time, so the server extracts them in
-    // a second step. Fetch them asynchronously and drop them into the note when
-    // they arrive — never blocking the form or the save.
-    if (result.raw_text) {
-      void extractReceiptItems(result.raw_text)
-        .then(({ items }) => {
-          if (items.length && !purpose.value.trim()) {
-            purpose.value = formatItemsNote(items)
-          }
-        })
-        .catch((err) => {
-          console.warn('[receipt] line-item extraction failed:', err)
-        })
-    }
-
-    receiptStatus.value = 'Beleg wird hochgeladen …'
-    const uploaded = await uploadPromise
+    const uploaded = await uploadReceiptCapture(file, accountId.value ?? undefined)
     receiptDocumentId.value = uploaded.id
     selectDocument(uploaded)
-
-    // Rename the stored receipt to "YYYY-MM-DD_Store", set sender/date and
-    // file it under the dedicated "Belege" category. Best-effort and fire-
-    // and-forget: it must never block the form. Setting these attributes pins
-    // the document so the background classifier won't refile the receipt.
-    void updateDocument(uploaded.id, {
-      title: buildReceiptTitle(result.date, result.store),
-      sender: result.store?.trim() || null,
-      doc_date: isIsoDate(result.date) ? result.date : null,
-      category_slug: 'belege',
-    }).catch((err) => {
-      console.warn('[receipt] document rename/categorize failed:', err)
-    })
-
-    receiptStatus.value = null
-    receiptSuggestion.value = applied.length > 0
-      ? `Aus Beleg übernommen: ${applied.join(', ')}. Beleg wird als „${buildReceiptTitle(result.date, result.store)}" abgelegt.`
-      : 'Beleg wurde erkannt, aber es gab keine neuen Formularwerte. Server-Analyse läuft im Hintergrund.'
+    void updateDocument(uploaded.id, { category_slug: 'belege' }).catch(() => {})
+    receiptStatus.value = 'Buchung folgt automatisch — Sie werden benachrichtigt.'
   } catch (err) {
     receiptStatus.value = null
     documentSearchError.value = err instanceof Error ? err.message : String(err)
   } finally {
     receiptUploading.value = false
   }
-}
-
-function applyOcrResult(result: ReceiptOcrResult): string[] {
-  const applied: string[] = []
-  if (result.amount != null && (!amount.value || amount.value <= 0)) {
-    amount.value = result.amount
-    isExpense.value = true
-    applied.push('Betrag')
-  }
-  if (result.date && !dateTouched.value) {
-    const parsed = parseLocalDate(result.date)
-    if (!Number.isNaN(parsed.getTime())) {
-      bookingDate.value = parsed
-      applied.push('Datum')
-    }
-  }
-  if (result.store && !counterparty.value) {
-    // Reuse a known recipient (canonical spelling + its saved tags) when the
-    // recognized store matches one; otherwise take the raw store name.
-    const match = recentRecipients.value.find(
-      (r) => r.counterparty.toLowerCase() === result.store!.trim().toLowerCase(),
-    )
-    if (match) {
-      counterparty.value = match.counterparty
-      if (match.tags?.length && tags.value.length === 0) {
-        tags.value = [...match.tags]
-        applied.push('Tags')
-      }
-    } else {
-      counterparty.value = result.store
-    }
-    applied.push('Empfänger')
-  }
-  // Line items are no longer part of the synchronous result — they are fetched
-  // asynchronously in onReceiptPicked and dropped into the note when ready.
-  return applied
-}
-
-function isIsoDate(value: string | null): value is string {
-  return !!value && /^\d{4}-\d{2}-\d{2}$/.test(value)
-}
-
-function buildReceiptTitle(date: string | null, store: string | null): string {
-  const datePart = isIsoDate(date) ? date : toLocalIsoDate(bookingDate.value)
-  // Strip characters that are invalid in file paths — the title feeds the
-  // document's canonical filename on disk.
-  const storePart = (store ?? '')
-    .replace(/[\\/:*?"<>|]+/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-  return storePart ? `${datePart}_${storePart}` : `${datePart}_Beleg`
-}
-
-function formatItemsNote(items: { name: string; amount: number }[]): string {
-  return items
-    .filter((it) => it.name?.trim())
-    .map((it) => {
-      const amt = typeof it.amount === 'number' && it.amount > 0
-        ? ` ${it.amount.toFixed(2).replace('.', ',')}`
-        : ''
-      return `${it.name.trim()}${amt}`
-    })
-    .join(' · ')
 }
 
 async function save() {
@@ -501,7 +400,6 @@ async function save() {
         />
       </div>
       <p v-if="receiptStatus" class="document-info">{{ receiptStatus }}</p>
-      <p v-if="receiptSuggestion" class="document-success">{{ receiptSuggestion }}</p>
       <p v-if="documentSearchError" class="document-error">{{ documentSearchError }}</p>
 
       <ul v-if="selectedDocuments.length" class="document-list selected-documents" aria-label="Ausgewählte Dokumente">
