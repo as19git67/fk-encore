@@ -195,14 +195,11 @@ async function onReceiptPicked(event: Event) {
   receiptStatus.value = 'Beleg wird hochgeladen …'
   try {
     const uploaded = await uploadReceiptCapture(file, accountId.value ?? undefined)
-    receiptDocumentId.value = uploaded.id
-    selectDocument(uploaded)
     void updateDocument(uploaded.id, { category_slug: 'belege' }).catch(() => {})
-    receiptStatus.value = 'Buchung folgt automatisch — Sie werden benachrichtigt.'
+    goBack()
   } catch (err) {
     receiptStatus.value = null
     documentSearchError.value = err instanceof Error ? err.message : String(err)
-  } finally {
     receiptUploading.value = false
   }
 }
