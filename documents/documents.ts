@@ -54,6 +54,7 @@ import {
   updateSubjectPerson,
 } from "./subject-persons";
 import { dropTaxLinks, relocateDocument } from "./relocate";
+import { straightenReceipt } from "./receipt-straighten";
 import {
   assertGroupMember,
   loadAdministrableDocument,
@@ -741,8 +742,15 @@ async function imageToReceiptPdf(input: Buffer): Promise<Buffer> {
   const image = isHeicBuffer(input)
     ? Buffer.from(await heicConvert({ buffer: input, format: "JPEG", quality: 0.9 }))
     : input;
-  const normalized = sharp(image, { failOn: "none" }).rotate().flatten({ background: "#ffffff" });
-  const { data: jpeg, info } = await normalized
+  // Auto-rotate (EXIF) and flatten transparency before straightening
+  const rotated = await sharp(image, { failOn: "none" })
+    .rotate()
+    .flatten({ background: "#ffffff" })
+    .jpeg({ quality: 92 })
+    .toBuffer();
+  // Perspective-correct the receipt; falls back to original on failure
+  const straightened = await straightenReceipt(rotated);
+  const { data: jpeg, info } = await sharp(straightened, { failOn: "none" })
     .jpeg({ quality: 90, mozjpeg: true })
     .toBuffer({ resolveWithObject: true });
   return singleJpegPagePdf(jpeg, info.width || 1000, info.height || 1000);
