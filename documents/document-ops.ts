@@ -7,7 +7,8 @@
  */
 
 import fs from "node:fs/promises";
-import { and, eq, sql } from "drizzle-orm";
+import crypto from "node:crypto";
+import { and, eq, ne, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbFirst } from "../db/adapter";
 import {
@@ -27,8 +28,9 @@ import {
   ReceiptOcrUnavailableError,
 } from "./receipt-ocr-client";
 import { extractPdfText, PdfPasswordRequiredError } from "./text-extract";
-import { buildThumbnail } from "./thumbnail";
+import { buildThumbnail, removeThumbnail } from "./thumbnail";
 import { removeOcrPdf, writeOcrPdf } from "./ocr-pdf";
+import { jpegToReceiptPdf } from "./receipt-pdf";
 import { deleteJobsForDocument } from "./scan-queue";
 import { checkReceiptEnrichment, createSuggestionsForDocument } from "../finance/document-match.service";
 import {
@@ -784,6 +786,19 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
   // Stage 1: core extraction (amount / date / store).
   const core = await extractReceipt(ocrBuffer, ocrFilename, ocrMimeType);
 
+  // If the service straightened/rotated the image, replace the stored PDF with
+  // the corrected version so the viewed document is upright and de-warped.
+  // Best-effort: failures here must never block booking.
+  if (core.corrected_image && row.mime_type === "application/pdf") {
+    try {
+      await replaceStoredReceiptImage(row, core.corrected_image);
+    } catch (err) {
+      console.warn(
+        `[documents] replacing corrected receipt image failed for doc=${documentId}: ${(err as Error).message}`,
+      );
+    }
+  }
+
   // Stage 2: line-item extraction — best-effort, failures don't block booking.
   let items: Array<{ name: string; amount: number }> = [];
   if (core.raw_text) {
@@ -889,8 +904,52 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
 }
 
 /**
+ * Replace a receipt document's stored PDF with the service-corrected image.
+ *
+ * The receipt-ocr service returns a cropped, perspective-de-warped and
+ * upright-rotated JPEG (base64) when it changed the geometry. We wrap it back
+ * into the same single-page PDF the upload path produces, overwrite the file in
+ * place, and refresh the derived artifacts (searchable sidecar + thumbnail) so
+ * the viewer shows the straightened document.
+ *
+ * No-ops silently when the corrected image collides with another document's
+ * content (the unique sha256 constraint) — the original file is kept.
+ */
+async function replaceStoredReceiptImage(
+  row: typeof documents.$inferSelect,
+  correctedImageB64: string,
+): Promise<void> {
+  const jpeg = Buffer.from(correctedImageB64, "base64");
+  if (jpeg.length === 0) return;
+
+  const pdf = await jpegToReceiptPdf(jpeg);
+  const digest = crypto.createHash("sha256").update(pdf).digest("hex");
+
+  // Keep the original if the corrected content already exists as another doc —
+  // the unique sha256 constraint would otherwise reject the update.
+  const duplicate = await dbFirst<{ id: number }>(
+    db.select({ id: documents.id }).from(documents)
+      .where(and(eq(documents.sha256, digest), ne(documents.id, row.id))),
+  );
+  if (duplicate) return;
+
+  assertPathUnderDocumentsRoot(row.disk_path);
+  await fs.writeFile(row.disk_path, pdf);
+
+  await removeOcrPdf(row.id);
+  await removeThumbnail(row.id);
+
+  await db.update(documents)
+    .set({ sha256: digest, size_bytes: pdf.length })
+    .where(eq(documents.id, row.id));
+
+  // Rebuild the thumbnail eagerly from the new file (best-effort).
+  await buildThumbnail(row.id, row.disk_path).catch(() => {});
+}
+
+/**
  * Extract the embedded JPEG from a hand-crafted receipt PDF (as built by
- * `singleJpegPagePdf` in documents.ts). The receipt-ocr service expects an
+ * `singleJpegPagePdf` in receipt-pdf.ts). The receipt-ocr service expects an
  * image, not a PDF wrapper, so we recover the raw JPEG bytes by locating the
  * SOI (FF D8) / EOI (FF D9) markers inside the PDF binary.
  *

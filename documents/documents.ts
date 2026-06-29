@@ -54,7 +54,7 @@ import {
   updateSubjectPerson,
 } from "./subject-persons";
 import { dropTaxLinks, relocateDocument } from "./relocate";
-import { straightenReceipt } from "./receipt-straighten";
+import { singleJpegPagePdf } from "./receipt-pdf";
 import {
   assertGroupMember,
   loadAdministrableDocument,
@@ -738,82 +738,26 @@ function isHeicBuffer(buf: Buffer): boolean {
   return HEIC_BRANDS.has(buf.toString("ascii", 8, 12));
 }
 
+/**
+ * Wrap a receipt photo into a single-page PDF for storage.
+ *
+ * Only EXIF auto-rotation + transparency flattening is applied here. Geometric
+ * correction (perspective de-warp, crop, and 0/90/180/270 orientation) is done
+ * later by the receipt-ocr service, which uses OpenCV contour detection and
+ * PaddleOCR text orientation — far more robust than anything we can do here.
+ * The worker then replaces this stored PDF with the service-corrected image
+ * (see `runReceiptOcr` in document-ops.ts).
+ */
 async function imageToReceiptPdf(input: Buffer): Promise<Buffer> {
   const image = isHeicBuffer(input)
     ? Buffer.from(await heicConvert({ buffer: input, format: "JPEG", quality: 0.9 }))
     : input;
-  // Auto-rotate (EXIF) and flatten transparency before straightening
-  const rotated = await sharp(image, { failOn: "none" })
+  const { data: jpeg, info } = await sharp(image, { failOn: "none" })
     .rotate()
     .flatten({ background: "#ffffff" })
-    .jpeg({ quality: 92 })
-    .toBuffer();
-  // Perspective-correct the receipt; falls back to original on failure
-  const straightened = await straightenReceipt(rotated);
-  const { data: jpeg, info } = await sharp(straightened, { failOn: "none" })
     .jpeg({ quality: 90, mozjpeg: true })
     .toBuffer({ resolveWithObject: true });
   return singleJpegPagePdf(jpeg, info.width || 1000, info.height || 1000);
-}
-
-function singleJpegPagePdf(jpeg: Buffer, imageWidth: number, imageHeight: number): Buffer {
-  const pageWidth = 595.28; // A4 portrait in PDF points
-  const pageHeight = 841.89;
-  const margin = 24;
-  const scale = Math.min((pageWidth - margin * 2) / imageWidth, (pageHeight - margin * 2) / imageHeight);
-  const drawWidth = imageWidth * scale;
-  const drawHeight = imageHeight * scale;
-  const x = (pageWidth - drawWidth) / 2;
-  const y = (pageHeight - drawHeight) / 2;
-  const content = Buffer.from(
-    `q\n${drawWidth.toFixed(2)} 0 0 ${drawHeight.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm\n/Im0 Do\nQ\n`,
-    "ascii",
-  );
-  return buildPdf([
-    "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>`,
-    {
-      dict: `<< /Type /XObject /Subtype /Image /Width ${imageWidth} /Height ${imageHeight} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>`,
-      stream: jpeg,
-    },
-    { dict: `<< /Length ${content.length} >>`, stream: content },
-  ]);
-}
-
-function buildPdf(objects: Array<string | { dict: string; stream: Buffer }>): Buffer {
-  const chunks: Buffer[] = [Buffer.from("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n", "binary")];
-  const offsets: number[] = [];
-  let offset = chunks[0].length;
-  objects.forEach((obj, index) => {
-    offsets.push(offset);
-    const prefix = Buffer.from(`${index + 1} 0 obj\n`, "ascii");
-    const body = typeof obj === "string"
-      ? Buffer.from(`${obj}\n`, "ascii")
-      : Buffer.concat([
-          Buffer.from(`${obj.dict}\nstream\n`, "ascii"),
-          obj.stream,
-          Buffer.from("\nendstream\n", "ascii"),
-        ]);
-    const suffix = Buffer.from("endobj\n", "ascii");
-    chunks.push(prefix, body, suffix);
-    offset += prefix.length + body.length + suffix.length;
-  });
-  const xrefOffset = offset;
-  const xrefLines = [
-    "xref",
-    `0 ${objects.length + 1}`,
-    "0000000000 65535 f ",
-    ...offsets.map((value) => `${String(value).padStart(10, "0")} 00000 n `),
-    "trailer",
-    `<< /Size ${objects.length + 1} /Root 1 0 R >>`,
-    "startxref",
-    String(xrefOffset),
-    "%%EOF",
-    "",
-  ];
-  chunks.push(Buffer.from(xrefLines.join("\n"), "ascii"));
-  return Buffer.concat(chunks);
 }
 
 function extractReceiptAmount(text: string | null | undefined): number | null {
