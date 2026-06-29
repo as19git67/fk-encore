@@ -388,8 +388,13 @@ Antworte ausschließlich mit gültigem JSON (UTF-8, ohne Markdown-Fences):
 Regeln:
 - amount: Immer den GESAMTBETRAG (Summe/Total/Zu zahlen), nicht Einzelposten.
   Deutsche Beträge: Komma = Dezimaltrenner (12,99 → 12.99), Punkt = Tausender (1.234,56 → 1234.56).
+  OCR-Artefakte: "«", "€" und "e" können alle das Euro-Zeichen darstellen.
+  WICHTIG: Wenn Kassenbon sowohl "Zwischensumme" als auch "Summe" enthält:
+    - "Zwischensumme" = Betrag VOR Rabatten/Coupons → NICHT als amount verwenden
+    - "Summe" = tatsächlicher Endbetrag NACH allen Abzügen → als amount verwenden
+  Coupon-Ersparnis, Rabatte und Aktionen reduzieren die finale Summe.
 - date: Das Kaufdatum, nicht Druckdatum oder MHD.
-- store: Der Geschäftsname aus dem Kopfbereich (z.B. "REWE", "ALDI", "dm").
+- store: Der Geschäftsname aus dem Kopfbereich (z.B. "REWE", "ALDI", "dm", "Rossmann").
 - Halluziniere keine Daten. Bei Unsicherheit: null."""
 
 
@@ -405,6 +410,19 @@ Regeln:
 - items: Nur erkennbare Einzelposten mit Preis. NICHT den Gesamtbetrag,
   Zwischensummen, Rückgeld, Pfand-Summen oder Steuerzeilen.
 - Deutsche Beträge: Komma = Dezimaltrenner (1,99 → 1.99).
+  OCR-Artefakte: "«", "€" und "e" können alle das Euro-Zeichen darstellen.
+
+Deutsches Kassenbon-Format (typisch):
+  [Menge×] [EAN/Barcode] Artikelname [Einzelpreis] [Gesamtpreis] [MwSt-Kz]
+- Lange Ziffernfolgen (8–13 Stellen, EAN/GTIN) vor dem Artikelnamen = Barcode, NICHT Produktname — ignorieren
+- Mengenkennzeichen am Zeilenanfang: "2x", "2 x", "2 ×" — OCR kann "x" als "%" lesen (z.B. "2%")
+- Bei Mehrfachmengen: die Zeile hat Einzelpreis UND Gesamtpreis → nutze den Gesamtpreis (letzter Preis) als amount
+- MwSt-Kennzeichen am Zeilenende (A, B, 1, 2 o.ä.) sind keine Preise — ignorieren
+
+Werbetexte und Aktionen ignorieren:
+- Werbebanner, Coupon-Aktionen, Prospekthinweise und Rabattangebote am Belegende sind KEINE Artikel
+- Erkennbar durch: "% auf …", Datumsangaben künftiger Aktionen, App-Hinweise, QR-Code-Texte
+
 - Leere Liste wenn unklar. Halluziniere keine Posten."""
 
 
