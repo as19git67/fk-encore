@@ -1,11 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { getPhotoUrl } from '../api/photos'
-import {
-  feedPinchZoom,
-  isFeedFullscreenTap,
-  shouldUseNativeFeedFullscreen,
-} from '../utils/feedFullscreen'
+import { feedPinchZoom, isFeedFullscreenTap } from '../utils/feedFullscreen'
 
 const props = defineProps<{
   filename: string
@@ -38,10 +34,14 @@ let elementCenterX = 0
 let elementCenterY = 0
 let pinched = false
 let moved = false
-let nativeRequested = false
 let closing = false
 let previousBodyOverflow = ''
 let suppressClickUntil = 0
+
+function consumeEvent(event: Event) {
+  event.preventDefault()
+  event.stopPropagation()
+}
 
 function distance(a: Touch, b: Touch): number {
   return Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY)
@@ -52,6 +52,7 @@ function midpoint(a: Touch, b: Touch): { x: number; y: number } {
 }
 
 function onTouchStart(event: TouchEvent) {
+  consumeEvent(event)
   if (event.touches.length === 1) {
     const touch = event.touches[0]!
     touchStartX = touch.clientX
@@ -79,7 +80,7 @@ function onTouchStart(event: TouchEvent) {
 }
 
 function onTouchMove(event: TouchEvent) {
-  event.preventDefault()
+  consumeEvent(event)
   if (event.touches.length === 2) {
     const first = event.touches[0]!
     const second = event.touches[1]!
@@ -103,6 +104,7 @@ function onTouchMove(event: TouchEvent) {
 }
 
 function onTouchEnd(event: TouchEvent) {
+  consumeEvent(event)
   if (event.touches.length > 0 || event.changedTouches.length === 0) return
   const touch = event.changedTouches[0]!
   const dx = touch.clientX - touchStartX
@@ -114,82 +116,50 @@ function onTouchEnd(event: TouchEvent) {
   if (isFeedFullscreenTap(dx, dy, pinched)) void close()
 }
 
-function onTouchCancel() {
+function onTouchCancel(event: TouchEvent) {
+  consumeEvent(event)
   moved = true
   suppressClickUntil = Date.now() + 500
 }
 
-function onContentClick() {
+function onOverlayClick(event: MouseEvent) {
+  consumeEvent(event)
+  if (event.target === overlayRef.value) close()
+}
+
+function onContentClick(event: MouseEvent) {
+  consumeEvent(event)
   if (Date.now() < suppressClickUntil) return
-  void close()
+  close()
 }
 
-type FullscreenDocument = Document & {
-  webkitFullscreenElement?: Element
-  webkitExitFullscreen?: () => Promise<void>
+function onCloseClick(event: Event) {
+  consumeEvent(event)
+  close()
 }
 
-type FullscreenElement = HTMLElement & {
-  webkitRequestFullscreen?: () => Promise<void>
-}
-
-function fullscreenElement(): Element | null {
-  const doc = document as FullscreenDocument
-  return doc.fullscreenElement ?? doc.webkitFullscreenElement ?? null
-}
-
-async function requestNativeFullscreen() {
-  if (!shouldUseNativeFeedFullscreen()) return
-  const element = overlayRef.value as FullscreenElement | null
-  if (!element) return
-  try {
-    if (element.requestFullscreen) await element.requestFullscreen()
-    else if (element.webkitRequestFullscreen) await element.webkitRequestFullscreen()
-    nativeRequested = fullscreenElement() === element
-  } catch {
-    // CSS fullscreen remains fully functional when browser policy rejects it.
-  }
-}
-
-async function exitNativeFullscreen() {
-  if (fullscreenElement() !== overlayRef.value) return
-  const doc = document as FullscreenDocument
-  if (doc.exitFullscreen) await doc.exitFullscreen()
-  else if (doc.webkitExitFullscreen) await doc.webkitExitFullscreen()
-}
-
-async function close() {
+function close() {
   if (closing) return
   closing = true
-  try { await exitNativeFullscreen() } catch { /* overlay still closes */ }
   emit('close')
 }
 
-function onFullscreenChange() {
-  if (nativeRequested && !fullscreenElement() && !closing) emit('close')
-}
-
 function onKeydown(event: KeyboardEvent) {
-  if (event.key !== 'Escape') return
+  if (event.key !== 'Escape' && event.key !== 'Enter' && event.key !== ' ') return
   event.preventDefault()
   event.stopImmediatePropagation()
-  void close()
+  close()
 }
 
 onMounted(() => {
   previousBodyOverflow = document.body.style.overflow
   document.body.style.overflow = 'hidden'
   window.addEventListener('keydown', onKeydown, true)
-  document.addEventListener('fullscreenchange', onFullscreenChange)
-  document.addEventListener('webkitfullscreenchange', onFullscreenChange)
-  void requestNativeFullscreen()
 })
 
 onUnmounted(() => {
   document.body.style.overflow = previousBodyOverflow
   window.removeEventListener('keydown', onKeydown, true)
-  document.removeEventListener('fullscreenchange', onFullscreenChange)
-  document.removeEventListener('webkitfullscreenchange', onFullscreenChange)
 })
 </script>
 
@@ -201,7 +171,7 @@ onUnmounted(() => {
       role="dialog"
       aria-modal="true"
       aria-label="Foto im Vollbild"
-      @click.self="close"
+      @click="onOverlayClick"
       @touchstart="onTouchStart"
       @touchmove="onTouchMove"
       @touchend="onTouchEnd"
@@ -214,7 +184,14 @@ onUnmounted(() => {
           draggable="false"
         />
       </div>
-      <button class="feed-fullscreen__close" type="button" aria-label="Vollbild schließen" @click.stop="close">
+      <button
+        class="feed-fullscreen__close"
+        type="button"
+        aria-label="Vollbild schließen"
+        @click="onCloseClick"
+        @touchstart="consumeEvent"
+        @touchend="onCloseClick"
+      >
         <i class="pi pi-times" />
       </button>
     </div>
