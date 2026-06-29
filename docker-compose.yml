@@ -124,10 +124,6 @@ services:
       # printer (e.g. a Raspberry Pi with a DYMO LabelWriter 450). Set this
       # in your .env; if unset the backend falls back to localhost:631.
       CUPS_SERVER_URL: ${CUPS_SERVER_URL:-}
-      # Left print margin in points (1 pt ≈ 4 px at 300 dpi); 0 disables.
-      CUPS_LABEL_LEFT_MARGIN_PT: ${CUPS_LABEL_LEFT_MARGIN_PT:-1}
-      # Printable label width in mm, used to center text. Default 85.
-      CUPS_LABEL_WIDTH_MM: ${CUPS_LABEL_WIDTH_MM:-85}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
