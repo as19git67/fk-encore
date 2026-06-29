@@ -21,6 +21,7 @@ import { getPhotoFacesCached } from '../composables/usePhotoMetaCache'
 import { useAuthStore } from '../stores/auth'
 import { discardFlingDirection, flingOffscreenTranslate } from '../utils/compareSwipe'
 import { mergeFreshScore, type FreshScore } from '../utils/comparePhotoScore'
+import { qualityComparisonRows } from '../utils/compareQualityDetails'
 import {
   computeBboxZoom,
   computeSyncBboxZoom,
@@ -162,17 +163,30 @@ const detailLabels: Record<string, string> = {
   face_composition: 'Gesichtsposition',
 }
 
-function aiScoreTooltip(photoId: number): string {
-  const photo = getPhotoById(photoId)
-  const s = photo?.ai_quality_score
-  let text = `KI-Qualität: ${s !== undefined && s !== null ? Math.round(s * 100) + '%' : '?'}`
-  const details = photo?.ai_quality_details
-  if (details && Object.keys(details).length > 0) {
-    const lines = Object.entries(details)
-      .map(([k, v]) => `${detailLabels[k] ?? k}: ${Math.round(v * 100)}%`)
-    text += '\n' + lines.join(' · ')
-  }
-  return text
+const qualityDetailsOpen = ref(false)
+const qualityDetailRows = computed(() => {
+  if (!currentPair.value) return []
+  const [firstId, secondId] = currentPair.value
+  return qualityComparisonRows(
+    getPhotoById(firstId)?.ai_quality_details,
+    getPhotoById(secondId)?.ai_quality_details,
+  )
+})
+
+function toggleQualityDetails() {
+  qualityDetailsOpen.value = !qualityDetailsOpen.value
+}
+
+function closeQualityDetails() {
+  qualityDetailsOpen.value = false
+}
+
+function qualityPercent(value: number | null): string {
+  return value === null ? '–' : `${Math.round(value * 100)}%`
+}
+
+function qualityBarWidth(value: number | null): string {
+  return `${Math.round((value ?? 0) * 100)}%`
 }
 
 // ── Eyes-closed hint (Track N / #81) ─────────────────────────────────────
@@ -647,6 +661,11 @@ function handleKeydown(e: KeyboardEvent) {
   }
 
   if (e.key === 'Escape') {
+    if (qualityDetailsOpen.value) {
+      closeQualityDetails()
+      e.preventDefault()
+      return
+    }
     if (anyZoomActive.value) {
       resetZoom()
       e.preventDefault()
@@ -1048,6 +1067,7 @@ onUnmounted(() => {
 })
 
 watch(() => props.group.id, () => {
+  qualityDetailsOpen.value = false
   syncCuration()
   initScores()
   // Clear the progress overlay as soon as the next group is actually
@@ -1232,13 +1252,14 @@ function compareTileSrc(photo: Photo, width?: number): string {
         </div>
 
         <!-- Side-by-side photos -->
-        <div class="side-by-side">
+        <div class="side-by-side" @click.self="closeQualityDetails">
           <div class="side-by-side-photos" :class="{ 'is-portrait': isPortrait }">
             <div
               v-for="photoId in currentPair"
               :key="photoId"
               class="side-by-side-item"
               :class="{ 'is-hidden': getCuration(photoId) === 'hidden' }"
+              @click="closeQualityDetails"
             >
               <div
                 class="side-by-side-image"
@@ -1259,7 +1280,14 @@ function compareTileSrc(photo: Photo, width?: number): string {
                 <div
                   class="ai-quality-badge"
                   :class="aiScoreClass(photoId)"
-                  v-tooltip.top="aiScoreTooltip(photoId)"
+                  role="button"
+                  tabindex="0"
+                  :aria-expanded="qualityDetailsOpen"
+                  aria-label="Detaillierte KI-Bewertung vergleichen"
+                  v-tooltip.top="'Detaillierte KI-Bewertung vergleichen'"
+                  @click.stop="toggleQualityDetails"
+                  @keydown.enter.stop.prevent="toggleQualityDetails"
+                  @keydown.space.stop.prevent="toggleQualityDetails"
                 >
                   <i class="pi pi-sparkles" style="font-size: 0.65rem" />
                   {{ aiScoreLabel(photoId) }}
@@ -1298,6 +1326,46 @@ function compareTileSrc(photo: Photo, width?: number): string {
               </div>
             </div>
           </div>
+          <section
+            v-if="qualityDetailsOpen"
+            class="quality-comparison"
+            :class="{ 'quality-comparison--portrait': isPortrait }"
+            role="dialog"
+            aria-label="Detaillierte KI-Bewertung"
+            @click.stop
+          >
+            <div class="quality-comparison__header">
+              <strong>KI-Bewertung</strong>
+              <Button
+                icon="pi pi-times"
+                text
+                rounded
+                size="small"
+                aria-label="Detaillierte KI-Bewertung schließen"
+                @click="closeQualityDetails"
+              />
+            </div>
+            <div class="quality-comparison__legend" aria-hidden="true">
+              <span><i class="quality-dot quality-dot--first" />Foto 1</span>
+              <span><i class="quality-dot quality-dot--second" />Foto 2</span>
+            </div>
+            <div v-if="qualityDetailRows.length" class="quality-comparison__rows">
+              <div v-for="row in qualityDetailRows" :key="row.key" class="quality-row">
+                <span class="quality-row__label">{{ detailLabels[row.key] ?? row.key }}</span>
+                <div class="quality-row__bars">
+                  <div class="quality-bar-line">
+                    <div class="quality-bar-track"><span class="quality-bar quality-bar--first" :style="{ width: qualityBarWidth(row.first) }" /></div>
+                    <span class="quality-value">{{ qualityPercent(row.first) }}</span>
+                  </div>
+                  <div class="quality-bar-line">
+                    <div class="quality-bar-track"><span class="quality-bar quality-bar--second" :style="{ width: qualityBarWidth(row.second) }" /></div>
+                    <span class="quality-value">{{ qualityPercent(row.second) }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <p v-else class="quality-comparison__empty">Noch keine Detailbewertung vorhanden.</p>
+          </section>
         </div>
       </template>
 
@@ -1715,7 +1783,124 @@ kbd {
   font-weight: 600;
   background: rgba(0, 0, 0, 0.65);
   backdrop-filter: blur(4px);
-  cursor: help;
+  cursor: pointer;
+}
+
+.quality-comparison {
+  position: absolute;
+  z-index: 20;
+  top: calc(2.5rem + 1rem);
+  left: 50%;
+  width: min(42rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 5rem);
+  overflow: auto;
+  transform: translateX(-50%);
+  padding: 0.9rem 1rem 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 0.75rem;
+  color: #f4f4f5;
+  background: rgba(24, 24, 27, 0.96);
+  box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.5);
+}
+
+.quality-comparison--portrait {
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.quality-comparison__header,
+.quality-comparison__legend,
+.quality-bar-line {
+  display: flex;
+  align-items: center;
+}
+
+.quality-comparison__header {
+  justify-content: space-between;
+  min-height: 2rem;
+}
+
+.quality-comparison__legend {
+  justify-content: flex-end;
+  gap: 1rem;
+  margin: 0.15rem 0 0.8rem;
+  color: #d4d4d8;
+  font-size: 0.75rem;
+}
+
+.quality-comparison__legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.quality-dot {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+}
+
+.quality-dot--first,
+.quality-bar--first { background: #38bdf8; }
+.quality-dot--second,
+.quality-bar--second { background: #f59e0b; }
+
+.quality-comparison__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.quality-row {
+  display: grid;
+  grid-template-columns: minmax(6.5rem, 9rem) 1fr;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.quality-row__label {
+  overflow-wrap: anywhere;
+  color: #e4e4e7;
+  font-size: 0.78rem;
+}
+
+.quality-row__bars {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.quality-bar-line { gap: 0.5rem; }
+.quality-bar-track {
+  height: 0.55rem;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+.quality-bar {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+.quality-value {
+  width: 2.5rem;
+  color: #fafafa;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.quality-comparison__empty {
+  margin: 0.5rem 0 0;
+  color: #a1a1aa;
+  text-align: center;
+}
+
+@media (max-width: 520px) {
+  .quality-comparison { padding-inline: 0.75rem; }
+  .quality-row { grid-template-columns: minmax(5.25rem, 6.5rem) 1fr; gap: 0.45rem; }
 }
 
 .ai-quality-badge.ai-score-good  { color: #22c55e; }

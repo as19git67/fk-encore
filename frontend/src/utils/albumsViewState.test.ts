@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  albumMenuTarget,
   ALBUMS_STATE_STORAGE_KEY,
   LAST_FOCUSED_ALBUM_KEY,
   albumsStateToQuery,
@@ -33,6 +34,18 @@ function installLocalStorageStub() {
 }
 
 describe('albumsViewState', () => {
+  describe('albumMenuTarget', () => {
+    it('returns to the list when already in the album list or details', () => {
+      expect(albumMenuTarget('fotos-albums', 7)).toEqual({ name: 'fotos-albums' })
+      expect(albumMenuTarget('fotos-album-detail', 7)).toEqual({ name: 'fotos-albums' })
+    })
+
+    it('resumes the remembered album from another photo view', () => {
+      expect(albumMenuTarget('fotos-gallery', 7)).toEqual({ name: 'fotos-album-detail', params: { id: 7 } })
+      expect(albumMenuTarget('fotos-gallery', null)).toEqual({ name: 'fotos-albums' })
+    })
+  })
+
   beforeEach(() => {
     installLocalStorageStub()
   })
