@@ -11,7 +11,8 @@ import { useFeedBadgeStore } from './stores/feedBadge'
 import { modules, detectModule, moduleEntryPath } from './config/modules'
 import type { ModuleConfig } from './config/modules'
 import { useReferenceData } from './composables/useReferenceData'
-import { albumMenuTarget, readRememberedAlbumId } from './utils/albumsViewState'
+import { usePhotoNavStore } from './stores/photoNav'
+import { albumMenuTarget, albumsViewQueryFromStorage, readRememberedAlbumId } from './utils/albumsViewState'
 
 const auth = useAuthStore()
 const anomalyStore = useAnomalyStore()
@@ -19,6 +20,7 @@ const feedBadgeStore = useFeedBadgeStore()
 const router = useRouter()
 const route = useRoute()
 const { fetchAlbums } = useReferenceData()
+const photoNav = usePhotoNavStore()
 
 feedBadgeStore.init()
 
@@ -127,7 +129,17 @@ function isGroupActive(children?: Array<{ routeName?: string }>): boolean {
 function navigateSubMenu(routeName?: string) {
   if (!routeName) return
   if (routeName === 'fotos-albums') {
-    void router.push(albumMenuTarget(route.name, readRememberedAlbumId()))
+    const target = albumMenuTarget(route.name, readRememberedAlbumId())
+    if (target.name === 'fotos-albums') {
+      // Selecting the album toolbar item from an album explicitly means
+      // "show the list". Drop the one-shot auto-jump armed by focusing a
+      // photo; otherwise AlbumsView immediately reopens the same album and
+      // makes this navigation look like a reload.
+      photoNav.consumeAlbumJump()
+      void router.push({ ...target, query: albumsViewQueryFromStorage() })
+    } else {
+      void router.push(target)
+    }
     return
   }
   void router.push({ name: routeName })
