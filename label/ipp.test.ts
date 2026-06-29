@@ -79,65 +79,40 @@ describe("ipp — request encoding", () => {
   });
 
   it("encodes a Print-Job with the document appended after the attributes", () => {
-    const text = "Hallo Welt";
+    const doc = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x01, 0x02, 0x03]);
     const buf = buildPrintJobRequest({
       printerUri: "ipp://pi.local:631/printers/DYMO",
       user: "tester",
       jobName: "job",
-      text,
+      document: doc,
+      documentFormat: "image/png",
       copies: 1,
     });
     expect(buf.readUInt16BE(2)).toBe(OP_PRINT_JOB);
     // The raw document is appended verbatim at the very end.
-    expect(buf.subarray(buf.length - Buffer.byteLength(text)).toString("utf8")).toBe(
-      text,
-    );
+    expect(buf.subarray(buf.length - doc.length)).toEqual(doc);
     // Operation attributes (printer-uri, document-format) are present.
     const asString = buf.toString("latin1");
     expect(asString).toContain("printer-uri");
     expect(asString).toContain("document-format");
-    expect(asString).toContain("text/plain");
+    expect(asString).toContain("image/png");
   });
 
   it("emits a copies job attribute only when copies > 1", () => {
-    const one = buildPrintJobRequest({
+    const doc = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    const base = {
       printerUri: "ipp://h/printers/p",
       user: "u",
       jobName: "j",
-      text: "x",
-      copies: 1,
-    });
-    expect(one.toString("latin1")).not.toContain("copies");
-
-    const many = buildPrintJobRequest({
-      printerUri: "ipp://h/printers/p",
-      user: "u",
-      jobName: "j",
-      text: "x",
-      copies: 3,
-    });
-    expect(many.toString("latin1")).toContain("copies");
-  });
-
-  it("emits a page-left job attribute only when leftMarginPt > 0", () => {
-    const base = { printerUri: "ipp://h/printers/p", user: "u", jobName: "j", text: "x" };
-    expect(buildPrintJobRequest({ ...base }).toString("latin1")).not.toContain(
-      "page-left",
+      document: doc,
+      documentFormat: "image/png",
+    };
+    expect(buildPrintJobRequest({ ...base, copies: 1 }).toString("latin1")).not.toContain(
+      "copies",
     );
-    expect(
-      buildPrintJobRequest({ ...base, leftMarginPt: 1 }).toString("latin1"),
-    ).toContain("page-left");
-  });
-
-  it("emits cpi/lpi job attributes only when set", () => {
-    const base = { printerUri: "ipp://h/printers/p", user: "u", jobName: "j", text: "x" };
-    const none = buildPrintJobRequest({ ...base }).toString("latin1");
-    expect(none).not.toContain("cpi");
-    expect(none).not.toContain("lpi");
-
-    const sized = buildPrintJobRequest({ ...base, cpi: 7, lpi: 4 }).toString("latin1");
-    expect(sized).toContain("cpi");
-    expect(sized).toContain("lpi");
+    expect(buildPrintJobRequest({ ...base, copies: 3 }).toString("latin1")).toContain(
+      "copies",
+    );
   });
 });
 

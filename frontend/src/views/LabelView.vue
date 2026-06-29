@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, computed, watch } from 'vue'
+import { onMounted, nextTick, ref, computed, watch } from 'vue'
 import Button from 'primevue/button'
 import Textarea from 'primevue/textarea'
 import InputNumber from 'primevue/inputnumber'
@@ -17,8 +17,9 @@ import {
 const auth = useAuthStore()
 const canPrint = auth.hasPermission('label.print')
 
-// Font-size presets → CUPS cpi/lpi (lower = larger font). sampleRem only
-// scales the "Aa" preview on the selector button.
+// Font-size presets expressed as cpi/lpi (characters/lines per inch; lower =
+// larger font). These drive the canvas render — cpi sets the glyph width, lpi
+// the line height. sampleRem only scales the "Aa" preview on the selector.
 interface FontPreset {
   key: 'small' | 'medium' | 'large'
   label: string
@@ -77,9 +78,18 @@ const selectedFont = computed(
 const selectedLabel = computed(
   () => LABELS.find((l) => l.code === labelCode.value) ?? LABELS[0]!,
 )
+// DYMO LabelWriter 450 prints at 300 dpi. The DYMO_DPI constant drives the
+// raster size; if other models are added it can be made configurable.
+const DPI = 300
+const MM_PER_INCH = 25.4
+
 // Lines that fit ≈ printable height (short edge) × lines-per-inch.
 const maxLines = computed(() =>
-  Math.max(1, Math.floor((selectedLabel.value.heightMm / 25.4) * selectedFont.value.lpi)),
+  Math.max(1, Math.floor((selectedLabel.value.heightMm / MM_PER_INCH) * selectedFont.value.lpi)),
+)
+// Characters per line ≈ printable width (long edge) × characters-per-inch.
+const maxColumns = computed(() =>
+  Math.max(1, Math.floor((selectedLabel.value.widthMm / MM_PER_INCH) * selectedFont.value.cpi)),
 )
 // Dropdown labels: "99012 · Adresse groß · 89×36 mm"
 const labelOptions = computed(() =>
@@ -89,18 +99,79 @@ const labelOptions = computed(() =>
   })),
 )
 
-// Live preview in the textarea: font size scales inversely with cpi (10 cpi ≈
-// base size), and the alignment mirrors the print alignment.
-const previewFontRem = computed(() => Math.round((10 / selectedFont.value.cpi) * 110) / 100)
-
-// Enforce the line cap: trim extra lines when the user types/pastes too many
-// or switches to a larger font that allows fewer lines.
-watch([text, maxLines], () => {
-  const lines = text.value.split('\n')
-  if (lines.length > maxLines.value) {
-    text.value = lines.slice(0, maxLines.value).join('\n')
+// Wrap text to the column width: keep explicit line breaks, wrap long lines at
+// word boundaries, and hard-break a word that is itself longer than a line.
+function wrapLines(input: string, columns: number): string[] {
+  const out: string[] = []
+  for (const paragraph of input.split('\n')) {
+    let rest = paragraph
+    while (rest.length > columns) {
+      let breakAt = rest.lastIndexOf(' ', columns)
+      if (breakAt <= 0) breakAt = columns // long word → hard break
+      out.push(rest.slice(0, breakAt))
+      rest = rest.slice(breakAt).replace(/^ +/, '')
+    }
+    out.push(rest)
   }
-})
+  return out
+}
+
+// All wrapped lines (before the height cap) — used to warn about overflow.
+const wrappedLines = computed(() => wrapLines(text.value, maxColumns.value))
+const overflow = computed(() => wrappedLines.value.length > maxLines.value)
+
+const previewCanvas = ref<HTMLCanvasElement | null>(null)
+
+/**
+ * Draw the label onto `previewCanvas` at full print resolution. The same
+ * canvas is exported to PNG for printing, so the preview is exactly what gets
+ * printed (WYSIWYG) — and because the image is always the same pixel size for
+ * a given label, the printer renders it at a consistent size regardless of how
+ * much text it contains.
+ */
+function renderLabel() {
+  const canvas = previewCanvas.value
+  if (!canvas) return
+  const label = selectedLabel.value
+  const font = selectedFont.value
+
+  const w = Math.round((label.widthMm / MM_PER_INCH) * DPI)
+  const h = Math.round((label.heightMm / MM_PER_INCH) * DPI)
+  canvas.width = w
+  canvas.height = h
+
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  // White paper; the printer renders dark pixels as "printed".
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, w, h)
+  ctx.fillStyle = '#000000'
+  ctx.textBaseline = 'top'
+
+  const lineHeightPx = DPI / font.lpi
+  // Derive the font size so one monospace character advances exactly DPI/cpi
+  // pixels — i.e. it renders at the chosen characters-per-inch, independent of
+  // which monospace face the browser actually substitutes.
+  const targetCharPx = DPI / font.cpi
+  const BASE = 100
+  ctx.font = `${BASE}px 'Courier New', Courier, monospace`
+  const advance = ctx.measureText('M').width || BASE * 0.6
+  const fontSizePx = (BASE * targetCharPx) / advance
+  ctx.font = `${fontSizePx}px 'Courier New', Courier, monospace`
+
+  const lines = wrappedLines.value.slice(0, maxLines.value)
+  lines.forEach((line, i) => {
+    const y = i * lineHeightPx + (lineHeightPx - fontSizePx) / 2
+    let x = 0
+    if (align.value === 'center') {
+      x = Math.max(0, (w - ctx.measureText(line).width) / 2)
+    }
+    ctx.fillText(line, x, y)
+  })
+}
+
+// Re-render whenever anything that affects the output changes.
+watch([text, fontKey, align, labelCode], () => nextTick(renderLabel))
 
 // Remember the formatting choices locally (no backend round-trip needed).
 const LS_KEY = 'label_ui_prefs'
@@ -161,12 +232,6 @@ async function handlePrinterChange() {
   }
 }
 
-function onTextareaKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter' && text.value.split('\n').length >= maxLines.value) {
-    e.preventDefault()
-  }
-}
-
 async function handlePrint() {
   error.value = ''
   info.value = ''
@@ -178,23 +243,21 @@ async function handlePrint() {
     error.value = 'Bitte einen Drucker auswählen'
     return
   }
+  // Render fresh, then export the canvas exactly as previewed.
+  renderLabel()
+  const canvas = previewCanvas.value
+  const dataUrl = canvas?.toDataURL('image/png')
+  const imageBase64 = dataUrl?.split(',')[1]
+  if (!imageBase64) {
+    error.value = 'Vorschau konnte nicht erzeugt werden'
+    return
+  }
   printing.value = true
-  // Pad with empty lines to maxLines so CUPS renders a fixed line count and
-  // doesn't auto-scale the font based on how much text is present.
-  const lineCount = text.value.split('\n').length
-  const paddedText =
-    lineCount < maxLines.value
-      ? text.value + '\n'.repeat(maxLines.value - lineCount)
-      : text.value
   try {
     const res = await printLabel({
-      text: paddedText,
+      imageBase64,
       copies: copies.value || 1,
       printer: selectedPrinter.value,
-      cpi: selectedFont.value.cpi,
-      lpi: selectedFont.value.lpi,
-      align: align.value,
-      labelWidthMm: selectedLabel.value.widthMm,
     })
     info.value =
       res.printed > 1
@@ -210,6 +273,7 @@ async function handlePrint() {
 onMounted(() => {
   loadUiPrefs()
   loadPrinters()
+  nextTick(renderLabel)
 })
 </script>
 
@@ -232,20 +296,29 @@ onMounted(() => {
         <span class="label">Text</span>
         <Textarea
           v-model="text"
-          :rows="maxLines"
+          :rows="Math.min(maxLines, 6)"
           placeholder="Text für das Label…"
           :disabled="printing"
-          :style="{
-            fontFamily: '\'Courier New\', Courier, monospace',
-            fontSize: previewFontRem + 'rem',
-            textAlign: align,
-            lineHeight: '1.25',
-            resize: 'none',
-          }"
-          @keydown="onTextareaKeydown"
+          class="text-input"
         />
-        <small class="hint-muted">max. {{ maxLines }} Zeilen bei dieser Schriftgröße</small>
+        <small class="hint-muted">
+          max. {{ maxLines }} Zeilen × {{ maxColumns }} Zeichen bei dieser Schriftgröße
+        </small>
+        <small v-if="overflow" class="hint-warn">
+          Der Text passt nicht vollständig auf das Etikett und wird abgeschnitten.
+        </small>
       </label>
+
+      <div class="field">
+        <span class="label">Vorschau</span>
+        <div class="preview">
+          <canvas ref="previewCanvas" class="preview__canvas" />
+        </div>
+        <small class="hint-muted">
+          So wird gedruckt — {{ selectedLabel.widthMm }}×{{ selectedLabel.heightMm }} mm bei
+          {{ DPI }} dpi.
+        </small>
+      </div>
 
       <label class="field">
         <span class="label">Etikett</span>
@@ -462,9 +535,37 @@ onMounted(() => {
   justify-content: flex-end;
 }
 
+.text-input {
+  font-family: 'Courier New', Courier, monospace;
+}
+
+/* Live WYSIWYG preview: the canvas is rendered at full print resolution and
+   scaled down to fit; its intrinsic pixel ratio preserves the label aspect. */
+.preview {
+  display: flex;
+  justify-content: center;
+  padding: 0.5rem;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 0.5rem;
+  background: var(--p-content-hover-background);
+}
+.preview__canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #fff;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 0.25rem;
+}
+
 .hint-muted {
   margin: 0;
   color: var(--p-text-muted-color);
+  font-size: 0.85rem;
+}
+.hint-warn {
+  margin: 0;
+  color: var(--p-message-warn-color, #b45309);
   font-size: 0.85rem;
 }
 .hint-muted code {

@@ -143,26 +143,15 @@ export interface PrintJobOptions {
   user: string;
   /** Human-readable job name shown in the CUPS queue. */
   jobName: string;
-  /** Document body (printed as text/plain — CUPS rasterizes via the driver). */
-  text: string;
+  /** Raw document bytes appended after the attributes. */
+  document: Buffer;
+  /**
+   * MIME type of the document, emitted as the IPP `document-format` attribute
+   * (e.g. "image/png"). CUPS picks the matching filter chain to rasterize it.
+   */
+  documentFormat: string;
   /** Number of copies (≥ 1). Emitted as the IPP `copies` job attribute. */
   copies?: number;
-  /**
-   * Left print margin in points (1 pt = 1/72"). Emitted as the CUPS
-   * `page-left` option so the text isn't flush against the label edge.
-   * Omitted/0 → no margin attribute.
-   */
-  leftMarginPt?: number;
-  /**
-   * Characters per inch (CUPS `cpi` text option). Lower = larger font.
-   * Omitted/0 → CUPS default (10).
-   */
-  cpi?: number;
-  /**
-   * Lines per inch (CUPS `lpi` text option). Lower = taller lines / fewer
-   * lines per label. Omitted/0 → CUPS default (6).
-   */
-  lpi?: number;
   requestId?: number;
 }
 
@@ -170,6 +159,11 @@ export interface PrintJobOptions {
  * Print-Job request. Sent (HTTP POST) to the printer path
  * `/printers/<name>`. The document is appended raw after the
  * end-of-attributes delimiter.
+ *
+ * Labels are rendered to a fixed-size raster image client-side and submitted
+ * as image/png. Pre-rasterizing makes the printed size deterministic — CUPS
+ * applies the same image filter to every image of the same dimensions — so no
+ * cpi/lpi/margin text-filter options are sent.
  */
 export function buildPrintJobRequest(opts: PrintJobOptions): Buffer {
   const w = new IppWriter();
@@ -180,22 +174,16 @@ export function buildPrintJobRequest(opts: PrintJobOptions): Buffer {
   w.strAttr(VTAG_URI, "printer-uri", opts.printerUri);
   w.strAttr(VTAG_NAME, "requesting-user-name", opts.user);
   w.strAttr(VTAG_NAME, "job-name", opts.jobName);
-  w.strAttr(VTAG_MIME_MEDIA_TYPE, "document-format", "text/plain");
+  w.strAttr(VTAG_MIME_MEDIA_TYPE, "document-format", opts.documentFormat);
 
   const copies = opts.copies ?? 1;
-  const leftMargin = opts.leftMarginPt ?? 0;
-  const cpi = opts.cpi ?? 0;
-  const lpi = opts.lpi ?? 0;
-  if (copies > 1 || leftMargin > 0 || cpi > 0 || lpi > 0) {
+  if (copies > 1) {
     w.delimiter(TAG_JOB_ATTRIBUTES);
-    if (copies > 1) w.intAttr(VTAG_INTEGER, "copies", copies);
-    if (leftMargin > 0) w.intAttr(VTAG_INTEGER, "page-left", leftMargin);
-    if (cpi > 0) w.intAttr(VTAG_INTEGER, "cpi", cpi);
-    if (lpi > 0) w.intAttr(VTAG_INTEGER, "lpi", lpi);
+    w.intAttr(VTAG_INTEGER, "copies", copies);
   }
 
   w.delimiter(TAG_END_OF_ATTRIBUTES);
-  w.raw(Buffer.from(opts.text, "utf8"));
+  w.raw(opts.document);
   return w.build();
 }
 
