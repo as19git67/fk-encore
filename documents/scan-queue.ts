@@ -17,7 +17,7 @@ import { and, eq, sql, inArray } from "drizzle-orm";
 import db from "../db/database";
 import { documentScanQueue } from "../db/schema";
 
-export type DocumentScanService = "text_extract" | "classify" | "embed";
+export type DocumentScanService = "text_extract" | "classify" | "embed" | "receipt_ocr";
 export type DocumentScanStatus = "pending" | "processing" | "failed" | "done";
 
 /** Services processed for every document, in dependency order. */

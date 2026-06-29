@@ -25,6 +25,7 @@ import {
   documentTaxSections,
   documents,
   documentsUserPref,
+  financeAccountAccess,
   userSubjectPersons,
 } from "../db/schema";
 import {
@@ -53,6 +54,7 @@ import {
   updateSubjectPerson,
 } from "./subject-persons";
 import { dropTaxLinks, relocateDocument } from "./relocate";
+import { singleJpegPagePdf } from "./receipt-pdf";
 import {
   assertGroupMember,
   loadAdministrableDocument,
@@ -420,6 +422,32 @@ export const uploadReceiptCapture = api.raw(
       .trim();
     const mimeType = normalizeReceiptMimeType(originalName, rawMimeType);
 
+    // Optional: cash account chosen by the user when photographing. Persisted
+    // so the background OCR worker knows which account to book the transaction to.
+    const rawAccountId = req.headers["x-account-id"] as string | undefined;
+    let receiptAccountId: number | null = null;
+    if (rawAccountId) {
+      const parsed = parseInt(rawAccountId, 10);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        res.statusCode = 400;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "Invalid X-Account-Id header" }));
+        return;
+      }
+      const account = await dbFirst<{ account_id: number }>(
+        db.select({ account_id: financeAccountAccess.account_id })
+          .from(financeAccountAccess)
+          .where(and(eq(financeAccountAccess.account_id, parsed), eq(financeAccountAccess.user_id, userId))),
+      );
+      if (!account) {
+        res.statusCode = 404;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "Account not found" }));
+        return;
+      }
+      receiptAccountId = parsed;
+    }
+
     if (!RECEIPT_CAPTURE_MIME_TYPES.has(mimeType)) {
       res.statusCode = 415;
       res.setHeader("Content-Type", "application/json");
@@ -445,7 +473,18 @@ export const uploadReceiptCapture = api.raw(
         mimeType: file.mimeType,
         userId,
         scanPriority: RECEIPT_CAPTURE_PRIORITY,
+        // When the user chose an account, we handle the receipt via the
+        // dedicated receipt_ocr worker and don't need the LLM classify/embed
+        // pipeline. text_extract still runs for the thumbnail.
+        scanServices: receiptAccountId !== null ? (["text_extract"] as const) : undefined,
       });
+      if (receiptAccountId !== null) {
+        await db.update(documents)
+          .set({ receipt_account_id: receiptAccountId, receipt_ocr_state: "pending" })
+          .where(eq(documents.id, result.id));
+        await enqueueDocumentScan(result.id, ["receipt_ocr"], RECEIPT_CAPTURE_PRIORITY);
+        triggerWorkers();
+      }
       res.statusCode = 201;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(result));
@@ -580,8 +619,9 @@ async function storeDocumentBuffer(params: {
   mimeType: string;
   userId: number;
   scanPriority?: number;
+  scanServices?: readonly import("./scan-queue").DocumentScanService[];
 }): Promise<DocumentSummary> {
-  const { buffer, originalName, mimeType, userId, scanPriority = 2 } = params;
+  const { buffer, originalName, mimeType, userId, scanPriority = 2, scanServices } = params;
   if (buffer.length > DOCUMENTS_MAX_BYTES) throw new Error("DOCUMENT_TOO_LARGE");
   const ext = guessExtension(originalName, mimeType);
   const digest = crypto.createHash("sha256").update(buffer).digest("hex");
@@ -650,7 +690,7 @@ async function storeDocumentBuffer(params: {
     }
   }
 
-  await enqueueDocumentScan(row.id, undefined, scanPriority);
+  await enqueueDocumentScan(row.id, scanServices, scanPriority);
   triggerWorkers();
 
   return toSummary(row, null, []);
@@ -698,75 +738,26 @@ function isHeicBuffer(buf: Buffer): boolean {
   return HEIC_BRANDS.has(buf.toString("ascii", 8, 12));
 }
 
+/**
+ * Wrap a receipt photo into a single-page PDF for storage.
+ *
+ * Only EXIF auto-rotation + transparency flattening is applied here. Geometric
+ * correction (perspective de-warp, crop, and 0/90/180/270 orientation) is done
+ * later by the receipt-ocr service, which uses OpenCV contour detection and
+ * PaddleOCR text orientation — far more robust than anything we can do here.
+ * The worker then replaces this stored PDF with the service-corrected image
+ * (see `runReceiptOcr` in document-ops.ts).
+ */
 async function imageToReceiptPdf(input: Buffer): Promise<Buffer> {
   const image = isHeicBuffer(input)
     ? Buffer.from(await heicConvert({ buffer: input, format: "JPEG", quality: 0.9 }))
     : input;
-  const normalized = sharp(image, { failOn: "none" }).rotate().flatten({ background: "#ffffff" });
-  const { data: jpeg, info } = await normalized
+  const { data: jpeg, info } = await sharp(image, { failOn: "none" })
+    .rotate()
+    .flatten({ background: "#ffffff" })
     .jpeg({ quality: 90, mozjpeg: true })
     .toBuffer({ resolveWithObject: true });
   return singleJpegPagePdf(jpeg, info.width || 1000, info.height || 1000);
-}
-
-function singleJpegPagePdf(jpeg: Buffer, imageWidth: number, imageHeight: number): Buffer {
-  const pageWidth = 595.28; // A4 portrait in PDF points
-  const pageHeight = 841.89;
-  const margin = 24;
-  const scale = Math.min((pageWidth - margin * 2) / imageWidth, (pageHeight - margin * 2) / imageHeight);
-  const drawWidth = imageWidth * scale;
-  const drawHeight = imageHeight * scale;
-  const x = (pageWidth - drawWidth) / 2;
-  const y = (pageHeight - drawHeight) / 2;
-  const content = Buffer.from(
-    `q\n${drawWidth.toFixed(2)} 0 0 ${drawHeight.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm\n/Im0 Do\nQ\n`,
-    "ascii",
-  );
-  return buildPdf([
-    "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>`,
-    {
-      dict: `<< /Type /XObject /Subtype /Image /Width ${imageWidth} /Height ${imageHeight} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>`,
-      stream: jpeg,
-    },
-    { dict: `<< /Length ${content.length} >>`, stream: content },
-  ]);
-}
-
-function buildPdf(objects: Array<string | { dict: string; stream: Buffer }>): Buffer {
-  const chunks: Buffer[] = [Buffer.from("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n", "binary")];
-  const offsets: number[] = [];
-  let offset = chunks[0].length;
-  objects.forEach((obj, index) => {
-    offsets.push(offset);
-    const prefix = Buffer.from(`${index + 1} 0 obj\n`, "ascii");
-    const body = typeof obj === "string"
-      ? Buffer.from(`${obj}\n`, "ascii")
-      : Buffer.concat([
-          Buffer.from(`${obj.dict}\nstream\n`, "ascii"),
-          obj.stream,
-          Buffer.from("\nendstream\n", "ascii"),
-        ]);
-    const suffix = Buffer.from("endobj\n", "ascii");
-    chunks.push(prefix, body, suffix);
-    offset += prefix.length + body.length + suffix.length;
-  });
-  const xrefOffset = offset;
-  const xrefLines = [
-    "xref",
-    `0 ${objects.length + 1}`,
-    "0000000000 65535 f ",
-    ...offsets.map((value) => `${String(value).padStart(10, "0")} 00000 n `),
-    "trailer",
-    `<< /Size ${objects.length + 1} /Root 1 0 R >>`,
-    "startxref",
-    String(xrefOffset),
-    "%%EOF",
-    "",
-  ];
-  chunks.push(Buffer.from(xrefLines.join("\n"), "ascii"));
-  return Buffer.concat(chunks);
 }
 
 function extractReceiptAmount(text: string | null | undefined): number | null {
