@@ -23,10 +23,10 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'like', item: FeedPhotoItem): void
   (e: 'hide', item: FeedPhotoItem): void
+  (e: 'open', item: FeedPhotoItem): void
 }>()
 
 const draft = ref('')
-const burst = ref(false)
 
 // ── Comment section (toggled by the comment-bubble button) ──────────────────
 const COMMENT_PAGE = 100
@@ -162,16 +162,6 @@ function formatTime(iso: string): string {
   return d.toLocaleDateString('de-DE', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-function onDoubleTap() {
-  // Double-tap to like (Instagram gesture). Only adds a like, never removes —
-  // matches the platform's one-way double-tap behaviour.
-  if (!props.item.likedByMe) {
-    burst.value = true
-    window.setTimeout(() => (burst.value = false), 600)
-    emit('like', props.item)
-  }
-}
-
 async function submitComment() {
   const body = draft.value.trim()
   if (!body || !props.item.album) return
@@ -208,9 +198,18 @@ async function submitComment() {
       </div>
     </header>
 
-    <div class="media" :class="{ 'media--hidden': item.hiddenByMe }" :style="{ aspectRatio }" @dblclick="onDoubleTap">
+    <div
+      class="media"
+      :class="{ 'media--hidden': item.hiddenByMe }"
+      :style="{ aspectRatio }"
+      role="button"
+      tabindex="0"
+      aria-label="Foto im Vollbild öffnen"
+      @click="emit('open', item)"
+      @keydown.enter.prevent="emit('open', item)"
+      @keydown.space.prevent="emit('open', item)"
+    >
       <img :src="getPhotoUrl(item.filename, 1280)" :alt="item.description ?? item.filename" loading="lazy" @load="onImageLoad" />
-      <i v-if="burst" class="pi pi-heart-fill burst" aria-hidden="true" />
       <i v-if="item.hiddenByMe" class="pi pi-thumbs-down-fill hidden-badge" aria-hidden="true" />
     </div>
 
@@ -411,25 +410,6 @@ async function submitComment() {
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
   pointer-events: none;
 }
-.burst {
-  position: absolute;
-  inset: 0;
-  margin: auto;
-  width: max-content;
-  height: max-content;
-  font-size: 6rem;
-  color: #fff;
-  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
-  animation: burst 0.6s ease-out;
-  pointer-events: none;
-}
-@keyframes burst {
-  0% { transform: scale(0.3); opacity: 0; }
-  30% { transform: scale(1.1); opacity: 1; }
-  60% { transform: scale(1); opacity: 1; }
-  100% { transform: scale(1); opacity: 0; }
-}
-
 .actions {
   display: flex;
   gap: 0.25rem;
