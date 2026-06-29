@@ -816,6 +816,16 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
     console.log(
       `[documents] receipt OCR doc=${documentId}: amount=${core.amount} outside reliable range — marked incomplete`,
     );
+    // Notify user that receipt was recognised but amount needs manual entry.
+    void realtime.publishEvent({
+      userIds: [String(row.user_id)],
+      channel: "finance",
+      type: "receipt.incomplete",
+      resourceId: String(documentId),
+      payload: { document_id: documentId },
+    }).catch(err => console.warn(`[documents] receipt.incomplete realtime failed doc=${documentId}: ${(err as Error).message}`));
+    void push.notifyReceiptIncomplete({ userId: row.user_id, documentId })
+      .catch(err => console.warn(`[documents] notifyReceiptIncomplete failed doc=${documentId}: ${(err as Error).message}`));
     return;
   }
 
@@ -844,5 +854,20 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
     console.log(
       `[documents] receipt OCR doc=${documentId}: auto-booked tx=${txId} amount=${core.amount} on account=${row.receipt_account_id}`,
     );
+    // Notify user that a new transaction was automatically created.
+    void realtime.publishEvent({
+      userIds: [String(row.user_id)],
+      channel: "finance",
+      type: "receipt.booked",
+      resourceId: String(txId),
+      payload: { transaction_id: txId, document_id: documentId, amount: core.amount, store: core.store },
+    }).catch(err => console.warn(`[documents] receipt.booked realtime failed doc=${documentId}: ${(err as Error).message}`));
+    void push.notifyReceiptBooked({
+      userId: row.user_id,
+      transactionId: txId,
+      documentId,
+      amount: core.amount!,
+      store: core.store,
+    }).catch(err => console.warn(`[documents] notifyReceiptBooked failed doc=${documentId}: ${(err as Error).message}`));
   }
 }
