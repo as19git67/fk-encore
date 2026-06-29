@@ -12,6 +12,7 @@ Runs entirely on CPU. No GPU required.
 from __future__ import annotations
 
 import asyncio
+import base64
 import functools
 import json
 import logging
@@ -58,6 +59,15 @@ OCR_LANG = os.environ.get("OCR_LANG", "latin")
 OCR_MAX_LONG_SIDE = _env_int("OCR_MAX_LONG_SIDE", 2000)
 # Set to "0" to disable contour-based auto-crop + perspective correction.
 OCR_AUTOCROP = os.environ.get("OCR_AUTOCROP", "1") == "1"
+# Set to "0" to disable 90/180/270 orientation normalization. When on, the
+# service runs a few quick low-resolution OCR probes per receipt to pick the
+# most readable page rotation (handles receipts photographed sideways/upside
+# down, which EXIF rotation can't catch).
+OCR_ORIENT = os.environ.get("OCR_ORIENT", "1") == "1"
+ORIENT_PROBE_LONG_SIDE = _env_int("ORIENT_PROBE_LONG_SIDE", 720)
+# The winning rotation must beat upright by at least this factor, so near-ties
+# default to no rotation rather than flip-flopping on noise.
+ORIENT_MARGIN = float(os.environ.get("ORIENT_MARGIN", "1.15"))
 # Set to "1" to disable the LLM step and use regex-only extraction
 REGEX_ONLY = os.environ.get("REGEX_ONLY", "0") == "1"
 
@@ -219,8 +229,68 @@ def _four_point_warp(img: np.ndarray, quad: np.ndarray) -> np.ndarray:
     return cv2.warpPerspective(img, mat, (max_w, max_h))
 
 
-def preprocess_image(img_bytes: bytes) -> np.ndarray:
-    """Decode, resize, denoise, and prepare receipt image for OCR."""
+def _rotate_90s(img: np.ndarray, angle: int) -> np.ndarray:
+    """Lossless rotation by a multiple of 90 degrees (counter-clockwise)."""
+    if angle == 90:
+        return cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    if angle == 180:
+        return cv2.rotate(img, cv2.ROTATE_180)
+    if angle == 270:
+        return cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+    return img
+
+
+def _orientation_score(img_bgr: np.ndarray) -> float:
+    """Score how 'readable' an image is via a fast, low-resolution OCR pass.
+    Higher = more confident, more recognized characters. Returns 0.0 when the
+    OCR model is unavailable (e.g. in unit tests), so callers leave the image
+    untouched."""
+    ocr = _state["ocr"]
+    if ocr is None:
+        return 0.0
+    h, w = img_bgr.shape[:2]
+    long_side = max(h, w)
+    if long_side > ORIENT_PROBE_LONG_SIDE:
+        s = ORIENT_PROBE_LONG_SIDE / long_side
+        img_bgr = cv2.resize(img_bgr, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
+    try:
+        # cls=False: detection without per-line angle correction, so an
+        # upside-down page scores low (which is exactly the signal we want).
+        result = ocr.ocr(img_bgr, cls=False)
+    except Exception:
+        return 0.0
+    if not result or not result[0]:
+        return 0.0
+    score = 0.0
+    for _box, (text, conf) in result[0]:
+        t = (text or "").strip()
+        if conf >= 0.5 and len(t) >= 2:
+            score += float(conf) * len(t)
+    return score
+
+
+def _detect_orientation(img_bgr: np.ndarray) -> int:
+    """Pick the page rotation (0/90/180/270, counter-clockwise) that makes the
+    receipt most readable, by scoring a quick low-res OCR pass at each. Returns
+    0 when orientation handling is disabled, the OCR model is unavailable, or no
+    rotation clearly beats upright."""
+    if not OCR_ORIENT or _state["ocr"] is None:
+        return 0
+    scores = {angle: _orientation_score(_rotate_90s(img_bgr, angle)) for angle in (0, 90, 180, 270)}
+    best = max(scores, key=lambda a: scores[a])
+    if scores[best] <= 0:
+        return 0
+    if best != 0 and scores[best] < scores[0] * ORIENT_MARGIN:
+        return 0
+    return best
+
+
+def correct_geometry(img_bytes: bytes) -> tuple[np.ndarray, bool]:
+    """Decode, resize-cap, auto-crop + perspective-correct, and rotate upright.
+
+    Returns (bgr_image, corrected) where `corrected` is True when a crop/warp or
+    a non-zero rotation was applied. The result is a clean color image suitable
+    for storage — no OCR-specific denoise/CLAHE is baked in."""
     arr = np.frombuffer(img_bytes, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
@@ -232,6 +302,8 @@ def preprocess_image(img_bytes: bytes) -> np.ndarray:
         scale = OCR_MAX_LONG_SIDE / max_side
         img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
 
+    corrected = False
+
     # Auto-crop + perspective-correct the receipt when it forms a detectable
     # quadrilateral on a contrasting background. No-op (full frame kept) when no
     # confident 4-corner contour is found, so a full-frame receipt is unaffected.
@@ -239,7 +311,22 @@ def preprocess_image(img_bytes: bytes) -> np.ndarray:
         quad = _find_document_quad(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
         if quad is not None:
             img = _four_point_warp(img, quad)
+            corrected = True
 
+    # Normalize 90/180/270 misrotation (receipt photographed sideways or upside
+    # down) so the stored image and the OCR input are both upright.
+    rot = _detect_orientation(img)
+    if rot != 0:
+        img = _rotate_90s(img, rot)
+        corrected = True
+
+    return img, corrected
+
+
+def enhance_for_ocr(img: np.ndarray) -> np.ndarray:
+    """OCR-specific enhancement of a geometry-corrected image: grayscale,
+    denoise, CLAHE and small-angle Hough deskew. Returns a 3-channel image for
+    PaddleOCR."""
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     # Adaptive denoising for thermal paper receipts
@@ -273,6 +360,13 @@ def preprocess_image(img_bytes: bytes) -> np.ndarray:
 
     # Convert back to 3-channel for PaddleOCR
     return cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
+
+
+def preprocess_image(img_bytes: bytes) -> np.ndarray:
+    """Decode + geometry-correct + OCR-enhance in one step. Convenience wrapper
+    used by tests and any caller that only needs the OCR-ready image."""
+    img, _ = correct_geometry(img_bytes)
+    return enhance_for_ocr(img)
 
 
 # ─── OCR ─────────────────────────────────────────────────────────────────────
@@ -541,6 +635,10 @@ class ReceiptResult(BaseModel):
     raw_text: str = ""
     ocr_confidence: float = 0.0
     processing_ms: int = 0
+    # Base64 JPEG of the cropped / de-warped / upright-rotated receipt, set only
+    # when the service changed the image's geometry. The backend uses it to
+    # replace the stored PDF so the viewed document is straight and upright.
+    corrected_image: str | None = None
 
 
 @app.post("/extract", response_model=ReceiptResult)
@@ -553,8 +651,9 @@ async def extract_receipt(file: UploadFile = File(...)) -> ReceiptResult:
         raise HTTPException(status_code=413, detail="file too large (max 20 MB)")
 
     def _pipeline(data: bytes) -> dict[str, Any]:
-        img = preprocess_image(data)
-        full_text, lines = run_ocr(img)
+        storage_img, corrected = correct_geometry(data)
+        ocr_img = enhance_for_ocr(storage_img)
+        full_text, lines = run_ocr(ocr_img)
 
         if not full_text.strip():
             return {
@@ -574,10 +673,21 @@ async def extract_receipt(file: UploadFile = File(...)) -> ReceiptResult:
         else:
             core = llm_extract_core(full_text)
 
+        out: dict[str, Any] = {
+            **core, "items": [], "raw_text": full_text,
+            "ocr_confidence": round(avg_confidence, 3),
+        }
+        # Hand back the straightened image so the backend can replace the stored
+        # PDF — only when the geometry actually changed.
+        if corrected:
+            ok, buf = cv2.imencode(".jpg", storage_img, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+            if ok:
+                out["corrected_image"] = base64.b64encode(buf.tobytes()).decode("ascii")
+
         # Line items are intentionally NOT extracted here: they dominate the LLM
         # generation time. The caller fetches them asynchronously via
         # /extract/items so the save-critical core fields return fast.
-        return {**core, "items": [], "raw_text": full_text, "ocr_confidence": round(avg_confidence, 3)}
+        return out
 
     result = await _run_blocking(_pipeline, img_bytes)
     elapsed_ms = int((time.monotonic() - t0) * 1000)

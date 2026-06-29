@@ -47,6 +47,14 @@ export interface ReceiptOcrResult {
   raw_text: string;
   ocr_confidence: number;
   processing_ms: number;
+  /**
+   * Base64-encoded JPEG of the geometry-corrected receipt (cropped,
+   * perspective-de-warped and rotated upright by the service). Present only
+   * when the service actually changed the image; the worker uses it to replace
+   * the stored PDF so the viewed document is straight and upright. Null/absent
+   * when no correction was applied.
+   */
+  corrected_image?: string | null;
 }
 
 export interface ReceiptItemsResult {
