@@ -25,6 +25,7 @@ import {
   documentTaxSections,
   documents,
   documentsUserPref,
+  financeAccountAccess,
   userSubjectPersons,
 } from "../db/schema";
 import {
@@ -420,6 +421,32 @@ export const uploadReceiptCapture = api.raw(
       .trim();
     const mimeType = normalizeReceiptMimeType(originalName, rawMimeType);
 
+    // Optional: cash account chosen by the user when photographing. Persisted
+    // so the background OCR worker knows which account to book the transaction to.
+    const rawAccountId = req.headers["x-account-id"] as string | undefined;
+    let receiptAccountId: number | null = null;
+    if (rawAccountId) {
+      const parsed = parseInt(rawAccountId, 10);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        res.statusCode = 400;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "Invalid X-Account-Id header" }));
+        return;
+      }
+      const account = await dbFirst<{ account_id: number }>(
+        db.select({ account_id: financeAccountAccess.account_id })
+          .from(financeAccountAccess)
+          .where(and(eq(financeAccountAccess.account_id, parsed), eq(financeAccountAccess.user_id, userId))),
+      );
+      if (!account) {
+        res.statusCode = 404;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "Account not found" }));
+        return;
+      }
+      receiptAccountId = parsed;
+    }
+
     if (!RECEIPT_CAPTURE_MIME_TYPES.has(mimeType)) {
       res.statusCode = 415;
       res.setHeader("Content-Type", "application/json");
@@ -446,6 +473,11 @@ export const uploadReceiptCapture = api.raw(
         userId,
         scanPriority: RECEIPT_CAPTURE_PRIORITY,
       });
+      if (receiptAccountId !== null) {
+        await db.update(documents)
+          .set({ receipt_account_id: receiptAccountId, receipt_ocr_state: "pending" })
+          .where(eq(documents.id, result.id));
+      }
       res.statusCode = 201;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(result));
