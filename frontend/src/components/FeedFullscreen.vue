@@ -1,11 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { getPhotoUrl } from '../api/photos'
-import {
-  feedPinchZoom,
-  isFeedFullscreenTap,
-  shouldUseNativeFeedFullscreen,
-} from '../utils/feedFullscreen'
+import { feedPinchZoom, isFeedFullscreenTap } from '../utils/feedFullscreen'
 
 const props = defineProps<{
   filename: string
@@ -38,7 +34,6 @@ let elementCenterX = 0
 let elementCenterY = 0
 let pinched = false
 let moved = false
-let nativeRequested = false
 let closing = false
 let previousBodyOverflow = ''
 let suppressClickUntil = 0
@@ -124,72 +119,28 @@ function onContentClick() {
   void close()
 }
 
-type FullscreenDocument = Document & {
-  webkitFullscreenElement?: Element
-  webkitExitFullscreen?: () => Promise<void>
-}
-
-type FullscreenElement = HTMLElement & {
-  webkitRequestFullscreen?: () => Promise<void>
-}
-
-function fullscreenElement(): Element | null {
-  const doc = document as FullscreenDocument
-  return doc.fullscreenElement ?? doc.webkitFullscreenElement ?? null
-}
-
-async function requestNativeFullscreen() {
-  if (!shouldUseNativeFeedFullscreen()) return
-  const element = overlayRef.value as FullscreenElement | null
-  if (!element) return
-  try {
-    if (element.requestFullscreen) await element.requestFullscreen()
-    else if (element.webkitRequestFullscreen) await element.webkitRequestFullscreen()
-    nativeRequested = fullscreenElement() === element
-  } catch {
-    // CSS fullscreen remains fully functional when browser policy rejects it.
-  }
-}
-
-async function exitNativeFullscreen() {
-  if (fullscreenElement() !== overlayRef.value) return
-  const doc = document as FullscreenDocument
-  if (doc.exitFullscreen) await doc.exitFullscreen()
-  else if (doc.webkitExitFullscreen) await doc.webkitExitFullscreen()
-}
-
-async function close() {
+function close() {
   if (closing) return
   closing = true
-  try { await exitNativeFullscreen() } catch { /* overlay still closes */ }
   emit('close')
 }
 
-function onFullscreenChange() {
-  if (nativeRequested && !fullscreenElement() && !closing) emit('close')
-}
-
 function onKeydown(event: KeyboardEvent) {
-  if (event.key !== 'Escape') return
+  if (event.key !== 'Escape' && event.key !== 'Enter' && event.key !== ' ') return
   event.preventDefault()
   event.stopImmediatePropagation()
-  void close()
+  close()
 }
 
 onMounted(() => {
   previousBodyOverflow = document.body.style.overflow
   document.body.style.overflow = 'hidden'
   window.addEventListener('keydown', onKeydown, true)
-  document.addEventListener('fullscreenchange', onFullscreenChange)
-  document.addEventListener('webkitfullscreenchange', onFullscreenChange)
-  void requestNativeFullscreen()
 })
 
 onUnmounted(() => {
   document.body.style.overflow = previousBodyOverflow
   window.removeEventListener('keydown', onKeydown, true)
-  document.removeEventListener('fullscreenchange', onFullscreenChange)
-  document.removeEventListener('webkitfullscreenchange', onFullscreenChange)
 })
 </script>
 
