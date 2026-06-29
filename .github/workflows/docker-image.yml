@@ -110,6 +110,8 @@ jobs:
 
       - name: Build frontend (SPA bundle)
         run: npm --prefix frontend run build
+        env:
+          VITE_APP_BUILD: ${{ github.run_number }}-${{ github.sha }}
 
       # Installs the Encore CLI by running the upstream `install.sh` as
       # documented at https://encore.dev/docs/ts/self-host/ci-cd. We do NOT
