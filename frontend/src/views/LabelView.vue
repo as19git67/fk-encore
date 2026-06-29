@@ -161,6 +161,12 @@ async function handlePrinterChange() {
   }
 }
 
+function onTextareaKeydown(e: KeyboardEvent) {
+  if (e.key === 'Enter' && text.value.split('\n').length >= maxLines.value) {
+    e.preventDefault()
+  }
+}
+
 async function handlePrint() {
   error.value = ''
   info.value = ''
@@ -173,9 +179,16 @@ async function handlePrint() {
     return
   }
   printing.value = true
+  // Pad with empty lines to maxLines so CUPS renders a fixed line count and
+  // doesn't auto-scale the font based on how much text is present.
+  const lineCount = text.value.split('\n').length
+  const paddedText =
+    lineCount < maxLines.value
+      ? text.value + '\n'.repeat(maxLines.value - lineCount)
+      : text.value
   try {
     const res = await printLabel({
-      text: text.value,
+      text: paddedText,
       copies: copies.value || 1,
       printer: selectedPrinter.value,
       cpi: selectedFont.value.cpi,
@@ -227,7 +240,9 @@ onMounted(() => {
             fontSize: previewFontRem + 'rem',
             textAlign: align,
             lineHeight: '1.25',
+            resize: 'none',
           }"
+          @keydown="onTextareaKeydown"
         />
         <small class="hint-muted">max. {{ maxLines }} Zeilen bei dieser Schriftgröße</small>
       </label>
