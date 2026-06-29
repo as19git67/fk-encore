@@ -82,9 +82,9 @@ const photoFilterMenuOpen = ref(false)
 // Lazy-Mount: siehe GalleryView. Beim Öffnen einer Personenseite vermeiden wir
 // dadurch einen unnötigen /albums- und /persons-Roundtrip.
 const photoFilterMenuMounted = ref(false)
-const PHOTO_FILTER_AVAILABLE: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange' | 'sizeRange'> = [
+const PHOTO_FILTER_AVAILABLE: Array<keyof PhotoFilter | 'dateRange' | 'qualityRange'> = [
   'hiddenMode', 'favorite', 'mediaTypes', 'hasGps',
-  'qualityRange', 'dateRange', 'sizeRange',
+  'qualityRange', 'dateRange',
 ]
 
 function openPhotoFilterMenu() {
@@ -331,22 +331,29 @@ const rememberedPersonId = ref<number | null>(
 )
 
 // ── Person face / photo items ─────────────────────────────────────────────────
-const personFaceItems = computed(() => {
+const allPersonFaceItems = computed(() => {
   if (!selectedPersonDetail.value) return []
-  const f = photoFilter.value
   return selectedPersonDetail.value.faces
-    .filter(face => !!face.photo && !face.ignored && matchesPhotoFilter(face.photo as Photo, f))
+    .filter(face => !!face.photo && !face.ignored)
     .map(face => ({ face, photo: face.photo as Photo }))
 })
 
-const uniquePhotoFaceItems = computed(() => {
+function uniqueByPhotoId(items: PersonFaceItem[]): PersonFaceItem[] {
   const seen = new Set<number>()
-  return personFaceItems.value.filter(item => {
+  return items.filter(item => {
     if (seen.has(item.photo.id)) return false
     seen.add(item.photo.id)
     return true
   })
-})
+}
+
+const allUniquePhotoFaceItems = computed(() => uniqueByPhotoId(allPersonFaceItems.value))
+
+const uniquePhotoFaceItems = computed(() =>
+  uniqueByPhotoId(
+    allPersonFaceItems.value.filter(item => matchesPhotoFilter(item.photo, photoFilter.value)),
+  ),
+)
 
 // While the fullscreen overlay is open we pin a snapshot of the list so
 // that hiding/unhiding the current photo (via the eye button) doesn't
@@ -745,6 +752,7 @@ useRealtimeEvent('photos', 'curation.changed', async (ev) => {
       </div>
       <div v-if="selectedPersonDetail && photoFilterActiveCount > 0" class="person-photo-filter-chips">
         <FilterChips :filter="photoFilter" @remove="onRemovePhotoFilterKey" />
+        <Chip :label="`${uniquePhotoFaceItems.length} von ${allUniquePhotoFaceItems.length}`" />
       </div>
     </div>
 

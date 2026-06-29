@@ -358,14 +358,7 @@ export interface Face {
   quality?: number;
   ignored: boolean;
   created_at: string;
-  photo?: {
-    id: number;
-    user_id: number;
-    filename: string;
-    original_name: string;
-    taken_at?: string;
-    created_at: string;
-  };
+  photo?: PhotoWithCuration;
 }
 
 export interface Person {

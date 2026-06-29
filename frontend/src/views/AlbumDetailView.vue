@@ -658,6 +658,13 @@ const albumPhotos = computed<Photo[]>(() => {
   return rawAlbumPhotos.value.filter(p => matchesPhotoFilter(p, filter.value, ctx))
 })
 
+// Grid mode is server-filtered, so its count must come from the same response
+// that rendered the cells. Map mode intentionally uses the client-filtered
+// full album array because no VirtualGallery is mounted there.
+const filteredAlbumPhotoCount = computed(() =>
+  viewMode.value === 'grid' ? galleryTotal.value : albumPhotos.value.length,
+)
+
 
 // ── Search ────────────────────────────────────────────────────────────────────
 const {
@@ -1796,9 +1803,9 @@ async function onFullscreenOpenGroupReview() {
   activeGroup.value = found
 }
 
-async function onGalleryLoaded() {
+async function onGalleryLoaded(info: { total: number; offset: number }) {
   if (!galleryRef.value) return
-  galleryTotal.value = galleryRef.value.getTotal()
+  galleryTotal.value = info.total
   // galleryAnchorPhotoId was set before this mount (initial load or map→grid
   // switch). VirtualGallery already loaded entries around it; findLoadedIndexById
   // will find it. Consume the anchor so subsequent reloads don't re-apply it.
@@ -2366,7 +2373,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
         />
         <Chip
           v-if="activeCount > 0 && rawAlbumPhotos.length > 0"
-          :label="`${albumPhotos.length} von ${rawAlbumPhotos.length}`"
+          :label="`${filteredAlbumPhotoCount} von ${rawAlbumPhotos.length}`"
         />
       </div>
     </div>
