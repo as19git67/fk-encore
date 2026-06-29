@@ -10,12 +10,17 @@ import { useAnomalyStore } from './stores/finance/anomalies'
 import { useFeedBadgeStore } from './stores/feedBadge'
 import { modules, detectModule, moduleEntryPath } from './config/modules'
 import type { ModuleConfig } from './config/modules'
+import { useReferenceData } from './composables/useReferenceData'
+import { usePhotoNavStore } from './stores/photoNav'
+import { albumMenuTarget, albumsViewQueryFromStorage, readRememberedAlbumId } from './utils/albumsViewState'
 
 const auth = useAuthStore()
 const anomalyStore = useAnomalyStore()
 const feedBadgeStore = useFeedBadgeStore()
 const router = useRouter()
 const route = useRoute()
+const { fetchAlbums } = useReferenceData()
+const photoNav = usePhotoNavStore()
 
 feedBadgeStore.init()
 
@@ -56,6 +61,17 @@ const moduleMenuItems = computed(() =>
 
 function toggleHamburgerMenu(event: Event) {
   hamburgerMenuRef.value?.toggle(event)
+  // Opening the switcher is a strong navigation signal. Start loading the
+  // remembered entry chunk for every visible module after the popup has
+  // painted, so the eventual menu click does not appear to do nothing while
+  // Vite downloads a lazy route for the first time.
+  window.setTimeout(() => {
+    for (const mod of modules) {
+      if (!mod.permission || auth.hasPermission(mod.permission)) {
+        prefetchLocation(moduleEntryPath(mod))
+      }
+    }
+  }, 0)
 }
 
 // ── Sub-menu items for the active module ─────────────────────────────────────
@@ -110,6 +126,48 @@ function isGroupActive(children?: Array<{ routeName?: string }>): boolean {
   return !!children?.some((c) => c.routeName && c.routeName === route.name)
 }
 
+function navigateSubMenu(routeName?: string) {
+  if (!routeName) return
+  if (routeName === 'fotos-albums') {
+    const target = albumMenuTarget(route.name, readRememberedAlbumId())
+    if (target.name === 'fotos-albums') {
+      // Selecting the album toolbar item from an album explicitly means
+      // "show the list". Drop the one-shot auto-jump armed by focusing a
+      // photo; otherwise AlbumsView immediately reopens the same album and
+      // makes this navigation look like a reload.
+      photoNav.consumeAlbumJump()
+      void router.push({ ...target, query: albumsViewQueryFromStorage() })
+    } else {
+      void router.push(target)
+    }
+    return
+  }
+  void router.push({ name: routeName })
+}
+
+function prefetchLocation(location: string | { name: string }) {
+  const resolved = router.resolve(location)
+  for (const record of resolved.matched) {
+    for (const component of Object.values(record.components ?? {})) {
+      if (typeof component !== 'function') continue
+      try {
+        void Promise.resolve((component as () => unknown)()).catch(() => { /* navigation reports failures */ })
+      } catch { /* navigation reports failures */ }
+    }
+  }
+  if (resolved.path.startsWith('/fotos/alben')) {
+    void fetchAlbums().catch(() => { /* regular view loading reports errors */ })
+  }
+}
+
+function prefetchSubMenu(routeName?: string) {
+  if (routeName !== 'fotos-albums') return
+  // Warm both the lazy route chunk and the shared request cache while the
+  // pointer/finger approaches the album button. AlbumsView then paints from
+  // the same in-flight promise instead of starting a second request.
+  prefetchLocation({ name: routeName })
+}
+
 async function handleLogout() {
   await auth.logout()
   router.push('/login')
@@ -156,7 +214,9 @@ async function handleLogout() {
               size="small"
               :severity="route.name === item.routeName ? 'primary' : 'secondary'"
               :class="{ 'submenu-item--active': route.name === item.routeName }"
-              @click="item.routeName && router.push({ name: item.routeName })"
+              @pointerenter="prefetchSubMenu(item.routeName)"
+              @focus="prefetchSubMenu(item.routeName)"
+              @click="navigateSubMenu(item.routeName)"
             />
           </template>
           <Menu ref="groupMenuRef" :model="groupMenuModel" :popup="true" />

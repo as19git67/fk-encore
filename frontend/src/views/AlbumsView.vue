@@ -14,7 +14,7 @@ import VirtualAlbumGrid from '../components/VirtualAlbumGrid.vue'
 import type { SortField, SortState } from '../composables/useSort'
 import {
   type Album,
-  createAlbum, listAlbums,
+  createAlbum,
 } from '../api/photos'
 import { useAuthStore } from '../stores/auth'
 import { usePhotoNavStore } from '../stores/photoNav'
@@ -39,12 +39,11 @@ import {
 } from '../utils/albumsViewState'
 import ServiceStatusBar from "../components/ServiceStatusBar.vue";
 
-// Wir behalten die View-eigene Albumliste (eigene Sortier-/Filter-Logik),
-// invalidieren aber nach jeder Mutation den app-weiten Cache, damit die
-// Foto-Galerie beim nächsten Öffnen nicht auf eine veraltete Liste schaut.
-const { invalidateAlbums } = useReferenceData()
+// The list shares the app-wide cache with album pickers and filters. This
+// avoids a second expensive request when the album route opens, while the
+// view still owns its filter/sort presentation state.
+const { albums, fetchAlbums, invalidateAlbums } = useReferenceData()
 
-const albums = ref<Album[]>([])
 const loading = ref(true)
 const error = ref('')
 const auth = useAuthStore()
@@ -324,7 +323,7 @@ async function persistState() {
   }
 }
 
-async function loadData() {
+async function loadData(force = false) {
   // Don't toggle `loading` to true on subsequent calls — only the initial
   // fetch needs the spinner state. Refreshes (after rename / delete /
   // realtime events) replace `albums.value` in place, so VirtualAlbumGrid
@@ -332,8 +331,7 @@ async function loadData() {
   // this guard, editing an album's description would unmount the grid and
   // snap the user back to the top of the list.
   try {
-    const res = await listAlbums()
-    albums.value = res.albums
+    await fetchAlbums(force)
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Alben'
   } finally {
@@ -369,13 +367,13 @@ async function handleCreateAlbum() {
 // backend fires `albums.shared` only to the sharee, so receiving this
 // event is a reliable cue that our list is stale.
 useRealtimeEvent('albums', 'shared', () => {
-  loadData()
+  void loadData(true)
 })
 
 // A participant left an album share — refresh so the album disappears for
 // the leaver and the owner's share indicators stay current.
 useRealtimeEvent('albums', 'unshared', () => {
-  loadData()
+  void loadData(true)
 })
 
 // New photos added to any visible album — the list view only shows
@@ -384,7 +382,7 @@ useRealtimeEvent('albums', 'photo_added', (ev) => {
   const albumId = Number(ev.resourceId)
   if (!Number.isFinite(albumId)) return
   if (!albums.value.some((a) => a.id === albumId)) return
-  loadData()
+  void loadData(true)
 })
 
 // Initialize filter/sort/search before loadData so the restored state is

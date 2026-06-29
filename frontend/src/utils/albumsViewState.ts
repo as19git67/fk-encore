@@ -157,6 +157,21 @@ export function readRememberedAlbumId(): number | null {
 }
 
 /**
+ * Album toolbar navigation is context-sensitive: from album list/detail it
+ * acts as "back to album list"; from every other photo view it resumes the
+ * last album, with the list as the first-use fallback.
+ */
+export function albumMenuTarget(
+  currentRouteName: string | symbol | null | undefined,
+  rememberedAlbumId: number | null,
+): { name: 'fotos-albums' } | { name: 'fotos-album-detail'; params: { id: number } } {
+  if (currentRouteName === 'fotos-albums' || currentRouteName === 'fotos-album-detail' || rememberedAlbumId === null) {
+    return { name: 'fotos-albums' }
+  }
+  return { name: 'fotos-album-detail', params: { id: rememberedAlbumId } }
+}
+
+/**
  * Builds the URL query that the albums list would render with right now,
  * using the persisted filter/sort/search. Used by callers that navigate TO
  * the list (e.g. the back arrow in AlbumDetailView) so the URL reflects the
