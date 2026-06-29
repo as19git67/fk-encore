@@ -38,6 +38,11 @@ let closing = false
 let previousBodyOverflow = ''
 let suppressClickUntil = 0
 
+function consumeEvent(event: Event) {
+  event.preventDefault()
+  event.stopPropagation()
+}
+
 function distance(a: Touch, b: Touch): number {
   return Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY)
 }
@@ -47,6 +52,7 @@ function midpoint(a: Touch, b: Touch): { x: number; y: number } {
 }
 
 function onTouchStart(event: TouchEvent) {
+  consumeEvent(event)
   if (event.touches.length === 1) {
     const touch = event.touches[0]!
     touchStartX = touch.clientX
@@ -74,7 +80,7 @@ function onTouchStart(event: TouchEvent) {
 }
 
 function onTouchMove(event: TouchEvent) {
-  event.preventDefault()
+  consumeEvent(event)
   if (event.touches.length === 2) {
     const first = event.touches[0]!
     const second = event.touches[1]!
@@ -98,6 +104,7 @@ function onTouchMove(event: TouchEvent) {
 }
 
 function onTouchEnd(event: TouchEvent) {
+  consumeEvent(event)
   if (event.touches.length > 0 || event.changedTouches.length === 0) return
   const touch = event.changedTouches[0]!
   const dx = touch.clientX - touchStartX
@@ -109,14 +116,26 @@ function onTouchEnd(event: TouchEvent) {
   if (isFeedFullscreenTap(dx, dy, pinched)) void close()
 }
 
-function onTouchCancel() {
+function onTouchCancel(event: TouchEvent) {
+  consumeEvent(event)
   moved = true
   suppressClickUntil = Date.now() + 500
 }
 
-function onContentClick() {
+function onOverlayClick(event: MouseEvent) {
+  consumeEvent(event)
+  if (event.target === overlayRef.value) close()
+}
+
+function onContentClick(event: MouseEvent) {
+  consumeEvent(event)
   if (Date.now() < suppressClickUntil) return
-  void close()
+  close()
+}
+
+function onCloseClick(event: Event) {
+  consumeEvent(event)
+  close()
 }
 
 function close() {
@@ -152,7 +171,7 @@ onUnmounted(() => {
       role="dialog"
       aria-modal="true"
       aria-label="Foto im Vollbild"
-      @click.self="close"
+      @click="onOverlayClick"
       @touchstart="onTouchStart"
       @touchmove="onTouchMove"
       @touchend="onTouchEnd"
@@ -165,7 +184,14 @@ onUnmounted(() => {
           draggable="false"
         />
       </div>
-      <button class="feed-fullscreen__close" type="button" aria-label="Vollbild schließen" @click.stop="close">
+      <button
+        class="feed-fullscreen__close"
+        type="button"
+        aria-label="Vollbild schließen"
+        @click="onCloseClick"
+        @touchstart="consumeEvent"
+        @touchend="onCloseClick"
+      >
         <i class="pi pi-times" />
       </button>
     </div>
