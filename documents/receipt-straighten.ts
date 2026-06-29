@@ -100,8 +100,13 @@ async function _straighten(input: Buffer): Promise<Buffer> {
   const S = (p: Point): Point => [clamp(p[0] * inv, 0, srcW - 1), clamp(p[1] * inv, 0, srcH - 1)];
   const sTL = S(tl), sTR = S(tr), sBR = S(br), sBL = S(bl);
 
-  const outW = Math.min(MAX_OUT_DIM, Math.round((dist(sTL, sTR) + dist(sBL, sBR)) / 2));
-  const outH = Math.min(MAX_OUT_DIM, Math.round((dist(sTL, sBL) + dist(sTR, sBR)) / 2));
+  const naturalW = (dist(sTL, sTR) + dist(sBL, sBR)) / 2;
+  const naturalH = (dist(sTL, sBL) + dist(sTR, sBR)) / 2;
+  // Scale both dimensions by the same factor so the aspect ratio is preserved.
+  // Capping each independently would squish very tall or very wide receipts.
+  const downscale = Math.min(1, MAX_OUT_DIM / Math.max(naturalW, naturalH));
+  const outW = Math.round(naturalW * downscale);
+  const outH = Math.round(naturalH * downscale);
   if (outW < 50 || outH < 50) return input;
 
   // Inverse-map via homography
