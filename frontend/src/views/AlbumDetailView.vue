@@ -1763,9 +1763,10 @@ function handleGridPhotoClick(entry: GalleryGridEntry) {
   if (!galleryRef.value) return
   const idx = galleryRef.value.findLoadedIndexById(entry.id)
   if (idx === null) return
-  cursorIndex.value = idx
-  void hydrateCursor(idx)
-  if (window.innerWidth <= 768) void openGridFullscreenAt(idx)
+  // A click both focuses the grid item and opens it, consistently with the
+  // main gallery. openGridFullscreenAt owns cursor hydration so this also
+  // avoids the former duplicate request on narrow screens.
+  void openGridFullscreenAt(idx)
 }
 
 async function handleGridStackClick(entry: GalleryGridEntry) {
