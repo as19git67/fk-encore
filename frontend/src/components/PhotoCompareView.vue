@@ -1119,6 +1119,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
         <div class="compare-header">
           <div class="compare-header-left">
             <Button
+              class="compare-thumb-action compare-thumb-action--first"
               icon="pi pi-thumbs-down-fill"
               :label="isVeryNarrow ? undefined : isNarrow ? '1' : 'ausblenden (1)'"
               v-tooltip.bottom="{ value: isVeryNarrow ? 'Linkes ausblenden (1)' : undefined, disabled: isTouch }"
@@ -1130,6 +1131,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
           </div>
           <div class="compare-header-center">
             <Button
+              class="compare-center-action"
               icon="pi pi-equals"
               :label="isVeryNarrow ? undefined : isNarrow ? 'U' : 'Unentschieden (U, Leertaste)'"
               v-tooltip.bottom="{ value: isVeryNarrow ? 'Unentschieden (U)' : undefined, disabled: isTouch }"
@@ -1139,6 +1141,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
               @click="chooseDraw"
             />
             <Button
+              class="compare-center-action"
               icon="pi pi-forward"
               :label="isVeryNarrow ? undefined : isNarrow ? 'S' : 'Überspringen (S)'"
               v-tooltip.bottom="{ value: isVeryNarrow ? 'Überspringen (S)' : undefined, disabled: isTouch }"
@@ -1148,6 +1151,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
               @click="skipPair"
             />
             <Button
+              class="compare-center-action"
               icon="pi pi-sparkles"
               :label="isVeryNarrow ? undefined : isNarrow ? 'KI' : 'KI-Vorauswahl'"
               severity="warn"
@@ -1157,6 +1161,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
               @click="applyAiPreselection"
             />
             <Button
+              class="compare-center-action"
               icon="pi pi-link"
               :label="isVeryNarrow ? undefined : isNarrow ? 'Sync' : 'Sync-Zoom'"
               :severity="syncZoomEnabled ? 'primary' : 'secondary'"
@@ -1174,6 +1179,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
             />
             <Button
               v-if="!isVeryNarrow"
+              class="compare-center-action"
               icon="pi pi-question-circle"
               text
               rounded
@@ -1230,6 +1236,7 @@ function compareTileSrc(photo: Photo, width?: number): string {
           </div>
           <div class="compare-header-right">
             <Button
+              class="compare-thumb-action compare-thumb-action--second"
               icon="pi pi-thumbs-down-fill"
               :label="isVeryNarrow ? undefined : isNarrow ? '2' : 'ausblenden (2)'"
               v-tooltip.bottom="{ value: isVeryNarrow ? 'Rechtes ausblenden (2)' : undefined, disabled: isTouch }"
@@ -1463,6 +1470,12 @@ function compareTileSrc(photo: Photo, width?: number): string {
 
 <style scoped>
 .compare-overlay {
+  --compare-first-color: #38bdf8;
+  --compare-first-hover: #0ea5e9;
+  --compare-second-color: #f59e0b;
+  --compare-second-hover: #d97706;
+  --compare-center-color: #a78bfa;
+  --compare-center-hover: #8b5cf6;
   position: fixed;
   inset: 0;
   background: #0a0a0a;
@@ -1470,6 +1483,56 @@ function compareTileSrc(photo: Photo, width?: number): string {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+:deep(.compare-thumb-action--first.p-button) {
+  border-color: var(--compare-first-color);
+  color: #082f49;
+  background: var(--compare-first-color);
+}
+
+:deep(.compare-thumb-action--first.p-button:not(:disabled):hover) {
+  border-color: var(--compare-first-hover);
+  background: var(--compare-first-hover);
+}
+
+:deep(.compare-thumb-action--second.p-button) {
+  border-color: var(--compare-second-color);
+  color: #451a03;
+  background: var(--compare-second-color);
+}
+
+:deep(.compare-thumb-action--second.p-button:not(:disabled):hover) {
+  border-color: var(--compare-second-hover);
+  background: var(--compare-second-hover);
+}
+
+/* The center actions form one neutral decision group. Filled, outlined and
+   text variants retain their affordance while sharing the same purple hue. */
+:deep(.compare-center-action.p-button) {
+  border-color: var(--compare-center-color);
+  color: #2e1065;
+  background: var(--compare-center-color);
+}
+
+:deep(.compare-center-action.p-button.p-button-outlined),
+:deep(.compare-center-action.p-button.p-button-text) {
+  color: var(--compare-center-hover);
+  background: transparent;
+}
+
+:deep(.compare-center-action.p-button.p-button-text) {
+  border-color: transparent;
+}
+
+:deep(.compare-center-action.p-button:not(:disabled):hover) {
+  border-color: var(--compare-center-hover);
+  background: var(--compare-center-hover);
+}
+
+:deep(.compare-center-action.p-button.p-button-outlined:not(:disabled):hover),
+:deep(.compare-center-action.p-button.p-button-text:not(:disabled):hover) {
+  color: #fff;
 }
 
 /* ── Header (shared between phases) ── */
@@ -1841,9 +1904,9 @@ kbd {
 }
 
 .quality-dot--first,
-.quality-bar--first { background: #38bdf8; }
+.quality-bar--first { background: var(--compare-first-color); }
 .quality-dot--second,
-.quality-bar--second { background: #f59e0b; }
+.quality-bar--second { background: var(--compare-second-color); }
 
 .quality-comparison__rows {
   display: flex;
