@@ -160,6 +160,11 @@ export function useGallerySource(): GallerySource {
    */
   const pageControllers = new Map<number, AbortController>()
   const inflightControllers = new Set<AbortController>()
+  // Monotonically increasing generation for full query changes. An aborted
+  // fetch can still resolve when the HTTP response wins the race against
+  // AbortController; without this guard that stale response overwrites the
+  // newer filter's total and sparse entries array.
+  let initGeneration = 0
 
   function spliceIn(offset: number, photos: GalleryGridEntry[]) {
     if (photos.length === 0) return
@@ -226,6 +231,7 @@ export function useGallerySource(): GallerySource {
     opts: GalleryQueryState & { aroundPhotoId?: number | null },
   ): Promise<{ initialOffset: number; total: number }> {
     cancel()
+    const generation = initGeneration
     pagePromises.clear()
     initialLoading.value = true
     error.value = ''
@@ -249,6 +255,9 @@ export function useGallerySource(): GallerySource {
         { signal: ctrl.signal },
       )
       inflightControllers.delete(ctrl)
+      if (generation !== initGeneration) {
+        return { initialOffset: 0, total: total.value }
+      }
       total.value = res.total
       // Allocate the sparse backing array.
       const arr: (GalleryGridEntry | null)[] = new Array(res.total).fill(null)
@@ -288,12 +297,12 @@ export function useGallerySource(): GallerySource {
       spliceIn(res.offset, res.photos)
       return { initialOffset: res.offset, total: res.total }
     } catch (err: any) {
-      if (err?.name !== 'AbortError') {
+      if (generation === initGeneration && err?.name !== 'AbortError') {
         error.value = err?.message ?? 'Fehler beim Laden der Fotos.'
       }
-      return { initialOffset: 0, total: 0 }
+      return { initialOffset: 0, total: total.value }
     } finally {
-      initialLoading.value = false
+      if (generation === initGeneration) initialLoading.value = false
     }
   }
 
@@ -383,6 +392,7 @@ export function useGallerySource(): GallerySource {
   }
 
   function cancel() {
+    initGeneration++
     for (const c of inflightControllers) {
       try { c.abort() } catch { /* ignore */ }
     }

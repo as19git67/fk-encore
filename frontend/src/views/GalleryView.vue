@@ -106,6 +106,7 @@ import {
   batchDeletePhotos,
   type BatchDeleteSkippedPhoto,
   type Photo,
+  type PhotoFilter,
   type PhotoGroup,
   type CurationStatus,
   type Face,
@@ -1385,9 +1386,11 @@ async function onPhotoClick(entry: GalleryGridEntry) {
 //   2. Otherwise, drop the cursor on the restored last-viewed photo and
 //      hydrate it so the desktop sidebar shows that photo's details on
 //      first paint (instead of the user having to click anything).
-async function onGalleryLoaded() {
+async function onGalleryLoaded(info: { total: number; offset: number }) {
   if (!galleryRef.value) return
-  galleryTotal.value = galleryRef.value.getTotal()
+  // Use the total from this exact completed load. An imperative read can
+  // observe another concurrently starting reload instead.
+  galleryTotal.value = info.total
   void refreshUnfilteredGalleryTotal()
   if (pendingFullscreenId.value !== null) {
     const id = pendingFullscreenId.value
@@ -1427,6 +1430,13 @@ async function refreshUnfilteredGalleryTotal() {
       offset: 0,
       sortBy: sortByForGallery.value,
       sortDir: sortDirForGallery.value,
+      // The denominator is the complete library, not the default grid
+      // (which itself filters manually and AI-hidden photos). This keeps all
+      // visibility modes a true subset of the displayed "n von m" total.
+      filter: {
+        hiddenMode: 'include',
+        showAiHidden: true,
+      } satisfies PhotoFilter,
     })
     if (request === galleryTotalRequest) unfilteredGalleryTotal.value = total
   } catch {

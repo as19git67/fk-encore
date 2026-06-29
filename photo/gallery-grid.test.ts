@@ -98,6 +98,31 @@ describe("Gallery grid – album scope", () => {
     expect(ownerLibrary.total).toBe(1);
   });
 
+  it("counts hidden-only results and the complete library consistently", async () => {
+    const visible = await makePhoto(owner.id, "visible.jpg");
+    const hiddenA = await makePhoto(owner.id, "hidden-a.jpg");
+    const hiddenB = await makePhoto(owner.id, "hidden-b.jpg");
+    await db.insert(photoCuration).values([
+      { user_id: owner.id, photo_id: hiddenA, status: "hidden" },
+      { user_id: owner.id, photo_id: hiddenB, status: "hidden" },
+    ]);
+
+    const hiddenOnly = await listGalleryGridLogic(owner.id, { hiddenMode: "only" }, opts);
+    expect(hiddenOnly.total).toBe(2);
+    expect(hiddenOnly.photos.map((p) => p.id).sort()).toEqual([hiddenA, hiddenB].sort());
+
+    // This is the denominator for "n von m": include both manual hides
+    // and AI auto-hides so every active filter is a subset of m.
+    const completeLibrary = await listGalleryGridLogic(
+      owner.id,
+      { hiddenMode: "include", aiHiddenMode: "include" },
+      opts,
+    );
+    expect(completeLibrary.total).toBe(3);
+    expect(completeLibrary.photos.map((p) => p.id).sort())
+      .toEqual([visible, hiddenA, hiddenB].sort());
+  });
+
   it("reports album-scoped comment counts on grid entries (badge data)", async () => {
     const albumA = await service.createAlbumLogic(owner.id, { name: "A" });
     const albumB = await service.createAlbumLogic(owner.id, { name: "B" });
@@ -159,6 +184,16 @@ describe("Gallery grid – album scope", () => {
     // Library grid: the AI auto-pick hides the duplicate.
     const library = await listGalleryGridLogic(owner.id, {}, opts);
     expect(library.photos.map((p) => p.id)).toEqual([pick]);
+
+    // The global "n von m" denominator deliberately includes AI-hidden
+    // duplicates as well, so filters that reveal them can never exceed m.
+    const completeLibrary = await listGalleryGridLogic(
+      owner.id,
+      { hiddenMode: "include", aiHiddenMode: "include" },
+      opts,
+    );
+    expect(completeLibrary.total).toBe(2);
+    expect(completeLibrary.photos.map((p) => p.id).sort()).toEqual([dup, pick].sort());
 
     // Album-detail grid: an album is a curated collection — every album
     // photo is shown, the AI auto-hide does not apply.
