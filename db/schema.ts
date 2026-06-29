@@ -678,6 +678,13 @@ export const documentVisibilityEnum = pgEnum("document_visibility", [
   "group",
 ]);
 
+export const receiptOcrStateEnum = pgEnum("receipt_ocr_state", [
+  "pending",
+  "booked",
+  "incomplete",
+  "failed",
+]);
+
 export const groupMemberRoleEnum = pgEnum("group_member_role", [
   "owner",
   "member",
@@ -776,7 +783,36 @@ export const documents = pgTable("documents", {
   // (re)defined by migration 0099 over title || sender || document_number ||
   // tags_text || extracted_text and accessed only via raw SQL (drizzle-orm
   // has no first-class tsvector support).
+  // Receipt OCR async pipeline (migration 0113).
+  // `receipt_ocr_state` tracks background processing for receipt documents.
+  // `receipt_account_id` stores the cash account chosen when photographing.
+  // `receipt_transaction_id` is the idempotency anchor — set once the
+  // auto-created transaction exists, preventing duplicate bookings.
+  receipt_ocr_state: receiptOcrStateEnum("receipt_ocr_state"),
+  receipt_account_id: integer("receipt_account_id").references(() => financeAccount.id, { onDelete: "set null" }),
+  // FK to finance_transaction declared in migration SQL only to avoid circular reference.
+  receipt_transaction_id: bigint("receipt_transaction_id", { mode: "number" }),
 });
+
+// 1:1 structured extraction result from receipt-OCR pipeline (migration 0113).
+// Kept separate from `documents` to avoid growing that table with nullable
+// receipt-only columns.
+export const documentReceiptExtraction = pgTable(
+  "document_receipt_extraction",
+  {
+    id: serial("id").primaryKey(),
+    document_id: integer("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" })
+      .unique(),
+    amount: numeric("amount", { precision: 14, scale: 2 }),
+    receipt_date: text("receipt_date"),
+    store: text("store"),
+    items: jsonb("items").$type<Array<{ name: string; amount: number }>>().notNull().default([]),
+    ocr_confidence: real("ocr_confidence"),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+);
 
 // N:M mapping of a document to one or more German tax-return sections
 // (Anlagen / Abzugsbereiche). Slug values are NOT a Postgres enum —
