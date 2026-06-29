@@ -1127,9 +1127,11 @@ describe("Photo Module", () => {
         user_id: user1.id,
         mime_type: "image/jpeg",
         size: 456,
-        taken_at: "2025-06-15T12:30:00.000Z",
         curation_status: "hidden",
       });
+      expect(new Date(details.faces[0].photo!.taken_at!).toISOString()).toBe(
+        "2025-06-15T12:30:00.000Z"
+      );
       expect(details.faces[1].photo?.curation_status).toBe("visible");
     });
 
