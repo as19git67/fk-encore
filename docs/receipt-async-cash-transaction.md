@@ -66,18 +66,21 @@ Push** (`npm run test`, alle grün). Bei neuen/umbenannten Migrationen immer
 
 ### Etappe 1 — Datenmodell
 
-**Ziel:** Persistenz der strukturierten Extraktion + Idempotenz-Anker.
+**Ziel:** Persistenz der strukturierten Extraktion + Idempotenz-Anker +
+gewähltes Konto.
 
-- Persistenz der OCR-Felder (Betrag/Datum/Store/Items/Confidence), damit der
-  Worker daraus bucht und der Review-View sie laden kann.
-  **Entscheidung (offen):** separate Tabelle `document_receipt_extraction`
-  (empfohlen, hält den Items-Array aus der schlanken `documents`-Zeile) vs.
-  Spalten auf `documents`.
-- Idempotenz: sicherstellen, dass pro Beleg höchstens **eine**
-  auto-erzeugte Transaktion entsteht (Worker ist at-least-once). Variante:
-  partieller Unique-Index auf `finance_transaction.receipt_document_id` für
-  auto-erzeugte Zeilen, oder Marker `receipt_transaction_id` am Dokument.
-- Optionaler Statusmarker am Dokument für den OCR-Fortschritt
+- **Separate Tabelle `document_receipt_extraction`** (entschieden): hält
+  Betrag/Datum/Store/Items/Confidence aus der schlanken `documents`-Zeile
+  heraus. 1:1 zum Dokument.
+- **Gewähltes Cash-Konto persistieren:** das beim Fotografieren gewählte Konto
+  (Etappe 2) muss bis zur späteren Hintergrund-Buchung erhalten bleiben —
+  Spalte `receipt_account_id` am Dokument (oder an der Extraktions-/Capture-
+  Zeile), Pflicht für den Auto-Buchungs-Pfad.
+- Idempotenz: sicherstellen, dass pro Beleg höchstens **eine** auto-erzeugte
+  Transaktion entsteht (Worker ist at-least-once). Variante: partieller
+  Unique-Index auf `finance_transaction.receipt_document_id` für auto-erzeugte
+  Zeilen, oder Marker `receipt_transaction_id` am Dokument.
+- Statusmarker am Dokument für den OCR-Fortschritt
   (`receipt_ocr_state: 'pending' | 'booked' | 'incomplete' | 'failed'`),
   damit Notifikation & UI den Zustand kennen.
 - Drizzle-Migration unter `db/migrations/postgres/`, `_journal.json` ergänzen.
@@ -91,11 +94,15 @@ Push** (`npm run test`, alle grün). Bei neuen/umbenannten Migrationen immer
 - `receipt-capture`-Pfad bleibt: Bild als Dokument speichern (schnell, 201) und
   Background-Verarbeitung anstoßen. Der synchrone `extractReceiptOcr`-Aufruf
   wird aus dem Capture-Flow entfernt.
-- Account-Kontext mitgeben/auflösen (welches Cash-Konto die spätere Transaktion
-  bekommt) — Parameter am Endpoint, Default = Standard-/zuletzt genutztes
-  Cash-Konto. **Entscheidung offen** (siehe unten).
+- **Konto-Wahl beim Fotografieren (entschieden):** der Foto-Dialog lässt den
+  Nutzer das Cash-Konto wählen, bevor er den Beleg aufnimmt. Das gewählte
+  `account_id` geht als Pflichtparameter an den Capture-Endpoint und wird am
+  Dokument persistiert (Etappe 1), damit die spätere Hintergrund-Buchung weiß,
+  wohin sie bucht. Vorbelegung mit zuletzt genutztem Cash-Konto ist erlaubt,
+  aber der Nutzer kann umstellen.
 
-**Done:** Capture liefert sofort zurück; kein synchrones OCR mehr im Request.
+**Done:** Capture liefert sofort zurück; kein synchrones OCR mehr im Request;
+gewähltes Konto ist gespeichert.
 
 ### Etappe 3 — Background-OCR im Worker
 
@@ -113,12 +120,23 @@ Push** (`npm run test`, alle grün). Bei neuen/umbenannten Migrationen immer
 
 **Ziel:** Aus dem OCR-Ergebnis entsteht die Bar-Transaktion.
 
-- Wenn ein verlässlicher **Betrag** vorliegt: Bar-Transaktion über den regulären
-  Erstell-Pfad anlegen — `amount`, `booking_date` (Belegdatum, sonst heute),
-  `counterparty` (=store), `purpose` (=Items-Notiz), `receipt_document_id`
-  gesetzt; Status `booked`.
-- Wenn **kein** Betrag erkennbar: **keine** Transaktion anlegen, Dokument-Status
-  `incomplete`, eigene Notifikation „Beleg erkannt — Betrag bitte ergänzen".
+- **Verlässlicher Betrag = `> 0 und <= 999` (entschieden):** nur in diesem
+  Bereich wird automatisch gebucht. `amount <= 0` oder `> 999` gilt als nicht
+  verlässlich → kein Auto-Buchen.
+- Wenn verlässlicher Betrag vorliegt: Bar-Transaktion über den regulären
+  Erstell-Pfad auf dem gewählten `receipt_account_id` anlegen — `amount`,
+  `booking_date`, `counterparty` (=store), `purpose` (=Items-Notiz),
+  `receipt_document_id` gesetzt; Status `booked`.
+- **Buchungsdatum (entschieden):** erkanntes Belegdatum, Fallback heute, und
+  **niemals neuer als heute**. „Heute" ist die *lokale* Sicht des Nutzers, nicht
+  Server-UTC — daher die Date-only-Helfer aus `frontend/src/utils/dateFormat.ts`
+  (`toLocalIsoDate`/`parseLocalDate`) verwenden bzw. das Clamping serverseitig so
+  umsetzen, dass eine am selben Tag aufgenommene Quittung nicht durch eine
+  UTC-Verschiebung fälschlich als „morgen" abgelehnt wird (Timezone
+  Frontend↔Server beachten).
+- Wenn **kein verlässlicher** Betrag: **keine** Transaktion anlegen,
+  Dokument-Status `incomplete`, Notifikation „Beleg erkannt — Betrag bitte
+  ergänzen".
 - Wenn das OCR-Service **down** ist: Job zurückstellen/retry (wie bestehende
   LLM-Backoff-Logik im Worker), kein Fehlschlag.
 - Idempotent über den Anker aus Etappe 1.
@@ -176,15 +194,14 @@ normalen Bearbeiten-Pfad, kein Extra-Review.
 
 ---
 
-## Offene Entscheidungen (vor Umsetzung klären)
+## Getroffene Entscheidungen
 
-1. **Persistenz der Extraktion:** separate Tabelle `document_receipt_extraction`
-   (empfohlen) vs. Spalten auf `documents`.
-2. **Konto-Auswahl** für die automatische Buchung: festes Default-Cash-Konto vs.
-   zuletzt genutztes vs. Auswahl beim Fotografieren. Bei mehreren Cash-Konten
-   ist das die wichtigste offene Frage.
-3. **Schwelle „verlässlicher Betrag":** ab welcher `ocr_confidence` /
-   Plausibilität wird automatisch gebucht vs. als `incomplete` an den Nutzer
-   gegeben?
-4. **Belegdatum vs. heute:** Buchungsdatum = erkanntes Belegdatum, Fallback heute
-   — bestätigt?
+1. **Persistenz der Extraktion:** separate Tabelle
+   `document_receipt_extraction`.
+2. **Konto-Auswahl:** der Nutzer wählt das Cash-Konto **beim Fotografieren**;
+   das gewählte Konto wird am Dokument persistiert und steuert die spätere
+   Hintergrund-Buchung.
+3. **Schwelle „verlässlicher Betrag":** automatisch buchen nur bei
+   `amount > 0 und <= 999`; sonst `incomplete` + Notifikation.
+4. **Buchungsdatum:** erkanntes Belegdatum, Fallback heute, niemals neuer als
+   heute — mit korrekter Timezone-Behandlung Frontend↔Server (lokales „heute").
