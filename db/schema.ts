@@ -653,6 +653,7 @@ export const documentJobServiceEnum = pgEnum("document_job_service", [
   "text_extract",
   "classify",
   "embed",
+  "receipt_ocr",
 ]);
 
 export const documentJobStatusEnum = pgEnum("document_job_status", [
