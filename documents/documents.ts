@@ -472,12 +472,17 @@ export const uploadReceiptCapture = api.raw(
         mimeType: file.mimeType,
         userId,
         scanPriority: RECEIPT_CAPTURE_PRIORITY,
+        // When the user chose an account, we handle the receipt via the
+        // dedicated receipt_ocr worker and don't need the LLM classify/embed
+        // pipeline. text_extract still runs for the thumbnail.
+        scanServices: receiptAccountId !== null ? (["text_extract"] as const) : undefined,
       });
       if (receiptAccountId !== null) {
         await db.update(documents)
           .set({ receipt_account_id: receiptAccountId, receipt_ocr_state: "pending" })
           .where(eq(documents.id, result.id));
         await enqueueDocumentScan(result.id, ["receipt_ocr"], RECEIPT_CAPTURE_PRIORITY);
+        triggerWorkers();
       }
       res.statusCode = 201;
       res.setHeader("Content-Type", "application/json");
@@ -613,8 +618,9 @@ async function storeDocumentBuffer(params: {
   mimeType: string;
   userId: number;
   scanPriority?: number;
+  scanServices?: readonly import("./scan-queue").DocumentScanService[];
 }): Promise<DocumentSummary> {
-  const { buffer, originalName, mimeType, userId, scanPriority = 2 } = params;
+  const { buffer, originalName, mimeType, userId, scanPriority = 2, scanServices } = params;
   if (buffer.length > DOCUMENTS_MAX_BYTES) throw new Error("DOCUMENT_TOO_LARGE");
   const ext = guessExtension(originalName, mimeType);
   const digest = crypto.createHash("sha256").update(buffer).digest("hex");
@@ -683,7 +689,7 @@ async function storeDocumentBuffer(params: {
     }
   }
 
-  await enqueueDocumentScan(row.id, undefined, scanPriority);
+  await enqueueDocumentScan(row.id, scanServices, scanPriority);
   triggerWorkers();
 
   return toSummary(row, null, []);

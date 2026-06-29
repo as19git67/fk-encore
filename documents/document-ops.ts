@@ -765,8 +765,24 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
   assertPathUnderDocumentsRoot(row.disk_path);
   const buffer = await fs.readFile(row.disk_path);
 
+  // Receipt captures are stored as PDF (image wrapped in PDF by uploadReceiptCapture),
+  // but the receipt-ocr service expects an image. Extract the embedded JPEG so the
+  // service receives the same data the old synchronous path used to send.
+  let ocrBuffer: Buffer = buffer;
+  let ocrMimeType = row.mime_type;
+  let ocrFilename = row.original_filename;
+  if (row.mime_type === "application/pdf") {
+    const jpeg = extractJpegFromPdf(buffer);
+    if (jpeg) {
+      ocrBuffer = jpeg;
+      ocrMimeType = "image/jpeg";
+      ocrFilename = row.original_filename.replace(/\.pdf$/i, ".jpg");
+    }
+    // If no JPEG found (genuine PDF receipt), fall through — the service may handle PDFs.
+  }
+
   // Stage 1: core extraction (amount / date / store).
-  const core = await extractReceipt(buffer, row.original_filename, row.mime_type);
+  const core = await extractReceipt(ocrBuffer, ocrFilename, ocrMimeType);
 
   // Stage 2: line-item extraction — best-effort, failures don't block booking.
   let items: Array<{ name: string; amount: number }> = [];
@@ -870,4 +886,34 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
       store: core.store,
     }).catch(err => console.warn(`[documents] notifyReceiptBooked failed doc=${documentId}: ${(err as Error).message}`));
   }
+}
+
+/**
+ * Extract the embedded JPEG from a hand-crafted receipt PDF (as built by
+ * `singleJpegPagePdf` in documents.ts). The receipt-ocr service expects an
+ * image, not a PDF wrapper, so we recover the raw JPEG bytes by locating the
+ * SOI (FF D8) / EOI (FF D9) markers inside the PDF binary.
+ *
+ * Returns null for genuine PDFs that don't contain a raw JPEG stream.
+ */
+function extractJpegFromPdf(pdfBuf: Buffer): Buffer | null {
+  let start = -1;
+  for (let i = 0; i < pdfBuf.length - 1; i++) {
+    if (pdfBuf[i] === 0xff && pdfBuf[i + 1] === 0xd8) {
+      start = i;
+      break;
+    }
+  }
+  if (start === -1) return null;
+
+  let end = -1;
+  for (let i = pdfBuf.length - 2; i >= start; i--) {
+    if (pdfBuf[i] === 0xff && pdfBuf[i + 1] === 0xd9) {
+      end = i + 2;
+      break;
+    }
+  }
+  if (end === -1) return null;
+
+  return Buffer.from(pdfBuf.subarray(start, end));
 }
