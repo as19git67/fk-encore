@@ -209,6 +209,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  loadGeneration++
   resizeObs?.disconnect()
   resizeObs = null
   scrollRef.value?.removeEventListener('scroll', updateScrollEnds)
@@ -293,8 +294,10 @@ watch(virtualRows, schedulePrefetch, { flush: 'post' })
 // ── Initial + re-init on query change ───────────────────────────────────────
 const ready = ref(false)
 const isInitialLoading = ref(true)
+let loadGeneration = 0
 
 async function loadAndScroll(anchor: number | null | undefined) {
+  const generation = ++loadGeneration
   ready.value = false
   const { initialOffset, total: totalRows } = await source.init({
     filter: props.filter,
@@ -303,11 +306,16 @@ async function loadAndScroll(anchor: number | null | undefined) {
     photoIds: props.searchPhotoIds ?? null,
     aroundPhotoId: anchor ?? null,
   })
+  // Filter/sort/search changes may start another load before this one
+  // settles. Only the latest request may announce a total or reposition the
+  // virtualizer; otherwise the count chip can be reset by a stale request.
+  if (generation !== loadGeneration) return
   ready.value = true
   emit('loaded', { total: totalRows, offset: initialOffset })
   // Wait one frame so the virtualizer has measured the container with the
   // new total before we ask it to scroll.
   await new Promise<void>((r) => requestAnimationFrame(() => r()))
+  if (generation !== loadGeneration) return
   if (cols.value > 0 && totalRows > 0) {
     // Anchor resolved → centre the viewport on it. Otherwise the backend
     // returned the newest page (offset = total - limit); land on the newest
@@ -325,10 +333,12 @@ async function loadAndScroll(anchor: number | null | undefined) {
   // state so the parent's "jump to newest / oldest" toolbar button
   // labels itself correctly without waiting for the user's first scroll.
   await new Promise<void>((r) => requestAnimationFrame(() => r()))
+  if (generation !== loadGeneration) return
   updateScrollEnds()
 
   // Allow prefetches to start after initial positioning is done.
   await new Promise<void>((r) => setTimeout(r, 200))
+  if (generation !== loadGeneration) return
   isInitialLoading.value = false
   // The prefetch watcher is gated while isInitialLoading is true, so the
   // scroll that positioned the initial viewport never fired a fetch for it.
