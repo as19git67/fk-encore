@@ -4,6 +4,7 @@ import { onBeforeRouteLeave } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import PhotoFeedCard from '../components/PhotoFeedCard.vue'
+import FeedFullscreen from '../components/FeedFullscreen.vue'
 import FeedUploadAlbumDialog from '../components/FeedUploadAlbumDialog.vue'
 import { listPhotoFeed, type FeedPhotoItem, type PhotoFeedCursor } from '../api/photoFeed'
 import { updatePhotoCuration, listAlbums, uploadPhoto, batchUpdateAlbumPhotos, computeFileHash, checkPhotoHash } from '../api/photos'
@@ -28,6 +29,11 @@ const loadingMore = ref(false)
 const error = ref('')
 const nextCursor = ref<PhotoFeedCursor | null>(null)
 const hasNew = ref(false)
+const fullscreenItem = ref<FeedPhotoItem | null>(null)
+
+function openFullscreen(item: FeedPhotoItem) {
+  fullscreenItem.value = item
+}
 
 // ── Upload ──────────────────────────────────────────────────────────────────
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -309,6 +315,7 @@ onBeforeUnmount(() => {
         :current-user-id="auth.user?.id ?? null"
         @like="onLike"
         @hide="onHide"
+        @open="openFullscreen"
       />
     </div>
 
@@ -325,6 +332,13 @@ onBeforeUnmount(() => {
       @update:visible="(v) => (dialogVisible = v)"
       @confirm="onDialogConfirm"
       @cancel="onDialogCancel"
+    />
+
+    <FeedFullscreen
+      v-if="fullscreenItem"
+      :filename="fullscreenItem.filename"
+      :alt="fullscreenItem.description ?? fullscreenItem.filename"
+      @close="fullscreenItem = null"
     />
   </div>
 </template>
