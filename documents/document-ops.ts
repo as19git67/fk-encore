@@ -6,17 +6,26 @@
  * layer.
  */
 
+import fs from "node:fs/promises";
 import { and, eq, sql } from "drizzle-orm";
 import db from "../db/database";
 import { dbFirst } from "../db/adapter";
 import {
   documentCategories,
+  documentReceiptExtraction,
   documentSubjectPersons,
   documentTagLinks,
   documentTags,
   documentTaxSections,
   documents,
 } from "../db/schema";
+import { createReceiptAutoTransaction } from "../finance/receipt-booking";
+import {
+  extractReceipt,
+  extractReceiptItems,
+  isReceiptOcrHealthy,
+  ReceiptOcrUnavailableError,
+} from "./receipt-ocr-client";
 import { extractPdfText, PdfPasswordRequiredError } from "./text-extract";
 import { buildThumbnail } from "./thumbnail";
 import { removeOcrPdf, writeOcrPdf } from "./ocr-pdf";
@@ -699,3 +708,141 @@ export async function replaceUserTaxSections(
 
 /** Exported for tests / seed completeness checks. */
 export { flattenTaxonomy };
+
+// ─── Receipt-OCR background job ───────────────────────────────────────────────
+
+/** Amount threshold for automatic booking (plan decision §3). */
+const RECEIPT_AUTO_BOOK_MIN = 0;
+const RECEIPT_AUTO_BOOK_MAX = 999;
+
+/**
+ * Return today's date as YYYY-MM-DD in local server time.
+ * Used to cap the booking date so a receipt can never be booked in the future.
+ */
+function localTodayIso(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Job: `receipt_ocr`.
+ *
+ * Runs only for documents captured via the `receipt-capture` endpoint
+ * with an `X-Account-Id` header (i.e. `receipt_ocr_state = 'pending'`).
+ *
+ * Pipeline:
+ * 1. Call receipt-ocr-service to extract amount / date / store / items.
+ * 2. Persist the raw extraction in `document_receipt_extraction`.
+ * 3. If the amount is reliable (>0 and <=999): auto-create a cash transaction.
+ * 4. If not reliable: mark the document as `incomplete`.
+ *
+ * Throws `ReceiptOcrUnavailableError` when the service is down so the
+ * worker defers the job (retry with exponential back-off, no permanent failure).
+ */
+export async function runReceiptOcr(documentId: number): Promise<void> {
+  const row = await getDocumentOrThrow(documentId);
+
+  // Guard: only process documents that are waiting for receipt OCR.
+  if (row.receipt_ocr_state !== "pending") return;
+  if (!row.receipt_account_id) {
+    // No account chosen — mark incomplete so UI can notify the user.
+    await db.update(documents)
+      .set({ receipt_ocr_state: "incomplete" })
+      .where(eq(documents.id, documentId));
+    return;
+  }
+
+  // Health check — defer the job if the service is cold/restarting.
+  const healthy = await isReceiptOcrHealthy().catch(() => false);
+  if (!healthy) {
+    throw new ReceiptOcrUnavailableError("receipt-ocr-service health check failed");
+  }
+
+  // Read the stored PDF/image from disk.
+  assertPathUnderDocumentsRoot(row.disk_path);
+  const buffer = await fs.readFile(row.disk_path);
+
+  // Stage 1: core extraction (amount / date / store).
+  const core = await extractReceipt(buffer, row.original_filename, row.mime_type);
+
+  // Stage 2: line-item extraction — best-effort, failures don't block booking.
+  let items: Array<{ name: string; amount: number }> = [];
+  if (core.raw_text) {
+    try {
+      const itemsResult = await extractReceiptItems(core.raw_text);
+      items = itemsResult.items;
+    } catch (err) {
+      console.warn(
+        `[documents] receipt items extraction failed for doc=${documentId}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  // Persist extraction result.
+  await db
+    .insert(documentReceiptExtraction)
+    .values({
+      document_id: documentId,
+      amount: core.amount != null ? String(core.amount) : null,
+      receipt_date: core.date,
+      store: core.store,
+      items,
+      ocr_confidence: core.ocr_confidence,
+    })
+    .onConflictDoUpdate({
+      target: documentReceiptExtraction.document_id,
+      set: {
+        amount: core.amount != null ? String(core.amount) : null,
+        receipt_date: core.date,
+        store: core.store,
+        items,
+        ocr_confidence: core.ocr_confidence,
+      },
+    });
+
+  // Determine if the amount is reliable enough for auto-booking.
+  const reliable =
+    core.amount != null &&
+    core.amount > RECEIPT_AUTO_BOOK_MIN &&
+    core.amount <= RECEIPT_AUTO_BOOK_MAX;
+
+  if (!reliable) {
+    await db.update(documents)
+      .set({ receipt_ocr_state: "incomplete" })
+      .where(eq(documents.id, documentId));
+    console.log(
+      `[documents] receipt OCR doc=${documentId}: amount=${core.amount} outside reliable range — marked incomplete`,
+    );
+    return;
+  }
+
+  // Clamp booking date: use receipt date, fall back to today, never in the future.
+  const today = localTodayIso();
+  let bookingDate = core.date ?? today;
+  if (bookingDate > today) bookingDate = today;
+
+  // Build a purpose string from items (e.g. "Milch, Joghurt, Brot").
+  const purpose =
+    items.length > 0
+      ? items.map((i) => i.name).join(", ").slice(0, 255)
+      : null;
+
+  const txId = await createReceiptAutoTransaction({
+    documentId,
+    accountId: row.receipt_account_id,
+    amount: -(core.amount!), // expenses are negative
+    bookingDate,
+    counterparty: core.store,
+    purpose,
+    currencyCode: core.currency ?? "EUR",
+  });
+
+  if (txId !== null) {
+    console.log(
+      `[documents] receipt OCR doc=${documentId}: auto-booked tx=${txId} amount=${core.amount} on account=${row.receipt_account_id}`,
+    );
+  }
+}

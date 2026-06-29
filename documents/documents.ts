@@ -477,6 +477,7 @@ export const uploadReceiptCapture = api.raw(
         await db.update(documents)
           .set({ receipt_account_id: receiptAccountId, receipt_ocr_state: "pending" })
           .where(eq(documents.id, result.id));
+        await enqueueDocumentScan(result.id, ["receipt_ocr"], RECEIPT_CAPTURE_PRIORITY);
       }
       res.statusCode = 201;
       res.setHeader("Content-Type", "application/json");
