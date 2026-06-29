@@ -197,6 +197,13 @@ function thumbnailSrc(item: FacePhotoItem): string {
     userId: auth.user?.id,
   })
 }
+
+function openPhoto(idx: number) {
+  emit('update:selectedIndex', idx)
+  // Desktop single-click mirrors gallery + album behavior. Keep the existing
+  // double-click path below as the deliberate mobile/touch affordance.
+  if (window.innerWidth > 768) emit('open-fullscreen')
+}
 </script>
 
 <template>
@@ -229,7 +236,7 @@ function thumbnailSrc(item: FacePhotoItem): string {
             'is-favorite': effectiveStatus(item) === 'favorite',
           }"
           :style="{ height: `${cellSize}px` }"
-          @click="emit('update:selectedIndex', idx)"
+          @click="openPhoto(idx)"
           @dblclick="emit('open-fullscreen')"
         >
           <div class="photo-thumb">
