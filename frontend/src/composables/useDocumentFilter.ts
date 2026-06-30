@@ -1,9 +1,13 @@
 import { ref, computed, watch } from 'vue'
 import type { Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type { LocationQueryRaw } from 'vue-router'
+import { replaceQuerySlice, updateRouteQuery } from '../utils/routeQueryUpdate'
 
 const STORAGE_KEY = 'documents.filter'
+export const DOCUMENT_FILTER_QUERY_KEYS = [
+  'category', 'tags', 'status', 'review', 'sender', 'dateFrom', 'dateTo',
+  'taxRelevant', 'subjectPerson',
+] as const
 
 export interface DocumentFilter {
   category?: string
@@ -91,10 +95,6 @@ function loadFilter(): DocumentFilter | null {
   } catch { return null }
 }
 
-export interface UseDocumentFilterOptions {
-  preserveKeys?: string[]
-}
-
 export interface UseDocumentFilterReturn {
   applied: Ref<DocumentFilter>
   draft: Ref<DocumentFilter>
@@ -107,7 +107,7 @@ export interface UseDocumentFilterReturn {
   removeTag: (tag: string) => void
 }
 
-export function useDocumentFilter(opts: UseDocumentFilterOptions = {}): UseDocumentFilterReturn {
+export function useDocumentFilter(): UseDocumentFilterReturn {
   const route = useRoute()
   const router = useRouter()
 
@@ -135,16 +135,11 @@ export function useDocumentFilter(opts: UseDocumentFilterOptions = {}): UseDocum
     },
   )
 
-  async function syncUrl(f: DocumentFilter) {
+  function syncUrl(f: DocumentFilter) {
     const filterQ = docFilterToQuery(f)
-    const preserved: Record<string, unknown> = {}
-    for (const key of opts.preserveKeys ?? []) {
-      const v = route.query[key]
-      if (v !== undefined) preserved[key] = v
-    }
-    const nextQuery = { ...preserved, ...filterQ } as LocationQueryRaw
-    if (JSON.stringify(nextQuery) === JSON.stringify(route.query)) return
-    await router.replace({ query: nextQuery })
+    return updateRouteQuery(router, (current) =>
+      replaceQuerySlice(current, DOCUMENT_FILTER_QUERY_KEYS, filterQ),
+    )
   }
 
   function openEdit() {
