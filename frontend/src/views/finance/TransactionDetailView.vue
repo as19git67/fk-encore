@@ -19,7 +19,7 @@ import { useTagsStore } from '../../stores/finance/tags'
 import { useTxSelectionStore } from '../../stores/finance/selection'
 import type { MandateHistoryItem, Transaction } from '../../api/finance'
 import * as api from '../../api/finance'
-import { searchDocuments, type DocumentSummary } from '../../api/documents'
+import { searchDocuments, type SearchDocumentSummary } from '../../api/documents'
 import { lookupBtcCodeDe } from '../../utils/btcCodes'
 
 const route = useRoute()
@@ -44,7 +44,7 @@ const linkedDocumentsLoading = ref(true)
 const linkedDocumentsLoaded = ref(false)
 const documentLinkPanelOpen = ref(false)
 const documentQuery = ref('')
-const documentResults = ref<DocumentSummary[]>([])
+const documentResults = ref<SearchDocumentSummary[]>([])
 const documentSuggestions = ref<api.DocumentMatchSuggestion[]>([])
 const documentSearchLoading = ref(false)
 const documentSuggestionsLoading = ref(false)
@@ -673,15 +673,35 @@ const extractedFields = computed(() => {
                 Keine passenden Dokumente gefunden.
               </p>
               <ul v-if="documentResults.length" class="document-result-list">
-                <li v-for="document in documentResults" :key="document.id" class="document-result-row">
-                  <span>{{ document.title ?? document.original_filename }}</span>
-                  <Button
-                    label="Verbinden"
-                    size="small"
-                    text
-                    :loading="documentLinkingId === document.id"
-                    @click="linkDocumentToTransaction(document.id)"
-                  />
+                <li v-for="document in documentResults" :key="document.id" class="document-suggestion">
+                  <div class="document-result-row">
+                    <div class="document-suggestion-title">
+                      <span>{{ document.title ?? document.original_filename }}</span>
+                    </div>
+                    <Button
+                      label="Verbinden"
+                      size="small"
+                      text
+                      :loading="documentLinkingId === document.id"
+                      @click="linkDocumentToTransaction(document.id)"
+                    />
+                  </div>
+                  <div class="document-suggestion-preview">
+                    <dl v-if="document.sender || document.doc_date" class="document-preview-meta">
+                      <template v-if="document.sender">
+                        <dt>Absender</dt>
+                        <dd>{{ document.sender }}</dd>
+                      </template>
+                      <template v-if="document.doc_date">
+                        <dt>Datum</dt>
+                        <dd>{{ document.doc_date }}</dd>
+                      </template>
+                    </dl>
+                    <p v-if="document.extracted_text_preview" class="document-preview-text">
+                      {{ document.extracted_text_preview }}
+                    </p>
+                    <p v-else class="hint">Keine Textvorschau verfügbar.</p>
+                  </div>
                 </li>
               </ul>
             </div>

@@ -2681,8 +2681,12 @@ export const listDocumentCategories = api(
 
 // ─── Search ─────────────────────────────────────────────────────────────────
 
+export interface SearchDocumentSummary extends DocumentSummary {
+  extracted_text_preview: string | null;
+}
+
 export interface SearchDocumentsResponse {
-  items: DocumentSummary[];
+  items: SearchDocumentSummary[];
   mode: SearchMode;
   query: string;
 }
@@ -2796,9 +2800,13 @@ export const searchDocumentsEndpoint = api(
       .map((h) => {
         const r = byId.get(h.document_id);
         if (!r) return null;
-        return toSummary(r as any, r.cat_slug, tagsByDoc.get(r.id) ?? []);
+        const preview = (r.extracted_text ?? "").slice(0, 2000);
+        return {
+          ...toSummary(r as any, r.cat_slug, tagsByDoc.get(r.id) ?? []),
+          extracted_text_preview: preview.length > 0 ? preview : null,
+        };
       })
-      .filter((x): x is DocumentSummary => x !== null);
+      .filter((x): x is SearchDocumentSummary => x !== null);
 
     return { items, mode: resolvedMode, query };
   },
