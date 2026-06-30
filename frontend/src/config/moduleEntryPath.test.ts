@@ -40,4 +40,21 @@ describe('moduleEntryPath', () => {
     expect(moduleEntryPath(dokumente)).toBe('/dokumente/gruppen')
     expect(moduleEntryPath(fotos)).toBe('/fotos/alben')
   })
+
+  it('exposes document navigation as the active-module submenu', () => {
+    expect(dokumente.menuItems.map((item) => item.label)).toEqual([
+      'Alle Dokumente',
+      'Arbeitskorb',
+      'Später',
+      'Steuer',
+      'Kategorie-Vorschläge',
+      'Hilfe',
+      'Einstellungen',
+    ])
+    expect(dokumente.menuItems.at(-1)?.children?.map((item) => item.label)).toEqual([
+      'Steuer-Hints',
+      'Bezugspersonen',
+      'Gruppen',
+    ])
+  })
 })
