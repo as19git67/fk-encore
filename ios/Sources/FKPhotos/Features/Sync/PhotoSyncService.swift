@@ -131,6 +131,12 @@ actor PhotoSyncService {
 
             let processingBatchSize = 500
             var processedCount = 0
+            // Per album, the oldest creationDate of an asset we FAILED to process
+            // this run (typically because its iCloud original wasn't available to
+            // hash). The watermark must never advance to or past these, otherwise
+            // the strict `creationDate >` enumeration predicate would skip them
+            // forever and they'd never be retried.
+            var earliestUnhashedByAlbum: [String: Date] = [:]
             for batchStart in stride(from: 0, to: assets.count, by: processingBatchSize) {
                 try Task.checkCancellation()
                 let assetBatch = assets[batchStart..<min(batchStart + processingBatchSize, assets.count)]
@@ -139,7 +145,15 @@ actor PhotoSyncService {
                 await SyncProgress.shared.update(.hashingBatch(done: processedCount, total: assets.count))
                 var hashPairs: [(asset: PHAsset, filename: String, sourceAlbumId: String?, hashResult: PhotoHashResult)] = []
                 for (asset, filename, sourceAlbumId) in assetBatch {
-                    guard let result = await PhotoHasher.shared.hashes(for: asset) else { continue }
+                    guard let result = await PhotoHasher.shared.hashes(for: asset) else {
+                        // Hash failed — remember the oldest such asset per album so
+                        // the watermark can't sail past it (see comment above).
+                        if let sourceAlbumId, let created = asset.creationDate,
+                           (earliestUnhashedByAlbum[sourceAlbumId].map { created < $0 } ?? true) {
+                            earliestUnhashedByAlbum[sourceAlbumId] = created
+                        }
+                        continue
+                    }
                     hashPairs.append((asset, filename, sourceAlbumId, result))
                 }
 
@@ -180,7 +194,7 @@ actor PhotoSyncService {
                 // computed). We deliberately exclude assets whose hash failed
                 // (typically because iCloud bytes weren't available) so they get
                 // retried on the next run instead of being silently skipped.
-                advanceWatermarksForProcessed(hashPairs)
+                advanceWatermarksForProcessed(hashPairs, earliestUnhashedByAlbum: earliestUnhashedByAlbum)
                 processedCount += assetBatch.count
             }
 
@@ -207,23 +221,43 @@ actor PhotoSyncService {
         await BackgroundSyncManager.shared.drainUploadQueue()
     }
 
-    /// Stores the newest creationDate per source album over the assets we
-    /// successfully processed in this batch. The `advanceAlbumSyncDate` helper
-    /// only writes when strictly newer, so out-of-order completions never
-    /// roll the watermark backwards.
+    /// Advances the per-album watermark to the newest creationDate among the
+    /// assets we successfully processed in this batch — but never to or past an
+    /// asset that failed to process this run (`earliestUnhashedByAlbum`). The
+    /// `advanceAlbumSyncDate` helper only writes when strictly newer, so
+    /// out-of-order completions never roll the watermark backwards.
     private func advanceWatermarksForProcessed(
-        _ pairs: [(asset: PHAsset, filename: String, sourceAlbumId: String?, hashResult: PhotoHashResult)]
+        _ pairs: [(asset: PHAsset, filename: String, sourceAlbumId: String?, hashResult: PhotoHashResult)],
+        earliestUnhashedByAlbum: [String: Date]
     ) {
-        var perAlbumMax: [String: Date] = [:]
-        for pair in pairs {
-            guard let sourceAlbumId = pair.sourceAlbumId,
-                  let created = pair.asset.creationDate else { continue }
-            if let existing = perAlbumMax[sourceAlbumId], existing >= created { continue }
-            perAlbumMax[sourceAlbumId] = created
+        let processed: [(albumId: String, created: Date)] = pairs.compactMap { pair in
+            guard let albumId = pair.sourceAlbumId, let created = pair.asset.creationDate else { return nil }
+            return (albumId, created)
         }
-        for (albumId, date) in perAlbumMax {
+        for (albumId, date) in Self.safeWatermarks(
+            processed: processed,
+            earliestUnhashed: earliestUnhashedByAlbum
+        ) {
             PhotoSyncPreferences.advanceAlbumSyncDate(date, for: albumId)
         }
+    }
+
+    /// Pure watermark computation (unit-tested): per album, the newest processed
+    /// `creationDate` that is strictly older than the album's earliest
+    /// *unprocessed* asset. Assets at or after a failure are excluded so the
+    /// strict `creationDate >` enumeration predicate re-includes the failed asset
+    /// (and everything after it) on the next run instead of skipping it forever.
+    static func safeWatermarks(
+        processed: [(albumId: String, created: Date)],
+        earliestUnhashed: [String: Date]
+    ) -> [String: Date] {
+        var result: [String: Date] = [:]
+        for entry in processed {
+            if let failed = earliestUnhashed[entry.albumId], entry.created >= failed { continue }
+            if let existing = result[entry.albumId], existing >= entry.created { continue }
+            result[entry.albumId] = entry.created
+        }
+        return result
     }
 
     private func resolveTargetAlbumIds(sourceAlbumId: String?) -> [Int] {

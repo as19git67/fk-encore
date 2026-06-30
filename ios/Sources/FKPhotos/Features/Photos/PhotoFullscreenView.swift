@@ -5,12 +5,32 @@ import MapKit
 // MARK: - Container (supports swipe paging between multiple photos)
 
 struct PhotoFullscreenView: View {
+    /// Album the viewer was opened from, enabling the contextual
+    /// "remove from this album" action (issue #762). Nil for the timeline,
+    /// person and grid contexts where there is no single owning album.
+    struct AlbumContext {
+        let id: Int
+        let name: String
+    }
+
     private let photos: [PhotoWithCuration]
     private let bboxes: [FaceBBox?]
     @Binding private var currentIndex: Int
     @Environment(\.dismiss) private var dismiss
+    @Environment(AuthManager.self) private var authManager
     @State private var showDetails = false
     @State private var curationOverrides: [Int: CurationStatus] = [:]
+
+    // Per-photo actions (issue #762): hide already exists below; these add
+    // delete, save-original-to-library and remove-from-album.
+    /// Called after a photo is removed from the current view — either deleted
+    /// server-side or removed from the owning album — so the presenting list can
+    /// splice it out of its own array. Carries the affected photo id.
+    private let onPhotoRemoved: ((Int) -> Void)?
+    private let albumContext: AlbumContext?
+    @State private var showDeleteConfirm = false
+    @State private var isProcessingAction = false
+    @State private var toastMessage: ToastMessage?
 
     // Person context (when navigated from PersonDetailView)
     private let personId: Int?
@@ -24,7 +44,7 @@ struct PhotoFullscreenView: View {
     @State private var isMerging = false
 
     /// Single-photo convenience init (e.g. PersonDetailView).
-    init(photo: PhotoWithCuration, faceBBox: FaceBBox? = nil, personId: Int? = nil, initialPersonName: String = "", onPersonRenamed: ((String) -> Void)? = nil, onPersonMerged: (() -> Void)? = nil) {
+    init(photo: PhotoWithCuration, faceBBox: FaceBBox? = nil, personId: Int? = nil, initialPersonName: String = "", onPersonRenamed: ((String) -> Void)? = nil, onPersonMerged: (() -> Void)? = nil, onPhotoRemoved: ((Int) -> Void)? = nil) {
         self.photos = [photo]
         self.bboxes = [faceBBox]
         _currentIndex = .constant(0)
@@ -32,20 +52,24 @@ struct PhotoFullscreenView: View {
         _personName = State(initialValue: initialPersonName)
         self.onPersonRenamed = onPersonRenamed
         self.onPersonMerged = onPersonMerged
+        self.onPhotoRemoved = onPhotoRemoved
+        self.albumContext = nil
     }
 
     /// Multi-photo init for paged navigation (e.g. PhotoGridView).
-    init(photos: [PhotoWithCuration], currentIndex: Binding<Int>) {
+    init(photos: [PhotoWithCuration], currentIndex: Binding<Int>, albumContext: AlbumContext? = nil, onPhotoRemoved: ((Int) -> Void)? = nil) {
         self.photos = photos
         self.bboxes = Array(repeating: nil, count: photos.count)
         _currentIndex = currentIndex
         self.personId = nil
         self.onPersonRenamed = nil
         self.onPersonMerged = nil
+        self.onPhotoRemoved = onPhotoRemoved
+        self.albumContext = albumContext
     }
 
     /// Multi-photo init for person context: paged navigation with per-photo face boxes.
-    init(photos: [PhotoWithCuration], bboxes: [FaceBBox?], currentIndex: Binding<Int>, personId: Int, initialPersonName: String, onPersonRenamed: ((String) -> Void)? = nil, onPersonMerged: (() -> Void)? = nil) {
+    init(photos: [PhotoWithCuration], bboxes: [FaceBBox?], currentIndex: Binding<Int>, personId: Int, initialPersonName: String, onPersonRenamed: ((String) -> Void)? = nil, onPersonMerged: (() -> Void)? = nil, onPhotoRemoved: ((Int) -> Void)? = nil) {
         self.photos = photos
         self.bboxes = bboxes.count == photos.count ? bboxes : Array(repeating: nil, count: photos.count)
         _currentIndex = currentIndex
@@ -53,6 +77,8 @@ struct PhotoFullscreenView: View {
         _personName = State(initialValue: initialPersonName)
         self.onPersonRenamed = onPersonRenamed
         self.onPersonMerged = onPersonMerged
+        self.onPhotoRemoved = onPhotoRemoved
+        self.albumContext = nil
     }
 
     private var currentPhoto: PhotoWithCuration? {
@@ -128,6 +154,39 @@ struct PhotoFullscreenView: View {
                             .foregroundStyle(currentCuration == .hidden ? Color.red : Color.accentColor)
                     }
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button {
+                            Task { await saveOriginalToLibrary() }
+                        } label: {
+                            Label("Original sichern", systemImage: "square.and.arrow.down")
+                        }
+
+                        if let album = albumContext {
+                            Button {
+                                Task { await removeFromAlbum(album) }
+                            } label: {
+                                Label("Aus „\(album.name)“ entfernen", systemImage: "rectangle.stack.badge.minus")
+                            }
+                        }
+
+                        if authManager.hasPermission("photos.delete") {
+                            Divider()
+                            Button(role: .destructive) {
+                                showDeleteConfirm = true
+                            } label: {
+                                Label("Löschen", systemImage: "trash")
+                            }
+                        }
+                    } label: {
+                        if isProcessingAction {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "ellipsis.circle")
+                        }
+                    }
+                    .disabled(isProcessingAction || currentPhoto == nil)
+                }
                 ToolbarItem(placement: .principal) {
                     if let photo = currentPhoto {
                         Button {
@@ -192,6 +251,19 @@ struct PhotoFullscreenView: View {
                 }
             }
         .toolbarBackground(showDetails ? .visible : .hidden, for: .bottomBar)
+        .confirmationDialog(
+            "Foto löschen?",
+            isPresented: $showDeleteConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Löschen", role: .destructive) {
+                Task { await deleteCurrentPhoto() }
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: {
+            Text("Das Foto wird in den Papierkorb verschoben.")
+        }
+        .toast($toastMessage)
         .alert("Umbenennen", isPresented: $isRenaming) {
                 TextField("Name eingeben", text: $newName)
                     .autocorrectionDisabled()
@@ -252,6 +324,68 @@ struct PhotoFullscreenView: View {
             DispatchQueue.main.async {
                 coordinator.navigationController?.interactivePopGestureRecognizer?.isEnabled = true
             }
+        }
+    }
+
+    // MARK: - Per-photo actions (issue #762)
+
+    /// Empty decodable for endpoints that return a small JSON object we don't
+    /// need to inspect (e.g. `{ success: true }`). Decoding any JSON object into
+    /// a field-less struct succeeds, so this stays robust to response shape.
+    private struct EmptyResponse: Codable {}
+
+    /// Downloads the original file bytes and saves them into the device's Photos
+    /// library as a new asset, stamped with the server's capture date/favourite.
+    private func saveOriginalToLibrary() async {
+        guard let photo = currentPhoto else { return }
+        isProcessingAction = true
+        defer { isProcessingAction = false }
+        do {
+            let data = try await APIClient.shared.downloadData("/photos/file/\(photo.filename)")
+            try await PhotoLibrarySaver.save(
+                data,
+                creationDate: parseISO(photo.taken_at ?? photo.created_at),
+                isFavorite: currentCuration == .favorite
+            )
+            toastMessage = .success("Original in der Fotos-Mediathek gesichert.")
+        } catch {
+            toastMessage = .error(error.localizedDescription)
+        }
+    }
+
+    /// Removes the current photo from the album it was opened in (not a global
+    /// delete) and tells the presenting album list to splice it out.
+    private func removeFromAlbum(_ album: AlbumContext) async {
+        guard let photo = currentPhoto else { return }
+        isProcessingAction = true
+        defer { isProcessingAction = false }
+        struct Body: Codable { let albumIds: [Int]; let photoIds: [Int]; let action: String }
+        do {
+            let _: EmptyResponse = try await APIClient.shared.post(
+                "/albums/photos/batch",
+                body: Body(albumIds: [album.id], photoIds: [photo.id], action: "remove")
+            )
+            onPhotoRemoved?(photo.id)
+            dismiss()
+        } catch {
+            toastMessage = .error(error.localizedDescription)
+        }
+    }
+
+    /// Soft-deletes the current photo server-side (moves it to the trash) and
+    /// tells the presenting list to splice it out. Gated in the UI by the
+    /// `photos.delete` permission; the server enforces ownership as well.
+    private func deleteCurrentPhoto() async {
+        guard let photo = currentPhoto else { return }
+        isProcessingAction = true
+        do {
+            let _: EmptyResponse = try await APIClient.shared.delete("/photos/\(photo.id)")
+            isProcessingAction = false
+            onPhotoRemoved?(photo.id)
+            dismiss()
+        } catch {
+            isProcessingAction = false
+            toastMessage = .error(error.localizedDescription)
         }
     }
 
