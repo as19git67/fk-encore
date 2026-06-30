@@ -7,7 +7,7 @@
  *   3. Emit anomalies:
  *      - amount_change:       mandate's typical amount changed by > AMOUNT_CHANGE_THRESHOLD
  *      - duplicate:           same mandate_ref + amount within DUPLICATE_WINDOW_DAYS
- *      - new_mandate:         first time a mandate appears with amount > NEW_MANDATE_ALERT_AMOUNT
+ *      - new_mandate:         a newly established recurring pattern above the alert amount
  *      - missing_transaction: a regular mandate's expected next booking is
  *                             overdue past MISSING_GRACE_DAYS.  Emitted in a
  *                             second pass after every account's transactions
@@ -41,8 +41,16 @@ const AMOUNT_CHANGE_THRESHOLD = 0.15; // 15 %
 const AMOUNT_CHANGE_MIN_ABS = 5.00;
 /** Days within which a second identical booking is flagged as duplicate. */
 const DUPLICATE_WINDOW_DAYS = 5;
-/** New SEPA debit mandates with |amount| above this threshold get a new_mandate alert. */
+/** Newly established recurring patterns above this amount get an alert. */
 const NEW_MANDATE_ALERT_AMOUNT = 100;
+/** Minimum real bookings required before a series can be called recurring. */
+const NEW_RECURRING_MIN_OCCURRENCES = 3;
+/** Ignore accidental same-merchant clusters shorter than a working week. */
+const NEW_RECURRING_MIN_INTERVAL_DAYS = 5;
+/** Annual payments plus calendar jitter still fit below this ceiling. */
+const NEW_RECURRING_MAX_INTERVAL_DAYS = 400;
+/** Maximum variation of the observed intervals for a new recurring pattern. */
+const NEW_RECURRING_INTERVAL_MAX_CV = 0.30;
 /** Minimum transactions before we trust the typical_amount baseline. */
 const BASELINE_MIN_TRANSACTIONS = 6;
 /**
@@ -129,16 +137,6 @@ function isTrackable(key: MandateKey): boolean {
   return !!(key.mandate_ref || key.creditor_id || key.counterparty_iban || key.counterparty);
 }
 
-/**
- * A counterparty name or IBAN is useful for grouping transaction history, but
- * does not prove that a transaction is a recurring debit. Card payments often
- * carry both and must not be announced as a new mandate. SEPA mandate or
- * creditor identifiers are the stable evidence required for this alert.
- */
-function isNewDebitMandate(key: MandateKey, amount: string): boolean {
-  return Number(amount) < 0 && !!(key.mandate_ref || key.creditor_id);
-}
-
 // -----------------------------------------------------------------------
 // Core processing
 // -----------------------------------------------------------------------
@@ -161,6 +159,11 @@ export async function runAnomalyDetection(
     mandates_updated: 0,
     anomalies_created: 0,
   };
+
+  // Alerts created by the old implementation represented a first occurrence,
+  // not an established recurring pattern. Hide them without a migration; a
+  // qualifying series can create a fresh alert on its actual pattern boundary.
+  await acknowledgeLegacyNewMandateAnomalies(accountIds);
 
   const accountCond = accountIds && accountIds.length > 0
     ? inArray(financeTransaction.account_id, accountIds)
@@ -244,31 +247,38 @@ async function processAccount(
     const txDate = new Date(tx.booking_date.slice(0, 10));
     const isRecentForAlerts = txDate >= recencyCutoff;
 
-    if (mandate.isNew) {
-      created++;
-      if (!isRecentForAlerts) continue;
+    if (mandate.isNew) created++;
+    else updated++;
 
-      if (
-        isNewDebitMandate(key, tx.amount)
-        && Math.abs(Number(tx.amount)) >= NEW_MANDATE_ALERT_AMOUNT
-      ) {
-        const inserted = await insertAnomalyIfAbsent({
-          account_id: accountId,
-          transaction_id: tx.id,
-          mandate_id: mandate.id,
-          type: "new_mandate",
-          score: "0.7000",
-          details: {
-            counterparty: tx.counterparty,
-            amount: tx.amount,
-          },
-        });
-        if (inserted) anomalies++;
-      }
-    } else {
-      updated++;
-      if (!isRecentForAlerts) continue;
+    if (!isRecentForAlerts) continue;
 
+    const recurringPattern = await getNewRecurringPattern(
+      mandate.id,
+      tx.id,
+      tx.booking_date,
+    );
+    if (
+      recurringPattern
+      && Math.abs(Number(tx.amount)) >= NEW_MANDATE_ALERT_AMOUNT
+    ) {
+      const inserted = await insertNewRecurringAnomalyIfAbsent({
+        account_id: accountId,
+        transaction_id: tx.id,
+        mandate_id: mandate.id,
+        type: "new_mandate",
+        score: "0.7000",
+        details: {
+          counterparty: tx.counterparty,
+          amount: tx.amount,
+          occurrences: recurringPattern.occurrences,
+          interval_days: recurringPattern.meanIntervalDays,
+          interval_cv: recurringPattern.intervalCv,
+        },
+      });
+      if (inserted) anomalies++;
+    }
+
+    if (!mandate.isNew) {
       // Check for amount change. The flagged transaction must not be older
       // than the reference transactions used to build the baseline —
       // otherwise we'd compare an older booking against a newer baseline,
@@ -738,6 +748,58 @@ async function getMandateIntervalCV(mandateId: number): Promise<number | null> {
   return Math.sqrt(variance) / Math.abs(mean);
 }
 
+interface RecurringPattern {
+  occurrences: number;
+  meanIntervalDays: number;
+  intervalCv: number;
+}
+
+/**
+ * Detect the point at which a real transaction history first establishes a
+ * recurring pattern. Only bookings up to the candidate are considered, so an
+ * older transaction can never gain knowledge from future bookings during a
+ * full detector rerun.
+ */
+async function getNewRecurringPattern(
+  mandateId: number,
+  transactionId: number,
+  bookingDate: string,
+): Promise<RecurringPattern | null> {
+  const rows = await db.execute<{ booking_date: string }>(sql`
+    SELECT ft.booking_date
+    FROM finance_transaction ft
+    JOIN finance_recurring_mandate frm ON frm.id = ${mandateId}
+    WHERE ft.account_id = frm.account_id
+      AND (
+        (frm.mandate_ref IS NOT NULL AND ft.mandate_ref = frm.mandate_ref)
+        OR (frm.mandate_ref IS NULL AND frm.counterparty_iban IS NOT NULL AND ft.counterparty_iban = frm.counterparty_iban)
+        OR (frm.mandate_ref IS NULL AND frm.counterparty_iban IS NULL AND ft.counterparty = frm.counterparty)
+      )
+      AND (
+        ft.booking_date < ${bookingDate}
+        OR (ft.booking_date = ${bookingDate} AND ft.id <= ${transactionId})
+      )
+    ORDER BY ft.booking_date DESC, ft.id DESC
+    LIMIT ${MISSING_INTERVAL_SAMPLE_SIZE}
+  `);
+  const dates = rows.rows.map((row) => row.booking_date.slice(0, 10)).sort();
+  if (dates.length < NEW_RECURRING_MIN_OCCURRENCES) return null;
+
+  const intervals = dates.slice(1).map((date, index) => dateDiffDays(dates[index], date));
+  if (intervals.some((days) => days <= 0)) return null;
+  const mean = intervals.reduce((sum, days) => sum + days, 0) / intervals.length;
+  if (mean < NEW_RECURRING_MIN_INTERVAL_DAYS || mean > NEW_RECURRING_MAX_INTERVAL_DAYS) return null;
+  const variance = intervals.reduce((sum, days) => sum + (days - mean) ** 2, 0) / intervals.length;
+  const cv = Math.sqrt(variance) / mean;
+  if (cv > NEW_RECURRING_INTERVAL_MAX_CV) return null;
+
+  return {
+    occurrences: dates.length,
+    meanIntervalDays: Math.round(mean),
+    intervalCv: Math.round(cv * 10000) / 10000,
+  };
+}
+
 /**
  * Severity 0..1 — grows with how late the booking is relative to the
  * mandate's own period. Pinned to 0.95 max so it sorts below true
@@ -825,6 +887,43 @@ async function insertAnomalyIfAbsent(values: {
   } catch {
     return false;
   }
+}
+
+async function insertNewRecurringAnomalyIfAbsent(values: {
+  account_id: number;
+  transaction_id: number;
+  mandate_id: number;
+  type: string;
+  score: string;
+  details: Record<string, unknown>;
+}): Promise<boolean> {
+  const [existing] = await db
+    .select({ id: financeAnomaly.id })
+    .from(financeAnomaly)
+    .where(
+      and(
+        eq(financeAnomaly.mandate_id, values.mandate_id),
+        eq(financeAnomaly.type, "new_mandate"),
+      ),
+    )
+    .limit(1);
+  if (existing) return false;
+  return insertAnomalyIfAbsent(values);
+}
+
+async function acknowledgeLegacyNewMandateAnomalies(accountIds?: number[]): Promise<void> {
+  const conditions = [
+    eq(financeAnomaly.type, "new_mandate"),
+    isNull(financeAnomaly.acknowledged_at),
+    sql`NOT COALESCE(${financeAnomaly.details} ? 'occurrences', FALSE)`,
+  ];
+  if (accountIds && accountIds.length > 0) {
+    conditions.push(inArray(financeAnomaly.account_id, accountIds));
+  }
+  await db
+    .update(financeAnomaly)
+    .set({ acknowledged_at: sql`NOW()` })
+    .where(and(...conditions));
 }
 
 // -----------------------------------------------------------------------
@@ -1345,7 +1444,7 @@ function buildMessage(
       const amount = Math.abs(Number(details.amount ?? 0));
       const isCredit = Number(details.amount ?? 0) > 0;
       const kind = isCredit ? "Gutschrift" : "Lastschrift";
-      return `Neue ${kind} von ${name} über ${fmtEur(amount)}.`;
+      return `Neue regelmäßige ${kind} von ${name} über ${fmtEur(amount)}.`;
     }
     case "missing_transaction": {
       const expectedAmount = details.expected_amount !== undefined
