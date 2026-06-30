@@ -575,6 +575,7 @@ onMounted(async () => {
           v-tooltip.bottom="filter.activeCount.value > 0 ? `${filter.activeCount.value} Filter aktiv` : 'Filter'"
           :badge="filter.activeCount.value > 0 ? String(filter.activeCount.value) : undefined"
           badge-severity="info"
+          :severity="filter.activeCount.value > 0 ? undefined : 'secondary'"
           @click="openFilterMenu"
         />
 
