@@ -8,6 +8,7 @@ import { extractDocumentAmount, isWithinDocumentMatchWindow } from './document-m
 import { requirePermission } from '../user/auth-handler'
 import { loadVisibleDocument } from '../documents/visibility'
 import { documentTextPreview } from '../documents/text-preview'
+import { fetchTagsForDocuments } from '../documents/tags'
 
 interface SuggestDocumentsParams { transaction_ids: number[] }
 interface DecideSuggestionParams { id: number; outcome: 'accepted' | 'rejected' | 'ignored' }
@@ -28,6 +29,7 @@ interface DocumentSuggestionDTO {
   doc_date: string | null
   summary: string | null
   extracted_text_preview: string | null
+  tags: string[]
 }
 interface MatchMetricBucket { accepted: number; rejected: number; ignored: number; pending: number }
 interface MatchMetricsResponse { high: MatchMetricBucket; medium: MatchMetricBucket; low: MatchMetricBucket }
@@ -65,13 +67,14 @@ export const suggestDocuments = api({ expose: true, method: 'POST', path: '/fina
       return null
     }
   }))
-  return { items: visible
+  const candidates = visible
     .filter((item): item is NonNullable<typeof item> => item !== null)
     .filter(({ row, document }) => isWithinDocumentMatchWindow(
       bookingDateById.get(Number(row.transaction_id)),
       document.doc_date,
     ))
-    .map(({ row, document }) => ({
+  const tagsByDocument = await fetchTagsForDocuments(candidates.map(({ document }) => document.id))
+  return { items: candidates.map(({ row, document }) => ({
     id: Number(row.id), transaction_id: Number(row.transaction_id), document_id: Number(row.document_id),
     score: Number(row.score), amount_score: Number(row.amount_score), date_score: Number(row.date_score),
     text_score: Number(row.text_score), outcome: String(row.outcome),
@@ -81,6 +84,7 @@ export const suggestDocuments = api({ expose: true, method: 'POST', path: '/fina
     doc_date: document.doc_date,
     summary: document.summary,
     extracted_text_preview: documentTextPreview(document.summary ?? document.extracted_text),
+    tags: tagsByDocument.get(document.id) ?? [],
     })) }
 })
 

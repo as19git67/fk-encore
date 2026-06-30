@@ -10,6 +10,7 @@ import DatePicker from 'primevue/datepicker'
 import TagAutoComplete from '../../components/finance/TagAutoComplete.vue'
 import Textarea from 'primevue/textarea'
 import Dialog from 'primevue/dialog'
+import DocumentThumbnail from '../../components/DocumentThumbnail.vue'
 import { useConfirm } from 'primevue/useconfirm'
 import { toLocalIsoDate } from '../../utils/dateFormat'
 import { useModuleBack } from '../../composables/useModuleBack'
@@ -50,6 +51,14 @@ const documentSearchLoading = ref(false)
 const documentSuggestionsLoading = ref(false)
 const documentLinkingId = ref<number | null>(null)
 const documentDecisionId = ref<number | null>(null)
+const expandedDocumentPreviews = ref<Set<number>>(new Set())
+
+function toggleDocumentPreview(documentId: number) {
+  const next = new Set(expandedDocumentPreviews.value)
+  if (next.has(documentId)) next.delete(documentId)
+  else next.add(documentId)
+  expandedDocumentPreviews.value = next
+}
 
 async function refreshLinkedDocuments() {
   if (!tx.value) {
@@ -676,7 +685,16 @@ const extractedFields = computed(() => {
                       <span>{{ document.title ?? document.original_filename }}</span>
                     </div>
                   </div>
-                  <div class="document-suggestion-preview">
+                  <div
+                    class="document-suggestion-preview document-suggestion-preview--interactive"
+                    role="button"
+                    tabindex="0"
+                    :aria-expanded="expandedDocumentPreviews.has(document.id)"
+                    aria-label="PDF-Vorschau der ersten Seite ein- oder ausblenden"
+                    @click="toggleDocumentPreview(document.id)"
+                    @keydown.enter="toggleDocumentPreview(document.id)"
+                    @keydown.space.prevent="toggleDocumentPreview(document.id)"
+                  >
                     <dl v-if="document.sender || document.doc_date" class="document-preview-meta">
                       <template v-if="document.sender">
                         <dt>Absender</dt>
@@ -687,10 +705,18 @@ const extractedFields = computed(() => {
                         <dd>{{ document.doc_date }}</dd>
                       </template>
                     </dl>
+                    <div v-if="document.tags.length" class="document-preview-tags">
+                      <Tag v-for="tag in document.tags" :key="tag" :value="tag" severity="secondary" />
+                    </div>
                     <p v-if="document.extracted_text_preview" class="document-preview-text">
                       {{ document.extracted_text_preview }}
                     </p>
                     <p v-else class="hint">Keine Textvorschau verfügbar.</p>
+                    <DocumentThumbnail
+                      v-if="expandedDocumentPreviews.has(document.id)"
+                      :id="document.id"
+                      :alt="`Erste Seite von ${document.title ?? document.original_filename}`"
+                    />
                   </div>
                   <div class="document-search-result-action">
                     <Button
@@ -735,7 +761,16 @@ const extractedFields = computed(() => {
                       />
                     </span>
                   </div>
-                  <div class="document-suggestion-preview">
+                  <div
+                    class="document-suggestion-preview document-suggestion-preview--interactive"
+                    role="button"
+                    tabindex="0"
+                    :aria-expanded="expandedDocumentPreviews.has(suggestion.document_id)"
+                    aria-label="PDF-Vorschau der ersten Seite ein- oder ausblenden"
+                    @click="toggleDocumentPreview(suggestion.document_id)"
+                    @keydown.enter="toggleDocumentPreview(suggestion.document_id)"
+                    @keydown.space.prevent="toggleDocumentPreview(suggestion.document_id)"
+                  >
                     <dl class="document-preview-meta">
                       <template v-if="suggestion.sender">
                         <dt>Absender</dt>
@@ -753,10 +788,18 @@ const extractedFields = computed(() => {
                         · Text {{ formatScore(suggestion.text_score) }}
                       </dd>
                     </dl>
+                    <div v-if="suggestion.tags.length" class="document-preview-tags">
+                      <Tag v-for="tag in suggestion.tags" :key="tag" :value="tag" severity="secondary" />
+                    </div>
                     <p v-if="suggestion.extracted_text_preview" class="document-preview-text">
                       {{ suggestion.extracted_text_preview }}
                     </p>
                     <p v-else class="hint">Keine Textvorschau verfügbar.</p>
+                    <DocumentThumbnail
+                      v-if="expandedDocumentPreviews.has(suggestion.document_id)"
+                      :id="suggestion.document_id"
+                      :alt="`Erste Seite von ${suggestionTitle(suggestion)}`"
+                    />
                   </div>
                 </li>
               </ul>
@@ -1234,6 +1277,26 @@ const extractedFields = computed(() => {
   border-radius: 0.45rem;
   background: var(--p-content-background);
   padding: 0.65rem 0.75rem;
+}
+.document-suggestion-preview--interactive {
+  cursor: pointer;
+}
+.document-suggestion-preview--interactive:focus-visible {
+  outline: 2px solid var(--p-primary-color);
+  outline-offset: 2px;
+}
+.document-preview-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.document-suggestion-preview :deep(.doc-thumb) {
+  align-self: center;
+  margin-top: 0.25rem;
+  width: min(100%, 34rem);
+}
+.document-suggestion-preview :deep(.doc-thumb-img) {
+  object-fit: contain;
 }
 .document-preview-meta {
   display: grid;
