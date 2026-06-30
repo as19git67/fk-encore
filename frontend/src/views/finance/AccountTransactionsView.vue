@@ -8,7 +8,7 @@
  * Logik folgt später, derzeit Dummy).
  */
 
-import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useScrollRestore } from '../../composables/useScrollRestore'
 import { useModuleBack } from '../../composables/useModuleBack'
@@ -179,36 +179,6 @@ function formatShortDate(iso: string | null): string | null {
 // user's search criteria.
 
 const filterPanelOpen = ref(false)
-const filterPanelRef = ref<HTMLElement | null>(null)
-const filterPanelHeight = ref(0)
-
-let filterRO: ResizeObserver | undefined
-watch(filterPanelOpen, async (open) => {
-  if (open) {
-    await nextTick()
-    if (filterPanelRef.value) {
-      filterPanelHeight.value = filterPanelRef.value.offsetHeight
-      filterRO?.disconnect()
-      filterRO = new ResizeObserver(() => {
-        filterPanelHeight.value = filterPanelRef.value?.offsetHeight ?? 0
-      })
-      filterRO.observe(filterPanelRef.value)
-    }
-  } else {
-    filterRO?.disconnect()
-    filterRO = undefined
-    filterPanelHeight.value = 0
-  }
-})
-onBeforeUnmount(() => filterRO?.disconnect())
-
-// Top offset for tx-select-bar: when filter is open, select-bar moves below it.
-const SELECT_BAR_BASE_TOP = 130
-const selectBarStyle = computed(() => ({
-  top: filterPanelOpen.value
-    ? `${SELECT_BAR_BASE_TOP + filterPanelHeight.value}px`
-    : `${SELECT_BAR_BASE_TOP}px`,
-}))
 
 const formQuery = computed({ get: () => filtersStore.formQuery, set: (v) => { filtersStore.formQuery = v } })
 const formTags = computed({ get: () => filtersStore.formTags, set: (v) => { filtersStore.formTags = v } })
@@ -1083,7 +1053,8 @@ function goBack() {
 
 <template>
   <div class="page">
-    <header class="tx-header">
+    <Teleport to="#module-subheaders">
+      <header class="tx-header" data-testid="finance-transaction-header">
       <Button
         icon="pi pi-chevron-left"
         severity="secondary"
@@ -1161,7 +1132,7 @@ function goBack() {
           @click="toggleSelectMode"
         />
       </div>
-    </header>
+      </header>
 
     <!--
       Selection popover (anchored to the list-button). Mirrors the
@@ -1198,11 +1169,7 @@ function goBack() {
       </ul>
     </Popover>
 
-    <section
-      v-if="filterPanelOpen"
-      ref="filterPanelRef"
-      class="tx-filter-panel"
-    >
+      <section v-if="filterPanelOpen" class="tx-filter-panel" data-testid="finance-filter-subheader">
       <div class="tx-filter-fields">
         <div class="tx-filter-row">
           <InputText
@@ -1251,13 +1218,10 @@ function goBack() {
           @click="clearFilters"
         />
       </div>
-    </section>
+      </section>
 
-    <!--
-      Tristate "select all" + batch action row, only in select mode.
-      Sits below the filter panel (if open) via dynamic top offset.
-    -->
-    <div v-if="selectMode" class="tx-select-bar" :style="selectBarStyle">
+    <!-- Tristate "select all" + batch actions, only in select mode. -->
+      <div v-if="selectMode" class="tx-select-bar" data-testid="finance-selection-subheader">
       <div class="tx-select-bar-left">
         <Checkbox
           :model-value="selectAllState === true"
@@ -1294,7 +1258,8 @@ function goBack() {
             @click="clearSelection"
         />
       </div>
-    </div>
+      </div>
+    </Teleport>
 
     <!-- ── Holdings table (depot accounts only) ─────────────────────── -->
     <section v-if="isDepot" class="holdings-section">
@@ -1743,9 +1708,6 @@ function goBack() {
   color: var(--p-primary-contrast-color);
   padding: 0.6rem 0.75rem;
   border-radius: 0.5rem;
-  position: sticky;
-  top: 58px;
-  z-index: 1;
 }
 .tx-header :deep(.p-button) {
   background: rgba(255, 255, 255, 0.18);
@@ -1777,9 +1739,6 @@ function goBack() {
   background: var(--p-content-hover-background);
   border: 1px solid var(--p-content-border-color);
   border-radius: 0.5rem;
-  position: sticky;
-  top: 120px;
-  z-index: 1;
 }
 .tx-select-bar-left {
   display: flex;
@@ -1852,12 +1811,7 @@ function goBack() {
   font-size: 0.85rem;
 }
 
-/* ── Filter panel (expands below the sticky tx-header) ────────────── */
-.tx-filter-panel {
-  position: sticky;
-  top: 130px;
-  z-index: 1;
-}
+/* ── Filter panel (conditional finance toolbar subheader) ─────────── */
 .tx-filter-panel {
   display: grid;
   grid-template-columns: 1fr auto;
