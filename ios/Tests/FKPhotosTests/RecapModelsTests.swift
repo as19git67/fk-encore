@@ -1,0 +1,48 @@
+import XCTest
+@testable import FKPhotosLib
+
+/// Decode guards for the recap JSON contract (#759). Locks field mapping and the
+/// lenient kind handling the list relies on.
+final class RecapModelsTests: XCTestCase {
+
+    func testDecodeListResponseAndKindMapping() throws {
+        let json = """
+        { "recaps": [
+            { "id": 1, "kind": "on_this_day", "title": "Vor 3 Jahren", "subtitle": "15. Juni",
+              "cover_photo_id": 42, "period_start": null, "period_end": null,
+              "photo_count": 7, "created_at": "2026-06-15T00:00:00Z",
+              "dismissed_at": null, "seen_at": null },
+            { "id": 2, "kind": "trip", "title": "Wochenende in Rom", "subtitle": null,
+              "cover_photo_id": null, "period_start": null, "period_end": null,
+              "photo_count": 23, "created_at": "2026-06-10T00:00:00Z",
+              "dismissed_at": null, "seen_at": "2026-06-16T00:00:00Z" }
+        ] }
+        """.data(using: .utf8)!
+
+        let response = try JSONDecoder().decode(ListRecapsResponse.self, from: json)
+        XCTAssertEqual(response.recaps.count, 2)
+        XCTAssertEqual(response.recaps[0].recapKind, .onThisDay)
+        XCTAssertEqual(response.recaps[0].cover_photo_id, 42)
+        XCTAssertNil(response.recaps[0].seen_at)
+        XCTAssertEqual(response.recaps[1].recapKind, .trip)
+        XCTAssertNil(response.recaps[1].subtitle)
+    }
+
+    func testUnknownKindFallsBackToOther() {
+        XCTAssertEqual(RecapKind(raw: "brand_new_kind"), .other)
+        XCTAssertEqual(RecapKind(raw: "person"), .person)
+    }
+
+    func testDecodeRecapDetailsPreservesPhotoOrder() throws {
+        let json = """
+        { "recap": { "id": 9, "kind": "person", "title": "Mit Anna", "subtitle": "Zuletzt",
+          "cover_photo_id": 5, "period_start": null, "period_end": null,
+          "photo_count": 3, "created_at": "2026-06-01T00:00:00Z",
+          "dismissed_at": null, "seen_at": null, "photo_ids": [5, 9, 2] } }
+        """.data(using: .utf8)!
+
+        let response = try JSONDecoder().decode(GetRecapResponse.self, from: json)
+        XCTAssertEqual(response.recap.photo_ids, [5, 9, 2])
+        XCTAssertEqual(response.recap.recapKind, .person)
+    }
+}
