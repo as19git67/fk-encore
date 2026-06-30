@@ -440,15 +440,22 @@ public final class BackgroundSyncManager {
         case failed(String)
     }
 
-    /// Updates the user-visible "Letzter Upload" timestamp and advances the
-    /// source iOS album watermark whenever a queue item is successfully
-    /// uploaded — covering both the auto-sync path and Share-Extension items
-    /// that the main app later drains.
+    /// Updates the user-visible "Letzter Upload" timestamp whenever a queue item
+    /// is successfully uploaded.
+    ///
+    /// It deliberately does NOT touch the per-album sync watermark. The watermark
+    /// is a *creationDate* value used by `buildFetchOptions` as
+    /// `creationDate > watermark`. Advancing it here to `Date()` (wall-clock now)
+    /// poisoned it: after the very first successful upload it jumped to "now", so
+    /// the next enumeration matched nothing (`creationDate > now`) and the sync
+    /// reported "finished" while hundreds of assets — those whose iCloud original
+    /// was not yet downloaded and thus failed to hash — were never uploaded and
+    /// could never be re-queued. The watermark is owned solely by
+    /// `PhotoSyncService.advanceWatermarksForProcessed`, which advances it by the
+    /// processed assets' real `creationDate` and never past an asset it could not
+    /// process this run.
     private func recordSuccessfulUpload(for item: UploadQueueItem) {
         PhotoSyncPreferences.lastSyncDate = Date()
-        if let albumId = item.sourceIosAlbumId, !albumId.isEmpty {
-            PhotoSyncPreferences.advanceAlbumSyncDate(Date(), for: albumId)
-        }
     }
 
     /// Performs the actual HTTP upload for one queue item, returning a
