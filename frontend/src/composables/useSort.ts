@@ -1,7 +1,7 @@
 import { ref, computed, watch } from 'vue'
 import type { Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type { LocationQueryRaw } from 'vue-router'
+import { replaceQuerySlice, updateRouteQuery } from '../utils/routeQueryUpdate'
 
 /**
  * Sort composable with draft/applied semantics and URL query-string sync.
@@ -41,6 +41,8 @@ export interface UseSortReturn {
   /** Reset to the default and sync to URL. */
   reset: () => void
 }
+
+const SORT_QUERY_KEYS = ['sortBy', 'sortDir'] as const
 
 export function useSort(opts: UseSortOptions): UseSortReturn {
   const route = useRoute()
@@ -105,17 +107,14 @@ export function useSort(opts: UseSortOptions): UseSortReturn {
     }
   )
 
-  async function syncUrl(s: SortState) {
-    const next: Record<string, unknown> = { ...route.query }
-    delete next.sortBy
-    delete next.sortDir
+  function syncUrl(s: SortState) {
+    const values: Record<string, string> = {}
     const isDef = s.field === opts.defaultState.field && s.direction === opts.defaultState.direction
     if (!isDef) {
-      next.sortBy = s.field
-      next.sortDir = s.direction
+      values.sortBy = s.field
+      values.sortDir = s.direction
     }
-    if (JSON.stringify(next) === JSON.stringify(route.query)) return
-    await router.replace({ query: next as LocationQueryRaw })
+    return updateRouteQuery(router, (current) => replaceQuerySlice(current, SORT_QUERY_KEYS, values))
   }
 
   function openEdit() {
