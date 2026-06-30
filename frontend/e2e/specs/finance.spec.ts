@@ -90,3 +90,55 @@ test.describe('Finance-Modul (DataTable + Tastatur)', () => {
     await expect(dialog.locator('.p-autocomplete-token, .p-chip').first()).toContainText('e2e-tag')
   })
 })
+
+test.describe('Finance-Subheader und Analysezeitraum', () => {
+  test('Transaktionswerkzeuge teilen sich einen sticky Toolbar-Stack', async ({ page }) => {
+    await page.goto('finanzen')
+    const accountLinks = page.locator('a[href*="/finanzen/uebersicht/konto/"]')
+    const accountCount = await accountLinks.count()
+    test.skip(accountCount === 0, 'Kein sichtbares Finance-Konto — Subheader-Test übersprungen')
+    const href = await accountLinks.first().getAttribute('href')
+    expect(href).toBeTruthy()
+    await page.goto(href!)
+
+    const stack = page.getByTestId('module-subheaders')
+    const header = page.getByTestId('finance-transaction-header')
+    await expect(header).toBeVisible()
+    await expect(stack.locator('[data-testid="finance-transaction-header"]')).toHaveCount(1)
+
+    const filterButton = header.getByRole('button', { name: 'Filter' })
+    await expect(filterButton).toHaveCount(1)
+    await filterButton.click()
+    await expect(stack.locator('[data-testid="finance-filter-subheader"]')).toBeVisible()
+
+    const selectionButton = header.getByRole('button', { name: 'Auswählen' })
+    await expect(selectionButton).toHaveCount(1)
+    await selectionButton.click()
+    await expect(stack.locator('[data-testid="finance-selection-subheader"]')).toBeVisible()
+
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+    const stackTop = await stack.evaluate((element) => element.parentElement!.getBoundingClientRect().top)
+    expect(Math.abs(stackTop)).toBeLessThanOrEqual(1)
+  })
+
+  test('N-Jahre-Feld akzeptiert zweistellige Werte ohne Abschneiden', async ({ page }) => {
+    await page.goto('finanzen/analyse')
+    if ((await page.getByRole('heading', { name: 'Analyse' }).count()) === 0) {
+      test.skip(true, 'Aktueller Nutzer hat finance.view nicht — übersprungen')
+    }
+
+    const timespan = page.locator('.timespan-select')
+    await expect(timespan).toHaveCount(1)
+    await timespan.click()
+    const yearsOption = page.getByRole('option', { name: 'Letzte N Jahre' })
+    await expect(yearsOption).toHaveCount(1)
+    await yearsOption.click()
+
+    const yearsInput = page.getByRole('spinbutton', { name: 'Anzahl Jahre' })
+    await expect(yearsInput).toHaveCount(1)
+    await yearsInput.fill('12')
+    await expect(yearsInput).toHaveValue('12')
+    const width = await yearsInput.evaluate((element) => element.getBoundingClientRect().width)
+    expect(width).toBeGreaterThanOrEqual(64)
+  })
+})
