@@ -30,7 +30,7 @@ struct PhotoFullscreenView: View {
     private let albumContext: AlbumContext?
     @State private var showDeleteConfirm = false
     @State private var isProcessingAction = false
-    @State private var actionMessage: String?
+    @State private var toastMessage: ToastMessage?
 
     // Person context (when navigated from PersonDetailView)
     private let personId: Int?
@@ -263,17 +263,7 @@ struct PhotoFullscreenView: View {
         } message: {
             Text("Das Foto wird in den Papierkorb verschoben.")
         }
-        .alert(
-            "Hinweis",
-            isPresented: Binding(
-                get: { actionMessage != nil },
-                set: { if !$0 { actionMessage = nil } }
-            )
-        ) {
-            Button("OK", role: .cancel) { actionMessage = nil }
-        } message: {
-            Text(actionMessage ?? "")
-        }
+        .toast($toastMessage)
         .alert("Umbenennen", isPresented: $isRenaming) {
                 TextField("Name eingeben", text: $newName)
                     .autocorrectionDisabled()
@@ -357,9 +347,9 @@ struct PhotoFullscreenView: View {
                 creationDate: parseISO(photo.taken_at ?? photo.created_at),
                 isFavorite: currentCuration == .favorite
             )
-            actionMessage = "Original in der Fotos-Mediathek gesichert."
+            toastMessage = .success("Original in der Fotos-Mediathek gesichert.")
         } catch {
-            actionMessage = error.localizedDescription
+            toastMessage = .error(error.localizedDescription)
         }
     }
 
@@ -378,7 +368,7 @@ struct PhotoFullscreenView: View {
             onPhotoRemoved?(photo.id)
             dismiss()
         } catch {
-            actionMessage = error.localizedDescription
+            toastMessage = .error(error.localizedDescription)
         }
     }
 
@@ -395,7 +385,7 @@ struct PhotoFullscreenView: View {
             dismiss()
         } catch {
             isProcessingAction = false
-            actionMessage = error.localizedDescription
+            toastMessage = .error(error.localizedDescription)
         }
     }
 
