@@ -68,6 +68,7 @@ import { ensureThumbnail, removeThumbnail } from "./thumbnail";
 import { ensureSearchablePdf, ocrPdfFilePath, removeOcrPdf } from "./ocr-pdf";
 import { decryptPdfWithPassword } from "./text-extract";
 import { searchDocuments, type SearchMode } from "./search";
+import { documentTextPreview } from "./text-preview";
 import {
   findTaxSection,
   isValidTaxSectionSlug,
@@ -2691,13 +2692,6 @@ export interface SearchDocumentsResponse {
   query: string;
 }
 
-function searchDocumentTextPreview(value: string | null | undefined, maxLength = 420): string | null {
-  const normalized = (value ?? "").replace(/\s+/g, " ").trim();
-  if (!normalized) return null;
-  if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, maxLength).trim()}…`;
-}
-
 interface SearchQuery {
   q: Query<string>;
   mode?: Query<string>;
@@ -2809,7 +2803,7 @@ export const searchDocumentsEndpoint = api(
         if (!r) return null;
         return {
           ...toSummary(r as any, r.cat_slug, tagsByDoc.get(r.id) ?? []),
-          extracted_text_preview: searchDocumentTextPreview(r.summary ?? r.extracted_text),
+          extracted_text_preview: documentTextPreview(r.summary ?? r.extracted_text),
         };
       })
       .filter((x): x is SearchDocumentSummary => x !== null);

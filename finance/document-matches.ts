@@ -7,6 +7,7 @@ import { decideSuggestion, createSuggestionsForTransaction, computeReceiptEnrich
 import { extractDocumentAmount, isWithinDocumentMatchWindow } from './document-matcher'
 import { requirePermission } from '../user/auth-handler'
 import { loadVisibleDocument } from '../documents/visibility'
+import { documentTextPreview } from '../documents/text-preview'
 
 interface SuggestDocumentsParams { transaction_ids: number[] }
 interface DecideSuggestionParams { id: number; outcome: 'accepted' | 'rejected' | 'ignored' }
@@ -37,13 +38,6 @@ interface DocumentTransactionLinkDTO { transaction_id: number; booking_date: str
 interface DocumentSuggestionsResponse { items: DocumentSuggestionDTO[] }
 interface TransactionDocumentLinksResponse { items: TransactionDocumentLinkDTO[] }
 interface DocumentTransactionLinksResponse { items: DocumentTransactionLinkDTO[] }
-
-function textPreview(value: string | null | undefined, maxLength = 420): string | null {
-  const normalized = (value ?? '').replace(/\s+/g, ' ').trim()
-  if (!normalized) return null
-  if (normalized.length <= maxLength) return normalized
-  return `${normalized.slice(0, maxLength).trim()}…`
-}
 
 async function readableTransactionIds(userId: number, ids: number[]) {
   const auth = getAuthData()!
@@ -86,7 +80,7 @@ export const suggestDocuments = api({ expose: true, method: 'POST', path: '/fina
     sender: document.sender,
     doc_date: document.doc_date,
     summary: document.summary,
-    extracted_text_preview: textPreview(document.summary ?? document.extracted_text),
+    extracted_text_preview: documentTextPreview(document.summary ?? document.extracted_text),
     })) }
 })
 
