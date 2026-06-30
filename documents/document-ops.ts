@@ -21,6 +21,7 @@ import {
   documents,
 } from "../db/schema";
 import { createReceiptAutoTransaction } from "../finance/receipt-booking";
+import { formatReceiptLineItemsNotice } from "../finance/receipt-line-items";
 import {
   extractReceipt,
   extractReceiptItems,
@@ -887,6 +888,7 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
     bookingDate,
     counterparty: core.store,
     purpose,
+    notice: formatReceiptLineItemsNotice(items, core.currency ?? "EUR"),
     currencyCode: core.currency ?? "EUR",
   });
 

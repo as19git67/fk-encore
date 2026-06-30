@@ -1221,6 +1221,7 @@ export interface DocumentMatchSuggestion {
   doc_date: string | null
   summary: string | null
   extracted_text_preview: string | null
+  tags: string[]
 }
 export async function suggestDocumentsForTransactions(transaction_ids: number[]) { const response = await apiFetch<{ items: DocumentMatchSuggestion[] }>('/finance/document-matches/suggest', { method: 'POST', body: JSON.stringify({ transaction_ids }) }); return response.items }
 export async function decideDocumentMatch(id: number, outcome: 'accepted' | 'rejected' | 'ignored') { return apiFetch<{ ok: boolean }>(`/finance/document-matches/${id}/decision`, { method: 'POST', body: JSON.stringify({ outcome }) }) }
