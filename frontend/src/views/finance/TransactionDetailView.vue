@@ -10,6 +10,7 @@ import DatePicker from 'primevue/datepicker'
 import TagAutoComplete from '../../components/finance/TagAutoComplete.vue'
 import Textarea from 'primevue/textarea'
 import Dialog from 'primevue/dialog'
+import DocumentThumbnail from '../../components/DocumentThumbnail.vue'
 import { useConfirm } from 'primevue/useconfirm'
 import { toLocalIsoDate } from '../../utils/dateFormat'
 import { useModuleBack } from '../../composables/useModuleBack'
@@ -19,7 +20,7 @@ import { useTagsStore } from '../../stores/finance/tags'
 import { useTxSelectionStore } from '../../stores/finance/selection'
 import type { MandateHistoryItem, Transaction } from '../../api/finance'
 import * as api from '../../api/finance'
-import { searchDocuments, type DocumentSummary } from '../../api/documents'
+import { searchDocuments, type SearchDocumentSummary } from '../../api/documents'
 import { lookupBtcCodeDe } from '../../utils/btcCodes'
 
 const route = useRoute()
@@ -40,22 +41,42 @@ const saving = ref(false)
 const deleting = ref(false)
 const copyToast = ref<string | null>(null)
 const linkedDocuments = ref<Array<{ document_id: number; title: string | null; original_filename: string }>>([])
+const linkedDocumentsLoading = ref(true)
+const linkedDocumentsLoaded = ref(false)
 const documentLinkPanelOpen = ref(false)
 const documentQuery = ref('')
-const documentResults = ref<DocumentSummary[]>([])
+const documentResults = ref<SearchDocumentSummary[]>([])
 const documentSuggestions = ref<api.DocumentMatchSuggestion[]>([])
 const documentSearchLoading = ref(false)
 const documentSuggestionsLoading = ref(false)
 const documentLinkingId = ref<number | null>(null)
 const documentDecisionId = ref<number | null>(null)
-const expandedSuggestionId = ref<number | null>(null)
+const expandedDocumentPreviews = ref<Set<number>>(new Set())
+
+function toggleDocumentPreview(documentId: number) {
+  const next = new Set(expandedDocumentPreviews.value)
+  if (next.has(documentId)) next.delete(documentId)
+  else next.add(documentId)
+  expandedDocumentPreviews.value = next
+}
 
 async function refreshLinkedDocuments() {
   if (!tx.value) {
     linkedDocuments.value = []
+    linkedDocumentsLoading.value = false
+    linkedDocumentsLoaded.value = true
     return
   }
-  linkedDocuments.value = await api.getTransactionDocumentLinks(tx.value.id).catch(() => [])
+  linkedDocumentsLoading.value = true
+  linkedDocumentsLoaded.value = false
+  try {
+    linkedDocuments.value = await api.getTransactionDocumentLinks(tx.value.id)
+    linkedDocumentsLoaded.value = true
+  } catch {
+    linkedDocuments.value = []
+  } finally {
+    linkedDocumentsLoading.value = false
+  }
 }
 
 async function unlinkDocument(documentId: number) {
@@ -111,9 +132,6 @@ async function linkDocumentToTransaction(documentId: number) {
     await api.linkDocumentsToTransactions([tx.value.id], [documentId])
     documentResults.value = documentResults.value.filter(document => document.id !== documentId)
     documentSuggestions.value = documentSuggestions.value.filter(suggestion => suggestion.document_id !== documentId)
-    if (documentSuggestions.value.every(suggestion => suggestion.id !== expandedSuggestionId.value)) {
-      expandedSuggestionId.value = null
-    }
     await refreshLinkedDocuments()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -142,7 +160,6 @@ async function decideDocumentSuggestion(suggestion: api.DocumentMatchSuggestion,
   try {
     await api.decideDocumentMatch(suggestion.id, outcome)
     documentSuggestions.value = documentSuggestions.value.filter(item => item.id !== suggestion.id)
-    if (expandedSuggestionId.value === suggestion.id) expandedSuggestionId.value = null
     if (outcome === 'accepted') await refreshLinkedDocuments()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -153,10 +170,6 @@ async function decideDocumentSuggestion(suggestion: api.DocumentMatchSuggestion,
 
 function suggestionTitle(suggestion: api.DocumentMatchSuggestion): string {
   return suggestion.title ?? suggestion.original_filename
-}
-
-function toggleSuggestionPreview(suggestionId: number) {
-  expandedSuggestionId.value = expandedSuggestionId.value === suggestionId ? null : suggestionId
 }
 
 function formatScore(score: number): string {
@@ -215,10 +228,9 @@ async function loadTransaction(id: number) {
   try {
     error.value = null
     tx.value = await api.getTransaction(id)
-    linkedDocuments.value = await api.getTransactionDocumentLinks(id).catch(() => [])
+    await refreshLinkedDocuments()
     documentResults.value = []
     documentSuggestions.value = []
-    expandedSuggestionId.value = null
     documentLinkPanelOpen.value = false
     documentQuery.value = ''
     syncForm()
@@ -384,7 +396,6 @@ async function save() {
 
 async function deleteTx() {
   if (!tx.value) return
-  if (!window.confirm('Diese Buchung wirklich löschen?')) return
   deleting.value = true
   try {
     await api.deleteTransaction(tx.value.id)
@@ -393,6 +404,18 @@ async function deleteTx() {
     error.value = err instanceof Error ? err.message : String(err)
     deleting.value = false
   }
+}
+
+function requestDeleteTx() {
+  if (!tx.value) return
+  confirmDialog.require({
+    message: 'Diese Buchung wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.',
+    header: 'Buchung löschen',
+    icon: 'pi pi-exclamation-triangle',
+    rejectProps: { label: 'Abbrechen', severity: 'secondary', outlined: true },
+    acceptProps: { label: 'Löschen', severity: 'danger' },
+    accept: () => { void deleteTx() },
+  })
 }
 
 function formatAmount(): string {
@@ -610,26 +633,30 @@ const extractedFields = computed(() => {
 
     <section v-if="tx" class="card">
       <dl class="details">
-        <dt>Verknüpfte Belege</dt>
         <dd class="document-links">
+          <div class="document-links-row">
+            <span v-if="linkedDocuments.length" class="document-links-title">Verknüpfte Belege</span>
+            <span v-else-if="!linkedDocumentsLoading && linkedDocumentsLoaded" class="hint">Keine Belege verknüpft.</span>
+            <span v-else></span>
+
+            <div class="document-link-actions">
+              <Button
+                :label="documentLinkPanelOpen ? 'Verknüpfen schließen' : 'Beleg verknüpfen'"
+                icon="pi pi-link"
+                size="small"
+                severity="secondary"
+                outlined
+                :loading="documentSuggestionsLoading"
+                @click="toggleDocumentLinkPanel"
+              />
+            </div>
+          </div>
+
           <div v-if="linkedDocuments.length" class="linked-documents">
             <span v-for="document in linkedDocuments" :key="document.document_id" class="linked-document">
               <Button :label="document.title ?? document.original_filename" size="small" text @click="router.push({ name: 'dokumente-detail', params: { id: document.document_id }, query: { fromTransaction: String(tx.id) } })" />
               <Button icon="pi pi-times" size="small" text aria-label="Belegverknüpfung trennen" @click="requestUnlinkDocument(document.document_id)" />
             </span>
-          </div>
-          <span v-else class="hint">Keine Belege verknüpft.</span>
-
-          <div class="document-link-actions">
-            <Button
-              :label="documentLinkPanelOpen ? 'Verknüpfen schließen' : 'Beleg verknüpfen'"
-              icon="pi pi-link"
-              size="small"
-              severity="secondary"
-              outlined
-              :loading="documentSuggestionsLoading"
-              @click="toggleDocumentLinkPanel"
-            />
           </div>
 
           <div v-if="documentLinkPanelOpen" class="document-link-panel">
@@ -652,15 +679,55 @@ const extractedFields = computed(() => {
                 Keine passenden Dokumente gefunden.
               </p>
               <ul v-if="documentResults.length" class="document-result-list">
-                <li v-for="document in documentResults" :key="document.id" class="document-result-row">
-                  <span>{{ document.title ?? document.original_filename }}</span>
-                  <Button
-                    label="Verbinden"
-                    size="small"
-                    text
-                    :loading="documentLinkingId === document.id"
-                    @click="linkDocumentToTransaction(document.id)"
-                  />
+                <li v-for="document in documentResults" :key="document.id" class="document-suggestion">
+                  <div class="document-result-row">
+                    <div class="document-suggestion-title">
+                      <span>{{ document.title ?? document.original_filename }}</span>
+                    </div>
+                  </div>
+                  <div
+                    class="document-suggestion-preview document-suggestion-preview--interactive"
+                    role="button"
+                    tabindex="0"
+                    :aria-expanded="expandedDocumentPreviews.has(document.id)"
+                    aria-label="PDF-Vorschau der ersten Seite ein- oder ausblenden"
+                    @click="toggleDocumentPreview(document.id)"
+                    @keydown.enter="toggleDocumentPreview(document.id)"
+                    @keydown.space.prevent="toggleDocumentPreview(document.id)"
+                  >
+                    <dl v-if="document.sender || document.doc_date" class="document-preview-meta">
+                      <template v-if="document.sender">
+                        <dt>Absender</dt>
+                        <dd>{{ document.sender }}</dd>
+                      </template>
+                      <template v-if="document.doc_date">
+                        <dt>Datum</dt>
+                        <dd>{{ document.doc_date }}</dd>
+                      </template>
+                    </dl>
+                    <div v-if="document.tags.length" class="document-preview-tags">
+                      <Tag v-for="tag in document.tags" :key="tag" :value="tag" severity="secondary" />
+                    </div>
+                    <p v-if="document.extracted_text_preview" class="document-preview-text">
+                      {{ document.extracted_text_preview }}
+                    </p>
+                    <p v-else class="hint">Keine Textvorschau verfügbar.</p>
+                    <DocumentThumbnail
+                      v-if="expandedDocumentPreviews.has(document.id)"
+                      :id="document.id"
+                      :alt="`Erste Seite von ${document.title ?? document.original_filename}`"
+                    />
+                  </div>
+                  <div class="document-search-result-action">
+                    <Button
+                      label="Verknüpfen"
+                      icon="pi pi-link"
+                      size="small"
+                      text
+                      :loading="documentLinkingId === document.id"
+                      @click="linkDocumentToTransaction(document.id)"
+                    />
+                  </div>
                 </li>
               </ul>
             </div>
@@ -672,25 +739,11 @@ const extractedFields = computed(() => {
               <ul v-else class="document-result-list">
                 <li v-for="suggestion in documentSuggestions" :key="suggestion.id" class="document-suggestion">
                   <div class="document-result-row">
-                    <button
-                      type="button"
-                      class="document-suggestion-title"
-                      :aria-expanded="expandedSuggestionId === suggestion.id"
-                      @click="toggleSuggestionPreview(suggestion.id)"
-                    >
+                    <div class="document-suggestion-title">
                       <span>{{ suggestionTitle(suggestion) }}</span>
                       <small>{{ formatScore(suggestion.score) }}</small>
-                    </button>
+                    </div>
                     <span class="document-result-actions">
-                      <Button
-                        label="Vorschau"
-                        icon="pi pi-eye"
-                        size="small"
-                        severity="secondary"
-                        text
-                        :aria-expanded="expandedSuggestionId === suggestion.id"
-                        @click="toggleSuggestionPreview(suggestion.id)"
-                      />
                       <Button
                         label="Annehmen"
                         size="small"
@@ -708,7 +761,16 @@ const extractedFields = computed(() => {
                       />
                     </span>
                   </div>
-                  <div v-if="expandedSuggestionId === suggestion.id" class="document-suggestion-preview">
+                  <div
+                    class="document-suggestion-preview document-suggestion-preview--interactive"
+                    role="button"
+                    tabindex="0"
+                    :aria-expanded="expandedDocumentPreviews.has(suggestion.document_id)"
+                    aria-label="PDF-Vorschau der ersten Seite ein- oder ausblenden"
+                    @click="toggleDocumentPreview(suggestion.document_id)"
+                    @keydown.enter="toggleDocumentPreview(suggestion.document_id)"
+                    @keydown.space.prevent="toggleDocumentPreview(suggestion.document_id)"
+                  >
                     <dl class="document-preview-meta">
                       <template v-if="suggestion.sender">
                         <dt>Absender</dt>
@@ -726,10 +788,18 @@ const extractedFields = computed(() => {
                         · Text {{ formatScore(suggestion.text_score) }}
                       </dd>
                     </dl>
+                    <div v-if="suggestion.tags.length" class="document-preview-tags">
+                      <Tag v-for="tag in suggestion.tags" :key="tag" :value="tag" severity="secondary" />
+                    </div>
                     <p v-if="suggestion.extracted_text_preview" class="document-preview-text">
                       {{ suggestion.extracted_text_preview }}
                     </p>
                     <p v-else class="hint">Keine Textvorschau verfügbar.</p>
+                    <DocumentThumbnail
+                      v-if="expandedDocumentPreviews.has(suggestion.document_id)"
+                      :id="suggestion.document_id"
+                      :alt="`Erste Seite von ${suggestionTitle(suggestion)}`"
+                    />
                   </div>
                 </li>
               </ul>
@@ -949,7 +1019,7 @@ const extractedFields = computed(() => {
         icon="pi pi-trash"
         severity="danger"
         :loading="deleting"
-        @click="deleteTx"
+        @click="requestDeleteTx"
       />
     </div>
 
@@ -1090,9 +1160,21 @@ const extractedFields = computed(() => {
   word-break: break-word;
 }
 .document-links {
+  grid-column: 1 / -1;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+.document-links-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+}
+.document-links-title {
+  color: var(--p-text-muted-color);
+  font-size: 0.9rem;
 }
 .linked-documents {
   display: flex;
@@ -1110,17 +1192,14 @@ const extractedFields = computed(() => {
 }
 .document-link-actions {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
+  flex-shrink: 0;
   gap: 0.5rem;
 }
 .document-link-panel {
-  border: 1px solid var(--p-content-border-color);
-  border-radius: 0.5rem;
   box-sizing: border-box;
   max-width: 100%;
   min-width: 0;
-  padding: 0.75rem;
-  background: var(--p-content-hover-background);
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
@@ -1179,16 +1258,7 @@ const extractedFields = computed(() => {
   flex: 1;
   gap: 0.5rem;
   min-width: 0;
-  border: none;
-  background: transparent;
   color: var(--p-text-color);
-  cursor: pointer;
-  font: inherit;
-  padding: 0;
-  text-align: left;
-}
-.document-suggestion-title:hover span {
-  text-decoration: underline;
 }
 .document-suggestion-title span {
   overflow: hidden;
@@ -1207,6 +1277,26 @@ const extractedFields = computed(() => {
   border-radius: 0.45rem;
   background: var(--p-content-background);
   padding: 0.65rem 0.75rem;
+}
+.document-suggestion-preview--interactive {
+  cursor: pointer;
+}
+.document-suggestion-preview--interactive:focus-visible {
+  outline: 2px solid var(--p-primary-color);
+  outline-offset: 2px;
+}
+.document-preview-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.document-suggestion-preview :deep(.doc-thumb) {
+  align-self: center;
+  margin-top: 0.25rem;
+  width: min(100%, 34rem);
+}
+.document-suggestion-preview :deep(.doc-thumb-img) {
+  object-fit: contain;
 }
 .document-preview-meta {
   display: grid;
@@ -1233,6 +1323,11 @@ const extractedFields = computed(() => {
   flex-shrink: 0;
   justify-content: flex-end;
   gap: 0.25rem;
+}
+.document-search-result-action {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.15rem;
 }
 @media (max-width: 520px) {
   .details {

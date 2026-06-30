@@ -4,9 +4,11 @@ import { and, eq, inArray, isNotNull } from 'drizzle-orm'
 import db from '../db/database'
 import { documents, financeAccountAccess, financeDocumentMatchSuggestion, financeTransaction } from '../db/schema'
 import { decideSuggestion, createSuggestionsForTransaction, computeReceiptEnrichment } from './document-match.service'
-import { extractDocumentAmount } from './document-matcher'
+import { extractDocumentAmount, isWithinDocumentMatchWindow } from './document-matcher'
 import { requirePermission } from '../user/auth-handler'
 import { loadVisibleDocument } from '../documents/visibility'
+import { documentTextPreview } from '../documents/text-preview'
+import { fetchTagsForDocuments } from '../documents/tags'
 
 interface SuggestDocumentsParams { transaction_ids: number[] }
 interface DecideSuggestionParams { id: number; outcome: 'accepted' | 'rejected' | 'ignored' }
@@ -27,6 +29,7 @@ interface DocumentSuggestionDTO {
   doc_date: string | null
   summary: string | null
   extracted_text_preview: string | null
+  tags: string[]
 }
 interface MatchMetricBucket { accepted: number; rejected: number; ignored: number; pending: number }
 interface MatchMetricsResponse { high: MatchMetricBucket; medium: MatchMetricBucket; low: MatchMetricBucket }
@@ -37,13 +40,6 @@ interface DocumentTransactionLinkDTO { transaction_id: number; booking_date: str
 interface DocumentSuggestionsResponse { items: DocumentSuggestionDTO[] }
 interface TransactionDocumentLinksResponse { items: TransactionDocumentLinkDTO[] }
 interface DocumentTransactionLinksResponse { items: DocumentTransactionLinkDTO[] }
-
-function textPreview(value: string | null | undefined, maxLength = 420): string | null {
-  const normalized = (value ?? '').replace(/\s+/g, ' ').trim()
-  if (!normalized) return null
-  if (normalized.length <= maxLength) return normalized
-  return `${normalized.slice(0, maxLength).trim()}…`
-}
 
 async function readableTransactionIds(userId: number, ids: number[]) {
   const auth = getAuthData()!
@@ -58,6 +54,11 @@ export const suggestDocuments = api({ expose: true, method: 'POST', path: '/fina
   if (ids.length !== transaction_ids.length) throw APIError.permissionDenied('Keine Berechtigung für eine oder mehrere Buchungen')
   await Promise.all(ids.map(createSuggestionsForTransaction))
   const rows = await db.select().from(financeDocumentMatchSuggestion).where(inArray(financeDocumentMatchSuggestion.transaction_id, ids))
+  const transactionRows = await db
+    .select({ id: financeTransaction.id, booking_date: financeTransaction.booking_date })
+    .from(financeTransaction)
+    .where(inArray(financeTransaction.id, ids))
+  const bookingDateById = new Map(transactionRows.map(row => [Number(row.id), row.booking_date]))
   const visible = await Promise.all(rows.map(async row => {
     try {
       const document = await loadVisibleDocument(Number(auth.userID), row.document_id)
@@ -66,7 +67,14 @@ export const suggestDocuments = api({ expose: true, method: 'POST', path: '/fina
       return null
     }
   }))
-  return { items: visible.filter((item): item is NonNullable<typeof item> => item !== null).map(({ row, document }) => ({
+  const candidates = visible
+    .filter((item): item is NonNullable<typeof item> => item !== null)
+    .filter(({ row, document }) => isWithinDocumentMatchWindow(
+      bookingDateById.get(Number(row.transaction_id)),
+      document.doc_date,
+    ))
+  const tagsByDocument = await fetchTagsForDocuments(candidates.map(({ document }) => document.id))
+  return { items: candidates.map(({ row, document }) => ({
     id: Number(row.id), transaction_id: Number(row.transaction_id), document_id: Number(row.document_id),
     score: Number(row.score), amount_score: Number(row.amount_score), date_score: Number(row.date_score),
     text_score: Number(row.text_score), outcome: String(row.outcome),
@@ -75,8 +83,9 @@ export const suggestDocuments = api({ expose: true, method: 'POST', path: '/fina
     sender: document.sender,
     doc_date: document.doc_date,
     summary: document.summary,
-    extracted_text_preview: textPreview(document.summary ?? document.extracted_text),
-  })) }
+    extracted_text_preview: documentTextPreview(document.summary ?? document.extracted_text),
+    tags: tagsByDocument.get(document.id) ?? [],
+    })) }
 })
 
 export const decideDocumentSuggestion = api({ expose: true, method: 'POST', path: '/finance/document-matches/:id/decision', auth: true }, async ({ id, outcome }: DecideSuggestionParams): Promise<OkResponse> => {
