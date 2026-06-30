@@ -916,7 +916,15 @@ const tagChartOptions = computed(() => {
       </div>
       <div v-if="timespanMode === 'last_n_months' || timespanMode === 'last_n_years'" class="ast-row">
         <span class="ast-label"></span>
-        <InputNumber v-model="relativeN" :min="1" :max="120" showButtons class="n-input" />
+        <InputNumber
+          v-model="relativeN"
+          input-id="analysis-relative-n"
+          :aria-label="timespanMode === 'last_n_months' ? 'Anzahl Monate' : 'Anzahl Jahre'"
+          :min="1"
+          :max="120"
+          showButtons
+          class="n-input"
+        />
         <span class="relative-hint">{{ timespanMode === 'last_n_months' ? 'Monate' : 'Jahre' }}</span>
       </div>
       <div v-if="timespanMode === 'custom'" class="ast-row">
@@ -1468,9 +1476,11 @@ const tagChartOptions = computed(() => {
   min-width: 14rem;
 }
 .n-input {
-  width: 5rem;
+  flex: 0 0 8rem;
+  width: 8rem;
 }
 .n-input :deep(.p-inputnumber-input) {
+  min-width: 0;
   width: 100%;
 }
 
