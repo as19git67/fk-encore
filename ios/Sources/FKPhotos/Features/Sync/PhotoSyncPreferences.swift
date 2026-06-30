@@ -132,6 +132,30 @@ struct PhotoSyncPreferences {
         UserDefaults.standard.set(dates, forKey: albumSyncDatesKey)
     }
 
+    // MARK: - One-time migrations
+
+    private static let watermarkPoisonResetKey = "sync.migration.watermarkPoisonResetV1"
+
+    /// One-time migration for installs that ran the old auto-upload, which
+    /// advanced per-album watermarks to wall-clock `Date()` on every successful
+    /// upload (and skipped past assets that failed to hash). The watermark logic
+    /// is fixed now, but those installs still carry the poisoned dates, so the
+    /// strict `creationDate >` enumeration would never re-surface the photos that
+    /// were left behind.
+    ///
+    /// Clearing the watermarks once makes the next sync re-enumerate every album;
+    /// already-uploaded photos are deduplicated server-side via
+    /// `/photos/sync/check`, so only the genuinely missing ones are re-queued.
+    /// Deliberately scoped to the watermarks only — the hash cache and
+    /// synced-state survive, so the re-check stays cheap (no byte re-reads, the
+    /// metadata-only fast path still applies). Guarded by a flag so it runs at
+    /// most once. The `defaults` parameter exists for unit testing.
+    static func runWatermarkPoisonMigrationIfNeeded(defaults: UserDefaults = .standard) {
+        guard !defaults.bool(forKey: watermarkPoisonResetKey) else { return }
+        defaults.removeObject(forKey: albumSyncDatesKey)
+        defaults.set(true, forKey: watermarkPoisonResetKey)
+    }
+
     // MARK: - Server photo ↔ local asset mapping
     //
     // Maps server photo ID (String) → iOS localIdentifier (String).

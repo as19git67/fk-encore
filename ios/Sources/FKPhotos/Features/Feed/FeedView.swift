@@ -33,6 +33,16 @@ struct FeedView: View {
             }
         }
         .navigationTitle("Feed")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink {
+                    RecapsListView()
+                } label: {
+                    Image(systemName: "sparkles")
+                }
+                .accessibilityLabel("Rückblicke")
+            }
+        }
         .refreshable {
             await viewModel.loadInitial()
         }

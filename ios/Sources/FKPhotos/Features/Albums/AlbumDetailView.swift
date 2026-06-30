@@ -82,7 +82,12 @@ struct AlbumDetailView: View {
         .navigationTitle(isSelecting ? "\(selectedIds.count) ausgewählt" : (album?.name ?? "Album"))
         .navigationBarTitleDisplayMode(.large)
         .navigationDestination(item: $fullscreenNav) { _ in
-            PhotoFullscreenView(photos: displayedPhotos, currentIndex: $fullscreenIndex)
+            PhotoFullscreenView(
+                photos: displayedPhotos,
+                currentIndex: $fullscreenIndex,
+                albumContext: album.map { .init(id: albumId, name: $0.name) },
+                onPhotoRemoved: { id in photos.removeAll { $0.id == id } }
+            )
         }
         .sheet(isPresented: $filterSort.isMenuPresented) {
             FilterSortMenuView(viewModel: filterSort, available: [.favorite, .hasGps, .dateRange])

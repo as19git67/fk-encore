@@ -278,7 +278,8 @@ struct PersonDetailView: View {
                     personId: personId,
                     initialPersonName: personName,
                     onPersonRenamed: { personName = $0 },
-                    onPersonMerged: { dismiss() }
+                    onPersonMerged: { dismiss() },
+                    onPhotoRemoved: { id in fullscreenPhotos.removeAll { $0.id == id } }
                 )
             }
         }

@@ -154,7 +154,11 @@ struct PhotoMonthGridView: View {
             }
         }
         .navigationDestination(item: $fullscreenNav) { _ in
-            PhotoFullscreenView(photos: photos, currentIndex: $selectedIndex)
+            PhotoFullscreenView(
+                photos: photos,
+                currentIndex: $selectedIndex,
+                onPhotoRemoved: { id in photos.removeAll { $0.id == id } }
+            )
         }
         .onChange(of: fullscreenNav) { _, nav in
             if nav == nil, !photos.isEmpty {
