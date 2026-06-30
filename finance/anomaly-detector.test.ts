@@ -117,6 +117,55 @@ beforeEach(async () => {
   await db.delete(users);
 });
 
+describe("finance/anomaly-detector — new_mandate", () => {
+  it("does not classify a one-off card payment as a new recurring debit", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+
+    await insertTx({
+      accountId,
+      bookingDate: daysAgo(1),
+      amount: "-149.00",
+      counterparty: "UZR*Alternate GmbH, Linden DE",
+      purpose: [
+        "Karte Nr. 4871 78XX XXXX 8079",
+        "Kartenzahlung",
+        "comdirect Visa-Debitkarte",
+      ].join("\n"),
+    });
+
+    await runAnomalyDetection([accountId]);
+
+    const anomalies = await db
+      .select()
+      .from(financeAnomaly)
+      .where(eq(financeAnomaly.type, "new_mandate"));
+    expect(anomalies).toHaveLength(0);
+  });
+
+  it("still reports a high-value first SEPA debit mandate", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+    const transactionId = await insertTx({
+      accountId,
+      bookingDate: daysAgo(1),
+      amount: "-149.00",
+      counterparty: "Versorgung GmbH",
+      mandateRef: "M-NEW-1",
+      creditorId: "DE98ZZZ09999999999",
+    });
+
+    await runAnomalyDetection([accountId]);
+
+    const anomalies = await db
+      .select()
+      .from(financeAnomaly)
+      .where(eq(financeAnomaly.type, "new_mandate"));
+    expect(anomalies).toHaveLength(1);
+    expect(anomalies[0].transaction_id).toBe(transactionId);
+  });
+});
+
 describe("finance/anomaly-detector — missing_transaction", () => {
   it("emits missing_transaction when a monthly mandate is overdue past the grace period", async () => {
     await ensureUser(1);

@@ -41,7 +41,7 @@ const AMOUNT_CHANGE_THRESHOLD = 0.15; // 15 %
 const AMOUNT_CHANGE_MIN_ABS = 5.00;
 /** Days within which a second identical booking is flagged as duplicate. */
 const DUPLICATE_WINDOW_DAYS = 5;
-/** New mandates with |amount| above this threshold get a new_mandate alert. */
+/** New SEPA debit mandates with |amount| above this threshold get a new_mandate alert. */
 const NEW_MANDATE_ALERT_AMOUNT = 100;
 /** Minimum transactions before we trust the typical_amount baseline. */
 const BASELINE_MIN_TRANSACTIONS = 6;
@@ -127,6 +127,16 @@ function mandateKeyFrom(tx: typeof financeTransaction.$inferSelect): MandateKey 
 /** Returns true when the transaction carries enough identity to be worth tracking. */
 function isTrackable(key: MandateKey): boolean {
   return !!(key.mandate_ref || key.creditor_id || key.counterparty_iban || key.counterparty);
+}
+
+/**
+ * A counterparty name or IBAN is useful for grouping transaction history, but
+ * does not prove that a transaction is a recurring debit. Card payments often
+ * carry both and must not be announced as a new mandate. SEPA mandate or
+ * creditor identifiers are the stable evidence required for this alert.
+ */
+function isNewDebitMandate(key: MandateKey, amount: string): boolean {
+  return Number(amount) < 0 && !!(key.mandate_ref || key.creditor_id);
 }
 
 // -----------------------------------------------------------------------
@@ -238,7 +248,10 @@ async function processAccount(
       created++;
       if (!isRecentForAlerts) continue;
 
-      if (Math.abs(Number(tx.amount)) >= NEW_MANDATE_ALERT_AMOUNT) {
+      if (
+        isNewDebitMandate(key, tx.amount)
+        && Math.abs(Number(tx.amount)) >= NEW_MANDATE_ALERT_AMOUNT
+      ) {
         const inserted = await insertAnomalyIfAbsent({
           account_id: accountId,
           transaction_id: tx.id,
@@ -1332,7 +1345,7 @@ function buildMessage(
       const amount = Math.abs(Number(details.amount ?? 0));
       const isCredit = Number(details.amount ?? 0) > 0;
       const kind = isCredit ? "Gutschrift" : "Lastschrift";
-      return `Neue regelmäßige ${kind} von ${name} über ${fmtEur(amount)}.`;
+      return `Neue ${kind} von ${name} über ${fmtEur(amount)}.`;
     }
     case "missing_transaction": {
       const expectedAmount = details.expected_amount !== undefined
