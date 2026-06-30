@@ -117,6 +117,110 @@ beforeEach(async () => {
   await db.delete(users);
 });
 
+describe("finance/anomaly-detector — new_mandate", () => {
+  it("does not classify a one-off card payment as recurring", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+
+    await insertTx({
+      accountId,
+      bookingDate: daysAgo(1),
+      amount: "-149.00",
+      counterparty: "UZR*Alternate GmbH, Linden DE",
+      purpose: [
+        "Karte Nr. 4871 78XX XXXX 8079",
+        "Kartenzahlung",
+        "comdirect Visa-Debitkarte",
+      ].join("\n"),
+    });
+
+    await runAnomalyDetection([accountId]);
+
+    const anomalies = await db
+      .select()
+      .from(financeAnomaly)
+      .where(eq(financeAnomaly.type, "new_mandate"));
+    expect(anomalies).toHaveLength(0);
+  });
+
+  it("reports a recurring card payment at the ten-euro threshold", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+    let transactionId = 0;
+    for (const days of [61, 31, 1]) {
+      transactionId = await insertTx({
+        accountId,
+        bookingDate: daysAgo(days),
+        amount: "-10.00",
+        counterparty: "Streaming per Visa",
+        purpose: "Kartenzahlung comdirect Visa-Debitkarte",
+      });
+    }
+
+    await runAnomalyDetection([accountId]);
+
+    const anomalies = await db
+      .select()
+      .from(financeAnomaly)
+      .where(eq(financeAnomaly.type, "new_mandate"));
+    expect(anomalies).toHaveLength(1);
+    expect(anomalies[0].transaction_id).toBe(transactionId);
+    expect(anomalies[0].details).toMatchObject({
+      occurrences: 3,
+      interval_days: 30,
+    });
+
+    await runAnomalyDetection([accountId]);
+    const afterRerun = await db
+      .select()
+      .from(financeAnomaly)
+      .where(eq(financeAnomaly.type, "new_mandate"));
+    expect(afterRerun).toHaveLength(1);
+  });
+
+  it("does not report a recurring pattern below ten euros", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+    for (const days of [61, 31, 1]) {
+      await insertTx({
+        accountId,
+        bookingDate: daysAgo(days),
+        amount: "-9.99",
+        counterparty: "Kleinbetrag-Abo",
+      });
+    }
+
+    await runAnomalyDetection([accountId]);
+
+    const anomalies = await db
+      .select()
+      .from(financeAnomaly)
+      .where(eq(financeAnomaly.type, "new_mandate"));
+    expect(anomalies).toHaveLength(0);
+  });
+
+  it("does not call irregular repeat purchases recurring", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+    for (const days of [51, 41, 1]) {
+      await insertTx({
+        accountId,
+        bookingDate: daysAgo(days),
+        amount: "-149.00",
+        counterparty: "Online-Händler",
+      });
+    }
+
+    await runAnomalyDetection([accountId]);
+
+    const anomalies = await db
+      .select()
+      .from(financeAnomaly)
+      .where(eq(financeAnomaly.type, "new_mandate"));
+    expect(anomalies).toHaveLength(0);
+  });
+});
+
 describe("finance/anomaly-detector — missing_transaction", () => {
   it("emits missing_transaction when a monthly mandate is overdue past the grace period", async () => {
     await ensureUser(1);
