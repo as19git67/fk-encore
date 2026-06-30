@@ -182,7 +182,7 @@ function typeLabel(type: string): string {
   switch (type) {
     case 'amount_change': return 'Betragsänderung'
     case 'duplicate': return 'Mögliches Duplikat'
-    case 'new_mandate': return 'Neue Lastschrift'
+    case 'new_mandate': return 'Neue regelmäßige Buchung'
     case 'missing_transaction': return 'Erwartete Buchung fehlt'
     default: return type
   }
