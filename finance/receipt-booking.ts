@@ -25,6 +25,8 @@ export interface AutoBookingParams {
   bookingDate: string; // YYYY-MM-DD, already clamped to <= today
   counterparty: string | null;
   purpose: string | null;
+  /** Structured receipt positions rendered for the editable notes field. */
+  notice: string | null;
   currencyCode: string;
 }
 
@@ -93,6 +95,7 @@ export async function createReceiptAutoTransaction(
         currency_code: params.currencyCode,
         counterparty: params.counterparty?.trim() || null,
         purpose: params.purpose?.trim() || null,
+        notice: params.notice?.trim() || null,
         receipt_document_id: params.documentId,
         dedupe_hash: dedupeHash,
       })

@@ -90,9 +90,13 @@ export interface ListDocumentsResponse {
 }
 
 export interface SearchDocumentsResponse {
-  items: DocumentSummary[]
+  items: SearchDocumentSummary[]
   mode: SearchMode
   query: string
+}
+
+export interface SearchDocumentSummary extends DocumentSummary {
+  extracted_text_preview: string | null
 }
 
 export interface ListDocumentsQuery {

@@ -68,6 +68,8 @@ import { ensureThumbnail, removeThumbnail } from "./thumbnail";
 import { ensureSearchablePdf, ocrPdfFilePath, removeOcrPdf } from "./ocr-pdf";
 import { decryptPdfWithPassword } from "./text-extract";
 import { searchDocuments, type SearchMode } from "./search";
+import { documentTextPreview } from "./text-preview";
+import { fetchTagsForDocuments } from "./tags";
 import {
   findTaxSection,
   isValidTaxSectionSlug,
@@ -2681,8 +2683,12 @@ export const listDocumentCategories = api(
 
 // ─── Search ─────────────────────────────────────────────────────────────────
 
+export interface SearchDocumentSummary extends DocumentSummary {
+  extracted_text_preview: string | null;
+}
+
 export interface SearchDocumentsResponse {
-  items: DocumentSummary[];
+  items: SearchDocumentSummary[];
   mode: SearchMode;
   query: string;
 }
@@ -2796,9 +2802,12 @@ export const searchDocumentsEndpoint = api(
       .map((h) => {
         const r = byId.get(h.document_id);
         if (!r) return null;
-        return toSummary(r as any, r.cat_slug, tagsByDoc.get(r.id) ?? []);
+        return {
+          ...toSummary(r as any, r.cat_slug, tagsByDoc.get(r.id) ?? []),
+          extracted_text_preview: documentTextPreview(r.summary ?? r.extracted_text),
+        };
       })
-      .filter((x): x is DocumentSummary => x !== null);
+      .filter((x): x is SearchDocumentSummary => x !== null);
 
     return { items, mode: resolvedMode, query };
   },
@@ -3082,24 +3091,6 @@ async function loadDetail(userId: number, id: number): Promise<DocumentDetail> {
     attributes_reviewed: row.attributes_reviewed ?? false,
     subject_persons: subjectPersons,
   };
-}
-
-export async function fetchTagsForDocuments(ids: number[]): Promise<Map<number, string[]>> {
-  const map = new Map<number, string[]>();
-  if (ids.length === 0) return map;
-  const rows = await dbAll<{ document_id: number; name: string }>(
-    db
-      .select({ document_id: documentTagLinks.document_id, name: documentTags.name })
-      .from(documentTagLinks)
-      .innerJoin(documentTags, eq(documentTagLinks.tag_id, documentTags.id))
-      .where(inArray(documentTagLinks.document_id, ids)),
-  );
-  for (const r of rows) {
-    const arr = map.get(r.document_id) ?? [];
-    arr.push(r.name);
-    map.set(r.document_id, arr);
-  }
-  return map;
 }
 
 // Manual tag editing (PATCH /documents/:id): the caller submits the full

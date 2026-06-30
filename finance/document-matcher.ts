@@ -2,6 +2,39 @@ export interface MatchTransaction { amount: number; bookingDate: string; counter
 export interface MatchDocument { amount?: number | null; documentDate?: string | null; sender?: string | null; text?: string | null }
 export interface MatchScore { total: number; amount: number; date: number; text: number }
 
+export const DOCUMENT_MATCH_WINDOW_DAYS = 7
+const DAY_MS = 24 * 60 * 60 * 1000
+
+function dateOnlyTimestamp(value: string | null | undefined): number | null {
+  if (!value) return null
+  const timestamp = Date.parse(`${value.slice(0, 10)}T00:00:00Z`)
+  return Number.isFinite(timestamp) ? timestamp : null
+}
+
+export function documentMatchDateRange(
+  value: string | null | undefined,
+  windowDays = DOCUMENT_MATCH_WINDOW_DAYS,
+): { from: string; to: string } | null {
+  const timestamp = dateOnlyTimestamp(value)
+  if (timestamp === null) return null
+  const offset = windowDays * DAY_MS
+  return {
+    from: new Date(timestamp - offset).toISOString().slice(0, 10),
+    to: new Date(timestamp + offset).toISOString().slice(0, 10),
+  }
+}
+
+export function isWithinDocumentMatchWindow(
+  transactionDate: string | null | undefined,
+  documentDate: string | null | undefined,
+  windowDays = DOCUMENT_MATCH_WINDOW_DAYS,
+): boolean {
+  const transactionTimestamp = dateOnlyTimestamp(transactionDate)
+  const documentTimestamp = dateOnlyTimestamp(documentDate)
+  if (transactionTimestamp === null || documentTimestamp === null) return false
+  return Math.abs(transactionTimestamp - documentTimestamp) <= windowDays * DAY_MS
+}
+
 function tokens(value: string | null | undefined): Set<string> {
   return new Set((value ?? '').toLocaleLowerCase('de-DE').split(/[^\p{L}\p{N}]+/u).filter(token => token.length >= 3))
 }

@@ -31,10 +31,10 @@ import {
 import { requirePermission } from "../user/auth-handler";
 import {
   LOW_CONFIDENCE_THRESHOLD,
-  fetchTagsForDocuments,
   toSummary,
   type DocumentSummary,
 } from "./documents";
+import { fetchTagsForDocuments } from "./tags";
 import {
   loadUserGroupIds,
   loadVisibleDocument,
