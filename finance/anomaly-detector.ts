@@ -42,7 +42,7 @@ const AMOUNT_CHANGE_MIN_ABS = 5.00;
 /** Days within which a second identical booking is flagged as duplicate. */
 const DUPLICATE_WINDOW_DAYS = 5;
 /** Newly established recurring patterns above this amount get an alert. */
-const NEW_MANDATE_ALERT_AMOUNT = 100;
+const NEW_MANDATE_ALERT_AMOUNT = 10;
 /** Minimum real bookings required before a series can be called recurring. */
 const NEW_RECURRING_MIN_OCCURRENCES = 3;
 /** Ignore accidental same-merchant clusters shorter than a working week. */

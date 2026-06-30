@@ -143,7 +143,7 @@ describe("finance/anomaly-detector — new_mandate", () => {
     expect(anomalies).toHaveLength(0);
   });
 
-  it("reports a high-value recurring card payment after three regular occurrences", async () => {
+  it("reports a recurring card payment at the ten-euro threshold", async () => {
     await ensureUser(1);
     const accountId = await insertAccount();
     let transactionId = 0;
@@ -151,7 +151,7 @@ describe("finance/anomaly-detector — new_mandate", () => {
       transactionId = await insertTx({
         accountId,
         bookingDate: daysAgo(days),
-        amount: "-149.00",
+        amount: "-10.00",
         counterparty: "Streaming per Visa",
         purpose: "Kartenzahlung comdirect Visa-Debitkarte",
       });
@@ -176,6 +176,27 @@ describe("finance/anomaly-detector — new_mandate", () => {
       .from(financeAnomaly)
       .where(eq(financeAnomaly.type, "new_mandate"));
     expect(afterRerun).toHaveLength(1);
+  });
+
+  it("does not report a recurring pattern below ten euros", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+    for (const days of [61, 31, 1]) {
+      await insertTx({
+        accountId,
+        bookingDate: daysAgo(days),
+        amount: "-9.99",
+        counterparty: "Kleinbetrag-Abo",
+      });
+    }
+
+    await runAnomalyDetection([accountId]);
+
+    const anomalies = await db
+      .select()
+      .from(financeAnomaly)
+      .where(eq(financeAnomaly.type, "new_mandate"));
+    expect(anomalies).toHaveLength(0);
   });
 
   it("does not call irregular repeat purchases recurring", async () => {
