@@ -34,9 +34,13 @@ import { useAuthStore } from '../stores/auth'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import { useScrollRestore } from '../composables/useScrollRestore'
 import { useSort, type SortField } from '../composables/useSort'
-import { useDocumentFilter } from '../composables/useDocumentFilter'
-
-let lastOpenedDocId: number | null = null
+import { DOCUMENT_FILTER_QUERY_KEYS, useDocumentFilter } from '../composables/useDocumentFilter'
+import { replaceQuerySlice, updateRouteQuery } from '../utils/routeQueryUpdate'
+import {
+  consumeDocumentListFocus,
+  focusDocumentListItem,
+  rememberDocumentListFocus,
+} from '../utils/documentListFocus'
 
 const router = useRouter()
 const route = useRoute()
@@ -74,8 +78,8 @@ const searchModeOptions = [
   { label: 'Bedeutung', value: 'semantic' },
 ]
 
-function triggerSearch() {
-  syncQueryParams()
+async function triggerSearch() {
+  await syncQueryParams()
   load()
 }
 
@@ -120,7 +124,7 @@ function resetSortMenu() {
 }
 
 // ─── Filter ─────────────────────────────────────────────────────────────────
-const filter = useDocumentFilter({ preserveKeys: ['q', 'sortBy', 'sortDir'] })
+const filter = useDocumentFilter()
 
 // `useSort` and `useDocumentFilter` each restore from localStorage and write
 // their slice of the URL on mount. Written separately they race: the filter's
@@ -321,7 +325,13 @@ function syncQueryParams() {
     query.sortBy = s.field
     query.sortDir = s.direction
   }
-  router.replace({ query })
+  return updateRouteQuery(router, (current) =>
+    replaceQuerySlice(
+      current,
+      ['q', 'sortBy', 'sortDir', ...DOCUMENT_FILTER_QUERY_KEYS],
+      query,
+    ),
+  )
 }
 
 async function load() {
@@ -382,21 +392,20 @@ async function loadSubjectPeople() {
 }
 
 function openDocument(doc: DocumentSummary) {
-  lastOpenedDocId = doc.id
+  rememberDocumentListFocus(doc.id)
   router.push({ name: 'dokumente-detail', params: { id: doc.id } })
 }
 
-async function restoreScrollToLastOpened() {
-  const id = lastOpenedDocId
-  lastOpenedDocId = null
-  if (id == null) return
+async function restoreFocusToLastOpened(): Promise<boolean> {
+  const id = consumeDocumentListFocus()
+  if (id == null) return false
   await nextTick()
   await nextTick()
-  const el = document.querySelector<HTMLElement>(`[data-doc-id="${id}"]`)
-  if (!el) return
-  el.scrollIntoView({ block: 'center' })
+  const el = focusDocumentListItem(document, id)
+  if (!el) return false
   el.classList.add('document-card--highlight')
   setTimeout(() => el.classList.remove('document-card--highlight'), 1500)
+  return true
 }
 
 useRealtimeEvent('documents', 'status.changed', (ev) => {
@@ -432,14 +441,9 @@ watch(
 
 onMounted(async () => {
   await Promise.all([loadCategories(), loadGroups(), loadSubjectPeople(), load()])
-  // Returning from a document detail: center+highlight that card. Only fall
-  // back to the generic saved-scroll restore otherwise — running both made the
-  // generic restore (rAF window.scrollTo) clobber the scrollIntoView. (#651)
-  if (lastOpenedDocId != null) {
-    await restoreScrollToLastOpened()
-  } else {
-    restoreScroll()
-  }
+  // Returning from detail: center, highlight and restore actual keyboard
+  // focus. Only use the generic scroll offset when there is no item anchor.
+  if (!(await restoreFocusToLastOpened())) restoreScroll()
 })
 </script>
 
