@@ -176,76 +176,81 @@ async function handleLogout() {
 
 <template>
   <div class="app-container">
-    <nav v-if="auth.isAuthenticated" class="sticky-navbar">
-      <!-- Left: hamburger + active module sub-menu -->
-      <div class="navbar-start">
-        <Button
-          icon="pi pi-bars"
-          severity="secondary"
-          text
-          rounded
-          aria-label="Hauptmenü"
-          v-tooltip.bottom="'Module'"
-          @click="toggleHamburgerMenu"
-        />
-        <Menu ref="hamburgerMenuRef" :model="moduleMenuItems" :popup="true" />
+    <div v-if="auth.isAuthenticated" class="app-toolbar-stack">
+      <nav class="sticky-navbar">
+        <!-- Left: hamburger + active module sub-menu -->
+        <div class="navbar-start">
+          <Button
+            icon="pi pi-bars"
+            severity="secondary"
+            text
+            rounded
+            aria-label="Hauptmenü"
+            v-tooltip.bottom="'Module'"
+            @click="toggleHamburgerMenu"
+          />
+          <Menu ref="hamburgerMenuRef" :model="moduleMenuItems" :popup="true" />
 
-        <!-- Sub-menu items shown inline when inside a module -->
-        <div v-if="activeModule && subMenuItems.length" class="submenu-strip">
-          <template v-for="item in subMenuItems" :key="item.routeName || item.label">
-            <!-- Group header (e.g. the Dokumente "Einstellungen" gear) -->
-            <Button
-              v-if="item.children"
-              :label="item.label"
-              :icon="item.icon"
-              text
-              size="small"
-              :severity="isGroupActive(item.children) ? 'primary' : 'secondary'"
-              :class="{ 'submenu-item--active': isGroupActive(item.children) }"
-              @click="openGroupMenu($event, item.children)"
-            />
-            <!-- Plain link -->
-            <Button
-              v-else
-              :label="item.label"
-              :icon="item.icon"
-              :badge="item.badge"
-              text
-              size="small"
-              :severity="route.name === item.routeName ? 'primary' : 'secondary'"
-              :class="{ 'submenu-item--active': route.name === item.routeName }"
-              @pointerenter="prefetchSubMenu(item.routeName)"
-              @focus="prefetchSubMenu(item.routeName)"
-              @click="navigateSubMenu(item.routeName)"
-            />
-          </template>
-          <Menu ref="groupMenuRef" :model="groupMenuModel" :popup="true" />
+          <!-- Sub-menu items shown inline when inside a module -->
+          <div v-if="activeModule && subMenuItems.length" class="submenu-strip">
+            <template v-for="item in subMenuItems" :key="item.routeName || item.label">
+              <!-- Group header (e.g. the Dokumente "Einstellungen" gear) -->
+              <Button
+                v-if="item.children"
+                :label="item.label"
+                :icon="item.icon"
+                text
+                size="small"
+                :severity="isGroupActive(item.children) ? 'primary' : 'secondary'"
+                :class="{ 'submenu-item--active': isGroupActive(item.children) }"
+                @click="openGroupMenu($event, item.children)"
+              />
+              <!-- Plain link -->
+              <Button
+                v-else
+                :label="item.label"
+                :icon="item.icon"
+                :badge="item.badge"
+                text
+                size="small"
+                :severity="route.name === item.routeName ? 'primary' : 'secondary'"
+                :class="{ 'submenu-item--active': route.name === item.routeName }"
+                @pointerenter="prefetchSubMenu(item.routeName)"
+                @focus="prefetchSubMenu(item.routeName)"
+                @click="navigateSubMenu(item.routeName)"
+              />
+            </template>
+            <Menu ref="groupMenuRef" :model="groupMenuModel" :popup="true" />
+          </div>
         </div>
-      </div>
 
-      <!-- Right: profile + logout (icons only) -->
-      <div class="navbar-end">
-        <TxBasketIndicator v-if="activeModule?.id === 'finanzen'" />
-        <Button
-          icon="pi pi-user"
-          severity="secondary"
-          text
-          rounded
-          aria-label="Profil"
-          v-tooltip.bottom="'Profil'"
-          @click="router.push('/profile')"
-        />
-        <Button
-          icon="pi pi-sign-out"
-          severity="secondary"
-          text
-          rounded
-          aria-label="Abmelden"
-          v-tooltip.bottom="'Abmelden'"
-          @click="handleLogout"
-        />
-      </div>
-    </nav>
+        <!-- Right: profile + logout (icons only) -->
+        <div class="navbar-end">
+          <TxBasketIndicator v-if="activeModule?.id === 'finanzen'" />
+          <Button
+            icon="pi pi-user"
+            severity="secondary"
+            text
+            rounded
+            aria-label="Profil"
+            v-tooltip.bottom="'Profil'"
+            @click="router.push('/profile')"
+          />
+          <Button
+            icon="pi pi-sign-out"
+            severity="secondary"
+            text
+            rounded
+            aria-label="Abmelden"
+            v-tooltip.bottom="'Abmelden'"
+            @click="handleLogout"
+          />
+        </div>
+      </nav>
+      <!-- Route views can teleport conditional toolbars here. Keeping all
+           subheaders in this single sticky stack avoids competing top offsets. -->
+      <div id="module-subheaders" class="module-subheaders" data-testid="module-subheaders" />
+    </div>
 
     <main class="content">
       <router-view />
@@ -273,11 +278,15 @@ body {
   --menubar-height: 3.5rem;
 }
 
-/* ── Sticky navbar ──────────────────────────────────────────────────────────── */
-.sticky-navbar {
+/* ── Sticky application toolbar stack ─────────────────────────────────────── */
+.app-toolbar-stack {
   position: sticky;
   top: 0;
   z-index: 1100;
+  background: var(--p-content-hover-background);
+}
+
+.sticky-navbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -286,6 +295,19 @@ body {
   background: var(--p-content-background);
   border-bottom: 1px solid var(--p-content-border-color);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+}
+
+.module-subheaders {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--p-content-border-color);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+}
+
+.module-subheaders:empty {
+  display: none;
 }
 
 .navbar-start {
@@ -346,6 +368,9 @@ body {
 
 /* On mobile (≤768 px) show only icons in the sub-menu strip */
 @media (max-width: 768px) {
+  .module-subheaders {
+    padding: 0.5rem;
+  }
   .submenu-strip .p-button-label {
     display: none;
   }
