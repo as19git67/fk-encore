@@ -42,6 +42,10 @@ public final class BackgroundSyncManager {
     // MARK: - Registration (call once at launch)
 
     public func register() {
+        // Recover installs poisoned by the old watermark bug before anything
+        // else touches the sync state (runs at most once).
+        PhotoSyncPreferences.runWatermarkPoisonMigrationIfNeeded()
+
         print("[BGSync] Registering task: \(PhotoSyncPreferences.taskIdentifier)")
         let ok = BGTaskScheduler.shared.register(
             forTaskWithIdentifier: PhotoSyncPreferences.taskIdentifier,
