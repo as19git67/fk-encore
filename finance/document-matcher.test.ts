@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { extractDocumentAmount, scoreDocumentMatch } from './document-matcher'
+import {
+  documentMatchDateRange,
+  extractDocumentAmount,
+  isWithinDocumentMatchWindow,
+  scoreDocumentMatch,
+} from './document-matcher'
 
 describe('scoreDocumentMatch', () => {
   const transaction = { amount: -42.5, bookingDate: '2026-06-10', counterparty: 'Bäckerei Müller', purpose: 'Rechnung 4711' }
@@ -14,5 +19,21 @@ describe('scoreDocumentMatch', () => {
   it('does not suggest unrelated documents strongly', () => {
     const score = scoreDocumentMatch(transaction, { amount: 9.99, documentDate: '2025-01-01', sender: 'Stadtwerke', text: 'Gasabschlag' })
     expect(score.total).toBeLessThan(0.2)
+  })
+})
+
+describe('document match date window', () => {
+  it('builds an inclusive seven-day range', () => {
+    expect(documentMatchDateRange('2026-06-15 12:00:00')).toEqual({
+      from: '2026-06-08',
+      to: '2026-06-22',
+    })
+    expect(isWithinDocumentMatchWindow('2026-06-15', '2026-06-08')).toBe(true)
+    expect(isWithinDocumentMatchWindow('2026-06-15', '2026-06-22')).toBe(true)
+  })
+
+  it('rejects older and undated documents', () => {
+    expect(isWithinDocumentMatchWindow('2026-06-15', '2011-06-15')).toBe(false)
+    expect(isWithinDocumentMatchWindow('2026-06-15', null)).toBe(false)
   })
 })

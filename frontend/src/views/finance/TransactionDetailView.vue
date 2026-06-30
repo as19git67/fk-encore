@@ -40,6 +40,8 @@ const saving = ref(false)
 const deleting = ref(false)
 const copyToast = ref<string | null>(null)
 const linkedDocuments = ref<Array<{ document_id: number; title: string | null; original_filename: string }>>([])
+const linkedDocumentsLoading = ref(true)
+const linkedDocumentsLoaded = ref(false)
 const documentLinkPanelOpen = ref(false)
 const documentQuery = ref('')
 const documentResults = ref<DocumentSummary[]>([])
@@ -48,14 +50,24 @@ const documentSearchLoading = ref(false)
 const documentSuggestionsLoading = ref(false)
 const documentLinkingId = ref<number | null>(null)
 const documentDecisionId = ref<number | null>(null)
-const expandedSuggestionId = ref<number | null>(null)
 
 async function refreshLinkedDocuments() {
   if (!tx.value) {
     linkedDocuments.value = []
+    linkedDocumentsLoading.value = false
+    linkedDocumentsLoaded.value = true
     return
   }
-  linkedDocuments.value = await api.getTransactionDocumentLinks(tx.value.id).catch(() => [])
+  linkedDocumentsLoading.value = true
+  linkedDocumentsLoaded.value = false
+  try {
+    linkedDocuments.value = await api.getTransactionDocumentLinks(tx.value.id)
+    linkedDocumentsLoaded.value = true
+  } catch {
+    linkedDocuments.value = []
+  } finally {
+    linkedDocumentsLoading.value = false
+  }
 }
 
 async function unlinkDocument(documentId: number) {
@@ -111,9 +123,6 @@ async function linkDocumentToTransaction(documentId: number) {
     await api.linkDocumentsToTransactions([tx.value.id], [documentId])
     documentResults.value = documentResults.value.filter(document => document.id !== documentId)
     documentSuggestions.value = documentSuggestions.value.filter(suggestion => suggestion.document_id !== documentId)
-    if (documentSuggestions.value.every(suggestion => suggestion.id !== expandedSuggestionId.value)) {
-      expandedSuggestionId.value = null
-    }
     await refreshLinkedDocuments()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -142,7 +151,6 @@ async function decideDocumentSuggestion(suggestion: api.DocumentMatchSuggestion,
   try {
     await api.decideDocumentMatch(suggestion.id, outcome)
     documentSuggestions.value = documentSuggestions.value.filter(item => item.id !== suggestion.id)
-    if (expandedSuggestionId.value === suggestion.id) expandedSuggestionId.value = null
     if (outcome === 'accepted') await refreshLinkedDocuments()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -153,10 +161,6 @@ async function decideDocumentSuggestion(suggestion: api.DocumentMatchSuggestion,
 
 function suggestionTitle(suggestion: api.DocumentMatchSuggestion): string {
   return suggestion.title ?? suggestion.original_filename
-}
-
-function toggleSuggestionPreview(suggestionId: number) {
-  expandedSuggestionId.value = expandedSuggestionId.value === suggestionId ? null : suggestionId
 }
 
 function formatScore(score: number): string {
@@ -215,10 +219,9 @@ async function loadTransaction(id: number) {
   try {
     error.value = null
     tx.value = await api.getTransaction(id)
-    linkedDocuments.value = await api.getTransactionDocumentLinks(id).catch(() => [])
+    await refreshLinkedDocuments()
     documentResults.value = []
     documentSuggestions.value = []
-    expandedSuggestionId.value = null
     documentLinkPanelOpen.value = false
     documentQuery.value = ''
     syncForm()
@@ -384,7 +387,6 @@ async function save() {
 
 async function deleteTx() {
   if (!tx.value) return
-  if (!window.confirm('Diese Buchung wirklich löschen?')) return
   deleting.value = true
   try {
     await api.deleteTransaction(tx.value.id)
@@ -393,6 +395,18 @@ async function deleteTx() {
     error.value = err instanceof Error ? err.message : String(err)
     deleting.value = false
   }
+}
+
+function requestDeleteTx() {
+  if (!tx.value) return
+  confirmDialog.require({
+    message: 'Diese Buchung wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.',
+    header: 'Buchung löschen',
+    icon: 'pi pi-exclamation-triangle',
+    rejectProps: { label: 'Abbrechen', severity: 'secondary', outlined: true },
+    acceptProps: { label: 'Löschen', severity: 'danger' },
+    accept: () => { void deleteTx() },
+  })
 }
 
 function formatAmount(): string {
@@ -610,26 +624,33 @@ const extractedFields = computed(() => {
 
     <section v-if="tx" class="card">
       <dl class="details">
-        <dt>Verknüpfte Belege</dt>
-        <dd class="document-links">
-          <div v-if="linkedDocuments.length" class="linked-documents">
-            <span v-for="document in linkedDocuments" :key="document.document_id" class="linked-document">
-              <Button :label="document.title ?? document.original_filename" size="small" text @click="router.push({ name: 'dokumente-detail', params: { id: document.document_id }, query: { fromTransaction: String(tx.id) } })" />
-              <Button icon="pi pi-times" size="small" text aria-label="Belegverknüpfung trennen" @click="requestUnlinkDocument(document.document_id)" />
-            </span>
-          </div>
-          <span v-else class="hint">Keine Belege verknüpft.</span>
+        <dt v-if="linkedDocuments.length">Verknüpfte Belege</dt>
+        <dd
+          class="document-links"
+          :class="{ 'document-links--without-heading': !linkedDocuments.length }"
+        >
+          <div class="document-links-row">
+            <div class="document-links-content">
+              <div v-if="linkedDocuments.length" class="linked-documents">
+                <span v-for="document in linkedDocuments" :key="document.document_id" class="linked-document">
+                  <Button :label="document.title ?? document.original_filename" size="small" text @click="router.push({ name: 'dokumente-detail', params: { id: document.document_id }, query: { fromTransaction: String(tx.id) } })" />
+                  <Button icon="pi pi-times" size="small" text aria-label="Belegverknüpfung trennen" @click="requestUnlinkDocument(document.document_id)" />
+                </span>
+              </div>
+              <span v-else-if="!linkedDocumentsLoading && linkedDocumentsLoaded" class="hint">Keine Belege verknüpft.</span>
+            </div>
 
-          <div class="document-link-actions">
-            <Button
-              :label="documentLinkPanelOpen ? 'Verknüpfen schließen' : 'Beleg verknüpfen'"
-              icon="pi pi-link"
-              size="small"
-              severity="secondary"
-              outlined
-              :loading="documentSuggestionsLoading"
-              @click="toggleDocumentLinkPanel"
-            />
+            <div class="document-link-actions">
+              <Button
+                :label="documentLinkPanelOpen ? 'Verknüpfen schließen' : 'Beleg verknüpfen'"
+                icon="pi pi-link"
+                size="small"
+                severity="secondary"
+                outlined
+                :loading="documentSuggestionsLoading"
+                @click="toggleDocumentLinkPanel"
+              />
+            </div>
           </div>
 
           <div v-if="documentLinkPanelOpen" class="document-link-panel">
@@ -672,25 +693,11 @@ const extractedFields = computed(() => {
               <ul v-else class="document-result-list">
                 <li v-for="suggestion in documentSuggestions" :key="suggestion.id" class="document-suggestion">
                   <div class="document-result-row">
-                    <button
-                      type="button"
-                      class="document-suggestion-title"
-                      :aria-expanded="expandedSuggestionId === suggestion.id"
-                      @click="toggleSuggestionPreview(suggestion.id)"
-                    >
+                    <div class="document-suggestion-title">
                       <span>{{ suggestionTitle(suggestion) }}</span>
                       <small>{{ formatScore(suggestion.score) }}</small>
-                    </button>
+                    </div>
                     <span class="document-result-actions">
-                      <Button
-                        label="Vorschau"
-                        icon="pi pi-eye"
-                        size="small"
-                        severity="secondary"
-                        text
-                        :aria-expanded="expandedSuggestionId === suggestion.id"
-                        @click="toggleSuggestionPreview(suggestion.id)"
-                      />
                       <Button
                         label="Annehmen"
                         size="small"
@@ -708,7 +715,7 @@ const extractedFields = computed(() => {
                       />
                     </span>
                   </div>
-                  <div v-if="expandedSuggestionId === suggestion.id" class="document-suggestion-preview">
+                  <div class="document-suggestion-preview">
                     <dl class="document-preview-meta">
                       <template v-if="suggestion.sender">
                         <dt>Absender</dt>
@@ -949,7 +956,7 @@ const extractedFields = computed(() => {
         icon="pi pi-trash"
         severity="danger"
         :loading="deleting"
-        @click="deleteTx"
+        @click="requestDeleteTx"
       />
     </div>
 
@@ -1094,6 +1101,20 @@ const extractedFields = computed(() => {
   flex-direction: column;
   gap: 0.5rem;
 }
+.document-links--without-heading {
+  grid-column: 1 / -1;
+}
+.document-links-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+}
+.document-links-content {
+  flex: 1;
+  min-width: 0;
+}
 .linked-documents {
   display: flex;
   flex-wrap: wrap;
@@ -1110,7 +1131,8 @@ const extractedFields = computed(() => {
 }
 .document-link-actions {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
+  flex-shrink: 0;
   gap: 0.5rem;
 }
 .document-link-panel {
@@ -1179,16 +1201,7 @@ const extractedFields = computed(() => {
   flex: 1;
   gap: 0.5rem;
   min-width: 0;
-  border: none;
-  background: transparent;
   color: var(--p-text-color);
-  cursor: pointer;
-  font: inherit;
-  padding: 0;
-  text-align: left;
-}
-.document-suggestion-title:hover span {
-  text-decoration: underline;
 }
 .document-suggestion-title span {
   overflow: hidden;
