@@ -136,7 +136,11 @@ struct PhotoGridView: View {
                 .presentationDetents([.medium, .large])
         }
         .navigationDestination(item: $fullscreenNav) { _ in
-            PhotoFullscreenView(photos: viewModel.photos, currentIndex: $selectedIndex)
+            PhotoFullscreenView(
+                photos: viewModel.photos,
+                currentIndex: $selectedIndex,
+                onPhotoRemoved: { id in viewModel.photos.removeAll { $0.id == id } }
+            )
         }
         .onChange(of: fullscreenNav) { _, nav in
             if nav == nil, !viewModel.photos.isEmpty {

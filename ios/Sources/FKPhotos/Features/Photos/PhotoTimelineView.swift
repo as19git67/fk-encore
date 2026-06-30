@@ -41,7 +41,11 @@ struct PhotoTimelineView: View {
         }
         .navigationTitle("Fotos")
         .navigationDestination(item: $fullscreenNav) { _ in
-            PhotoFullscreenView(photos: photosVM.photos, currentIndex: $fullscreenIndex)
+            PhotoFullscreenView(
+                photos: photosVM.photos,
+                currentIndex: $fullscreenIndex,
+                onPhotoRemoved: { id in photosVM.photos.removeAll { $0.id == id } }
+            )
         }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
