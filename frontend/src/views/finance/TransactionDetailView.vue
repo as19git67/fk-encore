@@ -624,21 +624,11 @@ const extractedFields = computed(() => {
 
     <section v-if="tx" class="card">
       <dl class="details">
-        <dt v-if="linkedDocuments.length">Verknüpfte Belege</dt>
-        <dd
-          class="document-links"
-          :class="{ 'document-links--without-heading': !linkedDocuments.length }"
-        >
+        <dd class="document-links">
           <div class="document-links-row">
-            <div class="document-links-content">
-              <div v-if="linkedDocuments.length" class="linked-documents">
-                <span v-for="document in linkedDocuments" :key="document.document_id" class="linked-document">
-                  <Button :label="document.title ?? document.original_filename" size="small" text @click="router.push({ name: 'dokumente-detail', params: { id: document.document_id }, query: { fromTransaction: String(tx.id) } })" />
-                  <Button icon="pi pi-times" size="small" text aria-label="Belegverknüpfung trennen" @click="requestUnlinkDocument(document.document_id)" />
-                </span>
-              </div>
-              <span v-else-if="!linkedDocumentsLoading && linkedDocumentsLoaded" class="hint">Keine Belege verknüpft.</span>
-            </div>
+            <span v-if="linkedDocuments.length" class="document-links-title">Verknüpfte Belege</span>
+            <span v-else-if="!linkedDocumentsLoading && linkedDocumentsLoaded" class="hint">Keine Belege verknüpft.</span>
+            <span v-else></span>
 
             <div class="document-link-actions">
               <Button
@@ -651,6 +641,13 @@ const extractedFields = computed(() => {
                 @click="toggleDocumentLinkPanel"
               />
             </div>
+          </div>
+
+          <div v-if="linkedDocuments.length" class="linked-documents">
+            <span v-for="document in linkedDocuments" :key="document.document_id" class="linked-document">
+              <Button :label="document.title ?? document.original_filename" size="small" text @click="router.push({ name: 'dokumente-detail', params: { id: document.document_id }, query: { fromTransaction: String(tx.id) } })" />
+              <Button icon="pi pi-times" size="small" text aria-label="Belegverknüpfung trennen" @click="requestUnlinkDocument(document.document_id)" />
+            </span>
           </div>
 
           <div v-if="documentLinkPanelOpen" class="document-link-panel">
@@ -678,13 +675,6 @@ const extractedFields = computed(() => {
                     <div class="document-suggestion-title">
                       <span>{{ document.title ?? document.original_filename }}</span>
                     </div>
-                    <Button
-                      label="Verbinden"
-                      size="small"
-                      text
-                      :loading="documentLinkingId === document.id"
-                      @click="linkDocumentToTransaction(document.id)"
-                    />
                   </div>
                   <div class="document-suggestion-preview">
                     <dl v-if="document.sender || document.doc_date" class="document-preview-meta">
@@ -701,6 +691,16 @@ const extractedFields = computed(() => {
                       {{ document.extracted_text_preview }}
                     </p>
                     <p v-else class="hint">Keine Textvorschau verfügbar.</p>
+                  </div>
+                  <div class="document-search-result-action">
+                    <Button
+                      label="Verknüpfen"
+                      icon="pi pi-link"
+                      size="small"
+                      text
+                      :loading="documentLinkingId === document.id"
+                      @click="linkDocumentToTransaction(document.id)"
+                    />
                   </div>
                 </li>
               </ul>
@@ -1117,12 +1117,10 @@ const extractedFields = computed(() => {
   word-break: break-word;
 }
 .document-links {
+  grid-column: 1 / -1;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-}
-.document-links--without-heading {
-  grid-column: 1 / -1;
 }
 .document-links-row {
   display: flex;
@@ -1131,9 +1129,9 @@ const extractedFields = computed(() => {
   gap: 0.75rem;
   min-width: 0;
 }
-.document-links-content {
-  flex: 1;
-  min-width: 0;
+.document-links-title {
+  color: var(--p-text-muted-color);
+  font-size: 0.9rem;
 }
 .linked-documents {
   display: flex;
@@ -1156,13 +1154,9 @@ const extractedFields = computed(() => {
   gap: 0.5rem;
 }
 .document-link-panel {
-  border: 1px solid var(--p-content-border-color);
-  border-radius: 0.5rem;
   box-sizing: border-box;
   max-width: 100%;
   min-width: 0;
-  padding: 0.75rem;
-  background: var(--p-content-hover-background);
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
@@ -1266,6 +1260,11 @@ const extractedFields = computed(() => {
   flex-shrink: 0;
   justify-content: flex-end;
   gap: 0.25rem;
+}
+.document-search-result-action {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.15rem;
 }
 @media (max-width: 520px) {
   .details {
