@@ -2691,6 +2691,13 @@ export interface SearchDocumentsResponse {
   query: string;
 }
 
+function searchDocumentTextPreview(value: string | null | undefined, maxLength = 420): string | null {
+  const normalized = (value ?? "").replace(/\s+/g, " ").trim();
+  if (!normalized) return null;
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength).trim()}…`;
+}
+
 interface SearchQuery {
   q: Query<string>;
   mode?: Query<string>;
@@ -2800,10 +2807,9 @@ export const searchDocumentsEndpoint = api(
       .map((h) => {
         const r = byId.get(h.document_id);
         if (!r) return null;
-        const preview = (r.extracted_text ?? "").slice(0, 2000);
         return {
           ...toSummary(r as any, r.cat_slug, tagsByDoc.get(r.id) ?? []),
-          extracted_text_preview: preview.length > 0 ? preview : null,
+          extracted_text_preview: searchDocumentTextPreview(r.summary ?? r.extracted_text),
         };
       })
       .filter((x): x is SearchDocumentSummary => x !== null);
