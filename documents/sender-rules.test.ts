@@ -120,6 +120,25 @@ describe("matchSenderRule", () => {
     ).toBeNull();
   });
 
+  it("routes gesetzliche Krankenkassen to gesundheit-kasse", () => {
+    expect(matchSenderRule({ sender: "BARMER" })).toBe("gesundheit-kasse");
+    expect(matchSenderRule({ sender: "Techniker Krankenkasse" })).toBe("gesundheit-kasse");
+    expect(matchSenderRule({ sender: "AOK Bayern - Die Gesundheitskasse" })).toBe("gesundheit-kasse");
+  });
+
+  it("routes Grundsteuerbescheide from Stadtverwaltung Eutin to kommunale Abgaben", () => {
+    expect(
+      matchSenderRule({ sender: "Stadtverwaltung Eutin", title: "Grundsteuerbescheid 2024" }),
+    ).toBe("wohnen-kommunale-abgaben");
+    expect(
+      matchSenderRule({ sender: "Stadt Eutin, Fachdienst Finanzen und Controlling", title: "Grundsteuerbescheid" }),
+    ).toBe("wohnen-kommunale-abgaben");
+    // Without Grundsteuer keyword → no override, let LLM decide
+    expect(
+      matchSenderRule({ sender: "Stadtverwaltung Eutin", title: "Bußgeldbescheid" }),
+    ).toBeNull();
+  });
+
   it("honours requireAny: DRV only routes to gesetzliche Rente for pension docs", () => {
     expect(
       matchSenderRule({ sender: "Deutsche Rentenversicherung Bund", title: "Renteninformation" }),
