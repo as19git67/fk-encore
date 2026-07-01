@@ -470,10 +470,15 @@ def run_ocr(img: np.ndarray) -> tuple[str, list[dict[str, Any]]]:
 
 _VALUE_PATTERN = r"(\d{1,3}(?:[. ]\d{3})*(?:,\d{2})|\d+(?:[.,]\d{2}))"
 
-_TOTAL_LABELS = re.compile(
+_STRONG_TOTAL_LABELS = re.compile(
     r"(?<![a-zA-ZäöüÄÖÜ])"
-    r"(?:gesamt(?:betrag|summe)?|summe|total|zu\s*zahlen|betrag|endsumme|eur\b)"
+    r"(?:gesamt(?:betrag|summe)?|summe|total|zu\s*zahlen|betrag|endsumme|bruttoumsatz)"
     r"\D{0,40}" + _VALUE_PATTERN,
+    re.IGNORECASE,
+)
+
+_EUR_TOTAL_LABEL = re.compile(
+    r"(?<![a-zA-ZäöüÄÖÜ])eur\b\D{0,40}" + _VALUE_PATTERN,
     re.IGNORECASE,
 )
 
@@ -489,12 +494,28 @@ def _parse_german_amount(raw: str) -> float | None:
         return None
 
 
+def _extract_labeled_total(text: str, *, strong_only: bool = False) -> float | None:
+    """Return a deterministically labelled receipt total.
+
+    Strong business labels are safe enough to override an LLM guess.  A bare
+    ``EUR`` label remains useful only for the regex fallback because it can
+    also occur near payment, tax or cash-tendered values.
+    """
+    patterns = [_STRONG_TOTAL_LABELS]
+    if not strong_only:
+        patterns.append(_EUR_TOTAL_LABEL)
+    for pattern in patterns:
+        match = pattern.search(text)
+        if match and match.group(1):
+            amount = _parse_german_amount(match.group(1))
+            if amount is not None:
+                return amount
+    return None
+
+
 def regex_extract(text: str) -> dict[str, Any]:
     """Best-effort field extraction using regex patterns."""
-    amount: float | None = None
-    match = _TOTAL_LABELS.search(text)
-    if match and match.group(1):
-        amount = _parse_german_amount(match.group(1))
+    amount = _extract_labeled_total(text)
 
     if amount is None:
         all_amounts = [
@@ -649,6 +670,12 @@ def llm_extract_core(text: str) -> dict[str, Any]:
         amount = None
     else:
         amount = round(float(amount), 2)
+
+    # OCR noise around payment rows can make the LLM prefer cash tendered or
+    # change. An explicit total label is more reliable and wins deterministically.
+    labeled_total = _extract_labeled_total(text, strong_only=True)
+    if labeled_total is not None:
+        amount = round(labeled_total, 2)
 
     date_val = data.get("date")
     if not (isinstance(date_val, str) and re.match(r"^\d{4}-\d{2}-\d{2}$", date_val)):
