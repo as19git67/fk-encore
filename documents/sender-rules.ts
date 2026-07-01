@@ -134,6 +134,13 @@ export const SENDER_RULES: readonly SenderRule[] = [
     category: "gesundheit-pflege",
   },
 
+  // ── Health insurance (gesetzliche Krankenkassen) ─────────────────────────
+  {
+    note: "BARMER / Techniker Krankenkasse / AOK → gesetzliche Krankenkasse",
+    senders: ["barmer", "techniker", "aokbayern", "aokplus"],
+    category: "gesundheit-kasse",
+  },
+
   // ── Insurances ──────────────────────────────────────────────────────────
   {
     note: "HALLESCHE / DKV → Private Kranken-/Zusatzversicherung",
@@ -141,8 +148,8 @@ export const SENDER_RULES: readonly SenderRule[] = [
     category: "versicherungen-kranken",
   },
   {
-    note: "Heidelberger / AXA Lebensversicherung → Kapital-Lebensversicherung",
-    senders: ["heidelbergerleben", "heidelbergerlebensversicherung", "axalebensversicherung"],
+    note: "Heidelberger / AXA / MLP Lebensversicherung → Kapital-Lebensversicherung",
+    senders: ["heidelbergerleben", "heidelbergerlebensversicherung", "axalebensversicherung", "mlplebensversicherung"],
     category: "altersvorsorge-lebensversicherung",
   },
   {
@@ -172,6 +179,12 @@ export const SENDER_RULES: readonly SenderRule[] = [
     note: "Gemeinde (Wasser/Abwasser/Müll/Gebühren) → kommunale Abgaben",
     senders: ["gemeindemerching", "gemeinde"],
     requireAny: ["wasser", "abwasser", "müll", "abfall", "gebühr", "benutzungsgeb", "straßenreinigung"],
+    category: "wohnen-kommunale-abgaben",
+  },
+  {
+    note: "Stadtverwaltung Eutin (Grundsteuerbescheid) → kommunale Abgaben",
+    senders: ["stadteutin", "stadtverwaltungeutin"],
+    requireAny: ["grundsteuer", "grundsteuerbescheid", "grundsteuermessbetrag"],
     category: "wohnen-kommunale-abgaben",
   },
 

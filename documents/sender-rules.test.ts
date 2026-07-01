@@ -59,6 +59,7 @@ describe("matchSenderRule", () => {
     expect(matchSenderRule({ sender: "HALLESCHE Krankenversicherung" })).toBe("versicherungen-kranken");
     expect(matchSenderRule({ sender: "DKV Deutsche Krankenversicherung" })).toBe("versicherungen-kranken");
     expect(matchSenderRule({ sender: "Heidelberger Leben" })).toBe("altersvorsorge-lebensversicherung");
+    expect(matchSenderRule({ sender: "MLP Lebensversicherung AG" })).toBe("altersvorsorge-lebensversicherung");
     expect(matchSenderRule({ sender: "Janitos Versicherung AG" })).toBe("versicherungen-sach");
     expect(matchSenderRule({ sender: "Zahnarztpraxis Dr. Kiesewetter" })).toBe("gesundheit-arzt");
     expect(matchSenderRule({ sender: "Caritas-Sozialstation" })).toBe("gesundheit-pflege");
@@ -96,8 +97,10 @@ describe("matchSenderRule", () => {
   });
 
   it("keeps the bank-statement and church-employer rules from over-grabbing", () => {
-    // MLP life insurance is a different sender token and lacks statement keywords.
-    expect(matchSenderRule({ sender: "MLP Lebensversicherung AG", title: "Beitragsmitteilung" })).toBeNull();
+    // MLP Lebensversicherung routes to life insurance (dedicated sender rule).
+    expect(matchSenderRule({ sender: "MLP Lebensversicherung AG", title: "Beitragsmitteilung" })).toBe(
+      "altersvorsorge-lebensversicherung",
+    );
     // Church mail without an SV/payslip keyword is left to the LLM.
     expect(matchSenderRule({ sender: "Erzb. Ordinariat München", title: "Rundschreiben" })).toBeNull();
   });
@@ -116,6 +119,25 @@ describe("matchSenderRule", () => {
     // a securities document — the excludeAny keyword keeps it out of telecom.
     expect(
       matchSenderRule({ sender: "Deutsche Telekom AG", title: "Dividendengutschrift" }),
+    ).toBeNull();
+  });
+
+  it("routes gesetzliche Krankenkassen to gesundheit-kasse", () => {
+    expect(matchSenderRule({ sender: "BARMER" })).toBe("gesundheit-kasse");
+    expect(matchSenderRule({ sender: "Techniker Krankenkasse" })).toBe("gesundheit-kasse");
+    expect(matchSenderRule({ sender: "AOK Bayern - Die Gesundheitskasse" })).toBe("gesundheit-kasse");
+  });
+
+  it("routes Grundsteuerbescheide from Stadtverwaltung Eutin to kommunale Abgaben", () => {
+    expect(
+      matchSenderRule({ sender: "Stadtverwaltung Eutin", title: "Grundsteuerbescheid 2024" }),
+    ).toBe("wohnen-kommunale-abgaben");
+    expect(
+      matchSenderRule({ sender: "Stadt Eutin, Fachdienst Finanzen und Controlling", title: "Grundsteuerbescheid" }),
+    ).toBe("wohnen-kommunale-abgaben");
+    // Without Grundsteuer keyword → no override, let LLM decide
+    expect(
+      matchSenderRule({ sender: "Stadtverwaltung Eutin", title: "Bußgeldbescheid" }),
     ).toBeNull();
   });
 
