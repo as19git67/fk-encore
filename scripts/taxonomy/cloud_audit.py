@@ -35,7 +35,7 @@ import _common as c
 OUT = c.OUT_DIR
 SAMPLE_SIZE = int(os.environ.get("AUDIT_SAMPLE", "300"))
 BATCH_SIZE = 5
-CLAUDE_MODEL = os.environ.get("AUDIT_MODEL", "claude-sonnet-5")
+CLAUDE_MODEL = os.environ.get("AUDIT_MODEL", "claude-opus-4-8")
 DRY_RUN = os.environ.get("AUDIT_DRY_RUN", "").lower() in ("1", "true", "yes")
 
 # ── Taxonomie aus dem TS-Quelltext lesen ──────────────────────────────────────
@@ -198,7 +198,13 @@ def _classify_batch(
             if text_block is None:
                 raise ValueError("no text block in response")
             text = text_block.text.strip()
-            # Parse JSON from response
+            # Strip markdown fences and extract JSON object
+            text = re.sub(r"^```(?:json)?\s*", "", text)
+            text = re.sub(r"\s*```$", "", text)
+            # Find first { ... } if there's surrounding text
+            m = re.search(r"\{.*\}", text, re.DOTALL)
+            if m:
+                text = m.group(0)
             parsed = json.loads(text)
             results.append({
                 "doc_id": doc["id"],
