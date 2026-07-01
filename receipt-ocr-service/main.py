@@ -405,9 +405,7 @@ _VALUE_PATTERN = r"(\d{1,3}(?:[. ]\d{3})*(?:,\d{2})|\d+(?:[.,]\d{2}))"
 
 _TOTAL_LABELS = re.compile(
     r"(?<![a-zA-ZäöüÄÖÜ])"
-    r"(?:gesamt(?:betrag|summe)?|summe|total|zu\s*zahlen|betrag|endsumme|"
-    r"karten(?:zahlung)?|ec[- ]?cash|bar|maestro|visa|mastercard|"
-    r"girocard|v\s*pay|eur\b)"
+    r"(?:gesamt(?:betrag|summe)?|summe|total|zu\s*zahlen|betrag|endsumme|eur\b)"
     r"\D{0,40}" + _VALUE_PATTERN,
     re.IGNORECASE,
 )
@@ -487,6 +485,9 @@ Regeln:
     - "Zwischensumme" = Betrag VOR Rabatten/Coupons → NICHT als amount verwenden
     - "Summe" = tatsächlicher Endbetrag NACH allen Abzügen → als amount verwenden
   Coupon-Ersparnis, Rabatte und Aktionen reduzieren die finale Summe.
+  Zahlungszeilen wie "Bar", "Gegeben", "EC-Cash", "Kartenzahlung", "VISA"
+  oder "Mastercard" sind NICHT der Gesamtbetrag. Insbesondere ist der Betrag
+  hinter "Bar" häufig das gegebene Bargeld vor Abzug des Rückgelds.
 - date: Das Kaufdatum, nicht Druckdatum oder MHD.
 - store: Der Geschäftsname aus dem Kopfbereich (z.B. "REWE", "ALDI", "dm", "Rossmann").
 - Halluziniere keine Daten. Bei Unsicherheit: null."""
@@ -635,10 +636,18 @@ class ReceiptResult(BaseModel):
     raw_text: str = ""
     ocr_confidence: float = 0.0
     processing_ms: int = 0
-    # Base64 JPEG of the cropped / de-warped / upright-rotated receipt, set only
-    # when the service changed the image's geometry. The backend uses it to
-    # replace the stored PDF so the viewed document is straight and upright.
+    # Base64 JPEG of the fully prepared receipt scan: cropped, perspective-
+    # corrected, upright, deskewed, denoised and contrast-enhanced. The backend
+    # always uses it to replace the camera image in the stored PDF.
     corrected_image: str | None = None
+
+
+def _encode_processed_jpeg(img: np.ndarray) -> str | None:
+    """Encode the display/OCR-ready receipt image for persistent PDF storage."""
+    ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
+    if not ok:
+        return None
+    return base64.b64encode(buf.tobytes()).decode("ascii")
 
 
 @app.post("/extract", response_model=ReceiptResult)
@@ -651,8 +660,9 @@ async def extract_receipt(file: UploadFile = File(...)) -> ReceiptResult:
         raise HTTPException(status_code=413, detail="file too large (max 20 MB)")
 
     def _pipeline(data: bytes) -> dict[str, Any]:
-        storage_img, corrected = correct_geometry(data)
+        storage_img, _geometry_corrected = correct_geometry(data)
         ocr_img = enhance_for_ocr(storage_img)
+        processed_image = _encode_processed_jpeg(ocr_img)
         full_text, lines = run_ocr(ocr_img)
 
         if not full_text.strip():
@@ -660,6 +670,7 @@ async def extract_receipt(file: UploadFile = File(...)) -> ReceiptResult:
                 "amount": None, "date": None, "store": None,
                 "currency": "EUR", "items": [], "raw_text": "",
                 "ocr_confidence": 0.0,
+                "corrected_image": processed_image,
             }
 
         avg_confidence = (
@@ -676,13 +687,8 @@ async def extract_receipt(file: UploadFile = File(...)) -> ReceiptResult:
         out: dict[str, Any] = {
             **core, "items": [], "raw_text": full_text,
             "ocr_confidence": round(avg_confidence, 3),
+            "corrected_image": processed_image,
         }
-        # Hand back the straightened image so the backend can replace the stored
-        # PDF — only when the geometry actually changed.
-        if corrected:
-            ok, buf = cv2.imencode(".jpg", storage_img, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
-            if ok:
-                out["corrected_image"] = base64.b64encode(buf.tobytes()).decode("ascii")
 
         # Line items are intentionally NOT extracted here: they dominate the LLM
         # generation time. The caller fetches them asynchronously via

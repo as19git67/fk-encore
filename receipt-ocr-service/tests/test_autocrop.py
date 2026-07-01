@@ -1,12 +1,16 @@
 """Tests for the contour-based auto-crop / perspective-correction helpers."""
 
+import base64
+
 import cv2
 import numpy as np
 
 from main import (
     _find_document_quad,
     _four_point_warp,
+    _encode_processed_jpeg,
     _order_quad,
+    enhance_for_ocr,
     preprocess_image,
 )
 
@@ -71,3 +75,21 @@ def test_preprocess_image_keeps_full_frame_without_border():
     img = np.full((400, 300, 3), 180, dtype=np.uint8)
     out = preprocess_image(_encode_png(img))
     assert out.shape[0] == 400 and out.shape[1] == 300
+
+
+def test_processed_receipt_jpeg_contains_display_enhancement():
+    gradient = np.tile(np.linspace(145, 205, 320, dtype=np.uint8), (480, 1))
+    img = cv2.cvtColor(gradient, cv2.COLOR_GRAY2BGR)
+    cv2.putText(img, "SUMME 12,34", (35, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (115, 115, 115), 2)
+
+    enhanced = enhance_for_ocr(img)
+    encoded = _encode_processed_jpeg(enhanced)
+    assert encoded is not None
+
+    decoded = cv2.imdecode(
+        np.frombuffer(base64.b64decode(encoded), dtype=np.uint8),
+        cv2.IMREAD_COLOR,
+    )
+    assert decoded.shape == img.shape
+    assert np.max(np.abs(decoded[:, :, 0].astype(int) - decoded[:, :, 1].astype(int))) <= 2
+    assert np.max(np.abs(decoded[:, :, 1].astype(int) - decoded[:, :, 2].astype(int))) <= 2

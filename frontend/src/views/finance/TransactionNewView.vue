@@ -13,7 +13,7 @@ import { useAccountsStore } from '../../stores/finance/accounts'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useTagsStore } from '../../stores/finance/tags'
 import { linkDocumentsToTransactions, recentCashRecipients, searchRecipients, type RecentRecipient } from '../../api/finance'
-import { deleteDocument, searchDocuments, updateDocument, uploadReceiptCapture, type DocumentSummary } from '../../api/documents'
+import { deleteDocument, searchDocuments, uploadReceiptCapture, type DocumentSummary } from '../../api/documents'
 import { useModuleBack } from '../../composables/useModuleBack'
 
 const route = useRoute()
@@ -194,8 +194,7 @@ async function onReceiptPicked(event: Event) {
   receiptUploading.value = true
   receiptStatus.value = 'Beleg wird hochgeladen …'
   try {
-    const uploaded = await uploadReceiptCapture(file, accountId.value ?? undefined)
-    void updateDocument(uploaded.id, { category_slug: 'belege' }).catch(() => {})
+    await uploadReceiptCapture(file, accountId.value ?? undefined)
     goBack()
   } catch (err) {
     receiptStatus.value = null

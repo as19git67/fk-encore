@@ -62,6 +62,16 @@ class TestRegexExtract:
         result = regex_extract(text)
         assert result["amount"] == 8.50
 
+    def test_cash_tendered_does_not_override_total(self):
+        text = "Bar  20,00\nRückgeld  7,66\nSUMME  12,34"
+        result = regex_extract(text)
+        assert result["amount"] == 12.34
+
+    def test_card_payment_does_not_override_total(self):
+        text = "VISA  50,00\nZu zahlen  47,25"
+        result = regex_extract(text)
+        assert result["amount"] == 47.25
+
     def test_eur_label(self):
         text = "Banane  0,99\nBrot  2,49\nEUR  3,48"
         result = regex_extract(text)

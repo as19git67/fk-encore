@@ -19,7 +19,7 @@ import {
   type DocumentLocationContext,
 } from "./documents.service";
 import { flattenTaxonomy, taxonomyHints, categoryTaxonomy, type CategorySeed } from "./taxonomy";
-import { DOCUMENT_SERVICES } from "./scan-queue";
+import { DOCUMENT_QUEUE_SERVICES, DOCUMENT_SERVICES } from "./scan-queue";
 import { DuplicateDocumentError } from "./import";
 import { SUPPORTED_EXTENSIONS } from "./documents.service";
 import { reciprocalRankFusion, visibilityClause, type SearchHit } from "./search";
@@ -258,6 +258,15 @@ describe("documents.taxonomy", () => {
 describe("documents.scan-queue constants", () => {
   it("pipeline stages are declared in dependency order", () => {
     expect(DOCUMENT_SERVICES).toEqual(["text_extract", "classify", "embed"]);
+  });
+
+  it("reports the specialised PaddleOCR worker in queue status", () => {
+    expect(DOCUMENT_QUEUE_SERVICES).toEqual([
+      "text_extract",
+      "classify",
+      "embed",
+      "receipt_ocr",
+    ]);
   });
 });
 

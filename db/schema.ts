@@ -807,8 +807,6 @@ export const documentReceiptExtraction = pgTable(
       .references(() => documents.id, { onDelete: "cascade" })
       .unique(),
     amount: numeric("amount", { precision: 14, scale: 2 }),
-    receipt_date: text("receipt_date"),
-    store: text("store"),
     items: jsonb("items").$type<Array<{ name: string; amount: number }>>().notNull().default([]),
     ocr_confidence: real("ocr_confidence"),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
