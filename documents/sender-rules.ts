@@ -141,8 +141,8 @@ export const SENDER_RULES: readonly SenderRule[] = [
     category: "versicherungen-kranken",
   },
   {
-    note: "Heidelberger / AXA Lebensversicherung → Kapital-Lebensversicherung",
-    senders: ["heidelbergerleben", "heidelbergerlebensversicherung", "axalebensversicherung"],
+    note: "Heidelberger / AXA / MLP Lebensversicherung → Kapital-Lebensversicherung",
+    senders: ["heidelbergerleben", "heidelbergerlebensversicherung", "axalebensversicherung", "mlplebensversicherung"],
     category: "altersvorsorge-lebensversicherung",
   },
   {

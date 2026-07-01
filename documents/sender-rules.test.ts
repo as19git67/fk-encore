@@ -59,6 +59,7 @@ describe("matchSenderRule", () => {
     expect(matchSenderRule({ sender: "HALLESCHE Krankenversicherung" })).toBe("versicherungen-kranken");
     expect(matchSenderRule({ sender: "DKV Deutsche Krankenversicherung" })).toBe("versicherungen-kranken");
     expect(matchSenderRule({ sender: "Heidelberger Leben" })).toBe("altersvorsorge-lebensversicherung");
+    expect(matchSenderRule({ sender: "MLP Lebensversicherung AG" })).toBe("altersvorsorge-lebensversicherung");
     expect(matchSenderRule({ sender: "Janitos Versicherung AG" })).toBe("versicherungen-sach");
     expect(matchSenderRule({ sender: "Zahnarztpraxis Dr. Kiesewetter" })).toBe("gesundheit-arzt");
     expect(matchSenderRule({ sender: "Caritas-Sozialstation" })).toBe("gesundheit-pflege");
