@@ -394,6 +394,14 @@ export const uploadDocument = api.raw(
 export const uploadReceiptCapture = api.raw(
   { expose: true, method: "POST", path: "/documents/receipt-capture", auth: true, bodyLimit: null },
   async (req, res) => {
+    const requestStarted = performance.now();
+    let timingMark = requestStarted;
+    const timings: Array<{ name: string; duration: number }> = [];
+    const recordTiming = (name: string) => {
+      const now = performance.now();
+      timings.push({ name, duration: now - timingMark });
+      timingMark = now;
+    };
     try {
       checkModule();
     } catch {
@@ -450,6 +458,7 @@ export const uploadReceiptCapture = api.raw(
       }
       receiptAccountId = parsed;
     }
+    recordTiming("account");
 
     if (!RECEIPT_CAPTURE_MIME_TYPES.has(mimeType)) {
       res.statusCode = 415;
@@ -463,13 +472,15 @@ export const uploadReceiptCapture = api.raw(
 
     try {
       const raw = await readRequestBuffer(req);
+      recordTiming("upload");
       const file = mimeType === "application/pdf"
         ? { buffer: raw, originalName, mimeType }
         : {
-            buffer: await imageToReceiptPdf(raw),
+            buffer: await imageToReceiptPdf(raw, mimeType),
             originalName: receiptPdfFilename(originalName),
             mimeType: "application/pdf",
           };
+      recordTiming("convert");
       const receiptCategory = await dbFirst<{ id: number }>(
         db.select({ id: documentCategories.id })
           .from(documentCategories)
@@ -478,6 +489,7 @@ export const uploadReceiptCapture = api.raw(
       if (!receiptCategory) {
         throw new Error("receipt category 'belege' not found");
       }
+      recordTiming("category");
       const capturePlan = buildReceiptCapturePlan(receiptCategory.id, receiptAccountId);
       const result = await storeDocumentBuffer({
         buffer: file.buffer,
@@ -493,8 +505,22 @@ export const uploadReceiptCapture = api.raw(
         // text, so running the Tesseract text_extract job would duplicate OCR.
         scanServices: capturePlan.scanServices,
       });
+      recordTiming("store");
+      const totalDuration = performance.now() - requestStarted;
       res.statusCode = 201;
       res.setHeader("Content-Type", "application/json");
+      res.setHeader(
+        "Server-Timing",
+        [...timings, { name: "total", duration: totalDuration }]
+          .map(({ name, duration }) => `${name};dur=${duration.toFixed(1)}`)
+          .join(", "),
+      );
+      console.log(
+        `[documents] receipt capture accepted doc=${result.id} mime=${mimeType} bytes=${raw.length} ` +
+        [...timings, { name: "total", duration: totalDuration }]
+          .map(({ name, duration }) => `${name}=${Math.round(duration)}ms`)
+          .join(" "),
+      );
       res.end(JSON.stringify(result));
     } catch (err: any) {
       if (err.message === "DOCUMENT_ALREADY_EXISTS") {
@@ -777,7 +803,15 @@ function isHeicBuffer(buf: Buffer): boolean {
  * The worker then replaces this stored PDF with the service-corrected image
  * (see `runReceiptOcr` in document-ops.ts).
  */
-async function imageToReceiptPdf(input: Buffer): Promise<Buffer> {
+async function imageToReceiptPdf(input: Buffer, mimeType: string): Promise<Buffer> {
+  // Camera capture in mobile browsers is normally already JPEG. Embedding the
+  // original compressed bytes directly avoids an expensive full-resolution
+  // MozJPEG encode on the request path; the background receipt worker replaces
+  // this provisional page with its cropped and enhanced scan.
+  if (mimeType === "image/jpeg" && !isHeicBuffer(input)) {
+    const meta = await sharp(input, { failOn: "none" }).metadata();
+    return singleJpegPagePdf(input, meta.width || 1000, meta.height || 1000);
+  }
   const image = isHeicBuffer(input)
     ? Buffer.from(await heicConvert({ buffer: input, format: "JPEG", quality: 0.9 }))
     : input;

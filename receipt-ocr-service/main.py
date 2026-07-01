@@ -405,9 +405,7 @@ _VALUE_PATTERN = r"(\d{1,3}(?:[. ]\d{3})*(?:,\d{2})|\d+(?:[.,]\d{2}))"
 
 _TOTAL_LABELS = re.compile(
     r"(?<![a-zA-ZäöüÄÖÜ])"
-    r"(?:gesamt(?:betrag|summe)?|summe|total|zu\s*zahlen|betrag|endsumme|"
-    r"karten(?:zahlung)?|ec[- ]?cash|bar|maestro|visa|mastercard|"
-    r"girocard|v\s*pay|eur\b)"
+    r"(?:gesamt(?:betrag|summe)?|summe|total|zu\s*zahlen|betrag|endsumme|eur\b)"
     r"\D{0,40}" + _VALUE_PATTERN,
     re.IGNORECASE,
 )
@@ -487,6 +485,9 @@ Regeln:
     - "Zwischensumme" = Betrag VOR Rabatten/Coupons → NICHT als amount verwenden
     - "Summe" = tatsächlicher Endbetrag NACH allen Abzügen → als amount verwenden
   Coupon-Ersparnis, Rabatte und Aktionen reduzieren die finale Summe.
+  Zahlungszeilen wie "Bar", "Gegeben", "EC-Cash", "Kartenzahlung", "VISA"
+  oder "Mastercard" sind NICHT der Gesamtbetrag. Insbesondere ist der Betrag
+  hinter "Bar" häufig das gegebene Bargeld vor Abzug des Rückgelds.
 - date: Das Kaufdatum, nicht Druckdatum oder MHD.
 - store: Der Geschäftsname aus dem Kopfbereich (z.B. "REWE", "ALDI", "dm", "Rossmann").
 - Halluziniere keine Daten. Bei Unsicherheit: null."""
