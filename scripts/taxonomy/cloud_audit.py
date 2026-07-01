@@ -149,10 +149,10 @@ def _anonymize_doc(doc: dict, names: list[str]) -> dict:
     raw_text = (doc.get("extracted_text") or "")[:_TEXT_CAP]
     return {
         "id": doc["id"],
-        "title": c.scrub(c.scrub_names(doc.get("title"), names)) or "",
-        "text": c.scrub(c.scrub_names(raw_text, names)) or "",
+        "title": c.scrub_names(c.scrub(doc.get("title")), names) or "",
+        "text": c.scrub_names(c.scrub(raw_text), names) or "",
         "sender_type": c.sender_type(doc.get("sender")),
-        "tags": c.scrub(c.scrub_names(doc.get("tags") or "", names)) or "",
+        "tags": c.scrub_names(c.scrub(doc.get("tags") or ""), names) or "",
         "qwen_slug": doc["cat_slug"],
         "qwen_name": doc["cat_name"],
         "qwen_confidence": doc.get("confidence"),
