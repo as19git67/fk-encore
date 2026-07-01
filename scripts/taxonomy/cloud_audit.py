@@ -201,14 +201,12 @@ def _classify_batch(
             if text_block is None:
                 raise ValueError("no text block in response")
             text = text_block.text.strip()
-            # Strip markdown fences and extract JSON object
+            # Strip markdown fences
             text = re.sub(r"^```(?:json)?\s*", "", text)
             text = re.sub(r"\s*```$", "", text)
-            # Find first { ... } if there's surrounding text
-            m = re.search(r"\{.*\}", text, re.DOTALL)
-            if m:
-                text = m.group(0)
-            parsed = json.loads(text)
+            # raw_decode stops after the first complete JSON object
+            idx = text.index("{")
+            parsed, _ = json.JSONDecoder().raw_decode(text, idx)
             results.append({
                 "doc_id": doc["id"],
                 "claude_slug": parsed.get("slug", "?"),
