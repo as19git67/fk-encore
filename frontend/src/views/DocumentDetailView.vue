@@ -4,7 +4,9 @@ import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
 import InputNumber from 'primevue/inputnumber'
+import DatePicker from 'primevue/datepicker'
 import InputText from 'primevue/inputtext'
+import { toLocalIsoDate, parseLocalDate } from '../utils/dateFormat'
 import Message from 'primevue/message'
 import Select from 'primevue/select'
 import MultiSelect from 'primevue/multiselect'
@@ -94,7 +96,7 @@ function toggleHelp(event: Event) {
 
 const form = ref({
   title: '' as string,
-  doc_date: '' as string,
+  doc_date: null as Date | null,
   sender: '' as string,
   document_number: '' as string,
   summary: '' as string,
@@ -194,7 +196,7 @@ function resetForm() {
   if (!doc.value) return
   form.value = {
     title: doc.value.title ?? '',
-    doc_date: doc.value.doc_date ?? '',
+    doc_date: doc.value.doc_date ? parseLocalDate(doc.value.doc_date) : null,
     sender: doc.value.sender ?? '',
     document_number: doc.value.document_number ?? '',
     summary: doc.value.summary ?? '',
@@ -270,7 +272,7 @@ async function save() {
     const tasks: Promise<any>[] = [
       updateDocument(doc.value.id, {
         title: form.value.title.trim() || null,
-        doc_date: form.value.doc_date.trim() || null,
+        doc_date: form.value.doc_date ? toLocalIsoDate(form.value.doc_date) : null,
         sender: form.value.sender.trim() || null,
         document_number: form.value.document_number.trim() || null,
         summary: form.value.summary.trim() || null,
@@ -722,9 +724,12 @@ onBeforeUnmount(() => {
           <div class="meta-form-row">
             <label>
               <span class="label">Datum</span>
-              <InputText
+              <DatePicker
                 v-model="form.doc_date"
-                placeholder="YYYY-MM-DD"
+                dateFormat="dd.mm.yy"
+                showIcon
+                fluid
+                showButtonBar
                 :disabled="!auth.hasPermission('documents.edit')"
               />
             </label>
