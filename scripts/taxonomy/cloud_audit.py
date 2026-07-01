@@ -35,7 +35,7 @@ import _common as c
 OUT = c.OUT_DIR
 SAMPLE_SIZE = int(os.environ.get("AUDIT_SAMPLE", "300"))
 BATCH_SIZE = 5
-CLAUDE_MODEL = os.environ.get("AUDIT_MODEL", "claude-sonnet-4-20250514")
+CLAUDE_MODEL = os.environ.get("AUDIT_MODEL", "claude-sonnet-5")
 
 # ── Taxonomie aus dem TS-Quelltext lesen ──────────────────────────────────────
 
