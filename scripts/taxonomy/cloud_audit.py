@@ -82,7 +82,7 @@ def _sample_documents(conn) -> list[dict]:
 
     # 1. All sonstiges (up to 100)
     cur.execute("""
-        SELECT d.id, d.title, d.summary, d.sender, d.extracted_text,
+        SELECT d.id, d.title, d.sender, d.extracted_text,
                c.slug AS cat_slug, c.name AS cat_name,
                d.classification_confidence AS confidence,
                d.tags_text AS tags
@@ -98,7 +98,7 @@ def _sample_documents(conn) -> list[dict]:
     # 2. Low confidence (< 0.85), excluding sonstiges already picked
     picked_ids = {d["id"] for d in sonstiges}
     cur.execute("""
-        SELECT d.id, d.title, d.summary, d.sender, d.extracted_text,
+        SELECT d.id, d.title, d.sender, d.extracted_text,
                c.slug AS cat_slug, c.name AS cat_name,
                d.classification_confidence AS confidence,
                d.tags_text AS tags
@@ -117,7 +117,7 @@ def _sample_documents(conn) -> list[dict]:
     remaining = SAMPLE_SIZE - len(sonstiges) - len(low_conf)
     if remaining > 0:
         cur.execute("""
-            SELECT d.id, d.title, d.summary, d.sender, d.extracted_text,
+            SELECT d.id, d.title, d.sender, d.extracted_text,
                    c.slug AS cat_slug, c.name AS cat_name,
                    d.classification_confidence AS confidence,
                    d.tags_text AS tags
@@ -142,12 +142,15 @@ def _sample_documents(conn) -> list[dict]:
 
 # ── Anonymisierung ────────────────────────────────────────────────────────────
 
+_TEXT_CAP = 6000  # same cap as llm-service/main.py
+
 def _anonymize_doc(doc: dict, names: list[str]) -> dict:
-    """Scrub PII from title, summary, sender; keep sender_type."""
+    """Scrub PII from title, extracted_text, sender; keep sender_type."""
+    raw_text = (doc.get("extracted_text") or "")[:_TEXT_CAP]
     return {
         "id": doc["id"],
         "title": c.scrub(c.scrub_names(doc.get("title"), names)) or "",
-        "summary": c.scrub(c.scrub_names(doc.get("summary"), names)) or "",
+        "text": c.scrub(c.scrub_names(raw_text, names)) or "",
         "sender_type": c.sender_type(doc.get("sender")),
         "tags": c.scrub(c.scrub_names(doc.get("tags") or "", names)) or "",
         "qwen_slug": doc["cat_slug"],
@@ -159,7 +162,7 @@ def _anonymize_doc(doc: dict, names: list[str]) -> dict:
 # ── Claude-Klassifikation ────────────────────────────────────────────────────
 
 _SYSTEM = """Du bist ein Experte für die Klassifikation privater Haushalts-Dokumente.
-Dir wird ein Dokument beschrieben (Titel, Zusammenfassung, Absender-Typ, Tags)
+Dir wird ein Dokument gezeigt (Titel, OCR-extrahierter Text, Absender-Typ, Tags)
 und eine Taxonomie mit Slugs. Ordne das Dokument dem am besten passenden Slug zu.
 
 Antworte ausschließlich mit gültigem JSON (ohne Markdown-Fences):
@@ -180,9 +183,9 @@ def _classify_batch(
             f"Taxonomie:\n{taxonomy}\n\n"
             f"Dokument (ID {doc['id']}):\n"
             f"- Titel: {doc['title']}\n"
-            f"- Zusammenfassung: {doc['summary']}\n"
             f"- Absender-Typ: {doc['sender_type']}\n"
             f"- Tags: {doc['tags']}\n"
+            f"- Text:\n{doc['text']}\n"
         )
         try:
             resp = client.messages.create(
@@ -215,7 +218,7 @@ def _classify_batch(
                 "qwen_name": doc["qwen_name"],
                 "qwen_confidence": doc["qwen_confidence"],
                 "title": doc["title"],
-                "summary": doc["summary"],
+                "text": doc["text"][:200],
                 "sender_type": doc["sender_type"],
             })
         except (json.JSONDecodeError, anthropic.APIError, KeyError) as e:
@@ -229,7 +232,7 @@ def _classify_batch(
                 "qwen_name": doc["qwen_name"],
                 "qwen_confidence": doc["qwen_confidence"],
                 "title": doc["title"],
-                "summary": doc["summary"],
+                "text": doc["text"][:200],
                 "sender_type": doc["sender_type"],
             })
     return results
@@ -359,9 +362,9 @@ def _write_dry_run(anon_docs: list[dict], taxonomy: str) -> None:
                 f"Taxonomie:\n{taxonomy}\n\n"
                 f"Dokument (ID {doc['id']}):\n"
                 f"- Titel: {doc['title']}\n"
-                f"- Zusammenfassung: {doc['summary']}\n"
                 f"- Absender-Typ: {doc['sender_type']}\n"
                 f"- Tags: {doc['tags']}\n"
+                f"- Text:\n{doc['text']}\n"
             )
             f.write(json.dumps({
                 "doc_id": doc["id"],
