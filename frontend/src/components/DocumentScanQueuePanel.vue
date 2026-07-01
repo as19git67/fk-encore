@@ -24,6 +24,7 @@ const serviceLabel: Record<string, string> = {
   text_extract: 'Text',
   classify: 'KI',
   embed: 'Embedding',
+  receipt_ocr: 'Beleg-OCR',
 }
 
 async function load() {

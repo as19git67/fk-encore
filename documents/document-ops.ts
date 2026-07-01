@@ -29,9 +29,10 @@ import {
   ReceiptOcrUnavailableError,
 } from "./receipt-ocr-client";
 import { extractPdfText, PdfPasswordRequiredError } from "./text-extract";
-import { buildThumbnail, removeThumbnail } from "./thumbnail";
+import { buildThumbnail, ensureThumbnail, removeThumbnail } from "./thumbnail";
 import { removeOcrPdf, writeOcrPdf } from "./ocr-pdf";
 import { jpegToReceiptPdf } from "./receipt-pdf";
+import { buildReceiptDocumentCompletion } from "./receipt-capture";
 import { deleteJobsForDocument } from "./scan-queue";
 import { checkReceiptEnrichment, createSuggestionsForDocument } from "../finance/document-match.service";
 import {
@@ -767,6 +768,11 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
     return;
   }
 
+  // Thumbnail generation is independent from OCR. Receipt captures do not
+  // enter text_extract (and therefore never invoke Tesseract), so warm the
+  // page preview here before contacting the potentially cold Paddle service.
+  await ensureThumbnail(documentId, row.disk_path).catch(() => null);
+
   // Health check — defer the job if the service is cold/restarting.
   const healthy = await isReceiptOcrHealthy().catch(() => false);
   if (!healthy) {
@@ -796,8 +802,8 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
   // Stage 1: core extraction (amount / date / store).
   const core = await extractReceipt(ocrBuffer, ocrFilename, ocrMimeType);
 
-  // If the service straightened/rotated the image, replace the stored PDF with
-  // the corrected version so the viewed document is upright and de-warped.
+  // Replace the stored PDF with the service's complete scan preparation:
+  // crop/perspective, orientation, fine deskew, denoise and contrast.
   // Best-effort: failures here must never block booking.
   if (core.corrected_image && row.mime_type === "application/pdf") {
     try {
@@ -828,8 +834,6 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
     .values({
       document_id: documentId,
       amount: core.amount != null ? String(core.amount) : null,
-      receipt_date: core.date,
-      store: core.store,
       items,
       ocr_confidence: core.ocr_confidence,
     })
@@ -837,8 +841,6 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
       target: documentReceiptExtraction.document_id,
       set: {
         amount: core.amount != null ? String(core.amount) : null,
-        receipt_date: core.date,
-        store: core.store,
         items,
         ocr_confidence: core.ocr_confidence,
       },
@@ -851,9 +853,13 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
     core.amount <= RECEIPT_AUTO_BOOK_MAX;
 
   if (!reliable) {
-    await db.update(documents)
-      .set({ receipt_ocr_state: "incomplete" })
-      .where(eq(documents.id, documentId));
+    await finalizeReceiptDocument(
+      documentId,
+      row.user_id,
+      core.raw_text,
+      { store: core.store, receiptDate: core.date },
+      "incomplete",
+    );
     console.log(
       `[documents] receipt OCR doc=${documentId}: amount=${core.amount} outside reliable range — marked incomplete`,
     );
@@ -892,6 +898,17 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
     currencyCode: core.currency ?? "EUR",
   });
 
+  // createReceiptAutoTransaction sets `booked` when it creates a row. A null
+  // result means an idempotent/deduplicated booking; keep the document
+  // reviewable instead of leaving receipt_ocr_state stuck on `pending`.
+  await finalizeReceiptDocument(
+    documentId,
+    row.user_id,
+    core.raw_text,
+    { store: core.store, receiptDate: core.date },
+    txId === null ? "incomplete" : undefined,
+  );
+
   if (txId !== null) {
     console.log(
       `[documents] receipt OCR doc=${documentId}: auto-booked tx=${txId} amount=${core.amount} on account=${row.receipt_account_id}`,
@@ -915,13 +932,45 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
 }
 
 /**
+ * Complete the document-facing side of receipt processing using PaddleOCR's
+ * text. This replaces the old text_extract/Tesseract job and only relocates
+ * after all upload-time metadata and OCR output have been persisted.
+ */
+async function finalizeReceiptDocument(
+  documentId: number,
+  ownerUserId: number,
+  rawText: string,
+  metadata: { store: string | null; receiptDate: string | null },
+  receiptState?: "incomplete",
+): Promise<void> {
+  const current = await getDocumentOrThrow(documentId);
+  await db.update(documents)
+    .set(buildReceiptDocumentCompletion(
+      rawText,
+      receiptState,
+      current.attributes_reviewed ? undefined : metadata,
+    ))
+    .where(eq(documents.id, documentId));
+  await publishStatusChanged(documentId, ownerUserId, "ready");
+
+  // status=ready + the server-assigned `belege` category now produce the
+  // final canonical path. No worker retains the upload path at this point.
+  try {
+    await relocateDocument(documentId);
+  } catch (err) {
+    console.warn(
+      `[documents] relocate after receipt OCR(${documentId}) failed: ${(err as Error).message}`,
+    );
+  }
+}
+
+/**
  * Replace a receipt document's stored PDF with the service-corrected image.
  *
- * The receipt-ocr service returns a cropped, perspective-de-warped and
- * upright-rotated JPEG (base64) when it changed the geometry. We wrap it back
- * into the same single-page PDF the upload path produces, overwrite the file in
- * place, and refresh the derived artifacts (searchable sidecar + thumbnail) so
- * the viewer shows the straightened document.
+ * The receipt-ocr service returns a cropped, perspective-corrected, upright,
+ * deskewed, denoised and contrast-enhanced JPEG (base64). We wrap it back into
+ * the same single-page PDF the upload path produces, overwrite the file in
+ * place, and refresh derived artifacts so the viewer shows the prepared scan.
  *
  * No-ops silently when the corrected image collides with another document's
  * content (the unique sha256 constraint) — the original file is kept.

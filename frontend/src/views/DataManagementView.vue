@@ -540,6 +540,7 @@ const docQueueServiceLabels: Record<string, string> = {
   text_extract: 'OCR / Text',
   classify: 'KI-Klassifikation',
   embed: 'Embedding',
+  receipt_ocr: 'Beleg-OCR (PaddleOCR)',
 }
 
 const docTotalPending = computed(() =>
