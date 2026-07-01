@@ -13,7 +13,14 @@ export interface ReceiptDocumentCompletion {
   extracted_text: string | null;
   status: "ready";
   last_error: null;
+  sender?: string;
+  doc_date?: string;
   receipt_ocr_state?: "incomplete";
+}
+
+export interface ReceiptDocumentMetadata {
+  store: string | null;
+  receiptDate: string | null;
 }
 
 /**
@@ -48,11 +55,16 @@ export function buildReceiptCapturePlan(
 export function buildReceiptDocumentCompletion(
   rawText: string,
   receiptState?: "incomplete",
+  metadata?: ReceiptDocumentMetadata,
 ): ReceiptDocumentCompletion {
+  const sender = metadata?.store?.trim() || null;
+  const docDate = metadata?.receiptDate?.trim() || null;
   return {
     extracted_text: rawText.trim() || null,
     status: "ready",
     last_error: null,
+    ...(sender ? { sender } : {}),
+    ...(docDate ? { doc_date: docDate } : {}),
     ...(receiptState ? { receipt_ocr_state: receiptState } : {}),
   };
 }

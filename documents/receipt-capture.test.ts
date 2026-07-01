@@ -35,16 +35,34 @@ describe("receipt capture queue plan", () => {
   });
 
   it("uses PaddleOCR text as the completed document text", () => {
-    expect(buildReceiptDocumentCompletion("  EDEKA\nSumme 12,34 EUR  ")).toEqual({
+    expect(buildReceiptDocumentCompletion(
+      "  EDEKA\nSumme 12,34 EUR  ",
+      undefined,
+      { store: " EDEKA München ", receiptDate: "2026-06-30" },
+    )).toEqual({
       extracted_text: "EDEKA\nSumme 12,34 EUR",
       status: "ready",
       last_error: null,
+      sender: "EDEKA München",
+      doc_date: "2026-06-30",
     });
     expect(buildReceiptDocumentCompletion("", "incomplete")).toEqual({
       extracted_text: null,
       status: "ready",
       last_error: null,
       receipt_ocr_state: "incomplete",
+    });
+  });
+
+  it("does not create empty canonical document metadata", () => {
+    expect(buildReceiptDocumentCompletion(
+      "Text",
+      undefined,
+      { store: "  ", receiptDate: null },
+    )).toEqual({
+      extracted_text: "Text",
+      status: "ready",
+      last_error: null,
     });
   });
 });

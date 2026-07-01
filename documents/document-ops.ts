@@ -834,8 +834,6 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
     .values({
       document_id: documentId,
       amount: core.amount != null ? String(core.amount) : null,
-      receipt_date: core.date,
-      store: core.store,
       items,
       ocr_confidence: core.ocr_confidence,
     })
@@ -843,8 +841,6 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
       target: documentReceiptExtraction.document_id,
       set: {
         amount: core.amount != null ? String(core.amount) : null,
-        receipt_date: core.date,
-        store: core.store,
         items,
         ocr_confidence: core.ocr_confidence,
       },
@@ -857,7 +853,13 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
     core.amount <= RECEIPT_AUTO_BOOK_MAX;
 
   if (!reliable) {
-    await finalizeReceiptDocument(documentId, row.user_id, core.raw_text, "incomplete");
+    await finalizeReceiptDocument(
+      documentId,
+      row.user_id,
+      core.raw_text,
+      { store: core.store, receiptDate: core.date },
+      "incomplete",
+    );
     console.log(
       `[documents] receipt OCR doc=${documentId}: amount=${core.amount} outside reliable range — marked incomplete`,
     );
@@ -903,6 +905,7 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
     documentId,
     row.user_id,
     core.raw_text,
+    { store: core.store, receiptDate: core.date },
     txId === null ? "incomplete" : undefined,
   );
 
@@ -937,10 +940,16 @@ async function finalizeReceiptDocument(
   documentId: number,
   ownerUserId: number,
   rawText: string,
+  metadata: { store: string | null; receiptDate: string | null },
   receiptState?: "incomplete",
 ): Promise<void> {
+  const current = await getDocumentOrThrow(documentId);
   await db.update(documents)
-    .set(buildReceiptDocumentCompletion(rawText, receiptState))
+    .set(buildReceiptDocumentCompletion(
+      rawText,
+      receiptState,
+      current.attributes_reviewed ? undefined : metadata,
+    ))
     .where(eq(documents.id, documentId));
   await publishStatusChanged(documentId, ownerUserId, "ready");
 
