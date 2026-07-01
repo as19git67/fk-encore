@@ -97,8 +97,10 @@ describe("matchSenderRule", () => {
   });
 
   it("keeps the bank-statement and church-employer rules from over-grabbing", () => {
-    // MLP life insurance is a different sender token and lacks statement keywords.
-    expect(matchSenderRule({ sender: "MLP Lebensversicherung AG", title: "Beitragsmitteilung" })).toBeNull();
+    // MLP Lebensversicherung routes to life insurance (dedicated sender rule).
+    expect(matchSenderRule({ sender: "MLP Lebensversicherung AG", title: "Beitragsmitteilung" })).toBe(
+      "altersvorsorge-lebensversicherung",
+    );
     // Church mail without an SV/payslip keyword is left to the LLM.
     expect(matchSenderRule({ sender: "Erzb. Ordinariat München", title: "Rundschreiben" })).toBeNull();
   });
