@@ -186,11 +186,17 @@ def _classify_batch(
         try:
             resp = client.messages.create(
                 model=CLAUDE_MODEL,
-                max_tokens=200,
+                max_tokens=16_000,
                 system=_SYSTEM,
                 messages=[{"role": "user", "content": user_msg}],
             )
-            text = resp.content[0].text.strip()
+            text_block = next(
+                (b for b in resp.content if getattr(b, "type", None) == "text"),
+                None,
+            )
+            if text_block is None:
+                raise ValueError("no text block in response")
+            text = text_block.text.strip()
             # Parse JSON from response
             parsed = json.loads(text)
             results.append({
