@@ -35,8 +35,7 @@ import _common as c
 OUT = c.OUT_DIR
 SAMPLE_SIZE = int(os.environ.get("AUDIT_SAMPLE", "300"))
 BATCH_SIZE = 5
-CLAUDE_MODEL = os.environ.get("AUDIT_MODEL", "claude-opus-4-8")
-DRY_RUN = os.environ.get("AUDIT_DRY_RUN", "").lower() in ("1", "true", "yes")
+CLAUDE_MODEL = os.environ.get("AUDIT_MODEL", "claude-sonnet-4-20250514")
 
 # ── Taxonomie aus dem TS-Quelltext lesen ──────────────────────────────────────
 
@@ -82,10 +81,10 @@ def _sample_documents(conn) -> list[dict]:
 
     # 1. All sonstiges (up to 100)
     cur.execute("""
-        SELECT d.id, d.title, d.sender, d.extracted_text,
+        SELECT d.id, d.title, d.summary, d.sender, d.extracted_text,
                c.slug AS cat_slug, c.name AS cat_name,
                d.classification_confidence AS confidence,
-               d.tags_text AS tags
+               d.tags
         FROM documents d
         JOIN document_categories c ON c.id = d.category_id
         WHERE c.slug = 'sonstiges'
@@ -98,10 +97,10 @@ def _sample_documents(conn) -> list[dict]:
     # 2. Low confidence (< 0.85), excluding sonstiges already picked
     picked_ids = {d["id"] for d in sonstiges}
     cur.execute("""
-        SELECT d.id, d.title, d.sender, d.extracted_text,
+        SELECT d.id, d.title, d.summary, d.sender, d.extracted_text,
                c.slug AS cat_slug, c.name AS cat_name,
                d.classification_confidence AS confidence,
-               d.tags_text AS tags
+               d.tags
         FROM documents d
         JOIN document_categories c ON c.id = d.category_id
         WHERE d.classification_confidence < 0.85
@@ -117,10 +116,10 @@ def _sample_documents(conn) -> list[dict]:
     remaining = SAMPLE_SIZE - len(sonstiges) - len(low_conf)
     if remaining > 0:
         cur.execute("""
-            SELECT d.id, d.title, d.sender, d.extracted_text,
+            SELECT d.id, d.title, d.summary, d.sender, d.extracted_text,
                    c.slug AS cat_slug, c.name AS cat_name,
                    d.classification_confidence AS confidence,
-                   d.tags_text AS tags
+                   d.tags
             FROM documents d
             JOIN document_categories c ON c.id = d.category_id
             WHERE c.slug <> 'sonstiges'
@@ -142,17 +141,17 @@ def _sample_documents(conn) -> list[dict]:
 
 # ── Anonymisierung ────────────────────────────────────────────────────────────
 
-_TEXT_CAP = 6000  # same cap as llm-service/main.py
-
 def _anonymize_doc(doc: dict, names: list[str]) -> dict:
-    """Scrub PII from title, extracted_text, sender; keep sender_type."""
-    raw_text = (doc.get("extracted_text") or "")[:_TEXT_CAP]
+    """Scrub PII from title, summary, sender; keep sender_type."""
     return {
         "id": doc["id"],
-        "title": c.scrub_names(c.scrub(doc.get("title")), names) or "",
-        "text": c.scrub_names(c.scrub(raw_text), names) or "",
+        "title": c.scrub(c.scrub_names(doc.get("title"), names)) or "",
+        "summary": c.scrub(c.scrub_names(doc.get("summary"), names)) or "",
         "sender_type": c.sender_type(doc.get("sender")),
-        "tags": c.scrub_names(c.scrub(doc.get("tags") or ""), names) or "",
+        "tags": c.scrub(c.scrub_names(
+            doc["tags"] if isinstance(doc.get("tags"), str)
+            else ", ".join(doc["tags"]) if isinstance(doc.get("tags"), list)
+            else "", names)) or "",
         "qwen_slug": doc["cat_slug"],
         "qwen_name": doc["cat_name"],
         "qwen_confidence": doc.get("confidence"),
@@ -162,7 +161,7 @@ def _anonymize_doc(doc: dict, names: list[str]) -> dict:
 # ── Claude-Klassifikation ────────────────────────────────────────────────────
 
 _SYSTEM = """Du bist ein Experte für die Klassifikation privater Haushalts-Dokumente.
-Dir wird ein Dokument gezeigt (Titel, OCR-extrahierter Text, Absender-Typ, Tags)
+Dir wird ein Dokument beschrieben (Titel, Zusammenfassung, Absender-Typ, Tags)
 und eine Taxonomie mit Slugs. Ordne das Dokument dem am besten passenden Slug zu.
 
 Antworte ausschließlich mit gültigem JSON (ohne Markdown-Fences):
@@ -183,30 +182,20 @@ def _classify_batch(
             f"Taxonomie:\n{taxonomy}\n\n"
             f"Dokument (ID {doc['id']}):\n"
             f"- Titel: {doc['title']}\n"
+            f"- Zusammenfassung: {doc['summary']}\n"
             f"- Absender-Typ: {doc['sender_type']}\n"
             f"- Tags: {doc['tags']}\n"
-            f"- Text:\n{doc['text']}\n"
         )
         try:
             resp = client.messages.create(
                 model=CLAUDE_MODEL,
-                max_tokens=16_000,
+                max_tokens=200,
                 system=_SYSTEM,
                 messages=[{"role": "user", "content": user_msg}],
             )
-            text_block = next(
-                (b for b in resp.content if getattr(b, "type", None) == "text"),
-                None,
-            )
-            if text_block is None:
-                raise ValueError("no text block in response")
-            text = text_block.text.strip()
-            # Strip markdown fences
-            text = re.sub(r"^```(?:json)?\s*", "", text)
-            text = re.sub(r"\s*```$", "", text)
-            # raw_decode stops after the first complete JSON object
-            idx = text.index("{")
-            parsed, _ = json.JSONDecoder().raw_decode(text, idx)
+            text = resp.content[0].text.strip()
+            # Parse JSON from response
+            parsed = json.loads(text)
             results.append({
                 "doc_id": doc["id"],
                 "claude_slug": parsed.get("slug", "?"),
@@ -216,7 +205,7 @@ def _classify_batch(
                 "qwen_name": doc["qwen_name"],
                 "qwen_confidence": doc["qwen_confidence"],
                 "title": doc["title"],
-                "text": doc["text"][:200],
+                "summary": doc["summary"],
                 "sender_type": doc["sender_type"],
             })
         except (json.JSONDecodeError, anthropic.APIError, KeyError) as e:
@@ -230,7 +219,7 @@ def _classify_batch(
                 "qwen_name": doc["qwen_name"],
                 "qwen_confidence": doc["qwen_confidence"],
                 "title": doc["title"],
-                "text": doc["text"][:200],
+                "summary": doc["summary"],
                 "sender_type": doc["sender_type"],
             })
     return results
@@ -350,37 +339,13 @@ def _top_n(items: list[str], n: int) -> list[tuple[str, int]]:
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-def _write_dry_run(anon_docs: list[dict], taxonomy: str) -> None:
-    """Write the exact prompts that would be sent to Claude, for review."""
-    OUT.mkdir(parents=True, exist_ok=True)
-    out_path = OUT / "cloud_audit_dry_run.jsonl"
-    with open(out_path, "w", encoding="utf8") as f:
-        for doc in anon_docs:
-            user_msg = (
-                f"Taxonomie:\n{taxonomy}\n\n"
-                f"Dokument (ID {doc['id']}):\n"
-                f"- Titel: {doc['title']}\n"
-                f"- Absender-Typ: {doc['sender_type']}\n"
-                f"- Tags: {doc['tags']}\n"
-                f"- Text:\n{doc['text']}\n"
-            )
-            f.write(json.dumps({
-                "doc_id": doc["id"],
-                "system": _SYSTEM,
-                "user_message": user_msg,
-                "qwen_slug": doc["qwen_slug"],
-                "qwen_name": doc["qwen_name"],
-            }, ensure_ascii=False) + "\n")
-    print(f"\n[cloud_audit] DRY RUN — {len(anon_docs)} Prompts geschrieben:")
-    print(f"  {out_path.relative_to(c.REPO_ROOT)}")
-    print(f"  Bitte prüfen, ob Anonymisierung ausreichend ist.")
-    print(f"  Danach ohne AUDIT_DRY_RUN erneut starten.")
-
-
 def main() -> None:
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        print("[cloud_audit] FEHLER: ANTHROPIC_API_KEY nicht gesetzt.", file=sys.stderr)
+        sys.exit(1)
+
     print(f"[cloud_audit] Modell: {CLAUDE_MODEL}, Stichprobe: {SAMPLE_SIZE}")
-    if DRY_RUN:
-        print(f"[cloud_audit] *** DRY RUN — nichts wird an die API gesendet ***")
     print(f"[cloud_audit] DB: {c.safe_dsn()}")
 
     conn = c.connect()
@@ -395,15 +360,6 @@ def main() -> None:
 
     # Anonymize
     anon_docs = [_anonymize_doc(d, names) for d in docs]
-
-    if DRY_RUN:
-        _write_dry_run(anon_docs, taxonomy)
-        return
-
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        print("[cloud_audit] FEHLER: ANTHROPIC_API_KEY nicht gesetzt.", file=sys.stderr)
-        sys.exit(1)
 
     # Classify via Claude
     client = anthropic.Anthropic(api_key=api_key)
