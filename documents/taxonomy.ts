@@ -53,7 +53,7 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "finanzen-steuern",
         name: "Steuern",
-        hint: "Allgemeine Steuerunterlagen: Steuererklärung, Korrespondenz mit dem Finanzamt/Steuerberater. NICHT für Wertpapier-/Dividenden-Steuermitteilungen (siehe finanzen-wertpapiere), Steuerbescheide (siehe behoerden-steuerbescheid) oder Kirchensteuer (finanzen-kirchensteuer).",
+        hint: "Allgemeine Steuerunterlagen: Einkommensteuererklärung (Mantelbogen, Anlagen), Fragebogen zur steuerlichen Erfassung, W-8BEN, Korrespondenz mit dem Finanzamt/Steuerberater. NICHT für Wertpapier-/Dividenden-Steuermitteilungen (→ finanzen-wertpapiere), Steuerbescheide (→ behoerden-steuerbescheid), Kirchensteuer (→ finanzen-kirchensteuer) oder Spendenquittungen (→ finanzen-spenden).",
       },
       {
         slug: "finanzen-kirchensteuer",
@@ -63,7 +63,7 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "finanzen-spenden",
         name: "Spenden & Zuwendungen",
-        hint: "Spendenquittungen, Zuwendungsbestätigungen und Sammelbestätigungen gemeinnütziger Organisationen (z. B. UNICEF, Deutsches Rotes Kreuz, Caritas). Steuerlich Sonderausgaben. NICHT: Meldungen oder Entgeltnachweise zur Sozialversicherung (→ finanzen-sozialversicherung).",
+        hint: "Spendenquittungen, Zuwendungsbestätigungen und Sammelbestätigungen gemeinnütziger Organisationen (z. B. UNICEF, Deutsches Rotes Kreuz, Feuerwehr, Kirchenstiftung, Caritas). Steuerlich Sonderausgaben (§10b EStG). NICHT: Meldungen oder Entgeltnachweise zur Sozialversicherung (→ finanzen-sozialversicherung).",
       },
     ],
   },
@@ -89,13 +89,33 @@ export const categoryTaxonomy: CategorySeed[] = [
         name: "Haus & Grund",
         children: [
           { slug: "wohnen-haus-eigentuemerversammlung", name: "Eigentümerversammlung" },
-          { slug: "wohnen-haus-hausgeld", name: "Wirtschaftsplan / Hausgeld" },
-          { slug: "wohnen-haus-weg-jahresabrechnung", name: "WEG-Jahresabrechnung" },
+          {
+            slug: "wohnen-haus-hausgeld",
+            name: "Wirtschaftsplan / Hausgeld",
+            hint: "Wirtschaftsplan oder Hausgeldabrechnung der selbst bewohnten Eigentumswohnung. NICHT Kapitalanlage-Immobilie (→ kapitalanlage-immobilie-hausgeld).",
+          },
+          {
+            slug: "wohnen-haus-weg-jahresabrechnung",
+            name: "WEG-Jahresabrechnung",
+            hint: "WEG-Jahresabrechnung der selbst bewohnten Eigentumswohnung. NICHT Kapitalanlage-Immobilie (→ kapitalanlage-immobilie-weg-jahresabrechnung).",
+          },
           { slug: "wohnen-haus-grundsteuer", name: "Grundsteuer" },
-          { slug: "wohnen-haus-gebaeudeversicherung", name: "Gebäudeversicherung" },
-          { slug: "wohnen-haus-instandhaltung", name: "Instandhaltung / Handwerker" },
+          {
+            slug: "wohnen-haus-gebaeudeversicherung",
+            name: "Gebäudeversicherung",
+            hint: "Wohngebäudeversicherung des selbst bewohnten Hauses: Beitragsrechnungen, Policen, Anpassungen (z. B. DOMCURA, Allianz, Janitos Privatschutz mit Sparte Wohngebäude).",
+          },
+          {
+            slug: "wohnen-haus-instandhaltung",
+            name: "Instandhaltung / Handwerker",
+            hint: "Handwerkerrechnungen, Reparaturen, Renovierung am selbst bewohnten Haus: Maler, Sanitär, Dachdecker, Heizungsbauer, Fassadenanstrich, Gerüstbau. Steuerlich §35a (haushaltsnahe).",
+          },
           { slug: "wohnen-haus-finanzierung", name: "Finanzierung / Darlehen" },
-          { slug: "wohnen-haus-kaufvertrag", name: "Kaufvertrag / Grundbuch" },
+          {
+            slug: "wohnen-haus-kaufvertrag",
+            name: "Kaufvertrag / Grundbuch",
+            hint: "Notarieller Kaufvertrag, Grundbuchauszug, Übergabeprotokoll der selbst bewohnten Immobilie.",
+          },
           {
             slug: "wohnen-haus-photovoltaik",
             name: "Photovoltaik",
@@ -110,12 +130,24 @@ export const categoryTaxonomy: CategorySeed[] = [
     name: "Kapitalanlage Immobilie",
     icon: "pi-key",
     children: [
-      { slug: "kapitalanlage-immobilie-mietvertrag", name: "Mietvertrag" },
-      { slug: "kapitalanlage-immobilie-mieteingaenge", name: "Mieteingänge" },
+      {
+        slug: "kapitalanlage-immobilie-mietvertrag",
+        name: "Mietvertrag",
+        hint: "Mietvertrag, Vollmacht zur Vermietung, Verwaltervertrag, Vermietungsvereinbarung einer Kapitalanlage-Immobilie (vermietete Eigentumswohnung / Sondereigentum).",
+      },
+      {
+        slug: "kapitalanlage-immobilie-mieteingaenge",
+        name: "Mieteingänge",
+        hint: "Gesamtübersicht Sondereigentum (SEV), Mieteingangsübersichten, Hausgeld-Überführung der vermieteten Kapitalanlage-Immobilie.",
+      },
       { slug: "kapitalanlage-immobilie-nebenkostenabrechnung", name: "Nebenkostenabrechnung" },
       { slug: "kapitalanlage-immobilie-eigentuemerversammlung", name: "Eigentümerversammlung" },
       { slug: "kapitalanlage-immobilie-hausgeld", name: "Wirtschaftsplan / Hausgeld" },
-      { slug: "kapitalanlage-immobilie-weg-jahresabrechnung", name: "WEG-Jahresabrechnung" },
+      {
+        slug: "kapitalanlage-immobilie-weg-jahresabrechnung",
+        name: "WEG-Jahresabrechnung",
+        hint: "WEG-Jahresabrechnung einer vermieteten Kapitalanlage-Immobilie. Signale: 'Pflegezimmer', 'Sondereigentum', 'SEV', Einheit im 2./3. OG. Steuerlich Anlage V / Werbungskosten V.",
+      },
       { slug: "kapitalanlage-immobilie-grundsteuer", name: "Grundsteuer" },
       { slug: "kapitalanlage-immobilie-gebaeudeversicherung", name: "Gebäudeversicherung" },
       { slug: "kapitalanlage-immobilie-instandhaltung", name: "Instandhaltung / Handwerker" },
@@ -132,10 +164,18 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "altersvorsorge-lebensversicherung",
         name: "Kapital-Lebensversicherung",
-        hint: "Kapital-Lebensversicherung: Kostenbescheinigungen, Statusreports, Leistungsübersichten, Beitrags-/Wertmitteilungen (z. B. Heidelberger Leben, AXA Lebensversicherung).",
+        hint: "NUR klassische Kapital-Lebensversicherung mit Ablaufleistung/Deckungskapital/Rückkaufswert: Kündigung, Ablauf, Standmitteilung (z. B. HDI-Gerling, CosmosDirekt, AXA Lebensversicherung). NICHT fondsgebundene Rentenversicherung, NICHT Riester/Rürup (→ altersvorsorge-rentenversicherung). Unterscheidung: 'Rentenversicherung' oder 'Zulagenbescheinigung nach §92 EStG' im Text → rentenversicherung; 'Kapital-Lebensversicherung', 'Deckungskapital', 'Rückkaufswert' → hierher.",
       },
-      { slug: "altersvorsorge-rentenversicherung", name: "Private Rentenversicherung (inkl. Riester/Rürup)" },
-      { slug: "altersvorsorge-betrieblich", name: "Betriebliche Altersvorsorge (bAV)" },
+      {
+        slug: "altersvorsorge-rentenversicherung",
+        name: "Private Rentenversicherung (inkl. Riester/Rürup)",
+        hint: "Fondsgebundene Rentenversicherung, Riester-Rentenversicherung (§10a EStG, Zulagenbescheinigung nach §92, Grundzulage, Kinderzulage, ZfA), Rürup-/Basisrentenversicherung, Förder Rente invest. Statusreports, Erhöhungsnachträge, Beitragsbescheinigungen (z. B. Heidelberger Leben / MLP balanced invest, Zurich DWS Premium, Allianz KinderPolice). Auch wenn der Absender 'Lebensversicherung AG' heißt — entscheidend ist 'Rentenversicherung' oder 'Riester' im Vertragsinhalt. NICHT Kapital-Lebensversicherung mit Ablaufleistung (→ altersvorsorge-lebensversicherung).",
+      },
+      {
+        slug: "altersvorsorge-betrieblich",
+        name: "Betriebliche Altersvorsorge (bAV)",
+        hint: "Leistungsmitteilung einer Unterstützungskasse, Pensionskasse, Pensionsfonds oder Direktversicherung (z. B. Contoso Unterstützungskasse e.V.). Arbeitgeberfinanzierte Altersvorsorge.",
+      },
       {
         slug: "altersvorsorge-gesetzlich",
         name: "Gesetzliche Rente (DRV)",
@@ -153,18 +193,26 @@ export const categoryTaxonomy: CategorySeed[] = [
         name: "Arztrechnungen",
         hint: "Privatärztliche/zahnärztliche Rechnungen (GOÄ/GOZ), Liquidationen niedergelassener Ärzte/Zahnärzte, Heil- und Kostenpläne. Steuerlich außergewöhnliche Belastungen (Krankheitskosten).",
       },
-      { slug: "gesundheit-rezepte", name: "Rezepte" },
+      {
+        slug: "gesundheit-rezepte",
+        name: "Rezepte",
+        hint: "Ärztliche Rezepte (Rp.), Apothekenrechnungen für verschreibungspflichtige Medikamente, Impfbescheinigungen, internationaler Impfausweis, Impfbuch, STIKO-Empfehlungen, Corona-Impfzertifikate (Robert Koch-Institut).",
+      },
       {
         slug: "gesundheit-kasse",
         name: "Krankenkasse",
-        hint: "Gesetzliche Krankenkasse (z. B. AOK, Techniker, Barmer): Mitgliedsbescheinigungen, Kostenübernahmen, Bescheide. NICHT private Krankenversicherung (versicherungen-kranken).",
+        hint: "Gesetzliche Krankenkasse (z. B. AOK, Techniker, Barmer): Mitgliedsbescheinigungen, Kostenübernahmen, Bescheide, Familienversicherung, Krankenpflegeleistungen. Auch Arbeitsunfähigkeitsbescheinigungen. NICHT private Krankenversicherung (→ versicherungen-kranken).",
       },
       {
         slug: "gesundheit-pflege",
         name: "Pflegeleistungen (Sozialstation)",
         hint: "Rechnungen/Leistungsnachweise ambulanter Pflege/Sozialstationen (z. B. Caritas-Sozialstation), häusliche Krankenpflege. NICHT: Meldung/Entgeltnachweis zur Sozialversicherung vom Arbeitgeber (→ finanzen-sozialversicherung) — „Sozialstation\" ≠ „Sozialversicherung\". Steuerlich haushaltsnahe Aufwendungen / außergewöhnliche Belastungen.",
       },
-      { slug: "gesundheit-pflegekasse", name: "Pflegekasse" },
+      {
+        slug: "gesundheit-pflegekasse",
+        name: "Pflegekasse",
+        hint: "Pflegekasse (bei AOK, Techniker etc.): Pflegegrad-Bescheide, Fragebogen zu Pflegepersonen (§44 SGB XI), Leistungsbescheide zur Pflegeversicherung.",
+      },
     ],
   },
   {
@@ -172,7 +220,16 @@ export const categoryTaxonomy: CategorySeed[] = [
     name: "Fahrzeug",
     icon: "pi-car",
     children: [
-      { slug: "fahrzeug-papiere", name: "Kfz-Papiere" },
+      {
+        slug: "fahrzeug-papiere",
+        name: "Kfz-Papiere",
+        hint: "Fahrzeugschein, Fahrzeugbrief, Zulassungsbescheinigung, Führerschein, Schlüsselzahlen, Umweltplakette (auch französische Crit'Air), Fahrzeugliste, ADAC-Dokumente. NICHT Kfz-Versicherung (→ fahrzeug-versicherung).",
+      },
+      {
+        slug: "fahrzeug-versicherung",
+        name: "Kfz-Versicherung",
+        hint: "Kfz-Haftpflicht-, Teilkasko-, Vollkaskoversicherung: Beitragsrechnungen, Versicherungsscheine, Schadenmeldungen, Deckungskarten (z. B. HDI, HUK-COBURG, Allianz). Auch THG-Bonus/Prämie. NICHT Sachversicherung (→ versicherungen-sach).",
+      },
       { slug: "fahrzeug-tuev", name: "TÜV / Hauptuntersuchung" },
       { slug: "fahrzeug-werkstatt", name: "Werkstatt" },
     ],
@@ -187,8 +244,16 @@ export const categoryTaxonomy: CategorySeed[] = [
         name: "Telekommunikation",
         hint: "Telefon, Internet, Mobilfunk, Kabel (z. B. Telekom, Vodafone, LEW TelNet).",
       },
-      { slug: "vertraege-strom", name: "Strom" },
-      { slug: "vertraege-gas", name: "Gas" },
+      {
+        slug: "vertraege-strom",
+        name: "Strom",
+        hint: "Stromliefervertrag, Stromrechnung/Jahresabrechnung für Eigenverbrauch (z. B. Lechwerke/LEW, Stadtwerke, E.ON). NICHT Einspeisevergütung/PV-Abrechnung (→ wohnen-haus-photovoltaik).",
+      },
+      {
+        slug: "vertraege-gas",
+        name: "Gas",
+        hint: "Gasliefervertrag, Gasrechnung/Jahresabrechnung (z. B. Stadtwerke, E.ON).",
+      },
       {
         slug: "vertraege-abos",
         name: "Abonnements",
@@ -205,12 +270,12 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "versicherungen-kranken",
         name: "Private Kranken-/Zusatzversicherung",
-        hint: "Private Kranken-, Pflege- und Krankenzusatzversicherung: Beitragsrechnungen, Beitragsanpassungen, Beitragsbescheinigungen, Leistungsabrechnungen (z. B. HALLESCHE, DKV). Steuerlich Vorsorgeaufwand. NICHT gesetzliche Krankenkasse (gesundheit-kasse).",
+        hint: "Private Kranken-, Pflege- und Krankenzusatzversicherung: Beitragsrechnungen, Beitragsanpassungen, Beitragsbescheinigungen, Leistungsabrechnungen (z. B. HALLESCHE, DKV, R+V Krankenversicherung). Steuerlich Vorsorgeaufwand. NICHT: gesetzliche Krankenkasse (→ gesundheit-kasse), NICHT Lebensversicherung (→ altersvorsorge-lebensversicherung), NICHT Rentenversicherung/Riester (→ altersvorsorge-rentenversicherung), NICHT Kfz-Versicherung (→ fahrzeug-versicherung), NICHT Wohngebäudeversicherung (→ wohnen-haus-gebaeudeversicherung), NICHT Freistellungsauftrag (→ finanzen-wertpapiere).",
       },
       {
         slug: "versicherungen-sach",
         name: "Sach- & Haftpflichtversicherung",
-        hint: "Haftpflicht-, Hausrat-, Rechtsschutz-, Unfallversicherung: Beiträge, Policen, Schadenfälle (z. B. Privatschutz; Makler wie Marsh, HVS). NICHT Wohngebäude (wohnen-versicherung) oder Kfz (fahrzeug).",
+        hint: "Privathaftpflicht-, Hausrat-, Rechtsschutz-, Unfallversicherung: Beiträge, Policen, Schadenfälle (z. B. Janitos Privatschutz Haftpflicht; Makler wie Marsh, HVS). NICHT: Kfz-Versicherung (→ fahrzeug-versicherung), NICHT Wohngebäudeversicherung (→ wohnen-haus-gebaeudeversicherung oder wohnen-versicherung), NICHT Führerschein/Fahrzeugpapiere (→ fahrzeug-papiere).",
       },
     ],
   },
@@ -219,7 +284,11 @@ export const categoryTaxonomy: CategorySeed[] = [
     name: "Beruf",
     icon: "pi-briefcase",
     children: [
-      { slug: "beruf-arbeitsvertrag", name: "Arbeitsvertrag" },
+      {
+        slug: "beruf-arbeitsvertrag",
+        name: "Arbeitsvertrag",
+        hint: "Arbeitsvertrag, Berufsausbildungsvertrag, Stellenbeschreibung, Änderungsvertrag, Kündigung. Auch Zeiterfassung, Urlaubsanträge, Reisekostenerstattung (arbeitsrechtliche Dokumente).",
+      },
       { slug: "beruf-zeugnisse", name: "Arbeitszeugnisse" },
     ],
   },
@@ -228,12 +297,16 @@ export const categoryTaxonomy: CategorySeed[] = [
     name: "Familie",
     icon: "pi-users",
     children: [
-      { slug: "familie-urkunden", name: "Urkunden" },
+      {
+        slug: "familie-urkunden",
+        name: "Urkunden",
+        hint: "Geburtsurkunde, Heiratsurkunde, kirchliche Trauurkunde, Sterbeurkunde, Ehrenurkunden (z. B. Feuerwehr-Ehrenzeichen), Taufurkunde. Auch Firmung (kirchliches Sakrament).",
+      },
       { slug: "familie-ausweise", name: "Ausweise" },
       {
         slug: "familie-schule",
         name: "Schule",
-        hint: "Schul-Korrespondenz: Elternbriefe, Anmeldungen, Klassenfahrten (z. B. Gymnasium).",
+        hint: "Schulische Dokumente aller Art: Schulaufgaben, Klassenarbeiten, Probearbeiten, Leseproben, Arbeitsblätter (Deutsch, Englisch, Französisch, Mathematik), Lernpläne, Testvorbereitungen, Notenbescheide, Bewertungen, Schulferienkalender, Elternbriefe, Anmeldungen, Klassenfahrten, Einwilligungserklärungen. Auch kirchliche Jugendarbeit: Firmvorbereitung, Firm-Orientierungs-Wochenende, Terminpläne für Firmlinge (z. B. Gymnasium, Pfarrei). NICHT Bildungszertifikate (→ bildung-zertifikate).",
       },
     ],
   },
@@ -242,7 +315,11 @@ export const categoryTaxonomy: CategorySeed[] = [
     name: "Behörden",
     icon: "pi-building",
     children: [
-      { slug: "behoerden-bescheide", name: "Bescheide" },
+      {
+        slug: "behoerden-bescheide",
+        name: "Bescheide",
+        hint: "Behördliche Bescheide und Schreiben: Steuerliche Identifikationsnummer (Bundeszentralamt für Steuern), Ehrungen/Gutscheine (Landratsamt), Baugenehmigungen, Meldebescheinigungen. NICHT Steuerbescheide (→ behoerden-steuerbescheid), NICHT kommunale Gebühren (→ wohnen-kommunale-abgaben).",
+      },
       {
         slug: "behoerden-steuerbescheid",
         name: "Steuerbescheide",
@@ -267,8 +344,16 @@ export const categoryTaxonomy: CategorySeed[] = [
     name: "Bildung",
     icon: "pi-graduation-cap",
     children: [
-      { slug: "bildung-zeugnisse", name: "Zeugnisse" },
-      { slug: "bildung-zertifikate", name: "Zertifikate" },
+      {
+        slug: "bildung-zeugnisse",
+        name: "Zeugnisse",
+        hint: "Schul-/Hochschulzeugnisse, Diplomurkunden, Abiturzeugnis, Bachelor-/Masterzeugnis.",
+      },
+      {
+        slug: "bildung-zertifikate",
+        name: "Zertifikate",
+        hint: "Teilnahmebescheinigungen, Fortbildungszertifikate, Sprachzertifikate, Erste-Hilfe-Ausbildung, berufliche Weiterbildungsnachweise. NICHT Schulzeugnisse (→ bildung-zeugnisse).",
+      },
     ],
   },
   {
@@ -281,6 +366,7 @@ export const categoryTaxonomy: CategorySeed[] = [
     slug: "sonstiges",
     name: "Sonstiges",
     icon: "pi-file",
+    hint: "LETZTE WAHL — nur verwenden, wenn das Dokument in KEINE andere Kategorie passt. Prüfe zuerst: Schuldokumente → familie-schule, Rechnungen → finanzen-rechnungen, Steuererklärungen → finanzen-steuern, Impfdokumente → gesundheit-rezepte, Urkunden → familie-urkunden, Behördenschreiben → behoerden-bescheide, WEG-Abrechnungen → kapitalanlage-immobilie-weg-jahresabrechnung oder wohnen-haus-weg-jahresabrechnung.",
   },
 ];
 

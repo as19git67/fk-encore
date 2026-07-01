@@ -511,8 +511,11 @@ Felder:
 - category_slug: der am besten passende Slug aus der gegebenen Taxonomie.
   Wenn kein Zweig passt, verwende "sonstiges" und gib eine niedrige confidence.
 - title: kurzer, sprechender Dokumenttitel (max. 80 Zeichen).
-- doc_date: das auf dem Dokument gedruckte Datum als ISO-8601 YYYY-MM-DD,
-  oder null falls nicht erkennbar.
+- doc_date: das auf dem Dokument gedruckte Datum (Briefdatum, Rechnungsdatum,
+  Bescheiddatum) als ISO-8601 YYYY-MM-DD. Typische deutsche Formate wie
+  "01.07.2024", "1. Juli 2024", "Juli 2024" (→ Monatserster) erkennen und
+  umwandeln. Bevorzuge das prominenteste/neueste Datum im Kopfbereich. null
+  nur wenn wirklich kein Datum erkennbar ist.
 - sender: die ausstellende Institution/Organisation oder Person, die das
   Dokument VERSCHICKT bzw. erstellt hat — erkennbar an Briefkopf, Logo oder
   Footer/Impressum (z. B. Versicherung, Behörde, Arztpraxis, Bank). NICHT der

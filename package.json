@@ -14,6 +14,7 @@
     "diagnose:taxonomy": "node scripts/taxonomy/diagnose.mjs",
     "cluster:taxonomy": "python3 scripts/taxonomy/cluster.py",
     "mine-hints:taxonomy": "python3 scripts/taxonomy/mine_hints.py",
+    "audit:taxonomy": "python3 scripts/taxonomy/cloud_audit.py",
     "prepare": "husky"
   },
   "devDependencies": {
