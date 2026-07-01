@@ -90,6 +90,16 @@ def sender_type(sender: str | None) -> str:
     return "sonstiger Absender"
 
 
+_ADDRESS_FRAGMENTS = [
+    "bahnhofstr", "bahnhofstraße", "bahnhofstrasse",
+    "10a", "12345", "beispielstadt",
+]
+_ADDRESS_RX = re.compile(
+    "|".join(rf"\b{re.escape(f)}\b" for f in _ADDRESS_FRAGMENTS),
+    re.I,
+)
+
+
 def scrub(text: str | None) -> str | None:
     if not text:
         return text
@@ -99,11 +109,12 @@ def scrub(text: str | None) -> str | None:
     t = _DATE.sub("[DATUM]", t)
     t = _PHONE.sub("[TEL]", t)
     t = _LONGNUM.sub("[NR]", t)
+    t = _ADDRESS_RX.sub("[ADRESSE]", t)
     return t
 
 
 def scrub_names(text: str | None, names: list[str]) -> str | None:
-    """Maskiert konkrete Personennamen (aus user_subject_persons)."""
+    """Maskiert konkrete Personennamen (aus DB + Haushalt)."""
     if not text:
         return text
     for name in names:
@@ -114,13 +125,44 @@ def scrub_names(text: str | None, names: list[str]) -> str | None:
     return text
 
 
-def subject_person_names(conn) -> list[str]:
+def household_names(conn) -> list[str]:
+    """Collect all person names that must be scrubbed: subject_persons,
+    user accounts, and any hardcoded household members."""
+    names: set[str] = set()
+
+    # 1. user_subject_persons (Bezugspersonen)
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT DISTINCT name FROM user_subject_persons")
-            return [r[0] for r in cur.fetchall() if r[0]]
+            for (n,) in cur.fetchall():
+                if n:
+                    names.add(n)
     except Exception:
-        return []
+        pass
+
+    # 2. users table (account owners)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT name FROM users WHERE name IS NOT NULL")
+            for (n,) in cur.fetchall():
+                if n:
+                    names.add(n)
+    except Exception:
+        pass
+
+    # 3. Known household members not necessarily in either table
+    for extra in ["Beispiel", "Isabella", "Manuel"]:
+        names.add(extra)
+
+    # 4. Family domain — scrub_names doesn't catch email-embedded names,
+    #    but scrub() replaces full emails; this covers partial occurrences.
+    names.add("beispiel.test")
+
+    return sorted(names)
+
+
+# Keep legacy alias for existing callers
+subject_person_names = household_names
 
 
 # ── Markdown-Helfer ─────────────────────────────────────────────────────────
