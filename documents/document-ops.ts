@@ -29,9 +29,10 @@ import {
   ReceiptOcrUnavailableError,
 } from "./receipt-ocr-client";
 import { extractPdfText, PdfPasswordRequiredError } from "./text-extract";
-import { buildThumbnail, removeThumbnail } from "./thumbnail";
+import { buildThumbnail, ensureThumbnail, removeThumbnail } from "./thumbnail";
 import { removeOcrPdf, writeOcrPdf } from "./ocr-pdf";
 import { jpegToReceiptPdf } from "./receipt-pdf";
+import { buildReceiptDocumentCompletion } from "./receipt-capture";
 import { deleteJobsForDocument } from "./scan-queue";
 import { checkReceiptEnrichment, createSuggestionsForDocument } from "../finance/document-match.service";
 import {
@@ -767,6 +768,11 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
     return;
   }
 
+  // Thumbnail generation is independent from OCR. Receipt captures do not
+  // enter text_extract (and therefore never invoke Tesseract), so warm the
+  // page preview here before contacting the potentially cold Paddle service.
+  await ensureThumbnail(documentId, row.disk_path).catch(() => null);
+
   // Health check — defer the job if the service is cold/restarting.
   const healthy = await isReceiptOcrHealthy().catch(() => false);
   if (!healthy) {
@@ -851,9 +857,7 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
     core.amount <= RECEIPT_AUTO_BOOK_MAX;
 
   if (!reliable) {
-    await db.update(documents)
-      .set({ receipt_ocr_state: "incomplete" })
-      .where(eq(documents.id, documentId));
+    await finalizeReceiptDocument(documentId, row.user_id, core.raw_text, "incomplete");
     console.log(
       `[documents] receipt OCR doc=${documentId}: amount=${core.amount} outside reliable range — marked incomplete`,
     );
@@ -892,6 +896,16 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
     currencyCode: core.currency ?? "EUR",
   });
 
+  // createReceiptAutoTransaction sets `booked` when it creates a row. A null
+  // result means an idempotent/deduplicated booking; keep the document
+  // reviewable instead of leaving receipt_ocr_state stuck on `pending`.
+  await finalizeReceiptDocument(
+    documentId,
+    row.user_id,
+    core.raw_text,
+    txId === null ? "incomplete" : undefined,
+  );
+
   if (txId !== null) {
     console.log(
       `[documents] receipt OCR doc=${documentId}: auto-booked tx=${txId} amount=${core.amount} on account=${row.receipt_account_id}`,
@@ -911,6 +925,33 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
       amount: core.amount!,
       store: core.store,
     }).catch(err => console.warn(`[documents] notifyReceiptBooked failed doc=${documentId}: ${(err as Error).message}`));
+  }
+}
+
+/**
+ * Complete the document-facing side of receipt processing using PaddleOCR's
+ * text. This replaces the old text_extract/Tesseract job and only relocates
+ * after all upload-time metadata and OCR output have been persisted.
+ */
+async function finalizeReceiptDocument(
+  documentId: number,
+  ownerUserId: number,
+  rawText: string,
+  receiptState?: "incomplete",
+): Promise<void> {
+  await db.update(documents)
+    .set(buildReceiptDocumentCompletion(rawText, receiptState))
+    .where(eq(documents.id, documentId));
+  await publishStatusChanged(documentId, ownerUserId, "ready");
+
+  // status=ready + the server-assigned `belege` category now produce the
+  // final canonical path. No worker retains the upload path at this point.
+  try {
+    await relocateDocument(documentId);
+  } catch (err) {
+    console.warn(
+      `[documents] relocate after receipt OCR(${documentId}) failed: ${(err as Error).message}`,
+    );
   }
 }
 

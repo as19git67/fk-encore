@@ -27,6 +27,12 @@ export const DOCUMENT_SERVICES: readonly DocumentScanService[] = [
   "embed",
 ] as const;
 
+/** Every worker represented in queue status, including specialised jobs. */
+export const DOCUMENT_QUEUE_SERVICES: readonly DocumentScanService[] = [
+  ...DOCUMENT_SERVICES,
+  "receipt_ocr",
+] as const;
+
 /**
  * Thrown by a job handler to signal "not ready yet — put me back in the
  * queue". The worker resets the job to pending without counting the
@@ -175,7 +181,7 @@ export async function getQueueStatus(): Promise<QueueStatus> {
   `);
 
   const map = new Map<DocumentScanService, QueueServiceStatus>();
-  for (const svc of DOCUMENT_SERVICES) {
+  for (const svc of DOCUMENT_QUEUE_SERVICES) {
     map.set(svc, { service: svc, pending: 0, processing: 0, failed: 0, done: 0 });
   }
   for (const row of rows.rows) {
