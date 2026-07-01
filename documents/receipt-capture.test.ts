@@ -43,6 +43,7 @@ describe("receipt capture queue plan", () => {
       extracted_text: "EDEKA\nSumme 12,34 EUR",
       status: "ready",
       last_error: null,
+      title: "Kassenbeleg – EDEKA München",
       sender: "EDEKA München",
       doc_date: "2026-06-30",
     });
@@ -63,6 +64,18 @@ describe("receipt capture queue plan", () => {
       extracted_text: "Text",
       status: "ready",
       last_error: null,
+      title: "Kassenbeleg",
     });
+  });
+
+  it("caps generated receipt titles to a useful document-title length", () => {
+    const completion = buildReceiptDocumentCompletion(
+      "Text",
+      undefined,
+      { store: "Sehr langer Händler ".repeat(20), receiptDate: null },
+    );
+
+    expect(completion.title).toMatch(/^Kassenbeleg – Sehr langer Händler/);
+    expect(completion.title).toHaveLength(120);
   });
 });

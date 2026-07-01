@@ -14,6 +14,19 @@ WHERE e.document_id = d.id
     (NULLIF(BTRIM(d.doc_date), '') IS NULL AND NULLIF(BTRIM(e.receipt_date), '') IS NOT NULL)
   );
 
+-- Receipt-Dokumente ohne manuell gepflegten Titel sollen in Liste, Suche und
+-- Dateipfad nicht weiter nur als "image.pdf" erscheinen. Nutzergeprüfte
+-- Attribute und bereits vorhandene Titel bleiben unverändert.
+UPDATE documents
+SET title = CASE
+  WHEN NULLIF(BTRIM(sender), '') IS NOT NULL
+    THEN LEFT('Kassenbeleg – ' || BTRIM(sender), 120)
+  ELSE 'Kassenbeleg'
+END
+WHERE receipt_ocr_state IS NOT NULL
+  AND attributes_reviewed = FALSE
+  AND NULLIF(BTRIM(title), '') IS NULL;
+
 ALTER TABLE document_receipt_extraction
   DROP COLUMN store,
   DROP COLUMN receipt_date;
