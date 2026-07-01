@@ -84,7 +84,7 @@ def _sample_documents(conn) -> list[dict]:
         SELECT d.id, d.title, d.summary, d.sender, d.extracted_text,
                c.slug AS cat_slug, c.name AS cat_name,
                d.classification_confidence AS confidence,
-               d.tags
+               d.tags_text AS tags
         FROM documents d
         JOIN document_categories c ON c.id = d.category_id
         WHERE c.slug = 'sonstiges'
@@ -100,7 +100,7 @@ def _sample_documents(conn) -> list[dict]:
         SELECT d.id, d.title, d.summary, d.sender, d.extracted_text,
                c.slug AS cat_slug, c.name AS cat_name,
                d.classification_confidence AS confidence,
-               d.tags
+               d.tags_text AS tags
         FROM documents d
         JOIN document_categories c ON c.id = d.category_id
         WHERE d.classification_confidence < 0.85
@@ -119,7 +119,7 @@ def _sample_documents(conn) -> list[dict]:
             SELECT d.id, d.title, d.summary, d.sender, d.extracted_text,
                    c.slug AS cat_slug, c.name AS cat_name,
                    d.classification_confidence AS confidence,
-                   d.tags
+                   d.tags_text AS tags
             FROM documents d
             JOIN document_categories c ON c.id = d.category_id
             WHERE c.slug <> 'sonstiges'
@@ -148,10 +148,7 @@ def _anonymize_doc(doc: dict, names: list[str]) -> dict:
         "title": c.scrub(c.scrub_names(doc.get("title"), names)) or "",
         "summary": c.scrub(c.scrub_names(doc.get("summary"), names)) or "",
         "sender_type": c.sender_type(doc.get("sender")),
-        "tags": c.scrub(c.scrub_names(
-            doc["tags"] if isinstance(doc.get("tags"), str)
-            else ", ".join(doc["tags"]) if isinstance(doc.get("tags"), list)
-            else "", names)) or "",
+        "tags": c.scrub(c.scrub_names(doc.get("tags") or "", names)) or "",
         "qwen_slug": doc["cat_slug"],
         "qwen_name": doc["cat_name"],
         "qwen_confidence": doc.get("confidence"),
