@@ -802,8 +802,8 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
   // Stage 1: core extraction (amount / date / store).
   const core = await extractReceipt(ocrBuffer, ocrFilename, ocrMimeType);
 
-  // If the service straightened/rotated the image, replace the stored PDF with
-  // the corrected version so the viewed document is upright and de-warped.
+  // Replace the stored PDF with the service's complete scan preparation:
+  // crop/perspective, orientation, fine deskew, denoise and contrast.
   // Best-effort: failures here must never block booking.
   if (core.corrected_image && row.mime_type === "application/pdf") {
     try {
@@ -967,11 +967,10 @@ async function finalizeReceiptDocument(
 /**
  * Replace a receipt document's stored PDF with the service-corrected image.
  *
- * The receipt-ocr service returns a cropped, perspective-de-warped and
- * upright-rotated JPEG (base64) when it changed the geometry. We wrap it back
- * into the same single-page PDF the upload path produces, overwrite the file in
- * place, and refresh the derived artifacts (searchable sidecar + thumbnail) so
- * the viewer shows the straightened document.
+ * The receipt-ocr service returns a cropped, perspective-corrected, upright,
+ * deskewed, denoised and contrast-enhanced JPEG (base64). We wrap it back into
+ * the same single-page PDF the upload path produces, overwrite the file in
+ * place, and refresh derived artifacts so the viewer shows the prepared scan.
  *
  * No-ops silently when the corrected image collides with another document's
  * content (the unique sha256 constraint) — the original file is kept.
