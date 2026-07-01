@@ -466,6 +466,43 @@ def run_ocr(img: np.ndarray) -> tuple[str, list[dict[str, Any]]]:
     return full_text, lines
 
 
+def _crop_to_ocr_content(
+    img: np.ndarray,
+    lines: list[dict[str, Any]],
+) -> np.ndarray:
+    """Crop large undetected borders using Paddle's recognised text region.
+
+    This is a conservative fallback for receipts whose paper edge cannot be
+    represented by a reliable quadrilateral (for example white paper on a
+    light table or a receipt touching the frame). A generous eight-percent
+    margin preserves logos and paper around the recognised text.
+    """
+    usable = [
+        line for line in lines
+        if line.get("text", "").strip() and line.get("confidence", 0.0) >= 0.45
+    ]
+    if len(usable) < 2:
+        return img
+
+    h, w = img.shape[:2]
+    xs = [float(point[0]) for line in usable for point in line["box"]]
+    ys = [float(point[1]) for line in usable for point in line["box"]]
+    pad_x = max(24, round(w * 0.08))
+    pad_y = max(32, round(h * 0.08))
+    left = max(0, int(min(xs)) - pad_x)
+    right = min(w, int(max(xs)) + pad_x)
+    top = max(0, int(min(ys)) - pad_y)
+    bottom = min(h, int(max(ys)) + pad_y)
+
+    # Avoid tiny, visually irrelevant crops and malformed OCR bounds.
+    if right <= left or bottom <= top:
+        return img
+    removed_area = 1.0 - ((right - left) * (bottom - top)) / float(w * h)
+    if removed_area < 0.08:
+        return img
+    return img[top:bottom, left:right]
+
+
 # ─── Regex extraction (fallback / REGEX_ONLY mode) ──────────────────────────
 
 _VALUE_PATTERN = r"(\d{1,3}(?:[. ]\d{3})*(?:,\d{2})|\d+(?:[.,]\d{2}))"
@@ -756,8 +793,12 @@ async def extract_receipt(file: UploadFile = File(...)) -> ReceiptResult:
     def _pipeline(data: bytes) -> dict[str, Any]:
         storage_img, _geometry_corrected = correct_geometry(data)
         ocr_img = enhance_for_ocr(storage_img)
-        processed_image = _encode_processed_jpeg(ocr_img)
         full_text, lines = run_ocr(ocr_img)
+        # Contour detection is deliberately strict. If it cannot see all four
+        # paper edges, use Paddle's text geometry to remove the remaining large
+        # camera background before persisting the final PDF.
+        stored_scan = _crop_to_ocr_content(ocr_img, lines)
+        processed_image = _encode_processed_jpeg(stored_scan)
 
         if not full_text.strip():
             return {
