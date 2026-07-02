@@ -371,6 +371,69 @@ def preprocess_image(img_bytes: bytes) -> np.ndarray:
 
 # ─── OCR ─────────────────────────────────────────────────────────────────────
 
+def _reconstruct_visual_lines(lines: list[dict[str, Any]]) -> list[str]:
+    """Rebuild receipt rows from Paddle's independently detected text boxes.
+
+    Paddle commonly returns the product name, quantity and right-aligned price
+    as separate boxes.  Treating every box as a newline destroys that spatial
+    relationship before the line-item parser sees it.  Boxes with substantial
+    vertical overlap (or an almost identical baseline) belong to one visual
+    row and are joined from left to right.
+    """
+    if not lines:
+        return []
+
+    boxes = sorted(lines, key=lambda line: (line["top"], line["x"]))
+    rows: list[dict[str, Any]] = []
+
+    for line in boxes:
+        height = max(1.0, line["bottom"] - line["top"])
+        best_row: dict[str, Any] | None = None
+        best_score = -1.0
+        for row in rows:
+            overlap = max(
+                0.0,
+                min(line["bottom"], row["bottom"]) - max(line["top"], row["top"]),
+            )
+            overlap_ratio = overlap / min(height, row["height"])
+            center_distance = abs(line["y"] - row["y"])
+            same_baseline = center_distance <= 0.35 * max(height, row["height"])
+            if overlap_ratio >= 0.45 or same_baseline:
+                score = overlap_ratio - center_distance / max(height, row["height"])
+                if score > best_score:
+                    best_row = row
+                    best_score = score
+
+        if best_row is None:
+            rows.append({
+                "lines": [line],
+                "top": line["top"],
+                "bottom": line["bottom"],
+                "height": height,
+                "y": line["y"],
+            })
+            continue
+
+        best_row["lines"].append(line)
+        best_row["top"] = min(best_row["top"], line["top"])
+        best_row["bottom"] = max(best_row["bottom"], line["bottom"])
+        best_row["height"] = max(1.0, best_row["bottom"] - best_row["top"])
+        best_row["y"] = (
+            sum(item["y"] for item in best_row["lines"])
+            / len(best_row["lines"])
+        )
+
+    rows.sort(key=lambda row: row["y"])
+    return [
+        " ".join(
+            item["text"].strip()
+            for item in sorted(row["lines"], key=lambda item: item["x"])
+            if item["text"].strip()
+        )
+        for row in rows
+    ]
+
+
 def run_ocr(img: np.ndarray) -> tuple[str, list[dict[str, Any]]]:
     """Run PaddleOCR and return (full_text, structured_lines)."""
     ocr = _state["ocr"]
@@ -382,31 +445,77 @@ def run_ocr(img: np.ndarray) -> tuple[str, list[dict[str, Any]]]:
     lines: list[dict[str, Any]] = []
     for line_info in result[0]:
         box, (text, confidence) = line_info
-        y_center = (box[0][1] + box[2][1]) / 2
-        x_center = (box[0][0] + box[2][0]) / 2
+        xs = [point[0] for point in box]
+        ys = [point[1] for point in box]
+        y_center = (min(ys) + max(ys)) / 2
+        x_center = (min(xs) + max(xs)) / 2
         lines.append({
             "text": text,
             "confidence": float(confidence),
             "y": float(y_center),
             "x": float(x_center),
+            "top": float(min(ys)),
+            "bottom": float(max(ys)),
             "box": box,
         })
 
-    # Sort by vertical position (top to bottom), then left to right
+    # Preserve the boxes for confidence/debugging, but give all downstream
+    # parsers text reconstructed as visual receipt rows.
     lines.sort(key=lambda l: (l["y"], l["x"]))
-
-    full_text = "\n".join(l["text"] for l in lines)
+    full_text = "\n".join(_reconstruct_visual_lines(lines))
     return full_text, lines
+
+
+def _crop_to_ocr_content(
+    img: np.ndarray,
+    lines: list[dict[str, Any]],
+) -> np.ndarray:
+    """Crop large undetected borders using Paddle's recognised text region.
+
+    This is a conservative fallback for receipts whose paper edge cannot be
+    represented by a reliable quadrilateral (for example white paper on a
+    light table or a receipt touching the frame). A generous eight-percent
+    margin preserves logos and paper around the recognised text.
+    """
+    usable = [
+        line for line in lines
+        if line.get("text", "").strip() and line.get("confidence", 0.0) >= 0.45
+    ]
+    if len(usable) < 2:
+        return img
+
+    h, w = img.shape[:2]
+    xs = [float(point[0]) for line in usable for point in line["box"]]
+    ys = [float(point[1]) for line in usable for point in line["box"]]
+    pad_x = max(24, round(w * 0.08))
+    pad_y = max(32, round(h * 0.08))
+    left = max(0, int(min(xs)) - pad_x)
+    right = min(w, int(max(xs)) + pad_x)
+    top = max(0, int(min(ys)) - pad_y)
+    bottom = min(h, int(max(ys)) + pad_y)
+
+    # Avoid tiny, visually irrelevant crops and malformed OCR bounds.
+    if right <= left or bottom <= top:
+        return img
+    removed_area = 1.0 - ((right - left) * (bottom - top)) / float(w * h)
+    if removed_area < 0.08:
+        return img
+    return img[top:bottom, left:right]
 
 
 # ─── Regex extraction (fallback / REGEX_ONLY mode) ──────────────────────────
 
 _VALUE_PATTERN = r"(\d{1,3}(?:[. ]\d{3})*(?:,\d{2})|\d+(?:[.,]\d{2}))"
 
-_TOTAL_LABELS = re.compile(
+_STRONG_TOTAL_LABELS = re.compile(
     r"(?<![a-zA-ZäöüÄÖÜ])"
-    r"(?:gesamt(?:betrag|summe)?|summe|total|zu\s*zahlen|betrag|endsumme|eur\b)"
+    r"(?:gesamt(?:betrag|summe)?|summe|total|zu\s*zahlen|betrag|endsumme|bruttoumsatz)"
     r"\D{0,40}" + _VALUE_PATTERN,
+    re.IGNORECASE,
+)
+
+_EUR_TOTAL_LABEL = re.compile(
+    r"(?<![a-zA-ZäöüÄÖÜ])eur\b\D{0,40}" + _VALUE_PATTERN,
     re.IGNORECASE,
 )
 
@@ -422,12 +531,28 @@ def _parse_german_amount(raw: str) -> float | None:
         return None
 
 
+def _extract_labeled_total(text: str, *, strong_only: bool = False) -> float | None:
+    """Return a deterministically labelled receipt total.
+
+    Strong business labels are safe enough to override an LLM guess.  A bare
+    ``EUR`` label remains useful only for the regex fallback because it can
+    also occur near payment, tax or cash-tendered values.
+    """
+    patterns = [_STRONG_TOTAL_LABELS]
+    if not strong_only:
+        patterns.append(_EUR_TOTAL_LABEL)
+    for pattern in patterns:
+        match = pattern.search(text)
+        if match and match.group(1):
+            amount = _parse_german_amount(match.group(1))
+            if amount is not None:
+                return amount
+    return None
+
+
 def regex_extract(text: str) -> dict[str, Any]:
     """Best-effort field extraction using regex patterns."""
-    amount: float | None = None
-    match = _TOTAL_LABELS.search(text)
-    if match and match.group(1):
-        amount = _parse_german_amount(match.group(1))
+    amount = _extract_labeled_total(text)
 
     if amount is None:
         all_amounts = [
@@ -583,6 +708,12 @@ def llm_extract_core(text: str) -> dict[str, Any]:
     else:
         amount = round(float(amount), 2)
 
+    # OCR noise around payment rows can make the LLM prefer cash tendered or
+    # change. An explicit total label is more reliable and wins deterministically.
+    labeled_total = _extract_labeled_total(text, strong_only=True)
+    if labeled_total is not None:
+        amount = round(labeled_total, 2)
+
     date_val = data.get("date")
     if not (isinstance(date_val, str) and re.match(r"^\d{4}-\d{2}-\d{2}$", date_val)):
         date_val = None
@@ -662,8 +793,12 @@ async def extract_receipt(file: UploadFile = File(...)) -> ReceiptResult:
     def _pipeline(data: bytes) -> dict[str, Any]:
         storage_img, _geometry_corrected = correct_geometry(data)
         ocr_img = enhance_for_ocr(storage_img)
-        processed_image = _encode_processed_jpeg(ocr_img)
         full_text, lines = run_ocr(ocr_img)
+        # Contour detection is deliberately strict. If it cannot see all four
+        # paper edges, use Paddle's text geometry to remove the remaining large
+        # camera background before persisting the final PDF.
+        stored_scan = _crop_to_ocr_content(ocr_img, lines)
+        processed_image = _encode_processed_jpeg(stored_scan)
 
         if not full_text.strip():
             return {
