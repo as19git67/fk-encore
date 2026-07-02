@@ -813,6 +813,13 @@
       "when": 1782864000000,
       "tag": "0115_receipt_canonical_document_metadata",
       "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "7",
+      "when": 1782950400000,
+      "tag": "0116_receipt_amount_confidence",
+      "breakpoints": true
     }
   ]
 }
