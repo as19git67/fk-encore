@@ -19,6 +19,7 @@ import {
   completeTanSession,
 } from "./tan-sessions";
 import * as fintsClient from "./fints-client";
+import * as statementPersist from "./statement-persist";
 import type { DialogResult } from "./types";
 import { __resetRateLimiterForTests } from "../user/rateLimiter";
 
@@ -27,6 +28,16 @@ vi.mock("./fints-client", async (orig) => {
   return {
     ...actual,
     runSynchronize: vi.fn(),
+    takeCachedClient: vi.fn(),
+    resumeFetchAfterTan: vi.fn(),
+  };
+});
+
+vi.mock("./statement-persist", async (orig) => {
+  const actual = await orig<typeof import("./statement-persist")>();
+  return {
+    ...actual,
+    persistFetchResult: vi.fn(),
   };
 });
 
@@ -62,6 +73,9 @@ beforeEach(async () => {
   __resetRateLimiterForTests();
   setAuth("1", []);
   vi.mocked(fintsClient.runSynchronize).mockReset();
+  vi.mocked(fintsClient.takeCachedClient).mockReset();
+  vi.mocked(fintsClient.resumeFetchAfterTan).mockReset();
+  vi.mocked(statementPersist.persistFetchResult).mockReset();
 });
 
 async function insertSession(opts: {
@@ -84,6 +98,36 @@ async function insertSession(opts: {
     challenge: "stored-challenge",
     expires_at: expiresAt.toISOString(),
   });
+  return ref;
+}
+
+async function insertStatementsSession(opts: {
+  userId: number;
+  bankcontactId: number;
+  withFetchContext?: boolean;
+}): Promise<string> {
+  await ensureUser(opts.userId);
+  const ref = randomUUID();
+  await db.insert(financeTanSession).values({
+    tan_reference: ref,
+    user_id: opts.userId,
+    bankcontact_id: opts.bankcontactId,
+    kind: "statements",
+    banking_information: { fintsTanRef: "statement-ref" },
+    challenge: "photoTAN",
+    fetch_context: opts.withFetchContext === false
+      ? null
+      : {
+          currentAccountNumber: "A",
+          remainingAccountNumbers: ["B"],
+          linkedAccountNumbers: ["A", "B"],
+        },
+    expires_at: new Date(Date.now() + 10 * 60_000).toISOString(),
+  });
+  await db
+    .update(financeBankcontact)
+    .set({ last_sync_status: "tan-required" })
+    .where(eq(financeBankcontact.id, opts.bankcontactId));
   return ref;
 }
 
@@ -209,6 +253,118 @@ describe("finance/tan-sessions — complete (error / retry paths)", () => {
       .from(financeTanSession)
       .where(eq(financeTanSession.tan_reference, ref));
     expect(rows).toHaveLength(0);
+  });
+});
+
+describe("finance/tan-sessions — statement TAN status", () => {
+  const emptyStats = {
+    accounts_seen: 2,
+    accounts_matched: 2,
+    accounts_closed: 0,
+    accounts_unknown: 0,
+    transactions_inserted: 3,
+    transactions_skipped_duplicate: 1,
+    balances_written: 2,
+    holdings_written: 0,
+    unknown: [],
+    errors: [],
+  };
+
+  it.each([
+    { partial: false, expected: "ok" },
+    { partial: true, expected: "partial" },
+  ])(
+    "replaces tan-required with $expected after a successful resume",
+    async ({ partial, expected }) => {
+      setAuth("42", ["finance.accounts.manage"]);
+      const bcId = await insertBankcontact();
+      const ref = await insertStatementsSession({
+        userId: 42,
+        bankcontactId: bcId,
+      });
+      vi.mocked(fintsClient.takeCachedClient).mockReturnValue({} as never);
+      vi.mocked(fintsClient.resumeFetchAfterTan).mockResolvedValue({
+        accounts: [],
+        partial,
+      });
+      vi.mocked(statementPersist.persistFetchResult).mockResolvedValue(emptyStats);
+
+      const response = await completeTanSession({
+        tanReference: ref,
+        tan: "123456",
+      });
+
+      expect(response.state).toBe("idle");
+      const [contact] = await db
+        .select({
+          status: financeBankcontact.last_sync_status,
+          syncedAt: financeBankcontact.last_sync_at,
+        })
+        .from(financeBankcontact)
+        .where(eq(financeBankcontact.id, bcId));
+      expect(contact.status).toBe(expected);
+      expect(contact.syncedAt).not.toBeNull();
+    },
+  );
+
+  it("keeps tan-required when the bank returns a follow-up challenge", async () => {
+    setAuth("42", ["finance.accounts.manage"]);
+    const bcId = await insertBankcontact();
+    const ref = await insertStatementsSession({
+      userId: 42,
+      bankcontactId: bcId,
+    });
+    vi.mocked(fintsClient.takeCachedClient).mockReturnValue({} as never);
+    vi.mocked(fintsClient.resumeFetchAfterTan).mockResolvedValue({
+      accounts: [],
+      partial: true,
+      pendingTan: {
+        tanReference: "statement-ref-2",
+        tanChallenge: "Noch eine TAN",
+        accountNumber: "A",
+        remainingAccountNumbers: [],
+      },
+    });
+    vi.mocked(statementPersist.persistFetchResult).mockResolvedValue(
+      emptyStats,
+    );
+
+    const response = await completeTanSession({
+      tanReference: ref,
+      tan: "wrong",
+    });
+
+    expect(response.state).toBe("tan-required");
+    const [contact] = await db
+      .select({ status: financeBankcontact.last_sync_status })
+      .from(financeBankcontact)
+      .where(eq(financeBankcontact.id, bcId));
+    expect(contact.status).toBe("tan-required");
+  });
+
+  it("replaces tan-required with a terminal error when the live client is gone", async () => {
+    setAuth("42", ["finance.accounts.manage"]);
+    const bcId = await insertBankcontact();
+    const ref = await insertStatementsSession({
+      userId: 42,
+      bankcontactId: bcId,
+    });
+    vi.mocked(fintsClient.takeCachedClient).mockReturnValue(null);
+
+    const response = await completeTanSession({
+      tanReference: ref,
+      tan: "123456",
+    });
+
+    expect(response).toMatchObject({
+      state: "error",
+      errorCode: "live-client-evicted",
+    });
+    const [contact] = await db
+      .select({ status: financeBankcontact.last_sync_status })
+      .from(financeBankcontact)
+      .where(eq(financeBankcontact.id, bcId));
+    expect(contact.status).toBe("error:live-client-evicted");
   });
 });
 
