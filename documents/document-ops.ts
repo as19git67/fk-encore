@@ -54,6 +54,15 @@ import { flattenTaxonomy, taxonomyHints } from "./taxonomy";
 import { matchSenderRule } from "./sender-rules";
 import { buildClassifyExamples } from "./few-shot";
 import {
+  learnedRelationTags,
+  loadLearnedMemory,
+  mergeLearnedPersonIds,
+  mergeLearnedTags,
+  mergeLearnedTaxSections,
+  resolveLearned,
+} from "./learned-rules";
+import { recordUncategorizedDocument } from "./suggestion-writer";
+import {
   detectSubjectPersonIds,
   extractDocumentNumber,
   extractReferenceNumberTags,
@@ -285,18 +294,38 @@ export async function runClassify(documentId: number): Promise<{ classification:
   if (isSubjectPersonSender(classification.sender, subject_persons)) {
     classification.sender = null;
   }
+
+  // Learned per-user memory from reviewed / user-curated documents, keyed by
+  // the now-finalized sender. Drives the category / tax / tag / Bezugsperson
+  // enrichment below (see learned-rules.ts). Best-effort — empty on any error.
+  const learnedMemory = await loadLearnedMemory(row.user_id, documentId);
+  const learned = resolveLearned(learnedMemory, classification.sender);
+
   // 3. Labelled contract/insurance/order numbers become searchable tags (the
   //    '#'-only document number no longer carries them).
   const referenceTags = extractReferenceNumberTags(clipped);
   if (referenceTags.length > 0) {
     classification.tags = [...classification.tags, ...referenceTags];
   }
-  // 4. Deterministically link the Bezugspersonen mentioned in the text.
-  const subjectPersonIds = detectSubjectPersonIds(clipped, subjectPersons);
+  // 3b. Content tags the user consistently files for this sender (learned).
+  classification.tags = mergeLearnedTags(classification.tags, learned);
+
+  // 4. Deterministically link the Bezugspersonen mentioned in the text, then
+  //    add the ones the user consistently links for this sender (learned) —
+  //    catches OCR-garbled names the in-text detector misses.
+  const detectedPersonIds = detectSubjectPersonIds(clipped, subjectPersons);
+  const subjectPersonIds = mergeLearnedPersonIds(detectedPersonIds, learned);
+  // A learned person is user-confirmed evidence, so surface their relation tag
+  // even when the name is absent from the text; reconcile keeps it because the
+  // id is in the confirmed set below.
+  classification.tags = [
+    ...classification.tags,
+    ...learnedRelationTags(learned, subjectPersons),
+  ];
   // 5. Person identity is deterministic, not the LLM's guess: strip any
   //    Bezugspersonen relation tag the classifier hallucinated (e.g. a
-  //    sibling/parent not actually named in the document) and ensure the
-  //    detected persons' relation tags are present.
+  //    sibling/parent not actually named in the document) and keep the
+  //    detected + learned persons' relation tags.
   classification.tags = reconcileSubjectPersonTags(
     classification.tags,
     subjectPersons,
@@ -321,6 +350,15 @@ export async function runClassify(documentId: number): Promise<{ classification:
     classification.tax_relevant = true;
   }
 
+  // 7. Tax sections the user consistently assigns for this sender (learned).
+  //    Reflects the user's own repeated tax_reviewed decisions, so it may make
+  //    a document tax-relevant that the LLM marked otherwise.
+  const beforeLearnedTax = classification.tax_sections.length;
+  classification.tax_sections = mergeLearnedTaxSections(classification.tax_sections, learned);
+  if (classification.tax_sections.length > beforeLearnedTax) {
+    classification.tax_relevant = true;
+  }
+
   // Deterministic sender → category routing (see sender-rules.ts). A known
   // recurring institution overrides the LLM's category guess, which otherwise
   // funnels most documents into the generic "finanzen-rechnungen" bucket.
@@ -329,13 +367,31 @@ export async function runClassify(documentId: number): Promise<{ classification:
     title: classification.title,
     text: clipped,
   });
+  // Learned per-user category fills the long tail the hand-authored rules don't
+  // cover: only applied when no hand rule matched, so the rules keep their
+  // context-aware precision (requireAny/excludeAny). See learned-rules.ts.
+  const learnedCatSlug =
+    !ruleSlug && learned?.category ? learned.category.slug : null;
   if (ruleSlug && ruleSlug !== classification.category_slug) {
     console.log(
       `[documents] sender rule override(${documentId}): ` +
         `"${classification.sender}" ${classification.category_slug} → ${ruleSlug}`,
     );
+  } else if (learnedCatSlug && learnedCatSlug !== classification.category_slug) {
+    console.log(
+      `[documents] learned category override(${documentId}): ` +
+        `"${classification.sender}" ${classification.category_slug} → ${learnedCatSlug} ` +
+        `(support=${learned!.category!.support}, share=${learned!.category!.share.toFixed(2)})`,
+    );
   }
-  const catSlug = ruleSlug ?? classification.category_slug;
+  const catSlug = ruleSlug ?? learnedCatSlug ?? classification.category_slug;
+  // A repeated manual filing decision for this sender is the strongest possible
+  // signal — treat the result as confident so it neither gets flagged for
+  // low-confidence review nor lands in the work-item basket.
+  const learnedCategoryApplied = learnedCatSlug != null && catSlug === learnedCatSlug;
+  if (learnedCategoryApplied) {
+    classification.confidence = Math.max(classification.confidence, 0.9);
+  }
   const cat = await dbFirst<{ id: number }>(
     db.select({ id: documentCategories.id }).from(documentCategories).where(eq(documentCategories.slug, catSlug)),
   );
@@ -366,6 +422,15 @@ export async function runClassify(documentId: number): Promise<{ classification:
   }
 
   await db.update(documents).set(patch).where(eq(documents.id, documentId));
+  // A document that even after learned + hand rules lands in the catch-all
+  // "sonstiges" is evidence the taxonomy may be missing a category for its
+  // sender — feed the admin's category-suggestions queue. Best-effort.
+  if (!row.attributes_reviewed && catSlug === "sonstiges") {
+    void recordUncategorizedDocument({ documentId, sender: classification.sender }).catch(
+      (err) =>
+        console.error(`[documents] category suggestion for document=${documentId} failed:`, err),
+    );
+  }
   // Advisory only: a document becoming OCR-ready must not delay the pipeline.
   void createSuggestionsForDocument(documentId).catch(err => console.error(`[documents] finance matching failed for document=${documentId}:`, err));
   void checkReceiptEnrichment(documentId).catch(err => console.error(`[documents] receipt enrichment check failed for document=${documentId}:`, err));
