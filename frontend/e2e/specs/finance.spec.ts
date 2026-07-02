@@ -122,13 +122,30 @@ test.describe('Finance-Subheader und Analysezeitraum', () => {
   })
 
   test('N-Jahre-Feld akzeptiert zweistellige Werte ohne Abschneiden', async ({ page }) => {
+    await page.route('**/finance/analysis/query', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ast: { tags: [], op: 'AND', kind: 'ongoing', interval: 'month' },
+          total: { sum: '0', count: 0, avg: '0' },
+          byPeriod: [],
+          byTag: [],
+          topCounterparties: [],
+        }),
+      })
+    })
     await page.goto('finanzen/analyse')
     if ((await page.getByRole('heading', { name: 'Analyse' }).count()) === 0) {
       test.skip(true, 'Aktueller Nutzer hat finance.view nicht — übersprungen')
     }
 
+    const question = page.getByPlaceholder('z. B. Was habe ich im Italien-Urlaub 2024 ausgegeben?')
+    await question.fill('Testanalyse für Zeitraum')
+    await question.press('Enter')
+
     const timespan = page.locator('.timespan-select')
-    await expect(timespan).toHaveCount(1)
+    await expect(timespan).toBeVisible()
     await timespan.click()
     const yearsOption = page.getByRole('option', { name: 'Letzte N Jahre' })
     await expect(yearsOption).toHaveCount(1)
