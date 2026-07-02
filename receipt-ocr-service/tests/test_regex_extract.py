@@ -72,6 +72,15 @@ class TestRegexExtract:
         result = regex_extract(text)
         assert result["amount"] == 47.25
 
+    def test_deutsche_post_bruttoumsatz_beats_cash_and_change(self):
+        text = (
+            "Deutsche Post AG\nBruttoumsatz\n*7,69 EUR\n"
+            "20.70 EUR\nBarzahlung\nnsbsn1o13.01EUR\n"
+            "Rückgeld/Auszahlung"
+        )
+        result = regex_extract(text)
+        assert result["amount"] == 7.69
+
     def test_eur_label(self):
         text = "Banane  0,99\nBrot  2,49\nEUR  3,48"
         result = regex_extract(text)

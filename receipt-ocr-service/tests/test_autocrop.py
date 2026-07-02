@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 
 from main import (
+    _crop_to_ocr_content,
     _find_document_quad,
     _four_point_warp,
     _encode_processed_jpeg,
@@ -75,6 +76,41 @@ def test_preprocess_image_keeps_full_frame_without_border():
     img = np.full((400, 300, 3), 180, dtype=np.uint8)
     out = preprocess_image(_encode_png(img))
     assert out.shape[0] == 400 and out.shape[1] == 300
+
+
+def _ocr_line(text, left, top, right, bottom, confidence=0.99):
+    return {
+        "text": text,
+        "confidence": confidence,
+        "box": [[left, top], [right, top], [right, bottom], [left, bottom]],
+    }
+
+
+def test_ocr_content_fallback_removes_large_camera_border():
+    img = np.zeros((1000, 800, 3), dtype=np.uint8)
+    lines = [
+        _ocr_line("Deutsche Post", 220, 180, 570, 220),
+        _ocr_line("Bruttoumsatz 7,69 EUR", 210, 760, 590, 800),
+    ]
+
+    cropped = _crop_to_ocr_content(img, lines)
+
+    assert cropped.shape[0] < img.shape[0]
+    assert cropped.shape[1] < img.shape[1]
+    assert cropped.shape[0] >= 780 - 180
+    assert cropped.shape[1] >= 590 - 210
+
+
+def test_ocr_content_fallback_keeps_already_tight_scan():
+    img = np.zeros((1000, 800, 3), dtype=np.uint8)
+    lines = [
+        _ocr_line("Kopf", 30, 30, 300, 70),
+        _ocr_line("Summe 7,69", 400, 920, 770, 970),
+    ]
+
+    cropped = _crop_to_ocr_content(img, lines)
+
+    assert cropped.shape == img.shape
 
 
 def test_processed_receipt_jpeg_contains_display_enhancement():
