@@ -188,6 +188,10 @@ async function resumeStatementsTan(
     await db
       .delete(financeTanSession)
       .where(eq(financeTanSession.tan_reference, p.tanReference));
+    await updateBankcontactSyncStatus(
+      session.bankcontact_id,
+      "error:live-client-evicted",
+    );
     return {
       state: "error",
       errorCode: "live-client-evicted",
@@ -201,6 +205,10 @@ async function resumeStatementsTan(
     await db
       .delete(financeTanSession)
       .where(eq(financeTanSession.tan_reference, p.tanReference));
+    await updateBankcontactSyncStatus(
+      session.bankcontact_id,
+      "error:missing-fetch-context",
+    );
     return {
       state: "error",
       errorCode: "missing-fetch-context",
@@ -237,6 +245,7 @@ async function resumeStatementsTan(
         },
       })
       .where(eq(financeTanSession.tan_reference, p.tanReference));
+    await updateBankcontactSyncStatus(session.bankcontact_id, "tan-required");
     return {
       state: "tan-required",
       tanReference: p.tanReference,
@@ -252,6 +261,10 @@ async function resumeStatementsTan(
   await db
     .delete(financeTanSession)
     .where(eq(financeTanSession.tan_reference, p.tanReference));
+  await updateBankcontactSyncStatus(
+    session.bankcontact_id,
+    fetched.partial ? "partial" : "ok",
+  );
 
   console.log(
     `[finance.tan-sessions] resumed statements fetch for bankcontact=` +
@@ -282,6 +295,25 @@ async function resumeStatementsTan(
 }
 
 /**
+ * Keep the status shown in both bankcontact views aligned with the
+ * lifecycle of a resumed statement fetch. The initial fetch writes
+ * `tan-required`; every later terminal outcome must replace it, otherwise
+ * the UI correctly refreshes a stale value from the database.
+ */
+async function updateBankcontactSyncStatus(
+  bankcontactId: number,
+  status: string,
+): Promise<void> {
+  await db
+    .update(financeBankcontact)
+    .set({
+      last_sync_at: new Date().toISOString(),
+      last_sync_status: status,
+    })
+    .where(eq(financeBankcontact.id, bankcontactId));
+}
+
+/**
  * Internal endpoint: delete all TAN sessions past their expires_at.
  * Wired to a CronJob in Etappe 6; exposed as `expose: false` so it
  * can't be hit from outside the cluster.
@@ -301,4 +333,3 @@ export const cleanupExpiredTanSessions = api(
     return { deleted: deleted.length };
   },
 );
-
