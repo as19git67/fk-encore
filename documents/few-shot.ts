@@ -61,6 +61,19 @@ function fewShotEnabled(): boolean {
   return (process.env.DOCUMENTS_FEWSHOT_ENABLED ?? "false").trim().toLowerCase() === "true";
 }
 
+/**
+ * Restrict few-shot candidates to human-reviewed documents (`attributes_reviewed
+ * = true`). **Default on** when few-shot is enabled: an anchor is only as good
+ * as the label behind it, and a human-confirmed decision is the trusted signal
+ * we want the LLM to copy — an unreviewed AI guess used as an example just
+ * reinforces the model's own prior. Set `DOCUMENTS_FEWSHOT_REVIEWED_ONLY=false`
+ * to fall back to any classified document (useful before a reviewed corpus
+ * exists).
+ */
+function fewShotReviewedOnly(): boolean {
+  return (process.env.DOCUMENTS_FEWSHOT_REVIEWED_ONLY ?? "true").trim().toLowerCase() !== "false";
+}
+
 /** One neighbour row as returned by the SQL below, before dedup. */
 export interface NeighborRow {
   category_slug: string;
@@ -129,6 +142,8 @@ export async function findNearestClassifiedExamples(
   const { userId, excludeDocumentId, queryVector } = params;
   if (queryVector.length === 0) return [];
   const literal = `[${queryVector.join(",")}]`;
+  // Only anchor on human-confirmed labels by default (see fewShotReviewedOnly).
+  const reviewedFilter = fewShotReviewedOnly() ? sql`AND d.attributes_reviewed = true` : sql``;
 
   const rows = await db.execute<NeighborRow>(sql`
     WITH nearest AS (
@@ -140,6 +155,7 @@ export async function findNearestClassifiedExamples(
         AND d.id <> ${excludeDocumentId}
         AND d.status = 'ready'
         AND d.category_id IS NOT NULL
+        ${reviewedFilter}
       ORDER BY de.embedding <=> ${literal}::vector ASC
       LIMIT ${CANDIDATE_CHUNK_LIMIT}
     ),
