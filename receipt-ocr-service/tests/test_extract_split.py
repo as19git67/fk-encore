@@ -4,7 +4,7 @@ The LLM isn't loaded during unit tests (_state["llm"] is None), so these
 exercise the regex/empty fallback paths of the split functions.
 """
 
-from main import ItemsRequest, ItemsResult, llm_extract_core, llm_extract_items
+from main import ItemsRequest, ItemsResult, _state, llm_extract_core, llm_extract_items
 
 
 def test_llm_extract_core_keys_and_regex_fallback():
@@ -28,3 +28,27 @@ def test_items_request_and_result_defaults():
     r = ItemsResult()
     assert r.items == []
     assert r.processing_ms == 0
+
+
+def test_explicit_bruttoumsatz_overrides_llm_cash_guess():
+    class FakeLlm:
+        def create_chat_completion(self, **_kwargs):
+            return {
+                "choices": [{
+                    "message": {
+                        "content": '{"amount":13.01,"date":null,"store":"Deutsche Post","currency":"EUR"}'
+                    }
+                }]
+            }
+
+    previous = _state["llm"]
+    _state["llm"] = FakeLlm()
+    try:
+        result = llm_extract_core(
+            "Deutsche Post AG\nBruttoumsatz\n*7,69 EUR\n"
+            "20.70 EUR\nBarzahlung\nnsbsn1o13.01EUR\nRückgeld/Auszahlung"
+        )
+    finally:
+        _state["llm"] = previous
+
+    assert result["amount"] == 7.69
