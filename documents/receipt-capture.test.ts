@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildReceiptCapturePlan,
   buildReceiptDocumentCompletion,
+  isReliableReceiptAmount,
 } from "./receipt-capture";
 
 describe("receipt capture queue plan", () => {
@@ -77,5 +78,12 @@ describe("receipt capture queue plan", () => {
 
     expect(completion.title).toMatch(/^Kassenbeleg – Sehr langer Händler/);
     expect(completion.title).toHaveLength(120);
+  });
+
+  it("auto-books only a plausible amount with a reliable assignment", () => {
+    expect(isReliableReceiptAmount(8.80, 0.995)).toBe(true);
+    expect(isReliableReceiptAmount(8.80, 0.55)).toBe(false);
+    expect(isReliableReceiptAmount(null, 0.995)).toBe(false);
+    expect(isReliableReceiptAmount(1000, 0.995)).toBe(false);
   });
 });

@@ -46,6 +46,8 @@ export interface ReceiptOcrResult {
   items: ReceiptItem[];
   raw_text: string;
   ocr_confidence: number;
+  amount_confidence: number;
+  amount_source: string | null;
   processing_ms: number;
   /**
    * Base64-encoded JPEG of the fully prepared receipt scan (cropped,

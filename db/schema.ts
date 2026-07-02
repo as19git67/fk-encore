@@ -809,6 +809,8 @@ export const documentReceiptExtraction = pgTable(
     amount: numeric("amount", { precision: 14, scale: 2 }),
     items: jsonb("items").$type<Array<{ name: string; amount: number }>>().notNull().default([]),
     ocr_confidence: real("ocr_confidence"),
+    amount_confidence: real("amount_confidence"),
+    amount_source: text("amount_source"),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
   },
 );

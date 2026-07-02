@@ -257,6 +257,8 @@ export interface ReceiptOcrResult {
   items: { name: string; amount: number }[]
   raw_text: string
   ocr_confidence: number
+  amount_confidence: number
+  amount_source: string | null
   processing_ms: number
 }
 
