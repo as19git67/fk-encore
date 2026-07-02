@@ -38,6 +38,16 @@ export interface ReceiptItem {
   amount: number;
 }
 
+export interface ReceiptLayoutRow {
+  text: string;
+  cells: Array<{
+    text: string;
+    x: number;
+    width: number;
+    confidence: number;
+  }>;
+}
+
 export interface ReceiptOcrResult {
   amount: number | null;
   date: string | null;
@@ -46,6 +56,9 @@ export interface ReceiptOcrResult {
   items: ReceiptItem[];
   raw_text: string;
   ocr_confidence: number;
+  amount_confidence: number;
+  amount_source: string | null;
+  layout_rows: ReceiptLayoutRow[];
   processing_ms: number;
   /**
    * Base64-encoded JPEG of the fully prepared receipt scan (cropped,
@@ -106,7 +119,10 @@ export async function extractReceipt(
  * `extractReceipt` (`raw_text`). Heavier than the core extraction, so it is run
  * asynchronously and must never block saving a transaction.
  */
-export async function extractReceiptItems(text: string): Promise<ReceiptItemsResult> {
+export async function extractReceiptItems(
+  text: string,
+  layoutRows: ReceiptLayoutRow[] = [],
+): Promise<ReceiptItemsResult> {
   const url = `${RECEIPT_OCR_SERVICE_URL}/extract/items`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
@@ -116,7 +132,7 @@ export async function extractReceiptItems(text: string): Promise<ReceiptItemsRes
     res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, layout_rows: layoutRows }),
       signal: controller.signal,
     });
   } catch (err: any) {

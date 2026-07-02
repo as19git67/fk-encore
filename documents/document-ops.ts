@@ -32,7 +32,10 @@ import { extractPdfText, PdfPasswordRequiredError } from "./text-extract";
 import { buildThumbnail, ensureThumbnail, removeThumbnail } from "./thumbnail";
 import { removeOcrPdf, writeOcrPdf } from "./ocr-pdf";
 import { jpegToReceiptPdf } from "./receipt-pdf";
-import { buildReceiptDocumentCompletion } from "./receipt-capture";
+import {
+  buildReceiptDocumentCompletion,
+  isReliableReceiptAmount,
+} from "./receipt-capture";
 import { deleteJobsForDocument } from "./scan-queue";
 import { checkReceiptEnrichment, createSuggestionsForDocument } from "../finance/document-match.service";
 import {
@@ -820,10 +823,6 @@ export { flattenTaxonomy };
 
 // ─── Receipt-OCR background job ───────────────────────────────────────────────
 
-/** Amount threshold for automatic booking (plan decision §3). */
-const RECEIPT_AUTO_BOOK_MIN = 0;
-const RECEIPT_AUTO_BOOK_MAX = 999;
-
 /**
  * Return today's date as YYYY-MM-DD in local server time.
  * Used to cap the booking date so a receipt can never be booked in the future.
@@ -915,7 +914,7 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
   let items: Array<{ name: string; amount: number }> = [];
   if (core.raw_text) {
     try {
-      const itemsResult = await extractReceiptItems(core.raw_text);
+      const itemsResult = await extractReceiptItems(core.raw_text, core.layout_rows);
       items = itemsResult.items;
     } catch (err) {
       console.warn(
@@ -932,6 +931,8 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
       amount: core.amount != null ? String(core.amount) : null,
       items,
       ocr_confidence: core.ocr_confidence,
+      amount_confidence: core.amount_confidence,
+      amount_source: core.amount_source,
     })
     .onConflictDoUpdate({
       target: documentReceiptExtraction.document_id,
@@ -939,14 +940,13 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
         amount: core.amount != null ? String(core.amount) : null,
         items,
         ocr_confidence: core.ocr_confidence,
+        amount_confidence: core.amount_confidence,
+        amount_source: core.amount_source,
       },
     });
 
   // Determine if the amount is reliable enough for auto-booking.
-  const reliable =
-    core.amount != null &&
-    core.amount > RECEIPT_AUTO_BOOK_MIN &&
-    core.amount <= RECEIPT_AUTO_BOOK_MAX;
+  const reliable = isReliableReceiptAmount(core.amount, core.amount_confidence);
 
   if (!reliable) {
     await finalizeReceiptDocument(

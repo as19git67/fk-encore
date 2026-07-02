@@ -30,6 +30,15 @@ import numpy as np
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
+from receipt_amount import (
+    AmountDecision,
+    VALUE_PATTERN,
+    decide_layout_amount,
+    decide_text_amount,
+    looks_amount_related,
+    parse_amount,
+)
+
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
@@ -387,19 +396,46 @@ def preprocess_image(img_bytes: bytes) -> np.ndarray:
 
 # ─── OCR ─────────────────────────────────────────────────────────────────────
 
-def _reconstruct_visual_lines(lines: list[dict[str, Any]]) -> list[str]:
+def _format_visual_row(items: list[dict[str, Any]]) -> str:
+    """Format one visual row while retaining large column gaps for the LLM."""
+    ordered = sorted(items, key=lambda item: item["left"])
+    parts: list[str] = []
+    previous: dict[str, Any] | None = None
+    for item in ordered:
+        text = item["text"].strip()
+        if not text:
+            continue
+        if previous is not None:
+            gap = item["left"] - previous["right"]
+            typical_height = max(1.0, min(item["height"], previous["height"]))
+            if gap > 2.2 * typical_height:
+                parts.append("|")
+        parts.append(text)
+        previous = item
+    return " ".join(parts)
+
+
+def _build_visual_rows(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Rebuild receipt rows from Paddle's independently detected text boxes.
 
     Paddle commonly returns the product name, quantity and right-aligned price
     as separate boxes.  Treating every box as a newline destroys that spatial
-    relationship before the line-item parser sees it.  Boxes with substantial
-    vertical overlap (or an almost identical baseline) belong to one visual
-    row and are joined from left to right.
+    relationship before the parser sees it. Baselines are more stable than raw
+    overlap when adjacent rows use different font sizes.
     """
     if not lines:
         return []
 
-    boxes = sorted(lines, key=lambda line: (line["top"], line["x"]))
+    normalized_lines: list[dict[str, Any]] = []
+    for source in lines:
+        line = dict(source)
+        points = line.get("box", [])
+        xs = [float(point[0]) for point in points]
+        line.setdefault("left", min(xs) if xs else float(line["x"]))
+        line.setdefault("right", max(xs) if xs else float(line["x"]))
+        line.setdefault("height", max(1.0, line["bottom"] - line["top"]))
+        normalized_lines.append(line)
+    boxes = sorted(normalized_lines, key=lambda line: (line["top"], line["x"]))
     rows: list[dict[str, Any]] = []
 
     for line in boxes:
@@ -407,15 +443,10 @@ def _reconstruct_visual_lines(lines: list[dict[str, Any]]) -> list[str]:
         best_row: dict[str, Any] | None = None
         best_score = -1.0
         for row in rows:
-            overlap = max(
-                0.0,
-                min(line["bottom"], row["bottom"]) - max(line["top"], row["top"]),
-            )
-            overlap_ratio = overlap / min(height, row["height"])
-            center_distance = abs(line["y"] - row["y"])
-            same_baseline = center_distance <= 0.35 * max(height, row["height"])
-            if overlap_ratio >= 0.45 or same_baseline:
-                score = overlap_ratio - center_distance / max(height, row["height"])
+            baseline_distance = abs(line["bottom"] - row["baseline"])
+            same_baseline = baseline_distance <= 0.35 * max(height, row["height"])
+            if same_baseline:
+                score = 1.0 - baseline_distance / max(height, row["height"])
                 if score > best_score:
                     best_row = row
                     best_score = score
@@ -427,6 +458,7 @@ def _reconstruct_visual_lines(lines: list[dict[str, Any]]) -> list[str]:
                 "bottom": line["bottom"],
                 "height": height,
                 "y": line["y"],
+                "baseline": line["bottom"],
             })
             continue
 
@@ -438,25 +470,32 @@ def _reconstruct_visual_lines(lines: list[dict[str, Any]]) -> list[str]:
             sum(item["y"] for item in best_row["lines"])
             / len(best_row["lines"])
         )
+        best_row["baseline"] = (
+            sum(item["bottom"] for item in best_row["lines"])
+            / len(best_row["lines"])
+        )
 
     rows.sort(key=lambda row: row["y"])
-    return [
-        " ".join(
-            item["text"].strip()
-            for item in sorted(row["lines"], key=lambda item: item["x"])
-            if item["text"].strip()
-        )
-        for row in rows
-    ]
+    for row in rows:
+        row["lines"].sort(key=lambda item: item["left"])
+        row["text"] = _format_visual_row(row["lines"])
+    return rows
 
 
-def run_ocr(img: np.ndarray) -> tuple[str, list[dict[str, Any]]]:
-    """Run PaddleOCR and return (full_text, structured_lines)."""
+def _reconstruct_visual_lines(lines: list[dict[str, Any]]) -> list[str]:
+    """Compatibility wrapper used by existing tests and callers."""
+    return [row["text"] for row in _build_visual_rows(lines)]
+
+
+def run_ocr(
+    img: np.ndarray,
+) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
+    """Run PaddleOCR and return text, boxes and reconstructed visual rows."""
     ocr = _state["ocr"]
     result = ocr.ocr(img, cls=True)
 
     if not result or not result[0]:
-        return "", []
+        return "", [], []
 
     lines: list[dict[str, Any]] = []
     for line_info in result[0]:
@@ -472,14 +511,18 @@ def run_ocr(img: np.ndarray) -> tuple[str, list[dict[str, Any]]]:
             "x": float(x_center),
             "top": float(min(ys)),
             "bottom": float(max(ys)),
+            "left": float(min(xs)),
+            "right": float(max(xs)),
+            "height": float(max(ys) - min(ys)),
             "box": box,
         })
 
     # Preserve the boxes for confidence/debugging, but give all downstream
     # parsers text reconstructed as visual receipt rows.
     lines.sort(key=lambda l: (l["y"], l["x"]))
-    full_text = "\n".join(_reconstruct_visual_lines(lines))
-    return full_text, lines
+    rows = _build_visual_rows(lines)
+    full_text = "\n".join(row["text"] for row in rows)
+    return full_text, lines, rows
 
 
 def _crop_to_ocr_content(
@@ -519,50 +562,105 @@ def _crop_to_ocr_content(
     return img[top:bottom, left:right]
 
 
+def _focused_amount_ocr(
+    img: np.ndarray,
+    rows: list[dict[str, Any]],
+) -> AmountDecision:
+    """Retry only the likely totals/payment region with two image variants.
+
+    This intentionally runs only when the first layout decision is uncertain,
+    keeping the normal fast path unchanged. A scaled grayscale pass helps tiny
+    totals; adaptive thresholding helps faint thermal print.
+    """
+    h, w = img.shape[:2]
+    related = [row for row in rows if looks_amount_related(str(row.get("text", "")))]
+    if related:
+        typical_height = float(np.median([row["height"] for row in related]))
+        top = max(0, int(min(row["top"] for row in related) - 2.5 * typical_height))
+        bottom = min(h, int(max(row["bottom"] for row in related) + 3.5 * typical_height))
+    else:
+        # Totals normally sit in the upper two thirds, before tax/footer text.
+        top, bottom = 0, max(1, int(h * 0.68))
+    if bottom - top < 20:
+        return AmountDecision(None, 0.0, "focused:invalid-region")
+
+    region = img[top:bottom, 0:w]
+    scaled = cv2.resize(region, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
+    gray = cv2.cvtColor(scaled, cv2.COLOR_BGR2GRAY)
+    binary = cv2.adaptiveThreshold(
+        gray,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        31,
+        12,
+    )
+    variants = [scaled, cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)]
+    best = AmountDecision(None, 0.0, "focused:unresolved")
+    for variant in variants:
+        try:
+            _text, _lines, focused_rows = run_ocr(variant)
+        except Exception as exc:
+            log.warning("Focused amount OCR failed: %s", exc)
+            continue
+        decision = decide_layout_amount(focused_rows)
+        if decision.amount is not None and decision.confidence > best.confidence:
+            best = AmountDecision(
+                decision.amount,
+                max(0.0, decision.confidence - 0.02),
+                f"focused:{decision.source}",
+            )
+            if best.confidence >= 0.95:
+                break
+    return best
+
+
+def _serialize_layout_rows(
+    rows: list[dict[str, Any]],
+    image_width: int,
+) -> list[dict[str, Any]]:
+    """Return compact normalized geometry safe to pass to item extraction."""
+    width = max(1, image_width)
+    return [
+        {
+            "text": row["text"],
+            "cells": [
+                {
+                    "text": cell["text"],
+                    "x": round(cell["left"] / width, 4),
+                    "width": round((cell["right"] - cell["left"]) / width, 4),
+                    "confidence": round(cell["confidence"], 3),
+                }
+                for cell in row["lines"]
+                if cell["text"].strip()
+            ],
+        }
+        for row in rows
+        if row["text"].strip()
+    ]
+
+
 # ─── Regex extraction (fallback / REGEX_ONLY mode) ──────────────────────────
 
-_VALUE_PATTERN = r"(\d{1,3}(?:[. ]\d{3})*(?:,\d{2})|\d+(?:[.,]\d{2}))"
-
-_STRONG_TOTAL_LABELS = re.compile(
-    r"(?<![a-zA-ZäöüÄÖÜ])"
-    r"(?:gesamt(?:betrag|summe)?|summe|total|zu\s*zahlen|betrag|endsumme|bruttoumsatz)"
-    r"\D{0,40}" + _VALUE_PATTERN,
-    re.IGNORECASE,
-)
-
-_EUR_TOTAL_LABEL = re.compile(
-    r"(?<![a-zA-ZäöüÄÖÜ])eur\b\D{0,40}" + _VALUE_PATTERN,
-    re.IGNORECASE,
-)
+_VALUE_PATTERN = VALUE_PATTERN
 
 _DATE_PATTERN = re.compile(r"(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{2,4})")
 
 
 def _parse_german_amount(raw: str) -> float | None:
-    normalized = re.sub(r"[. ](?=\d{3}(?:\D|$))", "", raw).replace(",", ".")
-    try:
-        n = float(normalized)
-        return n if n > 0 else None
-    except ValueError:
-        return None
+    return parse_amount(raw)
 
 
 def _extract_labeled_total(text: str, *, strong_only: bool = False) -> float | None:
     """Return a deterministically labelled receipt total.
 
-    Strong business labels are safe enough to override an LLM guess.  A bare
-    ``EUR`` label remains useful only for the regex fallback because it can
-    also occur near payment, tax or cash-tendered values.
+    Strong business labels are safe enough to override an LLM guess.
     """
-    patterns = [_STRONG_TOTAL_LABELS]
-    if not strong_only:
-        patterns.append(_EUR_TOTAL_LABEL)
-    for pattern in patterns:
-        match = pattern.search(text)
-        if match and match.group(1):
-            amount = _parse_german_amount(match.group(1))
-            if amount is not None:
-                return amount
+    decision = decide_text_amount(text)
+    if decision.amount is not None and (
+        not strong_only or decision.source.startswith(("label:", "validated:"))
+    ):
+        return decision.amount
     return None
 
 
@@ -650,6 +748,9 @@ Regeln:
 
 Deutsches Kassenbon-Format (typisch):
   [Menge×] [EAN/Barcode] Artikelname [Einzelpreis] [Gesamtpreis] [MwSt-Kz]
+- Das Zeichen "|" markiert eine große horizontale Lücke bzw. Spaltengrenze
+  aus dem Beleglayout. Text und rechts davon stehender Preis gehören weiterhin
+  zur selben visuellen Belegzeile.
 - Lange Ziffernfolgen (8–13 Stellen, EAN/GTIN) vor dem Artikelnamen = Barcode, NICHT Produktname — ignorieren
 - Mengenkennzeichen am Zeilenanfang: "2x", "2 x", "2 ×" — OCR kann "x" als "%" lesen (z.B. "2%")
 - Bei Mehrfachmengen: die Zeile hat Einzelpreis UND Gesamtpreis → nutze den Gesamtpreis (letzter Preis) als amount
@@ -744,13 +845,45 @@ def llm_extract_core(text: str) -> dict[str, Any]:
     return {"amount": amount, "date": date_val, "store": store, "currency": currency.upper()}
 
 
-def llm_extract_items(text: str) -> list[dict[str, Any]]:
+def _layout_text_for_items(
+    text: str,
+    layout_rows: list[dict[str, Any]] | None,
+) -> str:
+    if not layout_rows:
+        return text
+    formatted: list[str] = []
+    for row in layout_rows:
+        cells = row.get("cells", []) if isinstance(row, dict) else []
+        if not isinstance(cells, list):
+            continue
+        parts = []
+        for cell in cells:
+            if not isinstance(cell, dict) or not str(cell.get("text", "")).strip():
+                continue
+            x = cell.get("x")
+            position = f"@{float(x):.2f}" if isinstance(x, (int, float)) else "@?"
+            parts.append(f"{position} {str(cell['text']).strip()}")
+        if parts:
+            formatted.append(" | ".join(parts))
+    if not formatted:
+        return text
+    return "Layout-Zeilen (Position 0=links, 1=rechts):\n" + "\n".join(formatted)
+
+
+def llm_extract_items(
+    text: str,
+    layout_rows: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     """Extract line items from OCR text. Heavier (larger token budget) — meant
     to be called asynchronously, after the core fields have been returned.
     Returns an empty list in regex-only mode or when the LLM is unavailable."""
     if REGEX_ONLY:
         return []
-    data = _llm_json(_EXTRACT_ITEMS_SYSTEM, text, max_tokens=512)
+    data = _llm_json(
+        _EXTRACT_ITEMS_SYSTEM,
+        _layout_text_for_items(text, layout_rows),
+        max_tokens=512,
+    )
     if data is None:
         return []
 
@@ -782,6 +915,9 @@ class ReceiptResult(BaseModel):
     items: list[dict[str, Any]] = Field(default_factory=list)
     raw_text: str = ""
     ocr_confidence: float = 0.0
+    amount_confidence: float = 0.0
+    amount_source: str | None = None
+    layout_rows: list[dict[str, Any]] = Field(default_factory=list)
     processing_ms: int = 0
     # Base64 JPEG of the fully prepared receipt scan: cropped, perspective-
     # corrected, upright, deskewed, denoised and contrast-enhanced. The backend
@@ -809,7 +945,7 @@ async def extract_receipt(file: UploadFile = File(...)) -> ReceiptResult:
     def _pipeline(data: bytes) -> dict[str, Any]:
         storage_img, _geometry_corrected = correct_geometry(data)
         ocr_img = enhance_for_ocr(storage_img)
-        full_text, lines = run_ocr(ocr_img)
+        full_text, lines, rows = run_ocr(ocr_img)
         # Contour detection is deliberately strict. If it cannot see all four
         # paper edges, use Paddle's text geometry to remove the remaining large
         # camera background before persisting the final PDF.
@@ -821,6 +957,9 @@ async def extract_receipt(file: UploadFile = File(...)) -> ReceiptResult:
                 "amount": None, "date": None, "store": None,
                 "currency": "EUR", "items": [], "raw_text": "",
                 "ocr_confidence": 0.0,
+                "amount_confidence": 0.0,
+                "amount_source": None,
+                "layout_rows": [],
                 "corrected_image": processed_image,
             }
 
@@ -835,9 +974,24 @@ async def extract_receipt(file: UploadFile = File(...)) -> ReceiptResult:
         else:
             core = llm_extract_core(full_text)
 
+        amount_decision = decide_layout_amount(rows)
+        if amount_decision.confidence < 0.90:
+            focused_decision = _focused_amount_ocr(ocr_img, rows)
+            if focused_decision.confidence > amount_decision.confidence:
+                amount_decision = focused_decision
+
+        llm_amount = core.get("amount")
+        if amount_decision.amount is None and isinstance(llm_amount, (int, float)):
+            amount_decision = AmountDecision(round(float(llm_amount), 2), 0.55, "llm")
+        if amount_decision.amount is not None:
+            core["amount"] = amount_decision.amount
+
         out: dict[str, Any] = {
             **core, "items": [], "raw_text": full_text,
             "ocr_confidence": round(avg_confidence, 3),
+            "amount_confidence": round(amount_decision.confidence, 3),
+            "amount_source": amount_decision.source,
+            "layout_rows": _serialize_layout_rows(rows, ocr_img.shape[1]),
             "corrected_image": processed_image,
         }
 
@@ -850,15 +1004,19 @@ async def extract_receipt(file: UploadFile = File(...)) -> ReceiptResult:
     elapsed_ms = int((time.monotonic() - t0) * 1000)
     result["processing_ms"] = elapsed_ms
     log.info(
-        "Extracted receipt core: amount=%s date=%s store=%s confidence=%.2f time=%dms",
-        result.get("amount"), result.get("date"), result.get("store"),
-        result.get("ocr_confidence", 0), elapsed_ms,
+        "Extracted receipt core: amount=%s source=%s amount_confidence=%.2f "
+        "ocr_confidence=%.2f date=%s store=%s time=%dms",
+        result.get("amount"), result.get("amount_source"),
+        result.get("amount_confidence", 0),
+        result.get("ocr_confidence", 0), result.get("date"), result.get("store"),
+        elapsed_ms,
     )
     return ReceiptResult(**result)
 
 
 class ItemsRequest(BaseModel):
     text: str = ""
+    layout_rows: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ItemsResult(BaseModel):
@@ -875,7 +1033,7 @@ async def extract_items(req: ItemsRequest) -> ItemsResult:
     text = (req.text or "").strip()
     if not text:
         return ItemsResult(items=[], processing_ms=0)
-    items = await _run_blocking(llm_extract_items, text)
+    items = await _run_blocking(llm_extract_items, text, req.layout_rows)
     elapsed_ms = int((time.monotonic() - t0) * 1000)
     log.info("Extracted %d line items in %dms", len(items), elapsed_ms)
     return ItemsResult(items=items, processing_ms=elapsed_ms)

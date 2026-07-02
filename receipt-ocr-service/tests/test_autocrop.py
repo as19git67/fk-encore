@@ -4,10 +4,12 @@ import base64
 
 import cv2
 import numpy as np
+import main
 
 from main import (
     _crop_to_ocr_content,
     _find_document_quad,
+    _focused_amount_ocr,
     _four_point_warp,
     _hough_line_coords,
     _encode_processed_jpeg,
@@ -127,6 +129,31 @@ def test_ocr_content_fallback_keeps_already_tight_scan():
     cropped = _crop_to_ocr_content(img, lines)
 
     assert cropped.shape == img.shape
+
+
+def test_focused_amount_ocr_uses_scaled_and_thresholded_variants(monkeypatch):
+    calls = []
+
+    def fake_run_ocr(variant):
+        calls.append(variant)
+        rows = [] if len(calls) == 1 else [{"text": "Summe | 8,80"}]
+        return "", [], rows
+
+    monkeypatch.setattr(main, "run_ocr", fake_run_ocr)
+    img = np.full((600, 400, 3), 220, dtype=np.uint8)
+    rows = [{
+        "text": "Sunme",
+        "top": 180,
+        "bottom": 210,
+        "height": 30,
+    }]
+
+    decision = _focused_amount_ocr(img, rows)
+
+    assert len(calls) == 2
+    assert decision.amount == 8.80
+    assert decision.source == "focused:label:same-row"
+    assert decision.confidence == 0.96
 
 
 def test_processed_receipt_jpeg_contains_display_enhancement():
