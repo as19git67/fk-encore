@@ -615,6 +615,31 @@ def _focused_amount_ocr(
     return best
 
 
+def _serialize_layout_rows(
+    rows: list[dict[str, Any]],
+    image_width: int,
+) -> list[dict[str, Any]]:
+    """Return compact normalized geometry safe to pass to item extraction."""
+    width = max(1, image_width)
+    return [
+        {
+            "text": row["text"],
+            "cells": [
+                {
+                    "text": cell["text"],
+                    "x": round(cell["left"] / width, 4),
+                    "width": round((cell["right"] - cell["left"]) / width, 4),
+                    "confidence": round(cell["confidence"], 3),
+                }
+                for cell in row["lines"]
+                if cell["text"].strip()
+            ],
+        }
+        for row in rows
+        if row["text"].strip()
+    ]
+
+
 # ─── Regex extraction (fallback / REGEX_ONLY mode) ──────────────────────────
 
 _VALUE_PATTERN = VALUE_PATTERN
@@ -820,13 +845,45 @@ def llm_extract_core(text: str) -> dict[str, Any]:
     return {"amount": amount, "date": date_val, "store": store, "currency": currency.upper()}
 
 
-def llm_extract_items(text: str) -> list[dict[str, Any]]:
+def _layout_text_for_items(
+    text: str,
+    layout_rows: list[dict[str, Any]] | None,
+) -> str:
+    if not layout_rows:
+        return text
+    formatted: list[str] = []
+    for row in layout_rows:
+        cells = row.get("cells", []) if isinstance(row, dict) else []
+        if not isinstance(cells, list):
+            continue
+        parts = []
+        for cell in cells:
+            if not isinstance(cell, dict) or not str(cell.get("text", "")).strip():
+                continue
+            x = cell.get("x")
+            position = f"@{float(x):.2f}" if isinstance(x, (int, float)) else "@?"
+            parts.append(f"{position} {str(cell['text']).strip()}")
+        if parts:
+            formatted.append(" | ".join(parts))
+    if not formatted:
+        return text
+    return "Layout-Zeilen (Position 0=links, 1=rechts):\n" + "\n".join(formatted)
+
+
+def llm_extract_items(
+    text: str,
+    layout_rows: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     """Extract line items from OCR text. Heavier (larger token budget) — meant
     to be called asynchronously, after the core fields have been returned.
     Returns an empty list in regex-only mode or when the LLM is unavailable."""
     if REGEX_ONLY:
         return []
-    data = _llm_json(_EXTRACT_ITEMS_SYSTEM, text, max_tokens=512)
+    data = _llm_json(
+        _EXTRACT_ITEMS_SYSTEM,
+        _layout_text_for_items(text, layout_rows),
+        max_tokens=512,
+    )
     if data is None:
         return []
 
@@ -860,6 +917,7 @@ class ReceiptResult(BaseModel):
     ocr_confidence: float = 0.0
     amount_confidence: float = 0.0
     amount_source: str | None = None
+    layout_rows: list[dict[str, Any]] = Field(default_factory=list)
     processing_ms: int = 0
     # Base64 JPEG of the fully prepared receipt scan: cropped, perspective-
     # corrected, upright, deskewed, denoised and contrast-enhanced. The backend
@@ -901,6 +959,7 @@ async def extract_receipt(file: UploadFile = File(...)) -> ReceiptResult:
                 "ocr_confidence": 0.0,
                 "amount_confidence": 0.0,
                 "amount_source": None,
+                "layout_rows": [],
                 "corrected_image": processed_image,
             }
 
@@ -932,6 +991,7 @@ async def extract_receipt(file: UploadFile = File(...)) -> ReceiptResult:
             "ocr_confidence": round(avg_confidence, 3),
             "amount_confidence": round(amount_decision.confidence, 3),
             "amount_source": amount_decision.source,
+            "layout_rows": _serialize_layout_rows(rows, ocr_img.shape[1]),
             "corrected_image": processed_image,
         }
 
@@ -956,6 +1016,7 @@ async def extract_receipt(file: UploadFile = File(...)) -> ReceiptResult:
 
 class ItemsRequest(BaseModel):
     text: str = ""
+    layout_rows: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ItemsResult(BaseModel):
@@ -972,7 +1033,7 @@ async def extract_items(req: ItemsRequest) -> ItemsResult:
     text = (req.text or "").strip()
     if not text:
         return ItemsResult(items=[], processing_ms=0)
-    items = await _run_blocking(llm_extract_items, text)
+    items = await _run_blocking(llm_extract_items, text, req.layout_rows)
     elapsed_ms = int((time.monotonic() - t0) * 1000)
     log.info("Extracted %d line items in %dms", len(items), elapsed_ms)
     return ItemsResult(items=items, processing_ms=elapsed_ms)

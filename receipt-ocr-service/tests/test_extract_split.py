@@ -4,7 +4,14 @@ The LLM isn't loaded during unit tests (_state["llm"] is None), so these
 exercise the regex/empty fallback paths of the split functions.
 """
 
-from main import ItemsRequest, ItemsResult, _state, llm_extract_core, llm_extract_items
+from main import (
+    ItemsRequest,
+    ItemsResult,
+    _layout_text_for_items,
+    _state,
+    llm_extract_core,
+    llm_extract_items,
+)
 
 
 def test_llm_extract_core_keys_and_regex_fallback():
@@ -24,10 +31,26 @@ def test_llm_extract_items_empty_without_llm():
 
 def test_items_request_and_result_defaults():
     assert ItemsRequest().text == ""
+    assert ItemsRequest().layout_rows == []
     assert ItemsRequest(text="abc").text == "abc"
     r = ItemsResult()
     assert r.items == []
     assert r.processing_ms == 0
+
+
+def test_item_prompt_preserves_normalized_cell_positions():
+    layout_rows = [{
+        "text": "Vollmilch | 1,29",
+        "cells": [
+            {"text": "Vollmilch", "x": 0.08},
+            {"text": "1,29", "x": 0.82},
+        ],
+    }]
+
+    formatted = _layout_text_for_items("Vollmilch | 1,29", layout_rows)
+
+    assert "@0.08 Vollmilch" in formatted
+    assert "@0.82 1,29" in formatted
 
 
 def test_explicit_bruttoumsatz_overrides_llm_cash_guess():

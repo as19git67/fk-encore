@@ -849,7 +849,7 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
   let items: Array<{ name: string; amount: number }> = [];
   if (core.raw_text) {
     try {
-      const itemsResult = await extractReceiptItems(core.raw_text);
+      const itemsResult = await extractReceiptItems(core.raw_text, core.layout_rows);
       items = itemsResult.items;
     } catch (err) {
       console.warn(
