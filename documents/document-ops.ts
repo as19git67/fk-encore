@@ -142,6 +142,17 @@ async function getDocumentOrThrow(id: number): Promise<DocumentRow> {
 }
 
 /**
+ * Re-read `disk_path` fresh from the DB right before opening the file.
+ * Guards against TOCTOU races where a concurrent `relocateDocument`
+ * moved the file between the initial row fetch and the actual read.
+ */
+async function freshDiskPath(id: number): Promise<string> {
+  const row = await getDocumentOrThrow(id);
+  assertPathUnderDocumentsRoot(row.disk_path);
+  return row.disk_path;
+}
+
+/**
  * Job: `text_extract`.
  * Reads the PDF from disk, extracts text (with OCR fallback), and
  * stores it on the row. Moves the document into `classifying` state
@@ -163,7 +174,8 @@ export async function runTextExtract(documentId: number): Promise<void> {
 
   let result;
   try {
-    result = await extractPdfText(row.disk_path, {
+    const currentPath = await freshDiskPath(documentId);
+    result = await extractPdfText(currentPath, {
       forceOcr: row.force_ocr ?? false,
     });
   } catch (err) {
@@ -779,9 +791,9 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
     throw new ReceiptOcrUnavailableError("receipt-ocr-service health check failed");
   }
 
-  // Read the stored PDF/image from disk.
-  assertPathUnderDocumentsRoot(row.disk_path);
-  const buffer = await fs.readFile(row.disk_path);
+  // Re-read disk_path to guard against concurrent relocateDocument.
+  const currentPath = await freshDiskPath(documentId);
+  const buffer = await fs.readFile(currentPath);
 
   // Receipt captures are stored as PDF (image wrapped in PDF by uploadReceiptCapture),
   // but the receipt-ocr service expects an image. Extract the embedded JPEG so the
