@@ -123,9 +123,11 @@ describe("reconcileSubjectPersonTags", () => {
     expect(out).toEqual([]);
   });
 
-  it("adds the relation tag of a detected person the LLM missed", () => {
+  it("does not auto-add detected persons the LLM intentionally omitted", () => {
+    // The LLM decides who is relevant; the detector only removes hallucinations.
+    // A detected name (e.g. child on a payslip) that the LLM did not tag stays out.
     const out = reconcileSubjectPersonTags(["plymouth"], persons, [4]);
-    expect(out).toEqual(["plymouth", "Mutter"]);
+    expect(out).toEqual(["plymouth"]);
   });
 
   it("leaves documents without Bezugspersonen untouched", () => {
