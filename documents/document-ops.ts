@@ -48,6 +48,7 @@ import {
   type TaxonomyEntry,
 } from "./llm-client";
 import { loadEffectiveTaxSections } from "./tax-hint-overrides";
+import { isValidTaxSectionSlug } from "./tax-sections";
 import { loadSubjectPersonsForMatch } from "./subject-persons";
 import { flattenTaxonomy, taxonomyHints } from "./taxonomy";
 import { matchSenderRule } from "./sender-rules";
@@ -301,6 +302,24 @@ export async function runClassify(documentId: number): Promise<{ classification:
     subjectPersons,
     subjectPersonIds,
   );
+
+  // 6. Rescue tax-section slugs that the LLM put into tags instead of
+  //    tax_sections (e.g. "anlage-n" as a tag on a payslip).
+  const rescuedSections: TaxAssignment[] = [];
+  classification.tags = classification.tags.filter((tag) => {
+    const slug = tag.toLowerCase();
+    if (isValidTaxSectionSlug(slug)) {
+      if (!classification.tax_sections.some((s) => s.slug === slug)) {
+        rescuedSections.push({ slug, confidence: 0.7 });
+      }
+      return false;
+    }
+    return true;
+  });
+  if (rescuedSections.length > 0) {
+    classification.tax_sections = [...classification.tax_sections, ...rescuedSections];
+    classification.tax_relevant = true;
+  }
 
   // Deterministic sender → category routing (see sender-rules.ts). A known
   // recurring institution overrides the LLM's category guess, which otherwise
