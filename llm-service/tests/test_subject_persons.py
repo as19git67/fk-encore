@@ -1,7 +1,12 @@
 """Tests for the Bezugspersonen (subject persons) plumbing in the
-``/classify`` handler — covers the Pydantic schema and the prompt
-outline that is spliced into the user prompt when the caller supplies
-a non-empty ``subject_persons`` list.
+``/classify`` handler — covers the Pydantic schema and the outline that is
+spliced into the user prompt when the caller supplies a non-empty
+``subject_persons`` list.
+
+The system-prompt *text* for this feature no longer lives in main.py — it is
+pushed from the Encore app via ``PUT /prompts`` (see
+``documents/classify-prompts.ts`` and `test_prompts_endpoint.py`), so it is
+no longer a module-level constant to sanity-check here.
 """
 
 from __future__ import annotations
@@ -18,7 +23,6 @@ from main import (  # noqa: E402
     ClassifyRequest,
     SubjectPersonEntry,
     TaxonomyNode,
-    _SUBJECT_PERSONS_SYSTEM_PROMPT,
     _subject_persons_outline,
 )
 
@@ -67,12 +71,3 @@ class TestClassifyRequestSubjectPersons:
         )
         assert len(req.subject_persons) == 1
         assert req.subject_persons[0].relation_tag == "mutter"
-
-
-class TestSubjectPersonsSystemPrompt:
-    def test_mentions_relation_tag_and_address_matching(self):
-        # Sanity: the prompt segment exists and covers the two
-        # behaviours the TypeScript caller relies on (add the tag,
-        # tolerant name matching).
-        assert "Beziehungs-Tag" in _SUBJECT_PERSONS_SYSTEM_PROMPT
-        assert "adressiert" in _SUBJECT_PERSONS_SYSTEM_PROMPT

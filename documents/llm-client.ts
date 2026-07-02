@@ -14,6 +14,7 @@
  * so the scan-worker can defer (not fail) the job and retry later.
  */
 
+import { CLASSIFY_PROMPTS } from "./classify-prompts";
 import { isValidTaxSectionSlug, type TaxSectionGroup } from "./tax-sections";
 
 console.log("[boot] documents/llm-client.ts: all imports resolved");
@@ -121,39 +122,56 @@ export interface EmbedResponse {
   dim: number;
 }
 
-async function postJson<T>(endpoint: string, body: unknown, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> {
+class PromptsNotConfiguredError extends Error {
+  constructor() {
+    super("llm-service: prompts not configured (412)");
+    this.name = "PromptsNotConfiguredError";
+  }
+}
+
+async function fetchJson<T>(
+  method: "POST" | "PUT",
+  endpoint: string,
+  body: unknown,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+): Promise<T> {
   const url = `${LLM_SERVICE_URL}${endpoint}`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let res: Response;
   try {
     res = await fetch(url, {
-      method: "POST",
+      method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
   } catch (err: any) {
-    // Network-level failure or timeout — treat as "service unavailable"
-    // so the worker defers the job instead of marking it failed.
     throw new LlmServiceUnavailableError(
-      `POST ${url} failed: ${err?.message ?? String(err)}`,
+      `${method} ${url} failed: ${err?.message ?? String(err)}`,
     );
   } finally {
     clearTimeout(timer);
   }
 
+  if (res.status === 412) {
+    throw new PromptsNotConfiguredError();
+  }
   if (res.status >= 500 || res.status === 408 || res.status === 429) {
     const detail = await safeBody(res);
     throw new LlmServiceUnavailableError(
-      `POST ${url} returned ${res.status}: ${detail}`,
+      `${method} ${url} returned ${res.status}: ${detail}`,
     );
   }
   if (!res.ok) {
     const detail = await safeBody(res);
-    throw new Error(`POST ${url} returned ${res.status}: ${detail}`);
+    throw new Error(`${method} ${url} returned ${res.status}: ${detail}`);
   }
   return (await res.json()) as T;
+}
+
+function postJson<T>(endpoint: string, body: unknown, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> {
+  return fetchJson("POST", endpoint, body, timeoutMs);
 }
 
 async function safeBody(res: Response): Promise<string> {
@@ -165,8 +183,19 @@ async function safeBody(res: Response): Promise<string> {
   }
 }
 
+async function pushPrompts(): Promise<void> {
+  await fetchJson("PUT", "/prompts", CLASSIFY_PROMPTS);
+}
+
 export async function classifyDocument(req: ClassifyRequest): Promise<Classification> {
-  const raw = await postJson<unknown>("/classify", req);
+  let raw: unknown;
+  try {
+    raw = await postJson<unknown>("/classify", req);
+  } catch (err) {
+    if (!(err instanceof PromptsNotConfiguredError)) throw err;
+    await pushPrompts();
+    raw = await postJson<unknown>("/classify", req);
+  }
   return parseClassification(raw);
 }
 
