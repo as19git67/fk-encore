@@ -151,13 +151,5 @@ export function reconcileSubjectPersonTags(
     seen.add(n);
     out.push(tag.trim());
   }
-  // Make sure every confirmed person's relation tag is present.
-  for (const p of subjectPersons) {
-    if (!detected.has(p.id)) continue;
-    const rt = p.relation_tag.trim();
-    if (rt.length === 0 || seen.has(norm(rt))) continue;
-    seen.add(norm(rt));
-    out.push(rt);
-  }
   return out;
 }
