@@ -9,6 +9,7 @@ from main import (
     _crop_to_ocr_content,
     _find_document_quad,
     _four_point_warp,
+    _hough_line_coords,
     _encode_processed_jpeg,
     _order_quad,
     enhance_for_ocr,
@@ -61,6 +62,21 @@ def test_four_point_warp_crops_to_quad():
     warped = _four_point_warp(img, quad)
     assert warped.shape[0] == 600  # 700 - 100
     assert warped.shape[1] == 360  # 480 - 120
+
+
+def test_hough_line_coords_accepts_opencv4_shape():
+    line = np.array([[10, 20, 110, 22]], dtype=np.int32)
+    assert _hough_line_coords(line) == (10, 20, 110, 22)
+
+
+def test_hough_line_coords_accepts_opencv5_shape():
+    line = np.array([10, 20, 110, 22], dtype=np.int32)
+    assert _hough_line_coords(line) == (10, 20, 110, 22)
+
+
+def test_hough_line_coords_rejects_unexpected_shape():
+    line = np.array([10, 20, 110], dtype=np.int32)
+    assert _hough_line_coords(line) is None
 
 
 def test_preprocess_image_crops_receipt_on_background():

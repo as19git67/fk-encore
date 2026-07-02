@@ -323,6 +323,19 @@ def correct_geometry(img_bytes: bytes) -> tuple[np.ndarray, bool]:
     return img, corrected
 
 
+def _hough_line_coords(line: np.ndarray) -> tuple[int, int, int, int] | None:
+    """Normalize HoughLinesP output across OpenCV 4 and 5.
+
+    OpenCV 4 commonly returns each segment as ``(1, 4)`` while OpenCV 5 may
+    return it directly as ``(4,)``. Flattening makes the deskew path independent
+    of that binding detail.
+    """
+    coords = np.asarray(line).reshape(-1)
+    if coords.size != 4:
+        return None
+    return int(coords[0]), int(coords[1]), int(coords[2]), int(coords[3])
+
+
 def enhance_for_ocr(img: np.ndarray) -> np.ndarray:
     """OCR-specific enhancement of a geometry-corrected image: grayscale,
     denoise, CLAHE and small-angle Hough deskew. Returns a 3-channel image for
@@ -342,7 +355,10 @@ def enhance_for_ocr(img: np.ndarray) -> np.ndarray:
     if lines is not None and len(lines) > 0:
         angles = []
         for line in lines:
-            x1, y1, x2, y2 = line[0]
+            coords = _hough_line_coords(line)
+            if coords is None:
+                continue
+            x1, y1, x2, y2 = coords
             angle = np.degrees(np.arctan2(y2 - y1, x2 - x1))
             if abs(angle) < 15:
                 angles.append(angle)
