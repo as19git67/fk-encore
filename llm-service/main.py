@@ -511,11 +511,16 @@ Felder:
 - category_slug: der am besten passende Slug aus der gegebenen Taxonomie.
   Wenn kein Zweig passt, verwende "sonstiges" und gib eine niedrige confidence.
 - title: kurzer, sprechender Dokumenttitel (max. 80 Zeichen).
-- doc_date: das auf dem Dokument gedruckte Datum (Briefdatum, Rechnungsdatum,
-  Bescheiddatum) als ISO-8601 YYYY-MM-DD. Typische deutsche Formate wie
-  "01.07.2024", "1. Juli 2024", "Juli 2024" (→ Monatserster) erkennen und
-  umwandeln. Bevorzuge das prominenteste/neueste Datum im Kopfbereich. null
-  nur wenn wirklich kein Datum erkennbar ist.
+- doc_date: das inhaltliche Datum des Dokuments als ISO-8601 YYYY-MM-DD.
+  Bei Gehalts-/Entgeltabrechnungen: der Abrechnungsmonat (z.B. "für November
+  2025" → 2025-11-01), NICHT das ELStAM-Lieferdatum, Eintrittsdatum oder
+  "Gilt-ab"-Datum. Bei Rechnungen: Rechnungsdatum. Bei Bescheiden:
+  Bescheiddatum. Bei Kontoauszügen: Auszugsdatum/Enddatum des Zeitraums.
+  Typische deutsche Formate wie "01.07.2024", "1. Juli 2024", "Juli 2024"
+  (→ Monatserster) erkennen und umwandeln. Bevorzuge das für den
+  Dokumentinhalt maßgebliche Datum, nicht administrative Nebendaten
+  (Lieferdatum, Gilt-ab, Eintrittsdatum, Bankleitzahl-Änderung). null nur
+  wenn wirklich kein Datum erkennbar ist.
 - sender: die ausstellende Institution/Organisation oder Person, die das
   Dokument VERSCHICKT bzw. erstellt hat — erkennbar an Briefkopf, Logo oder
   Footer/Impressum (z. B. Versicherung, Behörde, Arztpraxis, Bank). NICHT der
@@ -547,6 +552,13 @@ Wenn das Dokument eine der genannten Personen klar adressiert oder
 inhaltlich betrifft (Patient, Versicherte, Mieter, Empfänger, Betreuter),
 ergänze das passende Beziehungs-Tag in `tags`. Nur wenn der Name
 tatsächlich auf dem Dokument steht — keine Vermutungen.
+
+WICHTIG: Bei Gehalts-/Entgeltabrechnungen ist die betroffene Person der
+Arbeitnehmer (Name im Adressfeld), NICHT die unter "Kinder" oder
+"Kinderfreibetrag" aufgeführten Familienmitglieder. Kindernamen auf
+Lohnabrechnungen dienen nur der Steuerklassenberechnung und machen die
+Kinder nicht zu Betroffenen des Dokuments. Gleiches gilt für
+Ehepartner-Daten bei Zusammenveranlagung.
 
 Adressmatching ist tolerant: Vor- und Nachname in beliebiger Reihenfolge,
 mit oder ohne Anrede ("Frau Erika Mustermann", "Mustermann, Erika"),
@@ -613,6 +625,10 @@ WICHTIGE ABGRENZUNGSREGELN:
   nicht auf Arbeitseinkommen.
 - Anlage N ist ausschließlich für Arbeitseinkommen (Gehalt,
   Lohnsteuerbescheinigung vom Arbeitgeber).
+- MONATLICHE Gehalts-/Entgeltabrechnungen sind NICHT steuerrelevant
+  (tax_relevant=false, tax_sections=[]), weil die Lohnsteuerbescheinigung
+  am Jahresende alle relevanten Daten zusammenfasst. Nur die
+  Lohnsteuerbescheinigung selbst gehört zu „anlage-n".
 
 2) Handwerkerrechnungen:
 - Handwerkerrechnung / Reparaturrechnung für die SELBST BEWOHNTE Wohnung

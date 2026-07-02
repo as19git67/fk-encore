@@ -156,10 +156,10 @@ export async function relocateDocument(documentId: number): Promise<string> {
       await moveFile(oldAbs, target.absPath);
       await pruneEmptyDirs(path.dirname(oldAbs));
     } else if (!fs.existsSync(target.absPath)) {
-      // No source file to move and target doesn't exist yet either —
-      // this happens in the upload path where the DB row is created
-      // after the file has been written to the target directly.
-      // Nothing to do on the fs side.
+      // Source is gone and target doesn't exist — a concurrent relocate
+      // already moved the file elsewhere. Skip the DB update to avoid
+      // pointing disk_path at a nonexistent path.
+      return row.disk_path;
     }
 
     await db

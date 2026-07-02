@@ -48,6 +48,7 @@ import {
   type TaxonomyEntry,
 } from "./llm-client";
 import { loadEffectiveTaxSections } from "./tax-hint-overrides";
+import { isValidTaxSectionSlug } from "./tax-sections";
 import { loadSubjectPersonsForMatch } from "./subject-persons";
 import { flattenTaxonomy, taxonomyHints } from "./taxonomy";
 import { matchSenderRule } from "./sender-rules";
@@ -142,6 +143,17 @@ async function getDocumentOrThrow(id: number): Promise<DocumentRow> {
 }
 
 /**
+ * Re-read `disk_path` fresh from the DB right before opening the file.
+ * Guards against TOCTOU races where a concurrent `relocateDocument`
+ * moved the file between the initial row fetch and the actual read.
+ */
+async function freshDiskPath(id: number): Promise<string> {
+  const row = await getDocumentOrThrow(id);
+  assertPathUnderDocumentsRoot(row.disk_path);
+  return row.disk_path;
+}
+
+/**
  * Job: `text_extract`.
  * Reads the PDF from disk, extracts text (with OCR fallback), and
  * stores it on the row. Moves the document into `classifying` state
@@ -163,7 +175,8 @@ export async function runTextExtract(documentId: number): Promise<void> {
 
   let result;
   try {
-    result = await extractPdfText(row.disk_path, {
+    const currentPath = await freshDiskPath(documentId);
+    result = await extractPdfText(currentPath, {
       forceOcr: row.force_ocr ?? false,
     });
   } catch (err) {
@@ -289,6 +302,24 @@ export async function runClassify(documentId: number): Promise<{ classification:
     subjectPersons,
     subjectPersonIds,
   );
+
+  // 6. Rescue tax-section slugs that the LLM put into tags instead of
+  //    tax_sections (e.g. "anlage-n" as a tag on a payslip).
+  const rescuedSections: TaxAssignment[] = [];
+  classification.tags = classification.tags.filter((tag) => {
+    const slug = tag.toLowerCase();
+    if (isValidTaxSectionSlug(slug)) {
+      if (!classification.tax_sections.some((s) => s.slug === slug)) {
+        rescuedSections.push({ slug, confidence: 0.7 });
+      }
+      return false;
+    }
+    return true;
+  });
+  if (rescuedSections.length > 0) {
+    classification.tax_sections = [...classification.tax_sections, ...rescuedSections];
+    classification.tax_relevant = true;
+  }
 
   // Deterministic sender → category routing (see sender-rules.ts). A known
   // recurring institution overrides the LLM's category guess, which otherwise
@@ -779,9 +810,9 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
     throw new ReceiptOcrUnavailableError("receipt-ocr-service health check failed");
   }
 
-  // Read the stored PDF/image from disk.
-  assertPathUnderDocumentsRoot(row.disk_path);
-  const buffer = await fs.readFile(row.disk_path);
+  // Re-read disk_path to guard against concurrent relocateDocument.
+  const currentPath = await freshDiskPath(documentId);
+  const buffer = await fs.readFile(currentPath);
 
   // Receipt captures are stored as PDF (image wrapped in PDF by uploadReceiptCapture),
   // but the receipt-ocr service expects an image. Extract the embedded JPEG so the
