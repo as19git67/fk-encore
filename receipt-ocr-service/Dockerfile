@@ -45,7 +45,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY --from=builder /install /usr/local
-COPY main.py ./
+COPY main.py receipt_amount.py ./
 COPY download_model.sh /usr/local/bin/download_model.sh
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/download_model.sh /usr/local/bin/entrypoint.sh
