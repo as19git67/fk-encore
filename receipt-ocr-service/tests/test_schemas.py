@@ -23,6 +23,9 @@ class TestReceiptResult:
         assert r.items == []
         assert r.raw_text == ""
         assert r.ocr_confidence == 0.0
+        assert r.amount_confidence == 0.0
+        assert r.amount_source is None
+        assert r.layout_rows == []
         assert r.processing_ms == 0
 
     def test_full_result(self):
@@ -34,10 +37,19 @@ class TestReceiptResult:
             items=[{"name": "Milch", "amount": 1.29}],
             raw_text="REWE\nMilch 1,29\nGesamt 12,99",
             ocr_confidence=0.95,
+            amount_confidence=0.995,
+            amount_source="validated:label+payment:cash-minus-change",
+            layout_rows=[{
+                "text": "Milch | 1,29",
+                "cells": [{"text": "Milch", "x": 0.1}],
+            }],
             processing_ms=3500,
         )
         assert r.amount == 12.99
         assert r.store == "REWE"
+        assert r.amount_confidence == 0.995
+        assert r.amount_source == "validated:label+payment:cash-minus-change"
+        assert len(r.layout_rows) == 1
         assert len(r.items) == 1
 
     def test_none_amount(self):

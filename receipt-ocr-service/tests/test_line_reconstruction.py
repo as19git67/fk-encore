@@ -22,7 +22,7 @@ def test_joins_product_quantity_and_price_on_same_visual_row():
         _line("1,29", 280, 19, 330, 39),
     ]
 
-    assert _reconstruct_visual_lines(lines) == ["1x Vollmilch 1,29"]
+    assert _reconstruct_visual_lines(lines) == ["1x Vollmilch | 1,29"]
 
 
 def test_keeps_neighbouring_receipt_rows_separate():
@@ -34,8 +34,8 @@ def test_keeps_neighbouring_receipt_rows_separate():
     ]
 
     assert _reconstruct_visual_lines(lines) == [
-        "Vollmilch 1,29",
-        "Brot 2,49",
+        "Vollmilch | 1,29",
+        "Brot | 2,49",
     ]
 
 
@@ -45,4 +45,17 @@ def test_tolerates_slightly_skewed_boxes_on_one_row():
         _line("2,99", 280, 25, 330, 45),
     ]
 
-    assert _reconstruct_visual_lines(lines) == ["Äpfel 2,99"]
+    assert _reconstruct_visual_lines(lines) == ["Äpfel | 2,99"]
+
+
+def test_does_not_merge_adjacent_rows_just_because_boxes_overlap():
+    lines = [
+        _line("Coupon 0,98", 40, 20, 210, 48),
+        _line("Summe", 10, 43, 120, 70),
+        _line("8,80", 280, 44, 330, 71),
+    ]
+
+    assert _reconstruct_visual_lines(lines) == [
+        "Coupon 0,98",
+        "Summe | 8,80",
+    ]

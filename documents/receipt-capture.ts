@@ -1,6 +1,9 @@
 import type { DocumentScanService } from "./scan-queue";
 
 const REGULAR_DOCUMENT_SERVICES = ["text_extract", "classify", "embed"] as const;
+const AUTO_BOOK_MIN_AMOUNT = 0;
+const AUTO_BOOK_MAX_AMOUNT = 999;
+const AUTO_BOOK_MIN_CONFIDENCE = 0.85;
 
 export interface ReceiptCapturePlan {
   categoryId: number;
@@ -22,6 +25,16 @@ export interface ReceiptDocumentCompletion {
 export interface ReceiptDocumentMetadata {
   store: string | null;
   receiptDate: string | null;
+}
+
+export function isReliableReceiptAmount(
+  amount: number | null,
+  confidence: number,
+): boolean {
+  return amount != null
+    && amount > AUTO_BOOK_MIN_AMOUNT
+    && amount <= AUTO_BOOK_MAX_AMOUNT
+    && confidence >= AUTO_BOOK_MIN_CONFIDENCE;
 }
 
 /**

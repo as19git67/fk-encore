@@ -257,6 +257,12 @@ export interface ReceiptOcrResult {
   items: { name: string; amount: number }[]
   raw_text: string
   ocr_confidence: number
+  amount_confidence: number
+  amount_source: string | null
+  layout_rows: Array<{
+    text: string
+    cells: Array<{ text: string; x: number; width: number; confidence: number }>
+  }>
   processing_ms: number
 }
 
