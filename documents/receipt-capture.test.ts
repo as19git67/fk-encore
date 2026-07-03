@@ -3,9 +3,18 @@ import {
   buildReceiptCapturePlan,
   buildReceiptDocumentCompletion,
   isReliableReceiptAmount,
+  shouldUseTesseractSidecar,
 } from "./receipt-capture";
 
 describe("receipt capture queue plan", () => {
+  it("never sends PaddleOCR receipts through the Tesseract PDF sidecar", () => {
+    expect(shouldUseTesseractSidecar("pending")).toBe(false);
+    expect(shouldUseTesseractSidecar("booked")).toBe(false);
+    expect(shouldUseTesseractSidecar("incomplete")).toBe(false);
+    expect(shouldUseTesseractSidecar("failed")).toBe(false);
+    expect(shouldUseTesseractSidecar(null)).toBe(true);
+  });
+
   it("fully initialises cash-account receipts before selecting PaddleOCR only", () => {
     const plan = buildReceiptCapturePlan(17, 42);
 
