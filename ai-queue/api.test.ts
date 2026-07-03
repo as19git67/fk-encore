@@ -10,6 +10,7 @@ import {
   getQueueStatus,
   cleanupStaleSlots,
 } from "./api";
+import { registerWaiter, unregisterWaiter, waiterCount } from "./waiters";
 
 beforeEach(async () => {
   await db.execute(sql`DELETE FROM ai_model_slot`);
@@ -78,6 +79,33 @@ describe("releaseSlot", () => {
 
     const poll = await pollSlot({ slotId: second.slotId });
     expect(poll.status).toBe("active");
+  });
+
+  it("wakes the promoted waiter's in-process registration", async () => {
+    const first = await acquireSlot({
+      model: "llm",
+      priority: 2,
+      requester: "a",
+    });
+    const second = await acquireSlot({
+      model: "llm",
+      priority: 2,
+      requester: "b",
+    });
+    expect(second.status).toBe("waiting");
+
+    let woken = false;
+    const wakeup = registerWaiter(second.slotId).then(() => {
+      woken = true;
+    });
+    try {
+      await releaseSlot({ slotId: first.slotId });
+      await wakeup; // resolves only if wakeWaiter fired
+      expect(woken).toBe(true);
+      expect(waiterCount()).toBe(0);
+    } finally {
+      unregisterWaiter(second.slotId);
+    }
   });
 
   it("activates higher priority slot first", async () => {
@@ -252,6 +280,39 @@ describe("cleanupStaleSlots", () => {
 
     const poll = await pollSlot({ slotId: waiting.slotId });
     expect(poll.status).toBe("active");
+  });
+
+  it("wakes the waiter it promotes after clearing a stale slot", async () => {
+    const stale = await acquireSlot({
+      model: "llm",
+      priority: 2,
+      requester: "stale-worker",
+    });
+    const waiting = await acquireSlot({
+      model: "llm",
+      priority: 2,
+      requester: "next-worker",
+    });
+    expect(waiting.status).toBe("waiting");
+
+    await db.execute(sql`
+      UPDATE ai_model_slot
+      SET activated_at = NOW() - INTERVAL '10 minutes'
+      WHERE id = ${stale.slotId}
+    `);
+
+    let woken = false;
+    const wakeup = registerWaiter(waiting.slotId).then(() => {
+      woken = true;
+    });
+    try {
+      await cleanupStaleSlots();
+      await wakeup;
+      expect(woken).toBe(true);
+      expect(waiterCount()).toBe(0);
+    } finally {
+      unregisterWaiter(waiting.slotId);
+    }
   });
 });
 
