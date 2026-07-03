@@ -12,7 +12,7 @@ import Textarea from 'primevue/textarea'
 import Dialog from 'primevue/dialog'
 import DocumentThumbnail from '../../components/DocumentThumbnail.vue'
 import { useConfirm } from 'primevue/useconfirm'
-import { toLocalIsoDate } from '../../utils/dateFormat'
+import { parseLocalDate, toLocalIsoDate } from '../../utils/dateFormat'
 import { useModuleBack } from '../../composables/useModuleBack'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useAccountsStore } from '../../stores/finance/accounts'
@@ -211,7 +211,7 @@ const isDirty = computed(() => {
     formCounterparty.value !== (tx.value.counterparty ?? '') ||
     formPurpose.value !== (tx.value.purpose ?? '') ||
     formAmount.value !== tx.value.amount ||
-    toIso(formBookingDate.value) !== tx.value.booking_date
+    toIso(formBookingDate.value) !== tx.value.booking_date.slice(0, 10)
   )
 })
 
@@ -221,7 +221,7 @@ function syncForm() {
   formCounterparty.value = tx.value.counterparty ?? ''
   formPurpose.value = tx.value.purpose ?? ''
   formAmount.value = tx.value.amount
-  formBookingDate.value = new Date(tx.value.booking_date)
+  formBookingDate.value = parseLocalDate(tx.value.booking_date.slice(0, 10))
 }
 
 async function loadTransaction(id: number) {

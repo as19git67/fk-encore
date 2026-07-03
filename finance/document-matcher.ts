@@ -42,17 +42,34 @@ function tokens(value: string | null | undefined): Set<string> {
 
 /** Extract a German invoice total only when it is explicitly labelled. */
 export function extractDocumentAmount(text: string | null | undefined): number | null {
-  const match = (text ?? '').match(/(?:gesamt(?:betrag|summe)|rechnungsbetrag|zu\s+zahlen)\D{0,24}([0-9]{1,3}(?:[. ][0-9]{3})*(?:,[0-9]{2})|[0-9]+(?:[.,][0-9]{2}))/iu)
+  const match = (text ?? '').match(/(?:\bgesamt(?:betrag|summe)\b|\brechnungsbetrag\b|\bbruttoumsatz\b|\bzu\s+zahlen\b|\bsumme\b|\btotal\b)\D{0,24}([0-9]{1,3}(?:[. ][0-9]{3})*(?:,[0-9]{2})|[0-9]+(?:[.,][0-9]{2}))/iu)
   if (!match) return null
   const normalized = match[1].replace(/[. ](?=\d{3}(?:\D|$))/g, '').replace(',', '.')
   const amount = Number(normalized)
   return Number.isFinite(amount) ? amount : null
 }
 
+/** Prefer the receipt pipeline's structured amount over reparsing OCR text. */
+export function resolveDocumentMatchAmount(
+  structuredAmount: string | number | null | undefined,
+  text: string | null | undefined,
+): number | null {
+  if (structuredAmount !== null && structuredAmount !== undefined) {
+    const amount = Number(structuredAmount)
+    if (Number.isFinite(amount) && amount > 0) return amount
+  }
+  return extractDocumentAmount(text)
+}
+
 export function scoreDocumentMatch(transaction: MatchTransaction, document: MatchDocument): MatchScore {
   const transactionAmount = Math.abs(transaction.amount)
   const documentAmount = document.amount == null ? null : Math.abs(document.amount)
-  const amount = documentAmount == null ? 0 : documentAmount === transactionAmount ? 1 : Math.max(0, 1 - Math.abs(documentAmount - transactionAmount) / Math.max(1, transactionAmount))
+  const amountDifference = documentAmount == null ? null : Math.abs(documentAmount - transactionAmount)
+  const amount = documentAmount == null
+    ? 0
+    : amountDifference! <= 0.01
+      ? 1
+      : Math.max(0, 1 - amountDifference! / Math.max(1, transactionAmount))
   const date = document.documentDate ? Math.max(0, 1 - Math.abs(Date.parse(transaction.bookingDate) - Date.parse(document.documentDate)) / (1000 * 60 * 60 * 24 * 14)) : 0
   const txTokens = new Set([...tokens(transaction.counterparty), ...tokens(transaction.purpose)])
   const docTokens = new Set([...tokens(document.sender), ...tokens(document.text)])
