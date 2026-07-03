@@ -17,6 +17,7 @@ import {
 import { useRealtimeEvent } from '../composables/useRealtime'
 import { useAuthStore } from '../stores/auth'
 import { usePhotoFeedStore } from '../stores/photoFeed'
+import { isAtOrBeforeFeedCursor, mergePhotoFeedItems } from '../utils/photoFeedMerge'
 
 const auth = useAuthStore()
 const feedCache = usePhotoFeedStore()
@@ -221,13 +222,62 @@ async function onHide(item: FeedPhotoItem) {
   }
 }
 
-// Discard the cached page and reload from the top (the "neue Aktivität" pill
-// and any forced refresh). Without clearing, restore-on-mount would bring the
-// stale page back.
+let refreshPromise: Promise<void> | null = null
+let refreshQueued = false
+
+// Refresh only the first page and merge it into the mounted list. Keyed cards
+// keep their DOM/component state, while bumped and newly imported photos move
+// to the top. A burst of realtime events is coalesced into at most one
+// follow-up request so the last event cannot be missed.
 async function refresh() {
-  feedCache.clear()
-  await loadInitial()
-  window.scrollTo({ top: 0 })
+  if (refreshPromise) {
+    refreshQueued = true
+    return refreshPromise
+  }
+
+  refreshPromise = (async () => {
+    do {
+      refreshQueued = false
+      try {
+        const boundary = items.value[0]
+          ? { ts: items.value[0].lastActivityAt, id: items.value[0].photoId }
+          : null
+        const freshItems: FeedPhotoItem[] = []
+        let cursor: PhotoFeedCursor | null = null
+        let firstPageCursor: PhotoFeedCursor | null = null
+
+        do {
+          const res = await listPhotoFeed({
+            limit: PAGE_SIZE,
+            cursorTs: cursor?.ts,
+            cursorId: cursor?.id,
+          })
+          freshItems.push(...res.items)
+          if (cursor === null) firstPageCursor = res.nextCursor
+
+          const reachedBoundary = boundary !== null
+            && res.items.some((item) => isAtOrBeforeFeedCursor(item, boundary))
+          cursor = res.nextCursor
+          if (boundary === null || reachedBoundary) break
+        } while (cursor)
+
+        const wasEmpty = items.value.length === 0
+        items.value = mergePhotoFeedItems(items.value, freshItems)
+        if (wasEmpty) nextCursor.value = firstPageCursor
+        hasNew.value = false
+        error.value = ''
+        feedCache.clear()
+        await nextTick()
+        window.scrollTo({ top: 0 })
+      } catch (err: any) {
+        error.value = err.message || 'Feed konnte nicht aktualisiert werden'
+      }
+    } while (refreshQueued)
+  })().finally(() => {
+    refreshPromise = null
+  })
+
+  return refreshPromise
 }
 
 // Live activity: a bump elsewhere may reorder the feed. Rather than yanking
