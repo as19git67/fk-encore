@@ -14,7 +14,9 @@ from main import (
     _hough_line_coords,
     _encode_processed_jpeg,
     _order_quad,
+    _ocr_quality,
     _prepare_storage_and_ocr_images,
+    _run_ocr_with_fallbacks,
     enhance_for_ocr,
     preprocess_image,
 )
@@ -103,6 +105,79 @@ def _ocr_line(text, left, top, right, bottom, confidence=0.99):
         "confidence": confidence,
         "box": [[left, top], [right, top], [right, bottom], [left, bottom]],
     }
+
+
+def _quality_lines(prefix="Zeile", count=6, confidence=0.95):
+    return [
+        {"text": f"{prefix}-{index}-123456", "confidence": confidence}
+        for index in range(count)
+    ]
+
+
+def test_ocr_quality_discounts_tiny_high_confidence_fragments():
+    tiny = _ocr_quality("SUMME", _quality_lines("X", count=1, confidence=0.99))
+    receipt = _ocr_quality(
+        "\n".join(f"Artikel {index} 1,99" for index in range(8)),
+        _quality_lines(count=8, confidence=0.90),
+    )
+
+    assert tiny[0] < receipt[0]
+
+
+def test_sharp_ocr_result_skips_all_enhanced_fallbacks(monkeypatch):
+    calls = []
+    fallback_builds = []
+
+    def fake_run_ocr(_variant):
+        calls.append("ocr")
+        return "sharp text", _quality_lines(), [{"text": "sharp row"}]
+
+    monkeypatch.setattr(main, "run_ocr", fake_run_ocr)
+    monkeypatch.setattr(
+        main,
+        "_mild_denoised_ocr_variant",
+        lambda _img: fallback_builds.append("mild") or _img,
+    )
+    monkeypatch.setattr(
+        main,
+        "_binary_ocr_variant",
+        lambda _img: fallback_builds.append("binary") or _img,
+    )
+    img = np.full((300, 200, 3), 220, dtype=np.uint8)
+
+    result = _run_ocr_with_fallbacks(img, img)
+
+    assert result[0] == "sharp text"
+    assert len(calls) == 1
+    assert fallback_builds == []
+
+
+def test_weak_sharp_result_uses_better_contrast_fallback(monkeypatch):
+    results = iter([
+        ("weak", [{"text": "x", "confidence": 0.45}], []),
+        ("contrast", _quality_lines(confidence=0.96), [{"text": "contrast row"}]),
+    ])
+    monkeypatch.setattr(main, "run_ocr", lambda _variant: next(results))
+    img = np.full((300, 200, 3), 220, dtype=np.uint8)
+
+    result = _run_ocr_with_fallbacks(img, img)
+
+    assert result[0] == "contrast"
+
+
+def test_all_fallbacks_compete_when_results_remain_uncertain(monkeypatch):
+    results = iter([
+        ("sharp", [{"text": "sharp", "confidence": 0.50}], []),
+        ("contrast", [{"text": "contrast", "confidence": 0.60}], []),
+        ("mild", [{"text": "mild result", "confidence": 0.70}], []),
+        ("binary", _quality_lines("binary", count=4, confidence=0.78), []),
+    ])
+    monkeypatch.setattr(main, "run_ocr", lambda _variant: next(results))
+    img = np.full((300, 200, 3), 220, dtype=np.uint8)
+
+    result = _run_ocr_with_fallbacks(img, img)
+
+    assert result[0] == "binary"
 
 
 def test_ocr_content_fallback_removes_large_camera_border():
