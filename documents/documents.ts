@@ -54,6 +54,7 @@ import {
   updateSubjectPerson,
 } from "./subject-persons";
 import { dropTaxLinks, relocateDocument } from "./relocate";
+import { withDocumentLock } from "./document-lock";
 import { singleJpegPagePdf } from "./receipt-pdf";
 import {
   buildReceiptCapturePlan,
@@ -1906,6 +1907,21 @@ export const reclassifyDocument = api(
 // ─── Replace file ───────────────────────────────────────────────────────────
 
 /**
+ * Re-read `disk_path` straight from the DB and validate it. Used by the
+ * in-place file writers (`replace-file`, `unlock`) right before touching
+ * the file, inside the per-document lock, so they never write to a path
+ * snapshot that a concurrent relocate has since moved.
+ */
+async function freshDocumentDiskPath(id: number): Promise<string> {
+  const row = await dbFirst<{ disk_path: string }>(
+    db.select({ disk_path: documents.disk_path }).from(documents).where(eq(documents.id, id)),
+  );
+  if (!row) throw new Error(`document ${id} not found`);
+  assertPathUnderDocumentsRoot(row.disk_path);
+  return row.disk_path;
+}
+
+/**
  * Replace the PDF on disk for an existing document. Preserves the document
  * record (id, title, category, tags) but overwrites the file and re-queues
  * for full processing. Useful when the original file was lost on disk.
@@ -1970,10 +1986,24 @@ export const replaceDocumentFile = api.raw(
       return;
     }
 
+    // Streaming the upload body above can take seconds, during which a
+    // concurrent relocate may have moved the file. Serialize against it and
+    // re-read `disk_path` fresh inside the lock so the new bytes land on the
+    // file the row currently points at — not a stale snapshot path.
     try {
-      assertPathUnderDocumentsRoot(row.disk_path);
-      await ensureDir(path.dirname(row.disk_path));
-      await fs.promises.writeFile(row.disk_path, buffer);
+      await withDocumentLock(docId, async () => {
+        const diskPath = await freshDocumentDiskPath(docId);
+        await ensureDir(path.dirname(diskPath));
+        await fs.promises.writeFile(diskPath, buffer);
+        await db.update(documents).set({
+          sha256: digest,
+          size_bytes: size,
+          original_filename: originalName,
+          mime_type: mimeType,
+          status: "pending",
+          last_error: null,
+        }).where(eq(documents.id, docId));
+      });
     } catch (err: any) {
       res.statusCode = 500; res.end(JSON.stringify({ error: err?.message ?? "Write failed" })); return;
     }
@@ -1983,14 +2013,6 @@ export const replaceDocumentFile = api.raw(
     await removeOcrPdf(docId);
     await removeThumbnail(docId);
 
-    await db.update(documents).set({
-      sha256: digest,
-      size_bytes: size,
-      original_filename: originalName,
-      mime_type: mimeType,
-      status: "pending",
-      last_error: null,
-    }).where(eq(documents.id, docId));
     await requeueDocument(docId);
     triggerWorkers();
 
@@ -2058,18 +2080,23 @@ export const unlockDocument = api(
       );
     }
 
-    await ensureDir(path.dirname(row.disk_path));
-    await fs.promises.writeFile(row.disk_path, decrypted);
-
-    await db
-      .update(documents)
-      .set({
-        sha256: digest,
-        size_bytes: size,
-        status: "pending",
-        last_error: null,
-      })
-      .where(eq(documents.id, req.id));
+    // Serialize the in-place rewrite against any concurrent relocate and
+    // re-read the path fresh inside the lock (the `row` snapshot may be
+    // stale after decryption ran).
+    await withDocumentLock(req.id, async () => {
+      const diskPath = await freshDocumentDiskPath(req.id);
+      await ensureDir(path.dirname(diskPath));
+      await fs.promises.writeFile(diskPath, decrypted);
+      await db
+        .update(documents)
+        .set({
+          sha256: digest,
+          size_bytes: size,
+          status: "pending",
+          last_error: null,
+        })
+        .where(eq(documents.id, req.id));
+    });
 
     // Derived artifacts were built from the encrypted/old content — drop them.
     await removeOcrPdf(req.id);
