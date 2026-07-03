@@ -246,11 +246,48 @@ function addSelectionToBasket() {
   clearSelection()
 }
 
-/** Put the whole visible result list (current filter/search) into the basket. */
-function addResultsToBasket() {
-  if (items.value.length === 0) return
-  basket.addAll(items.value)
-  info.value = `${items.value.length} Dokument${items.value.length === 1 ? '' : 'e'} in den Basket gelegt.`
+/** Hard ceiling for "alle Treffer in den Basket" — protects the browser
+ *  (sessionStorage + drawer rendering) from a five-digit document corpus. */
+const BASKET_ALL_CAP = 1000
+const addingAllToBasket = ref(false)
+
+/**
+ * Put the whole result list of the current filter/search into the basket —
+ * every match, not just the page currently on screen. List mode pages
+ * through the backend up to BASKET_ALL_CAP; search mode is already capped
+ * at its best SEARCH_LIMIT hits.
+ */
+async function addResultsToBasket() {
+  if (items.value.length === 0 || addingAllToBasket.value) return
+  addingAllToBasket.value = true
+  error.value = ''
+  try {
+    let docs = items.value
+    if (!isSearchActive.value && total.value > items.value.length) {
+      const s = sort.applied.value
+      const all: DocumentSummary[] = [...items.value]
+      while (all.length < Math.min(total.value, BASKET_ALL_CAP)) {
+        const res = await listDocuments({
+          ...currentFilterParams(),
+          sort_by: s.field,
+          sort_dir: s.direction,
+          limit: PAGE_SIZE,
+          offset: all.length,
+        })
+        if (res.items.length === 0) break
+        all.push(...res.items)
+      }
+      docs = all.slice(0, BASKET_ALL_CAP)
+    }
+    basket.addAll(docs)
+    info.value =
+      `${docs.length} Dokument${docs.length === 1 ? '' : 'e'} in den Basket gelegt.` +
+      (total.value > docs.length ? ` (Obergrenze ${BASKET_ALL_CAP} — Filter weiter eingrenzen.)` : '')
+  } catch (err: any) {
+    error.value = err.message || 'Dokumente konnten nicht in den Basket gelegt werden.'
+  } finally {
+    addingAllToBasket.value = false
+  }
 }
 
 function handleBatchTagsCreate(name: string) {
@@ -360,43 +397,82 @@ function syncQueryParams() {
   )
 }
 
+/** One backend page; the API clamps `limit` to 200 per request. */
+const PAGE_SIZE = 200
+/** Best-N cap of the search endpoint (it has no offset paging). */
+const SEARCH_LIMIT = 100
+
+/** Total matching documents (list mode); drives "X von Y" + "Mehr laden". */
+const total = ref(0)
+const loadingMore = ref(false)
+const isSearchActive = computed(() => q.value.trim().length > 0)
+const hasMore = computed(() => !isSearchActive.value && items.value.length < total.value)
+
+function currentFilterParams() {
+  const f = filter.applied.value
+  // Single source for the filter params so search and list stay in sync —
+  // searching used to drop every filter here. (#vxd1qh)
+  return {
+    category: f.category,
+    tags: f.tags?.join(','),
+    status: f.status as DocumentStatus | undefined,
+    needs_review: f.needs_review,
+    unreviewed: f.unreviewed,
+    sender: f.sender,
+    date_from: f.dateFrom,
+    date_to: f.dateTo,
+    tax_relevant: f.taxRelevant,
+    subject_person_id: f.subjectPersonId,
+  }
+}
+
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    const f = filter.applied.value
-    // Single source for the filter params so search and list stay in sync —
-    // searching used to drop every filter here. (#vxd1qh)
-    const filterParams = {
-      category: f.category,
-      tags: f.tags?.join(','),
-      status: f.status as DocumentStatus | undefined,
-      needs_review: f.needs_review,
-      unreviewed: f.unreviewed,
-      sender: f.sender,
-      date_from: f.dateFrom,
-      date_to: f.dateTo,
-      tax_relevant: f.taxRelevant,
-      subject_person_id: f.subjectPersonId,
-    }
-    const isSearch = q.value.trim().length > 0
-    if (isSearch) {
-      const res = await searchDocuments(q.value.trim(), searchMode.value, 100, filterParams)
+    const filterParams = currentFilterParams()
+    if (isSearchActive.value) {
+      const res = await searchDocuments(q.value.trim(), searchMode.value, SEARCH_LIMIT, filterParams)
       items.value = res.items
+      total.value = res.items.length
     } else {
       const s = sort.applied.value
       const res = await listDocuments({
         ...filterParams,
         sort_by: s.field,
         sort_dir: s.direction,
-        limit: 200,
+        limit: PAGE_SIZE,
       })
       items.value = res.items
+      total.value = res.total
     }
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Dokumente'
   } finally {
     loading.value = false
+  }
+}
+
+/** Append the next page (list mode only — search has no offset paging). */
+async function loadMore() {
+  if (loadingMore.value || !hasMore.value) return
+  loadingMore.value = true
+  try {
+    const s = sort.applied.value
+    const res = await listDocuments({
+      ...currentFilterParams(),
+      sort_by: s.field,
+      sort_dir: s.direction,
+      limit: PAGE_SIZE,
+      offset: items.value.length,
+    })
+    const known = new Set(items.value.map((d) => d.id))
+    items.value = [...items.value, ...res.items.filter((d) => !known.has(d.id))]
+    total.value = res.total
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Nachladen der Dokumente'
+  } finally {
+    loadingMore.value = false
   }
 }
 
@@ -623,17 +699,6 @@ onMounted(async () => {
           @click="openSortMenu"
         />
 
-        <Button
-          icon="pi pi-cart-plus"
-          text
-          rounded
-          severity="secondary"
-          aria-label="Trefferliste in den Basket legen"
-          v-tooltip.bottom="'Alle angezeigten Dokumente in den Basket legen'"
-          :disabled="items.length === 0"
-          @click="addResultsToBasket"
-        />
-
         <div class="view-toggle">
           <Button
             icon="pi pi-list"
@@ -728,8 +793,26 @@ onMounted(async () => {
       <template v-else>Noch keine Dokumente vorhanden.</template>
     </div>
 
+    <!-- Result count + whole-result-list basket action -->
+    <div v-if="!loading && items.length > 0" class="results-bar">
+      <span class="results-count">
+        <template v-if="isSearchActive">{{ items.length }} beste Treffer</template>
+        <template v-else-if="total > items.length">{{ items.length }} von {{ total }} Dokumenten</template>
+        <template v-else>{{ items.length }} Dokument{{ items.length === 1 ? '' : 'e' }}</template>
+      </span>
+      <Button
+        :label="`Alle ${isSearchActive ? items.length : Math.min(total, BASKET_ALL_CAP)} in den Basket`"
+        icon="pi pi-cart-plus"
+        size="small"
+        text
+        :loading="addingAllToBasket"
+        v-tooltip.bottom="'Legt die komplette Trefferliste des aktuellen Filters in den Basket — unabhängig von der Auswahl.'"
+        @click="addResultsToBasket"
+      />
+    </div>
+
     <!-- List view -->
-    <div v-else-if="viewMode === 'list'" class="document-list">
+    <div v-if="!loading && items.length > 0 && viewMode === 'list'" class="document-list">
       <div
         v-for="doc in items"
         :key="doc.id"
@@ -793,7 +876,7 @@ onMounted(async () => {
     </div>
 
     <!-- Grid / card view -->
-    <div v-else class="document-grid">
+    <div v-else-if="!loading && items.length > 0" class="document-grid">
       <div
         v-for="doc in items"
         :key="doc.id"
@@ -834,6 +917,18 @@ onMounted(async () => {
           <span v-if="doc.tags.length > 3" class="more-tags">+{{ doc.tags.length - 3 }}</span>
         </div>
       </div>
+    </div>
+
+    <!-- Pagination -->
+    <div v-if="hasMore" class="load-more-row">
+      <Button
+        :label="`Mehr laden (${items.length} von ${total})`"
+        icon="pi pi-angle-down"
+        severity="secondary"
+        outlined
+        :loading="loadingMore"
+        @click="loadMore"
+      />
     </div>
 
     <!-- Dialogs -->
@@ -1027,6 +1122,24 @@ onMounted(async () => {
   text-align: center;
   margin-top: 4rem;
   color: var(--p-text-muted-color);
+}
+
+/* ── Results bar / pagination ──────────────────────────────────── */
+.results-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.results-count {
+  color: var(--p-text-muted-color);
+  font-size: 0.85rem;
+}
+.load-more-row {
+  display: flex;
+  justify-content: center;
+  padding: 0.5rem 0 1rem;
 }
 
 /* ── List view ─────────────────────────────────────────────────── */
