@@ -202,6 +202,13 @@ function toIso(d: Date): string {
   return toLocalIsoDate(d)
 }
 
+function syncBookingDatePickerView() {
+  // PrimeVue 4.5 updates the visible calendar month before it adopts a new
+  // modelValue. Re-emitting the already parsed date when the overlay opens
+  // makes the calendar navigate to the transaction date as well.
+  formBookingDate.value = new Date(formBookingDate.value)
+}
+
 const isDirty = computed(() => {
   if (!tx.value) return false
   if (newTag.value.length > 0) return true
@@ -809,7 +816,13 @@ const extractedFields = computed(() => {
         </dd>
         <dt>Buchungsdatum</dt>
         <dd v-if="isCash">
-          <DatePicker v-model="formBookingDate" date-format="dd.mm.yy" show-icon fluid />
+          <DatePicker
+            v-model="formBookingDate"
+            date-format="dd.mm.yy"
+            show-icon
+            fluid
+            @show="syncBookingDatePickerView"
+          />
         </dd>
         <dd v-else>{{ tx.booking_date }}</dd>
 
