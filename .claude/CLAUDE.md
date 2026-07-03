@@ -1000,6 +1000,8 @@ Build:
 
 **Tests müssen vor jedem `git push` erfolgreich durchlaufen.** Kein Push ohne grüne Tests.
 
+Ausnahme: Betrifft ein Push **ausschließlich Markdown-Dateien** (Doku, Pläne, `*.md`), ist kein Testlauf erforderlich. Sobald auch nur eine Code-, Konfigurations- oder Migrationsdatei geändert ist, gilt die Test-Pflicht uneingeschränkt.
+
 Befehl:
 ```bash
 npm run test
