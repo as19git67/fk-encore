@@ -1,6 +1,7 @@
 import { api } from "encore.dev/api";
 import { sql } from "drizzle-orm";
 import db from "../db/database";
+import { wakeWaiter } from "./waiters";
 
 export type AiModel = "insightface" | "embedding" | "landmark" | "llm";
 
@@ -131,7 +132,7 @@ export const releaseSlot = api(
     const modelName = deleted.rows[0]?.model_name;
     if (!modelName) return;
 
-    await db.execute(sql`
+    const promoted = await db.execute<{ id: number }>(sql`
       UPDATE ai_model_slot
       SET status = 'active', activated_at = NOW()
       WHERE id = (
@@ -141,7 +142,16 @@ export const releaseSlot = api(
         LIMIT 1
         FOR UPDATE SKIP LOCKED
       )
+      RETURNING id
     `);
+
+    // Wake the promoted waiter directly instead of making it poll. Advisory
+    // only: if the waiter is not registered in this process (or already gone),
+    // this is a no-op and its fallback poll picks the promotion up.
+    const promotedId = promoted.rows[0]?.id;
+    if (promotedId != null) {
+      wakeWaiter(Number(promotedId));
+    }
   },
 );
 
@@ -231,7 +241,7 @@ export const cleanupStaleSlots = api(
 
     const affectedModels = new Set(stale.rows.map((r) => r.model_name));
     for (const modelName of affectedModels) {
-      await db.execute(sql`
+      const promoted = await db.execute<{ id: number }>(sql`
         UPDATE ai_model_slot
         SET status = 'active', activated_at = NOW()
         WHERE id = (
@@ -241,7 +251,12 @@ export const cleanupStaleSlots = api(
           LIMIT 1
           FOR UPDATE SKIP LOCKED
         )
+        RETURNING id
       `);
+      const promotedId = promoted.rows[0]?.id;
+      if (promotedId != null) {
+        wakeWaiter(Number(promotedId));
+      }
     }
 
     if (cleaned > 0) {

@@ -1,5 +1,6 @@
 import { aiqueue } from "~encore/clients";
 import type { AiModel } from "./api";
+import { registerWaiter, unregisterWaiter } from "./waiters";
 
 export type { AiModel } from "./api";
 
@@ -14,10 +15,74 @@ const DEFAULT_TIMEOUT_MS = parseInt(
   process.env.AI_QUEUE_SLOT_TIMEOUT_MS ?? "300000",
   10,
 );
-const POLL_INTERVAL_MS = parseInt(
-  process.env.AI_QUEUE_POLL_INTERVAL_MS ?? "1000",
-  10,
-);
+
+// Safety-net poll interval while waiting for a slot. In the normal case the
+// waiter is woken instantly by releaseSlot/cleanup (see ai-queue/waiters.ts),
+// so this only fires if a wakeup was ever lost (bug, or a future multi-process
+// topology). Kept coarse on purpose — it is not the primary progress mechanism.
+// Read per call (not cached at import) so it stays overridable in tests.
+function fallbackPollMs(): number {
+  return parseInt(process.env.AI_QUEUE_FALLBACK_POLL_MS ?? "30000", 10);
+}
+
+/** setTimeout wrapped as a cancelable promise so we never leak a live timer. */
+function sleep(ms: number): { promise: Promise<void>; cancel: () => void } {
+  let handle: ReturnType<typeof setTimeout>;
+  const promise = new Promise<void>((resolve) => {
+    handle = setTimeout(resolve, ms);
+  });
+  return { promise, cancel: () => clearTimeout(handle!) };
+}
+
+/**
+ * Wait until the slot becomes active, driven by a push wakeup rather than a
+ * per-second poll. The DB stays the source of truth: every wakeup (and every
+ * fallback tick) is confirmed with a single pollSlot.
+ *
+ * Race handling: the waiter is registered BEFORE each pollSlot re-check, so a
+ * promotion+wakeup that lands between iterations is never lost — the wakeup
+ * either resolves the current wait or the immediately-following poll observes
+ * `active`.
+ */
+async function waitForActiveSlot(
+  slotId: number,
+  model: AiModel,
+  timeoutMs: number,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    // Register first, then re-check — this closes the window between the
+    // acquireSlot response (or a previous iteration) and registration.
+    const wakeup = registerWaiter(slotId);
+    try {
+      const poll = await aiqueue.pollSlot({ slotId });
+      if (poll.status === "active") return;
+      if (poll.status === "cancelled") {
+        throw new AiSlotTimeoutError(model, timeoutMs);
+      }
+
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        // Give up. cancelSlot removes the row only while it is still `waiting`,
+        // which prevents the finally-releaseSlot in withAiSlot from wrongly
+        // promoting a second active slot. If the slot raced to `active` in the
+        // meantime, cancelSlot is a no-op and withAiSlot's releaseSlot frees it
+        // (and promotes the next waiter) instead.
+        await aiqueue.cancelSlot({ slotId }).catch(() => {});
+        throw new AiSlotTimeoutError(model, timeoutMs);
+      }
+
+      const timer = sleep(Math.min(remaining, fallbackPollMs()));
+      try {
+        await Promise.race([wakeup, timer.promise]);
+      } finally {
+        timer.cancel();
+      }
+    } finally {
+      unregisterWaiter(slotId);
+    }
+  }
+}
 
 export async function withAiSlot<T>(
   model: AiModel,
@@ -27,26 +92,17 @@ export async function withAiSlot<T>(
   timeoutMs = DEFAULT_TIMEOUT_MS,
 ): Promise<T> {
   const slot = await aiqueue.acquireSlot({ model, priority, requester });
-  let slotId = slot.slotId;
+  const slotId = slot.slotId;
 
   try {
     if (slot.status === "waiting") {
-      const deadline = Date.now() + timeoutMs;
-      while (true) {
-        if (Date.now() >= deadline) {
-          await aiqueue.cancelSlot({ slotId }).catch(() => {});
-          throw new AiSlotTimeoutError(model, timeoutMs);
-        }
-        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-        const poll = await aiqueue.pollSlot({ slotId });
-        if (poll.status === "active") break;
-        if (poll.status === "cancelled") {
-          throw new AiSlotTimeoutError(model, timeoutMs);
-        }
-      }
+      await waitForActiveSlot(slotId, model, timeoutMs);
     }
     return await fn();
   } finally {
+    // Frees the slot (and promotes the next waiter) whether we ran, timed out
+    // after racing to active, or fn() threw. A no-op if the row is already gone
+    // (e.g. cancelSlot removed a still-waiting slot on timeout).
     await aiqueue.releaseSlot({ slotId }).catch(() => {});
   }
 }

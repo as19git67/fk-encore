@@ -1,6 +1,9 @@
 # AI-Queue: Push-Wakeup statt Sekunden-Polling
 
-Status: **Entwurf / Plan** — noch nicht umgesetzt.
+Status: **Umgesetzt** — `ai-queue/waiters.ts`, `ai-queue/api.ts`,
+`ai-queue/slot-helper.ts` samt Tests
+(`ai-queue/waiters.test.ts`, `ai-queue/slot-helper.test.ts`, erweiterte
+`ai-queue/api.test.ts`).
 
 ## Problem
 
@@ -155,20 +158,20 @@ Wichtige Race-Betrachtung:
 | --- | --- |
 | Promotion passiert, bevor der Warter registriert ist (zwischen `acquireSlot`-Antwort und `registerWaiter`) | Einmaliger `pollSlot`-Recheck direkt nach der Registrierung (Schritt b) |
 | Wakeup trifft ein, nachdem der Warter per Timeout aufgegeben hat | `wakeWaiter` ist No-op für unregistrierte Slots; der per `cancelSlot` gelöschte bzw. vom Cleanup-Cron abgeräumte Slot blockiert nichts dauerhaft |
-| Timeout und Wakeup gleichzeitig | `withAiSlot` prüft nach dem Race den tatsächlichen DB-Status; gewinnt der Timeout, wird der ggf. schon aktive Slot per `releaseSlot` freigegeben (statt `cancelSlot`, das nur `waiting` löscht) — dadurch rückt sofort der Nächste nach |
+| Timeout und Wakeup gleichzeitig (Slot rast im Timeout-Moment auf `active`) | `waitForActiveSlot` ruft beim Timeout `cancelSlot` — das löscht nur eine noch `waiting`e Zeile und verhindert, dass der `finally`-`releaseSlot` fälschlich einen zweiten aktiven Slot promotet. Ist der Slot schon `active`, ist `cancelSlot` ein No-op und der `finally`-`releaseSlot` in `withAiSlot` gibt ihn frei und promotet den Nächsten. |
 
-Der letzte Punkt ist eine echte Verbesserung gegenüber heute: aktuell
-kann ein Slot, der genau im Timeout-Moment aktiviert wird, vom
-`cancelSlot` (löscht nur `waiting`) nicht entfernt werden und blockiert
-das Modell bis zum Stale-Cleanup (bis zu ~6 min). Der neue Pfad gibt in
-diesem Fall explizit frei.
+Dieses Zusammenspiel (`cancelSlot` für den Waiting-Fall, `finally`-`releaseSlot`
+für den Aktiv-Race) war schon in der Poll-Variante korrekt und bleibt so
+erhalten — `cancelSlot`-vor-`throw` ist dabei lasttragend, weil ein
+`releaseSlot` auf einer noch `waiting`en Zeile sonst einen zweiten aktiven
+Slot promoten würde.
 
 ### 4. Konfiguration
 
 | Variable | vorher | nachher |
 | --- | --- | --- |
-| `AI_QUEUE_POLL_INTERVAL_MS` | 1000 ms aktives Polling | entfällt (bzw. wird als Alias für den Fallback gelesen) |
-| `AI_QUEUE_FALLBACK_POLL_MS` | — | neu, Default 30 000 ms (Sicherheitsnetz) |
+| `AI_QUEUE_POLL_INTERVAL_MS` | 1000 ms aktives Polling | **entfällt** — wird nicht mehr gelesen |
+| `AI_QUEUE_FALLBACK_POLL_MS` | — | neu, Default 30 000 ms (Sicherheitsnetz, pro Warteschritt aus der Env gelesen) |
 | `AI_QUEUE_SLOT_TIMEOUT_MS` | 300 000 ms | unverändert |
 | `AI_QUEUE_STALE_TTL_MINUTES` | 5 min | unverändert (Cleanup-Cron bleibt als Absicherung gegen abgestürzte Inhaber) |
 
