@@ -55,7 +55,10 @@ import {
 } from "./subject-persons";
 import { dropTaxLinks, relocateDocument } from "./relocate";
 import { singleJpegPagePdf } from "./receipt-pdf";
-import { buildReceiptCapturePlan } from "./receipt-capture";
+import {
+  buildReceiptCapturePlan,
+  shouldUseTesseractSidecar,
+} from "./receipt-capture";
 import {
   assertGroupMember,
   loadAdministrableDocument,
@@ -1100,19 +1103,20 @@ export const getDocumentFile = api.raw(
     try {
       const row = await loadVisibleDocument(userId, docId);
       assertPathUnderDocumentsRoot(row.disk_path);
-      // Prefer the generated searchable ("sandwich") PDF when one exists so
-      // the in-app viewer can select/copy text on scanned pages. It is only
-      // present for documents whose original lacked a usable text layer; the
-      // sidecar is always a PDF regardless of the original's mime type.
+      // Prefer the generated searchable ("sandwich") PDF for regular scanned
+      // documents. PaddleOCR receipt captures deliberately serve their sharp
+      // native scan; a legacy Tesseract sidecar must never override it.
       const ocrPath = ocrPdfFilePath(docId);
       let servePath = row.disk_path;
       let serveType = row.mime_type || "application/pdf";
-      try {
-        await fs.promises.access(ocrPath, fs.constants.R_OK);
-        servePath = ocrPath;
-        serveType = "application/pdf";
-      } catch {
-        /* no sidecar — serve the original */
+      if (shouldUseTesseractSidecar(row.receipt_ocr_state)) {
+        try {
+          await fs.promises.access(ocrPath, fs.constants.R_OK);
+          servePath = ocrPath;
+          serveType = "application/pdf";
+        } catch {
+          /* no sidecar — serve the original */
+        }
       }
       const stat = await fs.promises.stat(servePath);
       res.statusCode = 200;
@@ -1141,11 +1145,10 @@ export const getDocumentFile = api.raw(
  * bytes inline for the viewer), this sets `Content-Disposition: attachment`
  * so the browser saves it under the original filename.
  *
- * The downloaded file always carries a selectable text layer: when the
- * original lacks one (image-only scan), a searchable ("sandwich") PDF is
- * built on demand and cached, so even documents imported before the OCR
- * pipeline gained this feature export with a text layer. Born-digital PDFs
- * are served as-is (already selectable).
+ * Regular scanned documents carry a selectable text layer: when the original
+ * lacks one, a searchable ("sandwich") PDF is built on demand and cached.
+ * PaddleOCR receipt captures are excluded because rasterizing their prepared
+ * scan through Tesseract visibly reduces thermal-print detail.
  */
 export const downloadDocument = api.raw(
   { expose: true, method: "GET", path: "/documents/:id/download", auth: true },
@@ -1185,12 +1188,14 @@ export const downloadDocument = api.raw(
       const row = await loadVisibleDocument(userId, docId);
       assertPathUnderDocumentsRoot(row.disk_path);
 
-      // Build (or reuse) the searchable sidecar so the exported file always
-      // has a text layer. Returns null for born-digital PDFs (already
-      // selectable) or when OCR produced nothing — fall back to the original.
+      // Build (or reuse) the searchable sidecar for regular documents. Receipt
+      // captures already have PaddleOCR text in their metadata and retain the
+      // original prepared scan without a second OCR/rasterization pass.
       let servePath = row.disk_path;
       let serveType = row.mime_type || "application/pdf";
-      const ocrPath = await ensureSearchablePdf(docId, row.disk_path);
+      const ocrPath = shouldUseTesseractSidecar(row.receipt_ocr_state)
+        ? await ensureSearchablePdf(docId, row.disk_path)
+        : null;
       if (ocrPath) {
         servePath = ocrPath;
         serveType = "application/pdf";

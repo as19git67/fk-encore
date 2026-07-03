@@ -27,6 +27,18 @@ export interface ReceiptDocumentMetadata {
   receiptDate: string | null;
 }
 
+/**
+ * Cash-account receipt captures already carry PaddleOCR text and must retain
+ * their native-resolution scan. Running the generic Tesseract sandwich-PDF
+ * path would duplicate OCR and rasterize the stored PDF at the document-wide
+ * OCR DPI, visibly softening thermal-print details.
+ */
+export function shouldUseTesseractSidecar(
+  receiptOcrState: string | null,
+): boolean {
+  return receiptOcrState == null;
+}
+
 export function isReliableReceiptAmount(
   amount: number | null,
   confidence: number,
