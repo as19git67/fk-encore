@@ -36,6 +36,7 @@ import {
   resolveTaxLinkPath,
   slugifyUserLogin,
 } from "./documents.service";
+import { withDocumentLock } from "./document-lock";
 
 console.log("[boot] documents/relocate.ts: all imports resolved");
 
@@ -126,6 +127,13 @@ async function loadCategoryChain(leafId: number): Promise<string[] | null> {
  * caller can persist it back to `documents.disk_path`.
  */
 export async function relocateDocument(documentId: number): Promise<string> {
+  // Serialize against every other file+disk_path mutation for this
+  // document so a concurrent relocate/replace can't move the file out
+  // from under us (see document-lock.ts).
+  return withDocumentLock(documentId, () => relocateDocumentLocked(documentId));
+}
+
+async function relocateDocumentLocked(documentId: number): Promise<string> {
   const row = await dbFirst<DocumentRow>(
     db.select().from(documents).where(eq(documents.id, documentId)),
   );
@@ -155,10 +163,19 @@ export async function relocateDocument(documentId: number): Promise<string> {
     if (oldAbs && fs.existsSync(oldAbs)) {
       await moveFile(oldAbs, target.absPath);
       await pruneEmptyDirs(path.dirname(oldAbs));
-    } else if (!fs.existsSync(target.absPath)) {
-      // Source is gone and target doesn't exist — a concurrent relocate
-      // already moved the file elsewhere. Skip the DB update to avoid
-      // pointing disk_path at a nonexistent path.
+    }
+
+    // Invariant: `disk_path` must always point at a file that exists.
+    // Only commit the new path once the file is provably sitting at the
+    // target — either we just moved it there, or it was already there.
+    // Otherwise (source gone, nothing at target — e.g. a concurrent
+    // relocate already moved the file elsewhere) leave `disk_path`
+    // untouched so we never record a phantom path.
+    if (!fs.existsSync(target.absPath)) {
+      console.warn(
+        `[documents] relocate(${documentId}): no file at source or target — ` +
+          `keeping disk_path=${row.disk_path}`,
+      );
       return row.disk_path;
     }
 
