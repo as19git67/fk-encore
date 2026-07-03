@@ -14,6 +14,7 @@ from main import (
     _hough_line_coords,
     _encode_processed_jpeg,
     _order_quad,
+    _prepare_storage_and_ocr_images,
     enhance_for_ocr,
     preprocess_image,
 )
@@ -156,13 +157,14 @@ def test_focused_amount_ocr_uses_scaled_and_thresholded_variants(monkeypatch):
     assert decision.confidence == 0.96
 
 
-def test_processed_receipt_jpeg_contains_display_enhancement():
+def test_processed_receipt_jpeg_preserves_storage_pixels_not_ocr_variant():
     gradient = np.tile(np.linspace(145, 205, 320, dtype=np.uint8), (480, 1))
     img = cv2.cvtColor(gradient, cv2.COLOR_GRAY2BGR)
-    cv2.putText(img, "SUMME 12,34", (35, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (115, 115, 115), 2)
+    img[:, :, 2] = np.clip(img[:, :, 2].astype(int) + 30, 0, 255).astype(np.uint8)
+    cv2.putText(img, "SUMME 12,34", (35, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (60, 90, 120), 2)
 
-    enhanced = enhance_for_ocr(img)
-    encoded = _encode_processed_jpeg(enhanced)
+    storage, ocr = _prepare_storage_and_ocr_images(img)
+    encoded = _encode_processed_jpeg(storage)
     assert encoded is not None
 
     decoded = cv2.imdecode(
@@ -170,5 +172,7 @@ def test_processed_receipt_jpeg_contains_display_enhancement():
         cv2.IMREAD_COLOR,
     )
     assert decoded.shape == img.shape
-    assert np.max(np.abs(decoded[:, :, 0].astype(int) - decoded[:, :, 1].astype(int))) <= 2
-    assert np.max(np.abs(decoded[:, :, 1].astype(int) - decoded[:, :, 2].astype(int))) <= 2
+    # The persisted scan remains colour; the Paddle working copy is grayscale.
+    assert np.mean(np.abs(decoded[:, :, 2].astype(int) - decoded[:, :, 0].astype(int))) > 20
+    assert np.max(np.abs(ocr[:, :, 0].astype(int) - ocr[:, :, 1].astype(int))) <= 2
+    assert np.max(np.abs(ocr[:, :, 1].astype(int) - ocr[:, :, 2].astype(int))) <= 2

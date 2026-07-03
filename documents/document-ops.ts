@@ -897,8 +897,9 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
   // Stage 1: core extraction (amount / date / store).
   const core = await extractReceipt(ocrBuffer, ocrFilename, ocrMimeType);
 
-  // Replace the stored PDF with the service's complete scan preparation:
-  // crop/perspective, orientation, fine deskew, denoise and contrast.
+  // Replace the stored PDF with the service's display preparation: crop,
+  // perspective correction, orientation and fine deskew. OCR-only denoising
+  // and contrast enhancement stay in Paddle's private working copy.
   // Best-effort: failures here must never block booking.
   if (core.corrected_image && row.mime_type === "application/pdf") {
     try {
@@ -1063,10 +1064,11 @@ async function finalizeReceiptDocument(
 /**
  * Replace a receipt document's stored PDF with the service-corrected image.
  *
- * The receipt-ocr service returns a cropped, perspective-corrected, upright,
- * deskewed, denoised and contrast-enhanced JPEG (base64). We wrap it back into
- * the same single-page PDF the upload path produces, overwrite the file in
- * place, and refresh derived artifacts so the viewer shows the prepared scan.
+ * The receipt-ocr service returns a cropped, perspective-corrected, upright
+ * and deskewed JPEG (base64) retaining the source colour pixels. We wrap it
+ * back into the same single-page PDF the upload path produces, overwrite the
+ * file in place, and refresh derived artifacts so the viewer shows the sharp
+ * prepared scan rather than Paddle's denoised OCR working copy.
  *
  * No-ops silently when the corrected image collides with another document's
  * content (the unique sha256 constraint) — the original file is kept.
