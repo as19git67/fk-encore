@@ -36,6 +36,11 @@ export interface DocumentSummary {
   group_id: number | null
   /** Free-form human notes (shared document metadata). */
   notes: string | null
+  /**
+   * True when a human pinned the editable attributes. `false` on a ready
+   * document marks it as "new": AI-only attribution awaiting approval (#635).
+   */
+  attributes_reviewed: boolean
 }
 
 export interface DocumentTaxSection {
@@ -59,8 +64,6 @@ export interface DocumentDetail extends DocumentSummary {
   tax_reviewed: boolean
   tax_year_confidence: number | null
   tax_sections: DocumentTaxSection[]
-  /** True when a human pinned the editable attributes against re-classify. */
-  attributes_reviewed: boolean
   /** Bezugspersonen this document concerns. */
   subject_persons: DocumentSubjectPerson[]
 }
@@ -109,6 +112,8 @@ export interface ListDocumentsQuery {
    * status='ready' with classification_confidence below 0.6.
    */
   needs_review?: boolean
+  /** Keep only "new" documents: ready with unapproved AI attribution (#635). */
+  unreviewed?: boolean
   sender?: string
   date_from?: string
   date_to?: string
@@ -198,6 +203,7 @@ export type DocumentFilterParams = Pick<
   | 'tags'
   | 'status'
   | 'needs_review'
+  | 'unreviewed'
   | 'sender'
   | 'date_from'
   | 'date_to'
@@ -386,6 +392,8 @@ export interface BatchUpdateAttributesPayload {
   category_slug?: string | null
   /** New document date (`YYYY-MM-DD`); `null` clears it. Omit to leave untouched. */
   doc_date?: string | null
+  /** Approve (`true`) or un-pin (`false`) the AI attribution without edits (#635). */
+  attributes_reviewed?: boolean
 }
 
 /** Set category and/or document date on many documents (pins the attributes). */

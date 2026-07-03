@@ -267,6 +267,31 @@ async function saveTax() {
   }
 }
 
+// ─── Approve AI attribution (issue #635) ────────────────────────────────────
+
+const approving = ref(false)
+const newCount = computed(
+  () => items.value.filter((d) => d.status === 'ready' && !d.attributes_reviewed).length,
+)
+
+/** Pin the attributes of every basket document — clears their "Neu" marker. */
+async function approveAttribution() {
+  approving.value = true
+  resetMessages()
+  try {
+    const res = await batchUpdateDocumentAttributes({
+      document_ids: selectionStore.ids as number[],
+      attributes_reviewed: true,
+    })
+    for (const d of items.value) d.attributes_reviewed = true
+    reportDone(res.affected_documents, 'Bestätigung')
+  } catch (err) {
+    reportError(err)
+  } finally {
+    approving.value = false
+  }
+}
+
 // ─── Subject persons (Bezugspersonen) ───────────────────────────────────────
 
 const personsDialogVisible = ref(false)
@@ -346,7 +371,14 @@ async function savePersons() {
             :aria-label="`Dokument öffnen: ${doc.title ?? doc.original_filename}`"
             @click="openDocument(doc)"
           >
-            <div class="basket-row-title">{{ doc.title ?? doc.original_filename }}</div>
+            <div class="basket-row-title">
+              {{ doc.title ?? doc.original_filename }}
+              <span
+                v-if="doc.status === 'ready' && !doc.attributes_reviewed"
+                class="new-badge"
+                title="KI-Zuordnung noch nicht bestätigt"
+              >Neu</span>
+            </div>
             <div class="basket-row-meta">
               <span v-if="doc.sender">{{ doc.sender }}</span>
               <span v-if="doc.doc_date">{{ formatDate(doc.doc_date) }}</span>
@@ -377,6 +409,19 @@ async function savePersons() {
           <div v-if="canEdit" class="action-row">
             <Button label="Steuer" icon="pi pi-calculator" size="small" severity="secondary" outlined :disabled="count === 0" @click="openTaxDialog" />
             <Button label="Personen" icon="pi pi-id-card" size="small" severity="secondary" outlined :disabled="count === 0" @click="openPersonsDialog" />
+          </div>
+          <div v-if="canEdit" class="action-row">
+            <Button
+              :label="newCount > 0 ? `Zuordnung bestätigen (${newCount} neu)` : 'Zuordnung bestätigen'"
+              icon="pi pi-check-circle"
+              size="small"
+              severity="success"
+              outlined
+              :disabled="count === 0"
+              :loading="approving"
+              v-tooltip.bottom="'KI-Zuordnung aller Dokumente im Basket bestätigen — fixiert die Attribute und entfernt das Neu-Kennzeichen.'"
+              @click="approveAttribution"
+            />
           </div>
           <div class="clear-row">
             <Button
@@ -612,6 +657,17 @@ async function savePersons() {
 }
 .tax-badge {
   color: var(--p-primary-color);
+}
+.new-badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--p-primary-color);
+  background: var(--p-highlight-background);
+  vertical-align: text-bottom;
 }
 .basket-row-remove {
   background: none;

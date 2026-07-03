@@ -143,6 +143,28 @@ describe("documents.batch-ops batchSetAttributes", () => {
     expect((await docRow(foreign)).doc_date).toBeNull();
   });
 
+  it("approves the AI attribution flag-only, and can hand it back (issue #635)", async () => {
+    const a = await insertDoc();
+    const b = await insertDoc();
+
+    // Approve without touching any attribute — the "new" marker disappears.
+    const affected = await batchSetAttributes(USER_ID, [a, b], {
+      attributes_reviewed: true,
+    });
+    expect(affected).toBe(2);
+    for (const id of [a, b]) {
+      const row = await docRow(id);
+      expect(row.attributes_reviewed).toBe(true);
+      expect(row.category_id).toBeNull();
+      expect(row.doc_date).toBeNull();
+    }
+
+    // Hand back to the classifier ("let the AI decide again").
+    await batchSetAttributes(USER_ID, [a], { attributes_reviewed: false });
+    expect((await docRow(a)).attributes_reviewed).toBe(false);
+    expect((await docRow(b)).attributes_reviewed).toBe(true);
+  });
+
   it("rejects an unknown category slug and malformed dates", async () => {
     const a = await insertDoc();
     await expect(

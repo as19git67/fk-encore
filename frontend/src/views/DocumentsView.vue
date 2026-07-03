@@ -277,6 +277,11 @@ function handleBatchReprocessDone(payload: { affected: number }) {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+/** "New" = ready, but no human has approved the AI attribution yet (#635). */
+function isNew(doc: DocumentSummary): boolean {
+  return doc.status === 'ready' && !doc.attributes_reviewed
+}
+
 const LOW_CONFIDENCE_THRESHOLD = 0.6
 function isLowConfidence(doc: DocumentSummary): boolean {
   return (
@@ -335,6 +340,7 @@ function syncQueryParams() {
   if (fq.tags && fq.tags.length > 0) query.tags = fq.tags.join(',')
   if (fq.status) query.status = fq.status
   if (fq.needs_review) query.review = '1'
+  if (fq.unreviewed) query.neu = '1'
   if (fq.sender) query.sender = fq.sender
   if (fq.dateFrom) query.dateFrom = fq.dateFrom
   if (fq.dateTo) query.dateTo = fq.dateTo
@@ -366,6 +372,7 @@ async function load() {
       tags: f.tags?.join(','),
       status: f.status as DocumentStatus | undefined,
       needs_review: f.needs_review,
+      unreviewed: f.unreviewed,
       sender: f.sender,
       date_from: f.dateFrom,
       date_to: f.dateTo,
@@ -697,6 +704,12 @@ onMounted(async () => {
         removable
         @remove="filter.removeKey(['needs_review'])"
       />
+      <Chip
+        v-if="filter.applied.value.unreviewed"
+        label="Nur neue"
+        removable
+        @remove="filter.removeKey(['unreviewed'])"
+      />
       <Button
         label="Alle Filter löschen"
         text
@@ -744,6 +757,13 @@ onMounted(async () => {
             {{ doc.title || doc.original_filename }}
           </button>
           <Tag :severity="statusSeverity(doc.status)" :value="statusLabel(doc.status)" />
+          <Tag
+            v-if="isNew(doc)"
+            severity="info"
+            icon="pi pi-sparkles"
+            value="Neu"
+            v-tooltip.bottom="'KI-Zuordnung noch nicht bestätigt — über den Basket oder die Detailansicht bestätigen.'"
+          />
           <Tag
             v-if="isLowConfidence(doc)"
             severity="warn"
@@ -800,6 +820,7 @@ onMounted(async () => {
           :severity="statusSeverity(doc.status)"
           :value="statusLabel(doc.status)"
         />
+        <Tag v-if="isNew(doc)" class="grid-card-status" severity="info" value="Neu" />
         <div class="grid-card-title">{{ doc.title || doc.original_filename }}</div>
         <div class="grid-card-meta">
           <span v-if="doc.sender">{{ doc.sender }}</span>

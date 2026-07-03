@@ -94,6 +94,13 @@ export interface BatchAttributesPatch {
   category_slug?: string | null;
   /** New document date (`YYYY-MM-DD`); `null` clears it. `undefined` = untouched. */
   doc_date?: string | null;
+  /**
+   * Explicitly set the "human-pinned attributes" flag without changing any
+   * attribute. `true` approves the AI attribution of "new" documents in one
+   * go (issue #635); `false` hands them back to the classifier. Editing
+   * category / doc_date already pins implicitly, mirroring the single PATCH.
+   */
+  attributes_reviewed?: boolean;
 }
 
 /**
@@ -106,11 +113,19 @@ export async function batchSetAttributes(
   ids: readonly number[],
   patch: BatchAttributesPatch,
 ): Promise<number> {
-  if (patch.category_slug === undefined && patch.doc_date === undefined) {
-    throw APIError.invalidArgument("at least one of category_slug / doc_date required");
+  if (
+    patch.category_slug === undefined &&
+    patch.doc_date === undefined &&
+    patch.attributes_reviewed === undefined
+  ) {
+    throw APIError.invalidArgument(
+      "at least one of category_slug / doc_date / attributes_reviewed required",
+    );
   }
 
-  const set: Partial<typeof documents.$inferInsert> = { attributes_reviewed: true };
+  const set: Partial<typeof documents.$inferInsert> = {
+    attributes_reviewed: patch.attributes_reviewed ?? true,
+  };
 
   if (patch.category_slug !== undefined) {
     if (patch.category_slug === null || patch.category_slug === "") {
@@ -144,7 +159,11 @@ export async function batchSetAttributes(
   if (docIds.length === 0) return 0;
 
   await db.update(documents).set(set).where(inArray(documents.id, docIds));
-  await relocateAll(docIds);
+  // Only category / doc_date feed the canonical path; merely toggling the
+  // reviewed flag never moves files (mirrors the single-document PATCH).
+  if (patch.category_slug !== undefined || patch.doc_date !== undefined) {
+    await relocateAll(docIds);
+  }
   return docIds.length;
 }
 
@@ -310,6 +329,7 @@ function requireDocumentIds(req: BatchDocumentIdsRequest): number[] {
 export interface BatchUpdateAttributesRequest extends BatchDocumentIdsRequest {
   category_slug?: string | null;
   doc_date?: string | null;
+  attributes_reviewed?: boolean;
 }
 
 export const batchUpdateAttributes = api(
@@ -320,6 +340,7 @@ export const batchUpdateAttributes = api(
     const affected = await batchSetAttributes(getUserId(), requireDocumentIds(req), {
       category_slug: req.category_slug,
       doc_date: req.doc_date,
+      attributes_reviewed: req.attributes_reviewed,
     });
     return { affected_documents: affected };
   },
