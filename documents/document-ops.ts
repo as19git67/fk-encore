@@ -42,6 +42,7 @@ import {
   assertPathUnderDocumentsRoot,
 } from "./documents.service";
 import { relocateDocument } from "./relocate";
+import { withDocumentLock } from "./document-lock";
 import {
   classifyDocument,
   embedTexts,
@@ -1091,18 +1092,23 @@ async function replaceStoredReceiptImage(
   );
   if (duplicate) return;
 
-  assertPathUnderDocumentsRoot(row.disk_path);
-  await fs.writeFile(row.disk_path, pdf);
+  // Serialize against any concurrent relocate/replace and re-read the
+  // path fresh inside the lock: the `row` snapshot may be stale if a
+  // relocate moved the file since this job started.
+  const writtenPath = await withDocumentLock(row.id, async () => {
+    const diskPath = await freshDiskPath(row.id);
+    await fs.writeFile(diskPath, pdf);
+    await db.update(documents)
+      .set({ sha256: digest, size_bytes: pdf.length })
+      .where(eq(documents.id, row.id));
+    return diskPath;
+  });
 
   await removeOcrPdf(row.id);
   await removeThumbnail(row.id);
 
-  await db.update(documents)
-    .set({ sha256: digest, size_bytes: pdf.length })
-    .where(eq(documents.id, row.id));
-
   // Rebuild the thumbnail eagerly from the new file (best-effort).
-  await buildThumbnail(row.id, row.disk_path).catch(() => {});
+  await buildThumbnail(row.id, writtenPath).catch(() => {});
 }
 
 /**
