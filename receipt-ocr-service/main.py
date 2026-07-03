@@ -1,8 +1,8 @@
 """Fast receipt OCR service: image preprocessing + PaddleOCR + small LLM.
 
-Pipeline per request (~3-7 s on CPU):
-  1. Image preprocessing (OpenCV: resize, grayscale, denoise, deskew)
-  2. Text detection + recognition via PaddleOCR (PP-OCRv4, Latin)
+Pipeline per request (~3-7 s on CPU for the normal sharp-image path):
+  1. Geometry correction and deskew, retaining the sharp colour scan
+  2. Text recognition via PaddleOCR; enhanced variants only on weak results
   3. Structured field extraction via small LLM (Qwen2.5-3B-Instruct)
   4. JSON response: amount, date, store, currency, items, raw_text
 
@@ -345,22 +345,29 @@ def _hough_line_coords(line: np.ndarray) -> tuple[int, int, int, int] | None:
     return int(coords[0]), int(coords[1]), int(coords[2]), int(coords[3])
 
 
-def enhance_for_ocr(img: np.ndarray) -> np.ndarray:
-    """OCR-specific enhancement of a geometry-corrected image: grayscale,
-    denoise, CLAHE and small-angle Hough deskew. Returns a 3-channel image for
-    PaddleOCR."""
+def _prepare_storage_and_ocr_images(
+    img: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Build aligned storage and OCR variants from a corrected camera image.
+
+    The storage variant keeps the original colour pixels and fine print. The
+    The secondary OCR variant increases local contrast for faint thermal print.
+    Any small-angle deskew is applied identically to both variants so Paddle's
+    text boxes can safely be used to crop the stored image. The sharp storage
+    variant remains the primary OCR input; enhanced variants are fallbacks.
+    """
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-    # Adaptive denoising for thermal paper receipts
-    denoised = cv2.fastNlMeansDenoising(gray, h=10, templateWindowSize=7, searchWindowSize=21)
-
-    # CLAHE for contrast enhancement (handles uneven lighting)
+    # CLAHE fallback for faint thermal print and uneven lighting. Do not
+    # denoise here: even moderate NLM can erase thin decimal points and glyph
+    # strokes. A much milder denoised variant is built only when needed.
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    enhanced = clahe.apply(denoised)
+    enhanced = clahe.apply(gray)
 
     # Deskew via Hough line detection
     edges = cv2.Canny(enhanced, 50, 150, apertureSize=3)
     lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=80, minLineLength=100, maxLineGap=10)
+    median_angle = 0.0
     if lines is not None and len(lines) > 0:
         angles = []
         for line in lines:
@@ -373,18 +380,57 @@ def enhance_for_ocr(img: np.ndarray) -> np.ndarray:
                 angles.append(angle)
         if angles:
             median_angle = float(np.median(angles))
-            if abs(median_angle) > 0.3:
-                h2, w2 = enhanced.shape[:2]
-                center = (w2 // 2, h2 // 2)
-                mat = cv2.getRotationMatrix2D(center, median_angle, 1.0)
-                enhanced = cv2.warpAffine(
-                    enhanced, mat, (w2, h2),
-                    flags=cv2.INTER_CUBIC,
-                    borderMode=cv2.BORDER_REPLICATE,
-                )
+    storage = img
+    if abs(median_angle) > 0.3:
+        h2, w2 = enhanced.shape[:2]
+        center = (w2 // 2, h2 // 2)
+        mat = cv2.getRotationMatrix2D(center, median_angle, 1.0)
+        enhanced = cv2.warpAffine(
+            enhanced, mat, (w2, h2),
+            flags=cv2.INTER_CUBIC,
+            borderMode=cv2.BORDER_REPLICATE,
+        )
+        storage = cv2.warpAffine(
+            storage, mat, (w2, h2),
+            flags=cv2.INTER_LANCZOS4,
+            borderMode=cv2.BORDER_REPLICATE,
+        )
 
     # Convert back to 3-channel for PaddleOCR
-    return cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
+    return storage, cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
+
+
+def enhance_for_ocr(img: np.ndarray) -> np.ndarray:
+    """Return only the OCR working copy for legacy callers and tests."""
+    _storage, ocr = _prepare_storage_and_ocr_images(img)
+    return ocr
+
+
+def _mild_denoised_ocr_variant(img: np.ndarray) -> np.ndarray:
+    """Build a conservative denoise fallback without touching stored pixels."""
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    denoised = cv2.fastNlMeansDenoising(
+        gray,
+        h=4,
+        templateWindowSize=7,
+        searchWindowSize=21,
+    )
+    clahe = cv2.createCLAHE(clipLimit=1.6, tileGridSize=(8, 8))
+    return cv2.cvtColor(clahe.apply(denoised), cv2.COLOR_GRAY2BGR)
+
+
+def _binary_ocr_variant(img: np.ndarray) -> np.ndarray:
+    """Build an adaptive-threshold fallback for very faint or uneven paper."""
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    binary = cv2.adaptiveThreshold(
+        gray,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        31,
+        12,
+    )
+    return cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
 
 
 def preprocess_image(img_bytes: bytes) -> np.ndarray:
@@ -523,6 +569,82 @@ def run_ocr(
     rows = _build_visual_rows(lines)
     full_text = "\n".join(row["text"] for row in rows)
     return full_text, lines, rows
+
+
+def _ocr_quality(
+    text: str,
+    lines: list[dict[str, Any]],
+) -> tuple[float, int, int]:
+    """Score an OCR result without favouring a tiny high-confidence fragment.
+
+    Paddle confidence is weighted by recognised non-whitespace characters and
+    discounted when text/line coverage is implausibly small for a receipt.
+    """
+    usable = [
+        line for line in lines
+        if line.get("text", "").strip() and line.get("confidence", 0.0) > 0
+    ]
+    char_count = sum(
+        len(re.sub(r"\s+", "", str(line["text"])))
+        for line in usable
+    )
+    if char_count == 0:
+        return 0.0, 0, 0
+    weighted_confidence = sum(
+        float(line["confidence"])
+        * len(re.sub(r"\s+", "", str(line["text"])))
+        for line in usable
+    ) / char_count
+    text_chars = len(re.sub(r"\s+", "", text))
+    coverage = min(1.0, max(char_count, text_chars) / 120.0)
+    line_coverage = min(1.0, len(usable) / 8.0)
+    score = weighted_confidence * (0.65 + 0.20 * coverage + 0.15 * line_coverage)
+    return float(score), char_count, len(usable)
+
+
+def _run_ocr_with_fallbacks(
+    storage_img: np.ndarray,
+    contrast_img: np.ndarray,
+) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]], np.ndarray]:
+    """Run sharp-first PaddleOCR and retry only when recognition is weak.
+
+    The unfiltered colour scan is always primary. Contrast enhancement, mild
+    denoising and adaptive thresholding are tried progressively; the best
+    Paddle result wins. Strong results stop the chain early for performance.
+    """
+    variants: list[tuple[str, Callable[[], np.ndarray]]] = [
+        ("sharp", lambda: storage_img),
+        ("contrast", lambda: contrast_img),
+        ("mild-denoise", lambda: _mild_denoised_ocr_variant(storage_img)),
+        ("binary", lambda: _binary_ocr_variant(storage_img)),
+    ]
+    best_result: tuple[
+        str,
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+        np.ndarray,
+    ] = (
+        "",
+        [],
+        [],
+        storage_img,
+    )
+    best_score = -1.0
+    best_name = "sharp"
+
+    for name, build_variant in variants:
+        variant = build_variant()
+        result = run_ocr(variant)
+        score, chars, line_count = _ocr_quality(result[0], result[1])
+        if score > best_score:
+            best_result = (*result, variant)
+            best_score = score
+            best_name = name
+        if score >= 0.82 and chars >= 60 and line_count >= 5:
+            break
+
+    log.info("PaddleOCR variant=%s quality=%.3f", best_name, max(0.0, best_score))
+    return best_result
 
 
 def _crop_to_ocr_content(
@@ -919,15 +1041,15 @@ class ReceiptResult(BaseModel):
     amount_source: str | None = None
     layout_rows: list[dict[str, Any]] = Field(default_factory=list)
     processing_ms: int = 0
-    # Base64 JPEG of the fully prepared receipt scan: cropped, perspective-
-    # corrected, upright, deskewed, denoised and contrast-enhanced. The backend
-    # always uses it to replace the camera image in the stored PDF.
+    # Base64 JPEG of the display-ready receipt scan: cropped, perspective-
+    # corrected, upright and deskewed, while retaining the colour source pixels
+    # and fine print. OCR-only denoising/contrast is never persisted.
     corrected_image: str | None = None
 
 
 def _encode_processed_jpeg(img: np.ndarray) -> str | None:
-    """Encode the display/OCR-ready receipt image for persistent PDF storage."""
-    ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
+    """Encode the display-ready receipt image for persistent PDF storage."""
+    ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
     if not ok:
         return None
     return base64.b64encode(buf.tobytes()).decode("ascii")
@@ -944,12 +1066,15 @@ async def extract_receipt(file: UploadFile = File(...)) -> ReceiptResult:
 
     def _pipeline(data: bytes) -> dict[str, Any]:
         storage_img, _geometry_corrected = correct_geometry(data)
-        ocr_img = enhance_for_ocr(storage_img)
-        full_text, lines, rows = run_ocr(ocr_img)
+        storage_img, ocr_img = _prepare_storage_and_ocr_images(storage_img)
+        full_text, lines, rows, selected_ocr_img = _run_ocr_with_fallbacks(
+            storage_img,
+            ocr_img,
+        )
         # Contour detection is deliberately strict. If it cannot see all four
         # paper edges, use Paddle's text geometry to remove the remaining large
         # camera background before persisting the final PDF.
-        stored_scan = _crop_to_ocr_content(ocr_img, lines)
+        stored_scan = _crop_to_ocr_content(storage_img, lines)
         processed_image = _encode_processed_jpeg(stored_scan)
 
         if not full_text.strip():
@@ -976,7 +1101,7 @@ async def extract_receipt(file: UploadFile = File(...)) -> ReceiptResult:
 
         amount_decision = decide_layout_amount(rows)
         if amount_decision.confidence < 0.90:
-            focused_decision = _focused_amount_ocr(ocr_img, rows)
+            focused_decision = _focused_amount_ocr(selected_ocr_img, rows)
             if focused_decision.confidence > amount_decision.confidence:
                 amount_decision = focused_decision
 
