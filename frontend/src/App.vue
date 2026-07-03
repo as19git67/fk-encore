@@ -5,6 +5,7 @@ import Button from 'primevue/button'
 import Menu from 'primevue/menu'
 import ConfirmDialog from 'primevue/confirmdialog'
 import TxBasketIndicator from './components/finance/TxBasketIndicator.vue'
+import DocBasketIndicator from './components/documents/DocBasketIndicator.vue'
 import { useAuthStore } from './stores/auth'
 import { useAnomalyStore } from './stores/finance/anomalies'
 import { useFeedBadgeStore } from './stores/feedBadge'
@@ -227,6 +228,7 @@ async function handleLogout() {
         <!-- Right: profile + logout (icons only) -->
         <div class="navbar-end">
           <TxBasketIndicator v-if="activeModule?.id === 'finanzen'" />
+          <DocBasketIndicator v-if="activeModule?.id === 'dokumente'" />
           <Button
             icon="pi pi-user"
             severity="secondary"

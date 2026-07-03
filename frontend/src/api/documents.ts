@@ -374,6 +374,61 @@ export function batchUpdateDocumentVisibility(payload: BatchUpdateVisibilityPayl
   })
 }
 
+// ─── Selection-basket batch operations (issue #736) ──────────────────────
+
+export interface BatchAffectedResponse {
+  affected_documents: number
+}
+
+export interface BatchUpdateAttributesPayload {
+  document_ids: number[]
+  /** New category slug; `null` clears the category. Omit to leave untouched. */
+  category_slug?: string | null
+  /** New document date (`YYYY-MM-DD`); `null` clears it. Omit to leave untouched. */
+  doc_date?: string | null
+}
+
+/** Set category and/or document date on many documents (pins the attributes). */
+export function batchUpdateDocumentAttributes(payload: BatchUpdateAttributesPayload) {
+  return apiFetch<BatchAffectedResponse>(`/documents/batch/attributes`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export interface BatchUpdateTaxPayload {
+  document_ids: number[]
+  tax_relevant: boolean
+  /** Required when `tax_relevant=true`. */
+  tax_year?: number | null
+  /** Replaces every section assignment; required non-empty when relevant. */
+  tax_sections?: string[]
+}
+
+/** Set the tax metadata on many documents (sets `tax_reviewed`). */
+export function batchUpdateDocumentTax(payload: BatchUpdateTaxPayload) {
+  return apiFetch<BatchAffectedResponse>(`/documents/batch/tax`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export interface BatchUpdateSubjectPersonsPayload {
+  document_ids: number[]
+  /** Subject-person ids to link (as user-curated) on every document. */
+  add_ids?: number[]
+  /** Subject-person ids to unlink from every document. */
+  remove_ids?: number[]
+}
+
+/** Add/remove Bezugsperson links on many documents. */
+export function batchUpdateDocumentSubjectPersons(payload: BatchUpdateSubjectPersonsPayload) {
+  return apiFetch<BatchAffectedResponse>(`/documents/batch/subject-persons`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export interface BatchReclassifyPayload {
   document_ids: number[]
   force_ocr?: boolean

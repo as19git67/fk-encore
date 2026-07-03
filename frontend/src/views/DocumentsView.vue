@@ -31,6 +31,7 @@ import {
   type SubjectPerson,
 } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
+import { useDocSelectionStore } from '../stores/documents/selection'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import { useScrollRestore } from '../composables/useScrollRestore'
 import { useSort, type SortField } from '../composables/useSort'
@@ -231,6 +232,25 @@ async function handleBatchTagsSave(payload: { adds: string[]; removes: string[] 
   } finally {
     savingBatchTags.value = false
   }
+}
+
+// ─── Basket (issue #736) ─────────────────────────────────────────────────────
+const basket = useDocSelectionStore()
+
+/** Move the checked documents into the basket (drawer in the navbar). */
+function addSelectionToBasket() {
+  const docs = selectedDocs.value
+  if (docs.length === 0) return
+  basket.addAll(docs)
+  info.value = `${docs.length} Dokument${docs.length === 1 ? '' : 'e'} in den Basket gelegt.`
+  clearSelection()
+}
+
+/** Put the whole visible result list (current filter/search) into the basket. */
+function addResultsToBasket() {
+  if (items.value.length === 0) return
+  basket.addAll(items.value)
+  info.value = `${items.value.length} Dokument${items.value.length === 1 ? '' : 'e'} in den Basket gelegt.`
 }
 
 function handleBatchTagsCreate(name: string) {
@@ -492,6 +512,13 @@ onMounted(async () => {
       </span>
       <div class="batch-actions">
         <Button
+          label="In den Basket"
+          icon="pi pi-shopping-cart"
+          size="small"
+          v-tooltip.bottom="'Auswahl in den Basket legen (oben rechts) — dort gemeinsam bearbeiten oder durchblättern'"
+          @click="addSelectionToBasket"
+        />
+        <Button
           v-if="auth.hasPermission('documents.edit')"
           label="Tags…"
           icon="pi pi-tag"
@@ -587,6 +614,17 @@ onMounted(async () => {
           v-tooltip.bottom="sort.isDefault.value ? 'Sortierung' : `Sortiert: ${sort.fieldLabel.value}`"
           :severity="sort.isDefault.value ? 'secondary' : undefined"
           @click="openSortMenu"
+        />
+
+        <Button
+          icon="pi pi-cart-plus"
+          text
+          rounded
+          severity="secondary"
+          aria-label="Trefferliste in den Basket legen"
+          v-tooltip.bottom="'Alle angezeigten Dokumente in den Basket legen'"
+          :disabled="items.length === 0"
+          @click="addResultsToBasket"
         />
 
         <div class="view-toggle">
