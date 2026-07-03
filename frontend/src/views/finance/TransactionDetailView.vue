@@ -12,7 +12,7 @@ import Textarea from 'primevue/textarea'
 import Dialog from 'primevue/dialog'
 import DocumentThumbnail from '../../components/DocumentThumbnail.vue'
 import { useConfirm } from 'primevue/useconfirm'
-import { toLocalIsoDate } from '../../utils/dateFormat'
+import { parseLocalDate, toLocalIsoDate } from '../../utils/dateFormat'
 import { useModuleBack } from '../../composables/useModuleBack'
 import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useAccountsStore } from '../../stores/finance/accounts'
@@ -202,6 +202,13 @@ function toIso(d: Date): string {
   return toLocalIsoDate(d)
 }
 
+function syncBookingDatePickerView() {
+  // PrimeVue 4.5 updates the visible calendar month before it adopts a new
+  // modelValue. Re-emitting the already parsed date when the overlay opens
+  // makes the calendar navigate to the transaction date as well.
+  formBookingDate.value = new Date(formBookingDate.value)
+}
+
 const isDirty = computed(() => {
   if (!tx.value) return false
   if (newTag.value.length > 0) return true
@@ -211,7 +218,7 @@ const isDirty = computed(() => {
     formCounterparty.value !== (tx.value.counterparty ?? '') ||
     formPurpose.value !== (tx.value.purpose ?? '') ||
     formAmount.value !== tx.value.amount ||
-    toIso(formBookingDate.value) !== tx.value.booking_date
+    toIso(formBookingDate.value) !== tx.value.booking_date.slice(0, 10)
   )
 })
 
@@ -221,7 +228,7 @@ function syncForm() {
   formCounterparty.value = tx.value.counterparty ?? ''
   formPurpose.value = tx.value.purpose ?? ''
   formAmount.value = tx.value.amount
-  formBookingDate.value = new Date(tx.value.booking_date)
+  formBookingDate.value = parseLocalDate(tx.value.booking_date.slice(0, 10))
 }
 
 async function loadTransaction(id: number) {
@@ -809,7 +816,13 @@ const extractedFields = computed(() => {
         </dd>
         <dt>Buchungsdatum</dt>
         <dd v-if="isCash">
-          <DatePicker v-model="formBookingDate" date-format="dd.mm.yy" show-icon fluid />
+          <DatePicker
+            v-model="formBookingDate"
+            date-format="dd.mm.yy"
+            show-icon
+            fluid
+            @show="syncBookingDatePickerView"
+          />
         </dd>
         <dd v-else>{{ tx.booking_date }}</dd>
 

@@ -1,10 +1,22 @@
-import { and, eq, gte, lte, isNotNull } from 'drizzle-orm'
+import { and, eq, gte, inArray, lte, isNotNull } from 'drizzle-orm'
 import db from '../db/database'
-import { documents, financeDocumentMatchSuggestion, financeTransaction, financeTransactionDocument } from '../db/schema'
-import { documentMatchDateRange, extractDocumentAmount, scoreDocumentMatch, type MatchScore } from './document-matcher'
+import { documentReceiptExtraction, documents, financeDocumentMatchSuggestion, financeTransaction, financeTransactionDocument } from '../db/schema'
+import { documentMatchDateRange, extractDocumentAmount, resolveDocumentMatchAmount, scoreDocumentMatch, type MatchScore } from './document-matcher'
 import { realtime } from '~encore/clients'
 
 export type MatchOutcome = 'pending' | 'accepted' | 'rejected' | 'ignored'
+
+async function structuredReceiptAmounts(documentIds: number[]): Promise<Map<number, string | null>> {
+  if (documentIds.length === 0) return new Map()
+  const rows = await db
+    .select({
+      document_id: documentReceiptExtraction.document_id,
+      amount: documentReceiptExtraction.amount,
+    })
+    .from(documentReceiptExtraction)
+    .where(inArray(documentReceiptExtraction.document_id, documentIds))
+  return new Map(rows.map(row => [row.document_id, row.amount]))
+}
 
 export async function createSuggestionsForTransaction(transactionId: number) {
   const [transaction] = await db.select().from(financeTransaction).where(eq(financeTransaction.id, transactionId)).limit(1)
@@ -17,7 +29,8 @@ export async function createSuggestionsForTransaction(transactionId: number) {
     gte(documents.doc_date, dateRange.from),
     lte(documents.doc_date, dateRange.to),
   )).limit(200)
-  const suggestions = candidates.map(document => ({ document, score: scoreDocumentMatch({ amount: Number(transaction.amount), bookingDate: transaction.booking_date, counterparty: transaction.counterparty, purpose: transaction.purpose }, { amount: extractDocumentAmount(document.extracted_text), documentDate: document.doc_date, sender: document.sender, text: document.extracted_text }) })).filter(candidate => candidate.score.total >= 0.45)
+  const receiptAmounts = await structuredReceiptAmounts(candidates.map(document => document.id))
+  const suggestions = candidates.map(document => ({ document, score: scoreDocumentMatch({ amount: Number(transaction.amount), bookingDate: transaction.booking_date, counterparty: transaction.counterparty, purpose: transaction.purpose }, { amount: resolveDocumentMatchAmount(receiptAmounts.get(document.id), document.extracted_text), documentDate: document.doc_date, sender: document.sender, text: document.extracted_text }) })).filter(candidate => candidate.score.total >= 0.45)
   for (const { document, score } of suggestions) {
     await db.insert(financeDocumentMatchSuggestion).values({ transaction_id: transactionId, document_id: document.id, score: score.total, amount_score: score.amount, date_score: score.date, text_score: score.text }).onConflictDoNothing()
   }
@@ -131,7 +144,12 @@ export async function createSuggestionsForDocument(documentId: number) {
     gte(financeTransaction.booking_date, dateRange.from),
     lte(financeTransaction.booking_date, dateRange.to),
   )).limit(500)
-  const matches = transactions.map(transaction => ({ transaction, score: scoreDocumentMatch({ amount: Number(transaction.amount), bookingDate: transaction.booking_date, counterparty: transaction.counterparty, purpose: transaction.purpose }, { amount: extractDocumentAmount(document.extracted_text), documentDate: document.doc_date, sender: document.sender, text: document.extracted_text }) })).filter(match => match.score.total >= .45)
+  const receiptAmounts = await structuredReceiptAmounts([documentId])
+  const documentAmount = resolveDocumentMatchAmount(
+    receiptAmounts.get(documentId),
+    document.extracted_text,
+  )
+  const matches = transactions.map(transaction => ({ transaction, score: scoreDocumentMatch({ amount: Number(transaction.amount), bookingDate: transaction.booking_date, counterparty: transaction.counterparty, purpose: transaction.purpose }, { amount: documentAmount, documentDate: document.doc_date, sender: document.sender, text: document.extracted_text }) })).filter(match => match.score.total >= .45)
   for (const { transaction, score } of matches) await db.insert(financeDocumentMatchSuggestion).values({ transaction_id: transaction.id, document_id: documentId, score: score.total, amount_score: score.amount, date_score: score.date, text_score: score.text }).onConflictDoNothing()
   return matches
 }
