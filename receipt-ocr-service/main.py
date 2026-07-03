@@ -345,10 +345,17 @@ def _hough_line_coords(line: np.ndarray) -> tuple[int, int, int, int] | None:
     return int(coords[0]), int(coords[1]), int(coords[2]), int(coords[3])
 
 
-def enhance_for_ocr(img: np.ndarray) -> np.ndarray:
-    """OCR-specific enhancement of a geometry-corrected image: grayscale,
-    denoise, CLAHE and small-angle Hough deskew. Returns a 3-channel image for
-    PaddleOCR."""
+def _prepare_storage_and_ocr_images(
+    img: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Build aligned storage and OCR variants from a corrected camera image.
+
+    The storage variant keeps the original colour pixels and fine print. The
+    OCR variant may be denoised and contrast-enhanced for PaddleOCR. Any
+    small-angle deskew is applied identically to both variants so Paddle's text
+    boxes can safely be used to crop the stored image without persisting the
+    deliberately softened OCR working copy.
+    """
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     # Adaptive denoising for thermal paper receipts
@@ -361,6 +368,7 @@ def enhance_for_ocr(img: np.ndarray) -> np.ndarray:
     # Deskew via Hough line detection
     edges = cv2.Canny(enhanced, 50, 150, apertureSize=3)
     lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=80, minLineLength=100, maxLineGap=10)
+    median_angle = 0.0
     if lines is not None and len(lines) > 0:
         angles = []
         for line in lines:
@@ -373,18 +381,30 @@ def enhance_for_ocr(img: np.ndarray) -> np.ndarray:
                 angles.append(angle)
         if angles:
             median_angle = float(np.median(angles))
-            if abs(median_angle) > 0.3:
-                h2, w2 = enhanced.shape[:2]
-                center = (w2 // 2, h2 // 2)
-                mat = cv2.getRotationMatrix2D(center, median_angle, 1.0)
-                enhanced = cv2.warpAffine(
-                    enhanced, mat, (w2, h2),
-                    flags=cv2.INTER_CUBIC,
-                    borderMode=cv2.BORDER_REPLICATE,
-                )
+    storage = img
+    if abs(median_angle) > 0.3:
+        h2, w2 = enhanced.shape[:2]
+        center = (w2 // 2, h2 // 2)
+        mat = cv2.getRotationMatrix2D(center, median_angle, 1.0)
+        enhanced = cv2.warpAffine(
+            enhanced, mat, (w2, h2),
+            flags=cv2.INTER_CUBIC,
+            borderMode=cv2.BORDER_REPLICATE,
+        )
+        storage = cv2.warpAffine(
+            storage, mat, (w2, h2),
+            flags=cv2.INTER_LANCZOS4,
+            borderMode=cv2.BORDER_REPLICATE,
+        )
 
     # Convert back to 3-channel for PaddleOCR
-    return cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
+    return storage, cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
+
+
+def enhance_for_ocr(img: np.ndarray) -> np.ndarray:
+    """Return only the OCR working copy for legacy callers and tests."""
+    _storage, ocr = _prepare_storage_and_ocr_images(img)
+    return ocr
 
 
 def preprocess_image(img_bytes: bytes) -> np.ndarray:
@@ -919,15 +939,15 @@ class ReceiptResult(BaseModel):
     amount_source: str | None = None
     layout_rows: list[dict[str, Any]] = Field(default_factory=list)
     processing_ms: int = 0
-    # Base64 JPEG of the fully prepared receipt scan: cropped, perspective-
-    # corrected, upright, deskewed, denoised and contrast-enhanced. The backend
-    # always uses it to replace the camera image in the stored PDF.
+    # Base64 JPEG of the display-ready receipt scan: cropped, perspective-
+    # corrected, upright and deskewed, while retaining the colour source pixels
+    # and fine print. OCR-only denoising/contrast is never persisted.
     corrected_image: str | None = None
 
 
 def _encode_processed_jpeg(img: np.ndarray) -> str | None:
-    """Encode the display/OCR-ready receipt image for persistent PDF storage."""
-    ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
+    """Encode the display-ready receipt image for persistent PDF storage."""
+    ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
     if not ok:
         return None
     return base64.b64encode(buf.tobytes()).decode("ascii")
@@ -944,12 +964,12 @@ async def extract_receipt(file: UploadFile = File(...)) -> ReceiptResult:
 
     def _pipeline(data: bytes) -> dict[str, Any]:
         storage_img, _geometry_corrected = correct_geometry(data)
-        ocr_img = enhance_for_ocr(storage_img)
+        storage_img, ocr_img = _prepare_storage_and_ocr_images(storage_img)
         full_text, lines, rows = run_ocr(ocr_img)
         # Contour detection is deliberately strict. If it cannot see all four
         # paper edges, use Paddle's text geometry to remove the remaining large
         # camera background before persisting the final PDF.
-        stored_scan = _crop_to_ocr_content(ocr_img, lines)
+        stored_scan = _crop_to_ocr_content(storage_img, lines)
         processed_image = _encode_processed_jpeg(stored_scan)
 
         if not full_text.strip():
