@@ -11,6 +11,10 @@ import "./scan-worker";
 // missed (downtime, network share without inotify, etc).
 import "./inbox-cron";
 
+// Register the daily storage consistency check that heals rows whose
+// disk_path points at a missing file (see fsck.ts).
+import "./fsck";
+
 startLocalCron();
 
 import { startInboxWatcher } from "./inbox-watcher";
