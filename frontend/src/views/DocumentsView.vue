@@ -8,9 +8,6 @@ import Message from 'primevue/message'
 import SelectButton from 'primevue/selectbutton'
 import Chip from 'primevue/chip'
 import Tag from 'primevue/tag'
-import MultiSelectDialog from '../components/MultiSelectDialog.vue'
-import DocumentBatchVisibilityDialog from '../components/DocumentBatchVisibilityDialog.vue'
-import DocumentBatchReprocessDialog from '../components/DocumentBatchReprocessDialog.vue'
 import DocumentUploadDefaultsDialog from '../components/DocumentUploadDefaultsDialog.vue'
 import DocumentFilterMenu from '../components/DocumentFilterMenu.vue'
 import DocumentScanQueuePanel from '../components/DocumentScanQueuePanel.vue'
@@ -22,7 +19,6 @@ import {
   listGroups,
   listSubjectPersons,
   searchDocuments,
-  batchUpdateDocumentTags,
   type DocumentSummary,
   type DocumentCategory,
   type DocumentStatus,
@@ -152,13 +148,13 @@ function resetFilterMenu() {
   load()
 }
 
-// ─── Selection & batch ─────────────────────────────────────────────────────
+// ─── Selection & basket (issue #736) ────────────────────────────────────────
+// The list selection is purely a staging step: checkboxes collect documents,
+// "In den Basket" hands them to the basket, and every batch edit
+// (Tags/Kategorie/Sichtbarkeit/OCR/…) lives in the basket drawer. The list
+// itself no longer edits documents.
 const selectedIds = ref<Set<number>>(new Set())
-const tagsDialogVisible = ref(false)
-const visibilityDialogVisible = ref(false)
-const reprocessDialogVisible = ref(false)
 const defaultsDialogVisible = ref(false)
-const savingBatchTags = ref(false)
 
 function isSelected(id: number) {
   return selectedIds.value.has(id)
@@ -175,66 +171,19 @@ function clearSelection() {
   selectedIds.value = new Set()
 }
 
-const sessionAddedTags = ref<string[]>([])
-
+// Known tags feed the filter panel's tag picker.
 const allKnownTags = computed(() => {
   const seen = new Set<string>()
   for (const d of items.value) {
     for (const t of d.tags) seen.add(t)
   }
-  for (const t of sessionAddedTags.value) seen.add(t)
   return [...seen].sort((a, b) => a.localeCompare(b))
 })
-
-const tagDialogItems = computed(() =>
-  allKnownTags.value.map((t) => ({ id: t, label: t })),
-)
 
 const selectedDocs = computed(() =>
   items.value.filter((d) => selectedIds.value.has(d.id)),
 )
 
-const tagInitialStates = computed<Map<string, boolean | null>>(() => {
-  const docs = selectedDocs.value
-  const out = new Map<string, boolean | null>()
-  for (const tag of allKnownTags.value) {
-    if (docs.length === 0) {
-      out.set(tag, false)
-      continue
-    }
-    let count = 0
-    for (const d of docs) {
-      if (d.tags.includes(tag)) count++
-    }
-    if (count === 0) out.set(tag, false)
-    else if (count === docs.length) out.set(tag, true)
-    else out.set(tag, null)
-  }
-  return out
-})
-
-async function handleBatchTagsSave(payload: { adds: string[]; removes: string[] }) {
-  if (selectedIds.value.size === 0) return
-  savingBatchTags.value = true
-  error.value = ''
-  info.value = ''
-  try {
-    const res = await batchUpdateDocumentTags({
-      document_ids: [...selectedIds.value],
-      add: payload.adds,
-      remove: payload.removes,
-    })
-    info.value = `Tags angewendet auf ${res.affected_documents} Dokument(e).`
-    tagsDialogVisible.value = false
-    await load()
-  } catch (err: any) {
-    error.value = err?.message || 'Tags konnten nicht aktualisiert werden.'
-  } finally {
-    savingBatchTags.value = false
-  }
-}
-
-// ─── Basket (issue #736) ─────────────────────────────────────────────────────
 const basket = useDocSelectionStore()
 
 /** Move the checked documents into the basket (drawer in the navbar). */
@@ -263,29 +212,6 @@ function toggleSelectAll() {
   } else {
     selectedIds.value = new Set(items.value.map((d) => d.id))
   }
-}
-
-function handleBatchTagsCreate(name: string) {
-  const trimmed = name.trim().toLowerCase()
-  if (!trimmed) return
-  if (!sessionAddedTags.value.includes(trimmed)) {
-    sessionAddedTags.value = [...sessionAddedTags.value, trimmed]
-  }
-}
-
-function handleBatchVisibilityDone(payload: { affected: number; skipped: number }) {
-  if (payload.skipped > 0) {
-    info.value = `Sichtbarkeit für ${payload.affected} Dokument(e) geändert. ${payload.skipped} übersprungen (keine Berechtigung).`
-  } else {
-    info.value = `Sichtbarkeit für ${payload.affected} Dokument(e) geändert.`
-  }
-  load()
-}
-
-function handleBatchReprocessDone(payload: { affected: number }) {
-  info.value = `OCR & KI für ${payload.affected} Dokument(e) neu gestartet.`
-  clearSelection()
-  load()
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -573,31 +499,8 @@ onMounted(async () => {
           label="In den Basket"
           icon="pi pi-shopping-cart"
           size="small"
-          v-tooltip.bottom="'Auswahl in den Basket legen (oben rechts) — dort gemeinsam bearbeiten oder durchblättern'"
+          v-tooltip.bottom="'Auswahl in den Basket legen (oben rechts) — dort werden Tags, Kategorie, Datum, Steuer, Sichtbarkeit und OCR/KI gemeinsam bearbeitet oder durchblättert.'"
           @click="addSelectionToBasket"
-        />
-        <Button
-          v-if="auth.hasPermission('documents.edit')"
-          label="Tags…"
-          icon="pi pi-tag"
-          size="small"
-          @click="tagsDialogVisible = true"
-        />
-        <Button
-          v-if="auth.hasPermission('documents.edit')"
-          label="Sichtbarkeit…"
-          icon="pi pi-users"
-          size="small"
-          @click="visibilityDialogVisible = true"
-        />
-        <Button
-          v-if="auth.hasPermission('documents.edit')"
-          label="OCR & KI neu…"
-          icon="pi pi-refresh"
-          size="small"
-          severity="secondary"
-          v-tooltip.bottom="'Text-Extraktion (OCR) und KI-Analyse für die Auswahl erneut starten'"
-          @click="reprocessDialogVisible = true"
         />
         <Button
           label="Auswahl aufheben"
@@ -906,35 +809,6 @@ onMounted(async () => {
     </div>
 
     <!-- Dialogs -->
-    <MultiSelectDialog
-      v-model:visible="tagsDialogVisible"
-      title="Tags auf Auswahl anwenden"
-      :items="tagDialogItems"
-      :initial-states="tagInitialStates"
-      :subject-count="selectedIds.size"
-      :subject-label="selectedIds.size === 1 ? 'Dokument' : 'Dokumente'"
-      :saving="savingBatchTags"
-      allow-create
-      create-label="Neuen Tag eintragen"
-      create-placeholder="Tagname…"
-      empty-message="Keine bekannten Tags. Lege einen neuen an."
-      @save="handleBatchTagsSave"
-      @create="handleBatchTagsCreate"
-    />
-
-    <DocumentBatchVisibilityDialog
-      v-model:visible="visibilityDialogVisible"
-      :documents="selectedDocs"
-      :groups="groups"
-      @done="handleBatchVisibilityDone"
-    />
-
-    <DocumentBatchReprocessDialog
-      v-model:visible="reprocessDialogVisible"
-      :document-ids="[...selectedIds]"
-      @done="handleBatchReprocessDone"
-    />
-
     <DocumentUploadDefaultsDialog
       v-model:visible="defaultsDialogVisible"
       :groups="groups"

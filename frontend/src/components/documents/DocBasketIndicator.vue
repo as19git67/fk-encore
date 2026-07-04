@@ -13,6 +13,8 @@ import SelectButton from 'primevue/selectbutton'
 import TreeSelect from 'primevue/treeselect'
 import type { TreeNode } from 'primevue/treenode'
 import MultiSelectDialog from '../MultiSelectDialog.vue'
+import DocumentBatchVisibilityDialog from '../DocumentBatchVisibilityDialog.vue'
+import DocumentBatchReprocessDialog from '../DocumentBatchReprocessDialog.vue'
 import { useDocSelectionStore } from '../../stores/documents/selection'
 import {
   batchUpdateDocumentAttributes,
@@ -20,10 +22,12 @@ import {
   batchUpdateDocumentTags,
   batchUpdateDocumentTax,
   listDocumentCategories,
+  listGroups,
   listSubjectPersons,
   listTaxSectionsCatalog,
   type DocumentCategory,
   type DocumentSummary,
+  type GroupSummary,
   type SubjectPerson,
   type TaxSectionCatalogEntry,
 } from '../../api/documents'
@@ -83,6 +87,7 @@ function reportError(err: unknown) {
 const categories = ref<DocumentCategory[]>([])
 const taxSections = ref<TaxSectionCatalogEntry[]>([])
 const subjectPersons = ref<SubjectPerson[]>([])
+const groups = ref<GroupSummary[]>([])
 
 async function ensureCategories() {
   if (categories.value.length > 0) return
@@ -94,6 +99,10 @@ async function ensureTaxSections() {
 }
 async function ensureSubjectPersons() {
   subjectPersons.value = (await listSubjectPersons()).items
+}
+async function ensureGroups() {
+  if (groups.value.length > 0) return
+  groups.value = (await listGroups()).items
 }
 
 /**
@@ -361,6 +370,32 @@ async function savePersons() {
     savingPersons.value = false
   }
 }
+
+// ─── Visibility & reprocess (moved here from the list's batch bar) ───────────
+
+const visibilityDialogVisible = ref(false)
+const reprocessDialogVisible = ref(false)
+
+async function openVisibilityDialog() {
+  resetMessages()
+  await ensureGroups().catch(reportError)
+  visibilityDialogVisible.value = true
+}
+
+function openReprocessDialog() {
+  resetMessages()
+  reprocessDialogVisible.value = true
+}
+
+function handleVisibilityDone(payload: { affected: number; skipped: number }) {
+  actionInfo.value =
+    `Sichtbarkeit auf ${payload.affected} Dokument${payload.affected === 1 ? '' : 'e'} angewendet.` +
+    (payload.skipped > 0 ? ` ${payload.skipped} übersprungen (keine Berechtigung).` : '')
+}
+
+function handleReprocessDone(payload: { affected: number }) {
+  reportDone(payload.affected, 'OCR & KI-Neustart')
+}
 </script>
 
 <template>
@@ -442,6 +477,19 @@ async function savePersons() {
           <div v-if="canEdit" class="action-row">
             <Button label="Steuer" icon="pi pi-calculator" size="small" severity="secondary" outlined :disabled="count === 0" @click="openTaxDialog" />
             <Button label="Personen" icon="pi pi-id-card" size="small" severity="secondary" outlined :disabled="count === 0" @click="openPersonsDialog" />
+          </div>
+          <div v-if="canEdit" class="action-row">
+            <Button label="Sichtbarkeit" icon="pi pi-users" size="small" severity="secondary" outlined :disabled="count === 0" @click="openVisibilityDialog" />
+            <Button
+              label="OCR & KI neu"
+              icon="pi pi-refresh"
+              size="small"
+              severity="secondary"
+              outlined
+              :disabled="count === 0"
+              v-tooltip.bottom="'Text-Extraktion (OCR) und KI-Analyse für alle Dokumente im Basket erneut starten'"
+              @click="openReprocessDialog"
+            />
           </div>
           <div v-if="canEdit" class="action-row">
             <Button
@@ -599,6 +647,19 @@ async function savePersons() {
         />
       </template>
     </Dialog>
+
+    <DocumentBatchVisibilityDialog
+      v-model:visible="visibilityDialogVisible"
+      :documents="items"
+      :groups="groups"
+      @done="handleVisibilityDone"
+    />
+
+    <DocumentBatchReprocessDialog
+      v-model:visible="reprocessDialogVisible"
+      :document-ids="selectionStore.ids as number[]"
+      @done="handleReprocessDone"
+    />
   </div>
 </template>
 
