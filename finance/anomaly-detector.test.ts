@@ -15,7 +15,11 @@ import {
   financeTransaction,
   users,
 } from "../db/schema";
-import { runAnomalyDetection } from "./anomaly-detector";
+import {
+  counterpartySimilarity,
+  normalizeCounterparty,
+  runAnomalyDetection,
+} from "./anomaly-detector";
 
 // All tests share a single tenant + account; the detector operates per
 // account so this is enough scope to exercise the missing-transaction
@@ -58,6 +62,14 @@ async function insertAccount(): Promise<number> {
     })
     .returning({ id: financeAccount.id });
   return row.id;
+}
+
+async function grantWriteAccess(accountId: number, userId: number): Promise<void> {
+  await db.insert(financeAccountAccess).values({
+    account_id: accountId,
+    user_id: userId,
+    level: "write",
+  });
 }
 
 interface InsertTxOpts {
@@ -115,6 +127,17 @@ beforeEach(async () => {
   await db.delete(financeAccount);
   await db.delete(financeBankcontact);
   await db.delete(users);
+});
+
+describe("finance/anomaly-detector — counterparty normalization", () => {
+  it("ignores punctuation and legal-form changes", () => {
+    expect(normalizeCounterparty("Müller & Partner GmbH")).toBe("muller und partner");
+    expect(counterpartySimilarity("Provider Deutschland GmbH", "PROVIDER Deutschland SE")).toBe(1);
+  });
+
+  it("does not conflate merchants that only share one generic token", () => {
+    expect(counterpartySimilarity("Provider Energie GmbH", "Provider Mobilität AG")).toBeLessThan(0.8);
+  });
 });
 
 describe("finance/anomaly-detector — new_mandate", () => {
@@ -526,17 +549,132 @@ describe("finance/anomaly-detector — missing_transaction", () => {
 
     await runAnomalyDetection([accountId]);
 
-    const missing = await db
+    const open = await db
       .select()
       .from(financeAnomaly)
       .where(
         and(
           eq(financeAnomaly.account_id, accountId),
-          eq(financeAnomaly.type, "missing_transaction"),
           isNull(financeAnomaly.acknowledged_at),
         ),
       );
-    expect(missing).toHaveLength(0);
+    expect(open.filter((item) => item.type === "missing_transaction")).toHaveLength(0);
+    expect(open.filter((item) => item.type === "new_mandate")).toHaveLength(0);
+  });
+
+  it("treats a matching mandate on the user's new bank account as the same recurring series", async () => {
+    await ensureUser(1);
+    const oldAccountId = await insertAccount();
+    const newAccountId = await insertAccount();
+    await grantWriteAccess(oldAccountId, 1);
+    await grantWriteAccess(newAccountId, 1);
+
+    for (let i = 0; i < 8; i++) {
+      await insertTx({
+        accountId: oldAccountId,
+        bookingDate: daysAgo(120 + i * 30),
+        amount: "-49.90",
+        counterparty: "Provider Deutschland GmbH",
+        mandateRef: "OLD-MANDATE",
+        creditorId: "DE98ZZZ0001",
+      });
+    }
+    for (let i = 0; i < 3; i++) {
+      await insertTx({
+        accountId: newAccountId,
+        bookingDate: daysAgo(90 - i * 30),
+        amount: "-52.00",
+        counterparty: "Provider Deutschland SE",
+        mandateRef: "NEW-MANDATE",
+        creditorId: "DE98ZZZ0002",
+      });
+    }
+
+    await runAnomalyDetection([oldAccountId, newAccountId]);
+
+    const open = await db
+      .select()
+      .from(financeAnomaly)
+      .where(isNull(financeAnomaly.acknowledged_at));
+    expect(open.filter((item) => item.type === "missing_transaction")).toHaveLength(0);
+    expect(open.filter((item) => item.type === "new_mandate")).toHaveLength(0);
+  });
+
+  it("does not bridge accounts when the amount no longer resembles the old series", async () => {
+    await ensureUser(1);
+    const oldAccountId = await insertAccount();
+    const newAccountId = await insertAccount();
+    await grantWriteAccess(oldAccountId, 1);
+    await grantWriteAccess(newAccountId, 1);
+
+    for (let i = 0; i < 8; i++) {
+      await insertTx({
+        accountId: oldAccountId,
+        bookingDate: daysAgo(120 + i * 30),
+        amount: "-49.90",
+        counterparty: "Provider Deutschland GmbH",
+        mandateRef: "OLD-MANDATE",
+        creditorId: "DE98ZZZ1001",
+      });
+    }
+    for (let i = 0; i < 3; i++) {
+      await insertTx({
+        accountId: newAccountId,
+        bookingDate: daysAgo(90 - i * 30),
+        amount: "-499.00",
+        counterparty: "Provider Deutschland SE",
+        mandateRef: "NEW-MANDATE",
+        creditorId: "DE98ZZZ1002",
+      });
+    }
+
+    await runAnomalyDetection([oldAccountId, newAccountId]);
+
+    const open = await db
+      .select()
+      .from(financeAnomaly)
+      .where(isNull(financeAnomaly.acknowledged_at));
+    expect(open.some((item) => item.type === "missing_transaction" && item.account_id === oldAccountId)).toBe(true);
+    expect(open.some((item) => item.type === "new_mandate" && item.account_id === newAccountId)).toBe(true);
+  });
+
+  it("does not bridge bank accounts without a shared write user", async () => {
+    await ensureUser(1);
+    await ensureUser(2);
+    const oldAccountId = await insertAccount();
+    const otherUsersAccountId = await insertAccount();
+    await grantWriteAccess(oldAccountId, 1);
+    await grantWriteAccess(otherUsersAccountId, 2);
+
+    for (let i = 0; i < 8; i++) {
+      await insertTx({
+        accountId: oldAccountId,
+        bookingDate: daysAgo(120 + i * 30),
+        amount: "-49.90",
+        counterparty: "Provider Deutschland GmbH",
+        mandateRef: "USER-1-MANDATE",
+        creditorId: "DE98ZZZ2001",
+      });
+    }
+    for (let i = 0; i < 3; i++) {
+      await insertTx({
+        accountId: otherUsersAccountId,
+        bookingDate: daysAgo(90 - i * 30),
+        amount: "-52.00",
+        counterparty: "Provider Deutschland SE",
+        mandateRef: "USER-2-MANDATE",
+        creditorId: "DE98ZZZ2002",
+      });
+    }
+
+    await runAnomalyDetection([oldAccountId, otherUsersAccountId]);
+
+    const open = await db
+      .select()
+      .from(financeAnomaly)
+      .where(isNull(financeAnomaly.acknowledged_at));
+    expect(open.some((item) => item.type === "missing_transaction" && item.account_id === oldAccountId)).toBe(true);
+    expect(open.some((item) => item.type === "new_mandate" && item.account_id === otherUsersAccountId)).toBe(true);
   });
 
   it("suppresses missing_transaction when the same counterparty has activity under a new IBAN (no mandate_ref)", async () => {
