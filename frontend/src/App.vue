@@ -5,6 +5,7 @@ import Button from 'primevue/button'
 import Menu from 'primevue/menu'
 import ConfirmDialog from 'primevue/confirmdialog'
 import TxBasketIndicator from './components/finance/TxBasketIndicator.vue'
+import DocBasketIndicator from './components/documents/DocBasketIndicator.vue'
 import { useAuthStore } from './stores/auth'
 import { useAnomalyStore } from './stores/finance/anomalies'
 import { useFeedBadgeStore } from './stores/feedBadge'
@@ -102,6 +103,20 @@ const subMenuItems = computed(() => {
     .filter((item) => item.routeName || item.children)
 })
 
+// The documents module swaps its basket and settings controls: the basket
+// (Einkaufswagen) sits at the end of the submenu strip where the settings
+// gear used to be, and the gear joins the meta icons in navbar-end.
+const docSettingsGroup = computed(() =>
+  activeModule.value?.id === 'dokumente'
+    ? subMenuItems.value.find((item) => item.children)
+    : undefined,
+)
+const stripItems = computed(() =>
+  docSettingsGroup.value
+    ? subMenuItems.value.filter((item) => item !== docSettingsGroup.value)
+    : subMenuItems.value,
+)
+
 // Shared popup for submenu groups. The model is rebuilt on each open so a
 // single <Menu> can back every group in the strip.
 const groupMenuRef = ref()
@@ -193,7 +208,7 @@ async function handleLogout() {
 
           <!-- Sub-menu items shown inline when inside a module -->
           <div v-if="activeModule && subMenuItems.length" class="submenu-strip">
-            <template v-for="item in subMenuItems" :key="item.routeName || item.label">
+            <template v-for="item in stripItems" :key="item.routeName || item.label">
               <!-- Group header (e.g. the Dokumente "Einstellungen" gear) -->
               <Button
                 v-if="item.children"
@@ -220,6 +235,8 @@ async function handleLogout() {
                 @click="navigateSubMenu(item.routeName)"
               />
             </template>
+            <!-- Documents: basket at the strip's end (where the gear used to sit) -->
+            <DocBasketIndicator v-if="activeModule?.id === 'dokumente'" />
             <Menu ref="groupMenuRef" :model="groupMenuModel" :popup="true" />
           </div>
         </div>
@@ -227,6 +244,17 @@ async function handleLogout() {
         <!-- Right: profile + logout (icons only) -->
         <div class="navbar-end">
           <TxBasketIndicator v-if="activeModule?.id === 'finanzen'" />
+          <!-- Documents: settings gear where the basket used to sit -->
+          <Button
+            v-if="docSettingsGroup?.children"
+            :icon="docSettingsGroup.icon"
+            text
+            rounded
+            :severity="isGroupActive(docSettingsGroup.children) ? 'primary' : 'secondary'"
+            :aria-label="docSettingsGroup.label"
+            v-tooltip.bottom="docSettingsGroup.label"
+            @click="openGroupMenu($event, docSettingsGroup.children)"
+          />
           <Button
             icon="pi pi-user"
             severity="secondary"

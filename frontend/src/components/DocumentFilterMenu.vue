@@ -239,6 +239,14 @@ function handleReset() {
         />
         <span>Nur zu prüfen</span>
       </div>
+
+      <div class="filter-switch">
+        <ToggleSwitch
+          :model-value="local.unreviewed ?? false"
+          @update:model-value="(v: boolean) => local = { ...local, unreviewed: v || undefined }"
+        />
+        <span>Nur neue (unbestätigte Zuordnung)</span>
+      </div>
     </div>
 
     <template #footer>

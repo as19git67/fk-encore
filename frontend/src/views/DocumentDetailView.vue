@@ -39,6 +39,7 @@ import {
   type TaxSectionGroup,
 } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
+import { useDocSelectionStore } from '../stores/documents/selection'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import { useModuleBack } from '../composables/useModuleBack'
 import PdfViewer from '../components/PdfViewer.vue'
@@ -51,6 +52,24 @@ const auth = useAuthStore()
 const confirmDialog = useConfirm()
 
 const docId = computed(() => parseInt(route.params.id as string, 10))
+
+// ─── Basket navigation (issue #736) ─────────────────────────────────────────
+// When the open document is in the basket, the basket doubles as a result
+// list: prev/next step through it in order.
+const basket = useDocSelectionStore()
+const basketIndex = computed(() => basket.indexOf(docId.value))
+const basketPrev = computed(() =>
+  basketIndex.value > 0 ? basket.items[basketIndex.value - 1] : null,
+)
+const basketNext = computed(() =>
+  basketIndex.value >= 0 && basketIndex.value < basket.count - 1
+    ? basket.items[basketIndex.value + 1]
+    : null,
+)
+
+function goBasketDoc(id: number) {
+  router.push({ name: 'dokumente-detail', params: { id } })
+}
 
 const doc = ref<DocumentDetail | null>(null)
 const categories = ref<DocumentCategory[]>([])
@@ -503,6 +522,29 @@ onBeforeUnmount(() => {
   <div class="document-detail-view">
     <div class="header">
       <Button icon="pi pi-arrow-left" label="Zurück" aria-label="Zurück" text @click="goBack" />
+      <div v-if="basketIndex >= 0" class="basket-nav" aria-label="Navigation durch den Basket">
+        <Button
+          icon="pi pi-chevron-left"
+          text
+          rounded
+          :disabled="!basketPrev"
+          aria-label="Vorheriges Dokument im Basket"
+          v-tooltip.bottom="'Vorheriges Dokument im Basket'"
+          @click="basketPrev && goBasketDoc(basketPrev.id)"
+        />
+        <span class="basket-nav-pos">
+          <i class="pi pi-shopping-cart" /> {{ basketIndex + 1 }}&hairsp;/&hairsp;{{ basket.count }}
+        </span>
+        <Button
+          icon="pi pi-chevron-right"
+          text
+          rounded
+          :disabled="!basketNext"
+          aria-label="Nächstes Dokument im Basket"
+          v-tooltip.bottom="'Nächstes Dokument im Basket'"
+          @click="basketNext && goBasketDoc(basketNext.id)"
+        />
+      </div>
       <div class="header-actions">
         <Button
           v-if="auth.hasPermission('documents.edit') && doc"
@@ -1031,6 +1073,20 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 .header-actions { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+.basket-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+.basket-nav-pos {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--p-text-muted-color);
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 
 .linked-tx-section {
   display: flex;
