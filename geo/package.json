@@ -6,6 +6,7 @@
   "description": "PostGIS-backed reverse geocoding and POI lookup for fk-encore.",
   "scripts": {
     "start": "tsx src/server.ts",
+    "test": "node --import tsx --test src/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

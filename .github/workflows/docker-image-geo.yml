@@ -45,6 +45,10 @@ jobs:
         run: npm run typecheck
         working-directory: geo
 
+      - name: Test
+        run: npm test
+        working-directory: geo
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx

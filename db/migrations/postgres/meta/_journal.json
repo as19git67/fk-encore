@@ -820,6 +820,13 @@
       "when": 1782950400000,
       "tag": "0116_receipt_amount_confidence",
       "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "7",
+      "when": 1783036800000,
+      "tag": "0117_osm_replication_healing",
+      "breakpoints": true
     }
   ]
 }
