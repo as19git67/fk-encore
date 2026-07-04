@@ -483,6 +483,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     visibility: 'private',
     group_id: null,
     notes: null,
+    attributes_reviewed: true,
   },
   {
     id: 2,
@@ -505,6 +506,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     visibility: 'private',
     group_id: null,
     notes: null,
+    attributes_reviewed: true,
   },
   {
     id: 3,
@@ -527,6 +529,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     visibility: 'private',
     group_id: null,
     notes: null,
+    attributes_reviewed: true,
   },
   {
     id: 4,
@@ -549,6 +552,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     visibility: 'private',
     group_id: null,
     notes: null,
+    attributes_reviewed: true,
   },
   {
     id: 5,
@@ -571,6 +575,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     visibility: 'private',
     group_id: null,
     notes: null,
+    attributes_reviewed: true,
   },
 ]
 
