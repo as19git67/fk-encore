@@ -4,6 +4,7 @@
  * Endpoints:
  *   GET    /health                — liveness + db reachability
  *   GET    /status                — list known region databases
+ *   GET    /replication/status/:postgresDb — replication state for one region
  *   POST   /reverse               — { database, lat, lon } → ReverseResult
  *   POST   /pois                  — { database, lat, lon, radiusM?, maxCandidates? }
  *   POST   /import                — { slug, postgresDb, pbfUrl }
@@ -27,6 +28,7 @@ import {
   type ImportRequest,
 } from "./import.ts";
 import {
+  getReplicationStatus,
   runReplicationUpdate,
   startReplicationLoop,
   stopReplicationLoop,
@@ -140,13 +142,19 @@ app.get("/imports/:postgresDb", async (req, res, next) => {
   }
 });
 
+app.get("/replication/status/:postgresDb", async (req, res, next) => {
+  try {
+    const postgresDb = requireDatabaseName(req.params.postgresDb ?? "");
+    res.json(await getReplicationStatus(postgresDb));
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.post("/refresh", async (req, res, next) => {
   try {
     const body = (req.body ?? {}) as Record<string, unknown>;
-    const postgresDb = requireString(body.postgresDb, "postgresDb");
-    if (!/^[a-z0-9_]+$/.test(postgresDb)) {
-      throw new HttpError(400, `postgresDb must match [a-z0-9_]+, got '${postgresDb}'`);
-    }
+    const postgresDb = requireDatabaseName(requireString(body.postgresDb, "postgresDb"));
     // Optional: the PBF URL lets the updater auto-initialise replication
     // if the region's status table is missing (see runReplicationUpdate).
     const pbfUrl = typeof body.pbfUrl === "string" ? body.pbfUrl : undefined;
@@ -225,6 +233,13 @@ function parseLookupBody(body: unknown): { database: string; lat: number; lon: n
   if (lat < -90 || lat > 90) throw new HttpError(400, `lat out of range: ${lat}`);
   if (lon < -180 || lon > 180) throw new HttpError(400, `lon out of range: ${lon}`);
   return { database, lat, lon };
+}
+
+function requireDatabaseName(database: string): string {
+  if (!/^nom_[a-z0-9_]+$/.test(database)) {
+    throw new HttpError(400, `postgresDb must match nom_[a-z0-9_]+, got '${database}'`);
+  }
+  return database;
 }
 
 function requireString(v: unknown, field: string): string {

@@ -23,6 +23,7 @@ import type {
   GeoPoiCandidate,
   GeoPoiQueryOptions,
   GeoRefreshResult,
+  GeoReplicationStatus,
   GeoReverseResult,
 } from "./geo-client";
 
@@ -37,6 +38,7 @@ export class InMemoryGeoClient implements GeoClient {
   private reverseResults = new Map<string, GeoReverseResult["result"]>();
   private poiCandidates = new Map<string, GeoPoiCandidate[]>();
   private refreshResults = new Map<string, GeoRefreshResult>();
+  private replicationStatuses = new Map<string, GeoReplicationStatus>();
   private droppedRegions: string[] = [];
   private startImportCalls: GeoImportRequest[] = [];
   private refreshCalls: string[] = [];
@@ -65,6 +67,16 @@ export class InMemoryGeoClient implements GeoClient {
 
   setRefreshResult(postgresDb: string, result: GeoRefreshResult): void {
     this.refreshResults.set(postgresDb, result);
+  }
+
+  setReplicationStatus(postgresDb: string, initialized: boolean, extras: Partial<GeoReplicationStatus> = {}): void {
+    this.replicationStatuses.set(postgresDb, {
+      postgresDb,
+      initialized,
+      sequence: null,
+      timestamp: null,
+      ...extras,
+    });
   }
 
   /** Test inspection helpers. */
@@ -97,6 +109,15 @@ export class InMemoryGeoClient implements GeoClient {
     return entry?.status ?? null;
   }
 
+  async getReplicationStatus(postgresDb: string): Promise<GeoReplicationStatus> {
+    return this.replicationStatuses.get(postgresDb) ?? {
+      postgresDb,
+      initialized: true,
+      sequence: null,
+      timestamp: null,
+    };
+  }
+
   async reverse(
     postgresDb: string,
     lat: number,
@@ -123,7 +144,14 @@ export class InMemoryGeoClient implements GeoClient {
     this.refreshCalls.push(postgresDb);
     this.refreshPbfUrls.push(pbfUrl);
     const cached = this.refreshResults.get(postgresDb);
-    if (cached) return cached;
+    if (cached) {
+      this.setReplicationStatus(postgresDb, true, {
+        sequence: cached.sequence,
+        timestamp: cached.timestamp,
+      });
+      return cached;
+    }
+    this.setReplicationStatus(postgresDb, true);
     return {
       postgresDb,
       appliedDiffs: 0,
