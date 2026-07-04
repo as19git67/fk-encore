@@ -50,6 +50,18 @@ export interface ReplicationResult {
   timestamp: string | null;
 }
 
+export interface ReplicationStatus {
+  postgresDb: string;
+  initialized: boolean;
+  sequence: number | null;
+  timestamp: string | null;
+}
+
+// A missing status table is actionable only once per process. Repeating the
+// same warning every hour hides real failures in otherwise healthy logs. The
+// entry is removed as soon as the region becomes initialized.
+const warnedUninitialized = new Set<string>();
+
 /**
  * Geofabrik publishes its replication state under
  * `<region>-updates/state.txt`. The PBF download lives at
@@ -94,13 +106,17 @@ export async function runReplicationUpdate(
   postgresDb: string,
   pbfUrl?: string,
 ): Promise<ReplicationResult> {
-  if (!(await isReplicationInitialized(postgresDb))) {
+  const status = await getReplicationStatus(postgresDb);
+  if (!status.initialized) {
     if (!pbfUrl) {
-      console.warn(
-        `[geo] replication ${postgresDb}: not initialised (no ` +
-          `osm2pgsql_replication_status table) and no pbfUrl available — ` +
-          `skipping. Trigger a manual refresh to heal it.`,
-      );
+      if (!warnedUninitialized.has(postgresDb)) {
+        warnedUninitialized.add(postgresDb);
+        console.warn(
+          `[geo] replication ${postgresDb}: not initialised (no ` +
+            `osm2pgsql_replication_status table) and no pbfUrl available — ` +
+            `skipping while osm-admin schedules automatic healing.`,
+        );
+      }
       return { postgresDb, appliedDiffs: 0, sequence: null, timestamp: null };
     }
     console.warn(
@@ -109,6 +125,7 @@ export async function runReplicationUpdate(
     );
     await initReplication(postgresDb, pbfUrl);
   }
+  warnedUninitialized.delete(postgresDb);
 
   // `osm2pgsql-replication update` prints summary lines we parse for
   // metrics. Capture stdout/stderr instead of inheriting.
@@ -153,19 +170,23 @@ export async function runReplicationUpdate(
  * Whether replication has been initialised for a region — i.e. the
  * `osm2pgsql_replication_status` table exists. Uses `to_regclass`,
  * which returns NULL (no error, no noisy server log) for a missing
- * relation. Returns false on any connection error too.
+ * relation. Connection and read errors deliberately propagate so the
+ * caller can retry them instead of mistaking an unavailable DB for a
+ * region that needs initialization.
  */
-async function isReplicationInitialized(postgresDb: string): Promise<boolean> {
+export async function getReplicationStatus(postgresDb: string): Promise<ReplicationStatus> {
   const { poolFor } = await import("./db.ts");
   const pool = poolFor(postgresDb);
-  try {
-    const res = await pool.query<{ ok: boolean }>(
-      `SELECT to_regclass('public.osm2pgsql_replication_status') IS NOT NULL AS ok`,
-    );
-    return res.rows[0]?.ok === true;
-  } catch {
-    return false;
+  const res = await pool.query<{ ok: boolean }>(
+    `SELECT to_regclass('public.osm2pgsql_replication_status') IS NOT NULL AS ok`,
+  );
+  const initialized = res.rows[0]?.ok === true;
+  if (!initialized) {
+    return { postgresDb, initialized: false, sequence: null, timestamp: null };
   }
+  const state = await readState(postgresDb);
+  warnedUninitialized.delete(postgresDb);
+  return { postgresDb, initialized: true, ...state };
 }
 
 interface ReplicationStateRow {
@@ -178,27 +199,22 @@ async function readState(postgresDb: string): Promise<ReplicationStateRow> {
   // `osm2pgsql_replication_status` (kept across slim/flex modes).
   const { poolFor } = await import("./db.ts");
   const pool = poolFor(postgresDb);
-  try {
-    const res = await pool.query<{ property: string; value: string }>(
-      `SELECT property, value
-         FROM osm2pgsql_replication_status
-        WHERE property IN ('sequence', 'timestamp')`,
-    );
-    let sequence: number | null = null;
-    let timestamp: string | null = null;
-    for (const row of res.rows) {
-      if (row.property === "sequence") {
-        const n = parseInt(row.value, 10);
-        if (Number.isFinite(n)) sequence = n;
-      } else if (row.property === "timestamp") {
-        timestamp = row.value;
-      }
+  const res = await pool.query<{ property: string; value: string }>(
+    `SELECT property, value
+       FROM osm2pgsql_replication_status
+      WHERE property IN ('sequence', 'timestamp')`,
+  );
+  let sequence: number | null = null;
+  let timestamp: string | null = null;
+  for (const row of res.rows) {
+    if (row.property === "sequence") {
+      const n = parseInt(row.value, 10);
+      if (Number.isFinite(n)) sequence = n;
+    } else if (row.property === "timestamp") {
+      timestamp = row.value;
     }
-    return { sequence, timestamp };
-  } catch {
-    // Table doesn't exist yet (init not run) — treat as zero.
-    return { sequence: null, timestamp: null };
   }
+  return { sequence, timestamp };
 }
 
 function pgArgs(database: string): string[] {

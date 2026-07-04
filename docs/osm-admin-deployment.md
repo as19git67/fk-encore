@@ -116,6 +116,9 @@ Read by the geo service unless noted:
 | `GEO_OSM2PGSQL_CACHE_MB` | `osm2pgsql --cache`. Raise to roughly the PBF size for fastest imports. | `2000` |
 | `GEO_OSM2PGSQL_PROCS` | `osm2pgsql --number-processes`. | `2` |
 | `GEO_REPLICATION_INTERVAL_MS` | Background replication-update loop interval (ms). | `3600000` (1 h) |
+| `OSM_REPLICATION_HEALING` | Enable automatic initialization healing for registered ready regions; set to `off` to disable. | enabled |
+| `GEO_STATUS_TIMEOUT_MS` | Timeout for a replication-status request from `osm-admin` (ms). | `10000` |
+| `GEO_REFRESH_TIMEOUT_MS` | Timeout for automatic replication initialization/update (ms). | `1800000` (30 min) |
 | `GEO_REPLICATION` | Set to `off` to disable the background replication loop entirely (e.g. during initial imports). | _(empty)_ |
 | `OSM_ADMIN_DISK_PROBE_PATH` | _(osm-admin side)_ Path the importer probes via `statfs` for the disk pre-check. Point at the bind-mount that backs `geo_data` for accurate readings. | `/` |
 
