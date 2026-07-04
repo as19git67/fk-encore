@@ -202,7 +202,8 @@ larger regions land in `pending_approval` and require an admin click.
 After a successful `osm2pgsql --create` the import path also runs
 `osm2pgsql-replication init --server <region>-updates/` which records
 the Geofabrik replication base URL in the database (table
-`osm2pgsql_replication_status`).
+`planet_osm_replication_status` on osm2pgsql < 1.9, or replication keys in
+`osm2pgsql_properties` on newer versions).
 
 From then on:
 

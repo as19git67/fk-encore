@@ -2,9 +2,9 @@
  * Replication updater for the per-region PostGIS databases.
  *
  * Uses osm2pgsql's bundled `osm2pgsql-replication` tool, which stores
- * its high-water sequence inside the database itself (in the
- * `osm2pgsql_replication_status` table) and pulls minute/hour/day
- * diffs from a Geofabrik replication base URL.
+ * its high-water sequence inside the database itself. Versions before
+ * osm2pgsql 1.9 use `planet_osm_replication_status`; newer versions use
+ * replication properties in `osm2pgsql_properties`.
  *
  *   initReplication        ran by the importer after a fresh
  *                           `osm2pgsql --create`. Tells the tool
@@ -57,6 +57,10 @@ export interface ReplicationStatus {
   timestamp: string | null;
 }
 
+export interface ReplicationStatusQuery {
+  query<T>(text: string): Promise<{ rows: T[] }>;
+}
+
 // A missing status table is actionable only once per process. Repeating the
 // same warning every hour hides real failures in otherwise healthy logs. The
 // entry is removed as soon as the region becomes initialized.
@@ -93,7 +97,7 @@ export async function initReplication(
  * happened. Caller surfaces non-zero exit codes as failures; an exit
  * of 0 with appliedDiffs === 0 means "nothing new yet".
  *
- * Self-healing: a region whose `osm2pgsql_replication_status` table is
+ * Self-healing: a region whose version-specific replication state is
  * missing was imported but never had replication initialised (e.g. the
  * non-fatal `initReplication` at import time failed, or it predates
  * replication support). Running `osm2pgsql-replication update` against
@@ -113,7 +117,7 @@ export async function runReplicationUpdate(
         warnedUninitialized.add(postgresDb);
         console.warn(
           `[geo] replication ${postgresDb}: not initialised (no ` +
-            `osm2pgsql_replication_status table) and no pbfUrl available — ` +
+            `replication state) and no pbfUrl available — ` +
             `skipping while osm-admin schedules automatic healing.`,
         );
       }
@@ -167,26 +171,73 @@ export async function runReplicationUpdate(
 }
 
 /**
- * Whether replication has been initialised for a region — i.e. the
- * `osm2pgsql_replication_status` table exists. Uses `to_regclass`,
- * which returns NULL (no error, no noisy server log) for a missing
- * relation. Connection and read errors deliberately propagate so the
- * caller can retry them instead of mistaking an unavailable DB for a
- * region that needs initialization.
+ * Read replication state across the two storage layouts used by supported
+ * osm2pgsql versions. Debian Bookworm ships 1.8 and therefore creates
+ * `planet_osm_replication_status` (columns url, sequence, importdate).
+ * osm2pgsql >= 1.9 stores replication_* keys in `osm2pgsql_properties`.
+ * Connection and read errors deliberately propagate so the caller retries
+ * them instead of mistaking an unavailable DB for an uninitialized region.
  */
-export async function getReplicationStatus(postgresDb: string): Promise<ReplicationStatus> {
-  const { poolFor } = await import("./db.ts");
-  const pool = poolFor(postgresDb);
-  const res = await pool.query<{ ok: boolean }>(
-    `SELECT to_regclass('public.osm2pgsql_replication_status') IS NOT NULL AS ok`,
+export async function getReplicationStatus(
+  postgresDb: string,
+  queryOverride?: ReplicationStatusQuery,
+): Promise<ReplicationStatus> {
+  const pool = queryOverride ?? await (async () => {
+    const { poolFor } = await import("./db.ts");
+    return poolFor(postgresDb) as unknown as ReplicationStatusQuery;
+  })();
+  const tables = await pool.query<{
+    properties_table: string | null;
+    legacy_table: string | null;
+  }>(
+    `SELECT to_regclass('public.osm2pgsql_properties')::text AS properties_table,
+            to_regclass('public.planet_osm_replication_status')::text AS legacy_table`,
   );
-  const initialized = res.rows[0]?.ok === true;
-  if (!initialized) {
-    return { postgresDb, initialized: false, sequence: null, timestamp: null };
+  const available = tables.rows[0];
+
+  if (available?.properties_table) {
+    const properties = await pool.query<{ property: string; value: string }>(
+      `SELECT property, value
+         FROM osm2pgsql_properties
+        WHERE property IN (
+          'replication_base_url',
+          'replication_sequence_number',
+          'replication_timestamp'
+        )`,
+    );
+    const values = new Map(properties.rows.map((row) => [row.property, row.value]));
+    const baseUrl = values.get("replication_base_url");
+    const rawSequence = values.get("replication_sequence_number");
+    if (baseUrl && rawSequence) {
+      warnedUninitialized.delete(postgresDb);
+      return {
+        postgresDb,
+        initialized: true,
+        sequence: parseSequence(rawSequence),
+        timestamp: values.get("replication_timestamp") ?? null,
+      };
+    }
   }
-  const state = await readState(postgresDb);
-  warnedUninitialized.delete(postgresDb);
-  return { postgresDb, initialized: true, ...state };
+
+  if (available?.legacy_table) {
+    const legacy = await pool.query<{ sequence: string | number | null; timestamp: string | null }>(
+      `SELECT sequence, importdate::text AS timestamp
+         FROM planet_osm_replication_status
+        LIMIT 1`,
+    );
+    const row = legacy.rows[0];
+    if (row) {
+      warnedUninitialized.delete(postgresDb);
+      return {
+        postgresDb,
+        initialized: true,
+        sequence: parseSequence(row.sequence),
+        timestamp: row.timestamp,
+      };
+    }
+  }
+
+  return { postgresDb, initialized: false, sequence: null, timestamp: null };
 }
 
 interface ReplicationStateRow {
@@ -195,26 +246,17 @@ interface ReplicationStateRow {
 }
 
 async function readState(postgresDb: string): Promise<ReplicationStateRow> {
-  // osm2pgsql ≥ 1.6 stores replication state in
-  // `osm2pgsql_replication_status` (kept across slim/flex modes).
-  const { poolFor } = await import("./db.ts");
-  const pool = poolFor(postgresDb);
-  const res = await pool.query<{ property: string; value: string }>(
-    `SELECT property, value
-       FROM osm2pgsql_replication_status
-      WHERE property IN ('sequence', 'timestamp')`,
-  );
-  let sequence: number | null = null;
-  let timestamp: string | null = null;
-  for (const row of res.rows) {
-    if (row.property === "sequence") {
-      const n = parseInt(row.value, 10);
-      if (Number.isFinite(n)) sequence = n;
-    } else if (row.property === "timestamp") {
-      timestamp = row.value;
-    }
+  const status = await getReplicationStatus(postgresDb);
+  if (!status.initialized) {
+    throw new Error(`replication state disappeared for ${postgresDb}`);
   }
-  return { sequence, timestamp };
+  return { sequence: status.sequence, timestamp: status.timestamp };
+}
+
+function parseSequence(value: string | number | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  const parsed = typeof value === "number" ? value : parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function pgArgs(database: string): string[] {
