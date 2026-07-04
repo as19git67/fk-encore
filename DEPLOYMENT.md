@@ -457,6 +457,9 @@ the photo UI responsive under sustained scan load.
 | `GEO_OSM2PGSQL_CACHE_MB`         | `2000`  | osm2pgsql `--cache` value, in MB. Raise on hosts with spare RAM to speed up imports of large regions. |
 | `GEO_OSM2PGSQL_PROCS`            | `2`    | osm2pgsql `--number-processes`. |
 | `GEO_REPLICATION_INTERVAL_MS`    | `3600000` | Background `osm2pgsql-replication update` loop interval, ms. Set to `off` (via `GEO_REPLICATION=off`) to disable entirely. |
+| `OSM_REPLICATION_HEALING`        | enabled | Set to `off` to disable the `osm-admin` startup and 5-minute self-healing checks for registered regions. |
+| `GEO_STATUS_TIMEOUT_MS`          | `10000` | Timeout for Geo replication-status checks initiated by `osm-admin`. |
+| `GEO_REFRESH_TIMEOUT_MS`         | `1800000` | Timeout for a Geo replication initialization/update initiated by `osm-admin`. |
 | `POI_REGION_AUTO_IMPORT_MAX_PBF_MB` | `1500` | PBF-size cutoff above which a region needs manual approval in the admin UI. |
 | `HEALTH_CHECK_INTERVAL_MS`       | `60000` | Interval between ML `/health` pings. Lower = faster detection of container outages; the ping itself is cheap. |
 | `HEALTH_CHECK_TIMEOUT_MS`        | `60000` | Timeout for a single health ping. Generous on purpose — a busy container may reply slowly without being unhealthy. |

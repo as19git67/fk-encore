@@ -7,6 +7,7 @@
  *
  *   POST   /import                — kick off a background osm2pgsql import
  *   GET    /imports/:postgresDb   — current status of an import
+ *   GET    /replication/status/:postgresDb — replication initialization state
  *   POST   /reverse               — Nominatim-shaped reverse geocoding
  *   POST   /pois                  — radius-based POI candidate lookup
  *   DELETE /regions/:postgresDb   — drop a region database
@@ -20,6 +21,8 @@
 
 const DEFAULT_BASE_URL = process.env.GEO_SERVICE_URL ?? "http://geo:8080";
 const SHARED_SECRET = process.env.GEO_SHARED_SECRET ?? "";
+const STATUS_TIMEOUT_MS = parseInt(process.env.GEO_STATUS_TIMEOUT_MS ?? "10000", 10);
+const REFRESH_TIMEOUT_MS = parseInt(process.env.GEO_REFRESH_TIMEOUT_MS ?? String(30 * 60_000), 10);
 
 export interface GeoImportRequest {
   slug: string;
@@ -78,10 +81,18 @@ export interface GeoRefreshResult {
   timestamp: string | null;
 }
 
+export interface GeoReplicationStatus {
+  postgresDb: string;
+  initialized: boolean;
+  sequence: number | null;
+  timestamp: string | null;
+}
+
 export interface GeoClient {
   health(): Promise<boolean>;
   startImport(req: GeoImportRequest): Promise<GeoImportStatus>;
   getImportStatus(postgresDb: string): Promise<GeoImportStatus | null>;
+  getReplicationStatus(postgresDb: string): Promise<GeoReplicationStatus>;
   reverse(postgresDb: string, lat: number, lon: number): Promise<GeoReverseResult["result"]>;
   findPois(
     postgresDb: string,
@@ -104,7 +115,7 @@ export interface HttpGeoClientOptions {
   fetcher?: typeof fetch;
 }
 
-class HttpGeoClient implements GeoClient {
+export class HttpGeoClient implements GeoClient {
   private readonly baseUrl: string;
   private readonly sharedSecret: string;
   private readonly fetcher: typeof fetch;
@@ -142,6 +153,16 @@ class HttpGeoClient implements GeoClient {
     return (await res.json()) as GeoImportStatus;
   }
 
+  async getReplicationStatus(postgresDb: string): Promise<GeoReplicationStatus> {
+    const path = `/replication/status/${encodeURIComponent(postgresDb)}`;
+    const res = await this.fetcher(`${this.baseUrl}${path}`, {
+      headers: this.headers(),
+      signal: AbortSignal.timeout(STATUS_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new Error(`geo: GET ${path} → HTTP ${res.status}`);
+    return (await res.json()) as GeoReplicationStatus;
+  }
+
   async reverse(
     postgresDb: string,
     lat: number,
@@ -172,7 +193,7 @@ class HttpGeoClient implements GeoClient {
   }
 
   async refresh(postgresDb: string, pbfUrl?: string): Promise<GeoRefreshResult> {
-    return await this.postJson<GeoRefreshResult>("/refresh", { postgresDb, pbfUrl });
+    return await this.postJson<GeoRefreshResult>("/refresh", { postgresDb, pbfUrl }, REFRESH_TIMEOUT_MS);
   }
 
   async dropRegion(postgresDb: string): Promise<boolean> {
@@ -187,11 +208,12 @@ class HttpGeoClient implements GeoClient {
     return body.deleted;
   }
 
-  private async postJson<T>(path: string, body: unknown): Promise<T> {
+  private async postJson<T>(path: string, body: unknown, timeoutMs?: number): Promise<T> {
     const res = await this.fetcher(`${this.baseUrl}${path}`, {
       method: "POST",
       headers: { ...this.headers(), "content-type": "application/json" },
       body: JSON.stringify(body),
+      signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
     });
     if (!res.ok) {
       let detail = "";

@@ -13,6 +13,10 @@ import { eq } from "drizzle-orm";
 import dbDefault from "../db/database";
 import { osmRegionImports } from "../db/schema";
 import { getGeoClient, type GeoClient } from "./geo-client";
+import {
+  nextReplicationHealthCheck,
+  replicationRetryDelayMs,
+} from "./replication-healer";
 
 export interface RefreshDeps {
   db?: typeof dbDefault;
@@ -59,13 +63,20 @@ export async function refreshRegion(
       result.sequence !== null && result.sequence !== undefined
         ? String(result.sequence)
         : row.replication_seq ?? undefined;
+    const succeeded = now();
+    const succeededAt = succeeded.toISOString();
+    const nextCheckAt = nextReplicationHealthCheck(succeeded);
     await db
       .update(osmRegionImports)
       .set({
         replication_seq: replicationSeq ?? null,
+        replication_last_attempt_at: succeededAt,
+        replication_last_success_at: succeededAt,
+        replication_failure_count: 0,
+        replication_next_retry_at: nextCheckAt,
         last_error: null,
-        last_used_at: now().toISOString(),
-        updated_at: now().toISOString(),
+        last_used_at: succeededAt,
+        updated_at: succeededAt,
       })
       .where(eq(osmRegionImports.slug, slug));
     return {
@@ -79,11 +90,18 @@ export async function refreshRegion(
     };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
+    const failedAt = now();
+    const failureCount = row.replication_failure_count + 1;
     await db
       .update(osmRegionImports)
       .set({
+        replication_last_attempt_at: failedAt.toISOString(),
+        replication_failure_count: failureCount,
+        replication_next_retry_at: new Date(
+          failedAt.getTime() + replicationRetryDelayMs(failureCount),
+        ).toISOString(),
         last_error: `replication: ${detail}`,
-        updated_at: now().toISOString(),
+        updated_at: failedAt.toISOString(),
       })
       .where(eq(osmRegionImports.slug, slug));
     return { slug, ok: false, detail };
