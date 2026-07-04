@@ -246,47 +246,22 @@ function addSelectionToBasket() {
   clearSelection()
 }
 
-/** Hard ceiling for "alle Treffer in den Basket" — protects the browser
- *  (sessionStorage + drawer rendering) from a five-digit document corpus. */
-const BASKET_ALL_CAP = 1000
-const addingAllToBasket = ref(false)
+/** True when every currently loaded document is already selected. */
+const allLoadedSelected = computed(
+  () => items.value.length > 0 && items.value.every((d) => selectedIds.value.has(d.id)),
+)
 
 /**
- * Put the whole result list of the current filter/search into the basket —
- * every match, not just the page currently on screen. List mode pages
- * through the backend up to BASKET_ALL_CAP; search mode is already capped
- * at its best SEARCH_LIMIT hits.
+ * Select (or deselect) every document on screen. Works on the loaded page(s)
+ * only — use "Mehr laden" first to pull in more, then select. From the
+ * selection the batch bar's "In den Basket" moves them into the basket, so
+ * "select all → basket" is two explicit clicks rather than one magic action.
  */
-async function addResultsToBasket() {
-  if (items.value.length === 0 || addingAllToBasket.value) return
-  addingAllToBasket.value = true
-  error.value = ''
-  try {
-    let docs = items.value
-    if (!isSearchActive.value && total.value > items.value.length) {
-      const s = sort.applied.value
-      const all: DocumentSummary[] = [...items.value]
-      while (all.length < Math.min(total.value, BASKET_ALL_CAP)) {
-        const res = await listDocuments({
-          ...currentFilterParams(),
-          sort_by: s.field,
-          sort_dir: s.direction,
-          limit: PAGE_SIZE,
-          offset: all.length,
-        })
-        if (res.items.length === 0) break
-        all.push(...res.items)
-      }
-      docs = all.slice(0, BASKET_ALL_CAP)
-    }
-    basket.addAll(docs)
-    info.value =
-      `${docs.length} Dokument${docs.length === 1 ? '' : 'e'} in den Basket gelegt.` +
-      (total.value > docs.length ? ` (Obergrenze ${BASKET_ALL_CAP} — Filter weiter eingrenzen.)` : '')
-  } catch (err: any) {
-    error.value = err.message || 'Dokumente konnten nicht in den Basket gelegt werden.'
-  } finally {
-    addingAllToBasket.value = false
+function toggleSelectAll() {
+  if (allLoadedSelected.value) {
+    clearSelection()
+  } else {
+    selectedIds.value = new Set(items.value.map((d) => d.id))
   }
 }
 
@@ -801,13 +776,12 @@ onMounted(async () => {
         <template v-else>{{ items.length }} Dokument{{ items.length === 1 ? '' : 'e' }}</template>
       </span>
       <Button
-        :label="`Alle ${isSearchActive ? items.length : Math.min(total, BASKET_ALL_CAP)} in den Basket`"
-        icon="pi pi-cart-plus"
+        :label="allLoadedSelected ? 'Auswahl aufheben' : 'Alle auswählen'"
+        :icon="allLoadedSelected ? 'pi pi-times' : 'pi pi-check-square'"
         size="small"
         text
-        :loading="addingAllToBasket"
-        v-tooltip.bottom="'Legt die komplette Trefferliste des aktuellen Filters in den Basket — unabhängig von der Auswahl.'"
-        @click="addResultsToBasket"
+        v-tooltip.bottom="'Alle geladenen Dokumente markieren — danach über die Aktionsleiste in den Basket legen oder direkt bearbeiten.'"
+        @click="toggleSelectAll"
       />
     </div>
 

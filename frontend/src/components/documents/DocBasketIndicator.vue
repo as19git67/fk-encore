@@ -9,8 +9,9 @@ import Drawer from 'primevue/drawer'
 import InputNumber from 'primevue/inputnumber'
 import Message from 'primevue/message'
 import MultiSelect from 'primevue/multiselect'
-import Select from 'primevue/select'
 import SelectButton from 'primevue/selectbutton'
+import TreeSelect from 'primevue/treeselect'
+import type { TreeNode } from 'primevue/treenode'
 import MultiSelectDialog from '../MultiSelectDialog.vue'
 import { useDocSelectionStore } from '../../stores/documents/selection'
 import {
@@ -95,9 +96,34 @@ async function ensureSubjectPersons() {
   subjectPersons.value = (await listSubjectPersons()).items
 }
 
-const categoryOptions = computed(() =>
-  categories.value.map((c) => ({ label: c.name, value: c.slug })),
-)
+/**
+ * Flat category rows → nested TreeSelect nodes via `parent_id`, so the
+ * drawer's category picker preserves the taxonomy (Finanzen › Steuern …)
+ * instead of flattening every level into one list. `key` is the slug — the
+ * value we send to the batch endpoint.
+ */
+const categoryTree = computed<TreeNode[]>(() => {
+  const byId = new Map<number, TreeNode>()
+  for (const c of categories.value) {
+    byId.set(c.id, { key: c.slug, label: c.name, children: [] })
+  }
+  const roots: TreeNode[] = []
+  for (const c of categories.value) {
+    const node = byId.get(c.id)!
+    const parent = c.parent_id != null ? byId.get(c.parent_id) : undefined
+    if (parent) parent.children!.push(node)
+    else roots.push(node)
+  }
+  // Drop empty children arrays so leaves don't render an expander toggle.
+  const prune = (nodes: TreeNode[]) => {
+    for (const n of nodes) {
+      if (n.children && n.children.length === 0) delete n.children
+      else if (n.children) prune(n.children)
+    }
+  }
+  prune(roots)
+  return roots
+})
 const taxSectionOptions = computed(() =>
   taxSections.value.map((s) => ({ label: s.name, value: s.slug })),
 )
@@ -168,12 +194,19 @@ async function handleTagSave(payload: { adds: string[]; removes: string[] }) {
 // ─── Category ───────────────────────────────────────────────────────────────
 
 const categoryDialogVisible = ref(false)
-const categoryDraft = ref<string | null>(null)
+// TreeSelect single-selection model is a `{ [key]: true }` map; the chosen
+// category slug is its single key (empty = clear the category).
+const categorySelection = ref<Record<string, boolean>>({})
 const savingCategory = ref(false)
+
+const categoryDraft = computed<string | null>(() => {
+  const keys = Object.keys(categorySelection.value)
+  return keys[0] ?? null
+})
 
 async function openCategoryDialog() {
   resetMessages()
-  categoryDraft.value = null
+  categorySelection.value = {}
   categoryDialogVisible.value = true
   await ensureCategories().catch(reportError)
 }
@@ -459,19 +492,23 @@ async function savePersons() {
         Setzt die Kategorie auf {{ count }} Dokument{{ count === 1 ? '' : 'e' }} und
         fixiert sie gegen die automatische Neuklassifizierung.
       </p>
-      <Select
-        v-model="categoryDraft"
-        :options="categoryOptions"
-        option-label="label"
-        option-value="value"
+      <TreeSelect
+        v-model="categorySelection"
+        :options="categoryTree"
+        selection-mode="single"
         placeholder="Kategorie wählen"
-        show-clear
         filter
+        filter-placeholder="Kategorie suchen…"
         class="dialog-field"
       />
       <template #footer>
         <Button label="Abbrechen" text severity="secondary" @click="categoryDialogVisible = false" />
-        <Button label="Übernehmen" :loading="savingCategory" @click="saveCategory" />
+        <Button
+          label="Übernehmen"
+          :loading="savingCategory"
+          :disabled="categoryDraft === null"
+          @click="saveCategory"
+        />
       </template>
     </Dialog>
 
@@ -698,6 +735,13 @@ async function savePersons() {
 .action-row :deep(.p-button) {
   flex: 1;
   min-width: 0;
+}
+/* Buttons share the row equally; clip an over-long label ("Kategorie") with
+   an ellipsis instead of forcing the row wider or wrapping the text. */
+.action-row :deep(.p-button-label) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .clear-row {
   display: flex;
