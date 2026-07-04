@@ -8,9 +8,6 @@ import Message from 'primevue/message'
 import SelectButton from 'primevue/selectbutton'
 import Chip from 'primevue/chip'
 import Tag from 'primevue/tag'
-import MultiSelectDialog from '../components/MultiSelectDialog.vue'
-import DocumentBatchVisibilityDialog from '../components/DocumentBatchVisibilityDialog.vue'
-import DocumentBatchReprocessDialog from '../components/DocumentBatchReprocessDialog.vue'
 import DocumentUploadDefaultsDialog from '../components/DocumentUploadDefaultsDialog.vue'
 import DocumentFilterMenu from '../components/DocumentFilterMenu.vue'
 import DocumentScanQueuePanel from '../components/DocumentScanQueuePanel.vue'
@@ -22,7 +19,6 @@ import {
   listGroups,
   listSubjectPersons,
   searchDocuments,
-  batchUpdateDocumentTags,
   type DocumentSummary,
   type DocumentCategory,
   type DocumentStatus,
@@ -31,6 +27,7 @@ import {
   type SubjectPerson,
 } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
+import { useDocSelectionStore } from '../stores/documents/selection'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import { useScrollRestore } from '../composables/useScrollRestore'
 import { useSort, type SortField } from '../composables/useSort'
@@ -151,13 +148,13 @@ function resetFilterMenu() {
   load()
 }
 
-// ─── Selection & batch ─────────────────────────────────────────────────────
+// ─── Selection & basket (issue #736) ────────────────────────────────────────
+// The list selection is purely a staging step: checkboxes collect documents,
+// "In den Basket" hands them to the basket, and every batch edit
+// (Tags/Kategorie/Sichtbarkeit/OCR/…) lives in the basket drawer. The list
+// itself no longer edits documents.
 const selectedIds = ref<Set<number>>(new Set())
-const tagsDialogVisible = ref(false)
-const visibilityDialogVisible = ref(false)
-const reprocessDialogVisible = ref(false)
 const defaultsDialogVisible = ref(false)
-const savingBatchTags = ref(false)
 
 function isSelected(id: number) {
   return selectedIds.value.has(id)
@@ -174,89 +171,55 @@ function clearSelection() {
   selectedIds.value = new Set()
 }
 
-const sessionAddedTags = ref<string[]>([])
-
+// Known tags feed the filter panel's tag picker.
 const allKnownTags = computed(() => {
   const seen = new Set<string>()
   for (const d of items.value) {
     for (const t of d.tags) seen.add(t)
   }
-  for (const t of sessionAddedTags.value) seen.add(t)
   return [...seen].sort((a, b) => a.localeCompare(b))
 })
-
-const tagDialogItems = computed(() =>
-  allKnownTags.value.map((t) => ({ id: t, label: t })),
-)
 
 const selectedDocs = computed(() =>
   items.value.filter((d) => selectedIds.value.has(d.id)),
 )
 
-const tagInitialStates = computed<Map<string, boolean | null>>(() => {
+const basket = useDocSelectionStore()
+
+/** Move the checked documents into the basket (drawer in the navbar). */
+function addSelectionToBasket() {
   const docs = selectedDocs.value
-  const out = new Map<string, boolean | null>()
-  for (const tag of allKnownTags.value) {
-    if (docs.length === 0) {
-      out.set(tag, false)
-      continue
-    }
-    let count = 0
-    for (const d of docs) {
-      if (d.tags.includes(tag)) count++
-    }
-    if (count === 0) out.set(tag, false)
-    else if (count === docs.length) out.set(tag, true)
-    else out.set(tag, null)
-  }
-  return out
-})
-
-async function handleBatchTagsSave(payload: { adds: string[]; removes: string[] }) {
-  if (selectedIds.value.size === 0) return
-  savingBatchTags.value = true
-  error.value = ''
-  info.value = ''
-  try {
-    const res = await batchUpdateDocumentTags({
-      document_ids: [...selectedIds.value],
-      add: payload.adds,
-      remove: payload.removes,
-    })
-    info.value = `Tags angewendet auf ${res.affected_documents} Dokument(e).`
-    tagsDialogVisible.value = false
-    await load()
-  } catch (err: any) {
-    error.value = err?.message || 'Tags konnten nicht aktualisiert werden.'
-  } finally {
-    savingBatchTags.value = false
-  }
-}
-
-function handleBatchTagsCreate(name: string) {
-  const trimmed = name.trim().toLowerCase()
-  if (!trimmed) return
-  if (!sessionAddedTags.value.includes(trimmed)) {
-    sessionAddedTags.value = [...sessionAddedTags.value, trimmed]
-  }
-}
-
-function handleBatchVisibilityDone(payload: { affected: number; skipped: number }) {
-  if (payload.skipped > 0) {
-    info.value = `Sichtbarkeit für ${payload.affected} Dokument(e) geändert. ${payload.skipped} übersprungen (keine Berechtigung).`
-  } else {
-    info.value = `Sichtbarkeit für ${payload.affected} Dokument(e) geändert.`
-  }
-  load()
-}
-
-function handleBatchReprocessDone(payload: { affected: number }) {
-  info.value = `OCR & KI für ${payload.affected} Dokument(e) neu gestartet.`
+  if (docs.length === 0) return
+  basket.addAll(docs)
+  info.value = `${docs.length} Dokument${docs.length === 1 ? '' : 'e'} in den Basket gelegt.`
   clearSelection()
-  load()
+}
+
+/** True when every currently loaded document is already selected. */
+const allLoadedSelected = computed(
+  () => items.value.length > 0 && items.value.every((d) => selectedIds.value.has(d.id)),
+)
+
+/**
+ * Select (or deselect) every document on screen. Works on the loaded page(s)
+ * only — use "Mehr laden" first to pull in more, then select. From the
+ * selection the batch bar's "In den Basket" moves them into the basket, so
+ * "select all → basket" is two explicit clicks rather than one magic action.
+ */
+function toggleSelectAll() {
+  if (allLoadedSelected.value) {
+    clearSelection()
+  } else {
+    selectedIds.value = new Set(items.value.map((d) => d.id))
+  }
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+/** "New" = ready, but no human has approved the AI attribution yet (#635). */
+function isNew(doc: DocumentSummary): boolean {
+  return doc.status === 'ready' && !doc.attributes_reviewed
+}
+
 const LOW_CONFIDENCE_THRESHOLD = 0.6
 function isLowConfidence(doc: DocumentSummary): boolean {
   return (
@@ -315,6 +278,7 @@ function syncQueryParams() {
   if (fq.tags && fq.tags.length > 0) query.tags = fq.tags.join(',')
   if (fq.status) query.status = fq.status
   if (fq.needs_review) query.review = '1'
+  if (fq.unreviewed) query.neu = '1'
   if (fq.sender) query.sender = fq.sender
   if (fq.dateFrom) query.dateFrom = fq.dateFrom
   if (fq.dateTo) query.dateTo = fq.dateTo
@@ -334,42 +298,82 @@ function syncQueryParams() {
   )
 }
 
+/** One backend page; the API clamps `limit` to 200 per request. */
+const PAGE_SIZE = 200
+/** Best-N cap of the search endpoint (it has no offset paging). */
+const SEARCH_LIMIT = 100
+
+/** Total matching documents (list mode); drives "X von Y" + "Mehr laden". */
+const total = ref(0)
+const loadingMore = ref(false)
+const isSearchActive = computed(() => q.value.trim().length > 0)
+const hasMore = computed(() => !isSearchActive.value && items.value.length < total.value)
+
+function currentFilterParams() {
+  const f = filter.applied.value
+  // Single source for the filter params so search and list stay in sync —
+  // searching used to drop every filter here. (#vxd1qh)
+  return {
+    category: f.category,
+    tags: f.tags?.join(','),
+    status: f.status as DocumentStatus | undefined,
+    needs_review: f.needs_review,
+    unreviewed: f.unreviewed,
+    sender: f.sender,
+    date_from: f.dateFrom,
+    date_to: f.dateTo,
+    tax_relevant: f.taxRelevant,
+    subject_person_id: f.subjectPersonId,
+  }
+}
+
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    const f = filter.applied.value
-    // Single source for the filter params so search and list stay in sync —
-    // searching used to drop every filter here. (#vxd1qh)
-    const filterParams = {
-      category: f.category,
-      tags: f.tags?.join(','),
-      status: f.status as DocumentStatus | undefined,
-      needs_review: f.needs_review,
-      sender: f.sender,
-      date_from: f.dateFrom,
-      date_to: f.dateTo,
-      tax_relevant: f.taxRelevant,
-      subject_person_id: f.subjectPersonId,
-    }
-    const isSearch = q.value.trim().length > 0
-    if (isSearch) {
-      const res = await searchDocuments(q.value.trim(), searchMode.value, 100, filterParams)
+    const filterParams = currentFilterParams()
+    if (isSearchActive.value) {
+      const res = await searchDocuments(q.value.trim(), searchMode.value, SEARCH_LIMIT, filterParams)
       items.value = res.items
+      total.value = res.items.length
     } else {
       const s = sort.applied.value
       const res = await listDocuments({
         ...filterParams,
         sort_by: s.field,
         sort_dir: s.direction,
-        limit: 200,
+        limit: PAGE_SIZE,
       })
       items.value = res.items
+      total.value = res.total
     }
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Dokumente'
   } finally {
     loading.value = false
+  }
+}
+
+/** Append the next page (list mode only — search has no offset paging). */
+async function loadMore() {
+  if (loadingMore.value || !hasMore.value) return
+  loadingMore.value = true
+  try {
+    const s = sort.applied.value
+    const res = await listDocuments({
+      ...currentFilterParams(),
+      sort_by: s.field,
+      sort_dir: s.direction,
+      limit: PAGE_SIZE,
+      offset: items.value.length,
+    })
+    const known = new Set(items.value.map((d) => d.id))
+    items.value = [...items.value, ...res.items.filter((d) => !known.has(d.id))]
+    total.value = res.total
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Nachladen der Dokumente'
+  } finally {
+    loadingMore.value = false
   }
 }
 
@@ -492,27 +496,11 @@ onMounted(async () => {
       </span>
       <div class="batch-actions">
         <Button
-          v-if="auth.hasPermission('documents.edit')"
-          label="Tags…"
-          icon="pi pi-tag"
+          label="In den Basket"
+          icon="pi pi-shopping-cart"
           size="small"
-          @click="tagsDialogVisible = true"
-        />
-        <Button
-          v-if="auth.hasPermission('documents.edit')"
-          label="Sichtbarkeit…"
-          icon="pi pi-users"
-          size="small"
-          @click="visibilityDialogVisible = true"
-        />
-        <Button
-          v-if="auth.hasPermission('documents.edit')"
-          label="OCR & KI neu…"
-          icon="pi pi-refresh"
-          size="small"
-          severity="secondary"
-          v-tooltip.bottom="'Text-Extraktion (OCR) und KI-Analyse für die Auswahl erneut starten'"
-          @click="reprocessDialogVisible = true"
+          v-tooltip.bottom="'Auswahl in den Basket legen (oben rechts) — dort werden Tags, Kategorie, Datum, Steuer, Sichtbarkeit und OCR/KI gemeinsam bearbeitet oder durchblättert.'"
+          @click="addSelectionToBasket"
         />
         <Button
           label="Auswahl aufheben"
@@ -659,6 +647,12 @@ onMounted(async () => {
         removable
         @remove="filter.removeKey(['needs_review'])"
       />
+      <Chip
+        v-if="filter.applied.value.unreviewed"
+        label="Nur neue"
+        removable
+        @remove="filter.removeKey(['unreviewed'])"
+      />
       <Button
         label="Alle Filter löschen"
         text
@@ -677,8 +671,25 @@ onMounted(async () => {
       <template v-else>Noch keine Dokumente vorhanden.</template>
     </div>
 
+    <!-- Result count + whole-result-list basket action -->
+    <div v-if="!loading && items.length > 0" class="results-bar">
+      <span class="results-count">
+        <template v-if="isSearchActive">{{ items.length }} beste Treffer</template>
+        <template v-else-if="total > items.length">{{ items.length }} von {{ total }} Dokumenten</template>
+        <template v-else>{{ items.length }} Dokument{{ items.length === 1 ? '' : 'e' }}</template>
+      </span>
+      <Button
+        :label="allLoadedSelected ? 'Auswahl aufheben' : 'Alle auswählen'"
+        :icon="allLoadedSelected ? 'pi pi-times' : 'pi pi-check-square'"
+        size="small"
+        text
+        v-tooltip.bottom="'Alle geladenen Dokumente markieren — danach über die Aktionsleiste in den Basket legen oder direkt bearbeiten.'"
+        @click="toggleSelectAll"
+      />
+    </div>
+
     <!-- List view -->
-    <div v-else-if="viewMode === 'list'" class="document-list">
+    <div v-if="!loading && items.length > 0 && viewMode === 'list'" class="document-list">
       <div
         v-for="doc in items"
         :key="doc.id"
@@ -706,6 +717,13 @@ onMounted(async () => {
             {{ doc.title || doc.original_filename }}
           </button>
           <Tag :severity="statusSeverity(doc.status)" :value="statusLabel(doc.status)" />
+          <Tag
+            v-if="isNew(doc)"
+            severity="info"
+            icon="pi pi-sparkles"
+            value="Neu"
+            v-tooltip.bottom="'KI-Zuordnung noch nicht bestätigt — über den Basket oder die Detailansicht bestätigen.'"
+          />
           <Tag
             v-if="isLowConfidence(doc)"
             severity="warn"
@@ -735,7 +753,7 @@ onMounted(async () => {
     </div>
 
     <!-- Grid / card view -->
-    <div v-else class="document-grid">
+    <div v-else-if="!loading && items.length > 0" class="document-grid">
       <div
         v-for="doc in items"
         :key="doc.id"
@@ -762,6 +780,7 @@ onMounted(async () => {
           :severity="statusSeverity(doc.status)"
           :value="statusLabel(doc.status)"
         />
+        <Tag v-if="isNew(doc)" class="grid-card-status" severity="info" value="Neu" />
         <div class="grid-card-title">{{ doc.title || doc.original_filename }}</div>
         <div class="grid-card-meta">
           <span v-if="doc.sender">{{ doc.sender }}</span>
@@ -777,36 +796,19 @@ onMounted(async () => {
       </div>
     </div>
 
+    <!-- Pagination -->
+    <div v-if="hasMore" class="load-more-row">
+      <Button
+        :label="`Mehr laden (${items.length} von ${total})`"
+        icon="pi pi-angle-down"
+        severity="secondary"
+        outlined
+        :loading="loadingMore"
+        @click="loadMore"
+      />
+    </div>
+
     <!-- Dialogs -->
-    <MultiSelectDialog
-      v-model:visible="tagsDialogVisible"
-      title="Tags auf Auswahl anwenden"
-      :items="tagDialogItems"
-      :initial-states="tagInitialStates"
-      :subject-count="selectedIds.size"
-      :subject-label="selectedIds.size === 1 ? 'Dokument' : 'Dokumente'"
-      :saving="savingBatchTags"
-      allow-create
-      create-label="Neuen Tag eintragen"
-      create-placeholder="Tagname…"
-      empty-message="Keine bekannten Tags. Lege einen neuen an."
-      @save="handleBatchTagsSave"
-      @create="handleBatchTagsCreate"
-    />
-
-    <DocumentBatchVisibilityDialog
-      v-model:visible="visibilityDialogVisible"
-      :documents="selectedDocs"
-      :groups="groups"
-      @done="handleBatchVisibilityDone"
-    />
-
-    <DocumentBatchReprocessDialog
-      v-model:visible="reprocessDialogVisible"
-      :document-ids="[...selectedIds]"
-      @done="handleBatchReprocessDone"
-    />
-
     <DocumentUploadDefaultsDialog
       v-model:visible="defaultsDialogVisible"
       :groups="groups"
@@ -968,6 +970,24 @@ onMounted(async () => {
   text-align: center;
   margin-top: 4rem;
   color: var(--p-text-muted-color);
+}
+
+/* ── Results bar / pagination ──────────────────────────────────── */
+.results-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.results-count {
+  color: var(--p-text-muted-color);
+  font-size: 0.85rem;
+}
+.load-more-row {
+  display: flex;
+  justify-content: center;
+  padding: 0.5rem 0 1rem;
 }
 
 /* ── List view ─────────────────────────────────────────────────── */

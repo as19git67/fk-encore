@@ -5,7 +5,7 @@ import { replaceQuerySlice, updateRouteQuery } from '../utils/routeQueryUpdate'
 
 const STORAGE_KEY = 'documents.filter'
 export const DOCUMENT_FILTER_QUERY_KEYS = [
-  'category', 'tags', 'status', 'review', 'sender', 'dateFrom', 'dateTo',
+  'category', 'tags', 'status', 'review', 'neu', 'sender', 'dateFrom', 'dateTo',
   'taxRelevant', 'subjectPerson',
 ] as const
 
@@ -14,6 +14,8 @@ export interface DocumentFilter {
   tags?: string[]
   status?: string
   needs_review?: boolean
+  /** Only "new" documents: ready with unapproved AI attribution (#635). */
+  unreviewed?: boolean
   sender?: string
   dateFrom?: string
   dateTo?: string
@@ -44,6 +46,8 @@ export function parseDocFilterFromQuery(q: Record<string, unknown>): DocumentFil
   if (typeof q.status === 'string' && q.status) f.status = q.status
   const nr = parseBool(q.review)
   if (nr === true) f.needs_review = true
+  const un = parseBool(q.neu)
+  if (un === true) f.unreviewed = true
   if (typeof q.sender === 'string' && q.sender) f.sender = q.sender
   if (typeof q.dateFrom === 'string' && q.dateFrom) f.dateFrom = q.dateFrom
   if (typeof q.dateTo === 'string' && q.dateTo) f.dateTo = q.dateTo
@@ -62,6 +66,7 @@ export function docFilterToQuery(f: DocumentFilter): Record<string, string> {
   if (f.tags && f.tags.length > 0) out.tags = f.tags.join(',')
   if (f.status) out.status = f.status
   if (f.needs_review) out.review = '1'
+  if (f.unreviewed) out.neu = '1'
   if (f.sender) out.sender = f.sender
   if (f.dateFrom) out.dateFrom = f.dateFrom
   if (f.dateTo) out.dateTo = f.dateTo
@@ -76,6 +81,7 @@ export function countActiveDocFilters(f: DocumentFilter): number {
   if (f.tags && f.tags.length > 0) n++
   if (f.status) n++
   if (f.needs_review) n++
+  if (f.unreviewed) n++
   if (f.sender) n++
   if (f.dateFrom || f.dateTo) n++
   if (f.taxRelevant !== undefined) n++

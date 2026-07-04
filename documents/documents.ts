@@ -142,6 +142,12 @@ export interface DocumentSummary {
   group_id: number | null;
   /** Free-form human notes (shared document metadata, issue #750). */
   notes: string | null;
+  /**
+   * True when a human pinned the editable attributes (see migration 0101).
+   * `false` on a ready document marks it as "new": freshly imported with
+   * AI-only attribution that nobody has approved yet (issue #635).
+   */
+  attributes_reviewed: boolean;
 }
 
 export interface DocumentTaxSectionDTO {
@@ -165,8 +171,6 @@ export interface DocumentDetail extends DocumentSummary {
   tax_reviewed: boolean;
   tax_year_confidence: number | null;
   tax_sections: DocumentTaxSectionDTO[];
-  /** True when a human pinned the editable attributes (see migration 0101). */
-  attributes_reviewed: boolean;
   /** Bezugspersonen this document concerns (see migration 0102). */
   subject_persons: DocumentSubjectPersonDTO[];
 }
@@ -208,6 +212,13 @@ interface ListQuery {
    * low-confidence ready ones).
    */
   needs_review?: Query<boolean>;
+  /**
+   * `unreviewed=true` keeps only "new" documents: status='ready' whose
+   * attributes nobody has approved yet (attributes_reviewed=false). The
+   * companion of needs_review for issue #635 — needs_review surfaces the
+   * *uncertain* ones, unreviewed surfaces *every* AI-only attribution.
+   */
+  unreviewed?: Query<boolean>;
   sender?: Query<string>;
   date_from?: Query<string>;
   date_to?: Query<string>;
@@ -229,6 +240,7 @@ interface DocumentFilterArgs {
   tags?: string;
   status?: string;
   needs_review?: boolean;
+  unreviewed?: boolean;
   sender?: string;
   date_from?: string;
   date_to?: string;
@@ -264,6 +276,14 @@ async function buildDocumentFilterConditions(
       ),
     );
     if (reviewCond) conds.push(reviewCond);
+  }
+  if (f.unreviewed === true) {
+    conds.push(
+      and(
+        eq(documents.status, "ready" as any),
+        eq(documents.attributes_reviewed, false),
+      )!,
+    );
   }
   if (f.category && f.category.length > 0) {
     const cat = await dbFirst<{ id: number }>(
@@ -894,7 +914,7 @@ async function loadDefaultGroupForUser(userId: number): Promise<number | null> {
 
 export const listDocuments = api(
   { expose: true, method: "GET", path: "/documents", auth: true },
-  async ({ category, tags, q, status, needs_review, sender, date_from, date_to, tax_relevant, subject_person_id, sort_by, sort_dir, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
+  async ({ category, tags, q, status, needs_review, unreviewed, sender, date_from, date_to, tax_relevant, subject_person_id, sort_by, sort_dir, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -909,7 +929,7 @@ export const listDocuments = api(
       : [visibleDocumentsWhere(userId, groupIds)];
 
     const filterConds = await buildDocumentFilterConditions({
-      category, tags, status, needs_review, sender, date_from, date_to, tax_relevant, subject_person_id,
+      category, tags, status, needs_review, unreviewed, sender, date_from, date_to, tax_relevant, subject_person_id,
     });
     if (filterConds === null) {
       // A requested tag doesn't exist — nothing can match.
@@ -967,6 +987,7 @@ export const listDocuments = api(
           group_id: documents.group_id,
           last_error: documents.last_error,
           notes: documents.notes,
+          attributes_reviewed: documents.attributes_reviewed,
           cat_slug: documentCategories.slug,
         })
         .from(documents)
@@ -2642,6 +2663,7 @@ export const listTaxDocuments = api(
           group_id: documents.group_id,
           last_error: documents.last_error,
           notes: documents.notes,
+          attributes_reviewed: documents.attributes_reviewed,
           cat_slug: documentCategories.slug,
         })
         .from(documents)
@@ -2796,6 +2818,7 @@ interface SearchQuery {
   tags?: Query<string>;
   status?: Query<string>;
   needs_review?: Query<boolean>;
+  unreviewed?: Query<boolean>;
   sender?: Query<string>;
   date_from?: Query<string>;
   date_to?: Query<string>;
@@ -2815,7 +2838,7 @@ interface SearchQuery {
  */
 export const searchDocumentsEndpoint = api(
   { expose: true, method: "GET", path: "/documents/search", auth: true },
-  async ({ q, mode, limit, category, tags, status, needs_review, sender, date_from, date_to, tax_relevant, subject_person_id }: SearchQuery): Promise<SearchDocumentsResponse> => {
+  async ({ q, mode, limit, category, tags, status, needs_review, unreviewed, sender, date_from, date_to, tax_relevant, subject_person_id }: SearchQuery): Promise<SearchDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -2830,7 +2853,7 @@ export const searchDocumentsEndpoint = api(
     }
 
     const filterConds = await buildDocumentFilterConditions({
-      category, tags, status, needs_review, sender, date_from, date_to, tax_relevant, subject_person_id,
+      category, tags, status, needs_review, unreviewed, sender, date_from, date_to, tax_relevant, subject_person_id,
     });
     if (filterConds === null) {
       // A requested tag doesn't exist — nothing can match.
@@ -2878,6 +2901,7 @@ export const searchDocumentsEndpoint = api(
           group_id: documents.group_id,
           last_error: documents.last_error,
           notes: documents.notes,
+          attributes_reviewed: documents.attributes_reviewed,
           cat_slug: documentCategories.slug,
         })
         .from(documents)
@@ -3243,6 +3267,7 @@ export function toSummary(
     visibility: row.visibility,
     group_id: row.group_id,
     notes: row.notes ?? null,
+    attributes_reviewed: row.attributes_reviewed ?? false,
   };
 }
 

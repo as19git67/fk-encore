@@ -42,19 +42,21 @@ describe('moduleEntryPath', () => {
   })
 
   it('exposes document navigation as the active-module submenu', () => {
+    // The strip keeps the four working views; rarely used entries
+    // (Kategorie-Vorschläge, Hilfe, …) live behind the Einstellungen gear.
     expect(dokumente.menuItems.map((item) => item.label)).toEqual([
       'Alle Dokumente',
       'Arbeitskorb',
       'Später',
       'Steuer',
-      'Kategorie-Vorschläge',
-      'Hilfe',
       'Einstellungen',
     ])
     expect(dokumente.menuItems.at(-1)?.children?.map((item) => item.label)).toEqual([
+      'Kategorie-Vorschläge',
       'Steuer-Hints',
       'Bezugspersonen',
       'Gruppen',
+      'Hilfe',
     ])
   })
 })
