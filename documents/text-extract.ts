@@ -81,13 +81,15 @@ const OCR_DPI = parseInt(process.env.DOCUMENTS_OCR_DPI ?? "200", 10);
 
 /**
  * Minimum whitespace-to-char ratio a text layer must have before we trust
- * it. German/English prose sits around 0.14–0.18. A text layer that
- * lost its space glyphs (a very common PDF export bug, especially in
- * pre-OCR'd scans) drops well below 0.05 — those end up classified as
- * "poor spacing" and we fall through to OCR.
+ * it. German/English prose sits around 0.14–0.18. A text layer that lost
+ * *some* of its space glyphs (a very common PDF export bug, especially in
+ * externally pre-OCR'd scans) drops toward 0.06–0.10; total loss goes near
+ * 0. The threshold sits at 0.09 so partial loss is caught, not only the
+ * catastrophic case (a real HDI insurance scan measured 0.0666 and used to
+ * pass at the old 0.05 cutoff).
  */
 const MIN_TEXT_LAYER_SPACE_RATIO = parseFloat(
-  process.env.DOCUMENTS_MIN_SPACE_RATIO ?? "0.05",
+  process.env.DOCUMENTS_MIN_SPACE_RATIO ?? "0.09",
 );
 
 /**
@@ -99,6 +101,35 @@ const GLUED_TOKEN_LEN = 30;
 const MAX_GLUED_TOKEN_RATIO = parseFloat(
   process.env.DOCUMENTS_MAX_GLUED_TOKEN_RATIO ?? "0.15",
 );
+
+/**
+ * Mean token length above which we suspect merged words. Normal German /
+ * English running text averages ~5–7 characters per whitespace-separated
+ * token; a layer that dropped a third of its spaces roughly doubles that
+ * (the reference HDI scan measured 14.3). Numeric-heavy documents (IBANs,
+ * long reference numbers) can push this up legitimately, so it is only one
+ * of several independent signals — never the sole trigger in practice.
+ */
+const MAX_MEAN_TOKEN_LEN = parseFloat(
+  process.env.DOCUMENTS_MAX_MEAN_TOKEN_LEN ?? "10",
+);
+
+/**
+ * Maximum share of tokens carrying an internal lowercase→uppercase boundary
+ * (e.g. "LebensversicherungAG", "GutenTag"). German never writes compounds
+ * with internal capitals, so such a boundary almost always marks a dropped
+ * space between two words. Legitimate text — including number/IBAN-heavy
+ * documents — stays near 0 %, while the reference scan hit 23.8 %, making
+ * this the most precise of the space-loss signals. A handful of common
+ * abbreviations ("MwSt", "kWh", "GmbH") are tolerated by the fractional
+ * threshold.
+ */
+const MAX_INTERNAL_CAPS_RATIO = parseFloat(
+  process.env.DOCUMENTS_MAX_INTERNAL_CAPS_RATIO ?? "0.08",
+);
+
+/** Internal lowercase→uppercase boundary (German merged-word signal). */
+const INTERNAL_CAPS_RE = /[a-zäöüß][A-ZÄÖÜ]/;
 
 export interface ExtractResult {
   text: string;
@@ -219,8 +250,20 @@ export async function decryptPdfWithPassword(
 
 /**
  * Heuristic: does `text` look like a text layer that lost its spaces?
- * Returns true when either the overall whitespace ratio is implausibly
- * low or an unusual share of tokens is very long.
+ *
+ * Combines four independent signals so both the catastrophic case (nearly
+ * all spaces gone) and the more common *partial* loss (externally OCR'd
+ * scans that drop maybe a third of their spaces) are caught:
+ *   1. overall whitespace ratio too low,
+ *   2. too many very long "glued" tokens,
+ *   3. mean token length implausibly high,
+ *   4. too many tokens with an internal lowercase→uppercase boundary
+ *      (a dropped space between two German words).
+ *
+ * Any one signal is enough. The thresholds are calibrated so clean prose
+ * (ratio ~0.14, mean ~5.8, 0 % internal caps) stays well clear while a real
+ * partial-loss scan (ratio 0.067, mean 14.3, 23.8 % internal caps) trips
+ * three of the four.
  *
  * Exported for unit testing.
  */
@@ -236,8 +279,16 @@ export function hasPoorSpacing(text: string): boolean {
 
   const tokens = text.split(/\s+/).filter((t) => t.length > 0);
   if (tokens.length === 0) return true;
+
   const glued = tokens.filter((t) => t.length > GLUED_TOKEN_LEN).length;
   if (glued / tokens.length > MAX_GLUED_TOKEN_RATIO) return true;
+
+  const meanTokenLen =
+    tokens.reduce((sum, t) => sum + t.length, 0) / tokens.length;
+  if (meanTokenLen > MAX_MEAN_TOKEN_LEN) return true;
+
+  const internalCaps = tokens.filter((t) => INTERNAL_CAPS_RE.test(t)).length;
+  if (internalCaps / tokens.length > MAX_INTERNAL_CAPS_RATIO) return true;
 
   return false;
 }
@@ -535,9 +586,25 @@ async function fileReadable(p: string): Promise<boolean> {
 function runTesseract(imagePath: string, outBase: string, configs: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const lang = process.env.DOCUMENTS_OCR_LANG ?? "deu+eng";
+    // `preserve_interword_spaces=1` keeps tesseract from collapsing the gaps
+    // between words when the source layout is dense — the same missing-space
+    // symptom we detect in externally OCR'd layers, so our own re-OCR must
+    // not reproduce it.
     const proc = spawn(
       "tesseract",
-      [imagePath, outBase, "-l", lang, "--oem", "1", "--psm", "3", ...configs],
+      [
+        imagePath,
+        outBase,
+        "-l",
+        lang,
+        "--oem",
+        "1",
+        "--psm",
+        "3",
+        "-c",
+        "preserve_interword_spaces=1",
+        ...configs,
+      ],
       { stdio: ["ignore", "ignore", "pipe"] },
     );
     let stderr = "";
