@@ -15,6 +15,10 @@ import "./inbox-cron";
 // disk_path points at a missing file (see fsck.ts).
 import "./fsck";
 
+// Register the weekly hint-mining job that analyses reviewed documents
+// and generates taxonomy/hint improvement suggestions.
+import "./hint-mining-cron";
+
 startLocalCron();
 
 import { startInboxWatcher } from "./inbox-watcher";

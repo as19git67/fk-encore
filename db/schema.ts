@@ -946,6 +946,22 @@ export const documentCategorySuggestions = pgTable("document_category_suggestion
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
 });
 
+// AI-mined hint improvement suggestions surfaced to the admin for review.
+// `kind` = 'tax-section' or 'category'; `target_slug` = the tax-section or
+// category slug the hint applies to. One open suggestion per (kind, target)
+// (enforced by a partial unique index in migration 0118).
+export const documentHintSuggestions = pgTable("document_hint_suggestions", {
+  id: serial("id").primaryKey(),
+  kind: text("kind").notNull().$type<"tax-section" | "category">(),
+  target_slug: text("target_slug").notNull(),
+  draft_hint: text("draft_hint").notNull(),
+  rationale: text("rationale"),
+  example_document_ids: integer("example_document_ids").array().notNull().default(sql`'{}'::integer[]`),
+  status: documentSuggestionStatusEnum("status").notNull().default("open"),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+});
+
 // Admin overrides for the per-section `hint` string that is sent to the
 // LLM in the /classify prompt. Missing row → use the hardcoded default
 // from documents/tax-sections.ts.

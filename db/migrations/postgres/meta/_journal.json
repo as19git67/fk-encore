@@ -827,6 +827,13 @@
       "when": 1783036800000,
       "tag": "0117_osm_replication_healing",
       "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "7",
+      "when": 1783123200000,
+      "tag": "0118_document_hint_suggestions",
+      "breakpoints": true
     }
   ]
 }
