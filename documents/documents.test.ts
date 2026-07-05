@@ -328,6 +328,32 @@ describe("documents.text-extract hasPoorSpacing", () => {
     const text = chunks.join("\n");
     expect(hasPoorSpacing(text)).toBe(true);
   });
+
+  it("flags PARTIAL space loss from an externally OCR'd scan", () => {
+    // Modelled on a real HDI insurance scan: plenty of spaces survive
+    // (ratio ~0.06, glued-token share ~13 %, so it slipped through the old
+    // ratio<0.05 / glued>30 checks) but ~a third of the spaces are gone,
+    // producing merged words with internal capitals. Repeated to clear the
+    // 200-char minimum.
+    const sample =
+      "HDI LebensversicherungAG, 50580Köln Charles-de-Gaulle-Platz1 AntonSchegg " +
+      "GutenTag AntonSchegg, wir habenzur Kenntnisgenommen,dassder " +
+      "Versicherungsnehmergeändertwerdensoll. Für die weitereBearbeitungsendenSie " +
+      "unsbittedie nachfolgendaufgeführtenUnterlagenzurück. ";
+    const text = sample.repeat(3);
+    expect(hasPoorSpacing(text)).toBe(true);
+  });
+
+  it("does not flag a number/IBAN-heavy but well-spaced document", () => {
+    // Bank-statement style: long numeric tokens pull the mean token length
+    // up a bit, but spaces are intact and there are no internal caps
+    // transitions, so it must not be re-OCR'd needlessly.
+    const line =
+      "Überweisung an DE89 3704 0044 0532 0130 00 Betrag 1.234,56 EUR " +
+      "Referenz 2026-04-0001-4711 Wertstellung 14.04.2026 ";
+    const text = line.repeat(8);
+    expect(hasPoorSpacing(text)).toBe(false);
+  });
 });
 
 describe("documents.text-extract looksLikeBrokenXref", () => {
