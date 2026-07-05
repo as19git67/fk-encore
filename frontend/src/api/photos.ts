@@ -332,6 +332,19 @@ export function updatePhotoDescription(id: number, description: string | null) {
   })
 }
 
+export interface BatchDescriptionResult {
+  updated: number[]
+  skipped: number[]
+  description: string | null
+}
+
+export function batchUpdatePhotoDescriptions(photoIds: number[], description: string | null) {
+  return apiFetch<BatchDescriptionResult>('/photos/batch-description', {
+    method: 'POST',
+    body: JSON.stringify({ photoIds, description })
+  })
+}
+
 // ---------- People & Faces ----------
 
 export interface FaceBBox { x: number; y: number; width: number; height: number }

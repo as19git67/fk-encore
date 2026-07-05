@@ -65,6 +65,7 @@ import PhotoCompareView from '../components/PhotoCompareView.vue'
 import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import PhotoDetailSidebar from '../components/PhotoDetailSidebar.vue'
 import PhotoAlbumDialog from '../components/PhotoAlbumDialog.vue'
+import PhotoBatchDescriptionDialog from '../components/PhotoBatchDescriptionDialog.vue'
 import CollageDialog from '../components/CollageDialog.vue'
 import { useFilter } from '../composables/useFilter'
 import { useSort, type SortField, type SortState } from '../composables/useSort'
@@ -351,6 +352,18 @@ function openAlbumDialog() {
   albumDialogVisible.value = true
 }
 
+const descriptionDialogVisible = ref(false)
+const descriptionDialogPhotoIds = computed(() => Array.from(selectedIds.value))
+function openDescriptionDialog() {
+  if (selectedIds.value.size === 0) return
+  descriptionDialogVisible.value = true
+}
+
+async function onDescriptionsSaved() {
+  await galleryRef.value?.reload()
+  exitSelectMode()
+}
+
 // ── Collage (2..9 selected photos) ──────────────────────────────────────────
 const collageDialogVisible = ref(false)
 // Computed so the prop is always in sync with the current selection when
@@ -464,6 +477,7 @@ const selectionMenuItems = computed(() => {
   items.push({ label: selectedCount.value === 1 ? 'Foto teilen' : 'Fotos teilen', icon: 'pi pi-share-alt', disabled: sharingPhotos.value, command: () => void shareSelectedPhotos() })
   if (canShowCollage.value) items.push({ label: 'Collage erstellen', icon: 'pi pi-images', command: openCollageDialog })
   if (canUpload.value) items.push({ label: 'Zu Alben hinzufügen', icon: 'pi pi-book', command: openAlbumDialog })
+  if (canUpload.value) items.push({ label: 'Beschreibung bearbeiten', icon: 'pi pi-align-left', command: openDescriptionDialog })
   if (canDelete.value) {
     items.push(
       { label: 'Als Favorit markieren', icon: 'pi pi-heart', disabled: curationBusy.value, command: () => void applyCurationToSelection('favorite') },
@@ -1798,6 +1812,12 @@ void refreshReviewSequence()
     <PhotoAlbumDialog
       v-model:visible="albumDialogVisible"
       :photo-ids="albumDialogPhotoIds"
+    />
+
+    <PhotoBatchDescriptionDialog
+      v-model:visible="descriptionDialogVisible"
+      :photo-ids="descriptionDialogPhotoIds"
+      @saved="onDescriptionsSaved"
     />
 
     <!-- Collage creator (gallery select-bar entry point) -->
