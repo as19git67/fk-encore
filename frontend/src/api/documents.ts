@@ -806,6 +806,47 @@ export function rejectCategorySuggestion(id: number) {
   })
 }
 
+// ─── Hint suggestions (mined from reviewed docs) ────────────────────────────
+
+export type HintSuggestionKind = 'tax-section' | 'category'
+
+export interface HintSuggestion {
+  id: number
+  kind: HintSuggestionKind
+  target_slug: string
+  draft_hint: string
+  rationale: string | null
+  example_document_ids: number[]
+  status: CategorySuggestionStatus
+  created_at: string | null
+  updated_at: string | null
+}
+
+export function listHintSuggestions(
+  status: CategorySuggestionStatus = 'open',
+  kind?: HintSuggestionKind,
+) {
+  const params: Record<string, string> = { status }
+  if (kind) params.kind = kind
+  return apiFetch<{ items: HintSuggestion[] }>(
+    `/document-hint-suggestions${buildQuery(params)}`,
+  )
+}
+
+export function acceptHintSuggestion(id: number) {
+  return apiFetch<{ success: boolean }>(`/document-hint-suggestions/${id}/accept`, {
+    method: 'POST',
+    body: JSON.stringify({ id }),
+  })
+}
+
+export function rejectHintSuggestion(id: number) {
+  return apiFetch<{ success: boolean }>(`/document-hint-suggestions/${id}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ id }),
+  })
+}
+
 // ─── Work-item basket & follow-ups ("Wiedervorlage", issue #750) ─────────────
 
 export interface DocumentBasketResponse {
