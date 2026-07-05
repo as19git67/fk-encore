@@ -3888,6 +3888,50 @@ export async function updatePhotoDescriptionLogic(
   return { success: true, description: trimmed };
 }
 
+export interface BatchDescriptionResult {
+  updated: number[];
+  skipped: number[];
+  description: string | null;
+}
+
+/**
+ * Apply one description to a selection without creating a burst of client
+ * requests. Three workers keep EXIF write-back moving while avoiding dozens
+ * of simultaneous exiftool processes for a large selection.
+ */
+export async function batchUpdatePhotoDescriptionsLogic(
+  userId: number,
+  photoIds: number[],
+  description: string | null,
+): Promise<BatchDescriptionResult> {
+  const ids = [...new Set(photoIds.filter(id => Number.isInteger(id) && id > 0))];
+  if (ids.length === 0) {
+    return { updated: [], skipped: [], description: description?.trim() || null };
+  }
+  const owned = await dbAll<{ id: number }>(
+    db.select({ id: photos.id }).from(photos).where(and(
+      eq(photos.user_id, userId),
+      inArray(photos.id, ids),
+    )),
+  );
+  const ownedIds = owned.map(row => row.id);
+  const ownedSet = new Set(ownedIds);
+  const skipped = ids.filter(id => !ownedSet.has(id));
+  const updated: number[] = [];
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (nextIndex < ownedIds.length) {
+      const id = ownedIds[nextIndex++];
+      await updatePhotoDescriptionLogic(userId, id, description);
+      updated.push(id);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(3, ownedIds.length) }, () => worker()));
+  return { updated, skipped, description: description?.trim() || null };
+}
+
 /**
  * Write the favourite flag back to the photo file as `xmp:Rating`.
  *
