@@ -651,6 +651,22 @@ export const updatePhotoDescription = api(
   }
 );
 
+/** Apply one description to multiple caller-owned photos. */
+export const batchUpdatePhotoDescriptions = api(
+  { expose: true, method: "POST", path: "/photos/batch-description", auth: true },
+  async ({ photoIds, description }: { photoIds: number[]; description: string | null }): Promise<service.BatchDescriptionResult> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.upload");
+
+    if (!Array.isArray(photoIds) || photoIds.length === 0 || photoIds.length > 1000) {
+      throw APIError.invalidArgument("photoIds must contain between 1 and 1000 IDs");
+    }
+    return await service.batchUpdatePhotoDescriptionsLogic(userId, photoIds, description);
+  }
+);
+
 /**
  * Serve a photo file.
  */

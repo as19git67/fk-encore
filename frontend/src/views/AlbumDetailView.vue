@@ -17,6 +17,7 @@ import FullscreenOverlay from '../components/FullscreenOverlay.vue'
 import ServiceStatusBar from '../components/ServiceStatusBar.vue'
 import PhotoCompareView from '../components/PhotoCompareView.vue'
 import PhotoAlbumDialog from '../components/PhotoAlbumDialog.vue'
+import PhotoBatchDescriptionDialog from '../components/PhotoBatchDescriptionDialog.vue'
 import CollageDialog from '../components/CollageDialog.vue'
 import NaturalSearchBar from '../components/NaturalSearchBar.vue'
 import FilterMenu from '../components/FilterMenu.vue'
@@ -451,6 +452,19 @@ function openAlbumDialog() {
   albumDialogVisible.value = true
 }
 
+const descriptionDialogVisible = ref(false)
+const descriptionDialogPhotoIds = computed(() => Array.from(selectedIds.value))
+function openDescriptionDialog() {
+  if (selectedIds.value.size === 0) return
+  descriptionDialogVisible.value = true
+}
+
+async function onDescriptionsSaved() {
+  await loadData()
+  await galleryRef.value?.reload()
+  exitSelectMode()
+}
+
 // ── Collage (2..9 selected photos) ──────────────────────────────────────────
 const collageDialogVisible = ref(false)
 // Computed so the prop is always in sync with the current selection when
@@ -584,6 +598,9 @@ const selectionMenuItems = computed(() => {
   if (canShowCollage.value) items.push({ label: 'Collage erstellen', icon: 'pi pi-images', command: openCollageDialog })
   if (canUploadPhotos.value && canReuseAlbumPhotos.value) {
     items.push({ label: 'Zu Alben hinzufügen', icon: 'pi pi-book', command: openAlbumDialog })
+  }
+  if (canUploadPhotos.value) {
+    items.push({ label: 'Beschreibung bearbeiten', icon: 'pi pi-align-left', command: openDescriptionDialog })
   }
   if (canDeletePhotos.value || canWrite.value) {
     items.push(
@@ -2855,6 +2872,12 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
     <PhotoAlbumDialog
       v-model:visible="albumDialogVisible"
       :photo-ids="albumDialogPhotoIds"
+    />
+
+    <PhotoBatchDescriptionDialog
+      v-model:visible="descriptionDialogVisible"
+      :photo-ids="descriptionDialogPhotoIds"
+      @saved="onDescriptionsSaved"
     />
 
     <!-- Collage creator (album select-bar entry point) -->
