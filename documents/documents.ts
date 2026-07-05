@@ -19,6 +19,7 @@ import { dbAll, dbFirst } from "../db/adapter";
 import {
   documentCategories,
   documentCategorySuggestions,
+  documentHintSuggestions,
   documentSubjectPersons,
   documentTagLinks,
   documentTags,
@@ -3102,6 +3103,102 @@ export const rejectCategorySuggestion = api(
       .update(documentCategorySuggestions)
       .set({ status: "rejected" })
       .where(and(eq(documentCategorySuggestions.id, id), eq(documentCategorySuggestions.status, "open")));
+    if ((updated as any)?.rowCount === 0) {
+      throw APIError.failedPrecondition("suggestion is not open");
+    }
+    return { success: true };
+  },
+);
+
+// ─── Hint suggestions (mined from reviewed docs) ────────────────────────────
+
+export interface HintSuggestionDTO {
+  id: number;
+  kind: "tax-section" | "category";
+  target_slug: string;
+  draft_hint: string;
+  rationale: string | null;
+  example_document_ids: number[];
+  status: "open" | "accepted" | "rejected";
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export const listHintSuggestions = api(
+  { expose: true, method: "GET", path: "/document-hint-suggestions", auth: true },
+  async ({ status, kind }: {
+    status?: Query<string>;
+    kind?: Query<string>;
+  }): Promise<{ items: HintSuggestionDTO[] }> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.manage_taxonomy");
+
+    const conditions: SQL[] = [];
+    const filterStatus = status === "accepted" || status === "rejected" ? status : "open";
+    conditions.push(eq(documentHintSuggestions.status, filterStatus as any));
+    if (kind === "tax-section" || kind === "category") {
+      conditions.push(eq(documentHintSuggestions.kind, kind));
+    }
+
+    const rows = await dbAll<typeof documentHintSuggestions.$inferSelect>(
+      db
+        .select()
+        .from(documentHintSuggestions)
+        .where(and(...conditions))
+        .orderBy(desc(documentHintSuggestions.updated_at)),
+    );
+    return {
+      items: rows.map((r) => ({
+        id: r.id,
+        kind: r.kind as "tax-section" | "category",
+        target_slug: r.target_slug,
+        draft_hint: r.draft_hint,
+        rationale: r.rationale,
+        example_document_ids: r.example_document_ids ?? [],
+        status: r.status,
+        created_at: r.created_at ?? null,
+        updated_at: r.updated_at ?? null,
+      })),
+    };
+  },
+);
+
+export const acceptHintSuggestion = api(
+  { expose: true, method: "POST", path: "/document-hint-suggestions/:id/accept", auth: true },
+  async ({ id }: { id: number }): Promise<{ success: boolean }> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.manage_taxonomy");
+
+    const suggestion = await dbFirst<typeof documentHintSuggestions.$inferSelect>(
+      db.select().from(documentHintSuggestions).where(eq(documentHintSuggestions.id, id)),
+    );
+    if (!suggestion) throw APIError.notFound("hint suggestion not found");
+    if (suggestion.status !== "open") {
+      throw APIError.failedPrecondition(`suggestion is ${suggestion.status}`);
+    }
+
+    await db
+      .update(documentHintSuggestions)
+      .set({ status: "accepted", updated_at: new Date().toISOString() })
+      .where(eq(documentHintSuggestions.id, id));
+
+    return { success: true };
+  },
+);
+
+export const rejectHintSuggestion = api(
+  { expose: true, method: "POST", path: "/document-hint-suggestions/:id/reject", auth: true },
+  async ({ id }: { id: number }): Promise<{ success: boolean }> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.manage_taxonomy");
+
+    const updated = await db
+      .update(documentHintSuggestions)
+      .set({ status: "rejected", updated_at: new Date().toISOString() })
+      .where(and(eq(documentHintSuggestions.id, id), eq(documentHintSuggestions.status, "open")));
     if ((updated as any)?.rowCount === 0) {
       throw APIError.failedPrecondition("suggestion is not open");
     }

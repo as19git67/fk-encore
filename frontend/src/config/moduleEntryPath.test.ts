@@ -54,6 +54,7 @@ describe('moduleEntryPath', () => {
     expect(dokumente.menuItems.at(-1)?.children?.map((item) => item.label)).toEqual([
       'Kategorie-Vorschläge',
       'Steuer-Hints',
+      'Hint-Vorschläge',
       'Bezugspersonen',
       'Gruppen',
       'Hilfe',
