@@ -261,21 +261,29 @@ async function processAccount(
       recurringPattern
       && Math.abs(Number(tx.amount)) >= NEW_MANDATE_ALERT_AMOUNT
     ) {
-      const inserted = await insertNewRecurringAnomalyIfAbsent({
-        account_id: accountId,
-        transaction_id: tx.id,
-        mandate_id: mandate.id,
-        type: "new_mandate",
-        score: "0.7000",
-        details: {
-          counterparty: tx.counterparty,
-          amount: tx.amount,
-          occurrences: recurringPattern.occurrences,
-          interval_days: recurringPattern.meanIntervalDays,
-          interval_cv: recurringPattern.intervalCv,
-        },
-      });
-      if (inserted) anomalies++;
+      const predecessor = await hasRecurringPredecessor(
+        mandate.id,
+        recurringPattern.meanIntervalDays,
+      );
+      if (predecessor) {
+        await acknowledgeNewMandateForMandate(mandate.id);
+      } else {
+        const inserted = await insertNewRecurringAnomalyIfAbsent({
+          account_id: accountId,
+          transaction_id: tx.id,
+          mandate_id: mandate.id,
+          type: "new_mandate",
+          score: "0.7000",
+          details: {
+            counterparty: tx.counterparty,
+            amount: tx.amount,
+            occurrences: recurringPattern.occurrences,
+            interval_days: recurringPattern.meanIntervalDays,
+            interval_cv: recurringPattern.intervalCv,
+          },
+        });
+        if (inserted) anomalies++;
+      }
     }
 
     if (!mandate.isNew) {
@@ -633,14 +641,11 @@ async function detectMissingForAccount(accountId: number): Promise<number> {
     // Not yet overdue past the grace window — nothing to flag.
     if (todayStr < dueDate) continue;
 
-    // Successor-activity guard: a creditor that switches banks /
-    // SEPA mandate identifiers shows up as a fresh transaction under
-    // the same counterparty name but a new mandate_ref / IBAN. The
-    // old mandate then goes silent through no fault of the user.
-    // If any transaction with this counterparty has hit the account
-    // after the mandate's last_seen, the recurring series has
-    // effectively continued elsewhere — suppress the missing alert
-    // AND auto-acknowledge any stale one already in the inbox.
+    // Successor-activity guard: a creditor or the user changing banks can
+    // move a recurring series to a new mandate identity and even a different
+    // account. Match same-account exact names as before; across accounts use
+    // shared write access plus merchant, amount and cadence safeguards.
+    // Suppress the missing alert and close any stale one already in the inbox.
     if (await hasSuccessorActivity(mandate)) {
       await acknowledgeStaleMissingForMandate(mandate.id);
       continue;
@@ -672,12 +677,10 @@ async function detectMissingForAccount(accountId: number): Promise<number> {
 }
 
 /**
- * True when this account has seen a transaction with the same
- * counterparty (case-insensitive, trimmed) AFTER the mandate's
- * last_seen — i.e. the recurring series with that counterparty has
- * continued under a different mandate identity. Used to suppress
- * false-positive missing alerts when a creditor changes their SEPA
- * mandate reference, creditor id or IBAN.
+ * True when the recurring series plausibly continues after last_seen under a
+ * different mandate identity. Candidates may be on the same account or on an
+ * account writable by the same user. Cross-account candidates additionally
+ * have to match merchant, amount direction/range and cadence.
  *
  * Returns false for mandates without a counterparty (we have no
  * stable key to match a successor on).
@@ -686,15 +689,189 @@ async function hasSuccessorActivity(
   mandate: typeof financeRecurringMandate.$inferSelect,
 ): Promise<boolean> {
   if (!mandate.counterparty || !mandate.last_seen) return false;
-  const rows = await db.execute<{ id: number }>(sql`
-    SELECT ft.id
+  const rows = await db.execute<{
+    id: number;
+    account_id: number;
+    booking_date: string;
+    amount: string;
+    counterparty: string;
+    exact_same_account_name: boolean;
+  }>(sql`
+    SELECT DISTINCT
+      ft.id,
+      ft.account_id,
+      ft.booking_date,
+      ft.amount,
+      ft.counterparty,
+      (
+        ft.account_id = ${mandate.account_id}
+        AND LOWER(TRIM(ft.counterparty)) = LOWER(TRIM(${mandate.counterparty}))
+      ) AS exact_same_account_name
     FROM finance_transaction ft
-    WHERE ft.account_id = ${mandate.account_id}
-      AND LOWER(TRIM(ft.counterparty)) = LOWER(TRIM(${mandate.counterparty}))
-      AND ft.booking_date > ${mandate.last_seen}
-    LIMIT 1
+    WHERE ft.booking_date > ${mandate.last_seen}
+      AND ft.counterparty IS NOT NULL
+      AND (
+        ft.account_id = ${mandate.account_id}
+        OR EXISTS (
+          SELECT 1
+          FROM finance_account_access old_acl
+          JOIN finance_account_access new_acl
+            ON new_acl.user_id = old_acl.user_id
+          WHERE old_acl.account_id = ${mandate.account_id}
+            AND new_acl.account_id = ft.account_id
+            AND old_acl.level = 'write'
+            AND new_acl.level = 'write'
+        )
+      )
+    ORDER BY exact_same_account_name DESC, ft.booking_date ASC, ft.id ASC
+    LIMIT 500
   `);
-  return rows.rows.length > 0;
+  return rows.rows.some((candidate) => {
+    // Preserve the established same-account behaviour for an exact name.
+    if (candidate.exact_same_account_name) {
+      return true;
+    }
+    return isLikelySeriesContinuation({
+      previousCounterparty: mandate.counterparty!,
+      nextCounterparty: candidate.counterparty,
+      previousAmount: mandate.typical_amount,
+      nextAmount: candidate.amount,
+      previousDate: mandate.last_seen!,
+      nextDate: candidate.booking_date,
+      intervalDays: mandate.typical_interval_days,
+    });
+  });
+}
+
+interface SeriesContinuationInput {
+  previousCounterparty: string;
+  nextCounterparty: string;
+  previousAmount: string | null;
+  nextAmount: string | null;
+  previousDate: string;
+  nextDate: string;
+  intervalDays: number | null;
+}
+
+const COMPANY_SUFFIXES = new Set([
+  "ag", "co", "eg", "ev", "gbr", "gmbh", "inc", "kg", "kgaa", "ltd", "mbh", "se",
+]);
+
+export function normalizeCounterparty(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("de-DE")
+    .replace(/&/g, " und ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((token) => token && !COMPANY_SUFFIXES.has(token))
+    .join(" ");
+}
+
+export function counterpartySimilarity(left: string, right: string): number {
+  const a = normalizeCounterparty(left);
+  const b = normalizeCounterparty(right);
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  if (Math.min(a.length, b.length) >= 6 && (a.includes(b) || b.includes(a))) return 0.9;
+  const aTokens = new Set(a.split(" "));
+  const bTokens = new Set(b.split(" "));
+  let intersection = 0;
+  for (const token of aTokens) if (bTokens.has(token)) intersection += 1;
+  return intersection / new Set([...aTokens, ...bTokens]).size;
+}
+
+function isLikelySeriesContinuation(input: SeriesContinuationInput): boolean {
+  if (counterpartySimilarity(input.previousCounterparty, input.nextCounterparty) < 0.8) {
+    return false;
+  }
+  if (input.previousAmount === null || input.nextAmount === null) return false;
+  const previousAmount = Number(input.previousAmount);
+  const nextAmount = Number(input.nextAmount);
+  if (!Number.isFinite(previousAmount) || !Number.isFinite(nextAmount)) return false;
+  if (Math.sign(previousAmount) !== Math.sign(nextAmount) || previousAmount === 0) return false;
+  const amountTolerance = Math.max(5, Math.abs(previousAmount) * 0.25);
+  if (Math.abs(Math.abs(previousAmount) - Math.abs(nextAmount)) > amountTolerance) return false;
+
+  const gapDays = dateDiffDays(input.previousDate, input.nextDate);
+  const maxGapDays = Math.max(120, (input.intervalDays ?? 30) * 4);
+  return gapDays > 0 && gapDays <= maxGapDays;
+}
+
+/**
+ * A new mandate identity is not a new recurring payment when an established
+ * series on the same account — or another account writable by the same user —
+ * ended shortly before it with matching merchant, amount and cadence.
+ */
+async function hasRecurringPredecessor(
+  mandateId: number,
+  fallbackIntervalDays: number,
+): Promise<boolean> {
+  const [current] = await db
+    .select()
+    .from(financeRecurringMandate)
+    .where(eq(financeRecurringMandate.id, mandateId))
+    .limit(1);
+  if (!current?.counterparty || !current.first_seen) return false;
+
+  const rows = await db.execute<{
+    id: number;
+    account_id: number;
+    counterparty: string;
+    typical_amount: string | null;
+    typical_interval_days: number | null;
+    last_seen: string;
+  }>(sql`
+    SELECT DISTINCT
+      previous.id,
+      previous.account_id,
+      previous.counterparty,
+      previous.typical_amount,
+      previous.typical_interval_days,
+      previous.last_seen
+    FROM finance_recurring_mandate previous
+    WHERE previous.id <> ${current.id}
+      AND previous.transaction_count >= ${BASELINE_MIN_TRANSACTIONS}
+      AND previous.counterparty IS NOT NULL
+      AND previous.last_seen IS NOT NULL
+      AND previous.last_seen < ${current.first_seen}
+      AND (
+        previous.account_id = ${current.account_id}
+        OR EXISTS (
+          SELECT 1
+          FROM finance_account_access previous_acl
+          JOIN finance_account_access current_acl
+            ON current_acl.user_id = previous_acl.user_id
+          WHERE previous_acl.account_id = previous.account_id
+            AND current_acl.account_id = ${current.account_id}
+            AND previous_acl.level = 'write'
+            AND current_acl.level = 'write'
+        )
+      )
+  `);
+
+  return rows.rows.some((previous) => isLikelySeriesContinuation({
+    previousCounterparty: previous.counterparty,
+    nextCounterparty: current.counterparty!,
+    previousAmount: previous.typical_amount,
+    nextAmount: current.typical_amount,
+    previousDate: previous.last_seen,
+    nextDate: current.first_seen!,
+    intervalDays: previous.typical_interval_days ?? fallbackIntervalDays,
+  }));
+}
+
+async function acknowledgeNewMandateForMandate(mandateId: number): Promise<void> {
+  await db
+    .update(financeAnomaly)
+    .set({ acknowledged_at: sql`NOW()` })
+    .where(and(
+      eq(financeAnomaly.mandate_id, mandateId),
+      eq(financeAnomaly.type, "new_mandate"),
+      isNull(financeAnomaly.acknowledged_at),
+    ));
 }
 
 /**
