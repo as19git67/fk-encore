@@ -2,7 +2,7 @@ import { Readable } from "stream";
 import { describe, it, expect, beforeEach, afterAll, vi } from "vitest";
 import fs from "fs";
 import path from "path";
-import { eq, sql, and } from "drizzle-orm";
+import { eq, sql, and, inArray } from "drizzle-orm";
 import db from "../db/database";
 import { photos, photoCuration, faces, userFaceAssignments, persons, albums, albumPhotos, albumShares, users, roles, permissions, rolePermissions, userRoles } from "../db/schema";
 import { dbInsertReturning, dbExec, dbFirst } from "../db/adapter";
@@ -188,6 +188,40 @@ describe("Photo Module", () => {
       const list2 = await service.listPhotosLogic(user2.id);
       expect(list2.photos).toHaveLength(1);
       expect(list2.photos[0].original_name).toBe("u2.jpg");
+    });
+
+    it("should update descriptions in bulk and skip photos owned by another user", async () => {
+      const ownA = await service.uploadPhotoLogic(user1.id, {
+        data: Buffer.from("bulk-description-a"), name: "bulk-a.jpg", mimeType: "image/jpeg",
+      });
+      const ownB = await service.uploadPhotoLogic(user1.id, {
+        data: Buffer.from("bulk-description-b"), name: "bulk-b.jpg", mimeType: "image/jpeg",
+      });
+      const foreign = await service.uploadPhotoLogic(user2.id, {
+        data: Buffer.from("bulk-description-foreign"), name: "bulk-foreign.jpg", mimeType: "image/jpeg",
+      });
+
+      const result = await service.batchUpdatePhotoDescriptionsLogic(
+        user1.id,
+        [ownA.id, ownB.id, foreign.id, ownA.id],
+        "  Gemeinsame Beschreibung  ",
+      );
+
+      expect(result.updated.sort((a, b) => a - b)).toEqual([ownA.id, ownB.id].sort((a, b) => a - b));
+      expect(result.skipped).toEqual([foreign.id]);
+      expect(result.description).toBe("Gemeinsame Beschreibung");
+
+      const rows = await db.select({ id: photos.id, description: photos.description })
+        .from(photos)
+        .where(inArray(photos.id, [ownA.id, ownB.id, foreign.id]));
+      expect(rows.find(row => row.id === ownA.id)?.description).toBe("Gemeinsame Beschreibung");
+      expect(rows.find(row => row.id === ownB.id)?.description).toBe("Gemeinsame Beschreibung");
+      expect(rows.find(row => row.id === foreign.id)?.description).toBeNull();
+
+      for (const photo of [ownA, ownB, foreign]) {
+        const file = path.join(UPLOAD_DIR, photo.filename);
+        if (fs.existsSync(file)) fs.unlinkSync(file);
+      }
     });
 
     it("should serve a photo file", async () => {
