@@ -21,6 +21,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { createExpenseReportPdf } from "./pdf-report";
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { and, desc, eq, gte, inArray, lte, or, sql } from "drizzle-orm";
@@ -67,6 +68,25 @@ async function readableAccountIds(
     .from(financeAccountAccess)
     .where(eq(financeAccountAccess.user_id, Number(auth.userID)));
   return rows.map((r) => r.id);
+}
+
+async function accessibleTransactionIds(
+  auth: { userID: string; permissions: string[] },
+  requestedIds: number[],
+): Promise<{ ids: number[]; skipped: number }> {
+  const requested = [...new Set(requestedIds.filter((id) => Number.isInteger(id) && id > 0))];
+  if (requested.length === 0) return { ids: [], skipped: 0 };
+  const visibleIds = await readableAccountIds(auth);
+  const conditions = [inArray(financeTransaction.id, requested)];
+  if (visibleIds !== null) {
+    if (visibleIds.length === 0) return { ids: [], skipped: requested.length };
+    conditions.push(inArray(financeTransaction.account_id, visibleIds));
+  }
+  const rows = await db
+    .select({ id: financeTransaction.id })
+    .from(financeTransaction)
+    .where(and(...conditions));
+  return { ids: rows.map((row) => row.id), skipped: requested.length - rows.length };
 }
 
 /**
@@ -161,6 +181,8 @@ interface TransactionView {
   original_currency_code: string | null;
   exchange_rate: string | null;
   notice: string | null;
+  reviewed_at: string | null;
+  is_tax_relevant: boolean;
   tags: TagOnTransaction[];
   created_at: string | null;
 }
@@ -236,6 +258,8 @@ function toView(
     original_currency_code: row.original_currency_code,
     exchange_rate: row.exchange_rate,
     notice: row.notice,
+    reviewed_at: row.reviewed_at,
+    is_tax_relevant: row.is_tax_relevant,
     tags,
     created_at: row.created_at,
   };
@@ -1095,6 +1119,85 @@ export const batchNotice = api(
   },
 );
 
+interface BatchBooleanParams {
+  transaction_ids: number[];
+  value: boolean;
+}
+
+interface BatchMutationResponse {
+  affected_transactions: number;
+  skipped_unauthorized: number;
+}
+
+export const batchReview = api(
+  { expose: true, method: "POST", path: "/finance/transactions/batch-review", auth: true },
+  async (p: BatchBooleanParams): Promise<BatchMutationResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+    if (!Array.isArray(p.transaction_ids) || p.transaction_ids.length === 0) {
+      throw APIError.invalidArgument("transaction_ids required");
+    }
+    if (typeof p.value !== "boolean") throw APIError.invalidArgument("value must be boolean");
+    const accessible = await accessibleTransactionIds(auth, p.transaction_ids);
+    if (accessible.ids.length > 0) {
+      await db.update(financeTransaction)
+        .set({ reviewed_at: p.value ? sql`NOW()` : null })
+        .where(inArray(financeTransaction.id, accessible.ids));
+    }
+    return { affected_transactions: accessible.ids.length, skipped_unauthorized: accessible.skipped };
+  },
+);
+
+export const batchTaxRelevant = api(
+  { expose: true, method: "POST", path: "/finance/transactions/batch-tax-relevant", auth: true },
+  async (p: BatchBooleanParams): Promise<BatchMutationResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+    if (!Array.isArray(p.transaction_ids) || p.transaction_ids.length === 0) {
+      throw APIError.invalidArgument("transaction_ids required");
+    }
+    if (typeof p.value !== "boolean") throw APIError.invalidArgument("value must be boolean");
+    const accessible = await accessibleTransactionIds(auth, p.transaction_ids);
+    if (accessible.ids.length > 0) {
+      await db.update(financeTransaction)
+        .set({ is_tax_relevant: p.value })
+        .where(inArray(financeTransaction.id, accessible.ids));
+    }
+    return { affected_transactions: accessible.ids.length, skipped_unauthorized: accessible.skipped };
+  },
+);
+
+interface MergeCounterpartiesParams {
+  transaction_ids: number[];
+  canonical_name: string;
+  set_iban?: string | null;
+  set_bic?: string | null;
+}
+
+export const mergeCounterparties = api(
+  { expose: true, method: "POST", path: "/finance/transactions/merge-counterparties", auth: true },
+  async (p: MergeCounterpartiesParams): Promise<BatchMutationResponse> => {
+    const auth = getAuthData()!;
+    requirePermission(auth, "finance.view");
+    if (!Array.isArray(p.transaction_ids) || p.transaction_ids.length === 0) {
+      throw APIError.invalidArgument("transaction_ids required");
+    }
+    const canonical = p.canonical_name?.trim();
+    if (!canonical) throw APIError.invalidArgument("canonical_name required");
+    const accessible = await accessibleTransactionIds(auth, p.transaction_ids);
+    if (accessible.ids.length > 0) {
+      await db.transaction(async (tx) => {
+        await tx.update(financeTransaction).set({
+          counterparty: canonical,
+          ...(p.set_iban !== undefined ? { counterparty_iban: p.set_iban?.trim() || null } : {}),
+          ...(p.set_bic !== undefined ? { counterparty_bic: p.set_bic?.trim() || null } : {}),
+        }).where(inArray(financeTransaction.id, accessible.ids));
+      });
+    }
+    return { affected_transactions: accessible.ids.length, skipped_unauthorized: accessible.skipped };
+  },
+);
+
 // CSV-Export — pull the basket out as a spreadsheet
 // -----------------------------------------------------------------------
 
@@ -1252,6 +1355,39 @@ export const exportTransactions = api.raw(
       );
     }
     res.end();
+  },
+);
+
+export const exportTransactionsPdf = api.raw(
+  { expose: true, method: "GET", path: "/finance/transactions/export-pdf", auth: true },
+  async (req, res) => {
+    const auth = getAuthData();
+    if (!auth) { res.statusCode = 401; res.end("Unauthorized"); return; }
+    try { requirePermission(auth, "finance.view"); } catch { res.statusCode = 403; res.end("Forbidden"); return; }
+    const ids = parseIdsParam(new URL(req.url ?? "/", "http://localhost").searchParams.get("ids"));
+    if (ids.length === 0) { res.statusCode = 400; res.end("ids required"); return; }
+    const accessible = await accessibleTransactionIds(auth, ids);
+    const rows = accessible.ids.length === 0 ? [] : await db
+      .select()
+      .from(financeTransaction)
+      .where(inArray(financeTransaction.id, accessible.ids))
+      .orderBy(financeTransaction.booking_date, financeTransaction.id);
+    const tags = await annotateTags(rows.map(row => row.id));
+    const today = new Date().toISOString().slice(0, 10);
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="spesen-${today}.pdf"`);
+    const pdf = createExpenseReportPdf(rows.map(row => ({
+      booking_date: toDateString(row.booking_date) ?? "",
+      counterparty: row.counterparty,
+      purpose: row.purpose,
+      amount: row.amount,
+      currency_code: row.currency_code,
+      notice: row.notice,
+      tags: (tags.get(row.id) ?? []).filter(tag => tag.source === "user").map(tag => tag.name),
+    })), today);
+    pdf.pipe(res);
+    pdf.end();
   },
 );
 
