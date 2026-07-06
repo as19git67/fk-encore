@@ -71,6 +71,27 @@ struct AlbumsListView: View {
                         }
                         .padding(.vertical, 4)
                     }
+
+                    NavigationLink(value: LibraryBrowserRef()) {
+                        HStack(spacing: 12) {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.accentColor.opacity(0.15))
+                                .frame(width: 60, height: 60)
+                                .overlay {
+                                    Image(systemName: "photo.stack")
+                                        .font(.title2)
+                                        .foregroundStyle(Color.accentColor)
+                                }
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("iOS Mediathek")
+                                    .font(.headline)
+                                Text("Alben vom iPhone verfügbar machen")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
                 }
 
                 if !pinnedAlbums.isEmpty {
@@ -146,6 +167,9 @@ struct AlbumsListView: View {
         }
         .navigationDestination(for: AllPhotosRef.self) { _ in
             PhotoTimelineView()
+        }
+        .navigationDestination(for: LibraryBrowserRef.self) { _ in
+            LibraryBrowserView()
         }
         .navigationDestination(for: TimelineYear.self) { year in
             PhotoYearView(year: year)

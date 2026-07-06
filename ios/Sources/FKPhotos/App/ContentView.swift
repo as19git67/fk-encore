@@ -60,12 +60,6 @@ struct MainTabView: View {
                 }
             }
 
-            Tab("Mediathek", systemImage: "photo.stack") {
-                NavigationStack {
-                    LibraryBrowserView()
-                }
-            }
-
             Tab("Einstellungen", systemImage: "gearshape") {
                 NavigationStack {
                     AdminView()
