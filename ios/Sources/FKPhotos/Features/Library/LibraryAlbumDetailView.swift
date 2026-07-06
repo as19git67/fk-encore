@@ -69,18 +69,17 @@ struct LibraryAlbumDetailView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            if canMakeAvailable {
-                ToolbarItem(placement: .primaryAction) {
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                if canMakeAvailable {
                     Button {
                         Task { await handleMakeAvailable() }
                     } label: {
                         Image(systemName: "link.badge.plus")
                     }
                     .disabled(viewModel.isMakingAvailable)
-                }
-            }
-            if canDisconnect {
-                ToolbarItem(placement: .primaryAction) {
+                } else if canDisconnect {
                     Button(role: .destructive) {
                         showDisconnectConfirm = true
                     } label: {
