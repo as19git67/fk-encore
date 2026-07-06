@@ -1554,6 +1554,8 @@ export const financeTransaction = pgTable(
     original_currency_code: text("original_currency_code"),
     exchange_rate: numeric("exchange_rate", { precision: 12, scale: 6 }),
     notice: text("notice"),
+    reviewed_at: timestamp("reviewed_at", { mode: "string", withTimezone: true }),
+    is_tax_relevant: boolean("is_tax_relevant").notNull().default(false),
     receipt_document_id: integer("receipt_document_id").references(() => documents.id, { onDelete: "set null" }),
     dedupe_hash: text("dedupe_hash").notNull(),
     raw: jsonb("raw").$type<Record<string, unknown>>(),
@@ -1573,6 +1575,34 @@ export const financeTransaction = pgTable(
     index("finance_transaction_receipt_doc_idx").on(table.receipt_document_id),
   ]
 );
+
+export const financeTransactionSplit = pgTable("finance_transaction_split", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  transaction_id: bigint("transaction_id", { mode: "number" }).notNull().references(() => financeTransaction.id, { onDelete: "cascade" }),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  tags: jsonb("tags").notNull().default(sql`'[]'::jsonb`).$type<string[]>(),
+  notice: text("notice"),
+  is_tax_relevant: boolean("is_tax_relevant").notNull().default(false),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+});
+
+export const financeBasketSnapshot = pgTable("finance_basket_snapshot", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  user_id: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  tx_ids: bigint("tx_ids", { mode: "number" }).array().notNull().default(sql`ARRAY[]::BIGINT[]`),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+}, table => [uniqueIndex("finance_basket_snapshot_user_name_unique").on(table.user_id, table.name)]);
+
+export const financeDatevMapping = pgTable("finance_datev_mapping", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  user_id: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tag_name: text("tag_name").notNull(),
+  konto_soll: text("konto_soll").notNull(),
+  konto_haben: text("konto_haben").notNull(),
+  bu_schluessel: text("bu_schluessel"),
+}, table => [uniqueIndex("finance_datev_mapping_user_tag_unique").on(table.user_id, table.tag_name)]);
 
 export const financeTransactionDocument = pgTable("finance_transaction_document", { transaction_id: bigint("transaction_id", { mode: "number" }).notNull().references(() => financeTransaction.id, { onDelete: "cascade" }), document_id: integer("document_id").notNull().references(() => documents.id, { onDelete: "cascade" }), created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow() }, (table) => [primaryKey({ columns: [table.transaction_id, table.document_id] })]);
 
