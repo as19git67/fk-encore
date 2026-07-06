@@ -499,7 +499,7 @@ async function exportDatev() {
           >
             {{ actionError }}
           </Message>
-          <div class="action-row">
+          <div class="drawer-actions">
             <Button
               :label="majorityReviewed ? 'Prüfvermerk entfernen' : 'Als geprüft markieren'"
               icon="pi pi-check-circle"
@@ -762,6 +762,22 @@ async function exportDatev() {
 }
 .action-row :deep(.p-button) {
   flex: 1;
+}
+.drawer-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(8.5rem, 100%), 1fr));
+  gap: 0.5rem;
+  width: 100%;
+}
+.drawer-actions :deep(.p-button) {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.5rem;
+  justify-content: center;
+}
+.drawer-actions :deep(.p-button-label) {
+  white-space: normal;
+  line-height: 1.15;
 }
 .clear-row {
   display: flex;
