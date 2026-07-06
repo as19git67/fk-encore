@@ -236,7 +236,15 @@ async function loadTransaction(id: number) {
   try {
     error.value = null
     tx.value = await api.getTransaction(id)
-    transactionSplits.value = (await api.getTransactionSplits(id)).items
+    // Splits are optional supplementary data. A missing migration, an older
+    // backend during a rolling deployment or a transient request failure must
+    // never make the successfully loaded transaction detail disappear.
+    try {
+      transactionSplits.value = (await api.getTransactionSplits(id)).items
+    } catch (splitError) {
+      transactionSplits.value = []
+      console.warn('Transaction splits could not be loaded', splitError)
+    }
     await refreshLinkedDocuments()
     documentResults.value = []
     documentSuggestions.value = []
