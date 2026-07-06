@@ -85,7 +85,7 @@ struct LibraryAlbumDetailView: View {
                     Button(role: .destructive) {
                         showDisconnectConfirm = true
                     } label: {
-                        Label("Trennen", systemImage: "link.badge.minus")
+                        Label("Trennen", systemImage: "minus.circle")
                     }
                 }
             }

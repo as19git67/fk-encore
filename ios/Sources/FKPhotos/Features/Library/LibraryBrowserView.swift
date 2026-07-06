@@ -1,6 +1,9 @@
 import SwiftUI
 import Photos
 
+/// Navigation value for pushing the library browser from the albums list.
+struct LibraryBrowserRef: Hashable {}
+
 struct LibraryBrowserView: View {
     @State private var viewModel = LibraryBrowserViewModel()
     @State private var searchText = ""
@@ -65,7 +68,7 @@ struct LibraryBrowserView: View {
                                     Button(role: .destructive) {
                                         viewModel.disconnect(album)
                                     } label: {
-                                        Label("Trennen", systemImage: "link.badge.minus")
+                                        Label("Trennen", systemImage: "minus.circle")
                                     }
                                 }
                             }
