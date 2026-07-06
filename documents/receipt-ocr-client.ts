@@ -77,6 +77,7 @@ export async function extractReceipt(
   imageBuffer: Buffer,
   filename = "receipt.jpg",
   mimeType = "image/jpeg",
+  referenceDate?: string | null,
 ): Promise<ReceiptOcrResult> {
   const url = `${RECEIPT_OCR_SERVICE_URL}/extract`;
   const controller = new AbortController();
@@ -84,6 +85,7 @@ export async function extractReceipt(
 
   const formData = new FormData();
   formData.append("file", new Blob([imageBuffer], { type: mimeType }), filename);
+  if (referenceDate) formData.append("reference_date", referenceDate.slice(0, 10));
 
   let res: Response;
   try {

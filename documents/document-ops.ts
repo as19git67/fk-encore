@@ -896,7 +896,12 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
   }
 
   // Stage 1: core extraction (amount / date / store).
-  const core = await extractReceipt(ocrBuffer, ocrFilename, ocrMimeType);
+  const core = await extractReceipt(
+    ocrBuffer,
+    ocrFilename,
+    ocrMimeType,
+    row.uploaded_at,
+  );
 
   // Replace the stored PDF with the service's display preparation: crop,
   // perspective correction, orientation and fine deskew. OCR-only denoising
