@@ -2,14 +2,21 @@
 import { computed, ref } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
+import InputNumber from 'primevue/inputnumber'
+import Select from 'primevue/select'
 import Drawer from 'primevue/drawer'
+import Dialog from 'primevue/dialog'
 import Message from 'primevue/message'
+import Checkbox from 'primevue/checkbox'
+import { useConfirm } from 'primevue/useconfirm'
 import { useTxSelectionStore } from '../../stores/finance/selection'
-import { downloadTransactionsCsv, suggestDocumentsForTransactions, decideDocumentMatch, getDocumentMatchMetrics, linkDocumentsToTransactions, type DocumentMatchSuggestion, type Transaction } from '../../api/finance'
+import { batchReview, batchTaxRelevant, deleteBasketSnapshot, downloadTransactionsCsv, downloadTransactionsDatev, downloadTransactionsPdf, getTransaction, getTransactionSplits, listBasketSnapshots, listDatevMappings, loadBasketSnapshot, mergeCounterparties, saveBasketSnapshot, saveDatevMapping, setTransactionSplits, suggestDocumentsForTransactions, decideDocumentMatch, getDocumentMatchMetrics, linkDocumentsToTransactions, type BasketSnapshot, type DatevMapping, type DocumentMatchSuggestion, type Transaction } from '../../api/finance'
 import BatchTagDialog from './BatchTagDialog.vue'
 import BatchNoticeDialog from './BatchNoticeDialog.vue'
 import { searchDocuments, type DocumentSummary } from '../../api/documents'
 import { basketTags, basketCounterparties, basketMonths, hasMixedCurrencies, type BasketAggregate } from '../../utils/financeBasketAnalysis'
+import { detectRecurringSelection } from '../../utils/financeRecurringSelection'
+import { compareBasketCounterparties } from '../../utils/financeBasketCompare'
 
 /**
  * Header indicator + slide-out drawer for the transaction basket.
@@ -21,6 +28,7 @@ import { basketTags, basketCounterparties, basketMonths, hasMixedCurrencies, typ
  */
 
 const selectionStore = useTxSelectionStore()
+const confirm = useConfirm()
 const drawerVisible = ref(false)
 const tagDialogVisible = ref(false)
 const noticeDialogVisible = ref(false)
@@ -34,11 +42,49 @@ const documentResults = ref<DocumentSummary[]>([])
 const manualLinkOpen = ref(false)
 const matchMetrics = ref<{ high: Record<string, number>; medium: Record<string, number>; low: Record<string, number> } | null>(null)
 const analysisView = ref<'tags' | 'counterparties' | 'months'>('tags')
+const batchBusy = ref(false)
+const counterpartyDialogVisible = ref(false)
+const canonicalCounterparty = ref('')
+const canonicalIban = ref('')
+const canonicalBic = ref('')
+const snapshotDialogVisible = ref(false)
+const snapshots = ref<BasketSnapshot[]>([])
+const snapshotName = ref('')
+const selectedSnapshotId = ref<number | null>(null)
+const compareDialogVisible = ref(false)
+const compareA = ref<number | null>(null)
+const compareB = ref<number | null>(null)
+const comparisonRows = ref<Array<{ label: string; a: number; b: number }>>([])
+const comparisonCurrencyMismatch = ref(false)
+const splitDialogVisible = ref(false)
+const editingExistingSplit = ref(false)
+const splitRows = ref<Array<{ amount: number; tags: string; notice: string; is_tax_relevant: boolean }>>([])
+const datevDialogVisible = ref(false)
+const datevMappings = ref<DatevMapping[]>([])
+const datevTag = ref('')
+const datevSoll = ref('')
+const datevHaben = ref('')
+const datevBu = ref('')
+const datevBerater = ref('')
+const datevMandant = ref('')
 
 const count = computed(() => selectionStore.count)
 const items = computed(() => selectionStore.items)
 const analysisRows = computed<BasketAggregate[]>(() => analysisView.value === 'tags' ? basketTags(items.value) : analysisView.value === 'counterparties' ? basketCounterparties(items.value) : basketMonths(items.value))
 const mixedCurrencies = computed(() => hasMixedCurrencies(items.value))
+const recurringGroups = computed(() => detectRecurringSelection(items.value))
+const majorityReviewed = computed(() => items.value.filter(item => !!item.reviewed_at).length > items.value.length / 2)
+const majorityTaxRelevant = computed(() => items.value.filter(item => !!item.is_tax_relevant).length > items.value.length / 2)
+const datevPreview = computed(() => items.value.slice(0, 5).map(tx => {
+  const mapping = datevMappings.value.find(candidate => (tx.tags ?? []).some(tag => tag.name === candidate.tag_name))
+  return {
+    id: tx.id,
+    date: tx.booking_date.slice(0, 10),
+    text: tx.counterparty ?? tx.purpose ?? 'Buchung',
+    amount: formatAmount(tx),
+    accounts: mapping ? `${mapping.konto_soll} / ${mapping.konto_haben}` : 'Mapping fehlt',
+  }
+}))
 
 const sumLabel = computed(() => {
   if (count.value === 0) return ''
@@ -136,6 +182,195 @@ async function exportCsv() {
     exporting.value = false
   }
 }
+
+async function exportPdf() {
+  if (!count.value || exporting.value) return
+  exporting.value = true
+  try { await downloadTransactionsPdf(selectionStore.ids) }
+  catch (err) { actionError.value = err instanceof Error ? err.message : String(err) }
+  finally { exporting.value = false }
+}
+
+async function applyBatchFlag(kind: 'reviewed' | 'tax', value: boolean) {
+  if (!count.value || batchBusy.value) return
+  batchBusy.value = true
+  actionError.value = null
+  try {
+    const result = kind === 'reviewed'
+      ? await batchReview(selectionStore.ids, value)
+      : await batchTaxRelevant(selectionStore.ids, value)
+    selectionStore.set(items.value.map(item => kind === 'reviewed'
+      ? { ...item, reviewed_at: value ? new Date().toISOString() : null }
+      : { ...item, is_tax_relevant: value }))
+    actionInfo.value = `${result.affected_transactions} Buchung${result.affected_transactions === 1 ? '' : 'en'} aktualisiert.`
+  } catch (err) {
+    actionError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    batchBusy.value = false
+  }
+}
+
+function toggleTaxRelevant() {
+  const value = !majorityTaxRelevant.value
+  confirm.require({
+    header: 'Steuerrelevanz ändern',
+    message: `${count.value} Buchungen → ${value ? 'steuerrelevant' : 'nicht steuerrelevant'}`,
+    rejectLabel: 'Abbrechen',
+    acceptLabel: 'Übernehmen',
+    accept: () => void applyBatchFlag('tax', value),
+  })
+}
+
+function openCounterpartyMerge() {
+  const names = items.value.map(item => item.counterparty?.trim()).filter((value): value is string => !!value)
+  canonicalCounterparty.value = names.sort((a, b) => names.filter(n => n === b).length - names.filter(n => n === a).length)[0] ?? ''
+  canonicalIban.value = items.value.find(item => item.counterparty_iban)?.counterparty_iban ?? ''
+  canonicalBic.value = items.value.find(item => item.counterparty_bic)?.counterparty_bic ?? ''
+  counterpartyDialogVisible.value = true
+}
+
+async function saveCounterpartyMerge() {
+  if (!canonicalCounterparty.value.trim() || batchBusy.value) return
+  batchBusy.value = true
+  try {
+    const result = await mergeCounterparties({
+      transaction_ids: selectionStore.ids,
+      canonical_name: canonicalCounterparty.value,
+      set_iban: canonicalIban.value || undefined,
+      set_bic: canonicalBic.value || undefined,
+    })
+    selectionStore.set(items.value.map(item => ({
+      ...item,
+      counterparty: canonicalCounterparty.value.trim(),
+      ...(canonicalIban.value ? { counterparty_iban: canonicalIban.value.trim() } : {}),
+      ...(canonicalBic.value ? { counterparty_bic: canonicalBic.value.trim() } : {}),
+    })))
+    actionInfo.value = `${result.affected_transactions} Gegenseiten vereinheitlicht.`
+    counterpartyDialogVisible.value = false
+  } catch (err) {
+    actionError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    batchBusy.value = false
+  }
+}
+
+async function refreshSnapshots() {
+  snapshots.value = (await listBasketSnapshots()).items
+}
+
+async function openSnapshots() {
+  actionError.value = null
+  await refreshSnapshots()
+  snapshotDialogVisible.value = true
+}
+
+async function saveSnapshot() {
+  if (!snapshotName.value.trim()) return
+  const existing = snapshots.value.find(snapshot => snapshot.name.toLocaleLowerCase() === snapshotName.value.trim().toLocaleLowerCase())
+  const execute = async () => {
+    await saveBasketSnapshot(snapshotName.value, selectionStore.ids)
+    await refreshSnapshots()
+    actionInfo.value = existing ? 'Basket überschrieben.' : 'Basket gespeichert.'
+  }
+  if (!existing) { await execute(); return }
+  confirm.require({
+    header: 'Basket überschreiben?',
+    message: `„${existing.name}“ wird durch die aktuelle Auswahl ersetzt.`,
+    icon: 'pi pi-exclamation-triangle',
+    acceptLabel: 'Überschreiben',
+    rejectLabel: 'Abbrechen',
+    accept: () => { void execute() },
+  })
+}
+
+async function loadSnapshot() {
+  if (!selectedSnapshotId.value) return
+  const snapshot = await loadBasketSnapshot(selectedSnapshotId.value)
+  const loaded = await Promise.all(snapshot.transaction_ids.map(id => getTransaction(id)))
+  selectionStore.set(loaded)
+  actionInfo.value = snapshot.missing ? `${snapshot.missing} nicht mehr verfügbare Buchungen wurden übersprungen.` : 'Basket geladen.'
+  snapshotDialogVisible.value = false
+}
+
+async function removeSnapshot() {
+  if (!selectedSnapshotId.value) return
+  const selected = snapshots.value.find(snapshot => snapshot.id === selectedSnapshotId.value)
+  confirm.require({
+    header: 'Basket löschen?',
+    message: `„${selected?.name ?? 'Basket'}“ wird dauerhaft gelöscht.`,
+    icon: 'pi pi-trash',
+    acceptLabel: 'Löschen',
+    rejectLabel: 'Abbrechen',
+    acceptClass: 'p-button-danger',
+    accept: () => { void (async () => {
+      await deleteBasketSnapshot(selectedSnapshotId.value!)
+      selectedSnapshotId.value = null
+      await refreshSnapshots()
+    })() },
+  })
+}
+
+async function compareSnapshots() {
+  if (!compareA.value || !compareB.value) return
+  const [a, b] = await Promise.all([loadBasketSnapshot(compareA.value), loadBasketSnapshot(compareB.value)])
+  const [aItems, bItems] = await Promise.all([
+    Promise.all(a.transaction_ids.map(id => getTransaction(id))),
+    Promise.all(b.transaction_ids.map(id => getTransaction(id))),
+  ])
+  const comparison = compareBasketCounterparties(aItems, bItems)
+  comparisonCurrencyMismatch.value = comparison.currencyMismatch
+  comparisonRows.value = comparison.rows
+}
+
+async function openSplit() {
+  const amount = Number(items.value[0]?.amount ?? 0)
+  const transactionId = items.value[0]?.id
+  if (transactionId) {
+    const existing = await getTransactionSplits(transactionId)
+    if (existing.items.length) {
+      editingExistingSplit.value = true
+      splitRows.value = existing.items.map(row => ({
+        amount: Number(row.amount),
+        tags: row.tags.join(', '),
+        notice: row.notice ?? '',
+        is_tax_relevant: !!row.is_tax_relevant,
+      }))
+      splitDialogVisible.value = true
+      return
+    }
+  }
+  editingExistingSplit.value = false
+  const first = Math.round(amount * 50) / 100
+  splitRows.value = [
+    { amount: first, tags: '', notice: '', is_tax_relevant: false },
+    { amount: Math.round((amount - first) * 100) / 100, tags: '', notice: '', is_tax_relevant: false },
+  ]
+  splitDialogVisible.value = true
+}
+
+const splitDifference = computed(() => Number(items.value[0]?.amount ?? 0) - splitRows.value.reduce((sum, row) => sum + Number(row.amount || 0), 0))
+async function saveSplit() {
+  const tx = items.value[0]
+  if (!tx || Math.abs(splitDifference.value) >= 0.005) return
+  await setTransactionSplits(tx.id, splitRows.value.map(row => ({ ...row, tags: row.tags.split(',').map(tag => tag.trim()).filter(Boolean) })))
+  splitDialogVisible.value = false
+  actionInfo.value = 'Split-Buchung gespeichert.'
+}
+
+async function openDatev() {
+  datevMappings.value = (await listDatevMappings()).items
+  datevDialogVisible.value = true
+}
+async function addDatevMapping() {
+  await saveDatevMapping({ tag_name: datevTag.value, konto_soll: datevSoll.value, konto_haben: datevHaben.value, bu_schluessel: datevBu.value || null })
+  datevMappings.value = (await listDatevMappings()).items
+  datevTag.value = ''; datevSoll.value = ''; datevHaben.value = ''; datevBu.value = ''
+}
+async function exportDatev() {
+  try { await downloadTransactionsDatev(selectionStore.ids, datevBerater.value, datevMandant.value) }
+  catch (err) { actionError.value = err instanceof Error ? err.message : String(err); return }
+  datevDialogVisible.value = false
+}
 </script>
 
 <template>
@@ -209,6 +444,15 @@ async function exportCsv() {
             </li>
           </ul>
         </section>
+        <section v-if="recurringGroups.length" class="basket-analysis" aria-label="Wiederkehrende Buchungen">
+          <strong>Wiederkehrende in der Auswahl</strong>
+          <ul class="basket-analysis-list">
+            <li v-for="group in recurringGroups" :key="`${group.counterparty}-${group.averageIntervalDays}`" class="basket-analysis-row">
+              <span>{{ group.counterparty }} <small>· {{ group.count }}×</small></span>
+              <span>Ø {{ group.averageIntervalDays }} Tage</span>
+            </li>
+          </ul>
+        </section>
         <li
           v-for="tx in items"
           :key="tx.id"
@@ -255,7 +499,20 @@ async function exportCsv() {
           >
             {{ actionError }}
           </Message>
-          <div class="action-row">
+          <div class="drawer-actions">
+            <Button
+              :label="majorityReviewed ? 'Prüfvermerk entfernen' : 'Als geprüft markieren'"
+              icon="pi pi-check-circle"
+              size="small"
+              severity="secondary"
+              outlined
+              :loading="batchBusy"
+              @click="applyBatchFlag('reviewed', !majorityReviewed)"
+            />
+            <Button label="Steuerrelevant" icon="pi pi-percentage" size="small" severity="secondary" outlined :loading="batchBusy" @click="toggleTaxRelevant" />
+            <Button label="Gegenseite" icon="pi pi-users" size="small" severity="secondary" outlined :disabled="count === 0" @click="openCounterpartyMerge" />
+            <Button label="Split" icon="pi pi-sitemap" size="small" severity="secondary" outlined :disabled="count !== 1" @click="openSplit" />
+            <Button label="Baskets" icon="pi pi-save" size="small" severity="secondary" outlined @click="openSnapshots" />
             <Button
               label="Tags"
               icon="pi pi-tag"
@@ -282,6 +539,8 @@ async function exportCsv() {
               :loading="exporting"
               @click="exportCsv"
             />
+            <Button label="PDF" icon="pi pi-file-pdf" size="small" severity="secondary" outlined :disabled="count === 0" :loading="exporting" @click="exportPdf" />
+            <Button label="DATEV" icon="pi pi-calculator" size="small" severity="secondary" outlined :disabled="count === 0" @click="openDatev" />
           </div>
           <div class="clear-row">
             <Button
@@ -303,6 +562,61 @@ async function exportCsv() {
       v-model:visible="noticeDialogVisible"
       :transaction-ids="selectionStore.ids"
     />
+    <Dialog v-model:visible="counterpartyDialogVisible" header="Gegenseiten vereinheitlichen" modal :style="{ width: 'min(30rem, calc(100vw - 2rem))' }">
+      <div class="counterparty-form">
+        <label>Kanonischer Name<InputText v-model="canonicalCounterparty" /></label>
+        <label>IBAN nachziehen (optional)<InputText v-model="canonicalIban" /></label>
+        <label>BIC nachziehen (optional)<InputText v-model="canonicalBic" /></label>
+        <strong>Vorschau</strong>
+        <ul class="basket-analysis-list"><li v-for="tx in items" :key="tx.id" class="basket-analysis-row"><span>{{ tx.counterparty ?? '—' }}</span><span>→ {{ canonicalCounterparty || '—' }}</span></li></ul>
+      </div>
+      <template #footer>
+        <Button label="Abbrechen" text severity="secondary" @click="counterpartyDialogVisible = false" />
+        <Button label="Vereinheitlichen" icon="pi pi-check" :loading="batchBusy" :disabled="!canonicalCounterparty.trim()" @click="saveCounterpartyMerge" />
+      </template>
+    </Dialog>
+    <Dialog v-model:visible="snapshotDialogVisible" header="Benannte Baskets" modal :style="{ width: 'min(34rem, calc(100vw - 2rem))' }">
+      <div class="counterparty-form">
+        <label>Aktuellen Basket speichern<InputText v-model="snapshotName" placeholder="Name" /></label>
+        <Button label="Speichern / überschreiben" icon="pi pi-save" :disabled="!snapshotName.trim() || count === 0" @click="saveSnapshot" />
+        <label>Gespeicherter Basket<Select v-model="selectedSnapshotId" :options="snapshots" option-label="name" option-value="id" placeholder="Basket wählen" /></label>
+        <div class="action-row"><Button label="Laden" :disabled="!selectedSnapshotId" @click="loadSnapshot" /><Button label="Löschen" severity="danger" outlined :disabled="!selectedSnapshotId" @click="removeSnapshot" /></div>
+        <Button label="Baskets vergleichen" icon="pi pi-chart-bar" outlined :disabled="snapshots.length < 2" @click="compareDialogVisible = true" />
+      </div>
+    </Dialog>
+    <Dialog v-model:visible="compareDialogVisible" header="Basket-Vergleich nach Gegenseite" modal :style="{ width: 'min(42rem, calc(100vw - 2rem))' }">
+      <div class="basket-match-actions"><Select v-model="compareA" :options="snapshots" option-label="name" option-value="id" placeholder="Basket A" /><Select v-model="compareB" :options="snapshots" option-label="name" option-value="id" placeholder="Basket B" /></div>
+      <Button label="Vergleichen" :disabled="!compareA || !compareB || compareA === compareB" @click="compareSnapshots" />
+      <Message v-if="comparisonCurrencyMismatch" severity="warn" :closable="false">Die Baskets enthalten unterschiedliche Währungen; es wird keine irreführende Gesamtsumme gebildet.</Message>
+      <ul class="basket-analysis-list"><li v-for="row in comparisonRows" :key="row.label" class="basket-analysis-row"><span>{{ row.label }}</span><span>{{ formatAnalysisAmount(row.a) }} → {{ formatAnalysisAmount(row.b) }} (Δ {{ formatAnalysisAmount(row.b - row.a) }})</span></li></ul>
+    </Dialog>
+    <Dialog v-model:visible="splitDialogVisible" header="Buchung aufteilen" modal :style="{ width: 'min(42rem, calc(100vw - 2rem))' }">
+      <div class="counterparty-form">
+        <Message v-if="editingExistingSplit" severity="info" :closable="false">Diese Buchung besitzt bereits einen Split. Speichern ersetzt die bestehende Aufteilung vollständig.</Message>
+        <div v-for="(row, index) in splitRows" :key="index" class="split-row">
+          <InputNumber v-model="row.amount" mode="currency" :currency="items[0]?.currency_code ?? 'EUR'" locale="de-DE" />
+          <InputText v-model="row.tags" placeholder="Tags, kommagetrennt" />
+          <InputText v-model="row.notice" placeholder="Notiz" />
+          <label class="split-tax"><Checkbox v-model="row.is_tax_relevant" binary /> Steuerrelevant</label>
+          <Button v-if="splitRows.length > 2" icon="pi pi-trash" text severity="danger" @click="splitRows.splice(index, 1)" />
+        </div>
+        <Button label="Teil hinzufügen" icon="pi pi-plus" text @click="splitRows.push({ amount: 0, tags: '', notice: '', is_tax_relevant: false })" />
+        <Message :severity="Math.abs(splitDifference) < .005 ? 'success' : 'warn'" :closable="false">Differenz: {{ formatAnalysisAmount(splitDifference) }}</Message>
+      </div>
+      <template #footer><Button label="Abbrechen" text @click="splitDialogVisible = false" /><Button label="Speichern" :disabled="Math.abs(splitDifference) >= .005" @click="saveSplit" /></template>
+    </Dialog>
+    <Dialog v-model:visible="datevDialogVisible" header="DATEV-Steuerexport" modal :style="{ width: 'min(42rem, calc(100vw - 2rem))' }">
+      <div class="counterparty-form">
+        <div class="basket-match-actions"><label>Beraternummer<InputText v-model="datevBerater" /></label><label>Mandantennummer<InputText v-model="datevMandant" /></label></div>
+        <strong>Tag-Konten-Mapping</strong>
+        <ul class="basket-analysis-list"><li v-for="mapping in datevMappings" :key="mapping.id" class="basket-analysis-row"><span>{{ mapping.tag_name }}</span><span>{{ mapping.konto_soll }} / {{ mapping.konto_haben }}<template v-if="mapping.bu_schluessel"> · BU {{ mapping.bu_schluessel }}</template></span></li></ul>
+        <div class="datev-mapping-row"><InputText v-model="datevTag" placeholder="Tag" /><InputText v-model="datevSoll" placeholder="Konto Soll" /><InputText v-model="datevHaben" placeholder="Konto Haben" /><InputText v-model="datevBu" placeholder="BU optional" /><Button icon="pi pi-plus" aria-label="Mapping speichern" :disabled="!datevTag || !datevSoll || !datevHaben" @click="addDatevMapping" /></div>
+        <Message severity="info" :closable="false">Der Export stoppt, wenn für eine Buchung kein Mapping ihrer Tags vorhanden ist.</Message>
+        <strong>Vorschau (erste 5 Buchungen)</strong>
+        <ul class="basket-analysis-list"><li v-for="row in datevPreview" :key="row.id" class="basket-analysis-row"><span>{{ row.date }} · {{ row.text }}<small> · {{ row.accounts }}</small></span><span>{{ row.amount }}</span></li></ul>
+      </div>
+      <template #footer><Button label="Abbrechen" text @click="datevDialogVisible = false" /><Button label="EXTF exportieren" icon="pi pi-download" :disabled="!datevBerater || !datevMandant" @click="exportDatev" /></template>
+    </Dialog>
   </div>
 </template>
 
@@ -342,6 +656,14 @@ async function exportCsv() {
 .basket-empty .hint {
   font-size: 0.85rem;
   margin-top: 0.25rem;
+}
+.counterparty-form { display: grid; gap: .85rem; }
+.counterparty-form label { display: grid; gap: .35rem; font-weight: 600; }
+.counterparty-form :deep(.p-inputtext) { width: 100%; }
+.split-row { display: grid; grid-template-columns: minmax(8rem, .7fr) minmax(9rem, 1fr) minmax(9rem, 1fr) auto; gap: .5rem; align-items: center; }
+.datev-mapping-row { display: grid; grid-template-columns: 1.2fr 1fr 1fr .8fr auto; gap: .4rem; align-items: center; }
+@media (max-width: 620px) {
+  .split-row, .datev-mapping-row { grid-template-columns: 1fr; }
 }
 
 .basket-match-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .5rem; margin-bottom: .5rem; }
@@ -440,6 +762,22 @@ async function exportCsv() {
 }
 .action-row :deep(.p-button) {
   flex: 1;
+}
+.drawer-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(8.5rem, 100%), 1fr));
+  gap: 0.5rem;
+  width: 100%;
+}
+.drawer-actions :deep(.p-button) {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.5rem;
+  justify-content: center;
+}
+.drawer-actions :deep(.p-button-label) {
+  white-space: normal;
+  line-height: 1.15;
 }
 .clear-row {
   display: flex;

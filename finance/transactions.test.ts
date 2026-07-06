@@ -15,10 +15,13 @@ import {
 } from "../db/schema";
 import {
   batchNotice,
+  batchReview,
   batchTag,
+  batchTaxRelevant,
   createTransaction,
   getTransaction,
   listTransactions,
+  mergeCounterparties,
   promoteAiTag,
   updateTransaction,
 } from "./transactions";
@@ -800,6 +803,29 @@ describe("finance/transactions — batchNotice", () => {
         mode: "wat" as "replace",
       }),
     ).rejects.toThrow(/mode must be/);
+  });
+});
+
+describe("finance/transactions — basket batch metadata", () => {
+  it("sets review and tax flags while reporting inaccessible ids", async () => {
+    const { a, b } = await createAccounts();
+    const allowed = await insertTx(a); const denied = await insertTx(b);
+    setAuth("7", ["finance.view"]); await grant(a, 7, "read");
+    expect(await batchReview({ transaction_ids: [allowed, denied, 999999], value: true })).toEqual({ affected_transactions: 1, skipped_unauthorized: 2 });
+    expect(await batchTaxRelevant({ transaction_ids: [allowed], value: true })).toEqual({ affected_transactions: 1, skipped_unauthorized: 0 });
+    const [row] = await db.select({ reviewed_at: financeTransaction.reviewed_at, tax: financeTransaction.is_tax_relevant }).from(financeTransaction).where(eq(financeTransaction.id, allowed));
+    expect(row.reviewed_at).toBeTruthy(); expect(row.tax).toBe(true);
+  });
+
+  it("merges counterparties and optional bank data atomically", async () => {
+    const { a } = await createAccounts();
+    const first = await insertTx(a, { counterparty: "AMZN MKTPLC" });
+    const second = await insertTx(a, { booking_date: "2024-08-16", counterparty: "Amazon EU" });
+    setAuth("7", ["finance.view"]); await grant(a, 7, "read");
+    const result = await mergeCounterparties({ transaction_ids: [first, second], canonical_name: "Amazon", set_iban: "DE123", set_bic: "TESTDEFF" });
+    expect(result.affected_transactions).toBe(2);
+    const rows = await db.select().from(financeTransaction).where(inArray(financeTransaction.id, [first, second]));
+    expect(rows.every(row => row.counterparty === "Amazon" && row.counterparty_iban === "DE123" && row.counterparty_bic === "TESTDEFF")).toBe(true);
   });
 });
 

@@ -52,6 +52,7 @@ const documentSuggestionsLoading = ref(false)
 const documentLinkingId = ref<number | null>(null)
 const documentDecisionId = ref<number | null>(null)
 const expandedDocumentPreviews = ref<Set<number>>(new Set())
+const transactionSplits = ref<api.TransactionSplit[]>([])
 
 function toggleDocumentPreview(documentId: number) {
   const next = new Set(expandedDocumentPreviews.value)
@@ -235,6 +236,15 @@ async function loadTransaction(id: number) {
   try {
     error.value = null
     tx.value = await api.getTransaction(id)
+    // Splits are optional supplementary data. A missing migration, an older
+    // backend during a rolling deployment or a transient request failure must
+    // never make the successfully loaded transaction detail disappear.
+    try {
+      transactionSplits.value = (await api.getTransactionSplits(id)).items
+    } catch (splitError) {
+      transactionSplits.value = []
+      console.warn('Transaction splits could not be loaded', splitError)
+    }
     await refreshLinkedDocuments()
     documentResults.value = []
     documentSuggestions.value = []
@@ -866,6 +876,18 @@ const extractedFields = computed(() => {
           <dd class="multiline">{{ tx.purpose ?? '—' }}</dd>
         </template>
       </dl>
+    </section>
+
+    <section v-if="transactionSplits.length" class="card">
+      <h2>Aufteilung</h2>
+      <ul class="split-detail-list">
+        <li v-for="(split, index) in transactionSplits" :key="split.id ?? index">
+          <strong>{{ new Intl.NumberFormat('de-DE', { style: 'currency', currency: tx?.currency_code ?? 'EUR' }).format(Number(split.amount)) }}</strong>
+          <span>{{ split.tags.join(', ') || 'Ohne Tags' }}</span>
+          <span v-if="split.notice">{{ split.notice }}</span>
+          <Tag v-if="split.is_tax_relevant" value="Steuerrelevant" severity="info" />
+        </li>
+      </ul>
     </section>
 
     <!-- Tags + Notiz -->
@@ -1577,4 +1599,7 @@ const extractedFields = computed(() => {
   z-index: 9999;
   pointer-events: none;
 }
+.split-detail-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .5rem; }
+.split-detail-list li { display: grid; grid-template-columns: 7rem 1fr 1fr auto; gap: .75rem; align-items: center; padding: .55rem; border: 1px solid var(--p-content-border-color); border-radius: .4rem; }
+@media (max-width: 600px) { .split-detail-list li { grid-template-columns: 1fr; gap: .25rem; } }
 </style>
