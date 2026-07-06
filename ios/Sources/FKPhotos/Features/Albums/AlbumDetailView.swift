@@ -251,7 +251,8 @@ struct AlbumDetailView: View {
                 photo_count: response.photos.count,
                 is_shared: false,
                 created_at: "",
-                updated_at: ""
+                updated_at: "",
+                my_access_level: response.role
             )
             photos = response.photos
         } catch {

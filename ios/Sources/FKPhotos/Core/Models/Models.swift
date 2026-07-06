@@ -143,6 +143,14 @@ struct Album: Codable, Identifiable, Sendable {
     let is_shared: Bool
     let created_at: String
     let updated_at: String
+    let my_access_level: String?
+
+    var hasWriteAccess: Bool {
+        switch my_access_level {
+        case "owner", "write", "write_share": return true
+        default: return false
+        }
+    }
 }
 
 // MARK: - Person & Face

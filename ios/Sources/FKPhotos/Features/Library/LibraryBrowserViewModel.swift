@@ -11,6 +11,10 @@ final class LibraryBrowserViewModel {
         let assetCount: Int
         let isSmart: Bool
         var syncStatus: SyncStatus
+        var isIndividuallySynced: Bool
+
+        var canMakeAvailable: Bool { syncStatus == .none && !isSmart }
+        var canDisconnect: Bool { isIndividuallySynced }
 
         enum SyncStatus: Hashable, Sendable {
             case none
@@ -18,9 +22,16 @@ final class LibraryBrowserViewModel {
         }
     }
 
+    enum MakeAvailableResult: Sendable {
+        case success(serverAlbumId: Int, albumName: String, assetCount: Int, iosAlbumId: String)
+        case error(String)
+    }
+
     var albums: [IOSAlbum] = []
     var isLoading = true
     var authorizationDenied = false
+    var isMakingAvailable = false
+    var errorMessage: String?
 
     func load() async {
         isLoading = true
@@ -79,13 +90,15 @@ final class LibraryBrowserViewModel {
                 let isAllLibrary = selectedIds.contains(allLibrary)
                 let result = raw.map { r -> IOSAlbum in
                     let localId = r.collection.localIdentifier
-                    let synced = isAllLibrary || (selectedIds.contains(localId) && mappings[localId] != nil)
+                    let individuallySynced = selectedIds.contains(localId) && mappings[localId] != nil
+                    let synced = isAllLibrary || individuallySynced
                     return IOSAlbum(
                         id: localId,
                         name: r.title,
                         assetCount: r.count,
                         isSmart: r.isSmart,
-                        syncStatus: synced ? .copy : .none
+                        syncStatus: synced ? .copy : .none,
+                        isIndividuallySynced: individuallySynced
                     )
                 }
                 continuation.resume(returning: result)
@@ -96,6 +109,102 @@ final class LibraryBrowserViewModel {
             if a.syncStatus != .none && b.syncStatus == .none { return true }
             if a.syncStatus == .none && b.syncStatus != .none { return false }
             return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+        }
+    }
+
+    // MARK: - Make Available
+
+    func makeAvailable(_ album: IOSAlbum) async -> MakeAvailableResult {
+        isMakingAvailable = true
+        defer { isMakingAvailable = false }
+
+        let duplicateLinked = albums.first {
+            $0.id != album.id && $0.name == album.name && $0.syncStatus != .none
+        }
+        if duplicateLinked != nil {
+            return .error("Ein iOS-Album mit dem Namen \"\(album.name)\" ist bereits verknüpft.")
+        }
+
+        let serverAlbums: [Album]
+        do {
+            let response: ListAlbumsResponse = try await APIClient.shared.get("/albums")
+            serverAlbums = response.albums
+        } catch {
+            return .error("Server-Alben konnten nicht geladen werden: \(error.localizedDescription)")
+        }
+
+        var targetAlbumId: Int?
+
+        if let ownAlbum = serverAlbums.first(where: {
+            $0.name == album.name && $0.my_access_level == "owner"
+        }) {
+            targetAlbumId = ownAlbum.id
+        } else if let sharedAlbum = serverAlbums.first(where: {
+            $0.name == album.name && $0.hasWriteAccess
+        }) {
+            targetAlbumId = sharedAlbum.id
+        } else {
+            struct Body: Encodable { let name: String; let description: String? }
+            struct CreatedAlbum: Decodable { let id: Int }
+            do {
+                let created: CreatedAlbum = try await APIClient.shared.post(
+                    "/albums", body: Body(name: album.name, description: nil)
+                )
+                targetAlbumId = created.id
+            } catch {
+                return .error("Album konnte nicht erstellt werden: \(error.localizedDescription)")
+            }
+        }
+
+        guard let serverId = targetAlbumId else {
+            return .error("Unbekannter Fehler bei der Album-Zuordnung.")
+        }
+
+        var selectedIds = PhotoSyncPreferences.selectedAlbumIds
+        selectedIds.insert(album.id)
+        PhotoSyncPreferences.selectedAlbumIds = selectedIds
+
+        var mappings = PhotoSyncPreferences.albumMappings
+        mappings[album.id] = serverId
+        PhotoSyncPreferences.albumMappings = mappings
+
+        PhotoSyncPreferences.confirmMapping(for: album.id)
+        PhotoSyncPreferences.syncEnabled = true
+
+        PhotoSyncPreferences.setAlbumSyncDate(Date(), for: album.id)
+
+        if let idx = albums.firstIndex(where: { $0.id == album.id }) {
+            albums[idx].syncStatus = .copy
+            albums[idx].isIndividuallySynced = true
+        }
+
+        BackgroundSyncManager.shared.scheduleNextSyncIfNeeded()
+
+        return .success(
+            serverAlbumId: serverId,
+            albumName: album.name,
+            assetCount: album.assetCount,
+            iosAlbumId: album.id
+        )
+    }
+
+    // MARK: - Disconnect
+
+    func disconnect(_ album: IOSAlbum) {
+        var selectedIds = PhotoSyncPreferences.selectedAlbumIds
+        selectedIds.remove(album.id)
+        PhotoSyncPreferences.selectedAlbumIds = selectedIds
+
+        var mappings = PhotoSyncPreferences.albumMappings
+        mappings.removeValue(forKey: album.id)
+        PhotoSyncPreferences.albumMappings = mappings
+
+        PhotoSyncPreferences.unconfirmMapping(for: album.id)
+        PhotoSyncPreferences.resetAlbumSyncDate(for: album.id)
+
+        if let idx = albums.firstIndex(where: { $0.id == album.id }) {
+            albums[idx].syncStatus = .none
+            albums[idx].isIndividuallySynced = false
         }
     }
 }

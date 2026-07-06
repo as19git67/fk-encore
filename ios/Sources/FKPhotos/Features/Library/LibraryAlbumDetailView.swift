@@ -3,15 +3,26 @@ import Photos
 
 struct LibraryAlbumDetailView: View {
     let album: LibraryBrowserViewModel.IOSAlbum
+    var viewModel: LibraryBrowserViewModel
 
     @State private var assets: [PHAsset] = []
     @State private var isLoading = true
     @State private var selectedAssetIndex: Int?
     @State private var showFullscreen = false
+    @State private var showDisconnectConfirm = false
+    @State private var pendingInitialSync: LibraryBrowserView.PendingInitialSync?
+    @State private var showError = false
+    @State private var errorMessage: String?
+
+    @Environment(\.dismiss) private var dismiss
 
     private let columns = [
         GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 2)
     ]
+
+    private var currentAlbum: LibraryBrowserViewModel.IOSAlbum {
+        viewModel.albums.first { $0.id == album.id } ?? album
+    }
 
     var body: some View {
         Group {
@@ -55,17 +66,112 @@ struct LibraryAlbumDetailView: View {
         .toolbar {
             ToolbarItem(placement: .bottomBar) {
                 HStack {
-                    SyncStatusBadge(status: album.syncStatus)
+                    SyncStatusBadge(status: currentAlbum.syncStatus)
                     Spacer()
                     Text("\(assets.count) Foto\(assets.count == 1 ? "" : "s")")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
             }
+            ToolbarItem(placement: .primaryAction) {
+                if currentAlbum.canMakeAvailable {
+                    Button {
+                        Task { await handleMakeAvailable() }
+                    } label: {
+                        Label("Verfügbar machen", systemImage: "arrow.up.circle")
+                    }
+                    .disabled(viewModel.isMakingAvailable)
+                } else if currentAlbum.canDisconnect {
+                    Button(role: .destructive) {
+                        showDisconnectConfirm = true
+                    } label: {
+                        Label("Trennen", systemImage: "link.badge.plus")
+                    }
+                }
+            }
         }
         .task {
             assets = await loadAssets()
             isLoading = false
+        }
+        .confirmationDialog(
+            "Verknüpfung lösen?",
+            isPresented: $showDisconnectConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Verknüpfung lösen", role: .destructive) {
+                viewModel.disconnect(album)
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: {
+            Text("Das Album \"\(album.name)\" wird nicht mehr automatisch hochgeladen. Bereits hochgeladene Fotos bleiben auf dem Server.")
+        }
+        .confirmationDialog(
+            initialSyncTitle,
+            isPresented: Binding(
+                get: { pendingInitialSync != nil },
+                set: { if !$0 { pendingInitialSync = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Alle Fotos hochladen") {
+                if let albumId = pendingInitialSync?.iosAlbumId {
+                    PhotoSyncPreferences.resetAlbumSyncDate(for: albumId)
+                }
+                pendingInitialSync = nil
+            }
+            Button("Nur neue ab jetzt") {
+                pendingInitialSync = nil
+            }
+            Button("Abbrechen", role: .cancel) {
+                pendingInitialSync = nil
+            }
+        } message: {
+            Text(initialSyncMessage)
+        }
+        .alert("Fehler", isPresented: $showError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorMessage ?? "")
+        }
+        .overlay {
+            if viewModel.isMakingAvailable {
+                Color.black.opacity(0.3)
+                    .ignoresSafeArea()
+                    .overlay {
+                        ProgressView("Wird eingerichtet…")
+                            .padding()
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    }
+            }
+        }
+    }
+
+    private var initialSyncTitle: String {
+        guard let item = pendingInitialSync else { return "" }
+        return "Album \"\(item.albumName)\""
+    }
+
+    private var initialSyncMessage: String {
+        guard let item = pendingInitialSync else { return "" }
+        if item.assetCount > 0 {
+            return "Sollen alle \(item.assetCount) Fotos dieses Albums hochgeladen werden oder nur neue ab jetzt?"
+        }
+        return "Sollen alle bisherigen Fotos hochgeladen werden oder nur neue ab jetzt?"
+    }
+
+    private func handleMakeAvailable() async {
+        let result = await viewModel.makeAvailable(album)
+        switch result {
+        case .success(_, let albumName, let assetCount, let iosAlbumId):
+            pendingInitialSync = LibraryBrowserView.PendingInitialSync(
+                iosAlbumId: iosAlbumId,
+                albumName: albumName,
+                assetCount: assetCount
+            )
+        case .error(let message):
+            errorMessage = message
+            showError = true
         }
     }
 
