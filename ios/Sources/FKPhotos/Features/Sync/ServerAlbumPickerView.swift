@@ -172,7 +172,8 @@ struct ServerAlbumPickerView: View {
                 photo_count: 0,
                 is_shared: false,
                 created_at: created.created_at ?? "",
-                updated_at: created.updated_at ?? ""
+                updated_at: created.updated_at ?? "",
+                my_access_level: "owner"
             )
             albums.append(album)
             onAlbumCreated(album)
