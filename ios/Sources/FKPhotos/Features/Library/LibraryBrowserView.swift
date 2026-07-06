@@ -4,6 +4,14 @@ import Photos
 struct LibraryBrowserView: View {
     @State private var viewModel = LibraryBrowserViewModel()
     @State private var searchText = ""
+    @State private var pendingInitialSync: PendingInitialSync?
+    @State private var showError = false
+
+    struct PendingInitialSync: Equatable {
+        let iosAlbumId: String
+        let albumName: String
+        let assetCount: Int
+    }
 
     private var filteredAlbums: [LibraryBrowserViewModel.IOSAlbum] {
         guard !searchText.isEmpty else { return viewModel.albums }
@@ -52,6 +60,47 @@ struct LibraryBrowserView: View {
         .refreshable {
             await viewModel.load()
         }
+        .alert("Fehler", isPresented: $showError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(viewModel.errorMessage ?? "")
+        }
+        .confirmationDialog(
+            initialSyncTitle,
+            isPresented: Binding(
+                get: { pendingInitialSync != nil },
+                set: { if !$0 { pendingInitialSync = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Alle Fotos hochladen") {
+                if let albumId = pendingInitialSync?.iosAlbumId {
+                    PhotoSyncPreferences.resetAlbumSyncDate(for: albumId)
+                }
+                pendingInitialSync = nil
+            }
+            Button("Nur neue ab jetzt") {
+                pendingInitialSync = nil
+            }
+            Button("Abbrechen", role: .cancel) {
+                pendingInitialSync = nil
+            }
+        } message: {
+            Text(initialSyncMessage)
+        }
+    }
+
+    private var initialSyncTitle: String {
+        guard let item = pendingInitialSync else { return "" }
+        return "Album \"\(item.albumName)\""
+    }
+
+    private var initialSyncMessage: String {
+        guard let item = pendingInitialSync else { return "" }
+        if item.assetCount > 0 {
+            return "Sollen alle \(item.assetCount) Fotos dieses Albums hochgeladen werden oder nur neue ab jetzt?"
+        }
+        return "Sollen alle bisherigen Fotos hochgeladen werden oder nur neue ab jetzt?"
     }
 
     @ViewBuilder
@@ -62,6 +111,15 @@ struct LibraryBrowserView: View {
                     ForEach(syncedAlbums) { album in
                         NavigationLink(value: album) {
                             LibraryAlbumRow(album: album)
+                        }
+                        .swipeActions(edge: .trailing) {
+                            if album.canDisconnect {
+                                Button(role: .destructive) {
+                                    viewModel.disconnect(album)
+                                } label: {
+                                    Label("Trennen", systemImage: "link.badge.plus")
+                                }
+                            }
                         }
                     }
                 } header: {
@@ -79,6 +137,16 @@ struct LibraryBrowserView: View {
                         NavigationLink(value: album) {
                             LibraryAlbumRow(album: album)
                         }
+                        .swipeActions(edge: .leading) {
+                            if album.canMakeAvailable {
+                                Button {
+                                    Task { await handleMakeAvailable(album) }
+                                } label: {
+                                    Label("Verfügbar machen", systemImage: "arrow.up.circle")
+                                }
+                                .tint(.blue)
+                            }
+                        }
                     }
                 }
             } header: {
@@ -89,7 +157,33 @@ struct LibraryBrowserView: View {
         }
         .searchable(text: $searchText, prompt: "Album suchen")
         .navigationDestination(for: LibraryBrowserViewModel.IOSAlbum.self) { album in
-            LibraryAlbumDetailView(album: album)
+            LibraryAlbumDetailView(album: album, viewModel: viewModel)
+        }
+        .overlay {
+            if viewModel.isMakingAvailable {
+                Color.black.opacity(0.3)
+                    .ignoresSafeArea()
+                    .overlay {
+                        ProgressView("Wird eingerichtet…")
+                            .padding()
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    }
+            }
+        }
+    }
+
+    private func handleMakeAvailable(_ album: LibraryBrowserViewModel.IOSAlbum) async {
+        let result = await viewModel.makeAvailable(album)
+        switch result {
+        case .success(_, let albumName, let assetCount, let iosAlbumId):
+            pendingInitialSync = PendingInitialSync(
+                iosAlbumId: iosAlbumId,
+                albumName: albumName,
+                assetCount: assetCount
+            )
+        case .error(let message):
+            viewModel.errorMessage = message
+            showError = true
         }
     }
 }
