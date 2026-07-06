@@ -3,13 +3,16 @@ import { computed, ref } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Drawer from 'primevue/drawer'
+import Dialog from 'primevue/dialog'
 import Message from 'primevue/message'
+import { useConfirm } from 'primevue/useconfirm'
 import { useTxSelectionStore } from '../../stores/finance/selection'
-import { downloadTransactionsCsv, suggestDocumentsForTransactions, decideDocumentMatch, getDocumentMatchMetrics, linkDocumentsToTransactions, type DocumentMatchSuggestion, type Transaction } from '../../api/finance'
+import { batchReview, batchTaxRelevant, downloadTransactionsCsv, mergeCounterparties, suggestDocumentsForTransactions, decideDocumentMatch, getDocumentMatchMetrics, linkDocumentsToTransactions, type DocumentMatchSuggestion, type Transaction } from '../../api/finance'
 import BatchTagDialog from './BatchTagDialog.vue'
 import BatchNoticeDialog from './BatchNoticeDialog.vue'
 import { searchDocuments, type DocumentSummary } from '../../api/documents'
 import { basketTags, basketCounterparties, basketMonths, hasMixedCurrencies, type BasketAggregate } from '../../utils/financeBasketAnalysis'
+import { detectRecurringSelection } from '../../utils/financeRecurringSelection'
 
 /**
  * Header indicator + slide-out drawer for the transaction basket.
@@ -21,6 +24,7 @@ import { basketTags, basketCounterparties, basketMonths, hasMixedCurrencies, typ
  */
 
 const selectionStore = useTxSelectionStore()
+const confirm = useConfirm()
 const drawerVisible = ref(false)
 const tagDialogVisible = ref(false)
 const noticeDialogVisible = ref(false)
@@ -34,11 +38,19 @@ const documentResults = ref<DocumentSummary[]>([])
 const manualLinkOpen = ref(false)
 const matchMetrics = ref<{ high: Record<string, number>; medium: Record<string, number>; low: Record<string, number> } | null>(null)
 const analysisView = ref<'tags' | 'counterparties' | 'months'>('tags')
+const batchBusy = ref(false)
+const counterpartyDialogVisible = ref(false)
+const canonicalCounterparty = ref('')
+const canonicalIban = ref('')
+const canonicalBic = ref('')
 
 const count = computed(() => selectionStore.count)
 const items = computed(() => selectionStore.items)
 const analysisRows = computed<BasketAggregate[]>(() => analysisView.value === 'tags' ? basketTags(items.value) : analysisView.value === 'counterparties' ? basketCounterparties(items.value) : basketMonths(items.value))
 const mixedCurrencies = computed(() => hasMixedCurrencies(items.value))
+const recurringGroups = computed(() => detectRecurringSelection(items.value))
+const majorityReviewed = computed(() => items.value.filter(item => !!item.reviewed_at).length > items.value.length / 2)
+const majorityTaxRelevant = computed(() => items.value.filter(item => !!item.is_tax_relevant).length > items.value.length / 2)
 
 const sumLabel = computed(() => {
   if (count.value === 0) return ''
@@ -136,6 +148,69 @@ async function exportCsv() {
     exporting.value = false
   }
 }
+
+async function applyBatchFlag(kind: 'reviewed' | 'tax', value: boolean) {
+  if (!count.value || batchBusy.value) return
+  batchBusy.value = true
+  actionError.value = null
+  try {
+    const result = kind === 'reviewed'
+      ? await batchReview(selectionStore.ids, value)
+      : await batchTaxRelevant(selectionStore.ids, value)
+    selectionStore.set(items.value.map(item => kind === 'reviewed'
+      ? { ...item, reviewed_at: value ? new Date().toISOString() : null }
+      : { ...item, is_tax_relevant: value }))
+    actionInfo.value = `${result.affected_transactions} Buchung${result.affected_transactions === 1 ? '' : 'en'} aktualisiert.`
+  } catch (err) {
+    actionError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    batchBusy.value = false
+  }
+}
+
+function toggleTaxRelevant() {
+  const value = !majorityTaxRelevant.value
+  confirm.require({
+    header: 'Steuerrelevanz ändern',
+    message: `${count.value} Buchungen → ${value ? 'steuerrelevant' : 'nicht steuerrelevant'}`,
+    rejectLabel: 'Abbrechen',
+    acceptLabel: 'Übernehmen',
+    accept: () => void applyBatchFlag('tax', value),
+  })
+}
+
+function openCounterpartyMerge() {
+  const names = items.value.map(item => item.counterparty?.trim()).filter((value): value is string => !!value)
+  canonicalCounterparty.value = names.sort((a, b) => names.filter(n => n === b).length - names.filter(n => n === a).length)[0] ?? ''
+  canonicalIban.value = items.value.find(item => item.counterparty_iban)?.counterparty_iban ?? ''
+  canonicalBic.value = items.value.find(item => item.counterparty_bic)?.counterparty_bic ?? ''
+  counterpartyDialogVisible.value = true
+}
+
+async function saveCounterpartyMerge() {
+  if (!canonicalCounterparty.value.trim() || batchBusy.value) return
+  batchBusy.value = true
+  try {
+    const result = await mergeCounterparties({
+      transaction_ids: selectionStore.ids,
+      canonical_name: canonicalCounterparty.value,
+      set_iban: canonicalIban.value || undefined,
+      set_bic: canonicalBic.value || undefined,
+    })
+    selectionStore.set(items.value.map(item => ({
+      ...item,
+      counterparty: canonicalCounterparty.value.trim(),
+      ...(canonicalIban.value ? { counterparty_iban: canonicalIban.value.trim() } : {}),
+      ...(canonicalBic.value ? { counterparty_bic: canonicalBic.value.trim() } : {}),
+    })))
+    actionInfo.value = `${result.affected_transactions} Gegenseiten vereinheitlicht.`
+    counterpartyDialogVisible.value = false
+  } catch (err) {
+    actionError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    batchBusy.value = false
+  }
+}
 </script>
 
 <template>
@@ -209,6 +284,15 @@ async function exportCsv() {
             </li>
           </ul>
         </section>
+        <section v-if="recurringGroups.length" class="basket-analysis" aria-label="Wiederkehrende Buchungen">
+          <strong>Wiederkehrende in der Auswahl</strong>
+          <ul class="basket-analysis-list">
+            <li v-for="group in recurringGroups" :key="`${group.counterparty}-${group.averageIntervalDays}`" class="basket-analysis-row">
+              <span>{{ group.counterparty }} <small>· {{ group.count }}×</small></span>
+              <span>Ø {{ group.averageIntervalDays }} Tage</span>
+            </li>
+          </ul>
+        </section>
         <li
           v-for="tx in items"
           :key="tx.id"
@@ -257,6 +341,17 @@ async function exportCsv() {
           </Message>
           <div class="action-row">
             <Button
+              :label="majorityReviewed ? 'Prüfvermerk entfernen' : 'Als geprüft markieren'"
+              icon="pi pi-check-circle"
+              size="small"
+              severity="secondary"
+              outlined
+              :loading="batchBusy"
+              @click="applyBatchFlag('reviewed', !majorityReviewed)"
+            />
+            <Button label="Steuerrelevant" icon="pi pi-percentage" size="small" severity="secondary" outlined :loading="batchBusy" @click="toggleTaxRelevant" />
+            <Button label="Gegenseite" icon="pi pi-users" size="small" severity="secondary" outlined :disabled="count === 0" @click="openCounterpartyMerge" />
+            <Button
               label="Tags"
               icon="pi pi-tag"
               size="small"
@@ -303,6 +398,17 @@ async function exportCsv() {
       v-model:visible="noticeDialogVisible"
       :transaction-ids="selectionStore.ids"
     />
+    <Dialog v-model:visible="counterpartyDialogVisible" header="Gegenseiten vereinheitlichen" modal :style="{ width: 'min(30rem, calc(100vw - 2rem))' }">
+      <div class="counterparty-form">
+        <label>Kanonischer Name<InputText v-model="canonicalCounterparty" /></label>
+        <label>IBAN nachziehen (optional)<InputText v-model="canonicalIban" /></label>
+        <label>BIC nachziehen (optional)<InputText v-model="canonicalBic" /></label>
+      </div>
+      <template #footer>
+        <Button label="Abbrechen" text severity="secondary" @click="counterpartyDialogVisible = false" />
+        <Button label="Vereinheitlichen" icon="pi pi-check" :loading="batchBusy" :disabled="!canonicalCounterparty.trim()" @click="saveCounterpartyMerge" />
+      </template>
+    </Dialog>
   </div>
 </template>
 
@@ -343,6 +449,9 @@ async function exportCsv() {
   font-size: 0.85rem;
   margin-top: 0.25rem;
 }
+.counterparty-form { display: grid; gap: .85rem; }
+.counterparty-form label { display: grid; gap: .35rem; font-weight: 600; }
+.counterparty-form :deep(.p-inputtext) { width: 100%; }
 
 .basket-match-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .5rem; margin-bottom: .5rem; }
 .basket-match-actions :deep(.p-button) { min-width: 0; }
