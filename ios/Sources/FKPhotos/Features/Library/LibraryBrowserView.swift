@@ -54,6 +54,9 @@ struct LibraryBrowserView: View {
             }
         }
         .navigationTitle("iOS Mediathek")
+        .navigationDestination(for: LibraryBrowserViewModel.IOSAlbum.self) { album in
+            LibraryAlbumDetailView(album: album, viewModel: viewModel)
+        }
         .task {
             await viewModel.load()
         }
@@ -156,9 +159,6 @@ struct LibraryBrowserView: View {
             }
         }
         .searchable(text: $searchText, prompt: "Album suchen")
-        .navigationDestination(for: LibraryBrowserViewModel.IOSAlbum.self) { album in
-            LibraryAlbumDetailView(album: album, viewModel: viewModel)
-        }
         .overlay {
             if viewModel.isMakingAvailable {
                 Color.black.opacity(0.3)
