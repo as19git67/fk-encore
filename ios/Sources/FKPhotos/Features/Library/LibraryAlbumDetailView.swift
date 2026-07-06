@@ -7,22 +7,28 @@ struct LibraryAlbumDetailView: View {
 
     @State private var assets: [PHAsset] = []
     @State private var isLoading = true
-    @State private var selectedAssetIndex: Int?
+    @State private var selectedAssetIndex: Int = 0
     @State private var showFullscreen = false
     @State private var showDisconnectConfirm = false
     @State private var pendingInitialSync: LibraryBrowserView.PendingInitialSync?
     @State private var showError = false
     @State private var errorMessage: String?
+    @State private var syncStatus: LibraryBrowserViewModel.IOSAlbum.SyncStatus
+    @State private var isLinked: Bool
 
-    @Environment(\.dismiss) private var dismiss
+    init(album: LibraryBrowserViewModel.IOSAlbum, viewModel: LibraryBrowserViewModel) {
+        self.album = album
+        self.viewModel = viewModel
+        self._syncStatus = State(initialValue: album.syncStatus)
+        self._isLinked = State(initialValue: album.isIndividuallySynced)
+    }
+
+    private var canMakeAvailable: Bool { syncStatus == .none && !album.isSmart }
+    private var canDisconnect: Bool { isLinked }
 
     private let columns = [
         GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 2)
     ]
-
-    private var currentAlbum: LibraryBrowserViewModel.IOSAlbum {
-        viewModel.albums.first { $0.id == album.id } ?? album
-    }
 
     var body: some View {
         Group {
@@ -48,17 +54,6 @@ struct LibraryAlbumDetailView: View {
                         }
                     }
                 }
-                .fullScreenCover(isPresented: $showFullscreen) {
-                    if let startIndex = selectedAssetIndex {
-                        LibraryPhotoFullscreenView(
-                            assets: assets,
-                            currentIndex: Binding(
-                                get: { selectedAssetIndex ?? startIndex },
-                                set: { selectedAssetIndex = $0 }
-                            )
-                        )
-                    }
-                }
             }
         }
         .navigationTitle(album.name)
@@ -66,22 +61,27 @@ struct LibraryAlbumDetailView: View {
         .toolbar {
             ToolbarItem(placement: .bottomBar) {
                 HStack {
-                    SyncStatusBadge(status: currentAlbum.syncStatus)
+                    SyncStatusBadge(status: syncStatus)
                     Spacer()
                     Text("\(assets.count) Foto\(assets.count == 1 ? "" : "s")")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
             }
-            ToolbarItem(placement: .primaryAction) {
-                if currentAlbum.canMakeAvailable {
+        }
+        .toolbar {
+            if canMakeAvailable {
+                ToolbarItem(placement: .primaryAction) {
                     Button {
                         Task { await handleMakeAvailable() }
                     } label: {
                         Label("Verfügbar machen", systemImage: "arrow.up.circle")
                     }
                     .disabled(viewModel.isMakingAvailable)
-                } else if currentAlbum.canDisconnect {
+                }
+            }
+            if canDisconnect {
+                ToolbarItem(placement: .primaryAction) {
                     Button(role: .destructive) {
                         showDisconnectConfirm = true
                     } label: {
@@ -94,6 +94,14 @@ struct LibraryAlbumDetailView: View {
             assets = await loadAssets()
             isLoading = false
         }
+        .fullScreenCover(isPresented: $showFullscreen) {
+            if !assets.isEmpty {
+                LibraryPhotoFullscreenView(
+                    assets: assets,
+                    currentIndex: $selectedAssetIndex
+                )
+            }
+        }
         .confirmationDialog(
             "Verknüpfung lösen?",
             isPresented: $showDisconnectConfirm,
@@ -101,6 +109,8 @@ struct LibraryAlbumDetailView: View {
         ) {
             Button("Verknüpfung lösen", role: .destructive) {
                 viewModel.disconnect(album)
+                syncStatus = .none
+                isLinked = false
             }
             Button("Abbrechen", role: .cancel) {}
         } message: {
@@ -164,6 +174,8 @@ struct LibraryAlbumDetailView: View {
         let result = await viewModel.makeAvailable(album)
         switch result {
         case .success(_, let albumName, let assetCount, let iosAlbumId):
+            syncStatus = .copy
+            isLinked = true
             pendingInitialSync = LibraryBrowserView.PendingInitialSync(
                 iosAlbumId: iosAlbumId,
                 albumName: albumName,
