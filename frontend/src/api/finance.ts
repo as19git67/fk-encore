@@ -671,6 +671,8 @@ export interface Transaction {
   original_currency_code: string | null
   exchange_rate: string | null
   notice: string | null
+  reviewed_at?: string | null
+  is_tax_relevant?: boolean
   tags: TagOnTransaction[]
   created_at: string | null
 }
@@ -775,6 +777,34 @@ export async function batchNotice(
   return apiFetch('/finance/transactions/batch-notice', {
     method: 'POST',
     body: JSON.stringify(input),
+  })
+}
+
+export interface BatchMutationResponse {
+  affected_transactions: number
+  skipped_unauthorized: number
+}
+
+export function batchReview(transaction_ids: number[], value: boolean): Promise<BatchMutationResponse> {
+  return apiFetch('/finance/transactions/batch-review', {
+    method: 'POST', body: JSON.stringify({ transaction_ids, value }),
+  })
+}
+
+export function batchTaxRelevant(transaction_ids: number[], value: boolean): Promise<BatchMutationResponse> {
+  return apiFetch('/finance/transactions/batch-tax-relevant', {
+    method: 'POST', body: JSON.stringify({ transaction_ids, value }),
+  })
+}
+
+export function mergeCounterparties(input: {
+  transaction_ids: number[]
+  canonical_name: string
+  set_iban?: string | null
+  set_bic?: string | null
+}): Promise<BatchMutationResponse> {
+  return apiFetch('/finance/transactions/merge-counterparties', {
+    method: 'POST', body: JSON.stringify(input),
   })
 }
 
