@@ -65,7 +65,7 @@ struct LibraryBrowserView: View {
                                     Button(role: .destructive) {
                                         viewModel.disconnect(album)
                                     } label: {
-                                        Label("Trennen", systemImage: "link.badge.plus")
+                                        Label("Trennen", systemImage: "link.badge.minus")
                                     }
                                 }
                             }
@@ -90,7 +90,7 @@ struct LibraryBrowserView: View {
                                     Button {
                                         Task { await handleMakeAvailable(album) }
                                     } label: {
-                                        Label("Verfügbar machen", systemImage: "arrow.up.circle")
+                                        Label("Verfügbar machen", systemImage: "link.badge.plus")
                                     }
                                     .tint(.blue)
                                 }

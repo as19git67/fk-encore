@@ -75,7 +75,7 @@ struct LibraryAlbumDetailView: View {
                     Button {
                         Task { await handleMakeAvailable() }
                     } label: {
-                        Label("Verfügbar machen", systemImage: "arrow.up.circle")
+                        Label("Verfügbar machen", systemImage: "link.badge.plus")
                     }
                     .disabled(viewModel.isMakingAvailable)
                 }
@@ -85,7 +85,7 @@ struct LibraryAlbumDetailView: View {
                     Button(role: .destructive) {
                         showDisconnectConfirm = true
                     } label: {
-                        Label("Trennen", systemImage: "link.badge.plus")
+                        Label("Trennen", systemImage: "link.badge.minus")
                     }
                 }
             }
