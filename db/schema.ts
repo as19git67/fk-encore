@@ -1576,6 +1576,34 @@ export const financeTransaction = pgTable(
   ]
 );
 
+export const financeTransactionSplit = pgTable("finance_transaction_split", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  transaction_id: bigint("transaction_id", { mode: "number" }).notNull().references(() => financeTransaction.id, { onDelete: "cascade" }),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  tags: jsonb("tags").notNull().default(sql`'[]'::jsonb`).$type<string[]>(),
+  notice: text("notice"),
+  is_tax_relevant: boolean("is_tax_relevant").notNull().default(false),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+});
+
+export const financeBasketSnapshot = pgTable("finance_basket_snapshot", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  user_id: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  tx_ids: bigint("tx_ids", { mode: "number" }).array().notNull().default(sql`ARRAY[]::BIGINT[]`),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+}, table => [uniqueIndex("finance_basket_snapshot_user_name_unique").on(table.user_id, table.name)]);
+
+export const financeDatevMapping = pgTable("finance_datev_mapping", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  user_id: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tag_name: text("tag_name").notNull(),
+  konto_soll: text("konto_soll").notNull(),
+  konto_haben: text("konto_haben").notNull(),
+  bu_schluessel: text("bu_schluessel"),
+}, table => [uniqueIndex("finance_datev_mapping_user_tag_unique").on(table.user_id, table.tag_name)]);
+
 export const financeTransactionDocument = pgTable("finance_transaction_document", { transaction_id: bigint("transaction_id", { mode: "number" }).notNull().references(() => financeTransaction.id, { onDelete: "cascade" }), document_id: integer("document_id").notNull().references(() => documents.id, { onDelete: "cascade" }), created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow() }, (table) => [primaryKey({ columns: [table.transaction_id, table.document_id] })]);
 
 export const financeDocumentMatchSuggestion = pgTable("finance_document_match_suggestion", { id: bigserial("id", { mode: "number" }).primaryKey(), transaction_id: bigint("transaction_id", { mode: "number" }).notNull().references(() => financeTransaction.id, { onDelete: "cascade" }), document_id: integer("document_id").notNull().references(() => documents.id, { onDelete: "cascade" }), score: real("score").notNull(), amount_score: real("amount_score").notNull().default(0), date_score: real("date_score").notNull().default(0), text_score: real("text_score").notNull().default(0), outcome: text("outcome").notNull().default("pending"), created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(), decided_at: timestamp("decided_at", { mode: "string", withTimezone: true }) }, (table) => [uniqueIndex("finance_document_match_unique").on(table.transaction_id, table.document_id)]);

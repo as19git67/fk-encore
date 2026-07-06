@@ -21,6 +21,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { createExpenseReportPdf } from "./pdf-report";
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { and, desc, eq, gte, inArray, lte, or, sql } from "drizzle-orm";
@@ -1354,6 +1355,39 @@ export const exportTransactions = api.raw(
       );
     }
     res.end();
+  },
+);
+
+export const exportTransactionsPdf = api.raw(
+  { expose: true, method: "GET", path: "/finance/transactions/export-pdf", auth: true },
+  async (req, res) => {
+    const auth = getAuthData();
+    if (!auth) { res.statusCode = 401; res.end("Unauthorized"); return; }
+    try { requirePermission(auth, "finance.view"); } catch { res.statusCode = 403; res.end("Forbidden"); return; }
+    const ids = parseIdsParam(new URL(req.url ?? "/", "http://localhost").searchParams.get("ids"));
+    if (ids.length === 0) { res.statusCode = 400; res.end("ids required"); return; }
+    const accessible = await accessibleTransactionIds(auth, ids);
+    const rows = accessible.ids.length === 0 ? [] : await db
+      .select()
+      .from(financeTransaction)
+      .where(inArray(financeTransaction.id, accessible.ids))
+      .orderBy(financeTransaction.booking_date, financeTransaction.id);
+    const tags = await annotateTags(rows.map(row => row.id));
+    const today = new Date().toISOString().slice(0, 10);
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="spesen-${today}.pdf"`);
+    const pdf = createExpenseReportPdf(rows.map(row => ({
+      booking_date: toDateString(row.booking_date) ?? "",
+      counterparty: row.counterparty,
+      purpose: row.purpose,
+      amount: row.amount,
+      currency_code: row.currency_code,
+      notice: row.notice,
+      tags: (tags.get(row.id) ?? []).filter(tag => tag.source === "user").map(tag => tag.name),
+    })), today);
+    pdf.pipe(res);
+    pdf.end();
   },
 );
 

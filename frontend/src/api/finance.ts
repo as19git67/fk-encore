@@ -808,6 +808,51 @@ export function mergeCounterparties(input: {
   })
 }
 
+export interface BasketSnapshot {
+  id: number
+  name: string
+  tx_ids: number[]
+  created_at: string
+  updated_at: string
+}
+
+export function listBasketSnapshots(): Promise<{ items: BasketSnapshot[] }> { return apiFetch('/finance/baskets') }
+export function saveBasketSnapshot(name: string, transaction_ids: number[]): Promise<BasketSnapshot> {
+  return apiFetch('/finance/baskets', { method: 'POST', body: JSON.stringify({ name, transaction_ids }) })
+}
+export function loadBasketSnapshot(id: number): Promise<BasketSnapshot & { transaction_ids: number[]; missing: number }> { return apiFetch(`/finance/baskets/${id}`) }
+export function deleteBasketSnapshot(id: number): Promise<{ deleted: boolean }> { return apiFetch(`/finance/baskets/${id}`, { method: 'DELETE' }) }
+
+export interface TransactionSplit {
+  id?: number
+  amount: string | number
+  tags: string[]
+  notice?: string | null
+  is_tax_relevant?: boolean
+}
+export function getTransactionSplits(transactionId: number): Promise<{ items: TransactionSplit[] }> { return apiFetch(`/finance/transactions/${transactionId}/splits`) }
+export function setTransactionSplits(transactionId: number, splits: TransactionSplit[]): Promise<{ saved: number }> {
+  return apiFetch(`/finance/transactions/${transactionId}/splits`, { method: 'PUT', body: JSON.stringify({ splits }) })
+}
+
+export interface DatevMapping { id: number; tag_name: string; konto_soll: string; konto_haben: string; bu_schluessel?: string | null }
+export function listDatevMappings(): Promise<{ items: DatevMapping[] }> { return apiFetch('/finance/datev/mappings') }
+export function saveDatevMapping(mapping: Omit<DatevMapping, 'id'>): Promise<DatevMapping> {
+  return apiFetch('/finance/datev/mappings', { method: 'POST', body: JSON.stringify(mapping) })
+}
+export async function downloadTransactionsDatev(ids: number[], berater: string, mandant: string): Promise<void> {
+  const token = localStorage.getItem('auth_token')
+  const params = new URLSearchParams({ ids: ids.join(','), berater, mandant })
+  const resp = await fetch(`${API_BASE_URL}/finance/datev/export?${params}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined })
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => null)
+    if (resp.status === 422) throw new Error(`Für ${body?.transaction_ids?.length ?? 0} Buchungen fehlt ein Tag-Mapping.`)
+    throw new Error(`DATEV-Export fehlgeschlagen (${resp.status})`)
+  }
+  const blob = await resp.blob(); const url = URL.createObjectURL(blob); const anchor = document.createElement('a')
+  anchor.href = url; anchor.download = `EXTF_Buchungsstapel_${new Date().toISOString().slice(0, 10)}.csv`; anchor.click(); URL.revokeObjectURL(url)
+}
+
 /**
  * Fetches the CSV export for `ids` and triggers a browser download.
  * The endpoint streams text/csv with a UTF-8 BOM so Excel opens
@@ -837,6 +882,22 @@ export async function downloadTransactionsCsv(ids: number[]): Promise<void> {
   a.click()
   a.remove()
   URL.revokeObjectURL(objectUrl)
+}
+
+export async function downloadTransactionsPdf(ids: number[]): Promise<void> {
+  if (ids.length === 0) return
+  const token = localStorage.getItem('auth_token')
+  const resp = await fetch(`${API_BASE_URL}/finance/transactions/export-pdf?ids=${ids.join(',')}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  })
+  if (!resp.ok) throw new Error(`PDF-Export fehlgeschlagen (${resp.status})`)
+  const blob = await resp.blob()
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = `spesen-${new Date().toISOString().slice(0, 10)}.pdf`
+  anchor.click()
+  URL.revokeObjectURL(url)
 }
 
 export interface RecentRecipient {
