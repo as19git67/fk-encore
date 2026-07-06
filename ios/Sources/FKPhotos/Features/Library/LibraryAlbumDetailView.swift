@@ -58,6 +58,7 @@ struct LibraryAlbumDetailView: View {
         }
         .navigationTitle(album.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .bottomBar) {
                 HStack {
@@ -68,14 +69,12 @@ struct LibraryAlbumDetailView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-        }
-        .toolbar {
             if canMakeAvailable {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         Task { await handleMakeAvailable() }
                     } label: {
-                        Label("Verfügbar machen", systemImage: "link.badge.plus")
+                        Image(systemName: "link.badge.plus")
                     }
                     .disabled(viewModel.isMakingAvailable)
                 }
@@ -85,7 +84,7 @@ struct LibraryAlbumDetailView: View {
                     Button(role: .destructive) {
                         showDisconnectConfirm = true
                     } label: {
-                        Label("Trennen", systemImage: "minus.circle")
+                        Image(systemName: "minus.circle")
                     }
                 }
             }
