@@ -1554,6 +1554,8 @@ export const financeTransaction = pgTable(
     original_currency_code: text("original_currency_code"),
     exchange_rate: numeric("exchange_rate", { precision: 12, scale: 6 }),
     notice: text("notice"),
+    reviewed_at: timestamp("reviewed_at", { mode: "string", withTimezone: true }),
+    is_tax_relevant: boolean("is_tax_relevant").notNull().default(false),
     receipt_document_id: integer("receipt_document_id").references(() => documents.id, { onDelete: "set null" }),
     dedupe_hash: text("dedupe_hash").notNull(),
     raw: jsonb("raw").$type<Record<string, unknown>>(),
