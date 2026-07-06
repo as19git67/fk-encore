@@ -27,9 +27,11 @@ struct LibraryBrowserView: View {
     }
 
     var body: some View {
-        Group {
-            if viewModel.isLoading {
+        List {
+            if viewModel.isLoading && viewModel.albums.isEmpty {
                 ProgressView("Mediathek laden…")
+                    .frame(maxWidth: .infinity)
+                    .listRowSeparator(.hidden)
             } else if viewModel.authorizationDenied {
                 ContentUnavailableView {
                     Label("Kein Zugriff", systemImage: "photo.on.rectangle.angled")
@@ -43,16 +45,66 @@ struct LibraryBrowserView: View {
                     }
                     .buttonStyle(.borderedProminent)
                 }
+                .listRowSeparator(.hidden)
             } else if viewModel.albums.isEmpty {
                 ContentUnavailableView {
                     Label("Keine Alben", systemImage: "photo.on.rectangle.angled")
                 } description: {
                     Text("Die iOS-Mediathek enthält keine Alben mit Fotos.")
                 }
+                .listRowSeparator(.hidden)
             } else {
-                albumList
+                if !syncedAlbums.isEmpty {
+                    Section {
+                        ForEach(syncedAlbums) { album in
+                            NavigationLink(value: album) {
+                                LibraryAlbumRow(album: album)
+                            }
+                            .swipeActions(edge: .trailing) {
+                                if album.canDisconnect {
+                                    Button(role: .destructive) {
+                                        viewModel.disconnect(album)
+                                    } label: {
+                                        Label("Trennen", systemImage: "link.badge.plus")
+                                    }
+                                }
+                            }
+                        }
+                    } header: {
+                        Text("Synchronisiert")
+                    }
+                }
+
+                Section {
+                    if unsyncedAlbums.isEmpty && !filteredAlbums.isEmpty {
+                        Text("Alle Alben werden synchronisiert.")
+                            .foregroundStyle(.secondary)
+                            .font(.subheadline)
+                    } else {
+                        ForEach(unsyncedAlbums) { album in
+                            NavigationLink(value: album) {
+                                LibraryAlbumRow(album: album)
+                            }
+                            .swipeActions(edge: .leading) {
+                                if album.canMakeAvailable {
+                                    Button {
+                                        Task { await handleMakeAvailable(album) }
+                                    } label: {
+                                        Label("Verfügbar machen", systemImage: "arrow.up.circle")
+                                    }
+                                    .tint(.blue)
+                                }
+                            }
+                        }
+                    }
+                } header: {
+                    if !syncedAlbums.isEmpty {
+                        Text("Nicht synchronisiert")
+                    }
+                }
             }
         }
+        .searchable(text: $searchText, prompt: "Album suchen")
         .navigationTitle("iOS Mediathek")
         .navigationDestination(for: LibraryBrowserViewModel.IOSAlbum.self) { album in
             LibraryAlbumDetailView(album: album, viewModel: viewModel)
@@ -91,6 +143,17 @@ struct LibraryBrowserView: View {
         } message: {
             Text(initialSyncMessage)
         }
+        .overlay {
+            if viewModel.isMakingAvailable {
+                Color.black.opacity(0.3)
+                    .ignoresSafeArea()
+                    .overlay {
+                        ProgressView("Wird eingerichtet…")
+                            .padding()
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    }
+            }
+        }
     }
 
     private var initialSyncTitle: String {
@@ -104,72 +167,6 @@ struct LibraryBrowserView: View {
             return "Sollen alle \(item.assetCount) Fotos dieses Albums hochgeladen werden oder nur neue ab jetzt?"
         }
         return "Sollen alle bisherigen Fotos hochgeladen werden oder nur neue ab jetzt?"
-    }
-
-    @ViewBuilder
-    private var albumList: some View {
-        List {
-            if !syncedAlbums.isEmpty {
-                Section {
-                    ForEach(syncedAlbums) { album in
-                        NavigationLink(value: album) {
-                            LibraryAlbumRow(album: album)
-                        }
-                        .swipeActions(edge: .trailing) {
-                            if album.canDisconnect {
-                                Button(role: .destructive) {
-                                    viewModel.disconnect(album)
-                                } label: {
-                                    Label("Trennen", systemImage: "link.badge.plus")
-                                }
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Synchronisiert")
-                }
-            }
-
-            Section {
-                if unsyncedAlbums.isEmpty && !filteredAlbums.isEmpty {
-                    Text("Alle Alben werden synchronisiert.")
-                        .foregroundStyle(.secondary)
-                        .font(.subheadline)
-                } else {
-                    ForEach(unsyncedAlbums) { album in
-                        NavigationLink(value: album) {
-                            LibraryAlbumRow(album: album)
-                        }
-                        .swipeActions(edge: .leading) {
-                            if album.canMakeAvailable {
-                                Button {
-                                    Task { await handleMakeAvailable(album) }
-                                } label: {
-                                    Label("Verfügbar machen", systemImage: "arrow.up.circle")
-                                }
-                                .tint(.blue)
-                            }
-                        }
-                    }
-                }
-            } header: {
-                if !syncedAlbums.isEmpty {
-                    Text("Nicht synchronisiert")
-                }
-            }
-        }
-        .searchable(text: $searchText, prompt: "Album suchen")
-        .overlay {
-            if viewModel.isMakingAvailable {
-                Color.black.opacity(0.3)
-                    .ignoresSafeArea()
-                    .overlay {
-                        ProgressView("Wird eingerichtet…")
-                            .padding()
-                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-                    }
-            }
-        }
     }
 
     private func handleMakeAvailable(_ album: LibraryBrowserViewModel.IOSAlbum) async {
