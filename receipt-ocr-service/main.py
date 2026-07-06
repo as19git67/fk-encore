@@ -27,7 +27,7 @@ from typing import Any, AsyncIterator, Callable, TypeVar
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from receipt_amount import (
@@ -38,6 +38,7 @@ from receipt_amount import (
     looks_amount_related,
     parse_amount,
 )
+from receipt_semantics import resolve_receipt_date, validate_receipt_items
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -766,9 +767,6 @@ def _serialize_layout_rows(
 
 _VALUE_PATTERN = VALUE_PATTERN
 
-_DATE_PATTERN = re.compile(r"(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{2,4})")
-
-
 def _parse_german_amount(raw: str) -> float | None:
     return parse_amount(raw)
 
@@ -800,24 +798,7 @@ def regex_extract(text: str) -> dict[str, Any]:
         if valid:
             amount = valid[-1]
 
-    date: str | None = None
-    import datetime
-    now = datetime.datetime.now()
-    best_dist = float("inf")
-    for m in _DATE_PATTERN.finditer(text):
-        day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        if year < 100:
-            year += 2000
-        if not (1 <= month <= 12 and 1 <= day <= 31 and 2010 <= year <= now.year + 1):
-            continue
-        try:
-            d = datetime.date(year, month, day)
-        except ValueError:
-            continue
-        dist = abs((now.date() - d).days)
-        if dist < best_dist:
-            best_dist = dist
-            date = d.isoformat()
+    date = resolve_receipt_date(text, None)
 
     return {"amount": amount, "date": date, "store": None, "currency": "EUR", "items": []}
 
@@ -849,7 +830,9 @@ Regeln:
   Zahlungszeilen wie "Bar", "Gegeben", "EC-Cash", "Kartenzahlung", "VISA"
   oder "Mastercard" sind NICHT der Gesamtbetrag. Insbesondere ist der Betrag
   hinter "Bar" häufig das gegebene Bargeld vor Abzug des Rückgelds.
-- date: Das Kaufdatum, nicht Druckdatum oder MHD.
+- date: Das Kaufdatum, nicht Druckdatum oder MHD. Bei mehrdeutigen numerischen
+  Daten (z.B. 05/07/2026) das Format NICHT raten: Sprache, Land, Adresse und
+  Währung des Belegs beachten. Deutsche Belege verwenden Tag/Monat/Jahr.
 - store: Der Geschäftsname aus dem Kopfbereich (z.B. "REWE", "ALDI", "dm", "Rossmann").
 - Halluziniere keine Daten. Bei Unsicherheit: null."""
 
@@ -877,6 +860,9 @@ Deutsches Kassenbon-Format (typisch):
 - Mengenkennzeichen am Zeilenanfang: "2x", "2 x", "2 ×" — OCR kann "x" als "%" lesen (z.B. "2%")
 - Bei Mehrfachmengen: die Zeile hat Einzelpreis UND Gesamtpreis → nutze den Gesamtpreis (letzter Preis) als amount
 - MwSt-Kennzeichen am Zeilenende (A, B, 1, 2 o.ä.) sind keine Preise — ignorieren
+- Zutaten, Extras, Beilagen und Modifikatoren unterhalb eines Hauptartikels
+  sind KEINE eigenen Posten, wenn in ihrer eigenen visuellen Zeile kein Preis steht.
+  Den Preis des Hauptartikels niemals auf nachfolgende unbepreiste Zeilen übertragen.
 
 Werbetexte und Aktionen ignorieren:
 - Werbebanner, Coupon-Aktionen, Prospekthinweise und Rabattangebote am Belegende sind KEINE Artikel
@@ -925,7 +911,7 @@ def _llm_json(system: str, text: str, max_tokens: int) -> dict[str, Any] | None:
         return None
 
 
-def llm_extract_core(text: str) -> dict[str, Any]:
+def llm_extract_core(text: str, reference_date: str | None = None) -> dict[str, Any]:
     """Extract the save-critical fields (amount, date, store, currency) with a
     small token budget so the synchronous response stays fast. Line items are
     fetched separately via llm_extract_items. Falls back to regex when the LLM
@@ -933,6 +919,7 @@ def llm_extract_core(text: str) -> dict[str, Any]:
     data = _llm_json(_EXTRACT_CORE_SYSTEM, text, max_tokens=128)
     if data is None:
         r = regex_extract(text)
+        r["date"] = resolve_receipt_date(text, r.get("date"), reference_date)
         return {k: r[k] for k in ("amount", "date", "store", "currency")}
 
     for key in ("store", "currency"):
@@ -953,9 +940,8 @@ def llm_extract_core(text: str) -> dict[str, Any]:
     if labeled_total is not None:
         amount = round(labeled_total, 2)
 
-    date_val = data.get("date")
-    if not (isinstance(date_val, str) and re.match(r"^\d{4}-\d{2}-\d{2}$", date_val)):
-        date_val = None
+    model_date = data.get("date") if isinstance(data.get("date"), str) else None
+    date_val = resolve_receipt_date(text, model_date, reference_date)
 
     store = data.get("store")
     store = store.strip() if isinstance(store, str) and store.strip() else None
@@ -1024,7 +1010,7 @@ def llm_extract_items(
                     "name": _repair_mojibake(name.strip()),
                     "amount": round(float(item_amount), 2),
                 })
-    return items
+    return validate_receipt_items(text, layout_rows, items, _parse_german_amount)
 
 
 # ─── API endpoints ──────────────────────────────────────────────────────────
@@ -1056,7 +1042,10 @@ def _encode_processed_jpeg(img: np.ndarray) -> str | None:
 
 
 @app.post("/extract", response_model=ReceiptResult)
-async def extract_receipt(file: UploadFile = File(...)) -> ReceiptResult:
+async def extract_receipt(
+    file: UploadFile = File(...),
+    reference_date: str | None = Form(None),
+) -> ReceiptResult:
     t0 = time.monotonic()
     img_bytes = await file.read()
     if len(img_bytes) == 0:
@@ -1096,8 +1085,9 @@ async def extract_receipt(file: UploadFile = File(...)) -> ReceiptResult:
         if REGEX_ONLY or _state["llm"] is None:
             r = regex_extract(full_text)
             core = {k: r[k] for k in ("amount", "date", "store", "currency")}
+            core["date"] = resolve_receipt_date(full_text, core.get("date"), reference_date)
         else:
-            core = llm_extract_core(full_text)
+            core = llm_extract_core(full_text, reference_date)
 
         amount_decision = decide_layout_amount(rows)
         if amount_decision.confidence < 0.90:
