@@ -30,6 +30,21 @@ const DEFAULT_REPORT_OPTIONS: Required<TransactionReportOptions> = {
   includeTags: true,
 };
 
+function formatLocalDate(value: string): string {
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.slice(0, 10));
+  if (dateOnly) {
+    const [, year, month, day] = dateOnly;
+    return `${day}.${month}.${year}`;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("de-DE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(date);
+}
+
 export function createTransactionReportPdf(
   rows: ExpenseReportRow[],
   today = new Date().toISOString().slice(0, 10),
@@ -41,13 +56,13 @@ export function createTransactionReportPdf(
 
   const pdf = new PDFDocument({ size: "A4", margin: 42, info: { Title: opts.title } });
   pdf.fontSize(18).text(opts.title, { align: "center" });
-  pdf.moveDown(0.4).fontSize(9).fillColor("#666").text(`Erstellt am ${today} · ${rows.length} Buchungen`, { align: "center" });
+  pdf.moveDown(0.4).fontSize(9).fillColor("#666").text(`Erstellt am ${formatLocalDate(today)} · ${rows.length} Buchungen`, { align: "center" });
   pdf.moveDown(1).fillColor("#000");
   for (const row of rows) {
     if (pdf.y > 740) pdf.addPage();
     const amount = new Intl.NumberFormat("de-DE", { style: "currency", currency: row.currency_code }).format(Number(row.amount));
     const headlineParts = [
-      opts.includeDate ? row.booking_date.slice(0, 10) : null,
+      opts.includeDate ? formatLocalDate(row.booking_date) : null,
       opts.includeCounterparty ? (row.counterparty ?? "(ohne Gegenseite)") : null,
     ].filter((part): part is string => !!part);
     pdf.fontSize(9).font("Helvetica-Bold").text(headlineParts.join("  ") || "Buchung", {
@@ -60,7 +75,7 @@ export function createTransactionReportPdf(
     if (opts.includeTags && row.tags.length) pdf.text(`Tags: ${row.tags.join(", ")}`);
     pdf.moveDown(0.5).strokeColor("#ddd").moveTo(42, pdf.y).lineTo(553, pdf.y).stroke().moveDown(0.5).fillColor("#000");
   }
-  pdf.moveDown().font("Helvetica-Bold").fontSize(11).text("Summen");
+  pdf.moveDown().font("Helvetica-Bold").fontSize(11).text("Summe");
   for (const [currency, total] of totals) pdf.text(new Intl.NumberFormat("de-DE", { style: "currency", currency }).format(total), { align: "right" });
   return pdf;
 }
