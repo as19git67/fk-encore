@@ -20,8 +20,10 @@ import {
   documentTaxSections,
   documents,
 } from "../db/schema";
-import { createReceiptAutoTransaction } from "../finance/receipt-booking";
+import { attachReceiptToExistingTransaction, createReceiptAutoTransaction } from "../finance/receipt-booking";
 import { formatReceiptLineItemsNotice } from "../finance/receipt-line-items";
+import { enqueueTagSuggestion } from "../finance/tag-queue";
+import { triggerTagWorker } from "../finance/tag-worker";
 import {
   extractReceipt,
   extractReceiptItems,
@@ -845,8 +847,9 @@ function localTodayIso(): string {
  * Pipeline:
  * 1. Call receipt-ocr-service to extract amount / date / store / items.
  * 2. Persist the raw extraction in `document_receipt_extraction`.
- * 3. If the amount is reliable (>0 and <=999): auto-create a cash transaction.
- * 4. If not reliable: mark the document as `incomplete`.
+ * 3. For existing-transaction captures: link/enrich the transaction and stop.
+ * 4. If the amount is reliable (>0 and <=999): auto-create a cash transaction.
+ * 5. If not reliable: mark the document as `incomplete`.
  *
  * Throws `ReceiptOcrUnavailableError` when the service is down so the
  * worker defers the job (retry with exponential back-off, no permanent failure).
@@ -856,7 +859,8 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
 
   // Guard: only process documents that are waiting for receipt OCR.
   if (row.receipt_ocr_state !== "pending") return;
-  if (!row.receipt_account_id) {
+  const existingTransactionId = row.receipt_transaction_id ?? null;
+  if (!row.receipt_account_id && !existingTransactionId) {
     // No account chosen — mark incomplete so UI can notify the user.
     await db.update(documents)
       .set({ receipt_ocr_state: "incomplete" })
@@ -950,7 +954,48 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
         amount_confidence: core.amount_confidence,
         amount_source: core.amount_source,
       },
+  });
+
+  if (existingTransactionId != null) {
+    await finalizeReceiptDocument(
+      documentId,
+      row.user_id,
+      core.raw_text,
+      { store: core.store, receiptDate: core.date },
+    );
+    await attachReceiptToExistingTransaction({
+      documentId,
+      transactionId: existingTransactionId,
+      notice: formatReceiptLineItemsNotice(items, core.currency ?? "EUR"),
     });
+    try {
+      await enqueueTagSuggestion(existingTransactionId, row.user_id, 1);
+      triggerTagWorker();
+    } catch (err) {
+      console.warn(
+        `[documents] enqueue tag suggestion for receipt tx=${existingTransactionId} failed: ${(err as Error).message}`,
+      );
+    }
+    console.log(
+      `[documents] receipt OCR doc=${documentId}: linked existing tx=${existingTransactionId}`,
+    );
+    void realtime.publishEvent({
+      userIds: [String(row.user_id)],
+      channel: "finance",
+      type: "receipt.linked",
+      resourceId: String(existingTransactionId),
+      payload: { transaction_id: existingTransactionId, document_id: documentId },
+    }).catch((err: unknown) => console.warn(`[documents] receipt.linked realtime failed doc=${documentId}: ${(err as Error).message}`));
+    return;
+  }
+
+  const receiptAccountId = row.receipt_account_id;
+  if (receiptAccountId == null) {
+    await db.update(documents)
+      .set({ receipt_ocr_state: "incomplete" })
+      .where(eq(documents.id, documentId));
+    return;
+  }
 
   // Determine if the amount is reliable enough for auto-booking.
   const reliable = isReliableReceiptAmount(core.amount, core.amount_confidence);
@@ -973,9 +1018,9 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
       type: "receipt.incomplete",
       resourceId: String(documentId),
       payload: { document_id: documentId },
-    }).catch(err => console.warn(`[documents] receipt.incomplete realtime failed doc=${documentId}: ${(err as Error).message}`));
+    }).catch((err: unknown) => console.warn(`[documents] receipt.incomplete realtime failed doc=${documentId}: ${(err as Error).message}`));
     void push.notifyReceiptIncomplete({ userId: row.user_id, documentId })
-      .catch(err => console.warn(`[documents] notifyReceiptIncomplete failed doc=${documentId}: ${(err as Error).message}`));
+      .catch((err: unknown) => console.warn(`[documents] notifyReceiptIncomplete failed doc=${documentId}: ${(err as Error).message}`));
     return;
   }
 
@@ -992,7 +1037,7 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
 
   const txId = await createReceiptAutoTransaction({
     documentId,
-    accountId: row.receipt_account_id,
+    accountId: receiptAccountId,
     amount: -(core.amount!), // expenses are negative
     bookingDate,
     counterparty: core.store,
@@ -1023,14 +1068,14 @@ export async function runReceiptOcr(documentId: number): Promise<void> {
       type: "receipt.booked",
       resourceId: String(txId),
       payload: { transaction_id: txId, document_id: documentId, amount: core.amount, store: core.store },
-    }).catch(err => console.warn(`[documents] receipt.booked realtime failed doc=${documentId}: ${(err as Error).message}`));
+    }).catch((err: unknown) => console.warn(`[documents] receipt.booked realtime failed doc=${documentId}: ${(err as Error).message}`));
     void push.notifyReceiptBooked({
       userId: row.user_id,
       transactionId: txId,
       documentId,
       amount: core.amount!,
       store: core.store,
-    }).catch(err => console.warn(`[documents] notifyReceiptBooked failed doc=${documentId}: ${(err as Error).message}`));
+    }).catch((err: unknown) => console.warn(`[documents] notifyReceiptBooked failed doc=${documentId}: ${(err as Error).message}`));
   }
 }
 
