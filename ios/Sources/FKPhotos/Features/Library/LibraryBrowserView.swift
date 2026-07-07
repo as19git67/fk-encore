@@ -8,6 +8,7 @@ struct LibraryBrowserView: View {
     @State private var viewModel = LibraryBrowserViewModel()
     @State private var searchText = ""
     @State private var pendingInitialSync: PendingInitialSync?
+    @State private var pendingModeChoice: LibraryBrowserViewModel.IOSAlbum?
     @State private var showError = false
 
     struct PendingInitialSync: Equatable {
@@ -91,7 +92,7 @@ struct LibraryBrowserView: View {
                             .swipeActions(edge: .leading) {
                                 if album.canMakeAvailable {
                                     Button {
-                                        Task { await handleMakeAvailable(album) }
+                                        pendingModeChoice = album
                                     } label: {
                                         Label("Verfügbar machen", systemImage: "link.badge.plus")
                                     }
@@ -122,6 +123,32 @@ struct LibraryBrowserView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(viewModel.errorMessage ?? "")
+        }
+        .confirmationDialog(
+            modeChoiceTitle,
+            isPresented: Binding(
+                get: { pendingModeChoice != nil },
+                set: { if !$0 { pendingModeChoice = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Kopieren") {
+                if let album = pendingModeChoice {
+                    pendingModeChoice = nil
+                    Task { await handleMakeAvailable(album, mode: .copy) }
+                }
+            }
+            Button("Synchronisieren") {
+                if let album = pendingModeChoice {
+                    pendingModeChoice = nil
+                    Task { await handleMakeAvailable(album, mode: .sync) }
+                }
+            }
+            Button("Abbrechen", role: .cancel) {
+                pendingModeChoice = nil
+            }
+        } message: {
+            Text("Kopieren lädt Fotos nur hoch. Synchronisieren entfernt außerdem Fotos aus dem Server-Album, wenn du sie aus dem iOS-Album löschst.")
         }
         .confirmationDialog(
             initialSyncTitle,
@@ -159,6 +186,11 @@ struct LibraryBrowserView: View {
         }
     }
 
+    private var modeChoiceTitle: String {
+        guard let album = pendingModeChoice else { return "" }
+        return "Album \"\(album.name)\" verfügbar machen"
+    }
+
     private var initialSyncTitle: String {
         guard let item = pendingInitialSync else { return "" }
         return "Album \"\(item.albumName)\""
@@ -172,8 +204,8 @@ struct LibraryBrowserView: View {
         return "Sollen alle bisherigen Fotos hochgeladen werden oder nur neue ab jetzt?"
     }
 
-    private func handleMakeAvailable(_ album: LibraryBrowserViewModel.IOSAlbum) async {
-        let result = await viewModel.makeAvailable(album)
+    private func handleMakeAvailable(_ album: LibraryBrowserViewModel.IOSAlbum, mode: PhotoSyncMode) async {
+        let result = await viewModel.makeAvailable(album, mode: mode)
         switch result {
         case .success(_, let albumName, let assetCount, let iosAlbumId):
             pendingInitialSync = PendingInitialSync(
@@ -238,6 +270,13 @@ struct SyncStatusBadge: View {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(.blue, in: Capsule())
+        case .sync:
+            Label("sync", systemImage: "arrow.triangle.2.circlepath")
+                .font(.caption2)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(.green, in: Capsule())
         }
     }
 }

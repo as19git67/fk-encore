@@ -10,6 +10,7 @@ struct LibraryAlbumDetailView: View {
     @State private var selectedAssetIndex: Int = 0
     @State private var showFullscreen = false
     @State private var showDisconnectConfirm = false
+    @State private var showModeChoice = false
     @State private var pendingInitialSync: LibraryBrowserView.PendingInitialSync?
     @State private var showError = false
     @State private var errorMessage: String?
@@ -25,6 +26,19 @@ struct LibraryAlbumDetailView: View {
 
     private var canMakeAvailable: Bool { syncStatus == .none && !album.isSmart }
     private var canDisconnect: Bool { isLinked }
+
+    /// Two-way binding for the linked album's sync mode. Reads the local
+    /// syncStatus; writing persists via the view model and reflects the new
+    /// status locally.
+    private var syncModeBinding: Binding<PhotoSyncMode> {
+        Binding(
+            get: { syncStatus == .sync ? .sync : .copy },
+            set: { newMode in
+                viewModel.setSyncMode(newMode, for: album)
+                syncStatus = newMode == .sync ? .sync : .copy
+            }
+        )
+    }
 
     private let columns = [
         GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 2)
@@ -74,16 +88,25 @@ struct LibraryAlbumDetailView: View {
             ToolbarItem(placement: .primaryAction) {
                 if canMakeAvailable {
                     Button {
-                        Task { await handleMakeAvailable() }
+                        showModeChoice = true
                     } label: {
                         Image(systemName: "link.badge.plus")
                     }
                     .disabled(viewModel.isMakingAvailable)
                 } else if canDisconnect {
-                    Button(role: .destructive) {
-                        showDisconnectConfirm = true
+                    Menu {
+                        Picker("Modus", selection: syncModeBinding) {
+                            Label("Kopieren", systemImage: "arrow.up").tag(PhotoSyncMode.copy)
+                            Label("Synchronisieren", systemImage: "arrow.triangle.2.circlepath").tag(PhotoSyncMode.sync)
+                        }
+                        Divider()
+                        Button(role: .destructive) {
+                            showDisconnectConfirm = true
+                        } label: {
+                            Label("Trennen", systemImage: "minus.circle")
+                        }
                     } label: {
-                        Image(systemName: "minus.circle")
+                        Image(systemName: "ellipsis.circle")
                     }
                 }
             }
@@ -99,6 +122,21 @@ struct LibraryAlbumDetailView: View {
                     currentIndex: $selectedAssetIndex
                 )
             }
+        }
+        .confirmationDialog(
+            "Album \"\(album.name)\" verfügbar machen",
+            isPresented: $showModeChoice,
+            titleVisibility: .visible
+        ) {
+            Button("Kopieren") {
+                Task { await handleMakeAvailable(mode: .copy) }
+            }
+            Button("Synchronisieren") {
+                Task { await handleMakeAvailable(mode: .sync) }
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: {
+            Text("Kopieren lädt Fotos nur hoch. Synchronisieren entfernt außerdem Fotos aus dem Server-Album, wenn du sie aus dem iOS-Album löschst.")
         }
         .confirmationDialog(
             "Verknüpfung lösen?",
@@ -168,11 +206,11 @@ struct LibraryAlbumDetailView: View {
         return "Sollen alle bisherigen Fotos hochgeladen werden oder nur neue ab jetzt?"
     }
 
-    private func handleMakeAvailable() async {
-        let result = await viewModel.makeAvailable(album)
+    private func handleMakeAvailable(mode: PhotoSyncMode) async {
+        let result = await viewModel.makeAvailable(album, mode: mode)
         switch result {
         case .success(_, let albumName, let assetCount, let iosAlbumId):
-            syncStatus = .copy
+            syncStatus = mode == .sync ? .sync : .copy
             isLinked = true
             pendingInitialSync = LibraryBrowserView.PendingInitialSync(
                 iosAlbumId: iosAlbumId,
