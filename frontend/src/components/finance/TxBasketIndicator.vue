@@ -10,7 +10,7 @@ import Message from 'primevue/message'
 import Checkbox from 'primevue/checkbox'
 import { useConfirm } from 'primevue/useconfirm'
 import { useTxSelectionStore } from '../../stores/finance/selection'
-import { batchReview, batchTaxRelevant, deleteBasketSnapshot, downloadTransactionsCsv, downloadTransactionsDatev, downloadTransactionsPdf, getTransaction, getTransactionSplits, listBasketSnapshots, listDatevMappings, loadBasketSnapshot, mergeCounterparties, saveBasketSnapshot, saveDatevMapping, setTransactionSplits, suggestDocumentsForTransactions, decideDocumentMatch, getDocumentMatchMetrics, linkDocumentsToTransactions, type BasketSnapshot, type DatevMapping, type DocumentMatchSuggestion, type Transaction } from '../../api/finance'
+import { batchReview, batchTaxRelevant, deleteBasketSnapshot, downloadTransactionsCsv, downloadTransactionsDatev, downloadTransactionsPdf, getTransaction, getTransactionSplits, listBasketSnapshots, listDatevMappings, loadBasketSnapshot, mergeCounterparties, saveBasketSnapshot, saveDatevMapping, setTransactionSplits, suggestDocumentsForTransactions, decideDocumentMatch, getDocumentMatchMetrics, linkDocumentsToTransactions, type BasketSnapshot, type DatevMapping, type DocumentMatchSuggestion, type Transaction, type TransactionPdfExportOptions } from '../../api/finance'
 import BatchTagDialog from './BatchTagDialog.vue'
 import BatchNoticeDialog from './BatchNoticeDialog.vue'
 import { searchDocuments, type DocumentSummary } from '../../api/documents'
@@ -32,7 +32,8 @@ const confirm = useConfirm()
 const drawerVisible = ref(false)
 const tagDialogVisible = ref(false)
 const noticeDialogVisible = ref(false)
-const exporting = ref(false)
+const csvExporting = ref(false)
+const pdfExporting = ref(false)
 const actionError = ref<string | null>(null)
 const actionInfo = ref<string | null>(null)
 const documentSuggestions = ref<DocumentMatchSuggestion[]>([])
@@ -67,6 +68,17 @@ const datevHaben = ref('')
 const datevBu = ref('')
 const datevBerater = ref('')
 const datevMandant = ref('')
+const pdfDialogVisible = ref(false)
+const pdfTitle = ref('Transaktionsübersicht')
+const pdfExportOptions = ref<TransactionPdfExportOptions>({
+  title: 'Transaktionsübersicht',
+  includeDate: true,
+  includeCounterparty: true,
+  includePurpose: true,
+  includeAmount: true,
+  includeNotice: true,
+  includeTags: true,
+})
 
 const count = computed(() => selectionStore.count)
 const items = computed(() => selectionStore.items)
@@ -171,24 +183,36 @@ function openBatchNoticeEditor() {
 }
 
 async function exportCsv() {
-  if (count.value === 0 || exporting.value) return
+  if (count.value === 0 || csvExporting.value) return
   actionError.value = null
-  exporting.value = true
+  csvExporting.value = true
   try {
     await downloadTransactionsCsv(selectionStore.ids)
   } catch (err) {
     actionError.value = err instanceof Error ? err.message : String(err)
   } finally {
-    exporting.value = false
+    csvExporting.value = false
   }
 }
 
+function openPdfDialog() {
+  if (!count.value) return
+  actionError.value = null
+  pdfDialogVisible.value = true
+}
+
 async function exportPdf() {
-  if (!count.value || exporting.value) return
-  exporting.value = true
-  try { await downloadTransactionsPdf(selectionStore.ids) }
+  if (!count.value || pdfExporting.value) return
+  pdfExporting.value = true
+  try {
+    await downloadTransactionsPdf(selectionStore.ids, {
+      ...pdfExportOptions.value,
+      title: pdfTitle.value.trim() || 'Transaktionsübersicht',
+    })
+    pdfDialogVisible.value = false
+  }
   catch (err) { actionError.value = err instanceof Error ? err.message : String(err) }
-  finally { exporting.value = false }
+  finally { pdfExporting.value = false }
 }
 
 async function applyBatchFlag(kind: 'reviewed' | 'tax', value: boolean) {
@@ -538,10 +562,10 @@ async function exportDatev() {
               severity="secondary"
               outlined
               :disabled="count === 0"
-              :loading="exporting"
+              :loading="csvExporting"
               @click="exportCsv"
             />
-            <Button label="PDF" icon="pi pi-file-pdf" size="small" severity="secondary" outlined :disabled="count === 0" :loading="exporting" @click="exportPdf" />
+            <Button label="PDF" icon="pi pi-file-pdf" size="small" severity="secondary" outlined :disabled="count === 0" :loading="pdfExporting" @click="openPdfDialog" />
             <Button label="DATEV" icon="pi pi-calculator" size="small" severity="secondary" outlined :disabled="count === 0" @click="openDatev" />
           </div>
           <div class="clear-row">
@@ -607,6 +631,26 @@ async function exportDatev() {
       </div>
       <template #footer><Button label="Abbrechen" text @click="splitDialogVisible = false" /><Button label="Speichern" :disabled="Math.abs(splitDifference) >= .005" @click="saveSplit" /></template>
     </Dialog>
+    <Dialog v-model:visible="pdfDialogVisible" header="PDF exportieren" modal :style="{ width: 'min(32rem, calc(100vw - 2rem))' }">
+      <div class="counterparty-form">
+        <label>
+          Überschrift
+          <InputText v-model="pdfTitle" placeholder="Transaktionsübersicht" />
+        </label>
+        <div class="pdf-options" aria-label="Attribute im PDF">
+          <label><Checkbox v-model="pdfExportOptions.includeDate" binary /> Datum</label>
+          <label><Checkbox v-model="pdfExportOptions.includeCounterparty" binary /> Gegenseite</label>
+          <label><Checkbox v-model="pdfExportOptions.includePurpose" binary /> Verwendungszweck</label>
+          <label><Checkbox v-model="pdfExportOptions.includeAmount" binary /> Betrag</label>
+          <label><Checkbox v-model="pdfExportOptions.includeNotice" binary /> Notiz</label>
+          <label><Checkbox v-model="pdfExportOptions.includeTags" binary /> Tags</label>
+        </div>
+      </div>
+      <template #footer>
+        <Button label="Abbrechen" text severity="secondary" @click="pdfDialogVisible = false" />
+        <Button label="PDF erstellen" icon="pi pi-file-pdf" :loading="pdfExporting" :disabled="count === 0" @click="exportPdf" />
+      </template>
+    </Dialog>
     <Dialog v-model:visible="datevDialogVisible" header="DATEV-Steuerexport" modal :style="{ width: 'min(42rem, calc(100vw - 2rem))' }">
       <div class="counterparty-form">
         <div class="basket-match-actions"><label>Beraternummer<InputText v-model="datevBerater" /></label><label>Mandantennummer<InputText v-model="datevMandant" /></label></div>
@@ -662,6 +706,17 @@ async function exportDatev() {
 .counterparty-form { display: grid; gap: .85rem; }
 .counterparty-form label { display: grid; gap: .35rem; font-weight: 600; }
 .counterparty-form :deep(.p-inputtext) { width: 100%; }
+.pdf-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: .6rem .85rem;
+}
+.counterparty-form .pdf-options label {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  font-weight: 500;
+}
 .split-row { display: grid; grid-template-columns: minmax(8rem, .7fr) minmax(9rem, 1fr) minmax(9rem, 1fr) auto; gap: .5rem; align-items: center; }
 .datev-mapping-row { display: grid; grid-template-columns: 1.2fr 1fr 1fr .8fr auto; gap: .4rem; align-items: center; }
 @media (max-width: 620px) {
