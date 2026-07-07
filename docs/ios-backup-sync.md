@@ -210,6 +210,18 @@ abgebrochene Uploads nicht als „Geister-Fehler" stehenbleiben.
   wird beim Upload gepflegt und vom Download genutzt, um bereits lokal
   vorhandene Fotos nicht erneut herunterzuladen. Bleibt bei
   `resetUploadHistory()` erhalten (strukturelles Wissen).
+- **Sync-Modus je Album** (`albumSyncModes`, Issue #812): `copy` oder `sync`,
+  gewählt beim „Verfügbar machen" in der iOS-Mediathek. Default `copy`
+  (Etappe-2-Verhalten). Bei `sync` läuft vor dem Upload-Scan der
+  Löschabgleich `PhotoSyncService.syncAlbumDeletions()`:
+  aktuelle iOS-Album-Mitgliedschaft (nur `localIdentifier`) vs.
+  `GET /albums/:id/photos`; Server-Fotos, die über `serverPhotoMap` von
+  diesem Gerät stammen und deren Quell-Asset das iOS-Album verlassen hat,
+  werden via `POST /albums/photos/batch` (`action: "remove"`) aus dem
+  Album entfernt. **Nicht-destruktiv**: nur die Album-Zuordnung wird
+  gelöst, das Foto bleibt auf dem Server; Web-Uploads (nicht in
+  `serverPhotoMap`) werden nie angefasst; ein nicht auflösbares Album wird
+  übersprungen (kein versehentliches Leeren).
 
 ---
 

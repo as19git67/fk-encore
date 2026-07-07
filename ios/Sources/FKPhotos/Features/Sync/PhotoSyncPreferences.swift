@@ -1,5 +1,15 @@
 import Foundation
 
+/// One-way sync mode for a linked iOS album (issue #812).
+enum PhotoSyncMode: String, Sendable {
+    /// Upload new photos only; never remove anything from the server album.
+    case copy
+    /// Upload new photos and remove server-album entries whose source asset has
+    /// left the iOS album. Non-destructive to the photo itself — only the album
+    /// membership is removed.
+    case sync
+}
+
 /// Namespace for all sync-related UserDefaults keys and typed accessors.
 /// Thread-safe through UserDefaults's own serialization.
 struct PhotoSyncPreferences {
@@ -68,6 +78,38 @@ struct PhotoSyncPreferences {
     static var albumMappings: [String: Int] {
         get { UserDefaults.standard.dictionary(forKey: albumMappingsKey) as? [String: Int] ?? [:] }
         set { UserDefaults.standard.set(newValue, forKey: albumMappingsKey) }
+    }
+
+    // MARK: - Per-album sync mode
+    //
+    // One-way sync behaviour for a linked iOS album:
+    //  - copy: upload new photos only; server-side removals never happen.
+    //  - sync: upload new photos AND remove server-album entries whose source
+    //          asset has left the iOS album (issue #812, "Sync" mode). Only the
+    //          album membership is removed — the photo itself stays on the server.
+    // Stored as [iosAlbumId: rawValue]. Absent entry defaults to copy so existing
+    // Etappe-2 links keep their non-destructive behaviour.
+
+    private static let albumSyncModesKey = "sync.albumSyncModes"
+
+    private static func loadAlbumSyncModes() -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: albumSyncModesKey) as? [String: String] ?? [:]
+    }
+
+    static func albumSyncMode(for albumId: String) -> PhotoSyncMode {
+        loadAlbumSyncModes()[albumId].flatMap(PhotoSyncMode.init(rawValue:)) ?? .copy
+    }
+
+    static func setAlbumSyncMode(_ mode: PhotoSyncMode, for albumId: String) {
+        var modes = loadAlbumSyncModes()
+        modes[albumId] = mode.rawValue
+        UserDefaults.standard.set(modes, forKey: albumSyncModesKey)
+    }
+
+    static func removeAlbumSyncMode(for albumId: String) {
+        var modes = loadAlbumSyncModes()
+        modes.removeValue(forKey: albumId)
+        UserDefaults.standard.set(modes, forKey: albumSyncModesKey)
     }
 
     // MARK: - Confirmed album mappings

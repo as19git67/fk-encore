@@ -19,6 +19,7 @@ final class LibraryBrowserViewModel {
         enum SyncStatus: Hashable, Sendable {
             case none
             case copy
+            case sync
         }
     }
 
@@ -91,13 +92,20 @@ final class LibraryBrowserViewModel {
                 let result = raw.map { r -> IOSAlbum in
                     let localId = r.collection.localIdentifier
                     let individuallySynced = selectedIds.contains(localId) && mappings[localId] != nil
-                    let synced = isAllLibrary || individuallySynced
+                    let status: IOSAlbum.SyncStatus
+                    if individuallySynced {
+                        status = PhotoSyncPreferences.albumSyncMode(for: localId) == .sync ? .sync : .copy
+                    } else if isAllLibrary {
+                        status = .copy
+                    } else {
+                        status = .none
+                    }
                     return IOSAlbum(
                         id: localId,
                         name: r.title,
                         assetCount: r.count,
                         isSmart: r.isSmart,
-                        syncStatus: synced ? .copy : .none,
+                        syncStatus: status,
                         isIndividuallySynced: individuallySynced
                     )
                 }
@@ -114,7 +122,7 @@ final class LibraryBrowserViewModel {
 
     // MARK: - Make Available
 
-    func makeAvailable(_ album: IOSAlbum) async -> MakeAvailableResult {
+    func makeAvailable(_ album: IOSAlbum, mode: PhotoSyncMode) async -> MakeAvailableResult {
         isMakingAvailable = true
         defer { isMakingAvailable = false }
 
@@ -169,12 +177,13 @@ final class LibraryBrowserViewModel {
         PhotoSyncPreferences.albumMappings = mappings
 
         PhotoSyncPreferences.confirmMapping(for: album.id)
+        PhotoSyncPreferences.setAlbumSyncMode(mode, for: album.id)
         PhotoSyncPreferences.syncEnabled = true
 
         PhotoSyncPreferences.setAlbumSyncDate(Date(), for: album.id)
 
         if let idx = albums.firstIndex(where: { $0.id == album.id }) {
-            albums[idx].syncStatus = .copy
+            albums[idx].syncStatus = mode == .sync ? .sync : .copy
             albums[idx].isIndividuallySynced = true
         }
 
@@ -200,11 +209,28 @@ final class LibraryBrowserViewModel {
         PhotoSyncPreferences.albumMappings = mappings
 
         PhotoSyncPreferences.unconfirmMapping(for: album.id)
+        PhotoSyncPreferences.removeAlbumSyncMode(for: album.id)
         PhotoSyncPreferences.resetAlbumSyncDate(for: album.id)
 
         if let idx = albums.firstIndex(where: { $0.id == album.id }) {
             albums[idx].syncStatus = .none
             albums[idx].isIndividuallySynced = false
+        }
+    }
+
+    // MARK: - Change sync mode
+
+    /// Switches an already-linked album between copy and sync mode. Switching to
+    /// sync schedules a run so the deletion pass reconciles the server album
+    /// with the current iOS album contents.
+    func setSyncMode(_ mode: PhotoSyncMode, for album: IOSAlbum) {
+        guard album.isIndividuallySynced else { return }
+        PhotoSyncPreferences.setAlbumSyncMode(mode, for: album.id)
+        if let idx = albums.firstIndex(where: { $0.id == album.id }) {
+            albums[idx].syncStatus = mode == .sync ? .sync : .copy
+        }
+        if mode == .sync {
+            BackgroundSyncManager.shared.scheduleNextSyncIfNeeded()
         }
     }
 }
