@@ -20,7 +20,7 @@ import { useTagsStore } from '../../stores/finance/tags'
 import { useTxSelectionStore } from '../../stores/finance/selection'
 import type { MandateHistoryItem, Transaction } from '../../api/finance'
 import * as api from '../../api/finance'
-import { searchDocuments, type SearchDocumentSummary } from '../../api/documents'
+import { searchDocuments, uploadReceiptCapture, type SearchDocumentSummary } from '../../api/documents'
 import { lookupBtcCodeDe } from '../../utils/btcCodes'
 
 const route = useRoute()
@@ -53,6 +53,9 @@ const documentLinkingId = ref<number | null>(null)
 const documentDecisionId = ref<number | null>(null)
 const expandedDocumentPreviews = ref<Set<number>>(new Set())
 const transactionSplits = ref<api.TransactionSplit[]>([])
+const receiptInput = ref<HTMLInputElement | null>(null)
+const receiptUploading = ref(false)
+const receiptStatus = ref<string | null>(null)
 
 function toggleDocumentPreview(documentId: number) {
   const next = new Set(expandedDocumentPreviews.value)
@@ -105,6 +108,35 @@ async function toggleDocumentLinkPanel() {
   if (documentLinkPanelOpen.value) {
     error.value = null
     await loadDocumentSuggestions()
+  }
+}
+
+function openReceiptCapture() {
+  if (!tx.value || receiptUploading.value) return
+  error.value = null
+  receiptInput.value?.click()
+}
+
+async function onReceiptPicked(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || !tx.value) return
+
+  error.value = null
+  receiptUploading.value = true
+  receiptStatus.value = 'Beleg wird hochgeladen …'
+  try {
+    await uploadReceiptCapture(file, undefined, undefined, tx.value.id)
+    receiptStatus.value = 'Beleg wurde hochgeladen. OCR ergänzt Notiz und Tags im Hintergrund.'
+    await refreshLinkedDocuments()
+    tx.value = await api.getTransaction(tx.value.id)
+    syncForm()
+  } catch (err) {
+    receiptStatus.value = null
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    receiptUploading.value = false
   }
 }
 
@@ -660,6 +692,23 @@ const extractedFields = computed(() => {
             <span v-else></span>
 
             <div class="document-link-actions">
+              <input
+                ref="receiptInput"
+                type="file"
+                accept="image/*"
+                capture="environment"
+                class="receipt-input"
+                @change="onReceiptPicked"
+              >
+              <Button
+                icon="pi pi-camera"
+                size="small"
+                severity="secondary"
+                outlined
+                aria-label="Beleg fotografieren"
+                :loading="receiptUploading"
+                @click="openReceiptCapture"
+              />
               <Button
                 :label="documentLinkPanelOpen ? 'Verknüpfen schließen' : 'Beleg verknüpfen'"
                 icon="pi pi-link"
@@ -671,6 +720,7 @@ const extractedFields = computed(() => {
               />
             </div>
           </div>
+          <p v-if="receiptStatus" class="document-info">{{ receiptStatus }}</p>
 
           <div v-if="linkedDocuments.length" class="linked-documents">
             <span v-for="document in linkedDocuments" :key="document.document_id" class="linked-document">
@@ -1233,6 +1283,14 @@ const extractedFields = computed(() => {
   align-items: center;
   flex-shrink: 0;
   gap: 0.5rem;
+}
+.receipt-input {
+  display: none;
+}
+.document-info {
+  margin: 0;
+  color: var(--p-text-muted-color);
+  font-size: 0.85rem;
 }
 .document-link-panel {
   box-sizing: border-box;

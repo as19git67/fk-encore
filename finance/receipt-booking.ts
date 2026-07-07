@@ -127,3 +127,52 @@ export async function createReceiptAutoTransaction(
 
   return txId;
 }
+
+export interface ExistingReceiptTransactionParams {
+  documentId: number;
+  transactionId: number;
+  notice: string | null;
+}
+
+/**
+ * Attach a captured receipt to an existing transaction.
+ *
+ * Used by the transaction detail camera action. It deliberately does not
+ * mutate booking_date, amount, counterparty or purpose. The only transaction
+ * field it may change is `notice`, where structured receipt positions are
+ * appended for human review.
+ */
+export async function attachReceiptToExistingTransaction(
+  params: ExistingReceiptTransactionParams,
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select({ notice: financeTransaction.notice })
+      .from(financeTransaction)
+      .where(eq(financeTransaction.id, params.transactionId))
+      .limit(1);
+    if (!existing) throw new Error(`transaction ${params.transactionId} not found`);
+
+    await tx
+      .insert(financeTransactionDocument)
+      .values({ transaction_id: params.transactionId, document_id: params.documentId })
+      .onConflictDoNothing();
+
+    const addition = params.notice?.trim() || null;
+    if (addition) {
+      const current = existing.notice?.trim() || "";
+      const alreadyContains = current.includes(addition);
+      if (!alreadyContains) {
+        await tx
+          .update(financeTransaction)
+          .set({ notice: current ? `${current}\n\n${addition}` : addition })
+          .where(eq(financeTransaction.id, params.transactionId));
+      }
+    }
+
+    await tx
+      .update(documents)
+      .set({ receipt_transaction_id: params.transactionId, receipt_ocr_state: "booked" })
+      .where(eq(documents.id, params.documentId));
+  });
+}
