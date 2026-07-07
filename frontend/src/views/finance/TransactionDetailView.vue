@@ -402,6 +402,9 @@ async function save() {
       input.booking_date = toIso(formBookingDate.value)
     }
     tx.value = await api.updateTransaction(tx.value.id, input)
+    if (selectionStore.has(tx.value.id)) {
+      selectionStore.set(selectionStore.items.map(item => item.id === tx.value!.id ? tx.value! : item))
+    }
     syncForm()
     goBack()
   } catch (err) {
