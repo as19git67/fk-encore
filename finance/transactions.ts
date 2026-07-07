@@ -1346,6 +1346,7 @@ export const exportTransactions = api.raw(
     const today = new Date().toISOString().slice(0, 10);
     res.statusCode = 200;
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
     res.setHeader(
       "Content-Disposition",
       `attachment; filename="basket-${today}.csv"`,
@@ -1399,6 +1400,7 @@ export const exportTransactionsPdf = api.raw(
     const filename = `${slugifyFilename(title)}-${today}.pdf`;
     res.statusCode = 200;
     res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Cache-Control", "no-store");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     const pdf = createTransactionReportPdf(rows.map(row => ({
       booking_date: toDateString(row.booking_date) ?? "",

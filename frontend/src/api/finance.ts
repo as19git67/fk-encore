@@ -843,7 +843,10 @@ export function saveDatevMapping(mapping: Omit<DatevMapping, 'id'>): Promise<Dat
 export async function downloadTransactionsDatev(ids: number[], berater: string, mandant: string): Promise<void> {
   const token = localStorage.getItem('auth_token')
   const params = new URLSearchParams({ ids: ids.join(','), berater, mandant })
-  const resp = await fetch(`${API_BASE_URL}/finance/datev/export?${params}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined })
+  const resp = await fetch(`${API_BASE_URL}/finance/datev/export?${params}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    cache: 'no-store',
+  })
   if (!resp.ok) {
     const body = await resp.json().catch(() => null)
     if (resp.status === 422) throw new Error(`Für ${body?.transaction_ids?.length ?? 0} Buchungen fehlt ein Tag-Mapping.`)
@@ -865,6 +868,7 @@ export async function downloadTransactionsCsv(ids: number[]): Promise<void> {
   const url = `${API_BASE_URL}/finance/transactions/export?ids=${ids.join(',')}`
   const resp = await fetch(url, {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    cache: 'no-store',
   })
   if (!resp.ok) {
     throw new Error(`Export fehlgeschlagen (${resp.status})`)
@@ -909,6 +913,7 @@ export async function downloadTransactionsPdf(ids: number[], options: Transactio
   })
   const resp = await fetch(`${API_BASE_URL}/finance/transactions/export-pdf?${params.toString()}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    cache: 'no-store',
   })
   if (!resp.ok) throw new Error(`PDF-Export fehlgeschlagen (${resp.status})`)
   const blob = await resp.blob()
