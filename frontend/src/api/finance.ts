@@ -884,18 +884,40 @@ export async function downloadTransactionsCsv(ids: number[]): Promise<void> {
   URL.revokeObjectURL(objectUrl)
 }
 
-export async function downloadTransactionsPdf(ids: number[]): Promise<void> {
+export interface TransactionPdfExportOptions {
+  title: string
+  includeDate: boolean
+  includeCounterparty: boolean
+  includePurpose: boolean
+  includeAmount: boolean
+  includeNotice: boolean
+  includeTags: boolean
+}
+
+export async function downloadTransactionsPdf(ids: number[], options: TransactionPdfExportOptions): Promise<void> {
   if (ids.length === 0) return
   const token = localStorage.getItem('auth_token')
-  const resp = await fetch(`${API_BASE_URL}/finance/transactions/export-pdf?ids=${ids.join(',')}`, {
+  const params = new URLSearchParams({
+    ids: ids.join(','),
+    title: options.title,
+    include_date: options.includeDate ? '1' : '0',
+    include_counterparty: options.includeCounterparty ? '1' : '0',
+    include_purpose: options.includePurpose ? '1' : '0',
+    include_amount: options.includeAmount ? '1' : '0',
+    include_notice: options.includeNotice ? '1' : '0',
+    include_tags: options.includeTags ? '1' : '0',
+  })
+  const resp = await fetch(`${API_BASE_URL}/finance/transactions/export-pdf?${params.toString()}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   })
   if (!resp.ok) throw new Error(`PDF-Export fehlgeschlagen (${resp.status})`)
   const blob = await resp.blob()
+  const disposition = resp.headers.get('Content-Disposition') ?? ''
+  const match = /filename="([^"]+)"/.exec(disposition)
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
-  anchor.download = `spesen-${new Date().toISOString().slice(0, 10)}.pdf`
+  anchor.download = match?.[1] ?? `transaktionen-${new Date().toISOString().slice(0, 10)}.pdf`
   anchor.click()
   URL.revokeObjectURL(url)
 }
