@@ -517,6 +517,8 @@ async function exportDatev() {
               label="Tags"
               icon="pi pi-tag"
               size="small"
+              severity="secondary"
+              outlined
               :disabled="count === 0"
               @click="openBatchTagEditor"
             />
@@ -765,22 +767,41 @@ async function exportDatev() {
 }
 .drawer-actions {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(8.5rem, 100%), 1fr));
-  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(6.75rem, 1fr));
+  gap: 0.4rem;
   width: 100%;
 }
 .drawer-actions :deep(.p-button) {
   width: 100%;
   min-width: 0;
-  min-height: 2.5rem;
+  min-height: 2.25rem;
   justify-content: center;
+  padding-inline: 0.55rem;
 }
 .drawer-actions :deep(.p-button-label) {
-  white-space: normal;
-  line-height: 1.15;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .clear-row {
   display: flex;
   justify-content: flex-end;
+}
+
+@media (max-width: 520px) {
+  .drawer-actions {
+    grid-template-columns: repeat(5, minmax(2.5rem, 1fr));
+    gap: 0.35rem;
+  }
+
+  .drawer-actions :deep(.p-button) {
+    min-height: 2.35rem;
+    padding-inline: 0.35rem;
+  }
+
+  .drawer-actions :deep(.p-button-label) {
+    display: none;
+  }
 }
 </style>
