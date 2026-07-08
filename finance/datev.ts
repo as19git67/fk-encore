@@ -11,11 +11,24 @@ function currentUser() {
   return auth;
 }
 
+type DatevMappingRow = typeof financeDatevMapping.$inferSelect;
+
+function datevMappingDto(mapping: DatevMappingRow) {
+  return {
+    id: Number(mapping.id),
+    tag_name: mapping.tag_name,
+    konto_soll: mapping.konto_soll,
+    konto_haben: mapping.konto_haben,
+    bu_schluessel: mapping.bu_schluessel,
+  };
+}
+
 export const listDatevMappings = api(
   { expose: true, method: "GET", path: "/finance/datev/mappings", auth: true },
   async () => {
     const auth = currentUser();
-    return { items: await db.select().from(financeDatevMapping).where(eq(financeDatevMapping.user_id, Number(auth.userID))) };
+    const rows = await db.select().from(financeDatevMapping).where(eq(financeDatevMapping.user_id, Number(auth.userID)));
+    return { items: rows.map(datevMappingDto) };
   },
 );
 
@@ -34,7 +47,7 @@ export const saveDatevMapping = api(
       target: [financeDatevMapping.user_id, financeDatevMapping.tag_name],
       set: { konto_soll: p.konto_soll, konto_haben: p.konto_haben, bu_schluessel: p.bu_schluessel?.trim() || null },
     }).returning();
-    return row;
+    return datevMappingDto(row);
   },
 );
 
