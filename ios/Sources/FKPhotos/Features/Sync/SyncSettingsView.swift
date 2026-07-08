@@ -156,11 +156,24 @@ struct SyncSettingsView: View {
                                 }
                                 .tint(.blue)
                             }
+
+                            // Per-album sync mode — only for a confirmed album
+                            // mapped to a real target (not the whole-library
+                            // sentinel, where deletion mirroring makes no sense).
+                            if isConfirmed,
+                               albumServerMappings[iosId] != nil,
+                               iosId != PhotoSyncPreferences.allLibrarySentinel {
+                                Picker("Modus", selection: modeBinding(for: iosId)) {
+                                    Text("Kopieren").tag(PhotoSyncMode.copy)
+                                    Text("Synchronisieren").tag(PhotoSyncMode.sync)
+                                }
+                                .pickerStyle(.menu)
+                            }
                         }
                     } header: {
                         Text("Album Zuordnungen")
                     } footer: {
-                        Text("Nach links wischen → alle Fotos erneut synchronisieren. Nach rechts wischen → nur zukünftige Fotos synchronisieren.")
+                        Text("Modus **Kopieren**: Fotos werden nur hochgeladen. Modus **Synchronisieren**: aus dem iOS-Album gelöschte Fotos werden auch aus dem Server-Album entfernt.\n\nNach links wischen → alle Fotos erneut synchronisieren. Nach rechts wischen → nur zukünftige Fotos synchronisieren.")
                     }
                 }
 
@@ -502,6 +515,22 @@ struct SyncSettingsView: View {
                 PhotoSyncPreferences.confirmMapping(for: iosId)
                 refreshTick += 1
                 Task { await loadServerAlbums() }
+            }
+        )
+    }
+
+    /// Reads/writes the per-album sync mode. Switching to sync schedules a run
+    /// so the deletion pass reconciles the server album against the current iOS
+    /// album contents.
+    private func modeBinding(for iosId: String) -> Binding<PhotoSyncMode> {
+        Binding(
+            get: { PhotoSyncPreferences.albumSyncMode(for: iosId) },
+            set: { newMode in
+                PhotoSyncPreferences.setAlbumSyncMode(newMode, for: iosId)
+                if newMode == .sync {
+                    BackgroundSyncManager.shared.scheduleNextSyncIfNeeded()
+                }
+                refreshTick += 1
             }
         )
     }
