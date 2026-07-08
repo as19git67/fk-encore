@@ -42,6 +42,26 @@ export interface SplitInput {
   is_tax_relevant?: boolean;
 }
 
+type BasketSnapshotRow = typeof financeBasketSnapshot.$inferSelect;
+
+function normalizeId(value: number | string | bigint): number {
+  return Number(value);
+}
+
+function normalizeIdArray(values: Array<number | string | bigint>): number[] {
+  return values.map(normalizeId).filter(Number.isInteger);
+}
+
+function basketSnapshotDto(snapshot: BasketSnapshotRow) {
+  return {
+    id: normalizeId(snapshot.id),
+    name: snapshot.name,
+    tx_ids: normalizeIdArray(snapshot.tx_ids as Array<number | string | bigint>),
+    created_at: snapshot.created_at,
+    updated_at: snapshot.updated_at,
+  };
+}
+
 export const setTransactionSplits = api(
   { expose: true, method: "PUT", path: "/finance/transactions/:transactionId/splits", auth: true },
   async ({ transactionId, splits }: { transactionId: number; splits: SplitInput[] }) => {
@@ -81,7 +101,8 @@ export const listBasketSnapshots = api(
   { expose: true, method: "GET", path: "/finance/baskets", auth: true },
   async () => {
     const current = auth();
-    return { items: await db.select().from(financeBasketSnapshot).where(eq(financeBasketSnapshot.user_id, Number(current.userID))) };
+    const rows = await db.select().from(financeBasketSnapshot).where(eq(financeBasketSnapshot.user_id, Number(current.userID)));
+    return { items: rows.map(basketSnapshotDto) };
   },
 );
 
@@ -97,7 +118,7 @@ export const saveBasketSnapshot = api(
         target: [financeBasketSnapshot.user_id, financeBasketSnapshot.name],
         set: { tx_ids: ids, updated_at: sql`NOW()` },
       }).returning();
-    return saved;
+    return basketSnapshotDto(saved);
   },
 );
 
@@ -107,8 +128,9 @@ export const loadBasketSnapshot = api(
     const current = auth();
     const [snapshot] = await db.select().from(financeBasketSnapshot).where(and(eq(financeBasketSnapshot.id, id), eq(financeBasketSnapshot.user_id, Number(current.userID))));
     if (!snapshot) throw APIError.notFound("basket not found");
-    const ids = await allowedIds(snapshot.tx_ids);
-    return { ...snapshot, transaction_ids: ids, missing: snapshot.tx_ids.length - ids.length };
+    const snapshotDto = basketSnapshotDto(snapshot);
+    const ids = await allowedIds(snapshotDto.tx_ids);
+    return { ...snapshotDto, transaction_ids: ids, missing: snapshotDto.tx_ids.length - ids.length };
   },
 );
 
