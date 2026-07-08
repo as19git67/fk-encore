@@ -9,7 +9,7 @@ Status: Feature-Plan, Umsetzung in Etappen.
 
 Ergänzung: Die später hinzugekommenen Tabellen und Endpunkte für
 Finance-Basket-Aktionen (`finance_transaction_split`,
-`finance_basket_snapshot`, `finance_datev_mapping`) sind in
+`finance_basket_snapshot`) sind in
 [`finance-basket-actions.md`](finance-basket-actions.md) dokumentiert.
 
 ---

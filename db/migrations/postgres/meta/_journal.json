@@ -841,6 +841,13 @@
       "when": 1783296000000,
       "tag": "0119_finance_basket_epic",
       "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "7",
+      "when": 1783468800000,
+      "tag": "0120_drop_finance_datev_mapping",
+      "breakpoints": true
     }
   ]
 }

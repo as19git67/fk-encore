@@ -13,7 +13,7 @@ Neu gegenüber Legacy: `AccountAssignmentView`, `SyncScheduleView`,
 Status: Feature-Plan, Umsetzung in Etappen.
 
 Ergänzung: Die umgesetzten Finance-Basket-Aktionen (`Split`, benannte
-`Baskets`, `DATEV`) sind in
+`Baskets`) sind in
 [`finance-basket-actions.md`](finance-basket-actions.md) dokumentiert.
 
 ---
