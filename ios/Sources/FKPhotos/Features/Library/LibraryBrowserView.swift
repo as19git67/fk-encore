@@ -240,15 +240,8 @@ private struct LibraryAlbumRow: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8))
 
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(album.name)
-                        .font(.headline)
-                    if album.isSmart {
-                        Image(systemName: "gearshape")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                Text(album.name)
+                    .font(.headline)
                 HStack(spacing: 8) {
                     Text("\(album.assetCount) Foto\(album.assetCount == 1 ? "" : "s")")
                         .font(.caption)
