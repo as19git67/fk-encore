@@ -1,6 +1,7 @@
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { and, eq, inArray } from "drizzle-orm";
+import type { IncomingMessage, ServerResponse } from "http";
 import db from "../db/database";
 import { financeAccountAccess, financeDatevMapping, financeTag, financeTagTransaction, financeTransaction } from "../db/schema";
 import { requirePermission } from "../user/auth-handler";
@@ -12,6 +13,7 @@ function currentUser() {
 }
 
 type DatevMappingRow = typeof financeDatevMapping.$inferSelect;
+type DatevMappingInput = { tag_name: string; konto_soll: string; konto_haben: string; bu_schluessel?: string | null };
 
 function datevMappingDto(mapping: DatevMappingRow) {
   return {
@@ -23,31 +25,91 @@ function datevMappingDto(mapping: DatevMappingRow) {
   };
 }
 
+function writeJson(res: ServerResponse, status: number, body: unknown) {
+  res.statusCode = status;
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.end(JSON.stringify(body));
+}
+
+async function readBody(req: IncomingMessage, limit = 64 * 1024): Promise<string> {
+  let body = "";
+  for await (const chunk of req) {
+    body += chunk;
+    if (body.length > limit) throw APIError.invalidArgument("request body too large");
+  }
+  return body;
+}
+
+function parseJsonBody<T>(raw: string): T {
+  try {
+    return JSON.parse(raw || "{}") as T;
+  } catch {
+    throw APIError.invalidArgument("invalid JSON body");
+  }
+}
+
+function writeRawError(res: ServerResponse, err: unknown) {
+  const status = err instanceof APIError && err.code === "invalid_argument" ? 400 : 500;
+  const message = err instanceof Error ? err.message : "internal error";
+  writeJson(res, status, { error: message });
+}
+
+async function listDatevMappingDtosForCurrentUser() {
+  const auth = currentUser();
+  const rows = await db.select().from(financeDatevMapping).where(eq(financeDatevMapping.user_id, Number(auth.userID)));
+  return rows.map(datevMappingDto);
+}
+
+async function saveDatevMappingForCurrentUser(p: DatevMappingInput) {
+  const auth = currentUser();
+  const tag = p.tag_name?.trim();
+  if (!tag || !/^\d{1,9}$/.test(p.konto_soll) || !/^\d{1,9}$/.test(p.konto_haben)) {
+    throw APIError.invalidArgument("tag_name and numeric DATEV accounts required");
+  }
+  const [row] = await db.insert(financeDatevMapping).values({
+    user_id: Number(auth.userID), tag_name: tag, konto_soll: p.konto_soll, konto_haben: p.konto_haben,
+    bu_schluessel: p.bu_schluessel?.trim() || null,
+  }).onConflictDoUpdate({
+    target: [financeDatevMapping.user_id, financeDatevMapping.tag_name],
+    set: { konto_soll: p.konto_soll, konto_haben: p.konto_haben, bu_schluessel: p.bu_schluessel?.trim() || null },
+  }).returning();
+  return datevMappingDto(row);
+}
+
 export const listDatevMappings = api(
   { expose: true, method: "GET", path: "/finance/datev/mappings", auth: true },
   async () => {
-    const auth = currentUser();
-    const rows = await db.select().from(financeDatevMapping).where(eq(financeDatevMapping.user_id, Number(auth.userID)));
-    return { items: rows.map(datevMappingDto) };
+    return { items: await listDatevMappingDtosForCurrentUser() };
   },
 );
 
 export const saveDatevMapping = api(
   { expose: true, method: "POST", path: "/finance/datev/mappings", auth: true },
-  async (p: { tag_name: string; konto_soll: string; konto_haben: string; bu_schluessel?: string | null }) => {
-    const auth = currentUser();
-    const tag = p.tag_name?.trim();
-    if (!tag || !/^\d{1,9}$/.test(p.konto_soll) || !/^\d{1,9}$/.test(p.konto_haben)) {
-      throw APIError.invalidArgument("tag_name and numeric DATEV accounts required");
+  async (p: DatevMappingInput) => {
+    return saveDatevMappingForCurrentUser(p);
+  },
+);
+
+export const listDatevMappingsRaw = api.raw(
+  { expose: true, method: "GET", path: "/finance/datev-mappings", auth: true },
+  async (_req, res) => {
+    try {
+      writeJson(res, 200, { items: await listDatevMappingDtosForCurrentUser() });
+    } catch (err) {
+      writeRawError(res, err);
     }
-    const [row] = await db.insert(financeDatevMapping).values({
-      user_id: Number(auth.userID), tag_name: tag, konto_soll: p.konto_soll, konto_haben: p.konto_haben,
-      bu_schluessel: p.bu_schluessel?.trim() || null,
-    }).onConflictDoUpdate({
-      target: [financeDatevMapping.user_id, financeDatevMapping.tag_name],
-      set: { konto_soll: p.konto_soll, konto_haben: p.konto_haben, bu_schluessel: p.bu_schluessel?.trim() || null },
-    }).returning();
-    return datevMappingDto(row);
+  },
+);
+
+export const saveDatevMappingRaw = api.raw(
+  { expose: true, method: "POST", path: "/finance/datev-mappings", auth: true },
+  async (req, res) => {
+    try {
+      const payload = parseJsonBody<DatevMappingInput>(await readBody(req));
+      writeJson(res, 200, await saveDatevMappingForCurrentUser(payload));
+    } catch (err) {
+      writeRawError(res, err);
+    }
   },
 );
 
