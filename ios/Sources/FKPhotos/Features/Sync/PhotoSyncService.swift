@@ -118,6 +118,12 @@ actor PhotoSyncService {
             // at a spinner thinking nothing was happening.
             await drainQueueWithProgress()
 
+            // Sync-mode deletion reconciliation (issue #812 "Sync" mode): remove
+            // server-album entries whose source asset has left the iOS album.
+            // Runs before — and independently of — the upload scan, so removals
+            // apply even when there is nothing new to upload.
+            await syncAlbumDeletions()
+
             await SyncProgress.shared.update(.scanningLibrary)
             let syncStartDate = Date()
             let assets = await fetchAssets()
@@ -262,6 +268,91 @@ actor PhotoSyncService {
 
     private func resolveTargetAlbumIds(sourceAlbumId: String?) -> [Int] {
         sourceAlbumId.flatMap { PhotoSyncPreferences.albumMappings[$0] }.map { [$0] } ?? []
+    }
+
+    // MARK: - Deletion sync (issue #812 "Sync" mode)
+
+    /// For every confirmed sync-mode album, removes server-album entries whose
+    /// source iOS asset has left the iOS album. Safety properties:
+    ///  - Only photos this device uploaded (present in `serverPhotoMap`) are ever
+    ///    touched — photos added on the web are never removed.
+    ///  - Only the album membership is removed (`action: "remove"`); the photo
+    ///    itself stays on the server.
+    ///  - A collection that fails to resolve is skipped, so a transient PhotoKit
+    ///    hiccup can't wipe a whole server album.
+    ///  - Copy-mode albums are untouched.
+    private func syncAlbumDeletions() async {
+        let mappings = PhotoSyncPreferences.albumMappings
+        guard !mappings.isEmpty else { return }
+        let confirmed = PhotoSyncPreferences.confirmedMappingIds
+        // serverPhotoMap: [serverPhotoId(String): iOS localIdentifier]
+        let serverPhotoMap = PhotoSyncPreferences.loadServerPhotoMap()
+        guard !serverPhotoMap.isEmpty else { return }
+
+        for (iosAlbumId, serverAlbumId) in mappings {
+            let mode = PhotoSyncPreferences.albumSyncMode(for: iosAlbumId)
+            guard confirmed.contains(iosAlbumId),
+                  mode == .sync || mode == .bisync else { continue }
+
+            // Current iOS album membership (local identifiers only — no hashing).
+            // nil means the collection couldn't be read; skip to avoid a wipe.
+            guard let presentLocalIds = await Self.fetchAlbumAssetLocalIds(iosAlbumId) else { continue }
+
+            struct MinimalPhoto: Decodable { let id: Int }
+            struct PhotosResponse: Decodable { let photos: [MinimalPhoto] }
+            let response: PhotosResponse? = try? await APIClient.shared.get("/albums/\(serverAlbumId)/photos")
+            guard let serverPhotos = response?.photos else { continue }
+
+            // Photos we uploaded whose source asset is no longer in the iOS album.
+            let toRemove: [Int] = serverPhotos.compactMap { photo in
+                guard let localId = serverPhotoMap[String(photo.id)] else { return nil }
+                return presentLocalIds.contains(localId) ? nil : photo.id
+            }
+            guard !toRemove.isEmpty else { continue }
+
+            struct BatchBody: Encodable {
+                let albumIds: [Int]
+                let photoIds: [Int]
+                let action: String
+            }
+            struct BatchResponse: Decodable { let success: Bool }
+            let _: BatchResponse? = try? await APIClient.shared.post(
+                "/albums/photos/batch",
+                body: BatchBody(albumIds: [serverAlbumId], photoIds: toRemove, action: "remove")
+            )
+
+            // Bisync: keep the download half in step. Forget these photos in the
+            // download tracking so PhotoDownloadService doesn't later see them as
+            // "removed on the server" and move the still-present local asset into
+            // "F4mil Trash". No-op for pure sync albums (not in the download set).
+            if mode == .bisync {
+                DownloadSyncPreferences.forgetDownloadedPhotos(albumId: serverAlbumId, photoIds: toRemove)
+            }
+        }
+    }
+
+    /// Fetches the current image-asset local identifiers of an iOS album.
+    /// Returns nil when the collection can't be resolved (never an empty set in
+    /// that case) so callers can distinguish "empty album" from "unreadable".
+    private static func fetchAlbumAssetLocalIds(_ iosAlbumId: String) async -> Set<String>? {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let collections = PHAssetCollection.fetchAssetCollections(
+                    withLocalIdentifiers: [iosAlbumId], options: nil
+                )
+                guard let collection = collections.firstObject else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                let options = PHFetchOptions()
+                options.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
+                var ids = Set<String>()
+                PHAsset.fetchAssets(in: collection, options: options).enumerateObjects { asset, _, _ in
+                    ids.insert(asset.localIdentifier)
+                }
+                continuation.resume(returning: ids)
+            }
+        }
     }
 
     // MARK: - Asset fetching
