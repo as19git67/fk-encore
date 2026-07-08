@@ -835,27 +835,6 @@ export function setTransactionSplits(transactionId: number, splits: TransactionS
   return apiFetch(`/finance/transaction-splits?id=${encodeURIComponent(String(transactionId))}`, { method: 'PUT', body: JSON.stringify({ splits }) })
 }
 
-export interface DatevMapping { id: number; tag_name: string; konto_soll: string; konto_haben: string; bu_schluessel?: string | null }
-export function listDatevMappings(): Promise<{ items: DatevMapping[] }> { return apiFetch('/finance/datev-mappings') }
-export function saveDatevMapping(mapping: Omit<DatevMapping, 'id'>): Promise<DatevMapping> {
-  return apiFetch('/finance/datev-mappings', { method: 'POST', body: JSON.stringify(mapping) })
-}
-export async function downloadTransactionsDatev(ids: number[], berater: string, mandant: string): Promise<void> {
-  const token = localStorage.getItem('auth_token')
-  const params = new URLSearchParams({ ids: ids.join(','), berater, mandant })
-  const resp = await fetch(`${API_BASE_URL}/finance/datev/export?${params}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    cache: 'no-store',
-  })
-  if (!resp.ok) {
-    const body = await resp.json().catch(() => null)
-    if (resp.status === 422) throw new Error(`Für ${body?.transaction_ids?.length ?? 0} Buchungen fehlt ein Tag-Mapping.`)
-    throw new Error(`DATEV-Export fehlgeschlagen (${resp.status})`)
-  }
-  const blob = await resp.blob(); const url = URL.createObjectURL(blob); const anchor = document.createElement('a')
-  anchor.href = url; anchor.download = `EXTF_Buchungsstapel_${new Date().toISOString().slice(0, 10)}.csv`; anchor.click(); URL.revokeObjectURL(url)
-}
-
 /**
  * Fetches the CSV export for `ids` and triggers a browser download.
  * The endpoint streams text/csv with a UTF-8 BOM so Excel opens

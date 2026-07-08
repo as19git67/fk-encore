@@ -10,7 +10,7 @@ Basket ist die temporäre Auswahl von Transaktionen in der Finance-UI.
 ## UI-Verhalten
 
 Die Basket-Aktionen werden im Drawer `TxBasketIndicator` angeboten. Aktionen,
-die vor dem Anzeigen Daten laden (`Baskets`, `Split`, `DATEV`), öffnen ihren
+die vor dem Anzeigen Daten laden (`Baskets`, `Split`), öffnen ihren
 Dialog sofort und laden Inhalte anschließend nach. Fehler werden im jeweiligen
 Dialog angezeigt, damit ein Klick nicht „tot“ wirkt.
 
@@ -85,34 +85,3 @@ Die älteren typed Endpunkte bleiben backendseitig kompatibel:
 
 Alle Basket-Responses werden als JSON-sichere DTOs normalisiert, insbesondere
 `BIGINT`-Felder wie `id` und `tx_ids`.
-
----
-
-## DATEV
-
-`DATEV` exportiert die aktuell ausgewählten Transaktionen als DATEV-EXTF CSV.
-
-Dafür werden Tags auf DATEV-Konten gemappt:
-
-- `tag_name`
-- `konto_soll`
-- `konto_haben`
-- `bu_schluessel` optional
-
-Die Mappings liegen in `finance_datev_mapping` und sind pro User und Tag
-eindeutig.
-
-Der Export benötigt Beraternummer und Mandantennummer. Wenn eine ausgewählte
-Buchung kein Tag-Mapping besitzt, bricht der Export mit `missing_mapping` ab,
-damit kein still falscher Buchungsstapel entsteht.
-
-API:
-
-- `GET /finance/datev-mappings`
-- `POST /finance/datev-mappings`
-- `GET /finance/datev/export?ids=…&berater=…&mandant=…`
-
-Die älteren typed Endpoints `GET/POST /finance/datev/mappings` bleiben aus
-Kompatibilitätsgründen vorhanden. Das Frontend nutzt jedoch die statischen Raw-
-Endpoints, damit der Dialog ohne Path-Pattern-Parsing geladen werden kann.
-Auch DATEV-Mapping-Responses werden als JSON-sichere DTOs normalisiert.
