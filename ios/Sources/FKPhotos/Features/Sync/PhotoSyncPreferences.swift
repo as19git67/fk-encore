@@ -1,5 +1,19 @@
 import Foundation
 
+/// Sync mode for a linked iOS album (issue #812).
+enum PhotoSyncMode: String, Sendable {
+    /// Upload new photos only; never remove anything from the server album.
+    case copy
+    /// Upload new photos and remove server-album entries whose source asset has
+    /// left the iOS album. Non-destructive to the photo itself — only the album
+    /// membership is removed.
+    case sync
+    /// Two-way: behaves like `sync` for the upload direction and additionally
+    /// pulls new server photos onto the device and mirrors server-side removals
+    /// (via PhotoDownloadService) for the same album pair.
+    case bisync
+}
+
 /// Namespace for all sync-related UserDefaults keys and typed accessors.
 /// Thread-safe through UserDefaults's own serialization.
 struct PhotoSyncPreferences {
@@ -68,6 +82,52 @@ struct PhotoSyncPreferences {
     static var albumMappings: [String: Int] {
         get { UserDefaults.standard.dictionary(forKey: albumMappingsKey) as? [String: Int] ?? [:] }
         set { UserDefaults.standard.set(newValue, forKey: albumMappingsKey) }
+    }
+
+    // MARK: - Per-album sync mode
+    //
+    // One-way sync behaviour for a linked iOS album:
+    //  - copy: upload new photos only; server-side removals never happen.
+    //  - sync: upload new photos AND remove server-album entries whose source
+    //          asset has left the iOS album (issue #812, "Sync" mode). Only the
+    //          album membership is removed — the photo itself stays on the server.
+    // Stored as [iosAlbumId: rawValue]. Absent entry defaults to copy so existing
+    // Etappe-2 links keep their non-destructive behaviour.
+
+    private static let albumSyncModesKey = "sync.albumSyncModes"
+
+    private static func loadAlbumSyncModes() -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: albumSyncModesKey) as? [String: String] ?? [:]
+    }
+
+    static func albumSyncMode(for albumId: String) -> PhotoSyncMode {
+        loadAlbumSyncModes()[albumId].flatMap(PhotoSyncMode.init(rawValue:)) ?? .copy
+    }
+
+    static func setAlbumSyncMode(_ mode: PhotoSyncMode, for albumId: String) {
+        var modes = loadAlbumSyncModes()
+        modes[albumId] = mode.rawValue
+        UserDefaults.standard.set(modes, forKey: albumSyncModesKey)
+    }
+
+    static func removeAlbumSyncMode(for albumId: String) {
+        var modes = loadAlbumSyncModes()
+        modes.removeValue(forKey: albumId)
+        UserDefaults.standard.set(modes, forKey: albumSyncModesKey)
+    }
+
+    /// Server album IDs whose linked iOS album is in bisync mode (confirmed and
+    /// mapped). Used by PhotoDownloadService to include these albums in the
+    /// download pass — even when the global "Automatisch herunterladen" toggle
+    /// is off — so the two-way sync's download half runs.
+    static func bisyncServerAlbumIds() -> Set<Int> {
+        let confirmed = confirmedMappingIds
+        var result = Set<Int>()
+        for (iosId, serverId) in albumMappings {
+            guard confirmed.contains(iosId), albumSyncMode(for: iosId) == .bisync else { continue }
+            result.insert(serverId)
+        }
+        return result
     }
 
     // MARK: - Confirmed album mappings

@@ -197,11 +197,17 @@ abgebrochene Uploads nicht als „Geister-Fehler" stehenbleiben.
 
 ## 8. Album-Zuordnung & Auswahl
 
+- **Konfiguration** erfolgt ausschließlich in der **iOS-Mediathek** über
+  „Verfügbar machen" (Album-Verknüpfung + Modus). Die Einstellungen
+  (`SyncSettingsView` → „Foto-Synchronisierung") enthalten nur noch den
+  Haupt­schalter, globale Optionen (Nur WLAN, Screenshots), Status und den
+  manuellen Auslöser — keine Album-Auswahl/-Zuordnung mehr.
 - **Geräte-Album → Server-Album**: `PhotoSyncPreferences.albumMappings`
-  (`[iOS-localIdentifier: serverAlbumId]`), gepflegt über `ServerAlbumPickerView`.
+  (`[iOS-localIdentifier: serverAlbumId]`), gesetzt beim „Verfügbar machen"
+  (Namensabgleich own → shared → neu anlegen).
 - **Bestätigte Zuordnungen**: `confirmedMappingIds` – nur Alben mit einer
-  expliziten Nutzer-Entscheidung (inkl. „kein Album") werden auto-synchronisiert;
-  unbestätigte werden übersprungen.
+  expliziten Nutzer-Entscheidung werden auto-synchronisiert; unbestätigte
+  werden übersprungen.
 - **„Gesamte Mediathek"**: Sentinel `__all_photos__` – enumeriert alle
   Bild-Assets direkt; bei gesetztem Sentinel werden Einzelalben ignoriert
   (kein versehentlicher Doppel-Sync).
@@ -210,16 +216,42 @@ abgebrochene Uploads nicht als „Geister-Fehler" stehenbleiben.
   wird beim Upload gepflegt und vom Download genutzt, um bereits lokal
   vorhandene Fotos nicht erneut herunterzuladen. Bleibt bei
   `resetUploadHistory()` erhalten (strukturelles Wissen).
+- **Sync-Modus je Album** (`albumSyncModes`, Issue #812): `copy`, `sync` oder
+  `bisync`, gewählt beim „Verfügbar machen" in der iOS-Mediathek. Default
+  `copy` (Etappe-2-Verhalten). Bei `sync`/`bisync` läuft vor dem Upload-Scan der
+  Löschabgleich `PhotoSyncService.syncAlbumDeletions()`:
+  aktuelle iOS-Album-Mitgliedschaft (nur `localIdentifier`) vs.
+  `GET /albums/:id/photos`; Server-Fotos, die über `serverPhotoMap` von
+  diesem Gerät stammen und deren Quell-Asset das iOS-Album verlassen hat,
+  werden via `POST /albums/photos/batch` (`action: "remove"`) aus dem
+  Album entfernt. **Nicht-destruktiv**: nur die Album-Zuordnung wird
+  gelöst, das Foto bleibt auf dem Server; Web-Uploads (nicht in
+  `serverPhotoMap`) werden nie angefasst; ein nicht auflösbares Album wird
+  übersprungen (kein versehentliches Leeren).
+- **Bisync** (Etappe 4): `bisync` = `sync` in Upload-Richtung **plus** die
+  Download-Hälfte fürs selbe Album-Paar. `PhotoSyncPreferences.bisyncServerAlbumIds()`
+  liefert die Server-Album-IDs der bisync-Alben; `PhotoDownloadService` bezieht
+  sie in den Download-Lauf ein — **auch wenn „Automatisch herunterladen" aus
+  ist**. Damit iOS-seitiges Entfernen nicht unnötig in `F4mil Trash` landet,
+  ruft der Delete-up-Pass `DownloadSyncPreferences.forgetDownloadedPhotos()`
+  auf, sodass die Download-Seite diese Fotos nicht als „server-seitig gelöscht"
+  interpretiert. Das iOS-Zielalbum ist dasselbe wie beim Upload (Download nutzt
+  `getOrCreateIOSAlbum(named:)`, Namensgleichheit durch „Verfügbar machen").
 
 ---
 
 ## 9. Download-Sync (Zwei-Wege)
 
-`PhotoDownloadService.sync()` lädt ausgewählte Server-Alben aufs Gerät:
+`PhotoDownloadService.sync()` lädt Server-Alben aufs Gerät. Es gibt **keine
+eigenständige Download-UI mehr** — der Download läuft nur noch als Hälfte des
+Bisync-Modus. Die `DownloadSyncPreferences` (inkl. `downloadEnabled`, Filter)
+bleiben intern erhalten; `downloadEnabled` ist standardmäßig aus und wird nicht
+mehr per UI umgeschaltet.
 
-- Vorbedingungen: `downloadEnabled`, Netzwerk-Gate (eigener
-  `wifiOnly`-Schalter), `selectedServerAlbumIds` nicht leer, Foto-Berechtigung
-  `readWrite` (`.authorized`/`.limited`).
+- Vorbedingungen: `downloadEnabled` **oder** mindestens ein Bisync-Album
+  (`bisyncServerAlbumIds()`), Netzwerk-Gate (eigener `wifiOnly`-Schalter),
+  Album-Menge = `selectedServerAlbumIds ∪ bisyncServerAlbumIds` nicht leer,
+  Foto-Berechtigung `readWrite` (`.authorized`/`.limited`).
 - **Fast-Skip per ETag**: `GET /photos/index` mit `If-None-Match`. Ein **304**
   bedeutet „nichts geändert" und überspringt den Album-Walk. Der erste Lauf
   (ohne ETag) macht den vollen Walk und speichert das ETag.
