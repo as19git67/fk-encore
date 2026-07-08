@@ -816,12 +816,12 @@ export interface BasketSnapshot {
   updated_at: string
 }
 
-export function listBasketSnapshots(): Promise<{ items: BasketSnapshot[] }> { return apiFetch('/finance/baskets') }
+export function listBasketSnapshots(): Promise<{ items: BasketSnapshot[] }> { return apiFetch('/finance/basket-snapshots') }
 export function saveBasketSnapshot(name: string, transaction_ids: number[]): Promise<BasketSnapshot> {
-  return apiFetch('/finance/baskets', { method: 'POST', body: JSON.stringify({ name, transaction_ids }) })
+  return apiFetch('/finance/basket-snapshots', { method: 'POST', body: JSON.stringify({ name, transaction_ids }) })
 }
-export function loadBasketSnapshot(id: number): Promise<BasketSnapshot & { transaction_ids: number[]; missing: number }> { return apiFetch(`/finance/baskets/${id}`) }
-export function deleteBasketSnapshot(id: number): Promise<{ deleted: boolean }> { return apiFetch(`/finance/baskets/${id}`, { method: 'DELETE' }) }
+export function loadBasketSnapshot(id: number): Promise<BasketSnapshot & { transaction_ids: number[]; missing: number }> { return apiFetch(`/finance/basket-snapshot?id=${encodeURIComponent(String(id))}`) }
+export function deleteBasketSnapshot(id: number): Promise<{ deleted: boolean }> { return apiFetch(`/finance/basket-snapshot?id=${encodeURIComponent(String(id))}`, { method: 'DELETE' }) }
 
 export interface TransactionSplit {
   id?: number
@@ -843,7 +843,10 @@ export function saveDatevMapping(mapping: Omit<DatevMapping, 'id'>): Promise<Dat
 export async function downloadTransactionsDatev(ids: number[], berater: string, mandant: string): Promise<void> {
   const token = localStorage.getItem('auth_token')
   const params = new URLSearchParams({ ids: ids.join(','), berater, mandant })
-  const resp = await fetch(`${API_BASE_URL}/finance/datev/export?${params}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined })
+  const resp = await fetch(`${API_BASE_URL}/finance/datev/export?${params}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    cache: 'no-store',
+  })
   if (!resp.ok) {
     const body = await resp.json().catch(() => null)
     if (resp.status === 422) throw new Error(`Für ${body?.transaction_ids?.length ?? 0} Buchungen fehlt ein Tag-Mapping.`)
@@ -865,6 +868,7 @@ export async function downloadTransactionsCsv(ids: number[]): Promise<void> {
   const url = `${API_BASE_URL}/finance/transactions/export?ids=${ids.join(',')}`
   const resp = await fetch(url, {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    cache: 'no-store',
   })
   if (!resp.ok) {
     throw new Error(`Export fehlgeschlagen (${resp.status})`)
@@ -884,18 +888,41 @@ export async function downloadTransactionsCsv(ids: number[]): Promise<void> {
   URL.revokeObjectURL(objectUrl)
 }
 
-export async function downloadTransactionsPdf(ids: number[]): Promise<void> {
+export interface TransactionPdfExportOptions {
+  title: string
+  includeDate: boolean
+  includeCounterparty: boolean
+  includePurpose: boolean
+  includeAmount: boolean
+  includeNotice: boolean
+  includeTags: boolean
+}
+
+export async function downloadTransactionsPdf(ids: number[], options: TransactionPdfExportOptions): Promise<void> {
   if (ids.length === 0) return
   const token = localStorage.getItem('auth_token')
-  const resp = await fetch(`${API_BASE_URL}/finance/transactions/export-pdf?ids=${ids.join(',')}`, {
+  const params = new URLSearchParams({
+    ids: ids.join(','),
+    title: options.title,
+    include_date: options.includeDate ? '1' : '0',
+    include_counterparty: options.includeCounterparty ? '1' : '0',
+    include_purpose: options.includePurpose ? '1' : '0',
+    include_amount: options.includeAmount ? '1' : '0',
+    include_notice: options.includeNotice ? '1' : '0',
+    include_tags: options.includeTags ? '1' : '0',
+  })
+  const resp = await fetch(`${API_BASE_URL}/finance/transactions/export-pdf?${params.toString()}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    cache: 'no-store',
   })
   if (!resp.ok) throw new Error(`PDF-Export fehlgeschlagen (${resp.status})`)
   const blob = await resp.blob()
+  const disposition = resp.headers.get('Content-Disposition') ?? ''
+  const match = /filename="([^"]+)"/.exec(disposition)
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
-  anchor.download = `spesen-${new Date().toISOString().slice(0, 10)}.pdf`
+  anchor.download = match?.[1] ?? `transaktionen-${new Date().toISOString().slice(0, 10)}.pdf`
   anchor.click()
   URL.revokeObjectURL(url)
 }
