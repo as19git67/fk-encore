@@ -38,8 +38,17 @@ entsprechen.
 
 API:
 
+- `GET /finance/transaction-splits?id=…`
+- `PUT /finance/transaction-splits?id=…`
+
+Die älteren typed Endpunkte bleiben backendseitig kompatibel:
+
 - `GET /finance/transactions/:transactionId/splits`
 - `PUT /finance/transactions/:transactionId/splits`
+
+Das Frontend verwendet die raw JSON-Endpunkte mit statischem Pfad, analog zu
+den Basket-Snapshot-Endpunkten. Dadurch vermeiden wir Browser-/Runtime-Probleme
+mit Path-Param-Pattern-Decoding und typed API Encoding.
 
 ---
 
@@ -99,8 +108,11 @@ damit kein still falscher Buchungsstapel entsteht.
 
 API:
 
-- `GET /finance/datev/mappings`
-- `POST /finance/datev/mappings`
+- `GET /finance/datev-mappings`
+- `POST /finance/datev-mappings`
 - `GET /finance/datev/export?ids=…&berater=…&mandant=…`
 
+Die älteren typed Endpoints `GET/POST /finance/datev/mappings` bleiben aus
+Kompatibilitätsgründen vorhanden. Das Frontend nutzt jedoch die statischen Raw-
+Endpoints, damit der Dialog ohne Path-Pattern-Parsing geladen werden kann.
 Auch DATEV-Mapping-Responses werden als JSON-sichere DTOs normalisiert.
