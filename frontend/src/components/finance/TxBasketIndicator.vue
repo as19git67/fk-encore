@@ -11,7 +11,7 @@ import Checkbox from 'primevue/checkbox'
 import { useConfirm } from 'primevue/useconfirm'
 import { useTxSelectionStore } from '../../stores/finance/selection'
 import { useTagsStore } from '../../stores/finance/tags'
-import { batchReview, batchTaxRelevant, deleteBasketSnapshot, downloadTransactionsCsv, downloadTransactionsDatev, downloadTransactionsPdf, getTransaction, getTransactionSplits, listBasketSnapshots, listDatevMappings, loadBasketSnapshot, mergeCounterparties, saveBasketSnapshot, saveDatevMapping, setTransactionSplits, suggestDocumentsForTransactions, decideDocumentMatch, getDocumentMatchMetrics, linkDocumentsToTransactions, type BasketSnapshot, type DatevMapping, type DocumentMatchSuggestion, type Transaction, type TransactionPdfExportOptions } from '../../api/finance'
+import { batchReview, batchTaxRelevant, deleteBasketSnapshot, downloadTransactionsCsv, downloadTransactionsPdf, getTransaction, getTransactionSplits, listBasketSnapshots, loadBasketSnapshot, mergeCounterparties, saveBasketSnapshot, setTransactionSplits, suggestDocumentsForTransactions, decideDocumentMatch, getDocumentMatchMetrics, linkDocumentsToTransactions, type BasketSnapshot, type DocumentMatchSuggestion, type Transaction, type TransactionPdfExportOptions } from '../../api/finance'
 import BatchTagDialog from './BatchTagDialog.vue'
 import BatchNoticeDialog from './BatchNoticeDialog.vue'
 import TagAutoComplete from './TagAutoComplete.vue'
@@ -67,16 +67,6 @@ const splitLoading = ref(false)
 const splitError = ref<string | null>(null)
 const editingExistingSplit = ref(false)
 const splitRows = ref<Array<{ amount: number; tags: string[]; notice: string; is_tax_relevant: boolean }>>([])
-const datevDialogVisible = ref(false)
-const datevLoading = ref(false)
-const datevError = ref<string | null>(null)
-const datevMappings = ref<DatevMapping[]>([])
-const datevTag = ref('')
-const datevSoll = ref('')
-const datevHaben = ref('')
-const datevBu = ref('')
-const datevBerater = ref('')
-const datevMandant = ref('')
 const pdfDialogVisible = ref(false)
 const pdfTitle = ref('Transaktionsübersicht')
 const pdfExportOptions = ref<TransactionPdfExportOptions>({
@@ -96,17 +86,6 @@ const mixedCurrencies = computed(() => hasMixedCurrencies(items.value))
 const recurringGroups = computed(() => detectRecurringSelection(items.value))
 const majorityReviewed = computed(() => items.value.filter(item => !!item.reviewed_at).length > items.value.length / 2)
 const majorityTaxRelevant = computed(() => items.value.filter(item => !!item.is_tax_relevant).length > items.value.length / 2)
-const datevPreview = computed(() => items.value.slice(0, 5).map(tx => {
-  const mapping = datevMappings.value.find(candidate => (tx.tags ?? []).some(tag => tag.name === candidate.tag_name))
-  return {
-    id: tx.id,
-    date: tx.booking_date.slice(0, 10),
-    text: tx.counterparty ?? tx.purpose ?? 'Buchung',
-    amount: formatAmount(tx),
-    accounts: mapping ? `${mapping.konto_soll} / ${mapping.konto_haben}` : 'Mapping fehlt',
-  }
-}))
-
 const sumLabel = computed(() => {
   if (count.value === 0) return ''
   return new Intl.NumberFormat('de-DE', {
@@ -417,33 +396,6 @@ async function saveSplit() {
   actionInfo.value = 'Split-Buchung gespeichert.'
 }
 
-async function openDatev() {
-  datevError.value = null
-  datevDialogVisible.value = true
-  datevLoading.value = true
-  try {
-    datevMappings.value = (await listDatevMappings()).items
-  } catch (err) {
-    datevError.value = errorMessage(err)
-  } finally {
-    datevLoading.value = false
-  }
-}
-async function addDatevMapping() {
-  datevError.value = null
-  try {
-    await saveDatevMapping({ tag_name: datevTag.value, konto_soll: datevSoll.value, konto_haben: datevHaben.value, bu_schluessel: datevBu.value || null })
-    datevMappings.value = (await listDatevMappings()).items
-    datevTag.value = ''; datevSoll.value = ''; datevHaben.value = ''; datevBu.value = ''
-  } catch (err) {
-    datevError.value = errorMessage(err)
-  }
-}
-async function exportDatev() {
-  try { await downloadTransactionsDatev(selectionStore.ids, datevBerater.value, datevMandant.value) }
-  catch (err) { actionError.value = err instanceof Error ? err.message : String(err); return }
-  datevDialogVisible.value = false
-}
 </script>
 
 <template>
@@ -615,7 +567,6 @@ async function exportDatev() {
               @click="exportCsv"
             />
             <Button label="PDF" icon="pi pi-file-pdf" size="small" severity="secondary" outlined :disabled="count === 0" :loading="pdfExporting" @click="openPdfDialog" />
-            <Button label="DATEV" icon="pi pi-calculator" size="small" severity="secondary" outlined :disabled="count === 0" :loading="datevLoading" @click="openDatev" />
           </div>
           <div class="clear-row">
             <Button
@@ -704,20 +655,6 @@ async function exportDatev() {
         <Button label="PDF erstellen" icon="pi pi-file-pdf" :loading="pdfExporting" :disabled="count === 0" @click="exportPdf" />
       </template>
     </Dialog>
-    <Dialog v-model:visible="datevDialogVisible" header="DATEV-Steuerexport" modal :style="{ width: 'min(42rem, calc(100vw - 2rem))' }">
-      <div class="counterparty-form">
-        <Message v-if="datevLoading" severity="info" :closable="false">DATEV-Mappings werden geladen…</Message>
-        <Message v-if="datevError" severity="error" :closable="false">DATEV-Mappings konnten nicht geladen werden: {{ datevError }}</Message>
-        <div class="basket-match-actions"><label>Beraternummer<InputText v-model="datevBerater" /></label><label>Mandantennummer<InputText v-model="datevMandant" /></label></div>
-        <strong>Tag-Konten-Mapping</strong>
-        <ul class="basket-analysis-list"><li v-for="mapping in datevMappings" :key="mapping.id" class="basket-analysis-row"><span>{{ mapping.tag_name }}</span><span>{{ mapping.konto_soll }} / {{ mapping.konto_haben }}<template v-if="mapping.bu_schluessel"> · BU {{ mapping.bu_schluessel }}</template></span></li></ul>
-        <div class="datev-mapping-row"><InputText v-model="datevTag" placeholder="Tag" /><InputText v-model="datevSoll" placeholder="Konto Soll" /><InputText v-model="datevHaben" placeholder="Konto Haben" /><InputText v-model="datevBu" placeholder="BU optional" /><Button icon="pi pi-plus" aria-label="Mapping speichern" :disabled="!datevTag || !datevSoll || !datevHaben" @click="addDatevMapping" /></div>
-        <Message severity="info" :closable="false">Der Export stoppt, wenn für eine Buchung kein Mapping ihrer Tags vorhanden ist.</Message>
-        <strong>Vorschau (erste 5 Buchungen)</strong>
-        <ul class="basket-analysis-list"><li v-for="row in datevPreview" :key="row.id" class="basket-analysis-row"><span>{{ row.date }} · {{ row.text }}<small> · {{ row.accounts }}</small></span><span>{{ row.amount }}</span></li></ul>
-      </div>
-      <template #footer><Button label="Abbrechen" text @click="datevDialogVisible = false" /><Button label="EXTF exportieren" icon="pi pi-download" :disabled="!datevBerater || !datevMandant" @click="exportDatev" /></template>
-    </Dialog>
   </div>
 </template>
 
@@ -773,9 +710,8 @@ async function exportDatev() {
   font-weight: 500;
 }
 .split-row { display: grid; grid-template-columns: minmax(8rem, .7fr) minmax(9rem, 1fr) minmax(9rem, 1fr) auto; gap: .5rem; align-items: center; }
-.datev-mapping-row { display: grid; grid-template-columns: 1.2fr 1fr 1fr .8fr auto; gap: .4rem; align-items: center; }
 @media (max-width: 620px) {
-  .split-row, .datev-mapping-row { grid-template-columns: 1fr; }
+  .split-row { grid-template-columns: 1fr; }
 }
 
 .basket-match-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .5rem; margin-bottom: .5rem; }
