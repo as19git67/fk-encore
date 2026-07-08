@@ -1,0 +1,106 @@
+# Finance — Basket-Aktionen
+
+Status: umgesetzt in Epic #722.
+
+Dieses Dokument beschreibt die erweiterten Aktionen im Finance-Basket. Der
+Basket ist die temporäre Auswahl von Transaktionen in der Finance-UI.
+
+---
+
+## UI-Verhalten
+
+Die Basket-Aktionen werden im Drawer `TxBasketIndicator` angeboten. Aktionen,
+die vor dem Anzeigen Daten laden (`Baskets`, `Split`, `DATEV`), öffnen ihren
+Dialog sofort und laden Inhalte anschließend nach. Fehler werden im jeweiligen
+Dialog angezeigt, damit ein Klick nicht „tot“ wirkt.
+
+Auf schmalen Viewports sind die Aktionen kompakt angeordnet, damit die
+Transaktionsliste nicht vollständig verdrängt wird.
+
+---
+
+## Split
+
+`Split` teilt eine einzelne Bankbuchung logisch in mehrere Teile auf.
+
+Die Originalbuchung bleibt unverändert in `finance_transaction`. Die
+Aufteilung wird als Overlay in `finance_transaction_split` gespeichert:
+
+- `transaction_id`: Referenz auf die Originalbuchung, `ON DELETE CASCADE`
+- `amount`: Teilbetrag
+- `tags`: JSON-Array von Tag-Namen
+- `notice`: optionale Notiz pro Teil
+- `is_tax_relevant`: Steuerrelevant-Flag pro Teil
+
+Beim Speichern werden bestehende Split-Zeilen dieser Buchung vollständig
+ersetzt. Die Summe aller Teile muss centgenau dem Betrag der Originalbuchung
+entsprechen.
+
+API:
+
+- `GET /finance/transactions/:transactionId/splits`
+- `PUT /finance/transactions/:transactionId/splits`
+
+---
+
+## Benannte Baskets
+
+`Baskets` speichert die aktuelle Transaktionsauswahl unter einem Namen. Ein
+gespeicherter Basket kann später geladen, gelöscht oder mit einem anderen
+Basket verglichen werden.
+
+Die Persistenz liegt in `finance_basket_snapshot`:
+
+- `user_id`: Besitzer des gespeicherten Baskets
+- `name`: Name, pro User eindeutig
+- `tx_ids`: Array der Transaktions-IDs
+
+Beim Laden werden nicht mehr zugreifbare oder gelöschte Transaktionen
+übersprungen; die Response enthält `missing`.
+
+Frontend-Pfade verwenden absichtlich raw JSON-Endpunkte mit statischen Pfaden,
+um Probleme mit typed API Encoding/Decoding und Browser-Pattern-Fehlern zu
+vermeiden:
+
+- `GET /finance/basket-snapshots`
+- `POST /finance/basket-snapshots`
+- `GET /finance/basket-snapshot?id=…`
+- `DELETE /finance/basket-snapshot?id=…`
+
+Die älteren typed Endpunkte bleiben backendseitig kompatibel:
+
+- `GET /finance/baskets`
+- `POST /finance/baskets`
+- `GET /finance/baskets/:id`
+- `DELETE /finance/baskets/:id`
+
+Alle Basket-Responses werden als JSON-sichere DTOs normalisiert, insbesondere
+`BIGINT`-Felder wie `id` und `tx_ids`.
+
+---
+
+## DATEV
+
+`DATEV` exportiert die aktuell ausgewählten Transaktionen als DATEV-EXTF CSV.
+
+Dafür werden Tags auf DATEV-Konten gemappt:
+
+- `tag_name`
+- `konto_soll`
+- `konto_haben`
+- `bu_schluessel` optional
+
+Die Mappings liegen in `finance_datev_mapping` und sind pro User und Tag
+eindeutig.
+
+Der Export benötigt Beraternummer und Mandantennummer. Wenn eine ausgewählte
+Buchung kein Tag-Mapping besitzt, bricht der Export mit `missing_mapping` ab,
+damit kein still falscher Buchungsstapel entsteht.
+
+API:
+
+- `GET /finance/datev/mappings`
+- `POST /finance/datev/mappings`
+- `GET /finance/datev/export?ids=…&berater=…&mandant=…`
+
+Auch DATEV-Mapping-Responses werden als JSON-sichere DTOs normalisiert.
