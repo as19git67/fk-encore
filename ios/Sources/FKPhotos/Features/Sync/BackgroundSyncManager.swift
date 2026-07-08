@@ -70,7 +70,9 @@ public final class BackgroundSyncManager {
 
     /// Schedule the next sync run. Cancels the request if both upload and download are disabled.
     public func scheduleNextSyncIfNeeded() {
-        guard PhotoSyncPreferences.syncEnabled || DownloadSyncPreferences.downloadEnabled else {
+        guard PhotoSyncPreferences.syncEnabled
+                || DownloadSyncPreferences.downloadEnabled
+                || !PhotoSyncPreferences.bisyncServerAlbumIds().isEmpty else {
             BGTaskScheduler.shared.cancel(
                 taskRequestWithIdentifier: PhotoSyncPreferences.taskIdentifier
             )
