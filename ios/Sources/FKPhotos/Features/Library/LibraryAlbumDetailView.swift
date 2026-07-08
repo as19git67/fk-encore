@@ -59,20 +59,18 @@ struct LibraryAlbumDetailView: View {
                     LazyVGrid(columns: columns, spacing: 2) {
                         ForEach(Array(assets.enumerated()), id: \.element.localIdentifier) { index, asset in
                             LibraryPhotoCell(asset: asset)
-                                .aspectRatio(1, contentMode: .fill)
-                                .clipped()
                                 .onTapGesture {
                                     selectedAssetIndex = index
                                     showFullscreen = true
                                 }
                         }
                     }
+                    .padding(.horizontal, 2)
                 }
             }
         }
         .navigationTitle(album.name)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.visible, for: .navigationBar)
+        .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .bottomBar) {
                 HStack {
@@ -123,10 +121,9 @@ struct LibraryAlbumDetailView: View {
                 )
             }
         }
-        .confirmationDialog(
+        .alert(
             "Album \"\(album.name)\" verfügbar machen",
-            isPresented: $showModeChoice,
-            titleVisibility: .visible
+            isPresented: $showModeChoice
         ) {
             Button("Kopieren") {
                 Task { await handleMakeAvailable(mode: .copy) }
@@ -138,12 +135,11 @@ struct LibraryAlbumDetailView: View {
         } message: {
             Text("Kopieren lädt Fotos nur hoch. Synchronisieren entfernt außerdem Fotos aus dem Server-Album, wenn du sie aus dem iOS-Album löschst.")
         }
-        .confirmationDialog(
-            "Verknüpfung lösen?",
-            isPresented: $showDisconnectConfirm,
-            titleVisibility: .visible
+        .alert(
+            "Verknüpfung trennen?",
+            isPresented: $showDisconnectConfirm
         ) {
-            Button("Verknüpfung lösen", role: .destructive) {
+            Button("Trennen", role: .destructive) {
                 viewModel.disconnect(album)
                 syncStatus = .none
                 isLinked = false
@@ -152,13 +148,12 @@ struct LibraryAlbumDetailView: View {
         } message: {
             Text("Das Album \"\(album.name)\" wird nicht mehr automatisch hochgeladen. Bereits hochgeladene Fotos bleiben auf dem Server.")
         }
-        .confirmationDialog(
+        .alert(
             initialSyncTitle,
             isPresented: Binding(
                 get: { pendingInitialSync != nil },
                 set: { if !$0 { pendingInitialSync = nil } }
-            ),
-            titleVisibility: .visible
+            )
         ) {
             Button("Alle Fotos hochladen") {
                 if let albumId = pendingInitialSync?.iosAlbumId {
@@ -257,19 +252,23 @@ struct LibraryPhotoCell: View {
     @State private var image: UIImage?
 
     var body: some View {
-        Group {
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                Rectangle()
-                    .fill(.quaternary)
+        Color.clear
+            .aspectRatio(1, contentMode: .fill)
+            .overlay {
+                if let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    Rectangle()
+                        .fill(.quaternary)
+                }
             }
-        }
-        .task(id: asset.localIdentifier) {
-            image = await loadThumbnail()
-        }
+            .clipped()
+            .contentShape(Rectangle())
+            .task(id: asset.localIdentifier) {
+                image = await loadThumbnail()
+            }
     }
 
     private func loadThumbnail() async -> UIImage? {
