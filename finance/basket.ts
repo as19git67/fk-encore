@@ -43,6 +43,7 @@ export interface SplitInput {
 }
 
 type BasketSnapshotRow = typeof financeBasketSnapshot.$inferSelect;
+type TransactionSplitRow = typeof financeTransactionSplit.$inferSelect;
 
 function normalizeId(value: number | string | bigint): number {
   return Number(value);
@@ -59,6 +60,18 @@ function basketSnapshotDto(snapshot: BasketSnapshotRow) {
     tx_ids: normalizeIdArray(snapshot.tx_ids as Array<number | string | bigint>),
     created_at: snapshot.created_at,
     updated_at: snapshot.updated_at,
+  };
+}
+
+function transactionSplitDto(split: TransactionSplitRow) {
+  return {
+    id: normalizeId(split.id),
+    transaction_id: normalizeId(split.transaction_id),
+    amount: split.amount,
+    tags: Array.isArray(split.tags) ? split.tags : [],
+    notice: split.notice,
+    is_tax_relevant: split.is_tax_relevant,
+    created_at: split.created_at,
   };
 }
 
@@ -93,7 +106,8 @@ export const getTransactionSplits = api(
   { expose: true, method: "GET", path: "/finance/transactions/:transactionId/splits", auth: true },
   async ({ transactionId }: { transactionId: number }) => {
     if (!(await allowedIds([transactionId])).length) throw APIError.notFound("transaction not found");
-    return { items: await db.select().from(financeTransactionSplit).where(eq(financeTransactionSplit.transaction_id, transactionId)) };
+    const rows = await db.select().from(financeTransactionSplit).where(eq(financeTransactionSplit.transaction_id, transactionId));
+    return { items: rows.map(transactionSplitDto) };
   },
 );
 
