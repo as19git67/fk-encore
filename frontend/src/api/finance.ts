@@ -816,12 +816,12 @@ export interface BasketSnapshot {
   updated_at: string
 }
 
-export function listBasketSnapshots(): Promise<{ items: BasketSnapshot[] }> { return apiFetch('/finance/baskets') }
+export function listBasketSnapshots(): Promise<{ items: BasketSnapshot[] }> { return apiFetch('/finance/basket-snapshots') }
 export function saveBasketSnapshot(name: string, transaction_ids: number[]): Promise<BasketSnapshot> {
-  return apiFetch('/finance/baskets', { method: 'POST', body: JSON.stringify({ name, transaction_ids }) })
+  return apiFetch('/finance/basket-snapshots', { method: 'POST', body: JSON.stringify({ name, transaction_ids }) })
 }
-export function loadBasketSnapshot(id: number): Promise<BasketSnapshot & { transaction_ids: number[]; missing: number }> { return apiFetch(`/finance/baskets/${id}`) }
-export function deleteBasketSnapshot(id: number): Promise<{ deleted: boolean }> { return apiFetch(`/finance/baskets/${id}`, { method: 'DELETE' }) }
+export function loadBasketSnapshot(id: number): Promise<BasketSnapshot & { transaction_ids: number[]; missing: number }> { return apiFetch(`/finance/basket-snapshot?id=${encodeURIComponent(String(id))}`) }
+export function deleteBasketSnapshot(id: number): Promise<{ deleted: boolean }> { return apiFetch(`/finance/basket-snapshot?id=${encodeURIComponent(String(id))}`, { method: 'DELETE' }) }
 
 export interface TransactionSplit {
   id?: number
