@@ -49,6 +49,8 @@ const canonicalCounterparty = ref('')
 const canonicalIban = ref('')
 const canonicalBic = ref('')
 const snapshotDialogVisible = ref(false)
+const snapshotLoading = ref(false)
+const snapshotError = ref<string | null>(null)
 const snapshots = ref<BasketSnapshot[]>([])
 const snapshotName = ref('')
 const selectedSnapshotId = ref<number | null>(null)
@@ -58,9 +60,13 @@ const compareB = ref<number | null>(null)
 const comparisonRows = ref<Array<{ label: string; a: number; b: number }>>([])
 const comparisonCurrencyMismatch = ref(false)
 const splitDialogVisible = ref(false)
+const splitLoading = ref(false)
+const splitError = ref<string | null>(null)
 const editingExistingSplit = ref(false)
 const splitRows = ref<Array<{ amount: number; tags: string; notice: string; is_tax_relevant: boolean }>>([])
 const datevDialogVisible = ref(false)
+const datevLoading = ref(false)
+const datevError = ref<string | null>(null)
 const datevMappings = ref<DatevMapping[]>([])
 const datevTag = ref('')
 const datevSoll = ref('')
@@ -111,6 +117,10 @@ function formatAmount(tx: Transaction): string {
     style: 'currency',
     currency: tx.currency_code,
   }).format(Number(tx.amount))
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
 }
 
 function formatDate(iso: string): string {
@@ -284,8 +294,16 @@ async function refreshSnapshots() {
 
 async function openSnapshots() {
   actionError.value = null
-  await refreshSnapshots()
+  snapshotError.value = null
   snapshotDialogVisible.value = true
+  snapshotLoading.value = true
+  try {
+    await refreshSnapshots()
+  } catch (err) {
+    snapshotError.value = errorMessage(err)
+  } finally {
+    snapshotLoading.value = false
+  }
 }
 
 async function saveSnapshot() {
@@ -349,20 +367,7 @@ async function compareSnapshots() {
 async function openSplit() {
   const amount = Number(items.value[0]?.amount ?? 0)
   const transactionId = items.value[0]?.id
-  if (transactionId) {
-    const existing = await getTransactionSplits(transactionId)
-    if (existing.items.length) {
-      editingExistingSplit.value = true
-      splitRows.value = existing.items.map(row => ({
-        amount: Number(row.amount),
-        tags: row.tags.join(', '),
-        notice: row.notice ?? '',
-        is_tax_relevant: !!row.is_tax_relevant,
-      }))
-      splitDialogVisible.value = true
-      return
-    }
-  }
+  splitError.value = null
   editingExistingSplit.value = false
   const first = Math.round(amount * 50) / 100
   splitRows.value = [
@@ -370,6 +375,26 @@ async function openSplit() {
     { amount: Math.round((amount - first) * 100) / 100, tags: '', notice: '', is_tax_relevant: false },
   ]
   splitDialogVisible.value = true
+
+  if (transactionId) {
+    splitLoading.value = true
+    try {
+      const existing = await getTransactionSplits(transactionId)
+      if (existing.items.length) {
+        editingExistingSplit.value = true
+        splitRows.value = existing.items.map(row => ({
+          amount: Number(row.amount),
+          tags: row.tags.join(', '),
+          notice: row.notice ?? '',
+          is_tax_relevant: !!row.is_tax_relevant,
+        }))
+      }
+    } catch (err) {
+      splitError.value = errorMessage(err)
+    } finally {
+      splitLoading.value = false
+    }
+  }
 }
 
 const splitDifference = computed(() => Number(items.value[0]?.amount ?? 0) - splitRows.value.reduce((sum, row) => sum + Number(row.amount || 0), 0))
@@ -382,13 +407,26 @@ async function saveSplit() {
 }
 
 async function openDatev() {
-  datevMappings.value = (await listDatevMappings()).items
+  datevError.value = null
   datevDialogVisible.value = true
+  datevLoading.value = true
+  try {
+    datevMappings.value = (await listDatevMappings()).items
+  } catch (err) {
+    datevError.value = errorMessage(err)
+  } finally {
+    datevLoading.value = false
+  }
 }
 async function addDatevMapping() {
-  await saveDatevMapping({ tag_name: datevTag.value, konto_soll: datevSoll.value, konto_haben: datevHaben.value, bu_schluessel: datevBu.value || null })
-  datevMappings.value = (await listDatevMappings()).items
-  datevTag.value = ''; datevSoll.value = ''; datevHaben.value = ''; datevBu.value = ''
+  datevError.value = null
+  try {
+    await saveDatevMapping({ tag_name: datevTag.value, konto_soll: datevSoll.value, konto_haben: datevHaben.value, bu_schluessel: datevBu.value || null })
+    datevMappings.value = (await listDatevMappings()).items
+    datevTag.value = ''; datevSoll.value = ''; datevHaben.value = ''; datevBu.value = ''
+  } catch (err) {
+    datevError.value = errorMessage(err)
+  }
 }
 async function exportDatev() {
   try { await downloadTransactionsDatev(selectionStore.ids, datevBerater.value, datevMandant.value) }
@@ -535,8 +573,8 @@ async function exportDatev() {
             />
             <Button label="Steuerrelevant" icon="pi pi-percentage" size="small" severity="secondary" outlined :loading="batchBusy" @click="toggleTaxRelevant" />
             <Button label="Gegenseite" icon="pi pi-users" size="small" severity="secondary" outlined :disabled="count === 0" @click="openCounterpartyMerge" />
-            <Button label="Split" icon="pi pi-sitemap" size="small" severity="secondary" outlined :disabled="count !== 1" @click="openSplit" />
-            <Button label="Baskets" icon="pi pi-save" size="small" severity="secondary" outlined @click="openSnapshots" />
+            <Button label="Split" icon="pi pi-sitemap" size="small" severity="secondary" outlined :disabled="count !== 1" :loading="splitLoading" @click="openSplit" />
+            <Button label="Baskets" icon="pi pi-save" size="small" severity="secondary" outlined :loading="snapshotLoading" @click="openSnapshots" />
             <Button
               label="Tags"
               icon="pi pi-tag"
@@ -566,7 +604,7 @@ async function exportDatev() {
               @click="exportCsv"
             />
             <Button label="PDF" icon="pi pi-file-pdf" size="small" severity="secondary" outlined :disabled="count === 0" :loading="pdfExporting" @click="openPdfDialog" />
-            <Button label="DATEV" icon="pi pi-calculator" size="small" severity="secondary" outlined :disabled="count === 0" @click="openDatev" />
+            <Button label="DATEV" icon="pi pi-calculator" size="small" severity="secondary" outlined :disabled="count === 0" :loading="datevLoading" @click="openDatev" />
           </div>
           <div class="clear-row">
             <Button
@@ -603,6 +641,8 @@ async function exportDatev() {
     </Dialog>
     <Dialog v-model:visible="snapshotDialogVisible" header="Benannte Baskets" modal :style="{ width: 'min(34rem, calc(100vw - 2rem))' }">
       <div class="counterparty-form">
+        <Message v-if="snapshotLoading" severity="info" :closable="false">Gespeicherte Baskets werden geladen…</Message>
+        <Message v-if="snapshotError" severity="error" :closable="false">Baskets konnten nicht geladen werden: {{ snapshotError }}</Message>
         <label>Aktuellen Basket speichern<InputText v-model="snapshotName" placeholder="Name" /></label>
         <Button label="Speichern / überschreiben" icon="pi pi-save" :disabled="!snapshotName.trim() || count === 0" @click="saveSnapshot" />
         <label>Gespeicherter Basket<Select v-model="selectedSnapshotId" :options="snapshots" option-label="name" option-value="id" placeholder="Basket wählen" /></label>
@@ -618,6 +658,8 @@ async function exportDatev() {
     </Dialog>
     <Dialog v-model:visible="splitDialogVisible" header="Buchung aufteilen" modal :style="{ width: 'min(42rem, calc(100vw - 2rem))' }">
       <div class="counterparty-form">
+        <Message v-if="splitLoading" severity="info" :closable="false">Vorhandene Split-Aufteilung wird geladen…</Message>
+        <Message v-if="splitError" severity="warn" :closable="false">Vorhandene Split-Aufteilung konnte nicht geladen werden: {{ splitError }}</Message>
         <Message v-if="editingExistingSplit" severity="info" :closable="false">Diese Buchung besitzt bereits einen Split. Speichern ersetzt die bestehende Aufteilung vollständig.</Message>
         <div v-for="(row, index) in splitRows" :key="index" class="split-row">
           <InputNumber v-model="row.amount" mode="currency" :currency="items[0]?.currency_code ?? 'EUR'" locale="de-DE" />
@@ -653,6 +695,8 @@ async function exportDatev() {
     </Dialog>
     <Dialog v-model:visible="datevDialogVisible" header="DATEV-Steuerexport" modal :style="{ width: 'min(42rem, calc(100vw - 2rem))' }">
       <div class="counterparty-form">
+        <Message v-if="datevLoading" severity="info" :closable="false">DATEV-Mappings werden geladen…</Message>
+        <Message v-if="datevError" severity="error" :closable="false">DATEV-Mappings konnten nicht geladen werden: {{ datevError }}</Message>
         <div class="basket-match-actions"><label>Beraternummer<InputText v-model="datevBerater" /></label><label>Mandantennummer<InputText v-model="datevMandant" /></label></div>
         <strong>Tag-Konten-Mapping</strong>
         <ul class="basket-analysis-list"><li v-for="mapping in datevMappings" :key="mapping.id" class="basket-analysis-row"><span>{{ mapping.tag_name }}</span><span>{{ mapping.konto_soll }} / {{ mapping.konto_haben }}<template v-if="mapping.bu_schluessel"> · BU {{ mapping.bu_schluessel }}</template></span></li></ul>
