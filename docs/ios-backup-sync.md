@@ -197,11 +197,17 @@ abgebrochene Uploads nicht als „Geister-Fehler" stehenbleiben.
 
 ## 8. Album-Zuordnung & Auswahl
 
+- **Konfiguration** erfolgt ausschließlich in der **iOS-Mediathek** über
+  „Verfügbar machen" (Album-Verknüpfung + Modus). Die Einstellungen
+  (`SyncSettingsView` → „Foto-Synchronisierung") enthalten nur noch den
+  Haupt­schalter, globale Optionen (Nur WLAN, Screenshots), Status und den
+  manuellen Auslöser — keine Album-Auswahl/-Zuordnung mehr.
 - **Geräte-Album → Server-Album**: `PhotoSyncPreferences.albumMappings`
-  (`[iOS-localIdentifier: serverAlbumId]`), gepflegt über `ServerAlbumPickerView`.
+  (`[iOS-localIdentifier: serverAlbumId]`), gesetzt beim „Verfügbar machen"
+  (Namensabgleich own → shared → neu anlegen).
 - **Bestätigte Zuordnungen**: `confirmedMappingIds` – nur Alben mit einer
-  expliziten Nutzer-Entscheidung (inkl. „kein Album") werden auto-synchronisiert;
-  unbestätigte werden übersprungen.
+  expliziten Nutzer-Entscheidung werden auto-synchronisiert; unbestätigte
+  werden übersprungen.
 - **„Gesamte Mediathek"**: Sentinel `__all_photos__` – enumeriert alle
   Bild-Assets direkt; bei gesetztem Sentinel werden Einzelalben ignoriert
   (kein versehentlicher Doppel-Sync).
@@ -236,7 +242,11 @@ abgebrochene Uploads nicht als „Geister-Fehler" stehenbleiben.
 
 ## 9. Download-Sync (Zwei-Wege)
 
-`PhotoDownloadService.sync()` lädt ausgewählte Server-Alben aufs Gerät:
+`PhotoDownloadService.sync()` lädt Server-Alben aufs Gerät. Es gibt **keine
+eigenständige Download-UI mehr** — der Download läuft nur noch als Hälfte des
+Bisync-Modus. Die `DownloadSyncPreferences` (inkl. `downloadEnabled`, Filter)
+bleiben intern erhalten; `downloadEnabled` ist standardmäßig aus und wird nicht
+mehr per UI umgeschaltet.
 
 - Vorbedingungen: `downloadEnabled` **oder** mindestens ein Bisync-Album
   (`bisyncServerAlbumIds()`), Netzwerk-Gate (eigener `wifiOnly`-Schalter),
