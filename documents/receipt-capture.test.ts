@@ -21,6 +21,7 @@ describe("receipt capture queue plan", () => {
     expect(plan).toEqual({
       categoryId: 17,
       receiptAccountId: 42,
+      receiptTransactionId: null,
       receiptOcrState: "pending",
       scanServices: ["receipt_ocr"],
     });
@@ -33,13 +34,27 @@ describe("receipt capture queue plan", () => {
     );
 
     expect(plans.map((plan) => plan.receiptAccountId)).toEqual([101, 102, 103]);
+    expect(plans.every((plan) => plan.receiptTransactionId === null)).toBe(true);
     expect(plans.every((plan) => plan.receiptOcrState === "pending")).toBe(true);
     expect(plans.every((plan) => plan.scanServices.join() === "receipt_ocr")).toBe(true);
+  });
+
+  it("uses PaddleOCR for receipt captures linked to an existing transaction", () => {
+    const plan = buildReceiptCapturePlan(17, null, 50274);
+
+    expect(plan).toEqual({
+      categoryId: 17,
+      receiptAccountId: null,
+      receiptTransactionId: 50274,
+      receiptOcrState: "pending",
+      scanServices: ["receipt_ocr"],
+    });
   });
 
   it("keeps the regular document pipeline for legacy captures without an account", () => {
     const plan = buildReceiptCapturePlan(17, null);
 
+    expect(plan.receiptTransactionId).toBeNull();
     expect(plan.receiptOcrState).toBeNull();
     expect(plan.scanServices).toEqual(["text_extract", "classify", "embed"]);
   });

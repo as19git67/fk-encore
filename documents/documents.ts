@@ -27,6 +27,8 @@ import {
   documents,
   documentsUserPref,
   financeAccountAccess,
+  financeTransaction,
+  financeTransactionDocument,
   userSubjectPersons,
 } from "../db/schema";
 import {
@@ -460,8 +462,19 @@ export const uploadReceiptCapture = api.raw(
 
     // Optional: cash account chosen by the user when photographing. Persisted
     // so the background OCR worker knows which account to book the transaction to.
+    // Alternatively, an existing transaction can be supplied. In that mode the
+    // OCR worker links and enriches the transaction, but never changes booking
+    // date, amount, counterparty or purpose.
     const rawAccountId = req.headers["x-account-id"] as string | undefined;
+    const rawTransactionId = req.headers["x-transaction-id"] as string | undefined;
     let receiptAccountId: number | null = null;
+    let receiptTransactionId: number | null = null;
+    if (rawAccountId && rawTransactionId) {
+      res.statusCode = 400;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: "Use either X-Account-Id or X-Transaction-Id, not both" }));
+      return;
+    }
     if (rawAccountId) {
       const parsed = parseInt(rawAccountId, 10);
       if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -482,6 +495,31 @@ export const uploadReceiptCapture = api.raw(
         return;
       }
       receiptAccountId = parsed;
+    }
+    if (rawTransactionId) {
+      const parsed = parseInt(rawTransactionId, 10);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        res.statusCode = 400;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "Invalid X-Transaction-Id header" }));
+        return;
+      }
+      const transaction = await dbFirst<{ id: number }>(
+        db.select({ id: financeTransaction.id })
+          .from(financeTransaction)
+          .innerJoin(financeAccountAccess, eq(financeAccountAccess.account_id, financeTransaction.account_id))
+          .where(and(
+            eq(financeTransaction.id, parsed),
+            eq(financeAccountAccess.user_id, userId),
+          )),
+      );
+      if (!transaction) {
+        res.statusCode = 404;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "Transaction not found" }));
+        return;
+      }
+      receiptTransactionId = parsed;
     }
     recordTiming("account");
 
@@ -515,7 +553,7 @@ export const uploadReceiptCapture = api.raw(
         throw new Error("receipt category 'belege' not found");
       }
       recordTiming("category");
-      const capturePlan = buildReceiptCapturePlan(receiptCategory.id, receiptAccountId);
+      const capturePlan = buildReceiptCapturePlan(receiptCategory.id, receiptAccountId, receiptTransactionId);
       const result = await storeDocumentBuffer({
         buffer: file.buffer,
         originalName: file.originalName,
@@ -524,6 +562,7 @@ export const uploadReceiptCapture = api.raw(
         scanPriority: RECEIPT_CAPTURE_PRIORITY,
         categoryId: capturePlan.categoryId,
         receiptAccountId: capturePlan.receiptAccountId,
+        receiptTransactionId: capturePlan.receiptTransactionId,
         receiptOcrState: capturePlan.receiptOcrState,
         // Cash-account captures are handled exclusively by PaddleOCR. The
         // receipt worker also warms the thumbnail and persists Paddle's raw
@@ -531,6 +570,12 @@ export const uploadReceiptCapture = api.raw(
         scanServices: capturePlan.scanServices,
       });
       recordTiming("store");
+      if (receiptTransactionId != null) {
+        await db
+          .insert(financeTransactionDocument)
+          .values({ transaction_id: receiptTransactionId, document_id: result.id })
+          .onConflictDoNothing();
+      }
       const totalDuration = performance.now() - requestStarted;
       res.statusCode = 201;
       res.setHeader("Content-Type", "application/json");
@@ -683,6 +728,7 @@ async function storeDocumentBuffer(params: {
   categoryId?: number | null;
   /** Receipt metadata set in the INSERT, before enqueue/trigger. */
   receiptAccountId?: number | null;
+  receiptTransactionId?: number | null;
   receiptOcrState?: "pending" | null;
 }): Promise<DocumentSummary> {
   const {
@@ -694,6 +740,7 @@ async function storeDocumentBuffer(params: {
     scanServices,
     categoryId = null,
     receiptAccountId = null,
+    receiptTransactionId = null,
     receiptOcrState = null,
   } = params;
   if (buffer.length > DOCUMENTS_MAX_BYTES) throw new Error("DOCUMENT_TOO_LARGE");
@@ -752,6 +799,7 @@ async function storeDocumentBuffer(params: {
         // calls triggerWorkers. Setting them afterwards allowed a worker to
         // race the category PATCH/relocate and retain a now-stale disk_path.
         receipt_account_id: receiptAccountId,
+        receipt_transaction_id: receiptTransactionId,
         receipt_ocr_state: receiptOcrState,
       })
       .returning(),

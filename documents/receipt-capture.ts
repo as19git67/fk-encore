@@ -8,6 +8,7 @@ const AUTO_BOOK_MIN_CONFIDENCE = 0.85;
 export interface ReceiptCapturePlan {
   categoryId: number;
   receiptAccountId: number | null;
+  receiptTransactionId: number | null;
   receiptOcrState: "pending" | null;
   scanServices: readonly DocumentScanService[];
 }
@@ -57,13 +58,15 @@ export function isReliableReceiptAmount(
 export function buildReceiptCapturePlan(
   categoryId: number,
   receiptAccountId: number | null,
+  receiptTransactionId: number | null = null,
 ): ReceiptCapturePlan {
-  if (receiptAccountId == null) {
+  if (receiptAccountId == null && receiptTransactionId == null) {
     // Legacy/API callers without a cash account still get the regular document
     // pipeline. The cash-transaction UI always supplies an account.
     return {
       categoryId,
       receiptAccountId: null,
+      receiptTransactionId: null,
       receiptOcrState: null,
       scanServices: REGULAR_DOCUMENT_SERVICES,
     };
@@ -72,6 +75,7 @@ export function buildReceiptCapturePlan(
   return {
     categoryId,
     receiptAccountId,
+    receiptTransactionId,
     receiptOcrState: "pending",
     scanServices: ["receipt_ocr"] as const,
   };

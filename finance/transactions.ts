@@ -21,7 +21,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { createExpenseReportPdf } from "./pdf-report";
+import { createTransactionReportPdf } from "./pdf-report";
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { and, desc, eq, gte, inArray, lte, or, sql } from "drizzle-orm";
@@ -1234,6 +1234,26 @@ function parseIdsParam(raw: string | null): number[] {
     .filter((n) => Number.isInteger(n) && n > 0);
 }
 
+function parseBooleanParam(raw: string | null, fallback: boolean): boolean {
+  if (raw === null) return fallback;
+  return raw === "1" || raw === "true";
+}
+
+function sanitizeReportTitle(raw: string | null): string {
+  const trimmed = (raw ?? "").replace(/\s+/g, " ").trim();
+  return trimmed.slice(0, 80) || "Transaktionsübersicht";
+}
+
+function slugifyFilename(title: string): string {
+  return title
+    .toLocaleLowerCase("de-DE")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || "transaktionen";
+}
+
 export const exportTransactions = api.raw(
   {
     expose: true,
@@ -1326,6 +1346,7 @@ export const exportTransactions = api.raw(
     const today = new Date().toISOString().slice(0, 10);
     res.statusCode = 200;
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
     res.setHeader(
       "Content-Disposition",
       `attachment; filename="basket-${today}.csv"`,
@@ -1364,7 +1385,8 @@ export const exportTransactionsPdf = api.raw(
     const auth = getAuthData();
     if (!auth) { res.statusCode = 401; res.end("Unauthorized"); return; }
     try { requirePermission(auth, "finance.view"); } catch { res.statusCode = 403; res.end("Forbidden"); return; }
-    const ids = parseIdsParam(new URL(req.url ?? "/", "http://localhost").searchParams.get("ids"));
+    const params = new URL(req.url ?? "/", "http://localhost").searchParams;
+    const ids = parseIdsParam(params.get("ids"));
     if (ids.length === 0) { res.statusCode = 400; res.end("ids required"); return; }
     const accessible = await accessibleTransactionIds(auth, ids);
     const rows = accessible.ids.length === 0 ? [] : await db
@@ -1374,10 +1396,13 @@ export const exportTransactionsPdf = api.raw(
       .orderBy(financeTransaction.booking_date, financeTransaction.id);
     const tags = await annotateTags(rows.map(row => row.id));
     const today = new Date().toISOString().slice(0, 10);
+    const title = sanitizeReportTitle(params.get("title"));
+    const filename = `${slugifyFilename(title)}-${today}.pdf`;
     res.statusCode = 200;
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="spesen-${today}.pdf"`);
-    const pdf = createExpenseReportPdf(rows.map(row => ({
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    const pdf = createTransactionReportPdf(rows.map(row => ({
       booking_date: toDateString(row.booking_date) ?? "",
       counterparty: row.counterparty,
       purpose: row.purpose,
@@ -1385,7 +1410,15 @@ export const exportTransactionsPdf = api.raw(
       currency_code: row.currency_code,
       notice: row.notice,
       tags: (tags.get(row.id) ?? []).filter(tag => tag.source === "user").map(tag => tag.name),
-    })), today);
+    })), today, {
+      title,
+      includeDate: parseBooleanParam(params.get("include_date"), true),
+      includeCounterparty: parseBooleanParam(params.get("include_counterparty"), true),
+      includePurpose: parseBooleanParam(params.get("include_purpose"), true),
+      includeAmount: parseBooleanParam(params.get("include_amount"), true),
+      includeNotice: parseBooleanParam(params.get("include_notice"), true),
+      includeTags: parseBooleanParam(params.get("include_tags"), true),
+    });
     pdf.pipe(res);
     pdf.end();
   },

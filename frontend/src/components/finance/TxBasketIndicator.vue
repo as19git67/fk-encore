@@ -10,7 +10,7 @@ import Message from 'primevue/message'
 import Checkbox from 'primevue/checkbox'
 import { useConfirm } from 'primevue/useconfirm'
 import { useTxSelectionStore } from '../../stores/finance/selection'
-import { batchReview, batchTaxRelevant, deleteBasketSnapshot, downloadTransactionsCsv, downloadTransactionsDatev, downloadTransactionsPdf, getTransaction, getTransactionSplits, listBasketSnapshots, listDatevMappings, loadBasketSnapshot, mergeCounterparties, saveBasketSnapshot, saveDatevMapping, setTransactionSplits, suggestDocumentsForTransactions, decideDocumentMatch, getDocumentMatchMetrics, linkDocumentsToTransactions, type BasketSnapshot, type DatevMapping, type DocumentMatchSuggestion, type Transaction } from '../../api/finance'
+import { batchReview, batchTaxRelevant, deleteBasketSnapshot, downloadTransactionsCsv, downloadTransactionsDatev, downloadTransactionsPdf, getTransaction, getTransactionSplits, listBasketSnapshots, listDatevMappings, loadBasketSnapshot, mergeCounterparties, saveBasketSnapshot, saveDatevMapping, setTransactionSplits, suggestDocumentsForTransactions, decideDocumentMatch, getDocumentMatchMetrics, linkDocumentsToTransactions, type BasketSnapshot, type DatevMapping, type DocumentMatchSuggestion, type Transaction, type TransactionPdfExportOptions } from '../../api/finance'
 import BatchTagDialog from './BatchTagDialog.vue'
 import BatchNoticeDialog from './BatchNoticeDialog.vue'
 import { searchDocuments, type DocumentSummary } from '../../api/documents'
@@ -32,7 +32,8 @@ const confirm = useConfirm()
 const drawerVisible = ref(false)
 const tagDialogVisible = ref(false)
 const noticeDialogVisible = ref(false)
-const exporting = ref(false)
+const csvExporting = ref(false)
+const pdfExporting = ref(false)
 const actionError = ref<string | null>(null)
 const actionInfo = ref<string | null>(null)
 const documentSuggestions = ref<DocumentMatchSuggestion[]>([])
@@ -48,6 +49,8 @@ const canonicalCounterparty = ref('')
 const canonicalIban = ref('')
 const canonicalBic = ref('')
 const snapshotDialogVisible = ref(false)
+const snapshotLoading = ref(false)
+const snapshotError = ref<string | null>(null)
 const snapshots = ref<BasketSnapshot[]>([])
 const snapshotName = ref('')
 const selectedSnapshotId = ref<number | null>(null)
@@ -57,9 +60,13 @@ const compareB = ref<number | null>(null)
 const comparisonRows = ref<Array<{ label: string; a: number; b: number }>>([])
 const comparisonCurrencyMismatch = ref(false)
 const splitDialogVisible = ref(false)
+const splitLoading = ref(false)
+const splitError = ref<string | null>(null)
 const editingExistingSplit = ref(false)
 const splitRows = ref<Array<{ amount: number; tags: string; notice: string; is_tax_relevant: boolean }>>([])
 const datevDialogVisible = ref(false)
+const datevLoading = ref(false)
+const datevError = ref<string | null>(null)
 const datevMappings = ref<DatevMapping[]>([])
 const datevTag = ref('')
 const datevSoll = ref('')
@@ -67,6 +74,17 @@ const datevHaben = ref('')
 const datevBu = ref('')
 const datevBerater = ref('')
 const datevMandant = ref('')
+const pdfDialogVisible = ref(false)
+const pdfTitle = ref('Transaktionsübersicht')
+const pdfExportOptions = ref<TransactionPdfExportOptions>({
+  title: 'Transaktionsübersicht',
+  includeDate: true,
+  includeCounterparty: true,
+  includePurpose: true,
+  includeAmount: true,
+  includeNotice: true,
+  includeTags: true,
+})
 
 const count = computed(() => selectionStore.count)
 const items = computed(() => selectionStore.items)
@@ -99,6 +117,10 @@ function formatAmount(tx: Transaction): string {
     style: 'currency',
     currency: tx.currency_code,
   }).format(Number(tx.amount))
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
 }
 
 function formatDate(iso: string): string {
@@ -171,24 +193,36 @@ function openBatchNoticeEditor() {
 }
 
 async function exportCsv() {
-  if (count.value === 0 || exporting.value) return
+  if (count.value === 0 || csvExporting.value) return
   actionError.value = null
-  exporting.value = true
+  csvExporting.value = true
   try {
     await downloadTransactionsCsv(selectionStore.ids)
   } catch (err) {
     actionError.value = err instanceof Error ? err.message : String(err)
   } finally {
-    exporting.value = false
+    csvExporting.value = false
   }
 }
 
+function openPdfDialog() {
+  if (!count.value) return
+  actionError.value = null
+  pdfDialogVisible.value = true
+}
+
 async function exportPdf() {
-  if (!count.value || exporting.value) return
-  exporting.value = true
-  try { await downloadTransactionsPdf(selectionStore.ids) }
+  if (!count.value || pdfExporting.value) return
+  pdfExporting.value = true
+  try {
+    await downloadTransactionsPdf(selectionStore.ids, {
+      ...pdfExportOptions.value,
+      title: pdfTitle.value.trim() || 'Transaktionsübersicht',
+    })
+    pdfDialogVisible.value = false
+  }
   catch (err) { actionError.value = err instanceof Error ? err.message : String(err) }
-  finally { exporting.value = false }
+  finally { pdfExporting.value = false }
 }
 
 async function applyBatchFlag(kind: 'reviewed' | 'tax', value: boolean) {
@@ -260,8 +294,16 @@ async function refreshSnapshots() {
 
 async function openSnapshots() {
   actionError.value = null
-  await refreshSnapshots()
+  snapshotError.value = null
   snapshotDialogVisible.value = true
+  snapshotLoading.value = true
+  try {
+    await refreshSnapshots()
+  } catch (err) {
+    snapshotError.value = errorMessage(err)
+  } finally {
+    snapshotLoading.value = false
+  }
 }
 
 async function saveSnapshot() {
@@ -325,20 +367,7 @@ async function compareSnapshots() {
 async function openSplit() {
   const amount = Number(items.value[0]?.amount ?? 0)
   const transactionId = items.value[0]?.id
-  if (transactionId) {
-    const existing = await getTransactionSplits(transactionId)
-    if (existing.items.length) {
-      editingExistingSplit.value = true
-      splitRows.value = existing.items.map(row => ({
-        amount: Number(row.amount),
-        tags: row.tags.join(', '),
-        notice: row.notice ?? '',
-        is_tax_relevant: !!row.is_tax_relevant,
-      }))
-      splitDialogVisible.value = true
-      return
-    }
-  }
+  splitError.value = null
   editingExistingSplit.value = false
   const first = Math.round(amount * 50) / 100
   splitRows.value = [
@@ -346,6 +375,26 @@ async function openSplit() {
     { amount: Math.round((amount - first) * 100) / 100, tags: '', notice: '', is_tax_relevant: false },
   ]
   splitDialogVisible.value = true
+
+  if (transactionId) {
+    splitLoading.value = true
+    try {
+      const existing = await getTransactionSplits(transactionId)
+      if (existing.items.length) {
+        editingExistingSplit.value = true
+        splitRows.value = existing.items.map(row => ({
+          amount: Number(row.amount),
+          tags: row.tags.join(', '),
+          notice: row.notice ?? '',
+          is_tax_relevant: !!row.is_tax_relevant,
+        }))
+      }
+    } catch (err) {
+      splitError.value = errorMessage(err)
+    } finally {
+      splitLoading.value = false
+    }
+  }
 }
 
 const splitDifference = computed(() => Number(items.value[0]?.amount ?? 0) - splitRows.value.reduce((sum, row) => sum + Number(row.amount || 0), 0))
@@ -358,13 +407,26 @@ async function saveSplit() {
 }
 
 async function openDatev() {
-  datevMappings.value = (await listDatevMappings()).items
+  datevError.value = null
   datevDialogVisible.value = true
+  datevLoading.value = true
+  try {
+    datevMappings.value = (await listDatevMappings()).items
+  } catch (err) {
+    datevError.value = errorMessage(err)
+  } finally {
+    datevLoading.value = false
+  }
 }
 async function addDatevMapping() {
-  await saveDatevMapping({ tag_name: datevTag.value, konto_soll: datevSoll.value, konto_haben: datevHaben.value, bu_schluessel: datevBu.value || null })
-  datevMappings.value = (await listDatevMappings()).items
-  datevTag.value = ''; datevSoll.value = ''; datevHaben.value = ''; datevBu.value = ''
+  datevError.value = null
+  try {
+    await saveDatevMapping({ tag_name: datevTag.value, konto_soll: datevSoll.value, konto_haben: datevHaben.value, bu_schluessel: datevBu.value || null })
+    datevMappings.value = (await listDatevMappings()).items
+    datevTag.value = ''; datevSoll.value = ''; datevHaben.value = ''; datevBu.value = ''
+  } catch (err) {
+    datevError.value = errorMessage(err)
+  }
 }
 async function exportDatev() {
   try { await downloadTransactionsDatev(selectionStore.ids, datevBerater.value, datevMandant.value) }
@@ -511,12 +573,14 @@ async function exportDatev() {
             />
             <Button label="Steuerrelevant" icon="pi pi-percentage" size="small" severity="secondary" outlined :loading="batchBusy" @click="toggleTaxRelevant" />
             <Button label="Gegenseite" icon="pi pi-users" size="small" severity="secondary" outlined :disabled="count === 0" @click="openCounterpartyMerge" />
-            <Button label="Split" icon="pi pi-sitemap" size="small" severity="secondary" outlined :disabled="count !== 1" @click="openSplit" />
-            <Button label="Baskets" icon="pi pi-save" size="small" severity="secondary" outlined @click="openSnapshots" />
+            <Button label="Split" icon="pi pi-sitemap" size="small" severity="secondary" outlined :disabled="count !== 1" :loading="splitLoading" @click="openSplit" />
+            <Button label="Baskets" icon="pi pi-save" size="small" severity="secondary" outlined :loading="snapshotLoading" @click="openSnapshots" />
             <Button
               label="Tags"
               icon="pi pi-tag"
               size="small"
+              severity="secondary"
+              outlined
               :disabled="count === 0"
               @click="openBatchTagEditor"
             />
@@ -536,11 +600,11 @@ async function exportDatev() {
               severity="secondary"
               outlined
               :disabled="count === 0"
-              :loading="exporting"
+              :loading="csvExporting"
               @click="exportCsv"
             />
-            <Button label="PDF" icon="pi pi-file-pdf" size="small" severity="secondary" outlined :disabled="count === 0" :loading="exporting" @click="exportPdf" />
-            <Button label="DATEV" icon="pi pi-calculator" size="small" severity="secondary" outlined :disabled="count === 0" @click="openDatev" />
+            <Button label="PDF" icon="pi pi-file-pdf" size="small" severity="secondary" outlined :disabled="count === 0" :loading="pdfExporting" @click="openPdfDialog" />
+            <Button label="DATEV" icon="pi pi-calculator" size="small" severity="secondary" outlined :disabled="count === 0" :loading="datevLoading" @click="openDatev" />
           </div>
           <div class="clear-row">
             <Button
@@ -577,6 +641,8 @@ async function exportDatev() {
     </Dialog>
     <Dialog v-model:visible="snapshotDialogVisible" header="Benannte Baskets" modal :style="{ width: 'min(34rem, calc(100vw - 2rem))' }">
       <div class="counterparty-form">
+        <Message v-if="snapshotLoading" severity="info" :closable="false">Gespeicherte Baskets werden geladen…</Message>
+        <Message v-if="snapshotError" severity="error" :closable="false">Baskets konnten nicht geladen werden: {{ snapshotError }}</Message>
         <label>Aktuellen Basket speichern<InputText v-model="snapshotName" placeholder="Name" /></label>
         <Button label="Speichern / überschreiben" icon="pi pi-save" :disabled="!snapshotName.trim() || count === 0" @click="saveSnapshot" />
         <label>Gespeicherter Basket<Select v-model="selectedSnapshotId" :options="snapshots" option-label="name" option-value="id" placeholder="Basket wählen" /></label>
@@ -592,6 +658,8 @@ async function exportDatev() {
     </Dialog>
     <Dialog v-model:visible="splitDialogVisible" header="Buchung aufteilen" modal :style="{ width: 'min(42rem, calc(100vw - 2rem))' }">
       <div class="counterparty-form">
+        <Message v-if="splitLoading" severity="info" :closable="false">Vorhandene Split-Aufteilung wird geladen…</Message>
+        <Message v-if="splitError" severity="warn" :closable="false">Vorhandene Split-Aufteilung konnte nicht geladen werden: {{ splitError }}</Message>
         <Message v-if="editingExistingSplit" severity="info" :closable="false">Diese Buchung besitzt bereits einen Split. Speichern ersetzt die bestehende Aufteilung vollständig.</Message>
         <div v-for="(row, index) in splitRows" :key="index" class="split-row">
           <InputNumber v-model="row.amount" mode="currency" :currency="items[0]?.currency_code ?? 'EUR'" locale="de-DE" />
@@ -605,8 +673,30 @@ async function exportDatev() {
       </div>
       <template #footer><Button label="Abbrechen" text @click="splitDialogVisible = false" /><Button label="Speichern" :disabled="Math.abs(splitDifference) >= .005" @click="saveSplit" /></template>
     </Dialog>
+    <Dialog v-model:visible="pdfDialogVisible" header="PDF exportieren" modal :style="{ width: 'min(32rem, calc(100vw - 2rem))' }">
+      <div class="counterparty-form">
+        <label>
+          Überschrift
+          <InputText v-model="pdfTitle" placeholder="Transaktionsübersicht" />
+        </label>
+        <div class="pdf-options" aria-label="Attribute im PDF">
+          <label><Checkbox v-model="pdfExportOptions.includeDate" binary /> Datum</label>
+          <label><Checkbox v-model="pdfExportOptions.includeCounterparty" binary /> Gegenseite</label>
+          <label><Checkbox v-model="pdfExportOptions.includePurpose" binary /> Verwendungszweck</label>
+          <label><Checkbox v-model="pdfExportOptions.includeAmount" binary /> Betrag</label>
+          <label><Checkbox v-model="pdfExportOptions.includeNotice" binary /> Notiz</label>
+          <label><Checkbox v-model="pdfExportOptions.includeTags" binary /> Tags</label>
+        </div>
+      </div>
+      <template #footer>
+        <Button label="Abbrechen" text severity="secondary" @click="pdfDialogVisible = false" />
+        <Button label="PDF erstellen" icon="pi pi-file-pdf" :loading="pdfExporting" :disabled="count === 0" @click="exportPdf" />
+      </template>
+    </Dialog>
     <Dialog v-model:visible="datevDialogVisible" header="DATEV-Steuerexport" modal :style="{ width: 'min(42rem, calc(100vw - 2rem))' }">
       <div class="counterparty-form">
+        <Message v-if="datevLoading" severity="info" :closable="false">DATEV-Mappings werden geladen…</Message>
+        <Message v-if="datevError" severity="error" :closable="false">DATEV-Mappings konnten nicht geladen werden: {{ datevError }}</Message>
         <div class="basket-match-actions"><label>Beraternummer<InputText v-model="datevBerater" /></label><label>Mandantennummer<InputText v-model="datevMandant" /></label></div>
         <strong>Tag-Konten-Mapping</strong>
         <ul class="basket-analysis-list"><li v-for="mapping in datevMappings" :key="mapping.id" class="basket-analysis-row"><span>{{ mapping.tag_name }}</span><span>{{ mapping.konto_soll }} / {{ mapping.konto_haben }}<template v-if="mapping.bu_schluessel"> · BU {{ mapping.bu_schluessel }}</template></span></li></ul>
@@ -660,6 +750,17 @@ async function exportDatev() {
 .counterparty-form { display: grid; gap: .85rem; }
 .counterparty-form label { display: grid; gap: .35rem; font-weight: 600; }
 .counterparty-form :deep(.p-inputtext) { width: 100%; }
+.pdf-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: .6rem .85rem;
+}
+.counterparty-form .pdf-options label {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  font-weight: 500;
+}
 .split-row { display: grid; grid-template-columns: minmax(8rem, .7fr) minmax(9rem, 1fr) minmax(9rem, 1fr) auto; gap: .5rem; align-items: center; }
 .datev-mapping-row { display: grid; grid-template-columns: 1.2fr 1fr 1fr .8fr auto; gap: .4rem; align-items: center; }
 @media (max-width: 620px) {
@@ -765,22 +866,41 @@ async function exportDatev() {
 }
 .drawer-actions {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(8.5rem, 100%), 1fr));
-  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(6.75rem, 1fr));
+  gap: 0.4rem;
   width: 100%;
 }
 .drawer-actions :deep(.p-button) {
   width: 100%;
   min-width: 0;
-  min-height: 2.5rem;
+  min-height: 2.25rem;
   justify-content: center;
+  padding-inline: 0.55rem;
 }
 .drawer-actions :deep(.p-button-label) {
-  white-space: normal;
-  line-height: 1.15;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .clear-row {
   display: flex;
   justify-content: flex-end;
+}
+
+@media (max-width: 520px) {
+  .drawer-actions {
+    grid-template-columns: repeat(5, minmax(2.5rem, 1fr));
+    gap: 0.35rem;
+  }
+
+  .drawer-actions :deep(.p-button) {
+    min-height: 2.35rem;
+    padding-inline: 0.35rem;
+  }
+
+  .drawer-actions :deep(.p-button-label) {
+    display: none;
+  }
 }
 </style>
