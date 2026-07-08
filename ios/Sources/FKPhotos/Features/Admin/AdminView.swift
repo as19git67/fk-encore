@@ -51,13 +51,7 @@ struct AdminView: View {
                 NavigationLink {
                     SyncSettingsView()
                 } label: {
-                    Label("Automatisch hochladen", systemImage: "arrow.up.to.line.circle")
-                }
-
-                NavigationLink {
-                    DownloadSettingsView()
-                } label: {
-                    Label("Automatisch herunterladen", systemImage: "arrow.down.to.line.circle")
+                    Label("Foto-Synchronisierung", systemImage: "arrow.triangle.2.circlepath")
                 }
 
                 NavigationLink {
