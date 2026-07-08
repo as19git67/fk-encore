@@ -10,9 +10,11 @@ import Message from 'primevue/message'
 import Checkbox from 'primevue/checkbox'
 import { useConfirm } from 'primevue/useconfirm'
 import { useTxSelectionStore } from '../../stores/finance/selection'
+import { useTagsStore } from '../../stores/finance/tags'
 import { batchReview, batchTaxRelevant, deleteBasketSnapshot, downloadTransactionsCsv, downloadTransactionsDatev, downloadTransactionsPdf, getTransaction, getTransactionSplits, listBasketSnapshots, listDatevMappings, loadBasketSnapshot, mergeCounterparties, saveBasketSnapshot, saveDatevMapping, setTransactionSplits, suggestDocumentsForTransactions, decideDocumentMatch, getDocumentMatchMetrics, linkDocumentsToTransactions, type BasketSnapshot, type DatevMapping, type DocumentMatchSuggestion, type Transaction, type TransactionPdfExportOptions } from '../../api/finance'
 import BatchTagDialog from './BatchTagDialog.vue'
 import BatchNoticeDialog from './BatchNoticeDialog.vue'
+import TagAutoComplete from './TagAutoComplete.vue'
 import { searchDocuments, type DocumentSummary } from '../../api/documents'
 import { basketTags, basketCounterparties, basketMonths, hasMixedCurrencies, type BasketAggregate } from '../../utils/financeBasketAnalysis'
 import { detectRecurringSelection } from '../../utils/financeRecurringSelection'
@@ -28,6 +30,7 @@ import { compareBasketCounterparties } from '../../utils/financeBasketCompare'
  */
 
 const selectionStore = useTxSelectionStore()
+const tagsStore = useTagsStore()
 const confirm = useConfirm()
 const drawerVisible = ref(false)
 const tagDialogVisible = ref(false)
@@ -63,7 +66,7 @@ const splitDialogVisible = ref(false)
 const splitLoading = ref(false)
 const splitError = ref<string | null>(null)
 const editingExistingSplit = ref(false)
-const splitRows = ref<Array<{ amount: number; tags: string; notice: string; is_tax_relevant: boolean }>>([])
+const splitRows = ref<Array<{ amount: number; tags: string[]; notice: string; is_tax_relevant: boolean }>>([])
 const datevDialogVisible = ref(false)
 const datevLoading = ref(false)
 const datevError = ref<string | null>(null)
@@ -368,11 +371,14 @@ async function openSplit() {
   const amount = Number(items.value[0]?.amount ?? 0)
   const transactionId = items.value[0]?.id
   splitError.value = null
+  if (tagsStore.items.length === 0) {
+    void tagsStore.refresh('user').catch(() => {})
+  }
   editingExistingSplit.value = false
   const first = Math.round(amount * 50) / 100
   splitRows.value = [
-    { amount: first, tags: '', notice: '', is_tax_relevant: false },
-    { amount: Math.round((amount - first) * 100) / 100, tags: '', notice: '', is_tax_relevant: false },
+    { amount: first, tags: [], notice: '', is_tax_relevant: false },
+    { amount: Math.round((amount - first) * 100) / 100, tags: [], notice: '', is_tax_relevant: false },
   ]
   splitDialogVisible.value = true
 
@@ -384,7 +390,7 @@ async function openSplit() {
         editingExistingSplit.value = true
         splitRows.value = existing.items.map(row => ({
           amount: Number(row.amount),
-          tags: row.tags.join(', '),
+          tags: [...row.tags],
           notice: row.notice ?? '',
           is_tax_relevant: !!row.is_tax_relevant,
         }))
@@ -401,7 +407,12 @@ const splitDifference = computed(() => Number(items.value[0]?.amount ?? 0) - spl
 async function saveSplit() {
   const tx = items.value[0]
   if (!tx || Math.abs(splitDifference.value) >= 0.005) return
-  await setTransactionSplits(tx.id, splitRows.value.map(row => ({ ...row, tags: row.tags.split(',').map(tag => tag.trim()).filter(Boolean) })))
+  const rows = splitRows.value.map(row => ({
+    ...row,
+    tags: row.tags.map(tag => tag.trim()).filter(Boolean),
+  }))
+  await setTransactionSplits(tx.id, rows)
+  tagsStore.addLocal(rows.flatMap(row => row.tags))
   splitDialogVisible.value = false
   actionInfo.value = 'Split-Buchung gespeichert.'
 }
@@ -663,12 +674,12 @@ async function exportDatev() {
         <Message v-if="editingExistingSplit" severity="info" :closable="false">Diese Buchung besitzt bereits einen Split. Speichern ersetzt die bestehende Aufteilung vollständig.</Message>
         <div v-for="(row, index) in splitRows" :key="index" class="split-row">
           <InputNumber v-model="row.amount" mode="currency" :currency="items[0]?.currency_code ?? 'EUR'" locale="de-DE" />
-          <InputText v-model="row.tags" placeholder="Tags, kommagetrennt" />
+          <TagAutoComplete v-model="row.tags" placeholder="Tags" />
           <InputText v-model="row.notice" placeholder="Notiz" />
           <label class="split-tax"><Checkbox v-model="row.is_tax_relevant" binary /> Steuerrelevant</label>
           <Button v-if="splitRows.length > 2" icon="pi pi-trash" text severity="danger" @click="splitRows.splice(index, 1)" />
         </div>
-        <Button label="Teil hinzufügen" icon="pi pi-plus" text @click="splitRows.push({ amount: 0, tags: '', notice: '', is_tax_relevant: false })" />
+        <Button label="Teil hinzufügen" icon="pi pi-plus" text @click="splitRows.push({ amount: 0, tags: [], notice: '', is_tax_relevant: false })" />
         <Message :severity="Math.abs(splitDifference) < .005 ? 'success' : 'warn'" :closable="false">Differenz: {{ formatAnalysisAmount(splitDifference) }}</Message>
       </div>
       <template #footer><Button label="Abbrechen" text @click="splitDialogVisible = false" /><Button label="Speichern" :disabled="Math.abs(splitDifference) >= .005" @click="saveSplit" /></template>
