@@ -836,9 +836,9 @@ export function setTransactionSplits(transactionId: number, splits: TransactionS
 }
 
 export interface DatevMapping { id: number; tag_name: string; konto_soll: string; konto_haben: string; bu_schluessel?: string | null }
-export function listDatevMappings(): Promise<{ items: DatevMapping[] }> { return apiFetch('/finance/datev/mappings') }
+export function listDatevMappings(): Promise<{ items: DatevMapping[] }> { return apiFetch('/finance/datev-mappings') }
 export function saveDatevMapping(mapping: Omit<DatevMapping, 'id'>): Promise<DatevMapping> {
-  return apiFetch('/finance/datev/mappings', { method: 'POST', body: JSON.stringify(mapping) })
+  return apiFetch('/finance/datev-mappings', { method: 'POST', body: JSON.stringify(mapping) })
 }
 export async function downloadTransactionsDatev(ids: number[], berater: string, mandant: string): Promise<void> {
   const token = localStorage.getItem('auth_token')
