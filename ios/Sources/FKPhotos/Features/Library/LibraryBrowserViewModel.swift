@@ -20,12 +20,25 @@ final class LibraryBrowserViewModel {
             case none
             case copy
             case sync
+            case bisync
         }
     }
 
     enum MakeAvailableResult: Sendable {
         case success(serverAlbumId: Int, albumName: String, assetCount: Int, iosAlbumId: String)
         case error(String)
+    }
+
+    /// Shared explanation shown in the copy/sync/bisync mode chooser.
+    static let modeChoiceExplanation =
+        "Kopieren: Fotos werden nur hochgeladen. Synchronisieren: zusätzlich werden im iOS-Album gelöschte Fotos auch aus dem Server-Album entfernt. Zwei-Wege: zusätzlich werden neue Server-Fotos aufs Gerät geladen und Server-Löschungen übernommen."
+
+    static func status(for mode: PhotoSyncMode) -> IOSAlbum.SyncStatus {
+        switch mode {
+        case .copy:   return .copy
+        case .sync:   return .sync
+        case .bisync: return .bisync
+        }
     }
 
     var albums: [IOSAlbum] = []
@@ -94,7 +107,7 @@ final class LibraryBrowserViewModel {
                     let individuallySynced = selectedIds.contains(localId) && mappings[localId] != nil
                     let status: IOSAlbum.SyncStatus
                     if individuallySynced {
-                        status = PhotoSyncPreferences.albumSyncMode(for: localId) == .sync ? .sync : .copy
+                        status = Self.status(for: PhotoSyncPreferences.albumSyncMode(for: localId))
                     } else if isAllLibrary {
                         status = .copy
                     } else {
@@ -183,7 +196,7 @@ final class LibraryBrowserViewModel {
         PhotoSyncPreferences.setAlbumSyncDate(Date(), for: album.id)
 
         if let idx = albums.firstIndex(where: { $0.id == album.id }) {
-            albums[idx].syncStatus = mode == .sync ? .sync : .copy
+            albums[idx].syncStatus = Self.status(for: mode)
             albums[idx].isIndividuallySynced = true
         }
 
@@ -227,9 +240,9 @@ final class LibraryBrowserViewModel {
         guard album.isIndividuallySynced else { return }
         PhotoSyncPreferences.setAlbumSyncMode(mode, for: album.id)
         if let idx = albums.firstIndex(where: { $0.id == album.id }) {
-            albums[idx].syncStatus = mode == .sync ? .sync : .copy
+            albums[idx].syncStatus = Self.status(for: mode)
         }
-        if mode == .sync {
+        if mode == .sync || mode == .bisync {
             BackgroundSyncManager.shared.scheduleNextSyncIfNeeded()
         }
     }

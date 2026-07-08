@@ -166,6 +166,7 @@ struct SyncSettingsView: View {
                                 Picker("Modus", selection: modeBinding(for: iosId)) {
                                     Text("Kopieren").tag(PhotoSyncMode.copy)
                                     Text("Synchronisieren").tag(PhotoSyncMode.sync)
+                                    Text("Zwei-Wege").tag(PhotoSyncMode.bisync)
                                 }
                                 .pickerStyle(.menu)
                             }
@@ -173,7 +174,7 @@ struct SyncSettingsView: View {
                     } header: {
                         Text("Album Zuordnungen")
                     } footer: {
-                        Text("Modus **Kopieren**: Fotos werden nur hochgeladen. Modus **Synchronisieren**: aus dem iOS-Album gelöschte Fotos werden auch aus dem Server-Album entfernt.\n\nNach links wischen → alle Fotos erneut synchronisieren. Nach rechts wischen → nur zukünftige Fotos synchronisieren.")
+                        Text("Modus **Kopieren**: Fotos werden nur hochgeladen. Modus **Synchronisieren**: aus dem iOS-Album gelöschte Fotos werden auch aus dem Server-Album entfernt. Modus **Zwei-Wege**: zusätzlich werden neue Server-Fotos aufs Gerät geladen und Server-Löschungen übernommen.\n\nNach links wischen → alle Fotos erneut synchronisieren. Nach rechts wischen → nur zukünftige Fotos synchronisieren.")
                     }
                 }
 
