@@ -9,11 +9,10 @@ final class LibraryBrowserViewModel {
         let id: String  // PHAssetCollection.localIdentifier
         let name: String
         let assetCount: Int
-        let isSmart: Bool
         var syncStatus: SyncStatus
         var isIndividuallySynced: Bool
 
-        var canMakeAvailable: Bool { syncStatus == .none && !isSmart }
+        var canMakeAvailable: Bool { syncStatus == .none }
         var canDisconnect: Bool { isIndividuallySynced }
 
         enum SyncStatus: Hashable, Sendable {
@@ -69,37 +68,29 @@ final class LibraryBrowserViewModel {
                 let imageFilter = PHFetchOptions()
                 imageFilter.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
 
-                let skipSubtypes: Set<PHAssetCollectionSubtype> = [
-                    .smartAlbumVideos, .smartAlbumAllHidden, .smartAlbumSlomoVideos,
-                    .smartAlbumTimelapses, .smartAlbumAnimated,
-                    .smartAlbumGeneric, .smartAlbumSelfPortraits,
-                    .smartAlbumLongExposures, .smartAlbumDepthEffect,
-                    .smartAlbumLivePhotos, .smartAlbumBursts,
-                    .smartAlbumScreenshots, .smartAlbumPanoramas,
-                ]
-
                 struct Raw {
                     let collection: PHAssetCollection
                     let title: String
                     let count: Int
-                    let isSmart: Bool
                 }
 
                 var seenIds = Set<String>()
                 var raw: [Raw] = []
 
-                func collect(from result: PHFetchResult<PHAssetCollection>, isSmart: Bool) {
+                func collect(from result: PHFetchResult<PHAssetCollection>) {
                     result.enumerateObjects { collection, _, _ in
-                        if skipSubtypes.contains(collection.assetCollectionSubtype) { return }
                         guard seenIds.insert(collection.localIdentifier).inserted else { return }
                         let count = PHAsset.fetchAssets(in: collection, options: imageFilter).count
                         guard count > 0 else { return }
                         let title = collection.localizedTitle ?? "Unbekannt"
-                        raw.append(Raw(collection: collection, title: title, count: count, isSmart: isSmart))
+                        raw.append(Raw(collection: collection, title: title, count: count))
                     }
                 }
-                collect(from: PHAssetCollection.fetchAssetCollections(with: .album, subtype: .albumRegular, options: nil), isSmart: false)
-                collect(from: PHAssetCollection.fetchAssetCollections(with: .smartAlbum, subtype: .any, options: nil), isSmart: true)
+                // Only regular user albums. Smart/system albums (Recents,
+                // Favoriten, Recently Saved, …) are intentionally excluded: their
+                // membership is managed dynamically by iOS and can't be safely
+                // linked for sync (and PhotoKit forbids writing into them).
+                collect(from: PHAssetCollection.fetchAssetCollections(with: .album, subtype: .albumRegular, options: nil))
 
                 let isAllLibrary = selectedIds.contains(allLibrary)
                 let result = raw.map { r -> IOSAlbum in
@@ -117,7 +108,6 @@ final class LibraryBrowserViewModel {
                         id: localId,
                         name: r.title,
                         assetCount: r.count,
-                        isSmart: r.isSmart,
                         syncStatus: status,
                         isIndividuallySynced: individuallySynced
                     )

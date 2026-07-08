@@ -24,7 +24,7 @@ struct LibraryAlbumDetailView: View {
         self._isLinked = State(initialValue: album.isIndividuallySynced)
     }
 
-    private var canMakeAvailable: Bool { syncStatus == .none && !album.isSmart }
+    private var canMakeAvailable: Bool { syncStatus == .none }
     private var canDisconnect: Bool { isLinked }
 
     /// Two-way binding for the linked album's sync mode. Reads the local
