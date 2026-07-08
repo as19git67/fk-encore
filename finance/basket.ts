@@ -163,39 +163,70 @@ function transactionSplitDto(split: TransactionSplitRow) {
   };
 }
 
+async function setTransactionSplitsForCurrentUser(transactionId: number, splits: SplitInput[]) {
+  const allowed = await allowedIds([transactionId], true);
+  if (!allowed.length) throw APIError.permissionDenied("write access required");
+  if (!Array.isArray(splits) || splits.length < 2) throw APIError.invalidArgument("at least two splits required");
+  const [transaction] = await db.select({ amount: financeTransaction.amount }).from(financeTransaction).where(eq(financeTransaction.id, transactionId));
+  const normalized = splits.map(split => ({ ...split, amount: Number(split.amount) }));
+  if (normalized.some(split => !Number.isFinite(split.amount) || split.amount === 0)) throw APIError.invalidArgument("split amounts must be non-zero numbers");
+  const cents = (value: number) => Math.round(value * 100);
+  if (normalized.reduce((sum, split) => sum + cents(split.amount), 0) !== cents(Number(transaction.amount))) {
+    throw APIError.invalidArgument("split sum must equal transaction amount");
+  }
+  await db.transaction(async tx => {
+    await tx.delete(financeTransactionSplit).where(eq(financeTransactionSplit.transaction_id, transactionId));
+    await tx.insert(financeTransactionSplit).values(normalized.map(split => ({
+      transaction_id: transactionId,
+      amount: split.amount.toFixed(2),
+      tags: [...new Set((split.tags ?? []).map(tag => tag.trim()).filter(Boolean))],
+      notice: split.notice?.trim() || null,
+      is_tax_relevant: !!split.is_tax_relevant,
+    })));
+  });
+  return { saved: normalized.length };
+}
+
+async function getTransactionSplitsForCurrentUser(transactionId: number) {
+  if (!(await allowedIds([transactionId])).length) throw APIError.notFound("transaction not found");
+  const rows = await db.select().from(financeTransactionSplit).where(eq(financeTransactionSplit.transaction_id, transactionId));
+  return { items: rows.map(transactionSplitDto) };
+}
+
 export const setTransactionSplits = api(
   { expose: true, method: "PUT", path: "/finance/transactions/:transactionId/splits", auth: true },
   async ({ transactionId, splits }: { transactionId: number; splits: SplitInput[] }) => {
-    const allowed = await allowedIds([transactionId], true);
-    if (!allowed.length) throw APIError.permissionDenied("write access required");
-    if (!Array.isArray(splits) || splits.length < 2) throw APIError.invalidArgument("at least two splits required");
-    const [transaction] = await db.select({ amount: financeTransaction.amount }).from(financeTransaction).where(eq(financeTransaction.id, transactionId));
-    const normalized = splits.map(split => ({ ...split, amount: Number(split.amount) }));
-    if (normalized.some(split => !Number.isFinite(split.amount) || split.amount === 0)) throw APIError.invalidArgument("split amounts must be non-zero numbers");
-    const cents = (value: number) => Math.round(value * 100);
-    if (normalized.reduce((sum, split) => sum + cents(split.amount), 0) !== cents(Number(transaction.amount))) {
-      throw APIError.invalidArgument("split sum must equal transaction amount");
-    }
-    await db.transaction(async tx => {
-      await tx.delete(financeTransactionSplit).where(eq(financeTransactionSplit.transaction_id, transactionId));
-      await tx.insert(financeTransactionSplit).values(normalized.map(split => ({
-        transaction_id: transactionId,
-        amount: split.amount.toFixed(2),
-        tags: [...new Set((split.tags ?? []).map(tag => tag.trim()).filter(Boolean))],
-        notice: split.notice?.trim() || null,
-        is_tax_relevant: !!split.is_tax_relevant,
-      })));
-    });
-    return { saved: normalized.length };
+    return setTransactionSplitsForCurrentUser(transactionId, splits);
   },
 );
 
 export const getTransactionSplits = api(
   { expose: true, method: "GET", path: "/finance/transactions/:transactionId/splits", auth: true },
   async ({ transactionId }: { transactionId: number }) => {
-    if (!(await allowedIds([transactionId])).length) throw APIError.notFound("transaction not found");
-    const rows = await db.select().from(financeTransactionSplit).where(eq(financeTransactionSplit.transaction_id, transactionId));
-    return { items: rows.map(transactionSplitDto) };
+    return getTransactionSplitsForCurrentUser(transactionId);
+  },
+);
+
+export const getTransactionSplitsRaw = api.raw(
+  { expose: true, method: "GET", path: "/finance/transaction-splits", auth: true },
+  async (req, res) => {
+    try {
+      writeJson(res, 200, await getTransactionSplitsForCurrentUser(idFromQuery(req)));
+    } catch (err) {
+      writeRawError(res, err);
+    }
+  },
+);
+
+export const setTransactionSplitsRaw = api.raw(
+  { expose: true, method: "PUT", path: "/finance/transaction-splits", auth: true },
+  async (req, res) => {
+    try {
+      const body = parseJsonBody<{ splits: SplitInput[] }>(await readBody(req));
+      writeJson(res, 200, await setTransactionSplitsForCurrentUser(idFromQuery(req), body.splits));
+    } catch (err) {
+      writeRawError(res, err);
+    }
   },
 );
 
