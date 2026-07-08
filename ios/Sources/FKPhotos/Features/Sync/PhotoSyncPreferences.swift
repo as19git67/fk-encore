@@ -1,6 +1,6 @@
 import Foundation
 
-/// One-way sync mode for a linked iOS album (issue #812).
+/// Sync mode for a linked iOS album (issue #812).
 enum PhotoSyncMode: String, Sendable {
     /// Upload new photos only; never remove anything from the server album.
     case copy
@@ -8,6 +8,10 @@ enum PhotoSyncMode: String, Sendable {
     /// left the iOS album. Non-destructive to the photo itself — only the album
     /// membership is removed.
     case sync
+    /// Two-way: behaves like `sync` for the upload direction and additionally
+    /// pulls new server photos onto the device and mirrors server-side removals
+    /// (via PhotoDownloadService) for the same album pair.
+    case bisync
 }
 
 /// Namespace for all sync-related UserDefaults keys and typed accessors.
@@ -110,6 +114,20 @@ struct PhotoSyncPreferences {
         var modes = loadAlbumSyncModes()
         modes.removeValue(forKey: albumId)
         UserDefaults.standard.set(modes, forKey: albumSyncModesKey)
+    }
+
+    /// Server album IDs whose linked iOS album is in bisync mode (confirmed and
+    /// mapped). Used by PhotoDownloadService to include these albums in the
+    /// download pass — even when the global "Automatisch herunterladen" toggle
+    /// is off — so the two-way sync's download half runs.
+    static func bisyncServerAlbumIds() -> Set<Int> {
+        let confirmed = confirmedMappingIds
+        var result = Set<Int>()
+        for (iosId, serverId) in albumMappings {
+            guard confirmed.contains(iosId), albumSyncMode(for: iosId) == .bisync else { continue }
+            result.insert(serverId)
+        }
+        return result
     }
 
     // MARK: - Confirmed album mappings

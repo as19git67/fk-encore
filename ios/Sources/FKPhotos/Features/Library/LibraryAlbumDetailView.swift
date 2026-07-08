@@ -32,10 +32,16 @@ struct LibraryAlbumDetailView: View {
     /// status locally.
     private var syncModeBinding: Binding<PhotoSyncMode> {
         Binding(
-            get: { syncStatus == .sync ? .sync : .copy },
+            get: {
+                switch syncStatus {
+                case .bisync: return .bisync
+                case .sync:   return .sync
+                default:      return .copy
+                }
+            },
             set: { newMode in
                 viewModel.setSyncMode(newMode, for: album)
-                syncStatus = newMode == .sync ? .sync : .copy
+                syncStatus = LibraryBrowserViewModel.status(for: newMode)
             }
         )
     }
@@ -96,6 +102,7 @@ struct LibraryAlbumDetailView: View {
                         Picker("Modus", selection: syncModeBinding) {
                             Label("Kopieren", systemImage: "arrow.up").tag(PhotoSyncMode.copy)
                             Label("Synchronisieren", systemImage: "arrow.triangle.2.circlepath").tag(PhotoSyncMode.sync)
+                            Label("Zwei-Wege", systemImage: "arrow.left.arrow.right").tag(PhotoSyncMode.bisync)
                         }
                         Divider()
                         Button(role: .destructive) {
@@ -131,9 +138,12 @@ struct LibraryAlbumDetailView: View {
             Button("Synchronisieren") {
                 Task { await handleMakeAvailable(mode: .sync) }
             }
+            Button("Zwei-Wege") {
+                Task { await handleMakeAvailable(mode: .bisync) }
+            }
             Button("Abbrechen", role: .cancel) {}
         } message: {
-            Text("Kopieren lädt Fotos nur hoch. Synchronisieren entfernt außerdem Fotos aus dem Server-Album, wenn du sie aus dem iOS-Album löschst.")
+            Text(LibraryBrowserViewModel.modeChoiceExplanation)
         }
         .alert(
             "Verknüpfung trennen?",

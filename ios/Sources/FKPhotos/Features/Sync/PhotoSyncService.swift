@@ -290,8 +290,9 @@ actor PhotoSyncService {
         guard !serverPhotoMap.isEmpty else { return }
 
         for (iosAlbumId, serverAlbumId) in mappings {
+            let mode = PhotoSyncPreferences.albumSyncMode(for: iosAlbumId)
             guard confirmed.contains(iosAlbumId),
-                  PhotoSyncPreferences.albumSyncMode(for: iosAlbumId) == .sync else { continue }
+                  mode == .sync || mode == .bisync else { continue }
 
             // Current iOS album membership (local identifiers only — no hashing).
             // nil means the collection couldn't be read; skip to avoid a wipe.
@@ -319,6 +320,14 @@ actor PhotoSyncService {
                 "/albums/photos/batch",
                 body: BatchBody(albumIds: [serverAlbumId], photoIds: toRemove, action: "remove")
             )
+
+            // Bisync: keep the download half in step. Forget these photos in the
+            // download tracking so PhotoDownloadService doesn't later see them as
+            // "removed on the server" and move the still-present local asset into
+            // "F4mil Trash". No-op for pure sync albums (not in the download set).
+            if mode == .bisync {
+                DownloadSyncPreferences.forgetDownloadedPhotos(albumId: serverAlbumId, photoIds: toRemove)
+            }
         }
     }
 
