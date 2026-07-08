@@ -124,13 +124,12 @@ struct LibraryBrowserView: View {
         } message: {
             Text(viewModel.errorMessage ?? "")
         }
-        .confirmationDialog(
+        .alert(
             modeChoiceTitle,
             isPresented: Binding(
                 get: { pendingModeChoice != nil },
                 set: { if !$0 { pendingModeChoice = nil } }
-            ),
-            titleVisibility: .visible
+            )
         ) {
             Button("Kopieren") {
                 if let album = pendingModeChoice {
@@ -150,13 +149,12 @@ struct LibraryBrowserView: View {
         } message: {
             Text("Kopieren lädt Fotos nur hoch. Synchronisieren entfernt außerdem Fotos aus dem Server-Album, wenn du sie aus dem iOS-Album löschst.")
         }
-        .confirmationDialog(
+        .alert(
             initialSyncTitle,
             isPresented: Binding(
                 get: { pendingInitialSync != nil },
                 set: { if !$0 { pendingInitialSync = nil } }
-            ),
-            titleVisibility: .visible
+            )
         ) {
             Button("Alle Fotos hochladen") {
                 if let albumId = pendingInitialSync?.iosAlbumId {
