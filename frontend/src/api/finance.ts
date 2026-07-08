@@ -830,9 +830,9 @@ export interface TransactionSplit {
   notice?: string | null
   is_tax_relevant?: boolean
 }
-export function getTransactionSplits(transactionId: number): Promise<{ items: TransactionSplit[] }> { return apiFetch(`/finance/transactions/${transactionId}/splits`) }
+export function getTransactionSplits(transactionId: number): Promise<{ items: TransactionSplit[] }> { return apiFetch(`/finance/transaction-splits?id=${encodeURIComponent(String(transactionId))}`) }
 export function setTransactionSplits(transactionId: number, splits: TransactionSplit[]): Promise<{ saved: number }> {
-  return apiFetch(`/finance/transactions/${transactionId}/splits`, { method: 'PUT', body: JSON.stringify({ splits }) })
+  return apiFetch(`/finance/transaction-splits?id=${encodeURIComponent(String(transactionId))}`, { method: 'PUT', body: JSON.stringify({ splits }) })
 }
 
 export interface DatevMapping { id: number; tag_name: string; konto_soll: string; konto_haben: string; bu_schluessel?: string | null }
