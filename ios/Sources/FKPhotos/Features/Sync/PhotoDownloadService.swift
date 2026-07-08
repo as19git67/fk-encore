@@ -75,7 +75,11 @@ actor PhotoDownloadService {
 
     /// Run one download sync cycle. Returns silently if preconditions aren't met.
     func sync() async throws {
-        guard DownloadSyncPreferences.downloadEnabled else { return }
+        // Bisync albums (issue #812 Etappe 4) are pulled even when the global
+        // "Automatisch herunterladen" toggle is off — their download half is
+        // implied by the two-way mode.
+        let bisyncIds = PhotoSyncPreferences.bisyncServerAlbumIds()
+        guard DownloadSyncPreferences.downloadEnabled || !bisyncIds.isEmpty else { return }
 
         if DownloadSyncPreferences.wifiOnly {
             guard await isWifiConnected else { return }
@@ -83,7 +87,7 @@ actor PhotoDownloadService {
             guard await isNetworkAvailable else { return }
         }
 
-        let albumIds = DownloadSyncPreferences.selectedServerAlbumIds
+        let albumIds = DownloadSyncPreferences.selectedServerAlbumIds.union(bisyncIds)
         guard !albumIds.isEmpty else { return }
 
         // Read/write access is required to create albums and modify existing ones

@@ -102,6 +102,27 @@ struct DownloadSyncPreferences {
         UserDefaults.standard.set(mapping, forKey: downloadedPhotosKey)
     }
 
+    /// Drops photos from the download tracking for an album without moving the
+    /// local asset to trash. Called from the upload-side deletion pass in bisync
+    /// mode: when the user removes a photo from the iOS album, delete-up removes
+    /// it from the server album, and this forgets it here so the download pass
+    /// treats it as gone-on-purpose rather than server-removed (which would move
+    /// the still-present local asset into "F4mil Trash").
+    static func forgetDownloadedPhotos(albumId: Int, photoIds: [Int]) {
+        guard !photoIds.isEmpty else { return }
+        let albumKey = String(albumId)
+        var photos = loadDownloadedPhotos()
+        guard var album = photos[albumKey] else { return }
+        var state = loadDownloadedState()
+        for pid in photoIds {
+            album.removeValue(forKey: String(pid))
+            state.removeValue(forKey: stateKey(albumId: albumId, photoId: pid))
+        }
+        photos[albumKey] = album
+        saveDownloadedPhotos(photos)
+        saveDownloadedState(state)
+    }
+
     static func resetDownloadHistory() {
         UserDefaults.standard.removeObject(forKey: downloadedPhotosKey)
         UserDefaults.standard.removeObject(forKey: lastSyncDateKey)

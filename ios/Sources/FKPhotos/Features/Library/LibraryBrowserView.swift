@@ -143,11 +143,17 @@ struct LibraryBrowserView: View {
                     Task { await handleMakeAvailable(album, mode: .sync) }
                 }
             }
+            Button("Zwei-Wege") {
+                if let album = pendingModeChoice {
+                    pendingModeChoice = nil
+                    Task { await handleMakeAvailable(album, mode: .bisync) }
+                }
+            }
             Button("Abbrechen", role: .cancel) {
                 pendingModeChoice = nil
             }
         } message: {
-            Text("Kopieren lädt Fotos nur hoch. Synchronisieren entfernt außerdem Fotos aus dem Server-Album, wenn du sie aus dem iOS-Album löschst.")
+            Text(modeChoiceMessage)
         }
         .alert(
             initialSyncTitle,
@@ -187,6 +193,10 @@ struct LibraryBrowserView: View {
     private var modeChoiceTitle: String {
         guard let album = pendingModeChoice else { return "" }
         return "Album \"\(album.name)\" verfügbar machen"
+    }
+
+    private var modeChoiceMessage: String {
+        LibraryBrowserViewModel.modeChoiceExplanation
     }
 
     private var initialSyncTitle: String {
@@ -275,6 +285,13 @@ struct SyncStatusBadge: View {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(.green, in: Capsule())
+        case .bisync:
+            Label("bidir", systemImage: "arrow.left.arrow.right")
+                .font(.caption2)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(.orange, in: Capsule())
         }
     }
 }
