@@ -38,8 +38,17 @@ entsprechen.
 
 API:
 
+- `GET /finance/transaction-splits?id=…`
+- `PUT /finance/transaction-splits?id=…`
+
+Die älteren typed Endpunkte bleiben backendseitig kompatibel:
+
 - `GET /finance/transactions/:transactionId/splits`
 - `PUT /finance/transactions/:transactionId/splits`
+
+Das Frontend verwendet die raw JSON-Endpunkte mit statischem Pfad, analog zu
+den Basket-Snapshot-Endpunkten. Dadurch vermeiden wir Browser-/Runtime-Probleme
+mit Path-Param-Pattern-Decoding und typed API Encoding.
 
 ---
 
