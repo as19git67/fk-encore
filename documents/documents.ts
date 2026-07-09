@@ -121,6 +121,17 @@ function checkModule(): void {
   requirePermission(authData, "module.documents");
 }
 
+/**
+ * `data.manage` admins see every document in `listDocuments`; the same flag
+ * lets `loadVisibleDocument` / `loadAdministrableDocument` open, edit, delete
+ * and replace those documents. Keeping the single-document endpoints in sync
+ * with the list avoids the "visible in the list but 'document not found' on
+ * open/delete" mismatch.
+ */
+function isDataAdmin(authData: { permissions: string[] }): boolean {
+  return authData.permissions.includes("data.manage");
+}
+
 // ─── DTOs ───────────────────────────────────────────────────────────────────
 
 export interface DocumentSummary {
@@ -1074,7 +1085,7 @@ export const getDocument = api(
     requirePermission(authData, "documents.view");
     const userId = getUserId();
 
-    const row = await loadVisibleDocument(userId, id);
+    const row = await loadVisibleDocument(userId, id, isDataAdmin(authData));
     const cat = row.category_id
       ? await dbFirst<{ slug: string }>(
           db.select({ slug: documentCategories.slug }).from(documentCategories).where(eq(documentCategories.id, row.category_id)),
@@ -1108,7 +1119,7 @@ export const getDocumentReceiptSuggestion = api(
     requirePermission(authData, "documents.view");
     const userId = getUserId();
 
-    const row = await loadVisibleDocument(userId, id);
+    const row = await loadVisibleDocument(userId, id, isDataAdmin(authData));
     const cat = row.category_id
       ? await dbFirst<{ slug: string }>(
           db.select({ slug: documentCategories.slug }).from(documentCategories).where(eq(documentCategories.id, row.category_id)),
@@ -1172,7 +1183,7 @@ export const getDocumentFile = api.raw(
     }
 
     try {
-      const row = await loadVisibleDocument(userId, docId);
+      const row = await loadVisibleDocument(userId, docId, isDataAdmin(authData));
       assertPathUnderDocumentsRoot(row.disk_path);
       // Prefer the generated searchable ("sandwich") PDF for regular scanned
       // documents. PaddleOCR receipt captures deliberately serve their sharp
@@ -1256,7 +1267,7 @@ export const downloadDocument = api.raw(
     }
 
     try {
-      const row = await loadVisibleDocument(userId, docId);
+      const row = await loadVisibleDocument(userId, docId, isDataAdmin(authData));
       assertPathUnderDocumentsRoot(row.disk_path);
 
       // Build (or reuse) the searchable sidecar for regular documents. Receipt
@@ -1338,7 +1349,7 @@ export const getDocumentThumbnail = api.raw(
     }
 
     try {
-      const row = await loadVisibleDocument(userId, docId);
+      const row = await loadVisibleDocument(userId, docId, isDataAdmin(authData));
       const thumbPath = await ensureThumbnail(docId, row.disk_path);
       if (!thumbPath) {
         res.statusCode = 404;
@@ -1401,7 +1412,7 @@ export const updateDocument = api(
     requirePermission(authData, "documents.edit");
     const userId = getUserId();
 
-    const existing = await loadVisibleDocument(userId, req.id);
+    const existing = await loadVisibleDocument(userId, req.id, isDataAdmin(authData));
 
     const patch: Partial<typeof documents.$inferInsert> = {};
     if (req.title !== undefined) patch.title = req.title?.trim() || null;
@@ -1464,7 +1475,7 @@ export const updateDocument = api(
       }
     }
 
-    return await loadDetail(userId, existing.id);
+    return await loadDetail(userId, existing.id, isDataAdmin(authData));
   },
 );
 
@@ -1493,7 +1504,7 @@ export const updateDocumentVisibility = api(
     requirePermission(authData, "documents.edit");
     const userId = getUserId();
 
-    const existing = await loadAdministrableDocument(userId, req.id);
+    const existing = await loadAdministrableDocument(userId, req.id, isDataAdmin(authData));
 
     if (req.visibility === "group") {
       if (req.group_id == null) {
@@ -1521,7 +1532,7 @@ export const updateDocumentVisibility = api(
       );
     }
 
-    return await loadDetail(userId, existing.id);
+    return await loadDetail(userId, existing.id, isDataAdmin(authData));
   },
 );
 
@@ -1697,7 +1708,7 @@ export const batchUpdateVisibility = api(
     for (const id of req.document_ids) {
       let row;
       try {
-        row = await loadAdministrableDocument(userId, id);
+        row = await loadAdministrableDocument(userId, id, isDataAdmin(authData));
       } catch {
         skipped++;
         continue;
@@ -1917,7 +1928,7 @@ export const deleteDocument = api(
     requirePermission(authData, "documents.delete");
     const userId = getUserId();
 
-    const row = await loadAdministrableDocument(userId, id);
+    const row = await loadAdministrableDocument(userId, id, isDataAdmin(authData));
     // Drop tax hardlinks first so we don't leave dangling entries under
     // `_steuer/` after the canonical inode is freed. The DB delete then
     // cascades through tag/tax rows via FK ON DELETE.
@@ -1961,7 +1972,7 @@ export const reclassifyDocument = api(
     requirePermission(authData, "documents.edit");
     const userId = getUserId();
 
-    await loadVisibleDocument(userId, req.id);
+    await loadVisibleDocument(userId, req.id, isDataAdmin(authData));
     const patch: Partial<typeof documents.$inferInsert> = {
       status: "pending",
       last_error: null,
@@ -2014,7 +2025,7 @@ export const replaceDocumentFile = api.raw(
     }
     let row: typeof documents.$inferSelect;
     try {
-      row = await loadAdministrableDocument(userId, docId);
+      row = await loadAdministrableDocument(userId, docId, isDataAdmin(authData));
     } catch {
       res.statusCode = 404; res.end(JSON.stringify({ error: "Document not found" })); return;
     }
@@ -2123,7 +2134,7 @@ export const unlockDocument = api(
       throw APIError.invalidArgument("Bitte ein Passwort eingeben.");
     }
 
-    const row = await loadAdministrableDocument(userId, req.id);
+    const row = await loadAdministrableDocument(userId, req.id, isDataAdmin(authData));
     assertPathUnderDocumentsRoot(row.disk_path);
 
     const decrypted = await decryptPdfWithPassword(row.disk_path, password);
@@ -2175,7 +2186,7 @@ export const unlockDocument = api(
     await requeueDocument(req.id);
     triggerWorkers();
 
-    return loadDetail(userId, req.id);
+    return loadDetail(userId, req.id, isDataAdmin(authData));
   },
 );
 
@@ -2204,7 +2215,7 @@ export const updateDocumentTax = api(
     requirePermission(authData, "documents.edit");
     const userId = getUserId();
 
-    const existing = await loadVisibleDocument(userId, req.id);
+    const existing = await loadVisibleDocument(userId, req.id, isDataAdmin(authData));
 
     let year: number | null = null;
     if (req.tax_relevant) {
@@ -2257,7 +2268,7 @@ export const updateDocumentTax = api(
       );
     }
 
-    return await loadDetail(userId, existing.id);
+    return await loadDetail(userId, existing.id, isDataAdmin(authData));
   },
 );
 
@@ -3332,8 +3343,8 @@ export const deleteSubjectPersonEndpoint = api(
 
 // ─── Internal helpers ───────────────────────────────────────────────────────
 
-async function loadDetail(userId: number, id: number): Promise<DocumentDetail> {
-  const row = await loadVisibleDocument(userId, id);
+async function loadDetail(userId: number, id: number, isAdmin = false): Promise<DocumentDetail> {
+  const row = await loadVisibleDocument(userId, id, isAdmin);
   const cat = row.category_id
     ? await dbFirst<{ slug: string }>(
         db.select({ slug: documentCategories.slug }).from(documentCategories).where(eq(documentCategories.id, row.category_id)),
