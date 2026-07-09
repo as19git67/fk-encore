@@ -476,6 +476,23 @@ describe("finance/transactions — create (manual booking)", () => {
     await expect(createTransaction(args)).rejects.toThrow(/duplicate/);
   });
 
+  it("keeps two same-day/amount bookings distinct when their note differs (dedupe includes notice)", async () => {
+    const { a } = await createAccounts();
+    setAuth("1", ["finance.view", "finance.admin"]);
+    const base = {
+      account_id: a,
+      booking_date: "2024-08-15",
+      amount: -3.5,
+    };
+    const first = await createTransaction({ ...base, notice: "Kaffee vormittags" });
+    const second = await createTransaction({ ...base, notice: "Kaffee nachmittags" });
+    expect(second.id).not.toBe(first.id);
+    // Same note → genuine duplicate, still rejected.
+    await expect(
+      createTransaction({ ...base, notice: "Kaffee vormittags" }),
+    ).rejects.toThrow(/duplicate/);
+  });
+
   it("404s on unknown account", async () => {
     setAuth("1", ["finance.view", "finance.admin"]);
     await expect(
