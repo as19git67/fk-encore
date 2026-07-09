@@ -105,6 +105,57 @@ export function replaceMeterDevice(id: number, req: ReplaceDeviceRequest) {
   })
 }
 
+// ── Readings (Etappe 3) ──────────────────────────────────────────────────────
+
+export interface Reading {
+  id: number
+  deviceId: number
+  deviceSerial: string | null
+  value: number
+  takenAt: string
+  source: string
+  notes: string | null
+  enteredBy: number | null
+  absoluteValue: number
+}
+
+export interface AddReadingRequest {
+  value: number
+  takenAt?: string
+  notes?: string
+}
+
+export interface UpdateReadingRequest {
+  value: number
+  takenAt: string
+  notes?: string
+}
+
+export function listReadings(meterId: number, limit = 100, offset = 0) {
+  const q = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  return apiFetch<{ readings: Reading[]; total: number }>(`/meters/${meterId}/readings?${q}`)
+}
+
+export function addReading(meterId: number, req: AddReadingRequest) {
+  return apiFetch<{ id: number }>(`/meters/${meterId}/readings`, {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+}
+
+export function updateReading(readingId: number, req: UpdateReadingRequest) {
+  return apiFetch<{ updated: boolean }>(`/meters/readings/${readingId}`, {
+    method: 'PUT',
+    body: JSON.stringify(req),
+  })
+}
+
+export function deleteReading(readingId: number) {
+  return apiFetch<{ deleted: boolean }>(`/meters/readings/${readingId}`, {
+    method: 'DELETE',
+  })
+}
+
 /** Human-readable German labels for the meter types. */
 export const METER_TYPE_LABELS: Record<MeterType, string> = {
   electricity: 'Strom',

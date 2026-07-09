@@ -18,11 +18,16 @@ import {
   updateMeter,
   deleteMeter,
   replaceMeterDevice,
+  listReadings,
+  addReading,
+  updateReading,
+  deleteReading,
   METER_TYPE_LABELS,
   METER_TYPE_ICONS,
   type MeterListItem,
   type MeterDetail,
   type MeterType,
+  type Reading,
 } from '../api/meters'
 import { listGroups, type GroupSummary } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
@@ -30,6 +35,7 @@ import { toLocalIsoDateTime } from '../utils/dateFormat'
 
 const auth = useAuthStore()
 const canManage = computed(() => auth.hasPermission('meters.manage'))
+const canEnter = computed(() => auth.hasPermission('meters.read_entry'))
 
 const meters = ref<MeterListItem[]>([])
 const groups = ref<GroupSummary[]>([])
@@ -228,6 +234,7 @@ async function openDetail(m: MeterListItem) {
   error.value = ''
   try {
     detail.value = await getMeter(m.id)
+    await loadReadings()
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Details'
   } finally {
@@ -274,6 +281,100 @@ async function handleReplace() {
   } finally {
     replacing.value = false
   }
+}
+
+// ── Readings (Etappe 3) ──────────────────────────────────────────────────────
+
+const readings = ref<Reading[]>([])
+const loadingReadings = ref(false)
+
+async function loadReadings() {
+  if (!detail.value) return
+  loadingReadings.value = true
+  try {
+    const res = await listReadings(detail.value.id)
+    readings.value = res.readings
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Laden der Ablesungen'
+  } finally {
+    loadingReadings.value = false
+  }
+}
+
+const showReading = ref(false)
+const savingReading = ref(false)
+const readingForm = ref<{ id: number | null; value: number; takenAt: Date; notes: string }>({
+  id: null,
+  value: 0,
+  takenAt: new Date(),
+  notes: '',
+})
+
+/** Whether the caller may edit/delete a given reading. */
+function canEditReading(r: Reading): boolean {
+  if (canManage.value) return true
+  return canEnter.value && r.enteredBy === (auth.user?.id ?? -1)
+}
+
+function openReadingEntry() {
+  readingForm.value = { id: null, value: 0, takenAt: new Date(), notes: '' }
+  showReading.value = true
+}
+
+function openReadingEdit(r: Reading) {
+  readingForm.value = {
+    id: r.id,
+    value: r.value,
+    takenAt: new Date(r.takenAt),
+    notes: r.notes ?? '',
+  }
+  showReading.value = true
+}
+
+async function handleSaveReading() {
+  if (!detail.value) return
+  savingReading.value = true
+  error.value = ''
+  try {
+    if (readingForm.value.id === null) {
+      await addReading(detail.value.id, {
+        value: readingForm.value.value,
+        takenAt: toLocalIsoDateTime(readingForm.value.takenAt),
+        notes: readingForm.value.notes.trim() || undefined,
+      })
+    } else {
+      await updateReading(readingForm.value.id, {
+        value: readingForm.value.value,
+        takenAt: toLocalIsoDateTime(readingForm.value.takenAt),
+        notes: readingForm.value.notes.trim() || undefined,
+      })
+    }
+    showReading.value = false
+    await Promise.all([loadReadings(), refreshAfterReading()])
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Speichern der Ablesung'
+  } finally {
+    savingReading.value = false
+  }
+}
+
+async function handleDeleteReading(r: Reading) {
+  if (!confirm('Ablesung wirklich löschen?')) return
+  error.value = ''
+  try {
+    await deleteReading(r.id)
+    await Promise.all([loadReadings(), refreshAfterReading()])
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Löschen der Ablesung'
+  }
+}
+
+/** Refresh the meter list + detail so last-reading / absolute totals update. */
+async function refreshAfterReading() {
+  if (!detail.value) return
+  const id = detail.value.id
+  await load()
+  detail.value = await getMeter(id)
 }
 
 onMounted(load)
@@ -323,9 +424,18 @@ onMounted(load)
             <span class="figure-value">{{ fmt(m.absoluteTotal, m.decimals) }} {{ m.unit }}</span>
           </div>
         </div>
-        <div v-if="canManage" class="meter-actions" @click.stop>
-          <Button icon="pi pi-pencil" text rounded severity="secondary" v-tooltip.top="'Bearbeiten'" @click="openEdit(m)" />
-          <Button icon="pi pi-trash" text rounded severity="danger" v-tooltip.top="'Löschen'" @click="handleDelete(m)" />
+        <div v-if="canManage || canEnter" class="meter-actions" @click.stop>
+          <Button
+            v-if="canEnter"
+            icon="pi pi-plus-circle"
+            text
+            rounded
+            severity="primary"
+            v-tooltip.top="'Ablesen'"
+            @click="openDetail(m).then(openReadingEntry)"
+          />
+          <Button v-if="canManage" icon="pi pi-pencil" text rounded severity="secondary" v-tooltip.top="'Bearbeiten'" @click="openEdit(m)" />
+          <Button v-if="canManage" icon="pi pi-trash" text rounded severity="danger" v-tooltip.top="'Löschen'" @click="handleDelete(m)" />
         </div>
       </div>
     </div>
@@ -362,6 +472,47 @@ onMounted(load)
         <Column header="Status">
           <template #body="{ data }">
             <Tag :value="data.active ? 'aktiv' : 'ersetzt'" :severity="data.active ? 'success' : 'secondary'" />
+          </template>
+        </Column>
+      </DataTable>
+
+      <!-- Readings -->
+      <div class="detail-header readings-header">
+        <h2><i class="pi pi-list" /> Ablesungen</h2>
+        <Button
+          v-if="canEnter"
+          label="Neue Ablesung"
+          icon="pi pi-plus"
+          size="small"
+          @click="openReadingEntry"
+        />
+      </div>
+      <div v-if="loadingReadings" class="info"><i class="pi pi-spin pi-spinner" /> Ablesungen…</div>
+      <div v-else-if="readings.length === 0" class="info">Noch keine Ablesungen erfasst.</div>
+      <DataTable v-else :value="readings" size="small" paginator :rows="10">
+        <Column header="Datum">
+          <template #body="{ data }">{{ fmtDateTime(data.takenAt) }}</template>
+        </Column>
+        <Column header="Wert">
+          <template #body="{ data }">{{ fmt(data.value, detail.decimals) }} {{ detail.unit }}</template>
+        </Column>
+        <Column header="Absolut">
+          <template #body="{ data }">{{ fmt(data.absoluteValue, detail.decimals) }} {{ detail.unit }}</template>
+        </Column>
+        <Column header="Quelle">
+          <template #body="{ data }">
+            <Tag :value="data.source" severity="secondary" />
+          </template>
+        </Column>
+        <Column field="notes" header="Notiz">
+          <template #body="{ data }">{{ data.notes ?? '' }}</template>
+        </Column>
+        <Column style="width: 6rem">
+          <template #body="{ data }">
+            <div class="reading-actions" v-if="canEditReading(data)">
+              <Button icon="pi pi-pencil" text rounded size="small" severity="secondary" v-tooltip.left="'Bearbeiten'" @click="openReadingEdit(data)" />
+              <Button icon="pi pi-trash" text rounded size="small" severity="danger" v-tooltip.left="'Löschen'" @click="handleDeleteReading(data)" />
+            </div>
           </template>
         </Column>
       </DataTable>
@@ -439,6 +590,30 @@ onMounted(load)
       <template #footer>
         <Button label="Abbrechen" text @click="showReplace = false" />
         <Button label="Ersetzen" icon="pi pi-refresh" :loading="replacing" @click="handleReplace" />
+      </template>
+    </Dialog>
+
+    <!-- Reading entry / edit dialog -->
+    <Dialog
+      v-model:visible="showReading"
+      :header="readingForm.id === null ? 'Neue Ablesung' : 'Ablesung bearbeiten'"
+      modal
+      :style="{ width: '26rem' }"
+    >
+      <div class="form-grid">
+        <label>Zeitpunkt
+          <DatePicker v-model="readingForm.takenAt" show-time hour-format="24" date-format="dd.mm.yy" />
+        </label>
+        <label>Zählerstand
+          <InputNumber v-model="readingForm.value" :min-fraction-digits="0" :max-fraction-digits="3" autofocus />
+        </label>
+        <label class="full">Notiz
+          <Textarea v-model="readingForm.notes" rows="2" auto-resize />
+        </label>
+      </div>
+      <template #footer>
+        <Button label="Abbrechen" text @click="showReading = false" />
+        <Button label="Speichern" icon="pi pi-check" :loading="savingReading" @click="handleSaveReading" />
       </template>
     </Dialog>
   </div>
@@ -546,6 +721,14 @@ onMounted(load)
 }
 .detail-header h2 i {
   margin-right: 0.4rem;
+}
+.readings-header {
+  margin-top: 1.5rem;
+}
+.reading-actions {
+  display: flex;
+  gap: 0.15rem;
+  justify-content: flex-end;
 }
 .form-grid {
   display: grid;
