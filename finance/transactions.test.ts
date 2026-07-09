@@ -425,6 +425,21 @@ describe("finance/transactions — create (manual booking)", () => {
     expect(result.tags.map((t) => t.name)).toContain("alltag");
   });
 
+  it("stores notice separately from purpose (regression: cash-booking form used to bind its Notiz field to purpose)", async () => {
+    const { a } = await createAccounts();
+    setAuth("7", ["finance.view"]);
+    await grant(a, 7, "write");
+    const result = await createTransaction({
+      account_id: a,
+      booking_date: "2024-08-15",
+      amount: -12,
+      purpose: "Wocheneinkauf",
+      notice: "War mit Anna einkaufen",
+    });
+    expect(result.purpose).toBe("Wocheneinkauf");
+    expect(result.notice).toBe("War mit Anna einkaufen");
+  });
+
   it("finance.admin can book on any account", async () => {
     const { a } = await createAccounts();
     setAuth("1", ["finance.view", "finance.admin"]);
@@ -459,6 +474,23 @@ describe("finance/transactions — create (manual booking)", () => {
     };
     await createTransaction(args);
     await expect(createTransaction(args)).rejects.toThrow(/duplicate/);
+  });
+
+  it("keeps two same-day/amount bookings distinct when their note differs (dedupe includes notice)", async () => {
+    const { a } = await createAccounts();
+    setAuth("1", ["finance.view", "finance.admin"]);
+    const base = {
+      account_id: a,
+      booking_date: "2024-08-15",
+      amount: -3.5,
+    };
+    const first = await createTransaction({ ...base, notice: "Kaffee vormittags" });
+    const second = await createTransaction({ ...base, notice: "Kaffee nachmittags" });
+    expect(second.id).not.toBe(first.id);
+    // Same note → genuine duplicate, still rejected.
+    await expect(
+      createTransaction({ ...base, notice: "Kaffee vormittags" }),
+    ).rejects.toThrow(/duplicate/);
   });
 
   it("404s on unknown account", async () => {

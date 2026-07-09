@@ -49,11 +49,25 @@ export async function loadUserGroupIds(userId: number): Promise<number[]> {
  * a group they belong to. Throws `APIError.notFound` otherwise
  * (deliberately masking the difference from "does not exist" so we
  * don't leak document ids).
+ *
+ * `isAdmin` callers (holding `data.manage`) bypass the visibility filter
+ * and may load any document. This keeps the single-document endpoints
+ * consistent with `listDocuments`, which already shows admins every
+ * document: without it an admin could see a document in the list but get
+ * "document not found" when opening, deleting, or replacing it.
  */
 export async function loadVisibleDocument(
   userId: number,
   documentId: number,
+  isAdmin = false,
 ): Promise<DocumentRow> {
+  if (isAdmin) {
+    const row = await dbFirst<DocumentRow>(
+      db.select().from(documents).where(eq(documents.id, documentId)),
+    );
+    if (!row) throw APIError.notFound("document not found");
+    return row;
+  }
   const groupIds = await loadUserGroupIds(userId);
   const row = await dbFirst<DocumentRow>(
     db
@@ -70,12 +84,17 @@ export async function loadVisibleDocument(
  * change): the caller must be the uploader OR hold the `owner` role in
  * the document's group. Regular members cannot delete group
  * documents they didn't upload.
+ *
+ * `isAdmin` callers (holding `data.manage`) may administer any document,
+ * mirroring the admin bypass in `loadVisibleDocument`.
  */
 export async function loadAdministrableDocument(
   userId: number,
   documentId: number,
+  isAdmin = false,
 ): Promise<DocumentRow> {
-  const row = await loadVisibleDocument(userId, documentId);
+  const row = await loadVisibleDocument(userId, documentId, isAdmin);
+  if (isAdmin) return row;
   if (row.user_id === userId) return row;
   if (row.visibility === "group" && row.group_id != null) {
     const membership = await dbFirst<{ role: "owner" | "member" }>(

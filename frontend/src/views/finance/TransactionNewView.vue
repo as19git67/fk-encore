@@ -28,7 +28,7 @@ const bookingDate = ref<Date>(new Date())
 const amount = ref<number | null>(null)
 const isExpense = ref(true)
 const counterparty = ref('')
-const purpose = ref('') // mapped to purpose in backend if needed, or just notes
+const notice = ref('')
 const tags = ref<string[]>([])
 const error = ref<string | null>(null)
 const saving = ref(false)
@@ -231,7 +231,7 @@ async function save() {
       booking_date: toIso(bookingDate.value),
       amount: signedAmount,
       counterparty: counterpartyName,
-      purpose: purpose.value.trim() || undefined,
+      notice: notice.value.trim() || undefined,
       tags: tags.value,
       receipt_document_id: receiptDocumentId.value ?? undefined,
     })
@@ -346,7 +346,7 @@ async function save() {
     <div class="field">
       <label class="field-label">Notiz</label>
       <InputText
-        v-model="purpose"
+        v-model="notice"
         type="text"
         class="recipient-input"
         placeholder="Notiz zur Buchung …"
