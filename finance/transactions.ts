@@ -119,6 +119,12 @@ function computeDedupeHash(input: {
   currency: string;
   purpose: string | null;
   counterpartyIban: string | null;
+  // Free-form note. Included so two otherwise-identical manual bookings
+  // (same day / amount / currency) stay distinct when the user tells them
+  // apart by their note — cash bookings carry no purpose or IBAN, so the
+  // note is the only remaining discriminator. Was previously covered by
+  // `purpose` back when the cash form (wrongly) stored notes there.
+  notice: string | null;
 }): string {
   const canonical = [
     input.bookingDate,
@@ -127,6 +133,7 @@ function computeDedupeHash(input: {
     input.currency,
     input.purpose ?? "",
     input.counterpartyIban ?? "",
+    input.notice ?? "",
   ].join("|");
   return createHash("sha256").update(canonical).digest("hex");
 }
@@ -457,6 +464,7 @@ interface CreateParams {
   amount: number | string;
   currency_code?: string; // defaults to account's currency
   purpose?: string;
+  notice?: string;
   counterparty?: string;
   counterparty_iban?: string;
   tags?: string[]; // user tags
@@ -525,6 +533,7 @@ export const createTransaction = api(
       currency: currencyCode,
       purpose: p.purpose ?? null,
       counterpartyIban: p.counterparty_iban ?? null,
+      notice: p.notice ?? null,
     });
 
     let row: typeof financeTransaction.$inferSelect;
@@ -538,6 +547,7 @@ export const createTransaction = api(
           amount,
           currency_code: currencyCode,
           purpose: p.purpose?.trim() || null,
+          notice: p.notice?.trim() || null,
           counterparty: p.counterparty?.trim() || null,
           counterparty_iban: p.counterparty_iban?.trim() || null,
           receipt_document_id: p.receipt_document_id ?? null,
@@ -553,7 +563,7 @@ export const createTransaction = api(
       if (pgCode === "23505") {
         // unique_violation on (account_id, dedupe_hash)
         throw APIError.alreadyExists(
-          "duplicate transaction on this account (same date / amount / purpose)",
+          "duplicate transaction on this account (same date / amount / purpose / note)",
         );
       }
       throw err;
