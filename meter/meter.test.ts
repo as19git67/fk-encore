@@ -158,3 +158,216 @@ describe("GET /meters", () => {
     });
   });
 });
+
+// ── CRUD + device management (Etappe 2) ──────────────────────────────────────
+
+const MANAGE = ["meters.view", "meters.manage"];
+
+describe("POST /meters", () => {
+  it("creates a meter with an initial device", async () => {
+    setAuth(String(userId), MANAGE);
+    const { id } = await endpoints.createMeter({
+      name: "Strom Haus",
+      type: "electricity",
+      unit: "kWh",
+      location: "Keller",
+      decimals: 2,
+      device: { serialNumber: "E-100", installedAt: "2024-01-01T00:00:00Z", startValue: 5000 },
+    });
+    const detail = await endpoints.getMeter({ id });
+    expect(detail.name).toBe("Strom Haus");
+    expect(detail.decimals).toBe(2);
+    expect(detail.devices).toHaveLength(1);
+    expect(detail.devices[0].serialNumber).toBe("E-100");
+    expect(detail.devices[0].startValue).toBe(5000);
+    expect(detail.devices[0].active).toBe(true);
+    // No readings yet → the started-at value contributes zero consumption.
+    expect(detail.absoluteTotal).toBe(0);
+  });
+
+  it("rejects an unknown meter type", async () => {
+    setAuth(String(userId), MANAGE);
+    await expect(
+      endpoints.createMeter({
+        name: "X",
+        type: "plasma" as any,
+        unit: "kWh",
+        device: { installedAt: "2024-01-01T00:00:00Z" },
+      }),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+  });
+
+  it("rejects an empty name", async () => {
+    setAuth(String(userId), MANAGE);
+    await expect(
+      endpoints.createMeter({
+        name: "   ",
+        type: "water",
+        unit: "m3",
+        device: { installedAt: "2024-01-01T00:00:00Z" },
+      }),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+  });
+
+  it("requires meters.manage (view alone is not enough)", async () => {
+    setAuth(String(userId), ["meters.view"]);
+    await expect(
+      endpoints.createMeter({
+        name: "X",
+        type: "water",
+        unit: "m3",
+        device: { installedAt: "2024-01-01T00:00:00Z" },
+      }),
+    ).rejects.toMatchObject({ code: "permission_denied" });
+  });
+});
+
+describe("PUT /meters/:id", () => {
+  it("updates master data", async () => {
+    setAuth(String(userId), MANAGE);
+    const { id } = await endpoints.createMeter({
+      name: "Alt",
+      type: "gas",
+      unit: "m3",
+      device: { installedAt: "2024-01-01T00:00:00Z" },
+    });
+    const updated = await endpoints.updateMeter({
+      id,
+      name: "Neu",
+      type: "gas",
+      unit: "kWh",
+      location: "Hauswirtschaftsraum",
+      decimals: 3,
+    });
+    expect(updated.name).toBe("Neu");
+    expect(updated.unit).toBe("kWh");
+    expect(updated.location).toBe("Hauswirtschaftsraum");
+    expect(updated.decimals).toBe(3);
+    // Device history is untouched by a master-data update.
+    expect(updated.devices).toHaveLength(1);
+  });
+
+  it("returns not_found for a meter the caller cannot see", async () => {
+    const otherId = await createUser("other");
+    cleanupUserIds.push(otherId);
+    setAuth(String(otherId), MANAGE);
+    const { id } = await endpoints.createMeter({
+      name: "Fremd",
+      type: "water",
+      unit: "m3",
+      device: { installedAt: "2024-01-01T00:00:00Z" },
+    });
+
+    setAuth(String(userId), MANAGE);
+    await expect(
+      endpoints.updateMeter({ id, name: "Hack", type: "water", unit: "m3" }),
+    ).rejects.toMatchObject({ code: "not_found" });
+  });
+});
+
+describe("DELETE /meters/:id", () => {
+  it("deletes a meter and cascades its devices", async () => {
+    setAuth(String(userId), MANAGE);
+    const { id } = await endpoints.createMeter({
+      name: "Weg",
+      type: "water",
+      unit: "m3",
+      device: { installedAt: "2024-01-01T00:00:00Z" },
+    });
+    await endpoints.deleteMeter({ id });
+    await expect(endpoints.getMeter({ id })).rejects.toMatchObject({ code: "not_found" });
+  });
+});
+
+describe("POST /meters/:id/replace-device", () => {
+  async function meterWithReading(): Promise<number> {
+    setAuth(String(userId), MANAGE);
+    const { id } = await endpoints.createMeter({
+      name: "Wasser",
+      type: "water",
+      unit: "m3",
+      device: { serialNumber: "OLD", installedAt: "2020-02-10T00:00:00Z", startValue: 102 },
+    });
+    const detail = await endpoints.getMeter({ id });
+    await db.insert(meterReadings).values({
+      device_id: detail.devices[0].id,
+      value: "734",
+      taken_at: "2025-03-20T00:00:00Z",
+      entered_by: userId,
+    });
+    return id;
+  }
+
+  it("closes the old device and installs a replacement (issue example)", async () => {
+    const id = await meterWithReading();
+    const { newDeviceId } = await endpoints.replaceDevice({
+      id,
+      swapAt: "2025-03-21T00:00:00Z",
+      finalValue: 734,
+      newSerialNumber: "NEW",
+      newStartValue: 3,
+    });
+    expect(newDeviceId).toBeGreaterThan(0);
+
+    const detail = await endpoints.getMeter({ id });
+    expect(detail.devices).toHaveLength(2);
+    const active = detail.devices.find((d) => d.active)!;
+    const closed = detail.devices.find((d) => !d.active)!;
+    expect(active.serialNumber).toBe("NEW");
+    expect(active.startValue).toBe(3);
+    expect(closed.endValue).toBe(734);
+    expect(closed.removedAt).toContain("2025-03-21");
+    // (734 - 102) + (3 - 3) = 632 so far.
+    expect(detail.absoluteTotal).toBe(632);
+
+    // A reading on the new device keeps the total monotonic across the swap.
+    await db.insert(meterReadings).values({
+      device_id: active.id,
+      value: "45",
+      taken_at: "2026-01-01T00:00:00Z",
+      entered_by: userId,
+    });
+    const after = await endpoints.getMeter({ id });
+    expect(after.absoluteTotal).toBe(674);
+  });
+
+  it("rejects a closing value below the last reading", async () => {
+    const id = await meterWithReading();
+    await expect(
+      endpoints.replaceDevice({ id, swapAt: "2025-03-21T00:00:00Z", finalValue: 700 }),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+  });
+
+  it("rejects a swap timestamp before the last reading", async () => {
+    const id = await meterWithReading();
+    await expect(
+      endpoints.replaceDevice({ id, swapAt: "2021-01-01T00:00:00Z", finalValue: 734 }),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+  });
+
+  it("keeps only one active device per metering point", async () => {
+    const id = await meterWithReading();
+    await endpoints.replaceDevice({ id, swapAt: "2025-03-21T00:00:00Z", finalValue: 734, newStartValue: 3 });
+    const detail = await endpoints.getMeter({ id });
+    expect(detail.devices.filter((d) => d.active)).toHaveLength(1);
+  });
+
+  it("fails when there is no active device to replace", async () => {
+    setAuth(String(userId), MANAGE);
+    const { id } = await endpoints.createMeter({
+      name: "Leer",
+      type: "water",
+      unit: "m3",
+      device: { installedAt: "2024-01-01T00:00:00Z" },
+    });
+    const detail = await endpoints.getMeter({ id });
+    // Manually close the only device to simulate an edge state.
+    await db
+      .update(meterDevices)
+      .set({ removed_at: "2024-06-01T00:00:00Z", end_value: "0" })
+      .where(eq(meterDevices.id, detail.devices[0].id));
+    await expect(
+      endpoints.replaceDevice({ id, swapAt: "2024-07-01T00:00:00Z", finalValue: 0 }),
+    ).rejects.toMatchObject({ code: "failed_precondition" });
+  });
+});
