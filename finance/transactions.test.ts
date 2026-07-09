@@ -425,6 +425,21 @@ describe("finance/transactions — create (manual booking)", () => {
     expect(result.tags.map((t) => t.name)).toContain("alltag");
   });
 
+  it("stores notice separately from purpose (regression: cash-booking form used to bind its Notiz field to purpose)", async () => {
+    const { a } = await createAccounts();
+    setAuth("7", ["finance.view"]);
+    await grant(a, 7, "write");
+    const result = await createTransaction({
+      account_id: a,
+      booking_date: "2024-08-15",
+      amount: -12,
+      purpose: "Wocheneinkauf",
+      notice: "War mit Anna einkaufen",
+    });
+    expect(result.purpose).toBe("Wocheneinkauf");
+    expect(result.notice).toBe("War mit Anna einkaufen");
+  });
+
   it("finance.admin can book on any account", async () => {
     const { a } = await createAccounts();
     setAuth("1", ["finance.view", "finance.admin"]);

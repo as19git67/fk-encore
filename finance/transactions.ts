@@ -457,6 +457,7 @@ interface CreateParams {
   amount: number | string;
   currency_code?: string; // defaults to account's currency
   purpose?: string;
+  notice?: string;
   counterparty?: string;
   counterparty_iban?: string;
   tags?: string[]; // user tags
@@ -538,6 +539,7 @@ export const createTransaction = api(
           amount,
           currency_code: currencyCode,
           purpose: p.purpose?.trim() || null,
+          notice: p.notice?.trim() || null,
           counterparty: p.counterparty?.trim() || null,
           counterparty_iban: p.counterparty_iban?.trim() || null,
           receipt_document_id: p.receipt_document_id ?? null,
