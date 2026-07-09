@@ -570,21 +570,28 @@ public final class BackgroundSyncManager {
         print("[BGSync] Task handler invoked")
 
         let work = Task {
+            var success = true
             do {
                 await drainUploadQueue()
                 try await PhotoSyncService.shared.sync()
                 try await PhotoDownloadService.shared.sync()
-                task.setTaskCompleted(success: true)
             } catch {
-                task.setTaskCompleted(success: false)
+                success = false
             }
+            // Completed exactly once, and only after the pipeline has actually
+            // stopped (Apple's recommended pattern: the expiration handler just
+            // cancels; the work acknowledges). A cancelled run reports failure
+            // so the system's heuristics don't treat it as a full run.
+            task.setTaskCompleted(success: success && !Task.isCancelled)
             scheduleNextSyncIfNeeded()
         }
 
         task.expirationHandler = {
-            work.cancel()
+            // Reschedule FIRST: if the process gets suspended before the work
+            // task acknowledges the cancellation, the follow-up run must
+            // already be booked. scheduleNextSyncIfNeeded() is idempotent.
             self.scheduleNextSyncIfNeeded()
-            task.setTaskCompleted(success: false)
+            work.cancel()
         }
     }
 

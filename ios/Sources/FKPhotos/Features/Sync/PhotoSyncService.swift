@@ -151,6 +151,12 @@ actor PhotoSyncService {
                 await SyncProgress.shared.update(.hashingBatch(done: processedCount, total: assets.count))
                 var hashPairs: [(asset: PHAsset, filename: String, sourceAlbumId: String?, hashResult: PhotoHashResult)] = []
                 for (asset, filename, sourceAlbumId) in assetBatch {
+                    // Per-asset cancellation check: hashing reads asset bytes and
+                    // isn't cancellation-aware itself, so without this a BG-task
+                    // expiry would keep hashing to the end of the 500 batch.
+                    // Aborting mid-batch is safe — hashes are cached per asset
+                    // and the batch watermark hasn't been advanced yet.
+                    try Task.checkCancellation()
                     guard let result = await PhotoHasher.shared.hashes(for: asset) else {
                         // Hash failed — remember the oldest such asset per album so
                         // the watermark can't sail past it (see comment above).
@@ -290,6 +296,9 @@ actor PhotoSyncService {
         guard !serverPhotoMap.isEmpty else { return }
 
         for (iosAlbumId, serverAlbumId) in mappings {
+            // Each album is one GET + one idempotent batch-remove; stop between
+            // albums when the BG task is being expired.
+            if Task.isCancelled { return }
             let mode = PhotoSyncPreferences.albumSyncMode(for: iosAlbumId)
             guard confirmed.contains(iosAlbumId),
                   mode == .sync || mode == .bisync else { continue }
