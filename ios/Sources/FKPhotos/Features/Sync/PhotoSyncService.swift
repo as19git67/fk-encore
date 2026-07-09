@@ -111,6 +111,13 @@ actor PhotoSyncService {
             return
         }
 
+        // Clean up legacy configs that target a smart album (Favoriten, Recents,
+        // …) before anything enumerates or reconciles them. Runs with photo
+        // access available (guaranteed by the guard above) so classification is
+        // reliable, and before syncAlbumDeletions() so a legacy sync/bisync
+        // smart-album mapping can't trigger a server-side removal.
+        purgeLegacySmartAlbumsIfNeeded()
+
         do {
             // Step 1: Drain whatever's already queued — Share-Extension items, or
             // pending items from a prior interrupted sync. This used to happen only
@@ -151,6 +158,12 @@ actor PhotoSyncService {
                 await SyncProgress.shared.update(.hashingBatch(done: processedCount, total: assets.count))
                 var hashPairs: [(asset: PHAsset, filename: String, sourceAlbumId: String?, hashResult: PhotoHashResult)] = []
                 for (asset, filename, sourceAlbumId) in assetBatch {
+                    // Per-asset cancellation check: hashing reads asset bytes and
+                    // isn't cancellation-aware itself, so without this a BG-task
+                    // expiry would keep hashing to the end of the 500 batch.
+                    // Aborting mid-batch is safe — hashes are cached per asset
+                    // and the batch watermark hasn't been advanced yet.
+                    try Task.checkCancellation()
                     guard let result = await PhotoHasher.shared.hashes(for: asset) else {
                         // Hash failed — remember the oldest such asset per album so
                         // the watermark can't sail past it (see comment above).
@@ -270,6 +283,38 @@ actor PhotoSyncService {
         sourceAlbumId.flatMap { PhotoSyncPreferences.albumMappings[$0] }.map { [$0] } ?? []
     }
 
+    // MARK: - Legacy smart-album purge (issue #812 follow-up)
+
+    /// One-time cleanup: a config from before smart albums were hidden could
+    /// still reference a smart/system album (selected via the old settings
+    /// picker). Those can no longer be seen or disconnected in the UI and their
+    /// dynamically-managed membership makes them unsafe to sync, so remove any
+    /// smart-album ids from the sync config. Guarded by a flag so it runs once;
+    /// classifies stored ids via PhotoKit, which is why it lives here (photo
+    /// access is already established when this is called).
+    private func purgeLegacySmartAlbumsIfNeeded() {
+        guard !PhotoSyncPreferences.smartAlbumPurgeDone else { return }
+        let ids = PhotoSyncPreferences.selectedAlbumIds.filter {
+            $0 != PhotoSyncPreferences.allLibrarySentinel
+        }
+        guard !ids.isEmpty else {
+            PhotoSyncPreferences.smartAlbumPurgeDone = true
+            return
+        }
+
+        var smartIds = Set<String>()
+        PHAssetCollection
+            .fetchAssetCollections(withLocalIdentifiers: Array(ids), options: nil)
+            .enumerateObjects { collection, _, _ in
+                if collection.assetCollectionType == .smartAlbum {
+                    smartIds.insert(collection.localIdentifier)
+                }
+            }
+
+        PhotoSyncPreferences.purgeAlbumsFromConfig(smartIds)
+        PhotoSyncPreferences.smartAlbumPurgeDone = true
+    }
+
     // MARK: - Deletion sync (issue #812 "Sync" mode)
 
     /// For every confirmed sync-mode album, removes server-album entries whose
@@ -290,6 +335,9 @@ actor PhotoSyncService {
         guard !serverPhotoMap.isEmpty else { return }
 
         for (iosAlbumId, serverAlbumId) in mappings {
+            // Each album is one GET + one idempotent batch-remove; stop between
+            // albums when the BG task is being expired.
+            if Task.isCancelled { return }
             let mode = PhotoSyncPreferences.albumSyncMode(for: iosAlbumId)
             guard confirmed.contains(iosAlbumId),
                   mode == .sync || mode == .bisync else { continue }
