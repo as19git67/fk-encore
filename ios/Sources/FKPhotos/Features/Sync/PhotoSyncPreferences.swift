@@ -216,6 +216,44 @@ struct PhotoSyncPreferences {
         defaults.set(true, forKey: watermarkPoisonResetKey)
     }
 
+    // MARK: - Legacy smart-album purge (issue #812 follow-up)
+
+    private static let smartAlbumPurgeKey = "sync.migration.smartAlbumPurgeV1"
+
+    static var smartAlbumPurgeDone: Bool {
+        get { UserDefaults.standard.bool(forKey: smartAlbumPurgeKey) }
+        set { UserDefaults.standard.set(newValue, forKey: smartAlbumPurgeKey) }
+    }
+
+    /// Removes the given iOS album ids from every sync-config store: selection,
+    /// server mapping, confirmation, per-album mode and watermark. Used by the
+    /// legacy smart-album purge — a config could target a smart album via the
+    /// old settings picker, which is neither shown nor manageable anymore and is
+    /// unsafe to sync (dynamic membership). The `defaults` parameter exists for
+    /// unit testing.
+    static func purgeAlbumsFromConfig(_ ids: Set<String>, defaults: UserDefaults = .standard) {
+        guard !ids.isEmpty else { return }
+
+        let remaining = Set(defaults.stringArray(forKey: selectedAlbumsKey) ?? []).subtracting(ids)
+        defaults.set(Array(remaining), forKey: selectedAlbumsKey)
+
+        let confirmed = Set(defaults.stringArray(forKey: confirmedMappingsKey) ?? []).subtracting(ids)
+        defaults.set(Array(confirmed), forKey: confirmedMappingsKey)
+
+        if var mappings = defaults.dictionary(forKey: albumMappingsKey) as? [String: Int] {
+            for id in ids { mappings.removeValue(forKey: id) }
+            defaults.set(mappings, forKey: albumMappingsKey)
+        }
+        if var modes = defaults.dictionary(forKey: albumSyncModesKey) as? [String: String] {
+            for id in ids { modes.removeValue(forKey: id) }
+            defaults.set(modes, forKey: albumSyncModesKey)
+        }
+        if var dates = defaults.dictionary(forKey: albumSyncDatesKey) as? [String: Date] {
+            for id in ids { dates.removeValue(forKey: id) }
+            defaults.set(dates, forKey: albumSyncDatesKey)
+        }
+    }
+
     // MARK: - Server photo ↔ local asset mapping
     //
     // Maps server photo ID (String) → iOS localIdentifier (String).
