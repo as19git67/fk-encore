@@ -123,20 +123,30 @@ actor PhotoDownloadService {
         var downloadedPhotos = DownloadSyncPreferences.loadDownloadedPhotos()
         var downloadedState  = DownloadSyncPreferences.loadDownloadedState()
 
+        var wasCancelled = false
         for albumId in albumIds {
+            // Stop cleanly on BG-task expiry / app suspension instead of
+            // burning the grace period on requests that will be aborted anyway.
+            if Task.isCancelled { wasCancelled = true; break }
             do {
                 try await syncAlbum(
                     albumId: albumId,
                     downloadedPhotos: &downloadedPhotos,
                     downloadedState: &downloadedState
                 )
+            } catch is CancellationError {
+                wasCancelled = true
+                break
             } catch {
                 // Continue with remaining albums – transient errors are retried next cycle.
             }
         }
 
+        // Always persist what this run achieved — also on cancellation, so the
+        // next run resumes instead of re-downloading.
         DownloadSyncPreferences.saveDownloadedPhotos(downloadedPhotos)
         DownloadSyncPreferences.saveDownloadedState(downloadedState)
+        if wasCancelled { throw CancellationError() }
         DownloadSyncPreferences.lastDownloadDate = Date()
 
         // Refresh the cached ETag so the next sync can short-circuit on 304.
@@ -188,6 +198,7 @@ actor PhotoDownloadService {
         let serverPhotoMap = PhotoSyncPreferences.loadServerPhotoMap()
         let newPhotos = serverPhotos.filter { !albumDownloads.keys.contains(String($0.id)) }
         for photo in newPhotos {
+            try Task.checkCancellation()
             let photoKey = String(photo.id)
 
             if let existingLocalId = serverPhotoMap[photoKey],
@@ -211,6 +222,8 @@ actor PhotoDownloadService {
                     downloadedPhotos[albumKey] = albumDownloads
                     DownloadSyncPreferences.saveDownloadedPhotos(downloadedPhotos)
                     DownloadSyncPreferences.saveDownloadedState(downloadedState)
+                } catch is CancellationError {
+                    throw CancellationError()
                 } catch {
                     // Skip individual photo failures; they'll be retried next run.
                 }
@@ -221,6 +234,7 @@ actor PhotoDownloadService {
         //    Skip work fast when neither hash nor updated_at moved (issue #303).
         let existingPhotos = serverPhotos.filter { albumDownloads.keys.contains(String($0.id)) }
         for photo in existingPhotos {
+            try Task.checkCancellation()
             guard let localId = albumDownloads[String(photo.id)] else { continue }
             let key = DownloadSyncPreferences.stateKey(albumId: albumId, photoId: photo.id)
             let prev = downloadedState[key]
@@ -239,6 +253,8 @@ actor PhotoDownloadService {
                     )
                     albumDownloads[String(photo.id)] = newLocalId
                     downloadedPhotos[albumKey] = albumDownloads
+                } catch is CancellationError {
+                    throw CancellationError()
                 } catch {
                     // Leave the old local asset in place; we'll retry next run.
                     continue
