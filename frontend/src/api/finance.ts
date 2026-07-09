@@ -722,6 +722,7 @@ export interface CreateTransactionInput {
   amount: number | string
   currency_code?: string
   purpose?: string
+  notice?: string
   counterparty?: string
   counterparty_iban?: string
   tags?: string[]
