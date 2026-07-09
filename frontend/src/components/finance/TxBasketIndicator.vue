@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
@@ -57,6 +57,7 @@ const snapshotError = ref<string | null>(null)
 const snapshots = ref<BasketSnapshot[]>([])
 const snapshotName = ref('')
 const selectedSnapshotId = ref<number | null>(null)
+const activeBasketName = ref<string | null>(null)
 const compareDialogVisible = ref(false)
 const compareA = ref<number | null>(null)
 const compareB = ref<number | null>(null)
@@ -86,12 +87,17 @@ const mixedCurrencies = computed(() => hasMixedCurrencies(items.value))
 const recurringGroups = computed(() => detectRecurringSelection(items.value))
 const majorityReviewed = computed(() => items.value.filter(item => !!item.reviewed_at).length > items.value.length / 2)
 const majorityTaxRelevant = computed(() => items.value.filter(item => !!item.is_tax_relevant).length > items.value.length / 2)
+const drawerTitle = computed(() => count.value > 0 ? activeBasketName.value || 'Basket' : 'Basket')
 const sumLabel = computed(() => {
   if (count.value === 0) return ''
   return new Intl.NumberFormat('de-DE', {
     style: 'currency',
     currency: selectionStore.currency,
   }).format(selectionStore.sum)
+})
+
+watch(count, (next) => {
+  if (next === 0) activeBasketName.value = null
 })
 
 function formatAmount(tx: Transaction): string {
@@ -292,8 +298,9 @@ async function saveSnapshot() {
   if (!snapshotName.value.trim()) return
   const existing = snapshots.value.find(snapshot => snapshot.name.toLocaleLowerCase() === snapshotName.value.trim().toLocaleLowerCase())
   const execute = async () => {
-    await saveBasketSnapshot(snapshotName.value, selectionStore.ids)
+    const saved = await saveBasketSnapshot(snapshotName.value, selectionStore.ids)
     await refreshSnapshots()
+    activeBasketName.value = saved.name
     actionInfo.value = existing ? 'Basket überschrieben.' : 'Basket gespeichert.'
   }
   if (!existing) { await execute(); return }
@@ -312,8 +319,14 @@ async function loadSnapshot() {
   const snapshot = await loadBasketSnapshot(selectedSnapshotId.value)
   const loaded = await Promise.all(snapshot.transaction_ids.map(id => getTransaction(id)))
   selectionStore.set(loaded)
+  activeBasketName.value = snapshot.name
   actionInfo.value = snapshot.missing ? `${snapshot.missing} nicht mehr verfügbare Buchungen wurden übersprungen.` : 'Basket geladen.'
   snapshotDialogVisible.value = false
+}
+
+function clearBasket() {
+  selectionStore.clear()
+  activeBasketName.value = null
 }
 
 async function removeSnapshot() {
@@ -421,7 +434,7 @@ async function saveSplit() {
     >
       <template #header>
         <div class="drawer-header">
-          <span class="drawer-title">Basket</span>
+          <span class="drawer-title" :title="drawerTitle">{{ drawerTitle }}</span>
           <span v-if="count > 0" class="drawer-sum">{{ sumLabel }}</span>
         </div>
       </template>
@@ -576,7 +589,7 @@ async function saveSplit() {
               text
               size="small"
               :disabled="count === 0"
-              @click="selectionStore.clear()"
+              @click="clearBasket"
             />
           </div>
         </div>
@@ -668,12 +681,20 @@ async function saveSplit() {
   display: flex;
   align-items: baseline;
   gap: 0.75rem;
+  min-width: 0;
+  width: 100%;
 }
 .drawer-title {
+  flex: 1 1 auto;
   font-weight: 600;
   font-size: 1.05rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .drawer-sum {
+  flex: 0 0 auto;
   color: var(--p-text-muted-color);
   font-variant-numeric: tabular-nums;
   font-size: 0.95rem;
