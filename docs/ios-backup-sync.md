@@ -201,7 +201,17 @@ abgebrochene Uploads nicht als „Geister-Fehler" stehenbleiben.
   „Verfügbar machen" (Album-Verknüpfung + Modus). Die Einstellungen
   (`SyncSettingsView` → „Foto-Synchronisierung") enthalten nur noch den
   Haupt­schalter, globale Optionen (Nur WLAN, Screenshots), Status und den
-  manuellen Auslöser — keine Album-Auswahl/-Zuordnung mehr.
+  manuellen Auslöser — keine Album-Auswahl/-Zuordnung mehr. Nur reguläre
+  Benutzeralben sind verknüpfbar; Smart-Alben werden nicht angezeigt.
+- **Einmal-Migration `purgeLegacySmartAlbumsIfNeeded()`** (in
+  `PhotoSyncService.sync()`, vor dem Löschabgleich): Alt-Konfigurationen, die
+  über den früheren Settings-Picker ein Smart-Album (Favoriten, Recents, …)
+  referenzierten, sind weder sichtbar noch trennbar und dynamisch unsicher.
+  Die Migration klassifiziert die gespeicherten IDs per PhotoKit
+  (`assetCollectionType == .smartAlbum`) und entfernt Smart-Album-Einträge aus
+  allen Sync-Config-Stores (`purgeAlbumsFromConfig`). Bereits hochgeladene
+  Fotos am Server bleiben unberührt. Der `__all_photos__`-Sentinel bleibt
+  erhalten (kein Smart-Album, legitime Ganze-Mediathek-Wahl).
 - **Geräte-Album → Server-Album**: `PhotoSyncPreferences.albumMappings`
   (`[iOS-localIdentifier: serverAlbumId]`), gesetzt beim „Verfügbar machen"
   (Namensabgleich own → shared → neu anlegen).
