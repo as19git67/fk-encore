@@ -243,12 +243,13 @@ nötig, Haushalts-Scope reicht).
 `GET /meters/reports/energy?granularity=month|year&from=&to=`
 
 Der aggregierte Energie-Report kombiniert die vorhandenen Stromzähler, sofern
-sie sichtbar sind. Die erste Ausbaustufe erkennt die Rollen über die stabilen
-Namen der importierten historischen Zähler:
+sie sichtbar sind. Dafür werden explizite Zählerrollen auf `meters.role`
+verwendet; die Report-Logik leitet Rollen nicht aus Anzeigenamen ab.
+Der historische Stromimport setzt diese Rollen direkt:
 
-- `Netzstrom Bezug (1.8.0)` → Bezug
-- `Netzstrom Einspeisung (2.8.0)` → Einspeisung
-- `PV Produktion` → Produktion
+- `grid_import` → Bezug
+- `grid_export` → Einspeisung
+- `pv_production` → Produktion
 
 Darauf werden je Bucket und für die Gesamtsumme folgende Werte berechnet:
 
@@ -258,8 +259,8 @@ Darauf werden je Bucket und für die Gesamtsumme folgende Werte berechnet:
 - Eigenverbrauchsquote = Eigenverbrauch / Produktion
 
 Wenn die PV-Produktion fehlt, bleiben die abgeleiteten PV-Kennzahlen leer;
-Bezug und Einspeisung werden trotzdem angezeigt. Später kann diese
-Rollenerkennung ohne API-Bruch durch explizite Zählerrollen ersetzt werden.
+Bezug und Einspeisung werden trotzdem angezeigt. Migration `0123_meter_roles`
+backfilled bereits importierte historische Zähler einmalig.
 
 Nicht Teil der ersten Ausbaustufe: E-Auto, Wärmepumpe, Warmwasser,
 Fußbodenheizung, PV-Anteile, Kosten/Preise, Gasvergleich/JAZ.

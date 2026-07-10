@@ -1,11 +1,13 @@
 import { apiFetch } from './client'
 
 export type MeterType = 'electricity' | 'water' | 'gas' | 'operating_hours'
+export type MeterRole = 'grid_import' | 'grid_export' | 'pv_production'
 
 export interface MeterListItem {
   id: number
   name: string
   type: MeterType
+  role: MeterRole | null
   unit: string
   location: string | null
   notes: string | null
@@ -45,6 +47,7 @@ export interface InitialDeviceInput {
 export interface CreateMeterRequest {
   name: string
   type: MeterType
+  role?: MeterRole | null
   unit: string
   location?: string
   notes?: string
@@ -56,6 +59,7 @@ export interface CreateMeterRequest {
 export interface UpdateMeterRequest {
   name: string
   type: MeterType
+  role?: MeterRole | null
   unit: string
   location?: string
   notes?: string
@@ -193,7 +197,7 @@ export function getMeterReport(meterId: number, granularity: MeterReportGranular
   return apiFetch<MeterReport>(`/meters/${meterId}/report?${q}`)
 }
 
-export type EnergyReportRole = 'grid_import' | 'grid_export' | 'pv_production'
+export type EnergyReportRole = MeterRole
 
 export interface EnergyReportMeterRef {
   role: EnergyReportRole

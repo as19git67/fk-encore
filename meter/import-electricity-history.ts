@@ -27,7 +27,7 @@ import { and, eq } from "drizzle-orm";
 import { APIError } from "encore.dev/api";
 import db from "../db/database";
 import { dbFirst } from "../db/adapter";
-import { meters } from "../db/schema";
+import { meters, type MeterRole } from "../db/schema";
 import { createMeter, replaceDevice } from "./meter.service";
 import { addReading } from "./readings.service";
 
@@ -78,6 +78,12 @@ const CONSOLIDATED_SOURCE_KEYS = new Set<string>([
   "waermepumpe_ht",
   "waermepumpe_nt",
 ]);
+
+const IMPORT_METER_ROLES: Partial<Record<string, MeterRole>> = {
+  netzstrom_bezug: "grid_import",
+  netzstrom_lieferung: "grid_export",
+  pv_produktion: "pv_production",
+};
 
 const VIRTUAL_DEVICE_SWAPS: Record<
   string,
@@ -339,6 +345,7 @@ export async function importElectricityHistory(
     const { id: meterId } = await createMeter(userId, {
       name: meterDef.name,
       type: meterDef.type,
+      role: IMPORT_METER_ROLES[meterDef.key] ?? null,
       unit: meterDef.unit,
       location: meterDef.location,
       decimals: meterDef.decimals,

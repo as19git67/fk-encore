@@ -119,6 +119,20 @@ describe("importElectricityHistory", () => {
     expect(waermepumpe.devices[1].startValue).toBe(41);
   });
 
+  it("sets explicit report roles on imported energy meters", async () => {
+    await importElectricityHistory(userId, DATA);
+
+    const { meterId: bezugId } = await findMeterByName(userId, "Netzstrom Bezug (1.8.0)");
+    const { meterId: einspeisungId } = await findMeterByName(userId, "Netzstrom Einspeisung (2.8.0)");
+    const { meterId: produktionId } = await findMeterByName(userId, "PV Produktion");
+    const { meterId: waermepumpeId } = await findMeterByName(userId, "Wärmepumpe Komplett");
+
+    await expect(getMeterDetail(userId, bezugId)).resolves.toMatchObject({ role: "grid_import" });
+    await expect(getMeterDetail(userId, einspeisungId)).resolves.toMatchObject({ role: "grid_export" });
+    await expect(getMeterDetail(userId, produktionId)).resolves.toMatchObject({ role: "pv_production" });
+    await expect(getMeterDetail(userId, waermepumpeId)).resolves.toMatchObject({ role: null });
+  }, 120_000);
+
   it("creates 14 report-friendly meters with 19 devices and consolidated readings", async () => {
     const res = await importElectricityHistory(userId, DATA);
     expect(res.alreadyImported).toBe(false);

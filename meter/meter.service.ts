@@ -22,6 +22,7 @@ import {
   meterDevices,
   meterReadings,
   meters,
+  type MeterRole,
   type MeterType,
 } from "../db/schema";
 
@@ -30,6 +31,11 @@ export const METER_TYPES: readonly MeterType[] = [
   "water",
   "gas",
   "operating_hours",
+];
+export const METER_ROLES: readonly MeterRole[] = [
+  "grid_import",
+  "grid_export",
+  "pv_production",
 ];
 
 export interface DeviceState {
@@ -74,6 +80,7 @@ export interface MeterListItem {
   id: number;
   name: string;
   type: MeterType;
+  role: MeterRole | null;
   unit: string;
   location: string | null;
   notes: string | null;
@@ -149,6 +156,7 @@ export async function listMeters(userId: number): Promise<MeterListItem[]> {
       id: m.id,
       name: m.name,
       type: m.type,
+      role: m.role,
       unit: m.unit,
       location: m.location,
       notes: m.notes,
@@ -195,6 +203,7 @@ export interface InitialDeviceInput {
 export interface CreateMeterInput {
   name: string;
   type: MeterType;
+  role?: MeterRole | null;
   unit: string;
   location?: string;
   notes?: string;
@@ -206,6 +215,7 @@ export interface CreateMeterInput {
 export interface UpdateMeterInput {
   name: string;
   type: MeterType;
+  role?: MeterRole | null;
   unit: string;
   location?: string;
   notes?: string;
@@ -250,6 +260,16 @@ function normalizeType(type: string): MeterType {
     );
   }
   return type as MeterType;
+}
+
+function normalizeRole(role: MeterRole | null | undefined): MeterRole | null {
+  if (role === undefined || role === null) return null;
+  if (!METER_ROLES.includes(role)) {
+    throw APIError.invalidArgument(
+      `role must be one of: ${METER_ROLES.join(", ")}`,
+    );
+  }
+  return role;
 }
 
 function normalizeDecimals(decimals: number | undefined): number {
@@ -299,6 +319,7 @@ export async function createMeter(
 ): Promise<{ id: number }> {
   const name = normalizeName(input.name);
   const type = normalizeType(input.type);
+  const role = normalizeRole(input.role);
   const unit = normalizeUnit(input.unit);
   const decimals = normalizeDecimals(input.decimals);
   const groupId = await assertGroupAssignable(userId, input.groupId);
@@ -318,6 +339,7 @@ export async function createMeter(
       .values({
         name,
         type,
+        role,
         unit,
         location: input.location?.trim() || null,
         notes: input.notes?.trim() || null,
@@ -342,9 +364,10 @@ export async function updateMeter(
   meterId: number,
   input: UpdateMeterInput,
 ): Promise<void> {
-  await loadVisibleMeter(userId, meterId);
+  const existing = await loadVisibleMeter(userId, meterId);
   const name = normalizeName(input.name);
   const type = normalizeType(input.type);
+  const role = "role" in input ? normalizeRole(input.role) : existing.role;
   const unit = normalizeUnit(input.unit);
   const decimals = normalizeDecimals(input.decimals);
   const groupId = await assertGroupAssignable(userId, input.groupId);
@@ -354,6 +377,7 @@ export async function updateMeter(
     .set({
       name,
       type,
+      role,
       unit,
       location: input.location?.trim() || null,
       notes: input.notes?.trim() || null,
@@ -418,6 +442,7 @@ export async function getMeterDetail(
     id: m.id,
     name: m.name,
     type: m.type,
+    role: m.role,
     unit: m.unit,
     location: m.location,
     notes: m.notes,

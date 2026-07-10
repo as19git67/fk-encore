@@ -37,7 +37,7 @@ export interface MeterReport {
   totalConsumption: number;
 }
 
-export type EnergyReportRole = "grid_import" | "grid_export" | "pv_production";
+export type EnergyReportRole = NonNullable<MeterListItem["role"]>;
 
 export interface EnergyReportMeterRef {
   role: EnergyReportRole;
@@ -250,28 +250,6 @@ export async function getMeterReportForUser(
   };
 }
 
-export function identifyEnergyReportRole(
-  meter: Pick<MeterListItem, "name" | "type" | "unit">,
-): EnergyReportRole | null {
-  if (meter.type !== "electricity" || meter.unit.toLowerCase() !== "kwh") return null;
-  const name = meter.name.toLowerCase();
-
-  if (name.includes("netzstrom") && (name.includes("bezug") || name.includes("1.8.0"))) {
-    return "grid_import";
-  }
-  if (
-    name.includes("netzstrom") &&
-    (name.includes("einspeis") || name.includes("liefer") || name.includes("2.8.0"))
-  ) {
-    return "grid_export";
-  }
-  if (name.includes("pv") && name.includes("produktion")) {
-    return "pv_production";
-  }
-
-  return null;
-}
-
 export function buildEnergyReportFromMeterReports(
   reports: Partial<Record<EnergyReportRole, MeterReport>>,
   granularity: ReportGranularity,
@@ -387,7 +365,7 @@ export async function getEnergyReportForUser(
 
   const roleMeters = new Map<EnergyReportRole, MeterListItem>();
   for (const meter of await listMeters(userId)) {
-    const role = identifyEnergyReportRole(meter);
+    const role = meter.role;
     if (role && !roleMeters.has(role)) roleMeters.set(role, meter);
   }
 

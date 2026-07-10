@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   buildEnergyReportFromMeterReports,
   buildMeterReportBuckets,
-  identifyEnergyReportRole,
 } from "./reports.service";
 
 describe("buildMeterReportBuckets", () => {
@@ -89,23 +88,6 @@ describe("buildMeterReportBuckets", () => {
     );
 
     expect(buckets.map((b) => [b.key, b.consumption])).toEqual([["2026-02", 30]]);
-  });
-});
-
-describe("identifyEnergyReportRole", () => {
-  it("detects the imported electricity report meters by stable names", () => {
-    expect(
-      identifyEnergyReportRole({ name: "Netzstrom Bezug (1.8.0)", type: "electricity", unit: "kWh" }),
-    ).toBe("grid_import");
-    expect(
-      identifyEnergyReportRole({ name: "Netzstrom Einspeisung (2.8.0)", type: "electricity", unit: "kWh" }),
-    ).toBe("grid_export");
-    expect(identifyEnergyReportRole({ name: "PV Produktion", type: "electricity", unit: "kWh" })).toBe(
-      "pv_production",
-    );
-    expect(
-      identifyEnergyReportRole({ name: "Wärmepumpe Komplett", type: "electricity", unit: "kWh" }),
-    ).toBeNull();
   });
 });
 
