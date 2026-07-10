@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { SENDER_RULES, matchSenderRule, normalizeForMatch } from "./sender-rules";
+import {
+  CONTENT_RULES,
+  SENDER_RULES,
+  matchContentRule,
+  matchSenderRule,
+  normalizeForMatch,
+} from "./sender-rules";
 import { flattenTaxonomy } from "./taxonomy";
 
 describe("normalizeForMatch", () => {
@@ -173,6 +179,76 @@ describe("SENDER_RULES invariants", () => {
     for (const rule of SENDER_RULES) {
       for (const frag of rule.senders) {
         expect(frag, `sender fragment not normalized: ${frag}`).toBe(normalizeForMatch(frag));
+      }
+    }
+  });
+});
+
+describe("matchContentRule", () => {
+  it("routes a Riester/§92 document to private Rentenversicherung", () => {
+    expect(
+      matchContentRule({
+        title: "Statusreport Heidelberger Lebensversicherung",
+        text: "MLP balanced invest, staatlich geförderte Riester-Rentenversicherung",
+      }),
+    ).toBe("altersvorsorge-rentenversicherung");
+    expect(
+      matchContentRule({ title: "Bescheinigung", text: "Zulagenbescheinigung nach § 92 EStG" }),
+    ).toBe("altersvorsorge-rentenversicherung");
+    expect(
+      matchContentRule({ title: "Förder Rente invest DWS Premium", text: "" }),
+    ).toBe("altersvorsorge-rentenversicherung");
+  });
+
+  it("does NOT steal an actual monthly payslip that lists a Riester deduction", () => {
+    expect(
+      matchContentRule({
+        title: "Entgeltabrechnung 04/2024",
+        text: "Gesamtbrutto 5000 Steuerbrutto 4800 Riester 100 Auszahlungsbetrag 3200",
+      }),
+    ).toBeNull();
+  });
+
+  it("routes Kfz-Kasko/Kraftfahrt documents to fahrzeug-versicherung", () => {
+    expect(
+      matchContentRule({ title: "Beitragsrechnung Kraftfahrtversicherung", text: "" }),
+    ).toBe("fahrzeug-versicherung");
+    expect(
+      matchContentRule({ title: "Kfz-Haftpflicht", text: "Teilkasko, Vollkasko, Tesla Model 3" }),
+    ).toBe("fahrzeug-versicherung");
+  });
+
+  it("routes a self-occupied Wohngebäudeversicherung but not a rented one", () => {
+    expect(
+      matchContentRule({ title: "Prämienrechnung Privatschutz", text: "Sparte Wohngebäude EFH" }),
+    ).toBe("wohnen-haus-gebaeudeversicherung");
+    // Rented object → Kapitalanlage branch, so the content rule must stay out.
+    expect(
+      matchContentRule({
+        title: "Wohngebäudeversicherung",
+        text: "Sondereigentum, vermietete Eigentumswohnung",
+      }),
+    ).toBeNull();
+  });
+
+  it("returns null when no keyword matches", () => {
+    expect(matchContentRule({ title: "Kapital-Lebensversicherung", text: "Rückkaufswert, Deckungskapital" })).toBeNull();
+    expect(matchContentRule({ title: "", text: "" })).toBeNull();
+  });
+});
+
+describe("CONTENT_RULES invariants", () => {
+  it("every rule targets a slug that exists in the taxonomy", () => {
+    const slugs = new Set(flattenTaxonomy().map((c) => c.slug));
+    for (const rule of CONTENT_RULES) {
+      expect(slugs.has(rule.category), `unknown category slug: ${rule.category}`).toBe(true);
+    }
+  });
+
+  it("keyword/exclude fragments are already normalized (no spaces/uppercase)", () => {
+    for (const rule of CONTENT_RULES) {
+      for (const frag of [...rule.keywords, ...(rule.excludeAny ?? [])]) {
+        expect(frag, `fragment not normalized: ${frag}`).toBe(normalizeForMatch(frag));
       }
     }
   });
