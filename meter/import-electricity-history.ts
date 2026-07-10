@@ -66,10 +66,12 @@ const SENTINEL_NAME = "Netzstrom Bezug (1.8.0)";
 const GRID_IMPORT_KEY = "netzstrom_bezug";
 const GRID_IMPORT_LEGACY_KEYS = ["hausstrom", "waermepumpe_ht", "waermepumpe_nt"] as const;
 const GRID_IMPORT_LEGACY_CUTOFF = "2021-05-01";
+const GRID_IMPORT_LEGACY_FINAL_DATE = "2021-05-01";
 
 const HEAT_PUMP_TOTAL_KEY = "waermepumpe_komplett";
 const HEAT_PUMP_LEGACY_KEYS = ["waermepumpe_ht", "waermepumpe_nt"] as const;
 const HEAT_PUMP_LEGACY_CUTOFF = "2022-12-01";
+const HEAT_PUMP_LEGACY_FINAL_DATE = "2021-05-01";
 
 const CONSOLIDATED_SOURCE_KEYS = new Set<string>([
   "hausstrom",
@@ -152,6 +154,7 @@ function aggregateCommonAbsoluteReadings(
   sourceKeys: readonly string[],
   cutoffDate: string,
   decimals: number,
+  finalDate = cutoffDate,
 ): { readings: [string, number][]; finalValue: number; finalDate: string } {
   const sources = sourceKeys.map((key) => {
     const meter = data.find((m) => m.key === key);
@@ -169,8 +172,8 @@ function aggregateCommonAbsoluteReadings(
   if (dates.length === 0) {
     throw APIError.invalidArgument(`no common historical readings before ${cutoffDate}`);
   }
-  if (!sources.every((s) => s.readings.has(cutoffDate))) {
-    throw APIError.invalidArgument(`missing historical closing reading at ${cutoffDate}`);
+  if (!sources.every((s) => s.readings.has(finalDate))) {
+    throw APIError.invalidArgument(`missing historical closing reading at ${finalDate}`);
   }
 
   const sumAt = (date: string) =>
@@ -182,8 +185,8 @@ function aggregateCommonAbsoluteReadings(
   const readings = dates.map((date): [string, number] => [date, sumAt(date)]);
   return {
     readings,
-    finalValue: sumAt(cutoffDate),
-    finalDate: cutoffDate,
+    finalValue: sumAt(finalDate),
+    finalDate,
   };
 }
 
@@ -199,12 +202,14 @@ export function consolidateHistoricalReportMeters(data: ElecImportData): ElecImp
     GRID_IMPORT_LEGACY_KEYS,
     GRID_IMPORT_LEGACY_CUTOFF,
     gridImport.decimals,
+    GRID_IMPORT_LEGACY_FINAL_DATE,
   );
   const heatPumpLegacy = aggregateCommonAbsoluteReadings(
     data,
     HEAT_PUMP_LEGACY_KEYS,
     HEAT_PUMP_LEGACY_CUTOFF,
     heatPumpTotal.decimals,
+    HEAT_PUMP_LEGACY_FINAL_DATE,
   );
 
   return data
@@ -219,7 +224,7 @@ export function consolidateHistoricalReportMeters(data: ElecImportData): ElecImp
               startValue: 0,
               endValue: gridLegacy.finalValue,
               installedAt: gridLegacy.readings[0][0],
-              removedAt: gridLegacy.finalDate,
+              removedAt: GRID_IMPORT_LEGACY_CUTOFF,
               readings: gridLegacy.readings,
             },
             ...meterDef.devices.map(withDeviceStartingAtFirstReading),
@@ -236,7 +241,7 @@ export function consolidateHistoricalReportMeters(data: ElecImportData): ElecImp
               startValue: 0,
               endValue: heatPumpLegacy.finalValue,
               installedAt: heatPumpLegacy.readings[0][0],
-              removedAt: heatPumpLegacy.finalDate,
+              removedAt: HEAT_PUMP_LEGACY_CUTOFF,
               readings: heatPumpLegacy.readings,
             },
             ...meterDef.devices.map(withDeviceStartingAtFirstReading),
