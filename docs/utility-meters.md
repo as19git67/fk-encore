@@ -145,6 +145,7 @@ meter/
 ├── ingest.ts                // api.raw POST /api/meters/ingest (API-Key-Auth)
 ├── api-keys.ts              // API-Key-Verwaltung
 ├── reports.ts               // Verbrauch/Zeit, Perioden-Vergleich
+├── reports.service.ts       // generische Bucket-Logik + DB-Reportdaten
 ├── anomaly.ts               // Anomalie-Erkennung (Cron)
 ├── finance-link.ts          // Verknüpfung Ablesung ↔ finance_transaction
 └── *.test.ts
@@ -157,13 +158,16 @@ meter/
 | `GET /meters` | `meters.view` | Liste inkl. aktuellem Gerät, letzter Ablesung, Absolutstand |
 | `POST /meters` / `PUT /meters/:id` / `DELETE /meters/:id` | `meters.manage` | Zähler-CRUD (Admin-Seite) |
 | `POST /meters/:id/replace-device` | `meters.manage` | Gerätewechsel (atomar, §2.2) |
+| `PUT /meters/devices/:id` | `meters.manage` | Gerätedaten korrigieren |
+| `DELETE /meters/devices/:id` | `meters.manage` | Neuestes Gerät löschen, solange es keine Ablesungen hat |
 | `GET /meters/:id/readings` | `meters.view` | Ablesungen (paginiert, über Gerätegrenzen hinweg, mit Absolutwert-Spalte) |
 | `POST /meters/:id/readings` | `meters.read_entry` | Manuelle Ablesung |
 | `PUT/DELETE /meters/readings/:id` | `meters.read_entry` (eigene) / `meters.manage` (fremde) | Korrektur/Löschen |
 | `POST /meters/:id/readings/ocr` | `meters.read_entry` | Foto hochladen → `{ value, confidence, photoPath }` als Vorschlag; Speichern erfolgt erst mit Bestätigung über `POST readings` |
 | `GET/POST/DELETE /meters/:id/api-keys` | `meters.manage` | API-Keys; Klartext-Token nur in der Create-Response |
 | `POST /api/meters/ingest` | API-Key (kein User-Auth) | Externe Ablesung |
-| `GET /meters/:id/report` | `meters.view` | Verbrauchsreihen (§5) |
+| `GET /meters/:id/report?granularity=month\|year&from=&to=` | `meters.view` | Generische Verbrauchsreihen (§5) |
+| `GET /meters/reports/energy?granularity=month\|year&from=&to=` | `meters.view` | Strom-/PV-Gesamtreport (§5.2) |
 | `GET/POST/DELETE /meters/readings/:id/transactions` | `meters.view` + `finance.view` | Finance-Verknüpfung |
 
 ### 3.2 Externe Ingestion
@@ -223,17 +227,49 @@ nötig, Haushalts-Scope reicht).
 
 ### 5.1 Verbrauchsreihen
 
-`GET /meters/:id/report?granularity=day|week|month|year&from=&to=`
+`GET /meters/:id/report?granularity=month|year&from=&to=`
 
-- Verbrauch pro Bucket = Differenz der interpolierten Absolutstände an den
-  Bucket-Grenzen (Ablesungen sind unregelmäßig → lineare Interpolation
-  zwischen benachbarten Ablesungen, über Gerätewechsel hinweg via
-  Absolutstand).
-- Vergleich: gleicher Zeitraum des Vorjahres (`compare=previous_year`) als
-  zweite Serie in derselben Response.
+- Implementierter MVP: Verbrauch pro Bucket = Differenz zwischen zwei
+  aufeinanderfolgenden Absolutständen. Das Intervall wird dem Bucket des
+  Start-Zeitpunkts zugeordnet. Das entspricht der bisherigen Excel-Logik:
+  Ablesung am Monatsanfang beschreibt den Verbrauch bis zur nächsten Ablesung.
+- Die Berechnung ist generisch für alle Zählertypen und läuft über den
+  Absolutstand der Messstelle, also auch über Gerätewechsel hinweg.
+- `from`/`to` filtern Intervalle nach Start-Zeitpunkt.
 - Bei Betriebsstundenzählern identisch (Einheit h).
+- Noch offen: lineare Interpolation auf exakte Bucket-Grenzen,
+  `day`/`week` und Vorjahresvergleich (`compare=previous_year`).
 
-### 5.2 Anomalie-Erkennung
+### 5.2 Strom-/PV-Gesamtreport
+
+`GET /meters/reports/energy?granularity=month|year&from=&to=`
+
+Der aggregierte Energie-Report kombiniert die vorhandenen Stromzähler, sofern
+sie sichtbar sind. Dafür werden explizite Zählerrollen auf `meters.role`
+verwendet; die Report-Logik leitet Rollen nicht aus Anzeigenamen ab.
+Der historische Stromimport setzt diese Rollen direkt:
+
+- `grid_import` → Bezug
+- `grid_export` → Einspeisung
+- `pv_production` → Produktion
+
+Darauf werden je Bucket und für die Gesamtsumme folgende Werte berechnet:
+
+- Eigenverbrauch = Produktion - Einspeisung
+- Gesamtverbrauch = Bezug + Eigenverbrauch
+- Autarkie = 1 - Bezug / Gesamtverbrauch
+- Eigenverbrauchsquote = Eigenverbrauch / Produktion
+
+Zeiträume ohne vollständiges PV-Set (Bezug, Einspeisung und Produktion) werden
+im aggregierten Energie-Report ausgelassen, damit alte Vor-PV-Daten nicht in
+PV-Kennzahlen und Analysewerte einfließen. Migration `0123_meter_roles`
+backfilled bereits importierte historische Zähler einmalig; beim manuellen
+Anlegen/Bearbeiten kann die Report-Rolle gesetzt werden.
+
+Nicht Teil der ersten Ausbaustufe: E-Auto, Wärmepumpe, Warmwasser,
+Fußbodenheizung, PV-Anteile, Kosten/Preise, Gasvergleich/JAZ.
+
+### 5.3 Anomalie-Erkennung
 
 Muster von `finance/anomaly-detector.ts` übernehmen:
 
@@ -288,7 +324,7 @@ Storybook-Stories für Übersicht + Erfassungsdialog.
 | 3 | Manuelle Ablesungen | `readings.ts`, Absolutstand-Berechnung, Übersichts- + Detail-View, Erfassungsdialog | 2 |
 | 4 | Foto-OCR | `receipt-ocr-service`-Endpunkt `/meter-reading`, `readings-ocr.ts`, Foto-Ablage, Bestätigungs-UI | 3 |
 | 5 | API-Ingestion | `meter_api_keys`, `ingest.ts` (Bearer, Idempotenz, Rate-Limit), Key-Verwaltung in Admin-View | 3 |
-| 6 | Reports | `reports.ts` (Interpolation, Buckets, Vorjahresvergleich), Chart in Detail-View | 3 |
+| 6 | Reports | MVP umgesetzt: `reports.ts`/`reports.service.ts`, Monats-/Jahres-Buckets aus Ableseintervallen, Chart + Tabelle in Detail-View, aggregierter Strom-/PV-Gesamtreport in der Übersicht, explizite Zählerrollen. Offen: Interpolation, Day/Week, Vorjahresvergleich. | 3 |
 | 7 | Anomalien | Cron + `meter_anomalies`, Badge/Liste im Frontend | 6 |
 | 8 | Finance-Link | Link-Tabelle, Endpunkte, UI an Ablesung/Transaktion | 3 (+ Finance) |
 
@@ -305,8 +341,8 @@ jedem Push) und ist unabhängig deploybar.
   neu ab 3), nur ein aktives Gerät pro Messstelle.
 - **Ingest**: gültiger/ungültiger/deaktivierter Key, Duplikat (idempotent),
   Monotonie-422, `last_used_at`.
-- **Reports**: Interpolation über Gerätewechsel, leere Zeiträume,
-  Vorjahresvergleich.
+- **Reports**: Bucketbildung über Gerätewechsel, leere Zeiträume,
+  Filtergrenzen; später Interpolation und Vorjahresvergleich.
 - **Rechte**: Sichtbarkeit Owner/Gruppe, `meters.manage` erforderlich für
   CRUD/Keys.
 - **OCR**: Client gemockt (Muster `documents/llm-client.test.ts`),

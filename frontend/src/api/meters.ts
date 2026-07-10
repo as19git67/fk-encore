@@ -1,11 +1,13 @@
 import { apiFetch } from './client'
 
 export type MeterType = 'electricity' | 'water' | 'gas' | 'operating_hours'
+export type MeterRole = 'grid_import' | 'grid_export' | 'pv_production'
 
 export interface MeterListItem {
   id: number
   name: string
   type: MeterType
+  role: MeterRole | null
   unit: string
   location: string | null
   notes: string | null
@@ -27,6 +29,8 @@ export interface MeterDevice {
   endValue: number | null
   notes: string | null
   active: boolean
+  readingCount: number
+  canDelete: boolean
 }
 
 export interface MeterDetail extends MeterListItem {
@@ -45,6 +49,7 @@ export interface InitialDeviceInput {
 export interface CreateMeterRequest {
   name: string
   type: MeterType
+  role?: MeterRole | null
   unit: string
   location?: string
   notes?: string
@@ -56,6 +61,7 @@ export interface CreateMeterRequest {
 export interface UpdateMeterRequest {
   name: string
   type: MeterType
+  role?: MeterRole | null
   unit: string
   location?: string
   notes?: string
@@ -68,6 +74,15 @@ export interface ReplaceDeviceRequest {
   finalValue: number
   newSerialNumber?: string
   newStartValue?: number
+}
+
+export interface UpdateMeterDeviceRequest {
+  serialNumber?: string | null
+  installedAt: string
+  startValue: number
+  removedAt?: string | null
+  endValue?: number | null
+  notes?: string | null
 }
 
 export function listMeters() {
@@ -102,6 +117,19 @@ export function replaceMeterDevice(id: number, req: ReplaceDeviceRequest) {
   return apiFetch<{ newDeviceId: number }>(`/meters/${id}/replace-device`, {
     method: 'POST',
     body: JSON.stringify(req),
+  })
+}
+
+export function updateMeterDevice(deviceId: number, req: UpdateMeterDeviceRequest) {
+  return apiFetch<{ updated: boolean }>(`/meters/devices/${deviceId}`, {
+    method: 'PUT',
+    body: JSON.stringify(req),
+  })
+}
+
+export function deleteMeterDevice(deviceId: number) {
+  return apiFetch<{ deleted: boolean }>(`/meters/devices/${deviceId}`, {
+    method: 'DELETE',
   })
 }
 
@@ -157,6 +185,79 @@ export function deleteReading(readingId: number) {
   return apiFetch<{ deleted: boolean }>(`/meters/readings/${readingId}`, {
     method: 'DELETE',
   })
+}
+
+// ── Reports (Etappe 6) ──────────────────────────────────────────────────────
+
+export type MeterReportGranularity = 'month' | 'year'
+
+export interface MeterReportBucket {
+  key: string
+  label: string
+  periodStart: string
+  periodEnd: string
+  startReadingAt: string
+  endReadingAt: string
+  startValue: number
+  endValue: number
+  consumption: number
+  intervals: number
+}
+
+export interface MeterReport {
+  meterId: number
+  name: string
+  unit: string
+  decimals: number
+  granularity: MeterReportGranularity
+  from: string | null
+  to: string | null
+  buckets: MeterReportBucket[]
+  totalConsumption: number
+}
+
+export function getMeterReport(meterId: number, granularity: MeterReportGranularity = 'month') {
+  const q = new URLSearchParams({ granularity })
+  return apiFetch<MeterReport>(`/meters/${meterId}/report?${q}`)
+}
+
+export type EnergyReportRole = MeterRole
+
+export interface EnergyReportMeterRef {
+  role: EnergyReportRole
+  meterId: number
+  name: string
+}
+
+export interface EnergyReportBucket {
+  key: string
+  label: string
+  periodStart: string
+  periodEnd: string
+  gridImport: number | null
+  gridExport: number | null
+  production: number | null
+  selfConsumption: number | null
+  totalConsumption: number | null
+  autarky: number | null
+  selfConsumptionRate: number | null
+}
+
+export interface EnergyReport {
+  unit: string
+  decimals: number
+  granularity: MeterReportGranularity
+  from: string | null
+  to: string | null
+  meters: EnergyReportMeterRef[]
+  missingRoles: EnergyReportRole[]
+  buckets: EnergyReportBucket[]
+  totals: Omit<EnergyReportBucket, 'key' | 'label' | 'periodStart' | 'periodEnd'>
+}
+
+export function getEnergyReport(granularity: MeterReportGranularity = 'month') {
+  const q = new URLSearchParams({ granularity })
+  return apiFetch<EnergyReport>(`/meters/reports/energy?${q}`)
 }
 
 // ── Import (Issue #792) ─────────────────────────────────────────────────────
@@ -253,4 +354,11 @@ export const METER_TYPE_ICONS: Record<MeterType, string> = {
   water: 'pi pi-cloud',
   gas: 'pi pi-cloud',
   operating_hours: 'pi pi-clock',
+}
+
+/** Human-readable German labels for optional energy report roles. */
+export const METER_ROLE_LABELS: Record<MeterRole, string> = {
+  grid_import: 'Netzbezug',
+  grid_export: 'Einspeisung',
+  pv_production: 'PV-Produktion',
 }
