@@ -4,8 +4,16 @@
  *
  * The source is a combined JSON extracted from several Excel workbooks and
  * LEW invoices, pre-transformed into `import/electricity-history-data.ts`.
- * It contains 17 logical meters (13 electricity + 4 operating-hours) with
- * 19 devices and ~2 000 readings spanning 2006–2026.
+ * It contains historical logical meters (13 electricity + 4 operating-hours)
+ * with ~2 000 readings spanning 2006–2026. The import deliberately condenses
+ * old parallel meters that only existed before the PV-era into the modern
+ * reporting meters:
+ *
+ *   Hausstrom + Wärmepumpe HT + Wärmepumpe NT → Netzstrom Bezug (1.8.0)
+ *   Wärmepumpe HT + Wärmepumpe NT             → Wärmepumpe Komplett
+ *
+ * The original Excel files remain the audit trail; fk-encore stores the
+ * report-friendly view that should be queried going forward.
  *
  * Like the water import, this importer routes every row through the public
  * service functions (`createMeter` → `replaceDevice` → `addReading`), so
@@ -53,7 +61,21 @@ export interface ElecImportResult {
   alreadyImported: boolean;
 }
 
-const SENTINEL_NAME = "Hausstrom";
+const SENTINEL_NAME = "Netzstrom Bezug (1.8.0)";
+
+const GRID_IMPORT_KEY = "netzstrom_bezug";
+const GRID_IMPORT_LEGACY_KEYS = ["hausstrom", "waermepumpe_ht", "waermepumpe_nt"] as const;
+const GRID_IMPORT_LEGACY_CUTOFF = "2021-05-01";
+
+const HEAT_PUMP_TOTAL_KEY = "waermepumpe_komplett";
+const HEAT_PUMP_LEGACY_KEYS = ["waermepumpe_ht", "waermepumpe_nt"] as const;
+const HEAT_PUMP_LEGACY_CUTOFF = "2022-12-01";
+
+const CONSOLIDATED_SOURCE_KEYS = new Set<string>([
+  "hausstrom",
+  "waermepumpe_ht",
+  "waermepumpe_nt",
+]);
 
 const VIRTUAL_DEVICE_SWAPS: Record<
   string,
@@ -90,14 +112,147 @@ function normalizeReadingValue(value: number, decimals: number): number {
   return Math.round(value * factor) / factor;
 }
 
+function cloneMeter(meter: ElecImportMeter): ElecImportMeter {
+  return {
+    ...meter,
+    devices: meter.devices.map(cloneDevice),
+  };
+}
+
+function firstReadingValue(device: ElecImportDevice): number | null {
+  return device.readings[0]?.[1] ?? null;
+}
+
+function withDeviceStartingAtFirstReading(device: ElecImportDevice): ElecImportDevice {
+  const first = firstReadingValue(device);
+  return {
+    ...cloneDevice(device),
+    startValue: first ?? device.startValue,
+  };
+}
+
+function absoluteReadingsByDate(meter: ElecImportMeter): Map<string, number> {
+  const out = new Map<string, number>();
+  let base = 0;
+
+  for (const device of meter.devices) {
+    for (const [date, value] of device.readings) {
+      out.set(date, normalizeReadingValue(base + value - device.startValue, meter.decimals));
+    }
+    if (device.endValue !== null) {
+      base = normalizeReadingValue(base + device.endValue - device.startValue, meter.decimals);
+    }
+  }
+
+  return out;
+}
+
+function aggregateCommonAbsoluteReadings(
+  data: ElecImportData,
+  sourceKeys: readonly string[],
+  cutoffDate: string,
+  decimals: number,
+): { readings: [string, number][]; finalValue: number; finalDate: string } {
+  const sources = sourceKeys.map((key) => {
+    const meter = data.find((m) => m.key === key);
+    if (!meter) {
+      throw APIError.invalidArgument(`missing import source meter "${key}"`);
+    }
+    return { key, readings: absoluteReadingsByDate(meter) };
+  });
+
+  const [first, ...rest] = sources;
+  const dates = [...first.readings.keys()]
+    .filter((date) => date < cutoffDate && rest.every((s) => s.readings.has(date)))
+    .sort();
+
+  if (dates.length === 0) {
+    throw APIError.invalidArgument(`no common historical readings before ${cutoffDate}`);
+  }
+  if (!sources.every((s) => s.readings.has(cutoffDate))) {
+    throw APIError.invalidArgument(`missing historical closing reading at ${cutoffDate}`);
+  }
+
+  const sumAt = (date: string) =>
+    normalizeReadingValue(
+      sources.reduce((sum, s) => sum + (s.readings.get(date) ?? 0), 0),
+      decimals,
+    );
+
+  const readings = dates.map((date): [string, number] => [date, sumAt(date)]);
+  return {
+    readings,
+    finalValue: sumAt(cutoffDate),
+    finalDate: cutoffDate,
+  };
+}
+
+export function consolidateHistoricalReportMeters(data: ElecImportData): ElecImportData {
+  const gridImport = data.find((m) => m.key === GRID_IMPORT_KEY);
+  const heatPumpTotal = data.find((m) => m.key === HEAT_PUMP_TOTAL_KEY);
+  if (!gridImport || !heatPumpTotal) {
+    throw APIError.invalidArgument("electricity import data is missing report target meters");
+  }
+
+  const gridLegacy = aggregateCommonAbsoluteReadings(
+    data,
+    GRID_IMPORT_LEGACY_KEYS,
+    GRID_IMPORT_LEGACY_CUTOFF,
+    gridImport.decimals,
+  );
+  const heatPumpLegacy = aggregateCommonAbsoluteReadings(
+    data,
+    HEAT_PUMP_LEGACY_KEYS,
+    HEAT_PUMP_LEGACY_CUTOFF,
+    heatPumpTotal.decimals,
+  );
+
+  return data
+    .filter((meterDef) => !CONSOLIDATED_SOURCE_KEYS.has(meterDef.key))
+    .map((meterDef): ElecImportMeter => {
+      if (meterDef.key === GRID_IMPORT_KEY) {
+        return {
+          ...meterDef,
+          devices: [
+            {
+              serial: "historisch-hausstrom-wp-ht-nt",
+              startValue: 0,
+              endValue: gridLegacy.finalValue,
+              installedAt: gridLegacy.readings[0][0],
+              removedAt: gridLegacy.finalDate,
+              readings: gridLegacy.readings,
+            },
+            ...meterDef.devices.map(withDeviceStartingAtFirstReading),
+          ],
+        };
+      }
+
+      if (meterDef.key === HEAT_PUMP_TOTAL_KEY) {
+        return {
+          ...meterDef,
+          devices: [
+            {
+              serial: "historisch-wp-ht-nt",
+              startValue: 0,
+              endValue: heatPumpLegacy.finalValue,
+              installedAt: heatPumpLegacy.readings[0][0],
+              removedAt: heatPumpLegacy.finalDate,
+              readings: heatPumpLegacy.readings,
+            },
+            ...meterDef.devices.map(withDeviceStartingAtFirstReading),
+          ],
+        };
+      }
+
+      return cloneMeter(meterDef);
+    });
+}
+
 export function applyHistoricalVirtualDeviceSwaps(data: ElecImportData): ElecImportData {
   return data.map((meterDef) => {
     const swap = VIRTUAL_DEVICE_SWAPS[meterDef.key];
     if (!swap) {
-      return {
-        ...meterDef,
-        devices: meterDef.devices.map(cloneDevice),
-      };
+      return cloneMeter(meterDef);
     }
 
     const devices: ElecImportDevice[] = [];
@@ -168,7 +323,9 @@ export async function importElectricityHistory(
   let devicesCreated = 0;
   let readingsCreated = 0;
 
-  for (const meterDef of applyHistoricalVirtualDeviceSwaps(data)) {
+  const reportMeters = consolidateHistoricalReportMeters(data);
+
+  for (const meterDef of applyHistoricalVirtualDeviceSwaps(reportMeters)) {
     if (!meterDef.devices.length) continue;
 
     const firstDev = meterDef.devices[0];
