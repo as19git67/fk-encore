@@ -41,6 +41,7 @@ const canManage = computed(() => auth.hasPermission('meters.manage'))
 const meters = ref<MeterListItem[]>([])
 const groups = ref<GroupSummary[]>([])
 const energyReport = ref<EnergyReport | null>(null)
+const energyMonthlyReport = ref<EnergyReport | null>(null)
 const energyGranularity = ref<MeterReportGranularity>('month')
 const loadingEnergyReport = ref(false)
 const loading = ref(false)
@@ -88,9 +89,21 @@ async function load() {
 async function loadEnergyReport() {
   loadingEnergyReport.value = true
   try {
-    energyReport.value = await getEnergyReport(energyGranularity.value)
+    if (energyGranularity.value === 'year') {
+      const [selected, monthly] = await Promise.all([
+        getEnergyReport('year'),
+        getEnergyReport('month'),
+      ])
+      energyReport.value = selected
+      energyMonthlyReport.value = monthly
+    } else {
+      const selected = await getEnergyReport('month')
+      energyReport.value = selected
+      energyMonthlyReport.value = selected
+    }
   } catch {
     energyReport.value = null
+    energyMonthlyReport.value = null
   } finally {
     loadingEnergyReport.value = false
   }
@@ -147,25 +160,54 @@ const energyBuckets = computed(() => {
 
 type EnergyBucket = EnergyReport['buckets'][number]
 
+function isCurrentPeriod(bucket: EnergyBucket, granularity: MeterReportGranularity, now = new Date()) {
+  if (granularity === 'year') {
+    return bucket.key === String(now.getFullYear())
+  }
+  return bucket.key === `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+}
+
+function completedBuckets(buckets: EnergyBucket[], granularity: MeterReportGranularity) {
+  return buckets.filter((bucket) => !isCurrentPeriod(bucket, granularity))
+}
+
+function linearRegressionSlope(values: number[]): number | null {
+  if (values.length < 3) return null
+  const n = values.length
+  const meanX = (n - 1) / 2
+  const meanY = values.reduce((sum, value) => sum + value, 0) / n
+  let numerator = 0
+  let denominator = 0
+  values.forEach((value, index) => {
+    const dx = index - meanX
+    numerator += dx * (value - meanY)
+    denominator += dx * dx
+  })
+  if (denominator === 0) return null
+  return numerator / denominator
+}
+
+function trendLabel() {
+  if (energyGranularity.value === 'year') return 'Trend/Jahr'
+  return 'Trend/Monat'
+}
+
 const energyAnalysis = computed(() => {
   const buckets = energyReport.value?.buckets ?? []
+  const completed = completedBuckets(buckets, energyGranularity.value)
+  const trendSource = energyGranularity.value === 'month' ? completed.slice(-12) : completed
   const avg = (selector: (bucket: EnergyBucket) => number | null) => {
-    const values = buckets.map(selector).filter((value): value is number => value !== null)
+    const values = completed.map(selector).filter((value): value is number => value !== null)
     if (values.length === 0) return null
     return values.reduce((sum, value) => sum + value, 0) / values.length
   }
   const trend = (selector: (bucket: EnergyBucket) => number | null) => {
-    if (buckets.length < 2) return null
-    const previousBucket = buckets[buckets.length - 2]
-    const currentBucket = buckets[buckets.length - 1]
-    if (!previousBucket || !currentBucket) return null
-    const previous = selector(previousBucket)
-    const current = selector(currentBucket)
-    if (previous === null || current === null) return null
-    return current - previous
+    const values = trendSource.map(selector).filter((value): value is number => value !== null)
+    return linearRegressionSlope(values)
   }
   return {
-    count: buckets.length,
+    count: completed.length,
+    trendPoints: trendSource.length,
     avgGridImport: avg((bucket) => bucket.gridImport),
     avgGridExport: avg((bucket) => bucket.gridExport),
     avgProduction: avg((bucket) => bucket.production),
@@ -177,15 +219,60 @@ const energyAnalysis = computed(() => {
   }
 })
 
+const energyYtdComparison = computed(() => {
+  if (energyGranularity.value !== 'year') return null
+  const buckets = energyMonthlyReport.value?.buckets ?? []
+  const now = new Date()
+  const currentYear = now.getFullYear()
+  const currentMonth = now.getMonth() + 1
+  const completedMonthLimit = currentMonth - 1
+  if (completedMonthLimit <= 0) return null
+
+  const monthKey = (year: number, month: number) => `${year}-${String(month).padStart(2, '0')}`
+  const byKey = new Map(buckets.map((bucket) => [bucket.key, bucket]))
+  const currentBuckets: EnergyBucket[] = []
+  const previousBuckets: EnergyBucket[] = []
+  for (let month = 1; month <= completedMonthLimit; month++) {
+    const current = byKey.get(monthKey(currentYear, month))
+    const previous = byKey.get(monthKey(currentYear - 1, month))
+    if (!current || !previous) return null
+    currentBuckets.push(current)
+    previousBuckets.push(previous)
+  }
+
+  const sum = (source: EnergyBucket[], selector: (bucket: EnergyBucket) => number | null) => {
+    const values = source.map(selector).filter((value): value is number => value !== null)
+    if (values.length !== source.length) return null
+    return values.reduce((total, value) => total + value, 0)
+  }
+  const ratioAvg = (source: EnergyBucket[], selector: (bucket: EnergyBucket) => number | null) => {
+    const values = source.map(selector).filter((value): value is number => value !== null)
+    if (values.length !== source.length || values.length === 0) return null
+    return values.reduce((total, value) => total + value, 0) / values.length
+  }
+  const currentImport = sum(currentBuckets, (bucket) => bucket.gridImport)
+  const previousImport = sum(previousBuckets, (bucket) => bucket.gridImport)
+  const currentAutarky = ratioAvg(currentBuckets, (bucket) => bucket.autarky)
+  const previousAutarky = ratioAvg(previousBuckets, (bucket) => bucket.autarky)
+
+  return {
+    label: `Jan–${String(completedMonthLimit).padStart(2, '0')}`,
+    gridImportDelta:
+      currentImport !== null && previousImport !== null ? currentImport - previousImport : null,
+    autarkyDelta:
+      currentAutarky !== null && previousAutarky !== null ? currentAutarky - previousAutarky : null,
+  }
+})
+
 function fmtTrend(value: number | null, decimals: number, unit = '') {
-  if (value === null) return 'Trend: –'
+  if (value === null) return `${trendLabel()}: –`
   const sign = value > 0 ? '+' : ''
-  return `Trend: ${sign}${fmt(value, decimals)}${unit ? ` ${unit}` : ''}`
+  return `${trendLabel()}: ${sign}${fmt(value, decimals)}${unit ? ` ${unit}` : ''}`
 }
 function fmtPercentTrend(value: number | null) {
-  if (value === null) return 'Trend: –'
+  if (value === null) return `${trendLabel()}: –`
   const sign = value > 0 ? '+' : ''
-  return `Trend: ${sign}${(value * 100).toLocaleString('de-DE', {
+  return `${trendLabel()}: ${sign}${(value * 100).toLocaleString('de-DE', {
     minimumFractionDigits: 0,
     maximumFractionDigits: 1,
   })} Prozentpunkte`
@@ -448,6 +535,7 @@ onMounted(load)
             <div class="energy-kpi">
               <span class="figure-label">Ø Einspeisung</span>
               <strong>{{ fmt(energyAnalysis.avgGridExport, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+              <span class="figure-sub">{{ energyAnalysis.count }} abgeschlossene {{ energyGranularity === 'month' ? 'PV-Monate' : 'PV-Jahre' }}</span>
             </div>
             <div class="energy-kpi">
               <span class="figure-label">Ø Produktion</span>
@@ -465,8 +553,14 @@ onMounted(load)
             <div class="energy-kpi">
               <span class="figure-label">Ø Eigenverbrauchsquote</span>
               <strong>{{ fmtPercent(energyAnalysis.avgSelfConsumptionRate) }}</strong>
-              <span class="figure-sub">{{ energyAnalysis.count }} {{ energyGranularity === 'month' ? 'PV-Monate' : 'PV-Jahre' }}</span>
+              <span class="figure-sub">Trendbasis: {{ energyAnalysis.trendPoints }} Werte</span>
             </div>
+          </div>
+
+          <div v-if="energyYtdComparison" class="energy-ytd">
+            <span>YTD {{ energyYtdComparison.label }} ggü. Vorjahr:</span>
+            <strong>Bezug {{ fmtTrend(energyYtdComparison.gridImportDelta, energyReport.decimals, energyReport.unit).replace(trendLabel(), 'Δ') }}</strong>
+            <strong>Autarkie {{ fmtPercentTrend(energyYtdComparison.autarkyDelta).replace(trendLabel(), 'Δ') }}</strong>
           </div>
 
           <div class="energy-table-wrap">
@@ -664,6 +758,21 @@ onMounted(load)
   display: block;
   margin-top: 0.15rem;
   overflow-wrap: break-word;
+}
+.energy-ytd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin: -0.25rem 0 1rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  background: var(--p-content-hover-background);
+  color: var(--p-text-muted-color);
+  font-size: 0.85rem;
+}
+.energy-ytd strong {
+  color: var(--p-text-color);
 }
 .energy-table-wrap {
   max-width: 100%;
