@@ -323,6 +323,24 @@ export const modules: ModuleConfig[] = [
     ],
   },
   {
+    id: 'zaehler',
+    label: 'Zähler',
+    icon: 'pi pi-gauge',
+    basePath: '/zaehler',
+    permission: 'module.meters',
+    routes: [
+      {
+        path: '',
+        name: 'zaehler-list',
+        component: () => import('../views/MetersView.vue'),
+        meta: { permission: 'meters.view' },
+      },
+    ],
+    menuItems: [
+      { label: 'Zähler', icon: 'pi pi-gauge', routeName: 'zaehler-list', permission: 'meters.view' },
+    ],
+  },
+  {
     id: 'admin',
     label: 'Admin',
     icon: 'pi pi-cog',

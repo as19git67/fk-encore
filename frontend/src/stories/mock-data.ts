@@ -42,6 +42,7 @@ export const MOCK_USER: UserWithRoles = {
     'people.view',
     'data.manage',
     'documents.view', 'documents.upload', 'documents.edit', 'documents.delete',
+    'module.meters', 'meters.view', 'meters.read_entry', 'meters.manage',
   ],
 }
 
