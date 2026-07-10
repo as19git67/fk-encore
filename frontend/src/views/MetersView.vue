@@ -22,6 +22,7 @@ import {
   addReading,
   updateReading,
   deleteReading,
+  importWaterHistory,
   METER_TYPE_LABELS,
   METER_TYPE_ICONS,
   type MeterListItem,
@@ -377,6 +378,36 @@ async function refreshAfterReading() {
   detail.value = await getMeter(id)
 }
 
+// ── Water history import ────────────────────────────────────────────────────
+
+const importing = ref(false)
+const importDone = ref(false)
+const importMsg = ref('')
+
+const showImportButton = computed(
+  () => canManage.value && !importDone.value && !meters.value.some((m) => m.type === 'water' && m.name === 'Wasser'),
+)
+
+async function handleImportWater() {
+  importing.value = true
+  error.value = ''
+  importMsg.value = ''
+  try {
+    const res = await importWaterHistory()
+    if (res.alreadyImported) {
+      importMsg.value = 'Wasser-Historie war bereits importiert.'
+    } else {
+      importMsg.value = `Import abgeschlossen: ${res.devices} Geräte, ${res.readings} Ablesungen.`
+    }
+    importDone.value = true
+    await load()
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Import'
+  } finally {
+    importing.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -384,14 +415,25 @@ onMounted(load)
   <div class="meters-view">
     <div class="header">
       <h1>Zähler</h1>
-      <Button
-        v-if="canManage"
-        label="Neuer Zähler"
-        icon="pi pi-plus"
-        @click="openCreate"
-      />
+      <div class="header-actions">
+        <Button
+          v-if="showImportButton"
+          label="Wasser-Historie importieren"
+          icon="pi pi-upload"
+          severity="secondary"
+          :loading="importing"
+          @click="handleImportWater"
+        />
+        <Button
+          v-if="canManage"
+          label="Neuer Zähler"
+          icon="pi pi-plus"
+          @click="openCreate"
+        />
+      </div>
     </div>
 
+    <Message v-if="importMsg" severity="success" @close="importMsg = ''" closable>{{ importMsg }}</Message>
     <Message v-if="error" severity="error" @close="error = ''" closable>{{ error }}</Message>
 
     <div v-if="loading" class="info"><i class="pi pi-spin pi-spinner" /> Zähler werden geladen…</div>
@@ -635,6 +677,11 @@ onMounted(load)
 }
 .header h1 {
   margin: 0;
+}
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 .info {
   padding: 2rem;

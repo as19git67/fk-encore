@@ -76,6 +76,9 @@ const meterHandlers = [
     HttpResponse.json({ readings: MOCK_READINGS, total: MOCK_READINGS.length }),
   ),
   http.get('/api/meters/:id', () => HttpResponse.json(MOCK_METER_DETAIL)),
+  http.post('/api/meters/import/water-history', () =>
+    HttpResponse.json({ meterId: 99, devices: 4, readings: 222, alreadyImported: false }),
+  ),
   http.get('/api/groups', () => HttpResponse.json({ items: [] })),
   ...defaultHandlers,
 ]

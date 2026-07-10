@@ -156,6 +156,21 @@ export function deleteReading(readingId: number) {
   })
 }
 
+// ── Import (Issue #792) ─────────────────────────────────────────────────────
+
+export interface WaterImportResult {
+  meterId: number
+  devices: number
+  readings: number
+  alreadyImported: boolean
+}
+
+export function importWaterHistory() {
+  return apiFetch<WaterImportResult>('/meters/import/water-history', {
+    method: 'POST',
+  })
+}
+
 /** Human-readable German labels for the meter types. */
 export const METER_TYPE_LABELS: Record<MeterType, string> = {
   electricity: 'Strom',
