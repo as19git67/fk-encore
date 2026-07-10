@@ -24,12 +24,17 @@ import {
   deleteReading,
   importWaterHistory,
   importElectricityHistory,
+  listApiKeys,
+  createApiKey,
+  deleteApiKey,
+  ocrMeterReading,
   METER_TYPE_LABELS,
   METER_TYPE_ICONS,
   type MeterListItem,
   type MeterDetail,
   type MeterType,
   type Reading,
+  type ApiKey,
 } from '../api/meters'
 import { listGroups, type GroupSummary } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
@@ -236,7 +241,7 @@ async function openDetail(m: MeterListItem) {
   error.value = ''
   try {
     detail.value = await getMeter(m.id)
-    await loadReadings()
+    await Promise.all([loadReadings(), canManage.value ? loadApiKeys() : Promise.resolve()])
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Details'
   } finally {
@@ -377,6 +382,95 @@ async function refreshAfterReading() {
   const id = detail.value.id
   await load()
   detail.value = await getMeter(id)
+}
+
+// ── OCR photo capture ────────────────────────────────────────────────────────
+
+const ocrLoading = ref(false)
+const ocrError = ref('')
+const ocrFileInput = ref<HTMLInputElement | null>(null)
+
+function triggerOcrUpload() {
+  ocrFileInput.value?.click()
+}
+
+async function handleOcrFile(event: Event) {
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (!file || !detail.value) return
+  ocrLoading.value = true
+  ocrError.value = ''
+  try {
+    const result = await ocrMeterReading(detail.value.id, file)
+    if (result.value !== null) {
+      readingForm.value.value = result.value
+      readingForm.value.notes = `OCR (${Math.round(result.confidence * 100)}%)`
+    } else {
+      ocrError.value = 'Kein Zählerstand erkannt. Bitte manuell eingeben.'
+    }
+  } catch (err: any) {
+    ocrError.value = err.message || 'OCR-Dienst nicht erreichbar'
+  } finally {
+    ocrLoading.value = false
+    if (ocrFileInput.value) ocrFileInput.value.value = ''
+  }
+}
+
+// ── API keys (Etappe 5) ──────────────────────────────────────────────────────
+
+const apiKeys = ref<ApiKey[]>([])
+const loadingKeys = ref(false)
+const showCreateKey = ref(false)
+const creatingKey = ref(false)
+const newKeyName = ref('')
+const newKeyToken = ref('')
+
+async function loadApiKeys() {
+  if (!detail.value) return
+  loadingKeys.value = true
+  try {
+    const res = await listApiKeys(detail.value.id)
+    apiKeys.value = res.keys
+  } catch {
+    apiKeys.value = []
+  } finally {
+    loadingKeys.value = false
+  }
+}
+
+function openCreateKey() {
+  newKeyName.value = ''
+  newKeyToken.value = ''
+  showCreateKey.value = true
+}
+
+async function handleCreateKey() {
+  if (!detail.value || !newKeyName.value.trim()) return
+  creatingKey.value = true
+  error.value = ''
+  try {
+    const result = await createApiKey(detail.value.id, newKeyName.value.trim())
+    newKeyToken.value = result.token
+    await loadApiKeys()
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Erstellen des API-Keys'
+  } finally {
+    creatingKey.value = false
+  }
+}
+
+async function handleDeleteKey(key: ApiKey) {
+  if (!confirm(`API-Key „${key.name}" wirklich löschen?`)) return
+  error.value = ''
+  try {
+    await deleteApiKey(key.id)
+    await loadApiKeys()
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Löschen des API-Keys'
+  }
+}
+
+function copyToken() {
+  if (newKeyToken.value) navigator.clipboard.writeText(newKeyToken.value)
 }
 
 // ── History imports ─────────────────────────────────────────────────────────
@@ -672,22 +766,88 @@ onMounted(load)
       modal
       :style="{ width: '26rem', maxWidth: '95vw' }"
     >
-      <!-- Single column: the date+time picker needs the full width or its
-           value ("TT.MM.JJJJ HH:MM") gets clipped in a half-width cell. -->
       <div class="form-grid form-grid--stack">
         <label>Zeitpunkt
           <DatePicker v-model="readingForm.takenAt" show-time hour-format="24" date-format="dd.mm.yy" />
         </label>
         <label>Zählerstand
-          <InputNumber v-model="readingForm.value" :min-fraction-digits="0" :max-fraction-digits="3" autofocus />
+          <div class="ocr-row">
+            <InputNumber v-model="readingForm.value" :min-fraction-digits="0" :max-fraction-digits="3" autofocus class="ocr-input" />
+            <Button
+              v-if="readingForm.id === null"
+              icon="pi pi-camera"
+              severity="secondary"
+              v-tooltip.top="'Foto-Erkennung'"
+              :loading="ocrLoading"
+              @click="triggerOcrUpload"
+            />
+          </div>
         </label>
+        <Message v-if="ocrError" severity="warn" :closable="false" class="ocr-msg">{{ ocrError }}</Message>
         <label>Notiz
           <Textarea v-model="readingForm.notes" rows="2" auto-resize />
         </label>
       </div>
+      <input ref="ocrFileInput" type="file" accept="image/*" capture="environment" style="display:none" @change="handleOcrFile" />
       <template #footer>
         <Button label="Abbrechen" text @click="showReading = false" />
         <Button label="Speichern" icon="pi pi-check" :loading="savingReading" @click="handleSaveReading" />
+      </template>
+    </Dialog>
+
+    <!-- API key management -->
+    <div v-if="detail && canManage" class="detail-panel api-keys-panel">
+      <div class="detail-header">
+        <h2><i class="pi pi-key" /> API-Keys</h2>
+        <Button label="Neuer Key" icon="pi pi-plus" size="small" @click="openCreateKey" />
+      </div>
+      <div v-if="loadingKeys" class="info"><i class="pi pi-spin pi-spinner" /> Keys…</div>
+      <div v-else-if="apiKeys.length === 0" class="info">Keine API-Keys vorhanden.</div>
+      <DataTable v-else :value="apiKeys" size="small">
+        <Column field="name" header="Name" />
+        <Column header="Erstellt">
+          <template #body="{ data }">{{ fmtDateTime(data.createdAt) }}</template>
+        </Column>
+        <Column header="Zuletzt genutzt">
+          <template #body="{ data }">{{ data.lastUsedAt ? fmtDateTime(data.lastUsedAt) : 'nie' }}</template>
+        </Column>
+        <Column header="Status">
+          <template #body="{ data }">
+            <Tag :value="data.disabledAt ? 'deaktiviert' : 'aktiv'" :severity="data.disabledAt ? 'danger' : 'success'" />
+          </template>
+        </Column>
+        <Column style="width: 4rem">
+          <template #body="{ data }">
+            <Button icon="pi pi-trash" text rounded size="small" severity="danger" v-tooltip.left="'Löschen'" @click="handleDeleteKey(data)" />
+          </template>
+        </Column>
+      </DataTable>
+    </div>
+
+    <!-- Create API key dialog -->
+    <Dialog v-model:visible="showCreateKey" header="Neuer API-Key" modal :style="{ width: '28rem', maxWidth: '95vw' }">
+      <template v-if="!newKeyToken">
+        <div class="form-grid form-grid--stack">
+          <label>Bezeichnung
+            <InputText v-model="newKeyName" autofocus placeholder="z.B. Shelly EM" />
+          </label>
+        </div>
+      </template>
+      <template v-else>
+        <p class="hint">Der Token wird nur einmal angezeigt. Jetzt kopieren!</p>
+        <div class="token-display">
+          <code>{{ newKeyToken }}</code>
+          <Button icon="pi pi-copy" text rounded severity="secondary" v-tooltip.top="'Kopieren'" @click="copyToken" />
+        </div>
+      </template>
+      <template #footer>
+        <template v-if="!newKeyToken">
+          <Button label="Abbrechen" text @click="showCreateKey = false" />
+          <Button label="Erstellen" icon="pi pi-plus" :loading="creatingKey" :disabled="!newKeyName.trim()" @click="handleCreateKey" />
+        </template>
+        <template v-else>
+          <Button label="Schließen" @click="showCreateKey = false" />
+        </template>
       </template>
     </Dialog>
   </div>
@@ -864,5 +1024,35 @@ onMounted(load)
   color: var(--p-text-muted-color);
   font-size: 0.85rem;
   margin: 0 0 0.75rem;
+}
+.ocr-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+.ocr-input {
+  flex: 1;
+  min-width: 0;
+}
+.ocr-msg {
+  margin: 0;
+}
+.api-keys-panel {
+  border-top: none;
+  padding-top: 0;
+}
+.token-display {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--p-content-hover-background);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  word-break: break-all;
+}
+.token-display code {
+  flex: 1;
+  font-size: 0.8rem;
 }
 </style>
