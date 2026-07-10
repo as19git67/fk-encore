@@ -159,6 +159,40 @@ export function deleteReading(readingId: number) {
   })
 }
 
+// ── Reports (Etappe 6) ──────────────────────────────────────────────────────
+
+export type MeterReportGranularity = 'month' | 'year'
+
+export interface MeterReportBucket {
+  key: string
+  label: string
+  periodStart: string
+  periodEnd: string
+  startReadingAt: string
+  endReadingAt: string
+  startValue: number
+  endValue: number
+  consumption: number
+  intervals: number
+}
+
+export interface MeterReport {
+  meterId: number
+  name: string
+  unit: string
+  decimals: number
+  granularity: MeterReportGranularity
+  from: string | null
+  to: string | null
+  buckets: MeterReportBucket[]
+  totalConsumption: number
+}
+
+export function getMeterReport(meterId: number, granularity: MeterReportGranularity = 'month') {
+  const q = new URLSearchParams({ granularity })
+  return apiFetch<MeterReport>(`/meters/${meterId}/report?${q}`)
+}
+
 // ── Import (Issue #792) ─────────────────────────────────────────────────────
 
 export interface WaterImportResult {

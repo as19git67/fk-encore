@@ -145,6 +145,7 @@ meter/
 ├── ingest.ts                // api.raw POST /api/meters/ingest (API-Key-Auth)
 ├── api-keys.ts              // API-Key-Verwaltung
 ├── reports.ts               // Verbrauch/Zeit, Perioden-Vergleich
+├── reports.service.ts       // generische Bucket-Logik + DB-Reportdaten
 ├── anomaly.ts               // Anomalie-Erkennung (Cron)
 ├── finance-link.ts          // Verknüpfung Ablesung ↔ finance_transaction
 └── *.test.ts
@@ -163,7 +164,7 @@ meter/
 | `POST /meters/:id/readings/ocr` | `meters.read_entry` | Foto hochladen → `{ value, confidence, photoPath }` als Vorschlag; Speichern erfolgt erst mit Bestätigung über `POST readings` |
 | `GET/POST/DELETE /meters/:id/api-keys` | `meters.manage` | API-Keys; Klartext-Token nur in der Create-Response |
 | `POST /api/meters/ingest` | API-Key (kein User-Auth) | Externe Ablesung |
-| `GET /meters/:id/report` | `meters.view` | Verbrauchsreihen (§5) |
+| `GET /meters/:id/report?granularity=month\|year&from=&to=` | `meters.view` | Generische Verbrauchsreihen (§5) |
 | `GET/POST/DELETE /meters/readings/:id/transactions` | `meters.view` + `finance.view` | Finance-Verknüpfung |
 
 ### 3.2 Externe Ingestion
@@ -223,15 +224,18 @@ nötig, Haushalts-Scope reicht).
 
 ### 5.1 Verbrauchsreihen
 
-`GET /meters/:id/report?granularity=day|week|month|year&from=&to=`
+`GET /meters/:id/report?granularity=month|year&from=&to=`
 
-- Verbrauch pro Bucket = Differenz der interpolierten Absolutstände an den
-  Bucket-Grenzen (Ablesungen sind unregelmäßig → lineare Interpolation
-  zwischen benachbarten Ablesungen, über Gerätewechsel hinweg via
-  Absolutstand).
-- Vergleich: gleicher Zeitraum des Vorjahres (`compare=previous_year`) als
-  zweite Serie in derselben Response.
+- Implementierter MVP: Verbrauch pro Bucket = Differenz zwischen zwei
+  aufeinanderfolgenden Absolutständen. Das Intervall wird dem Bucket des
+  Start-Zeitpunkts zugeordnet. Das entspricht der bisherigen Excel-Logik:
+  Ablesung am Monatsanfang beschreibt den Verbrauch bis zur nächsten Ablesung.
+- Die Berechnung ist generisch für alle Zählertypen und läuft über den
+  Absolutstand der Messstelle, also auch über Gerätewechsel hinweg.
+- `from`/`to` filtern Intervalle nach Start-Zeitpunkt.
 - Bei Betriebsstundenzählern identisch (Einheit h).
+- Noch offen: lineare Interpolation auf exakte Bucket-Grenzen,
+  `day`/`week` und Vorjahresvergleich (`compare=previous_year`).
 
 ### 5.2 Anomalie-Erkennung
 
@@ -288,7 +292,7 @@ Storybook-Stories für Übersicht + Erfassungsdialog.
 | 3 | Manuelle Ablesungen | `readings.ts`, Absolutstand-Berechnung, Übersichts- + Detail-View, Erfassungsdialog | 2 |
 | 4 | Foto-OCR | `receipt-ocr-service`-Endpunkt `/meter-reading`, `readings-ocr.ts`, Foto-Ablage, Bestätigungs-UI | 3 |
 | 5 | API-Ingestion | `meter_api_keys`, `ingest.ts` (Bearer, Idempotenz, Rate-Limit), Key-Verwaltung in Admin-View | 3 |
-| 6 | Reports | `reports.ts` (Interpolation, Buckets, Vorjahresvergleich), Chart in Detail-View | 3 |
+| 6 | Reports | MVP umgesetzt: `reports.ts`/`reports.service.ts`, Monats-/Jahres-Buckets aus Ableseintervallen, Chart + Tabelle in Detail-View. Offen: Interpolation, Day/Week, Vorjahresvergleich. | 3 |
 | 7 | Anomalien | Cron + `meter_anomalies`, Badge/Liste im Frontend | 6 |
 | 8 | Finance-Link | Link-Tabelle, Endpunkte, UI an Ablesung/Transaktion | 3 (+ Finance) |
 
@@ -305,8 +309,8 @@ jedem Push) und ist unabhängig deploybar.
   neu ab 3), nur ein aktives Gerät pro Messstelle.
 - **Ingest**: gültiger/ungültiger/deaktivierter Key, Duplikat (idempotent),
   Monotonie-422, `last_used_at`.
-- **Reports**: Interpolation über Gerätewechsel, leere Zeiträume,
-  Vorjahresvergleich.
+- **Reports**: Bucketbildung über Gerätewechsel, leere Zeiträume,
+  Filtergrenzen; später Interpolation und Vorjahresvergleich.
 - **Rechte**: Sichtbarkeit Owner/Gruppe, `meters.manage` erforderlich für
   CRUD/Keys.
 - **OCR**: Client gemockt (Muster `documents/llm-client.test.ts`),

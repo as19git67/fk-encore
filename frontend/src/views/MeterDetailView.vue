@@ -12,6 +12,8 @@ import Message from 'primevue/message'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Tag from 'primevue/tag'
+import Chart from 'primevue/chart'
+import SelectButton from 'primevue/selectbutton'
 import {
   getMeter,
   updateMeter,
@@ -25,12 +27,15 @@ import {
   createApiKey,
   deleteApiKey,
   ocrMeterReading,
+  getMeterReport,
   METER_TYPE_LABELS,
   METER_TYPE_ICONS,
   type MeterDetail,
   type MeterType,
   type Reading,
   type ApiKey,
+  type MeterReport,
+  type MeterReportGranularity,
 } from '../api/meters'
 import { listGroups, type GroupSummary } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
@@ -93,6 +98,7 @@ async function loadDetail() {
     detail.value = await getMeter(meterId.value)
     await Promise.all([
       loadReadings(),
+      loadReport(),
       canManage.value ? loadApiKeys() : Promise.resolve(),
     ])
   } catch (err: any) {
@@ -101,6 +107,76 @@ async function loadDetail() {
     loading.value = false
   }
 }
+
+// ── Reports ─────────────────────────────────────────────────────────────────
+
+const report = ref<MeterReport | null>(null)
+const loadingReport = ref(false)
+const reportGranularity = ref<MeterReportGranularity>('month')
+const reportGranularityOptions: Array<{ label: string; value: MeterReportGranularity }> = [
+  { label: 'Monat', value: 'month' },
+  { label: 'Jahr', value: 'year' },
+]
+
+const recentReportBuckets = computed(() => {
+  const buckets = report.value?.buckets ?? []
+  return reportGranularity.value === 'month' ? buckets.slice(-24) : buckets
+})
+
+const reportChartData = computed(() => {
+  if (!detail.value || recentReportBuckets.value.length === 0) return null
+  return {
+    labels: recentReportBuckets.value.map((bucket) => bucket.label),
+    datasets: [
+      {
+        label: `${detail.value.name} (${detail.value.unit})`,
+        data: recentReportBuckets.value.map((bucket) => bucket.consumption),
+        backgroundColor: 'rgba(245, 158, 11, 0.55)',
+        borderColor: 'rgb(217, 119, 6)',
+        borderWidth: 1,
+        borderRadius: 6,
+      },
+    ],
+  }
+})
+
+const reportChartOptions = computed(() => ({
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: {
+    legend: { display: false },
+    tooltip: {
+      callbacks: {
+        label: (ctx: any) => `${fmt(Number(ctx.raw ?? 0), detail.value?.decimals ?? 1)} ${detail.value?.unit ?? ''}`,
+      },
+    },
+  },
+  scales: {
+    y: {
+      beginAtZero: true,
+      ticks: {
+        callback: (value: number | string) => `${fmt(Number(value), detail.value?.decimals ?? 1)} ${detail.value?.unit ?? ''}`,
+      },
+    },
+  },
+}))
+
+async function loadReport() {
+  if (!detail.value) return
+  loadingReport.value = true
+  try {
+    report.value = await getMeterReport(detail.value.id, reportGranularity.value)
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Laden des Reports'
+    report.value = null
+  } finally {
+    loadingReport.value = false
+  }
+}
+
+watch(reportGranularity, () => {
+  if (detail.value) void loadReport()
+})
 
 // ── Edit dialog ──────────────────────────────────────────────────────────────
 
@@ -452,6 +528,43 @@ watch(meterId, () => loadDetail())
 
       <Message v-if="error" severity="error" @close="error = ''" closable>{{ error }}</Message>
 
+      <!-- Report -->
+      <div class="section-header">
+        <h2><i class="pi pi-chart-bar" /> Verbrauch</h2>
+        <SelectButton
+          v-model="reportGranularity"
+          :options="reportGranularityOptions"
+          option-label="label"
+          option-value="value"
+          size="small"
+          :allow-empty="false"
+        />
+      </div>
+      <div v-if="loadingReport" class="info"><i class="pi pi-spin pi-spinner" /> Report…</div>
+      <div v-else-if="!report || report.buckets.length === 0" class="info">Noch nicht genug Ablesungen für einen Verbrauchsreport.</div>
+      <div v-else class="report-panel">
+        <div class="report-summary">
+          <span class="figure-label">Gesamt im Report</span>
+          <strong>{{ fmt(report.totalConsumption, detail.decimals) }} {{ detail.unit }}</strong>
+          <span class="figure-sub">{{ report.buckets.length }} {{ reportGranularity === 'month' ? 'Monate' : 'Jahre' }}</span>
+        </div>
+        <div v-if="reportChartData" class="report-chart">
+          <Chart type="bar" :data="reportChartData" :options="reportChartOptions" />
+        </div>
+        <DataTable :value="recentReportBuckets" size="small" class="report-table">
+          <Column field="label" :header="reportGranularity === 'month' ? 'Monat' : 'Jahr'" />
+          <Column header="Verbrauch">
+            <template #body="{ data }">{{ fmt(data.consumption, detail!.decimals) }} {{ detail!.unit }}</template>
+          </Column>
+          <Column header="Von">
+            <template #body="{ data }">{{ fmtDateTime(data.startReadingAt) }}</template>
+          </Column>
+          <Column header="Bis">
+            <template #body="{ data }">{{ fmtDateTime(data.endReadingAt) }}</template>
+          </Column>
+        </DataTable>
+      </div>
+
       <!-- Device history -->
       <div class="section-header">
         <h2><i class="pi pi-cog" /> Gerätehistorie</h2>
@@ -751,6 +864,42 @@ watch(meterId, () => loadDetail())
 }
 .section-header h2 i {
   margin-right: 0.4rem;
+}
+.report-panel {
+  background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 8px;
+  padding: 1rem;
+}
+.report-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.report-summary strong {
+  font-size: 1.1rem;
+}
+.report-chart {
+  height: 260px;
+  min-width: 0;
+}
+.report-table {
+  margin-top: 1rem;
+}
+@media (max-width: 560px) {
+  .section-header {
+    align-items: flex-start;
+    gap: 0.75rem;
+    flex-direction: column;
+  }
+  .report-panel {
+    padding: 0.75rem;
+  }
+  .report-chart {
+    height: 220px;
+  }
 }
 .reading-actions {
   display: flex;
