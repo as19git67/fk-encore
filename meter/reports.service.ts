@@ -37,7 +37,7 @@ export interface MeterReport {
   totalConsumption: number;
 }
 
-export type EnergyReportRole = NonNullable<MeterListItem["role"]>;
+export type EnergyReportRole = "grid_import" | "grid_export" | "pv_production";
 
 export interface EnergyReportMeterRef {
   role: EnergyReportRole;
