@@ -123,6 +123,9 @@ export interface AddReadingRequest {
   value: number
   takenAt?: string
   notes?: string
+  source?: 'manual' | 'ocr'
+  photoPath?: string
+  ocrConfidence?: number
 }
 
 export interface UpdateReadingRequest {
@@ -181,6 +184,58 @@ export interface ElecImportResult {
 export function importElectricityHistory() {
   return apiFetch<ElecImportResult>('/meters/import/electricity-history', {
     method: 'POST',
+  })
+}
+
+// ── API Keys (Etappe 5) ─────────────────────────────────────────────────────
+
+export interface ApiKey {
+  id: number
+  meterId: number
+  name: string
+  createdAt: string
+  lastUsedAt: string | null
+  disabledAt: string | null
+}
+
+export interface CreateApiKeyResult extends ApiKey {
+  token: string
+}
+
+export function listApiKeys(meterId: number) {
+  return apiFetch<{ keys: ApiKey[] }>(`/meters/${meterId}/api-keys`)
+}
+
+export function createApiKey(meterId: number, name: string) {
+  return apiFetch<CreateApiKeyResult>(`/meters/${meterId}/api-keys`, {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  })
+}
+
+export function deleteApiKey(keyId: number) {
+  return apiFetch<{ deleted: boolean }>(`/meters/api-keys/${keyId}`, {
+    method: 'DELETE',
+  })
+}
+
+// ── OCR (Etappe 4) ─────────────────────────────────────────────────────────
+
+export interface MeterOcrResult {
+  value: number | null
+  confidence: number
+  photoPath: string
+  rawText: string
+}
+
+export function ocrMeterReading(meterId: number, imageFile: File) {
+  return apiFetch<MeterOcrResult>(`/meters/${meterId}/readings/ocr`, {
+    method: 'POST',
+    body: imageFile,
+    headers: {
+      'Content-Type': imageFile.type || 'image/jpeg',
+      'X-File-Name': imageFile.name,
+    },
   })
 }
 

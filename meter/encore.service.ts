@@ -4,5 +4,8 @@ import { Service } from "encore.dev/service";
 import "./meter";
 import "./readings";
 import "./import";
+import "./api-keys";
+import "./ingest";
+import "./readings-ocr";
 
 export default new Service("meter");

@@ -48,11 +48,11 @@ describe("importElectricityHistory", () => {
     expect(totalReadings).toBe(2003);
   });
 
-  it("creates 17 meters with 19 devices and all readings", async () => {
+  it("creates 17 meters with 20 devices and all readings", async () => {
     const res = await importElectricityHistory(userId, DATA);
     expect(res.alreadyImported).toBe(false);
     expect(res.metersCreated).toBe(17);
-    expect(res.devicesCreated).toBe(19);
+    expect(res.devicesCreated).toBe(20);
     expect(res.readingsCreated).toBe(2003);
   }, 120_000);
 
@@ -93,6 +93,22 @@ describe("importElectricityHistory", () => {
     expect(detail.type).toBe("operating_hours");
     expect(detail.unit).toBe("h");
     expect(detail.devices).toHaveLength(1);
+  }, 120_000);
+
+  it("Heizungspumpe has 2 devices due to 16-bit counter overflow", async () => {
+    await importElectricityHistory(userId, DATA);
+    const { meterId } = await findMeterByName(userId, "Heizungspumpe");
+    const detail = await getMeterDetail(userId, meterId);
+    expect(detail.type).toBe("operating_hours");
+    expect(detail.devices).toHaveLength(2);
+    expect(detail.devices.filter((d) => d.active)).toHaveLength(1);
+
+    const closed = detail.devices.find((d) => !d.active)!;
+    expect(closed.endValue).toBe(65536);
+
+    const readings = await listReadings(userId, meterId, 500, 0);
+    const latest = readings.readings[0];
+    expect(latest.absoluteValue).toBeGreaterThan(65536);
   }, 120_000);
 
   it("is idempotent — a second run writes nothing", async () => {
