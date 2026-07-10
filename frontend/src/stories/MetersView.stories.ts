@@ -99,7 +99,7 @@ const meterHandlers = [
     HttpResponse.json({ meterId: 99, devices: 4, readings: 222, alreadyImported: false }),
   ),
   http.post('/api/meters/import/electricity-history', () =>
-    HttpResponse.json({ metersCreated: 17, devicesCreated: 19, readingsCreated: 2003, alreadyImported: false }),
+    HttpResponse.json({ metersCreated: 17, devicesCreated: 20, readingsCreated: 2003, alreadyImported: false }),
   ),
   http.get('/api/meters/:id/api-keys', () => HttpResponse.json({ keys: MOCK_API_KEYS })),
   http.post('/api/meters/:id/api-keys', () =>
