@@ -371,3 +371,74 @@ describe("POST /meters/:id/replace-device", () => {
     ).rejects.toMatchObject({ code: "failed_precondition" });
   });
 });
+
+describe("PUT/DELETE /meters/devices/:deviceId", () => {
+  async function meterWithReplacement(): Promise<number> {
+    setAuth(String(userId), MANAGE);
+    const { id } = await endpoints.createMeter({
+      name: "Gerätehistorie",
+      type: "water",
+      unit: "m3",
+      device: { serialNumber: "OLD", installedAt: "2024-01-01T00:00:00Z", startValue: 10 },
+    });
+    await endpoints.replaceDevice({
+      id,
+      swapAt: "2025-01-01T00:00:00Z",
+      finalValue: 20,
+      newSerialNumber: "NEW",
+      newStartValue: 0,
+    });
+    return id;
+  }
+
+  it("updates device metadata", async () => {
+    const id = await meterWithReplacement();
+    const detail = await endpoints.getMeter({ id });
+    const active = detail.devices.find((d) => d.active)!;
+
+    await endpoints.updateDevice({
+      deviceId: active.id,
+      serialNumber: "NEW-EDITED",
+      installedAt: active.installedAt,
+      startValue: 1,
+      notes: "Zählerschrank",
+    });
+
+    const updated = await endpoints.getMeter({ id });
+    const updatedActive = updated.devices.find((d) => d.active)!;
+    expect(updatedActive.serialNumber).toBe("NEW-EDITED");
+    expect(updatedActive.startValue).toBe(1);
+    expect(updatedActive.notes).toBe("Zählerschrank");
+  });
+
+  it("deletes the newest device without readings and reactivates the previous one", async () => {
+    const id = await meterWithReplacement();
+    const detail = await endpoints.getMeter({ id });
+    const active = detail.devices.find((d) => d.active)!;
+
+    await endpoints.deleteDevice({ deviceId: active.id });
+
+    const after = await endpoints.getMeter({ id });
+    expect(after.devices).toHaveLength(1);
+    expect(after.devices[0].serialNumber).toBe("OLD");
+    expect(after.devices[0].active).toBe(true);
+    expect(after.devices[0].removedAt).toBeNull();
+    expect(after.devices[0].endValue).toBeNull();
+  });
+
+  it("rejects deleting a device with readings", async () => {
+    const id = await meterWithReplacement();
+    const detail = await endpoints.getMeter({ id });
+    const active = detail.devices.find((d) => d.active)!;
+    await db.insert(meterReadings).values({
+      device_id: active.id,
+      value: "5",
+      taken_at: "2025-02-01T00:00:00Z",
+      entered_by: userId,
+    });
+
+    await expect(endpoints.deleteDevice({ deviceId: active.id })).rejects.toMatchObject({
+      code: "failed_precondition",
+    });
+  });
+});

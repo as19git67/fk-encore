@@ -13,7 +13,7 @@
  * and, when `group_id` is set, to every member of that group.
  */
 
-import { and, desc, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
 import { APIError } from "encore.dev/api";
 import db from "../db/database";
 import { dbAll } from "../db/adapter";
@@ -22,6 +22,7 @@ import {
   meterDevices,
   meterReadings,
   meters,
+  type MeterRole,
   type MeterType,
 } from "../db/schema";
 
@@ -30,6 +31,11 @@ export const METER_TYPES: readonly MeterType[] = [
   "water",
   "gas",
   "operating_hours",
+];
+export const METER_ROLES: readonly MeterRole[] = [
+  "grid_import",
+  "grid_export",
+  "pv_production",
 ];
 
 export interface DeviceState {
@@ -74,6 +80,7 @@ export interface MeterListItem {
   id: number;
   name: string;
   type: MeterType;
+  role: MeterRole | null;
   unit: string;
   location: string | null;
   notes: string | null;
@@ -149,6 +156,7 @@ export async function listMeters(userId: number): Promise<MeterListItem[]> {
       id: m.id,
       name: m.name,
       type: m.type,
+      role: m.role,
       unit: m.unit,
       location: m.location,
       notes: m.notes,
@@ -175,6 +183,8 @@ export interface DeviceDto {
   notes: string | null;
   /** True for the currently installed device (removedAt === null). */
   active: boolean;
+  readingCount: number;
+  canDelete: boolean;
 }
 
 export interface MeterDetail extends MeterListItem {
@@ -195,6 +205,7 @@ export interface InitialDeviceInput {
 export interface CreateMeterInput {
   name: string;
   type: MeterType;
+  role?: MeterRole | null;
   unit: string;
   location?: string;
   notes?: string;
@@ -206,6 +217,7 @@ export interface CreateMeterInput {
 export interface UpdateMeterInput {
   name: string;
   type: MeterType;
+  role?: MeterRole | null;
   unit: string;
   location?: string;
   notes?: string;
@@ -220,6 +232,16 @@ export interface ReplaceDeviceInput {
   finalValue: number;
   newSerialNumber?: string;
   newStartValue?: number;
+}
+
+export interface UpdateDeviceInput {
+  serialNumber?: string | null;
+  /** ISO timestamp the device was installed. */
+  installedAt: string;
+  startValue: number;
+  removedAt?: string | null;
+  endValue?: number | null;
+  notes?: string | null;
 }
 
 /**
@@ -250,6 +272,16 @@ function normalizeType(type: string): MeterType {
     );
   }
   return type as MeterType;
+}
+
+function normalizeRole(role: MeterRole | null | undefined): MeterRole | null {
+  if (role === undefined || role === null) return null;
+  if (!METER_ROLES.includes(role)) {
+    throw APIError.invalidArgument(
+      `role must be one of: ${METER_ROLES.join(", ")}`,
+    );
+  }
+  return role;
 }
 
 function normalizeDecimals(decimals: number | undefined): number {
@@ -299,6 +331,7 @@ export async function createMeter(
 ): Promise<{ id: number }> {
   const name = normalizeName(input.name);
   const type = normalizeType(input.type);
+  const role = normalizeRole(input.role);
   const unit = normalizeUnit(input.unit);
   const decimals = normalizeDecimals(input.decimals);
   const groupId = await assertGroupAssignable(userId, input.groupId);
@@ -318,6 +351,7 @@ export async function createMeter(
       .values({
         name,
         type,
+        role,
         unit,
         location: input.location?.trim() || null,
         notes: input.notes?.trim() || null,
@@ -342,9 +376,10 @@ export async function updateMeter(
   meterId: number,
   input: UpdateMeterInput,
 ): Promise<void> {
-  await loadVisibleMeter(userId, meterId);
+  const existing = await loadVisibleMeter(userId, meterId);
   const name = normalizeName(input.name);
   const type = normalizeType(input.type);
+  const role = "role" in input ? normalizeRole(input.role) : existing.role;
   const unit = normalizeUnit(input.unit);
   const decimals = normalizeDecimals(input.decimals);
   const groupId = await assertGroupAssignable(userId, input.groupId);
@@ -354,6 +389,7 @@ export async function updateMeter(
     .set({
       name,
       type,
+      role,
       unit,
       location: input.location?.trim() || null,
       notes: input.notes?.trim() || null,
@@ -406,6 +442,18 @@ export async function getMeterDetail(
 
   const active = deviceRows.find((d) => d.removed_at === null) ?? null;
   const activeLatest = active ? latestByDevice.get(active.id) ?? null : null;
+  const readingCountByDevice = new Map<number, number>();
+  if (deviceIds.length > 0) {
+    const counts = await dbAll<{ device_id: number; count: number }>(
+      db
+        .select({ device_id: meterReadings.device_id, count: count() })
+        .from(meterReadings)
+        .where(inArray(meterReadings.device_id, deviceIds))
+        .groupBy(meterReadings.device_id),
+    );
+    for (const row of counts) readingCountByDevice.set(row.device_id, Number(row.count));
+  }
+  const newestDeviceId = deviceRows[0]?.id ?? null;
   const absoluteTotal = computeAbsoluteTotal(
     deviceRows.map((d) => ({
       startValue: parseFloat(d.start_value),
@@ -418,6 +466,7 @@ export async function getMeterDetail(
     id: m.id,
     name: m.name,
     type: m.type,
+    role: m.role,
     unit: m.unit,
     location: m.location,
     notes: m.notes,
@@ -440,8 +489,98 @@ export async function getMeterDetail(
       endValue: d.end_value !== null ? parseFloat(d.end_value) : null,
       notes: d.notes,
       active: d.removed_at === null,
+      readingCount: readingCountByDevice.get(d.id) ?? 0,
+      canDelete: d.id === newestDeviceId && (readingCountByDevice.get(d.id) ?? 0) === 0,
     })),
   };
+}
+
+async function loadVisibleDevice(
+  userId: number,
+  deviceId: number,
+): Promise<typeof meterDevices.$inferSelect> {
+  const [device] = await dbAll<typeof meterDevices.$inferSelect>(
+    db.select().from(meterDevices).where(eq(meterDevices.id, deviceId)),
+  );
+  if (!device) throw APIError.notFound("meter device not found");
+  await loadVisibleMeter(userId, device.meter_id);
+  return device;
+}
+
+async function loadNewestDevice(meterId: number): Promise<typeof meterDevices.$inferSelect | null> {
+  const [device] = await dbAll<typeof meterDevices.$inferSelect>(
+    db
+      .select()
+      .from(meterDevices)
+      .where(eq(meterDevices.meter_id, meterId))
+      .orderBy(desc(meterDevices.installed_at), desc(meterDevices.id))
+      .limit(1),
+  );
+  return device ?? null;
+}
+
+async function assertDeviceHasNoReadings(deviceId: number): Promise<void> {
+  const [row] = await dbAll<{ count: number }>(
+    db
+      .select({ count: count() })
+      .from(meterReadings)
+      .where(eq(meterReadings.device_id, deviceId)),
+  );
+  if (Number(row?.count ?? 0) > 0) {
+    throw APIError.failedPrecondition("device has readings and cannot be deleted");
+  }
+}
+
+export async function updateDevice(
+  userId: number,
+  deviceId: number,
+  input: UpdateDeviceInput,
+): Promise<void> {
+  const device = await loadVisibleDevice(userId, deviceId);
+  const installedAt = toIso(input.installedAt, "installedAt");
+  const removedAt = input.removedAt ? toIso(input.removedAt, "removedAt") : null;
+  if (removedAt && new Date(removedAt).getTime() < new Date(installedAt).getTime()) {
+    throw APIError.invalidArgument("removedAt must be at or after installedAt");
+  }
+  if (!Number.isFinite(input.startValue) || input.startValue < 0) {
+    throw APIError.invalidArgument("startValue must be >= 0");
+  }
+  const endValue = input.endValue ?? null;
+  if (!removedAt && endValue !== null) {
+    throw APIError.invalidArgument("endValue requires removedAt");
+  }
+  if (endValue !== null && (!Number.isFinite(endValue) || endValue < input.startValue)) {
+    throw APIError.invalidArgument("endValue must be >= startValue");
+  }
+  await db
+    .update(meterDevices)
+    .set({
+      serial_number: input.serialNumber?.trim() || null,
+      installed_at: installedAt,
+      removed_at: removedAt,
+      start_value: input.startValue.toFixed(3),
+      end_value: endValue === null ? null : endValue.toFixed(3),
+      notes: input.notes?.trim() || null,
+    })
+    .where(eq(meterDevices.id, device.id));
+}
+
+export async function deleteNewestDevice(userId: number, deviceId: number): Promise<void> {
+  const device = await loadVisibleDevice(userId, deviceId);
+  const newest = await loadNewestDevice(device.meter_id);
+  if (!newest || newest.id !== device.id) {
+    throw APIError.failedPrecondition("only the newest device can be deleted");
+  }
+  await assertDeviceHasNoReadings(device.id);
+  await db.delete(meterDevices).where(eq(meterDevices.id, device.id));
+
+  const previous = await loadNewestDevice(device.meter_id);
+  if (previous && previous.removed_at !== null) {
+    await db
+      .update(meterDevices)
+      .set({ removed_at: null, end_value: null })
+      .where(eq(meterDevices.id, previous.id));
+  }
 }
 
 /**

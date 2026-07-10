@@ -2037,6 +2037,7 @@ export const scheduledJobState = pgTable("scheduled_job_state", {
 // ========== Utility meters (meter service, migration 0122) ==========
 
 export type MeterType = "electricity" | "water" | "gas" | "operating_hours";
+export type MeterRole = "grid_import" | "grid_export" | "pv_production";
 export type MeterReadingSource = "manual" | "ocr" | "api";
 
 // Logical metering point. Persists across physical device swaps; visibility
@@ -2052,6 +2053,7 @@ export const meters = pgTable(
     location: text("location"),
     notes: text("notes"),
     photo_path: text("photo_path"),
+    role: text("role").$type<MeterRole>(),
     // Decimal places offered in entry forms / display (0..3, DB CHECK).
     decimals: integer("decimals").notNull().default(1),
     owner_user_id: integer("owner_user_id")

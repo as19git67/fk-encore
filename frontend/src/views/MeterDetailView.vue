@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
@@ -12,11 +12,16 @@ import Message from 'primevue/message'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Tag from 'primevue/tag'
+import Chart from 'primevue/chart'
+import SelectButton from 'primevue/selectbutton'
+import { useConfirm } from 'primevue/useconfirm'
 import {
   getMeter,
   updateMeter,
   deleteMeter,
   replaceMeterDevice,
+  updateMeterDevice,
+  deleteMeterDevice,
   listReadings,
   addReading,
   updateReading,
@@ -25,12 +30,18 @@ import {
   createApiKey,
   deleteApiKey,
   ocrMeterReading,
+  getMeterReport,
   METER_TYPE_LABELS,
   METER_TYPE_ICONS,
+  METER_ROLE_LABELS,
   type MeterDetail,
+  type MeterDevice,
+  type MeterRole,
   type MeterType,
   type Reading,
   type ApiKey,
+  type MeterReport,
+  type MeterReportGranularity,
 } from '../api/meters'
 import { listGroups, type GroupSummary } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
@@ -39,6 +50,7 @@ import { toLocalIsoDateTime } from '../utils/dateFormat'
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const confirmDialog = useConfirm()
 const canManage = computed(() => auth.hasPermission('meters.manage'))
 const canEnter = computed(() => auth.hasPermission('meters.read_entry'))
 
@@ -53,12 +65,22 @@ const typeOptions = (Object.keys(METER_TYPE_LABELS) as MeterType[]).map((value) 
   label: METER_TYPE_LABELS[value],
   value,
 }))
+const roleOptions: Array<{ label: string; value: MeterRole | null }> = [
+  { label: 'Keine Report-Rolle', value: null },
+  ...(Object.keys(METER_ROLE_LABELS) as MeterRole[]).map((value) => ({
+    label: METER_ROLE_LABELS[value],
+    value,
+  })),
+]
 
 function typeLabel(t: MeterType) {
   return METER_TYPE_LABELS[t]
 }
 function typeIcon(t: MeterType) {
   return METER_TYPE_ICONS[t]
+}
+function roleLabel(role: MeterRole | null) {
+  return role ? METER_ROLE_LABELS[role] : null
 }
 function fmt(value: number | null, decimals: number) {
   if (value === null) return '–'
@@ -70,6 +92,19 @@ function fmt(value: number | null, decimals: number) {
 function fmtDateTime(iso: string | null) {
   if (!iso) return '–'
   return new Date(iso).toLocaleString('de-DE')
+}
+const isNarrowScreen = ref(false)
+let narrowMedia: MediaQueryList | null = null
+function updateNarrowScreen() {
+  isNarrowScreen.value = narrowMedia?.matches ?? false
+}
+function fmtReportDate(iso: string | null) {
+  if (!iso) return '–'
+  const date = new Date(iso)
+  if (isNarrowScreen.value) {
+    return date.toLocaleDateString('de-DE', { month: '2-digit', year: '2-digit' })
+  }
+  return date.toLocaleString('de-DE')
 }
 
 async function loadGroups(): Promise<GroupSummary[]> {
@@ -93,6 +128,7 @@ async function loadDetail() {
     detail.value = await getMeter(meterId.value)
     await Promise.all([
       loadReadings(),
+      loadReport(),
       canManage.value ? loadApiKeys() : Promise.resolve(),
     ])
   } catch (err: any) {
@@ -102,11 +138,87 @@ async function loadDetail() {
   }
 }
 
+// ── Reports ─────────────────────────────────────────────────────────────────
+
+const report = ref<MeterReport | null>(null)
+const loadingReport = ref(false)
+const reportGranularity = ref<MeterReportGranularity>('month')
+const reportGranularityOptions: Array<{ label: string; value: MeterReportGranularity }> = [
+  { label: 'Monat', value: 'month' },
+  { label: 'Jahr', value: 'year' },
+]
+
+const recentReportBuckets = computed(() => {
+  const buckets = report.value?.buckets ?? []
+  return reportGranularity.value === 'month' ? buckets.slice(-24) : buckets
+})
+
+const reportTableBuckets = computed(() => {
+  if (reportGranularity.value !== 'year') return recentReportBuckets.value
+  return [...recentReportBuckets.value].reverse()
+})
+
+const reportChartData = computed(() => {
+  if (!detail.value || recentReportBuckets.value.length === 0) return null
+  return {
+    labels: recentReportBuckets.value.map((bucket) => bucket.label),
+    datasets: [
+      {
+        label: `${detail.value.name} (${detail.value.unit})`,
+        data: recentReportBuckets.value.map((bucket) => bucket.consumption),
+        backgroundColor: 'rgba(245, 158, 11, 0.55)',
+        borderColor: 'rgb(217, 119, 6)',
+        borderWidth: 1,
+        borderRadius: 6,
+      },
+    ],
+  }
+})
+
+const reportChartOptions = computed(() => ({
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: {
+    legend: { display: false },
+    tooltip: {
+      callbacks: {
+        label: (ctx: any) => `${fmt(Number(ctx.raw ?? 0), detail.value?.decimals ?? 1)} ${detail.value?.unit ?? ''}`,
+      },
+    },
+  },
+  scales: {
+    y: {
+      beginAtZero: true,
+      ticks: {
+        callback: (value: number | string) => `${fmt(Number(value), detail.value?.decimals ?? 1)} ${detail.value?.unit ?? ''}`,
+      },
+    },
+  },
+}))
+
+async function loadReport() {
+  if (!detail.value) return
+  loadingReport.value = true
+  try {
+    report.value = await getMeterReport(detail.value.id, reportGranularity.value)
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Laden des Reports'
+    report.value = null
+  } finally {
+    loadingReport.value = false
+  }
+}
+
+watch(reportGranularity, () => {
+  if (detail.value) void loadReport()
+})
+
 // ── Edit dialog ──────────────────────────────────────────────────────────────
 
 interface EditForm {
   name: string
   type: MeterType
+  role: MeterRole | null
   unit: string
   location: string
   notes: string
@@ -119,6 +231,7 @@ const saving = ref(false)
 const editForm = ref<EditForm>({
   name: '',
   type: 'electricity',
+  role: null,
   unit: '',
   location: '',
   notes: '',
@@ -131,6 +244,7 @@ function openEdit() {
   editForm.value = {
     name: detail.value.name,
     type: detail.value.type,
+    role: detail.value.role,
     unit: detail.value.unit,
     location: detail.value.location ?? '',
     notes: detail.value.notes ?? '',
@@ -151,6 +265,7 @@ async function handleSave() {
     await updateMeter(detail.value.id, {
       name: editForm.value.name.trim(),
       type: editForm.value.type,
+      role: editForm.value.role,
       unit: editForm.value.unit.trim(),
       location: editForm.value.location.trim() || undefined,
       notes: editForm.value.notes.trim() || undefined,
@@ -168,7 +283,19 @@ async function handleSave() {
 
 async function handleDelete() {
   if (!detail.value) return
-  if (!confirm(`Zähler „${detail.value.name}“ mit allen Geräten und Ablesungen löschen?`)) return
+  confirmDialog.require({
+    message: `Zähler „${detail.value.name}“ mit allen Geräten und Ablesungen löschen? Diese Aktion kann nicht rückgängig gemacht werden.`,
+    header: 'Zähler löschen',
+    icon: 'pi pi-exclamation-triangle',
+    rejectLabel: 'Abbrechen',
+    acceptLabel: 'Endgültig löschen',
+    acceptClass: 'p-button-danger',
+    accept: () => void performDeleteMeter(),
+  })
+}
+
+async function performDeleteMeter() {
+  if (!detail.value) return
   error.value = ''
   try {
     await deleteMeter(detail.value.id)
@@ -218,6 +345,84 @@ async function handleReplace() {
     error.value = err.message || 'Fehler beim Gerätewechsel'
   } finally {
     replacing.value = false
+  }
+}
+
+const showDeviceEdit = ref(false)
+const savingDevice = ref(false)
+const deviceForm = ref<{
+  id: number | null
+  serialNumber: string
+  installedAt: Date
+  removedAt: Date | null
+  startValue: number
+  endValue: number | null
+  notes: string
+}>({
+  id: null,
+  serialNumber: '',
+  installedAt: new Date(),
+  removedAt: null,
+  startValue: 0,
+  endValue: null,
+  notes: '',
+})
+
+function openDeviceEdit(device: MeterDevice) {
+  deviceForm.value = {
+    id: device.id,
+    serialNumber: device.serialNumber ?? '',
+    installedAt: new Date(device.installedAt),
+    removedAt: device.removedAt ? new Date(device.removedAt) : null,
+    startValue: device.startValue,
+    endValue: device.endValue,
+    notes: device.notes ?? '',
+  }
+  showDeviceEdit.value = true
+}
+
+async function handleSaveDevice() {
+  const id = deviceForm.value.id
+  if (id === null) return
+  savingDevice.value = true
+  error.value = ''
+  try {
+    await updateMeterDevice(id, {
+      serialNumber: deviceForm.value.serialNumber.trim() || null,
+      installedAt: toLocalIsoDateTime(deviceForm.value.installedAt),
+      removedAt: deviceForm.value.removedAt ? toLocalIsoDateTime(deviceForm.value.removedAt) : null,
+      startValue: deviceForm.value.startValue,
+      endValue: deviceForm.value.endValue,
+      notes: deviceForm.value.notes.trim() || null,
+    })
+    showDeviceEdit.value = false
+    await loadDetail()
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Speichern des Geräts'
+  } finally {
+    savingDevice.value = false
+  }
+}
+
+function handleDeleteDevice(device: MeterDevice) {
+  confirmDialog.require({
+    message: `Neuestes Gerät „${device.serialNumber ?? 'ohne Seriennummer'}“ löschen? Das ist nur möglich, solange keine Ablesungen dafür existieren.`,
+    header: 'Gerät löschen',
+    icon: 'pi pi-exclamation-triangle',
+    rejectLabel: 'Abbrechen',
+    acceptLabel: 'Löschen',
+    acceptClass: 'p-button-danger',
+    accept: () => void performDeleteDevice(device),
+  })
+}
+
+async function performDeleteDevice(device: MeterDevice) {
+  error.value = ''
+  try {
+    await deleteMeterDevice(device.id)
+    await loadDetail()
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Löschen des Geräts'
   }
 }
 
@@ -405,8 +610,15 @@ function copyToken() {
 }
 
 onMounted(async () => {
+  narrowMedia = window.matchMedia('(max-width: 560px)')
+  updateNarrowScreen()
+  narrowMedia.addEventListener('change', updateNarrowScreen)
   groups.value = await loadGroups()
   await loadDetail()
+})
+
+onUnmounted(() => {
+  narrowMedia?.removeEventListener('change', updateNarrowScreen)
 })
 
 watch(meterId, () => loadDetail())
@@ -418,18 +630,19 @@ watch(meterId, () => loadDetail())
     <template v-else-if="detail">
       <!-- Header -->
       <div class="detail-top">
-        <Button icon="pi pi-arrow-left" text rounded severity="secondary" @click="router.push({ name: 'zaehler-list' })" v-tooltip.right="'Zurück'" />
-        <div class="detail-title">
-          <h1><i :class="typeIcon(detail.type)" /> {{ detail.name }}</h1>
-          <div class="detail-subtitle">
-            <Tag :value="typeLabel(detail.type)" severity="secondary" />
-            <span v-if="detail.location"><i class="pi pi-map-marker" /> {{ detail.location }}</span>
-          </div>
-        </div>
+        <Button class="back-button" icon="pi pi-arrow-left" text rounded severity="secondary" @click="router.push({ name: 'zaehler-list' })" v-tooltip.right="'Zurück'" />
         <div class="detail-top-actions">
           <Button v-if="canEnter" label="Neue Ablesung" icon="pi pi-plus" size="small" @click="openReadingEntry" />
           <Button v-if="canManage" icon="pi pi-pencil" text rounded severity="secondary" v-tooltip.top="'Bearbeiten'" @click="openEdit" />
           <Button v-if="canManage" icon="pi pi-trash" text rounded severity="danger" v-tooltip.top="'Löschen'" @click="handleDelete" />
+        </div>
+        <div class="detail-title">
+          <h1><i :class="typeIcon(detail.type)" /> <span class="meter-name">{{ detail.name }}</span></h1>
+          <div class="detail-subtitle">
+            <Tag :value="typeLabel(detail.type)" severity="secondary" />
+            <Tag v-if="detail.role" :value="roleLabel(detail.role)" severity="info" />
+            <span v-if="detail.location"><i class="pi pi-map-marker" /> {{ detail.location }}</span>
+          </div>
         </div>
       </div>
 
@@ -446,11 +659,48 @@ watch(meterId, () => loadDetail())
         </div>
         <div class="figure">
           <span class="figure-label">Aktives Gerät</span>
-          <span class="figure-value">{{ detail.activeDeviceSerial ?? '–' }}</span>
+          <span class="figure-value figure-value--wrap">{{ detail.activeDeviceSerial ?? '–' }}</span>
         </div>
       </div>
 
       <Message v-if="error" severity="error" @close="error = ''" closable>{{ error }}</Message>
+
+      <!-- Report -->
+      <div class="section-header">
+        <h2><i class="pi pi-chart-bar" /> Verbrauch</h2>
+        <SelectButton
+          v-model="reportGranularity"
+          :options="reportGranularityOptions"
+          option-label="label"
+          option-value="value"
+          size="small"
+          :allow-empty="false"
+        />
+      </div>
+      <div v-if="loadingReport" class="info"><i class="pi pi-spin pi-spinner" /> Report…</div>
+      <div v-else-if="!report || report.buckets.length === 0" class="info">Noch nicht genug Ablesungen für einen Verbrauchsreport.</div>
+      <div v-else class="report-panel">
+        <div class="report-summary">
+          <span class="figure-label">Gesamt im Report</span>
+          <strong>{{ fmt(report.totalConsumption, detail.decimals) }} {{ detail.unit }}</strong>
+          <span class="figure-sub">{{ report.buckets.length }} {{ reportGranularity === 'month' ? 'Monate' : 'Jahre' }}</span>
+        </div>
+        <div v-if="reportChartData" class="report-chart">
+          <Chart type="bar" :data="reportChartData" :options="reportChartOptions" />
+        </div>
+        <DataTable :value="reportTableBuckets" size="small" class="report-table">
+          <Column field="label" :header="reportGranularity === 'month' ? 'Monat' : 'Jahr'" />
+          <Column header="Verbrauch">
+            <template #body="{ data }">{{ fmt(data.consumption, detail!.decimals) }} {{ detail!.unit }}</template>
+          </Column>
+          <Column header="Von">
+            <template #body="{ data }">{{ fmtReportDate(data.startReadingAt) }}</template>
+          </Column>
+          <Column header="Bis">
+            <template #body="{ data }">{{ fmtReportDate(data.endReadingAt) }}</template>
+          </Column>
+        </DataTable>
+      </div>
 
       <!-- Device history -->
       <div class="section-header">
@@ -476,6 +726,23 @@ watch(meterId, () => loadDetail())
         <Column header="Status">
           <template #body="{ data }">
             <Tag :value="data.active ? 'aktiv' : 'ersetzt'" :severity="data.active ? 'success' : 'secondary'" />
+          </template>
+        </Column>
+        <Column v-if="canManage" style="width: 6.5rem">
+          <template #body="{ data }">
+            <div class="device-actions">
+              <Button icon="pi pi-pencil" text rounded size="small" severity="secondary" v-tooltip.left="'Gerät bearbeiten'" @click="openDeviceEdit(data)" />
+              <Button
+                icon="pi pi-trash"
+                text
+                rounded
+                size="small"
+                severity="danger"
+                :disabled="!data.canDelete"
+                v-tooltip.left="data.canDelete ? 'Neuestes Gerät löschen' : 'Nur neuestes Gerät ohne Ablesungen löschbar'"
+                @click="handleDeleteDevice(data)"
+              />
+            </div>
           </template>
         </Column>
       </DataTable>
@@ -555,6 +822,9 @@ watch(meterId, () => loadDetail())
         <label>Typ
           <Select v-model="editForm.type" :options="typeOptions" option-label="label" option-value="value" />
         </label>
+        <label>Report-Rolle
+          <Select v-model="editForm.role" :options="roleOptions" option-label="label" option-value="value" />
+        </label>
         <label>Einheit
           <InputText v-model="editForm.unit" />
         </label>
@@ -600,6 +870,34 @@ watch(meterId, () => loadDetail())
       <template #footer>
         <Button label="Abbrechen" text @click="showReplace = false" />
         <Button label="Ersetzen" icon="pi pi-refresh" :loading="replacing" @click="handleReplace" />
+      </template>
+    </Dialog>
+
+    <!-- Edit device dialog -->
+    <Dialog v-model:visible="showDeviceEdit" header="Gerät bearbeiten" modal :style="{ width: '30rem', maxWidth: '95vw' }">
+      <div class="form-grid">
+        <label>Seriennummer
+          <InputText v-model="deviceForm.serialNumber" autofocus />
+        </label>
+        <label>Eingebaut am
+          <DatePicker v-model="deviceForm.installedAt" show-time hour-format="24" date-format="dd.mm.yy" />
+        </label>
+        <label>Startwert
+          <InputNumber v-model="deviceForm.startValue" :min-fraction-digits="0" :max-fraction-digits="3" />
+        </label>
+        <label>Ausgebaut am
+          <DatePicker v-model="deviceForm.removedAt" show-time hour-format="24" date-format="dd.mm.yy" show-button-bar />
+        </label>
+        <label>Endwert
+          <InputNumber v-model="deviceForm.endValue" :min-fraction-digits="0" :max-fraction-digits="3" />
+        </label>
+        <label class="full">Notiz
+          <Textarea v-model="deviceForm.notes" rows="2" auto-resize />
+        </label>
+      </div>
+      <template #footer>
+        <Button label="Abbrechen" text @click="showDeviceEdit = false" />
+        <Button label="Speichern" icon="pi pi-check" :loading="savingDevice" @click="handleSaveDevice" />
       </template>
     </Dialog>
 
@@ -673,6 +971,7 @@ watch(meterId, () => loadDetail())
   padding: 1rem;
   max-width: 1100px;
   margin: 0 auto;
+  overflow-x: clip;
 }
 .info {
   padding: 2rem;
@@ -684,24 +983,40 @@ watch(meterId, () => loadDetail())
   align-items: flex-start;
   gap: 0.75rem;
   margin-bottom: 1rem;
+  flex-wrap: wrap;
 }
 .detail-title {
-  flex: 1;
+  flex: 1 1 16rem;
+  min-width: 0;
+  margin-left: auto;
+  text-align: right;
 }
 .detail-title h1 {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.4rem;
   margin: 0;
   font-size: 1.4rem;
+  line-height: 1.2;
 }
 .detail-title h1 i {
-  margin-right: 0.4rem;
+  flex: 0 0 auto;
+}
+.meter-name {
+  min-width: 0;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 .detail-subtitle {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.75rem;
   margin-top: 0.25rem;
   color: var(--p-text-muted-color);
   font-size: 0.85rem;
+  flex-wrap: wrap;
 }
 .detail-subtitle i {
   margin-right: 0.2rem;
@@ -710,6 +1025,8 @@ watch(meterId, () => loadDetail())
   display: flex;
   gap: 0.25rem;
   align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 .figures-bar {
   display: flex;
@@ -735,6 +1052,9 @@ watch(meterId, () => loadDetail())
   font-weight: 600;
   font-size: 1.1rem;
 }
+.figure-value--wrap {
+  overflow-wrap: anywhere;
+}
 .figure-sub {
   font-size: 0.7rem;
   color: var(--p-text-muted-color);
@@ -752,7 +1072,73 @@ watch(meterId, () => loadDetail())
 .section-header h2 i {
   margin-right: 0.4rem;
 }
+.report-panel {
+  background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 8px;
+  padding: 1rem;
+}
+.report-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.report-summary strong {
+  font-size: 1.1rem;
+}
+.report-chart {
+  height: 260px;
+  min-width: 0;
+}
+.report-table {
+  margin-top: 1rem;
+}
+.meter-detail-view :deep(.p-datatable) {
+  max-width: 100%;
+}
+.meter-detail-view :deep(.p-datatable-table) {
+  width: 100%;
+  table-layout: fixed;
+}
+.meter-detail-view :deep(.p-datatable-thead > tr > th),
+.meter-detail-view :deep(.p-datatable-tbody > tr > td) {
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+@media (max-width: 560px) {
+  .detail-title {
+    flex-basis: 100%;
+    margin-left: 0;
+    text-align: left;
+  }
+  .detail-title h1,
+  .detail-subtitle {
+    justify-content: flex-start;
+  }
+  .detail-top-actions :deep(.p-button-label) {
+    display: none;
+  }
+  .section-header {
+    align-items: flex-start;
+    gap: 0.75rem;
+    flex-direction: column;
+  }
+  .report-panel {
+    padding: 0.75rem;
+  }
+  .report-chart {
+    height: 220px;
+  }
+}
 .reading-actions {
+  display: flex;
+  gap: 0.15rem;
+  justify-content: flex-end;
+}
+.device-actions {
   display: flex;
   gap: 0.15rem;
   justify-content: flex-end;
