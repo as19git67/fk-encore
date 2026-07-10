@@ -335,6 +335,12 @@ export const modules: ModuleConfig[] = [
         component: () => import('../views/MetersView.vue'),
         meta: { permission: 'meters.view' },
       },
+      {
+        path: ':id',
+        name: 'zaehler-detail',
+        component: () => import('../views/MeterDetailView.vue'),
+        meta: { permission: 'meters.view' },
+      },
     ],
     menuItems: [
       { label: 'Zähler', icon: 'pi pi-gauge', routeName: 'zaehler-list', permission: 'meters.view' },

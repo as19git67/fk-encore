@@ -55,13 +55,17 @@ interface AddReadingRequest {
   value: number;
   takenAt?: string;
   notes?: string;
+  source?: string;
+  photoPath?: string;
+  ocrConfidence?: number;
 }
 
 export const addReading = api(
   { expose: true, method: "POST", path: "/meters/:id/readings", auth: true },
-  async ({ id, value, takenAt, notes }: AddReadingRequest): Promise<{ id: number }> => {
+  async ({ id, value, takenAt, notes, source, photoPath, ocrConfidence }: AddReadingRequest): Promise<{ id: number }> => {
     const userId = requireUser("meters.read_entry");
-    return await readings.addReading(userId, id, { value, takenAt, notes });
+    const src = source === "ocr" ? "ocr" as const : "manual" as const;
+    return await readings.addReading(userId, id, { value, takenAt, notes, source: src, photoPath, ocrConfidence });
   },
 );
 

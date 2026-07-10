@@ -1154,6 +1154,114 @@ async def extract_items(req: ItemsRequest) -> ItemsResult:
     return ItemsResult(items=items, processing_ms=elapsed_ms)
 
 
+# ─── Meter reading OCR (Etappe 4) ─────────────────────────────────────────
+
+# Pattern for plausible meter counter digits: an integer or decimal number
+# with at least 3 digits before the decimal point (meters rarely show fewer).
+# Accepts comma or period as decimal separator, optional thousands separator.
+_METER_DIGIT_PATTERN = re.compile(
+    r"(?<!\d)"                     # not preceded by a digit
+    r"(\d[\d.]*\d)"                # core digit group (at least 2 digits, may contain dots)
+    r"(?:[,.](\d{1,3}))?"         # optional decimal part after comma/period
+    r"(?!\d)"                      # not followed by a digit
+)
+
+
+def _extract_meter_value(text: str, decimals: int = 0) -> tuple[float | None, float]:
+    """Find the most likely meter counter value from OCR text.
+
+    Heuristic: find all plausible multi-digit numbers, prefer the longest
+    (meter counters show more digits than surrounding text like dates or
+    serial numbers). Returns (value, confidence).
+    """
+    candidates: list[tuple[float, int, float]] = []
+    for m in _METER_DIGIT_PATTERN.finditer(text):
+        integer_part = m.group(1).replace(".", "")  # strip thousands separators
+        decimal_part = m.group(2) or ""
+
+        # Skip numbers that look like dates (DD.MM.YYYY patterns)
+        full_match = m.group(0)
+        if re.match(r"^\d{1,2}[.,]\d{1,2}[.,]\d{2,4}$", full_match):
+            continue
+        # Skip very short numbers (< 3 integer digits) — unlikely to be a meter
+        if len(integer_part) < 3:
+            continue
+
+        try:
+            if decimal_part:
+                val = float(f"{integer_part}.{decimal_part}")
+            else:
+                val = float(integer_part)
+        except ValueError:
+            continue
+
+        # Confidence: longer numbers are more likely the meter counter
+        digit_count = len(integer_part) + len(decimal_part)
+        conf = min(0.95, 0.5 + 0.07 * digit_count)
+        candidates.append((val, digit_count, conf))
+
+    if not candidates:
+        return None, 0.0
+
+    # Pick the candidate with the most digits (most likely the counter)
+    candidates.sort(key=lambda c: c[1], reverse=True)
+    return candidates[0][0], candidates[0][2]
+
+
+class MeterReadingResult(BaseModel):
+    value: float | None = None
+    confidence: float = 0.0
+    raw_text: str = ""
+    processing_ms: int = 0
+    corrected_image: str | None = None
+
+
+@app.post("/meter-reading", response_model=MeterReadingResult)
+async def extract_meter_reading(
+    file: UploadFile = File(...),
+    decimals: int = Form(0),
+) -> MeterReadingResult:
+    """Extract a meter counter value from a photo of a utility meter.
+
+    Uses PaddleOCR to read digits, then a heuristic to pick the most
+    plausible counter value (longest digit sequence). No LLM needed —
+    meter displays show large, clear digits.
+    """
+    t0 = time.monotonic()
+    img_bytes = await file.read()
+    if len(img_bytes) == 0:
+        raise HTTPException(status_code=400, detail="empty file")
+    if len(img_bytes) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="file too large (max 20 MB)")
+
+    def _pipeline(data: bytes) -> dict[str, Any]:
+        storage_img, _corrected = correct_geometry(data)
+        storage_img, ocr_img = _prepare_storage_and_ocr_images(storage_img)
+        full_text, lines, rows, _ocr_img = _run_ocr_with_fallbacks(
+            storage_img, ocr_img,
+        )
+        stored_scan = _crop_to_ocr_content(storage_img, lines)
+        processed_image = _encode_processed_jpeg(stored_scan)
+
+        value, confidence = _extract_meter_value(full_text, decimals)
+
+        return {
+            "value": value,
+            "confidence": round(confidence, 3),
+            "raw_text": full_text,
+            "corrected_image": processed_image,
+        }
+
+    result = await _run_blocking(_pipeline, img_bytes)
+    elapsed_ms = int((time.monotonic() - t0) * 1000)
+    result["processing_ms"] = elapsed_ms
+    log.info(
+        "Meter reading OCR: value=%s confidence=%.2f time=%dms",
+        result.get("value"), result.get("confidence", 0), elapsed_ms,
+    )
+    return MeterReadingResult(**result)
+
+
 @app.get("/healthz")
 async def healthz() -> dict[str, Any]:
     return {

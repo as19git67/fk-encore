@@ -70,6 +70,25 @@ const MOCK_READINGS = [
   { id: 1, deviceId: 1, deviceSerial: 'OLD-1', value: 500, takenAt: '2023-01-01T08:00:00Z', source: 'manual', notes: null, enteredBy: 1, absoluteValue: 398 },
 ]
 
+const MOCK_API_KEYS = [
+  {
+    id: 1,
+    meterId: 1,
+    name: 'Shelly EM',
+    createdAt: '2026-03-01T10:00:00Z',
+    lastUsedAt: '2026-06-30T14:22:00Z',
+    disabledAt: null,
+  },
+  {
+    id: 2,
+    meterId: 1,
+    name: 'Test Key',
+    createdAt: '2026-04-15T08:00:00Z',
+    lastUsedAt: null,
+    disabledAt: '2026-05-01T00:00:00Z',
+  },
+]
+
 const meterHandlers = [
   http.get('/api/meters', () => HttpResponse.json({ meters: MOCK_METERS })),
   http.get('/api/meters/:id/readings', () =>
@@ -80,7 +99,23 @@ const meterHandlers = [
     HttpResponse.json({ meterId: 99, devices: 4, readings: 222, alreadyImported: false }),
   ),
   http.post('/api/meters/import/electricity-history', () =>
-    HttpResponse.json({ metersCreated: 17, devicesCreated: 19, readingsCreated: 2003, alreadyImported: false }),
+    HttpResponse.json({ metersCreated: 17, devicesCreated: 20, readingsCreated: 2003, alreadyImported: false }),
+  ),
+  http.get('/api/meters/:id/api-keys', () => HttpResponse.json({ keys: MOCK_API_KEYS })),
+  http.post('/api/meters/:id/api-keys', () =>
+    HttpResponse.json({
+      id: 3,
+      meterId: 1,
+      name: 'Neuer Key',
+      createdAt: new Date().toISOString(),
+      lastUsedAt: null,
+      disabledAt: null,
+      token: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+    }),
+  ),
+  http.delete('/api/meters/api-keys/:keyId', () => HttpResponse.json({ deleted: true })),
+  http.post('/api/meters/:id/readings/ocr', () =>
+    HttpResponse.json({ value: 12456.7, confidence: 0.88, photoPath: '/uploads/meters/1/ocr.jpg', rawText: '12456.7 kWh' }),
   ),
   http.get('/api/groups', () => HttpResponse.json({ items: [] })),
   ...defaultHandlers,

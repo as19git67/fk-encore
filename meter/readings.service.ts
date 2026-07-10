@@ -38,6 +38,9 @@ export interface AddReadingInput {
   /** ISO timestamp; defaults to now when omitted. */
   takenAt?: string;
   notes?: string;
+  source?: "manual" | "ocr";
+  photoPath?: string;
+  ocrConfidence?: number;
 }
 
 export interface UpdateReadingInput {
@@ -175,7 +178,9 @@ export async function addReading(
         device_id: device.id,
         value: input.value.toFixed(3),
         taken_at: takenAt,
-        source: "manual",
+        source: input.source ?? "manual",
+        photo_path: input.photoPath ?? null,
+        ocr_confidence: input.ocrConfidence ?? null,
         notes: input.notes?.trim() || null,
         entered_by: userId,
       })
