@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildMeterReportBuckets } from "./reports.service";
+import {
+  buildEnergyReportFromMeterReports,
+  buildMeterReportBuckets,
+  identifyEnergyReportRole,
+} from "./reports.service";
 
 describe("buildMeterReportBuckets", () => {
   it("assigns each consumption interval to the month of the start reading", () => {
@@ -85,5 +89,104 @@ describe("buildMeterReportBuckets", () => {
     );
 
     expect(buckets.map((b) => [b.key, b.consumption])).toEqual([["2026-02", 30]]);
+  });
+});
+
+describe("identifyEnergyReportRole", () => {
+  it("detects the imported electricity report meters by stable names", () => {
+    expect(
+      identifyEnergyReportRole({ name: "Netzstrom Bezug (1.8.0)", type: "electricity", unit: "kWh" }),
+    ).toBe("grid_import");
+    expect(
+      identifyEnergyReportRole({ name: "Netzstrom Einspeisung (2.8.0)", type: "electricity", unit: "kWh" }),
+    ).toBe("grid_export");
+    expect(identifyEnergyReportRole({ name: "PV Produktion", type: "electricity", unit: "kWh" })).toBe(
+      "pv_production",
+    );
+    expect(
+      identifyEnergyReportRole({ name: "Wärmepumpe Komplett", type: "electricity", unit: "kWh" }),
+    ).toBeNull();
+  });
+});
+
+describe("buildEnergyReportFromMeterReports", () => {
+  const bucket = (key: string, consumption: number) => ({
+    key,
+    label: key,
+    periodStart: `${key}-01T00:00:00.000Z`,
+    periodEnd: `${key}-02T00:00:00.000Z`,
+    startReadingAt: `${key}-01T12:00:00.000Z`,
+    endReadingAt: `${key}-02T12:00:00.000Z`,
+    startValue: 0,
+    endValue: consumption,
+    consumption,
+    intervals: 1,
+  });
+
+  const report = (name: string, buckets: Array<ReturnType<typeof bucket>>) => ({
+    meterId: 1,
+    name,
+    unit: "kWh",
+    decimals: 1,
+    granularity: "month" as const,
+    from: null,
+    to: null,
+    buckets,
+    totalConsumption: buckets.reduce((sum, b) => sum + b.consumption, 0),
+  });
+
+  it("derives self consumption, total consumption and ratios from import/export/production", () => {
+    const energy = buildEnergyReportFromMeterReports(
+      {
+        grid_import: report("Bezug", [bucket("2026-01", 100)]),
+        grid_export: report("Einspeisung", [bucket("2026-01", 300)]),
+        pv_production: report("Produktion", [bucket("2026-01", 500)]),
+      },
+      "month",
+      null,
+      null,
+    );
+
+    expect(energy.buckets[0]).toMatchObject({
+      key: "2026-01",
+      gridImport: 100,
+      gridExport: 300,
+      production: 500,
+      selfConsumption: 200,
+      totalConsumption: 300,
+      autarky: 0.667,
+      selfConsumptionRate: 0.4,
+    });
+    expect(energy.totals).toMatchObject({
+      gridImport: 100,
+      gridExport: 300,
+      production: 500,
+      selfConsumption: 200,
+      totalConsumption: 300,
+      autarky: 0.667,
+      selfConsumptionRate: 0.4,
+    });
+  });
+
+  it("keeps grid values available when production is missing", () => {
+    const energy = buildEnergyReportFromMeterReports(
+      {
+        grid_import: report("Bezug", [bucket("2026-01", 100)]),
+        grid_export: report("Einspeisung", [bucket("2026-01", 50)]),
+      },
+      "month",
+      null,
+      null,
+    );
+
+    expect(energy.buckets[0]).toMatchObject({
+      gridImport: 100,
+      gridExport: 50,
+      production: null,
+      selfConsumption: null,
+      totalConsumption: null,
+      autarky: null,
+      selfConsumptionRate: null,
+    });
   });
 });

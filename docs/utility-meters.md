@@ -165,6 +165,7 @@ meter/
 | `GET/POST/DELETE /meters/:id/api-keys` | `meters.manage` | API-Keys; Klartext-Token nur in der Create-Response |
 | `POST /api/meters/ingest` | API-Key (kein User-Auth) | Externe Ablesung |
 | `GET /meters/:id/report?granularity=month\|year&from=&to=` | `meters.view` | Generische Verbrauchsreihen (§5) |
+| `GET /meters/reports/energy?granularity=month\|year&from=&to=` | `meters.view` | Strom-/PV-Gesamtreport (§5.2) |
 | `GET/POST/DELETE /meters/readings/:id/transactions` | `meters.view` + `finance.view` | Finance-Verknüpfung |
 
 ### 3.2 Externe Ingestion
@@ -237,7 +238,33 @@ nötig, Haushalts-Scope reicht).
 - Noch offen: lineare Interpolation auf exakte Bucket-Grenzen,
   `day`/`week` und Vorjahresvergleich (`compare=previous_year`).
 
-### 5.2 Anomalie-Erkennung
+### 5.2 Strom-/PV-Gesamtreport
+
+`GET /meters/reports/energy?granularity=month|year&from=&to=`
+
+Der aggregierte Energie-Report kombiniert die vorhandenen Stromzähler, sofern
+sie sichtbar sind. Die erste Ausbaustufe erkennt die Rollen über die stabilen
+Namen der importierten historischen Zähler:
+
+- `Netzstrom Bezug (1.8.0)` → Bezug
+- `Netzstrom Einspeisung (2.8.0)` → Einspeisung
+- `PV Produktion` → Produktion
+
+Darauf werden je Bucket und für die Gesamtsumme folgende Werte berechnet:
+
+- Eigenverbrauch = Produktion - Einspeisung
+- Gesamtverbrauch = Bezug + Eigenverbrauch
+- Autarkie = 1 - Bezug / Gesamtverbrauch
+- Eigenverbrauchsquote = Eigenverbrauch / Produktion
+
+Wenn die PV-Produktion fehlt, bleiben die abgeleiteten PV-Kennzahlen leer;
+Bezug und Einspeisung werden trotzdem angezeigt. Später kann diese
+Rollenerkennung ohne API-Bruch durch explizite Zählerrollen ersetzt werden.
+
+Nicht Teil der ersten Ausbaustufe: E-Auto, Wärmepumpe, Warmwasser,
+Fußbodenheizung, PV-Anteile, Kosten/Preise, Gasvergleich/JAZ.
+
+### 5.3 Anomalie-Erkennung
 
 Muster von `finance/anomaly-detector.ts` übernehmen:
 
@@ -292,7 +319,7 @@ Storybook-Stories für Übersicht + Erfassungsdialog.
 | 3 | Manuelle Ablesungen | `readings.ts`, Absolutstand-Berechnung, Übersichts- + Detail-View, Erfassungsdialog | 2 |
 | 4 | Foto-OCR | `receipt-ocr-service`-Endpunkt `/meter-reading`, `readings-ocr.ts`, Foto-Ablage, Bestätigungs-UI | 3 |
 | 5 | API-Ingestion | `meter_api_keys`, `ingest.ts` (Bearer, Idempotenz, Rate-Limit), Key-Verwaltung in Admin-View | 3 |
-| 6 | Reports | MVP umgesetzt: `reports.ts`/`reports.service.ts`, Monats-/Jahres-Buckets aus Ableseintervallen, Chart + Tabelle in Detail-View. Offen: Interpolation, Day/Week, Vorjahresvergleich. | 3 |
+| 6 | Reports | MVP umgesetzt: `reports.ts`/`reports.service.ts`, Monats-/Jahres-Buckets aus Ableseintervallen, Chart + Tabelle in Detail-View, aggregierter Strom-/PV-Gesamtreport in der Übersicht. Offen: Interpolation, Day/Week, Vorjahresvergleich, explizite Zählerrollen. | 3 |
 | 7 | Anomalien | Cron + `meter_anomalies`, Badge/Liste im Frontend | 6 |
 | 8 | Finance-Link | Link-Tabelle, Endpunkte, UI an Ablesung/Transaktion | 3 (+ Finance) |
 

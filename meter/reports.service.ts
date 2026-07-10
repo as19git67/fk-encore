@@ -3,7 +3,7 @@ import { asc, eq } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll } from "../db/adapter";
 import { meterDevices, meterReadings } from "../db/schema";
-import { loadVisibleMeter } from "./meter.service";
+import { listMeters, loadVisibleMeter, type MeterListItem } from "./meter.service";
 
 export type ReportGranularity = "month" | "year";
 
@@ -35,6 +35,40 @@ export interface MeterReport {
   to: string | null;
   buckets: MeterReportBucket[];
   totalConsumption: number;
+}
+
+export type EnergyReportRole = "grid_import" | "grid_export" | "pv_production";
+
+export interface EnergyReportMeterRef {
+  role: EnergyReportRole;
+  meterId: number;
+  name: string;
+}
+
+export interface EnergyReportBucket {
+  key: string;
+  label: string;
+  periodStart: string;
+  periodEnd: string;
+  gridImport: number | null;
+  gridExport: number | null;
+  production: number | null;
+  selfConsumption: number | null;
+  totalConsumption: number | null;
+  autarky: number | null;
+  selfConsumptionRate: number | null;
+}
+
+export interface EnergyReport {
+  unit: string;
+  decimals: number;
+  granularity: ReportGranularity;
+  from: string | null;
+  to: string | null;
+  meters: EnergyReportMeterRef[];
+  missingRoles: EnergyReportRole[];
+  buckets: EnergyReportBucket[];
+  totals: Omit<EnergyReportBucket, "key" | "label" | "periodStart" | "periodEnd">;
 }
 
 export function parseReportBoundary(value: string | undefined, field: string): Date | null {
@@ -77,6 +111,11 @@ function bucketEndIso(key: string, granularity: ReportGranularity): string {
 export function roundReportValue(value: number, decimals: number): number {
   const factor = 10 ** Math.max(0, decimals);
   return Math.round(value * factor) / factor;
+}
+
+function roundRatio(value: number | null): number | null {
+  if (value === null || !Number.isFinite(value)) return null;
+  return Math.round(value * 1000) / 1000;
 }
 
 export function buildMeterReportBuckets(
@@ -208,5 +247,164 @@ export async function getMeterReportForUser(
       buckets.reduce((sum, bucket) => sum + bucket.consumption, 0),
       meter.decimals,
     ),
+  };
+}
+
+export function identifyEnergyReportRole(
+  meter: Pick<MeterListItem, "name" | "type" | "unit">,
+): EnergyReportRole | null {
+  if (meter.type !== "electricity" || meter.unit.toLowerCase() !== "kwh") return null;
+  const name = meter.name.toLowerCase();
+
+  if (name.includes("netzstrom") && (name.includes("bezug") || name.includes("1.8.0"))) {
+    return "grid_import";
+  }
+  if (
+    name.includes("netzstrom") &&
+    (name.includes("einspeis") || name.includes("liefer") || name.includes("2.8.0"))
+  ) {
+    return "grid_export";
+  }
+  if (name.includes("pv") && name.includes("produktion")) {
+    return "pv_production";
+  }
+
+  return null;
+}
+
+export function buildEnergyReportFromMeterReports(
+  reports: Partial<Record<EnergyReportRole, MeterReport>>,
+  granularity: ReportGranularity,
+  fromDate: Date | null,
+  toDate: Date | null,
+): Omit<EnergyReport, "meters" | "missingRoles"> {
+  const decimals = Math.max(
+    0,
+    reports.grid_import?.decimals ?? 0,
+    reports.grid_export?.decimals ?? 0,
+    reports.pv_production?.decimals ?? 0,
+  );
+  const bucketKeys = new Set<string>();
+  for (const report of Object.values(reports)) {
+    for (const bucket of report?.buckets ?? []) bucketKeys.add(bucket.key);
+  }
+
+  const byRole = new Map<EnergyReportRole, Map<string, MeterReportBucket>>();
+  for (const role of ["grid_import", "grid_export", "pv_production"] as const) {
+    byRole.set(role, new Map((reports[role]?.buckets ?? []).map((bucket) => [bucket.key, bucket])));
+  }
+
+  const buckets = [...bucketKeys].sort().map((key): EnergyReportBucket => {
+    const source =
+      byRole.get("grid_import")?.get(key) ??
+      byRole.get("grid_export")?.get(key) ??
+      byRole.get("pv_production")?.get(key);
+    const gridImport = byRole.get("grid_import")?.get(key)?.consumption ?? null;
+    const gridExport = byRole.get("grid_export")?.get(key)?.consumption ?? null;
+    const production = byRole.get("pv_production")?.get(key)?.consumption ?? null;
+    const selfConsumption =
+      production !== null && gridExport !== null
+        ? roundReportValue(Math.max(0, production - gridExport), decimals)
+        : null;
+    const totalConsumption =
+      gridImport !== null && selfConsumption !== null
+        ? roundReportValue(gridImport + selfConsumption, decimals)
+        : null;
+
+    return {
+      key,
+      label: source?.label ?? bucketLabel(key, granularity),
+      periodStart: source?.periodStart ?? bucketStartIso(key, granularity),
+      periodEnd: source?.periodEnd ?? bucketEndIso(key, granularity),
+      gridImport,
+      gridExport,
+      production,
+      selfConsumption,
+      totalConsumption,
+      autarky:
+        totalConsumption !== null && totalConsumption > 0 && gridImport !== null
+          ? roundRatio(1 - gridImport / totalConsumption)
+          : null,
+      selfConsumptionRate:
+        production !== null && production > 0 && selfConsumption !== null
+          ? roundRatio(selfConsumption / production)
+          : null,
+    };
+  });
+
+  const sum = (selector: (bucket: EnergyReportBucket) => number | null) => {
+    const values = buckets.map(selector).filter((value): value is number => value !== null);
+    if (values.length === 0) return null;
+    return roundReportValue(values.reduce((total, value) => total + value, 0), decimals);
+  };
+
+  const gridImport = sum((bucket) => bucket.gridImport);
+  const gridExport = sum((bucket) => bucket.gridExport);
+  const production = sum((bucket) => bucket.production);
+  const selfConsumption =
+    production !== null && gridExport !== null
+      ? roundReportValue(Math.max(0, production - gridExport), decimals)
+      : null;
+  const totalConsumption =
+    gridImport !== null && selfConsumption !== null
+      ? roundReportValue(gridImport + selfConsumption, decimals)
+      : null;
+
+  return {
+    unit: "kWh",
+    decimals,
+    granularity,
+    from: fromDate?.toISOString() ?? null,
+    to: toDate?.toISOString() ?? null,
+    buckets,
+    totals: {
+      gridImport,
+      gridExport,
+      production,
+      selfConsumption,
+      totalConsumption,
+      autarky:
+        totalConsumption !== null && totalConsumption > 0 && gridImport !== null
+          ? roundRatio(1 - gridImport / totalConsumption)
+          : null,
+      selfConsumptionRate:
+        production !== null && production > 0 && selfConsumption !== null
+          ? roundRatio(selfConsumption / production)
+          : null,
+    },
+  };
+}
+
+export async function getEnergyReportForUser(
+  userId: number,
+  granularity: ReportGranularity,
+  fromDate: Date | null,
+  toDate: Date | null,
+): Promise<EnergyReport> {
+  if (fromDate && toDate && fromDate >= toDate) {
+    throw APIError.invalidArgument("from must be before to");
+  }
+
+  const roleMeters = new Map<EnergyReportRole, MeterListItem>();
+  for (const meter of await listMeters(userId)) {
+    const role = identifyEnergyReportRole(meter);
+    if (role && !roleMeters.has(role)) roleMeters.set(role, meter);
+  }
+
+  const reports: Partial<Record<EnergyReportRole, MeterReport>> = {};
+  for (const [role, meter] of roleMeters) {
+    reports[role] = await getMeterReportForUser(userId, meter.id, granularity, fromDate, toDate);
+  }
+
+  const base = buildEnergyReportFromMeterReports(reports, granularity, fromDate, toDate);
+  const allRoles: EnergyReportRole[] = ["grid_import", "grid_export", "pv_production"];
+  return {
+    ...base,
+    meters: [...roleMeters.entries()].map(([role, meter]) => ({
+      role,
+      meterId: meter.id,
+      name: meter.name,
+    })),
+    missingRoles: allRoles.filter((role) => !roleMeters.has(role)),
   };
 }

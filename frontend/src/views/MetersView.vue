@@ -10,15 +10,19 @@ import DatePicker from 'primevue/datepicker'
 import Dialog from 'primevue/dialog'
 import Message from 'primevue/message'
 import Tag from 'primevue/tag'
+import SelectButton from 'primevue/selectbutton'
 import {
   listMeters,
   createMeter,
   updateMeter,
   deleteMeter,
+  getEnergyReport,
   importWaterHistory,
   importElectricityHistory,
   METER_TYPE_LABELS,
   METER_TYPE_ICONS,
+  type EnergyReport,
+  type MeterReportGranularity,
   type MeterListItem,
   type MeterType,
 } from '../api/meters'
@@ -32,8 +36,16 @@ const canManage = computed(() => auth.hasPermission('meters.manage'))
 
 const meters = ref<MeterListItem[]>([])
 const groups = ref<GroupSummary[]>([])
+const energyReport = ref<EnergyReport | null>(null)
+const energyGranularity = ref<MeterReportGranularity>('month')
+const loadingEnergyReport = ref(false)
 const loading = ref(false)
 const error = ref('')
+
+const energyGranularityOptions: Array<{ label: string; value: MeterReportGranularity }> = [
+  { label: 'Monat', value: 'month' },
+  { label: 'Jahr', value: 'year' },
+]
 
 const typeOptions = (Object.keys(METER_TYPE_LABELS) as MeterType[]).map((value) => ({
   label: METER_TYPE_LABELS[value],
@@ -54,10 +66,22 @@ async function load() {
     const [mRes, gRes] = await Promise.all([listMeters(), loadGroups()])
     meters.value = mRes.meters
     groups.value = gRes
+    await loadEnergyReport()
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Zähler'
   } finally {
     loading.value = false
+  }
+}
+
+async function loadEnergyReport() {
+  loadingEnergyReport.value = true
+  try {
+    energyReport.value = await getEnergyReport(energyGranularity.value)
+  } catch {
+    energyReport.value = null
+  } finally {
+    loadingEnergyReport.value = false
   }
 }
 
@@ -92,6 +116,20 @@ function fmtDateTime(iso: string | null) {
   if (!iso) return '–'
   return new Date(iso).toLocaleString('de-DE')
 }
+function fmtPercent(value: number | null) {
+  if (value === null) return '–'
+  return value.toLocaleString('de-DE', {
+    style: 'percent',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 1,
+  })
+}
+
+const energyBuckets = computed(() => {
+  const buckets = energyReport.value?.buckets ?? []
+  const recent = energyGranularity.value === 'month' ? buckets.slice(-12) : buckets
+  return energyGranularity.value === 'year' ? [...recent].reverse() : recent
+})
 
 function openDetail(m: MeterListItem) {
   router.push({ name: 'zaehler-detail', params: { id: m.id } })
@@ -225,7 +263,7 @@ const showWaterImport = computed(
   () => canManage.value && !meters.value.some((m) => m.type === 'water' && m.name === 'Wasser'),
 )
 const showElecImport = computed(
-  () => canManage.value && !meters.value.some((m) => m.type === 'electricity' && m.name === 'Hausstrom'),
+  () => canManage.value && !meters.value.some((m) => m.type === 'electricity' && m.name === 'Netzstrom Bezug (1.8.0)'),
 )
 
 async function handleImportWater() {
@@ -305,7 +343,85 @@ onMounted(load)
     <div v-if="loading" class="info"><i class="pi pi-spin pi-spinner" /> Zähler werden geladen…</div>
     <div v-else-if="meters.length === 0" class="info">Noch keine Zähler angelegt.</div>
 
-    <div v-else class="meter-grid">
+    <template v-else>
+      <section v-if="energyReport && energyReport.meters.length > 0" class="energy-report-card">
+        <div class="energy-report-head">
+          <div>
+            <h2><i class="pi pi-bolt" /> Energie</h2>
+            <p>Bezug, Einspeisung, PV-Produktion und daraus abgeleitete Kennzahlen.</p>
+          </div>
+          <SelectButton
+            v-model="energyGranularity"
+            :options="energyGranularityOptions"
+            option-label="label"
+            option-value="value"
+            size="small"
+            :allow-empty="false"
+            @change="loadEnergyReport"
+          />
+        </div>
+
+        <div v-if="loadingEnergyReport" class="info info-compact"><i class="pi pi-spin pi-spinner" /> Energie-Report…</div>
+        <template v-else>
+          <div class="energy-kpis">
+            <div class="energy-kpi">
+              <span class="figure-label">Bezug</span>
+              <strong>{{ fmt(energyReport.totals.gridImport, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+            </div>
+            <div class="energy-kpi">
+              <span class="figure-label">Einspeisung</span>
+              <strong>{{ fmt(energyReport.totals.gridExport, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+            </div>
+            <div class="energy-kpi">
+              <span class="figure-label">Produktion</span>
+              <strong>{{ fmt(energyReport.totals.production, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+            </div>
+            <div class="energy-kpi">
+              <span class="figure-label">Eigenverbrauch</span>
+              <strong>{{ fmt(energyReport.totals.selfConsumption, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+            </div>
+            <div class="energy-kpi">
+              <span class="figure-label">Autarkie</span>
+              <strong>{{ fmtPercent(energyReport.totals.autarky) }}</strong>
+            </div>
+            <div class="energy-kpi">
+              <span class="figure-label">Eigenverbrauchsquote</span>
+              <strong>{{ fmtPercent(energyReport.totals.selfConsumptionRate) }}</strong>
+            </div>
+          </div>
+
+          <div class="energy-table-wrap">
+            <table class="energy-table">
+              <thead>
+                <tr>
+                  <th>{{ energyGranularity === 'month' ? 'Monat' : 'Jahr' }}</th>
+                  <th>Bezug</th>
+                  <th>Einspeisung</th>
+                  <th>Produktion</th>
+                  <th>Eigenverbrauch</th>
+                  <th>Gesamtverbrauch</th>
+                  <th>Autarkie</th>
+                  <th>EV-Quote</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="bucket in energyBuckets" :key="bucket.key">
+                  <td>{{ bucket.label }}</td>
+                  <td>{{ fmt(bucket.gridImport, energyReport.decimals) }}</td>
+                  <td>{{ fmt(bucket.gridExport, energyReport.decimals) }}</td>
+                  <td>{{ fmt(bucket.production, energyReport.decimals) }}</td>
+                  <td>{{ fmt(bucket.selfConsumption, energyReport.decimals) }}</td>
+                  <td>{{ fmt(bucket.totalConsumption, energyReport.decimals) }}</td>
+                  <td>{{ fmtPercent(bucket.autarky) }}</td>
+                  <td>{{ fmtPercent(bucket.selfConsumptionRate) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
+      </section>
+
+      <div class="meter-grid">
       <div
         v-for="m in meters"
         :key="m.id"
@@ -336,7 +452,8 @@ onMounted(load)
           <Button icon="pi pi-trash" text rounded severity="danger" v-tooltip.top="'Löschen'" @click="handleDelete(m)" />
         </div>
       </div>
-    </div>
+      </div>
+    </template>
 
     <!-- Create / edit dialog -->
     <Dialog
@@ -413,6 +530,74 @@ onMounted(load)
   padding: 2rem;
   text-align: center;
   color: var(--p-text-muted-color);
+}
+.info-compact {
+  padding: 1rem;
+}
+.energy-report-card {
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 10px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  background: var(--p-content-background);
+  overflow: hidden;
+}
+.energy-report-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+.energy-report-head h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+.energy-report-head h2 i {
+  margin-right: 0.35rem;
+}
+.energy-report-head p {
+  margin: 0.25rem 0 0;
+  color: var(--p-text-muted-color);
+  font-size: 0.9rem;
+}
+.energy-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+.energy-kpi {
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 8px;
+  padding: 0.75rem;
+  min-width: 0;
+}
+.energy-kpi strong {
+  display: block;
+  margin-top: 0.15rem;
+  overflow-wrap: break-word;
+}
+.energy-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.energy-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.energy-table th,
+.energy-table td {
+  padding: 0.45rem 0.5rem;
+  border-top: 1px solid var(--p-content-border-color);
+  text-align: right;
+  white-space: nowrap;
+}
+.energy-table th:first-child,
+.energy-table td:first-child {
+  text-align: left;
 }
 .meter-grid {
   display: grid;

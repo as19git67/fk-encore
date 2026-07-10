@@ -193,6 +193,45 @@ export function getMeterReport(meterId: number, granularity: MeterReportGranular
   return apiFetch<MeterReport>(`/meters/${meterId}/report?${q}`)
 }
 
+export type EnergyReportRole = 'grid_import' | 'grid_export' | 'pv_production'
+
+export interface EnergyReportMeterRef {
+  role: EnergyReportRole
+  meterId: number
+  name: string
+}
+
+export interface EnergyReportBucket {
+  key: string
+  label: string
+  periodStart: string
+  periodEnd: string
+  gridImport: number | null
+  gridExport: number | null
+  production: number | null
+  selfConsumption: number | null
+  totalConsumption: number | null
+  autarky: number | null
+  selfConsumptionRate: number | null
+}
+
+export interface EnergyReport {
+  unit: string
+  decimals: number
+  granularity: MeterReportGranularity
+  from: string | null
+  to: string | null
+  meters: EnergyReportMeterRef[]
+  missingRoles: EnergyReportRole[]
+  buckets: EnergyReportBucket[]
+  totals: Omit<EnergyReportBucket, 'key' | 'label' | 'periodStart' | 'periodEnd'>
+}
+
+export function getEnergyReport(granularity: MeterReportGranularity = 'month') {
+  const q = new URLSearchParams({ granularity })
+  return apiFetch<EnergyReport>(`/meters/reports/energy?${q}`)
+}
+
 // ── Import (Issue #792) ─────────────────────────────────────────────────────
 
 export interface WaterImportResult {
