@@ -248,3 +248,104 @@ export function matchSenderRule(input: {
   }
   return null;
 }
+
+/**
+ * Content-keyword routing rules — a sibling to the sender rules for the case
+ * the sender CANNOT disambiguate: the same institution issues several document
+ * types that only a document-type keyword tells apart (a cloud-LLM audit showed
+ * the local model consistently confuses these):
+ *
+ *   - Heidelberger / MLP issue both a Kapital-Lebensversicherung AND a
+ *     (Riester/fondsgebundene) Rentenversicherung — the sender rule forces
+ *     "altersvorsorge-lebensversicherung", but a §92/§10a/Riester marker means
+ *     it is really "altersvorsorge-rentenversicherung".
+ *   - A Kfz-insurer's Kasko/Kraftfahrt policy is a fahrzeug-versicherung, not a
+ *     generic Sach-/Personenversicherung.
+ *
+ * These are matched on the normalized title + text only (no sender), and — see
+ * `matchContentRule`'s use in `runClassify` — take precedence OVER the sender
+ * rules, because a document-type keyword is more specific than the issuer.
+ */
+export interface ContentRule {
+  /** What this rule covers — documentation only. */
+  note: string;
+  /** Normalized keyword fragments; matches if the normalized title+text
+   *  CONTAINS any of these. Give them already normalized (no spaces/punct). */
+  keywords: string[];
+  /** Optional: never fire when normalized title+text contains any of these. */
+  excludeAny?: string[];
+  /** Target taxonomy category slug. */
+  category: string;
+}
+
+export const CONTENT_RULES: readonly ContentRule[] = [
+  {
+    // Riester/Rürup and fond-linked pension contracts. The markers below are
+    // unique to a state-subsidised/annuity pension (never on a plain capital
+    // life policy). The excludeAny guards an actual monthly payslip whose body
+    // might list a "Riester" deduction line — a payslip carries the brutto/
+    // net markers a pension status report never does.
+    note: "Riester/Rürup/fondsgebundene Rentenversicherung → private Rentenversicherung",
+    keywords: [
+      "riester",
+      "rürup",
+      "basisrente",
+      "zulagenbescheinigung",
+      "altersvorsorgezulage",
+      "grundzulage",
+      "kinderzulage",
+      "förderrente",
+      "fondsgebundenerentenversicherung",
+      "92estg", // "§ 92 EStG" — Riester-Zulagenbescheinigung
+      "10aestg", // "§ 10a EStG" — Riester/Rürup Sonderausgabenabzug
+    ],
+    excludeAny: [
+      "gesamtbrutto",
+      "steuerbrutto",
+      "svbrutto",
+      "auszahlungsbetrag",
+      "nettoverdienst",
+    ],
+    category: "altersvorsorge-rentenversicherung",
+  },
+  {
+    note: "Kfz-Haftpflicht/Kasko/Kraftfahrtversicherung → Kfz-Versicherung",
+    keywords: [
+      "kraftfahrtversicherung",
+      "kraftfahrzeugversicherung",
+      "kfzversicherung",
+      "kfzhaftpflicht",
+      "teilkasko",
+      "vollkasko",
+      "kaskoversicherung",
+    ],
+    category: "fahrzeug-versicherung",
+  },
+  {
+    // Building insurance for the SELF-OCCUPIED home. A rented object's building
+    // insurance belongs to the Kapitalanlage branch, so exclude those markers.
+    note: "Wohngebäudeversicherung (selbst bewohnt) → Gebäudeversicherung Haus",
+    keywords: ["wohngebäudeversicherung", "wohngebäude"],
+    excludeAny: ["sondereigentum", "kapitalanlage", "vermietet", "vermietung", "mieteinnahmen"],
+    category: "wohnen-haus-gebaeudeversicherung",
+  },
+];
+
+/**
+ * Return the category slug a deterministic CONTENT rule assigns, or null. Keyed
+ * purely on the normalized title + text (the sender is irrelevant here). Used
+ * ahead of `matchSenderRule` in `runClassify`.
+ */
+export function matchContentRule(input: {
+  title?: string | null;
+  text?: string | null;
+}): string | null {
+  const ctx = normalizeForMatch(`${input.title ?? ""} ${input.text ?? ""}`);
+  if (!ctx) return null;
+  for (const rule of CONTENT_RULES) {
+    if (!rule.keywords.some((frag) => ctx.includes(frag))) continue;
+    if (rule.excludeAny && rule.excludeAny.some((frag) => ctx.includes(frag))) continue;
+    return rule.category;
+  }
+  return null;
+}
