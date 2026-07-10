@@ -57,7 +57,7 @@ import { loadEffectiveTaxSections } from "./tax-hint-overrides";
 import { isValidTaxSectionSlug } from "./tax-sections";
 import { loadSubjectPersonsForMatch } from "./subject-persons";
 import { flattenTaxonomy, taxonomyHints } from "./taxonomy";
-import { matchSenderRule } from "./sender-rules";
+import { matchContentRule, matchSenderRule } from "./sender-rules";
 import { buildClassifyExamples } from "./few-shot";
 import {
   learnedRelationTags,
@@ -368,29 +368,49 @@ export async function runClassify(documentId: number): Promise<{ classification:
   // Deterministic sender → category routing (see sender-rules.ts). A known
   // recurring institution overrides the LLM's category guess, which otherwise
   // funnels most documents into the generic "finanzen-rechnungen" bucket.
+  // Deterministic CONTENT routing (see content-rules in sender-rules.ts): a
+  // document-type keyword (Riester/§92, Kfz-Kasko, Wohngebäude) the small model
+  // and the sender-keyed rules can't disambiguate. Highest precedence because
+  // it resolves same-sender ambiguity — e.g. Heidelberger issues both a
+  // Kapital-Lebensversicherung AND a Riester Rentenversicherung, and the sender
+  // rule would force the former.
+  const contentSlug = matchContentRule({
+    title: classification.title,
+    text: clipped,
+  });
   const ruleSlug = matchSenderRule({
     sender: classification.sender,
     title: classification.title,
     text: clipped,
   });
   // Learned per-user category fills the long tail the hand-authored rules don't
-  // cover: only applied when no hand rule matched, so the rules keep their
-  // context-aware precision (requireAny/excludeAny). See learned-rules.ts.
+  // cover: only applied when neither a content nor a sender rule matched, so
+  // the rules keep their context-aware precision. See learned-rules.ts.
   const learnedCatSlug =
-    !ruleSlug && learned?.category ? learned.category.slug : null;
-  if (ruleSlug && ruleSlug !== classification.category_slug) {
+    !contentSlug && !ruleSlug && learned?.category ? learned.category.slug : null;
+  if (contentSlug && contentSlug !== classification.category_slug) {
+    console.log(
+      `[documents] content rule override(${documentId}): ` +
+        `${classification.category_slug} → ${contentSlug}`,
+    );
+  } else if (!contentSlug && ruleSlug && ruleSlug !== classification.category_slug) {
     console.log(
       `[documents] sender rule override(${documentId}): ` +
         `"${classification.sender}" ${classification.category_slug} → ${ruleSlug}`,
     );
-  } else if (learnedCatSlug && learnedCatSlug !== classification.category_slug) {
+  } else if (
+    !contentSlug &&
+    !ruleSlug &&
+    learnedCatSlug &&
+    learnedCatSlug !== classification.category_slug
+  ) {
     console.log(
       `[documents] learned category override(${documentId}): ` +
         `"${classification.sender}" ${classification.category_slug} → ${learnedCatSlug} ` +
         `(support=${learned!.category!.support}, share=${learned!.category!.share.toFixed(2)})`,
     );
   }
-  const catSlug = ruleSlug ?? learnedCatSlug ?? classification.category_slug;
+  const catSlug = contentSlug ?? ruleSlug ?? learnedCatSlug ?? classification.category_slug;
   // A repeated manual filing decision for this sender is the strongest possible
   // signal — treat the result as confident so it neither gets flagged for
   // low-confidence review nor lands in the work-item basket.
