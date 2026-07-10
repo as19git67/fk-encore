@@ -523,7 +523,7 @@ onMounted(load)
       v-model:visible="showForm"
       :header="form.id === null ? 'Neuer Zähler' : 'Zähler bearbeiten'"
       modal
-      :style="{ width: '32rem' }"
+      :style="{ width: '32rem', maxWidth: '95vw' }"
     >
       <div class="form-grid">
         <label>Name
@@ -568,7 +568,7 @@ onMounted(load)
     </Dialog>
 
     <!-- Replace-device dialog -->
-    <Dialog v-model:visible="showReplace" header="Gerät ersetzen" modal :style="{ width: '30rem' }">
+    <Dialog v-model:visible="showReplace" header="Gerät ersetzen" modal :style="{ width: '30rem', maxWidth: '95vw' }">
       <p class="hint">
         Das aktuelle Gerät wird mit dem Endstand abgeschlossen; das neue Gerät startet
         beim angegebenen Wert. Der absolute Gesamtstand bleibt dadurch fortlaufend.
@@ -598,16 +598,18 @@ onMounted(load)
       v-model:visible="showReading"
       :header="readingForm.id === null ? 'Neue Ablesung' : 'Ablesung bearbeiten'"
       modal
-      :style="{ width: '26rem' }"
+      :style="{ width: '26rem', maxWidth: '95vw' }"
     >
-      <div class="form-grid">
+      <!-- Single column: the date+time picker needs the full width or its
+           value ("TT.MM.JJJJ HH:MM") gets clipped in a half-width cell. -->
+      <div class="form-grid form-grid--stack">
         <label>Zeitpunkt
           <DatePicker v-model="readingForm.takenAt" show-time hour-format="24" date-format="dd.mm.yy" />
         </label>
         <label>Zählerstand
           <InputNumber v-model="readingForm.value" :min-fraction-digits="0" :max-fraction-digits="3" autofocus />
         </label>
-        <label class="full">Notiz
+        <label>Notiz
           <Textarea v-model="readingForm.notes" rows="2" auto-resize />
         </label>
       </div>
@@ -732,8 +734,24 @@ onMounted(load)
 }
 .form-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* minmax(0, 1fr) lets the columns shrink below the intrinsic min-width of
+     the PrimeVue widgets (DatePicker with time, InputNumber with buttons).
+     Plain `1fr` keeps their min-content width and overflows the dialog,
+     forcing a horizontal scrollbar. */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
+}
+/* Single column on narrow/phone viewports — two columns of inputs are
+   unreadably cramped there. */
+@media (max-width: 480px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+/* Opt-in single column (used by the reading dialog, whose date+time picker
+   needs the full width at every viewport). */
+.form-grid--stack {
+  grid-template-columns: 1fr;
 }
 .form-grid label {
   display: flex;
@@ -741,9 +759,24 @@ onMounted(load)
   gap: 0.25rem;
   font-size: 0.85rem;
   color: var(--p-text-muted-color);
+  min-width: 0;
 }
 .form-grid label.full {
   grid-column: 1 / -1;
+}
+/* Make every input fill its grid cell so it shrinks with the column rather
+   than pushing the dialog wider. Covers the component root and, for the
+   composite widgets, their inner <input>. */
+.form-grid label > :deep(.p-inputtext),
+.form-grid label > :deep(.p-select),
+.form-grid label > :deep(.p-datepicker),
+.form-grid label > :deep(.p-inputnumber),
+.form-grid label > :deep(.p-textarea) {
+  width: 100%;
+}
+.form-grid :deep(.p-inputnumber-input),
+.form-grid :deep(.p-datepicker-input) {
+  width: 100%;
 }
 .section-title {
   font-weight: 600;
