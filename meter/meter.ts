@@ -16,7 +16,7 @@ import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import * as svc from "./meter.service";
-import type { MeterType } from "../db/schema";
+import type { MeterRole, MeterType } from "../db/schema";
 
 function requireUser(permission: string): number {
   const auth = getAuthData();
@@ -48,6 +48,7 @@ export const getMeter = api(
 interface CreateMeterRequest {
   name: string;
   type: MeterType;
+  role?: MeterRole | null;
   unit: string;
   location?: string;
   notes?: string;
@@ -72,6 +73,7 @@ interface UpdateMeterRequest {
   id: number;
   name: string;
   type: MeterType;
+  role?: MeterRole | null;
   unit: string;
   location?: string;
   notes?: string;
@@ -118,5 +120,33 @@ export const replaceDevice = api(
   async ({ id, ...rest }: ReplaceDeviceRequest): Promise<ReplaceDeviceResponse> => {
     const userId = requireUser("meters.manage");
     return await svc.replaceDevice(userId, id, rest);
+  },
+);
+
+interface UpdateDeviceRequest {
+  deviceId: number;
+  serialNumber?: string | null;
+  installedAt: string;
+  startValue: number;
+  removedAt?: string | null;
+  endValue?: number | null;
+  notes?: string | null;
+}
+
+export const updateDevice = api(
+  { expose: true, method: "PUT", path: "/meters/devices/:deviceId", auth: true },
+  async ({ deviceId, ...rest }: UpdateDeviceRequest): Promise<{ updated: boolean }> => {
+    const userId = requireUser("meters.manage");
+    await svc.updateDevice(userId, deviceId, rest);
+    return { updated: true };
+  },
+);
+
+export const deleteDevice = api(
+  { expose: true, method: "DELETE", path: "/meters/devices/:deviceId", auth: true },
+  async ({ deviceId }: { deviceId: number }): Promise<{ deleted: boolean }> => {
+    const userId = requireUser("meters.manage");
+    await svc.deleteNewestDevice(userId, deviceId);
+    return { deleted: true };
   },
 );

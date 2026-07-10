@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
@@ -14,11 +14,14 @@ import Column from 'primevue/column'
 import Tag from 'primevue/tag'
 import Chart from 'primevue/chart'
 import SelectButton from 'primevue/selectbutton'
+import { useConfirm } from 'primevue/useconfirm'
 import {
   getMeter,
   updateMeter,
   deleteMeter,
   replaceMeterDevice,
+  updateMeterDevice,
+  deleteMeterDevice,
   listReadings,
   addReading,
   updateReading,
@@ -30,7 +33,10 @@ import {
   getMeterReport,
   METER_TYPE_LABELS,
   METER_TYPE_ICONS,
+  METER_ROLE_LABELS,
   type MeterDetail,
+  type MeterDevice,
+  type MeterRole,
   type MeterType,
   type Reading,
   type ApiKey,
@@ -44,6 +50,7 @@ import { toLocalIsoDateTime } from '../utils/dateFormat'
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const confirmDialog = useConfirm()
 const canManage = computed(() => auth.hasPermission('meters.manage'))
 const canEnter = computed(() => auth.hasPermission('meters.read_entry'))
 
@@ -58,12 +65,22 @@ const typeOptions = (Object.keys(METER_TYPE_LABELS) as MeterType[]).map((value) 
   label: METER_TYPE_LABELS[value],
   value,
 }))
+const roleOptions: Array<{ label: string; value: MeterRole | null }> = [
+  { label: 'Keine Report-Rolle', value: null },
+  ...(Object.keys(METER_ROLE_LABELS) as MeterRole[]).map((value) => ({
+    label: METER_ROLE_LABELS[value],
+    value,
+  })),
+]
 
 function typeLabel(t: MeterType) {
   return METER_TYPE_LABELS[t]
 }
 function typeIcon(t: MeterType) {
   return METER_TYPE_ICONS[t]
+}
+function roleLabel(role: MeterRole | null) {
+  return role ? METER_ROLE_LABELS[role] : null
 }
 function fmt(value: number | null, decimals: number) {
   if (value === null) return '–'
@@ -75,6 +92,19 @@ function fmt(value: number | null, decimals: number) {
 function fmtDateTime(iso: string | null) {
   if (!iso) return '–'
   return new Date(iso).toLocaleString('de-DE')
+}
+const isNarrowScreen = ref(false)
+let narrowMedia: MediaQueryList | null = null
+function updateNarrowScreen() {
+  isNarrowScreen.value = narrowMedia?.matches ?? false
+}
+function fmtReportDate(iso: string | null) {
+  if (!iso) return '–'
+  const date = new Date(iso)
+  if (isNarrowScreen.value) {
+    return date.toLocaleDateString('de-DE', { month: '2-digit', year: '2-digit' })
+  }
+  return date.toLocaleString('de-DE')
 }
 
 async function loadGroups(): Promise<GroupSummary[]> {
@@ -188,6 +218,7 @@ watch(reportGranularity, () => {
 interface EditForm {
   name: string
   type: MeterType
+  role: MeterRole | null
   unit: string
   location: string
   notes: string
@@ -200,6 +231,7 @@ const saving = ref(false)
 const editForm = ref<EditForm>({
   name: '',
   type: 'electricity',
+  role: null,
   unit: '',
   location: '',
   notes: '',
@@ -212,6 +244,7 @@ function openEdit() {
   editForm.value = {
     name: detail.value.name,
     type: detail.value.type,
+    role: detail.value.role,
     unit: detail.value.unit,
     location: detail.value.location ?? '',
     notes: detail.value.notes ?? '',
@@ -232,6 +265,7 @@ async function handleSave() {
     await updateMeter(detail.value.id, {
       name: editForm.value.name.trim(),
       type: editForm.value.type,
+      role: editForm.value.role,
       unit: editForm.value.unit.trim(),
       location: editForm.value.location.trim() || undefined,
       notes: editForm.value.notes.trim() || undefined,
@@ -249,7 +283,19 @@ async function handleSave() {
 
 async function handleDelete() {
   if (!detail.value) return
-  if (!confirm(`Zähler „${detail.value.name}“ mit allen Geräten und Ablesungen löschen?`)) return
+  confirmDialog.require({
+    message: `Zähler „${detail.value.name}“ mit allen Geräten und Ablesungen löschen? Diese Aktion kann nicht rückgängig gemacht werden.`,
+    header: 'Zähler löschen',
+    icon: 'pi pi-exclamation-triangle',
+    rejectLabel: 'Abbrechen',
+    acceptLabel: 'Endgültig löschen',
+    acceptClass: 'p-button-danger',
+    accept: () => void performDeleteMeter(),
+  })
+}
+
+async function performDeleteMeter() {
+  if (!detail.value) return
   error.value = ''
   try {
     await deleteMeter(detail.value.id)
@@ -299,6 +345,84 @@ async function handleReplace() {
     error.value = err.message || 'Fehler beim Gerätewechsel'
   } finally {
     replacing.value = false
+  }
+}
+
+const showDeviceEdit = ref(false)
+const savingDevice = ref(false)
+const deviceForm = ref<{
+  id: number | null
+  serialNumber: string
+  installedAt: Date
+  removedAt: Date | null
+  startValue: number
+  endValue: number | null
+  notes: string
+}>({
+  id: null,
+  serialNumber: '',
+  installedAt: new Date(),
+  removedAt: null,
+  startValue: 0,
+  endValue: null,
+  notes: '',
+})
+
+function openDeviceEdit(device: MeterDevice) {
+  deviceForm.value = {
+    id: device.id,
+    serialNumber: device.serialNumber ?? '',
+    installedAt: new Date(device.installedAt),
+    removedAt: device.removedAt ? new Date(device.removedAt) : null,
+    startValue: device.startValue,
+    endValue: device.endValue,
+    notes: device.notes ?? '',
+  }
+  showDeviceEdit.value = true
+}
+
+async function handleSaveDevice() {
+  const id = deviceForm.value.id
+  if (id === null) return
+  savingDevice.value = true
+  error.value = ''
+  try {
+    await updateMeterDevice(id, {
+      serialNumber: deviceForm.value.serialNumber.trim() || null,
+      installedAt: toLocalIsoDateTime(deviceForm.value.installedAt),
+      removedAt: deviceForm.value.removedAt ? toLocalIsoDateTime(deviceForm.value.removedAt) : null,
+      startValue: deviceForm.value.startValue,
+      endValue: deviceForm.value.endValue,
+      notes: deviceForm.value.notes.trim() || null,
+    })
+    showDeviceEdit.value = false
+    await loadDetail()
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Speichern des Geräts'
+  } finally {
+    savingDevice.value = false
+  }
+}
+
+function handleDeleteDevice(device: MeterDevice) {
+  confirmDialog.require({
+    message: `Neuestes Gerät „${device.serialNumber ?? 'ohne Seriennummer'}“ löschen? Das ist nur möglich, solange keine Ablesungen dafür existieren.`,
+    header: 'Gerät löschen',
+    icon: 'pi pi-exclamation-triangle',
+    rejectLabel: 'Abbrechen',
+    acceptLabel: 'Löschen',
+    acceptClass: 'p-button-danger',
+    accept: () => void performDeleteDevice(device),
+  })
+}
+
+async function performDeleteDevice(device: MeterDevice) {
+  error.value = ''
+  try {
+    await deleteMeterDevice(device.id)
+    await loadDetail()
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Löschen des Geräts'
   }
 }
 
@@ -486,8 +610,15 @@ function copyToken() {
 }
 
 onMounted(async () => {
+  narrowMedia = window.matchMedia('(max-width: 560px)')
+  updateNarrowScreen()
+  narrowMedia.addEventListener('change', updateNarrowScreen)
   groups.value = await loadGroups()
   await loadDetail()
+})
+
+onUnmounted(() => {
+  narrowMedia?.removeEventListener('change', updateNarrowScreen)
 })
 
 watch(meterId, () => loadDetail())
@@ -509,6 +640,7 @@ watch(meterId, () => loadDetail())
           <h1><i :class="typeIcon(detail.type)" /> <span class="meter-name">{{ detail.name }}</span></h1>
           <div class="detail-subtitle">
             <Tag :value="typeLabel(detail.type)" severity="secondary" />
+            <Tag v-if="detail.role" :value="roleLabel(detail.role)" severity="info" />
             <span v-if="detail.location"><i class="pi pi-map-marker" /> {{ detail.location }}</span>
           </div>
         </div>
@@ -527,7 +659,7 @@ watch(meterId, () => loadDetail())
         </div>
         <div class="figure">
           <span class="figure-label">Aktives Gerät</span>
-          <span class="figure-value">{{ detail.activeDeviceSerial ?? '–' }}</span>
+          <span class="figure-value figure-value--wrap">{{ detail.activeDeviceSerial ?? '–' }}</span>
         </div>
       </div>
 
@@ -562,10 +694,10 @@ watch(meterId, () => loadDetail())
             <template #body="{ data }">{{ fmt(data.consumption, detail!.decimals) }} {{ detail!.unit }}</template>
           </Column>
           <Column header="Von">
-            <template #body="{ data }">{{ fmtDateTime(data.startReadingAt) }}</template>
+            <template #body="{ data }">{{ fmtReportDate(data.startReadingAt) }}</template>
           </Column>
           <Column header="Bis">
-            <template #body="{ data }">{{ fmtDateTime(data.endReadingAt) }}</template>
+            <template #body="{ data }">{{ fmtReportDate(data.endReadingAt) }}</template>
           </Column>
         </DataTable>
       </div>
@@ -594,6 +726,23 @@ watch(meterId, () => loadDetail())
         <Column header="Status">
           <template #body="{ data }">
             <Tag :value="data.active ? 'aktiv' : 'ersetzt'" :severity="data.active ? 'success' : 'secondary'" />
+          </template>
+        </Column>
+        <Column v-if="canManage" style="width: 6.5rem">
+          <template #body="{ data }">
+            <div class="device-actions">
+              <Button icon="pi pi-pencil" text rounded size="small" severity="secondary" v-tooltip.left="'Gerät bearbeiten'" @click="openDeviceEdit(data)" />
+              <Button
+                icon="pi pi-trash"
+                text
+                rounded
+                size="small"
+                severity="danger"
+                :disabled="!data.canDelete"
+                v-tooltip.left="data.canDelete ? 'Neuestes Gerät löschen' : 'Nur neuestes Gerät ohne Ablesungen löschbar'"
+                @click="handleDeleteDevice(data)"
+              />
+            </div>
           </template>
         </Column>
       </DataTable>
@@ -673,6 +822,9 @@ watch(meterId, () => loadDetail())
         <label>Typ
           <Select v-model="editForm.type" :options="typeOptions" option-label="label" option-value="value" />
         </label>
+        <label>Report-Rolle
+          <Select v-model="editForm.role" :options="roleOptions" option-label="label" option-value="value" />
+        </label>
         <label>Einheit
           <InputText v-model="editForm.unit" />
         </label>
@@ -718,6 +870,34 @@ watch(meterId, () => loadDetail())
       <template #footer>
         <Button label="Abbrechen" text @click="showReplace = false" />
         <Button label="Ersetzen" icon="pi pi-refresh" :loading="replacing" @click="handleReplace" />
+      </template>
+    </Dialog>
+
+    <!-- Edit device dialog -->
+    <Dialog v-model:visible="showDeviceEdit" header="Gerät bearbeiten" modal :style="{ width: '30rem', maxWidth: '95vw' }">
+      <div class="form-grid">
+        <label>Seriennummer
+          <InputText v-model="deviceForm.serialNumber" autofocus />
+        </label>
+        <label>Eingebaut am
+          <DatePicker v-model="deviceForm.installedAt" show-time hour-format="24" date-format="dd.mm.yy" />
+        </label>
+        <label>Startwert
+          <InputNumber v-model="deviceForm.startValue" :min-fraction-digits="0" :max-fraction-digits="3" />
+        </label>
+        <label>Ausgebaut am
+          <DatePicker v-model="deviceForm.removedAt" show-time hour-format="24" date-format="dd.mm.yy" show-button-bar />
+        </label>
+        <label>Endwert
+          <InputNumber v-model="deviceForm.endValue" :min-fraction-digits="0" :max-fraction-digits="3" />
+        </label>
+        <label class="full">Notiz
+          <Textarea v-model="deviceForm.notes" rows="2" auto-resize />
+        </label>
+      </div>
+      <template #footer>
+        <Button label="Abbrechen" text @click="showDeviceEdit = false" />
+        <Button label="Speichern" icon="pi pi-check" :loading="savingDevice" @click="handleSaveDevice" />
       </template>
     </Dialog>
 
@@ -814,7 +994,7 @@ watch(meterId, () => loadDetail())
 .detail-title h1 {
   display: flex;
   justify-content: flex-end;
-  align-items: flex-start;
+  align-items: center;
   gap: 0.4rem;
   margin: 0;
   font-size: 1.4rem;
@@ -822,7 +1002,6 @@ watch(meterId, () => loadDetail())
 }
 .detail-title h1 i {
   flex: 0 0 auto;
-  margin-top: 0.1rem;
 }
 .meter-name {
   min-width: 0;
@@ -872,6 +1051,9 @@ watch(meterId, () => loadDetail())
 .figure-value {
   font-weight: 600;
   font-size: 1.1rem;
+}
+.figure-value--wrap {
+  overflow-wrap: anywhere;
 }
 .figure-sub {
   font-size: 0.7rem;
@@ -929,6 +1111,12 @@ watch(meterId, () => loadDetail())
 @media (max-width: 560px) {
   .detail-title {
     flex-basis: 100%;
+    margin-left: 0;
+    text-align: left;
+  }
+  .detail-title h1,
+  .detail-subtitle {
+    justify-content: flex-start;
   }
   .detail-top-actions :deep(.p-button-label) {
     display: none;
@@ -946,6 +1134,11 @@ watch(meterId, () => loadDetail())
   }
 }
 .reading-actions {
+  display: flex;
+  gap: 0.15rem;
+  justify-content: flex-end;
+}
+.device-actions {
   display: flex;
   gap: 0.15rem;
   justify-content: flex-end;

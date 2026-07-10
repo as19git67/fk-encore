@@ -150,7 +150,7 @@ describe("buildEnergyReportFromMeterReports", () => {
     });
   });
 
-  it("keeps grid values available when production is missing", () => {
+  it("omits buckets that do not have a complete PV data set", () => {
     const energy = buildEnergyReportFromMeterReports(
       {
         grid_import: report("Bezug", [bucket("2026-01", 100)]),
@@ -161,9 +161,10 @@ describe("buildEnergyReportFromMeterReports", () => {
       null,
     );
 
-    expect(energy.buckets[0]).toMatchObject({
-      gridImport: 100,
-      gridExport: 50,
+    expect(energy.buckets).toHaveLength(0);
+    expect(energy.totals).toMatchObject({
+      gridImport: null,
+      gridExport: null,
       production: null,
       selfConsumption: null,
       totalConsumption: null,

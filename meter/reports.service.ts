@@ -309,9 +309,19 @@ export function buildEnergyReportFromMeterReports(
           : null,
     };
   });
+  const completeBuckets = buckets.filter(
+    (bucket) =>
+      bucket.gridImport !== null &&
+      bucket.gridExport !== null &&
+      bucket.production !== null &&
+      bucket.selfConsumption !== null &&
+      bucket.totalConsumption !== null &&
+      bucket.autarky !== null &&
+      bucket.selfConsumptionRate !== null,
+  );
 
   const sum = (selector: (bucket: EnergyReportBucket) => number | null) => {
-    const values = buckets.map(selector).filter((value): value is number => value !== null);
+    const values = completeBuckets.map(selector).filter((value): value is number => value !== null);
     if (values.length === 0) return null;
     return roundReportValue(values.reduce((total, value) => total + value, 0), decimals);
   };
@@ -334,7 +344,7 @@ export function buildEnergyReportFromMeterReports(
     granularity,
     from: fromDate?.toISOString() ?? null,
     to: toDate?.toISOString() ?? null,
-    buckets,
+    buckets: completeBuckets,
     totals: {
       gridImport,
       gridExport,

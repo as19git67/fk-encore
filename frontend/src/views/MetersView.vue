@@ -11,6 +11,7 @@ import Dialog from 'primevue/dialog'
 import Message from 'primevue/message'
 import Tag from 'primevue/tag'
 import SelectButton from 'primevue/selectbutton'
+import { useConfirm } from 'primevue/useconfirm'
 import {
   listMeters,
   createMeter,
@@ -21,9 +22,11 @@ import {
   importElectricityHistory,
   METER_TYPE_LABELS,
   METER_TYPE_ICONS,
+  METER_ROLE_LABELS,
   type EnergyReport,
   type MeterReportGranularity,
   type MeterListItem,
+  type MeterRole,
   type MeterType,
 } from '../api/meters'
 import { listGroups, type GroupSummary } from '../api/documents'
@@ -32,6 +35,7 @@ import { toLocalIsoDateTime } from '../utils/dateFormat'
 
 const router = useRouter()
 const auth = useAuthStore()
+const confirm = useConfirm()
 const canManage = computed(() => auth.hasPermission('meters.manage'))
 
 const meters = ref<MeterListItem[]>([])
@@ -51,6 +55,13 @@ const typeOptions = (Object.keys(METER_TYPE_LABELS) as MeterType[]).map((value) 
   label: METER_TYPE_LABELS[value],
   value,
 }))
+const roleOptions: Array<{ label: string; value: MeterRole | null }> = [
+  { label: 'Keine Report-Rolle', value: null },
+  ...(Object.keys(METER_ROLE_LABELS) as MeterRole[]).map((value) => ({
+    label: METER_ROLE_LABELS[value],
+    value,
+  })),
+]
 
 const DEFAULT_UNIT: Record<MeterType, string> = {
   electricity: 'kWh',
@@ -105,6 +116,9 @@ function typeLabel(t: MeterType) {
 function typeIcon(t: MeterType) {
   return METER_TYPE_ICONS[t]
 }
+function roleLabel(role: MeterRole | null) {
+  return role ? METER_ROLE_LABELS[role] : null
+}
 function fmt(value: number | null, decimals: number) {
   if (value === null) return '–'
   return value.toLocaleString('de-DE', {
@@ -131,6 +145,52 @@ const energyBuckets = computed(() => {
   return energyGranularity.value === 'year' ? [...recent].reverse() : recent
 })
 
+type EnergyBucket = EnergyReport['buckets'][number]
+
+const energyAnalysis = computed(() => {
+  const buckets = energyReport.value?.buckets ?? []
+  const avg = (selector: (bucket: EnergyBucket) => number | null) => {
+    const values = buckets.map(selector).filter((value): value is number => value !== null)
+    if (values.length === 0) return null
+    return values.reduce((sum, value) => sum + value, 0) / values.length
+  }
+  const trend = (selector: (bucket: EnergyBucket) => number | null) => {
+    if (buckets.length < 2) return null
+    const previousBucket = buckets[buckets.length - 2]
+    const currentBucket = buckets[buckets.length - 1]
+    if (!previousBucket || !currentBucket) return null
+    const previous = selector(previousBucket)
+    const current = selector(currentBucket)
+    if (previous === null || current === null) return null
+    return current - previous
+  }
+  return {
+    count: buckets.length,
+    avgGridImport: avg((bucket) => bucket.gridImport),
+    avgGridExport: avg((bucket) => bucket.gridExport),
+    avgProduction: avg((bucket) => bucket.production),
+    avgSelfConsumption: avg((bucket) => bucket.selfConsumption),
+    avgAutarky: avg((bucket) => bucket.autarky),
+    avgSelfConsumptionRate: avg((bucket) => bucket.selfConsumptionRate),
+    trendGridImport: trend((bucket) => bucket.gridImport),
+    trendAutarky: trend((bucket) => bucket.autarky),
+  }
+})
+
+function fmtTrend(value: number | null, decimals: number, unit = '') {
+  if (value === null) return 'Trend: –'
+  const sign = value > 0 ? '+' : ''
+  return `Trend: ${sign}${fmt(value, decimals)}${unit ? ` ${unit}` : ''}`
+}
+function fmtPercentTrend(value: number | null) {
+  if (value === null) return 'Trend: –'
+  const sign = value > 0 ? '+' : ''
+  return `Trend: ${sign}${(value * 100).toLocaleString('de-DE', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 1,
+  })} Prozentpunkte`
+}
+
 function openDetail(m: MeterListItem) {
   router.push({ name: 'zaehler-detail', params: { id: m.id } })
 }
@@ -141,6 +201,7 @@ interface MeterForm {
   id: number | null
   name: string
   type: MeterType
+  role: MeterRole | null
   unit: string
   location: string
   notes: string
@@ -160,6 +221,7 @@ function emptyForm(): MeterForm {
     id: null,
     name: '',
     type: 'electricity',
+    role: null,
     unit: DEFAULT_UNIT.electricity,
     location: '',
     notes: '',
@@ -181,6 +243,7 @@ function openEdit(m: MeterListItem) {
     id: m.id,
     name: m.name,
     type: m.type,
+    role: m.role,
     unit: m.unit,
     location: m.location ?? '',
     notes: m.notes ?? '',
@@ -211,6 +274,7 @@ async function handleSave() {
       await createMeter({
         name: form.value.name.trim(),
         type: form.value.type,
+        role: form.value.role,
         unit: form.value.unit.trim(),
         location: form.value.location.trim() || undefined,
         notes: form.value.notes.trim() || undefined,
@@ -226,6 +290,7 @@ async function handleSave() {
       await updateMeter(form.value.id, {
         name: form.value.name.trim(),
         type: form.value.type,
+        role: form.value.role,
         unit: form.value.unit.trim(),
         location: form.value.location.trim() || undefined,
         notes: form.value.notes.trim() || undefined,
@@ -243,7 +308,18 @@ async function handleSave() {
 }
 
 async function handleDelete(m: MeterListItem) {
-  if (!confirm(`Zähler „${m.name}" mit allen Geräten und Ablesungen löschen?`)) return
+  confirm.require({
+    message: `Zähler „${m.name}“ mit allen Geräten und Ablesungen löschen? Diese Aktion kann nicht rückgängig gemacht werden.`,
+    header: 'Zähler löschen',
+    icon: 'pi pi-exclamation-triangle',
+    rejectLabel: 'Abbrechen',
+    acceptLabel: 'Endgültig löschen',
+    acceptClass: 'p-button-danger',
+    accept: () => void performDelete(m),
+  })
+}
+
+async function performDelete(m: MeterListItem) {
   error.value = ''
   try {
     await deleteMeter(m.id)
@@ -362,31 +438,34 @@ onMounted(load)
         </div>
 
         <div v-if="loadingEnergyReport" class="info info-compact"><i class="pi pi-spin pi-spinner" /> Energie-Report…</div>
-        <template v-else>
+        <template v-else-if="energyBuckets.length > 0">
           <div class="energy-kpis">
             <div class="energy-kpi">
-              <span class="figure-label">Bezug</span>
-              <strong>{{ fmt(energyReport.totals.gridImport, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+              <span class="figure-label">Ø Bezug</span>
+              <strong>{{ fmt(energyAnalysis.avgGridImport, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+              <span class="figure-sub">{{ fmtTrend(energyAnalysis.trendGridImport, energyReport.decimals, energyReport.unit) }}</span>
             </div>
             <div class="energy-kpi">
-              <span class="figure-label">Einspeisung</span>
-              <strong>{{ fmt(energyReport.totals.gridExport, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+              <span class="figure-label">Ø Einspeisung</span>
+              <strong>{{ fmt(energyAnalysis.avgGridExport, energyReport.decimals) }} {{ energyReport.unit }}</strong>
             </div>
             <div class="energy-kpi">
-              <span class="figure-label">Produktion</span>
-              <strong>{{ fmt(energyReport.totals.production, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+              <span class="figure-label">Ø Produktion</span>
+              <strong>{{ fmt(energyAnalysis.avgProduction, energyReport.decimals) }} {{ energyReport.unit }}</strong>
             </div>
             <div class="energy-kpi">
-              <span class="figure-label">Eigenverbrauch</span>
-              <strong>{{ fmt(energyReport.totals.selfConsumption, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+              <span class="figure-label">Ø Eigenverbrauch</span>
+              <strong>{{ fmt(energyAnalysis.avgSelfConsumption, energyReport.decimals) }} {{ energyReport.unit }}</strong>
             </div>
             <div class="energy-kpi">
-              <span class="figure-label">Autarkie</span>
-              <strong>{{ fmtPercent(energyReport.totals.autarky) }}</strong>
+              <span class="figure-label">Ø Autarkie</span>
+              <strong>{{ fmtPercent(energyAnalysis.avgAutarky) }}</strong>
+              <span class="figure-sub">{{ fmtPercentTrend(energyAnalysis.trendAutarky) }}</span>
             </div>
             <div class="energy-kpi">
-              <span class="figure-label">Eigenverbrauchsquote</span>
-              <strong>{{ fmtPercent(energyReport.totals.selfConsumptionRate) }}</strong>
+              <span class="figure-label">Ø Eigenverbrauchsquote</span>
+              <strong>{{ fmtPercent(energyAnalysis.avgSelfConsumptionRate) }}</strong>
+              <span class="figure-sub">{{ energyAnalysis.count }} {{ energyGranularity === 'month' ? 'PV-Monate' : 'PV-Jahre' }}</span>
             </div>
           </div>
 
@@ -419,6 +498,9 @@ onMounted(load)
             </table>
           </div>
         </template>
+        <div v-else class="info info-compact">
+          Noch keine vollständigen PV-Zeiträume mit Bezug, Einspeisung und Produktion vorhanden.
+        </div>
       </section>
 
       <div class="meter-grid">
@@ -432,6 +514,7 @@ onMounted(load)
           <i :class="typeIcon(m.type)" />
           <span class="meter-name">{{ m.name }}</span>
           <Tag :value="typeLabel(m.type)" severity="secondary" />
+          <Tag v-if="m.role" :value="roleLabel(m.role)" severity="info" />
         </div>
         <div class="meter-meta">
           <span v-if="m.location"><i class="pi pi-map-marker" /> {{ m.location }}</span>
@@ -468,6 +551,9 @@ onMounted(load)
         </label>
         <label>Typ
           <Select v-model="form.type" :options="typeOptions" option-label="label" option-value="value" @change="onTypeChange" />
+        </label>
+        <label>Report-Rolle
+          <Select v-model="form.role" :options="roleOptions" option-label="label" option-value="value" />
         </label>
         <label>Einheit
           <InputText v-model="form.unit" />

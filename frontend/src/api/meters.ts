@@ -29,6 +29,8 @@ export interface MeterDevice {
   endValue: number | null
   notes: string | null
   active: boolean
+  readingCount: number
+  canDelete: boolean
 }
 
 export interface MeterDetail extends MeterListItem {
@@ -74,6 +76,15 @@ export interface ReplaceDeviceRequest {
   newStartValue?: number
 }
 
+export interface UpdateMeterDeviceRequest {
+  serialNumber?: string | null
+  installedAt: string
+  startValue: number
+  removedAt?: string | null
+  endValue?: number | null
+  notes?: string | null
+}
+
 export function listMeters() {
   return apiFetch<{ meters: MeterListItem[] }>('/meters')
 }
@@ -106,6 +117,19 @@ export function replaceMeterDevice(id: number, req: ReplaceDeviceRequest) {
   return apiFetch<{ newDeviceId: number }>(`/meters/${id}/replace-device`, {
     method: 'POST',
     body: JSON.stringify(req),
+  })
+}
+
+export function updateMeterDevice(deviceId: number, req: UpdateMeterDeviceRequest) {
+  return apiFetch<{ updated: boolean }>(`/meters/devices/${deviceId}`, {
+    method: 'PUT',
+    body: JSON.stringify(req),
+  })
+}
+
+export function deleteMeterDevice(deviceId: number) {
+  return apiFetch<{ deleted: boolean }>(`/meters/devices/${deviceId}`, {
+    method: 'DELETE',
   })
 }
 
@@ -330,4 +354,11 @@ export const METER_TYPE_ICONS: Record<MeterType, string> = {
   water: 'pi pi-cloud',
   gas: 'pi pi-cloud',
   operating_hours: 'pi pi-clock',
+}
+
+/** Human-readable German labels for optional energy report roles. */
+export const METER_ROLE_LABELS: Record<MeterRole, string> = {
+  grid_import: 'Netzbezug',
+  grid_export: 'Einspeisung',
+  pv_production: 'PV-Produktion',
 }

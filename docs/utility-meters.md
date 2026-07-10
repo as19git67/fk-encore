@@ -158,6 +158,8 @@ meter/
 | `GET /meters` | `meters.view` | Liste inkl. aktuellem Gerät, letzter Ablesung, Absolutstand |
 | `POST /meters` / `PUT /meters/:id` / `DELETE /meters/:id` | `meters.manage` | Zähler-CRUD (Admin-Seite) |
 | `POST /meters/:id/replace-device` | `meters.manage` | Gerätewechsel (atomar, §2.2) |
+| `PUT /meters/devices/:id` | `meters.manage` | Gerätedaten korrigieren |
+| `DELETE /meters/devices/:id` | `meters.manage` | Neuestes Gerät löschen, solange es keine Ablesungen hat |
 | `GET /meters/:id/readings` | `meters.view` | Ablesungen (paginiert, über Gerätegrenzen hinweg, mit Absolutwert-Spalte) |
 | `POST /meters/:id/readings` | `meters.read_entry` | Manuelle Ablesung |
 | `PUT/DELETE /meters/readings/:id` | `meters.read_entry` (eigene) / `meters.manage` (fremde) | Korrektur/Löschen |
@@ -258,9 +260,11 @@ Darauf werden je Bucket und für die Gesamtsumme folgende Werte berechnet:
 - Autarkie = 1 - Bezug / Gesamtverbrauch
 - Eigenverbrauchsquote = Eigenverbrauch / Produktion
 
-Wenn die PV-Produktion fehlt, bleiben die abgeleiteten PV-Kennzahlen leer;
-Bezug und Einspeisung werden trotzdem angezeigt. Migration `0123_meter_roles`
-backfilled bereits importierte historische Zähler einmalig.
+Zeiträume ohne vollständiges PV-Set (Bezug, Einspeisung und Produktion) werden
+im aggregierten Energie-Report ausgelassen, damit alte Vor-PV-Daten nicht in
+PV-Kennzahlen und Analysewerte einfließen. Migration `0123_meter_roles`
+backfilled bereits importierte historische Zähler einmalig; beim manuellen
+Anlegen/Bearbeiten kann die Report-Rolle gesetzt werden.
 
 Nicht Teil der ersten Ausbaustufe: E-Auto, Wärmepumpe, Warmwasser,
 Fußbodenheizung, PV-Anteile, Kosten/Preise, Gasvergleich/JAZ.
@@ -320,7 +324,7 @@ Storybook-Stories für Übersicht + Erfassungsdialog.
 | 3 | Manuelle Ablesungen | `readings.ts`, Absolutstand-Berechnung, Übersichts- + Detail-View, Erfassungsdialog | 2 |
 | 4 | Foto-OCR | `receipt-ocr-service`-Endpunkt `/meter-reading`, `readings-ocr.ts`, Foto-Ablage, Bestätigungs-UI | 3 |
 | 5 | API-Ingestion | `meter_api_keys`, `ingest.ts` (Bearer, Idempotenz, Rate-Limit), Key-Verwaltung in Admin-View | 3 |
-| 6 | Reports | MVP umgesetzt: `reports.ts`/`reports.service.ts`, Monats-/Jahres-Buckets aus Ableseintervallen, Chart + Tabelle in Detail-View, aggregierter Strom-/PV-Gesamtreport in der Übersicht. Offen: Interpolation, Day/Week, Vorjahresvergleich, explizite Zählerrollen. | 3 |
+| 6 | Reports | MVP umgesetzt: `reports.ts`/`reports.service.ts`, Monats-/Jahres-Buckets aus Ableseintervallen, Chart + Tabelle in Detail-View, aggregierter Strom-/PV-Gesamtreport in der Übersicht, explizite Zählerrollen. Offen: Interpolation, Day/Week, Vorjahresvergleich. | 3 |
 | 7 | Anomalien | Cron + `meter_anomalies`, Badge/Liste im Frontend | 6 |
 | 8 | Finance-Link | Link-Tabelle, Endpunkte, UI an Ablesung/Transaktion | 3 (+ Finance) |
 
