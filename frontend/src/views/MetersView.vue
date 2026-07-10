@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
@@ -8,36 +9,26 @@ import Select from 'primevue/select'
 import DatePicker from 'primevue/datepicker'
 import Dialog from 'primevue/dialog'
 import Message from 'primevue/message'
-import DataTable from 'primevue/datatable'
-import Column from 'primevue/column'
 import Tag from 'primevue/tag'
 import {
   listMeters,
-  getMeter,
   createMeter,
   updateMeter,
   deleteMeter,
-  replaceMeterDevice,
-  listReadings,
-  addReading,
-  updateReading,
-  deleteReading,
   importWaterHistory,
   importElectricityHistory,
   METER_TYPE_LABELS,
   METER_TYPE_ICONS,
   type MeterListItem,
-  type MeterDetail,
   type MeterType,
-  type Reading,
 } from '../api/meters'
 import { listGroups, type GroupSummary } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
 import { toLocalIsoDateTime } from '../utils/dateFormat'
 
+const router = useRouter()
 const auth = useAuthStore()
 const canManage = computed(() => auth.hasPermission('meters.manage'))
-const canEnter = computed(() => auth.hasPermission('meters.read_entry'))
 
 const meters = ref<MeterListItem[]>([])
 const groups = ref<GroupSummary[]>([])
@@ -49,7 +40,6 @@ const typeOptions = (Object.keys(METER_TYPE_LABELS) as MeterType[]).map((value) 
   value,
 }))
 
-// Sensible default unit per meter type, prefilled when creating.
 const DEFAULT_UNIT: Record<MeterType, string> = {
   electricity: 'kWh',
   water: 'm³',
@@ -76,7 +66,6 @@ async function loadGroups(): Promise<GroupSummary[]> {
     const res = await listGroups()
     return res.items
   } catch {
-    // Groups are optional (a user may not use them); never block the page.
     return []
   }
 }
@@ -104,6 +93,10 @@ function fmtDateTime(iso: string | null) {
   return new Date(iso).toLocaleString('de-DE')
 }
 
+function openDetail(m: MeterListItem) {
+  router.push({ name: 'zaehler-detail', params: { id: m.id } })
+}
+
 // ── Create / edit dialog ─────────────────────────────────────────────────────
 
 interface MeterForm {
@@ -115,7 +108,6 @@ interface MeterForm {
   notes: string
   decimals: number
   groupId: number | null
-  // Initial device (create only).
   deviceSerial: string
   deviceInstalledAt: Date
   deviceStartValue: number
@@ -164,8 +156,6 @@ function openEdit(m: MeterListItem) {
 }
 
 function onTypeChange() {
-  // Only prefill the unit while creating and when it still matches a default,
-  // so we never clobber a deliberately chosen unit on an existing meter.
   if (form.value.id === null) {
     form.value.unit = DEFAULT_UNIT[form.value.type]
   }
@@ -219,164 +209,10 @@ async function handleDelete(m: MeterListItem) {
   error.value = ''
   try {
     await deleteMeter(m.id)
-    if (detail.value?.id === m.id) detail.value = null
     await load()
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Löschen'
   }
-}
-
-// ── Device history / replace ─────────────────────────────────────────────────
-
-const detail = ref<MeterDetail | null>(null)
-const loadingDetail = ref(false)
-
-async function openDetail(m: MeterListItem) {
-  loadingDetail.value = true
-  error.value = ''
-  try {
-    detail.value = await getMeter(m.id)
-    await loadReadings()
-  } catch (err: any) {
-    error.value = err.message || 'Fehler beim Laden der Details'
-  } finally {
-    loadingDetail.value = false
-  }
-}
-
-const showReplace = ref(false)
-const replacing = ref(false)
-const replaceForm = ref({
-  swapAt: new Date(),
-  finalValue: 0,
-  newSerial: '',
-  newStartValue: 0,
-})
-
-function openReplace() {
-  if (!detail.value) return
-  const active = detail.value.devices.find((d) => d.active)
-  replaceForm.value = {
-    swapAt: new Date(),
-    finalValue: active?.startValue ?? 0,
-    newSerial: '',
-    newStartValue: 0,
-  }
-  showReplace.value = true
-}
-
-async function handleReplace() {
-  if (!detail.value) return
-  replacing.value = true
-  error.value = ''
-  try {
-    await replaceMeterDevice(detail.value.id, {
-      swapAt: toLocalIsoDateTime(replaceForm.value.swapAt),
-      finalValue: replaceForm.value.finalValue,
-      newSerialNumber: replaceForm.value.newSerial.trim() || undefined,
-      newStartValue: replaceForm.value.newStartValue,
-    })
-    showReplace.value = false
-    await Promise.all([load(), openDetail(detail.value)])
-  } catch (err: any) {
-    error.value = err.message || 'Fehler beim Gerätewechsel'
-  } finally {
-    replacing.value = false
-  }
-}
-
-// ── Readings (Etappe 3) ──────────────────────────────────────────────────────
-
-const readings = ref<Reading[]>([])
-const loadingReadings = ref(false)
-
-async function loadReadings() {
-  if (!detail.value) return
-  loadingReadings.value = true
-  try {
-    const res = await listReadings(detail.value.id)
-    readings.value = res.readings
-  } catch (err: any) {
-    error.value = err.message || 'Fehler beim Laden der Ablesungen'
-  } finally {
-    loadingReadings.value = false
-  }
-}
-
-const showReading = ref(false)
-const savingReading = ref(false)
-const readingForm = ref<{ id: number | null; value: number; takenAt: Date; notes: string }>({
-  id: null,
-  value: 0,
-  takenAt: new Date(),
-  notes: '',
-})
-
-/** Whether the caller may edit/delete a given reading. */
-function canEditReading(r: Reading): boolean {
-  if (canManage.value) return true
-  return canEnter.value && r.enteredBy === (auth.user?.id ?? -1)
-}
-
-function openReadingEntry() {
-  readingForm.value = { id: null, value: 0, takenAt: new Date(), notes: '' }
-  showReading.value = true
-}
-
-function openReadingEdit(r: Reading) {
-  readingForm.value = {
-    id: r.id,
-    value: r.value,
-    takenAt: new Date(r.takenAt),
-    notes: r.notes ?? '',
-  }
-  showReading.value = true
-}
-
-async function handleSaveReading() {
-  if (!detail.value) return
-  savingReading.value = true
-  error.value = ''
-  try {
-    if (readingForm.value.id === null) {
-      await addReading(detail.value.id, {
-        value: readingForm.value.value,
-        takenAt: toLocalIsoDateTime(readingForm.value.takenAt),
-        notes: readingForm.value.notes.trim() || undefined,
-      })
-    } else {
-      await updateReading(readingForm.value.id, {
-        value: readingForm.value.value,
-        takenAt: toLocalIsoDateTime(readingForm.value.takenAt),
-        notes: readingForm.value.notes.trim() || undefined,
-      })
-    }
-    showReading.value = false
-    await Promise.all([loadReadings(), refreshAfterReading()])
-  } catch (err: any) {
-    error.value = err.message || 'Fehler beim Speichern der Ablesung'
-  } finally {
-    savingReading.value = false
-  }
-}
-
-async function handleDeleteReading(r: Reading) {
-  if (!confirm('Ablesung wirklich löschen?')) return
-  error.value = ''
-  try {
-    await deleteReading(r.id)
-    await Promise.all([loadReadings(), refreshAfterReading()])
-  } catch (err: any) {
-    error.value = err.message || 'Fehler beim Löschen der Ablesung'
-  }
-}
-
-/** Refresh the meter list + detail so last-reading / absolute totals update. */
-async function refreshAfterReading() {
-  if (!detail.value) return
-  const id = detail.value.id
-  await load()
-  detail.value = await getMeter(id)
 }
 
 // ── History imports ─────────────────────────────────────────────────────────
@@ -474,7 +310,6 @@ onMounted(load)
         v-for="m in meters"
         :key="m.id"
         class="meter-card"
-        :class="{ active: detail?.id === m.id }"
         @click="openDetail(m)"
       >
         <div class="meter-card-head">
@@ -496,98 +331,11 @@ onMounted(load)
             <span class="figure-value">{{ fmt(m.absoluteTotal, m.decimals) }} {{ m.unit }}</span>
           </div>
         </div>
-        <div v-if="canManage || canEnter" class="meter-actions" @click.stop>
-          <Button
-            v-if="canEnter"
-            icon="pi pi-plus-circle"
-            text
-            rounded
-            severity="primary"
-            v-tooltip.top="'Ablesen'"
-            @click="openDetail(m).then(openReadingEntry)"
-          />
-          <Button v-if="canManage" icon="pi pi-pencil" text rounded severity="secondary" v-tooltip.top="'Bearbeiten'" @click="openEdit(m)" />
-          <Button v-if="canManage" icon="pi pi-trash" text rounded severity="danger" v-tooltip.top="'Löschen'" @click="handleDelete(m)" />
+        <div v-if="canManage" class="meter-actions" @click.stop>
+          <Button icon="pi pi-pencil" text rounded severity="secondary" v-tooltip.top="'Bearbeiten'" @click="openEdit(m)" />
+          <Button icon="pi pi-trash" text rounded severity="danger" v-tooltip.top="'Löschen'" @click="handleDelete(m)" />
         </div>
       </div>
-    </div>
-
-    <!-- Device history -->
-    <div v-if="loadingDetail" class="info"><i class="pi pi-spin pi-spinner" /> Details…</div>
-    <div v-else-if="detail" class="detail-panel">
-      <div class="detail-header">
-        <h2><i :class="typeIcon(detail.type)" /> {{ detail.name }} — Gerätehistorie</h2>
-        <Button
-          v-if="canManage"
-          label="Gerät ersetzen"
-          icon="pi pi-refresh"
-          size="small"
-          @click="openReplace"
-        />
-      </div>
-      <DataTable :value="detail.devices" size="small">
-        <Column field="serialNumber" header="Seriennummer">
-          <template #body="{ data }">{{ data.serialNumber ?? '–' }}</template>
-        </Column>
-        <Column header="Von">
-          <template #body="{ data }">{{ fmtDateTime(data.installedAt) }}</template>
-        </Column>
-        <Column header="Bis">
-          <template #body="{ data }">{{ data.removedAt ? fmtDateTime(data.removedAt) : 'aktiv' }}</template>
-        </Column>
-        <Column header="Startwert">
-          <template #body="{ data }">{{ fmt(data.startValue, detail.decimals) }}</template>
-        </Column>
-        <Column header="Endwert">
-          <template #body="{ data }">{{ data.endValue === null ? '–' : fmt(data.endValue, detail.decimals) }}</template>
-        </Column>
-        <Column header="Status">
-          <template #body="{ data }">
-            <Tag :value="data.active ? 'aktiv' : 'ersetzt'" :severity="data.active ? 'success' : 'secondary'" />
-          </template>
-        </Column>
-      </DataTable>
-
-      <!-- Readings -->
-      <div class="detail-header readings-header">
-        <h2><i class="pi pi-list" /> Ablesungen</h2>
-        <Button
-          v-if="canEnter"
-          label="Neue Ablesung"
-          icon="pi pi-plus"
-          size="small"
-          @click="openReadingEntry"
-        />
-      </div>
-      <div v-if="loadingReadings" class="info"><i class="pi pi-spin pi-spinner" /> Ablesungen…</div>
-      <div v-else-if="readings.length === 0" class="info">Noch keine Ablesungen erfasst.</div>
-      <DataTable v-else :value="readings" size="small" paginator :rows="10">
-        <Column header="Datum">
-          <template #body="{ data }">{{ fmtDateTime(data.takenAt) }}</template>
-        </Column>
-        <Column header="Wert">
-          <template #body="{ data }">{{ fmt(data.value, detail.decimals) }} {{ detail.unit }}</template>
-        </Column>
-        <Column header="Absolut">
-          <template #body="{ data }">{{ fmt(data.absoluteValue, detail.decimals) }} {{ detail.unit }}</template>
-        </Column>
-        <Column header="Quelle">
-          <template #body="{ data }">
-            <Tag :value="data.source" severity="secondary" />
-          </template>
-        </Column>
-        <Column field="notes" header="Notiz">
-          <template #body="{ data }">{{ data.notes ?? '' }}</template>
-        </Column>
-        <Column style="width: 6rem">
-          <template #body="{ data }">
-            <div class="reading-actions" v-if="canEditReading(data)">
-              <Button icon="pi pi-pencil" text rounded size="small" severity="secondary" v-tooltip.left="'Bearbeiten'" @click="openReadingEdit(data)" />
-              <Button icon="pi pi-trash" text rounded size="small" severity="danger" v-tooltip.left="'Löschen'" @click="handleDeleteReading(data)" />
-            </div>
-          </template>
-        </Column>
-      </DataTable>
     </div>
 
     <!-- Create / edit dialog -->
@@ -638,58 +386,6 @@ onMounted(load)
         <Button label="Speichern" icon="pi pi-check" :loading="saving" @click="handleSave" />
       </template>
     </Dialog>
-
-    <!-- Replace-device dialog -->
-    <Dialog v-model:visible="showReplace" header="Gerät ersetzen" modal :style="{ width: '30rem', maxWidth: '95vw' }">
-      <p class="hint">
-        Das aktuelle Gerät wird mit dem Endstand abgeschlossen; das neue Gerät startet
-        beim angegebenen Wert. Der absolute Gesamtstand bleibt dadurch fortlaufend.
-      </p>
-      <div class="form-grid">
-        <label>Wechsel am
-          <DatePicker v-model="replaceForm.swapAt" show-time hour-format="24" date-format="dd.mm.yy" />
-        </label>
-        <label>Endstand altes Gerät
-          <InputNumber v-model="replaceForm.finalValue" :min-fraction-digits="0" :max-fraction-digits="3" />
-        </label>
-        <label>Seriennummer neu
-          <InputText v-model="replaceForm.newSerial" />
-        </label>
-        <label>Startwert neu
-          <InputNumber v-model="replaceForm.newStartValue" :min-fraction-digits="0" :max-fraction-digits="3" />
-        </label>
-      </div>
-      <template #footer>
-        <Button label="Abbrechen" text @click="showReplace = false" />
-        <Button label="Ersetzen" icon="pi pi-refresh" :loading="replacing" @click="handleReplace" />
-      </template>
-    </Dialog>
-
-    <!-- Reading entry / edit dialog -->
-    <Dialog
-      v-model:visible="showReading"
-      :header="readingForm.id === null ? 'Neue Ablesung' : 'Ablesung bearbeiten'"
-      modal
-      :style="{ width: '26rem', maxWidth: '95vw' }"
-    >
-      <!-- Single column: the date+time picker needs the full width or its
-           value ("TT.MM.JJJJ HH:MM") gets clipped in a half-width cell. -->
-      <div class="form-grid form-grid--stack">
-        <label>Zeitpunkt
-          <DatePicker v-model="readingForm.takenAt" show-time hour-format="24" date-format="dd.mm.yy" />
-        </label>
-        <label>Zählerstand
-          <InputNumber v-model="readingForm.value" :min-fraction-digits="0" :max-fraction-digits="3" autofocus />
-        </label>
-        <label>Notiz
-          <Textarea v-model="readingForm.notes" rows="2" auto-resize />
-        </label>
-      </div>
-      <template #footer>
-        <Button label="Abbrechen" text @click="showReading = false" />
-        <Button label="Speichern" icon="pi pi-check" :loading="savingReading" @click="handleSaveReading" />
-      </template>
-    </Dialog>
   </div>
 </template>
 
@@ -733,9 +429,6 @@ onMounted(load)
 }
 .meter-card:hover {
   background: var(--p-content-hover-background);
-}
-.meter-card.active {
-  border-color: var(--p-primary-color);
 }
 .meter-card-head {
   display: flex;
@@ -783,52 +476,15 @@ onMounted(load)
   gap: 0.25rem;
   margin-top: 0.5rem;
 }
-.detail-panel {
-  margin-top: 1.5rem;
-  border-top: 1px solid var(--p-content-border-color);
-  padding-top: 1rem;
-}
-.detail-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 0.75rem;
-}
-.detail-header h2 {
-  margin: 0;
-  font-size: 1.15rem;
-}
-.detail-header h2 i {
-  margin-right: 0.4rem;
-}
-.readings-header {
-  margin-top: 1.5rem;
-}
-.reading-actions {
-  display: flex;
-  gap: 0.15rem;
-  justify-content: flex-end;
-}
 .form-grid {
   display: grid;
-  /* minmax(0, 1fr) lets the columns shrink below the intrinsic min-width of
-     the PrimeVue widgets (DatePicker with time, InputNumber with buttons).
-     Plain `1fr` keeps their min-content width and overflows the dialog,
-     forcing a horizontal scrollbar. */
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
 }
-/* Single column on narrow/phone viewports — two columns of inputs are
-   unreadably cramped there. */
 @media (max-width: 480px) {
   .form-grid {
     grid-template-columns: 1fr;
   }
-}
-/* Opt-in single column (used by the reading dialog, whose date+time picker
-   needs the full width at every viewport). */
-.form-grid--stack {
-  grid-template-columns: 1fr;
 }
 .form-grid label {
   display: flex;
@@ -841,9 +497,6 @@ onMounted(load)
 .form-grid label.full {
   grid-column: 1 / -1;
 }
-/* Make every input fill its grid cell so it shrinks with the column rather
-   than pushing the dialog wider. Covers the component root and, for the
-   composite widgets, their inner <input>. */
 .form-grid label > :deep(.p-inputtext),
 .form-grid label > :deep(.p-select),
 .form-grid label > :deep(.p-datepicker),
@@ -859,10 +512,5 @@ onMounted(load)
   font-weight: 600;
   color: var(--p-text-color);
   margin-top: 0.5rem;
-}
-.hint {
-  color: var(--p-text-muted-color);
-  font-size: 0.85rem;
-  margin: 0 0 0.75rem;
 }
 </style>
