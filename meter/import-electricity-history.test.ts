@@ -4,7 +4,11 @@ import { eq } from "drizzle-orm";
 
 import db from "../db/database";
 import { users } from "../db/schema";
-import { importElectricityHistory } from "./import-electricity-history";
+import {
+  applyHistoricalVirtualDeviceSwaps,
+  consolidateHistoricalReportMeters,
+  importElectricityHistory,
+} from "./import-electricity-history";
 import { electricityHistoryData as DATA } from "./import/electricity-history-data";
 import { getMeterDetail } from "./meter.service";
 import { listReadings } from "./readings.service";
@@ -48,42 +52,149 @@ describe("importElectricityHistory", () => {
     expect(totalReadings).toBe(2003);
   });
 
-  it("creates 17 meters with 20 devices and all readings", async () => {
-    const res = await importElectricityHistory(userId, DATA);
-    expect(res.alreadyImported).toBe(false);
-    expect(res.metersCreated).toBe(17);
-    expect(res.devicesCreated).toBe(20);
-    expect(res.readingsCreated).toBe(2003);
-  }, 120_000);
+  it("normalizes the 2024-12 virtual meter swaps for 1.8.0 and 2.8.0", () => {
+    const reportMeters = consolidateHistoricalReportMeters(DATA);
+    const normalized = applyHistoricalVirtualDeviceSwaps(reportMeters);
 
-  it("Hausstrom has 3 devices with correct device swaps", async () => {
+    const importMeter = DATA.find((m) => m.key === "netzstrom_bezug")!;
+    expect(importMeter.devices).toHaveLength(1);
+    expect(importMeter.devices[0].readings.find(([date]) => date === "2024-12-01")?.[1]).toBe(24018);
+
+    const bezug = normalized.find((m) => m.key === "netzstrom_bezug")!;
+    expect(bezug.devices).toHaveLength(3);
+    expect(bezug.devices[0].serial).toBe("historisch-hausstrom-wp-ht-nt");
+    expect(bezug.devices[0].endValue).toBe(184484);
+    expect(bezug.devices[1].startValue).toBe(4726);
+    expect(bezug.devices[1].endValue).toBe(23030);
+    expect(bezug.devices[2].installedAt).toBe("2024-12-01");
+    expect(bezug.devices[2].readings[0]).toEqual(["2024-12-01", 1600]);
+    expect(bezug.devices[2].readings[bezug.devices[2].readings.length - 1]).toEqual(["2026-07-01", 12745]);
+
+    const lieferung = normalized.find((m) => m.key === "netzstrom_lieferung")!;
+    expect(lieferung.devices).toHaveLength(2);
+    expect(lieferung.devices[0].endValue).toBe(15442);
+    expect(lieferung.devices[1].installedAt).toBe("2024-12-01");
+    expect(lieferung.devices[1].readings[0]).toEqual(["2024-12-01", 571]);
+    expect(lieferung.devices[1].readings[lieferung.devices[1].readings.length - 1]).toEqual(["2026-07-01", 7927]);
+  });
+
+  it("consolidates legacy parallel meters into modern report meters", () => {
+    const consolidated = consolidateHistoricalReportMeters(DATA);
+
+    expect(consolidated).toHaveLength(14);
+    expect(consolidated.find((m) => m.key === "hausstrom")).toBeUndefined();
+    expect(consolidated.find((m) => m.key === "waermepumpe_ht")).toBeUndefined();
+    expect(consolidated.find((m) => m.key === "waermepumpe_nt")).toBeUndefined();
+
+    const bezug = consolidated.find((m) => m.key === "netzstrom_bezug")!;
+    expect(bezug.devices).toHaveLength(2);
+    expect(bezug.devices[0]).toMatchObject({
+      serial: "historisch-hausstrom-wp-ht-nt",
+      startValue: 0,
+      endValue: 184484,
+      installedAt: "2008-01-01",
+      removedAt: "2021-05-01",
+    });
+    expect(bezug.devices[0].readings[0]).toEqual(["2008-01-01", 16234.2]);
+    expect(bezug.devices[0].readings[bezug.devices[0].readings.length - 1]).toEqual([
+      "2021-04-01",
+      184109,
+    ]);
+    expect(bezug.devices[1].startValue).toBe(4726);
+
+    const waermepumpe = consolidated.find((m) => m.key === "waermepumpe_komplett")!;
+    expect(waermepumpe.devices).toHaveLength(2);
+    expect(waermepumpe.devices[0]).toMatchObject({
+      serial: "historisch-wp-ht-nt",
+      startValue: 0,
+      endValue: 105145,
+      installedAt: "2006-09-20",
+      removedAt: "2022-12-01",
+    });
+    expect(waermepumpe.devices[0].readings[0]).toEqual(["2006-09-20", 409.1]);
+    expect(waermepumpe.devices[0].readings[waermepumpe.devices[0].readings.length - 1]).toEqual([
+      "2021-05-01",
+      105145,
+    ]);
+    expect(waermepumpe.devices[1].startValue).toBe(41);
+  });
+
+  it("sets explicit report roles on imported energy meters", async () => {
     await importElectricityHistory(userId, DATA);
 
-    // Find the Hausstrom meter — it's the first in the data
-    const hausstromDef = DATA.find((m) => m.key === "hausstrom")!;
-    expect(hausstromDef.name).toBe("Hausstrom");
+    const { meterId: bezugId } = await findMeterByName(userId, "Netzstrom Bezug (1.8.0)");
+    const { meterId: einspeisungId } = await findMeterByName(userId, "Netzstrom Einspeisung (2.8.0)");
+    const { meterId: produktionId } = await findMeterByName(userId, "PV Produktion");
+    const { meterId: waermepumpeId } = await findMeterByName(userId, "Wärmepumpe Komplett");
 
-    // Use listReadings to find the meter ID by walking our created meters
-    // (we know the import creates meters in order)
-    const { meterId } = await findMeterByName(userId, "Hausstrom");
+    await expect(getMeterDetail(userId, bezugId)).resolves.toMatchObject({ role: "grid_import" });
+    await expect(getMeterDetail(userId, einspeisungId)).resolves.toMatchObject({ role: "grid_export" });
+    await expect(getMeterDetail(userId, produktionId)).resolves.toMatchObject({ role: "pv_production" });
+    await expect(getMeterDetail(userId, waermepumpeId)).resolves.toMatchObject({ role: null });
+  }, 120_000);
+
+  it("creates 14 report-friendly meters with 19 devices and consolidated readings", async () => {
+    const res = await importElectricityHistory(userId, DATA);
+    expect(res.alreadyImported).toBe(false);
+    expect(res.metersCreated).toBe(14);
+    expect(res.devicesCreated).toBe(19);
+    expect(res.readingsCreated).toBe(1780);
+  }, 120_000);
+
+  it("imports 1.8.0 and 2.8.0 post-swap readings as raw device values", async () => {
+    await importElectricityHistory(userId, DATA);
+
+    const { meterId: bezugId } = await findMeterByName(userId, "Netzstrom Bezug (1.8.0)");
+    const bezug = await getMeterDetail(userId, bezugId);
+    expect(bezug.devices).toHaveLength(3);
+    expect(bezug.devices.find((d) => d.active)?.serialNumber).toBe("1.8.0-ab-2024-12");
+    expect(
+      bezug.devices
+        .map((d) => d.endValue)
+        .filter((v) => v !== null)
+        .sort((a, b) => a - b),
+    ).toEqual([23030, 184484]);
+    const bezugReadings = await listReadings(userId, bezugId, 100, 0);
+    expect(bezugReadings.readings[0].value).toBe(12745);
+    expect(bezugReadings.readings[0].absoluteValue).toBe(215533);
+
+    const { meterId: lieferungId } = await findMeterByName(userId, "Netzstrom Einspeisung (2.8.0)");
+    const lieferung = await getMeterDetail(userId, lieferungId);
+    expect(lieferung.devices).toHaveLength(2);
+    expect(lieferung.devices.find((d) => d.active)?.serialNumber).toBe("2.8.0-ab-2024-12");
+    expect(lieferung.devices.find((d) => !d.active)?.endValue).toBe(15442);
+    const lieferungReadings = await listReadings(userId, lieferungId, 100, 0);
+    expect(lieferungReadings.readings[0].value).toBe(7927);
+    expect(lieferungReadings.readings[0].absoluteValue).toBe(23369);
+  }, 120_000);
+
+  it("imports Wärmepumpe Komplett with the old HT/NT history folded in", async () => {
+    await importElectricityHistory(userId, DATA);
+
+    await expect(findMeterByName(userId, "Hausstrom")).rejects.toThrow('meter "Hausstrom" not found');
+    await expect(findMeterByName(userId, "Wärmepumpe HT")).rejects.toThrow('meter "Wärmepumpe HT" not found');
+    await expect(findMeterByName(userId, "Wärmepumpe NT")).rejects.toThrow('meter "Wärmepumpe NT" not found');
+
+    const { meterId } = await findMeterByName(userId, "Wärmepumpe Komplett");
     const detail = await getMeterDetail(userId, meterId);
 
     expect(detail.type).toBe("electricity");
     expect(detail.unit).toBe("kWh");
-    expect(detail.devices).toHaveLength(3);
+    expect(detail.devices).toHaveLength(2);
     expect(detail.devices.filter((d) => d.active)).toHaveLength(1);
 
-    // Active device is the newest (1EFR2375190547)
     const active = detail.devices.find((d) => d.active)!;
-    expect(active.serialNumber).toBe("1EFR2375190547");
+    expect(active.serialNumber).toBeNull();
     expect(active.endValue).toBeNull();
+    expect(active.startValue).toBe(41);
 
-    // Closed device end values match the change events
-    const closedEnds = detail.devices
-      .filter((d) => !d.active)
-      .map((d) => d.endValue)
-      .sort((a, b) => (a ?? 0) - (b ?? 0));
-    expect(closedEnds).toEqual([22418, 74613]);
+    const closed = detail.devices.find((d) => !d.active)!;
+    expect(closed.serialNumber).toBe("historisch-wp-ht-nt");
+    expect(closed.endValue).toBe(105145);
+
+    const readings = await listReadings(userId, meterId, 100, 0);
+    expect(readings.readings[0].value).toBe(15399);
+    expect(readings.readings[0].absoluteValue).toBe(120503);
   }, 120_000);
 
   it("operating-hours meters are created with correct type", async () => {

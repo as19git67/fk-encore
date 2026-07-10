@@ -862,6 +862,13 @@
       "when": 1783641600000,
       "tag": "0122_utility_meters",
       "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1783728000000,
+      "tag": "0123_meter_roles",
+      "breakpoints": true
     }
   ]
 }
