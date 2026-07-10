@@ -2033,3 +2033,124 @@ export const scheduledJobState = pgTable("scheduled_job_state", {
     .notNull()
     .defaultNow(),
 });
+
+// ========== Utility meters (meter service, migration 0122) ==========
+
+export type MeterType = "electricity" | "water" | "gas" | "operating_hours";
+export type MeterReadingSource = "manual" | "ocr" | "api";
+
+// Logical metering point. Persists across physical device swaps; visibility
+// is owner + members of group_id (same groups concept as documents).
+export const meters = pgTable(
+  "meters",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    // TEXT + CHECK in SQL (not a pg enum) so new types don't need a migration.
+    type: text("type").$type<MeterType>().notNull(),
+    unit: text("unit").notNull(),
+    location: text("location"),
+    notes: text("notes"),
+    photo_path: text("photo_path"),
+    // Decimal places offered in entry forms / display (0..3, DB CHECK).
+    decimals: integer("decimals").notNull().default(1),
+    owner_user_id: integer("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    group_id: integer("group_id").references(() => groups.id, { onDelete: "set null" }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("meters_owner_idx").on(table.owner_user_id),
+    index("meters_group_idx").on(table.group_id),
+  ]
+);
+
+// Physical device installed at a metering point for a period. The absolute
+// total of the point is the sum over its devices of
+// (end_value ?? latest reading) - start_value.
+export const meterDevices = pgTable(
+  "meter_devices",
+  {
+    id: serial("id").primaryKey(),
+    meter_id: integer("meter_id")
+      .notNull()
+      .references(() => meters.id, { onDelete: "cascade" }),
+    serial_number: text("serial_number"),
+    installed_at: timestamp("installed_at", { mode: "string", withTimezone: true }).notNull(),
+    // NULL = currently installed device (at most one per meter, partial
+    // unique index meter_devices_one_active).
+    removed_at: timestamp("removed_at", { mode: "string", withTimezone: true }),
+    start_value: numeric("start_value", { precision: 14, scale: 3 }).notNull().default("0"),
+    end_value: numeric("end_value", { precision: 14, scale: 3 }),
+    notes: text("notes"),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("meter_devices_one_active")
+      .on(table.meter_id)
+      .where(sql`${table.removed_at} IS NULL`),
+    index("meter_devices_meter_idx").on(table.meter_id),
+  ]
+);
+
+// Bearer tokens for external ingestion (POST /api/meters/ingest). Only the
+// SHA-256 hex of the token is stored; plaintext is shown once on create.
+export const meterApiKeys = pgTable(
+  "meter_api_keys",
+  {
+    id: serial("id").primaryKey(),
+    meter_id: integer("meter_id")
+      .notNull()
+      .references(() => meters.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    key_hash: text("key_hash").unique().notNull(),
+    created_by: integer("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    last_used_at: timestamp("last_used_at", { mode: "string", withTimezone: true }),
+    disabled_at: timestamp("disabled_at", { mode: "string", withTimezone: true }),
+  },
+  (table) => [index("meter_api_keys_meter_idx").on(table.meter_id)]
+);
+
+export const meterReadings = pgTable(
+  "meter_readings",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    device_id: integer("device_id")
+      .notNull()
+      .references(() => meterDevices.id, { onDelete: "cascade" }),
+    value: numeric("value", { precision: 14, scale: 3 }).notNull(),
+    taken_at: timestamp("taken_at", { mode: "string", withTimezone: true }).notNull(),
+    source: text("source").$type<MeterReadingSource>().notNull().default("manual"),
+    photo_path: text("photo_path"),
+    ocr_confidence: real("ocr_confidence"),
+    entered_by: integer("entered_by").references(() => users.id, { onDelete: "set null" }),
+    api_key_id: integer("api_key_id").references(() => meterApiKeys.id, { onDelete: "set null" }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Idempotency anchor for API ingestion (devices re-send after outages).
+    uniqueIndex("meter_readings_device_id_taken_at_key").on(table.device_id, table.taken_at),
+    index("meter_readings_device_taken_idx").on(table.device_id, table.taken_at),
+  ]
+);
+
+// Link payments (advance payments, annual settlement) to a reading.
+// Same pattern as finance_transaction_document.
+export const meterReadingTransactions = pgTable(
+  "meter_reading_transactions",
+  {
+    reading_id: bigint("reading_id", { mode: "number" })
+      .notNull()
+      .references(() => meterReadings.id, { onDelete: "cascade" }),
+    transaction_id: bigint("transaction_id", { mode: "number" })
+      .notNull()
+      .references(() => financeTransaction.id, { onDelete: "cascade" }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.reading_id, table.transaction_id] })]
+);

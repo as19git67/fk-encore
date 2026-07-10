@@ -27,6 +27,7 @@ export async function seed(db: any): Promise<void> {
     { name: "Dokumente User", description: "Access to the documents module" },
     { name: "Finance User", description: "Access to the finance module" },
     { name: "Label User", description: "Access to the label printing module" },
+    { name: "Zähler User", description: "Access to the utility meters module" },
   ];
 
   for (const role of defaultRoles) {
@@ -82,6 +83,11 @@ export async function seed(db: any): Promise<void> {
     { key: "module.label", description: "Enable label printing module" },
     { key: "label.view", description: "View label module and select a printer" },
     { key: "label.print", description: "Print labels to a CUPS printer" },
+    // --- Utility meters module (Issue #792) ---
+    { key: "module.meters", description: "Enable utility meters module" },
+    { key: "meters.view", description: "View meters, readings and reports" },
+    { key: "meters.read_entry", description: "Enter meter readings (manual/OCR)" },
+    { key: "meters.manage", description: "Create/edit/replace meters and manage API keys" },
   ];
 
   // Permissions that are NEVER auto-assigned to the Admin role.
@@ -166,6 +172,11 @@ export async function seed(db: any): Promise<void> {
       "module.label",
       "label.view",
       "label.print",
+    ],
+    "Zähler User": [
+      "module.meters",
+      "meters.view",
+      "meters.read_entry",
     ],
   };
 
