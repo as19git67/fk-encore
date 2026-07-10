@@ -134,7 +134,12 @@ describe("importElectricityHistory", () => {
     const bezug = await getMeterDetail(userId, bezugId);
     expect(bezug.devices).toHaveLength(3);
     expect(bezug.devices.find((d) => d.active)?.serialNumber).toBe("1.8.0-ab-2024-12");
-    expect(bezug.devices.map((d) => d.endValue).filter((v) => v !== null)).toEqual([184484, 23030]);
+    expect(
+      bezug.devices
+        .map((d) => d.endValue)
+        .filter((v) => v !== null)
+        .sort((a, b) => a - b),
+    ).toEqual([23030, 184484]);
     const bezugReadings = await listReadings(userId, bezugId, 100, 0);
     expect(bezugReadings.readings[0].value).toBe(12745);
     expect(bezugReadings.readings[0].absoluteValue).toBe(215533);

@@ -161,8 +161,9 @@ function aggregateCommonAbsoluteReadings(
     if (!meter) {
       throw APIError.invalidArgument(`missing import source meter "${key}"`);
     }
-    return { key, readings: absoluteReadingsByDate(meter) };
+    return { key, decimals: meter.decimals, readings: absoluteReadingsByDate(meter) };
   });
+  const resultDecimals = Math.max(decimals, ...sources.map((s) => s.decimals));
 
   const [first, ...rest] = sources;
   const dates = [...first.readings.keys()]
@@ -179,7 +180,7 @@ function aggregateCommonAbsoluteReadings(
   const sumAt = (date: string) =>
     normalizeReadingValue(
       sources.reduce((sum, s) => sum + (s.readings.get(date) ?? 0), 0),
-      decimals,
+      resultDecimals,
     );
 
   const readings = dates.map((date): [string, number] => [date, sumAt(date)]);
