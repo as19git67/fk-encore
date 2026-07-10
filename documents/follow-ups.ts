@@ -404,10 +404,9 @@ export const getDocumentBasket = api(
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
     const userId = getUserId();
-    const isAdmin = authData.permissions.includes("data.manage");
     const lim = Math.min(Math.max(limit ?? 50, 1), 200);
     const off = Math.max(offset ?? 0, 0);
-    return await listBasket(userId, isAdmin, lim, off);
+    return await listBasket(userId, false, lim, off);
   },
 );
 

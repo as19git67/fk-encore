@@ -284,6 +284,7 @@ function syncQueryParams() {
   if (fq.dateTo) query.dateTo = fq.dateTo
   if (fq.taxRelevant !== undefined) query.taxRelevant = String(fq.taxRelevant)
   if (fq.subjectPersonId) query.subjectPerson = String(fq.subjectPersonId)
+  if (fq.showAll) query.showAll = '1'
   const s = sort.applied.value
   if (s.field !== 'uploaded_at' || s.direction !== 'desc') {
     query.sortBy = s.field
@@ -324,6 +325,7 @@ function currentFilterParams() {
     date_to: f.dateTo,
     tax_relevant: f.taxRelevant,
     subject_person_id: f.subjectPersonId,
+    show_all: f.showAll,
   }
 }
 
@@ -653,6 +655,12 @@ onMounted(async () => {
         removable
         @remove="filter.removeKey(['unreviewed'])"
       />
+      <Chip
+        v-if="filter.applied.value.showAll"
+        label="Alle Dokumente (Admin)"
+        removable
+        @remove="filter.removeKey(['showAll'])"
+      />
       <Button
         label="Alle Filter löschen"
         text
@@ -821,6 +829,7 @@ onMounted(async () => {
       :categories="categories"
       :known-tags="allKnownTags"
       :subject-people="subjectPeople"
+      :is-admin="auth.hasPermission('data.manage')"
       @apply="applyFilterMenu"
       @reset="resetFilterMenu"
     />

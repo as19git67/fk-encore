@@ -122,11 +122,11 @@ function checkModule(): void {
 }
 
 /**
- * `data.manage` admins see every document in `listDocuments`; the same flag
- * lets `loadVisibleDocument` / `loadAdministrableDocument` open, edit, delete
- * and replace those documents. Keeping the single-document endpoints in sync
- * with the list avoids the "visible in the list but 'document not found' on
- * open/delete" mismatch.
+ * `data.manage` admins may access any single document (open, edit, delete,
+ * replace) via `loadVisibleDocument` / `loadAdministrableDocument`. The list
+ * endpoints no longer auto-bypass visibility for admins — they require the
+ * explicit `show_all=true` query param so admins see only their own documents
+ * by default.
  */
 function isDataAdmin(authData: { permissions: string[] }): boolean {
   return authData.permissions.includes("data.manage");
@@ -239,6 +239,8 @@ interface ListQuery {
   tax_relevant?: Query<boolean>;
   /** Keep only documents linked to this Bezugsperson (see migration 0102). */
   subject_person_id?: Query<number>;
+  /** Admin-only: bypass visibility filter to show all documents. Ignored for non-admins. */
+  show_all?: Query<boolean>;
   sort_by?: Query<string>;
   sort_dir?: Query<string>;
   limit?: Query<number>;
@@ -974,7 +976,7 @@ async function loadDefaultGroupForUser(userId: number): Promise<number | null> {
 
 export const listDocuments = api(
   { expose: true, method: "GET", path: "/documents", auth: true },
-  async ({ category, tags, q, status, needs_review, unreviewed, sender, date_from, date_to, tax_relevant, subject_person_id, sort_by, sort_dir, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
+  async ({ category, tags, q, status, needs_review, unreviewed, sender, date_from, date_to, tax_relevant, subject_person_id, show_all, sort_by, sort_dir, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -983,8 +985,9 @@ export const listDocuments = api(
     const lim = Math.min(Math.max(limit ?? 50, 1), 200);
     const off = Math.max(offset ?? 0, 0);
     const isAdmin = authData.permissions.includes("data.manage");
-    const groupIds = isAdmin ? [] : await loadUserGroupIds(userId);
-    const conds: ReturnType<typeof and>[] = isAdmin
+    const skipVisibility = isAdmin && show_all === true;
+    const groupIds = skipVisibility ? [] : await loadUserGroupIds(userId);
+    const conds: ReturnType<typeof and>[] = skipVisibility
       ? []
       : [visibleDocumentsWhere(userId, groupIds)];
 
@@ -2884,6 +2887,8 @@ interface SearchQuery {
   date_to?: Query<string>;
   tax_relevant?: Query<boolean>;
   subject_person_id?: Query<number>;
+  /** Admin-only: bypass visibility filter to show all documents. Ignored for non-admins. */
+  show_all?: Query<boolean>;
 }
 
 /**
@@ -2898,7 +2903,7 @@ interface SearchQuery {
  */
 export const searchDocumentsEndpoint = api(
   { expose: true, method: "GET", path: "/documents/search", auth: true },
-  async ({ q, mode, limit, category, tags, status, needs_review, unreviewed, sender, date_from, date_to, tax_relevant, subject_person_id }: SearchQuery): Promise<SearchDocumentsResponse> => {
+  async ({ q, mode, limit, category, tags, status, needs_review, unreviewed, sender, date_from, date_to, tax_relevant, subject_person_id, show_all }: SearchQuery): Promise<SearchDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -2931,7 +2936,12 @@ export const searchDocumentsEndpoint = api(
     }
 
     const ids = hits.map((h) => h.document_id);
-    const groupIds = await loadUserGroupIds(userId);
+    const isAdmin = authData.permissions.includes("data.manage");
+    const skipVisibility = isAdmin && show_all === true;
+    const groupIds = skipVisibility ? [] : await loadUserGroupIds(userId);
+    const whereConds = skipVisibility
+      ? [inArray(documents.id, ids), ...filterConds]
+      : [visibleDocumentsWhere(userId, groupIds), inArray(documents.id, ids), ...filterConds];
     const rows = await dbAll<typeof documents.$inferSelect & { cat_slug: string | null }>(
       db
         .select({
@@ -2966,7 +2976,7 @@ export const searchDocumentsEndpoint = api(
         })
         .from(documents)
         .leftJoin(documentCategories, eq(documents.category_id, documentCategories.id))
-        .where(and(visibleDocumentsWhere(userId, groupIds), inArray(documents.id, ids), ...filterConds)),
+        .where(and(...whereConds)),
     );
 
     const byId = new Map<number, (typeof rows)[number]>();

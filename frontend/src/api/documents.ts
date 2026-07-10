@@ -120,6 +120,8 @@ export interface ListDocumentsQuery {
   tax_relevant?: boolean
   /** Keep only documents linked to this Bezugsperson. */
   subject_person_id?: number
+  /** Admin-only: bypass visibility filter to show all documents. */
+  show_all?: boolean
   sort_by?: string
   sort_dir?: 'asc' | 'desc'
   limit?: number
@@ -209,6 +211,7 @@ export type DocumentFilterParams = Pick<
   | 'date_to'
   | 'tax_relevant'
   | 'subject_person_id'
+  | 'show_all'
 >
 
 export function searchDocuments(

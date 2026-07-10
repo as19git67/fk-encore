@@ -6,7 +6,7 @@ import { replaceQuerySlice, updateRouteQuery } from '../utils/routeQueryUpdate'
 const STORAGE_KEY = 'documents.filter'
 export const DOCUMENT_FILTER_QUERY_KEYS = [
   'category', 'tags', 'status', 'review', 'neu', 'sender', 'dateFrom', 'dateTo',
-  'taxRelevant', 'subjectPerson',
+  'taxRelevant', 'subjectPerson', 'showAll',
 ] as const
 
 export interface DocumentFilter {
@@ -21,6 +21,8 @@ export interface DocumentFilter {
   dateTo?: string
   taxRelevant?: boolean
   subjectPersonId?: number
+  /** Admin-only: show all documents regardless of visibility. */
+  showAll?: boolean
 }
 
 function parseBool(v: unknown): boolean | undefined {
@@ -57,6 +59,8 @@ export function parseDocFilterFromQuery(q: Record<string, unknown>): DocumentFil
     const n = Number(q.subjectPerson)
     if (Number.isFinite(n)) f.subjectPersonId = n
   }
+  const sa = parseBool(q.showAll)
+  if (sa === true) f.showAll = true
   return f
 }
 
@@ -72,6 +76,7 @@ export function docFilterToQuery(f: DocumentFilter): Record<string, string> {
   if (f.dateTo) out.dateTo = f.dateTo
   if (f.taxRelevant !== undefined) out.taxRelevant = String(f.taxRelevant)
   if (f.subjectPersonId) out.subjectPerson = String(f.subjectPersonId)
+  if (f.showAll) out.showAll = '1'
   return out
 }
 
@@ -86,6 +91,7 @@ export function countActiveDocFilters(f: DocumentFilter): number {
   if (f.dateFrom || f.dateTo) n++
   if (f.taxRelevant !== undefined) n++
   if (f.subjectPersonId) n++
+  if (f.showAll) n++
   return n
 }
 

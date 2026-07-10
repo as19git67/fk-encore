@@ -19,6 +19,7 @@ const props = defineProps<{
   categories: DocumentCategory[]
   knownTags: string[]
   subjectPeople: SubjectPerson[]
+  isAdmin?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -247,6 +248,14 @@ function handleReset() {
         />
         <span>Nur neue (unbestätigte Zuordnung)</span>
       </div>
+
+      <div v-if="props.isAdmin" class="filter-switch admin-toggle">
+        <ToggleSwitch
+          :model-value="local.showAll ?? false"
+          @update:model-value="(v: boolean) => local = { ...local, showAll: v || undefined }"
+        />
+        <span>Alle Dokumente anzeigen (Admin)</span>
+      </div>
     </div>
 
     <template #footer>
@@ -262,4 +271,5 @@ function handleReset() {
 .filter-row { display: flex; flex-direction: column; gap: 0.5rem; }
 .filter-label { font-weight: 500; font-size: 0.9rem; color: var(--p-text-muted-color); }
 .filter-switch { display: flex; align-items: center; gap: 0.6rem; }
+.admin-toggle { border-top: 1px solid var(--p-content-border-color); padding-top: 1rem; }
 </style>
