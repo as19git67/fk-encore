@@ -123,6 +123,11 @@ const recentReportBuckets = computed(() => {
   return reportGranularity.value === 'month' ? buckets.slice(-24) : buckets
 })
 
+const reportTableBuckets = computed(() => {
+  if (reportGranularity.value !== 'year') return recentReportBuckets.value
+  return [...recentReportBuckets.value].reverse()
+})
+
 const reportChartData = computed(() => {
   if (!detail.value || recentReportBuckets.value.length === 0) return null
   return {
@@ -494,18 +499,18 @@ watch(meterId, () => loadDetail())
     <template v-else-if="detail">
       <!-- Header -->
       <div class="detail-top">
-        <Button icon="pi pi-arrow-left" text rounded severity="secondary" @click="router.push({ name: 'zaehler-list' })" v-tooltip.right="'Zurück'" />
-        <div class="detail-title">
-          <h1><i :class="typeIcon(detail.type)" /> {{ detail.name }}</h1>
-          <div class="detail-subtitle">
-            <Tag :value="typeLabel(detail.type)" severity="secondary" />
-            <span v-if="detail.location"><i class="pi pi-map-marker" /> {{ detail.location }}</span>
-          </div>
-        </div>
+        <Button class="back-button" icon="pi pi-arrow-left" text rounded severity="secondary" @click="router.push({ name: 'zaehler-list' })" v-tooltip.right="'Zurück'" />
         <div class="detail-top-actions">
           <Button v-if="canEnter" label="Neue Ablesung" icon="pi pi-plus" size="small" @click="openReadingEntry" />
           <Button v-if="canManage" icon="pi pi-pencil" text rounded severity="secondary" v-tooltip.top="'Bearbeiten'" @click="openEdit" />
           <Button v-if="canManage" icon="pi pi-trash" text rounded severity="danger" v-tooltip.top="'Löschen'" @click="handleDelete" />
+        </div>
+        <div class="detail-title">
+          <h1><i :class="typeIcon(detail.type)" /> <span class="meter-name">{{ detail.name }}</span></h1>
+          <div class="detail-subtitle">
+            <Tag :value="typeLabel(detail.type)" severity="secondary" />
+            <span v-if="detail.location"><i class="pi pi-map-marker" /> {{ detail.location }}</span>
+          </div>
         </div>
       </div>
 
@@ -551,7 +556,7 @@ watch(meterId, () => loadDetail())
         <div v-if="reportChartData" class="report-chart">
           <Chart type="bar" :data="reportChartData" :options="reportChartOptions" />
         </div>
-        <DataTable :value="recentReportBuckets" size="small" class="report-table">
+        <DataTable :value="reportTableBuckets" size="small" class="report-table">
           <Column field="label" :header="reportGranularity === 'month' ? 'Monat' : 'Jahr'" />
           <Column header="Verbrauch">
             <template #body="{ data }">{{ fmt(data.consumption, detail!.decimals) }} {{ detail!.unit }}</template>
@@ -786,6 +791,7 @@ watch(meterId, () => loadDetail())
   padding: 1rem;
   max-width: 1100px;
   margin: 0 auto;
+  overflow-x: clip;
 }
 .info {
   padding: 2rem;
@@ -797,24 +803,41 @@ watch(meterId, () => loadDetail())
   align-items: flex-start;
   gap: 0.75rem;
   margin-bottom: 1rem;
+  flex-wrap: wrap;
 }
 .detail-title {
-  flex: 1;
+  flex: 1 1 16rem;
+  min-width: 0;
+  margin-left: auto;
+  text-align: right;
 }
 .detail-title h1 {
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  gap: 0.4rem;
   margin: 0;
   font-size: 1.4rem;
+  line-height: 1.2;
 }
 .detail-title h1 i {
-  margin-right: 0.4rem;
+  flex: 0 0 auto;
+  margin-top: 0.1rem;
+}
+.meter-name {
+  min-width: 0;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 .detail-subtitle {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.75rem;
   margin-top: 0.25rem;
   color: var(--p-text-muted-color);
   font-size: 0.85rem;
+  flex-wrap: wrap;
 }
 .detail-subtitle i {
   margin-right: 0.2rem;
@@ -823,6 +846,8 @@ watch(meterId, () => loadDetail())
   display: flex;
   gap: 0.25rem;
   align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 .figures-bar {
   display: flex;
@@ -888,7 +913,26 @@ watch(meterId, () => loadDetail())
 .report-table {
   margin-top: 1rem;
 }
+.meter-detail-view :deep(.p-datatable) {
+  max-width: 100%;
+}
+.meter-detail-view :deep(.p-datatable-table) {
+  width: 100%;
+  table-layout: fixed;
+}
+.meter-detail-view :deep(.p-datatable-thead > tr > th),
+.meter-detail-view :deep(.p-datatable-tbody > tr > td) {
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
 @media (max-width: 560px) {
+  .detail-title {
+    flex-basis: 100%;
+  }
+  .detail-top-actions :deep(.p-button-label) {
+    display: none;
+  }
   .section-header {
     align-items: flex-start;
     gap: 0.75rem;
