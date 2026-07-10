@@ -171,6 +171,19 @@ export function importWaterHistory() {
   })
 }
 
+export interface ElecImportResult {
+  metersCreated: number
+  devicesCreated: number
+  readingsCreated: number
+  alreadyImported: boolean
+}
+
+export function importElectricityHistory() {
+  return apiFetch<ElecImportResult>('/meters/import/electricity-history', {
+    method: 'POST',
+  })
+}
+
 /** Human-readable German labels for the meter types. */
 export const METER_TYPE_LABELS: Record<MeterType, string> = {
   electricity: 'Strom',

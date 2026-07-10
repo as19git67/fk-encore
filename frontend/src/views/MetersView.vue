@@ -23,6 +23,7 @@ import {
   updateReading,
   deleteReading,
   importWaterHistory,
+  importElectricityHistory,
   METER_TYPE_LABELS,
   METER_TYPE_ICONS,
   type MeterListItem,
@@ -378,18 +379,21 @@ async function refreshAfterReading() {
   detail.value = await getMeter(id)
 }
 
-// ── Water history import ────────────────────────────────────────────────────
+// ── History imports ─────────────────────────────────────────────────────────
 
-const importing = ref(false)
-const importDone = ref(false)
+const importingWater = ref(false)
+const importingElec = ref(false)
 const importMsg = ref('')
 
-const showImportButton = computed(
-  () => canManage.value && !importDone.value && !meters.value.some((m) => m.type === 'water' && m.name === 'Wasser'),
+const showWaterImport = computed(
+  () => canManage.value && !meters.value.some((m) => m.type === 'water' && m.name === 'Wasser'),
+)
+const showElecImport = computed(
+  () => canManage.value && !meters.value.some((m) => m.type === 'electricity' && m.name === 'Hausstrom'),
 )
 
 async function handleImportWater() {
-  importing.value = true
+  importingWater.value = true
   error.value = ''
   importMsg.value = ''
   try {
@@ -397,14 +401,32 @@ async function handleImportWater() {
     if (res.alreadyImported) {
       importMsg.value = 'Wasser-Historie war bereits importiert.'
     } else {
-      importMsg.value = `Import abgeschlossen: ${res.devices} Geräte, ${res.readings} Ablesungen.`
+      importMsg.value = `Wasser-Import: ${res.devices} Geräte, ${res.readings} Ablesungen.`
     }
-    importDone.value = true
     await load()
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Import'
   } finally {
-    importing.value = false
+    importingWater.value = false
+  }
+}
+
+async function handleImportElec() {
+  importingElec.value = true
+  error.value = ''
+  importMsg.value = ''
+  try {
+    const res = await importElectricityHistory()
+    if (res.alreadyImported) {
+      importMsg.value = 'Strom-Historie war bereits importiert.'
+    } else {
+      importMsg.value = `Strom-Import: ${res.metersCreated} Zähler, ${res.devicesCreated} Geräte, ${res.readingsCreated} Ablesungen.`
+    }
+    await load()
+  } catch (err: any) {
+    error.value = err.message || 'Fehler beim Import'
+  } finally {
+    importingElec.value = false
   }
 }
 
@@ -417,11 +439,19 @@ onMounted(load)
       <h1>Zähler</h1>
       <div class="header-actions">
         <Button
-          v-if="showImportButton"
+          v-if="showElecImport"
+          label="Strom-Historie importieren"
+          icon="pi pi-upload"
+          severity="secondary"
+          :loading="importingElec"
+          @click="handleImportElec"
+        />
+        <Button
+          v-if="showWaterImport"
           label="Wasser-Historie importieren"
           icon="pi pi-upload"
           severity="secondary"
-          :loading="importing"
+          :loading="importingWater"
           @click="handleImportWater"
         />
         <Button

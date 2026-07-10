@@ -79,6 +79,9 @@ const meterHandlers = [
   http.post('/api/meters/import/water-history', () =>
     HttpResponse.json({ meterId: 99, devices: 4, readings: 222, alreadyImported: false }),
   ),
+  http.post('/api/meters/import/electricity-history', () =>
+    HttpResponse.json({ metersCreated: 17, devicesCreated: 19, readingsCreated: 2003, alreadyImported: false }),
+  ),
   http.get('/api/groups', () => HttpResponse.json({ items: [] })),
   ...defaultHandlers,
 ]
