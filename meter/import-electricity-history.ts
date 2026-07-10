@@ -55,11 +55,88 @@ export interface ElecImportResult {
 
 const SENTINEL_NAME = "Hausstrom";
 
+const VIRTUAL_DEVICE_SWAPS: Record<
+  string,
+  { swapDate: string; sourceOffset: number; serialSuffix: string }
+> = {
+  netzstrom_bezug: {
+    swapDate: "2024-12-01",
+    sourceOffset: 22418,
+    serialSuffix: "1.8.0-ab-2024-12",
+  },
+  netzstrom_lieferung: {
+    swapDate: "2024-12-01",
+    sourceOffset: 14919,
+    serialSuffix: "2.8.0-ab-2024-12",
+  },
+};
+
 function readingTs(date: string): string {
   return `${date}T12:00:00Z`;
 }
 function swapTs(date: string): string {
   return `${date}T00:00:00Z`;
+}
+
+function cloneDevice(device: ElecImportDevice): ElecImportDevice {
+  return {
+    ...device,
+    readings: device.readings.map(([date, value]) => [date, value]),
+  };
+}
+
+function normalizeReadingValue(value: number, decimals: number): number {
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
+}
+
+export function applyHistoricalVirtualDeviceSwaps(data: ElecImportData): ElecImportData {
+  return data.map((meterDef) => {
+    const swap = VIRTUAL_DEVICE_SWAPS[meterDef.key];
+    if (!swap) {
+      return {
+        ...meterDef,
+        devices: meterDef.devices.map(cloneDevice),
+      };
+    }
+
+    const devices: ElecImportDevice[] = [];
+    for (const device of meterDef.devices) {
+      const before = device.readings.filter(([date]) => date < swap.swapDate);
+      const after = device.readings
+        .filter(([date]) => date >= swap.swapDate)
+        .map(([date, value]): [string, number] => [
+          date,
+          normalizeReadingValue(value - swap.sourceOffset, meterDef.decimals),
+        ]);
+
+      if (before.length === 0 || after.length === 0) {
+        devices.push(cloneDevice(device));
+        continue;
+      }
+
+      const closingValue = before[before.length - 1][1];
+      devices.push({
+        ...device,
+        endValue: closingValue,
+        removedAt: swap.swapDate,
+        readings: before.map(([date, value]) => [date, value]),
+      });
+      devices.push({
+        serial: device.serial ? `${device.serial}-${swap.serialSuffix}` : swap.serialSuffix,
+        startValue: 0,
+        endValue: null,
+        installedAt: swap.swapDate,
+        removedAt: null,
+        readings: after,
+      });
+    }
+
+    return {
+      ...meterDef,
+      devices,
+    };
+  });
 }
 
 export async function importElectricityHistory(
@@ -91,7 +168,7 @@ export async function importElectricityHistory(
   let devicesCreated = 0;
   let readingsCreated = 0;
 
-  for (const meterDef of data) {
+  for (const meterDef of applyHistoricalVirtualDeviceSwaps(data)) {
     if (!meterDef.devices.length) continue;
 
     const firstDev = meterDef.devices[0];
