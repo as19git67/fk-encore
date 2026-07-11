@@ -83,6 +83,11 @@ const IMPORT_METER_ROLES: Partial<Record<string, MeterRole>> = {
   netzstrom_bezug: "grid_import",
   netzstrom_lieferung: "grid_export",
   pv_produktion: "pv_production",
+  waermepumpe_komplett: "heat_pump_total",
+  fussbodenheizung: "heat_heating_total",
+  fussbodenheizung_pv: "heat_heating_pv",
+  warmwasser: "hot_water_total",
+  warmwasser_pv: "hot_water_pv",
 };
 
 const VIRTUAL_DEVICE_SWAPS: Record<

@@ -126,11 +126,19 @@ describe("importElectricityHistory", () => {
     const { meterId: einspeisungId } = await findMeterByName(userId, "Netzstrom Einspeisung (2.8.0)");
     const { meterId: produktionId } = await findMeterByName(userId, "PV Produktion");
     const { meterId: waermepumpeId } = await findMeterByName(userId, "Wärmepumpe Komplett");
+    const { meterId: heizungId } = await findMeterByName(userId, "Fußbodenheizung");
+    const { meterId: heizungPvId } = await findMeterByName(userId, "Fußbodenheizung PV");
+    const { meterId: warmwasserId } = await findMeterByName(userId, "Warmwasser");
+    const { meterId: warmwasserPvId } = await findMeterByName(userId, "Warmwasser PV");
 
     await expect(getMeterDetail(userId, bezugId)).resolves.toMatchObject({ role: "grid_import" });
     await expect(getMeterDetail(userId, einspeisungId)).resolves.toMatchObject({ role: "grid_export" });
     await expect(getMeterDetail(userId, produktionId)).resolves.toMatchObject({ role: "pv_production" });
-    await expect(getMeterDetail(userId, waermepumpeId)).resolves.toMatchObject({ role: null });
+    await expect(getMeterDetail(userId, waermepumpeId)).resolves.toMatchObject({ role: "heat_pump_total" });
+    await expect(getMeterDetail(userId, heizungId)).resolves.toMatchObject({ role: "heat_heating_total" });
+    await expect(getMeterDetail(userId, heizungPvId)).resolves.toMatchObject({ role: "heat_heating_pv" });
+    await expect(getMeterDetail(userId, warmwasserId)).resolves.toMatchObject({ role: "hot_water_total" });
+    await expect(getMeterDetail(userId, warmwasserPvId)).resolves.toMatchObject({ role: "hot_water_pv" });
   }, 120_000);
 
   it("creates 14 report-friendly meters with 19 devices and consolidated readings", async () => {

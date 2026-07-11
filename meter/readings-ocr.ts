@@ -126,6 +126,8 @@ export const ocrReading = api.raw(
         if (err instanceof MeterOcrUnavailableError) {
           jsonResponse(res, 503, {
             error: "meter OCR service unavailable",
+            message: "Zählerstand-OCR ist momentan nicht erreichbar. Bitte später erneut versuchen oder den Wert manuell eingeben.",
+            detail: err.message,
             photoPath,
           });
           return;
@@ -141,11 +143,17 @@ export const ocrReading = api.raw(
       });
     } catch (err: any) {
       if (err?.message === "IMAGE_TOO_LARGE") {
-        jsonResponse(res, 413, { error: "image too large (max 20 MB)" });
+        jsonResponse(res, 413, {
+          error: "image too large (max 20 MB)",
+          message: "Das Foto ist zu groß. Bitte ein kleineres Bild verwenden.",
+        });
         return;
       }
       console.error("[meter] OCR error:", err);
-      jsonResponse(res, 502, { error: err?.message ?? "OCR service error" });
+      jsonResponse(res, 502, {
+        error: err?.message ?? "OCR service error",
+        message: "Zählerstand-OCR ist fehlgeschlagen. Bitte erneut versuchen oder den Wert manuell eingeben.",
+      });
     }
   },
 );
