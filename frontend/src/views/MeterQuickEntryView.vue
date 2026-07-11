@@ -172,7 +172,6 @@ onMounted(load)
       </div>
       <div class="head-actions">
         <Button icon="pi pi-cog" severity="secondary" outlined rounded v-tooltip.bottom="'Schnellerfassung konfigurieren'" @click="openConfig" />
-        <Button icon="pi pi-refresh" label="Aktualisieren" severity="secondary" outlined :loading="loading" @click="load" />
       </div>
     </section>
 

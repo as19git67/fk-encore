@@ -104,7 +104,6 @@ onMounted(load)
       </div>
       <div class="head-actions">
         <Button icon="pi pi-arrow-left" label="Zur Erfassung" severity="secondary" outlined @click="router.push({ name: 'zaehler-schnellerfassung' })" />
-        <Button icon="pi pi-refresh" severity="secondary" outlined rounded :loading="loading" v-tooltip.bottom="'Aktualisieren'" @click="load" />
       </div>
     </section>
 
