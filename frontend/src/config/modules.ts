@@ -336,6 +336,18 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'meters.view' },
       },
       {
+        path: 'schnellerfassung',
+        name: 'zaehler-schnellerfassung',
+        component: () => import('../views/MeterQuickEntryView.vue'),
+        meta: { permission: 'meters.read_entry' },
+      },
+      {
+        path: 'schnellerfassung/konfiguration',
+        name: 'zaehler-schnellerfassung-config',
+        component: () => import('../views/MeterQuickEntryConfigView.vue'),
+        meta: { permission: 'meters.read_entry' },
+      },
+      {
         path: ':id',
         name: 'zaehler-detail',
         component: () => import('../views/MeterDetailView.vue'),
@@ -344,6 +356,7 @@ export const modules: ModuleConfig[] = [
     ],
     menuItems: [
       { label: 'Zähler', icon: 'pi pi-gauge', routeName: 'zaehler-list', permission: 'meters.view' },
+      { label: 'Schnellerfassung', icon: 'pi pi-list-check', routeName: 'zaehler-schnellerfassung', permission: 'meters.read_entry' },
     ],
   },
   {

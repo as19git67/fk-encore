@@ -869,6 +869,34 @@
       "when": 1783728000000,
       "tag": "0123_meter_roles",
       "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1783814400000,
+      "tag": "0124_meter_energy_detail_roles",
+      "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "7",
+      "when": 1783900800000,
+      "tag": "0125_meter_electricity_tariffs",
+      "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "7",
+      "when": 1783987200000,
+      "tag": "0126_meter_ev_charger_roles",
+      "breakpoints": true
+    },
+    {
+      "idx": 127,
+      "version": "7",
+      "when": 1784073600000,
+      "tag": "0127_meter_quick_entry",
+      "breakpoints": true
     }
   ]
 }

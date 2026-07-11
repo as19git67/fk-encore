@@ -36,6 +36,13 @@ export const METER_ROLES: readonly MeterRole[] = [
   "grid_import",
   "grid_export",
   "pv_production",
+  "heat_pump_total",
+  "heat_heating_total",
+  "heat_heating_pv",
+  "hot_water_total",
+  "hot_water_pv",
+  "ev_charger_total",
+  "ev_charger_pv",
 ];
 
 export interface DeviceState {
