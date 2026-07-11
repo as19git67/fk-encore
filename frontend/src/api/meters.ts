@@ -1,7 +1,15 @@
 import { apiFetch } from './client'
 
 export type MeterType = 'electricity' | 'water' | 'gas' | 'operating_hours'
-export type MeterRole = 'grid_import' | 'grid_export' | 'pv_production'
+export type MeterRole =
+  | 'grid_import'
+  | 'grid_export'
+  | 'pv_production'
+  | 'heat_pump_total'
+  | 'heat_heating_total'
+  | 'heat_heating_pv'
+  | 'hot_water_total'
+  | 'hot_water_pv'
 
 export interface MeterListItem {
   id: number
@@ -241,6 +249,13 @@ export interface EnergyReportBucket {
   totalConsumption: number | null
   autarky: number | null
   selfConsumptionRate: number | null
+  heatPumpTotal: number | null
+  heatHeatingTotal: number | null
+  heatHeatingPv: number | null
+  heatHeatingGrid: number | null
+  hotWaterTotal: number | null
+  hotWaterPv: number | null
+  hotWaterGrid: number | null
 }
 
 export interface EnergyReport {
@@ -361,4 +376,9 @@ export const METER_ROLE_LABELS: Record<MeterRole, string> = {
   grid_import: 'Netzbezug',
   grid_export: 'Einspeisung',
   pv_production: 'PV-Produktion',
+  heat_pump_total: 'Wärmepumpe gesamt',
+  heat_heating_total: 'Heizung gesamt',
+  heat_heating_pv: 'Heizung PV',
+  hot_water_total: 'Warmwasser gesamt',
+  hot_water_pv: 'Warmwasser PV',
 }

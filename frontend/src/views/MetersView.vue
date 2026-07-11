@@ -214,10 +214,26 @@ const energyAnalysis = computed(() => {
     avgSelfConsumption: avg((bucket) => bucket.selfConsumption),
     avgAutarky: avg((bucket) => bucket.autarky),
     avgSelfConsumptionRate: avg((bucket) => bucket.selfConsumptionRate),
+    avgHeatPumpTotal: avg((bucket) => bucket.heatPumpTotal),
+    avgHeatHeatingGrid: avg((bucket) => bucket.heatHeatingGrid),
+    avgHeatHeatingPv: avg((bucket) => bucket.heatHeatingPv),
+    avgHotWaterGrid: avg((bucket) => bucket.hotWaterGrid),
+    avgHotWaterPv: avg((bucket) => bucket.hotWaterPv),
     trendGridImport: trend((bucket) => bucket.gridImport),
     trendAutarky: trend((bucket) => bucket.autarky),
   }
 })
+
+const hasHeatPumpBreakdown = computed(() =>
+  (energyReport.value?.buckets ?? []).some(
+    (bucket) =>
+      bucket.heatPumpTotal !== null ||
+      bucket.heatHeatingGrid !== null ||
+      bucket.heatHeatingPv !== null ||
+      bucket.hotWaterGrid !== null ||
+      bucket.hotWaterPv !== null,
+  ),
+)
 
 const energyYtdComparison = computed(() => {
   if (energyGranularity.value !== 'year') return null
@@ -557,6 +573,29 @@ onMounted(load)
             </div>
           </div>
 
+          <div v-if="hasHeatPumpBreakdown" class="energy-kpis energy-kpis--compact">
+            <div class="energy-kpi">
+              <span class="figure-label">Ø Wärmepumpe gesamt</span>
+              <strong>{{ fmt(energyAnalysis.avgHeatPumpTotal, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+            </div>
+            <div class="energy-kpi">
+              <span class="figure-label">Ø Heizung Netzstrom</span>
+              <strong>{{ fmt(energyAnalysis.avgHeatHeatingGrid, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+            </div>
+            <div class="energy-kpi">
+              <span class="figure-label">Ø Heizung PV-Strom</span>
+              <strong>{{ fmt(energyAnalysis.avgHeatHeatingPv, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+            </div>
+            <div class="energy-kpi">
+              <span class="figure-label">Ø Warmwasser Netzstrom</span>
+              <strong>{{ fmt(energyAnalysis.avgHotWaterGrid, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+            </div>
+            <div class="energy-kpi">
+              <span class="figure-label">Ø Warmwasser PV-Strom</span>
+              <strong>{{ fmt(energyAnalysis.avgHotWaterPv, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+            </div>
+          </div>
+
           <div v-if="energyYtdComparison" class="energy-ytd">
             <span>YTD {{ energyYtdComparison.label }} ggü. Vorjahr:</span>
             <strong>Bezug {{ fmtTrend(energyYtdComparison.gridImportDelta, energyReport.decimals, energyReport.unit).replace(trendLabel(), 'Δ') }}</strong>
@@ -575,6 +614,11 @@ onMounted(load)
                   <th>Gesamtverbrauch</th>
                   <th>Autarkie</th>
                   <th>EV-Quote</th>
+                  <th v-if="hasHeatPumpBreakdown">WP gesamt</th>
+                  <th v-if="hasHeatPumpBreakdown">Hzg Netz</th>
+                  <th v-if="hasHeatPumpBreakdown">Hzg PV</th>
+                  <th v-if="hasHeatPumpBreakdown">WW Netz</th>
+                  <th v-if="hasHeatPumpBreakdown">WW PV</th>
                 </tr>
               </thead>
               <tbody>
@@ -587,6 +631,11 @@ onMounted(load)
                   <td>{{ fmt(bucket.totalConsumption, energyReport.decimals) }}</td>
                   <td>{{ fmtPercent(bucket.autarky) }}</td>
                   <td>{{ fmtPercent(bucket.selfConsumptionRate) }}</td>
+                  <td v-if="hasHeatPumpBreakdown">{{ fmt(bucket.heatPumpTotal, energyReport.decimals) }}</td>
+                  <td v-if="hasHeatPumpBreakdown">{{ fmt(bucket.heatHeatingGrid, energyReport.decimals) }}</td>
+                  <td v-if="hasHeatPumpBreakdown">{{ fmt(bucket.heatHeatingPv, energyReport.decimals) }}</td>
+                  <td v-if="hasHeatPumpBreakdown">{{ fmt(bucket.hotWaterGrid, energyReport.decimals) }}</td>
+                  <td v-if="hasHeatPumpBreakdown">{{ fmt(bucket.hotWaterPv, energyReport.decimals) }}</td>
                 </tr>
               </tbody>
             </table>
@@ -747,6 +796,9 @@ onMounted(load)
   grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
   gap: 0.75rem;
   margin-bottom: 1rem;
+}
+.energy-kpis--compact {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
 }
 .energy-kpi {
   border: 1px solid var(--p-content-border-color);

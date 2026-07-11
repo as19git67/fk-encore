@@ -252,6 +252,9 @@ Der historische Stromimport setzt diese Rollen direkt:
 - `grid_import` → Bezug
 - `grid_export` → Einspeisung
 - `pv_production` → Produktion
+- `heat_pump_total` → Wärmepumpe gesamt
+- `heat_heating_total` / `heat_heating_pv` → Heizung/Fußbodenheizung gesamt bzw. PV-Anteil
+- `hot_water_total` / `hot_water_pv` → Warmwasser gesamt bzw. PV-Anteil
 
 Darauf werden je Bucket und für die Gesamtsumme folgende Werte berechnet:
 
@@ -259,6 +262,8 @@ Darauf werden je Bucket und für die Gesamtsumme folgende Werte berechnet:
 - Gesamtverbrauch = Bezug + Eigenverbrauch
 - Autarkie = 1 - Bezug / Gesamtverbrauch
 - Eigenverbrauchsquote = Eigenverbrauch / Produktion
+- Heizung Netzstrom = Heizung gesamt - Heizung PV
+- Warmwasser Netzstrom = Warmwasser gesamt - Warmwasser PV
 
 Zeiträume ohne vollständiges PV-Set (Bezug, Einspeisung und Produktion) werden
 im aggregierten Energie-Report ausgelassen, damit alte Vor-PV-Daten nicht in
@@ -266,8 +271,13 @@ PV-Kennzahlen und Analysewerte einfließen. Migration `0123_meter_roles`
 backfilled bereits importierte historische Zähler einmalig; beim manuellen
 Anlegen/Bearbeiten kann die Report-Rolle gesetzt werden.
 
-Nicht Teil der ersten Ausbaustufe: E-Auto, Wärmepumpe, Warmwasser,
-Fußbodenheizung, PV-Anteile, Kosten/Preise, Gasvergleich/JAZ.
+Kosten und PV-Ersparnis sind bewusst noch nicht berechnet, weil dafür ein
+Tarifmodell fehlt. Benötigt werden mindestens zeitlich gültige Arbeitspreise
+für Netzbezug, Einspeisevergütung und optional Grundpreise/Anlagenkosten. Erst
+damit kann belastbar berechnet werden: vermiedener Netzbezug durch Eigenverbrauch,
+Einspeiseerlös, Netto-Ersparnis und Amortisationswerte.
+
+Nicht Teil der ersten Ausbaustufe: E-Auto, Kosten/Preise, Gasvergleich/JAZ.
 
 ### 5.3 Anomalie-Erkennung
 

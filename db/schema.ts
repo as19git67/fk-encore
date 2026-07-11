@@ -2037,7 +2037,15 @@ export const scheduledJobState = pgTable("scheduled_job_state", {
 // ========== Utility meters (meter service, migration 0122) ==========
 
 export type MeterType = "electricity" | "water" | "gas" | "operating_hours";
-export type MeterRole = "grid_import" | "grid_export" | "pv_production";
+export type MeterRole =
+  | "grid_import"
+  | "grid_export"
+  | "pv_production"
+  | "heat_pump_total"
+  | "heat_heating_total"
+  | "heat_heating_pv"
+  | "hot_water_total"
+  | "hot_water_pv";
 export type MeterReadingSource = "manual" | "ocr" | "api";
 
 // Logical metering point. Persists across physical device swaps; visibility

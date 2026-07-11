@@ -158,6 +158,60 @@ const reportTableBuckets = computed(() => {
   return [...recentReportBuckets.value].reverse()
 })
 
+type MeterReportBucket = MeterReport['buckets'][number]
+
+function isCurrentReportPeriod(bucket: MeterReportBucket, granularity: MeterReportGranularity, now = new Date()) {
+  if (granularity === 'year') return bucket.key === String(now.getFullYear())
+  return bucket.key === `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+}
+
+function completedReportBuckets(buckets: MeterReportBucket[], granularity: MeterReportGranularity) {
+  return buckets.filter((bucket) => !isCurrentReportPeriod(bucket, granularity))
+}
+
+function linearRegressionSlope(values: number[]): number | null {
+  if (values.length < 3) return null
+  const n = values.length
+  const meanX = (n - 1) / 2
+  const meanY = values.reduce((sum, value) => sum + value, 0) / n
+  let numerator = 0
+  let denominator = 0
+  values.forEach((value, index) => {
+    const dx = index - meanX
+    numerator += dx * (value - meanY)
+    denominator += dx * dx
+  })
+  if (denominator === 0) return null
+  return numerator / denominator
+}
+
+const reportAnalysis = computed(() => {
+  const buckets = report.value?.buckets ?? []
+  const completed = completedReportBuckets(buckets, reportGranularity.value)
+  const trendSource = reportGranularity.value === 'month' ? completed.slice(-12) : completed
+  const avg =
+    completed.length > 0
+      ? completed.reduce((sum, bucket) => sum + bucket.consumption, 0) / completed.length
+      : null
+  return {
+    count: completed.length,
+    trendPoints: trendSource.length,
+    avgConsumption: avg,
+    consumptionTrend: linearRegressionSlope(trendSource.map((bucket) => bucket.consumption)),
+  }
+})
+
+function reportTrendLabel() {
+  return reportGranularity.value === 'year' ? 'Trend/Jahr' : 'Trend/Monat'
+}
+
+function fmtReportTrend(value: number | null) {
+  if (!detail.value) return 'Trend: –'
+  if (value === null) return `${reportTrendLabel()}: –`
+  const sign = value > 0 ? '+' : ''
+  return `${reportTrendLabel()}: ${sign}${fmt(value, detail.value.decimals)} ${detail.value.unit}`
+}
+
 const reportChartData = computed(() => {
   if (!detail.value || recentReportBuckets.value.length === 0) return null
   return {
@@ -681,9 +735,10 @@ watch(meterId, () => loadDetail())
       <div v-else-if="!report || report.buckets.length === 0" class="info">Noch nicht genug Ablesungen für einen Verbrauchsreport.</div>
       <div v-else class="report-panel">
         <div class="report-summary">
-          <span class="figure-label">Gesamt im Report</span>
-          <strong>{{ fmt(report.totalConsumption, detail.decimals) }} {{ detail.unit }}</strong>
-          <span class="figure-sub">{{ report.buckets.length }} {{ reportGranularity === 'month' ? 'Monate' : 'Jahre' }}</span>
+          <span class="figure-label">Ø Verbrauch</span>
+          <strong>{{ fmt(reportAnalysis.avgConsumption, detail.decimals) }} {{ detail.unit }}</strong>
+          <span class="figure-sub">{{ fmtReportTrend(reportAnalysis.consumptionTrend) }}</span>
+          <span class="figure-sub">Basis: {{ reportAnalysis.count }} abgeschlossene {{ reportGranularity === 'month' ? 'Monate' : 'Jahre' }}, Trend: {{ reportAnalysis.trendPoints }} Werte</span>
         </div>
         <div v-if="reportChartData" class="report-chart">
           <Chart type="bar" :data="reportChartData" :options="reportChartOptions" />

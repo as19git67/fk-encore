@@ -172,4 +172,41 @@ describe("buildEnergyReportFromMeterReports", () => {
       selfConsumptionRate: null,
     });
   });
+
+  it("splits heat pump usage into grid and PV shares for heating and hot water", () => {
+    const energy = buildEnergyReportFromMeterReports(
+      {
+        grid_import: report("Bezug", [bucket("2026-01", 100)]),
+        grid_export: report("Einspeisung", [bucket("2026-01", 300)]),
+        pv_production: report("Produktion", [bucket("2026-01", 500)]),
+        heat_pump_total: report("Wärmepumpe", [bucket("2026-01", 80)]),
+        heat_heating_total: report("Heizung", [bucket("2026-01", 60)]),
+        heat_heating_pv: report("Heizung PV", [bucket("2026-01", 25)]),
+        hot_water_total: report("Warmwasser", [bucket("2026-01", 20)]),
+        hot_water_pv: report("Warmwasser PV", [bucket("2026-01", 8)]),
+      },
+      "month",
+      null,
+      null,
+    );
+
+    expect(energy.buckets[0]).toMatchObject({
+      heatPumpTotal: 80,
+      heatHeatingTotal: 60,
+      heatHeatingPv: 25,
+      heatHeatingGrid: 35,
+      hotWaterTotal: 20,
+      hotWaterPv: 8,
+      hotWaterGrid: 12,
+    });
+    expect(energy.totals).toMatchObject({
+      heatPumpTotal: 80,
+      heatHeatingTotal: 60,
+      heatHeatingPv: 25,
+      heatHeatingGrid: 35,
+      hotWaterTotal: 20,
+      hotWaterPv: 8,
+      hotWaterGrid: 12,
+    });
+  });
 });
