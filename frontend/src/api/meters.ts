@@ -1,7 +1,17 @@
 import { apiFetch } from './client'
 
 export type MeterType = 'electricity' | 'water' | 'gas' | 'operating_hours'
-export type MeterRole = 'grid_import' | 'grid_export' | 'pv_production'
+export type MeterRole =
+  | 'grid_import'
+  | 'grid_export'
+  | 'pv_production'
+  | 'heat_pump_total'
+  | 'heat_heating_total'
+  | 'heat_heating_pv'
+  | 'hot_water_total'
+  | 'hot_water_pv'
+  | 'ev_charger_total'
+  | 'ev_charger_pv'
 
 export interface MeterListItem {
   id: number
@@ -187,6 +197,28 @@ export function deleteReading(readingId: number) {
   })
 }
 
+// ── Quick entry ─────────────────────────────────────────────────────────────
+
+export interface QuickEntryItem extends MeterListItem {
+  sortOrder: number
+}
+
+export interface QuickEntryConfig {
+  items: QuickEntryItem[]
+  availableMeters: MeterListItem[]
+}
+
+export function getQuickEntryConfig() {
+  return apiFetch<QuickEntryConfig>('/meters/quick-entry')
+}
+
+export function saveQuickEntryConfig(meterIds: number[]) {
+  return apiFetch<QuickEntryConfig>('/meters/quick-entry', {
+    method: 'PUT',
+    body: JSON.stringify({ meterIds }),
+  })
+}
+
 // ── Reports (Etappe 6) ──────────────────────────────────────────────────────
 
 export type MeterReportGranularity = 'month' | 'year'
@@ -239,8 +271,32 @@ export interface EnergyReportBucket {
   production: number | null
   selfConsumption: number | null
   totalConsumption: number | null
+  consumptionWithoutHeatPumpAndEv: number | null
   autarky: number | null
   selfConsumptionRate: number | null
+  heatPumpTotal: number | null
+  heatHeatingTotal: number | null
+  heatHeatingPv: number | null
+  heatHeatingGrid: number | null
+  heatHeatingPvShare: number | null
+  hotWaterTotal: number | null
+  hotWaterPv: number | null
+  hotWaterGrid: number | null
+  hotWaterPvShare: number | null
+  evChargerTotal: number | null
+  evChargerPv: number | null
+  evChargerPvShare: number | null
+  costs: EnergyTariffCosts | null
+}
+
+export interface EnergyTariffCosts {
+  gridImportCostEur: number | null
+  baseCostEur: number | null
+  feedInRevenueEur: number | null
+  avoidedGridCostEur: number | null
+  pvBenefitEur: number | null
+  netElectricityCostEur: number | null
+  noPvElectricityCostEur: number | null
 }
 
 export interface EnergyReport {
@@ -253,11 +309,80 @@ export interface EnergyReport {
   missingRoles: EnergyReportRole[]
   buckets: EnergyReportBucket[]
   totals: Omit<EnergyReportBucket, 'key' | 'label' | 'periodStart' | 'periodEnd'>
+  hasTariffs: boolean
 }
 
 export function getEnergyReport(granularity: MeterReportGranularity = 'month') {
   const q = new URLSearchParams({ granularity })
   return apiFetch<EnergyReport>(`/meters/reports/energy?${q}`)
+}
+
+// ── Electricity tariffs / prices ───────────────────────────────────────────
+
+export type ElectricityTariffKind =
+  | 'grid_import'
+  | 'base_price'
+  | 'feed_in'
+  | 'self_consumption_value'
+  | 'pv_investment_net'
+  | 'pv_investment_vat'
+  | 'opportunity_cost_year'
+  | 'opportunity_cost_total'
+  | 'amortization_years'
+
+export type ElectricityTariffUnit = 'eur_per_kwh' | 'eur_per_month' | 'eur' | 'years'
+
+export interface ElectricityTariff {
+  id: number
+  kind: ElectricityTariffKind
+  validFrom: string
+  amount: number
+  unit: ElectricityTariffUnit
+  taxStatus: string | null
+  name: string | null
+  capacityLimitKw: number | null
+  source: Record<string, unknown> | null
+}
+
+export interface UpsertElectricityTariffRequest {
+  kind: ElectricityTariffKind
+  validFrom: string
+  amount: number
+  unit: ElectricityTariffUnit
+  taxStatus?: string | null
+  name?: string | null
+  capacityLimitKw?: number | null
+}
+
+export function listElectricityTariffs() {
+  return apiFetch<{ tariffs: ElectricityTariff[] }>('/meters/tariffs/electricity')
+}
+
+export function createElectricityTariff(req: UpsertElectricityTariffRequest) {
+  return apiFetch<ElectricityTariff>('/meters/tariffs/electricity', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+}
+
+export function updateElectricityTariff(id: number, req: UpsertElectricityTariffRequest) {
+  return apiFetch<ElectricityTariff>(`/meters/tariffs/electricity/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(req),
+  })
+}
+
+export function deleteElectricityTariff(id: number) {
+  return apiFetch<{ deleted: boolean }>(`/meters/tariffs/electricity/${id}`, {
+    method: 'DELETE',
+  })
+}
+
+export function importElectricityPrices() {
+  return apiFetch<{ created: number; updated: number; total: number; alreadyImported: boolean }>(
+    '/meters/import/electricity-prices',
+    { method: 'POST' },
+  )
 }
 
 // ── Import (Issue #792) ─────────────────────────────────────────────────────
@@ -361,4 +486,30 @@ export const METER_ROLE_LABELS: Record<MeterRole, string> = {
   grid_import: 'Netzbezug',
   grid_export: 'Einspeisung',
   pv_production: 'PV-Produktion',
+  heat_pump_total: 'Wärmepumpe gesamt',
+  heat_heating_total: 'Heizung gesamt',
+  heat_heating_pv: 'Heizung PV',
+  hot_water_total: 'Warmwasser gesamt',
+  hot_water_pv: 'Warmwasser PV',
+  ev_charger_total: 'E-Auto/Wallbox gesamt',
+  ev_charger_pv: 'E-Auto/Wallbox PV',
+}
+
+export const ELECTRICITY_TARIFF_KIND_LABELS: Record<ElectricityTariffKind, string> = {
+  grid_import: 'Arbeitspreis Netzbezug',
+  base_price: 'Grundpreis',
+  feed_in: 'Einspeisevergütung',
+  self_consumption_value: 'Eigenverbrauchswert',
+  pv_investment_net: 'PV-Invest netto',
+  pv_investment_vat: 'PV-MwSt.',
+  opportunity_cost_year: 'Opportunitätskosten/Jahr',
+  opportunity_cost_total: 'Opportunitätskosten gesamt',
+  amortization_years: 'Amortisation',
+}
+
+export const ELECTRICITY_TARIFF_UNIT_LABELS: Record<ElectricityTariffUnit, string> = {
+  eur_per_kwh: '€/kWh',
+  eur_per_month: '€/Monat',
+  eur: '€',
+  years: 'Jahre',
 }

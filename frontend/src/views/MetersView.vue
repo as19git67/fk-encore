@@ -18,12 +18,22 @@ import {
   updateMeter,
   deleteMeter,
   getEnergyReport,
+  listElectricityTariffs,
+  createElectricityTariff,
+  updateElectricityTariff,
+  deleteElectricityTariff,
   importWaterHistory,
   importElectricityHistory,
+  importElectricityPrices,
   METER_TYPE_LABELS,
   METER_TYPE_ICONS,
   METER_ROLE_LABELS,
+  ELECTRICITY_TARIFF_KIND_LABELS,
+  ELECTRICITY_TARIFF_UNIT_LABELS,
   type EnergyReport,
+  type ElectricityTariff,
+  type ElectricityTariffKind,
+  type ElectricityTariffUnit,
   type MeterReportGranularity,
   type MeterListItem,
   type MeterRole,
@@ -214,10 +224,47 @@ const energyAnalysis = computed(() => {
     avgSelfConsumption: avg((bucket) => bucket.selfConsumption),
     avgAutarky: avg((bucket) => bucket.autarky),
     avgSelfConsumptionRate: avg((bucket) => bucket.selfConsumptionRate),
+    avgHeatPumpTotal: avg((bucket) => bucket.heatPumpTotal),
+    avgConsumptionWithoutHeatPumpAndEv: avg((bucket) => bucket.consumptionWithoutHeatPumpAndEv),
+    avgHeatHeatingTotal: avg((bucket) => bucket.heatHeatingTotal),
+    avgHeatHeatingPvShare: avg((bucket) => bucket.heatHeatingPvShare),
+    avgHotWaterTotal: avg((bucket) => bucket.hotWaterTotal),
+    avgHotWaterPvShare: avg((bucket) => bucket.hotWaterPvShare),
+    avgEvChargerTotal: avg((bucket) => bucket.evChargerTotal),
+    avgEvChargerPvShare: avg((bucket) => bucket.evChargerPvShare),
     trendGridImport: trend((bucket) => bucket.gridImport),
     trendAutarky: trend((bucket) => bucket.autarky),
   }
 })
+
+const hasHeatPumpBreakdown = computed(() =>
+  (energyReport.value?.buckets ?? []).some(
+    (bucket) =>
+      bucket.heatPumpTotal !== null ||
+      bucket.consumptionWithoutHeatPumpAndEv !== null ||
+      bucket.heatHeatingTotal !== null ||
+      bucket.heatHeatingPvShare !== null ||
+      bucket.hotWaterTotal !== null ||
+      bucket.hotWaterPvShare !== null ||
+      bucket.evChargerTotal !== null ||
+      bucket.evChargerPvShare !== null,
+  ),
+)
+
+const energyVisibleRangeLabel = computed(() => {
+  const buckets = energyBuckets.value
+  if (buckets.length === 0) return 'angezeigter Zeitraum'
+  const sorted = [...buckets].sort((a, b) => a.key.localeCompare(b.key))
+  const first = sorted[0]
+  const last = sorted[sorted.length - 1]
+  if (!first || !last) return 'angezeigter Zeitraum'
+  if (first.key === last.key) return first.label
+  return `${first.label}–${last.label}`
+})
+
+const energyCostScopeLabel = computed(
+  () => `Summe im angezeigten Zeitraum ${energyVisibleRangeLabel.value}`,
+)
 
 const energyYtdComparison = computed(() => {
   if (energyGranularity.value !== 'year') return null
@@ -281,6 +328,8 @@ function fmtPercentTrend(value: number | null) {
 function openDetail(m: MeterListItem) {
   router.push({ name: 'zaehler-detail', params: { id: m.id } })
 }
+
+const showEnergyHelp = ref(false)
 
 // ── Create / edit dialog ─────────────────────────────────────────────────────
 
@@ -420,6 +469,7 @@ async function performDelete(m: MeterListItem) {
 
 const importingWater = ref(false)
 const importingElec = ref(false)
+const importingPrices = ref(false)
 const importMsg = ref('')
 
 const showWaterImport = computed(
@@ -467,6 +517,218 @@ async function handleImportElec() {
   }
 }
 
+// ── Electricity prices / tariffs ───────────────────────────────────────────
+
+interface TariffForm {
+  id: number | null
+  kind: ElectricityTariffKind
+  validFrom: Date
+  amount: number
+  unit: ElectricityTariffUnit
+  taxStatus: string
+  name: string
+  capacityLimitKw: number | null
+}
+
+const showTariffs = ref(false)
+const loadingTariffs = ref(false)
+const savingTariff = ref(false)
+const tariffs = ref<ElectricityTariff[]>([])
+const tariffForm = ref<TariffForm>(emptyTariffForm())
+const tariffFormEl = ref<HTMLElement | null>(null)
+
+const tariffKindOptions = (Object.keys(ELECTRICITY_TARIFF_KIND_LABELS) as ElectricityTariffKind[]).map((value) => ({
+  label: ELECTRICITY_TARIFF_KIND_LABELS[value],
+  value,
+}))
+const tariffUnitOptions = (Object.keys(ELECTRICITY_TARIFF_UNIT_LABELS) as ElectricityTariffUnit[]).map((value) => ({
+  label: ELECTRICITY_TARIFF_UNIT_LABELS[value],
+  value,
+}))
+
+const visibleTariffs = computed(() =>
+  tariffs.value
+    .filter((tariff) =>
+      ['grid_import', 'base_price', 'feed_in', 'self_consumption_value'].includes(tariff.kind),
+    )
+    .sort((a, b) => b.validFrom.localeCompare(a.validFrom) || tariffKindLabel(a.kind).localeCompare(tariffKindLabel(b.kind), 'de')),
+)
+
+const tariffImportKinds: ElectricityTariffKind[] = [
+  'grid_import',
+  'base_price',
+  'feed_in',
+  'self_consumption_value',
+  'pv_investment_net',
+  'pv_investment_vat',
+  'opportunity_cost_year',
+  'opportunity_cost_total',
+  'amortization_years',
+]
+
+const pricesAlreadyImported = computed(() =>
+  tariffImportKinds.every((kind) => tariffs.value.some((tariff) => tariff.kind === kind)),
+)
+
+function emptyTariffForm(): TariffForm {
+  return {
+    id: null,
+    kind: 'grid_import',
+    validFrom: new Date(),
+    amount: 0,
+    unit: 'eur_per_kwh',
+    taxStatus: 'gross',
+    name: '',
+    capacityLimitKw: null,
+  }
+}
+
+function tariffKindLabel(kind: ElectricityTariffKind) {
+  return ELECTRICITY_TARIFF_KIND_LABELS[kind]
+}
+
+function tariffUnitLabel(unit: ElectricityTariffUnit) {
+  return ELECTRICITY_TARIFF_UNIT_LABELS[unit]
+}
+
+function fmtDate(iso: string | null) {
+  if (!iso) return '–'
+  return new Date(iso).toLocaleDateString('de-DE')
+}
+
+function fmtCurrency(value: number | null) {
+  if (value === null) return '–'
+  return value.toLocaleString('de-DE', {
+    style: 'currency',
+    currency: 'EUR',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
+}
+
+function fmtTariffAmount(tariff: ElectricityTariff) {
+  return `${tariff.amount.toLocaleString('de-DE', {
+    minimumFractionDigits: tariff.unit === 'eur' ? 2 : 4,
+    maximumFractionDigits: tariff.unit === 'eur' ? 2 : 6,
+  })} ${tariffUnitLabel(tariff.unit)}`
+}
+
+function tariffTaxStatusLabel(status: string | null) {
+  if (!status) return '–'
+  const labels: Record<string, string> = {
+    gross: 'incl. MwSt.',
+    net: 'excl. MwSt.',
+    assumed_net_plus_vat: 'angenommen excl. MwSt. zzgl. MwSt.',
+  }
+  return labels[status] ?? status
+}
+
+function onTariffKindChange() {
+  if (tariffForm.value.kind === 'base_price') tariffForm.value.unit = 'eur_per_month'
+  else if (tariffForm.value.kind === 'pv_investment_net' || tariffForm.value.kind === 'pv_investment_vat') tariffForm.value.unit = 'eur'
+  else if (tariffForm.value.kind === 'amortization_years') tariffForm.value.unit = 'years'
+  else tariffForm.value.unit = 'eur_per_kwh'
+}
+
+async function openTariffs() {
+  showTariffs.value = true
+  tariffForm.value = emptyTariffForm()
+  await loadTariffs()
+}
+
+async function loadTariffs() {
+  loadingTariffs.value = true
+  error.value = ''
+  try {
+    const res = await listElectricityTariffs()
+    tariffs.value = res.tariffs
+  } catch (err: any) {
+    error.value = err.message || 'Strompreise konnten nicht geladen werden'
+  } finally {
+    loadingTariffs.value = false
+  }
+}
+
+function editTariff(tariff: ElectricityTariff) {
+  tariffForm.value = {
+    id: tariff.id,
+    kind: tariff.kind,
+    validFrom: new Date(tariff.validFrom),
+    amount: tariff.amount,
+    unit: tariff.unit,
+    taxStatus: tariff.taxStatus ?? '',
+    name: tariff.name ?? '',
+    capacityLimitKw: tariff.capacityLimitKw,
+  }
+  window.setTimeout(() => {
+    tariffFormEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
+}
+
+function resetTariffForm() {
+  tariffForm.value = emptyTariffForm()
+}
+
+async function saveTariff() {
+  savingTariff.value = true
+  error.value = ''
+  try {
+    const req = {
+      kind: tariffForm.value.kind,
+      validFrom: toLocalIsoDateTime(tariffForm.value.validFrom).slice(0, 10),
+      amount: tariffForm.value.amount,
+      unit: tariffForm.value.unit,
+      taxStatus: tariffForm.value.taxStatus.trim() || null,
+      name: tariffForm.value.name.trim() || null,
+      capacityLimitKw: tariffForm.value.capacityLimitKw,
+    }
+    if (tariffForm.value.id === null) await createElectricityTariff(req)
+    else await updateElectricityTariff(tariffForm.value.id, req)
+    tariffForm.value = emptyTariffForm()
+    await loadTariffs()
+    await loadEnergyReport()
+  } catch (err: any) {
+    error.value = err.message || 'Strompreis konnte nicht gespeichert werden'
+  } finally {
+    savingTariff.value = false
+  }
+}
+
+async function handleDeleteTariff(tariff: ElectricityTariff) {
+  confirm.require({
+    message: `Preisänderung „${tariffKindLabel(tariff.kind)}“ ab ${fmtDate(tariff.validFrom)} löschen?`,
+    header: 'Strompreis löschen',
+    icon: 'pi pi-exclamation-triangle',
+    rejectLabel: 'Abbrechen',
+    acceptLabel: 'Löschen',
+    acceptClass: 'p-button-danger',
+    accept: async () => {
+      await deleteElectricityTariff(tariff.id)
+      await loadTariffs()
+      await loadEnergyReport()
+    },
+  })
+}
+
+async function handleImportPrices() {
+  if (pricesAlreadyImported.value) return
+  importingPrices.value = true
+  error.value = ''
+  importMsg.value = ''
+  try {
+    const res = await importElectricityPrices()
+    importMsg.value = res.alreadyImported
+      ? `Strompreise waren bereits importiert; ${res.updated} Einträge aktualisiert.`
+      : `Strompreise importiert: ${res.created} neu, ${res.updated} aktualisiert.`
+    await loadTariffs()
+    await loadEnergyReport()
+  } catch (err: any) {
+    error.value = err.message || 'Strompreise konnten nicht importiert werden'
+  } finally {
+    importingPrices.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -493,6 +755,13 @@ onMounted(load)
         />
         <Button
           v-if="canManage"
+          label="Strompreise"
+          icon="pi pi-euro"
+          severity="secondary"
+          @click="openTariffs"
+        />
+        <Button
+          v-if="canManage"
           label="Neuer Zähler"
           icon="pi pi-plus"
           @click="openCreate"
@@ -511,17 +780,26 @@ onMounted(load)
         <div class="energy-report-head">
           <div>
             <h2><i class="pi pi-bolt" /> Energie</h2>
-            <p>Bezug, Einspeisung, PV-Produktion und daraus abgeleitete Kennzahlen.</p>
+            <p>Bezug, Einspeisung, PV-Produktion und daraus abgeleitete Kennzahlen für {{ energyVisibleRangeLabel }}.</p>
           </div>
-          <SelectButton
-            v-model="energyGranularity"
-            :options="energyGranularityOptions"
-            option-label="label"
-            option-value="value"
-            size="small"
-            :allow-empty="false"
-            @change="loadEnergyReport"
-          />
+          <div class="energy-report-actions">
+            <Button
+              icon="pi pi-question-circle"
+              label="Hilfe"
+              severity="secondary"
+              text
+              @click="showEnergyHelp = true"
+            />
+            <SelectButton
+              v-model="energyGranularity"
+              :options="energyGranularityOptions"
+              option-label="label"
+              option-value="value"
+              size="small"
+              :allow-empty="false"
+              @change="loadEnergyReport"
+            />
+          </div>
         </div>
 
         <div v-if="loadingEnergyReport" class="info info-compact"><i class="pi pi-spin pi-spinner" /> Energie-Report…</div>
@@ -557,10 +835,61 @@ onMounted(load)
             </div>
           </div>
 
+          <div v-if="hasHeatPumpBreakdown" class="energy-kpis energy-kpis--compact">
+            <div class="energy-kpi">
+              <span class="figure-label">Ø Verbrauch ohne WP/E-Auto</span>
+              <strong>{{ fmt(energyAnalysis.avgConsumptionWithoutHeatPumpAndEv, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+            </div>
+            <div class="energy-kpi">
+              <span class="figure-label">Ø Wärmepumpe gesamt</span>
+              <strong>{{ fmt(energyAnalysis.avgHeatPumpTotal, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+            </div>
+            <div class="energy-kpi">
+              <span class="figure-label">Ø Heizung gesamt</span>
+              <strong>{{ fmt(energyAnalysis.avgHeatHeatingTotal, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+              <span class="figure-sub">PV-Anteil {{ fmtPercent(energyAnalysis.avgHeatHeatingPvShare) }}</span>
+            </div>
+            <div class="energy-kpi">
+              <span class="figure-label">Ø Warmwasser gesamt</span>
+              <strong>{{ fmt(energyAnalysis.avgHotWaterTotal, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+              <span class="figure-sub">PV-Anteil {{ fmtPercent(energyAnalysis.avgHotWaterPvShare) }}</span>
+            </div>
+            <div class="energy-kpi">
+              <span class="figure-label">Ø E-Auto/Wallbox gesamt</span>
+              <strong>{{ fmt(energyAnalysis.avgEvChargerTotal, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+              <span class="figure-sub">PV-Anteil {{ fmtPercent(energyAnalysis.avgEvChargerPvShare) }}</span>
+            </div>
+          </div>
+
           <div v-if="energyYtdComparison" class="energy-ytd">
             <span>YTD {{ energyYtdComparison.label }} ggü. Vorjahr:</span>
             <strong>Bezug {{ fmtTrend(energyYtdComparison.gridImportDelta, energyReport.decimals, energyReport.unit).replace(trendLabel(), 'Δ') }}</strong>
             <strong>Autarkie {{ fmtPercentTrend(energyYtdComparison.autarkyDelta).replace(trendLabel(), 'Δ') }}</strong>
+          </div>
+
+          <div v-if="energyReport.hasTariffs && energyReport.totals.costs" class="energy-kpis energy-kpis--compact">
+            <div class="energy-kpi">
+              <span class="figure-label">Stromkosten nach Einspeisung</span>
+              <strong>{{ fmtCurrency(energyReport.totals.costs.netElectricityCostEur) }}</strong>
+              <span class="figure-sub">{{ energyCostScopeLabel }}</span>
+              <span class="figure-sub">Bezug + Grundpreis − Einspeisung</span>
+            </div>
+            <div class="energy-kpi">
+              <span class="figure-label">PV-Nutzen</span>
+              <strong>{{ fmtCurrency(energyReport.totals.costs.pvBenefitEur) }}</strong>
+              <span class="figure-sub">{{ energyCostScopeLabel }}</span>
+              <span class="figure-sub">Eigenverbrauch + Einspeiseerlös</span>
+            </div>
+            <div class="energy-kpi">
+              <span class="figure-label">Vermiedener Netzbezug</span>
+              <strong>{{ fmtCurrency(energyReport.totals.costs.avoidedGridCostEur) }}</strong>
+              <span class="figure-sub">{{ energyCostScopeLabel }}</span>
+            </div>
+            <div class="energy-kpi">
+              <span class="figure-label">Einspeiseerlös</span>
+              <strong>{{ fmtCurrency(energyReport.totals.costs.feedInRevenueEur) }}</strong>
+              <span class="figure-sub">{{ energyCostScopeLabel }}</span>
+            </div>
           </div>
 
           <div class="energy-table-wrap">
@@ -575,6 +904,16 @@ onMounted(load)
                   <th>Gesamtverbrauch</th>
                   <th>Autarkie</th>
                   <th>EV-Quote</th>
+                  <th v-if="hasHeatPumpBreakdown">Ohne WP/E-Auto</th>
+                  <th v-if="hasHeatPumpBreakdown">WP gesamt</th>
+                  <th v-if="hasHeatPumpBreakdown">Heizung gesamt</th>
+                  <th v-if="hasHeatPumpBreakdown">Heizung PV</th>
+                  <th v-if="hasHeatPumpBreakdown">Warmwasser gesamt</th>
+                  <th v-if="hasHeatPumpBreakdown">Warmwasser PV</th>
+                  <th v-if="hasHeatPumpBreakdown">E-Auto gesamt</th>
+                  <th v-if="hasHeatPumpBreakdown">E-Auto PV</th>
+                  <th v-if="energyReport.hasTariffs">Kosten</th>
+                  <th v-if="energyReport.hasTariffs">PV-Nutzen</th>
                 </tr>
               </thead>
               <tbody>
@@ -587,6 +926,16 @@ onMounted(load)
                   <td>{{ fmt(bucket.totalConsumption, energyReport.decimals) }}</td>
                   <td>{{ fmtPercent(bucket.autarky) }}</td>
                   <td>{{ fmtPercent(bucket.selfConsumptionRate) }}</td>
+                  <td v-if="hasHeatPumpBreakdown">{{ fmt(bucket.consumptionWithoutHeatPumpAndEv, energyReport.decimals) }}</td>
+                  <td v-if="hasHeatPumpBreakdown">{{ fmt(bucket.heatPumpTotal, energyReport.decimals) }}</td>
+                  <td v-if="hasHeatPumpBreakdown">{{ fmt(bucket.heatHeatingTotal, energyReport.decimals) }}</td>
+                  <td v-if="hasHeatPumpBreakdown">{{ fmtPercent(bucket.heatHeatingPvShare) }}</td>
+                  <td v-if="hasHeatPumpBreakdown">{{ fmt(bucket.hotWaterTotal, energyReport.decimals) }}</td>
+                  <td v-if="hasHeatPumpBreakdown">{{ fmtPercent(bucket.hotWaterPvShare) }}</td>
+                  <td v-if="hasHeatPumpBreakdown">{{ fmt(bucket.evChargerTotal, energyReport.decimals) }}</td>
+                  <td v-if="hasHeatPumpBreakdown">{{ fmtPercent(bucket.evChargerPvShare) }}</td>
+                  <td v-if="energyReport.hasTariffs">{{ fmtCurrency(bucket.costs?.netElectricityCostEur ?? null) }}</td>
+                  <td v-if="energyReport.hasTariffs">{{ fmtCurrency(bucket.costs?.pvBenefitEur ?? null) }}</td>
                 </tr>
               </tbody>
             </table>
@@ -683,6 +1032,155 @@ onMounted(load)
         <Button label="Speichern" icon="pi pi-check" :loading="saving" @click="handleSave" />
       </template>
     </Dialog>
+
+    <Dialog
+      v-model:visible="showEnergyHelp"
+      header="Energie-Kennzahlen"
+      modal
+      :style="{ width: '44rem', maxWidth: '95vw' }"
+    >
+      <div class="energy-help">
+        <p>
+          Die Werte beziehen sich auf die aktuell angezeigten vollständigen PV-Zeiträume:
+          <strong>{{ energyVisibleRangeLabel }}</strong>. In der Monatsansicht werden in der
+          Tabelle die letzten 12 Monate gezeigt, in der Jahresansicht die Jahre.
+        </p>
+
+        <h3>Verbrauch und PV</h3>
+        <dl>
+          <dt>Bezug</dt>
+          <dd>Strom aus dem Netz. Kommt aus dem Zähler mit Rolle „Netzbezug“.</dd>
+          <dt>Einspeisung</dt>
+          <dd>PV-Strom, der ins Netz eingespeist wurde.</dd>
+          <dt>Produktion</dt>
+          <dd>Gesamte PV-Produktion.</dd>
+          <dt>Eigenverbrauch</dt>
+          <dd><code>Produktion − Einspeisung</code></dd>
+          <dt>Gesamtverbrauch</dt>
+          <dd><code>Bezug + Eigenverbrauch</code></dd>
+          <dt>Autarkie</dt>
+          <dd><code>1 − Bezug / Gesamtverbrauch</code></dd>
+          <dt>Eigenverbrauchsquote</dt>
+          <dd><code>Eigenverbrauch / Produktion</code></dd>
+        </dl>
+
+        <h3>Wärmepumpe</h3>
+        <dl>
+          <dt>Verbrauch ohne Wärmepumpe/E-Auto</dt>
+          <dd><code>Gesamtverbrauch − Wärmepumpe gesamt − E-Auto/Wallbox gesamt</code></dd>
+          <dt>Heizung PV-Anteil</dt>
+          <dd><code>Heizung PV-Strom / Heizung gesamt</code></dd>
+          <dt>Warmwasser PV-Anteil</dt>
+          <dd><code>Warmwasser PV-Strom / Warmwasser gesamt</code></dd>
+          <dt>E-Auto/Wallbox PV-Anteil</dt>
+          <dd><code>E-Auto/Wallbox PV-Strom / E-Auto/Wallbox gesamt</code></dd>
+        </dl>
+
+        <h3>Kosten und PV-Nutzen</h3>
+        <dl>
+          <dt>Stromkosten nach Einspeisung</dt>
+          <dd><code>Netzbezugskosten + Grundpreis − Einspeiseerlös</code></dd>
+          <dt>Netzbezugskosten</dt>
+          <dd><code>Bezug × zeitgültiger Arbeitspreis</code></dd>
+          <dt>Grundpreis</dt>
+          <dd>Zeitgültiger monatlicher Grundpreis, anteilig auf den jeweiligen Zeitraum gerechnet.</dd>
+          <dt>Einspeiseerlös</dt>
+          <dd><code>Einspeisung × zeitgültige Einspeisevergütung</code></dd>
+          <dt>Vermiedener Netzbezug</dt>
+          <dd><code>Eigenverbrauch × Eigenverbrauchswert</code>. Wenn kein Eigenverbrauchswert gepflegt ist, wird der Arbeitspreis für Netzbezug verwendet.</dd>
+          <dt>PV-Nutzen</dt>
+          <dd><code>Vermiedener Netzbezug + Einspeiseerlös</code></dd>
+        </dl>
+
+        <p class="energy-help-note">
+          Preisänderungen werden tagesanteilig berücksichtigt, wenn sie innerhalb eines Monats oder Jahres liegen.
+        </p>
+      </div>
+    </Dialog>
+
+    <Dialog
+      v-model:visible="showTariffs"
+      header="Strompreise verwalten"
+      modal
+      :style="{ width: '46rem', maxWidth: '95vw' }"
+    >
+      <div class="tariff-dialog">
+        <div class="tariff-toolbar">
+          <p>Preisänderungen werden ab ihrem Gültigkeitsdatum für Kosten und PV-Ersparnis verwendet.</p>
+          <Button
+            :label="pricesAlreadyImported ? 'Importiert' : 'JSON-Grundlage importieren'"
+            icon="pi pi-upload"
+            severity="secondary"
+            :loading="importingPrices"
+            :disabled="pricesAlreadyImported"
+            @click="handleImportPrices"
+          />
+        </div>
+
+        <div ref="tariffFormEl" class="form-grid tariff-form" :class="{ 'tariff-form--editing': tariffForm.id !== null }">
+          <div v-if="tariffForm.id !== null" class="tariff-edit-banner full">
+            Bearbeite Preisänderung #{{ tariffForm.id }}. Änderungen mit „Speichern“ übernehmen oder mit „Neu“ abbrechen.
+          </div>
+          <label>Art
+            <Select v-model="tariffForm.kind" :options="tariffKindOptions" option-label="label" option-value="value" @change="onTariffKindChange" />
+          </label>
+          <label>Gültig ab
+            <DatePicker v-model="tariffForm.validFrom" date-format="dd.mm.yy" />
+          </label>
+          <label>Betrag
+            <InputNumber v-model="tariffForm.amount" :min="0" :min-fraction-digits="0" :max-fraction-digits="6" />
+          </label>
+          <label>Einheit
+            <Select v-model="tariffForm.unit" :options="tariffUnitOptions" option-label="label" option-value="value" />
+          </label>
+          <label>Name / Tarif
+            <InputText v-model="tariffForm.name" placeholder="optional" />
+          </label>
+          <label>Grenze kW
+            <InputNumber v-model="tariffForm.capacityLimitKw" :min="0" :min-fraction-digits="0" :max-fraction-digits="3" />
+          </label>
+          <label>Steuerstatus
+            <InputText v-model="tariffForm.taxStatus" placeholder="incl. MwSt., excl. MwSt., …" />
+          </label>
+          <div class="tariff-form-actions">
+            <Button :label="tariffForm.id === null ? 'Neu' : 'Abbrechen'" text @click="resetTariffForm" />
+            <Button :label="tariffForm.id === null ? 'Speichern' : 'Änderung speichern'" icon="pi pi-check" :loading="savingTariff" @click="saveTariff" />
+          </div>
+        </div>
+
+        <div v-if="loadingTariffs" class="info info-compact"><i class="pi pi-spin pi-spinner" /> Strompreise…</div>
+        <div v-else-if="visibleTariffs.length === 0" class="info info-compact">
+          Noch keine Strompreise vorhanden.
+        </div>
+        <div v-else class="tariff-table-wrap">
+          <table class="energy-table tariff-table">
+            <thead>
+              <tr>
+                <th>Gültig ab</th>
+                <th>Art</th>
+                <th>Name</th>
+                <th>Betrag</th>
+                <th>Steuer</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="tariff in visibleTariffs" :key="tariff.id">
+                <td>{{ fmtDate(tariff.validFrom) }}</td>
+                <td>{{ tariffKindLabel(tariff.kind) }}</td>
+                <td>{{ tariff.name || '–' }}</td>
+                <td>{{ fmtTariffAmount(tariff) }}</td>
+                <td>{{ tariffTaxStatusLabel(tariff.taxStatus) }}</td>
+                <td class="tariff-actions">
+                  <Button icon="pi pi-pencil" text rounded severity="secondary" @click.stop="editTariff(tariff)" />
+                  <Button icon="pi pi-trash" text rounded severity="danger" @click.stop="handleDeleteTariff(tariff)" />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </Dialog>
   </div>
 </template>
 
@@ -742,11 +1240,21 @@ onMounted(load)
   color: var(--p-text-muted-color);
   font-size: 0.9rem;
 }
+.energy-report-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 .energy-kpis {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
   gap: 0.75rem;
   margin-bottom: 1rem;
+}
+.energy-kpis--compact {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
 }
 .energy-kpi {
   border: 1px solid var(--p-content-border-color);
@@ -758,6 +1266,11 @@ onMounted(load)
   display: block;
   margin-top: 0.15rem;
   overflow-wrap: break-word;
+}
+.energy-kpi .figure-sub {
+  display: block;
+  margin-top: 0.2rem;
+  line-height: 1.25;
 }
 .energy-ytd {
   display: flex;
@@ -793,6 +1306,51 @@ onMounted(load)
 .energy-table th:first-child,
 .energy-table td:first-child {
   text-align: left;
+}
+.energy-help {
+  color: var(--p-text-color);
+  line-height: 1.45;
+}
+.energy-help p {
+  margin: 0 0 1rem;
+}
+.energy-help h3 {
+  margin: 1rem 0 0.5rem;
+  font-size: 1rem;
+}
+.energy-help dl {
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.8fr) minmax(0, 2fr);
+  gap: 0.45rem 1rem;
+  margin: 0;
+}
+.energy-help dt {
+  font-weight: 600;
+}
+.energy-help dd {
+  margin: 0;
+  color: var(--p-text-muted-color);
+}
+.energy-help code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.9em;
+  color: var(--p-text-color);
+}
+.energy-help-note {
+  margin-top: 1rem;
+  color: var(--p-text-muted-color);
+}
+@media (max-width: 560px) {
+  .energy-report-actions {
+    justify-content: flex-start;
+  }
+  .energy-help dl {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+  .energy-help dd {
+    margin-bottom: 0.5rem;
+  }
 }
 .meter-grid {
   display: grid;
@@ -892,5 +1450,58 @@ onMounted(load)
   font-weight: 600;
   color: var(--p-text-color);
   margin-top: 0.5rem;
+}
+.tariff-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.tariff-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.tariff-toolbar p {
+  margin: 0;
+  color: var(--p-text-muted-color);
+  font-size: 0.9rem;
+  max-width: 32rem;
+}
+.tariff-form {
+  padding: 0.75rem;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 8px;
+}
+.tariff-form--editing {
+  border-color: var(--p-primary-color);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--p-primary-color) 45%, transparent);
+}
+.tariff-edit-banner {
+  padding: 0.55rem 0.65rem;
+  border-radius: 6px;
+  background: var(--p-highlight-background);
+  color: var(--p-highlight-color);
+  font-size: 0.85rem;
+}
+.tariff-form-actions {
+  display: flex;
+  align-items: end;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+.tariff-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.tariff-table td,
+.tariff-table th {
+  text-align: left;
+}
+.tariff-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.25rem;
 }
 </style>

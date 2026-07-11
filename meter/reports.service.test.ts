@@ -172,4 +172,55 @@ describe("buildEnergyReportFromMeterReports", () => {
       selfConsumptionRate: null,
     });
   });
+
+  it("reports heat pump and EV usage as totals with PV shares", () => {
+    const energy = buildEnergyReportFromMeterReports(
+      {
+        grid_import: report("Bezug", [bucket("2026-01", 100)]),
+        grid_export: report("Einspeisung", [bucket("2026-01", 300)]),
+        pv_production: report("Produktion", [bucket("2026-01", 500)]),
+        heat_pump_total: report("Wärmepumpe", [bucket("2026-01", 80)]),
+        heat_heating_total: report("Heizung", [bucket("2026-01", 60)]),
+        heat_heating_pv: report("Heizung PV", [bucket("2026-01", 25)]),
+        hot_water_total: report("Warmwasser", [bucket("2026-01", 20)]),
+        hot_water_pv: report("Warmwasser PV", [bucket("2026-01", 8)]),
+        ev_charger_total: report("Wallbox", [bucket("2026-01", 40)]),
+        ev_charger_pv: report("Wallbox PV", [bucket("2026-01", 10)]),
+      },
+      "month",
+      null,
+      null,
+    );
+
+    expect(energy.buckets[0]).toMatchObject({
+      heatPumpTotal: 80,
+      consumptionWithoutHeatPumpAndEv: 180,
+      heatHeatingTotal: 60,
+      heatHeatingPv: 25,
+      heatHeatingGrid: 35,
+      heatHeatingPvShare: 0.417,
+      hotWaterTotal: 20,
+      hotWaterPv: 8,
+      hotWaterGrid: 12,
+      hotWaterPvShare: 0.4,
+      evChargerTotal: 40,
+      evChargerPv: 10,
+      evChargerPvShare: 0.25,
+    });
+    expect(energy.totals).toMatchObject({
+      heatPumpTotal: 80,
+      consumptionWithoutHeatPumpAndEv: 180,
+      heatHeatingTotal: 60,
+      heatHeatingPv: 25,
+      heatHeatingGrid: 35,
+      heatHeatingPvShare: 0.417,
+      hotWaterTotal: 20,
+      hotWaterPv: 8,
+      hotWaterGrid: 12,
+      hotWaterPvShare: 0.4,
+      evChargerTotal: 40,
+      evChargerPv: 10,
+      evChargerPvShare: 0.25,
+    });
+  });
 });

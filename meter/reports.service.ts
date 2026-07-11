@@ -4,6 +4,11 @@ import db from "../db/database";
 import { dbAll } from "../db/adapter";
 import { meterDevices, meterReadings } from "../db/schema";
 import { listMeters, loadVisibleMeter, type MeterListItem } from "./meter.service";
+import {
+  EnergyTariffTimeline,
+  loadEnergyTariffTimeline,
+  type EnergyTariffCostResult,
+} from "./tariffs.service";
 
 export type ReportGranularity = "month" | "year";
 
@@ -37,7 +42,17 @@ export interface MeterReport {
   totalConsumption: number;
 }
 
-export type EnergyReportRole = "grid_import" | "grid_export" | "pv_production";
+export type EnergyReportRole =
+  | "grid_import"
+  | "grid_export"
+  | "pv_production"
+  | "heat_pump_total"
+  | "heat_heating_total"
+  | "heat_heating_pv"
+  | "hot_water_total"
+  | "hot_water_pv"
+  | "ev_charger_total"
+  | "ev_charger_pv";
 
 export interface EnergyReportMeterRef {
   role: EnergyReportRole;
@@ -55,8 +70,22 @@ export interface EnergyReportBucket {
   production: number | null;
   selfConsumption: number | null;
   totalConsumption: number | null;
+  consumptionWithoutHeatPumpAndEv: number | null;
   autarky: number | null;
   selfConsumptionRate: number | null;
+  heatPumpTotal: number | null;
+  heatHeatingTotal: number | null;
+  heatHeatingPv: number | null;
+  heatHeatingGrid: number | null;
+  heatHeatingPvShare: number | null;
+  hotWaterTotal: number | null;
+  hotWaterPv: number | null;
+  hotWaterGrid: number | null;
+  hotWaterPvShare: number | null;
+  evChargerTotal: number | null;
+  evChargerPv: number | null;
+  evChargerPvShare: number | null;
+  costs: EnergyTariffCostResult | null;
 }
 
 export interface EnergyReport {
@@ -69,7 +98,27 @@ export interface EnergyReport {
   missingRoles: EnergyReportRole[];
   buckets: EnergyReportBucket[];
   totals: Omit<EnergyReportBucket, "key" | "label" | "periodStart" | "periodEnd">;
+  hasTariffs: boolean;
 }
+
+const ENERGY_REPORT_ROLES: EnergyReportRole[] = [
+  "grid_import",
+  "grid_export",
+  "pv_production",
+  "heat_pump_total",
+  "heat_heating_total",
+  "heat_heating_pv",
+  "hot_water_total",
+  "hot_water_pv",
+  "ev_charger_total",
+  "ev_charger_pv",
+];
+
+const REQUIRED_ENERGY_REPORT_ROLES: EnergyReportRole[] = [
+  "grid_import",
+  "grid_export",
+  "pv_production",
+];
 
 export function parseReportBoundary(value: string | undefined, field: string): Date | null {
   if (!value) return null;
@@ -255,12 +304,20 @@ export function buildEnergyReportFromMeterReports(
   granularity: ReportGranularity,
   fromDate: Date | null,
   toDate: Date | null,
+  tariffTimeline?: EnergyTariffTimeline,
 ): Omit<EnergyReport, "meters" | "missingRoles"> {
   const decimals = Math.max(
     0,
     reports.grid_import?.decimals ?? 0,
     reports.grid_export?.decimals ?? 0,
     reports.pv_production?.decimals ?? 0,
+    reports.heat_pump_total?.decimals ?? 0,
+    reports.heat_heating_total?.decimals ?? 0,
+    reports.heat_heating_pv?.decimals ?? 0,
+    reports.hot_water_total?.decimals ?? 0,
+    reports.hot_water_pv?.decimals ?? 0,
+    reports.ev_charger_total?.decimals ?? 0,
+    reports.ev_charger_pv?.decimals ?? 0,
   );
   const bucketKeys = new Set<string>();
   for (const report of Object.values(reports)) {
@@ -268,7 +325,7 @@ export function buildEnergyReportFromMeterReports(
   }
 
   const byRole = new Map<EnergyReportRole, Map<string, MeterReportBucket>>();
-  for (const role of ["grid_import", "grid_export", "pv_production"] as const) {
+  for (const role of ENERGY_REPORT_ROLES) {
     byRole.set(role, new Map((reports[role]?.buckets ?? []).map((bucket) => [bucket.key, bucket])));
   }
 
@@ -276,10 +333,41 @@ export function buildEnergyReportFromMeterReports(
     const source =
       byRole.get("grid_import")?.get(key) ??
       byRole.get("grid_export")?.get(key) ??
-      byRole.get("pv_production")?.get(key);
+      byRole.get("pv_production")?.get(key) ??
+      byRole.get("heat_pump_total")?.get(key) ??
+      byRole.get("heat_heating_total")?.get(key) ??
+      byRole.get("hot_water_total")?.get(key) ??
+      byRole.get("ev_charger_total")?.get(key);
     const gridImport = byRole.get("grid_import")?.get(key)?.consumption ?? null;
     const gridExport = byRole.get("grid_export")?.get(key)?.consumption ?? null;
     const production = byRole.get("pv_production")?.get(key)?.consumption ?? null;
+    const heatPumpTotal = byRole.get("heat_pump_total")?.get(key)?.consumption ?? null;
+    const heatHeatingTotal = byRole.get("heat_heating_total")?.get(key)?.consumption ?? null;
+    const heatHeatingPv = byRole.get("heat_heating_pv")?.get(key)?.consumption ?? null;
+    const heatHeatingGrid =
+      heatHeatingTotal !== null && heatHeatingPv !== null
+        ? roundReportValue(Math.max(0, heatHeatingTotal - heatHeatingPv), decimals)
+        : null;
+    const heatHeatingPvShare =
+      heatHeatingTotal !== null && heatHeatingTotal > 0 && heatHeatingPv !== null
+        ? roundRatio(heatHeatingPv / heatHeatingTotal)
+        : null;
+    const hotWaterTotal = byRole.get("hot_water_total")?.get(key)?.consumption ?? null;
+    const hotWaterPv = byRole.get("hot_water_pv")?.get(key)?.consumption ?? null;
+    const hotWaterGrid =
+      hotWaterTotal !== null && hotWaterPv !== null
+        ? roundReportValue(Math.max(0, hotWaterTotal - hotWaterPv), decimals)
+        : null;
+    const hotWaterPvShare =
+      hotWaterTotal !== null && hotWaterTotal > 0 && hotWaterPv !== null
+        ? roundRatio(hotWaterPv / hotWaterTotal)
+        : null;
+    const evChargerTotal = byRole.get("ev_charger_total")?.get(key)?.consumption ?? null;
+    const evChargerPv = byRole.get("ev_charger_pv")?.get(key)?.consumption ?? null;
+    const evChargerPvShare =
+      evChargerTotal !== null && evChargerTotal > 0 && evChargerPv !== null
+        ? roundRatio(evChargerPv / evChargerTotal)
+        : null;
     const selfConsumption =
       production !== null && gridExport !== null
         ? roundReportValue(Math.max(0, production - gridExport), decimals)
@@ -288,8 +376,17 @@ export function buildEnergyReportFromMeterReports(
       gridImport !== null && selfConsumption !== null
         ? roundReportValue(gridImport + selfConsumption, decimals)
         : null;
+    const heatPumpExclusion =
+      heatPumpTotal ??
+      (heatHeatingTotal !== null && hotWaterTotal !== null
+        ? roundReportValue(heatHeatingTotal + hotWaterTotal, decimals)
+        : null);
+    const consumptionWithoutHeatPumpAndEv =
+      totalConsumption !== null
+        ? roundReportValue(Math.max(0, totalConsumption - (heatPumpExclusion ?? 0) - (evChargerTotal ?? 0)), decimals)
+        : null;
 
-    return {
+    const bucket: EnergyReportBucket = {
       key,
       label: source?.label ?? bucketLabel(key, granularity),
       periodStart: source?.periodStart ?? bucketStartIso(key, granularity),
@@ -299,6 +396,7 @@ export function buildEnergyReportFromMeterReports(
       production,
       selfConsumption,
       totalConsumption,
+      consumptionWithoutHeatPumpAndEv,
       autarky:
         totalConsumption !== null && totalConsumption > 0 && gridImport !== null
           ? roundRatio(1 - gridImport / totalConsumption)
@@ -307,7 +405,31 @@ export function buildEnergyReportFromMeterReports(
         production !== null && production > 0 && selfConsumption !== null
           ? roundRatio(selfConsumption / production)
           : null,
+      heatPumpTotal,
+      heatHeatingTotal,
+      heatHeatingPv,
+      heatHeatingGrid,
+      heatHeatingPvShare,
+      hotWaterTotal,
+      hotWaterPv,
+      hotWaterGrid,
+      hotWaterPvShare,
+      evChargerTotal,
+      evChargerPv,
+      evChargerPvShare,
+      costs: null,
     };
+    bucket.costs = tariffTimeline?.hasCostTariffs()
+      ? tariffTimeline.costsForBucket({
+          periodStart: bucket.periodStart,
+          periodEnd: bucket.periodEnd,
+          gridImport: bucket.gridImport,
+          gridExport: bucket.gridExport,
+          selfConsumption: bucket.selfConsumption,
+          totalConsumption: bucket.totalConsumption,
+        })
+      : null;
+    return bucket;
   });
   const completeBuckets = buckets.filter(
     (bucket) =>
@@ -329,6 +451,22 @@ export function buildEnergyReportFromMeterReports(
   const gridImport = sum((bucket) => bucket.gridImport);
   const gridExport = sum((bucket) => bucket.gridExport);
   const production = sum((bucket) => bucket.production);
+  const heatPumpTotal = sum((bucket) => bucket.heatPumpTotal);
+  const heatHeatingTotal = sum((bucket) => bucket.heatHeatingTotal);
+  const heatHeatingPv = sum((bucket) => bucket.heatHeatingPv);
+  const heatHeatingGrid = sum((bucket) => bucket.heatHeatingGrid);
+  const hotWaterTotal = sum((bucket) => bucket.hotWaterTotal);
+  const hotWaterPv = sum((bucket) => bucket.hotWaterPv);
+  const hotWaterGrid = sum((bucket) => bucket.hotWaterGrid);
+  const evChargerTotal = sum((bucket) => bucket.evChargerTotal);
+  const evChargerPv = sum((bucket) => bucket.evChargerPv);
+  const costSum = (selector: (bucket: EnergyReportBucket) => number | null | undefined) => {
+    const values = completeBuckets
+      .map(selector)
+      .filter((value): value is number => value !== null && value !== undefined);
+    if (values.length === 0) return null;
+    return Math.round(values.reduce((total, value) => total + value, 0) * 100) / 100;
+  };
   const selfConsumption =
     production !== null && gridExport !== null
       ? roundReportValue(Math.max(0, production - gridExport), decimals)
@@ -336,6 +474,15 @@ export function buildEnergyReportFromMeterReports(
   const totalConsumption =
     gridImport !== null && selfConsumption !== null
       ? roundReportValue(gridImport + selfConsumption, decimals)
+      : null;
+  const heatPumpExclusion =
+    heatPumpTotal ??
+    (heatHeatingTotal !== null && hotWaterTotal !== null
+      ? roundReportValue(heatHeatingTotal + hotWaterTotal, decimals)
+      : null);
+  const consumptionWithoutHeatPumpAndEv =
+    totalConsumption !== null
+      ? roundReportValue(Math.max(0, totalConsumption - (heatPumpExclusion ?? 0) - (evChargerTotal ?? 0)), decimals)
       : null;
 
   return {
@@ -351,6 +498,7 @@ export function buildEnergyReportFromMeterReports(
       production,
       selfConsumption,
       totalConsumption,
+      consumptionWithoutHeatPumpAndEv,
       autarky:
         totalConsumption !== null && totalConsumption > 0 && gridImport !== null
           ? roundRatio(1 - gridImport / totalConsumption)
@@ -359,7 +507,40 @@ export function buildEnergyReportFromMeterReports(
         production !== null && production > 0 && selfConsumption !== null
           ? roundRatio(selfConsumption / production)
           : null,
+      heatPumpTotal,
+      heatHeatingTotal,
+      heatHeatingPv,
+      heatHeatingGrid,
+      heatHeatingPvShare:
+        heatHeatingTotal !== null && heatHeatingTotal > 0 && heatHeatingPv !== null
+          ? roundRatio(heatHeatingPv / heatHeatingTotal)
+          : null,
+      hotWaterTotal,
+      hotWaterPv,
+      hotWaterGrid,
+      hotWaterPvShare:
+        hotWaterTotal !== null && hotWaterTotal > 0 && hotWaterPv !== null
+          ? roundRatio(hotWaterPv / hotWaterTotal)
+          : null,
+      evChargerTotal,
+      evChargerPv,
+      evChargerPvShare:
+        evChargerTotal !== null && evChargerTotal > 0 && evChargerPv !== null
+          ? roundRatio(evChargerPv / evChargerTotal)
+          : null,
+      costs: tariffTimeline?.hasCostTariffs()
+        ? {
+            gridImportCostEur: costSum((bucket) => bucket.costs?.gridImportCostEur),
+            baseCostEur: costSum((bucket) => bucket.costs?.baseCostEur),
+            feedInRevenueEur: costSum((bucket) => bucket.costs?.feedInRevenueEur),
+            avoidedGridCostEur: costSum((bucket) => bucket.costs?.avoidedGridCostEur),
+            pvBenefitEur: costSum((bucket) => bucket.costs?.pvBenefitEur),
+            netElectricityCostEur: costSum((bucket) => bucket.costs?.netElectricityCostEur),
+            noPvElectricityCostEur: costSum((bucket) => bucket.costs?.noPvElectricityCostEur),
+          }
+        : null,
     },
+    hasTariffs: tariffTimeline?.hasCostTariffs() ?? false,
   };
 }
 
@@ -384,8 +565,8 @@ export async function getEnergyReportForUser(
     reports[role] = await getMeterReportForUser(userId, meter.id, granularity, fromDate, toDate);
   }
 
-  const base = buildEnergyReportFromMeterReports(reports, granularity, fromDate, toDate);
-  const allRoles: EnergyReportRole[] = ["grid_import", "grid_export", "pv_production"];
+  const tariffTimeline = await loadEnergyTariffTimeline(userId);
+  const base = buildEnergyReportFromMeterReports(reports, granularity, fromDate, toDate, tariffTimeline);
   return {
     ...base,
     meters: [...roleMeters.entries()].map(([role, meter]) => ({
@@ -393,6 +574,6 @@ export async function getEnergyReportForUser(
       meterId: meter.id,
       name: meter.name,
     })),
-    missingRoles: allRoles.filter((role) => !roleMeters.has(role)),
+    missingRoles: REQUIRED_ENERGY_REPORT_ROLES.filter((role) => !roleMeters.has(role)),
   };
 }

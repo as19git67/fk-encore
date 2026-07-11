@@ -2037,8 +2037,28 @@ export const scheduledJobState = pgTable("scheduled_job_state", {
 // ========== Utility meters (meter service, migration 0122) ==========
 
 export type MeterType = "electricity" | "water" | "gas" | "operating_hours";
-export type MeterRole = "grid_import" | "grid_export" | "pv_production";
+export type MeterRole =
+  | "grid_import"
+  | "grid_export"
+  | "pv_production"
+  | "heat_pump_total"
+  | "heat_heating_total"
+  | "heat_heating_pv"
+  | "hot_water_total"
+  | "hot_water_pv"
+  | "ev_charger_total"
+  | "ev_charger_pv";
 export type MeterReadingSource = "manual" | "ocr" | "api";
+export type MeterElectricityTariffKind =
+  | "grid_import"
+  | "base_price"
+  | "feed_in"
+  | "self_consumption_value"
+  | "pv_investment_net"
+  | "pv_investment_vat"
+  | "opportunity_cost_year"
+  | "opportunity_cost_total"
+  | "amortization_years";
 
 // Logical metering point. Persists across physical device swaps; visibility
 // is owner + members of group_id (same groups concept as documents).
@@ -2141,6 +2161,24 @@ export const meterReadings = pgTable(
   ]
 );
 
+export const meterQuickEntryItems = pgTable(
+  "meter_quick_entry_items",
+  {
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    meter_id: integer("meter_id")
+      .notNull()
+      .references(() => meters.id, { onDelete: "cascade" }),
+    sort_order: integer("sort_order").notNull(),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.user_id, table.meter_id] }),
+    index("meter_quick_entry_items_user_order_idx").on(table.user_id, table.sort_order),
+  ],
+);
+
 // Link payments (advance payments, annual settlement) to a reading.
 // Same pattern as finance_transaction_document.
 export const meterReadingTransactions = pgTable(
@@ -2155,4 +2193,42 @@ export const meterReadingTransactions = pgTable(
     created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [primaryKey({ columns: [table.reading_id, table.transaction_id] })]
+);
+
+// Time-versioned electricity prices and PV assumptions used by the energy report.
+// `kind` + `valid_from` forms a tariff timeline per user. Feed-in tariffs may
+// have multiple rows at the same date for different capacity tiers (`name` /
+// `capacity_limit_kw`), so the unique key includes those fields.
+export const meterElectricityTariffs = pgTable(
+  "meter_electricity_tariffs",
+  {
+    id: serial("id").primaryKey(),
+    owner_user_id: integer("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<MeterElectricityTariffKind>().notNull(),
+    valid_from: timestamp("valid_from", { mode: "string", withTimezone: true }).notNull(),
+    amount: numeric("amount", { precision: 14, scale: 6 }).notNull(),
+    unit: text("unit").notNull(),
+    tax_status: text("tax_status"),
+    name: text("name"),
+    capacity_limit_kw: numeric("capacity_limit_kw", { precision: 10, scale: 3 }),
+    source: jsonb("source"),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("meter_electricity_tariffs_owner_kind_idx").on(
+      table.owner_user_id,
+      table.kind,
+      table.valid_from,
+    ),
+    uniqueIndex("meter_electricity_tariffs_unique_idx").on(
+      table.owner_user_id,
+      table.kind,
+      table.valid_from,
+      table.unit,
+      table.name,
+    ),
+  ],
 );

@@ -168,6 +168,8 @@ meter/
 | `POST /api/meters/ingest` | API-Key (kein User-Auth) | Externe Ablesung |
 | `GET /meters/:id/report?granularity=month\|year&from=&to=` | `meters.view` | Generische Verbrauchsreihen (§5) |
 | `GET /meters/reports/energy?granularity=month\|year&from=&to=` | `meters.view` | Strom-/PV-Gesamtreport (§5.2) |
+| `GET/POST/PUT/DELETE /meters/tariffs/electricity` | `meters.view` / `meters.manage` | Strompreise und Einspeisevergütung verwalten (§5.2) |
+| `POST /meters/import/electricity-prices` | `meters.manage` | Historische Strompreise aus der Excel-Grundlage importieren |
 | `GET/POST/DELETE /meters/readings/:id/transactions` | `meters.view` + `finance.view` | Finance-Verknüpfung |
 
 ### 3.2 Externe Ingestion
@@ -252,6 +254,10 @@ Der historische Stromimport setzt diese Rollen direkt:
 - `grid_import` → Bezug
 - `grid_export` → Einspeisung
 - `pv_production` → Produktion
+- `heat_pump_total` → Wärmepumpe gesamt
+- `heat_heating_total` / `heat_heating_pv` → Heizung/Fußbodenheizung gesamt bzw. PV-Anteil
+- `hot_water_total` / `hot_water_pv` → Warmwasser gesamt bzw. PV-Anteil
+- `ev_charger_total` / `ev_charger_pv` → E-Auto/Wallbox gesamt bzw. PV-Anteil
 
 Darauf werden je Bucket und für die Gesamtsumme folgende Werte berechnet:
 
@@ -259,6 +265,17 @@ Darauf werden je Bucket und für die Gesamtsumme folgende Werte berechnet:
 - Gesamtverbrauch = Bezug + Eigenverbrauch
 - Autarkie = 1 - Bezug / Gesamtverbrauch
 - Eigenverbrauchsquote = Eigenverbrauch / Produktion
+- Verbrauch ohne Wärmepumpe/E-Auto = Gesamtverbrauch - Wärmepumpe gesamt - E-Auto/Wallbox gesamt
+- Heizung PV-Anteil = Heizung PV / Heizung gesamt
+- Warmwasser PV-Anteil = Warmwasser PV / Warmwasser gesamt
+- E-Auto/Wallbox PV-Anteil = E-Auto/Wallbox PV / E-Auto/Wallbox gesamt
+- Netzbezugskosten = Bezug × zeitgültiger Arbeitspreis
+- Grundkosten = zeitgültiger Grundpreis anteilig pro Bucket
+- Einspeiseerlös = Einspeisung × zeitgültige Einspeisevergütung
+- Vermiedener Netzbezug = Eigenverbrauch × zeitgültiger Eigenverbrauchswert
+  (Fallback: Arbeitspreis Netzbezug)
+- PV-Nutzen = vermiedener Netzbezug + Einspeiseerlös
+- Netto-Stromkosten = Netzbezugskosten + Grundkosten - Einspeiseerlös
 
 Zeiträume ohne vollständiges PV-Set (Bezug, Einspeisung und Produktion) werden
 im aggregierten Energie-Report ausgelassen, damit alte Vor-PV-Daten nicht in
@@ -266,8 +283,25 @@ PV-Kennzahlen und Analysewerte einfließen. Migration `0123_meter_roles`
 backfilled bereits importierte historische Zähler einmalig; beim manuellen
 Anlegen/Bearbeiten kann die Report-Rolle gesetzt werden.
 
-Nicht Teil der ersten Ausbaustufe: E-Auto, Wärmepumpe, Warmwasser,
-Fußbodenheizung, PV-Anteile, Kosten/Preise, Gasvergleich/JAZ.
+Kosten und PV-Ersparnis verwenden `meter_electricity_tariffs`. Die
+Tarifverwaltung erlaubt Preisänderungen mit `valid_from` für:
+
+- `grid_import` Arbeitspreis Netzbezug (`eur_per_kwh`)
+- `base_price` Grundpreis (`eur_per_month`)
+- `feed_in` Einspeisevergütung (`eur_per_kwh`)
+- `self_consumption_value` angenommener Wert des Eigenverbrauchs (`eur_per_kwh`)
+
+Zusätzlich können importierte Annahmen wie PV-Invest, Opportunitätskosten und
+Amortisationsjahre gespeichert werden. Sie werden aktuell noch nicht in die
+Bucket-Kosten eingerechnet, bleiben aber als Stammdaten verfügbar.
+
+Der Import `POST /meters/import/electricity-prices` lädt die normalisierte
+Preisgrundlage aus der historischen Excel-Auswertung. Für die Einspeisevergütung
+enthält die Quelle mehrere Leistungsstufen, aber noch keine Anlagenleistung im
+Encore-Modell. Bis eine Anlagenleistungs-Einstellung existiert, verwendet die
+Kostenrechnung die niedrigste passende Stufe.
+
+Nicht Teil der ersten Ausbaustufe: E-Auto, Gasvergleich/JAZ.
 
 ### 5.3 Anomalie-Erkennung
 
@@ -305,6 +339,8 @@ Neue Views unter `frontend/src/views/meters/`, Navigation gated auf
 |---|---|---|
 | `MetersView.vue` | `meters.view` | Kachel-/Listenübersicht: Name, Typ-Icon, Standort, letzter Stand + Datum, Absolutstand, Anomalie-Badge; Schnellaktion „Ablesen“ |
 | `MeterDetailView.vue` | `meters.view` | Stammdaten, Gerätehistorie (Tabelle wie im Issue-Beispiel), Ablesungsliste, Verbrauchs-Chart mit Vorjahresvergleich, verknüpfte Zahlungen |
+| `MeterQuickEntryView.vue` | `meters.read_entry` | Schnelle Ablesemaske mit einem gemeinsamen Datum für alle konfigurierten Zähler und OCR-Kamera je Zählerzeile |
+| `MeterQuickEntryConfigView.vue` | `meters.read_entry` | Persönliche Konfigurationsseite für Zählerauswahl/Reihenfolge (`meter_quick_entry_items`), erreichbar über das Zahnrad in der Schnell-Erfassung |
 | `MeterReadingEntryView.vue` (oder Dialog) | `meters.read_entry` | Wert + Datum/Zeit (Default jetzt), Foto-Button → OCR-Vorschlag mit Confidence, Bestätigen/Korrigieren |
 | `MetersAdminView.vue` | `meters.manage` | Zähler-CRUD, Gerät ersetzen (Wizard: Endstand alt → Startwert neu), API-Key-Verwaltung |
 
