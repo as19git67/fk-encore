@@ -245,6 +245,21 @@ const hasHeatPumpBreakdown = computed(() =>
   ),
 )
 
+const energyVisibleRangeLabel = computed(() => {
+  const buckets = energyBuckets.value
+  if (buckets.length === 0) return 'angezeigter Zeitraum'
+  const sorted = [...buckets].sort((a, b) => a.key.localeCompare(b.key))
+  const first = sorted[0]
+  const last = sorted[sorted.length - 1]
+  if (!first || !last) return 'angezeigter Zeitraum'
+  if (first.key === last.key) return first.label
+  return `${first.label}–${last.label}`
+})
+
+const energyCostScopeLabel = computed(
+  () => `Summe im angezeigten Zeitraum ${energyVisibleRangeLabel.value}`,
+)
+
 const energyYtdComparison = computed(() => {
   if (energyGranularity.value !== 'year') return null
   const buckets = energyMonthlyReport.value?.buckets ?? []
@@ -307,6 +322,8 @@ function fmtPercentTrend(value: number | null) {
 function openDetail(m: MeterListItem) {
   router.push({ name: 'zaehler-detail', params: { id: m.id } })
 }
+
+const showEnergyHelp = ref(false)
 
 // ── Create / edit dialog ─────────────────────────────────────────────────────
 
@@ -736,17 +753,26 @@ onMounted(load)
         <div class="energy-report-head">
           <div>
             <h2><i class="pi pi-bolt" /> Energie</h2>
-            <p>Bezug, Einspeisung, PV-Produktion und daraus abgeleitete Kennzahlen.</p>
+            <p>Bezug, Einspeisung, PV-Produktion und daraus abgeleitete Kennzahlen für {{ energyVisibleRangeLabel }}.</p>
           </div>
-          <SelectButton
-            v-model="energyGranularity"
-            :options="energyGranularityOptions"
-            option-label="label"
-            option-value="value"
-            size="small"
-            :allow-empty="false"
-            @change="loadEnergyReport"
-          />
+          <div class="energy-report-actions">
+            <Button
+              icon="pi pi-question-circle"
+              label="Hilfe"
+              severity="secondary"
+              text
+              @click="showEnergyHelp = true"
+            />
+            <SelectButton
+              v-model="energyGranularity"
+              :options="energyGranularityOptions"
+              option-label="label"
+              option-value="value"
+              size="small"
+              :allow-empty="false"
+              @change="loadEnergyReport"
+            />
+          </div>
         </div>
 
         <div v-if="loadingEnergyReport" class="info info-compact"><i class="pi pi-spin pi-spinner" /> Energie-Report…</div>
@@ -815,20 +841,24 @@ onMounted(load)
             <div class="energy-kpi">
               <span class="figure-label">Stromkosten netto</span>
               <strong>{{ fmtCurrency(energyReport.totals.costs.netElectricityCostEur) }}</strong>
+              <span class="figure-sub">{{ energyCostScopeLabel }}</span>
               <span class="figure-sub">Bezug + Grundpreis − Einspeisung</span>
             </div>
             <div class="energy-kpi">
               <span class="figure-label">PV-Nutzen</span>
               <strong>{{ fmtCurrency(energyReport.totals.costs.pvBenefitEur) }}</strong>
+              <span class="figure-sub">{{ energyCostScopeLabel }}</span>
               <span class="figure-sub">Eigenverbrauch + Einspeiseerlös</span>
             </div>
             <div class="energy-kpi">
               <span class="figure-label">Vermiedener Netzbezug</span>
               <strong>{{ fmtCurrency(energyReport.totals.costs.avoidedGridCostEur) }}</strong>
+              <span class="figure-sub">{{ energyCostScopeLabel }}</span>
             </div>
             <div class="energy-kpi">
               <span class="figure-label">Einspeiseerlös</span>
               <strong>{{ fmtCurrency(energyReport.totals.costs.feedInRevenueEur) }}</strong>
+              <span class="figure-sub">{{ energyCostScopeLabel }}</span>
             </div>
           </div>
 
@@ -965,6 +995,67 @@ onMounted(load)
         <Button label="Abbrechen" text @click="showForm = false" />
         <Button label="Speichern" icon="pi pi-check" :loading="saving" @click="handleSave" />
       </template>
+    </Dialog>
+
+    <Dialog
+      v-model:visible="showEnergyHelp"
+      header="Energie-Kennzahlen"
+      modal
+      :style="{ width: '44rem', maxWidth: '95vw' }"
+    >
+      <div class="energy-help">
+        <p>
+          Die Werte beziehen sich auf die aktuell angezeigten vollständigen PV-Zeiträume:
+          <strong>{{ energyVisibleRangeLabel }}</strong>. In der Monatsansicht werden in der
+          Tabelle die letzten 12 Monate gezeigt, in der Jahresansicht die Jahre.
+        </p>
+
+        <h3>Verbrauch und PV</h3>
+        <dl>
+          <dt>Bezug</dt>
+          <dd>Strom aus dem Netz. Kommt aus dem Zähler mit Rolle „Netzbezug“.</dd>
+          <dt>Einspeisung</dt>
+          <dd>PV-Strom, der ins Netz eingespeist wurde.</dd>
+          <dt>Produktion</dt>
+          <dd>Gesamte PV-Produktion.</dd>
+          <dt>Eigenverbrauch</dt>
+          <dd><code>Produktion − Einspeisung</code></dd>
+          <dt>Gesamtverbrauch</dt>
+          <dd><code>Bezug + Eigenverbrauch</code></dd>
+          <dt>Autarkie</dt>
+          <dd><code>1 − Bezug / Gesamtverbrauch</code></dd>
+          <dt>Eigenverbrauchsquote</dt>
+          <dd><code>Eigenverbrauch / Produktion</code></dd>
+        </dl>
+
+        <h3>Wärmepumpe</h3>
+        <dl>
+          <dt>Heizung Netzstrom</dt>
+          <dd><code>Heizung gesamt − Heizung PV-Strom</code></dd>
+          <dt>Warmwasser Netzstrom</dt>
+          <dd><code>Warmwasser gesamt − Warmwasser PV-Strom</code></dd>
+        </dl>
+
+        <h3>Kosten und PV-Nutzen</h3>
+        <dl>
+          <dt>Stromkosten netto</dt>
+          <dd><code>Netzbezugskosten + Grundpreis − Einspeiseerlös</code></dd>
+          <dt>Netzbezugskosten</dt>
+          <dd><code>Bezug × zeitgültiger Arbeitspreis</code></dd>
+          <dt>Grundpreis</dt>
+          <dd>Zeitgültiger monatlicher Grundpreis, anteilig auf den jeweiligen Zeitraum gerechnet.</dd>
+          <dt>Einspeiseerlös</dt>
+          <dd><code>Einspeisung × zeitgültige Einspeisevergütung</code></dd>
+          <dt>Vermiedener Netzbezug</dt>
+          <dd><code>Eigenverbrauch × Eigenverbrauchswert</code>. Wenn kein Eigenverbrauchswert gepflegt ist, wird der Arbeitspreis für Netzbezug verwendet.</dd>
+          <dt>PV-Nutzen</dt>
+          <dd><code>Vermiedener Netzbezug + Einspeiseerlös</code></dd>
+        </dl>
+
+        <p class="energy-help-note">
+          Preisänderungen werden tagesanteilig berücksichtigt, wenn sie innerhalb eines Monats oder Jahres liegen.
+        </p>
+      </div>
     </Dialog>
 
     <Dialog
@@ -1105,6 +1196,13 @@ onMounted(load)
   color: var(--p-text-muted-color);
   font-size: 0.9rem;
 }
+.energy-report-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 .energy-kpis {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
@@ -1159,6 +1257,51 @@ onMounted(load)
 .energy-table th:first-child,
 .energy-table td:first-child {
   text-align: left;
+}
+.energy-help {
+  color: var(--p-text-color);
+  line-height: 1.45;
+}
+.energy-help p {
+  margin: 0 0 1rem;
+}
+.energy-help h3 {
+  margin: 1rem 0 0.5rem;
+  font-size: 1rem;
+}
+.energy-help dl {
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.8fr) minmax(0, 2fr);
+  gap: 0.45rem 1rem;
+  margin: 0;
+}
+.energy-help dt {
+  font-weight: 600;
+}
+.energy-help dd {
+  margin: 0;
+  color: var(--p-text-muted-color);
+}
+.energy-help code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.9em;
+  color: var(--p-text-color);
+}
+.energy-help-note {
+  margin-top: 1rem;
+  color: var(--p-text-muted-color);
+}
+@media (max-width: 560px) {
+  .energy-report-actions {
+    justify-content: flex-start;
+  }
+  .energy-help dl {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+  .energy-help dd {
+    margin-bottom: 0.5rem;
+  }
 }
 .meter-grid {
   display: grid;
