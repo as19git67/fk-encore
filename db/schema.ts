@@ -2047,6 +2047,16 @@ export type MeterRole =
   | "hot_water_total"
   | "hot_water_pv";
 export type MeterReadingSource = "manual" | "ocr" | "api";
+export type MeterElectricityTariffKind =
+  | "grid_import"
+  | "base_price"
+  | "feed_in"
+  | "self_consumption_value"
+  | "pv_investment_net"
+  | "pv_investment_vat"
+  | "opportunity_cost_year"
+  | "opportunity_cost_total"
+  | "amortization_years";
 
 // Logical metering point. Persists across physical device swaps; visibility
 // is owner + members of group_id (same groups concept as documents).
@@ -2163,4 +2173,42 @@ export const meterReadingTransactions = pgTable(
     created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [primaryKey({ columns: [table.reading_id, table.transaction_id] })]
+);
+
+// Time-versioned electricity prices and PV assumptions used by the energy report.
+// `kind` + `valid_from` forms a tariff timeline per user. Feed-in tariffs may
+// have multiple rows at the same date for different capacity tiers (`name` /
+// `capacity_limit_kw`), so the unique key includes those fields.
+export const meterElectricityTariffs = pgTable(
+  "meter_electricity_tariffs",
+  {
+    id: serial("id").primaryKey(),
+    owner_user_id: integer("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<MeterElectricityTariffKind>().notNull(),
+    valid_from: timestamp("valid_from", { mode: "string", withTimezone: true }).notNull(),
+    amount: numeric("amount", { precision: 14, scale: 6 }).notNull(),
+    unit: text("unit").notNull(),
+    tax_status: text("tax_status"),
+    name: text("name"),
+    capacity_limit_kw: numeric("capacity_limit_kw", { precision: 10, scale: 3 }),
+    source: jsonb("source"),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("meter_electricity_tariffs_owner_kind_idx").on(
+      table.owner_user_id,
+      table.kind,
+      table.valid_from,
+    ),
+    uniqueIndex("meter_electricity_tariffs_unique_idx").on(
+      table.owner_user_id,
+      table.kind,
+      table.valid_from,
+      table.unit,
+      table.name,
+    ),
+  ],
 );

@@ -4,6 +4,11 @@ import db from "../db/database";
 import { dbAll } from "../db/adapter";
 import { meterDevices, meterReadings } from "../db/schema";
 import { listMeters, loadVisibleMeter, type MeterListItem } from "./meter.service";
+import {
+  EnergyTariffTimeline,
+  loadEnergyTariffTimeline,
+  type EnergyTariffCostResult,
+} from "./tariffs.service";
 
 export type ReportGranularity = "month" | "year";
 
@@ -72,6 +77,7 @@ export interface EnergyReportBucket {
   hotWaterTotal: number | null;
   hotWaterPv: number | null;
   hotWaterGrid: number | null;
+  costs: EnergyTariffCostResult | null;
 }
 
 export interface EnergyReport {
@@ -84,6 +90,7 @@ export interface EnergyReport {
   missingRoles: EnergyReportRole[];
   buckets: EnergyReportBucket[];
   totals: Omit<EnergyReportBucket, "key" | "label" | "periodStart" | "periodEnd">;
+  hasTariffs: boolean;
 }
 
 const ENERGY_REPORT_ROLES: EnergyReportRole[] = [
@@ -287,6 +294,7 @@ export function buildEnergyReportFromMeterReports(
   granularity: ReportGranularity,
   fromDate: Date | null,
   toDate: Date | null,
+  tariffTimeline?: EnergyTariffTimeline,
 ): Omit<EnergyReport, "meters" | "missingRoles"> {
   const decimals = Math.max(
     0,
@@ -342,7 +350,7 @@ export function buildEnergyReportFromMeterReports(
         ? roundReportValue(gridImport + selfConsumption, decimals)
         : null;
 
-    return {
+    const bucket: EnergyReportBucket = {
       key,
       label: source?.label ?? bucketLabel(key, granularity),
       periodStart: source?.periodStart ?? bucketStartIso(key, granularity),
@@ -367,7 +375,19 @@ export function buildEnergyReportFromMeterReports(
       hotWaterTotal,
       hotWaterPv,
       hotWaterGrid,
+      costs: null,
     };
+    bucket.costs = tariffTimeline?.hasCostTariffs()
+      ? tariffTimeline.costsForBucket({
+          periodStart: bucket.periodStart,
+          periodEnd: bucket.periodEnd,
+          gridImport: bucket.gridImport,
+          gridExport: bucket.gridExport,
+          selfConsumption: bucket.selfConsumption,
+          totalConsumption: bucket.totalConsumption,
+        })
+      : null;
+    return bucket;
   });
   const completeBuckets = buckets.filter(
     (bucket) =>
@@ -396,6 +416,13 @@ export function buildEnergyReportFromMeterReports(
   const hotWaterTotal = sum((bucket) => bucket.hotWaterTotal);
   const hotWaterPv = sum((bucket) => bucket.hotWaterPv);
   const hotWaterGrid = sum((bucket) => bucket.hotWaterGrid);
+  const costSum = (selector: (bucket: EnergyReportBucket) => number | null | undefined) => {
+    const values = completeBuckets
+      .map(selector)
+      .filter((value): value is number => value !== null && value !== undefined);
+    if (values.length === 0) return null;
+    return Math.round(values.reduce((total, value) => total + value, 0) * 100) / 100;
+  };
   const selfConsumption =
     production !== null && gridExport !== null
       ? roundReportValue(Math.max(0, production - gridExport), decimals)
@@ -433,7 +460,19 @@ export function buildEnergyReportFromMeterReports(
       hotWaterTotal,
       hotWaterPv,
       hotWaterGrid,
+      costs: tariffTimeline?.hasCostTariffs()
+        ? {
+            gridImportCostEur: costSum((bucket) => bucket.costs?.gridImportCostEur),
+            baseCostEur: costSum((bucket) => bucket.costs?.baseCostEur),
+            feedInRevenueEur: costSum((bucket) => bucket.costs?.feedInRevenueEur),
+            avoidedGridCostEur: costSum((bucket) => bucket.costs?.avoidedGridCostEur),
+            pvBenefitEur: costSum((bucket) => bucket.costs?.pvBenefitEur),
+            netElectricityCostEur: costSum((bucket) => bucket.costs?.netElectricityCostEur),
+            noPvElectricityCostEur: costSum((bucket) => bucket.costs?.noPvElectricityCostEur),
+          }
+        : null,
     },
+    hasTariffs: tariffTimeline?.hasCostTariffs() ?? false,
   };
 }
 
@@ -458,7 +497,8 @@ export async function getEnergyReportForUser(
     reports[role] = await getMeterReportForUser(userId, meter.id, granularity, fromDate, toDate);
   }
 
-  const base = buildEnergyReportFromMeterReports(reports, granularity, fromDate, toDate);
+  const tariffTimeline = await loadEnergyTariffTimeline(userId);
+  const base = buildEnergyReportFromMeterReports(reports, granularity, fromDate, toDate, tariffTimeline);
   return {
     ...base,
     meters: [...roleMeters.entries()].map(([role, meter]) => ({

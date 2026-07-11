@@ -168,6 +168,8 @@ meter/
 | `POST /api/meters/ingest` | API-Key (kein User-Auth) | Externe Ablesung |
 | `GET /meters/:id/report?granularity=month\|year&from=&to=` | `meters.view` | Generische Verbrauchsreihen (§5) |
 | `GET /meters/reports/energy?granularity=month\|year&from=&to=` | `meters.view` | Strom-/PV-Gesamtreport (§5.2) |
+| `GET/POST/PUT/DELETE /meters/tariffs/electricity` | `meters.view` / `meters.manage` | Strompreise und Einspeisevergütung verwalten (§5.2) |
+| `POST /meters/import/electricity-prices` | `meters.manage` | Historische Strompreise aus der Excel-Grundlage importieren |
 | `GET/POST/DELETE /meters/readings/:id/transactions` | `meters.view` + `finance.view` | Finance-Verknüpfung |
 
 ### 3.2 Externe Ingestion
@@ -264,6 +266,13 @@ Darauf werden je Bucket und für die Gesamtsumme folgende Werte berechnet:
 - Eigenverbrauchsquote = Eigenverbrauch / Produktion
 - Heizung Netzstrom = Heizung gesamt - Heizung PV
 - Warmwasser Netzstrom = Warmwasser gesamt - Warmwasser PV
+- Netzbezugskosten = Bezug × zeitgültiger Arbeitspreis
+- Grundkosten = zeitgültiger Grundpreis anteilig pro Bucket
+- Einspeiseerlös = Einspeisung × zeitgültige Einspeisevergütung
+- Vermiedener Netzbezug = Eigenverbrauch × zeitgültiger Eigenverbrauchswert
+  (Fallback: Arbeitspreis Netzbezug)
+- PV-Nutzen = vermiedener Netzbezug + Einspeiseerlös
+- Netto-Stromkosten = Netzbezugskosten + Grundkosten - Einspeiseerlös
 
 Zeiträume ohne vollständiges PV-Set (Bezug, Einspeisung und Produktion) werden
 im aggregierten Energie-Report ausgelassen, damit alte Vor-PV-Daten nicht in
@@ -271,13 +280,25 @@ PV-Kennzahlen und Analysewerte einfließen. Migration `0123_meter_roles`
 backfilled bereits importierte historische Zähler einmalig; beim manuellen
 Anlegen/Bearbeiten kann die Report-Rolle gesetzt werden.
 
-Kosten und PV-Ersparnis sind bewusst noch nicht berechnet, weil dafür ein
-Tarifmodell fehlt. Benötigt werden mindestens zeitlich gültige Arbeitspreise
-für Netzbezug, Einspeisevergütung und optional Grundpreise/Anlagenkosten. Erst
-damit kann belastbar berechnet werden: vermiedener Netzbezug durch Eigenverbrauch,
-Einspeiseerlös, Netto-Ersparnis und Amortisationswerte.
+Kosten und PV-Ersparnis verwenden `meter_electricity_tariffs`. Die
+Tarifverwaltung erlaubt Preisänderungen mit `valid_from` für:
 
-Nicht Teil der ersten Ausbaustufe: E-Auto, Kosten/Preise, Gasvergleich/JAZ.
+- `grid_import` Arbeitspreis Netzbezug (`eur_per_kwh`)
+- `base_price` Grundpreis (`eur_per_month`)
+- `feed_in` Einspeisevergütung (`eur_per_kwh`)
+- `self_consumption_value` angenommener Wert des Eigenverbrauchs (`eur_per_kwh`)
+
+Zusätzlich können importierte Annahmen wie PV-Invest, Opportunitätskosten und
+Amortisationsjahre gespeichert werden. Sie werden aktuell noch nicht in die
+Bucket-Kosten eingerechnet, bleiben aber als Stammdaten verfügbar.
+
+Der Import `POST /meters/import/electricity-prices` lädt die normalisierte
+Preisgrundlage aus der historischen Excel-Auswertung. Für die Einspeisevergütung
+enthält die Quelle mehrere Leistungsstufen, aber noch keine Anlagenleistung im
+Encore-Modell. Bis eine Anlagenleistungs-Einstellung existiert, verwendet die
+Kostenrechnung die niedrigste passende Stufe.
+
+Nicht Teil der ersten Ausbaustufe: E-Auto, Gasvergleich/JAZ.
 
 ### 5.3 Anomalie-Erkennung
 

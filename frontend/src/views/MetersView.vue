@@ -18,12 +18,22 @@ import {
   updateMeter,
   deleteMeter,
   getEnergyReport,
+  listElectricityTariffs,
+  createElectricityTariff,
+  updateElectricityTariff,
+  deleteElectricityTariff,
   importWaterHistory,
   importElectricityHistory,
+  importElectricityPrices,
   METER_TYPE_LABELS,
   METER_TYPE_ICONS,
   METER_ROLE_LABELS,
+  ELECTRICITY_TARIFF_KIND_LABELS,
+  ELECTRICITY_TARIFF_UNIT_LABELS,
   type EnergyReport,
+  type ElectricityTariff,
+  type ElectricityTariffKind,
+  type ElectricityTariffUnit,
   type MeterReportGranularity,
   type MeterListItem,
   type MeterRole,
@@ -436,6 +446,7 @@ async function performDelete(m: MeterListItem) {
 
 const importingWater = ref(false)
 const importingElec = ref(false)
+const importingPrices = ref(false)
 const importMsg = ref('')
 
 const showWaterImport = computed(
@@ -483,6 +494,185 @@ async function handleImportElec() {
   }
 }
 
+// ── Electricity prices / tariffs ───────────────────────────────────────────
+
+interface TariffForm {
+  id: number | null
+  kind: ElectricityTariffKind
+  validFrom: Date
+  amount: number
+  unit: ElectricityTariffUnit
+  taxStatus: string
+  name: string
+  capacityLimitKw: number | null
+}
+
+const showTariffs = ref(false)
+const loadingTariffs = ref(false)
+const savingTariff = ref(false)
+const tariffs = ref<ElectricityTariff[]>([])
+const tariffForm = ref<TariffForm>(emptyTariffForm())
+
+const tariffKindOptions = (Object.keys(ELECTRICITY_TARIFF_KIND_LABELS) as ElectricityTariffKind[]).map((value) => ({
+  label: ELECTRICITY_TARIFF_KIND_LABELS[value],
+  value,
+}))
+const tariffUnitOptions = (Object.keys(ELECTRICITY_TARIFF_UNIT_LABELS) as ElectricityTariffUnit[]).map((value) => ({
+  label: ELECTRICITY_TARIFF_UNIT_LABELS[value],
+  value,
+}))
+
+const visibleTariffs = computed(() =>
+  tariffs.value.filter((tariff) =>
+    ['grid_import', 'base_price', 'feed_in', 'self_consumption_value'].includes(tariff.kind),
+  ),
+)
+
+function emptyTariffForm(): TariffForm {
+  return {
+    id: null,
+    kind: 'grid_import',
+    validFrom: new Date(),
+    amount: 0,
+    unit: 'eur_per_kwh',
+    taxStatus: 'gross',
+    name: '',
+    capacityLimitKw: null,
+  }
+}
+
+function tariffKindLabel(kind: ElectricityTariffKind) {
+  return ELECTRICITY_TARIFF_KIND_LABELS[kind]
+}
+
+function tariffUnitLabel(unit: ElectricityTariffUnit) {
+  return ELECTRICITY_TARIFF_UNIT_LABELS[unit]
+}
+
+function fmtDate(iso: string | null) {
+  if (!iso) return '–'
+  return new Date(iso).toLocaleDateString('de-DE')
+}
+
+function fmtCurrency(value: number | null) {
+  if (value === null) return '–'
+  return value.toLocaleString('de-DE', {
+    style: 'currency',
+    currency: 'EUR',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
+}
+
+function fmtTariffAmount(tariff: ElectricityTariff) {
+  return `${tariff.amount.toLocaleString('de-DE', {
+    minimumFractionDigits: tariff.unit === 'eur' ? 2 : 4,
+    maximumFractionDigits: tariff.unit === 'eur' ? 2 : 6,
+  })} ${tariffUnitLabel(tariff.unit)}`
+}
+
+function onTariffKindChange() {
+  if (tariffForm.value.kind === 'base_price') tariffForm.value.unit = 'eur_per_month'
+  else if (tariffForm.value.kind === 'pv_investment_net' || tariffForm.value.kind === 'pv_investment_vat') tariffForm.value.unit = 'eur'
+  else if (tariffForm.value.kind === 'amortization_years') tariffForm.value.unit = 'years'
+  else tariffForm.value.unit = 'eur_per_kwh'
+}
+
+async function openTariffs() {
+  showTariffs.value = true
+  tariffForm.value = emptyTariffForm()
+  await loadTariffs()
+}
+
+async function loadTariffs() {
+  loadingTariffs.value = true
+  error.value = ''
+  try {
+    const res = await listElectricityTariffs()
+    tariffs.value = res.tariffs
+  } catch (err: any) {
+    error.value = err.message || 'Strompreise konnten nicht geladen werden'
+  } finally {
+    loadingTariffs.value = false
+  }
+}
+
+function editTariff(tariff: ElectricityTariff) {
+  tariffForm.value = {
+    id: tariff.id,
+    kind: tariff.kind,
+    validFrom: new Date(tariff.validFrom),
+    amount: tariff.amount,
+    unit: tariff.unit,
+    taxStatus: tariff.taxStatus ?? '',
+    name: tariff.name ?? '',
+    capacityLimitKw: tariff.capacityLimitKw,
+  }
+}
+
+function resetTariffForm() {
+  tariffForm.value = emptyTariffForm()
+}
+
+async function saveTariff() {
+  savingTariff.value = true
+  error.value = ''
+  try {
+    const req = {
+      kind: tariffForm.value.kind,
+      validFrom: toLocalIsoDateTime(tariffForm.value.validFrom).slice(0, 10),
+      amount: tariffForm.value.amount,
+      unit: tariffForm.value.unit,
+      taxStatus: tariffForm.value.taxStatus.trim() || null,
+      name: tariffForm.value.name.trim() || null,
+      capacityLimitKw: tariffForm.value.capacityLimitKw,
+    }
+    if (tariffForm.value.id === null) await createElectricityTariff(req)
+    else await updateElectricityTariff(tariffForm.value.id, req)
+    tariffForm.value = emptyTariffForm()
+    await loadTariffs()
+    await loadEnergyReport()
+  } catch (err: any) {
+    error.value = err.message || 'Strompreis konnte nicht gespeichert werden'
+  } finally {
+    savingTariff.value = false
+  }
+}
+
+async function handleDeleteTariff(tariff: ElectricityTariff) {
+  confirm.require({
+    message: `Preisänderung „${tariffKindLabel(tariff.kind)}“ ab ${fmtDate(tariff.validFrom)} löschen?`,
+    header: 'Strompreis löschen',
+    icon: 'pi pi-exclamation-triangle',
+    rejectLabel: 'Abbrechen',
+    acceptLabel: 'Löschen',
+    acceptClass: 'p-button-danger',
+    accept: async () => {
+      await deleteElectricityTariff(tariff.id)
+      await loadTariffs()
+      await loadEnergyReport()
+    },
+  })
+}
+
+async function handleImportPrices() {
+  importingPrices.value = true
+  error.value = ''
+  importMsg.value = ''
+  try {
+    const res = await importElectricityPrices()
+    importMsg.value = res.alreadyImported
+      ? `Strompreise waren bereits importiert; ${res.updated} Einträge aktualisiert.`
+      : `Strompreise importiert: ${res.created} neu, ${res.updated} aktualisiert.`
+    await loadTariffs()
+    await loadEnergyReport()
+  } catch (err: any) {
+    error.value = err.message || 'Strompreise konnten nicht importiert werden'
+  } finally {
+    importingPrices.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -506,6 +696,13 @@ onMounted(load)
           severity="secondary"
           :loading="importingWater"
           @click="handleImportWater"
+        />
+        <Button
+          v-if="canManage"
+          label="Strompreise"
+          icon="pi pi-euro"
+          severity="secondary"
+          @click="openTariffs"
         />
         <Button
           v-if="canManage"
@@ -602,6 +799,27 @@ onMounted(load)
             <strong>Autarkie {{ fmtPercentTrend(energyYtdComparison.autarkyDelta).replace(trendLabel(), 'Δ') }}</strong>
           </div>
 
+          <div v-if="energyReport.hasTariffs && energyReport.totals.costs" class="energy-kpis energy-kpis--compact">
+            <div class="energy-kpi">
+              <span class="figure-label">Stromkosten netto</span>
+              <strong>{{ fmtCurrency(energyReport.totals.costs.netElectricityCostEur) }}</strong>
+              <span class="figure-sub">Bezug + Grundpreis − Einspeisung</span>
+            </div>
+            <div class="energy-kpi">
+              <span class="figure-label">PV-Nutzen</span>
+              <strong>{{ fmtCurrency(energyReport.totals.costs.pvBenefitEur) }}</strong>
+              <span class="figure-sub">Eigenverbrauch + Einspeiseerlös</span>
+            </div>
+            <div class="energy-kpi">
+              <span class="figure-label">Vermiedener Netzbezug</span>
+              <strong>{{ fmtCurrency(energyReport.totals.costs.avoidedGridCostEur) }}</strong>
+            </div>
+            <div class="energy-kpi">
+              <span class="figure-label">Einspeiseerlös</span>
+              <strong>{{ fmtCurrency(energyReport.totals.costs.feedInRevenueEur) }}</strong>
+            </div>
+          </div>
+
           <div class="energy-table-wrap">
             <table class="energy-table">
               <thead>
@@ -619,6 +837,8 @@ onMounted(load)
                   <th v-if="hasHeatPumpBreakdown">Hzg PV</th>
                   <th v-if="hasHeatPumpBreakdown">WW Netz</th>
                   <th v-if="hasHeatPumpBreakdown">WW PV</th>
+                  <th v-if="energyReport.hasTariffs">Kosten</th>
+                  <th v-if="energyReport.hasTariffs">PV-Nutzen</th>
                 </tr>
               </thead>
               <tbody>
@@ -636,6 +856,8 @@ onMounted(load)
                   <td v-if="hasHeatPumpBreakdown">{{ fmt(bucket.heatHeatingPv, energyReport.decimals) }}</td>
                   <td v-if="hasHeatPumpBreakdown">{{ fmt(bucket.hotWaterGrid, energyReport.decimals) }}</td>
                   <td v-if="hasHeatPumpBreakdown">{{ fmt(bucket.hotWaterPv, energyReport.decimals) }}</td>
+                  <td v-if="energyReport.hasTariffs">{{ fmtCurrency(bucket.costs?.netElectricityCostEur ?? null) }}</td>
+                  <td v-if="energyReport.hasTariffs">{{ fmtCurrency(bucket.costs?.pvBenefitEur ?? null) }}</td>
                 </tr>
               </tbody>
             </table>
@@ -731,6 +953,86 @@ onMounted(load)
         <Button label="Abbrechen" text @click="showForm = false" />
         <Button label="Speichern" icon="pi pi-check" :loading="saving" @click="handleSave" />
       </template>
+    </Dialog>
+
+    <Dialog
+      v-model:visible="showTariffs"
+      header="Strompreise verwalten"
+      modal
+      :style="{ width: '46rem', maxWidth: '95vw' }"
+    >
+      <div class="tariff-dialog">
+        <div class="tariff-toolbar">
+          <p>Preisänderungen werden ab ihrem Gültigkeitsdatum für Kosten und PV-Ersparnis verwendet.</p>
+          <Button
+            label="JSON-Grundlage importieren"
+            icon="pi pi-upload"
+            severity="secondary"
+            :loading="importingPrices"
+            @click="handleImportPrices"
+          />
+        </div>
+
+        <div class="form-grid tariff-form">
+          <label>Art
+            <Select v-model="tariffForm.kind" :options="tariffKindOptions" option-label="label" option-value="value" @change="onTariffKindChange" />
+          </label>
+          <label>Gültig ab
+            <DatePicker v-model="tariffForm.validFrom" date-format="dd.mm.yy" />
+          </label>
+          <label>Betrag
+            <InputNumber v-model="tariffForm.amount" :min="0" :min-fraction-digits="0" :max-fraction-digits="6" />
+          </label>
+          <label>Einheit
+            <Select v-model="tariffForm.unit" :options="tariffUnitOptions" option-label="label" option-value="value" />
+          </label>
+          <label>Name / Tarif
+            <InputText v-model="tariffForm.name" placeholder="optional" />
+          </label>
+          <label>Grenze kW
+            <InputNumber v-model="tariffForm.capacityLimitKw" :min="0" :min-fraction-digits="0" :max-fraction-digits="3" />
+          </label>
+          <label>Steuerstatus
+            <InputText v-model="tariffForm.taxStatus" placeholder="gross, net, …" />
+          </label>
+          <div class="tariff-form-actions">
+            <Button label="Neu" text @click="resetTariffForm" />
+            <Button label="Speichern" icon="pi pi-check" :loading="savingTariff" @click="saveTariff" />
+          </div>
+        </div>
+
+        <div v-if="loadingTariffs" class="info info-compact"><i class="pi pi-spin pi-spinner" /> Strompreise…</div>
+        <div v-else-if="visibleTariffs.length === 0" class="info info-compact">
+          Noch keine Strompreise vorhanden.
+        </div>
+        <div v-else class="tariff-table-wrap">
+          <table class="energy-table tariff-table">
+            <thead>
+              <tr>
+                <th>Gültig ab</th>
+                <th>Art</th>
+                <th>Name</th>
+                <th>Betrag</th>
+                <th>Steuer</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="tariff in visibleTariffs" :key="tariff.id">
+                <td>{{ fmtDate(tariff.validFrom) }}</td>
+                <td>{{ tariffKindLabel(tariff.kind) }}</td>
+                <td>{{ tariff.name || '–' }}</td>
+                <td>{{ fmtTariffAmount(tariff) }}</td>
+                <td>{{ tariff.taxStatus || '–' }}</td>
+                <td class="tariff-actions">
+                  <Button icon="pi pi-pencil" text rounded severity="secondary" @click="editTariff(tariff)" />
+                  <Button icon="pi pi-trash" text rounded severity="danger" @click="handleDeleteTariff(tariff)" />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </Dialog>
   </div>
 </template>
@@ -944,5 +1246,47 @@ onMounted(load)
   font-weight: 600;
   color: var(--p-text-color);
   margin-top: 0.5rem;
+}
+.tariff-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.tariff-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.tariff-toolbar p {
+  margin: 0;
+  color: var(--p-text-muted-color);
+  font-size: 0.9rem;
+  max-width: 32rem;
+}
+.tariff-form {
+  padding: 0.75rem;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 8px;
+}
+.tariff-form-actions {
+  display: flex;
+  align-items: end;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+.tariff-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.tariff-table td,
+.tariff-table th {
+  text-align: left;
+}
+.tariff-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.25rem;
 }
 </style>
