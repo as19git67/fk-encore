@@ -342,6 +342,12 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'meters.read_entry' },
       },
       {
+        path: 'schnellerfassung/konfiguration',
+        name: 'zaehler-schnellerfassung-config',
+        component: () => import('../views/MeterQuickEntryConfigView.vue'),
+        meta: { permission: 'meters.read_entry' },
+      },
+      {
         path: ':id',
         name: 'zaehler-detail',
         component: () => import('../views/MeterDetailView.vue'),

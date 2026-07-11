@@ -1,18 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import DatePicker from 'primevue/datepicker'
 import InputNumber from 'primevue/inputnumber'
 import Message from 'primevue/message'
-import Select from 'primevue/select'
-import Tag from 'primevue/tag'
 import {
   addReading,
   getQuickEntryConfig,
   ocrMeterReading,
-  saveQuickEntryConfig,
   METER_TYPE_ICONS,
-  METER_TYPE_LABELS,
   type MeterListItem,
   type QuickEntryItem,
 } from '../api/meters'
@@ -28,27 +25,16 @@ interface EntryRow {
   info: string
 }
 
+const router = useRouter()
 const loading = ref(false)
-const savingConfig = ref(false)
 const error = ref('')
 const info = ref('')
-const availableMeters = ref<MeterListItem[]>([])
 const configuredItems = ref<QuickEntryItem[]>([])
 const rows = ref<EntryRow[]>([])
 const readingDate = ref(new Date())
-const selectedMeterId = ref<number | null>(null)
 const ocrFileInput = ref<HTMLInputElement | null>(null)
 const ocrTargetMeterId = ref<number | null>(null)
 
-const configuredIds = computed(() => new Set(configuredItems.value.map((item) => item.id)))
-const addableMeterOptions = computed(() =>
-  availableMeters.value
-    .filter((meter) => !configuredIds.value.has(meter.id))
-    .map((meter) => ({
-      label: `${meter.name} · ${METER_TYPE_LABELS[meter.type]}`,
-      value: meter.id,
-    })),
-)
 const hasRows = computed(() => rows.value.length > 0)
 const hasPendingValues = computed(() => rows.value.some((row) => row.value !== null && !row.saved))
 const saveAllLoading = computed(() => rows.value.some((row) => row.saving))
@@ -93,7 +79,6 @@ async function load() {
   error.value = ''
   try {
     const res = await getQuickEntryConfig()
-    availableMeters.value = res.availableMeters
     configuredItems.value = [...res.items].sort((a, b) => a.sortOrder - b.sortOrder)
     resetRows()
   } catch (err: any) {
@@ -103,47 +88,8 @@ async function load() {
   }
 }
 
-async function persistConfig(nextItems = configuredItems.value) {
-  savingConfig.value = true
-  error.value = ''
-  try {
-    const res = await saveQuickEntryConfig(nextItems.map((item) => item.id))
-    availableMeters.value = res.availableMeters
-    configuredItems.value = [...res.items].sort((a, b) => a.sortOrder - b.sortOrder)
-    resetRows()
-    info.value = 'Konfiguration gespeichert.'
-  } catch (err: any) {
-    error.value = err.message || 'Konfiguration konnte nicht gespeichert werden'
-  } finally {
-    savingConfig.value = false
-  }
-}
-
-async function addConfiguredMeter() {
-  if (selectedMeterId.value === null) return
-  const meter = availableMeters.value.find((candidate) => candidate.id === selectedMeterId.value)
-  if (!meter) return
-  selectedMeterId.value = null
-  const next = [
-    ...configuredItems.value,
-    { ...meter, sortOrder: configuredItems.value.length },
-  ]
-  await persistConfig(next)
-}
-
-async function removeConfiguredMeter(index: number) {
-  const next = configuredItems.value.filter((_, i) => i !== index)
-  await persistConfig(next)
-}
-
-async function moveConfiguredMeter(index: number, direction: -1 | 1) {
-  const target = index + direction
-  if (target < 0 || target >= configuredItems.value.length) return
-  const next = [...configuredItems.value]
-  const [item] = next.splice(index, 1)
-  if (!item) return
-  next.splice(target, 0, item)
-  await persistConfig(next)
+function openConfig() {
+  void router.push({ name: 'zaehler-schnellerfassung-config' })
 }
 
 function findRow(meterId: number) {
@@ -222,54 +168,16 @@ onMounted(load)
       <div>
         <p class="eyebrow">Zähler</p>
         <h1>Schnellerfassung</h1>
-        <p class="muted">Stelle einmal deine Ablese-Liste zusammen und erfasse danach alle Werte mit einem gemeinsamen Datum.</p>
+        <p class="muted">Erfasse deine vorbereitete Ablese-Liste mit einem gemeinsamen Datum.</p>
       </div>
-      <Button icon="pi pi-refresh" label="Aktualisieren" severity="secondary" outlined :loading="loading" @click="load" />
+      <div class="head-actions">
+        <Button icon="pi pi-cog" severity="secondary" outlined rounded v-tooltip.bottom="'Schnellerfassung konfigurieren'" @click="openConfig" />
+        <Button icon="pi pi-refresh" label="Aktualisieren" severity="secondary" outlined :loading="loading" @click="load" />
+      </div>
     </section>
 
     <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
     <Message v-else-if="info" severity="success" closable @close="info = ''">{{ info }}</Message>
-
-    <section class="card config-card">
-      <div class="section-title">
-        <div>
-          <h2>Konfiguration</h2>
-          <p>Diese Liste wird für deinen Benutzer gespeichert.</p>
-        </div>
-        <Tag :value="`${configuredItems.length} Zähler`" severity="secondary" />
-      </div>
-
-      <div class="add-row">
-        <Select
-          v-model="selectedMeterId"
-          :options="addableMeterOptions"
-          option-label="label"
-          option-value="value"
-          filter
-          placeholder="Zähler hinzufügen …"
-          class="add-select"
-        />
-        <Button icon="pi pi-plus" label="Hinzufügen" :disabled="selectedMeterId === null" :loading="savingConfig" @click="addConfiguredMeter" />
-      </div>
-
-      <div v-if="configuredItems.length === 0" class="empty">
-        Noch keine Zähler ausgewählt. Füge oben die Zähler hinzu, die du regelmäßig abliest.
-      </div>
-      <ol v-else class="config-list">
-        <li v-for="(meter, index) in configuredItems" :key="meter.id">
-          <span class="meter-icon"><i :class="typeIcon(meter)" /></span>
-          <span class="config-name">
-            <strong>{{ meter.name }}</strong>
-            <small>{{ METER_TYPE_LABELS[meter.type] }} · {{ meter.unit }}</small>
-          </span>
-          <div class="config-actions">
-            <Button icon="pi pi-arrow-up" text rounded severity="secondary" :disabled="index === 0 || savingConfig" @click="moveConfiguredMeter(index, -1)" />
-            <Button icon="pi pi-arrow-down" text rounded severity="secondary" :disabled="index === configuredItems.length - 1 || savingConfig" @click="moveConfiguredMeter(index, 1)" />
-            <Button icon="pi pi-times" text rounded severity="danger" :disabled="savingConfig" @click="removeConfiguredMeter(index)" />
-          </div>
-        </li>
-      </ol>
-    </section>
 
     <section class="card capture-card">
       <div class="capture-head">
@@ -282,7 +190,10 @@ onMounted(load)
         </label>
       </div>
 
-      <div v-if="!hasRows" class="empty">Konfiguriere zuerst mindestens einen Zähler.</div>
+      <div v-if="!hasRows" class="empty empty-config">
+        <span>Konfiguriere zuerst mindestens einen Zähler.</span>
+        <Button icon="pi pi-cog" label="Konfiguration öffnen" severity="secondary" outlined @click="openConfig" />
+      </div>
       <div v-else class="entry-list">
         <article v-for="row in rows" :key="row.meter.id" class="entry-row" :class="{ saved: row.saved }">
           <div class="entry-main">
@@ -349,12 +260,10 @@ onMounted(load)
 }
 
 .page-head,
-.section-title,
 .capture-head,
 .entry-main,
 .entry-input,
-.add-row,
-.config-list li,
+.head-actions,
 .capture-footer {
   display: flex;
   gap: 0.75rem;
@@ -362,16 +271,13 @@ onMounted(load)
 }
 
 .page-head,
-.section-title,
 .capture-head {
   justify-content: space-between;
 }
 
 .eyebrow,
 .muted,
-.section-title p,
 .capture-head p,
-.config-name small,
 .entry-title small,
 .row-info {
   color: var(--text-color-secondary);
@@ -398,11 +304,6 @@ p {
   background: var(--surface-card);
 }
 
-.add-select {
-  flex: 1;
-  min-width: 0;
-}
-
 .empty {
   padding: 1rem;
   border: 1px dashed var(--surface-border);
@@ -410,23 +311,17 @@ p {
   color: var(--text-color-secondary);
 }
 
-.config-list {
-  list-style: none;
-  padding: 0;
-  margin: 1rem 0 0;
-  display: grid;
-  gap: 0.5rem;
+.empty-config {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
 }
 
-.config-list li,
 .entry-row {
   border: 1px solid var(--surface-border);
   border-radius: 14px;
   background: var(--surface-ground);
-}
-
-.config-list li {
-  padding: 0.65rem;
 }
 
 .meter-icon {
@@ -441,24 +336,16 @@ p {
   flex: 0 0 auto;
 }
 
-.config-name,
 .entry-title {
   min-width: 0;
   flex: 1;
   display: grid;
 }
 
-.config-name strong,
 .entry-title strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.config-actions {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
 }
 
 .date-field {
@@ -508,9 +395,9 @@ p {
   }
 
   .page-head,
-  .section-title,
   .capture-head,
-  .add-row {
+  .head-actions,
+  .empty-config {
     align-items: stretch;
     flex-direction: column;
   }
@@ -526,10 +413,6 @@ p {
 
   .entry-input :deep(.p-button:last-child) {
     grid-column: 1 / -1;
-  }
-
-  .config-actions {
-    gap: 0;
   }
 }
 </style>
