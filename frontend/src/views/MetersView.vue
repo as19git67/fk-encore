@@ -523,9 +523,11 @@ const tariffUnitOptions = (Object.keys(ELECTRICITY_TARIFF_UNIT_LABELS) as Electr
 }))
 
 const visibleTariffs = computed(() =>
-  tariffs.value.filter((tariff) =>
-    ['grid_import', 'base_price', 'feed_in', 'self_consumption_value'].includes(tariff.kind),
-  ),
+  tariffs.value
+    .filter((tariff) =>
+      ['grid_import', 'base_price', 'feed_in', 'self_consumption_value'].includes(tariff.kind),
+    )
+    .sort((a, b) => b.validFrom.localeCompare(a.validFrom) || tariffKindLabel(a.kind).localeCompare(tariffKindLabel(b.kind), 'de')),
 )
 
 function emptyTariffForm(): TariffForm {
@@ -569,6 +571,16 @@ function fmtTariffAmount(tariff: ElectricityTariff) {
     minimumFractionDigits: tariff.unit === 'eur' ? 2 : 4,
     maximumFractionDigits: tariff.unit === 'eur' ? 2 : 6,
   })} ${tariffUnitLabel(tariff.unit)}`
+}
+
+function tariffTaxStatusLabel(status: string | null) {
+  if (!status) return '–'
+  const labels: Record<string, string> = {
+    gross: 'brutto',
+    net: 'netto',
+    assumed_net_plus_vat: 'angenommen netto zzgl. MwSt.',
+  }
+  return labels[status] ?? status
 }
 
 function onTariffKindChange() {
@@ -993,7 +1005,7 @@ onMounted(load)
             <InputNumber v-model="tariffForm.capacityLimitKw" :min="0" :min-fraction-digits="0" :max-fraction-digits="3" />
           </label>
           <label>Steuerstatus
-            <InputText v-model="tariffForm.taxStatus" placeholder="gross, net, …" />
+            <InputText v-model="tariffForm.taxStatus" placeholder="brutto, netto, …" />
           </label>
           <div class="tariff-form-actions">
             <Button label="Neu" text @click="resetTariffForm" />
@@ -1023,7 +1035,7 @@ onMounted(load)
                 <td>{{ tariffKindLabel(tariff.kind) }}</td>
                 <td>{{ tariff.name || '–' }}</td>
                 <td>{{ fmtTariffAmount(tariff) }}</td>
-                <td>{{ tariff.taxStatus || '–' }}</td>
+                <td>{{ tariffTaxStatusLabel(tariff.taxStatus) }}</td>
                 <td class="tariff-actions">
                   <Button icon="pi pi-pencil" text rounded severity="secondary" @click="editTariff(tariff)" />
                   <Button icon="pi pi-trash" text rounded severity="danger" @click="handleDeleteTariff(tariff)" />
