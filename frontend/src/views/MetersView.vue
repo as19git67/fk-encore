@@ -529,6 +529,7 @@ const loadingTariffs = ref(false)
 const savingTariff = ref(false)
 const tariffs = ref<ElectricityTariff[]>([])
 const tariffForm = ref<TariffForm>(emptyTariffForm())
+const tariffFormEl = ref<HTMLElement | null>(null)
 
 const tariffKindOptions = (Object.keys(ELECTRICITY_TARIFF_KIND_LABELS) as ElectricityTariffKind[]).map((value) => ({
   label: ELECTRICITY_TARIFF_KIND_LABELS[value],
@@ -545,6 +546,22 @@ const visibleTariffs = computed(() =>
       ['grid_import', 'base_price', 'feed_in', 'self_consumption_value'].includes(tariff.kind),
     )
     .sort((a, b) => b.validFrom.localeCompare(a.validFrom) || tariffKindLabel(a.kind).localeCompare(tariffKindLabel(b.kind), 'de')),
+)
+
+const tariffImportKinds: ElectricityTariffKind[] = [
+  'grid_import',
+  'base_price',
+  'feed_in',
+  'self_consumption_value',
+  'pv_investment_net',
+  'pv_investment_vat',
+  'opportunity_cost_year',
+  'opportunity_cost_total',
+  'amortization_years',
+]
+
+const pricesAlreadyImported = computed(() =>
+  tariffImportKinds.every((kind) => tariffs.value.some((tariff) => tariff.kind === kind)),
 )
 
 function emptyTariffForm(): TariffForm {
@@ -593,9 +610,9 @@ function fmtTariffAmount(tariff: ElectricityTariff) {
 function tariffTaxStatusLabel(status: string | null) {
   if (!status) return '–'
   const labels: Record<string, string> = {
-    gross: 'brutto',
-    net: 'netto',
-    assumed_net_plus_vat: 'angenommen netto zzgl. MwSt.',
+    gross: 'incl. MwSt.',
+    net: 'excl. MwSt.',
+    assumed_net_plus_vat: 'angenommen excl. MwSt. zzgl. MwSt.',
   }
   return labels[status] ?? status
 }
@@ -637,6 +654,9 @@ function editTariff(tariff: ElectricityTariff) {
     name: tariff.name ?? '',
     capacityLimitKw: tariff.capacityLimitKw,
   }
+  window.setTimeout(() => {
+    tariffFormEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
 }
 
 function resetTariffForm() {
@@ -685,6 +705,7 @@ async function handleDeleteTariff(tariff: ElectricityTariff) {
 }
 
 async function handleImportPrices() {
+  if (pricesAlreadyImported.value) return
   importingPrices.value = true
   error.value = ''
   importMsg.value = ''
@@ -839,7 +860,7 @@ onMounted(load)
 
           <div v-if="energyReport.hasTariffs && energyReport.totals.costs" class="energy-kpis energy-kpis--compact">
             <div class="energy-kpi">
-              <span class="figure-label">Stromkosten netto</span>
+              <span class="figure-label">Stromkosten nach Einspeisung</span>
               <strong>{{ fmtCurrency(energyReport.totals.costs.netElectricityCostEur) }}</strong>
               <span class="figure-sub">{{ energyCostScopeLabel }}</span>
               <span class="figure-sub">Bezug + Grundpreis − Einspeisung</span>
@@ -1038,7 +1059,7 @@ onMounted(load)
 
         <h3>Kosten und PV-Nutzen</h3>
         <dl>
-          <dt>Stromkosten netto</dt>
+          <dt>Stromkosten nach Einspeisung</dt>
           <dd><code>Netzbezugskosten + Grundpreis − Einspeiseerlös</code></dd>
           <dt>Netzbezugskosten</dt>
           <dd><code>Bezug × zeitgültiger Arbeitspreis</code></dd>
@@ -1068,15 +1089,19 @@ onMounted(load)
         <div class="tariff-toolbar">
           <p>Preisänderungen werden ab ihrem Gültigkeitsdatum für Kosten und PV-Ersparnis verwendet.</p>
           <Button
-            label="JSON-Grundlage importieren"
+            :label="pricesAlreadyImported ? 'Importiert' : 'JSON-Grundlage importieren'"
             icon="pi pi-upload"
             severity="secondary"
             :loading="importingPrices"
+            :disabled="pricesAlreadyImported"
             @click="handleImportPrices"
           />
         </div>
 
-        <div class="form-grid tariff-form">
+        <div ref="tariffFormEl" class="form-grid tariff-form" :class="{ 'tariff-form--editing': tariffForm.id !== null }">
+          <div v-if="tariffForm.id !== null" class="tariff-edit-banner full">
+            Bearbeite Preisänderung #{{ tariffForm.id }}. Änderungen mit „Speichern“ übernehmen oder mit „Neu“ abbrechen.
+          </div>
           <label>Art
             <Select v-model="tariffForm.kind" :options="tariffKindOptions" option-label="label" option-value="value" @change="onTariffKindChange" />
           </label>
@@ -1096,11 +1121,11 @@ onMounted(load)
             <InputNumber v-model="tariffForm.capacityLimitKw" :min="0" :min-fraction-digits="0" :max-fraction-digits="3" />
           </label>
           <label>Steuerstatus
-            <InputText v-model="tariffForm.taxStatus" placeholder="brutto, netto, …" />
+            <InputText v-model="tariffForm.taxStatus" placeholder="incl. MwSt., excl. MwSt., …" />
           </label>
           <div class="tariff-form-actions">
-            <Button label="Neu" text @click="resetTariffForm" />
-            <Button label="Speichern" icon="pi pi-check" :loading="savingTariff" @click="saveTariff" />
+            <Button :label="tariffForm.id === null ? 'Neu' : 'Abbrechen'" text @click="resetTariffForm" />
+            <Button :label="tariffForm.id === null ? 'Speichern' : 'Änderung speichern'" icon="pi pi-check" :loading="savingTariff" @click="saveTariff" />
           </div>
         </div>
 
@@ -1128,8 +1153,8 @@ onMounted(load)
                 <td>{{ fmtTariffAmount(tariff) }}</td>
                 <td>{{ tariffTaxStatusLabel(tariff.taxStatus) }}</td>
                 <td class="tariff-actions">
-                  <Button icon="pi pi-pencil" text rounded severity="secondary" @click="editTariff(tariff)" />
-                  <Button icon="pi pi-trash" text rounded severity="danger" @click="handleDeleteTariff(tariff)" />
+                  <Button icon="pi pi-pencil" text rounded severity="secondary" @click.stop="editTariff(tariff)" />
+                  <Button icon="pi pi-trash" text rounded severity="danger" @click.stop="handleDeleteTariff(tariff)" />
                 </td>
               </tr>
             </tbody>
@@ -1222,6 +1247,11 @@ onMounted(load)
   display: block;
   margin-top: 0.15rem;
   overflow-wrap: break-word;
+}
+.energy-kpi .figure-sub {
+  display: block;
+  margin-top: 0.2rem;
+  line-height: 1.25;
 }
 .energy-ytd {
   display: flex;
@@ -1424,6 +1454,17 @@ onMounted(load)
   padding: 0.75rem;
   border: 1px solid var(--p-content-border-color);
   border-radius: 8px;
+}
+.tariff-form--editing {
+  border-color: var(--p-primary-color);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--p-primary-color) 45%, transparent);
+}
+.tariff-edit-banner {
+  padding: 0.55rem 0.65rem;
+  border-radius: 6px;
+  background: var(--p-highlight-background);
+  color: var(--p-highlight-color);
+  font-size: 0.85rem;
 }
 .tariff-form-actions {
   display: flex;
