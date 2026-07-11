@@ -339,6 +339,7 @@ Neue Views unter `frontend/src/views/meters/`, Navigation gated auf
 |---|---|---|
 | `MetersView.vue` | `meters.view` | Kachel-/Listenübersicht: Name, Typ-Icon, Standort, letzter Stand + Datum, Absolutstand, Anomalie-Badge; Schnellaktion „Ablesen“ |
 | `MeterDetailView.vue` | `meters.view` | Stammdaten, Gerätehistorie (Tabelle wie im Issue-Beispiel), Ablesungsliste, Verbrauchs-Chart mit Vorjahresvergleich, verknüpfte Zahlungen |
+| `MeterQuickEntryView.vue` | `meters.read_entry` | Persönliche Schnell-Erfassungsliste mit persistenter Zählerauswahl/Reihenfolge (`meter_quick_entry_items`), einem gemeinsamen Datum für alle Ablesungen und OCR-Kamera je Zählerzeile |
 | `MeterReadingEntryView.vue` (oder Dialog) | `meters.read_entry` | Wert + Datum/Zeit (Default jetzt), Foto-Button → OCR-Vorschlag mit Confidence, Bestätigen/Korrigieren |
 | `MetersAdminView.vue` | `meters.manage` | Zähler-CRUD, Gerät ersetzen (Wizard: Endstand alt → Startwert neu), API-Key-Verwaltung |
 

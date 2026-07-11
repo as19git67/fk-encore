@@ -2161,6 +2161,24 @@ export const meterReadings = pgTable(
   ]
 );
 
+export const meterQuickEntryItems = pgTable(
+  "meter_quick_entry_items",
+  {
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    meter_id: integer("meter_id")
+      .notNull()
+      .references(() => meters.id, { onDelete: "cascade" }),
+    sort_order: integer("sort_order").notNull(),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.user_id, table.meter_id] }),
+    index("meter_quick_entry_items_user_order_idx").on(table.user_id, table.sort_order),
+  ],
+);
+
 // Link payments (advance payments, annual settlement) to a reading.
 // Same pattern as finance_transaction_document.
 export const meterReadingTransactions = pgTable(

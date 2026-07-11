@@ -8,5 +8,6 @@ import "./api-keys";
 import "./ingest";
 import "./readings-ocr";
 import "./reports";
+import "./quick-entry";
 
 export default new Service("meter");

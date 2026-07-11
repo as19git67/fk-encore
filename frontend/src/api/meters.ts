@@ -197,6 +197,28 @@ export function deleteReading(readingId: number) {
   })
 }
 
+// ── Quick entry ─────────────────────────────────────────────────────────────
+
+export interface QuickEntryItem extends MeterListItem {
+  sortOrder: number
+}
+
+export interface QuickEntryConfig {
+  items: QuickEntryItem[]
+  availableMeters: MeterListItem[]
+}
+
+export function getQuickEntryConfig() {
+  return apiFetch<QuickEntryConfig>('/meters/quick-entry')
+}
+
+export function saveQuickEntryConfig(meterIds: number[]) {
+  return apiFetch<QuickEntryConfig>('/meters/quick-entry', {
+    method: 'PUT',
+    body: JSON.stringify({ meterIds }),
+  })
+}
+
 // ── Reports (Etappe 6) ──────────────────────────────────────────────────────
 
 export type MeterReportGranularity = 'month' | 'year'

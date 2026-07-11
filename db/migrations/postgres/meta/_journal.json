@@ -890,6 +890,13 @@
       "when": 1783987200000,
       "tag": "0126_meter_ev_charger_roles",
       "breakpoints": true
+    },
+    {
+      "idx": 127,
+      "version": "7",
+      "when": 1784073600000,
+      "tag": "0127_meter_quick_entry",
+      "breakpoints": true
     }
   ]
 }
