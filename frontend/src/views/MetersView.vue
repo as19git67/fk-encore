@@ -225,10 +225,13 @@ const energyAnalysis = computed(() => {
     avgAutarky: avg((bucket) => bucket.autarky),
     avgSelfConsumptionRate: avg((bucket) => bucket.selfConsumptionRate),
     avgHeatPumpTotal: avg((bucket) => bucket.heatPumpTotal),
-    avgHeatHeatingGrid: avg((bucket) => bucket.heatHeatingGrid),
-    avgHeatHeatingPv: avg((bucket) => bucket.heatHeatingPv),
-    avgHotWaterGrid: avg((bucket) => bucket.hotWaterGrid),
-    avgHotWaterPv: avg((bucket) => bucket.hotWaterPv),
+    avgConsumptionWithoutHeatPumpAndEv: avg((bucket) => bucket.consumptionWithoutHeatPumpAndEv),
+    avgHeatHeatingTotal: avg((bucket) => bucket.heatHeatingTotal),
+    avgHeatHeatingPvShare: avg((bucket) => bucket.heatHeatingPvShare),
+    avgHotWaterTotal: avg((bucket) => bucket.hotWaterTotal),
+    avgHotWaterPvShare: avg((bucket) => bucket.hotWaterPvShare),
+    avgEvChargerTotal: avg((bucket) => bucket.evChargerTotal),
+    avgEvChargerPvShare: avg((bucket) => bucket.evChargerPvShare),
     trendGridImport: trend((bucket) => bucket.gridImport),
     trendAutarky: trend((bucket) => bucket.autarky),
   }
@@ -238,10 +241,13 @@ const hasHeatPumpBreakdown = computed(() =>
   (energyReport.value?.buckets ?? []).some(
     (bucket) =>
       bucket.heatPumpTotal !== null ||
-      bucket.heatHeatingGrid !== null ||
-      bucket.heatHeatingPv !== null ||
-      bucket.hotWaterGrid !== null ||
-      bucket.hotWaterPv !== null,
+      bucket.consumptionWithoutHeatPumpAndEv !== null ||
+      bucket.heatHeatingTotal !== null ||
+      bucket.heatHeatingPvShare !== null ||
+      bucket.hotWaterTotal !== null ||
+      bucket.hotWaterPvShare !== null ||
+      bucket.evChargerTotal !== null ||
+      bucket.evChargerPvShare !== null,
   ),
 )
 
@@ -831,24 +837,27 @@ onMounted(load)
 
           <div v-if="hasHeatPumpBreakdown" class="energy-kpis energy-kpis--compact">
             <div class="energy-kpi">
+              <span class="figure-label">Ø Verbrauch ohne WP/E-Auto</span>
+              <strong>{{ fmt(energyAnalysis.avgConsumptionWithoutHeatPumpAndEv, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+            </div>
+            <div class="energy-kpi">
               <span class="figure-label">Ø Wärmepumpe gesamt</span>
               <strong>{{ fmt(energyAnalysis.avgHeatPumpTotal, energyReport.decimals) }} {{ energyReport.unit }}</strong>
             </div>
             <div class="energy-kpi">
-              <span class="figure-label">Ø Heizung Netzstrom</span>
-              <strong>{{ fmt(energyAnalysis.avgHeatHeatingGrid, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+              <span class="figure-label">Ø Heizung gesamt</span>
+              <strong>{{ fmt(energyAnalysis.avgHeatHeatingTotal, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+              <span class="figure-sub">PV-Anteil {{ fmtPercent(energyAnalysis.avgHeatHeatingPvShare) }}</span>
             </div>
             <div class="energy-kpi">
-              <span class="figure-label">Ø Heizung PV-Strom</span>
-              <strong>{{ fmt(energyAnalysis.avgHeatHeatingPv, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+              <span class="figure-label">Ø Warmwasser gesamt</span>
+              <strong>{{ fmt(energyAnalysis.avgHotWaterTotal, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+              <span class="figure-sub">PV-Anteil {{ fmtPercent(energyAnalysis.avgHotWaterPvShare) }}</span>
             </div>
             <div class="energy-kpi">
-              <span class="figure-label">Ø Warmwasser Netzstrom</span>
-              <strong>{{ fmt(energyAnalysis.avgHotWaterGrid, energyReport.decimals) }} {{ energyReport.unit }}</strong>
-            </div>
-            <div class="energy-kpi">
-              <span class="figure-label">Ø Warmwasser PV-Strom</span>
-              <strong>{{ fmt(energyAnalysis.avgHotWaterPv, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+              <span class="figure-label">Ø E-Auto/Wallbox gesamt</span>
+              <strong>{{ fmt(energyAnalysis.avgEvChargerTotal, energyReport.decimals) }} {{ energyReport.unit }}</strong>
+              <span class="figure-sub">PV-Anteil {{ fmtPercent(energyAnalysis.avgEvChargerPvShare) }}</span>
             </div>
           </div>
 
@@ -895,11 +904,14 @@ onMounted(load)
                   <th>Gesamtverbrauch</th>
                   <th>Autarkie</th>
                   <th>EV-Quote</th>
+                  <th v-if="hasHeatPumpBreakdown">Ohne WP/E-Auto</th>
                   <th v-if="hasHeatPumpBreakdown">WP gesamt</th>
-                  <th v-if="hasHeatPumpBreakdown">Hzg Netz</th>
-                  <th v-if="hasHeatPumpBreakdown">Hzg PV</th>
-                  <th v-if="hasHeatPumpBreakdown">WW Netz</th>
-                  <th v-if="hasHeatPumpBreakdown">WW PV</th>
+                  <th v-if="hasHeatPumpBreakdown">Heizung gesamt</th>
+                  <th v-if="hasHeatPumpBreakdown">Heizung PV</th>
+                  <th v-if="hasHeatPumpBreakdown">Warmwasser gesamt</th>
+                  <th v-if="hasHeatPumpBreakdown">Warmwasser PV</th>
+                  <th v-if="hasHeatPumpBreakdown">E-Auto gesamt</th>
+                  <th v-if="hasHeatPumpBreakdown">E-Auto PV</th>
                   <th v-if="energyReport.hasTariffs">Kosten</th>
                   <th v-if="energyReport.hasTariffs">PV-Nutzen</th>
                 </tr>
@@ -914,11 +926,14 @@ onMounted(load)
                   <td>{{ fmt(bucket.totalConsumption, energyReport.decimals) }}</td>
                   <td>{{ fmtPercent(bucket.autarky) }}</td>
                   <td>{{ fmtPercent(bucket.selfConsumptionRate) }}</td>
+                  <td v-if="hasHeatPumpBreakdown">{{ fmt(bucket.consumptionWithoutHeatPumpAndEv, energyReport.decimals) }}</td>
                   <td v-if="hasHeatPumpBreakdown">{{ fmt(bucket.heatPumpTotal, energyReport.decimals) }}</td>
-                  <td v-if="hasHeatPumpBreakdown">{{ fmt(bucket.heatHeatingGrid, energyReport.decimals) }}</td>
-                  <td v-if="hasHeatPumpBreakdown">{{ fmt(bucket.heatHeatingPv, energyReport.decimals) }}</td>
-                  <td v-if="hasHeatPumpBreakdown">{{ fmt(bucket.hotWaterGrid, energyReport.decimals) }}</td>
-                  <td v-if="hasHeatPumpBreakdown">{{ fmt(bucket.hotWaterPv, energyReport.decimals) }}</td>
+                  <td v-if="hasHeatPumpBreakdown">{{ fmt(bucket.heatHeatingTotal, energyReport.decimals) }}</td>
+                  <td v-if="hasHeatPumpBreakdown">{{ fmtPercent(bucket.heatHeatingPvShare) }}</td>
+                  <td v-if="hasHeatPumpBreakdown">{{ fmt(bucket.hotWaterTotal, energyReport.decimals) }}</td>
+                  <td v-if="hasHeatPumpBreakdown">{{ fmtPercent(bucket.hotWaterPvShare) }}</td>
+                  <td v-if="hasHeatPumpBreakdown">{{ fmt(bucket.evChargerTotal, energyReport.decimals) }}</td>
+                  <td v-if="hasHeatPumpBreakdown">{{ fmtPercent(bucket.evChargerPvShare) }}</td>
                   <td v-if="energyReport.hasTariffs">{{ fmtCurrency(bucket.costs?.netElectricityCostEur ?? null) }}</td>
                   <td v-if="energyReport.hasTariffs">{{ fmtCurrency(bucket.costs?.pvBenefitEur ?? null) }}</td>
                 </tr>
@@ -1051,10 +1066,14 @@ onMounted(load)
 
         <h3>Wärmepumpe</h3>
         <dl>
-          <dt>Heizung Netzstrom</dt>
-          <dd><code>Heizung gesamt − Heizung PV-Strom</code></dd>
-          <dt>Warmwasser Netzstrom</dt>
-          <dd><code>Warmwasser gesamt − Warmwasser PV-Strom</code></dd>
+          <dt>Verbrauch ohne Wärmepumpe/E-Auto</dt>
+          <dd><code>Gesamtverbrauch − Wärmepumpe gesamt − E-Auto/Wallbox gesamt</code></dd>
+          <dt>Heizung PV-Anteil</dt>
+          <dd><code>Heizung PV-Strom / Heizung gesamt</code></dd>
+          <dt>Warmwasser PV-Anteil</dt>
+          <dd><code>Warmwasser PV-Strom / Warmwasser gesamt</code></dd>
+          <dt>E-Auto/Wallbox PV-Anteil</dt>
+          <dd><code>E-Auto/Wallbox PV-Strom / E-Auto/Wallbox gesamt</code></dd>
         </dl>
 
         <h3>Kosten und PV-Nutzen</h3>

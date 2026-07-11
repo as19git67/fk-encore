@@ -41,6 +41,8 @@ export const METER_ROLES: readonly MeterRole[] = [
   "heat_heating_pv",
   "hot_water_total",
   "hot_water_pv",
+  "ev_charger_total",
+  "ev_charger_pv",
 ];
 
 export interface DeviceState {

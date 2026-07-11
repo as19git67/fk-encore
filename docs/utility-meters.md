@@ -257,6 +257,7 @@ Der historische Stromimport setzt diese Rollen direkt:
 - `heat_pump_total` → Wärmepumpe gesamt
 - `heat_heating_total` / `heat_heating_pv` → Heizung/Fußbodenheizung gesamt bzw. PV-Anteil
 - `hot_water_total` / `hot_water_pv` → Warmwasser gesamt bzw. PV-Anteil
+- `ev_charger_total` / `ev_charger_pv` → E-Auto/Wallbox gesamt bzw. PV-Anteil
 
 Darauf werden je Bucket und für die Gesamtsumme folgende Werte berechnet:
 
@@ -264,8 +265,10 @@ Darauf werden je Bucket und für die Gesamtsumme folgende Werte berechnet:
 - Gesamtverbrauch = Bezug + Eigenverbrauch
 - Autarkie = 1 - Bezug / Gesamtverbrauch
 - Eigenverbrauchsquote = Eigenverbrauch / Produktion
-- Heizung Netzstrom = Heizung gesamt - Heizung PV
-- Warmwasser Netzstrom = Warmwasser gesamt - Warmwasser PV
+- Verbrauch ohne Wärmepumpe/E-Auto = Gesamtverbrauch - Wärmepumpe gesamt - E-Auto/Wallbox gesamt
+- Heizung PV-Anteil = Heizung PV / Heizung gesamt
+- Warmwasser PV-Anteil = Warmwasser PV / Warmwasser gesamt
+- E-Auto/Wallbox PV-Anteil = E-Auto/Wallbox PV / E-Auto/Wallbox gesamt
 - Netzbezugskosten = Bezug × zeitgültiger Arbeitspreis
 - Grundkosten = zeitgültiger Grundpreis anteilig pro Bucket
 - Einspeiseerlös = Einspeisung × zeitgültige Einspeisevergütung

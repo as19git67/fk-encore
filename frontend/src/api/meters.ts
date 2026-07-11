@@ -10,6 +10,8 @@ export type MeterRole =
   | 'heat_heating_pv'
   | 'hot_water_total'
   | 'hot_water_pv'
+  | 'ev_charger_total'
+  | 'ev_charger_pv'
 
 export interface MeterListItem {
   id: number
@@ -247,15 +249,21 @@ export interface EnergyReportBucket {
   production: number | null
   selfConsumption: number | null
   totalConsumption: number | null
+  consumptionWithoutHeatPumpAndEv: number | null
   autarky: number | null
   selfConsumptionRate: number | null
   heatPumpTotal: number | null
   heatHeatingTotal: number | null
   heatHeatingPv: number | null
   heatHeatingGrid: number | null
+  heatHeatingPvShare: number | null
   hotWaterTotal: number | null
   hotWaterPv: number | null
   hotWaterGrid: number | null
+  hotWaterPvShare: number | null
+  evChargerTotal: number | null
+  evChargerPv: number | null
+  evChargerPvShare: number | null
   costs: EnergyTariffCosts | null
 }
 
@@ -461,6 +469,8 @@ export const METER_ROLE_LABELS: Record<MeterRole, string> = {
   heat_heating_pv: 'Heizung PV',
   hot_water_total: 'Warmwasser gesamt',
   hot_water_pv: 'Warmwasser PV',
+  ev_charger_total: 'E-Auto/Wallbox gesamt',
+  ev_charger_pv: 'E-Auto/Wallbox PV',
 }
 
 export const ELECTRICITY_TARIFF_KIND_LABELS: Record<ElectricityTariffKind, string> = {

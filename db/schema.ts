@@ -2045,7 +2045,9 @@ export type MeterRole =
   | "heat_heating_total"
   | "heat_heating_pv"
   | "hot_water_total"
-  | "hot_water_pv";
+  | "hot_water_pv"
+  | "ev_charger_total"
+  | "ev_charger_pv";
 export type MeterReadingSource = "manual" | "ocr" | "api";
 export type MeterElectricityTariffKind =
   | "grid_import"

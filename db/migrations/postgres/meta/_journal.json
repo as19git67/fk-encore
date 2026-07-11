@@ -883,6 +883,13 @@
       "when": 1783900800000,
       "tag": "0125_meter_electricity_tariffs",
       "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "7",
+      "when": 1783987200000,
+      "tag": "0126_meter_ev_charger_roles",
+      "breakpoints": true
     }
   ]
 }
