@@ -113,6 +113,60 @@ const MISSING_INTERVAL_SAMPLE_SIZE = 12;
 const MISSING_MAX_LAST_SEEN_AGE_DAYS = 365 * 2;
 
 // -----------------------------------------------------------------------
+// Tunables — inactivity gate
+// -----------------------------------------------------------------------
+
+/**
+ * Maximum factor of typical_interval_days before a returning transaction
+ * is treated as a NEW mandate rather than a continuation of the old one.
+ * E.g. a monthly mandate (interval ~30 d) must be silent for 30 × 4 = 120
+ * days before it's considered lapsed.
+ */
+const INACTIVITY_INTERVAL_FACTOR = 4;
+/**
+ * Absolute floor for the inactivity gate — even if interval × factor is
+ * smaller, we never split before this many days of silence. Covers edge
+ * cases where the EMA interval hasn't converged yet.
+ */
+const INACTIVITY_MIN_DAYS = 120;
+
+// -----------------------------------------------------------------------
+// Payment-channel derivation
+// -----------------------------------------------------------------------
+
+type PaymentChannel = "direct_debit" | "card" | "transfer" | "other";
+
+const DIRECT_DEBIT_FAMILIES = new Set(["RDDT", "IDDT"]);
+const CARD_FAMILIES = new Set(["CCRD", "MCRD"]);
+const TRANSFER_FAMILIES = new Set(["RCDT", "ICDT", "IRCT", "RRCT"]);
+
+/**
+ * Derives a coarse payment channel from ISO BTC codes and/or the
+ * German MT940 entry text. Used to keep separate mandates for the same
+ * counterparty when the payment method differs (e.g. SEPA direct debit
+ * vs. card payment).
+ */
+export function derivePaymentChannel(tx: {
+  transaction_type?: string | null;
+  entry_text?: string | null;
+  mandate_ref?: string | null;
+}): PaymentChannel {
+  const family = tx.transaction_type?.trim().toUpperCase() ?? "";
+  if (DIRECT_DEBIT_FAMILIES.has(family)) return "direct_debit";
+  if (CARD_FAMILIES.has(family)) return "card";
+  if (TRANSFER_FAMILIES.has(family)) return "transfer";
+
+  const entry = tx.entry_text?.toLowerCase() ?? "";
+  if (entry.includes("lastschrift")) return "direct_debit";
+  if (entry.includes("kartenzahlung") || entry.includes("karte")) return "card";
+  if (entry.includes("überweisung") || entry.includes("ueberweisung")) return "transfer";
+
+  if (tx.mandate_ref) return "direct_debit";
+
+  return "other";
+}
+
+// -----------------------------------------------------------------------
 // Mandate key helpers
 // -----------------------------------------------------------------------
 
@@ -121,6 +175,7 @@ interface MandateKey {
   creditor_id: string | null;
   counterparty_iban: string | null;
   counterparty: string | null;
+  payment_channel: PaymentChannel;
 }
 
 function mandateKeyFrom(tx: typeof financeTransaction.$inferSelect): MandateKey {
@@ -129,6 +184,7 @@ function mandateKeyFrom(tx: typeof financeTransaction.$inferSelect): MandateKey 
     creditor_id: tx.creditor_id ?? null,
     counterparty_iban: tx.counterparty_iban ?? null,
     counterparty: tx.counterparty ?? null,
+    payment_channel: derivePaymentChannel(tx),
   };
 }
 
@@ -299,38 +355,46 @@ async function processAccount(
         // Compare against the IMMEDIATELY previous transaction for this
         // mandate, not the smoothed EMA. This avoids flagging gradual
         // trends (e.g. 59 → 48 → 47) and only fires on real step-changes.
-        const prevRaw = await getPrevTransactionAmount(mandate.id, tx.id, txDateStr);
+        const prevTx = await getPrevTransaction(mandate.id, tx.id, txDateStr);
+        const prevRaw = prevTx?.amount ?? null;
         if (prevRaw !== null) {
-          const prev = Math.abs(Number(prevRaw));
-          const curr = Math.abs(Number(tx.amount));
-          const diff = curr - prev;
-          const pct = prev > 0 ? diff / prev : 0;
+          // Interval guard: suppress amount_change when the gap to the
+          // previous transaction vastly exceeds the mandate's cadence.
+          // The series was likely cancelled and this is a new, unrelated
+          // payment to the same counterparty.
+          const prevDate = prevTx!.booking_date.slice(0, 10);
+          const gapDays = dateDiffDays(prevDate, txDateStr);
+          const typicalInterval = mandate.transaction_count > 1
+            ? (await getMandateTypicalInterval(mandate.id)) ?? 30
+            : 30;
+          const gapThreshold = Math.max(INACTIVITY_MIN_DAYS, typicalInterval * INACTIVITY_INTERVAL_FACTOR);
+          if (gapDays <= gapThreshold) {
+            const prev = Math.abs(Number(prevRaw));
+            const curr = Math.abs(Number(tx.amount));
+            const diff = curr - prev;
+            const pct = prev > 0 ? diff / prev : 0;
 
-          if (Math.abs(diff) >= AMOUNT_CHANGE_MIN_ABS && Math.abs(pct) >= AMOUNT_CHANGE_THRESHOLD) {
-            // Require a stable baseline computed from real transaction data.
-            // cv===null means too few samples — do NOT fire (insufficient evidence).
-            // mandate.transaction_count is unreliable across re-runs; the CV
-            // sample-size requirement (BASELINE_MIN_TRANSACTIONS) is the true gate.
-            const cv = await getMandateStabilityCV(mandate.id, tx.id, txDateStr);
-            const stable = cv !== null && cv <= STABILITY_MAX_CV;
-            if (stable) {
-              const score = Math.min(1, Math.abs(pct) * 2).toFixed(4);
-              const inserted = await insertAnomalyIfAbsent({
-                account_id: accountId,
-                transaction_id: tx.id,
-                mandate_id: mandate.id,
-                type: "amount_change",
-                score,
-                details: {
-                  previous: prev,
-                  current: curr,
-                  diff: Math.round(diff * 100) / 100,
-                  pct: Math.round(pct * 10000) / 100,
-                  // raw sign preserved so the message builder knows debit vs. credit
-                  is_credit: Number(tx.amount) > 0,
-                },
-              });
-              if (inserted) anomalies++;
+            if (Math.abs(diff) >= AMOUNT_CHANGE_MIN_ABS && Math.abs(pct) >= AMOUNT_CHANGE_THRESHOLD) {
+              const cv = await getMandateStabilityCV(mandate.id, tx.id, txDateStr);
+              const stable = cv !== null && cv <= STABILITY_MAX_CV;
+              if (stable) {
+                const score = Math.min(1, Math.abs(pct) * 2).toFixed(4);
+                const inserted = await insertAnomalyIfAbsent({
+                  account_id: accountId,
+                  transaction_id: tx.id,
+                  mandate_id: mandate.id,
+                  type: "amount_change",
+                  score,
+                  details: {
+                    previous: prev,
+                    current: curr,
+                    diff: Math.round(diff * 100) / 100,
+                    pct: Math.round(pct * 10000) / 100,
+                    is_credit: Number(tx.amount) > 0,
+                  },
+                });
+                if (inserted) anomalies++;
+              }
             }
           }
         }
@@ -382,6 +446,35 @@ async function upsertMandate(
 
   const bookingDate = tx.booking_date.slice(0, 10); // normalize to YYYY-MM-DD
 
+  // Inactivity gate: if the existing mandate has been silent for much
+  // longer than its typical period, treat this transaction as the start
+  // of a fresh series rather than a continuation. This prevents false
+  // amount_change alerts when a one-off payment (e.g. card) hits the
+  // same counterparty years after an ABO ended.
+  const treatAsNew = existing != null && isMandateLapsed(existing, bookingDate);
+
+  if (treatAsNew) {
+    await db
+      .update(financeRecurringMandate)
+      .set({
+        typical_amount: tx.amount,
+        typical_interval_days: null,
+        transaction_count: 1,
+        first_seen: bookingDate,
+        last_seen: bookingDate,
+        payment_channel: key.payment_channel,
+        updated_at: sql`NOW()`,
+      })
+      .where(eq(financeRecurringMandate.id, existing.id));
+    return {
+      id: existing.id,
+      typical_amount: tx.amount,
+      transaction_count: 1,
+      isNew: true,
+      previous_last_seen: null,
+    };
+  }
+
   if (!existing) {
     const [row] = await db
       .insert(financeRecurringMandate)
@@ -391,6 +484,7 @@ async function upsertMandate(
         creditor_id: key.creditor_id,
         counterparty_iban: key.counterparty_iban,
         counterparty: key.counterparty,
+        payment_channel: key.payment_channel,
         typical_amount: tx.amount,
         typical_interval_days: null,
         transaction_count: 1,
@@ -427,6 +521,12 @@ async function upsertMandate(
     }
   }
 
+  // Back-fill payment_channel for legacy mandates that predate migration 0129.
+  const channelUpdate: Record<string, unknown> = {};
+  if (!existing.payment_channel) {
+    channelUpdate.payment_channel = key.payment_channel;
+  }
+
   await db
     .update(financeRecurringMandate)
     .set({
@@ -435,6 +535,7 @@ async function upsertMandate(
       transaction_count: count,
       last_seen: bookingDate,
       updated_at: sql`NOW()`,
+      ...channelUpdate,
     })
     .where(eq(financeRecurringMandate.id, existing.id));
 
@@ -447,11 +548,32 @@ async function upsertMandate(
   };
 }
 
+function isMandateLapsed(
+  mandate: typeof financeRecurringMandate.$inferSelect,
+  bookingDate: string,
+): boolean {
+  if (!mandate.last_seen) return false;
+  const gap = dateDiffDays(mandate.last_seen, bookingDate);
+  if (gap <= 0) return false;
+  const interval = mandate.typical_interval_days ?? 30;
+  const threshold = Math.max(
+    INACTIVITY_MIN_DAYS,
+    interval * INACTIVITY_INTERVAL_FACTOR,
+  );
+  return gap > threshold;
+}
+
 async function findMandate(
   accountId: number,
   key: MandateKey,
 ): Promise<typeof financeRecurringMandate.$inferSelect | undefined> {
-  // Priority: mandate_ref+creditor_id → iban → name
+  // Priority: mandate_ref+creditor_id → iban+channel → name+channel
+  //
+  // Tier 1 (SEPA identity) is exact enough that payment_channel is
+  // redundant. Tiers 2+3 add a channel gate so a Lastschrift and a
+  // Kartenzahlung to the same counterparty form separate mandates.
+  // Legacy mandates (payment_channel IS NULL) match any channel so
+  // existing data keeps working without a backfill.
   if (key.mandate_ref && key.creditor_id) {
     const [row] = await db
       .select()
@@ -477,6 +599,7 @@ async function findMandate(
           eq(financeRecurringMandate.counterparty_iban, key.counterparty_iban),
           isNull(financeRecurringMandate.mandate_ref),
           isNull(financeRecurringMandate.creditor_id),
+          paymentChannelMatch(key.payment_channel),
         )
       )
       .limit(1);
@@ -494,6 +617,7 @@ async function findMandate(
           isNull(financeRecurringMandate.mandate_ref),
           isNull(financeRecurringMandate.creditor_id),
           isNull(financeRecurringMandate.counterparty_iban),
+          paymentChannelMatch(key.payment_channel),
         )
       )
       .limit(1);
@@ -501,6 +625,14 @@ async function findMandate(
   }
 
   return undefined;
+}
+
+/**
+ * SQL condition: mandate.payment_channel must equal the given channel
+ * OR be NULL (legacy row that predates migration 0129).
+ */
+function paymentChannelMatch(channel: PaymentChannel) {
+  return sql`(${financeRecurringMandate.payment_channel} = ${channel} OR ${financeRecurringMandate.payment_channel} IS NULL)`;
 }
 
 /**
@@ -539,18 +671,19 @@ async function getMandateStabilityCV(
 }
 
 /**
- * Returns the amount of the most recent prior transaction for the same
- * mandate (chronologically before the candidate). Used as the comparison
+ * Returns the most recent prior transaction for the same mandate
+ * (chronologically before the candidate). Used as the comparison
  * reference for amount_change anomalies — comparing against the immediate
- * predecessor avoids flagging gradual drift.
+ * predecessor avoids flagging gradual drift. Also returns booking_date
+ * so callers can compute the inter-arrival gap.
  */
-async function getPrevTransactionAmount(
+async function getPrevTransaction(
   mandateId: number,
   excludingTxId: number,
   beforeBookingDate: string,
-): Promise<string | null> {
-  const rows = await db.execute<{ amount: string }>(sql`
-    SELECT ft.amount
+): Promise<{ amount: string; booking_date: string } | null> {
+  const rows = await db.execute<{ amount: string; booking_date: string }>(sql`
+    SELECT ft.amount, ft.booking_date
     FROM finance_transaction ft
     JOIN finance_recurring_mandate frm ON frm.id = ${mandateId}
     WHERE ft.account_id = frm.account_id
@@ -564,7 +697,36 @@ async function getPrevTransactionAmount(
     ORDER BY ft.booking_date DESC, ft.id DESC
     LIMIT 1
   `);
-  return rows.rows[0]?.amount ?? null;
+  return rows.rows[0] ?? null;
+}
+
+/**
+ * Median-ish typical interval from actual transaction dates for a mandate.
+ * Returns null when fewer than 2 transactions exist.
+ */
+async function getMandateTypicalInterval(mandateId: number): Promise<number | null> {
+  const rows = await db.execute<{ booking_date: string }>(sql`
+    SELECT ft.booking_date
+    FROM finance_transaction ft
+    JOIN finance_recurring_mandate frm ON frm.id = ${mandateId}
+    WHERE ft.account_id = frm.account_id
+      AND (
+        (frm.mandate_ref IS NOT NULL AND ft.mandate_ref = frm.mandate_ref)
+        OR (frm.mandate_ref IS NULL AND frm.counterparty_iban IS NOT NULL AND ft.counterparty_iban = frm.counterparty_iban)
+        OR (frm.mandate_ref IS NULL AND frm.counterparty_iban IS NULL AND ft.counterparty = frm.counterparty)
+      )
+    ORDER BY ft.booking_date DESC
+    LIMIT 12
+  `);
+  const dates = rows.rows.map((r) => r.booking_date.slice(0, 10)).sort();
+  if (dates.length < 2) return null;
+  const intervals: number[] = [];
+  for (let i = 1; i < dates.length; i++) {
+    const gap = dateDiffDays(dates[i - 1], dates[i]);
+    if (gap > 0) intervals.push(gap);
+  }
+  if (intervals.length === 0) return null;
+  return Math.round(intervals.reduce((a, b) => a + b, 0) / intervals.length);
 }
 
 async function findDuplicate(
