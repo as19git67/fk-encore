@@ -3,9 +3,6 @@
 services:
   llm_service:
     image: ${LLM_GPU_IMAGE:-ghcr.io/as19git67/fk-encore-llm-gpu}:${DEPLOY_IMAGE_TAG:-latest}
-    build:
-      context: ./llm-service
-      dockerfile: Dockerfile.gpu
     environment:
       LLM_MODEL_PATH: ${LLM_GPU_MODEL_PATH:-/models/Qwen3-14B-Q4_K_M.gguf}
       LLM_MODEL_URL: ${LLM_GPU_MODEL_URL:-https://huggingface.co/Qwen/Qwen3-14B-GGUF/resolve/main/Qwen3-14B-Q4_K_M.gguf}
