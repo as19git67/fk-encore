@@ -681,12 +681,19 @@ export function looksLikeBrokenXref(stderr: string): boolean {
 
 /**
  * Rewrite `srcPath` through qpdf so a broken xref/trailer is rebuilt.
- * Returns the repaired file path, or null when qpdf is unavailable or
- * also fails on the input (in which case the caller should propagate
- * the original poppler/pdf-parse error rather than masking it).
+ * When qpdf fails (severely broken PDFs), falls back to Ghostscript
+ * which re-renders the entire file from scratch and handles deeper
+ * structural corruption.
+ * Returns the repaired file path, or null when both tools fail.
  */
-function repairPdf(srcPath: string, tmpDir: string): Promise<string | null> {
-  const dst = path.join(tmpDir, "repaired.pdf");
+async function repairPdf(srcPath: string, tmpDir: string): Promise<string | null> {
+  const qpdfResult = await repairPdfWithQpdf(srcPath, tmpDir);
+  if (qpdfResult) return qpdfResult;
+  return repairPdfWithGs(srcPath, tmpDir);
+}
+
+function repairPdfWithQpdf(srcPath: string, tmpDir: string): Promise<string | null> {
+  const dst = path.join(tmpDir, "repaired-qpdf.pdf");
   return new Promise((resolve) => {
     const proc = spawn(
       "qpdf",
@@ -698,8 +705,6 @@ function repairPdf(srcPath: string, tmpDir: string): Promise<string | null> {
       stderr += d.toString();
     });
     proc.on("error", (err) => {
-      // ENOENT: qpdf missing from the image. Don't crash the worker —
-      // surface the original failure to the caller instead.
       console.warn(
         `[documents.text-extract] qpdf unavailable for repair: ${err.message}`,
       );
@@ -711,6 +716,56 @@ function repairPdf(srcPath: string, tmpDir: string): Promise<string | null> {
       } else {
         console.warn(
           `[documents.text-extract] qpdf repair exited ${code}: ${stderr.trim()}`,
+        );
+        resolve(null);
+      }
+    });
+  });
+}
+
+/**
+ * Ghostscript fallback: `gs -sDEVICE=pdfwrite` re-interprets the PDF
+ * instructions from scratch and writes a clean file. Slower than qpdf
+ * but handles cases where the internal structure is too broken for a
+ * simple xref rewrite (missing trailer dictionary, corrupted object
+ * streams, truncated files).
+ */
+function repairPdfWithGs(srcPath: string, tmpDir: string): Promise<string | null> {
+  const dst = path.join(tmpDir, "repaired-gs.pdf");
+  return new Promise((resolve) => {
+    const proc = spawn(
+      "gs",
+      [
+        "-dQUIET",
+        "-dBATCH",
+        "-dNOPAUSE",
+        "-dSAFER",
+        "-sDEVICE=pdfwrite",
+        "-dPDFSETTINGS=/prepress",
+        `-sOutputFile=${dst}`,
+        srcPath,
+      ],
+      { stdio: ["ignore", "ignore", "pipe"] },
+    );
+    let stderr = "";
+    proc.stderr.on("data", (d) => {
+      stderr += d.toString();
+    });
+    proc.on("error", (err) => {
+      console.warn(
+        `[documents.text-extract] gs unavailable for repair: ${err.message}`,
+      );
+      resolve(null);
+    });
+    proc.on("close", (code) => {
+      if (code === 0) {
+        console.log(
+          `[documents.text-extract] gs repair succeeded (qpdf had failed)`,
+        );
+        resolve(dst);
+      } else {
+        console.warn(
+          `[documents.text-extract] gs repair exited ${code}: ${stderr.trim()}`,
         );
         resolve(null);
       }
