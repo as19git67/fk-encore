@@ -46,7 +46,7 @@ const POLL_INTERVAL_MS = parseInt(process.env.DOC_SCAN_POLL_INTERVAL_MS ?? "3000
 
 const AI_MODEL_MAP: Partial<Record<DocumentScanService, AiModel>> = {
   classify: "llm",
-  embed: "llm",
+  embed: "embedding",
 };
 
 class DocumentScanWorker {

@@ -904,6 +904,13 @@
       "when": 1784160000000,
       "tag": "0128_learned_memory_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 129,
+      "version": "7",
+      "when": 1784246400000,
+      "tag": "0129_anomaly_payment_channel",
+      "breakpoints": true
     }
   ]
 }
