@@ -41,6 +41,7 @@ def test_healthz_reports_starting_before_models_load():
     assert body["llm_accelerator"] == main.LLM_ACCELERATOR
     assert body["llm_gpu_layers"] == main.LLM_GPU_LAYERS
     assert body["embedder_device"] == main.LLM_EMBED_DEVICE
+    assert body["embed_batch_size"] == main.LLM_EMBED_BATCH_SIZE
     # Diagnostic fields are always present so ops can spot memory growth /
     # tiny uptimes in a plain `curl` against /healthz.
     assert isinstance(body["rss_mb"], (int, float))
@@ -133,7 +134,7 @@ def test_embed_applies_prefix_to_encoder_input(monkeypatch):
     seen: dict[str, list[str]] = {}
 
     class _StubEmbedder:
-        def encode(self, texts, normalize_embeddings=True):
+        def encode(self, texts, normalize_embeddings=True, batch_size=32):
             seen["texts"] = list(texts)
             return _Vec(texts)
 

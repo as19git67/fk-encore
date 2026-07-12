@@ -13,6 +13,7 @@ services:
       LLM_GPU_LAYERS: ${LLM_GPU_OFFLOAD_LAYERS:--1}
       LLM_ACCELERATOR: cuda
       LLM_EMBED_DEVICE: ${LLM_GPU_EMBED_DEVICE:-cuda}
+      LLM_EMBED_BATCH_SIZE: ${LLM_GPU_EMBED_BATCH_SIZE:-32}
     deploy:
       resources:
         reservations:

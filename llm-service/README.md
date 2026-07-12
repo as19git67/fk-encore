@@ -132,6 +132,7 @@ Generates warm, personal titles and subtitles for private photo recaps (e.g., "A
 | `LLM_ACCELERATOR` | `cpu` | Runtime guard: `cpu` or `cuda` |
 | `LLM_GPU_LAYERS` | `0` | llama.cpp layers offloaded to GPU; the GPU profile uses `-1` (all) |
 | `LLM_EMBED_DEVICE` | `cpu` | Sentence-Transformer device: `cpu`, `cuda`, or `auto` |
+| `LLM_EMBED_BATCH_SIZE` | `32` | Chunk size `encode()` uses internally when `/embed` receives a large text list. Raise for higher GPU throughput on big batches; lower if VRAM is tight. |
 | `CLASSIFY_TEXT_CHAR_LIMIT` | `6000` | Max document characters fed to `/classify` (cheap pre-cap before the n_ctx token guard). Keep ≥ the app's `DOCUMENTS_CLASSIFY_CHAR_LIMIT`; raise both in lockstep with `LLM_CTX` to classify longer documents. |
 | `TAX_SECTIONS_MAX` | `4` | Dump-all backstop: when `/classify` returns more than this many tax sections at once it is treated as a confused small-model output and the entire tax assignment is dropped. Set to `0` to disable. |
 | `EMBEDDING_MODEL` | `intfloat/multilingual-e5-base` | Sentence-Transformers repo or path |
