@@ -17,6 +17,7 @@ import {
 } from "../db/schema";
 import {
   counterpartySimilarity,
+  derivePaymentChannel,
   normalizeCounterparty,
   runAnomalyDetection,
 } from "./anomaly-detector";
@@ -81,6 +82,8 @@ interface InsertTxOpts {
   creditorId?: string | null;
   counterpartyIban?: string | null;
   purpose?: string | null;
+  entryText?: string | null;
+  transactionType?: string | null;
 }
 
 let txCounter = 0;
@@ -98,8 +101,8 @@ async function insertTx(opts: InsertTxOpts): Promise<number> {
       mandate_ref: opts.mandateRef ?? null,
       creditor_id: opts.creditorId ?? null,
       purpose: opts.purpose ?? null,
-      // dedupe_hash is NOT NULL; we don't care about the value beyond
-      // uniqueness within a test run.
+      entry_text: opts.entryText ?? null,
+      transaction_type: opts.transactionType ?? null,
       dedupe_hash: `t-${Date.now()}-${txCounter}`.padEnd(64, "0").slice(0, 64),
     })
     .returning({ id: financeTransaction.id });
@@ -768,5 +771,221 @@ describe("finance/anomaly-detector — missing_transaction", () => {
         ),
       );
     expect(stillOpen).toHaveLength(0);
+  });
+});
+
+describe("finance/anomaly-detector — derivePaymentChannel", () => {
+  it("classifies ISO BTC family codes", () => {
+    expect(derivePaymentChannel({ transaction_type: "RDDT" })).toBe("direct_debit");
+    expect(derivePaymentChannel({ transaction_type: "IDDT" })).toBe("direct_debit");
+    expect(derivePaymentChannel({ transaction_type: "CCRD" })).toBe("card");
+    expect(derivePaymentChannel({ transaction_type: "MCRD" })).toBe("card");
+    expect(derivePaymentChannel({ transaction_type: "RCDT" })).toBe("transfer");
+    expect(derivePaymentChannel({ transaction_type: "ICDT" })).toBe("transfer");
+  });
+
+  it("falls back to entry_text when transaction_type is missing", () => {
+    expect(derivePaymentChannel({ entry_text: "Lastschrift" })).toBe("direct_debit");
+    expect(derivePaymentChannel({ entry_text: "SEPA-Lastschrift" })).toBe("direct_debit");
+    expect(derivePaymentChannel({ entry_text: "Kartenzahlung" })).toBe("card");
+    expect(derivePaymentChannel({ entry_text: "Karte Nr. 4871" })).toBe("card");
+    expect(derivePaymentChannel({ entry_text: "Überweisung" })).toBe("transfer");
+  });
+
+  it("falls back to mandate_ref presence", () => {
+    expect(derivePaymentChannel({ mandate_ref: "M-123" })).toBe("direct_debit");
+  });
+
+  it("returns other when nothing matches", () => {
+    expect(derivePaymentChannel({})).toBe("other");
+    expect(derivePaymentChannel({ entry_text: "Zinsen" })).toBe("other");
+  });
+});
+
+describe("finance/anomaly-detector — payment channel separation", () => {
+  it("does NOT fire amount_change when a card payment follows a long-ended direct-debit ABO to the same counterparty", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+
+    // 8 monthly direct-debit bookings ending ~400 days ago
+    for (let i = 0; i < 8; i++) {
+      await insertTx({
+        accountId,
+        bookingDate: daysAgo(400 + (7 - i) * 30),
+        amount: "-49.00",
+        counterparty: "DB Vertrieb GmbH",
+        entryText: "Lastschrift",
+        transactionType: "RDDT",
+        mandateRef: "M-DB-ABO",
+        creditorId: "DE00DB000",
+      });
+    }
+
+    // One-off card payment to the same counterparty, different amount
+    await insertTx({
+      accountId,
+      bookingDate: daysAgo(1),
+      amount: "-38.44",
+      counterparty: "DB Vertrieb GmbH",
+      entryText: "Kartenzahlung",
+      transactionType: "CCRD",
+    });
+
+    await runAnomalyDetection([accountId]);
+
+    const amountChanges = await db
+      .select()
+      .from(financeAnomaly)
+      .where(eq(financeAnomaly.type, "amount_change"));
+    expect(amountChanges).toHaveLength(0);
+
+    // The card payment should have created a SEPARATE mandate
+    const mandates = await db
+      .select()
+      .from(financeRecurringMandate)
+      .where(eq(financeRecurringMandate.account_id, accountId));
+    expect(mandates.length).toBeGreaterThanOrEqual(2);
+    const channels = mandates.map((m) => m.payment_channel);
+    expect(channels).toContain("direct_debit");
+    expect(channels).toContain("card");
+  });
+
+  it("keeps same-channel transactions in one mandate", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+
+    for (let i = 0; i < 3; i++) {
+      await insertTx({
+        accountId,
+        bookingDate: daysAgo(60 - i * 30),
+        amount: "-49.00",
+        counterparty: "Streaming GmbH",
+        entryText: "Lastschrift",
+      });
+    }
+
+    await runAnomalyDetection([accountId]);
+
+    const mandates = await db
+      .select()
+      .from(financeRecurringMandate)
+      .where(eq(financeRecurringMandate.account_id, accountId));
+    expect(mandates).toHaveLength(1);
+    expect(mandates[0].payment_channel).toBe("direct_debit");
+  });
+});
+
+describe("finance/anomaly-detector — inactivity gate", () => {
+  it("resets mandate baseline when a booking arrives after a long gap", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+
+    // 8 monthly bookings, last one 200 days ago
+    for (let i = 0; i < 8; i++) {
+      await insertTx({
+        accountId,
+        bookingDate: daysAgo(200 + (7 - i) * 30),
+        amount: "-25.00",
+        counterparty: "Verlag XY",
+        entryText: "Lastschrift",
+      });
+    }
+
+    // New booking after a long gap (200 days >> 30 × 4 = 120)
+    await insertTx({
+      accountId,
+      bookingDate: daysAgo(1),
+      amount: "-30.00",
+      counterparty: "Verlag XY",
+      entryText: "Lastschrift",
+    });
+
+    await runAnomalyDetection([accountId]);
+
+    // Mandate is reset, not duplicated
+    const mandates = await db
+      .select()
+      .from(financeRecurringMandate)
+      .where(eq(financeRecurringMandate.account_id, accountId));
+    expect(mandates).toHaveLength(1);
+    expect(mandates[0].transaction_count).toBe(1);
+
+    const amountChanges = await db
+      .select()
+      .from(financeAnomaly)
+      .where(eq(financeAnomaly.type, "amount_change"));
+    expect(amountChanges).toHaveLength(0);
+  });
+
+  it("does NOT split a mandate when the gap is within tolerance", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+
+    // 8 monthly bookings, last one 50 days ago (gap < 120 days)
+    for (let i = 0; i < 8; i++) {
+      await insertTx({
+        accountId,
+        bookingDate: daysAgo(50 + (7 - i) * 30),
+        amount: "-25.00",
+        counterparty: "Verlag XY",
+        entryText: "Lastschrift",
+      });
+    }
+
+    // New booking within normal range
+    await insertTx({
+      accountId,
+      bookingDate: daysAgo(1),
+      amount: "-25.00",
+      counterparty: "Verlag XY",
+      entryText: "Lastschrift",
+    });
+
+    await runAnomalyDetection([accountId]);
+
+    const mandates = await db
+      .select()
+      .from(financeRecurringMandate)
+      .where(eq(financeRecurringMandate.account_id, accountId));
+    expect(mandates).toHaveLength(1);
+  });
+
+  it("suppresses amount_change when interval gap is excessive (mandate reset)", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+
+    // 8 monthly bookings via counterparty-only matching, ending 500 days ago
+    for (let i = 0; i < 8; i++) {
+      await insertTx({
+        accountId,
+        bookingDate: daysAgo(500 + (7 - i) * 30),
+        amount: "-49.00",
+        counterparty: "Alt GmbH",
+      });
+    }
+
+    // New booking same counterparty, different amount, after huge gap
+    await insertTx({
+      accountId,
+      bookingDate: daysAgo(1),
+      amount: "-38.00",
+      counterparty: "Alt GmbH",
+    });
+
+    await runAnomalyDetection([accountId]);
+
+    const amountChanges = await db
+      .select()
+      .from(financeAnomaly)
+      .where(eq(financeAnomaly.type, "amount_change"));
+    expect(amountChanges).toHaveLength(0);
+
+    // Mandate baseline is reset
+    const mandates = await db
+      .select()
+      .from(financeRecurringMandate)
+      .where(eq(financeRecurringMandate.account_id, accountId));
+    expect(mandates).toHaveLength(1);
+    expect(mandates[0].transaction_count).toBe(1);
   });
 });
