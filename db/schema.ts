@@ -1892,6 +1892,7 @@ export const financeRecurringMandate = pgTable(
     creditor_id: text("creditor_id"),
     counterparty_iban: text("counterparty_iban"),
     counterparty: text("counterparty"),
+    payment_channel: text("payment_channel"),
     typical_amount: numeric("typical_amount", { precision: 12, scale: 2 }),
     typical_interval_days: integer("typical_interval_days"),
     transaction_count: integer("transaction_count").notNull().default(0),
