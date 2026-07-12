@@ -9,8 +9,10 @@ Prüft zwei unabhängige Achsen gegen Qwen (den lokalen Klassifikator):
   1. Kategorie (category_slug) — wie schon bisher.
   2. Steuerrelevanz (tax_relevant / tax_year / tax_sections) — NEU. Claude
      bekommt exakt dieselbe STEUER-ERKENNUNG-Anleitung wie der lokale
-     Klassifikator (wortgleich aus documents/classify-prompts.ts übernommen),
-     damit der Vergleich die Modellqualität misst, nicht Prompt-Unterschiede.
+     Klassifikator: der Prompt wird zur Laufzeit direkt aus
+     documents/classify-prompts.ts gelesen (kein dupliziertes, driftendes
+     Copy), damit der Vergleich die Modellqualität misst, nicht Prompt-
+     Unterschiede.
 
 Die Stichprobe zieht gezielt aus den aktuell auffälligen bzw. vorher toten
 Steuer-Sektionen (AUDIT_TAX_FOCUS_SECTIONS), weil genau dort ein Diagnose-Lauf
@@ -329,99 +331,23 @@ Antworte ausschließlich mit gültigem JSON (ohne Markdown-Fences):
 Wenn kein Taxonomie-Slug passt, verwende "sonstiges". Wenn das Dokument nicht
 steuerrelevant ist: tax_relevant=false, tax_year=null, tax_sections=[]."""
 
-# Wortgleich aus documents/classify-prompts.ts (CLASSIFY_TAX_PROMPT) übernommen,
-# nur die "(nur wenn dir unten eine Liste gezeigt wird)"-Klausel entfernt, weil
-# die Steuer-Sektionsliste hier immer mitgeschickt wird. Bewusst 1:1 identisch
-# zum lokalen Klassifikator-Prompt, damit der Vergleich Modellqualität misst,
-# nicht Prompt-Unterschiede.
-_TAX_GUIDANCE = """
-STEUER-ERKENNUNG
-Beurteile zusätzlich, ob das Dokument als Beleg für die deutsche
-Einkommensteuererklärung dient.
+def _load_tax_guidance() -> str:
+    """Lies CLASSIFY_TAX_PROMPT wortgleich aus documents/classify-prompts.ts.
 
-Zusätzliche Felder:
-- tax_relevant (bool): true, wenn das Dokument üblicherweise als Beleg,
-  Bescheinigung oder Bescheid für die Einkommensteuererklärung dient
-  (Lohnsteuerbescheinigung, Jahressteuerbescheinigung der Bank, Spenden-
-  quittung, Handwerker-/Haushaltshilfe-Rechnung, Krankheitskosten,
-  Vermietungsbelege, Kinderbetreuung, Steuerbescheid,
-  Photovoltaik-Einspeiseabrechnungen, …). false bei rein privaten Belegen
-  ohne Steuerbezug (Supermarktkassenbon, Werbung, privater Schriftverkehr).
-- tax_year (int | null): vierstelliges Kalenderjahr, für das der Beleg
-  steuerlich zählt. Bei Jahresbescheinigungen ("Jahressteuerbescheinigung
-  2024"): das genannte Jahr. Bei Einzelrechnungen: das Jahr des Leistungs-
-  bzw. Zahlungsdatums (Zuflussprinzip). Bei Unsicherheit: null.
-- tax_year_confidence (0..1): Vertrauen in das Steuerjahr.
-- tax_sections: Liste der passenden Sektions-Slugs aus der unten gegebenen
-  Liste, jeweils mit eigener confidence. Ein Beleg darf mehreren Sektionen
-  zugeordnet werden (z.B. Handwerkerrechnung für das vermietete Objekt →
-  sowohl werbungskosten-v als auch ggf. haushaltsnahe, falls Eigennutzungs-
-  anteil). Leere Liste = keine passende Sektion / nicht steuerrelevant.
-  Format: [{"slug": "anlage-n", "confidence": 0.91}, ...]. Verwende nur
-  Slugs aus der Liste; erfinde keine neuen.
+    So bekommt Claude im Audit exakt dieselbe STEUER-ERKENNUNG-Anleitung wie der
+    lokale Klassifikator — ohne Drift, wenn der Prompt dort weiterentwickelt
+    wird. Der Vergleich misst damit Modellqualität, nicht Prompt-Unterschiede.
+    """
+    text = (c.REPO_ROOT / "documents" / "classify-prompts.ts").read_text("utf8")
+    m = re.search(r"CLASSIFY_TAX_PROMPT\s*=\s*`(.*?)`", text, re.DOTALL)
+    if not m:
+        raise RuntimeError(
+            "CLASSIFY_TAX_PROMPT nicht in documents/classify-prompts.ts gefunden"
+        )
+    return m.group(1).strip()
 
-PRÄZISION (sehr wichtig): Ordne eine Sektion NUR zu, wenn der Beleg sie
-konkret betrifft. Die meisten Belege gehören zu genau EINER Sektion, viele
-zu KEINER. Vergib niemals mehrere Abzugs-Sektionen pauschal „auf Verdacht"
-(eine Renteninformation gehört z. B. nur zu anlage-r, NICHT zusätzlich zu
-Werbungskosten, Sonderausgaben usw.). Im Zweifel: leere Liste.
 
-WICHTIGE ABGRENZUNGSREGELN:
-
-1) Wertpapiere / Kapitalerträge:
-- Dividendengutschrift, Wertpapierabrechnung, Erträgnisaufstellung,
-  Jahressteuerbescheinigung einer Bank oder eines Brokers → IMMER
-  „anlage-kap", NIEMALS „anlage-n".
-- Dokumente, die Kapitalertragsteuer (KESt), Solidaritätszuschlag oder
-  Kirchensteuer im Zusammenhang mit Dividenden, Zinsen oder Wertpapieren
-  ausweisen (z. B. Steueraufstellung von Comdirect, ING, Trade Republic)
-  → „anlage-kap". Diese Steuerabzüge beziehen sich auf Kapitalerträge,
-  nicht auf Arbeitseinkommen.
-- Anlage N ist ausschließlich für Arbeitseinkommen (Gehalt,
-  Lohnsteuerbescheinigung vom Arbeitgeber).
-- MONATLICHE Gehalts-/Entgeltabrechnungen sind NICHT steuerrelevant
-  (tax_relevant=false, tax_sections=[]), weil die Lohnsteuerbescheinigung
-  am Jahresende alle relevanten Daten zusammenfasst. Nur die
-  Lohnsteuerbescheinigung selbst gehört zu „anlage-n".
-
-2) Handwerkerrechnungen:
-- Handwerkerrechnung / Reparaturrechnung für die SELBST BEWOHNTE Wohnung
-  oder das eigene Haus → „haushaltsnahe" (§35a EStG), NICHT anlage-n oder
-  werbungskosten-n.
-- Enthält eine Rechnung einen ausgewiesenen „absetzbaren Anteil nach §35a
-  EStG" oder „Lohnkostenanteil nach §35a", ist sie IMMER steuerrelevant
-  (tax_relevant=true) → „haushaltsnahe". Dies gilt auch ohne beigefügten
-  Kontoauszug oder Überweisungsbeleg — die Rechnung allein ist der Beleg.
-- Typische Aussteller: Heizungsbauer, Haustechnik, Sanitär, Elektriker,
-  Maler, Dachdecker, Schreiner, Schornsteinfeger, Gärtner.
-- Handwerkerrechnung für ein VERMIETETES Objekt → „werbungskosten-v".
-- Nur wenn aus dem Dokument eindeutig hervorgeht, dass die Leistung
-  beruflich veranlasst ist (z. B. Arbeitszimmer-Renovierung beim
-  Arbeitnehmer), kommt zusätzlich „werbungskosten-n" in Frage.
-  Im Zweifel: „haushaltsnahe".
-
-3) Photovoltaik / Stromeinspeisung:
-- Einspeisevergütungs-Abrechnungen eines Netzbetreibers (Bayernwerk,
-  E.ON, EnBW, Vattenfall u. a.) für eine PV-Anlage sind IMMER
-  steuerrelevant (tax_relevant=true) → „anlage-g" (Gewerbeeinkünfte).
-- Erkennungsmerkmale: Stromeinspeisung, Einspeisestelle, kWp,
-  EEG-Vergütung, Erzeugungsanlage, Abschlagszahlung an den Betreiber.
-- Auch wenn PV-Kleinanlagen (<30 kWp) seit 2023 einkommensteuerbefreit
-  sein können (§3 Nr. 72 EStG), bleibt das Dokument steuerrelevant und
-  gehört in anlage-g.
-
-4) Spenden und Zuwendungen:
-- Eine Spendenquittung, Zuwendungsbestätigung oder Sammelbestätigung einer
-  gemeinnützigen Organisation ist IMMER steuerrelevant (tax_relevant=true)
-  und gehört zu „sonderausgaben".
-- Erkennungsmerkmale sind „Spendenquittung", „Zuwendungsbestätigung",
-  „Sammelbestätigung", „§ 10b EStG", ein Gesamtbetrag der Zuwendung oder
-  eine Bestätigung über die steuerbegünstigte Verwendung. Das gilt auch für
-  Organisationen wie UNICEF, Deutsches Rotes Kreuz oder Caritas.
-- Verwechsle solche Belege niemals mit einer Meldung zur Sozialversicherung;
-  diese stammt typischerweise vom Arbeitgeber und bezieht sich auf gemeldete
-  Sozialversicherungsentgelte.
-"""
+_TAX_GUIDANCE = _load_tax_guidance()
 
 
 def _build_system(tax_outline: str) -> str:
