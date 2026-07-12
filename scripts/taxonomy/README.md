@@ -37,19 +37,32 @@ Ergebnisse reviewen unter `scripts/taxonomy/out/`:
 
 ## Cloud-Audit (Etappe F)
 
-`cloud_audit.py` lässt Claude eine Stichprobe (Default 300) klassifizieren und
-vergleicht das Ergebnis mit der lokalen Qwen-Klassifikation. PII wird vor dem
-API-Call gescruppt (gleiche Infrastruktur wie `_common.py`).
+`cloud_audit.py` lässt Claude eine Stichprobe klassifizieren und vergleicht das
+Ergebnis mit der lokalen Qwen-Klassifikation auf zwei unabhängigen Achsen:
+
+- **Kategorie** (Default-Stichprobe 300: sonstiges + low-confidence + random).
+- **Steuerrelevanz / -sektionen** (Default-Stichprobe 100, gezielt aus den
+  aktuell auffälligen bzw. vorher toten Sektionen — `AUDIT_TAX_FOCUS_SECTIONS`).
+  Claude bekommt dieselbe STEUER-ERKENNUNG-Anleitung wie der lokale
+  Klassifikator (wortgleich aus `documents/classify-prompts.ts`), damit der
+  Vergleich Modellqualität misst statt Prompt-Unterschiede.
+
+PII wird vor dem API-Call gescruppt (gleiche Infrastruktur wie `_common.py`).
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-npm run audit:taxonomy                     # Standard-Stichprobe (300)
-AUDIT_SAMPLE=100 npm run audit:taxonomy    # kleinere Stichprobe
+npm run audit:taxonomy                     # Standard-Stichprobe (300 Kategorie + 100 Steuer)
+AUDIT_SAMPLE=100 npm run audit:taxonomy    # kleinere Kategorie-Stichprobe
+AUDIT_TAX_SAMPLE=50 npm run audit:taxonomy # kleinere Steuer-Stichprobe
+AUDIT_TAX_FOCUS_SECTIONS=anlage-g,anlage-kind npm run audit:taxonomy  # andere Fokus-Sektionen
 AUDIT_MODEL=claude-sonnet-4-20250514 npm run audit:taxonomy  # anderes Modell
+AUDIT_DRY_RUN=1 npm run audit:taxonomy     # Prompts nur schreiben, nichts an die API senden
 ```
 
-Ergebnisse: `out/cloud_audit.md` (Disagreement-Report),
-`out/cloud_audit_gold.json` (bestätigte Gold-Labels),
+Ergebnisse: `out/cloud_audit.md` (Disagreement-Report — §1–4 Kategorie, §5
+Steuer inkl. Confusion-Matrix "Qwen steuerrelevant vs. Claude bestätigt" und
+Bestätigungsrate je Sektion), `out/cloud_audit_gold.json` (bestätigte
+Gold-Labels, inkl. Steuerfeldern wo auch dort Übereinstimmung besteht),
 `out/cloud_audit_full.json` (alle Ergebnisse).
 
 ## Anonymisierung

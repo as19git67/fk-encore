@@ -134,7 +134,36 @@ WICHTIGE ABGRENZUNGSREGELN:
   Organisationen wie UNICEF, Deutsches Rotes Kreuz oder Caritas.
 - Verwechsle solche Belege niemals mit einer Meldung zur Sozialversicherung;
   diese stammt typischerweise vom Arbeitgeber und bezieht sich auf gemeldete
-  Sozialversicherungsentgelte.`;
+  Sozialversicherungsentgelte.
+
+5) Renten-/Lebens-/Riester-Versicherungen (WICHTIG — häufigste Fehlerquelle):
+- Steuerrelevant (tax_relevant=true) ist bei privaten Renten-, Lebens- und
+  Riester-/Rürup-Versicherungen NUR der tatsächliche Steuerbeleg:
+  • Beitragsbescheinigung/-mitteilung nach §10a EStG (Riester-Sonderausgaben),
+  • Zulagenbescheinigung nach §92 EStG,
+  • Beitragsbescheinigung nach §10 EStG (Vorsorgeaufwand),
+  • Leistungs-/Renten-/Auszahlungsmitteilung (steuerpflichtige Auszahlung),
+  • Jahressteuerbescheinigung des Versicherers.
+  → dann „anlage-av" (Riester/Rürup/bAV) bzw. „vorsorgeaufwand" bzw. „anlage-r".
+- NICHT steuerrelevant (tax_relevant=false, tax_sections=[]) sind reine
+  Verwaltungs-/Vertragsschreiben OHNE ausgewiesene Beiträge zum Einreichen:
+  Erhöhungsnachtrag, Dynamik-Nachtrag, Widerspruch zur Dynamik,
+  Statusreport/Standmitteilung zum Vertragsstand in der Ansparphase,
+  Fondsumschichtung, Kontakt-/Adressänderung, allgemeine Produktinfo.
+  Das Wort „Riester", „Rentenversicherung" oder ein Vertragsstand allein
+  macht ein Dokument NICHT steuerrelevant — entscheidend ist eine konkrete,
+  zum Einreichen bestimmte Bescheinigung mit Beitrags-/Auszahlungsbetrag.
+- Analog zu den monatlichen Gehaltsabrechnungen: die laufende Vertragspost
+  ist kein Steuerbeleg, nur die jährliche Bescheinigung zählt.
+
+6) Steuererklärungen und Bescheide — nur die deutsche Einkommensteuer:
+- „mantelbogen"/„anlage-*" und die deutsche Einkommensteuererklärung betreffen
+  ausschließlich die deutsche private Einkommensteuer.
+- NICHT steuerrelevant im Sinne dieser Sektionen sind: Umsatzsteuererklärungen
+  (betreffen die Umsatzsteuer des Unternehmers), Gewerbesteuererklärungen sowie
+  AUSLÄNDISCHE Steuererklärungen (z. B. US-Einkommensteuererklärung/US tax
+  return) und deren Steuerberater-Fragebögen. Diese gehören NICHT zu
+  „mantelbogen" (tax_sections=[]).`;
 
 export const CLASSIFY_SUBJECT_PERSONS_PROMPT = `
 

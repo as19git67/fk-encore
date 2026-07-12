@@ -58,6 +58,29 @@ def taxonomy_slugs() -> list[str]:
     return re.findall(r'slug:\s*"([^"]+)"', text)
 
 
+def tax_sections_with_hints() -> list[dict]:
+    """[{slug, group, name, hint}] aus documents/tax-sections.ts.
+
+    Separat von `tax_sections()` (die keinen Hint braucht, z.B. `mine_hints.py`),
+    damit dort nichts kaputtgeht. Wird vom Cloud-Audit genutzt, um Claude
+    dieselbe Sektions-Beschreibung wie dem lokalen Klassifikator zu zeigen.
+    """
+    text = (REPO_ROOT / "documents" / "tax-sections.ts").read_text(encoding="utf8")
+    out = []
+    for m in re.finditer(
+        r'slug:\s*"([^"]+)",\s*group:\s*"([^"]+)",\s*name:\s*"([^"]+)",\s*'
+        r'hint:\s*"((?:[^"\\]|\\.)*)"',
+        text,
+    ):
+        out.append({
+            "slug": m.group(1),
+            "group": m.group(2),
+            "name": m.group(3),
+            "hint": m.group(4).replace('\\"', '"'),
+        })
+    return out
+
+
 # ── PII-Scrubbing für anonymisierten Cloud-Export ───────────────────────────
 _IBAN = re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b")
 _AMOUNT = re.compile(r"\b\d{1,3}(?:[.\s]\d{3})*,\d{2}\s?(?:€|EUR)?\b")
