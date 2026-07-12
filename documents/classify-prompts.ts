@@ -36,6 +36,8 @@ Felder:
   Präfix, oder null.
 - summary: 1-2 Sätze, deutsch, nüchtern — "Worum geht es?".
 - tags: bis zu max_tags kurze, kleingeschriebene Stichwörter (keine Sätze).
+  Deutsche Umlaute und ß beibehalten (z. B. „prüfung", „tüv", „süd", „straße") —
+  NICHT zu ae/oe/ue/ss auflösen und NICHT weglassen.
   Bei Kassenbons/Belegen: Tags NUR aus tatsächlich gekauften Artikeln ableiten.
   Werbetext, Coupon-Aktionen, Prospekthinweise und Rabattangebote am Belegende
   (z.B. "20% auf Sonnenpflege", "Sonnenbrillen Deal", App-Hinweise) NICHT in

@@ -59,6 +59,9 @@ LLM_THREADS = _env_int("LLM_THREADS", os.cpu_count() or 4)
 LLM_GPU_LAYERS = _env_int("LLM_GPU_LAYERS", 0)
 LLM_ACCELERATOR = (os.environ.get("LLM_ACCELERATOR") or "cpu").lower()
 LLM_EMBED_DEVICE = (os.environ.get("LLM_EMBED_DEVICE") or "cpu").lower()
+# sentence-transformers' own default; raising it trades VRAM/RAM for fewer,
+# bigger chunks when a caller sends large text lists to /embed.
+LLM_EMBED_BATCH_SIZE = _env_int("LLM_EMBED_BATCH_SIZE", 32)
 
 if LLM_ACCELERATOR not in {"cpu", "cuda"}:
     raise ValueError("LLM_ACCELERATOR must be 'cpu' or 'cuda'")
@@ -360,6 +363,7 @@ async def healthz() -> dict[str, Any]:
         "llm_gpu_layers": LLM_GPU_LAYERS,
         "embedding_model": EMBEDDING_MODEL,
         "embedder_device": _state["embedder_device"] or LLM_EMBED_DEVICE,
+        "embed_batch_size": LLM_EMBED_BATCH_SIZE,
         "cuda_device_name": _state["cuda_device_name"],
         "rss_mb": round(_rss_mb(), 1),
         "uptime_s": round(uptime_s, 1) if uptime_s is not None else None,
@@ -436,7 +440,9 @@ async def embed(req: EmbedRequest) -> EmbedResponse:
         raise HTTPException(status_code=503, detail="embedder not loaded")
     prepared = _apply_embedding_prefix(req.texts, req.kind)
     vectors = await _run_blocking(
-        lambda: embedder.encode(prepared, normalize_embeddings=True).tolist()
+        lambda: embedder.encode(
+            prepared, normalize_embeddings=True, batch_size=LLM_EMBED_BATCH_SIZE
+        ).tolist()
     )
     return EmbedResponse(embeddings=vectors, dim=len(vectors[0]) if vectors else 0)
 
