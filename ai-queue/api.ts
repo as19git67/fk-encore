@@ -37,9 +37,58 @@ export interface QueueStatusResponse {
   models: QueueModelStatus[];
 }
 
+let startupCleanupPromise: Promise<void> | null = null;
+
+async function clearAllSlots(reason: string): Promise<{ cleaned: number }> {
+  const stale = await db.execute<{ id: number; model_name: string; status: string }>(sql`
+    DELETE FROM ai_model_slot
+    RETURNING id, model_name, status
+  `);
+
+  const cleaned = stale.rows.length;
+  if (cleaned > 0) {
+    const byModel = new Map<string, number>();
+    for (const row of stale.rows) {
+      byModel.set(row.model_name, (byModel.get(row.model_name) ?? 0) + 1);
+    }
+    const details = Array.from(byModel.entries())
+      .map(([model, count]) => `${model}=${count}`)
+      .join(", ");
+    console.log(`[ai-queue] cleared ${cleaned} slot(s) on ${reason}: ${details}`);
+  }
+  return { cleaned };
+}
+
+/**
+ * Remove slots left behind by an app-service restart.
+ *
+ * The slot table is only an in-process scheduling aid for the app container.
+ * After a restart there are no live waiters or protected LLM calls from the old
+ * process, so both active and waiting rows are stale. Leaving them around can
+ * block the first real post-restart document/classification job behind a
+ * phantom active slot.
+ */
+export async function resetSlotsOnStartup(): Promise<{ cleaned: number }> {
+  return clearAllSlots("startup");
+}
+
+export async function ensureStartupSlotsCleared(): Promise<void> {
+  if (!startupCleanupPromise) {
+    startupCleanupPromise = resetSlotsOnStartup()
+      .then(() => undefined)
+      .catch((err) => {
+        startupCleanupPromise = null;
+        throw err;
+      });
+  }
+  await startupCleanupPromise;
+}
+
 export const acquireSlot = api(
   { method: "POST", path: "/ai-queue/acquire", expose: false },
   async (req: AcquireSlotRequest): Promise<AcquireSlotResponse> => {
+    await ensureStartupSlotsCleared();
+
     const insertRows = await db.execute<{ id: number }>(sql`
       INSERT INTO ai_model_slot (model_name, priority, requester, status, enqueued_at)
       VALUES (${req.model}, ${req.priority}, ${req.requester}, 'waiting', NOW())
