@@ -219,6 +219,14 @@ From then on:
 Both paths are idempotent: the in-database high-water mark dedupes
 concurrent updates and re-runs.
 
+Replication also requires osm2pgsql's retained slim middle tables
+(`planet_osm_nodes`, `planet_osm_ways`, `planet_osm_rels`). Fresh imports keep
+these tables by running `osm2pgsql --slim` without `--drop`. Older imports that
+discarded them cannot be updated with replication diffs afterwards: the geo
+service detects this before starting `osm2pgsql-replication`, skips the
+background update with a clear warning, and explicit refreshes report that the
+region must be reimported.
+
 ## Status reference
 
 | Status | Meaning |

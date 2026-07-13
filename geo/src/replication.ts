@@ -29,7 +29,7 @@ import path from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { adminPool, connectionInfo } from "./db.ts";
+import { adminPool, connectionInfo, poolFor } from "./db.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -65,6 +65,7 @@ export interface ReplicationStatusQuery {
 // same warning every hour hides real failures in otherwise healthy logs. The
 // entry is removed as soon as the region becomes initialized.
 const warnedUninitialized = new Set<string>();
+const warnedNotUpdatable = new Set<string>();
 
 /**
  * Geofabrik publishes its replication state under
@@ -131,6 +132,27 @@ export async function runReplicationUpdate(
   }
   warnedUninitialized.delete(postgresDb);
 
+  const updateStorage = await getUpdateStorageStatus(postgresDb);
+  if (!updateStorage.updatable) {
+    const msg =
+      `osm2pgsql slim middle table(s) missing: ${updateStorage.missingTables.join(", ")}. ` +
+      `This region was imported without retained slim tables; reimport it to enable replication.`;
+    if (pbfUrl) {
+      throw new Error(msg);
+    }
+    if (!warnedNotUpdatable.has(postgresDb)) {
+      warnedNotUpdatable.add(postgresDb);
+      console.warn(`[geo] replication ${postgresDb}: ${msg} Skipping background update.`);
+    }
+    return {
+      postgresDb,
+      appliedDiffs: 0,
+      sequence: status.sequence,
+      timestamp: status.timestamp,
+    };
+  }
+  warnedNotUpdatable.delete(postgresDb);
+
   // `osm2pgsql-replication update` prints summary lines we parse for
   // metrics. Capture stdout/stderr instead of inheriting.
   const before = await readState(postgresDb);
@@ -168,6 +190,25 @@ export async function runReplicationUpdate(
     sequence: after.sequence,
     timestamp: after.timestamp,
   };
+}
+
+export async function getUpdateStorageStatus(
+  postgresDb: string,
+  db: ReplicationStatusQuery = poolFor(postgresDb),
+): Promise<{ updatable: boolean; missingTables: string[] }> {
+  const expected = [
+    "planet_osm_nodes",
+    "planet_osm_ways",
+    "planet_osm_rels",
+  ] as const;
+  const rows = await db.query<Record<(typeof expected)[number], string | null>>(
+    `SELECT to_regclass('public.planet_osm_nodes')::text AS planet_osm_nodes,
+            to_regclass('public.planet_osm_ways')::text AS planet_osm_ways,
+            to_regclass('public.planet_osm_rels')::text AS planet_osm_rels`,
+  );
+  const found = rows.rows[0] ?? {};
+  const missingTables = expected.filter((name) => !found[name]);
+  return { updatable: missingTables.length === 0, missingTables };
 }
 
 /**
