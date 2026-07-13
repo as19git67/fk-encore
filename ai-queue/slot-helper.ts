@@ -93,16 +93,55 @@ export async function withAiSlot<T>(
 ): Promise<T> {
   const slot = await aiqueue.acquireSlot({ model, priority, requester });
   const slotId = slot.slotId;
+  const acquiredAt = Date.now();
+  console.log(
+    `[ai-queue] ${requester} acquired ${model} slot ${slotId} ` +
+      `status=${slot.status} position=${slot.position}`,
+  );
 
   try {
     if (slot.status === "waiting") {
+      console.log(
+        `[ai-queue] ${requester} waiting for ${model} slot ${slotId} ` +
+          `position=${slot.position}`,
+      );
       await waitForActiveSlot(slotId, model, timeoutMs);
+      console.log(
+        `[ai-queue] ${requester} ${model} slot ${slotId} became active ` +
+          `after ${Date.now() - acquiredAt}ms`,
+      );
     }
-    return await fn();
+    const runStartedAt = Date.now();
+    console.log(
+      `[ai-queue] ${requester} running with active ${model} slot ${slotId}`,
+    );
+    try {
+      const result = await fn();
+      console.log(
+        `[ai-queue] ${requester} finished ${model} slot ${slotId} ` +
+          `in ${Date.now() - runStartedAt}ms`,
+      );
+      return result;
+    } catch (err: any) {
+      console.warn(
+        `[ai-queue] ${requester} failed while using ${model} slot ${slotId} ` +
+          `after ${Date.now() - runStartedAt}ms: ${err?.message ?? err}`,
+      );
+      throw err;
+    }
   } finally {
     // Frees the slot (and promotes the next waiter) whether we ran, timed out
     // after racing to active, or fn() threw. A no-op if the row is already gone
     // (e.g. cancelSlot removed a still-waiting slot on timeout).
-    await aiqueue.releaseSlot({ slotId }).catch(() => {});
+    await aiqueue.releaseSlot({ slotId }).catch((err: any) => {
+      console.warn(
+        `[ai-queue] ${requester} could not release ${model} slot ${slotId}: ` +
+          `${err?.message ?? err}`,
+      );
+    });
+    console.log(
+      `[ai-queue] ${requester} released ${model} slot ${slotId} ` +
+        `after ${Date.now() - acquiredAt}ms total`,
+    );
   }
 }
