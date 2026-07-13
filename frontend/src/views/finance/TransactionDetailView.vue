@@ -316,6 +316,7 @@ async function addUserTags() {
     await api.batchTag({
       transaction_ids: [tx.value.id],
       add: newTag.value,
+      promote_ai_tags: false,
     })
     tagsStore.addLocal(newTag.value)
     tx.value = await api.getTransaction(tx.value.id)
@@ -420,6 +421,7 @@ async function save() {
       await api.batchTag({
         transaction_ids: [tx.value.id],
         add: newTag.value,
+        promote_ai_tags: false,
       })
       tagsStore.addLocal(newTag.value)
       newTag.value = []
