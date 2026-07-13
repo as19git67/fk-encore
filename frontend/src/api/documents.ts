@@ -483,6 +483,18 @@ export function reclassifyAllDocuments(mode: ReclassifyAllMode) {
   })
 }
 
+export interface RelocateAllDocumentsResponse {
+  processed: number
+  moved: number
+  failed: number
+}
+
+export function relocateAllDocuments() {
+  return apiFetch<RelocateAllDocumentsResponse>('/documents/relocate-all', {
+    method: 'POST',
+  })
+}
+
 export function reclassifyDocument(
   id: number,
   options: { forceOcr?: boolean } = {},

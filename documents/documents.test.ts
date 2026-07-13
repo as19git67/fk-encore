@@ -101,6 +101,7 @@ describe("documents.service buildSpeakingFileName", () => {
     categorySlugs: null,
     status: "ready",
     docDate: "2026-04-15",
+    documentNumber: null,
     uploadedAt: new Date("2026-04-17T12:00:00Z"),
     sender: "Finanzamt München",
     title: "Einkommensteuerbescheid 2025",
@@ -109,21 +110,39 @@ describe("documents.service buildSpeakingFileName", () => {
     ext: ".pdf",
   };
 
-  it("joins date, sender, title and hash8 suffix", () => {
+  it("joins year, sender, title and hash8 suffix", () => {
     expect(buildSpeakingFileName(base)).toBe(
-      "2026-04-15_finanzamt-muenchen_einkommensteuerbescheid-2025__a1b2c3d4.pdf",
+      "2026_finanzamt-muenchen_einkommensteuerbescheid-2025__a1b2c3d4.pdf",
     );
   });
 
-  it("falls back to uploaded date when docDate is null", () => {
+  it("omits the year prefix and falls back to uploaded date when docDate is null", () => {
     const out = buildSpeakingFileName({ ...base, docDate: null });
     expect(out.startsWith("2026-04-17_")).toBe(true);
+    expect(out.startsWith("2026_2026-04-17_")).toBe(false);
   });
 
-  it("drops missing sender/title parts but keeps the date + hash", () => {
-    // Sender and title reduce to empty slugs; the date remains the sole
+  it("adds the document number prefix when present", () => {
+    expect(buildSpeakingFileName({ ...base, documentNumber: "2661160" })).toBe(
+      "2026_#2661160_finanzamt-muenchen_einkommensteuerbescheid-2025__a1b2c3d4.pdf",
+    );
+  });
+
+  it("omits the year prefix when only a document number exists", () => {
+    const out = buildSpeakingFileName({
+      ...base,
+      docDate: null,
+      documentNumber: "2661160",
+    });
+    expect(out).toBe(
+      "#2661160_2026-04-17_finanzamt-muenchen_einkommensteuerbescheid-2025__a1b2c3d4.pdf",
+    );
+  });
+
+  it("drops missing sender/title parts but keeps the year + hash", () => {
+    // Sender and title reduce to empty slugs; the year remains the sole
     // human-readable part. `dokument` is the final fallback reserved for
-    // the pathological case where *nothing* (not even the date) would
+    // the pathological case where *nothing* (not even the year) would
     // remain.
     const out = buildSpeakingFileName({
       ...base,
@@ -131,7 +150,7 @@ describe("documents.service buildSpeakingFileName", () => {
       title: null,
       originalFilename: "!!!.pdf",
     });
-    expect(out).toBe("2026-04-15__a1b2c3d4.pdf");
+    expect(out).toBe("2026__a1b2c3d4.pdf");
   });
 });
 
@@ -143,6 +162,7 @@ describe("documents.service resolveDocumentDiskPath", () => {
     categorySlugs: ["finanzen", "steuern"],
     status: "ready",
     docDate: "2026-04-15",
+    documentNumber: null,
     uploadedAt: new Date("2026-04-17T00:00:00Z"),
     sender: "Finanzamt",
     title: "Bescheid",
@@ -155,7 +175,7 @@ describe("documents.service resolveDocumentDiskPath", () => {
     const { relPath, inbox } = resolveDocumentDiskPath(readyCtx);
     expect(inbox).toBe(false);
     expect(relPath).toBe(
-      path.join("max", "finanzen", "steuern", "2026", "2026-04-15_finanzamt_bescheid__aaaaaaaa.pdf"),
+      path.join("max", "finanzen", "steuern", "2026", "2026_finanzamt_bescheid__aaaaaaaa.pdf"),
     );
   });
 
@@ -193,7 +213,7 @@ describe("documents.service resolveDocumentDiskPath", () => {
   it("resolveTaxLinkPath lands under <owner>/_steuer/<year>/<section>", () => {
     const { relPath } = resolveTaxLinkPath(readyCtx, 2025, "anlage-n");
     expect(relPath).toBe(
-      path.join("max", STEUER_SEGMENT, "2025", "anlage-n", "2026-04-15_finanzamt_bescheid__aaaaaaaa.pdf"),
+      path.join("max", STEUER_SEGMENT, "2025", "anlage-n", "2026_finanzamt_bescheid__aaaaaaaa.pdf"),
     );
   });
 });
