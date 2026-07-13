@@ -848,7 +848,7 @@ interface BatchTagParams {
   add?: string[];
   remove?: string[];
   replace?: boolean; // when true, clear all existing user-tags before adding
-  promote_ai_tags?: boolean; // when true, promote AI tags to user tags; when false/absent, remove them
+  promote_ai_tags?: boolean; // true: promote AI tags; false: remove AI tags; undefined: keep AI tags untouched
 }
 
 interface BatchTagResponse {

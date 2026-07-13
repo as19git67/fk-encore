@@ -31,7 +31,6 @@ import { computed, ref, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
-import Checkbox from 'primevue/checkbox'
 import Message from 'primevue/message'
 import { useTagsStore } from '../../stores/finance/tags'
 import { useTxSelectionStore } from '../../stores/finance/selection'
@@ -73,7 +72,8 @@ interface TagRow {
 
 const search = ref('')
 const tagRows = ref<TagRow[]>([])
-const promoteAiTags = ref(false)
+type AiTagMode = 'keep' | 'promote' | 'remove'
+const aiTagMode = ref<AiTagMode>('keep')
 const saving = ref(false)
 const error = ref<string | null>(null)
 
@@ -113,7 +113,7 @@ watch(
   async (open) => {
     if (!open) return
     search.value = ''
-    promoteAiTags.value = false
+    aiTagMode.value = 'keep'
     error.value = null
     saving.value = false
     tagRows.value = []
@@ -165,11 +165,17 @@ async function save() {
     else if (row.state === 'unchecked') remove.push(row.name)
   }
   try {
+    const promote_ai_tags =
+      aiTagMode.value === 'promote'
+        ? true
+        : aiTagMode.value === 'remove'
+          ? false
+          : undefined
     await txStore.batchTag({
       transaction_ids: workingSet.value.map((tx) => tx.id),
       add,
       remove,
-      promote_ai_tags: promoteAiTags.value,
+      ...(promote_ai_tags !== undefined ? { promote_ai_tags } : {}),
     })
     // When the basket store is the source, keep its in-memory items in
     // sync with what the server now sees so reopening the dialog
@@ -181,10 +187,10 @@ async function save() {
         selectionStore.items.map((tx) => {
           let tags = tx.tags.filter((t) => {
             if (t.source === 'user' && remove.includes(t.name)) return false
-            if (t.source === 'ai' && promoteAiTags.value === false) return false
+            if (t.source === 'ai' && aiTagMode.value === 'remove') return false
             return true
           })
-          if (promoteAiTags.value === true) {
+          if (aiTagMode.value === 'promote') {
             tags = tags.map((t) =>
               t.source === 'ai'
                 ? { ...t, source: 'user' as const, confidence: null }
@@ -232,14 +238,25 @@ async function save() {
     </Message>
 
     <div class="bt-ai-row">
-      <Checkbox v-model="promoteAiTags" inputId="bt-promote-ai" binary />
-      <label for="bt-promote-ai" class="bt-ai-label">KI-Tags übernehmen</label>
+      <span class="bt-ai-label">KI-Tags</span>
+      <div class="bt-ai-options" role="radiogroup" aria-label="Umgang mit KI-Tags">
+        <label class="bt-ai-option">
+          <input v-model="aiTagMode" type="radio" value="keep" />
+          <span>Unverändert</span>
+        </label>
+        <label class="bt-ai-option">
+          <input v-model="aiTagMode" type="radio" value="promote" />
+          <span>Übernehmen</span>
+        </label>
+        <label class="bt-ai-option">
+          <input v-model="aiTagMode" type="radio" value="remove" />
+          <span>Entfernen</span>
+        </label>
+      </div>
       <span class="bt-ai-hint">
-        {{
-          promoteAiTags
-            ? 'KI-Tags werden zu manuellen Tags hochgestuft'
-            : 'KI-Tags werden entfernt'
-        }}
+        <template v-if="aiTagMode === 'promote'">KI-Tags werden zu manuellen Tags hochgestuft.</template>
+        <template v-else-if="aiTagMode === 'remove'">KI-Tags werden entfernt.</template>
+        <template v-else>KI-Tags bleiben als Vorschläge erhalten.</template>
       </span>
     </div>
 
@@ -340,9 +357,21 @@ async function save() {
 }
 .bt-ai-label {
   font-weight: 500;
+}
+.bt-ai-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.bt-ai-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.9rem;
   cursor: pointer;
 }
 .bt-ai-hint {
+  flex-basis: 100%;
   font-size: 0.8rem;
   color: var(--p-text-muted-color);
 }
