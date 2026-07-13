@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  getUpdateStorageStatus,
   getReplicationStatus,
   type ReplicationStatusQuery,
 } from "./replication.ts";
@@ -88,4 +89,36 @@ test("falls back to legacy state when properties contain no replication keys", a
 
   assert.equal(status.initialized, true);
   assert.equal(status.sequence, 42);
+});
+
+test("detects retained slim middle tables required for replication append", async () => {
+  const { db, statements } = scriptedQuery([
+    [{
+      planet_osm_nodes: "planet_osm_nodes",
+      planet_osm_ways: "planet_osm_ways",
+      planet_osm_rels: "planet_osm_rels",
+    }],
+  ]);
+
+  const status = await getUpdateStorageStatus("nom_sachsen", db);
+
+  assert.deepEqual(status, { updatable: true, missingTables: [] });
+  assert.match(statements[0]!, /planet_osm_nodes/);
+});
+
+test("reports missing osm2pgsql slim middle tables before append", async () => {
+  const { db } = scriptedQuery([
+    [{
+      planet_osm_nodes: null,
+      planet_osm_ways: "planet_osm_ways",
+      planet_osm_rels: null,
+    }],
+  ]);
+
+  const status = await getUpdateStorageStatus("nom_sachsen", db);
+
+  assert.deepEqual(status, {
+    updatable: false,
+    missingTables: ["planet_osm_nodes", "planet_osm_rels"],
+  });
 });
