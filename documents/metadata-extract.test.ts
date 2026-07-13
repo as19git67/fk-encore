@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
+  applySubjectPersonDeductionReviewConfidence,
   detectSubjectPersonIds,
+  detectSubjectPersonPersonalDeductionReview,
   extractDocumentNumber,
   extractReferenceNumberTags,
   isSubjectPersonSender,
@@ -138,5 +140,70 @@ describe("reconcileSubjectPersonTags", () => {
   it("matches relation tags case-insensitively and de-duplicates", () => {
     const out = reconcileSubjectPersonTags(["manuel", "Manuel", "MANUEL"], persons, [1]);
     expect(out).toEqual(["manuel"]);
+  });
+});
+
+describe("detectSubjectPersonPersonalDeductionReview", () => {
+  it("flags personal deduction sections for review when the document concerns a Bezugsperson", () => {
+    expect(
+      detectSubjectPersonPersonalDeductionReview({
+        detectedSubjectPersonIds: [4],
+        taxSections: [
+          { slug: "sonderausgaben" },
+          { slug: "haushaltsnahe" },
+        ],
+      }),
+    ).toEqual({
+      shouldReview: true,
+      reviewSlugs: ["sonderausgaben", "haushaltsnahe"],
+    });
+  });
+
+  it("does not flag when no Bezugsperson was detected", () => {
+    expect(
+      detectSubjectPersonPersonalDeductionReview({
+        detectedSubjectPersonIds: [],
+        taxSections: [{ slug: "haushaltsnahe" }],
+      }),
+    ).toEqual({ shouldReview: false, reviewSlugs: [] });
+  });
+
+  it("does not flag non-personal tax sections such as Anlage Unterhalt or income sections", () => {
+    expect(
+      detectSubjectPersonPersonalDeductionReview({
+        detectedSubjectPersonIds: [4],
+        taxSections: [
+          { slug: "anlage-unterhalt" },
+          { slug: "anlage-r" },
+          { slug: "steuerbescheid" },
+        ],
+      }),
+    ).toEqual({ shouldReview: false, reviewSlugs: [] });
+  });
+
+  it("deduplicates and normalises review slugs", () => {
+    expect(
+      detectSubjectPersonPersonalDeductionReview({
+        detectedSubjectPersonIds: [4],
+        taxSections: [
+          { slug: " Haushaltsnahe " },
+          { slug: "haushaltsnahe" },
+        ],
+      }),
+    ).toEqual({ shouldReview: true, reviewSlugs: ["haushaltsnahe"] });
+  });
+});
+
+describe("applySubjectPersonDeductionReviewConfidence", () => {
+  it("lowers even a learned-category confidence bump to review level", () => {
+    expect(applySubjectPersonDeductionReviewConfidence(0.9, true)).toBe(0.55);
+  });
+
+  it("keeps already-lower confidence unchanged", () => {
+    expect(applySubjectPersonDeductionReviewConfidence(0.4, true)).toBe(0.4);
+  });
+
+  it("does nothing when the review signal is absent", () => {
+    expect(applySubjectPersonDeductionReviewConfidence(0.9, false)).toBe(0.9);
   });
 });

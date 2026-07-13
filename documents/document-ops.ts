@@ -69,7 +69,9 @@ import {
 } from "./learned-rules";
 import { recordUncategorizedDocument } from "./suggestion-writer";
 import {
+  applySubjectPersonDeductionReviewConfidence,
   detectSubjectPersonIds,
+  detectSubjectPersonPersonalDeductionReview,
   extractDocumentNumber,
   extractReferenceNumberTags,
   isSubjectPersonSender,
@@ -365,6 +367,19 @@ export async function runClassify(documentId: number): Promise<{ classification:
     classification.tax_relevant = true;
   }
 
+  // Personal deductions (Sonderausgaben, §35a haushaltsnahe, private
+  // health/care costs, ...) usually require the user's own economic burden.
+  // A document that concerns a Bezugsperson (e.g. "mutter") can still be a
+  // valid tax document when the user paid it, so do not clear the tax
+  // sections. Instead, remember the soft signal and apply the confidence
+  // lowering after all later confidence bumps (e.g. learned category) ran.
+  const subjectPersonDeductionReview = detectSubjectPersonPersonalDeductionReview({
+    detectedSubjectPersonIds: subjectPersonIds,
+    taxSections: classification.tax_sections,
+  });
+  const forceTaxReviewConfidence =
+    !row.tax_reviewed && subjectPersonDeductionReview.shouldReview;
+
   // Deterministic sender → category routing (see sender-rules.ts). A known
   // recurring institution overrides the LLM's category guess, which otherwise
   // funnels most documents into the generic "finanzen-rechnungen" bucket.
@@ -418,6 +433,16 @@ export async function runClassify(documentId: number): Promise<{ classification:
   if (learnedCategoryApplied) {
     classification.confidence = Math.max(classification.confidence, 0.9);
   }
+  if (forceTaxReviewConfidence) {
+    classification.confidence = applySubjectPersonDeductionReviewConfidence(
+      classification.confidence,
+      true,
+    );
+    console.log(
+      `[documents] subject-person tax review(${documentId}): ` +
+        `${subjectPersonDeductionReview.reviewSlugs.join(", ")}`,
+    );
+  }
   const cat = await dbFirst<{ id: number }>(
     db.select({ id: documentCategories.id }).from(documentCategories).where(eq(documentCategories.slug, catSlug)),
   );
@@ -436,6 +461,11 @@ export async function runClassify(documentId: number): Promise<{ classification:
     patch.sender = classification.sender;
     patch.document_number = classification.document_number;
     patch.summary = classification.summary;
+    patch.classification_confidence = classification.confidence;
+  } else if (forceTaxReviewConfidence) {
+    // The existing attributes are user-pinned, but this soft tax-review signal
+    // still needs to reach the persisted confidence used by the review basket.
+    // Do not touch category/title/date/sender/etc.
     patch.classification_confidence = classification.confidence;
   }
   // Only overwrite tax fields when the user has not pinned them via the
