@@ -233,7 +233,7 @@ services:
 
   # ── LLM Service (Llama GGUF classifier + multilingual-e5-base embedder) ───
   llm_service:
-    image: ghcr.io/as19git67/fk-encore-llm:${DEPLOY_IMAGE_TAG:-latest}
+    image: ${LLM_IMAGE:-ghcr.io/as19git67/fk-encore-llm}:${DEPLOY_IMAGE_TAG:-latest}
     container_name: fk-encore-llm${DEPLOY_NAME_SUFFIX:-}
     restart: unless-stopped
     user: "568:568"
@@ -256,12 +256,24 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-base}
       LLM_CTX: ${LLM_CTX:-8192}
       LLM_GPU_LAYERS: ${LLM_GPU_LAYERS:-0}
-      LLM_ACCELERATOR: cpu
-      LLM_EMBED_DEVICE: cpu
+      LLM_ACCELERATOR: ${LLM_ACCELERATOR:-cpu}
+      LLM_EMBED_DEVICE: ${LLM_EMBED_DEVICE:-cpu}
+      LLM_EMBED_BATCH_SIZE: ${LLM_EMBED_BATCH_SIZE:-32}
       LLM_THREADS: ${LLM_THREADS:-}
       CLASSIFY_TEXT_CHAR_LIMIT: ${CLASSIFY_TEXT_CHAR_LIMIT:-6000}
       TAX_SECTIONS_MAX: ${TAX_SECTIONS_MAX:-4}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    # Single-file CPU/GPU switch:
+    #   CPU default: LLM_GPU_COUNT=0, CPU image/model/env values.
+    #   NVIDIA GPU: set LLM_IMAGE to the -llm-gpu image, LLM_ACCELERATOR=cuda,
+    #   LLM_GPU_LAYERS=-1, LLM_EMBED_DEVICE=cuda and LLM_GPU_COUNT=1.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: ${LLM_GPU_DRIVER:-nvidia}
+              count: ${LLM_GPU_COUNT:-0}
+              capabilities: [gpu]
     volumes:
       - llm_models:/models
     healthcheck:
