@@ -13,8 +13,8 @@ Status: implementiert in Migration `0036_documents_households`.
 - **Durchstöberbar im Dateisystem**: Ein Anwender soll auch ohne die Web-App
   auf einem File-Share direkt zur gesuchten Rechnung bzw. zum Bescheid
   navigieren können.
-- **Sprechende Dateinamen**: `YYYY-MM-DD_<absender>_<titel>__<hash8>.pdf` statt
-  opaker SHA-256-Shards.
+- **Sprechende Dateinamen**: `[YYYY_][#dokumentnummer_]<absender>_<titel>__<hash8>.pdf`
+  statt opaker SHA-256-Shards.
 - **Umzug bei Reklassifikation**: Ändert sich die Kategorie, das Datum, der
   Absender oder die Sichtbarkeit, wandert die Datei automatisch an ihren neuen
   kanonischen Platz.
@@ -86,13 +86,24 @@ ist im Schema `UNIQUE`.
 Das Dateinamens-Schema ist:
 
 ```
-YYYY-MM-DD_<absender-slug>_<titel-slug>__<hash8>.pdf
+[YYYY_][#dokumentnummer_]<absender-slug>_<titel-slug>__<hash8>.pdf
 ```
 
-Fehlende Bestandteile entfallen (Dokument ohne Absender → `YYYY-MM-DD_<titel>__<hash8>.pdf`).
-Das `__<hash8>`-Suffix sind die ersten 8 hex-Stellen des SHA-256 und
-garantieren Eindeutigkeit auch wenn zwei Dokumente vom selben Absender am
-selben Tag mit demselben Titel hochgeladen werden.
+Der Jahrespräfix stammt aus dem Dokumentdatum (`doc_date`). Wenn kein
+Dokumentdatum vorhanden ist, entfällt der Jahrespräfix und stattdessen bleibt
+das Upload-Datum `YYYY-MM-DD` als Fallback-Bestandteil im Dateinamen. Die
+Dokumentnummer wird mit `#` vorangestellt, sofern sie vorhanden ist.
+
+Beispiele:
+
+- `2026_#2661160_finanzamt-muenchen_bescheid__a1b2c3d4.pdf`
+- `2026_finanzamt-muenchen_bescheid__a1b2c3d4.pdf`
+- `#2661160_2026-04-17_finanzamt-muenchen_bescheid__a1b2c3d4.pdf`
+
+Fehlende Bestandteile entfallen (Dokument ohne Absender →
+`2026_<titel>__<hash8>.pdf`). Das `__<hash8>`-Suffix sind die ersten 8
+hex-Stellen des SHA-256 und garantiert Eindeutigkeit auch wenn zwei Dokumente
+vom selben Absender im selben Jahr mit demselben Titel hochgeladen werden.
 
 ---
 
@@ -136,14 +147,16 @@ gesichert (`assertPathUnderDocumentsRoot` vor jeder fs-Operation).
 
 ---
 
-## 6. Migration bestehender Uploads
+## 6. Bestandsdateien aktualisieren
 
 Vor Version 0036 hochgeladene Dokumente liegen unter dem alten
 `YYYY/YYYY-MM/<sha256>.pdf`-Schema. Migration 0036 ändert nur das DB-Schema —
-die Dateien wandern erst beim Aufruf von
-`POST /documents/layout/backfill`. Dieser Endpunkt iteriert alle sichtbaren
-Dokumente des Aufrufers, ruft `relocateDocument` auf jedes einzelne auf und
-meldet zurück, wie viele tatsächlich verschoben, übersprungen oder gescheitert
-sind.
+die Dateien wandern erst beim expliziten Aktualisieren der Dateinamen.
+
+Die Wartungsseite bietet dafür neben „Nur KI-Klassifikation“ und
+„OCR + Klassifikation“ die Aktion **Dateinamen aktualisieren**. Technisch ruft
+sie `POST /documents/relocate-all` auf. Der Endpunkt benötigt `data.manage`,
+iteriert alle Dokumente, ruft `relocateDocument` auf jedes einzelne auf und
+meldet zurück, wie viele Dokumente geprüft, verschoben oder fehlgeschlagen sind.
 
 `relocateDocument` ist idempotent: mehrfache Aufrufe sind gefahrlos.

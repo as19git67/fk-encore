@@ -33,10 +33,11 @@ import {
   type TagQueueServiceStatus,
 } from '../api/finance'
 import {
-  getDocumentQueueStatus, reclassifyAllDocuments,
+  getDocumentQueueStatus, reclassifyAllDocuments, relocateAllDocuments,
   cancelDocumentQueue, retryDocumentQueue,
   type DocQueueStatus,
   type ReclassifyAllMode,
+  type RelocateAllDocumentsResponse,
 } from '../api/documents'
 import {
   listOsmRegions, suggestOsmRegion, createOsmRegion,
@@ -533,6 +534,8 @@ const docQueueStatus = ref<DocQueueStatus>({ services: [] })
 const docReclassifyLoading = ref(false)
 const docReclassifyError = ref('')
 const docReclassifyResult = ref<number | null>(null)
+const docRelocateLoading = ref(false)
+const docRelocateResult = ref<RelocateAllDocumentsResponse | null>(null)
 const docCancelLoading = ref(false)
 const docRetryLoading = ref(false)
 
@@ -567,6 +570,7 @@ async function fetchDocQueueStatus() {
 async function handleDocReclassifyAll(mode: ReclassifyAllMode) {
   docReclassifyError.value = ''
   docReclassifyResult.value = null
+  docRelocateResult.value = null
   docReclassifyLoading.value = true
   try {
     const { queued } = await reclassifyAllDocuments(mode)
@@ -576,6 +580,20 @@ async function handleDocReclassifyAll(mode: ReclassifyAllMode) {
     docReclassifyError.value = err.message || 'Fehler beim Einreihen'
   } finally {
     docReclassifyLoading.value = false
+  }
+}
+
+async function handleDocRelocateAll() {
+  docReclassifyError.value = ''
+  docReclassifyResult.value = null
+  docRelocateResult.value = null
+  docRelocateLoading.value = true
+  try {
+    docRelocateResult.value = await relocateAllDocuments()
+  } catch (err: any) {
+    docReclassifyError.value = err.message || 'Fehler beim Aktualisieren der Dateipfade'
+  } finally {
+    docRelocateLoading.value = false
   }
 }
 
@@ -1096,6 +1114,16 @@ onBeforeUnmount(() => {
         </Message>
       </div>
 
+      <div v-if="docRelocateResult !== null" class="mb-3">
+        <Message :severity="docRelocateResult.failed > 0 ? 'warn' : 'info'" :closable="false">
+          {{ docRelocateResult.processed }} Dokument(e) geprüft,
+          {{ docRelocateResult.moved }} Dateipfad(e) aktualisiert
+          <template v-if="docRelocateResult.failed > 0">
+            , {{ docRelocateResult.failed }} fehlgeschlagen
+          </template>.
+        </Message>
+      </div>
+
       <div class="queue-table-wrapper">
         <table class="queue-table">
           <thead>
@@ -1187,6 +1215,14 @@ onBeforeUnmount(() => {
           :loading="docReclassifyLoading"
           :disabled="docReclassifyLoading || docIsActive"
           @click="handleDocReclassifyAll('resume')"
+        />
+        <Button
+          label="Dateinamen aktualisieren"
+          icon="pi pi-folder"
+          severity="secondary"
+          :loading="docRelocateLoading"
+          :disabled="docRelocateLoading || docReclassifyLoading || docIsActive"
+          @click="handleDocRelocateAll"
         />
         <Button
           v-if="docTotalFailed > 0"

@@ -79,6 +79,7 @@ export async function loadDocumentLocationContext(
     categorySlugs,
     status: doc.status,
     docDate: doc.doc_date,
+    documentNumber: doc.document_number,
     uploadedAt,
     sender: doc.sender,
     title: doc.title,
@@ -328,4 +329,3 @@ export async function dropTaxLinks(documentId: number): Promise<void> {
   if (!row) return;
   await removeTaxLinksForDocument(row.disk_path, row.sha256);
 }
-

@@ -123,6 +123,8 @@ export interface DocumentLocationContext {
   status: "pending" | "extracting" | "classifying" | "ready" | "failed";
   /** Date on the document (YYYY-MM-DD) if the classifier found one. */
   docDate: string | null;
+  /** Document/invoice/file number if one was extracted or entered. */
+  documentNumber: string | null;
   /** Upload timestamp — used as fallback when docDate is missing. */
   uploadedAt: Date;
   /** Extracted sender/absender (used in filename). */
@@ -187,24 +189,46 @@ function parseYearFromDocDate(docDate: string | null): number | null {
 
 /**
  * Build the speaking filename for a document — shape:
- *   `YYYY-MM-DD_<sender>_<title>__<hash8>.ext`
+ *   `[YYYY_][#documentNumber_]<sender>_<title>__<hash8>.ext`
+ * More precisely, the optional sharing prefix is:
+ *   - `YYYY_` from `docDate`, omitted when there is no document date
+ *   - `#<documentNumber>_`, omitted when there is no document number
+ * When no `docDate` exists, the upload date `YYYY-MM-DD` is kept as a
+ * fallback filename part.
  * Missing parts collapse: a doc without a sender becomes
- * `YYYY-MM-DD_<title>__<hash8>.ext`; both missing → `YYYY-MM-DD__<hash8>.ext`.
+ * `YYYY_#1234_<title>__<hash8>.ext`; both missing →
+ * `YYYY_#1234__<hash8>.ext`.
  * The `__<hash8>` suffix guarantees uniqueness even when two documents
- * share date + sender + title; it also gives a quick handle for DB lookup.
+ * share year + sender + title; it also gives a quick handle for DB lookup.
  */
 export function buildSpeakingFileName(ctx: DocumentLocationContext): string {
-  const date = ctx.docDate ?? isoDate(ctx.uploadedAt);
+  const documentYear = parseYearFromDocDate(ctx.docDate);
+  const yearPrefix = documentYear ? `${documentYear}` : "";
+  const fallbackDate = yearPrefix.length > 0 ? "" : (ctx.docDate ?? isoDate(ctx.uploadedAt));
+  const docNumberPrefix = slugifyDocumentNumber(ctx.documentNumber);
   const senderSlug = slugifyName(ctx.sender ?? "", 40);
   const titleSource = ctx.title && ctx.title.trim().length > 0
     ? ctx.title
     : ctx.originalFilename.replace(/\.[^.]+$/, "");
   const titleSlug = slugifyName(titleSource, 60);
-  const parts = [date, senderSlug, titleSlug].filter((p) => p.length > 0);
+  const parts = [
+    yearPrefix,
+    docNumberPrefix,
+    fallbackDate,
+    senderSlug,
+    titleSlug,
+  ].filter((p) => p.length > 0);
   const nameBase = parts.join("_") || "dokument";
   const hashSuffix = ctx.sha256.slice(0, 8);
   const ext = ctx.ext.startsWith(".") ? ctx.ext : `.${ctx.ext}`;
   return `${nameBase}__${hashSuffix}${ext}`;
+}
+
+function slugifyDocumentNumber(documentNumber: string | null): string {
+  const value = (documentNumber ?? "").trim();
+  if (value.length === 0) return "";
+  const slug = slugifyName(value, 40);
+  return slug.length > 0 ? `#${slug}` : "";
 }
 
 /**
@@ -301,6 +325,7 @@ export function composeOwnerRootSegment(params: {
     categorySlugs: null,
     status: "pending",
     docDate: null,
+    documentNumber: null,
     uploadedAt: new Date(),
     sender: null,
     title: null,
