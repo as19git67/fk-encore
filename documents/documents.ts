@@ -1814,6 +1814,12 @@ export interface ReclassifyAllResponse {
   queued: number;
 }
 
+export interface RelocateAllDocumentsResponse {
+  processed: number;
+  moved: number;
+  failed: number;
+}
+
 export const reclassifyAll = api(
   { expose: true, method: "POST", path: "/documents/reclassify-all", auth: true },
   async (req: ReclassifyAllRequest): Promise<ReclassifyAllResponse> => {
@@ -1852,6 +1858,37 @@ export const reclassifyAll = api(
     triggerWorkers();
 
     return { queued: ids.length };
+  },
+);
+
+// ─── Rebuild filesystem paths for all documents ────────────────────────────
+
+export const relocateAllDocuments = api(
+  { expose: true, method: "POST", path: "/documents/relocate-all", auth: true },
+  async (): Promise<RelocateAllDocumentsResponse> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "data.manage");
+
+    const rows = await dbAll<{ id: number; disk_path: string }>(
+      db.select({ id: documents.id, disk_path: documents.disk_path }).from(documents),
+    );
+
+    let moved = 0;
+    let failed = 0;
+    for (const row of rows) {
+      try {
+        const nextPath = await relocateDocument(row.id);
+        if (nextPath !== row.disk_path) moved++;
+      } catch (err) {
+        failed++;
+        console.warn(
+          `[documents] relocate-all: document ${row.id} failed: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    return { processed: rows.length, moved, failed };
   },
 );
 
