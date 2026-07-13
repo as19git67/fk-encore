@@ -5,7 +5,12 @@ import { defineConfig } from "vitest/config";
 // module-local state.
 export default defineConfig({
   test: {
-    include: ["backup/state.test.ts", "finance/sepa-parser.test.ts", "web/static-cache.test.ts"],
+    include: [
+      "backup/state.test.ts",
+      "documents/metadata-extract.test.ts",
+      "finance/sepa-parser.test.ts",
+      "web/static-cache.test.ts",
+    ],
     exclude: ["node_modules/**", "encore.gen/**", "frontend/**"],
     fileParallelism: false,
   },

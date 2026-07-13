@@ -80,6 +80,18 @@ zu KEINER. Vergib niemals mehrere Abzugs-Sektionen pauschal „auf Verdacht"
 (eine Renteninformation gehört z. B. nur zu anlage-r, NICHT zusätzlich zu
 Werbungskosten, Sonderausgaben usw.). Im Zweifel: leere Liste.
 
+PERSONENBEZUG / BEZAHLER (sehr wichtig): Die Steuer-Sektionen beziehen sich
+auf die Einkommensteuererklärung des Nutzers. Rechnungen, Beitragsbescheide,
+Spendenquittungen, Krankheits-/Pflege-/Handwerkerbelege oder sonstige
+Abzugsbelege, die erkennbar eine Bezugsperson betreffen (z. B. Mutter/Vater)
+und nicht vom Nutzer selbst getragen wurden, sind für den Nutzer NICHT
+steuerrelevant (tax_relevant=false, tax_sections=[]). Der bloße Umstand, dass
+das Dokument im Haushalt abgelegt ist oder eine Bezugsperson erkannt wurde,
+reicht niemals für Sonderausgaben, Vorsorgeaufwand, außergewöhnliche
+Belastungen oder haushaltsnahe Aufwendungen. Nur wenn das Dokument eindeutig
+belegt, dass der Nutzer selbst Zahlungspflichtiger/Zahler ist oder es um eigene
+Unterhaltszahlungen des Nutzers geht, darf eine Abzugs-Sektion gesetzt werden.
+
 WICHTIGE ABGRENZUNGSREGELN:
 
 1) Wertpapiere / Kapitalerträge:
