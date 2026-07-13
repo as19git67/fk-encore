@@ -68,24 +68,36 @@ The full list of `DEPLOY_*` overrides:
 
 ### NVIDIA document-AI profile
 
-The normal deployment remains CPU-only. To accelerate document
-classification on one NVIDIA GPU while leaving all photo services on CPU,
-install the NVIDIA driver and NVIDIA Container Toolkit on the host, then run:
+The normal deployment remains CPU-only. To accelerate document classification
+on one NVIDIA GPU while leaving all photo services on CPU, install the NVIDIA
+driver and NVIDIA Container Toolkit on the host, then switch the `llm_service`
+variables in `.env`:
+
+```env
+LLM_IMAGE=ghcr.io/as19git67/fk-encore-llm-gpu
+LLM_MODEL_PATH=/models/Qwen3-14B-Q4_K_M.gguf
+LLM_MODEL_URL=https://huggingface.co/Qwen/Qwen3-14B-GGUF/resolve/main/Qwen3-14B-Q4_K_M.gguf
+LLM_ACCELERATOR=cuda
+LLM_GPU_LAYERS=-1
+LLM_EMBED_DEVICE=cuda
+LLM_GPU_COUNT=1
+```
+
+Then recreate the service from the single compose file:
 
 ```bash
-docker compose --env-file .env \
-  -f docker-compose.yml -f docker-compose.gpu.yml \
+docker compose --env-file .env -f docker-compose.yml \
   up -d --pull always --force-recreate llm_service
 ```
 
-The override selects the separate amd64 CUDA 12.8 image, Qwen3-14B Q4_K_M,
-all-layer llama.cpp offload, and CUDA embeddings. Verify the active runtime at
+These values select the separate amd64 CUDA image, Qwen3-14B Q4_K_M, all-layer
+llama.cpp offload, and CUDA embeddings. Verify the active runtime at
 `http://llm_service:8000/healthz`; it reports `llm_accelerator`,
 `llm_gpu_layers`, `embedder_device`, and the CUDA device name. Set
-`LLM_GPU_EMBED_DEVICE=cpu` if the card needs more VRAM headroom.
+`LLM_EMBED_DEVICE=cpu` if the card needs more VRAM headroom.
 
-Return to the portable Qwen2.5-7B CPU profile by recreating from only the base
-file:
+Return to the portable Qwen2.5-7B CPU profile by setting the `LLM_*` values
+back to the CPU defaults from `docker-compose.env.example` and recreating:
 
 ```bash
 docker compose --env-file .env -f docker-compose.yml \
