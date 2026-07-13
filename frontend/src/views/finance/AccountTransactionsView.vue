@@ -1185,7 +1185,7 @@ function goBack() {
             text
             rounded
             aria-label="Suchtext leeren"
-            @click="() => { formQuery = ''; if (!formTags.length && !formFrom && !formTo) filterPanelOpen = false }"
+            @click="formQuery = ''"
           />
         </div>
         <MultiSelect

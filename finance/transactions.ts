@@ -848,7 +848,7 @@ interface BatchTagParams {
   add?: string[];
   remove?: string[];
   replace?: boolean; // when true, clear all existing user-tags before adding
-  promote_ai_tags?: boolean; // when true, promote AI tags to user tags; when false/absent, remove them
+  promote_ai_tags?: boolean; // true: promote AI tags; false: remove AI tags; undefined: keep AI tags untouched
 }
 
 interface BatchTagResponse {
@@ -1012,7 +1012,9 @@ export const batchTag = api(
       let addedLinks = 0;
       if (add.length > 0) {
         for (const txId of txIds) {
-          addedLinks += await applyUserTagsTx(tx, txId, add);
+          addedLinks += await applyUserTagsTx(tx, txId, add, {
+            clearAiTags: p.promote_ai_tags !== undefined,
+          });
         }
       }
 
@@ -1533,6 +1535,7 @@ async function applyUserTagsTx(
   tx: any,
   transactionId: number,
   names: string[],
+  opts: { clearAiTags?: boolean } = {},
 ): Promise<number> {
   if (names.length === 0) return 0;
   const uniqueNames = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
@@ -1576,19 +1579,22 @@ async function applyUserTagsTx(
     }
   }
 
-  // User tags take precedence — remove any AI-tag joins that still exist
-  // on this transaction so they don't reappear in the UI.
-  await tx
-    .delete(financeTagTransaction)
-    .where(
-      and(
-        eq(financeTagTransaction.transaction_id, transactionId),
-        inArray(
-          financeTagTransaction.tag_id,
-          tx.select({ id: financeTag.id }).from(financeTag).where(eq(financeTag.source, "ai")),
+  if (opts.clearAiTags !== false) {
+    // User tags take precedence — remove any AI-tag joins that still exist
+    // on this transaction so they don't reappear in the UI. Batch-tag uses
+    // clearAiTags=false for its default "KI-Tags unverändert" mode.
+    await tx
+      .delete(financeTagTransaction)
+      .where(
+        and(
+          eq(financeTagTransaction.transaction_id, transactionId),
+          inArray(
+            financeTagTransaction.tag_id,
+            tx.select({ id: financeTag.id }).from(financeTag).where(eq(financeTag.source, "ai")),
+          ),
         ),
-      ),
-    );
+      );
+  }
 
   return added;
 }
