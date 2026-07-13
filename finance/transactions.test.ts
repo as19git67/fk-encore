@@ -642,6 +642,36 @@ describe("finance/transactions — batchTag", () => {
     expect(joins[0].tag_id).toBe(aiTagId);
   });
 
+  it("adding user-tags leaves AI suggestions untouched by default", async () => {
+    const { a } = await createAccounts();
+    const t1 = await insertTx(a);
+    const aiTagId = await insertTag("ki-vorschlag", "ai");
+    await db
+      .insert(financeTagTransaction)
+      .values({ tag_id: aiTagId, transaction_id: t1, confidence: "0.700" });
+
+    setAuth("7", ["finance.view"]);
+    await grant(a, 7, "read");
+    const result = await batchTag({
+      transaction_ids: [t1],
+      add: ["manuell"],
+    });
+    expect(result.added_links).toBe(1);
+    expect(result.removed_links).toBe(0);
+
+    const rows = await db
+      .select({ name: financeTag.name, source: financeTag.source })
+      .from(financeTagTransaction)
+      .innerJoin(financeTag, eq(financeTag.id, financeTagTransaction.tag_id))
+      .where(eq(financeTagTransaction.transaction_id, t1));
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        { name: "ki-vorschlag", source: "ai" },
+        { name: "manuell", source: "user" },
+      ]),
+    );
+  });
+
   it("replace clears all existing user-tags before adding", async () => {
     const { a } = await createAccounts();
     const t1 = await insertTx(a);
