@@ -54,18 +54,30 @@ MODELS_DIR=./models uvicorn main:app --reload --port 8001
 
 ### NVIDIA GPU profile
 
-The repository-level `docker-compose.gpu.yml` only replaces `llm_service`.
-InsightFace and photo embeddings remain on CPU. On a host with NVIDIA
-Container Toolkit installed, start the document-AI profile with:
+`docker-compose.yml` can switch only the document-AI `llm_service` to GPU via
+environment variables; InsightFace and photo embeddings remain on CPU. On a
+host with NVIDIA Container Toolkit installed, set these values in `.env`:
+
+```env
+LLM_IMAGE=ghcr.io/as19git67/fk-encore-llm-gpu
+LLM_MODEL_PATH=/models/Qwen3-14B-Q4_K_M.gguf
+LLM_MODEL_URL=https://huggingface.co/Qwen/Qwen3-14B-GGUF/resolve/main/Qwen3-14B-Q4_K_M.gguf
+LLM_ACCELERATOR=cuda
+LLM_GPU_LAYERS=-1
+LLM_EMBED_DEVICE=cuda
+LLM_GPU_COUNT=1
+```
+
+Then recreate the service from the single compose file:
 
 ```bash
-docker compose --env-file .env \
-  -f docker-compose.yml -f docker-compose.gpu.yml \
+docker compose --env-file .env -f docker-compose.yml \
   up -d --pull always --force-recreate llm_service
 ```
 
 The first start downloads Qwen3-14B Q4_K_M into the existing `llm_models`
-volume. To return to the CPU profile, omit the override and recreate:
+volume. To return to the CPU profile, set the `LLM_*` values back to the CPU
+defaults from `docker-compose.env.example` and recreate:
 
 ```bash
 docker compose --env-file .env -f docker-compose.yml \
@@ -73,7 +85,7 @@ docker compose --env-file .env -f docker-compose.yml \
 ```
 
 If 16 GB VRAM becomes tight, keep llama.cpp on the GPU but move the E5
-embedder back to system RAM with `LLM_GPU_EMBED_DEVICE=cpu`.
+embedder back to system RAM with `LLM_EMBED_DEVICE=cpu`.
 
 ---
 
