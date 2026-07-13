@@ -9,6 +9,7 @@ import {
   cancelSlot,
   getQueueStatus,
   cleanupStaleSlots,
+  resetSlotsOnStartup,
 } from "./api";
 import { registerWaiter, unregisterWaiter, waiterCount } from "./waiters";
 
@@ -313,6 +314,31 @@ describe("cleanupStaleSlots", () => {
     } finally {
       unregisterWaiter(waiting.slotId);
     }
+  });
+});
+
+describe("resetSlotsOnStartup", () => {
+  it("clears active and waiting rows left behind by a previous process", async () => {
+    const active = await acquireSlot({
+      model: "llm",
+      priority: 2,
+      requester: "old-active-worker",
+    });
+    const waiting = await acquireSlot({
+      model: "llm",
+      priority: 2,
+      requester: "old-waiting-worker",
+    });
+    expect(active.status).toBe("active");
+    expect(waiting.status).toBe("waiting");
+
+    const result = await resetSlotsOnStartup();
+    expect(result.cleaned).toBe(2);
+
+    const rows = await db.execute<{ c: number }>(
+      sql`SELECT COUNT(*)::int AS c FROM ai_model_slot`,
+    );
+    expect(rows.rows[0].c).toBe(0);
   });
 });
 
