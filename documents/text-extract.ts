@@ -9,10 +9,12 @@
  * (missing trailer dictionary / unreadable xref — common for PDFs
  * truncated in transit or assembled by buggy scanners), we attempt a
  * one-shot repair pass through `qpdf` which rewrites the file with a
- * fresh cross-reference table, then retry the failing step.
+ * fresh cross-reference table, then retry the failing step. If poppler
+ * still rejects the original/repaired file, a slower Ghostscript repair
+ * is used as a last resort only.
  *
  * The external binaries (`pdftoppm` from poppler-utils, `tesseract`
- * from tesseract-ocr, `qpdf`) are expected to be present in the
+ * from tesseract-ocr, `qpdf`, `gs`) are expected to be present in the
  * backend container image — see `docker/Dockerfile.runtime` for the
  * `apt-get install` line.
  *
@@ -78,6 +80,24 @@ const OCR_TIMEOUT_MS = parseInt(
 
 /** Poppler DPI for OCR rasterization. 200 is a good speed/quality trade-off. */
 const OCR_DPI = parseInt(process.env.DOCUMENTS_OCR_DPI ?? "200", 10);
+
+/**
+ * Ghostscript is much slower than qpdf and can get stuck on deeply
+ * corrupted PDFs. It is only used after poppler has also rejected the
+ * original input, and this timeout keeps one bad file from occupying the
+ * single text-extract worker for minutes.
+ */
+const GS_REPAIR_TIMEOUT_MS = parseInt(
+  process.env.DOCUMENTS_GS_REPAIR_TIMEOUT_MS ?? "90000",
+  10,
+);
+
+/**
+ * `prepress` preserves too much detail for our use case and can produce
+ * very large intermediary PDFs. We only need a structurally clean PDF for
+ * poppler/Tesseract, so `printer` is the default compromise.
+ */
+const GS_PDFSETTINGS = process.env.DOCUMENTS_GS_PDFSETTINGS ?? "/printer";
 
 /**
  * Minimum whitespace-to-char ratio a text layer must have before we trust
@@ -431,7 +451,10 @@ export interface OcrResult {
  *
  * When `repairFirst` is true (set by the caller after pdf-parse already
  * rejected the file as having a broken xref), we run qpdf eagerly so
- * pdftoppm doesn't have to fail first.
+ * pdftoppm doesn't have to fail first. Ghostscript is intentionally not
+ * part of that eager path: pdf-parse can reject files that poppler still
+ * rasterizes, and gs is expensive. We only escalate to gs after pdftoppm
+ * has actually failed with a repairable PDF-structure error.
  */
 async function ocrPdf(
   absPath: string,
@@ -441,7 +464,7 @@ async function ocrPdf(
   try {
     let pdfPath = absPath;
     if (options.repairFirst) {
-      const repaired = await repairPdf(pdfPath, tmpDir);
+      const repaired = await repairPdfWithQpdf(pdfPath, tmpDir);
       if (repaired) pdfPath = repaired;
     }
 
@@ -453,11 +476,11 @@ async function ocrPdf(
       // qpdf rebuilds a valid xref. Only retry once, and only when the
       // failure signature matches — anything else (e.g. a missing
       // pdftoppm binary, encrypted PDFs) falls straight through.
-      if (pdfPath === absPath && looksLikeBrokenXref((err as Error).message)) {
+      if (looksLikeBrokenXref((err as Error).message)) {
         const repaired = await repairPdf(pdfPath, tmpDir);
         if (repaired) {
           console.log(
-            `[documents.text-extract] pdftoppm rejected broken xref — retrying after qpdf repair`,
+            `[documents.text-extract] pdftoppm rejected broken xref — retrying after PDF repair`,
           );
           pdfPath = repaired;
           await runPdftoppm(pdfPath, path.join(tmpDir, "page"));
@@ -681,9 +704,11 @@ export function looksLikeBrokenXref(stderr: string): boolean {
 
 /**
  * Rewrite `srcPath` through qpdf so a broken xref/trailer is rebuilt.
- * When qpdf fails (severely broken PDFs), falls back to Ghostscript
- * which re-renders the entire file from scratch and handles deeper
- * structural corruption.
+ * When qpdf fails after poppler has also rejected the file, fall back to
+ * Ghostscript which re-renders the entire file from scratch and handles
+ * deeper structural corruption. This function must not be called on the
+ * eager pdf-parse failure path — use `repairPdfWithQpdf` there so gs does
+ * not run before poppler had a chance to accept the original PDF.
  * Returns the repaired file path, or null when both tools fail.
  */
 async function repairPdf(srcPath: string, tmpDir: string): Promise<string | null> {
@@ -741,13 +766,27 @@ function repairPdfWithGs(srcPath: string, tmpDir: string): Promise<string | null
         "-dNOPAUSE",
         "-dSAFER",
         "-sDEVICE=pdfwrite",
-        "-dPDFSETTINGS=/prepress",
+        `-dPDFSETTINGS=${GS_PDFSETTINGS}`,
         `-sOutputFile=${dst}`,
         srcPath,
       ],
       { stdio: ["ignore", "ignore", "pipe"] },
     );
     let stderr = "";
+    let settled = false;
+    const finish = (result: string | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      console.warn(
+        `[documents.text-extract] gs repair timed out after ${GS_REPAIR_TIMEOUT_MS}ms`,
+      );
+      proc.kill("SIGKILL");
+      finish(null);
+    }, GS_REPAIR_TIMEOUT_MS);
     proc.stderr.on("data", (d) => {
       stderr += d.toString();
     });
@@ -755,19 +794,20 @@ function repairPdfWithGs(srcPath: string, tmpDir: string): Promise<string | null
       console.warn(
         `[documents.text-extract] gs unavailable for repair: ${err.message}`,
       );
-      resolve(null);
+      finish(null);
     });
     proc.on("close", (code) => {
+      if (settled) return;
       if (code === 0) {
         console.log(
           `[documents.text-extract] gs repair succeeded (qpdf had failed)`,
         );
-        resolve(dst);
+        finish(dst);
       } else {
         console.warn(
           `[documents.text-extract] gs repair exited ${code}: ${stderr.trim()}`,
         );
-        resolve(null);
+        finish(null);
       }
     });
   });
