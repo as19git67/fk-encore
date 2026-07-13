@@ -153,3 +153,76 @@ export function reconcileSubjectPersonTags(
   }
   return out;
 }
+
+/**
+ * Personal deduction sections that usually require the user's own economic
+ * burden.
+ *
+ * A document addressed to / concerning a Bezugsperson can be useful to keep
+ * in the household archive, but it is not automatically a tax document for
+ * the user's own income-tax return. In practice the LLM over-eagerly marks
+ * third-party invoices for "mutter"/"vater" as Sonderausgaben or §35a
+ * haushaltsnahe Aufwendungen.
+ *
+ * Deliberately not included: income sections (anlage-r, anlage-kap, ...),
+ * Anlage Unterhalt, or Steuerbescheid. Those have their own semantics and can
+ * legitimately refer to another person in stored paperwork.
+ */
+const PERSONAL_DEDUCTION_SECTIONS_REQUIRING_USER_PAYMENT = new Set([
+  "sonderausgaben",
+  "vorsorgeaufwand",
+  "anlage-av",
+  "aussergewoehnliche",
+  "haushaltsnahe",
+  "anlage-kind",
+  "anlage-energetisch",
+]);
+
+export interface PersonalDeductionGuardInput {
+  detectedSubjectPersonIds: readonly number[];
+  taxSections: readonly { slug: string }[];
+}
+
+export interface PersonalDeductionGuardResult {
+  shouldReview: boolean;
+  reviewSlugs: string[];
+}
+
+export const SUBJECT_PERSON_DEDUCTION_REVIEW_CONFIDENCE = 0.55;
+
+/**
+ * Return true when an AI tax assignment should be surfaced for human review
+ * because it is a personal deduction on a document that deterministically
+ * concerns a stored Bezugsperson. This is intentionally a soft signal: it does
+ * not clear the tax assignment, because the user might genuinely pay expenses
+ * for that person.
+ */
+export function detectSubjectPersonPersonalDeductionReview(
+  input: PersonalDeductionGuardInput,
+): PersonalDeductionGuardResult {
+  if (input.detectedSubjectPersonIds.length === 0) {
+    return { shouldReview: false, reviewSlugs: [] };
+  }
+  const reviewSlugs = input.taxSections
+    .map((s) => s.slug.trim().toLowerCase())
+    .filter((slug) => PERSONAL_DEDUCTION_SECTIONS_REQUIRING_USER_PAYMENT.has(slug));
+
+  return {
+    shouldReview: reviewSlugs.length > 0,
+    reviewSlugs: Array.from(new Set(reviewSlugs)),
+  };
+}
+
+/**
+ * Apply the subject-person deduction soft signal after all other confidence
+ * mutations (especially learned-category boosts). Returns the confidence that
+ * should be persisted for review routing.
+ */
+export function applySubjectPersonDeductionReviewConfidence(
+  confidence: number,
+  shouldReview: boolean,
+): number {
+  return shouldReview
+    ? Math.min(confidence, SUBJECT_PERSON_DEDUCTION_REVIEW_CONFIDENCE)
+    : confidence;
+}
