@@ -25,7 +25,7 @@ vi.mock("./llm-client", () => ({
 
 import db from "../db/database";
 import { documents } from "../db/schema";
-import { runClassify } from "./document-ops";
+import { runClassify, runEmbed } from "./document-ops";
 
 const USER_ID = 990101;
 const DOC_ID = 990101;
@@ -38,7 +38,17 @@ async function ensureUser(id: number): Promise<void> {
   );
 }
 
-async function seedDocument(reviewed: boolean): Promise<void> {
+async function seedDocument(
+  reviewed: boolean,
+  opts: {
+    status?: "pending" | "extracting" | "classifying" | "ready" | "failed" | "encrypted";
+    extractedText?: string | null;
+  } = {},
+): Promise<void> {
+  const status = opts.status ?? "classifying";
+  const extractedText = opts.extractedText === undefined
+    ? "irgendein extrahierter Text #9999"
+    : opts.extractedText;
   await db.delete(documents).where(eq(documents.id, DOC_ID));
   await db.execute(
     sql`INSERT INTO documents
@@ -46,8 +56,8 @@ async function seedDocument(reviewed: boolean): Promise<void> {
            status, title, sender, summary, extracted_text, attributes_reviewed)
         VALUES
           (${DOC_ID}, ${USER_ID}, ${`sha-${DOC_ID}`}, 'doc.pdf', 'application/pdf', 1,
-           ${`/tmp/doc-${DOC_ID}.pdf`}, 'classifying', 'Mein Titel', 'Meine Quelle',
-           'Meine Zusammenfassung', 'irgendein extrahierter Text #9999', ${reviewed})`,
+           ${`/tmp/doc-${DOC_ID}.pdf`}, ${status}, 'Mein Titel', 'Meine Quelle',
+           'Meine Zusammenfassung', ${extractedText}, ${reviewed})`,
   );
 }
 
@@ -86,5 +96,23 @@ describe("runClassify — attributes_reviewed guard", () => {
     expect(row.summary).toBe("AI Zusammenfassung");
     expect(row.document_number).toBe("9999");
     expect(row.status).toBe("ready");
+  });
+
+  it("defers when text extraction has not finished yet", async () => {
+    await seedDocument(false, { status: "pending", extractedText: null });
+
+    await expect(runClassify(DOC_ID)).resolves.toEqual({ deferred: true });
+  });
+
+  it("fails instead of deferring forever when text extraction produced no text", async () => {
+    await seedDocument(false, { status: "classifying", extractedText: null });
+
+    await expect(runClassify(DOC_ID)).rejects.toThrow(/no extracted text/i);
+  });
+
+  it("does not leave embedding pending forever when no text exists after extraction", async () => {
+    await seedDocument(false, { status: "classifying", extractedText: null });
+
+    await expect(runEmbed(DOC_ID)).resolves.toEqual({ chunks: 0 });
   });
 });

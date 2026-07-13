@@ -83,6 +83,10 @@ console.log("[boot] documents/document-ops.ts: all imports resolved");
 
 type DocumentStatus = "pending" | "extracting" | "classifying" | "ready" | "failed" | "encrypted";
 
+function isWaitingForTextExtraction(status: DocumentStatus): boolean {
+  return status === "pending" || status === "extracting";
+}
+
 /**
  * Fire-and-forget realtime notification for a document status change.
  * Errors are swallowed — the scan pipeline must not break when the
@@ -260,7 +264,10 @@ export async function runClassify(documentId: number): Promise<{ classification:
   const row = await getDocumentOrThrow(documentId);
   const text = (row.extracted_text ?? "").trim();
   if (text.length === 0) {
-    return { deferred: true };
+    if (isWaitingForTextExtraction(row.status)) {
+      return { deferred: true };
+    }
+    throw new Error("classify: no extracted text available after text extraction");
   }
 
   const taxonomy = await loadTaxonomyForClassifier();
@@ -631,7 +638,12 @@ async function replaceAiSubjectPersons(
 export async function runEmbed(documentId: number): Promise<{ chunks: number } | { deferred: true }> {
   const row = await getDocumentOrThrow(documentId);
   const text = (row.extracted_text ?? "").trim();
-  if (text.length === 0) return { deferred: true };
+  if (text.length === 0) {
+    if (isWaitingForTextExtraction(row.status)) {
+      return { deferred: true };
+    }
+    return { chunks: 0 };
+  }
 
   const chunks = chunkText(text, EMBED_CHUNK_CHARS, EMBED_CHUNK_OVERLAP_CHARS)
     .slice(0, EMBED_MAX_CHUNKS);

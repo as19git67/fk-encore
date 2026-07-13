@@ -25,7 +25,7 @@ import { SUPPORTED_EXTENSIONS } from "./documents.service";
 import { reciprocalRankFusion, visibilityClause, type SearchHit } from "./search";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { chunkText } from "./document-ops";
-import { hasPoorSpacing, looksLikeBrokenXref } from "./text-extract";
+import { hasPoorSpacing, isSuppressedPdfJsWarning, looksLikeBrokenXref } from "./text-extract";
 
 describe("documents.service", () => {
   it("guessExtension prefers the filename extension for supported types", () => {
@@ -388,6 +388,17 @@ describe("documents.text-extract looksLikeBrokenXref", () => {
     expect(
       looksLikeBrokenXref("pdftoppm exited 137: out of memory"),
     ).toBe(false);
+  });
+});
+
+describe("documents.text-extract PDF.js warning filter", () => {
+  it("suppresses benign TrueType interpreter warnings from pdf.js", () => {
+    expect(isSuppressedPdfJsWarning("Warning: TT: undefined function: 32")).toBe(true);
+    expect(isSuppressedPdfJsWarning("Warning: TT: undefined function: 21")).toBe(true);
+  });
+
+  it("does not suppress unrelated warnings", () => {
+    expect(isSuppressedPdfJsWarning("Warning: failed to parse xref table")).toBe(false);
   });
 });
 

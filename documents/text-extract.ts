@@ -47,13 +47,18 @@ const SUPPRESSED_PDFJS_WARNINGS = [
   "Ran out of space in font private use area",
 ];
 
+export function isSuppressedPdfJsWarning(message: string): boolean {
+  return SUPPRESSED_PDFJS_WARNINGS.some((p) => message.includes(p)) ||
+    /^Warning:\s+TT:\s+undefined function:\s+\d+\s*$/u.test(message);
+}
+
 async function pdfParseQuiet(buffer: Buffer): ReturnType<PdfParseFn> {
   const originalLog = console.log;
   console.log = (...args: unknown[]) => {
     const first = args[0];
     if (
       typeof first === "string" &&
-      SUPPRESSED_PDFJS_WARNINGS.some((p) => first.includes(p))
+      isSuppressedPdfJsWarning(first)
     ) {
       return;
     }
