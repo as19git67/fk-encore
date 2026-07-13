@@ -655,6 +655,10 @@ export const updateTransaction = api(
       .where(eq(financeTransaction.id, p.id))
       .returning();
 
+    // A manual save means the user has reviewed the transaction state.
+    // Existing AI suggestions should no longer be shown as pending hints.
+    await clearAiTagsForTransaction(p.id);
+
     const tags = (await annotateTags([p.id])).get(p.id) ?? [];
     return toView(updated, tags);
   },
@@ -749,8 +753,9 @@ export const promoteAiTag = api(
         );
     }
 
-    // Upsert the user-variant and link it
-    await applyUserTags(p.id, [tagName]);
+    // Upsert the user-variant and link it. Keep any other AI suggestions:
+    // accepting one suggestion is a targeted action, not a blanket dismissal.
+    await applyUserTags(p.id, [tagName], { clearAiTags: false });
 
     const tags = (await annotateTags([p.id])).get(p.id) ?? [];
     return { promoted: true, tags };
@@ -1461,6 +1466,7 @@ async function loadTransaction(
 async function applyUserTags(
   transactionId: number,
   names: string[],
+  opts: { clearAiTags?: boolean } = {},
 ): Promise<number> {
   if (names.length === 0) return 0;
   const uniqueNames = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
@@ -1506,8 +1512,16 @@ async function applyUserTags(
     }
   }
 
-  // User tags take precedence — remove any AI-tag joins that still exist
-  // on this transaction so they don't reappear in the UI.
+  if (opts.clearAiTags !== false) {
+    // User tags take precedence — remove any AI-tag joins that still exist
+    // on this transaction so they don't reappear in the UI.
+    await clearAiTagsForTransaction(transactionId);
+  }
+
+  return added;
+}
+
+async function clearAiTagsForTransaction(transactionId: number): Promise<void> {
   await db
     .delete(financeTagTransaction)
     .where(
@@ -1519,8 +1533,6 @@ async function applyUserTags(
         ),
       ),
     );
-
-  return added;
 }
 
 /**
