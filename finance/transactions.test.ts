@@ -558,6 +558,33 @@ describe("finance/transactions — promoteAiTag", () => {
     expect(sources).toContain("user");
   });
 
+  it("keeps unrelated AI suggestions when accepting one AI tag", async () => {
+    const { a } = await createAccounts();
+    const txId = await insertTx(a);
+    const acceptedAiTagId = await insertTag("urlaub", "ai");
+    const remainingAiTagId = await insertTag("hotel", "ai");
+    await db.insert(financeTagTransaction).values([
+      { tag_id: acceptedAiTagId, transaction_id: txId, confidence: "0.820" },
+      { tag_id: remainingAiTagId, transaction_id: txId, confidence: "0.640" },
+    ]);
+
+    setAuth("7", ["finance.view"]);
+    await grant(a, 7, "read");
+    const result = await promoteAiTag({ id: txId, tag: "urlaub" });
+
+    expect(result.tags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "urlaub", source: "user" }),
+        expect.objectContaining({ name: "hotel", source: "ai" }),
+      ]),
+    );
+    expect(result.tags).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "urlaub", source: "ai" }),
+      ]),
+    );
+  });
+
   it("is idempotent when the user-tag already exists", async () => {
     const { a } = await createAccounts();
     const txId = await insertTx(a);
@@ -913,6 +940,21 @@ describe("finance/transactions — updateTransaction (notice)", () => {
 
     const result = await updateTransaction({ id: txId, notice: null });
     expect(result.notice).toBeNull();
+  });
+
+  it("clears AI suggestions after a manual save", async () => {
+    const { a } = await createAccounts();
+    const txId = await insertTx(a);
+    const aiTagId = await insertTag("prüfung", "ai");
+    await db
+      .insert(financeTagTransaction)
+      .values({ tag_id: aiTagId, transaction_id: txId, confidence: "0.770" });
+    setAuth("7", ["finance.view"]);
+    await grant(a, 7, "read");
+
+    const result = await updateTransaction({ id: txId, notice: "geprüft" });
+
+    expect(result.tags.filter((tag) => tag.source === "ai")).toHaveLength(0);
   });
 
   it("404s for a transaction outside the caller's ACL", async () => {

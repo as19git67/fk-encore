@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import InputNumber from 'primevue/inputnumber'
 import InputText from 'primevue/inputtext'
+import Textarea from 'primevue/textarea'
 import DatePicker from 'primevue/datepicker'
 import Button from 'primevue/button'
 import AutoComplete from 'primevue/autocomplete'
@@ -345,11 +346,12 @@ async function save() {
     <!-- Notiz -->
     <div class="field">
       <label class="field-label">Notiz</label>
-      <InputText
+      <Textarea
         v-model="notice"
-        type="text"
         class="recipient-input"
         placeholder="Notiz zur Buchung …"
+        rows="2"
+        auto-resize
       />
     </div>
 
