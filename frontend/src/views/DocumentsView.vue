@@ -16,9 +16,11 @@ import SortMenu from '../components/SortMenu.vue'
 import {
   listDocuments,
   listDocumentCategories,
+  listCorrespondents,
   listGroups,
   listSubjectPersons,
   searchDocuments,
+  type CorrespondentFacet,
   type DocumentSummary,
   type DocumentCategory,
   type DocumentStatus,
@@ -47,6 +49,11 @@ const { restore: restoreScroll } = useScrollRestore('documents-list')
 const items = ref<DocumentSummary[]>([])
 const categories = ref<DocumentCategory[]>([])
 const subjectPeople = ref<SubjectPerson[]>([])
+const correspondents = ref<CorrespondentFacet[]>([])
+
+function correspondentLabel(slug: string): string {
+  return correspondents.value.find((c) => c.slug === slug)?.display ?? slug
+}
 const groups = ref<GroupSummary[]>([])
 const loading = ref(true)
 const error = ref('')
@@ -280,6 +287,7 @@ function syncQueryParams() {
   if (fq.needs_review) query.review = '1'
   if (fq.unreviewed) query.neu = '1'
   if (fq.sender) query.sender = fq.sender
+  if (fq.correspondent) query.correspondent = fq.correspondent
   if (fq.dateFrom) query.dateFrom = fq.dateFrom
   if (fq.dateTo) query.dateTo = fq.dateTo
   if (fq.taxRelevant !== undefined) query.taxRelevant = String(fq.taxRelevant)
@@ -320,6 +328,7 @@ function currentFilterParams() {
     needs_review: f.needs_review,
     unreviewed: f.unreviewed,
     sender: f.sender,
+    correspondent: f.correspondent,
     date_from: f.dateFrom,
     date_to: f.dateTo,
     tax_relevant: f.taxRelevant,
@@ -395,6 +404,15 @@ async function loadSubjectPeople() {
   }
 }
 
+async function loadCorrespondents() {
+  try {
+    const res = await listCorrespondents()
+    correspondents.value = res.items
+  } catch (err: any) {
+    console.warn('[documents] failed to load correspondents:', err)
+  }
+}
+
 function openDocument(doc: DocumentSummary) {
   rememberDocumentListFocus(doc.id)
   router.push({ name: 'dokumente-detail', params: { id: doc.id } })
@@ -444,7 +462,7 @@ watch(
 )
 
 onMounted(async () => {
-  await Promise.all([loadCategories(), loadGroups(), loadSubjectPeople(), load()])
+  await Promise.all([loadCategories(), loadGroups(), loadSubjectPeople(), loadCorrespondents(), load()])
   // Returning from detail: center, highlight and restore actual keyboard
   // focus. Only use the generic scroll offset when there is no item anchor.
   if (!(await restoreFocusToLastOpened())) restoreScroll()
@@ -628,6 +646,12 @@ onMounted(async () => {
         :label="`Absender: ${filter.applied.value.sender}`"
         removable
         @remove="filter.removeKey(['sender'])"
+      />
+      <Chip
+        v-if="filter.applied.value.correspondent"
+        :label="`Korrespondent: ${correspondentLabel(filter.applied.value.correspondent)}`"
+        removable
+        @remove="filter.removeKey(['correspondent'])"
       />
       <Chip
         v-if="filter.applied.value.dateFrom || filter.applied.value.dateTo"
@@ -821,6 +845,7 @@ onMounted(async () => {
       :categories="categories"
       :known-tags="allKnownTags"
       :subject-people="subjectPeople"
+      :correspondents="correspondents"
       @apply="applyFilterMenu"
       @reset="resetFilterMenu"
     />
