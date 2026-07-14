@@ -99,6 +99,7 @@ describe("documents.service buildSpeakingFileName", () => {
     userLoginSlug: "max",
     groupSlug: null,
     categorySlugs: null,
+    correspondentSlug: null,
     status: "ready",
     docDate: "2026-04-15",
     documentNumber: null,
@@ -160,6 +161,7 @@ describe("documents.service resolveDocumentDiskPath", () => {
     userLoginSlug: "max",
     groupSlug: null,
     categorySlugs: ["finanzen", "steuern"],
+    correspondentSlug: "finanzamt",
     status: "ready",
     docDate: "2026-04-15",
     documentNumber: null,
@@ -171,11 +173,18 @@ describe("documents.service resolveDocumentDiskPath", () => {
     ext: ".pdf",
   };
 
-  it("places classified documents under <owner>/<category>/<year>/", () => {
+  it("places classified documents under <owner>/<category>/<correspondent>/<year>/", () => {
     const { relPath, inbox } = resolveDocumentDiskPath(readyCtx);
     expect(inbox).toBe(false);
     expect(relPath).toBe(
-      path.join("max", "finanzen", "steuern", "2026", "2026_finanzamt_bescheid__aaaaaaaa.pdf"),
+      path.join("max", "finanzen", "steuern", "finanzamt", "2026", "2026_finanzamt_bescheid__aaaaaaaa.pdf"),
+    );
+  });
+
+  it("uses the _ohne-absender placeholder when no correspondent resolved", () => {
+    const { relPath } = resolveDocumentDiskPath({ ...readyCtx, correspondentSlug: null });
+    expect(relPath).toBe(
+      path.join("max", "finanzen", "steuern", "_ohne-absender", "2026", "2026_finanzamt_bescheid__aaaaaaaa.pdf"),
     );
   });
 
