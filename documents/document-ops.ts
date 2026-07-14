@@ -68,6 +68,7 @@ import {
   resolveLearned,
 } from "./learned-rules";
 import { recordUncategorizedDocument } from "./suggestion-writer";
+import { applyInsuranceAdminTaxRule } from "./tax-rules";
 import {
   applySubjectPersonDeductionReviewConfidence,
   detectSubjectPersonIds,
@@ -372,6 +373,22 @@ export async function runClassify(documentId: number): Promise<{ classification:
   classification.tax_sections = mergeLearnedTaxSections(classification.tax_sections, learned);
   if (classification.tax_sections.length > beforeLearnedTax) {
     classification.tax_relevant = true;
+  }
+
+  // 7b. Deterministic tax post-rule (see tax-rules.ts): private pension/life/
+  //     Riester insurance ADMIN mail (Erhöhungsnachtrag/Statusreport/Dynamik/
+  //     Standmitteilung) without an actual §10a/§92 certificate is NOT a tax
+  //     document — the small model marks it anyway. Checked against the OCR
+  //     text (not the LLM title) so an unreliable "Beitragsbescheinigung" title
+  //     can't rescue a Dynamik-Widerspruch.
+  {
+    const adjusted = applyInsuranceAdminTaxRule({
+      text: clipped,
+      taxSections: classification.tax_sections,
+      taxRelevant: classification.tax_relevant,
+    });
+    classification.tax_sections = adjusted.taxSections;
+    classification.tax_relevant = adjusted.taxRelevant;
   }
 
   // Personal deductions (Sonderausgaben, §35a haushaltsnahe, private

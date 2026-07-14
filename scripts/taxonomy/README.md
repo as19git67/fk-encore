@@ -59,6 +59,17 @@ AUDIT_MODEL=claude-sonnet-4-20250514 npm run audit:taxonomy  # anderes Modell
 AUDIT_DRY_RUN=1 npm run audit:taxonomy     # Prompts nur schreiben, nichts an die API senden
 ```
 
+**Rate-Limits:** Der SDK-Client retryt 429/5xx/Verbindungsfehler automatisch mit
+exponentiellem Backoff (respektiert `Retry-After`); `AUDIT_MAX_RETRIES` (Default
+8) hebt die Obergrenze. Reißt das Limit trotzdem anhaltend, bricht der Lauf
+sauber ab und wertet das **Teilergebnis** aus, statt den Rest der Stichprobe an
+dieselbe Wand zu fahren. `AUDIT_REQUEST_DELAY=1` fügt eine feste Pause (Sekunden)
+zwischen den Requests ein, um proaktiv unter dem Minutenlimit zu bleiben.
+
+```bash
+AUDIT_REQUEST_DELAY=1.5 AUDIT_TAX_SAMPLE=60 AUDIT_SAMPLE=0 npm run audit:taxonomy  # schonend, nur Steuer-Achse
+```
+
 Ergebnisse: `out/cloud_audit.md` (Disagreement-Report — §1–4 Kategorie, §5
 Steuer inkl. Confusion-Matrix "Qwen steuerrelevant vs. Claude bestätigt" und
 Bestätigungsrate je Sektion), `out/cloud_audit_gold.json` (bestätigte

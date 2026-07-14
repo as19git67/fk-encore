@@ -54,6 +54,12 @@ TAX_SAMPLE_SIZE = int(os.environ.get("AUDIT_TAX_SAMPLE", "100"))
 BATCH_SIZE = 5
 CLAUDE_MODEL = os.environ.get("AUDIT_MODEL", "claude-opus-4-8")
 DRY_RUN = os.environ.get("AUDIT_DRY_RUN", "").lower() in ("1", "true", "yes")
+# The SDK already retries 429/5xx/connection errors with exponential backoff and
+# respects Retry-After; raise the ceiling so a busy minute doesn't lose docs.
+MAX_RETRIES = int(os.environ.get("AUDIT_MAX_RETRIES", "8"))
+# Optional fixed delay (seconds) between requests to stay under the per-minute
+# rate limit proactively. 0 = as fast as the SDK allows.
+REQUEST_DELAY = float(os.environ.get("AUDIT_REQUEST_DELAY", "0"))
 
 # Sektionen, die in der letzten Diagnose auffällig waren: vorher tot
 # (anlage-euer, anlage-kind, mantelbogen, werbungskosten-v) oder plötzlich der
@@ -234,7 +240,17 @@ def _sample_documents(conn) -> list[dict]:
           f"({', '.join(TAX_FOCUS_SECTIONS) or '—'}) + {len(tax_random)} random "
           f"tax_relevant = {len(tax_sample)}")
 
-    # ── B) Kategorie-fokussiert (unverändert) ────────────────────────────
+    # ── B) Kategorie-fokussiert ──────────────────────────────────────────
+    # AUDIT_SAMPLE=0 überspringt die Kategorie-Achse komplett — nützlich, um das
+    # (rate-limitierte) API-Budget ganz auf die Steuerprüfung zu legen.
+    if SAMPLE_SIZE <= 0:
+        cur.close()
+        print("[cloud_audit] Kategorie-Stichprobe: übersprungen (AUDIT_SAMPLE=0)")
+        print(f"[cloud_audit] Gesamt-Stichprobe (dedupliziert): {len(tax_sample)}")
+        return tax_sample
+
+    # sonstiges is capped at min(100, SAMPLE_SIZE); low-conf at min(50, rest).
+    sonstiges_limit = min(100, SAMPLE_SIZE)
     cur.execute(f"""
         SELECT {_BASE_COLUMNS}
         FROM documents d
@@ -242,24 +258,27 @@ def _sample_documents(conn) -> list[dict]:
         WHERE c.slug = 'sonstiges'
           AND d.id <> ALL(%s)
         ORDER BY random()
-        LIMIT 100
-    """, (list(picked_ids) or [-1],))
+        LIMIT %s
+    """, (list(picked_ids) or [-1], sonstiges_limit))
     cols = [desc[0] for desc in cur.description]
     sonstiges = _rows_to_docs(cols, cur.fetchall())
     picked_ids.update(d["id"] for d in sonstiges)
 
-    cur.execute(f"""
-        SELECT {_BASE_COLUMNS}
-        FROM documents d
-        JOIN document_categories c ON c.id = d.category_id
-        WHERE d.classification_confidence < 0.85
-          AND c.slug <> 'sonstiges'
-          AND d.id <> ALL(%s)
-        ORDER BY d.classification_confidence ASC
-        LIMIT 50
-    """, (list(picked_ids) or [-1],))
-    low_conf = _rows_to_docs(cols, cur.fetchall())
-    picked_ids.update(d["id"] for d in low_conf)
+    low_conf_limit = max(0, min(50, SAMPLE_SIZE - len(sonstiges)))
+    low_conf: list[dict] = []
+    if low_conf_limit > 0:
+        cur.execute(f"""
+            SELECT {_BASE_COLUMNS}
+            FROM documents d
+            JOIN document_categories c ON c.id = d.category_id
+            WHERE d.classification_confidence < 0.85
+              AND c.slug <> 'sonstiges'
+              AND d.id <> ALL(%s)
+            ORDER BY d.classification_confidence ASC
+            LIMIT %s
+        """, (list(picked_ids) or [-1], low_conf_limit))
+        low_conf = _rows_to_docs(cols, cur.fetchall())
+        picked_ids.update(d["id"] for d in low_conf)
 
     remaining = SAMPLE_SIZE - len(sonstiges) - len(low_conf)
     if remaining > 0:
@@ -390,15 +409,29 @@ def _clean_claude_tax_sections(raw: object) -> list[dict]:
     )
 
 
+def _is_rate_or_overload(exc: Exception) -> bool:
+    """A sustained rate-limit / overload that even the SDK's retries couldn't
+    ride out. Aborting the run then beats burning the rest of the sample on the
+    same wall (and keeps the partial results already gathered)."""
+    if isinstance(exc, anthropic.RateLimitError):
+        return True
+    status = getattr(exc, "status_code", None)
+    return status in (429, 529, 503)
+
+
 def _classify_batch(
     client: anthropic.Anthropic,
     docs: list[dict],
     taxonomy: str,
     tax_outline: str,
-) -> list[dict]:
-    """Classify a batch of documents via Claude. Returns one result per doc."""
+) -> tuple[list[dict], bool]:
+    """Classify a batch of documents via Claude. Returns (results, aborted).
+
+    `aborted` is True when a sustained rate-limit/overload made us stop early;
+    the caller keeps the partial results and skips the rest of the run.
+    """
     system = _build_system(tax_outline)
-    results = []
+    results: list[dict] = []
     for doc in docs:
         user_msg = _build_user_msg(doc, taxonomy)
         base = {
@@ -444,6 +477,13 @@ def _classify_batch(
                 "tax_reasoning": parsed.get("tax_reasoning", ""),
             })
         except (json.JSONDecodeError, anthropic.APIError, KeyError, ValueError) as e:
+            if _is_rate_or_overload(e):
+                print(
+                    f"  [!] Rate-Limit/Overload bei Dok {doc['id']} — Lauf wird "
+                    f"abgebrochen, Teilergebnis bleibt erhalten: {e}",
+                    file=sys.stderr,
+                )
+                return results, True
             print(f"  [!] Dok {doc['id']}: {e}", file=sys.stderr)
             results.append({
                 **base,
@@ -455,7 +495,9 @@ def _classify_batch(
                 "claude_tax_sections": [],
                 "tax_reasoning": "",
             })
-    return results
+        if REQUEST_DELAY > 0:
+            time.sleep(REQUEST_DELAY)
+    return results, False
 
 
 # ── Report ────────────────────────────────────────────────────────────────────
@@ -704,16 +746,24 @@ def main() -> None:
         print("[cloud_audit] FEHLER: ANTHROPIC_API_KEY nicht gesetzt.", file=sys.stderr)
         sys.exit(1)
 
-    # Classify via Claude
-    client = anthropic.Anthropic(api_key=api_key)
+    # Classify via Claude. `max_retries` lets the SDK ride out transient
+    # 429/5xx/connection blips with exponential backoff (respecting Retry-After).
+    client = anthropic.Anthropic(api_key=api_key, max_retries=MAX_RETRIES)
     all_results: list[dict] = []
     total = len(anon_docs)
     for i in range(0, total, BATCH_SIZE):
         batch = anon_docs[i:i + BATCH_SIZE]
         print(f"  Batch {i//BATCH_SIZE + 1}/{(total + BATCH_SIZE - 1)//BATCH_SIZE} "
               f"({len(batch)} Dokumente)...")
-        results = _classify_batch(client, batch, taxonomy, tax_outline)
+        results, aborted = _classify_batch(client, batch, taxonomy, tax_outline)
         all_results.extend(results)
+        if aborted:
+            print(
+                f"[cloud_audit] Rate-Limit — Abbruch nach {len(all_results)}/{total} "
+                f"Dokumenten. Teilergebnis wird ausgewertet und gespeichert.",
+                file=sys.stderr,
+            )
+            break
 
     # Generate report
     report, gold = _generate_report(all_results)
