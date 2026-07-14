@@ -248,6 +248,19 @@ export async function printLabel(input: PrintLabelInput): Promise<void> {
 export interface LabelPrefs {
   /** The CUPS queue name the user last selected. */
   printer?: string;
+  /** Reusable, user-owned label layouts. */
+  templates?: LabelTemplate[];
+  /** Template most recently applied by the user. */
+  lastTemplateId?: string | null;
+}
+
+export interface LabelTemplate {
+  id: string;
+  name: string;
+  text: string;
+  labelCode: string;
+  fontKey: "small" | "medium" | "large";
+  align: "left" | "center";
 }
 
 export async function getLabelPrefs(userId: number): Promise<LabelPrefs> {
@@ -264,4 +277,25 @@ export async function setLabelPrefs(userId: number, prefs: LabelPrefs): Promise<
   await dbExec(
     db.update(users).set({ label_prefs: prefs }).where(eq(users.id, userId)),
   );
+}
+
+/** Merge selected preference keys without losing unrelated label settings. */
+export async function patchLabelPrefs(
+  userId: number,
+  patch: Partial<LabelPrefs>,
+): Promise<LabelPrefs> {
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({ label_prefs: users.label_prefs })
+      .from(users)
+      .where(eq(users.id, userId))
+      .for("update");
+    const current =
+      row && typeof row.label_prefs === "object" && row.label_prefs !== null
+        ? (row.label_prefs as LabelPrefs)
+        : {};
+    const next = { ...current, ...patch };
+    await tx.update(users).set({ label_prefs: next }).where(eq(users.id, userId));
+    return next;
+  });
 }
