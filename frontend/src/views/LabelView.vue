@@ -2,19 +2,27 @@
 import { onMounted, nextTick, ref, computed, watch } from 'vue'
 import Button from 'primevue/button'
 import Textarea from 'primevue/textarea'
+import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import Select from 'primevue/select'
 import SelectButton from 'primevue/selectbutton'
 import Message from 'primevue/message'
+import Dialog from 'primevue/dialog'
+import { useConfirm } from 'primevue/useconfirm'
 import { useAuthStore } from '../stores/auth'
 import {
   listLabelPrinters,
+  listLabelTemplates,
   saveLabelPrinter,
+  saveLabelTemplates,
   printLabel,
   type LabelPrinter,
+  type LabelTemplate,
 } from '../api/label'
+import { LABEL_PLACEHOLDERS, resolveLabelPlaceholders } from '../utils/labelPlaceholders'
 
 const auth = useAuthStore()
+const confirm = useConfirm()
 const canPrint = auth.hasPermission('label.print')
 
 // Font-size presets expressed as cpi/lpi (characters/lines per inch; lower =
@@ -66,6 +74,21 @@ const copies = ref(1)
 const fontKey = ref<FontPreset['key']>('medium')
 const align = ref<'left' | 'center'>('left')
 const labelCode = ref<string>('99012')
+const templates = ref<LabelTemplate[]>([])
+const selectedTemplateId = ref<string | null>(null)
+const lastTemplateId = ref<string | null>(null)
+const templatesLoading = ref(false)
+const templatesSaving = ref(false)
+const templateDialogVisible = ref(false)
+const editingTemplateId = ref<string | null>(null)
+const templateTextInput = ref<any>(null)
+const templateForm = ref<Omit<LabelTemplate, 'id'>>({
+  name: '',
+  text: '',
+  labelCode: '99012',
+  fontKey: 'medium',
+  align: 'left',
+})
 
 const loading = ref(false)
 const printing = ref(false)
@@ -78,10 +101,26 @@ const selectedFont = computed(
 const selectedLabel = computed(
   () => LABELS.find((l) => l.code === labelCode.value) ?? LABELS[0]!,
 )
+const templateOptions = computed(() =>
+  [...templates.value]
+    .sort((a, b) => a.name.localeCompare(b.name, 'de'))
+    .map((template) => ({ label: template.name, value: template.id })),
+)
+const selectedTemplate = computed(() =>
+  templates.value.find((template) => template.id === selectedTemplateId.value) ?? null,
+)
+const lastTemplate = computed(() =>
+  templates.value.find((template) => template.id === lastTemplateId.value) ?? null,
+)
 // DYMO LabelWriter 450 prints at 300 dpi. The DYMO_DPI constant drives the
 // raster size; if other models are added it can be made configurable.
 const DPI = 300
 const MM_PER_INCH = 25.4
+const PRINT_OFFSET_X_PX = 4
+const placeholderNow = ref(new Date())
+const resolvedText = computed(() =>
+  resolveLabelPlaceholders(text.value, placeholderNow.value, auth.user?.name ?? ''),
+)
 
 // Lines that fit ≈ printable height (short edge) × lines-per-inch.
 const maxLines = computed(() =>
@@ -117,7 +156,7 @@ function wrapLines(input: string, columns: number): string[] {
 }
 
 // All wrapped lines (before the height cap) — used to warn about overflow.
-const wrappedLines = computed(() => wrapLines(text.value, maxColumns.value))
+const wrappedLines = computed(() => wrapLines(resolvedText.value, maxColumns.value))
 const overflow = computed(() => wrappedLines.value.length > maxLines.value)
 
 const previewCanvas = ref<HTMLCanvasElement | null>(null)
@@ -166,12 +205,12 @@ function renderLabel() {
     if (align.value === 'center') {
       x = Math.max(0, (w - ctx.measureText(line).width) / 2)
     }
-    ctx.fillText(line, x, y)
+    ctx.fillText(line, x + PRINT_OFFSET_X_PX, y)
   })
 }
 
 // Re-render whenever anything that affects the output changes.
-watch([text, fontKey, align, labelCode], () => nextTick(renderLabel))
+watch([text, fontKey, align, labelCode, placeholderNow], () => nextTick(renderLabel))
 
 // Remember the formatting choices locally (no backend round-trip needed).
 const LS_KEY = 'label_ui_prefs'
@@ -232,6 +271,151 @@ async function handlePrinterChange() {
   }
 }
 
+async function loadTemplates() {
+  templatesLoading.value = true
+  try {
+    const res = await listLabelTemplates()
+    templates.value = res.templates
+    lastTemplateId.value = res.lastTemplateId
+  } catch (err: any) {
+    error.value = err.message || 'Vorlagen konnten nicht geladen werden'
+  } finally {
+    templatesLoading.value = false
+  }
+}
+
+function applyTemplateValues(template: LabelTemplate) {
+  text.value = template.text
+  labelCode.value = template.labelCode
+  fontKey.value = template.fontKey
+  align.value = template.align
+  selectedTemplateId.value = template.id
+  placeholderNow.value = new Date()
+}
+
+async function applyTemplate(template: LabelTemplate, remember = true) {
+  applyTemplateValues(template)
+  if (!remember || lastTemplateId.value === template.id) return
+  const previous = lastTemplateId.value
+  lastTemplateId.value = template.id
+  try {
+    const res = await saveLabelTemplates(templates.value, template.id)
+    templates.value = res.templates
+    lastTemplateId.value = res.lastTemplateId
+  } catch (err: any) {
+    lastTemplateId.value = previous
+    error.value = err.message || 'Letzte Vorlage konnte nicht gespeichert werden'
+  }
+}
+
+function handleTemplateChange() {
+  const template = selectedTemplate.value
+  if (template) void applyTemplate(template)
+}
+
+function useLastTemplate() {
+  if (lastTemplate.value) void applyTemplate(lastTemplate.value)
+}
+
+function openCreateTemplate() {
+  editingTemplateId.value = null
+  templateForm.value = {
+    name: '',
+    text: text.value,
+    labelCode: labelCode.value,
+    fontKey: fontKey.value,
+    align: align.value,
+  }
+  templateDialogVisible.value = true
+}
+
+function openEditTemplate() {
+  const template = selectedTemplate.value
+  if (!template) return
+  editingTemplateId.value = template.id
+  templateForm.value = {
+    name: template.name,
+    text: template.text,
+    labelCode: template.labelCode,
+    fontKey: template.fontKey,
+    align: template.align,
+  }
+  templateDialogVisible.value = true
+}
+
+function insertPlaceholder(token: string) {
+  const component = templateTextInput.value
+  const element = (component?.$el ?? component) as HTMLTextAreaElement | undefined
+  const current = templateForm.value.text
+  const start = element?.selectionStart ?? current.length
+  const end = element?.selectionEnd ?? start
+  templateForm.value.text = `${current.slice(0, start)}${token}${current.slice(end)}`
+  void nextTick(() => {
+    const cursor = start + token.length
+    element?.focus()
+    element?.setSelectionRange(cursor, cursor)
+  })
+}
+
+async function saveTemplate() {
+  const name = templateForm.value.name.trim()
+  if (!name || templatesSaving.value) return
+  templatesSaving.value = true
+  error.value = ''
+  const id = editingTemplateId.value ?? crypto.randomUUID()
+  const template: LabelTemplate = {
+    id,
+    name,
+    text: templateForm.value.text,
+    labelCode: templateForm.value.labelCode,
+    fontKey: templateForm.value.fontKey,
+    align: templateForm.value.align,
+  }
+  const next = editingTemplateId.value
+    ? templates.value.map((item) => (item.id === id ? template : item))
+    : [...templates.value, template]
+  try {
+    const res = await saveLabelTemplates(next, id)
+    templates.value = res.templates
+    lastTemplateId.value = res.lastTemplateId
+    templateDialogVisible.value = false
+    applyTemplateValues(template)
+  } catch (err: any) {
+    error.value = err.message || 'Vorlage konnte nicht gespeichert werden'
+  } finally {
+    templatesSaving.value = false
+  }
+}
+
+function deleteSelectedTemplate() {
+  const template = selectedTemplate.value
+  if (!template) return
+  confirm.require({
+    header: 'Vorlage löschen',
+    message: `Soll die Vorlage „${template.name}“ gelöscht werden?`,
+    icon: 'pi pi-exclamation-triangle',
+    rejectLabel: 'Abbrechen',
+    acceptLabel: 'Löschen',
+    acceptClass: 'p-button-danger',
+    accept: async () => {
+      templatesSaving.value = true
+      error.value = ''
+      const next = templates.value.filter((item) => item.id !== template.id)
+      const nextLastId = lastTemplateId.value === template.id ? null : lastTemplateId.value
+      try {
+        const res = await saveLabelTemplates(next, nextLastId)
+        templates.value = res.templates
+        lastTemplateId.value = res.lastTemplateId
+        selectedTemplateId.value = null
+      } catch (err: any) {
+        error.value = err.message || 'Vorlage konnte nicht gelöscht werden'
+      } finally {
+        templatesSaving.value = false
+      }
+    },
+  })
+}
+
 async function handlePrint() {
   error.value = ''
   info.value = ''
@@ -244,6 +428,8 @@ async function handlePrint() {
     return
   }
   // Render fresh, then export the canvas exactly as previewed.
+  placeholderNow.value = new Date()
+  await nextTick()
   renderLabel()
   const canvas = previewCanvas.value
   const dataUrl = canvas?.toDataURL('image/png')
@@ -273,6 +459,7 @@ async function handlePrint() {
 onMounted(() => {
   loadUiPrefs()
   loadPrinters()
+  loadTemplates()
   nextTick(renderLabel)
 })
 </script>
@@ -282,9 +469,9 @@ onMounted(() => {
     <header class="page-header">
       <h1>Label drucken</h1>
       <p class="page-hint">
-        Text eingeben, Schriftgröße, Ausrichtung, Anzahl und Drucker wählen und
-        auf <strong>Drucken</strong> tippen. Der Text wird an den ausgewählten
-        CUPS-Drucker gesendet (z.&nbsp;B. DYMO LabelWriter&nbsp;450).
+        Vorlage wählen oder Text eingeben, Format und Drucker festlegen und auf
+        <strong>Drucken</strong> tippen. Vorlagen können dynamische Platzhalter
+        wie das aktuelle Datum enthalten.
       </p>
     </header>
 
@@ -292,6 +479,56 @@ onMounted(() => {
     <Message v-if="info" severity="success" @close="info = ''">{{ info }}</Message>
 
     <section class="form">
+      <div class="field template-field">
+        <span class="label">Vorlage</span>
+        <Button
+          v-if="lastTemplate"
+          class="last-template-button"
+          icon="pi pi-bolt"
+          :label="`Zuletzt verwendet: ${lastTemplate.name}`"
+          severity="secondary"
+          outlined
+          :disabled="printing || templatesSaving"
+          @click="useLastTemplate"
+        />
+        <div class="template-select-row">
+          <Select
+            v-model="selectedTemplateId"
+            :options="templateOptions"
+            option-label="label"
+            option-value="value"
+            placeholder="Vorlage auswählen"
+            :loading="templatesLoading"
+            :disabled="printing || templatesSaving"
+            show-clear
+            class="template-select"
+            @change="handleTemplateChange"
+          />
+          <Button
+            icon="pi pi-plus"
+            label="Neu"
+            :disabled="printing || templatesSaving"
+            @click="openCreateTemplate"
+          />
+          <Button
+            icon="pi pi-pencil"
+            aria-label="Vorlage bearbeiten"
+            severity="secondary"
+            outlined
+            :disabled="!selectedTemplate || printing || templatesSaving"
+            @click="openEditTemplate"
+          />
+          <Button
+            icon="pi pi-trash"
+            aria-label="Vorlage löschen"
+            severity="danger"
+            outlined
+            :disabled="!selectedTemplate || printing || templatesSaving"
+            @click="deleteSelectedTemplate"
+          />
+        </div>
+      </div>
+
       <label class="field">
         <span class="label">Text</span>
         <Textarea
@@ -303,6 +540,9 @@ onMounted(() => {
         />
         <small class="hint-muted">
           max. {{ maxLines }} Zeilen × {{ maxColumns }} Zeichen bei dieser Schriftgröße
+        </small>
+        <small v-if="text.includes('{{')" class="hint-muted">
+          Platzhalter werden in der Vorschau und beim Drucken mit aktuellen Werten ersetzt.
         </small>
         <small v-if="overflow" class="hint-warn">
           Der Text passt nicht vollständig auf das Etikett und wird abgeschnitten.
@@ -433,6 +673,103 @@ onMounted(() => {
         Dir fehlt die Berechtigung <code>label.print</code> zum Drucken.
       </p>
     </section>
+
+    <Dialog
+      v-model:visible="templateDialogVisible"
+      modal
+      :header="editingTemplateId ? 'Vorlage bearbeiten' : 'Vorlage erstellen'"
+      :style="{ width: '36rem', maxWidth: 'calc(100vw - 2rem)' }"
+      :closable="!templatesSaving"
+    >
+      <div class="template-dialog-form">
+        <label class="field">
+          <span class="label">Name</span>
+          <InputText
+            v-model="templateForm.name"
+            maxlength="80"
+            placeholder="z. B. Eingelagert am"
+            autofocus
+          />
+        </label>
+
+        <div class="field">
+          <span class="label">Text</span>
+          <Textarea
+            ref="templateTextInput"
+            v-model="templateForm.text"
+            rows="6"
+            auto-resize
+            class="text-input"
+            placeholder="Text für die Vorlage …"
+          />
+          <div class="placeholder-buttons" aria-label="Platzhalter einfügen">
+            <Button
+              v-for="placeholder in LABEL_PLACEHOLDERS"
+              :key="placeholder.token"
+              :label="placeholder.label"
+              :title="`${placeholder.token} → ${placeholder.example}`"
+              size="small"
+              severity="secondary"
+              outlined
+              @click="insertPlaceholder(placeholder.token)"
+            />
+          </div>
+          <small class="hint-muted">
+            Platzhalter werden erst in Vorschau und Ausdruck ersetzt und bleiben in der Vorlage dynamisch.
+          </small>
+        </div>
+
+        <label class="field">
+          <span class="label">Etikett</span>
+          <Select
+            v-model="templateForm.labelCode"
+            :options="labelOptions"
+            option-label="text"
+            option-value="code"
+          />
+        </label>
+
+        <div class="field-row">
+          <div class="field field--font">
+            <span class="label">Schriftgröße</span>
+            <SelectButton
+              v-model="templateForm.fontKey"
+              :options="FONT_PRESETS"
+              option-label="label"
+              option-value="key"
+              :allow-empty="false"
+            />
+          </div>
+          <div class="field field--align">
+            <span class="label">Ausrichtung</span>
+            <SelectButton
+              v-model="templateForm.align"
+              :options="ALIGN_OPTIONS"
+              option-label="label"
+              option-value="value"
+              :allow-empty="false"
+            />
+          </div>
+        </div>
+      </div>
+
+      <template #footer>
+        <Button
+          label="Abbrechen"
+          severity="secondary"
+          text
+          :disabled="templatesSaving"
+          @click="templateDialogVisible = false"
+        />
+        <Button
+          label="Speichern"
+          icon="pi pi-check"
+          :loading="templatesSaving"
+          :disabled="!templateForm.name.trim()"
+          @click="saveTemplate"
+        />
+      </template>
+    </Dialog>
   </div>
 </template>
 
@@ -497,6 +834,53 @@ onMounted(() => {
 .field--font,
 .field--align {
   flex: 1 1 auto;
+}
+
+.template-field {
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--p-content-border-color);
+}
+.last-template-button {
+  align-self: flex-start;
+  max-width: 100%;
+}
+.last-template-button :deep(.p-button-label) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.template-select-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.template-select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.template-dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.template-dialog-form :deep(.p-inputtext),
+.template-dialog-form :deep(.p-textarea),
+.template-dialog-form :deep(.p-select) {
+  width: 100%;
+}
+.placeholder-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+@media (max-width: 480px) {
+  .template-select-row {
+    flex-wrap: wrap;
+  }
+  .template-select {
+    flex-basis: 100%;
+  }
 }
 
 /* "Aa" sample on the font-size selector, scaled per preset. */
