@@ -3,6 +3,8 @@
  *
  *   GET /label/printers  → list CUPS printers + the user's saved selection.
  *   PUT /label/printer   → persist the user's selected printer.
+ *   GET /label/templates → list the user's reusable label templates.
+ *   PUT /label/templates → persist templates and the last-used template.
  *   POST /label/print    → print a pre-rendered label image to a CUPS queue.
  *
  * Listing/selecting a printer needs `label.view`; printing needs
@@ -88,8 +90,102 @@ export const savePrinter = api(
     const userId = requireUser("label.view");
     const printer = req.printer?.trim();
     if (!printer) throw APIError.invalidArgument("printer darf nicht leer sein");
-    await svc.setLabelPrefs(userId, { printer });
+    await svc.patchLabelPrefs(userId, { printer });
     return { selected: printer };
+  },
+);
+
+// ---------- Templates ----------
+
+const MAX_TEMPLATES = 50;
+const MAX_TEMPLATE_NAME = 80;
+const MAX_TEMPLATE_TEXT = 4_000;
+const VALID_FONT_KEYS = new Set(["small", "medium", "large"]);
+const VALID_ALIGNS = new Set(["left", "center"]);
+const VALID_LABEL_CODES = new Set([
+  "99012", "99010", "99014", "11356", "11354", "11352", "99015", "11355", "99017",
+]);
+
+interface TemplatesResponse {
+  templates: svc.LabelTemplate[];
+  lastTemplateId: string | null;
+}
+
+interface SaveTemplatesRequest {
+  templates: svc.LabelTemplate[];
+  lastTemplateId?: string | null;
+}
+
+function normalizeTemplates(input: svc.LabelTemplate[]): svc.LabelTemplate[] {
+  if (!Array.isArray(input)) {
+    throw APIError.invalidArgument("templates muss eine Liste sein");
+  }
+  if (input.length > MAX_TEMPLATES) {
+    throw APIError.invalidArgument(`Maximal ${MAX_TEMPLATES} Vorlagen sind erlaubt`);
+  }
+  const ids = new Set<string>();
+  return input.map((template) => {
+    const id = template?.id?.trim();
+    const name = template?.name?.trim();
+    const labelCode = template?.labelCode?.trim();
+    if (!id || id.length > 100 || ids.has(id)) {
+      throw APIError.invalidArgument("Vorlagen benötigen eine eindeutige ID");
+    }
+    ids.add(id);
+    if (!name || name.length > MAX_TEMPLATE_NAME) {
+      throw APIError.invalidArgument(`Vorlagenname muss 1 bis ${MAX_TEMPLATE_NAME} Zeichen lang sein`);
+    }
+    if (typeof template.text !== "string" || template.text.length > MAX_TEMPLATE_TEXT) {
+      throw APIError.invalidArgument(`Vorlagentext darf maximal ${MAX_TEMPLATE_TEXT} Zeichen lang sein`);
+    }
+    if (!labelCode || !VALID_LABEL_CODES.has(labelCode)) {
+      throw APIError.invalidArgument("Ungültiger Etikettentyp");
+    }
+    if (!VALID_FONT_KEYS.has(template.fontKey)) {
+      throw APIError.invalidArgument("Ungültige Schriftgröße");
+    }
+    if (!VALID_ALIGNS.has(template.align)) {
+      throw APIError.invalidArgument("Ungültige Ausrichtung");
+    }
+    return {
+      id,
+      name,
+      text: template.text,
+      labelCode,
+      fontKey: template.fontKey,
+      align: template.align,
+    };
+  });
+}
+
+export const listTemplates = api(
+  { expose: true, method: "GET", path: "/label/templates", auth: true },
+  async (): Promise<TemplatesResponse> => {
+    const userId = requireUser("label.view");
+    const prefs = await svc.getLabelPrefs(userId);
+    const templates = Array.isArray(prefs.templates) ? prefs.templates : [];
+    const lastTemplateId =
+      prefs.lastTemplateId && templates.some((template) => template.id === prefs.lastTemplateId)
+        ? prefs.lastTemplateId
+        : null;
+    return { templates, lastTemplateId };
+  },
+);
+
+export const saveTemplates = api(
+  { expose: true, method: "PUT", path: "/label/templates", auth: true },
+  async (req: SaveTemplatesRequest): Promise<TemplatesResponse> => {
+    const userId = requireUser("label.view");
+    const templates = normalizeTemplates(req.templates);
+    const requestedLastId = req.lastTemplateId?.trim() || null;
+    if (requestedLastId && !templates.some((template) => template.id === requestedLastId)) {
+      throw APIError.invalidArgument("Die zuletzt verwendete Vorlage existiert nicht");
+    }
+    await svc.patchLabelPrefs(userId, {
+      templates,
+      lastTemplateId: requestedLastId,
+    });
+    return { templates, lastTemplateId: requestedLastId };
   },
 );
 
@@ -146,7 +242,7 @@ export const print = api(
     // If the caller passed an explicit printer, remember it as the new
     // default so the next print prefills correctly.
     if (req.printer?.trim()) {
-      await svc.setLabelPrefs(userId, { printer });
+      await svc.patchLabelPrefs(userId, { printer });
     }
 
     return { printed: copies, printer };
