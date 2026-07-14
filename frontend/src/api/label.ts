@@ -26,6 +26,37 @@ export function saveLabelPrinter(printer: string) {
   })
 }
 
+export type LabelTemplateFontKey = 'small' | 'medium' | 'large'
+export type LabelTemplateAlign = 'left' | 'center'
+
+export interface LabelTemplate {
+  id: string
+  name: string
+  text: string
+  labelCode: string
+  fontKey: LabelTemplateFontKey
+  align: LabelTemplateAlign
+}
+
+export interface LabelTemplatesResponse {
+  templates: LabelTemplate[]
+  lastTemplateId: string | null
+}
+
+export function listLabelTemplates() {
+  return apiFetch<LabelTemplatesResponse>('/label/templates')
+}
+
+export function saveLabelTemplates(
+  templates: LabelTemplate[],
+  lastTemplateId: string | null,
+) {
+  return apiFetch<LabelTemplatesResponse>('/label/templates', {
+    method: 'PUT',
+    body: JSON.stringify({ templates, lastTemplateId }),
+  })
+}
+
 export interface PrintLabelRequest {
   /** The label rendered to a PNG image, base64-encoded (no data: prefix). */
   imageBase64: string
