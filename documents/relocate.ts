@@ -37,7 +37,8 @@ import {
   slugifyUserLogin,
 } from "./documents.service";
 import { withDocumentLock } from "./document-lock";
-import { buildCorrespondentFolderSlug } from "./correspondent";
+import { buildCorrespondentFolderSlug, resolveCorrespondent } from "./correspondent";
+import { loadCorrespondentOverrides } from "./correspondent-overrides";
 
 console.log("[boot] documents/relocate.ts: all imports resolved");
 
@@ -80,11 +81,15 @@ export async function loadDocumentLocationContext(
   const tagNames = doc.tags_text
     ? doc.tags_text.split(/\s+/).filter((t) => t.length > 0)
     : [];
-  const correspondentSlug = buildCorrespondentFolderSlug({
-    sender: doc.sender,
-    title: doc.title,
-    tags: tagNames,
-  });
+  const overrides = await loadCorrespondentOverrides();
+  const correspondentSlug = buildCorrespondentFolderSlug(
+    {
+      sender: doc.sender,
+      title: doc.title,
+      tags: tagNames,
+    },
+    overrides,
+  );
 
   return {
     visibility: doc.visibility,
@@ -158,6 +163,26 @@ async function relocateDocumentLocked(documentId: number): Promise<string> {
   const ctx = await loadDocumentLocationContext(row);
   const target = resolveDocumentDiskPath(ctx);
   assertPathUnderDocumentsRoot(target.absPath);
+
+  // Persist the institution-level correspondent identity (migration 0130) so
+  // the document list can filter/group by it. Written up-front — independent of
+  // whether the file ends up moving — so the backfill records the correspondent
+  // even for a row whose file is temporarily missing, and so classification
+  // metadata isn't tied to filesystem state. Overrides win over the registry.
+  const overrides = await loadCorrespondentOverrides();
+  const corr = resolveCorrespondent(row.sender, overrides);
+  if (
+    corr?.slug !== (row.correspondent_slug ?? undefined) ||
+    corr?.display !== (row.correspondent_display ?? undefined)
+  ) {
+    await db
+      .update(documents)
+      .set({
+        correspondent_slug: corr?.slug ?? null,
+        correspondent_display: corr?.display ?? null,
+      })
+      .where(eq(documents.id, documentId));
+  }
 
   const oldAbs = row.disk_path;
   const moved = oldAbs !== target.absPath;

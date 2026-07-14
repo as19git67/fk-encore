@@ -87,6 +87,29 @@ describe("resolveCorrespondent", () => {
     expect(out).not.toBeNull();
     expect(out!.slug.length).toBeLessThanOrEqual(40);
   });
+
+  it("lets a user override win over the built-in registry", () => {
+    const overrides = [{ pattern: "janitos", slug: "versicherung-x", display: "Versicherung X" }];
+    expect(resolveCorrespondent("Janitos Versicherung AG", overrides)).toEqual({
+      slug: "versicherung-x",
+      display: "Versicherung X",
+    });
+  });
+
+  it("falls back to the registry when no override pattern matches", () => {
+    const overrides = [{ pattern: "allianz", slug: "allianz", display: "Allianz" }];
+    expect(resolveCorrespondent("Janitos", overrides)?.slug).toBe("janitos");
+  });
+
+  it("threads overrides through buildCorrespondentFolderSlug", () => {
+    const overrides = [{ pattern: "janitos", slug: "versicherung-x", display: "Versicherung X" }];
+    expect(
+      buildCorrespondentFolderSlug(
+        { sender: "Janitos", title: "Hausratversicherung", tags: [] },
+        overrides,
+      ),
+    ).toBe("versicherung-x-hausrat");
+  });
 });
 
 describe("CORRESPONDENT_REGISTRY", () => {

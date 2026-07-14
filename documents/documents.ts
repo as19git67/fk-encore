@@ -20,6 +20,7 @@ import {
   documentCategories,
   documentCategorySuggestions,
   documentHintSuggestions,
+  documentCorrespondentOverrides,
   documentSubjectPersons,
   documentTagLinks,
   documentTags,
@@ -40,8 +41,13 @@ import {
   getInitialUploadDiskPath,
   guessExtension,
   pruneEmptyDirs,
+  slugifyName,
   slugifyUserLogin,
 } from "./documents.service";
+import { normalizeForMatch } from "./sender-rules";
+import {
+  invalidateCorrespondentOverridesCache,
+} from "./correspondent-overrides";
 import { users } from "../db/schema";
 import { replaceUserTaxSections } from "./document-ops";
 import {
@@ -145,6 +151,9 @@ export interface DocumentSummary {
   doc_date: string | null;
   sender: string | null;
   document_number: string | null;
+  /** Canonical correspondent (institution) derived from sender (migration 0130). */
+  correspondent_slug: string | null;
+  correspondent_display: string | null;
   category_id: number | null;
   category_slug: string | null;
   classification_confidence: number | null;
@@ -234,6 +243,8 @@ interface ListQuery {
    */
   unreviewed?: Query<boolean>;
   sender?: Query<string>;
+  /** Keep only documents whose persisted correspondent matches this slug (migration 0130). */
+  correspondent?: Query<string>;
   date_from?: Query<string>;
   date_to?: Query<string>;
   tax_relevant?: Query<boolean>;
@@ -256,6 +267,7 @@ interface DocumentFilterArgs {
   needs_review?: boolean;
   unreviewed?: boolean;
   sender?: string;
+  correspondent?: string;
   date_from?: string;
   date_to?: string;
   tax_relevant?: boolean;
@@ -307,6 +319,9 @@ async function buildDocumentFilterConditions(
   }
   if (f.sender && f.sender.trim().length > 0) {
     conds.push(ilike(documents.sender, `%${f.sender.trim()}%`));
+  }
+  if (f.correspondent && f.correspondent.trim().length > 0) {
+    conds.push(eq(documents.correspondent_slug, f.correspondent.trim().toLowerCase()));
   }
   if (f.date_from) {
     conds.push(gte(documents.doc_date, f.date_from));
@@ -974,7 +989,7 @@ async function loadDefaultGroupForUser(userId: number): Promise<number | null> {
 
 export const listDocuments = api(
   { expose: true, method: "GET", path: "/documents", auth: true },
-  async ({ category, tags, q, status, needs_review, unreviewed, sender, date_from, date_to, tax_relevant, subject_person_id, sort_by, sort_dir, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
+  async ({ category, tags, q, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, sort_by, sort_dir, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -989,7 +1004,7 @@ export const listDocuments = api(
       : [visibleDocumentsWhere(userId, groupIds)];
 
     const filterConds = await buildDocumentFilterConditions({
-      category, tags, status, needs_review, unreviewed, sender, date_from, date_to, tax_relevant, subject_person_id,
+      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id,
     });
     if (filterConds === null) {
       // A requested tag doesn't exist — nothing can match.
@@ -1035,6 +1050,8 @@ export const listDocuments = api(
           doc_date: documents.doc_date,
           sender: documents.sender,
           document_number: documents.document_number,
+          correspondent_slug: documents.correspondent_slug,
+          correspondent_display: documents.correspondent_display,
           summary: documents.summary,
           extracted_text: documents.extracted_text,
           classification_confidence: documents.classification_confidence,
@@ -2748,6 +2765,8 @@ export const listTaxDocuments = api(
           doc_date: documents.doc_date,
           sender: documents.sender,
           document_number: documents.document_number,
+          correspondent_slug: documents.correspondent_slug,
+          correspondent_display: documents.correspondent_display,
           summary: documents.summary,
           extracted_text: documents.extracted_text,
           classification_confidence: documents.classification_confidence,
@@ -2917,6 +2936,7 @@ interface SearchQuery {
   needs_review?: Query<boolean>;
   unreviewed?: Query<boolean>;
   sender?: Query<string>;
+  correspondent?: Query<string>;
   date_from?: Query<string>;
   date_to?: Query<string>;
   tax_relevant?: Query<boolean>;
@@ -2935,7 +2955,7 @@ interface SearchQuery {
  */
 export const searchDocumentsEndpoint = api(
   { expose: true, method: "GET", path: "/documents/search", auth: true },
-  async ({ q, mode, limit, category, tags, status, needs_review, unreviewed, sender, date_from, date_to, tax_relevant, subject_person_id }: SearchQuery): Promise<SearchDocumentsResponse> => {
+  async ({ q, mode, limit, category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id }: SearchQuery): Promise<SearchDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -2950,7 +2970,7 @@ export const searchDocumentsEndpoint = api(
     }
 
     const filterConds = await buildDocumentFilterConditions({
-      category, tags, status, needs_review, unreviewed, sender, date_from, date_to, tax_relevant, subject_person_id,
+      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id,
     });
     if (filterConds === null) {
       // A requested tag doesn't exist — nothing can match.
@@ -2986,6 +3006,8 @@ export const searchDocumentsEndpoint = api(
           doc_date: documents.doc_date,
           sender: documents.sender,
           document_number: documents.document_number,
+          correspondent_slug: documents.correspondent_slug,
+          correspondent_display: documents.correspondent_display,
           summary: documents.summary,
           extracted_text: documents.extracted_text,
           classification_confidence: documents.classification_confidence,
@@ -3450,6 +3472,8 @@ export function toSummary(
     doc_date: row.doc_date,
     sender: row.sender,
     document_number: row.document_number ?? null,
+    correspondent_slug: row.correspondent_slug ?? null,
+    correspondent_display: row.correspondent_display ?? null,
     category_id: row.category_id,
     category_slug: categorySlug,
     classification_confidence: row.classification_confidence,
@@ -3576,3 +3600,178 @@ async function replaceUserSubjectPersons(
       });
   }
 }
+
+// ─── Correspondents: facet + user overrides ────────────────────────────────
+
+export interface CorrespondentFacet {
+  slug: string;
+  display: string;
+  count: number;
+}
+
+export interface CorrespondentFacetResponse {
+  items: CorrespondentFacet[];
+}
+
+/**
+ * Distinct correspondents across the caller's visible documents, with a
+ * document count each (most frequent first). Powers the "nach Korrespondent"
+ * filter facet in the document list. Reads the persisted
+ * `correspondent_slug`/`correspondent_display` columns (migration 0130).
+ */
+export const listCorrespondents = api(
+  { expose: true, method: "GET", path: "/documents/correspondents", auth: true },
+  async (): Promise<CorrespondentFacetResponse> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.view");
+    const userId = getUserId();
+    const groupIds = await loadUserGroupIds(userId);
+
+    const rows = await dbAll<{ slug: string | null; display: string | null; count: number }>(
+      db
+        .select({
+          slug: documents.correspondent_slug,
+          display: sql<string>`max(${documents.correspondent_display})`,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(documents)
+        .where(
+          and(
+            visibleDocumentsWhere(userId, groupIds),
+            sql`${documents.correspondent_slug} IS NOT NULL`,
+          ),
+        )
+        .groupBy(documents.correspondent_slug)
+        .orderBy(sql`count(*) DESC`),
+    );
+
+    return {
+      items: rows
+        .filter((r): r is { slug: string; display: string | null; count: number } => r.slug != null)
+        .map((r) => ({ slug: r.slug, display: r.display ?? r.slug, count: Number(r.count) })),
+    };
+  },
+);
+
+export interface CorrespondentOverrideDTO {
+  id: number;
+  sender_pattern: string;
+  correspondent_slug: string;
+  correspondent_display: string;
+}
+
+export interface CorrespondentOverrideListResponse {
+  items: CorrespondentOverrideDTO[];
+}
+
+/** List the household's correspondent overrides (admin/taxonomy management). */
+export const listCorrespondentOverrides = api(
+  { expose: true, method: "GET", path: "/documents/correspondent-overrides", auth: true },
+  async (): Promise<CorrespondentOverrideListResponse> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.manage_taxonomy");
+    const items = await dbAll<CorrespondentOverrideDTO>(
+      db
+        .select({
+          id: documentCorrespondentOverrides.id,
+          sender_pattern: documentCorrespondentOverrides.sender_pattern,
+          correspondent_slug: documentCorrespondentOverrides.correspondent_slug,
+          correspondent_display: documentCorrespondentOverrides.correspondent_display,
+        })
+        .from(documentCorrespondentOverrides)
+        .orderBy(asc(documentCorrespondentOverrides.sender_pattern)),
+    );
+    return { items };
+  },
+);
+
+export interface CreateCorrespondentOverrideRequest {
+  /** Free-form sender fragment; normalised server-side (e.g. "Janitos AG" → "janitosag"). */
+  sender_pattern: string;
+  /** Human-readable correspondent name (e.g. "Janitos"). */
+  correspondent_display: string;
+  /** Optional explicit slug; derived from the display name when omitted. */
+  correspondent_slug?: string;
+}
+
+/**
+ * Create or replace (upsert on sender_pattern) a correspondent override.
+ * Takes effect the next time an affected document is relocated — run the
+ * "Dateinamen aktualisieren" backfill to apply it across the corpus.
+ */
+export const createCorrespondentOverride = api(
+  { expose: true, method: "POST", path: "/documents/correspondent-overrides", auth: true },
+  async (req: CreateCorrespondentOverrideRequest): Promise<CorrespondentOverrideDTO> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.manage_taxonomy");
+    const userId = getUserId();
+
+    const pattern = normalizeForMatch(req.sender_pattern);
+    if (pattern.length < 2) {
+      throw APIError.invalidArgument("sender_pattern must have at least 2 usable characters");
+    }
+    const display = (req.correspondent_display ?? "").trim();
+    if (display.length === 0) {
+      throw APIError.invalidArgument("correspondent_display must not be empty");
+    }
+    const slug = slugifyName(
+      req.correspondent_slug && req.correspondent_slug.trim().length > 0
+        ? req.correspondent_slug
+        : display,
+      40,
+    );
+    if (slug.length === 0) {
+      throw APIError.invalidArgument("correspondent_slug reduces to empty");
+    }
+
+    const existing = await dbFirst<{ id: number }>(
+      db
+        .select({ id: documentCorrespondentOverrides.id })
+        .from(documentCorrespondentOverrides)
+        .where(eq(documentCorrespondentOverrides.sender_pattern, pattern)),
+    );
+    let id: number;
+    if (existing) {
+      await db
+        .update(documentCorrespondentOverrides)
+        .set({ correspondent_slug: slug, correspondent_display: display })
+        .where(eq(documentCorrespondentOverrides.id, existing.id));
+      id = existing.id;
+    } else {
+      const inserted = await db
+        .insert(documentCorrespondentOverrides)
+        .values({
+          sender_pattern: pattern,
+          correspondent_slug: slug,
+          correspondent_display: display,
+          created_by: userId,
+        })
+        .returning({ id: documentCorrespondentOverrides.id });
+      id = inserted[0].id;
+    }
+    invalidateCorrespondentOverridesCache();
+    return { id, sender_pattern: pattern, correspondent_slug: slug, correspondent_display: display };
+  },
+);
+
+export interface DeleteCorrespondentOverrideRequest {
+  id: number;
+}
+
+/** Remove a correspondent override; affected documents revert to the registry. */
+export const deleteCorrespondentOverride = api(
+  { expose: true, method: "DELETE", path: "/documents/correspondent-overrides/:id", auth: true },
+  async (req: DeleteCorrespondentOverrideRequest): Promise<{ deleted: boolean }> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.manage_taxonomy");
+    await db
+      .delete(documentCorrespondentOverrides)
+      .where(eq(documentCorrespondentOverrides.id, req.id));
+    invalidateCorrespondentOverridesCache();
+    return { deleted: true };
+  },
+);

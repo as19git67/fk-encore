@@ -5,7 +5,7 @@ import { replaceQuerySlice, updateRouteQuery } from '../utils/routeQueryUpdate'
 
 const STORAGE_KEY = 'documents.filter'
 export const DOCUMENT_FILTER_QUERY_KEYS = [
-  'category', 'tags', 'status', 'review', 'neu', 'sender', 'dateFrom', 'dateTo',
+  'category', 'tags', 'status', 'review', 'neu', 'sender', 'correspondent', 'dateFrom', 'dateTo',
   'taxRelevant', 'subjectPerson',
 ] as const
 
@@ -17,6 +17,8 @@ export interface DocumentFilter {
   /** Only "new" documents: ready with unapproved AI attribution (#635). */
   unreviewed?: boolean
   sender?: string
+  /** Canonical correspondent slug (facet filter). */
+  correspondent?: string
   dateFrom?: string
   dateTo?: string
   taxRelevant?: boolean
@@ -49,6 +51,7 @@ export function parseDocFilterFromQuery(q: Record<string, unknown>): DocumentFil
   const un = parseBool(q.neu)
   if (un === true) f.unreviewed = true
   if (typeof q.sender === 'string' && q.sender) f.sender = q.sender
+  if (typeof q.correspondent === 'string' && q.correspondent) f.correspondent = q.correspondent
   if (typeof q.dateFrom === 'string' && q.dateFrom) f.dateFrom = q.dateFrom
   if (typeof q.dateTo === 'string' && q.dateTo) f.dateTo = q.dateTo
   const tr = parseBool(q.taxRelevant)
@@ -68,6 +71,7 @@ export function docFilterToQuery(f: DocumentFilter): Record<string, string> {
   if (f.needs_review) out.review = '1'
   if (f.unreviewed) out.neu = '1'
   if (f.sender) out.sender = f.sender
+  if (f.correspondent) out.correspondent = f.correspondent
   if (f.dateFrom) out.dateFrom = f.dateFrom
   if (f.dateTo) out.dateTo = f.dateTo
   if (f.taxRelevant !== undefined) out.taxRelevant = String(f.taxRelevant)
@@ -83,6 +87,7 @@ export function countActiveDocFilters(f: DocumentFilter): number {
   if (f.needs_review) n++
   if (f.unreviewed) n++
   if (f.sender) n++
+  if (f.correspondent) n++
   if (f.dateFrom || f.dateTo) n++
   if (f.taxRelevant !== undefined) n++
   if (f.subjectPersonId) n++

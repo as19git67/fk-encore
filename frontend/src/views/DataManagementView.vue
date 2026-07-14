@@ -7,6 +7,7 @@ import Message from 'primevue/message'
 import RadioButton from 'primevue/radiobutton'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
+import CorrespondentOverridesPanel from '../components/CorrespondentOverridesPanel.vue'
 import {
   getScanQueueStatus, rescanPhotos, retryFailedScans, cancelPendingScans,
   redetectMissingPois,
@@ -1244,6 +1245,11 @@ onBeforeUnmount(() => {
           @click="handleDocCancel"
         />
       </div>
+    </div>
+
+    <!-- Korrespondenten-Overrides -->
+    <div class="data-management-group">
+      <CorrespondentOverridesPanel />
     </div>
 
     <!-- Foto-Gruppen -->

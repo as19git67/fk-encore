@@ -8,6 +8,7 @@ export default defineConfig({
     include: [
       "backup/state.test.ts",
       "documents/correspondent.test.ts",
+      "documents/institutions.test.ts",
       "documents/document-filename.test.ts",
       "documents/metadata-extract.test.ts",
       "documents/text-extract-warning.test.ts",

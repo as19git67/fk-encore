@@ -39,6 +39,7 @@
 
 import { normalizeForMatch } from "./sender-rules";
 import { slugifyName } from "./documents.service";
+import { INSTITUTIONS } from "./institutions";
 
 export interface CorrespondentIdentity {
   /** Filesystem-safe folder segment, e.g. "janitos". */
@@ -47,66 +48,27 @@ export interface CorrespondentIdentity {
   display: string;
 }
 
-interface CorrespondentRegistryEntry {
+/**
+ * A user-defined correspondent override: when the normalised sender contains
+ * `pattern`, force the given identity instead of consulting the registry.
+ * Loaded from the DB by `correspondent-overrides.ts` and passed in so this
+ * module stays pure/DB-free.
+ */
+export interface CorrespondentOverride {
+  /** Normalised sender fragment to match (same folding as `normalizeForMatch`). */
+  pattern: string;
   slug: string;
   display: string;
-  /**
-   * Normalised sender fragments (already run through the same folding as
-   * `normalizeForMatch`: lower-case, only `[a-z0-9äöüß]`). The entry matches
-   * when the normalised sender CONTAINS any fragment.
-   */
-  fragments: string[];
 }
 
 /**
- * Known recurring correspondents for this household, seeded from the
- * institutions in `sender-rules.ts`. Deliberately excludes overly generic
- * fragments (e.g. "gemeinde", "bausparkasse", "gymnasium") — those carry no
- * institution identity and are better handled by the slugified fallback.
+ * Known recurring correspondents for this household. Single-sourced from
+ * `institutions.ts`, which is kept in lock-step with the sender rules by
+ * `institutions.test.ts`. Overly generic senders (e.g. "gemeinde",
+ * "bausparkasse") are intentionally absent and fall through to the slugified
+ * fallback in `resolveCorrespondent`.
  */
-export const CORRESPONDENT_REGISTRY: readonly CorrespondentRegistryEntry[] = [
-  // ── Employer document portals (Contoso/Contoso deliver the employer's
-  //    payslips, SV notifications, forwarded tax assessments). Unified so all
-  //    employer paperwork lands under one correspondent. ──
-  { slug: "arbeitgeber", display: "Arbeitgeber", fragments: ["contoso", "contoso"] },
-
-  // ── Banks / brokers ──
-  { slug: "comdirect", display: "comdirect", fragments: ["comdirect"] },
-  { slug: "commerzbank", display: "Commerzbank", fragments: ["commerzbank"] },
-  { slug: "mlp", display: "MLP", fragments: ["mlpbank", "mlpbanking", "mlplebensversicherung"] },
-
-  // ── Doctors / dentists / care ──
-  { slug: "kiesewetter", display: "Zahnarzt Kiesewetter", fragments: ["kiesewetter"] },
-  { slug: "enzensberger", display: "Ärztin Enzensberger", fragments: ["enzensberger"] },
-  { slug: "caritas-sozialstation", display: "Caritas-Sozialstation", fragments: ["caritassozialstation"] },
-
-  // ── Health insurance (gesetzliche Krankenkassen) ──
-  { slug: "barmer", display: "BARMER", fragments: ["barmer"] },
-  { slug: "techniker-krankenkasse", display: "Techniker Krankenkasse", fragments: ["technikerkrankenkasse", "technikerkasse"] },
-  { slug: "aok", display: "AOK", fragments: ["aokbayern", "aokplus"] },
-
-  // ── Private health / life / property insurance ──
-  { slug: "hallesche", display: "HALLESCHE", fragments: ["hallesche"] },
-  { slug: "dkv", display: "DKV", fragments: ["dkvdeutsche"] },
-  { slug: "heidelberger-leben", display: "Heidelberger Leben", fragments: ["heidelbergerleben", "heidelbergerlebensversicherung"] },
-  { slug: "axa", display: "AXA", fragments: ["axalebensversicherung", "axaversicherung"] },
-  { slug: "janitos", display: "Janitos", fragments: ["janitos"] },
-  { slug: "marsh", display: "Marsh", fragments: ["marshgmbh"] },
-  { slug: "hvs", display: "HVS", fragments: ["hvsversicherung"] },
-
-  // ── Pension / authorities / tax ──
-  { slug: "deutsche-rentenversicherung", display: "Deutsche Rentenversicherung", fragments: ["deutscherentenversicherung", "bundesversicherungsanstalt"] },
-  { slug: "treukontax", display: "Treukontax", fragments: ["treukontax"] },
-  { slug: "stadt-eutin", display: "Stadt Eutin", fragments: ["stadteutin", "stadtverwaltungeutin"] },
-
-  // ── Telecom / memberships / vehicle ──
-  { slug: "lew-telnet", display: "LEW TelNet", fragments: ["lewtelnet", "telnet"] },
-  { slug: "telefonica", display: "Telefónica/O2", fragments: ["telefnica", "telefonica"] },
-  { slug: "vodafone", display: "Vodafone", fragments: ["vodafone"] },
-  { slug: "telekom", display: "Telekom", fragments: ["deutschetelekom", "telekom"] },
-  { slug: "clever-fit", display: "Clever Fit", fragments: ["cleverfit"] },
-  { slug: "tuev-sued", display: "TÜV SÜD", fragments: ["tüvsüd", "tuvsud"] },
-];
+export const CORRESPONDENT_REGISTRY = INSTITUTIONS;
 
 /**
  * Resolve the canonical correspondent for a raw sender string.
@@ -117,9 +79,19 @@ export const CORRESPONDENT_REGISTRY: readonly CorrespondentRegistryEntry[] = [
  */
 export function resolveCorrespondent(
   sender: string | null | undefined,
+  overrides?: readonly CorrespondentOverride[],
 ): CorrespondentIdentity | null {
   const normalized = normalizeForMatch(sender);
   if (!normalized) return null;
+
+  // User overrides win over the built-in registry.
+  if (overrides) {
+    for (const o of overrides) {
+      if (o.pattern.length > 0 && normalized.includes(o.pattern)) {
+        return { slug: o.slug, display: o.display };
+      }
+    }
+  }
 
   for (const entry of CORRESPONDENT_REGISTRY) {
     if (entry.fragments.some((frag) => normalized.includes(frag))) {
@@ -249,8 +221,9 @@ export interface CorrespondentFolderInput {
  */
 export function buildCorrespondentFolderSlug(
   input: CorrespondentFolderInput,
+  overrides?: readonly CorrespondentOverride[],
 ): string | null {
-  const correspondent = resolveCorrespondent(input.sender);
+  const correspondent = resolveCorrespondent(input.sender, overrides);
   if (!correspondent) return null;
   const product = resolveProductSlug(input.title);
   const contract = extractContractAnchor(input.tags);

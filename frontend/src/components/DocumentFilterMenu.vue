@@ -19,6 +19,7 @@ const props = defineProps<{
   categories: DocumentCategory[]
   knownTags: string[]
   subjectPeople: SubjectPerson[]
+  correspondents: { slug: string; display: string; count: number }[]
 }>()
 
 const emit = defineEmits<{
@@ -135,6 +136,11 @@ const subjectOptions = computed<Array<{ label: string; value: number | null }>>(
   ...props.subjectPeople.map((p) => ({ label: p.full_name, value: p.id })),
 ])
 
+const correspondentOptions = computed<Array<{ label: string; value: string | null }>>(() => [
+  { label: 'Alle', value: null },
+  ...props.correspondents.map((c) => ({ label: `${c.display} (${c.count})`, value: c.slug })),
+])
+
 function handleApply() {
   emit('apply')
   emit('update:visible', false)
@@ -202,6 +208,18 @@ function handleReset() {
           :model-value="local.sender ?? ''"
           placeholder="Absender filtern…"
           @update:model-value="(v: string | undefined) => local = { ...local, sender: v || undefined }"
+        />
+      </div>
+
+      <div v-if="props.correspondents.length > 0" class="filter-row">
+        <label class="filter-label">Korrespondent</label>
+        <Select
+          :model-value="local.correspondent ?? null"
+          :options="correspondentOptions"
+          option-label="label"
+          option-value="value"
+          filter
+          @update:model-value="(v: string | null) => local = { ...local, correspondent: v ?? undefined }"
         />
       </div>
 
