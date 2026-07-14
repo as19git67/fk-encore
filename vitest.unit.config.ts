@@ -7,9 +7,11 @@ export default defineConfig({
   test: {
     include: [
       "backup/state.test.ts",
+      "documents/correspondent.test.ts",
+      "documents/institutions.test.ts",
       "documents/document-filename.test.ts",
-      "documents/text-extract-warning.test.ts",
       "documents/metadata-extract.test.ts",
+      "documents/text-extract-warning.test.ts",
       "finance/sepa-parser.test.ts",
       "web/static-cache.test.ts",
     ],

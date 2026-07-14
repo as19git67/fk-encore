@@ -25,6 +25,8 @@ export interface DocumentSummary {
   doc_date: string | null
   sender: string | null
   document_number: string | null
+  correspondent_slug: string | null
+  correspondent_display: string | null
   category_id: number | null
   category_slug: string | null
   classification_confidence: number | null
@@ -115,6 +117,8 @@ export interface ListDocumentsQuery {
   /** Keep only "new" documents: ready with unapproved AI attribution (#635). */
   unreviewed?: boolean
   sender?: string
+  /** Keep only documents whose persisted correspondent matches this slug. */
+  correspondent?: string
   date_from?: string
   date_to?: string
   tax_relevant?: boolean
@@ -170,6 +174,47 @@ function buildQuery(params: Record<string, unknown>): string {
 
 export function listDocuments(params: ListDocumentsQuery = {}) {
   return apiFetch<ListDocumentsResponse>(`/documents${buildQuery(params as Record<string, unknown>)}`)
+}
+
+// ─── Correspondents: facet + overrides ──────────────────────────────────────
+
+export interface CorrespondentFacet {
+  slug: string
+  display: string
+  count: number
+}
+
+/** Distinct correspondents across the caller's documents, most frequent first. */
+export function listCorrespondents() {
+  return apiFetch<{ items: CorrespondentFacet[] }>('/documents/correspondents')
+}
+
+export interface CorrespondentOverride {
+  id: number
+  sender_pattern: string
+  correspondent_slug: string
+  correspondent_display: string
+}
+
+export function listCorrespondentOverrides() {
+  return apiFetch<{ items: CorrespondentOverride[] }>('/documents/correspondent-overrides')
+}
+
+export function createCorrespondentOverride(payload: {
+  sender_pattern: string
+  correspondent_display: string
+  correspondent_slug?: string
+}) {
+  return apiFetch<CorrespondentOverride>('/documents/correspondent-overrides', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteCorrespondentOverride(id: number) {
+  return apiFetch<{ deleted: boolean }>(`/documents/correspondent-overrides/${id}`, {
+    method: 'DELETE',
+  })
 }
 
 export function getDocument(id: number) {

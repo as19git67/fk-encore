@@ -37,6 +37,8 @@ import {
   slugifyUserLogin,
 } from "./documents.service";
 import { withDocumentLock } from "./document-lock";
+import { buildCorrespondentFolderSlug, resolveCorrespondent } from "./correspondent";
+import { loadCorrespondentOverrides } from "./correspondent-overrides";
 
 console.log("[boot] documents/relocate.ts: all imports resolved");
 
@@ -72,11 +74,29 @@ export async function loadDocumentLocationContext(
   const uploadedAt = doc.uploaded_at ? new Date(doc.uploaded_at) : new Date();
   const ext = path.extname(doc.original_filename).toLowerCase() || ".pdf";
 
+  // `tags_text` is the trigger-maintained, lowercase, space-separated list of
+  // the document's tag names (see schema). It already holds the reference-number
+  // tags (`versicherungsnr:…`/`vertragsnr:…`) the correspondent needs for its
+  // contract anchor, so we can derive the correspondent without an extra query.
+  const tagNames = doc.tags_text
+    ? doc.tags_text.split(/\s+/).filter((t) => t.length > 0)
+    : [];
+  const overrides = await loadCorrespondentOverrides();
+  const correspondentSlug = buildCorrespondentFolderSlug(
+    {
+      sender: doc.sender,
+      title: doc.title,
+      tags: tagNames,
+    },
+    overrides,
+  );
+
   return {
     visibility: doc.visibility,
     userLoginSlug,
     groupSlug,
     categorySlugs,
+    correspondentSlug,
     status: doc.status,
     docDate: doc.doc_date,
     documentNumber: doc.document_number,
@@ -143,6 +163,26 @@ async function relocateDocumentLocked(documentId: number): Promise<string> {
   const ctx = await loadDocumentLocationContext(row);
   const target = resolveDocumentDiskPath(ctx);
   assertPathUnderDocumentsRoot(target.absPath);
+
+  // Persist the institution-level correspondent identity (migration 0130) so
+  // the document list can filter/group by it. Written up-front — independent of
+  // whether the file ends up moving — so the backfill records the correspondent
+  // even for a row whose file is temporarily missing, and so classification
+  // metadata isn't tied to filesystem state. Overrides win over the registry.
+  const overrides = await loadCorrespondentOverrides();
+  const corr = resolveCorrespondent(row.sender, overrides);
+  if (
+    corr?.slug !== (row.correspondent_slug ?? undefined) ||
+    corr?.display !== (row.correspondent_display ?? undefined)
+  ) {
+    await db
+      .update(documents)
+      .set({
+        correspondent_slug: corr?.slug ?? null,
+        correspondent_display: corr?.display ?? null,
+      })
+      .where(eq(documents.id, documentId));
+  }
 
   const oldAbs = row.disk_path;
   const moved = oldAbs !== target.absPath;

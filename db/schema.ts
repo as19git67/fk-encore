@@ -743,6 +743,13 @@ export const documents = pgTable("documents", {
   doc_date: text("doc_date"),
   sender: text("sender"),
   document_number: text("document_number"),
+  // Canonical correspondent identity derived from `sender` (institution level,
+  // e.g. "janitos"/"Janitos"; see documents/correspondent.ts). Persisted so the
+  // document list can filter/group by correspondent without re-deriving.
+  // Populated by `relocateDocument`, so the "Dateinamen aktualisieren" backfill
+  // fills it for the whole corpus (migration 0130).
+  correspondent_slug: text("correspondent_slug"),
+  correspondent_display: text("correspondent_display"),
   summary: text("summary"),
   extracted_text: text("extracted_text"),
   classification_confidence: real("classification_confidence"),
@@ -837,6 +844,21 @@ export const documentTags = pgTable("document_tags", {
   id: serial("id").primaryKey(),
   name: text("name").unique().notNull(),
   color: text("color"),
+});
+
+// Household-global correspondent overrides (migration 0131). When a document's
+// normalised sender contains `sender_pattern`, the correspondent resolver forces
+// the given identity instead of consulting the built-in registry — so a user can
+// unify or correct how senders map to correspondent folders/filters. See
+// documents/correspondent-overrides.ts.
+export const documentCorrespondentOverrides = pgTable("document_correspondent_overrides", {
+  id: serial("id").primaryKey(),
+  // Already-normalised sender fragment (lowercase, [a-z0-9äöüß] only).
+  sender_pattern: text("sender_pattern").unique().notNull(),
+  correspondent_slug: text("correspondent_slug").notNull(),
+  correspondent_display: text("correspondent_display").notNull(),
+  created_by: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
 });
 
 // Per-user "Bezugspersonen" — maps a literal name as it appears on
