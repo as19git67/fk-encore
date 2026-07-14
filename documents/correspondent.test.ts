@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
   CORRESPONDENT_REGISTRY,
+  PRODUCT_RULES,
+  buildCorrespondentFolderSlug,
+  extractContractAnchor,
   resolveCorrespondent,
+  resolveProductSlug,
 } from "./correspondent";
 
 describe("resolveCorrespondent", () => {
@@ -104,6 +108,134 @@ describe("CORRESPONDENT_REGISTRY", () => {
     for (const entry of CORRESPONDENT_REGISTRY) {
       expect(entry.fragments.length).toBeGreaterThan(0);
       expect(entry.display.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("resolveProductSlug", () => {
+  it("returns null for empty or product-less titles", () => {
+    expect(resolveProductSlug(null)).toBeNull();
+    expect(resolveProductSlug("")).toBeNull();
+    expect(resolveProductSlug("Beitragsrechnung 2024")).toBeNull();
+  });
+
+  it("detects a product from the title", () => {
+    expect(resolveProductSlug("Privathaftpflichtversicherung Beitragsrechnung 2024"))
+      .toEqual({ slug: "privathaftpflicht", display: "Privathaftpflicht" });
+    expect(resolveProductSlug("Hausratversicherung Nachtrag")?.slug).toBe("hausrat");
+  });
+
+  it("prefers the more specific Kfz product over a bare match", () => {
+    expect(resolveProductSlug("Kfz-Haftpflicht und Kaskoversicherung")?.slug).toBe("kfz");
+  });
+
+  it("distinguishes Zahnzusatz from general Krankenversicherung", () => {
+    expect(resolveProductSlug("Zahnzusatzversicherung Beitrag")?.slug).toBe("zahnzusatz");
+    expect(resolveProductSlug("Private Krankenvollversicherung")?.slug).toBe("krankenversicherung");
+  });
+
+  it("folds umlauts in product keywords", () => {
+    expect(resolveProductSlug("Berufsunfähigkeitsversicherung")?.slug).toBe("berufsunfaehigkeit");
+    expect(resolveProductSlug("Wohngebäudeversicherung")?.slug).toBe("wohngebaeude");
+  });
+});
+
+describe("extractContractAnchor", () => {
+  it("returns null when there are no contract tags", () => {
+    expect(extractContractAnchor(null)).toBeNull();
+    expect(extractContractAnchor([])).toBeNull();
+    expect(extractContractAnchor(["kundennr:99", "auftragsnr:12345"])).toBeNull();
+  });
+
+  it("extracts a Versicherungsschein-/Vertragsnummer anchor", () => {
+    expect(extractContractAnchor(["versicherungsnr:4711884"])).toBe("4711884");
+    expect(extractContractAnchor(["vertragsnr:ab-12/34"])).toBe("ab-12-34");
+  });
+
+  it("prefers versicherungsnr over vertragsnr", () => {
+    expect(extractContractAnchor(["vertragsnr:111", "versicherungsnr:222"])).toBe("222");
+  });
+});
+
+describe("buildCorrespondentFolderSlug", () => {
+  it("combines sender, product and contract anchor", () => {
+    expect(
+      buildCorrespondentFolderSlug({
+        sender: "Janitos Versicherung AG",
+        title: "Privathaftpflichtversicherung 2024",
+        tags: ["versicherungsnr:4711884", "kundennr:99"],
+      }),
+    ).toBe("janitos-privathaftpflicht-4711884");
+  });
+
+  it("omits the contract anchor when no contract tag is present", () => {
+    expect(
+      buildCorrespondentFolderSlug({
+        sender: "Janitos",
+        title: "Hausratversicherung",
+        tags: [],
+      }),
+    ).toBe("janitos-hausrat");
+  });
+
+  it("falls back to sender-only when neither product nor contract is known", () => {
+    expect(
+      buildCorrespondentFolderSlug({
+        sender: "comdirect",
+        title: "Depotauszug",
+      }),
+    ).toBe("comdirect");
+  });
+
+  it("separates two same-Sparte contracts from the same provider by anchor", () => {
+    const a = buildCorrespondentFolderSlug({
+      sender: "Janitos",
+      title: "Privathaftpflichtversicherung",
+      tags: ["versicherungsnr:111"],
+    });
+    const b = buildCorrespondentFolderSlug({
+      sender: "Janitos",
+      title: "Privathaftpflichtversicherung",
+      tags: ["versicherungsnr:222"],
+    });
+    expect(a).toBe("janitos-privathaftpflicht-111");
+    expect(b).toBe("janitos-privathaftpflicht-222");
+    expect(a).not.toBe(b);
+  });
+
+  it("works with a long-tail (unregistered) sender", () => {
+    expect(
+      buildCorrespondentFolderSlug({
+        sender: "Stadtwerke Beispiel GmbH",
+        title: "Stromrechnung",
+      }),
+    ).toBe("stadtwerke-beispiel-gmbh");
+  });
+
+  it("returns null when there is no usable sender", () => {
+    expect(
+      buildCorrespondentFolderSlug({
+        sender: null,
+        title: "Hausratversicherung",
+        tags: ["versicherungsnr:1"],
+      }),
+    ).toBeNull();
+    expect(buildCorrespondentFolderSlug({ sender: "   " })).toBeNull();
+  });
+});
+
+describe("PRODUCT_RULES", () => {
+  it("has only lower-case, filesystem-safe slugs", () => {
+    for (const rule of PRODUCT_RULES) {
+      expect(rule.slug).toMatch(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+    }
+  });
+
+  it("has only pre-normalised keywords", () => {
+    for (const rule of PRODUCT_RULES) {
+      for (const kw of rule.keywords) {
+        expect(kw).toMatch(/^[a-z0-9äöüß]+$/);
+      }
     }
   });
 });
