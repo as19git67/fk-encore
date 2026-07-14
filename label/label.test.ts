@@ -208,6 +208,47 @@ describe("label endpoints", () => {
     expect(await getLabelPrefs(userId)).toEqual({ printer: "DYMO" });
   });
 
+  it("persists templates and the last-used template", async () => {
+    const template = {
+      id: "storage-date",
+      name: "Eingelagert",
+      text: "Eingelagert am {{datum}}",
+      labelCode: "99012",
+      fontKey: "medium" as const,
+      align: "left" as const,
+    };
+    const saved = await endpoints.saveTemplates({
+      templates: [template],
+      lastTemplateId: template.id,
+    });
+    expect(saved).toEqual({ templates: [template], lastTemplateId: template.id });
+    expect(await endpoints.listTemplates()).toEqual(saved);
+  });
+
+  it("keeps templates when the selected printer changes", async () => {
+    const template = {
+      id: "dated",
+      name: "Datum",
+      text: "{{datum}}",
+      labelCode: "99010",
+      fontKey: "small" as const,
+      align: "center" as const,
+    };
+    await endpoints.saveTemplates({ templates: [template], lastTemplateId: template.id });
+    await endpoints.savePrinter({ printer: "DYMO" });
+    expect(await getLabelPrefs(userId)).toEqual({
+      printer: "DYMO",
+      templates: [template],
+      lastTemplateId: template.id,
+    });
+  });
+
+  it("rejects an unknown last-used template", async () => {
+    await expect(
+      endpoints.saveTemplates({ templates: [], lastTemplateId: "missing" }),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+  });
+
   it("print rejects when no printer is selected", async () => {
     await expect(endpoints.print({ imageBase64: PNG_B64 })).rejects.toMatchObject({
       code: "failed_precondition",
