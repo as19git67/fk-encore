@@ -1,6 +1,6 @@
 # Design: Cloud-Lehrer zum automatischen Wachsen des Gold-Sets
 
-**Status:** Entwurf zur Diskussion — noch kein Code.
+**Status:** Entscheidungen getroffen (Abschnitt 7) — bereit zur Implementierung.
 **Autor-Kontext:** Folgt aus der Steuer-/Kategorie-Audit-Serie (Juli 2026).
 
 ## 1. Ziel und Abgrenzung (wichtig)
@@ -62,12 +62,15 @@ lokalen Pipeline + den deterministischen Extraktoren. Ein „vollständig korrek
 klassifiziert per Claude" ist mit aggressivem Scrubbing technisch nicht möglich —
 das Scrubbing nimmt dem Modell die Signale dafür.
 
-**Regler statt Alles-oder-nichts:** Institutionelle Absendernamen (Comdirect,
-HALLESCHE, Finanzamt) sind **keine** PII. Man kann sie behalten und nur
-personenbezogene Daten strippen — dann kann Claude auch Absender + Kategorie
-deutlich zuverlässiger lehren, bei kaum erhöhtem Privacy-Risiko. Empfehlung:
-eigene, **weniger aggressive** Scrub-Stufe für den Lehrer (Personen/IBAN/Beträge
-raus, institutioneller Absender bleibt), getrennt von der strengen Audit-Stufe.
+**Entscheidung:** Institutionelle Absendernamen (Comdirect, HALLESCHE,
+Finanzamt) sind **keine** PII und bleiben im Klartext — nur personenbezogene
+Daten werden gestrippt. Das gibt Claude ein stärkeres Signal für Absender- und
+Kategorie-Zuordnungen, bei kaum erhöhtem Privacy-Risiko. Der Lehrer bekommt eine
+eigene, **weniger aggressive** Scrub-Stufe (Personennamen/IBAN/Beträge/Daten
+raus, institutioneller Absender bleibt), getrennt von der strengen Audit-Stufe
+(`_scrub_for_teacher()` als eigene Funktion neben `scrub()`/`scrub_names()` in
+`_common.py`, nicht als Parameter der bestehenden — die Audit-Stufe bleibt
+unverändert streng).
 
 ## 4. Privacy-Entscheidung (bewusst zu treffen)
 
@@ -105,21 +108,29 @@ dessen gezielt dort, wo das Gold-Set dünn oder Qwen systematisch schwach ist:
 
 Deduplizieren gegen bereits gelabelte (wie `picked_ids` im Audit).
 
-### 5.2 Persistenz (WO landen die Labels?)
+### 5.2 Persistenz (WO landen die Labels?) — entschieden: separater `cloud`-Marker
 
 Neue Herkunfts-Markierung, klar getrennt von KI-Rohoutput und echten
-Nutzer-Reviews:
+Nutzer-Reviews — **nicht** einfach als `attributes_reviewed=true`/`user`
+verbucht, damit ein späterer Widerspruch (z. B. nächstes Audit) gezielt
+zurückgenommen werden kann, ohne echte manuelle Reviews zu berühren:
 
-- Kategorie: eine Spalte/Tabelle, die „diese Kategorie ist cloud-bestätigt"
-  ausdrückt — z. B. `documents.category_source = 'cloud'` **oder** ein
-  `attributes_reviewed`-Äquivalent `attributes_cloud_verified`. Wichtig: **nicht**
-  einfach `attributes_reviewed=true` setzen, damit man „echt manuell" von
-  „cloud-gelabelt" unterscheiden kann (Vertrauensstufen).
-- Steuer: `document_tax_sections.source = 'cloud'` (Enum erweitern; heute
+- Kategorie: `documents.category_source` (neue Spalte, `'ai' | 'cloud' | 'user'`,
+  Default `'ai'`) statt des reinen Booleans `attributes_reviewed`. Category-Fix
+  bleibt geschützt (`runClassify` überschreibt nicht, wenn `category_source IN
+  ('cloud','user')` — analog zum bisherigen `attributes_reviewed`-Guard).
+- Steuer: `document_tax_sections.source` Enum um `'cloud'` erweitern (heute
   `'ai' | 'user'`).
+- Tags/Bezugspersonen: gleiches Muster bei Bedarf, `source='cloud'` auf den
+  bestehenden `'ai' | 'user'`-Spalten (`document_tag_links`,
+  `document_subject_persons`).
 
 Damit bleibt die Semantik sauber dreistufig: `ai` (Roh-Qwen) < `cloud`
-(Claude-bestätigt) < `user` (manuell).
+(Claude-bestätigt) < `user` (manuell). **Regressionsschutz:** genau wegen dieser
+Trennung ist ein Rücknehmen trivial — `DELETE ... WHERE source='cloud'` (bzw.
+`category_source` zurück auf `'ai'` setzen) fällt automatisch auf die
+Roh-Qwen-Werte zurück, kein Sonderfall nötig. Kein zusätzlicher Batch-Zeitstempel
+geplant — die vorhandenen `created_at`-Spalten reichen für Nachvollziehbarkeit.
 
 ### 5.3 Einspeisung (WIE verbessert es das lokale Modell?)
 
@@ -135,6 +146,15 @@ Wirkung: mehr vertrauenswürdige Beispiele → mehr Few-Shot-Deckung und mehr
 gelernte Sender-Overrides → das **freie** lokale Modell wird besser, dauerhaft,
 ohne Cloud-Call zur Laufzeit.
 
+### 5.5 Übernahme — entschieden: direkt automatisch
+
+Claude-Opus-Labels werden **ohne Zwischenschritt** mit `source='cloud'` /
+`category_source='cloud'` persistiert — kein Review-Queue-Umweg, das wäre
+gegen den Zweck der Idee (Ersatz für manuelles Klassifizieren). Begründung:
+Claude Opus ist in den bisherigen Audits als Klassifikator sehr zuverlässig
+(Kategorie- und Steuer-Urteile deckten sich mit sorgfältiger Einzelprüfung).
+Der Regressionsschutz aus 5.2 fängt den seltenen Fehlerfall ab.
+
 ### 5.4 Abgrenzung zu den deterministischen Regeln
 
 Der Cloud-Lehrer **ersetzt** die deterministischen Regeln (Sender-/Content-/
@@ -143,36 +163,47 @@ Steuer-Regeln) **nicht**. Die Regeln bleiben der billige, sofortige Fix für
 langen Schwanz**, den man nicht per Hand als Regel fassen kann. Sie ergänzen
 sich.
 
-## 6. Kosten & Betrieb
+## 6. Kosten & Betrieb — entschieden: ~300–500 Dokumente pro Lauf
 
-- Nur eine **Teilmenge** geht an Claude (dünne Zweige + neue + strittige Docs),
-  nicht der ganze Korpus und nicht bei jedem Reclassify. Das begrenzt Kosten und
-  Rate-Limit-Druck.
-- Rate-Limit-Robustheit ist im Audit-Tool bereits vorhanden (Backoff,
-  Teilergebnis, `AUDIT_REQUEST_DELAY`) und würde wiederverwendet.
-- Wiederkehrend als manueller Batch oder Cron; Ergebnis ist ein Datenbank-Update
-  der `cloud`-Labels, kein Laufzeitpfad.
+- Batch-Größe pro Lehrer-Lauf: **~300–500 Dokumente**, aus dünnen Zweigen +
+  neuen Dokumenten + bekannten Streit-Achsen (5.1), nicht der ganze Korpus und
+  nicht bei jedem Reclassify.
+- Braucht die Rate-Limit-Härtung aus PR #847 zwingend (Backoff, Teilergebnis
+  bei Abbruch, `AUDIT_REQUEST_DELAY`) — bei dieser Größenordnung wird `429`
+  ohne sie zum Normalfall, nicht zur Ausnahme.
+- Wiederkehrend als manueller Batch oder Cron; Ergebnis ist ein
+  Datenbank-Update der `cloud`-Labels, kein Laufzeitpfad.
 
-## 7. Offene Fragen (vor Implementierung zu klären)
+## 7. Entscheidungen (final)
 
-1. **Scrub-Stufe für den Lehrer:** institutionellen Absender behalten (mehr
-   Signal) oder strikt wie das Audit (max. Datensparsamkeit)?
-2. **Vertrauensstufe:** separater `cloud`-Marker (empfohlen) oder direkt als
-   `reviewed` behandeln?
-3. **Auto-Anwendung vs. Vorschlag:** Claude-Label direkt als `category_source=
-   'cloud'` schreiben, oder in eine Review-Queue legen, die du stichprobenartig
-   abnickst? (Kompromiss: hohe Claude-Confidence auto-anwenden, Rest in die
-   Queue.)
-4. **Umfang pro Lauf / Budget-Deckel.**
-5. **Regressionsschutz:** Wenn `cloud`-Labels Learned-Rules speisen und eine
-   davon später falsch ist, wie einfach lässt sich das rückgängig machen?
-   (Vorschlag: `cloud`-Herkunft macht das trivial filter-/löschbar.)
+1. **Scrub-Stufe:** institutioneller Absender bleibt im Klartext, nur
+   personenbezogene Daten werden gestrippt (eigene, mildere Scrub-Funktion
+   für den Lehrer, s. 3).
+2. **Vertrauensstufe:** separater `cloud`-Marker (`category_source` /
+   `source='cloud'`), nie mit `reviewed`/`user` vermischt.
+3. **Übernahme:** direkt automatisch, keine Review-Queue.
+4. **Umfang pro Lauf:** ~300–500 Dokumente.
+5. **Regressionsschutz:** die `cloud`-Herkunft selbst reicht (löschbar/
+   filterbar), kein zusätzlicher Batch-Zeitstempel.
 
-## 8. Empfohlener nächster Schritt
+## 8. Nächster Schritt
 
-Kein Code, bevor Frage 1–3 entschieden sind. Danach ein kleiner, isolierter
-erster Schritt: **`cloud`-Herkunft in Schema + Scrub-Stufe** einführen und einen
-`teacher`-Modus im bestehenden `cloud_audit.py` (bzw. einem Schwester-Skript),
-der eine dünn besetzte Kategorie labelt und als `cloud` persistiert — messbar
-über den nächsten Diagnose-/Audit-Lauf, bevor die Einspeisung in Few-Shot/
-Learned-Rules scharf geschaltet wird.
+Bereit für einen ersten Implementierungs-PR:
+
+1. Schema: `documents.category_source` (Spalte, ersetzt/ergänzt
+   `attributes_reviewed` als Guard-Quelle), `document_tax_sections.source` und
+   `document_tag_links.source`/`document_subject_persons.source` um `'cloud'`
+   erweitern.
+2. `_common.py`: neue, mildere Scrub-Funktion für den Lehrer-Kontext
+   (institutioneller Absender bleibt).
+3. Neuer `teacher`-Modus (eigenes Skript oder Flag in `cloud_audit.py`):
+   Auswahl nach 5.1, schreibt direkt mit `source='cloud'` in die DB (kein
+   Dry-Run-Zwang für die Persistenz, aber `AUDIT_DRY_RUN`-Unterstützung bleibt
+   zur Prompt-Kontrolle erhalten).
+4. `runClassify`-Guards und Few-Shot-/Learned-Rules-Filter auf `cloud`
+   erweitern (5.2/5.3).
+5. Messen: Diagnose-/Audit-Lauf vorher/nachher, um die Wirkung auf dünn
+   besetzte Zweige zu quantifizieren.
+
+Empfehlung: Schritt 1–3 zuerst isoliert (reine Persistenz, noch keine Wirkung
+auf die Klassifikation), dann 4 erst nach Sichtprüfung der ersten `cloud`-Labels.
