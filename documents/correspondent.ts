@@ -8,7 +8,7 @@
  * raw sender onto a **stable correspondent identity** so callers can build
  * a deduplicated `<category>/<correspondent>/<year>/…` folder tree.
  *
- * Resolution order:
+ * Sender resolution order:
  *   1. empty / unrecognisable sender          → `null` (caller falls back)
  *   2. registry hit (known recurring sender)  → canonical `{ slug, display }`
  *   3. otherwise                              → slugified raw sender
@@ -18,6 +18,20 @@
  * institutions already catalogued in `sender-rules.ts`. It can grow without
  * touching the matching logic. Entries are evaluated top-to-bottom and the
  * FIRST fragment match wins, so keep more specific fragments earlier.
+ *
+ * Folder-slug composition (`buildCorrespondentFolderSlug`): so that several
+ * contracts from the *same* provider don't collapse into one directory, the
+ * folder segment combines up to three parts:
+ *
+ *   <sender>[-<product>][-<contract-anchor>]
+ *
+ *   - product        — from a keyword table over the document TITLE
+ *     (privathaftpflicht, hausrat, kfz, …); omitted when no known product.
+ *   - contract-anchor — the stable Versicherungsschein-/Vertragsnummer that
+ *     already lives in the document's reference tags (`versicherungsnr:…`,
+ *     `vertragsnr:…`; see `extractReferenceNumberTags`). Appended whenever
+ *     present. Deliberately NOT `document_number`, which is a per-document
+ *     number (see metadata-extract.ts, #664), not a per-contract anchor.
  *
  * This module is intentionally side-effect free and DB-free so it can be
  * unit-tested in isolation (see `correspondent.test.ts`).
@@ -119,4 +133,128 @@ export function resolveCorrespondent(
   const slug = slugifyName(sender ?? "", 40);
   if (!slug) return null;
   return { slug, display: (sender ?? "").trim() };
+}
+
+// ─── Product (Sparte) resolution ───────────────────────────────────────────
+
+export interface ProductIdentity {
+  slug: string;
+  display: string;
+}
+
+interface ProductRule {
+  slug: string;
+  display: string;
+  /**
+   * Normalised keyword fragments (same folding as `normalizeForMatch`). The
+   * rule matches when the normalised TITLE contains any fragment. Matching is
+   * on the title only (not the full body text): a title almost always names
+   * the product, while the body frequently mentions other Sparten in passing —
+   * matching the body would mis-file documents into a wrong product folder.
+   */
+  keywords: string[];
+}
+
+/**
+ * Product/Sparte keyword table. Evaluated top-to-bottom, FIRST match wins, so
+ * keep more specific products earlier (e.g. a Kfz-Haftpflicht before a bare
+ * Haftpflicht). Focused on the recurring insurance/financial products in this
+ * household; grows as new product types appear.
+ */
+export const PRODUCT_RULES: readonly ProductRule[] = [
+  { slug: "kfz", display: "Kfz-Versicherung", keywords: ["kraftfahrtversicherung", "kraftfahrzeugversicherung", "kfzversicherung", "kfzhaftpflicht", "kaskoversicherung", "teilkasko", "vollkasko"] },
+  { slug: "privathaftpflicht", display: "Privathaftpflicht", keywords: ["privathaftpflicht", "privatehaftpflicht"] },
+  { slug: "tierhalterhaftpflicht", display: "Tierhalterhaftpflicht", keywords: ["tierhalterhaftpflicht", "hundehaftpflicht"] },
+  { slug: "hausrat", display: "Hausratversicherung", keywords: ["hausratversicherung", "hausrat"] },
+  { slug: "wohngebaeude", display: "Wohngebäudeversicherung", keywords: ["wohngebäudeversicherung", "wohngebäude", "gebäudeversicherung"] },
+  { slug: "rechtsschutz", display: "Rechtsschutzversicherung", keywords: ["rechtsschutzversicherung", "rechtsschutz"] },
+  { slug: "unfall", display: "Unfallversicherung", keywords: ["unfallversicherung"] },
+  { slug: "berufsunfaehigkeit", display: "Berufsunfähigkeitsversicherung", keywords: ["berufsunfähigkeitsversicherung", "berufsunfähigkeit"] },
+  { slug: "rentenversicherung", display: "Rentenversicherung", keywords: ["rentenversicherung", "riester", "rürup", "basisrente", "fondsgebundenerentenversicherung"] },
+  { slug: "lebensversicherung", display: "Lebensversicherung", keywords: ["risikolebensversicherung", "kapitallebensversicherung", "lebensversicherung"] },
+  { slug: "zahnzusatz", display: "Zahnzusatzversicherung", keywords: ["zahnzusatzversicherung", "zahnzusatz"] },
+  { slug: "krankenzusatz", display: "Krankenzusatzversicherung", keywords: ["krankenzusatzversicherung", "krankenzusatz"] },
+  { slug: "krankenversicherung", display: "Krankenversicherung", keywords: ["krankenversicherung", "krankenvollversicherung"] },
+  { slug: "pflege", display: "Pflegeversicherung", keywords: ["pflegezusatzversicherung", "pflegeversicherung"] },
+  { slug: "reise", display: "Reiseversicherung", keywords: ["reiserücktrittsversicherung", "auslandskrankenversicherung", "reiseversicherung"] },
+  { slug: "bausparen", display: "Bausparvertrag", keywords: ["bausparvertrag", "bausparen"] },
+];
+
+/**
+ * Resolve a product/Sparte slug from the document title, or `null` when the
+ * title names no known product.
+ */
+export function resolveProductSlug(
+  title: string | null | undefined,
+): ProductIdentity | null {
+  const normalized = normalizeForMatch(title);
+  if (!normalized) return null;
+  for (const rule of PRODUCT_RULES) {
+    if (rule.keywords.some((k) => normalized.includes(k))) {
+      return { slug: rule.slug, display: rule.display };
+    }
+  }
+  return null;
+}
+
+// ─── Contract anchor (stable per-contract number) ──────────────────────────
+
+/**
+ * Reference-tag prefixes that identify a *contract* (not a customer or order),
+ * in priority order. These are produced by `extractReferenceNumberTags`.
+ * `kundennr`/`auftragsnr` are intentionally excluded: a customer number spans
+ * all of a provider's contracts, an order number is per-transaction.
+ */
+const CONTRACT_TAG_PREFIXES = ["versicherungsnr", "vertragsnr"] as const;
+
+/**
+ * Pull a stable contract anchor slug out of the document's tags, preferring a
+ * Versicherungsschein-/Policennummer over a generic Vertragsnummer. Returns
+ * `null` when no contract tag is present.
+ */
+export function extractContractAnchor(
+  tags: readonly string[] | null | undefined,
+): string | null {
+  if (!tags || tags.length === 0) return null;
+  for (const prefix of CONTRACT_TAG_PREFIXES) {
+    for (const tag of tags) {
+      const t = tag.trim().toLowerCase();
+      if (t.startsWith(`${prefix}:`)) {
+        const slug = slugifyName(t.slice(prefix.length + 1), 32);
+        if (slug) return slug;
+      }
+    }
+  }
+  return null;
+}
+
+// ─── Composite folder slug ─────────────────────────────────────────────────
+
+export interface CorrespondentFolderInput {
+  /** Free-form extracted sender/absender. */
+  sender: string | null | undefined;
+  /** Classified title — used for product detection. */
+  title?: string | null;
+  /** Document tags (must include any `versicherungsnr:`/`vertragsnr:` tags). */
+  tags?: readonly string[] | null;
+}
+
+/**
+ * Build the correspondent folder segment `<sender>[-<product>][-<contract>]`.
+ *
+ * Returns `null` when there is no usable sender, so the caller can place the
+ * document under an "unknown correspondent" fallback folder. Product and
+ * contract parts are appended only when detected, degrading gracefully to a
+ * plain `<sender>` slug.
+ */
+export function buildCorrespondentFolderSlug(
+  input: CorrespondentFolderInput,
+): string | null {
+  const correspondent = resolveCorrespondent(input.sender);
+  if (!correspondent) return null;
+  const product = resolveProductSlug(input.title);
+  const contract = extractContractAnchor(input.tags);
+  return [correspondent.slug, product?.slug, contract]
+    .filter((part): part is string => Boolean(part))
+    .join("-");
 }
