@@ -104,13 +104,24 @@ const selectedLabel = computed(
 const templateOptions = computed(() =>
   [...templates.value]
     .sort((a, b) => a.name.localeCompare(b.name, 'de'))
-    .map((template) => ({ label: template.name, value: template.id })),
+    .map((template) => {
+      const label = LABELS.find((item) => item.code === template.labelCode)
+      return {
+        label: template.name,
+        value: template.id,
+        labelType: label ? `${label.code} · ${label.name}` : template.labelCode,
+        disabled: template.labelCode !== labelCode.value,
+      }
+    }),
 )
 const selectedTemplate = computed(() =>
   templates.value.find((template) => template.id === selectedTemplateId.value) ?? null,
 )
 const lastTemplate = computed(() =>
   templates.value.find((template) => template.id === lastTemplateId.value) ?? null,
+)
+const lastTemplateMatchesLabel = computed(() =>
+  Boolean(lastTemplate.value && lastTemplate.value.labelCode === labelCode.value),
 )
 // DYMO LabelWriter 450 prints at 300 dpi. The DYMO_DPI constant drives the
 // raster size; if other models are added it can be made configurable.
@@ -211,6 +222,11 @@ function renderLabel() {
 
 // Re-render whenever anything that affects the output changes.
 watch([text, fontKey, align, labelCode, placeholderNow], () => nextTick(renderLabel))
+watch(labelCode, (currentLabelCode) => {
+  if (selectedTemplate.value?.labelCode !== currentLabelCode) {
+    selectedTemplateId.value = null
+  }
+})
 
 // Remember the formatting choices locally (no backend round-trip needed).
 const LS_KEY = 'label_ui_prefs'
@@ -294,6 +310,13 @@ function applyTemplateValues(template: LabelTemplate) {
 }
 
 async function applyTemplate(template: LabelTemplate, remember = true) {
+  if (template.labelCode !== labelCode.value) {
+    const requiredLabel = LABELS.find((label) => label.code === template.labelCode)
+    error.value = `Die Vorlage „${template.name}“ benötigt das Etikett ${
+      requiredLabel ? `${requiredLabel.code} · ${requiredLabel.name}` : template.labelCode
+    }.`
+    return
+  }
   applyTemplateValues(template)
   if (!remember || lastTemplateId.value === template.id) return
   const previous = lastTemplateId.value
@@ -375,11 +398,17 @@ async function saveTemplate() {
     ? templates.value.map((item) => (item.id === id ? template : item))
     : [...templates.value, template]
   try {
-    const res = await saveLabelTemplates(next, id)
+    const canApply = template.labelCode === labelCode.value
+    const res = await saveLabelTemplates(next, canApply ? id : lastTemplateId.value)
     templates.value = res.templates
     lastTemplateId.value = res.lastTemplateId
     templateDialogVisible.value = false
-    applyTemplateValues(template)
+    if (canApply) {
+      applyTemplateValues(template)
+    } else {
+      selectedTemplateId.value = null
+      info.value = `Vorlage „${template.name}“ gespeichert. Zum Verwenden zuerst das passende Etikett auswählen.`
+    }
   } catch (err: any) {
     error.value = err.message || 'Vorlage konnte nicht gespeichert werden'
   } finally {
@@ -488,7 +517,8 @@ onMounted(() => {
           :label="`Zuletzt verwendet: ${lastTemplate.name}`"
           severity="secondary"
           outlined
-          :disabled="printing || templatesSaving"
+          :disabled="!lastTemplateMatchesLabel || printing || templatesSaving"
+          :title="lastTemplateMatchesLabel ? undefined : `Benötigt Etikett ${lastTemplate.labelCode}`"
           @click="useLastTemplate"
         />
         <div class="template-select-row">
@@ -497,13 +527,23 @@ onMounted(() => {
             :options="templateOptions"
             option-label="label"
             option-value="value"
-            placeholder="Vorlage auswählen"
+            option-disabled="disabled"
+            :placeholder="`Vorlage für Etikett ${labelCode} auswählen`"
             :loading="templatesLoading"
             :disabled="printing || templatesSaving"
             show-clear
             class="template-select"
             @change="handleTemplateChange"
-          />
+          >
+            <template #option="{ option }">
+              <div class="template-option">
+                <span>{{ option.label }}</span>
+                <small>
+                  {{ option.labelType }}<template v-if="option.disabled"> · anderes Etikett</template>
+                </small>
+              </div>
+            </template>
+          </Select>
           <Button
             icon="pi pi-plus"
             label="Neu"
@@ -527,6 +567,9 @@ onMounted(() => {
             @click="deleteSelectedTemplate"
           />
         </div>
+        <small class="hint-muted">
+          Vorlagen für andere Etikettentypen sind sichtbar, werden aber erst nach Auswahl des passenden Etiketts aktiv.
+        </small>
       </div>
 
       <label class="field">
@@ -857,6 +900,14 @@ onMounted(() => {
 .template-select {
   flex: 1 1 auto;
   min-width: 0;
+}
+.template-option {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.template-option small {
+  color: var(--p-text-muted-color);
 }
 .template-dialog-form {
   display: flex;
