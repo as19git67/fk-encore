@@ -4,14 +4,19 @@
  * Documents live under `DOCUMENTS_DIR` in a *speaking* folder tree:
  *
  *   DOCUMENTS_DIR/
- *   ├── _gruppe/<group-slug>/<category-path>/<year>/<name>.pdf
- *   └── <user-login-slug>/<category-path>/<year>/<name>.pdf
+ *   ├── _gruppe/<group-slug>/<category-path>/<correspondent>/<year>/<name>.pdf
+ *   └── <user-login-slug>/<category-path>/<correspondent>/<year>/<name>.pdf
  *
  * where:
  *   - `_gruppe/<slug>/...` is used when `documents.visibility='group'`
  *     and every member of that group sees the same physical tree;
  *   - `<user-login-slug>/...` is used for `visibility='private'` and is
  *     derived from the local-part of the uploader's e-mail address.
+ *
+ * `<correspondent>` groups documents by their canonical correspondent
+ * (`<sender>[-<product>][-<contract>]`, see correspondent.ts). Classified
+ * documents whose sender can't be resolved land under the
+ * `_ohne-absender` placeholder segment.
  *
  * Documents that have not been classified yet (status != 'ready' or no
  * category assigned) land in `<owner-root>/_inbox/YYYY-MM/` and get
@@ -55,6 +60,13 @@ export const INBOX_SEGMENT = "_inbox";
 export const STEUER_SEGMENT = "_steuer";
 /** Sub-directory of DOCUMENTS_DIR for group-scoped documents. */
 export const GROUP_SEGMENT = "_gruppe";
+/**
+ * Placeholder correspondent segment for classified documents whose sender
+ * couldn't be resolved to a correspondent (see correspondent.ts). Leading
+ * underscore keeps it visually distinct from real correspondent folders,
+ * consistent with `_inbox`/`_steuer`.
+ */
+export const UNKNOWN_CORRESPONDENT_SEGMENT = "_ohne-absender";
 
 export function guessExtension(filename: string, mimeType: string): string {
   const ext = path.extname(filename).toLowerCase();
@@ -119,6 +131,13 @@ export interface DocumentLocationContext {
    * _inbox folder instead.
    */
   categorySlugs: string[] | null;
+  /**
+   * Canonical correspondent folder segment `<sender>[-<product>][-<contract>]`
+   * (see `buildCorrespondentFolderSlug` in correspondent.ts). `null` when the
+   * sender can't be resolved — classified documents then land under the
+   * `_ohne-absender` placeholder.
+   */
+  correspondentSlug: string | null;
   /** Current document status — non-`ready` documents live in _inbox. */
   status: "pending" | "extracting" | "classifying" | "ready" | "failed";
   /** Date on the document (YYYY-MM-DD) if the classifier found one. */
@@ -246,8 +265,9 @@ export function resolveDocumentDiskPath(
   let inbox: boolean;
   if (isClassified(ctx)) {
     const catPath = (ctx.categorySlugs ?? []).join(path.sep);
+    const correspondent = ctx.correspondentSlug || UNKNOWN_CORRESPONDENT_SEGMENT;
     const year = parseYearFromDocDate(ctx.docDate) ?? ctx.uploadedAt.getUTCFullYear();
-    relDir = path.join(ownerSeg, catPath, String(year));
+    relDir = path.join(ownerSeg, catPath, correspondent, String(year));
     inbox = false;
   } else {
     relDir = path.join(ownerSeg, INBOX_SEGMENT, yearMonth(ctx.uploadedAt));

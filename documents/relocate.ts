@@ -37,6 +37,7 @@ import {
   slugifyUserLogin,
 } from "./documents.service";
 import { withDocumentLock } from "./document-lock";
+import { buildCorrespondentFolderSlug } from "./correspondent";
 
 console.log("[boot] documents/relocate.ts: all imports resolved");
 
@@ -72,11 +73,25 @@ export async function loadDocumentLocationContext(
   const uploadedAt = doc.uploaded_at ? new Date(doc.uploaded_at) : new Date();
   const ext = path.extname(doc.original_filename).toLowerCase() || ".pdf";
 
+  // `tags_text` is the trigger-maintained, lowercase, space-separated list of
+  // the document's tag names (see schema). It already holds the reference-number
+  // tags (`versicherungsnr:…`/`vertragsnr:…`) the correspondent needs for its
+  // contract anchor, so we can derive the correspondent without an extra query.
+  const tagNames = doc.tags_text
+    ? doc.tags_text.split(/\s+/).filter((t) => t.length > 0)
+    : [];
+  const correspondentSlug = buildCorrespondentFolderSlug({
+    sender: doc.sender,
+    title: doc.title,
+    tags: tagNames,
+  });
+
   return {
     visibility: doc.visibility,
     userLoginSlug,
     groupSlug,
     categorySlugs,
+    correspondentSlug,
     status: doc.status,
     docDate: doc.doc_date,
     documentNumber: doc.document_number,
