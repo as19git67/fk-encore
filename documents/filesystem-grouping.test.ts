@@ -5,9 +5,20 @@ import {
   resolveDocumentDiskPath,
   resolveSubjectPersonGroupingSegment,
 } from "./documents.service";
-import { filesystemGroupingForCategoryPath } from "./taxonomy";
+import { categoryTaxonomy, filesystemGroupingForCategoryPath } from "./taxonomy";
 
 describe("filesystem category grouping", () => {
+  it("contains the Vereine root and its two focused children", () => {
+    const vereine = categoryTaxonomy.find((category) => category.slug === "vereine");
+    expect(vereine?.name).toBe("Vereine");
+    expect(vereine?.children?.map((child) => child.slug)).toEqual([
+      "vereine-urkunden",
+      "vereine-mitgliedschaft",
+    ]);
+    expect(vereine?.children?.[0]?.hint).toContain("Feuerwehr");
+    expect(vereine?.children?.[1]?.hint).toContain("Aufnahmeanträge");
+  });
+
   it("declares required Betreuung and optional person-aware roots", () => {
     expect(filesystemGroupingForCategoryPath([
       "betreuung",
@@ -20,7 +31,7 @@ describe("filesystem category grouping", () => {
         multipleSegment: "_mehrere-betreute",
       },
     });
-    for (const slug of ["gesundheit", "familie", "bildung"]) {
+    for (const slug of ["gesundheit", "familie", "vereine", "bildung"]) {
       expect(filesystemGroupingForCategoryPath([slug])?.config).toEqual({
         source: "subject_person",
         multipleSegment: "_mehrere-bezugspersonen",

@@ -102,7 +102,7 @@ Aktuell sind folgende Wurzelkategorien konfiguriert:
 
 - `betreuung`: Die Person ist für die Ablage zwingend. Ohne Zuordnung wird
   `_ohne-betreuten`, bei mehreren Personen `_mehrere-betreute` verwendet.
-- `gesundheit`, `familie`, `bildung`: Die Personendimension wird nur ergänzt,
+- `gesundheit`, `familie`, `vereine`, `bildung`: Die Personendimension wird nur ergänzt,
   wenn eine Bezugsperson verknüpft ist. Eigene Dokumente behalten daher den
   bisherigen kurzen Pfad. Mehrere Personen landen unter
   `_mehrere-bezugspersonen`.

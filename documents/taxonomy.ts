@@ -318,13 +318,34 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "familie-urkunden",
         name: "Urkunden",
-        hint: "Geburtsurkunde, Heiratsurkunde, kirchliche Trauurkunde, Sterbeurkunde, Ehrenurkunden (z. B. Feuerwehr-Ehrenzeichen), Taufurkunde. Auch Firmung (kirchliches Sakrament).",
+        hint: "Personenstands- und kirchliche Urkunden: Geburtsurkunde, Heiratsurkunde, kirchliche Trauurkunde, Sterbeurkunde, Taufurkunde. Auch Firmung (kirchliches Sakrament). NICHT Vereins-, Sport- oder Feuerwehr-Ehrungen (→ vereine-urkunden).",
       },
       { slug: "familie-ausweise", name: "Ausweise" },
       {
         slug: "familie-schule",
         name: "Schule",
         hint: "Schulische Dokumente aller Art: Schulaufgaben, Klassenarbeiten, Probearbeiten, Leseproben, Arbeitsblätter (Deutsch, Englisch, Französisch, Mathematik), Lernpläne, Testvorbereitungen, Notenbescheide, Bewertungen, Schulferienkalender, Elternbriefe, Anmeldungen, Klassenfahrten, Einwilligungserklärungen. Auch kirchliche Jugendarbeit: Firmvorbereitung, Firm-Orientierungs-Wochenende, Terminpläne für Firmlinge (z. B. Gymnasium, Pfarrei). NICHT Bildungszertifikate (→ bildung-zertifikate).",
+      },
+    ],
+  },
+  {
+    slug: "vereine",
+    name: "Vereine",
+    icon: "pi-users",
+    filesystemGrouping: {
+      source: "subject_person",
+      multipleSegment: "_mehrere-bezugspersonen",
+    },
+    children: [
+      {
+        slug: "vereine-urkunden",
+        name: "Urkunden & Ehrungen",
+        hint: "Urkunden, Ehrungen und Auszeichnungen von Sportvereinen, Feuerwehr und anderen Vereinen: Leistungs- und Wettkampfurkunden, Ehrenzeichen, Jubiläums- und Dankesurkunden. NICHT Personenstands- oder kirchliche Urkunden (→ familie-urkunden), NICHT Lehrgangs- und Fortbildungsnachweise (→ bildung-zertifikate).",
+      },
+      {
+        slug: "vereine-mitgliedschaft",
+        name: "Mitgliedschaft",
+        hint: "Unterlagen zur Vereinsmitgliedschaft: Aufnahmeanträge und -bestätigungen, Mitgliedsausweise, Kündigungen, Satzungen, Beitragsbescheide und Korrespondenz zur Mitgliedschaft. NICHT Spendenbescheinigungen (→ finanzen-spenden), NICHT Urkunden oder Ehrungen (→ vereine-urkunden).",
       },
     ],
   },
