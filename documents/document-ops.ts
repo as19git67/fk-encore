@@ -68,7 +68,11 @@ import {
   resolveLearned,
 } from "./learned-rules";
 import { recordUncategorizedDocument } from "./suggestion-writer";
-import { applyInsuranceAdminTaxRule, applyKindergeldTaxRule } from "./tax-rules";
+import {
+  applyAgricultureFiscalYearTaxRule,
+  applyInsuranceAdminTaxRule,
+  applyKindergeldTaxRule,
+} from "./tax-rules";
 import {
   applySubjectPersonDeductionReviewConfidence,
   detectSubjectPersonIds,
@@ -405,6 +409,16 @@ export async function runClassify(documentId: number): Promise<{ classification:
         classification.tax_year_confidence = 0.9;
       }
     }
+  }
+  {
+    const adjusted = applyAgricultureFiscalYearTaxRule({
+      text: clipped,
+      taxSections: classification.tax_sections,
+      taxYear: classification.tax_year,
+      taxYearConfidence: classification.tax_year_confidence,
+    });
+    classification.tax_year = adjusted.taxYear;
+    classification.tax_year_confidence = adjusted.taxYearConfidence;
   }
 
   // Personal deductions (Sonderausgaben, §35a haushaltsnahe, private
