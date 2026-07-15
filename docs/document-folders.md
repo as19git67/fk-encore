@@ -72,17 +72,22 @@ verwaist.
 DOCUMENTS_DIR/
 ├── <user-login-slug>/                                  ← private Dokumente
 │   ├── _inbox/YYYY-MM/                                 ← noch nicht klassifiziert
-│   ├── <category-path>/<korrespondent>/<year>/*.pdf    ← klassifiziert
+│   ├── <category-path>/<korrespondent>/*.pdf           ← klassifiziert
 │   └── _steuer/<year>/<anlage>/*.pdf                   ← Hardlinks in Steuer-Sicht
 └── _gruppe/<group-slug>/                            ← Gruppendokumente
     ├── _inbox/YYYY-MM/
-    ├── <category-path>/<korrespondent>/<year>/*.pdf
+    ├── <category-path>/<korrespondent>/*.pdf
     └── _steuer/<year>/<anlage>/*.pdf
 ```
 
 `<korrespondent>` ist das in Abschnitt 3a beschriebene Ordner-Segment; die
 `_steuer/`-Sicht bleibt bewusst nach Jahr/Anlage organisiert, ohne
 Korrespondenten-Ebene.
+
+Die kanonische Ablage besitzt keinen zusätzlichen Jahresordner. Das Jahr steht
+bereits am Anfang des sprechenden Dateinamens; Dokumente verschiedener Jahre
+liegen dadurch gemeinsam im Ordner ihres Korrespondenten und bleiben trotzdem
+lexikografisch nach Jahr gruppiert.
 
 Der `<user-login-slug>` wird aus dem Local-Part der E-Mail-Adresse abgeleitet
 (`max.mueller@example.com` → `max-mueller`). Für rein numerische oder leere
@@ -168,8 +173,10 @@ Fehlzuordnung korrigiert werden), kann ein Nutzer in der Wartungsseite unter
 „Korrespondenten-Overrides" ein Absender-Muster → Korrespondent-Mapping
 anlegen (Migration `0131`, `documents/correspondent-overrides.ts`). Ein
 Override schlägt die eingebaute Registry und greift, sobald das betroffene
-Dokument neu abgelegt wird (Reklassifikation oder „Dateinamen
-aktualisieren"). Overrides sind haushaltsweit (nicht pro Nutzer) und werden
+Dokument neu abgelegt wird (Reklassifikation oder „Dateipfade
+aktualisieren"). Treffen mehrere Muster, gewinnt immer das längste und damit
+spezifischste Muster, unabhängig von der Reihenfolge in der Datenbank.
+Overrides sind haushaltsweit (nicht pro Nutzer) und werden
 mit kurzer TTL gecacht, damit der Massen-Umzug nicht pro Dokument nachfragt.
 
 ### Single Source der bekannten Institutionen
@@ -232,10 +239,10 @@ gesichert (`assertPathUnderDocumentsRoot` vor jeder fs-Operation).
 
 Vor Version 0036 hochgeladene Dokumente liegen unter dem alten
 `YYYY/YYYY-MM/<sha256>.pdf`-Schema. Migration 0036 ändert nur das DB-Schema —
-die Dateien wandern erst beim expliziten Aktualisieren der Dateinamen.
+die Dateien wandern erst beim expliziten Aktualisieren der Dateipfade.
 
 Die Wartungsseite bietet dafür neben „Nur KI-Klassifikation“ und
-„OCR + Klassifikation“ die Aktion **Dateinamen aktualisieren**. Technisch ruft
+„OCR + Klassifikation“ die Aktion **Dateipfade aktualisieren**. Technisch ruft
 sie `POST /documents/relocate-all` auf. Der Endpunkt benötigt `data.manage`,
 iteriert alle Dokumente, ruft `relocateDocument` auf jedes einzelne auf und
 meldet zurück, wie viele Dokumente geprüft, verschoben oder fehlgeschlagen sind.
@@ -245,6 +252,7 @@ meldet zurück, wie viele Dokumente geprüft, verschoben oder fehlgeschlagen sin
 Derselbe Mechanismus deckt auch die Einführung der Korrespondenten-Ebene
 (Abschnitt 3a, Migration `0130`) ab: `relocateDocument` leitet Pfad und
 Korrespondenten-Spalten immer frisch aus den aktuellen Metadaten ab, ein
-einziger Klick auf **Dateinamen aktualisieren** genügt also, um den gesamten
+einziger Klick auf **Dateipfade aktualisieren** genügt also, um den gesamten
 Altbestand in die neue Ordnerstruktur zu überführen und die persistierten
 Korrespondenten-Felder zu befüllen — ohne eigene Migrations-/Backfill-Logik.
+Das gilt ebenso für das Entfernen der früheren Jahresordner-Ebene.

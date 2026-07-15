@@ -46,7 +46,7 @@ async function add() {
     await createCorrespondentOverride({ sender_pattern: p, correspondent_display: d })
     pattern.value = ''
     display.value = ''
-    info.value = 'Override gespeichert. Wird beim nächsten „Dateinamen aktualisieren" angewendet.'
+    info.value = 'Override gespeichert. Wird beim nächsten „Dateipfade aktualisieren" angewendet.'
     await load()
   } catch (err: any) {
     error.value = err?.message || 'Override konnte nicht gespeichert werden.'
@@ -75,7 +75,8 @@ onMounted(load)
     <p class="hint">
       Erzwingt für Dokumente, deren Absender das Muster enthält, einen bestimmten
       Korrespondenten (überschreibt die eingebaute Zuordnung). Greift, sobald ein
-      Dokument neu abgelegt wird — z. B. über „Dateinamen aktualisieren".
+      Dokument neu abgelegt wird — z. B. über „Dateipfade aktualisieren". Bei
+      mehreren Treffern gewinnt das längste und damit spezifischste Muster.
     </p>
 
     <div class="add-row">
