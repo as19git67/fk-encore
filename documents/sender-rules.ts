@@ -63,6 +63,11 @@ const SV_MELDUNG_KEYWORDS: string[] = [
 ];
 
 export const SENDER_RULES: readonly SenderRule[] = [
+  {
+    note: "Familienkasse → Familienleistungen",
+    senders: ["familienkasse"],
+    category: "familie-familienleistungen",
+  },
   // ── Employer: payslips vs. forwarded tax assessment vs. SV notification ──
   // Order matters (first match wins): the most specific document types come
   // first, the unguarded payslip fallback last.
@@ -279,6 +284,19 @@ export interface ContentRule {
 }
 
 export const CONTENT_RULES: readonly ContentRule[] = [
+  {
+    // High-precision Kindergeld document markers. Deliberately no bare
+    // "kindergeld": an Einkommensteuerbescheid or Anlage Kind may mention it
+    // without being a Familienkasse document.
+    note: "Kindergeldbescheid/-akte → Familienleistungen",
+    keywords: [
+      "bescheidüberkindergeld",
+      "kindergeldnummer",
+      "festsetzungdeskindergeldes",
+      "kindergeldfestsetzung",
+    ],
+    category: "familie-familienleistungen",
+  },
   {
     // Riester/Rürup and fond-linked pension contracts. The markers below are
     // unique to a state-subsidised/annuity pension (never on a plain capital
