@@ -175,7 +175,14 @@ WICHTIGE ABGRENZUNGSREGELN:
   (betreffen die Umsatzsteuer des Unternehmers), Gewerbesteuererklärungen sowie
   AUSLÄNDISCHE Steuererklärungen (z. B. US-Einkommensteuererklärung/US tax
   return) und deren Steuerberater-Fragebögen. Diese gehören NICHT zu
-  „mantelbogen" (tax_sections=[]).`;
+  „mantelbogen" (tax_sections=[]).
+
+7) Kindergeld und Familienleistungen:
+- Kindergeldbescheide der Familienkasse sind NICHT steuerrelevant
+  (tax_relevant=false, tax_sections=[]), auch wenn sie „Festsetzung",
+  „Bescheid über Kindergeld", „§ 70" oder „Einkommensteuergesetz (EStG)"
+  enthalten. Der EStG-Verweis ist hier nur die Rechtsgrundlage der
+  Familienleistung und macht das Schreiben nicht zum Steuerbescheid.`;
 
 export const CLASSIFY_SUBJECT_PERSONS_PROMPT = `
 
