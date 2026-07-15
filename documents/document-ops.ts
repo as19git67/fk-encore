@@ -398,9 +398,12 @@ export async function runClassify(documentId: number): Promise<{ classification:
     });
     classification.tax_sections = adjusted.taxSections;
     classification.tax_relevant = adjusted.taxRelevant;
-    if (adjusted.matched) {
-      classification.tax_year = null;
-      classification.tax_year_confidence = 0;
+    if (adjusted.matched && classification.tax_year == null) {
+      const year = /^(\d{4})-/.exec(classification.doc_date ?? "")?.[1];
+      if (year) {
+        classification.tax_year = Number(year);
+        classification.tax_year_confidence = 0.9;
+      }
     }
   }
 
