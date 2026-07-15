@@ -1474,6 +1474,7 @@ export const updateDocument = api(
       await replaceTags(existing.id, req.tags);
     }
 
+    const subjectPersonsChanged = req.subject_person_ids !== undefined;
     if (req.subject_person_ids !== undefined) {
       await replaceUserSubjectPersons(existing.id, userId, req.subject_person_ids);
     }
@@ -1482,7 +1483,7 @@ export const updateDocument = api(
     // move the file and rebuild tax hardlinks. `relocateDocument` is
     // idempotent when nothing actually moved. Only needed when a
     // path-affecting attribute changed, not when merely toggling the flag.
-    if (attributesChanged) {
+    if (attributesChanged || subjectPersonsChanged) {
       try {
         await relocateDocument(existing.id);
       } catch (err) {
@@ -3353,6 +3354,40 @@ export interface DeleteSubjectPersonRequest {
   id: number;
 }
 
+async function documentIdsForOwnedSubjectPerson(
+  userId: number,
+  subjectPersonId: number,
+): Promise<number[]> {
+  const rows = await dbAll<{ document_id: number }>(
+    db
+      .select({ document_id: documentSubjectPersons.document_id })
+      .from(documentSubjectPersons)
+      .innerJoin(
+        userSubjectPersons,
+        eq(userSubjectPersons.id, documentSubjectPersons.subject_person_id),
+      )
+      .where(
+        and(
+          eq(documentSubjectPersons.subject_person_id, subjectPersonId),
+          eq(userSubjectPersons.user_id, userId),
+        ),
+      ),
+  );
+  return rows.map((row) => row.document_id);
+}
+
+async function relocateSubjectPersonDocuments(documentIds: readonly number[]): Promise<void> {
+  for (const documentId of documentIds) {
+    try {
+      await relocateDocument(documentId);
+    } catch (err) {
+      console.warn(
+        `[documents] relocate after subject-person change(${documentId}) failed: ${(err as Error).message}`,
+      );
+    }
+  }
+}
+
 /**
  * List the caller's "Bezugspersonen" — the mapping of names that
  * appear on documents (e.g. "Erika Mustermann") to relationship tags
@@ -3383,10 +3418,15 @@ export const updateSubjectPersonEndpoint = api(
   async (req: UpdateSubjectPersonRequest): Promise<SubjectPersonDTO> => {
     checkModule();
     const userId = getUserId();
-    return await updateSubjectPerson(userId, req.id, {
+    const affectedDocumentIds = req.full_name !== undefined
+      ? await documentIdsForOwnedSubjectPerson(userId, req.id)
+      : [];
+    const updated = await updateSubjectPerson(userId, req.id, {
       full_name: req.full_name,
       relation_tag: req.relation_tag,
     });
+    await relocateSubjectPersonDocuments(affectedDocumentIds);
+    return updated;
   },
 );
 
@@ -3395,7 +3435,9 @@ export const deleteSubjectPersonEndpoint = api(
   async (req: DeleteSubjectPersonRequest): Promise<{ success: boolean }> => {
     checkModule();
     const userId = getUserId();
+    const affectedDocumentIds = await documentIdsForOwnedSubjectPerson(userId, req.id);
     await deleteSubjectPerson(userId, req.id);
+    await relocateSubjectPersonDocuments(affectedDocumentIds);
     return { success: true };
   },
 );
