@@ -67,6 +67,8 @@ const ALIGN_OPTIONS = [
   { label: 'Zentriert', value: 'center', icon: 'pi pi-align-center' },
 ]
 
+const NO_TEMPLATE_ID = '__none__'
+
 const printers = ref<LabelPrinter[]>([])
 const selectedPrinter = ref<string | null>(null)
 const text = ref('')
@@ -75,7 +77,7 @@ const fontKey = ref<FontPreset['key']>('medium')
 const align = ref<'left' | 'center'>('left')
 const labelCode = ref<string>('99012')
 const templates = ref<LabelTemplate[]>([])
-const selectedTemplateId = ref<string | null>(null)
+const selectedTemplateId = ref<string | null>(NO_TEMPLATE_ID)
 const lastTemplateId = ref<string | null>(null)
 const templatesLoading = ref(false)
 const templatesSaving = ref(false)
@@ -101,8 +103,15 @@ const selectedFont = computed(
 const selectedLabel = computed(
   () => LABELS.find((l) => l.code === labelCode.value) ?? LABELS[0]!,
 )
-const templateOptions = computed(() =>
-  [...templates.value]
+const templateOptions = computed(() => [
+  {
+    label: '–',
+    value: NO_TEMPLATE_ID,
+    labelType: '',
+    disabled: false,
+    isNone: true,
+  },
+  ...[...templates.value]
     .sort((a, b) => a.name.localeCompare(b.name, 'de'))
     .map((template) => {
       const label = LABELS.find((item) => item.code === template.labelCode)
@@ -111,9 +120,10 @@ const templateOptions = computed(() =>
         value: template.id,
         labelType: label ? `${label.code} · ${label.name}` : template.labelCode,
         disabled: template.labelCode !== labelCode.value,
+        isNone: false,
       }
     }),
-)
+])
 const selectedTemplate = computed(() =>
   templates.value.find((template) => template.id === selectedTemplateId.value) ?? null,
 )
@@ -127,7 +137,11 @@ const lastTemplateMatchesLabel = computed(() =>
 // raster size; if other models are added it can be made configurable.
 const DPI = 300
 const MM_PER_INCH = 25.4
-const PRINT_OFFSET_X_PX = 4
+// Four CSS pixels correspond to roughly 1.06 mm at the CSS reference density
+// of 96 dpi. The canvas itself is rendered at the printer's 300 dpi, so a
+// literal four canvas pixels would only move the print by 0.34 mm.
+const PRINT_LEFT_MARGIN_MM = (4 / 96) * MM_PER_INCH
+const PRINT_OFFSET_X_PX = Math.round((PRINT_LEFT_MARGIN_MM / MM_PER_INCH) * DPI)
 const placeholderNow = ref(new Date())
 const resolvedText = computed(() =>
   resolveLabelPlaceholders(text.value, placeholderNow.value, auth.user?.name ?? ''),
@@ -224,7 +238,7 @@ function renderLabel() {
 watch([text, fontKey, align, labelCode, placeholderNow], () => nextTick(renderLabel))
 watch(labelCode, (currentLabelCode) => {
   if (selectedTemplate.value?.labelCode !== currentLabelCode) {
-    selectedTemplateId.value = null
+    selectedTemplateId.value = NO_TEMPLATE_ID
   }
 })
 
@@ -332,6 +346,7 @@ async function applyTemplate(template: LabelTemplate, remember = true) {
 }
 
 function handleTemplateChange() {
+  if (selectedTemplateId.value === NO_TEMPLATE_ID) return
   const template = selectedTemplate.value
   if (template) void applyTemplate(template)
 }
@@ -406,7 +421,7 @@ async function saveTemplate() {
     if (canApply) {
       applyTemplateValues(template)
     } else {
-      selectedTemplateId.value = null
+      selectedTemplateId.value = NO_TEMPLATE_ID
       info.value = `Vorlage „${template.name}“ gespeichert. Zum Verwenden zuerst das passende Etikett auswählen.`
     }
   } catch (err: any) {
@@ -435,7 +450,7 @@ function deleteSelectedTemplate() {
         const res = await saveLabelTemplates(next, nextLastId)
         templates.value = res.templates
         lastTemplateId.value = res.lastTemplateId
-        selectedTemplateId.value = null
+        selectedTemplateId.value = NO_TEMPLATE_ID
       } catch (err: any) {
         error.value = err.message || 'Vorlage konnte nicht gelöscht werden'
       } finally {
@@ -531,14 +546,13 @@ onMounted(() => {
             :placeholder="`Vorlage für Etikett ${labelCode} auswählen`"
             :loading="templatesLoading"
             :disabled="printing || templatesSaving"
-            show-clear
             class="template-select"
             @change="handleTemplateChange"
           >
             <template #option="{ option }">
               <div class="template-option">
                 <span>{{ option.label }}</span>
-                <small>
+                <small v-if="!option.isNone">
                   {{ option.labelType }}<template v-if="option.disabled"> · anderes Etikett</template>
                 </small>
               </div>
