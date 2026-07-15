@@ -4690,10 +4690,14 @@ export async function deleteAlbumLogic(userId: number, albumId: number): Promise
   const album = await dbFirst<typeof albums.$inferSelect>(
     db.select().from(albums).where(eq(albums.id, albumId))
   );
-  if (!album) throw new Error("Album not found");
+  // DELETE is intentionally idempotent. A duplicate request can occur when a
+  // touch/click is submitted twice or retried by the client. The first request
+  // has already achieved the desired state, so the retry must not surface as
+  // an internal server error.
+  if (!album) return { success: true, message: "Album deleted" };
 
   if (album.user_id !== userId) {
-    throw new Error("Only owner can delete album");
+    throw APIError.permissionDenied("Only owner can delete album");
   }
 
   // Capture membership before the cascade wipes album_photos so the content
