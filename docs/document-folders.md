@@ -89,6 +89,30 @@ bereits am Anfang des sprechenden Dateinamens; Dokumente verschiedener Jahre
 liegen dadurch gemeinsam im Ordner ihres Korrespondenten und bleiben trotzdem
 lexikografisch nach Jahr gruppiert.
 
+Einzelne Kategorien können in der Taxonomie eine zusätzliche
+`filesystemGrouping`-Dimension definieren. Sie wird direkt hinter der
+konfigurierten Kategorie in den Pfad eingefügt und derzeit aus den am Dokument
+verknüpften Bezugspersonen gebildet. Damit entsteht beispielsweise:
+
+```
+betreuung/erika-mustermann/betreuung-rechenschaftsbericht/amtsgericht-augsburg/*.pdf
+```
+
+Aktuell sind folgende Wurzelkategorien konfiguriert:
+
+- `betreuung`: Die Person ist für die Ablage zwingend. Ohne Zuordnung wird
+  `_ohne-betreuten`, bei mehreren Personen `_mehrere-betreute` verwendet.
+- `gesundheit`, `familie`, `bildung`: Die Personendimension wird nur ergänzt,
+  wenn eine Bezugsperson verknüpft ist. Eigene Dokumente behalten daher den
+  bisherigen kurzen Pfad. Mehrere Personen landen unter
+  `_mehrere-bezugspersonen`.
+
+Der Personenname wird mit demselben sicheren Slug-Verfahren wie andere
+Ordnersegmente normalisiert. Zuordnung, Entfernen oder Umbenennen einer
+Bezugsperson löst eine erneute Ablage des betroffenen Dokuments aus. Welche
+Kategorien gruppieren, ist nicht im Path-Builder hart codiert, sondern wird
+zentral in `documents/taxonomy.ts` festgelegt.
+
 Der `<user-login-slug>` wird aus dem Local-Part der E-Mail-Adresse abgeleitet
 (`max.mueller@example.com` → `max-mueller`). Für rein numerische oder leere
 Local-Parts fällt der Algorithmus auf `user-<id>` zurück.
@@ -203,7 +227,8 @@ Listen können also nicht auseinanderlaufen, ohne dass ein Test fehlschlägt.
 3. **Nutzer-Korrektur** (`PATCH /documents/:id`): Das Ändern einer der Felder
    triggert erneut `relocateDocument`. Der Verschiebevorgang ist idempotent —
    steht die Datei bereits richtig, passiert nichts ausser einem Rebuild der
-   Steuer-Links.
+   Steuer-Links. Das gilt auch für die Zuordnung einer Bezugsperson, sofern die
+   Kategorie eine `filesystemGrouping`-Dimension verwendet.
 4. **Sichtbarkeits-Wechsel** (`POST /documents/:id/visibility`): Versetzt das
    Dokument zwischen privatem Bereich und Gruppenbereich; die Datei wandert
    in die entsprechende Owner-Root, alte Steuer-Hardlinks werden weggeräumt.
@@ -255,4 +280,6 @@ Korrespondenten-Spalten immer frisch aus den aktuellen Metadaten ab, ein
 einziger Klick auf **Dateipfade aktualisieren** genügt also, um den gesamten
 Altbestand in die neue Ordnerstruktur zu überführen und die persistierten
 Korrespondenten-Felder zu befüllen — ohne eigene Migrations-/Backfill-Logik.
-Das gilt ebenso für das Entfernen der früheren Jahresordner-Ebene.
+Das gilt ebenso für das Entfernen der früheren Jahresordner-Ebene und für die
+konfigurierten Bezugspersonen-Ordner: Die bestehenden DB-Verknüpfungen werden
+beim Lauf ausgewertet und die Dateien entsprechend verschoben.

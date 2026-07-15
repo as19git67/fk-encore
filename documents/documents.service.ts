@@ -118,6 +118,25 @@ export function slugifyUserLogin(email: string, userId: number): string {
 
 // ─── Path context + builder ────────────────────────────────────────────────
 
+export interface ResolvedFilesystemGrouping {
+  /** Category segment after which the extra folder is inserted. */
+  afterCategorySlug: string;
+  /** Already resolved, filesystem-safe folder segment. */
+  segment: string;
+}
+
+/** Resolve linked person names into one deterministic folder segment. */
+export function resolveSubjectPersonGroupingSegment(
+  fullNames: readonly string[],
+  options: { missingSegment?: string; multipleSegment?: string },
+): string | null {
+  const slugs = [...new Set(fullNames.map((name) => slugifyName(name)).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+  if (slugs.length === 1) return slugs[0];
+  if (slugs.length === 0) return options.missingSegment ?? null;
+  return options.multipleSegment ?? "_mehrere-bezugspersonen";
+}
+
 export interface DocumentLocationContext {
   /** Access scope of the document. */
   visibility: "private" | "group";
@@ -131,6 +150,8 @@ export interface DocumentLocationContext {
    * _inbox folder instead.
    */
   categorySlugs: string[] | null;
+  /** Optional category-specific dimension, already resolved from metadata. */
+  filesystemGrouping?: ResolvedFilesystemGrouping | null;
   /**
    * Canonical correspondent folder segment `<sender>[-<product>][-<contract>]`
    * (see `buildCorrespondentFolderSlug` in correspondent.ts). `null` when the
@@ -264,7 +285,16 @@ export function resolveDocumentDiskPath(
   let relDir: string;
   let inbox: boolean;
   if (isClassified(ctx)) {
-    const catPath = (ctx.categorySlugs ?? []).join(path.sep);
+    const categorySegments = [...(ctx.categorySlugs ?? [])];
+    if (ctx.filesystemGrouping) {
+      const insertionIndex = categorySegments.indexOf(
+        ctx.filesystemGrouping.afterCategorySlug,
+      );
+      if (insertionIndex >= 0) {
+        categorySegments.splice(insertionIndex + 1, 0, ctx.filesystemGrouping.segment);
+      }
+    }
+    const catPath = categorySegments.join(path.sep);
     const correspondent = ctx.correspondentSlug || UNKNOWN_CORRESPONDENT_SEGMENT;
     relDir = path.join(ownerSeg, catPath, correspondent);
     inbox = false;
