@@ -27,6 +27,13 @@ describe("matchSenderRule", () => {
     expect(matchSenderRule({ sender: "Anton Schegg", title: "Irgendein Schreiben" })).toBeNull();
   });
 
+  it("routes Familienkasse documents to Familienleistungen", () => {
+    expect(matchSenderRule({
+      sender: "Bundesagentur für Arbeit, Familienkasse Bayern Süd",
+      title: "Bescheid über Kindergeld",
+    })).toBe("familie-familienleistungen");
+  });
+
   it("routes the employer to payslips regardless of OCR spacing/case", () => {
     expect(matchSenderRule({ sender: "Open Text Software GmbH", title: "Entgeltabrechnung 04/2024" }))
       .toBe("finanzen-gehalt");
@@ -185,6 +192,17 @@ describe("SENDER_RULES invariants", () => {
 });
 
 describe("matchContentRule", () => {
+  it("routes strong Kindergeld-case markers but not a bare tax-document mention", () => {
+    expect(matchContentRule({
+      title: "Bescheid über Kindergeld nach dem Einkommensteuergesetz",
+      text: "Ihre Kindergeldnummer: 123 FK 456",
+    })).toBe("familie-familienleistungen");
+    expect(matchContentRule({
+      title: "Einkommensteuerbescheid 2025",
+      text: "Bei der Günstigerprüfung wurde das ausgezahlte Kindergeld berücksichtigt.",
+    })).toBeNull();
+  });
+
   it("routes a Riester/§92 document to private Rentenversicherung", () => {
     expect(
       matchContentRule({
