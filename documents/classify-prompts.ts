@@ -178,11 +178,11 @@ WICHTIGE ABGRENZUNGSREGELN:
   „mantelbogen" (tax_sections=[]).
 
 7) Kindergeld und Familienleistungen:
-- Kindergeldbescheide der Familienkasse sind NICHT steuerrelevant
-  (tax_relevant=false, tax_sections=[]), auch wenn sie „Festsetzung",
-  „Bescheid über Kindergeld", „§ 70" oder „Einkommensteuergesetz (EStG)"
-  enthalten. Der EStG-Verweis ist hier nur die Rechtsgrundlage der
-  Familienleistung und macht das Schreiben nicht zum Steuerbescheid.`;
+- Kindergeldbescheide der Familienkasse sind für die Günstigerprüfung und
+  Anlage Kind steuerrelevant (tax_relevant=true, tax_sections=[anlage-kind]).
+  Sie gehören aber NICHT zu finanzen-steuern oder behoerden-steuerbescheid,
+  auch wenn sie „Festsetzung", „§ 70" oder „Einkommensteuergesetz (EStG)"
+  enthalten. Der EStG-Verweis macht das Schreiben nicht zum Steuerbescheid.`;
 
 export const CLASSIFY_SUBJECT_PERSONS_PROMPT = `
 

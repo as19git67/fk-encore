@@ -66,7 +66,7 @@ beforeEach(async () => {
 });
 
 describe("runClassify — Kindergeld protection", () => {
-  it("routes the notice to Familienleistungen and clears false tax metadata", async () => {
+  it("routes the notice to Familienleistungen and assigns only Anlage Kind", async () => {
     await runClassify(DOC_ID);
 
     const document = (await db.select().from(documents).where(eq(documents.id, DOC_ID)))[0]!;
@@ -80,8 +80,8 @@ describe("runClassify — Kindergeld protection", () => {
       .where(eq(documentTaxSections.document_id, DOC_ID));
 
     expect(category?.slug).toBe("familie-familienleistungen");
-    expect(document.tax_relevant).toBe(false);
-    expect(document.tax_year).toBeNull();
-    expect(taxSections).toEqual([]);
+    expect(document.tax_relevant).toBe(true);
+    expect(document.tax_year).toBe(2025);
+    expect(taxSections.map((section) => section.tax_section)).toEqual(["anlage-kind"]);
   });
 });

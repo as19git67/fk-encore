@@ -100,11 +100,13 @@ export function applyInsuranceAdminTaxRule(input: {
 }
 
 /**
- * A Familienkasse Kindergeld decision is an administrative benefit notice,
- * not a tax-return document. Small local models often mistake the statutory
- * wording (EStG, §70, "Festsetzung", "Bescheid") for a tax assessment.
- * Only high-precision Kindergeld-case markers fire this rule so an actual
- * Einkommensteuerbescheid that merely mentions Kindergeld remains untouched.
+ * A Familienkasse Kindergeld decision is not a tax assessment, but it is a
+ * supporting document for Anlage Kind and the Kindergeld/Kinderfreibetrag
+ * comparison. Small local models often route the statutory wording (EStG,
+ * §70, "Festsetzung") to a generic tax category/section. Replace those guesses
+ * with the one precise section. Only high-precision case markers fire this rule
+ * so an actual Einkommensteuerbescheid that merely mentions Kindergeld remains
+ * untouched.
  */
 const KINDERGELD_NOTICE_MARKERS: readonly string[] = [
   "bescheidüberkindergeld",
@@ -126,7 +128,11 @@ export function applyKindergeldTaxRule(input: {
       matched: false,
     };
   }
-  return { taxSections: [], taxRelevant: false, matched: true };
+  return {
+    taxSections: [{ slug: "anlage-kind", confidence: 0.98 }],
+    taxRelevant: true,
+    matched: true,
+  };
 }
 
 /** Exposed for tests / diagnostics. */

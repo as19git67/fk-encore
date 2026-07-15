@@ -116,7 +116,7 @@ describe("applyInsuranceAdminTaxRule", () => {
 });
 
 describe("applyKindergeldTaxRule", () => {
-  it("clears false-positive tax metadata from a Familienkasse decision", () => {
+  it("replaces generic tax guesses with Anlage Kind for a Familienkasse decision", () => {
     const out = applyKindergeldTaxRule({
       text: "Familienkasse Bayern Süd. Ihre Kindergeldnummer: 123 FK 456. " +
         "Bescheid über Kindergeld nach dem Einkommensteuergesetz (EStG). " +
@@ -124,7 +124,11 @@ describe("applyKindergeldTaxRule", () => {
       taxSections: [{ slug: "mantelbogen", confidence: 0.9 }],
       taxRelevant: true,
     });
-    expect(out).toEqual({ taxSections: [], taxRelevant: false, matched: true });
+    expect(out).toEqual({
+      taxSections: [{ slug: "anlage-kind", confidence: 0.98 }],
+      taxRelevant: true,
+      matched: true,
+    });
   });
 
   it("does not alter a tax assessment that only mentions Kindergeld", () => {
