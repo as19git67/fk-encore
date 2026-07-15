@@ -135,6 +135,69 @@ export function applyKindergeldTaxRule(input: {
   };
 }
 
+/**
+ * Land- und Forstwirtschaft is the one supported case where the filing year
+ * follows the beginning of the shifted 1 July–30 June fiscal year.  A normal
+ * EÜR with the same printed period still belongs to the calendar year in
+ * which its fiscal year ends.
+ *
+ * Keep this deliberately narrow: both an explicit Landwirtschaft signal and
+ * the complete standard fiscal-year range must be present.  This prevents a
+ * generic cross-year invoice or a commercial EÜR from being moved backwards.
+ */
+export function applyAgricultureFiscalYearTaxRule(input: {
+  text: string;
+  taxSections: readonly TaxAssignment[];
+  taxYear: number | null;
+  taxYearConfidence: number;
+}): {
+  taxYear: number | null;
+  taxYearConfidence: number;
+  matched: boolean;
+} {
+  const ctx = normalizeForMatch(input.text);
+  const isAgriculture =
+    input.taxSections.some((section) => section.slug === "anlage-l") ||
+    ctx.includes("landundforstwirtschaft") ||
+    ctx.includes("landwirtschaftlicheinkünfte");
+  if (!isAgriculture) {
+    return {
+      taxYear: input.taxYear,
+      taxYearConfidence: input.taxYearConfidence,
+      matched: false,
+    };
+  }
+
+  const hasFiscalYearLabel =
+    ctx.includes("wirtschaftsjahr") || ctx.includes("geschäftsjahr") || ctx.includes("geschaeftsjahr");
+  if (!hasFiscalYearLabel) {
+    return {
+      taxYear: input.taxYear,
+      taxYearConfidence: input.taxYearConfidence,
+      matched: false,
+    };
+  }
+
+  const period = /\b0?1[.\/-]0?7[.\/-](20\d{2})\s*(?:bis|[-–—])\s*30[.\/-]0?6[.\/-](20\d{2})\b/i.exec(
+    input.text,
+  );
+  const startYear = period ? Number(period[1]) : null;
+  const endYear = period ? Number(period[2]) : null;
+  if (startYear == null || endYear !== startYear + 1) {
+    return {
+      taxYear: input.taxYear,
+      taxYearConfidence: input.taxYearConfidence,
+      matched: false,
+    };
+  }
+
+  return {
+    taxYear: startYear,
+    taxYearConfidence: 0.99,
+    matched: true,
+  };
+}
+
 /** Exposed for tests / diagnostics. */
 export const INSURANCE_ADMIN_TAX_RULE_INTERNALS = {
   INSURANCE_TAX_SLUGS,
