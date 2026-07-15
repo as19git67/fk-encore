@@ -1218,9 +1218,10 @@ onBeforeUnmount(() => {
           @click="handleDocReclassifyAll('resume')"
         />
         <Button
-          label="Dateinamen aktualisieren"
+          label="Dateipfade aktualisieren"
           icon="pi pi-folder"
           severity="secondary"
+          v-tooltip.top="'Wendet das aktuelle Ordner- und Dateinamensschema auf alle Dokumente an.'"
           :loading="docRelocateLoading"
           :disabled="docRelocateLoading || docReclassifyLoading || docIsActive"
           @click="handleDocRelocateAll"
