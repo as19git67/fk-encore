@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { applyInsuranceAdminTaxRule, applyKindergeldTaxRule } from "./tax-rules";
+import {
+  applyAgricultureFiscalYearTaxRule,
+  applyInsuranceAdminTaxRule,
+  applyKindergeldTaxRule,
+} from "./tax-rules";
 
 const AV = [{ slug: "anlage-av", confidence: 0.95 }];
 
@@ -147,5 +151,43 @@ describe("applyKindergeldTaxRule", () => {
       taxSections: sections,
       taxRelevant: true,
     })).toEqual({ taxSections: sections, taxRelevant: true, matched: false });
+  });
+});
+
+describe("applyAgricultureFiscalYearTaxRule", () => {
+  it("uses the start year for the shifted Landwirtschaft fiscal year", () => {
+    expect(applyAgricultureFiscalYearTaxRule({
+      text: "Einnahmenüberschussrechnung für das Geschäftsjahr 01.07.2024 bis 30.06.2025",
+      taxSections: [{ slug: "anlage-l", confidence: 0.94 }],
+      taxYear: 2025,
+      taxYearConfidence: 0.86,
+    })).toEqual({ taxYear: 2024, taxYearConfidence: 0.99, matched: true });
+  });
+
+  it("does not change a non-agricultural EÜR with the same dates", () => {
+    expect(applyAgricultureFiscalYearTaxRule({
+      text: "Einnahmenüberschussrechnung für das Geschäftsjahr 01.07.2024 bis 30.06.2025",
+      taxSections: [{ slug: "anlage-g", confidence: 0.94 }],
+      taxYear: 2025,
+      taxYearConfidence: 0.86,
+    })).toEqual({ taxYear: 2025, taxYearConfidence: 0.86, matched: false });
+  });
+
+  it("accepts an explicit Landwirtschaft marker if Anlage L was missed", () => {
+    expect(applyAgricultureFiscalYearTaxRule({
+      text: "Land- und Forstwirtschaft – Wirtschaftsjahr 1/7/2024 - 30/6/2025",
+      taxSections: [{ slug: "anlage-euer", confidence: 0.8 }],
+      taxYear: 2025,
+      taxYearConfidence: 0.7,
+    })).toEqual({ taxYear: 2024, taxYearConfidence: 0.99, matched: true });
+  });
+
+  it("does not infer a year from an incomplete or non-standard period", () => {
+    expect(applyAgricultureFiscalYearTaxRule({
+      text: "Land- und Forstwirtschaft, Wirtschaftsjahr 01.01.2024 bis 31.12.2024",
+      taxSections: [{ slug: "anlage-l", confidence: 0.94 }],
+      taxYear: 2024,
+      taxYearConfidence: 0.8,
+    })).toEqual({ taxYear: 2024, taxYearConfidence: 0.8, matched: false });
   });
 });
