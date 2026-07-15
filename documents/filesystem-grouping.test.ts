@@ -19,6 +19,15 @@ describe("filesystem category grouping", () => {
     expect(vereine?.children?.[1]?.hint).toContain("Aufnahmeanträge");
   });
 
+  it("contains the Familienleistungen category below Familie", () => {
+    const familie = categoryTaxonomy.find((category) => category.slug === "familie");
+    const familienleistungen = familie?.children?.find(
+      (child) => child.slug === "familie-familienleistungen",
+    );
+    expect(familienleistungen?.name).toBe("Familienleistungen");
+    expect(familienleistungen?.hint).toContain("Kindergeldbescheid");
+  });
+
   it("declares required Betreuung and optional person-aware roots", () => {
     expect(filesystemGroupingForCategoryPath([
       "betreuung",
