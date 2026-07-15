@@ -203,14 +203,23 @@ describe("content feed: photo_feed_entries maintenance", () => {
     expect(await viewersOf(p.id)).toEqual([owner.id]);
   });
 
-  it("deleting an album drops entries for photos that lose all albums", async () => {
+  it("deleting an album with multiple photos drops all entries and is idempotent", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
-    const p = await uploadPhoto(owner.id, "a.jpg");
-    await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
+    const p1 = await uploadPhoto(owner.id, "a.jpg");
+    const p2 = await uploadPhoto(owner.id, "b.jpg");
+    await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p1.id });
+    await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p2.id });
     await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
-    expect((await viewersOf(p.id)).length).toBe(2);
+    expect((await viewersOf(p1.id)).length).toBe(2);
+    expect((await viewersOf(p2.id)).length).toBe(2);
 
     await photo.deleteAlbumLogic(owner.id, album.id);
-    expect(await viewersOf(p.id)).toEqual([]);
+    expect(await viewersOf(p1.id)).toEqual([]);
+    expect(await viewersOf(p2.id)).toEqual([]);
+
+    await expect(photo.deleteAlbumLogic(owner.id, album.id)).resolves.toEqual({
+      success: true,
+      message: "Album deleted",
+    });
   });
 });

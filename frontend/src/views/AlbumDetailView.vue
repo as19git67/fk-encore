@@ -1542,10 +1542,11 @@ const showDeleteDialog = ref(false)
 const deletingAlbum = ref(false)
 
 async function handleDeleteAlbum() {
-  if (!album.value) return
+  if (!album.value || deletingAlbum.value) return
+  const albumId = album.value.id
   deletingAlbum.value = true
   try {
-    await deleteAlbum(album.value.id)
+    await deleteAlbum(albumId)
     invalidateAlbums()
     showDeleteDialog.value = false
     router.push({ name: 'fotos-albums', query: albumsViewQueryFromStorage() })
@@ -2851,7 +2852,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       </div>
       <template #footer>
         <Button label="Abbrechen" text @click="showDeleteDialog = false" />
-        <Button label="Löschen" severity="danger" :loading="deletingAlbum" @click="handleDeleteAlbum" />
+        <Button label="Löschen" severity="danger" :loading="deletingAlbum" :disabled="deletingAlbum" @click="handleDeleteAlbum" />
       </template>
     </Dialog>
 
