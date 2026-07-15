@@ -3,6 +3,14 @@
 // LLM classifier as the available label set. Heuristic set — meant to evolve
 // through the AI suggestion loop (see document_category_suggestions table).
 
+export interface FilesystemGroupingConfig {
+  source: "subject_person";
+  /** Folder used when this category requires a person but none is linked. */
+  missingSegment?: string;
+  /** Folder used when more than one distinct person is linked. */
+  multipleSegment?: string;
+}
+
 export interface CategorySeed {
   slug: string;
   name: string;
@@ -11,6 +19,8 @@ export interface CategorySeed {
   // to disambiguate borderline documents (e.g. a dividend tax statement that
   // is heavy on tax vocabulary but belongs with the securities documents).
   hint?: string;
+  /** Optional extra filesystem dimension inserted directly below this category. */
+  filesystemGrouping?: FilesystemGroupingConfig;
   children?: CategorySeed[];
 }
 
@@ -187,6 +197,10 @@ export const categoryTaxonomy: CategorySeed[] = [
     slug: "gesundheit",
     name: "Gesundheit",
     icon: "pi-heart",
+    filesystemGrouping: {
+      source: "subject_person",
+      multipleSegment: "_mehrere-bezugspersonen",
+    },
     children: [
       {
         slug: "gesundheit-arzt",
@@ -296,6 +310,10 @@ export const categoryTaxonomy: CategorySeed[] = [
     slug: "familie",
     name: "Familie",
     icon: "pi-users",
+    filesystemGrouping: {
+      source: "subject_person",
+      multipleSegment: "_mehrere-bezugspersonen",
+    },
     children: [
       {
         slug: "familie-urkunden",
@@ -331,6 +349,11 @@ export const categoryTaxonomy: CategorySeed[] = [
     slug: "betreuung",
     name: "Rechtliche Betreuung",
     icon: "pi-id-card",
+    filesystemGrouping: {
+      source: "subject_person",
+      missingSegment: "_ohne-betreuten",
+      multipleSegment: "_mehrere-betreute",
+    },
     children: [
       { slug: "betreuung-bestellung", name: "Bestellungsurkunde / Betreuerausweis" },
       { slug: "betreuung-rechenschaftsbericht", name: "Rechenschaftsbericht" },
@@ -343,6 +366,10 @@ export const categoryTaxonomy: CategorySeed[] = [
     slug: "bildung",
     name: "Bildung",
     icon: "pi-graduation-cap",
+    filesystemGrouping: {
+      source: "subject_person",
+      multipleSegment: "_mehrere-bezugspersonen",
+    },
     children: [
       {
         slug: "bildung-zeugnisse",
@@ -404,4 +431,24 @@ export function taxonomyHints(
     }
   }
   return out;
+}
+
+/**
+ * Return the first filesystem grouping configured on an actual root-to-leaf
+ * category path. Keeping this metadata in the taxonomy avoids category-name
+ * conditionals in the generic filesystem path builder.
+ */
+export function filesystemGroupingForCategoryPath(
+  categorySlugs: readonly string[],
+): { categorySlug: string; config: FilesystemGroupingConfig } | null {
+  let nodes = categoryTaxonomy;
+  for (const slug of categorySlugs) {
+    const node = nodes.find((candidate) => candidate.slug === slug);
+    if (!node) return null;
+    if (node.filesystemGrouping) {
+      return { categorySlug: node.slug, config: node.filesystemGrouping };
+    }
+    nodes = node.children ?? [];
+  }
+  return null;
 }
