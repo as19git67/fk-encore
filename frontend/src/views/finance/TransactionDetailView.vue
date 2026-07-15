@@ -818,13 +818,15 @@ const extractedFields = computed(() => {
                     <span class="document-result-actions">
                       <Button
                         label="Annehmen"
+                        icon="pi pi-check"
                         size="small"
                         text
                         :loading="documentDecisionId === suggestion.id"
                         @click="decideDocumentSuggestion(suggestion, 'accepted')"
                       />
                       <Button
-                        label="Ablehnen"
+                        label="Verwerfen"
+                        icon="pi pi-times"
                         size="small"
                         severity="secondary"
                         text
@@ -1440,10 +1442,13 @@ const extractedFields = computed(() => {
     flex-direction: column;
   }
   .document-result-actions {
-    justify-content: flex-end;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
   }
-  .document-result-actions :deep(.p-button-label) {
-    display: none;
+  .document-result-actions :deep(.p-button) {
+    justify-content: center;
+    min-width: 0;
   }
 }
 .field-input {
