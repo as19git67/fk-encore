@@ -12,6 +12,8 @@ export default defineConfig({
       "documents/document-filename.test.ts",
       "documents/filesystem-grouping.test.ts",
       "documents/metadata-extract.test.ts",
+      "documents/sender-rules.test.ts",
+      "documents/tax-rules.test.ts",
       "documents/text-extract-warning.test.ts",
       "finance/sepa-parser.test.ts",
       "web/static-cache.test.ts",

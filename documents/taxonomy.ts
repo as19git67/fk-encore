@@ -63,7 +63,7 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "finanzen-steuern",
         name: "Steuern",
-        hint: "Allgemeine Steuerunterlagen: Einkommensteuererklärung (Mantelbogen, Anlagen), Fragebogen zur steuerlichen Erfassung, W-8BEN, Korrespondenz mit dem Finanzamt/Steuerberater. NICHT für Wertpapier-/Dividenden-Steuermitteilungen (→ finanzen-wertpapiere), Steuerbescheide (→ behoerden-steuerbescheid), Kirchensteuer (→ finanzen-kirchensteuer) oder Spendenquittungen (→ finanzen-spenden).",
+        hint: "Allgemeine Steuerunterlagen: Einkommensteuererklärung (Mantelbogen, Anlagen), Fragebogen zur steuerlichen Erfassung, W-8BEN, Korrespondenz mit dem Finanzamt/Steuerberater. NICHT für Wertpapier-/Dividenden-Steuermitteilungen (→ finanzen-wertpapiere), Steuerbescheide (→ behoerden-steuerbescheid), Kirchensteuer (→ finanzen-kirchensteuer), Spendenquittungen (→ finanzen-spenden) oder Kindergeldbescheide der Familienkasse trotz EStG-Verweis (→ familie-familienleistungen).",
       },
       {
         slug: "finanzen-kirchensteuer",
@@ -325,6 +325,11 @@ export const categoryTaxonomy: CategorySeed[] = [
         slug: "familie-schule",
         name: "Schule",
         hint: "Schulische Dokumente aller Art: Schulaufgaben, Klassenarbeiten, Probearbeiten, Leseproben, Arbeitsblätter (Deutsch, Englisch, Französisch, Mathematik), Lernpläne, Testvorbereitungen, Notenbescheide, Bewertungen, Schulferienkalender, Elternbriefe, Anmeldungen, Klassenfahrten, Einwilligungserklärungen. Auch kirchliche Jugendarbeit: Firmvorbereitung, Firm-Orientierungs-Wochenende, Terminpläne für Firmlinge (z. B. Gymnasium, Pfarrei). NICHT Bildungszertifikate (→ bildung-zertifikate).",
+      },
+      {
+        slug: "familie-familienleistungen",
+        name: "Familienleistungen",
+        hint: "Bescheide und Korrespondenz zu Kindergeld, Kinderzuschlag, Elterngeld und vergleichbaren Familienleistungen, insbesondere von Familienkasse oder Elterngeldstelle. Ein Kindergeldbescheid gehört trotz Formulierungen wie Festsetzung, §70 und EStG NICHT zu finanzen-steuern oder behoerden-steuerbescheid.",
       },
     ],
   },
