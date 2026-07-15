@@ -4,8 +4,8 @@
  * Documents live under `DOCUMENTS_DIR` in a *speaking* folder tree:
  *
  *   DOCUMENTS_DIR/
- *   ├── _gruppe/<group-slug>/<category-path>/<correspondent>/<year>/<name>.pdf
- *   └── <user-login-slug>/<category-path>/<correspondent>/<year>/<name>.pdf
+ *   ├── _gruppe/<group-slug>/<category-path>/<correspondent>/<name>.pdf
+ *   └── <user-login-slug>/<category-path>/<correspondent>/<name>.pdf
  *
  * where:
  *   - `_gruppe/<slug>/...` is used when `documents.visibility='group'`
@@ -266,8 +266,7 @@ export function resolveDocumentDiskPath(
   if (isClassified(ctx)) {
     const catPath = (ctx.categorySlugs ?? []).join(path.sep);
     const correspondent = ctx.correspondentSlug || UNKNOWN_CORRESPONDENT_SEGMENT;
-    const year = parseYearFromDocDate(ctx.docDate) ?? ctx.uploadedAt.getUTCFullYear();
-    relDir = path.join(ownerSeg, catPath, correspondent, String(year));
+    relDir = path.join(ownerSeg, catPath, correspondent);
     inbox = false;
   } else {
     relDir = path.join(ownerSeg, INBOX_SEGMENT, yearMonth(ctx.uploadedAt));

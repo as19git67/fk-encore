@@ -3699,7 +3699,7 @@ export interface CreateCorrespondentOverrideRequest {
 /**
  * Create or replace (upsert on sender_pattern) a correspondent override.
  * Takes effect the next time an affected document is relocated — run the
- * "Dateinamen aktualisieren" backfill to apply it across the corpus.
+ * "Dateipfade aktualisieren" backfill to apply it across the corpus.
  */
 export const createCorrespondentOverride = api(
   { expose: true, method: "POST", path: "/documents/correspondent-overrides", auth: true },

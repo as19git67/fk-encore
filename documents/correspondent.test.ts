@@ -96,6 +96,27 @@ describe("resolveCorrespondent", () => {
     });
   });
 
+  it("prefers the longest matching override regardless of database order", () => {
+    const broadFirst = [
+      { pattern: "post", slug: "post-allgemein", display: "Post allgemein" },
+      { pattern: "deutschepost", slug: "deutsche-post", display: "Deutsche Post" },
+    ];
+    const specificFirst = [...broadFirst].reverse();
+
+    expect(resolveCorrespondent("Deutsche Post AG", broadFirst)?.slug).toBe("deutsche-post");
+    expect(resolveCorrespondent("Deutsche Post AG", specificFirst)?.slug).toBe("deutsche-post");
+  });
+
+  it("breaks equally specific override ties deterministically", () => {
+    const overrides = [
+      { pattern: "werke", slug: "werke", display: "Werke" },
+      { pattern: "stadt", slug: "stadt", display: "Stadt" },
+    ];
+
+    expect(resolveCorrespondent("Stadtwerke", overrides)?.slug).toBe("stadt");
+    expect(resolveCorrespondent("Stadtwerke", [...overrides].reverse())?.slug).toBe("stadt");
+  });
+
   it("falls back to the registry when no override pattern matches", () => {
     const overrides = [{ pattern: "allianz", slug: "allianz", display: "Allianz" }];
     expect(resolveCorrespondent("Janitos", overrides)?.slug).toBe("janitos");

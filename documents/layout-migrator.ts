@@ -1,7 +1,7 @@
 /**
  * One-shot boot-time migration that moves pre-0036 documents from the
  * legacy sha256-shard layout (`<YYYY>/<YYYY-MM>/<sha256>.pdf`) to the
- * speaking `<owner>/<category-path>/<year>/<name>__<hash8>.pdf` layout.
+ * speaking `<owner>/<category-path>/<correspondent>/<name>__<hash8>.pdf` layout.
  *
  * Self-guarding: we detect legacy rows via a regex match on `disk_path`.
  * When no row matches, the migration is a no-op — so rerunning on every
