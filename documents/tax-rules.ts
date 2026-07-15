@@ -99,9 +99,49 @@ export function applyInsuranceAdminTaxRule(input: {
   };
 }
 
+/**
+ * A Familienkasse Kindergeld decision is not a tax assessment, but it is a
+ * supporting document for Anlage Kind and the Kindergeld/Kinderfreibetrag
+ * comparison. Small local models often route the statutory wording (EStG,
+ * §70, "Festsetzung") to a generic tax category/section. Replace those guesses
+ * with the one precise section. Only high-precision case markers fire this rule
+ * so an actual Einkommensteuerbescheid that merely mentions Kindergeld remains
+ * untouched.
+ */
+const KINDERGELD_NOTICE_MARKERS: readonly string[] = [
+  "bescheidüberkindergeld",
+  "kindergeldnummer",
+  "festsetzungdeskindergeldes",
+  "kindergeldfestsetzung",
+];
+
+export function applyKindergeldTaxRule(input: {
+  text: string;
+  taxSections: readonly TaxAssignment[];
+  taxRelevant: boolean;
+}): { taxSections: TaxAssignment[]; taxRelevant: boolean; matched: boolean } {
+  const ctx = normalizeForMatch(input.text);
+  if (!KINDERGELD_NOTICE_MARKERS.some((marker) => ctx.includes(marker))) {
+    return {
+      taxSections: [...input.taxSections],
+      taxRelevant: input.taxRelevant,
+      matched: false,
+    };
+  }
+  return {
+    taxSections: [{ slug: "anlage-kind", confidence: 0.98 }],
+    taxRelevant: true,
+    matched: true,
+  };
+}
+
 /** Exposed for tests / diagnostics. */
 export const INSURANCE_ADMIN_TAX_RULE_INTERNALS = {
   INSURANCE_TAX_SLUGS,
   ADMIN_MARKERS,
   BELEG_MARKERS,
+};
+
+export const KINDERGELD_TAX_RULE_INTERNALS = {
+  KINDERGELD_NOTICE_MARKERS,
 };

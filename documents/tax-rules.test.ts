@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { applyInsuranceAdminTaxRule } from "./tax-rules";
+import { applyInsuranceAdminTaxRule, applyKindergeldTaxRule } from "./tax-rules";
 
 const AV = [{ slug: "anlage-av", confidence: 0.95 }];
 
@@ -112,5 +112,40 @@ describe("applyInsuranceAdminTaxRule", () => {
       taxRelevant: true,
     });
     expect(out.taxRelevant).toBe(false);
+  });
+});
+
+describe("applyKindergeldTaxRule", () => {
+  it("replaces generic tax guesses with Anlage Kind for a Familienkasse decision", () => {
+    const out = applyKindergeldTaxRule({
+      text: "Familienkasse Bayern Süd. Ihre Kindergeldnummer: 123 FK 456. " +
+        "Bescheid über Kindergeld nach dem Einkommensteuergesetz (EStG). " +
+        "Die Festsetzung des Kindergeldes wird gemäß § 70 Absatz 2 geändert.",
+      taxSections: [{ slug: "mantelbogen", confidence: 0.9 }],
+      taxRelevant: true,
+    });
+    expect(out).toEqual({
+      taxSections: [{ slug: "anlage-kind", confidence: 0.98 }],
+      taxRelevant: true,
+      matched: true,
+    });
+  });
+
+  it("does not alter a tax assessment that only mentions Kindergeld", () => {
+    const sections = [{ slug: "steuerbescheid", confidence: 0.9 }];
+    expect(applyKindergeldTaxRule({
+      text: "Einkommensteuerbescheid: Bei der Günstigerprüfung wurde Kindergeld berücksichtigt.",
+      taxSections: sections,
+      taxRelevant: true,
+    })).toEqual({ taxSections: sections, taxRelevant: true, matched: false });
+  });
+
+  it("does not clear other family benefits such as Elterngeld", () => {
+    const sections = [{ slug: "progressionsvorbehalt", confidence: 0.9 }];
+    expect(applyKindergeldTaxRule({
+      text: "Elterngeldbescheid über Leistungen mit Progressionsvorbehalt",
+      taxSections: sections,
+      taxRelevant: true,
+    })).toEqual({ taxSections: sections, taxRelevant: true, matched: false });
   });
 });
