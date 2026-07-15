@@ -20,9 +20,11 @@ import db from "../db/database";
 import { dbAll, dbFirst } from "../db/adapter";
 import {
   documentCategories,
+  documentSubjectPersons,
   documentTaxSections,
   documents,
   groups,
+  userSubjectPersons,
   users,
 } from "../db/schema";
 import {
@@ -32,6 +34,7 @@ import {
   assertPathUnderDocumentsRoot,
   ensureDir,
   pruneEmptyDirs,
+  resolveSubjectPersonGroupingSegment,
   resolveDocumentDiskPath,
   resolveTaxLinkPath,
   slugifyUserLogin,
@@ -39,6 +42,7 @@ import {
 import { withDocumentLock } from "./document-lock";
 import { buildCorrespondentFolderSlug, resolveCorrespondent } from "./correspondent";
 import { loadCorrespondentOverrides } from "./correspondent-overrides";
+import { filesystemGroupingForCategoryPath } from "./taxonomy";
 
 console.log("[boot] documents/relocate.ts: all imports resolved");
 
@@ -71,6 +75,33 @@ export async function loadDocumentLocationContext(
     ? await loadCategoryChain(doc.category_id)
     : null;
 
+  let filesystemGrouping: DocumentLocationContext["filesystemGrouping"] = null;
+  const groupingDefinition = categorySlugs
+    ? filesystemGroupingForCategoryPath(categorySlugs)
+    : null;
+  if (groupingDefinition?.config.source === "subject_person") {
+    const linkedPeople = await dbAll<{ full_name: string }>(
+      db
+        .select({ full_name: userSubjectPersons.full_name })
+        .from(documentSubjectPersons)
+        .innerJoin(
+          userSubjectPersons,
+          eq(userSubjectPersons.id, documentSubjectPersons.subject_person_id),
+        )
+        .where(eq(documentSubjectPersons.document_id, doc.id)),
+    );
+    const segment = resolveSubjectPersonGroupingSegment(
+      linkedPeople.map((person) => person.full_name),
+      groupingDefinition.config,
+    );
+    if (segment) {
+      filesystemGrouping = {
+        afterCategorySlug: groupingDefinition.categorySlug,
+        segment,
+      };
+    }
+  }
+
   const uploadedAt = doc.uploaded_at ? new Date(doc.uploaded_at) : new Date();
   const ext = path.extname(doc.original_filename).toLowerCase() || ".pdf";
 
@@ -96,6 +127,7 @@ export async function loadDocumentLocationContext(
     userLoginSlug,
     groupSlug,
     categorySlugs,
+    filesystemGrouping,
     correspondentSlug,
     status: doc.status,
     docDate: doc.doc_date,

@@ -173,18 +173,18 @@ describe("documents.service resolveDocumentDiskPath", () => {
     ext: ".pdf",
   };
 
-  it("places classified documents under <owner>/<category>/<correspondent>/<year>/", () => {
+  it("places classified documents under <owner>/<category>/<correspondent>/", () => {
     const { relPath, inbox } = resolveDocumentDiskPath(readyCtx);
     expect(inbox).toBe(false);
     expect(relPath).toBe(
-      path.join("max", "finanzen", "steuern", "finanzamt", "2026", "2026_finanzamt_bescheid__aaaaaaaa.pdf"),
+      path.join("max", "finanzen", "steuern", "finanzamt", "2026_finanzamt_bescheid__aaaaaaaa.pdf"),
     );
   });
 
   it("uses the _ohne-absender placeholder when no correspondent resolved", () => {
     const { relPath } = resolveDocumentDiskPath({ ...readyCtx, correspondentSlug: null });
     expect(relPath).toBe(
-      path.join("max", "finanzen", "steuern", "_ohne-absender", "2026", "2026_finanzamt_bescheid__aaaaaaaa.pdf"),
+      path.join("max", "finanzen", "steuern", "_ohne-absender", "2026_finanzamt_bescheid__aaaaaaaa.pdf"),
     );
   });
 
