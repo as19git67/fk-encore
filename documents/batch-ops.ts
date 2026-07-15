@@ -306,6 +306,7 @@ export async function batchSetSubjectPersons(
     }
   }
 
+  await relocateAll(docIds);
   return docIds.length;
 }
 

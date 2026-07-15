@@ -6,7 +6,7 @@
  * directly as a *folder* name: "Janitos", "Janitos Versicherung AG" and
  * "Janitos AG" would each spawn their own directory. This module maps a
  * raw sender onto a **stable correspondent identity** so callers can build
- * a deduplicated `<category>/<correspondent>/<year>/…` folder tree.
+ * a deduplicated `<category>/<correspondent>/…` folder tree.
  *
  * Sender resolution order:
  *   1. empty / unrecognisable sender          → `null` (caller falls back)
@@ -51,6 +51,8 @@ export interface CorrespondentIdentity {
 /**
  * A user-defined correspondent override: when the normalised sender contains
  * `pattern`, force the given identity instead of consulting the registry.
+ * If several overrides match, the longest (most specific) pattern wins; equal
+ * lengths use the pattern text as a deterministic tie-breaker.
  * Loaded from the DB by `correspondent-overrides.ts` and passed in so this
  * module stays pure/DB-free.
  */
@@ -86,10 +88,17 @@ export function resolveCorrespondent(
 
   // User overrides win over the built-in registry.
   if (overrides) {
+    let bestMatch: CorrespondentOverride | undefined;
     for (const o of overrides) {
-      if (o.pattern.length > 0 && normalized.includes(o.pattern)) {
-        return { slug: o.slug, display: o.display };
-      }
+      if (o.pattern.length === 0 || !normalized.includes(o.pattern)) continue;
+      if (
+        !bestMatch ||
+        o.pattern.length > bestMatch.pattern.length ||
+        (o.pattern.length === bestMatch.pattern.length && o.pattern < bestMatch.pattern)
+      ) bestMatch = o;
+    }
+    if (bestMatch) {
+      return { slug: bestMatch.slug, display: bestMatch.display };
     }
   }
 
