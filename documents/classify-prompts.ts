@@ -64,7 +64,12 @@ Zusätzliche Felder:
 - tax_year (int | null): vierstelliges Kalenderjahr, für das der Beleg
   steuerlich zählt. Bei Jahresbescheinigungen ("Jahressteuerbescheinigung
   2024"): das genannte Jahr. Bei Einzelrechnungen: das Jahr des Leistungs-
-  bzw. Zahlungsdatums (Zuflussprinzip). Bei Unsicherheit: null.
+  bzw. Zahlungsdatums (Zuflussprinzip). Bei einer Gewinnermittlung/EÜR für
+  Land- und Forstwirtschaft mit dem abweichenden Wirtschaftsjahr 01.07.JJJJ
+  bis 30.06.FOLGEJAHR: JJJJ, also das Jahr, in dem dieses Wirtschaftsjahr
+  beginnt. Diese Sonderregel gilt nur für Land- und Forstwirtschaft; bei
+  anderen Betrieben zählt das Jahr, in dem das Wirtschaftsjahr endet. Bei
+  Unsicherheit: null.
 - tax_year_confidence (0..1): Vertrauen in das Steuerjahr.
 - tax_sections: Liste der passenden Sektions-Slugs aus der unten gegebenen
   Liste, jeweils mit eigener confidence. Ein Beleg darf mehreren Sektionen

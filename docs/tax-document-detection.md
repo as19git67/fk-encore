@@ -187,6 +187,11 @@ Einkommensteuererklärung dient.
       genannte Jahr.
     * Bei Einzelrechnungen: das Jahr des Leistungs-/Zahlungsdatums
       (Zuflussprinzip).
+    * Bei einer land-/forstwirtschaftlichen Gewinnermittlung für das
+      abweichende Wirtschaftsjahr 01.07.JJJJ–30.06.FOLGEJAHR: JJJJ. Diese
+      Startjahr-Regel gilt nur für Land- und Forstwirtschaft; andere
+      betriebliche EÜR werden dem Endjahr zugeordnet. Eine deterministische
+      Nachprüfung sichert diese Abgrenzung zusätzlich zum LLM-Prompt ab.
     * Bei Unsicherheit: null.
 - tax_section: der passendste Slug aus der gegebenen Steuerabschnitts-Liste
   oder null, wenn tax_relevant=false oder die Zuordnung unsicher ist.
