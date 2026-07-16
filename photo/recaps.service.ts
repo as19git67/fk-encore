@@ -94,7 +94,7 @@ export interface RecapDetails extends RecapSummary {
 }
 
 /** Candidate photo as read from the database when building recaps. */
-interface CandidatePhoto {
+export interface CandidatePhoto {
   id: number;
   taken_at: string | null;
   created_at: string | null;
@@ -405,7 +405,10 @@ async function buildOnThisDayRecaps(
         kind: "on_this_day",
         years_ago: yearsAgo,
         date_range: fallbackSubtitle,
-        photo_count: photosForYear.length,
+        // Count of photos actually kept in the recap — the raw candidate
+        // count would let the LLM write e.g. "708 Fotos" into the subtitle
+        // while the player then shows only MAX_PHOTOS_PER_RECAP.
+        photo_count: rankedIds.length,
       },
     });
 
@@ -447,36 +450,55 @@ interface TripCluster {
   dominantCountry: string | null;
 }
 
+// Grid cell size for home detection, in degrees (~5.5 km latitude). Coarse
+// enough that a town and its surroundings fall into one cell, fine enough to
+// separate home from a holiday region.
+const HOME_CELL_DEG = 0.05;
+
 /**
- * Liefert den geografischen Zentroiden der letzten N Tage — vermutlich der
- * Lebensmittelpunkt des Users. Trips werden relativ dazu als "weit weg"
- * erkannt.
+ * Liefert den Lebensmittelpunkt des Users. Trips werden relativ dazu als
+ * "weit weg" erkannt.
+ *
+ * Der Wohnort ist die Gitterzelle mit den meisten *distinkten Fototagen*
+ * ueber die gesamte Bibliothek — nicht der Koordinaten-Mittelwert. Ein
+ * Mittelwert wird von Reisefotos weggezogen (viele Japan-Fotos schieben
+ * das "Zuhause" in Richtung Asien, wodurch der echte Wohnort ploetzlich
+ * als Trip erkannt wird). Distinkte Tage sind robust: zuhause fotografiert
+ * man an vielen Tagen ueber Jahre, ein Urlaub liefert hoechstens ein paar
+ * Wochen, egal wie viele Fotos dabei entstehen.
  */
-function computeHomeCentroid(
+export function computeHomeCentroid(
   photos: CandidatePhoto[],
-  today: Date
+  _today: Date
 ): { lat: number; lon: number } | null {
-  const cutoff = new Date(today);
-  cutoff.setDate(cutoff.getDate() - 30);
-  const recent = photos.filter((p) => {
+  const cells = new Map<
+    string,
+    { days: Set<string>; lats: number[]; lons: number[] }
+  >();
+  for (const p of photos) {
+    if (p.latitude == null || p.longitude == null) continue;
     const d = effectiveDate(p);
-    return d && d >= cutoff && p.latitude != null && p.longitude != null;
-  });
-  if (recent.length < 10) {
-    // Fallback: alle GPS-Fotos
-    const withGps = photos.filter(
-      (p) => p.latitude != null && p.longitude != null
-    );
-    if (withGps.length === 0) return null;
-    return {
-      lat: avg(withGps.map((p) => p.latitude!)),
-      lon: avg(withGps.map((p) => p.longitude!)),
-    };
+    if (!d) continue;
+    const key = `${Math.round(p.latitude / HOME_CELL_DEG)}:${Math.round(
+      p.longitude / HOME_CELL_DEG
+    )}`;
+    let cell = cells.get(key);
+    if (!cell) {
+      cell = { days: new Set(), lats: [], lons: [] };
+      cells.set(key, cell);
+    }
+    cell.days.add(d.toISOString().slice(0, 10));
+    cell.lats.push(p.latitude);
+    cell.lons.push(p.longitude);
   }
-  return {
-    lat: avg(recent.map((p) => p.latitude!)),
-    lon: avg(recent.map((p) => p.longitude!)),
-  };
+  if (cells.size === 0) return null;
+
+  let best: { days: Set<string>; lats: number[]; lons: number[] } | null = null;
+  for (const cell of cells.values()) {
+    if (!best || cell.days.size > best.days.size) best = cell;
+  }
+  if (!best) return null;
+  return { lat: avg(best.lats), lon: avg(best.lons) };
 }
 
 function avg(values: number[]): number {
@@ -598,6 +620,35 @@ function tripSubtitle(cluster: TripCluster): string {
   return `${a} – ${b}`;
 }
 
+/**
+ * Delete recaps of `kind` whose dedup_key the current rebuild no longer
+ * produced. Covers clusters that shifted (new photos change trip boundaries →
+ * new dedup key) and recaps built from a since-corrected home location.
+ * Dismissed recaps are kept: their dedup_key must survive so a later rebuild
+ * that produces the same key doesn't resurface the memory as "neu".
+ */
+async function pruneStaleRecaps(
+  userId: number,
+  kind: RecapKind,
+  builtKeys: Set<string>
+): Promise<void> {
+  await dbExec(
+    db.delete(recaps).where(
+      and(
+        eq(recaps.user_id, userId),
+        eq(recaps.kind, kind),
+        sql`${recaps.dismissed_at} IS NULL`,
+        builtKeys.size > 0
+          ? sql`${recaps.dedup_key} NOT IN (${sql.join(
+              Array.from(builtKeys).map((k) => sql`${k}`),
+              sql`, `
+            )})`
+          : sql`TRUE`
+      )
+    )
+  );
+}
+
 async function buildTripRecaps(
   userId: number,
   allPhotos: CandidatePhoto[],
@@ -606,6 +657,7 @@ async function buildTripRecaps(
   const home = computeHomeCentroid(allPhotos, today);
   const clusters = buildTripClusters(allPhotos, home, today);
   let built = 0;
+  const builtKeys = new Set<string>();
 
   for (const cluster of clusters) {
     const { cover, rankedIds } = curatePhotos(cluster.photos);
@@ -634,7 +686,7 @@ async function buildTripRecaps(
         place_city: cluster.dominantCity,
         place_country: cluster.dominantCountry,
         date_range: fallbackSubtitle,
-        photo_count: cluster.photos.length,
+        photo_count: rankedIds.length,
       },
     });
 
@@ -658,9 +710,11 @@ async function buildTripRecaps(
       },
       photoIds: rankedIds,
     });
+    builtKeys.add(dedupKey);
     built++;
   }
 
+  await pruneStaleRecaps(userId, "trip", builtKeys);
   return built;
 }
 
@@ -803,7 +857,7 @@ async function buildPersonRecaps(
         ctx: {
           kind: "person",
           person_name: person.name,
-          photo_count: recent.length,
+          photo_count: rankedIds.length,
         },
       });
       await upsertRecap({
@@ -856,7 +910,7 @@ async function buildPersonRecaps(
           person_name: person.name,
           year,
           date_range: String(year),
-          photo_count: list.length,
+          photo_count: rankedIds.length,
         },
       });
       await upsertRecap({
@@ -923,7 +977,7 @@ async function buildRecentHighlightsRecaps(
     ctx: {
       kind: "recent_highlights",
       month_label: monthLabel,
-      photo_count: recent.length,
+      photo_count: rankedIds.length,
     },
   });
 
@@ -971,6 +1025,7 @@ async function buildPlaceRecaps(
   }
 
   let built = 0;
+  const builtKeys = new Set<string>();
   for (const [city, list] of byCity) {
     if (list.length < PLACE_MIN_PHOTOS) continue;
     const dates = list
@@ -989,11 +1044,11 @@ async function buildPlaceRecaps(
     const resolved = await resolveTitle({
       userId,
       dedupKey,
-      fallback: { title: city, subtitle: `${list.length} Fotos aus ${city}` },
+      fallback: { title: city, subtitle: `${rankedIds.length} Fotos aus ${city}` },
       ctx: {
         kind: "place",
         place_city: city,
-        photo_count: list.length,
+        photo_count: rankedIds.length,
       },
     });
 
@@ -1015,8 +1070,10 @@ async function buildPlaceRecaps(
       },
       photoIds: rankedIds,
     });
+    builtKeys.add(dedupKey);
     built++;
   }
+  await pruneStaleRecaps(userId, "place", builtKeys);
   return built;
 }
 
@@ -1122,12 +1179,12 @@ async function buildThemeRecaps(
       dedupKey,
       fallback: {
         title: theme.title,
-        subtitle: `${ranked.length} Fotos`,
+        subtitle: `${rankedIds.length} Fotos`,
       },
       ctx: {
         kind: "theme",
         keywords: theme.keywords,
-        photo_count: ranked.length,
+        photo_count: rankedIds.length,
       },
     });
 
@@ -1194,6 +1251,20 @@ export async function rebuildRecapsForUser(
   const theme = includeThemes
     ? await buildThemeRecaps(userId, candidates, now)
     : 0;
+
+  // Orphan cleanup: photo deletions cascade through recap_photos, which can
+  // leave a recap row with zero members ("0 Fotos" in the feed). The listing
+  // also filters these out, but pruning here keeps the table tidy.
+  await dbExec(
+    db.delete(recaps).where(
+      and(
+        eq(recaps.user_id, userId),
+        sql`NOT EXISTS (SELECT 1 FROM ${recapPhotos}
+              WHERE ${recapPhotos.recap_id} = ${recaps.id})`
+      )
+    )
+  );
+
   return { on_this_day, trip, person, recent_highlights, place, theme };
 }
 
@@ -1316,6 +1387,10 @@ export async function listRecapsForUser(
       FROM recaps
       WHERE user_id = ${userId}
             ${dismissedFilter}
+            -- Orphaned recaps (all photos cascade-deleted) would show up as
+            -- "0 Fotos" cards; hide them until the next rebuild prunes them.
+            AND EXISTS (SELECT 1 FROM recap_photos rp
+                          WHERE rp.recap_id = recaps.id)
     ) r
     WHERE rn <= ${RECAP_KIND_POOL}
   `);
