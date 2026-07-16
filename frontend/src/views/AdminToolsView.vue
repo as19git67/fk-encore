@@ -10,7 +10,10 @@ import {
   runTool,
   cancelTool,
   getToolsStatus,
+  listReports,
+  downloadReport,
   type RunToolOptions,
+  type ReportFile,
 } from '../api/taxonomy-tools'
 import { useRealtimeEvent } from '../composables/useRealtime'
 
@@ -79,6 +82,8 @@ const cancelling = ref<Record<string, boolean>>({})
 const error = ref('')
 const logs = ref<Record<string, string[]>>({})
 const finishedState = ref<Record<string, 'done' | 'error' | null>>({})
+const reports = ref<Record<string, ReportFile[]>>({})
+const downloading = ref<Record<string, boolean>>({})
 
 async function fetchStatus() {
   try {
@@ -134,6 +139,27 @@ function appendLog(tool: string, message: string) {
   logs.value = { ...logs.value, [tool]: current }
 }
 
+async function fetchReports(toolName: string) {
+  try {
+    const res = await listReports(toolName)
+    reports.value = { ...reports.value, [toolName]: res.files }
+  } catch {
+    reports.value = { ...reports.value, [toolName]: [] }
+  }
+}
+
+async function doDownload(toolName: string, filename: string) {
+  const key = `${toolName}/${filename}`
+  downloading.value = { ...downloading.value, [key]: true }
+  try {
+    await downloadReport(toolName, filename)
+  } catch (err: any) {
+    error.value = `Download ${filename}: ${err?.message ?? err}`
+  } finally {
+    downloading.value = { ...downloading.value, [key]: false }
+  }
+}
+
 // Realtime events from the backend relay.
 useRealtimeEvent('tools', 'start', (ev) => {
   const tool = ev.resourceId
@@ -150,6 +176,7 @@ useRealtimeEvent('tools', 'done', (ev) => {
   appendLog(tool, ev.payload.message as string)
   running.value = { ...running.value, [tool]: false }
   finishedState.value = { ...finishedState.value, [tool]: 'done' }
+  fetchReports(tool)
 })
 
 useRealtimeEvent('tools', 'error', (ev) => {
@@ -317,6 +344,22 @@ onMounted(() => {
           />
         </div>
 
+        <!-- Reports -->
+        <div v-if="(reports[tool.name]?.length ?? 0) > 0" class="tool-reports">
+          <span class="reports-label">Reports:</span>
+          <Button
+            v-for="file in reports[tool.name]"
+            :key="file.name"
+            :icon="downloading[`${tool.name}/${file.name}`] ? 'pi pi-spinner pi-spin' : 'pi pi-download'"
+            :label="file.name"
+            size="small"
+            severity="secondary"
+            outlined
+            :disabled="!!downloading[`${tool.name}/${file.name}`]"
+            @click="doDownload(tool.name, file.name)"
+          />
+        </div>
+
         <!-- Log output -->
         <div
           v-if="(logs[tool.name]?.length ?? 0) > 0"
@@ -408,6 +451,17 @@ onMounted(() => {
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
+}
+.tool-reports {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.reports-label {
+  font-size: 0.85rem;
+  color: var(--p-text-muted-color);
+  flex-shrink: 0;
 }
 .log-area {
   max-height: 400px;
