@@ -6,6 +6,8 @@ struct FeedView: View {
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 1) {
+                RecapFeedStripView()
+
                 ForEach(viewModel.items) { item in
                     FeedCardView(
                         item: item,

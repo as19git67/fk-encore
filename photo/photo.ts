@@ -683,7 +683,7 @@ export const batchUpdatePhotoDescriptions = api(
  * Returns null when the path is invalid or refers to nothing on disk; in
  * that case the caller should respond with 404.
  */
-async function resolvePhotoFilePath(filename: string): Promise<string | null> {
+export async function resolvePhotoFilePath(filename: string): Promise<string | null> {
   const topSegment = filename.split("/")[0];
   if (topSegment === "_tmp" || topSegment.startsWith(".")) {
     return null;
