@@ -14,6 +14,7 @@
  */
 
 import { APIError, api } from "encore.dev/api";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { getAuthData } from "~encore/auth";
 import { realtime, user } from "~encore/clients";
 
@@ -255,6 +256,120 @@ export const toolsStatus = api(
       throw APIError.unavailable(
         `taxonomy-tools sidecar unreachable: ${(err as Error).message}`,
       );
+    }
+  },
+);
+
+// ── Report download ──────────────────────────────────────────────────────
+
+interface ReportFile {
+  name: string;
+  size: number;
+}
+
+interface ListReportsParams {
+  tool: string;
+}
+
+interface ListReportsResponse {
+  files: ReportFile[];
+}
+
+export const listReports = api(
+  {
+    expose: true,
+    method: "GET",
+    path: "/admin/tools/reports/:tool",
+    auth: true,
+  },
+  async (params: ListReportsParams): Promise<ListReportsResponse> => {
+    requirePermission(getAuthData()!, "data.manage");
+    const tool = validateTool(params.tool);
+
+    try {
+      const resp = await fetch(`${SIDECAR_URL}/reports/${tool}`);
+      if (!resp.ok) {
+        throw APIError.internal(`sidecar error ${resp.status}`);
+      }
+      const data = (await resp.json()) as {
+        files: Array<{ name: string; size: number }>;
+      };
+      return {
+        files: data.files.map((f) => ({ name: f.name, size: f.size })),
+      };
+    } catch (err) {
+      if (err instanceof APIError) throw err;
+      throw APIError.unavailable(
+        `taxonomy-tools sidecar unreachable: ${(err as Error).message}`,
+      );
+    }
+  },
+);
+
+interface DownloadReportParams {
+  tool: string;
+  filename: string;
+}
+
+export const downloadReport = api.raw(
+  {
+    expose: true,
+    method: "GET",
+    path: "/admin/tools/reports/:tool/:filename",
+    auth: true,
+  },
+  async (req: IncomingMessage, res: ServerResponse) => {
+    try {
+      requirePermission(getAuthData()!, "data.manage");
+    } catch {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ code: "permission_denied", message: "forbidden" }));
+      return;
+    }
+
+    const parts = (req.url ?? "").split("/");
+    const filename = decodeURIComponent(parts[parts.length - 1] ?? "");
+    const tool = decodeURIComponent(parts[parts.length - 2] ?? "");
+
+    if (!VALID_TOOLS.includes(tool as ToolName)) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ code: "invalid_argument", message: `unknown tool: ${tool}` }));
+      return;
+    }
+
+    try {
+      const sidecarResp = await fetch(
+        `${SIDECAR_URL}/reports/${tool}/${encodeURIComponent(filename)}`,
+      );
+
+      if (!sidecarResp.ok) {
+        res.writeHead(sidecarResp.status, { "Content-Type": "application/json" });
+        const body = await sidecarResp.text().catch(() => "");
+        res.end(body);
+        return;
+      }
+
+      const contentType =
+        sidecarResp.headers.get("content-type") ?? "application/octet-stream";
+      res.writeHead(200, {
+        "Content-Type": contentType,
+        "Content-Disposition": `attachment; filename="${filename}"`,
+      });
+
+      const reader = sidecarResp.body?.getReader();
+      if (!reader) {
+        res.end();
+        return;
+      }
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(value);
+      }
+      res.end();
+    } catch {
+      res.writeHead(502, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ code: "unavailable", message: "sidecar unreachable" }));
     }
   },
 );

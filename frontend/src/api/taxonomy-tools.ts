@@ -1,4 +1,4 @@
-import { apiFetch } from './client'
+import { API_BASE_URL, apiFetch } from './client'
 
 export interface RunToolOptions {
   dry_run?: boolean
@@ -12,6 +12,11 @@ export interface RunToolOptions {
 export interface ToolStatus {
   tool: string
   running: boolean
+}
+
+export interface ReportFile {
+  name: string
+  size: number
 }
 
 export async function runTool(
@@ -34,4 +39,25 @@ export async function cancelTool(
 
 export async function getToolsStatus(): Promise<{ tools: ToolStatus[] }> {
   return apiFetch('/admin/tools/status')
+}
+
+export async function listReports(
+  tool: string,
+): Promise<{ files: ReportFile[] }> {
+  return apiFetch(`/admin/tools/reports/${encodeURIComponent(tool)}`)
+}
+
+export async function downloadReport(tool: string, filename: string): Promise<void> {
+  const token = localStorage.getItem('auth_token')
+  const url = `${API_BASE_URL}/admin/tools/reports/${encodeURIComponent(tool)}/${encodeURIComponent(filename)}`
+  const resp = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!resp.ok) throw new Error(`Download failed: ${resp.status}`)
+  const blob = await resp.blob()
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(a.href)
 }
