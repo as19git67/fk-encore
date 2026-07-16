@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, computed } from 'vue'
+import { onMounted, ref } from 'vue'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import ToggleSwitch from 'primevue/toggleswitch'
@@ -157,15 +157,6 @@ useRealtimeEvent('tools', 'error', (ev) => {
   appendLog(tool, ev.payload.message as string)
   running.value = { ...running.value, [tool]: false }
   finishedState.value = { ...finishedState.value, [tool]: 'error' }
-})
-
-const hasVisibleOptions = computed(() => {
-  return (tool: ToolConfig) => {
-    if (tool.name === 'diagnose') return true
-    if (tool.name === 'cloud-audit') return true
-    if (tool.name === 'cloud-teacher') return true
-    return false
-  }
 })
 
 onMounted(() => {

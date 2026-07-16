@@ -20,7 +20,7 @@ export async function runTool(
 ): Promise<{ status: string }> {
   return apiFetch(`/admin/tools/run/${encodeURIComponent(tool)}`, {
     method: 'POST',
-    body: options,
+    body: options ? JSON.stringify(options) : undefined,
   })
 }
 
