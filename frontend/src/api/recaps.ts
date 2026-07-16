@@ -77,3 +77,26 @@ export function rebuildRecaps() {
     method: 'POST',
   })
 }
+
+// ---------- Video export ----------
+
+export interface RecapExportStatus {
+  status: 'none' | 'running' | 'done' | 'failed'
+  /** 0..1 */
+  progress: number
+  error?: string
+  /** Relative download path once the MP4 is ready. */
+  download_url?: string
+}
+
+export function startRecapExport(id: number) {
+  return apiFetch<RecapExportStatus>(`/recaps/${id}/export`, { method: 'POST' })
+}
+
+export function getRecapExportStatus(id: number) {
+  return apiFetch<RecapExportStatus>(`/recaps/${id}/export/status`)
+}
+
+export function getRecapExportDownloadUrl(status: RecapExportStatus): string | null {
+  return status.download_url ? `${API_BASE_URL}${status.download_url}` : null
+}

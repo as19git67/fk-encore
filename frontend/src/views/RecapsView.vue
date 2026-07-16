@@ -9,11 +9,15 @@ import {
   listRecaps,
   getRecap,
   getRecapMusicUrl,
+  getRecapExportDownloadUrl,
+  getRecapExportStatus,
+  startRecapExport,
   dismissRecap,
   markRecapSeen,
   rebuildRecaps,
   type RecapSummary,
   type RecapDetails,
+  type RecapExportStatus,
   type RecapKind,
   type MusicTrack,
 } from '../api/recaps'
@@ -23,6 +27,7 @@ import {
   type Photo,
 } from '../api/photos'
 import { tripMapIntroFromSeed, type RecapMapIntroData } from '../utils/recapMapIntro'
+import { personCompareFromSeed, type RecapCompareData } from '../utils/recapCompare'
 
 const route = useRoute()
 const router = useRouter()
@@ -51,7 +56,35 @@ const playerTitle = ref<string>('')
 const playerSubtitle = ref<string | null>(null)
 const playerMusicUrl = ref<string | null>(null)
 const playerMapIntro = ref<RecapMapIntroData | null>(null)
+const playerCompare = ref<RecapCompareData | null>(null)
+const detailCompare = ref<RecapCompareData | null>(null)
 const cardPlayLoadingId = ref<number | null>(null)
+
+/**
+ * Photo ids the player needs beyond the recap membership: the "Damals &
+ * heute" pair can reference photos outside the curated top-30.
+ */
+function collectPlayerPhotoIds(recap: RecapDetails): number[] {
+  const compare = personCompareFromSeed(recap.kind, recap.seed)
+  return Array.from(
+    new Set([
+      ...recap.photo_ids,
+      ...(compare ? [compare.thenId, compare.nowId] : []),
+    ])
+  )
+}
+
+function buildCompareData(
+  recap: RecapDetails,
+  byId: Map<number, Photo>
+): RecapCompareData | null {
+  const compare = personCompareFromSeed(recap.kind, recap.seed)
+  if (!compare) return null
+  const then = byId.get(compare.thenId)
+  const now = byId.get(compare.nowId)
+  if (!then || !now) return null
+  return { then, thenYear: compare.thenYear, now, nowYear: compare.nowYear }
+}
 
 const kindLabels: Record<RecapKind, string> = {
   on_this_day: 'Heute vor…',
@@ -99,12 +132,23 @@ async function loadDetail(id: number) {
     const res = await getRecap(id)
     detail.value = res.recap
     detailMusic.value = res.music ?? null
-    if (res.recap.photo_ids.length > 0) {
-      const photosRes = await getPhotoDetailsBatch(res.recap.photo_ids)
+    detailCompare.value = null
+    const idsToLoad = collectPlayerPhotoIds(res.recap)
+    if (idsToLoad.length > 0) {
+      const photosRes = await getPhotoDetailsBatch(idsToLoad)
       const byId = new Map(photosRes.photos.map((p) => [p.id, p]))
       detailPhotos.value = res.recap.photo_ids
         .map((pid) => byId.get(pid))
         .filter((p): p is Photo => !!p)
+      detailCompare.value = buildCompareData(res.recap, byId)
+    }
+    // Deep link from the feed strip: ?play=1 opens the player straight away.
+    // The flag is consumed (removed from the URL) so closing the player and
+    // reloading doesn't restart it.
+    if (route.query.play === '1') {
+      const { play: _omit, ...rest } = route.query
+      void router.replace({ path: route.path, query: rest })
+      if (detailPhotos.value.length > 0) openPlayer()
     }
     // Opening the detail counts as "seen". Fire-and-forget; a failed
     // stamp is harmless — the badge just stays until the next rebuild.
@@ -153,6 +197,66 @@ async function handleRebuild() {
   }
 }
 
+// ── Video-Export ─────────────────────────────────────────────────────────────
+// Startet den Server-Render (ffmpeg) und pollt den Fortschritt; das fertige
+// MP4 wird per Content-Disposition-Download ausgeliefert.
+
+const exportRunning = ref(false)
+const exportProgress = ref(0)
+let exportTimer: ReturnType<typeof setTimeout> | null = null
+
+function stopExportPolling() {
+  if (exportTimer) {
+    clearTimeout(exportTimer)
+    exportTimer = null
+  }
+  exportRunning.value = false
+  exportProgress.value = 0
+}
+
+function applyExportStatus(st: RecapExportStatus, recapId: number) {
+  exportProgress.value = st.progress
+  if (st.status === 'running') {
+    exportRunning.value = true
+    exportTimer = setTimeout(() => {
+      exportTimer = null
+      void pollExport(recapId)
+    }, 2000)
+    return
+  }
+  exportRunning.value = false
+  if (st.status === 'done') {
+    const url = getRecapExportDownloadUrl(st)
+    if (url) window.location.assign(url)
+  } else if (st.status === 'failed') {
+    error.value = st.error ?? 'Video-Export fehlgeschlagen.'
+  }
+}
+
+async function pollExport(recapId: number) {
+  if (activeRecapId.value !== recapId) return
+  try {
+    applyExportStatus(await getRecapExportStatus(recapId), recapId)
+  } catch (err: any) {
+    exportRunning.value = false
+    error.value = err?.message ?? 'Video-Export fehlgeschlagen.'
+  }
+}
+
+async function handleExport() {
+  const recap = detail.value
+  if (!recap || exportRunning.value) return
+  error.value = ''
+  exportRunning.value = true
+  exportProgress.value = 0
+  try {
+    applyExportStatus(await startRecapExport(recap.id), recap.id)
+  } catch (err: any) {
+    exportRunning.value = false
+    error.value = err?.message ?? 'Video-Export konnte nicht gestartet werden.'
+  }
+}
+
 function coverUrl(photoId: number | null, size = 600): string | null {
   if (!photoId) return null
   const filename = coverFilenames.value[photoId]
@@ -165,10 +269,12 @@ onMounted(loadList)
 watch(
   activeRecapId,
   (id) => {
+    stopExportPolling()
     if (id != null) loadDetail(id)
     else {
       detail.value = null
       detailMusic.value = null
+      detailCompare.value = null
       detailPhotos.value = []
       playerOpen.value = false
     }
@@ -185,6 +291,7 @@ function openPlayer() {
   playerMapIntro.value = detail.value
     ? tripMapIntroFromSeed(detail.value.kind, detail.value.seed)
     : null
+  playerCompare.value = detailCompare.value
   playerOpen.value = true
 }
 
@@ -195,7 +302,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
   try {
     const res = await getRecap(r.id)
     if (res.recap.photo_ids.length === 0) return
-    const photosRes = await getPhotoDetailsBatch(res.recap.photo_ids)
+    const photosRes = await getPhotoDetailsBatch(collectPlayerPhotoIds(res.recap))
     const byId = new Map(photosRes.photos.map((p) => [p.id, p]))
     playerPhotos.value = res.recap.photo_ids
       .map((pid) => byId.get(pid))
@@ -204,6 +311,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
     playerSubtitle.value = res.recap.subtitle ?? null
     playerMusicUrl.value = res.music ? getRecapMusicUrl(res.music) : null
     playerMapIntro.value = tripMapIntroFromSeed(res.recap.kind, res.recap.seed)
+    playerCompare.value = buildCompareData(res.recap, byId)
     playerOpen.value = true
     if (!res.recap.seen_at) {
       const stamp = new Date().toISOString()
@@ -301,6 +409,15 @@ async function playFromCard(r: RecapSummary, e: Event) {
               @click="openPlayer"
             />
             <Button
+              icon="pi pi-video"
+              :label="exportRunning ? `${Math.round(exportProgress * 100)} %` : 'Video'"
+              severity="secondary"
+              :loading="exportRunning"
+              :disabled="!detail || detailPhotos.length === 0"
+              v-tooltip.bottom="'Als Video (MP4) exportieren'"
+              @click="handleExport"
+            />
+            <Button
               icon="pi pi-thumbs-down-fill"
               label="Ausblenden"
               severity="secondary"
@@ -339,6 +456,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
       :subtitle="playerSubtitle"
       :music-url="playerMusicUrl"
       :map-intro="playerMapIntro"
+      :compare-intro="playerCompare"
       :open="playerOpen"
       @close="playerOpen = false"
     />
