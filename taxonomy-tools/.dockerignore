@@ -1,0 +1,6 @@
+__pycache__
+*.pyc
+.git
+build-context.sh
+.dockerignore
+node_modules

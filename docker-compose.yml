@@ -115,6 +115,7 @@ services:
       EMBEDDING_SERVICE_URL: http://embedding_service:8000
       LLM_SERVICE_URL: http://llm_service:8000
       RECEIPT_OCR_SERVICE_URL: http://receipt_ocr_service:8000
+      TAXONOMY_TOOLS_SERVICE_URL: http://taxonomy_tools:8000
       # ENABLE_LANDMARKS retired (Epic #383) — use ENABLE_POI_DETECTION instead.
       ENABLE_POI_DETECTION: ${ENABLE_POI_DETECTION:-false}
       # Geo service (reverse geocoding + POI lookup). Talks to the geo
@@ -403,6 +404,34 @@ services:
       retries: 5
       start_period: 30s
 
+  # ── Taxonomy Tools (offline diagnosis + cloud audit/teacher) ────────────
+  # Python + Node sidecar that runs the offline taxonomy scripts on demand
+  # via HTTP. The Encore app triggers runs and relays the SSE log stream
+  # to the admin frontend over WebSocket.
+  taxonomy_tools:
+    image: ghcr.io/as19git67/fk-encore-taxonomy-tools:${DEPLOY_IMAGE_TAG:-latest}
+    container_name: fk-encore-taxonomy-tools${DEPLOY_NAME_SUFFIX:-}
+    restart: unless-stopped
+    user: "568:568"
+    labels:
+      com.centurylinklabs.watchtower.scope: ${DEPLOY_WATCHTOWER_SCOPE:-fkprod}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DATABASE: ${DEPLOY_PG_DATABASE:-encore}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   # ── Watchtower ────────────────────────────────────────────────────────────
   # Observes only containers carrying the configured scope label so two
   # deployments on the same host stay independent.
@@ -426,6 +455,7 @@ services:
       fk-encore-llm${DEPLOY_NAME_SUFFIX:-}
       fk-encore-receipt-ocr${DEPLOY_NAME_SUFFIX:-}
       fk-encore-geo${DEPLOY_NAME_SUFFIX:-}
+      fk-encore-taxonomy-tools${DEPLOY_NAME_SUFFIX:-}
     ports:
       - "${DEPLOY_HOST_PORT_WATCHTOWER:-9000}:8080"
 
