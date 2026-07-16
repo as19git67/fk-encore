@@ -178,14 +178,14 @@ export interface DocumentTaxSectionDTO {
   name: string;
   group: TaxSectionGroup;
   confidence: number | null;
-  source: "ai" | "user";
+  source: "ai" | "cloud" | "user";
 }
 
 export interface DocumentSubjectPersonDTO {
   id: number;
   full_name: string;
   relation_tag: string;
-  source: "ai" | "user";
+  source: "ai" | "cloud" | "user";
 }
 
 export interface DocumentDetail extends DocumentSummary {
@@ -2689,7 +2689,7 @@ export const listTaxYears = api(
 export interface TaxDocumentAssignmentDTO {
   document: DocumentSummary;
   confidence: number | null;
-  source: "ai" | "user";
+  source: "ai" | "cloud" | "user";
 }
 
 export interface TaxSectionBucket {
@@ -2804,7 +2804,7 @@ export const listTaxDocuments = api(
       document_id: number;
       tax_section: string;
       confidence: number | null;
-      source: "ai" | "user";
+      source: "ai" | "cloud" | "user";
     }>(
       db
         .select({
@@ -3534,7 +3534,7 @@ async function fetchTaxSectionsForDocument(documentId: number): Promise<Document
   const rows = await dbAll<{
     tax_section: string;
     confidence: number | null;
-    source: "ai" | "user";
+    source: "ai" | "cloud" | "user";
   }>(
     db
       .select({

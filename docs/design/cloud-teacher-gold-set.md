@@ -1,6 +1,8 @@
 # Design: Cloud-Lehrer zum automatischen Wachsen des Gold-Sets
 
-**Status:** Entscheidungen getroffen (Abschnitt 7) — bereit zur Implementierung.
+**Status:** Schritte 1–3 umgesetzt (Persistenz-Schicht, noch ohne Wirkung auf
+die Klassifikation). Schritte 4–5 (runClassify-Guards, Few-Shot/Learned-Rules-
+Filter, Messung) folgen nach Sichtprüfung der ersten `cloud`-Labels.
 **Autor-Kontext:** Folgt aus der Steuer-/Kategorie-Audit-Serie (Juli 2026).
 
 ## 1. Ziel und Abgrenzung (wichtig)
@@ -188,22 +190,35 @@ sich.
 
 ## 8. Nächster Schritt
 
-Bereit für einen ersten Implementierungs-PR:
+Schritte 1–3 sind umgesetzt (isolierte Persistenz-Schicht):
 
-1. Schema: `documents.category_source` (Spalte, ersetzt/ergänzt
-   `attributes_reviewed` als Guard-Quelle), `document_tax_sections.source` und
-   `document_tag_links.source`/`document_subject_persons.source` um `'cloud'`
-   erweitern.
-2. `_common.py`: neue, mildere Scrub-Funktion für den Lehrer-Kontext
-   (institutioneller Absender bleibt).
-3. Neuer `teacher`-Modus (eigenes Skript oder Flag in `cloud_audit.py`):
-   Auswahl nach 5.1, schreibt direkt mit `source='cloud'` in die DB (kein
-   Dry-Run-Zwang für die Persistenz, aber `AUDIT_DRY_RUN`-Unterstützung bleibt
-   zur Prompt-Kontrolle erhalten).
-4. `runClassify`-Guards und Few-Shot-/Learned-Rules-Filter auf `cloud`
-   erweitern (5.2/5.3).
+1. ✅ Schema (Migration `0132_document_cloud_source`): neue Spalte
+   `documents.category_source` (Enum `document_category_source`
+   `'ai' | 'cloud' | 'user'`, Default `'ai'`, Backfill `'user'` wo
+   `attributes_reviewed`), Enum `document_tax_source` um `'cloud'` erweitert.
+   `document_tag_links.source`/`document_subject_persons.source` sind TEXT und
+   akzeptieren `'cloud'` bereits — nur die Drizzle-`$type`-Annotationen wurden
+   geweitet (kein DDL).
+2. ✅ `_common.py`: `scrub_for_teacher()` — mildere Scrub-Stufe, lässt den
+   institutionellen Absender im Klartext, entfernt aber dieselbe PII wie der
+   Audit. Die strenge Audit-Stufe (`scrub`/`scrub_names`) bleibt unverändert.
+3. ✅ `scripts/taxonomy/cloud_teacher.py`: eigener Lehrer-Modus. Auswahl nach
+   5.1 (dünne Zweige + Streit-Achsen + neue Dokumente), schreibt direkt mit
+   `source='cloud'` / `category_source='cloud'` in die DB. Fasst
+   `user`/`reviewed`-Werte nie an. `TEACHER_DRY_RUN` (bzw. `AUDIT_DRY_RUN`)
+   schreibt nur die gescrubbten Prompts nach `out/` zur Kontrolle. Schreibt
+   einen Vorher/Nachher-Report (`out/cloud_teacher.md` +
+   `cloud_teacher_labels.json`) für die Sichtprüfung.
+
+Offen (bewusst noch nicht umgesetzt, damit die Persistenz erst isoliert
+geprüft werden kann):
+
+4. `runClassify`-Guards (auf `category_source` statt nur `attributes_reviewed`)
+   und Few-Shot-/Learned-Rules-Filter auf `cloud` erweitern (5.2/5.3). Bis
+   dahin überschreibt ein normaler Reclassify die `cloud`-Kategorie wieder —
+   die Labels sind bis Schritt 4 nur zur Inspektion da. Auch die Frontend-
+   Badges (`source === 'ai'`) behandeln `'cloud'` erst mit Schritt 4 eigen.
 5. Messen: Diagnose-/Audit-Lauf vorher/nachher, um die Wirkung auf dünn
    besetzte Zweige zu quantifizieren.
 
-Empfehlung: Schritt 1–3 zuerst isoliert (reine Persistenz, noch keine Wirkung
-auf die Klassifikation), dann 4 erst nach Sichtprüfung der ersten `cloud`-Labels.
+Empfehlung bleibt: Schritt 4 erst nach Sichtprüfung der ersten `cloud`-Labels.
