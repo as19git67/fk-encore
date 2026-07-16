@@ -19,13 +19,105 @@ const emit = defineEmits<{
 }>()
 
 const photoDurationMs = computed(() => props.durationMs ?? 4500)
+// Collages carry 2–3 photos, so they stay on screen a bit longer.
+const COLLAGE_DURATION_FACTOR = 1.4
 
 const index = ref(0)
 const paused = ref(false)
 const showControls = ref(true)
 
-const slotA = ref<Photo | null>(null)
-const slotB = ref<Photo | null>(null)
+// ── Slide plan ───────────────────────────────────────────────────────────────
+// A slide is either a single Ken-Burns photo or a 2–3 photo collage whose
+// tiles slide in from different edges. Collages are only formed "wenn es
+// passt": the grouped photos must be taken close together in time, and two
+// collages never follow each other back-to-back. The plan is deterministic
+// (seeded by the photo ids), so replaying a recap yields the same sequence.
+
+type SlideLayout = 'single' | 'duo' | 'trio'
+
+interface Slide {
+  key: string
+  layout: SlideLayout
+  photos: Photo[]
+}
+
+const COLLAGE_MAX_TIME_GAP_MS = 6 * 60 * 60 * 1000
+
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0
+  return () => {
+    a |= 0
+    a = (a + 0x6d2b79f5) | 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+function photoTime(p: Photo): number | null {
+  const iso = p.taken_at ?? p.created_at
+  if (!iso) return null
+  const t = Date.parse(iso)
+  return Number.isFinite(t) ? t : null
+}
+
+function closeInTime(a: Photo, b: Photo): boolean {
+  const ta = photoTime(a)
+  const tb = photoTime(b)
+  if (ta == null || tb == null) return false
+  return Math.abs(ta - tb) <= COLLAGE_MAX_TIME_GAP_MS
+}
+
+function buildSlides(photos: Photo[]): Slide[] {
+  const out: Slide[] = []
+  const rnd = mulberry32((photos[0]?.id ?? 1) * 2654435761 + photos.length)
+  let i = 0
+  let sinceCollage = 99
+  while (i < photos.length) {
+    const remaining = photos.length - i
+    let size = 1
+    const a = photos[i]
+    const b = photos[i + 1]
+    const c = photos[i + 2]
+    if (remaining >= 2 && sinceCollage >= 2 && a && b) {
+      const duoFits = closeInTime(a, b)
+      const trioFits = remaining >= 3 && duoFits && !!c && closeInTime(b, c)
+      const roll = rnd()
+      if (trioFits && roll < 0.3) size = 3
+      else if (duoFits && roll < 0.55) size = 2
+    }
+    const group = photos.slice(i, i + size)
+    out.push({
+      key: group.map((p) => p.id).join('-'),
+      layout: size === 3 ? 'trio' : size === 2 ? 'duo' : 'single',
+      photos: group,
+    })
+    sinceCollage = size > 1 ? 0 : sinceCollage + 1
+    i += size
+  }
+  return out
+}
+
+const slides = computed<Slide[]>(() => buildSlides(props.photos))
+const total = computed(() => slides.value.length)
+
+function slideDurationMs(slide: Slide | null): number {
+  if (!slide) return photoDurationMs.value
+  return slide.layout === 'single'
+    ? photoDurationMs.value
+    : Math.round(photoDurationMs.value * COLLAGE_DURATION_FACTOR)
+}
+
+const currentSlide = computed<Slide | null>(() => slides.value[index.value] ?? null)
+const currentDurationMs = computed(() => slideDurationMs(currentSlide.value))
+
+/** First photo of a slide — every slide carries at least one by construction. */
+function primaryPhoto(slide: Slide): Photo {
+  return slide.photos[0] as Photo
+}
+
+const slotA = ref<Slide | null>(null)
+const slotB = ref<Slide | null>(null)
 const activeSlot = ref<'A' | 'B'>('A')
 
 let advanceTimer: ReturnType<typeof setTimeout> | null = null
@@ -35,7 +127,7 @@ let advanceToken = 0
 const preloadCache = new Map<string, Promise<boolean>>()
 const PRELOAD_WAIT_TIMEOUT_MS = 5000
 
-const total = computed(() => props.photos.length)
+// ── Ken Burns (single slides) ────────────────────────────────────────────────
 
 type Motion = {
   fromScale: number
@@ -62,7 +154,9 @@ function pickMotion(seed: number): Motion {
   return { fromScale, toScale, fromX, fromY, toX, toY }
 }
 
-function animStyleFor(photo: Photo | null): Record<string, string> {
+function animStyleFor(slide: Slide | null): Record<string, string> {
+  if (!slide || slide.layout !== 'single') return {}
+  const photo = slide.photos[0]
   if (!photo) return {}
   const m = pickMotion(photo.id)
   return {
@@ -72,12 +166,41 @@ function animStyleFor(photo: Photo | null): Record<string, string> {
     '--kb-from-y': `${m.fromY}%`,
     '--kb-to-x': `${m.toX}%`,
     '--kb-to-y': `${m.toY}%`,
-    '--kb-duration': `${photoDurationMs.value}ms`,
+    '--kb-duration': `${slideDurationMs(slide)}ms`,
   }
 }
 
 const slotAAnimStyle = computed(() => animStyleFor(slotA.value))
 const slotBAnimStyle = computed(() => animStyleFor(slotB.value))
+
+// Collage tiles enter from different edges; per-tile custom props drive the
+// slide-in offset and a small stagger.
+const COLLAGE_ENTRIES: Record<'duo' | 'trio', Array<{ x: string; y: string }>> = {
+  duo: [
+    { x: '-110%', y: '0%' },
+    { x: '110%', y: '0%' },
+  ],
+  trio: [
+    { x: '-110%', y: '0%' },
+    { x: '110%', y: '-40%' },
+    { x: '110%', y: '110%' },
+  ],
+}
+
+function collageTileStyle(slide: Slide, tileIdx: number): Record<string, string> {
+  const layout = slide.layout === 'trio' ? 'trio' : 'duo'
+  const entry = COLLAGE_ENTRIES[layout][tileIdx] ?? { x: '0%', y: '110%' }
+  // Alternate the slow inner zoom direction per tile for a lively collage.
+  const zoomIn = (slide.photos[tileIdx]?.id ?? tileIdx) % 2 === 0
+  return {
+    '--tile-from-x': entry.x,
+    '--tile-from-y': entry.y,
+    '--tile-delay': `${tileIdx * 160}ms`,
+    '--tile-zoom-from': zoomIn ? '1' : '1.12',
+    '--tile-zoom-to': zoomIn ? '1.12' : '1',
+    '--kb-duration': `${slideDurationMs(slide)}ms`,
+  }
+}
 
 function clearAdvance() {
   if (advanceTimer) {
@@ -122,23 +245,22 @@ function preloadUrl(url: string): Promise<boolean> {
   return promise
 }
 
+function preloadSlide(slide: Slide | undefined) {
+  if (!slide) return
+  for (const photo of slide.photos) void preloadUrl(photoDisplayUrl(photo))
+}
+
 function preloadOffset(offset: number) {
-  const idx = index.value + offset
-  if (idx < 0 || idx >= total.value) return
-  const photo = props.photos[idx]
-  if (!photo) return
-  void preloadUrl(photoDisplayUrl(photo))
+  preloadSlide(slides.value[index.value + offset])
 }
 
 function waitForOffset(offset: number): Promise<void> {
-  const idx = index.value + offset
-  if (idx < 0 || idx >= total.value) return Promise.resolve()
-  const photo = props.photos[idx]
-  if (!photo) return Promise.resolve()
-  const preload = preloadUrl(photoDisplayUrl(photo))
+  const slide = slides.value[index.value + offset]
+  if (!slide) return Promise.resolve()
+  const preloads = slide.photos.map((p) => preloadUrl(photoDisplayUrl(p)))
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(), PRELOAD_WAIT_TIMEOUT_MS)
-    preload.finally(() => {
+    Promise.allSettled(preloads).then(() => {
       clearTimeout(timer)
       resolve()
     })
@@ -156,18 +278,18 @@ function scheduleAdvance() {
     if (token !== advanceToken) return
     if (!props.open || paused.value) return
     next()
-  }, photoDurationMs.value)
+  }, currentDurationMs.value)
 }
 
 function goToIndex(newIndex: number) {
   if (newIndex < 0 || newIndex >= total.value) return
   if (newIndex === index.value && slotA.value !== null) return
-  const photo = props.photos[newIndex]
-  if (!photo) return
+  const slide = slides.value[newIndex]
+  if (!slide) return
   index.value = newIndex
   const target: 'A' | 'B' = activeSlot.value === 'A' ? 'B' : 'A'
-  if (target === 'A') slotA.value = photo
-  else slotB.value = photo
+  if (target === 'A') slotA.value = slide
+  else slotB.value = slide
   void nextTick(() => {
     activeSlot.value = target
   })
@@ -222,13 +344,20 @@ function reset() {
   index.value = 0
   paused.value = false
   activeSlot.value = 'A'
-  slotA.value = props.photos[0] ?? null
+  slotA.value = slides.value[0] ?? null
   slotB.value = null
   bumpControls()
   scheduleAdvance()
 }
 
+// The player is teleported to <body>; lock the page scroll behind it so the
+// fullscreen stage never scrolls the app shell underneath.
+function setBodyScrollLock(locked: boolean) {
+  document.body.style.overflow = locked ? 'hidden' : ''
+}
+
 watch(() => props.open, (isOpen) => {
+  setBodyScrollLock(isOpen)
   if (isOpen) reset()
   else clearAdvance()
 })
@@ -240,101 +369,155 @@ watch(() => props.photos, () => {
 
 onMounted(() => {
   window.addEventListener('keydown', handleKey)
-  if (props.open) reset()
+  if (props.open) {
+    setBodyScrollLock(true)
+    reset()
+  }
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKey)
   clearAdvance()
   if (controlsTimer) clearTimeout(controlsTimer)
+  setBodyScrollLock(false)
 })
 </script>
 
 <template>
-  <div
-    v-if="open"
-    class="recap-player"
-    @mousemove="bumpControls"
-    @touchstart="bumpControls"
-  >
-    <div class="recap-player-stage">
-      <div class="kb-slide" :class="{ 'is-active': activeSlot === 'A' }">
-        <div
-          v-if="slotA"
-          :key="`A-${slotA.id}`"
-          class="kb-motion"
-          :style="slotAAnimStyle"
-        >
-          <HeicImage
-            :src="photoDisplayUrl(slotA)"
-            :alt="slotA.original_name"
-            object-fit="cover"
-          />
+  <!-- Teleported to <body>: inside the router view the player would sit in the
+       `.content` stacking context (z-index 0) and end up BELOW the sticky
+       toolbar (z-index 1100), so it never covered the full screen. -->
+  <Teleport to="body">
+    <div
+      v-if="open"
+      class="recap-player"
+      @mousemove="bumpControls"
+      @touchstart="bumpControls"
+    >
+      <div class="recap-player-stage">
+        <div class="kb-slide" :class="{ 'is-active': activeSlot === 'A' }">
+          <div
+            v-if="slotA && slotA.layout === 'single'"
+            :key="`A-${slotA.key}`"
+            class="kb-motion"
+            :style="slotAAnimStyle"
+          >
+            <HeicImage
+              :src="photoDisplayUrl(primaryPhoto(slotA))"
+              :alt="primaryPhoto(slotA).original_name"
+              object-fit="cover"
+            />
+          </div>
+          <div
+            v-else-if="slotA"
+            :key="`A-collage-${slotA.key}`"
+            class="collage"
+            :class="slotA.layout"
+          >
+            <div
+              v-for="(photo, tileIdx) in slotA.photos"
+              :key="photo.id"
+              class="collage-tile"
+              :style="collageTileStyle(slotA, tileIdx)"
+            >
+              <div class="collage-tile-zoom">
+                <HeicImage
+                  :src="photoDisplayUrl(photo)"
+                  :alt="photo.original_name"
+                  object-fit="cover"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="kb-slide" :class="{ 'is-active': activeSlot === 'B' }">
+          <div
+            v-if="slotB && slotB.layout === 'single'"
+            :key="`B-${slotB.key}`"
+            class="kb-motion"
+            :style="slotBAnimStyle"
+          >
+            <HeicImage
+              :src="photoDisplayUrl(primaryPhoto(slotB))"
+              :alt="primaryPhoto(slotB).original_name"
+              object-fit="cover"
+            />
+          </div>
+          <div
+            v-else-if="slotB"
+            :key="`B-collage-${slotB.key}`"
+            class="collage"
+            :class="slotB.layout"
+          >
+            <div
+              v-for="(photo, tileIdx) in slotB.photos"
+              :key="photo.id"
+              class="collage-tile"
+              :style="collageTileStyle(slotB, tileIdx)"
+            >
+              <div class="collage-tile-zoom">
+                <HeicImage
+                  :src="photoDisplayUrl(photo)"
+                  :alt="photo.original_name"
+                  object-fit="cover"
+                />
+              </div>
+            </div>
+          </div>
         </div>
       </div>
-      <div class="kb-slide" :class="{ 'is-active': activeSlot === 'B' }">
-        <div
-          v-if="slotB"
-          :key="`B-${slotB.id}`"
-          class="kb-motion"
-          :style="slotBAnimStyle"
-        >
-          <HeicImage
-            :src="photoDisplayUrl(slotB)"
-            :alt="slotB.original_name"
-            object-fit="cover"
-          />
-        </div>
+
+      <div class="recap-player-title" :class="{ 'is-hidden': !showControls && index > 0 }">
+        <div v-if="title" class="recap-player-title-text">{{ title }}</div>
+        <div v-if="subtitle" class="recap-player-subtitle">{{ subtitle }}</div>
       </div>
-    </div>
 
-    <div class="recap-player-title" :class="{ 'is-hidden': !showControls && index > 0 }">
-      <div v-if="title" class="recap-player-title-text">{{ title }}</div>
-      <div v-if="subtitle" class="recap-player-subtitle">{{ subtitle }}</div>
-    </div>
-
-    <div class="recap-player-progress">
       <div
-        v-for="(_p, i) in photos"
-        :key="i"
-        class="recap-player-progress-seg"
-        :class="{
-          'is-done': i < index,
-          'is-active': i === index,
-          'is-paused': i === index && paused,
-        }"
+        class="recap-player-progress"
+        :style="{ '--kb-duration': `${currentDurationMs}ms` }"
       >
-        <div class="recap-player-progress-fill" />
+        <div
+          v-for="(s, i) in slides"
+          :key="s.key"
+          class="recap-player-progress-seg"
+          :class="{
+            'is-done': i < index,
+            'is-active': i === index,
+            'is-paused': i === index && paused,
+          }"
+        >
+          <div class="recap-player-progress-fill" />
+        </div>
       </div>
-    </div>
 
-    <div class="recap-player-controls" :class="{ 'is-hidden': !showControls }">
-      <button type="button" class="recap-player-btn" aria-label="Zurück" @click="prev">
-        <i class="pi pi-chevron-left" />
-      </button>
+      <div class="recap-player-controls" :class="{ 'is-hidden': !showControls }">
+        <button type="button" class="recap-player-btn" aria-label="Zurück" @click="prev">
+          <i class="pi pi-chevron-left" />
+        </button>
+        <button
+          type="button"
+          class="recap-player-btn recap-player-btn-pause"
+          :aria-label="paused ? 'Wiedergabe' : 'Pause'"
+          @click="togglePause"
+        >
+          <i :class="paused ? 'pi pi-play' : 'pi pi-pause'" />
+        </button>
+        <button type="button" class="recap-player-btn" aria-label="Weiter" @click="next">
+          <i class="pi pi-chevron-right" />
+        </button>
+      </div>
+
       <button
         type="button"
-        class="recap-player-btn recap-player-btn-pause"
-        :aria-label="paused ? 'Wiedergabe' : 'Pause'"
-        @click="togglePause"
+        class="recap-player-close"
+        aria-label="Schließen"
+        :class="{ 'is-hidden': !showControls }"
+        @click="emit('close')"
       >
-        <i :class="paused ? 'pi pi-play' : 'pi pi-pause'" />
-      </button>
-      <button type="button" class="recap-player-btn" aria-label="Weiter" @click="next">
-        <i class="pi pi-chevron-right" />
+        <i class="pi pi-times" />
       </button>
     </div>
-
-    <button
-      type="button"
-      class="recap-player-close"
-      aria-label="Schließen"
-      :class="{ 'is-hidden': !showControls }"
-      @click="emit('close')"
-    >
-      <i class="pi pi-times" />
-    </button>
-  </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -388,6 +571,84 @@ onBeforeUnmount(() => {
     transform: translate(var(--kb-to-x, 0%), var(--kb-to-y, 0%))
       scale(var(--kb-to-scale, 1.1));
   }
+}
+
+/* ── Collage slides ─────────────────────────────────────────────────────── */
+
+.collage {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+}
+
+.collage.duo {
+  grid-template-columns: 1fr 1fr;
+}
+
+.collage.trio {
+  grid-template-columns: 3fr 2fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.collage.trio .collage-tile:first-child {
+  grid-row: 1 / span 2;
+}
+
+/* Portrait screens: stack the collage vertically instead of side-by-side. */
+@media (orientation: portrait) {
+  .collage.duo {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr;
+  }
+  .collage.trio {
+    grid-template-columns: 2fr 3fr;
+    grid-template-rows: 1fr 1fr;
+  }
+  .collage.trio .collage-tile:first-child {
+    grid-row: 1 / span 2;
+    grid-column: 2;
+  }
+}
+
+.collage-tile {
+  overflow: hidden;
+  border-radius: 10px;
+  transform: translate(var(--tile-from-x, 0%), var(--tile-from-y, 110%));
+  animation: collage-slide-in 700ms cubic-bezier(0.22, 0.9, 0.35, 1) forwards;
+  animation-delay: var(--tile-delay, 0ms);
+  will-change: transform;
+}
+
+@keyframes collage-slide-in {
+  to {
+    transform: translate(0%, 0%);
+  }
+}
+
+/* Slow inner zoom keeps collage tiles alive after they've slid in. */
+.collage-tile-zoom {
+  width: 100%;
+  height: 100%;
+  animation: collage-zoom var(--kb-duration, 6300ms) linear forwards;
+  will-change: transform;
+}
+
+@keyframes collage-zoom {
+  from {
+    transform: scale(var(--tile-zoom-from, 1));
+  }
+  to {
+    transform: scale(var(--tile-zoom-to, 1.12));
+  }
+}
+
+.collage-tile :deep(img),
+.collage-tile :deep(.heic-image-container) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .recap-player-title {
