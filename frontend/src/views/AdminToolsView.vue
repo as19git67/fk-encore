@@ -368,6 +368,7 @@ onMounted(() => {
   border: 1px solid var(--p-content-border-color);
   border-radius: 0.6rem;
   background: var(--p-content-background);
+  overflow: hidden;
 }
 .tool-header {
   display: flex;
@@ -383,22 +384,25 @@ onMounted(() => {
 }
 .tool-options {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem 1.5rem;
-  align-items: center;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 .option-row {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  max-width: 100%;
 }
 .option-row label {
   font-size: 0.85rem;
   white-space: nowrap;
+  flex-shrink: 0;
   color: var(--p-text-muted-color);
 }
 .option-input {
-  width: 160px;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 240px;
 }
 .tool-actions {
   display: flex;
@@ -442,12 +446,8 @@ onMounted(() => {
   .page-header h1 {
     font-size: 1.25rem;
   }
-  .tool-options {
-    flex-direction: column;
-    align-items: flex-start;
-  }
   .option-input {
-    width: 100%;
+    max-width: 100%;
   }
 }
 </style>
