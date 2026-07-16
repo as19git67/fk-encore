@@ -59,8 +59,21 @@ struct RecapDetails: Codable, Identifiable, Sendable {
     var recapKind: RecapKind { RecapKind(raw: kind) }
 }
 
+/// Self-hosted background track for the recap player (`GET /recaps/:id`,
+/// field `music`). `url` is an API path without host; stream it through the
+/// shared `APIClient`.
+struct RecapMusicTrack: Codable, Sendable {
+    let id: String
+    let mood: String
+    let title: String
+    let url: String
+}
+
 struct ListRecapsResponse: Codable, Sendable { let recaps: [RecapSummary] }
-struct GetRecapResponse: Codable, Sendable { let recap: RecapDetails }
+struct GetRecapResponse: Codable, Sendable {
+    let recap: RecapDetails
+    let music: RecapMusicTrack?
+}
 
 /// Minimal photo metadata needed to render a recap slide / cover, decoded from
 /// the shared `/photos/details` batch endpoint (extra fields are ignored).
