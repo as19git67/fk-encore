@@ -60,7 +60,9 @@ onMounted(() => {
   L.tileLayer('https://tile.openstreetmap.de/{z}/{x}/{y}.png', {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     maxZoom: 19,
+    noWrap: true,
   }).addTo(map)
+  map.setMaxBounds([[-85, -180], [85, 180]])
 
   const to = L.latLng(props.intro.to.lat, props.intro.to.lon)
 
