@@ -88,6 +88,13 @@ struct GetRecapResponse: Codable, Sendable {
     let music: RecapMusicTrack?
 }
 
+/// Server-computed focal point (face centre, normalized 0..1) used to pick
+/// the visible crop when a slide fills the screen.
+struct RecapAutoCrop: Codable, Sendable {
+    let x: Double
+    let y: Double
+}
+
 /// Minimal photo metadata needed to render a recap slide / cover, decoded from
 /// the shared `/photos/details` batch endpoint (extra fields are ignored).
 struct RecapPhoto: Codable, Identifiable, Sendable {
@@ -99,6 +106,7 @@ struct RecapPhoto: Codable, Identifiable, Sendable {
     let description: String?
     /// "visible" | "hidden" | "favorite" — drives the player's heart button.
     let curation_status: String?
+    let auto_crop: RecapAutoCrop?
 }
 
 struct RecapPhotoDetailsResponse: Codable, Sendable { let photos: [RecapPhoto] }
