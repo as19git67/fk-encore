@@ -8,10 +8,16 @@ Musik-Ordner liegen, siehe `docs/recap-music.md`).
 ## Voraussetzung: ffmpeg
 
 Der Export braucht ein `ffmpeg`-Binary auf dem Server — es ist **keine**
-npm-Abhängigkeit. Installation auf dem Host:
+npm-Abhängigkeit. Im Produktions-Image ist es bereits enthalten: das
+Runtime-Image (`docker/Dockerfile.runtime`) installiert `ffmpeg` zusammen
+mit den übrigen System-Tools per apt. Es ist also nichts weiter zu tun.
+
+Für die lokale Entwicklung außerhalb des Containers muss `ffmpeg` einmalig
+installiert werden:
 
 ```bash
 apt-get install ffmpeg      # Debian/Ubuntu
+brew install ffmpeg         # macOS
 ```
 
 Pfad konfigurierbar über `FFMPEG_PATH` (Default: `ffmpeg` im `PATH`).
