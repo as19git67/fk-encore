@@ -705,6 +705,9 @@ async function buildTripRecaps(
         location_country: cluster.dominantCountry,
         centroid_lat: cluster.centroidLat,
         centroid_lon: cluster.centroidLon,
+        // Home location at build time — the players draw the animated
+        // "von zuhause zum Ziel" map intro from these.
+        ...(home ? { home_lat: home.lat, home_lon: home.lon } : {}),
         duration_days: durationDays,
         ...(resolved.llmUsed ? { llm_title: true } : {}),
       },

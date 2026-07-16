@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import HeicImage from './HeicImage.vue'
+import RecapMapIntro from './RecapMapIntro.vue'
+import type { RecapMapIntroData } from '../utils/recapMapIntro'
 import { getPhotoUrl, type Photo } from '../api/photos'
 import { getRenderedPhotoUrl } from '../api/photoTransforms'
 import { useTransformedPhotosIndex } from '../composables/useTransformedPhotosIndex'
@@ -14,6 +16,8 @@ const props = defineProps<{
   durationMs?: number
   /** Absolute URL of the background track; omit for a silent recap. */
   musicUrl?: string | null
+  /** Trip map intro rendered as the first slide; omit to start with photos. */
+  mapIntro?: RecapMapIntroData | null
 }>()
 
 const emit = defineEmits<{
@@ -35,7 +39,7 @@ const showControls = ref(true)
 // collages never follow each other back-to-back. The plan is deterministic
 // (seeded by the photo ids), so replaying a recap yields the same sequence.
 
-type SlideLayout = 'single' | 'duo' | 'trio'
+type SlideLayout = 'single' | 'duo' | 'trio' | 'map'
 
 interface Slide {
   key: string
@@ -100,11 +104,20 @@ function buildSlides(photos: Photo[]): Slide[] {
   return out
 }
 
-const slides = computed<Slide[]>(() => buildSlides(props.photos))
+const MAP_INTRO_DURATION_MS = 5500
+
+const slides = computed<Slide[]>(() => {
+  const plan = buildSlides(props.photos)
+  if (props.mapIntro) {
+    plan.unshift({ key: 'map-intro', layout: 'map', photos: [] })
+  }
+  return plan
+})
 const total = computed(() => slides.value.length)
 
 function slideDurationMs(slide: Slide | null): number {
   if (!slide) return photoDurationMs.value
+  if (slide.layout === 'map') return MAP_INTRO_DURATION_MS
   return slide.layout === 'single'
     ? photoDurationMs.value
     : Math.round(photoDurationMs.value * COLLAGE_DURATION_FACTOR)
@@ -511,8 +524,14 @@ onBeforeUnmount(() => {
     >
       <div class="recap-player-stage">
         <div class="kb-slide" :class="{ 'is-active': activeSlot === 'A' }">
+          <RecapMapIntro
+            v-if="slotA && slotA.layout === 'map' && mapIntro"
+            :key="`A-${slotA.key}`"
+            :intro="mapIntro"
+            :duration-ms="MAP_INTRO_DURATION_MS"
+          />
           <div
-            v-if="slotA && slotA.layout === 'single'"
+            v-else-if="slotA && slotA.layout === 'single'"
             :key="`A-${slotA.key}`"
             class="kb-motion"
             :style="slotAAnimStyle"
@@ -546,8 +565,14 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div class="kb-slide" :class="{ 'is-active': activeSlot === 'B' }">
+          <RecapMapIntro
+            v-if="slotB && slotB.layout === 'map' && mapIntro"
+            :key="`B-${slotB.key}`"
+            :intro="mapIntro"
+            :duration-ms="MAP_INTRO_DURATION_MS"
+          />
           <div
-            v-if="slotB && slotB.layout === 'single'"
+            v-else-if="slotB && slotB.layout === 'single'"
             :key="`B-${slotB.key}`"
             class="kb-motion"
             :style="slotBAnimStyle"

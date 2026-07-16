@@ -40,6 +40,18 @@ struct RecapSummary: Codable, Identifiable, Sendable {
     var recapKind: RecapKind { RecapKind(raw: kind) }
 }
 
+/// Builder metadata stored per recap. The JSON object carries kind-specific
+/// keys; only the ones the app renders are decoded, everything else is
+/// ignored. Trip recaps persist home + destination coordinates for the
+/// animated map intro.
+struct RecapSeed: Codable, Sendable {
+    let home_lat: Double?
+    let home_lon: Double?
+    let centroid_lat: Double?
+    let centroid_lon: Double?
+    let location_city: String?
+}
+
 /// A single recap with its ordered photo IDs (`GET /recaps/:id`). Photo metadata
 /// is resolved separately via the shared `/photos/details` batch endpoint.
 struct RecapDetails: Codable, Identifiable, Sendable {
@@ -55,6 +67,7 @@ struct RecapDetails: Codable, Identifiable, Sendable {
     let dismissed_at: String?
     let seen_at: String?
     let photo_ids: [Int]
+    let seed: RecapSeed?
 
     var recapKind: RecapKind { RecapKind(raw: kind) }
 }

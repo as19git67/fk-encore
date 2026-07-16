@@ -22,6 +22,7 @@ import {
   getPhotoUrl,
   type Photo,
 } from '../api/photos'
+import { tripMapIntroFromSeed, type RecapMapIntroData } from '../utils/recapMapIntro'
 
 const route = useRoute()
 const router = useRouter()
@@ -49,6 +50,7 @@ const playerPhotos = ref<Photo[]>([])
 const playerTitle = ref<string>('')
 const playerSubtitle = ref<string | null>(null)
 const playerMusicUrl = ref<string | null>(null)
+const playerMapIntro = ref<RecapMapIntroData | null>(null)
 const cardPlayLoadingId = ref<number | null>(null)
 
 const kindLabels: Record<RecapKind, string> = {
@@ -180,6 +182,9 @@ function openPlayer() {
   playerTitle.value = detail.value?.title ?? ''
   playerSubtitle.value = detail.value?.subtitle ?? null
   playerMusicUrl.value = detailMusic.value ? getRecapMusicUrl(detailMusic.value) : null
+  playerMapIntro.value = detail.value
+    ? tripMapIntroFromSeed(detail.value.kind, detail.value.seed)
+    : null
   playerOpen.value = true
 }
 
@@ -198,6 +203,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
     playerTitle.value = res.recap.title
     playerSubtitle.value = res.recap.subtitle ?? null
     playerMusicUrl.value = res.music ? getRecapMusicUrl(res.music) : null
+    playerMapIntro.value = tripMapIntroFromSeed(res.recap.kind, res.recap.seed)
     playerOpen.value = true
     if (!res.recap.seen_at) {
       const stamp = new Date().toISOString()
@@ -332,6 +338,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
       :title="playerTitle"
       :subtitle="playerSubtitle"
       :music-url="playerMusicUrl"
+      :map-intro="playerMapIntro"
       :open="playerOpen"
       @close="playerOpen = false"
     />
