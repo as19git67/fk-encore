@@ -4,6 +4,7 @@ import { onBeforeRouteLeave } from 'vue-router'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import PhotoFeedCard from '../components/PhotoFeedCard.vue'
+import RecapFeedStrip from '../components/RecapFeedStrip.vue'
 import FeedFullscreen from '../components/FeedFullscreen.vue'
 import FeedUploadAlbumDialog from '../components/FeedUploadAlbumDialog.vue'
 import { listPhotoFeed, type FeedPhotoItem, type PhotoFeedCursor } from '../api/photoFeed'
@@ -360,6 +361,8 @@ onBeforeUnmount(() => {
     </div>
 
     <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
+
+    <RecapFeedStrip />
 
     <div v-if="loading" class="info-text">
       <i class="pi pi-spin pi-spinner" /> Feed wird geladen…
