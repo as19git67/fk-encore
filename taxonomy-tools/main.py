@@ -17,8 +17,10 @@ import time
 from enum import Enum
 from typing import Any
 
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
@@ -153,3 +155,51 @@ async def cancel_tool(tool: ToolName):
     except ProcessLookupError:
         pass
     return JSONResponse({"status": "cancelled"})
+
+
+REPORT_FILES: dict[ToolName, list[str]] = {
+    ToolName.diagnose: ["diagnose.md"],
+    ToolName.cloud_audit: ["cloud_audit.md", "cloud_audit_gold.json"],
+    ToolName.cloud_teacher: [
+        "cloud_teacher.md",
+        "cloud_teacher_labels.json",
+        "cloud_teacher_dry_run.jsonl",
+    ],
+}
+
+CONTENT_TYPES: dict[str, str] = {
+    ".md": "text/markdown; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".jsonl": "application/x-ndjson; charset=utf-8",
+}
+
+
+@app.get("/reports/{tool}")
+async def list_reports(tool: ToolName):
+    out_dir = Path(SCRIPTS_DIR) / "out"
+    candidates = REPORT_FILES.get(tool, [])
+    files = []
+    for name in candidates:
+        p = out_dir / name
+        if p.is_file():
+            stat = p.stat()
+            files.append({
+                "name": name,
+                "size": stat.st_size,
+                "modified": stat.st_mtime,
+            })
+    return {"files": files}
+
+
+@app.get("/reports/{tool}/{filename}")
+async def download_report(tool: ToolName, filename: str):
+    allowed = REPORT_FILES.get(tool, [])
+    if filename not in allowed:
+        raise HTTPException(404, f"unknown report file: {filename}")
+    out_dir = Path(SCRIPTS_DIR) / "out"
+    path = out_dir / filename
+    if not path.is_file():
+        raise HTTPException(404, f"report not found: {filename}")
+    suffix = path.suffix.lower()
+    media_type = CONTENT_TYPES.get(suffix, "application/octet-stream")
+    return FileResponse(path, media_type=media_type, filename=filename)
