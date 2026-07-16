@@ -41,6 +41,11 @@ struct RecapPlayerView: View {
     /// Trip map intro shown before the slideshow; nil once finished/skipped.
     @State private var mapIntro: RecapMapIntroData?
 
+    /// Local favorite toggles (photoId → isFavorite) shadowing the fetched
+    /// curation_status; rolled back if the PATCH fails.
+    @State private var favoriteOverrides: [Int: Bool] = [:]
+    @State private var favoriteBusy = false
+
     private let musicVolume: Float = 0.55
 
     /// Seconds each slide stays on screen before auto-advancing.
@@ -127,6 +132,17 @@ struct RecapPlayerView: View {
                 }
 
                 topOverlay
+
+                if mapIntro == nil {
+                    favoriteButton(for: idx)
+                        .frame(
+                            maxWidth: .infinity,
+                            maxHeight: .infinity,
+                            alignment: .bottomTrailing
+                        )
+                        .padding(.trailing, 16)
+                        .padding(.bottom, 28)
+                }
             }
             .contentShape(Rectangle())
             .gesture(
@@ -273,6 +289,46 @@ struct RecapPlayerView: View {
         guard mapIntro != nil else { return }
         mapIntro = nil
         startTicker()
+    }
+
+    // MARK: - Favorites
+
+    private func isFavorite(_ photo: RecapPhoto) -> Bool {
+        favoriteOverrides[photo.id] ?? (photo.curation_status == "favorite")
+    }
+
+    private func favoriteButton(for idx: Int) -> some View {
+        let fav = idx < photos.count ? isFavorite(photos[idx]) : false
+        return Button { toggleFavorite(at: idx) } label: {
+            Image(systemName: fav ? "heart.fill" : "heart")
+                .font(.title2)
+                .foregroundStyle(fav ? .red : .white)
+                .padding(12)
+                .background(.black.opacity(0.45), in: Circle())
+        }
+        .disabled(favoriteBusy)
+        .accessibilityLabel(fav ? "Favorit entfernen" : "Als Favorit markieren")
+    }
+
+    private func toggleFavorite(at idx: Int) {
+        guard idx < photos.count, !favoriteBusy else { return }
+        let photo = photos[idx]
+        let target = !isFavorite(photo)
+        favoriteOverrides[photo.id] = target
+        favoriteBusy = true
+        Task { @MainActor in
+            defer { favoriteBusy = false }
+            struct CurationBody: Encodable { let status: String }
+            struct CurationResponse: Decodable { let success: Bool }
+            do {
+                let _: CurationResponse = try await APIClient.shared.patch(
+                    "/photos/\(photo.id)/curation",
+                    body: CurationBody(status: target ? "favorite" : "visible")
+                )
+            } catch {
+                favoriteOverrides[photo.id] = !target
+            }
+        }
     }
 
     // MARK: - Music

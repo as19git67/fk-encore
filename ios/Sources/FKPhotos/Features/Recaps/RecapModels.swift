@@ -97,6 +97,8 @@ struct RecapPhoto: Codable, Identifiable, Sendable {
     let location_name: String?
     let location_city: String?
     let description: String?
+    /// "visible" | "hidden" | "favorite" — drives the player's heart button.
+    let curation_status: String?
 }
 
 struct RecapPhotoDetailsResponse: Codable, Sendable { let photos: [RecapPhoto] }
