@@ -671,6 +671,17 @@ export const documentSuggestionStatusEnum = pgEnum("document_suggestion_status",
 
 export const documentTaxSourceEnum = pgEnum("document_tax_source", [
   "ai",
+  "cloud",
+  "user",
+]);
+
+// Provenance of a document's category assignment (migration 0132). Three-tier:
+// 'ai' (raw local Qwen guess) < 'cloud' (Claude-verified via the offline
+// Cloud-Teacher) < 'user' (human-pinned). Replaces `attributes_reviewed` as the
+// category-guard source — see docs/design/cloud-teacher-gold-set.md.
+export const documentCategorySourceEnum = pgEnum("document_category_source", [
+  "ai",
+  "cloud",
   "user",
 ]);
 
@@ -770,6 +781,13 @@ export const documents = pgTable("documents", {
   // re-classify must not overwrite them (migration 0101). Mirrors
   // `tax_reviewed` for the tax fields.
   attributes_reviewed: boolean("attributes_reviewed").notNull().default(false),
+  // Provenance of the category assignment (migration 0132): 'ai' < 'cloud' <
+  // 'user'. The offline Cloud-Teacher writes 'cloud'; the edit dialog writes
+  // 'user'. Intended as the category-guard source that supersedes the
+  // attributes_reviewed boolean once the classify path is wired to it
+  // (docs/design/cloud-teacher-gold-set.md, step 4). Backfilled to 'user' for
+  // rows that were attributes_reviewed at migration time.
+  category_source: documentCategorySourceEnum("category_source").notNull().default("ai"),
   // Access control (migration 0036/0069). `visibility` drives who can see
   // the document; `group_id` must be set iff visibility='group'
   // (DB CHECK constraint). `user_id` stays as the uploader regardless.
@@ -889,7 +907,7 @@ export const documentSubjectPersons = pgTable(
     subject_person_id: integer("subject_person_id")
       .notNull()
       .references(() => userSubjectPersons.id, { onDelete: "cascade" }),
-    source: text("source").$type<"ai" | "user">().notNull().default("ai"),
+    source: text("source").$type<"ai" | "cloud" | "user">().notNull().default("ai"),
     created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
   },
   (table) => [primaryKey({ columns: [table.document_id, table.subject_person_id] })]
@@ -906,8 +924,9 @@ export const documentTagLinks = pgTable(
       .references(() => documentTags.id, { onDelete: "cascade" }),
     // Origin of the link: 'ai' rows are owned by the classifier and replaced
     // on every re-classify; 'user' rows are human-curated and must survive a
-    // re-classify. See migration 0100 and documents/document-ops.ts.
-    source: text("source").$type<"ai" | "user">().notNull().default("ai"),
+    // re-classify; 'cloud' rows come from the offline Cloud-Teacher. See
+    // migration 0100/0132 and documents/document-ops.ts.
+    source: text("source").$type<"ai" | "cloud" | "user">().notNull().default("ai"),
   },
   (table) => [primaryKey({ columns: [table.document_id, table.tag_id] })]
 );

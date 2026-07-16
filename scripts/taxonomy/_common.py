@@ -148,6 +148,24 @@ def scrub_names(text: str | None, names: list[str]) -> str | None:
     return text
 
 
+def scrub_for_teacher(text: str | None, names: list[str]) -> str | None:
+    """Milder Scrub-Stufe für den Cloud-Lehrer (cloud_teacher.py).
+
+    Entfernt dieselben personenbezogenen Daten wie der Audit-Pfad
+    (IBAN/Beträge/Daten/Telefon/lange Nummern/E-Mail/Adresse via `scrub` plus
+    konkrete Personennamen via `scrub_names`), lässt aber — anders als der
+    Audit — den *institutionellen* Absender im Klartext: der aufrufende Lehrer
+    reduziert den Absender NICHT auf einen Typ (`sender_type`), sondern schickt
+    den echten Institutsnamen (Comdirect, HALLESCHE, Finanzamt) durch diese
+    Funktion. Institutsnamen sind keine PII und geben Claude ein stärkeres
+    Kategorie-Signal bei kaum erhöhtem Privacy-Risiko.
+
+    Bewusst getrennt von `scrub`/`scrub_names`: die strenge Audit-Stufe bleibt
+    unverändert (siehe docs/design/cloud-teacher-gold-set.md §3).
+    """
+    return scrub_names(scrub(text), names)
+
+
 def household_names(conn) -> list[str]:
     """Collect all person names that must be scrubbed: subject_persons,
     user accounts, and any hardcoded household members."""
