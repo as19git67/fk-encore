@@ -5,7 +5,8 @@ export type EventChannel =
   | "feed"
   | "finance"
   | "scan-queue"
-  | "system";
+  | "system"
+  | "tools";
 
 /**
  * Envelope for every realtime event. Identical to the wire shape: the

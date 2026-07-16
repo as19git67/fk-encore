@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "description": "Node dependencies for taxonomy-tools sidecar (pg for diagnose.mjs)",
+  "dependencies": {
+    "pg": "^8.13.0"
+  }
+}

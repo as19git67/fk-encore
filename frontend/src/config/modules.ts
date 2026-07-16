@@ -402,6 +402,12 @@ export const modules: ModuleConfig[] = [
         component: () => import('../views/ScheduledJobsView.vue'),
         meta: { permission: 'data.manage' },
       },
+      {
+        path: 'tools',
+        name: 'admin-tools',
+        component: () => import('../views/AdminToolsView.vue'),
+        meta: { permission: 'data.manage' },
+      },
     ],
     menuItems: [
       { label: 'Benutzer', icon: 'pi pi-users', routeName: 'admin-users', permission: 'users.list' },
@@ -409,6 +415,7 @@ export const modules: ModuleConfig[] = [
       { label: 'Datenverwaltung', icon: 'pi pi-database', routeName: 'admin-data', permission: 'data.manage' },
       { label: 'Externe Bibliotheken', icon: 'pi pi-folder', routeName: 'admin-libraries', permission: 'photos.libraries.manage' },
       { label: 'Eingeplante Jobs', icon: 'pi pi-clock', routeName: 'admin-scheduled-jobs', permission: 'data.manage' },
+      { label: 'Taxonomie-Tools', icon: 'pi pi-wrench', routeName: 'admin-tools', permission: 'data.manage' },
     ],
   },
 ]

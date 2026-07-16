@@ -9,6 +9,7 @@ export type RealtimeChannel =
   | 'finance'
   | 'scan-queue'
   | 'system'
+  | 'tools'
 
 export interface RealtimeEvent {
   id: string
