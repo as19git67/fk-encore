@@ -3,7 +3,12 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import HeicImage from './HeicImage.vue'
 import RecapMapIntro from './RecapMapIntro.vue'
 import type { RecapMapIntroData } from '../utils/recapMapIntro'
-import { getPhotoUrl, type Photo } from '../api/photos'
+import {
+  getPhotoUrl,
+  updatePhotoCuration,
+  type CurationStatus,
+  type Photo,
+} from '../api/photos'
 import { getRenderedPhotoUrl } from '../api/photoTransforms'
 import { useTransformedPhotosIndex } from '../composables/useTransformedPhotosIndex'
 import { useAuthStore } from '../stores/auth'
@@ -327,6 +332,45 @@ function prev() {
   scheduleAdvance()
 }
 
+// ── Favorites ────────────────────────────────────────────────────────────────
+// The heart toggles favorite on every photo of the current slide (one photo
+// on single slides, 2–3 on collages). Local overrides shadow the props so we
+// never mutate the parent's Photo objects; on API failure the override is
+// rolled back.
+
+const curationOverrides = ref(new Map<number, CurationStatus>())
+const favoriteBusy = ref(false)
+
+function effectiveCuration(photo: Photo): CurationStatus {
+  return curationOverrides.value.get(photo.id) ?? photo.curation_status
+}
+
+const currentSlideFavorite = computed(() => {
+  const slide = currentSlide.value
+  if (!slide || slide.photos.length === 0) return false
+  return slide.photos.every((p) => effectiveCuration(p) === 'favorite')
+})
+
+const favoriteToggleable = computed(
+  () => (currentSlide.value?.photos.length ?? 0) > 0
+)
+
+async function toggleFavorite() {
+  const slide = currentSlide.value
+  if (!slide || slide.photos.length === 0 || favoriteBusy.value) return
+  const target: CurationStatus = currentSlideFavorite.value ? 'visible' : 'favorite'
+  const previous = slide.photos.map((p) => [p.id, effectiveCuration(p)] as const)
+  for (const p of slide.photos) curationOverrides.value.set(p.id, target)
+  favoriteBusy.value = true
+  try {
+    await Promise.all(slide.photos.map((p) => updatePhotoCuration(p.id, target)))
+  } catch {
+    for (const [id, status] of previous) curationOverrides.value.set(id, status)
+  } finally {
+    favoriteBusy.value = false
+  }
+}
+
 // ── Background music ─────────────────────────────────────────────────────────
 // One looping <audio> per player session, gently faded in/out. Autoplay can be
 // blocked when the player opens outside a fresh user gesture (the recap data
@@ -444,6 +488,8 @@ function handleKey(e: KeyboardEvent) {
   } else if (e.key === ' ') {
     e.preventDefault()
     togglePause()
+  } else if (e.key === 'f' || e.key === 'F') {
+    void toggleFavorite()
   }
 }
 
@@ -485,6 +531,7 @@ watch(() => props.open, (isOpen) => {
 
 watch(() => props.photos, () => {
   preloadCache.clear()
+  curationOverrides.value.clear()
   if (props.open) reset()
 })
 
@@ -653,6 +700,17 @@ onBeforeUnmount(() => {
           @click="toggleMusicMuted"
         >
           <i :class="musicMuted || musicBlocked ? 'pi pi-volume-off' : 'pi pi-volume-up'" />
+        </button>
+        <button
+          v-if="favoriteToggleable"
+          type="button"
+          class="recap-player-btn recap-player-btn-heart"
+          :class="{ 'is-favorite': currentSlideFavorite }"
+          :aria-label="currentSlideFavorite ? 'Favorit entfernen' : 'Als Favorit markieren'"
+          :disabled="favoriteBusy"
+          @click="toggleFavorite"
+        >
+          <i :class="currentSlideFavorite ? 'pi pi-heart-fill' : 'pi pi-heart'" />
         </button>
       </div>
 
@@ -908,6 +966,15 @@ onBeforeUnmount(() => {
   width: 58px;
   height: 58px;
   font-size: 1.35rem;
+}
+
+.recap-player-btn-heart.is-favorite {
+  color: #f43f5e;
+}
+
+.recap-player-btn-heart:disabled {
+  cursor: progress;
+  opacity: 0.7;
 }
 
 .recap-player-close {
