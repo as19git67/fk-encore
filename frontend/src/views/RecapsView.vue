@@ -138,6 +138,14 @@ async function loadDetail(id: number) {
         .filter((p): p is Photo => !!p)
       detailCompare.value = buildCompareData(res.recap, byId)
     }
+    // Deep link from the feed strip: ?play=1 opens the player straight away.
+    // The flag is consumed (removed from the URL) so closing the player and
+    // reloading doesn't restart it.
+    if (route.query.play === '1') {
+      const { play: _omit, ...rest } = route.query
+      void router.replace({ path: route.path, query: rest })
+      if (detailPhotos.value.length > 0) openPlayer()
+    }
     // Opening the detail counts as "seen". Fire-and-forget; a failed
     // stamp is harmless — the badge just stays until the next rebuild.
     if (!res.recap.seen_at) {
