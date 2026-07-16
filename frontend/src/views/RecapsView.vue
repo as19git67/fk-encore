@@ -9,11 +9,15 @@ import {
   listRecaps,
   getRecap,
   getRecapMusicUrl,
+  getRecapExportDownloadUrl,
+  getRecapExportStatus,
+  startRecapExport,
   dismissRecap,
   markRecapSeen,
   rebuildRecaps,
   type RecapSummary,
   type RecapDetails,
+  type RecapExportStatus,
   type RecapKind,
   type MusicTrack,
 } from '../api/recaps'
@@ -193,6 +197,66 @@ async function handleRebuild() {
   }
 }
 
+// ── Video-Export ─────────────────────────────────────────────────────────────
+// Startet den Server-Render (ffmpeg) und pollt den Fortschritt; das fertige
+// MP4 wird per Content-Disposition-Download ausgeliefert.
+
+const exportRunning = ref(false)
+const exportProgress = ref(0)
+let exportTimer: ReturnType<typeof setTimeout> | null = null
+
+function stopExportPolling() {
+  if (exportTimer) {
+    clearTimeout(exportTimer)
+    exportTimer = null
+  }
+  exportRunning.value = false
+  exportProgress.value = 0
+}
+
+function applyExportStatus(st: RecapExportStatus, recapId: number) {
+  exportProgress.value = st.progress
+  if (st.status === 'running') {
+    exportRunning.value = true
+    exportTimer = setTimeout(() => {
+      exportTimer = null
+      void pollExport(recapId)
+    }, 2000)
+    return
+  }
+  exportRunning.value = false
+  if (st.status === 'done') {
+    const url = getRecapExportDownloadUrl(st)
+    if (url) window.location.assign(url)
+  } else if (st.status === 'failed') {
+    error.value = st.error ?? 'Video-Export fehlgeschlagen.'
+  }
+}
+
+async function pollExport(recapId: number) {
+  if (activeRecapId.value !== recapId) return
+  try {
+    applyExportStatus(await getRecapExportStatus(recapId), recapId)
+  } catch (err: any) {
+    exportRunning.value = false
+    error.value = err?.message ?? 'Video-Export fehlgeschlagen.'
+  }
+}
+
+async function handleExport() {
+  const recap = detail.value
+  if (!recap || exportRunning.value) return
+  error.value = ''
+  exportRunning.value = true
+  exportProgress.value = 0
+  try {
+    applyExportStatus(await startRecapExport(recap.id), recap.id)
+  } catch (err: any) {
+    exportRunning.value = false
+    error.value = err?.message ?? 'Video-Export konnte nicht gestartet werden.'
+  }
+}
+
 function coverUrl(photoId: number | null, size = 600): string | null {
   if (!photoId) return null
   const filename = coverFilenames.value[photoId]
@@ -205,6 +269,7 @@ onMounted(loadList)
 watch(
   activeRecapId,
   (id) => {
+    stopExportPolling()
     if (id != null) loadDetail(id)
     else {
       detail.value = null
@@ -342,6 +407,15 @@ async function playFromCard(r: RecapSummary, e: Event) {
               label="Abspielen"
               :disabled="detailPhotos.length === 0"
               @click="openPlayer"
+            />
+            <Button
+              icon="pi pi-video"
+              :label="exportRunning ? `${Math.round(exportProgress * 100)} %` : 'Video'"
+              severity="secondary"
+              :loading="exportRunning"
+              :disabled="!detail || detailPhotos.length === 0"
+              v-tooltip.bottom="'Als Video (MP4) exportieren'"
+              @click="handleExport"
             />
             <Button
               icon="pi pi-thumbs-down-fill"
