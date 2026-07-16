@@ -41,6 +41,9 @@ struct RecapPlayerView: View {
     /// Trip map intro shown before the slideshow; nil once finished/skipped.
     @State private var mapIntro: RecapMapIntroData?
 
+    /// "Damals & heute" intro on person recaps; nil once finished/skipped.
+    @State private var compareIntro: RecapCompareIntroData?
+
     /// Local favorite toggles (photoId → isFavorite) shadowing the fetched
     /// curation_status; rolled back if the PATCH fails.
     @State private var favoriteOverrides: [Int: Bool] = [:]
@@ -125,15 +128,17 @@ struct RecapPlayerView: View {
                         .onTapGesture { goNext() }
                 }
 
-                // Trip map intro covers the first slide until it finishes
-                // (or is skipped by tap); the slideshow ticker starts after.
+                // Intros cover the first slide until they finish (or are
+                // skipped by tap); the slideshow ticker starts after.
                 if let intro = mapIntro {
-                    RecapMapIntroView(data: intro) { finishMapIntro() }
+                    RecapMapIntroView(data: intro) { finishIntro() }
+                } else if let compare = compareIntro {
+                    RecapCompareIntroView(data: compare) { finishIntro() }
                 }
 
                 topOverlay
 
-                if mapIntro == nil {
+                if mapIntro == nil && compareIntro == nil {
                     favoriteButton(for: idx)
                         .frame(
                             maxWidth: .infinity,
@@ -246,13 +251,35 @@ struct RecapPlayerView: View {
             subtitle = detail.recap.subtitle
 
             let ids = detail.recap.photo_ids
+            // The "Damals & heute" pair may reference photos outside the
+            // curated recap membership — load them in the same batch.
+            var compareIds: (then: Int, thenYear: Int, now: Int, nowYear: Int)?
+            if detail.recap.recapKind == .person,
+               let seed = detail.recap.seed,
+               let thenId = seed.then_photo_id, let thenYear = seed.then_year,
+               let nowId = seed.now_photo_id, let nowYear = seed.now_year,
+               thenId != nowId {
+                compareIds = (thenId, thenYear, nowId, nowYear)
+            }
             if !ids.isEmpty {
-                let query = ["ids": ids.map(String.init).joined(separator: ",")]
+                var fetchIds = ids
+                if let c = compareIds {
+                    for extra in [c.then, c.now] where !fetchIds.contains(extra) {
+                        fetchIds.append(extra)
+                    }
+                }
+                let query = ["ids": fetchIds.map(String.init).joined(separator: ",")]
                 let response: RecapPhotoDetailsResponse =
                     try await APIClient.shared.get("/photos/details", query: query)
                 // The batch endpoint may reorder; restore the recap's order.
                 let byId = Dictionary(response.photos.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
                 photos = ids.compactMap { byId[$0] }
+                if let c = compareIds, let then = byId[c.then], let now = byId[c.now] {
+                    compareIntro = RecapCompareIntroData(
+                        then: then, thenYear: c.thenYear,
+                        now: now, nowYear: c.nowYear
+                    )
+                }
             }
 
             playback = RecapPlayback(count: photos.count)
@@ -273,9 +300,9 @@ struct RecapPlayerView: View {
                     )
                 }
                 prefetch(around: 0)
-                // With a map intro the ticker starts once the intro finishes,
-                // so the first photo keeps its full screen time.
-                if mapIntro == nil { startTicker() }
+                // With an intro (map or compare) the ticker starts once it
+                // finishes, so the first photo keeps its full screen time.
+                if mapIntro == nil && compareIntro == nil { startTicker() }
                 if let track = detail.music {
                     Task { await startMusic(track) }
                 }
@@ -286,9 +313,10 @@ struct RecapPlayerView: View {
         }
     }
 
-    private func finishMapIntro() {
-        guard mapIntro != nil else { return }
+    private func finishIntro() {
+        guard mapIntro != nil || compareIntro != nil else { return }
         mapIntro = nil
+        compareIntro = nil
         startTicker()
     }
 
@@ -538,6 +566,90 @@ private struct RecapMapIntroView: View {
             longitudeDelta: max(0.5, (maxLon - minLon) * 1.6)
         )
         return MKCoordinateRegion(center: center, span: span)
+    }
+}
+
+/// Data for the "Damals & heute" intro on person recaps.
+private struct RecapCompareIntroData {
+    let then: RecapPhoto
+    let thenYear: Int
+    let now: RecapPhoto
+    let nowYear: Int
+}
+
+/// Split-screen "Damals & heute" intro: the person's oldest photo next to
+/// the newest, with year chips. Side-by-side in landscape, stacked in
+/// portrait. Tap anywhere to skip; auto-advances after a few seconds.
+private struct RecapCompareIntroView: View {
+    let data: RecapCompareIntroData
+    let onFinished: () -> Void
+
+    private let displaySeconds: Double = 5.5
+
+    var body: some View {
+        GeometryReader { geo in
+            let landscape = geo.size.width > geo.size.height
+            let layout = landscape
+                ? AnyLayout(HStackLayout(spacing: 6))
+                : AnyLayout(VStackLayout(spacing: 6))
+            layout {
+                CompareTile(
+                    filename: data.then.filename,
+                    label: "Damals · \(data.thenYear)"
+                )
+                CompareTile(
+                    filename: data.now.filename,
+                    label: "Heute · \(data.nowYear)"
+                )
+            }
+            .padding(6)
+        }
+        .background(Color.black)
+        .contentShape(Rectangle())
+        .onTapGesture { onFinished() }
+        .task {
+            try? await Task.sleep(for: .seconds(displaySeconds))
+            guard !Task.isCancelled else { return }
+            onFinished()
+        }
+    }
+}
+
+/// One half of the compare intro: image (aspect fill) with a year chip.
+private struct CompareTile: View {
+    let label: String
+    @State private var loader: ThumbnailLoader
+
+    init(filename: String, label: String) {
+        self.label = label
+        _loader = State(initialValue: ThumbnailLoader(filename: filename))
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .bottom) {
+                Color.black
+                if let image = loader.image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .clipped()
+                } else {
+                    ProgressView().tint(.white)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                }
+                Text(label)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 5)
+                    .background(.black.opacity(0.65), in: Capsule())
+                    .padding(.bottom, 12)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .task { await loader.load() }
     }
 }
 

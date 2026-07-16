@@ -23,6 +23,7 @@ import {
   type Photo,
 } from '../api/photos'
 import { tripMapIntroFromSeed, type RecapMapIntroData } from '../utils/recapMapIntro'
+import { personCompareFromSeed, type RecapCompareData } from '../utils/recapCompare'
 
 const route = useRoute()
 const router = useRouter()
@@ -51,7 +52,35 @@ const playerTitle = ref<string>('')
 const playerSubtitle = ref<string | null>(null)
 const playerMusicUrl = ref<string | null>(null)
 const playerMapIntro = ref<RecapMapIntroData | null>(null)
+const playerCompare = ref<RecapCompareData | null>(null)
+const detailCompare = ref<RecapCompareData | null>(null)
 const cardPlayLoadingId = ref<number | null>(null)
+
+/**
+ * Photo ids the player needs beyond the recap membership: the "Damals &
+ * heute" pair can reference photos outside the curated top-30.
+ */
+function collectPlayerPhotoIds(recap: RecapDetails): number[] {
+  const compare = personCompareFromSeed(recap.kind, recap.seed)
+  return Array.from(
+    new Set([
+      ...recap.photo_ids,
+      ...(compare ? [compare.thenId, compare.nowId] : []),
+    ])
+  )
+}
+
+function buildCompareData(
+  recap: RecapDetails,
+  byId: Map<number, Photo>
+): RecapCompareData | null {
+  const compare = personCompareFromSeed(recap.kind, recap.seed)
+  if (!compare) return null
+  const then = byId.get(compare.thenId)
+  const now = byId.get(compare.nowId)
+  if (!then || !now) return null
+  return { then, thenYear: compare.thenYear, now, nowYear: compare.nowYear }
+}
 
 const kindLabels: Record<RecapKind, string> = {
   on_this_day: 'Heute vor…',
@@ -99,12 +128,15 @@ async function loadDetail(id: number) {
     const res = await getRecap(id)
     detail.value = res.recap
     detailMusic.value = res.music ?? null
-    if (res.recap.photo_ids.length > 0) {
-      const photosRes = await getPhotoDetailsBatch(res.recap.photo_ids)
+    detailCompare.value = null
+    const idsToLoad = collectPlayerPhotoIds(res.recap)
+    if (idsToLoad.length > 0) {
+      const photosRes = await getPhotoDetailsBatch(idsToLoad)
       const byId = new Map(photosRes.photos.map((p) => [p.id, p]))
       detailPhotos.value = res.recap.photo_ids
         .map((pid) => byId.get(pid))
         .filter((p): p is Photo => !!p)
+      detailCompare.value = buildCompareData(res.recap, byId)
     }
     // Opening the detail counts as "seen". Fire-and-forget; a failed
     // stamp is harmless — the badge just stays until the next rebuild.
@@ -169,6 +201,7 @@ watch(
     else {
       detail.value = null
       detailMusic.value = null
+      detailCompare.value = null
       detailPhotos.value = []
       playerOpen.value = false
     }
@@ -185,6 +218,7 @@ function openPlayer() {
   playerMapIntro.value = detail.value
     ? tripMapIntroFromSeed(detail.value.kind, detail.value.seed)
     : null
+  playerCompare.value = detailCompare.value
   playerOpen.value = true
 }
 
@@ -195,7 +229,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
   try {
     const res = await getRecap(r.id)
     if (res.recap.photo_ids.length === 0) return
-    const photosRes = await getPhotoDetailsBatch(res.recap.photo_ids)
+    const photosRes = await getPhotoDetailsBatch(collectPlayerPhotoIds(res.recap))
     const byId = new Map(photosRes.photos.map((p) => [p.id, p]))
     playerPhotos.value = res.recap.photo_ids
       .map((pid) => byId.get(pid))
@@ -204,6 +238,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
     playerSubtitle.value = res.recap.subtitle ?? null
     playerMusicUrl.value = res.music ? getRecapMusicUrl(res.music) : null
     playerMapIntro.value = tripMapIntroFromSeed(res.recap.kind, res.recap.seed)
+    playerCompare.value = buildCompareData(res.recap, byId)
     playerOpen.value = true
     if (!res.recap.seen_at) {
       const stamp = new Date().toISOString()
@@ -339,6 +374,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
       :subtitle="playerSubtitle"
       :music-url="playerMusicUrl"
       :map-intro="playerMapIntro"
+      :compare-intro="playerCompare"
       :open="playerOpen"
       @close="playerOpen = false"
     />
