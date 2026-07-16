@@ -52,6 +52,67 @@ describe("applyInsuranceAdminTaxRule", () => {
     ).toBe(false);
   });
 
+  it("strips from a Zulagenantrag / Deckungskapitalübertragung / Beitragsanpassung", () => {
+    expect(
+      applyInsuranceAdminTaxRule({
+        text: "Antrag auf Zulagenantrag für Ihre Riester-Rentenversicherung",
+        taxSections: AV,
+        taxRelevant: true,
+      }).taxRelevant,
+    ).toBe(false);
+    expect(
+      applyInsuranceAdminTaxRule({
+        text: "Deckungskapitalübertragung gemäß § 1 Abs. 2 AltvDV",
+        taxSections: AV,
+        taxRelevant: true,
+      }).taxRelevant,
+    ).toBe(false);
+    expect(
+      applyInsuranceAdminTaxRule({
+        text: "Mitteilung über Beitragsanpassung Ihrer Rentenversicherung",
+        taxSections: [{ slug: "vorsorgeaufwand", confidence: 0.9 }],
+        taxRelevant: true,
+      }).taxRelevant,
+    ).toBe(false);
+  });
+
+  it("strips from a Leistungsabrechnung / Erstattungsabrechnung / Konsortium notice", () => {
+    expect(
+      applyInsuranceAdminTaxRule({
+        text: "Erstattungsabrechnung zu Ihrer Krankenzusatzversicherung",
+        taxSections: [{ slug: "vorsorgeaufwand", confidence: 0.9 }],
+        taxRelevant: true,
+      }).taxRelevant,
+    ).toBe(false);
+    expect(
+      applyInsuranceAdminTaxRule({
+        text: "Leistungsabrechnung Nr. 12345 der Pflegeversicherung",
+        taxSections: AV,
+        taxRelevant: true,
+      }).taxRelevant,
+    ).toBe(false);
+    expect(
+      applyInsuranceAdminTaxRule({
+        text: "Information zur Konsortiumszusammensetzung Ihres Versicherungsvertrags",
+        taxSections: AV,
+        taxRelevant: true,
+      }).taxRelevant,
+    ).toBe(false);
+  });
+
+  it("no longer treats bare 'Leistungsmitteilung' as a certificate marker", () => {
+    // An Contoso Unterstützungskasse "Leistungsmitteilung gemäß Leistungsplan"
+    // is mere status/anwartschaft — NOT a tax certificate. Previously the word
+    // was in BELEG_MARKERS and would have shielded admin mail from stripping.
+    const out = applyInsuranceAdminTaxRule({
+      text: "Leistungsmitteilung gemäß Leistungsplan der Unterstützungskasse. Statusreport Ihrer Anwartschaft.",
+      taxSections: AV,
+      taxRelevant: true,
+    });
+    expect(out.taxSections).toEqual([]);
+    expect(out.taxRelevant).toBe(false);
+  });
+
   it("KEEPS a genuine Beitrags-/Zulagenbescheinigung even with an admin word present", () => {
     // A real certificate mail may also contain "Erhöhungsnachtrag" boilerplate;
     // the certificate marker wins.

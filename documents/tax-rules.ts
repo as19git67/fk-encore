@@ -40,6 +40,13 @@ const ADMIN_MARKERS: readonly string[] = [
   "kontaktdaten",
   "adressänderung",
   "anschriftenänderung",
+  "zulagenantrag",
+  "deckungskapitalübertragung",
+  "kapitalübertragung",
+  "konsortium",
+  "beitragsanpassung",
+  "erstattungsabrechnung",
+  "leistungsabrechnung",
 ];
 
 /**
@@ -54,7 +61,6 @@ const BELEG_MARKERS: readonly string[] = [
   "10aestg", // "§ 10a EStG" — Riester Sonderausgabenabzug
   "92estg", // "§ 92 EStG" — Riester-Zulagenbescheinigung
   "10estg", // "§ 10 EStG" — Vorsorgeaufwand-Bescheinigung
-  "leistungsmitteilung",
   "rentenbezugsmitteilung",
   "steuerbescheinigung",
 ];

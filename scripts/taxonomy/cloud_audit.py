@@ -443,7 +443,7 @@ def _classify_batch(
             "qwen_tax_year": doc["qwen_tax_year"],
             "qwen_tax_sections": doc["qwen_tax_sections"],
             "title": doc["title"],
-            "text": doc["text"][:200],
+            "text": doc["text"][:1500],
             "sender_type": doc["sender_type"],
         }
         try:
