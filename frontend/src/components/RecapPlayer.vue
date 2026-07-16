@@ -12,6 +12,8 @@ const props = defineProps<{
   subtitle?: string | null
   open: boolean
   durationMs?: number
+  /** Absolute URL of the background track; omit for a silent recap. */
+  musicUrl?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -312,10 +314,110 @@ function prev() {
   scheduleAdvance()
 }
 
+// ── Background music ─────────────────────────────────────────────────────────
+// One looping <audio> per player session, gently faded in/out. Autoplay can be
+// blocked when the player opens outside a fresh user gesture (the recap data
+// is fetched async before opening) — in that case the next interaction
+// (mousemove/touch/click) retries once.
+
+const MUSIC_VOLUME = 0.55
+const musicMuted = ref(false)
+const musicBlocked = ref(false)
+
+let audio: HTMLAudioElement | null = null
+let fadeTimer: ReturnType<typeof setInterval> | null = null
+
+function fadeTo(target: number, ms: number, onDone?: () => void) {
+  if (!audio) return
+  if (fadeTimer) clearInterval(fadeTimer)
+  const el = audio
+  const startVol = el.volume
+  const steps = Math.max(1, Math.round(ms / 50))
+  let i = 0
+  fadeTimer = setInterval(() => {
+    i++
+    el.volume = Math.min(1, Math.max(0, startVol + ((target - startVol) * i) / steps))
+    if (i >= steps) {
+      if (fadeTimer) clearInterval(fadeTimer)
+      fadeTimer = null
+      onDone?.()
+    }
+  }, 50)
+}
+
+function stopMusic(fadeMs = 500) {
+  if (!audio) return
+  const el = audio
+  audio = null
+  if (fadeMs > 0 && !el.paused) {
+    if (fadeTimer) clearInterval(fadeTimer)
+    fadeTimer = null
+    const startVol = el.volume
+    const steps = Math.max(1, Math.round(fadeMs / 50))
+    let i = 0
+    const timer = setInterval(() => {
+      i++
+      el.volume = Math.max(0, startVol * (1 - i / steps))
+      if (i >= steps) {
+        clearInterval(timer)
+        el.pause()
+        el.src = ''
+      }
+    }, 50)
+  } else {
+    el.pause()
+    el.src = ''
+  }
+}
+
+function startMusic() {
+  stopMusic(0)
+  musicBlocked.value = false
+  if (!props.musicUrl) return
+  const el = new Audio(props.musicUrl)
+  el.loop = true
+  el.volume = 0
+  el.muted = musicMuted.value
+  audio = el
+  void el
+    .play()
+    .then(() => fadeTo(MUSIC_VOLUME, 1500))
+    .catch(() => {
+      // Autoplay blocked — retry on the next user interaction.
+      musicBlocked.value = true
+    })
+}
+
+function retryBlockedMusic() {
+  if (!musicBlocked.value || !audio) return
+  musicBlocked.value = false
+  void audio
+    .play()
+    .then(() => fadeTo(MUSIC_VOLUME, 1500))
+    .catch(() => {
+      musicBlocked.value = true
+    })
+}
+
+function toggleMusicMuted() {
+  musicMuted.value = !musicMuted.value
+  if (audio) audio.muted = musicMuted.value
+  if (!musicMuted.value) retryBlockedMusic()
+}
+
 function togglePause() {
   paused.value = !paused.value
-  if (paused.value) clearAdvance()
-  else scheduleAdvance()
+  if (paused.value) {
+    clearAdvance()
+    if (audio && !audio.paused) audio.pause()
+  } else {
+    scheduleAdvance()
+    if (audio) {
+      void audio.play().catch(() => {
+        musicBlocked.value = true
+      })
+    }
+  }
 }
 
 function handleKey(e: KeyboardEvent) {
@@ -333,6 +435,7 @@ function handleKey(e: KeyboardEvent) {
 }
 
 function bumpControls() {
+  retryBlockedMusic()
   showControls.value = true
   if (controlsTimer) clearTimeout(controlsTimer)
   controlsTimer = setTimeout(() => {
@@ -358,8 +461,13 @@ function setBodyScrollLock(locked: boolean) {
 
 watch(() => props.open, (isOpen) => {
   setBodyScrollLock(isOpen)
-  if (isOpen) reset()
-  else clearAdvance()
+  if (isOpen) {
+    reset()
+    startMusic()
+  } else {
+    clearAdvance()
+    stopMusic()
+  }
 })
 
 watch(() => props.photos, () => {
@@ -367,11 +475,16 @@ watch(() => props.photos, () => {
   if (props.open) reset()
 })
 
+watch(() => props.musicUrl, () => {
+  if (props.open) startMusic()
+})
+
 onMounted(() => {
   window.addEventListener('keydown', handleKey)
   if (props.open) {
     setBodyScrollLock(true)
     reset()
+    startMusic()
   }
 })
 
@@ -379,6 +492,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKey)
   clearAdvance()
   if (controlsTimer) clearTimeout(controlsTimer)
+  stopMusic(0)
+  if (fadeTimer) clearInterval(fadeTimer)
   setBodyScrollLock(false)
 })
 </script>
@@ -504,6 +619,15 @@ onBeforeUnmount(() => {
         </button>
         <button type="button" class="recap-player-btn" aria-label="Weiter" @click="next">
           <i class="pi pi-chevron-right" />
+        </button>
+        <button
+          v-if="musicUrl"
+          type="button"
+          class="recap-player-btn"
+          :aria-label="musicMuted ? 'Musik einschalten' : 'Musik stummschalten'"
+          @click="toggleMusicMuted"
+        >
+          <i :class="musicMuted || musicBlocked ? 'pi pi-volume-off' : 'pi pi-volume-up'" />
         </button>
       </div>
 

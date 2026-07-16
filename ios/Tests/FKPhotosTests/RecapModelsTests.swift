@@ -44,5 +44,21 @@ final class RecapModelsTests: XCTestCase {
         let response = try JSONDecoder().decode(GetRecapResponse.self, from: json)
         XCTAssertEqual(response.recap.photo_ids, [5, 9, 2])
         XCTAssertEqual(response.recap.recapKind, .person)
+        XCTAssertNil(response.music)
+    }
+
+    func testDecodeRecapDetailsWithMusicTrack() throws {
+        let json = """
+        { "recap": { "id": 9, "kind": "trip", "title": "Rom", "subtitle": null,
+          "cover_photo_id": null, "period_start": null, "period_end": null,
+          "photo_count": 1, "created_at": "2026-06-01T00:00:00Z",
+          "dismissed_at": null, "seen_at": null, "photo_ids": [5] },
+          "music": { "id": "upbeat/01_sunny-road.mp3", "mood": "upbeat",
+            "title": "Sunny Road", "url": "/recaps-music/file/upbeat/01_sunny-road.mp3" } }
+        """.data(using: .utf8)!
+
+        let response = try JSONDecoder().decode(GetRecapResponse.self, from: json)
+        XCTAssertEqual(response.music?.id, "upbeat/01_sunny-road.mp3")
+        XCTAssertEqual(response.music?.mood, "upbeat")
     }
 }

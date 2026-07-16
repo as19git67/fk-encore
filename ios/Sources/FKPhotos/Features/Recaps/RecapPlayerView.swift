@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 
 /// Story-style, full-screen recap player: auto-advancing slides with a
@@ -8,6 +9,8 @@ import SwiftUI
 /// Ken-Burns motion plus a crossfade between slides, mirroring the web
 /// player. While the current slide's image is still downloading, playback
 /// progress is held so the slide never loses its screen time to a spinner.
+/// If the server suggests a background track (self-hosted recap music), it
+/// loops behind the slides with a gentle fade and a mute toggle.
 struct RecapPlayerView: View {
     let recapId: Int
     var onSeen: ((Int) -> Void)? = nil
@@ -31,6 +34,11 @@ struct RecapPlayerView: View {
     /// Slide indices with an in-flight download (dedupes prefetch tasks).
     @State private var loadingSlides: Set<Int> = []
 
+    @State private var musicPlayer: AVAudioPlayer?
+    @State private var isMusicMuted = false
+
+    private let musicVolume: Float = 0.55
+
     /// Seconds each slide stays on screen before auto-advancing.
     private let perItem: Double = 4.0
     private let tickStep: Double = 0.05
@@ -44,7 +52,18 @@ struct RecapPlayerView: View {
         }
         .statusBarHidden(true)
         .task { await load() }
-        .onDisappear { ticker?.cancel() }
+        .onDisappear {
+            ticker?.cancel()
+            stopMusic()
+        }
+        .onChange(of: isPaused) { _, paused in
+            guard let musicPlayer else { return }
+            if paused {
+                musicPlayer.pause()
+            } else {
+                musicPlayer.play()
+            }
+        }
     }
 
     @ViewBuilder
@@ -161,6 +180,15 @@ struct RecapPlayerView: View {
                     }
                 }
                 Spacer()
+                if musicPlayer != nil {
+                    Button { toggleMusicMuted() } label: {
+                        Image(systemName: isMusicMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .padding(8)
+                    }
+                    .accessibilityLabel(isMusicMuted ? "Musik einschalten" : "Musik stummschalten")
+                }
                 Button { dismiss() } label: {
                     Image(systemName: "xmark")
                         .font(.headline)
@@ -206,11 +234,53 @@ struct RecapPlayerView: View {
             if !photos.isEmpty {
                 prefetch(around: 0)
                 startTicker()
+                if let track = detail.music {
+                    Task { await startMusic(track) }
+                }
             }
         } catch {
             loadError = error.localizedDescription
             isLoading = false
         }
+    }
+
+    // MARK: - Music
+
+    /// Download the suggested track and loop it behind the slides. Any
+    /// failure keeps the recap silent — music is never worth an error UI.
+    @MainActor
+    private func startMusic(_ track: RecapMusicTrack) async {
+        do {
+            // `track.id` is the raw "<mood>/<filename>" pair; APIClient
+            // percent-encodes paths itself, so don't use the pre-encoded url.
+            let data = try await APIClient.shared.downloadData("/recaps-music/file/\(track.id)")
+            let player = try AVAudioPlayer(data: data)
+            player.numberOfLoops = -1
+            player.volume = 0
+            try? AVAudioSession.sharedInstance().setCategory(.playback)
+            try? AVAudioSession.sharedInstance().setActive(true)
+            guard !Task.isCancelled, !playback.finished else { return }
+            player.play()
+            player.setVolume(isMusicMuted ? 0 : musicVolume, fadeDuration: 1.5)
+            musicPlayer = player
+        } catch {
+            // Silent recap — intentionally no error surface.
+        }
+    }
+
+    private func stopMusic() {
+        guard let player = musicPlayer else { return }
+        musicPlayer = nil
+        player.setVolume(0, fadeDuration: 0.3)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            player.stop()
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
+    }
+
+    private func toggleMusicMuted() {
+        isMusicMuted.toggle()
+        musicPlayer?.setVolume(isMusicMuted ? 0 : musicVolume, fadeDuration: 0.3)
     }
 
     private func cacheKey(_ filename: String) -> String { "photo-\(filename)" }
