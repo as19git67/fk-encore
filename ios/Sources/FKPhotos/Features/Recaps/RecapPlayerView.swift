@@ -1,4 +1,5 @@
 import AVFoundation
+import MapKit
 import SwiftUI
 
 /// Story-style, full-screen recap player: auto-advancing slides with a
@@ -36,6 +37,9 @@ struct RecapPlayerView: View {
 
     @State private var musicPlayer: AVAudioPlayer?
     @State private var isMusicMuted = false
+
+    /// Trip map intro shown before the slideshow; nil once finished/skipped.
+    @State private var mapIntro: RecapMapIntroData?
 
     private let musicVolume: Float = 0.55
 
@@ -114,6 +118,12 @@ struct RecapPlayerView: View {
                     Color.clear
                         .contentShape(Rectangle())
                         .onTapGesture { goNext() }
+                }
+
+                // Trip map intro covers the first slide until it finishes
+                // (or is skipped by tap); the slideshow ticker starts after.
+                if let intro = mapIntro {
+                    RecapMapIntroView(data: intro) { finishMapIntro() }
                 }
 
                 topOverlay
@@ -232,8 +242,23 @@ struct RecapPlayerView: View {
             isLoading = false
             onSeen?(recapId)
             if !photos.isEmpty {
+                if detail.recap.recapKind == .trip,
+                   let seed = detail.recap.seed,
+                   let toLat = seed.centroid_lat, let toLon = seed.centroid_lon {
+                    var from: CLLocationCoordinate2D?
+                    if let hLat = seed.home_lat, let hLon = seed.home_lon {
+                        from = CLLocationCoordinate2D(latitude: hLat, longitude: hLon)
+                    }
+                    mapIntro = RecapMapIntroData(
+                        from: from,
+                        to: CLLocationCoordinate2D(latitude: toLat, longitude: toLon),
+                        label: seed.location_city
+                    )
+                }
                 prefetch(around: 0)
-                startTicker()
+                // With a map intro the ticker starts once the intro finishes,
+                // so the first photo keeps its full screen time.
+                if mapIntro == nil { startTicker() }
                 if let track = detail.music {
                     Task { await startMusic(track) }
                 }
@@ -242,6 +267,12 @@ struct RecapPlayerView: View {
             loadError = error.localizedDescription
             isLoading = false
         }
+    }
+
+    private func finishMapIntro() {
+        guard mapIntro != nil else { return }
+        mapIntro = nil
+        startTicker()
     }
 
     // MARK: - Music
@@ -350,6 +381,106 @@ struct RecapPlayerView: View {
 
     private func goPrevious() {
         playback.previous()
+    }
+}
+
+/// Coordinates for the trip map intro, derived from the recap seed.
+private struct RecapMapIntroData {
+    /// Home location; nil for recaps built before home was persisted.
+    let from: CLLocationCoordinate2D?
+    let to: CLLocationCoordinate2D
+    let label: String?
+}
+
+/// Animated map intro for trip recaps: starts framed on home, then flies the
+/// camera out to frame the dashed route to the destination. Tap anywhere to
+/// skip. With no home coordinates it zooms from a wide view onto the
+/// destination instead.
+private struct RecapMapIntroView: View {
+    let data: RecapMapIntroData
+    let onFinished: () -> Void
+
+    @State private var camera: MapCameraPosition
+
+    init(data: RecapMapIntroData, onFinished: @escaping () -> Void) {
+        self.data = data
+        self.onFinished = onFinished
+        let startCenter = data.from ?? data.to
+        let startSpan = data.from == nil
+            ? MKCoordinateSpan(latitudeDelta: 40, longitudeDelta: 40)
+            : MKCoordinateSpan(latitudeDelta: 1.2, longitudeDelta: 1.2)
+        _camera = State(initialValue: .region(
+            MKCoordinateRegion(center: startCenter, span: startSpan)
+        ))
+    }
+
+    var body: some View {
+        Map(position: $camera, interactionModes: []) {
+            if let from = data.from {
+                MapPolyline(coordinates: [from, data.to])
+                    .stroke(.white, style: StrokeStyle(lineWidth: 3, dash: [4, 8]))
+                Annotation("", coordinate: from) {
+                    ZStack {
+                        Circle().fill(.white).frame(width: 14, height: 14)
+                        Circle().fill(.blue).frame(width: 10, height: 10)
+                    }
+                }
+            }
+            Annotation(data.label ?? "", coordinate: data.to) {
+                ZStack {
+                    Circle().fill(.white).frame(width: 18, height: 18)
+                    Circle().fill(.red).frame(width: 13, height: 13)
+                }
+            }
+        }
+        .mapStyle(.standard(elevation: .flat))
+        .environment(\.colorScheme, .dark)
+        .contentShape(Rectangle())
+        .onTapGesture { onFinished() }
+        .task {
+            try? await Task.sleep(for: .seconds(0.7))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 2.8)) {
+                camera = .region(Self.region(
+                    containing: [data.from, data.to].compactMap { $0 }
+                ))
+            }
+            try? await Task.sleep(for: .seconds(4.0))
+            guard !Task.isCancelled else { return }
+            onFinished()
+        }
+    }
+
+    /// Region framing all coordinates with padding; guards against a zero
+    /// span when home and destination share an axis.
+    private static func region(
+        containing coords: [CLLocationCoordinate2D]
+    ) -> MKCoordinateRegion {
+        guard let first = coords.first else {
+            return MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: 0, longitude: 0),
+                span: MKCoordinateSpan(latitudeDelta: 60, longitudeDelta: 60)
+            )
+        }
+        var minLat = first.latitude
+        var maxLat = first.latitude
+        var minLon = first.longitude
+        var maxLon = first.longitude
+        for c in coords {
+            minLat = min(minLat, c.latitude)
+            maxLat = max(maxLat, c.latitude)
+            minLon = min(minLon, c.longitude)
+            maxLon = max(maxLon, c.longitude)
+        }
+        let center = CLLocationCoordinate2D(
+            latitude: (minLat + maxLat) / 2,
+            longitude: (minLon + maxLon) / 2
+        )
+        let span = MKCoordinateSpan(
+            latitudeDelta: max(0.5, (maxLat - minLat) * 1.6),
+            longitudeDelta: max(0.5, (maxLon - minLon) * 1.6)
+        )
+        return MKCoordinateRegion(center: center, span: span)
     }
 }
 
