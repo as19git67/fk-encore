@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import HeicImage from './HeicImage.vue'
 import RecapMapIntro from './RecapMapIntro.vue'
 import type { RecapMapIntroData } from '../utils/recapMapIntro'
+import { collageObjectPosition } from '../utils/collageLayouts'
 import {
   getPhotoUrl,
   updatePhotoCuration,
@@ -187,6 +188,9 @@ function animStyleFor(slide: Slide | null): Record<string, string> {
     '--kb-to-x': `${m.toX}%`,
     '--kb-to-y': `${m.toY}%`,
     '--kb-duration': `${slideDurationMs(slide)}ms`,
+    // Smart crop: keep the server-computed focal point (face centre) in
+    // view under object-fit: cover instead of the geometric centre.
+    '--kb-object-position': collageObjectPosition(photo.auto_crop ?? null),
   }
 }
 
@@ -219,6 +223,11 @@ function collageTileStyle(slide: Slide, tileIdx: number): Record<string, string>
     '--tile-zoom-from': zoomIn ? '1' : '1.12',
     '--tile-zoom-to': zoomIn ? '1.12' : '1',
     '--kb-duration': `${slideDurationMs(slide)}ms`,
+    // Smart crop per tile — collages crop aggressively, so centring on the
+    // focal point matters even more than on full-screen slides.
+    '--tile-object-position': collageObjectPosition(
+      slide.photos[tileIdx]?.auto_crop ?? null
+    ),
   }
 }
 
@@ -767,6 +776,7 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: var(--kb-object-position, 50% 50%);
 }
 
 @keyframes ken-burns {
@@ -856,6 +866,7 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: var(--tile-object-position, 50% 50%);
 }
 
 .recap-player-title {

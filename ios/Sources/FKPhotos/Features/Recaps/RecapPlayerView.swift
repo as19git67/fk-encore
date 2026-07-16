@@ -169,7 +169,8 @@ struct RecapPlayerView: View {
                 KenBurnsSlide(
                     image: image,
                     seed: photos[idx].id,
-                    duration: perItem + 1.0
+                    duration: perItem + 1.0,
+                    focal: photos[idx].auto_crop.map { CGPoint(x: $0.x, y: $0.y) }
                 )
                 .id(photos[idx].id)
                 .transition(.opacity.animation(.easeInOut(duration: 0.5)))
@@ -559,11 +560,14 @@ private struct ProgressBar: View {
 
 /// Renders one slide with a slow Ken-Burns pan/zoom. The motion is derived
 /// deterministically from the photo id (same hash as the web player), so a
-/// given photo always drifts the same way.
+/// given photo always drifts the same way. When a focal point (`auto_crop`)
+/// is present, the fill crop is shifted so faces stay in view instead of
+/// the geometric centre.
 private struct KenBurnsSlide: View {
     let image: UIImage
     let seed: Int
     let duration: Double
+    var focal: CGPoint? = nil
 
     @State private var animate = false
 
@@ -598,19 +602,41 @@ private struct KenBurnsSlide: View {
     var body: some View {
         let m = motion
         GeometryReader { geo in
+            let base = focalOffset(in: geo.size)
             Image(uiImage: image)
                 .resizable()
                 .scaledToFill()
                 .frame(width: geo.size.width, height: geo.size.height)
                 .scaleEffect(animate ? m.toScale : m.fromScale)
                 .offset(
-                    x: (animate ? m.toX : m.fromX) * geo.size.width,
-                    y: (animate ? m.toY : m.fromY) * geo.size.height
+                    x: base.width + (animate ? m.toX : m.fromX) * geo.size.width,
+                    y: base.height + (animate ? m.toY : m.fromY) * geo.size.height
                 )
                 .onAppear {
                     withAnimation(.linear(duration: duration)) { animate = true }
                 }
         }
         .clipped()
+    }
+
+    /// `scaledToFill` centres the image; this shifts the crop so the focal
+    /// point moves towards the visible area. The offset is bounded by half
+    /// the fill overflow per axis (focal 0/1 aligns the image edge with the
+    /// container edge), matching CSS `object-position` semantics.
+    private func focalOffset(in size: CGSize) -> CGSize {
+        guard let focal else { return .zero }
+        let img = image.size
+        guard img.width > 0, img.height > 0, size.width > 0, size.height > 0 else {
+            return .zero
+        }
+        let scale = max(size.width / img.width, size.height / img.height)
+        let overflowX = max(0, img.width * scale - size.width)
+        let overflowY = max(0, img.height * scale - size.height)
+        let fx = min(max(focal.x, 0), 1)
+        let fy = min(max(focal.y, 0), 1)
+        return CGSize(
+            width: (0.5 - fx) * overflowX,
+            height: (0.5 - fy) * overflowY
+        )
     }
 }
