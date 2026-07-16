@@ -1,4 +1,4 @@
-import { apiFetch } from './client'
+import { API_BASE_URL, apiFetch } from './client'
 
 export type RecapKind =
   | 'on_this_day'
@@ -31,8 +31,25 @@ export interface ListRecapsResponse {
   recaps: RecapSummary[]
 }
 
+export type RecapMood = 'upbeat' | 'warm' | 'nostalgic' | 'calm'
+
+/** Self-hosted background track, served from the recap-music folder. */
+export interface MusicTrack {
+  id: string
+  mood: RecapMood
+  title: string
+  /** API path without host — resolve via getRecapMusicUrl(). */
+  url: string
+}
+
 export interface GetRecapResponse {
   recap: RecapDetails
+  /** Suggested background track; absent when the music folder is empty. */
+  music?: MusicTrack
+}
+
+export function getRecapMusicUrl(track: MusicTrack): string {
+  return `${API_BASE_URL}${track.url}`
 }
 
 export function listRecaps() {

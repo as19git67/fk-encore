@@ -9,6 +9,11 @@ import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import * as recapsService from "./recaps.service";
 import type { RecapSummary, RecapDetails } from "./recaps.service";
+import {
+  listMusicTracks,
+  pickTrackForRecap,
+  type MusicTrack,
+} from "./recaps-music.service";
 
 function getUserId(): number {
   const authData = getAuthData();
@@ -28,6 +33,12 @@ interface ListRecapsResponse {
 
 interface GetRecapResponse {
   recap: RecapDetails;
+  /**
+   * Suggested background track for the player, deterministically chosen from
+   * the self-hosted music folder (same recap → same track). Absent when the
+   * folder holds no usable audio files.
+   */
+  music?: MusicTrack;
 }
 
 interface DismissResponse {
@@ -73,7 +84,9 @@ export const getRecap = api(
     requirePermission(authData, "photos.view");
     const recap = await recapsService.getRecapForUser(userId, id);
     if (!recap) throw APIError.notFound("recap not found");
-    return { recap };
+    const tracks = await listMusicTracks();
+    const music = pickTrackForRecap(tracks, recap.kind, recap.id);
+    return { recap, ...(music ? { music } : {}) };
   }
 );
 
