@@ -777,12 +777,60 @@ async function loadPersonPhotoMap(userId: number): Promise<Map<number, Set<numbe
 
 const PERSON_RECENT_DAYS = 90;
 const PERSON_MIN_PHOTOS = 8;
+// Minimum year span between the oldest and newest photo of a person before
+// the "Damals & heute" compare slide carries any wow — below this the two
+// photos look near-identical and the slide is skipped.
+const COMPARE_MIN_YEAR_SPAN = 2;
 // Only the top-N most-photographed persons per user get dedicated recaps.
 // Without this cap, a user with many recognised faces generates hundreds of
 // per-year recaps, most of them for peripheral persons. Choosing 15 keeps the
 // close-circle covered (family, partners, close friends) without swamping
 // the feed or the DB.
 const PERSON_MAX_PERSONS = 15;
+
+export interface ThenAndNow {
+  then: CandidatePhoto;
+  thenYear: number;
+  now: CandidatePhoto;
+  nowYear: number;
+}
+
+/**
+ * Pick the "Damals & heute" pair for a person: the best-quality photo from
+ * the oldest year with photos vs. the best from the newest year. Returns
+ * null when the span is below COMPARE_MIN_YEAR_SPAN — a two-month-apart
+ * comparison carries no memory value.
+ */
+export function pickThenAndNow(photos: CandidatePhoto[]): ThenAndNow | null {
+  let minYear = Infinity;
+  let maxYear = -Infinity;
+  const dated: Array<{ photo: CandidatePhoto; year: number }> = [];
+  for (const p of photos) {
+    const d = effectiveDate(p);
+    if (!d) continue;
+    const year = d.getFullYear();
+    dated.push({ photo: p, year });
+    if (year < minYear) minYear = year;
+    if (year > maxYear) maxYear = year;
+  }
+  if (dated.length < 2 || maxYear - minYear < COMPARE_MIN_YEAR_SPAN) return null;
+
+  const bestOfYear = (year: number): CandidatePhoto | null => {
+    let best: CandidatePhoto | null = null;
+    for (const { photo, year: y } of dated) {
+      if (y !== year) continue;
+      if (!best || (photo.ai_quality_score ?? 0) > (best.ai_quality_score ?? 0)) {
+        best = photo;
+      }
+    }
+    return best;
+  };
+
+  const then = bestOfYear(minYear);
+  const now = bestOfYear(maxYear);
+  if (!then || !now || then.id === now.id) return null;
+  return { then, thenYear: minYear, now, nowYear: maxYear };
+}
 
 async function buildPersonRecaps(
   userId: number,
@@ -848,6 +896,10 @@ async function buildPersonRecaps(
     });
     if (recent.length >= PERSON_MIN_PHOTOS) {
       const { cover, rankedIds } = curatePhotos(recent);
+      // "Damals & heute": oldest vs newest photo of this person across the
+      // whole library (not just the window) — the players render it as a
+      // split-screen compare slide.
+      const compare = pickThenAndNow(photosForPerson);
       const sorted = recent
         .map(effectiveDate)
         .filter((d): d is Date => d != null)
@@ -877,6 +929,14 @@ async function buildPersonRecaps(
           person_id: person.id,
           window: "recent",
           days: PERSON_RECENT_DAYS,
+          ...(compare
+            ? {
+                then_photo_id: compare.then.id,
+                then_year: compare.thenYear,
+                now_photo_id: compare.now.id,
+                now_year: compare.nowYear,
+              }
+            : {}),
           ...(resolved.llmUsed ? { llm_title: true } : {}),
         },
         photoIds: rankedIds,

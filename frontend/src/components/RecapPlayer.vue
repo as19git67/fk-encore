@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import HeicImage from './HeicImage.vue'
 import RecapMapIntro from './RecapMapIntro.vue'
 import type { RecapMapIntroData } from '../utils/recapMapIntro'
+import type { RecapCompareData } from '../utils/recapCompare'
 import { collageObjectPosition } from '../utils/collageLayouts'
 import {
   getPhotoUrl,
@@ -24,6 +25,8 @@ const props = defineProps<{
   musicUrl?: string | null
   /** Trip map intro rendered as the first slide; omit to start with photos. */
   mapIntro?: RecapMapIntroData | null
+  /** "Damals & heute" split-screen rendered as the first slide of person recaps. */
+  compareIntro?: RecapCompareData | null
 }>()
 
 const emit = defineEmits<{
@@ -45,7 +48,7 @@ const showControls = ref(true)
 // collages never follow each other back-to-back. The plan is deterministic
 // (seeded by the photo ids), so replaying a recap yields the same sequence.
 
-type SlideLayout = 'single' | 'duo' | 'trio' | 'map'
+type SlideLayout = 'single' | 'duo' | 'trio' | 'map' | 'compare'
 
 interface Slide {
   key: string
@@ -114,6 +117,13 @@ const MAP_INTRO_DURATION_MS = 5500
 
 const slides = computed<Slide[]>(() => {
   const plan = buildSlides(props.photos)
+  if (props.compareIntro) {
+    plan.unshift({
+      key: 'compare-intro',
+      layout: 'compare',
+      photos: [props.compareIntro.then, props.compareIntro.now],
+    })
+  }
   if (props.mapIntro) {
     plan.unshift({ key: 'map-intro', layout: 'map', photos: [] })
   }
@@ -209,6 +219,13 @@ const COLLAGE_ENTRIES: Record<'duo' | 'trio', Array<{ x: string; y: string }>> =
     { x: '110%', y: '-40%' },
     { x: '110%', y: '110%' },
   ],
+}
+
+/** Label chip for the "Damals & heute" compare slide (tile 0 = then). */
+function compareLabel(tileIdx: number): string {
+  const c = props.compareIntro
+  if (!c) return ''
+  return tileIdx === 0 ? `Damals · ${c.thenYear}` : `Heute · ${c.nowYear}`
 }
 
 function collageTileStyle(slide: Slide, tileIdx: number): Record<string, string> {
@@ -617,6 +634,9 @@ onBeforeUnmount(() => {
                   object-fit="cover"
                 />
               </div>
+              <span v-if="slotA.layout === 'compare'" class="compare-label">
+                {{ compareLabel(tileIdx) }}
+              </span>
             </div>
           </div>
         </div>
@@ -658,6 +678,9 @@ onBeforeUnmount(() => {
                   object-fit="cover"
                 />
               </div>
+              <span v-if="slotB.layout === 'compare'" class="compare-label">
+                {{ compareLabel(tileIdx) }}
+              </span>
             </div>
           </div>
         </div>
@@ -800,7 +823,8 @@ onBeforeUnmount(() => {
   padding: 8px;
 }
 
-.collage.duo {
+.collage.duo,
+.collage.compare {
   grid-template-columns: 1fr 1fr;
 }
 
@@ -815,7 +839,8 @@ onBeforeUnmount(() => {
 
 /* Portrait screens: stack the collage vertically instead of side-by-side. */
 @media (orientation: portrait) {
-  .collage.duo {
+  .collage.duo,
+  .collage.compare {
     grid-template-columns: 1fr;
     grid-template-rows: 1fr 1fr;
   }
@@ -830,6 +855,7 @@ onBeforeUnmount(() => {
 }
 
 .collage-tile {
+  position: relative;
   overflow: hidden;
   border-radius: 10px;
   transform: translate(var(--tile-from-x, 0%), var(--tile-from-y, 110%));
@@ -867,6 +893,21 @@ onBeforeUnmount(() => {
   height: 100%;
   object-fit: cover;
   object-position: var(--tile-object-position, 50% 50%);
+}
+
+.compare-label {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 14px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 600;
+  white-space: nowrap;
+  backdrop-filter: blur(4px);
 }
 
 .recap-player-title {
