@@ -20,6 +20,7 @@ export default defineConfig({
       // to a project-relative path so vitest runs in a sandbox/CI.
       PHOTO_UPLOAD_DIR: "uploads/photos",
       PHOTO_THUMBNAIL_DIR: "uploads/thumbnails",
+      RECAPS_EXPORT_DIR: "uploads/recap-exports",
     },
     // frontend/** is excluded entirely: those files rely on a DOM / Vue test
     // env we haven't wired up, and even the pure-utility tests under
