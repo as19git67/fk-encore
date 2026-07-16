@@ -50,6 +50,11 @@ struct RecapSeed: Codable, Sendable {
     let centroid_lat: Double?
     let centroid_lon: Double?
     let location_city: String?
+    // "Damals & heute" pair on person recaps (oldest vs newest year).
+    let then_photo_id: Int?
+    let then_year: Int?
+    let now_photo_id: Int?
+    let now_year: Int?
 }
 
 /// A single recap with its ordered photo IDs (`GET /recaps/:id`). Photo metadata
