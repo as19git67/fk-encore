@@ -42,6 +42,11 @@ USER root
 #   - `ghostscript` (`gs`) re-renders severely broken PDFs that qpdf can't
 #     fix (missing trailer + corrupted xref). Slower but more resilient.
 # All of these are invoked by `documents/text-extract.ts`.
+#
+# ffmpeg renders recap slideshows into MP4 videos (photo/recap-export.service.ts:
+# zoompan Ken-Burns + xfade transitions + the recap's background music). The
+# export endpoint degrades gracefully when the binary is absent, but baking it
+# into the image is what makes the feature available in production.
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl gnupg; \
@@ -59,7 +64,8 @@ RUN set -eux; \
         tesseract-ocr-eng \
         poppler-utils \
         qpdf \
-        ghostscript; \
+        ghostscript \
+        ffmpeg; \
     apt-get purge -y --auto-remove curl gnupg; \
     rm -rf /var/lib/apt/lists/*
 
