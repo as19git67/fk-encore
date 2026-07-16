@@ -40,6 +40,18 @@ struct RecapSummary: Codable, Identifiable, Sendable {
     var recapKind: RecapKind { RecapKind(raw: kind) }
 }
 
+/// Builder metadata stored per recap. The JSON object carries kind-specific
+/// keys; only the ones the app renders are decoded, everything else is
+/// ignored. Trip recaps persist home + destination coordinates for the
+/// animated map intro.
+struct RecapSeed: Codable, Sendable {
+    let home_lat: Double?
+    let home_lon: Double?
+    let centroid_lat: Double?
+    let centroid_lon: Double?
+    let location_city: String?
+}
+
 /// A single recap with its ordered photo IDs (`GET /recaps/:id`). Photo metadata
 /// is resolved separately via the shared `/photos/details` batch endpoint.
 struct RecapDetails: Codable, Identifiable, Sendable {
@@ -55,12 +67,33 @@ struct RecapDetails: Codable, Identifiable, Sendable {
     let dismissed_at: String?
     let seen_at: String?
     let photo_ids: [Int]
+    let seed: RecapSeed?
 
     var recapKind: RecapKind { RecapKind(raw: kind) }
 }
 
+/// Self-hosted background track for the recap player (`GET /recaps/:id`,
+/// field `music`). `url` is an API path without host; stream it through the
+/// shared `APIClient`.
+struct RecapMusicTrack: Codable, Sendable {
+    let id: String
+    let mood: String
+    let title: String
+    let url: String
+}
+
 struct ListRecapsResponse: Codable, Sendable { let recaps: [RecapSummary] }
-struct GetRecapResponse: Codable, Sendable { let recap: RecapDetails }
+struct GetRecapResponse: Codable, Sendable {
+    let recap: RecapDetails
+    let music: RecapMusicTrack?
+}
+
+/// Server-computed focal point (face centre, normalized 0..1) used to pick
+/// the visible crop when a slide fills the screen.
+struct RecapAutoCrop: Codable, Sendable {
+    let x: Double
+    let y: Double
+}
 
 /// Minimal photo metadata needed to render a recap slide / cover, decoded from
 /// the shared `/photos/details` batch endpoint (extra fields are ignored).
@@ -71,6 +104,9 @@ struct RecapPhoto: Codable, Identifiable, Sendable {
     let location_name: String?
     let location_city: String?
     let description: String?
+    /// "visible" | "hidden" | "favorite" — drives the player's heart button.
+    let curation_status: String?
+    let auto_crop: RecapAutoCrop?
 }
 
 struct RecapPhotoDetailsResponse: Codable, Sendable { let photos: [RecapPhoto] }

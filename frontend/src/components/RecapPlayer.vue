@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import HeicImage from './HeicImage.vue'
-import { getPhotoUrl, type Photo } from '../api/photos'
+import RecapMapIntro from './RecapMapIntro.vue'
+import type { RecapMapIntroData } from '../utils/recapMapIntro'
+import { collageObjectPosition } from '../utils/collageLayouts'
+import {
+  getPhotoUrl,
+  updatePhotoCuration,
+  type CurationStatus,
+  type Photo,
+} from '../api/photos'
 import { getRenderedPhotoUrl } from '../api/photoTransforms'
 import { useTransformedPhotosIndex } from '../composables/useTransformedPhotosIndex'
 import { useAuthStore } from '../stores/auth'
@@ -12,6 +20,10 @@ const props = defineProps<{
   subtitle?: string | null
   open: boolean
   durationMs?: number
+  /** Absolute URL of the background track; omit for a silent recap. */
+  musicUrl?: string | null
+  /** Trip map intro rendered as the first slide; omit to start with photos. */
+  mapIntro?: RecapMapIntroData | null
 }>()
 
 const emit = defineEmits<{
@@ -33,7 +45,7 @@ const showControls = ref(true)
 // collages never follow each other back-to-back. The plan is deterministic
 // (seeded by the photo ids), so replaying a recap yields the same sequence.
 
-type SlideLayout = 'single' | 'duo' | 'trio'
+type SlideLayout = 'single' | 'duo' | 'trio' | 'map'
 
 interface Slide {
   key: string
@@ -98,11 +110,20 @@ function buildSlides(photos: Photo[]): Slide[] {
   return out
 }
 
-const slides = computed<Slide[]>(() => buildSlides(props.photos))
+const MAP_INTRO_DURATION_MS = 5500
+
+const slides = computed<Slide[]>(() => {
+  const plan = buildSlides(props.photos)
+  if (props.mapIntro) {
+    plan.unshift({ key: 'map-intro', layout: 'map', photos: [] })
+  }
+  return plan
+})
 const total = computed(() => slides.value.length)
 
 function slideDurationMs(slide: Slide | null): number {
   if (!slide) return photoDurationMs.value
+  if (slide.layout === 'map') return MAP_INTRO_DURATION_MS
   return slide.layout === 'single'
     ? photoDurationMs.value
     : Math.round(photoDurationMs.value * COLLAGE_DURATION_FACTOR)
@@ -167,6 +188,9 @@ function animStyleFor(slide: Slide | null): Record<string, string> {
     '--kb-to-x': `${m.toX}%`,
     '--kb-to-y': `${m.toY}%`,
     '--kb-duration': `${slideDurationMs(slide)}ms`,
+    // Smart crop: keep the server-computed focal point (face centre) in
+    // view under object-fit: cover instead of the geometric centre.
+    '--kb-object-position': collageObjectPosition(photo.auto_crop ?? null),
   }
 }
 
@@ -199,6 +223,11 @@ function collageTileStyle(slide: Slide, tileIdx: number): Record<string, string>
     '--tile-zoom-from': zoomIn ? '1' : '1.12',
     '--tile-zoom-to': zoomIn ? '1.12' : '1',
     '--kb-duration': `${slideDurationMs(slide)}ms`,
+    // Smart crop per tile — collages crop aggressively, so centring on the
+    // focal point matters even more than on full-screen slides.
+    '--tile-object-position': collageObjectPosition(
+      slide.photos[tileIdx]?.auto_crop ?? null
+    ),
   }
 }
 
@@ -312,10 +341,149 @@ function prev() {
   scheduleAdvance()
 }
 
+// ── Favorites ────────────────────────────────────────────────────────────────
+// The heart toggles favorite on every photo of the current slide (one photo
+// on single slides, 2–3 on collages). Local overrides shadow the props so we
+// never mutate the parent's Photo objects; on API failure the override is
+// rolled back.
+
+const curationOverrides = ref(new Map<number, CurationStatus>())
+const favoriteBusy = ref(false)
+
+function effectiveCuration(photo: Photo): CurationStatus {
+  return curationOverrides.value.get(photo.id) ?? photo.curation_status
+}
+
+const currentSlideFavorite = computed(() => {
+  const slide = currentSlide.value
+  if (!slide || slide.photos.length === 0) return false
+  return slide.photos.every((p) => effectiveCuration(p) === 'favorite')
+})
+
+const favoriteToggleable = computed(
+  () => (currentSlide.value?.photos.length ?? 0) > 0
+)
+
+async function toggleFavorite() {
+  const slide = currentSlide.value
+  if (!slide || slide.photos.length === 0 || favoriteBusy.value) return
+  const target: CurationStatus = currentSlideFavorite.value ? 'visible' : 'favorite'
+  const previous = slide.photos.map((p) => [p.id, effectiveCuration(p)] as const)
+  for (const p of slide.photos) curationOverrides.value.set(p.id, target)
+  favoriteBusy.value = true
+  try {
+    await Promise.all(slide.photos.map((p) => updatePhotoCuration(p.id, target)))
+  } catch {
+    for (const [id, status] of previous) curationOverrides.value.set(id, status)
+  } finally {
+    favoriteBusy.value = false
+  }
+}
+
+// ── Background music ─────────────────────────────────────────────────────────
+// One looping <audio> per player session, gently faded in/out. Autoplay can be
+// blocked when the player opens outside a fresh user gesture (the recap data
+// is fetched async before opening) — in that case the next interaction
+// (mousemove/touch/click) retries once.
+
+const MUSIC_VOLUME = 0.55
+const musicMuted = ref(false)
+const musicBlocked = ref(false)
+
+let audio: HTMLAudioElement | null = null
+let fadeTimer: ReturnType<typeof setInterval> | null = null
+
+function fadeTo(target: number, ms: number, onDone?: () => void) {
+  if (!audio) return
+  if (fadeTimer) clearInterval(fadeTimer)
+  const el = audio
+  const startVol = el.volume
+  const steps = Math.max(1, Math.round(ms / 50))
+  let i = 0
+  fadeTimer = setInterval(() => {
+    i++
+    el.volume = Math.min(1, Math.max(0, startVol + ((target - startVol) * i) / steps))
+    if (i >= steps) {
+      if (fadeTimer) clearInterval(fadeTimer)
+      fadeTimer = null
+      onDone?.()
+    }
+  }, 50)
+}
+
+function stopMusic(fadeMs = 500) {
+  if (!audio) return
+  const el = audio
+  audio = null
+  if (fadeMs > 0 && !el.paused) {
+    if (fadeTimer) clearInterval(fadeTimer)
+    fadeTimer = null
+    const startVol = el.volume
+    const steps = Math.max(1, Math.round(fadeMs / 50))
+    let i = 0
+    const timer = setInterval(() => {
+      i++
+      el.volume = Math.max(0, startVol * (1 - i / steps))
+      if (i >= steps) {
+        clearInterval(timer)
+        el.pause()
+        el.src = ''
+      }
+    }, 50)
+  } else {
+    el.pause()
+    el.src = ''
+  }
+}
+
+function startMusic() {
+  stopMusic(0)
+  musicBlocked.value = false
+  if (!props.musicUrl) return
+  const el = new Audio(props.musicUrl)
+  el.loop = true
+  el.volume = 0
+  el.muted = musicMuted.value
+  audio = el
+  void el
+    .play()
+    .then(() => fadeTo(MUSIC_VOLUME, 1500))
+    .catch(() => {
+      // Autoplay blocked — retry on the next user interaction.
+      musicBlocked.value = true
+    })
+}
+
+function retryBlockedMusic() {
+  if (!musicBlocked.value || !audio) return
+  musicBlocked.value = false
+  void audio
+    .play()
+    .then(() => fadeTo(MUSIC_VOLUME, 1500))
+    .catch(() => {
+      musicBlocked.value = true
+    })
+}
+
+function toggleMusicMuted() {
+  musicMuted.value = !musicMuted.value
+  if (audio) audio.muted = musicMuted.value
+  if (!musicMuted.value) retryBlockedMusic()
+}
+
 function togglePause() {
   paused.value = !paused.value
-  if (paused.value) clearAdvance()
-  else scheduleAdvance()
+  if (paused.value) {
+    clearAdvance()
+    if (audio && !audio.paused) audio.pause()
+  } else {
+    scheduleAdvance()
+    if (audio) {
+      void audio.play().catch(() => {
+        musicBlocked.value = true
+      })
+    }
+  }
 }
 
 function handleKey(e: KeyboardEvent) {
@@ -329,10 +497,13 @@ function handleKey(e: KeyboardEvent) {
   } else if (e.key === ' ') {
     e.preventDefault()
     togglePause()
+  } else if (e.key === 'f' || e.key === 'F') {
+    void toggleFavorite()
   }
 }
 
 function bumpControls() {
+  retryBlockedMusic()
   showControls.value = true
   if (controlsTimer) clearTimeout(controlsTimer)
   controlsTimer = setTimeout(() => {
@@ -358,13 +529,23 @@ function setBodyScrollLock(locked: boolean) {
 
 watch(() => props.open, (isOpen) => {
   setBodyScrollLock(isOpen)
-  if (isOpen) reset()
-  else clearAdvance()
+  if (isOpen) {
+    reset()
+    startMusic()
+  } else {
+    clearAdvance()
+    stopMusic()
+  }
 })
 
 watch(() => props.photos, () => {
   preloadCache.clear()
+  curationOverrides.value.clear()
   if (props.open) reset()
+})
+
+watch(() => props.musicUrl, () => {
+  if (props.open) startMusic()
 })
 
 onMounted(() => {
@@ -372,6 +553,7 @@ onMounted(() => {
   if (props.open) {
     setBodyScrollLock(true)
     reset()
+    startMusic()
   }
 })
 
@@ -379,6 +561,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKey)
   clearAdvance()
   if (controlsTimer) clearTimeout(controlsTimer)
+  stopMusic(0)
+  if (fadeTimer) clearInterval(fadeTimer)
   setBodyScrollLock(false)
 })
 </script>
@@ -396,8 +580,14 @@ onBeforeUnmount(() => {
     >
       <div class="recap-player-stage">
         <div class="kb-slide" :class="{ 'is-active': activeSlot === 'A' }">
+          <RecapMapIntro
+            v-if="slotA && slotA.layout === 'map' && mapIntro"
+            :key="`A-${slotA.key}`"
+            :intro="mapIntro"
+            :duration-ms="MAP_INTRO_DURATION_MS"
+          />
           <div
-            v-if="slotA && slotA.layout === 'single'"
+            v-else-if="slotA && slotA.layout === 'single'"
             :key="`A-${slotA.key}`"
             class="kb-motion"
             :style="slotAAnimStyle"
@@ -431,8 +621,14 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div class="kb-slide" :class="{ 'is-active': activeSlot === 'B' }">
+          <RecapMapIntro
+            v-if="slotB && slotB.layout === 'map' && mapIntro"
+            :key="`B-${slotB.key}`"
+            :intro="mapIntro"
+            :duration-ms="MAP_INTRO_DURATION_MS"
+          />
           <div
-            v-if="slotB && slotB.layout === 'single'"
+            v-else-if="slotB && slotB.layout === 'single'"
             :key="`B-${slotB.key}`"
             class="kb-motion"
             :style="slotBAnimStyle"
@@ -505,6 +701,26 @@ onBeforeUnmount(() => {
         <button type="button" class="recap-player-btn" aria-label="Weiter" @click="next">
           <i class="pi pi-chevron-right" />
         </button>
+        <button
+          v-if="musicUrl"
+          type="button"
+          class="recap-player-btn"
+          :aria-label="musicMuted ? 'Musik einschalten' : 'Musik stummschalten'"
+          @click="toggleMusicMuted"
+        >
+          <i :class="musicMuted || musicBlocked ? 'pi pi-volume-off' : 'pi pi-volume-up'" />
+        </button>
+        <button
+          v-if="favoriteToggleable"
+          type="button"
+          class="recap-player-btn recap-player-btn-heart"
+          :class="{ 'is-favorite': currentSlideFavorite }"
+          :aria-label="currentSlideFavorite ? 'Favorit entfernen' : 'Als Favorit markieren'"
+          :disabled="favoriteBusy"
+          @click="toggleFavorite"
+        >
+          <i :class="currentSlideFavorite ? 'pi pi-heart-fill' : 'pi pi-heart'" />
+        </button>
       </div>
 
       <button
@@ -560,6 +776,7 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: var(--kb-object-position, 50% 50%);
 }
 
 @keyframes ken-burns {
@@ -649,6 +866,7 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: var(--tile-object-position, 50% 50%);
 }
 
 .recap-player-title {
@@ -759,6 +977,15 @@ onBeforeUnmount(() => {
   width: 58px;
   height: 58px;
   font-size: 1.35rem;
+}
+
+.recap-player-btn-heart.is-favorite {
+  color: #f43f5e;
+}
+
+.recap-player-btn-heart:disabled {
+  cursor: progress;
+  opacity: 0.7;
 }
 
 .recap-player-close {

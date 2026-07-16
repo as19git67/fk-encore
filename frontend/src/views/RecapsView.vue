@@ -8,18 +8,21 @@ import RecapPlayer from '../components/RecapPlayer.vue'
 import {
   listRecaps,
   getRecap,
+  getRecapMusicUrl,
   dismissRecap,
   markRecapSeen,
   rebuildRecaps,
   type RecapSummary,
   type RecapDetails,
   type RecapKind,
+  type MusicTrack,
 } from '../api/recaps'
 import {
   getPhotoDetailsBatch,
   getPhotoUrl,
   type Photo,
 } from '../api/photos'
+import { tripMapIntroFromSeed, type RecapMapIntroData } from '../utils/recapMapIntro'
 
 const route = useRoute()
 const router = useRouter()
@@ -38,6 +41,7 @@ const activeRecapId = computed(() => {
 })
 
 const detail = ref<RecapDetails | null>(null)
+const detailMusic = ref<MusicTrack | null>(null)
 const detailPhotos = ref<Photo[]>([])
 const detailLoading = ref(false)
 const detailError = ref('')
@@ -45,6 +49,8 @@ const playerOpen = ref(false)
 const playerPhotos = ref<Photo[]>([])
 const playerTitle = ref<string>('')
 const playerSubtitle = ref<string | null>(null)
+const playerMusicUrl = ref<string | null>(null)
+const playerMapIntro = ref<RecapMapIntroData | null>(null)
 const cardPlayLoadingId = ref<number | null>(null)
 
 const kindLabels: Record<RecapKind, string> = {
@@ -92,6 +98,7 @@ async function loadDetail(id: number) {
   try {
     const res = await getRecap(id)
     detail.value = res.recap
+    detailMusic.value = res.music ?? null
     if (res.recap.photo_ids.length > 0) {
       const photosRes = await getPhotoDetailsBatch(res.recap.photo_ids)
       const byId = new Map(photosRes.photos.map((p) => [p.id, p]))
@@ -161,6 +168,7 @@ watch(
     if (id != null) loadDetail(id)
     else {
       detail.value = null
+      detailMusic.value = null
       detailPhotos.value = []
       playerOpen.value = false
     }
@@ -173,6 +181,10 @@ function openPlayer() {
   playerPhotos.value = detailPhotos.value
   playerTitle.value = detail.value?.title ?? ''
   playerSubtitle.value = detail.value?.subtitle ?? null
+  playerMusicUrl.value = detailMusic.value ? getRecapMusicUrl(detailMusic.value) : null
+  playerMapIntro.value = detail.value
+    ? tripMapIntroFromSeed(detail.value.kind, detail.value.seed)
+    : null
   playerOpen.value = true
 }
 
@@ -190,6 +202,8 @@ async function playFromCard(r: RecapSummary, e: Event) {
       .filter((p): p is Photo => !!p)
     playerTitle.value = res.recap.title
     playerSubtitle.value = res.recap.subtitle ?? null
+    playerMusicUrl.value = res.music ? getRecapMusicUrl(res.music) : null
+    playerMapIntro.value = tripMapIntroFromSeed(res.recap.kind, res.recap.seed)
     playerOpen.value = true
     if (!res.recap.seen_at) {
       const stamp = new Date().toISOString()
@@ -323,6 +337,8 @@ async function playFromCard(r: RecapSummary, e: Event) {
       :photos="playerPhotos"
       :title="playerTitle"
       :subtitle="playerSubtitle"
+      :music-url="playerMusicUrl"
+      :map-intro="playerMapIntro"
       :open="playerOpen"
       @close="playerOpen = false"
     />

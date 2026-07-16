@@ -1,3 +1,5 @@
+import AVFoundation
+import MapKit
 import SwiftUI
 
 /// Story-style, full-screen recap player: auto-advancing slides with a
@@ -8,6 +10,8 @@ import SwiftUI
 /// Ken-Burns motion plus a crossfade between slides, mirroring the web
 /// player. While the current slide's image is still downloading, playback
 /// progress is held so the slide never loses its screen time to a spinner.
+/// If the server suggests a background track (self-hosted recap music), it
+/// loops behind the slides with a gentle fade and a mute toggle.
 struct RecapPlayerView: View {
     let recapId: Int
     var onSeen: ((Int) -> Void)? = nil
@@ -31,6 +35,19 @@ struct RecapPlayerView: View {
     /// Slide indices with an in-flight download (dedupes prefetch tasks).
     @State private var loadingSlides: Set<Int> = []
 
+    @State private var musicPlayer: AVAudioPlayer?
+    @State private var isMusicMuted = false
+
+    /// Trip map intro shown before the slideshow; nil once finished/skipped.
+    @State private var mapIntro: RecapMapIntroData?
+
+    /// Local favorite toggles (photoId → isFavorite) shadowing the fetched
+    /// curation_status; rolled back if the PATCH fails.
+    @State private var favoriteOverrides: [Int: Bool] = [:]
+    @State private var favoriteBusy = false
+
+    private let musicVolume: Float = 0.55
+
     /// Seconds each slide stays on screen before auto-advancing.
     private let perItem: Double = 4.0
     private let tickStep: Double = 0.05
@@ -44,7 +61,18 @@ struct RecapPlayerView: View {
         }
         .statusBarHidden(true)
         .task { await load() }
-        .onDisappear { ticker?.cancel() }
+        .onDisappear {
+            ticker?.cancel()
+            stopMusic()
+        }
+        .onChange(of: isPaused) { _, paused in
+            guard let musicPlayer else { return }
+            if paused {
+                musicPlayer.pause()
+            } else {
+                musicPlayer.play()
+            }
+        }
     }
 
     @ViewBuilder
@@ -97,7 +125,24 @@ struct RecapPlayerView: View {
                         .onTapGesture { goNext() }
                 }
 
+                // Trip map intro covers the first slide until it finishes
+                // (or is skipped by tap); the slideshow ticker starts after.
+                if let intro = mapIntro {
+                    RecapMapIntroView(data: intro) { finishMapIntro() }
+                }
+
                 topOverlay
+
+                if mapIntro == nil {
+                    favoriteButton(for: idx)
+                        .frame(
+                            maxWidth: .infinity,
+                            maxHeight: .infinity,
+                            alignment: .bottomTrailing
+                        )
+                        .padding(.trailing, 16)
+                        .padding(.bottom, 28)
+                }
             }
             .contentShape(Rectangle())
             .gesture(
@@ -124,7 +169,8 @@ struct RecapPlayerView: View {
                 KenBurnsSlide(
                     image: image,
                     seed: photos[idx].id,
-                    duration: perItem + 1.0
+                    duration: perItem + 1.0,
+                    focal: photos[idx].auto_crop.map { CGPoint(x: $0.x, y: $0.y) }
                 )
                 .id(photos[idx].id)
                 .transition(.opacity.animation(.easeInOut(duration: 0.5)))
@@ -161,6 +207,15 @@ struct RecapPlayerView: View {
                     }
                 }
                 Spacer()
+                if musicPlayer != nil {
+                    Button { toggleMusicMuted() } label: {
+                        Image(systemName: isMusicMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .padding(8)
+                    }
+                    .accessibilityLabel(isMusicMuted ? "Musik einschalten" : "Musik stummschalten")
+                }
                 Button { dismiss() } label: {
                     Image(systemName: "xmark")
                         .font(.headline)
@@ -204,13 +259,116 @@ struct RecapPlayerView: View {
             isLoading = false
             onSeen?(recapId)
             if !photos.isEmpty {
+                if detail.recap.recapKind == .trip,
+                   let seed = detail.recap.seed,
+                   let toLat = seed.centroid_lat, let toLon = seed.centroid_lon {
+                    var from: CLLocationCoordinate2D?
+                    if let hLat = seed.home_lat, let hLon = seed.home_lon {
+                        from = CLLocationCoordinate2D(latitude: hLat, longitude: hLon)
+                    }
+                    mapIntro = RecapMapIntroData(
+                        from: from,
+                        to: CLLocationCoordinate2D(latitude: toLat, longitude: toLon),
+                        label: seed.location_city
+                    )
+                }
                 prefetch(around: 0)
-                startTicker()
+                // With a map intro the ticker starts once the intro finishes,
+                // so the first photo keeps its full screen time.
+                if mapIntro == nil { startTicker() }
+                if let track = detail.music {
+                    Task { await startMusic(track) }
+                }
             }
         } catch {
             loadError = error.localizedDescription
             isLoading = false
         }
+    }
+
+    private func finishMapIntro() {
+        guard mapIntro != nil else { return }
+        mapIntro = nil
+        startTicker()
+    }
+
+    // MARK: - Favorites
+
+    private func isFavorite(_ photo: RecapPhoto) -> Bool {
+        favoriteOverrides[photo.id] ?? (photo.curation_status == "favorite")
+    }
+
+    private func favoriteButton(for idx: Int) -> some View {
+        let fav = idx < photos.count ? isFavorite(photos[idx]) : false
+        return Button { toggleFavorite(at: idx) } label: {
+            Image(systemName: fav ? "heart.fill" : "heart")
+                .font(.title2)
+                .foregroundStyle(fav ? .red : .white)
+                .padding(12)
+                .background(.black.opacity(0.45), in: Circle())
+        }
+        .disabled(favoriteBusy)
+        .accessibilityLabel(fav ? "Favorit entfernen" : "Als Favorit markieren")
+    }
+
+    private func toggleFavorite(at idx: Int) {
+        guard idx < photos.count, !favoriteBusy else { return }
+        let photo = photos[idx]
+        let target = !isFavorite(photo)
+        favoriteOverrides[photo.id] = target
+        favoriteBusy = true
+        Task { @MainActor in
+            defer { favoriteBusy = false }
+            struct CurationBody: Encodable { let status: String }
+            struct CurationResponse: Decodable { let success: Bool }
+            do {
+                let _: CurationResponse = try await APIClient.shared.patch(
+                    "/photos/\(photo.id)/curation",
+                    body: CurationBody(status: target ? "favorite" : "visible")
+                )
+            } catch {
+                favoriteOverrides[photo.id] = !target
+            }
+        }
+    }
+
+    // MARK: - Music
+
+    /// Download the suggested track and loop it behind the slides. Any
+    /// failure keeps the recap silent — music is never worth an error UI.
+    @MainActor
+    private func startMusic(_ track: RecapMusicTrack) async {
+        do {
+            // `track.id` is the raw "<mood>/<filename>" pair; APIClient
+            // percent-encodes paths itself, so don't use the pre-encoded url.
+            let data = try await APIClient.shared.downloadData("/recaps-music/file/\(track.id)")
+            let player = try AVAudioPlayer(data: data)
+            player.numberOfLoops = -1
+            player.volume = 0
+            try? AVAudioSession.sharedInstance().setCategory(.playback)
+            try? AVAudioSession.sharedInstance().setActive(true)
+            guard !Task.isCancelled, !playback.finished else { return }
+            player.play()
+            player.setVolume(isMusicMuted ? 0 : musicVolume, fadeDuration: 1.5)
+            musicPlayer = player
+        } catch {
+            // Silent recap — intentionally no error surface.
+        }
+    }
+
+    private func stopMusic() {
+        guard let player = musicPlayer else { return }
+        musicPlayer = nil
+        player.setVolume(0, fadeDuration: 0.3)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            player.stop()
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
+    }
+
+    private func toggleMusicMuted() {
+        isMusicMuted.toggle()
+        musicPlayer?.setVolume(isMusicMuted ? 0 : musicVolume, fadeDuration: 0.3)
     }
 
     private func cacheKey(_ filename: String) -> String { "photo-\(filename)" }
@@ -283,6 +441,106 @@ struct RecapPlayerView: View {
     }
 }
 
+/// Coordinates for the trip map intro, derived from the recap seed.
+private struct RecapMapIntroData {
+    /// Home location; nil for recaps built before home was persisted.
+    let from: CLLocationCoordinate2D?
+    let to: CLLocationCoordinate2D
+    let label: String?
+}
+
+/// Animated map intro for trip recaps: starts framed on home, then flies the
+/// camera out to frame the dashed route to the destination. Tap anywhere to
+/// skip. With no home coordinates it zooms from a wide view onto the
+/// destination instead.
+private struct RecapMapIntroView: View {
+    let data: RecapMapIntroData
+    let onFinished: () -> Void
+
+    @State private var camera: MapCameraPosition
+
+    init(data: RecapMapIntroData, onFinished: @escaping () -> Void) {
+        self.data = data
+        self.onFinished = onFinished
+        let startCenter = data.from ?? data.to
+        let startSpan = data.from == nil
+            ? MKCoordinateSpan(latitudeDelta: 40, longitudeDelta: 40)
+            : MKCoordinateSpan(latitudeDelta: 1.2, longitudeDelta: 1.2)
+        _camera = State(initialValue: .region(
+            MKCoordinateRegion(center: startCenter, span: startSpan)
+        ))
+    }
+
+    var body: some View {
+        Map(position: $camera, interactionModes: []) {
+            if let from = data.from {
+                MapPolyline(coordinates: [from, data.to])
+                    .stroke(.white, style: StrokeStyle(lineWidth: 3, dash: [4, 8]))
+                Annotation("", coordinate: from) {
+                    ZStack {
+                        Circle().fill(.white).frame(width: 14, height: 14)
+                        Circle().fill(.blue).frame(width: 10, height: 10)
+                    }
+                }
+            }
+            Annotation(data.label ?? "", coordinate: data.to) {
+                ZStack {
+                    Circle().fill(.white).frame(width: 18, height: 18)
+                    Circle().fill(.red).frame(width: 13, height: 13)
+                }
+            }
+        }
+        .mapStyle(.standard(elevation: .flat))
+        .environment(\.colorScheme, .dark)
+        .contentShape(Rectangle())
+        .onTapGesture { onFinished() }
+        .task {
+            try? await Task.sleep(for: .seconds(0.7))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 2.8)) {
+                camera = .region(Self.region(
+                    containing: [data.from, data.to].compactMap { $0 }
+                ))
+            }
+            try? await Task.sleep(for: .seconds(4.0))
+            guard !Task.isCancelled else { return }
+            onFinished()
+        }
+    }
+
+    /// Region framing all coordinates with padding; guards against a zero
+    /// span when home and destination share an axis.
+    private static func region(
+        containing coords: [CLLocationCoordinate2D]
+    ) -> MKCoordinateRegion {
+        guard let first = coords.first else {
+            return MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: 0, longitude: 0),
+                span: MKCoordinateSpan(latitudeDelta: 60, longitudeDelta: 60)
+            )
+        }
+        var minLat = first.latitude
+        var maxLat = first.latitude
+        var minLon = first.longitude
+        var maxLon = first.longitude
+        for c in coords {
+            minLat = min(minLat, c.latitude)
+            maxLat = max(maxLat, c.latitude)
+            minLon = min(minLon, c.longitude)
+            maxLon = max(maxLon, c.longitude)
+        }
+        let center = CLLocationCoordinate2D(
+            latitude: (minLat + maxLat) / 2,
+            longitude: (minLon + maxLon) / 2
+        )
+        let span = MKCoordinateSpan(
+            latitudeDelta: max(0.5, (maxLat - minLat) * 1.6),
+            longitudeDelta: max(0.5, (maxLon - minLon) * 1.6)
+        )
+        return MKCoordinateRegion(center: center, span: span)
+    }
+}
+
 /// One segment of the story progress bar.
 private struct ProgressBar: View {
     let fraction: Double
@@ -302,11 +560,14 @@ private struct ProgressBar: View {
 
 /// Renders one slide with a slow Ken-Burns pan/zoom. The motion is derived
 /// deterministically from the photo id (same hash as the web player), so a
-/// given photo always drifts the same way.
+/// given photo always drifts the same way. When a focal point (`auto_crop`)
+/// is present, the fill crop is shifted so faces stay in view instead of
+/// the geometric centre.
 private struct KenBurnsSlide: View {
     let image: UIImage
     let seed: Int
     let duration: Double
+    var focal: CGPoint? = nil
 
     @State private var animate = false
 
@@ -341,19 +602,41 @@ private struct KenBurnsSlide: View {
     var body: some View {
         let m = motion
         GeometryReader { geo in
+            let base = focalOffset(in: geo.size)
             Image(uiImage: image)
                 .resizable()
                 .scaledToFill()
                 .frame(width: geo.size.width, height: geo.size.height)
                 .scaleEffect(animate ? m.toScale : m.fromScale)
                 .offset(
-                    x: (animate ? m.toX : m.fromX) * geo.size.width,
-                    y: (animate ? m.toY : m.fromY) * geo.size.height
+                    x: base.width + (animate ? m.toX : m.fromX) * geo.size.width,
+                    y: base.height + (animate ? m.toY : m.fromY) * geo.size.height
                 )
                 .onAppear {
                     withAnimation(.linear(duration: duration)) { animate = true }
                 }
         }
         .clipped()
+    }
+
+    /// `scaledToFill` centres the image; this shifts the crop so the focal
+    /// point moves towards the visible area. The offset is bounded by half
+    /// the fill overflow per axis (focal 0/1 aligns the image edge with the
+    /// container edge), matching CSS `object-position` semantics.
+    private func focalOffset(in size: CGSize) -> CGSize {
+        guard let focal else { return .zero }
+        let img = image.size
+        guard img.width > 0, img.height > 0, size.width > 0, size.height > 0 else {
+            return .zero
+        }
+        let scale = max(size.width / img.width, size.height / img.height)
+        let overflowX = max(0, img.width * scale - size.width)
+        let overflowY = max(0, img.height * scale - size.height)
+        let fx = min(max(focal.x, 0), 1)
+        let fy = min(max(focal.y, 0), 1)
+        return CGSize(
+            width: (0.5 - fx) * overflowX,
+            height: (0.5 - fy) * overflowY
+        )
     }
 }
