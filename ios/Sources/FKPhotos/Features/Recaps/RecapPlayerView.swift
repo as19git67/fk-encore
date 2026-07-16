@@ -3,6 +3,11 @@ import SwiftUI
 /// Story-style, full-screen recap player: auto-advancing slides with a
 /// segmented progress bar, tap-left/right to seek, long-press to pause and
 /// swipe-down (or the X button) to dismiss. Read-only.
+///
+/// Slides are prefetched a few positions ahead and rendered with a subtle
+/// Ken-Burns motion plus a crossfade between slides, mirroring the web
+/// player. While the current slide's image is still downloading, playback
+/// progress is held so the slide never loses its screen time to a spinner.
 struct RecapPlayerView: View {
     let recapId: Int
     var onSeen: ((Int) -> Void)? = nil
@@ -18,9 +23,19 @@ struct RecapPlayerView: View {
     @State private var isPaused = false
     @State private var ticker: Task<Void, Never>?
 
+    /// Loaded slide images keyed by position in `photos`.
+    @State private var slideImages: [Int: UIImage] = [:]
+    /// Slides whose download failed — rendered as an error glyph and skipped
+    /// by the buffering gate so playback doesn't hang forever.
+    @State private var failedSlides: Set<Int> = []
+    /// Slide indices with an in-flight download (dedupes prefetch tasks).
+    @State private var loadingSlides: Set<Int> = []
+
     /// Seconds each slide stays on screen before auto-advancing.
     private let perItem: Double = 4.0
     private let tickStep: Double = 0.05
+    /// How many slides beyond the current one are fetched ahead of time.
+    private let prefetchAhead = 3
 
     var body: some View {
         ZStack {
@@ -67,10 +82,9 @@ struct RecapPlayerView: View {
         let idx = min(playback.index, max(0, photos.count - 1))
         return GeometryReader { geo in
             ZStack(alignment: .top) {
-                RecapSlide(filename: photos[idx].filename)
+                slideContent(idx: idx)
                     .frame(width: geo.size.width, height: geo.size.height)
                     .clipped()
-                    .id(photos[idx].id)
 
                 // Tap zones: left third = back, right two-thirds = forward.
                 HStack(spacing: 0) {
@@ -97,6 +111,31 @@ struct RecapPlayerView: View {
             }, perform: {})
         }
         .ignoresSafeArea()
+        .onChange(of: playback.index) { _, newIndex in
+            prefetch(around: newIndex)
+        }
+    }
+
+    @ViewBuilder
+    private func slideContent(idx: Int) -> some View {
+        ZStack {
+            Color.black
+            if let image = slideImages[idx] {
+                KenBurnsSlide(
+                    image: image,
+                    seed: photos[idx].id,
+                    duration: perItem + 1.0
+                )
+                .id(photos[idx].id)
+                .transition(.opacity.animation(.easeInOut(duration: 0.5)))
+            } else if failedSlides.contains(idx) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.largeTitle)
+                    .foregroundStyle(.white.opacity(0.6))
+            } else {
+                ProgressView().tint(.white)
+            }
+        }
     }
 
     private var topOverlay: some View {
@@ -164,10 +203,50 @@ struct RecapPlayerView: View {
             playback = RecapPlayback(count: photos.count)
             isLoading = false
             onSeen?(recapId)
-            if !photos.isEmpty { startTicker() }
+            if !photos.isEmpty {
+                prefetch(around: 0)
+                startTicker()
+            }
         } catch {
             loadError = error.localizedDescription
             isLoading = false
+        }
+    }
+
+    private func cacheKey(_ filename: String) -> String { "photo-\(filename)" }
+
+    /// Kick off downloads for the slide at `idx` and the next few. Each slide
+    /// is fetched at most once; results land in the shared `ImageCache`, so a
+    /// replay or the photo grid can reuse them.
+    private func prefetch(around idx: Int) {
+        for i in idx...(idx + prefetchAhead) where i >= 0 && i < photos.count {
+            guard slideImages[i] == nil,
+                  !failedSlides.contains(i),
+                  !loadingSlides.contains(i) else { continue }
+            loadingSlides.insert(i)
+            Task { await loadSlide(i) }
+        }
+    }
+
+    @MainActor
+    private func loadSlide(_ idx: Int) async {
+        defer { loadingSlides.remove(idx) }
+        let filename = photos[idx].filename
+
+        if let cached = await ImageCache.shared.image(forKey: cacheKey(filename)) {
+            slideImages[idx] = cached
+            return
+        }
+        do {
+            let data = try await APIClient.shared.downloadData("/photos/file/\(filename)")
+            guard let image = UIImage(data: data) else {
+                failedSlides.insert(idx)
+                return
+            }
+            await ImageCache.shared.store(image, forKey: cacheKey(filename))
+            slideImages[idx] = image
+        } catch {
+            failedSlides.insert(idx)
         }
     }
 
@@ -180,6 +259,11 @@ struct RecapPlayerView: View {
                 try? await Task.sleep(for: .seconds(tickStep))
                 if Task.isCancelled { return }
                 if isPaused { continue }
+                // Buffering gate: hold progress while the current slide is
+                // still downloading, so the photo gets its full screen time
+                // once it appears (failed slides advance normally).
+                let idx = playback.index
+                if slideImages[idx] == nil && !failedSlides.contains(idx) { continue }
                 playback.tick(delta: tickStep, perItem: perItem)
                 if playback.finished {
                     dismiss()
@@ -216,31 +300,60 @@ private struct ProgressBar: View {
     }
 }
 
-/// Loads and displays a single recap slide image, fit to the screen on black.
-private struct RecapSlide: View {
-    let filename: String
-    @State private var loader: ThumbnailLoader
+/// Renders one slide with a slow Ken-Burns pan/zoom. The motion is derived
+/// deterministically from the photo id (same hash as the web player), so a
+/// given photo always drifts the same way.
+private struct KenBurnsSlide: View {
+    let image: UIImage
+    let seed: Int
+    let duration: Double
 
-    init(filename: String) {
-        self.filename = filename
-        _loader = State(initialValue: ThumbnailLoader(filename: filename))
+    @State private var animate = false
+
+    private struct Motion {
+        let fromScale: CGFloat
+        let toScale: CGFloat
+        let fromX: CGFloat
+        let fromY: CGFloat
+        let toX: CGFloat
+        let toY: CGFloat
+    }
+
+    private var motion: Motion {
+        func r(_ x: Double) -> Double {
+            let s = sin(Double(seed) * 9301 + x * 49297) * 233280
+            return s - s.rounded(.down)
+        }
+        let zoomIn = r(1) > 0.5
+        // Offsets are fractions of the slide size; the minimum scale of 1.06
+        // leaves enough overscan that a ±1.5% pan never exposes an edge.
+        let amp = 0.015
+        return Motion(
+            fromScale: zoomIn ? 1.06 : 1.18,
+            toScale: zoomIn ? 1.18 : 1.06,
+            fromX: CGFloat((r(2) - 0.5) * 2 * amp),
+            fromY: CGFloat((r(3) - 0.5) * 2 * amp),
+            toX: CGFloat((r(4) - 0.5) * 2 * amp),
+            toY: CGFloat((r(5) - 0.5) * 2 * amp)
+        )
     }
 
     var body: some View {
-        ZStack {
-            Color.black
-            if let image = loader.image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-            } else if loader.hasError {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.largeTitle)
-                    .foregroundStyle(.white.opacity(0.6))
-            } else {
-                ProgressView().tint(.white)
-            }
+        let m = motion
+        GeometryReader { geo in
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: geo.size.width, height: geo.size.height)
+                .scaleEffect(animate ? m.toScale : m.fromScale)
+                .offset(
+                    x: (animate ? m.toX : m.fromX) * geo.size.width,
+                    y: (animate ? m.toY : m.fromY) * geo.size.height
+                )
+                .onAppear {
+                    withAnimation(.linear(duration: duration)) { animate = true }
+                }
         }
-        .task { await loader.load() }
+        .clipped()
     }
 }
