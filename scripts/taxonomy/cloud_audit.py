@@ -410,13 +410,14 @@ def _clean_claude_tax_sections(raw: object) -> list[dict]:
 
 
 def _is_rate_or_overload(exc: Exception) -> bool:
-    """A sustained rate-limit / overload that even the SDK's retries couldn't
-    ride out. Aborting the run then beats burning the rest of the sample on the
-    same wall (and keeps the partial results already gathered)."""
+    """A sustained rate-limit / overload / credit exhaustion that even the
+    SDK's retries couldn't ride out. Aborting the run then beats burning the
+    rest of the sample on the same wall (and keeps the partial results already
+    gathered). 402 = credit/billing limit reached."""
     if isinstance(exc, anthropic.RateLimitError):
         return True
     status = getattr(exc, "status_code", None)
-    return status in (429, 529, 503)
+    return status in (402, 429, 529, 503)
 
 
 def _classify_batch(
@@ -432,7 +433,9 @@ def _classify_batch(
     """
     system = _build_system(tax_outline)
     results: list[dict] = []
-    for doc in docs:
+    batch_total = len(docs)
+    for di, doc in enumerate(docs, 1):
+        print(f"    [{di}/{batch_total}] Dok {doc['id']} — sende an Claude …")
         user_msg = _build_user_msg(doc, taxonomy)
         base = {
             "doc_id": doc["id"],
@@ -466,9 +469,12 @@ def _classify_batch(
             # raw_decode stops after the first complete JSON object
             idx = text.index("{")
             parsed, _ = json.JSONDecoder().raw_decode(text, idx)
+            claude_slug = parsed.get("slug", "?")
+            match = "✓" if claude_slug == doc["qwen_slug"] else f"✗ (Qwen: {doc['qwen_slug']})"
+            print(f"      → {claude_slug} {match}")
             results.append({
                 **base,
-                "claude_slug": parsed.get("slug", "?"),
+                "claude_slug": claude_slug,
                 "claude_confidence": parsed.get("confidence", 0),
                 "reasoning": parsed.get("reasoning", ""),
                 "claude_tax_relevant": bool(parsed.get("tax_relevant", False)),
@@ -479,7 +485,7 @@ def _classify_batch(
         except (json.JSONDecodeError, anthropic.APIError, KeyError, ValueError) as e:
             if _is_rate_or_overload(e):
                 print(
-                    f"  [!] Rate-Limit/Overload bei Dok {doc['id']} — Lauf wird "
+                    f"  [!] Rate-Limit/Guthaben bei Dok {doc['id']} — Lauf wird "
                     f"abgebrochen, Teilergebnis bleibt erhalten: {e}",
                     file=sys.stderr,
                 )
@@ -723,10 +729,15 @@ def main() -> None:
         print(f"[cloud_audit] *** DRY RUN — nichts wird an die API gesendet ***")
     print(f"[cloud_audit] DB: {c.safe_dsn()}")
 
+    print("[cloud_audit] Verbinde mit Datenbank …")
     conn = c.connect()
+    print("[cloud_audit] Lade Namen für Anonymisierung …")
     names = c.subject_person_names(conn)
+    print(f"[cloud_audit] {len(names)} Namen geladen")
+    print("[cloud_audit] Lade Taxonomie …")
     taxonomy = _load_taxonomy_outline()
     tax_outline = _load_tax_sections_outline()
+    print("[cloud_audit] Wähle Stichprobe aus …")
     docs = _sample_documents(conn)
     conn.close()
 
@@ -734,7 +745,7 @@ def main() -> None:
         print("[cloud_audit] Keine Dokumente gefunden.", file=sys.stderr)
         sys.exit(1)
 
-    # Anonymize
+    print(f"[cloud_audit] Anonymisiere {len(docs)} Dokumente …")
     anon_docs = [_anonymize_doc(d, names) for d in docs]
 
     if DRY_RUN:
@@ -746,8 +757,7 @@ def main() -> None:
         print("[cloud_audit] FEHLER: ANTHROPIC_API_KEY nicht gesetzt.", file=sys.stderr)
         sys.exit(1)
 
-    # Classify via Claude. `max_retries` lets the SDK ride out transient
-    # 429/5xx/connection blips with exponential backoff (respecting Retry-After).
+    print(f"[cloud_audit] Starte Klassifikation mit {CLAUDE_MODEL} …")
     client = anthropic.Anthropic(api_key=api_key, max_retries=MAX_RETRIES)
     all_results: list[dict] = []
     total = len(anon_docs)
