@@ -392,63 +392,66 @@ async function playFromCard(r: RecapSummary, e: Event) {
       </div>
     </div>
 
-    <!-- Detail-Overlay -->
-    <div v-if="activeRecapId != null" class="recap-detail-overlay" @click.self="closeDetail">
-      <div class="recap-detail">
-        <header class="recap-detail-header">
-          <div>
-            <h2 v-if="detail">{{ detail.title }}</h2>
-            <h2 v-else>Rückblick</h2>
-            <p v-if="detail?.subtitle" class="recap-subtitle">{{ detail.subtitle }}</p>
+    <!-- Detail-Overlay: teleported to <body> so it escapes the .content
+         stacking context (z-index: 0) and renders above the toolbar (z-index: 1100). -->
+    <Teleport to="body">
+      <div v-if="activeRecapId != null" class="recap-detail-overlay" @click.self="closeDetail">
+        <div class="recap-detail">
+          <header class="recap-detail-header">
+            <div>
+              <h2 v-if="detail">{{ detail.title }}</h2>
+              <h2 v-else>Rückblick</h2>
+              <p v-if="detail?.subtitle" class="recap-subtitle">{{ detail.subtitle }}</p>
+            </div>
+            <div class="recap-detail-actions">
+              <Button
+                icon="pi pi-play"
+                label="Abspielen"
+                :disabled="detailPhotos.length === 0"
+                @click="openPlayer"
+              />
+              <Button
+                icon="pi pi-video"
+                :label="exportRunning ? `${Math.round(exportProgress * 100)} %` : 'Video'"
+                severity="secondary"
+                :loading="exportRunning"
+                :disabled="!detail || detailPhotos.length === 0"
+                v-tooltip.bottom="'Als Video (MP4) exportieren'"
+                @click="handleExport"
+              />
+              <Button
+                icon="pi pi-thumbs-down-fill"
+                label="Ausblenden"
+                severity="secondary"
+                text
+                :disabled="!detail"
+                @click="detail && handleDismiss(detail)"
+              />
+              <Button icon="pi pi-times" severity="secondary" text @click="closeDetail" />
+            </div>
+          </header>
+
+          <Message v-if="detailError" severity="error" :closable="false">{{ detailError }}</Message>
+
+          <div v-if="detailLoading" class="recaps-empty">Lade Rückblick …</div>
+
+          <div v-else-if="detailPhotos.length === 0" class="recaps-empty">
+            Keine Fotos in diesem Rückblick.
           </div>
-          <div class="recap-detail-actions">
-            <Button
-              icon="pi pi-play"
-              label="Abspielen"
-              :disabled="detailPhotos.length === 0"
+
+          <div v-else class="recap-photo-grid">
+            <div
+              v-for="photo in detailPhotos"
+              :key="photo.id"
+              class="recap-photo"
               @click="openPlayer"
-            />
-            <Button
-              icon="pi pi-video"
-              :label="exportRunning ? `${Math.round(exportProgress * 100)} %` : 'Video'"
-              severity="secondary"
-              :loading="exportRunning"
-              :disabled="!detail || detailPhotos.length === 0"
-              v-tooltip.bottom="'Als Video (MP4) exportieren'"
-              @click="handleExport"
-            />
-            <Button
-              icon="pi pi-thumbs-down-fill"
-              label="Ausblenden"
-              severity="secondary"
-              text
-              :disabled="!detail"
-              @click="detail && handleDismiss(detail)"
-            />
-            <Button icon="pi pi-times" severity="secondary" text @click="closeDetail" />
-          </div>
-        </header>
-
-        <Message v-if="detailError" severity="error" :closable="false">{{ detailError }}</Message>
-
-        <div v-if="detailLoading" class="recaps-empty">Lade Rückblick …</div>
-
-        <div v-else-if="detailPhotos.length === 0" class="recaps-empty">
-          Keine Fotos in diesem Rückblick.
-        </div>
-
-        <div v-else class="recap-photo-grid">
-          <div
-            v-for="photo in detailPhotos"
-            :key="photo.id"
-            class="recap-photo"
-            @click="openPlayer"
-          >
-            <HeicImage :src="getPhotoUrl(photo.filename, 600)" :alt="photo.original_name" />
+            >
+              <HeicImage :src="getPhotoUrl(photo.filename, 600)" :alt="photo.original_name" />
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </Teleport>
 
     <RecapPlayer
       :photos="playerPhotos"
@@ -627,6 +630,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
   justify-content: center;
   padding: 2rem 1rem;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .recap-detail {
@@ -686,6 +690,9 @@ async function playFromCard(r: RecapSummary, e: Event) {
 }
 
 @media (max-width: 600px) {
+  .recap-detail-overlay {
+    padding: 1rem 0.5rem;
+  }
   .recap-detail {
     padding: 1rem;
     border-radius: 10px;
