@@ -27,6 +27,8 @@ from app.db.database import check_db_connection, get_db
 from app.db import repository
 from app.models.schemas import (
     DinoEmbedResponse,
+    DiverseSelectRequest,
+    DiverseSelectResponse,
     EmbedRequest,
     EmbedResponse,
     GetRequest,
@@ -46,6 +48,7 @@ from app.models.schemas import (
 )
 from app.services.embedding_service import clip_embedder_class, dino_embedder_class
 from app.services.similar_groups import find_similar_groups
+from app.services.diverse_select import select_diverse
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -670,6 +673,34 @@ async def similar_groups(request: SimilarGroupsRequest, db: DbDep) -> SimilarGro
         for cover, ranked_members in groups
     ]
     return SimilarGroupsResponse(groups=payload)
+
+
+# ---------------------------------------------------------------------------
+# /select-diverse
+# ---------------------------------------------------------------------------
+
+@router.post("/select-diverse", response_model=DiverseSelectResponse, tags=["embeddings"])
+async def select_diverse_photos(request: DiverseSelectRequest, db: DbDep) -> DiverseSelectResponse:
+    """Pick high-quality, visually diverse photos spread across location clusters.
+
+    The main app's recap builder sends its candidate photos (each tagged with a
+    quality score and a location-cluster label) and asks for up to ``count`` of
+    them. DINOv2 vectors are looked up here so they never cross the wire; the
+    quality-weighted, diversity-aware greedy runs in numpy and only the chosen
+    ids come back.
+    """
+    ids = [it.photo_id for it in request.items]
+    photos = await repository.get_photos_by_ids(db, ids)
+    emb_by_id = {
+        p.photo_id: (list(p.embedding_dino) if p.embedding_dino is not None else None)
+        for p in photos
+    }
+    items = [
+        (it.photo_id, it.quality, it.cluster, emb_by_id.get(it.photo_id))
+        for it in request.items
+    ]
+    chosen = select_diverse(items, request.count, request.similarity_threshold)
+    return DiverseSelectResponse(photo_ids=chosen)
 
 
 # ---------------------------------------------------------------------------

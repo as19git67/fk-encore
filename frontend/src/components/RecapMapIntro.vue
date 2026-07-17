@@ -93,30 +93,33 @@ onMounted(() => {
     }).addTo(map)
 
     const bounds = L.latLngBounds([from, to]).pad(0.3)
-    const lineDurationMs = props.durationMs * 0.65
-    flyTimer = setTimeout(() => {
-      map?.flyToBounds(bounds, { duration: lineDurationMs / 1000 })
-    }, 300)
+    const flyDurationMs = props.durationMs * 0.6
+    const lineDurationMs = flyDurationMs * 0.9
+    const startDelay = 300
 
-    const start = performance.now()
-    const step = (now: number) => {
-      if (!map) return
-      const t = Math.min(1, (now - start) / lineDurationMs)
-      const e = easeInOut(t)
-      const cur = L.latLng(
-        from.lat + (to.lat - from.lat) * e,
-        from.lng + (to.lng - from.lng) * e
-      )
-      line.setLatLngs([from, cur])
-      head.setLatLng(cur)
-      if (t < 1) {
-        raf = requestAnimationFrame(step)
-      } else {
-        head.remove()
-        destinationMarker(to).addTo(map)
+    flyTimer = setTimeout(() => {
+      map?.flyToBounds(bounds, { duration: flyDurationMs / 1000 })
+
+      const start = performance.now()
+      const step = (now: number) => {
+        if (!map) return
+        const t = Math.min(1, (now - start) / lineDurationMs)
+        const e = easeInOut(t)
+        const cur = L.latLng(
+          from.lat + (to.lat - from.lat) * e,
+          from.lng + (to.lng - from.lng) * e
+        )
+        line.setLatLngs([from, cur])
+        head.setLatLng(cur)
+        if (t < 1) {
+          raf = requestAnimationFrame(step)
+        } else {
+          head.remove()
+          destinationMarker(to).addTo(map)
+        }
       }
-    }
-    raf = requestAnimationFrame(step)
+      raf = requestAnimationFrame(step)
+    }, startDelay)
   } else {
     // No home known — zoom from a wide view onto the destination.
     map.setView(to, 4)

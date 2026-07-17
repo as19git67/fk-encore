@@ -969,9 +969,17 @@ Strikte Regeln — halte dich nur an den gegebenen Kontext:
   entstanden.
 - Erfinde keine Zeitspannen ("letzte X Jahre", "seit X Jahren") — nutze
   nur den Zeitraum aus dem Kontext, falls vorhanden.
-- Nenne keine Zahlen (z.B. Fotoanzahl, Jahreszahlen), die nicht im Kontext stehen.
+- KEINE Zahlen im Titel oder Untertitel: keine Fotoanzahl, keine
+  Tagesanzahl ("124 Tage", "63 Fotos"), keine Jahreszahlen — es sei denn,
+  die exakte Zahl steht wörtlich im Kontext.
+- Erfinde keine Aktivitäten ("Wanderabenteuer", "Nachtigallen"), die nicht
+  in den Stichwörtern stehen. Halte dich an das, was gegeben ist.
+- Verwende korrekte deutsche Grammatik und Deklination (z.B. "in der
+  Inneren Stadt", nicht "in der Innere Stadt").
 - Fehlt ein Ort im Kontext, dann titel ohne Ortsbezug (z.B. über die
   Jahreszeit, das Jahr oder die Person).
+- Nenne den Ort im Titel nicht zusammen mit dem Suffix "Trip",
+  "Aufenthalt" o. Ä. — benenne lieber das Erlebnis oder den Ort allein.
 
 Ton: freundlich, nüchtern, erinnerungsvoll. Keine Floskeln wie "Zurück in
 der Zeit". Vermeide Redundanz zwischen Titel und Untertitel."""
