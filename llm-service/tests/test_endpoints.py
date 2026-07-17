@@ -223,7 +223,7 @@ def test_recap_context_renders_expected_lines():
     assert "Ort: Lissabon" in ctx
     assert "Land: Portugal" in ctx
     assert "Zeitraum: Juli 2023" in ctx
-    assert "Fotos: 42" in ctx
+    assert "Fotos:" not in ctx
     assert "Stichwörter: strand, meer, altstadt" in ctx
 
 

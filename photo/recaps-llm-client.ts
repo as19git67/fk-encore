@@ -45,7 +45,8 @@ function cleanContext(ctx: RecapTitleContext): Record<string, unknown> {
   if (ctx.person_name) out.person_name = ctx.person_name;
   if (typeof ctx.year === "number") out.year = ctx.year;
   if (ctx.month_label) out.month_label = ctx.month_label;
-  if (typeof ctx.photo_count === "number") out.photo_count = ctx.photo_count;
+  // photo_count intentionally omitted — the LLM tends to bake it into
+  // the title/subtitle where it adds no value.
   if (ctx.keywords && ctx.keywords.length > 0) out.keywords = ctx.keywords.slice(0, 8);
   return out;
 }

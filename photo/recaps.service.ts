@@ -170,12 +170,46 @@ async function loadVisiblePhotos(userId: number): Promise<CandidatePhoto[]> {
   );
 }
 
-/** Pick cover + kuratierte Reihenfolge nach AI-Quality (null-safe). */
+const BURST_GAP_MS = 5_000;
+
+function dedupBursts(photos: CandidatePhoto[]): CandidatePhoto[] {
+  if (photos.length <= 1) return photos;
+  const sorted = [...photos].sort((a, b) => {
+    const da = effectiveDate(a)?.getTime() ?? 0;
+    const db = effectiveDate(b)?.getTime() ?? 0;
+    return da - db;
+  });
+  const result: CandidatePhoto[] = [sorted[0]!];
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = result[result.length - 1]!;
+    const curr = sorted[i]!;
+    const tPrev = effectiveDate(prev)?.getTime();
+    const tCurr = effectiveDate(curr)?.getTime();
+    if (
+      tPrev != null &&
+      tCurr != null &&
+      tCurr - tPrev < BURST_GAP_MS
+    ) {
+      const qPrev = prev.ai_quality_score ?? 0;
+      const qCurr = curr.ai_quality_score ?? 0;
+      if (qCurr > qPrev) result[result.length - 1] = curr;
+    } else {
+      result.push(curr);
+    }
+  }
+  return result;
+}
+
+/**
+ * Pick the best photos by AI-quality, then sort them chronologically for
+ * playback. The cover photo is always the highest-quality shot.
+ */
 function curatePhotos(candidates: CandidatePhoto[]): {
   cover: number | null;
   rankedIds: number[];
 } {
-  const sorted = [...candidates].sort((a, b) => {
+  const deduped = dedupBursts(candidates);
+  const byQuality = [...deduped].sort((a, b) => {
     const qa = a.ai_quality_score ?? 0;
     const qb = b.ai_quality_score ?? 0;
     if (qb !== qa) return qb - qa;
@@ -183,9 +217,15 @@ function curatePhotos(candidates: CandidatePhoto[]): {
     const dd = effectiveDate(b)?.getTime() ?? 0;
     return dd - da;
   });
-  const limited = sorted.slice(0, MAX_PHOTOS_PER_RECAP);
+  const cover = byQuality[0]?.id ?? null;
+  const limited = byQuality.slice(0, MAX_PHOTOS_PER_RECAP);
+  limited.sort((a, b) => {
+    const da = effectiveDate(a)?.getTime() ?? 0;
+    const db = effectiveDate(b)?.getTime() ?? 0;
+    return da - db;
+  });
   return {
-    cover: limited[0]?.id ?? null,
+    cover,
     rankedIds: limited.map((p) => p.id),
   };
 }
@@ -405,10 +445,6 @@ async function buildOnThisDayRecaps(
         kind: "on_this_day",
         years_ago: yearsAgo,
         date_range: fallbackSubtitle,
-        // Count of photos actually kept in the recap — the raw candidate
-        // count would let the LLM write e.g. "708 Fotos" into the subtitle
-        // while the player then shows only MAX_PHOTOS_PER_RECAP.
-        photo_count: rankedIds.length,
       },
     });
 
@@ -686,7 +722,6 @@ async function buildTripRecaps(
         place_city: cluster.dominantCity,
         place_country: cluster.dominantCountry,
         date_range: fallbackSubtitle,
-        photo_count: rankedIds.length,
       },
     });
 
@@ -905,14 +940,18 @@ async function buildPersonRecaps(
         .filter((d): d is Date => d != null)
         .sort((a, b) => a.getTime() - b.getTime());
       const dedupKey = `person:${person.id}:recent`;
+      const dateRangeLabel =
+        sorted.length >= 2
+          ? `${sorted[0]!.toLocaleDateString("de-DE", { month: "long", year: "numeric" })} – ${sorted[sorted.length - 1]!.toLocaleDateString("de-DE", { month: "long", year: "numeric" })}`
+          : "Zuletzt";
       const resolved = await resolveTitle({
         userId,
         dedupKey,
-        fallback: { title: `Mit ${person.name}`, subtitle: "Zuletzt" },
+        fallback: { title: `Mit ${person.name}`, subtitle: dateRangeLabel },
         ctx: {
           kind: "person",
           person_name: person.name,
-          photo_count: rankedIds.length,
+          date_range: dateRangeLabel,
         },
       });
       await upsertRecap({
@@ -973,7 +1012,6 @@ async function buildPersonRecaps(
           person_name: person.name,
           year,
           date_range: String(year),
-          photo_count: rankedIds.length,
         },
       });
       await upsertRecap({
@@ -1040,7 +1078,6 @@ async function buildRecentHighlightsRecaps(
     ctx: {
       kind: "recent_highlights",
       month_label: monthLabel,
-      photo_count: rankedIds.length,
     },
   });
 
@@ -1107,11 +1144,10 @@ async function buildPlaceRecaps(
     const resolved = await resolveTitle({
       userId,
       dedupKey,
-      fallback: { title: city, subtitle: `${rankedIds.length} Fotos aus ${city}` },
+      fallback: { title: city, subtitle: null },
       ctx: {
         kind: "place",
         place_city: city,
-        photo_count: rankedIds.length,
       },
     });
 
@@ -1242,12 +1278,11 @@ async function buildThemeRecaps(
       dedupKey,
       fallback: {
         title: theme.title,
-        subtitle: `${rankedIds.length} Fotos`,
+        subtitle: null,
       },
       ctx: {
         kind: "theme",
         keywords: theme.keywords,
-        photo_count: rankedIds.length,
       },
     });
 
