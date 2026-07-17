@@ -66,6 +66,30 @@ const THEME_HTTP_TIMEOUT_MS = parseInt(
 );
 const THEMES_ENABLED = (process.env.RECAPS_THEMES_ENABLED ?? "1") !== "0";
 
+// ── Diverse photo selection (visual + geographic) ─────────────────────────────
+// Recap curation offloads photo selection to the embedding service's
+// /select-diverse endpoint: it keeps high-quality shots while thinning out
+// visually near-identical ones (DINOv2 cosine) and spreading the picks across
+// location clusters. Falls back to local burst-dedup when disabled/unavailable.
+const DIVERSITY_ENABLED = (process.env.RECAPS_DIVERSITY_ENABLED ?? "1") !== "0";
+// Cosine similarity at/above which two photos count as "too similar". Lower
+// than the 0.90 near-duplicate threshold so we also thin out shots that are
+// merely similar (same scene, slightly different framing).
+const DIVERSITY_SIMILARITY_THRESHOLD = parseFloat(
+  process.env.RECAPS_DIVERSITY_THRESHOLD ?? "0.82"
+);
+// Cap on candidates sent to the service per recap. We pre-trim to the top of
+// the pool by quality so clustering + payload stay bounded even for places
+// with hundreds of photos.
+const DIVERSITY_POOL_LIMIT = 150;
+// Photos within this distance of a cluster centroid join it. ~500 m keeps a
+// city walk spread across several spots without shattering a single viewpoint.
+const LOCATION_CLUSTER_RADIUS_KM = 0.5;
+const DIVERSITY_HTTP_TIMEOUT_MS = parseInt(
+  process.env.RECAPS_DIVERSITY_TIMEOUT_MS ?? "15000",
+  10
+);
+
 export type RecapKind =
   | "on_this_day"
   | "trip"
@@ -170,7 +194,7 @@ async function loadVisiblePhotos(userId: number): Promise<CandidatePhoto[]> {
   );
 }
 
-const BURST_GAP_MS = 5_000;
+const BURST_GAP_MS = 60_000;
 
 function dedupBursts(photos: CandidatePhoto[]): CandidatePhoto[] {
   if (photos.length <= 1) return photos;
@@ -200,33 +224,156 @@ function dedupBursts(photos: CandidatePhoto[]): CandidatePhoto[] {
   return result;
 }
 
+/** Quality descending, newest first as a tiebreak. */
+function byQualityDesc(a: CandidatePhoto, b: CandidatePhoto): number {
+  const qa = a.ai_quality_score ?? 0;
+  const qb = b.ai_quality_score ?? 0;
+  if (qb !== qa) return qb - qa;
+  const da = effectiveDate(a)?.getTime() ?? 0;
+  const dd = effectiveDate(b)?.getTime() ?? 0;
+  return dd - da;
+}
+
+function byChronological(a: CandidatePhoto, b: CandidatePhoto): number {
+  const da = effectiveDate(a)?.getTime() ?? 0;
+  const db = effectiveDate(b)?.getTime() ?? 0;
+  return da - db;
+}
+
 /**
- * Pick the best photos by AI-quality, then sort them chronologically for
- * playback. The cover photo is always the highest-quality shot.
+ * Local fallback curation: collapse temporal bursts, keep the top photos by
+ * AI-quality, then order them chronologically. Used when diverse selection is
+ * disabled or the embedding service is unavailable.
  */
-function curatePhotos(candidates: CandidatePhoto[]): {
+function curatePhotosLocal(candidates: CandidatePhoto[]): {
   cover: number | null;
   rankedIds: number[];
 } {
   const deduped = dedupBursts(candidates);
-  const byQuality = [...deduped].sort((a, b) => {
-    const qa = a.ai_quality_score ?? 0;
-    const qb = b.ai_quality_score ?? 0;
-    if (qb !== qa) return qb - qa;
-    const da = effectiveDate(a)?.getTime() ?? 0;
-    const dd = effectiveDate(b)?.getTime() ?? 0;
-    return dd - da;
-  });
+  const byQuality = [...deduped].sort(byQualityDesc);
   const cover = byQuality[0]?.id ?? null;
   const limited = byQuality.slice(0, MAX_PHOTOS_PER_RECAP);
-  limited.sort((a, b) => {
-    const da = effectiveDate(a)?.getTime() ?? 0;
-    const db = effectiveDate(b)?.getTime() ?? 0;
-    return da - db;
-  });
+  limited.sort(byChronological);
   return {
     cover,
     rankedIds: limited.map((p) => p.id),
+  };
+}
+
+/**
+ * Greedy geographic clustering of candidate photos. Returns a cluster label
+ * per input photo (aligned to the input order). Photos without GPS all share
+ * one extra label so they still receive a selection budget. Mirrors the spirit
+ * of the album map view's stop clustering, at a coarser ~500 m radius.
+ */
+export function clusterByLocation(photos: CandidatePhoto[]): number[] {
+  const centroids: { lat: number; lon: number; count: number }[] = [];
+  const labels: number[] = [];
+  for (const p of photos) {
+    if (p.latitude == null || p.longitude == null) {
+      labels.push(-1); // resolved to a shared no-GPS label below
+      continue;
+    }
+    let best = -1;
+    let bestD = Infinity;
+    for (let i = 0; i < centroids.length; i++) {
+      const c = centroids[i]!;
+      const d = haversineKm(p.latitude, p.longitude, c.lat, c.lon);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    if (best >= 0 && bestD <= LOCATION_CLUSTER_RADIUS_KM) {
+      const c = centroids[best]!;
+      c.lat = (c.lat * c.count + p.latitude) / (c.count + 1);
+      c.lon = (c.lon * c.count + p.longitude) / (c.count + 1);
+      c.count++;
+      labels.push(best);
+    } else {
+      centroids.push({ lat: p.latitude, lon: p.longitude, count: 1 });
+      labels.push(centroids.length - 1);
+    }
+  }
+  // All no-GPS photos share one label placed after the geographic clusters.
+  const noGpsLabel = centroids.length;
+  return labels.map((l) => (l === -1 ? noGpsLabel : l));
+}
+
+/**
+ * Ask the embedding service for a high-quality, visually diverse, geographically
+ * spread subset. Returns chosen photo ids (best-first) or null on any failure
+ * so the caller can fall back to local curation.
+ */
+async function selectDiverseRemote(
+  items: { photo_id: string; quality: number; cluster: number }[]
+): Promise<string[] | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DIVERSITY_HTTP_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${EMBEDDING_SERVICE_URL}/select-diverse`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items,
+        count: MAX_PHOTOS_PER_RECAP,
+        similarity_threshold: DIVERSITY_SIMILARITY_THRESHOLD,
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { photo_ids?: string[] };
+    return data.photo_ids ?? null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Pick the photos that go into a recap. Prefers visual + geographic diversity
+ * via the embedding service; the cover is always the highest-quality shot and
+ * the returned ids are ordered chronologically for playback. Falls back to
+ * local burst-dedup curation when diversity is disabled or the service fails.
+ */
+async function curatePhotos(candidates: CandidatePhoto[]): Promise<{
+  cover: number | null;
+  rankedIds: number[];
+}> {
+  if (!DIVERSITY_ENABLED || candidates.length <= MIN_PHOTOS_PER_RECAP) {
+    return curatePhotosLocal(candidates);
+  }
+  // Collapse rapid-fire bursts, then pre-trim to the strongest candidates by
+  // quality so clustering and the request payload stay bounded.
+  const pool = dedupBursts(candidates)
+    .sort(byQualityDesc)
+    .slice(0, DIVERSITY_POOL_LIMIT);
+  if (pool.length <= MIN_PHOTOS_PER_RECAP) {
+    return curatePhotosLocal(candidates);
+  }
+
+  const labels = clusterByLocation(pool);
+  const items = pool.map((p, i) => ({
+    photo_id: String(p.id),
+    quality: p.ai_quality_score ?? 0,
+    cluster: labels[i]!,
+  }));
+
+  const chosen = await selectDiverseRemote(items);
+  if (!chosen || chosen.length === 0) return curatePhotosLocal(candidates);
+
+  const byId = new Map(pool.map((p) => [p.id, p]));
+  const chosenPhotos = chosen
+    .map((id) => byId.get(parseInt(id, 10)))
+    .filter((p): p is CandidatePhoto => p != null);
+  if (chosenPhotos.length === 0) return curatePhotosLocal(candidates);
+
+  const cover = chosenPhotos[0]!.id; // service returns best-first
+  const ordered = [...chosenPhotos].sort(byChronological);
+  return {
+    cover,
+    rankedIds: ordered.map((p) => p.id),
   };
 }
 
@@ -421,7 +568,7 @@ async function buildOnThisDayRecaps(
   for (const [year, photosForYear] of groups.entries()) {
     if (photosForYear.length < MIN_PHOTOS_PER_RECAP) continue;
     const yearsAgo = currentYear - year;
-    const { cover, rankedIds } = curatePhotos(photosForYear);
+    const { cover, rankedIds } = await curatePhotos(photosForYear);
     const periodStart = new Date(year, today.getMonth(), today.getDate());
     const periodEnd = new Date(periodStart);
     periodEnd.setHours(23, 59, 59);
@@ -586,6 +733,19 @@ function buildTripClusters(
       bucket = [];
       return;
     }
+    // Drop individual photos that are still near home (e.g. shots taken
+    // before/after departure that fall within the TRIP_MAX_GAP_DAYS window).
+    bucket = bucket.filter(
+      (p) =>
+        p.latitude != null &&
+        p.longitude != null &&
+        haversineKm(home.lat, home.lon, p.latitude, p.longitude) >=
+          TRIP_MIN_DISTANCE_KM
+    );
+    if (bucket.length < MIN_PHOTOS_PER_RECAP) {
+      bucket = [];
+      return;
+    }
     const start = effectiveDate(bucket[0])!;
     const end = effectiveDate(bucket[bucket.length - 1])!;
     clusters.push({
@@ -696,7 +856,7 @@ async function buildTripRecaps(
   const builtKeys = new Set<string>();
 
   for (const cluster of clusters) {
-    const { cover, rankedIds } = curatePhotos(cluster.photos);
+    const { cover, rankedIds } = await curatePhotos(cluster.photos);
     const startIso = cluster.start.toISOString().slice(0, 10);
     const endIso = cluster.end.toISOString().slice(0, 10);
     const placeSlug = (cluster.dominantCity ?? cluster.dominantCountry ?? "trip")
@@ -930,7 +1090,7 @@ async function buildPersonRecaps(
       return d != null && d >= recentCutoff;
     });
     if (recent.length >= PERSON_MIN_PHOTOS) {
-      const { cover, rankedIds } = curatePhotos(recent);
+      const { cover, rankedIds } = await curatePhotos(recent);
       // "Damals & heute": oldest vs newest photo of this person across the
       // whole library (not just the window) — the players render it as a
       // split-screen compare slide.
@@ -996,7 +1156,7 @@ async function buildPersonRecaps(
     }
     for (const [year, list] of byYear) {
       if (list.length < PERSON_MIN_PHOTOS) continue;
-      const { cover, rankedIds } = curatePhotos(list);
+      const { cover, rankedIds } = await curatePhotos(list);
       const start = new Date(year, 0, 1);
       const end = new Date(year, 11, 31, 23, 59, 59);
       const dedupKey = `person:${person.id}:year:${year}`;
@@ -1063,7 +1223,7 @@ async function buildRecentHighlightsRecaps(
   );
   if (distinctDays.size < RECENT_HIGHLIGHTS_MIN_DAYS) return 0;
 
-  const { cover, rankedIds } = curatePhotos(recent);
+  const { cover, rankedIds } = await curatePhotos(recent);
   const yyyyMm = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
   const monthLabel = today.toLocaleDateString("de-DE", {
     month: "long",
@@ -1134,7 +1294,7 @@ async function buildPlaceRecaps(
     const distinctDays = new Set(dates.map((d) => d.toISOString().slice(0, 10)));
     if (distinctDays.size < PLACE_MIN_DISTINCT_DAYS) continue;
 
-    const { cover, rankedIds } = curatePhotos(list);
+    const { cover, rankedIds } = await curatePhotos(list);
     const slug = city
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")

@@ -112,6 +112,14 @@ similar_groups_stub = types.ModuleType("app.services.similar_groups")
 similar_groups_stub.find_similar_groups = lambda rows, threshold, time_window_seconds: []
 sys.modules["app.services.similar_groups"] = similar_groups_stub
 
+# app.services.diverse_select stub — the real module imports numpy and runs
+# the quality/diversity greedy; endpoint tests don't exercise that path.
+diverse_select_stub = types.ModuleType("app.services.diverse_select")
+diverse_select_stub.select_diverse = lambda items, count, similarity_threshold: [
+    it[0] for it in items[:count]
+]
+sys.modules["app.services.diverse_select"] = diverse_select_stub
+
 sys.modules["app.services"] = types.ModuleType("app.services")
 
 # ---------------------------------------------------------------------------
