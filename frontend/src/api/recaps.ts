@@ -7,6 +7,7 @@ export type RecapKind =
   | 'place'
   | 'theme'
   | 'recent_highlights'
+  | 'scene_then_now'
 
 export interface RecapSummary {
   id: number
