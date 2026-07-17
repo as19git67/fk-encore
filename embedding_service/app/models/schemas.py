@@ -114,3 +114,24 @@ class SimilarGroup(BaseModel):
 
 class SimilarGroupsResponse(BaseModel):
     groups: List[SimilarGroup]
+
+
+class DiverseSelectItem(BaseModel):
+    photo_id: str
+    quality: float = Field(default=0.0, description="AI quality score; higher is better")
+    cluster: int = Field(default=0, description="Location cluster label; picks are spread across clusters")
+
+
+class DiverseSelectRequest(BaseModel):
+    items: List[DiverseSelectItem] = Field(..., min_length=1, description="Candidate photos to choose from")
+    count: int = Field(..., ge=1, description="Target number of photos to return")
+    similarity_threshold: float = Field(
+        default=0.82,
+        ge=0.0,
+        le=1.0,
+        description="Skip a candidate whose cosine similarity to an already-chosen photo reaches this",
+    )
+
+
+class DiverseSelectResponse(BaseModel):
+    photo_ids: List[str] = Field(..., description="Chosen photo ids, best-first (index 0 is the cover)")
