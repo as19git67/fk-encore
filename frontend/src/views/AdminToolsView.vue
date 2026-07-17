@@ -627,6 +627,16 @@ onUnmounted(() => {
   flex: 1 1 0;
   min-width: 0;
   max-width: 240px;
+  width: 100%;
+  box-sizing: border-box;
+}
+/* PrimeVue InputNumber applies the .option-input class to a wrapper span,
+   not the actual field — force the inner <input> to shrink with it so it
+   can't overflow the card on narrow screens. */
+.option-input :deep(input) {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 .tool-actions {
   display: flex;
@@ -680,6 +690,13 @@ onUnmounted(() => {
   }
   .page-header h1 {
     font-size: 1.25rem;
+  }
+  /* Stack label over a full-width field so nothing can run off the right
+     edge on a phone. */
+  .option-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.25rem;
   }
   .option-input {
     max-width: 100%;
