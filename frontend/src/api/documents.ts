@@ -12,6 +12,7 @@ export type DocumentStatus = 'pending' | 'extracting' | 'classifying' | 'ready' 
 export type SearchMode = 'fts' | 'semantic' | 'hybrid'
 export type TaxSectionGroup = 'einkuenfte' | 'abzuege' | 'bescheid' | 'rahmen'
 export type TaxAssignmentSource = 'ai' | 'user'
+export type CategorySource = 'ai' | 'cloud' | 'user'
 export type DocumentVisibility = 'private' | 'group'
 
 export interface DocumentSummary {
@@ -43,6 +44,7 @@ export interface DocumentSummary {
    * document marks it as "new": AI-only attribution awaiting approval (#635).
    */
   attributes_reviewed: boolean
+  category_source: CategorySource
 }
 
 export interface DocumentTaxSection {
@@ -124,6 +126,8 @@ export interface ListDocumentsQuery {
   tax_relevant?: boolean
   /** Keep only documents linked to this Bezugsperson. */
   subject_person_id?: number
+  /** Filter by category source: 'ai', 'cloud', or 'user'. */
+  category_source?: CategorySource
   sort_by?: string
   sort_dir?: 'asc' | 'desc'
   limit?: number
@@ -254,6 +258,7 @@ export type DocumentFilterParams = Pick<
   | 'date_to'
   | 'tax_relevant'
   | 'subject_person_id'
+  | 'category_source'
 >
 
 export function searchDocuments(

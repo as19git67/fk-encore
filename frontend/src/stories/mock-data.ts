@@ -487,6 +487,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     group_id: null,
     notes: null,
     attributes_reviewed: true,
+    category_source: 'ai',
   },
   {
     id: 2,
@@ -512,6 +513,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     group_id: null,
     notes: null,
     attributes_reviewed: true,
+    category_source: 'ai',
   },
   {
     id: 3,
@@ -537,6 +539,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     group_id: null,
     notes: null,
     attributes_reviewed: true,
+    category_source: 'ai',
   },
   {
     id: 4,
@@ -562,6 +565,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     group_id: null,
     notes: null,
     attributes_reviewed: true,
+    category_source: 'ai',
   },
   {
     id: 5,
@@ -587,6 +591,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     group_id: null,
     notes: null,
     attributes_reviewed: true,
+    category_source: 'ai',
   },
 ]
 

@@ -404,10 +404,15 @@ def main() -> None:
         print(f"[cloud_teacher] *** DRY RUN — nichts wird gesendet/geschrieben ***")
     print(f"[cloud_teacher] DB: {c.safe_dsn()}")
 
+    print("[cloud_teacher] Verbinde mit Datenbank …")
     conn = _connect_writable()
+    print("[cloud_teacher] Lade Haushaltsnamen für Anonymisierung …")
     names = c.household_names(conn)
+    print(f"[cloud_teacher] {len(names)} Namen geladen")
+    print("[cloud_teacher] Lade Taxonomie …")
     taxonomy = _load_taxonomy_outline()
     tax_outline = _load_tax_sections_outline()
+    print("[cloud_teacher] Wähle Dokumente aus …")
     docs = _select_documents(conn)
 
     if not docs:
@@ -415,6 +420,7 @@ def main() -> None:
         conn.close()
         return
 
+    print(f"[cloud_teacher] Anonymisiere {len(docs)} Dokumente …")
     anon_docs = [_anonymize_doc(d, names) for d in docs]
 
     if DRY_RUN:
@@ -428,26 +434,39 @@ def main() -> None:
         conn.close()
         sys.exit(1)
 
+    print(f"[cloud_teacher] Starte Klassifikation mit {CLAUDE_MODEL} …")
     client = anthropic.Anthropic(api_key=api_key, max_retries=MAX_RETRIES)
     system = _build_system(tax_outline)
     entries: list[dict] = []
+    skipped = 0
     total = len(anon_docs)
+    t0 = time.monotonic()
     for i, doc in enumerate(anon_docs, 1):
-        if i % 25 == 1 or i == total:
-            print(f"  {i}/{total} …")
+        print(f"  [{i}/{total}] Dok {doc['id']} — sende an Claude …")
         label, aborted = _classify(client, doc, system, taxonomy)
         if aborted:
-            print(f"[cloud_teacher] Rate-Limit — Abbruch nach {len(entries)}/{total} "
-                  f"geschriebenen Dokumenten. Teilergebnis bleibt persistent.",
+            print(f"[cloud_teacher] API-Limit (Rate-Limit/Guthaben) — Abbruch nach "
+                  f"{len(entries)} geschrieben, {skipped} übersprungen von {total}. "
+                  f"Teilergebnis bleibt persistent.",
                   file=sys.stderr)
             break
         if label is None:
+            skipped += 1
+            print(f"    übersprungen (Fehler)")
             continue
         if not label["slug"]:
+            skipped += 1
+            print(f"    übersprungen (leerer Slug)")
             continue
-        entries.append(_persist(conn, doc, label))
+        entry = _persist(conn, doc, label)
+        entries.append(entry)
+        changed = " (geändert)" if entry["category_changed"] else ""
+        print(f"    → {label['slug']}{changed} (Conf. {label['confidence']:.2f})")
         if REQUEST_DELAY > 0:
             time.sleep(REQUEST_DELAY)
+    elapsed = round(time.monotonic() - t0, 1)
+    print(f"[cloud_teacher] Klassifikation abgeschlossen: {elapsed}s, "
+          f"{len(entries)} geschrieben, {skipped} übersprungen")
 
     conn.close()
 
