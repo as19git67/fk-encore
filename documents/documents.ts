@@ -1458,6 +1458,11 @@ export const updateDocument = api(
         if (!cat) throw APIError.invalidArgument(`unknown category slug: ${req.category_slug}`);
         patch.category_id = cat.id;
       }
+      // Mirrors cloud_teacher.py writing category_source='cloud' alongside
+      // category_id: whoever sets the category value owns its provenance, so
+      // the "Kategorie-Quelle" filter reflects a hand-picked category as
+      // "Manuell" rather than stale "Cloud Teacher"/"KI".
+      patch.category_source = "user";
     }
 
     // Editing any of the attributes above pins them: a re-classify must not
@@ -1467,6 +1472,13 @@ export const updateDocument = api(
     const attributesChanged = Object.keys(patch).length > 0;
     if (req.attributes_reviewed !== undefined) {
       patch.attributes_reviewed = req.attributes_reviewed;
+      if (req.attributes_reviewed === false) {
+        // Release the category too, else a cloud/user-sourced category_source
+        // keeps blocking runClassify's categoryProtected guard even though
+        // attributes_reviewed no longer does — "let the AI decide again"
+        // must actually let it decide again.
+        patch.category_source = "ai";
+      }
     } else if (attributesChanged) {
       patch.attributes_reviewed = true;
     }
