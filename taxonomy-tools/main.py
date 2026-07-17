@@ -159,7 +159,11 @@ async def cancel_tool(tool: ToolName):
 
 REPORT_FILES: dict[ToolName, list[str]] = {
     ToolName.diagnose: ["diagnose.md"],
-    ToolName.cloud_audit: ["cloud_audit.md", "cloud_audit_gold.json"],
+    ToolName.cloud_audit: [
+        "cloud_audit.md",
+        "cloud_audit_gold.json",
+        "cloud_audit_dry_run.jsonl",
+    ],
     ToolName.cloud_teacher: [
         "cloud_teacher.md",
         "cloud_teacher_labels.json",

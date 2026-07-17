@@ -102,6 +102,31 @@ async function publishToolEvent(
   }
 }
 
+async function publishReportsEvent(
+  tool: string,
+  userIds: string[],
+): Promise<void> {
+  if (userIds.length === 0) return;
+  try {
+    const resp = await fetch(`${SIDECAR_URL}/reports/${tool}`);
+    if (!resp.ok) return;
+    const data = (await resp.json()) as {
+      files: Array<{ name: string; size: number }>;
+    };
+    await realtime.publishEvent({
+      userIds,
+      channel: "tools",
+      type: "reports",
+      resourceId: tool,
+      payload: { tool, files: data.files },
+    });
+  } catch (err) {
+    console.warn(
+      `[taxonomy-tools] reports publish failed: ${(err as Error).message}`,
+    );
+  }
+}
+
 async function relaySseStream(
   tool: string,
   response: Response,
@@ -135,6 +160,14 @@ async function relaySseStream(
   } finally {
     reader.releaseLock();
   }
+
+  // The SSE stream only closes once the sidecar's subprocess has exited
+  // (success, failure, or cancellation) and its terminal event was the
+  // last thing yielded. Explicitly (re-)publish the report file list at
+  // this point — a dedicated, guaranteed-after-completion signal the
+  // frontend can rely on instead of only reacting to the relayed "done"/
+  // "error" line, which can otherwise race with fast tool runs.
+  await publishReportsEvent(tool, userIds);
 }
 
 export const runTool = api(
