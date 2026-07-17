@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import ToggleSwitch from 'primevue/toggleswitch'
@@ -64,7 +64,7 @@ const tools = ref<ToolConfig[]>([
     name: 'cloud-teacher',
     label: 'Cloud Teacher',
     description:
-      'Claude labelt strategisch ausgewaehlte Dokumente und schreibt die Labels als source=cloud in die DB.',
+      'Claude labelt strategisch ausgewählte Dokumente und schreibt die Labels als source=cloud in die DB.',
     options: {
       dry_run: false,
       batch: 400,
@@ -84,13 +84,54 @@ const logs = ref<Record<string, string[]>>({})
 const finishedState = ref<Record<string, 'done' | 'error' | null>>({})
 const reports = ref<Record<string, ReportFile[]>>({})
 const downloading = ref<Record<string, boolean>>({})
+const loadingReports = ref<Record<string, boolean>>({})
+// True once a status poll has actually observed the run as active. Guards
+// against the start-up race where /health can briefly report not-running
+// before the sidecar begins consuming the stream, which would otherwise be
+// mistaken for an immediate completion.
+const sawRunning = ref<Record<string, boolean>>({})
+
+// Poll the sidecar status while any tool runs. The live log arrives via
+// WebSocket, but long tools (cloud-audit/cloud-teacher call the Claude API
+// for minutes) can have gaps where a terminal SSE event is missed and the
+// card would otherwise stay stuck on "läuft" forever. The sidecar /health
+// endpoint is the source of truth for whether a run is still active, so we
+// poll it as a safety net: when a run stops, we un-stick the UI and load
+// the generated report files for download.
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
+function ensurePolling() {
+  if (pollTimer !== null) return
+  pollTimer = setInterval(fetchStatus, 3000)
+}
+
+function stopPollingIfIdle() {
+  const anyRunning = Object.values(running.value).some(Boolean)
+  if (!anyRunning && pollTimer !== null) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
 
 async function fetchStatus() {
   try {
     const res = await getToolsStatus()
     for (const t of res.tools) {
-      running.value[t.tool] = t.running
+      if (t.running) {
+        sawRunning.value = { ...sawRunning.value, [t.tool]: true }
+      }
+      running.value = { ...running.value, [t.tool]: t.running }
+      // A poll observed the run active and it has now stopped, and no
+      // terminal SSE event set the state → treat it as finished and pull
+      // the reports so the download buttons appear.
+      if (sawRunning.value[t.tool] && !t.running && !finishedState.value[t.tool]) {
+        sawRunning.value = { ...sawRunning.value, [t.tool]: false }
+        finishedState.value = { ...finishedState.value, [t.tool]: 'done' }
+        fetchReports(t.tool)
+      }
     }
+    if (res.tools.some((t) => t.running)) ensurePolling()
+    else stopPollingIfIdle()
   } catch (err: any) {
     error.value = `Status: ${err?.message ?? err}`
   }
@@ -101,6 +142,7 @@ async function startTool(tool: ToolConfig) {
   starting.value = { ...starting.value, [tool.name]: true }
   logs.value = { ...logs.value, [tool.name]: [] }
   finishedState.value = { ...finishedState.value, [tool.name]: null }
+  sawRunning.value = { ...sawRunning.value, [tool.name]: false }
 
   const opts: RunToolOptions = {}
   if (tool.options.dry_run) opts.dry_run = true
@@ -113,6 +155,8 @@ async function startTool(tool: ToolConfig) {
   try {
     await runTool(tool.name, opts)
     running.value = { ...running.value, [tool.name]: true }
+    reports.value = { ...reports.value, [tool.name]: [] }
+    ensurePolling()
   } catch (err: any) {
     error.value = `${tool.label}: ${err?.message ?? err}`
   } finally {
@@ -140,11 +184,14 @@ function appendLog(tool: string, message: string) {
 }
 
 async function fetchReports(toolName: string) {
+  loadingReports.value = { ...loadingReports.value, [toolName]: true }
   try {
     const res = await listReports(toolName)
     reports.value = { ...reports.value, [toolName]: res.files }
   } catch {
     reports.value = { ...reports.value, [toolName]: [] }
+  } finally {
+    loadingReports.value = { ...loadingReports.value, [toolName]: false }
   }
 }
 
@@ -177,6 +224,7 @@ useRealtimeEvent('tools', 'done', (ev) => {
   running.value = { ...running.value, [tool]: false }
   finishedState.value = { ...finishedState.value, [tool]: 'done' }
   fetchReports(tool)
+  stopPollingIfIdle()
 })
 
 useRealtimeEvent('tools', 'error', (ev) => {
@@ -184,10 +232,20 @@ useRealtimeEvent('tools', 'error', (ev) => {
   appendLog(tool, ev.payload.message as string)
   running.value = { ...running.value, [tool]: false }
   finishedState.value = { ...finishedState.value, [tool]: 'error' }
+  // A partial report may still have been written before the failure.
+  fetchReports(tool)
+  stopPollingIfIdle()
 })
 
-onMounted(() => {
-  fetchStatus()
+onMounted(async () => {
+  await fetchStatus()
+  // Surface any reports already on disk from an earlier run so the user
+  // can download them without re-running the tool.
+  for (const tool of tools.value) fetchReports(tool.name)
+})
+
+onUnmounted(() => {
+  if (pollTimer !== null) clearInterval(pollTimer)
 })
 </script>
 
@@ -205,8 +263,9 @@ onMounted(() => {
     </header>
 
     <p class="hint">
-      Offline-Werkzeuge fuer die Dokument-Taxonomie. Diagnose und Audit sind read-only;
-      der Cloud-Teacher schreibt Labels in die Datenbank. Logs werden live ueber WebSocket gestreamt.
+      Offline-Werkzeuge für die Dokument-Taxonomie. Diagnose und Audit sind read-only;
+      der Cloud-Teacher schreibt Labels in die Datenbank. Logs werden live über WebSocket gestreamt.
+      Cloud Audit und Cloud Teacher rufen die Claude-API auf und können mehrere Minuten laufen.
     </p>
 
     <Message v-if="error" severity="error" :closable="true" @close="error = ''">
@@ -223,7 +282,7 @@ onMounted(() => {
           <Tag
             v-if="running[tool.name]"
             severity="warn"
-            value="laeuft"
+            value="läuft"
           />
           <Tag
             v-else-if="finishedState[tool.name] === 'done'"
@@ -345,7 +404,7 @@ onMounted(() => {
         </div>
 
         <!-- Reports -->
-        <div v-if="(reports[tool.name]?.length ?? 0) > 0" class="tool-reports">
+        <div class="tool-reports">
           <span class="reports-label">Reports:</span>
           <Button
             v-for="file in reports[tool.name]"
@@ -357,6 +416,18 @@ onMounted(() => {
             outlined
             :disabled="!!downloading[`${tool.name}/${file.name}`]"
             @click="doDownload(tool.name, file.name)"
+          />
+          <span v-if="(reports[tool.name]?.length ?? 0) === 0" class="hint">
+            noch keine
+          </span>
+          <Button
+            icon="pi pi-refresh"
+            label="Aktualisieren"
+            size="small"
+            severity="secondary"
+            text
+            :loading="loadingReports[tool.name]"
+            @click="fetchReports(tool.name)"
           />
         </div>
 
