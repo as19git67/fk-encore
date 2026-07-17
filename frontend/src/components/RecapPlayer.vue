@@ -768,6 +768,7 @@ onBeforeUnmount(() => {
   color: #fff;
   overflow: hidden;
   user-select: none;
+  touch-action: none;
 }
 
 .recap-player-stage {

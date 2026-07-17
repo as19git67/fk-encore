@@ -170,7 +170,7 @@ async function loadVisiblePhotos(userId: number): Promise<CandidatePhoto[]> {
   );
 }
 
-const BURST_GAP_MS = 5_000;
+const BURST_GAP_MS = 60_000;
 
 function dedupBursts(photos: CandidatePhoto[]): CandidatePhoto[] {
   if (photos.length <= 1) return photos;
@@ -583,6 +583,19 @@ function buildTripClusters(
     const cLon = avg(lons);
     const distance = haversineKm(home.lat, home.lon, cLat, cLon);
     if (distance < TRIP_MIN_DISTANCE_KM) {
+      bucket = [];
+      return;
+    }
+    // Drop individual photos that are still near home (e.g. shots taken
+    // before/after departure that fall within the TRIP_MAX_GAP_DAYS window).
+    bucket = bucket.filter(
+      (p) =>
+        p.latitude != null &&
+        p.longitude != null &&
+        haversineKm(home.lat, home.lon, p.latitude, p.longitude) >=
+          TRIP_MIN_DISTANCE_KM
+    );
+    if (bucket.length < MIN_PHOTOS_PER_RECAP) {
       bucket = [];
       return;
     }
