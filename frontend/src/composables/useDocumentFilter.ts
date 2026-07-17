@@ -6,7 +6,7 @@ import { replaceQuerySlice, updateRouteQuery } from '../utils/routeQueryUpdate'
 const STORAGE_KEY = 'documents.filter'
 export const DOCUMENT_FILTER_QUERY_KEYS = [
   'category', 'tags', 'status', 'review', 'neu', 'sender', 'correspondent', 'dateFrom', 'dateTo',
-  'taxRelevant', 'subjectPerson',
+  'taxRelevant', 'subjectPerson', 'categorySource',
 ] as const
 
 export interface DocumentFilter {
@@ -23,6 +23,8 @@ export interface DocumentFilter {
   dateTo?: string
   taxRelevant?: boolean
   subjectPersonId?: number
+  /** Filter by category source: 'ai', 'cloud', or 'user'. */
+  categorySource?: string
 }
 
 function parseBool(v: unknown): boolean | undefined {
@@ -60,6 +62,7 @@ export function parseDocFilterFromQuery(q: Record<string, unknown>): DocumentFil
     const n = Number(q.subjectPerson)
     if (Number.isFinite(n)) f.subjectPersonId = n
   }
+  if (typeof q.categorySource === 'string' && q.categorySource) f.categorySource = q.categorySource
   return f
 }
 
@@ -76,6 +79,7 @@ export function docFilterToQuery(f: DocumentFilter): Record<string, string> {
   if (f.dateTo) out.dateTo = f.dateTo
   if (f.taxRelevant !== undefined) out.taxRelevant = String(f.taxRelevant)
   if (f.subjectPersonId) out.subjectPerson = String(f.subjectPersonId)
+  if (f.categorySource) out.categorySource = f.categorySource
   return out
 }
 
@@ -91,6 +95,7 @@ export function countActiveDocFilters(f: DocumentFilter): number {
   if (f.dateFrom || f.dateTo) n++
   if (f.taxRelevant !== undefined) n++
   if (f.subjectPersonId) n++
+  if (f.categorySource) n++
   return n
 }
 
