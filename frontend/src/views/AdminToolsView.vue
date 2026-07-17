@@ -214,6 +214,12 @@ async function startTool(tool: ToolConfig) {
     await runTool(tool.name, opts)
     submittedOptions.value = { ...submittedOptions.value, [tool.name]: { ...tool.options } }
     running.value = { ...running.value, [tool.name]: true }
+    // We know for a fact the run is active right now (the sidecar just
+    // accepted it) — mark it seen immediately. Without this, a tool that
+    // finishes before the first poll tick (fast diagnose runs) would never
+    // trigger the "just completed" branch in fetchStatus, silently leaving
+    // the card without a result tag or report list.
+    sawRunning.value = { ...sawRunning.value, [tool.name]: true }
     reports.value = { ...reports.value, [tool.name]: [] }
     ensurePolling()
   } catch (err: any) {
@@ -337,6 +343,18 @@ useRealtimeEvent('tools', 'error', (ev) => {
   fetchReports(tool)
   stopPollingIfIdle()
   persistState()
+})
+
+// The backend sends this once, right after a run's SSE stream closes
+// (success, failure, or cancellation) — a dedicated, guaranteed signal
+// that the report file list may have changed, decoupled from the
+// per-line "done"/"error" relay. Populates the report list directly from
+// the payload so downloads appear without waiting for another round trip
+// or a poll tick.
+useRealtimeEvent('tools', 'reports', (ev) => {
+  const tool = ev.resourceId
+  const files = (ev.payload.files as ReportFile[] | undefined) ?? []
+  reports.value = { ...reports.value, [tool]: files }
 })
 
 onMounted(async () => {
