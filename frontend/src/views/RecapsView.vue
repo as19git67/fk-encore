@@ -621,7 +621,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.75);
-  z-index: 1000;
+  z-index: 1200;
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -634,25 +634,29 @@ async function playFromCard(r: RecapSummary, e: Event) {
   border-radius: 14px;
   width: min(1200px, 100%);
   padding: 1.25rem 1.5rem 2rem;
+  overflow-x: hidden;
 }
 
 .recap-detail-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.75rem;
   margin-bottom: 1rem;
+  flex-wrap: wrap;
 }
 
 .recap-detail-header h2 {
   margin: 0;
   font-size: 1.5rem;
+  min-width: 0;
+  word-break: break-word;
 }
 
 .recap-detail-actions {
   display: flex;
   gap: 0.25rem;
-  flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 .recap-photo-grid {
@@ -679,5 +683,24 @@ async function playFromCard(r: RecapSummary, e: Event) {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+@media (max-width: 600px) {
+  .recap-detail {
+    padding: 1rem;
+    border-radius: 10px;
+  }
+  .recap-detail-header h2 {
+    font-size: 1.2rem;
+  }
+  .recap-detail-actions :deep(.p-button-label) {
+    display: none;
+  }
+  .recap-detail-actions :deep(.p-button) {
+    padding: 0.5rem;
+  }
+  .recap-photo-grid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  }
 }
 </style>

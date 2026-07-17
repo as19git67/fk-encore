@@ -967,7 +967,9 @@ Strikte Regeln — halte dich nur an den gegebenen Kontext:
 - Sprich nur bei Art "trip" von einer Reise/einem Urlaub/"unterwegs".
   Bei allen anderen Arten sind die Fotos NICHT zwingend auf Reisen
   entstanden.
-- Nenne Zahlen (z.B. Fotoanzahl) nur, wenn sie exakt so im Kontext stehen.
+- Erfinde keine Zeitspannen ("letzte X Jahre", "seit X Jahren") — nutze
+  nur den Zeitraum aus dem Kontext, falls vorhanden.
+- Nenne keine Zahlen (z.B. Fotoanzahl, Jahreszahlen), die nicht im Kontext stehen.
 - Fehlt ein Ort im Kontext, dann titel ohne Ortsbezug (z.B. über die
   Jahreszeit, das Jahr oder die Person).
 
@@ -991,8 +993,7 @@ def _recap_context(req: RecapTitleRequest) -> str:
         parts.append(f"Vor {req.years_ago} Jahr(en)")
     if req.month_label:
         parts.append(f"Monat: {req.month_label}")
-    if req.photo_count is not None:
-        parts.append(f"Fotos: {req.photo_count}")
+    # photo_count intentionally omitted — it adds no value to the title.
     if req.keywords:
         parts.append("Stichwörter: " + ", ".join(req.keywords[:8]))
     return "\n".join(parts)
