@@ -14,6 +14,10 @@ import numpy as np
 # Ensure the embedding_service root is on sys.path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+# Clear stubs that test_endpoints.py may have registered so we import the real modules
+sys.modules.pop("app.services.scene_pairs", None)
+sys.modules.pop("app.services", None)
+
 from app.services.scene_pairs import find_scene_pairs
 
 DAY = 86400.0
