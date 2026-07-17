@@ -85,6 +85,45 @@ const finishedState = ref<Record<string, 'done' | 'error' | null>>({})
 const reports = ref<Record<string, ReportFile[]>>({})
 const downloading = ref<Record<string, boolean>>({})
 const loadingReports = ref<Record<string, boolean>>({})
+
+// Persist the last result + log per tool so a browser refresh doesn't wipe
+// everything. The report files themselves live in the sidecar and are
+// re-fetched on mount; here we only keep the finished-state tag and the log
+// text, which have no other source of truth once the page reloads.
+const STORAGE_KEY = 'admin-tools-state-v1'
+
+function persistState() {
+  try {
+    const snapshot: Record<string, { finished: 'done' | 'error' | null; logs: string[] }> = {}
+    for (const tool of tools.value) {
+      const f = finishedState.value[tool.name] ?? null
+      const l = logs.value[tool.name] ?? []
+      if (f || l.length > 0) snapshot[tool.name] = { finished: f, logs: l }
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot))
+  } catch {
+    // localStorage may be unavailable/full — persistence is best-effort.
+  }
+}
+
+function restoreState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return
+    const snapshot = JSON.parse(raw) as Record<
+      string,
+      { finished: 'done' | 'error' | null; logs: string[] }
+    >
+    for (const [tool, s] of Object.entries(snapshot)) {
+      if (s.finished) finishedState.value = { ...finishedState.value, [tool]: s.finished }
+      if (Array.isArray(s.logs) && s.logs.length > 0) {
+        logs.value = { ...logs.value, [tool]: s.logs }
+      }
+    }
+  } catch {
+    // Ignore malformed persisted state.
+  }
+}
 // True once a status poll has actually observed the run as active. Guards
 // against the start-up race where /health can briefly report not-running
 // before the sidecar begins consuming the stream, which would otherwise be
@@ -119,6 +158,12 @@ async function fetchStatus() {
     for (const t of res.tools) {
       if (t.running) {
         sawRunning.value = { ...sawRunning.value, [t.tool]: true }
+        // A run is active now — drop any stale finished-state restored from
+        // a previous session so it neither shows a wrong tag nor blocks the
+        // completion branch below.
+        if (finishedState.value[t.tool]) {
+          finishedState.value = { ...finishedState.value, [t.tool]: null }
+        }
       }
       running.value = { ...running.value, [t.tool]: t.running }
       // A poll observed the run active and it has now stopped, and no
@@ -128,6 +173,7 @@ async function fetchStatus() {
         sawRunning.value = { ...sawRunning.value, [t.tool]: false }
         finishedState.value = { ...finishedState.value, [t.tool]: 'done' }
         fetchReports(t.tool)
+        persistState()
       }
     }
     if (res.tools.some((t) => t.running)) ensurePolling()
@@ -143,6 +189,7 @@ async function startTool(tool: ToolConfig) {
   logs.value = { ...logs.value, [tool.name]: [] }
   finishedState.value = { ...finishedState.value, [tool.name]: null }
   sawRunning.value = { ...sawRunning.value, [tool.name]: false }
+  persistState()
 
   const opts: RunToolOptions = {}
   if (tool.options.dry_run) opts.dry_run = true
@@ -175,12 +222,32 @@ async function stopTool(toolName: string) {
   }
 }
 
+let lastPersist = 0
 function appendLog(tool: string, message: string) {
   const current = logs.value[tool] ?? []
   current.push(message)
   // Keep last 2000 lines to avoid memory issues on long runs.
   if (current.length > 2000) current.splice(0, current.length - 2000)
   logs.value = { ...logs.value, [tool]: current }
+  // Throttle persistence so a chatty run doesn't hammer localStorage but a
+  // refresh mid-run still restores most of the log.
+  const now = Date.now()
+  if (now - lastPersist > 1500) {
+    lastPersist = now
+    persistState()
+  }
+}
+
+// Full manual refresh from the top button: reconcile running state AND
+// re-pull the report list for every tool so nothing is left stale.
+async function refreshAll() {
+  await fetchStatus()
+  for (const tool of tools.value) fetchReports(tool.name)
+}
+
+function clearLog(toolName: string) {
+  logs.value = { ...logs.value, [toolName]: [] }
+  persistState()
 }
 
 async function fetchReports(toolName: string) {
@@ -225,6 +292,7 @@ useRealtimeEvent('tools', 'done', (ev) => {
   finishedState.value = { ...finishedState.value, [tool]: 'done' }
   fetchReports(tool)
   stopPollingIfIdle()
+  persistState()
 })
 
 useRealtimeEvent('tools', 'error', (ev) => {
@@ -235,9 +303,13 @@ useRealtimeEvent('tools', 'error', (ev) => {
   // A partial report may still have been written before the failure.
   fetchReports(tool)
   stopPollingIfIdle()
+  persistState()
 })
 
 onMounted(async () => {
+  // Restore the last result + log from a previous session so a browser
+  // refresh doesn't blank the page.
+  restoreState()
   await fetchStatus()
   // Surface any reports already on disk from an earlier run so the user
   // can download them without re-running the tool.
@@ -246,6 +318,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (pollTimer !== null) clearInterval(pollTimer)
+  persistState()
 })
 </script>
 
@@ -258,7 +331,7 @@ onUnmounted(() => {
         label="Status"
         text
         size="small"
-        @click="fetchStatus"
+        @click="refreshAll"
       />
     </header>
 
@@ -399,7 +472,7 @@ onUnmounted(() => {
             size="small"
             severity="secondary"
             text
-            @click="logs[tool.name] = []"
+            @click="clearLog(tool.name)"
           />
         </div>
 
