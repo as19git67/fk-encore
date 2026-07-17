@@ -142,8 +142,11 @@ export async function findNearestClassifiedExamples(
   const { userId, excludeDocumentId, queryVector } = params;
   if (queryVector.length === 0) return [];
   const literal = `[${queryVector.join(",")}]`;
-  // Only anchor on human-confirmed labels by default (see fewShotReviewedOnly).
-  const reviewedFilter = fewShotReviewedOnly() ? sql`AND d.attributes_reviewed = true` : sql``;
+  // Only anchor on trusted labels by default (see fewShotReviewedOnly):
+  // human-confirmed (attributes_reviewed) OR Cloud Teacher (category_source='cloud').
+  const reviewedFilter = fewShotReviewedOnly()
+    ? sql`AND (d.attributes_reviewed = true OR d.category_source = 'cloud')`
+    : sql``;
 
   const rows = await db.execute<NeighborRow>(sql`
     WITH nearest AS (
@@ -173,7 +176,9 @@ export async function findNearestClassifiedExamples(
     FROM per_doc p
     JOIN documents d ON d.id = p.document_id
     JOIN document_categories c ON c.id = d.category_id
-    ORDER BY d.attributes_reviewed DESC, p.dist ASC
+    ORDER BY d.attributes_reviewed DESC,
+             (d.category_source = 'cloud')::int DESC,
+             p.dist ASC
   `);
 
   const normalized: NeighborRow[] = rows.rows.map((r) => ({

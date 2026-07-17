@@ -504,11 +504,13 @@ export async function runClassify(documentId: number): Promise<{ classification:
   const patch: Partial<typeof documents.$inferInsert> = {
     status: "ready",
   };
-  // Only overwrite the human-editable attributes when the user has not pinned
-  // them via the edit dialog. `attributes_reviewed=true` means a human has
-  // asserted these values and the classifier must not undo them (mirrors the
-  // `tax_reviewed` guard below for the tax fields).
-  if (!row.attributes_reviewed) {
+  // Only overwrite the human-editable attributes when neither a human nor the
+  // Cloud Teacher has asserted them. `attributes_reviewed=true` means a human
+  // pinned them; `category_source IN ('cloud','user')` means a trusted source
+  // labelled the category and the local classifier must not undo it.
+  const categoryProtected =
+    row.attributes_reviewed || row.category_source === "cloud" || row.category_source === "user";
+  if (!categoryProtected) {
     patch.category_id = cat?.id ?? null;
     patch.title = classification.title || row.title || row.original_filename;
     patch.doc_date = classification.doc_date;
@@ -516,16 +518,17 @@ export async function runClassify(documentId: number): Promise<{ classification:
     patch.document_number = classification.document_number;
     patch.summary = classification.summary;
     patch.classification_confidence = classification.confidence;
-  } else if (forceTaxReviewConfidence) {
-    // The existing attributes are user-pinned, but this soft tax-review signal
-    // still needs to reach the persisted confidence used by the review basket.
-    // Do not touch category/title/date/sender/etc.
+  } else if (forceTaxReviewConfidence && !row.attributes_reviewed) {
+    // The category is protected (cloud/user source), but the soft tax-review
+    // confidence signal still needs to reach the persisted value used by the
+    // review basket. Do not touch category/title/date/sender/etc.
     patch.classification_confidence = classification.confidence;
   }
-  // Only overwrite tax fields when the user has not pinned them via the
-  // /documents/:id/tax endpoint. `tax_reviewed=true` means the human has
-  // asserted the ground truth and the classifier must not undo it.
-  if (!row.tax_reviewed) {
+  // Only overwrite tax fields when neither a human nor the Cloud Teacher has
+  // pinned them. `tax_reviewed=true` = human asserted; `category_source` in
+  // ('cloud','user') = trusted source also wrote the tax metadata.
+  const taxProtected = row.tax_reviewed || row.category_source === "cloud" || row.category_source === "user";
+  if (!taxProtected) {
     patch.tax_relevant = classification.tax_relevant;
     patch.tax_year = classification.tax_year;
     patch.tax_year_confidence = classification.tax_year_confidence;
@@ -535,7 +538,7 @@ export async function runClassify(documentId: number): Promise<{ classification:
   // A document that even after learned + hand rules lands in the catch-all
   // "sonstiges" is evidence the taxonomy may be missing a category for its
   // sender — feed the admin's category-suggestions queue. Best-effort.
-  if (!row.attributes_reviewed && catSlug === "sonstiges") {
+  if (!categoryProtected && catSlug === "sonstiges") {
     void recordUncategorizedDocument({ documentId, sender: classification.sender }).catch(
       (err) =>
         console.error(`[documents] category suggestion for document=${documentId} failed:`, err),
@@ -546,9 +549,9 @@ export async function runClassify(documentId: number): Promise<{ classification:
   void checkReceiptEnrichment(documentId).catch(err => console.error(`[documents] receipt enrichment check failed for document=${documentId}:`, err));
 
   // Report the category the document actually carries now: the fresh guess
-  // when applied, or the pinned existing one when attributes are reviewed.
+  // when applied, or the pinned existing one when the category is protected.
   let effectiveCatSlug: string | null = catSlug;
-  if (row.attributes_reviewed) {
+  if (categoryProtected) {
     effectiveCatSlug =
       row.category_id == null
         ? null
@@ -569,7 +572,7 @@ export async function runClassify(documentId: number): Promise<{ classification:
   await replaceTagLinks(documentId, classification.tags);
   await replaceAiSubjectPersons(documentId, subjectPersonIds);
 
-  if (!row.tax_reviewed) {
+  if (!taxProtected) {
     await replaceAiTaxSections(documentId, classification.tax_sections);
   }
 
@@ -584,10 +587,10 @@ export async function runClassify(documentId: number): Promise<{ classification:
     );
   }
 
-  // A reviewed document's attributes weren't touched, so there is nothing to
+  // A protected document's attributes weren't touched, so there is nothing to
   // flag for review even if the (ignored) guess was low-confidence.
   const lowConfidence =
-    !row.attributes_reviewed && classification.confidence < LOW_CONFIDENCE_THRESHOLD;
+    !categoryProtected && classification.confidence < LOW_CONFIDENCE_THRESHOLD;
   if (lowConfidence) {
     // Best-effort — push must never block the pipeline.
     push

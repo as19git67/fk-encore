@@ -131,6 +131,13 @@ const taxOptions = [
   { label: 'Nein', value: 'false' },
 ]
 
+const categorySourceOptions = [
+  { label: 'Alle', value: '' },
+  { label: 'KI (lokal)', value: 'ai' },
+  { label: 'Cloud Teacher', value: 'cloud' },
+  { label: 'Manuell', value: 'user' },
+]
+
 const subjectOptions = computed<Array<{ label: string; value: number | null }>>(() => [
   { label: 'Alle', value: null },
   ...props.subjectPeople.map((p) => ({ label: p.full_name, value: p.id })),
@@ -236,6 +243,17 @@ function handleReset() {
           option-label="label"
           option-value="value"
           @update:model-value="(v: string) => local = { ...local, taxRelevant: v === '' ? undefined : v === 'true' }"
+        />
+      </div>
+
+      <div class="filter-row">
+        <label class="filter-label">Kategorie-Quelle</label>
+        <Select
+          :model-value="local.categorySource ?? ''"
+          :options="categorySourceOptions"
+          option-label="label"
+          option-value="value"
+          @update:model-value="(v: string) => local = { ...local, categorySource: v || undefined }"
         />
       </div>
 
