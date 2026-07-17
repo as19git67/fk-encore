@@ -174,7 +174,7 @@ def household_names(conn) -> list[str]:
     # 1. user_subject_persons (Bezugspersonen)
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT DISTINCT name FROM user_subject_persons")
+            cur.execute("SELECT DISTINCT full_name FROM user_subject_persons")
             for (n,) in cur.fetchall():
                 if n:
                     names.add(n)
