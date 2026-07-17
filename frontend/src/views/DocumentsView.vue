@@ -333,6 +333,7 @@ function currentFilterParams() {
     date_to: f.dateTo,
     tax_relevant: f.taxRelevant,
     subject_person_id: f.subjectPersonId,
+    category_source: f.categorySource as any,
   }
 }
 

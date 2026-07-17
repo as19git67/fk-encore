@@ -171,6 +171,8 @@ export interface DocumentSummary {
    * AI-only attribution that nobody has approved yet (issue #635).
    */
   attributes_reviewed: boolean;
+  /** Who last set the category: 'ai' (local model), 'cloud' (Cloud Teacher), 'user' (human). */
+  category_source: "ai" | "cloud" | "user";
 }
 
 export interface DocumentTaxSectionDTO {
@@ -250,6 +252,8 @@ interface ListQuery {
   tax_relevant?: Query<boolean>;
   /** Keep only documents linked to this Bezugsperson (see migration 0102). */
   subject_person_id?: Query<number>;
+  /** Filter by category source: 'ai', 'cloud', or 'user'. */
+  category_source?: Query<string>;
   sort_by?: Query<string>;
   sort_dir?: Query<string>;
   limit?: Query<number>;
@@ -272,6 +276,7 @@ interface DocumentFilterArgs {
   date_to?: string;
   tax_relevant?: boolean;
   subject_person_id?: number;
+  category_source?: string;
 }
 
 /**
@@ -342,6 +347,10 @@ async function buildDocumentFilterConditions(
           AND ${documentSubjectPersons.subject_person_id} = ${f.subject_person_id}
       )`,
     );
+  }
+
+  if (f.category_source && ["ai", "cloud", "user"].includes(f.category_source)) {
+    conds.push(eq(documents.category_source, f.category_source as "ai" | "cloud" | "user"));
   }
 
   const tagList = f.tags
@@ -989,7 +998,7 @@ async function loadDefaultGroupForUser(userId: number): Promise<number | null> {
 
 export const listDocuments = api(
   { expose: true, method: "GET", path: "/documents", auth: true },
-  async ({ category, tags, q, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, sort_by, sort_dir, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
+  async ({ category, tags, q, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, sort_by, sort_dir, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -1004,7 +1013,7 @@ export const listDocuments = api(
       : [visibleDocumentsWhere(userId, groupIds)];
 
     const filterConds = await buildDocumentFilterConditions({
-      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id,
+      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source,
     });
     if (filterConds === null) {
       // A requested tag doesn't exist — nothing can match.
@@ -1065,6 +1074,7 @@ export const listDocuments = api(
           last_error: documents.last_error,
           notes: documents.notes,
           attributes_reviewed: documents.attributes_reviewed,
+          category_source: documents.category_source,
           cat_slug: documentCategories.slug,
         })
         .from(documents)
@@ -2942,6 +2952,7 @@ interface SearchQuery {
   date_to?: Query<string>;
   tax_relevant?: Query<boolean>;
   subject_person_id?: Query<number>;
+  category_source?: Query<string>;
 }
 
 /**
@@ -2956,7 +2967,7 @@ interface SearchQuery {
  */
 export const searchDocumentsEndpoint = api(
   { expose: true, method: "GET", path: "/documents/search", auth: true },
-  async ({ q, mode, limit, category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id }: SearchQuery): Promise<SearchDocumentsResponse> => {
+  async ({ q, mode, limit, category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source }: SearchQuery): Promise<SearchDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -2971,7 +2982,7 @@ export const searchDocumentsEndpoint = api(
     }
 
     const filterConds = await buildDocumentFilterConditions({
-      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id,
+      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source,
     });
     if (filterConds === null) {
       // A requested tag doesn't exist — nothing can match.
@@ -3527,6 +3538,7 @@ export function toSummary(
     group_id: row.group_id,
     notes: row.notes ?? null,
     attributes_reviewed: row.attributes_reviewed ?? false,
+    category_source: row.category_source ?? "ai",
   };
 }
 
