@@ -14,19 +14,21 @@ from app.services.scene_pairs import find_scene_pairs
 
 
 def _make_vec(seed: int, dim: int = 768) -> list[float]:
-    """Deterministic pseudo-random unit vector for testing."""
-    import random
-    rng = random.Random(seed)
-    raw = [rng.gauss(0, 1) for _ in range(dim)]
+    """Deterministic unit vector — no random.gauss, fully portable."""
+    # Simple linear congruential generator to avoid platform-dependent
+    # random.gauss implementations across Python versions.
+    s = seed
+    raw = []
+    for _ in range(dim):
+        s = (s * 1103515245 + 12345) & 0x7FFFFFFF
+        raw.append((s / 0x7FFFFFFF) - 0.5)
     norm = math.sqrt(sum(x * x for x in raw))
     return [x / norm for x in raw]
 
 
-def _similar_vec(base: list[float], noise: float = 0.05, seed: int = 42) -> list[float]:
-    """Return a vector very similar to base (high cosine similarity)."""
-    import random
-    rng = random.Random(seed)
-    perturbed = [x + rng.gauss(0, noise) for x in base]
+def _similar_vec(base: list[float], scale: float = 0.001) -> list[float]:
+    """Return a vector very close to base by adding a tiny deterministic offset."""
+    perturbed = [x + scale * (0.5 - (i % 7) / 6.0) for i, x in enumerate(base)]
     norm = math.sqrt(sum(x * x for x in perturbed))
     return [x / norm for x in perturbed]
 
@@ -38,7 +40,7 @@ YEAR = 365.25 * DAY
 class TestFindScenePairs:
     def test_finds_similar_pair_across_time(self):
         v1 = _make_vec(1)
-        v2 = _similar_vec(v1, noise=0.005, seed=10)
+        v2 = _similar_vec(v1)
         items = [
             ("a", 0.0, 0.8, v1),
             ("b", 3 * YEAR, 0.7, v2),
@@ -53,7 +55,7 @@ class TestFindScenePairs:
 
     def test_respects_time_gap_minimum(self):
         v1 = _make_vec(1)
-        v2 = _similar_vec(v1, noise=0.005)
+        v2 = _similar_vec(v1)
         items = [
             ("a", 0.0, 0.8, v1),
             ("b", 0.5 * YEAR, 0.7, v2),  # only 6 months apart
@@ -73,8 +75,8 @@ class TestFindScenePairs:
         base = _make_vec(1)
         items = [
             ("a", 0.0, 0.9, base),
-            ("b", 3 * YEAR, 0.8, _similar_vec(base, 0.005, seed=10)),
-            ("c", 4 * YEAR, 0.7, _similar_vec(base, 0.008, seed=20)),
+            ("b", 3 * YEAR, 0.8, _similar_vec(base, 0.001)),
+            ("c", 4 * YEAR, 0.7, _similar_vec(base, 0.002)),
         ]
         pairs = find_scene_pairs(items, 2 * YEAR, 0.85, 10)
         # a matches both b and c, but each photo can only appear once
@@ -87,7 +89,7 @@ class TestFindScenePairs:
         for i in range(10):
             v = _make_vec(i * 100)
             pairs_data.append((f"then_{i}", float(i) * DAY, 0.8, v))
-            pairs_data.append((f"now_{i}", 5 * YEAR + float(i) * DAY, 0.7, _similar_vec(v, 0.005, seed=i)))
+            pairs_data.append((f"now_{i}", 5 * YEAR + float(i) * DAY, 0.7, _similar_vec(v)))
         pairs = find_scene_pairs(pairs_data, 2 * YEAR, 0.85, 3)
         assert len(pairs) <= 3
 
@@ -96,7 +98,7 @@ class TestFindScenePairs:
         items = [
             ("a", 0.0, 0.8, v1),
             ("b", 3 * YEAR, 0.7, None),
-            ("c", 3 * YEAR, 0.6, _similar_vec(v1, 0.005)),
+            ("c", 3 * YEAR, 0.6, _similar_vec(v1)),
         ]
         pairs = find_scene_pairs(items, 2 * YEAR, 0.85, 10)
         # b has no embedding, so the only possible pair is (a, c)
@@ -113,7 +115,7 @@ class TestFindScenePairs:
 
     def test_then_is_always_older(self):
         v1 = _make_vec(1)
-        v2 = _similar_vec(v1, noise=0.005)
+        v2 = _similar_vec(v1)
         items = [
             ("newer", 5 * YEAR, 0.8, v1),
             ("older", 0.0, 0.7, v2),
