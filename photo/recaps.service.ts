@@ -532,7 +532,12 @@ async function resolveTitle(opts: {
 // Builder: on_this_day
 // ────────────────────────────────────────────────────────────────────────────
 
-function buildOnThisDayGroups(
+// Only these round anniversaries get an "on this day" recap. Without this,
+// every past year with enough photos produces a recap — a decade-old library
+// would show up to 10 near-identical "Vor N Jahren" cards per day.
+const ON_THIS_DAY_MILESTONE_YEARS = new Set([1, 5, 10, 20, 25]);
+
+export function buildOnThisDayGroups(
   photos: CandidatePhoto[],
   today: Date
 ): Map<number, CandidatePhoto[]> {
@@ -547,6 +552,7 @@ function buildOnThisDayGroups(
     if (d.getMonth() !== targetMonth || d.getDate() !== targetDay) continue;
     const year = d.getFullYear();
     if (year >= currentYear) continue; // only past years
+    if (!ON_THIS_DAY_MILESTONE_YEARS.has(currentYear - year)) continue;
     const arr = byYear.get(year) ?? [];
     arr.push(p);
     byYear.set(year, arr);
@@ -978,10 +984,10 @@ const PERSON_MIN_PHOTOS = 8;
 const COMPARE_MIN_YEAR_SPAN = 2;
 // Only the top-N most-photographed persons per user get dedicated recaps.
 // Without this cap, a user with many recognised faces generates hundreds of
-// per-year recaps, most of them for peripheral persons. Choosing 15 keeps the
-// close-circle covered (family, partners, close friends) without swamping
+// per-year recaps, most of them for peripheral persons. Choosing 6 keeps the
+// closest circle covered (family, partner, closest friends) without swamping
 // the feed or the DB.
-const PERSON_MAX_PERSONS = 15;
+const PERSON_MAX_PERSONS = 6;
 
 export interface ThenAndNow {
   then: CandidatePhoto;
