@@ -85,6 +85,10 @@ const finishedState = ref<Record<string, 'done' | 'error' | null>>({})
 const reports = ref<Record<string, ReportFile[]>>({})
 const downloading = ref<Record<string, boolean>>({})
 const loadingReports = ref<Record<string, boolean>>({})
+// The option values captured at the moment a run was started, shown
+// read-only while it runs so the config on screen always matches what the
+// run was launched with.
+const submittedOptions = ref<Record<string, ToolConfig['options']>>({})
 
 // Persist the last result + log per tool so a browser refresh doesn't wipe
 // everything. The report files themselves live in the sidecar and are
@@ -92,13 +96,20 @@ const loadingReports = ref<Record<string, boolean>>({})
 // text, which have no other source of truth once the page reloads.
 const STORAGE_KEY = 'admin-tools-state-v1'
 
+interface PersistedTool {
+  finished: 'done' | 'error' | null
+  logs: string[]
+  submitted?: ToolConfig['options']
+}
+
 function persistState() {
   try {
-    const snapshot: Record<string, { finished: 'done' | 'error' | null; logs: string[] }> = {}
+    const snapshot: Record<string, PersistedTool> = {}
     for (const tool of tools.value) {
       const f = finishedState.value[tool.name] ?? null
       const l = logs.value[tool.name] ?? []
-      if (f || l.length > 0) snapshot[tool.name] = { finished: f, logs: l }
+      const s = submittedOptions.value[tool.name]
+      if (f || l.length > 0 || s) snapshot[tool.name] = { finished: f, logs: l, submitted: s }
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot))
   } catch {
@@ -110,14 +121,14 @@ function restoreState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return
-    const snapshot = JSON.parse(raw) as Record<
-      string,
-      { finished: 'done' | 'error' | null; logs: string[] }
-    >
+    const snapshot = JSON.parse(raw) as Record<string, PersistedTool>
     for (const [tool, s] of Object.entries(snapshot)) {
       if (s.finished) finishedState.value = { ...finishedState.value, [tool]: s.finished }
       if (Array.isArray(s.logs) && s.logs.length > 0) {
         logs.value = { ...logs.value, [tool]: s.logs }
+      }
+      if (s.submitted) {
+        submittedOptions.value = { ...submittedOptions.value, [tool]: s.submitted }
       }
     }
   } catch {
@@ -201,6 +212,7 @@ async function startTool(tool: ToolConfig) {
 
   try {
     await runTool(tool.name, opts)
+    submittedOptions.value = { ...submittedOptions.value, [tool.name]: { ...tool.options } }
     running.value = { ...running.value, [tool.name]: true }
     reports.value = { ...reports.value, [tool.name]: [] }
     ensurePolling()
@@ -248,6 +260,27 @@ async function refreshAll() {
 function clearLog(toolName: string) {
   logs.value = { ...logs.value, [toolName]: [] }
   persistState()
+}
+
+// Human-readable summary of the options a run was started with, per tool.
+function submittedSummary(tool: ToolConfig): string {
+  const o = submittedOptions.value[tool.name]
+  if (!o) return ''
+  const parts: string[] = []
+  if (tool.name === 'cloud-audit' || tool.name === 'cloud-teacher') {
+    parts.push(`Dry Run: ${o.dry_run ? 'an' : 'aus'}`)
+  }
+  if (tool.name === 'diagnose' && o.sample) parts.push(`Confusion Sample: ${o.sample}`)
+  if (tool.name === 'cloud-audit') {
+    if (o.sample) parts.push(`Kategorie-Stichprobe: ${o.sample}`)
+    if (o.tax_sample) parts.push(`Steuer-Stichprobe: ${o.tax_sample}`)
+    if (o.focus_sections) parts.push(`Focus Sections: ${o.focus_sections}`)
+  }
+  if (tool.name === 'cloud-teacher') {
+    if (o.batch) parts.push(`Batch: ${o.batch}`)
+    if (o.focus_categories) parts.push(`Focus Categories: ${o.focus_categories}`)
+  }
+  return parts.join(' · ')
 }
 
 async function fetchReports(toolName: string) {
@@ -369,11 +402,13 @@ onUnmounted(() => {
           />
         </header>
 
-        <!-- Options -->
-        <div class="tool-options">
+        <!-- Options (interactive only while idle; a run must not be able to
+             change its own config, and rendering a disabled ToggleSwitch is
+             what made Dry Run appear to reset itself). -->
+        <div v-if="!running[tool.name]" class="tool-options">
           <div v-if="tool.name === 'cloud-audit' || tool.name === 'cloud-teacher'" class="option-row">
             <label>Dry Run</label>
-            <ToggleSwitch v-model="tool.options.dry_run" :disabled="running[tool.name]" />
+            <ToggleSwitch v-model="tool.options.dry_run" />
           </div>
 
           <div v-if="tool.name === 'diagnose'" class="option-row">
@@ -382,7 +417,6 @@ onUnmounted(() => {
               v-model="tool.options.sample"
               :min="0"
               :max="5000"
-              :disabled="running[tool.name]"
               placeholder="800"
               class="option-input"
             />
@@ -394,7 +428,6 @@ onUnmounted(() => {
               v-model="tool.options.sample"
               :min="1"
               :max="5000"
-              :disabled="running[tool.name]"
               placeholder="300"
               class="option-input"
             />
@@ -406,7 +439,6 @@ onUnmounted(() => {
               v-model="tool.options.tax_sample"
               :min="1"
               :max="5000"
-              :disabled="running[tool.name]"
               placeholder="100"
               class="option-input"
             />
@@ -418,7 +450,6 @@ onUnmounted(() => {
               v-model="tool.options.batch"
               :min="1"
               :max="5000"
-              :disabled="running[tool.name]"
               placeholder="400"
               class="option-input"
             />
@@ -428,7 +459,6 @@ onUnmounted(() => {
             <label>Focus Sections</label>
             <InputText
               v-model="tool.options.focus_sections"
-              :disabled="running[tool.name]"
               placeholder="z.B. anlage-av,anlage-kind"
               class="option-input"
             />
@@ -438,11 +468,15 @@ onUnmounted(() => {
             <label>Focus Categories</label>
             <InputText
               v-model="tool.options.focus_categories"
-              :disabled="running[tool.name]"
               placeholder="z.B. finanzen-steuern,sonstiges"
               class="option-input"
             />
           </div>
+        </div>
+
+        <!-- Read-only summary of the config that is actually running. -->
+        <div v-else-if="submittedSummary(tool)" class="tool-options-readonly hint">
+          {{ submittedSummary(tool) }}
         </div>
 
         <!-- Actions -->
@@ -574,6 +608,9 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 0.5rem;
 }
+.tool-options-readonly {
+  padding: 0.25rem 0;
+}
 .option-row {
   display: flex;
   align-items: center;
@@ -590,6 +627,16 @@ onUnmounted(() => {
   flex: 1 1 0;
   min-width: 0;
   max-width: 240px;
+  width: 100%;
+  box-sizing: border-box;
+}
+/* PrimeVue InputNumber applies the .option-input class to a wrapper span,
+   not the actual field — force the inner <input> to shrink with it so it
+   can't overflow the card on narrow screens. */
+.option-input :deep(input) {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 .tool-actions {
   display: flex;
@@ -643,6 +690,13 @@ onUnmounted(() => {
   }
   .page-header h1 {
     font-size: 1.25rem;
+  }
+  /* Stack label over a full-width field so nothing can run off the right
+     edge on a phone. */
+  .option-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.25rem;
   }
   .option-input {
     max-width: 100%;
