@@ -61,6 +61,7 @@ export function moodForKind(kind: RecapKind): RecapMood {
     case "person":
       return "warm";
     case "on_this_day":
+    case "scene_then_now":
       return "nostalgic";
     case "place":
     case "theme":

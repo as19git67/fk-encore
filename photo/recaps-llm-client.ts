@@ -29,6 +29,8 @@ export interface RecapTitleContext {
   month_label?: string | null;
   photo_count?: number | null;
   keywords?: string[];
+  year_then?: number | null;
+  year_now?: number | null;
 }
 
 export interface RecapTitleResult {
@@ -48,6 +50,8 @@ function cleanContext(ctx: RecapTitleContext): Record<string, unknown> {
   // photo_count intentionally omitted — the LLM tends to bake it into
   // the title/subtitle where it adds no value.
   if (ctx.keywords && ctx.keywords.length > 0) out.keywords = ctx.keywords.slice(0, 8);
+  if (typeof ctx.year_then === "number") out.year_then = ctx.year_then;
+  if (typeof ctx.year_now === "number") out.year_now = ctx.year_now;
   return out;
 }
 

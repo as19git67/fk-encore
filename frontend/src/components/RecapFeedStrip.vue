@@ -54,6 +54,7 @@ const kindLabels: Record<RecapKind, string> = {
   place: 'Ort',
   theme: 'Thema',
   recent_highlights: 'Kürzlich',
+  scene_then_now: 'Damals & heute',
 }
 
 function coverUrl(r: RecapSummary): string | null {

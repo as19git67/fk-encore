@@ -135,3 +135,27 @@ class DiverseSelectRequest(BaseModel):
 
 class DiverseSelectResponse(BaseModel):
     photo_ids: List[str] = Field(..., description="Chosen photo ids, best-first (index 0 is the cover)")
+
+
+class ScenePairCandidate(BaseModel):
+    photo_id: str
+    timestamp: float = Field(..., description="Unix epoch seconds of capture time")
+    quality: float = Field(default=0.0, description="AI quality score; used to pick the best pair per scene")
+
+
+class FindScenePairsRequest(BaseModel):
+    candidates: List[ScenePairCandidate] = Field(..., min_length=2, description="Candidate photos to scan for scene pairs")
+    min_time_gap_days: int = Field(default=730, ge=30, description="Minimum days between the two photos of a pair")
+    similarity_threshold: float = Field(default=0.70, ge=0.0, le=1.0, description="Minimum DINOv2 cosine similarity for a match")
+    max_pairs: int = Field(default=10, ge=1, le=50, description="Maximum number of scene pairs to return")
+
+
+class ScenePair(BaseModel):
+    photo_id_then: str
+    photo_id_now: str
+    similarity: float
+    time_gap_days: int
+
+
+class FindScenePairsResponse(BaseModel):
+    pairs: List[ScenePair]

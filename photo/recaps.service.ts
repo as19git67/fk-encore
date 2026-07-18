@@ -42,9 +42,10 @@ const RECAP_KIND_QUOTA: Record<RecapKind, number> = {
   recent_highlights: 4,
   on_this_day: 8,
   trip: 10,
-  person: 15,
+  person: 12,
   place: 8,
   theme: 5,
+  scene_then_now: 3,
 };
 // Candidate pool size per kind (fetched via window function). Sized to
 // MAX_VISIBLE_RECAPS so that a user with only one populated kind can still
@@ -53,6 +54,9 @@ const RECAP_KIND_POOL = MAX_VISIBLE_RECAPS;
 const TRIP_MIN_DISTANCE_KM = 100;
 const TRIP_MAX_GAP_DAYS = 2;
 const TRIP_LOOKBACK_DAYS = 365 * 3;
+// Within a time-contiguous trip bucket, photos further apart than this form
+// separate sub-trips (e.g. Berlin → Prague in the same week).
+const TRIP_GEO_SPLIT_KM = 50;
 
 const EMBEDDING_SERVICE_URL = (
   process.env.EMBEDDING_SERVICE_URL || "http://localhost:8001"
@@ -96,7 +100,8 @@ export type RecapKind =
   | "person"
   | "place"
   | "theme"
-  | "recent_highlights";
+  | "recent_highlights"
+  | "scene_then_now";
 
 export interface RecapSummary {
   id: number;
@@ -532,7 +537,12 @@ async function resolveTitle(opts: {
 // Builder: on_this_day
 // ────────────────────────────────────────────────────────────────────────────
 
-function buildOnThisDayGroups(
+// Only these round anniversaries get an "on this day" recap. Without this,
+// every past year with enough photos produces a recap — a decade-old library
+// would show up to 10 near-identical "Vor N Jahren" cards per day.
+const ON_THIS_DAY_MILESTONE_YEARS = new Set([1, 5, 10, 20, 25]);
+
+export function buildOnThisDayGroups(
   photos: CandidatePhoto[],
   today: Date
 ): Map<number, CandidatePhoto[]> {
@@ -547,6 +557,7 @@ function buildOnThisDayGroups(
     if (d.getMonth() !== targetMonth || d.getDate() !== targetDay) continue;
     const year = d.getFullYear();
     if (year >= currentYear) continue; // only past years
+    if (!ON_THIS_DAY_MILESTONE_YEARS.has(currentYear - year)) continue;
     const arr = byYear.get(year) ?? [];
     arr.push(p);
     byYear.set(year, arr);
@@ -690,9 +701,74 @@ function avg(values: number[]): number {
 }
 
 /**
+ * Split a time-contiguous bucket of trip photos into geographic sub-groups.
+ * Photos within TRIP_GEO_SPLIT_KM of each other stay together; distant
+ * clusters (e.g. Berlin vs Prague on the same week-long trip) become separate
+ * sub-buckets. Each sub-bucket preserves chronological order.
+ */
+export function splitBucketByGeo(bucket: CandidatePhoto[]): CandidatePhoto[][] {
+  if (bucket.length === 0) return [];
+  const centroids: { lat: number; lon: number; count: number }[] = [];
+  const labels: number[] = [];
+  for (const p of bucket) {
+    if (p.latitude == null || p.longitude == null) {
+      labels.push(-1);
+      continue;
+    }
+    let best = -1;
+    let bestD = Infinity;
+    for (let i = 0; i < centroids.length; i++) {
+      const c = centroids[i]!;
+      const d = haversineKm(p.latitude, p.longitude, c.lat, c.lon);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    if (best >= 0 && bestD <= TRIP_GEO_SPLIT_KM) {
+      const c = centroids[best]!;
+      c.lat = (c.lat * c.count + p.latitude) / (c.count + 1);
+      c.lon = (c.lon * c.count + p.longitude) / (c.count + 1);
+      c.count++;
+      labels.push(best);
+    } else {
+      centroids.push({ lat: p.latitude, lon: p.longitude, count: 1 });
+      labels.push(centroids.length - 1);
+    }
+  }
+  // Find the largest geo cluster so no-GPS photos can join it.
+  const groups = new Map<number, CandidatePhoto[]>();
+  for (let i = 0; i < bucket.length; i++) {
+    const l = labels[i]!;
+    if (l === -1) continue; // handle below
+    const arr = groups.get(l) ?? [];
+    arr.push(bucket[i]!);
+    groups.set(l, arr);
+  }
+  let largestLabel = 0;
+  let largestSize = 0;
+  for (const [l, arr] of groups) {
+    if (arr.length > largestSize) {
+      largestSize = arr.length;
+      largestLabel = l;
+    }
+  }
+  for (let i = 0; i < bucket.length; i++) {
+    if (labels[i] !== -1) continue;
+    const arr = groups.get(largestLabel) ?? [];
+    arr.push(bucket[i]!);
+    groups.set(largestLabel, arr);
+  }
+  return Array.from(groups.values());
+}
+
+/**
  * Clustere GPS-Fotos chronologisch: neuer Trip beginnt, sobald eine
- * Zeitluecke > TRIP_MAX_GAP_DAYS auftritt. Nur Cluster mit signifikantem
- * Abstand zum Home-Zentroid werden als Trip akzeptiert.
+ * Zeitluecke > TRIP_MAX_GAP_DAYS auftritt. Innerhalb eines Zeit-Buckets
+ * werden Fotos zusätzlich nach Entfernung aufgesplittet, sodass z.B.
+ * Berlin und Prag auf der gleichen Wochenreise separate Recaps ergeben.
+ * Nur Cluster mit signifikantem Abstand zum Home-Zentroid werden als Trip
+ * akzeptiert.
  */
 function buildTripClusters(
   candidates: CandidatePhoto[],
@@ -719,48 +795,44 @@ function buildTripClusters(
   let bucket: CandidatePhoto[] = [];
   let lastDate: Date | null = null;
 
-  const flush = () => {
-    if (bucket.length < MIN_PHOTOS_PER_RECAP) {
-      bucket = [];
-      return;
-    }
-    const lats = bucket.map((p) => p.latitude!);
-    const lons = bucket.map((p) => p.longitude!);
+  const flushGroup = (group: CandidatePhoto[]) => {
+    if (group.length < MIN_PHOTOS_PER_RECAP) return;
+    const lats = group.map((p) => p.latitude!);
+    const lons = group.map((p) => p.longitude!);
     const cLat = avg(lats);
     const cLon = avg(lons);
     const distance = haversineKm(home.lat, home.lon, cLat, cLon);
-    if (distance < TRIP_MIN_DISTANCE_KM) {
-      bucket = [];
-      return;
-    }
-    // Drop individual photos that are still near home (e.g. shots taken
-    // before/after departure that fall within the TRIP_MAX_GAP_DAYS window).
-    bucket = bucket.filter(
+    if (distance < TRIP_MIN_DISTANCE_KM) return;
+    group = group.filter(
       (p) =>
         p.latitude != null &&
         p.longitude != null &&
         haversineKm(home.lat, home.lon, p.latitude, p.longitude) >=
           TRIP_MIN_DISTANCE_KM
     );
-    if (bucket.length < MIN_PHOTOS_PER_RECAP) {
-      bucket = [];
-      return;
-    }
-    const start = effectiveDate(bucket[0])!;
-    const end = effectiveDate(bucket[bucket.length - 1])!;
+    if (group.length < MIN_PHOTOS_PER_RECAP) return;
+    const start = effectiveDate(group[0])!;
+    const end = effectiveDate(group[group.length - 1])!;
     clusters.push({
-      photos: bucket,
+      photos: group,
       start,
       end,
       centroidLat: cLat,
       centroidLon: cLon,
-      // location_city / location_country may contain UTF-8-as-Latin-1
-      // mojibake from IPTC EXIF fields that lack a CodedCharacterSet
-      // marker. Repair at the boundary so both the fallback title and
-      // the LLM context see clean strings.
-      dominantCity: repairMojibake(mostFrequent(bucket.map((p) => p.location_city))),
-      dominantCountry: repairMojibake(mostFrequent(bucket.map((p) => p.location_country))),
+      dominantCity: repairMojibake(mostFrequent(group.map((p) => p.location_city))),
+      dominantCountry: repairMojibake(mostFrequent(group.map((p) => p.location_country))),
     });
+  };
+
+  const flush = () => {
+    if (bucket.length < MIN_PHOTOS_PER_RECAP) {
+      bucket = [];
+      return;
+    }
+    const geoGroups = splitBucketByGeo(bucket);
+    for (const group of geoGroups) {
+      flushGroup(group);
+    }
     bucket = [];
   };
 
@@ -978,10 +1050,10 @@ const PERSON_MIN_PHOTOS = 8;
 const COMPARE_MIN_YEAR_SPAN = 2;
 // Only the top-N most-photographed persons per user get dedicated recaps.
 // Without this cap, a user with many recognised faces generates hundreds of
-// per-year recaps, most of them for peripheral persons. Choosing 15 keeps the
-// close-circle covered (family, partners, close friends) without swamping
+// per-year recaps, most of them for peripheral persons. Choosing 6 keeps the
+// closest circle covered (family, partner, closest friends) without swamping
 // the feed or the DB.
-const PERSON_MAX_PERSONS = 15;
+const PERSON_MAX_PERSONS = 6;
 
 export interface ThenAndNow {
   then: CandidatePhoto;
@@ -1472,6 +1544,155 @@ async function buildThemeRecaps(
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Builder: scene_then_now (same scene photographed years apart)
+// ────────────────────────────────────────────────────────────────────────────
+
+const SCENE_ENABLED = (process.env.RECAPS_SCENE_ENABLED ?? "1") !== "0";
+const SCENE_MIN_TIME_GAP_DAYS = 730; // 2 years
+const SCENE_SIMILARITY_THRESHOLD = 0.70;
+const SCENE_MAX_PAIRS = 10;
+const SCENE_SAMPLE_SIZE = 1000;
+const SCENE_HTTP_TIMEOUT_MS = parseInt(
+  process.env.RECAPS_SCENE_TIMEOUT_MS ?? "20000",
+  10
+);
+
+interface ScenePairResult {
+  photo_id_then: string;
+  photo_id_now: string;
+  similarity: number;
+  time_gap_days: number;
+}
+
+async function findScenePairsRemote(
+  candidates: { photo_id: string; timestamp: number; quality: number }[]
+): Promise<ScenePairResult[] | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SCENE_HTTP_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${EMBEDDING_SERVICE_URL}/find-scene-pairs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        candidates,
+        min_time_gap_days: SCENE_MIN_TIME_GAP_DAYS,
+        similarity_threshold: SCENE_SIMILARITY_THRESHOLD,
+        max_pairs: SCENE_MAX_PAIRS,
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { pairs?: ScenePairResult[] };
+    return data.pairs ?? null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function buildSceneRecaps(
+  userId: number,
+  allPhotos: CandidatePhoto[],
+  _today: Date
+): Promise<number> {
+  if (!SCENE_ENABLED) return 0;
+  if (allPhotos.length < 20) return 0;
+
+  // Sample the highest-quality photos to keep payload and compute bounded.
+  const withTimestamp = allPhotos
+    .filter((p) => effectiveDate(p) != null)
+    .sort(byQualityDesc)
+    .slice(0, SCENE_SAMPLE_SIZE);
+  if (withTimestamp.length < 10) return 0;
+
+  const candidates = withTimestamp.map((p) => ({
+    photo_id: String(p.id),
+    timestamp: effectiveDate(p)!.getTime() / 1000,
+    quality: p.ai_quality_score ?? 0,
+  }));
+
+  const pairs = await findScenePairsRemote(candidates);
+  if (!pairs || pairs.length === 0) return 0;
+
+  const photosById = new Map(allPhotos.map((p) => [p.id, p]));
+  let built = 0;
+
+  for (const pair of pairs) {
+    const thenId = parseInt(pair.photo_id_then, 10);
+    const nowId = parseInt(pair.photo_id_now, 10);
+    const thenPhoto = photosById.get(thenId);
+    const nowPhoto = photosById.get(nowId);
+    if (!thenPhoto || !nowPhoto) continue;
+
+    const thenDate = effectiveDate(thenPhoto);
+    const nowDate = effectiveDate(nowPhoto);
+    if (!thenDate || !nowDate) continue;
+
+    const thenYear = thenDate.getFullYear();
+    const nowYear = nowDate.getFullYear();
+    const dedupKey = `scene_then_now:${thenId}:${nowId}`;
+    const coverPhoto =
+      (thenPhoto.ai_quality_score ?? 0) >= (nowPhoto.ai_quality_score ?? 0)
+        ? thenPhoto
+        : nowPhoto;
+
+    const locationCity =
+      nowPhoto.location_city ?? thenPhoto.location_city ?? null;
+    const locationCountry =
+      nowPhoto.location_country ?? thenPhoto.location_country ?? null;
+
+    const fallbackTitle =
+      thenYear === nowYear - 1
+        ? "Vor einem Jahr"
+        : `${nowYear - thenYear} Jahre dazwischen`;
+    const fallbackSubtitle = locationCity
+      ? repairMojibake(locationCity)
+      : repairMojibake(locationCountry);
+
+    const resolved = await resolveTitle({
+      userId,
+      dedupKey,
+      fallback: { title: fallbackTitle, subtitle: fallbackSubtitle },
+      ctx: {
+        kind: "scene_then_now",
+        place_city: locationCity ? repairMojibake(locationCity) : undefined,
+        place_country: locationCountry
+          ? repairMojibake(locationCountry)
+          : undefined,
+        year_then: thenYear,
+        year_now: nowYear,
+      },
+    });
+
+    await upsertRecap({
+      userId,
+      kind: "scene_then_now",
+      title: resolved.title,
+      subtitle: resolved.subtitle,
+      dedupKey,
+      coverPhotoId: coverPhoto.id,
+      periodStart: thenDate,
+      periodEnd: nowDate,
+      score: 60 + Math.min(pair.time_gap_days / 365, 10),
+      seed: {
+        then_photo_id: thenId,
+        then_year: thenYear,
+        now_photo_id: nowId,
+        now_year: nowYear,
+        similarity: pair.similarity,
+        time_gap_days: pair.time_gap_days,
+        ...(locationCity ? { location_city: repairMojibake(locationCity) } : {}),
+        ...(resolved.llmUsed ? { llm_title: true } : {}),
+      },
+      photoIds: [thenId, nowId],
+    });
+    built++;
+  }
+  return built;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Public API: rebuild + list + get + dismiss
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -1482,6 +1703,7 @@ export interface RebuildResult {
   recent_highlights: number;
   place: number;
   theme: number;
+  scene_then_now: number;
 }
 
 export interface RebuildOptions {
@@ -1509,6 +1731,9 @@ export async function rebuildRecapsForUser(
   const theme = includeThemes
     ? await buildThemeRecaps(userId, candidates, now)
     : 0;
+  const scene_then_now = includeThemes
+    ? await buildSceneRecaps(userId, candidates, now)
+    : 0;
 
   // Orphan cleanup: photo deletions cascade through recap_photos, which can
   // leave a recap row with zero members ("0 Fotos" in the feed). The listing
@@ -1523,7 +1748,7 @@ export async function rebuildRecapsForUser(
     )
   );
 
-  return { on_this_day, trip, person, recent_highlights, place, theme };
+  return { on_this_day, trip, person, recent_highlights, place, theme, scene_then_now };
 }
 
 // Promise-lock guarding rebuildRecapsForAllUsers. See the comment in the
@@ -1554,6 +1779,7 @@ export async function rebuildRecapsForAllUsers(
         recent_highlights: 0,
         place: 0,
         theme: 0,
+        scene_then_now: 0,
       },
       skipped: true,
     };
@@ -1572,6 +1798,7 @@ export async function rebuildRecapsForAllUsers(
       recent_highlights: 0,
       place: 0,
       theme: 0,
+      scene_then_now: 0,
     };
     for (const row of rows) {
       try {
@@ -1582,6 +1809,7 @@ export async function rebuildRecapsForAllUsers(
         total.recent_highlights += r.recent_highlights;
         total.place += r.place;
         total.theme += r.theme;
+        total.scene_then_now += r.scene_then_now;
       } catch (err: any) {
         console.error(
           `[recaps] rebuild failed for user ${row.user_id}:`,

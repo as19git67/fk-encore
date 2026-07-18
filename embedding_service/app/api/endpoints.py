@@ -31,12 +31,15 @@ from app.models.schemas import (
     DiverseSelectResponse,
     EmbedRequest,
     EmbedResponse,
+    FindScenePairsRequest,
+    FindScenePairsResponse,
     GetRequest,
     GetResponse,
     HealthResponse,
     ParseQueryRequest,
     ParseQueryResponse,
     PhotoRecord,
+    ScenePair,
     SearchRequest,
     SearchResponse,
     SearchResult,
@@ -48,6 +51,7 @@ from app.models.schemas import (
 )
 from app.services.embedding_service import clip_embedder_class, dino_embedder_class
 from app.services.similar_groups import find_similar_groups
+from app.services.scene_pairs import find_scene_pairs
 from app.services.diverse_select import select_diverse
 
 logger = logging.getLogger(__name__)
@@ -701,6 +705,47 @@ async def select_diverse_photos(request: DiverseSelectRequest, db: DbDep) -> Div
     ]
     chosen = select_diverse(items, request.count, request.similarity_threshold)
     return DiverseSelectResponse(photo_ids=chosen)
+
+
+# ---------------------------------------------------------------------------
+# /find-scene-pairs
+# ---------------------------------------------------------------------------
+
+@router.post("/find-scene-pairs", response_model=FindScenePairsResponse, tags=["embeddings"])
+async def find_scene_pairs_endpoint(request: FindScenePairsRequest, db: DbDep) -> FindScenePairsResponse:
+    """Find photo pairs showing the same scene/object photographed years apart.
+
+    Uses DINOv2 cosine similarity to detect visually matching photos that
+    are separated by a large time gap — the "Damals & heute" recap concept.
+    Each photo appears in at most one pair; pairs are ranked by similarity.
+    """
+    ids = [c.photo_id for c in request.candidates]
+    photos = await repository.get_photos_by_ids(db, ids)
+    emb_by_id = {
+        p.photo_id: (list(p.embedding_dino) if p.embedding_dino is not None else None)
+        for p in photos
+    }
+    items = [
+        (c.photo_id, c.timestamp, c.quality, emb_by_id.get(c.photo_id))
+        for c in request.candidates
+    ]
+    raw_pairs = find_scene_pairs(
+        items,
+        min_time_gap_seconds=request.min_time_gap_days * 86400.0,
+        similarity_threshold=request.similarity_threshold,
+        max_pairs=request.max_pairs,
+    )
+    return FindScenePairsResponse(
+        pairs=[
+            ScenePair(
+                photo_id_then=then_id,
+                photo_id_now=now_id,
+                similarity=round(sim, 4),
+                time_gap_days=gap,
+            )
+            for then_id, now_id, sim, gap in raw_pairs
+        ]
+    )
 
 
 # ---------------------------------------------------------------------------
