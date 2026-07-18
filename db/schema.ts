@@ -788,6 +788,13 @@ export const documents = pgTable("documents", {
   // (docs/design/cloud-teacher-gold-set.md, step 4). Backfilled to 'user' for
   // rows that were attributes_reviewed at migration time.
   category_source: documentCategorySourceEnum("category_source").notNull().default("ai"),
+  // Manual "queue for Cloud-Teacher" flag (migration 0133). A user who finds a
+  // document hard to classify sets this; the offline Cloud-Teacher picks flagged
+  // documents first (priority bucket) and clears the flag once it writes a label.
+  // Only actionable while the category is still untrusted (category_source='ai'
+  // AND attributes_reviewed=false); otherwise the teacher skips it.
+  teacher_requested: boolean("teacher_requested").notNull().default(false),
+  teacher_requested_at: timestamp("teacher_requested_at", { mode: "string" }),
   // Access control (migration 0036/0069). `visibility` drives who can see
   // the document; `group_id` must be set iff visibility='group'
   // (DB CHECK constraint). `user_id` stays as the uploader regardless.
