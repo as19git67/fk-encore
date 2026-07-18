@@ -33,6 +33,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 import _common as c
 
 OUT = c.OUT_DIR
+_P = c.today_prefix()
 TOP_K_NEIGHBORS = 10
 
 # Kompakte deutsche Stoppwortliste (TF-IDF-Rauschen reduzieren).
@@ -243,10 +244,10 @@ def main() -> None:
         [[name, slug, n, f"{int(rate*100)} %"] for slug, name, n, rate in recall_gaps],
     )
 
-    md.write(OUT / "hints_proposal.md")
+    md.write(OUT / f"{_P}hints_proposal.md")
 
     c.write_json(
-        OUT / "hints_mining.json",
+        OUT / f"{_P}hints_mining.json",
         {
             "categories": {
                 slug: {
@@ -268,7 +269,7 @@ def main() -> None:
     )
 
     conn.close()
-    print(f"[hints] Reports → {OUT.relative_to(c.REPO_ROOT)}/hints_proposal.md, hints_mining.json")
+    print(f"[hints] Reports → {OUT.relative_to(c.REPO_ROOT)}/{_P}hints_proposal.md, {_P}hints_mining.json")
 
 
 if __name__ == "__main__":

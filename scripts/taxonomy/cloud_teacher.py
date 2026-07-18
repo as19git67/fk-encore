@@ -67,6 +67,7 @@ from cloud_audit import (
 )
 
 OUT = c.OUT_DIR
+_P = c.today_prefix()
 BATCH = int(os.environ.get("TEACHER_BATCH", "400"))
 CLAUDE_MODEL = os.environ.get("TEACHER_MODEL", os.environ.get("AUDIT_MODEL", "claude-opus-4-8"))
 # Dry-Run: nur die (gescrubbten) Prompts nach out/ schreiben, nichts senden,
@@ -353,7 +354,7 @@ def _persist(conn, doc: dict, label: dict) -> dict:
 
 def _write_dry_run(anon_docs: list[dict], taxonomy: str, tax_outline: str) -> None:
     OUT.mkdir(parents=True, exist_ok=True)
-    out_path = OUT / "cloud_teacher_dry_run.jsonl"
+    out_path = OUT / f"{_P}cloud_teacher_dry_run.jsonl"
     system = _build_system(tax_outline)
     with open(out_path, "w", encoding="utf8") as f:
         for doc in anon_docs:
@@ -392,8 +393,8 @@ def _write_report(entries: list[dict]) -> None:
         [[e["doc_id"], e["qwen_slug"], e["cloud_slug"], e["cloud_confidence"],
           e["reasoning"]] for e in sorted(cat_changed, key=lambda x: x["qwen_slug"])],
     )
-    md.write(OUT / "cloud_teacher.md")
-    c.write_json(OUT / "cloud_teacher_labels.json", entries)
+    md.write(OUT / f"{_P}cloud_teacher.md")
+    c.write_json(OUT / f"{_P}cloud_teacher_labels.json", entries)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -478,8 +479,8 @@ def main() -> None:
         print(f"\n[cloud_teacher] Geschrieben: {cat_written} Kategorie-Labels "
               f"(davon {cat_changed} geändert), {tax_written} Steuer-Labels — "
               f"alle source='cloud'.")
-        print(f"[cloud_teacher] Report: {(OUT / 'cloud_teacher.md').relative_to(c.REPO_ROOT)}")
-        print(f"[cloud_teacher] Labels: {(OUT / 'cloud_teacher_labels.json').relative_to(c.REPO_ROOT)}")
+        print(f"[cloud_teacher] Report: {(OUT / f'{_P}cloud_teacher.md').relative_to(c.REPO_ROOT)}")
+        print(f"[cloud_teacher] Labels: {(OUT / f'{_P}cloud_teacher_labels.json').relative_to(c.REPO_ROOT)}")
         print(f"[cloud_teacher] Rücknahme: DELETE FROM document_tax_sections WHERE "
               f"source='cloud'; UPDATE documents SET category_source='ai' WHERE "
               f"category_source='cloud'; danach Reclassify.")
