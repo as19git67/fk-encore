@@ -18,14 +18,16 @@ export interface RecapCompareData {
 }
 
 /**
- * Extract the "Damals & heute" pair from a person recap's seed. Only person
- * recaps whose builder found a pair with enough year span carry these fields.
+ * Extract the "Damals & heute" pair from a recap's seed. Person recaps may
+ * carry a compare pair when the builder found photos with enough year span.
+ * Scene-then-now recaps always carry exactly one pair — the recap itself is
+ * the compare.
  */
 export function personCompareFromSeed(
   kind: RecapKind,
   seed: Record<string, unknown> | null | undefined
 ): RecapCompareIds | null {
-  if (kind !== 'person' || !seed) return null
+  if ((kind !== 'person' && kind !== 'scene_then_now') || !seed) return null
   const { then_photo_id, then_year, now_photo_id, now_year } = seed
   if (
     typeof then_photo_id !== 'number' ||
