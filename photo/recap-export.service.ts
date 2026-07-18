@@ -26,6 +26,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import sharp from "sharp";
+import { convertHeicToJpeg } from "./heic-convert.service";
 
 export const RECAPS_EXPORT_DIR = path.resolve(
   process.env.RECAPS_EXPORT_DIR || "/mnt/data/recap-exports"
@@ -279,7 +280,12 @@ export async function startExport(opts: {
       for (let i = 0; i < photos.length; i++) {
         const photo = photos[i];
         const framePath = path.join(tmpDir, `frame-${String(i).padStart(3, "0")}.jpg`);
-        const img = sharp(photo.filePath).rotate();
+        const ext = path.extname(photo.filePath).toLowerCase();
+        const isHeic = ext === ".heic" || ext === ".heif";
+        const input = isHeic
+          ? await convertHeicToJpeg(photo.filePath)
+          : photo.filePath;
+        const img = sharp(input).rotate();
         const meta = await img.metadata();
         // metadata() reports pre-rotation dimensions; extract() after
         // rotate() works on the rotated image — swap for 90°-orientations.
