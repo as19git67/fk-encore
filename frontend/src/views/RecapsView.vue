@@ -204,6 +204,14 @@ async function handleRebuild() {
 
 const exportRunning = ref(false)
 const exportProgress = ref(0)
+// Set once the render is done; the template renders this as an explicit
+// download link rather than auto-navigating. Auto-navigating from here
+// (`window.location.assign`) fires outside the user-gesture stack of the
+// original click — Safari on iOS silently drops navigation/downloads that
+// aren't triggered synchronously by a tap, so a render that takes a few
+// seconds (i.e. always) never reliably opens the "Save Video" sheet. A
+// user-clicked link doesn't have that problem.
+const exportDownloadUrl = ref<string | null>(null)
 let exportTimer: ReturnType<typeof setTimeout> | null = null
 
 function stopExportPolling() {
@@ -213,6 +221,7 @@ function stopExportPolling() {
   }
   exportRunning.value = false
   exportProgress.value = 0
+  exportDownloadUrl.value = null
 }
 
 function applyExportStatus(st: RecapExportStatus, recapId: number) {
@@ -227,8 +236,7 @@ function applyExportStatus(st: RecapExportStatus, recapId: number) {
   }
   exportRunning.value = false
   if (st.status === 'done') {
-    const url = getRecapExportDownloadUrl(st)
-    if (url) window.location.assign(url)
+    exportDownloadUrl.value = getRecapExportDownloadUrl(st)
   } else if (st.status === 'failed') {
     error.value = st.error ?? 'Video-Export fehlgeschlagen.'
   }
@@ -250,6 +258,7 @@ async function handleExport() {
   error.value = ''
   exportRunning.value = true
   exportProgress.value = 0
+  exportDownloadUrl.value = null
   try {
     applyExportStatus(await startRecapExport(recap.id), recap.id)
   } catch (err: any) {
@@ -412,6 +421,16 @@ async function playFromCard(r: RecapSummary, e: Event) {
                 @click="openPlayer"
               />
               <Button
+                v-if="exportDownloadUrl"
+                icon="pi pi-download"
+                label="Herunterladen"
+                severity="secondary"
+                as="a"
+                :href="exportDownloadUrl"
+                v-tooltip.bottom="'Video-Download starten'"
+              />
+              <Button
+                v-else
                 icon="pi pi-video"
                 :label="exportRunning ? `${Math.round(exportProgress * 100)} %` : 'Video'"
                 severity="secondary"
