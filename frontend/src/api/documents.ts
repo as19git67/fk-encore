@@ -70,6 +70,8 @@ export interface DocumentDetail extends DocumentSummary {
   tax_sections: DocumentTaxSection[]
   /** Bezugspersonen this document concerns. */
   subject_persons: DocumentSubjectPerson[]
+  /** True when flagged for the next Cloud-Teacher run (see migration 0133). */
+  teacher_requested: boolean
 }
 
 export interface DocumentReceiptSuggestion {
@@ -385,6 +387,14 @@ export function updateDocument(id: number, payload: UpdateDocumentPayload) {
 
 export function deleteDocument(id: number) {
   return apiFetch<{ success: boolean }>(`/documents/${id}`, { method: 'DELETE' })
+}
+
+/** Flag (or un-flag) a document for the next Cloud-Teacher run. */
+export function setTeacherRequested(id: number, requested: boolean) {
+  return apiFetch<DocumentDetail>(`/documents/${id}/teacher-request`, {
+    method: 'POST',
+    body: JSON.stringify({ requested }),
+  })
 }
 
 export interface UpdateDocumentVisibilityPayload {

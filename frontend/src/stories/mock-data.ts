@@ -606,6 +606,7 @@ export const MOCK_DOCUMENT_DETAIL: DocumentDetail = {
   tax_sections: [],
   attributes_reviewed: false,
   subject_persons: [],
+  teacher_requested: false,
 }
 
 export const MOCK_DOCUMENT_DETAIL_CLASSIFYING: DocumentDetail = {
@@ -617,6 +618,7 @@ export const MOCK_DOCUMENT_DETAIL_CLASSIFYING: DocumentDetail = {
   tax_sections: [],
   attributes_reviewed: false,
   subject_persons: [],
+  teacher_requested: false,
 }
 
 export const MOCK_DOCUMENT_DETAIL_FAILED: DocumentDetail = {
@@ -628,6 +630,7 @@ export const MOCK_DOCUMENT_DETAIL_FAILED: DocumentDetail = {
   tax_sections: [],
   attributes_reviewed: false,
   subject_persons: [],
+  teacher_requested: false,
 }
 
 export const MOCK_DOCUMENT_QUEUE_IDLE: DocumentQueueStatus = {

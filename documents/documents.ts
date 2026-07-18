@@ -198,6 +198,12 @@ export interface DocumentDetail extends DocumentSummary {
   tax_sections: DocumentTaxSectionDTO[];
   /** Bezugspersonen this document concerns (see migration 0102). */
   subject_persons: DocumentSubjectPersonDTO[];
+  /**
+   * True when a user flagged this document for the next Cloud-Teacher run
+   * (migration 0133). The teacher picks flagged documents first and clears the
+   * flag once it writes a label.
+   */
+  teacher_requested: boolean;
 }
 
 export interface DocumentReceiptSuggestion {
@@ -1134,6 +1140,7 @@ export const getDocument = api(
       tax_sections: taxSections,
       attributes_reviewed: row.attributes_reviewed ?? false,
       subject_persons: subjectPersons,
+      teacher_requested: row.teacher_requested ?? false,
     };
   },
 );
@@ -1514,6 +1521,42 @@ export const updateDocument = api(
         );
       }
     }
+
+    return await loadDetail(userId, existing.id, isDataAdmin(authData));
+  },
+);
+
+export interface SetTeacherRequestedRequest {
+  id: number;
+  /** true = queue for the next Cloud-Teacher run; false = un-queue. */
+  requested: boolean;
+}
+
+/**
+ * Flag (or un-flag) a document for the next Cloud-Teacher run. Intended for the
+ * case where a user finds a document hard to classify themselves and wants the
+ * offline cloud pass to take priority on it (see migration 0133). Purely a
+ * request marker — the teacher still only acts on untrusted categories and
+ * clears the flag once it has written a label.
+ */
+export const setTeacherRequested = api(
+  { expose: true, method: "POST", path: "/documents/:id/teacher-request", auth: true },
+  async (req: SetTeacherRequestedRequest): Promise<DocumentDetail> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.edit");
+    const userId = getUserId();
+
+    const existing = await loadVisibleDocument(userId, req.id, isDataAdmin(authData));
+
+    await db
+      .update(documents)
+      .set(
+        req.requested
+          ? { teacher_requested: true, teacher_requested_at: new Date().toISOString() }
+          : { teacher_requested: false, teacher_requested_at: null },
+      )
+      .where(eq(documents.id, existing.id));
 
     return await loadDetail(userId, existing.id, isDataAdmin(authData));
   },
@@ -3487,6 +3530,7 @@ async function loadDetail(userId: number, id: number, isAdmin = false): Promise<
     tax_sections: taxSections,
     attributes_reviewed: row.attributes_reviewed ?? false,
     subject_persons: subjectPersons,
+    teacher_requested: row.teacher_requested ?? false,
   };
 }
 
