@@ -128,36 +128,60 @@ def _rows_to_docs(cur) -> list[dict]:
 
 
 def _select_documents(conn) -> list[dict]:
-    """Drei Buckets nach §5.1, dedupliziert über `picked`:
+    """Vier Buckets, dedupliziert über `picked`:
+      0) Vom Nutzer vorgemerkt (teacher_requested) — IMMER zuerst, ohne Limit.
       A) Dünn besetzte Kategorien — die mit den wenigsten vertrauenswürdigen
-         (cloud/user) Beispielen zuerst (~50 %).
+         (cloud/user) Beispielen zuerst (~50 % vom Rest-Budget).
       B) Bekannte Streit-Achsen (FOCUS_CATEGORIES) (~30 %).
       C) Neue Dokumente (höchste IDs) (Rest).
     """
     cur = conn.cursor()
     picked: set[int] = set()
 
-    thin_n = int(BATCH * 0.5)
-    focus_n = int(BATCH * 0.3)
-
-    # ── A) Dünn besetzte Kategorien ──────────────────────────────────────
+    # ── 0) Vom Nutzer vorgemerkt ─────────────────────────────────────────
+    # Höchste Priorität und ohne Limit: wer sich mit einem Dokument schwer tut,
+    # will es garantiert im nächsten Lauf haben. Nur die vorgemerkten Dokumente,
+    # deren Kategorie noch untrusted ist (sonst hätte der Guard eh geschützt und
+    # das Flag bliebe ewig — der Reset in _persist greift nur bei geschriebenem
+    # Label). Zählt gegen BATCH, damit die Gesamtmenge stabil bleibt.
     cur.execute(f"""
-        WITH trusted AS (
-          SELECT category_id, count(*) AS n
-          FROM documents
-          WHERE category_source IN ('cloud', 'user') OR attributes_reviewed = true
-          GROUP BY category_id
-        )
         SELECT {_SELECT_COLUMNS}
         FROM documents d
         JOIN document_categories c ON c.id = d.category_id
-        LEFT JOIN trusted t ON t.category_id = d.category_id
         WHERE {_UNTRUSTED}
-        ORDER BY COALESCE(t.n, 0) ASC, random()
+          AND d.teacher_requested = true
+        ORDER BY d.teacher_requested_at ASC NULLS LAST, d.id DESC
         LIMIT %s
-    """, (thin_n,))
-    thin = _rows_to_docs(cur)
-    picked.update(d["id"] for d in thin)
+    """, (BATCH,))
+    requested = _rows_to_docs(cur)
+    picked.update(d["id"] for d in requested)
+
+    # Rest-Budget nach den vorgemerkten Dokumenten auf die drei Heuristik-Buckets.
+    rest = max(0, BATCH - len(requested))
+    thin_n = int(rest * 0.5)
+    focus_n = int(rest * 0.3)
+
+    # ── A) Dünn besetzte Kategorien ──────────────────────────────────────
+    thin: list[dict] = []
+    if thin_n > 0:
+        cur.execute(f"""
+            WITH trusted AS (
+              SELECT category_id, count(*) AS n
+              FROM documents
+              WHERE category_source IN ('cloud', 'user') OR attributes_reviewed = true
+              GROUP BY category_id
+            )
+            SELECT {_SELECT_COLUMNS}
+            FROM documents d
+            JOIN document_categories c ON c.id = d.category_id
+            LEFT JOIN trusted t ON t.category_id = d.category_id
+            WHERE {_UNTRUSTED}
+              AND d.id <> ALL(%s)
+            ORDER BY COALESCE(t.n, 0) ASC, random()
+            LIMIT %s
+        """, (list(picked) or [-1], thin_n))
+        thin = _rows_to_docs(cur)
+        picked.update(d["id"] for d in thin)
 
     # ── B) Streit-Achsen ─────────────────────────────────────────────────
     focus: list[dict] = []
@@ -176,7 +200,7 @@ def _select_documents(conn) -> list[dict]:
         picked.update(d["id"] for d in focus)
 
     # ── C) Neue Dokumente ────────────────────────────────────────────────
-    remaining = BATCH - len(thin) - len(focus)
+    remaining = BATCH - len(requested) - len(thin) - len(focus)
     new: list[dict] = []
     if remaining > 0:
         cur.execute(f"""
@@ -192,9 +216,10 @@ def _select_documents(conn) -> list[dict]:
         picked.update(d["id"] for d in new)
 
     cur.close()
-    docs = thin + focus + new
-    print(f"[cloud_teacher] Auswahl: {len(thin)} dünne Zweige + {len(focus)} "
-          f"Streit-Achsen ({', '.join(FOCUS_CATEGORIES) or '—'}) + {len(new)} neue "
+    docs = requested + thin + focus + new
+    print(f"[cloud_teacher] Auswahl: {len(requested)} vorgemerkt + {len(thin)} "
+          f"dünne Zweige + {len(focus)} Streit-Achsen "
+          f"({', '.join(FOCUS_CATEGORIES) or '—'}) + {len(new)} neue "
           f"= {len(docs)} Dokumente")
     return docs
 
@@ -345,6 +370,17 @@ def _persist(conn, doc: dict, label: dict) -> dict:
             entry["tax_written"] = True
             entry["cloud_tax_relevant"] = label["tax_relevant"]
             entry["cloud_tax_sections"] = [s["slug"] for s in label["tax_sections"]]
+
+    # Vom Nutzer vorgemerkte Anfrage ist erfüllt, sobald der Lehrer das Dokument
+    # verarbeitet hat — Flag löschen, damit es nicht in jedem Lauf wiederkommt.
+    with conn.cursor() as cur:
+        cur.execute("""
+            UPDATE documents
+            SET teacher_requested = false, teacher_requested_at = NULL
+            WHERE id = %s AND teacher_requested = true
+        """, (doc_id,))
+        if cur.rowcount > 0:
+            entry["teacher_request_cleared"] = True
 
     conn.commit()
     return entry
