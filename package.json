@@ -12,6 +12,7 @@
     "dev:frontend": "cd frontend && npm run dev",
     "check:sfc": "node scripts/check-sfc.mjs",
     "diagnose:taxonomy": "node scripts/taxonomy/diagnose.mjs",
+    "diagnose:diff": "node scripts/taxonomy/diagnose-diff.mjs",
     "cluster:taxonomy": "python3 scripts/taxonomy/cluster.py",
     "mine-hints:taxonomy": "python3 scripts/taxonomy/mine_hints.py",
     "audit:taxonomy": "python3 scripts/taxonomy/cloud_audit.py",
