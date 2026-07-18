@@ -34,7 +34,8 @@ const { Pool } = pg;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const OUT_DIR = path.join(__dirname, "out");
-const OUT_FILE = path.join(OUT_DIR, "diagnose.md");
+const TODAY = new Date().toISOString().slice(0, 10);
+const OUT_FILE = path.join(OUT_DIR, `${TODAY}-diagnose.md`);
 
 // Wie viele Dokumente für die (teurere) Confusion-Heuristik bemustert werden.
 // 0 = überspringen. Nachbarn pro Dokument:
