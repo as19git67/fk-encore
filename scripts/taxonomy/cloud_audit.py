@@ -49,6 +49,7 @@ except ImportError:
 import _common as c
 
 OUT = c.OUT_DIR
+_P = c.today_prefix()
 SAMPLE_SIZE = int(os.environ.get("AUDIT_SAMPLE", "300"))
 TAX_SAMPLE_SIZE = int(os.environ.get("AUDIT_TAX_SAMPLE", "100"))
 BATCH_SIZE = 5
@@ -703,7 +704,7 @@ def _top_n(items: list[str], n: int) -> list[tuple[str, int]]:
 def _write_dry_run(anon_docs: list[dict], taxonomy: str, tax_outline: str) -> None:
     """Write the exact prompts that would be sent to Claude, for review."""
     OUT.mkdir(parents=True, exist_ok=True)
-    out_path = OUT / "cloud_audit_dry_run.jsonl"
+    out_path = OUT / f"{_P}cloud_audit_dry_run.jsonl"
     system = _build_system(tax_outline)
     with open(out_path, "w", encoding="utf8") as f:
         for doc in anon_docs:
@@ -779,9 +780,9 @@ def main() -> None:
     report, gold = _generate_report(all_results)
 
     OUT.mkdir(parents=True, exist_ok=True)
-    (OUT / "cloud_audit.md").write_text(report, encoding="utf8")
-    c.write_json(OUT / "cloud_audit_gold.json", gold)
-    c.write_json(OUT / "cloud_audit_full.json", all_results)
+    (OUT / f"{_P}cloud_audit.md").write_text(report, encoding="utf8")
+    c.write_json(OUT / f"{_P}cloud_audit_gold.json", gold)
+    c.write_json(OUT / f"{_P}cloud_audit_full.json", all_results)
 
     # Summary
     valid = [r for r in all_results if r["claude_slug"] != "ERROR"]
@@ -795,8 +796,8 @@ def main() -> None:
         print(f"[cloud_audit] Steuer: {tax_confirmed}/{len(qwen_tax_true)} der "
               f"Qwen-als-steuerrelevant markierten Dokumente von Claude bestätigt "
               f"({100*tax_confirmed/len(qwen_tax_true):.1f}%)")
-    print(f"[cloud_audit] Report: {(OUT / 'cloud_audit.md').relative_to(c.REPO_ROOT)}")
-    print(f"[cloud_audit] Gold-Set: {len(gold)} bestätigte Labels → cloud_audit_gold.json")
+    print(f"[cloud_audit] Report: {(OUT / f'{_P}cloud_audit.md').relative_to(c.REPO_ROOT)}")
+    print(f"[cloud_audit] Gold-Set: {len(gold)} bestätigte Labels → {_P}cloud_audit_gold.json")
 
 
 if __name__ == "__main__":

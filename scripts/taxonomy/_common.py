@@ -10,12 +10,17 @@ from __future__ import annotations
 import json
 import os
 import re
+from datetime import date
 from pathlib import Path
 
 import psycopg2
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 OUT_DIR = Path(__file__).resolve().parent / "out"
+
+
+def today_prefix() -> str:
+    return date.today().isoformat() + "-"
 
 
 # ── DB-Verbindung (Spiegel von db/database.ts) ──────────────────────────────
