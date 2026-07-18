@@ -47,6 +47,13 @@ USER root
 # zoompan Ken-Burns + xfade transitions + the recap's background music). The
 # export endpoint degrades gracefully when the binary is absent, but baking it
 # into the image is what makes the feature available in production.
+#
+# fonts-noto-core + fonts-noto-cjk give sharp's bundled librsvg (used to
+# rasterize the recap export's title card, see photo/recap-export.service.ts
+# renderTitleCard) broad Unicode coverage. node:*-bookworm-slim ships no
+# fonts at all, so without these packages Pango has nothing to substitute
+# for missing glyphs and titles containing non-Latin scripts (Japanese,
+# Chinese, Korean, ...) render as empty "notdef" boxes.
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl gnupg; \
@@ -65,7 +72,11 @@ RUN set -eux; \
         poppler-utils \
         qpdf \
         ghostscript \
-        ffmpeg; \
+        ffmpeg \
+        fontconfig \
+        fonts-noto-core \
+        fonts-noto-cjk; \
+    fc-cache -f; \
     apt-get purge -y --auto-remove curl gnupg; \
     rm -rf /var/lib/apt/lists/*
 

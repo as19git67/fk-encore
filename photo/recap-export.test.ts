@@ -142,6 +142,16 @@ describe("renderTitleCard", () => {
     expect(stat.size).toBeGreaterThan(1000);
     await fs.promises.rm(tmp, { recursive: true, force: true });
   });
+
+  it("renders non-Latin scripts without throwing (glyph coverage is a Docker-image font concern, not this pipeline's)", async () => {
+    const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), "title-card-"));
+    const out = path.join(tmp, "title.jpg");
+    await renderTitleCard("東京旅行 2024", "日本 — 家族旅行", out);
+    const meta = await sharp(out).metadata();
+    expect(meta.format).toBe("jpeg");
+    expect(meta.width).toBe(2560);
+    await fs.promises.rm(tmp, { recursive: true, force: true });
+  });
 });
 
 // Real end-to-end render. Skipped when ffmpeg is not installed (e.g. CI).
