@@ -23,6 +23,8 @@ const props = defineProps<{
   durationMs?: number
   /** Absolute URL of the background track; omit for a silent recap. */
   musicUrl?: string | null
+  /** When true, show a control to switch to another background track. */
+  canChangeMusic?: boolean
   /** Trip map intro rendered as the first slide; omit to start with photos. */
   mapIntro?: RecapMapIntroData | null
   /** "Damals & heute" split-screen rendered as the first slide of person recaps. */
@@ -31,6 +33,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'close'): void
+  (e: 'change-music'): void
 }>()
 
 const photoDurationMs = computed(() => props.durationMs ?? 4500)
@@ -756,6 +759,15 @@ onBeforeUnmount(() => {
           @click="toggleMusicMuted"
         >
           <i :class="musicMuted || musicBlocked ? 'pi pi-volume-off' : 'pi pi-volume-up'" />
+        </button>
+        <button
+          v-if="musicUrl && canChangeMusic"
+          type="button"
+          class="recap-player-btn"
+          aria-label="Andere Musik"
+          @click="emit('change-music')"
+        >
+          <i class="pi pi-forward" />
         </button>
         <button
           v-if="favoriteToggleable"

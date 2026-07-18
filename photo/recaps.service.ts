@@ -146,6 +146,37 @@ function effectiveDate(p: CandidatePhoto): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
+/**
+ * OSM/Nominatim reverse-geocoding often puts a generic neighbourhood or
+ * district name — "Innere Stadt", "Altstadt", "Neustadt", "Zentrum",
+ * "Innenstadt", … — into `location_city`. As a recap title or map label
+ * these are useless and misleading (every city has an "Altstadt"), so we
+ * treat them as "no city" when titling. The photos still belong to the
+ * recap; only the name is suppressed in favour of the country or a generic
+ * fallback. Matched case-insensitively after trimming.
+ */
+const GENERIC_PLACE_NAMES = new Set<string>([
+  "innere stadt",
+  "innenstadt",
+  "altstadt",
+  "neustadt",
+  "zentrum",
+  "stadtzentrum",
+  "stadtmitte",
+  "old town",
+  "new town",
+  "city centre",
+  "city center",
+  "downtown",
+  "centre",
+  "center",
+]);
+
+export function isGenericPlaceName(name: string | null | undefined): boolean {
+  if (!name) return false;
+  return GENERIC_PLACE_NAMES.has(name.trim().toLowerCase());
+}
+
 /** Haversine distance between two (lat, lon) points in kilometres. */
 function haversineKm(
   lat1: number,
@@ -871,7 +902,9 @@ function formatMonthYear(d: Date): string {
 }
 
 function tripTitle(cluster: TripCluster): string {
-  if (cluster.dominantCity) return cluster.dominantCity;
+  if (cluster.dominantCity && !isGenericPlaceName(cluster.dominantCity)) {
+    return cluster.dominantCity;
+  }
   if (cluster.dominantCountry) return cluster.dominantCountry;
   return "Unterwegs";
 }
@@ -951,9 +984,12 @@ async function buildTripRecaps(
       fallback: { title: tripTitle(cluster), subtitle: fallbackSubtitle },
       ctx: {
         kind: "trip",
-        place_city: cluster.dominantCity,
+        place_city: isGenericPlaceName(cluster.dominantCity)
+          ? null
+          : cluster.dominantCity,
         place_country: cluster.dominantCountry,
         date_range: fallbackSubtitle,
+        duration_days: durationDays,
       },
     });
 
@@ -1350,7 +1386,9 @@ async function buildPlaceRecaps(
     // Repair IPTC Latin-1-mojibake city names at the grouping boundary so
     // "Brüssel" and "BrÃ¼ssel" aren't treated as different cities.
     const city = repairMojibake(p.location_city?.trim() ?? "");
-    if (!city) continue;
+    // Skip generic district names ("Altstadt", "Zentrum", …): a place recap
+    // titled after them is meaningless, and every city has one.
+    if (!city || isGenericPlaceName(city)) continue;
     const arr = byCity.get(city) ?? [];
     arr.push(p);
     byCity.set(city, arr);
@@ -1637,8 +1675,13 @@ async function buildSceneRecaps(
         ? thenPhoto
         : nowPhoto;
 
-    const locationCity =
+    const rawLocationCity =
       nowPhoto.location_city ?? thenPhoto.location_city ?? null;
+    // Drop generic district names so they never surface as title/subtitle.
+    const locationCity =
+      rawLocationCity && !isGenericPlaceName(repairMojibake(rawLocationCity))
+        ? rawLocationCity
+        : null;
     const locationCountry =
       nowPhoto.location_country ?? thenPhoto.location_country ?? null;
 
