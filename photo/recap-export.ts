@@ -115,12 +115,23 @@ export const startRecapExport = api(
 
     const tracks = await listMusicTracks();
     const track = pickTrackForRecap(tracks, recap.kind, recap.id);
+    if (!track) {
+      console.warn(
+        `[recap-export] no music track found for recap ${id} (kind=${recap.kind}, ${tracks.length} tracks scanned)`
+      );
+    }
     const musicFilePath = track ? await resolveMusicFilePath(track.id) : null;
+    if (track && !musicFilePath) {
+      console.warn(
+        `[recap-export] music track "${track.id}" selected but file not found on disk`
+      );
+    }
 
     const job = await startExport({
       userId,
       recapId: id,
       title: recap.title,
+      subtitle: recap.subtitle,
       photos: exportPhotos,
       musicFilePath,
     });

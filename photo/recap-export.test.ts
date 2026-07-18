@@ -13,8 +13,11 @@ import {
   resolveExportFilePath,
   startExport,
   getExportJob,
+  renderTitleCard,
   SLIDE_SECONDS,
   FADE_SECONDS,
+  EXPORT_WIDTH,
+  EXPORT_HEIGHT,
 } from "./recap-export.service";
 
 describe("coverCrop", () => {
@@ -79,6 +82,29 @@ describe("buildExportFilterGraph", () => {
     expect(g.audioLabel).toBeNull();
     expect(g.filter).not.toContain("xfade");
   });
+
+  it("applies z=1 for static indices (title card)", () => {
+    const g = buildExportFilterGraph({
+      count: 3,
+      zoomIn: [false, true, false],
+      withAudio: false,
+      staticIndices: new Set([0]),
+    });
+    expect(g.filter).toMatch(/\[0:v\]zoompan=z='1'/);
+    expect(g.filter).not.toMatch(/\[1:v\]zoompan=z='1'/);
+  });
+
+  it("respects per-slide durations in total duration", () => {
+    const g = buildExportFilterGraph({
+      count: 3,
+      zoomIn: [false, true, false],
+      withAudio: false,
+      slideDurations: [4, 3.5, 3.5],
+      fadeSeconds: 0.6,
+    });
+    // 4 + 3.5 + 3.5 - 2*0.6 = 9.8
+    expect(g.duration).toBeCloseTo(9.8);
+  });
 });
 
 describe("exportFileName / resolveExportFilePath", () => {
@@ -93,6 +119,28 @@ describe("exportFileName / resolveExportFilePath", () => {
     expect(await resolveExportFilePath("../etc/passwd")).toBeNull();
     expect(await resolveExportFilePath("recap-1-zzzz.mp4")).toBeNull();
     expect(await resolveExportFilePath("recap-1-0123456789abcdef0123.mp4")).toBeNull();
+  });
+});
+
+describe("renderTitleCard", () => {
+  it("produces a JPEG at the expected dimensions", async () => {
+    const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), "title-card-"));
+    const out = path.join(tmp, "title.jpg");
+    await renderTitleCard("Sommerurlaub 2024", "Mallorca — 42 Fotos", out);
+    const meta = await sharp(out).metadata();
+    expect(meta.format).toBe("jpeg");
+    expect(meta.width).toBe(2560);
+    expect(meta.height).toBe(1440);
+    await fs.promises.rm(tmp, { recursive: true, force: true });
+  });
+
+  it("handles title without subtitle", async () => {
+    const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), "title-card-"));
+    const out = path.join(tmp, "title.jpg");
+    await renderTitleCard("Kurztrip", null, out);
+    const stat = await fs.promises.stat(out);
+    expect(stat.size).toBeGreaterThan(1000);
+    await fs.promises.rm(tmp, { recursive: true, force: true });
   });
 });
 
@@ -124,6 +172,7 @@ describe("startExport (ffmpeg)", () => {
         userId: 1,
         recapId: 999_999,
         title: "Test",
+        subtitle: "Subtitle",
         photos: [
           { id: 2, filePath: p1, focal: { x: 0.5, y: 0.5 } },
           { id: 3, filePath: p2 },

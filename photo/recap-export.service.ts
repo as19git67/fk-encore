@@ -45,6 +45,9 @@ export const SLIDE_SECONDS = 3.5;
 export const FADE_SECONDS = 0.6;
 const ZOOM_AMOUNT = 0.12;
 const MAX_EXPORT_PHOTOS = 30;
+const TITLE_SLIDE_SECONDS = 4;
+const TITLE_FONT_SIZE = 64;
+const SUBTITLE_FONT_SIZE = 36;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Pure helpers (unit-tested)
@@ -80,6 +83,65 @@ export function coverCrop(
   };
 }
 
+/**
+ * Render a title card: dark gradient background with centred white text.
+ * The image is written at FRAME_WIDTH×FRAME_HEIGHT (same as photo frames)
+ * so zoompan can handle it uniformly.
+ */
+export async function renderTitleCard(
+  title: string,
+  subtitle: string | null,
+  outputPath: string
+): Promise<void> {
+  const esc = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const lines: string[] = [];
+  const lineHeight = TITLE_FONT_SIZE * 1.3;
+  const maxChars = 28;
+  const words = title.split(/\s+/);
+  let cur = "";
+  for (const w of words) {
+    if (cur && (cur + " " + w).length > maxChars) {
+      lines.push(cur);
+      cur = w;
+    } else {
+      cur = cur ? cur + " " + w : w;
+    }
+  }
+  if (cur) lines.push(cur);
+
+  const titleBlockHeight = lines.length * lineHeight;
+  const subtitleHeight = subtitle ? SUBTITLE_FONT_SIZE * 1.8 : 0;
+  const totalHeight = titleBlockHeight + subtitleHeight;
+  const startY = (FRAME_HEIGHT - totalHeight) / 2;
+
+  let textSvg = "";
+  for (let i = 0; i < lines.length; i++) {
+    textSvg += `<text x="${FRAME_WIDTH / 2}" y="${startY + lineHeight * (i + 0.8)}"
+      font-family="sans-serif" font-size="${TITLE_FONT_SIZE}" font-weight="700"
+      fill="white" text-anchor="middle">${esc(lines[i])}</text>`;
+  }
+  if (subtitle) {
+    textSvg += `<text x="${FRAME_WIDTH / 2}" y="${startY + titleBlockHeight + SUBTITLE_FONT_SIZE * 1.2}"
+      font-family="sans-serif" font-size="${SUBTITLE_FONT_SIZE}" font-weight="400"
+      fill="rgba(255,255,255,0.75)" text-anchor="middle">${esc(subtitle)}</text>`;
+  }
+
+  const svg = `<svg width="${FRAME_WIDTH}" height="${FRAME_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
+    <defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a1a2e"/>
+      <stop offset="1" stop-color="#16213e"/>
+    </linearGradient></defs>
+    <rect width="100%" height="100%" fill="url(#bg)"/>
+    ${textSvg}
+  </svg>`;
+
+  await sharp(Buffer.from(svg))
+    .resize(FRAME_WIDTH, FRAME_HEIGHT)
+    .jpeg({ quality: 95 })
+    .toFile(outputPath);
+}
+
 /** Total video duration for n slides with overlapping crossfades. */
 export function exportDurationSeconds(
   n: number,
@@ -101,19 +163,30 @@ export function buildExportFilterGraph(opts: {
   withAudio: boolean;
   slideSeconds?: number;
   fadeSeconds?: number;
+  /** Per-slide duration overrides (e.g. longer title card). */
+  slideDurations?: number[];
+  /** Indices that should display statically (z=1, no Ken Burns). */
+  staticIndices?: Set<number>;
 }): { filter: string; videoLabel: string; audioLabel: string | null; duration: number } {
-  const slide = opts.slideSeconds ?? SLIDE_SECONDS;
+  const defaultSlide = opts.slideSeconds ?? SLIDE_SECONDS;
   const fade = opts.fadeSeconds ?? FADE_SECONDS;
-  const frames = Math.round(slide * FPS);
   const parts: string[] = [];
+  const slideSecs: number[] = [];
 
   for (let i = 0; i < opts.count; i++) {
-    const zin = opts.zoomIn[i] ?? i % 2 === 0;
-    // zoompan evaluates z per output frame ("on"). Linear ramp over the
-    // slide; zoom-out starts at the max and eases back to 1.
-    const z = zin
-      ? `1+${ZOOM_AMOUNT}*on/${frames}`
-      : `1+${ZOOM_AMOUNT}-${ZOOM_AMOUNT}*on/${frames}`;
+    const slide = opts.slideDurations?.[i] ?? defaultSlide;
+    slideSecs.push(slide);
+    const frames = Math.round(slide * FPS);
+    const isStatic = opts.staticIndices?.has(i) ?? false;
+    let z: string;
+    if (isStatic) {
+      z = "1";
+    } else {
+      const zin = opts.zoomIn[i] ?? i % 2 === 0;
+      z = zin
+        ? `1+${ZOOM_AMOUNT}*on/${frames}`
+        : `1+${ZOOM_AMOUNT}-${ZOOM_AMOUNT}*on/${frames}`;
+    }
     parts.push(
       `[${i}:v]zoompan=z='${z}':d=${frames}:x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2'` +
         `:s=${EXPORT_WIDTH}x${EXPORT_HEIGHT}:fps=${FPS},setsar=1[v${i}]`
@@ -123,18 +196,23 @@ export function buildExportFilterGraph(opts: {
   let videoLabel = "[v0]";
   if (opts.count > 1) {
     let prev = "v0";
+    let offset = slideSecs[0] - fade;
     for (let i = 1; i < opts.count; i++) {
       const out = i === opts.count - 1 ? "vout" : `x${i}`;
-      const offset = (slide - fade) * i;
       parts.push(
         `[${prev}][v${i}]xfade=transition=fade:duration=${fade}:offset=${offset.toFixed(3)}[${out}]`
       );
       prev = out;
+      if (i < opts.count - 1) offset += slideSecs[i] - fade;
     }
     videoLabel = "[vout]";
   }
 
-  const duration = exportDurationSeconds(opts.count, slide, fade);
+  let duration = 0;
+  for (let i = 0; i < opts.count; i++) {
+    duration += slideSecs[i];
+    if (i > 0) duration -= fade;
+  }
   let audioLabel: string | null = null;
   if (opts.withAudio) {
     const fadeOutStart = Math.max(0, duration - 2);
@@ -232,6 +310,7 @@ export async function startExport(opts: {
   userId: number;
   recapId: number;
   title: string;
+  subtitle: string | null;
   photos: ExportPhotoInput[];
   musicFilePath: string | null;
 }): Promise<ExportJobStatus> {
@@ -277,9 +356,19 @@ export async function startExport(opts: {
 
       // Phase 1: pre-render frames (30% of the progress bar).
       const framePaths: string[] = [];
+      const slideDurations: number[] = [];
+      const staticIndices = new Set<number>();
+
+      // Title card is always the first frame.
+      const titlePath = path.join(tmpDir, "frame-000-title.jpg");
+      await renderTitleCard(opts.title, opts.subtitle, titlePath);
+      framePaths.push(titlePath);
+      slideDurations.push(TITLE_SLIDE_SECONDS);
+      staticIndices.add(0);
+
       for (let i = 0; i < photos.length; i++) {
         const photo = photos[i];
-        const framePath = path.join(tmpDir, `frame-${String(i).padStart(3, "0")}.jpg`);
+        const framePath = path.join(tmpDir, `frame-${String(i + 1).padStart(3, "0")}.jpg`);
         const ext = path.extname(photo.filePath).toLowerCase();
         const isHeic = ext === ".heic" || ext === ".heif";
         const input = isHeic
@@ -287,8 +376,6 @@ export async function startExport(opts: {
           : photo.filePath;
         const img = sharp(input).rotate();
         const meta = await img.metadata();
-        // metadata() reports pre-rotation dimensions; extract() after
-        // rotate() works on the rotated image — swap for 90°-orientations.
         const swapped = (meta.orientation ?? 1) >= 5;
         const natW = (swapped ? meta.height : meta.width) ?? FRAME_WIDTH;
         const natH = (swapped ? meta.width : meta.height) ?? FRAME_HEIGHT;
@@ -299,15 +386,18 @@ export async function startExport(opts: {
           .jpeg({ quality: 92 })
           .toFile(framePath);
         framePaths.push(framePath);
+        slideDurations.push(SLIDE_SECONDS);
         job.progress = (0.3 * (i + 1)) / photos.length;
       }
 
       // Phase 2: encode.
-      const zoomIn = photos.map((p) => p.id % 2 === 0);
+      const zoomIn: boolean[] = [false, ...photos.map((p) => p.id % 2 === 0)];
       const graph = buildExportFilterGraph({
         count: framePaths.length,
         zoomIn,
         withAudio: opts.musicFilePath != null,
+        slideDurations,
+        staticIndices,
       });
 
       const args: string[] = ["-y"];
