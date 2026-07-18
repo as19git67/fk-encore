@@ -39,6 +39,7 @@ from sklearn.cluster import HDBSCAN
 import _common as c
 
 OUT = c.OUT_DIR
+_P = c.today_prefix()
 MIN_CLUSTER_SIZE = int(os.environ.get("MIN_CLUSTER_SIZE", "15"))
 MIN_SAMPLES = int(os.environ.get("MIN_SAMPLES", str(MIN_CLUSTER_SIZE)))
 TARGET = os.environ.get("TARGET", "all")
@@ -191,11 +192,11 @@ def main() -> None:
         md("Passen in kein Cluster — typische Quelle für fehlende Kategorien. "
            "In den Repräsentanten enthalten.")
         md("")
-    md.write(OUT / "clusters.md")
+    md.write(OUT / f"{_P}clusters.md")
 
     # ── Maschinenlesbar ─────────────────────────────────────────────────────
     c.write_json(
-        OUT / "clusters.json",
+        OUT / f"{_P}clusters.json",
         [{k: v for k, v in cl.items() if not k.startswith("_")} for cl in clusters],
     )
 
@@ -247,16 +248,16 @@ def main() -> None:
                 "tags": c.scrub(c.scrub_names(d.get("tags_text"), names)),
             }
         )
-    c.write_json(OUT / "representatives.json", representatives)
+    c.write_json(OUT / f"{_P}representatives.json", representatives)
     OUT.mkdir(parents=True, exist_ok=True)
-    (OUT / "representatives.anon.jsonl").write_text(
+    (OUT / f"{_P}representatives.anon.jsonl").write_text(
         "\n".join(json.dumps(a, ensure_ascii=False) for a in anon), encoding="utf8"
     )
 
     conn.close()
     print(f"[cluster] Repräsentanten: {len(representatives)} "
-          f"(anonymisiert → representatives.anon.jsonl)")
-    print(f"[cluster] Reports → {OUT.relative_to(c.REPO_ROOT)}/clusters.md, clusters.json")
+          f"(anonymisiert → {_P}representatives.anon.jsonl)")
+    print(f"[cluster] Reports → {OUT.relative_to(c.REPO_ROOT)}/{_P}clusters.md, {_P}clusters.json")
 
 
 if __name__ == "__main__":

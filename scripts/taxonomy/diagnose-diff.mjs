@@ -14,7 +14,7 @@
  *
  * Aufruf:
  *   node scripts/taxonomy/diagnose-diff.mjs <alt.md> <neu.md>
- *   npm run diagnose:diff -- out/diagnose_2026-07-15.md scripts/taxonomy/out/diagnose.md
+ *   npm run diagnose:diff -- scripts/taxonomy/out/2026-07-15-diagnose.md scripts/taxonomy/out/2026-07-18-diagnose.md
  *
  * Beide Argumente müssen von diagnose.mjs erzeugte (oder strukturell gleiche)
  * Markdown-Reports sein. Fehlende Abschnitte (z.B. Confusion übersprungen via
@@ -27,7 +27,8 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = path.join(__dirname, "out");
-const OUT_FILE = path.join(OUT_DIR, "diagnose-diff.md");
+const TODAY = new Date().toISOString().slice(0, 10);
+const OUT_FILE = path.join(OUT_DIR, `${TODAY}-diagnose-diff.md`);
 
 const [, , oldPath, newPath] = process.argv;
 if (!oldPath || !newPath) {
