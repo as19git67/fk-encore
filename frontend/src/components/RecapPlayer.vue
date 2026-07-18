@@ -154,6 +154,8 @@ const activeSlot = ref<'A' | 'B'>('A')
 let advanceTimer: ReturnType<typeof setTimeout> | null = null
 let controlsTimer: ReturnType<typeof setTimeout> | null = null
 let advanceToken = 0
+const mapReady = ref(false)
+let mapReadyResolve: (() => void) | null = null
 
 const preloadCache = new Map<string, Promise<boolean>>()
 const PRELOAD_WAIT_TIMEOUT_MS = 5000
@@ -256,6 +258,17 @@ function clearAdvance() {
   advanceToken++
 }
 
+function onMapReady() {
+  mapReady.value = true
+  mapReadyResolve?.()
+  mapReadyResolve = null
+}
+
+function waitForMap(): Promise<void> {
+  if (mapReady.value) return Promise.resolve()
+  return new Promise((resolve) => { mapReadyResolve = resolve })
+}
+
 const auth = useAuthStore()
 const transformedIndex = useTransformedPhotosIndex()
 
@@ -313,11 +326,18 @@ function waitForOffset(offset: number): Promise<void> {
   })
 }
 
-function scheduleAdvance() {
+async function scheduleAdvance() {
   clearAdvance()
   if (paused.value || !props.open || total.value === 0) return
-  preloadOffset(1)
   const token = ++advanceToken
+
+  // For map slides, wait until all tiles are loaded before starting the timer.
+  if (currentSlide.value?.layout === 'map') {
+    await waitForMap()
+    if (token !== advanceToken || !props.open || paused.value) return
+  }
+
+  preloadOffset(1)
   advanceTimer = setTimeout(async () => {
     advanceTimer = null
     await waitForOffset(1)
@@ -534,6 +554,8 @@ function reset() {
   activeSlot.value = 'A'
   slotA.value = slides.value[0] ?? null
   slotB.value = null
+  mapReady.value = false
+  mapReadyResolve = null
   bumpControls()
   scheduleAdvance()
 }
@@ -602,6 +624,7 @@ onBeforeUnmount(() => {
             :key="`A-${slotA.key}`"
             :intro="mapIntro"
             :duration-ms="MAP_INTRO_DURATION_MS"
+            @ready="onMapReady"
           />
           <div
             v-else-if="slotA && slotA.layout === 'single'"
@@ -646,6 +669,7 @@ onBeforeUnmount(() => {
             :key="`B-${slotB.key}`"
             :intro="mapIntro"
             :duration-ms="MAP_INTRO_DURATION_MS"
+            @ready="onMapReady"
           />
           <div
             v-else-if="slotB && slotB.layout === 'single'"
