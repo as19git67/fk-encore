@@ -120,6 +120,11 @@ diverse_select_stub.select_diverse = lambda items, count, similarity_threshold: 
 ]
 sys.modules["app.services.diverse_select"] = diverse_select_stub
 
+# app.services.scene_pairs stub
+scene_pairs_stub = types.ModuleType("app.services.scene_pairs")
+scene_pairs_stub.find_scene_pairs = lambda items, min_time_gap_seconds, similarity_threshold, max_pairs: []
+sys.modules.setdefault("app.services.scene_pairs", scene_pairs_stub)
+
 sys.modules["app.services"] = types.ModuleType("app.services")
 
 # ---------------------------------------------------------------------------
