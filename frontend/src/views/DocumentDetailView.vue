@@ -23,6 +23,7 @@ import {
   listTaxSectionsCatalog,
   reclassifyDocument,
   replaceDocumentFile,
+  setTeacherRequested,
   unlockDocument,
   updateDocument,
   updateDocumentTax,
@@ -361,6 +362,24 @@ async function onReclassify(options: { forceOcr?: boolean } = {}) {
   }
 }
 
+async function onToggleTeacherRequested() {
+  if (!doc.value) return
+  saving.value = true
+  error.value = ''
+  info.value = ''
+  try {
+    const next = !doc.value.teacher_requested
+    doc.value = await setTeacherRequested(doc.value.id, next)
+    info.value = next
+      ? 'Für den nächsten Cloud-Lehrer-Lauf vorgemerkt.'
+      : 'Vormerkung für den Cloud-Lehrer aufgehoben.'
+  } catch (err: any) {
+    error.value = err.message || 'Aktion fehlgeschlagen'
+  } finally {
+    saving.value = false
+  }
+}
+
 const downloading = ref(false)
 const unlockPassword = ref('')
 const unlocking = ref(false)
@@ -564,6 +583,18 @@ onBeforeUnmount(() => {
           :loading="saving"
           title="Text-Layer der PDF ignorieren und komplett per OCR neu einlesen (hilft bei Scans mit fehlenden Leerzeichen)."
           @click="onReclassify({ forceOcr: true })"
+        />
+        <Button
+          v-if="auth.hasPermission('documents.edit') && doc"
+          :icon="doc.teacher_requested ? 'pi pi-bookmark-fill' : 'pi pi-bookmark'"
+          :label="doc.teacher_requested ? 'Vorgemerkt' : 'Für Cloud-Lehrer vormerken'"
+          :aria-label="doc.teacher_requested ? 'Vormerkung aufheben' : 'Für Cloud-Lehrer vormerken'"
+          text
+          :loading="saving"
+          :title="doc.teacher_requested
+            ? 'Dieses Dokument ist für den nächsten Cloud-Lehrer-Lauf vorgemerkt. Klicken zum Aufheben.'
+            : 'Schwer einzuordnen? Für den nächsten Cloud-Lehrer-Lauf vormerken — die Cloud klassifiziert es dann vorrangig.'"
+          @click="onToggleTeacherRequested"
         />
         <Button
           v-if="doc"
