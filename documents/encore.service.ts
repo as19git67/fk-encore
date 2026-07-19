@@ -19,6 +19,10 @@ import "./fsck";
 // and generates taxonomy/hint improvement suggestions.
 import "./hint-mining-cron";
 
+// Register the daily taxonomy cockpit snapshot that captures KPI metrics
+// for the admin dashboard (sonstiges-%, confidence, teacher queue, etc.).
+import "./taxonomy-cockpit";
+
 startLocalCron();
 
 import { startInboxWatcher } from "./inbox-watcher";
