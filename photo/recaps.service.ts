@@ -18,6 +18,7 @@ import {
   photos,
   recaps,
   recapPhotos,
+  recapExcludedPhotos,
   photoCuration,
   persons,
   faces,
@@ -29,6 +30,9 @@ import { repairMojibake } from "./text-encoding";
 
 const MIN_PHOTOS_PER_RECAP = 4;
 const MAX_PHOTOS_PER_RECAP = 30;
+// How many next-best candidates (beyond the chosen set) are kept per recap in
+// `seed.reserve_ids` to backfill slots when the user excludes a photo.
+const RECAP_RESERVE_SIZE = 30;
 // Visible feed is capped so the page stays snappy for libraries with thousands
 // of recaps (e.g. users with many assigned persons generate hundreds of
 // per-year person-recaps). The underlying rows remain in the DB — only the
@@ -284,15 +288,22 @@ function byChronological(a: CandidatePhoto, b: CandidatePhoto): number {
 function curatePhotosLocal(candidates: CandidatePhoto[]): {
   cover: number | null;
   rankedIds: number[];
+  reserveIds: number[];
 } {
   const deduped = dedupBursts(candidates);
   const byQuality = [...deduped].sort(byQualityDesc);
   const cover = byQuality[0]?.id ?? null;
   const limited = byQuality.slice(0, MAX_PHOTOS_PER_RECAP);
+  // Reserve = the next-best shots not chosen, kept quality-desc so a later
+  // exclusion backfills with the strongest remaining candidate.
+  const reserveIds = byQuality
+    .slice(MAX_PHOTOS_PER_RECAP, MAX_PHOTOS_PER_RECAP + RECAP_RESERVE_SIZE)
+    .map((p) => p.id);
   limited.sort(byChronological);
   return {
     cover,
     rankedIds: limited.map((p) => p.id),
+    reserveIds,
   };
 }
 
@@ -376,6 +387,7 @@ async function selectDiverseRemote(
 async function curatePhotos(candidates: CandidatePhoto[]): Promise<{
   cover: number | null;
   rankedIds: number[];
+  reserveIds: number[];
 }> {
   if (!DIVERSITY_ENABLED || candidates.length <= MIN_PHOTOS_PER_RECAP) {
     return curatePhotosLocal(candidates);
@@ -407,16 +419,76 @@ async function curatePhotos(candidates: CandidatePhoto[]): Promise<{
 
   const cover = chosenPhotos[0]!.id; // service returns best-first
   const ordered = [...chosenPhotos].sort(byChronological);
+  // Reserve = strongest pool photos the diversity pass didn't choose, so an
+  // exclusion can backfill without another round-trip. Kept quality-desc.
+  const chosenIds = new Set(chosenPhotos.map((p) => p.id));
+  const reserveIds = pool
+    .filter((p) => !chosenIds.has(p.id))
+    .slice(0, RECAP_RESERVE_SIZE)
+    .map((p) => p.id);
   return {
     cover,
     rankedIds: ordered.map((p) => p.id),
+    reserveIds,
   };
+}
+
+/**
+ * Apply a recap's persistent photo exclusions to a freshly curated photo set,
+ * backfilling emptied slots from the ranked reserve. Pure so the exclusion +
+ * backfill semantics stay unit-testable independent of the DB.
+ *
+ * - Excluded photos are dropped from both the chosen set and the reserve.
+ * - Slots freed by exclusions are refilled from the (quality-desc) reserve,
+ *   up to the original photo count.
+ * - If the cover was excluded, it moves to the first surviving photo.
+ * - The returned reserve has the used backfill removed, ready to persist.
+ */
+export function applyExclusionsAndBackfill(opts: {
+  chosen: number[];
+  reserve: number[];
+  excluded: Set<number>;
+  coverPhotoId: number | null;
+  targetCount: number;
+}): { photoIds: number[]; reserve: number[]; coverPhotoId: number | null } {
+  const { excluded } = opts;
+  const keptChosen = opts.chosen.filter((id) => !excluded.has(id));
+  const chosenSet = new Set(keptChosen);
+  const availableReserve = opts.reserve.filter(
+    (id) => !excluded.has(id) && !chosenSet.has(id)
+  );
+  const need = Math.max(0, opts.targetCount - keptChosen.length);
+  const backfill = availableReserve.slice(0, need);
+  const backfillSet = new Set(backfill);
+  const photoIds = [...keptChosen, ...backfill];
+  const reserve = availableReserve.filter((id) => !backfillSet.has(id));
+  const coverPhotoId =
+    opts.coverPhotoId != null && !excluded.has(opts.coverPhotoId)
+      ? opts.coverPhotoId
+      : (photoIds[0] ?? null);
+  return { photoIds, reserve, coverPhotoId };
+}
+
+/** Photo ids the user has excluded from the recap with the given id. */
+async function loadExclusionSet(recapId: number): Promise<Set<number>> {
+  const rows = await dbAll<{ photo_id: number }>(
+    db
+      .select({ photo_id: recapExcludedPhotos.photo_id })
+      .from(recapExcludedPhotos)
+      .where(eq(recapExcludedPhotos.recap_id, recapId))
+  );
+  return new Set(rows.map((r) => r.photo_id));
 }
 
 /**
  * Upsert a recap by (user_id, dedup_key). Replaces the photo membership
  * wholesale. Keeps dismissed_at if the row already existed — a user who has
  * dismissed a recap should not see it re-appear when the cron rebuilds it.
+ *
+ * Honours persistent per-recap photo exclusions: excluded photos are removed
+ * from the freshly curated set and their slots backfilled from `reserveIds`;
+ * the leftover reserve is stored in `seed.reserve_ids` for the live exclude
+ * endpoint to draw on between rebuilds.
  */
 async function upsertRecap(input: {
   userId: number;
@@ -430,6 +502,7 @@ async function upsertRecap(input: {
   score: number;
   seed: Record<string, unknown>;
   photoIds: number[];
+  reserveIds?: number[];
 }): Promise<number> {
   const existing = await dbFirst<{ id: number }>(
     db
@@ -441,6 +514,17 @@ async function upsertRecap(input: {
       .limit(1)
   );
 
+  // Brand-new recaps can't have exclusions yet; existing ones may.
+  const excluded = existing ? await loadExclusionSet(existing.id) : new Set<number>();
+  const { photoIds, reserve, coverPhotoId } = applyExclusionsAndBackfill({
+    chosen: input.photoIds,
+    reserve: input.reserveIds ?? [],
+    excluded,
+    coverPhotoId: input.coverPhotoId,
+    targetCount: input.photoIds.length,
+  });
+  const seed = { ...input.seed, reserve_ids: reserve };
+
   let recapId: number;
   if (existing) {
     recapId = existing.id;
@@ -451,13 +535,13 @@ async function upsertRecap(input: {
           kind: input.kind,
           title: input.title,
           subtitle: input.subtitle,
-          cover_photo_id: input.coverPhotoId,
+          cover_photo_id: coverPhotoId,
           period_start: input.periodStart
             ? input.periodStart.toISOString()
             : null,
           period_end: input.periodEnd ? input.periodEnd.toISOString() : null,
           score: input.score,
-          seed: input.seed,
+          seed,
         })
         .where(eq(recaps.id, recapId))
     );
@@ -471,24 +555,24 @@ async function upsertRecap(input: {
           kind: input.kind,
           title: input.title,
           subtitle: input.subtitle,
-          cover_photo_id: input.coverPhotoId,
+          cover_photo_id: coverPhotoId,
           period_start: input.periodStart
             ? input.periodStart.toISOString()
             : null,
           period_end: input.periodEnd ? input.periodEnd.toISOString() : null,
           score: input.score,
           dedup_key: input.dedupKey,
-          seed: input.seed,
+          seed,
         })
         .returning({ id: recaps.id })
     );
     recapId = inserted!.id;
   }
 
-  if (input.photoIds.length > 0) {
+  if (photoIds.length > 0) {
     await dbExec(
       db.insert(recapPhotos).values(
-        input.photoIds.map((photoId, idx) => ({
+        photoIds.map((photoId, idx) => ({
           recap_id: recapId,
           photo_id: photoId,
           rank: idx,
@@ -610,7 +694,7 @@ async function buildOnThisDayRecaps(
   for (const [year, photosForYear] of groups.entries()) {
     if (photosForYear.length < MIN_PHOTOS_PER_RECAP) continue;
     const yearsAgo = currentYear - year;
-    const { cover, rankedIds } = await curatePhotos(photosForYear);
+    const { cover, rankedIds, reserveIds } = await curatePhotos(photosForYear);
     const periodStart = new Date(year, today.getMonth(), today.getDate());
     const periodEnd = new Date(periodStart);
     periodEnd.setHours(23, 59, 59);
@@ -654,6 +738,7 @@ async function buildOnThisDayRecaps(
         ...(resolved.llmUsed ? { llm_title: true } : {}),
       },
       photoIds: rankedIds,
+      reserveIds,
     });
     built++;
   }
@@ -961,7 +1046,7 @@ async function buildTripRecaps(
   const builtKeys = new Set<string>();
 
   for (const cluster of clusters) {
-    const { cover, rankedIds } = await curatePhotos(cluster.photos);
+    const { cover, rankedIds, reserveIds } = await curatePhotos(cluster.photos);
     const startIso = cluster.start.toISOString().slice(0, 10);
     const endIso = cluster.end.toISOString().slice(0, 10);
     const placeSlug = (cluster.dominantCity ?? cluster.dominantCountry ?? "trip")
@@ -1015,6 +1100,7 @@ async function buildTripRecaps(
         ...(resolved.llmUsed ? { llm_title: true } : {}),
       },
       photoIds: rankedIds,
+      reserveIds,
     });
     builtKeys.add(dedupKey);
     built++;
@@ -1198,7 +1284,7 @@ async function buildPersonRecaps(
       return d != null && d >= recentCutoff;
     });
     if (recent.length >= PERSON_MIN_PHOTOS) {
-      const { cover, rankedIds } = await curatePhotos(recent);
+      const { cover, rankedIds, reserveIds } = await curatePhotos(recent);
       // "Damals & heute": oldest vs newest photo of this person across the
       // whole library (not just the window) — the players render it as a
       // split-screen compare slide.
@@ -1247,6 +1333,7 @@ async function buildPersonRecaps(
           ...(resolved.llmUsed ? { llm_title: true } : {}),
         },
         photoIds: rankedIds,
+        reserveIds,
       });
       built++;
     }
@@ -1264,7 +1351,7 @@ async function buildPersonRecaps(
     }
     for (const [year, list] of byYear) {
       if (list.length < PERSON_MIN_PHOTOS) continue;
-      const { cover, rankedIds } = await curatePhotos(list);
+      const { cover, rankedIds, reserveIds } = await curatePhotos(list);
       const start = new Date(year, 0, 1);
       const end = new Date(year, 11, 31, 23, 59, 59);
       const dedupKey = `person:${person.id}:year:${year}`;
@@ -1299,6 +1386,7 @@ async function buildPersonRecaps(
           ...(resolved.llmUsed ? { llm_title: true } : {}),
         },
         photoIds: rankedIds,
+        reserveIds,
       });
       built++;
     }
@@ -1331,7 +1419,7 @@ async function buildRecentHighlightsRecaps(
   );
   if (distinctDays.size < RECENT_HIGHLIGHTS_MIN_DAYS) return 0;
 
-  const { cover, rankedIds } = await curatePhotos(recent);
+  const { cover, rankedIds, reserveIds } = await curatePhotos(recent);
   const yyyyMm = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
   const monthLabel = today.toLocaleDateString("de-DE", {
     month: "long",
@@ -1365,6 +1453,7 @@ async function buildRecentHighlightsRecaps(
       ...(resolved.llmUsed ? { llm_title: true } : {}),
     },
     photoIds: rankedIds,
+    reserveIds,
   });
   return 1;
 }
@@ -1404,7 +1493,7 @@ async function buildPlaceRecaps(
     const distinctDays = new Set(dates.map((d) => d.toISOString().slice(0, 10)));
     if (distinctDays.size < PLACE_MIN_DISTINCT_DAYS) continue;
 
-    const { cover, rankedIds } = await curatePhotos(list);
+    const { cover, rankedIds, reserveIds } = await curatePhotos(list);
     const slug = city
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
@@ -1438,6 +1527,7 @@ async function buildPlaceRecaps(
         ...(resolved.llmUsed ? { llm_title: true } : {}),
       },
       photoIds: rankedIds,
+      reserveIds,
     });
     builtKeys.add(dedupKey);
     built++;
@@ -2094,6 +2184,140 @@ export async function restoreRecap(userId: number, recapId: number): Promise<boo
       .where(and(eq(recaps.id, recapId), eq(recaps.user_id, userId)))
   );
   return result.changes > 0;
+}
+
+export type ExcludeRecapPhotoResult =
+  | {
+      status: "ok";
+      /** The removed photo id. */
+      removed: number;
+      /** The backfilled replacement, or null if the reserve was exhausted. */
+      added: number | null;
+      /** New ordered photo ids for the recap. */
+      photo_ids: number[];
+      cover_photo_id: number | null;
+    }
+  | { status: "not_found" }
+  | { status: "would_empty" };
+
+/**
+ * Persistently exclude a photo from a recap and backfill its slot from the
+ * ranked reserve (`seed.reserve_ids`). Idempotent per (recap, photo). The
+ * exclusion survives the daily rebuild because it is keyed by the stable
+ * recap id, and `upsertRecap` re-applies it on every rebuild.
+ *
+ * Returns the new membership so clients can update in place. Refuses to remove
+ * the last remaining photo when there is nothing to backfill with.
+ */
+export async function excludeRecapPhoto(
+  userId: number,
+  recapId: number,
+  photoId: number
+): Promise<ExcludeRecapPhotoResult> {
+  const recap = await dbFirst<{
+    id: number;
+    cover_photo_id: number | null;
+    seed: Record<string, unknown> | null;
+  }>(
+    db
+      .select({
+        id: recaps.id,
+        cover_photo_id: recaps.cover_photo_id,
+        seed: recaps.seed,
+      })
+      .from(recaps)
+      .where(and(eq(recaps.id, recapId), eq(recaps.user_id, userId)))
+      .limit(1)
+  );
+  if (!recap) return { status: "not_found" };
+
+  const photoRows = await dbAll<{ photo_id: number }>(
+    db
+      .select({ photo_id: recapPhotos.photo_id })
+      .from(recapPhotos)
+      .where(eq(recapPhotos.recap_id, recapId))
+      .orderBy(recapPhotos.rank)
+  );
+  const currentIds = photoRows.map((r) => r.photo_id);
+
+  // Photo isn't part of the recap (already removed / stale client) — no-op.
+  if (!currentIds.includes(photoId)) {
+    return {
+      status: "ok",
+      removed: photoId,
+      added: null,
+      photo_ids: currentIds,
+      cover_photo_id: recap.cover_photo_id,
+    };
+  }
+
+  const reserveRaw = recap.seed?.reserve_ids;
+  const reserve: number[] = Array.isArray(reserveRaw)
+    ? reserveRaw.filter((n): n is number => typeof n === "number")
+    : [];
+
+  // Record the exclusion first so the reserve/backfill can't re-pick it.
+  await dbExec(
+    db
+      .insert(recapExcludedPhotos)
+      .values({ recap_id: recapId, photo_id: photoId })
+      .onConflictDoNothing()
+  );
+
+  const excludedSet = await loadExclusionSet(recapId);
+  const currentSet = new Set(currentIds);
+  const replacement =
+    reserve.find((id) => !excludedSet.has(id) && !currentSet.has(id)) ?? null;
+
+  const newIds = currentIds.filter((id) => id !== photoId);
+  if (replacement != null) newIds.push(replacement);
+
+  if (newIds.length === 0) {
+    // Nothing left and nothing to backfill — roll back the exclusion.
+    await dbExec(
+      db
+        .delete(recapExcludedPhotos)
+        .where(
+          and(
+            eq(recapExcludedPhotos.recap_id, recapId),
+            eq(recapExcludedPhotos.photo_id, photoId)
+          )
+        )
+    );
+    return { status: "would_empty" };
+  }
+
+  await dbExec(db.delete(recapPhotos).where(eq(recapPhotos.recap_id, recapId)));
+  await dbExec(
+    db.insert(recapPhotos).values(
+      newIds.map((pid, idx) => ({ recap_id: recapId, photo_id: pid, rank: idx }))
+    )
+  );
+
+  const newReserve = reserve.filter(
+    (id) => id !== replacement && !excludedSet.has(id)
+  );
+  const newCover =
+    recap.cover_photo_id != null && !excludedSet.has(recap.cover_photo_id)
+      ? recap.cover_photo_id
+      : (newIds[0] ?? null);
+  await dbExec(
+    db
+      .update(recaps)
+      .set({
+        seed: { ...(recap.seed ?? {}), reserve_ids: newReserve },
+        cover_photo_id: newCover,
+      })
+      .where(eq(recaps.id, recapId))
+  );
+
+  return {
+    status: "ok",
+    removed: photoId,
+    added: replacement,
+    photo_ids: newIds,
+    cover_photo_id: newCover,
+  };
 }
 
 // ────────────────────────────────────────────────────────────────────────────

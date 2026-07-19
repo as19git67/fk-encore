@@ -52,6 +52,7 @@ struct RecapPlayerView: View {
     /// curation_status; rolled back if the PATCH fails.
     @State private var favoriteOverrides: [Int: Bool] = [:]
     @State private var favoriteBusy = false
+    @State private var excludeBusy = false
 
     private let musicVolume: Float = 0.55
 
@@ -150,6 +151,15 @@ struct RecapPlayerView: View {
                             alignment: .bottomTrailing
                         )
                         .padding(.trailing, 16)
+                        .padding(.bottom, 28)
+
+                    excludeButton
+                        .frame(
+                            maxWidth: .infinity,
+                            maxHeight: .infinity,
+                            alignment: .bottomLeading
+                        )
+                        .padding(.leading, 16)
                         .padding(.bottom, 28)
                 }
             }
@@ -370,6 +380,60 @@ struct RecapPlayerView: View {
                 )
             } catch {
                 favoriteOverrides[photo.id] = !target
+            }
+        }
+    }
+
+    // MARK: - Exclude
+
+    private var excludeButton: some View {
+        Button { excludeCurrentPhoto() } label: {
+            Image(systemName: "nosign")
+                .font(.title2)
+                .foregroundStyle(.white)
+                .padding(12)
+                .background(.black.opacity(0.45), in: Circle())
+        }
+        .disabled(excludeBusy || photos.isEmpty)
+        .accessibilityLabel("Foto aus Rückblick entfernen")
+    }
+
+    /// Persistently remove the current photo from the recap. The server
+    /// backfills the next-best photo; we refresh the membership in place and
+    /// restart the photo sequence (the intro is not replayed). Failures keep
+    /// the show running unchanged.
+    private func excludeCurrentPhoto() {
+        guard !excludeBusy, !photos.isEmpty else { return }
+        let idx = min(playback.index, photos.count - 1)
+        let photoId = photos[idx].id
+        excludeBusy = true
+        Task { @MainActor in
+            defer { excludeBusy = false }
+            struct EmptyBody: Encodable {}
+            struct ExcludeResponse: Decodable { let photo_ids: [Int] }
+            do {
+                let res: ExcludeResponse = try await APIClient.shared.post(
+                    "/recaps/\(recapId)/photos/\(photoId)/exclude",
+                    body: EmptyBody()
+                )
+                guard !res.photo_ids.isEmpty else { return }
+                let query = ["ids": res.photo_ids.map(String.init).joined(separator: ",")]
+                let response: RecapPhotoDetailsResponse =
+                    try await APIClient.shared.get("/photos/details", query: query)
+                let byId = Dictionary(
+                    response.photos.map { ($0.id, $0) },
+                    uniquingKeysWith: { first, _ in first }
+                )
+                let ordered = res.photo_ids.compactMap { byId[$0] }
+                guard !ordered.isEmpty else { return }
+                photos = ordered
+                slideImages = [:]
+                failedSlides = []
+                loadingSlides = []
+                playback = RecapPlayback(count: ordered.count)
+                prefetch(around: 0)
+            } catch {
+                // Keep the show running on any failure.
             }
         }
     }

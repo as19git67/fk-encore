@@ -25,6 +25,8 @@ const props = defineProps<{
   musicUrl?: string | null
   /** When true, show a control to switch to another background track. */
   canChangeMusic?: boolean
+  /** When true, single-photo slides get an "aus Rückblick entfernen" control. */
+  canExcludePhotos?: boolean
   /** Trip map intro rendered as the first slide; omit to start with photos. */
   mapIntro?: RecapMapIntroData | null
   /** "Damals & heute" split-screen rendered as the first slide of person recaps. */
@@ -34,6 +36,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'change-music'): void
+  (e: 'exclude-photo', photoId: number): void
 }>()
 
 const photoDurationMs = computed(() => props.durationMs ?? 4500)
@@ -404,6 +407,22 @@ const favoriteToggleable = computed(
   () => (currentSlide.value?.photos.length ?? 0) > 0
 )
 
+// Excluding is only offered on single-photo slides, where "this photo" is
+// unambiguous. Collages / map / compare slides are skipped.
+const excludeBusy = ref(false)
+const excludablePhotoId = computed<number | null>(() => {
+  const slide = currentSlide.value
+  if (!slide || slide.layout !== 'single' || slide.photos.length !== 1) return null
+  return slide.photos[0]?.id ?? null
+})
+
+function requestExclude() {
+  const id = excludablePhotoId.value
+  if (id == null || excludeBusy.value) return
+  excludeBusy.value = true
+  emit('exclude-photo', id)
+}
+
 async function toggleFavorite() {
   const slide = currentSlide.value
   if (!slide || slide.photos.length === 0 || favoriteBusy.value) return
@@ -580,10 +599,37 @@ watch(() => props.open, (isOpen) => {
   }
 })
 
-watch(() => props.photos, () => {
+watch(() => props.photos, (next, prev) => {
   preloadCache.clear()
-  curationOverrides.value.clear()
-  if (props.open) reset()
+  if (!props.open) {
+    curationOverrides.value.clear()
+    return
+  }
+  // Distinguish an in-place edit (a photo was excluded → most ids carry over)
+  // from a wholesale swap to a different recap. An edit re-anchors the visible
+  // slot so playback continues from roughly where it was; a new recap resets.
+  const prevIds = new Set((prev ?? []).map((p) => p.id))
+  const overlap = next.filter((p) => prevIds.has(p.id)).length
+  const isEdit =
+    !!prev && prev.length > 0 && overlap >= Math.min(prev.length, next.length) - 2
+  if (isEdit) {
+    const len = total.value
+    if (len === 0) {
+      emit('close')
+      return
+    }
+    if (index.value >= len) index.value = len - 1
+    const slide = slides.value[index.value]
+    if (slide) {
+      if (activeSlot.value === 'A') slotA.value = slide
+      else slotB.value = slide
+    }
+    excludeBusy.value = false
+    scheduleAdvance()
+  } else {
+    curationOverrides.value.clear()
+    reset()
+  }
 })
 
 watch(() => props.musicUrl, () => {
@@ -779,6 +825,16 @@ onBeforeUnmount(() => {
           @click="toggleFavorite"
         >
           <i :class="currentSlideFavorite ? 'pi pi-heart-fill' : 'pi pi-heart'" />
+        </button>
+        <button
+          v-if="canExcludePhotos && excludablePhotoId != null"
+          type="button"
+          class="recap-player-btn"
+          aria-label="Foto aus Rückblick entfernen"
+          :disabled="excludeBusy"
+          @click="requestExclude"
+        >
+          <i :class="excludeBusy ? 'pi pi-spin pi-spinner' : 'pi pi-ban'" />
         </button>
       </div>
 
