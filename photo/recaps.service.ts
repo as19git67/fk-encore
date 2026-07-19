@@ -2200,6 +2200,46 @@ export type ExcludeRecapPhotoResult =
   | { status: "not_found" }
   | { status: "would_empty" };
 
+type RecapExclusionRow = {
+  id: number;
+  cover_photo_id: number | null;
+  seed: Record<string, unknown> | null;
+};
+
+async function fetchRecapForExclusion(
+  userId: number,
+  recapId: number
+): Promise<RecapExclusionRow | null> {
+  return dbFirst<RecapExclusionRow>(
+    db
+      .select({
+        id: recaps.id,
+        cover_photo_id: recaps.cover_photo_id,
+        seed: recaps.seed,
+      })
+      .from(recaps)
+      .where(and(eq(recaps.id, recapId), eq(recaps.user_id, userId)))
+      .limit(1)
+  );
+}
+
+function parseReserveIds(seed: Record<string, unknown> | null | undefined): number[] {
+  const raw = seed?.reserve_ids;
+  return Array.isArray(raw) ? raw.filter((n): n is number => typeof n === "number") : [];
+}
+
+/**
+ * Whether `seed` has ever been written by the reserve-aware `upsertRecap`
+ * (i.e. carries a `reserve_ids` key at all, even an empty array). False for
+ * recaps built before this feature shipped — those need one self-heal
+ * rebuild. Deliberately distinct from "reserve is currently empty": once a
+ * recap has a real (possibly exhausted) reserve, further exclusions accept
+ * the shrink rather than forcing a rebuild on every call.
+ */
+function hasReserveKey(seed: Record<string, unknown> | null | undefined): boolean {
+  return !!seed && Object.prototype.hasOwnProperty.call(seed, "reserve_ids");
+}
+
 /**
  * Persistently exclude a photo from a recap and backfill its slot from the
  * ranked reserve (`seed.reserve_ids`). Idempotent per (recap, photo). The
@@ -2214,21 +2254,7 @@ export async function excludeRecapPhoto(
   recapId: number,
   photoId: number
 ): Promise<ExcludeRecapPhotoResult> {
-  const recap = await dbFirst<{
-    id: number;
-    cover_photo_id: number | null;
-    seed: Record<string, unknown> | null;
-  }>(
-    db
-      .select({
-        id: recaps.id,
-        cover_photo_id: recaps.cover_photo_id,
-        seed: recaps.seed,
-      })
-      .from(recaps)
-      .where(and(eq(recaps.id, recapId), eq(recaps.user_id, userId)))
-      .limit(1)
-  );
+  let recap = await fetchRecapForExclusion(userId, recapId);
   if (!recap) return { status: "not_found" };
 
   const photoRows = await dbAll<{ photo_id: number }>(
@@ -2251,12 +2277,8 @@ export async function excludeRecapPhoto(
     };
   }
 
-  const reserveRaw = recap.seed?.reserve_ids;
-  const reserve: number[] = Array.isArray(reserveRaw)
-    ? reserveRaw.filter((n): n is number => typeof n === "number")
-    : [];
-
-  // Record the exclusion first so the reserve/backfill can't re-pick it.
+  // Record the exclusion first so nothing downstream (fast backfill, the
+  // rebuild fallback, or the manual fallback below) can re-pick this photo.
   await dbExec(
     db
       .insert(recapExcludedPhotos)
@@ -2266,8 +2288,55 @@ export async function excludeRecapPhoto(
 
   const excludedSet = await loadExclusionSet(recapId);
   const currentSet = new Set(currentIds);
-  const replacement =
+  let reserve = parseReserveIds(recap.seed);
+  let replacement =
     reserve.find((id) => !excludedSet.has(id) && !currentSet.has(id)) ?? null;
+
+  if (replacement == null && !hasReserveKey(recap.seed)) {
+    // This recap predates the reserve mechanism (built before this feature
+    // shipped), so there is nothing to draw from yet. Recompute the user's
+    // recaps for real (the same cost as the manual "Aktualisieren" rebuild),
+    // just this once — upsertRecap re-reads recap_excluded_photos itself, so
+    // a rebuilt recap already reflects this exclusion with a freshly
+    // backfilled membership and a real `reserve_ids`. Once a recap has that
+    // key (even empty), later exclusions accept an exhausted reserve as
+    // final instead of forcing a rebuild on every call.
+    await rebuildRecapsForUser(userId);
+    const after = await fetchRecapForExclusion(userId, recapId);
+    if (!after) {
+      // The rebuild pruned the now-empty recap (orphan cleanup) — nothing
+      // left to exclude from, and the row itself is gone.
+      return { status: "would_empty" };
+    }
+    recap = after;
+    reserve = parseReserveIds(after.seed);
+
+    const rebuiltIds = await dbAll<{ photo_id: number }>(
+      db
+        .select({ photo_id: recapPhotos.photo_id })
+        .from(recapPhotos)
+        .where(eq(recapPhotos.recap_id, recapId))
+        .orderBy(recapPhotos.rank)
+    );
+    if (!rebuiltIds.some((r) => r.photo_id === photoId)) {
+      // upsertRecap ran for this recap this pass and already applied the
+      // removal + backfill — nothing more to do.
+      const photoIds = rebuiltIds.map((r) => r.photo_id);
+      return {
+        status: "ok",
+        removed: photoId,
+        added: photoIds.find((id) => !currentSet.has(id)) ?? null,
+        photo_ids: photoIds,
+        cover_photo_id: recap.cover_photo_id,
+      };
+    }
+    // The recap's candidate pool no longer meets its kind's minimum
+    // threshold, so the builder skipped upserting it this pass and
+    // recap_photos still holds the excluded photo. Fall through to the
+    // direct removal below so the exclusion is honoured regardless.
+    replacement =
+      reserve.find((id) => !excludedSet.has(id) && !currentSet.has(id)) ?? null;
+  }
 
   const newIds = currentIds.filter((id) => id !== photoId);
   if (replacement != null) newIds.push(replacement);
