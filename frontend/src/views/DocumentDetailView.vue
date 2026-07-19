@@ -6,6 +6,7 @@ import Checkbox from 'primevue/checkbox'
 import InputNumber from 'primevue/inputnumber'
 import DatePicker from 'primevue/datepicker'
 import InputText from 'primevue/inputtext'
+import Dialog from 'primevue/dialog'
 import { toLocalIsoDate, parseLocalDate } from '../utils/dateFormat'
 import Message from 'primevue/message'
 import Select from 'primevue/select'
@@ -21,6 +22,7 @@ import {
   getDocument,
   listDocumentCategories,
   listTaxSectionsCatalog,
+  proposeCategory,
   reclassifyDocument,
   replaceDocumentFile,
   setTeacherRequested,
@@ -139,6 +141,57 @@ const followUpOpen = ref(false)
 function onFollowUpDone() {
   followUpOpen.value = false
   info.value = 'Dokument auf Wiedervorlage gelegt.'
+}
+
+// "Keine passende Kategorie — neue vorschlagen"
+const proposeOpen = ref(false)
+const proposeName = ref('')
+const proposeParentSlug = ref<string | null>(null)
+const proposeMoveToSonstiges = ref(true)
+const proposing = ref(false)
+
+// Parent options: only top-level categories (a new category hangs under one).
+const parentCategoryOptions = computed(() => {
+  const opts: Array<{ label: string; value: string | null }> = [{ label: '— keine (Oberkategorie) —', value: null }]
+  for (const c of categories.value) {
+    if (c.parent_id == null) opts.push({ label: c.name, value: c.slug })
+  }
+  return opts
+})
+
+function openPropose() {
+  if (!doc.value) return
+  proposeName.value = (doc.value.sender ?? doc.value.title ?? '').trim()
+  proposeParentSlug.value = null
+  proposeMoveToSonstiges.value = doc.value.category_slug !== 'sonstiges'
+  proposeOpen.value = true
+}
+
+async function onProposeCategory() {
+  if (!doc.value) return
+  if (!proposeName.value.trim()) {
+    error.value = 'Bitte einen Namen für die vorgeschlagene Kategorie angeben.'
+    return
+  }
+  proposing.value = true
+  error.value = ''
+  info.value = ''
+  try {
+    doc.value = await proposeCategory(doc.value.id, {
+      suggested_name: proposeName.value.trim(),
+      parent_slug: proposeParentSlug.value,
+      move_to_sonstiges: proposeMoveToSonstiges.value,
+    })
+    resetForm()
+    proposeOpen.value = false
+    info.value = proposeMoveToSonstiges.value
+      ? 'Kategorie-Vorschlag eingereicht — Dokument vorerst auf „Sonstiges" gesetzt. Ein Admin entscheidet darüber.'
+      : 'Kategorie-Vorschlag eingereicht. Ein Admin entscheidet darüber.'
+  } catch (err: any) {
+    error.value = err.message || 'Vorschlag konnte nicht eingereicht werden'
+  } finally {
+    proposing.value = false
+  }
 }
 
 const TAX_GROUP_LABELS: Record<TaxSectionGroup, string> = {
@@ -824,6 +877,15 @@ onBeforeUnmount(() => {
               optionValue="value"
               :disabled="!auth.hasPermission('documents.edit')"
             />
+            <Button
+              v-if="auth.hasPermission('documents.edit')"
+              class="propose-link"
+              label="Keine passende Kategorie? Neue vorschlagen"
+              icon="pi pi-lightbulb"
+              text
+              size="small"
+              @click="openPropose"
+            />
           </label>
           <label>
             <span class="label">Tags (Komma-getrennt)</span>
@@ -1073,6 +1135,46 @@ onBeforeUnmount(() => {
       :document-ids="[doc.id]"
       @done="onFollowUpDone"
     />
+
+    <Dialog
+      v-model:visible="proposeOpen"
+      modal
+      header="Neue Kategorie vorschlagen"
+      :style="{ width: '30rem', maxWidth: '95vw' }"
+    >
+      <div class="propose-dialog">
+        <p class="propose-hint">
+          Passt keine der vorhandenen Kategorien? Schlage eine neue vor — ein
+          Administrator prüft den Vorschlag und legt die Kategorie ggf. an.
+        </p>
+        <label>
+          <span class="label">Name der Kategorie</span>
+          <InputText v-model="proposeName" placeholder="z. B. Vereinsbeiträge" />
+        </label>
+        <label>
+          <span class="label">Oberkategorie (optional)</span>
+          <Select
+            v-model="proposeParentSlug"
+            :options="parentCategoryOptions"
+            optionLabel="label"
+            optionValue="value"
+          />
+        </label>
+        <label class="propose-checkbox">
+          <Checkbox v-model="proposeMoveToSonstiges" :binary="true" inputId="propose-sonstiges" />
+          <span>Dokument vorerst auf „Sonstiges" setzen</span>
+        </label>
+      </div>
+      <template #footer>
+        <Button label="Abbrechen" text :disabled="proposing" @click="proposeOpen = false" />
+        <Button
+          label="Vorschlag einreichen"
+          icon="pi pi-check"
+          :loading="proposing"
+          @click="onProposeCategory"
+        />
+      </template>
+    </Dialog>
   </div>
 </template>
 
@@ -1095,6 +1197,36 @@ onBeforeUnmount(() => {
    viewports the panes still sit side by side via the grid below,
    they just grow with their content and the page scrolls if needed. */
 @media (min-width: 800px) { .document-detail-view { padding-inline: 1em; } }
+
+.propose-link {
+  align-self: flex-start;
+  margin-top: 0.25rem;
+  padding-inline: 0;
+}
+.propose-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.propose-dialog .label {
+  display: block;
+  margin-bottom: 0.35rem;
+}
+.propose-dialog :deep(.p-inputtext),
+.propose-dialog :deep(.p-select) {
+  width: 100%;
+}
+.propose-hint {
+  margin: 0;
+  color: var(--p-text-muted-color);
+  font-size: 0.9rem;
+}
+.propose-checkbox {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
 
 .header {
   display: flex;
