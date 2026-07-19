@@ -946,6 +946,13 @@
       "when": 1784678400000,
       "tag": "0134_recap_excluded_photos",
       "breakpoints": true
+    },
+    {
+      "idx": 135,
+      "version": "7",
+      "when": 1784764800000,
+      "tag": "0135_taxonomy_snapshots",
+      "breakpoints": true
     }
   ]
 }
