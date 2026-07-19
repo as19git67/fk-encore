@@ -55,6 +55,16 @@ interface RebuildResponse {
   trip: number;
 }
 
+interface ExcludePhotoResponse {
+  /** The removed photo id. */
+  removed: number;
+  /** Backfilled replacement photo id, or null when the reserve was empty. */
+  added: number | null;
+  /** New ordered photo ids for the recap. */
+  photo_ids: number[];
+  cover_photo_id: number | null;
+}
+
 /**
  * List all visible (non-dismissed) recaps for the current user, sorted by
  * relevance.
@@ -121,6 +131,40 @@ export const markRecapSeen = api(
     const ok = await recapsService.markRecapSeen(userId, id);
     if (!ok) throw APIError.notFound("recap not found");
     return { seen: true };
+  }
+);
+
+/**
+ * Exclude a single photo from a recap (from the collage view or the player).
+ * The exclusion is persistent and the freed slot is backfilled with the
+ * next-best reserve photo. Returns the recap's new photo membership.
+ */
+export const excludeRecapPhoto = api(
+  { expose: true, method: "POST", path: "/recaps/:id/photos/:photoId/exclude", auth: true },
+  async ({
+    id,
+    photoId,
+  }: {
+    id: number;
+    photoId: number;
+  }): Promise<ExcludePhotoResponse> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    const result = await recapsService.excludeRecapPhoto(userId, id, photoId);
+    if (result.status === "not_found") throw APIError.notFound("recap not found");
+    if (result.status === "would_empty") {
+      throw APIError.failedPrecondition(
+        "cannot remove the last photo of a recap"
+      );
+    }
+    return {
+      removed: result.removed,
+      added: result.added,
+      photo_ids: result.photo_ids,
+      cover_photo_id: result.cover_photo_id,
+    };
   }
 );
 

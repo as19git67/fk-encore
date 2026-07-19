@@ -84,6 +84,22 @@ export function rebuildRecaps() {
   })
 }
 
+export interface ExcludeRecapPhotoResponse {
+  removed: number
+  /** Backfilled replacement photo id, or null when the reserve was empty. */
+  added: number | null
+  photo_ids: number[]
+  cover_photo_id: number | null
+}
+
+/** Exclude a photo from a recap; the server backfills the next-best photo. */
+export function excludeRecapPhoto(recapId: number, photoId: number) {
+  return apiFetch<ExcludeRecapPhotoResponse>(
+    `/recaps/${recapId}/photos/${photoId}/exclude`,
+    { method: 'POST' },
+  )
+}
+
 // ---------- Video export ----------
 
 export interface RecapExportStatus {
