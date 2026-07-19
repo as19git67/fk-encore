@@ -66,4 +66,19 @@ final class RecapModelsTests: XCTestCase {
         XCTAssertEqual(response.recap.seed?.home_lon, 11.58)
         XCTAssertEqual(response.recap.seed?.location_city, "Rom")
     }
+
+    func testOrderedMusicCycleStartsAtSuggestedAndWraps() {
+        let tracks = ["a", "b", "c", "d"].map {
+            RecapMusicTrack(id: $0, mood: "calm", title: $0, url: "/recaps-music/file/\($0)")
+        }
+        let cycle = RecapPlayerView.orderedMusicCycle(tracks, suggestedId: "c")
+        XCTAssertEqual(cycle.map(\.id), ["c", "d", "a", "b"])
+
+        // Unknown id falls back to the head; empty stays empty.
+        XCTAssertEqual(
+            RecapPlayerView.orderedMusicCycle(tracks, suggestedId: "zzz").map(\.id),
+            ["a", "b", "c", "d"]
+        )
+        XCTAssertTrue(RecapPlayerView.orderedMusicCycle([], suggestedId: "a").isEmpty)
+    }
 }
