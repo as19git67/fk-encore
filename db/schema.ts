@@ -1121,6 +1121,23 @@ export const recapPhotos = pgTable(
   (table) => [primaryKey({ columns: [table.recap_id, table.photo_id] })]
 );
 
+// Photos the user has explicitly removed from a recap. Persistent and keyed by
+// recap_id (stable across the daily rebuild), so a rejected photo stays gone
+// and the builder backfills its slot from the ranked reserve pool.
+export const recapExcludedPhotos = pgTable(
+  "recap_excluded_photos",
+  {
+    recap_id: integer("recap_id")
+      .notNull()
+      .references(() => recaps.id, { onDelete: "cascade" }),
+    photo_id: integer("photo_id")
+      .notNull()
+      .references(() => photos.id, { onDelete: "cascade" }),
+    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.recap_id, table.photo_id] })]
+);
+
 // ========== Realtime Outbox ==========
 //
 // Every event published via realtime.publishEvent lands here before
