@@ -205,6 +205,13 @@ export interface DocumentDetail extends DocumentSummary {
    * flag once it writes a label.
    */
   teacher_requested: boolean;
+  /**
+   * True when the classifier assigned a personal-deduction tax section to a
+   * document that concerns a Bezugsperson (migration 0136). A soft "did you
+   * actually pay this deductible expense?" prompt — the category itself is not
+   * in doubt. Cleared by pinning the tax fields.
+   */
+  tax_review_needed: boolean;
 }
 
 export interface DocumentReceiptSuggestion {
@@ -1076,6 +1083,7 @@ export const listDocuments = api(
           tax_year: documents.tax_year,
           tax_year_confidence: documents.tax_year_confidence,
           tax_reviewed: documents.tax_reviewed,
+          tax_review_needed: documents.tax_review_needed,
           visibility: documents.visibility,
           group_id: documents.group_id,
           last_error: documents.last_error,
@@ -1142,6 +1150,7 @@ export const getDocument = api(
       attributes_reviewed: row.attributes_reviewed ?? false,
       subject_persons: subjectPersons,
       teacher_requested: row.teacher_requested ?? false,
+      tax_review_needed: row.tax_review_needed ?? false,
     };
   },
 );
@@ -2446,6 +2455,9 @@ export const updateDocumentTax = api(
         // ground truth from here on.
         tax_year_confidence: req.tax_relevant ? 1 : 0,
         tax_reviewed: true,
+        // The human just answered the "did you pay this deductible expense?"
+        // question by pinning the tax fields — clear the review flag (0136).
+        tax_review_needed: false,
       })
       .where(eq(documents.id, existing.id));
 
@@ -2852,6 +2864,8 @@ export interface ListTaxDocumentsResponse {
 interface ListTaxDocumentsQuery {
   year?: Query<number>;
   section?: Query<string>;
+  /** When true, only documents flagged for personal-deduction review (0136). */
+  review_needed?: Query<boolean>;
 }
 
 /**
@@ -2867,7 +2881,7 @@ interface ListTaxDocumentsQuery {
  */
 export const listTaxDocuments = api(
   { expose: true, method: "GET", path: "/documents/tax", auth: true },
-  async ({ year, section }: ListTaxDocumentsQuery): Promise<ListTaxDocumentsResponse> => {
+  async ({ year, section, review_needed }: ListTaxDocumentsQuery): Promise<ListTaxDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -2892,6 +2906,7 @@ export const listTaxDocuments = api(
       eq(documents.tax_relevant, true),
     ];
     if (yearFilter !== null) conds.push(eq(documents.tax_year, yearFilter));
+    if (review_needed === true) conds.push(eq(documents.tax_review_needed, true));
 
     const docRows = await dbAll<typeof documents.$inferSelect & { cat_slug: string | null }>(
       db
@@ -3610,6 +3625,7 @@ async function loadDetail(userId: number, id: number, isAdmin = false): Promise<
     attributes_reviewed: row.attributes_reviewed ?? false,
     subject_persons: subjectPersons,
     teacher_requested: row.teacher_requested ?? false,
+    tax_review_needed: row.tax_review_needed ?? false,
   };
 }
 
