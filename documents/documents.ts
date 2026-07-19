@@ -91,6 +91,7 @@ import {
   TAX_SECTIONS,
   type TaxSectionGroup,
 } from "./tax-sections";
+import { recordUserCategoryProposal } from "./suggestion-writer";
 
 const _require = createRequire(import.meta.url);
 type HeicConvertFn = (opts: {
@@ -1557,6 +1558,84 @@ export const setTeacherRequested = api(
           : { teacher_requested: false, teacher_requested_at: null },
       )
       .where(eq(documents.id, existing.id));
+
+    return await loadDetail(userId, existing.id, isDataAdmin(authData));
+  },
+);
+
+export interface ProposeCategoryRequest {
+  id: number;
+  /**
+   * Name for the proposed new category. Optional — falls back to the document's
+   * sender, then its title. Must resolve to at least one usable character.
+   */
+  suggested_name?: string;
+  /** Optional parent category slug the new one should hang under. */
+  parent_slug?: string | null;
+  /**
+   * Park the document in "sonstiges" (pinned as a user choice) as an honest
+   * interim signal until an admin decides on the proposal. Defaults to true;
+   * send false to keep a close-but-imperfect category while proposing a
+   * refinement. No-op if the document is already in "sonstiges" or that
+   * category does not exist.
+   */
+  move_to_sonstiges?: boolean;
+}
+
+/**
+ * "No category fits — propose a new one." A user-facing counterpart to the
+ * classifier's auto-mined category suggestions: records the proposal in the
+ * admin's `document_category_suggestions` queue (deduplicated per proposed
+ * name) and, by default, parks the document in the "sonstiges" catch-all so it
+ * stops sitting in a wrong bucket until an admin acts. Requires only
+ * `documents.edit` — accepting the proposal (which creates the category) still
+ * needs `documents.manage_taxonomy`.
+ */
+export const proposeCategory = api(
+  { expose: true, method: "POST", path: "/documents/:id/propose-category", auth: true },
+  async (req: ProposeCategoryRequest): Promise<DocumentDetail> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.edit");
+    const userId = getUserId();
+
+    const existing = await loadVisibleDocument(userId, req.id, isDataAdmin(authData));
+
+    const proposedName = (req.suggested_name ?? existing.sender ?? existing.title ?? "").trim();
+    if (!proposedName) {
+      throw APIError.invalidArgument(
+        "no name to propose: pass suggested_name, or set a sender/title first",
+      );
+    }
+
+    await recordUserCategoryProposal({
+      documentId: existing.id,
+      proposedName,
+      parentSlug: req.parent_slug ?? null,
+    });
+
+    // Honest interim: park the document in the catch-all so it no longer sits in
+    // a wrong category. Pin it as a user choice so a re-classify/cloud pass does
+    // not drift it back before the admin has decided.
+    const moveToSonstiges = req.move_to_sonstiges ?? true;
+    if (moveToSonstiges) {
+      const sonstiges = await dbFirst<{ id: number }>(
+        db.select({ id: documentCategories.id }).from(documentCategories).where(eq(documentCategories.slug, "sonstiges")),
+      );
+      if (sonstiges && existing.category_id !== sonstiges.id) {
+        await db
+          .update(documents)
+          .set({ category_id: sonstiges.id, category_source: "user", attributes_reviewed: true })
+          .where(eq(documents.id, existing.id));
+        try {
+          await relocateDocument(existing.id);
+        } catch (err) {
+          console.warn(
+            `[documents] relocate after propose-category(${existing.id}) failed: ${(err as Error).message}`,
+          );
+        }
+      }
+    }
 
     return await loadDetail(userId, existing.id, isDataAdmin(authData));
   },
