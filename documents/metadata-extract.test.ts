@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import {
-  applySubjectPersonDeductionReviewConfidence,
   detectSubjectPersonIds,
   detectSubjectPersonPersonalDeductionReview,
   extractDocumentNumber,
@@ -191,19 +190,5 @@ describe("detectSubjectPersonPersonalDeductionReview", () => {
         ],
       }),
     ).toEqual({ shouldReview: true, reviewSlugs: ["haushaltsnahe"] });
-  });
-});
-
-describe("applySubjectPersonDeductionReviewConfidence", () => {
-  it("lowers even a learned-category confidence bump to review level", () => {
-    expect(applySubjectPersonDeductionReviewConfidence(0.9, true)).toBe(0.55);
-  });
-
-  it("keeps already-lower confidence unchanged", () => {
-    expect(applySubjectPersonDeductionReviewConfidence(0.4, true)).toBe(0.4);
-  });
-
-  it("does nothing when the review signal is absent", () => {
-    expect(applySubjectPersonDeductionReviewConfidence(0.9, false)).toBe(0.9);
   });
 });

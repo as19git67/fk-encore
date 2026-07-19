@@ -776,6 +776,13 @@ export const documents = pgTable("documents", {
   tax_year: integer("tax_year"),
   tax_year_confidence: real("tax_year_confidence"),
   tax_reviewed: boolean("tax_reviewed").notNull().default(false),
+  // Soft "please check whether you actually paid this deductible expense" signal
+  // (migration 0136). Set by runClassify when a document concerns a Bezugsperson
+  // AND carries a personal-deduction tax section. Kept SEPARATE from
+  // classification_confidence so the work-item basket only reacts to genuine
+  // category uncertainty; surfaced instead as a filter in the tax area. Cleared
+  // when the user pins the tax fields (tax_reviewed = true).
+  tax_review_needed: boolean("tax_review_needed").notNull().default(false),
   // When true, a human has pinned the editable attributes (title, doc_date,
   // sender, document_number, summary, category) via the edit dialog and a
   // re-classify must not overwrite them (migration 0101). Mirrors

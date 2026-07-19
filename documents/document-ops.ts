@@ -74,7 +74,6 @@ import {
   applyKindergeldTaxRule,
 } from "./tax-rules";
 import {
-  applySubjectPersonDeductionReviewConfidence,
   detectSubjectPersonIds,
   detectSubjectPersonPersonalDeductionReview,
   extractDocumentNumber,
@@ -488,10 +487,11 @@ export async function runClassify(documentId: number): Promise<{ classification:
     classification.confidence = Math.max(classification.confidence, 0.9);
   }
   if (forceTaxReviewConfidence) {
-    classification.confidence = applySubjectPersonDeductionReviewConfidence(
-      classification.confidence,
-      true,
-    );
+    // Do NOT lower classification_confidence here: the category was classified
+    // confidently and must not be dragged into the low-confidence work-item
+    // basket. The soft "did you actually pay this deductible expense?" signal is
+    // carried by the dedicated `tax_review_needed` column (set in the patch
+    // below) and surfaced separately in the tax area.
     console.log(
       `[documents] subject-person tax review(${documentId}): ` +
         `${subjectPersonDeductionReview.reviewSlugs.join(", ")}`,
@@ -518,11 +518,6 @@ export async function runClassify(documentId: number): Promise<{ classification:
     patch.document_number = classification.document_number;
     patch.summary = classification.summary;
     patch.classification_confidence = classification.confidence;
-  } else if (forceTaxReviewConfidence && !row.attributes_reviewed) {
-    // The category is protected (cloud/user source), but the soft tax-review
-    // confidence signal still needs to reach the persisted value used by the
-    // review basket. Do not touch category/title/date/sender/etc.
-    patch.classification_confidence = classification.confidence;
   }
   // Only overwrite tax fields when neither a human nor the Cloud Teacher has
   // pinned them. `tax_reviewed=true` = human asserted; `category_source` in
@@ -532,6 +527,10 @@ export async function runClassify(documentId: number): Promise<{ classification:
     patch.tax_relevant = classification.tax_relevant;
     patch.tax_year = classification.tax_year;
     patch.tax_year_confidence = classification.tax_year_confidence;
+    // Carry the subject-person deduction review as its own flag (see above).
+    // Follows the same protection rule as the other tax fields so a re-classify
+    // clears a stale flag but a trusted source's tax data is never second-guessed.
+    patch.tax_review_needed = forceTaxReviewConfidence;
   }
 
   await db.update(documents).set(patch).where(eq(documents.id, documentId));
