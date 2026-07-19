@@ -14,6 +14,7 @@ import {
   getRecapExportStatus,
   startRecapExport,
   dismissRecap,
+  excludeRecapPhoto,
   markRecapSeen,
   rebuildRecaps,
   type RecapSummary,
@@ -21,6 +22,7 @@ import {
   type RecapExportStatus,
   type RecapKind,
   type MusicTrack,
+  type ExcludeRecapPhotoResponse,
 } from '../api/recaps'
 import {
   getPhotoDetailsBatch,
@@ -59,6 +61,7 @@ const detailPhotos = ref<Photo[]>([])
 const detailLoading = ref(false)
 const detailError = ref('')
 const playerOpen = ref(false)
+const playerRecapId = ref<number | null>(null)
 const playerPhotos = ref<Photo[]>([])
 const playerTitle = ref<string>('')
 const playerSubtitle = ref<string | null>(null)
@@ -178,6 +181,92 @@ async function loadDetail(id: number) {
     detailError.value = err?.message ?? 'Rückblick konnte nicht geladen werden.'
   } finally {
     detailLoading.value = false
+  }
+}
+
+// Per-tile busy id while an exclusion request is in flight.
+const excludingId = ref<number | null>(null)
+
+/**
+ * Mirror an exclusion response into the detail collage, the open player, and
+ * the feed card so every surface reflects the new membership without a reload.
+ * `byId` must already contain Photo objects for all `res.photo_ids` in view.
+ */
+function applyExclusionResult(
+  recapId: number,
+  res: ExcludeRecapPhotoResponse,
+  byId: Map<number, Photo>,
+) {
+  const toPhotos = (ids: number[]) =>
+    ids.map((id) => byId.get(id)).filter((p): p is Photo => !!p)
+
+  if (detail.value?.id === recapId) {
+    detailPhotos.value = toPhotos(res.photo_ids)
+    detail.value = {
+      ...detail.value,
+      photo_ids: res.photo_ids,
+      cover_photo_id: res.cover_photo_id,
+    }
+  }
+  if (playerRecapId.value === recapId) {
+    playerPhotos.value = toPhotos(res.photo_ids)
+  }
+  const summary = recaps.value.find((r) => r.id === recapId)
+  if (summary) {
+    summary.photo_count = res.photo_ids.length
+    summary.cover_photo_id = res.cover_photo_id
+  }
+  if (res.cover_photo_id != null) {
+    const coverPhoto = byId.get(res.cover_photo_id)
+    if (coverPhoto) {
+      coverFilenames.value = {
+        ...coverFilenames.value,
+        [coverPhoto.id]: coverPhoto.filename,
+      }
+    }
+  }
+}
+
+/** Fetch the backfilled replacement's details (if any) into `byId`. */
+async function ensureAddedPhoto(res: ExcludeRecapPhotoResponse, byId: Map<number, Photo>) {
+  if (res.added != null && !byId.has(res.added)) {
+    const det = await getPhotoDetailsBatch([res.added])
+    const added = det.photos[0]
+    if (added) byId.set(added.id, added)
+  }
+}
+
+/** Exclude a photo from the collage (detail) view. */
+async function handleExcludePhoto(photo: Photo, e: Event) {
+  e.stopPropagation()
+  if (!detail.value || excludingId.value != null) return
+  const recapId = detail.value.id
+  excludingId.value = photo.id
+  try {
+    const res = await excludeRecapPhoto(recapId, photo.id)
+    const byId = new Map<number, Photo>(detailPhotos.value.map((p) => [p.id, p]))
+    for (const p of playerPhotos.value) byId.set(p.id, p)
+    await ensureAddedPhoto(res, byId)
+    applyExclusionResult(recapId, res, byId)
+  } catch (err: any) {
+    detailError.value = err?.message ?? 'Foto konnte nicht entfernt werden.'
+  } finally {
+    excludingId.value = null
+  }
+}
+
+/** Exclude the current single-photo slide from the player ("show"). */
+async function handlePlayerExclude(photoId: number) {
+  const recapId = playerRecapId.value
+  if (recapId == null) return
+  try {
+    const res = await excludeRecapPhoto(recapId, photoId)
+    const byId = new Map<number, Photo>(playerPhotos.value.map((p) => [p.id, p]))
+    for (const p of detailPhotos.value) byId.set(p.id, p)
+    await ensureAddedPhoto(res, byId)
+    applyExclusionResult(recapId, res, byId)
+  } catch (err: any) {
+    error.value = err?.message ?? 'Foto konnte nicht entfernt werden.'
   }
 }
 
@@ -383,6 +472,7 @@ function changePlayerMusic() {
 
 function openPlayer() {
   if (detailPhotos.value.length === 0) return
+  playerRecapId.value = detail.value?.id ?? null
   playerPhotos.value = detailPhotos.value
   playerTitle.value = detail.value?.title ?? ''
   playerSubtitle.value = detail.value?.subtitle ?? null
@@ -404,6 +494,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
     if (res.recap.photo_ids.length === 0) return
     const photosRes = await getPhotoDetailsBatch(collectPlayerPhotoIds(res.recap))
     const byId = new Map(photosRes.photos.map((p) => [p.id, p]))
+    playerRecapId.value = res.recap.id
     playerPhotos.value = res.recap.photo_ids
       .map((pid) => byId.get(pid))
       .filter((p): p is Photo => !!p)
@@ -559,6 +650,16 @@ async function playFromCard(r: RecapSummary, e: Event) {
               @click="openPlayer"
             >
               <HeicImage :src="getPhotoUrl(photo.filename, 600)" :alt="photo.original_name" />
+              <button
+                type="button"
+                class="recap-photo-exclude"
+                aria-label="Foto aus Rückblick entfernen"
+                v-tooltip.bottom="'Aus Rückblick entfernen'"
+                :disabled="excludingId != null"
+                @click.stop="handleExcludePhoto(photo, $event)"
+              >
+                <i :class="excludingId === photo.id ? 'pi pi-spin pi-spinner' : 'pi pi-times'" />
+              </button>
             </div>
           </div>
         </div>
@@ -571,11 +672,13 @@ async function playFromCard(r: RecapSummary, e: Event) {
       :subtitle="playerSubtitle"
       :music-url="playerMusicUrl"
       :can-change-music="playerCanChangeMusic"
+      :can-exclude-photos="playerRecapId != null"
       :map-intro="playerMapIntro"
       :compare-intro="playerCompare"
       :open="playerOpen"
       @close="playerOpen = false"
       @change-music="changePlayerMusic"
+      @exclude-photo="handlePlayerExclude"
     />
   </div>
 </template>
@@ -784,6 +887,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
 }
 
 .recap-photo {
+  position: relative;
   aspect-ratio: 1 / 1;
   overflow: hidden;
   border-radius: 8px;
@@ -794,6 +898,45 @@ async function playFromCard(r: RecapSummary, e: Event) {
 
 .recap-photo:hover {
   transform: scale(1.02);
+}
+
+.recap-photo-exclude {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.recap-photo:hover .recap-photo-exclude,
+.recap-photo-exclude:focus-visible {
+  opacity: 1;
+}
+
+.recap-photo-exclude:hover {
+  background: rgba(225, 29, 72, 0.9);
+}
+
+.recap-photo-exclude:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* Touch devices have no hover — keep the control reachable. */
+@media (hover: none) {
+  .recap-photo-exclude {
+    opacity: 1;
+  }
 }
 
 .recap-photo :deep(img),
