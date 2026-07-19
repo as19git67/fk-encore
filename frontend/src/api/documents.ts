@@ -72,6 +72,12 @@ export interface DocumentDetail extends DocumentSummary {
   subject_persons: DocumentSubjectPerson[]
   /** True when flagged for the next Cloud-Teacher run (see migration 0133). */
   teacher_requested: boolean
+  /**
+   * True when the classifier put a personal-deduction tax section on a document
+   * concerning a Bezugsperson (migration 0136). A soft "did you actually pay
+   * this deductible expense?" prompt — the category itself is not in doubt.
+   */
+  tax_review_needed: boolean
 }
 
 export interface DocumentReceiptSuggestion {
@@ -711,7 +717,9 @@ export function listTaxYears() {
   return apiFetch<TaxYearsResponse>('/documents/tax/years')
 }
 
-export function listTaxDocuments(params: { year?: number; section?: string } = {}) {
+export function listTaxDocuments(
+  params: { year?: number; section?: string; review_needed?: boolean } = {},
+) {
   return apiFetch<ListTaxDocumentsResponse>(`/documents/tax${buildQuery(params as Record<string, unknown>)}`)
 }
 

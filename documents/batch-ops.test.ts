@@ -213,6 +213,19 @@ describe("documents.batch-ops batchSetTax", () => {
     }
   });
 
+  it("clears the tax_review_needed flag when the user pins the tax fields (0136)", async () => {
+    const a = await insertDoc();
+    await db.execute(sql`UPDATE documents SET tax_review_needed = true WHERE id = ${a}`);
+    expect((await docRow(a)).tax_review_needed).toBe(true);
+
+    await batchSetTax(USER_ID, [a], {
+      tax_relevant: true,
+      tax_year: 2024,
+      tax_sections: ["anlage-n"],
+    });
+    expect((await docRow(a)).tax_review_needed).toBe(false);
+  });
+
   it("clears tax metadata when tax_relevant=false", async () => {
     const a = await insertDoc();
     await batchSetTax(USER_ID, [a], {

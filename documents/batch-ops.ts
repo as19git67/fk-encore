@@ -218,6 +218,8 @@ export async function batchSetTax(
       tax_year: year,
       tax_year_confidence: patch.tax_relevant ? 1 : 0,
       tax_reviewed: true,
+      // Human pinned the tax fields → clear the deduction review flag (0136).
+      tax_review_needed: false,
     })
     .where(inArray(documents.id, docIds));
 

@@ -1018,6 +1018,14 @@ onBeforeUnmount(() => {
           </div>
 
           <div v-if="!editingTax" class="tax-view-mode">
+            <div v-if="doc.tax_review_needed" class="tax-review-hint">
+              <i class="pi pi-question-circle" />
+              <span>
+                Betrifft eine Bezugsperson mit einer absetzbaren Position —
+                bitte prüfen, ob <strong>du</strong> die Ausgabe getragen hast.
+                Beim Bestätigen der Steuer-Zuordnung verschwindet dieser Hinweis.
+              </span>
+            </div>
             <div v-if="doc.tax_relevant && doc.tax_year" class="tax-info-row">
               <span class="label">Steuerjahr</span>
               <span>{{ doc.tax_year }}</span>
@@ -1553,6 +1561,22 @@ onBeforeUnmount(() => {
 .tax-empty-hint {
   font-size: 0.9rem;
   color: var(--p-text-muted-color);
+}
+
+.tax-review-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  background: var(--p-content-hover-background);
+  border: 1px solid var(--p-content-border-color);
+  font-size: 0.85rem;
+  color: var(--p-text-color);
+}
+.tax-review-hint .pi {
+  color: var(--p-primary-color);
+  margin-top: 0.1rem;
 }
 
 .tax-edit-mode {

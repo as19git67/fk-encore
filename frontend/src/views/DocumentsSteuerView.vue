@@ -22,6 +22,7 @@ const auth = useAuthStore()
 
 const years = ref<TaxYearCount[]>([])
 const selectedYear = ref<number | null>(null)
+const reviewNeededOnly = ref(false)
 const data = ref<ListTaxDocumentsResponse | null>(null)
 const loading = ref(true)
 const error = ref('')
@@ -76,9 +77,10 @@ async function loadData() {
   loading.value = true
   error.value = ''
   try {
-    data.value = await listTaxDocuments(
-      selectedYear.value != null ? { year: selectedYear.value } : {},
-    )
+    data.value = await listTaxDocuments({
+      ...(selectedYear.value != null ? { year: selectedYear.value } : {}),
+      ...(reviewNeededOnly.value ? { review_needed: true } : {}),
+    })
   } catch (err: any) {
     error.value = err.message || 'Steuerliste konnte nicht geladen werden'
   } finally {
@@ -132,6 +134,7 @@ function formatDate(dateStr: string | null): string {
 }
 
 watch(selectedYear, loadData)
+watch(reviewNeededOnly, loadData)
 
 onMounted(async () => {
   await loadYears()
@@ -176,6 +179,15 @@ onMounted(async () => {
         :severity="selectedYear === y.year ? 'primary' : 'secondary'"
         :outlined="selectedYear !== y.year"
         @click="selectedYear = y.year"
+      />
+      <Button
+        label="Nur zu prüfen"
+        icon="pi pi-question-circle"
+        size="small"
+        severity="warn"
+        :outlined="!reviewNeededOnly"
+        title="Nur Dokumente einer Bezugsperson mit absetzbarer Position, bei denen noch offen ist, ob du die Ausgabe getragen hast."
+        @click="reviewNeededOnly = !reviewNeededOnly"
       />
     </div>
 

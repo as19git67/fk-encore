@@ -79,6 +79,12 @@ export function todayIsoDate(now: Date = new Date()): string {
  * WHERE fragment selecting review-worthy documents: failures plus
  * ready-but-low-confidence documents the user hasn't pinned yet. Mirrors the
  * `low_confidence` notification gate in `document-ops.ts`.
+ *
+ * `tax_review_needed = true` documents are excluded from the low-confidence
+ * arm: those carry a purely *tax* review signal (did the user pay a deductible
+ * expense for a Bezugsperson?), not category uncertainty, and are surfaced in
+ * the tax area instead (migration 0136). A genuine `failed` document still
+ * belongs in the basket regardless of that flag.
  */
 function reviewWorthyWhere() {
   return or(
@@ -87,6 +93,7 @@ function reviewWorthyWhere() {
       eq(documents.status, "ready"),
       eq(documents.attributes_reviewed, false),
       lt(documents.classification_confidence, LOW_CONFIDENCE_THRESHOLD),
+      eq(documents.tax_review_needed, false),
     ),
   )!;
 }
@@ -350,6 +357,7 @@ export async function processDueFollowUps(today: string = todayIsoDate()): Promi
         status: documents.status,
         attributes_reviewed: documents.attributes_reviewed,
         classification_confidence: documents.classification_confidence,
+        tax_review_needed: documents.tax_review_needed,
       })
       .from(documentFollowUps)
       .innerJoin(documents, eq(documentFollowUps.document_id, documents.id))
@@ -370,6 +378,7 @@ export async function processDueFollowUps(today: string = todayIsoDate()): Promi
       r.status === "failed" ||
       (r.status === "ready" &&
         !r.attributes_reviewed &&
+        !r.tax_review_needed &&
         r.classification_confidence != null &&
         r.classification_confidence < LOW_CONFIDENCE_THRESHOLD),
   );

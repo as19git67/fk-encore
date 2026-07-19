@@ -29,6 +29,7 @@ async function insertDoc(opts: {
   status?: string;
   confidence?: number | null;
   reviewed?: boolean;
+  taxReviewNeeded?: boolean;
   userId?: number;
 }): Promise<number> {
   seq += 1;
@@ -36,11 +37,13 @@ async function insertDoc(opts: {
   const row = await db.execute<{ id: number }>(sql`
     INSERT INTO documents
       (user_id, sha256, original_filename, mime_type, size_bytes, disk_path,
-       status, classification_confidence, attributes_reviewed, visibility)
+       status, classification_confidence, attributes_reviewed, tax_review_needed,
+       visibility)
     VALUES
       (${opts.userId ?? USER_ID}, ${sha}, ${`doc-${seq}.pdf`}, 'application/pdf',
        ${1000 + seq}, ${`/tmp/fu-${seq}.pdf`}, ${opts.status ?? "ready"},
-       ${opts.confidence ?? null}, ${opts.reviewed ?? false}, 'private')
+       ${opts.confidence ?? null}, ${opts.reviewed ?? false},
+       ${opts.taxReviewNeeded ?? false}, 'private')
     RETURNING id
   `);
   return row.rows[0]!.id;
@@ -89,6 +92,24 @@ describe("documents.follow-ups basket", () => {
     await insertDoc({ status: "failed", userId: OTHER_USER_ID });
     const basket = await listBasket(USER_ID, false, 50, 0);
     expect(basket.items).toHaveLength(0);
+  });
+
+  it("excludes a low-confidence document flagged only for tax review (0136)", async () => {
+    // A subject-person personal-deduction document: classified with low
+    // confidence but carrying its own tax_review_needed signal. It must stay
+    // out of the category work-item basket (lives in the tax area instead).
+    await insertDoc({ status: "ready", confidence: 0.55, taxReviewNeeded: true });
+    const stillInBasket = await insertDoc({ status: "ready", confidence: 0.55 });
+
+    const basket = await listBasket(USER_ID, false, 50, 0);
+    expect(basket.items.map((i) => i.id)).toEqual([stillInBasket]);
+    expect(basket.total).toBe(1);
+  });
+
+  it("still surfaces a failed document even when tax_review_needed is set", async () => {
+    const failed = await insertDoc({ status: "failed", taxReviewNeeded: true });
+    const basket = await listBasket(USER_ID, false, 50, 0);
+    expect(basket.items.map((i) => i.id)).toEqual([failed]);
   });
 });
 
