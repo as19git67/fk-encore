@@ -37,6 +37,10 @@ struct RecapPlayerView: View {
 
     @State private var musicPlayer: AVAudioPlayer?
     @State private var isMusicMuted = false
+    /// Track cycle for "Andere Musik", ordered so the recap's suggested track
+    /// leads; stepping wraps back to it. Empty / single => no change control.
+    @State private var musicTracks: [RecapMusicTrack] = []
+    @State private var musicCycleIndex = 0
 
     /// Trip map intro shown before the slideshow; nil once finished/skipped.
     @State private var mapIntro: RecapMapIntroData?
@@ -221,6 +225,15 @@ struct RecapPlayerView: View {
                     }
                     .accessibilityLabel(isMusicMuted ? "Musik einschalten" : "Musik stummschalten")
                 }
+                if musicPlayer != nil && musicTracks.count > 1 {
+                    Button { changeMusic() } label: {
+                        Image(systemName: "forward.fill")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .padding(8)
+                    }
+                    .accessibilityLabel("Andere Musik")
+                }
                 Button { dismiss() } label: {
                     Image(systemName: "xmark")
                         .font(.headline)
@@ -305,6 +318,7 @@ struct RecapPlayerView: View {
                 if mapIntro == nil && compareIntro == nil { startTicker() }
                 if let track = detail.music {
                     Task { await startMusic(track) }
+                    Task { await loadMusicCycle(suggested: track) }
                 }
             }
         } catch {
@@ -392,6 +406,46 @@ struct RecapPlayerView: View {
             player.stop()
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
+    }
+
+    /// Order the track list so the recap's suggested track leads, enabling a
+    /// wrap-around cycle. Mirrors the web player's `orderedTrackCycle`.
+    static func orderedMusicCycle(
+        _ tracks: [RecapMusicTrack],
+        suggestedId: String
+    ) -> [RecapMusicTrack] {
+        guard !tracks.isEmpty else { return [] }
+        let start = tracks.firstIndex(where: { $0.id == suggestedId }) ?? 0
+        return Array(tracks[start...] + tracks[..<start])
+    }
+
+    /// Fetch the full track list and build the cycle. Failure leaves the recap
+    /// with just its suggested track (no change control) — never an error UI.
+    @MainActor
+    private func loadMusicCycle(suggested: RecapMusicTrack) async {
+        guard
+            let resp: RecapMusicListResponse = try? await APIClient.shared.get("/recaps-music")
+        else { return }
+        let ordered = Self.orderedMusicCycle(resp.tracks, suggestedId: suggested.id)
+        if ordered.count > 1 {
+            musicTracks = ordered
+            musicCycleIndex = 0
+        }
+    }
+
+    /// Step to the next track, wrapping back to the suggested one. Fades the
+    /// old player out without deactivating the session so the new track can
+    /// take over seamlessly.
+    private func changeMusic() {
+        guard musicTracks.count > 1 else { return }
+        musicCycleIndex = (musicCycleIndex + 1) % musicTracks.count
+        let next = musicTracks[musicCycleIndex]
+        if let old = musicPlayer {
+            musicPlayer = nil
+            old.setVolume(0, fadeDuration: 0.3)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { old.stop() }
+        }
+        Task { await startMusic(next) }
     }
 
     private func toggleMusicMuted() {

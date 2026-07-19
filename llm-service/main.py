@@ -933,6 +933,9 @@ class RecapTitleRequest(BaseModel):
     year: int | None = None
     month_label: str | None = None
     photo_count: int | None = None
+    # Span of the recap in days (trip recaps). 1 => single-day outing, which
+    # must read as "Ausflug", not a multi-day "Urlaub"/"Reise".
+    duration_days: int | None = None
     # Optional free-form keywords from image tags / embedding clusters —
     # helpful for "theme" recaps, harmless for the others.
     keywords: list[str] = Field(default_factory=list)
@@ -967,6 +970,9 @@ Strikte Regeln — halte dich nur an den gegebenen Kontext:
 - Sprich nur bei Art "trip" von einer Reise/einem Urlaub/"unterwegs".
   Bei allen anderen Arten sind die Fotos NICHT zwingend auf Reisen
   entstanden.
+- Stammen die Fotos alle vom selben Tag (Dauer: 1 Tag), ist es ein
+  Ausflug / Tagesausflug — nenne es NICHT "Urlaub", "Reise" oder
+  "Wochenende", denn das setzt mehrere Tage voraus.
 - Erfinde keine Zeitspannen ("letzte X Jahre", "seit X Jahren") — nutze
   nur den Zeitraum aus dem Kontext, falls vorhanden.
 - KEINE Zahlen im Titel oder Untertitel: keine Fotoanzahl, keine
@@ -974,12 +980,17 @@ Strikte Regeln — halte dich nur an den gegebenen Kontext:
   die exakte Zahl steht wörtlich im Kontext.
 - Erfinde keine Aktivitäten ("Wanderabenteuer", "Nachtigallen"), die nicht
   in den Stichwörtern stehen. Halte dich an das, was gegeben ist.
-- Verwende korrekte deutsche Grammatik und Deklination (z.B. "in der
-  Inneren Stadt", nicht "in der Innere Stadt").
+- Verwende korrekte deutsche Grammatik und Deklination (z.B. "an der
+  Nordsee", nicht "an der Nordseee").
 - Fehlt ein Ort im Kontext, dann titel ohne Ortsbezug (z.B. über die
   Jahreszeit, das Jahr oder die Person).
 - Nenne den Ort im Titel nicht zusammen mit dem Suffix "Trip",
   "Aufenthalt" o. Ä. — benenne lieber das Erlebnis oder den Ort allein.
+- Vermeide nichtssagende Ortsfloskeln und Klischees: KEIN "in der Fremde",
+  "in fremden Landen", "in der Ferne", und KEINE generischen Stadtteil-
+  Bezeichnungen wie "Innere Stadt", "Innenstadt", "Altstadt", "Neustadt",
+  "Zentrum" oder "Stadtmitte" — auch dann nicht, wenn ähnliche Wörter in
+  den Stichwörtern auftauchen.
 
 Ton: freundlich, nüchtern, erinnerungsvoll. Keine Floskeln wie "Zurück in
 der Zeit". Vermeide Redundanz zwischen Titel und Untertitel."""
@@ -1001,6 +1012,8 @@ def _recap_context(req: RecapTitleRequest) -> str:
         parts.append(f"Vor {req.years_ago} Jahr(en)")
     if req.month_label:
         parts.append(f"Monat: {req.month_label}")
+    if req.duration_days is not None:
+        parts.append(f"Dauer: {req.duration_days} Tag(e)")
     # photo_count intentionally omitted — it adds no value to the title.
     if req.keywords:
         parts.append("Stichwörter: " + ", ".join(req.keywords[:8]))

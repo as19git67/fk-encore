@@ -87,6 +87,10 @@ struct RecapMusicTrack: Codable, Sendable {
     let url: String
 }
 
+/// All available background tracks (`GET /recaps-music`), used to let the
+/// player cycle through music with "Andere Musik".
+struct RecapMusicListResponse: Codable, Sendable { let tracks: [RecapMusicTrack] }
+
 struct ListRecapsResponse: Codable, Sendable { let recaps: [RecapSummary] }
 struct GetRecapResponse: Codable, Sendable {
     let recap: RecapDetails

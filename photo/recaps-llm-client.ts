@@ -28,6 +28,8 @@ export interface RecapTitleContext {
   year?: number | null;
   month_label?: string | null;
   photo_count?: number | null;
+  /** Trip span in days; 1 => single-day outing ("Ausflug", not "Urlaub"). */
+  duration_days?: number | null;
   keywords?: string[];
   year_then?: number | null;
   year_now?: number | null;
@@ -47,6 +49,7 @@ function cleanContext(ctx: RecapTitleContext): Record<string, unknown> {
   if (ctx.person_name) out.person_name = ctx.person_name;
   if (typeof ctx.year === "number") out.year = ctx.year;
   if (ctx.month_label) out.month_label = ctx.month_label;
+  if (typeof ctx.duration_days === "number") out.duration_days = ctx.duration_days;
   // photo_count intentionally omitted — the LLM tends to bake it into
   // the title/subtitle where it adds no value.
   if (ctx.keywords && ctx.keywords.length > 0) out.keywords = ctx.keywords.slice(0, 8);

@@ -53,6 +53,11 @@ export function getRecapMusicUrl(track: MusicTrack): string {
   return `${API_BASE_URL}${track.url}`
 }
 
+/** All available background tracks, used to cycle music in the player. */
+export function listRecapMusic() {
+  return apiFetch<{ tracks: MusicTrack[] }>('/recaps-music')
+}
+
 export function listRecaps() {
   return apiFetch<ListRecapsResponse>('/recaps')
 }

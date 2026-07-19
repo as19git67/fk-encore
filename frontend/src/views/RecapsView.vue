@@ -9,6 +9,7 @@ import {
   listRecaps,
   getRecap,
   getRecapMusicUrl,
+  listRecapMusic,
   getRecapExportDownloadUrl,
   getRecapExportStatus,
   startRecapExport,
@@ -27,6 +28,13 @@ import {
   type Photo,
 } from '../api/photos'
 import { tripMapIntroFromSeed, type RecapMapIntroData } from '../utils/recapMapIntro'
+import { orderedTrackCycle } from '../utils/recapMusic'
+import {
+  canShareFiles,
+  fetchFileForSharing,
+  shareFile,
+  triggerDownload,
+} from '../utils/shareFile'
 import { personCompareFromSeed, type RecapCompareData } from '../utils/recapCompare'
 
 const route = useRoute()
@@ -55,6 +63,13 @@ const playerPhotos = ref<Photo[]>([])
 const playerTitle = ref<string>('')
 const playerSubtitle = ref<string | null>(null)
 const playerMusicUrl = ref<string | null>(null)
+// Music cycling: the full track list (fetched once), ordered so the recap's
+// suggested track comes first, plus the current position. "Andere Musik" steps
+// through them and wraps back to the suggested track.
+const allMusicTracks = ref<MusicTrack[] | null>(null)
+const playerTrackCycle = ref<MusicTrack[]>([])
+const playerTrackIndex = ref(0)
+const playerCanChangeMusic = computed(() => playerTrackCycle.value.length > 1)
 const playerMapIntro = ref<RecapMapIntroData | null>(null)
 const playerCompare = ref<RecapCompareData | null>(null)
 const detailCompare = ref<RecapCompareData | null>(null)
@@ -204,15 +219,32 @@ async function handleRebuild() {
 
 const exportRunning = ref(false)
 const exportProgress = ref(0)
-// Set once the render is done; the template renders this as an explicit
-// download link rather than auto-navigating. Auto-navigating from here
-// (`window.location.assign`) fires outside the user-gesture stack of the
-// original click — Safari on iOS silently drops navigation/downloads that
-// aren't triggered synchronously by a tap, so a render that takes a few
-// seconds (i.e. always) never reliably opens the "Save Video" sheet. A
-// user-clicked link doesn't have that problem.
+// Set once the render is done. The MP4 is then either saved via the native
+// iOS share sheet (see saveExport / utils/shareFile) or, on platforms without
+// file sharing, downloaded through a synthesized <a download>. We never
+// auto-navigate: a navigation fired from the async poll (not a tap) makes
+// Safari on iOS flash the save sheet and dismiss it again.
 const exportDownloadUrl = ref<string | null>(null)
+// On file-share-capable platforms (iOS) we pre-fetch the MP4 into a File as
+// soon as it is ready, so the tap handler can call navigator.share()
+// synchronously without losing transient activation. null while fetching.
+const exportFile = ref<File | null>(null)
 let exportTimer: ReturnType<typeof setTimeout> | null = null
+
+// True between "render done" and "File fetched" on share-capable platforms —
+// the save button shows a preparing state so the user only taps once the File
+// is in hand (guaranteeing the synchronous share path).
+const exportPreparing = computed(
+  () => exportDownloadUrl.value != null && canShareFiles() && exportFile.value == null
+)
+
+function exportFilename(): string {
+  const base = (detail.value?.title ?? 'rueckblick')
+    .replace(/[^\p{L}\p{N} _-]+/gu, '')
+    .trim()
+    .replace(/\s+/g, '-')
+  return `${base || 'rueckblick'}.mp4`
+}
 
 function stopExportPolling() {
   if (exportTimer) {
@@ -222,6 +254,7 @@ function stopExportPolling() {
   exportRunning.value = false
   exportProgress.value = 0
   exportDownloadUrl.value = null
+  exportFile.value = null
 }
 
 function applyExportStatus(st: RecapExportStatus, recapId: number) {
@@ -236,10 +269,33 @@ function applyExportStatus(st: RecapExportStatus, recapId: number) {
   }
   exportRunning.value = false
   if (st.status === 'done') {
-    exportDownloadUrl.value = getRecapExportDownloadUrl(st)
+    const url = getRecapExportDownloadUrl(st)
+    exportDownloadUrl.value = url
+    // Pre-fetch the File so the tap handler can share() synchronously. Only
+    // worthwhile where file sharing exists; desktop uses the download link.
+    if (url && canShareFiles()) {
+      void fetchFileForSharing(url, exportFilename())
+        .then((file) => {
+          if (exportDownloadUrl.value === url) exportFile.value = file
+        })
+        .catch(() => {
+          // Prefetch failed — saveExport falls back to a plain download.
+        })
+    }
   } else if (st.status === 'failed') {
     error.value = st.error ?? 'Video-Export fehlgeschlagen.'
   }
+}
+
+async function saveExport() {
+  const url = exportDownloadUrl.value
+  if (!url) return
+  if (exportFile.value) {
+    await shareFile(exportFile.value, url)
+    return
+  }
+  // No prefetched File (desktop, or prefetch not done/failed) — download.
+  triggerDownload(url, exportFilename())
 }
 
 async function pollExport(recapId: number) {
@@ -259,6 +315,7 @@ async function handleExport() {
   exportRunning.value = true
   exportProgress.value = 0
   exportDownloadUrl.value = null
+  exportFile.value = null
   try {
     applyExportStatus(await startRecapExport(recap.id), recap.id)
   } catch (err: any) {
@@ -292,12 +349,45 @@ watch(
   { immediate: true }
 )
 
+/**
+ * Prepare the player's music cycle from a recap's suggested track. Fetches the
+ * full track list once (cached), orders it so the suggested track leads, and
+ * resets the position. Safe to call even when the recap is silent.
+ */
+async function setupMusicCycle(suggested: MusicTrack | null) {
+  playerTrackCycle.value = suggested ? [suggested] : []
+  playerTrackIndex.value = 0
+  if (!suggested) return
+  try {
+    if (!allMusicTracks.value) {
+      allMusicTracks.value = (await listRecapMusic()).tracks
+    }
+    const cycle = orderedTrackCycle(allMusicTracks.value, suggested.id)
+    if (cycle.length > 0) {
+      playerTrackCycle.value = cycle
+      playerTrackIndex.value = 0
+    }
+  } catch {
+    // List fetch failed — keep the single suggested track (no cycling).
+  }
+}
+
+/** Step to the next track, wrapping back to the suggested one at the end. */
+function changePlayerMusic() {
+  const cycle = playerTrackCycle.value
+  if (cycle.length <= 1) return
+  playerTrackIndex.value = (playerTrackIndex.value + 1) % cycle.length
+  const next = cycle[playerTrackIndex.value]
+  if (next) playerMusicUrl.value = getRecapMusicUrl(next)
+}
+
 function openPlayer() {
   if (detailPhotos.value.length === 0) return
   playerPhotos.value = detailPhotos.value
   playerTitle.value = detail.value?.title ?? ''
   playerSubtitle.value = detail.value?.subtitle ?? null
   playerMusicUrl.value = detailMusic.value ? getRecapMusicUrl(detailMusic.value) : null
+  void setupMusicCycle(detailMusic.value)
   playerMapIntro.value = detail.value
     ? tripMapIntroFromSeed(detail.value.kind, detail.value.seed)
     : null
@@ -320,6 +410,7 @@ async function playFromCard(r: RecapSummary, e: Event) {
     playerTitle.value = res.recap.title
     playerSubtitle.value = res.recap.subtitle ?? null
     playerMusicUrl.value = res.music ? getRecapMusicUrl(res.music) : null
+    void setupMusicCycle(res.music ?? null)
     playerMapIntro.value = tripMapIntroFromSeed(res.recap.kind, res.recap.seed)
     playerCompare.value = buildCompareData(res.recap, byId)
     playerOpen.value = true
@@ -423,11 +514,12 @@ async function playFromCard(r: RecapSummary, e: Event) {
               <Button
                 v-if="exportDownloadUrl"
                 icon="pi pi-download"
-                label="Herunterladen"
+                :label="exportPreparing ? 'Wird vorbereitet …' : 'Sichern'"
                 severity="secondary"
-                as="a"
-                :href="exportDownloadUrl"
-                v-tooltip.bottom="'Video-Download starten'"
+                :loading="exportPreparing"
+                :disabled="exportPreparing"
+                v-tooltip.bottom="'Video sichern'"
+                @click="saveExport"
               />
               <Button
                 v-else
@@ -478,10 +570,12 @@ async function playFromCard(r: RecapSummary, e: Event) {
       :title="playerTitle"
       :subtitle="playerSubtitle"
       :music-url="playerMusicUrl"
+      :can-change-music="playerCanChangeMusic"
       :map-intro="playerMapIntro"
       :compare-intro="playerCompare"
       :open="playerOpen"
       @close="playerOpen = false"
+      @change-music="changePlayerMusic"
     />
   </div>
 </template>
