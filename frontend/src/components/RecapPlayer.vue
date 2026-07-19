@@ -166,6 +166,15 @@ let mapReadyResolve: (() => void) | null = null
 const preloadCache = new Map<string, Promise<boolean>>()
 const PRELOAD_WAIT_TIMEOUT_MS = 5000
 
+// ── Orientation detection ───────────────────────────────────────────────────
+const isPortrait = ref(false)
+let orientationMql: MediaQueryList | null = null
+
+function syncOrientation() {
+  if (orientationMql) isPortrait.value = orientationMql.matches
+}
+
+
 // ── Ken Burns (single slides) ────────────────────────────────────────────────
 
 type Motion = {
@@ -228,6 +237,11 @@ const COLLAGE_ENTRIES: Record<'duo' | 'trio', Array<{ x: string; y: string }>> =
     { x: '110%', y: '110%' },
   ],
 }
+const COLLAGE_ENTRIES_PORTRAIT_TRIO: Array<{ x: string; y: string }> = [
+  { x: '-110%', y: '0%' },
+  { x: '110%', y: '0%' },
+  { x: '-110%', y: '0%' },
+]
 
 /** Label chip for the "Damals & heute" compare slide (tile 0 = then). */
 function compareLabel(tileIdx: number): string {
@@ -238,7 +252,10 @@ function compareLabel(tileIdx: number): string {
 
 function collageTileStyle(slide: Slide, tileIdx: number): Record<string, string> {
   const layout = slide.layout === 'trio' ? 'trio' : 'duo'
-  const entry = COLLAGE_ENTRIES[layout][tileIdx] ?? { x: '0%', y: '110%' }
+  const usePortraitTrio = isPortrait.value && slide.layout === 'trio'
+  const entry = usePortraitTrio
+    ? (COLLAGE_ENTRIES_PORTRAIT_TRIO[tileIdx] ?? { x: '-110%', y: '0%' })
+    : (COLLAGE_ENTRIES[layout][tileIdx] ?? { x: '0%', y: '110%' })
   // Alternate the slow inner zoom direction per tile for a lively collage.
   const zoomIn = (slide.photos[tileIdx]?.id ?? tileIdx) % 2 === 0
   return {
@@ -638,6 +655,9 @@ watch(() => props.musicUrl, () => {
 
 onMounted(() => {
   window.addEventListener('keydown', handleKey)
+  orientationMql = window.matchMedia('(orientation: portrait)')
+  isPortrait.value = orientationMql.matches
+  orientationMql.addEventListener('change', syncOrientation)
   if (props.open) {
     setBodyScrollLock(true)
     reset()
@@ -647,6 +667,10 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKey)
+  if (orientationMql) {
+    orientationMql.removeEventListener('change', syncOrientation)
+    orientationMql = null
+  }
   clearAdvance()
   if (controlsTimer) clearTimeout(controlsTimer)
   stopMusic(0)
@@ -938,12 +962,12 @@ onBeforeUnmount(() => {
     grid-template-rows: 1fr 1fr;
   }
   .collage.trio {
-    grid-template-columns: 2fr 3fr;
-    grid-template-rows: 1fr 1fr;
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr 1fr;
   }
   .collage.trio .collage-tile:first-child {
-    grid-row: 1 / span 2;
-    grid-column: 2;
+    grid-row: auto;
+    grid-column: auto;
   }
 }
 
