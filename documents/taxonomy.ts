@@ -304,6 +304,11 @@ export const categoryTaxonomy: CategorySeed[] = [
         hint: "Arbeitsvertrag, Berufsausbildungsvertrag, Stellenbeschreibung, Änderungsvertrag, Kündigung. Auch Zeiterfassung, Urlaubsanträge, Reisekostenerstattung (arbeitsrechtliche Dokumente).",
       },
       { slug: "beruf-zeugnisse", name: "Arbeitszeugnisse" },
+      {
+        slug: "beruf-betriebliche-unterlagen",
+        name: "Betriebliche Unterlagen",
+        hint: "Merkblätter, Betriebsvereinbarungen, Datenschutz-Verpflichtungen, Schweigepflicht-Erklärungen, Schulungsnachweise, Compliance-Dokumente, Arbeitsanweisungen vom Arbeitgeber. NICHT Arbeitsvertrag/Kündigung (→ beruf-arbeitsvertrag), NICHT Arbeitszeugnisse (→ beruf-zeugnisse).",
+      },
     ],
   },
   {
@@ -369,6 +374,11 @@ export const categoryTaxonomy: CategorySeed[] = [
         name: "Steuerbescheide",
         hint: "Einkommensteuerbescheid/-bescheinigung, Vorauszahlungsbescheid vom Finanzamt. NICHT Lohnsteuerbescheinigung (finanzen-gehalt) oder Kirchensteuerbescheid (finanzen-kirchensteuer).",
       },
+      {
+        slug: "behoerden-mitteilungen",
+        name: "Mitteilungen",
+        hint: "Amtliche Mitteilungen und Informationsschreiben von Behörden: Wahlbenachrichtigungen, Meldebescheinigungen, Anschreiben, Hinweisschreiben, Einladungen zu Wahlen. NICHT Bescheide mit Rechtsbehelfsbelehrung (→ behoerden-bescheide), NICHT Steuerbescheide (→ behoerden-steuerbescheid).",
+      },
     ],
   },
   {
@@ -410,6 +420,23 @@ export const categoryTaxonomy: CategorySeed[] = [
     ],
   },
   {
+    slug: "rechtliches",
+    name: "Rechtliches",
+    icon: "pi-file-check",
+    children: [
+      {
+        slug: "rechtliches-vollmachten",
+        name: "Vollmachten",
+        hint: "Vollmachten aller Art: Kontovollmacht, Vorsorgevollmacht, Generalvollmacht, Bankvollmacht, Handlungsvollmacht, notarielle Vollmacht. NICHT Betreuungsurkunde (→ betreuung-bestellung).",
+      },
+      {
+        slug: "rechtliches-verfuegungen",
+        name: "Verfügungen",
+        hint: "Patientenverfügung, Testament, letztwillige Verfügung, Erbvertrag, Organspendeausweis. Persönliche Vorsorgedokumente. NICHT behördliche Bescheide (→ behoerden-bescheide).",
+      },
+    ],
+  },
+  {
     slug: "belege",
     name: "Belege",
     icon: "pi-receipt",
@@ -419,7 +446,7 @@ export const categoryTaxonomy: CategorySeed[] = [
     slug: "sonstiges",
     name: "Sonstiges",
     icon: "pi-file",
-    hint: "LETZTE WAHL — nur verwenden, wenn das Dokument in KEINE andere Kategorie passt. Prüfe zuerst: Schuldokumente → familie-schule, Rechnungen → finanzen-rechnungen, Steuererklärungen → finanzen-steuern, Impfdokumente → gesundheit-rezepte, Urkunden → familie-urkunden, Behördenschreiben → behoerden-bescheide, WEG-Abrechnungen → kapitalanlage-immobilie-weg-jahresabrechnung oder wohnen-haus-weg-jahresabrechnung.",
+    hint: "LETZTE WAHL — nur verwenden, wenn das Dokument in KEINE andere Kategorie passt. Prüfe zuerst: Schuldokumente → familie-schule, Rechnungen → finanzen-rechnungen, Steuererklärungen → finanzen-steuern, Impfdokumente → gesundheit-rezepte, Urkunden → familie-urkunden, Behördenschreiben → behoerden-bescheide oder behoerden-mitteilungen, Vollmachten → rechtliches-vollmachten, Patientenverfügung/Testament → rechtliches-verfuegungen, betriebliche Merkblätter → beruf-betriebliche-unterlagen, WEG-Abrechnungen → kapitalanlage-immobilie-weg-jahresabrechnung oder wohnen-haus-weg-jahresabrechnung.",
   },
 ];
 
