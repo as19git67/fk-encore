@@ -397,6 +397,23 @@ export function setTeacherRequested(id: number, requested: boolean) {
   })
 }
 
+export interface ProposeCategoryPayload {
+  /** Name for the proposed category; falls back to sender, then title. */
+  suggested_name?: string
+  /** Optional parent category slug. */
+  parent_slug?: string | null
+  /** Park the document in "sonstiges" until an admin decides (default true). */
+  move_to_sonstiges?: boolean
+}
+
+/** "No category fits — propose a new one." Files an admin category suggestion. */
+export function proposeCategory(id: number, payload: ProposeCategoryPayload = {}) {
+  return apiFetch<DocumentDetail>(`/documents/${id}/propose-category`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export interface UpdateDocumentVisibilityPayload {
   visibility: DocumentVisibility
   group_id?: number | null

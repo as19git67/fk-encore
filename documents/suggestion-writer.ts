@@ -22,6 +22,12 @@ import { normalizeForMatch } from "./sender-rules";
  *  repeated hits from the same sender collapse into one suggestion. */
 export const AUTO_SENDER_MARKER = "auto-sender:";
 
+/** Prefix that tags a user-proposed suggestion ("no category fits — propose a
+ *  new one" from the edit dialog) so repeated proposals of the same name
+ *  collapse into one suggestion. Kept distinct from the sender marker so the
+ *  admin view can tell auto-mined from human-proposed. */
+export const USER_PROPOSED_MARKER = "user-proposed:";
+
 /** Cap the example list so a chronically-uncategorized sender can't grow an
  *  unbounded array. */
 const MAX_EXAMPLES = 20;
@@ -108,4 +114,80 @@ export async function recordUncategorizedDocument(params: {
       `[documents] recordUncategorizedDocument(${documentId}) failed: ${(err as Error).message}`,
     );
   }
+}
+
+/**
+ * Decide insert-vs-append for a user-proposed category, keyed on the proposed
+ * NAME (not the sender). Pure, so it is unit-tested without a DB. A user who
+ * proposes the same name for several documents grows one suggestion instead of
+ * many duplicates.
+ */
+export function planUserProposal(
+  open: readonly OpenSuggestion[],
+  proposedName: string,
+  documentId: number,
+): SuggestionPlan {
+  const key = normalizeForMatch(proposedName);
+  if (!key) return { kind: "noop" };
+  const marker = `${USER_PROPOSED_MARKER}${key}`;
+
+  const existing = open.find((s) => (s.rationale ?? "").startsWith(marker));
+  if (!existing) return { kind: "insert", marker };
+
+  if (existing.example_document_ids.includes(documentId)) return { kind: "noop" };
+  const exampleIds = [...existing.example_document_ids, documentId].slice(-MAX_EXAMPLES);
+  return { kind: "append", id: existing.id, exampleIds };
+}
+
+/** Human-readable rationale for a user-proposed category. */
+export function userProposalRationale(marker: string, docId: number): string {
+  return `${marker} — vom Nutzer vorgeschlagen: passende Kategorie fehlt (Dokument #${docId}).`;
+}
+
+/**
+ * Record a user's manual "no category fits — propose a new one" action from the
+ * edit dialog. Inserts or grows a per-name open suggestion. Unlike
+ * `recordUncategorizedDocument` this is a foreground action: errors propagate so
+ * the caller can surface them.
+ */
+export async function recordUserCategoryProposal(params: {
+  documentId: number;
+  proposedName: string;
+  parentSlug?: string | null;
+}): Promise<void> {
+  const { documentId, proposedName, parentSlug } = params;
+  const name = proposedName.trim();
+  if (!normalizeForMatch(name)) {
+    throw new Error("proposedName must contain at least one usable character");
+  }
+
+  const open = await dbAll<OpenSuggestion>(
+    db
+      .select({
+        id: documentCategorySuggestions.id,
+        rationale: documentCategorySuggestions.rationale,
+        example_document_ids: documentCategorySuggestions.example_document_ids,
+      })
+      .from(documentCategorySuggestions)
+      .where(eq(documentCategorySuggestions.status, "open")),
+  );
+
+  const plan = planUserProposal(open, name, documentId);
+  if (plan.kind === "noop") return;
+
+  if (plan.kind === "insert") {
+    await db.insert(documentCategorySuggestions).values({
+      suggested_name: name.slice(0, 120),
+      parent_slug: parentSlug?.trim() || null,
+      example_document_ids: [documentId],
+      rationale: userProposalRationale(plan.marker, documentId),
+      status: "open",
+    });
+    return;
+  }
+
+  await db
+    .update(documentCategorySuggestions)
+    .set({ example_document_ids: plan.exampleIds })
+    .where(eq(documentCategorySuggestions.id, plan.id));
 }

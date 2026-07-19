@@ -1,4 +1,4 @@
-import { pgTable, text, integer, primaryKey, serial, boolean, timestamp, real, doublePrecision, pgEnum, jsonb, bigserial, numeric, uuid, uniqueIndex, index, bigint } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, primaryKey, serial, boolean, timestamp, real, doublePrecision, pgEnum, jsonb, bigserial, numeric, uuid, uniqueIndex, index, bigint, date } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 // ========== Users ==========
@@ -1017,6 +1017,24 @@ export const taxSectionHintOverrides = pgTable("tax_section_hint_overrides", {
   slug: text("slug").primaryKey(),
   hint: text("hint").notNull(),
   updated_at: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+});
+
+// Periodic taxonomy health snapshots captured by the daily cron job
+// `documents-taxonomy-cockpit`. One row per day; the admin dashboard
+// renders trends and recommendations from the last N snapshots.
+export const taxonomySnapshots = pgTable("taxonomy_snapshots", {
+  id: serial("id").primaryKey(),
+  snapshot_date: date("snapshot_date").unique().notNull(),
+  total_documents: integer("total_documents").notNull().default(0),
+  classified_documents: integer("classified_documents").notNull().default(0),
+  sonstiges_count: integer("sonstiges_count").notNull().default(0),
+  sonstiges_pct: real("sonstiges_pct").notNull().default(0),
+  avg_confidence: real("avg_confidence"),
+  low_confidence_count: integer("low_confidence_count").notNull().default(0),
+  teacher_requested_count: integer("teacher_requested_count").notNull().default(0),
+  open_suggestions_count: integer("open_suggestions_count").notNull().default(0),
+  category_count: integer("category_count").notNull().default(0),
+  created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
 });
 
 // NOTE: `document_embeddings` (pgvector) is created via raw SQL in migration

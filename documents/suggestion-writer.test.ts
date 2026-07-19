@@ -1,8 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
   AUTO_SENDER_MARKER,
+  USER_PROPOSED_MARKER,
   planSuggestion,
+  planUserProposal,
   suggestionRationale,
+  userProposalRationale,
   type OpenSuggestion,
 } from "./suggestion-writer";
 
@@ -70,5 +73,41 @@ describe("suggestionRationale", () => {
     const r = suggestionRationale(marker("acme"), "Acme GmbH");
     expect(r.startsWith(marker("acme"))).toBe(true);
     expect(r).toContain("Acme GmbH");
+  });
+});
+
+const userMarker = (name: string) => `${USER_PROPOSED_MARKER}${name}`;
+
+describe("planUserProposal", () => {
+  it("is a no-op for a name that normalizes to empty", () => {
+    expect(planUserProposal([], "   ", 1)).toEqual({ kind: "noop" });
+  });
+
+  it("inserts a new suggestion keyed on the proposed name", () => {
+    const plan = planUserProposal([], "Vereinsbeiträge", 42);
+    expect(plan).toEqual({ kind: "insert", marker: userMarker("vereinsbeiträge") });
+  });
+
+  it("appends to an existing open proposal with the same name", () => {
+    const open: OpenSuggestion[] = [
+      {
+        id: 7,
+        rationale: userProposalRationale(userMarker("vereinsbeiträge"), 1),
+        example_document_ids: [1],
+      },
+    ];
+    const plan = planUserProposal(open, "Vereinsbeiträge", 2);
+    expect(plan).toEqual({ kind: "append", id: 7, exampleIds: [1, 2] });
+  });
+
+  it("does not collide with an auto-sender suggestion of a similar key", () => {
+    const open: OpenSuggestion[] = [
+      { id: 9, rationale: marker("vereinsbeiträge"), example_document_ids: [1] },
+    ];
+    // Same normalized key but different marker prefix → treated as new.
+    expect(planUserProposal(open, "Vereinsbeiträge", 2)).toEqual({
+      kind: "insert",
+      marker: userMarker("vereinsbeiträge"),
+    });
   });
 });
