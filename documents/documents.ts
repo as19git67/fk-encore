@@ -45,6 +45,7 @@ import {
   slugifyUserLogin,
 } from "./documents.service";
 import { normalizeForMatch } from "./sender-rules";
+import { PERSONAL_DEDUCTION_TAX_SECTION_SLUGS } from "./metadata-extract";
 import {
   invalidateCorrespondentOverridesCache,
 } from "./correspondent-overrides";
@@ -3491,6 +3492,7 @@ export interface SubjectPersonDTO {
   id: number;
   full_name: string;
   relation_tag: string;
+  requires_tax_review: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -3502,12 +3504,14 @@ export interface SubjectPersonListResponse {
 export interface CreateSubjectPersonRequest {
   full_name: string;
   relation_tag: string;
+  requires_tax_review?: boolean;
 }
 
 export interface UpdateSubjectPersonRequest {
   id: number;
   full_name?: string;
   relation_tag?: string;
+  requires_tax_review?: boolean;
 }
 
 export interface DeleteSubjectPersonRequest {
@@ -3534,6 +3538,66 @@ async function documentIdsForOwnedSubjectPerson(
       ),
   );
   return rows.map((row) => row.document_id);
+}
+
+/**
+ * Toggling requires_tax_review on/off (#0137) retroactively (re-)applies the
+ * tax_review_needed signal to this subject person's already-classified
+ * documents, so the user doesn't have to reclassify each one by hand after
+ * e.g. marking "Mutter" as needing tax review. Mirrors the exact condition
+ * document-ops.ts applies at classify time (see
+ * detectSubjectPersonPersonalDeductionReview / the taxProtected guard).
+ */
+export async function syncTaxReviewFlagForSubjectPerson(
+  userId: number,
+  subjectPersonId: number,
+  requiresReview: boolean,
+): Promise<void> {
+  if (requiresReview) {
+    // A plain interpolated array is expanded by drizzle's sql tag into a
+    // comma-separated param list ("record"), which Postgres refuses to cast
+    // to text[] — so build the IN-list explicitly instead of ANY(...::text[]).
+    const slugList = sql.join(
+      PERSONAL_DEDUCTION_TAX_SECTION_SLUGS.map((slug) => sql`${slug}`),
+      sql`, `,
+    );
+    await db.execute(sql`
+      UPDATE documents d
+      SET tax_review_needed = true
+      WHERE d.user_id = ${userId}
+        AND d.tax_reviewed = false
+        AND d.category_source NOT IN ('cloud', 'user')
+        AND EXISTS (
+          SELECT 1 FROM document_subject_persons dsp
+          WHERE dsp.document_id = d.id AND dsp.subject_person_id = ${subjectPersonId}
+        )
+        AND EXISTS (
+          SELECT 1 FROM document_tax_sections dts
+          WHERE dts.document_id = d.id
+            AND dts.tax_section IN (${slugList})
+        )
+    `);
+  } else {
+    // Only clear the flag when no OTHER still-opted-in subject person also
+    // matches the document — a doc can name more than one Bezugsperson.
+    await db.execute(sql`
+      UPDATE documents d
+      SET tax_review_needed = false
+      WHERE d.user_id = ${userId}
+        AND d.tax_review_needed = true
+        AND EXISTS (
+          SELECT 1 FROM document_subject_persons dsp
+          WHERE dsp.document_id = d.id AND dsp.subject_person_id = ${subjectPersonId}
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM document_subject_persons dsp2
+          JOIN user_subject_persons usp2 ON usp2.id = dsp2.subject_person_id
+          WHERE dsp2.document_id = d.id
+            AND usp2.requires_tax_review = true
+            AND usp2.id <> ${subjectPersonId}
+        )
+    `);
+  }
 }
 
 async function relocateSubjectPersonDocuments(documentIds: readonly number[]): Promise<void> {
@@ -3584,8 +3648,12 @@ export const updateSubjectPersonEndpoint = api(
     const updated = await updateSubjectPerson(userId, req.id, {
       full_name: req.full_name,
       relation_tag: req.relation_tag,
+      requires_tax_review: req.requires_tax_review,
     });
     await relocateSubjectPersonDocuments(affectedDocumentIds);
+    if (req.requires_tax_review !== undefined) {
+      await syncTaxReviewFlagForSubjectPerson(userId, req.id, req.requires_tax_review);
+    }
     return updated;
   },
 );
