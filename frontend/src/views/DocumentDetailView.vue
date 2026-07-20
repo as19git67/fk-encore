@@ -868,7 +868,7 @@ onBeforeUnmount(() => {
               <InputText v-model="form.document_number" :disabled="!auth.hasPermission('documents.edit')" placeholder="#1234" />
             </label>
           </div>
-          <label>
+          <div class="meta-form-field">
             <span class="label">Kategorie</span>
             <Select
               v-model="form.category_slug"
@@ -886,7 +886,7 @@ onBeforeUnmount(() => {
               size="small"
               @click="openPropose"
             />
-          </label>
+          </div>
           <label>
             <span class="label">Tags (Komma-getrennt)</span>
             <InputText v-model="form.tagsText" :disabled="!auth.hasPermission('documents.edit')" />
@@ -1420,7 +1420,8 @@ onBeforeUnmount(() => {
 .meta-summary i { color: var(--p-primary-color); flex-shrink: 0; margin-top: 0.15rem; }
 
 .meta-form { display: flex; flex-direction: column; gap: 0.75rem; }
-.meta-form label { display: flex; flex-direction: column; gap: 0.25rem; }
+.meta-form label,
+.meta-form .meta-form-field { display: flex; flex-direction: column; gap: 0.25rem; }
 .meta-form-row {
   display: flex;
   flex-wrap: wrap;
