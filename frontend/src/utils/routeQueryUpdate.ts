@@ -28,6 +28,21 @@ export function updateRouteQuery(router: Router, update: QueryUpdater): Promise<
   return next
 }
 
+/**
+ * Await any in-flight `updateRouteQuery()` write before navigating away.
+ * `updateRouteQuery` is fire-and-forget by design (callers like
+ * `filter.apply()` don't await it), so a navigation to another route
+ * (e.g. opening a document from a freshly-filtered list) can race the
+ * pending `router.replace({ query })` — whichever resolves last wins,
+ * and if the replace lands after the push it silently overwrites it,
+ * dropping the just-applied filter from history entirely. Call this
+ * right before a `router.push()` that depends on the current query
+ * (e.g. for the back-arrow's `history.state.back` to capture it).
+ */
+export function waitForPendingQueryUpdate(router: Router): Promise<void> {
+  return pendingByRouter.get(router) ?? Promise.resolve()
+}
+
 export function replaceQuerySlice(
   current: LocationQuery,
   ownedKeys: readonly string[],

@@ -34,7 +34,7 @@ import { useRealtimeEvent } from '../composables/useRealtime'
 import { useScrollRestore } from '../composables/useScrollRestore'
 import { useSort, type SortField } from '../composables/useSort'
 import { DOCUMENT_FILTER_QUERY_KEYS, useDocumentFilter } from '../composables/useDocumentFilter'
-import { replaceQuerySlice, updateRouteQuery } from '../utils/routeQueryUpdate'
+import { replaceQuerySlice, updateRouteQuery, waitForPendingQueryUpdate } from '../utils/routeQueryUpdate'
 import {
   consumeDocumentListFocus,
   focusDocumentListItem,
@@ -414,8 +414,13 @@ async function loadCorrespondents() {
   }
 }
 
-function openDocument(doc: DocumentSummary) {
+async function openDocument(doc: DocumentSummary) {
   rememberDocumentListFocus(doc.id)
+  // Applying a filter/sort writes the URL asynchronously (fire-and-forget,
+  // see routeQueryUpdate.ts) — wait for it to land first, otherwise a
+  // still-pending write can resolve after this push and silently overwrite
+  // it, dropping the filter from the history entry the back arrow returns to.
+  await waitForPendingQueryUpdate(router)
   router.push({ name: 'dokumente-detail', params: { id: doc.id } })
 }
 
