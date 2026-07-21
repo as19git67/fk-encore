@@ -1364,6 +1364,63 @@ describe("Photo Module", () => {
     });
   });
 
+  describe("/photos/index ETag fingerprint", () => {
+    const etagFor = async (userId: number) =>
+      service.photoIndexEtag(userId, await service.getPhotoIndexFingerprint(userId), "");
+
+    it("changes when an existing photo is added to or removed from an album", async () => {
+      // Adding an existing photo to an album only inserts an album_photos row;
+      // the photo row is untouched. The iOS bisync download relies on the ETag
+      // flipping here — otherwise the 304 fast-skip hides server-side additions.
+      const album = await service.createAlbumLogic(user1.id, { name: "Bisync Album" });
+      const photo = await service.uploadPhotoLogic(user1.id, {
+        data: Buffer.from([1, 2, 3]),
+        name: "p.jpg",
+        mimeType: "image/jpeg",
+      });
+
+      const beforeAdd = await etagFor(user1.id);
+      await service.addPhotoToAlbumLogic(user1.id, { albumId: album.id, photoId: photo.id });
+      const afterAdd = await etagFor(user1.id);
+      expect(afterAdd).not.toBe(beforeAdd);
+
+      await service.batchUpdateAlbumPhotosLogic(user1.id, {
+        albumIds: [album.id],
+        photoIds: [photo.id],
+        action: "remove",
+      });
+      const afterRemove = await etagFor(user1.id);
+      expect(afterRemove).not.toBe(afterAdd);
+    });
+
+    it("changes for a share participant when the owner adds a photo", async () => {
+      const album = await service.createAlbumLogic(user1.id, { name: "Shared Bisync" });
+      await service.shareAlbumLogic(user1.id, { albumId: album.id, userId: user2.id, accessLevel: "read" });
+      const photo = await service.uploadPhotoLogic(user1.id, {
+        data: Buffer.from([1, 2, 3]),
+        name: "p.jpg",
+        mimeType: "image/jpeg",
+      });
+
+      const before = await etagFor(user2.id);
+      await service.addPhotoToAlbumLogic(user1.id, { albumId: album.id, photoId: photo.id });
+      const after = await etagFor(user2.id);
+      expect(after).not.toBe(before);
+    });
+
+    it("stays stable when nothing changed", async () => {
+      const album = await service.createAlbumLogic(user1.id, { name: "Stable Album" });
+      const photo = await service.uploadPhotoLogic(user1.id, {
+        data: Buffer.from([1, 2, 3]),
+        name: "p.jpg",
+        mimeType: "image/jpeg",
+      });
+      await service.addPhotoToAlbumLogic(user1.id, { albumId: album.id, photoId: photo.id });
+
+      expect(await etagFor(user1.id)).toBe(await etagFor(user1.id));
+    });
+  });
+
   describe("Album Sharing", () => {
     it("should allow read access to shared album", async () => {
       const album = await service.createAlbumLogic(user1.id, { name: "Shared Read" });

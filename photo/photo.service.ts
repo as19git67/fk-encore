@@ -2937,14 +2937,24 @@ export async function listPhotosLogic(
  *                  that do not move the MAX (e.g., an old photo is
  *                  removed while a newer one still holds the max).
  *
- * The query is a single aggregated SELECT and uses the
+ *   albumsFp     – fingerprint over the albums visible to the user (owned
+ *                  or shared with them): MAX(album_photos.added_at),
+ *                  MAX(photos.updated_at) of the member photos, and the
+ *                  membership COUNT. Adding an existing photo to an album
+ *                  only inserts an album_photos row — the photo row itself
+ *                  is untouched — so without this component the ETag stayed
+ *                  stable and the iOS download sync's 304 fast-skip never
+ *                  saw server-side album additions/removals (or metadata
+ *                  changes on other users' photos in shared albums).
+ *
+ * The queries are aggregated SELECTs; the photos part uses the
  * (user_id, updated_at DESC) index, so it is effectively O(1) on large
  * libraries. When a user has zero photos, maxUpdatedAt is "0" so the
  * resulting ETag is still well-defined.
  */
 export async function getPhotoIndexFingerprint(
   userId: number,
-): Promise<{ maxUpdatedAt: string; count: number }> {
+): Promise<{ maxUpdatedAt: string; count: number; albumsFp: string }> {
   const row = await dbFirst<{ max_u: string | null; c: number }>(
     db
       .select({
@@ -2954,9 +2964,25 @@ export async function getPhotoIndexFingerprint(
       .from(photos)
       .where(eq(photos.user_id, userId)),
   );
+  const albumRow = await dbFirst<{ max_a: string | null; max_p: string | null; c: number }>(
+    db
+      .select({
+        max_a: sql<string | null>`MAX(${albumPhotos.added_at})`,
+        max_p: sql<string | null>`MAX(${photos.updated_at})`,
+        c: sql<number>`COUNT(*)::int`,
+      })
+      .from(albumPhotos)
+      .innerJoin(albums, eq(albums.id, albumPhotos.album_id))
+      .innerJoin(photos, eq(photos.id, albumPhotos.photo_id))
+      .where(or(
+        eq(albums.user_id, userId),
+        sql`EXISTS (SELECT 1 FROM ${albumShares} WHERE ${albumShares.album_id} = ${albums.id} AND ${albumShares.user_id} = ${userId})`
+      )),
+  );
   return {
     maxUpdatedAt: row?.max_u ?? "0",
     count: row?.c ?? 0,
+    albumsFp: `${albumRow?.max_a ?? "0"}|${albumRow?.max_p ?? "0"}|${albumRow?.c ?? 0}`,
   };
 }
 
@@ -2968,12 +2994,12 @@ export async function getPhotoIndexFingerprint(
  */
 export function photoIndexEtag(
   userId: number,
-  fp: { maxUpdatedAt: string; count: number },
+  fp: { maxUpdatedAt: string; count: number; albumsFp: string },
   serializedFilter: string,
 ): string {
   const hash = crypto
     .createHash("md5")
-    .update(`${userId}|${fp.maxUpdatedAt}|${fp.count}|${serializedFilter}`)
+    .update(`${userId}|${fp.maxUpdatedAt}|${fp.count}|${fp.albumsFp}|${serializedFilter}`)
     .digest("hex");
   return `"${hash}"`;
 }
