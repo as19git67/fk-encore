@@ -24,6 +24,7 @@ export interface SubjectPerson {
   id: number;
   full_name: string;
   relation_tag: string;
+  requires_tax_review: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -79,6 +80,7 @@ export async function listSubjectPersons(userId: number): Promise<SubjectPerson[
         id: userSubjectPersons.id,
         full_name: userSubjectPersons.full_name,
         relation_tag: userSubjectPersons.relation_tag,
+        requires_tax_review: userSubjectPersons.requires_tax_review,
         created_at: userSubjectPersons.created_at,
         updated_at: userSubjectPersons.updated_at,
       })
@@ -91,7 +93,7 @@ export async function listSubjectPersons(userId: number): Promise<SubjectPerson[
 
 export async function createSubjectPerson(
   userId: number,
-  input: { full_name: string; relation_tag: string },
+  input: { full_name: string; relation_tag: string; requires_tax_review?: boolean },
 ): Promise<SubjectPerson> {
   const full_name = requireNonEmpty("full_name", input.full_name);
   const relation_tag = normaliseRelationTag(input.relation_tag);
@@ -102,11 +104,17 @@ export async function createSubjectPerson(
   try {
     const [row] = await db
       .insert(userSubjectPersons)
-      .values({ user_id: userId, full_name, relation_tag })
+      .values({
+        user_id: userId,
+        full_name,
+        relation_tag,
+        requires_tax_review: input.requires_tax_review ?? false,
+      })
       .returning({
         id: userSubjectPersons.id,
         full_name: userSubjectPersons.full_name,
         relation_tag: userSubjectPersons.relation_tag,
+        requires_tax_review: userSubjectPersons.requires_tax_review,
         created_at: userSubjectPersons.created_at,
         updated_at: userSubjectPersons.updated_at,
       });
@@ -122,9 +130,14 @@ export async function createSubjectPerson(
 export async function updateSubjectPerson(
   userId: number,
   id: number,
-  input: { full_name?: string; relation_tag?: string },
+  input: { full_name?: string; relation_tag?: string; requires_tax_review?: boolean },
 ): Promise<SubjectPerson> {
-  const patch: { full_name?: string; relation_tag?: string; updated_at: string } = {
+  const patch: {
+    full_name?: string;
+    relation_tag?: string;
+    requires_tax_review?: boolean;
+    updated_at: string;
+  } = {
     updated_at: new Date().toISOString(),
   };
   if (input.full_name !== undefined) {
@@ -137,6 +150,9 @@ export async function updateSubjectPerson(
     }
     patch.relation_tag = tag;
   }
+  if (input.requires_tax_review !== undefined) {
+    patch.requires_tax_review = input.requires_tax_review;
+  }
 
   try {
     const [row] = await db
@@ -147,6 +163,7 @@ export async function updateSubjectPerson(
         id: userSubjectPersons.id,
         full_name: userSubjectPersons.full_name,
         relation_tag: userSubjectPersons.relation_tag,
+        requires_tax_review: userSubjectPersons.requires_tax_review,
         created_at: userSubjectPersons.created_at,
         updated_at: userSubjectPersons.updated_at,
       });
@@ -187,6 +204,7 @@ export interface SubjectPersonMatch {
   id: number;
   full_name: string;
   relation_tag: string;
+  requires_tax_review: boolean;
 }
 
 export async function loadSubjectPersonsForMatch(userId: number): Promise<SubjectPersonMatch[]> {
@@ -196,6 +214,7 @@ export async function loadSubjectPersonsForMatch(userId: number): Promise<Subjec
         id: userSubjectPersons.id,
         full_name: userSubjectPersons.full_name,
         relation_tag: userSubjectPersons.relation_tag,
+        requires_tax_review: userSubjectPersons.requires_tax_review,
       })
       .from(userSubjectPersons)
       .where(eq(userSubjectPersons.user_id, userId))

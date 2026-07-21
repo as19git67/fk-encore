@@ -168,7 +168,9 @@ export function reconcileSubjectPersonTags(
  * Anlage Unterhalt, or Steuerbescheid. Those have their own semantics and can
  * legitimately refer to another person in stored paperwork.
  */
-const PERSONAL_DEDUCTION_SECTIONS_REQUIRING_USER_PAYMENT = new Set([
+/** Exported so documents.ts can re-derive the same set for the
+ *  requires_tax_review backfill when a subject person is opted in. */
+export const PERSONAL_DEDUCTION_TAX_SECTION_SLUGS: readonly string[] = [
   "sonderausgaben",
   "vorsorgeaufwand",
   "anlage-av",
@@ -176,9 +178,15 @@ const PERSONAL_DEDUCTION_SECTIONS_REQUIRING_USER_PAYMENT = new Set([
   "haushaltsnahe",
   "anlage-kind",
   "anlage-energetisch",
-]);
+];
+const PERSONAL_DEDUCTION_SECTIONS_REQUIRING_USER_PAYMENT = new Set(
+  PERSONAL_DEDUCTION_TAX_SECTION_SLUGS,
+);
 
 export interface PersonalDeductionGuardInput {
+  /** Ids of matched subject persons that opted in via
+   *  user_subject_persons.requires_tax_review (migration 0137) — NOT every
+   *  matched subject person. The caller is responsible for filtering. */
   detectedSubjectPersonIds: readonly number[];
   taxSections: readonly { slug: string }[];
 }
@@ -191,14 +199,21 @@ export interface PersonalDeductionGuardResult {
 /**
  * Return true when an AI tax assignment should be surfaced for human review
  * because it is a personal deduction on a document that deterministically
- * concerns a stored Bezugsperson. This is intentionally a soft signal: it does
- * not clear the tax assignment, because the user might genuinely pay expenses
- * for that person.
+ * concerns a Bezugsperson opted into tax review. This is intentionally a
+ * soft signal: it does not clear the tax assignment, because the user might
+ * genuinely pay expenses for that person.
  *
  * The caller (runClassify) records the result in the dedicated
  * `tax_review_needed` column (migration 0136) — it is deliberately NOT folded
  * into `classification_confidence` so a confidently-classified category never
  * gets dragged into the low-confidence work-item basket by a tax question.
+ *
+ * The signal itself is opt-in per subject person (migration 0137): most
+ * Bezugspersonen (spouse, own children) are dependents the user obviously
+ * pays for, so flagging every one of them for review flooded the "zu
+ * prüfen" queue. Only subject persons explicitly marked
+ * requires_tax_review=true (e.g. a parent whose bills the user may not have
+ * covered) reach this function at all — see document-ops.ts.
  */
 export function detectSubjectPersonPersonalDeductionReview(
   input: PersonalDeductionGuardInput,

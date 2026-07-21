@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import Button from 'primevue/button'
+import Checkbox from 'primevue/checkbox'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import DataTable from 'primevue/datatable'
@@ -10,6 +11,7 @@ import {
   createSubjectPerson,
   deleteSubjectPerson,
   listSubjectPersons,
+  updateSubjectPerson,
   type SubjectPerson,
 } from '../api/documents'
 
@@ -18,9 +20,10 @@ const loading = ref(false)
 const error = ref('')
 const info = ref('')
 
-const form = ref({ full_name: '', relation_tag: '' })
+const form = ref({ full_name: '', relation_tag: '', requires_tax_review: false })
 const adding = ref(false)
 const deletingId = ref<number | null>(null)
+const togglingId = ref<number | null>(null)
 
 async function load() {
   loading.value = true
@@ -43,17 +46,39 @@ async function handleAdd() {
   error.value = ''
   info.value = ''
   try {
-    const created = await createSubjectPerson({ full_name, relation_tag })
+    const created = await createSubjectPerson({
+      full_name,
+      relation_tag,
+      requires_tax_review: form.value.requires_tax_review,
+    })
     persons.value = [...persons.value, created].sort((a, b) =>
       a.full_name.localeCompare(b.full_name, 'de'),
     )
     form.value.full_name = ''
     form.value.relation_tag = ''
+    form.value.requires_tax_review = false
     info.value = `${created.full_name} hinzugefügt`
   } catch (err: any) {
     error.value = err.message || 'Speichern fehlgeschlagen'
   } finally {
     adding.value = false
+  }
+}
+
+async function handleToggleTaxReview(p: SubjectPerson, checked: boolean) {
+  togglingId.value = p.id
+  error.value = ''
+  info.value = ''
+  try {
+    const updated = await updateSubjectPerson(p.id, { requires_tax_review: checked })
+    persons.value = persons.value.map((x) => (x.id === p.id ? updated : x))
+    info.value = checked
+      ? `Steuerdokumente von ${p.full_name} werden ab sofort zur Prüfung markiert.`
+      : `Steuerdokumente von ${p.full_name} werden nicht mehr zur Prüfung markiert.`
+  } catch (err: any) {
+    error.value = err.message || 'Speichern fehlgeschlagen'
+  } finally {
+    togglingId.value = null
   }
 }
 
@@ -109,6 +134,10 @@ onMounted(load)
             :disabled="adding"
           />
         </label>
+        <label class="checkbox-label">
+          <Checkbox v-model="form.requires_tax_review" :binary="true" :disabled="adding" />
+          <span>Steuerdokumente dieser Person zur Prüfung markieren</span>
+        </label>
         <Button
           type="submit"
           label="Hinzufügen"
@@ -117,6 +146,14 @@ onMounted(load)
           :disabled="!form.full_name.trim() || !form.relation_tag.trim()"
         />
       </form>
+      <p class="page-hint">
+        Betrifft ein Dokument eine absetzbare Position (Sonderausgaben,
+        haushaltsnahe Aufwendungen, …) und eine Bezugsperson, ist oft unklar,
+        ob <em>du</em> die Ausgabe getragen hast. Aktiviere die Option nur für
+        Personen außerhalb deines Haushalts, deren Rechnungen du nicht
+        automatisch bezahlst (z.&nbsp;B. ein Elternteil) — für Ehepartner:in
+        oder eigene Kinder lässt du sie i.&nbsp;d.&nbsp;R. aus.
+      </p>
     </section>
 
     <DataTable
@@ -130,6 +167,16 @@ onMounted(load)
       <Column header="Tag">
         <template #body="{ data }">
           <Tag :value="data.relation_tag" severity="info" />
+        </template>
+      </Column>
+      <Column header="Steuer-Prüfung" :style="{ width: '10rem' }">
+        <template #body="{ data }">
+          <Checkbox
+            :modelValue="data.requires_tax_review"
+            :binary="true"
+            :disabled="togglingId === data.id"
+            @update:modelValue="(v: boolean) => handleToggleTaxReview(data, v)"
+          />
         </template>
       </Column>
       <Column header="" :style="{ width: '4rem', textAlign: 'right' }">
@@ -197,6 +244,13 @@ onMounted(load)
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
+}
+.add-form__row .checkbox-label {
+  flex: 1 1 18rem;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  padding-bottom: 0.4rem;
 }
 .label {
   font-size: 0.85rem;

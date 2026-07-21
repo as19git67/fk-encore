@@ -426,8 +426,14 @@ export async function runClassify(documentId: number): Promise<{ classification:
   // valid tax document when the user paid it, so do not clear the tax
   // sections. Instead, remember the soft signal and apply the confidence
   // lowering after all later confidence bumps (e.g. learned category) ran.
+  // Only subject persons explicitly opted in (requires_tax_review, #0137) can
+  // trigger the review — most Bezugspersonen (spouse, own children) are
+  // dependents the user obviously pays for.
+  const reviewOptedInPersonIds = new Set(
+    subjectPersons.filter((p) => p.requires_tax_review).map((p) => p.id),
+  );
   const subjectPersonDeductionReview = detectSubjectPersonPersonalDeductionReview({
-    detectedSubjectPersonIds: subjectPersonIds,
+    detectedSubjectPersonIds: subjectPersonIds.filter((id) => reviewOptedInPersonIds.has(id)),
     taxSections: classification.tax_sections,
   });
   const forceTaxReviewConfidence =
