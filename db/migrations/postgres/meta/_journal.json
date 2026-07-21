@@ -960,6 +960,13 @@
       "when": 1784851200000,
       "tag": "0136_document_tax_review_needed",
       "breakpoints": true
+    },
+    {
+      "idx": 137,
+      "version": "7",
+      "when": 1784937600000,
+      "tag": "0137_subject_person_tax_review_opt_in",
+      "breakpoints": true
     }
   ]
 }

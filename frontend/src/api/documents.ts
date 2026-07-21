@@ -779,6 +779,7 @@ export interface SubjectPerson {
   id: number
   full_name: string
   relation_tag: string
+  requires_tax_review: boolean
   created_at: string
   updated_at: string
 }
@@ -787,7 +788,11 @@ export function listSubjectPersons() {
   return apiFetch<{ items: SubjectPerson[] }>('/documents/subject-persons')
 }
 
-export function createSubjectPerson(input: { full_name: string; relation_tag: string }) {
+export function createSubjectPerson(input: {
+  full_name: string
+  relation_tag: string
+  requires_tax_review?: boolean
+}) {
   return apiFetch<SubjectPerson>('/documents/subject-persons', {
     method: 'POST',
     body: JSON.stringify(input),
@@ -796,7 +801,7 @@ export function createSubjectPerson(input: { full_name: string; relation_tag: st
 
 export function updateSubjectPerson(
   id: number,
-  patch: { full_name?: string; relation_tag?: string },
+  patch: { full_name?: string; relation_tag?: string; requires_tax_review?: boolean },
 ) {
   return apiFetch<SubjectPerson>(`/documents/subject-persons/${id}`, {
     method: 'PATCH',

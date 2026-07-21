@@ -904,6 +904,13 @@ export const userSubjectPersons = pgTable("user_subject_persons", {
     .references(() => users.id, { onDelete: "cascade" }),
   full_name: text("full_name").notNull(),
   relation_tag: text("relation_tag").notNull(),
+  // Opt-in signal (migration 0137): a personal-deduction tax section on a
+  // document mentioning this person only sets documents.tax_review_needed
+  // when this is true. Defaults to false — most subject persons (spouse,
+  // own children) are dependents the user demonstrably pays for, so their
+  // documents never need the "did you actually pay this?" prompt. Meant for
+  // relatives (e.g. a parent) whose expenses the user may or may not cover.
+  requires_tax_review: boolean("requires_tax_review").notNull().default(false),
   created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
   updated_at: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
 });
