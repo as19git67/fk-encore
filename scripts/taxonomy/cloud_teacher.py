@@ -63,6 +63,8 @@ from cloud_audit import (
     _is_rate_or_overload,
     _load_tax_sections_outline,
     _load_taxonomy_outline,
+    _system_blocks,
+    _taxonomy_cache_block,
     _TEXT_CAP,
 )
 
@@ -246,10 +248,10 @@ def _anonymize_doc(doc: dict, names: list[str]) -> dict:
     }
 
 
-def _build_user_msg(doc: dict, taxonomy: str) -> str:
-    """Wie der Audit-User-Prompt, aber mit echtem Absender-Klartext statt Typ."""
+def _build_doc_msg(doc: dict) -> str:
+    """Wie der Audit-Dokument-Teil, aber mit echtem Absender-Klartext statt Typ.
+    Der NICHT-cacheable, pro Dokument einzigartige Teil der User-Message."""
     return (
-        f"Taxonomie:\n{taxonomy}\n\n"
         f"Dokument (ID {doc['id']}):\n"
         f"- Titel: {doc['title']}\n"
         f"- Absender: {doc['sender']}\n"
@@ -258,19 +260,28 @@ def _build_user_msg(doc: dict, taxonomy: str) -> str:
     )
 
 
+def _user_content_blocks(doc: dict, taxonomy: str) -> list[dict]:
+    return [_taxonomy_cache_block(taxonomy), {"type": "text", "text": _build_doc_msg(doc)}]
+
+
+def _build_user_msg(doc: dict, taxonomy: str) -> str:
+    """Volltext der User-Message — nur noch für den (nicht an die API
+    gesendeten) Dry-Run-Export; der Live-Call nutzt _user_content_blocks."""
+    return f"Taxonomie:\n{taxonomy}\n\n{_build_doc_msg(doc)}"
+
+
 # ── Claude-Klassifikation ─────────────────────────────────────────────────────
 
 def _classify(client, doc: dict, system: str, taxonomy: str) -> tuple[dict | None, bool]:
     """Returns (label | None, aborted). None = harter Fehler (Dokument wird
     übersprungen). aborted=True = anhaltendes Rate-Limit → Lauf beenden,
     Teilergebnis behalten."""
-    user_msg = _build_user_msg(doc, taxonomy)
     try:
         resp = client.messages.create(
             model=CLAUDE_MODEL,
             max_tokens=16_000,
-            system=system,
-            messages=[{"role": "user", "content": user_msg}],
+            system=_system_blocks(system),
+            messages=[{"role": "user", "content": _user_content_blocks(doc, taxonomy)}],
         )
         text_block = next(
             (b for b in resp.content if getattr(b, "type", None) == "text"), None
