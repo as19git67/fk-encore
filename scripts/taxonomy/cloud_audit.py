@@ -374,15 +374,47 @@ def _build_system(tax_outline: str) -> str:
     return f"{_SYSTEM_BASE}\n{_TAX_GUIDANCE}\n\nSteuer-Sektionen (slug: Name — Hinweis):\n{tax_outline}"
 
 
-def _build_user_msg(doc: dict, taxonomy: str) -> str:
+# ── Prompt-Caching ────────────────────────────────────────────────────────────
+# Der System-Prompt UND die Taxonomie sind für einen ganzen Lauf identisch —
+# nur das jeweilige Dokument ändert sich pro Request. Ohne cache_control zahlt
+# und rendert Claude beides bei jedem einzelnen Dokument neu; markiert als
+# ephemeral (5-Minuten-TTL, verlängert sich bei jedem Cache-Hit) trifft ab dem
+# zweiten Request im Lauf ein Cache-Hit, solange die Requests sequenziell
+# innerhalb der TTL bleiben (was bei einem einzelnen Lauf immer der Fall ist).
+_CACHE_CONTROL = {"type": "ephemeral"}
+
+
+def _system_blocks(system_text: str) -> list[dict]:
+    return [{"type": "text", "text": system_text, "cache_control": _CACHE_CONTROL}]
+
+
+def _taxonomy_cache_block(taxonomy: str) -> dict:
+    """Cacheable Präfix-Block der User-Message: identisch für jedes Dokument
+    im Lauf, siehe _CACHE_CONTROL oben. Muss als erster Content-Block der
+    Message stehen, damit Claude den kompletten Präfix bis einschließlich
+    diesem Block cachen kann."""
+    return {"type": "text", "text": f"Taxonomie:\n{taxonomy}\n\n", "cache_control": _CACHE_CONTROL}
+
+
+def _build_doc_msg(doc: dict) -> str:
+    """Der NICHT-cacheable, pro Dokument einzigartige Teil der User-Message."""
     return (
-        f"Taxonomie:\n{taxonomy}\n\n"
         f"Dokument (ID {doc['id']}):\n"
         f"- Titel: {doc['title']}\n"
         f"- Absender-Typ: {doc['sender_type']}\n"
         f"- Tags: {doc['tags']}\n"
         f"- Text:\n{doc['text']}\n"
     )
+
+
+def _user_content_blocks(doc: dict, taxonomy: str) -> list[dict]:
+    return [_taxonomy_cache_block(taxonomy), {"type": "text", "text": _build_doc_msg(doc)}]
+
+
+def _build_user_msg(doc: dict, taxonomy: str) -> str:
+    """Volltext der User-Message — nur noch für den (nicht an die API
+    gesendeten) Dry-Run-Export; der Live-Call nutzt _user_content_blocks."""
+    return f"Taxonomie:\n{taxonomy}\n\n{_build_doc_msg(doc)}"
 
 
 def _clean_claude_tax_sections(raw: object) -> list[dict]:
@@ -437,7 +469,6 @@ def _classify_batch(
     batch_total = len(docs)
     for di, doc in enumerate(docs, 1):
         print(f"    [{di}/{batch_total}] Dok {doc['id']} — sende an Claude …")
-        user_msg = _build_user_msg(doc, taxonomy)
         base = {
             "doc_id": doc["id"],
             "qwen_slug": doc["qwen_slug"],
@@ -454,8 +485,8 @@ def _classify_batch(
             resp = client.messages.create(
                 model=CLAUDE_MODEL,
                 max_tokens=16_000,
-                system=system,
-                messages=[{"role": "user", "content": user_msg}],
+                system=_system_blocks(system),
+                messages=[{"role": "user", "content": _user_content_blocks(doc, taxonomy)}],
             )
             text_block = next(
                 (b for b in resp.content if getattr(b, "type", None) == "text"),
