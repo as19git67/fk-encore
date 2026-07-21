@@ -934,6 +934,25 @@ export const documentSubjectPersons = pgTable(
   (table) => [primaryKey({ columns: [table.document_id, table.subject_person_id] })]
 );
 
+// Explicit "the user removed this Bezugsperson from this document" markers
+// (migration 0138). Written when a save deselects an existing link; read by
+// runClassify so neither the deterministic name detection nor the learned
+// sender-memory merge re-links the person. Re-adding the person manually
+// deletes the row again.
+export const documentSubjectPersonRemovals = pgTable(
+  "document_subject_person_removals",
+  {
+    document_id: integer("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    subject_person_id: integer("subject_person_id")
+      .notNull()
+      .references(() => userSubjectPersons.id, { onDelete: "cascade" }),
+    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.document_id, table.subject_person_id] })]
+);
+
 export const documentTagLinks = pgTable(
   "document_tag_links",
   {

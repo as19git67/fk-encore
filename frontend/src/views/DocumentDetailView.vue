@@ -20,6 +20,7 @@ import {
   downloadDocument,
   fetchDocumentBytes,
   getDocument,
+  getDocumentText,
   listDocumentCategories,
   listTaxSectionsCatalog,
   proposeCategory,
@@ -143,6 +144,33 @@ function onFollowUpDone() {
   info.value = 'Dokument auf Wiedervorlage gelegt.'
 }
 
+// ─── Volltext-Anzeige ────────────────────────────────────────────────────────
+// The detail payload only carries a truncated preview; the full OCR text is
+// fetched lazily the first time the user expands it.
+const fullText = ref<string | null>(null)
+const fullTextVisible = ref(false)
+const fullTextLoading = ref(false)
+
+async function toggleFullText() {
+  if (fullTextVisible.value) {
+    fullTextVisible.value = false
+    return
+  }
+  if (fullText.value === null && doc.value) {
+    fullTextLoading.value = true
+    try {
+      const res = await getDocumentText(doc.value.id)
+      fullText.value = res.text ?? ''
+    } catch (err: any) {
+      error.value = err.message || 'Volltext konnte nicht geladen werden'
+      return
+    } finally {
+      fullTextLoading.value = false
+    }
+  }
+  fullTextVisible.value = true
+}
+
 // "Keine passende Kategorie — neue vorschlagen"
 const proposeOpen = ref(false)
 const proposeName = ref('')
@@ -242,6 +270,9 @@ async function load() {
     groups.value = houseItems.items
     subjectPeople.value = people.items
     linkedTransactions.value = links
+    // Cached full text belongs to the previously shown document/state.
+    fullText.value = null
+    fullTextVisible.value = false
     resetForm()
     resetTaxForm()
     await loadPdf(id)
@@ -1130,8 +1161,18 @@ onBeforeUnmount(() => {
             <strong>Konfidenz:</strong> {{ (doc.classification_confidence * 100).toFixed(0) }}%
           </div>
           <div v-if="doc.extracted_text_preview" class="text-preview">
-            <strong>Text-Vorschau:</strong>
-            <p>{{ doc.extracted_text_preview }}</p>
+            <strong>{{ fullTextVisible ? 'Extrahierter Text (vollständig):' : 'Text-Vorschau:' }}</strong>
+            <p :class="{ 'text-preview--full': fullTextVisible }">
+              {{ fullTextVisible ? (fullText || doc.extracted_text_preview) : doc.extracted_text_preview }}
+            </p>
+            <Button
+              :label="fullTextVisible ? 'Nur Vorschau anzeigen' : 'Vollständigen Text anzeigen'"
+              :icon="fullTextVisible ? 'pi pi-angle-up' : 'pi pi-angle-down'"
+              text
+              size="small"
+              :loading="fullTextLoading"
+              @click="toggleFullText"
+            />
           </div>
         </div>
       </div>
@@ -1503,6 +1544,11 @@ onBeforeUnmount(() => {
   overflow-wrap: anywhere;
   max-height: 180px;
   overflow-y: auto;
+}
+/* Expanded full text gets more room but stays its own scroll container so
+   the page never grows by tens of thousands of pixels. */
+.text-preview p.text-preview--full {
+  max-height: 60vh;
 }
 
 .tax-card {
