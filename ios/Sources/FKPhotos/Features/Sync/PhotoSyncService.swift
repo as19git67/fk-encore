@@ -321,6 +321,9 @@ actor PhotoSyncService {
     /// source iOS asset has left the iOS album. Safety properties:
     ///  - Only photos this device uploaded (present in `serverPhotoMap`) are ever
     ///    touched — photos added on the web are never removed.
+    ///  - Bisync albums additionally require the photo to be registered in the
+    ///    album's download tracking, so a server-side addition that hasn't been
+    ///    synced down yet is never mistaken for a local removal.
     ///  - Only the album membership is removed (`action: "remove"`); the photo
     ///    itself stays on the server.
     ///  - A collection that fails to resolve is skipped, so a transient PhotoKit
@@ -351,8 +354,20 @@ actor PhotoSyncService {
             let response: PhotosResponse? = try? await APIClient.shared.get("/albums/\(serverAlbumId)/photos")
             guard let serverPhotos = response?.photos else { continue }
 
+            // Bisync: a server photo counts as "was in the iOS album" only once
+            // the download half has registered it for this album pair. The
+            // global serverPhotoMap alone is NOT sufficient evidence — a photo
+            // uploaded from this device via another album or the whole-library
+            // sync, then added to the album on the web, has a local asset that
+            // was never in this iOS album. Treating its absence as a removal
+            // deleted server-side additions before they could ever sync down.
+            let bisyncTracked: Set<String>? = mode == .bisync
+                ? Set((DownloadSyncPreferences.loadDownloadedPhotos()[String(serverAlbumId)] ?? [:]).keys)
+                : nil
+
             // Photos we uploaded whose source asset is no longer in the iOS album.
             let toRemove: [Int] = serverPhotos.compactMap { photo in
+                if let tracked = bisyncTracked, !tracked.contains(String(photo.id)) { return nil }
                 guard let localId = serverPhotoMap[String(photo.id)] else { return nil }
                 return presentLocalIds.contains(localId) ? nil : photo.id
             }

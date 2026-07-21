@@ -245,7 +245,13 @@ abgebrochene Uploads nicht als „Geister-Fehler" stehenbleiben.
   ist**. Damit iOS-seitiges Entfernen nicht unnötig in `F4mil Trash` landet,
   ruft der Delete-up-Pass `DownloadSyncPreferences.forgetDownloadedPhotos()`
   auf, sodass die Download-Seite diese Fotos nicht als „server-seitig gelöscht"
-  interpretiert. Das iOS-Zielalbum ist dasselbe wie beim Upload (Download nutzt
+  interpretiert. **Zusätzliches Delete-up-Gate bei Bisync**: Ein Server-Foto
+  wird nur entfernt, wenn es auch im Download-Tracking des Album-Paars
+  registriert ist (`downloadedPhotos[serverAlbumId]`). Die globale
+  `serverPhotoMap` allein reicht nicht — ein von diesem Gerät (z. B. über
+  „Gesamte Mediathek") hochgeladenes Foto, das am Server ins Album aufgenommen
+  wurde, war nie im iOS-Album; sein Fehlen dort ist keine lokale Löschung,
+  sondern eine noch nicht heruntergesynchte Server-Aufnahme. Das iOS-Zielalbum ist dasselbe wie beim Upload (Download nutzt
   `getOrCreateIOSAlbum(named:)`, Namensgleichheit durch „Verfügbar machen").
 
 ---
@@ -264,7 +270,13 @@ mehr per UI umgeschaltet.
   Foto-Berechtigung `readWrite` (`.authorized`/`.limited`).
 - **Fast-Skip per ETag**: `GET /photos/index` mit `If-None-Match`. Ein **304**
   bedeutet „nichts geändert" und überspringt den Album-Walk. Der erste Lauf
-  (ohne ETag) macht den vollen Walk und speichert das ETag.
+  (ohne ETag) macht den vollen Walk und speichert das ETag. Der serverseitige
+  Fingerprint (`getPhotoIndexFingerprint`) umfasst neben den eigenen Fotos
+  auch die **Album-Mitgliedschaften** (MAX `added_at` + COUNT über
+  `album_photos`) und die Foto-`updated_at` der Mitglieder in allen sichtbaren
+  Alben (eigene + geteilte) — sonst würde das Aufnehmen eines bestehenden
+  Fotos in ein Album (nur ein `album_photos`-Insert) das ETag nicht ändern
+  und der 304-Fast-Skip würde server-seitige Album-Änderungen verstecken.
 - Eigener `F4mil Trash`-Mechanismus zum Verschieben gelöschter Fotos (nur bei
   `readWrite`-Zugriff).
 - Eigener `NWPathMonitor` mit derselben First-Path-Await-Logik wie der Upload.
