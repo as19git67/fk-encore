@@ -32,6 +32,32 @@ export const USER_PROPOSED_MARKER = "user-proposed:";
  *  unbounded array. */
 const MAX_EXAMPLES = 20;
 
+/**
+ * Auto-mined (sender-driven) suggestions are heuristic: a single "sonstiges"
+ * document from a sender is not yet evidence the taxonomy is missing a
+ * category for it. Require this many recurrences from the same sender before
+ * the suggestion is worth an admin's attention — mirrors MIN_CATEGORY_SUPPORT
+ * in learned-rules.ts. A user's explicit "propose new category" action
+ * (USER_PROPOSED_MARKER) is exempt: it is a foreground request, not a mined
+ * heuristic, and is always shown regardless of example count.
+ */
+export const MIN_AUTO_SUGGESTION_SUPPORT = 3;
+
+/**
+ * Whether an open suggestion has accumulated enough evidence to be shown to
+ * an admin. Pure so it is unit-tested without a DB.
+ */
+export function isSuggestionVisible(
+  rationale: string | null | undefined,
+  exampleCount: number,
+): boolean {
+  const r = rationale ?? "";
+  if (r.startsWith(USER_PROPOSED_MARKER)) return true;
+  if (r.startsWith(AUTO_SENDER_MARKER)) return exampleCount >= MIN_AUTO_SUGGESTION_SUPPORT;
+  // No recognized marker (legacy/manual row) — better to surface than hide silently.
+  return true;
+}
+
 export interface OpenSuggestion {
   id: number;
   rationale: string | null;

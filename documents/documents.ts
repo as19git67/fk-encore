@@ -93,7 +93,7 @@ import {
   TAX_SECTIONS,
   type TaxSectionGroup,
 } from "./tax-sections";
-import { recordUserCategoryProposal } from "./suggestion-writer";
+import { isSuggestionVisible, recordUserCategoryProposal } from "./suggestion-writer";
 
 const _require = createRequire(import.meta.url);
 type HeicConvertFn = (opts: {
@@ -3300,6 +3300,14 @@ function slugify(input: string): string {
  * List taxonomy refinements proposed by the classifier. Defaults to
  * `open` suggestions; pass `?status=` to surface accepted/rejected
  * for audit purposes.
+ *
+ * Open, auto-mined (sender-driven) suggestions are additionally filtered by
+ * `isSuggestionVisible`: a single "sonstiges" hit is not yet evidence the
+ * taxonomy is missing a category, so it stays hidden until the sender has
+ * recurred MIN_AUTO_SUGGESTION_SUPPORT times (see suggestion-writer.ts). The
+ * writer still records every hit regardless — the growing example list is
+ * what eventually crosses the threshold. User-proposed suggestions and the
+ * accepted/rejected audit views are never filtered.
  */
 export const listCategorySuggestions = api(
   { expose: true, method: "GET", path: "/document-category-suggestions", auth: true },
@@ -3316,8 +3324,12 @@ export const listCategorySuggestions = api(
         .where(eq(documentCategorySuggestions.status, filter as any))
         .orderBy(desc(documentCategorySuggestions.created_at)),
     );
+    const visible =
+      filter === "open"
+        ? rows.filter((r) => isSuggestionVisible(r.rationale, (r.example_document_ids ?? []).length))
+        : rows;
     return {
-      items: rows.map((r) => ({
+      items: visible.map((r) => ({
         id: r.id,
         suggested_name: r.suggested_name,
         parent_slug: r.parent_slug,

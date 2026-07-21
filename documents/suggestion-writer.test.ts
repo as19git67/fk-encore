@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   AUTO_SENDER_MARKER,
+  MIN_AUTO_SUGGESTION_SUPPORT,
   USER_PROPOSED_MARKER,
+  isSuggestionVisible,
   planSuggestion,
   planUserProposal,
   suggestionRationale,
@@ -109,5 +111,29 @@ describe("planUserProposal", () => {
       kind: "insert",
       marker: userMarker("vereinsbeiträge"),
     });
+  });
+});
+
+describe("isSuggestionVisible", () => {
+  const autoMarker = suggestionRationale(`${AUTO_SENDER_MARKER}acmegmbh`, "Acme GmbH");
+  const userMarker = userProposalRationale(`${USER_PROPOSED_MARKER}vereinsbeiträge`, 1);
+
+  it("hides an auto-mined suggestion below the support threshold", () => {
+    expect(isSuggestionVisible(autoMarker, 1)).toBe(false);
+    expect(isSuggestionVisible(autoMarker, MIN_AUTO_SUGGESTION_SUPPORT - 1)).toBe(false);
+  });
+
+  it("shows an auto-mined suggestion once it reaches the support threshold", () => {
+    expect(isSuggestionVisible(autoMarker, MIN_AUTO_SUGGESTION_SUPPORT)).toBe(true);
+    expect(isSuggestionVisible(autoMarker, MIN_AUTO_SUGGESTION_SUPPORT + 5)).toBe(true);
+  });
+
+  it("always shows a user-proposed suggestion, even with a single example", () => {
+    expect(isSuggestionVisible(userMarker, 1)).toBe(true);
+  });
+
+  it("shows rows with no recognized marker rather than hiding them silently", () => {
+    expect(isSuggestionVisible(null, 1)).toBe(true);
+    expect(isSuggestionVisible("some manual note", 1)).toBe(true);
   });
 });
