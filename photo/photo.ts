@@ -315,10 +315,14 @@ export const listPhotos = api(
  * Implemented as a raw endpoint so it can emit an ETag and short-circuit
  * with 304 Not Modified when the client's cached copy is still current.
  * The ETag is derived from a cheap user-scoped fingerprint:
- *   md5(userId | MAX(photos.updated_at) | COUNT(photos) | serializedFilter)
- * Both MAX and COUNT are served by the (user_id, updated_at DESC) index
- * added in migration 0034, so the fingerprint query runs in single-digit
- * ms even on large libraries. When the fingerprint and filter match the
+ *   md5(userId | MAX(photos.updated_at) | COUNT(photos) | albumsFp | serializedFilter)
+ * where albumsFp additionally covers album membership and member-photo
+ * changes in albums the user owns or is shared into (see
+ * getPhotoIndexFingerprint) — the iOS download sync relies on the ETag
+ * flipping when a photo is added to or removed from a synced album.
+ * MAX and COUNT over the user's photos are served by the
+ * (user_id, updated_at DESC) index added in migration 0034, so the
+ * fingerprint query runs in single-digit ms even on large libraries. When the fingerprint and filter match the
  * value the client supplied via If-None-Match we skip the full SELECT and
  * JSON serialization entirely.
  */
