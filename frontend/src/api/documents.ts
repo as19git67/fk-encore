@@ -233,6 +233,11 @@ export function getDocument(id: number) {
   return apiFetch<DocumentDetail>(`/documents/${id}`)
 }
 
+/** Full extracted text (the detail payload only carries a truncated preview). */
+export function getDocumentText(id: number) {
+  return apiFetch<{ text: string | null }>(`/documents/${id}/text`)
+}
+
 export function listDocumentCategories() {
   return apiFetch<{ items: DocumentCategory[] }>('/document-categories')
 }

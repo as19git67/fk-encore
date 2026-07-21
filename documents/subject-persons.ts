@@ -18,7 +18,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { APIError } from "encore.dev/api";
 import db from "../db/database";
 import { dbAll, dbFirst } from "../db/adapter";
-import { userSubjectPersons } from "../db/schema";
+import { documentSubjectPersonRemovals, userSubjectPersons } from "../db/schema";
 
 export interface SubjectPerson {
   id: number;
@@ -220,6 +220,22 @@ export async function loadSubjectPersonsForMatch(userId: number): Promise<Subjec
       .where(eq(userSubjectPersons.user_id, userId))
       .orderBy(asc(userSubjectPersons.full_name)),
   );
+}
+
+/**
+ * Subject persons the user explicitly removed from this document (migration
+ * 0138). runClassify filters both the deterministic in-text detection and the
+ * learned sender-memory merge against this set, so a manual removal is not
+ * silently undone by the next re-classify.
+ */
+export async function loadRemovedSubjectPersonIds(documentId: number): Promise<Set<number>> {
+  const rows = await dbAll<{ subject_person_id: number }>(
+    db
+      .select({ subject_person_id: documentSubjectPersonRemovals.subject_person_id })
+      .from(documentSubjectPersonRemovals)
+      .where(eq(documentSubjectPersonRemovals.document_id, documentId)),
+  );
+  return new Set(rows.map((r) => r.subject_person_id));
 }
 
 export async function loadSubjectPersonHints(userId: number): Promise<SubjectPersonHint[]> {

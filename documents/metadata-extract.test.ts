@@ -1,11 +1,13 @@
 import { describe, it, expect } from "vitest";
 import {
+  buildUmlautRestorationMap,
   detectSubjectPersonIds,
   detectSubjectPersonPersonalDeductionReview,
   extractDocumentNumber,
   extractReferenceNumberTags,
   isSubjectPersonSender,
   reconcileSubjectPersonTags,
+  restoreUmlautSpellings,
 } from "./metadata-extract";
 
 describe("extractDocumentNumber", () => {
@@ -190,5 +192,53 @@ describe("detectSubjectPersonPersonalDeductionReview", () => {
         ],
       }),
     ).toEqual({ shouldReview: true, reviewSlugs: ["haushaltsnahe"] });
+  });
+});
+
+describe("umlaut restoration (buildUmlautRestorationMap / restoreUmlautSpellings)", () => {
+  const source =
+    "Gebührenbescheid der Stadt München über die Prüfung der Straßenreinigung. " +
+    "Zusätzliche Gebühren für die Müllabfuhr.";
+  const map = buildUmlautRestorationMap(source);
+
+  it("restores transliterated tags to the spelling found in the document", () => {
+    expect(restoreUmlautSpellings("pruefung", map)).toBe("prüfung");
+    expect(restoreUmlautSpellings("gebuehren", map)).toBe("gebühren");
+    expect(restoreUmlautSpellings("muellabfuhr", map)).toBe("müllabfuhr");
+  });
+
+  it("restores words inside longer text and keeps the casing shape", () => {
+    expect(
+      restoreUmlautSpellings("Gebuehrenbescheid der Stadt Muenchen zur Pruefung", map),
+    ).toBe("Gebührenbescheid der Stadt München zur Prüfung");
+    expect(restoreUmlautSpellings("MUENCHEN", map)).toBe("MÜNCHEN");
+  });
+
+  it("restores ß spellings (strassenreinigung → straßenreinigung)", () => {
+    expect(restoreUmlautSpellings("strassenreinigung", map)).toBe("straßenreinigung");
+  });
+
+  it("leaves words alone that have no umlauted counterpart in the document", () => {
+    // "michael" contains "ae" but the document never spells a word whose
+    // transliteration is "michael" — must NOT become "michäl".
+    expect(restoreUmlautSpellings("michael", map)).toBe("michael");
+    expect(restoreUmlautSpellings("Suedbayern kasse", map)).toBe("Suedbayern kasse");
+  });
+
+  it("passes through null/empty and words already carrying umlauts", () => {
+    expect(restoreUmlautSpellings(null, map)).toBeNull();
+    expect(restoreUmlautSpellings("", map)).toBe("");
+    expect(restoreUmlautSpellings("prüfung", map)).toBe("prüfung");
+  });
+
+  it("prefers the most frequent source spelling on key collisions", () => {
+    const m = buildUmlautRestorationMap("Maße Maße Masse");
+    // "Maße" appears twice, so the restored form is the frequent one.
+    expect(restoreUmlautSpellings("masse", m)).toBe("maße");
+  });
+
+  it("returns the input untouched when the document has no umlauts at all", () => {
+    const empty = buildUmlautRestorationMap("Invoice without any special letters");
+    expect(restoreUmlautSpellings("pruefung", empty)).toBe("pruefung");
   });
 });
