@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Chip from 'primevue/chip'
 import Message from 'primevue/message'
@@ -16,18 +16,40 @@ import {
   type TaxYearCount,
 } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
+import { replaceQuerySlice, updateRouteQuery, waitForPendingQueryUpdate } from '../utils/routeQueryUpdate'
 
+const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
+// Persisted in the URL (year/review) so the back arrow from the document
+// detail view restores the same filter instead of resetting to the newest
+// year with no review filter.
+const STEUER_QUERY_KEYS = ['year', 'review'] as const
+
+function initialYearFromQuery(): number | null {
+  const raw = route.query.year
+  const n = typeof raw === 'string' ? Number(raw) : NaN
+  return Number.isFinite(n) ? n : null
+}
+
 const years = ref<TaxYearCount[]>([])
-const selectedYear = ref<number | null>(null)
-const reviewNeededOnly = ref(false)
+const selectedYear = ref<number | null>(initialYearFromQuery())
+const reviewNeededOnly = ref(route.query.review === '1')
 const data = ref<ListTaxDocumentsResponse | null>(null)
 const loading = ref(true)
 const error = ref('')
 const info = ref('')
 const backfilling = ref(false)
+
+function syncQueryParams() {
+  const query: Record<string, string> = {}
+  if (selectedYear.value != null) query.year = String(selectedYear.value)
+  if (reviewNeededOnly.value) query.review = '1'
+  return updateRouteQuery(router, (current) =>
+    replaceQuerySlice(current, STEUER_QUERY_KEYS, query),
+  )
+}
 
 const GROUP_LABELS: Record<TaxSectionGroup, string> = {
   einkuenfte: 'Einkünfte',
@@ -111,7 +133,10 @@ async function onBackfill() {
   }
 }
 
-function openDocument(docId: number) {
+async function openDocument(docId: number) {
+  // Wait for any pending filter write so the back arrow's history entry
+  // captures the current year/review filter instead of a stale query.
+  await waitForPendingQueryUpdate(router)
   router.push({ name: 'dokumente-detail', params: { id: docId } })
 }
 
@@ -133,8 +158,8 @@ function formatDate(dateStr: string | null): string {
   return d.toLocaleDateString('de-DE', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-watch(selectedYear, loadData)
-watch(reviewNeededOnly, loadData)
+watch(selectedYear, () => { syncQueryParams(); loadData() })
+watch(reviewNeededOnly, () => { syncQueryParams(); loadData() })
 
 onMounted(async () => {
   await loadYears()
