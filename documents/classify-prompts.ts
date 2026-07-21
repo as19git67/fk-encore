@@ -34,7 +34,9 @@ Felder:
   bevorzugt das mit "#" markierte Muster (#1234). NICHT Vertrags-,
   Versicherungs-, Kunden- oder Auftragsnummern. Nur die Nummer selbst, ohne
   Präfix, oder null.
-- summary: 1-2 Sätze, deutsch, nüchtern — "Worum geht es?".
+- summary: 1-2 Sätze, deutsch, nüchtern — "Worum geht es?". Auch hier (wie in
+  title und tags) deutsche Umlaute und ß beibehalten — NICHT zu ae/oe/ue/ss
+  auflösen.
 - tags: bis zu max_tags kurze, kleingeschriebene Stichwörter (keine Sätze).
   Deutsche Umlaute und ß beibehalten (z. B. „prüfung", „tüv", „süd", „straße") —
   NICHT zu ae/oe/ue/ss auflösen und NICHT weglassen.

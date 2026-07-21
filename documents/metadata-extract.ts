@@ -230,3 +230,84 @@ export function detectSubjectPersonPersonalDeductionReview(
     reviewSlugs: Array.from(new Set(reviewSlugs)),
   };
 }
+
+// ─── Umlaut restoration ──────────────────────────────────────────────────────
+//
+// The local classifier regularly transliterates German umlauts in its output
+// ("pruefung" instead of "prüfung", "Gebuehrenbescheid" instead of
+// "Gebührenbescheid") although the prompt forbids it. A blind reverse mapping
+// (ae→ä) would be wrong for words like "Michael" or "Masse", so the repair is
+// dictionary-based: only spellings that literally occur in the document's own
+// OCR text are restored. If the document says "Prüfung", the tag "pruefung"
+// becomes "prüfung"; a word with no umlauted counterpart in the text is left
+// alone.
+
+/** Transliterate the German umlauts/ß the way the LLM does (ä→ae, …). */
+function transliterateGerman(word: string): string {
+  return word
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss")
+    .replace(/Ä/g, "Ae")
+    .replace(/Ö/g, "Oe")
+    .replace(/Ü/g, "Ue");
+}
+
+/** Quick pre-filter: a word can only be a transliteration if it contains one
+ *  of the digraphs. Keeps the per-word map lookup off the hot path. */
+const TRANSLIT_DIGRAPH_RE = /ae|oe|ue|ss/i;
+
+/**
+ * Build a lookup from transliterated spelling (lowercase) → the umlauted
+ * spelling (lowercase) as it appears in `sourceText`. When several distinct
+ * source words collide on the same key (rare), the most frequent one wins.
+ */
+export function buildUmlautRestorationMap(sourceText: string): Map<string, string> {
+  const counts = new Map<string, Map<string, number>>();
+  for (const m of sourceText.matchAll(/\p{L}+/gu)) {
+    const word = m[0]!;
+    if (!/[äöüßÄÖÜ]/.test(word)) continue;
+    const key = transliterateGerman(word).toLowerCase();
+    const value = word.toLowerCase();
+    const perKey = counts.get(key) ?? new Map<string, number>();
+    perKey.set(value, (perKey.get(value) ?? 0) + 1);
+    counts.set(key, perKey);
+  }
+  const out = new Map<string, string>();
+  for (const [key, perKey] of counts) {
+    const best = [...perKey.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]!;
+    out.set(key, best[0]);
+  }
+  return out;
+}
+
+/** Re-apply the original word's casing shape to the restored spelling. */
+function matchCase(original: string, restored: string): string {
+  if (original === original.toUpperCase() && original.length > 1) {
+    return restored.toUpperCase();
+  }
+  if (original[0] === original[0]!.toUpperCase()) {
+    return restored.charAt(0).toUpperCase() + restored.slice(1);
+  }
+  return restored;
+}
+
+/**
+ * Restore umlaut spellings in a free-text field (tag, title, summary) using
+ * the document-derived map from `buildUmlautRestorationMap`. Word-level:
+ * every letter-run whose lowercase form matches a map key is replaced,
+ * preserving the original casing shape. null/empty passes through.
+ */
+export function restoreUmlautSpellings(
+  value: string | null | undefined,
+  map: ReadonlyMap<string, string>,
+): string | null {
+  if (!value) return value ?? null;
+  if (map.size === 0) return value;
+  return value.replace(/\p{L}+/gu, (word) => {
+    if (!TRANSLIT_DIGRAPH_RE.test(word)) return word;
+    const restored = map.get(word.toLowerCase());
+    return restored ? matchCase(word, restored) : word;
+  });
+}

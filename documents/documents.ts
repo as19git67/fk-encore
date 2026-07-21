@@ -22,6 +22,7 @@ import {
   documentHintSuggestions,
   documentCorrespondentOverrides,
   documentSubjectPersons,
+  documentSubjectPersonRemovals,
   documentTagLinks,
   documentTags,
   documentTaxSections,
@@ -1153,6 +1154,31 @@ export const getDocument = api(
       teacher_requested: row.teacher_requested ?? false,
       tax_review_needed: row.tax_review_needed ?? false,
     };
+  },
+);
+
+export interface DocumentTextResponse {
+  /** Full OCR/extracted text, or null when nothing was extracted (yet). */
+  text: string | null;
+}
+
+/**
+ * Full extracted text of a document. The detail payload only carries a
+ * truncated `extracted_text_preview` (first 2000 chars) to keep it light;
+ * this endpoint backs the "Vollständigen Text anzeigen" expander in the
+ * detail view.
+ */
+export const getDocumentText = api(
+  { expose: true, method: "GET", path: "/documents/:id/text", auth: true },
+  async ({ id }: { id: number }): Promise<DocumentTextResponse> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.view");
+    const userId = getUserId();
+
+    const row = await loadVisibleDocument(userId, id, isDataAdmin(authData));
+    const text = (row.extracted_text ?? "").trim();
+    return { text: text.length > 0 ? text : null };
   },
 );
 
@@ -3827,9 +3853,17 @@ async function fetchSubjectPersonsForDocument(
 }
 
 /**
- * Replace the user-source Bezugsperson links of a document with `ids`. Only ids
- * that belong to `userId` are accepted; AI-source links are left untouched so a
- * re-classify's detections remain alongside the manual selection.
+ * Replace the Bezugsperson links of a document with `ids`. Only ids that
+ * belong to `userId` are accepted.
+ *
+ * The edit dialog shows ALL current links (ai/cloud/user), so the submitted
+ * selection is authoritative across sources: links of any source that were
+ * deselected are deleted — previously only user rows were, which made an
+ * AI-detected person impossible to remove (it reappeared on every save).
+ * Each such removal is remembered in `document_subject_person_removals`
+ * (migration 0138) so a later re-classify does not silently re-link the
+ * person via in-text detection or the learned sender memory; re-adding the
+ * person manually clears the marker again.
  */
 async function replaceUserSubjectPersons(
   documentId: number,
@@ -3853,15 +3887,39 @@ async function replaceUserSubjectPersons(
               ),
           )
         ).map((r) => r.id);
+  const keep = new Set(owned);
 
-  await db
-    .delete(documentSubjectPersons)
-    .where(
-      and(
-        eq(documentSubjectPersons.document_id, documentId),
-        eq(documentSubjectPersons.source, "user"),
-      ),
-    );
+  // Record explicit removals BEFORE deleting: every currently linked person
+  // (any source) that is absent from the new selection was deselected by the
+  // user. Only persons owned by the caller land here (foreign links cannot
+  // appear in a document the caller may edit, but the ownership join in
+  // `owned` above keeps the invariant explicit for the kept side).
+  const existing = await dbAll<{ subject_person_id: number }>(
+    db
+      .select({ subject_person_id: documentSubjectPersons.subject_person_id })
+      .from(documentSubjectPersons)
+      .where(eq(documentSubjectPersons.document_id, documentId)),
+  );
+  const removedIds = existing
+    .map((r) => r.subject_person_id)
+    .filter((id) => !keep.has(id));
+
+  for (const id of removedIds) {
+    await db
+      .insert(documentSubjectPersonRemovals)
+      .values({ document_id: documentId, subject_person_id: id })
+      .onConflictDoNothing();
+  }
+  if (removedIds.length > 0) {
+    await db
+      .delete(documentSubjectPersons)
+      .where(
+        and(
+          eq(documentSubjectPersons.document_id, documentId),
+          inArray(documentSubjectPersons.subject_person_id, removedIds),
+        ),
+      );
+  }
 
   for (const id of owned) {
     await db
@@ -3871,6 +3929,15 @@ async function replaceUserSubjectPersons(
         target: [documentSubjectPersons.document_id, documentSubjectPersons.subject_person_id],
         set: { source: "user" },
       });
+    // Re-adding a previously removed person lifts the block again.
+    await db
+      .delete(documentSubjectPersonRemovals)
+      .where(
+        and(
+          eq(documentSubjectPersonRemovals.document_id, documentId),
+          eq(documentSubjectPersonRemovals.subject_person_id, id),
+        ),
+      );
   }
 }
 
