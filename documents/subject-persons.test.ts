@@ -73,9 +73,26 @@ describe("documents.subject-persons CRUD", () => {
     expect(created.full_name).toBe("Erika Mustermann");
     // relation_tag is normalised to lowercase on the way in.
     expect(created.relation_tag).toBe("mutter");
+    // Opt-in tax-review signal (0137) defaults to off — most Bezugspersonen
+    // are dependents the user obviously pays for.
+    expect(created.requires_tax_review).toBe(false);
 
     const items = await listSubjectPersons(TEST_USER_ID);
     expect(items.map((i) => i.id)).toContain(created.id);
+  });
+
+  it("creates a subject person opted into tax review and can toggle it back off", async () => {
+    const created = await createSubjectPerson(TEST_USER_ID, {
+      full_name: "Maria Beispiel",
+      relation_tag: "mutter",
+      requires_tax_review: true,
+    });
+    expect(created.requires_tax_review).toBe(true);
+
+    const toggledOff = await updateSubjectPerson(TEST_USER_ID, created.id, {
+      requires_tax_review: false,
+    });
+    expect(toggledOff.requires_tax_review).toBe(false);
   });
 
   it("scopes the list to the calling user", async () => {
