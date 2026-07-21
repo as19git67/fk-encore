@@ -55,7 +55,7 @@ import {
 } from "./llm-client";
 import { loadEffectiveTaxSections } from "./tax-hint-overrides";
 import { isValidTaxSectionSlug } from "./tax-sections";
-import { loadSubjectPersonsForMatch } from "./subject-persons";
+import { loadRemovedSubjectPersonIds, loadSubjectPersonsForMatch } from "./subject-persons";
 import { flattenTaxonomy, taxonomyHints } from "./taxonomy";
 import { matchContentRule, matchSenderRule } from "./sender-rules";
 import { buildClassifyExamples } from "./few-shot";
@@ -74,12 +74,14 @@ import {
   applyKindergeldTaxRule,
 } from "./tax-rules";
 import {
+  buildUmlautRestorationMap,
   detectSubjectPersonIds,
   detectSubjectPersonPersonalDeductionReview,
   extractDocumentNumber,
   extractReferenceNumberTags,
   isSubjectPersonSender,
   reconcileSubjectPersonTags,
+  restoreUmlautSpellings,
 } from "./metadata-extract";
 import { realtime, push } from "~encore/clients";
 
@@ -313,6 +315,19 @@ export async function runClassify(documentId: number): Promise<{ classification:
   if (isSubjectPersonSender(classification.sender, subject_persons)) {
     classification.sender = null;
   }
+  // 2b. The small model regularly transliterates umlauts ("pruefung",
+  //     "Gebuehrenbescheid") despite the prompt forbidding it. Restore the
+  //     spellings that literally occur in the OCR text (dictionary-based, so
+  //     "Michael"/"Masse" are never falsely umlautified — see
+  //     metadata-extract.ts). Sender is deliberately left untouched: the
+  //     learned-rules memory and the sender rules key on the sender string,
+  //     and rewriting it would orphan the memory built from earlier documents.
+  const umlautMap = buildUmlautRestorationMap(clipped);
+  classification.title = restoreUmlautSpellings(classification.title, umlautMap) ?? "";
+  classification.summary = restoreUmlautSpellings(classification.summary, umlautMap) ?? "";
+  classification.tags = classification.tags.map(
+    (t) => restoreUmlautSpellings(t, umlautMap) ?? t,
+  );
 
   // Learned per-user memory from reviewed / user-curated documents, keyed by
   // the now-finalized sender. Drives the category / tax / tag / Bezugsperson
@@ -331,9 +346,15 @@ export async function runClassify(documentId: number): Promise<{ classification:
 
   // 4. Deterministically link the Bezugspersonen mentioned in the text, then
   //    add the ones the user consistently links for this sender (learned) —
-  //    catches OCR-garbled names the in-text detector misses.
+  //    catches OCR-garbled names the in-text detector misses. Persons the
+  //    user explicitly REMOVED from this document (migration 0138) are
+  //    filtered out of both sources: an explicit per-document removal beats
+  //    name detection and sender memory alike.
   const detectedPersonIds = detectSubjectPersonIds(clipped, subjectPersons);
-  const subjectPersonIds = mergeLearnedPersonIds(detectedPersonIds, learned);
+  const removedPersonIds = await loadRemovedSubjectPersonIds(documentId);
+  const subjectPersonIds = mergeLearnedPersonIds(detectedPersonIds, learned).filter(
+    (id) => !removedPersonIds.has(id),
+  );
   // A learned person is user-confirmed evidence, so surface their relation tag
   // even when the name is absent from the text; reconcile keeps it because the
   // id is in the confirmed set below.

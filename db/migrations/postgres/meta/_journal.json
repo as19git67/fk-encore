@@ -967,6 +967,13 @@
       "when": 1784937600000,
       "tag": "0137_subject_person_tax_review_opt_in",
       "breakpoints": true
+    },
+    {
+      "idx": 138,
+      "version": "7",
+      "when": 1785024000000,
+      "tag": "0138_subject_person_removals",
+      "breakpoints": true
     }
   ]
 }
