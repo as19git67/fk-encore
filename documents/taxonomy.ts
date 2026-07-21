@@ -434,6 +434,11 @@ export const categoryTaxonomy: CategorySeed[] = [
         name: "Verfügungen",
         hint: "Patientenverfügung, Testament, letztwillige Verfügung, Erbvertrag, Organspendeausweis. Persönliche Vorsorgedokumente. NICHT behördliche Bescheide (→ behoerden-bescheide).",
       },
+      {
+        slug: "rechtliches-verfahren",
+        name: "Rechtsstreit / Verfahren",
+        hint: "Schriftverkehr zu einem konkreten Rechtsstreit oder Verfahren: Anwaltsschreiben (Mandatsvereinbarung, Schriftsätze, Kostennoten), Klage-/Antragsschriften, Schriftverkehr mit Gerichten in einer Zivil- oder Strafsache, Strafanzeigen, Schreiben der Staatsanwaltschaft/Polizei zu einem Ermittlungsverfahren, außergerichtliche Vergleiche. NICHT allgemeine Verwaltungsvorgänge wie Finanzamt/Bauamt (→ behoerden-bescheide), NICHT Korrespondenz mit dem Betreuungsgericht (→ betreuung-korrespondenz), NICHT Vorsorgedokumente wie Vollmacht/Testament (→ rechtliches-vollmachten, rechtliches-verfuegungen).",
+      },
     ],
   },
   {
@@ -446,7 +451,7 @@ export const categoryTaxonomy: CategorySeed[] = [
     slug: "sonstiges",
     name: "Sonstiges",
     icon: "pi-file",
-    hint: "LETZTE WAHL — nur verwenden, wenn das Dokument in KEINE andere Kategorie passt. Prüfe zuerst: Schuldokumente → familie-schule, Rechnungen → finanzen-rechnungen, Steuererklärungen → finanzen-steuern, Impfdokumente → gesundheit-rezepte, Urkunden → familie-urkunden, Behördenschreiben → behoerden-bescheide oder behoerden-mitteilungen, Vollmachten → rechtliches-vollmachten, Patientenverfügung/Testament → rechtliches-verfuegungen, betriebliche Merkblätter → beruf-betriebliche-unterlagen, WEG-Abrechnungen → kapitalanlage-immobilie-weg-jahresabrechnung oder wohnen-haus-weg-jahresabrechnung.",
+    hint: "LETZTE WAHL — nur verwenden, wenn das Dokument in KEINE andere Kategorie passt. Prüfe zuerst: Schuldokumente → familie-schule, Rechnungen → finanzen-rechnungen, Steuererklärungen → finanzen-steuern, Impfdokumente → gesundheit-rezepte, Urkunden → familie-urkunden, Behördenschreiben → behoerden-bescheide oder behoerden-mitteilungen, Vollmachten → rechtliches-vollmachten, Patientenverfügung/Testament → rechtliches-verfuegungen, Anwaltsschreiben/Klage/Ermittlungsverfahren/Staatsanwaltschaft → rechtliches-verfahren, betriebliche Merkblätter → beruf-betriebliche-unterlagen, WEG-Abrechnungen → kapitalanlage-immobilie-weg-jahresabrechnung oder wohnen-haus-weg-jahresabrechnung.",
   },
 ];
 
