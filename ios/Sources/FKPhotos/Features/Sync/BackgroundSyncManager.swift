@@ -39,6 +39,11 @@ public final class BackgroundSyncManager {
         func release() { draining = false }
     }
 
+    /// Serialises full-pipeline runs so the manual "Jetzt synchronisieren"
+    /// trigger, the foreground-resume auto-continue and the background task
+    /// never run two upload+download pipelines against each other.
+    private let pipelineLock = DrainLock()
+
     // MARK: - Registration (call once at launch)
 
     public func register() {
@@ -331,14 +336,45 @@ public final class BackgroundSyncManager {
 
     /// Called when the app returns to the foreground. Items that were aborted
     /// mid-upload by background suspension show up as `.failed` with a
-    /// transient `URLError` message; we requeue those and immediately drain so
-    /// the user doesn't see ghost failures on every app re-open. Exposed as a
-    /// public wrapper because `UploadQueue` is internal to this module.
+    /// transient `URLError` message; we requeue those so the user doesn't see
+    /// ghost failures on every app re-open, then re-run the full pipeline.
+    ///
+    /// Re-running the whole pipeline (not just a queue drain) is what makes an
+    /// interrupted manual sync continue on its own: iOS freezes the process a
+    /// few seconds after backgrounding, so a manually started sync stops
+    /// mid-scan and — unless the phone happens to be charging/idle when iOS
+    /// decides to run the BGProcessingTask — never resumes. It also runs the
+    /// download (bisync) half, which otherwise only ever ran from that rarely
+    /// scheduled background task, so server-side album additions never reached
+    /// the device after a manual sync. The upload watermark and the
+    /// `/photos/index` ETag keep this cheap when nothing changed.
     public func handleForegroundResume() {
         Task {
             await UploadQueue.shared.requeueTransientFailures()
-            await drainUploadQueue()
+            try? await runFullSync()
         }
+    }
+
+    /// Runs the complete sync pipeline used by every trigger — the manual
+    /// button, foreground resume and the background task: drain the upload
+    /// queue, run the upload-side library sync, then the download-side (bisync)
+    /// sync. Guarded by `pipelineLock` so overlapping triggers no-op instead of
+    /// running two pipelines at once. Throws the first pipeline error so the
+    /// manual UI can surface it; the auto-continue callers ignore it.
+    public func runFullSync() async throws {
+        guard await pipelineLock.tryAcquire() else {
+            print("[BGSync] runFullSync: another pipeline already running, skipping")
+            return
+        }
+        do {
+            await drainUploadQueue()
+            try await PhotoSyncService.shared.sync()
+            try await PhotoDownloadService.shared.sync()
+        } catch {
+            await pipelineLock.release()
+            throw error
+        }
+        await pipelineLock.release()
     }
 
     /// Whether the current network state permits uploading queue items.
@@ -572,9 +608,7 @@ public final class BackgroundSyncManager {
         let work = Task {
             var success = true
             do {
-                await drainUploadQueue()
-                try await PhotoSyncService.shared.sync()
-                try await PhotoDownloadService.shared.sync()
+                try await runFullSync()
             } catch {
                 success = false
             }
