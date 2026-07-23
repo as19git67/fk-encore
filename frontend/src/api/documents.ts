@@ -64,12 +64,26 @@ export interface DocumentSubjectPerson {
   source: TaxAssignmentSource
 }
 
+export type RetentionClass = 'dauerhaft' | 'steuer_10' | 'bis_ende' | 'kurz' | 'unbekannt'
+
+export interface DocumentRetention {
+  cls: RetentionClass
+  /** Short German label, e.g. "Ca. 10 Jahre (steuerlich)". */
+  label: string
+  /** One-line German rationale. */
+  note: string
+  /** Earliest year the document may be discarded, or null when not year-based. */
+  retain_until_year: number | null
+}
+
 export interface DocumentDetail extends DocumentSummary {
   summary: string | null
   extracted_text_preview: string | null
   tax_reviewed: boolean
   tax_year_confidence: number | null
   tax_sections: DocumentTaxSection[]
+  /** Derived retention guidance (Aufbewahrungsfrist) — orientation, not advice. */
+  retention: DocumentRetention
   /** Bezugspersonen this document concerns. */
   subject_persons: DocumentSubjectPerson[]
   /** True when flagged for the next Cloud-Teacher run (see migration 0133). */

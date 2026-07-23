@@ -944,6 +944,19 @@ onBeforeUnmount(() => {
               :disabled="!auth.hasPermission('documents.edit')"
             />
           </div>
+          <div
+            v-if="doc && doc.retention.cls !== 'unbekannt'"
+            class="retention-hint"
+          >
+            <i class="pi pi-clock" />
+            <span>
+              <strong>Aufbewahrung:</strong> {{ doc.retention.label }}
+              <template v-if="doc.retention.retain_until_year != null">
+                — voraussichtlich entbehrlich ab {{ doc.retention.retain_until_year }}
+              </template>
+              <span class="retention-note">{{ doc.retention.note }} (Orientierung, keine Rechtsberatung)</span>
+            </span>
+          </div>
           <label>
             <span class="label">Tags (Komma-getrennt)</span>
             <InputText v-model="form.tagsText" :disabled="!auth.hasPermission('documents.edit')" />
@@ -1489,6 +1502,23 @@ onBeforeUnmount(() => {
 .meta-form { display: flex; flex-direction: column; gap: 0.75rem; }
 .meta-form label,
 .meta-form .meta-form-field { display: flex; flex-direction: column; gap: 0.25rem; }
+.retention-hint {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 6px;
+  background: var(--p-content-hover-background);
+  font-size: 0.85rem;
+  color: var(--p-text-color);
+}
+.retention-hint .pi-clock { color: var(--p-text-muted-color); margin-top: 0.15rem; }
+.retention-hint .retention-note {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--p-text-muted-color);
+}
 .meta-form-row {
   display: flex;
   flex-wrap: wrap;

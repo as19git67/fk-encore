@@ -94,6 +94,7 @@ import {
   type TaxSectionGroup,
 } from "./tax-sections";
 import { DOCUMENT_TYPES, isValidDocumentTypeSlug } from "./document-types";
+import { retentionFor, retainUntilYear } from "./retention";
 import { isSuggestionVisible, recordUserCategoryProposal } from "./suggestion-writer";
 
 const _require = createRequire(import.meta.url);
@@ -217,6 +218,22 @@ export interface DocumentDetail extends DocumentSummary {
    * in doubt. Cleared by pinning the tax fields.
    */
   tax_review_needed: boolean;
+  /**
+   * Derived retention guidance (Aufbewahrungsfrist, Stufe C) computed from
+   * category × document type × tax relevance. Orientation only, NOT legal
+   * advice — see documents/retention.ts.
+   */
+  retention: DocumentRetentionDTO;
+}
+
+export interface DocumentRetentionDTO {
+  cls: "dauerhaft" | "steuer_10" | "bis_ende" | "kurz" | "unbekannt";
+  /** Short German label, e.g. "Ca. 10 Jahre (steuerlich)". */
+  label: string;
+  /** One-line German rationale. */
+  note: string;
+  /** Earliest year the document may be discarded, or null when not year-based. */
+  retain_until_year: number | null;
 }
 
 export interface DocumentReceiptSuggestion {
@@ -1153,6 +1170,11 @@ export const getDocument = api(
     const subjectPersons = await fetchSubjectPersonsForDocument(id);
 
     const preview = (row.extracted_text ?? "").slice(0, 2000);
+    const retentionInfo = retentionFor({
+      categorySlug: cat?.slug ?? null,
+      documentType: row.document_type,
+      taxRelevant: row.tax_relevant ?? false,
+    });
     return {
       ...toSummary(row, cat?.slug ?? null, tags),
       summary: row.summary,
@@ -1164,6 +1186,15 @@ export const getDocument = api(
       subject_persons: subjectPersons,
       teacher_requested: row.teacher_requested ?? false,
       tax_review_needed: row.tax_review_needed ?? false,
+      retention: {
+        cls: retentionInfo.cls,
+        label: retentionInfo.label,
+        note: retentionInfo.note,
+        retain_until_year: retainUntilYear(retentionInfo, {
+          taxYear: row.tax_year,
+          docDate: row.doc_date,
+        }),
+      },
     };
   },
 );
