@@ -167,9 +167,35 @@ wird als `pending` zurückgelegt).
 
 ---
 
-## 7. Hintergrund-Ausführung
+## 7. Gesamtpipeline & Auslöser
 
-Zwei Pfade, abhängig von der iOS-Version:
+Alle Auslöser laufen über **`BackgroundSyncManager.runFullSync()`**: Queue-Drain
+→ Upload-Sync (`PhotoSyncService.sync()`) → **Download-/Bisync-Sync**
+(`PhotoDownloadService.sync()`). `runFullSync()` ist durch `pipelineLock` gegen
+einen zweiten gleichzeitigen Lauf geschützt (manueller Tap + Foreground-Resume +
+BG-Task), so dass sich zwei Pipelines nie überlagern.
+
+> **Wichtig:** Die Download-Hälfte lief früher **ausschließlich** im
+> BGProcessingTask. Da iOS diesen Task nur selten und meist beim Laden/Idle
+> ausführt, holte ein **manuell** ausgelöster Sync server-seitig ins Album
+> aufgenommene Fotos nie herunter. Seit alle Auslöser über `runFullSync()`
+> gehen, läuft der Download auch beim manuellen Tap und beim Foreground-Resume.
+
+Auslöser:
+
+- **Manueller Tap** („Jetzt synchronisieren", `SyncSettingsView`) → nach dem
+  Netzwerk-Vorabcheck `runFullSync()`.
+- **Foreground-Resume** (`applicationWillEnterForeground`) →
+  `handleForegroundResume()` → `requeueTransientFailures()` + `runFullSync()`.
+  Das **setzt einen abgebrochenen manuellen Sync von selbst fort**: iOS friert
+  den Prozess wenige Sekunden nach dem Backgrounding ein, ein manuell gestarteter
+  Sync stoppt also mitten im Scan und würde sonst — solange der BG-Task nicht
+  zufällig läuft (Laden/Idle) — erst beim nächsten manuellen Tap weitermachen.
+  Upload-Watermark und `/photos/index`-ETag halten den Wiederholungslauf billig,
+  wenn sich nichts geändert hat.
+- **BGProcessingTask** (siehe unten) → `runFullSync()`.
+
+Hintergrund-Ausführung, zwei Pfade je nach iOS-Version:
 
 - **iOS 26.1+**: PhotoKit-Hintergrund-Upload
   (`PHBackgroundResourceUploadExtension`). `enqueueForBackgroundUpload` bäckt den
@@ -183,15 +209,11 @@ Zwei Pfade, abhängig von der iOS-Version:
   vor App-Ende registriert; `scheduleNextSyncIfNeeded()` plant beim Wechsel in
   den Hintergrund den nächsten Lauf (`requiresNetworkConnectivity = true`,
   `earliestBeginDate` +5 min) und storniert ihn, wenn weder Up- noch Download
-  aktiv ist. Der Handler ruft `drainUploadQueue()`/`PhotoSyncService.sync()`.
+  aktiv ist. Der Handler ruft `runFullSync()`.
 
 `drainUploadQueue()` ist durch `drainLock` gegen einen zweiten gleichzeitigen
 Drain im selben Prozess geschützt; prozessübergreifend schützt zusätzlich der
 atomare `claimNextPending()`-Schritt.
-
-Beim Foreground-Resume (`applicationWillEnterForeground`) ruft
-`handleForegroundResume()` → `requeueTransientFailures()` + Drain, damit
-abgebrochene Uploads nicht als „Geister-Fehler" stehenbleiben.
 
 ---
 

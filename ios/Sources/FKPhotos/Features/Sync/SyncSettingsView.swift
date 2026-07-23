@@ -47,7 +47,10 @@ struct SyncSettingsView: View {
                                 return
                             }
                             do {
-                                try await PhotoSyncService.shared.sync()
+                                // Full pipeline (upload + download/bisync), not
+                                // just the upload half — otherwise a manual sync
+                                // never pulls server-side album additions down.
+                                try await BackgroundSyncManager.shared.runFullSync()
                             } catch {
                                 syncError = error.localizedDescription
                             }
