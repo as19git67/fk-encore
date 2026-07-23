@@ -16,6 +16,7 @@
 
 import { CLASSIFY_PROMPTS } from "./classify-prompts";
 import { isValidTaxSectionSlug, type TaxSectionGroup } from "./tax-sections";
+import { isValidDocumentTypeSlug } from "./document-types";
 
 console.log("[boot] documents/llm-client.ts: all imports resolved");
 
@@ -48,6 +49,12 @@ export interface TaxSectionRequestEntry {
   hint?: string;
 }
 
+export interface DocumentTypeRequestEntry {
+  slug: string;
+  name: string;
+  hint?: string;
+}
+
 export interface TaxAssignment {
   slug: string;
   confidence: number;
@@ -62,6 +69,10 @@ export interface Classification {
   summary: string;
   tags: string[];
   confidence: number;
+  // Document-type facet. `null` when type detection was off (no
+  // `document_types` list was sent) or the LLM returned no valid slug.
+  document_type: string | null;
+  document_type_confidence: number;
   // Tax-return metadata. `tax_sections` is empty when tax detection was
   // off (no `tax_sections` list was sent) or when the LLM didn't find
   // a match.
@@ -92,6 +103,9 @@ export interface ClassifyExample {
 export interface ClassifyRequest {
   text: string;
   taxonomy: TaxonomyEntry[];
+  // When provided, the classifier additionally picks the single best-matching
+  // document type from this fixed set. Omit/empty to disable.
+  document_types?: DocumentTypeRequestEntry[];
   // When provided, the classifier additionally decides tax-relevance,
   // tax year, and a list of matching sections. Omit/empty to disable.
   tax_sections?: TaxSectionRequestEntry[];
@@ -258,8 +272,23 @@ export function parseClassification(raw: unknown): Classification {
     summary,
     tags,
     confidence: conf,
+    ...parseDocumentType(r),
     ...parseTaxFields(r),
   };
+}
+
+/** Validate the single document-type slug the classifier returned against the
+ *  fixed vocabulary. An invalid/absent slug yields `null` (type unknown) rather
+ *  than a forced fallback, so the document stays untyped instead of mislabelled. */
+function parseDocumentType(r: Record<string, unknown>): {
+  document_type: string | null;
+  document_type_confidence: number;
+} {
+  const raw = typeof r.document_type === "string" ? r.document_type.trim().toLowerCase() : "";
+  if (!raw || !isValidDocumentTypeSlug(raw)) {
+    return { document_type: null, document_type_confidence: 0 };
+  }
+  return { document_type: raw, document_type_confidence: clamp01(r.document_type_confidence) };
 }
 
 function parseTaxFields(r: Record<string, unknown>): {
