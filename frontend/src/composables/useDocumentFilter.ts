@@ -6,7 +6,7 @@ import { replaceQuerySlice, updateRouteQuery } from '../utils/routeQueryUpdate'
 const STORAGE_KEY = 'documents.filter'
 export const DOCUMENT_FILTER_QUERY_KEYS = [
   'category', 'tags', 'status', 'review', 'neu', 'sender', 'correspondent', 'dateFrom', 'dateTo',
-  'taxRelevant', 'subjectPerson', 'categorySource',
+  'taxRelevant', 'subjectPerson', 'categorySource', 'documentType',
 ] as const
 
 export interface DocumentFilter {
@@ -25,6 +25,8 @@ export interface DocumentFilter {
   subjectPersonId?: number
   /** Filter by category source: 'ai', 'cloud', or 'user'. */
   categorySource?: string
+  /** Filter by document-type facet slug (Dokumentart). */
+  documentType?: string
 }
 
 function parseBool(v: unknown): boolean | undefined {
@@ -63,6 +65,7 @@ export function parseDocFilterFromQuery(q: Record<string, unknown>): DocumentFil
     if (Number.isFinite(n)) f.subjectPersonId = n
   }
   if (typeof q.categorySource === 'string' && q.categorySource) f.categorySource = q.categorySource
+  if (typeof q.documentType === 'string' && q.documentType) f.documentType = q.documentType
   return f
 }
 
@@ -80,6 +83,7 @@ export function docFilterToQuery(f: DocumentFilter): Record<string, string> {
   if (f.taxRelevant !== undefined) out.taxRelevant = String(f.taxRelevant)
   if (f.subjectPersonId) out.subjectPerson = String(f.subjectPersonId)
   if (f.categorySource) out.categorySource = f.categorySource
+  if (f.documentType) out.documentType = f.documentType
   return out
 }
 
@@ -96,6 +100,7 @@ export function countActiveDocFilters(f: DocumentFilter): number {
   if (f.taxRelevant !== undefined) n++
   if (f.subjectPersonId) n++
   if (f.categorySource) n++
+  if (f.documentType) n++
   return n
 }
 

@@ -22,6 +22,7 @@ import {
   getDocument,
   getDocumentText,
   listDocumentCategories,
+  listDocumentTypesCatalog,
   listTaxSectionsCatalog,
   proposeCategory,
   reclassifyDocument,
@@ -36,6 +37,7 @@ import {
   type DocumentCategory,
   type DocumentDetail,
   type DocumentStatus,
+  type DocumentTypeCatalogEntry,
   type DocumentVisibility,
   type GroupSummary,
   type SubjectPerson,
@@ -77,6 +79,7 @@ function goBasketDoc(id: number) {
 
 const doc = ref<DocumentDetail | null>(null)
 const categories = ref<DocumentCategory[]>([])
+const documentTypes = ref<DocumentTypeCatalogEntry[]>([])
 const groups = ref<GroupSummary[]>([])
 const taxCatalog = ref<TaxSectionCatalogEntry[]>([])
 const subjectPeople = ref<SubjectPerson[]>([])
@@ -125,6 +128,7 @@ const form = ref({
   summary: '' as string,
   notes: '' as string,
   category_slug: null as string | null,
+  document_type: null as string | null,
   tagsText: '' as string,
   subject_person_ids: [] as number[],
   visibility: 'private' as DocumentVisibility,
@@ -249,6 +253,14 @@ const categoryOptions = computed(() => {
   return opts
 })
 
+const documentTypeOptions = computed(() => {
+  const opts: Array<{ label: string; value: string | null }> = [{ label: '— keine —', value: null }]
+  for (const t of documentTypes.value) {
+    opts.push({ label: t.name, value: t.slug })
+  }
+  return opts
+})
+
 async function load() {
   const id = docId.value
   if (!Number.isFinite(id)) return
@@ -256,9 +268,10 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [detail, cats, taxCats, houseItems, people, links] = await Promise.all([
+    const [detail, cats, docTypes, taxCats, houseItems, people, links] = await Promise.all([
       getDocument(id),
       listDocumentCategories(),
+      listDocumentTypesCatalog(),
       listTaxSectionsCatalog(),
       listGroups(),
       listSubjectPersons(),
@@ -266,6 +279,7 @@ async function load() {
     ])
     doc.value = detail
     categories.value = cats.items
+    documentTypes.value = docTypes.items
     taxCatalog.value = taxCats.items
     groups.value = houseItems.items
     subjectPeople.value = people.items
@@ -306,6 +320,7 @@ function resetForm() {
     summary: doc.value.summary ?? '',
     notes: doc.value.notes ?? '',
     category_slug: doc.value.category_slug,
+    document_type: doc.value.document_type,
     tagsText: doc.value.tags.join(', '),
     subject_person_ids: doc.value.subject_persons.map((p) => p.id),
     visibility: doc.value.visibility,
@@ -382,6 +397,7 @@ async function save() {
         summary: form.value.summary.trim() || null,
         notes: form.value.notes.trim() || null,
         category_slug: form.value.category_slug,
+        document_type: form.value.document_type,
         tags,
         subject_person_ids: form.value.subject_person_ids,
       })
@@ -916,6 +932,16 @@ onBeforeUnmount(() => {
               text
               size="small"
               @click="openPropose"
+            />
+          </div>
+          <div class="meta-form-field">
+            <span class="label">Dokumentart</span>
+            <Select
+              v-model="form.document_type"
+              :options="documentTypeOptions"
+              optionLabel="label"
+              optionValue="value"
+              :disabled="!auth.hasPermission('documents.edit')"
             />
           </div>
           <label>

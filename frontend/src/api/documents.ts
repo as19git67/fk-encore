@@ -31,6 +31,8 @@ export interface DocumentSummary {
   category_id: number | null
   category_slug: string | null
   classification_confidence: number | null
+  /** Document-type facet slug (Dokumentart), or null when untyped. */
+  document_type: string | null
   tags: string[]
   tax_relevant: boolean
   tax_year: number | null
@@ -136,6 +138,8 @@ export interface ListDocumentsQuery {
   subject_person_id?: number
   /** Filter by category source: 'ai', 'cloud', or 'user'. */
   category_source?: CategorySource
+  /** Filter by document-type facet slug (Dokumentart). */
+  document_type?: string
   sort_by?: string
   sort_dir?: 'asc' | 'desc'
   limit?: number
@@ -149,6 +153,8 @@ export interface UpdateDocumentPayload {
   document_number?: string | null
   summary?: string | null
   category_slug?: string | null
+  /** Override the document-type facet (Dokumentart); null clears it. */
+  document_type?: string | null
   tags?: string[]
   /**
    * Explicitly set/clear the "human-pinned attributes" flag. Editing any
@@ -242,6 +248,16 @@ export function listDocumentCategories() {
   return apiFetch<{ items: DocumentCategory[] }>('/document-categories')
 }
 
+export interface DocumentTypeCatalogEntry {
+  slug: string
+  name: string
+}
+
+/** The controlled document-type vocabulary (Dokumentart), for filter + labels. */
+export function listDocumentTypesCatalog() {
+  return apiFetch<{ items: DocumentTypeCatalogEntry[] }>('/document-types')
+}
+
 export function getDocumentQueueStatus() {
   return apiFetch<DocQueueStatus>('/document-queue/status')
 }
@@ -272,6 +288,7 @@ export type DocumentFilterParams = Pick<
   | 'tax_relevant'
   | 'subject_person_id'
   | 'category_source'
+  | 'document_type'
 >
 
 export function searchDocuments(

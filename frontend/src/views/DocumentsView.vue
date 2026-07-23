@@ -16,6 +16,7 @@ import SortMenu from '../components/SortMenu.vue'
 import {
   listDocuments,
   listDocumentCategories,
+  listDocumentTypesCatalog,
   listCorrespondents,
   listGroups,
   listSubjectPersons,
@@ -23,6 +24,7 @@ import {
   type CorrespondentFacet,
   type DocumentSummary,
   type DocumentCategory,
+  type DocumentTypeCatalogEntry,
   type DocumentStatus,
   type GroupSummary,
   type SearchMode,
@@ -48,6 +50,7 @@ const { restore: restoreScroll } = useScrollRestore('documents-list')
 
 const items = ref<DocumentSummary[]>([])
 const categories = ref<DocumentCategory[]>([])
+const documentTypes = ref<DocumentTypeCatalogEntry[]>([])
 const subjectPeople = ref<SubjectPerson[]>([])
 const correspondents = ref<CorrespondentFacet[]>([])
 
@@ -334,6 +337,7 @@ function currentFilterParams() {
     tax_relevant: f.taxRelevant,
     subject_person_id: f.subjectPersonId,
     category_source: f.categorySource as any,
+    document_type: f.documentType,
   }
 }
 
@@ -394,6 +398,20 @@ async function loadCategories() {
   } catch (err: any) {
     console.warn('[documents] failed to load categories:', err)
   }
+}
+
+async function loadDocumentTypes() {
+  try {
+    const res = await listDocumentTypesCatalog()
+    documentTypes.value = res.items
+  } catch (err: any) {
+    console.warn('[documents] failed to load document types:', err)
+  }
+}
+
+/** Human label for a document-type slug (falls back to the slug). */
+function documentTypeLabel(slug: string): string {
+  return documentTypes.value.find((t) => t.slug === slug)?.name ?? slug
 }
 
 async function loadSubjectPeople() {
@@ -468,7 +486,7 @@ watch(
 )
 
 onMounted(async () => {
-  await Promise.all([loadCategories(), loadGroups(), loadSubjectPeople(), loadCorrespondents(), load()])
+  await Promise.all([loadCategories(), loadDocumentTypes(), loadGroups(), loadSubjectPeople(), loadCorrespondents(), load()])
   // Returning from detail: center, highlight and restore actual keyboard
   // focus. Only use the generic scroll offset when there is no item anchor.
   if (!(await restoreFocusToLastOpened())) restoreScroll()
@@ -633,6 +651,12 @@ onMounted(async () => {
         :label="`Kategorie: ${filter.applied.value.category}`"
         removable
         @remove="filter.removeKey(['category'])"
+      />
+      <Chip
+        v-if="filter.applied.value.documentType"
+        :label="`Dokumentart: ${documentTypeLabel(filter.applied.value.documentType)}`"
+        removable
+        @remove="filter.removeKey(['documentType'])"
       />
       <Chip
         v-if="filter.applied.value.status"
@@ -849,6 +873,7 @@ onMounted(async () => {
       v-model:visible="filterMenuVisible"
       v-model:draft="filter.draft.value"
       :categories="categories"
+      :document-types="documentTypes"
       :known-tags="allKnownTags"
       :subject-people="subjectPeople"
       :correspondents="correspondents"
