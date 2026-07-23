@@ -51,6 +51,11 @@ export const categoryTaxonomy: CategorySeed[] = [
         hint: "Bausparverträge: Kontoauszüge, Jahresmeldungen, Zuteilungsmitteilungen (z. B. Wüstenrot Bausparkasse).",
       },
       {
+        slug: "finanzen-kredite",
+        name: "Kredite & Darlehen",
+        hint: "Konsum- und Ratenkredite, Autokredite, Rahmen-/Dispositionskredite, Privatdarlehen: Kreditverträge, Tilgungspläne, Saldenmitteilungen, Ablösung (z. B. Bank, Autobank, SCHUFA-bezogene Kreditunterlagen). NICHT Immobilienfinanzierung (→ wohnen-haus-finanzierung bzw. kapitalanlage-immobilie-finanzierung), NICHT Bausparverträge (→ finanzen-bausparen).",
+      },
+      {
         slug: "finanzen-rechnungen",
         name: "Rechnungen",
         hint: "Sammelkategorie — NUR wählen, wenn keine spezifischere Kategorie und kein bekannter Absender passt. NICHT für: Gehaltsabrechnungen (finanzen-gehalt), Arzt-/Zahnarztrechnungen (gesundheit-arzt), Pflege (gesundheit-pflege), Versicherungsbeiträge (versicherungen-*, altersvorsorge-*), Renten (altersvorsorge-gesetzlich), Steuerbescheide (behoerden-steuerbescheid), Kirchensteuer (finanzen-kirchensteuer).",
@@ -227,6 +232,16 @@ export const categoryTaxonomy: CategorySeed[] = [
         name: "Pflegekasse",
         hint: "Pflegekasse (bei AOK, Techniker etc.): Pflegegrad-Bescheide, Fragebogen zu Pflegepersonen (§44 SGB XI), Leistungsbescheide zur Pflegeversicherung.",
       },
+      {
+        slug: "gesundheit-befunde",
+        name: "Befunde & Arztbriefe",
+        hint: "Medizinische Befunde und Berichte ohne Zahlungscharakter: Arztbriefe, Befundberichte, Laborwerte, Diagnosen, Entlassungs-/Krankenhausberichte, Untersuchungs- und OP-Berichte, Überweisungen. NICHT ärztliche Rechnungen (→ gesundheit-arzt), NICHT Rezepte/Apothekenbelege (→ gesundheit-rezepte), NICHT Bescheide der Krankenkasse (→ gesundheit-kasse).",
+      },
+      {
+        slug: "gesundheit-schwerbehinderung",
+        name: "Schwerbehinderung",
+        hint: "Feststellung einer Behinderung: Schwerbehindertenausweis, GdB-Bescheid (Grad der Behinderung), Feststellungsbescheid des Versorgungs-/Landratsamts, Merkzeichen (G, aG, B, H, RF), Widerspruch dazu. Steuerlich Behinderten-Pauschbetrag. NICHT Pflegegrad der Pflegekasse (→ gesundheit-pflegekasse).",
+      },
     ],
   },
   {
@@ -247,6 +262,12 @@ export const categoryTaxonomy: CategorySeed[] = [
       { slug: "fahrzeug-tuev", name: "TÜV / Hauptuntersuchung" },
       { slug: "fahrzeug-werkstatt", name: "Werkstatt" },
     ],
+  },
+  {
+    slug: "anschaffungen",
+    name: "Anschaffungen & Garantien",
+    icon: "pi-box",
+    hint: "Unterlagen zu angeschafften Geräten, Möbeln und Haushaltsgegenständen: Garantie- und Gewährleistungsbescheinigungen, Bedienungs-/Montageanleitungen, Kaufbelege und Rechnungen für Elektro-/Haushaltsgeräte, Werkzeuge, Möbel (z. B. Waschmaschine, Kühlschrank, Handbrause, Fernseher). NICHT förmliche Handwerker-/Dienstleistungsrechnungen am Haus (→ wohnen-haus-instandhaltung), NICHT Kfz-Werkstatt (→ fahrzeug-werkstatt), NICHT Kassenbons an einer Bargeldbuchung (→ belege).",
   },
   {
     slug: "vertraege",
@@ -291,6 +312,11 @@ export const categoryTaxonomy: CategorySeed[] = [
         name: "Sach- & Haftpflichtversicherung",
         hint: "Privathaftpflicht-, Hausrat-, Rechtsschutz-, Unfallversicherung: Beiträge, Policen, Schadenfälle (z. B. Janitos Privatschutz Haftpflicht; Makler wie Marsh, HVS). NICHT: Kfz-Versicherung (→ fahrzeug-versicherung), NICHT Wohngebäudeversicherung (→ wohnen-haus-gebaeudeversicherung oder wohnen-versicherung), NICHT Führerschein/Fahrzeugpapiere (→ fahrzeug-papiere).",
       },
+      {
+        slug: "versicherungen-berufsunfaehigkeit",
+        name: "Berufsunfähigkeit (BU)",
+        hint: "Berufsunfähigkeits- und Erwerbsunfähigkeitsversicherung (auch BU-Zusatzversicherung): Policen, Beitragsrechnungen, Beitragsanpassungen, Nachversicherungsgarantien und Leistungsfälle. NICHT gesetzliche Erwerbsminderungsrente (→ altersvorsorge-gesetzlich), NICHT private Kranken-/Zusatzversicherung (→ versicherungen-kranken), NICHT Renten-/Riester-Versicherung (→ altersvorsorge-rentenversicherung).",
+      },
     ],
   },
   {
@@ -308,6 +334,11 @@ export const categoryTaxonomy: CategorySeed[] = [
         slug: "beruf-betriebliche-unterlagen",
         name: "Betriebliche Unterlagen",
         hint: "Merkblätter, Betriebsvereinbarungen, Datenschutz-Verpflichtungen, Schweigepflicht-Erklärungen, Schulungsnachweise, Compliance-Dokumente, Arbeitsanweisungen vom Arbeitgeber. NICHT Arbeitsvertrag/Kündigung (→ beruf-arbeitsvertrag), NICHT Arbeitszeugnisse (→ beruf-zeugnisse).",
+      },
+      {
+        slug: "beruf-arbeitsagentur",
+        name: "Arbeitsagentur / Arbeitslosigkeit",
+        hint: "Agentur für Arbeit und Jobcenter: Bescheide zu Arbeitslosengeld (ALG I), Bürgergeld, Arbeitslosmeldung, Vermittlungsvorschläge, Eingliederungsvereinbarung, Bescheinigungen der Arbeitsagentur. NICHT Arbeitsvertrag/Kündigung des Arbeitgebers (→ beruf-arbeitsvertrag), NICHT gesetzliche Rentenbescheide (→ altersvorsorge-gesetzlich).",
       },
     ],
   },
@@ -439,6 +470,11 @@ export const categoryTaxonomy: CategorySeed[] = [
         name: "Rechtsstreit / Verfahren",
         hint: "Schriftverkehr zu einem konkreten Rechtsstreit oder Verfahren: Anwaltsschreiben (Mandatsvereinbarung, Schriftsätze, Kostennoten), Klage-/Antragsschriften, Schriftverkehr mit Gerichten in einer Zivil- oder Strafsache, Strafanzeigen, Schreiben der Staatsanwaltschaft/Polizei zu einem Ermittlungsverfahren, außergerichtliche Vergleiche. NICHT allgemeine Verwaltungsvorgänge wie Finanzamt/Bauamt (→ behoerden-bescheide), NICHT Korrespondenz mit dem Betreuungsgericht (→ betreuung-korrespondenz), NICHT Vorsorgedokumente wie Vollmacht/Testament (→ rechtliches-vollmachten, rechtliches-verfuegungen).",
       },
+      {
+        slug: "rechtliches-nachlass",
+        name: "Nachlass & Erbfall",
+        hint: "Abwicklung eines Erbfalls: Erbschein, Testamentseröffnung/Eröffnungsprotokoll des Nachlassgerichts, Nachlassverzeichnis, Erbauseinandersetzung, Erbschaftsteuererklärung/-bescheid, Korrespondenz mit Nachlassgericht/Miterben. NICHT eigene Vorsorgedokumente wie Testament/Erbvertrag zu Lebzeiten (→ rechtliches-verfuegungen), NICHT allgemeine Steuerbescheide (→ behoerden-steuerbescheid).",
+      },
     ],
   },
   {
@@ -451,7 +487,7 @@ export const categoryTaxonomy: CategorySeed[] = [
     slug: "sonstiges",
     name: "Sonstiges",
     icon: "pi-file",
-    hint: "LETZTE WAHL — nur verwenden, wenn das Dokument in KEINE andere Kategorie passt. Prüfe zuerst: Schuldokumente → familie-schule, Rechnungen → finanzen-rechnungen, Steuererklärungen → finanzen-steuern, Impfdokumente → gesundheit-rezepte, Urkunden → familie-urkunden, Behördenschreiben → behoerden-bescheide oder behoerden-mitteilungen, Vollmachten → rechtliches-vollmachten, Patientenverfügung/Testament → rechtliches-verfuegungen, Anwaltsschreiben/Klage/Ermittlungsverfahren/Staatsanwaltschaft → rechtliches-verfahren, betriebliche Merkblätter → beruf-betriebliche-unterlagen, WEG-Abrechnungen → kapitalanlage-immobilie-weg-jahresabrechnung oder wohnen-haus-weg-jahresabrechnung.",
+    hint: "LETZTE WAHL — nur verwenden, wenn das Dokument in KEINE andere Kategorie passt. Prüfe zuerst: Schuldokumente → familie-schule, Rechnungen → finanzen-rechnungen, Steuererklärungen → finanzen-steuern, Impfdokumente → gesundheit-rezepte, Arztbriefe/Befunde/Laborwerte → gesundheit-befunde, Schwerbehindertenausweis/GdB → gesundheit-schwerbehinderung, Urkunden → familie-urkunden, Behördenschreiben → behoerden-bescheide oder behoerden-mitteilungen, Arbeitslosengeld/Jobcenter → beruf-arbeitsagentur, Konsum-/Ratenkredit → finanzen-kredite, Garantie/Bedienungsanleitung/Gerätekaufbeleg → anschaffungen, Erbschein/Nachlass/Erbschaftsteuer → rechtliches-nachlass, Vollmachten → rechtliches-vollmachten, Patientenverfügung/Testament → rechtliches-verfuegungen, Anwaltsschreiben/Klage/Ermittlungsverfahren/Staatsanwaltschaft → rechtliches-verfahren, betriebliche Merkblätter → beruf-betriebliche-unterlagen, WEG-Abrechnungen → kapitalanlage-immobilie-weg-jahresabrechnung oder wohnen-haus-weg-jahresabrechnung.",
   },
 ];
 
