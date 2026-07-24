@@ -23,7 +23,10 @@ console.log("[boot] documents/llm-client.ts: all imports resolved");
 const LLM_SERVICE_URL = (process.env.LLM_SERVICE_URL || "http://localhost:8002").replace(/\/$/, "");
 const DEFAULT_TIMEOUT_MS = parseInt(process.env.LLM_SERVICE_TIMEOUT_MS ?? "120000", 10);
 
-const TAX_YEAR_MIN = 2000;
+// Lower bound 1970 (not e.g. 2000): household documents legitimately span
+// decades — a 1997 Jahresdepotauszug is a real, unremarkable case. Must match
+// the ClassifyResponse.tax_year bound in llm-service/main.py.
+const TAX_YEAR_MIN = 1970;
 const TAX_YEAR_MAX = 2100;
 
 export class LlmServiceUnavailableError extends Error {
@@ -171,6 +174,12 @@ async function fetchJson<T>(
   if (res.status === 412) {
     throw new PromptsNotConfiguredError();
   }
+  // >=500/408/429 are treated as transient — scan-worker.ts defers the job for
+  // an unbounded retry (no attempt cap, see scan-queue.ts deferJob). A 422
+  // ("classify" schema-mismatch, see llm-service/main.py) deliberately falls
+  // through to the plain Error below instead: it reflects a real fact about
+  // the document (e.g. an out-of-range tax_year) rather than a transient
+  // outage, so it must surface as a hard failure — not loop forever.
   if (res.status >= 500 || res.status === 408 || res.status === 429) {
     const detail = await safeBody(res);
     throw new LlmServiceUnavailableError(
