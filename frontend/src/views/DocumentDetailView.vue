@@ -945,7 +945,7 @@ onBeforeUnmount(() => {
             />
           </div>
           <div
-            v-if="doc && doc.retention.cls !== 'unbekannt'"
+            v-if="doc?.retention && doc.retention.cls !== 'unbekannt'"
             class="retention-hint"
           >
             <i class="pi pi-clock" />

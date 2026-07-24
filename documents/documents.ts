@@ -1156,46 +1156,7 @@ export const getDocument = api(
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
     const userId = getUserId();
-
-    const row = await loadVisibleDocument(userId, id, isDataAdmin(authData));
-    const cat = row.category_id
-      ? await dbFirst<{ slug: string }>(
-          db.select({ slug: documentCategories.slug }).from(documentCategories).where(eq(documentCategories.id, row.category_id)),
-        )
-      : undefined;
-
-    const tagsMap = await fetchTagsForDocuments([id]);
-    const tags = tagsMap.get(id) ?? [];
-    const taxSections = await fetchTaxSectionsForDocument(id);
-    const subjectPersons = await fetchSubjectPersonsForDocument(id);
-
-    const preview = (row.extracted_text ?? "").slice(0, 2000);
-    const retentionInfo = retentionFor({
-      categorySlug: cat?.slug ?? null,
-      documentType: row.document_type,
-      taxRelevant: row.tax_relevant ?? false,
-    });
-    return {
-      ...toSummary(row, cat?.slug ?? null, tags),
-      summary: row.summary,
-      extracted_text_preview: preview.length > 0 ? preview : null,
-      tax_reviewed: row.tax_reviewed ?? false,
-      tax_year_confidence: row.tax_year_confidence ?? null,
-      tax_sections: taxSections,
-      attributes_reviewed: row.attributes_reviewed ?? false,
-      subject_persons: subjectPersons,
-      teacher_requested: row.teacher_requested ?? false,
-      tax_review_needed: row.tax_review_needed ?? false,
-      retention: {
-        cls: retentionInfo.cls,
-        label: retentionInfo.label,
-        note: retentionInfo.note,
-        retain_until_year: retainUntilYear(retentionInfo, {
-          taxYear: row.tax_year,
-          docDate: row.doc_date,
-        }),
-      },
-    };
+    return await loadDetail(userId, id, isDataAdmin(authData));
   },
 );
 
@@ -3808,6 +3769,11 @@ async function loadDetail(userId: number, id: number, isAdmin = false): Promise<
   const taxSections = await fetchTaxSectionsForDocument(id);
   const subjectPersons = await fetchSubjectPersonsForDocument(id);
   const preview = (row.extracted_text ?? "").slice(0, 2000);
+  const retentionInfo = retentionFor({
+    categorySlug: cat?.slug ?? null,
+    documentType: row.document_type,
+    taxRelevant: row.tax_relevant ?? false,
+  });
   return {
     ...toSummary(row, cat?.slug ?? null, tagsMap.get(id) ?? []),
     summary: row.summary,
@@ -3819,6 +3785,15 @@ async function loadDetail(userId: number, id: number, isAdmin = false): Promise<
     subject_persons: subjectPersons,
     teacher_requested: row.teacher_requested ?? false,
     tax_review_needed: row.tax_review_needed ?? false,
+    retention: {
+      cls: retentionInfo.cls,
+      label: retentionInfo.label,
+      note: retentionInfo.note,
+      retain_until_year: retainUntilYear(retentionInfo, {
+        taxYear: row.tax_year,
+        docDate: row.doc_date,
+      }),
+    },
   };
 }
 
