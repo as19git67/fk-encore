@@ -1,7 +1,7 @@
 import Foundation
 
 /// Sync mode for a linked iOS album (issue #812).
-enum PhotoSyncMode: String, Sendable {
+enum PhotoSyncMode: String, Codable, Sendable {
     /// Upload new photos only; never remove anything from the server album.
     case copy
     /// Upload new photos and remove server-album entries whose source asset has
