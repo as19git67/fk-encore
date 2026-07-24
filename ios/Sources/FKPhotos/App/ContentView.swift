@@ -69,5 +69,19 @@ struct MainTabView: View {
         .task {
             await feedViewModel.refreshUnreadCount()
         }
+        .task {
+            // Cold-launch auto-resume: `applicationWillEnterForeground` only
+            // fires when the process was suspended and resumed, never on a
+            // fresh launch. If the OS suspended and later jetsam-killed the
+            // app while a sync was interrupted mid-run (the common case when
+            // backgrounding without power — see BackgroundSyncManager.
+            // runFullSync), the next open is a cold launch and would
+            // otherwise sit idle until the user taps "Jetzt synchronisieren"
+            // again. This view appears once per cold launch (and once per
+            // login), so firing the same auto-continue here closes that gap.
+            // `pipelineLock` in runFullSync makes this a no-op if a
+            // foreground-resume or background task is already running.
+            BackgroundSyncManager.shared.handleForegroundResume()
+        }
     }
 }

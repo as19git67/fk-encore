@@ -142,7 +142,16 @@ actor PhotoSyncService {
                 return
             }
 
-            let processingBatchSize = 500
+            // Small on purpose (issue: manual sync interrupted by backgrounding
+            // always restarted from scratch). At ~30s/100 photos, a 500-item
+            // batch took minutes to hash — far longer than the OS typically
+            // grants a backgrounded app before suspending or jetsam-killing it,
+            // so the per-album watermark (only advanced once per batch, see
+            // Step 5 below) never moved and every retry re-scanned from the
+            // same starting point. 50 keeps each batch's checkpoint reachable
+            // within a few seconds, so an interruption loses at most a few
+            // seconds of hashing instead of the whole batch.
+            let processingBatchSize = 50
             var processedCount = 0
             // Per album, the oldest creationDate of an asset we FAILED to process
             // this run (typically because its iCloud original wasn't available to
@@ -160,9 +169,10 @@ actor PhotoSyncService {
                 for (asset, filename, sourceAlbumId) in assetBatch {
                     // Per-asset cancellation check: hashing reads asset bytes and
                     // isn't cancellation-aware itself, so without this a BG-task
-                    // expiry would keep hashing to the end of the 500 batch.
-                    // Aborting mid-batch is safe — hashes are cached per asset
-                    // and the batch watermark hasn't been advanced yet.
+                    // expiry would keep hashing to the end of the current batch.
+                    // Aborting mid-batch only loses that batch's progress (up to
+                    // `processingBatchSize` assets) — already-cached hashes and
+                    // the previously advanced watermark are unaffected.
                     try Task.checkCancellation()
                     guard let result = await PhotoHasher.shared.hashes(for: asset) else {
                         // Hash failed — remember the oldest such asset per album so

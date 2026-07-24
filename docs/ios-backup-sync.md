@@ -185,15 +185,37 @@ Auslöser:
 
 - **Manueller Tap** („Jetzt synchronisieren", `SyncSettingsView`) → nach dem
   Netzwerk-Vorabcheck `runFullSync()`.
-- **Foreground-Resume** (`applicationWillEnterForeground`) →
-  `handleForegroundResume()` → `requeueTransientFailures()` + `runFullSync()`.
-  Das **setzt einen abgebrochenen manuellen Sync von selbst fort**: iOS friert
-  den Prozess wenige Sekunden nach dem Backgrounding ein, ein manuell gestarteter
-  Sync stoppt also mitten im Scan und würde sonst — solange der BG-Task nicht
-  zufällig läuft (Laden/Idle) — erst beim nächsten manuellen Tap weitermachen.
-  Upload-Watermark und `/photos/index`-ETag halten den Wiederholungslauf billig,
-  wenn sich nichts geändert hat.
+- **Foreground-Resume** (`applicationWillEnterForeground`, App war suspendiert,
+  nicht beendet) → `handleForegroundResume()` → `requeueTransientFailures()` +
+  `runFullSync()`.
+- **Kaltstart** (`MainTabView.task` in `ContentView.swift`) → ebenfalls
+  `handleForegroundResume()`. `applicationWillEnterForeground` feuert **nur**
+  beim Aufwachen aus dem Suspend, nicht bei einem frischen Prozessstart. Wurde
+  die App im Hintergrund vom System beendet (jetsam — siehe Kasten unten, sehr
+  wahrscheinlich ohne Ladekabel), ist der nächste Öffnen-Vorgang ein Kaltstart;
+  ohne diesen zweiten Auslöser bliebe ein unterbrochener Sync bis zum nächsten
+  manuellen Tap liegen. `pipelineLock` macht Doppelauslösungen (z. B. beide
+  Trigger kurz nacheinander) zum No-op.
 - **BGProcessingTask** (siehe unten) → `runFullSync()`.
+
+> **Abgebrochener manueller Sync — warum er früher immer bei 0 neu startete:**
+> `runFullSync()` läuft beim manuellen Tap als einfacher `Task` **ohne**
+> Hintergrund-Ausführungszeit vom System. Ohne Ladekabel/Idle friert iOS die
+> App fast unmittelbar nach dem Backgrounding ein und kann sie jederzeit
+> beenden (jetsam), um Speicher freizugeben — bei „App wieder öffnen, ohne dass
+> zwischenzeitlich ein Hintergrund-Task lief" ist das der Normalfall, nicht die
+> Ausnahme. Zwei Maßnahmen dagegen:
+> 1. `runFullSync()` fordert per `UIApplication.beginBackgroundTask` echte
+>    Zusatzlaufzeit an; deren Expiration-Handler bricht den inneren `Task`
+>    kooperativ ab (`Task.checkCancellation()`), statt den Prozess mitten im
+>    Schritt einfrieren zu lassen.
+> 2. Der Upload-Sync (`PhotoSyncService.sync()`) hat den Wasserstand pro Album
+>    früher erst nach einem kompletten 500er-Batch vorangetrieben. Bei
+>    ~30 Sek. Hash-Zeit pro 100 Fotos dauert ein 500er-Batch mehrere Minuten —
+>    deutlich länger, als die App realistisch Restlaufzeit bekommt. Der
+>    Wasserstand bewegte sich dadurch nie, jeder Versuch scannte sichtbar wieder
+>    von vorn. `processingBatchSize` ist jetzt **50**, sodass ein Batch-Checkpoint
+>    auch bei kurzer Restlaufzeit erreichbar ist.
 
 Hintergrund-Ausführung, zwei Pfade je nach iOS-Version:
 
