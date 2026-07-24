@@ -19,6 +19,7 @@ import main
 
 _VALID_PROMPTS = {
     "classify_system": "SYSTEM",
+    "classify_document_type": "DOCTYPE",
     "classify_tax": "TAX",
     "classify_subject_persons": "SUBJECTS",
     "classify_examples": "EXAMPLES",
@@ -62,7 +63,7 @@ def test_healthz_reports_prompts_configured_flag():
     client = TestClient(main.app)
     assert client.get("/healthz").json()["prompts_configured"] is False
 
-    main._CLASSIFY_PROMPTS = {"system": "s", "tax": "t", "subject_persons": "p", "examples": "e"}
+    main._CLASSIFY_PROMPTS = {"system": "s", "document_type": "d", "tax": "t", "subject_persons": "p", "examples": "e"}
     assert client.get("/healthz").json()["prompts_configured"] is True
 
 

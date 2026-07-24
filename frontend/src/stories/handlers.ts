@@ -268,6 +268,17 @@ export const defaultHandlers = [
   http.get('/api/document-categories', () =>
     HttpResponse.json({ items: MOCK_DOCUMENT_CATEGORIES }),
   ),
+  http.get('/api/document-types', () =>
+    HttpResponse.json({
+      items: [
+        { slug: 'rechnung', name: 'Rechnung / Mahnung' },
+        { slug: 'vertrag', name: 'Vertrag / Police' },
+        { slug: 'bescheid', name: 'Bescheid / Festsetzung' },
+        { slug: 'gutschrift', name: 'Gutschrift / Erstattung' },
+        { slug: 'bescheinigung', name: 'Bescheinigung / Nachweis' },
+      ],
+    }),
+  ),
   http.get('/api/document-queue/status', () =>
     HttpResponse.json(MOCK_DOCUMENT_QUEUE_IDLE),
   ),

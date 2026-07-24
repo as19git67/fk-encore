@@ -30,6 +30,7 @@ def _classify_prompts_configured():
 
     main._CLASSIFY_PROMPTS = {
         "system": "SYSTEM_PROMPT",
+        "document_type": "DOCUMENT_TYPE_PROMPT",
         "tax": "TAX_PROMPT",
         "subject_persons": "SUBJECT_PERSONS_PROMPT",
         "examples": "EXAMPLES_PROMPT",

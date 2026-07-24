@@ -49,12 +49,14 @@ import {
   classifyDocument,
   embedTexts,
   type Classification,
+  type DocumentTypeRequestEntry,
   type TaxAssignment,
   type TaxSectionRequestEntry,
   type TaxonomyEntry,
 } from "./llm-client";
 import { loadEffectiveTaxSections } from "./tax-hint-overrides";
 import { isValidTaxSectionSlug } from "./tax-sections";
+import { DOCUMENT_TYPES } from "./document-types";
 import { loadRemovedSubjectPersonIds, loadSubjectPersonsForMatch } from "./subject-persons";
 import { flattenTaxonomy, taxonomyHints } from "./taxonomy";
 import { matchContentRule, matchSenderRule } from "./sender-rules";
@@ -285,6 +287,13 @@ export async function runClassify(documentId: number): Promise<{ classification:
     group: s.group,
     hint: s.hint,
   }));
+  // Document-type facet: the fixed vocabulary is sent as the label set so the
+  // classifier picks the single best-matching type (see document-types.ts).
+  const document_types: DocumentTypeRequestEntry[] = DOCUMENT_TYPES.map((t) => ({
+    slug: t.slug,
+    name: t.name,
+    hint: t.hint,
+  }));
   const subjectPersons = await loadSubjectPersonsForMatch(row.user_id);
   const subject_persons = subjectPersons.map(({ full_name, relation_tag }) => ({
     full_name,
@@ -301,6 +310,7 @@ export async function runClassify(documentId: number): Promise<{ classification:
   const classification = await classifyDocument({
     text: clipped,
     taxonomy,
+    document_types,
     tax_sections,
     subject_persons,
     examples,
@@ -545,6 +555,11 @@ export async function runClassify(documentId: number): Promise<{ classification:
     patch.document_number = classification.document_number;
     patch.summary = classification.summary;
     patch.classification_confidence = classification.confidence;
+    // Document-type facet follows the same human/cloud-override protection as
+    // the other editable attributes. Keep NULL when the classifier returned no
+    // valid type rather than forcing a fallback.
+    patch.document_type = classification.document_type;
+    patch.document_type_confidence = classification.document_type_confidence;
   }
   // Only overwrite tax fields when neither a human nor the Cloud Teacher has
   // pinned them. `tax_reviewed=true` = human asserted; `category_source` in

@@ -764,6 +764,13 @@ export const documents = pgTable("documents", {
   summary: text("summary"),
   extracted_text: text("extracted_text"),
   classification_confidence: real("classification_confidence"),
+  // Document-type facet (Dokumentart), orthogonal to the category taxonomy
+  // (migration 0139). One value per document, validated in the service layer
+  // against documents/document-types.ts (no enum). Nullable until a
+  // (re-)classification writes it; a document the classifier can't type stays
+  // NULL rather than a forced "sonstiges".
+  document_type: text("document_type"),
+  document_type_confidence: real("document_type_confidence"),
   // When true, `text_extract` skips the PDF text layer and always runs
   // OCR. Used to recover documents whose pre-baked text layer lost its
   // spaces (see migration 0028).

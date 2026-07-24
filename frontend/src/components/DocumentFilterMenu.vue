@@ -17,6 +17,7 @@ const props = defineProps<{
   visible: boolean
   draft: DocumentFilter
   categories: DocumentCategory[]
+  documentTypes: { slug: string; name: string }[]
   knownTags: string[]
   subjectPeople: SubjectPerson[]
   correspondents: { slug: string; display: string; count: number }[]
@@ -143,6 +144,11 @@ const subjectOptions = computed<Array<{ label: string; value: number | null }>>(
   ...props.subjectPeople.map((p) => ({ label: p.full_name, value: p.id })),
 ])
 
+const documentTypeOptions = computed<Array<{ label: string; value: string }>>(() => [
+  { label: 'Alle', value: '' },
+  ...props.documentTypes.map((t) => ({ label: t.name, value: t.slug })),
+])
+
 const correspondentOptions = computed<Array<{ label: string; value: string | null }>>(() => [
   { label: 'Alle', value: null },
   ...props.correspondents.map((c) => ({ label: `${c.display} (${c.count})`, value: c.slug })),
@@ -243,6 +249,18 @@ function handleReset() {
           option-label="label"
           option-value="value"
           @update:model-value="(v: string) => local = { ...local, taxRelevant: v === '' ? undefined : v === 'true' }"
+        />
+      </div>
+
+      <div class="filter-row">
+        <label class="filter-label">Dokumentart</label>
+        <Select
+          :model-value="local.documentType ?? ''"
+          :options="documentTypeOptions"
+          option-label="label"
+          option-value="value"
+          filter
+          @update:model-value="(v: string) => local = { ...local, documentType: v || undefined }"
         />
       </div>
 

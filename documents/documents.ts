@@ -93,6 +93,8 @@ import {
   TAX_SECTIONS,
   type TaxSectionGroup,
 } from "./tax-sections";
+import { DOCUMENT_TYPES, isValidDocumentTypeSlug } from "./document-types";
+import { retentionFor, retainUntilYear } from "./retention";
 import { isSuggestionVisible, recordUserCategoryProposal } from "./suggestion-writer";
 
 const _require = createRequire(import.meta.url);
@@ -160,6 +162,8 @@ export interface DocumentSummary {
   category_id: number | null;
   category_slug: string | null;
   classification_confidence: number | null;
+  /** Document-type facet slug (Dokumentart), or null when untyped (migration 0139). */
+  document_type: string | null;
   tags: string[];
   tax_relevant: boolean;
   tax_year: number | null;
@@ -214,6 +218,22 @@ export interface DocumentDetail extends DocumentSummary {
    * in doubt. Cleared by pinning the tax fields.
    */
   tax_review_needed: boolean;
+  /**
+   * Derived retention guidance (Aufbewahrungsfrist, Stufe C) computed from
+   * category × document type × tax relevance. Orientation only, NOT legal
+   * advice — see documents/retention.ts.
+   */
+  retention: DocumentRetentionDTO;
+}
+
+export interface DocumentRetentionDTO {
+  cls: "dauerhaft" | "steuer_10" | "bis_ende" | "kurz" | "unbekannt";
+  /** Short German label, e.g. "Ca. 10 Jahre (steuerlich)". */
+  label: string;
+  /** One-line German rationale. */
+  note: string;
+  /** Earliest year the document may be discarded, or null when not year-based. */
+  retain_until_year: number | null;
 }
 
 export interface DocumentReceiptSuggestion {
@@ -270,6 +290,8 @@ interface ListQuery {
   subject_person_id?: Query<number>;
   /** Filter by category source: 'ai', 'cloud', or 'user'. */
   category_source?: Query<string>;
+  /** Filter by document-type facet slug (Dokumentart), see migration 0139. */
+  document_type?: Query<string>;
   sort_by?: Query<string>;
   sort_dir?: Query<string>;
   limit?: Query<number>;
@@ -293,6 +315,7 @@ interface DocumentFilterArgs {
   tax_relevant?: boolean;
   subject_person_id?: number;
   category_source?: string;
+  document_type?: string;
 }
 
 /**
@@ -367,6 +390,10 @@ async function buildDocumentFilterConditions(
 
   if (f.category_source && ["ai", "cloud", "user"].includes(f.category_source)) {
     conds.push(eq(documents.category_source, f.category_source as "ai" | "cloud" | "user"));
+  }
+
+  if (f.document_type && isValidDocumentTypeSlug(f.document_type)) {
+    conds.push(eq(documents.document_type, f.document_type));
   }
 
   const tagList = f.tags
@@ -1014,7 +1041,7 @@ async function loadDefaultGroupForUser(userId: number): Promise<number | null> {
 
 export const listDocuments = api(
   { expose: true, method: "GET", path: "/documents", auth: true },
-  async ({ category, tags, q, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, sort_by, sort_dir, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
+  async ({ category, tags, q, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, sort_by, sort_dir, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -1029,7 +1056,7 @@ export const listDocuments = api(
       : [visibleDocumentsWhere(userId, groupIds)];
 
     const filterConds = await buildDocumentFilterConditions({
-      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source,
+      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type,
     });
     if (filterConds === null) {
       // A requested tag doesn't exist — nothing can match.
@@ -1080,6 +1107,7 @@ export const listDocuments = api(
           summary: documents.summary,
           extracted_text: documents.extracted_text,
           classification_confidence: documents.classification_confidence,
+          document_type: documents.document_type,
           force_ocr: documents.force_ocr,
           tax_relevant: documents.tax_relevant,
           tax_year: documents.tax_year,
@@ -1142,6 +1170,11 @@ export const getDocument = api(
     const subjectPersons = await fetchSubjectPersonsForDocument(id);
 
     const preview = (row.extracted_text ?? "").slice(0, 2000);
+    const retentionInfo = retentionFor({
+      categorySlug: cat?.slug ?? null,
+      documentType: row.document_type,
+      taxRelevant: row.tax_relevant ?? false,
+    });
     return {
       ...toSummary(row, cat?.slug ?? null, tags),
       summary: row.summary,
@@ -1153,7 +1186,40 @@ export const getDocument = api(
       subject_persons: subjectPersons,
       teacher_requested: row.teacher_requested ?? false,
       tax_review_needed: row.tax_review_needed ?? false,
+      retention: {
+        cls: retentionInfo.cls,
+        label: retentionInfo.label,
+        note: retentionInfo.note,
+        retain_until_year: retainUntilYear(retentionInfo, {
+          taxYear: row.tax_year,
+          docDate: row.doc_date,
+        }),
+      },
     };
+  },
+);
+
+export interface DocumentTypeDTO {
+  slug: string;
+  name: string;
+}
+
+export interface ListDocumentTypesResponse {
+  items: DocumentTypeDTO[];
+}
+
+/**
+ * The controlled document-type vocabulary (Dokumentart). Backs the "Dokumentart"
+ * filter dropdown and the slug→label mapping in the document detail. Static —
+ * the list lives in documents/document-types.ts. Distinct top-level path so it
+ * never collides with `/documents/:id`.
+ */
+export const listDocumentTypes = api(
+  { expose: true, method: "GET", path: "/document-types", auth: true },
+  async (): Promise<ListDocumentTypesResponse> => {
+    checkModule();
+    requirePermission(getAuthData()!, "documents.view");
+    return { items: DOCUMENT_TYPES.map((t) => ({ slug: t.slug, name: t.name })) };
   },
 );
 
@@ -1456,6 +1522,9 @@ export interface UpdateDocumentRequest {
   document_number?: string | null;
   summary?: string | null;
   category_slug?: string | null;
+  /** Override the document-type facet (Dokumentart). Send null to clear it.
+   *  Must be a slug from documents/document-types.ts. */
+  document_type?: string | null;
   tags?: string[];
   /**
    * Explicitly set the "human-pinned attributes" flag. Editing any attribute
@@ -1507,6 +1576,21 @@ export const updateDocument = api(
       // the "Kategorie-Quelle" filter reflects a hand-picked category as
       // "Manuell" rather than stale "Cloud Teacher"/"KI".
       patch.category_source = "user";
+    }
+
+    if (req.document_type !== undefined) {
+      if (req.document_type === null || req.document_type === "") {
+        patch.document_type = null;
+        patch.document_type_confidence = null;
+      } else {
+        if (!isValidDocumentTypeSlug(req.document_type)) {
+          throw APIError.invalidArgument(`unknown document type: ${req.document_type}`);
+        }
+        patch.document_type = req.document_type;
+        // A human-picked type is certain; the confidence column mirrors that so
+        // the value reads the same as a strong classifier hit.
+        patch.document_type_confidence = 1;
+      }
     }
 
     // Editing any of the attributes above pins them: a re-classify must not
@@ -2957,6 +3041,7 @@ export const listTaxDocuments = api(
           summary: documents.summary,
           extracted_text: documents.extracted_text,
           classification_confidence: documents.classification_confidence,
+          document_type: documents.document_type,
           force_ocr: documents.force_ocr,
           tax_relevant: documents.tax_relevant,
           tax_year: documents.tax_year,
@@ -3129,6 +3214,7 @@ interface SearchQuery {
   tax_relevant?: Query<boolean>;
   subject_person_id?: Query<number>;
   category_source?: Query<string>;
+  document_type?: Query<string>;
 }
 
 /**
@@ -3143,7 +3229,7 @@ interface SearchQuery {
  */
 export const searchDocumentsEndpoint = api(
   { expose: true, method: "GET", path: "/documents/search", auth: true },
-  async ({ q, mode, limit, category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source }: SearchQuery): Promise<SearchDocumentsResponse> => {
+  async ({ q, mode, limit, category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type }: SearchQuery): Promise<SearchDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -3158,7 +3244,7 @@ export const searchDocumentsEndpoint = api(
     }
 
     const filterConds = await buildDocumentFilterConditions({
-      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source,
+      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type,
     });
     if (filterConds === null) {
       // A requested tag doesn't exist — nothing can match.
@@ -3199,6 +3285,7 @@ export const searchDocumentsEndpoint = api(
           summary: documents.summary,
           extracted_text: documents.extracted_text,
           classification_confidence: documents.classification_confidence,
+          document_type: documents.document_type,
           force_ocr: documents.force_ocr,
           tax_relevant: documents.tax_relevant,
           tax_year: documents.tax_year,
@@ -3787,6 +3874,7 @@ export function toSummary(
     category_id: row.category_id,
     category_slug: categorySlug,
     classification_confidence: row.classification_confidence,
+    document_type: row.document_type ?? null,
     tags,
     tax_relevant: row.tax_relevant ?? false,
     tax_year: row.tax_year ?? null,
