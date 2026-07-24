@@ -109,6 +109,16 @@ class TestClassifyResponseTax:
             ClassifyResponse(**self._base_kwargs(), tax_year=42)
         with pytest.raises(ValidationError):
             ClassifyResponse(**self._base_kwargs(), tax_year=3000)
+        with pytest.raises(ValidationError):
+            ClassifyResponse(**self._base_kwargs(), tax_year=1969)
+
+    def test_tax_year_accepts_historical_years_down_to_1970(self):
+        # A 1997 Jahresdepotauszug is a real, unremarkable household document —
+        # the lower bound must not reject it (see main.py ClassifyResponse).
+        r = ClassifyResponse(**self._base_kwargs(), tax_year=1997)
+        assert r.tax_year == 1997
+        r2 = ClassifyResponse(**self._base_kwargs(), tax_year=1970)
+        assert r2.tax_year == 1970
 
     def test_tax_year_confidence_range(self):
         with pytest.raises(ValidationError):
