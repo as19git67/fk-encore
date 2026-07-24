@@ -48,9 +48,9 @@ struct MainTabView: View {
                 }
             }
 
-            Tab("Personen", systemImage: "person.2") {
+            Tab("Trip", systemImage: "map") {
                 NavigationStack {
-                    PersonsListView()
+                    TripView()
                 }
             }
 
