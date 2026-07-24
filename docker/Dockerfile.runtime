@@ -36,6 +36,10 @@ USER root
 #     It also emits a per-page searchable PDF (image + invisible positioned
 #     text layer) that `pdfunite` (poppler-utils) merges into one sandwich
 #     PDF, so scans become selectable in the viewer and on download.
+#   - `tesseract-ocr-osd` ships the orientation-&-script-detection model
+#     (osd.traineddata). Because we install with --no-install-recommends it
+#     is NOT pulled in automatically, yet documents/ocr-preprocess.ts needs
+#     it to detect and correct 90°/180°/270° page rotation (`--psm 0`).
 #   - `qpdf` rewrites PDFs whose cross-reference table is missing or
 #     truncated so poppler can rasterize them. See the repair fallback in
 #     `documents/text-extract.ts`.
@@ -69,6 +73,7 @@ RUN set -eux; \
         tesseract-ocr \
         tesseract-ocr-deu \
         tesseract-ocr-eng \
+        tesseract-ocr-osd \
         poppler-utils \
         qpdf \
         ghostscript \
