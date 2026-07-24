@@ -358,6 +358,39 @@ def _has_core_fields(data: dict[str, Any]) -> bool:
     return any(data.get(k) is not None for k in _CLASSIFY_CORE_FIELDS)
 
 
+# The app's catch-all category slug (see documents/taxonomy.ts). When the model
+# reproducibly returns degenerate output even after a varied retry, the service
+# falls back to this so the document lands as a low-confidence "sonstiges"
+# document — usable, in the review queue, and still open to the app's
+# deterministic sender/content rules — rather than dead-ending on a hard error.
+_FALLBACK_CATEGORY_SLUG = "sonstiges"
+
+
+def _degenerate_fallback(req: "ClassifyRequest", reason: str) -> ClassifyResponse:
+    """Last-resort minimal classification for a persistently degenerate model
+    output. Uses the offered ``sonstiges`` node with confidence 0.0 (empty
+    title/summary/tags — the app fills the title from the filename). Raises a
+    hard 422 (never 502, which the caller would treat as a transient outage and
+    defer for an unbounded retry) when no fallback category was offered."""
+
+    node = next((n for n in req.taxonomy if n.slug == _FALLBACK_CATEGORY_SLUG), None)
+    if node is None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"classify failed: {reason}, and no "
+                f"'{_FALLBACK_CATEGORY_SLUG}' fallback category was offered"
+            ),
+        )
+    log.warning(
+        "classify: %s after retries — falling back to '%s' (confidence 0)",
+        reason, node.slug,
+    )
+    return ClassifyResponse(
+        category_slug=node.slug, title="", summary="", tags=[], confidence=0.0
+    )
+
+
 # ─── /healthz ──────────────────────────────────────────────────────────────────
 
 
@@ -843,18 +876,31 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
     # persistently failing document still fails fast instead of doubling
     # every request's worst-case latency indefinitely.
     _CLASSIFY_MAX_ATTEMPTS = 2
-    last_decode_exc: json.JSONDecodeError | None = None
 
     for attempt in range(1, _CLASSIFY_MAX_ATTEMPTS + 1):
+        # Retry variation: a degenerate first sample (empty/near-empty output)
+        # at temperature 0.2 tends to reproduce identically on a second call
+        # with the same prompt, so the retry MUST change the sampling. Raise
+        # the temperature and shed the few-shot examples — pure orientation,
+        # and the bulkiest optional prompt block; a small model overwhelmed by
+        # a long prompt is a plausible cause of a `{}` completion.
+        retry = attempt > 1
+        temperature = 0.55 if retry else 0.2
+        if retry and examples_active:
+            attempt_system, _attempt_build = _assemble(False)
+            attempt_user = _attempt_build(text)
+        else:
+            attempt_system, attempt_user = system_prompt, user_prompt
+
         try:
             completion = await _run_blocking(
                 llm.create_chat_completion,
                 messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
+                    {"role": "system", "content": attempt_system},
+                    {"role": "user", "content": attempt_user},
                 ],
                 response_format={"type": "json_object"},
-                temperature=0.2,
+                temperature=temperature,
                 # _CLASSIFY_MAX_TOKENS leaves headroom for the extra tax fields
                 # (up to a handful of tax_sections entries) without touching n_ctx.
                 max_tokens=_CLASSIFY_MAX_TOKENS,
@@ -868,13 +914,17 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
         raw = completion["choices"][0]["message"]["content"].strip()
         try:
             data = json.loads(raw)
-        except json.JSONDecodeError as exc:
+        except json.JSONDecodeError:
             log.warning(
                 "classify attempt %d/%d: LLM returned non-JSON payload: %r",
                 attempt, _CLASSIFY_MAX_ATTEMPTS, raw[:200],
             )
-            last_decode_exc = exc
-            continue
+            if attempt < _CLASSIFY_MAX_ATTEMPTS:
+                continue
+            # Persistent non-JSON is the same per-document degenerate phenomenon
+            # as an empty object — fall back rather than 502 (which the caller
+            # would treat as a transient outage and defer forever).
+            return _degenerate_fallback(req, "non-JSON output")
 
         # Repair UTF-8-as-Latin-1 mojibake at the producer boundary — see the
         # ``_repair_mojibake`` docstring above. Only the free-form German text
@@ -935,40 +985,35 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
             if data.get("tax_year_confidence") is None:
                 data["tax_year_confidence"] = 0.0
 
-        # A completion that is valid JSON but is missing every field without a
-        # default (category_slug/title/summary/tags/confidence) is the same
-        # degenerate-sample phenomenon as non-JSON output above — retry it the
-        # same way, up to the attempt cap, instead of spending the caller's one
-        # non-retryable shot on a fluke. A response that DID parse those core
-        # fields but fails on a constrained value (e.g. tax_year) still falls
-        # through to the immediate 422 below — no retry, see the comment there.
-        if attempt < _CLASSIFY_MAX_ATTEMPTS and not _has_core_fields(data):
-            log.warning(
-                "classify attempt %d/%d: payload missing all core fields: %r",
-                attempt, _CLASSIFY_MAX_ATTEMPTS, data,
-            )
+        if _has_core_fields(data):
+            # A parseable, populated classification. Coerce it — a failure here
+            # is a constraint violation on real content (e.g. an out-of-range
+            # tax_year), which is deterministic: surface it immediately as 422,
+            # with NO retry and NO fallback. 422 not 502 so the caller doesn't
+            # treat it as a service outage and defer for an unbounded retry
+            # (see scan-worker.ts / scan-queue.ts deferJob). No fallback either,
+            # because masking a real value bug as "sonstiges" is exactly how the
+            # tax_year-range issue stayed invisible for so long.
+            try:
+                return ClassifyResponse(**data)
+            except Exception as exc:
+                log.warning("LLM payload did not match schema: %r", data)
+                raise HTTPException(status_code=422, detail=f"schema mismatch: {exc}") from exc
+
+        # Valid JSON but missing every core field — a degenerate/empty sample.
+        # Retry once (with the varied sampling above); if it persists, fall back
+        # to a low-confidence "sonstiges" so the document is usable and reviewable
+        # instead of dead-ending.
+        log.warning(
+            "classify attempt %d/%d: payload missing all core fields: %r",
+            attempt, _CLASSIFY_MAX_ATTEMPTS, data,
+        )
+        if attempt < _CLASSIFY_MAX_ATTEMPTS:
             continue
+        return _degenerate_fallback(req, "empty/near-empty output")
 
-        # Coerce into ClassifyResponse. Deliberately 422, NOT 502: the caller
-        # (documents/llm-client.ts) treats >=500 as "LLM service unavailable" and
-        # defers the job for an unbounded retry with no attempt cap (see
-        # scan-worker.ts / scan-queue.ts deferJob). A schema-mismatch surviving
-        # to the last attempt is not a transient outage — it reflects a real
-        # fact about the document (e.g. a tax_year the schema doesn't yet
-        # allow) that would keep recurring, so it must surface as a hard
-        # failure instead of looping forever.
-        try:
-            return ClassifyResponse(**data)
-        except Exception as exc:
-            log.warning("LLM payload did not match schema: %r", data)
-            raise HTTPException(status_code=422, detail=f"schema mismatch: {exc}") from exc
-
-    # Every attempt returned non-JSON — the loop only reaches here via
-    # `continue` on a JSONDecodeError, never falls through otherwise.
-    assert last_decode_exc is not None
-    raise HTTPException(
-        status_code=502, detail=f"llm returned invalid JSON: {last_decode_exc}"
-    ) from last_decode_exc
+    # Unreachable: the loop either returns or raises on every path above.
+    raise HTTPException(status_code=500, detail="classify: unreachable")
 
 
 # ─── /json-prompt ──────────────────────────────────────────────────────────────

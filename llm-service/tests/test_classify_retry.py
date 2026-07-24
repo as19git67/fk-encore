@@ -52,15 +52,27 @@ _DEGENERATE: dict = {}
 
 _REQUEST_BODY = {
     "text": "doc",
+    # No 'sonstiges' node → the degenerate fallback can't fire, so these
+    # requests exercise the hard-failure path.
     "taxonomy": [{"slug": "finanzen-wertpapiere", "name": "X"}],
 }
 
+# Same, but WITH the catch-all node the app always sends in production, so the
+# degenerate fallback can synthesise a low-confidence "sonstiges" result.
+_REQUEST_WITH_FALLBACK = {
+    "text": "doc",
+    "taxonomy": [
+        {"slug": "finanzen-wertpapiere", "name": "X"},
+        {"slug": "sonstiges", "name": "Sonstiges"},
+    ],
+}
 
-def _classify(llm) -> "tuple[int, dict]":
+
+def _classify(llm, body=_REQUEST_BODY) -> "tuple[int, dict]":
     main._state["llm"] = llm
     try:
         client = TestClient(main.app)
-        resp = client.post("/classify", json=_REQUEST_BODY)
+        resp = client.post("/classify", json=body)
         return resp.status_code, resp.json()
     finally:
         main._state["llm"] = None
@@ -74,12 +86,27 @@ def test_degenerate_first_attempt_retries_and_succeeds():
     assert llm.calls == 2
 
 
-def test_degenerate_on_every_attempt_still_fails_after_the_cap():
+def test_degenerate_persists_then_falls_back_to_sonstiges():
+    # Production case: the model reproducibly returns `{}` for a document. With
+    # the catch-all offered, the service must not dead-end — it returns a
+    # low-confidence sonstiges result so the doc stays usable and reviewable.
+    llm = _SequencedLlm([_DEGENERATE, _DEGENERATE, _DEGENERATE])
+    status, body = _classify(llm, _REQUEST_WITH_FALLBACK)
+    assert status == 200, body
+    assert body["category_slug"] == "sonstiges"
+    assert body["confidence"] == 0.0
+    assert body["title"] == ""
+    # Bounded — exactly the attempt cap, not one call per queue-level retry.
+    assert llm.calls == 2
+
+
+def test_degenerate_without_fallback_category_fails_hard():
+    # No 'sonstiges' offered → nothing safe to fall back to → hard 422 (never
+    # 502, which the caller would defer for an unbounded retry).
     llm = _SequencedLlm([_DEGENERATE, _DEGENERATE, _DEGENERATE])
     status, body = _classify(llm)
     assert status == 422, body
-    assert "schema mismatch" in body["detail"]
-    # Bounded — exactly the attempt cap, not one call per queue-level retry.
+    assert "fallback category" in body["detail"]
     assert llm.calls == 2
 
 
@@ -99,12 +126,31 @@ def test_non_json_first_attempt_retries_and_succeeds():
     assert llm.calls == 2
 
 
+def test_persistent_non_json_falls_back_to_sonstiges_not_502():
+    class _AlwaysRawLlm:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def create_chat_completion(self, **_kwargs):
+            self.calls += 1
+            return {"choices": [{"message": {"content": "still not json"}}]}
+
+    llm = _AlwaysRawLlm()
+    status, body = _classify(llm, _REQUEST_WITH_FALLBACK)
+    # Crucially NOT 502 — that would make the caller defer for an unbounded retry.
+    assert status == 200, body
+    assert body["category_slug"] == "sonstiges"
+    assert llm.calls == 2
+
+
 def test_constraint_violation_on_a_fully_populated_payload_does_not_retry():
     # confidence=1.5 is out of range but every core field IS present (so
     # _has_core_fields is true) — this must fail on the FIRST attempt, no
-    # retry, since it reflects a real (bad) value rather than an empty sample.
+    # retry and no sonstiges fallback, since it reflects a real (bad) value
+    # rather than an empty sample. Masking it would hide genuine schema bugs.
     bad_confidence = {**_GOOD, "confidence": 1.5}
     llm = _SequencedLlm([bad_confidence, _GOOD])
-    status, body = _classify(llm)
+    status, body = _classify(llm, _REQUEST_WITH_FALLBACK)
     assert status == 422, body
+    assert "schema mismatch" in body["detail"]
     assert llm.calls == 1
