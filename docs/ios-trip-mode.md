@@ -70,6 +70,20 @@ serverseitig.
 Robust gegen App-Kills: Der Pass holt beim nächsten Lauf nach (idempotent),
 passt zur Resilienz-Arbeit an `runFullSync`.
 
+**Warum die Reconciliation überhaupt nötig ist (und heute nicht auftritt):** Die
+aktuelle Implementierung hat **genau einen Schreiber** der Album-Mitgliedschaft
+— den Nutzer (in Fotos.app). Der Sync *liest* die Mitgliedschaft nur und leitet
+Upload/Löschung ab; er *fügt nie* etwas hinzu. Entfernt der Nutzer ein Foto,
+propagiert `sync` das zum Server und nichts fügt es je wieder ein → kein
+Konflikt. Trip Mode führt mit dem Auto-Add-Pass einen **zweiten, automatischen
+Schreiber** ein — erst dadurch kann „aussortiert → sofort wieder eingefügt →
+Re-Upload → …" entstehen. `handledAssetIds` (jedes Asset genau einmal anfassen)
+stellt die „ein effektiver Schreiber"-Eigenschaft wieder her. Präzedenzfall: die
+bisync-Download-Seite fügt schon heute Fotos ins iOS-Album (heruntergeladene
+Server-Fotos) und trackt via `downloadedPhotos` / `forgetDownloadedPhotos`, was
+sie hinzugefügt hat, genau um denselben Kampf mit dem Aussortieren zu vermeiden.
+`handledAssetIds` ist das Upload-seitige Gegenstück.
+
 ## 5. Trip-Lebenszyklus
 
 - **Start:** Zeitpunkt des Einschaltens (deterministisch, keine Fehlalarme).
@@ -168,10 +182,11 @@ Für die Auto-Erkennung (Etappe 5): `suggestionsEnabled` (globaler Schalter),
 
 ## 12. Etappen
 
-1. **Solo, manuell gestartet**: Toggle, Auto-iOS-Album + Server-Album (reuse
-   `makeAvailable`), Capture-Window-Auto-Add (ChangeObserver + Catch-up beim
-   Sync) inkl. `handledAssetIds`-Reconciliation, Auto-Name aus Ort. Modus sync.
-   Toggle-off friert ein.
+1. **Solo, manuell gestartet** (Detailspezifikation §14): Trip-Tab (ersetzt
+   Personen-Tab), Auto-iOS-Album + Server-Album (reuse `makeAvailable`),
+   Capture-Window-Auto-Add (ChangeObserver + Catch-up beim Sync) inkl.
+   `handledAssetIds`-Reconciliation, **Geofence + Auto-Name** aus CoreLocation.
+   Modus sync. Genau **ein** aktiver Trip. Nur Bilder. Toggle-off friert ein.
 2. **Manueller Kurationsmodus**: Review-Grid, Auswahl → hinzufügen → optional
    Sync, `dismissedAssetIds`.
 3. **Geteilter Trip – Einladung**: `albums`-Trip-Spalten, Einladung via Share +
@@ -181,12 +196,66 @@ Für die Auto-Erkennung (Etappe 5): `suggestionsEnabled` (globaler Schalter),
 
 ## 13. Offene Detailfragen (für später)
 
-- Geofence-Radius-Default (z. B. 25 km)? Und: Geofence überhaupt Etappe 1 oder
-  erst später?
 - Auto-Ende-Heuristik: Schwellen (Stunden in Home-Region, km).
 - „Trip aktiv" am Server: reicht `trip_ended_at IS NULL`, oder braucht es ein
   Sichtbarkeitsfenster für den Beitritts-Dialog (z. B. nur Trips der letzten
   N Tage)?
-- Mehrere gleichzeitige Trips erlauben oder genau einer aktiv?
-- ChangeObserver-Reichweite: nur „Recents"/„alle Fotos" beobachten; Videos
-  (noch nicht unterstützt) ausschließen wie im bestehenden Upload.
+
+## 14. Etappe 1 – Detailspezifikation
+
+Gesperrt am 2026-07-24.
+
+### 14.1 Navigation / UI-Umbau
+
+- **Tab-Leiste** (`ContentView.MainTabView`): Der **Personen-Tab wird durch
+  einen Trip-Tab ersetzt**. Reihenfolge dann: Feed, Alben, **Trip**, Suche,
+  Einstellungen.
+- **Personen wandert in „Alben"** als spezielle Einstiegs-Zeile — analog zu den
+  bestehenden „Alle Fotos" (`AllPhotosRef`) und „iOS Mediathek"
+  (`LibraryBrowserRef`) oben in `AlbumsListView`. Neue Zeile „Personen" öffnet
+  das bestehende Personen-Grid. (Eigener, klar abgrenzbarer Teil-Task des UI-
+  Umbaus, unabhängig von der Trip-Logik.)
+- **Trip-Tab-Icon ist zustandsabhängig**: unterschiedliches Symbol bzw.
+  Einfärbung je nachdem, ob gerade ein Trip aktiv ist (z. B. akzentfarben/gefüllt
+  bei aktivem Trip, neutral sonst).
+
+### 14.2 Trip-View (Inhalt des Trip-Tabs)
+
+- **Kein aktiver Trip:** Einstieg mit „Trip starten"-Aktion (+ ggf. Liste
+  vergangener/eingefrorener Trips als normale Alben).
+- **Aktiver Trip:** oben die Optionen-Buttons (Trip beenden, Modus
+  copy/sync/bisync, Auto/Manuell, Name/Ort bearbeiten), darunter das **Foto-Grid**
+  der Trip-Album-Inhalte. Im manuellen Modus zusätzlich der Button zum
+  Review-Grid (Etappe 2).
+
+### 14.3 Start-Flow
+
+1. Toggle „Trip starten".
+2. **CoreLocation** einmalig abfragen (Berechtigung „When in use" reicht):
+   aktuelle Position → Reverse-Geocoding → **Ortsname sofort vorschlagen**, mit
+   Bestätigung + Editiermöglichkeit. Der bestätigte Name wird Server-Album-Name.
+3. **Geofence** aus Startkoordinate + Default-Radius (Vorschlag 25 km) — schon
+   in Etappe 1, weil CoreLocation für den Namen ohnehin gebraucht wird.
+4. Auto-iOS-Album anlegen, `makeAvailable`-Logik (Server-Album per Namensabgleich
+   finden/erstellen), Modus **sync**, confirm, `syncEnabled = true`,
+   Watermark = jetzt.
+
+### 14.4 Fixierte Parameter
+
+- **Genau ein aktiver Trip** zur Zeit (keine parallelen Trips in Etappe 1).
+- **Nur Bilder**, keine Videos (wie im bestehenden Upload).
+- **`handledAssetIds` + High-Water-Mark auf `creationDate`**: der Wasserstand ist
+  die effiziente Enumerationsgrenze (wie beim Upload-Sync), die ID-Liste nur die
+  kleine „behandelt, aber wieder entfernt/verworfen"-Randmenge — hält den State
+  bei großen Bibliotheken/langen Trips klein.
+- **Geofence-Mitgliedschaft**: Ein Fenster-Asset zählt nur, wenn es GPS hat und
+  im Radius liegt. Assets **ohne** GPS: Standard „einschließen" (im Zweifel
+  aufnehmen; Nutzer kann im manuellen Modus/beim Aussortieren korrigieren) —
+  Feinschliff später.
+
+### 14.5 ChangeObserver
+
+- `PHPhotoLibraryChangeObserver` registrieren, während ein Trip aktiv ist; auf
+  Bild-Assets beschränkt. Reaktives Auto-Add ergänzt den Catch-up-Pass in
+  `runFullSync` (Foreground/Kaltstart/BG), ersetzt ihn nicht — der Catch-up
+  bleibt die verlässliche Grenze gegen verpasste Änderungen bei App-Kills.
