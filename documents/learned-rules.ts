@@ -58,6 +58,8 @@ const MIN_TAX_SUPPORT = 2;
 const MAX_TAX_SECTIONS = 3;
 /** Docs a (sender, user-tag) pair needs before the tag is applied. */
 const MIN_TAG_SUPPORT = 2;
+/** Share of a sender's user-tagged docs a tag must appear on to be learned. */
+const TAG_DOMINANCE = 0.6;
 /** Max learned tags applied per sender. */
 const MAX_TAGS = 5;
 /** Docs a (sender, subject-person) pair needs before the person is applied. */
@@ -78,6 +80,7 @@ export interface SenderTaxRow {
 export interface SenderTagRow {
   sender: string | null;
   tag: string;
+  document_id: number;
 }
 export interface SenderPersonRow {
   sender: string | null;
@@ -167,16 +170,33 @@ export function buildLearnedMemory(inputs: {
     },
   );
 
-  // Tags: recurring user-added tags for the sender.
-  applyTopCounts(
-    inputs.tags,
-    (r) => r.tag?.trim().toLowerCase(),
-    MIN_TAG_SUPPORT,
-    MAX_TAGS,
-    (key, values) => {
-      ensureEntry(memory, key).tags = values;
-    },
-  );
+  // Tags: recurring user-added tags for the sender, filtered by dominance so
+  // type-specific tags (e.g. "wertpapierkauf" on purchase docs) don't bleed
+  // onto unrelated document types from the same sender.
+  const tagBySender = new Map<string, { docIds: Set<number>; tagDocs: Map<string, Set<number>> }>();
+  for (const r of inputs.tags) {
+    const key = normalizeForMatch(r.sender);
+    const tag = r.tag?.trim().toLowerCase();
+    if (!key || !tag || !Number.isInteger(r.document_id)) continue;
+    let entry = tagBySender.get(key);
+    if (!entry) {
+      entry = { docIds: new Set(), tagDocs: new Map() };
+      tagBySender.set(key, entry);
+    }
+    entry.docIds.add(r.document_id);
+    const docs = entry.tagDocs.get(tag) ?? new Set<number>();
+    docs.add(r.document_id);
+    entry.tagDocs.set(tag, docs);
+  }
+  for (const [key, { docIds, tagDocs }] of tagBySender) {
+    const total = docIds.size;
+    const tags = [...tagDocs.entries()]
+      .filter(([, docs]) => docs.size >= MIN_TAG_SUPPORT && docs.size / total >= TAG_DOMINANCE)
+      .sort((a, b) => b[1].size - a[1].size || a[0].localeCompare(b[0]))
+      .slice(0, MAX_TAGS)
+      .map(([tag]) => tag);
+    if (tags.length > 0) ensureEntry(memory, key).tags = tags;
+  }
 
   // Subject persons: recurring user-linked Bezugspersonen for the sender.
   const personCounts = new Map<string, Map<number, number>>();
@@ -343,7 +363,11 @@ export async function loadLearnedMemory(
       ),
       dbAll<SenderTagRow>(
         db
-          .select({ sender: documents.sender, tag: documentTags.name })
+          .select({
+            sender: documents.sender,
+            tag: documentTags.name,
+            document_id: documents.id,
+          })
           .from(documentTagLinks)
           .innerJoin(documents, eq(documents.id, documentTagLinks.document_id))
           .innerJoin(documentTags, eq(documentTags.id, documentTagLinks.tag_id))

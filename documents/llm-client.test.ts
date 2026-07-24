@@ -47,6 +47,35 @@ describe("parseClassification (base fields)", () => {
   });
 });
 
+describe("parseClassification (document type)", () => {
+  it("defaults to null when no type was returned", () => {
+    const c = parseClassification(baseRaw());
+    expect(c.document_type).toBeNull();
+    expect(c.document_type_confidence).toBe(0);
+  });
+
+  it("accepts a valid slug and clamps its confidence", () => {
+    const c = parseClassification(
+      baseRaw({ document_type: "rechnung", document_type_confidence: 0.8 }),
+    );
+    expect(c.document_type).toBe("rechnung");
+    expect(c.document_type_confidence).toBe(0.8);
+  });
+
+  it("normalises case/whitespace before validating", () => {
+    const c = parseClassification(baseRaw({ document_type: "  Rechnung  " }));
+    expect(c.document_type).toBe("rechnung");
+  });
+
+  it("drops an invalid slug to null (no forced fallback)", () => {
+    const c = parseClassification(
+      baseRaw({ document_type: "erfundene-art", document_type_confidence: 0.9 }),
+    );
+    expect(c.document_type).toBeNull();
+    expect(c.document_type_confidence).toBe(0);
+  });
+});
+
 describe("parseClassification (tax fields)", () => {
   it("accepts a well-formed tax payload", () => {
     const c = parseClassification(

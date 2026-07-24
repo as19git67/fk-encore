@@ -377,6 +377,7 @@ class PromptsConfig(BaseModel):
     """Classify prompt parts pushed lazily from the Encore app."""
 
     classify_system: str = Field(..., min_length=1)
+    classify_document_type: str = Field(..., min_length=1)
     classify_tax: str = Field(..., min_length=1)
     classify_subject_persons: str = Field(..., min_length=1)
     classify_examples: str = Field(..., min_length=1)
@@ -387,6 +388,7 @@ async def configure_prompts(config: PromptsConfig) -> dict[str, Any]:
     global _CLASSIFY_PROMPTS
     _CLASSIFY_PROMPTS = {
         "system": config.classify_system,
+        "document_type": config.classify_document_type,
         "tax": config.classify_tax,
         "subject_persons": config.classify_subject_persons,
         "examples": config.classify_examples,
@@ -470,6 +472,17 @@ class TaxSectionEntry(BaseModel):
     hint: str | None = None
 
 
+class DocumentTypeEntry(BaseModel):
+    """One document *type* (Dokumentart) offered to the classifier as a fixed
+    label set, so it can pick the single best-matching kind of paperwork
+    (Rechnung, Bescheid, Vertrag …) orthogonally to the category. Flat, with a
+    human hint like :class:`TaxSectionEntry`."""
+
+    slug: str
+    name: str
+    hint: str | None = None
+
+
 class SubjectPersonEntry(BaseModel):
     """Per-user mapping of a literal name as it appears on documents to
     the user's relationship tag (e.g. "Erika Mustermann" → "mutter").
@@ -495,6 +508,9 @@ class ExampleEntry(BaseModel):
 class ClassifyRequest(BaseModel):
     text: str = Field(..., min_length=1)
     taxonomy: list[TaxonomyNode] = Field(..., min_length=1)
+    # Optional: if non-empty the classifier picks the single best-matching
+    # document type (Dokumentart) from this fixed set. Empty list = disabled.
+    document_types: list[DocumentTypeEntry] = Field(default_factory=list)
     # Optional: if non-empty the classifier is asked to additionally decide
     # whether the document is relevant for the German income-tax return and
     # which section(s) it belongs to. Empty list = tax detection disabled.
@@ -528,6 +544,10 @@ class ClassifyResponse(BaseModel):
     summary: str
     tags: list[str]
     confidence: float = Field(..., ge=0.0, le=1.0)
+    # Document-type facet — default null so callers that don't send
+    # ``document_types`` still get a valid response.
+    document_type: str | None = None
+    document_type_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     # Tax-return fields — default "not relevant" so existing callers that
     # don't send ``tax_sections`` still get a valid response.
     tax_relevant: bool = False
@@ -583,6 +603,19 @@ def _examples_outline(entries: list[ExampleEntry]) -> str:
         sender = e.sender if e.sender else "unbekannt"
         cat = f"{e.category_slug} ({e.category_name})" if e.category_name else e.category_slug
         lines.append(f"- Absender: {sender} | Titel: {e.title} → {cat}")
+    return "\n".join(lines)
+
+
+def _document_types_outline(entries: list[DocumentTypeEntry]) -> str:
+    """Render the document-type list as "- slug: Name — Hinweis" lines.
+    Empty input yields an empty string (caller must gate on that)."""
+
+    if not entries:
+        return ""
+    lines: list[str] = []
+    for e in entries:
+        hint = f" — {e.hint}" if e.hint else ""
+        lines.append(f"- {e.slug}: {e.name}{hint}")
     return "\n".join(lines)
 
 
@@ -678,9 +711,16 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
     # bloat the prompt past n_ctx (issue #325).
     text = req.text[:CLASSIFY_TEXT_CHAR_LIMIT]
 
+    doctype_active = bool(req.document_types)
     tax_active = bool(req.tax_sections)
     subjects_active = bool(req.subject_persons)
     examples_active = bool(req.examples)
+
+    doctype_block = (
+        f"\n\nDokumentarten (slug: Name — Hinweis):\n{_document_types_outline(req.document_types)}"
+        if doctype_active
+        else ""
+    )
 
     tax_block = (
         f"\n\nSteuer-Sektionen (slug: Name — Hinweis):\n{_tax_sections_outline(req.tax_sections)}"
@@ -706,6 +746,7 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
     def _assemble(with_examples: bool) -> tuple[str, Callable[[str], str]]:
         system_prompt = (
             prompts["system"]
+            + (prompts["document_type"] if doctype_active else "")
             + (prompts["tax"] if tax_active else "")
             + (prompts["subject_persons"] if subjects_active else "")
             + (prompts["examples"] if with_examples else "")
@@ -715,7 +756,7 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
         def build(body: str) -> str:
             return (
                 f"Taxonomie (slug: Name — Hinweis):\n{_taxonomy_outline(req.taxonomy)}"
-                f"{tax_block}{subjects_block}{ex_block}\n\n"
+                f"{doctype_block}{tax_block}{subjects_block}{ex_block}\n\n"
                 f"Max. Tags: {req.max_tags}\n\n"
                 f"Dokumenttext:\n---\n{body}\n---"
             )
@@ -801,6 +842,22 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
     # trigger the bug; slugs, dates and confidences are ASCII.
     _repair_fields(data, ("title", "sender", "document_number", "summary"))
     _repair_tags(data)
+
+    # Document-type facet: when disabled, drop any type the LLM emitted anyway;
+    # when enabled, keep the returned slug only if it is in the offered set,
+    # otherwise null it (no forced fallback — an untyped document is better than
+    # a wrong type). Mirrors the tax_sections whitelist below.
+    if not doctype_active:
+        data.pop("document_type", None)
+        data.pop("document_type_confidence", None)
+    else:
+        allowed_types = {e.slug for e in req.document_types}
+        dt = data.get("document_type")
+        if not isinstance(dt, str) or dt not in allowed_types:
+            data["document_type"] = None
+            data["document_type_confidence"] = 0.0
+        elif not isinstance(data.get("document_type_confidence"), (int, float)):
+            data["document_type_confidence"] = 0.0
 
     # If tax detection is off, ignore any tax_* fields the LLM might have
     # hallucinated — they're not validated against a slug whitelist here.

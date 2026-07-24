@@ -91,18 +91,45 @@ describe("buildLearnedMemory — tax / tags / persons", () => {
     expect(resolveLearned(mem, "Broker")?.taxSections).toEqual(["anlage-kap"]);
   });
 
-  it("learns recurring user tags (>=2) and drops one-offs", () => {
+  it("learns recurring user tags that appear on most of the sender's docs", () => {
+    // "mitgliedsbeitrag" on 3/3 docs (100%) → kept
+    // "einmalig" on 1/3 docs (33%) → dropped (below 60% dominance)
     const mem = buildLearnedMemory({
       categories: [],
       taxSections: [],
       tags: [
-        { sender: "Verein", tag: "mitgliedsbeitrag" },
-        { sender: "Verein", tag: "mitgliedsbeitrag" },
-        { sender: "Verein", tag: "einmalig" },
+        { sender: "Verein", tag: "mitgliedsbeitrag", document_id: 1 },
+        { sender: "Verein", tag: "mitgliedsbeitrag", document_id: 2 },
+        { sender: "Verein", tag: "mitgliedsbeitrag", document_id: 3 },
+        { sender: "Verein", tag: "einmalig", document_id: 1 },
       ],
       persons: [],
     });
     expect(resolveLearned(mem, "Verein")?.tags).toEqual(["mitgliedsbeitrag"]);
+  });
+
+  it("drops tags that only appear on a subset of a sender's docs (dominance filter)", () => {
+    // Simulates the Comdirect scenario: "wertpapierkauf" on 2/6 docs (33%),
+    // "dividende" on 2/6 docs (33%), "depot" on 5/6 docs (83%).
+    // Only "depot" passes the 60% dominance threshold.
+    const mem = buildLearnedMemory({
+      categories: [],
+      taxSections: [],
+      tags: [
+        { sender: "Comdirect", tag: "depot", document_id: 1 },
+        { sender: "Comdirect", tag: "depot", document_id: 2 },
+        { sender: "Comdirect", tag: "depot", document_id: 3 },
+        { sender: "Comdirect", tag: "depot", document_id: 4 },
+        { sender: "Comdirect", tag: "depot", document_id: 5 },
+        { sender: "Comdirect", tag: "wertpapierkauf", document_id: 1 },
+        { sender: "Comdirect", tag: "wertpapierkauf", document_id: 2 },
+        { sender: "Comdirect", tag: "dividende", document_id: 3 },
+        { sender: "Comdirect", tag: "dividende", document_id: 4 },
+        { sender: "Comdirect", tag: "sonstiges", document_id: 6 },
+      ],
+      persons: [],
+    });
+    expect(resolveLearned(mem, "Comdirect")?.tags).toEqual(["depot"]);
   });
 
   it("learns subject persons linked at least twice for a sender", () => {
