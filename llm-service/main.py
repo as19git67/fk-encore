@@ -346,6 +346,18 @@ def _repair_tags(data: dict[str, Any]) -> None:
         data["tags"] = [_repair_mojibake(t) if isinstance(t, str) else t for t in tags]
 
 
+# Fields ClassifyResponse requires with no default — a completion missing
+# ALL of these is a degenerate/near-empty generation (observed: an LLM
+# response containing only tax/document-type keys, which the /classify
+# handler always injects regardless of what the model returned), not a
+# genuine classification attempt that merely got one value wrong.
+_CLASSIFY_CORE_FIELDS = ("category_slug", "title", "summary", "tags", "confidence")
+
+
+def _has_core_fields(data: dict[str, Any]) -> bool:
+    return any(data.get(k) is not None for k in _CLASSIFY_CORE_FIELDS)
+
+
 # ─── /healthz ──────────────────────────────────────────────────────────────────
 
 
@@ -815,103 +827,148 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
             text = truncated
             user_prompt = _build_user_prompt(text)
 
-    try:
-        completion = await _run_blocking(
-            llm.create_chat_completion,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.2,
-            # _CLASSIFY_MAX_TOKENS leaves headroom for the extra tax fields
-            # (up to a handful of tax_sections entries) without touching n_ctx.
-            max_tokens=_CLASSIFY_MAX_TOKENS,
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:  # llama.cpp raises a generic Exception family
-        log.exception("llm.create_chat_completion failed")
-        raise HTTPException(status_code=500, detail=f"llm failure: {exc}") from exc
+    # Bounded in-process retry (2 attempts total = 1 retry) for a *single*
+    # generation coming back unusable: either non-JSON, or valid JSON that is
+    # empty/near-empty (observed in production: a completion that omitted
+    # every field without a default — category_slug/title/summary/tags/
+    # confidence — while returning in <500ms, i.e. a degenerate short
+    # completion, not a real classification attempt). At temperature=0.2 a
+    # second sample is not guaranteed to differ, but this class of failure is
+    # a one-off sampling artifact, unlike a value that validates as JSON *and*
+    # parses into the schema but violates a constraint (e.g. an out-of-range
+    # tax_year) — that reflects a real fact about the document and would just
+    # fail again identically, so it still raises immediately without a retry
+    # (see the schema-mismatch-after-successful-parse path below, which does
+    # NOT loop). Bounded here — unlike the caller's queue-level retry — so a
+    # persistently failing document still fails fast instead of doubling
+    # every request's worst-case latency indefinitely.
+    _CLASSIFY_MAX_ATTEMPTS = 2
+    last_decode_exc: json.JSONDecodeError | None = None
 
-    raw = completion["choices"][0]["message"]["content"].strip()
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        log.warning("LLM returned non-JSON payload: %r", raw[:200])
-        raise HTTPException(status_code=502, detail=f"llm returned invalid JSON: {exc}") from exc
-
-    # Repair UTF-8-as-Latin-1 mojibake at the producer boundary — see the
-    # ``_repair_mojibake`` docstring above. Only the free-form German text
-    # fields can contain the two-byte UTF-8 codepoints (ä/ö/ü/ß, umlauts) that
-    # trigger the bug; slugs, dates and confidences are ASCII.
-    _repair_fields(data, ("title", "sender", "document_number", "summary"))
-    _repair_tags(data)
-
-    # Document-type facet: when disabled, drop any type the LLM emitted anyway;
-    # when enabled, keep the returned slug only if it is in the offered set,
-    # otherwise null it (no forced fallback — an untyped document is better than
-    # a wrong type). Mirrors the tax_sections whitelist below.
-    if not doctype_active:
-        data.pop("document_type", None)
-        data.pop("document_type_confidence", None)
-    else:
-        allowed_types = {e.slug for e in req.document_types}
-        dt = data.get("document_type")
-        if not isinstance(dt, str) or dt not in allowed_types:
-            data["document_type"] = None
-            data["document_type_confidence"] = 0.0
-        elif not isinstance(data.get("document_type_confidence"), (int, float)):
-            data["document_type_confidence"] = 0.0
-
-    # If tax detection is off, ignore any tax_* fields the LLM might have
-    # hallucinated — they're not validated against a slug whitelist here.
-    if not tax_active:
-        for k in ("tax_relevant", "tax_year", "tax_year_confidence", "tax_sections"):
-            data.pop(k, None)
-    else:
-        # Drop tax_sections entries whose slug is not in the provided list —
-        # the LLM sometimes invents neighbouring labels. The caller also
-        # validates, but doing it here keeps the 502 schema-mismatch path
-        # tight and the HTTP response tidy.
-        allowed = {e.slug for e in req.tax_sections}
-        raw_sections = data.get("tax_sections")
-        if isinstance(raw_sections, list):
-            data["tax_sections"] = [
-                s for s in raw_sections
-                if isinstance(s, dict) and s.get("slug") in allowed
-            ]
-        # Dump-all backstop: a small classifier sometimes returns the entire
-        # offered section list at high confidence when no real match exists
-        # (observed: a Grundsteuerbescheid and a Renteninformation each tagged
-        # with all 18 sections). Drop the entire tax assignment in that case —
-        # better to surface "no tax sections" than poison the user's tax view.
-        n = len(data.get("tax_sections") or [])
-        if TAX_SECTIONS_MAX > 0 and n > TAX_SECTIONS_MAX:
-            log.warning(
-                "classify: dump-all tax_sections (%d > %d) — dropping tax assignment",
-                n, TAX_SECTIONS_MAX,
+    for attempt in range(1, _CLASSIFY_MAX_ATTEMPTS + 1):
+        try:
+            completion = await _run_blocking(
+                llm.create_chat_completion,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.2,
+                # _CLASSIFY_MAX_TOKENS leaves headroom for the extra tax fields
+                # (up to a handful of tax_sections entries) without touching n_ctx.
+                max_tokens=_CLASSIFY_MAX_TOKENS,
             )
-            data["tax_sections"] = []
-            data["tax_relevant"] = False
-            data["tax_year"] = None
-            data["tax_year_confidence"] = 0.0
-        # LLM sometimes emits null for numeric confidence fields — coerce to defaults.
-        if data.get("tax_year_confidence") is None:
-            data["tax_year_confidence"] = 0.0
+        except HTTPException:
+            raise
+        except Exception as exc:  # llama.cpp raises a generic Exception family
+            log.exception("llm.create_chat_completion failed")
+            raise HTTPException(status_code=500, detail=f"llm failure: {exc}") from exc
 
-    # Coerce into ClassifyResponse. Deliberately 422, NOT 502: the caller
-    # (documents/llm-client.ts) treats >=500 as "LLM service unavailable" and
-    # defers the job for an unbounded retry with no attempt cap (see
-    # scan-worker.ts / scan-queue.ts deferJob). A schema-mismatch is not a
-    # transient outage — it reflects a real fact about the document (e.g. a
-    # tax_year the schema doesn't yet allow) that will keep recurring, so it
-    # must surface as a hard failure instead of looping forever.
-    try:
-        return ClassifyResponse(**data)
-    except Exception as exc:
-        log.warning("LLM payload did not match schema: %r", data)
-        raise HTTPException(status_code=422, detail=f"schema mismatch: {exc}") from exc
+        raw = completion["choices"][0]["message"]["content"].strip()
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            log.warning(
+                "classify attempt %d/%d: LLM returned non-JSON payload: %r",
+                attempt, _CLASSIFY_MAX_ATTEMPTS, raw[:200],
+            )
+            last_decode_exc = exc
+            continue
+
+        # Repair UTF-8-as-Latin-1 mojibake at the producer boundary — see the
+        # ``_repair_mojibake`` docstring above. Only the free-form German text
+        # fields can contain the two-byte UTF-8 codepoints (ä/ö/ü/ß, umlauts) that
+        # trigger the bug; slugs, dates and confidences are ASCII.
+        _repair_fields(data, ("title", "sender", "document_number", "summary"))
+        _repair_tags(data)
+
+        # Document-type facet: when disabled, drop any type the LLM emitted anyway;
+        # when enabled, keep the returned slug only if it is in the offered set,
+        # otherwise null it (no forced fallback — an untyped document is better than
+        # a wrong type). Mirrors the tax_sections whitelist below.
+        if not doctype_active:
+            data.pop("document_type", None)
+            data.pop("document_type_confidence", None)
+        else:
+            allowed_types = {e.slug for e in req.document_types}
+            dt = data.get("document_type")
+            if not isinstance(dt, str) or dt not in allowed_types:
+                data["document_type"] = None
+                data["document_type_confidence"] = 0.0
+            elif not isinstance(data.get("document_type_confidence"), (int, float)):
+                data["document_type_confidence"] = 0.0
+
+        # If tax detection is off, ignore any tax_* fields the LLM might have
+        # hallucinated — they're not validated against a slug whitelist here.
+        if not tax_active:
+            for k in ("tax_relevant", "tax_year", "tax_year_confidence", "tax_sections"):
+                data.pop(k, None)
+        else:
+            # Drop tax_sections entries whose slug is not in the provided list —
+            # the LLM sometimes invents neighbouring labels. The caller also
+            # validates, but doing it here keeps the schema-mismatch path
+            # tight and the HTTP response tidy.
+            allowed = {e.slug for e in req.tax_sections}
+            raw_sections = data.get("tax_sections")
+            if isinstance(raw_sections, list):
+                data["tax_sections"] = [
+                    s for s in raw_sections
+                    if isinstance(s, dict) and s.get("slug") in allowed
+                ]
+            # Dump-all backstop: a small classifier sometimes returns the entire
+            # offered section list at high confidence when no real match exists
+            # (observed: a Grundsteuerbescheid and a Renteninformation each tagged
+            # with all 18 sections). Drop the entire tax assignment in that case —
+            # better to surface "no tax sections" than poison the user's tax view.
+            n = len(data.get("tax_sections") or [])
+            if TAX_SECTIONS_MAX > 0 and n > TAX_SECTIONS_MAX:
+                log.warning(
+                    "classify: dump-all tax_sections (%d > %d) — dropping tax assignment",
+                    n, TAX_SECTIONS_MAX,
+                )
+                data["tax_sections"] = []
+                data["tax_relevant"] = False
+                data["tax_year"] = None
+                data["tax_year_confidence"] = 0.0
+            # LLM sometimes emits null for numeric confidence fields — coerce to defaults.
+            if data.get("tax_year_confidence") is None:
+                data["tax_year_confidence"] = 0.0
+
+        # A completion that is valid JSON but is missing every field without a
+        # default (category_slug/title/summary/tags/confidence) is the same
+        # degenerate-sample phenomenon as non-JSON output above — retry it the
+        # same way, up to the attempt cap, instead of spending the caller's one
+        # non-retryable shot on a fluke. A response that DID parse those core
+        # fields but fails on a constrained value (e.g. tax_year) still falls
+        # through to the immediate 422 below — no retry, see the comment there.
+        if attempt < _CLASSIFY_MAX_ATTEMPTS and not _has_core_fields(data):
+            log.warning(
+                "classify attempt %d/%d: payload missing all core fields: %r",
+                attempt, _CLASSIFY_MAX_ATTEMPTS, data,
+            )
+            continue
+
+        # Coerce into ClassifyResponse. Deliberately 422, NOT 502: the caller
+        # (documents/llm-client.ts) treats >=500 as "LLM service unavailable" and
+        # defers the job for an unbounded retry with no attempt cap (see
+        # scan-worker.ts / scan-queue.ts deferJob). A schema-mismatch surviving
+        # to the last attempt is not a transient outage — it reflects a real
+        # fact about the document (e.g. a tax_year the schema doesn't yet
+        # allow) that would keep recurring, so it must surface as a hard
+        # failure instead of looping forever.
+        try:
+            return ClassifyResponse(**data)
+        except Exception as exc:
+            log.warning("LLM payload did not match schema: %r", data)
+            raise HTTPException(status_code=422, detail=f"schema mismatch: {exc}") from exc
+
+    # Every attempt returned non-JSON — the loop only reaches here via
+    # `continue` on a JSONDecodeError, never falls through otherwise.
+    assert last_decode_exc is not None
+    raise HTTPException(
+        status_code=502, detail=f"llm returned invalid JSON: {last_decode_exc}"
+    ) from last_decode_exc
 
 
 # ─── /json-prompt ──────────────────────────────────────────────────────────────
