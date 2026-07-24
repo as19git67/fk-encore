@@ -488,6 +488,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     notes: null,
     attributes_reviewed: true,
     category_source: 'ai',
+    document_type: null,
   },
   {
     id: 2,
@@ -514,6 +515,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     notes: null,
     attributes_reviewed: true,
     category_source: 'ai',
+    document_type: null,
   },
   {
     id: 3,
@@ -540,6 +542,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     notes: null,
     attributes_reviewed: true,
     category_source: 'ai',
+    document_type: null,
   },
   {
     id: 4,
@@ -566,6 +569,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     notes: null,
     attributes_reviewed: true,
     category_source: 'ai',
+    document_type: null,
   },
   {
     id: 5,
@@ -592,6 +596,7 @@ export const MOCK_DOCUMENTS: DocumentSummary[] = [
     notes: null,
     attributes_reviewed: true,
     category_source: 'ai',
+    document_type: null,
   },
 ]
 
@@ -608,6 +613,12 @@ export const MOCK_DOCUMENT_DETAIL: DocumentDetail = {
   subject_persons: [],
   teacher_requested: false,
   tax_review_needed: false,
+  retention: {
+    cls: 'kurz',
+    label: 'Kurzfristig / nach Bedarf',
+    note: 'Kann entsorgt werden, sobald der Vorgang erledigt und nicht steuerrelevant ist.',
+    retain_until_year: null,
+  },
 }
 
 export const MOCK_DOCUMENT_DETAIL_CLASSIFYING: DocumentDetail = {
@@ -621,6 +632,12 @@ export const MOCK_DOCUMENT_DETAIL_CLASSIFYING: DocumentDetail = {
   subject_persons: [],
   teacher_requested: false,
   tax_review_needed: false,
+  retention: {
+    cls: 'kurz',
+    label: 'Kurzfristig / nach Bedarf',
+    note: 'Kann entsorgt werden, sobald der Vorgang erledigt und nicht steuerrelevant ist.',
+    retain_until_year: null,
+  },
 }
 
 export const MOCK_DOCUMENT_DETAIL_FAILED: DocumentDetail = {
@@ -634,6 +651,12 @@ export const MOCK_DOCUMENT_DETAIL_FAILED: DocumentDetail = {
   subject_persons: [],
   teacher_requested: false,
   tax_review_needed: false,
+  retention: {
+    cls: 'kurz',
+    label: 'Kurzfristig / nach Bedarf',
+    note: 'Kann entsorgt werden, sobald der Vorgang erledigt und nicht steuerrelevant ist.',
+    retain_until_year: null,
+  },
 }
 
 export const MOCK_DOCUMENT_QUEUE_IDLE: DocumentQueueStatus = {

@@ -191,6 +191,34 @@ WICHTIGE ABGRENZUNGSREGELN:
   auch wenn sie „Festsetzung", „§ 70" oder „Einkommensteuergesetz (EStG)"
   enthalten. Der EStG-Verweis macht das Schreiben nicht zum Steuerbescheid.`;
 
+export const CLASSIFY_DOCUMENT_TYPE_PROMPT = `
+
+DOKUMENTART (nur wenn dir unten eine Liste von Dokumentarten gezeigt wird)
+Bestimme zusätzlich die EINE am besten passende Dokumentart — also WAS für ein
+Schriftstück es ist (Rechnung, Bescheid, Vertrag …), unabhängig vom Lebensbereich
+der Kategorie.
+
+Zusätzliche Felder:
+- document_type: genau EIN Slug aus der unten gegebenen Liste \`Dokumentarten\`.
+  Verwende ausschließlich Slugs aus der Liste; erfinde keine neuen. Wenn keine
+  Art erkennbar passt, "sonstiges".
+- document_type_confidence (0..1): dein Vertrauen in die Dokumentart.
+
+PRÄZISION / PRIORITÄT bei Mehrdeutigkeit (ein Dokument ist oft mehreres —
+wähle die PRIMÄRE Funktion):
+- Eine Gutschrift/Erstattung (Geld fließt zum Empfänger) → "gutschrift",
+  NICHT "abrechnung" oder "rechnung".
+- Eine Beitragsrechnung zu einem Vertrag/einer Police → "rechnung",
+  NICHT "vertrag".
+- Eine Zahlungsaufforderung → "rechnung"; eine periodische Aufstellung
+  (Jahres-/Nebenkosten-/Gehaltsabrechnung, Kontoauszug) → "abrechnung".
+- Ein periodischer Vertrags-/Depotstand ohne Handlungsbedarf (Standmitteilung,
+  Statusreport, Reporting) → "standmitteilung", NICHT "mitteilung".
+- Eine hoheitliche Entscheidung (Bescheid, Festsetzung, Feststellung, Beschluss,
+  Bewilligung, Genehmigung) → "bescheid".
+- Eine vom Bürger abgegebene Erklärung (z. B. Steuererklärung) → "erklaerung";
+  ein auszufüllendes Antragsformular → "antrag".`;
+
 export const CLASSIFY_SUBJECT_PERSONS_PROMPT = `
 
 BEZUGSPERSONEN (nur wenn dir unten eine Liste von Bezugspersonen gezeigt wird)
@@ -228,6 +256,7 @@ und weiche bei klarer Abweichung ab.`;
 
 export interface ClassifyPromptsPayload {
   classify_system: string;
+  classify_document_type: string;
   classify_tax: string;
   classify_subject_persons: string;
   classify_examples: string;
@@ -235,6 +264,7 @@ export interface ClassifyPromptsPayload {
 
 export const CLASSIFY_PROMPTS: ClassifyPromptsPayload = {
   classify_system: CLASSIFY_SYSTEM_PROMPT,
+  classify_document_type: CLASSIFY_DOCUMENT_TYPE_PROMPT,
   classify_tax: CLASSIFY_TAX_PROMPT,
   classify_subject_persons: CLASSIFY_SUBJECT_PERSONS_PROMPT,
   classify_examples: CLASSIFY_EXAMPLES_PROMPT,
