@@ -92,6 +92,27 @@ struct AlbumsListView: View {
                         }
                         .padding(.vertical, 4)
                     }
+
+                    NavigationLink(value: PersonsRef()) {
+                        HStack(spacing: 12) {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.accentColor.opacity(0.15))
+                                .frame(width: 60, height: 60)
+                                .overlay {
+                                    Image(systemName: "person.2")
+                                        .font(.title2)
+                                        .foregroundStyle(Color.accentColor)
+                                }
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Personen")
+                                    .font(.headline)
+                                Text("Automatisch erkannte Personen")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
                 }
 
                 if !pinnedAlbums.isEmpty {
@@ -170,6 +191,9 @@ struct AlbumsListView: View {
         }
         .navigationDestination(for: LibraryBrowserRef.self) { _ in
             LibraryBrowserView()
+        }
+        .navigationDestination(for: PersonsRef.self) { _ in
+            PersonsListView()
         }
         .navigationDestination(for: TimelineYear.self) { year in
             PhotoYearView(year: year)
