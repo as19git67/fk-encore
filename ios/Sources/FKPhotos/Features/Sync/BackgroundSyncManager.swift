@@ -3,6 +3,7 @@ import CoreLocation
 import Foundation
 import ImageIO
 import Photos
+import UIKit
 
 /// Manages registration and scheduling of the background photo-sync processing task,
 /// and drains the shared UploadQueue during background execution.
@@ -361,20 +362,74 @@ public final class BackgroundSyncManager {
     /// sync. Guarded by `pipelineLock` so overlapping triggers no-op instead of
     /// running two pipelines at once. Throws the first pipeline error so the
     /// manual UI can surface it; the auto-continue callers ignore it.
+    ///
+    /// Wrapped in a `beginBackgroundTask` assertion so a manual trigger that
+    /// gets backgrounded (app not suspended-and-resumed, but actually pushed to
+    /// the background without being plugged in) gets real extra execution time
+    /// from the OS instead of being frozen within a fraction of a second. A
+    /// plain `Task` with no such assertion gets essentially no background
+    /// runtime, so a manual sync of any real size could never make it past its
+    /// first checkpoint before being suspended (and, if the OS reclaims memory
+    /// before the user reopens the app, jetsam-killed — losing all in-memory
+    /// progress and forcing a scan restart). The expiration handler cancels the
+    /// inner work cooperatively (`Task.checkCancellation()` checkpoints
+    /// throughout the pipeline) so it can unwind and persist whatever
+    /// checkpointed progress it already made instead of being killed mid-step.
     public func runFullSync() async throws {
         guard await pipelineLock.tryAcquire() else {
             print("[BGSync] runFullSync: another pipeline already running, skipping")
             return
         }
-        do {
+
+        let work = Task {
             await drainUploadQueue()
             try await PhotoSyncService.shared.sync()
             try await PhotoDownloadService.shared.sync()
+        }
+
+        let taskGuard = BackgroundTaskGuard()
+        let bgTaskID = await MainActor.run {
+            UIApplication.shared.beginBackgroundTask(withName: "dev.fk-encore.F4milPhotos.manualSync") {
+                // The OS expects the background-time assertion released
+                // immediately when this fires, not once the cooperatively
+                // cancelled pipeline eventually unwinds — waiting risks a
+                // watchdog termination before `work` even notices it was
+                // cancelled.
+                work.cancel()
+                Task { await taskGuard.endIfNeeded() }
+            }
+        }
+        await taskGuard.begin(bgTaskID)
+
+        do {
+            try await work.value
         } catch {
+            await taskGuard.endIfNeeded()
             await pipelineLock.release()
             throw error
         }
+        await taskGuard.endIfNeeded()
         await pipelineLock.release()
+    }
+
+    /// Ends a `beginBackgroundTask` assertion exactly once, however many
+    /// callers race to end it — the expiration handler and `runFullSync`'s
+    /// normal completion path both try. Ending the same identifier twice is a
+    /// documented crash, so this isn't optional bookkeeping.
+    private actor BackgroundTaskGuard {
+        private var identifier: UIBackgroundTaskIdentifier = .invalid
+        private var ended = false
+
+        func begin(_ id: UIBackgroundTaskIdentifier) {
+            identifier = id
+        }
+
+        func endIfNeeded() async {
+            guard !ended, identifier != .invalid else { return }
+            ended = true
+            let id = identifier
+            await MainActor.run { UIApplication.shared.endBackgroundTask(id) }
+        }
     }
 
     /// Whether the current network state permits uploading queue items.
