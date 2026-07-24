@@ -3,7 +3,11 @@
  *
  * Happy path: `pdf-parse` pulls the text layer out of a digital PDF in
  * <100 ms. Fallback path (text layer empty or too short): rasterize
- * pages with `pdftoppm` and run `tesseract` (deu+eng) over the PNGs.
+ * pages with `pdftoppm`, clean each page raster (auto-rotate to upright +
+ * contrast-stretch gray scans toward black-on-white, see `ocr-preprocess.ts`)
+ * and run `tesseract` (deu+eng) over the PNGs. The searchable PDF is built
+ * from the cleaned pages, so the served/downloaded sandwich PDF keeps the
+ * corrected rotation.
  *
  * When either `pdf-parse` or `pdftoppm` rejects the file as broken
  * (missing trailer dictionary / unreadable xref — common for PDFs
@@ -28,6 +32,7 @@ import os from "os";
 import path from "path";
 import { createRequire } from "module";
 import { spawn } from "child_process";
+import { detectOcrRotation, preprocessOcrImage } from "./ocr-preprocess";
 
 // pdf-parse is CJS and its default import pulls in a debug routine that
 // tries to read `test/05-versions-space.pdf` when `module.parent` is
@@ -510,8 +515,20 @@ async function ocrPdf(
         console.warn("[documents.text-extract] OCR timeout reached, truncating");
         break;
       }
-      const pagePath = path.join(tmpDir, entries[i]);
+      const rawPagePath = path.join(tmpDir, entries[i]);
       const outBase = path.join(tmpDir, `ocr-${String(i).padStart(4, "0")}`);
+      // Clean up the raster before recognition: detect and correct a
+      // 90°/180°/270° misrotation, then lift the contrast toward black-on-
+      // white so gray-paper scans read well. Best-effort — a failure leaves
+      // `pagePath` pointing at the untouched raster, so OCR never regresses.
+      // The searchable PDF is built from `pagePath`, so any rotation applied
+      // here is baked into the downloaded/served sandwich PDF as well.
+      let pagePath = rawPagePath;
+      const rotate = await detectOcrRotation(rawPagePath);
+      const prepPath = path.join(tmpDir, `prep-${String(i).padStart(4, "0")}.png`);
+      if (await preprocessOcrImage(rawPagePath, prepPath, { rotate })) {
+        pagePath = prepPath;
+      }
       // tesseract appends the extension per output config (`txt`, `pdf`).
       const configs = options.wantSearchablePdf ? ["txt", "pdf"] : ["txt"];
       try {
