@@ -1,5 +1,18 @@
 import SwiftUI
 
+/// Typed navigation value for a person. Deliberately not a raw `Int`: since
+/// Etappe 1a the Personen-Grid is pushed inside the "Alben" NavigationStack,
+/// which already registers `navigationDestination(for: Int.self)` for album
+/// IDs. A raw `Int` person link would resolve to `AlbumDetailView` instead of
+/// `PersonDetailView`. Wrapping the id keeps the two destinations distinct.
+struct PersonRef: Hashable {
+    let id: Int
+}
+
+/// Navigation value that opens the Personen-Grid as a special "album" entry
+/// from `AlbumsListView` (alongside „Alle Fotos" and „iOS Mediathek").
+struct PersonsRef: Hashable {}
+
 struct PersonsListView: View {
     @State private var viewModel = PersonsViewModel()
 
@@ -32,7 +45,7 @@ struct PersonsListView: View {
             } else {
                 LazyVGrid(columns: columns, spacing: 8) {
                     ForEach(sortedPersons) { person in
-                        NavigationLink(value: person.id) {
+                        NavigationLink(value: PersonRef(id: person.id)) {
                             PersonCardView(person: person)
                         }
                         .buttonStyle(.plain)
@@ -41,8 +54,8 @@ struct PersonsListView: View {
             }
         }
         .navigationTitle("Personen")
-        .navigationDestination(for: Int.self) { personId in
-            PersonDetailView(personId: personId)
+        .navigationDestination(for: PersonRef.self) { ref in
+            PersonDetailView(personId: ref.id)
         }
         .refreshable {
             await viewModel.loadPersons()
