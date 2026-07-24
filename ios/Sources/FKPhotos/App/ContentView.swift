@@ -32,6 +32,7 @@ public struct ContentView: View {
 
 struct MainTabView: View {
     @State private var feedViewModel = FeedViewModel()
+    @State private var tripStore = TripStore.shared
 
     var body: some View {
         TabView {
@@ -48,7 +49,7 @@ struct MainTabView: View {
                 }
             }
 
-            Tab("Trip", systemImage: "map") {
+            Tab("Trip", systemImage: tripStore.isActive ? "map.fill" : "map") {
                 NavigationStack {
                     TripView()
                 }
