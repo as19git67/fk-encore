@@ -128,10 +128,24 @@ describe("parseClassification (tax fields)", () => {
     expect(c.tax_sections[0].confidence).toBe(0.9);
   });
 
-  it("clamps tax_year to the 2000..2100 window", () => {
+  it("clamps tax_year to the 1970..2100 window", () => {
     expect(parseClassification(baseRaw({ tax_year: 42, tax_relevant: true, tax_sections: [{ slug: "anlage-n", confidence: 0.9 }] })).tax_year).toBeNull();
     expect(parseClassification(baseRaw({ tax_year: 3000, tax_relevant: true, tax_sections: [{ slug: "anlage-n", confidence: 0.9 }] })).tax_year).toBeNull();
     expect(parseClassification(baseRaw({ tax_year: 2024.5, tax_relevant: true, tax_sections: [{ slug: "anlage-n", confidence: 0.9 }] })).tax_year).toBeNull();
+  });
+
+  it("accepts a historical tax_year down to 1970 (e.g. a 1997 Jahresdepotauszug)", () => {
+    const c = parseClassification(
+      baseRaw({ tax_year: 1997, tax_relevant: true, tax_sections: [{ slug: "anlage-kap", confidence: 0.9 }] }),
+    );
+    expect(c.tax_year).toBe(1997);
+  });
+
+  it("still rejects a year just below the 1970 floor", () => {
+    const c = parseClassification(
+      baseRaw({ tax_year: 1969, tax_relevant: true, tax_sections: [{ slug: "anlage-kap", confidence: 0.9 }] }),
+    );
+    expect(c.tax_year).toBeNull();
   });
 
   it("forces tax_relevant=false when no valid sections remain", () => {

@@ -551,7 +551,12 @@ class ClassifyResponse(BaseModel):
     # Tax-return fields — default "not relevant" so existing callers that
     # don't send ``tax_sections`` still get a valid response.
     tax_relevant: bool = False
-    tax_year: int | None = Field(default=None, ge=2000, le=2100)
+    # Lower bound 1970 (not e.g. 2000): household documents legitimately span
+    # decades — a 1997 Jahresdepotauszug is a real, unremarkable case, and
+    # rejecting it here previously misrouted the document into the "LLM
+    # service unavailable" retry path (see the classify handler below), which
+    # defers forever instead of surfacing the failure.
+    tax_year: int | None = Field(default=None, ge=1970, le=2100)
     tax_year_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     tax_sections: list[TaxAssignment] = Field(default_factory=list)
 
@@ -895,13 +900,18 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
         if data.get("tax_year_confidence") is None:
             data["tax_year_confidence"] = 0.0
 
-    # Coerce into ClassifyResponse; missing fields raise a 422 back to the caller
-    # which is fine — that is a bug signal worth surfacing.
+    # Coerce into ClassifyResponse. Deliberately 422, NOT 502: the caller
+    # (documents/llm-client.ts) treats >=500 as "LLM service unavailable" and
+    # defers the job for an unbounded retry with no attempt cap (see
+    # scan-worker.ts / scan-queue.ts deferJob). A schema-mismatch is not a
+    # transient outage — it reflects a real fact about the document (e.g. a
+    # tax_year the schema doesn't yet allow) that will keep recurring, so it
+    # must surface as a hard failure instead of looping forever.
     try:
         return ClassifyResponse(**data)
     except Exception as exc:
         log.warning("LLM payload did not match schema: %r", data)
-        raise HTTPException(status_code=502, detail=f"schema mismatch: {exc}") from exc
+        raise HTTPException(status_code=422, detail=f"schema mismatch: {exc}") from exc
 
 
 # ─── /json-prompt ──────────────────────────────────────────────────────────────
