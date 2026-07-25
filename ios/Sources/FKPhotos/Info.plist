@@ -26,6 +26,8 @@
 	<string>public.app-category.photography</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Zum direkten Aufnehmen von Fotos für den Upload</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Um beim Start eines Trips den Ort für einen Namensvorschlag zu ermitteln und neue Fotos dem richtigen Reise-Album zuzuordnen</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Zum Speichern aufgenommener Fotos in deiner Mediathek</string>
 	<key>NSPhotoLibraryUsageDescription</key>
