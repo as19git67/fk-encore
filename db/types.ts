@@ -418,6 +418,14 @@ export interface AlbumPhotoWithMeta extends PhotoWithCuration {
   added_by_user_id?: number;
   added_at: string;
   curation_stats?: PhotoCurationStats;
+  /**
+   * SHA-256 of the decoded pixel data (stable across metadata edits). The iOS
+   * download sync uses THIS — not `hash`, which stores the full/state hash and
+   * therefore changes on favorite/caption/date edits — to decide whether a
+   * photo's pixels actually changed and the local copy must be re-downloaded.
+   * Optional: legacy rows uploaded before image_data_hash existed carry NULL.
+   */
+  image_data_hash?: string;
 }
 
 export type AlbumAccessLevel = "read" | "write" | "write_share";
