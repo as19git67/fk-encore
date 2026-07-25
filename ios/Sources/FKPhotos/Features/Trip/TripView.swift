@@ -82,7 +82,9 @@ private struct ActiveTripView: View {
             Divider()
             grid
         }
-        .task(id: trip.iosAlbumId) {
+        // Re-keyed on the handled count so the grid refreshes after the auto-add
+        // pass adds new trip photos (the parent re-renders with an updated trip).
+        .task(id: "\(trip.iosAlbumId)-\(trip.handledAssetIds.count)") {
             assets = await Self.loadAssets(albumId: trip.iosAlbumId)
             isLoading = false
         }
