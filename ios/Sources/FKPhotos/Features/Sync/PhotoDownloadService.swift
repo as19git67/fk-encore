@@ -203,8 +203,10 @@ actor PhotoDownloadService {
 
             if let existingLocalId = serverPhotoMap[photoKey],
                PHAsset.fetchAssets(withLocalIdentifiers: [existingLocalId], options: nil).count > 0 {
-                // This photo was originally uploaded from this device — skip the download,
-                // just register it in the album tracking and update its metadata.
+                // Already have a local asset for this server photo — a device
+                // original we uploaded, or one this app downloaded for another
+                // album. Reuse it (register + add to album + update metadata);
+                // no re-download.
                 albumDownloads[photoKey] = existingLocalId
                 await addToAlbumIfNeeded(localIdentifier: existingLocalId, album: iosAlbum)
                 await applyServerMetadata(localIdentifier: existingLocalId, photo: photo)
@@ -232,6 +234,8 @@ actor PhotoDownloadService {
 
         // 3. Reconcile already-downloaded photos with current server state.
         //    Skip work fast when neither hash nor updated_at moved (issue #303).
+        //    Re-read after step 2 so freshly-downloaded assets are included.
+        let downloadedAssetIds = DownloadSyncPreferences.loadDownloadedAssetIds()
         let existingPhotos = serverPhotos.filter { albumDownloads.keys.contains(String($0.id)) }
         for photo in existingPhotos {
             try Task.checkCancellation()
@@ -253,14 +257,18 @@ actor PhotoDownloadService {
                 return prevPixel != nextPixel
             }()
 
-            // Never delete/replace a device-originated photo (camera original):
-            // for those, the device is the source of truth for pixels, and
-            // deleting one prompts the user. Only assets this app downloaded
-            // (created itself) may be replaced. Device-originated photos are the
-            // ones present in the upload-side serverPhotoMap.
-            let isDeviceOriginated = serverPhotoMap[String(photo.id)] != nil
+            // Re-download only on a real SERVER pixel change, and only for assets
+            // THIS app downloaded (app-created → deletable without a prompt, never
+            // a camera original). Metadata-only changes — including caption — never
+            // replace a local photo (no re-encoded duplicate). Device-originated
+            // photos are never replaced; the device is their pixel source.
+            let isDownloaded = downloadedAssetIds.contains(localId)
 
-            if pixelsChanged && !isDeviceOriginated {
+            if pixelsChanged && isDownloaded {
+                // Re-download the server's new pixels (byte-identical). The old
+                // app-created copy is deleted (no prompt) and the new asset takes
+                // its place; the upload side skips it (downloaded-asset guard), so
+                // this doesn't loop back as a server/device duplicate.
                 do {
                     let newLocalId = try await replaceLocalAsset(
                         oldLocalIdentifier: localId,
@@ -277,13 +285,13 @@ actor PhotoDownloadService {
                 }
             } else {
                 // Metadata-only change (or a device photo we must not replace):
-                // update favorite / creationDate in place. Caption propagation
-                // (server→iOS, via content editing) is deliberately not done here
-                // — a content edit bumps the asset's modificationDate, which the
-                // upload side would then treat as a change and re-upload. It is
-                // handled together with the upload round-trip guard in a
-                // follow-up so it doesn't worsen the duplication issue.
+                // update favorite / creationDate in place. For downloaded assets
+                // also propagate a changed caption via a lossless metadata edit
+                // (no re-download, no pixel change, no re-upload).
                 await applyServerMetadata(localIdentifier: localId, photo: photo)
+                if isDownloaded, prev?.caption != next.caption {
+                    await applyCaption(localIdentifier: localId, description: photo.description)
+                }
             }
 
             downloadedState[key] = next
@@ -330,6 +338,73 @@ actor PhotoDownloadService {
         }
     }
 
+    /// Writes `description` into the asset's IPTC caption **losslessly** — via a
+    /// content edit that only rewrites metadata (`CGImageDestinationCopyImageSource`
+    /// copies the image bytes unchanged, no re-encode). The pixels — and thus the
+    /// `image_data_hash` — stay identical; only the metadata changes.
+    ///
+    /// Safe for downloaded assets specifically: the content edit bumps the
+    /// asset's `modificationDate`, but the upload scan skips downloaded assets
+    /// (round-trip guard), so this never causes a re-upload. It also never
+    /// triggers a re-download — the download reconcile compares SERVER hashes,
+    /// which a local edit does not touch. Must NOT be used on camera originals
+    /// (those aren't upload-skipped → would re-upload, and we don't modify
+    /// originals). Best-effort: any failure leaves the asset unchanged.
+    private func applyCaption(localIdentifier: String, description: String?) async {
+        guard let description, !description.isEmpty else { return }
+        let assets = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil)
+        guard let asset = assets.firstObject else { return }
+
+        let requestOptions = PHContentEditingInputRequestOptions()
+        requestOptions.isNetworkAccessAllowed = true
+        let input: PHContentEditingInput? = await withCheckedContinuation { cont in
+            asset.requestContentEditingInput(with: requestOptions) { input, _ in
+                cont.resume(returning: input)
+            }
+        }
+        guard
+            let input,
+            let sourceURL = input.fullSizeImageURL,
+            let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil),
+            let uti = CGImageSourceGetType(source)
+        else { return }
+
+        // Skip if the file already carries this caption (no redundant edit).
+        let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        let iptc = props?[kCGImagePropertyIPTCDictionary] as? [CFString: Any]
+        if let existing = iptc?[kCGImagePropertyIPTCCaptionAbstract] as? String, existing == description {
+            return
+        }
+
+        // Metadata-only change: set the IPTC caption, merge into existing metadata.
+        let metadata = CGImageMetadataCreateMutable()
+        guard CGImageMetadataSetValueMatchingImageProperty(
+            metadata, kCGImagePropertyIPTCDictionary, kCGImagePropertyIPTCCaptionAbstract, description as CFString
+        ) else { return }
+
+        let output = PHContentEditingOutput(contentEditingInput: input)
+        output.adjustmentData = PHAdjustmentData(
+            formatIdentifier: "dev.fk-encore.F4milPhotos.caption",
+            formatVersion: "1",
+            data: Data(description.utf8)
+        )
+
+        guard let dest = CGImageDestinationCreateWithURL(output.renderedContentURL as CFURL, uti, 1, nil) else { return }
+        let destOptions: [CFString: Any] = [
+            kCGImageDestinationMetadata: metadata,
+            kCGImageDestinationMergeMetadata: true,
+        ]
+        guard CGImageDestinationCopyImageSource(dest, source, destOptions as CFDictionary, nil) else { return }
+
+        try? await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest(for: asset).contentEditingOutput = output
+            } completionHandler: { _, error in
+                if let error { cont.resume(throwing: error) } else { cont.resume() }
+            }
+        }
+    }
+
 
     /// Re-downloads `photo` and replaces the local asset identified by
     /// `oldLocalIdentifier`. The old asset is deleted (which on iOS moves it
@@ -340,10 +415,10 @@ actor PhotoDownloadService {
         photo: AlbumPhotoWithMeta,
         toAlbum album: PHAssetCollection
     ) async throws -> String {
-        var imageData = try await APIClient.shared.downloadData("/photos/file/\(photo.filename)")
-        if let desc = photo.description, !desc.isEmpty {
-            imageData = embedDescription(imageData, description: desc) ?? imageData
-        }
+        // Save the server's original bytes unchanged (no IPTC re-encoding) so the
+        // local copy stays byte-identical to the server file — no re-encoded
+        // duplicate ever replaces a photo on the device.
+        let imageData = try await APIClient.shared.downloadData("/photos/file/\(photo.filename)")
 
         var newLocalIdentifier: String?
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
@@ -372,6 +447,11 @@ actor PhotoDownloadService {
         }
 
         guard let id = newLocalIdentifier else { throw DownloadError.saveFailed }
+        // The old app-created copy was deleted; move the "downloaded" bookkeeping
+        // and the server-photo mapping to the fresh asset.
+        DownloadSyncPreferences.unmarkDownloadedAsset(oldLocalIdentifier)
+        DownloadSyncPreferences.markDownloadedAsset(id)
+        PhotoSyncPreferences.recordUploadedPhoto(serverPhotoId: photo.id, localIdentifier: id)
         return id
     }
 
@@ -436,12 +516,10 @@ actor PhotoDownloadService {
     }
 
     private func downloadAndSave(photo: AlbumPhotoWithMeta, toAlbum album: PHAssetCollection) async throws -> String {
-        var imageData = try await APIClient.shared.downloadData("/photos/file/\(photo.filename)")
-
-        // Best-effort: embed description into IPTC metadata before saving
-        if let desc = photo.description, !desc.isEmpty {
-            imageData = embedDescription(imageData, description: desc) ?? imageData
-        }
+        // Save the server's original bytes unchanged (no re-encoding) so the base
+        // pixels stay identical to the server file. The caption (if any) is added
+        // afterwards as a lossless metadata-only edit (see applyCaption).
+        let imageData = try await APIClient.shared.downloadData("/photos/file/\(photo.filename)")
 
         var localIdentifier: String?
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
@@ -466,6 +544,13 @@ actor PhotoDownloadService {
         }
 
         guard let id = localIdentifier else { throw DownloadError.saveFailed }
+        // Register so this asset can later be reconciled for caption/pixel
+        // changes, and so the upload side never re-uploads it (round-trip guard).
+        DownloadSyncPreferences.markDownloadedAsset(id)
+        PhotoSyncPreferences.recordUploadedPhoto(serverPhotoId: photo.id, localIdentifier: id)
+        // Apply the caption as a lossless metadata edit (the saved bytes are the
+        // server's original, so the caption is added on top without re-encoding).
+        await applyCaption(localIdentifier: id, description: photo.description)
         return id
     }
 
@@ -523,30 +608,6 @@ actor PhotoDownloadService {
                 if let error { cont.resume(throwing: error) } else { cont.resume() }
             }
         }
-    }
-
-    // MARK: - IPTC description embedding
-
-    /// Returns a copy of `data` with the IPTC caption set to `description`,
-    /// or nil if the image format does not support embedded metadata.
-    private func embedDescription(_ data: Data, description: String) -> Data? {
-        guard
-            let source = CGImageSourceCreateWithData(data as CFData, nil),
-            let uti    = CGImageSourceGetType(source)
-        else { return nil }
-
-        var props = (CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]) ?? [:]
-        var iptc  = props[kCGImagePropertyIPTCDictionary] as? [CFString: Any] ?? [:]
-        iptc[kCGImagePropertyIPTCCaptionAbstract] = description
-        props[kCGImagePropertyIPTCDictionary] = iptc
-
-        let output = NSMutableData()
-        guard
-            let dest = CGImageDestinationCreateWithData(output, uti, 1, nil)
-        else { return nil }
-        CGImageDestinationAddImageFromSource(dest, source, 0, props as CFDictionary)
-        guard CGImageDestinationFinalize(dest) else { return nil }
-        return output as Data
     }
 
     // MARK: - Error types
