@@ -54,6 +54,10 @@ struct MainTabView: View {
                     TripView()
                 }
             }
+            // A running trip is signalled two ways so it's unmistakable in the
+            // tab bar: the icon switches to its filled variant, and a badge dot
+            // appears (the same dynamic mechanism the Feed unread badge uses).
+            .badge(tripStore.isActive ? Text("●") : nil)
 
             Tab("Suche", systemImage: "magnifyingglass") {
                 NavigationStack {

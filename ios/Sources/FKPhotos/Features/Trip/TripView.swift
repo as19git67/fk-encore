@@ -24,8 +24,8 @@ struct TripView: View {
         .navigationTitle("Trip")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showStartSheet) {
-            TripStartSheet { name in
-                Task { await start(name: name) }
+            TripStartSheet { name, geofence in
+                Task { await start(name: name, geofence: geofence) }
             }
         }
         .alert("Fehler", isPresented: $showError) {
@@ -47,7 +47,7 @@ struct TripView: View {
         }
     }
 
-    private func start(name: String) async {
+    private func start(name: String, geofence: ActiveTrip.Geofence?) async {
         // Read-write access is required to create the iOS album.
         let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
         guard status == .authorized || status == .limited else {
@@ -56,7 +56,7 @@ struct TripView: View {
             return
         }
         do {
-            try await store.startTrip(name: name)
+            try await store.startTrip(name: name, geofence: geofence)
         } catch {
             errorMessage = error.localizedDescription
             showError = true
