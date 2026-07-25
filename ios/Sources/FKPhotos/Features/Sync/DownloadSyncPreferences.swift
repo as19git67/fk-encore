@@ -127,10 +127,41 @@ struct DownloadSyncPreferences {
         UserDefaults.standard.removeObject(forKey: downloadedPhotosKey)
         UserDefaults.standard.removeObject(forKey: lastSyncDateKey)
         UserDefaults.standard.removeObject(forKey: downloadedStateKey)
+        UserDefaults.standard.removeObject(forKey: downloadedAssetIdsKey)
     }
 
     static var downloadedCount: Int {
         loadDownloadedPhotos().values.reduce(0) { $0 + $1.count }
+    }
+
+    // MARK: - Downloaded asset identifiers
+    //
+    // Local identifiers of assets this app DOWNLOADED from the server (as
+    // opposed to device-originated photos it merely registered into an album).
+    // Two uses:
+    //  1. Only downloaded (app-created) assets may be re-downloaded/replaced for
+    //     a caption/pixel change — deleting them shows no prompt, and it must
+    //     never touch a camera original.
+    //  2. The upload side skips them, so a server-downloaded photo is never
+    //     re-uploaded (which would create a near-duplicate on the server that
+    //     loops back as a device-side duplicate).
+
+    private static let downloadedAssetIdsKey = "download.downloadedAssetIds"
+
+    static func loadDownloadedAssetIds() -> Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: downloadedAssetIdsKey) ?? [])
+    }
+
+    static func markDownloadedAsset(_ localId: String) {
+        var ids = loadDownloadedAssetIds()
+        guard ids.insert(localId).inserted else { return }
+        UserDefaults.standard.set(Array(ids), forKey: downloadedAssetIdsKey)
+    }
+
+    static func unmarkDownloadedAsset(_ localId: String) {
+        var ids = loadDownloadedAssetIds()
+        guard ids.remove(localId) != nil else { return }
+        UserDefaults.standard.set(Array(ids), forKey: downloadedAssetIdsKey)
     }
 
     // MARK: - Per-photo sync state (issue #303)
