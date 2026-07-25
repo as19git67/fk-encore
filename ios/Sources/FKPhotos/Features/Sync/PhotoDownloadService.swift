@@ -242,9 +242,25 @@ actor PhotoDownloadService {
 
             if prev == next { continue }  // nothing to do
 
-            // Pixel data changed on the server (e.g. user replaced the file or
-            // it was reprocessed). Re-download and replace the local asset.
-            if let prevHash = prev?.hash, let nextHash = next.hash, prevHash != nextHash {
+            // Decide re-download ONLY from the pixel hash (image_data_hash), not
+            // the full/state `hash` — the latter changes on favorite/caption/date
+            // edits, which used to trigger a spurious re-download that deleted
+            // the local asset (and, for camera originals, showed a "may we delete
+            // this photo?" prompt on every sync). A nil on either side is treated
+            // as "pixels unchanged".
+            let pixelsChanged: Bool = {
+                guard let prevPixel = prev?.imageDataHash, let nextPixel = next.imageDataHash else { return false }
+                return prevPixel != nextPixel
+            }()
+
+            // Never delete/replace a device-originated photo (camera original):
+            // for those, the device is the source of truth for pixels, and
+            // deleting one prompts the user. Only assets this app downloaded
+            // (created itself) may be replaced. Device-originated photos are the
+            // ones present in the upload-side serverPhotoMap.
+            let isDeviceOriginated = serverPhotoMap[String(photo.id)] != nil
+
+            if pixelsChanged && !isDeviceOriginated {
                 do {
                     let newLocalId = try await replaceLocalAsset(
                         oldLocalIdentifier: localId,
@@ -260,8 +276,13 @@ actor PhotoDownloadService {
                     continue
                 }
             } else {
-                // Metadata-only change: update creationDate / favorite status in
-                // place. Cheap PHAssetChangeRequest, no re-download needed.
+                // Metadata-only change (or a device photo we must not replace):
+                // update favorite / creationDate in place. Caption propagation
+                // (server→iOS, via content editing) is deliberately not done here
+                // — a content edit bumps the asset's modificationDate, which the
+                // upload side would then treat as a change and re-upload. It is
+                // handled together with the upload round-trip guard in a
+                // follow-up so it doesn't worsen the duplication issue.
                 await applyServerMetadata(localIdentifier: localId, photo: photo)
             }
 
@@ -276,9 +297,11 @@ actor PhotoDownloadService {
     private func makeState(from photo: AlbumPhotoWithMeta) -> DownloadSyncPreferences.DownloadedPhotoState {
         DownloadSyncPreferences.DownloadedPhotoState(
             hash: photo.hash,
+            imageDataHash: photo.image_data_hash,
             updatedAt: photo.updated_at,
             takenAt: photo.taken_at,
-            isFavorite: photo.curation_status == .favorite
+            isFavorite: photo.curation_status == .favorite,
+            caption: photo.description
         )
     }
 
@@ -306,6 +329,7 @@ actor PhotoDownloadService {
             }
         }
     }
+
 
     /// Re-downloads `photo` and replaces the local asset identified by
     /// `oldLocalIdentifier`. The old asset is deleted (which on iOS moves it

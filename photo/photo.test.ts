@@ -1362,6 +1362,25 @@ describe("Photo Module", () => {
       const details = await service.getAlbumLogic(user1.id, album.id);
       expect(details.photos).toHaveLength(1);
     });
+
+    it("exposes image_data_hash in album photos for iOS bisync pixel-change detection", async () => {
+      // The iOS download sync must distinguish a real pixel change from a mere
+      // metadata edit. `hash` stores the full/state hash (changes on
+      // favorite/caption/date), so the client needs the pixel-only
+      // image_data_hash to avoid re-downloading (and deleting) on metadata edits.
+      const album = await service.createAlbumLogic(user1.id, { name: "Bisync Hash Album" });
+      const photo = await service.uploadPhotoLogic(user1.id, {
+        data: Buffer.from([1, 2, 3]),
+        name: "p.jpg",
+        mimeType: "image/jpeg",
+      });
+      await db.update(photos).set({ image_data_hash: "pixelhash123" }).where(eq(photos.id, photo.id));
+      await service.addPhotoToAlbumLogic(user1.id, { albumId: album.id, photoId: photo.id });
+
+      const details = await service.getAlbumLogic(user1.id, album.id, { includePhotos: true });
+      const p = details.photos.find((x) => x.id === photo.id);
+      expect(p?.image_data_hash).toBe("pixelhash123");
+    });
   });
 
   describe("/photos/index ETag fingerprint", () => {

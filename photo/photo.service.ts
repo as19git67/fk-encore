@@ -4464,7 +4464,7 @@ export async function getAlbumLogic(
     : sql``;
   const groupByClause = includeAllPc
     ? sql`
-    GROUP BY p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash,
+    GROUP BY p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash, p.image_data_hash,
              p.taken_at, p.created_at, p.updated_at,
              p.ai_quality_score, p.auto_crop, p.description,
              p.latitude, p.longitude,
@@ -4473,7 +4473,7 @@ export async function getAlbumLogic(
     : sql``;
   const photoRows = (await db.execute(sql`
     SELECT
-      p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash,
+      p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash, p.image_data_hash,
       p.taken_at, p.created_at, p.updated_at,
       p.ai_quality_score, p.auto_crop, p.description,
       p.latitude, p.longitude,
@@ -4546,6 +4546,7 @@ export async function getAlbumLogic(
       mime_type: r.mime_type,
       size: r.size,
       hash: r.hash ?? undefined,
+      image_data_hash: r.image_data_hash ?? undefined,
       taken_at: r.taken_at ?? undefined,
       created_at: r.created_at ?? "",
       updated_at: r.updated_at ?? undefined,

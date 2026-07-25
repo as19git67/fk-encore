@@ -139,10 +139,20 @@ struct DownloadSyncPreferences {
     /// Used by PhotoDownloadService to skip work when nothing moved and to
     /// refresh metadata / pixel data when something did.
     struct DownloadedPhotoState: Codable, Hashable, Sendable {
+        /// Full/state hash (changes on any edit). Kept for change-detection but
+        /// NOT used to decide pixel changes — see `imageDataHash`.
         let hash: String?
+        /// Pixel-only hash: decides whether the local asset must be
+        /// re-downloaded. Optional (nil for legacy state / legacy server rows) —
+        /// a nil on either side is treated as "pixels unchanged" so a metadata
+        /// edit never triggers a re-download + delete.
+        let imageDataHash: String?
         let updatedAt: String?
         let takenAt: String?
         let isFavorite: Bool
+        /// Server-side description, so a caption change can be applied in place
+        /// (content edit) instead of re-downloading.
+        let caption: String?
     }
 
     /// Returns the entire state map keyed by "<albumId>:<photoId>".

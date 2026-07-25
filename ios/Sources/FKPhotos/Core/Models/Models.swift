@@ -229,7 +229,15 @@ struct AlbumPhotoWithMeta: Codable, Identifiable, Sendable {
     let original_name: String
     let mime_type: String
     let size: Int
+    /// Full/state hash: changes on ANY sync-relevant edit (favorite, caption,
+    /// date). Do NOT use this to decide whether pixels changed — use
+    /// `image_data_hash` for that (otherwise metadata edits trigger a needless
+    /// re-download + delete of the local asset).
     let hash: String?
+    /// SHA-256 of the decoded pixel data — stable across metadata edits. Used by
+    /// the download sync to detect a real pixel change. Optional: legacy rows
+    /// may carry NULL.
+    let image_data_hash: String?
     let taken_at: String?
     let created_at: String
     /// Server-side timestamp; bumped by a DB trigger on every metadata or
