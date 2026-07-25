@@ -448,6 +448,12 @@ actor PhotoSyncService {
         guard !albumIds.isEmpty else { return [] }
 
         let confirmed = PhotoSyncPreferences.confirmedMappingIds
+        // Never re-upload assets this device downloaded from the server (bisync
+        // round-trip guard): the server already has them, and a re-encoded
+        // downloaded copy would carry a different image_data_hash, so the server
+        // dedup would miss it and store a near-duplicate that loops back onto the
+        // device as a visible duplicate.
+        let downloadedIds = DownloadSyncPreferences.loadDownloadedAssetIds()
 
         var pairs: [(PHAsset, String?)] = []
         var seen = Set<String>()
@@ -482,11 +488,13 @@ actor PhotoSyncService {
                 }
         }
 
-        return pairs.map { (asset, sourceAlbumId) in
-            let filename = AssetUploadEnqueuer.originalFilename(for: asset)
-                ?? "photo_\(asset.localIdentifier.prefix(8)).jpg"
-            return (asset, filename, sourceAlbumId)
-        }
+        return pairs
+            .filter { !downloadedIds.contains($0.0.localIdentifier) }
+            .map { (asset, sourceAlbumId) in
+                let filename = AssetUploadEnqueuer.originalFilename(for: asset)
+                    ?? "photo_\(asset.localIdentifier.prefix(8)).jpg"
+                return (asset, filename, sourceAlbumId)
+            }
     }
 
     private static func buildFetchOptions(lastSync: Date?) -> PHFetchOptions {
