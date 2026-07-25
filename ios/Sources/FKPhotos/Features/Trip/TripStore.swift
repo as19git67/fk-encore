@@ -1,3 +1,4 @@
+import CoreLocation
 import Foundation
 import Observation
 import Photos
@@ -19,6 +20,11 @@ final class TripStore {
     /// True while a trip is being provisioned (album + server link), so the UI
     /// can show progress and block a second concurrent start.
     private(set) var isProvisioning = false
+    /// Guards against overlapping auto-add passes. `@MainActor` methods can
+    /// still interleave at their `await` points, so two triggers (runFullSync
+    /// catch-up + the library-change observer) could otherwise process the same
+    /// candidates twice.
+    private var isAutoAdding = false
 
     private init() {
         activeTrip = TripPreferences.loadActiveTrip()
@@ -122,6 +128,116 @@ final class TripStore {
         trip.autoAdd = enabled
         activeTrip = trip
         TripPreferences.saveActiveTrip(trip)
+    }
+
+    // MARK: - Auto-add pass (Etappe 1c)
+
+    /// Adds newly-captured trip photos to the trip's iOS album and returns how
+    /// many were added. Idempotent and safe to run repeatedly (`runFullSync`
+    /// catch-up + `PHPhotoLibraryChangeObserver`).
+    ///
+    /// Membership rule: image assets with `creationDate >= startedAt` (and, when
+    /// a geofence is set, within its radius — assets without GPS are included).
+    ///
+    /// The `handledAssetIds` set makes each asset get added **at most once**:
+    /// once handled it is never re-added, so an aussortiertes Foto stays out and
+    /// the `sync` mode can propagate the removal to the server without the
+    /// auto-add pass fighting it (see `docs/ios-trip-mode.md` §4). No-op unless
+    /// a trip is active and in Auto mode.
+    @discardableResult
+    func runAutoAddPass() async -> Int {
+        guard let trip = activeTrip, trip.autoAdd else { return 0 }
+        guard !isAutoAdding else { return 0 }
+        isAutoAdding = true
+        defer { isAutoAdding = false }
+
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard status == .authorized || status == .limited else { return 0 }
+
+        let handled = Set(trip.handledAssetIds)
+        let candidates = await Self.fetchTripCandidates(
+            since: trip.startedAt,
+            geofence: trip.geofence,
+            excluding: handled
+        )
+        guard !candidates.isEmpty else { return 0 }
+
+        let added = await Self.addAssets(localIds: candidates, toAlbum: trip.iosAlbumId)
+        guard !added.isEmpty else { return 0 }
+
+        // Re-read in case the trip changed while we were adding, and only extend
+        // the same trip's handled set (de-duplicated).
+        guard var current = activeTrip, current.iosAlbumId == trip.iosAlbumId else { return 0 }
+        let existing = Set(current.handledAssetIds)
+        let newlyHandled = added.filter { !existing.contains($0) }
+        guard !newlyHandled.isEmpty else { return 0 }
+        current.handledAssetIds.append(contentsOf: newlyHandled)
+        activeTrip = current
+        TripPreferences.saveActiveTrip(current)
+        return newlyHandled.count
+    }
+
+    /// Enumerates image assets in the trip's time window (and geofence) that
+    /// haven't been handled yet. Runs off the main thread — enumeration reads
+    /// asset metadata and shouldn't block the cooperative pool.
+    private static func fetchTripCandidates(
+        since: Date,
+        geofence: ActiveTrip.Geofence?,
+        excluding handled: Set<String>
+    ) async -> [String] {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let options = PHFetchOptions()
+                options.predicate = NSPredicate(
+                    format: "mediaType == %d AND creationDate >= %@",
+                    PHAssetMediaType.image.rawValue, since as NSDate
+                )
+                options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
+
+                let center = geofence.map { CLLocation(latitude: $0.latitude, longitude: $0.longitude) }
+                let radius = geofence?.radiusMeters
+
+                var result: [String] = []
+                PHAsset.fetchAssets(with: .image, options: options).enumerateObjects { asset, _, _ in
+                    let id = asset.localIdentifier
+                    if handled.contains(id) { return }
+                    // Geofence refinement: exclude located assets outside the
+                    // radius. Assets without GPS are included (Etappe-1-Entscheidung).
+                    if let center, let radius, let location = asset.location,
+                       location.distance(from: center) > radius {
+                        return
+                    }
+                    result.append(id)
+                }
+                continuation.resume(returning: result)
+            }
+        }
+    }
+
+    /// Adds the given assets to the album. Returns the local identifiers that
+    /// were resolvable and passed to the change request (empty on failure).
+    /// Adding an asset already in the album is a no-op in PhotoKit.
+    private static func addAssets(localIds: [String], toAlbum albumId: String) async -> [String] {
+        let assets = PHAsset.fetchAssets(withLocalIdentifiers: localIds, options: nil)
+        guard assets.count > 0 else { return [] }
+        let collections = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [albumId], options: nil)
+        guard let album = collections.firstObject else { return [] }
+
+        var resolvedIds: [String] = []
+        assets.enumerateObjects { asset, _, _ in resolvedIds.append(asset.localIdentifier) }
+
+        do {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                PHPhotoLibrary.shared().performChanges {
+                    PHAssetCollectionChangeRequest(for: album)?.addAssets(assets)
+                } completionHandler: { _, error in
+                    if let error { cont.resume(throwing: error) } else { cont.resume() }
+                }
+            }
+        } catch {
+            return []
+        }
+        return resolvedIds
     }
 
     // MARK: - Helpers
