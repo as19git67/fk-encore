@@ -70,6 +70,10 @@ public final class BackgroundSyncManager {
         // Reset any items that were stuck in "uploading" state from a previous run.
         Task { await UploadQueue.shared.resetStaleUploading() }
         Task { await UploadQueue.shared.load() }
+
+        // Observe photo-library changes so a running trip picks up freshly-taken
+        // photos promptly (Trip Mode Etappe 1c). No-op until a trip is active.
+        TripPhotoLibraryObserver.shared.startIfNeeded()
     }
 
     // MARK: - Scheduling
@@ -382,6 +386,10 @@ public final class BackgroundSyncManager {
         }
 
         let work = Task {
+            // Add newly-captured trip photos to the trip album BEFORE the upload
+            // scan, so they are enumerated and uploaded in this same pass
+            // (Trip Mode Etappe 1c). No-op when no trip is active / not in Auto.
+            await TripStore.shared.runAutoAddPass()
             await drainUploadQueue()
             try await PhotoSyncService.shared.sync()
             try await PhotoDownloadService.shared.sync()
