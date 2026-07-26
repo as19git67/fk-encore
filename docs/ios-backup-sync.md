@@ -169,11 +169,19 @@ wird als `pending` zurückgelegt).
 
 ## 7. Gesamtpipeline & Auslöser
 
-Alle Auslöser laufen über **`BackgroundSyncManager.runFullSync()`**: Queue-Drain
-→ Upload-Sync (`PhotoSyncService.sync()`) → **Download-/Bisync-Sync**
-(`PhotoDownloadService.sync()`). `runFullSync()` ist durch `pipelineLock` gegen
-einen zweiten gleichzeitigen Lauf geschützt (manueller Tap + Foreground-Resume +
-BG-Task), so dass sich zwei Pipelines nie überlagern.
+Alle Auslöser laufen über **`BackgroundSyncManager.runFullSync()`**: Trip-Auto-Add
+→ **Download-/Bisync-Sync** (`PhotoDownloadService.sync()`) → Queue-Drain →
+Upload-Sync (`PhotoSyncService.sync()`). `runFullSync()` ist durch `pipelineLock`
+gegen einen zweiten gleichzeitigen Lauf geschützt (manueller Tap +
+Foreground-Resume + BG-Task), so dass sich zwei Pipelines nie überlagern.
+
+> **Reihenfolge Download vor Upload (wichtig):** Ein am Server **gelöschtes**
+> Foto muss zuerst per Download aus dem lokalen Album entfernt (in „F4mil Trash"
+> verschoben) werden, **bevor** der Upload-Scan läuft. Sonst sieht der Upload die
+> noch vorhandene lokale Kopie im Album, lädt sie wieder hoch und lässt das
+> gelöschte Foto **auferstehen** (es taucht erneut im Album auf, während eine
+> Streukopie im Trash liegt). Download-zuerst schließt dieses Rennen für jedes
+> heruntergeladene Foto — unabhängig vom Round-Trip-Tracking-Set.
 
 > **Wichtig:** Die Download-Hälfte lief früher **ausschließlich** im
 > BGProcessingTask. Da iOS diesen Task nur selten und meist beim Laden/Idle
