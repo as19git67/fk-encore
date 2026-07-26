@@ -33,6 +33,70 @@ export function extractDocumentNumber(text: string): string | null {
   return text.match(/#[\s.\-:/]?(\d{4,})/)?.[1] ?? null;
 }
 
+// Date labels/anchors, most-specific first, that reliably precede a document's
+// own date in German paperwork. `\w*datum` covers "Datum", "Rechnungsdatum",
+// "Bescheiddatum", "Belegdatum", "Ausstellungsdatum", "Auftragsdatum", … in one
+// go. `[ \t:]{0,40}` tolerates the large whitespace gap seen in OCR
+// ("Rechnungsdatum                18.01.2021") while staying on the same line
+// (no newline) so we never jump to a later line's unrelated date. The class is
+// whitespace/colon-only, so it always stops at the first non-space — which must
+// be the date's first digit — making even a large gap safe (it can't span an
+// intervening field or word).
+const DATE_ANCHOR_PATTERNS: readonly RegExp[] = [
+  /\b\w*datum\b[ \t:]{0,80}(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})\b/i,
+  // "Rechnung vom 18.01.2021"
+  /\bvom\b[ \t:]{0,5}(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})\b/i,
+  // German letterhead convention "Ort, TT.MM.JJJJ" (4-digit year only, to keep
+  // precision — a bare 2-digit year after a word is too easily a false match).
+  /\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-]+,[ \t]{0,3}(\d{1,2})\.(\d{1,2})\.(\d{4})\b/,
+];
+
+const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+function isLeapYear(year: number): boolean {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
+function toIsoDate(dayStr: string, monthStr: string, yearStr: string): string | null {
+  const day = Number(dayStr);
+  const month = Number(monthStr);
+  let year = Number(yearStr);
+  if (yearStr.length === 2) {
+    // strptime %y convention: 00–68 → 2000–2068, 69–99 → 1969–1999. Fits a
+    // household archive that legitimately spans decades (see tax_year floor).
+    year = year <= 68 ? 2000 + year : 1900 + year;
+  }
+  if (month < 1 || month > 12) return null;
+  if (year < 1900 || year > 2100) return null;
+  const maxDay = month === 2 && isLeapYear(year) ? 29 : DAYS_IN_MONTH[month - 1];
+  if (day < 1 || day > maxDay) return null;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/**
+ * Deterministic fallback for the document date. The small model regularly
+ * returns `doc_date=null` even when the date is plainly in the text
+ * ("Datum: 11.08.14", "Rechnungsdatum        18.01.2021", "Datum: 09.05.2014").
+ * This scans the OCR text for a date anchored to a strong German date label
+ * (a "…datum" word, "vom", or the "Ort, TT.MM.JJJJ" letterhead convention) and
+ * returns it as ISO YYYY-MM-DD.
+ *
+ * Only *label-anchored* dates are accepted — never just any date in the text —
+ * so a due date, validity date or birthdate is not mistaken for the document
+ * date. Applied as a *fallback* in runClassify: it never overrides a date the
+ * LLM did produce, whose nuanced choice (salary month, invoice date, …) is
+ * better. Returns null when no anchored date is found. (#date-fallback)
+ */
+export function extractDocumentDate(text: string): string | null {
+  for (const re of DATE_ANCHOR_PATTERNS) {
+    const m = re.exec(text);
+    if (!m) continue;
+    const iso = toIsoDate(m[1], m[2], m[3]);
+    if (iso) return iso;
+  }
+  return null;
+}
+
 /**
  * True when `sender` is essentially one of the user's Bezugspersonen — the
  * "owner/recipient extracted as sender" bug. High precision: every (de-noised)
