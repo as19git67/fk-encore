@@ -23,14 +23,23 @@ function nameTokens(value: string | null | undefined): string[] {
 }
 
 /**
+ * Marks an explicit "#1234"-style document-number sticker/stamp. A single
+ * optional separator (space, '.', '-', ':' or '/') may sit between the '#'
+ * and the digits, so "#1234", "#.1234", "# 1234" and "#-1234" all match.
+ * Exported so `text-extract.ts` can check for the marker's *presence*
+ * without duplicating the pattern — see the sparse-text OCR fallback there
+ * for why (#892 follow-up: such markers sit in a page corner next to a logo/
+ * box and are otherwise silently dropped by Tesseract's layout analysis).
+ */
+export const DOCUMENT_NUMBER_RE = /#[\s.\-:/]?(\d{4,})/;
+
+/**
  * The document number is authoritative only from an explicit "#" marker in the
  * text. The LLM's free-form guess (often a contract/insurance/customer number)
- * is discarded. A single optional separator (space, '.', '-', ':' or '/') may
- * sit between the '#' and the digits, so "#1234", "#.1234", "# 1234" and
- * "#-1234" all yield "1234". Returns the digits without the '#', or null. (#651)
+ * is discarded. Returns the digits without the '#', or null. (#651)
  */
 export function extractDocumentNumber(text: string): string | null {
-  return text.match(/#[\s.\-:/]?(\d{4,})/)?.[1] ?? null;
+  return text.match(DOCUMENT_NUMBER_RE)?.[1] ?? null;
 }
 
 // Date labels/anchors, most-specific first, that reliably precede a document's

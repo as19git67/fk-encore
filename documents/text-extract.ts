@@ -7,7 +7,10 @@
  * contrast-stretch gray scans toward black-on-white, see `ocr-preprocess.ts`)
  * and run `tesseract` (deu+eng) over the PNGs. The searchable PDF is built
  * from the cleaned pages, so the served/downloaded sandwich PDF keeps the
- * corrected rotation.
+ * corrected rotation. When the primary pass finds no "#1234"-style
+ * document-number marker, page 1 gets one extra `--psm 11` (sparse text)
+ * pass to recover markers that sit isolated in a corner next to a logo/box —
+ * see `NUMBER_MARKER_FALLBACK_ENABLED` below.
  *
  * When either `pdf-parse` or `pdftoppm` rejects the file as broken
  * (missing trailer dictionary / unreadable xref — common for PDFs
@@ -23,8 +26,11 @@
  * `apt-get install` line.
  *
  * Kept deliberately small: it returns the raw text and lets the caller
- * decide what to do. No JSON, no metadata — classification happens in
- * the LLM step.
+ * decide what to do. No JSON, no metadata — classification happens in the
+ * LLM step. The one narrow exception is `DOCUMENT_NUMBER_RE`, imported from
+ * `metadata-extract.ts` only to check whether the marker is *present* (so
+ * the sparse-text fallback above knows whether it's needed) — the actual
+ * digits are still parsed exclusively in `metadata-extract.ts`.
  */
 
 import fs from "fs";
@@ -33,6 +39,7 @@ import path from "path";
 import { createRequire } from "module";
 import { spawn } from "child_process";
 import { detectOcrRotation, preprocessOcrImage } from "./ocr-preprocess";
+import { DOCUMENT_NUMBER_RE } from "./metadata-extract";
 
 // pdf-parse is CJS and its default import pulls in a debug routine that
 // tries to read `test/05-versions-space.pdf` when `module.parent` is
@@ -81,6 +88,20 @@ const MIN_TEXT_LAYER_CHARS = parseInt(
   process.env.DOCUMENTS_MIN_TEXT_CHARS ?? "80",
   10,
 );
+
+/**
+ * Whether to re-scan page 1 with a sparse-text Tesseract pass (`--psm 11`)
+ * when the primary `--psm 3` OCR text has no "#1234"-style document-number
+ * marker. Verified against real scans (#892 follow-up): such markers sit
+ * isolated in a page corner, often right next to a logo or decorative box,
+ * and Tesseract's default layout analysis regularly fuses that corner into
+ * the neighboring graphic and drops it — even though the same marker OCRs
+ * correctly in sparse-text mode on the very same, unmodified page. Only
+ * runs when the primary pass found nothing (the common case), so the extra
+ * Tesseract call is rare in practice.
+ */
+const NUMBER_MARKER_FALLBACK_ENABLED =
+  (process.env.DOCUMENTS_OCR_NUMBER_FALLBACK ?? "1") !== "0";
 
 /** Hard cap on OCR runtime per document — OCR on a large scan can be slow. */
 const OCR_TIMEOUT_MS = parseInt(
@@ -509,6 +530,9 @@ async function ocrPdf(
 
     const parts: string[] = [];
     const pagePdfs: string[] = [];
+    // The document-number marker (see below) lives on page 1 in practice —
+    // remember its final (post-preprocessing) image for the fallback pass.
+    let firstPagePath: string | null = null;
     const started = Date.now();
     for (let i = 0; i < entries.length; i++) {
       if (Date.now() - started > OCR_TIMEOUT_MS) {
@@ -529,6 +553,7 @@ async function ocrPdf(
       if (await preprocessOcrImage(rawPagePath, prepPath, { rotate })) {
         pagePath = prepPath;
       }
+      if (i === 0) firstPagePath = pagePath;
       // tesseract appends the extension per output config (`txt`, `pdf`).
       const configs = options.wantSearchablePdf ? ["txt", "pdf"] : ["txt"];
       try {
@@ -558,7 +583,21 @@ async function ocrPdf(
       });
     }
 
-    return { text: parts.join("\n\n").trim(), searchablePdf };
+    let text = parts.join("\n\n").trim();
+    if (
+      shouldRunNumberMarkerFallback(text, firstPagePath != null) &&
+      Date.now() - started <= OCR_TIMEOUT_MS
+    ) {
+      const marker = await recoverDocumentNumberMarker(firstPagePath!);
+      if (marker) {
+        console.log(
+          `[documents.text-extract] recovered document-number marker "${marker}" via sparse-text fallback`,
+        );
+        text = `${marker}\n\n${text}`.trim();
+      }
+    }
+
+    return { text, searchablePdf };
   } finally {
     // Best-effort cleanup — never throw from the finally block.
     fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
@@ -660,6 +699,65 @@ function runTesseract(imagePath: string, outBase: string, configs: string[]): Pr
     proc.on("close", (code) => {
       if (code === 0) resolve();
       else reject(new Error(`tesseract exited ${code}: ${stderr.trim()}`));
+    });
+  });
+}
+
+/**
+ * Whether the sparse-text document-number fallback is worth running: only
+ * when the feature is enabled, page 1's image is available, and the
+ * primary OCR pass found no "#1234"-style marker at all. Pure; exported
+ * for unit testing.
+ */
+export function shouldRunNumberMarkerFallback(
+  primaryText: string,
+  hasFirstPage: boolean,
+): boolean {
+  return (
+    NUMBER_MARKER_FALLBACK_ENABLED && hasFirstPage && !DOCUMENT_NUMBER_RE.test(primaryText)
+  );
+}
+
+/**
+ * Re-scan `imagePath` with `--psm 11` ("sparse text": find as much text as
+ * possible, in no particular order, without assuming a normal paragraph
+ * layout) and return a "#1234"-style marker if one turns up. Used only as a
+ * fallback when the primary `--psm 3` pass found no marker at all — see
+ * `NUMBER_MARKER_FALLBACK_ENABLED` above for why this is necessary. Returns
+ * null on any failure (missing binary, no match, …); never throws.
+ */
+async function recoverDocumentNumberMarker(imagePath: string): Promise<string | null> {
+  try {
+    const stdout = await runTesseractSparseText(imagePath);
+    return stdout.match(DOCUMENT_NUMBER_RE)?.[0] ?? null;
+  } catch (err) {
+    console.warn(
+      `[documents.text-extract] sparse-text fallback failed for ${imagePath}: ${(err as Error).message}`,
+    );
+    return null;
+  }
+}
+
+function runTesseractSparseText(imagePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const lang = process.env.DOCUMENTS_OCR_LANG ?? "deu+eng";
+    const proc = spawn(
+      "tesseract",
+      [imagePath, "stdout", "-l", lang, "--oem", "1", "--psm", "11"],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let stdout = "";
+    let stderr = "";
+    proc.stdout.on("data", (d) => {
+      stdout += d.toString();
+    });
+    proc.stderr.on("data", (d) => {
+      stderr += d.toString();
+    });
+    proc.on("error", reject);
+    proc.on("close", (code) => {
+      if (code === 0) resolve(stdout);
+      else reject(new Error(`tesseract --psm 11 exited ${code}: ${stderr.trim()}`));
     });
   });
 }
