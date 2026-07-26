@@ -3,6 +3,7 @@ import {
   buildUmlautRestorationMap,
   detectSubjectPersonIds,
   detectSubjectPersonPersonalDeductionReview,
+  extractDocumentDate,
   extractDocumentNumber,
   extractReferenceNumberTags,
   isSubjectPersonSender,
@@ -31,6 +32,55 @@ describe("extractDocumentNumber", () => {
   it("requires at least four digits and returns null otherwise", () => {
     expect(extractDocumentNumber("Zimmer #12")).toBeNull();
     expect(extractDocumentNumber("kein Marker hier")).toBeNull();
+  });
+});
+
+describe("extractDocumentDate", () => {
+  it("reads the three production examples the LLM missed", () => {
+    expect(extractDocumentDate("Datum: 11.08.14")).toBe("2014-08-11");
+    expect(extractDocumentDate("Rechnungsdatum                       18.01.2021")).toBe("2021-01-18");
+    expect(extractDocumentDate("Datum: 09.05.2014")).toBe("2014-05-09");
+  });
+
+  it("handles the compound *datum labels", () => {
+    expect(extractDocumentDate("Bescheiddatum 03.12.2020")).toBe("2020-12-03");
+    expect(extractDocumentDate("Ausstellungsdatum: 1.7.2019")).toBe("2019-07-01");
+  });
+
+  it("reads 'Rechnung vom …'", () => {
+    expect(extractDocumentDate("Rechnung vom 18.01.2021 über …")).toBe("2021-01-18");
+  });
+
+  it("reads the 'Ort, TT.MM.JJJJ' letterhead convention", () => {
+    expect(extractDocumentDate("München, 05.03.2022\nSehr geehrte …")).toBe("2022-03-05");
+  });
+
+  it("expands two-digit years with the 00–68 / 69–99 pivot", () => {
+    expect(extractDocumentDate("Datum 01.01.68")).toBe("2068-01-01");
+    expect(extractDocumentDate("Datum 01.01.69")).toBe("1969-01-01");
+    expect(extractDocumentDate("Datum 31.12.85")).toBe("1985-12-31");
+  });
+
+  it("rejects impossible calendar dates", () => {
+    expect(extractDocumentDate("Datum: 31.02.2021")).toBeNull();
+    expect(extractDocumentDate("Datum: 30.02.2020")).toBeNull();
+    expect(extractDocumentDate("Datum: 29.02.2021")).toBeNull(); // 2021 not a leap year
+    expect(extractDocumentDate("Datum: 29.02.2020")).toBe("2020-02-29"); // leap year ok
+  });
+
+  it("does not grab an unlabelled date from the body", () => {
+    expect(extractDocumentDate("Bitte zahlen Sie bis zum 30.06.2021.")).toBeNull();
+    expect(extractDocumentDate("geboren 12.04.1950 in …")).toBeNull();
+  });
+
+  it("stays on the label's own line (no jump to a later line)", () => {
+    // The word "Datum" with no date after it must not pull the date two lines down.
+    expect(extractDocumentDate("Datum:\nKundennummer 4711\nFällig 30.06.2021")).toBeNull();
+  });
+
+  it("returns null when there is no date at all", () => {
+    expect(extractDocumentDate("Kein Datum in diesem Text")).toBeNull();
+    expect(extractDocumentDate("")).toBeNull();
   });
 });
 

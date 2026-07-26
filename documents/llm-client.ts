@@ -210,7 +210,39 @@ async function pushPrompts(): Promise<void> {
   await fetchJson("PUT", "/prompts", CLASSIFY_PROMPTS);
 }
 
+// The llm-service caches the prompts it was last given (in-memory
+// `_CLASSIFY_PROMPTS`) and only reports "not configured" (412) until the first
+// push. A long-running service therefore keeps STALE prompts across an app
+// redeploy — so a prompt edit (classify-prompts.ts) would silently not take
+// effect until the service happened to restart, contradicting this module's
+// "iterating on prompts needs only an app redeploy" design. To make that true,
+// each app process pushes the current prompts once, lazily, before its first
+// classify, overwriting whatever the service had. Idempotent; the guard makes
+// concurrent first-calls share a single push.
+let promptSync: Promise<void> | null = null;
+function ensurePromptsFresh(): Promise<void> {
+  if (!promptSync) {
+    promptSync = pushPrompts().catch((err) => {
+      // Don't cache a failure: a transient outage (service still loading its
+      // model) must not permanently skip the refresh. The 412 path below still
+      // configures a genuinely-unconfigured service.
+      promptSync = null;
+      throw err;
+    });
+  }
+  return promptSync;
+}
+
 export async function classifyDocument(req: ClassifyRequest): Promise<Classification> {
+  // Best-effort one-time refresh so this process's prompts win over whatever a
+  // long-running service cached. Non-fatal on failure — fall through to the
+  // classify call, whose 412 handler still configures an unconfigured service.
+  try {
+    await ensurePromptsFresh();
+  } catch {
+    /* handled by the 412 path below if the service is truly unconfigured */
+  }
+
   let raw: unknown;
   try {
     raw = await postJson<unknown>("/classify", req);
