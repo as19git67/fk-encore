@@ -390,9 +390,17 @@ public final class BackgroundSyncManager {
             // scan, so they are enumerated and uploaded in this same pass
             // (Trip Mode Etappe 1c). No-op when no trip is active / not in Auto.
             await TripStore.shared.runAutoAddPass()
+
+            // Download BEFORE upload. A photo deleted on the server must be moved
+            // to "F4mil Trash" (and removed from the local album) FIRST — before
+            // the upload scan runs. Otherwise the upload sees the still-present
+            // local copy in the album, re-uploads it, and resurrects the deleted
+            // photo (it reappears in the album while a stray copy is left in the
+            // trash). Applying server-side removals first closes that race for
+            // every downloaded photo, independent of the round-trip tracking set.
+            try await PhotoDownloadService.shared.sync()
             await drainUploadQueue()
             try await PhotoSyncService.shared.sync()
-            try await PhotoDownloadService.shared.sync()
         }
 
         let taskGuard = BackgroundTaskGuard()
