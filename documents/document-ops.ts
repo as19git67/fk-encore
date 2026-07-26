@@ -79,6 +79,7 @@ import {
   buildUmlautRestorationMap,
   detectSubjectPersonIds,
   detectSubjectPersonPersonalDeductionReview,
+  extractDocumentDate,
   extractDocumentNumber,
   extractReferenceNumberTags,
   isSubjectPersonSender,
@@ -320,6 +321,14 @@ export async function runClassify(documentId: number): Promise<{ classification:
   // 1. The document number comes only from an explicit "#1234" marker; the
   //    LLM's free-form guess (often a contract/insurance number) is dropped.
   classification.document_number = extractDocumentNumber(clipped);
+  // 1b. The date: the small model frequently returns null even when the date is
+  //     plainly labelled in the text ("Datum: 11.08.14", "Rechnungsdatum
+  //     18.01.2021"). Fill it — but never OVERRIDE a date the LLM did produce,
+  //     whose nuanced choice (salary month vs. delivery date, …) is better —
+  //     from a deterministic label-anchored scan (see metadata-extract.ts).
+  if (!classification.doc_date) {
+    classification.doc_date = extractDocumentDate(clipped);
+  }
   // 2. A recipient/Bezugsperson is never the sender — drop it if the
   //    classifier echoed a known subject person into the sender field.
   if (isSubjectPersonSender(classification.sender, subject_persons)) {

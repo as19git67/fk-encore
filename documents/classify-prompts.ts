@@ -17,15 +17,23 @@ Felder:
   Wenn kein Zweig passt, verwende "sonstiges" und gib eine niedrige confidence.
 - title: kurzer, sprechender Dokumenttitel (max. 80 Zeichen).
 - doc_date: das inhaltliche Datum des Dokuments als ISO-8601 YYYY-MM-DD.
-  Bei Gehalts-/Entgeltabrechnungen: der Abrechnungsmonat (z.B. "für November
-  2025" → 2025-11-01), NICHT das ELStAM-Lieferdatum, Eintrittsdatum oder
-  "Gilt-ab"-Datum. Bei Rechnungen: Rechnungsdatum. Bei Bescheiden:
-  Bescheiddatum. Bei Kontoauszügen: Auszugsdatum/Enddatum des Zeitraums.
-  Typische deutsche Formate wie "01.07.2024", "1. Juli 2024", "Juli 2024"
-  (→ Monatserster) erkennen und umwandeln. Bevorzuge das für den
-  Dokumentinhalt maßgebliche Datum, nicht administrative Nebendaten
-  (Lieferdatum, Gilt-ab, Eintrittsdatum, Bankleitzahl-Änderung). null nur
-  wenn wirklich kein Datum erkennbar ist.
+  Fast jedes Dokument trägt ein Datum — suche es aktiv, bevor du null gibst.
+  Häufige Fundstellen: ein Datums-Label ("Datum", "Rechnungsdatum",
+  "Bescheiddatum", "ausgestellt am"), "vom TT.MM.JJJJ", oder Ort + Datum im
+  Briefkopf ("München, 05.03.2022").
+  Stehen mehrere Daten im Dokument, entscheidet der KONTEXT, welches maßgeblich
+  ist: bei Rechnungen das Rechnungsdatum, bei Bescheiden das Bescheiddatum, bei
+  Kontoauszügen das Auszugs-/Zeitraumende, bei Gehalts-/Entgeltabrechnungen der
+  Abrechnungsmonat (z. B. "für November 2025" → 2025-11-01). NICHT
+  administrative Nebendaten: ELStAM-Lieferdatum, "gilt ab", Eintrittsdatum,
+  Fälligkeits-/Zahlungsziel, Druck-/Zustelldatum, Geburtsdatum,
+  Bankleitzahl-Änderung.
+  Formate erkennen und nach ISO umwandeln: "01.07.2024", "1. Juli 2024",
+  "Juli 2024" (→ Monatserster). Zweistellige Jahreszahlen expandieren:
+  JJ 00–68 → 20JJ, 69–99 → 19JJ (z. B. "11.08.14" → 2014-08-11,
+  "31.12.98" → 1998-12-31).
+  Gib null NUR zurück, wenn im Text wirklich kein Datum steht — nicht schon
+  deshalb, weil das Format ungewöhnlich oder das Jahr zweistellig ist.
 - sender: die ausstellende Institution/Organisation oder Person, die das
   Dokument VERSCHICKT bzw. erstellt hat — erkennbar an Briefkopf, Logo oder
   Footer/Impressum (z. B. Versicherung, Behörde, Arztpraxis, Bank). NICHT der
