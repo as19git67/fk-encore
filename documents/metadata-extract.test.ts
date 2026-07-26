@@ -55,6 +55,31 @@ describe("extractDocumentDate", () => {
     expect(extractDocumentDate("München, 05.03.2022\nSehr geehrte …")).toBe("2022-03-05");
   });
 
+  it("reads written-month dates like '8. September 2017'", () => {
+    expect(extractDocumentDate("Datum: 8. September 2017")).toBe("2017-09-08");
+    expect(extractDocumentDate("Rechnungsdatum 1. Juli 2024")).toBe("2024-07-01");
+    expect(extractDocumentDate("Rechnung vom 8. September 2017")).toBe("2017-09-08");
+    // Letterhead with "den": "München, den 8. September 2017"
+    expect(extractDocumentDate("München, den 8. September 2017\nSehr geehrte …")).toBe("2017-09-08");
+  });
+
+  it("handles month abbreviations, umlauts and no-period days", () => {
+    expect(extractDocumentDate("Datum: 3. Dez. 2019")).toBe("2019-12-03");
+    expect(extractDocumentDate("Datum: 15 März 2020")).toBe("2020-03-15");
+    expect(extractDocumentDate("Ausstellungsdatum: 1. Mai 2021")).toBe("2021-05-01");
+  });
+
+  it("skips a non-month word after the label and finds the real written date", () => {
+    // "Datum: Sehr …" must not abort the scan; the real date is later.
+    expect(extractDocumentDate("Datum: Sehr geehrte Damen. Rechnungsdatum 8. September 2017")).toBe(
+      "2017-09-08",
+    );
+  });
+
+  it("rejects an impossible written-month date", () => {
+    expect(extractDocumentDate("Datum: 31. September 2017")).toBeNull(); // Sept has 30 days
+  });
+
   it("expands two-digit years with the 00–68 / 69–99 pivot", () => {
     expect(extractDocumentDate("Datum 01.01.68")).toBe("2068-01-01");
     expect(extractDocumentDate("Datum 01.01.69")).toBe("1969-01-01");
