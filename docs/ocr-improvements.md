@@ -118,13 +118,51 @@ Key takeaways applied here:
   already available through `sharp` + `tesseract`, so no new apt packages are
   pulled in (only the small `osd` data file).
 
+## Follow-up: recovering isolated document-number markers
+
+While testing the above against real scans, a third, previously-unreported
+failure turned up: the household's own `#1234`-style document-number marker
+(a printed sticker or stamp added before scanning; see
+`extractDocumentNumber` in
+[`documents/metadata-extract.ts`](../documents/metadata-extract.ts))
+sometimes went missing from the OCR text entirely, on otherwise
+clean, unrotated, high-contrast scans — i.e. independent of the two problems
+fixed above.
+
+**Root cause, confirmed against two real production scans:** in both cases
+the marker was printed cleanly and legibly, but sat isolated in a page
+corner right next to a graphic — a company logo in one case, a decorative
+rounded box in the other. Tesseract's default page segmentation (`--psm 3`)
+regularly fuses such an isolated corner block into the neighboring graphic
+and drops it as a non-text region, even though the very same crop, run in
+isolation, OCRs perfectly. Re-running the *same, full, uncropped* page with
+`--psm 11` ("sparse text": find as much text as possible without assuming a
+normal paragraph layout) recovered the marker correctly in both cases —
+proof that this is a segmentation gap, not a recognition-quality problem
+(so the preprocessing above does not help here).
+
+**Fix:** `ocrPdf` in `text-extract.ts` now runs one extra `--psm 11` pass
+over page 1 — but only when the primary `--psm 3` text has no `#1234`-style
+marker at all (`shouldRunNumberMarkerFallback`, unit-tested). If the sparse
+pass finds one, it's prepended to the extracted text so the existing
+`extractDocumentNumber` regex picks it up exactly as if the primary pass had
+found it. Because the fallback only fires when the marker is already
+missing, the extra Tesseract call is rare in practice and cannot make a
+working case worse. Toggle with `DOCUMENTS_OCR_NUMBER_FALLBACK=0`.
+
 ## Files
 
 - [`documents/ocr-preprocess.ts`](../documents/ocr-preprocess.ts) — the
   preprocessing module (OSD parsing, rotation decision, `sharp` pipeline).
 - [`documents/text-extract.ts`](../documents/text-extract.ts) — calls
-  `detectOcrRotation` + `preprocessOcrImage` per page inside `ocrPdf`.
+  `detectOcrRotation` + `preprocessOcrImage` per page inside `ocrPdf`, and
+  runs the sparse-text document-number fallback after the main OCR loop.
 - [`documents/ocr-preprocess.test.ts`](../documents/ocr-preprocess.test.ts) —
   unit tests for the pure OSD-parsing and rotation-decision helpers.
+- [`documents/documents.test.ts`](../documents/documents.test.ts) — includes
+  unit tests for `shouldRunNumberMarkerFallback`.
+- [`documents/metadata-extract.ts`](../documents/metadata-extract.ts) —
+  `DOCUMENT_NUMBER_RE`, the single source of truth for the `#1234` marker
+  pattern, shared with `text-extract.ts`.
 - [`docker/Dockerfile.runtime`](../docker/Dockerfile.runtime) — installs
   `tesseract-ocr-osd`.

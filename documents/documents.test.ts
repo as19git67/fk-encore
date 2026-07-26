@@ -25,7 +25,12 @@ import { SUPPORTED_EXTENSIONS } from "./documents.service";
 import { reciprocalRankFusion, visibilityClause, type SearchHit } from "./search";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { chunkText } from "./document-ops";
-import { hasPoorSpacing, isSuppressedPdfJsWarning, looksLikeBrokenXref } from "./text-extract";
+import {
+  hasPoorSpacing,
+  isSuppressedPdfJsWarning,
+  looksLikeBrokenXref,
+  shouldRunNumberMarkerFallback,
+} from "./text-extract";
 
 describe("documents.service", () => {
   it("guessExtension prefers the filename extension for supported types", () => {
@@ -417,6 +422,24 @@ describe("documents.text-extract looksLikeBrokenXref", () => {
     expect(
       looksLikeBrokenXref("pdftoppm exited 137: out of memory"),
     ).toBe(false);
+  });
+});
+
+describe("documents.text-extract shouldRunNumberMarkerFallback", () => {
+  it("runs when page 1 is available and no marker was found", () => {
+    expect(shouldRunNumberMarkerFallback("Sehr geehrter Herr Beispiel, ...", true)).toBe(true);
+  });
+
+  it("does not run when the primary text already has a marker", () => {
+    expect(shouldRunNumberMarkerFallback("Beleg #4711 vom 1.1.", true)).toBe(false);
+  });
+
+  it("does not run without a page-1 image (e.g. no rasterizable pages)", () => {
+    expect(shouldRunNumberMarkerFallback("no marker here", false)).toBe(false);
+  });
+
+  it("does not run on an empty primary text without a marker but page missing", () => {
+    expect(shouldRunNumberMarkerFallback("", false)).toBe(false);
   });
 });
 
