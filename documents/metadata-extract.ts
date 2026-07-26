@@ -51,6 +51,31 @@ const DATE_ANCHOR_PATTERNS: readonly RegExp[] = [
   /\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-]+,[ \t]{0,3}(\d{1,2})\.(\d{1,2})\.(\d{4})\b/,
 ];
 
+// Same anchors as above, but for German month-name dates ("8. September 2017").
+// The month word is captured broadly and validated against MONTHS afterwards
+// (so a non-month word never blocks a real match — the caller scans all matches
+// via the /g flag). 4-digit year only. The `den` is the common
+// "München, den 8. September 2017" letterhead phrasing. The letterhead pattern
+// stays case-sensitive on the city's leading capital (no /i).
+const DATE_ANCHOR_MONTHNAME_PATTERNS: readonly RegExp[] = [
+  /\b\w*datum\b[ \t:]{0,80}(\d{1,2})\.?[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4})\b/gi,
+  /\bvom\b[ \t:]{0,5}(?:den[ \t]+)?(\d{1,2})\.?[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4})\b/gi,
+  /\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-]+,[ \t]{0,3}(?:den[ \t]+)?(\d{1,2})\.?[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4})\b/g,
+];
+
+// German month names + common abbreviations → month number.
+const MONTHS: Readonly<Record<string, number>> = {
+  januar: 1, jan: 1, februar: 2, feb: 2, "märz": 3, maerz: 3, mrz: 3,
+  april: 4, apr: 4, mai: 5, juni: 6, jun: 6, juli: 7, jul: 7, august: 8, aug: 8,
+  september: 9, sept: 9, sep: 9, oktober: 10, okt: 10,
+  november: 11, nov: 11, dezember: 12, dez: 12,
+};
+
+function monthFromName(word: string): number | null {
+  const key = word.trim().toLowerCase().replace(/\.$/, "");
+  return MONTHS[key] ?? null;
+}
+
 const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 function isLeapYear(year: number): boolean {
@@ -78,7 +103,8 @@ function toIsoDate(dayStr: string, monthStr: string, yearStr: string): string | 
  * returns `doc_date=null` even when the date is plainly in the text
  * ("Datum: 11.08.14", "Rechnungsdatum        18.01.2021", "Datum: 09.05.2014").
  * This scans the OCR text for a date anchored to a strong German date label
- * (a "…datum" word, "vom", or the "Ort, TT.MM.JJJJ" letterhead convention) and
+ * (a "…datum" word, "vom", or the "Ort, TT.MM.JJJJ" letterhead convention),
+ * both numeric ("18.01.2021") and written-month ("8. September 2017"), and
  * returns it as ISO YYYY-MM-DD.
  *
  * Only *label-anchored* dates are accepted — never just any date in the text —
@@ -93,6 +119,19 @@ export function extractDocumentDate(text: string): string | null {
     if (!m) continue;
     const iso = toIsoDate(m[1], m[2], m[3]);
     if (iso) return iso;
+  }
+  // Written-month dates ("8. September 2017"). Iterate all matches per pattern:
+  // the month word is captured broadly, so a non-month word (e.g. "Datum: sehr
+  // geehrte …") must be skipped rather than aborting the scan.
+  for (const re of DATE_ANCHOR_MONTHNAME_PATTERNS) {
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      const month = monthFromName(m[2]);
+      if (month == null) continue;
+      const iso = toIsoDate(m[1], String(month), m[3]);
+      if (iso) return iso;
+    }
   }
   return null;
 }
