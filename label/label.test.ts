@@ -12,6 +12,7 @@ import {
   listPrinters,
   getCupsBaseUrl,
 } from "./label.service";
+import type * as svc from "./label.service";
 import * as endpoints from "./label";
 
 // A minimal byte sequence that starts with the PNG signature — enough to pass
@@ -216,6 +217,7 @@ describe("label endpoints", () => {
       labelCode: "99012",
       fontKey: "medium" as const,
       align: "left" as const,
+      bold: true,
     };
     const saved = await endpoints.saveTemplates({
       templates: [template],
@@ -233,6 +235,7 @@ describe("label endpoints", () => {
       labelCode: "99010",
       fontKey: "small" as const,
       align: "center" as const,
+      bold: false,
     };
     await endpoints.saveTemplates({ templates: [template], lastTemplateId: template.id });
     await endpoints.savePrinter({ printer: "DYMO" });
@@ -246,6 +249,34 @@ describe("label endpoints", () => {
   it("rejects an unknown last-used template", async () => {
     await expect(
       endpoints.saveTemplates({ templates: [], lastTemplateId: "missing" }),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+  });
+
+  it("defaults bold to false when omitted", async () => {
+    const template = {
+      id: "no-bold",
+      name: "Ohne Fett-Angabe",
+      text: "Text",
+      labelCode: "99012",
+      fontKey: "medium" as const,
+      align: "left" as const,
+    } as unknown as svc.LabelTemplate;
+    const saved = await endpoints.saveTemplates({ templates: [template], lastTemplateId: null });
+    expect(saved.templates[0]?.bold).toBe(false);
+  });
+
+  it("rejects a non-boolean bold value", async () => {
+    const template = {
+      id: "bad-bold",
+      name: "Ungültig",
+      text: "Text",
+      labelCode: "99012",
+      fontKey: "medium" as const,
+      align: "left" as const,
+      bold: "yes",
+    } as unknown as svc.LabelTemplate;
+    await expect(
+      endpoints.saveTemplates({ templates: [template], lastTemplateId: null }),
     ).rejects.toMatchObject({ code: "invalid_argument" });
   });
 
