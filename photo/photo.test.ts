@@ -1610,6 +1610,43 @@ describe("Photo Module", () => {
       });
     });
 
+    it("excludes photos hidden by the owner or by any shared collaborator from the public link", async () => {
+      const album = await service.createAlbumLogic(user1.id, { name: "Public exclusions" });
+      const visible = await service.uploadPhotoLogic(user1.id, {
+        data: Buffer.from([1, 2, 3]),
+        name: "visible.jpg",
+        mimeType: "image/jpeg",
+      });
+      const hiddenByOwner = await service.uploadPhotoLogic(user1.id, {
+        data: Buffer.from([4, 5, 6]),
+        name: "hidden_by_owner.jpg",
+        mimeType: "image/jpeg",
+      });
+      const hiddenByCollaborator = await service.uploadPhotoLogic(user1.id, {
+        data: Buffer.from([7, 8, 9]),
+        name: "hidden_by_collaborator.jpg",
+        mimeType: "image/jpeg",
+      });
+      await service.addPhotoToAlbumLogic(user1.id, { albumId: album.id, photoId: visible.id });
+      await service.addPhotoToAlbumLogic(user1.id, { albumId: album.id, photoId: hiddenByOwner.id });
+      await service.addPhotoToAlbumLogic(user1.id, { albumId: album.id, photoId: hiddenByCollaborator.id });
+
+      await service.shareAlbumLogic(user1.id, { albumId: album.id, userId: user2.id, accessLevel: "read" });
+
+      await service.updatePhotoCurationLogic(user1.id, hiddenByOwner.id, "hidden");
+      // A collaborator (not the owner) hiding a photo must also keep it out of the public link.
+      await service.updatePhotoCurationLogic(user2.id, hiddenByCollaborator.id, "hidden");
+
+      const link = await service.createAlbumPublicLinkLogic(user1.id, album.id);
+      const publicView = await service.getPublicAlbumLogic(link.token);
+
+      const publicIds = publicView.photos.map(p => p.id);
+      expect(publicIds).toContain(visible.id);
+      expect(publicIds).not.toContain(hiddenByOwner.id);
+      expect(publicIds).not.toContain(hiddenByCollaborator.id);
+      expect(publicView.photos).toHaveLength(1);
+    });
+
     it("should let write_share participants invite users but not escalate to write_share", async () => {
       const user3 = await createUserLogic({ email: "u3@share.com", name: "User 3", password: "pw" });
       const album = await service.createAlbumLogic(user1.id, { name: "Delegated invites" });
