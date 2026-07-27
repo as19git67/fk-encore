@@ -376,11 +376,12 @@ actor PhotoSyncService {
                 : nil
 
             // Photos we uploaded whose source asset is no longer in the iOS album.
-            let toRemove: [Int] = serverPhotos.compactMap { photo in
-                if let tracked = bisyncTracked, !tracked.contains(String(photo.id)) { return nil }
-                guard let localId = serverPhotoMap[String(photo.id)] else { return nil }
-                return presentLocalIds.contains(localId) ? nil : photo.id
-            }
+            let toRemove = Self.computeAlbumRemovals(
+                serverPhotoIds: serverPhotos.map(\.id),
+                serverPhotoMap: serverPhotoMap,
+                presentLocalIds: presentLocalIds,
+                bisyncTracked: bisyncTracked
+            )
             guard !toRemove.isEmpty else { continue }
 
             struct BatchBody: Encodable {
@@ -401,6 +402,31 @@ actor PhotoSyncService {
             if mode == .bisync {
                 DownloadSyncPreferences.forgetDownloadedPhotos(albumId: serverAlbumId, photoIds: toRemove)
             }
+        }
+    }
+
+    /// Pure decision core of `syncAlbumDeletions` (extracted for unit testing):
+    /// given the server album's photo ids, the global server→local id map, the
+    /// iOS album's current local ids, and — in bisync mode — the set of server
+    /// photo ids already downloaded for this album pair, returns the server photo
+    /// ids to remove from the album.
+    ///
+    /// A photo is removed only when it is one THIS device is responsible for
+    /// (present in `serverPhotoMap`) whose local asset has left the iOS album. In
+    /// bisync mode a server photo not yet downloaded for this album pair
+    /// (`bisyncTracked` misses it) is never removed — otherwise a web-side
+    /// addition would be deleted before it could sync down. `bisyncTracked == nil`
+    /// (pure sync mode) skips that guard.
+    nonisolated static func computeAlbumRemovals(
+        serverPhotoIds: [Int],
+        serverPhotoMap: [String: String],
+        presentLocalIds: Set<String>,
+        bisyncTracked: Set<String>?
+    ) -> [Int] {
+        serverPhotoIds.compactMap { pid in
+            if let tracked = bisyncTracked, !tracked.contains(String(pid)) { return nil }
+            guard let localId = serverPhotoMap[String(pid)] else { return nil }
+            return presentLocalIds.contains(localId) ? nil : pid
         }
     }
 
