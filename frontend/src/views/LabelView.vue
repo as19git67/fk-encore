@@ -6,7 +6,7 @@ import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import Select from 'primevue/select'
 import SelectButton from 'primevue/selectbutton'
-import ToggleButton from 'primevue/togglebutton'
+import ToggleSwitch from 'primevue/toggleswitch'
 import Message from 'primevue/message'
 import Dialog from 'primevue/dialog'
 import { useConfirm } from 'primevue/useconfirm'
@@ -664,16 +664,8 @@ onMounted(() => {
         </div>
 
         <div class="field field--bold">
-          <span class="label">Stil</span>
-          <ToggleButton
-            v-model="bold"
-            on-label="Fett"
-            off-label="Normal"
-            on-icon="pi pi-check"
-            off-icon="pi pi-minus"
-            :disabled="printing"
-            aria-label="Fett"
-          />
+          <span class="label">Fett</span>
+          <ToggleSwitch v-model="bold" :disabled="printing" aria-label="Fett" />
         </div>
 
         <div class="field field--align">
@@ -825,15 +817,8 @@ onMounted(() => {
             />
           </div>
           <div class="field field--bold">
-            <span class="label">Stil</span>
-            <ToggleButton
-              v-model="templateForm.bold"
-              on-label="Fett"
-              off-label="Normal"
-              on-icon="pi pi-check"
-              off-icon="pi pi-minus"
-              aria-label="Fett"
-            />
+            <span class="label">Fett</span>
+            <ToggleSwitch v-model="templateForm.bold" aria-label="Fett" />
           </div>
           <div class="field field--align">
             <span class="label">Ausrichtung</span>
