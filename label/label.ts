@@ -147,6 +147,9 @@ function normalizeTemplates(input: svc.LabelTemplate[]): svc.LabelTemplate[] {
     if (!VALID_ALIGNS.has(template.align)) {
       throw APIError.invalidArgument("Ungültige Ausrichtung");
     }
+    if (template.bold !== undefined && typeof template.bold !== "boolean") {
+      throw APIError.invalidArgument("Ungültiger Fett-Wert");
+    }
     return {
       id,
       name,
@@ -154,6 +157,7 @@ function normalizeTemplates(input: svc.LabelTemplate[]): svc.LabelTemplate[] {
       labelCode,
       fontKey: template.fontKey,
       align: template.align,
+      bold: Boolean(template.bold),
     };
   });
 }

@@ -261,6 +261,7 @@ export interface LabelTemplate {
   labelCode: string;
   fontKey: "small" | "medium" | "large";
   align: "left" | "center";
+  bold: boolean;
 }
 
 export async function getLabelPrefs(userId: number): Promise<LabelPrefs> {

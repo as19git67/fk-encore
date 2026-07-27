@@ -36,6 +36,7 @@ export interface LabelTemplate {
   labelCode: string
   fontKey: LabelTemplateFontKey
   align: LabelTemplateAlign
+  bold: boolean
 }
 
 export interface LabelTemplatesResponse {

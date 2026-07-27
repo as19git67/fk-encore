@@ -6,6 +6,7 @@ import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import Select from 'primevue/select'
 import SelectButton from 'primevue/selectbutton'
+import ToggleButton from 'primevue/togglebutton'
 import Message from 'primevue/message'
 import Dialog from 'primevue/dialog'
 import { useConfirm } from 'primevue/useconfirm'
@@ -74,6 +75,7 @@ const selectedPrinter = ref<string | null>(null)
 const text = ref('')
 const copies = ref(1)
 const fontKey = ref<FontPreset['key']>('medium')
+const bold = ref(false)
 const align = ref<'left' | 'center'>('left')
 const labelCode = ref<string>('99012')
 const templates = ref<LabelTemplate[]>([])
@@ -90,6 +92,7 @@ const templateForm = ref<Omit<LabelTemplate, 'id'>>({
   labelCode: '99012',
   fontKey: 'medium',
   align: 'left',
+  bold: false,
 })
 
 const loading = ref(false)
@@ -218,10 +221,11 @@ function renderLabel() {
   // which monospace face the browser actually substitutes.
   const targetCharPx = DPI / font.cpi
   const BASE = 100
-  ctx.font = `${BASE}px 'Courier New', Courier, monospace`
+  const weight = bold.value ? 'bold ' : ''
+  ctx.font = `${weight}${BASE}px 'Courier New', Courier, monospace`
   const advance = ctx.measureText('M').width || BASE * 0.6
   const fontSizePx = (BASE * targetCharPx) / advance
-  ctx.font = `${fontSizePx}px 'Courier New', Courier, monospace`
+  ctx.font = `${weight}${fontSizePx}px 'Courier New', Courier, monospace`
 
   const lines = wrappedLines.value.slice(0, maxLines.value)
   lines.forEach((line, i) => {
@@ -235,7 +239,7 @@ function renderLabel() {
 }
 
 // Re-render whenever anything that affects the output changes.
-watch([text, fontKey, align, labelCode, placeholderNow], () => nextTick(renderLabel))
+watch([text, fontKey, bold, align, labelCode, placeholderNow], () => nextTick(renderLabel))
 watch(labelCode, (currentLabelCode) => {
   if (selectedTemplate.value?.labelCode !== currentLabelCode) {
     selectedTemplateId.value = NO_TEMPLATE_ID
@@ -250,17 +254,23 @@ function loadUiPrefs() {
     if (!raw) return
     const p = JSON.parse(raw)
     if (FONT_PRESETS.some((f) => f.key === p.fontKey)) fontKey.value = p.fontKey
+    if (typeof p.bold === 'boolean') bold.value = p.bold
     if (p.align === 'left' || p.align === 'center') align.value = p.align
     if (LABELS.some((l) => l.code === p.labelCode)) labelCode.value = p.labelCode
   } catch {
     /* ignore corrupt prefs */
   }
 }
-watch([fontKey, align, labelCode], () => {
+watch([fontKey, bold, align, labelCode], () => {
   try {
     localStorage.setItem(
       LS_KEY,
-      JSON.stringify({ fontKey: fontKey.value, align: align.value, labelCode: labelCode.value }),
+      JSON.stringify({
+        fontKey: fontKey.value,
+        bold: bold.value,
+        align: align.value,
+        labelCode: labelCode.value,
+      }),
     )
   } catch {
     /* storage unavailable — non-fatal */
@@ -318,6 +328,7 @@ function applyTemplateValues(template: LabelTemplate) {
   text.value = template.text
   labelCode.value = template.labelCode
   fontKey.value = template.fontKey
+  bold.value = Boolean(template.bold)
   align.value = template.align
   selectedTemplateId.value = template.id
   placeholderNow.value = new Date()
@@ -362,6 +373,7 @@ function openCreateTemplate() {
     text: text.value,
     labelCode: labelCode.value,
     fontKey: fontKey.value,
+    bold: bold.value,
     align: align.value,
   }
   templateDialogVisible.value = true
@@ -376,6 +388,7 @@ function openEditTemplate() {
     text: template.text,
     labelCode: template.labelCode,
     fontKey: template.fontKey,
+    bold: Boolean(template.bold),
     align: template.align,
   }
   templateDialogVisible.value = true
@@ -407,6 +420,7 @@ async function saveTemplate() {
     text: templateForm.value.text,
     labelCode: templateForm.value.labelCode,
     fontKey: templateForm.value.fontKey,
+    bold: templateForm.value.bold,
     align: templateForm.value.align,
   }
   const next = editingTemplateId.value
@@ -649,6 +663,19 @@ onMounted(() => {
           </SelectButton>
         </div>
 
+        <div class="field field--bold">
+          <span class="label">Stil</span>
+          <ToggleButton
+            v-model="bold"
+            on-label="Fett"
+            off-label="Normal"
+            on-icon="pi pi-check"
+            off-icon="pi pi-minus"
+            :disabled="printing"
+            aria-label="Fett"
+          />
+        </div>
+
         <div class="field field--align">
           <span class="label">Ausrichtung</span>
           <SelectButton
@@ -797,6 +824,17 @@ onMounted(() => {
               :allow-empty="false"
             />
           </div>
+          <div class="field field--bold">
+            <span class="label">Stil</span>
+            <ToggleButton
+              v-model="templateForm.bold"
+              on-label="Fett"
+              off-label="Normal"
+              on-icon="pi pi-check"
+              off-icon="pi pi-minus"
+              aria-label="Fett"
+            />
+          </div>
           <div class="field field--align">
             <span class="label">Ausrichtung</span>
             <SelectButton
@@ -891,6 +929,9 @@ onMounted(() => {
 .field--font,
 .field--align {
   flex: 1 1 auto;
+}
+.field--bold {
+  flex: 0 0 auto;
 }
 
 .template-field {
