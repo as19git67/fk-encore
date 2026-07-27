@@ -244,27 +244,20 @@ actor PhotoDownloadService {
             let prev = downloadedState[key]
             let next = makeState(from: photo)
 
-            if prev == next { continue }  // nothing to do
-
-            // Decide re-download ONLY from the pixel hash (image_data_hash), not
-            // the full/state `hash` — the latter changes on favorite/caption/date
-            // edits, which used to trigger a spurious re-download that deleted
-            // the local asset (and, for camera originals, showed a "may we delete
-            // this photo?" prompt on every sync). A nil on either side is treated
-            // as "pixels unchanged".
-            let pixelsChanged: Bool = {
-                guard let prevPixel = prev?.imageDataHash, let nextPixel = next.imageDataHash else { return false }
-                return prevPixel != nextPixel
-            }()
-
             // Re-download only on a real SERVER pixel change, and only for assets
             // THIS app downloaded (app-created → deletable without a prompt, never
             // a camera original). Metadata-only changes — including caption — never
             // replace a local photo (no re-encoded duplicate). Device-originated
-            // photos are never replaced; the device is their pixel source.
+            // photos are never replaced; the device is their pixel source. The
+            // decision core is a pure function (see `reconcileAction`) so it can
+            // be unit-tested without a live Photos library.
             let isDownloaded = downloadedAssetIds.contains(localId)
 
-            if pixelsChanged && isDownloaded {
+            switch Self.reconcileAction(prev: prev, next: next, isDownloaded: isDownloaded) {
+            case .skip:
+                continue  // nothing moved
+
+            case .replacePixels:
                 // Re-download the server's new pixels (byte-identical). The old
                 // app-created copy is deleted (no prompt) and the new asset takes
                 // its place; the upload side skips it (downloaded-asset guard), so
@@ -283,15 +276,20 @@ actor PhotoDownloadService {
                     // Leave the old local asset in place; we'll retry next run.
                     continue
                 }
-            } else {
-                // Metadata-only change (or a device photo we must not replace):
-                // update favorite / creationDate in place. For downloaded assets
-                // also propagate a changed caption via a lossless metadata edit
-                // (no re-download, no pixel change, no re-upload).
+
+            case .metadataOnly:
+                // Update favorite / creationDate in place. The caption is
+                // intentionally NOT written back — a camera original exposes no
+                // user-editable description on iOS, so a server-side caption edit
+                // stays server-only (the "web description → iOS" restriction).
                 await applyServerMetadata(localIdentifier: localId, photo: photo)
-                if isDownloaded, prev?.caption != next.caption {
-                    await applyCaption(localIdentifier: localId, description: photo.description)
-                }
+
+            case .metadataAndCaption:
+                // Downloaded (app-created) asset whose caption changed: apply
+                // favorite/date AND propagate the caption via a lossless metadata
+                // edit (no re-download, no pixel change, no re-upload).
+                await applyServerMetadata(localIdentifier: localId, photo: photo)
+                await applyCaption(localIdentifier: localId, description: photo.description)
             }
 
             downloadedState[key] = next
@@ -311,6 +309,45 @@ actor PhotoDownloadService {
             isFavorite: photo.curation_status == .favorite,
             caption: photo.description
         )
+    }
+
+    /// What the download reconcile must do for one already-tracked album photo,
+    /// given the server state we last applied (`prev`), the server state now
+    /// (`next`), and whether the local asset is one THIS app downloaded.
+    enum ReconcileAction: Equatable, Sendable {
+        /// Server state matches what we last applied — nothing to do.
+        case skip
+        /// Server pixels changed AND the asset is app-downloaded → re-download.
+        case replacePixels
+        /// Apply favorite/date only; the caption is left untouched (camera
+        /// originals: iOS exposes no user-editable description → web caption
+        /// edits stay server-only).
+        case metadataOnly
+        /// Downloaded asset whose caption changed → apply favorite/date AND write
+        /// the caption into the asset's IPTC.
+        case metadataAndCaption
+    }
+
+    /// Pure reconcile decision (extracted for unit testing — no Photos library
+    /// or network involved). Pixel changes are decided ONLY from
+    /// `image_data_hash`, never the full/state `hash`, so a favorite/caption/date
+    /// edit never triggers a re-download + delete. A nil pixel hash on either
+    /// side counts as "pixels unchanged".
+    nonisolated static func reconcileAction(
+        prev: DownloadSyncPreferences.DownloadedPhotoState?,
+        next: DownloadSyncPreferences.DownloadedPhotoState,
+        isDownloaded: Bool
+    ) -> ReconcileAction {
+        if prev == next { return .skip }
+
+        let pixelsChanged: Bool = {
+            guard let p = prev?.imageDataHash, let n = next.imageDataHash else { return false }
+            return p != n
+        }()
+
+        if pixelsChanged && isDownloaded { return .replacePixels }
+        if isDownloaded && prev?.caption != next.caption { return .metadataAndCaption }
+        return .metadataOnly
     }
 
     /// Applies server-side metadata onto the local PHAsset: favorite flag and
