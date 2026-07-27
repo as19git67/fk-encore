@@ -5600,9 +5600,17 @@ export async function getPublicAlbumLogic(token: string): Promise<PublicAlbumRes
 
   const stats = await getAlbumStats(link.album_id);
 
-  // Get all photos in the album. Surface the album owner's curation so the
-  // public map view can filter on "Highlights" (group covers) and hide the
-  // photos the owner has hidden.
+  // A photo hidden by ANY album participant (owner or a shared collaborator)
+  // must never reach an anonymous public-link visitor — there's no "current
+  // user" to scope hiding to here, so we exclude at the SQL level rather than
+  // just flagging it for client-side filtering (that flag can trivially be
+  // bypassed by calling this endpoint directly).
+  const shareRows = await dbAll<{ user_id: number }>(
+    db.select({ user_id: albumShares.user_id }).from(albumShares).where(eq(albumShares.album_id, link.album_id))
+  );
+  const participantIds = [album.user_id, ...shareRows.map(s => s.user_id)];
+
+  // Get all photos in the album, excluding any hidden by a participant.
   const photoRows = (await db.execute(sql`
     SELECT
       p.id, p.filename, p.original_name, p.mime_type, p.size,
@@ -5612,13 +5620,15 @@ export async function getPublicAlbumLogic(token: string): Promise<PublicAlbumRes
       EXISTS (
         SELECT 1 FROM ${photoGroups} pg
         WHERE pg.user_id = ${album.user_id} AND pg.cover_photo_id = p.id
-      ) AS is_highlight,
-      EXISTS (
-        SELECT 1 FROM ${photoCuration} pc
-        WHERE pc.user_id = ${album.user_id} AND pc.photo_id = p.id AND pc.status = 'hidden'
-      ) AS is_hidden
+      ) AS is_highlight
     FROM photos p
     INNER JOIN album_photos ap ON ap.photo_id = p.id AND ap.album_id = ${link.album_id}
+    WHERE NOT EXISTS (
+      SELECT 1 FROM ${photoCuration} pc
+      WHERE pc.photo_id = p.id
+        AND pc.status = 'hidden'
+        AND pc.user_id = ANY(ARRAY[${sql.join(participantIds.map(id => sql`${id}`), sql`, `)}]::int[])
+    )
     ORDER BY p.taken_at ASC NULLS LAST, p.created_at ASC
   `)).rows;
 
@@ -5658,7 +5668,6 @@ export async function getPublicAlbumLogic(token: string): Promise<PublicAlbumRes
       auto_crop: r.auto_crop ?? undefined,
       description: r.description ?? undefined,
       is_highlight: !!r.is_highlight,
-      is_hidden: !!r.is_hidden,
     })),
   };
 }
