@@ -157,7 +157,12 @@ async def cancel_tool(tool: ToolName):
     return JSONResponse({"status": "cancelled"})
 
 
-REPORT_FILES: dict[ToolName, list[str]] = {
+import re
+
+# Base filenames (without date prefix) each tool can produce.  The actual
+# scripts prepend a YYYY-MM-DD- date prefix (e.g. "2026-07-28-diagnose.md").
+# _find_report_files() resolves the latest date-prefixed variant on disk.
+_REPORT_BASES: dict[ToolName, list[str]] = {
     ToolName.diagnose: ["diagnose.md"],
     ToolName.cloud_audit: [
         "cloud_audit.md",
@@ -171,6 +176,8 @@ REPORT_FILES: dict[ToolName, list[str]] = {
     ],
 }
 
+_DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
+
 CONTENT_TYPES: dict[str, str] = {
     ".md": "text/markdown; charset=utf-8",
     ".json": "application/json; charset=utf-8",
@@ -178,27 +185,58 @@ CONTENT_TYPES: dict[str, str] = {
 }
 
 
+def _find_report_files(tool: ToolName) -> list[Path]:
+    """Return the latest date-prefixed variant of each expected report file."""
+    out_dir = Path(SCRIPTS_DIR) / "out"
+    if not out_dir.is_dir():
+        return []
+
+    bases = _REPORT_BASES.get(tool, [])
+    result: list[Path] = []
+    for base in bases:
+        # Try exact name first (legacy / non-prefixed).
+        exact = out_dir / base
+        if exact.is_file():
+            result.append(exact)
+            continue
+        # Glob for date-prefixed variants and pick the newest.
+        candidates = sorted(out_dir.glob(f"*-{base}"), reverse=True)
+        for c in candidates:
+            prefix = c.name[: len(c.name) - len(base)]
+            if _DATE_PREFIX_RE.match(prefix):
+                result.append(c)
+                break
+    return result
+
+
 @app.get("/reports/{tool}")
 async def list_reports(tool: ToolName):
-    out_dir = Path(SCRIPTS_DIR) / "out"
-    candidates = REPORT_FILES.get(tool, [])
     files = []
-    for name in candidates:
-        p = out_dir / name
-        if p.is_file():
-            stat = p.stat()
-            files.append({
-                "name": name,
-                "size": stat.st_size,
-                "modified": stat.st_mtime,
-            })
+    for p in _find_report_files(tool):
+        stat = p.stat()
+        files.append({
+            "name": p.name,
+            "size": stat.st_size,
+            "modified": stat.st_mtime,
+        })
     return {"files": files}
+
+
+def _is_allowed_report(tool: ToolName, filename: str) -> bool:
+    """Check that filename matches a known report pattern for the tool."""
+    bases = _REPORT_BASES.get(tool, [])
+    for base in bases:
+        if filename == base:
+            return True
+        prefix = filename[: len(filename) - len(base)]
+        if filename.endswith(base) and _DATE_PREFIX_RE.match(prefix):
+            return True
+    return False
 
 
 @app.get("/reports/{tool}/{filename}")
 async def download_report(tool: ToolName, filename: str):
-    allowed = REPORT_FILES.get(tool, [])
-    if filename not in allowed:
+    if not _is_allowed_report(tool, filename):
         raise HTTPException(404, f"unknown report file: {filename}")
     out_dir = Path(SCRIPTS_DIR) / "out"
     path = out_dir / filename
