@@ -609,7 +609,7 @@ class ClassifyResponse(BaseModel):
 _CLASSIFY_PROMPTS: dict[str, str] | None = None
 
 
-def _taxonomy_outline(nodes: list[TaxonomyNode]) -> str:
+def _taxonomy_outline(nodes: list[TaxonomyNode], *, with_hints: bool = True) -> str:
     by_parent: dict[str | None, list[TaxonomyNode]] = {}
     for n in nodes:
         by_parent.setdefault(n.parent_slug, []).append(n)
@@ -618,7 +618,7 @@ def _taxonomy_outline(nodes: list[TaxonomyNode]) -> str:
         lines: list[str] = []
         for n in by_parent.get(parent, []):
             indent = "  " * depth
-            hint = f" — {n.hint}" if n.hint else ""
+            hint = f" — {n.hint}" if with_hints and n.hint else ""
             lines.append(f"{indent}- {n.slug}: {n.name}{hint}")
             lines.extend(render(n.slug, depth + 1))
         return lines
@@ -656,7 +656,7 @@ def _examples_outline(entries: list[ExampleEntry]) -> str:
     return "\n".join(lines)
 
 
-def _document_types_outline(entries: list[DocumentTypeEntry]) -> str:
+def _document_types_outline(entries: list[DocumentTypeEntry], *, with_hints: bool = True) -> str:
     """Render the document-type list as "- slug: Name — Hinweis" lines.
     Empty input yields an empty string (caller must gate on that)."""
 
@@ -664,12 +664,12 @@ def _document_types_outline(entries: list[DocumentTypeEntry]) -> str:
         return ""
     lines: list[str] = []
     for e in entries:
-        hint = f" — {e.hint}" if e.hint else ""
+        hint = f" — {e.hint}" if with_hints and e.hint else ""
         lines.append(f"- {e.slug}: {e.name}{hint}")
     return "\n".join(lines)
 
 
-def _tax_sections_outline(entries: list[TaxSectionEntry]) -> str:
+def _tax_sections_outline(entries: list[TaxSectionEntry], *, with_hints: bool = True) -> str:
     """Render the tax-section list grouped by ``group`` in a stable order.
     Empty input yields an empty string (caller must gate on that)."""
 
@@ -688,15 +688,14 @@ def _tax_sections_outline(entries: list[TaxSectionEntry]) -> str:
         seen.add(group)
         lines.append(f"[{_TAX_GROUP_LABELS[group]}]")
         for e in by_group[group]:
-            hint = f" — {e.hint}" if e.hint else ""
+            hint = f" — {e.hint}" if with_hints and e.hint else ""
             lines.append(f"- {e.slug}: {e.name}{hint}")
-    # Render any unexpected groups at the end so we never silently drop entries.
     for group, items in by_group.items():
         if group in seen:
             continue
         lines.append(f"[{group}]")
         for e in items:
-            hint = f" — {e.hint}" if e.hint else ""
+            hint = f" — {e.hint}" if with_hints and e.hint else ""
             lines.append(f"- {e.slug}: {e.name}{hint}")
     return "\n".join(lines)
 
@@ -765,18 +764,7 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
     tax_active = bool(req.tax_sections)
     subjects_active = bool(req.subject_persons)
     examples_active = bool(req.examples)
-
-    doctype_block = (
-        f"\n\nDokumentarten (slug: Name — Hinweis):\n{_document_types_outline(req.document_types)}"
-        if doctype_active
-        else ""
-    )
-
-    tax_block = (
-        f"\n\nSteuer-Sektionen (slug: Name — Hinweis):\n{_tax_sections_outline(req.tax_sections)}"
-        if tax_active
-        else ""
-    )
+    hints_active = True
 
     subjects_block = (
         f"\n\nBezugspersonen (Name → Beziehungs-Tag):\n{_subject_persons_outline(req.subject_persons)}"
@@ -784,16 +772,28 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
         else ""
     )
 
-    examples_block = (
-        f"\n\nÄhnliche, bereits eingeordnete Dokumente (Orientierung):\n{_examples_outline(req.examples)}"
-        if examples_active
-        else ""
-    )
+    def _build_data_blocks(*, with_hints: bool) -> tuple[str, str, str]:
+        h_label = " — Hinweis" if with_hints else ""
+        dt = (
+            f"\n\nDokumentarten (slug: Name{h_label}):\n"
+            f"{_document_types_outline(req.document_types, with_hints=with_hints)}"
+            if doctype_active
+            else ""
+        )
+        tx = (
+            f"\n\nSteuer-Sektionen (slug: Name{h_label}):\n"
+            f"{_tax_sections_outline(req.tax_sections, with_hints=with_hints)}"
+            if tax_active
+            else ""
+        )
+        tax_outline = _taxonomy_outline(req.taxonomy, with_hints=with_hints)
+        return tax_outline, dt, tx
 
     # The few-shot examples are orientation only and must never be the reason a
     # classification fails: when the prompt overflows the context window they
     # are shed first (below), so the document still gets classified zero-shot.
-    def _assemble(with_examples: bool) -> tuple[str, Callable[[str], str]]:
+    # Hints are shed second — without them the model still sees slug + name.
+    def _assemble(with_examples: bool, with_hints: bool) -> tuple[str, Callable[[str], str]]:
         system_prompt = (
             prompts["system"]
             + (prompts["document_type"] if doctype_active else "")
@@ -801,11 +801,17 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
             + (prompts["subject_persons"] if subjects_active else "")
             + (prompts["examples"] if with_examples else "")
         )
-        ex_block = examples_block if with_examples else ""
+        ex_block = (
+            f"\n\nÄhnliche, bereits eingeordnete Dokumente (Orientierung):\n{_examples_outline(req.examples)}"
+            if with_examples
+            else ""
+        )
+        taxonomy_text, doctype_block, tax_block = _build_data_blocks(with_hints=with_hints)
+        h_label = " — Hinweis" if with_hints else ""
 
         def build(body: str) -> str:
             return (
-                f"Taxonomie (slug: Name — Hinweis):\n{_taxonomy_outline(req.taxonomy)}"
+                f"Taxonomie (slug: Name{h_label}):\n{taxonomy_text}"
                 f"{doctype_block}{tax_block}{subjects_block}{ex_block}\n\n"
                 f"Max. Tags: {req.max_tags}\n\n"
                 f"Dokumenttext:\n---\n{body}\n---"
@@ -813,7 +819,7 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
 
         return system_prompt, build
 
-    system_prompt, _build_user_prompt = _assemble(examples_active)
+    system_prompt, _build_user_prompt = _assemble(examples_active, hints_active)
     user_prompt = _build_user_prompt(text)
 
     # Token-budget guard. The taxonomy + tax_sections outline can be several
@@ -834,16 +840,27 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
                 overhead_tokens, budget,
             )
             examples_active = False
-            system_prompt, _build_user_prompt = _assemble(False)
+            system_prompt, _build_user_prompt = _assemble(False, hints_active)
+            user_prompt = _build_user_prompt(text)
+            overhead_tokens = _count_tokens(llm, system_prompt + _build_user_prompt(""))
+
+        # Hints second: the taxonomy/doctype/tax-section hints are the largest
+        # variable contributor. Without them the model still sees every slug +
+        # name — just no disambiguation prose. Much better than a hard 413.
+        if hints_active and overhead_tokens is not None and budget - overhead_tokens < 64:
+            log.info(
+                "classify: dropping taxonomy/doctype/tax hints to fit n_ctx "
+                "(overhead=%d budget=%d)",
+                overhead_tokens, budget,
+            )
+            hints_active = False
+            system_prompt, _build_user_prompt = _assemble(examples_active, False)
             user_prompt = _build_user_prompt(text)
             overhead_tokens = _count_tokens(llm, system_prompt + _build_user_prompt(""))
 
     if overhead_tokens is not None:
         text_token_budget = budget - overhead_tokens
         if text_token_budget < 64:
-            # Even with empty text (and no examples) we'd overflow —
-            # taxonomy/tax_sections alone are too large. Surface a 413 so the
-            # caller can act on it instead of hitting llama.cpp's 500.
             raise HTTPException(
                 status_code=413,
                 detail=(
