@@ -156,7 +156,7 @@ function asPhotos(photos: PublicAlbumPhoto[]): Photo[] {
     ...p,
     user_id: 0,
     hash: undefined,
-    curation_status: p.is_hidden ? 'hidden' as const : 'visible' as const,
+    curation_status: 'visible' as const,
     ai_quality_details: undefined,
     description: p.description,
   }))
