@@ -182,6 +182,33 @@ actor PhotoDownloadService {
         let iosAlbum   = try await getOrCreateIOSAlbum(named: albumData.name)
         let trashAlbum = try await getOrCreateIOSAlbum(named: Self.trashAlbumName)
 
+        // 0. Reverse of hide→trash: a photo that is hidden server-side but whose
+        //    local asset is back in the iOS album (the user pulled it out of
+        //    "F4mil Trash") is pushed back to `visible`. Uses the RAW, unfiltered
+        //    server list because `applyFilter` has already dropped hidden photos.
+        //    The un-hidden photos only reappear as visible on the NEXT run (this
+        //    run's server response still said hidden) — eventual consistency, no
+        //    extra fetch. Decision core is the pure `unhideCandidates`.
+        if !DownloadSyncPreferences.includeHidden {
+            let hiddenIds = albumData.photos
+                .filter { $0.curation_status == .hidden }
+                .map { $0.id }
+            if !hiddenIds.isEmpty {
+                let memberLocalIds = await albumMemberLocalIds(in: iosAlbum)
+                let unhideMap = PhotoSyncPreferences.loadServerPhotoMap()
+                let toUnhide = Self.unhideCandidates(
+                    hiddenServerPhotoIds: hiddenIds,
+                    serverPhotoMap: unhideMap,
+                    albumMemberLocalIds: memberLocalIds,
+                    includeHidden: false
+                )
+                for photoId in toUnhide {
+                    try Task.checkCancellation()
+                    await unhideOnServer(photoId: photoId)
+                }
+            }
+        }
+
         // 1. Remove photos that are no longer in the server album
         let removedIds = downloadedIds.subtracting(serverPhotoIds)
         for removedId in removedIds {
@@ -348,6 +375,26 @@ actor PhotoDownloadService {
         if pixelsChanged && isDownloaded { return .replacePixels }
         if isDownloaded && prev?.caption != next.caption { return .metadataAndCaption }
         return .metadataOnly
+    }
+
+    /// Reverse of hide→trash: which hidden server photos should be pushed back to
+    /// `visible`. A photo qualifies when it is hidden server-side AND its mapped
+    /// local asset is a member of the synced iOS album again — i.e. the user
+    /// pulled it out of "F4mil Trash". With the hidden filter off there is no
+    /// hide→trash semantics, so nothing is un-hidden. Pure (no Photos library or
+    /// network) so it can be unit-tested, mirroring `computeAlbumRemovals` /
+    /// `reconcileAction`.
+    nonisolated static func unhideCandidates(
+        hiddenServerPhotoIds: [Int],
+        serverPhotoMap: [String: String],
+        albumMemberLocalIds: Set<String>,
+        includeHidden: Bool
+    ) -> [Int] {
+        guard !includeHidden else { return [] }
+        return hiddenServerPhotoIds.filter { id in
+            guard let localId = serverPhotoMap[String(id)] else { return false }
+            return albumMemberLocalIds.contains(localId)
+        }
     }
 
     /// Applies server-side metadata onto the local PHAsset: favorite flag and
@@ -592,6 +639,34 @@ actor PhotoDownloadService {
     }
 
     /// Adds an existing local asset to the iOS album, if it isn't already a member.
+    /// All local identifiers currently in `album`. Runs the enumeration off the
+    /// main actor so a large album doesn't block the sync actor.
+    private func albumMemberLocalIds(in album: PHAssetCollection) async -> Set<String> {
+        await withCheckedContinuation { (cont: CheckedContinuation<Set<String>, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var ids = Set<String>()
+                PHAsset.fetchAssets(in: album, options: nil).enumerateObjects { asset, _, _ in
+                    ids.insert(asset.localIdentifier)
+                }
+                cont.resume(returning: ids)
+            }
+        }
+    }
+
+    /// Pushes a photo's curation back to `visible` on the server. Best-effort:
+    /// a failure just retries on the next sync run.
+    private func unhideOnServer(photoId: Int) async {
+        struct CurationBody: Encodable { let status: String }
+        do {
+            let _: SuccessResponse = try await APIClient.shared.patch(
+                "/photos/\(photoId)/curation",
+                body: CurationBody(status: "visible")
+            )
+        } catch {
+            // Best-effort; retried next run.
+        }
+    }
+
     private func addToAlbumIfNeeded(localIdentifier: String, album: PHAssetCollection) async {
         let assets = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil)
         guard assets.count > 0 else { return }

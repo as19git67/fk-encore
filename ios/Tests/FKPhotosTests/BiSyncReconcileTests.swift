@@ -161,4 +161,46 @@ final class BiSyncReconcileTests: XCTestCase {
             "A nil pixel hash must not be treated as a pixel change"
         )
     }
+
+    // MARK: - Un-hide (reverse of hide→trash): PhotoDownloadService.unhideCandidates
+
+    /// A hidden photo whose local asset is back in the iOS album (pulled out of
+    /// "F4mil Trash") is pushed to `visible`; one still sitting in the trash
+    /// (not an album member) is left hidden.
+    func testUnhidePicksMemberButNotTrashResident() {
+        let serverPhotoMap = ["30": "localBack", "31": "localTrash"]
+        let members: Set<String> = ["localBack"]  // localTrash is still in F4mil Trash
+
+        let toUnhide = PhotoDownloadService.unhideCandidates(
+            hiddenServerPhotoIds: [30, 31],
+            serverPhotoMap: serverPhotoMap,
+            albumMemberLocalIds: members,
+            includeHidden: false
+        )
+        XCTAssertEqual(toUnhide, [30], "Only the hidden photo whose asset is back in the album is un-hidden")
+    }
+
+    /// A hidden photo this device never mapped locally is never un-hidden — it
+    /// isn't ours to reconcile.
+    func testUnhideIgnoresUnmappedPhotos() {
+        let toUnhide = PhotoDownloadService.unhideCandidates(
+            hiddenServerPhotoIds: [99],
+            serverPhotoMap: [:],            // 99 not mapped to any local asset
+            albumMemberLocalIds: ["whatever"],
+            includeHidden: false
+        )
+        XCTAssertTrue(toUnhide.isEmpty, "Unmapped hidden photos are left untouched")
+    }
+
+    /// With the hidden filter off there is no hide→trash semantics, so nothing is
+    /// un-hidden even if a mapped asset is an album member.
+    func testUnhideIsNoOpWhenIncludeHidden() {
+        let toUnhide = PhotoDownloadService.unhideCandidates(
+            hiddenServerPhotoIds: [30],
+            serverPhotoMap: ["30": "localBack"],
+            albumMemberLocalIds: ["localBack"],
+            includeHidden: true
+        )
+        XCTAssertTrue(toUnhide.isEmpty, "includeHidden disables the hide/un-hide round-trip")
+    }
 }
