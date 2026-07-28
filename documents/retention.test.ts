@@ -29,12 +29,19 @@ describe("retentionFor", () => {
     // Tax categories are tax-relevant even without the flag.
     expect(retentionFor({ categorySlug: "behoerden-steuerbescheid", documentType: "bescheid", taxRelevant: false }).cls)
       .toBe("steuer_10");
+    expect(retentionFor({ categorySlug: "landwirtschaft-steuer", documentType: "abrechnung", taxRelevant: false }).cls)
+      .toBe("steuer_10");
   });
 
   it("keeps contracts until the contract ends", () => {
     const r = retentionFor({ categorySlug: "vertraege-strom", documentType: "vertrag", taxRelevant: false });
     expect(r.cls).toBe("bis_ende");
     expect(r.years).toBeNull();
+  });
+
+  it("keeps Pachtverträge until the contract ends (by category)", () => {
+    const r = retentionFor({ categorySlug: "landwirtschaft-pacht", documentType: "bescheid", taxRelevant: false });
+    expect(r.cls).toBe("bis_ende");
   });
 
   it("keeps purchases until warranty/guarantee ends", () => {
