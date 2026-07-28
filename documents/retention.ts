@@ -59,6 +59,7 @@ const TAX_CATEGORIES: ReadonlySet<string> = new Set([
   "finanzen-kirchensteuer",
   "behoerden-steuerbescheid",
   "kapitalanlage-immobilie-anlage-v",
+  "landwirtschaft-steuer",
 ]);
 
 /** Document types with no lasting value once the matter is settled. */
@@ -111,7 +112,7 @@ export function retentionFor(input: {
   }
 
   // 3) Contracts and warranty-bearing purchases — keep until the matter ends.
-  if (type === "vertrag") {
+  if (type === "vertrag" || cat === "landwirtschaft-pacht") {
     return {
       cls: "bis_ende",
       label: "Bis Vertragsende",

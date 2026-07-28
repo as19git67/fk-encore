@@ -172,6 +172,34 @@ export const categoryTaxonomy: CategorySeed[] = [
     ],
   },
   {
+    slug: "landwirtschaft",
+    name: "Landwirtschaft (verpachtet)",
+    icon: "pi-warehouse",
+    hint: "Verpachteter land-/forstwirtschaftlicher Betrieb oder Flächen: Pacht, Versicherungen, Instandhaltung, Steuer/EÜR. Steuerlich Anlage L / Anlage EÜR. NICHT Vermietung von Wohn-/Gewerbeimmobilien (→ kapitalanlage-immobilie), NICHT Eigenheim (→ wohnen).",
+    children: [
+      {
+        slug: "landwirtschaft-pacht",
+        name: "Pacht & Verträge",
+        hint: "Pachtverträge, Nachträge, Flächenverzeichnisse, Pachtpreisanpassungen, Pachtzinsbescheinigungen für land-/forstwirtschaftliche Flächen oder Betriebe. NICHT Mietvertrag Wohn-/Gewerbeimmobilie (→ kapitalanlage-immobilie-mietvertrag).",
+      },
+      {
+        slug: "landwirtschaft-versicherung",
+        name: "Versicherungen",
+        hint: "Versicherungen im landwirtschaftlichen Kontext: Traktorversicherung, Gebäudeversicherung Scheune/Stall, Betriebshaftpflicht Landwirtschaft, Ernteversicherung, Tierversicherung. NICHT Kfz-Versicherung PKW (→ fahrzeug-versicherung), NICHT Wohngebäudeversicherung (→ wohnen-haus-gebaeudeversicherung).",
+      },
+      {
+        slug: "landwirtschaft-instandhaltung",
+        name: "Instandhaltung & Reparatur",
+        hint: "Rechnungen für Reparatur und Wartung landwirtschaftlicher Gebäude (Scheune, Stall, Maschinenhalle) und Maschinen (Traktor, Mähdrescher, Anbaugeräte), Ersatzteile, Handwerkerrechnungen am landwirtschaftlichen Betrieb. NICHT Handwerker am Eigenheim (→ wohnen-haus-instandhaltung), NICHT Kfz-Werkstatt PKW (→ fahrzeug-werkstatt).",
+      },
+      {
+        slug: "landwirtschaft-steuer",
+        name: "Steuer & Buchhaltung",
+        hint: "Einnahmenüberschussrechnung (EÜR) der Land-/Forstwirtschaft, Umsatzsteuervoranmeldung, Gewinnermittlung Wirtschaftsjahr, Belege zu Betriebsausgaben, Korrespondenz mit Steuerberater zur Landwirtschaft. Steuerlich Anlage L / Anlage EÜR.",
+      },
+    ],
+  },
+  {
     slug: "altersvorsorge",
     name: "Altersvorsorge",
     icon: "pi-shield",
@@ -487,7 +515,7 @@ export const categoryTaxonomy: CategorySeed[] = [
     slug: "sonstiges",
     name: "Sonstiges",
     icon: "pi-file",
-    hint: "LETZTE WAHL — nur verwenden, wenn das Dokument in KEINE andere Kategorie passt. Prüfe zuerst: Schuldokumente → familie-schule, Rechnungen → finanzen-rechnungen, Steuererklärungen → finanzen-steuern, Impfdokumente → gesundheit-rezepte, Arztbriefe/Befunde/Laborwerte → gesundheit-befunde, Schwerbehindertenausweis/GdB → gesundheit-schwerbehinderung, Urkunden → familie-urkunden, Behördenschreiben → behoerden-bescheide oder behoerden-mitteilungen, Arbeitslosengeld/Jobcenter → beruf-arbeitsagentur, Konsum-/Ratenkredit → finanzen-kredite, Garantie/Bedienungsanleitung/Gerätekaufbeleg → anschaffungen, Erbschein/Nachlass/Erbschaftsteuer → rechtliches-nachlass, Vollmachten → rechtliches-vollmachten, Patientenverfügung/Testament → rechtliches-verfuegungen, Anwaltsschreiben/Klage/Ermittlungsverfahren/Staatsanwaltschaft → rechtliches-verfahren, betriebliche Merkblätter → beruf-betriebliche-unterlagen, WEG-Abrechnungen → kapitalanlage-immobilie-weg-jahresabrechnung oder wohnen-haus-weg-jahresabrechnung.",
+    hint: "LETZTE WAHL — nur verwenden, wenn das Dokument in KEINE andere Kategorie passt. Prüfe zuerst: Schuldokumente → familie-schule, Rechnungen → finanzen-rechnungen, Steuererklärungen → finanzen-steuern, Impfdokumente → gesundheit-rezepte, Arztbriefe/Befunde/Laborwerte → gesundheit-befunde, Schwerbehindertenausweis/GdB → gesundheit-schwerbehinderung, Urkunden → familie-urkunden, Behördenschreiben → behoerden-bescheide oder behoerden-mitteilungen, Arbeitslosengeld/Jobcenter → beruf-arbeitsagentur, Konsum-/Ratenkredit → finanzen-kredite, Garantie/Bedienungsanleitung/Gerätekaufbeleg → anschaffungen, Erbschein/Nachlass/Erbschaftsteuer → rechtliches-nachlass, Vollmachten → rechtliches-vollmachten, Patientenverfügung/Testament → rechtliches-verfuegungen, Anwaltsschreiben/Klage/Ermittlungsverfahren/Staatsanwaltschaft → rechtliches-verfahren, betriebliche Merkblätter → beruf-betriebliche-unterlagen, WEG-Abrechnungen → kapitalanlage-immobilie-weg-jahresabrechnung oder wohnen-haus-weg-jahresabrechnung, Pachtvertrag/Traktor/Scheune/EÜR Landwirtschaft → landwirtschaft-*.",
   },
 ];
 
