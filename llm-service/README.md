@@ -84,8 +84,43 @@ docker compose --env-file .env -f docker-compose.yml \
   up -d --force-recreate llm_service
 ```
 
-If 16 GB VRAM becomes tight, keep llama.cpp on the GPU but move the E5
-embedder back to system RAM with `LLM_EMBED_DEVICE=cpu`.
+The `-llm-gpu` image ships `LLM_BATCH=2048`, `LLM_UBATCH=512` and
+`LLM_FLASH_ATTN=1` as image defaults, but `docker-compose.yml` sets all four
+tuning variables explicitly (a compose `environment:` entry always wins over the
+image `ENV`), so put them in `.env` when using compose — see the GPU block in
+`docker-compose.env.example`.
+
+#### VRAM budget
+
+Qwen3-14B costs **160 KiB of KV cache per token** (40 layers × 8 KV heads × 128
+dims × [K+V] × 2 bytes) — roughly three times Qwen2.5-7B's 56 KiB, because of the
+deeper stack and wider GQA group:
+
+| `LLM_CTX` | KV (`f16`) | KV (`q8_0`) |
+|---|---|---|
+| 8192 | 1.25 GiB | 0.63 GiB |
+| 18500 | 2.82 GiB | 1.41 GiB |
+| 32768 | 5.00 GiB | 2.50 GiB |
+
+On top of that come ~9 GB of Q4_K_M weights and ~1.5 GB for the E5 embedder plus
+its CUDA context when `LLM_EMBED_DEVICE=cuda`. A 16 GB card therefore carries
+`LLM_CTX=18500` comfortably at `f16`; for Qwen3's native 32k window set
+`LLM_KV_TYPE=q8_0` (requires `LLM_FLASH_ATTN=1`).
+
+If VRAM becomes tight, either set `LLM_KV_TYPE=q8_0` or move the E5 embedder back
+to system RAM with `LLM_EMBED_DEVICE=cpu`. Watch the llama.cpp load log — once
+`n_gpu_layers=-1` can no longer place all 41 layers, the layers that spill to the
+host dominate every request and classification latency collapses.
+
+#### Why `LLM_CTX` changes latency so sharply
+
+`/classify` shrinks its prompt to fit the window: it drops the few-shot examples
+first, then the taxonomy/doctype/tax-section *hints*, and only then returns 413.
+The hints are by far the largest variable block — with them the prompt is roughly
+17k tokens, without them roughly 8.5k. Raising `LLM_CTX` past the point where the
+hints fit therefore doubles the prompt, and with it the prefill time, in one step.
+`classify: dropping taxonomy/doctype/tax hints to fit n_ctx` in the log tells you
+which side of that line a given deployment is on.
 
 ---
 
@@ -143,6 +178,10 @@ Generates warm, personal titles and subtitles for private photo recaps (e.g., "A
 | `LLM_THREADS` | `$(nproc)` | CPU threads for inference |
 | `LLM_ACCELERATOR` | `cpu` | Runtime guard: `cpu` or `cuda` |
 | `LLM_GPU_LAYERS` | `0` | llama.cpp layers offloaded to GPU; the GPU profile uses `-1` (all) |
+| `LLM_BATCH` | `512` | llama.cpp prompt-eval batch size (`n_batch`). The classifier prompt is ~15k tokens of fixed prefix before the document text, so prefill dominates `/classify`; `2048` keeps a GPU busy across that. No benefit on CPU. |
+| `LLM_UBATCH` | `512` | Physical micro-batch (`n_ubatch`) inside each `LLM_BATCH`. |
+| `LLM_FLASH_ATTN` | `0` | Enable FlashAttention. Worthwhile at long context on CUDA, and required for a quantised V cache. |
+| `LLM_KV_TYPE` | `f16` | KV-cache element type: `f16`, `q8_0`, `q5_1`, `q5_0`, `q4_0`. `q8_0` halves KV memory at negligible quality cost — needs `LLM_FLASH_ATTN=1`. |
 | `LLM_EMBED_DEVICE` | `cpu` | Sentence-Transformer device: `cpu`, `cuda`, or `auto` |
 | `LLM_EMBED_BATCH_SIZE` | `32` | Chunk size `encode()` uses internally when `/embed` receives a large text list. Raise for higher GPU throughput on big batches; lower if VRAM is tight. |
 | `CLASSIFY_TEXT_CHAR_LIMIT` | `6000` | Max document characters fed to `/classify` (cheap pre-cap before the n_ctx token guard). Keep ≥ the app's `DOCUMENTS_CLASSIFY_CHAR_LIMIT`; raise both in lockstep with `LLM_CTX` to classify longer documents. |

@@ -24,6 +24,11 @@ name: GHCR Cleanup
 #        - `pw-<x.y.z>` — per-Playwright-version pinpoint on the
 #          playwright-e2e runner image, kept as a permanent rollback
 #          marker the way semver tags are on the application images.
+#        - `buildcache` — the registry-backed buildx cache written by
+#          docker-image-llm.yml. Deleting it costs a ~1 h cold rebuild of
+#          the from-source llama-cpp-python compile. When the tag moves to
+#          a new cache manifest the superseded version becomes untagged and
+#          is reclaimed by step 1, so this does not accumulate.
 #      Tags matching any protected pattern are never deleted.
 #
 # PR builds push the `test` tag (see the metadata step in each build
@@ -54,6 +59,7 @@ jobs:
           - fk-encore-geo
           - fk-encore-insightface
           - fk-encore-llm
+          - fk-encore-llm-gpu
           - fk-encore-playwright-e2e
     steps:
       # Step 1 — purge untagged versions that are NOT child manifests of a
@@ -179,7 +185,7 @@ jobs:
               select(.metadata.container.tags | length > 0) |
               select(
                 .metadata.container.tags |
-                map(test("^(latest|v?[0-9]+\\.[0-9]+\\.[0-9]+|pw-[0-9]+\\.[0-9]+\\.[0-9]+)$")) |
+                map(test("^(latest|buildcache|v?[0-9]+\\.[0-9]+\\.[0-9]+|pw-[0-9]+\\.[0-9]+\\.[0-9]+)$")) |
                 any | not
               )
             ] |

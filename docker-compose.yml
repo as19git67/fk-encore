@@ -261,6 +261,14 @@ services:
       LLM_EMBED_DEVICE: ${LLM_EMBED_DEVICE:-cpu}
       LLM_EMBED_BATCH_SIZE: ${LLM_EMBED_BATCH_SIZE:-32}
       LLM_THREADS: ${LLM_THREADS:-}
+      # Prefill/KV tuning. The defaults here are llama.cpp's own, i.e. the CPU
+      # profile; the GPU block in docker-compose.env.example raises them. A
+      # mapping entry always wins over the image ENV, so these must repeat the
+      # neutral values rather than being left empty.
+      LLM_BATCH: ${LLM_BATCH:-512}
+      LLM_UBATCH: ${LLM_UBATCH:-512}
+      LLM_FLASH_ATTN: ${LLM_FLASH_ATTN:-0}
+      LLM_KV_TYPE: ${LLM_KV_TYPE:-f16}
       CLASSIFY_TEXT_CHAR_LIMIT: ${CLASSIFY_TEXT_CHAR_LIMIT:-6000}
       TAX_SECTIONS_MAX: ${TAX_SECTIONS_MAX:-4}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
