@@ -52,12 +52,56 @@ def _env_int(name: str, default: int) -> int:
     return int(raw)
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 MODELS_DIR = Path(os.environ.get("MODELS_DIR") or "/models")
 LLM_MODEL_PATH = Path(os.environ.get("LLM_MODEL_PATH") or str(MODELS_DIR / "qwen2.5-7b-instruct-q4_k_m.gguf"))
 LLM_CTX = _env_int("LLM_CTX", 8192)
 LLM_THREADS = _env_int("LLM_THREADS", os.cpu_count() or 4)
 LLM_GPU_LAYERS = _env_int("LLM_GPU_LAYERS", 0)
 LLM_ACCELERATOR = (os.environ.get("LLM_ACCELERATOR") or "cpu").lower()
+# ── Prefill / KV tuning ───────────────────────────────────────────────────────
+#
+# The classifier prompt is dominated by a fixed prefix — system prompts plus the
+# taxonomy/doctype/tax-section outline *with* hints is ~15k tokens before the
+# document text is appended. Prefill therefore dominates wall time per
+# /classify, and the knobs that govern prefill matter more here than the
+# decode-side ones.
+#
+# ``n_batch``/``n_ubatch``: llama.cpp evaluates the prompt in batches; the
+# upstream default of 512 leaves GPU prefill throughput unused at five-figure
+# prompt lengths. Defaults kept at llama.cpp's own value so the CPU image is
+# unaffected — the CUDA image raises them via ENV.
+LLM_BATCH = _env_int("LLM_BATCH", 512)
+LLM_UBATCH = _env_int("LLM_UBATCH", 512)
+# FlashAttention: fused attention kernel, a real win at long context on CUDA and
+# a prerequisite for quantising the V side of the KV cache. Off by default
+# (llama.cpp's default); the CUDA image turns it on.
+LLM_FLASH_ATTN = _env_bool("LLM_FLASH_ATTN", False)
+# KV-cache element type. Qwen3-14B spends 160 KiB of KV per token (40 layers ×
+# 8 KV heads × 128 dims × [K+V] × 2 bytes) — 2.8 GiB at LLM_CTX=18500, the
+# largest VRAM item after the weights themselves. "q8_0" halves that at
+# negligible quality cost, buying headroom for a larger window. Quantising the
+# V cache requires LLM_FLASH_ATTN=1.
+LLM_KV_TYPE = (os.environ.get("LLM_KV_TYPE") or "f16").lower()
+
+# ggml_type enum values (ggml.h). Hard-coded as a fallback because the symbol
+# names are not guaranteed to be re-exported at the llama_cpp package root
+# across the two pinned versions (CPU image 0.3.2, CUDA image 0.3.31); we
+# prefer the module attribute when it exists.
+_GGML_KV_TYPES: dict[str, tuple[str, int]] = {
+    "f16": ("GGML_TYPE_F16", 1),
+    "q8_0": ("GGML_TYPE_Q8_0", 8),
+    "q5_1": ("GGML_TYPE_Q5_1", 7),
+    "q5_0": ("GGML_TYPE_Q5_0", 6),
+    "q4_0": ("GGML_TYPE_Q4_0", 2),
+}
+
 LLM_EMBED_DEVICE = (os.environ.get("LLM_EMBED_DEVICE") or "cpu").lower()
 # sentence-transformers' own default; raising it trades VRAM/RAM for fewer,
 # bigger chunks when a caller sends large text lists to /embed.
@@ -67,6 +111,8 @@ if LLM_ACCELERATOR not in {"cpu", "cuda"}:
     raise ValueError("LLM_ACCELERATOR must be 'cpu' or 'cuda'")
 if LLM_EMBED_DEVICE not in {"cpu", "cuda", "auto"}:
     raise ValueError("LLM_EMBED_DEVICE must be 'cpu', 'cuda', or 'auto'")
+if LLM_KV_TYPE not in _GGML_KV_TYPES:
+    raise ValueError(f"LLM_KV_TYPE must be one of {sorted(_GGML_KV_TYPES)}, got {LLM_KV_TYPE!r}")
 
 # Deterministic backstop for a known small-model failure mode: when the
 # classifier doesn't actually see a tax-section match, it sometimes returns
@@ -120,6 +166,75 @@ def _rss_mb() -> float:
     Linux so we don't bother distinguishing."""
 
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+
+
+def _ggml_type(llama_cpp: Any, name: str) -> int:
+    """Resolve a ggml type name to its enum value, preferring the binding's own
+    constant over our hard-coded fallback."""
+
+    symbol, fallback = _GGML_KV_TYPES[name]
+    value = getattr(llama_cpp, symbol, None)
+    return int(value) if isinstance(value, int) else fallback
+
+
+def _optional_llama_kwargs(llama_cpp: Any, llama_cls: Any) -> dict[str, Any]:
+    """Map the prefill/KV tuning knobs onto whatever ``Llama.__init__`` the
+    installed llama-cpp-python actually accepts.
+
+    The two images pin different versions (CPU 0.3.2, CUDA 0.3.31) and llama.cpp
+    reworked the FlashAttention switch from a bool into a tri-state enum in
+    between, so the parameter set is not stable across them. Anything the
+    installed signature does not know is dropped with a warning: a *tuning*
+    parameter must never be the reason the service fails to start.
+    """
+
+    import inspect
+
+    try:
+        params = inspect.signature(llama_cls.__init__).parameters
+    except (TypeError, ValueError):  # pragma: no cover — C-extension shims
+        log.warning("cannot introspect Llama.__init__; skipping tuning kwargs")
+        return {}
+
+    kwargs: dict[str, Any] = {}
+
+    for env_name, param, value in (
+        ("LLM_BATCH", "n_batch", LLM_BATCH),
+        ("LLM_UBATCH", "n_ubatch", LLM_UBATCH),
+    ):
+        if param in params:
+            kwargs[param] = value
+        elif value != 512:
+            log.warning("%s set but llama-cpp-python has no %s parameter", env_name, param)
+
+    if LLM_FLASH_ATTN:
+        if "flash_attn" in params:
+            kwargs["flash_attn"] = True
+        elif "flash_attn_type" in params:
+            # llama.cpp's tri-state: AUTO=-1, DISABLED=0, ENABLED=1.
+            enabled = getattr(llama_cpp, "LLAMA_FLASH_ATTN_TYPE_ENABLED", 1)
+            kwargs["flash_attn_type"] = int(enabled)
+        else:
+            log.warning(
+                "LLM_FLASH_ATTN=1 but llama-cpp-python exposes neither "
+                "flash_attn nor flash_attn_type; running without it"
+            )
+
+    if LLM_KV_TYPE != "f16":
+        ggml = _ggml_type(llama_cpp, LLM_KV_TYPE)
+        for param in ("type_k", "type_v"):
+            if param in params:
+                kwargs[param] = ggml
+            else:
+                log.warning("LLM_KV_TYPE set but llama-cpp-python has no %s parameter", param)
+        if not LLM_FLASH_ATTN:
+            log.warning(
+                "LLM_KV_TYPE=%s without LLM_FLASH_ATTN=1: llama.cpp cannot use a "
+                "quantised V cache without flash attention and may fall back or fail",
+                LLM_KV_TYPE,
+            )
+
+    return kwargs
 
 
 def _install_shutdown_logging(startup_monotonic: float) -> None:
@@ -208,15 +323,26 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
                 "was built without CUDA offload support"
             )
 
-    log.info("Loading Llama from %s (ctx=%d, threads=%d, gpu_layers=%d)",
-             LLM_MODEL_PATH, LLM_CTX, LLM_THREADS, LLM_GPU_LAYERS)
-    _state["llm"] = Llama(
+    tuning = _optional_llama_kwargs(llama_cpp, Llama)
+    log.info("Loading Llama from %s (ctx=%d, threads=%d, gpu_layers=%d, tuning=%s)",
+             LLM_MODEL_PATH, LLM_CTX, LLM_THREADS, LLM_GPU_LAYERS, tuning or "{}")
+    base_kwargs: dict[str, Any] = dict(
         model_path=str(LLM_MODEL_PATH),
         n_ctx=LLM_CTX,
         n_threads=LLM_THREADS,
         n_gpu_layers=LLM_GPU_LAYERS,
         verbose=False,
     )
+    try:
+        _state["llm"] = Llama(**base_kwargs, **tuning)
+    except Exception:
+        # A rejected tuning value (unsupported KV type for the build, a
+        # FlashAttention kernel the backend lacks, …) must degrade to the
+        # previous behaviour rather than take the service down.
+        if not tuning:
+            raise
+        log.exception("Llama load failed with tuning kwargs %s — retrying without them", tuning)
+        _state["llm"] = Llama(**base_kwargs)
     _state["llm_accelerator"] = LLM_ACCELERATOR
     log.info("Llama loaded (RSS=%.0f MB)", _rss_mb())
 
@@ -904,7 +1030,10 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
         retry = attempt > 1
         temperature = 0.55 if retry else 0.2
         if retry and examples_active:
-            attempt_system, _attempt_build = _assemble(False)
+            # Keep whatever hint state the budget guard settled on — dropping
+            # the examples is the retry's variation; re-adding shed hints would
+            # push the prompt back over the window.
+            attempt_system, _attempt_build = _assemble(False, hints_active)
             attempt_user = _attempt_build(text)
         else:
             attempt_system, attempt_user = system_prompt, user_prompt
