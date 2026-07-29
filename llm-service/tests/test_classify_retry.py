@@ -143,6 +143,31 @@ def test_persistent_non_json_falls_back_to_sonstiges_not_502():
     assert llm.calls == 2
 
 
+def test_retry_with_few_shot_examples_sheds_them_without_crashing():
+    # Regression: the retry re-assembles the prompt without the few-shot
+    # examples, but `_assemble` grew a second (with_hints) parameter when hint
+    # shedding was added — the call site still passed one argument, so a retry
+    # on a request that carried examples raised TypeError *outside* the
+    # try/except and surfaced as an uncaught 500 instead of retrying.
+    # Only reachable with DOCUMENTS_FEWSHOT_ENABLED=true, hence unnoticed.
+    body = {
+        **_REQUEST_BODY,
+        "examples": [
+            {
+                "sender": "Musterbank",
+                "title": "Jahresdepotauszug 2023",
+                "category_slug": "finanzen-wertpapiere",
+                "category_name": "Wertpapiere",
+            }
+        ],
+    }
+    llm = _SequencedLlm([_DEGENERATE, _GOOD])
+    status, resp = _classify(llm, body)
+    assert status == 200, resp
+    assert resp["category_slug"] == "finanzen-wertpapiere"
+    assert llm.calls == 2
+
+
 def test_constraint_violation_on_a_fully_populated_payload_does_not_retry():
     # confidence=1.5 is out of range but every core field IS present (so
     # _has_core_fields is true) — this must fail on the FIRST attempt, no
