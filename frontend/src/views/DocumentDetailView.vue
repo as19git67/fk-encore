@@ -10,6 +10,7 @@ import Dialog from 'primevue/dialog'
 import { toLocalIsoDate, parseLocalDate } from '../utils/dateFormat'
 import Message from 'primevue/message'
 import Select from 'primevue/select'
+import AutoComplete from 'primevue/autocomplete'
 import MultiSelect from 'primevue/multiselect'
 import Tag from 'primevue/tag'
 import Chip from 'primevue/chip'
@@ -75,6 +76,13 @@ const basketNext = computed(() =>
 
 function goBasketDoc(id: number) {
   router.push({ name: 'dokumente-detail', params: { id } })
+}
+
+const inBasket = computed(() => basketIndex.value >= 0)
+
+function toggleBasket() {
+  if (!doc.value) return
+  basket.toggle(doc.value)
 }
 
 const doc = ref<DocumentDetail | null>(null)
@@ -244,21 +252,71 @@ const taxCatalogByGroup = computed(() => {
     .filter((b) => b.items.length > 0)
 })
 
-const categoryOptions = computed(() => {
-  const opts: Array<{ label: string; value: string | null }> = [{ label: '— keine —', value: null }]
-  for (const c of categories.value) {
-    const prefix = c.parent_id == null ? '' : '— '
-    opts.push({ label: `${prefix}${c.name}`, value: c.slug })
+interface SlugOption { label: string; slug: string }
+
+// Top-level categories alphabetically, each followed by its children
+// (also alphabetically sorted) — so every level of the taxonomy reads
+// A→Z instead of following the backend's sort_order.
+const categoryOptions = computed<SlugOption[]>(() => {
+  const byName = (a: DocumentCategory, b: DocumentCategory) => a.name.localeCompare(b.name, 'de')
+  const opts: SlugOption[] = []
+  const topLevel = categories.value.filter((c) => c.parent_id == null).slice().sort(byName)
+  for (const top of topLevel) {
+    opts.push({ label: top.name, slug: top.slug })
+    const children = categories.value.filter((c) => c.parent_id === top.id).slice().sort(byName)
+    for (const child of children) {
+      opts.push({ label: `— ${child.name}`, slug: child.slug })
+    }
   }
   return opts
 })
 
-const documentTypeOptions = computed(() => {
-  const opts: Array<{ label: string; value: string | null }> = [{ label: '— keine —', value: null }]
-  for (const t of documentTypes.value) {
-    opts.push({ label: t.name, value: t.slug })
-  }
-  return opts
+const documentTypeOptions = computed<SlugOption[]>(() =>
+  documentTypes.value
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name, 'de'))
+    .map((t) => ({ label: t.name, slug: t.slug })),
+)
+
+// ─── Typeahead selects (Kategorie / Dokumentart) ────────────────────────────
+const selectedCategoryOption = ref<SlugOption | null>(null)
+const categorySuggestions = ref<SlugOption[]>([])
+
+function syncCategorySelection() {
+  selectedCategoryOption.value = form.value.category_slug
+    ? categoryOptions.value.find((o) => o.slug === form.value.category_slug) ?? null
+    : null
+}
+
+function searchCategories(event: { query: string }) {
+  const q = event.query.trim().toLowerCase()
+  categorySuggestions.value = q
+    ? categoryOptions.value.filter((o) => o.label.toLowerCase().includes(q))
+    : categoryOptions.value
+}
+
+watch(selectedCategoryOption, (v) => {
+  form.value.category_slug = v ? v.slug : null
+})
+
+const selectedDocumentTypeOption = ref<SlugOption | null>(null)
+const documentTypeSuggestions = ref<SlugOption[]>([])
+
+function syncDocumentTypeSelection() {
+  selectedDocumentTypeOption.value = form.value.document_type
+    ? documentTypeOptions.value.find((o) => o.slug === form.value.document_type) ?? null
+    : null
+}
+
+function searchDocumentTypes(event: { query: string }) {
+  const q = event.query.trim().toLowerCase()
+  documentTypeSuggestions.value = q
+    ? documentTypeOptions.value.filter((o) => o.label.toLowerCase().includes(q))
+    : documentTypeOptions.value
+}
+
+watch(selectedDocumentTypeOption, (v) => {
+  form.value.document_type = v ? v.slug : null
 })
 
 async function load() {
@@ -326,6 +384,8 @@ function resetForm() {
     visibility: doc.value.visibility,
     group_id: doc.value.group_id,
   }
+  syncCategorySelection()
+  syncDocumentTypeSelection()
 }
 
 function resetTaxForm() {
@@ -666,6 +726,16 @@ onBeforeUnmount(() => {
       </div>
       <div class="header-actions">
         <Button
+          v-if="doc"
+          :icon="inBasket ? 'pi pi-cart-minus' : 'pi pi-shopping-cart'"
+          :label="inBasket ? 'Im Basket' : 'In den Basket'"
+          :aria-label="inBasket ? 'Aus dem Basket entfernen' : 'In den Basket legen'"
+          text
+          :severity="inBasket ? 'success' : undefined"
+          v-tooltip.bottom="inBasket ? 'Aus dem Basket entfernen' : 'Dokument in den Basket legen'"
+          @click="toggleBasket"
+        />
+        <Button
           v-if="auth.hasPermission('documents.edit') && doc"
           icon="pi pi-refresh"
           label="Neu klassifizieren"
@@ -740,6 +810,13 @@ onBeforeUnmount(() => {
                 <div>
                   <strong>Zurück</strong>
                   <span>Zur Dokumentenliste zurückkehren.</span>
+                </div>
+              </li>
+              <li>
+                <i class="pi pi-shopping-cart" aria-hidden="true" />
+                <div>
+                  <strong>In den Basket</strong>
+                  <span>Dokument in den Basket legen bzw. wieder entfernen — für Stapelbearbeitung oder als Navigationsliste.</span>
                 </div>
               </li>
               <li v-if="auth.hasPermission('documents.edit')">
@@ -917,12 +994,16 @@ onBeforeUnmount(() => {
           </div>
           <div class="meta-form-field">
             <span class="label">Kategorie</span>
-            <Select
-              v-model="form.category_slug"
-              :options="categoryOptions"
+            <AutoComplete
+              v-model="selectedCategoryOption"
+              :suggestions="categorySuggestions"
               optionLabel="label"
-              optionValue="value"
+              dropdown
+              showClear
+              placeholder="Keine"
+              :inputStyle="{ width: '100%' }"
               :disabled="!auth.hasPermission('documents.edit')"
+              @complete="searchCategories"
             />
             <Button
               v-if="auth.hasPermission('documents.edit')"
@@ -936,12 +1017,16 @@ onBeforeUnmount(() => {
           </div>
           <div class="meta-form-field">
             <span class="label">Dokumentart</span>
-            <Select
-              v-model="form.document_type"
-              :options="documentTypeOptions"
+            <AutoComplete
+              v-model="selectedDocumentTypeOption"
+              :suggestions="documentTypeSuggestions"
               optionLabel="label"
-              optionValue="value"
+              dropdown
+              showClear
+              placeholder="Keine"
+              :inputStyle="{ width: '100%' }"
               :disabled="!auth.hasPermission('documents.edit')"
+              @complete="searchDocumentTypes"
             />
           </div>
           <div
