@@ -770,6 +770,16 @@ onMounted(async () => {
           >
             {{ doc.title || doc.original_filename }}
           </button>
+          <Button
+            :icon="basket.has(doc.id) ? 'pi pi-cart-minus' : 'pi pi-shopping-cart'"
+            text
+            rounded
+            size="small"
+            :severity="basket.has(doc.id) ? 'success' : 'secondary'"
+            :aria-label="basket.has(doc.id) ? 'Aus dem Basket entfernen' : 'In den Basket legen'"
+            v-tooltip.bottom="basket.has(doc.id) ? 'Aus dem Basket entfernen' : 'Dokument direkt in den Basket legen'"
+            @click.stop="basket.toggle(doc)"
+          />
           <Tag :severity="statusSeverity(doc.status)" :value="statusLabel(doc.status)" />
           <Tag
             v-if="isNew(doc)"
@@ -826,6 +836,17 @@ onMounted(async () => {
             @update:modelValue="(val: boolean) => toggleSelected(doc.id, val)"
           />
         </div>
+        <Button
+          class="grid-card-basket-btn"
+          :icon="basket.has(doc.id) ? 'pi pi-cart-minus' : 'pi pi-shopping-cart'"
+          text
+          rounded
+          size="small"
+          :severity="basket.has(doc.id) ? 'success' : 'secondary'"
+          :aria-label="basket.has(doc.id) ? 'Aus dem Basket entfernen' : 'In den Basket legen'"
+          v-tooltip.bottom="basket.has(doc.id) ? 'Aus dem Basket entfernen' : 'Dokument direkt in den Basket legen'"
+          @click.stop="basket.toggle(doc)"
+        />
         <div class="grid-card-thumb">
           <DocumentThumbnail :id="doc.id" :alt="doc.title || doc.original_filename" />
         </div>
@@ -1197,6 +1218,14 @@ onMounted(async () => {
   top: 0.5rem;
   right: 0.5rem;
   z-index: 1;
+}
+
+.grid-card-basket-btn {
+  position: absolute;
+  top: 0.25rem;
+  left: 0.25rem;
+  z-index: 1;
+  background: color-mix(in srgb, var(--p-content-background) 75%, transparent);
 }
 
 .grid-card-thumb {
