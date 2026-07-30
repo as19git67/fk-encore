@@ -13,7 +13,7 @@ import { createRequire } from "module";
 import { api, APIError, type Query } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
-import { asc, and, desc, eq, gte, ilike, inArray, lte, lt, ne, or, sql, type SQL } from "drizzle-orm";
+import { asc, and, desc, eq, gte, ilike, inArray, isNull, lte, lt, ne, or, sql, type SQL } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbFirst } from "../db/adapter";
 import {
@@ -3432,21 +3432,41 @@ export const acceptCategorySuggestion = api(
       parentId = parent?.id ?? null;
     }
 
-    const existing = await dbFirst<{ id: number }>(
+    const existingBySlug = await dbFirst<{ id: number }>(
       db.select({ id: documentCategories.id }).from(documentCategories).where(eq(documentCategories.slug, slug)),
     );
     let categoryId: number;
-    if (existing) {
-      categoryId = existing.id;
+    if (existingBySlug) {
+      categoryId = existingBySlug.id;
     } else {
-      const inserted = await dbFirst<{ id: number }>(
+      // Guard against a duplicate-looking category: the auto-derived slug only
+      // catches an exact slug collision, but a suggestion can carry the same
+      // name as an existing category under a slug that doesn't match it (e.g.
+      // slugify("Betriebliche Unterlagen") doesn't collide with the existing
+      // "beruf-betriebliche-unterlagen"). Reuse the existing sibling instead of
+      // inserting a second row with the same name under the same parent.
+      const existingByName = await dbFirst<{ id: number }>(
         db
-          .insert(documentCategories)
-          .values({ slug, name, parent_id: parentId })
-          .returning({ id: documentCategories.id }),
+          .select({ id: documentCategories.id })
+          .from(documentCategories)
+          .where(
+            parentId == null
+              ? and(isNull(documentCategories.parent_id), ilike(documentCategories.name, name))
+              : and(eq(documentCategories.parent_id, parentId), ilike(documentCategories.name, name)),
+          ),
       );
-      if (!inserted) throw new Error("insert documentCategories: no row returned");
-      categoryId = inserted.id;
+      if (existingByName) {
+        categoryId = existingByName.id;
+      } else {
+        const inserted = await dbFirst<{ id: number }>(
+          db
+            .insert(documentCategories)
+            .values({ slug, name, parent_id: parentId })
+            .returning({ id: documentCategories.id }),
+        );
+        if (!inserted) throw new Error("insert documentCategories: no row returned");
+        categoryId = inserted.id;
+      }
     }
 
     await db

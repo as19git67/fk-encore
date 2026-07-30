@@ -78,6 +78,13 @@ function goBasketDoc(id: number) {
   router.push({ name: 'dokumente-detail', params: { id } })
 }
 
+const inBasket = computed(() => basketIndex.value >= 0)
+
+function toggleBasket() {
+  if (!doc.value) return
+  basket.toggle(doc.value)
+}
+
 const doc = ref<DocumentDetail | null>(null)
 const categories = ref<DocumentCategory[]>([])
 const documentTypes = ref<DocumentTypeCatalogEntry[]>([])
@@ -719,6 +726,16 @@ onBeforeUnmount(() => {
       </div>
       <div class="header-actions">
         <Button
+          v-if="doc"
+          :icon="inBasket ? 'pi pi-cart-minus' : 'pi pi-shopping-cart'"
+          :label="inBasket ? 'Im Basket' : 'In den Basket'"
+          :aria-label="inBasket ? 'Aus dem Basket entfernen' : 'In den Basket legen'"
+          text
+          :severity="inBasket ? 'success' : undefined"
+          v-tooltip.bottom="inBasket ? 'Aus dem Basket entfernen' : 'Dokument in den Basket legen'"
+          @click="toggleBasket"
+        />
+        <Button
           v-if="auth.hasPermission('documents.edit') && doc"
           icon="pi pi-refresh"
           label="Neu klassifizieren"
@@ -793,6 +810,13 @@ onBeforeUnmount(() => {
                 <div>
                   <strong>Zurück</strong>
                   <span>Zur Dokumentenliste zurückkehren.</span>
+                </div>
+              </li>
+              <li>
+                <i class="pi pi-shopping-cart" aria-hidden="true" />
+                <div>
+                  <strong>In den Basket</strong>
+                  <span>Dokument in den Basket legen bzw. wieder entfernen — für Stapelbearbeitung oder als Navigationsliste.</span>
                 </div>
               </li>
               <li v-if="auth.hasPermission('documents.edit')">
