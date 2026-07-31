@@ -184,6 +184,41 @@ export function layoutTextFromTsv(tsv: string): string {
 }
 
 /**
+ * Mean per-word recognition confidence (0..100) over a TSV pass, or null when
+ * it recognized nothing. Tesseract scores every word it emits, and the average
+ * is a good summary of "did this page read like language" — text recognized
+ * sideways still produces words, but with confidences far below an upright
+ * page's. `ocr-preprocess.ts` uses that gap to check a rotation it isn't sure
+ * about; kept here because this module owns the TSV column layout.
+ *
+ * The structural rows (page/block/paragraph/line) carry conf -1 and are
+ * skipped along with blank text, so only real words count.
+ */
+export function meanWordConfidence(tsv: string): number | null {
+  const lines = tsv.split(/\r?\n/);
+  if (lines.length === 0) return null;
+  const header = lines[0].split("\t");
+  const iLevel = header.indexOf("level");
+  const iConf = header.indexOf("conf");
+  const iText = header.indexOf("text");
+  if (iLevel < 0 || iConf < 0 || iText < 0) return null;
+
+  let sum = 0;
+  let count = 0;
+  for (let i = 1; i < lines.length; i++) {
+    const cells = lines[i].split("\t");
+    if (cells.length <= iText) continue;
+    if (Number(cells[iLevel]) !== TSV_WORD_LEVEL) continue;
+    if (!cells[iText].trim()) continue;
+    const conf = Number(cells[iConf]);
+    if (!Number.isFinite(conf) || conf < 0) continue;
+    sum += conf;
+    count++;
+  }
+  return count > 0 ? sum / count : null;
+}
+
+/**
  * Whether the reconstruction may replace Tesseract's own `txt` rendering.
  *
  * Both strings come out of the same recognition pass, so they must carry the
