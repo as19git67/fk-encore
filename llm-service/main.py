@@ -123,6 +123,15 @@ if LLM_KV_TYPE not in _GGML_KV_TYPES:
 # Set to 0 to disable the backstop.
 TAX_SECTIONS_MAX = _env_int("TAX_SECTIONS_MAX", 4)
 
+# Plausible range for a document's tax year. Household documents legitimately
+# span decades, so the lower bound is generous — it exists to catch the
+# classifier grabbing an unrelated four-digit number off the page (a birth year
+# next to "geb.", a street number, a customer id), not to police old documents.
+# Mirrored by TAX_YEAR_MIN/TAX_YEAR_MAX in documents/llm-client.ts and by the
+# documents_tax_year_range CHECK constraint (migration 0140).
+TAX_YEAR_MIN = 1970
+TAX_YEAR_MAX = 2100
+
 # Upper bound (characters) on the document text considered by /classify. This
 # is a cheap pre-cap before the token-budget guard further shrinks the text to
 # fit n_ctx. Keep it >= the caller's DOCUMENTS_CLASSIFY_CHAR_LIMIT, otherwise a
@@ -472,6 +481,24 @@ def _repair_tags(data: dict[str, Any]) -> None:
         data["tags"] = [_repair_mojibake(t) if isinstance(t, str) else t for t in tags]
 
 
+def _sane_tax_year(value: Any) -> int | None:
+    """Coerce the model's ``tax_year`` to a plausible year, or None.
+
+    A four-digit number on a scan is not necessarily a tax year, and a small
+    classifier reliably grabs the wrong one: the observed production case was a
+    doctor's invoice dated 01.04.2019 whose patient birth year (1967) came back
+    as the tax year. Non-numeric, out-of-range and nonsensical values all
+    collapse to None here.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        year = int(value)
+    except (TypeError, ValueError):
+        return None
+    return year if TAX_YEAR_MIN <= year <= TAX_YEAR_MAX else None
+
+
 # Fields ClassifyResponse requires with no default — a completion missing
 # ALL of these is a degenerate/near-empty generation (observed: an LLM
 # response containing only tax/document-type keys, which the /classify
@@ -726,8 +753,10 @@ class ClassifyResponse(BaseModel):
     # decades — a 1997 Jahresdepotauszug is a real, unremarkable case, and
     # rejecting it here previously misrouted the document into the "LLM
     # service unavailable" retry path (see the classify handler below), which
-    # defers forever instead of surfacing the failure.
-    tax_year: int | None = Field(default=None, ge=1970, le=2100)
+    # defers forever instead of surfacing the failure. Values outside the range
+    # never reach this bound: the handler nulls them first (``_sane_tax_year``),
+    # so the constraint documents the contract rather than enforcing it.
+    tax_year: int | None = Field(default=None, ge=TAX_YEAR_MIN, le=TAX_YEAR_MAX)
     tax_year_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     tax_sections: list[TaxAssignment] = Field(default_factory=list)
 
@@ -1011,9 +1040,9 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
     # completion, not a real classification attempt). At temperature=0.2 a
     # second sample is not guaranteed to differ, but this class of failure is
     # a one-off sampling artifact, unlike a value that validates as JSON *and*
-    # parses into the schema but violates a constraint (e.g. an out-of-range
-    # tax_year) — that reflects a real fact about the document and would just
-    # fail again identically, so it still raises immediately without a retry
+    # parses into the schema but violates a constraint (e.g. a confidence
+    # outside 0..1) — that reflects a real fact about the document and would
+    # just fail again identically, so it still raises immediately without a retry
     # (see the schema-mismatch-after-successful-parse path below, which does
     # NOT loop). Bounded here — unlike the caller's queue-level retry — so a
     # persistently failing document still fails fast instead of doubling
@@ -1130,16 +1159,40 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
             # LLM sometimes emits null for numeric confidence fields — coerce to defaults.
             if data.get("tax_year_confidence") is None:
                 data["tax_year_confidence"] = 0.0
+            # An implausible tax year is dropped, not fatal. The year is one
+            # optional derived field among many, and the classifier regularly
+            # mistakes another four-digit number on the page for it (observed:
+            # the patient's birth year on a doctor's invoice). Letting that
+            # value reach the ClassifyResponse bound below turned a good
+            # classification — right category, title, date, sender, sections —
+            # into a hard 422 that parks the whole document in `failed`. Same
+            # treatment as the document_type and tax_sections whitelists above,
+            # and the same as documents/llm-client.ts `parseTaxFields`, which
+            # has always nulled out-of-range years on the caller side.
+            raw_year = data.get("tax_year")
+            sane_year = _sane_tax_year(raw_year)
+            if raw_year is not None and sane_year is None:
+                log.warning(
+                    "classify: implausible tax_year %r — dropping it (kept the rest)",
+                    raw_year,
+                )
+                data["tax_year_confidence"] = 0.0
+            data["tax_year"] = sane_year
 
         if _has_core_fields(data):
             # A parseable, populated classification. Coerce it — a failure here
-            # is a constraint violation on real content (e.g. an out-of-range
-            # tax_year), which is deterministic: surface it immediately as 422,
-            # with NO retry and NO fallback. 422 not 502 so the caller doesn't
-            # treat it as a service outage and defer for an unbounded retry
-            # (see scan-worker.ts / scan-queue.ts deferJob). No fallback either,
-            # because masking a real value bug as "sonstiges" is exactly how the
-            # tax_year-range issue stayed invisible for so long.
+            # is a constraint violation on real content (e.g. a confidence
+            # outside 0..1), which is deterministic: surface it immediately as
+            # 422, with NO retry and NO fallback. 422 not 502 so the caller
+            # doesn't treat it as a service outage and defer for an unbounded
+            # retry (see scan-worker.ts / scan-queue.ts deferJob). No fallback
+            # either, because masking a real value bug as "sonstiges" is exactly
+            # how the tax_year-range issue stayed invisible for so long.
+            #
+            # Individual *optional* facets are sanitized above rather than left
+            # to fail here — a single implausible derived value (document_type,
+            # tax_sections, tax_year) is not worth discarding an otherwise good
+            # classification and parking the document in `failed`.
             try:
                 return ClassifyResponse(**data)
             except Exception as exc:
