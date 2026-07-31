@@ -38,7 +38,7 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "finanzen-gehalt",
         name: "Gehaltsabrechnungen",
-        hint: "Monatliche Entgelt-/Gehalts-/Lohnabrechnung, Verdienstbescheinigung, Lohnsteuerbescheinigung — ausgestellt vom Arbeitgeber (z. B. Contoso Software, Contoso). NICHT als allgemeine Rechnung einordnen. NICHT: jährliche Meldung/Entgeltnachweis zur Sozialversicherung (→ finanzen-sozialversicherung). Steuerlich Anlage N.",
+        hint: "Monatliche Entgelt-/Gehalts-/Lohnabrechnung, Verdienstbescheinigung, Lohnsteuerbescheinigung — ausgestellt vom Arbeitgeber. NICHT als allgemeine Rechnung einordnen. NICHT: jährliche Meldung/Entgeltnachweis zur Sozialversicherung (→ finanzen-sozialversicherung). Steuerlich Anlage N.",
       },
       {
         slug: "finanzen-sozialversicherung",
@@ -217,7 +217,7 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "altersvorsorge-betrieblich",
         name: "Betriebliche Altersvorsorge (bAV)",
-        hint: "Leistungsmitteilung einer Unterstützungskasse, Pensionskasse, Pensionsfonds oder Direktversicherung (z. B. Contoso Unterstützungskasse e.V.). Arbeitgeberfinanzierte Altersvorsorge.",
+        hint: "Leistungsmitteilung einer Unterstützungskasse, Pensionskasse, Pensionsfonds oder Direktversicherung des Arbeitgebers. Arbeitgeberfinanzierte Altersvorsorge.",
       },
       {
         slug: "altersvorsorge-gesetzlich",

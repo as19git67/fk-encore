@@ -192,6 +192,14 @@ Einkommensteuererklärung dient.
       Startjahr-Regel gilt nur für Land- und Forstwirtschaft; andere
       betriebliche EÜR werden dem Endjahr zugeordnet. Eine deterministische
       Nachprüfung sichert diese Abgrenzung zusätzlich zum LLM-Prompt ab.
+    * Bei einem Kirchensteuerbescheid NICHT das in der Überschrift genannte
+      Veranlagungsjahr, sondern das Jahr der Nachzahlung bzw. Erstattung/
+      Gutschrift (§ 11 EStG, Zu-/Abflussprinzip) — in der Regel das Jahr des
+      Bescheiddatums bzw. einer ausgewiesenen Fälligkeit. Beispiel:
+      "Kirchensteuerbescheid 2019" vom 19.04.2021 mit Guthaben → 2021. Auch
+      hier greift zusätzlich eine deterministische Nachprüfung
+      (`applyKirchensteuerBescheidYearTaxRule` in `documents/tax-rules.ts`);
+      reine Vorauszahlungsbescheide bleiben unangetastet.
     * Bei Unsicherheit: null.
 - tax_section: der passendste Slug aus der gegebenen Steuerabschnitts-Liste
   oder null, wenn tax_relevant=false oder die Zuordnung unsicher ist.

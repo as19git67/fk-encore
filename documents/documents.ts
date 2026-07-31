@@ -21,6 +21,7 @@ import {
   documentCategorySuggestions,
   documentHintSuggestions,
   documentCorrespondentOverrides,
+  documentSenderRuleOverrides,
   documentSubjectPersons,
   documentSubjectPersonRemovals,
   documentTagLinks,
@@ -50,6 +51,8 @@ import { PERSONAL_DEDUCTION_TAX_SECTION_SLUGS } from "./metadata-extract";
 import {
   invalidateCorrespondentOverridesCache,
 } from "./correspondent-overrides";
+import { invalidateSenderRuleOverridesCache } from "./sender-rule-overrides";
+import { flattenTaxonomy } from "./taxonomy";
 import { users } from "../db/schema";
 import { replaceUserTaxSections } from "./document-ops";
 import {
@@ -4264,6 +4267,126 @@ export const deleteCorrespondentOverride = api(
       .delete(documentCorrespondentOverrides)
       .where(eq(documentCorrespondentOverrides.id, req.id));
     invalidateCorrespondentOverridesCache();
+    return { deleted: true };
+  },
+);
+
+export interface SenderRuleOverrideDTO {
+  id: number;
+  note: string | null;
+  sender_pattern: string;
+  require_any: string[] | null;
+  exclude_any: string[] | null;
+  category: string;
+  sort_order: number;
+}
+
+export interface SenderRuleOverrideListResponse {
+  items: SenderRuleOverrideDTO[];
+}
+
+/** List the household's sender → category rule overrides (admin/taxonomy management). */
+export const listSenderRuleOverrides = api(
+  { expose: true, method: "GET", path: "/documents/sender-rule-overrides", auth: true },
+  async (): Promise<SenderRuleOverrideListResponse> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.manage_taxonomy");
+    const items = await dbAll<SenderRuleOverrideDTO>(
+      db
+        .select({
+          id: documentSenderRuleOverrides.id,
+          note: documentSenderRuleOverrides.note,
+          sender_pattern: documentSenderRuleOverrides.sender_pattern,
+          require_any: documentSenderRuleOverrides.require_any,
+          exclude_any: documentSenderRuleOverrides.exclude_any,
+          category: documentSenderRuleOverrides.category,
+          sort_order: documentSenderRuleOverrides.sort_order,
+        })
+        .from(documentSenderRuleOverrides)
+        .orderBy(asc(documentSenderRuleOverrides.sort_order), asc(documentSenderRuleOverrides.id)),
+    );
+    return { items };
+  },
+);
+
+export interface CreateSenderRuleOverrideRequest {
+  note?: string;
+  /** Free-form sender fragment; normalised server-side (e.g. "Contoso GmbH" → "contosogmbh"). */
+  sender_pattern: string;
+  /** Only fire when normalised title+text contains any of these (already-normalised fragments). */
+  require_any?: string[];
+  /** Never fire when normalised title+text contains any of these (already-normalised fragments). */
+  exclude_any?: string[];
+  /** Target taxonomy category slug. */
+  category: string;
+  /** Lower sorts first — use to order a specific case ahead of a fallback for the same sender. */
+  sort_order?: number;
+}
+
+/**
+ * Create a sender → category rule override. Evaluated before the built-in
+ * SENDER_RULES (see sender-rules.ts) the next time a document is classified.
+ */
+export const createSenderRuleOverride = api(
+  { expose: true, method: "POST", path: "/documents/sender-rule-overrides", auth: true },
+  async (req: CreateSenderRuleOverrideRequest): Promise<SenderRuleOverrideDTO> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.manage_taxonomy");
+    const userId = getUserId();
+
+    const pattern = normalizeForMatch(req.sender_pattern);
+    if (pattern.length < 2) {
+      throw APIError.invalidArgument("sender_pattern must have at least 2 usable characters");
+    }
+    const category = (req.category ?? "").trim();
+    const knownSlugs = new Set(flattenTaxonomy().map((c) => c.slug));
+    if (!knownSlugs.has(category)) {
+      throw APIError.invalidArgument(`category must be a known taxonomy slug, got "${category}"`);
+    }
+
+    const inserted = await db
+      .insert(documentSenderRuleOverrides)
+      .values({
+        note: req.note?.trim() || null,
+        sender_pattern: pattern,
+        require_any: req.require_any && req.require_any.length > 0 ? req.require_any : null,
+        exclude_any: req.exclude_any && req.exclude_any.length > 0 ? req.exclude_any : null,
+        category,
+        sort_order: req.sort_order ?? 0,
+        created_by: userId,
+      })
+      .returning({ id: documentSenderRuleOverrides.id });
+
+    invalidateSenderRuleOverridesCache();
+    return {
+      id: inserted[0].id,
+      note: req.note?.trim() || null,
+      sender_pattern: pattern,
+      require_any: req.require_any ?? null,
+      exclude_any: req.exclude_any ?? null,
+      category,
+      sort_order: req.sort_order ?? 0,
+    };
+  },
+);
+
+export interface DeleteSenderRuleOverrideRequest {
+  id: number;
+}
+
+/** Remove a sender rule override; affected documents fall back to the built-in rules. */
+export const deleteSenderRuleOverride = api(
+  { expose: true, method: "DELETE", path: "/documents/sender-rule-overrides/:id", auth: true },
+  async (req: DeleteSenderRuleOverrideRequest): Promise<{ deleted: boolean }> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.manage_taxonomy");
+    await db
+      .delete(documentSenderRuleOverrides)
+      .where(eq(documentSenderRuleOverrides.id, req.id));
+    invalidateSenderRuleOverridesCache();
     return { deleted: true };
   },
 );

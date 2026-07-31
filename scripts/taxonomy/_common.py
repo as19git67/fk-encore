@@ -118,14 +118,24 @@ def sender_type(sender: str | None) -> str:
     return "sonstiger Absender"
 
 
-_ADDRESS_FRAGMENTS = [
+_ADDRESS_FRAGMENTS_BASE = [
     "bahnhofstr", "bahnhofstraße", "bahnhofstrasse",
-    "10a", "12345", "beispielstadt",
 ]
-_ADDRESS_RX = re.compile(
-    "|".join(rf"\b{re.escape(f)}\b" for f in _ADDRESS_FRAGMENTS),
-    re.I,
-)
+
+
+def _extra_address_fragments() -> list[str]:
+    """Household-specific address fragments (street number, postcode, town)
+    are deliberately NOT hard-coded here — this file is public. Set them
+    locally via `TAXONOMY_SCRUB_EXTRA_ADDRESS_FRAGMENTS` (comma-separated,
+    e.g. in a gitignored `.env`), or the redaction below only catches the
+    generic patterns."""
+    raw = os.environ.get("TAXONOMY_SCRUB_EXTRA_ADDRESS_FRAGMENTS", "")
+    return [f.strip() for f in raw.split(",") if f.strip()]
+
+
+def _address_rx() -> re.Pattern[str]:
+    fragments = _ADDRESS_FRAGMENTS_BASE + _extra_address_fragments()
+    return re.compile("|".join(rf"\b{re.escape(f)}\b" for f in fragments), re.I)
 
 
 def scrub(text: str | None) -> str | None:
@@ -137,7 +147,7 @@ def scrub(text: str | None) -> str | None:
     t = _DATE.sub("[DATUM]", t)
     t = _PHONE.sub("[TEL]", t)
     t = _LONGNUM.sub("[NR]", t)
-    t = _ADDRESS_RX.sub("[ADRESSE]", t)
+    t = _address_rx().sub("[ADRESSE]", t)
     return t
 
 
@@ -196,13 +206,17 @@ def household_names(conn) -> list[str]:
     except Exception:
         pass
 
-    # 3. Known household members not necessarily in either table
-    for extra in ["Beispiel", "Isabella", "Manuel"]:
-        names.add(extra)
-
-    # 4. Family domain — scrub_names doesn't catch email-embedded names,
-    #    but scrub() replaces full emails; this covers partial occurrences.
-    names.add("beispiel.test")
+    # 3. Household members not necessarily in either table, and the family
+    #    email domain (for partial occurrences scrub()'s full-email match
+    #    misses). Deliberately NOT hard-coded — this file is public. Set
+    #    locally via `TAXONOMY_SCRUB_EXTRA_NAMES` (comma-separated, e.g. in a
+    #    gitignored `.env`), or the redaction below only catches DB-known
+    #    names.
+    raw = os.environ.get("TAXONOMY_SCRUB_EXTRA_NAMES", "")
+    for extra in raw.split(","):
+        extra = extra.strip()
+        if extra:
+            names.add(extra)
 
     return sorted(names)
 

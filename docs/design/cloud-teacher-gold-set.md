@@ -80,9 +80,10 @@ Der bisherige Cloud-Zugriff ist ein **einmaliger Sample-Audit** mit
 Dry-Run-Review des Scrubbings. Ein **wiederkehrender** Lehrer-Batch über Teile
 des Bestands ist eine andere Posture. Punkte:
 
-- Der Scrubber ist regex-basiert und **best-effort** (er hat sogar
-  Adressfragmente wie „beispielstadt"/„12345" hart codiert). Für einen Batch okay;
-  vor einem Dauerbetrieb sollte man das Scrubbing härten/prüfen.
+- Der Scrubber ist regex-basiert und **best-effort** (Adressfragmente/Namen
+  über die Umgebungsvariablen `TAXONOMY_SCRUB_EXTRA_ADDRESS_FRAGMENTS` /
+  `TAXONOMY_SCRUB_EXTRA_NAMES` ergänzt, siehe `_common.py`). Für einen Batch
+  okay; vor einem Dauerbetrieb sollte man das Scrubbing härten/prüfen.
 - **Dry-Run-Pflicht:** Jeder Lehrer-Lauf sollte im `AUDIT_DRY_RUN`-Stil erst die
   exakt zu sendenden (gescrubbten) Prompts nach `out/` schreiben, damit man vor
   dem Absenden stichprobenartig prüfen kann.

@@ -87,6 +87,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      # The CUDA image installs torch (cu128) plus a CUDA-compiled
+      # llama-cpp-python on top of the nvidia/cuda devel+runtime base images —
+      # together with buildx's layer cache that regularly exceeds the ~14 GB
+      # free on a stock ubuntu-latest runner ("ResourceExhausted: no space
+      # left on device" while writing the nvidia site-packages). Strip the
+      # preinstalled toolchains the runner ships that this workflow never
+      # uses to reclaim space before the build starts.
+      - name: Free disk space
+        if: matrix.variant == 'cuda'
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: false
+          docker-images: false
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
