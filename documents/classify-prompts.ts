@@ -79,6 +79,10 @@ Zusätzliche Felder:
   bis 30.06.FOLGEJAHR: JJJJ, also das Jahr, in dem dieses Wirtschaftsjahr
   beginnt. Diese Sonderregel gilt nur für Land- und Forstwirtschaft; bei
   anderen Betrieben zählt das Jahr, in dem das Wirtschaftsjahr endet. Bei
+  einem Kirchensteuerbescheid NICHT das in der Überschrift genannte
+  Veranlagungsjahr nehmen, sondern das Jahr, in dem die Nachzahlung bzw.
+  Erstattung/Gutschrift erfolgt (§ 11 EStG) — in der Regel das Jahr des
+  Bescheiddatums: "Kirchensteuerbescheid 2019" vom 19.04.2021 → 2021. Bei
   Unsicherheit: null.
 - tax_year_confidence (0..1): Vertrauen in das Steuerjahr.
 - tax_sections: Liste der passenden Sektions-Slugs aus der unten gegebenen

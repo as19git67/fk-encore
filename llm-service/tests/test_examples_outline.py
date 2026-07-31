@@ -21,11 +21,11 @@ def test_single_with_sender_and_name():
                 category_slug="finanzen-gehalt",
                 category_name="Gehalt",
                 title="Entgeltabrechnung Mai",
-                sender="Open Text",
+                sender="Contoso Software",
             )
         ]
     )
-    assert out == "- Absender: Open Text | Titel: Entgeltabrechnung Mai → finanzen-gehalt (Gehalt)"
+    assert out == "- Absender: Contoso Software | Titel: Entgeltabrechnung Mai → finanzen-gehalt (Gehalt)"
 
 
 def test_missing_sender_falls_back_to_unbekannt():

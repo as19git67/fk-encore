@@ -34,10 +34,11 @@ export interface Institution {
  * handled by the slugified fallback in `resolveCorrespondent`.
  */
 export const INSTITUTIONS: readonly Institution[] = [
-  // Employer document portals (OpenText/IXOS deliver the employer's payslips,
-  // SV notifications, forwarded tax assessments). Unified so all employer
-  // paperwork lands under one correspondent.
-  { slug: "arbeitgeber", display: "Arbeitgeber", fragments: ["opentext", "ixos"] },
+  // The employer, parish, and other household-specific correspondents are
+  // deliberately NOT hard-coded here — this file is public. Configure them
+  // as DB-backed correspondent overrides instead (migration 0131, see
+  // `correspondent-overrides.ts` and the `/documents/correspondent-overrides`
+  // API), e.g. mapping the employer's sender fragment to slug "arbeitgeber".
 
   // Banks / brokers
   { slug: "comdirect", display: "comdirect", fragments: ["comdirect"] },

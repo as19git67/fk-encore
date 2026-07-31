@@ -900,6 +900,23 @@ export const documentCorrespondentOverrides = pgTable("document_correspondent_ov
   created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
 });
 
+// Household-global sender → category rule overrides (migration 0141). Lets a
+// user pin household-specific senders (employer, parish, …) to a taxonomy
+// category without hard-coding those institution names in the public source
+// tree. Evaluated before the built-in SENDER_RULES; see
+// documents/sender-rule-overrides.ts and documents/sender-rules.ts.
+export const documentSenderRuleOverrides = pgTable("document_sender_rule_overrides", {
+  id: serial("id").primaryKey(),
+  note: text("note"),
+  sender_pattern: text("sender_pattern").notNull(),
+  require_any: text("require_any").array(),
+  exclude_any: text("exclude_any").array(),
+  category: text("category").notNull(),
+  sort_order: integer("sort_order").notNull().default(0),
+  created_by: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+});
+
 // Per-user "Bezugspersonen" — maps a literal name as it appears on
 // documents to a relationship tag (mutter, vater, …). The classify
 // step forwards this list to the LLM so address/recipient matches

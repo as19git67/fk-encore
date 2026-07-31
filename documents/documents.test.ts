@@ -370,8 +370,8 @@ describe("documents.text-extract hasPoorSpacing", () => {
     // producing merged words with internal capitals. Repeated to clear the
     // 200-char minimum.
     const sample =
-      "HDI LebensversicherungAG, 50580Köln Charles-de-Gaulle-Platz1 AntonSchegg " +
-      "GutenTag AntonSchegg, wir habenzur Kenntnisgenommen,dassder " +
+      "HDI LebensversicherungAG, 50580Köln Charles-de-Gaulle-Platz1 AntonBeispiel " +
+      "GutenTag AntonBeispiel, wir habenzur Kenntnisgenommen,dassder " +
       "Versicherungsnehmergeändertwerdensoll. Für die weitereBearbeitungsendenSie " +
       "unsbittedie nachfolgendaufgeführtenUnterlagenzurück. ";
     const text = sample.repeat(3);
@@ -427,7 +427,7 @@ describe("documents.text-extract looksLikeBrokenXref", () => {
 
 describe("documents.text-extract shouldRunNumberMarkerFallback", () => {
   it("runs when page 1 is available and no marker was found", () => {
-    expect(shouldRunNumberMarkerFallback("Sehr geehrter Herr Schegg, ...", true)).toBe(true);
+    expect(shouldRunNumberMarkerFallback("Sehr geehrter Herr Beispiel, ...", true)).toBe(true);
   });
 
   it("does not run when the primary text already has a marker", () => {

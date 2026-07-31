@@ -3,6 +3,7 @@ import {
   applyAgricultureFiscalYearTaxRule,
   applyInsuranceAdminTaxRule,
   applyKindergeldTaxRule,
+  applyKirchensteuerBescheidYearTaxRule,
 } from "./tax-rules";
 
 const AV = [{ slug: "anlage-av", confidence: 0.95 }];
@@ -101,7 +102,7 @@ describe("applyInsuranceAdminTaxRule", () => {
   });
 
   it("no longer treats bare 'Leistungsmitteilung' as a certificate marker", () => {
-    // An IXOS Unterstützungskasse "Leistungsmitteilung gemäß Leistungsplan"
+    // An employer Unterstützungskasse "Leistungsmitteilung gemäß Leistungsplan"
     // is mere status/anwartschaft — NOT a tax certificate. Previously the word
     // was in BELEG_MARKERS and would have shielded admin mail from stripping.
     const out = applyInsuranceAdminTaxRule({
@@ -250,5 +251,92 @@ describe("applyAgricultureFiscalYearTaxRule", () => {
       taxYear: 2024,
       taxYearConfidence: 0.8,
     })).toEqual({ taxYear: 2024, taxYearConfidence: 0.8, matched: false });
+  });
+});
+
+describe("applyKirchensteuerBescheidYearTaxRule", () => {
+  const NOTICE_2019_SETTLED_2021 = [
+    "Katholisches Kirchensteueramt Augsburg",
+    "Abrechnung der Veranlagungs- und Vorauszahlungsjahre",
+    "2019 verbleibende Steuer lt. Bescheid v. 19.04.2021",
+    "Kirchensteuerbescheid 2019",
+    "verbleibendes Guthaben 0,27",
+    "verbleibende Kirchensteuer -120,27 €",
+  ].join("\n");
+
+  it("uses the settlement year, not the assessed year in the heading", () => {
+    expect(applyKirchensteuerBescheidYearTaxRule({
+      text: NOTICE_2019_SETTLED_2021,
+      docDate: "2021-04-19",
+      taxYear: 2019,
+      taxYearConfidence: 0.9,
+    })).toEqual({ taxYear: 2021, taxYearConfidence: 0.95, matched: true });
+  });
+
+  it("falls back to the document date when no Bescheid date is printed", () => {
+    expect(applyKirchensteuerBescheidYearTaxRule({
+      text: "Kirchensteuerbescheid 2019 — Erstattung der zu viel gezahlten Kirchensteuer",
+      docDate: "2021-04-19",
+      taxYear: 2019,
+      taxYearConfidence: 0.9,
+    })).toEqual({ taxYear: 2021, taxYearConfidence: 0.95, matched: true });
+  });
+
+  it("prefers an explicit due date over the Bescheid date", () => {
+    expect(applyKirchensteuerBescheidYearTaxRule({
+      text:
+        "Kirchensteuerbescheid 2021, Bescheid vom 15.12.2022\n" +
+        "Die Nachzahlung ist fällig am 20.01.2023",
+      docDate: "2022-12-15",
+      taxYear: 2021,
+      taxYearConfidence: 0.9,
+    })).toEqual({ taxYear: 2023, taxYearConfidence: 0.95, matched: true });
+  });
+
+  it("keeps the year when Bescheid and settlement fall into the same year", () => {
+    expect(applyKirchensteuerBescheidYearTaxRule({
+      text: "Kirchensteuerbescheid 2021 vom 03.11.2021, Nachzahlung 42,00 €",
+      docDate: "2021-11-03",
+      taxYear: 2021,
+      taxYearConfidence: 0.88,
+    })).toEqual({ taxYear: 2021, taxYearConfidence: 0.88, matched: true });
+  });
+
+  it("leaves a pure Vorauszahlungsbescheid untouched", () => {
+    expect(applyKirchensteuerBescheidYearTaxRule({
+      text:
+        "Katholisches Kirchensteueramt — Vorauszahlungsbescheid\n" +
+        "Festsetzung der Vorauszahlungen ab 2022, Nachzahlung je Quartal",
+      docDate: "2021-11-03",
+      taxYear: 2022,
+      taxYearConfidence: 0.8,
+    })).toEqual({ taxYear: 2022, taxYearConfidence: 0.8, matched: false });
+  });
+
+  it("ignores documents that merely mention Kirchensteuer", () => {
+    expect(applyKirchensteuerBescheidYearTaxRule({
+      text: "Jahressteuerbescheinigung 2021: Kapitalertragsteuer, Solidaritätszuschlag, Kirchensteuer, Erstattung",
+      docDate: "2022-02-01",
+      taxYear: 2021,
+      taxYearConfidence: 0.95,
+    })).toEqual({ taxYear: 2021, taxYearConfidence: 0.95, matched: false });
+  });
+
+  it("never moves the year backwards on a bad date extraction", () => {
+    expect(applyKirchensteuerBescheidYearTaxRule({
+      text: "Kirchensteuerbescheid 2019, Guthaben — Bescheid vom 19.04.2018",
+      docDate: "2018-04-19",
+      taxYear: 2019,
+      taxYearConfidence: 0.9,
+    })).toEqual({ taxYear: 2019, taxYearConfidence: 0.9, matched: false });
+  });
+
+  it("does nothing without any usable date", () => {
+    expect(applyKirchensteuerBescheidYearTaxRule({
+      text: "Kirchensteuerbescheid — Guthaben",
+      docDate: null,
+      taxYear: 2019,
+      taxYearConfidence: 0.9,
+    })).toEqual({ taxYear: 2019, taxYearConfidence: 0.9, matched: false });
   });
 });

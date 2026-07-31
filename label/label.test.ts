@@ -176,8 +176,8 @@ describe("label.service — listPrinters", () => {
 
 describe("label.service — getCupsBaseUrl", () => {
   it("prepends http:// when the scheme is missing", () => {
-    process.env.CUPS_SERVER_URL = "scanner.schegg.net:631";
-    expect(getCupsBaseUrl()).toBe("http://scanner.schegg.net:631");
+    process.env.CUPS_SERVER_URL = "scanner.example.net:631";
+    expect(getCupsBaseUrl()).toBe("http://scanner.example.net:631");
   });
 
   it("keeps an explicit scheme and strips a trailing slash", () => {

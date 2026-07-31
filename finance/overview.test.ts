@@ -136,7 +136,7 @@ describe("finance/overview — defaults", () => {
     const tagesgeld = await insertAccount("Anton Tagesgeld", "tagesgeld");
     const depot = await insertAccount("Anton Depot", "depot");
 
-    await ensureUser(7, "anton@schegg.de");
+    await ensureUser(7, "anton@beispiel.test");
     await grantAcl(giro, 7);
     await grantAcl(visa, 7);
     await grantAcl(tagesgeld, 7);
@@ -146,7 +146,7 @@ describe("finance/overview — defaults", () => {
     const resp = await getOverview();
 
     expect(resp.is_default).toBe(true);
-    expect(resp.user_email).toBe("anton@schegg.de");
+    expect(resp.user_email).toBe("anton@beispiel.test");
 
     const taeglich = resp.sections.find((s) => s.name === "Täglich");
     const sparen = resp.sections.find((s) => s.name === "Sparen");

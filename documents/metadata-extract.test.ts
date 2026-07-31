@@ -182,13 +182,13 @@ describe("extractDocumentDate", () => {
 });
 
 describe("isSubjectPersonSender", () => {
-  const persons = [{ full_name: "Erika Mustermann" }, { full_name: "Anton Schegg" }];
+  const persons = [{ full_name: "Erika Mustermann" }, { full_name: "Anton Beispiel" }];
 
   it("matches the person's name in any order, with or without salutation", () => {
     expect(isSubjectPersonSender("Erika Mustermann", persons)).toBe(true);
     expect(isSubjectPersonSender("Mustermann, Erika", persons)).toBe(true);
     expect(isSubjectPersonSender("Frau Erika Mustermann", persons)).toBe(true);
-    expect(isSubjectPersonSender("Anton Schegg", persons)).toBe(true);
+    expect(isSubjectPersonSender("Anton Beispiel", persons)).toBe(true);
   });
 
   it("does not match a company that merely contains the surname", () => {
@@ -206,13 +206,13 @@ describe("isSubjectPersonSender", () => {
 describe("detectSubjectPersonIds", () => {
   const persons = [
     { id: 1, full_name: "Erika Mustermann" },
-    { id: 2, full_name: "Anton Schegg" },
+    { id: 2, full_name: "Anton Beispiel" },
   ];
 
   it("matches a person whose full name appears in any order", () => {
     expect(detectSubjectPersonIds("Patientin: Erika Mustermann, geb. 1950", persons)).toEqual([1]);
     expect(detectSubjectPersonIds("Rechnung an Mustermann, Erika", persons)).toEqual([1]);
-    expect(detectSubjectPersonIds("Betreff Anton Schegg und Erika Mustermann", persons)).toEqual([
+    expect(detectSubjectPersonIds("Betreff Anton Beispiel und Erika Mustermann", persons)).toEqual([
       1, 2,
     ]);
   });

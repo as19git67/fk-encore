@@ -76,7 +76,7 @@ beforeEach(async () => {
 
 describe("documents.syncTaxReviewFlagForSubjectPerson", () => {
   it("retroactively flags existing documents when opted in", async () => {
-    const mutter = await addPerson("Maria Schegg", "mutter");
+    const mutter = await addPerson("Maria Beispiel", "mutter");
     await insertDoc(DOC_ID);
     await linkPerson(DOC_ID, mutter);
     await addTaxSection(DOC_ID, "haushaltsnahe");
@@ -87,7 +87,7 @@ describe("documents.syncTaxReviewFlagForSubjectPerson", () => {
   });
 
   it("does not flag a tax_reviewed (user-pinned) document", async () => {
-    const mutter = await addPerson("Maria Schegg", "mutter");
+    const mutter = await addPerson("Maria Beispiel", "mutter");
     await insertDoc(DOC_ID, { taxReviewed: true });
     await linkPerson(DOC_ID, mutter);
     await addTaxSection(DOC_ID, "haushaltsnahe");
@@ -98,7 +98,7 @@ describe("documents.syncTaxReviewFlagForSubjectPerson", () => {
   });
 
   it("does not flag a document without a personal-deduction tax section", async () => {
-    const mutter = await addPerson("Maria Schegg", "mutter");
+    const mutter = await addPerson("Maria Beispiel", "mutter");
     await insertDoc(DOC_ID);
     await linkPerson(DOC_ID, mutter);
     await addTaxSection(DOC_ID, "anlage-r"); // income section, not a personal deduction
@@ -109,7 +109,7 @@ describe("documents.syncTaxReviewFlagForSubjectPerson", () => {
   });
 
   it("clears the flag on opt-out", async () => {
-    const mutter = await addPerson("Maria Schegg", "mutter");
+    const mutter = await addPerson("Maria Beispiel", "mutter");
     await insertDoc(DOC_ID);
     await linkPerson(DOC_ID, mutter);
     await addTaxSection(DOC_ID, "haushaltsnahe");
@@ -122,8 +122,8 @@ describe("documents.syncTaxReviewFlagForSubjectPerson", () => {
   });
 
   it("keeps the flag on opt-out when another opted-in person still matches", async () => {
-    const mutter = await addPerson("Maria Schegg", "mutter");
-    const vater = await addPerson("Anton Schegg", "vater");
+    const mutter = await addPerson("Maria Beispiel", "mutter");
+    const vater = await addPerson("Anton Beispiel", "vater");
     await insertDoc(DOC_ID);
     await linkPerson(DOC_ID, mutter);
     await linkPerson(DOC_ID, vater);
@@ -142,7 +142,7 @@ describe("documents.syncTaxReviewFlagForSubjectPerson", () => {
   });
 
   it("does not touch another user's documents", async () => {
-    const mutter = await addPerson("Maria Schegg", "mutter");
+    const mutter = await addPerson("Maria Beispiel", "mutter");
     await insertDoc(DOC_ID);
     await linkPerson(DOC_ID, mutter);
     await addTaxSection(DOC_ID, "haushaltsnahe");

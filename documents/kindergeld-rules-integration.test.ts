@@ -5,7 +5,7 @@ const AI = {
   category_slug: "finanzen-steuern",
   title: "Bescheid über Kindergeld nach dem EStG",
   doc_date: "2025-10-08",
-  sender: "Anton Schegg",
+  sender: "Anton Beispiel",
   document_number: "5625",
   summary: "Änderung der Kindergeldfestsetzung",
   confidence: 0.92,

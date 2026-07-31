@@ -83,7 +83,7 @@ describe("documents.subject-persons CRUD", () => {
 
   it("creates a subject person opted into tax review and can toggle it back off", async () => {
     const created = await createSubjectPerson(TEST_USER_ID, {
-      full_name: "Maria Schegg",
+      full_name: "Maria Beispiel",
       relation_tag: "mutter",
       requires_tax_review: true,
     });

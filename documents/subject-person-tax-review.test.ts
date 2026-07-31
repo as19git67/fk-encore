@@ -87,8 +87,8 @@ describe("runClassify — subject-person tax review is opt-in (0137)", () => {
   });
 
   it("flags a document for a subject person that opted into tax review", async () => {
-    await addPerson("Maria Schegg", "mutter", true);
-    await insertDoc(DOC_ID_B, "Rechnung für Maria Schegg, Pflegeleistungen.");
+    await addPerson("Maria Beispiel", "mutter", true);
+    await insertDoc(DOC_ID_B, "Rechnung für Maria Beispiel, Pflegeleistungen.");
 
     await runClassify(DOC_ID_B);
 

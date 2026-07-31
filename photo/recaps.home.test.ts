@@ -18,8 +18,8 @@ const photo = (
   curation_status: null,
 });
 
-// Merching bei Augsburg
-const HOME = { lat: 48.25, lon: 10.98 };
+// Beispielstadt (fictional, Bavaria-ish coordinates for the distance math)
+const HOME = { lat: 48.14, lon: 11.58 };
 // Tokio
 const TRIP = { lat: 35.68, lon: 139.69 };
 
