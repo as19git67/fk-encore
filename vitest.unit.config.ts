@@ -14,6 +14,7 @@ export default defineConfig({
       "documents/metadata-extract.test.ts",
       "documents/ocr-layout.test.ts",
       "documents/ocr-preprocess.test.ts",
+      "documents/pdf-rotate.test.ts",
       "documents/sender-rules.test.ts",
       "documents/tax-rules.test.ts",
       "documents/text-extract-warning.test.ts",

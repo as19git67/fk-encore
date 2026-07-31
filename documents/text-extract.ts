@@ -45,6 +45,7 @@ import { createRequire } from "module";
 import { spawn } from "child_process";
 import { detectOcrRotation, preprocessOcrImage } from "./ocr-preprocess";
 import { layoutTextFromTsv, shouldUseLayoutText } from "./ocr-layout";
+import { tesseractEnv } from "./tesseract-env";
 import { DOCUMENT_NUMBER_RE } from "./metadata-extract";
 
 // pdf-parse is CJS and its default import pulls in a debug routine that
@@ -737,7 +738,7 @@ function runTesseract(imagePath: string, outBase: string, configs: string[]): Pr
         "preserve_interword_spaces=1",
         ...configs,
       ],
-      { stdio: ["ignore", "ignore", "pipe"] },
+      { stdio: ["ignore", "ignore", "pipe"], env: tesseractEnv() },
     );
     let stderr = "";
     proc.stderr.on("data", (d) => {
@@ -792,7 +793,7 @@ function runTesseractSparseText(imagePath: string): Promise<string> {
     const proc = spawn(
       "tesseract",
       [imagePath, "stdout", "-l", lang, "--oem", "1", "--psm", "11"],
-      { stdio: ["ignore", "pipe", "pipe"] },
+      { stdio: ["ignore", "pipe", "pipe"], env: tesseractEnv() },
     );
     let stdout = "";
     let stderr = "";
