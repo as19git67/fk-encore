@@ -145,6 +145,8 @@ _state: dict[str, Any] = {
     "llm_accelerator": None,
     "embedder_device": None,
     "cuda_device_name": None,
+    # Resolved once at startup — see _resolve_classify_response_format.
+    "classify_response_format": None,
 }
 
 
@@ -235,6 +237,47 @@ def _optional_llama_kwargs(llama_cpp: Any, llama_cls: Any) -> dict[str, Any]:
             )
 
     return kwargs
+
+
+def _resolve_classify_response_format() -> dict[str, Any]:
+    """Decide once, at startup, whether the installed binding can turn
+    ``_CLASSIFY_JSON_SCHEMA`` into a grammar — and fall back to the plain
+    ``json_object`` format if it cannot.
+
+    Worth the ceremony because the failure mode is otherwise severe and silent:
+    ``create_chat_completion`` converts the schema on every call, so a schema
+    this build's converter chokes on (union types like ``["string", "null"]``
+    are the likely candidate on older ports) would make *every* /classify raise
+    — which the handler turns into a 500, which the app's llm-client treats as
+    "service unavailable" and defers for an unbounded retry. Every document
+    would silently stop being classified.
+
+    We only degrade on positive evidence of a problem. If the converter itself
+    cannot be located we keep the schema and say so, rather than throwing the
+    fix away because of a moved import path.
+    """
+
+    try:
+        from llama_cpp.llama_grammar import LlamaGrammar
+    except Exception:
+        log.warning(
+            "could not import LlamaGrammar to pre-verify the /classify JSON schema; "
+            "using it unverified"
+        )
+        return _CLASSIFY_RESPONSE_FORMAT
+
+    try:
+        LlamaGrammar.from_json_schema(json.dumps(_CLASSIFY_JSON_SCHEMA), verbose=False)
+    except Exception:
+        log.exception(
+            "this llama-cpp-python build cannot convert the /classify JSON schema to a "
+            "grammar — falling back to plain json_object. Empty '{}' completions become "
+            "possible again and are handled by the retry/fallback path"
+        )
+        return {"type": "json_object"}
+
+    log.info("/classify JSON schema verified: empty completions are ungrammatical")
+    return _CLASSIFY_RESPONSE_FORMAT
 
 
 def _install_shutdown_logging(startup_monotonic: float) -> None:
@@ -344,6 +387,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         log.exception("Llama load failed with tuning kwargs %s — retrying without them", tuning)
         _state["llm"] = Llama(**base_kwargs)
     _state["llm_accelerator"] = LLM_ACCELERATOR
+    _state["classify_response_format"] = _resolve_classify_response_format()
     log.info("Llama loaded (RSS=%.0f MB)", _rss_mb())
 
     embed_device = _resolve_embed_device(torch)
@@ -732,6 +776,65 @@ class ClassifyResponse(BaseModel):
     tax_sections: list[TaxAssignment] = Field(default_factory=list)
 
 
+# Output grammar for /classify.
+#
+# ``response_format={"type": "json_object"}`` alone constrains the completion to
+# *some* valid JSON object — and ``{}`` is the shortest string that satisfies
+# that. It is therefore the cheapest escape for a model that would rather be
+# emitting something the grammar forbids (Qwen3 opening a ``<think>`` block, for
+# one). Measured on a 7697-document run: ~200 first attempts returned ``{}``, and
+# 66 of those still did on the retry and dead-ended in the sonstiges fallback
+# with confidence 0 — documents that look like ordinary low-confidence results
+# but never got classified at all.
+#
+# Passing a schema makes llama.cpp derive a GBNF grammar from it, so the five
+# fields ClassifyResponse has no default for cannot be omitted. ``{}`` stops
+# being a reachable output rather than being retried after the fact.
+#
+# Every OPTIONAL field is listed here too, even though none of them is required:
+# llama.cpp builds the object rule from ``properties``, so a field left out
+# would become unemittable and the document-type and tax facets would silently
+# stop working. ``required`` is what does the actual constraining. Value ranges
+# (confidence 0..1, tax_year 1970..2100) are deliberately not expressed — the
+# grammar cannot enforce them meaningfully, and the pydantic validation below
+# already rejects out-of-range values as a schema mismatch.
+_CLASSIFY_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "category_slug": {"type": "string"},
+        "title": {"type": "string"},
+        "doc_date": {"type": ["string", "null"]},
+        "sender": {"type": ["string", "null"]},
+        "document_number": {"type": ["string", "null"]},
+        "summary": {"type": "string"},
+        "tags": {"type": "array", "items": {"type": "string"}},
+        "confidence": {"type": "number"},
+        "document_type": {"type": ["string", "null"]},
+        "document_type_confidence": {"type": "number"},
+        "tax_relevant": {"type": "boolean"},
+        "tax_year": {"type": ["integer", "null"]},
+        "tax_year_confidence": {"type": "number"},
+        "tax_sections": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "slug": {"type": "string"},
+                    "confidence": {"type": "number"},
+                },
+                "required": ["slug", "confidence"],
+            },
+        },
+    },
+    "required": list(_CLASSIFY_CORE_FIELDS),
+}
+
+_CLASSIFY_RESPONSE_FORMAT: dict[str, Any] = {
+    "type": "json_object",
+    "schema": _CLASSIFY_JSON_SCHEMA,
+}
+
+
 _CLASSIFY_PROMPTS: dict[str, str] | None = None
 
 
@@ -1018,6 +1121,13 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
     # NOT loop). Bounded here — unlike the caller's queue-level retry — so a
     # persistently failing document still fails fast instead of doubling
     # every request's worst-case latency indefinitely.
+    #
+    # The empty-output half of this is now largely vestigial: _CLASSIFY_JSON_SCHEMA
+    # makes an empty object ungrammatical, so the model cannot produce one in the
+    # first place. Kept as a backstop for the case where the grammar does not
+    # apply — a binding that ignores the ``schema`` key, or a build whose
+    # schema→GBNF conversion rejects it — rather than trusting that it always
+    # engages. The non-JSON half is unaffected and still does real work.
     _CLASSIFY_MAX_ATTEMPTS = 2
 
     for attempt in range(1, _CLASSIFY_MAX_ATTEMPTS + 1):
@@ -1045,7 +1155,8 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
                     {"role": "system", "content": attempt_system},
                     {"role": "user", "content": attempt_user},
                 ],
-                response_format={"type": "json_object"},
+                response_format=_state.get("classify_response_format")
+                or _CLASSIFY_RESPONSE_FORMAT,
                 temperature=temperature,
                 # _CLASSIFY_MAX_TOKENS leaves headroom for the extra tax fields
                 # (up to a handful of tax_sections entries) without touching n_ctx.
