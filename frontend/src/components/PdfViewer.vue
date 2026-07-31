@@ -72,13 +72,10 @@ const textLayers = new Map<number, TextLayer>()
 /** Pages inside the render margin — re-rasterised after zoom/resize. */
 const pendingPages = new Set<number>()
 const renderingPages = new Set<number>()
-/** Pages actually intersecting the viewport — drives the page indicator. */
-const visiblePages = new Set<number>()
 
-let renderObserver: IntersectionObserver | null = null
-let visibilityObserver: IntersectionObserver | null = null
 let resizeObserver: ResizeObserver | null = null
 let resizeRaf = 0
+let scanRaf = 0
 /** Guards against a superseded chunk build finishing after a newer one. */
 let buildToken = 0
 
@@ -117,7 +114,6 @@ function clearChunk() {
   canvasEls.clear()
   textEls.clear()
   pendingPages.clear()
-  visiblePages.clear()
   pages.value = []
 }
 
@@ -215,6 +211,7 @@ async function buildChunk(scrollToPage?: number) {
   await nextTick()
   if (token !== buildToken) return
   if (scrollToPage !== undefined) scrollToPageElement(scrollToPage)
+  updateVisiblePages()
 }
 
 async function ensureRendered(pageNumber: number) {
@@ -255,8 +252,12 @@ async function ensureRendered(pageNumber: number) {
     }
     return
   } finally {
-    if (renderTasks.get(pageNumber) === task) renderTasks.delete(pageNumber)
-    renderingPages.delete(pageNumber)
+    // Only clear the guards if this is still the page's current task — a
+    // relayout may already have cancelled us and started a fresh render.
+    if (renderTasks.get(pageNumber) === task) {
+      renderTasks.delete(pageNumber)
+      renderingPages.delete(pageNumber)
+    }
   }
 
   await renderTextLayer(pageNumber, page, cssScale)
@@ -298,13 +299,73 @@ async function renderTextLayer(pageNumber: number, page: PDFPageProxy, cssScale:
   }
 }
 
-function renderPending() {
-  for (const n of pendingPages) void ensureRendered(n)
+// ─── Visibility scanning ────────────────────────────────────────────────────
+// Which pages need rasterising depends on the layout: on wide viewports the
+// page stack scrolls inside `.canvas-wrapper`, on narrow ones the wrapper
+// just grows and the whole document scrolls. An IntersectionObserver would
+// need a different `root` per case (and its rootMargin prefetch is defeated
+// by an intermediate scroll container), so we measure against the wrapper's
+// currently on-screen band instead — that is correct in both layouts.
+
+/** The vertical slice of the viewer that is actually on screen. */
+function visibleBand(): { top: number; bottom: number } | null {
+  const el = containerRef.value
+  if (!el) return null
+  const rect = el.getBoundingClientRect()
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight
+  const top = Math.max(rect.top, 0)
+  const bottom = Math.min(rect.bottom, viewportHeight)
+  return bottom > top ? { top, bottom } : null
 }
 
-/** Re-measure every mounted page after a zoom or container-width change. */
+/**
+ * Rasterise every page within the render margin of the visible band, drop
+ * the ones that scrolled away, and report the current page to the toolbar.
+ *
+ * "Current" is the page covering most of the band, not the top-most one:
+ * with a sliver of the previous page still showing, the top-most rule would
+ * name a page the user has effectively scrolled past.
+ */
+function updateVisiblePages() {
+  const band = visibleBand()
+  if (!band || pages.value.length === 0) return
+  let best: number | null = null
+  let bestCoverage = 0
+  for (const entry of pages.value) {
+    const el = pageEls.get(entry.pageNumber)
+    if (!el) continue
+    const rect = el.getBoundingClientRect()
+    if (rect.bottom >= band.top - RENDER_MARGIN_PX && rect.top <= band.bottom + RENDER_MARGIN_PX) {
+      pendingPages.add(entry.pageNumber)
+      void ensureRendered(entry.pageNumber)
+    } else {
+      pendingPages.delete(entry.pageNumber)
+    }
+    const coverage = Math.min(rect.bottom, band.bottom) - Math.max(rect.top, band.top)
+    if (coverage > bestCoverage) {
+      bestCoverage = coverage
+      best = entry.pageNumber
+    }
+  }
+  if (best !== null && best !== currentPage.value) setCurrentPage(best)
+}
+
+function scheduleScan() {
+  if (scanRaf) return
+  scanRaf = requestAnimationFrame(() => {
+    scanRaf = 0
+    updateVisiblePages()
+  })
+}
+
+/**
+ * Re-measure every mounted page after a zoom or container-width change.
+ * Every page changes height, so the old scroll offset would land on a
+ * different page — keep the one the user was looking at anchored.
+ */
 async function relayout() {
   if (pages.value.length === 0) return
+  const anchor = currentPage.value
   cancelRenders()
   for (const entry of pages.value) {
     const page = pageProxies.get(entry.pageNumber)
@@ -318,7 +379,8 @@ async function relayout() {
   }
   effectiveZoom.value = pages.value[0]?.scale ?? 1
   await nextTick()
-  renderPending()
+  scrollToPageElement(anchor)
+  updateVisiblePages()
 }
 
 // ─── Page element registration & observation ────────────────────────────────
@@ -336,20 +398,11 @@ function isMounted(pageNumber: number): boolean {
 function setPageEl(pageNumber: number, el: Element | null) {
   if (!el) {
     if (isMounted(pageNumber)) return
-    const previous = pageEls.get(pageNumber)
-    if (previous) {
-      renderObserver?.unobserve(previous)
-      visibilityObserver?.unobserve(previous)
-    }
     pageEls.delete(pageNumber)
     pendingPages.delete(pageNumber)
-    visiblePages.delete(pageNumber)
     return
   }
-  const node = el as HTMLElement
-  pageEls.set(pageNumber, node)
-  renderObserver?.observe(node)
-  visibilityObserver?.observe(node)
+  pageEls.set(pageNumber, el as HTMLElement)
 }
 
 function setCanvasEl(pageNumber: number, el: Element | null) {
@@ -360,37 +413,6 @@ function setCanvasEl(pageNumber: number, el: Element | null) {
 function setTextEl(pageNumber: number, el: Element | null) {
   if (el) textEls.set(pageNumber, el as HTMLDivElement)
   else if (!isMounted(pageNumber)) textEls.delete(pageNumber)
-}
-
-function pageNumberOf(target: Element): number | null {
-  const raw = (target as HTMLElement).dataset.pageNumber
-  const parsed = raw ? parseInt(raw, 10) : Number.NaN
-  return Number.isFinite(parsed) ? parsed : null
-}
-
-function onRenderIntersect(entries: IntersectionObserverEntry[]) {
-  for (const entry of entries) {
-    const n = pageNumberOf(entry.target)
-    if (n === null) continue
-    if (entry.isIntersecting) {
-      pendingPages.add(n)
-      void ensureRendered(n)
-    } else {
-      pendingPages.delete(n)
-    }
-  }
-}
-
-function onVisibilityIntersect(entries: IntersectionObserverEntry[]) {
-  for (const entry of entries) {
-    const n = pageNumberOf(entry.target)
-    if (n === null) continue
-    if (entry.isIntersecting) visiblePages.add(n)
-    else visiblePages.delete(n)
-  }
-  if (visiblePages.size === 0) return
-  const topMost = Math.min(...visiblePages)
-  if (topMost !== currentPage.value) setCurrentPage(topMost)
 }
 
 function setCurrentPage(pageNumber: number) {
@@ -409,7 +431,10 @@ function clampedPage(value: number): number {
 function scrollToPageElement(pageNumber: number) {
   const el = pageEls.get(pageNumber)
   if (!el) return
-  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  // Deliberately instant: smooth-scrolling across a 25-page stack drags the
+  // visible band over every page in between, which would rasterise the whole
+  // chunk on the way to the target.
+  el.scrollIntoView({ block: 'start' })
 }
 
 async function goToPage(value: number) {
@@ -465,7 +490,12 @@ function zoomOut() {
 function fitWidth() { zoom.value = FIT_WIDTH }
 
 function onContainerResize() {
-  if (zoom.value !== FIT_WIDTH) return
+  // A height-only change (e.g. the panel resizing) doesn't affect the
+  // fit-width scale, but it does change which pages are on screen.
+  if (zoom.value !== FIT_WIDTH) {
+    scheduleScan()
+    return
+  }
   if (resizeRaf) cancelAnimationFrame(resizeRaf)
   resizeRaf = requestAnimationFrame(() => {
     resizeRaf = 0
@@ -481,24 +511,24 @@ watch(() => props.data, (bytes) => {
 watch(zoom, () => { void relayout() })
 
 onMounted(() => {
-  if (typeof IntersectionObserver !== 'undefined') {
-    renderObserver = new IntersectionObserver(onRenderIntersect, {
-      rootMargin: `${RENDER_MARGIN_PX}px 0px`,
-    })
-    visibilityObserver = new IntersectionObserver(onVisibilityIntersect)
-  }
   if (props.data) void loadDocument(props.data)
   if (containerRef.value && typeof ResizeObserver !== 'undefined') {
     resizeObserver = new ResizeObserver(onContainerResize)
     resizeObserver.observe(containerRef.value)
   }
+  // Capture phase: `scroll` doesn't bubble, but it does travel the capture
+  // path — so one listener catches both the page scrolling (narrow layout)
+  // and the panel scrolling (wide layout).
+  window.addEventListener('scroll', scheduleScan, { capture: true, passive: true })
+  window.addEventListener('resize', scheduleScan, { passive: true })
 })
 
 onBeforeUnmount(() => {
-  renderObserver?.disconnect()
-  visibilityObserver?.disconnect()
+  window.removeEventListener('scroll', scheduleScan, { capture: true })
+  window.removeEventListener('resize', scheduleScan)
   if (resizeObserver) resizeObserver.disconnect()
   if (resizeRaf) cancelAnimationFrame(resizeRaf)
+  if (scanRaf) cancelAnimationFrame(scanRaf)
   void destroyDoc()
 })
 </script>
@@ -678,9 +708,12 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   width: 100%;
-  /* No fixed/inherited height — the viewer grows with the rendered
-     pages so the surrounding page is the only thing that scrolls. */
+  /* Height is not set here: the viewer fills its panel when that panel has
+     a definite height, and otherwise grows with the rendered pages.
+     `min-height: 0` lets the page stack shrink below its content size in
+     the former case so it — and not the whole document — scrolls. */
   min-width: 0;
+  min-height: 0;
 }
 
 .toolbar {
@@ -760,10 +793,16 @@ onBeforeUnmount(() => {
 
 .canvas-wrapper {
   position: relative;
-  /* Allow scrolling the preview when the user zooms the page past the
-     available width — horizontal in particular, so the cut-off sides
-     stay reachable. The wrapper grows with the page stack, so vertical
-     overflow still falls through to the page scroll as before. */
+  /* This is the page stack's scroll container whenever the viewer has a
+     definite height (wide layout: the panel fills the viewport, so only
+     the stack scrolls and toolbar/pagination stay pinned to the panel).
+     With `flex-basis: auto` the wrapper falls back to its content height
+     when the viewer is free to grow (narrow layout) — then nothing
+     overflows vertically and the page itself scrolls as before.
+     Horizontal overflow is scrolled here in both cases, so the sides of a
+     zoomed-in page stay reachable. */
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
   display: flex;
   padding: 0.5rem;
@@ -789,8 +828,10 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: center;
   gap: 0.25rem;
-  /* Keep the page clear of the app's sticky navbar when jumped to. */
-  scroll-margin-top: calc(var(--menubar-height, 3.5rem) + 0.5rem);
+  /* When the whole page scrolls, a jumped-to page has to clear the app's
+     sticky navbar. Layouts that scroll the panel itself override this via
+     `--pdf-scroll-margin` — there is no navbar in the way. */
+  scroll-margin-top: var(--pdf-scroll-margin, calc(var(--menubar-height, 3.5rem) + 0.5rem));
 }
 
 .page-caption {
@@ -913,4 +954,24 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 .password-submit:disabled { opacity: 0.5; cursor: default; }
+</style>
+
+<!--
+  pdf.js appends helper nodes (a canvas for text measuring, a span for copy
+  support) directly to <body>, outside this component — so they need an
+  unscoped rule. Without it the inline canvas creates a line box that makes
+  the document ~19px taller than the viewport, which shows up as a stray
+  page scrollbar. Mirrors pdfjs-dist/web/pdf_viewer.css, which we don't
+  import wholesale.
+-->
+<style>
+#hiddenCopyElement,
+.hiddenCanvasElement {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  display: none;
+}
 </style>
