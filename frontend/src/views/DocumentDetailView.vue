@@ -18,6 +18,7 @@ import Popover from 'primevue/popover'
 import { useConfirm } from 'primevue/useconfirm'
 import {
   deleteDocument,
+  dismissDocumentError,
   downloadDocument,
   fetchDocumentBytes,
   getDocument,
@@ -599,6 +600,23 @@ function onDelete() {
   })
 }
 
+const dismissingError = ref(false)
+
+async function onDismissError() {
+  if (!doc.value) return
+  dismissingError.value = true
+  error.value = ''
+  info.value = ''
+  try {
+    doc.value = await dismissDocumentError(doc.value.id)
+    info.value = 'Fehler verworfen — das Dokument gilt als manuell erfasst.'
+  } catch (err: any) {
+    error.value = err.message || 'Fehler konnte nicht verworfen werden'
+  } finally {
+    dismissingError.value = false
+  }
+}
+
 const replaceFileInput = ref<HTMLInputElement | null>(null)
 const replacing = ref(false)
 
@@ -887,6 +905,18 @@ onBeforeUnmount(() => {
               severity="secondary"
               :loading="replacing"
               @click="onReplaceFileClick"
+            />
+            <!-- The file is often fine and only the automatic classification
+                 wasn't; then the fix is to fill the metadata in by hand and
+                 mark the document done, not to upload it again. -->
+            <Button
+              v-if="auth.hasPermission('documents.edit')"
+              label="Fehler verwerfen"
+              icon="pi pi-check"
+              size="small"
+              severity="secondary"
+              :loading="dismissingError"
+              @click="onDismissError"
             />
           </div>
         </Message>

@@ -107,6 +107,78 @@ describe("extractDocumentDate", () => {
     expect(extractDocumentDate("Kein Datum in diesem Text")).toBeNull();
     expect(extractDocumentDate("")).toBeNull();
   });
+
+  // Scanned German invoices routinely print the date as a table column with
+  // the label above the value, which the same-line patterns cannot see.
+  describe("column-header layout (label above the value)", () => {
+    it("reads a date from the row under its column header", () => {
+      // The production case: a scanned doctor's invoice, as ocr-layout.ts
+      // reconstructs it (column breaks rendered as wide gaps).
+      const text = [
+        "Bitte bei Zahlung unbedingt angeben",
+        "Datum      Rechnungs-Nr.   Endbetrag",
+        "01.04.19   77213-9042          20,11",
+      ].join("\n");
+      expect(extractDocumentDate(text)).toBe("2019-04-01");
+    });
+
+    it("reads a single-column header/value pair", () => {
+      expect(extractDocumentDate("Datum\n01.04.19")).toBe("2019-04-01");
+      expect(extractDocumentDate("Rechnungsdatum\n18.01.2021")).toBe("2021-01-18");
+    });
+
+    it("picks the cell belonging to the date column, not another one", () => {
+      const text = ["Kunden-Nr.   Datum        Betrag", "4711         18.01.2021   20,11"].join("\n");
+      expect(extractDocumentDate(text)).toBe("2021-01-18");
+    });
+
+    it("reads a written-month date under the header", () => {
+      expect(extractDocumentDate("Datum\n8. September 2017")).toBe("2017-09-08");
+    });
+
+    it("skips the row when the columns do not line up", () => {
+      // One value cell missing — the indices no longer correspond, so taking
+      // any of them would be a guess.
+      const text = ["Kunden-Nr.   Datum        Betrag", "4711         18.01.2021"].join("\n");
+      expect(extractDocumentDate(text)).toBeNull();
+    });
+
+    it("does not treat a sentence mentioning 'Datum' as a column header", () => {
+      const text = ["Das Datum entnehmen Sie bitte dem Beleg.", "30.06.2021"].join("\n");
+      expect(extractDocumentDate(text)).toBeNull();
+    });
+
+    it("still requires an actual date in the row below", () => {
+      expect(extractDocumentDate("Datum:\nKundennummer 4711\nFällig 30.06.2021")).toBeNull();
+    });
+  });
+
+  describe("labels that name someone else's date", () => {
+    it("ignores a Geburtsdatum on the same line", () => {
+      expect(extractDocumentDate("Geburtsdatum: 17.11.1955")).toBeNull();
+      expect(extractDocumentDate("Geburtsdatum 17. November 1955")).toBeNull();
+    });
+
+    it("ignores a Geburtsdatum used as a column header", () => {
+      expect(extractDocumentDate("Geburtsdatum\n17.11.1955")).toBeNull();
+    });
+
+    it("ignores due and validity dates", () => {
+      expect(extractDocumentDate("Fälligkeitsdatum: 30.06.2021")).toBeNull();
+      expect(extractDocumentDate("Gültigkeitsdatum: 31.12.2025")).toBeNull();
+      expect(extractDocumentDate("Ablaufdatum 31.12.2025")).toBeNull();
+    });
+
+    it("still finds the document's own date next to a birthdate", () => {
+      // Both labels present — the real one must win regardless of order.
+      expect(extractDocumentDate("Geburtsdatum: 17.11.1955\nRechnungsdatum: 01.04.2019")).toBe(
+        "2019-04-01",
+      );
+      expect(extractDocumentDate("Rechnungsdatum: 01.04.2019\nGeburtsdatum: 17.11.1955")).toBe(
+        "2019-04-01",
+      );
+    });
+  });
 });
 
 describe("isSubjectPersonSender", () => {

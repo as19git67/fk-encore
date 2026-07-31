@@ -52,13 +52,39 @@ export function extractDocumentNumber(text: string): string | null {
 // be the date's first digit — making even a large gap safe (it can't span an
 // intervening field or word).
 const DATE_ANCHOR_PATTERNS: readonly RegExp[] = [
-  /\b\w*datum\b[ \t:]{0,80}(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})\b/i,
+  /\b\w*datum\b[ \t:]{0,80}(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})\b/gi,
   // "Rechnung vom 18.01.2021"
-  /\bvom\b[ \t:]{0,5}(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})\b/i,
+  /\bvom\b[ \t:]{0,5}(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})\b/gi,
   // German letterhead convention "Ort, TT.MM.JJJJ" (4-digit year only, to keep
   // precision — a bare 2-digit year after a word is too easily a false match).
-  /\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-]+,[ \t]{0,3}(\d{1,2})\.(\d{1,2})\.(\d{4})\b/,
+  /\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-]+,[ \t]{0,3}(\d{1,2})\.(\d{1,2})\.(\d{4})\b/g,
 ];
+
+// `\w*datum` is deliberately broad, which also makes it swallow compounds that
+// name a date the document is *about* rather than the date it carries. The
+// contract above ("a due date, validity date or birthdate is not mistaken for
+// the document date") only held for unlabelled dates; these labels made it
+// through. A birthdate is the costly one — see the doctor's invoice that
+// prompted this, where the patient's birth year also reached the classifier.
+const NON_DOCUMENT_DATE_LABEL_RE =
+  /\b(geburts|fälligkeits|faelligkeits|gültigkeits|gueltigkeits|ablauf|verfalls|sterbe)datum\b/i;
+
+/**
+ * True when `m` was anchored on a label naming someone else's date.
+ *
+ * The anchor patterns start at `\b\w*datum`, and `\w` is ASCII-only — in
+ * "Fälligkeitsdatum" the umlaut is a word boundary, so the match begins at
+ * "lligkeitsdatum" and the label is no longer recognizable in `m[0]` alone.
+ * Walking back over the letters directly preceding the match restores the
+ * whole word, and only that word: the walk stops at the first space, newline
+ * or digit, so a "Geburtsdatum" on the line before can never suppress a real
+ * "Datum" match on this one.
+ */
+function isNonDocumentDateMatch(text: string, m: RegExpExecArray): boolean {
+  let start = m.index;
+  while (start > 0 && /[A-Za-zÄÖÜäöüß]/.test(text[start - 1])) start--;
+  return NON_DOCUMENT_DATE_LABEL_RE.test(text.slice(start, m.index) + m[0]);
+}
 
 // Same anchors as above, but for German month-name dates ("8. September 2017").
 // The month word is captured broadly and validated against MONTHS afterwards
@@ -107,6 +133,82 @@ function toIsoDate(dayStr: string, monthStr: string, yearStr: string): string | 
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
+/** A date label standing alone in a table cell ("Datum", "Rechnungsdatum"). */
+const DATE_HEADER_CELL_RE = /^\W*\w*datum\W*$/i;
+
+function isDocumentDateLabel(cell: string): boolean {
+  return DATE_HEADER_CELL_RE.test(cell) && !NON_DOCUMENT_DATE_LABEL_RE.test(cell);
+}
+
+/** Numeric date anywhere inside a table cell. */
+const CELL_DATE_RE = /\b(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})\b/;
+
+/** Written-month date inside a table cell ("8. September 2017"). */
+const CELL_MONTHNAME_DATE_RE = /\b(\d{1,2})\.?[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4})\b/;
+
+/**
+ * Split one reconstructed line into its table cells. `ocr-layout.ts` renders a
+ * column break as a run of spaces and a word space as a single one, so a run
+ * of three or more is the column separator. Tesseract's own `txt` output (used
+ * when the layout rebuild is off or unusable) separates columns by wide space
+ * runs too, so this works on either rendering.
+ */
+function splitCells(line: string): string[] {
+  return line.split(/ {3,}|\t+/).map((c) => c.trim());
+}
+
+function dateFromCell(cell: string): string | null {
+  const numeric = CELL_DATE_RE.exec(cell);
+  if (numeric) {
+    const iso = toIsoDate(numeric[1], numeric[2], numeric[3]);
+    if (iso) return iso;
+  }
+  const named = CELL_MONTHNAME_DATE_RE.exec(cell);
+  if (named) {
+    const month = monthFromName(named[2]);
+    if (month != null) return toIsoDate(named[1], String(month), named[3]);
+  }
+  return null;
+}
+
+/**
+ * Table variant of the anchored-date scan: the label is a *column header* and
+ * the date sits in the row below it, not on the same line —
+ *
+ *     Datum      Rechnungs-Nr.   Endbetrag
+ *     01.04.19   77213-9042          20,11
+ *
+ * which is how scanned German invoices routinely print their date. The
+ * same-line patterns above cannot see this (their separator class deliberately
+ * excludes newlines so they never wander into an unrelated later line).
+ *
+ * Matching is by cell *index*, not by character offset: the rendered column
+ * widths don't track the pixel positions they came from, but the cell order
+ * does. Both rows must split into the same number of cells — a mismatch means
+ * a column went missing somewhere and the indices no longer line up, which is
+ * exactly when a wrong value would be picked. Only a cell containing nothing
+ * but the label counts as a header, so a sentence that merely mentions "Datum"
+ * doesn't turn the next line into a date source.
+ *
+ * Runs last in `extractDocumentDate`: a date the document itself put on the
+ * same line as its label is the more direct statement.
+ */
+function extractColumnHeaderDate(text: string): string | null {
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length - 1; i++) {
+    const header = splitCells(lines[i]);
+    if (!header.some(isDocumentDateLabel)) continue;
+    const values = splitCells(lines[i + 1]);
+    if (values.length !== header.length) continue;
+    for (let k = 0; k < header.length; k++) {
+      if (!isDocumentDateLabel(header[k])) continue;
+      const iso = dateFromCell(values[k]);
+      if (iso) return iso;
+    }
+  }
+  return null;
+}
+
 /**
  * Deterministic fallback for the document date. The small model regularly
  * returns `doc_date=null` even when the date is plainly in the text
@@ -114,7 +216,8 @@ function toIsoDate(dayStr: string, monthStr: string, yearStr: string): string | 
  * This scans the OCR text for a date anchored to a strong German date label
  * (a "…datum" word, "vom", or the "Ort, TT.MM.JJJJ" letterhead convention),
  * both numeric ("18.01.2021") and written-month ("8. September 2017"), and
- * returns it as ISO YYYY-MM-DD.
+ * returns it as ISO YYYY-MM-DD. A "…datum" label used as a *column header*
+ * over the date is covered too — see `extractColumnHeaderDate`.
  *
  * Only *label-anchored* dates are accepted — never just any date in the text —
  * so a due date, validity date or birthdate is not mistaken for the document
@@ -123,11 +226,17 @@ function toIsoDate(dayStr: string, monthStr: string, yearStr: string): string | 
  * better. Returns null when no anchored date is found. (#date-fallback)
  */
 export function extractDocumentDate(text: string): string | null {
+  // Iterate all matches per pattern (not just the first): a hit on a
+  // non-document label like "Geburtsdatum" must be skipped in favour of a
+  // later, real one rather than abandoning the pattern.
   for (const re of DATE_ANCHOR_PATTERNS) {
-    const m = re.exec(text);
-    if (!m) continue;
-    const iso = toIsoDate(m[1], m[2], m[3]);
-    if (iso) return iso;
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      if (isNonDocumentDateMatch(text, m)) continue;
+      const iso = toIsoDate(m[1], m[2], m[3]);
+      if (iso) return iso;
+    }
   }
   // Written-month dates ("8. September 2017"). Iterate all matches per pattern:
   // the month word is captured broadly, so a non-month word (e.g. "Datum: sehr
@@ -136,13 +245,14 @@ export function extractDocumentDate(text: string): string | null {
     re.lastIndex = 0;
     let m: RegExpExecArray | null;
     while ((m = re.exec(text)) !== null) {
+      if (isNonDocumentDateMatch(text, m)) continue;
       const month = monthFromName(m[2]);
       if (month == null) continue;
       const iso = toIsoDate(m[1], String(month), m[3]);
       if (iso) return iso;
     }
   }
-  return null;
+  return extractColumnHeaderDate(text);
 }
 
 /**
