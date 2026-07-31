@@ -12,6 +12,11 @@
  * pass to recover markers that sit isolated in a corner next to a logo/box —
  * see `NUMBER_MARKER_FALLBACK_ENABLED` below.
  *
+ * The OCR'd page text is not tesseract's `txt` rendering but a reconstruction
+ * from the word boxes in its TSV output (`ocr-layout.ts`), so text that sits
+ * on one visual line stays on one line even when tesseract split the page into
+ * several blocks — see `OCR_LAYOUT_REBUILD_ENABLED` below.
+ *
  * When either `pdf-parse` or `pdftoppm` rejects the file as broken
  * (missing trailer dictionary / unreadable xref — common for PDFs
  * truncated in transit or assembled by buggy scanners), we attempt a
@@ -39,6 +44,7 @@ import path from "path";
 import { createRequire } from "module";
 import { spawn } from "child_process";
 import { detectOcrRotation, preprocessOcrImage } from "./ocr-preprocess";
+import { layoutTextFromTsv, shouldUseLayoutText } from "./ocr-layout";
 import { DOCUMENT_NUMBER_RE } from "./metadata-extract";
 
 // pdf-parse is CJS and its default import pulls in a debug routine that
@@ -102,6 +108,17 @@ const MIN_TEXT_LAYER_CHARS = parseInt(
  */
 const NUMBER_MARKER_FALLBACK_ENABLED =
   (process.env.DOCUMENTS_OCR_NUMBER_FALLBACK ?? "1") !== "0";
+
+/**
+ * Whether to rebuild each OCR'd page's text from the word boxes in Tesseract's
+ * TSV output instead of taking its `txt` rendering verbatim — see
+ * `ocr-layout.ts` for why the two differ and when it matters. On by default;
+ * set `DOCUMENTS_OCR_LAYOUT=0` to fall back to the plain text of a single
+ * Tesseract pass (the reconstruction costs no extra pass, only the TSV
+ * output file).
+ */
+const OCR_LAYOUT_REBUILD_ENABLED =
+  (process.env.DOCUMENTS_OCR_LAYOUT ?? "1") !== "0";
 
 /** Hard cap on OCR runtime per document — OCR on a large scan can be slow. */
 const OCR_TIMEOUT_MS = parseInt(
@@ -554,14 +571,21 @@ async function ocrPdf(
         pagePath = prepPath;
       }
       if (i === 0) firstPagePath = pagePath;
-      // tesseract appends the extension per output config (`txt`, `pdf`).
-      const configs = options.wantSearchablePdf ? ["txt", "pdf"] : ["txt"];
+      // tesseract appends the extension per output config (`txt`, `tsv`, `pdf`).
+      // All requested formats come out of one recognition pass, so asking for
+      // the TSV alongside the text costs a file, not a second OCR run.
+      const configs = ["txt"];
+      if (OCR_LAYOUT_REBUILD_ENABLED) configs.push("tsv");
+      if (options.wantSearchablePdf) configs.push("pdf");
       try {
         await runTesseract(pagePath, outBase, configs);
         const txt = await fs.promises
           .readFile(`${outBase}.txt`, "utf8")
           .catch(() => "");
-        if (txt.trim().length > 0) parts.push(txt.trim());
+        const pageText = OCR_LAYOUT_REBUILD_ENABLED
+          ? await layoutTextForPage(`${outBase}.tsv`, txt)
+          : txt.trim();
+        if (pageText.length > 0) parts.push(pageText);
         if (options.wantSearchablePdf) {
           const pdf = `${outBase}.pdf`;
           if (await fileReadable(pdf)) pagePdfs.push(pdf);
@@ -664,8 +688,32 @@ async function fileReadable(p: string): Promise<boolean> {
 }
 
 /**
+ * Rebuild one page's text from the word boxes in `tsvPath`, falling back to
+ * Tesseract's own `txt` rendering when the TSV is missing, unparseable or
+ * visibly incomplete. Best-effort: never throws, so a layout problem can only
+ * cost the reconstruction, never the page.
+ */
+async function layoutTextForPage(tsvPath: string, plainText: string): Promise<string> {
+  try {
+    const tsv = await fs.promises.readFile(tsvPath, "utf8");
+    const layout = layoutTextFromTsv(tsv);
+    if (shouldUseLayoutText(layout, plainText)) return layout;
+    if (layout.trim().length > 0) {
+      console.warn(
+        `[documents.text-extract] layout reconstruction looked incomplete for ${path.basename(tsvPath)} — using tesseract's plain text`,
+      );
+    }
+  } catch (err) {
+    console.warn(
+      `[documents.text-extract] reading ${path.basename(tsvPath)} failed: ${(err as Error).message}`,
+    );
+  }
+  return plainText.trim();
+}
+
+/**
  * Run tesseract on a single image, writing the requested output formats
- * (`txt`, `pdf`, …) to `<outBase>.<ext>`.
+ * (`txt`, `tsv`, `pdf`, …) to `<outBase>.<ext>`.
  */
 function runTesseract(imagePath: string, outBase: string, configs: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
