@@ -1,7 +1,7 @@
 """An implausible tax_year is dropped, not fatal.
 
-Production case: a scanned doctor's invoice dated 01.04.2019 whose patient
-birth year (1967) came back as `tax_year`. The value fell below the schema's
+Production case: a scanned doctor's invoice dated 12.03.2019 whose patient
+birth year (1955) came back as `tax_year`. The value fell below the schema's
 lower bound, so the final ClassifyResponse coercion raised — surfacing as a
 422, which documents/llm-client.ts turns into a hard failure that parks the
 document in status='failed' with a red banner. The rest of the classification
@@ -36,7 +36,7 @@ class _ScriptedLlm:
 _BASE_FIELDS = {
     "category_slug": "arztrechnungen",
     "title": "Rechnung von Dr. med. Peter Baumgartner",
-    "doc_date": "2019-04-01",
+    "doc_date": "2019-03-12",
     "sender": "Dr. med. Peter Baumgartner",
     "document_number": "6613",
     "summary": "Arztrechnung über 20,11 EUR.",
@@ -45,7 +45,7 @@ _BASE_FIELDS = {
 }
 
 _REQUEST = {
-    "text": "Rechnung 01.04.19 ... geb. 17.11.1955",
+    "text": "Rechnung 12.03.19 ... geb. 17.11.1955",
     "taxonomy": [{"slug": "arztrechnungen", "name": "Arztrechnungen"}],
     "tax_sections": [
         {"slug": "anlage-vorsorgeaufwand", "name": "Anlage Vorsorgeaufwand", "group": "abzuege"},
@@ -61,7 +61,7 @@ def _classify(payload: dict):
         main._state["llm"] = None
 
 
-@pytest.mark.parametrize("bad_year", [1967, 42, 20191, "keine", -5])
+@pytest.mark.parametrize("bad_year", [1955, 42, 20191, "keine", -5])
 def test_implausible_tax_year_is_dropped_not_fatal(bad_year):
     resp = _classify({
         **_BASE_FIELDS,
@@ -77,7 +77,7 @@ def test_implausible_tax_year_is_dropped_not_fatal(bad_year):
     assert body["tax_year_confidence"] == 0.0
     # Everything the classifier got right survives.
     assert body["category_slug"] == "arztrechnungen"
-    assert body["doc_date"] == "2019-04-01"
+    assert body["doc_date"] == "2019-03-12"
     assert body["document_number"] == "6613"
     assert body["tax_sections"] == [{"slug": "anlage-vorsorgeaufwand", "confidence": 0.7}]
 

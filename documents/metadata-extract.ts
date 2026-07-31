@@ -176,7 +176,7 @@ function dateFromCell(cell: string): string | null {
  * the date sits in the row below it, not on the same line —
  *
  *     Datum      Rechnungs-Nr.   Endbetrag
- *     01.04.19   77213-9042          20,11
+ *     12.03.19   77213-9042          20,11
  *
  * which is how scanned German invoices routinely print their date. The
  * same-line patterns above cannot see this (their separator class deliberately

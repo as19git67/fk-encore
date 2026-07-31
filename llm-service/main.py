@@ -530,7 +530,7 @@ def _sane_tax_year(value: Any) -> int | None:
 
     A four-digit number on a scan is not necessarily a tax year, and a small
     classifier reliably grabs the wrong one: the observed production case was a
-    doctor's invoice dated 01.04.2019 whose patient birth year (1967) came back
+    doctor's invoice dated 12.03.2019 whose patient birth year (1955) came back
     as the tax year. Non-numeric, out-of-range and nonsensical values all
     collapse to None here.
     """
