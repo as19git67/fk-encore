@@ -988,6 +988,13 @@
       "when": 1785196800000,
       "tag": "0140_widen_tax_year_range",
       "breakpoints": true
+    },
+    {
+      "idx": 141,
+      "version": "7",
+      "when": 1785283200000,
+      "tag": "0141_sender_rule_overrides",
+      "breakpoints": true
     }
   ]
 }

@@ -204,6 +204,100 @@ export function applyAgricultureFiscalYearTaxRule(input: {
   };
 }
 
+/**
+ * A Kirchensteuerbescheid names the *Veranlagungsjahr* in its heading
+ * ("Kirchensteuerbescheid 2019"), but the Kirchensteuer is a Sonderausgabe in
+ * the year the money actually moves (§ 11 EStG, Zu-/Abflussprinzip): a
+ * Nachzahlung is deductible, an Erstattung reduces the deduction — both in the
+ * year of the payment/refund, which is the year the Bescheid settles, not the
+ * assessed year. Example: "Kirchensteuerbescheid 2019" issued 19.04.2021 with a
+ * remaining Guthaben belongs to tax year 2021.
+ *
+ * Both the LLM and the file name usually take the heading year, so fix it here.
+ *
+ * Deliberately narrow: the document must be an actual Kirchensteuer assessment
+ * AND show a settlement (Guthaben/Erstattung/Nachzahlung/verbleibende Steuer).
+ * A pure Vorauszahlungsbescheid — whose instalments fall due in several later
+ * years — is left untouched.
+ */
+const KIRCHENSTEUER_NOTICE_MARKERS: readonly string[] = [
+  "kirchensteuerbescheid",
+  "kirchensteueramt",
+  "kirchensteuerfestsetzung",
+];
+
+const KIRCHENSTEUER_SETTLEMENT_MARKERS: readonly string[] = [
+  "verbleibendekirchensteuer",
+  "verbleibendesteuer",
+  "verbleibendesguthaben",
+  "guthaben",
+  "erstattung",
+  "nachzahlung",
+  "abrechnungderveranlagung",
+];
+
+/** A Vorauszahlungsbescheid without any settlement must keep its own year. */
+const KIRCHENSTEUER_PREPAYMENT_ONLY_MARKERS: readonly string[] = [
+  "vorauszahlungsbescheid",
+  "festsetzungdervorauszahlungen",
+];
+
+/**
+ * Date the Bescheid is settled: an explicit due date wins over the date the
+ * Bescheid was issued, because a notice issued in late December can be payable
+ * in January. Run against the raw text (not `normalizeForMatch`, which strips
+ * the date separators).
+ */
+function settlementYearFromText(text: string): number | null {
+  const patterns: readonly RegExp[] = [
+    /f[äa]llig(?:keit)?(?:\s*(?:ist|wird|am|zum|bis))?[^0-9]{0,20}(\d{1,2})[.\/-](\d{1,2})[.\/-](20\d{2})/i,
+    /(?:zahlbar|zu\s+zahlen)\s+(?:bis|am|zum)\s*(\d{1,2})[.\/-](\d{1,2})[.\/-](20\d{2})/i,
+    /bescheid(?:es|s)?\s*v(?:om|\.)\s*(\d{1,2})[.\/-](\d{1,2})[.\/-](20\d{2})/i,
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
+    if (match) return Number(match[3]);
+  }
+  return null;
+}
+
+export function applyKirchensteuerBescheidYearTaxRule(input: {
+  text: string;
+  /** LLM-extracted document date, "YYYY-MM-DD" — the Bescheiddatum fallback. */
+  docDate: string | null;
+  taxYear: number | null;
+  taxYearConfidence: number;
+}): { taxYear: number | null; taxYearConfidence: number; matched: boolean } {
+  const unchanged = {
+    taxYear: input.taxYear,
+    taxYearConfidence: input.taxYearConfidence,
+    matched: false,
+  };
+
+  const ctx = normalizeForMatch(input.text);
+  if (!KIRCHENSTEUER_NOTICE_MARKERS.some((m) => ctx.includes(m))) return unchanged;
+  if (!KIRCHENSTEUER_SETTLEMENT_MARKERS.some((m) => ctx.includes(m))) return unchanged;
+  if (
+    KIRCHENSTEUER_PREPAYMENT_ONLY_MARKERS.some((m) => ctx.includes(m)) &&
+    !ctx.includes("kirchensteuerbescheid")
+  ) {
+    return unchanged;
+  }
+
+  const docDateYear = /^(\d{4})-/.exec(input.docDate ?? "")?.[1];
+  const settlementYear = settlementYearFromText(input.text) ?? (docDateYear ? Number(docDateYear) : null);
+  if (settlementYear == null) return unchanged;
+
+  // Only ever move the year forward: the payment/refund cannot happen before
+  // the assessed year, and a smaller value means the extracted date is wrong.
+  if (input.taxYear != null && settlementYear < input.taxYear) return unchanged;
+  if (settlementYear === input.taxYear) {
+    return { taxYear: settlementYear, taxYearConfidence: input.taxYearConfidence, matched: true };
+  }
+
+  return { taxYear: settlementYear, taxYearConfidence: 0.95, matched: true };
+}
+
 /** Exposed for tests / diagnostics. */
 export const INSURANCE_ADMIN_TAX_RULE_INTERNALS = {
   INSURANCE_TAX_SLUGS,
@@ -213,4 +307,10 @@ export const INSURANCE_ADMIN_TAX_RULE_INTERNALS = {
 
 export const KINDERGELD_TAX_RULE_INTERNALS = {
   KINDERGELD_NOTICE_MARKERS,
+};
+
+export const KIRCHENSTEUER_TAX_RULE_INTERNALS = {
+  KIRCHENSTEUER_NOTICE_MARKERS,
+  KIRCHENSTEUER_SETTLEMENT_MARKERS,
+  KIRCHENSTEUER_PREPAYMENT_ONLY_MARKERS,
 };

@@ -60,6 +60,7 @@ import { DOCUMENT_TYPES } from "./document-types";
 import { loadRemovedSubjectPersonIds, loadSubjectPersonsForMatch } from "./subject-persons";
 import { flattenTaxonomy, taxonomyHints } from "./taxonomy";
 import { matchContentRule, matchSenderRule } from "./sender-rules";
+import { loadSenderRuleOverrides } from "./sender-rule-overrides";
 import { buildClassifyExamples } from "./few-shot";
 import {
   learnedRelationTags,
@@ -72,6 +73,7 @@ import {
 import { recordUncategorizedDocument } from "./suggestion-writer";
 import {
   applyAgricultureFiscalYearTaxRule,
+  applyKirchensteuerBescheidYearTaxRule,
   applyInsuranceAdminTaxRule,
   applyKindergeldTaxRule,
 } from "./tax-rules";
@@ -475,6 +477,25 @@ export async function runClassify(documentId: number): Promise<{ classification:
     classification.tax_year = adjusted.taxYear;
     classification.tax_year_confidence = adjusted.taxYearConfidence;
   }
+  // 7c. Kirchensteuerbescheid: the heading names the Veranlagungsjahr, but the
+  //     Sonderausgabe counts in the year of the Nachzahlung/Erstattung
+  //     (§ 11 EStG). "Kirchensteuerbescheid 2019" issued 19.04.2021 → 2021.
+  {
+    const adjusted = applyKirchensteuerBescheidYearTaxRule({
+      text: clipped,
+      docDate: classification.doc_date ?? null,
+      taxYear: classification.tax_year,
+      taxYearConfidence: classification.tax_year_confidence,
+    });
+    if (adjusted.matched && adjusted.taxYear !== classification.tax_year) {
+      console.log(
+        `[documents] Kirchensteuerbescheid year rule(${documentId}): ` +
+          `${classification.tax_year} → ${adjusted.taxYear}`,
+      );
+    }
+    classification.tax_year = adjusted.taxYear;
+    classification.tax_year_confidence = adjusted.taxYearConfidence;
+  }
 
   // Personal deductions (Sonderausgaben, §35a haushaltsnahe, private
   // health/care costs, ...) usually require the user's own economic burden.
@@ -508,11 +529,15 @@ export async function runClassify(documentId: number): Promise<{ classification:
     title: classification.title,
     text: clipped,
   });
-  const ruleSlug = matchSenderRule({
-    sender: classification.sender,
-    title: classification.title,
-    text: clipped,
-  });
+  const senderRuleOverrides = await loadSenderRuleOverrides();
+  const ruleSlug = matchSenderRule(
+    {
+      sender: classification.sender,
+      title: classification.title,
+      text: clipped,
+    },
+    senderRuleOverrides,
+  );
   // Learned per-user category fills the long tail the hand-authored rules don't
   // cover: only applied when neither a content nor a sender rule matched, so
   // the rules keep their context-aware precision. See learned-rules.ts.

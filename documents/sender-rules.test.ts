@@ -5,6 +5,7 @@ import {
   matchContentRule,
   matchSenderRule,
   normalizeForMatch,
+  type SenderRule,
 } from "./sender-rules";
 import { flattenTaxonomy } from "./taxonomy";
 
@@ -34,39 +35,6 @@ describe("matchSenderRule", () => {
     })).toBe("familie-familienleistungen");
   });
 
-  it("routes the employer to payslips regardless of OCR spacing/case", () => {
-    expect(matchSenderRule({ sender: "Contoso Software GmbH", title: "Entgeltabrechnung 04/2024" }))
-      .toBe("finanzen-gehalt");
-    expect(matchSenderRule({ sender: "Contoso", title: "Gehaltsabrechnung 12/2019" }))
-      .toBe("finanzen-gehalt");
-    // The unguarded employer fallback still catches plain payslips.
-    expect(matchSenderRule({ sender: "Contoso Software GmbH", title: "Lohnabrechnung" }))
-      .toBe("finanzen-gehalt");
-  });
-
-  it("splits employer SV notifications from monthly payslips", () => {
-    // Annual DEÜV social-insurance notice → its own category, not payslips.
-    expect(
-      matchSenderRule({ sender: "Contoso", title: "Sozialversicherungsnachweis" }),
-    ).toBe("finanzen-sozialversicherung");
-    expect(
-      matchSenderRule({ sender: "Contoso Software GmbH", title: "Meldung zur Sozialversicherung" }),
-    ).toBe("finanzen-sozialversicherung");
-    // The monthly payslip from the same employer stays in finanzen-gehalt.
-    expect(
-      matchSenderRule({ sender: "Contoso Software GmbH", title: "Entgeltabrechnung 03/2024" }),
-    ).toBe("finanzen-gehalt");
-  });
-
-  it("disambiguates a forwarded tax assessment from the same employer (rule order)", () => {
-    expect(
-      matchSenderRule({
-        sender: "Contoso Software GmbH",
-        title: "Einkommensteuerbescheid für 2022",
-      }),
-    ).toBe("behoerden-steuerbescheid");
-  });
-
   it("routes banks, insurers, doctors and care to their categories", () => {
     expect(matchSenderRule({ sender: "comdirect bank AG" })).toBe("finanzen-wertpapiere");
     expect(matchSenderRule({ sender: "HALLESCHE Krankenversicherung" })).toBe("versicherungen-kranken");
@@ -81,26 +49,13 @@ describe("matchSenderRule", () => {
     expect(matchSenderRule({ sender: "Clever Fit Mering" })).toBe("vertraege-abos");
   });
 
-  it("routes the tax advisor, church-employer SV notices and bank statements", () => {
+  it("routes the tax advisor and bank statements", () => {
     expect(
       matchSenderRule({
         sender: "Treukontax Steuerberatungsgesellschaft mbH",
         title: "Einkommensteuererklärung 2022",
       }),
     ).toBe("finanzen-steuern");
-    expect(
-      matchSenderRule({
-        sender: "Erzbischöfliches Verwaltungsstelle München",
-        title: "Entgeltnachweis zur Sozialversicherung",
-      }),
-    ).toBe("finanzen-sozialversicherung");
-    // …but a monthly payslip from the same church employer stays gehalt.
-    expect(
-      matchSenderRule({
-        sender: "Pfarramt St. Beispiel",
-        title: "Entgeltabrechnung 06/2023",
-      }),
-    ).toBe("finanzen-gehalt");
     expect(matchSenderRule({ sender: "MLP Banking AG", title: "Darlehenskontoauszug" })).toBe(
       "finanzen-kontoauszuege",
     );
@@ -109,13 +64,11 @@ describe("matchSenderRule", () => {
     ).toBe("finanzen-kontoauszuege");
   });
 
-  it("keeps the bank-statement and church-employer rules from over-grabbing", () => {
+  it("keeps the bank-statement rules from over-grabbing", () => {
     // MLP Lebensversicherung routes to life insurance (dedicated sender rule).
     expect(matchSenderRule({ sender: "MLP Lebensversicherung AG", title: "Beitragsmitteilung" })).toBe(
       "altersvorsorge-lebensversicherung",
     );
-    // Church mail without an SV/payslip keyword is left to the LLM.
-    expect(matchSenderRule({ sender: "Erzb. Verwaltungsstelle München", title: "Rundschreiben" })).toBeNull();
   });
 
   it("routes telecom providers to Telekommunikation, but not their shares", () => {
@@ -166,11 +119,107 @@ describe("matchSenderRule", () => {
 
   it("honours requireAny for municipal fees", () => {
     expect(
-      matchSenderRule({ sender: "Gemeinde Beispielstadt", title: "Bescheid Wasser und Abwasser 2023" }),
+      matchSenderRule({ sender: "Gemeinde Musterhausen", title: "Bescheid Wasser und Abwasser 2023" }),
     ).toBe("wohnen-kommunale-abgaben");
     expect(
-      matchSenderRule({ sender: "Gemeinde Beispielstadt", title: "Einladung Bürgerversammlung" }),
+      matchSenderRule({ sender: "Gemeinde Musterhausen", title: "Einladung Bürgerversammlung" }),
     ).toBeNull();
+  });
+});
+
+describe("matchSenderRule (household overrides, e.g. employer/parish)", () => {
+  // Household-specific senders (the actual employer, parish, …) are NOT
+  // hard-coded in SENDER_RULES — they're configured as DB-backed overrides
+  // (migration 0141, see sender-rule-overrides.ts) and passed in here. This
+  // exercises that mechanism with fictional example data, in the same shape
+  // a real household's overrides would take.
+  const employerOverrides: SenderRule[] = [
+    {
+      note: "Arbeitgeber leitet ausnahmsweise einen Einkommensteuerbescheid weiter",
+      senders: ["contoso"],
+      requireAny: ["einkommensteuerbescheid", "steuerbescheid"],
+      category: "behoerden-steuerbescheid",
+    },
+    {
+      note: "Arbeitgeber → jährliche Meldung/Entgeltnachweis zur Sozialversicherung (DEÜV)",
+      senders: ["contoso"],
+      requireAny: ["entgeltnachweis", "sozialversicherungsnachweis", "meldungzursozialversicherung"],
+      category: "finanzen-sozialversicherung",
+    },
+    {
+      note: "Arbeitgeber → monatliche Entgelt-/Gehaltsabrechnung (Fallback)",
+      senders: ["contoso"],
+      category: "finanzen-gehalt",
+    },
+    {
+      note: "Kirchlicher Arbeitgeber → Meldung zur Sozialversicherung",
+      senders: ["pfarramtstbeispiel"],
+      requireAny: ["entgeltnachweis", "sozialversicherungsnachweis"],
+      category: "finanzen-sozialversicherung",
+    },
+    {
+      note: "Kirchlicher Arbeitgeber → Entgelt-/Gehaltsabrechnung",
+      senders: ["pfarramtstbeispiel"],
+      requireAny: ["entgeltabrechnung", "gehaltsabrechnung", "lohnabrechnung"],
+      category: "finanzen-gehalt",
+    },
+  ];
+
+  it("is not consulted when no overrides are passed", () => {
+    expect(matchSenderRule({ sender: "Contoso Software GmbH", title: "Entgeltabrechnung 04/2024" })).toBeNull();
+  });
+
+  it("routes the employer to payslips regardless of OCR spacing/case", () => {
+    expect(
+      matchSenderRule({ sender: "Contoso Software GmbH", title: "Entgeltabrechnung 04/2024" }, employerOverrides),
+    ).toBe("finanzen-gehalt");
+    // The unguarded employer fallback still catches plain payslips.
+    expect(
+      matchSenderRule({ sender: "Contoso Software GmbH", title: "Lohnabrechnung" }, employerOverrides),
+    ).toBe("finanzen-gehalt");
+  });
+
+  it("splits employer SV notifications from monthly payslips", () => {
+    expect(
+      matchSenderRule({ sender: "Contoso Software GmbH", title: "Sozialversicherungsnachweis" }, employerOverrides),
+    ).toBe("finanzen-sozialversicherung");
+    expect(
+      matchSenderRule({ sender: "Contoso Software GmbH", title: "Entgeltabrechnung 03/2024" }, employerOverrides),
+    ).toBe("finanzen-gehalt");
+  });
+
+  it("disambiguates a forwarded tax assessment from the same employer (override order)", () => {
+    expect(
+      matchSenderRule(
+        { sender: "Contoso Software GmbH", title: "Einkommensteuerbescheid für 2022" },
+        employerOverrides,
+      ),
+    ).toBe("behoerden-steuerbescheid");
+  });
+
+  it("routes a church employer's SV notice and payslip separately", () => {
+    expect(
+      matchSenderRule(
+        { sender: "Pfarramt St. Beispiel", title: "Entgeltnachweis zur Sozialversicherung" },
+        employerOverrides,
+      ),
+    ).toBe("finanzen-sozialversicherung");
+    expect(
+      matchSenderRule({ sender: "Pfarramt St. Beispiel", title: "Entgeltabrechnung 06/2023" }, employerOverrides),
+    ).toBe("finanzen-gehalt");
+    // Church mail without an SV/payslip keyword is left to the LLM.
+    expect(matchSenderRule({ sender: "Pfarramt St. Beispiel", title: "Rundschreiben" }, employerOverrides)).toBeNull();
+  });
+
+  it("overrides win over the built-in SENDER_RULES", () => {
+    // "familienkasse" is a built-in fragment; an override for the same
+    // fragment (evaluated first) must take precedence.
+    const familienkasseOverride: SenderRule[] = [
+      { note: "test override", senders: ["familienkasse"], category: "finanzen-steuern" },
+    ];
+    expect(
+      matchSenderRule({ sender: "Familienkasse Bayern Süd" }, familienkasseOverride),
+    ).toBe("finanzen-steuern");
   });
 });
 
