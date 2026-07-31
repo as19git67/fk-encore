@@ -32,7 +32,7 @@ import {
 } from "./receipt-ocr-client";
 import { extractPdfText, PdfPasswordRequiredError } from "./text-extract";
 import { buildThumbnail, ensureThumbnail, removeThumbnail } from "./thumbnail";
-import { removeOcrPdf, writeOcrPdf } from "./ocr-pdf";
+import { ensureSearchablePdf, removeOcrPdf, writeOcrPdf } from "./ocr-pdf";
 import { jpegToReceiptPdf } from "./receipt-pdf";
 import {
   buildReceiptDocumentCompletion,
@@ -240,6 +240,22 @@ export async function runTextExtract(documentId: number): Promise<void> {
   } catch (err) {
     console.warn(
       `[documents] persisting OCR sidecar for doc=${documentId} failed: ${(err as Error).message}`,
+    );
+  }
+
+  // Settle on the PDF this document will actually be served as: the sandwich
+  // just written, or — for a born-digital PDF drawn sideways — a losslessly
+  // rotated copy (see ocr-pdf.ts). Doing it here rather than on first view
+  // keeps the wait out of the viewer, and lets the preview thumbnail be
+  // rebuilt from the same file, so grid and viewer agree on which way is up.
+  // The early warm-up above already rendered a thumbnail from the original;
+  // this replaces it only when the served PDF turns out to differ.
+  try {
+    const servedPdf = await ensureSearchablePdf(documentId, await freshDiskPath(documentId));
+    if (servedPdf) await buildThumbnail(documentId, servedPdf);
+  } catch (err) {
+    console.warn(
+      `[documents] refreshing preview for doc=${documentId} failed: ${(err as Error).message}`,
     );
   }
 

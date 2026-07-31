@@ -1064,6 +1064,10 @@ For date-only values (no time component), always use the helpers from `frontend/
 - `d.toISOString().slice(0, 10)` — shifts the date for timezones east of UTC
 - `new Date("YYYY-MM-DD")` — parses as UTC midnight, may display the previous day locally
 
+## Language for git commit messages and PR descriptions
+
+Git commit messages and pull-request descriptions (title and body) must always be written in English, regardless of what language the conversation with the user is in.
+
 ## Aktive Feature-Pläne
 
 - **Dokumentenverwaltung** (neues Modul neben Fotos, lokale KI-Klassifikation via llm-service): `/root/.claude/plans/ein-weiteres-modul-in-peaceful-robin.md`. Wird iterativ in Etappen umgesetzt (DB/Seed → llm-service → documents-Service → Watcher → Suche → Frontend → Infra).

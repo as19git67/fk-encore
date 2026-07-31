@@ -4,6 +4,7 @@ import {
   chooseOsdRotation,
   normalizeRightAngle,
   parseOsdRotation,
+  shouldApplyVerifiedRotation,
 } from "./ocr-preprocess";
 
 describe("documents.ocr-preprocess parseOsdRotation", () => {
@@ -77,5 +78,32 @@ describe("documents.ocr-preprocess normalizeRightAngle", () => {
     expect(normalizeRightAngle(-90)).toBe(270);
     expect(normalizeRightAngle(44)).toBe(0);
     expect(normalizeRightAngle(46)).toBe(90);
+  });
+});
+
+describe("documents.ocr-preprocess shouldApplyVerifiedRotation", () => {
+  // Numbers taken from the document that prompted the check: a one-row bank
+  // export drawn sideways on A4, where OSD named the right angle but scored
+  // only 0.75 — below the trust threshold, so the page used to stay sideways.
+  it("applies the rotation when it reads clearly better", () => {
+    expect(shouldApplyVerifiedRotation(34.8, 89.3, 10)).toBe(true);
+  });
+
+  it("keeps the original when the gain is within noise", () => {
+    expect(shouldApplyVerifiedRotation(61.0, 64.0, 10)).toBe(false);
+    expect(shouldApplyVerifiedRotation(61.0, 71.0, 10)).toBe(true); // exactly the margin
+  });
+
+  it("keeps the original when rotating makes it worse", () => {
+    expect(shouldApplyVerifiedRotation(88.0, 30.0, 10)).toBe(false);
+  });
+
+  it("never rotates into an orientation that recognizes nothing", () => {
+    expect(shouldApplyVerifiedRotation(34.8, null, 10)).toBe(false);
+    expect(shouldApplyVerifiedRotation(null, null, 10)).toBe(false);
+  });
+
+  it("accepts any readable rotation when the original reads nothing at all", () => {
+    expect(shouldApplyVerifiedRotation(null, 42.0, 10)).toBe(true);
   });
 });

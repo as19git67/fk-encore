@@ -4,6 +4,7 @@ import {
   formatVisualRow,
   layoutTextFromTsv,
   layoutTextFromWords,
+  meanWordConfidence,
   parseTesseractTsv,
   shouldUseLayoutText,
   type OcrWord,
@@ -151,5 +152,41 @@ describe("shouldUseLayoutText", () => {
 
   it("accepts the reconstruction when tesseract's own text is empty", () => {
     expect(shouldUseLayoutText("Datum 01.04.19", "")).toBe(true);
+  });
+});
+
+describe("meanWordConfidence", () => {
+  it("averages the confidence of recognized words", () => {
+    const tsv = [
+      TSV_HEADER,
+      "5\t1\t1\t1\t1\t1\t10\t10\t40\t20\t90\tRechnung",
+      "5\t1\t1\t1\t1\t2\t60\t10\t40\t20\t80\tSumme",
+    ].join("\n");
+    expect(meanWordConfidence(tsv)).toBe(85);
+  });
+
+  it("ignores the structural rows and their -1 confidence", () => {
+    const tsv = [
+      TSV_HEADER,
+      "1\t1\t0\t0\t0\t0\t0\t0\t2480\t3508\t-1\t",
+      "4\t1\t1\t1\t1\t0\t10\t10\t100\t20\t-1\t",
+      "5\t1\t1\t1\t1\t1\t10\t10\t40\t20\t70\tRechnung",
+    ].join("\n");
+    expect(meanWordConfidence(tsv)).toBe(70);
+  });
+
+  it("ignores words tesseract emitted without text", () => {
+    const tsv = [
+      TSV_HEADER,
+      "5\t1\t1\t1\t1\t1\t10\t10\t5\t20\t0\t ",
+      "5\t1\t1\t1\t1\t2\t30\t10\t40\t20\t60\tDatum",
+    ].join("\n");
+    expect(meanWordConfidence(tsv)).toBe(60);
+  });
+
+  it("returns null when nothing was recognized", () => {
+    expect(meanWordConfidence(TSV_HEADER)).toBeNull();
+    expect(meanWordConfidence("")).toBeNull();
+    expect(meanWordConfidence("kein tsv")).toBeNull();
   });
 });
