@@ -639,6 +639,19 @@ export function unlockDocument(id: number, password: string) {
   })
 }
 
+/**
+ * Drop a document's `failed` state without re-running the pipeline — for when
+ * the file is fine and only the automatic classification wasn't, so the user
+ * fills the metadata in by hand and marks the document done. Returns the
+ * refreshed document detail.
+ */
+export function dismissDocumentError(id: number) {
+  return apiFetch<DocumentDetail>(`/documents/${id}/dismiss-error`, {
+    method: 'POST',
+    body: JSON.stringify({ id }),
+  })
+}
+
 export function replaceDocumentFile(id: number, file: File, signal?: AbortSignal) {
   return apiFetch<{ success: boolean }>(`/documents/${id}/replace-file`, {
     method: 'POST',

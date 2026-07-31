@@ -3,11 +3,16 @@
 Background: documents/llm-client.ts treats any >=500 status as "LLM service
 temporarily unavailable" and defers the scan-worker job for an unbounded
 retry (no attempt cap — see scan-queue.ts deferJob). A pydantic validation
-failure on the LLM's own output (e.g. a tax_year the schema doesn't allow)
+failure on the LLM's own output (e.g. a confidence the schema doesn't allow)
 is not a transient outage — it reflects a real fact about the document that
 will keep recurring on every retry. Misclassifying it as 502 caused an
 infinite reclassify loop instead of surfacing a visible failure. See main.py
 around the ClassifyResponse(**data) coercion.
+
+The flip side is that a 422 fails the document *hard* (status='failed'), so
+only a genuinely broken payload may reach it. An implausible value in a
+single optional derived field is sanitized before the coercion instead — see
+test_classify_tax_year_sanity.py.
 """
 
 from __future__ import annotations
@@ -41,9 +46,10 @@ _BASE_FIELDS = {
 
 
 def test_schema_mismatch_is_422_not_502():
-    # tax_year below the schema's lower bound triggers a pydantic
-    # ValidationError inside the /classify handler's final coercion step.
-    llm = _ScriptedLlm({**_BASE_FIELDS, "tax_year": 42, "tax_relevant": True})
+    # A confidence outside 0..1 triggers a pydantic ValidationError inside the
+    # /classify handler's final coercion step. Unlike the optional derived
+    # facets, `confidence` is a required core field with no sanitizing step.
+    llm = _ScriptedLlm({**_BASE_FIELDS, "confidence": 42.0})
     main._state["llm"] = llm
     try:
         client = TestClient(main.app)
