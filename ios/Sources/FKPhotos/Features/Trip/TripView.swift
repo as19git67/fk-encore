@@ -73,6 +73,7 @@ private struct ActiveTripView: View {
     @State private var assets: [PHAsset] = []
     @State private var isLoading = true
     @State private var showEndConfirm = false
+    @State private var showShareSheet = false
 
     private let columns = [GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 2)]
 
@@ -98,6 +99,12 @@ private struct ActiveTripView: View {
         } message: {
             Text("Neue Fotos werden nicht mehr automatisch hinzugefügt. Das Album und die bereits synchronisierten Fotos bleiben erhalten.")
         }
+        // Sharing the trip album straight from the trip view (issue #918): the
+        // trip syncs into an ordinary server album, so the regular album share
+        // UI applies unchanged.
+        .sheet(isPresented: $showShareSheet) {
+            AlbumShareView(albumId: trip.serverAlbumId, albumName: trip.name)
+        }
     }
 
     private var optionsBar: some View {
@@ -111,6 +118,11 @@ private struct ActiveTripView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button { showShareSheet = true } label: {
+                    Label("Teilen", systemImage: "person.crop.circle.badge.plus")
+                        .labelStyle(.titleAndIcon)
+                }
+                .buttonStyle(.bordered)
                 Button(role: .destructive) { showEndConfirm = true } label: {
                     Text("Beenden")
                 }

@@ -278,11 +278,52 @@ struct AlbumWithPhotos: Codable, Sendable {
 struct AlbumShareWithUser: Codable, Identifiable, Sendable {
     let album_id: Int
     let user_id: Int
-    let access_level: String // "read" | "write"
+    let access_level: String // "read" | "write" | "write_share"
+    /// Who created this share. `nil` for shares that predate the field — the
+    /// backend treats those as owner-created, so delegates can't revoke them.
+    let invited_by_user_id: Int?
     let user_name: String
     let user_email: String
 
     var id: Int { user_id }
+}
+
+/// Access levels an album can be shared with — mirrors the web share dialog.
+enum AlbumAccessLevel: String, CaseIterable, Identifiable, Sendable {
+    case read
+    case write
+    case writeShare = "write_share"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .read:       return "Nur lesen"
+        case .write:      return "Bearbeiten"
+        case .writeShare: return "Bearbeiten + Teilen"
+        }
+    }
+
+    /// Compact form for the share list rows.
+    var shortLabel: String {
+        switch self {
+        case .read:       return "Nur lesen"
+        case .write:      return "Bearbeiten"
+        case .writeShare: return "Bearb. + Teilen"
+        }
+    }
+}
+
+/// Candidate for an album share — from `/albums/:id/shareable-users`, which is
+/// open to owners and write_share delegates (unlike the admin-only `/users`).
+struct ShareableUser: Codable, Identifiable, Sendable {
+    let id: Int
+    let name: String
+    let email: String
+}
+
+struct GetAlbumShareableUsersResponse: Codable, Sendable {
+    let users: [ShareableUser]
 }
 
 struct AlbumPublicLink: Codable, Identifiable, Sendable {

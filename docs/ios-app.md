@@ -70,8 +70,14 @@ dokumentiert**:
   Erstellen/Löschen.
 - Detail-Ansicht mit Grid, Filter/Sort, **Mehrfachauswahl inkl.
   Drag-Select**, Stapel-Aktionen (zu Album hinzufügen, teilen), Upload.
-- **Album teilen** mit anderen Nutzern inkl. Rolle (`AlbumShareView`,
-  `AlbumShareViewModel`).
+- **Album teilen** wie im Web (`AlbumShareView`, `AlbumShareViewModel`,
+  Issue #918): interne Nutzer mit „Nur lesen“, „Bearbeiten“ oder
+  „Bearbeiten + Teilen“ einladen (letzteres nur als Eigentümer) sowie
+  öffentlicher Link mit Ablaufdatum, Kopieren und Share-Sheet. Die
+  einladbaren Nutzer kommen aus `/albums/:id/shareable-users`, sodass auch
+  Nicht-Admins und `write_share`-Delegierte teilen können; Delegierte können
+  nur ihre eigenen Einladungen wieder entfernen. Erreichbar aus der
+  Album-Detailansicht und direkt aus dem laufenden Trip.
 
 ### 2.5 Personen & Gesichter
 - Personen-Grid (`PersonsListView`), Umbenennen, Zusammenführen,

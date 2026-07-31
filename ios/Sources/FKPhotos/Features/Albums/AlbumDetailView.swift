@@ -4,6 +4,11 @@ struct AlbumDetailView: View {
     let albumId: Int
     @State private var album: Album?
     @State private var userRole: String = ""
+    /// The caller's access level on this album ("owner" / "write" / "write_share"
+    /// / "read"). Finer-grained than `userRole`, which collapses every writer
+    /// into "contributor" — sharing is allowed for owners and write_share
+    /// delegates only (issue #918).
+    @State private var myAccessLevel: String = ""
     @State private var photos: [PhotoWithCuration] = []
     @State private var isLoading = true
     @State private var errorMessage: String?
@@ -33,6 +38,13 @@ struct AlbumDetailView: View {
     private let columns = [
         GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 2)
     ]
+
+    /// Mirrors the web app: the owner can always share, a `write_share`
+    /// delegate may invite further participants and manage the public link.
+    private var canShareAlbum: Bool {
+        myAccessLevel == "owner" || myAccessLevel == "write_share"
+            || userRole == "admin"
+    }
 
     var body: some View {
         ScrollView {
@@ -134,7 +146,7 @@ struct AlbumDetailView: View {
                         Image(systemName: "photo.badge.plus")
                     }
                 }
-                if userRole == "owner" || userRole == "admin" {
+                if canShareAlbum {
                     ToolbarItem(placement: .primaryAction) {
                         Button {
                             showShareSheet = true
@@ -142,6 +154,8 @@ struct AlbumDetailView: View {
                             Image(systemName: "person.crop.circle.badge.plus")
                         }
                     }
+                }
+                if userRole == "owner" || userRole == "admin" {
                     ToolbarItem(placement: .primaryAction) {
                         Button(role: .destructive) {
                             showDeleteConfirm = true
@@ -166,7 +180,11 @@ struct AlbumDetailView: View {
             }
         }
         .sheet(isPresented: $showShareSheet) {
-            AlbumShareView(albumId: albumId)
+            AlbumShareView(
+                albumId: albumId,
+                albumName: album?.name,
+                accessLevel: myAccessLevel.isEmpty ? nil : myAccessLevel
+            )
         }
         .sheet(isPresented: $shareManager.isPresented) {
             ActivityView(images: shareManager.images)
@@ -235,9 +253,11 @@ struct AlbumDetailView: View {
                 let description: String?
                 let photos: [PhotoWithCuration]
                 let role: String?
+                let my_access_level: String?
             }
             let response: AlbumResponse = try await APIClient.shared.get("/albums/\(albumId)")
             userRole = response.role ?? ""
+            myAccessLevel = response.my_access_level ?? ""
             album = Album(
                 id: response.id,
                 user_id: 0,
@@ -252,7 +272,7 @@ struct AlbumDetailView: View {
                 is_shared: false,
                 created_at: "",
                 updated_at: "",
-                my_access_level: response.role
+                my_access_level: response.my_access_level ?? response.role
             )
             photos = response.photos
         } catch {

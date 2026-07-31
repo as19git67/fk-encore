@@ -1,19 +1,34 @@
 import SwiftUI
 
+/// Album sharing UI — the iOS counterpart of the web share dialog: invite
+/// internal users with read / write / write_share access and manage the public
+/// link. Reachable from the album detail view and from the active trip
+/// (issue #918).
 struct AlbumShareView: View {
     let albumId: Int
+    /// Album title, shown as the sheet subtitle when the caller knows it.
+    let albumName: String?
+
     @State private var viewModel: AlbumShareViewModel
     @State private var selectedUserId: Int? = nil
-    @State private var selectedAccessLevel = "read"
+    @State private var selectedAccessLevel: AlbumAccessLevel = .read
     @State private var linkExpiry: String? = nil
     @State private var showErrorAlert = false
     @State private var copiedToClipboard = false
     @Environment(\.dismiss) private var dismiss
+    @Environment(AuthManager.self) private var authManager
     @AppStorage(APIClient.serverURLKey) private var serverURL: String = "http://localhost:4000"
 
-    init(albumId: Int) {
+    /// - Parameters:
+    ///   - albumId: album to share.
+    ///   - albumName: optional title for the sheet header.
+    ///   - accessLevel: the caller's own access level when already known
+    ///     (`owner`, `write_share`, …). When omitted it is resolved from the
+    ///     album list, which is what the trip view relies on.
+    init(albumId: Int, albumName: String? = nil, accessLevel: String? = nil) {
         self.albumId = albumId
-        _viewModel = State(initialValue: AlbumShareViewModel(albumId: albumId))
+        self.albumName = albumName
+        _viewModel = State(initialValue: AlbumShareViewModel(albumId: albumId, accessLevel: accessLevel))
     }
 
     var publicLinkURL: String? {
@@ -21,15 +36,15 @@ struct AlbumShareView: View {
         return "\(serverURL)/albums/public/\(link.token)"
     }
 
-    // Exclude users already having a share
-    var availableUsers: [UserWithRoles] {
-        let sharedIds = Set(viewModel.shares.map { $0.user_id })
-        return viewModel.users.filter { !sharedIds.contains($0.id) }
-    }
-
     var body: some View {
         NavigationStack {
             List {
+                if let albumName, !albumName.isEmpty {
+                    Section {
+                        Label(albumName, systemImage: "rectangle.stack")
+                            .font(.subheadline)
+                    }
+                }
                 userSharesSection
                 publicLinkSection
             }
@@ -41,9 +56,10 @@ struct AlbumShareView: View {
                 }
             }
             .task {
-                async let shares: () = viewModel.loadShares()
-                async let users: () = viewModel.loadUsers()
-                _ = await (shares, users)
+                // The caller's user id decides which delegate-created shares may
+                // be revoked, so it is wired in before the first load.
+                viewModel.setCurrentUserId(authManager.currentUser?.id)
+                await viewModel.load()
             }
             .alert("Fehler", isPresented: $showErrorAlert) {
                 Button("OK", role: .cancel) { viewModel.errorMessage = nil }
@@ -52,6 +68,12 @@ struct AlbumShareView: View {
             }
             .onChange(of: viewModel.errorMessage) { _, newValue in
                 if newValue != nil { showErrorAlert = true }
+            }
+            .onChange(of: viewModel.isOwner) { _, _ in
+                // A delegate must not keep a preselected level they cannot grant.
+                if !viewModel.grantableAccessLevels.contains(selectedAccessLevel) {
+                    selectedAccessLevel = .read
+                }
             }
         }
     }
@@ -69,14 +91,14 @@ struct AlbumShareView: View {
                 Label("Benutzerliste nicht verfügbar", systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.secondary)
                     .font(.subheadline)
-            } else if viewModel.users.isEmpty {
-                Text("Keine anderen Benutzer vorhanden")
+            } else if viewModel.availableUsers.isEmpty {
+                Text("Keine weiteren Benutzer verfügbar")
                     .foregroundStyle(.secondary)
                     .font(.subheadline)
             } else {
                 Picker("Benutzer", selection: $selectedUserId) {
                     Text("Benutzer wählen…").tag(Optional<Int>.none)
-                    ForEach(availableUsers) { user in
+                    ForEach(viewModel.availableUsers) { user in
                         VStack(alignment: .leading) {
                             Text(user.name)
                             Text(user.email).font(.caption).foregroundStyle(.secondary)
@@ -86,10 +108,11 @@ struct AlbumShareView: View {
                 }
 
                 Picker("Zugriff", selection: $selectedAccessLevel) {
-                    Text("Nur lesen").tag("read")
-                    Text("Bearbeiten").tag("write")
+                    ForEach(viewModel.grantableAccessLevels) { level in
+                        Text(level.label).tag(level)
+                    }
                 }
-                .pickerStyle(.segmented)
+                .pickerStyle(.menu)
 
                 Button {
                     guard let userId = selectedUserId else { return }
@@ -117,7 +140,7 @@ struct AlbumShareView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
             } else {
                 ForEach(viewModel.shares) { share in
-                    ShareRowView(share: share) {
+                    ShareRowView(share: share, canDelete: viewModel.canRemove(share)) {
                         Task { await viewModel.removeShare(userId: share.user_id) }
                     }
                 }
@@ -127,6 +150,8 @@ struct AlbumShareView: View {
         } footer: {
             if !viewModel.shares.isEmpty {
                 Text("\(viewModel.shares.count) aktive Freigabe(n)")
+            } else if !viewModel.isOwner {
+                Text("Als Bearbeiten + Teilen kannst du nur „Nur lesen“ und „Bearbeiten“ vergeben.")
             }
         }
     }
@@ -170,6 +195,11 @@ struct AlbumShareView: View {
                     )
                 }
                 .foregroundStyle(copiedToClipboard ? .green : .accentColor)
+
+                // Share the link through the system share sheet
+                ShareLink(item: url) {
+                    Label("Link teilen", systemImage: "square.and.arrow.up")
+                }
 
                 // Delete link button
                 Button(role: .destructive) {
@@ -221,7 +251,22 @@ struct AlbumShareView: View {
 
 private struct ShareRowView: View {
     let share: AlbumShareWithUser
+    /// False when the caller may not revoke this share (delegates can only
+    /// remove invitations they created themselves).
+    let canDelete: Bool
     let onDelete: () -> Void
+
+    private var level: AlbumAccessLevel {
+        AlbumAccessLevel(rawValue: share.access_level) ?? .read
+    }
+
+    private var tint: Color {
+        switch level {
+        case .read:       return .blue
+        case .write:      return .green
+        case .writeShare: return .orange
+        }
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -237,23 +282,24 @@ private struct ShareRowView: View {
             Spacer()
 
             // Access level tag
-            let isRead = share.access_level == "read"
-            Text(isRead ? "Nur lesen" : "Bearbeiten")
+            Text(level.shortLabel)
                 .font(.caption)
                 .fontWeight(.medium)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
-                .background(isRead ? Color.blue.opacity(0.12) : Color.green.opacity(0.12))
-                .foregroundStyle(isRead ? Color.blue : Color.green)
+                .background(tint.opacity(0.12))
+                .foregroundStyle(tint)
                 .clipShape(Capsule())
 
             // Remove button
-            Button(action: onDelete) {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.secondary)
-                    .imageScale(.large)
+            if canDelete {
+                Button(action: onDelete) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                        .imageScale(.large)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding(.vertical, 2)
     }
