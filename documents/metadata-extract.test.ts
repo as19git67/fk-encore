@@ -117,13 +117,13 @@ describe("extractDocumentDate", () => {
       const text = [
         "Bitte bei Zahlung unbedingt angeben",
         "Datum      Rechnungs-Nr.   Endbetrag",
-        "01.04.19   77213-9042          20,11",
+        "12.03.19   77213-9042          20,11",
       ].join("\n");
-      expect(extractDocumentDate(text)).toBe("2019-04-01");
+      expect(extractDocumentDate(text)).toBe("2019-03-12");
     });
 
     it("reads a single-column header/value pair", () => {
-      expect(extractDocumentDate("Datum\n01.04.19")).toBe("2019-04-01");
+      expect(extractDocumentDate("Datum\n12.03.19")).toBe("2019-03-12");
       expect(extractDocumentDate("Rechnungsdatum\n18.01.2021")).toBe("2021-01-18");
     });
 
@@ -171,11 +171,11 @@ describe("extractDocumentDate", () => {
 
     it("still finds the document's own date next to a birthdate", () => {
       // Both labels present — the real one must win regardless of order.
-      expect(extractDocumentDate("Geburtsdatum: 17.11.1955\nRechnungsdatum: 01.04.2019")).toBe(
-        "2019-04-01",
+      expect(extractDocumentDate("Geburtsdatum: 17.11.1955\nRechnungsdatum: 12.03.2019")).toBe(
+        "2019-03-12",
       );
-      expect(extractDocumentDate("Rechnungsdatum: 01.04.2019\nGeburtsdatum: 17.11.1955")).toBe(
-        "2019-04-01",
+      expect(extractDocumentDate("Rechnungsdatum: 12.03.2019\nGeburtsdatum: 17.11.1955")).toBe(
+        "2019-03-12",
       );
     });
   });

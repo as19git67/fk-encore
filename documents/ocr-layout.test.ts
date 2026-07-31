@@ -86,8 +86,8 @@ describe("formatVisualRow", () => {
   });
 
   it("marks a wide horizontal gap as a column break", () => {
-    const row = [word("01.04.19", 100, 10, 80, 20), word("77213-9042", 600, 10, 100, 20)];
-    expect(formatVisualRow(row)).toBe("01.04.19   77213-9042");
+    const row = [word("12.03.19", 100, 10, 80, 20), word("77213-9042", 600, 10, 100, 20)];
+    expect(formatVisualRow(row)).toBe("12.03.19   77213-9042");
   });
 });
 
@@ -99,7 +99,7 @@ describe("layoutTextFromWords", () => {
     // label behind; row reconstruction restores the visual reading.
     const words = [
       word("Datum", 620, 140, 90, 22),
-      word("01.04.19", 620, 180, 110, 22),
+      word("12.03.19", 620, 180, 110, 22),
       word("Rechnungs-Nr.", 900, 140, 180, 22),
       word("77213-9042", 900, 180, 150, 22),
       word("geb.", 620, 620, 60, 22),
@@ -107,7 +107,7 @@ describe("layoutTextFromWords", () => {
     ];
 
     expect(layoutTextFromWords(words)).toBe(
-      ["Datum   Rechnungs-Nr.", "01.04.19   77213-9042", "geb. 17.11.1955"].join("\n"),
+      ["Datum   Rechnungs-Nr.", "12.03.19   77213-9042", "geb. 17.11.1955"].join("\n"),
     );
   });
 
@@ -136,22 +136,22 @@ describe("layoutTextFromTsv", () => {
 
 describe("shouldUseLayoutText", () => {
   it("accepts a reconstruction carrying the same characters", () => {
-    expect(shouldUseLayoutText("Datum 01.04.19\nEndbetrag 20,11", "Datum\n01.04.19\nEndbetrag\n20,11")).toBe(true);
+    expect(shouldUseLayoutText("Datum 12.03.19\nEndbetrag 20,11", "Datum\n12.03.19\nEndbetrag\n20,11")).toBe(true);
   });
 
   it("rejects an empty reconstruction", () => {
-    expect(shouldUseLayoutText("", "Datum 01.04.19")).toBe(false);
-    expect(shouldUseLayoutText("   \n  ", "Datum 01.04.19")).toBe(false);
+    expect(shouldUseLayoutText("", "Datum 12.03.19")).toBe(false);
+    expect(shouldUseLayoutText("   \n  ", "Datum 12.03.19")).toBe(false);
   });
 
   it("rejects a reconstruction that lost content", () => {
-    expect(shouldUseLayoutText("Datum", "Datum 01.04.19 Endbetrag 20,11 Rechnungs-Nr. 50094")).toBe(
+    expect(shouldUseLayoutText("Datum", "Datum 12.03.19 Endbetrag 20,11 Rechnungs-Nr. 77213")).toBe(
       false,
     );
   });
 
   it("accepts the reconstruction when tesseract's own text is empty", () => {
-    expect(shouldUseLayoutText("Datum 01.04.19", "")).toBe(true);
+    expect(shouldUseLayoutText("Datum 12.03.19", "")).toBe(true);
   });
 });
 
