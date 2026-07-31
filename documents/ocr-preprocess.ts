@@ -39,8 +39,12 @@
  * `docs/ocr-improvements.md` for the full comparison.
  */
 
+import fs from "fs";
+import os from "os";
+import path from "path";
 import { spawn } from "child_process";
 import sharp from "sharp";
+import { meanWordConfidence } from "./ocr-layout";
 
 /** Master switch for the whole preprocessing step (grayscale/contrast + rotate). */
 const PREPROCESS_ENABLED = envFlag("DOCUMENTS_OCR_PREPROCESS", true);
@@ -56,6 +60,34 @@ const AUTOROTATE_ENABLED = envFlag("DOCUMENTS_OCR_AUTOROTATE", true);
  * noise while still catching genuine sideways scans.
  */
 const ROTATE_MIN_CONFIDENCE = envFloat("DOCUMENTS_OCR_ROTATE_MIN_CONFIDENCE", 1.0);
+
+/**
+ * Second chance for a rotation OSD suggested but wasn't confident about.
+ *
+ * The confidence threshold above conflates two different situations, because
+ * OSD's score scales with how much text it had to judge from: a blank page
+ * scoring 0.4 on noise, and a *sparse but genuinely sideways* page scoring
+ * 0.75, look the same to a threshold. A one-row bank-statement export on an
+ * A4 sheet is the observed case — OSD named the right angle (`Rotate: 90`) at
+ * confidence 0.75, the threshold discarded it, and the page OCR'd into
+ * gibberish ("KL €202 Bensg 22'852-").
+ *
+ * So instead of discarding a low-confidence suggestion, we test it: OCR the
+ * page both as-is and rotated, and compare mean word confidence. Recognizing
+ * real text upright scores far above reading the same text sideways (34.8 vs
+ * 89.3 on that document), while a bad suggestion shows no such gain and is
+ * rejected. Costs two extra Tesseract passes (~1.5 s for an A4 page at 200
+ * dpi), only for pages where OSD was both unsure *and* concrete — a page it
+ * says nothing about, such as a truly blank one, never reaches this.
+ */
+const ROTATE_VERIFY_ENABLED = envFlag("DOCUMENTS_OCR_ROTATE_VERIFY", true);
+
+/**
+ * How many points of mean word confidence the rotated orientation must beat
+ * the original by. Well clear of run-to-run noise, far below the gap a real
+ * misrotation produces.
+ */
+const ROTATE_VERIFY_MIN_MARGIN = envFloat("DOCUMENTS_OCR_ROTATE_VERIFY_MARGIN", 10);
 
 /** Convert the page to grayscale before contrast work (scans rarely need color). */
 const GRAYSCALE_ENABLED = envFlag("DOCUMENTS_OCR_GRAYSCALE", true);
@@ -142,15 +174,107 @@ export function chooseOsdRotation(
  */
 export async function detectOcrRotation(imagePath: string): Promise<number> {
   if (!PREPROCESS_ENABLED || !AUTOROTATE_ENABLED) return 0;
+  let osd: OsdResult | null = null;
   try {
-    const stdout = await runTesseractOsd(imagePath);
-    return chooseOsdRotation(parseOsdRotation(stdout));
+    osd = parseOsdRotation(await runTesseractOsd(imagePath));
+    const confident = chooseOsdRotation(osd);
+    if (confident !== 0) return confident;
   } catch (err) {
     console.warn(
       `[documents.ocr-preprocess] OSD detection failed for ${imagePath}: ${(err as Error).message}`,
     );
     return 0;
   }
+
+  // OSD named an angle but wasn't confident enough to be trusted outright.
+  // Rather than discard it, check it against recognition quality — see
+  // ROTATE_VERIFY_ENABLED above for why the threshold alone gets this wrong.
+  if (!ROTATE_VERIFY_ENABLED || !osd || osd.rotate === 0) return 0;
+  try {
+    const verified = await verifyRotationByRecognition(imagePath, osd.rotate);
+    if (verified) {
+      console.log(
+        `[documents.ocr-preprocess] low-confidence OSD (${osd.rotate}° @ ${osd.confidence}) confirmed by recognition — rotating`,
+      );
+      return osd.rotate;
+    }
+  } catch (err) {
+    console.warn(
+      `[documents.ocr-preprocess] rotation verification failed for ${imagePath}: ${(err as Error).message}`,
+    );
+  }
+  return 0;
+}
+
+/**
+ * Decide whether a rotation is worth applying from the two orientations'
+ * mean word confidences. Requires a clear win: an unreadable original (no
+ * words at all) counts as beatable, but a rotation that recognizes nothing is
+ * never applied. Pure; unit-tested.
+ */
+export function shouldApplyVerifiedRotation(
+  originalConfidence: number | null,
+  rotatedConfidence: number | null,
+  margin: number = ROTATE_VERIFY_MIN_MARGIN,
+): boolean {
+  if (rotatedConfidence == null) return false;
+  if (originalConfidence == null) return true;
+  return rotatedConfidence - originalConfidence >= margin;
+}
+
+/**
+ * OCR `imagePath` as-is and rotated by `rotate` degrees, and report whether
+ * the rotated orientation reads clearly better. Runs in a temp directory that
+ * is always cleaned up.
+ */
+async function verifyRotationByRecognition(
+  imagePath: string,
+  rotate: number,
+): Promise<boolean> {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "fk-osdverify-"));
+  try {
+    const rotatedPath = path.join(tmpDir, "rotated.png");
+    await sharp(imagePath, { failOn: "none" }).rotate(normalizeRightAngle(rotate)).png().toFile(rotatedPath);
+
+    const [original, rotated] = await Promise.all([
+      recognitionConfidence(imagePath, path.join(tmpDir, "as-is")),
+      recognitionConfidence(rotatedPath, path.join(tmpDir, "rot")),
+    ]);
+    console.log(
+      `[documents.ocr-preprocess] rotation probe: as-is=${original?.toFixed(1) ?? "n/a"} rotated(${rotate}°)=${rotated?.toFixed(1) ?? "n/a"}`,
+    );
+    return shouldApplyVerifiedRotation(original, rotated);
+  } finally {
+    fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/** Mean word confidence of a plain `--psm 3` pass, or null when it read nothing. */
+async function recognitionConfidence(
+  imagePath: string,
+  outBase: string,
+): Promise<number | null> {
+  const lang = process.env.DOCUMENTS_OCR_LANG ?? "deu+eng";
+  await new Promise<void>((resolve, reject) => {
+    // Same recognition settings as the real pass in text-extract.ts, so the
+    // probe measures what that pass would actually get.
+    const proc = spawn(
+      "tesseract",
+      [imagePath, outBase, "-l", lang, "--oem", "1", "--psm", "3", "tsv"],
+      { stdio: ["ignore", "ignore", "pipe"] },
+    );
+    let stderr = "";
+    proc.stderr.on("data", (d) => {
+      stderr += d.toString();
+    });
+    proc.on("error", reject);
+    proc.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`tesseract probe exited ${code}: ${stderr.trim()}`));
+    });
+  });
+  const tsv = await fs.promises.readFile(`${outBase}.tsv`, "utf8");
+  return meanWordConfidence(tsv);
 }
 
 function runTesseractOsd(imagePath: string): Promise<string> {
