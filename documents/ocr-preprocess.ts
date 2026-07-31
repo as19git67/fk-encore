@@ -45,6 +45,7 @@ import path from "path";
 import { spawn } from "child_process";
 import sharp from "sharp";
 import { meanWordConfidence } from "./ocr-layout";
+import { tesseractEnv } from "./tesseract-env";
 
 /** Master switch for the whole preprocessing step (grayscale/contrast + rotate). */
 const PREPROCESS_ENABLED = envFlag("DOCUMENTS_OCR_PREPROCESS", true);
@@ -261,7 +262,7 @@ async function recognitionConfidence(
     const proc = spawn(
       "tesseract",
       [imagePath, outBase, "-l", lang, "--oem", "1", "--psm", "3", "tsv"],
-      { stdio: ["ignore", "ignore", "pipe"] },
+      { stdio: ["ignore", "ignore", "pipe"], env: tesseractEnv() },
     );
     let stderr = "";
     proc.stderr.on("data", (d) => {
@@ -282,6 +283,7 @@ function runTesseractOsd(imagePath: string): Promise<string> {
     // `--psm 0` = orientation & script detection only (no recognition).
     const proc = spawn("tesseract", [imagePath, "stdout", "--psm", "0"], {
       stdio: ["ignore", "pipe", "pipe"],
+      env: tesseractEnv(),
     });
     let stdout = "";
     let stderr = "";
