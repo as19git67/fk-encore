@@ -72,6 +72,7 @@ import {
 import { recordUncategorizedDocument } from "./suggestion-writer";
 import {
   applyAgricultureFiscalYearTaxRule,
+  applyKirchensteuerBescheidYearTaxRule,
   applyInsuranceAdminTaxRule,
   applyKindergeldTaxRule,
 } from "./tax-rules";
@@ -456,6 +457,25 @@ export async function runClassify(documentId: number): Promise<{ classification:
       taxYear: classification.tax_year,
       taxYearConfidence: classification.tax_year_confidence,
     });
+    classification.tax_year = adjusted.taxYear;
+    classification.tax_year_confidence = adjusted.taxYearConfidence;
+  }
+  // 7c. Kirchensteuerbescheid: the heading names the Veranlagungsjahr, but the
+  //     Sonderausgabe counts in the year of the Nachzahlung/Erstattung
+  //     (§ 11 EStG). "Kirchensteuerbescheid 2019" issued 19.04.2021 → 2021.
+  {
+    const adjusted = applyKirchensteuerBescheidYearTaxRule({
+      text: clipped,
+      docDate: classification.doc_date ?? null,
+      taxYear: classification.tax_year,
+      taxYearConfidence: classification.tax_year_confidence,
+    });
+    if (adjusted.matched && adjusted.taxYear !== classification.tax_year) {
+      console.log(
+        `[documents] Kirchensteuerbescheid year rule(${documentId}): ` +
+          `${classification.tax_year} → ${adjusted.taxYear}`,
+      );
+    }
     classification.tax_year = adjusted.taxYear;
     classification.tax_year_confidence = adjusted.taxYearConfidence;
   }
