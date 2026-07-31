@@ -2402,6 +2402,46 @@ export const replaceDocumentFile = api.raw(
 
 // ─── Unlock (decrypt password-protected PDF) ─────────────────────────────────
 
+export interface DismissDocumentErrorRequest {
+  id: number;
+}
+
+/**
+ * Drop a document's `failed` state without re-running the pipeline.
+ *
+ * The counterpart to "Datei ersetzen" for the case where the file is fine and
+ * only the automatic classification wasn't: the user fills the metadata in by
+ * hand and marks the document done. `updateDocument` already clears the state
+ * as a side effect of any hand-edit, but a document whose fields the user
+ * happens to be content with (or who cleared them deliberately) otherwise has
+ * no way out of the red banner. Idempotent for a healthy document; refuses
+ * `encrypted`, which needs the PDF password rather than a decision.
+ */
+export const dismissDocumentError = api(
+  { expose: true, method: "POST", path: "/documents/:id/dismiss-error", auth: true },
+  async (req: DismissDocumentErrorRequest): Promise<DocumentDetail> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.edit");
+    const userId = getUserId();
+
+    const existing = await loadVisibleDocument(userId, req.id, isDataAdmin(authData));
+    if (existing.status === "encrypted") {
+      throw APIError.failedPrecondition(
+        "Das Dokument ist passwortgeschützt — bitte zuerst entsperren.",
+      );
+    }
+    if (existing.status === "failed") {
+      await db
+        .update(documents)
+        .set({ status: "ready", last_error: null })
+        .where(eq(documents.id, existing.id));
+    }
+
+    return loadDetail(userId, existing.id, isDataAdmin(authData));
+  },
+);
+
 export interface UnlockDocumentRequest {
   id: number;
   password: string;

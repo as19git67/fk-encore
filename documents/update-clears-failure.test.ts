@@ -6,7 +6,7 @@ import { eq, sql } from "drizzle-orm";
 import db from "../db/database";
 import { documents } from "../db/schema";
 import { DOCUMENTS_DIR } from "./documents.service";
-import { updateDocument } from "./documents";
+import { dismissDocumentError, updateDocument } from "./documents";
 
 // A document whose classify step failed hard (see llm-client.ts: a 422 from
 // the llm-service is a permanent failure, not a deferred retry) is parked in
@@ -121,5 +121,37 @@ describe("updateDocument — a hand-edit resolves a failed pipeline run", () => 
     const row = await readDoc();
     expect(row.status).toBe("ready");
     expect(row.lastError).toBeNull();
+  });
+});
+
+describe("dismissDocumentError", () => {
+  it("clears the failure without any metadata change", async () => {
+    await seedDocument("failed", ERROR_TEXT);
+
+    const detail = await dismissDocumentError({ id: DOC_ID });
+
+    expect(detail.status).toBe("ready");
+    expect(detail.last_error).toBeNull();
+
+    const row = await readDoc();
+    expect(row.status).toBe("ready");
+    expect(row.lastError).toBeNull();
+  });
+
+  it("is a no-op on a healthy document", async () => {
+    await seedDocument("ready", null);
+
+    const detail = await dismissDocumentError({ id: DOC_ID });
+
+    expect(detail.status).toBe("ready");
+  });
+
+  it("refuses an encrypted document — that needs the PDF password", async () => {
+    await seedDocument("encrypted", null);
+
+    await expect(dismissDocumentError({ id: DOC_ID })).rejects.toThrow(/passwortgeschützt/);
+
+    const row = await readDoc();
+    expect(row.status).toBe("encrypted");
   });
 });
