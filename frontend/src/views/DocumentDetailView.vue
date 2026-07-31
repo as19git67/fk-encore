@@ -1543,12 +1543,29 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
+/* ── Desktop: die Seite selbst scrollt nicht ────────────────────────────────
+   Auf breiten Viewports füllt die Detailansicht exakt die Höhe unter der
+   App-Navbar. Gescrollt wird ausschließlich *innerhalb* der beiden Panels:
+   links Seite für Seite durch das PDF, rechts durch die Attribute. Kopfzeile
+   und Menü bleiben dabei stehen. (#919)
+
+   Der einzige Offset ist die Navbar: `#module-subheaders` ist auf dieser
+   Route leer (die Ansicht teleportiert nichts dorthin) und `main.content`
+   hat weder Padding noch Margin. */
 @media (min-width: 1000px) {
+  .document-detail-view {
+    height: calc(100dvh - var(--menubar-height, 3.5rem));
+    overflow: hidden;
+  }
   .detail-grid {
     grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
-    /* Without this the sticky meta panel would be stretched to the full row
-       height and never have anything to stick within. */
-    align-items: start;
+    min-height: 0;
+  }
+  .pdf-panel {
+    min-height: 0;
+    /* Der Seitenstapel scrollt im Viewer selbst, deshalb steht keine
+       Navbar im Weg, wenn zu einer Seite gesprungen wird. */
+    --pdf-scroll-margin: 0.5rem;
   }
 }
 
@@ -1577,17 +1594,12 @@ onBeforeUnmount(() => {
   padding-right: 0.25rem;
 }
 
-/* On the desktop layout the PDF panel scrolls page after page through the
-   whole document while the attributes stay in view. The panel sticks below
-   the app's sticky navbar and scrolls internally when it is taller than the
-   viewport. (#919) */
+/* Eigener Scroll-Bereich neben dem PDF — siehe den Block weiter oben. */
 @media (min-width: 1000px) {
   .meta-panel {
-    position: sticky;
-    top: calc(var(--menubar-height, 3.5rem) + 0.5rem);
-    max-height: calc(100dvh - var(--menubar-height, 3.5rem) - 1rem);
+    min-height: 0;
     overflow-y: auto;
-    /* Room for the scrollbar so it doesn't overlap the inputs. */
+    /* Platz für die Scrollbar, damit sie nicht auf den Eingabefeldern liegt. */
     padding-right: 0.5rem;
   }
 }
