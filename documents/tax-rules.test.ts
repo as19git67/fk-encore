@@ -102,7 +102,7 @@ describe("applyInsuranceAdminTaxRule", () => {
   });
 
   it("no longer treats bare 'Leistungsmitteilung' as a certificate marker", () => {
-    // An IXOS Unterstützungskasse "Leistungsmitteilung gemäß Leistungsplan"
+    // An employer Unterstützungskasse "Leistungsmitteilung gemäß Leistungsplan"
     // is mere status/anwartschaft — NOT a tax certificate. Previously the word
     // was in BELEG_MARKERS and would have shielded admin mail from stripping.
     const out = applyInsuranceAdminTaxRule({

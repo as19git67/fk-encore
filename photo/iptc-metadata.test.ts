@@ -518,7 +518,7 @@ describe("extractDateFromFilename", () => {
   });
 
   it("parses year-month from filename", () => {
-    const r = extractDateFromFilename("Kinderturnen TSV Merching 2010-11.jpg");
+    const r = extractDateFromFilename("Kinderturnen TSV Musterhausen 2010-11.jpg");
     expect(r).not.toBeNull();
     const d = new Date(r!);
     expect(d.getUTCFullYear()).toBe(2010);

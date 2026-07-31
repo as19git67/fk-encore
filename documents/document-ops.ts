@@ -60,6 +60,7 @@ import { DOCUMENT_TYPES } from "./document-types";
 import { loadRemovedSubjectPersonIds, loadSubjectPersonsForMatch } from "./subject-persons";
 import { flattenTaxonomy, taxonomyHints } from "./taxonomy";
 import { matchContentRule, matchSenderRule } from "./sender-rules";
+import { loadSenderRuleOverrides } from "./sender-rule-overrides";
 import { buildClassifyExamples } from "./few-shot";
 import {
   learnedRelationTags,
@@ -512,11 +513,15 @@ export async function runClassify(documentId: number): Promise<{ classification:
     title: classification.title,
     text: clipped,
   });
-  const ruleSlug = matchSenderRule({
-    sender: classification.sender,
-    title: classification.title,
-    text: clipped,
-  });
+  const senderRuleOverrides = await loadSenderRuleOverrides();
+  const ruleSlug = matchSenderRule(
+    {
+      sender: classification.sender,
+      title: classification.title,
+      text: clipped,
+    },
+    senderRuleOverrides,
+  );
   // Learned per-user category fills the long tail the hand-authored rules don't
   // cover: only applied when neither a content nor a sender rule matched, so
   // the rules keep their context-aware precision. See learned-rules.ts.

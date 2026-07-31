@@ -97,8 +97,8 @@ beforeEach(async () => {
 describe("subject-person removal sticks (migration 0138)", () => {
   it("deselecting an AI-linked person deletes the link and records the removal", async () => {
     const erika = await addPerson("Erika Mustermann", "mutter");
-    const anton = await addPerson("Anton Schegg", "vater");
-    await insertDoc("Befund für Erika Mustermann und Anton Schegg");
+    const anton = await addPerson("Anton Beispiel", "vater");
+    await insertDoc("Befund für Erika Mustermann und Anton Beispiel");
     await db.insert(documentSubjectPersons).values([
       { document_id: DOC_ID, subject_person_id: erika, source: "ai" },
       { document_id: DOC_ID, subject_person_id: anton, source: "ai" },

@@ -54,7 +54,7 @@ beforeEach(async () => {
 describe("runClassify — Bezugsperson linking", () => {
   it("links subject persons found in the text and preserves manual links", async () => {
     const erika = await addPerson("Erika Mustermann", "mutter");
-    const anton = await addPerson("Anton Schegg", "vater");
+    const anton = await addPerson("Anton Beispiel", "vater");
 
     // The text mentions Erika but not Anton.
     await db.execute(

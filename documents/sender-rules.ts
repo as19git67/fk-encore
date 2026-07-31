@@ -68,41 +68,15 @@ export const SENDER_RULES: readonly SenderRule[] = [
     senders: ["familienkasse"],
     category: "familie-familienleistungen",
   },
-  // ── Employer: payslips vs. forwarded tax assessment vs. SV notification ──
-  // Order matters (first match wins): the most specific document types come
-  // first, the unguarded payslip fallback last.
-  //
-  // Specific case first: the employer occasionally forwards an
-  // Einkommensteuerbescheid — that is a tax assessment, not a payslip.
-  {
-    note: "Arbeitgeber leitet ausnahmsweise einen Einkommensteuerbescheid weiter",
-    senders: ["opentext", "ixos"],
-    requireAny: ["einkommensteuerbescheid", "steuerbescheid"],
-    category: "behoerden-steuerbescheid",
-  },
-  {
-    note: "Arbeitgeber → jährliche Meldung/Entgeltnachweis zur Sozialversicherung (DEÜV)",
-    senders: ["opentext", "ixos"],
-    requireAny: SV_MELDUNG_KEYWORDS,
-    category: "finanzen-sozialversicherung",
-  },
-  {
-    note: "Arbeitgeber → monatliche Entgelt-/Gehaltsabrechnung (Fallback)",
-    senders: ["opentext", "ixos"],
-    category: "finanzen-gehalt",
-  },
-  {
-    note: "Kirchlicher Arbeitgeber (Erzb. Ordinariat / St. Ulrich) → Meldung zur Sozialversicherung",
-    senders: ["ordinariat", "stulrich"],
-    requireAny: SV_MELDUNG_KEYWORDS,
-    category: "finanzen-sozialversicherung",
-  },
-  {
-    note: "Kirchlicher Arbeitgeber (Erzb. Ordinariat / St. Ulrich) → Entgelt-/Gehaltsabrechnung",
-    senders: ["ordinariat", "stulrich"],
-    requireAny: ["entgeltabrechnung", "gehaltsabrechnung", "lohnabrechnung", "verdienstbescheinigung"],
-    category: "finanzen-gehalt",
-  },
+  // ── Employer / other household-specific senders ────────────────────────
+  // Household-specific institutions (the actual employer, parish, etc.) are
+  // deliberately NOT hard-coded here — this file is public. They are
+  // configured as DB-backed overrides instead (migration 0141, see
+  // `sender-rule-overrides.ts` and the `/documents/sender-rule-overrides`
+  // API), which `matchSenderRule` below consults FIRST, ahead of this
+  // built-in list. Use the same shape as `SenderRule` above, e.g. an
+  // "Arbeitgeber" rule with `requireAny: SV_MELDUNG_KEYWORDS` for the DEÜV
+  // notification case and a bare fallback rule for the monthly payslip.
 
   // ── Banks / brokers ─────────────────────────────────────────────────────
   {
@@ -182,7 +156,7 @@ export const SENDER_RULES: readonly SenderRule[] = [
   },
   {
     note: "Gemeinde (Wasser/Abwasser/Müll/Gebühren) → kommunale Abgaben",
-    senders: ["gemeindemerching", "gemeinde"],
+    senders: ["gemeinde"],
     requireAny: ["wasser", "abwasser", "müll", "abfall", "gebühr", "benutzungsgeb", "straßenreinigung"],
     category: "wohnen-kommunale-abgaben",
   },
@@ -237,14 +211,25 @@ export const SENDER_RULES: readonly SenderRule[] = [
  * only list external institutions), so the known "owner extracted as sender"
  * bug simply yields no override.
  */
-export function matchSenderRule(input: {
-  sender?: string | null;
-  title?: string | null;
-  text?: string | null;
-}): string | null {
+export function matchSenderRule(
+  input: {
+    sender?: string | null;
+    title?: string | null;
+    text?: string | null;
+  },
+  overrides?: readonly SenderRule[],
+): string | null {
   const sender = normalizeForMatch(input.sender);
   if (!sender) return null;
   const ctx = normalizeForMatch(`${input.title ?? ""} ${input.text ?? ""}`);
+  // DB-backed household overrides win over the built-in list (see the
+  // "Employer / other household-specific senders" note above).
+  for (const rule of overrides ?? []) {
+    if (!rule.senders.some((frag) => sender.includes(frag))) continue;
+    if (rule.requireAny && !rule.requireAny.some((frag) => ctx.includes(frag))) continue;
+    if (rule.excludeAny && rule.excludeAny.some((frag) => ctx.includes(frag))) continue;
+    return rule.category;
+  }
   for (const rule of SENDER_RULES) {
     if (!rule.senders.some((frag) => sender.includes(frag))) continue;
     if (rule.requireAny && !rule.requireAny.some((frag) => ctx.includes(frag))) continue;

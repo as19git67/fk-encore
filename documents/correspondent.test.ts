@@ -6,6 +6,7 @@ import {
   extractContractAnchor,
   resolveCorrespondent,
   resolveProductSlug,
+  type CorrespondentOverride,
 } from "./correspondent";
 
 describe("resolveCorrespondent", () => {
@@ -57,9 +58,20 @@ describe("resolveCorrespondent", () => {
     });
   });
 
-  it("unifies the employer document portals under one correspondent", () => {
-    expect(resolveCorrespondent("OpenText")?.slug).toBe("arbeitgeber");
-    expect(resolveCorrespondent("IXOS")?.slug).toBe("arbeitgeber");
+  it("unifies household-specific senders (e.g. the employer) via DB-backed overrides", () => {
+    // The employer, parish, etc. are NOT hard-coded in the built-in registry
+    // — they're configured as DB-backed correspondent overrides (migration
+    // 0131, see correspondent-overrides.ts) and passed in here.
+    const employerOverrides: CorrespondentOverride[] = [
+      { pattern: "contoso", slug: "arbeitgeber", display: "Arbeitgeber" },
+      { pattern: "ctso", slug: "arbeitgeber", display: "Arbeitgeber" },
+    ];
+    expect(resolveCorrespondent("Contoso Software GmbH", employerOverrides)?.slug).toBe("arbeitgeber");
+    expect(resolveCorrespondent("CTSO", employerOverrides)?.slug).toBe("arbeitgeber");
+    // Without overrides, the built-in registry has no opinion.
+    expect(resolveCorrespondent("Contoso Software GmbH")).not.toEqual(
+      expect.objectContaining({ slug: "arbeitgeber" }),
+    );
   });
 
   it("unifies MLP bank and MLP life-insurance senders", () => {

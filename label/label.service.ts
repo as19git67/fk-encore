@@ -38,7 +38,7 @@ const DEFAULT_CUPS_URL = "http://localhost:631";
 /**
  * Base URL of the CUPS server, normalized: a scheme is added when missing
  * (CUPS speaks HTTP) and any trailing slash is stripped. So a bare
- * `scanner.schegg.net:631` becomes `http://scanner.schegg.net:631` rather
+ * `scanner.example.net:631` becomes `http://scanner.example.net:631` rather
  * than a malformed URL that makes fetch() fail.
  */
 export function getCupsBaseUrl(): string {
@@ -78,7 +78,7 @@ const REQUEST_TIMEOUT_MS = 15_000;
  * rejecting any request (HTTP 400 Bad Request) whose Host header is not one
  * of: a loopback name *on a loopback connection*, the server's own listening
  * IP addresses, or a configured ServerName/ServerAlias. A remote client that
- * sends `Host: scanner.schegg.net` is therefore refused unless the admin adds
+ * sends `Host: scanner.example.net` is therefore refused unless the admin adds
  * a ServerAlias. By connecting to the resolved IP, node sets `Host: <ip>:<port>`
  * — the server's own address — which CUPS accepts without any server config.
  */
