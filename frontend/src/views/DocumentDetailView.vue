@@ -1514,7 +1514,12 @@ onBeforeUnmount(() => {
 }
 
 @media (min-width: 1000px) {
-  .detail-grid { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); }
+  .detail-grid {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+    /* Without this the sticky meta panel would be stretched to the full row
+       height and never have anything to stick within. */
+    align-items: start;
+  }
 }
 
 .pdf-panel {
@@ -1540,6 +1545,21 @@ onBeforeUnmount(() => {
      grid track wider than the container. */
   min-width: 0;
   padding-right: 0.25rem;
+}
+
+/* On the desktop layout the PDF panel scrolls page after page through the
+   whole document while the attributes stay in view. The panel sticks below
+   the app's sticky navbar and scrolls internally when it is taller than the
+   viewport. (#919) */
+@media (min-width: 1000px) {
+  .meta-panel {
+    position: sticky;
+    top: calc(var(--menubar-height, 3.5rem) + 0.5rem);
+    max-height: calc(100dvh - var(--menubar-height, 3.5rem) - 1rem);
+    overflow-y: auto;
+    /* Room for the scrollbar so it doesn't overlap the inputs. */
+    padding-right: 0.5rem;
+  }
 }
 
 .meta-top {
