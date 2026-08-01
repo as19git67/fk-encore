@@ -1226,6 +1226,23 @@ describe("Photo Module", () => {
       expect(album.user_id).toBe(user1.id);
     });
 
+    // Issue #849: the iOS sync derives the album name from the iOS album title,
+    // which keeps trailing spaces. Untrimmed storage made "Urlaub " a second
+    // album next to "Urlaub" on the next sync run.
+    it("trims surrounding whitespace from album names on create", async () => {
+      const album = await service.createAlbumLogic(user1.id, { name: "  Urlaub  " });
+      expect(album.name).toBe("Urlaub");
+
+      const response = await service.listAlbumsLogic(user1.id);
+      expect(response.albums.find(a => a.id === album.id)!.name).toBe("Urlaub");
+    });
+
+    it("trims surrounding whitespace from album names on update", async () => {
+      const album = await service.createAlbumLogic(user1.id, { name: "Gardasee" });
+      const updated = await service.updateAlbumLogic(user1.id, { id: album.id, name: "Gardasee 2026 " });
+      expect(updated.name).toBe("Gardasee 2026");
+    });
+
     it("should list albums with cover photo and description", async () => {
       const album = await service.createAlbumLogic(user1.id, { 
         name: "Vacation with Cover", 

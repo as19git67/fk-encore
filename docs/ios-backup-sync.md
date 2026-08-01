@@ -255,6 +255,16 @@ atomare `claimNextPending()`-Schritt.
   Haupt­schalter, globale Optionen (Nur WLAN, Screenshots), Status und den
   manuellen Auslöser — keine Album-Auswahl/-Zuordnung mehr. Nur reguläre
   Benutzeralben sind verknüpfbar; Smart-Alben werden nicht angezeigt.
+  **Leere Alben werden mit aufgelistet** (Issue #822), damit eine
+  Synchronisierung schon vor dem ersten Foto eingerichtet werden kann; die
+  Rückfrage „alle Fotos / nur neue" bleibt relevant, weil sie den Wasserstand
+  (`creationDate`) setzt und damit über später nachgelegte ältere Fotos
+  entscheidet.
+- **Namensabgleich ist getrimmt** (Issue #849): iOS behält Leerzeichen am
+  Namensende, das Web trimmt beim Anlegen. `AlbumName.normalized/matches`
+  vergleicht beide Seiten getrimmt und sendet den getrimmten Namen an den
+  Server (der ihn zusätzlich in `createAlbumLogic`/`updateAlbumLogic` trimmt),
+  sodass „Urlaub " kein zweites Album neben „Urlaub" mehr erzeugt.
 - **Einmal-Migration `purgeLegacySmartAlbumsIfNeeded()`** (in
   `PhotoSyncService.sync()`, vor dem Löschabgleich): Alt-Konfigurationen, die
   über den früheren Settings-Picker ein Smart-Album (Favoriten, Recents, …)

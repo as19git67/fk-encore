@@ -572,7 +572,10 @@ actor PhotoDownloadService {
                 PHAssetCollection
                     .fetchAssetCollections(with: .album, subtype: .albumRegular, options: nil)
                     .enumerateObjects { collection, _, stop in
-                        if collection.localizedTitle == name {
+                        // Trimmed comparison: an iOS album titled "Urlaub " must
+                        // be reused for the server album "Urlaub" instead of
+                        // creating a second local album (issue #849).
+                        if AlbumName.matches(collection.localizedTitle ?? "", name) {
                             found = collection
                             stop.pointee = true
                         }
@@ -586,7 +589,9 @@ actor PhotoDownloadService {
         var createdIdentifier: String?
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             PHPhotoLibrary.shared().performChanges {
-                let req = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: name)
+                let req = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(
+                    withTitle: AlbumName.normalized(name)
+                )
                 createdIdentifier = req.placeholderForCreatedAssetCollection.localIdentifier
             } completionHandler: { _, error in
                 if let error { cont.resume(throwing: error) } else { cont.resume() }

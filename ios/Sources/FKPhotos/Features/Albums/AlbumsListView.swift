@@ -9,6 +9,8 @@ struct AlbumsListView: View {
     @State private var newAlbumDescription = ""
     @State private var searchText = ""
     @State private var pinnedAlbumIds: Set<Int> = AlbumPinPreferences.pinnedIds
+    /// Album whose properties are being edited (sheet is driven by this).
+    @State private var editingAlbum: Album?
 
     private var filteredAlbums: [Album] {
         let filtered = viewModel.albums.filter { filterSort.appliedFilter.matches($0) }
@@ -138,6 +140,7 @@ struct AlbumsListView: View {
                                 Button { togglePin(album.id) } label: {
                                     Label("Lösen", systemImage: "pin.slash")
                                 }
+                                albumSettingsButton(for: album)
                                 Button(role: .destructive) {
                                     Task { await viewModel.deleteAlbum(id: album.id) }
                                 } label: {
@@ -171,6 +174,7 @@ struct AlbumsListView: View {
                             Button { togglePin(album.id) } label: {
                                 Label("Anpinnen", systemImage: "pin")
                             }
+                            albumSettingsButton(for: album)
                             Button(role: .destructive) {
                                 Task { await viewModel.deleteAlbum(id: album.id) }
                             } label: {
@@ -204,6 +208,23 @@ struct AlbumsListView: View {
         .sheet(isPresented: $filterSort.isMenuPresented) {
             AlbumFilterSortMenuView(viewModel: filterSort)
                 .presentationDetents([.medium, .large])
+        }
+        // Album properties (and sharing) straight from the list — the same
+        // sheet the detail view opens.
+        .sheet(item: $editingAlbum) { album in
+            AlbumSettingsView(
+                albumId: album.id,
+                name: album.name,
+                description: album.description,
+                displayMode: album.display_mode,
+                accessLevel: album.my_access_level,
+                canShare: album.my_access_level == "owner" || album.my_access_level == "write_share",
+                canDelete: album.my_access_level == "owner",
+                onSaved: { _ in Task { await viewModel.loadAlbums() } },
+                onDelete: album.my_access_level == "owner"
+                    ? { Task { await viewModel.deleteAlbum(id: album.id) } }
+                    : nil
+            )
         }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
@@ -255,6 +276,18 @@ struct AlbumsListView: View {
             }
         } message: {
             Text(viewModel.errorMessage ?? "")
+        }
+    }
+
+    /// Context-menu entry that opens the album's properties. Shown for every
+    /// album the user may write to (owner, write, write_share) — sharing and
+    /// deleting are gated again inside the sheet.
+    @ViewBuilder
+    private func albumSettingsButton(for album: Album) -> some View {
+        if album.hasWriteAccess {
+            Button { editingAlbum = album } label: {
+                Label("Album-Einstellungen", systemImage: "gearshape")
+            }
         }
     }
 

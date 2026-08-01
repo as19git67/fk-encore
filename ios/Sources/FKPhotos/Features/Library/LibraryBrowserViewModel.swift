@@ -80,8 +80,9 @@ final class LibraryBrowserViewModel {
                 func collect(from result: PHFetchResult<PHAssetCollection>) {
                     result.enumerateObjects { collection, _, _ in
                         guard seenIds.insert(collection.localIdentifier).inserted else { return }
+                        // Empty albums are listed too: a sync can be prepared
+                        // before the first photo lands in the album (issue #822).
                         let count = PHAsset.fetchAssets(in: collection, options: imageFilter).count
-                        guard count > 0 else { return }
                         let title = collection.localizedTitle ?? "Unbekannt"
                         raw.append(Raw(collection: collection, title: title, count: count))
                     }
@@ -129,11 +130,15 @@ final class LibraryBrowserViewModel {
         isMakingAvailable = true
         defer { isMakingAvailable = false }
 
+        // Names are matched trimmed on both sides, so "Urlaub " and "Urlaub"
+        // count as the same album everywhere (issue #849).
+        let serverName = AlbumName.normalized(album.name)
+
         let duplicateLinked = albums.first {
-            $0.id != album.id && $0.name == album.name && $0.syncStatus != .none
+            $0.id != album.id && AlbumName.matches($0.name, album.name) && $0.syncStatus != .none
         }
         if duplicateLinked != nil {
-            return .error("Ein iOS-Album mit dem Namen \"\(album.name)\" ist bereits verknüpft.")
+            return .error("Ein iOS-Album mit dem Namen \"\(serverName)\" ist bereits verknüpft.")
         }
 
         let serverAlbums: [Album]
@@ -147,11 +152,11 @@ final class LibraryBrowserViewModel {
         var targetAlbumId: Int?
 
         if let ownAlbum = serverAlbums.first(where: {
-            $0.name == album.name && $0.my_access_level == "owner"
+            AlbumName.matches($0.name, serverName) && $0.my_access_level == "owner"
         }) {
             targetAlbumId = ownAlbum.id
         } else if let sharedAlbum = serverAlbums.first(where: {
-            $0.name == album.name && $0.hasWriteAccess
+            AlbumName.matches($0.name, serverName) && $0.hasWriteAccess
         }) {
             targetAlbumId = sharedAlbum.id
         } else {
@@ -159,7 +164,7 @@ final class LibraryBrowserViewModel {
             struct CreatedAlbum: Decodable { let id: Int }
             do {
                 let created: CreatedAlbum = try await APIClient.shared.post(
-                    "/albums", body: Body(name: album.name, description: nil)
+                    "/albums", body: Body(name: serverName, description: nil)
                 )
                 targetAlbumId = created.id
             } catch {
