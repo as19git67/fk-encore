@@ -208,7 +208,9 @@ struct LibraryAlbumDetailView: View {
         if item.assetCount > 0 {
             return "Sollen alle \(item.assetCount) Fotos dieses Albums hochgeladen werden oder nur neue ab jetzt?"
         }
-        return "Sollen alle bisherigen Fotos hochgeladen werden oder nur neue ab jetzt?"
+        // Empty album (issue #822): the choice still matters — it decides whether
+        // older photos that you add to the album later are uploaded as well.
+        return "Das Album ist noch leer. Sollen auch ältere Fotos hochgeladen werden, die du später hinzufügst, oder nur ab jetzt neu aufgenommene?"
     }
 
     private func handleMakeAvailable(mode: PhotoSyncMode) async {
