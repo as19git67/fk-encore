@@ -27,7 +27,7 @@ import {
   financeRecurringMandate,
   financeTransaction,
 } from "../db/schema";
-import { everyMs, schedule } from "../lib/local-cron";
+import { dailyAtUtc, schedule } from "../lib/local-cron";
 
 console.log("[boot] finance/anomaly-detector.ts: all imports resolved");
 
@@ -1316,12 +1316,15 @@ export const triggerAnomalyDetection = api(
 );
 
 
+// 12:00 Berlin (CEST) / 10:00 UTC — was drifting `every 24h` (relative
+// to last container boot); pinned to a fixed UTC time so it lands
+// reliably in the 10–13 Uhr batch window.
 schedule({
   name: "finance-anomaly-detection",
   description: "Detect recurring mandate changes and duplicate transactions",
   service: "finance",
-  scheduleLabel: "every 24h",
-  nextFire: everyMs(24 * 60 * 60_000),
+  scheduleLabel: "daily 10:00 UTC",
+  nextFire: dailyAtUtc(10, 0),
   run: () => runAnomalyDetectionJob(),
 });
 

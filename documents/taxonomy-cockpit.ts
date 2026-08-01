@@ -128,12 +128,13 @@ export const runTaxonomyCockpit = api(
   },
 );
 
+// 11:00 Berlin (CEST) / 09:00 UTC — part of the 10–13 Uhr batch window.
 schedule({
   name: "documents-taxonomy-cockpit",
   description: "Capture daily taxonomy health snapshot for the KPI cockpit",
   service: "documents",
-  scheduleLabel: "daily 04:30 UTC",
-  nextFire: dailyAtUtc(4, 30),
+  scheduleLabel: "daily 09:00 UTC",
+  nextFire: dailyAtUtc(9, 0),
   run: () => runTaxonomyCockpit(),
 });
 
