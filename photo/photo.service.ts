@@ -4156,9 +4156,20 @@ async function getAlbumStats(albumId: number, userId?: number): Promise<{ newest
   };
 }
 
+/**
+ * Album names are stored trimmed. The web UI already trims before posting, but
+ * the iOS sync derives the name from the iOS album title, which keeps trailing
+ * spaces — an album "Urlaub " then no longer matched "Urlaub" and the sync
+ * created a duplicate (issue #849). Normalising here makes the storage layer
+ * the single authority, independent of the client.
+ */
+export function normalizeAlbumName(name: string): string {
+  return name.trim();
+}
+
 export async function createAlbumLogic(userId: number, req: CreateAlbumRequest): Promise<Album> {
   const row = await dbInsertReturning<typeof albums.$inferSelect>(
-    db.insert(albums).values({ user_id: userId, name: req.name, description: req.description ?? null, display_mode: req.displayMode ?? "grid" }).returning()
+    db.insert(albums).values({ user_id: userId, name: normalizeAlbumName(req.name), description: req.description ?? null, display_mode: req.displayMode ?? "grid" }).returning()
   );
 
   return {
@@ -4665,7 +4676,7 @@ export async function updateAlbumLogic(userId: number, req: UpdateAlbumRequest):
   }
 
   const values: any = { updated_at: new Date().toISOString() };
-  if (req.name !== undefined) values.name = req.name;
+  if (req.name !== undefined) values.name = normalizeAlbumName(req.name);
   if (req.description !== undefined) values.description = req.description;
   if (req.displayMode !== undefined) values.display_mode = req.displayMode;
   if (req.coverPhotoId !== undefined) {

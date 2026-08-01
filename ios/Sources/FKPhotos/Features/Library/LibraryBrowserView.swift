@@ -54,7 +54,7 @@ struct LibraryBrowserView: View {
                 ContentUnavailableView {
                     Label("Keine Alben", systemImage: "photo.on.rectangle.angled")
                 } description: {
-                    Text("Die iOS-Mediathek enthält keine Alben mit Fotos.")
+                    Text("Die iOS-Mediathek enthält keine Alben.")
                 }
                 .listRowSeparator(.hidden)
             } else {
@@ -209,7 +209,9 @@ struct LibraryBrowserView: View {
         if item.assetCount > 0 {
             return "Sollen alle \(item.assetCount) Fotos dieses Albums hochgeladen werden oder nur neue ab jetzt?"
         }
-        return "Sollen alle bisherigen Fotos hochgeladen werden oder nur neue ab jetzt?"
+        // Empty album (issue #822): the choice still matters — it decides whether
+        // older photos that you add to the album later are uploaded as well.
+        return "Das Album ist noch leer. Sollen auch ältere Fotos hochgeladen werden, die du später hinzufügst, oder nur ab jetzt neu aufgenommene?"
     }
 
     private func handleMakeAvailable(_ album: LibraryBrowserViewModel.IOSAlbum, mode: PhotoSyncMode) async {

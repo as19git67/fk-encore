@@ -275,12 +275,19 @@ final class TripStore {
     /// Finds a matching server album by name (own, else shared-with-write) or
     /// creates a new one. Mirrors `LibraryBrowserViewModel.makeAvailable`.
     private func findOrCreateServerAlbum(named name: String) async throws -> Int {
+        // Trimmed on both sides so a trailing space can't spawn a duplicate
+        // server album (issue #849).
+        let serverName = AlbumName.normalized(name)
         do {
             let response: ListAlbumsResponse = try await APIClient.shared.get("/albums")
-            if let own = response.albums.first(where: { $0.name == name && $0.my_access_level == "owner" }) {
+            if let own = response.albums.first(where: {
+                AlbumName.matches($0.name, serverName) && $0.my_access_level == "owner"
+            }) {
                 return own.id
             }
-            if let shared = response.albums.first(where: { $0.name == name && $0.hasWriteAccess }) {
+            if let shared = response.albums.first(where: {
+                AlbumName.matches($0.name, serverName) && $0.hasWriteAccess
+            }) {
                 return shared.id
             }
         } catch {
@@ -291,7 +298,7 @@ final class TripStore {
         struct CreatedAlbum: Decodable { let id: Int }
         do {
             let created: CreatedAlbum = try await APIClient.shared.post(
-                "/albums", body: Body(name: name, description: nil)
+                "/albums", body: Body(name: serverName, description: nil)
             )
             return created.id
         } catch {

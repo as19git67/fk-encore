@@ -126,8 +126,12 @@ iOS-Trip-Album, das per **sync** ins gemeinsame Server-Album synct.
 die *dieses Gerät* hochgeladen hat (`serverPhotoMap`). A kann also nur A's
 eigene Fotos aus dem geteilten Album aussortieren, nie B's. Genau richtig.
 
-- **Einladen:** Initiator wählt Teilnehmer aus `/albums/:id/shareable-users`,
-  teilt mit `write`, Push „Anna hat dich zum Trip 'Gardasee' eingeladen".
+- **Einladen (umgesetzt, Issue #918):** Der „Teilen"-Button in der aktiven
+  Trip-Ansicht öffnet die reguläre `AlbumShareView` für das Trip-Server-Album:
+  Teilnehmer aus `/albums/:id/shareable-users` mit `read` / `write` /
+  `write_share` einladen oder einen öffentlichen Link erzeugen. Der
+  Trip-spezifische Push („Anna hat dich zum Trip 'Gardasee' eingeladen") und
+  die Empfänger-Provisionierung folgen weiterhin in Etappe 3.
 - **Beitreten beim Einschalten:** Client fragt `GET /trips/active` (aktive
   Trips aus meinem Kreis) → Dialog „An Trip von Anna teilnehmen?". Bei Zusage:
   Provisionierung mappt das lokale iOS-Album **direkt auf die bekannte
