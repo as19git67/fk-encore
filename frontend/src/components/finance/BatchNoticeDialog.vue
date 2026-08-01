@@ -25,7 +25,13 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:visible': [value: boolean]
-  applied: [response: { affected_transactions: number; skipped_unauthorized: number }]
+  /** The second payload carries what was applied so the caller can mirror
+   *  the change into its own in-memory items — the endpoint only returns
+   *  counters. */
+  applied: [
+    response: { affected_transactions: number; skipped_unauthorized: number },
+    input: { notice: string; mode: 'replace' | 'append' },
+  ]
 }>()
 
 const noticeText = ref('')
@@ -65,7 +71,7 @@ async function apply() {
       notice: noticeText.value,
       mode: mode.value,
     })
-    emit('applied', resp)
+    emit('applied', resp, { notice: noticeText.value, mode: mode.value })
     emit('update:visible', false)
   } catch (e: any) {
     error.value = e?.message ?? 'Notiz konnte nicht angewendet werden'
