@@ -70,6 +70,11 @@ dokumentiert**:
   Erstellen/Löschen.
 - Detail-Ansicht mit Grid, Filter/Sort, **Mehrfachauswahl inkl.
   Drag-Select**, Stapel-Aktionen (zu Album hinzufügen, teilen), Upload.
+- **Album-Einstellungen** (`AlbumSettingsView`) wie im Web: Name,
+  Beschreibung und „Karte aktivieren" (`display_mode`) ändern. Erreichbar über
+  das Überlauf-Menü der Detailansicht und das Kontextmenü der Albenliste;
+  Freigeben und Löschen sind aus demselben Sheet heraus möglich. Bearbeiten
+  darf jeder mit Schreibzugriff, Löschen nur der Eigentümer.
 - **Album teilen** wie im Web (`AlbumShareView`, `AlbumShareViewModel`,
   Issue #918): interne Nutzer mit „Nur lesen“, „Bearbeiten“ oder
   „Bearbeiten + Teilen“ einladen (letzteres nur als Eigentümer) sowie

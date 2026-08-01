@@ -13,6 +13,7 @@ struct AlbumDetailView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var showShareSheet = false
+    @State private var showSettings = false
     @State private var showUpload = false
     @State private var showDeleteConfirm = false
     @State private var isDeleting = false
@@ -44,6 +45,17 @@ struct AlbumDetailView: View {
     private var canShareAlbum: Bool {
         myAccessLevel == "owner" || myAccessLevel == "write_share"
             || userRole == "admin"
+    }
+
+    /// Album properties (name, description, map view) are editable with any
+    /// write access — same rule as the web's `canWrite`.
+    private var canEditAlbum: Bool {
+        myAccessLevel == "owner" || myAccessLevel == "write" || myAccessLevel == "write_share"
+            || userRole == "owner" || userRole == "admin" || userRole == "contributor"
+    }
+
+    private var canDeleteAlbum: Bool {
+        userRole == "owner" || userRole == "admin"
     }
 
     var body: some View {
@@ -146,21 +158,36 @@ struct AlbumDetailView: View {
                         Image(systemName: "photo.badge.plus")
                     }
                 }
-                if canShareAlbum {
+                // Sharing, properties and deletion share one overflow menu so
+                // the toolbar stays usable (same pattern as the iOS media
+                // library album detail).
+                if canShareAlbum || canEditAlbum || canDeleteAlbum {
                     ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            showShareSheet = true
+                        Menu {
+                            if canShareAlbum {
+                                Button {
+                                    showShareSheet = true
+                                } label: {
+                                    Label("Freigeben", systemImage: "person.crop.circle.badge.plus")
+                                }
+                            }
+                            if canEditAlbum {
+                                Button {
+                                    showSettings = true
+                                } label: {
+                                    Label("Album-Einstellungen", systemImage: "gearshape")
+                                }
+                            }
+                            if canDeleteAlbum {
+                                Divider()
+                                Button(role: .destructive) {
+                                    showDeleteConfirm = true
+                                } label: {
+                                    Label("Album löschen", systemImage: "trash")
+                                }
+                            }
                         } label: {
-                            Image(systemName: "person.crop.circle.badge.plus")
-                        }
-                    }
-                }
-                if userRole == "owner" || userRole == "admin" {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button(role: .destructive) {
-                            showDeleteConfirm = true
-                        } label: {
-                            Image(systemName: "trash")
+                            Image(systemName: "ellipsis.circle")
                         }
                     }
                 }
@@ -185,6 +212,21 @@ struct AlbumDetailView: View {
                 albumName: album?.name,
                 accessLevel: myAccessLevel.isEmpty ? nil : myAccessLevel
             )
+        }
+        .sheet(isPresented: $showSettings) {
+            if let album {
+                AlbumSettingsView(
+                    albumId: albumId,
+                    name: album.name,
+                    description: album.description,
+                    displayMode: album.display_mode,
+                    accessLevel: myAccessLevel.isEmpty ? nil : myAccessLevel,
+                    canShare: canShareAlbum,
+                    canDelete: canDeleteAlbum,
+                    onSaved: { saved in applySettings(saved) },
+                    onDelete: canDeleteAlbum ? { Task { await deleteAlbum() } } : nil
+                )
+            }
         }
         .sheet(isPresented: $shareManager.isPresented) {
             ActivityView(images: shareManager.images)
@@ -233,6 +275,28 @@ struct AlbumDetailView: View {
             }
     }
 
+    /// Reflects saved album properties locally (title, description, map view)
+    /// so the detail view updates without another round trip.
+    private func applySettings(_ saved: AlbumSettingsView.Saved) {
+        guard let current = album else { return }
+        album = Album(
+            id: current.id,
+            user_id: current.user_id,
+            name: saved.name,
+            description: saved.description.isEmpty ? nil : saved.description,
+            cover_photo_id: current.cover_photo_id,
+            cover_filename: current.cover_filename,
+            display_mode: saved.displayMode,
+            newest_photo_at: current.newest_photo_at,
+            oldest_photo_at: current.oldest_photo_at,
+            photo_count: current.photo_count,
+            is_shared: current.is_shared,
+            created_at: current.created_at,
+            updated_at: current.updated_at,
+            my_access_level: current.my_access_level
+        )
+    }
+
     private func deleteAlbum() async {
         isDeleting = true
         do {
@@ -254,6 +318,7 @@ struct AlbumDetailView: View {
                 let photos: [PhotoWithCuration]
                 let role: String?
                 let my_access_level: String?
+                let display_mode: String?
             }
             let response: AlbumResponse = try await APIClient.shared.get("/albums/\(albumId)")
             userRole = response.role ?? ""
@@ -265,7 +330,7 @@ struct AlbumDetailView: View {
                 description: response.description,
                 cover_photo_id: nil,
                 cover_filename: nil,
-                display_mode: "grid",
+                display_mode: response.display_mode ?? "grid",
                 newest_photo_at: nil,
                 oldest_photo_at: nil,
                 photo_count: response.photos.count,
