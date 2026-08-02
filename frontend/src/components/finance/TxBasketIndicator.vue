@@ -10,6 +10,7 @@ import Message from 'primevue/message'
 import Checkbox from 'primevue/checkbox'
 import { useConfirm } from 'primevue/useconfirm'
 import { useTxSelectionStore } from '../../stores/finance/selection'
+import { useTransactionsStore } from '../../stores/finance/transactions'
 import { useTagsStore } from '../../stores/finance/tags'
 import { batchReview, batchTaxRelevant, deleteBasketSnapshot, downloadTransactionsCsv, downloadTransactionsPdf, getTransaction, getTransactionSplits, listBasketSnapshots, loadBasketSnapshot, mergeCounterparties, saveBasketSnapshot, setTransactionSplits, suggestDocumentsForTransactions, decideDocumentMatch, getDocumentMatchMetrics, linkDocumentsToTransactions, type BasketSnapshot, type DocumentMatchSuggestion, type Transaction, type TransactionPdfExportOptions } from '../../api/finance'
 import BatchTagDialog from './BatchTagDialog.vue'
@@ -30,6 +31,7 @@ import { compareBasketCounterparties } from '../../utils/financeBasketCompare'
  */
 
 const selectionStore = useTxSelectionStore()
+const txStore = useTransactionsStore()
 const tagsStore = useTagsStore()
 const confirm = useConfirm()
 const drawerVisible = ref(false)
@@ -99,6 +101,17 @@ const sumLabel = computed(() => {
 watch(count, (next) => {
   if (next === 0) activeBasketName.value = null
 })
+
+/**
+ * Single write path for basket edits: the basket keeps the freshly
+ * edited items, and the transaction list behind the drawer gets the same
+ * update so its cards change immediately instead of only after a reload
+ * (issue #886).
+ */
+function applyUpdatedTransactions(next: Transaction[]) {
+  selectionStore.set(next)
+  txStore.syncFrom(next)
+}
 
 function formatAmount(tx: Transaction): string {
   return new Intl.NumberFormat('de-DE', {
@@ -180,6 +193,27 @@ function openBatchNoticeEditor() {
   noticeDialogVisible.value = true
 }
 
+/**
+ * Mirror the server-side batch-notice result locally. `batchNotice`
+ * returns only counters, so we replay the same rule the endpoint applies
+ * (replace → new text, append → blank-line join onto a non-empty notice).
+ */
+function onNoticeApplied(
+  response: { affected_transactions: number; skipped_unauthorized: number },
+  input: { notice: string; mode: 'replace' | 'append' },
+) {
+  const trimmed = input.notice.trim()
+  applyUpdatedTransactions(items.value.map(tx => ({
+    ...tx,
+    notice: input.mode === 'replace'
+      ? (trimmed || null)
+      : tx.notice && tx.notice.trim() ? `${tx.notice}\n\n${trimmed}` : trimmed,
+  })))
+  actionInfo.value = response.skipped_unauthorized > 0
+    ? `${response.affected_transactions} Buchungen aktualisiert, ${response.skipped_unauthorized} übersprungen.`
+    : `${response.affected_transactions} Buchung${response.affected_transactions === 1 ? '' : 'en'} aktualisiert.`
+}
+
 async function exportCsv() {
   if (count.value === 0 || csvExporting.value) return
   actionError.value = null
@@ -221,7 +255,7 @@ async function applyBatchFlag(kind: 'reviewed' | 'tax', value: boolean) {
     const result = kind === 'reviewed'
       ? await batchReview(selectionStore.ids, value)
       : await batchTaxRelevant(selectionStore.ids, value)
-    selectionStore.set(items.value.map(item => kind === 'reviewed'
+    applyUpdatedTransactions(items.value.map(item => kind === 'reviewed'
       ? { ...item, reviewed_at: value ? new Date().toISOString() : null }
       : { ...item, is_tax_relevant: value }))
     actionInfo.value = `${result.affected_transactions} Buchung${result.affected_transactions === 1 ? '' : 'en'} aktualisiert.`
@@ -261,7 +295,7 @@ async function saveCounterpartyMerge() {
       set_iban: canonicalIban.value || undefined,
       set_bic: canonicalBic.value || undefined,
     })
-    selectionStore.set(items.value.map(item => ({
+    applyUpdatedTransactions(items.value.map(item => ({
       ...item,
       counterparty: canonicalCounterparty.value.trim(),
       ...(canonicalIban.value ? { counterparty_iban: canonicalIban.value.trim() } : {}),
@@ -600,6 +634,7 @@ async function saveSplit() {
     <BatchNoticeDialog
       v-model:visible="noticeDialogVisible"
       :transaction-ids="selectionStore.ids"
+      @applied="onNoticeApplied"
     />
     <Dialog v-model:visible="counterpartyDialogVisible" header="Gegenseiten vereinheitlichen" modal :style="{ width: 'min(30rem, calc(100vw - 2rem))' }">
       <div class="counterparty-form">
