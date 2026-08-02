@@ -28,6 +28,8 @@
 	<string>Zum direkten Aufnehmen von Fotos für den Upload</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Um beim Start eines Trips den Ort für einen Namensvorschlag zu ermitteln und neue Fotos dem richtigen Reise-Album zuzuordnen</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Damit F4mil Photos während eines laufenden Trips vorschlagen kann, den Trip zu beenden, sobald du wieder zuhause bist – auch wenn die App gerade nicht geöffnet ist</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Zum Speichern aufgenommener Fotos in deiner Mediathek</string>
 	<key>NSPhotoLibraryUsageDescription</key>
