@@ -258,10 +258,32 @@ Gesperrt am 2026-07-24.
 
 - **Genau ein aktiver Trip** zur Zeit (keine parallelen Trips in Etappe 1).
 - **Nur Bilder**, keine Videos (wie im bestehenden Upload).
-- **`handledAssetIds` + High-Water-Mark auf `creationDate`**: der Wasserstand ist
-  die effiziente Enumerationsgrenze (wie beim Upload-Sync), die ID-Liste nur die
-  kleine „behandelt, aber wieder entfernt/verworfen"-Randmenge — hält den State
-  bei großen Bibliotheken/langen Trips klein.
+- **`handledAssetIds` + High-Water-Mark auf `creationDate`** (umgesetzt): der
+  Wasserstand (`ActiveTrip.handledWatermark`) ist die effiziente
+  Enumerationsgrenze (wie beim Upload-Sync), die ID-Liste nur die kleine
+  Randmenge — hält den State bei großen Bibliotheken/langen Trips klein.
+  Details:
+  - Der Wasserstand bedeutet „bis hierher wurde **alles angeschaut**" — auch
+    Assets, die *keine* Kandidaten waren (bereits behandelt oder außerhalb des
+    Geofence). Nur so darf die alte ID-Liste beim Vorrücken wegfallen: sonst
+    könnte ein bereits behandeltes, neueres Foto unter den Wasserstand rutschen
+    und beim nächsten Pass erneut eingefügt werden (Konflikt mit dem
+    Aussortieren, §4).
+  - Die Untergrenze ist **inklusiv** (`creationDate >= watermark`), die
+    Randliste enthält genau die Assets auf diesem Zeitstempel. Ein striktes `>`
+    würde Serienbilder verschlucken, die sich einen `creationDate` teilen.
+    Rückt der Wasserstand vor, ersetzt die neue Randliste die alte; bleibt er
+    gleich, werden beide vereinigt.
+  - Der Wasserstand rückt **nur bei erfolgreichem Add** vor. Schlägt
+    `performChanges` fehl, bleibt er stehen und die Assets werden beim nächsten
+    Pass erneut versucht.
+  - Trips, die vor dem Wasserstand gespeichert wurden, dekodieren ihn als `nil`
+    und starten einmalig wieder bei `startedAt`; der erste Pass verdichtet die
+    angesammelte ID-Liste. Keine Migration nötig.
+  - Bekannte Konsequenz (wie beim Upload-Sync): ein Foto, das *nachträglich*
+    mit einem `creationDate` unterhalb des Wasserstands in der Mediathek landet
+    (iCloud-Nachlauf von einem anderen Gerät, Import), wird nicht mehr
+    aufgenommen.
 - **Geofence-Mitgliedschaft**: Ein Fenster-Asset zählt nur, wenn es GPS hat und
   im Radius liegt. Assets **ohne** GPS: Standard „einschließen" (im Zweifel
   aufnehmen; Nutzer kann im manuellen Modus/beim Aussortieren korrigieren) —

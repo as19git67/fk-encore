@@ -96,6 +96,7 @@ final class TripStore {
             autoAdd: autoAdd,
             mode: mode,
             geofence: geofence,
+            handledWatermark: nil,
             handledAssetIds: [],
             dismissedAssetIds: [],
             isShared: false,
@@ -175,10 +176,11 @@ final class TripStore {
     /// `[startedAt, endedAt]` and, when a geofence is set, within its radius
     /// (assets without GPS are included).
     ///
-    /// The `handledAssetIds` set makes each asset get added **at most once**:
-    /// once handled it is never re-added, so an aussortiertes Foto stays out and
-    /// the `sync` mode can propagate the removal to the server without the
-    /// auto-add pass fighting it (see `docs/ios-trip-mode.md` §4).
+    /// Each asset is added **at most once**: the `handledWatermark` plus its
+    /// edge list (`handledAssetIds`) cover everything the pass has already seen,
+    /// so an aussortiertes Foto stays out and the `sync` mode can propagate the
+    /// removal to the server without the auto-add pass fighting it (see
+    /// `docs/ios-trip-mode.md` §4).
     ///
     /// Concurrent triggers are **chained, not dropped**: `@MainActor` methods
     /// interleave at their `await` points, so the sync's catch-up and the
@@ -222,42 +224,49 @@ final class TripStore {
     }
 
     /// Adds the not-yet-handled window assets of a single trip to its album and
-    /// returns how many were newly handled.
+    /// returns how many were added.
+    ///
+    /// The watermark only advances when the add actually succeeded — a failed
+    /// `performChanges` leaves it where it was, so the same assets are retried
+    /// on the next pass instead of being skipped forever.
     private func addPass(for trip: ActiveTrip, isActive: Bool) async -> Int {
-        let handled = Set(trip.handledAssetIds)
-        let candidates = await Self.fetchTripCandidates(for: trip, excluding: handled)
-        guard !candidates.isEmpty else { return 0 }
+        let scan = await Self.scanTripWindow(for: trip, excluding: Set(trip.handledAssetIds))
+        // Nothing in the window at all — not even something already handled.
+        guard let watermark = scan.examinedMax else { return 0 }
 
-        let added = await Self.addAssets(localIds: candidates, toAlbum: trip.iosAlbumId)
-        guard !added.isEmpty else { return 0 }
+        var addedCount = 0
+        if !scan.candidateIds.isEmpty {
+            guard let added = await Self.addAssets(localIds: scan.candidateIds, toAlbum: trip.iosAlbumId) else {
+                return 0
+            }
+            addedCount = added.count
+        }
 
-        return recordHandled(added, forAlbum: trip.iosAlbumId, isActive: isActive)
+        advanceWatermark(
+            to: watermark, edge: scan.examinedAtMax, forAlbum: trip.iosAlbumId, isActive: isActive
+        )
+        return addedCount
     }
 
-    /// Extends a trip's handled set, re-reading the trip first: it may have been
+    /// Persists the new watermark, re-reading the trip first: it may have been
     /// ended or replaced while we were awaiting the photo-library change.
-    private func recordHandled(_ ids: [String], forAlbum albumId: String, isActive: Bool) -> Int {
-        func extend(_ trip: inout ActiveTrip) -> Int {
-            let existing = Set(trip.handledAssetIds)
-            let newlyHandled = ids.filter { !existing.contains($0) }
-            trip.handledAssetIds.append(contentsOf: newlyHandled)
-            return newlyHandled.count
-        }
-
+    private func advanceWatermark(
+        to watermark: Date, edge: [String], forAlbum albumId: String, isActive: Bool
+    ) {
         if isActive {
-            guard var current = activeTrip, current.iosAlbumId == albumId else { return 0 }
-            let count = extend(&current)
-            guard count > 0 else { return 0 }
-            activeTrip = current
-            TripPreferences.saveActiveTrip(current)
-            return count
+            guard let current = activeTrip, current.iosAlbumId == albumId else { return }
+            let updated = TripMembership.advanced(current, watermark: watermark, edge: edge)
+            guard updated != current else { return }
+            activeTrip = updated
+            TripPreferences.saveActiveTrip(updated)
+            return
         }
 
-        guard let index = closedTrips.firstIndex(where: { $0.iosAlbumId == albumId }) else { return 0 }
-        let count = extend(&closedTrips[index])
-        guard count > 0 else { return 0 }
+        guard let index = closedTrips.firstIndex(where: { $0.iosAlbumId == albumId }) else { return }
+        let updated = TripMembership.advanced(closedTrips[index], watermark: watermark, edge: edge)
+        guard updated != closedTrips[index] else { return }
+        closedTrips[index] = updated
         TripPreferences.saveClosedTrips(closedTrips)
-        return count
     }
 
     /// Drops ended trips that have outlived their grace period.
@@ -269,22 +278,41 @@ final class TripStore {
         TripPreferences.saveClosedTrips(remaining)
     }
 
-    /// Enumerates image assets in the trip's capture window (and geofence) that
-    /// haven't been handled yet. Runs off the main thread — enumeration reads
-    /// asset metadata and shouldn't block the cooperative pool.
+    /// Result of one enumeration of a trip's capture window.
+    private struct WindowScan: Sendable {
+        /// Assets that should be added to the trip album.
+        var candidateIds: [String] = []
+        /// Newest `creationDate` examined — the watermark once the add succeeds.
+        /// Covers assets that were *not* candidates too (already handled, or
+        /// outside the geofence): the watermark means "everything up to here has
+        /// been looked at", so those are never re-enumerated either.
+        var examinedMax: Date?
+        /// Every asset examined at exactly `examinedMax` — the new edge list.
+        var examinedAtMax: [String] = []
+    }
+
+    /// Enumerates the trip's capture window from its watermark and collects the
+    /// assets to add. Runs off the main thread — enumeration reads asset
+    /// metadata and shouldn't block the cooperative pool.
     ///
-    /// The window bounds go into the fetch predicate so the store does the
-    /// filtering; `TripMembership.includes` then re-checks each candidate,
-    /// which is what applies the geofence.
-    private static func fetchTripCandidates(
+    /// The window bounds go into the fetch predicate so the photo store does the
+    /// filtering; `TripMembership.includes` then re-checks each asset, which is
+    /// what applies the geofence. The lower bound is the watermark (inclusive,
+    /// with the edge list skipping what was already seen at that exact instant)
+    /// instead of `startedAt`, so the pass costs the same on day 14 of a trip as
+    /// on day 1 (`docs/ios-trip-mode.md` §14.4).
+    private static func scanTripWindow(
         for trip: ActiveTrip,
         excluding handled: Set<String>
-    ) async -> [String] {
+    ) async -> WindowScan {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let options = PHFetchOptions()
                 var format = "mediaType == %d AND creationDate >= %@"
-                var arguments: [Any] = [PHAssetMediaType.image.rawValue, trip.startedAt as NSDate]
+                var arguments: [Any] = [
+                    PHAssetMediaType.image.rawValue,
+                    (trip.handledWatermark ?? trip.startedAt) as NSDate,
+                ]
                 if let endedAt = trip.endedAt {
                     format += " AND creationDate <= %@"
                     arguments.append(endedAt as NSDate)
@@ -292,30 +320,47 @@ final class TripStore {
                 options.predicate = NSPredicate(format: format, argumentArray: arguments)
                 options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
 
-                var result: [String] = []
+                var scan = WindowScan()
                 PHAsset.fetchAssets(with: .image, options: options).enumerateObjects { asset, _, _ in
+                    guard let created = asset.creationDate else { return }
                     let id = asset.localIdentifier
+
+                    // Ascending sort: `created` never goes backwards, so this
+                    // tracks the newest instant and everything sitting on it.
+                    if let max = scan.examinedMax, created == max {
+                        scan.examinedAtMax.append(id)
+                    } else {
+                        scan.examinedMax = created
+                        scan.examinedAtMax = [id]
+                    }
+
                     if handled.contains(id) { return }
                     guard TripMembership.includes(
-                        creationDate: asset.creationDate,
+                        creationDate: created,
                         location: asset.location,
                         trip: trip
                     ) else { return }
-                    result.append(id)
+                    scan.candidateIds.append(id)
                 }
-                continuation.resume(returning: result)
+                continuation.resume(returning: scan)
             }
         }
     }
 
     /// Adds the given assets to the album. Returns the local identifiers that
-    /// were resolvable and passed to the change request (empty on failure).
+    /// were resolvable and passed to the change request, or `nil` when the album
+    /// couldn't be resolved or the change request failed — the caller must not
+    /// advance the watermark past assets that never made it into the album.
     /// Adding an asset already in the album is a no-op in PhotoKit.
-    private static func addAssets(localIds: [String], toAlbum albumId: String) async -> [String] {
+    ///
+    /// Identifiers that no longer resolve (asset deleted between the scan and
+    /// here) are simply absent from the result; they are gone from the library,
+    /// so letting the watermark move past them is correct.
+    private static func addAssets(localIds: [String], toAlbum albumId: String) async -> [String]? {
         let assets = PHAsset.fetchAssets(withLocalIdentifiers: localIds, options: nil)
         guard assets.count > 0 else { return [] }
         let collections = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [albumId], options: nil)
-        guard let album = collections.firstObject else { return [] }
+        guard let album = collections.firstObject else { return nil }
 
         var resolvedIds: [String] = []
         assets.enumerateObjects { asset, _, _ in resolvedIds.append(asset.localIdentifier) }
@@ -329,7 +374,7 @@ final class TripStore {
                 }
             }
         } catch {
-            return []
+            return nil
         }
         return resolvedIds
     }

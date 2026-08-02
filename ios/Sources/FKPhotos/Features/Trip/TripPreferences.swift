@@ -27,8 +27,25 @@ struct ActiveTrip: Codable, Equatable, Sendable {
     /// Optional geofence that narrows trip membership. Captured in Etappe 1b-ii
     /// (CoreLocation); `nil` means pure time-window membership.
     var geofence: Geofence?
-    /// Assets the auto-add pass has already handled (Etappe 1c). Kept so an
-    /// aussortiertes Foto is never re-added. Empty until Etappe 1c.
+    /// High-water mark on `creationDate`: the auto-add pass has examined every
+    /// asset in the window up to this instant, so the next pass only needs to
+    /// enumerate from here (`docs/ios-trip-mode.md` §14.4). `nil` before the
+    /// first pass — then the window starts at `startedAt`.
+    ///
+    /// Missing from trips persisted before the watermark existed; the synthesised
+    /// decoder maps that to `nil`, so the next pass simply starts at `startedAt`
+    /// once and compacts the state from there.
+    var handledWatermark: Date?
+    /// The assets examined at exactly `handledWatermark` — the small edge list
+    /// that keeps the inclusive `creationDate >= watermark` enumeration exact.
+    /// A burst can share one timestamp, so a strict `>` bound would silently
+    /// drop its remaining shots; instead the boundary is re-enumerated and these
+    /// IDs are skipped.
+    ///
+    /// Everything *below* the watermark is covered by the watermark itself, so
+    /// this list stays burst-sized instead of growing with the trip. It is also
+    /// what keeps an aussortiertes Foto out: once handled, an asset is either
+    /// below the watermark (never enumerated again) or listed here (skipped).
     var handledAssetIds: [String]
     /// Assets explicitly dismissed in the manual review grid (Etappe 2).
     var dismissedAssetIds: [String]
@@ -76,6 +93,36 @@ enum TripMembership {
         guard let geofence = trip.geofence, let location else { return true }
         let center = CLLocation(latitude: geofence.latitude, longitude: geofence.longitude)
         return location.distance(from: center) <= geofence.radiusMeters
+    }
+
+    /// Records that a pass examined the whole window up to `watermark`.
+    ///
+    /// `edge` are the assets seen at exactly that timestamp. When the watermark
+    /// moves forward they *replace* the old edge list — everything before is
+    /// covered by the watermark itself, which is what keeps the persisted state
+    /// small on a long trip. When the pass found nothing newer, the edge lists
+    /// are merged, so an asset that appeared at the boundary after the previous
+    /// pass isn't forgotten.
+    ///
+    /// A watermark older than the stored one is ignored: the pass enumerates
+    /// from the stored watermark, so that can only be a stale result.
+    static func advanced(_ trip: ActiveTrip, watermark: Date, edge: [String]) -> ActiveTrip {
+        var updated = trip
+        guard let current = trip.handledWatermark else {
+            updated.handledWatermark = watermark
+            updated.handledAssetIds = edge
+            return updated
+        }
+        if watermark < current { return trip }
+
+        if watermark == current {
+            var seen = Set(trip.handledAssetIds)
+            updated.handledAssetIds = trip.handledAssetIds + edge.filter { seen.insert($0).inserted }
+        } else {
+            updated.handledAssetIds = edge
+        }
+        updated.handledWatermark = watermark
+        return updated
     }
 }
 
