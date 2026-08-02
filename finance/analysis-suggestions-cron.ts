@@ -12,11 +12,12 @@ import { dailyAtUtc, schedule } from "../lib/local-cron";
 
 console.log("[boot] finance/analysis-suggestions-cron.ts: all imports resolved");
 
+// 10:45 Berlin (CEST) / 08:45 UTC — part of the 10–13 Uhr batch window.
 schedule({
   name: "finance-analysis-suggestions",
   description: "KI-generierte Finanz-Rückblicke für alle Nutzer erzeugen",
   service: "finance",
-  scheduleLabel: "daily 04:00 UTC",
-  nextFire: dailyAtUtc(4, 0),
+  scheduleLabel: "daily 08:45 UTC",
+  nextFire: dailyAtUtc(8, 45),
   run: () => generateSuggestionsForAllUsers(),
 });

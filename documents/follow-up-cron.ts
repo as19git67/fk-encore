@@ -18,11 +18,12 @@ export const runDueFollowUps = api(
   },
 );
 
+// 11:45 Berlin (CEST) / 09:45 UTC — part of the 10–13 Uhr batch window.
 schedule({
   name: "documents-follow-ups-process-due",
   description: "Surface due document follow-ups and notify their owners",
   service: "documents",
-  scheduleLabel: "daily 06:00 UTC",
-  nextFire: dailyAtUtc(6, 0),
+  scheduleLabel: "daily 09:45 UTC",
+  nextFire: dailyAtUtc(9, 45),
   run: () => runDueFollowUps(),
 });

@@ -39,11 +39,12 @@ export async function removeAiTagsWhereUserTagged(): Promise<number> {
   return deleted;
 }
 
+// 11:15 Berlin (CEST) / 09:15 UTC — part of the 10–13 Uhr batch window.
 schedule({
   name: "finance-ai-tag-cleanup",
   description: "KI-Tags entfernen wenn manuelle Tags vorhanden",
   service: "finance",
-  scheduleLabel: "daily 05:00 UTC",
-  nextFire: dailyAtUtc(5, 0),
+  scheduleLabel: "daily 09:15 UTC",
+  nextFire: dailyAtUtc(9, 15),
   run: () => removeAiTagsWhereUserTagged(),
 });

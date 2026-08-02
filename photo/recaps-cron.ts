@@ -8,15 +8,18 @@
  */
 
 import { rebuildRecapsInternal } from "./recaps";
-import { everyMs, schedule } from "../lib/local-cron";
+import { dailyAtUtc, schedule } from "../lib/local-cron";
 
 console.log("[boot] photo/recaps-cron.ts: all imports resolved");
 
+// 12:30 Berlin (CEST) / 10:30 UTC, after library-reconcile — was
+// drifting `every 24h` (relative to last container boot); pinned to a
+// fixed UTC time so it lands reliably in the 10–13 Uhr batch window.
 schedule({
   name: "recaps-rebuild",
   description: "Rebuild Rueckblicke (recaps) for all users",
   service: "photo",
-  scheduleLabel: "every 24h",
-  nextFire: everyMs(24 * 60 * 60_000),
+  scheduleLabel: "daily 10:30 UTC",
+  nextFire: dailyAtUtc(10, 30),
   run: () => rebuildRecapsInternal(),
 });

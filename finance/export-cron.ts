@@ -303,13 +303,14 @@ async function rotateExports(currentFilename: string): Promise<number> {
 
 // -----------------------------------------------------------------------
 
-// 03:00 UTC every day — late enough to overlap the early-morning
-// bank syncs in finance-fints-integration.md §5 without contention.
+// 08:00 UTC every day — 10:00 Berlin time (CEST, UTC+2); shifts to
+// 09:00 Berlin in winter (CET) since dailyAtUtc is fixed-UTC, not
+// DST-aware. First in the 10–13 Uhr batch window.
 schedule({
   name: "finance-export-snapshot",
   description: "Daily JSON snapshot of every finance_* user-data table",
   service: "finance",
-  scheduleLabel: "daily 03:00 UTC",
-  nextFire: dailyAtUtc(3, 0),
+  scheduleLabel: "daily 08:00 UTC",
+  nextFire: dailyAtUtc(8, 0),
   run: () => runFinanceExport(),
 });
