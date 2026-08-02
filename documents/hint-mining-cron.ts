@@ -43,11 +43,12 @@ export const runHintMiningEndpoint = api(
   },
 );
 
+// 10:30 Berlin (CEST) / 08:30 UTC — part of the 10–13 Uhr batch window.
 schedule({
   name: "documents-hint-mining",
   description: "Mine reviewed documents for taxonomy/hint improvements",
   service: "documents",
-  scheduleLabel: "weekly Sun 03:00 UTC",
-  nextFire: weeklyAtUtc(0, 3, 0),
+  scheduleLabel: "weekly Sun 08:30 UTC",
+  nextFire: weeklyAtUtc(0, 8, 30),
   run: () => runHintMiningEndpoint(),
 });
