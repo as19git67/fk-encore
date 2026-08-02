@@ -178,36 +178,33 @@ async function save() {
       remove,
       ...(promote_ai_tags !== undefined ? { promote_ai_tags } : {}),
     })
-    // When the basket store is the source, keep its in-memory items in
-    // sync with what the server now sees so reopening the dialog
-    // reflects the new tristate. For list-local working sets the
-    // calling view owns the data and refreshes it via the `applied`
-    // event.
-    if (!props.transactions) {
-      selectionStore.set(
-        selectionStore.items.map((tx) => {
-          let tags = tx.tags.filter((t) => {
-            if (t.source === 'user' && remove.includes(t.name)) return false
-            if (t.source === 'ai' && aiTagMode.value === 'remove') return false
-            return true
-          })
-          if (aiTagMode.value === 'promote') {
-            tags = tags.map((t) =>
-              t.source === 'ai'
-                ? { ...t, source: 'user' as const, confidence: null }
-                : t,
-            )
-          }
-          const existingNames = new Set(tags.map((t) => t.name))
-          for (const name of add) {
-            if (!existingNames.has(name)) {
-              tags.push({ name, source: 'user', confidence: null })
-            }
-          }
-          return { ...tx, tags }
-        }),
-      )
-    }
+    // Keep the in-memory copies in sync with what the server now sees:
+    // the basket so reopening the dialog reflects the new tristate, and
+    // the transaction list so its cards show the new tags right away
+    // instead of only after a reload (issue #886).
+    const updated = workingSet.value.map((tx) => {
+      let tags = tx.tags.filter((t) => {
+        if (t.source === 'user' && remove.includes(t.name)) return false
+        if (t.source === 'ai' && aiTagMode.value === 'remove') return false
+        return true
+      })
+      if (aiTagMode.value === 'promote') {
+        tags = tags.map((t) =>
+          t.source === 'ai'
+            ? { ...t, source: 'user' as const, confidence: null }
+            : t,
+        )
+      }
+      const existingNames = new Set(tags.map((t) => t.name))
+      for (const name of add) {
+        if (!existingNames.has(name)) {
+          tags.push({ name, source: 'user', confidence: null })
+        }
+      }
+      return { ...tx, tags }
+    })
+    if (!props.transactions) selectionStore.set(updated)
+    txStore.syncFrom(updated)
     emit('applied')
     emit('update:visible', false)
   } catch (err) {

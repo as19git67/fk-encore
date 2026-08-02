@@ -30,6 +30,7 @@ import { useAuthStore } from '../../stores/auth'
 import DateRangePresets from '../../components/DateRangePresets.vue'
 import BatchTagDialog from '../../components/finance/BatchTagDialog.vue'
 import { toLocalIsoDate } from '../../utils/dateFormat'
+import { compactDateLabels, fullDateLabel } from '../../utils/financeChartDates'
 import type {
   DepotTransaction,
   DepotTransactionKind,
@@ -457,6 +458,77 @@ function gainSign(val: string | number | null): 'pos' | 'neg' | 'flat' {
   return n > 0 ? 'pos' : 'neg'
 }
 
+// ── Optional holdings columns (#887) ─────────────────────────────────
+//
+// Einstand / G/V / Realisiert are only populated once the depot has
+// acquisition data or completed sells. Without it they render as a wall
+// of "–" that pushes the columns that do carry data off a phone screen,
+// so we drop each of them entirely when no position has a value. What is
+// left on small screens is additionally reduced via CSS; the expanded row
+// repeats every figure so nothing becomes unreachable.
+
+const showCostColumn = computed(() =>
+  holdings.value.some((h) => h.cost_basis !== null),
+)
+const showGainColumn = computed(() =>
+  holdings.value.some((h) => h.unrealized_gain !== null),
+)
+const showRealizedColumn = computed(() =>
+  holdings.value.some((h) => h.realized_gain !== null),
+)
+
+/** Name + Stück + Kurs + Wert + Anteil, plus whichever optional columns
+ *  carry data — used for the expanded row's colspan. */
+const holdingsColumnCount = computed(
+  () =>
+    5 +
+    (showCostColumn.value ? 1 : 0) +
+    (showGainColumn.value ? 1 : 0) +
+    (showRealizedColumn.value ? 1 : 0),
+)
+
+interface PositionFact {
+  label: string
+  value: string
+  /** Gain colouring class, when the fact is a signed figure. */
+  sign?: 'pos' | 'neg' | 'flat'
+}
+
+/** Thin figure strip under the expanded position's chart (#887) — the
+ *  single place where every number stays visible, including the columns
+ *  the table drops on narrow screens. */
+function positionFacts(h: Holding): PositionFact[] {
+  const currency = h.currency ?? undefined
+  const facts: PositionFact[] = [
+    { label: 'Stück', value: formatAmount(h.amount) },
+    { label: 'Kurs', value: formatCurrency(h.price, currency) },
+    { label: 'Wert', value: formatCurrency(h.value, currency) },
+  ]
+  if (h.cost_basis !== null) {
+    facts.push({ label: 'Einstand', value: formatCurrency(h.cost_basis, currency) })
+  }
+  if (h.unrealized_gain !== null) {
+    facts.push({
+      label: 'G/V',
+      value:
+        formatSignedCurrency(h.unrealized_gain, currency) +
+        (h.unrealized_gain_pct !== null
+          ? ` (${formatSignedPercent(h.unrealized_gain_pct)})`
+          : ''),
+      sign: gainSign(h.unrealized_gain),
+    })
+  }
+  if (h.realized_gain !== null) {
+    facts.push({
+      label: 'Realisiert',
+      value: formatSignedCurrency(h.realized_gain, currency),
+      sign: gainSign(h.realized_gain),
+    })
+  }
+  facts.push({ label: 'Anteil', value: holdingShare(h) })
+  return facts
+}
+
 watch(isDepot, (v) => { if (v) void loadHoldings() }, { immediate: true })
 watch(
   () => mode.value && mode.value.kind === 'account' ? mode.value.accountId : null,
@@ -530,7 +602,8 @@ function chartAxisColors() {
 const totalChartData = computed(() => {
   if (!history.value || history.value.totals.length < 2) return null
   return {
-    labels: history.value.totals.map((p) => p.as_of),
+    // Compact labels (#887) — the full date lives in the tooltip title.
+    labels: compactDateLabels(history.value.totals.map((p) => p.as_of)),
     datasets: [
       {
         label: 'Depot-Gesamtwert',
@@ -549,6 +622,7 @@ const totalChartOptions = computed(() => {
   const { tick, grid } = chartAxisColors()
   const currency = history.value?.totals.find((t) => t.currency)?.currency || 'EUR'
   const fmt = new Intl.NumberFormat('de-DE', { style: 'currency', currency })
+  const isoDates = history.value?.totals.map((p) => p.as_of) ?? []
   return {
     responsive: true,
     maintainAspectRatio: false,
@@ -556,12 +630,22 @@ const totalChartOptions = computed(() => {
       legend: { display: false },
       tooltip: {
         callbacks: {
+          title: (ctx: Array<{ dataIndex: number }>) =>
+            fullDateLabel(isoDates[ctx[0]?.dataIndex ?? 0] ?? ''),
           label: (ctx: { parsed: { y: number } }) => fmt.format(ctx.parsed.y),
         },
       },
     },
     scales: {
-      x: { ticks: { color: tick, maxRotation: 0, autoSkip: true }, grid: { color: grid } },
+      x: {
+        ticks: {
+          color: tick,
+          maxRotation: 0,
+          autoSkip: true,
+          autoSkipPadding: 12,
+        },
+        grid: { color: grid },
+      },
       y: {
         ticks: {
           color: tick,
@@ -585,7 +669,7 @@ function sparklineData(series: HoldingsHistoryPosition | null) {
     return raw === null ? null : Number(raw)
   })
   return {
-    labels: series.points.map((p) => p.as_of),
+    labels: compactDateLabels(series.points.map((p) => p.as_of)),
     datasets: [
       {
         label: metric === 'value' ? 'Wert' : 'Kurs',
@@ -605,6 +689,7 @@ function sparklineOptions(series: HoldingsHistoryPosition | null) {
   const { tick, grid } = chartAxisColors()
   const currency = series?.currency || 'EUR'
   const fmt = new Intl.NumberFormat('de-DE', { style: 'currency', currency })
+  const isoDates = series?.points.map((p) => p.as_of) ?? []
   return {
     responsive: true,
     maintainAspectRatio: false,
@@ -612,12 +697,22 @@ function sparklineOptions(series: HoldingsHistoryPosition | null) {
       legend: { display: false },
       tooltip: {
         callbacks: {
+          title: (ctx: Array<{ dataIndex: number }>) =>
+            fullDateLabel(isoDates[ctx[0]?.dataIndex ?? 0] ?? ''),
           label: (ctx: { parsed: { y: number } }) => fmt.format(ctx.parsed.y),
         },
       },
     },
     scales: {
-      x: { ticks: { color: tick, maxRotation: 0, autoSkip: true }, grid: { color: grid } },
+      x: {
+        ticks: {
+          color: tick,
+          maxRotation: 0,
+          autoSkip: true,
+          autoSkipPadding: 12,
+        },
+        grid: { color: grid },
+      },
       y: {
         ticks: {
           color: tick,
@@ -1321,9 +1416,9 @@ function goBack() {
               </th>
               <th class="holdings-col-num">Kurs</th>
               <th class="holdings-col-num">Wert</th>
-              <th class="holdings-col-num holdings-col-cost">Einstand</th>
-              <th class="holdings-col-num holdings-col-gain">G/V</th>
-              <th class="holdings-col-num holdings-col-realized">Realisiert</th>
+              <th v-if="showCostColumn" class="holdings-col-num holdings-col-cost">Einstand</th>
+              <th v-if="showGainColumn" class="holdings-col-num holdings-col-gain">G/V</th>
+              <th v-if="showRealizedColumn" class="holdings-col-num holdings-col-realized">Realisiert</th>
               <th class="holdings-col-num holdings-col-share">Anteil</th>
             </tr>
           </thead>
@@ -1344,7 +1439,7 @@ function goBack() {
                 <td class="holdings-col-num">{{ formatAmount(h.amount) }}</td>
                 <td class="holdings-col-num">{{ formatCurrency(h.price, h.currency ?? undefined) }}</td>
                 <td class="holdings-col-num holdings-value">{{ formatCurrency(h.value, h.currency ?? undefined) }}</td>
-                <td class="holdings-col-num holdings-col-cost">
+                <td v-if="showCostColumn" class="holdings-col-num holdings-col-cost">
                   {{ formatCurrency(h.cost_basis, h.currency ?? undefined) }}
                   <span
                     v-if="h.cost_basis_source === 'tx-wac'"
@@ -1353,6 +1448,7 @@ function goBack() {
                   >∅</span>
                 </td>
                 <td
+                  v-if="showGainColumn"
                   class="holdings-col-num holdings-col-gain"
                   :class="`holdings-gain-${gainSign(h.unrealized_gain)}`"
                 >
@@ -1360,6 +1456,7 @@ function goBack() {
                   <span v-if="h.unrealized_gain_pct !== null" class="holdings-gain-pct">{{ formatSignedPercent(h.unrealized_gain_pct) }}</span>
                 </td>
                 <td
+                  v-if="showRealizedColumn"
                   class="holdings-col-num holdings-col-realized"
                   :class="`holdings-gain-${gainSign(h.realized_gain)}`"
                 >
@@ -1376,7 +1473,7 @@ function goBack() {
                 v-if="expandedPositionKey === (h.isin || h.wkn || h.name || '')"
                 class="holdings-history-row"
               >
-                <td colspan="8">
+                <td :colspan="holdingsColumnCount">
                   <div class="holdings-history-head">
                     <span class="holdings-history-label">Verlauf</span>
                     <div class="holdings-history-toggle">
@@ -1408,6 +1505,22 @@ function goBack() {
                   <p v-else class="holdings-history-empty">
                     Noch keine Verlaufs-Datenpunkte für diese Position.
                   </p>
+
+                  <!-- Thin figure strip (#887): repeats every number of the
+                       position, including the columns the table drops on
+                       narrow screens. -->
+                  <dl class="holdings-facts">
+                    <div
+                      v-for="fact in positionFacts(h)"
+                      :key="fact.label"
+                      class="holdings-fact"
+                    >
+                      <dt>{{ fact.label }}</dt>
+                      <dd :class="fact.sign ? `holdings-gain-${fact.sign}` : undefined">
+                        {{ fact.value }}
+                      </dd>
+                    </div>
+                  </dl>
 
                   <!-- Per-position transactions (Phase 2) -->
                   <div class="depot-tx">
@@ -1544,8 +1657,9 @@ function goBack() {
             <tr>
               <td class="holdings-col-name" colspan="3">Gesamt</td>
               <td class="holdings-col-num holdings-value">{{ formatCurrency(holdingsTotal) }}</td>
-              <td class="holdings-col-num holdings-col-cost">{{ formatCurrency(holdingsCostTotal) }}</td>
+              <td v-if="showCostColumn" class="holdings-col-num holdings-col-cost">{{ formatCurrency(holdingsCostTotal) }}</td>
               <td
+                v-if="showGainColumn"
                 class="holdings-col-num holdings-col-gain"
                 :class="`holdings-gain-${gainSign(holdingsGainTotal)}`"
               >
@@ -1553,6 +1667,7 @@ function goBack() {
                 <span v-if="holdingsGainPctTotal !== null" class="holdings-gain-pct">{{ formatSignedPercent(holdingsGainPctTotal) }}</span>
               </td>
               <td
+                v-if="showRealizedColumn"
                 class="holdings-col-num holdings-col-realized"
                 :class="`holdings-gain-${gainSign(holdingsRealizedTotal)}`"
               >
@@ -2182,8 +2297,13 @@ function goBack() {
   }
   /* "Anteil" is redundant with "Wert" on the smallest screens and is
      the first thing to drop. Hidden in head, body AND footer so the
-     column collapses cleanly — no empty cells or stray "100 %" left. */
-  .holdings-table .holdings-col-share {
+     column collapses cleanly — no empty cells or stray "100 %" left.
+     "Einstand" and "Realisiert" follow (issue #887): eight columns never
+     fit a phone, and every figure is repeated in the expanded row's
+     figure strip. What stays is Name/Stk/Kurs/Wert/GV. */
+  .holdings-table .holdings-col-share,
+  .holdings-table .holdings-col-cost,
+  .holdings-table .holdings-col-realized {
     display: none;
   }
   /* Allow numeric cells to break onto a second line in portrait — without
@@ -2231,6 +2351,31 @@ function goBack() {
   margin: 0.25rem 0 0;
   font-size: 0.8rem;
   color: var(--p-text-muted-color);
+}
+
+/* Thin figure strip under the expanded position's chart (#887). */
+.holdings-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 1rem;
+  margin: 0.5rem 0 0;
+  padding: 0.4rem 0 0;
+  border-top: 1px solid var(--p-content-border-color);
+  font-size: 0.78rem;
+}
+.holdings-fact {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  white-space: nowrap;
+}
+.holdings-fact dt {
+  color: var(--p-text-muted-color);
+}
+.holdings-fact dd {
+  margin: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Per-position depot transactions (Phase 2) */

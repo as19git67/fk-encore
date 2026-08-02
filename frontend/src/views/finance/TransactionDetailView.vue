@@ -439,6 +439,9 @@ async function save() {
     if (selectionStore.has(tx.value.id)) {
       selectionStore.set(selectionStore.items.map(item => item.id === tx.value!.id ? tx.value! : item))
     }
+    // Keep the list behind us current as well, so returning to it shows
+    // the edit without waiting for a reload (issue #886).
+    txStore.syncFrom([tx.value])
     syncForm()
     goBack()
   } catch (err) {
