@@ -316,8 +316,22 @@ Für Depot-Konten (`type_kind === 'depot'`) wechselt die
 
 - **Holdings-Tabelle** ("Positionen") wird anstelle der Umsatzliste
   angezeigt. Spalten: Name/ISIN, Stück (amount), Kurs (price), Wert
-  (value), Anteil (share %). Eine Footer-Zeile zeigt den Gesamtwert
-  (Gesamt) und 100 %.
+  (value), optional Einstand (cost_basis), G/V (unrealized_gain),
+  Realisiert (realized_gain), Anteil (share %). Eine Footer-Zeile zeigt
+  den Gesamtwert (Gesamt) und 100 %.
+  - Einstand/G-V/Realisiert werden komplett ausgeblendet, wenn keine
+    Position einen Wert dafür hat (`show*Column`-Computeds in
+    `AccountTransactionsView.vue`). Unter 640px fallen Einstand und
+    Realisiert zusätzlich weg (neben dem bereits bestehenden Wegfall von
+    Anteil) — auf schmalen Displays bleiben Name/Stk/Kurs/Wert/G-V
+    (#887). Jede aufgeklappte Position zeigt alle Werte trotzdem in
+    einer schmalen Kennzahlenzeile (`holdings-facts`) unter dem Chart.
+- **Wertverlauf-Chart** (Gesamtwert über die Zeit) und die
+  Positions-Sparkline im aufgeklappten Zustand nutzen kompakte
+  x-Achsen-Labels aus `utils/financeChartDates.ts`: Tag+Monat innerhalb
+  eines Kalenderjahres, Monat/Kurzjahr bei höchstens einem Datenpunkt pro
+  Monat über mehrere Jahre, sonst Tag+Monat+Kurzjahr. Das volle Datum
+  steht im Tooltip-Titel (#887).
 - **Transaction-Toolbar** (Filter, Batch-Select, Batch-Tag-Buttons) wird
   ausgeblendet — Depot-Konten haben keine klassischen Buchungen.
 - **"Keine Buchungen vorhanden"**-Meldung wird unterdrückt — die
