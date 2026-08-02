@@ -15,6 +15,9 @@ struct AlbumShareView: View {
     @State private var linkExpiry: String? = nil
     @State private var showErrorAlert = false
     @State private var copiedToClipboard = false
+    /// Shown when "Fertig" is tapped while a user is picked but not yet added —
+    /// otherwise the selection silently disappears with no share created.
+    @State private var showPendingSelectionWarning = false
     @Environment(\.dismiss) private var dismiss
     @Environment(AuthManager.self) private var authManager
     @AppStorage(APIClient.serverURLKey) private var serverURL: String = "http://localhost:4000"
@@ -45,15 +48,34 @@ struct AlbumShareView: View {
                             .font(.subheadline)
                     }
                 }
-                userSharesSection
+                addShareSection
+                existingSharesSection
                 publicLinkSection
             }
             .navigationTitle("Freigabe")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Fertig") { dismiss() }
+                    Button("Fertig") {
+                        if selectedUserId != nil {
+                            // A pending, not-yet-added selection would otherwise
+                            // silently vanish with no share created.
+                            showPendingSelectionWarning = true
+                        } else {
+                            dismiss()
+                        }
+                    }
                 }
+            }
+            .confirmationDialog(
+                "Ausgewählter Benutzer wurde nicht hinzugefügt",
+                isPresented: $showPendingSelectionWarning,
+                titleVisibility: .visible
+            ) {
+                Button("Ohne Freigabe schliessen", role: .destructive) { dismiss() }
+                Button("Zurück", role: .cancel) {}
+            } message: {
+                Text("Du hast einen Benutzer ausgewählt, aber noch nicht auf „Hinzufügen“ getippt. Ohne das bleibt die Freigabe unwirksam.")
             }
             .task {
                 // The caller's user id decides which delegate-created shares may
@@ -78,12 +100,15 @@ struct AlbumShareView: View {
         }
     }
 
-    // MARK: - User Shares Section
+    // MARK: - Add Share Section
+
+    private var canAddShare: Bool {
+        selectedUserId != nil && !viewModel.isSubmitting
+    }
 
     @ViewBuilder
-    private var userSharesSection: some View {
+    private var addShareSection: some View {
         Section {
-            // Add-user controls
             if viewModel.isLoadingUsers {
                 ProgressView("Benutzer laden…")
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -127,17 +152,37 @@ struct AlbumShareView: View {
                         ProgressView()
                             .frame(maxWidth: .infinity, alignment: .center)
                     } else {
+                        // Explicit colour (not just `.disabled`'s system dimming)
+                        // so "no user picked yet" reads unambiguously as
+                        // disabled rather than a slightly muted active button.
                         Label("Hinzufügen", systemImage: "person.badge.plus")
                             .frame(maxWidth: .infinity, alignment: .center)
+                            .foregroundStyle(canAddShare ? Color.accentColor : Color.secondary)
                     }
                 }
-                .disabled(selectedUserId == nil || viewModel.isSubmitting)
+                .disabled(!canAddShare)
             }
+        } header: {
+            Text("Neue Freigabe")
+        } footer: {
+            if !viewModel.isOwner {
+                Text("Als Bearbeiten + Teilen kannst du nur „Nur lesen“ und „Bearbeiten“ vergeben.")
+            }
+        }
+    }
 
-            // Current shares list
+    // MARK: - Existing Shares Section
+
+    @ViewBuilder
+    private var existingSharesSection: some View {
+        Section {
             if viewModel.isLoadingShares {
                 ProgressView()
                     .frame(maxWidth: .infinity, alignment: .center)
+            } else if viewModel.shares.isEmpty {
+                Text("Noch keine Freigaben")
+                    .foregroundStyle(.secondary)
+                    .font(.subheadline)
             } else {
                 ForEach(viewModel.shares) { share in
                     ShareRowView(share: share, canDelete: viewModel.canRemove(share)) {
@@ -146,12 +191,10 @@ struct AlbumShareView: View {
                 }
             }
         } header: {
-            Text("Freigabe für Benutzer")
+            Text("Freigaben")
         } footer: {
             if !viewModel.shares.isEmpty {
                 Text("\(viewModel.shares.count) aktive Freigabe(n)")
-            } else if !viewModel.isOwner {
-                Text("Als Bearbeiten + Teilen kannst du nur „Nur lesen“ und „Bearbeiten“ vergeben.")
             }
         }
     }
