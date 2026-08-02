@@ -154,8 +154,48 @@ eigene Fotos aus dem geteilten Album aussortieren, nie B's. Genau richtig.
 Home-Distanz-Heuristik aus den Recaps geliehen (`computeHomeCentroid`): Ist der
 Nutzer > X km vom Home-Zentroid für > Y Stunden → proaktiver Vorschlag „Sieht
 aus, als wärst du unterwegs (Ort). Trip Mode einschalten?". Bewusst nur
-Vorschlag, nie automatisch (Zuverlässigkeit/Akku). Auto-Ende, wenn wieder
-länger in Home-Region.
+Vorschlag, nie automatisch (Zuverlässigkeit/Akku).
+
+**Start-Vorschlag: noch nicht umgesetzt.** Der Rest dieses Abschnitts (§9.1
+„Vorschlag dauerhaft abwählbar") beschreibt weiterhin nur den Plan.
+
+### 9.1 Auto-Ende-Vorschlag (umgesetzt)
+
+Die spiegelbildliche Hälfte — „wieder länger in Home-Region → Trip beenden?"
+— **ist umgesetzt**, unabhängig vom (noch offenen) Start-Vorschlag:
+
+- **Server:** `GET /trips/home-location` (`photo/trips.ts`) liefert den
+  Home-Zentroid des Nutzers, berechnet mit derselben
+  `computeHomeCentroid`-Funktion wie die Recaps — Client und Server sind sich
+  damit einig, wo „zuhause" ist. `null`, solange zu wenig Geodaten vorliegen.
+- **Client:** `TripAutoEndMonitor` (Singleton, `@MainActor`) startet bei
+  `TripStore.startTrip` und stoppt bei `endTrip`. Registriert
+  `CLLocationManager.startMonitoringSignificantLocationChanges()` — läuft
+  auch, während die App im Hintergrund oder (mit „Immer"-Berechtigung)
+  beendet ist; das System weckt die App bei Bedarf, um das Update
+  zuzustellen. `NSLocationAlwaysAndWhenInUseUsageDescription` in `Info.plist`
+  begründet die zusätzliche Berechtigungsanfrage.
+- **Heuristik (`TripAutoEndHeuristic`, pur/testbar):** Bleibt das Gerät
+  ununterbrochen innerhalb von `homeArrivalRadiusMeters` (2 km — enger als
+  ein typischer Trip-Geofence von 25 km, damit ein Trip in Heimatnähe nicht
+  sofort als „beendet" erscheint) für mindestens `homeArrivalGrace` (2 h),
+  wird der Vorschlag ausgelöst. Verlässt das Gerät den Radius zwischendurch,
+  beginnt die Uhr neu. Nach einem Vorschlag greift `suggestionCooldown` (6 h),
+  damit ein kurzer Einkauf in Heimatnähe nicht sofort erneut fragt.
+- **Vorschlag erreicht den Nutzer auf zwei Wegen, beide aus `pendingSuggestion`
+  gespeist (`TripAutoEndPreferences`):**
+  1. Lokale Notification mit Aktionen „Trip beenden" / „Weiter unterwegs" —
+     beantwortbar direkt von der Sperrbildschirm-Benachrichtigung aus, ohne
+     die App zu öffnen (`AppDelegate.userNotificationCenter(_:didReceive:)`).
+  2. Banner oben in `TripView`, falls die Notification nicht erlaubt,
+     verpasst oder ignoriert wurde — erscheint beim nächsten Öffnen/
+     Vordergrund-Wechsel der App.
+  Beide Wege beenden den Trip nur nach expliziter Bestätigung; ein Antippen
+  der Notification ohne Aktion oder „Weiter unterwegs" räumt den Vorschlag
+  nur weg (Cooldown greift trotzdem, damit nicht sofort erneut gefragt wird).
+- Fehlt die Standortberechtigung oder wird sie verweigert, läuft der Trip
+  unverändert weiter — der Monitor ist eine reine Zusatzfunktion über dem
+  bestehenden manuellen „Beenden"-Button in `TripView`.
 
 **Vorschlag dauerhaft ortsbezogen abwählbar (wichtig):** Ohne das würde z. B.
 das tägliche Pendeln zum Arbeitsplatz jeden Tag „Trip Mode einschalten?" fragen.

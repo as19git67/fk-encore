@@ -70,15 +70,27 @@ private struct ActiveTripView: View {
     let trip: ActiveTrip
     let store: TripStore
 
+    @Environment(\.scenePhase) private var scenePhase
     @State private var assets: [PHAsset] = []
     @State private var isLoading = true
     @State private var showEndConfirm = false
     @State private var showShareSheet = false
+    /// Mirrors `TripAutoEndPreferences.pendingSuggestion` for this trip. Read
+    /// fresh on appear and whenever the app returns to the foreground — the
+    /// suggestion is normally raised and answered via the notification while
+    /// the app isn't running, so this banner is the fallback for when
+    /// notifications are denied or the user opens the app instead of using the
+    /// notification's actions.
+    @State private var autoEndSuggestion: PendingAutoEndSuggestion?
 
     private let columns = [GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 2)]
 
     var body: some View {
         VStack(spacing: 0) {
+            if autoEndSuggestion != nil {
+                autoEndBanner
+                Divider()
+            }
             optionsBar
             Divider()
             grid
@@ -112,6 +124,43 @@ private struct ActiveTripView: View {
         .sheet(isPresented: $showShareSheet) {
             AlbumShareView(albumId: trip.serverAlbumId, albumName: trip.name)
         }
+        .onAppear { refreshAutoEndSuggestion() }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active { refreshAutoEndSuggestion() }
+        }
+    }
+
+    private func refreshAutoEndSuggestion() {
+        let pending = TripAutoEndPreferences.pendingSuggestion
+        autoEndSuggestion = pending?.tripIosAlbumId == trip.iosAlbumId ? pending : nil
+    }
+
+    private var autoEndBanner: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "house.fill")
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Bist du zurück?")
+                    .font(.subheadline.weight(.semibold))
+                Text("Sieht so aus, als wärst du wieder zuhause.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Beenden") {
+                TripAutoEndMonitor.shared.dismissSuggestion(forTripAlbumId: trip.iosAlbumId)
+                autoEndSuggestion = nil
+                store.endTrip()
+            }
+            .buttonStyle(.borderedProminent)
+            Button("Nein") {
+                TripAutoEndMonitor.shared.dismissSuggestion(forTripAlbumId: trip.iosAlbumId)
+                autoEndSuggestion = nil
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding()
+        .background(.thinMaterial)
     }
 
     private var optionsBar: some View {

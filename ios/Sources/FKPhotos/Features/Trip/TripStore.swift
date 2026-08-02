@@ -106,6 +106,9 @@ final class TripStore {
         TripPreferences.saveActiveTrip(trip)
 
         BackgroundSyncManager.shared.scheduleNextSyncIfNeeded()
+        // Suggest ending the trip once the device is back home (Etappe 5,
+        // docs/ios-trip-mode.md §9) — never automatic, only a prompt.
+        TripAutoEndMonitor.shared.start()
     }
 
     /// Ends (freezes) the active trip: photos taken from now on are no longer
@@ -126,6 +129,9 @@ final class TripStore {
         TripPreferences.saveClosedTrips(closedTrips)
         activeTrip = nil
         TripPreferences.saveActiveTrip(nil)
+
+        TripAutoEndMonitor.shared.stop()
+        TripAutoEndMonitor.shared.dismissSuggestion(forTripAlbumId: trip.iosAlbumId)
 
         // Run the final catch-up right away — the app is in the foreground, so
         // this is the cheapest moment to close the window.

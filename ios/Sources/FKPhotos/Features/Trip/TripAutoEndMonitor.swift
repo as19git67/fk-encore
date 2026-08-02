@@ -1,0 +1,193 @@
+import CoreLocation
+import Foundation
+import UserNotifications
+
+/// Watches for "the device is back home" while a trip is active and, once
+/// that has held for long enough, suggests ending the trip — never ends it
+/// automatically (`docs/ios-trip-mode.md` §9). Deliberately reachable while
+/// the app is not in the foreground: it uses the significant-change location
+/// service, which can relaunch a suspended or terminated app to deliver an
+/// update, and raises the suggestion as an actionable local notification so
+/// the user can answer it without opening the app.
+///
+/// This is a heuristic layered *on top of* the manual "Beenden" button in
+/// `TripView` — it never replaces it, and doing nothing leaves the trip
+/// running exactly as if the monitor didn't exist.
+@MainActor
+final class TripAutoEndMonitor: NSObject, CLLocationManagerDelegate {
+    static let shared = TripAutoEndMonitor()
+
+    static let notificationCategoryId = "trip.autoend"
+    static let endActionId = "trip.autoend.end"
+    static let dismissActionId = "trip.autoend.dismiss"
+
+    private let manager = CLLocationManager()
+    private var isMonitoring = false
+    /// Serialises the async home-location fetch so two significant-change
+    /// callbacks arriving close together don't both start a request.
+    private var isFetchingHomeLocation = false
+
+    private override init() {
+        super.init()
+        manager.delegate = self
+    }
+
+    /// Registers the notification category (actions) once at launch, so a
+    /// notification delivered while the app isn't running still has them —
+    /// categories must be registered before the notification is presented, not
+    /// necessarily before it's scheduled, but doing it at launch is simplest.
+    static func registerNotificationCategory() {
+        let end = UNNotificationAction(
+            identifier: endActionId, title: "Trip beenden", options: [.destructive]
+        )
+        let dismiss = UNNotificationAction(
+            identifier: dismissActionId, title: "Weiter unterwegs", options: []
+        )
+        let category = UNNotificationCategory(
+            identifier: notificationCategoryId,
+            actions: [end, dismiss],
+            intentIdentifiers: [],
+            options: []
+        )
+        UNUserNotificationCenter.current().setNotificationCategories([category])
+    }
+
+    /// Starts significant-change location monitoring for the active trip.
+    /// Idempotent. Requests "Always" authorization — without it the service
+    /// still runs but iOS stops delivering updates once the app is fully
+    /// terminated rather than just suspended, so the suggestion becomes
+    /// foreground/background-only instead of working after a jetsam kill.
+    /// Either way this never blocks trip start: a denied/undetermined status
+    /// just means fewer updates, not a broken trip.
+    func start() {
+        guard !isMonitoring else { return }
+        isMonitoring = true
+        TripAutoEndPreferences.resetArrivalTracking()
+
+        let status = manager.authorizationStatus
+        if status == .notDetermined || status == .authorizedWhenInUse {
+            manager.requestAlwaysAuthorization()
+        }
+        manager.startMonitoringSignificantLocationChanges()
+
+        Task { await requestNotificationAuthorizationIfNeeded() }
+    }
+
+    /// Stops monitoring. Called when the trip ends — the suggestion is only
+    /// meaningful for a running trip, and continuing to monitor afterwards
+    /// would just burn battery for the closed-trip catch-up, which doesn't
+    /// need location at all.
+    func stop() {
+        guard isMonitoring else { return }
+        isMonitoring = false
+        manager.stopMonitoringSignificantLocationChanges()
+        TripAutoEndPreferences.resetArrivalTracking()
+    }
+
+    /// Resumes monitoring after a cold launch if a trip was already active —
+    /// `isMonitoring` starts false every process launch, so without this a
+    /// trip started in a previous run would silently stop being watched the
+    /// moment the app was killed and relaunched.
+    func resumeIfTripActive() {
+        guard TripStore.shared.isActive else { return }
+        start()
+    }
+
+    /// Clears the pending suggestion (if it matches the given trip) and starts
+    /// the cooldown, so the next arrival at home doesn't immediately re-ask.
+    /// Called both when the user acts on the notification/banner and when
+    /// `endTrip()` runs for any other reason (the suggestion would otherwise
+    /// dangle, referencing a trip that no longer exists).
+    func dismissSuggestion(forTripAlbumId albumId: String) {
+        guard TripAutoEndPreferences.pendingSuggestion?.tripIosAlbumId == albumId else { return }
+        TripAutoEndPreferences.pendingSuggestion = nil
+        TripAutoEndPreferences.lastSuggestionAt = Date()
+    }
+
+    // MARK: - CLLocationManagerDelegate
+
+    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let location = locations.last else { return }
+        Task { @MainActor in await self.handle(location) }
+    }
+
+    nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        // Significant-change failures are transient (no fix, airplane mode) and
+        // self-resolve on the next update; nothing to reconcile here.
+    }
+
+    // MARK: - Evaluation
+
+    private func handle(_ location: CLLocation) async {
+        guard isMonitoring, let trip = TripStore.shared.activeTrip else { return }
+        guard TripAutoEndPreferences.pendingSuggestion == nil else { return }
+
+        guard let home = await resolveHomeLocation() else { return }
+
+        let atHome = TripAutoEndHeuristic.isAtHome(location.coordinate, home: home)
+        let decision = TripAutoEndHeuristic.evaluate(
+            candidateSince: TripAutoEndPreferences.homeArrivalCandidateSince,
+            lastSuggestionAt: TripAutoEndPreferences.lastSuggestionAt,
+            isAtHome: atHome,
+            now: Date()
+        )
+        TripAutoEndPreferences.homeArrivalCandidateSince = decision.candidateSince
+        guard decision.shouldSuggest else { return }
+
+        raiseSuggestion(for: trip)
+    }
+
+    /// Returns the cached home location, refreshing it from the server when
+    /// missing or stale. Best-effort: a failed fetch just means this update is
+    /// skipped, the next significant-change callback tries again.
+    private func resolveHomeLocation() async -> CLLocationCoordinate2D? {
+        if TripAutoEndPreferences.isHomeLocationFresh, let cached = TripAutoEndPreferences.homeLocation {
+            return cached
+        }
+        guard !isFetchingHomeLocation else { return TripAutoEndPreferences.homeLocation }
+        isFetchingHomeLocation = true
+        defer { isFetchingHomeLocation = false }
+
+        struct Response: Decodable {
+            struct Location: Decodable { let lat: Double; let lon: Double }
+            let location: Location?
+        }
+        guard let response: Response = try? await APIClient.shared.get("/trips/home-location"),
+              let location = response.location
+        else {
+            return TripAutoEndPreferences.homeLocation
+        }
+        let coordinate = CLLocationCoordinate2D(latitude: location.lat, longitude: location.lon)
+        TripAutoEndPreferences.homeLocation = coordinate
+        return coordinate
+    }
+
+    private func raiseSuggestion(for trip: ActiveTrip) {
+        TripAutoEndPreferences.pendingSuggestion = PendingAutoEndSuggestion(
+            tripIosAlbumId: trip.iosAlbumId, raisedAt: Date()
+        )
+        TripAutoEndPreferences.lastSuggestionAt = Date()
+
+        let content = UNMutableNotificationContent()
+        content.title = "Bist du zurück?"
+        content.body = "Sieht so aus, als wärst du wieder zuhause. Trip \"\(trip.name)\" beenden?"
+        content.categoryIdentifier = Self.notificationCategoryId
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: "trip.autoend.\(trip.iosAlbumId)", content: content, trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    /// Requests notification permission if not yet determined. A denial just
+    /// means the suggestion only ever surfaces as the in-app `TripView` banner
+    /// (`pendingSuggestion` is set regardless of this), not as a background
+    /// notification — the heuristic itself doesn't depend on it.
+    private func requestNotificationAuthorizationIfNeeded() async {
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        guard settings.authorizationStatus == .notDetermined else { return }
+        _ = try? await center.requestAuthorization(options: [.alert, .sound])
+    }
+}

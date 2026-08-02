@@ -74,6 +74,15 @@ public final class BackgroundSyncManager {
         // Observe photo-library changes so a running trip picks up freshly-taken
         // photos promptly (Trip Mode Etappe 1c). No-op until a trip is active.
         TripPhotoLibraryObserver.shared.startIfNeeded()
+
+        // Re-arm the auto-end location monitor if a trip was already active
+        // before this launch — `TripAutoEndMonitor.isMonitoring` resets to
+        // false on every process start, so without this a trip survives a
+        // relaunch but silently stops being watched for "back home".
+        Task { @MainActor in
+            TripAutoEndMonitor.registerNotificationCategory()
+            TripAutoEndMonitor.shared.resumeIfTripActive()
+        }
     }
 
     // MARK: - Scheduling
