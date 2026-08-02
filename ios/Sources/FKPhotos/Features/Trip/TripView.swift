@@ -83,9 +83,16 @@ private struct ActiveTripView: View {
             Divider()
             grid
         }
-        // Re-keyed on the handled count so the grid refreshes after the auto-add
-        // pass adds new trip photos (the parent re-renders with an updated trip).
-        .task(id: "\(trip.iosAlbumId)-\(trip.handledAssetIds.count)") {
+        // Re-keyed on the auto-add pass's progress marker so the grid refreshes
+        // after new trip photos were added (the parent re-renders with an
+        // updated trip). The watermark moves on every pass that saw something
+        // new; the edge count covers the rare pass that added a photo sitting on
+        // the watermark instant itself.
+        .task(id: """
+            \(trip.iosAlbumId)-\
+            \(trip.handledWatermark?.timeIntervalSince1970 ?? 0)-\
+            \(trip.handledAssetIds.count)
+            """) {
             assets = await Self.loadAssets(albumId: trip.iosAlbumId)
             isLoading = false
         }

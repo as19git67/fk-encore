@@ -1,13 +1,14 @@
 import Photos
 
-/// Reacts to photo-library changes while a trip is active: runs the trip
+/// Reacts to photo-library changes while a trip is pending: runs the trip
 /// auto-add pass so a freshly-taken photo lands in the trip album promptly
 /// (Etappe 1c), and — only when something was actually added — kicks off a
 /// sync so it uploads without waiting for the next foreground/background cycle.
 ///
-/// The auto-add pass is also run from `BackgroundSyncManager.runFullSync` as a
-/// catch-up, so a change missed while the app was suspended is picked up on the
-/// next launch/resume regardless of this observer.
+/// This only ever fires while the app is running; photos taken in the Camera
+/// app with F4mil Photos suspended produce no callback here. Those are picked
+/// up by the same pass running from `BackgroundSyncManager.runFullSync` (app
+/// open, foreground resume, background task), which is the reliable path.
 final class TripPhotoLibraryObserver: NSObject, PHPhotoLibraryChangeObserver {
     static let shared = TripPhotoLibraryObserver()
 
@@ -26,7 +27,7 @@ final class TripPhotoLibraryObserver: NSObject, PHPhotoLibraryChangeObserver {
     func photoLibraryDidChange(_ changeInstance: PHChange) {
         // Called on an arbitrary queue; hop to the main actor to read the store.
         Task { @MainActor in
-            guard TripStore.shared.isActive else { return }
+            guard TripStore.shared.hasPendingTripWork else { return }
             let added = await TripStore.shared.runAutoAddPass()
             guard added > 0 else { return }
             // Adding to the album itself fires another change; that follow-up
