@@ -94,9 +94,19 @@ sie hinzugefügt hat, genau um denselben Kampf mit dem Aussortieren zu vermeiden
   (daheim während laufendem Trip gemachte Fotos fallen raus).
 - **Ende:** Toggle-off (Standard). Später optional Auto-Ende (wieder länger in
   Home-Region) + Max-Dauer.
-- **Toggle-off:** Auto-Add stoppt. iOS-Album, Server-Album, Verknüpfung
-  bleiben — der Trip wird ein normales verknüpftes Album, Modus weiter änderbar
-  (bestehende Disconnect/Mode-Logik).
+- **Toggle-off:** Auto-Add stoppt für *neue* Fotos. iOS-Album, Server-Album,
+  Verknüpfung bleiben — der Trip wird ein normales verknüpftes Album, Modus
+  weiter änderbar (bestehende Disconnect/Mode-Logik).
+- **Nachlauf nach dem Ende (wichtig):** Der Trip wird beim Beenden **nicht
+  verworfen**, sondern mit gesetztem `endedAt` in eine Liste beendeter Trips
+  übernommen (`TripPreferences.loadClosedTrips`). Grund: Der Auto-Add-Pass
+  sieht die Fotomediathek nur, während die App läuft — mit der Kamera-App
+  aufgenommene Fotos werden regelmäßig erst später entdeckt, unter Umständen
+  erst nach dem Toggle-off. Der Catch-up arbeitet solche Fotos noch nach.
+  `endedAt` ist dabei die **harte Obergrenze**: Fotos, die nach dem Beenden
+  entstanden sind, landen nie im Trip-Album. Nach Ablauf einer Karenzzeit
+  (`TripMembership.closedTripGrace`, 24 h) fällt der beendete Trip aus der
+  Liste.
 
 ## 6. Solo-Trip – Ablauf
 
@@ -263,3 +273,23 @@ Gesperrt am 2026-07-24.
   Bild-Assets beschränkt. Reaktives Auto-Add ergänzt den Catch-up-Pass in
   `runFullSync` (Foreground/Kaltstart/BG), ersetzt ihn nicht — der Catch-up
   bleibt die verlässliche Grenze gegen verpasste Änderungen bei App-Kills.
+- Der Observer feuert **nur, während die App läuft**. Fotos, die in der
+  Kamera-App bei suspendierter F4mil-App entstehen, erzeugen keinen Callback;
+  der Catch-up in `runFullSync` ist für sie der einzige Weg.
+
+### 14.6 Catch-up-Garantien
+
+- Der Pass läuft in `runFullSync` **vor** Download/Upload und **außerhalb** des
+  `pipelineLock`. Innerhalb des Locks wurde er übersprungen, sobald ein anderer
+  Trigger schon eine Pipeline hielt (Kaltstart-Task und Foreground-Resume
+  rennen routinemäßig gegeneinander) — die Fotos verpassten dann genau den
+  Scan, der gerade lief. Der Pass ist lokal, billig und idempotent; der Lock
+  schützt nur die Upload/Download-Pipeline.
+- Gleichzeitige Trigger werden **verkettet, nicht verworfen**. Der frühere
+  `isAutoAdding`-Guard gab bei laufendem Pass `0` zurück, wodurch ein während
+  des Passes aufgenommenes Foto bis zum nächsten Trigger liegen blieb. Jetzt
+  bekommt jeder Aufrufer einen Pass, der nach seinem Aufruf startet; ein
+  Folge-Pass ohne neue Kandidaten kehrt sofort zurück, die Kette terminiert.
+- Beendete Trips werden im selben Pass mitverarbeitet (Fenster bis `endedAt`),
+  beendete zuerst. Beim Toggle-off läuft zusätzlich sofort ein Pass samt Sync,
+  solange die App ohnehin im Vordergrund ist.
