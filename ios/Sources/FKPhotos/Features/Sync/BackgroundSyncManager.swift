@@ -380,17 +380,26 @@ public final class BackgroundSyncManager {
     /// throughout the pipeline) so it can unwind and persist whatever
     /// checkpointed progress it already made instead of being killed mid-step.
     public func runFullSync() async throws {
+        // Add trip photos the app hasn't seen yet to the trip album BEFORE the
+        // upload scan, so they are enumerated and uploaded in this same run
+        // (Trip Mode Etappe 1c). This covers photos taken with the Camera app
+        // while F4mil Photos was suspended — the library-change observer never
+        // sees those — and it also finishes ended trips up to their `endedAt`.
+        //
+        // Deliberately OUTSIDE the pipeline lock: the pass is cheap, local and
+        // idempotent, whereas the lock's job is to keep two upload/download
+        // pipelines apart. Running it inside meant every trigger that found the
+        // lock taken (cold-launch task and foreground resume routinely race)
+        // skipped the catch-up entirely, so the photos missed the scan that was
+        // running right then and waited for the next cycle.
+        await TripStore.shared.runAutoAddPass()
+
         guard await pipelineLock.tryAcquire() else {
             print("[BGSync] runFullSync: another pipeline already running, skipping")
             return
         }
 
         let work = Task {
-            // Add newly-captured trip photos to the trip album BEFORE the upload
-            // scan, so they are enumerated and uploaded in this same pass
-            // (Trip Mode Etappe 1c). No-op when no trip is active / not in Auto.
-            await TripStore.shared.runAutoAddPass()
-
             // Download BEFORE upload. A photo deleted on the server must be moved
             // to "F4mil Trash" (and removed from the local album) FIRST — before
             // the upload scan runs. Otherwise the upload sees the still-present
