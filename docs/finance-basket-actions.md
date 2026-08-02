@@ -17,6 +17,26 @@ Dialog angezeigt, damit ein Klick nicht „tot“ wirkt.
 Auf schmalen Viewports sind die Aktionen kompakt angeordnet, damit die
 Transaktionsliste nicht vollständig verdrängt wird.
 
+### Live-Sync mit der Transaktionsliste
+
+Basket-Aktionen, die Buchungsfelder ändern (Prüfvermerk, Steuerrelevanz,
+Gegenseiten-Vereinheitlichung, Tags, Notiz), schreiben das Ergebnis nicht nur
+in den Basket-Store zurück, sondern spiegeln es über
+`useTransactionsStore.syncFrom()` / `.patch()` auch in die aktuell
+angezeigte Liste. Dadurch zeigt die Liste die Änderung sofort an, ohne dass
+der Nutzer neu laden muss (#886).
+
+`syncFrom`/`patch` sind No-ops für IDs, die nicht auf der aktuell geladenen
+Seite liegen — eine Änderung an einer Buchung außerhalb des aktiven
+Filters/Scopes schleust sich also nicht versehentlich in die Liste ein.
+`TransactionDetailView.save()` folgt demselben Muster für Einzel-Edits.
+
+Die Batch-Notiz-Aktion ist ein Sonderfall: `POST
+/finance/transactions/batch-notice` liefert nur Zähler zurück, keine
+aktualisierten Buchungen. Das Frontend repliziert deshalb die
+Replace/Append-Regel des Servers lokal (`BatchNoticeDialog` gibt Text +
+Modus im `applied`-Event mit), statt die Buchungen erneut zu laden.
+
 ---
 
 ## Split
