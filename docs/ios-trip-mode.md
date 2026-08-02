@@ -94,9 +94,19 @@ sie hinzugefügt hat, genau um denselben Kampf mit dem Aussortieren zu vermeiden
   (daheim während laufendem Trip gemachte Fotos fallen raus).
 - **Ende:** Toggle-off (Standard). Später optional Auto-Ende (wieder länger in
   Home-Region) + Max-Dauer.
-- **Toggle-off:** Auto-Add stoppt. iOS-Album, Server-Album, Verknüpfung
-  bleiben — der Trip wird ein normales verknüpftes Album, Modus weiter änderbar
-  (bestehende Disconnect/Mode-Logik).
+- **Toggle-off:** Auto-Add stoppt für *neue* Fotos. iOS-Album, Server-Album,
+  Verknüpfung bleiben — der Trip wird ein normales verknüpftes Album, Modus
+  weiter änderbar (bestehende Disconnect/Mode-Logik).
+- **Nachlauf nach dem Ende (wichtig):** Der Trip wird beim Beenden **nicht
+  verworfen**, sondern mit gesetztem `endedAt` in eine Liste beendeter Trips
+  übernommen (`TripPreferences.loadClosedTrips`). Grund: Der Auto-Add-Pass
+  sieht die Fotomediathek nur, während die App läuft — mit der Kamera-App
+  aufgenommene Fotos werden regelmäßig erst später entdeckt, unter Umständen
+  erst nach dem Toggle-off. Der Catch-up arbeitet solche Fotos noch nach.
+  `endedAt` ist dabei die **harte Obergrenze**: Fotos, die nach dem Beenden
+  entstanden sind, landen nie im Trip-Album. Nach Ablauf einer Karenzzeit
+  (`TripMembership.closedTripGrace`, 24 h) fällt der beendete Trip aus der
+  Liste.
 
 ## 6. Solo-Trip – Ablauf
 
@@ -248,10 +258,32 @@ Gesperrt am 2026-07-24.
 
 - **Genau ein aktiver Trip** zur Zeit (keine parallelen Trips in Etappe 1).
 - **Nur Bilder**, keine Videos (wie im bestehenden Upload).
-- **`handledAssetIds` + High-Water-Mark auf `creationDate`**: der Wasserstand ist
-  die effiziente Enumerationsgrenze (wie beim Upload-Sync), die ID-Liste nur die
-  kleine „behandelt, aber wieder entfernt/verworfen"-Randmenge — hält den State
-  bei großen Bibliotheken/langen Trips klein.
+- **`handledAssetIds` + High-Water-Mark auf `creationDate`** (umgesetzt): der
+  Wasserstand (`ActiveTrip.handledWatermark`) ist die effiziente
+  Enumerationsgrenze (wie beim Upload-Sync), die ID-Liste nur die kleine
+  Randmenge — hält den State bei großen Bibliotheken/langen Trips klein.
+  Details:
+  - Der Wasserstand bedeutet „bis hierher wurde **alles angeschaut**" — auch
+    Assets, die *keine* Kandidaten waren (bereits behandelt oder außerhalb des
+    Geofence). Nur so darf die alte ID-Liste beim Vorrücken wegfallen: sonst
+    könnte ein bereits behandeltes, neueres Foto unter den Wasserstand rutschen
+    und beim nächsten Pass erneut eingefügt werden (Konflikt mit dem
+    Aussortieren, §4).
+  - Die Untergrenze ist **inklusiv** (`creationDate >= watermark`), die
+    Randliste enthält genau die Assets auf diesem Zeitstempel. Ein striktes `>`
+    würde Serienbilder verschlucken, die sich einen `creationDate` teilen.
+    Rückt der Wasserstand vor, ersetzt die neue Randliste die alte; bleibt er
+    gleich, werden beide vereinigt.
+  - Der Wasserstand rückt **nur bei erfolgreichem Add** vor. Schlägt
+    `performChanges` fehl, bleibt er stehen und die Assets werden beim nächsten
+    Pass erneut versucht.
+  - Trips, die vor dem Wasserstand gespeichert wurden, dekodieren ihn als `nil`
+    und starten einmalig wieder bei `startedAt`; der erste Pass verdichtet die
+    angesammelte ID-Liste. Keine Migration nötig.
+  - Bekannte Konsequenz (wie beim Upload-Sync): ein Foto, das *nachträglich*
+    mit einem `creationDate` unterhalb des Wasserstands in der Mediathek landet
+    (iCloud-Nachlauf von einem anderen Gerät, Import), wird nicht mehr
+    aufgenommen.
 - **Geofence-Mitgliedschaft**: Ein Fenster-Asset zählt nur, wenn es GPS hat und
   im Radius liegt. Assets **ohne** GPS: Standard „einschließen" (im Zweifel
   aufnehmen; Nutzer kann im manuellen Modus/beim Aussortieren korrigieren) —
@@ -263,3 +295,23 @@ Gesperrt am 2026-07-24.
   Bild-Assets beschränkt. Reaktives Auto-Add ergänzt den Catch-up-Pass in
   `runFullSync` (Foreground/Kaltstart/BG), ersetzt ihn nicht — der Catch-up
   bleibt die verlässliche Grenze gegen verpasste Änderungen bei App-Kills.
+- Der Observer feuert **nur, während die App läuft**. Fotos, die in der
+  Kamera-App bei suspendierter F4mil-App entstehen, erzeugen keinen Callback;
+  der Catch-up in `runFullSync` ist für sie der einzige Weg.
+
+### 14.6 Catch-up-Garantien
+
+- Der Pass läuft in `runFullSync` **vor** Download/Upload und **außerhalb** des
+  `pipelineLock`. Innerhalb des Locks wurde er übersprungen, sobald ein anderer
+  Trigger schon eine Pipeline hielt (Kaltstart-Task und Foreground-Resume
+  rennen routinemäßig gegeneinander) — die Fotos verpassten dann genau den
+  Scan, der gerade lief. Der Pass ist lokal, billig und idempotent; der Lock
+  schützt nur die Upload/Download-Pipeline.
+- Gleichzeitige Trigger werden **verkettet, nicht verworfen**. Der frühere
+  `isAutoAdding`-Guard gab bei laufendem Pass `0` zurück, wodurch ein während
+  des Passes aufgenommenes Foto bis zum nächsten Trigger liegen blieb. Jetzt
+  bekommt jeder Aufrufer einen Pass, der nach seinem Aufruf startet; ein
+  Folge-Pass ohne neue Kandidaten kehrt sofort zurück, die Kette terminiert.
+- Beendete Trips werden im selben Pass mitverarbeitet (Fenster bis `endedAt`),
+  beendete zuerst. Beim Toggle-off läuft zusätzlich sofort ein Pass samt Sync,
+  solange die App ohnehin im Vordergrund ist.
