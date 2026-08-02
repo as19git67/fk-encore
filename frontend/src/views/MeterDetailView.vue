@@ -762,7 +762,7 @@ watch(meterId, () => loadDetail())
         <h2><i class="pi pi-cog" /> Gerätehistorie</h2>
         <Button v-if="canManage" label="Gerät ersetzen" icon="pi pi-refresh" size="small" @click="openReplace" />
       </div>
-      <DataTable :value="detail.devices" size="small">
+      <DataTable :value="detail.devices" size="small" class="device-table">
         <Column field="serialNumber" header="Seriennummer">
           <template #body="{ data }">{{ data.serialNumber ?? '–' }}</template>
         </Column>
@@ -809,7 +809,7 @@ watch(meterId, () => loadDetail())
       </div>
       <div v-if="loadingReadings" class="info"><i class="pi pi-spin pi-spinner" /> Ablesungen…</div>
       <div v-else-if="readings.length === 0" class="info">Noch keine Ablesungen erfasst.</div>
-      <DataTable v-else :value="readings" size="small" lazy paginator :rows="readingsRows" :total-records="totalReadings" :first="readingsFirst" @page="onReadingsPage">
+      <DataTable v-else :value="readings" size="small" class="readings-table" lazy paginator :rows="readingsRows" :total-records="totalReadings" :first="readingsFirst" @page="onReadingsPage">
         <Column header="Datum">
           <template #body="{ data }">{{ fmtDateTime(data.takenAt) }}</template>
         </Column>
@@ -825,7 +825,7 @@ watch(meterId, () => loadDetail())
           </template>
         </Column>
         <Column field="notes" header="Notiz">
-          <template #body="{ data }">{{ data.notes ?? '' }}</template>
+          <template #body="{ data }"><span class="notes-cell" :title="data.notes ?? ''">{{ data.notes ?? '' }}</span></template>
         </Column>
         <Column style="width: 6rem">
           <template #body="{ data }">
@@ -845,7 +845,7 @@ watch(meterId, () => loadDetail())
         </div>
         <div v-if="loadingKeys" class="info"><i class="pi pi-spin pi-spinner" /> Keys…</div>
         <div v-else-if="apiKeys.length === 0" class="info">Keine API-Keys vorhanden.</div>
-        <DataTable v-else :value="apiKeys" size="small">
+        <DataTable v-else :value="apiKeys" size="small" class="keys-table">
           <Column field="name" header="Name" />
           <Column header="Erstellt">
             <template #body="{ data }">{{ fmtDateTime(data.createdAt) }}</template>
@@ -1153,15 +1153,38 @@ watch(meterId, () => loadDetail())
 .meter-detail-view :deep(.p-datatable) {
   max-width: 100%;
 }
+/* Narrow screens: scroll the table horizontally instead of squeezing every
+   column until headers overlap and values break apart character by character. */
+.meter-detail-view :deep(.p-datatable-table-container) {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
 .meter-detail-view :deep(.p-datatable-table) {
   width: 100%;
-  table-layout: fixed;
+  table-layout: auto;
 }
 .meter-detail-view :deep(.p-datatable-thead > tr > th),
 .meter-detail-view :deep(.p-datatable-tbody > tr > td) {
-  white-space: normal;
-  overflow-wrap: break-word;
-  word-break: normal;
+  white-space: nowrap;
+}
+.report-table :deep(.p-datatable-table) {
+  min-width: 26rem;
+}
+.device-table :deep(.p-datatable-table) {
+  min-width: 44rem;
+}
+.readings-table :deep(.p-datatable-table) {
+  min-width: 40rem;
+}
+.keys-table :deep(.p-datatable-table) {
+  min-width: 34rem;
+}
+.notes-cell {
+  display: inline-block;
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
 }
 @media (max-width: 560px) {
   .detail-title {

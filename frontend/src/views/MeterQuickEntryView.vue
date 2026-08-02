@@ -372,6 +372,28 @@ p {
 .unit {
   color: var(--text-color-secondary);
   min-width: 2.5rem;
+  flex: 0 0 auto;
+}
+
+/* Rather than squeezing the buttons, let the row wrap when space runs out. */
+.entry-input {
+  flex-wrap: wrap;
+  row-gap: 0.5rem;
+}
+
+/* Buttons must keep their intrinsic width, otherwise the flex row shrinks them
+   until the label ("Gespeichert") spills out of the button. */
+.entry-input :deep(.p-button) {
+  flex: 0 0 auto;
+}
+
+.entry-input :deep(.p-button-label) {
+  white-space: nowrap;
+}
+
+.entry-input :deep(.p-inputnumber) {
+  flex: 1 1 5rem;
+  min-width: 0;
 }
 
 .row-msg,
