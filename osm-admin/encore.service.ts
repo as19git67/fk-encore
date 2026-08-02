@@ -5,10 +5,10 @@
  * order:
  *
  *   1. Register the admin HTTP endpoints (side-effect imports).
- *   2. Schedule the importer tick — every 30 s the worker polls the
+ *   2. Schedule the importer tick — every 5 min the worker polls the
  *      geo service for the next import's progress and advances at most
  *      one `importing` row toward `ready_running`.
- *   3. Schedule replication self-healing every five minutes and once shortly
+ *   3. Schedule replication self-healing hourly and once shortly
  *      after boot. Only registered ready regions are considered.
  *   4. Arm the local-cron scheduler (idempotent across services).
  *
@@ -32,8 +32,8 @@ schedule({
   name: "osm-admin-importer",
   description: "Drive `importing` region rows toward `ready_running`.",
   service: "osm-admin",
-  scheduleLabel: "every 30s",
-  nextFire: everyMs(30_000),
+  scheduleLabel: "every 5m",
+  nextFire: everyMs(5 * 60_000),
   run: async () => {
     const outcome = await tickImporter();
     if (outcome.result !== "noop") {
@@ -63,8 +63,8 @@ if (replicationHealingEnabled) {
     name: "osm-admin-replication-healing",
     description: "Initialize missing replication state for registered OSM regions.",
     service: "osm-admin",
-    scheduleLabel: "every 5m",
-    nextFire: everyMs(5 * 60_000),
+    scheduleLabel: "every 1h",
+    nextFire: everyMs(60 * 60_000),
     run: () => runReplicationHealing("scheduled"),
   });
 

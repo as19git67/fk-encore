@@ -260,11 +260,12 @@ function hashFile(absPath: string): Promise<string> {
   });
 }
 
+// 10:15 Berlin (CEST) / 08:15 UTC — part of the 10–13 Uhr batch window.
 schedule({
   name: "documents-fsck",
   description: "Verify document files exist and heal rows pointing at missing files",
   service: "documents",
-  scheduleLabel: "daily 03:30 UTC",
-  nextFire: dailyAtUtc(3, 30),
+  scheduleLabel: "daily 08:15 UTC",
+  nextFire: dailyAtUtc(8, 15),
   run: () => runDocumentsFsck({}),
 });
