@@ -43,6 +43,34 @@ export const useTransactionsStore = defineStore('finance.transactions', () => {
     return resp
   }
 
+  /**
+   * Merge edits made outside the list (basket drawer, batch dialogs) into
+   * the currently displayed page so the cards reflect them without a
+   * reload — issue #886.
+   *
+   * Ids that aren't on the current page are ignored: they're simply not
+   * visible, and pulling them in would break the active filter/scope.
+   */
+  function syncFrom(updated: api.Transaction[]) {
+    if (updated.length === 0) return
+    const byId = new Map(updated.map((tx) => [tx.id, tx]))
+    if (!items.value.some((tx) => byId.has(tx.id))) return
+    items.value = items.value.map((tx) => {
+      const next = byId.get(tx.id)
+      return next ? { ...tx, ...next } : tx
+    })
+  }
+
+  /** Apply the same field changes to a set of ids on the current page. */
+  function patch(ids: number[], changes: Partial<api.Transaction>) {
+    if (ids.length === 0) return
+    const idSet = new Set(ids)
+    if (!items.value.some((tx) => idSet.has(tx.id))) return
+    items.value = items.value.map((tx) =>
+      idSet.has(tx.id) ? { ...tx, ...changes } : tx,
+    )
+  }
+
   return {
     items,
     total,
@@ -52,5 +80,7 @@ export const useTransactionsStore = defineStore('finance.transactions', () => {
     create,
     promoteAiTag,
     batchTag,
+    syncFrom,
+    patch,
   }
 })
