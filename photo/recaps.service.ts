@@ -1035,6 +1035,19 @@ async function pruneStaleRecaps(
   );
 }
 
+/**
+ * The user's home centroid (see `computeHomeCentroid`), for clients that need
+ * "is the device back home" outside of recap building — currently the iOS
+ * Trip Mode auto-end suggestion (`GET /trips/home-location`). `null` when the
+ * user has no geotagged photos yet.
+ */
+export async function getHomeCentroidForUser(
+  userId: number
+): Promise<{ lat: number; lon: number } | null> {
+  const photos = await loadVisiblePhotos(userId);
+  return computeHomeCentroid(photos, new Date());
+}
+
 async function buildTripRecaps(
   userId: number,
   allPhotos: CandidatePhoto[],
