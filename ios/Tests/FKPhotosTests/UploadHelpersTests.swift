@@ -38,6 +38,51 @@ final class UploadHelpersTests: XCTestCase {
         XCTAssertEqual(PhotoSyncService.mimeType(for: "com.example.unknown"), "image/jpeg")
     }
 
+    // MARK: - Image format detection from raw bytes
+    //
+    // Used by the PhotosPicker fallback path, which has no PHAsset to ask for a
+    // uniformTypeIdentifier. It used to declare every such upload as
+    // `image/jpeg`, storing PNGs under a `.jpg` name with a mismatching
+    // Content-Type.
+
+    private func bytes(_ values: [UInt8]) -> Data { Data(values) }
+
+    func testDetectsPngFromMagicBytes() {
+        let png = bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00])
+        XCTAssertEqual(AssetUploadEnqueuer.mimeType(forImageData: png), "image/png")
+    }
+
+    func testDetectsJpegFromMagicBytes() {
+        let jpeg = bytes([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10])
+        XCTAssertEqual(AssetUploadEnqueuer.mimeType(forImageData: jpeg), "image/jpeg")
+    }
+
+    func testDetectsHeicFromBrandBox() {
+        // ....ftypheic
+        let heic = bytes([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70,
+                          0x68, 0x65, 0x69, 0x63, 0x00, 0x00, 0x00, 0x00])
+        XCTAssertEqual(AssetUploadEnqueuer.mimeType(forImageData: heic), "image/heic")
+    }
+
+    func testDetectsWebpFromRiffContainer() {
+        let webp = bytes([0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00,
+                          0x57, 0x45, 0x42, 0x50])
+        XCTAssertEqual(AssetUploadEnqueuer.mimeType(forImageData: webp), "image/webp")
+    }
+
+    func testUnknownAndShortDataFallBackToJpeg() {
+        XCTAssertEqual(AssetUploadEnqueuer.mimeType(forImageData: bytes([0x00, 0x01, 0x02])), "image/jpeg")
+        XCTAssertEqual(AssetUploadEnqueuer.mimeType(forImageData: Data()), "image/jpeg")
+    }
+
+    func testDetectedPngDrivesTheFilenameExtension() {
+        // The two helpers are used together on the fallback path — a PNG must
+        // end up with a .png name, not the hardcoded .jpg it had before.
+        let png = bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+        let mime = AssetUploadEnqueuer.mimeType(forImageData: png)
+        XCTAssertEqual(AssetUploadEnqueuer.filenameMatchingMime("photo_123.jpg", mimeType: mime), "photo_123.png")
+    }
+
     // MARK: - Sync watermark advancement (iOS auto-upload incompleteness)
     //
     // Guards the rule that the per-album watermark must never advance past an

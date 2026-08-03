@@ -321,12 +321,18 @@ struct PhotoUploadView: View {
         let fullHash = PhotoHasher.fullHash(
             imageDataHash: imageDataHash, caption: "", isFavorite: false, capturedAtString: ""
         )
-        let filename = "photo_\(Date().timeIntervalSince1970).jpg"
+        // Derive the real format from the bytes: this path has no PHAsset to
+        // ask, and hardcoding JPEG stored PNGs under a .jpg name with a
+        // mismatching Content-Type.
+        let mimeType = AssetUploadEnqueuer.mimeType(forImageData: data)
+        let filename = AssetUploadEnqueuer.filenameMatchingMime(
+            "photo_\(Date().timeIntervalSince1970).jpg", mimeType: mimeType
+        )
         guard let tempURL = try? await UploadQueue.shared.saveTempFile(data: data, filename: filename) else { return nil }
         return UploadQueueItem(
             tempFileURL: tempURL,
             filename: filename,
-            mimeType: "image/jpeg",
+            mimeType: mimeType,
             imageDataHash: imageDataHash,
             fullHash: fullHash,
             caption: "",

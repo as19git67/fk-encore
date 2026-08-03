@@ -387,6 +387,32 @@ describe("Photo Module", () => {
         fs.unlinkSync(path.join(UPLOAD_DIR, photo.filename));
       });
 
+      it("checkPhotoFullHashesLogic pairs every known hash with its photo id", async () => {
+        // The iOS sync needs the id to add an already-existing photo to its
+        // target album: such a photo is never re-uploaded, so the upload path —
+        // the only place that creates album membership — never runs for it.
+        const photo = await uploadWithSync("with-id.jpg", "with-id-pixels", {
+          imageDataHash: "aa".repeat(32),
+          fullHash: fullHashB,
+        });
+        const unknown = "d5".repeat(32);
+
+        const res = await service.checkPhotoFullHashesLogic(user1.id, [fullHashB, unknown]);
+        expect(res.matches).toEqual([{ hash: fullHashB, photoId: photo.id }]);
+
+        // Scoped per user, exactly like `existing`.
+        const other = await service.checkPhotoFullHashesLogic(user2.id, [fullHashB]);
+        expect(other.matches).toEqual([]);
+
+        fs.unlinkSync(path.join(UPLOAD_DIR, photo.filename));
+      });
+
+      it("checkPhotoFullHashesLogic returns empty matches for an empty request", async () => {
+        const res = await service.checkPhotoFullHashesLogic(user1.id, ["bad", ""]);
+        expect(res.existing).toEqual([]);
+        expect(res.matches).toEqual([]);
+      });
+
       it("tryMetadataOnlySync returns null when the image-data hash is unknown", async () => {
         const res = await service.tryMetadataOnlySync(user1.id, { imageDataHash: "e5".repeat(32) });
         expect(res).toBeNull();
