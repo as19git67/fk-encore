@@ -11,6 +11,9 @@ struct AlbumsListView: View {
     @State private var pinnedAlbumIds: Set<Int> = AlbumPinPreferences.pinnedIds
     /// Album whose properties are being edited (sheet is driven by this).
     @State private var editingAlbum: Album?
+    /// Album being linked to an iPhone album via "Mit iPhone verknüpfen…"
+    /// (issue #812) — the mirror of the media library's "Mit f4mil verknüpfen…".
+    @State private var syncLinkAlbum: Album?
 
     private var filteredAlbums: [Album] {
         let filtered = viewModel.albums.filter { filterSort.appliedFilter.matches($0) }
@@ -87,7 +90,7 @@ struct AlbumsListView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("iOS Mediathek")
                                     .font(.headline)
-                                Text("Alben vom iPhone verfügbar machen")
+                                Text("Alben vom iPhone mit f4mil verknüpfen")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -140,6 +143,7 @@ struct AlbumsListView: View {
                                 Button { togglePin(album.id) } label: {
                                     Label("Lösen", systemImage: "pin.slash")
                                 }
+                                syncToIPhoneButton(for: album)
                                 albumSettingsButton(for: album)
                                 Button(role: .destructive) {
                                     Task { await viewModel.deleteAlbum(id: album.id) }
@@ -174,6 +178,7 @@ struct AlbumsListView: View {
                             Button { togglePin(album.id) } label: {
                                 Label("Anpinnen", systemImage: "pin")
                             }
+                            syncToIPhoneButton(for: album)
                             albumSettingsButton(for: album)
                             Button(role: .destructive) {
                                 Task { await viewModel.deleteAlbum(id: album.id) }
@@ -225,6 +230,9 @@ struct AlbumsListView: View {
                     ? { Task { await viewModel.deleteAlbum(id: album.id) } }
                     : nil
             )
+        }
+        .sheet(item: $syncLinkAlbum) { album in
+            AlbumSyncLinkSheet(album: album)
         }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
@@ -287,6 +295,18 @@ struct AlbumsListView: View {
         if album.hasWriteAccess {
             Button { editingAlbum = album } label: {
                 Label("Album-Einstellungen", systemImage: "gearshape")
+            }
+        }
+    }
+
+    /// Starts the "make this album available on the iPhone" flow (issue #812).
+    /// Requires write access: all three modes upload, and a read-only share
+    /// would 403 on every photo.
+    @ViewBuilder
+    private func syncToIPhoneButton(for album: Album) -> some View {
+        if album.hasWriteAccess {
+            Button { syncLinkAlbum = album } label: {
+                Label(SyncWording.linkFromServerAlbum, systemImage: SyncWording.linkSymbol)
             }
         }
     }
