@@ -249,27 +249,27 @@ describe("extractReferenceNumberTags", () => {
 
 describe("reconcileSubjectPersonTags", () => {
   const persons = [
-    { id: 1, relation_tag: "Jonas" },
-    { id: 2, relation_tag: "Lena" },
+    { id: 1, relation_tag: "Alex" },
+    { id: 2, relation_tag: "Nina" },
     { id: 3, relation_tag: "Vater" },
     { id: 4, relation_tag: "Mutter" },
   ];
 
   it("drops relation tags the detector did not confirm (the reported bug)", () => {
-    // LLM hallucinated Lena + Vater; only Jonas was actually detected.
+    // LLM hallucinated Nina + Vater; only Alex was actually detected.
     const out = reconcileSubjectPersonTags(
-      ["Jonas", "Lena", "Vater", "sprachreise"],
+      ["Alex", "Nina", "Vater", "sprachreise"],
       persons,
       [1],
     );
-    expect(out).toContain("Jonas");
+    expect(out).toContain("Alex");
     expect(out).toContain("sprachreise"); // content tag untouched
-    expect(out).not.toContain("Lena");
+    expect(out).not.toContain("Nina");
     expect(out).not.toContain("Vater");
   });
 
   it("drops all person tags when the detector confirms none (OCR-garbled names)", () => {
-    const out = reconcileSubjectPersonTags(["Jonas", "Lena", "Vater"], persons, []);
+    const out = reconcileSubjectPersonTags(["Alex", "Nina", "Vater"], persons, []);
     expect(out).toEqual([]);
   });
 
@@ -286,8 +286,8 @@ describe("reconcileSubjectPersonTags", () => {
   });
 
   it("matches relation tags case-insensitively and de-duplicates", () => {
-    const out = reconcileSubjectPersonTags(["jonas", "Jonas", "JONAS"], persons, [1]);
-    expect(out).toEqual(["jonas"]);
+    const out = reconcileSubjectPersonTags(["alex", "Alex", "ALEX"], persons, [1]);
+    expect(out).toEqual(["alex"]);
   });
 });
 
