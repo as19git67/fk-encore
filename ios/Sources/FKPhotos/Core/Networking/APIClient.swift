@@ -109,12 +109,30 @@ actor APIClient {
     // MARK: - Batch sync-check
 
     /// Asks the server which of the given full-hashes it already has.
-    /// Returns the subset that exists server-side; everything NOT returned must be uploaded.
-    func syncCheck(hashes: [String]) async throws -> Set<String> {
+    /// Returns full-hash → server photo id for everything that exists
+    /// server-side; every hash NOT in the result must be uploaded.
+    ///
+    /// The photo ids matter for album reconciliation: a photo the server
+    /// already knows is never uploaded again, so the upload path — which is
+    /// what creates album membership — never runs for it. Carrying the id here
+    /// lets the sync add such a photo to its target album directly.
+    /// `matches` is absent on servers predating that field; the hashes then
+    /// still dedup correctly, only the album reconciliation is skipped.
+    func syncCheck(hashes: [String]) async throws -> [String: Int] {
         struct Body: Encodable { let hashes: [String] }
-        struct Response: Decodable { let existing: [String] }
+        struct Match: Decodable { let hash: String; let photoId: Int }
+        struct Response: Decodable {
+            let existing: [String]
+            let matches: [Match]?
+        }
         let response: Response = try await post("/photos/sync/check", body: Body(hashes: hashes))
-        return Set(response.existing)
+        var result: [String: Int] = [:]
+        for match in response.matches ?? [] { result[match.hash] = match.photoId }
+        // Hashes the server reports as existing but without an id (legacy
+        // server) still need to suppress the upload, so map them to 0 and let
+        // callers treat a non-positive id as "known, but not addressable".
+        for hash in response.existing where result[hash] == nil { result[hash] = 0 }
+        return result
     }
 
     // MARK: - Metadata-only sync

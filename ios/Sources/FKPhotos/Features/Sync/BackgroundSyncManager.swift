@@ -662,7 +662,18 @@ public final class BackgroundSyncManager {
         } catch APIError.duplicatePhoto(let existingId) {
             // Server reports duplicate. Treat as success so we don't keep
             // retrying — the dedup outcome is the same as a fresh insert.
-            return .succeeded(photoId: existingId ?? 0)
+            //
+            // A 409 without an id used to be reported as photoId 0, which then
+            // made the album-add below post `photoId: 0` and fail silently: the
+            // photo counted as synced but never appeared in the target album.
+            // Resolve the real id via the hash instead, and only give up when
+            // that fails too.
+            if let existingId, existingId > 0 { return .succeeded(photoId: existingId) }
+            if let resolved = try? await APIClient.shared.syncCheck(hashes: [item.fullHash])[item.fullHash],
+               resolved > 0 {
+                return .succeeded(photoId: resolved)
+            }
+            return .failed("Duplikat ohne Foto-ID — Album-Zuordnung nicht möglich")
         } catch {
             if Self.isCancellationError(error) { return .cancelled }
             return .failed(error.localizedDescription)
