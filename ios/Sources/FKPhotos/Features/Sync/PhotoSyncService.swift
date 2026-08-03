@@ -119,6 +119,13 @@ actor PhotoSyncService {
         purgeLegacySmartAlbumsIfNeeded()
 
         do {
+            // Park links whose server album is gone or no longer writable before
+            // anything uploads into or reconciles them (issue #812, shared-album
+            // entry point). Runs first so a revoked link neither uploads (403 on
+            // every asset) nor has its server album reconciled against a local
+            // album it may no longer represent.
+            await reconcileLinkAccess()
+
             // Step 1: Drain whatever's already queued — Share-Extension items, or
             // pending items from a prior interrupted sync. This used to happen only
             // AFTER the (potentially minute-long) library scan, so the user stared
@@ -400,6 +407,36 @@ actor PhotoSyncService {
         PhotoSyncPreferences.smartAlbumPurgeDone = true
     }
 
+    // MARK: - Link access reconciliation (issue #812, shared-album entry point)
+
+    /// Recomputes which links point at a server album the user may still write
+    /// to, and parks the rest (see `PhotoSyncPreferences.revokedLinkIds`).
+    ///
+    /// One `GET /albums` per sync run — the same request the linking flows
+    /// already make — is enough: it returns every album the user owns or has a
+    /// share for, with the effective access level. A link whose target is
+    /// missing from that list has lost its share or the album was deleted.
+    ///
+    /// A failed request leaves the stored set untouched on purpose: a transient
+    /// network error must never be mistaken for a revoked share and disable a
+    /// perfectly good link.
+    private func reconcileLinkAccess() async {
+        let mappings = PhotoSyncPreferences.albumMappings
+        guard !mappings.isEmpty else { return }
+
+        let response: ListAlbumsResponse? = try? await APIClient.shared.get("/albums")
+        guard let albums = response?.albums else { return }
+
+        let writable = Set(albums.filter(\.hasWriteAccess).map(\.id))
+        let revoked = PhotoSyncPreferences.computeRevokedLinks(
+            mappings: mappings,
+            confirmed: PhotoSyncPreferences.confirmedMappingIds,
+            writableServerAlbumIds: writable
+        )
+        guard revoked != PhotoSyncPreferences.revokedLinkIds else { return }
+        PhotoSyncPreferences.revokedLinkIds = revoked
+    }
+
     // MARK: - Deletion sync (issue #812 "Sync" mode)
 
     /// For every confirmed sync-mode album, removes server-album entries whose
@@ -422,12 +459,17 @@ actor PhotoSyncService {
         let serverPhotoMap = PhotoSyncPreferences.loadServerPhotoMap()
         guard !serverPhotoMap.isEmpty else { return }
 
+        // A link whose share was revoked must not reconcile: we can no longer
+        // read the server album reliably, and a removal we can't verify is the
+        // one operation that must never be guessed.
+        let revoked = PhotoSyncPreferences.revokedLinkIds
+
         for (iosAlbumId, serverAlbumId) in mappings {
             // Each album is one GET + one idempotent batch-remove; stop between
             // albums when the BG task is being expired.
             if Task.isCancelled { return }
             let mode = PhotoSyncPreferences.albumSyncMode(for: iosAlbumId)
-            guard confirmed.contains(iosAlbumId),
+            guard confirmed.contains(iosAlbumId), !revoked.contains(iosAlbumId),
                   mode == .sync || mode == .bisync else { continue }
 
             // Current iOS album membership (local identifiers only — no hashing).
@@ -549,6 +591,9 @@ actor PhotoSyncService {
         guard !albumIds.isEmpty else { return [] }
 
         let confirmed = PhotoSyncPreferences.confirmedMappingIds
+        // Links whose server album is gone or read-only for us: enumerating them
+        // would queue uploads that can only 403 (issue #812).
+        let revoked = PhotoSyncPreferences.revokedLinkIds
         // Never re-upload assets this device downloaded from the server (bisync
         // round-trip guard): the server already has them, and a re-encoded
         // downloaded copy would carry a different image_data_hash, so the server
@@ -563,7 +608,8 @@ actor PhotoSyncService {
         // bypassing per-album collections. Other selections are ignored when
         // the sentinel is present so the user can't accidentally double-sync.
         if albumIds.contains(PhotoSyncPreferences.allLibrarySentinel),
-           confirmed.contains(PhotoSyncPreferences.allLibrarySentinel) {
+           confirmed.contains(PhotoSyncPreferences.allLibrarySentinel),
+           !revoked.contains(PhotoSyncPreferences.allLibrarySentinel) {
             let lastSync = PhotoSyncPreferences.albumSyncDate(for: PhotoSyncPreferences.allLibrarySentinel)
             let options = buildFetchOptions(lastSync: lastSync)
             PHAsset.fetchAssets(with: .image, options: options)
@@ -573,7 +619,7 @@ actor PhotoSyncService {
                     }
                 }
         } else {
-            let confirmedAlbumIds = albumIds.filter { confirmed.contains($0) }
+            let confirmedAlbumIds = albumIds.filter { confirmed.contains($0) && !revoked.contains($0) }
             PHAssetCollection
                 .fetchAssetCollections(withLocalIdentifiers: Array(confirmedAlbumIds), options: nil)
                 .enumerateObjects { collection, _, _ in
