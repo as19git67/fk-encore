@@ -159,6 +159,10 @@ actor PhotoSyncService {
             // the strict `creationDate >` enumeration predicate would skip them
             // forever and they'd never be retried.
             var earliestUnhashedByAlbum: [String: Date] = [:]
+            // Server album id → photo ids that already exist server-side and
+            // belong into that album (see Step 3b). Reconciled in one batched
+            // call per album after the scan.
+            var pendingAlbumAttachments: [Int: Set<Int>] = [:]
             for batchStart in stride(from: 0, to: assets.count, by: processingBatchSize) {
                 try Task.checkCancellation()
                 let assetBatch = assets[batchStart..<min(batchStart + processingBatchSize, assets.count)]
@@ -190,7 +194,28 @@ actor PhotoSyncService {
                     // Step 3: Sync-check to find which full-hashes the server already has.
                     await SyncProgress.shared.update(.checkingServer(batchSize: hashPairs.count))
                     let batchHashes = hashPairs.map { $0.hashResult.fullHash }
-                    let serverHas = Set((try? await APIClient.shared.syncCheck(hashes: batchHashes)) ?? [])
+                    let serverPhotoIds = (try? await APIClient.shared.syncCheck(hashes: batchHashes)) ?? [:]
+                    let serverHas = Set(serverPhotoIds.keys)
+
+                    // Step 3b: Collect album memberships for assets we are about
+                    // to skip because the server already has their pixels. The
+                    // upload path is what normally creates membership, so
+                    // without this a photo that exists server-side but was never
+                    // added to this album would stay out of it on every run,
+                    // forever — including after a full re-sync (issue: a few
+                    // photos always missing from the server album).
+                    for pair in hashPairs where serverHas.contains(pair.hashResult.fullHash) {
+                        guard let photoId = serverPhotoIds[pair.hashResult.fullHash], photoId > 0,
+                              let albumId = resolveTargetAlbumIds(sourceAlbumId: pair.sourceAlbumId).first
+                        else { continue }
+                        pendingAlbumAttachments[albumId, default: []].insert(photoId)
+                        // Keep the server↔local mapping current so the deletion
+                        // pass recognises this photo as one this device owns.
+                        PhotoSyncPreferences.recordUploadedPhoto(
+                            serverPhotoId: photoId,
+                            localIdentifier: pair.asset.localIdentifier
+                        )
+                    }
 
                     // Step 4: Enqueue assets whose full-hash the server doesn't have.
                     let alreadyQueued = Set(await UploadQueue.shared.pendingItems().map(\.fullHash))
@@ -227,9 +252,11 @@ actor PhotoSyncService {
                 processedCount += assetBatch.count
             }
 
-            // Final pass: drain anything still pending plus mark the overall sync
+            // Final pass: drain anything still pending, reconcile the album
+            // memberships collected in Step 3b, then mark the overall sync
             // timestamp. The per-album watermarks were already advanced above.
             await drainQueueWithProgress()
+            await reconcileAlbumAttachments(pendingAlbumAttachments)
             PhotoSyncPreferences.lastSyncDate = syncStartDate
             await SyncProgress.shared.reset()
         } catch {
@@ -238,6 +265,54 @@ actor PhotoSyncService {
             // so the spinner never stays visible after the sync has stopped.
             await SyncProgress.shared.reset()
             throw error
+        }
+    }
+
+    // MARK: - Album membership reconciliation
+
+    /// Adds photos that already exist server-side to their target album.
+    ///
+    /// The upload path is the only place that creates album membership, so a
+    /// photo whose pixels the server already has — uploaded from another album,
+    /// via the Share Extension, from another device, or by a duplicate response
+    /// that carried no photo id — is skipped by the sync scan and never lands
+    /// in the album. That gap is stable: every subsequent run skips it again,
+    /// and even disconnecting and re-linking the album with "upload everything"
+    /// does not help, because only the watermark is reset while the server-side
+    /// hashes stay.
+    ///
+    /// One GET (current membership) plus at most one batched POST per album, and
+    /// only for albums that actually have something to add, so a steady-state
+    /// sync costs nothing.
+    private func reconcileAlbumAttachments(_ pending: [Int: Set<Int>]) async {
+        guard !pending.isEmpty else { return }
+
+        for (serverAlbumId, photoIds) in pending {
+            if Task.isCancelled { return }
+            guard !photoIds.isEmpty else { continue }
+
+            struct MinimalPhoto: Decodable { let id: Int }
+            struct PhotosResponse: Decodable { let photos: [MinimalPhoto] }
+            // Without the current membership we cannot tell what is missing;
+            // skip rather than blind-adding the whole set every run.
+            guard let response: PhotosResponse = try? await APIClient.shared.get(
+                "/albums/\(serverAlbumId)/photos"
+            ) else { continue }
+
+            let present = Set(response.photos.map(\.id))
+            let toAdd = photoIds.subtracting(present).sorted()
+            guard !toAdd.isEmpty else { continue }
+
+            struct BatchBody: Encodable {
+                let albumIds: [Int]
+                let photoIds: [Int]
+                let action: String
+            }
+            struct BatchResponse: Decodable { let success: Bool }
+            let _: BatchResponse? = try? await APIClient.shared.post(
+                "/albums/photos/batch",
+                body: BatchBody(albumIds: [serverAlbumId], photoIds: toAdd, action: "add")
+            )
         }
     }
 

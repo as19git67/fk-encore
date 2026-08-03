@@ -1819,27 +1819,43 @@ export async function checkPhotoHashLogic(
  * one batched round-trip replaces thousands of individual /photos/check-hash
  * calls (issue #432). Hashes are normalised and de-duplicated; malformed
  * entries are silently dropped.
+ *
+ * Besides the plain `existing` list the response carries `matches`, pairing
+ * every known hash with its photo id. The client needs the id to reconcile
+ * album membership for photos it skips as "already on the server": without it
+ * a photo that exists but was never added to the target album stayed out of
+ * that album forever, because the sync skips it on every single run and album
+ * membership was only ever created on the upload path.
  */
 export async function checkPhotoFullHashesLogic(
   userId: number,
   hashes: string[],
-): Promise<{ existing: string[] }> {
+): Promise<{ existing: string[]; matches: { hash: string; photoId: number }[] }> {
   const normalized = Array.from(new Set(
     (hashes ?? [])
       .map((h) => (h ?? "").trim().toLowerCase())
       .filter((h) => /^[a-f0-9]{64}$/.test(h)),
   ));
-  if (normalized.length === 0) return { existing: [] };
+  if (normalized.length === 0) return { existing: [], matches: [] };
 
-  const rows = await dbAll<{ hash: string | null }>(
-    db.select({ hash: photos.hash })
+  const rows = await dbAll<{ id: number; hash: string | null }>(
+    db.select({ id: photos.id, hash: photos.hash })
       .from(photos)
       .where(and(eq(photos.user_id, userId), inArray(photos.hash, normalized))),
   );
-  const found = new Set(
-    rows.map((r) => r.hash).filter((h): h is string => !!h),
-  );
-  return { existing: normalized.filter((h) => found.has(h)) };
+  // Lowest id wins when the same hash somehow maps to several rows, so the
+  // client's album reconciliation is deterministic across runs.
+  const byHash = new Map<string, number>();
+  for (const row of rows) {
+    if (!row.hash) continue;
+    const current = byHash.get(row.hash);
+    if (current === undefined || row.id < current) byHash.set(row.hash, row.id);
+  }
+  const existing = normalized.filter((h) => byHash.has(h));
+  return {
+    existing,
+    matches: existing.map((hash) => ({ hash, photoId: byHash.get(hash)! })),
+  };
 }
 
 /**

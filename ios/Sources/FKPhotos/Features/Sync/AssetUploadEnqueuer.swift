@@ -95,6 +95,38 @@ enum AssetUploadEnqueuer {
         )
     }
 
+    /// Detects the image format from the data's magic bytes. Used on the
+    /// PhotosPicker fallback path, where iOS hands us raw bytes without a
+    /// `PHAsset` (and thus without a `uniformTypeIdentifier` to map). That path
+    /// used to declare everything as `image/jpeg`, so a PNG was stored under a
+    /// `.jpg` name with a mismatching Content-Type.
+    ///
+    /// Only the formats the server accepts are recognised; anything else falls
+    /// back to JPEG, which is what the old behaviour assumed unconditionally.
+    static func mimeType(forImageData data: Data) -> String {
+        func matches(_ signature: [UInt8], at offset: Int = 0) -> Bool {
+            guard data.count >= offset + signature.count else { return false }
+            let start = data.index(data.startIndex, offsetBy: offset)
+            return !zip(data[start...], signature).contains { $0 != $1 }
+        }
+
+        if matches([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) { return "image/png" }
+        if matches([0xFF, 0xD8, 0xFF]) { return "image/jpeg" }
+        if matches([0x47, 0x49, 0x46, 0x38]) { return "image/gif" }
+        // RIFF....WEBP
+        if matches([0x52, 0x49, 0x46, 0x46]), matches([0x57, 0x45, 0x42, 0x50], at: 8) { return "image/webp" }
+        // ISO-BMFF brand box: "ftyp" at offset 4, HEIC/HEIF brand right after.
+        if matches([0x66, 0x74, 0x79, 0x70], at: 4) {
+            for brand in [[0x68, 0x65, 0x69, 0x63], [0x68, 0x65, 0x69, 0x78],
+                          [0x68, 0x65, 0x76, 0x63], [0x6D, 0x69, 0x66, 0x31]] as [[UInt8]]
+            where matches(brand, at: 8) {
+                return "image/heic"
+            }
+        }
+        if matches([0x49, 0x49, 0x2A, 0x00]) || matches([0x4D, 0x4D, 0x00, 0x2A]) { return "image/tiff" }
+        return "image/jpeg"
+    }
+
     /// Replaces the filename's extension with one matching *mimeType* when the
     /// two disagree. Equivalent extensions (heic ↔ heif, jpg ↔ jpeg) are treated
     /// as matching so user-recognisable names aren't churned needlessly.

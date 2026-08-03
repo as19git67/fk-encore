@@ -232,10 +232,17 @@ export const checkPhotoHash = api(
  * sync sends the full-file hash of every photo in the device library in a few
  * batched calls and uploads only the ones the server reports as missing —
  * replacing thousands of individual /photos/check-hash round-trips.
+ *
+ * `matches` pairs each known hash with its photo id so the client can add an
+ * already-existing photo to its target album without re-uploading the bytes.
+ * Older clients that only read `existing` are unaffected.
  */
 export const checkPhotoHashes = api(
   { expose: true, method: "POST", path: "/photos/sync/check", auth: true },
-  async ({ hashes }: { hashes: string[] }): Promise<{ existing: string[] }> => {
+  async ({ hashes }: { hashes: string[] }): Promise<{
+    existing: string[];
+    matches: { hash: string; photoId: number }[];
+  }> => {
     checkModule();
     const userId = getUserId();
     const authData = getAuthData()!;
