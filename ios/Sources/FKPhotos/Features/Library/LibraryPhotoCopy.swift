@@ -173,12 +173,27 @@ struct LibraryPhotoCopySheet: View {
 
     private func copy(to album: Album) async {
         let count = await model.copy(assets, to: album)
-        if count > 0 {
-            let what = count == 1 ? "Foto" : "\(count) Fotos"
-            onFinished(.success("\(what) wird nach \"\(album.name)\" hochgeladen"))
-        } else {
-            onFinished(.error(model.errorMessage ?? "Kopieren fehlgeschlagen"))
-        }
+        onFinished(Self.resultToast(enqueued: count, requested: assets.count, albumName: album.name)
+            ?? .error(model.errorMessage ?? "Kopieren fehlgeschlagen"))
         dismiss()
+    }
+
+    /// Feedback for a finished copy, or nil when nothing could be prepared at
+    /// all (the caller then reports the model's error).
+    ///
+    /// A partial result is called out explicitly: with a batch it is entirely
+    /// possible that a few photos live only in iCloud and can't be hashed, and
+    /// silently uploading 47 of 50 while saying "50 Fotos" would be a lie the
+    /// user only discovers much later, if ever.
+    static func resultToast(enqueued: Int, requested: Int, albumName: String) -> ToastMessage? {
+        guard enqueued > 0 else { return nil }
+        if enqueued < requested {
+            return .info("\(enqueued) von \(requested) Fotos werden nach \"\(albumName)\" hochgeladen — der Rest ist gerade nicht auf dem Gerät verfügbar")
+        }
+        return .success(
+            enqueued == 1
+                ? "Foto wird nach \"\(albumName)\" hochgeladen"
+                : "\(enqueued) Fotos werden nach \"\(albumName)\" hochgeladen"
+        )
     }
 }

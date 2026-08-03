@@ -69,6 +69,35 @@ final class LibraryPhotoCopyTests: XCTestCase {
         XCTAssertTrue(LibraryPhotoCopyModel.copyTargets(from: []).isEmpty)
     }
 
+    // MARK: - Batch result feedback
+
+    func testSinglePhotoUsesSingularWording() {
+        let toast = LibraryPhotoCopySheet.resultToast(enqueued: 1, requested: 1, albumName: "Toskana")
+        XCTAssertEqual(toast?.style, .success)
+        XCTAssertEqual(toast?.text, "Foto wird nach \"Toskana\" hochgeladen")
+    }
+
+    func testFullBatchUsesPluralWording() {
+        let toast = LibraryPhotoCopySheet.resultToast(enqueued: 12, requested: 12, albumName: "Toskana")
+        XCTAssertEqual(toast?.style, .success)
+        XCTAssertEqual(toast?.text, "12 Fotos werden nach \"Toskana\" hochgeladen")
+    }
+
+    /// Photos that live only in iCloud can't be hashed. Reporting the batch as
+    /// complete would hide that from the user until they eventually notice
+    /// missing photos — so a partial result says so out loud.
+    func testPartialBatchReportsBothCounts() {
+        let toast = LibraryPhotoCopySheet.resultToast(enqueued: 47, requested: 50, albumName: "Toskana")
+        XCTAssertEqual(toast?.style, .info)
+        XCTAssertEqual(toast?.text.contains("47 von 50"), true, toast?.text ?? "")
+    }
+
+    /// Nothing prepared is not a toast the sheet can phrase — the caller falls
+    /// back to the model's own error message.
+    func testNothingEnqueuedYieldsNoToast() {
+        XCTAssertNil(LibraryPhotoCopySheet.resultToast(enqueued: 0, requested: 3, albumName: "Toskana"))
+    }
+
     // MARK: - Sheet payload
 
     /// `.sheet(item:)` re-presents whenever the identity changes, so the id has

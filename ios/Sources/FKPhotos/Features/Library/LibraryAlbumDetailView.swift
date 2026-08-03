@@ -16,9 +16,18 @@ struct LibraryAlbumDetailView: View {
     @State private var errorMessage: String?
     @State private var syncStatus: LibraryBrowserViewModel.IOSAlbum.SyncStatus
     @State private var isLinked: Bool
-    /// Asset queued for the one-off "Nach f4mil kopieren…" flow (issue #812).
+    /// Asset(s) queued for the one-off "Nach f4mil kopieren…" flow (issue #812).
     @State private var copyRequest: LibraryPhotoCopyRequest?
     @State private var toastMessage: ToastMessage?
+    /// Multi-select for copying a batch in one go. Keyed by `localIdentifier`
+    /// rather than grid index so a reload can't silently reassign the selection
+    /// to different photos.
+    @State private var isSelecting = false
+    @State private var selectedAssetIds: Set<String> = []
+    /// Grid-cell frames by index, for the drag-select hit test. Index-keyed
+    /// because the shared `PhotoFramePreference` is `[Int: CGRect]`; resolved
+    /// back to a `localIdentifier` before anything is selected.
+    @State private var itemFrames: [Int: CGRect] = [:]
 
     init(album: LibraryBrowserViewModel.IOSAlbum, viewModel: LibraryBrowserViewModel) {
         self.album = album
@@ -59,8 +68,8 @@ struct LibraryAlbumDetailView: View {
             }
             content
         }
-        .navigationTitle(album.name)
-        .navigationBarTitleDisplayMode(.large)
+        .navigationTitle(isSelecting ? "\(selectedAssetIds.count) ausgewählt" : album.name)
+        .navigationBarTitleDisplayMode(isSelecting ? .inline : .large)
         .toolbar {
             ToolbarItem(placement: .bottomBar) {
                 HStack {
@@ -73,8 +82,45 @@ struct LibraryAlbumDetailView: View {
             }
         }
         .toolbar {
+            if isSelecting {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") { endSelection() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(selectedAssetIds.count == assets.count ? "Keins" : "Alle") {
+                        selectedAssetIds = selectedAssetIds.count == assets.count
+                            ? []
+                            : Set(assets.map(\.localIdentifier))
+                    }
+                    .disabled(assets.isEmpty)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        copySelection()
+                    } label: {
+                        Image(systemName: "square.and.arrow.up.on.square")
+                    }
+                    .disabled(selectedAssetIds.isEmpty)
+                }
+            }
+        }
+        .toolbar {
+            // Entering multi-select needs a visible affordance — the context
+            // menu alone would leave batch copying undiscoverable.
             ToolbarItem(placement: .primaryAction) {
-                if canMakeAvailable {
+                if !isSelecting && !assets.isEmpty {
+                    Button {
+                        isSelecting = true
+                        selectedAssetIds = []
+                    } label: {
+                        Image(systemName: "checkmark.circle")
+                    }
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                if isSelecting {
+                    EmptyView()
+                } else if canMakeAvailable {
                     Button {
                         showModeChoice = true
                     } label: {
@@ -115,6 +161,9 @@ struct LibraryAlbumDetailView: View {
         .sheet(item: $copyRequest) { request in
             LibraryPhotoCopySheet(assets: request.assets) { message in
                 toastMessage = message
+                // The batch is on its way; keeping the grid in selection mode
+                // would invite an accidental second copy of the same photos.
+                endSelection()
             }
         }
         .toast($toastMessage)
@@ -204,22 +253,104 @@ struct LibraryAlbumDetailView: View {
                 LazyVGrid(columns: columns, spacing: 2) {
                     ForEach(Array(assets.enumerated()), id: \.element.localIdentifier) { index, asset in
                         LibraryPhotoCell(asset: asset)
-                            .onTapGesture {
-                                selectedAssetIndex = index
-                                showFullscreen = true
-                            }
-                            .contextMenu {
-                                Button {
-                                    copyRequest = LibraryPhotoCopyRequest(asset)
-                                } label: {
-                                    Label("Nach f4mil kopieren…", systemImage: "square.and.arrow.up.on.square")
+                            .overlay(alignment: .topLeading) {
+                                if isSelecting {
+                                    SelectionCheckmark(
+                                        isSelected: selectedAssetIds.contains(asset.localIdentifier)
+                                    )
+                                    .padding(4)
                                 }
                             }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                if isSelecting {
+                                    toggleSelection(asset.localIdentifier)
+                                } else {
+                                    selectedAssetIndex = index
+                                    showFullscreen = true
+                                }
+                            }
+                            // Long-press stays the context menu rather than
+                            // becoming "enter selection mode": the toolbar
+                            // already offers that, and the one-tap single copy
+                            // is worth keeping. Both branches always yield at
+                            // least one item — an empty @ViewBuilder here would
+                            // pop a blank menu.
+                            .contextMenu {
+                                if isSelecting {
+                                    Button {
+                                        copySelection(including: asset)
+                                    } label: {
+                                        Label("Auswahl kopieren…", systemImage: "square.and.arrow.up.on.square")
+                                    }
+                                } else {
+                                    Button {
+                                        copyRequest = LibraryPhotoCopyRequest(asset)
+                                    } label: {
+                                        Label("Nach f4mil kopieren…", systemImage: "square.and.arrow.up.on.square")
+                                    }
+                                    Button {
+                                        isSelecting = true
+                                        selectedAssetIds = [asset.localIdentifier]
+                                    } label: {
+                                        Label("Mehrere auswählen", systemImage: "checkmark.circle")
+                                    }
+                                }
+                            }
+                            .reportPhotoFrame(id: index, space: "libraryGrid")
                     }
                 }
                 .padding(.horizontal, 2)
+                .coordinateSpace(name: "libraryGrid")
+                .onPreferenceChange(PhotoFramePreference.self) { itemFrames = $0 }
+                .simultaneousGesture(isSelecting ? dragSelectGesture : nil)
             }
         }
+    }
+
+    // MARK: - Multi-select
+
+    /// Swipe across the grid to select a run of photos, matching the album
+    /// detail view's gesture. Additive only: dragging never *deselects*, so a
+    /// wobbly finger can't silently undo part of the selection.
+    private var dragSelectGesture: some Gesture {
+        DragGesture(minimumDistance: 10, coordinateSpace: .named("libraryGrid"))
+            .onChanged { value in
+                let point = value.location
+                for (index, frame) in itemFrames where frame.contains(point) {
+                    guard assets.indices.contains(index) else { continue }
+                    selectedAssetIds.insert(assets[index].localIdentifier)
+                }
+            }
+    }
+
+    private func toggleSelection(_ localIdentifier: String) {
+        if selectedAssetIds.contains(localIdentifier) {
+            selectedAssetIds.remove(localIdentifier)
+        } else {
+            selectedAssetIds.insert(localIdentifier)
+        }
+    }
+
+    private func endSelection() {
+        isSelecting = false
+        selectedAssetIds = []
+    }
+
+    /// Hands the current selection to the copy sheet, in grid order so the
+    /// upload queue mirrors what the user sees.
+    ///
+    /// `extra` is the photo a context menu was opened on: long-pressing a photo
+    /// that isn't selected yet should include it rather than quietly copy
+    /// everything *except* the one under the finger. Resolved into a local set
+    /// first so the copy never depends on the `@State` write landing first.
+    private func copySelection(including extra: PHAsset? = nil) {
+        var ids = selectedAssetIds
+        if let extra { ids.insert(extra.localIdentifier) }
+        let selected = assets.filter { ids.contains($0.localIdentifier) }
+        guard !selected.isEmpty else { return }
+        selectedAssetIds = ids
+        copyRequest = LibraryPhotoCopyRequest(selected)
     }
 
     /// Shown when the linked server album is gone or no longer writable
