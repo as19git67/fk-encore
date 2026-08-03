@@ -249,8 +249,24 @@ atomare `claimNextPending()`-Schritt.
 
 ## 8. Album-Zuordnung & Auswahl
 
-- **Konfiguration** erfolgt ausschließlich in der **iOS-Mediathek** über
-  „Verfügbar machen" (Album-Verknüpfung + Modus). Die Einstellungen
+- **Konfiguration** erfolgt über zwei spiegelbildliche Einstiegspunkte, die
+  **dieselbe** Verknüpfung schreiben — alles dahinter (Upload-Scan,
+  Löschabgleich, Bisync-Download) kennt den Unterschied nicht:
+  1. **iOS-Mediathek → „Verfügbar machen"** (`LibraryBrowserViewModel.makeAvailable`):
+     startet beim iOS-Album, findet/erzeugt das Server-Album.
+  2. **f4mil-Album → „Mit iPhone synchronisieren…"** (`AlbumSyncLinkModel.link`,
+     Issue #812): startet beim **Server-Album** und findet/erzeugt das iOS-Album
+     via `IOSAlbumLocator.findOrCreate(named:)`. Das ist der Weg für **geteilte
+     Alben**: wer Bearbeiten-Freigabe auf ein fremdes Album hat, kann seine
+     eigenen Fotos dort einbringen, ohne vorher ein lokales Album passend
+     umbenennen zu müssen. Erreichbar aus dem Kontextmenü der Albumliste und
+     dem Überlauf-Menü der Album-Detailansicht; erfordert Schreibzugriff, weil
+     alle drei Modi hochladen.
+     Vorbedingungen (`AlbumSyncLinkModel.precondition`, rein & getestet):
+     Schreibzugriff, nicht-leerer Name, Server-Album noch nicht verknüpft, und
+     kein gleichnamiges iOS-Album, das bereits an einem **anderen** Server-Album
+     hängt (sonst würden zwei Verknüpfungen um dasselbe iOS-Album streiten).
+  Die Einstellungen
   (`SyncSettingsView` → „Foto-Synchronisierung") enthalten nur noch den
   Haupt­schalter, globale Optionen (Nur WLAN, Screenshots), Status und den
   manuellen Auslöser — keine Album-Auswahl/-Zuordnung mehr. Nur reguläre
@@ -315,6 +331,28 @@ atomare `claimNextPending()`-Schritt.
   wurde, war nie im iOS-Album; sein Fehlen dort ist keine lokale Löschung,
   sondern eine noch nicht heruntergesynchte Server-Aufnahme. Das iOS-Zielalbum ist dasselbe wie beim Upload (Download nutzt
   `getOrCreateIOSAlbum(named:)`, Namensgleichheit durch „Verfügbar machen").
+- **Entzogene Freigaben** (`revokedLinkIds`, Issue #812): Eine Verknüpfung kann
+  auf ein **fremdes** Album zeigen. Wird die Freigabe entzogen, auf Nur-Lesen
+  herabgestuft oder das Album gelöscht, würde der Upload sonst bei jedem Lauf
+  aufs Neue mit 403/404 scheitern. `PhotoSyncService.reconcileLinkAccess()` holt
+  darum zu Beginn jedes Laufs **ein** `GET /albums` und parkt alle
+  Verknüpfungen, deren Ziel nicht (mehr) beschreibbar ist
+  (`PhotoSyncPreferences.computeRevokedLinks`, rein & getestet). Geparkte
+  Verknüpfungen werden vom Upload-Scan (`fetchAssetsSync`), vom Löschabgleich
+  und von `bisyncServerAlbumIds()` übersprungen; die Mediathek zeigt das Badge
+  „kein Zugriff" samt Erklärung. Die Menge wird **jedes Mal neu berechnet**,
+  also reaktiviert sich eine Verknüpfung von selbst, sobald der Zugriff zurück
+  ist. Ein fehlgeschlagener Request lässt die gespeicherte Menge bewusst
+  unverändert — ein Netzwerkfehler darf nie als Freigabe-Entzug durchgehen.
+- **Einmal-Kopie einzelner Fotos** (`LibraryPhotoCopyModel`, Issue #812
+  Etappe 5): „Nach f4mil kopieren…" im Kontextmenü des Mediathek-Grids und in
+  der Vollbildansicht. Bewusst **keine** dauerhafte Beziehung — es wird nichts
+  in die Verknüpfungs-Stores geschrieben, und das Queue-Item trägt **kein**
+  `sourceIosAlbumId`, damit die Einmal-Kopie keinen Album-Wasserstand
+  vorschiebt und so Fotos aus dem echten Sync des Albums verschluckt.
+  Zielauswahl: alle Alben mit Schreibzugriff (Nur-Lesen-Freigaben würden
+  serverseitig abgelehnt). Mehrfaches Kopieren ist harmlos: der Server
+  dedupliziert über `full_hash` und hängt das vorhandene Foto nur ans Album.
 
 ---
 

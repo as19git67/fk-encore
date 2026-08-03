@@ -16,6 +16,18 @@ struct LibraryAlbumDetailView: View {
     @State private var errorMessage: String?
     @State private var syncStatus: LibraryBrowserViewModel.IOSAlbum.SyncStatus
     @State private var isLinked: Bool
+    /// Asset(s) queued for the one-off "Nach f4mil kopieren…" flow (issue #812).
+    @State private var copyRequest: LibraryPhotoCopyRequest?
+    @State private var toastMessage: ToastMessage?
+    /// Multi-select for copying a batch in one go. Keyed by `localIdentifier`
+    /// rather than grid index so a reload can't silently reassign the selection
+    /// to different photos.
+    @State private var isSelecting = false
+    @State private var selectedAssetIds: Set<String> = []
+    /// Grid-cell frames by index, for the drag-select hit test. Index-keyed
+    /// because the shared `PhotoFramePreference` is `[Int: CGRect]`; resolved
+    /// back to a `localIdentifier` before anything is selected.
+    @State private var itemFrames: [Int: CGRect] = [:]
 
     init(album: LibraryBrowserViewModel.IOSAlbum, viewModel: LibraryBrowserViewModel) {
         self.album = album
@@ -27,21 +39,20 @@ struct LibraryAlbumDetailView: View {
     private var canMakeAvailable: Bool { syncStatus == .none }
     private var canDisconnect: Bool { isLinked }
 
-    /// Two-way binding for the linked album's sync mode. Reads the local
-    /// syncStatus; writing persists via the view model and reflects the new
-    /// status locally.
+    /// Two-way binding for the linked album's sync mode. Reads the *persisted*
+    /// mode rather than deriving it from `syncStatus`, because a parked link
+    /// (`.revoked`) has no mode of its own to derive from and would otherwise
+    /// always read back as "Kopieren".
     private var syncModeBinding: Binding<PhotoSyncMode> {
         Binding(
-            get: {
-                switch syncStatus {
-                case .bisync: return .bisync
-                case .sync:   return .sync
-                default:      return .copy
-                }
-            },
+            get: { PhotoSyncPreferences.albumSyncMode(for: album.id) },
             set: { newMode in
                 viewModel.setSyncMode(newMode, for: album)
-                syncStatus = LibraryBrowserViewModel.status(for: newMode)
+                // A revoked link keeps its badge until access is restored — the
+                // mode change doesn't reactivate it.
+                if syncStatus != .revoked {
+                    syncStatus = LibraryBrowserViewModel.status(for: newMode)
+                }
             }
         )
     }
@@ -51,32 +62,14 @@ struct LibraryAlbumDetailView: View {
     ]
 
     var body: some View {
-        Group {
-            if isLoading {
-                ProgressView("Fotos laden…")
-            } else if assets.isEmpty {
-                ContentUnavailableView {
-                    Label("Keine Fotos", systemImage: "photo")
-                } description: {
-                    Text("Dieses Album enthält keine Fotos.")
-                }
-            } else {
-                ScrollView {
-                    LazyVGrid(columns: columns, spacing: 2) {
-                        ForEach(Array(assets.enumerated()), id: \.element.localIdentifier) { index, asset in
-                            LibraryPhotoCell(asset: asset)
-                                .onTapGesture {
-                                    selectedAssetIndex = index
-                                    showFullscreen = true
-                                }
-                        }
-                    }
-                    .padding(.horizontal, 2)
-                }
+        VStack(spacing: 0) {
+            if syncStatus == .revoked {
+                revokedNotice
             }
+            content
         }
-        .navigationTitle(album.name)
-        .navigationBarTitleDisplayMode(.large)
+        .navigationTitle(isSelecting ? "\(selectedAssetIds.count) ausgewählt" : album.name)
+        .navigationBarTitleDisplayMode(isSelecting ? .inline : .large)
         .toolbar {
             ToolbarItem(placement: .bottomBar) {
                 HStack {
@@ -89,8 +82,45 @@ struct LibraryAlbumDetailView: View {
             }
         }
         .toolbar {
+            if isSelecting {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") { endSelection() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(selectedAssetIds.count == assets.count ? "Keins" : "Alle") {
+                        selectedAssetIds = selectedAssetIds.count == assets.count
+                            ? []
+                            : Set(assets.map(\.localIdentifier))
+                    }
+                    .disabled(assets.isEmpty)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        copySelection()
+                    } label: {
+                        Image(systemName: SyncWording.sendOnceSymbol)
+                    }
+                    .disabled(selectedAssetIds.isEmpty)
+                }
+            }
+        }
+        .toolbar {
+            // Entering multi-select needs a visible affordance — the context
+            // menu alone would leave batch copying undiscoverable.
             ToolbarItem(placement: .primaryAction) {
-                if canMakeAvailable {
+                if !isSelecting && !assets.isEmpty {
+                    Button {
+                        isSelecting = true
+                        selectedAssetIds = []
+                    } label: {
+                        Image(systemName: "checkmark.circle")
+                    }
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                if isSelecting {
+                    EmptyView()
+                } else if canMakeAvailable {
                     Button {
                         showModeChoice = true
                     } label: {
@@ -108,7 +138,7 @@ struct LibraryAlbumDetailView: View {
                         Button(role: .destructive) {
                             showDisconnectConfirm = true
                         } label: {
-                            Label("Trennen", systemImage: "minus.circle")
+                            Label(SyncWording.unlink, systemImage: SyncWording.unlinkSymbol)
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
@@ -128,8 +158,17 @@ struct LibraryAlbumDetailView: View {
                 )
             }
         }
+        .sheet(item: $copyRequest) { request in
+            LibraryPhotoCopySheet(assets: request.assets) { message in
+                toastMessage = message
+                // The batch is on its way; keeping the grid in selection mode
+                // would invite an accidental second copy of the same photos.
+                endSelection()
+            }
+        }
+        .toast($toastMessage)
         .alert(
-            "Album \"\(album.name)\" verfügbar machen",
+            "Album \"\(album.name)\" mit f4mil verknüpfen",
             isPresented: $showModeChoice
         ) {
             Button("Kopieren") {
@@ -156,7 +195,7 @@ struct LibraryAlbumDetailView: View {
             }
             Button("Abbrechen", role: .cancel) {}
         } message: {
-            Text("Das Album \"\(album.name)\" wird nicht mehr automatisch hochgeladen. Bereits hochgeladene Fotos bleiben auf dem Server.")
+            Text("Das Album \"\(album.name)\" wird nicht mehr automatisch hochgeladen. Bereits hochgeladene Fotos bleiben in f4mil.")
         }
         .alert(
             initialSyncTitle,
@@ -198,6 +237,143 @@ struct LibraryAlbumDetailView: View {
         }
     }
 
+    @ViewBuilder
+    private var content: some View {
+        if isLoading {
+            ProgressView("Fotos laden…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if assets.isEmpty {
+            ContentUnavailableView {
+                Label("Keine Fotos", systemImage: "photo")
+            } description: {
+                Text("Dieses Album enthält keine Fotos.")
+            }
+        } else {
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: 2) {
+                    ForEach(Array(assets.enumerated()), id: \.element.localIdentifier) { index, asset in
+                        LibraryPhotoCell(asset: asset)
+                            .overlay(alignment: .topLeading) {
+                                if isSelecting {
+                                    SelectionCheckmark(
+                                        isSelected: selectedAssetIds.contains(asset.localIdentifier)
+                                    )
+                                    .padding(4)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                if isSelecting {
+                                    toggleSelection(asset.localIdentifier)
+                                } else {
+                                    selectedAssetIndex = index
+                                    showFullscreen = true
+                                }
+                            }
+                            // Long-press stays the context menu rather than
+                            // becoming "enter selection mode": the toolbar
+                            // already offers that, and the one-tap single copy
+                            // is worth keeping. Both branches always yield at
+                            // least one item — an empty @ViewBuilder here would
+                            // pop a blank menu.
+                            .contextMenu {
+                                if isSelecting {
+                                    Button {
+                                        copySelection(including: asset)
+                                    } label: {
+                                        Label(SyncWording.sendSelectionOnce, systemImage: SyncWording.sendOnceSymbol)
+                                    }
+                                } else {
+                                    Button {
+                                        copyRequest = LibraryPhotoCopyRequest(asset)
+                                    } label: {
+                                        Label(SyncWording.sendOnce, systemImage: SyncWording.sendOnceSymbol)
+                                    }
+                                    Button {
+                                        isSelecting = true
+                                        selectedAssetIds = [asset.localIdentifier]
+                                    } label: {
+                                        Label("Mehrere auswählen", systemImage: "checkmark.circle")
+                                    }
+                                }
+                            }
+                            .reportPhotoFrame(id: index, space: "libraryGrid")
+                    }
+                }
+                .padding(.horizontal, 2)
+                .coordinateSpace(name: "libraryGrid")
+                .onPreferenceChange(PhotoFramePreference.self) { itemFrames = $0 }
+                .simultaneousGesture(isSelecting ? dragSelectGesture : nil)
+            }
+        }
+    }
+
+    // MARK: - Multi-select
+
+    /// Swipe across the grid to select a run of photos, matching the album
+    /// detail view's gesture. Additive only: dragging never *deselects*, so a
+    /// wobbly finger can't silently undo part of the selection.
+    private var dragSelectGesture: some Gesture {
+        DragGesture(minimumDistance: 10, coordinateSpace: .named("libraryGrid"))
+            .onChanged { value in
+                let point = value.location
+                for (index, frame) in itemFrames where frame.contains(point) {
+                    guard assets.indices.contains(index) else { continue }
+                    selectedAssetIds.insert(assets[index].localIdentifier)
+                }
+            }
+    }
+
+    private func toggleSelection(_ localIdentifier: String) {
+        if selectedAssetIds.contains(localIdentifier) {
+            selectedAssetIds.remove(localIdentifier)
+        } else {
+            selectedAssetIds.insert(localIdentifier)
+        }
+    }
+
+    private func endSelection() {
+        isSelecting = false
+        selectedAssetIds = []
+    }
+
+    /// Hands the current selection to the copy sheet, in grid order so the
+    /// upload queue mirrors what the user sees.
+    ///
+    /// `extra` is the photo a context menu was opened on: long-pressing a photo
+    /// that isn't selected yet should include it rather than quietly copy
+    /// everything *except* the one under the finger. Resolved into a local set
+    /// first so the copy never depends on the `@State` write landing first.
+    private func copySelection(including extra: PHAsset? = nil) {
+        var ids = selectedAssetIds
+        if let extra { ids.insert(extra.localIdentifier) }
+        let selected = assets.filter { ids.contains($0.localIdentifier) }
+        guard !selected.isEmpty else { return }
+        selectedAssetIds = ids
+        copyRequest = LibraryPhotoCopyRequest(selected)
+    }
+
+    /// Shown when the linked server album is gone or no longer writable
+    /// (issue #812). The link is kept — access may come back — but nothing syncs
+    /// meanwhile, and silently doing nothing would look like a bug.
+    private var revokedNotice: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Kein Zugriff mehr auf das f4mil-Album")
+                    .font(.subheadline.weight(.semibold))
+                Text("Die Freigabe wurde entzogen oder auf Nur-Lesen gesetzt. Es wird nichts mehr übertragen. Sobald du wieder Bearbeiten-Rechte hast, läuft die Synchronisierung von selbst weiter.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(.orange.opacity(0.12))
+    }
+
     private var initialSyncTitle: String {
         guard let item = pendingInitialSync else { return "" }
         return "Album \"\(item.albumName)\""
@@ -205,24 +381,20 @@ struct LibraryAlbumDetailView: View {
 
     private var initialSyncMessage: String {
         guard let item = pendingInitialSync else { return "" }
-        if item.assetCount > 0 {
-            return "Sollen alle \(item.assetCount) Fotos dieses Albums hochgeladen werden oder nur neue ab jetzt?"
-        }
-        // Empty album (issue #822): the choice still matters — it decides whether
-        // older photos that you add to the album later are uploaded as well.
-        return "Das Album ist noch leer. Sollen auch ältere Fotos hochgeladen werden, die du später hinzufügst, oder nur ab jetzt neu aufgenommene?"
+        return LibraryBrowserView.initialSyncPrompt(for: item)
     }
 
     private func handleMakeAvailable(mode: PhotoSyncMode) async {
         let result = await viewModel.makeAvailable(album, mode: mode)
         switch result {
-        case .success(_, let albumName, let assetCount, let iosAlbumId):
-            syncStatus = mode == .sync ? .sync : .copy
+        case .success(_, let albumName, let assetCount, let iosAlbumId, let resolution):
+            syncStatus = LibraryBrowserViewModel.status(for: mode)
             isLinked = true
             pendingInitialSync = LibraryBrowserView.PendingInitialSync(
                 iosAlbumId: iosAlbumId,
                 albumName: albumName,
-                assetCount: assetCount
+                assetCount: assetCount,
+                joinedSharedAlbum: resolution == .sharedAlbum
             )
         case .error(let message):
             errorMessage = message

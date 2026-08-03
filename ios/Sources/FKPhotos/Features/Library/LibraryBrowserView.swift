@@ -15,6 +15,11 @@ struct LibraryBrowserView: View {
         let iosAlbumId: String
         let albumName: String
         let assetCount: Int
+        /// True when the name matched an album somebody else shared with us
+        /// rather than one of our own. Called out explicitly because uploading
+        /// into a shared album makes the photos visible to everyone it is
+        /// shared with (issue #812).
+        var joinedSharedAlbum: Bool = false
     }
 
     private var filteredAlbums: [LibraryBrowserViewModel.IOSAlbum] {
@@ -69,7 +74,7 @@ struct LibraryBrowserView: View {
                                     Button(role: .destructive) {
                                         viewModel.disconnect(album)
                                     } label: {
-                                        Label("Trennen", systemImage: "minus.circle")
+                                        Label(SyncWording.unlink, systemImage: SyncWording.unlinkSymbol)
                                     }
                                 }
                             }
@@ -94,7 +99,7 @@ struct LibraryBrowserView: View {
                                     Button {
                                         pendingModeChoice = album
                                     } label: {
-                                        Label("Verfügbar machen", systemImage: "link.badge.plus")
+                                        Label(SyncWording.linkFromLibrary, systemImage: SyncWording.linkSymbol)
                                     }
                                     .tint(.blue)
                                 }
@@ -192,7 +197,7 @@ struct LibraryBrowserView: View {
 
     private var modeChoiceTitle: String {
         guard let album = pendingModeChoice else { return "" }
-        return "Album \"\(album.name)\" verfügbar machen"
+        return "Album \"\(album.name)\" mit f4mil verknüpfen"
     }
 
     private var modeChoiceMessage: String {
@@ -206,22 +211,34 @@ struct LibraryBrowserView: View {
 
     private var initialSyncMessage: String {
         guard let item = pendingInitialSync else { return "" }
+        return LibraryBrowserView.initialSyncPrompt(for: item)
+    }
+
+    /// Shared by both entry points into this dialog (list and album detail).
+    static func initialSyncPrompt(for item: PendingInitialSync) -> String {
+        // Joining somebody else's album is the one outcome the user can't infer
+        // from the name match, and it changes who sees the photos — so it leads.
+        let sharedNote = item.joinedSharedAlbum
+            ? "Verknüpft mit dem geteilten Album \"\(AlbumName.normalized(item.albumName))\" — nicht mit einem eigenen. Hochgeladene Fotos sind für alle sichtbar, mit denen es geteilt ist.\n\n"
+            : ""
+
         if item.assetCount > 0 {
-            return "Sollen alle \(item.assetCount) Fotos dieses Albums hochgeladen werden oder nur neue ab jetzt?"
+            return sharedNote + "Sollen alle \(item.assetCount) Fotos dieses Albums hochgeladen werden oder nur neue ab jetzt?"
         }
         // Empty album (issue #822): the choice still matters — it decides whether
         // older photos that you add to the album later are uploaded as well.
-        return "Das Album ist noch leer. Sollen auch ältere Fotos hochgeladen werden, die du später hinzufügst, oder nur ab jetzt neu aufgenommene?"
+        return sharedNote + "Das Album ist noch leer. Sollen auch ältere Fotos hochgeladen werden, die du später hinzufügst, oder nur ab jetzt neu aufgenommene?"
     }
 
     private func handleMakeAvailable(_ album: LibraryBrowserViewModel.IOSAlbum, mode: PhotoSyncMode) async {
         let result = await viewModel.makeAvailable(album, mode: mode)
         switch result {
-        case .success(_, let albumName, let assetCount, let iosAlbumId):
+        case .success(_, let albumName, let assetCount, let iosAlbumId, let resolution):
             pendingInitialSync = PendingInitialSync(
                 iosAlbumId: iosAlbumId,
                 albumName: albumName,
-                assetCount: assetCount
+                assetCount: assetCount,
+                joinedSharedAlbum: resolution == .sharedAlbum
             )
         case .error(let message):
             viewModel.errorMessage = message
@@ -259,35 +276,52 @@ private struct LibraryAlbumRow: View {
 
 // MARK: - Sync Status Badge
 
+/// The badge names a mode with exactly the words and symbol the mode chooser
+/// uses — they used to read "kopiert" / "sync" / "bidir" against modes called
+/// "Kopieren" / "Synchronisieren" / "Zwei-Wege", leaving the user to guess
+/// which badge meant which mode.
 struct SyncStatusBadge: View {
     let status: LibraryBrowserViewModel.IOSAlbum.SyncStatus
+
+    private var mode: PhotoSyncMode? {
+        switch status {
+        case .copy:   return .copy
+        case .sync:   return .sync
+        case .bisync: return .bisync
+        case .none, .revoked: return nil
+        }
+    }
+
+    private var tint: Color {
+        switch status {
+        case .copy:    return .blue
+        case .sync:    return .green
+        case .bisync:  return .orange
+        case .revoked: return .red
+        case .none:    return .clear
+        }
+    }
 
     var body: some View {
         switch status {
         case .none:
             EmptyView()
-        case .copy:
-            Label("kopiert", systemImage: "arrow.up")
-                .font(.caption2)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(.blue, in: Capsule())
-        case .sync:
-            Label("sync", systemImage: "arrow.triangle.2.circlepath")
-                .font(.caption2)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(.green, in: Capsule())
-        case .bisync:
-            Label("bidir", systemImage: "arrow.left.arrow.right")
-                .font(.caption2)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(.orange, in: Capsule())
+        case .revoked:
+            badge("Kein Zugriff", symbol: "exclamationmark.triangle.fill")
+        case .copy, .sync, .bisync:
+            if let mode {
+                badge(mode.title, symbol: mode.symbolName)
+            }
         }
+    }
+
+    private func badge(_ text: String, symbol: String) -> some View {
+        Label(text, systemImage: symbol)
+            .font(.caption2)
+            .foregroundStyle(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(tint, in: Capsule())
     }
 }
 

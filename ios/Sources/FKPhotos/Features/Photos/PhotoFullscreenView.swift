@@ -159,7 +159,7 @@ struct PhotoFullscreenView: View {
                         Button {
                             Task { await saveOriginalToLibrary() }
                         } label: {
-                            Label("Original sichern", systemImage: "square.and.arrow.down")
+                            Label(SyncWording.saveOriginal, systemImage: SyncWording.saveOriginalSymbol)
                         }
 
                         if let album = albumContext {
