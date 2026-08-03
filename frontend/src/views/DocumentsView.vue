@@ -347,7 +347,14 @@ async function load() {
   try {
     const filterParams = currentFilterParams()
     if (isSearchActive.value) {
-      const res = await searchDocuments(q.value.trim(), searchMode.value, SEARCH_LIMIT, filterParams)
+      // Leave relevance ranking alone unless the user actively picked a
+      // sort — otherwise every search would default to "Hochgeladen" and
+      // lose the ranked order. An explicit choice must still apply though,
+      // it used to be silently dropped in search mode (#dokumentenliste-sortierung).
+      const sortOverride = sort.isDefault.value
+        ? undefined
+        : { sort_by: sort.applied.value.field, sort_dir: sort.applied.value.direction }
+      const res = await searchDocuments(q.value.trim(), searchMode.value, SEARCH_LIMIT, filterParams, sortOverride)
       items.value = res.items
       total.value = res.items.length
     } else {

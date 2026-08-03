@@ -310,9 +310,10 @@ export function searchDocuments(
   mode: SearchMode = 'hybrid',
   limit = 20,
   filters: DocumentFilterParams = {},
+  sort?: { sort_by: string; sort_dir: 'asc' | 'desc' },
 ) {
   return apiFetch<SearchDocumentsResponse>(
-    `/documents/search${buildQuery({ q, mode, limit, ...filters })}`,
+    `/documents/search${buildQuery({ q, mode, limit, ...filters, ...sort })}`,
   )
 }
 

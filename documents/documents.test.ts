@@ -23,6 +23,7 @@ import { DOCUMENT_QUEUE_SERVICES, DOCUMENT_SERVICES } from "./scan-queue";
 import { DuplicateDocumentError } from "./import";
 import { SUPPORTED_EXTENSIONS } from "./documents.service";
 import { reciprocalRankFusion, visibilityClause, type SearchHit } from "./search";
+import { sortDocumentSummaries, type DocumentSummary } from "./documents";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { chunkText } from "./document-ops";
 import {
@@ -651,5 +652,78 @@ describe("documents.document-ops chunkText", () => {
     for (let i = 1; i < chunks.length; i++) {
       expect(chunks[i].startsWith(chunks[i - 1].slice(-10))).toBe(true);
     }
+  });
+});
+
+describe("documents.sortDocumentSummaries", () => {
+  function summary(overrides: Partial<DocumentSummary> & { id: number }): DocumentSummary {
+    return {
+      title: null,
+      original_filename: `doc-${overrides.id}.pdf`,
+      mime_type: "application/pdf",
+      size_bytes: 0,
+      status: "ready",
+      uploaded_at: null,
+      doc_date: null,
+      sender: null,
+      document_number: null,
+      correspondent_slug: null,
+      correspondent_display: null,
+      category_id: null,
+      category_slug: null,
+      classification_confidence: null,
+      document_type: null,
+      tags: [],
+      tax_relevant: false,
+      tax_year: null,
+      last_error: null,
+      visibility: "private",
+      group_id: null,
+      notes: null,
+      attributes_reviewed: false,
+      category_source: "ai",
+      ...overrides,
+    };
+  }
+
+  // Search results arrive pre-ranked by relevance; an explicit sort choice
+  // must override that order (#dokumentenliste-sortierung — sorting used
+  // to only ever apply to the plain list, never to search results).
+  const byRelevance = [
+    summary({ id: 1, title: "Charlie", size_bytes: 300 }),
+    summary({ id: 2, title: "Alpha", size_bytes: 100 }),
+    summary({ id: 3, title: "Bravo", size_bytes: 200 }),
+  ];
+
+  it("leaves the ranked order untouched when no sort field is given", () => {
+    expect(sortDocumentSummaries(byRelevance, undefined, undefined).map((d) => d.id)).toEqual([1, 2, 3]);
+  });
+
+  it("leaves the ranked order untouched for an unknown sort field", () => {
+    expect(sortDocumentSummaries(byRelevance, "not_a_field", "asc").map((d) => d.id)).toEqual([1, 2, 3]);
+  });
+
+  it("sorts by title ascending, overriding relevance order", () => {
+    expect(sortDocumentSummaries(byRelevance, "title", "asc").map((d) => d.id)).toEqual([2, 3, 1]);
+  });
+
+  it("sorts by a numeric field descending", () => {
+    expect(sortDocumentSummaries(byRelevance, "size_bytes", "desc").map((d) => d.id)).toEqual([1, 3, 2]);
+  });
+
+  it("sorts nulls last regardless of direction", () => {
+    const withNulls = [
+      summary({ id: 1, doc_date: "2024-01-01" }),
+      summary({ id: 2, doc_date: null }),
+      summary({ id: 3, doc_date: "2023-01-01" }),
+    ];
+    expect(sortDocumentSummaries(withNulls, "doc_date", "asc").map((d) => d.id)).toEqual([3, 1, 2]);
+    expect(sortDocumentSummaries(withNulls, "doc_date", "desc").map((d) => d.id)).toEqual([1, 3, 2]);
+  });
+
+  it("does not mutate the input array", () => {
+    const copy = [...byRelevance];
+    sortDocumentSummaries(byRelevance, "title", "asc");
+    expect(byRelevance).toEqual(copy);
   });
 });
