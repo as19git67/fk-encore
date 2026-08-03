@@ -1072,3 +1072,17 @@ Git commit messages and pull-request descriptions (title and body) must always b
 
 - **Dokumentenverwaltung** (neues Modul neben Fotos, lokale KI-Klassifikation via llm-service): `/root/.claude/plans/ein-weiteres-modul-in-peaceful-robin.md`. Wird iterativ in Etappen umgesetzt (DB/Seed → llm-service → documents-Service → Watcher → Suche → Frontend → Infra).
 
+## Keine personenbezogenen Daten (PII) im Repo
+
+In Code, Tests, Fixtures, Kommentaren, Seed-Daten, Migrationsdateien und Commit-/PR-Texten dürfen **keine echten personenbezogenen Daten** vorkommen. Das gilt insbesondere für:
+
+- Namen (Vor-/Nachnamen von Personen, auch Ärztinnen/Ärzte, Angehörige, Absender)
+- Adressen, Postleitzahlen, Geokoordinaten
+- Telefonnummern, E-Mail-Adressen
+- IBAN/Kontonummern, Depotnummern, Vertrags-/Kunden-/Rechnungsnummern
+- Geburtsdaten und andere identifizierende Angaben
+
+Betroffen sind auch Inhalte aus Beispieldokumenten, die zur Analyse (z. B. für die Dokumentenverwaltung/Klassifikation) hochgeladen werden — daraus abgeleitete Test-Fixtures, Prompts oder Beispieltexte müssen mit frei erfundenen, offensichtlich synthetischen Werten arbeiten (z. B. `Beispielstraße 1`, `12345 Musterstadt`, `max@beispiel.test`, `DE00 0000 0000 0000 0000 00`), nicht mit realen Daten aus der Quelle.
+
+Vor jedem Commit, der neue Test-Fixtures, Seed-Daten oder Beispieltexte einführt: kurz prüfen, ob eine der obigen Kategorien betroffen ist, und ggf. durch synthetische Werte ersetzen.
+
