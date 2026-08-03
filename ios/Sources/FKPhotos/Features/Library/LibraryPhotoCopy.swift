@@ -21,6 +21,11 @@ final class LibraryPhotoCopyModel {
     var isLoading = false
     var isCopying = false
     var errorMessage: String?
+    /// Progress of the preparation pass, so a batch that has to pull originals
+    /// down from iCloud shows movement instead of a silent spinner. Preparing a
+    /// photo means hashing it, and hashing may block on an iCloud download.
+    var preparedCount = 0
+    var totalToPrepare = 0
 
     /// Albums a photo may be copied into: everything the user can write to.
     /// Read-only shares are filtered out because the server rejects the album
@@ -48,22 +53,32 @@ final class LibraryPhotoCopyModel {
     @discardableResult
     func copy(_ assets: [PHAsset], to album: Album) async -> Int {
         isCopying = true
-        defer { isCopying = false }
+        preparedCount = 0
+        totalToPrepare = assets.count
+        defer {
+            isCopying = false
+            preparedCount = 0
+            totalToPrepare = 0
+        }
 
         var enqueued = 0
         for asset in assets {
-            guard let item = await AssetUploadEnqueuer.makeQueueItem(
+            // Hashing pulls the original — from iCloud too, if that is where it
+            // lives — so this can take a while per photo on a slow connection.
+            if let item = await AssetUploadEnqueuer.makeQueueItem(
                 for: asset,
                 targetAlbumIds: [album.id]
-            ) else { continue }
-            await UploadQueue.shared.enqueue(item)
-            enqueued += 1
+            ) {
+                await UploadQueue.shared.enqueue(item)
+                enqueued += 1
+            }
+            preparedCount += 1
         }
 
         guard enqueued > 0 else {
             errorMessage = assets.count == 1
-                ? "Das Foto konnte nicht gelesen werden. Liegt es nur in iCloud?"
-                : "Keines der Fotos konnte gelesen werden. Liegen sie nur in iCloud?"
+                ? "Das Foto konnte nicht geladen werden. Besteht eine Verbindung zu iCloud?"
+                : "Keines der Fotos konnte geladen werden. Besteht eine Verbindung zu iCloud?"
             return 0
         }
 
@@ -161,9 +176,25 @@ struct LibraryPhotoCopySheet: View {
                 if model.isCopying {
                     ZStack {
                         Color.black.opacity(0.3).ignoresSafeArea()
-                        ProgressView("Wird vorbereitet…")
-                            .padding()
-                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        VStack(spacing: 8) {
+                            if model.totalToPrepare > 1 {
+                                ProgressView(
+                                    value: Double(model.preparedCount),
+                                    total: Double(model.totalToPrepare)
+                                )
+                                .frame(width: 180)
+                                Text("\(model.preparedCount) von \(model.totalToPrepare) vorbereitet")
+                                    .font(.footnote)
+                                Text("Fotos aus iCloud werden dabei geladen.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.center)
+                            } else {
+                                ProgressView("Wird vorbereitet…")
+                            }
+                        }
+                        .padding()
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
                     }
                 }
             }
@@ -181,14 +212,19 @@ struct LibraryPhotoCopySheet: View {
     /// Feedback for a finished copy, or nil when nothing could be prepared at
     /// all (the caller then reports the model's error).
     ///
-    /// A partial result is called out explicitly: with a batch it is entirely
-    /// possible that a few photos live only in iCloud and can't be hashed, and
-    /// silently uploading 47 of 50 while saying "50 Fotos" would be a lie the
-    /// user only discovers much later, if ever.
+    /// A partial result is called out explicitly: silently uploading 47 of 50
+    /// while saying "50 Fotos" would be a lie the user only discovers much
+    /// later, if ever.
+    ///
+    /// Note this is *not* about iCloud-only photos as such — the hash pipeline
+    /// sets `isNetworkAccessAllowed`, so an original stored only in iCloud is
+    /// fetched and copied like any other. A photo drops out here when that
+    /// fetch actually fails: no connection, iCloud unreachable, or an asset
+    /// whose bytes can't be read.
     static func resultToast(enqueued: Int, requested: Int, albumName: String) -> ToastMessage? {
         guard enqueued > 0 else { return nil }
         if enqueued < requested {
-            return .info("\(enqueued) von \(requested) Fotos werden nach \"\(albumName)\" hochgeladen — der Rest ist gerade nicht auf dem Gerät verfügbar")
+            return .info("\(enqueued) von \(requested) Fotos werden nach \"\(albumName)\" hochgeladen — die übrigen konnten nicht geladen werden (Verbindung zu iCloud?)")
         }
         return .success(
             enqueued == 1

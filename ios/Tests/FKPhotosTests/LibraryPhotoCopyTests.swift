@@ -83,9 +83,12 @@ final class LibraryPhotoCopyTests: XCTestCase {
         XCTAssertEqual(toast?.text, "12 Fotos werden nach \"Toskana\" hochgeladen")
     }
 
-    /// Photos that live only in iCloud can't be hashed. Reporting the batch as
-    /// complete would hide that from the user until they eventually notice
-    /// missing photos — so a partial result says so out loud.
+    /// Reporting the batch as complete would hide the gap until the user
+    /// eventually notices missing photos — so a partial result says so out loud.
+    ///
+    /// This is not the iCloud-only case: the hash pipeline sets
+    /// `isNetworkAccessAllowed`, so those originals are fetched and copied
+    /// normally. A photo lands here when that fetch genuinely fails.
     func testPartialBatchReportsBothCounts() {
         let toast = LibraryPhotoCopySheet.resultToast(enqueued: 47, requested: 50, albumName: "Toskana")
         XCTAssertEqual(toast?.style, .info)
