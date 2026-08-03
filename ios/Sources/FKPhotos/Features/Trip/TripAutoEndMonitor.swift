@@ -14,12 +14,18 @@ import UserNotifications
 /// `TripView` — it never replaces it, and doing nothing leaves the trip
 /// running exactly as if the monitor didn't exist.
 @MainActor
-final class TripAutoEndMonitor: NSObject, CLLocationManagerDelegate {
-    static let shared = TripAutoEndMonitor()
+public final class TripAutoEndMonitor: NSObject, CLLocationManagerDelegate {
+    public static let shared = TripAutoEndMonitor()
 
-    static let notificationCategoryId = "trip.autoend"
-    static let endActionId = "trip.autoend.end"
-    static let dismissActionId = "trip.autoend.dismiss"
+    /// Public so `Main.swift` (the App target, a separate module from
+    /// `FKPhotosLib`) can tell this category apart from any future
+    /// notification type before routing a response to `handleNotificationAction`.
+    /// `nonisolated` — plain string constants, and `Main.swift` reads this one
+    /// from its `UNUserNotificationCenterDelegate` callback before hopping onto
+    /// the main actor, so it must be readable without that isolation.
+    public nonisolated static let notificationCategoryId = "trip.autoend"
+    nonisolated static let endActionId = "trip.autoend.end"
+    nonisolated static let dismissActionId = "trip.autoend.dismiss"
 
     private let manager = CLLocationManager()
     private var isMonitoring = false
@@ -104,14 +110,36 @@ final class TripAutoEndMonitor: NSObject, CLLocationManagerDelegate {
         TripAutoEndPreferences.lastSuggestionAt = Date()
     }
 
+    /// Entry point for `Main.swift`'s `UNUserNotificationCenterDelegate`: reacts
+    /// to a tap or action on the auto-end notification (already confirmed to be
+    /// this category by the caller). Kept as a single public method — rather
+    /// than exposing `TripStore`/`ActiveTrip` across the module boundary — so
+    /// the App target's public surface stays this one call, mirroring
+    /// `BackgroundSyncManager.shared.register()`.
+    ///
+    /// "Trip beenden" ends the trip; a plain tap and the explicit "Weiter
+    /// unterwegs" action both just clear the suggestion (tapping only opens the
+    /// app, it isn't an implicit "yes").
+    public func handleNotificationAction(_ actionIdentifier: String) {
+        guard let trip = TripStore.shared.activeTrip else { return }
+        dismissSuggestion(forTripAlbumId: trip.iosAlbumId)
+        if actionIdentifier == Self.endActionId {
+            TripStore.shared.endTrip()
+        }
+    }
+
     // MARK: - CLLocationManagerDelegate
 
-    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+    // `public` because the class itself is public and conforms to a public
+    // protocol: Swift requires a public type's protocol-witness methods to be
+    // at least as visible as the requirement, even though nothing outside this
+    // module is meant to call these directly (CLLocationManager does).
+    public nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
         Task { @MainActor in await self.handle(location) }
     }
 
-    nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+    public nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         // Significant-change failures are transient (no fix, airplane mode) and
         // self-resolve on the next update; nothing to reconcile here.
     }
