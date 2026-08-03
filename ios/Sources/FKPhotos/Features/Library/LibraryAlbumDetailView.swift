@@ -16,7 +16,7 @@ struct LibraryAlbumDetailView: View {
     @State private var errorMessage: String?
     @State private var syncStatus: LibraryBrowserViewModel.IOSAlbum.SyncStatus
     @State private var isLinked: Bool
-    /// Asset(s) queued for the one-off "Nach f4mil kopieren…" flow (issue #812).
+    /// Asset(s) queued for the one-off "Einmalig an f4mil senden…" flow (issue #812).
     @State private var copyRequest: LibraryPhotoCopyRequest?
     @State private var toastMessage: ToastMessage?
     /// Multi-select for copying a batch in one go. Keyed by `localIdentifier`

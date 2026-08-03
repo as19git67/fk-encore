@@ -3,7 +3,7 @@ import Photos
 
 /// Global control panel for the automatic photo sync. Which albums sync — and
 /// in which mode (copy / sync / bisync) — is configured per album in the iOS
-/// media library via "Verfügbar machen"; this screen only holds the master
+/// media library via "Mit f4mil verknüpfen…"; this screen only holds the master
 /// switch, global options, status and the manual trigger.
 struct SyncSettingsView: View {
     @AppStorage("sync.enabled")            private var syncEnabled        = false
@@ -27,7 +27,7 @@ struct SyncSettingsView: View {
             Section {
                 Toggle("Automatisch synchronisieren", isOn: $syncEnabled)
             } footer: {
-                Text("Verknüpfte Alben werden automatisch im Hintergrund synchronisiert. Welche Alben – und ob Kopieren, Synchronisieren oder Zwei-Wege – legst du in der iOS-Mediathek über „Verfügbar machen“ fest.")
+                Text("Verknüpfte Alben werden automatisch im Hintergrund synchronisiert. Welche Alben – und ob Kopieren, Synchronisieren oder Zwei-Wege – legst du in der iOS-Mediathek über „\(SyncWording.linkFromLibrary)“ fest.")
             }
 
             // ── Manual trigger ─────────────────────────────────────────

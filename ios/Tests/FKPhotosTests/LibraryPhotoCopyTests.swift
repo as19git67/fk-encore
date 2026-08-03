@@ -74,13 +74,13 @@ final class LibraryPhotoCopyTests: XCTestCase {
     func testSinglePhotoUsesSingularWording() {
         let toast = LibraryPhotoCopySheet.resultToast(enqueued: 1, requested: 1, albumName: "Toskana")
         XCTAssertEqual(toast?.style, .success)
-        XCTAssertEqual(toast?.text, "Foto wird nach \"Toskana\" hochgeladen")
+        XCTAssertEqual(toast?.text, "Foto wird an \"Toskana\" gesendet")
     }
 
     func testFullBatchUsesPluralWording() {
         let toast = LibraryPhotoCopySheet.resultToast(enqueued: 12, requested: 12, albumName: "Toskana")
         XCTAssertEqual(toast?.style, .success)
-        XCTAssertEqual(toast?.text, "12 Fotos werden nach \"Toskana\" hochgeladen")
+        XCTAssertEqual(toast?.text, "12 Fotos werden an \"Toskana\" gesendet")
     }
 
     /// Reporting the batch as complete would hide the gap until the user
