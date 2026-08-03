@@ -14,7 +14,7 @@ const AI = {
   title: "Jahresdepotauszug FT-Investmentkonto",
   doc_date: "1997-09-30",
   sender: "FRANKFURT-TRUST",
-  document_number: "009/08861361/01",
+  document_number: "782/23724459/23",
   summary: "Jahresdepotauszug für Investmentkonto mit Ertragsthesaurierung.",
   confidence: 0.95,
   tags: [] as string[],
