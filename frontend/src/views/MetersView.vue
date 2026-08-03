@@ -165,7 +165,8 @@ function fmtPercent(value: number | null) {
 const energyBuckets = computed(() => {
   const buckets = energyReport.value?.buckets ?? []
   const recent = energyGranularity.value === 'month' ? buckets.slice(-12) : buckets
-  return energyGranularity.value === 'year' ? [...recent].reverse() : recent
+  // Buckets come from the backend oldest-first; the table shows the newest period on top.
+  return [...recent].reverse()
 })
 
 type EnergyBucket = EnergyReport['buckets'][number]
