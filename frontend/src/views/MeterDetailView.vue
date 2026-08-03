@@ -154,7 +154,7 @@ const recentReportBuckets = computed(() => {
 })
 
 const reportTableBuckets = computed(() => {
-  if (reportGranularity.value !== 'year') return recentReportBuckets.value
+  // Buckets come from the backend oldest-first; the table shows the newest period on top.
   return [...recentReportBuckets.value].reverse()
 })
 

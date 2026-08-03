@@ -70,6 +70,8 @@ const MOCK_READINGS = [
   },
 ]
 
+// Buckets are returned oldest-first by the backend (see meter/reports.service.ts).
+// The "Verbrauch" table must still render the newest period on top.
 const MOCK_REPORT = {
   meterId: 1,
   name: 'Strom Wärmepumpe',
@@ -78,8 +80,20 @@ const MOCK_REPORT = {
   granularity: 'month' as const,
   from: null,
   to: null,
-  totalConsumption: 361.57,
+  totalConsumption: 591.93,
   buckets: [
+    {
+      key: '2026-05',
+      label: 'Mai 2026',
+      periodStart: '2026-05-01T00:00:00Z',
+      periodEnd: '2026-05-31T23:59:59Z',
+      startReadingAt: '2026-05-01T00:00:00Z',
+      endReadingAt: '2026-06-01T09:30:00Z',
+      startValue: 5900,
+      endValue: 6100.12,
+      consumption: 200.12,
+      intervals: 1,
+    },
     {
       key: '2026-06',
       label: 'Juni 2026',
