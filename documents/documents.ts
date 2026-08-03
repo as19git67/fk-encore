@@ -1042,6 +1042,35 @@ async function loadDefaultGroupForUser(userId: number): Promise<number | null> {
 
 // ─── List / get / file ──────────────────────────────────────────────────────
 
+/** Keep in sync with `VALID_SORT_FIELDS` inside `listDocuments`. */
+const DOCUMENT_SORT_FIELDS = ["uploaded_at", "doc_date", "title", "sender", "size_bytes"] as const;
+type DocumentSortField = (typeof DOCUMENT_SORT_FIELDS)[number];
+
+/**
+ * Re-orders already-ranked search results by a list field, overriding the
+ * relevance order. Used by `searchDocumentsEndpoint` so an explicit sort
+ * choice applies to search results too (otherwise it only affected the
+ * plain list view — issue: "sortieren nach <Feld> wird ignoriert").
+ */
+export function sortDocumentSummaries<T extends DocumentSummary>(
+  items: T[],
+  sortBy: string | undefined,
+  sortDir: string | undefined,
+): T[] {
+  if (!sortBy || !(DOCUMENT_SORT_FIELDS as readonly string[]).includes(sortBy)) return items;
+  const field = sortBy as DocumentSortField;
+  const asc = sortDir === "asc";
+  return [...items].sort((a, b) => {
+    const av = a[field];
+    const bv = b[field];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+    return asc ? cmp : -cmp;
+  });
+}
+
 export const listDocuments = api(
   { expose: true, method: "GET", path: "/documents", auth: true },
   async ({ category, tags, q, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, sort_by, sort_dir, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
@@ -3236,6 +3265,11 @@ interface SearchQuery {
   subject_person_id?: Query<number>;
   category_source?: Query<string>;
   document_type?: Query<string>;
+  // Optional override of the relevance ranking, mirrored from `ListQuery`
+  // (otherwise a sort chosen in the list view was silently dropped once a
+  // search term was active — sorting only ever worked on the plain list).
+  sort_by?: Query<string>;
+  sort_dir?: Query<string>;
 }
 
 /**
@@ -3246,11 +3280,12 @@ interface SearchQuery {
  * `mode=hybrid` (default) — Reciprocal Rank Fusion of both branches.
  *
  * Returned documents keep the same shape as `GET /documents` so the
- * frontend can reuse the list renderer.
+ * frontend can reuse the list renderer. Results are relevance-ranked unless
+ * `sort_by` is given, in which case that field overrides the ranking.
  */
 export const searchDocumentsEndpoint = api(
   { expose: true, method: "GET", path: "/documents/search", auth: true },
-  async ({ q, mode, limit, category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type }: SearchQuery): Promise<SearchDocumentsResponse> => {
+  async ({ q, mode, limit, category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, sort_by, sort_dir }: SearchQuery): Promise<SearchDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -3341,7 +3376,7 @@ export const searchDocumentsEndpoint = api(
       })
       .filter((x): x is SearchDocumentSummary => x !== null);
 
-    return { items, mode: resolvedMode, query };
+    return { items: sortDocumentSummaries(items, sort_by, sort_dir), mode: resolvedMode, query };
   },
 );
 
