@@ -14,6 +14,8 @@ struct AlbumDetailView: View {
     @State private var errorMessage: String?
     @State private var showShareSheet = false
     @State private var showSettings = false
+    /// Drives the "Mit iPhone synchronisieren…" sheet (issue #812).
+    @State private var syncLinkAlbum: Album?
     @State private var showUpload = false
     @State private var showDeleteConfirm = false
     @State private var isDeleting = false
@@ -57,6 +59,10 @@ struct AlbumDetailView: View {
     private var canDeleteAlbum: Bool {
         userRole == "owner" || userRole == "admin"
     }
+
+    /// "Mit iPhone synchronisieren…" needs the same write access as an upload:
+    /// every mode uploads, and a read-only share would 403 on each photo.
+    private var canLinkToIPhone: Bool { canEditAlbum }
 
     var body: some View {
         ScrollView {
@@ -171,6 +177,13 @@ struct AlbumDetailView: View {
                                     Label("Freigeben", systemImage: "person.crop.circle.badge.plus")
                                 }
                             }
+                            if canLinkToIPhone, let album {
+                                Button {
+                                    syncLinkAlbum = album
+                                } label: {
+                                    Label("Mit iPhone synchronisieren…", systemImage: "iphone.and.arrow.forward")
+                                }
+                            }
                             if canEditAlbum {
                                 Button {
                                     showSettings = true
@@ -205,6 +218,9 @@ struct AlbumDetailView: View {
             PhotoUploadView(albumId: albumId) {
                 Task { await loadAlbum() }
             }
+        }
+        .sheet(item: $syncLinkAlbum) { album in
+            AlbumSyncLinkSheet(album: album, hasWriteAccess: canLinkToIPhone)
         }
         .sheet(isPresented: $showShareSheet) {
             AlbumShareView(

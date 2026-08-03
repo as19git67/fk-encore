@@ -6,6 +6,9 @@ struct LibraryPhotoFullscreenView: View {
     @Binding var currentIndex: Int
     @Environment(\.dismiss) private var dismiss
     @State private var showInfo = false
+    /// One-off "Nach f4mil kopieren…" for the photo on screen (issue #812).
+    @State private var copyRequest: LibraryPhotoCopyRequest?
+    @State private var toastMessage: ToastMessage?
 
     private var currentAsset: PHAsset? {
         guard assets.indices.contains(currentIndex) else { return nil }
@@ -38,6 +41,19 @@ struct LibraryPhotoFullscreenView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
+                        if let asset = currentAsset {
+                            copyRequest = LibraryPhotoCopyRequest(asset)
+                        }
+                    } label: {
+                        Image(systemName: "square.and.arrow.up.on.square")
+                            .foregroundStyle(.white)
+                            .padding(8)
+                            .background(.black.opacity(0.5), in: Circle())
+                    }
+                    .disabled(currentAsset == nil)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
                         showInfo.toggle()
                     } label: {
                         Image(systemName: "info.circle")
@@ -60,6 +76,12 @@ struct LibraryPhotoFullscreenView: View {
                         .presentationDetents([.medium])
                 }
             }
+            .sheet(item: $copyRequest) { request in
+                LibraryPhotoCopySheet(assets: request.assets) { message in
+                    toastMessage = message
+                }
+            }
+            .toast($toastMessage)
         }
     }
 

@@ -16,6 +16,9 @@ struct LibraryAlbumDetailView: View {
     @State private var errorMessage: String?
     @State private var syncStatus: LibraryBrowserViewModel.IOSAlbum.SyncStatus
     @State private var isLinked: Bool
+    /// Asset queued for the one-off "Nach f4mil kopieren…" flow (issue #812).
+    @State private var copyRequest: LibraryPhotoCopyRequest?
+    @State private var toastMessage: ToastMessage?
 
     init(album: LibraryBrowserViewModel.IOSAlbum, viewModel: LibraryBrowserViewModel) {
         self.album = album
@@ -27,21 +30,20 @@ struct LibraryAlbumDetailView: View {
     private var canMakeAvailable: Bool { syncStatus == .none }
     private var canDisconnect: Bool { isLinked }
 
-    /// Two-way binding for the linked album's sync mode. Reads the local
-    /// syncStatus; writing persists via the view model and reflects the new
-    /// status locally.
+    /// Two-way binding for the linked album's sync mode. Reads the *persisted*
+    /// mode rather than deriving it from `syncStatus`, because a parked link
+    /// (`.revoked`) has no mode of its own to derive from and would otherwise
+    /// always read back as "Kopieren".
     private var syncModeBinding: Binding<PhotoSyncMode> {
         Binding(
-            get: {
-                switch syncStatus {
-                case .bisync: return .bisync
-                case .sync:   return .sync
-                default:      return .copy
-                }
-            },
+            get: { PhotoSyncPreferences.albumSyncMode(for: album.id) },
             set: { newMode in
                 viewModel.setSyncMode(newMode, for: album)
-                syncStatus = LibraryBrowserViewModel.status(for: newMode)
+                // A revoked link keeps its badge until access is restored — the
+                // mode change doesn't reactivate it.
+                if syncStatus != .revoked {
+                    syncStatus = LibraryBrowserViewModel.status(for: newMode)
+                }
             }
         )
     }
@@ -51,29 +53,11 @@ struct LibraryAlbumDetailView: View {
     ]
 
     var body: some View {
-        Group {
-            if isLoading {
-                ProgressView("Fotos laden…")
-            } else if assets.isEmpty {
-                ContentUnavailableView {
-                    Label("Keine Fotos", systemImage: "photo")
-                } description: {
-                    Text("Dieses Album enthält keine Fotos.")
-                }
-            } else {
-                ScrollView {
-                    LazyVGrid(columns: columns, spacing: 2) {
-                        ForEach(Array(assets.enumerated()), id: \.element.localIdentifier) { index, asset in
-                            LibraryPhotoCell(asset: asset)
-                                .onTapGesture {
-                                    selectedAssetIndex = index
-                                    showFullscreen = true
-                                }
-                        }
-                    }
-                    .padding(.horizontal, 2)
-                }
+        VStack(spacing: 0) {
+            if syncStatus == .revoked {
+                revokedNotice
             }
+            content
         }
         .navigationTitle(album.name)
         .navigationBarTitleDisplayMode(.large)
@@ -128,6 +112,12 @@ struct LibraryAlbumDetailView: View {
                 )
             }
         }
+        .sheet(item: $copyRequest) { request in
+            LibraryPhotoCopySheet(assets: request.assets) { message in
+                toastMessage = message
+            }
+        }
+        .toast($toastMessage)
         .alert(
             "Album \"\(album.name)\" verfügbar machen",
             isPresented: $showModeChoice
@@ -198,6 +188,61 @@ struct LibraryAlbumDetailView: View {
         }
     }
 
+    @ViewBuilder
+    private var content: some View {
+        if isLoading {
+            ProgressView("Fotos laden…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if assets.isEmpty {
+            ContentUnavailableView {
+                Label("Keine Fotos", systemImage: "photo")
+            } description: {
+                Text("Dieses Album enthält keine Fotos.")
+            }
+        } else {
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: 2) {
+                    ForEach(Array(assets.enumerated()), id: \.element.localIdentifier) { index, asset in
+                        LibraryPhotoCell(asset: asset)
+                            .onTapGesture {
+                                selectedAssetIndex = index
+                                showFullscreen = true
+                            }
+                            .contextMenu {
+                                Button {
+                                    copyRequest = LibraryPhotoCopyRequest(asset)
+                                } label: {
+                                    Label("Nach f4mil kopieren…", systemImage: "square.and.arrow.up.on.square")
+                                }
+                            }
+                    }
+                }
+                .padding(.horizontal, 2)
+            }
+        }
+    }
+
+    /// Shown when the linked server album is gone or no longer writable
+    /// (issue #812). The link is kept — access may come back — but nothing syncs
+    /// meanwhile, and silently doing nothing would look like a bug.
+    private var revokedNotice: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Kein Zugriff mehr auf das f4mil-Album")
+                    .font(.subheadline.weight(.semibold))
+                Text("Die Freigabe wurde entzogen oder auf Nur-Lesen gesetzt. Es wird nichts mehr übertragen. Sobald du wieder Bearbeiten-Rechte hast, läuft die Synchronisierung von selbst weiter.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(.orange.opacity(0.12))
+    }
+
     private var initialSyncTitle: String {
         guard let item = pendingInitialSync else { return "" }
         return "Album \"\(item.albumName)\""
@@ -205,24 +250,20 @@ struct LibraryAlbumDetailView: View {
 
     private var initialSyncMessage: String {
         guard let item = pendingInitialSync else { return "" }
-        if item.assetCount > 0 {
-            return "Sollen alle \(item.assetCount) Fotos dieses Albums hochgeladen werden oder nur neue ab jetzt?"
-        }
-        // Empty album (issue #822): the choice still matters — it decides whether
-        // older photos that you add to the album later are uploaded as well.
-        return "Das Album ist noch leer. Sollen auch ältere Fotos hochgeladen werden, die du später hinzufügst, oder nur ab jetzt neu aufgenommene?"
+        return LibraryBrowserView.initialSyncPrompt(for: item)
     }
 
     private func handleMakeAvailable(mode: PhotoSyncMode) async {
         let result = await viewModel.makeAvailable(album, mode: mode)
         switch result {
-        case .success(_, let albumName, let assetCount, let iosAlbumId):
-            syncStatus = mode == .sync ? .sync : .copy
+        case .success(_, let albumName, let assetCount, let iosAlbumId, let resolution):
+            syncStatus = LibraryBrowserViewModel.status(for: mode)
             isLinked = true
             pendingInitialSync = LibraryBrowserView.PendingInitialSync(
                 iosAlbumId: iosAlbumId,
                 albumName: albumName,
-                assetCount: assetCount
+                assetCount: assetCount,
+                joinedSharedAlbum: resolution == .sharedAlbum
             )
         case .error(let message):
             errorMessage = message

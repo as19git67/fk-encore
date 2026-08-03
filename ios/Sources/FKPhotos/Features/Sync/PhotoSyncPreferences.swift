@@ -122,12 +122,65 @@ struct PhotoSyncPreferences {
     /// is off — so the two-way sync's download half runs.
     static func bisyncServerAlbumIds() -> Set<Int> {
         let confirmed = confirmedMappingIds
+        let revoked = revokedLinkIds
         var result = Set<Int>()
         for (iosId, serverId) in albumMappings {
-            guard confirmed.contains(iosId), albumSyncMode(for: iosId) == .bisync else { continue }
+            guard confirmed.contains(iosId), !revoked.contains(iosId),
+                  albumSyncMode(for: iosId) == .bisync else { continue }
             result.insert(serverId)
         }
         return result
+    }
+
+    // MARK: - Revoked links (issue #812, shared-album entry point)
+    //
+    // A link can point at a server album somebody else owns — that is the whole
+    // point of the "Mit iPhone synchronisieren…" entry point on a shared album.
+    // Such a link is only valid while the owner keeps granting write access. If
+    // the share is revoked, downgraded to read-only, or the album is deleted,
+    // the upload half would otherwise retry and fail with 403/404 on every run,
+    // forever. Those links are parked here instead: the engine skips them and
+    // the media-library view shows why, so the user can disconnect.
+    //
+    // The set is *recomputed* from the server's album list on every sync run, so
+    // a restored share automatically reactivates the link — no manual repair.
+
+    private static let revokedLinksKey = "sync.revokedLinks"
+
+    static var revokedLinkIds: Set<String> {
+        get { Set(UserDefaults.standard.stringArray(forKey: revokedLinksKey) ?? []) }
+        set { UserDefaults.standard.set(Array(newValue), forKey: revokedLinksKey) }
+    }
+
+    static func isLinkRevoked(_ albumId: String) -> Bool {
+        revokedLinkIds.contains(albumId)
+    }
+
+    static func clearRevokedLink(for albumId: String) {
+        var ids = revokedLinkIds
+        guard ids.remove(albumId) != nil else { return }
+        revokedLinkIds = ids
+    }
+
+    /// Pure decision core of the access reconciliation (extracted for unit
+    /// testing): given the configured links and the server albums the user may
+    /// still write to, returns the iOS album ids whose link must be treated as
+    /// inactive.
+    ///
+    /// Only *confirmed* links are considered — an unconfirmed one is skipped by
+    /// the engine anyway. A link whose target is absent from
+    /// `writableServerAlbumIds` is revoked, which covers all three ways access
+    /// can end: share removed, downgraded to read-only, album deleted.
+    static func computeRevokedLinks(
+        mappings: [String: Int],
+        confirmed: Set<String>,
+        writableServerAlbumIds: Set<Int>
+    ) -> Set<String> {
+        var revoked = Set<String>()
+        for (iosId, serverId) in mappings where confirmed.contains(iosId) {
+            if !writableServerAlbumIds.contains(serverId) { revoked.insert(iosId) }
+        }
+        return revoked
     }
 
     // MARK: - Confirmed album mappings
@@ -252,6 +305,9 @@ struct PhotoSyncPreferences {
             for id in ids { dates.removeValue(forKey: id) }
             defaults.set(dates, forKey: albumSyncDatesKey)
         }
+
+        let stillRevoked = Set(defaults.stringArray(forKey: revokedLinksKey) ?? []).subtracting(ids)
+        defaults.set(Array(stillRevoked), forKey: revokedLinksKey)
     }
 
     // MARK: - Server photo ↔ local asset mapping

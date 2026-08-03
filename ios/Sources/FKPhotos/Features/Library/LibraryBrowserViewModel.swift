@@ -20,11 +20,32 @@ final class LibraryBrowserViewModel {
             case copy
             case sync
             case bisync
+            /// Linked, but the server album is gone or no longer writable —
+            /// typically a share that was revoked or downgraded to read-only
+            /// (issue #812). The engine skips such links; the user can
+            /// disconnect, or the link revives on its own once access returns.
+            case revoked
         }
     }
 
+    /// How the target server album was found. Surfaced to the user because
+    /// landing in *somebody else's* album is a materially different outcome from
+    /// creating your own, and the name match alone doesn't make that visible
+    /// (issue #812).
+    enum TargetResolution: Sendable {
+        case ownAlbum
+        case sharedAlbum
+        case created
+    }
+
     enum MakeAvailableResult: Sendable {
-        case success(serverAlbumId: Int, albumName: String, assetCount: Int, iosAlbumId: String)
+        case success(
+            serverAlbumId: Int,
+            albumName: String,
+            assetCount: Int,
+            iosAlbumId: String,
+            resolution: TargetResolution
+        )
         case error(String)
     }
 
@@ -62,6 +83,7 @@ final class LibraryBrowserViewModel {
         let selectedIds = PhotoSyncPreferences.selectedAlbumIds
         let mappings = PhotoSyncPreferences.albumMappings
         let allLibrary = PhotoSyncPreferences.allLibrarySentinel
+        let revoked = PhotoSyncPreferences.revokedLinkIds
 
         let loaded: [IOSAlbum] = await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
@@ -99,7 +121,9 @@ final class LibraryBrowserViewModel {
                     let individuallySynced = selectedIds.contains(localId) && mappings[localId] != nil
                     let status: IOSAlbum.SyncStatus
                     if individuallySynced {
-                        status = Self.status(for: PhotoSyncPreferences.albumSyncMode(for: localId))
+                        status = revoked.contains(localId)
+                            ? .revoked
+                            : Self.status(for: PhotoSyncPreferences.albumSyncMode(for: localId))
                     } else if isAllLibrary {
                         status = .copy
                     } else {
@@ -150,15 +174,18 @@ final class LibraryBrowserViewModel {
         }
 
         var targetAlbumId: Int?
+        var resolution: TargetResolution = .created
 
         if let ownAlbum = serverAlbums.first(where: {
             AlbumName.matches($0.name, serverName) && $0.my_access_level == "owner"
         }) {
             targetAlbumId = ownAlbum.id
+            resolution = .ownAlbum
         } else if let sharedAlbum = serverAlbums.first(where: {
             AlbumName.matches($0.name, serverName) && $0.hasWriteAccess
         }) {
             targetAlbumId = sharedAlbum.id
+            resolution = .sharedAlbum
         } else {
             struct Body: Encodable { let name: String; let description: String? }
             struct CreatedAlbum: Decodable { let id: Int }
@@ -187,6 +214,9 @@ final class LibraryBrowserViewModel {
         PhotoSyncPreferences.confirmMapping(for: album.id)
         PhotoSyncPreferences.setAlbumSyncMode(mode, for: album.id)
         PhotoSyncPreferences.syncEnabled = true
+        // Re-linking an album whose share had been revoked must un-park it,
+        // otherwise the engine keeps skipping the fresh link.
+        PhotoSyncPreferences.clearRevokedLink(for: album.id)
 
         PhotoSyncPreferences.setAlbumSyncDate(Date(), for: album.id)
 
@@ -201,7 +231,8 @@ final class LibraryBrowserViewModel {
             serverAlbumId: serverId,
             albumName: album.name,
             assetCount: album.assetCount,
-            iosAlbumId: album.id
+            iosAlbumId: album.id,
+            resolution: resolution
         )
     }
 
@@ -219,6 +250,7 @@ final class LibraryBrowserViewModel {
         PhotoSyncPreferences.unconfirmMapping(for: album.id)
         PhotoSyncPreferences.removeAlbumSyncMode(for: album.id)
         PhotoSyncPreferences.resetAlbumSyncDate(for: album.id)
+        PhotoSyncPreferences.clearRevokedLink(for: album.id)
 
         if let idx = albums.firstIndex(where: { $0.id == album.id }) {
             albums[idx].syncStatus = .none
