@@ -130,12 +130,16 @@ public final class TripAutoEndMonitor: NSObject, CLLocationManagerDelegate {
 
     // MARK: - CLLocationManagerDelegate
 
-    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+    // `public` because the class itself is public and conforms to a public
+    // protocol: Swift requires a public type's protocol-witness methods to be
+    // at least as visible as the requirement, even though nothing outside this
+    // module is meant to call these directly (CLLocationManager does).
+    public nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
         Task { @MainActor in await self.handle(location) }
     }
 
-    nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+    public nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         // Significant-change failures are transient (no fix, airplane mode) and
         // self-resolve on the next update; nothing to reconcile here.
     }
