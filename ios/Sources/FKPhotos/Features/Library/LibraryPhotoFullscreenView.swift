@@ -6,7 +6,7 @@ struct LibraryPhotoFullscreenView: View {
     @Binding var currentIndex: Int
     @Environment(\.dismiss) private var dismiss
     @State private var showInfo = false
-    /// One-off "Nach f4mil kopieren…" for the photo on screen (issue #812).
+    /// One-off "Einmalig an f4mil senden…" for the photo on screen (issue #812).
     @State private var copyRequest: LibraryPhotoCopyRequest?
     @State private var toastMessage: ToastMessage?
 
