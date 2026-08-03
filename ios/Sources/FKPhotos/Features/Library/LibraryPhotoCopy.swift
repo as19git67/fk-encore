@@ -160,12 +160,14 @@ struct LibraryPhotoCopySheet: View {
                             .disabled(model.isCopying)
                         }
                     } footer: {
-                        Text("Einmalige Kopie — das Album wird dadurch nicht dauerhaft synchronisiert.")
+                        Text("Einmaliges Senden — das Album wird dadurch nicht dauerhaft mit f4mil verknüpft.")
                     }
                 }
             }
             .searchable(text: $searchText, prompt: "Album suchen")
-            .navigationTitle(assets.count == 1 ? "Nach f4mil kopieren" : "\(assets.count) Fotos kopieren")
+            // Must name the same action the user tapped to get here
+            // (`SyncWording.sendOnce`), minus its trailing ellipsis.
+            .navigationTitle(assets.count == 1 ? "Einmalig an f4mil senden" : "\(assets.count) Fotos senden")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -205,7 +207,7 @@ struct LibraryPhotoCopySheet: View {
     private func copy(to album: Album) async {
         let count = await model.copy(assets, to: album)
         onFinished(Self.resultToast(enqueued: count, requested: assets.count, albumName: album.name)
-            ?? .error(model.errorMessage ?? "Kopieren fehlgeschlagen"))
+            ?? .error(model.errorMessage ?? "Senden fehlgeschlagen"))
         dismiss()
     }
 
@@ -224,12 +226,12 @@ struct LibraryPhotoCopySheet: View {
     static func resultToast(enqueued: Int, requested: Int, albumName: String) -> ToastMessage? {
         guard enqueued > 0 else { return nil }
         if enqueued < requested {
-            return .info("\(enqueued) von \(requested) Fotos werden nach \"\(albumName)\" hochgeladen — die übrigen konnten nicht geladen werden (Verbindung zu iCloud?)")
+            return .info("\(enqueued) von \(requested) Fotos werden an \"\(albumName)\" gesendet — die übrigen konnten nicht geladen werden (Verbindung zu iCloud?)")
         }
         return .success(
             enqueued == 1
-                ? "Foto wird nach \"\(albumName)\" hochgeladen"
-                : "\(enqueued) Fotos werden nach \"\(albumName)\" hochgeladen"
+                ? "Foto wird an \"\(albumName)\" gesendet"
+                : "\(enqueued) Fotos werden an \"\(albumName)\" gesendet"
         )
     }
 }
