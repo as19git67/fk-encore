@@ -107,7 +107,19 @@ watch(local, (v) => emit('update:draft', v), { deep: true })
 // Sync all derived editor state (ranges, dates, selections) from the draft
 // once, at the moment the dialog transitions from hidden → visible.
 watch(() => props.visible, (v) => {
-  if (!v) return
+  if (!v) {
+    // PrimeVue tears down the Dialog's content while hidden, so the DOM node
+    // `locationMap` is bound to gets destroyed even though this component
+    // instance (and its `locationMap`/`mapOpen` state) survives. Drop the
+    // stale Leaflet instance and collapse the picker now; otherwise reopening
+    // the dialog renders a fresh, unbound container while `mapOpen` is still
+    // true, so the map never (re-)attaches and only a blank rectangle shows.
+    locationMap?.remove()
+    locationMap = null
+    locationMarker = null
+    mapOpen.value = false
+    return
+  }
   local.value = { ...props.draft }
   qualityRange.value = [props.draft.qualityMin ?? 0, props.draft.qualityMax ?? 100]
   dateFrom.value = props.draft.dateFrom ? parseLocalDate(props.draft.dateFrom) : null
