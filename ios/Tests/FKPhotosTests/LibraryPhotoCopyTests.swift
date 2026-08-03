@@ -25,13 +25,15 @@ final class LibraryPhotoCopyTests: XCTestCase {
         )
     }
 
+    /// Which access levels qualify — ordering is a separate concern, covered by
+    /// `testTargetsAreSortedByNameCaseInsensitively`, so compare as a set.
     func testOwnedAndWritableSharesAreOffered() {
         let targets = LibraryPhotoCopyModel.copyTargets(from: [
             album(1, "Eigenes", access: "owner"),
             album(2, "Geteilt schreibend", access: "write"),
             album(3, "Geteilt mit Weitergabe", access: "write_share"),
         ])
-        XCTAssertEqual(targets.map(\.id), [1, 2, 3])
+        XCTAssertEqual(Set(targets.map(\.id)), [1, 2, 3])
     }
 
     /// The server refuses to attach a photo to an album you can only read, so
