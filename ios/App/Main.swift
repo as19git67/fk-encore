@@ -51,17 +51,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             return
         }
         Task { @MainActor in
-            if response.actionIdentifier == TripAutoEndMonitor.endActionId {
-                if let trip = TripStore.shared.activeTrip {
-                    TripAutoEndMonitor.shared.dismissSuggestion(forTripAlbumId: trip.iosAlbumId)
-                    TripStore.shared.endTrip()
-                }
-            } else if let trip = TripStore.shared.activeTrip {
-                // Plain tap and the explicit "Weiter unterwegs" action both just
-                // clear the suggestion — tapping only opens the app, it isn't an
-                // implicit "yes".
-                TripAutoEndMonitor.shared.dismissSuggestion(forTripAlbumId: trip.iosAlbumId)
-            }
+            TripAutoEndMonitor.shared.handleNotificationAction(response.actionIdentifier)
             completionHandler()
         }
     }
