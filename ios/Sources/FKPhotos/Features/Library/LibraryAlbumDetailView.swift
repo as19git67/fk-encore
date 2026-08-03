@@ -98,7 +98,7 @@ struct LibraryAlbumDetailView: View {
                     Button {
                         copySelection()
                     } label: {
-                        Image(systemName: "square.and.arrow.up.on.square")
+                        Image(systemName: SyncWording.sendOnceSymbol)
                     }
                     .disabled(selectedAssetIds.isEmpty)
                 }
@@ -138,7 +138,7 @@ struct LibraryAlbumDetailView: View {
                         Button(role: .destructive) {
                             showDisconnectConfirm = true
                         } label: {
-                            Label("Trennen", systemImage: "minus.circle")
+                            Label(SyncWording.unlink, systemImage: SyncWording.unlinkSymbol)
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
@@ -168,7 +168,7 @@ struct LibraryAlbumDetailView: View {
         }
         .toast($toastMessage)
         .alert(
-            "Album \"\(album.name)\" verfügbar machen",
+            "Album \"\(album.name)\" mit f4mil verknüpfen",
             isPresented: $showModeChoice
         ) {
             Button("Kopieren") {
@@ -195,7 +195,7 @@ struct LibraryAlbumDetailView: View {
             }
             Button("Abbrechen", role: .cancel) {}
         } message: {
-            Text("Das Album \"\(album.name)\" wird nicht mehr automatisch hochgeladen. Bereits hochgeladene Fotos bleiben auf dem Server.")
+            Text("Das Album \"\(album.name)\" wird nicht mehr automatisch hochgeladen. Bereits hochgeladene Fotos bleiben in f4mil.")
         }
         .alert(
             initialSyncTitle,
@@ -281,13 +281,13 @@ struct LibraryAlbumDetailView: View {
                                     Button {
                                         copySelection(including: asset)
                                     } label: {
-                                        Label("Auswahl kopieren…", systemImage: "square.and.arrow.up.on.square")
+                                        Label(SyncWording.sendSelectionOnce, systemImage: SyncWording.sendOnceSymbol)
                                     }
                                 } else {
                                     Button {
                                         copyRequest = LibraryPhotoCopyRequest(asset)
                                     } label: {
-                                        Label("Nach f4mil kopieren…", systemImage: "square.and.arrow.up.on.square")
+                                        Label(SyncWording.sendOnce, systemImage: SyncWording.sendOnceSymbol)
                                     }
                                     Button {
                                         isSelecting = true

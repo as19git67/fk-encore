@@ -144,36 +144,5 @@ struct AlbumSyncLinkSheet: View {
     }
 }
 
-// MARK: - Mode presentation
-
-extension PhotoSyncMode {
-    /// Order the modes are offered in, weakest first.
-    static var allChoices: [PhotoSyncMode] { [.copy, .sync, .bisync] }
-
-    var title: String {
-        switch self {
-        case .copy:   return "Kopieren"
-        case .sync:   return "Synchronisieren"
-        case .bisync: return "Zwei-Wege"
-        }
-    }
-
-    var symbolName: String {
-        switch self {
-        case .copy:   return "arrow.up"
-        case .sync:   return "arrow.triangle.2.circlepath"
-        case .bisync: return "arrow.left.arrow.right"
-        }
-    }
-
-    var explanation: String {
-        switch self {
-        case .copy:
-            return "Fotos vom iPhone werden nur hochgeladen. Löschungen wirken sich nie auf f4mil aus."
-        case .sync:
-            return "Wie Kopieren — zusätzlich werden im iPhone-Album gelöschte Fotos auch aus dem f4mil-Album entfernt."
-        case .bisync:
-            return "Beide Richtungen: neue f4mil-Fotos landen auch auf dem iPhone, Löschungen werden in beide Richtungen übernommen."
-        }
-    }
-}
+// Mode titles, symbols and explanations live on `PhotoSyncMode` itself
+// (PhotoSyncPreferences.swift) so every surface names them identically.

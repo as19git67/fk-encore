@@ -11,8 +11,8 @@ struct AlbumsListView: View {
     @State private var pinnedAlbumIds: Set<Int> = AlbumPinPreferences.pinnedIds
     /// Album whose properties are being edited (sheet is driven by this).
     @State private var editingAlbum: Album?
-    /// Album being linked to an iPhone album via "Mit iPhone synchronisieren…"
-    /// (issue #812) — the mirror of the media library's "Verfügbar machen".
+    /// Album being linked to an iPhone album via "Mit iPhone verknüpfen…"
+    /// (issue #812) — the mirror of the media library's "Mit f4mil verknüpfen…".
     @State private var syncLinkAlbum: Album?
 
     private var filteredAlbums: [Album] {
@@ -90,7 +90,7 @@ struct AlbumsListView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("iOS Mediathek")
                                     .font(.headline)
-                                Text("Alben vom iPhone verfügbar machen")
+                                Text("Alben vom iPhone mit f4mil verknüpfen")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -306,7 +306,7 @@ struct AlbumsListView: View {
     private func syncToIPhoneButton(for album: Album) -> some View {
         if album.hasWriteAccess {
             Button { syncLinkAlbum = album } label: {
-                Label("Mit iPhone synchronisieren…", systemImage: "iphone.and.arrow.forward")
+                Label(SyncWording.linkFromServerAlbum, systemImage: SyncWording.linkSymbol)
             }
         }
     }

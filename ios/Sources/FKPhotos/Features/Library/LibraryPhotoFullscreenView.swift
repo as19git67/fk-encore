@@ -45,7 +45,7 @@ struct LibraryPhotoFullscreenView: View {
                             copyRequest = LibraryPhotoCopyRequest(asset)
                         }
                     } label: {
-                        Image(systemName: "square.and.arrow.up.on.square")
+                        Image(systemName: SyncWording.sendOnceSymbol)
                             .foregroundStyle(.white)
                             .padding(8)
                             .background(.black.opacity(0.5), in: Circle())

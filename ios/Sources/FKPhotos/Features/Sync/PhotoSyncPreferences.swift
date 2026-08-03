@@ -1,5 +1,55 @@
 import Foundation
 
+/// Wording and iconography shared by every surface that talks about moving
+/// photos between the iPhone and f4mil (issue #812).
+///
+/// Two concepts must never blur into each other:
+///
+///  * a **Verknüpfung** is ongoing — it keeps working after you walk away, and
+///    `PhotoSyncMode` says how far it goes;
+///  * **einmalig senden/sichern** is a one-shot copy that establishes nothing.
+///
+/// Both directions of each concept share a verb and a mirrored symbol, so the
+/// same idea reads the same everywhere:
+///
+/// | | iPhone → f4mil | f4mil → iPhone |
+/// |---|---|---|
+/// | dauerhaft | „Mit f4mil verknüpfen…" `link.badge.plus` | „Mit iPhone verknüpfen…" `link.badge.plus` |
+/// | einmalig | „Einmalig an f4mil senden…" `arrow.up.circle` | „Original sichern" `arrow.down.circle` |
+///
+/// Deliberately *not* reusing the verb "kopieren" for the one-shot action: it
+/// is already the name of the `copy` **mode**, which is the opposite kind of
+/// commitment, and both appear within a thumb's width of each other in the
+/// media-library album view.
+///
+/// The arrows are also chosen against two collisions:
+///  * `square.and.arrow.up` is the system *share sheet* glyph and is already
+///    used for exactly that in the album detail view's selection mode — a
+///    near-identical grid screen — so it stays reserved for sharing.
+///  * The modes use bare arrows (`arrow.up`, …) for an ongoing flow, so the
+///    one-shot actions take the *circled* form of the same direction.
+enum SyncWording {
+    /// Establishing the ongoing link, from either side.
+    static let linkSymbol = "link.badge.plus"
+    static let linkFromLibrary = "Mit f4mil verknüpfen…"
+    static let linkFromServerAlbum = "Mit iPhone verknüpfen…"
+    /// Undoing it. Reads as the inverse of "verknüpfen" — "Verfügbar machen"
+    /// used to pair with "Trennen", which it never did.
+    static let unlink = "Trennen"
+    static let unlinkSymbol = "minus.circle"
+
+    /// One-shot, iPhone → f4mil.
+    static let sendOnceSymbol = "arrow.up.circle"
+    static let sendOnce = "Einmalig an f4mil senden…"
+    static let sendSelectionOnce = "Auswahl einmalig senden…"
+
+    /// One-shot, f4mil → iPhone: the mirrored counterpart, in the f4mil photo
+    /// viewer. The label predates this vocabulary (issue #762) and is accurate,
+    /// so only the symbol joins the pair.
+    static let saveOriginalSymbol = "arrow.down.circle"
+    static let saveOriginal = "Original sichern"
+}
+
 /// Sync mode for a linked iOS album (issue #812).
 enum PhotoSyncMode: String, Codable, Sendable {
     /// Upload new photos only; never remove anything from the server album.
@@ -12,6 +62,45 @@ enum PhotoSyncMode: String, Codable, Sendable {
     /// pulls new server photos onto the device and mirrors server-side removals
     /// (via PhotoDownloadService) for the same album pair.
     case bisync
+}
+
+// MARK: - Mode presentation
+//
+// Single source of truth: badges, pickers and explanatory copy all read from
+// here, so a mode can never be called "Zwei-Wege" in one place and "bidir" in
+// another. Lives on the enum rather than in a view so every surface — including
+// non-SwiftUI callers — gets the same words.
+
+extension PhotoSyncMode {
+    /// Order the modes are offered in, least committal first.
+    static var allChoices: [PhotoSyncMode] { [.copy, .sync, .bisync] }
+
+    var title: String {
+        switch self {
+        case .copy:   return "Kopieren"
+        case .sync:   return "Synchronisieren"
+        case .bisync: return "Zwei-Wege"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .copy:   return "arrow.up"
+        case .sync:   return "arrow.triangle.2.circlepath"
+        case .bisync: return "arrow.left.arrow.right"
+        }
+    }
+
+    var explanation: String {
+        switch self {
+        case .copy:
+            return "Fotos vom iPhone werden nur hochgeladen. Löschungen wirken sich nie auf f4mil aus."
+        case .sync:
+            return "Wie Kopieren — zusätzlich werden im iPhone-Album gelöschte Fotos auch aus dem f4mil-Album entfernt."
+        case .bisync:
+            return "Beide Richtungen: neue f4mil-Fotos landen auch auf dem iPhone, Löschungen werden in beide Richtungen übernommen."
+        }
+    }
 }
 
 /// Namespace for all sync-related UserDefaults keys and typed accessors.

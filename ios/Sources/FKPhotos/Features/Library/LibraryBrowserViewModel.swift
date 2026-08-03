@@ -49,9 +49,15 @@ final class LibraryBrowserViewModel {
         case error(String)
     }
 
-    /// Shared explanation shown in the copy/sync/bisync mode chooser.
-    static let modeChoiceExplanation =
-        "Kopieren: Fotos werden nur hochgeladen. Synchronisieren: zusätzlich werden im iOS-Album gelöschte Fotos auch aus dem Server-Album entfernt. Zwei-Wege: zusätzlich werden neue Server-Fotos aufs Gerät geladen und Server-Löschungen übernommen."
+    /// Explanation shown in the mode chooser. Composed from `PhotoSyncMode` so
+    /// it can't drift from the descriptions the linking sheet shows — the two
+    /// used to describe the same three modes in different words ("Server-Album"
+    /// here vs. "f4mil-Album" there).
+    static var modeChoiceExplanation: String {
+        PhotoSyncMode.allChoices
+            .map { "\($0.title): \($0.explanation)" }
+            .joined(separator: "\n\n")
+    }
 
     static func status(for mode: PhotoSyncMode) -> IOSAlbum.SyncStatus {
         switch mode {
@@ -162,7 +168,7 @@ final class LibraryBrowserViewModel {
             $0.id != album.id && AlbumName.matches($0.name, album.name) && $0.syncStatus != .none
         }
         if duplicateLinked != nil {
-            return .error("Ein iOS-Album mit dem Namen \"\(serverName)\" ist bereits verknüpft.")
+            return .error("Ein iPhone-Album mit dem Namen \"\(serverName)\" ist bereits verknüpft.")
         }
 
         let serverAlbums: [Album]
@@ -170,7 +176,7 @@ final class LibraryBrowserViewModel {
             let response: ListAlbumsResponse = try await APIClient.shared.get("/albums")
             serverAlbums = response.albums
         } catch {
-            return .error("Server-Alben konnten nicht geladen werden: \(error.localizedDescription)")
+            return .error("f4mil-Alben konnten nicht geladen werden: \(error.localizedDescription)")
         }
 
         var targetAlbumId: Int?

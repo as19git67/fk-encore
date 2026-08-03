@@ -14,7 +14,7 @@ struct AlbumDetailView: View {
     @State private var errorMessage: String?
     @State private var showShareSheet = false
     @State private var showSettings = false
-    /// Drives the "Mit iPhone synchronisieren…" sheet (issue #812).
+    /// Drives the "Mit iPhone verknüpfen…" sheet (issue #812).
     @State private var syncLinkAlbum: Album?
     @State private var showUpload = false
     @State private var showDeleteConfirm = false
@@ -60,7 +60,7 @@ struct AlbumDetailView: View {
         userRole == "owner" || userRole == "admin"
     }
 
-    /// "Mit iPhone synchronisieren…" needs the same write access as an upload:
+    /// "Mit iPhone verknüpfen…" needs the same write access as an upload:
     /// every mode uploads, and a read-only share would 403 on each photo.
     private var canLinkToIPhone: Bool { canEditAlbum }
 
@@ -181,7 +181,7 @@ struct AlbumDetailView: View {
                                 Button {
                                     syncLinkAlbum = album
                                 } label: {
-                                    Label("Mit iPhone synchronisieren…", systemImage: "iphone.and.arrow.forward")
+                                    Label(SyncWording.linkFromServerAlbum, systemImage: SyncWording.linkSymbol)
                                 }
                             }
                             if canEditAlbum {

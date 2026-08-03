@@ -74,7 +74,7 @@ struct LibraryBrowserView: View {
                                     Button(role: .destructive) {
                                         viewModel.disconnect(album)
                                     } label: {
-                                        Label("Trennen", systemImage: "minus.circle")
+                                        Label(SyncWording.unlink, systemImage: SyncWording.unlinkSymbol)
                                     }
                                 }
                             }
@@ -99,7 +99,7 @@ struct LibraryBrowserView: View {
                                     Button {
                                         pendingModeChoice = album
                                     } label: {
-                                        Label("Verfügbar machen", systemImage: "link.badge.plus")
+                                        Label(SyncWording.linkFromLibrary, systemImage: SyncWording.linkSymbol)
                                     }
                                     .tint(.blue)
                                 }
@@ -197,7 +197,7 @@ struct LibraryBrowserView: View {
 
     private var modeChoiceTitle: String {
         guard let album = pendingModeChoice else { return "" }
-        return "Album \"\(album.name)\" verfügbar machen"
+        return "Album \"\(album.name)\" mit f4mil verknüpfen"
     }
 
     private var modeChoiceMessage: String {
@@ -276,42 +276,52 @@ private struct LibraryAlbumRow: View {
 
 // MARK: - Sync Status Badge
 
+/// The badge names a mode with exactly the words and symbol the mode chooser
+/// uses — they used to read "kopiert" / "sync" / "bidir" against modes called
+/// "Kopieren" / "Synchronisieren" / "Zwei-Wege", leaving the user to guess
+/// which badge meant which mode.
 struct SyncStatusBadge: View {
     let status: LibraryBrowserViewModel.IOSAlbum.SyncStatus
+
+    private var mode: PhotoSyncMode? {
+        switch status {
+        case .copy:   return .copy
+        case .sync:   return .sync
+        case .bisync: return .bisync
+        case .none, .revoked: return nil
+        }
+    }
+
+    private var tint: Color {
+        switch status {
+        case .copy:    return .blue
+        case .sync:    return .green
+        case .bisync:  return .orange
+        case .revoked: return .red
+        case .none:    return .clear
+        }
+    }
 
     var body: some View {
         switch status {
         case .none:
             EmptyView()
-        case .copy:
-            Label("kopiert", systemImage: "arrow.up")
-                .font(.caption2)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(.blue, in: Capsule())
-        case .sync:
-            Label("sync", systemImage: "arrow.triangle.2.circlepath")
-                .font(.caption2)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(.green, in: Capsule())
-        case .bisync:
-            Label("bidir", systemImage: "arrow.left.arrow.right")
-                .font(.caption2)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(.orange, in: Capsule())
         case .revoked:
-            Label("kein Zugriff", systemImage: "exclamationmark.triangle.fill")
-                .font(.caption2)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(.red, in: Capsule())
+            badge("Kein Zugriff", symbol: "exclamationmark.triangle.fill")
+        case .copy, .sync, .bisync:
+            if let mode {
+                badge(mode.title, symbol: mode.symbolName)
+            }
         }
+    }
+
+    private func badge(_ text: String, symbol: String) -> some View {
+        Label(text, systemImage: symbol)
+            .font(.caption2)
+            .foregroundStyle(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(tint, in: Capsule())
     }
 }
 

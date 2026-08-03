@@ -2,8 +2,8 @@ import Foundation
 import Photos
 import Observation
 
-/// "Mit iPhone synchronisieren…" — the mirror image of the media library's
-/// "Verfügbar machen" (issue #812).
+/// "Mit iPhone verknüpfen…" — the mirror image of the media library's
+/// "Mit f4mil verknüpfen…" (issue #812).
 ///
 /// The library-side flow starts from an iOS album and finds (or creates) the
 /// server album. This one starts from a **server** album — which is what you
@@ -41,9 +41,9 @@ final class AlbumSyncLinkModel {
             case .readOnly:
                 return "Für dieses Album hast du nur Leserechte. Bitte die Besitzerin oder den Besitzer um Bearbeiten-Freigabe."
             case .alreadyLinked(let title):
-                return "Dieses Album ist bereits mit dem iOS-Album \"\(title)\" verknüpft."
+                return "Dieses Album ist bereits mit dem iPhone-Album \"\(title)\" verknüpft."
             case .nameConflict(let title):
-                return "Das iOS-Album \"\(title)\" ist bereits mit einem anderen f4mil-Album verknüpft. Benenne eines der beiden um."
+                return "Das iPhone-Album \"\(title)\" ist bereits mit einem anderen f4mil-Album verknüpft. Benenne eines der beiden um."
             case .emptyName:
                 return "Das Album hat keinen Namen — die Verknüpfung läuft über den Albumnamen."
             }
@@ -96,7 +96,7 @@ final class AlbumSyncLinkModel {
     }
 
     /// Establishes the relationship: finds or creates the matching iOS album and
-    /// stores exactly the same link the library-side "Verfügbar machen" writes.
+    /// stores exactly the same link the library-side "Mit f4mil verknüpfen…" writes.
     ///
     /// The per-album watermark is set to *now*, so the default is "only new
     /// photos from here on" — the caller offers the "upload everything" option
