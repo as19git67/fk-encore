@@ -24,9 +24,18 @@ struct ActiveTrip: Codable, Equatable, Sendable {
     /// only surfaced for review and added on demand.
     var autoAdd: Bool
     var mode: PhotoSyncMode
-    /// Optional geofence that narrows trip membership. Captured in Etappe 1b-ii
-    /// (CoreLocation); `nil` means pure time-window membership.
-    var geofence: Geofence?
+    /// Optional **exclusion** zone around the user's home: a photo taken inside
+    /// it is not a trip photo, everything else in the window is. `nil` means
+    /// pure time-window membership.
+    ///
+    /// This replaces the start-anchored *inclusion* geofence of Etappe 1b-ii,
+    /// which broke the moment a trip actually travelled: it only ever admitted
+    /// photos within 25 km of wherever Trip Mode happened to be switched on, so
+    /// a trip started in München silently dropped everything shot in Frankfurt.
+    /// The documented intent was always „daheim während laufendem Trip gemachte
+    /// Fotos fallen raus" (§5) — which is what an exclusion zone around *home*
+    /// expresses, independent of where the trip starts or goes.
+    var homeExclusion: Geofence?
     /// High-water mark on `creationDate`: the auto-add pass has examined every
     /// asset in the window up to this instant, so the next pass only needs to
     /// enumerate from here (`docs/ios-trip-mode.md` §14.4). `nil` before the
@@ -79,20 +88,34 @@ enum TripMembership {
         return now.timeIntervalSince(endedAt) > closedTripGrace
     }
 
+    /// Radius of the home exclusion zone. Matches
+    /// `TripAutoEndPreferences.homeArrivalRadiusMeters` — the same notion of
+    /// „zuhause" decides both „end the trip?" and „this isn't a trip photo".
+    /// Deliberately tight: a trip is defined by its time window, and the only
+    /// thing the zone has to catch is the quick shot taken at home while a trip
+    /// is nominally still running.
+    static let homeExclusionRadiusMeters: CLLocationDistance =
+        TripAutoEndPreferences.homeArrivalRadiusMeters
+
     /// Whether an asset belongs to the trip: taken inside the capture window
-    /// `[startedAt, endedAt]` (open-ended while the trip runs) and, when a
-    /// geofence is set, within its radius.
+    /// `[startedAt, endedAt]` (open-ended while the trip runs) and not inside
+    /// the home exclusion zone, when one is set.
+    ///
+    /// The window is the rule; the zone only carves out home. A trip travels —
+    /// distance from where it started says nothing about whether a photo
+    /// belongs to it, which is exactly what the old start-anchored geofence got
+    /// wrong (see `ActiveTrip.homeExclusion`).
     ///
     /// An asset without a creation date can't be placed in the window and is
-    /// excluded. An asset without GPS **is** included even under a geofence —
-    /// im Zweifel aufnehmen (`docs/ios-trip-mode.md` §14.4).
+    /// excluded. An asset without GPS **is** included — im Zweifel aufnehmen
+    /// (`docs/ios-trip-mode.md` §14.4).
     static func includes(creationDate: Date?, location: CLLocation?, trip: ActiveTrip) -> Bool {
         guard let creationDate else { return false }
         guard creationDate >= trip.startedAt else { return false }
         if let endedAt = trip.endedAt, creationDate > endedAt { return false }
-        guard let geofence = trip.geofence, let location else { return true }
-        let center = CLLocation(latitude: geofence.latitude, longitude: geofence.longitude)
-        return location.distance(from: center) <= geofence.radiusMeters
+        guard let home = trip.homeExclusion, let location else { return true }
+        let center = CLLocation(latitude: home.latitude, longitude: home.longitude)
+        return location.distance(from: center) > home.radiusMeters
     }
 
     /// Records that a pass examined the whole window up to `watermark`.
@@ -133,11 +156,45 @@ enum TripPreferences {
     private static let closedTripsKey = "trip.closed"
 
     static func loadActiveTrip() -> ActiveTrip? {
-        guard let data = UserDefaults.standard.data(forKey: activeTripKey),
-              let trip = try? JSONDecoder().decode(ActiveTrip.self, from: data) else {
-            return nil
-        }
-        return trip
+        guard let data = UserDefaults.standard.data(forKey: activeTripKey) else { return nil }
+        return decodeActiveTrip(data)
+    }
+
+    /// Decodes a persisted active trip, applying the start-geofence migration.
+    /// Split out from `loadActiveTrip()` so the migration is unit-testable
+    /// without UserDefaults.
+    static func decodeActiveTrip(_ data: Data) -> ActiveTrip? {
+        guard let trip = try? JSONDecoder().decode(ActiveTrip.self, from: data) else { return nil }
+        let raw = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        return migratedFromStartGeofence(trip, raw: raw)
+    }
+
+    /// Repairs a trip that was persisted under the old start-anchored geofence.
+    ///
+    /// Two things have to happen for such a trip, and only for such a trip:
+    ///
+    /// 1. The geofence itself is dropped (the decoded `homeExclusion` is
+    ///    already `nil` — the legacy key doesn't map onto it), so membership
+    ///    falls back to the pure time window and the trip stops discarding
+    ///    photos taken away from its start location.
+    /// 2. The watermark is reset, because the old rule's damage is otherwise
+    ///    permanent: the pass advances the watermark over assets it *examined*,
+    ///    including the ones the geofence rejected (`docs/ios-trip-mode.md`
+    ///    §14.4). Those photos sit below the watermark and would never be
+    ///    enumerated again, so fixing the rule alone would not bring back the
+    ///    photos the user already took.
+    ///
+    /// Re-enumerating from `startedAt` can re-add a photo the user had
+    /// deliberately removed from the album, because the pruned `handledAssetIds`
+    /// no longer names it. That is a one-off, bounded to trips that were
+    /// actually subject to the broken rule, and the alternative is losing the
+    /// trip's photos outright — the trade-off §4 does not have to make for
+    /// anyone else, since trips without a legacy geofence are left untouched.
+    static func migratedFromStartGeofence(_ trip: ActiveTrip, raw: [String: Any]?) -> ActiveTrip {
+        guard let raw, raw["geofence"] is [String: Any] else { return trip }
+        var migrated = trip
+        migrated.handledWatermark = nil
+        return migrated
     }
 
     static func saveActiveTrip(_ trip: ActiveTrip?) {
@@ -154,11 +211,19 @@ enum TripPreferences {
     /// the active trip so ending a trip never loses the photos that were taken
     /// while the app was suspended.
     static func loadClosedTrips() -> [ActiveTrip] {
-        guard let data = UserDefaults.standard.data(forKey: closedTripsKey),
-              let trips = try? JSONDecoder().decode([ActiveTrip].self, from: data) else {
-            return []
+        guard let data = UserDefaults.standard.data(forKey: closedTripsKey) else { return [] }
+        return decodeClosedTrips(data)
+    }
+
+    /// Decodes the persisted ended trips, applying the same start-geofence
+    /// migration as `decodeActiveTrip`. An ended trip is still inside its
+    /// catch-up grace period, so repairing it can genuinely recover photos.
+    static func decodeClosedTrips(_ data: Data) -> [ActiveTrip] {
+        guard let trips = try? JSONDecoder().decode([ActiveTrip].self, from: data) else { return [] }
+        let raw = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]]
+        return trips.enumerated().map { index, trip in
+            migratedFromStartGeofence(trip, raw: raw?.indices.contains(index) == true ? raw?[index] : nil)
         }
-        return trips
     }
 
     static func saveClosedTrips(_ trips: [ActiveTrip]) {

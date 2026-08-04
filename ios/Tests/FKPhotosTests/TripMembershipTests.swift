@@ -17,7 +17,7 @@ final class TripMembershipTests: XCTestCase {
     private func makeTrip(
         startedAt: Date,
         endedAt: Date? = nil,
-        geofence: ActiveTrip.Geofence? = nil,
+        homeExclusion: ActiveTrip.Geofence? = nil,
         handledWatermark: Date? = nil,
         handledAssetIds: [String] = []
     ) -> ActiveTrip {
@@ -29,7 +29,7 @@ final class TripMembershipTests: XCTestCase {
             endedAt: endedAt,
             autoAdd: true,
             mode: .sync,
-            geofence: geofence,
+            homeExclusion: homeExclusion,
             handledWatermark: handledWatermark,
             handledAssetIds: handledAssetIds,
             dismissedAssetIds: [],
@@ -102,41 +102,77 @@ final class TripMembershipTests: XCTestCase {
         )
     }
 
-    // MARK: - Geofence
+    // MARK: - Home exclusion
 
-    private let gardasee = ActiveTrip.Geofence(
-        latitude: 45.6, longitude: 10.7, radiusMeters: 25_000
-    )
+    private let munich = CLLocation(latitude: 48.14, longitude: 11.58)
+    private let frankfurt = CLLocation(latitude: 50.11, longitude: 8.68)
 
-    func testGeofenceExcludesDistantPhoto() {
-        let trip = makeTrip(startedAt: start, geofence: gardasee)
-        let munich = CLLocation(latitude: 48.14, longitude: 11.58)
-        XCTAssertFalse(
-            TripMembership.includes(
-                creationDate: start.addingTimeInterval(60), location: munich, trip: trip
-            ),
-            "A located photo outside the radius is not a trip photo"
+    private func homeZone(at location: CLLocation) -> ActiveTrip.Geofence {
+        ActiveTrip.Geofence(
+            latitude: location.coordinate.latitude,
+            longitude: location.coordinate.longitude,
+            radiusMeters: TripMembership.homeExclusionRadiusMeters
         )
     }
 
-    func testGeofenceIncludesNearbyPhoto() {
-        let trip = makeTrip(startedAt: start, geofence: gardasee)
-        let nearby = CLLocation(latitude: 45.62, longitude: 10.72)
+    /// The regression this rule exists for: Trip Mode switched on in München,
+    /// photos taken in Frankfurt. Under the old start-anchored inclusion
+    /// geofence (25 km around the start) they were silently dropped and never
+    /// reached the trip album.
+    func testPhotoFarFromTheStartLocationIsATripPhoto() {
+        let trip = makeTrip(startedAt: start, homeExclusion: homeZone(at: munich))
         XCTAssertTrue(
             TripMembership.includes(
-                creationDate: start.addingTimeInterval(60), location: nearby, trip: trip
+                creationDate: start.addingTimeInterval(3600), location: frankfurt, trip: trip
+            ),
+            "A trip travels — distance from where it started never excludes a photo"
+        )
+    }
+
+    /// The zone's actual job (`docs/ios-trip-mode.md` §5): a photo taken at
+    /// home while a trip is nominally still running is not a trip photo.
+    func testPhotoAtHomeIsExcluded() {
+        let trip = makeTrip(startedAt: start, homeExclusion: homeZone(at: munich))
+        let nextDoor = CLLocation(latitude: 48.141, longitude: 11.581)
+        XCTAssertFalse(
+            TripMembership.includes(
+                creationDate: start.addingTimeInterval(60), location: nextDoor, trip: trip
+            )
+        )
+    }
+
+    func testPhotoJustOutsideTheHomeZoneIsIncluded() {
+        let home = CLLocation(latitude: 48.14, longitude: 11.58)
+        let trip = makeTrip(startedAt: start, homeExclusion: homeZone(at: home))
+        // ~3.3 km north of home, comfortably outside the 2 km radius.
+        let away = CLLocation(latitude: 48.17, longitude: 11.58)
+        XCTAssertGreaterThan(away.distance(from: home), TripMembership.homeExclusionRadiusMeters)
+        XCTAssertTrue(
+            TripMembership.includes(
+                creationDate: start.addingTimeInterval(60), location: away, trip: trip
+            )
+        )
+    }
+
+    /// Without a known home location the trip is a pure time window — the
+    /// documented default (§2).
+    func testWithoutHomeExclusionEveryWindowPhotoCounts() {
+        let trip = makeTrip(startedAt: start)
+        XCTAssertTrue(
+            TripMembership.includes(
+                creationDate: start.addingTimeInterval(60), location: munich, trip: trip
             )
         )
     }
 
     /// Etappe-1-Entscheidung (`docs/ios-trip-mode.md` §14.4): im Zweifel aufnehmen.
-    func testGeofenceIncludesPhotoWithoutGPS() {
-        let trip = makeTrip(startedAt: start, geofence: gardasee)
+    func testPhotoWithoutGPSIsIncluded() {
+        let trip = makeTrip(startedAt: start, homeExclusion: homeZone(at: munich))
         XCTAssertTrue(
             TripMembership.includes(
                 creationDate: start.addingTimeInterval(60), location: nil, trip: trip
             ),
-            "Assets without GPS are included even under a geofence"
+            "Assets without GPS are included even under a home exclusion zone"
         )
     }
 
@@ -246,5 +282,82 @@ final class TripMembershipTests: XCTestCase {
             advanced.handledAssetIds, ["d"],
             "The first pass after the upgrade collapses the accumulated list"
         )
+    }
+
+    // MARK: - Start-geofence migration
+
+    /// A trip persisted while the start-anchored geofence was still in force.
+    /// `handledWatermark` sits at 500 (seconds since the reference date), i.e.
+    /// the pass had already examined — and discarded — everything up to there.
+    private func legacyTripJSON(geofence: Bool) -> Data {
+        let fence = geofence
+            ? #""geofence":{"latitude":48.14,"longitude":11.58,"radiusMeters":25000},"#
+            : ""
+        return Data("""
+        {"serverAlbumId":1,"iosAlbumId":"album-local-id","name":"München",
+         "startedAt":0,"autoAdd":true,"mode":"sync",\(fence)
+         "handledWatermark":500,"handledAssetIds":["a","b"],
+         "dismissedAssetIds":[],"isShared":false}
+        """.utf8)
+    }
+
+    /// Without the watermark reset the fix would be cosmetic: the photos the old
+    /// rule rejected sit below the watermark and are never enumerated again.
+    func testLegacyGeofenceTripResetsItsWatermark() throws {
+        let trip = try XCTUnwrap(TripPreferences.decodeActiveTrip(legacyTripJSON(geofence: true)))
+
+        XCTAssertNil(
+            trip.handledWatermark,
+            "A trip that ran under the start geofence re-scans its window from startedAt"
+        )
+        XCTAssertNil(trip.homeExclusion, "The legacy start geofence is not carried over")
+        XCTAssertEqual(
+            trip.handledAssetIds, ["a", "b"],
+            "The edge list survives, so the assets it names are still skipped"
+        )
+    }
+
+    /// The re-scan is a targeted repair, not a blanket one: a trip that never
+    /// had a geofence was never filtered by location, so its watermark stands
+    /// and nothing the user sorted out comes back.
+    func testTripWithoutLegacyGeofenceKeepsItsWatermark() throws {
+        let trip = try XCTUnwrap(TripPreferences.decodeActiveTrip(legacyTripJSON(geofence: false)))
+
+        XCTAssertEqual(trip.handledWatermark, Date(timeIntervalSinceReferenceDate: 500))
+        XCTAssertNil(trip.homeExclusion)
+    }
+
+    /// Ended trips are still inside their catch-up grace period, so repairing
+    /// them is what actually recovers the photos of a trip the user just ended.
+    func testClosedTripsAreMigratedIndividually() {
+        let withFence = String(decoding: legacyTripJSON(geofence: true), as: UTF8.self)
+        let withoutFence = String(decoding: legacyTripJSON(geofence: false), as: UTF8.self)
+        let data = Data("[\(withFence),\(withoutFence)]".utf8)
+
+        let trips = TripPreferences.decodeClosedTrips(data)
+
+        XCTAssertEqual(trips.count, 2)
+        XCTAssertNil(trips[0].handledWatermark, "The geofenced trip re-scans")
+        XCTAssertEqual(
+            trips[1].handledWatermark, Date(timeIntervalSinceReferenceDate: 500),
+            "Its neighbour in the same list is untouched"
+        )
+    }
+
+    /// A trip written by the current version round-trips unchanged — the
+    /// migration must not fire on the new field.
+    func testCurrentTripRoundTripsWithoutMigration() throws {
+        let home = ActiveTrip.Geofence(latitude: 48.14, longitude: 11.58, radiusMeters: 2_000)
+        let trip = makeTrip(
+            startedAt: start,
+            homeExclusion: home,
+            handledWatermark: start.addingTimeInterval(600),
+            handledAssetIds: ["a"]
+        )
+
+        let data = try JSONEncoder().encode(trip)
+        let decoded = try XCTUnwrap(TripPreferences.decodeActiveTrip(data))
+
+        XCTAssertEqual(decoded, trip)
     }
 }
