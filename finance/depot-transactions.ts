@@ -384,6 +384,11 @@ interface DeriveDepotTransactionsResponse {
   skipped: number;
   duplicates: number;
   errors: string[];
+  /** Bookings that looked like Wertpapierabrechnungen and were examined. */
+  candidates: number;
+  skipped_not_classified: number;
+  skipped_no_identifier: number;
+  skipped_no_holding: number;
 }
 
 export const deriveDepotTransactionsFromGiro = api(
