@@ -29,9 +29,6 @@ public final class TripAutoEndMonitor: NSObject, CLLocationManagerDelegate {
 
     private let manager = CLLocationManager()
     private var isMonitoring = false
-    /// Serialises the async home-location fetch so two significant-change
-    /// callbacks arriving close together don't both start a request.
-    private var isFetchingHomeLocation = false
 
     private override init() {
         super.init()
@@ -150,7 +147,7 @@ public final class TripAutoEndMonitor: NSObject, CLLocationManagerDelegate {
         guard isMonitoring, let trip = TripStore.shared.activeTrip else { return }
         guard TripAutoEndPreferences.pendingSuggestion == nil else { return }
 
-        guard let home = await resolveHomeLocation() else { return }
+        guard let home = await TripHomeLocation.resolve() else { return }
 
         let atHome = TripAutoEndHeuristic.isAtHome(location.coordinate, home: home)
         let decision = TripAutoEndHeuristic.evaluate(
@@ -163,31 +160,6 @@ public final class TripAutoEndMonitor: NSObject, CLLocationManagerDelegate {
         guard decision.shouldSuggest else { return }
 
         raiseSuggestion(for: trip)
-    }
-
-    /// Returns the cached home location, refreshing it from the server when
-    /// missing or stale. Best-effort: a failed fetch just means this update is
-    /// skipped, the next significant-change callback tries again.
-    private func resolveHomeLocation() async -> CLLocationCoordinate2D? {
-        if TripAutoEndPreferences.isHomeLocationFresh, let cached = TripAutoEndPreferences.homeLocation {
-            return cached
-        }
-        guard !isFetchingHomeLocation else { return TripAutoEndPreferences.homeLocation }
-        isFetchingHomeLocation = true
-        defer { isFetchingHomeLocation = false }
-
-        struct Response: Decodable {
-            struct Location: Decodable { let lat: Double; let lon: Double }
-            let location: Location?
-        }
-        guard let response: Response = try? await APIClient.shared.get("/trips/home-location"),
-              let location = response.location
-        else {
-            return TripAutoEndPreferences.homeLocation
-        }
-        let coordinate = CLLocationCoordinate2D(latitude: location.lat, longitude: location.lon)
-        TripAutoEndPreferences.homeLocation = coordinate
-        return coordinate
     }
 
     private func raiseSuggestion(for trip: ActiveTrip) {
