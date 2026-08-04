@@ -56,9 +56,14 @@ final class TripStore {
     /// Starts a solo trip: creates an iOS album, links it to a server album,
     /// sets the sync mode (default `sync`) and persists the active trip. The
     /// caller must have ensured read-write photo access.
+    ///
+    /// The trip's only location input is the home exclusion zone, which is
+    /// resolved **after** the trip is live (`applyHomeExclusion`) rather than
+    /// passed in from the start sheet: it has nothing to do with where the trip
+    /// is being started, and it may need a network round-trip — starting a trip
+    /// on a train with no signal must not hang on that.
     func startTrip(
         name: String,
-        geofence: ActiveTrip.Geofence? = nil,
         autoAdd: Bool = true
     ) async throws {
         guard activeTrip == nil, !isProvisioning else { return }
@@ -95,7 +100,7 @@ final class TripStore {
             endedAt: nil,
             autoAdd: autoAdd,
             mode: mode,
-            geofence: geofence,
+            homeExclusion: nil,
             handledWatermark: nil,
             handledAssetIds: [],
             dismissedAssetIds: [],
@@ -109,6 +114,24 @@ final class TripStore {
         // Suggest ending the trip once the device is back home (Etappe 5,
         // docs/ios-trip-mode.md §9) — never automatic, only a prompt.
         TripAutoEndMonitor.shared.start()
+        Task { [weak self] in await self?.applyHomeExclusion(toAlbum: iosAlbumId) }
+    }
+
+    /// Stamps the home exclusion zone onto a just-started trip, once the home
+    /// location is known. Runs detached from `startTrip` so a slow or absent
+    /// network never delays the trip going live.
+    ///
+    /// Until this lands the trip is a pure time window, which is the safe
+    /// direction: it over-collects rather than dropping photos, and anything it
+    /// picked up at home in those first seconds can be sorted out by hand. The
+    /// zone is only applied while *this* trip is still the active one — the user
+    /// may have ended it in the meantime.
+    private func applyHomeExclusion(toAlbum albumId: String) async {
+        guard let zone = await TripHomeLocation.exclusionZone() else { return }
+        guard var trip = activeTrip, trip.iosAlbumId == albumId, trip.homeExclusion == nil else { return }
+        trip.homeExclusion = zone
+        activeTrip = trip
+        TripPreferences.saveActiveTrip(trip)
     }
 
     /// Ends (freezes) the active trip: photos taken from now on are no longer
@@ -179,7 +202,7 @@ final class TripStore {
     /// `endedAt` bounds that: nothing taken after the trip ended is added.
     ///
     /// Membership rule (`TripMembership.includes`): image assets inside
-    /// `[startedAt, endedAt]` and, when a geofence is set, within its radius
+    /// `[startedAt, endedAt]`, minus the home exclusion zone when one is set
     /// (assets without GPS are included).
     ///
     /// Each asset is added **at most once**: the `handledWatermark` plus its
@@ -290,7 +313,7 @@ final class TripStore {
         var candidateIds: [String] = []
         /// Newest `creationDate` examined — the watermark once the add succeeds.
         /// Covers assets that were *not* candidates too (already handled, or
-        /// outside the geofence): the watermark means "everything up to here has
+        /// inside the home exclusion): the watermark means "everything up to here has
         /// been looked at", so those are never re-enumerated either.
         var examinedMax: Date?
         /// Every asset examined at exactly `examinedMax` — the new edge list.
@@ -303,7 +326,7 @@ final class TripStore {
     ///
     /// The window bounds go into the fetch predicate so the photo store does the
     /// filtering; `TripMembership.includes` then re-checks each asset, which is
-    /// what applies the geofence. The lower bound is the watermark (inclusive,
+    /// what applies the home exclusion. The lower bound is the watermark (inclusive,
     /// with the edge list skipping what was already seen at that exact instant)
     /// instead of `startedAt`, so the pass costs the same on day 14 of a trip as
     /// on day 1 (`docs/ios-trip-mode.md` §14.4).

@@ -17,10 +17,12 @@ struct PendingAutoEndSuggestion: Codable, Equatable, Sendable {
 /// UserDefaults persistence — no CoreLocation monitoring here, that lives in
 /// `TripAutoEndMonitor`.
 enum TripAutoEndPreferences {
-    /// How close to home counts as "arrived", in metres. Deliberately tighter
-    /// than a typical trip geofence (~25 km default) — a trip whose geofence
-    /// happens to be close to home must not immediately look "ended" just
-    /// because both circles overlap.
+    /// How close to home counts as "arrived", in metres. Doubles as the radius
+    /// of a trip's home exclusion zone (`TripMembership.homeExclusionRadiusMeters`),
+    /// so "you are back home" and "this photo was taken at home" draw the same
+    /// circle. Tight on purpose: the trip's time window is the actual rule, and
+    /// a wide circle around home would start eating legitimate photos from the
+    /// first hours of a trip that begins in the user's own city.
     static let homeArrivalRadiusMeters: CLLocationDistance = 2_000
 
     /// How long the device must stay continuously within the radius before the

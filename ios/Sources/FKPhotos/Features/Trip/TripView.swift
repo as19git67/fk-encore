@@ -3,9 +3,9 @@ import SwiftUI
 
 /// Entry point of the "Trip" tab.
 ///
-/// Etappe 1b-i: Trip-Lebenszyklus (starten/beenden), Modus- und Auto/Manuell-
-/// Optionen und das Foto-Grid des Trip-Albums. Ortsermittlung + Geofende
-/// (CoreLocation) folgen in 1b-ii, der automatische Foto-Zuwachs in 1c
+/// Trip-Lebenszyklus (starten/beenden), Modus- und Auto/Manuell-Optionen und
+/// das Foto-Grid des Trip-Albums. Ortsermittlung beim Start liefert den
+/// Namensvorschlag, der automatische Foto-Zuwachs läuft über den Auto-Add-Pass
 /// (siehe `docs/ios-trip-mode.md`).
 struct TripView: View {
     @State private var store = TripStore.shared
@@ -24,8 +24,8 @@ struct TripView: View {
         .navigationTitle("Trip")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showStartSheet) {
-            TripStartSheet { name, geofence in
-                Task { await start(name: name, geofence: geofence) }
+            TripStartSheet { name in
+                Task { await start(name: name) }
             }
         }
         .alert("Fehler", isPresented: $showError) {
@@ -47,7 +47,7 @@ struct TripView: View {
         }
     }
 
-    private func start(name: String, geofence: ActiveTrip.Geofence?) async {
+    private func start(name: String) async {
         // Read-write access is required to create the iOS album.
         let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
         guard status == .authorized || status == .limited else {
@@ -56,7 +56,7 @@ struct TripView: View {
             return
         }
         do {
-            try await store.startTrip(name: name, geofence: geofence)
+            try await store.startTrip(name: name)
         } catch {
             errorMessage = error.localizedDescription
             showError = true

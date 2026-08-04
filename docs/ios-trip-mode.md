@@ -22,8 +22,10 @@ das der Nutzer von Hand in Fotos.app).
 1. **Default-Modus solo = `sync`** (nicht bisync). Grund: `sync` propagiert
    iPhone-seitiges Aussortieren (Foto aus dem Album entfernt) auch zum
    Server-Album. bisync optional zuschaltbar.
-2. **Trip-Mitgliedschaft = Zeitfenster** als Default, **Geofence** als
-   Verfeinerung.
+2. **Trip-Mitgliedschaft = Zeitfenster** als Default, **Home-Ausschlusszone**
+   als Verfeinerung. Ausdrücklich *keine* Zone um den Startort: ein Trip
+   bewegt sich vom Start weg, die Entfernung zum Startort sagt nichts über die
+   Zugehörigkeit eines Fotos aus.
 3. **Geteilter Trip = `sync` als Default**, pro Nutzer auf bisync umschaltbar.
    Server-Album ist die gemeinsame Basis.
 4. **Automatische Trip-Erkennung**: gewünscht (als Vorschlag), wenn sie
@@ -90,8 +92,10 @@ sie hinzugefügt hat, genau um denselben Kampf mit dem Aussortieren zu vermeiden
 - **Ort/Name:** aktuelle `CLLocation` beim Start holen, reverse-geocoden
   (geo/osm-admin) → Namensvorschlag „Gardasee (Juli 2026)", editierbar. Der
   Name wird zum Server-Album-Namen.
-- **Geofence (optional):** Startkoordinate + Radius; grenzt Mitgliedschaft ein
-  (daheim während laufendem Trip gemachte Fotos fallen raus).
+- **Home-Ausschlusszone (optional):** Home-Zentroid (`GET /trips/home-location`,
+  dieselbe Quelle wie das Auto-Ende) + `homeArrivalRadiusMeters`; grenzt
+  Mitgliedschaft ein (daheim während laufendem Trip gemachte Fotos fallen
+  raus). Ohne bekannten Home-Ort gilt das reine Zeitfenster.
 - **Ende:** Toggle-off (Standard). Später optional Auto-Ende (wieder länger in
   Home-Region) + Max-Dauer.
 - **Toggle-off:** Auto-Add stoppt für *neue* Fotos. iOS-Album, Server-Album,
@@ -288,8 +292,11 @@ Gesperrt am 2026-07-24.
 2. **CoreLocation** einmalig abfragen (Berechtigung „When in use" reicht):
    aktuelle Position → Reverse-Geocoding → **Ortsname sofort vorschlagen**, mit
    Bestätigung + Editiermöglichkeit. Der bestätigte Name wird Server-Album-Name.
-3. **Geofence** aus Startkoordinate + Default-Radius (Vorschlag 25 km) — schon
-   in Etappe 1, weil CoreLocation für den Namen ohnehin gebraucht wird.
+3. **Home-Ausschlusszone** aus dem Home-Zentroid stempeln (nicht aus der
+   Startkoordinate!). Der Startort dient ausschließlich dem Namensvorschlag.
+   Die Zone wird **nachgereicht** (`TripStore.applyHomeExclusion`), nicht im
+   Start-Pfad abgewartet: ein Trip startet oft ohne Netz. Bis sie steht, gilt
+   das reine Zeitfenster — die sichere Richtung (lieber zu viel aufnehmen).
 4. Auto-iOS-Album anlegen, `makeAvailable`-Logik (Server-Album per Namensabgleich
    finden/erstellen), Modus **sync**, confirm, `syncEnabled = true`,
    Watermark = jetzt.
@@ -324,10 +331,20 @@ Gesperrt am 2026-07-24.
     mit einem `creationDate` unterhalb des Wasserstands in der Mediathek landet
     (iCloud-Nachlauf von einem anderen Gerät, Import), wird nicht mehr
     aufgenommen.
-- **Geofence-Mitgliedschaft**: Ein Fenster-Asset zählt nur, wenn es GPS hat und
-  im Radius liegt. Assets **ohne** GPS: Standard „einschließen" (im Zweifel
-  aufnehmen; Nutzer kann im manuellen Modus/beim Aussortieren korrigieren) —
-  Feinschliff später.
+- **Home-Ausschluss-Mitgliedschaft**: Ein Fenster-Asset fällt nur dann raus,
+  wenn es GPS hat *und* innerhalb der Home-Zone liegt. Alles andere im Fenster
+  zählt zum Trip — unabhängig davon, wie weit es vom Startort entfernt
+  aufgenommen wurde. Assets **ohne** GPS: „einschließen" (im Zweifel aufnehmen;
+  Nutzer kann im manuellen Modus/beim Aussortieren korrigieren).
+
+  > **Historie (Bug):** Bis dahin war dies eine *Einschluss*-Zone um den
+  > Startort mit 25 km Radius. Ein Trip, der in München eingeschaltet und in
+  > Frankfurt fotografiert wurde, verlor damit alle Fotos lautlos. Weil der
+  > Wasserstand auch über die abgelehnten Assets vorrückt (siehe oben), war der
+  > Verlust endgültig: die Fotos lagen unter dem Wasserstand und wurden nie
+  > wieder enumeriert. Trips, die noch mit `geofence` gespeichert sind, setzen
+  > beim Laden einmalig ihren Wasserstand zurück
+  > (`TripPreferences.migratedFromStartGeofence`) und holen die Fotos nach.
 
 ### 14.5 ChangeObserver
 
