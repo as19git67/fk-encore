@@ -9,7 +9,12 @@
  * synthesize `finance_depot_transaction` rows with `source='giro-derived'`.
  *
  * Match rules (strict — false positives are worse than misses here):
- *   - Caller filters to `funds_code === 'SECU'` only.
+ *   - Candidate selection (`isSecuritiesCandidate`): when the bank gave us
+ *     a real ISO BTC domain in `funds_code` we trust it and require
+ *     `SECU`. Only camt.05x statements carry that; MT940 (HKKAZ) puts a
+ *     single letter like "R" there and manual imports leave it null, so
+ *     for those we fall back to requiring a hard identifier (ISIN or
+ *     prefixed WKN) in the purpose / booking text instead.
  *   - Kind:
  *       transaction_code === 'DVCA'   → 'dividend'  (positive net_amount)
  *       transaction_code === 'CHRG'   → skip (custody fee, not a holding tx)
@@ -63,10 +68,12 @@ export function extractIsin(text: string | null | undefined): string | null {
 /**
  * German Wertpapierkennnummer: always 6 alphanumeric characters. The
  * shape alone is too generic (matches dates, amounts, fragments of
- * IBANs), so we require an explicit "WKN" prefix to avoid false
- * positives. Handles "WKN 930921", "WKN: 930921", "WKN/ISIN 930921/LU…".
+ * IBANs), so we require an explicit prefix to avoid false positives.
+ * Banks spell that prefix several ways — "WKN 930921", "WKN: 930921",
+ * "WKN/ISIN 930921/LU…", and (e.g. comdirect/Sparkasse Wertpapier-
+ * abrechnungen) "WPKNR: 865985" or "WP-KENNNR 865985".
  */
-const WKN_RE = /\bWKN[:\s/]+([A-Z0-9]{6})\b/i;
+const WKN_RE = /\b(?:WKN|WPKNR|WPK|WP-?KENN(?:NR|NUMMER)?)[.:\s/]+([A-Z0-9]{6})\b/i;
 
 /** Extract the first prefixed WKN appearing in a free-text field, or null. */
 export function extractWkn(text: string | null | undefined): string | null {
@@ -155,6 +162,66 @@ async function matchHoldingByName(
   return matches.length === 1 ? matches[0] : undefined;
 }
 
+/**
+ * ISO 20022 BTC domain codes. Used to decide whether `funds_code` actually
+ * carries usable Bank-Transaction-Code information — see
+ * `hasUsableBtcDomain` below.
+ */
+const BTC_DOMAIN_CODES: ReadonlySet<string> = new Set([
+  "ACMT", "CAMT", "CMDT", "DERV", "FORX", "LDAS",
+  "PMET", "PMNT", "SECU", "TRAD", "XTND",
+]);
+
+/**
+ * True when `funds_code` holds a real ISO BTC domain and we can therefore
+ * trust it as the authoritative securities/non-securities signal.
+ *
+ * Only the CAMT (camt.05x) path ever fills this in: lib-fints sets
+ * `fundsCode = bkTxCd.domainCode || creditDebitInd`. The MT940 path
+ * (HKKAZ, what most German banks still deliver) parses subfield 4 of the
+ * `:61:` line instead — a *single letter* such as "R" — and the manual
+ * import path leaves it null. In those cases the field says nothing about
+ * whether a booking is a Wertpapierabrechnung, so we must not gate on it.
+ */
+export function hasUsableBtcDomain(
+  fundsCode: string | null | undefined,
+): boolean {
+  if (!fundsCode) return false;
+  return BTC_DOMAIN_CODES.has(fundsCode.trim().toUpperCase());
+}
+
+/**
+ * Decide whether a giro booking is worth examining as a possible
+ * Wertpapierabrechnung.
+ *
+ * Two admissible routes, mirroring what the source data can tell us:
+ *
+ *   1. The bank gave us a real BTC domain → trust it completely. `SECU`
+ *      qualifies, every other domain (PMNT, CAMT, …) is excluded. This
+ *      keeps the original strict behaviour for camt-sourced bookings, so
+ *      a rent payment that happens to quote an ISIN stays excluded.
+ *   2. No usable BTC domain (MT940 single-letter code, or null) → fall
+ *      back to the text, and require a hard security identifier: an ISIN
+ *      or a prefixed WKN in the purpose or booking text. A booking that
+ *      names neither is never considered on this route.
+ *
+ * Route 2 alone is not what creates a depot transaction — the caller
+ * still has to match the extracted identifier against a holding that
+ * actually exists on one of the bankcontact's depots, so a stray
+ * ISIN-shaped token cannot conjure a position out of nothing.
+ */
+export function isSecuritiesCandidate(tx: {
+  funds_code: string | null;
+  purpose: string | null;
+  entry_text?: string | null;
+}): boolean {
+  if (hasUsableBtcDomain(tx.funds_code)) {
+    return tx.funds_code!.trim().toUpperCase() === "SECU";
+  }
+  const text = `${tx.purpose ?? ""}\n${tx.entry_text ?? ""}`;
+  return extractIsin(text) !== null || extractWkn(text) !== null;
+}
+
 export type DerivedKind = "buy" | "sell" | "dividend";
 
 /**
@@ -176,16 +243,29 @@ export function classifySecuTransaction(tx: {
 export interface DerivationStats {
   /** Newly inserted rows. */
   derived: number;
-  /** SECU bookings considered but skipped (no ISIN match, custody fee, …). */
+  /** Securities bookings considered but skipped (no holding match, fee, …). */
   skipped: number;
   /** Bookings already covered by a prior derivation (dedupe hit). */
   duplicates: number;
   /** Soft errors (per-tx insert failures). */
   errors: string[];
+  /**
+   * Bookings that passed `isSecuritiesCandidate` and were actually
+   * examined. Zero here means nothing on this bankcontact looked like a
+   * Wertpapierabrechnung at all — a different problem from "examined but
+   * no holding matched", which the counters below separate out.
+   */
+  candidates: number;
+  /** Skipped by `classifySecuTransaction` (custody fee, zero amount). */
+  skipped_not_classified: number;
+  /** No ISIN/WKN extractable and the name fallback found nothing. */
+  skipped_no_identifier: number;
+  /** Identifier found, but no holding on this bankcontact carries it. */
+  skipped_no_holding: number;
 }
 
 /**
- * Walk SECU-flagged transactions on every account of the given
+ * Walk securities-looking transactions on every account of the given
  * bankcontact and write `source='giro-derived'` rows into
  * finance_depot_transaction for the ones that match a known holding.
  */
@@ -197,6 +277,10 @@ export async function deriveDepotTransactionsForBankcontact(
     skipped: 0,
     duplicates: 0,
     errors: [],
+    candidates: 0,
+    skipped_not_classified: 0,
+    skipped_no_identifier: 0,
+    skipped_no_holding: 0,
   };
 
   // All accounts on this bankcontact — we look at giro/clearing txs and
@@ -219,6 +303,7 @@ export async function deriveDepotTransactionsForBankcontact(
       purpose: financeTransaction.purpose,
       counterparty: financeTransaction.counterparty,
       funds_code: financeTransaction.funds_code,
+      entry_text: financeTransaction.entry_text,
       transaction_type: financeTransaction.transaction_type,
       transaction_code: financeTransaction.transaction_code,
     })
@@ -226,19 +311,40 @@ export async function deriveDepotTransactionsForBankcontact(
     .where(
       and(
         inArray(financeTransaction.account_id, accountIds),
-        eq(financeTransaction.funds_code, "SECU"),
+        // Cheap SQL pre-filter; `isSecuritiesCandidate` below makes the
+        // authoritative call. Either the bank flagged the booking SECU,
+        // or the text mentions something identifier-shaped that is worth
+        // running the precise regexes over.
+        or(
+          eq(financeTransaction.funds_code, "SECU"),
+          sql`(
+            coalesce(${financeTransaction.purpose}, '') || ' ' ||
+            coalesce(${financeTransaction.entry_text}, '') || ' ' ||
+            coalesce(${financeTransaction.counterparty}, '')
+          ) ~* '([A-Z]{2}[A-Z0-9]{9}[0-9])|(WKN|WPKNR|WPK|WP-?KENN)'`,
+        ),
       ),
     );
 
   for (const tx of txs) {
+    if (!isSecuritiesCandidate(tx)) continue;
+    stats.candidates++;
+
     const kind = classifySecuTransaction(tx);
     if (kind === null) {
       stats.skipped++;
+      stats.skipped_not_classified++;
       continue;
     }
 
-    const isin = extractIsin(tx.purpose) ?? extractIsin(tx.counterparty);
-    const wkn = extractWkn(tx.purpose) ?? extractWkn(tx.counterparty);
+    const isin =
+      extractIsin(tx.purpose) ??
+      extractIsin(tx.entry_text) ??
+      extractIsin(tx.counterparty);
+    const wkn =
+      extractWkn(tx.purpose) ??
+      extractWkn(tx.entry_text) ??
+      extractWkn(tx.counterparty);
 
     let holding: HoldingMatch | undefined;
 
@@ -281,6 +387,8 @@ export async function deriveDepotTransactionsForBankcontact(
 
     if (!holding) {
       stats.skipped++;
+      if (isin || wkn) stats.skipped_no_holding++;
+      else stats.skipped_no_identifier++;
       continue;
     }
 

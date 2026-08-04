@@ -20,6 +20,7 @@ import {
   deriveDepotTransactionsForBankcontact,
   extractIsin,
   extractWkn,
+  isSecuritiesCandidate,
 } from "./depot-derivation";
 import { deriveDepotTransactionsFromGiro } from "./depot-transactions";
 
@@ -187,10 +188,72 @@ describe("extractWkn", () => {
     expect(extractWkn("AUFTRAGSNR 930921 KURS 56,19")).toBeNull();
   });
 
+  it("handles the 'WPKNR:' prefix used on Wertpapierabrechnungen", () => {
+    expect(extractWkn("APPLE INC.\nWPKNR: 865985  ISIN: US0378331005"))
+      .toBe("865985");
+  });
+
+  it("handles the 'WP-KENNNR' prefix", () => {
+    expect(extractWkn("WP-KENNNR 865985 STK 10")).toBe("865985");
+  });
+
   it("returns null on null/empty input", () => {
     expect(extractWkn(null)).toBeNull();
     expect(extractWkn("")).toBeNull();
     expect(extractWkn(undefined)).toBeNull();
+  });
+});
+
+describe("isSecuritiesCandidate", () => {
+  it("accepts a SECU-flagged booking (camt path)", () => {
+    expect(
+      isSecuritiesCandidate({ funds_code: "SECU", purpose: "irgendwas" }),
+    ).toBe(true);
+  });
+
+  it("rejects another BTC domain even when the text quotes an ISIN", () => {
+    // A rent payment referencing an ISIN must never become a depot tx —
+    // the bank told us this is Payments, so we trust it.
+    expect(
+      isSecuritiesCandidate({
+        funds_code: "PMNT",
+        purpose: "MIETE Verweis DE000A1EWWW0",
+      }),
+    ).toBe(false);
+  });
+
+  it("accepts an MT940 booking (single-letter funds code) carrying an ISIN", () => {
+    expect(
+      isSecuritiesCandidate({
+        funds_code: "R",
+        purpose: "APPLE INC.\nWPKNR: 865985  ISIN: US0378331005",
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts a null funds_code booking carrying a prefixed WKN", () => {
+    expect(
+      isSecuritiesCandidate({
+        funds_code: null,
+        purpose: "WERTPAPIERABRECHNUNG WKN 930921",
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects an MT940 booking with no identifier in the text", () => {
+    expect(
+      isSecuritiesCandidate({ funds_code: "R", purpose: "APPLE.COM/BILL" }),
+    ).toBe(false);
+  });
+
+  it("looks at entry_text as well as purpose", () => {
+    expect(
+      isSecuritiesCandidate({
+        funds_code: "R",
+        purpose: "Abrechnung",
+        entry_text: "WERTPAPIERKAUF WKN 865985",
+      }),
+    ).toBe(true);
   });
 });
 
@@ -372,6 +435,89 @@ describe("deriveDepotTransactionsForBankcontact", () => {
     const stats = await deriveDepotTransactionsForBankcontact(bcId);
     expect(stats.derived).toBe(0);
     expect(stats.skipped).toBe(1);
+  });
+
+  it("derives an MT940 booking (single-letter funds_code) via the purpose ISIN", async () => {
+    // The reported bug: HKKAZ/MT940 statements put a single letter in
+    // subfield 4 of :61: (here "R"), never the ISO BTC domain "SECU", so
+    // the old funds_code='SECU' gate skipped every such booking.
+    const bcId = await insertBankcontact();
+    const giro = await insertAccount(bcId, "giro", "GIRO-1");
+    const depot = await insertAccount(bcId, "depot", "DEPOT-1");
+    await insertHolding({
+      accountId: depot,
+      asOf: "2026-05-15",
+      isin: "US0378331005",
+      wkn: "865985",
+      name: "APPLE INC.",
+    });
+    await insertTx({
+      accountId: giro,
+      bookingDate: "2026-06-01",
+      amount: "-1500.00",
+      purpose: "APPLE INC.\nWPKNR: 865985  ISIN: US0378331005",
+      funds_code: "R",
+      transaction_code: null,
+    });
+
+    const stats = await deriveDepotTransactionsForBankcontact(bcId);
+    expect(stats.candidates).toBe(1);
+    expect(stats.derived).toBe(1);
+    expect(stats.skipped).toBe(0);
+
+    const [row] = await db
+      .select()
+      .from(financeDepotTransaction)
+      .where(eq(financeDepotTransaction.account_id, depot));
+    expect(row.kind).toBe("buy");
+    expect(row.isin).toBe("US0378331005");
+    expect(row.wkn).toBe("865985");
+    expect(row.net_amount).toBe("-1500.00");
+  });
+
+  it("reports skipped_no_holding when the identifier matches no position", async () => {
+    const bcId = await insertBankcontact();
+    const giro = await insertAccount(bcId, "giro", "GIRO-1");
+    await insertAccount(bcId, "depot", "DEPOT-1");
+    // Depot has no holdings synced yet.
+    await insertTx({
+      accountId: giro,
+      bookingDate: "2026-06-01",
+      amount: "-1500.00",
+      purpose: "APPLE INC.\nWPKNR: 865985  ISIN: US0378331005",
+      funds_code: "R",
+    });
+
+    const stats = await deriveDepotTransactionsForBankcontact(bcId);
+    expect(stats.candidates).toBe(1);
+    expect(stats.derived).toBe(0);
+    expect(stats.skipped_no_holding).toBe(1);
+    expect(stats.skipped_no_identifier).toBe(0);
+  });
+
+  it("does not treat an App Store charge as a securities booking", async () => {
+    // "APPLE.COM/BILL" matches the holding name by words, but carries no
+    // ISIN/WKN and no SECU flag — it must never reach the name fallback.
+    const bcId = await insertBankcontact();
+    const giro = await insertAccount(bcId, "giro", "GIRO-1");
+    const depot = await insertAccount(bcId, "depot", "DEPOT-1");
+    await insertHolding({
+      accountId: depot,
+      asOf: "2026-05-15",
+      isin: "US0378331005",
+      name: "APPLE INC.",
+    });
+    await insertTx({
+      accountId: giro,
+      bookingDate: "2026-06-02",
+      amount: "-9.99",
+      purpose: "APPLE.COM/BILL ITUNES",
+      funds_code: "R",
+    });
+
+    const stats = await deriveDepotTransactionsForBankcontact(bcId);
+    expect(stats.candidates).toBe(0);
+    expect(stats.derived).toBe(0);
   });
 
   it("falls back to matching by holding name when purpose has no ISIN/WKN", async () => {

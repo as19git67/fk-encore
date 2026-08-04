@@ -909,10 +909,30 @@ async function runDerivation() {
         severity: 'info',
         text: 'Keine neuen Transaktionen — bereits alles abgeleitet.',
       }
+    } else if (resp.candidates === 0) {
+      deriveMessage.value = {
+        severity: 'info',
+        text:
+          'Keine Wertpapier-Buchungen im Giro-Konto gefunden. Die Buchungen ' +
+          'enthalten weder eine ISIN/WKN im Verwendungszweck noch die ' +
+          'Kennzeichnung „Wertpapiere“ der Bank.',
+      }
+    } else if (resp.skipped_no_holding > 0) {
+      deriveMessage.value = {
+        severity: 'info',
+        text:
+          `${resp.candidates} Wertpapier-Buchung${resp.candidates === 1 ? '' : 'en'} ` +
+          `geprüft, aber ${resp.skipped_no_holding} davon passen zu keiner ` +
+          'Position im Depot. Bitte zuerst die Depot-Bestände synchronisieren.',
+      }
     } else {
       deriveMessage.value = {
         severity: 'info',
-        text: 'Keine passenden Wertpapier-Buchungen im Giro-Konto gefunden.',
+        text:
+          `${resp.candidates} Wertpapier-Buchung${resp.candidates === 1 ? '' : 'en'} ` +
+          'geprüft, aber keine davon war ableitbar ' +
+          `(${resp.skipped_no_identifier} ohne ISIN/WKN, ` +
+          `${resp.skipped_not_classified} ohne Kauf/Verkauf-Charakter).`,
       }
     }
     // Refresh per-position lists that are already loaded so the new
