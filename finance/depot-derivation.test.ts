@@ -374,6 +374,69 @@ describe("deriveDepotTransactionsForBankcontact", () => {
     expect(stats.skipped).toBe(1);
   });
 
+  it("falls back to matching by holding name when purpose has no ISIN/WKN", async () => {
+    const bcId = await insertBankcontact();
+    const giro = await insertAccount(bcId, "giro", "GIRO-1");
+    const depot = await insertAccount(bcId, "depot", "DEPOT-1");
+    await insertHolding({
+      accountId: depot,
+      asOf: "2026-05-15",
+      isin: "US0378331005",
+      wkn: "865985",
+      name: "APPLE INC.",
+    });
+    await insertTx({
+      accountId: giro,
+      bookingDate: "2026-06-01",
+      amount: "-1500.00",
+      purpose: "APPLE INC.",
+      funds_code: "SECU",
+      transaction_code: "TRAD",
+    });
+
+    const stats = await deriveDepotTransactionsForBankcontact(bcId);
+    expect(stats.derived).toBe(1);
+    expect(stats.skipped).toBe(0);
+
+    const [row] = await db
+      .select()
+      .from(financeDepotTransaction)
+      .where(eq(financeDepotTransaction.account_id, depot));
+    expect(row.kind).toBe("buy");
+    expect(row.isin).toBe("US0378331005");
+    expect(row.wkn).toBe("865985");
+  });
+
+  it("skips the name fallback when it would be ambiguous across holdings", async () => {
+    const bcId = await insertBankcontact();
+    const giro = await insertAccount(bcId, "giro", "GIRO-1");
+    const depot = await insertAccount(bcId, "depot", "DEPOT-1");
+    await insertHolding({
+      accountId: depot,
+      asOf: "2026-05-15",
+      isin: "US0378331005",
+      name: "APPLE INC.",
+    });
+    await insertHolding({
+      accountId: depot,
+      asOf: "2026-05-16",
+      isin: "US0000000001",
+      name: "APPLE HOLDINGS SE",
+    });
+    await insertTx({
+      accountId: giro,
+      bookingDate: "2026-06-01",
+      amount: "-1500.00",
+      purpose: "APPLE",
+      funds_code: "SECU",
+      transaction_code: "TRAD",
+    });
+
+    const stats = await deriveDepotTransactionsForBankcontact(bcId);
+    expect(stats.derived).toBe(0);
+    expect(stats.skipped).toBe(1);
+  });
+
   it("ignores transactions outside of SECU domain", async () => {
     const bcId = await insertBankcontact();
     const giro = await insertAccount(bcId, "giro", "GIRO-1");

@@ -22,8 +22,16 @@
  *   - The derived row is attached to a *depot* account on the same
  *     bankcontact whose holdings currently contain the matching ISIN or
  *     WKN. When multiple depots qualify, the one with the most recent
- *     matching holding wins. Unmatched SECU bookings are skipped silently
- *     (counted, not errored — re-running after the next sync may match).
+ *     matching holding wins.
+ *   - When the purpose text has neither an ISIN nor a WKN-prefixed code
+ *     (e.g. "APPLE INC." with no identifier at all), fall back to matching
+ *     the holding's own display name against the purpose text. Every
+ *     significant word of the name (legal-form suffixes like "INC"/"AG"
+ *     stripped) must appear in the purpose, and the match must be
+ *     unambiguous — exactly one qualifying security across the
+ *     bankcontact's depots — or we skip.
+ *   - Unmatched SECU bookings are skipped silently (counted, not errored —
+ *     re-running after the next sync may match).
  *
  * Idempotency: `dedupe_hash = "giro:<linked_transaction_id>"` and the
  * partial unique index `(account_id, dedupe_hash) WHERE dedupe_hash IS
@@ -65,6 +73,86 @@ export function extractWkn(text: string | null | undefined): string | null {
   if (!text) return null;
   const m = text.match(WKN_RE);
   return m ? m[1].toUpperCase() : null;
+}
+
+/**
+ * Legal-form / share-class suffixes stripped before comparing a holding's
+ * display name against free text — they carry no identifying signal and
+ * would otherwise dilute the word match below (e.g. "AG" or "INC" showing
+ * up in unrelated purposes).
+ */
+const NAME_SUFFIX_WORDS = new Set([
+  "INC", "INCORPORATED", "CORP", "CORPORATION", "AG", "SE", "LTD", "LIMITED",
+  "PLC", "CO", "COMPANY", "KGAA", "NV", "SA", "SPA", "GMBH", "HOLDING",
+  "HOLDINGS", "GROUP", "CLASS", "ORD", "REG", "SHS", "COM",
+]);
+
+function nameWords(text: string): string[] {
+  return text
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .split(" ")
+    .filter((w) => w.length > 0);
+}
+
+function coreNameWords(name: string): string[] {
+  return nameWords(name).filter((w) => !NAME_SUFFIX_WORDS.has(w));
+}
+
+interface HoldingMatch {
+  account_id: number;
+  isin: string | null;
+  wkn: string | null;
+  name: string | null;
+  currency: string | null;
+}
+
+/**
+ * Fallback for bookings whose purpose text carries neither ISIN nor a
+ * WKN-prefixed code (e.g. "APPLE INC." with nothing else) — match by the
+ * holding's own display name instead. Deliberately conservative: every
+ * significant word of the holding's name must appear in the purpose text,
+ * and the match must be unambiguous (exactly one qualifying security) or
+ * we skip, per the "false positives are worse than misses" rule above.
+ */
+async function matchHoldingByName(
+  bankcontactId: number,
+  purpose: string | null | undefined,
+): Promise<HoldingMatch | undefined> {
+  if (!purpose) return undefined;
+  const purposeWords = new Set(nameWords(purpose));
+  if (purposeWords.size === 0) return undefined;
+
+  const holdings = await db
+    .select({
+      account_id: financeAccountHolding.account_id,
+      isin: financeAccountHolding.isin,
+      wkn: financeAccountHolding.wkn,
+      name: financeAccountHolding.name,
+      currency: financeAccountHolding.currency,
+    })
+    .from(financeAccountHolding)
+    .innerJoin(
+      financeAccount,
+      eq(financeAccount.id, financeAccountHolding.account_id),
+    )
+    .where(eq(financeAccount.bankcontact_id, bankcontactId))
+    .orderBy(desc(financeAccountHolding.as_of));
+
+  // Most-recent snapshot per distinct security (account + isin/wkn/name),
+  // mirroring the "most recent as_of wins" rule used for identifier matches.
+  const latestBySecurity = new Map<string, HoldingMatch>();
+  for (const h of holdings) {
+    const key = `${h.account_id}:${h.isin ?? h.wkn ?? h.name}`;
+    if (!latestBySecurity.has(key)) latestBySecurity.set(key, h);
+  }
+
+  const matches = [...latestBySecurity.values()].filter((h) => {
+    const core = coreNameWords(h.name ?? "");
+    return core.length > 0 && core.every((w) => purposeWords.has(w));
+  });
+
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 export type DerivedKind = "buy" | "sell" | "dividend";
@@ -151,40 +239,45 @@ export async function deriveDepotTransactionsForBankcontact(
 
     const isin = extractIsin(tx.purpose) ?? extractIsin(tx.counterparty);
     const wkn = extractWkn(tx.purpose) ?? extractWkn(tx.counterparty);
-    if (!isin && !wkn) {
-      stats.skipped++;
-      continue;
+
+    let holding: HoldingMatch | undefined;
+
+    if (isin || wkn) {
+      // Find a depot account on the same bankcontact whose holdings
+      // include this ISIN or WKN. Pick the most recent snapshot to break
+      // ties. We accept either identifier because some banks only fill in
+      // WKN on the holdings side (or only ISIN on the booking side).
+      const idMatches = [];
+      if (isin) idMatches.push(eq(financeAccountHolding.isin, isin));
+      if (wkn) idMatches.push(eq(financeAccountHolding.wkn, wkn));
+
+      [holding] = await db
+        .select({
+          account_id: financeAccountHolding.account_id,
+          isin: financeAccountHolding.isin,
+          wkn: financeAccountHolding.wkn,
+          name: financeAccountHolding.name,
+          currency: financeAccountHolding.currency,
+        })
+        .from(financeAccountHolding)
+        .innerJoin(
+          financeAccount,
+          eq(financeAccount.id, financeAccountHolding.account_id),
+        )
+        .where(
+          and(
+            eq(financeAccount.bankcontact_id, bankcontactId),
+            or(...idMatches),
+          ),
+        )
+        .orderBy(desc(financeAccountHolding.as_of))
+        .limit(1);
+    } else {
+      // No ISIN and no WKN-prefixed code in the text (e.g. "APPLE INC."
+      // with nothing else) — fall back to matching the holding's own
+      // display name against the purpose text.
+      holding = await matchHoldingByName(bankcontactId, tx.purpose);
     }
-
-    // Find a depot account on the same bankcontact whose holdings
-    // include this ISIN or WKN. Pick the most recent snapshot to break
-    // ties. We accept either identifier because some banks only fill in
-    // WKN on the holdings side (or only ISIN on the booking side).
-    const idMatches = [];
-    if (isin) idMatches.push(eq(financeAccountHolding.isin, isin));
-    if (wkn) idMatches.push(eq(financeAccountHolding.wkn, wkn));
-
-    const [holding] = await db
-      .select({
-        account_id: financeAccountHolding.account_id,
-        isin: financeAccountHolding.isin,
-        wkn: financeAccountHolding.wkn,
-        name: financeAccountHolding.name,
-        currency: financeAccountHolding.currency,
-      })
-      .from(financeAccountHolding)
-      .innerJoin(
-        financeAccount,
-        eq(financeAccount.id, financeAccountHolding.account_id),
-      )
-      .where(
-        and(
-          eq(financeAccount.bankcontact_id, bankcontactId),
-          or(...idMatches),
-        ),
-      )
-      .orderBy(desc(financeAccountHolding.as_of))
-      .limit(1);
 
     if (!holding) {
       stats.skipped++;
