@@ -73,6 +73,58 @@ final class BiSyncReconcileTests: XCTestCase {
         XCTAssertEqual(removals, [20], "A tracked photo whose local asset left the album is removed")
     }
 
+    // MARK: - Downloaded asset → album membership (PhotoSyncService.serverPhotoIdsByLocalId)
+    //
+    // A server-downloaded asset the user puts into a synced iOS album is dropped
+    // from the upload enumeration by the round-trip guard, so it never reaches
+    // the sync-check and never lands in the album. Resolving it to its known
+    // server photo id is what lets the reconciliation add it without uploading
+    // any bytes.
+
+    func testResolvesLocalIdFromDownloadTracking() {
+        let result = PhotoSyncService.serverPhotoIdsByLocalId(
+            downloadedPhotos: ["7": ["30": "localA", "31": "localB"]],
+            serverPhotoMap: [:]
+        )
+        XCTAssertEqual(result["localA"], 30)
+        XCTAssertEqual(result["localB"], 31)
+    }
+
+    func testResolvesLocalIdFromUploadMapWhenNotDownloaded() {
+        let result = PhotoSyncService.serverPhotoIdsByLocalId(
+            downloadedPhotos: [:],
+            serverPhotoMap: ["40": "localC"]
+        )
+        XCTAssertEqual(result["localC"], 40)
+    }
+
+    func testDownloadTrackingWinsOverTheGlobalUploadMap() {
+        // The upload map is global and can carry a stale entry for a local asset
+        // that was replaced since; the per-album download tracking is authoritative.
+        let result = PhotoSyncService.serverPhotoIdsByLocalId(
+            downloadedPhotos: ["7": ["50": "localD"]],
+            serverPhotoMap: ["49": "localD"]
+        )
+        XCTAssertEqual(result["localD"], 50)
+    }
+
+    func testMergesAcrossSeveralAlbumsAndSkipsMalformedIds() {
+        let result = PhotoSyncService.serverPhotoIdsByLocalId(
+            downloadedPhotos: ["7": ["60": "localE"], "8": ["61": "localF", "nope": "localG"]],
+            serverPhotoMap: ["bad": "localH"]
+        )
+        XCTAssertEqual(result["localE"], 60)
+        XCTAssertEqual(result["localF"], 61)
+        XCTAssertNil(result["localG"], "A non-numeric photo id is skipped")
+        XCTAssertNil(result["localH"], "A non-numeric key in the upload map is skipped")
+    }
+
+    func testEmptyStoresResolveToNothing() {
+        XCTAssertTrue(
+            PhotoSyncService.serverPhotoIdsByLocalId(downloadedPhotos: [:], serverPhotoMap: [:]).isEmpty
+        )
+    }
+
     // MARK: - S6 / S8 / re-download: download reconcile decision (PhotoDownloadService.reconcileAction)
 
     private func state(
