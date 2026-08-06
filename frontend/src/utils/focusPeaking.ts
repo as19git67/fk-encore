@@ -34,6 +34,24 @@ export const LAPLACIAN_FULL_SCALE = 500
  *  for a meaningful sharpness reading and are skipped. */
 export const MIN_FACE_PIXELS = 10
 
+/**
+ * Minimum on-screen face size (smaller side, CSS px) below which a peaking
+ * frame is skipped. This is a *display* threshold, independent of
+ * `MIN_FACE_PIXELS` (which gates the source-pixel crop the measurement
+ * reads): a face can be measurable yet still render at a couple of CSS
+ * pixels on a wide crowd shot, where a coloured box conveys nothing and a
+ * dozen of them overlapping into unreadable percentage labels are worse
+ * than showing none at all.
+ */
+export const MIN_RENDERED_FACE_PX = 40
+
+/** Whether a face rendered at `widthPx`×`heightPx` on screen is large enough
+ *  for its peaking frame to be worth showing. */
+export function isRenderedFaceLegible(widthPx: number, heightPx: number): boolean {
+  if (!Number.isFinite(widthPx) || !Number.isFinite(heightPx)) return false
+  return Math.min(widthPx, heightPx) >= MIN_RENDERED_FACE_PX
+}
+
 /** Score at or above which a face counts as in focus (green). */
 export const SHARP_MIN = 0.45
 

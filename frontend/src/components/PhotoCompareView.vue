@@ -24,6 +24,7 @@ import {
   classifySharpness,
   peakDescription,
   sharpnessLabel,
+  isRenderedFaceLegible,
   type PeakLevel,
 } from '../utils/focusPeaking'
 import { useAuthStore } from '../stores/auth'
@@ -33,6 +34,7 @@ import { qualityComparisonRows } from '../utils/compareQualityDetails'
 import {
   computeBboxZoom,
   computeSyncBboxZoom,
+  containedRect,
   pickPrimaryBbox,
   pickBboxAtPoint,
   findFaceForPerson,
@@ -1116,6 +1118,24 @@ interface FocusPeakBox {
   style: Record<string, string>
 }
 
+/**
+ * On-screen size (CSS px) `bbox` would render at right now: the
+ * `object-fit: contain` letterbox rect scaled by whatever zoom-to-face
+ * transform is currently active on that photo. `null` when the viewport
+ * isn't known yet (image not laid out) — callers treat that as "can't
+ * tell, don't show".
+ */
+function renderedFaceSize(
+  photoId: number,
+  bbox: { width: number; height: number },
+): { width: number; height: number } | null {
+  const vp = getViewport(photoId)
+  if (!vp) return null
+  const rect = containedRect(vp)
+  const zoom = zoomByPhoto.value.get(photoId)?.computation.zoom ?? 1
+  return { width: bbox.width * rect.w * zoom, height: bbox.height * rect.h * zoom }
+}
+
 function focusPeakBoxes(photoId: number): FocusPeakBox[] {
   if (!focusPeaking.enabled.value) return []
   const measured = focusPeaking.scores.value.get(photoId)
@@ -1127,6 +1147,12 @@ function focusPeakBoxes(photoId: number): FocusPeakBox[] {
     const score = measured.get(face.id)
     if (score === undefined) continue
     if (!validBbox(face.bbox)) continue
+    // Skip faces too small on screen to read — a coloured sliver conveys
+    // nothing, and in a crowd shot a dozen of them overlap into unreadable
+    // clutter (see #873 follow-up). Zoom-to-face can bring a face back
+    // above the threshold, so this re-evaluates on every render.
+    const rendered = renderedFaceSize(photoId, face.bbox)
+    if (rendered && !isRenderedFaceLegible(rendered.width, rendered.height)) continue
     boxes.push({
       faceId: face.id,
       level: classifySharpness(score),

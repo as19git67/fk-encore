@@ -204,6 +204,14 @@ percentage label:
   helpers use (`getPhotoFacesCached`); measurement runs once per photo
   per session, triggered by the image `load` event, by a pair change, or
   by switching the toggle back on.
+- A face rendering below `MIN_RENDERED_FACE_PX` (40 CSS px on the smaller
+  side) gets no frame at all — a coloured sliver conveys nothing, and a
+  wide crowd shot can have dozens of tiny detections whose frames and
+  percentage labels would otherwise stack into unreadable clutter. The
+  on-screen size is derived from `containedRect` (the same object-fit
+  letterbox math the zoom helpers use), scaled by whatever zoom-to-face
+  factor is currently active — zooming into a face can bring it back
+  above the threshold (`renderedFaceSize` / `isRenderedFaceLegible`).
 
 The scoring maths lives in `frontend/src/utils/focusPeaking.ts` (DOM-free
 and unit-tested); the canvas plumbing and the persisted switch live in
