@@ -144,12 +144,12 @@ Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders ·
 | Feature | Web | iOS |
 |---|---|---|
 | Favorit | ✅ | ✅ |
-| Ausblenden / Einblenden | ✅ | 🔶 (nur im Feed) |
-| Löschen | ✅ | ❌ (nur Album löschen) |
-| Original herunterladen | ✅ | 🔶 (Share-Sheet / Auto-Download) |
+| Ausblenden / Einblenden | ✅ | ✅ (Feed + Vollbild) |
+| Löschen | ✅ | ✅ (mit `photos.delete`) |
+| Original herunterladen | ✅ | ✅ (in die Fotos-Mediathek) |
 | Teilen (nativ) | 🔶 (Link) | ⚡ iOS-Share-Sheet |
 | Zu Album hinzufügen | ✅ | ✅ |
-| Aus Album entfernen | ✅ | ❌ |
+| Aus Album entfernen | ✅ | ✅ (im Album-Kontext) |
 | Aufnahmedatum ändern | ✅ | ✅ |
 | GPS-Ort setzen/ändern | ✅ `PhotoLocationMenu` | ❌ (nur Anzeige) |
 | Reindex / Metadaten aktualisieren | ✅ | ❌ |
@@ -169,8 +169,8 @@ Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders ·
 |---|---|---|
 | Liste / Erstellen / Löschen | ✅ | ✅ |
 | Album anpinnen | 🔶 | ⚡ (Pin + Wisch-Aktionen) |
-| Ansichtsmodi (Alle/Favoriten/Konsens/Eigen) | ✅ | ❌ |
-| Konsens-/anonyme Abstimmung | ⚡ | ❌ |
+| Ansichtsmodi (Alle/Favoriten/Konsens/Eigen) | ✅ | ✅ `AlbumViewMode` |
+| Konsens-/anonyme Abstimmung | ⚡ | ✅ (Badges „3/5" + Favoriten-Vote) |
 | Mit Nutzern teilen (Rollen) | ✅ | ✅ |
 | Öffentliche Links (mit Ablauf) | ✅ | ❌ |
 | Cover setzen / Album bearbeiten | ✅ | ❌ |
@@ -202,9 +202,9 @@ Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders ·
 ### 3.8 Rückblicke & Review
 | Feature | Web | iOS |
 |---|---|---|
-| Rückblicke (Recaps) – Player | ✅ `RecapsView`/`RecapPlayer` | ❌ |
-| „An diesem Tag" / Memories | 🔶 (über Recaps) | ❌ |
-| Gruppen-Review (Review-Queue) | ✅ `ReviewQueueView` | ❌ |
+| Rückblicke (Recaps) – Player | ✅ `RecapsView`/`RecapPlayer` | ✅ `RecapPlayerView` |
+| „An diesem Tag" / Memories | 🔶 (über Recaps) | 🔶 (über Recaps) |
+| Gruppen-Review (Review-Queue) | ✅ `ReviewQueueView` | ✅ `ReviewQueueView` (Swipe) |
 
 ### 3.9 Backup & Sync
 | Feature | Web | iOS |
@@ -231,16 +231,20 @@ Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders ·
 
 Priorisiert nach Nutzen ÷ Aufwand und „passt das auf ein Telefon?".
 
-### Etappe 1 – Hoher Nutzen, mobil naheliegend
-1. **Rückblicke/Recaps-Viewer** – Story-artige Wiedergabe ist auf dem Handy
+### Etappe 1 – Hoher Nutzen, mobil naheliegend *(umgesetzt)*
+
+Alle vier Punkte sind in der App vorhanden; die Beschreibungen bleiben als
+Referenz stehen, was jeweils gebaut wurde.
+
+1. ✅ **Rückblicke/Recaps-Viewer** – Story-artige Wiedergabe ist auf dem Handy
    ideal. Read-only-Konsum der bestehenden `/recaps`-Daten + `RecapPlayer`-
    Pendant in SwiftUI (`TabView`-Paging, Auto-Advance, Musik optional).
-2. **Album-Ansichtsmodi + Konsens/Abstimmung** – das Alleinstellungsmerkmal
+2. ✅ **Album-Ansichtsmodi + Konsens/Abstimmung** – das Alleinstellungsmerkmal
    der App (kollaborative Kuratierung). Modi „Alle / Favoriten / Konsens",
    Favoriten-Toggle je Album-Mitglied, „3/5 Favoriten"-Anzeige.
-3. **Gruppen-Review (Review-Queue)** – Swipe-basiertes Review (links/rechts)
+3. ✅ **Gruppen-Review (Review-Queue)** – Swipe-basiertes Review (links/rechts)
    passt hervorragend zu Touch.
-4. **Foto-Aktionen im Vollbild vervollständigen** – Ausblenden/Einblenden,
+4. ✅ **Foto-Aktionen im Vollbild vervollständigen** – Ausblenden/Einblenden,
    Aus Album entfernen, Löschen (mit Berechtigung), Original herunterladen.
    Schließt alltägliche Lücken; nutzt vorhandene Endpunkte.
 

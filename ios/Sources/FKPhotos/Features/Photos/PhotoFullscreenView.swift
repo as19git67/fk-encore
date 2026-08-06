@@ -28,6 +28,10 @@ struct PhotoFullscreenView: View {
     /// splice it out of its own array. Carries the affected photo id.
     private let onPhotoRemoved: ((Int) -> Void)?
     private let albumContext: AlbumContext?
+    /// Anonymized opinion counters per photo id, supplied by the album detail
+    /// view for shared albums (issue #760). Empty everywhere else, which makes
+    /// the "Meinungen" block collapse to nothing.
+    private let curationStats: [Int: PhotoCurationStats]
     @State private var showDeleteConfirm = false
     @State private var isProcessingAction = false
     @State private var toastMessage: ToastMessage?
@@ -54,10 +58,17 @@ struct PhotoFullscreenView: View {
         self.onPersonMerged = onPersonMerged
         self.onPhotoRemoved = onPhotoRemoved
         self.albumContext = nil
+        self.curationStats = [:]
     }
 
     /// Multi-photo init for paged navigation (e.g. PhotoGridView).
-    init(photos: [PhotoWithCuration], currentIndex: Binding<Int>, albumContext: AlbumContext? = nil, onPhotoRemoved: ((Int) -> Void)? = nil) {
+    init(
+        photos: [PhotoWithCuration],
+        currentIndex: Binding<Int>,
+        albumContext: AlbumContext? = nil,
+        curationStats: [Int: PhotoCurationStats] = [:],
+        onPhotoRemoved: ((Int) -> Void)? = nil
+    ) {
         self.photos = photos
         self.bboxes = Array(repeating: nil, count: photos.count)
         _currentIndex = currentIndex
@@ -66,6 +77,7 @@ struct PhotoFullscreenView: View {
         self.onPersonMerged = nil
         self.onPhotoRemoved = onPhotoRemoved
         self.albumContext = albumContext
+        self.curationStats = curationStats
     }
 
     /// Multi-photo init for person context: paged navigation with per-photo face boxes.
@@ -79,6 +91,7 @@ struct PhotoFullscreenView: View {
         self.onPersonMerged = onPersonMerged
         self.onPhotoRemoved = onPhotoRemoved
         self.albumContext = nil
+        self.curationStats = [:]
     }
 
     private var currentPhoto: PhotoWithCuration? {
@@ -104,7 +117,8 @@ struct PhotoFullscreenView: View {
                     photo: photos[index],
                     faceBBox: index < bboxes.count ? bboxes[index] : nil,
                     showDetails: $showDetails,
-                    curationStatus: curationBinding(for: photos[index])
+                    curationStatus: curationBinding(for: photos[index]),
+                    curationStats: curationStats[photos[index].id]
                 )
                 .tag(index)
             }
@@ -475,6 +489,9 @@ struct PhotoFullscreenView: View {
 private struct PhotoPageView: View {
     let photo: PhotoWithCuration
     let faceBBox: FaceBBox?
+    /// Anonymized opinion counters for this photo, or nil outside a shared
+    /// album — then the "Meinungen" block is omitted entirely.
+    let curationStats: PhotoCurationStats?
 
     @State private var loader: ThumbnailLoader
     @State private var viewModel: PhotoMetadataViewModel
@@ -486,9 +503,16 @@ private struct PhotoPageView: View {
     @State private var isEditingDescription = false
     @State private var draftDescription = ""
 
-    init(photo: PhotoWithCuration, faceBBox: FaceBBox? = nil, showDetails: Binding<Bool>, curationStatus: Binding<CurationStatus>) {
+    init(
+        photo: PhotoWithCuration,
+        faceBBox: FaceBBox? = nil,
+        showDetails: Binding<Bool>,
+        curationStatus: Binding<CurationStatus>,
+        curationStats: PhotoCurationStats? = nil
+    ) {
         self.photo = photo
         self.faceBBox = faceBBox
+        self.curationStats = curationStats
         _loader = State(initialValue: ThumbnailLoader(filename: photo.filename))
         _viewModel = State(initialValue: PhotoMetadataViewModel(photo: photo))
         _showDetails = showDetails
@@ -655,6 +679,15 @@ private struct PhotoPageView: View {
                 } else if let loc = locationText {
                     sectionHeader("Ort")
                     detailRow { Text(loc).font(.subheadline) }
+                }
+
+                // Anonymized group opinions — shared albums only (issue #760)
+                if let curationStats, !OpinionsSection.isEmpty(curationStats) {
+                    sectionHeader("Meinungen")
+                    detailRow {
+                        OpinionsSection(stats: curationStats)
+                            .padding(.vertical, 4)
+                    }
                 }
 
                 // AI quality

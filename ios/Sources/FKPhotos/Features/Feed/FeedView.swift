@@ -38,6 +38,14 @@ struct FeedView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink {
+                    ReviewQueueView()
+                } label: {
+                    Image(systemName: "checklist")
+                }
+                .accessibilityLabel("Gruppen-Review")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink {
                     RecapsListView()
                 } label: {
                     Image(systemName: "sparkles")
