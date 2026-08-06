@@ -263,6 +263,12 @@ actor PhotoSyncService {
             // memberships collected in Step 3b, then mark the overall sync
             // timestamp. The per-album watermarks were already advanced above.
             await drainQueueWithProgress()
+            // Downloaded assets never reach the scan above (they are filtered
+            // out of the enumeration entirely), so their album memberships are
+            // collected separately.
+            for (albumId, photoIds) in await downloadedAssetAttachments() {
+                pendingAlbumAttachments[albumId, default: []].formUnion(photoIds)
+            }
             await reconcileAlbumAttachments(pendingAlbumAttachments)
             PhotoSyncPreferences.lastSyncDate = syncStartDate
             await SyncProgress.shared.reset()
@@ -276,6 +282,72 @@ actor PhotoSyncService {
     }
 
     // MARK: - Album membership reconciliation
+
+    /// Album memberships for assets this app downloaded from the server and the
+    /// user has since put into a synced iOS album.
+    ///
+    /// `fetchAssetsSync` drops every downloaded asset from the enumeration (the
+    /// bisync round-trip guard: re-uploading a downloaded copy would produce a
+    /// near-duplicate the server dedup cannot catch, because the re-encoded
+    /// bytes carry a different image_data_hash). That guard is right about the
+    /// pixels but too broad about membership: such an asset never gets hashed,
+    /// never reaches the sync-check, and so never lands in the album the user
+    /// put it into — on any run, and regardless of how often the album is
+    /// disconnected and re-linked, since nothing ever clears the downloaded-id
+    /// store.
+    ///
+    /// We therefore resolve those assets to their known server photo id and
+    /// hand them to the reconciliation directly. No bytes are read or uploaded,
+    /// so the round-trip guard stays fully intact.
+    private func downloadedAssetAttachments() async -> [Int: Set<Int>] {
+        let mappings = PhotoSyncPreferences.albumMappings
+        guard !mappings.isEmpty else { return [:] }
+        let downloadedIds = DownloadSyncPreferences.loadDownloadedAssetIds()
+        guard !downloadedIds.isEmpty else { return [:] }
+
+        let photoIdByLocalId = Self.serverPhotoIdsByLocalId(
+            downloadedPhotos: DownloadSyncPreferences.loadDownloadedPhotos(),
+            serverPhotoMap: PhotoSyncPreferences.loadServerPhotoMap()
+        )
+        guard !photoIdByLocalId.isEmpty else { return [:] }
+
+        let confirmed = PhotoSyncPreferences.confirmedMappingIds
+        var result: [Int: Set<Int>] = [:]
+        for (iosAlbumId, serverAlbumId) in mappings where confirmed.contains(iosAlbumId) {
+            if Task.isCancelled { return result }
+            // nil means the collection couldn't be read — skip it rather than
+            // treating the album as empty.
+            guard let presentLocalIds = await Self.fetchAlbumAssetLocalIds(iosAlbumId) else { continue }
+            for localId in presentLocalIds.intersection(downloadedIds) {
+                guard let photoId = photoIdByLocalId[localId] else { continue }
+                result[serverAlbumId, default: []].insert(photoId)
+            }
+        }
+        return result
+    }
+
+    /// Inverts both server↔local tracking stores into `localIdentifier → server
+    /// photo id` (extracted for unit testing). The download tracking wins over
+    /// the upload map: it is keyed per album pair and describes exactly the
+    /// assets this app created, whereas the upload map is global and can carry
+    /// an older entry for a local asset that was replaced since.
+    nonisolated static func serverPhotoIdsByLocalId(
+        downloadedPhotos: [String: [String: String]],
+        serverPhotoMap: [String: String]
+    ) -> [String: Int] {
+        var result: [String: Int] = [:]
+        for (photoId, localId) in serverPhotoMap {
+            guard let pid = Int(photoId) else { continue }
+            result[localId] = pid
+        }
+        for (_, album) in downloadedPhotos {
+            for (photoId, localId) in album {
+                guard let pid = Int(photoId) else { continue }
+                result[localId] = pid
+            }
+        }
+        return result
+    }
 
     /// Adds photos that already exist server-side to their target album.
     ///
