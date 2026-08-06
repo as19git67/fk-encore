@@ -32,6 +32,8 @@ tax categories, and banking.
 ### Photo management
 - Web upload with JPEG, PNG, GIF, WebP, and automatic HEIC → JPEG conversion
 - Hash-based and ML-based duplicate detection (DINOv2) with a review workflow
+- Focus peaking in the review: every detected face is framed in green, yellow,
+  or red according to how sharp that face is
 - On-the-fly resizing via query parameter
 - Intelligent thumbnail focus point derived from detected faces and POIs
 - AI-based quality score for every photo

@@ -18,6 +18,14 @@ import {
 import type { FeedPhotoItem } from '../api/photoFeed'
 import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
 import { getPhotoFacesCached } from '../composables/usePhotoMetaCache'
+import { useFocusPeaking } from '../composables/useFocusPeaking'
+import { faceBoxStyle, validBbox } from '../utils/faceBbox'
+import {
+  classifySharpness,
+  peakDescription,
+  sharpnessLabel,
+  type PeakLevel,
+} from '../utils/focusPeaking'
 import { useAuthStore } from '../stores/auth'
 import { discardFlingDirection, flingOffscreenTranslate } from '../utils/compareSwipe'
 import { mergeFreshScore, type FreshScore } from '../utils/comparePhotoScore'
@@ -1089,6 +1097,79 @@ watch(phase, (p) => {
   if (p === 'review') seedReviewItems()
 })
 
+// ── Focus peaking (#873) ─────────────────────────────────────────────────
+// Every detected face gets a frame coloured by how sharp that face region
+// is: green = in focus, yellow = middling, red = out of focus. That is the
+// question the compare view exists to answer, so peaking defaults to ON;
+// the toolbar toggle (persisted) turns it off for an unobstructed view.
+const focusPeaking = useFocusPeaking()
+
+// Non-reactive registry of the rendered <img> per photo — the measurement
+// samples pixels straight off the element that is already on screen.
+const loadedImages = new Map<number, HTMLImageElement>()
+
+interface FocusPeakBox {
+  faceId: number
+  level: PeakLevel
+  label: string
+  description: string
+  style: Record<string, string>
+}
+
+function focusPeakBoxes(photoId: number): FocusPeakBox[] {
+  if (!focusPeaking.enabled.value) return []
+  const measured = focusPeaking.scores.value.get(photoId)
+  if (!measured) return []
+  const faces = facesCache.value.get(photoId) ?? []
+  const boxes: FocusPeakBox[] = []
+  for (const face of faces) {
+    if (face.ignored) continue
+    const score = measured.get(face.id)
+    if (score === undefined) continue
+    if (!validBbox(face.bbox)) continue
+    boxes.push({
+      faceId: face.id,
+      level: classifySharpness(score),
+      label: sharpnessLabel(score),
+      description: peakDescription(score),
+      style: faceBoxStyle(face.bbox),
+    })
+  }
+  return boxes
+}
+
+/** Measure the faces of an already-rendered photo. Safe to call repeatedly —
+ *  the composable keeps one measurement per photo. */
+async function measureFocusPeaking(photoId: number) {
+  const img = loadedImages.get(photoId)
+  if (!img || !focusPeaking.enabled.value) return
+  const { faces } = await ensureBboxData(photoId)
+  if (faces.length === 0) return
+  focusPeaking.measure(photoId, img, faces)
+}
+
+function onCompareImageLoad(photoId: number, evt: Event) {
+  const img = evt.target as HTMLImageElement | null
+  if (!img) return
+  loadedImages.set(photoId, img)
+  void measureFocusPeaking(photoId)
+}
+
+function onFocusPeakingToggle() {
+  focusPeaking.toggle()
+  if (!focusPeaking.enabled.value) return
+  // Turned on after the photos were already rendered — measure what's up.
+  for (const photoId of currentPair.value ?? []) {
+    void measureFocusPeaking(photoId)
+  }
+}
+
+// A new pair renders into the same <img> elements when the browser has the
+// files cached, in which case no `load` event fires — measure explicitly.
+watch(currentPair, (pair) => {
+  for (const photoId of pair ?? []) void measureFocusPeaking(photoId)
+})
+
 function getPhotoById(id: number): Photo | undefined {
   const base = props.allPhotos.find(p => p.id === id) ?? fetchedMembers.value.get(id)
   return base ? mergeFreshScore(base, freshScores.value.get(id)) : undefined
@@ -1178,6 +1259,23 @@ function compareTileSrc(photo: Photo, width?: number): string {
               @click="onSyncToggleClick"
             />
             <Button
+              class="compare-center-action"
+              icon="pi pi-eye"
+              :label="isVeryNarrow ? undefined : isNarrow ? 'Fokus' : 'Fokus-Peaking'"
+              :severity="focusPeaking.enabled.value ? 'primary' : 'secondary'"
+              :outlined="!focusPeaking.enabled.value"
+              size="small"
+              :aria-pressed="focusPeaking.enabled.value"
+              v-tooltip.bottom="{
+                value: focusPeaking.enabled.value
+                  ? 'Gesichtsrahmen zeigen die Schärfe (grün = scharf, gelb = mittel, rot = unscharf) — anklicken zum Ausblenden'
+                  : 'Gesichtsrahmen mit Schärfe-Anzeige einblenden',
+                disabled: isTouch,
+              }"
+              :disabled="committing"
+              @click="onFocusPeakingToggle"
+            />
+            <Button
               v-if="!isVeryNarrow"
               class="compare-center-action"
               icon="pi pi-question-circle"
@@ -1223,6 +1321,11 @@ function compareTileSrc(photo: Photo, width?: number): string {
                       <td>KI-Vorauswahl</td>
                       <td><strong>KI-Bewertung anwenden</strong></td>
                       <td class="help-desc">Überspringt den manuellen Vergleich. Die KI bewertet jedes Foto technisch (Schärfe, Belichtung, Bildqualität via CLIP) und schlägt die schlechtesten Fotos zum Ausblenden vor.</td>
+                    </tr>
+                    <tr>
+                      <td>Fokus-Peaking</td>
+                      <td><strong>Schärfe der Gesichter anzeigen</strong></td>
+                      <td class="help-desc">Rahmt jedes erkannte Gesicht ein und färbt den Rahmen nach der gemessenen Schärfe: grün = scharf, gelb = mittelscharf, rot = unscharf. Standardmäßig eingeschaltet; die Einstellung bleibt gespeichert.</td>
                     </tr>
                   </tbody>
                 </table>
@@ -1282,7 +1385,23 @@ function compareTileSrc(photo: Photo, width?: number): string {
                     :src="compareTileSrc(getPhotoById(photoId)!)"
                     alt=""
                     objectFit="contain"
-                  />
+                    @load="(evt: Event) => onCompareImageLoad(photoId, evt)"
+                  >
+                    <!-- Focus peaking (#873): frames sit in HeicImage's slot,
+                         which tracks the rendered image rect, so the bbox
+                         percentages line up under object-fit: contain. -->
+                    <div
+                      v-for="box in focusPeakBoxes(photoId)"
+                      :key="box.faceId"
+                      class="focus-peak-box"
+                      :class="`focus-peak-box--${box.level}`"
+                      :style="box.style"
+                      role="img"
+                      :aria-label="box.description"
+                    >
+                      <span class="focus-peak-label">{{ box.label }}</span>
+                    </div>
+                  </HeicImage>
                 </div>
                 <div
                   class="ai-quality-badge"
@@ -2047,5 +2166,47 @@ kbd {
 .review-eyes-closed {
   font-size: 0.65rem;
   padding: 0.1rem 0.4rem;
+}
+
+/* ── Focus peaking (#873) ── Traffic-light frames around detected faces.
+   The colours are deliberately literal (green / yellow / red) rather than
+   theme-semantic: they encode a measurement, not a surface, and have to
+   read the same on top of any photo in light and dark mode. */
+.focus-peak-box {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid var(--focus-peak-color);
+  border-radius: 3px;
+  pointer-events: none;
+  z-index: 2;
+  /* Dark halo so a light-coloured frame stays visible on a bright photo. */
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+.focus-peak-box--sharp {
+  --focus-peak-color: #22c55e;
+}
+
+.focus-peak-box--medium {
+  --focus-peak-color: #eab308;
+}
+
+.focus-peak-box--unsharp {
+  --focus-peak-color: #ef4444;
+}
+
+.focus-peak-label {
+  position: absolute;
+  bottom: 100%;
+  left: -2px;
+  margin-bottom: 2px;
+  padding: 0 0.25rem;
+  border-radius: 3px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  color: #0b0b0b;
+  background: var(--focus-peak-color);
 }
 </style>

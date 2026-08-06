@@ -163,6 +163,52 @@ surface low scores directly:
   actionable "pick the other one" case.
 - The review-grid tiles render the same pill in a compact variant.
 
+### Focus peaking (#873)
+
+Picking between near-identical shots usually comes down to "which one has
+the faces in focus?". In the compare phase every detected face gets a
+frame coloured by the sharpness of that face region, plus a small
+percentage label:
+
+| Colour | Level | Normalised score |
+|--------|-------|------------------|
+| green  | in focus (`sharp`) | ≥ `SHARP_MIN` (0.45) |
+| yellow | middling (`medium`) | ≥ `MEDIUM_MIN` (0.18) |
+| red    | out of focus (`unsharp`) | < `MEDIUM_MIN` |
+
+- A **Fokus-Peaking toggle** in the compare header switches the frames
+  off. It defaults to **on** and the choice is persisted under the
+  `focus_peaking_enabled` localStorage key
+  (`composables/useFocusPeaking.ts`).
+- Sharpness is measured **in the browser**, off the `<img>` element that
+  is already on screen — no extra request, no schema change, and it works
+  on the whole existing library without a re-scan. Photo files are served
+  from the app's own origin, so the canvas stays untainted; if
+  `getImageData` throws anyway, that photo simply renders no frames.
+- The metric mirrors the embedding service's `face_sharpness` (see
+  `embedding_service/app/api/endpoints.py`): crop the face bbox, resample
+  to 128×128, grayscale, variance of the discrete Laplacian, normalised
+  against the same full-scale value (500). Mirroring it keeps the colours
+  consistent with the KI quality scores shown next to them.
+- **One deliberate deviation:** the service approximates the Laplacian
+  with `np.roll`, which wraps neighbours around the crop edges. That is
+  harmless on a whole photo, but on a small face crop the wrap turns a
+  brightness difference between opposite edges into a bogus edge and a
+  soft face reads as sharp. The frontend skips the border row/column
+  instead of wrapping (`laplacianVariance` in `utils/focusPeaking.ts`).
+- Frames render inside `HeicImage`'s slot, which tracks the rendered
+  image rect, so the normalised bbox percentages stay aligned under
+  `object-fit: contain` and under the zoom-to-face transform above.
+  Ignored faces and bboxes in a foreign coordinate space are skipped.
+- Faces come from the same lazily-fetched, per-photo cache the zoom
+  helpers use (`getPhotoFacesCached`); measurement runs once per photo
+  per session, triggered by the image `load` event, by a pair change, or
+  by switching the toggle back on.
+
+The scoring maths lives in `frontend/src/utils/focusPeaking.ts` (DOM-free
+and unit-tested); the canvas plumbing and the persisted switch live in
+`frontend/src/composables/useFocusPeaking.ts`.
+
 ### Album-specific restriction
 
 In the album view, groups are additionally constrained to album members that
