@@ -1,6 +1,6 @@
 # iOS-App (FKPhotos) – Feature-Inventar, Web-Vergleich & Parität-Plan
 
-Stand: Juni 2026
+Stand: August 2026
 
 Dieses Dokument beschreibt den tatsächlichen Funktionsumfang der nativen
 iOS-App (`ios/`, SwiftUI), vergleicht den **Foto-Bereich** der Web-App mit der
@@ -20,7 +20,9 @@ Erweiterungen vorgeschlagen, die nur auf dem Gerät sinnvoll sind.
 
 - **Sprache/UI:** Swift / SwiftUI, `@Observable`-ViewModels.
 - **Einstieg:** `App/ContentView.swift` → `MainTabView` mit fünf Tabs:
-  **Feed**, **Alben**, **Personen**, **Suche**, **Einstellungen**.
+  **Feed**, **Alben**, **Trip**, **Suche**, **Einstellungen**. Personen hängen
+  an der Albenliste; **Rückblicke** und **Gruppen-Review** an der
+  Feed-Toolbar.
 - **Netzwerk:** `Core/Networking/APIClient.swift` (+ `AuthInterceptor`),
   spricht dieselbe Encore.ts-API wie das Web-Frontend.
 - **Auth:** `Core/Auth/` – `AuthManager`, `KeychainHelper`, `PasskeyManager`.
@@ -64,12 +66,31 @@ dokumentiert**:
   `ActivityView`).
 - **Personen benennen / zusammenführen** direkt aus erkannten Gesichtern
   im Vollbild.
+- **Ausblenden / Einblenden**, **Aus dem Album entfernen** (im Album-Kontext),
+  **Löschen** (nur mit `photos.delete`, mit Rückfrage) und **Original in die
+  Fotos-Mediathek sichern** – alle im Überlauf-Menü des Vollbilds (Issue #762).
 
 ### 2.4 Alben
 - Liste mit Suche, **Anpinnen** (`AlbumPinPreferences`), Wisch-Aktionen,
   Erstellen/Löschen.
 - Detail-Ansicht mit Grid, Filter/Sort, **Mehrfachauswahl inkl.
   Drag-Select**, Stapel-Aktionen (zu Album hinzufügen, teilen), Upload.
+- **Ansichtsmodi + Konsens** (`AlbumViewMode`, Issue #760): Umschalter für
+  „Alle Fotos", „Meine Favoriten", „Gruppen-Highlights" (Konsens),
+  „Von anderen favorisiert" und eine „Eigene Ansicht" mit einstellbaren
+  Schwellenwerten. Die zählerbasierten Modi erscheinen nur bei geteilten Alben.
+  Der gewählte Modus wird pro Album gemerkt.
+- **Anonymisierte Abstimmung**: In geteilten Alben zeigt jedes Thumbnail
+  „3/5"-Badges für Favoriten und Ausblendungen, das Vollbild einen
+  „Meinungen"-Block mit Anteilsbalken. Die eigene Favoriten-Stimme lässt sich
+  direkt aus dem Grid-Kontextmenü setzen; die Zähler aktualisieren sich sofort
+  und werden bei einem Fehler zurückgerollt.
+
+  Die Filterung passiert **auf dem Gerät**, nicht über das serverseitige
+  `active_view`: Das Web setzt diese Einstellung bei jedem Album-Laden auf
+  `"all"` zurück und filtert selbst clientseitig, ein von iOS gespeichertes
+  Preset würde also stillschweigend verworfen. Details in
+  `docs/album-photo-views.md`.
 - **Album-Einstellungen** (`AlbumSettingsView`) wie im Web: Name,
   Beschreibung und „Karte aktivieren" (`display_mode`) ändern. Erreichbar über
   das Überlauf-Menü der Detailansicht und das Kontextmenü der Albenliste;
@@ -117,7 +138,24 @@ dokumentiert**:
 - **Foto-Hashing** (`PhotoHashing`) zur Duplikat-/Wiedererkennung.
 - **Share-Extension**: Fotos aus anderen Apps direkt hochladen.
 
-### 2.9 Einstellungen / Admin
+### 2.9 Rückblicke & Gruppen-Review
+- **Rückblicke** (`RecapsListView`, `RecapPlayerView`, Issue #759): story-artiger
+  Vollbild-Player mit Auto-Advance, Segment-Fortschrittsbalken, Tippen zum
+  Blättern, Halten zum Pausieren und Runterwischen zum Schließen. Dazu
+  Trip-Karten-Intro, „Damals & heute"-Vergleich und optionale Hintergrundmusik.
+  Einstieg über den Streifen im Feed und die Feed-Toolbar. Read-only – Recaps
+  entstehen serverseitig.
+- **Gruppen-Review** (`ReviewQueueView`, Issue #761): Wisch-basierte Prüfung
+  ähnlicher Fotos gegen `/photos/groups/review-queue`. Rechts = KI-Vorschlag
+  übernehmen, links = alle behalten, hoch = favorisieren und übernehmen,
+  Tippen auf ein Foto = nur dieses behalten; bei Peer-Signal zusätzlich
+  „Konsens übernehmen". Jede Geste hat einen gleichwertigen Button
+  (VoiceOver). Fortschrittsbalken, Filter nach Sicherheitsstufe und ein
+  garantiert einstufiges **Rückgängig** – die neueste Entscheidung wird lokal
+  gepuffert und erst mit der nächsten (oder beim Verlassen) gesendet, weil das
+  Backend kein „Un-Review" kennt. Entscheiden erfordert `photos.delete`.
+
+### 2.10 Einstellungen / Admin
 - Profil-Anzeige (Name, E-Mail, Rollen).
 - **Benutzerverwaltung** (`UsersListView`) und **Rollen & Berechtigungen**
   (`RolesView`) – Basis-Admin.
@@ -144,12 +182,12 @@ Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders ·
 | Feature | Web | iOS |
 |---|---|---|
 | Favorit | ✅ | ✅ |
-| Ausblenden / Einblenden | ✅ | 🔶 (nur im Feed) |
-| Löschen | ✅ | ❌ (nur Album löschen) |
-| Original herunterladen | ✅ | 🔶 (Share-Sheet / Auto-Download) |
+| Ausblenden / Einblenden | ✅ | ✅ (Feed + Vollbild) |
+| Löschen | ✅ | ✅ (mit `photos.delete`) |
+| Original herunterladen | ✅ | ✅ (in die Fotos-Mediathek) |
 | Teilen (nativ) | 🔶 (Link) | ⚡ iOS-Share-Sheet |
 | Zu Album hinzufügen | ✅ | ✅ |
-| Aus Album entfernen | ✅ | ❌ |
+| Aus Album entfernen | ✅ | ✅ (im Album-Kontext) |
 | Aufnahmedatum ändern | ✅ | ✅ |
 | GPS-Ort setzen/ändern | ✅ `PhotoLocationMenu` | ❌ (nur Anzeige) |
 | Reindex / Metadaten aktualisieren | ✅ | ❌ |
@@ -169,8 +207,8 @@ Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders ·
 |---|---|---|
 | Liste / Erstellen / Löschen | ✅ | ✅ |
 | Album anpinnen | 🔶 | ⚡ (Pin + Wisch-Aktionen) |
-| Ansichtsmodi (Alle/Favoriten/Konsens/Eigen) | ✅ | ❌ |
-| Konsens-/anonyme Abstimmung | ⚡ | ❌ |
+| Ansichtsmodi (Alle/Favoriten/Konsens/Eigen) | ✅ | ✅ `AlbumViewMode` |
+| Konsens-/anonyme Abstimmung | ⚡ | ✅ (Badges „3/5" + Favoriten-Vote) |
 | Mit Nutzern teilen (Rollen) | ✅ | ✅ |
 | Öffentliche Links (mit Ablauf) | ✅ | ❌ |
 | Cover setzen / Album bearbeiten | ✅ | ❌ |
@@ -202,9 +240,9 @@ Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders ·
 ### 3.8 Rückblicke & Review
 | Feature | Web | iOS |
 |---|---|---|
-| Rückblicke (Recaps) – Player | ✅ `RecapsView`/`RecapPlayer` | ❌ |
-| „An diesem Tag" / Memories | 🔶 (über Recaps) | ❌ |
-| Gruppen-Review (Review-Queue) | ✅ `ReviewQueueView` | ❌ |
+| Rückblicke (Recaps) – Player | ✅ `RecapsView`/`RecapPlayer` | ✅ `RecapPlayerView` |
+| „An diesem Tag" / Memories | 🔶 (über Recaps) | 🔶 (über Recaps) |
+| Gruppen-Review (Review-Queue) | ✅ `ReviewQueueView` | ✅ `ReviewQueueView` (Swipe) |
 
 ### 3.9 Backup & Sync
 | Feature | Web | iOS |
@@ -231,16 +269,20 @@ Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders ·
 
 Priorisiert nach Nutzen ÷ Aufwand und „passt das auf ein Telefon?".
 
-### Etappe 1 – Hoher Nutzen, mobil naheliegend
-1. **Rückblicke/Recaps-Viewer** – Story-artige Wiedergabe ist auf dem Handy
+### Etappe 1 – Hoher Nutzen, mobil naheliegend *(umgesetzt)*
+
+Alle vier Punkte sind in der App vorhanden; die Beschreibungen bleiben als
+Referenz stehen, was jeweils gebaut wurde.
+
+1. ✅ **Rückblicke/Recaps-Viewer** – Story-artige Wiedergabe ist auf dem Handy
    ideal. Read-only-Konsum der bestehenden `/recaps`-Daten + `RecapPlayer`-
    Pendant in SwiftUI (`TabView`-Paging, Auto-Advance, Musik optional).
-2. **Album-Ansichtsmodi + Konsens/Abstimmung** – das Alleinstellungsmerkmal
+2. ✅ **Album-Ansichtsmodi + Konsens/Abstimmung** – das Alleinstellungsmerkmal
    der App (kollaborative Kuratierung). Modi „Alle / Favoriten / Konsens",
    Favoriten-Toggle je Album-Mitglied, „3/5 Favoriten"-Anzeige.
-3. **Gruppen-Review (Review-Queue)** – Swipe-basiertes Review (links/rechts)
+3. ✅ **Gruppen-Review (Review-Queue)** – Swipe-basiertes Review (links/rechts)
    passt hervorragend zu Touch.
-4. **Foto-Aktionen im Vollbild vervollständigen** – Ausblenden/Einblenden,
+4. ✅ **Foto-Aktionen im Vollbild vervollständigen** – Ausblenden/Einblenden,
    Aus Album entfernen, Löschen (mit Berechtigung), Original herunterladen.
    Schließt alltägliche Lücken; nutzt vorhandene Endpunkte.
 
@@ -297,3 +339,8 @@ eine echte Bereicherung:
 - Die Sync-Architektur (Upload-Queue, Hintergrund-Task, Hash-Abgleich,
   Zwei-Wege-Sync) ist in [`ios-backup-sync.md`](./ios-backup-sync.md)
   dokumentiert.
+- Die Album-Ansichtsmodi inklusive der Begründung, warum iOS auf dem Gerät
+  filtert statt `active_view` zu speichern, stehen in
+  [`album-photo-views.md`](./album-photo-views.md).
+- Die Wisch-Variante der Review-Queue samt Gesten-Tabelle und dem Verhalten
+  des einstufigen Undo steht in [`ai-auto-pick.md`](./ai-auto-pick.md).

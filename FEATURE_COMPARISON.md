@@ -1,6 +1,6 @@
 # Feature Comparison: Immich vs. FK-Encore
 
-Status: April 2026 (updated)
+Status: August 2026 (updated)
 
 ## Legend
 
@@ -16,7 +16,7 @@ Status: April 2026 (updated)
 | Feature | Immich | FK-Encore |
 |---|---|---|
 | Upload (Web) | ✅ | ✅ |
-| Upload (Mobile App) | ✅ | ❌ |
+| Upload (Mobile App) | ✅ | ✅ iOS: manual upload, share extension, background auto-backup |
 | Upload (CLI) | ✅ Bulk upload, glob filter, watch mode | ❌ |
 | Formats: JPEG, PNG, GIF, WebP | ✅ | ✅ |
 | HEIC/HEIF support | ✅ Native | ✅ With auto-conversion to JPEG |
@@ -50,7 +50,7 @@ Status: April 2026 (updated)
 | Share albums with users | ✅ Editor/Viewer roles | ✅ Read/Write access |
 | Public links (no account) | ✅ With expiry date, password | 🔶 With expiry date (no password) |
 | Upload by recipients | ✅ Configurable | ❌ |
-| Album sync from phone | ✅ Auto-sync of device albums | ❌ |
+| Album sync from phone | ✅ Auto-sync of device albums | ✅ iOS: device-album → server-album mapping (two-way) |
 | Album cover photo | ✅ | ✅ |
 | Collaborative curation | ❌ | ⚡ Favorites, hide, consensus view |
 | Anonymous voting in albums | ❌ | ⚡ "3/5 favorites" display |
@@ -111,7 +111,7 @@ Status: April 2026 (updated)
 |---|---|---|
 | Chronological timeline | ✅ With virtual scroll | ✅ Photo grid with navigation |
 | Folder view | ✅ | ❌ |
-| Memories ("On this day") | ✅ Web & mobile | ❌ |
+| Memories ("On this day") | ✅ Web & mobile | ✅ Recaps incl. `on_this_day`, story player on web & iOS |
 | Scrubbable scrollbar | ✅ | ❌ |
 
 ## 8. Mobile Apps
@@ -128,14 +128,19 @@ Status: April 2026 (updated)
 | Share extension (upload from other apps) | ✅ | ✅ |
 | Passkeys on mobile | ❌ | ⚡ WebAuthn via `ASAuthorization` |
 | Comments & reactions in app | ✅ | ✅ |
+| Collaborative album views in app | ❌ | ⚡ All / Favorites / Consensus / Custom |
+| Anonymous voting in app | ❌ | ⚡ "3/5" badges + favorite vote from the grid |
+| Similar-photo group review in app | ❌ | ⚡ Swipe-based review queue |
 | "Free up space" | ✅ | ❌ |
 | Offline mode | ✅ | 🔶 Thumbnail cache + two-way download sync |
 | Read-only mode | ✅ | ❌ |
 
 > **FK-Encore has no native Android app. The iOS app (SwiftUI) is fully
 > functional: background auto-backup, two-way sync, selective album mapping,
-> Wi-Fi-only, a share extension, passkeys, and comments/reactions. See
-> `docs/ios-app.md` for the full inventory and the Web↔iOS parity plan.**
+> Wi-Fi-only, a share extension, passkeys, comments/reactions, recaps, and the
+> collaborative-curation features (album view modes with anonymized consensus
+> counters, and the swipe-based group review queue). See `docs/ios-app.md` for
+> the full inventory and the Web↔iOS parity plan.**
 
 ## 9. Authentication & User Management
 
@@ -157,9 +162,9 @@ Status: April 2026 (updated)
 
 | Feature | Immich | FK-Encore |
 |---|---|---|
-| Mount external folders | ✅ Read-only | ❌ |
-| Filesystem watching | ✅ (experimental) | ❌ |
-| Scheduled scans | ✅ | ❌ |
+| Mount external folders | ✅ Read-only | ✅ `link` (file stays in place) or `move` into the standard layout |
+| Filesystem watching | ✅ (experimental) | ✅ chokidar watcher per library with `auto_import` |
+| Scheduled scans | ✅ | ✅ Daily reconcile job via the scan queue |
 | Configurable storage layout | ✅ Templates | 🔶 Automatic YYYY/YYYY-MM folders with dated filenames |
 | S3-compatible backends | ✅ | ❌ |
 | Object storage | ❌ | ✅ Encore Buckets |
@@ -224,8 +229,6 @@ Status: April 2026 (updated)
 - **Video support** – entirely missing in FK-Encore
 - **Android app** (FK-Encore has a native iOS app with auto-backup, but no Android)
 - **Interactive world map**
-- **Memories** ("On this day")
-- **External libraries** – mount existing photo folders
 - **Partner sharing** – share an entire library
 - **Public links with password protection** – FK-Encore has public links but no password
 - **OAuth/OIDC** – enterprise SSO integration
@@ -260,8 +263,9 @@ Status: April 2026 (updated)
 ### Conclusion
 
 **Immich** is the more comprehensive, more mature solution – especially as a
-full Google Photos replacement with video support, mobile apps, and a broad
-community. It covers the entire lifecycle of photo/video management.
+full Google Photos replacement with video support, mobile apps for both iOS
+and Android, and a broad community. It covers the entire lifecycle of
+photo/video management.
 
 **FK-Encore** stands out with innovative AI features and a unique collaborative
 curation concept. Album curation (consensus view, AI voting, anonymous voting)
@@ -279,6 +283,10 @@ be the most impactful:
    still pending
 
 For the iOS app specifically, the Web↔iOS feature gap and a prioritized
-parity plan (recaps viewer, album consensus/view-modes, group review,
-fullscreen photo actions, map/location editing) plus iOS-only enrichment
-ideas are tracked in **`docs/ios-app.md`**.
+parity plan plus iOS-only enrichment ideas are tracked in
+**`docs/ios-app.md`**. Stage 1 of that plan is complete (recaps viewer, album
+view-modes with consensus voting, swipe-based group review, and the full set of
+fullscreen photo actions). What remains on iOS is Stage 2 and beyond: setting
+GPS locations, an interactive map/trips view, public album links, multi-select
+in the "All Photos" timeline, richer search filter chips, slideshow, and the
+heavier editors (transform/crop, collage, photo compare).
