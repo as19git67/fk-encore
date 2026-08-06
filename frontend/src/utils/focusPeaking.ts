@@ -52,6 +52,28 @@ export function isRenderedFaceLegible(widthPx: number, heightPx: number): boolea
   return Math.min(widthPx, heightPx) >= MIN_RENDERED_FACE_PX
 }
 
+/** Floor for `peakChromeScale` — keeps the border from thinning into an
+ *  invisible hairline at the maximum zoom-to-face level. */
+export const MIN_PEAK_CHROME_SCALE = 0.4
+
+/**
+ * Counter-scale for a peaking frame's border/label, given the CSS zoom
+ * factor currently applied to its ancestor (the zoom-to-face transform).
+ *
+ * The frame's box (bbox percentages) is meant to grow with the zoom — it
+ * has to keep tracing the face's actual edges. Its border and label are UI
+ * chrome, though: without compensation the ancestor's `scale()` enlarges
+ * them right along with the box, so a thin 2px outline reads as a thick
+ * smudge once zoomed in. Dividing by `zoom` keeps their on-screen size
+ * constant; the result is clamped so it never shrinks below
+ * `MIN_PEAK_CHROME_SCALE`, i.e. the border stays visible even at the
+ * highest zoom level.
+ */
+export function peakChromeScale(zoom: number): number {
+  if (!Number.isFinite(zoom) || zoom <= 0) return 1
+  return Math.max(MIN_PEAK_CHROME_SCALE, Math.min(1, 1 / zoom))
+}
+
 /** Score at or above which a face counts as in focus (green). */
 export const SHARP_MIN = 0.45
 
