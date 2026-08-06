@@ -172,6 +172,16 @@ export function chooseOsdRotation(
  * degrees) needed to make it upright. Best-effort: returns 0 when OSD is
  * disabled, the `osd` model is missing, confidence is too low, or anything
  * else goes wrong. Never throws.
+ *
+ * 180° is always verified via recognition quality, regardless of OSD
+ * confidence: OSD judges orientation from glyph shape (ascenders vs.
+ * descenders), but that signal is near-zero for form-heavy / numeric pages,
+ * so it cannot reliably tell 0° from 180°.  90° and 270° rely on text-line
+ * direction, which OSD reads correctly even on sparse pages.
+ *
+ * When OSD reports 0° below the confidence threshold, we additionally probe
+ * 180° — the answer "upright" at low confidence is no more trustworthy than
+ * "flipped" at low confidence for the same class of documents.
  */
 export async function detectOcrRotation(imagePath: string): Promise<number> {
   if (!PREPROCESS_ENABLED || !AUTOROTATE_ENABLED) return 0;
@@ -179,7 +189,9 @@ export async function detectOcrRotation(imagePath: string): Promise<number> {
   try {
     osd = parseOsdRotation(await runTesseractOsd(imagePath));
     const confident = chooseOsdRotation(osd);
-    if (confident !== 0) return confident;
+    // 90° / 270°: OSD is reliable — trust a confident result directly.
+    if (confident === 90 || confident === 270) return confident;
+    // 180°: OSD cannot distinguish it from 0° — fall through to verification.
   } catch (err) {
     console.warn(
       `[documents.ocr-preprocess] OSD detection failed for ${imagePath}: ${(err as Error).message}`,
@@ -187,17 +199,26 @@ export async function detectOcrRotation(imagePath: string): Promise<number> {
     return 0;
   }
 
-  // OSD named an angle but wasn't confident enough to be trusted outright.
-  // Rather than discard it, check it against recognition quality — see
-  // ROTATE_VERIFY_ENABLED above for why the threshold alone gets this wrong.
-  if (!ROTATE_VERIFY_ENABLED || !osd || osd.rotate === 0) return 0;
+  if (!ROTATE_VERIFY_ENABLED || !osd) return 0;
+
+  // Determine which angle to verify:
+  //  • OSD said 180° (any confidence): test 180°
+  //  • OSD said 90°/270° low confidence: test that angle
+  //  • OSD said 0° low confidence: probe 180° (the ambiguous twin)
+  //  • OSD said 0° high confidence: page is very likely upright — skip
+  const angleToTest =
+    osd.rotate === 0
+      ? osd.confidence < ROTATE_MIN_CONFIDENCE ? 180 : 0
+      : osd.rotate;
+  if (angleToTest === 0) return 0;
+
   try {
-    const verified = await verifyRotationByRecognition(imagePath, osd.rotate);
+    const verified = await verifyRotationByRecognition(imagePath, angleToTest);
     if (verified) {
       console.log(
-        `[documents.ocr-preprocess] low-confidence OSD (${osd.rotate}° @ ${osd.confidence}) confirmed by recognition — rotating`,
+        `[documents.ocr-preprocess] OSD (${osd.rotate}° @ ${osd.confidence}) → ${angleToTest}° confirmed by recognition — rotating`,
       );
-      return osd.rotate;
+      return angleToTest;
     }
   } catch (err) {
     console.warn(

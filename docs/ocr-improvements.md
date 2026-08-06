@@ -43,6 +43,32 @@ Everything is **best-effort**: a missing `osd` model, a low-confidence
 detection, or a `sharp` decode error leaves the untouched page image in
 place, so OCR never regresses below the previous behavior.
 
+### The 0° / 180° ambiguity
+
+OSD judges page orientation from two signals: **text-line direction** (which
+way the lines run — reliably distinguishes 90° and 270°) and **glyph shape**
+(ascenders vs. descenders — the only signal for 0° vs. 180°). On form-heavy,
+numeric, or sparse pages the glyph-shape signal is near-zero, and OSD cannot
+tell upright from upside-down. A high-confidence `Rotate: 180` on a
+correctly-scanned page would flip it, producing both a visually upside-down
+PDF and a garbage text layer.
+
+To guard against this, **180° is always verified via recognition quality**,
+regardless of OSD confidence: the page is OCR'd as-is and rotated by 180°,
+and the rotation is only applied when the rotated orientation reads
+significantly better (mean word confidence ≥ 10 points higher). 90° and 270°
+are trusted directly above the confidence threshold because text-line
+direction is unambiguous for those.
+
+Conversely, when OSD reports 0° below the confidence threshold, the code
+probes 180° through the same verification — a low-confidence "upright" is no
+more trustworthy than a low-confidence "flipped" for the same class of
+documents.
+
+The verification costs two extra Tesseract passes (~1.5 s per A4 page at
+200 dpi) and only fires for pages where OSD names 180° or is unsure about
+0°. Toggle with `DOCUMENTS_OCR_ROTATE_VERIFY=0`.
+
 ## Runtime requirement: `tesseract-ocr-osd`
 
 Orientation detection needs the `osd.traineddata` model. The runtime image
@@ -61,7 +87,9 @@ the exact pre-#892 behavior.
 | --- | --- | --- |
 | `DOCUMENTS_OCR_PREPROCESS` | `1` | Master switch for the whole step (rotate + contrast). |
 | `DOCUMENTS_OCR_AUTOROTATE` | `1` | Detect & correct 90°/180°/270° rotation via OSD. |
-| `DOCUMENTS_OCR_ROTATE_MIN_CONFIDENCE` | `1.0` | Minimum OSD orientation confidence before rotating. |
+| `DOCUMENTS_OCR_ROTATE_MIN_CONFIDENCE` | `1.0` | Minimum OSD orientation confidence before rotating (90°/270° only; 180° always goes through verification). |
+| `DOCUMENTS_OCR_ROTATE_VERIFY` | `1` | Verify uncertain or 180° OSD results by comparing recognition quality in both orientations. |
+| `DOCUMENTS_OCR_ROTATE_VERIFY_MARGIN` | `10` | Minimum mean-word-confidence gain the rotated orientation must show to be accepted. |
 | `DOCUMENTS_OCR_GRAYSCALE` | `1` | Convert the page to grayscale before contrast work. |
 | `DOCUMENTS_OCR_NORMALIZE` | `1` | Percentile-clip normalization (lifts the gray cast to white). |
 | `DOCUMENTS_OCR_NORMALIZE_LOWER` | `2` | Lower clip percentile. |
