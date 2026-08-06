@@ -24,6 +24,8 @@ import {
   classifySharpness,
   peakDescription,
   sharpnessLabel,
+  isRenderedFaceLegible,
+  peakChromeScale,
   type PeakLevel,
 } from '../utils/focusPeaking'
 import { useAuthStore } from '../stores/auth'
@@ -33,6 +35,7 @@ import { qualityComparisonRows } from '../utils/compareQualityDetails'
 import {
   computeBboxZoom,
   computeSyncBboxZoom,
+  containedRect,
   pickPrimaryBbox,
   pickBboxAtPoint,
   findFaceForPerson,
@@ -1116,23 +1119,55 @@ interface FocusPeakBox {
   style: Record<string, string>
 }
 
+/**
+ * `object-fit: contain` letterbox rect for `photoId`, plus whatever
+ * zoom-to-face factor is currently active on it. `null` when the viewport
+ * isn't known yet (image not laid out) — callers treat that as "can't
+ * tell, don't show".
+ */
+function renderedPhotoGeometry(
+  photoId: number,
+): { rect: { w: number; h: number }; zoom: number } | null {
+  const vp = getViewport(photoId)
+  if (!vp) return null
+  return {
+    rect: containedRect(vp),
+    zoom: zoomByPhoto.value.get(photoId)?.computation.zoom ?? 1,
+  }
+}
+
 function focusPeakBoxes(photoId: number): FocusPeakBox[] {
   if (!focusPeaking.enabled.value) return []
   const measured = focusPeaking.scores.value.get(photoId)
   if (!measured) return []
   const faces = facesCache.value.get(photoId) ?? []
+  const geometry = renderedPhotoGeometry(photoId)
+  // Border/label chrome must NOT grow with the zoom-to-face transform (it
+  // lives inside the same scaled ancestor) — only the box itself should,
+  // so it keeps tracing the face's actual edges. Compensate by the inverse
+  // zoom factor via a CSS custom property the stylesheet reads.
+  const chromeScale = geometry ? peakChromeScale(geometry.zoom) : 1
   const boxes: FocusPeakBox[] = []
   for (const face of faces) {
     if (face.ignored) continue
     const score = measured.get(face.id)
     if (score === undefined) continue
     if (!validBbox(face.bbox)) continue
+    // Skip faces too small on screen to read — a coloured sliver conveys
+    // nothing, and in a crowd shot a dozen of them overlap into unreadable
+    // clutter (see #873 follow-up). Zoom-to-face can bring a face back
+    // above the threshold, so this re-evaluates on every render.
+    if (geometry) {
+      const width = face.bbox.width * geometry.rect.w * geometry.zoom
+      const height = face.bbox.height * geometry.rect.h * geometry.zoom
+      if (!isRenderedFaceLegible(width, height)) continue
+    }
     boxes.push({
       faceId: face.id,
       level: classifySharpness(score),
       label: sharpnessLabel(score),
       description: peakDescription(score),
-      style: faceBoxStyle(face.bbox),
+      style: { ...faceBoxStyle(face.bbox), '--peak-scale': `${chromeScale}` },
     })
   }
   return boxes
@@ -2171,16 +2206,26 @@ kbd {
 /* ── Focus peaking (#873) ── Traffic-light frames around detected faces.
    The colours are deliberately literal (green / yellow / red) rather than
    theme-semantic: they encode a measurement, not a surface, and have to
-   read the same on top of any photo in light and dark mode. */
+   read the same on top of any photo in light and dark mode.
+
+   The box lives inside the zoom-to-face wrapper, so its rectangle scales
+   with the zoom transform — correctly, since it has to keep tracing the
+   face's edges. The border/shadow/radius and the label are UI chrome,
+   though, and must NOT grow along with it (a 2px outline reading as a
+   thick smudge at 5x zoom); `--peak-scale` (set inline per box, see
+   `peakChromeScale`) counteracts the ancestor's scale for exactly those. */
 .focus-peak-box {
+  --peak-scale: 1;
   position: absolute;
   box-sizing: border-box;
-  border: 2px solid var(--focus-peak-color);
-  border-radius: 3px;
+  border: calc(2px * var(--peak-scale)) solid var(--focus-peak-color);
+  border-radius: calc(3px * var(--peak-scale));
   pointer-events: none;
   z-index: 2;
   /* Dark halo so a light-coloured frame stays visible on a bright photo. */
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+  box-shadow:
+    0 0 0 calc(1px * var(--peak-scale)) rgba(0, 0, 0, 0.45),
+    inset 0 0 0 calc(1px * var(--peak-scale)) rgba(0, 0, 0, 0.25);
 }
 
 .focus-peak-box--sharp {
@@ -2208,5 +2253,10 @@ kbd {
   white-space: nowrap;
   color: #0b0b0b;
   background: var(--focus-peak-color);
+  /* Scale the whole label (text, padding, radius) as one unit instead of
+     compensating each property — bottom-left anchor keeps it pinned just
+     above the frame regardless of scale. */
+  transform: scale(var(--peak-scale));
+  transform-origin: bottom left;
 }
 </style>

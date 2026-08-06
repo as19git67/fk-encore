@@ -34,6 +34,46 @@ export const LAPLACIAN_FULL_SCALE = 500
  *  for a meaningful sharpness reading and are skipped. */
 export const MIN_FACE_PIXELS = 10
 
+/**
+ * Minimum on-screen face size (smaller side, CSS px) below which a peaking
+ * frame is skipped. This is a *display* threshold, independent of
+ * `MIN_FACE_PIXELS` (which gates the source-pixel crop the measurement
+ * reads): a face can be measurable yet still render at a couple of CSS
+ * pixels on a wide crowd shot, where a coloured box conveys nothing and a
+ * dozen of them overlapping into unreadable percentage labels are worse
+ * than showing none at all.
+ */
+export const MIN_RENDERED_FACE_PX = 40
+
+/** Whether a face rendered at `widthPx`×`heightPx` on screen is large enough
+ *  for its peaking frame to be worth showing. */
+export function isRenderedFaceLegible(widthPx: number, heightPx: number): boolean {
+  if (!Number.isFinite(widthPx) || !Number.isFinite(heightPx)) return false
+  return Math.min(widthPx, heightPx) >= MIN_RENDERED_FACE_PX
+}
+
+/** Floor for `peakChromeScale` — keeps the border from thinning into an
+ *  invisible hairline at the maximum zoom-to-face level. */
+export const MIN_PEAK_CHROME_SCALE = 0.4
+
+/**
+ * Counter-scale for a peaking frame's border/label, given the CSS zoom
+ * factor currently applied to its ancestor (the zoom-to-face transform).
+ *
+ * The frame's box (bbox percentages) is meant to grow with the zoom — it
+ * has to keep tracing the face's actual edges. Its border and label are UI
+ * chrome, though: without compensation the ancestor's `scale()` enlarges
+ * them right along with the box, so a thin 2px outline reads as a thick
+ * smudge once zoomed in. Dividing by `zoom` keeps their on-screen size
+ * constant; the result is clamped so it never shrinks below
+ * `MIN_PEAK_CHROME_SCALE`, i.e. the border stays visible even at the
+ * highest zoom level.
+ */
+export function peakChromeScale(zoom: number): number {
+  if (!Number.isFinite(zoom) || zoom <= 0) return 1
+  return Math.max(MIN_PEAK_CHROME_SCALE, Math.min(1, 1 / zoom))
+}
+
 /** Score at or above which a face counts as in focus (green). */
 export const SHARP_MIN = 0.45
 

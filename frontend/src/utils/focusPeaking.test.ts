@@ -8,10 +8,14 @@ import {
   sharpnessFromRgba,
   sharpnessLabel,
   peakDescription,
+  isRenderedFaceLegible,
+  peakChromeScale,
   FACE_SAMPLE_SIZE,
   LAPLACIAN_FULL_SCALE,
   SHARP_MIN,
   MEDIUM_MIN,
+  MIN_RENDERED_FACE_PX,
+  MIN_PEAK_CHROME_SCALE,
 } from './focusPeaking'
 
 /** Pack a grayscale plane into RGBA the way canvas getImageData returns it. */
@@ -149,6 +153,43 @@ describe('sharpnessFromRgba', () => {
     const score = sharpnessFromRgba(toRgba(coarse), size, size)
     expect(score).toBeGreaterThan(0)
     expect(score).toBeLessThan(SHARP_MIN)
+  })
+})
+
+describe('isRenderedFaceLegible', () => {
+  it('rejects a face smaller than the threshold on either axis', () => {
+    expect(isRenderedFaceLegible(MIN_RENDERED_FACE_PX - 1, 100)).toBe(false)
+    expect(isRenderedFaceLegible(100, MIN_RENDERED_FACE_PX - 1)).toBe(false)
+  })
+
+  it('accepts a face at or above the threshold on both axes', () => {
+    expect(isRenderedFaceLegible(MIN_RENDERED_FACE_PX, MIN_RENDERED_FACE_PX)).toBe(true)
+    expect(isRenderedFaceLegible(200, 150)).toBe(true)
+  })
+
+  it('rejects non-finite sizes', () => {
+    expect(isRenderedFaceLegible(Number.NaN, 100)).toBe(false)
+    expect(isRenderedFaceLegible(100, Number.POSITIVE_INFINITY)).toBe(false)
+  })
+})
+
+describe('peakChromeScale', () => {
+  it('is 1 at no zoom', () => {
+    expect(peakChromeScale(1)).toBe(1)
+  })
+
+  it('shrinks proportionally as zoom increases', () => {
+    expect(peakChromeScale(2)).toBeCloseTo(0.5, 6)
+  })
+
+  it('never drops below the floor, even at extreme zoom', () => {
+    expect(peakChromeScale(10)).toBe(MIN_PEAK_CHROME_SCALE)
+  })
+
+  it('treats non-finite or non-positive zoom as unscaled', () => {
+    expect(peakChromeScale(Number.NaN)).toBe(1)
+    expect(peakChromeScale(0)).toBe(1)
+    expect(peakChromeScale(-2)).toBe(1)
   })
 })
 
