@@ -297,6 +297,22 @@ Edge Cases:
   fremder Sessions nicht möglich ist.
 - **User verwirft Dialog**: Session wird nicht aktiv gelöscht, läuft
   durch TTL ab; Cleanup siehe §5.
+- **Zweite TAN direkt nach der ersten** (comdirect/photoTAN): Nach dem
+  akzeptierten Init-TAN verlangt die Bank für die Umsatzabfrage selbst
+  noch einmal SCA. `complete` reicht deshalb die `userId` an
+  `fetchAndPersist` weiter, damit daraus eine Folge-Session mit
+  `kind="statements"` entsteht und die UI direkt weiterfragt. Ohne die
+  `userId` fiel diese Challenge unter den Tisch: die Antwort war
+  `state: "idle"`, der Dialog schloss sich wie bei Erfolg — und der
+  nächste Sync fing wieder bei derselben TAN an.
+- **Terminaler Fehler**: `state: "error"` löscht die Session
+  serverseitig. Die UI **schließt den Dialog nicht**, sondern zeigt
+  `errorCode: errorMessage` an und bietet nur noch „Schließen" an —
+  sonst ist eine abgelehnte TAN von einer erfolgreichen nicht zu
+  unterscheiden. Backend-seitig wird jeder nicht-`idle`-Ausgang von
+  `complete` geloggt (`[fints] resume sync … state=…`,
+  `[finance.tan-sessions] … init-TAN rejected: …`); vorher war der
+  einzige Hinweis ein HTTP 200 im Access-Log.
 
 **Transport-Konvention**: Sowohl `POST /finance/statements` als auch
 `POST /finance/tan-sessions/complete` liefern eine gemeinsame
@@ -379,13 +395,15 @@ neuer Buchungen). Wir setzen `from` deshalb pro Konto in
 | Konto-Status | `from` |
 |---|---|
 | Hat bereits Buchungen in `finance_transaction` | `MAX(booking_date) − 14 Tage` |
-| Frisch verlinktes Konto, noch keine Daten | `now() − 90 Tage` |
+| Frisch verlinktes Konto, noch keine Daten | `now() − 89 Tage` |
 
 Die 14-Tage-Überlappung fängt Spät-Buchungen und Nachträge auf;
 Duplikate werden über den Unique-Index `dedupe_hash` (siehe
 `finance-data-model.md` §3) ohne Datenbank-Konflikt verworfen. Die
-90-Tage-Erstabfrage liegt bewusst innerhalb des PSD2-Read-Only-Fensters
-und löst deshalb keine zusätzliche SCA aus — wer mehr Historie braucht,
+Erstabfrage liegt mit 89 Tagen bewusst *innerhalb* des
+PSD2-Read-Only-Fensters (ein Datum exakt auf der 90-Tage-Grenze werten
+manche Banken schon als „älter als 90 Tage" und verlangen dann bei
+jedem Sync eine frische TAN) und löst deshalb keine zusätzliche SCA aus — wer mehr Historie braucht,
 muss entweder den Finanzkraft-Import nutzen
 (`finance-data-import.md`) oder den Default-Wert in `statements.ts`
 temporär hochsetzen und die einmalige TAN-Aufforderung in Kauf nehmen.
@@ -402,7 +420,7 @@ for (const m of maxes) {
     new Date(new Date(m.latest).getTime() - overlapMs),
   );
 }
-const defaultFrom = new Date(Date.now() - 90 * 24 * 60 * 60_000);
+const defaultFrom = new Date(Date.now() - 89 * 24 * 60 * 60_000);
 
 await runFetchAccounts(client, {
   linkedAccountNumbers,
@@ -415,6 +433,14 @@ await runFetchAccounts(client, {
 passenden Wert ab; nicht-verlinkte Bank-Konten werden komplett
 übersprungen, damit jede TAN nur einmal angefordert wird (siehe §5.3
 unten).
+
+Der Plan (verlinkte Konten + `from`-Map + `defaultFrom`) steckt in
+`statements.buildFetchPlan()` und wird **auch beim TAN-Resume** benutzt
+(`tan-sessions.resumeStatementsTan` → `resumeFetchAfterTan`). Vorher lief
+die Warteschlange hinter dem pausierten Konto ohne Plan weiter: ohne
+`linkedAccountNumbers` mit SCA-Push für nicht verlinkte Konten, ohne
+`from` außerhalb des 90-Tage-Fensters — also mit einer neuen
+TAN-Challenge für praktisch jedes Folgekonto.
 
 ### 5.3 Nur verlinkte Konten abrufen
 

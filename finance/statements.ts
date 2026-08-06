@@ -235,72 +235,8 @@ export async function fetchAndPersist(
       unknown_accounts: [],
     };
   }
-  // Pre-compute the linked accounts so runFetchAccounts only issues
-  // statement / balance calls (and SCA pushes) for accounts the user
-  // actually wants in fk-encore. Unknown bank-side accounts still
-  // surface in the response for the UI's "noch nicht zugeordnet"-
-  // block, just without the per-account TAN cost.
-  //
-  // We also pull the latest finance_transaction.booking_date per
-  // linked account so getAccountStatements(accountNumber, from) only
-  // asks the bank for new bookings — with a 14-day overlap so a
-  // late-arriving / re-dated booking is still caught and deduped via
-  // finance_transaction.dedupe_hash. Without an explicit `from` some
-  // banks (comdirect for one) return arbitrary archival data instead
-  // of recent transactions.
-  // Closed accounts (closed_at IS NOT NULL) are excluded so the bank
-  // fetcher never asks for them — saves a per-account TAN round-trip
-  // for accounts the user has explicitly retired. statement-persist
-  // also refuses inserts on closed accounts as a defence in depth.
-  const linkedRows = await db
-    .select({
-      id: financeAccount.id,
-      fints_account_number: financeAccount.fints_account_number,
-    })
-    .from(financeAccount)
-    .where(
-      and(
-        eq(financeAccount.bankcontact_id, bankcontactId),
-        isNotNull(financeAccount.fints_account_number),
-        isNull(financeAccount.closed_at),
-      ),
-    );
-  const linkedAccountNumbers = new Set(
-    linkedRows
-      .map((r) => r.fints_account_number)
-      .filter((n): n is string => n !== null && n.length > 0),
-  );
-
-  // MAX(booking_date) per linked account → fromByAccountNumber.
-  const fromByAccountNumber = new Map<string, Date>();
-  if (linkedRows.length > 0) {
-    const ids = linkedRows.map((r) => r.id);
-    const maxes = await db
-      .select({
-        account_id: financeTransaction.account_id,
-        latest: sql<string | null>`MAX(${financeTransaction.booking_date})`,
-      })
-      .from(financeTransaction)
-      .where(inArray(financeTransaction.account_id, ids))
-      .groupBy(financeTransaction.account_id);
-    const overlapMs = 14 * 24 * 60 * 60_000;
-    for (const m of maxes) {
-      if (!m.latest) continue;
-      const row = linkedRows.find((r) => r.id === m.account_id);
-      if (!row?.fints_account_number) continue;
-      const latest = new Date(m.latest);
-      // pull a generous overlap window
-      fromByAccountNumber.set(
-        row.fints_account_number,
-        new Date(latest.getTime() - overlapMs),
-      );
-    }
-  }
-  // Accounts with no prior data start 90 days back — covers PSD2's
-  // read-only window without forcing extra SCA. Tune if you want
-  // more first-time history (and accept the SCA prompt that comes
-  // with going past 90 days).
-  const defaultFrom = new Date(Date.now() - 90 * 24 * 60 * 60_000);
+  const { linkedAccountNumbers, fromByAccountNumber, defaultFrom } =
+    await buildFetchPlan(bankcontactId);
 
   const fetched = await runFetchAccounts(client as FintsClientSurface, {
     linkedAccountNumbers,
@@ -393,6 +329,98 @@ export async function fetchAndPersist(
 }
 
 // -----------------------------------------------------------------------
+
+/**
+ * What a bank fetch for `bankcontactId` should ask for.
+ *
+ * Pre-computes the linked accounts so runFetchAccounts only issues
+ * statement / balance calls (and SCA pushes) for accounts the user
+ * actually wants in fk-encore. Unknown bank-side accounts still
+ * surface in the response for the UI's "noch nicht zugeordnet"-block,
+ * just without the per-account TAN cost.
+ *
+ * It also pulls the latest finance_transaction.booking_date per linked
+ * account so getAccountStatements(accountNumber, from) only asks the
+ * bank for new bookings — with a 14-day overlap so a late-arriving /
+ * re-dated booking is still caught and deduped via
+ * finance_transaction.dedupe_hash. Without an explicit `from` some
+ * banks (comdirect for one) return arbitrary archival data instead of
+ * recent transactions — and asking for more than PSD2's 90-day window
+ * makes them demand a fresh TAN on every single query.
+ *
+ * Closed accounts (closed_at IS NOT NULL) are excluded so the bank
+ * fetcher never asks for them — saves a per-account TAN round-trip for
+ * accounts the user has explicitly retired. statement-persist also
+ * refuses inserts on closed accounts as a defence in depth.
+ *
+ * Exported because the TAN-resume path (tan-sessions.resumeStatementsTan)
+ * has to continue the paused fetch loop with exactly the same plan;
+ * without it the resumed accounts would be fetched unfiltered and
+ * without a `from`, re-triggering a TAN for every queued account.
+ */
+export interface FetchPlan {
+  linkedAccountNumbers: Set<string>;
+  fromByAccountNumber: Map<string, Date>;
+  defaultFrom: Date;
+}
+
+export async function buildFetchPlan(
+  bankcontactId: number,
+): Promise<FetchPlan> {
+  const linkedRows = await db
+    .select({
+      id: financeAccount.id,
+      fints_account_number: financeAccount.fints_account_number,
+    })
+    .from(financeAccount)
+    .where(
+      and(
+        eq(financeAccount.bankcontact_id, bankcontactId),
+        isNotNull(financeAccount.fints_account_number),
+        isNull(financeAccount.closed_at),
+      ),
+    );
+  const linkedAccountNumbers = new Set(
+    linkedRows
+      .map((r) => r.fints_account_number)
+      .filter((n): n is string => n !== null && n.length > 0),
+  );
+
+  // MAX(booking_date) per linked account → fromByAccountNumber.
+  const fromByAccountNumber = new Map<string, Date>();
+  if (linkedRows.length > 0) {
+    const ids = linkedRows.map((r) => r.id);
+    const maxes = await db
+      .select({
+        account_id: financeTransaction.account_id,
+        latest: sql<string | null>`MAX(${financeTransaction.booking_date})`,
+      })
+      .from(financeTransaction)
+      .where(inArray(financeTransaction.account_id, ids))
+      .groupBy(financeTransaction.account_id);
+    const overlapMs = 14 * 24 * 60 * 60_000;
+    for (const m of maxes) {
+      if (!m.latest) continue;
+      const row = linkedRows.find((r) => r.id === m.account_id);
+      if (!row?.fints_account_number) continue;
+      const latest = new Date(m.latest);
+      // pull a generous overlap window
+      fromByAccountNumber.set(
+        row.fints_account_number,
+        new Date(latest.getTime() - overlapMs),
+      );
+    }
+  }
+  // Accounts with no prior data start just inside 90 days back —
+  // covers PSD2's read-only window without forcing extra SCA. A
+  // date exactly on the boundary is already "older than 90 days"
+  // for some banks, so we keep a day of slack. Tune if you want
+  // more first-time history (and accept the SCA prompt that comes
+  // with going past 90 days).
+  const defaultFrom = new Date(Date.now() - 89 * 24 * 60 * 60_000);
+
+  return { linkedAccountNumbers, fromByAccountNumber, defaultFrom };
+}
 
 async function assertBankcontactExists(id: number): Promise<void> {
   const [row] = await db
