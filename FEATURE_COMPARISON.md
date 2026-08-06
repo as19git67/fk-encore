@@ -128,14 +128,19 @@ Status: April 2026 (updated)
 | Share extension (upload from other apps) | ✅ | ✅ |
 | Passkeys on mobile | ❌ | ⚡ WebAuthn via `ASAuthorization` |
 | Comments & reactions in app | ✅ | ✅ |
+| Collaborative album views in app | ❌ | ⚡ All / Favorites / Consensus / Custom |
+| Anonymous voting in app | ❌ | ⚡ "3/5" badges + favorite vote from the grid |
+| Similar-photo group review in app | ❌ | ⚡ Swipe-based review queue |
 | "Free up space" | ✅ | ❌ |
 | Offline mode | ✅ | 🔶 Thumbnail cache + two-way download sync |
 | Read-only mode | ✅ | ❌ |
 
 > **FK-Encore has no native Android app. The iOS app (SwiftUI) is fully
 > functional: background auto-backup, two-way sync, selective album mapping,
-> Wi-Fi-only, a share extension, passkeys, and comments/reactions. See
-> `docs/ios-app.md` for the full inventory and the Web↔iOS parity plan.**
+> Wi-Fi-only, a share extension, passkeys, comments/reactions, recaps, and the
+> collaborative-curation features (album view modes with anonymized consensus
+> counters, and the swipe-based group review queue). See `docs/ios-app.md` for
+> the full inventory and the Web↔iOS parity plan.**
 
 ## 9. Authentication & User Management
 
@@ -279,6 +284,10 @@ be the most impactful:
    still pending
 
 For the iOS app specifically, the Web↔iOS feature gap and a prioritized
-parity plan (recaps viewer, album consensus/view-modes, group review,
-fullscreen photo actions, map/location editing) plus iOS-only enrichment
-ideas are tracked in **`docs/ios-app.md`**.
+parity plan plus iOS-only enrichment ideas are tracked in
+**`docs/ios-app.md`**. Stage 1 of that plan is complete (recaps viewer, album
+view-modes with consensus voting, swipe-based group review, and the full set of
+fullscreen photo actions). What remains on iOS is Stage 2 and beyond: setting
+GPS locations, an interactive map/trips view, public album links, multi-select
+in the "All Photos" timeline, richer search filter chips, slideshow, and the
+heavier editors (transform/crop, collage, photo compare).
