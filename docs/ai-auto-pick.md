@@ -150,6 +150,42 @@ Eigene Route + Menüeintrag "Gruppen-Review". Vertikale Karten-Liste, sortiert h
 - Bei **4+ Mitgliedern:** KI-Pick groß + Sibling-Strip mit gedimmten Nicht-Picks.
 - Action-Bar: **"KI-Pick übernehmen"** (atomar) + **"Manuell prüfen"** (öffnet `PhotoCompareView` für volle Granularität).
 
+### Rapid Review auf iOS (Wisch-Variante)
+
+Die iOS-App konsumiert dieselbe `/photos/groups/review-queue` und dieselben
+Aktions-Endpoints, präsentiert sie aber als **Karten-Stapel statt Liste** — eine
+Gruppe pro Karte, aufgelöst mit einer einzigen Geste:
+
+| Geste | Aktion | Endpoint |
+|---|---|---|
+| → rechts | KI-Vorschlag übernehmen | `POST /photos/groups/:id/accept-ai-pick` |
+| ← links | Alle behalten, nur als geprüft markieren | `POST /photos/groups/:id/review` |
+| ↑ hoch | Vorschlag favorisieren, dann übernehmen | `PATCH /photos/:id/curation` + accept-ai-pick |
+| Tippen auf ein Foto | Nur dieses behalten | `POST /photos/groups/:id/pick-photos` |
+| Button (bei Peer-Signal) | Konsens übernehmen | `POST /photos/groups/:id/accept-peer-consensus` |
+
+Jede Wischgeste hat einen gleichwertigen Button — eine reine Gestenoberfläche
+wäre mit VoiceOver / Switch Control nicht bedienbar.
+
+**Gruppen ohne KI-Vorschlag** lassen sich per Wischgeste grundsätzlich nur
+"behalten": `pick-photos` verlangt eine nicht-leere Keep-Menge, und alle
+Mitglieder auszublenden wäre eine destruktive Überraschung. Solche Gruppen
+werden über Antippen eines Fotos aufgelöst.
+
+**Undo ohne Un-Review-Endpoint.** Serverseitig lässt sich `reviewed_at` nicht
+zurücksetzen. Statt zu kompensieren puffert die App die *jeweils neueste*
+Entscheidung lokal und sendet sie erst, wenn die nächste getroffen wird (oder
+der Screen verlassen wird). Damit ist genau ein Schritt garantiert
+zurücknehmbar; ältere Entscheidungen sind bereits beim Server und melden das
+auch ehrlich zurück ("Rückgängig" verschwindet). Stirbt die App mitten in der
+Sitzung, geht höchstens eine noch nicht gesendete Entscheidung verloren — die
+Gruppe bleibt dann ungeprüft und taucht später wieder auf, also die harmlose
+Fehlerrichtung.
+
+Berechtigungen entsprechen dem Backend: Laden braucht `photos.view`, jede
+Entscheidung `photos.delete`. Ohne die zweite zeigt der Screen einen Hinweis
+statt der Aktionsleiste.
+
 **Header:**
 - Counter "X offen"
 - **"Alle hochkonfidenten bestätigen"** mit Disclaimer-Dialog: zeigt die Top-1-Trefferquote aus der Per-User-Kalibrierung (Stufe D) und verlangt einen zweiten Klick. Wenn keine Kalibrierung existiert, weist der Dialog darauf hin.
@@ -423,3 +459,15 @@ Frontend:
 - `frontend/src/composables/useFilter.ts` — URL-Sync inkl. `showAiHidden`
 - `frontend/src/composables/useGallerySource.ts` — Sparse-Page-Cache mit korrigierter Partial-Page-Markierung
 - `frontend/src/config/modules.ts` — Route + Menüeintrag für `/fotos/review-queue`
+
+iOS (SwiftUI, Issue #761):
+- `ios/Sources/FKPhotos/Features/Review/ReviewQueueModels.swift` — Wire-Typen der
+  Review-Queue, Entscheidungs-Kinds, Wisch→Entscheidung-Mapping und der
+  Cursor/Undo-Puffer (`ReviewQueueState`)
+- `ios/Sources/FKPhotos/Features/Review/ReviewQueueViewModel.swift` — Laden,
+  Pagination, serialisierte Commit-Kette
+- `ios/Sources/FKPhotos/Features/Review/ReviewQueueView.swift` — Karten-UI mit
+  Wischgesten und gleichwertigen Buttons
+- `ios/Sources/FKPhotos/Features/Feed/FeedView.swift` — Einstiegspunkt in der
+  Feed-Toolbar
+- `ios/Tests/FKPhotosTests/ReviewQueueTests.swift` — Tests für Mapping + Undo

@@ -29,13 +29,49 @@ struct AlbumDetailView: View {
     @State private var itemFrames: [Int: CGRect] = [:]
     @Environment(\.dismiss) private var dismiss
 
+    // ── Album views + consensus (issue #760) ──────────────────────────────
+    /// Anonymized opinion counters per photo id. Only populated for shared
+    /// albums — the server omits them everywhere else.
+    @State private var curationStats: [Int: PhotoCurationStats] = [:]
+    @State private var isSharedAlbum = false
+    @State private var viewFilter = AlbumViewFilter()
+    @State private var draftViewConfig = AlbumViewConfig.default
+    @State private var showViewConfig = false
+    @State private var didRestoreViewFilter = false
+    /// Votes cast in this session, keyed by photo id. `PhotoWithCuration` is
+    /// immutable, so the grid reads its curation through `curation(_:)` — the
+    /// same override pattern the fullscreen viewer uses.
+    @State private var curationOverrides: [Int: CurationStatus] = [:]
+    @State private var toastMessage: ToastMessage?
+
     private var displayedPhotos: [PhotoWithCuration] {
-        let filtered = filterSort.appliedFilter.isEmpty
+        let byView = viewFilter.mode == .all
             ? photos
-            : photos.filter { matchesFilter($0, filterSort.appliedFilter) }
+            : photos.filter { viewFilter.matches(curation: curation($0), stats: curationStats[$0.id]) }
+        let filtered = filterSort.appliedFilter.isEmpty
+            ? byView
+            : byView.filter { matchesFilter($0, filterSort.appliedFilter) }
         return filterSort.appliedSort.isDefault
             ? filtered
             : filtered.sorted(by: filterSort.appliedSort.comparator)
+    }
+
+    /// The current user's curation for a photo, honoring votes cast since the
+    /// album was loaded.
+    private func curation(_ photo: PhotoWithCuration) -> CurationStatus {
+        curationOverrides[photo.id] ?? photo.curation_status
+    }
+
+    /// Participant count of this album, read off the counters the server
+    /// attached (owner + shares + the AI voter). 0 for unshared albums.
+    private var memberCount: Int {
+        curationStats.values.map(\.memberCount).max() ?? 0
+    }
+
+    /// True when the active view — not the filter menu — is what emptied the
+    /// grid, so the empty state can offer the right way out.
+    private var isEmptiedByView: Bool {
+        displayedPhotos.isEmpty && !photos.isEmpty && viewFilter.mode != .all
     }
 
     private let columns = [
@@ -75,6 +111,15 @@ struct AlbumDetailView: View {
                 } description: {
                     Text("Dieses Album enthält noch keine Fotos.")
                 }
+            } else if isEmptiedByView {
+                ContentUnavailableView {
+                    Label("Nichts in dieser Ansicht", systemImage: viewFilter.mode.systemImage)
+                } description: {
+                    Text("Kein Foto erfüllt die Kriterien von „\(viewFilter.mode.label)“.")
+                } actions: {
+                    Button("Alle Fotos anzeigen") { selectViewMode(.all) }
+                }
+                .padding(.top, 60)
             } else {
                 LazyVGrid(columns: columns, spacing: 2) {
                     ForEach(displayedPhotos) { photo in
@@ -82,6 +127,20 @@ struct AlbumDetailView: View {
                             .overlay(alignment: .topLeading) {
                                 if isSelecting {
                                     SelectionCheckmark(isSelected: selectedIds.contains(photo.id))
+                                        .padding(4)
+                                }
+                            }
+                            .overlay(alignment: .bottomTrailing) {
+                                if !isSelecting, let stats = curationStats[photo.id] {
+                                    CurationStatsBadges(stats: stats)
+                                }
+                            }
+                            .overlay(alignment: .topTrailing) {
+                                if !isSelecting, curation(photo) == .favorite {
+                                    Image(systemName: "heart.fill")
+                                        .font(.caption2)
+                                        .foregroundStyle(.pink)
+                                        .shadow(radius: 2)
                                         .padding(4)
                                 }
                             }
@@ -100,6 +159,29 @@ struct AlbumDetailView: View {
                                     selectedIds = [photo.id]
                                 }
                             }
+                            // Casting a vote without leaving the grid is the
+                            // point of the consensus feature — the fullscreen
+                            // viewer's heart is one tap too deep when you're
+                            // going through an album (issue #760).
+                            .contextMenu {
+                                if !isSelecting {
+                                    Button {
+                                        Task { await toggleFavorite(photo) }
+                                    } label: {
+                                        Label(
+                                            curation(photo) == .favorite
+                                                ? "Favorit entfernen"
+                                                : "Als Favorit markieren",
+                                            systemImage: curation(photo) == .favorite ? "heart.slash" : "heart"
+                                        )
+                                    }
+                                    if let stats = curationStats[photo.id], stats.hasSignal {
+                                        Section("Meinungen") {
+                                            Text(consensusSummary(stats))
+                                        }
+                                    }
+                                }
+                            }
                             .reportPhotoFrame(id: photo.id, space: "albumGrid")
                     }
                 }
@@ -116,12 +198,24 @@ struct AlbumDetailView: View {
                 photos: displayedPhotos,
                 currentIndex: $fullscreenIndex,
                 albumContext: album.map { .init(id: albumId, name: $0.name) },
+                curationStats: curationStats,
                 onPhotoRemoved: { id in photos.removeAll { $0.id == id } }
             )
         }
         .sheet(isPresented: $filterSort.isMenuPresented) {
             FilterSortMenuView(viewModel: filterSort, available: [.favorite, .hasGps, .dateRange])
                 .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showViewConfig) {
+            AlbumViewConfigSheet(
+                config: $draftViewConfig,
+                memberCount: memberCount,
+                onApply: {
+                    viewFilter = AlbumViewFilter(mode: .custom, config: draftViewConfig)
+                    AlbumViewModeStore.save(viewFilter, albumId: albumId)
+                }
+            )
+            .presentationDetents([.medium])
         }
         .toolbar {
             if isSelecting {
@@ -149,6 +243,9 @@ struct AlbumDetailView: View {
             } else {
                 ToolbarItem(placement: .topBarLeading) {
                     FilterSortButton(viewModel: filterSort)
+                }
+                ToolbarItem(placement: .topBarLeading) {
+                    viewModeMenu
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
@@ -261,6 +358,7 @@ struct AlbumDetailView: View {
                 }
             }
         }
+        .toast($toastMessage)
         .onChange(of: addToAlbum.resultMessage) { _, message in
             guard message != nil else { return }
             isSelecting = false
@@ -269,6 +367,96 @@ struct AlbumDetailView: View {
         }
         .task {
             await loadAlbum()
+        }
+    }
+
+    // MARK: - Album views (issue #760)
+
+    /// Preset picker for the album views. The counter-based modes are only
+    /// offered on shared albums — on a solo album there is no group whose
+    /// opinion could be aggregated, exactly as on the web.
+    private var viewModeMenu: some View {
+        Menu {
+            Picker("Ansicht", selection: viewModeSelection) {
+                ForEach(AlbumViewMode.available(isShared: isSharedAlbum)) { mode in
+                    Label(mode.label, systemImage: mode.systemImage).tag(mode)
+                }
+            }
+            if isSharedAlbum {
+                Divider()
+                Button {
+                    draftViewConfig = viewFilter.config.clamped(memberCount: memberCount)
+                    showViewConfig = true
+                } label: {
+                    Label(
+                        viewFilter.summary.map { "Schwellenwerte: \($0)" } ?? "Schwellenwerte anpassen…",
+                        systemImage: "slider.horizontal.3"
+                    )
+                }
+            }
+        } label: {
+            Image(systemName: viewFilter.mode.systemImage)
+                .symbolVariant(viewFilter.mode == .all ? .none : .fill)
+        }
+        .accessibilityLabel("Ansicht: \(viewFilter.mode.label)")
+    }
+
+    /// Selecting `custom` from the picker opens the threshold sheet instead of
+    /// silently applying whatever was configured last.
+    private var viewModeSelection: Binding<AlbumViewMode> {
+        Binding(
+            get: { viewFilter.mode },
+            set: { newMode in
+                if newMode == .custom {
+                    draftViewConfig = viewFilter.config.clamped(memberCount: memberCount)
+                    showViewConfig = true
+                } else {
+                    selectViewMode(newMode)
+                }
+            }
+        )
+    }
+
+    private func selectViewMode(_ mode: AlbumViewMode) {
+        viewFilter = AlbumViewFilter(mode: mode, config: viewFilter.config)
+        AlbumViewModeStore.save(viewFilter, albumId: albumId)
+    }
+
+    private func consensusSummary(_ stats: PhotoCurationStats) -> String {
+        var parts: [String] = []
+        if stats.favCount > 0 {
+            parts.append("\(stats.favCount) von \(stats.memberCount) favorisiert")
+        }
+        if stats.hideCount > 0 {
+            parts.append("\(stats.hideCount) von \(stats.memberCount) ausgeblendet")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Casts (or withdraws) the current user's favorite vote. Optimistic: the
+    /// badge and heart move immediately and are rolled back if the PATCH
+    /// fails, so a vote never silently disappears into the network.
+    private func toggleFavorite(_ photo: PhotoWithCuration) async {
+        let old = curation(photo)
+        let new: CurationStatus = old == .favorite ? .visible : .favorite
+        let previousStats = curationStats[photo.id]
+
+        curationOverrides[photo.id] = new
+        if let previousStats {
+            curationStats[photo.id] = previousStats.applying(vote: old, to: new)
+        }
+
+        struct Body: Codable { let status: CurationStatus }
+        struct Response: Codable { let success: Bool }
+        do {
+            _ = try await APIClient.shared.patch(
+                "/photos/\(photo.id)/curation",
+                body: Body(status: new)
+            ) as Response
+        } catch {
+            curationOverrides[photo.id] = old
+            curationStats[photo.id] = previousStats
+            toastMessage = .error("Bewertung konnte nicht gespeichert werden.")
         }
     }
 
@@ -324,6 +512,25 @@ struct AlbumDetailView: View {
         isDeleting = false
     }
 
+    /// Restores the view chosen last time this album was open. Runs after the
+    /// album loaded, because a stored consensus view has to be dropped when
+    /// the album is no longer shared — otherwise the grid would come up empty
+    /// with no obvious cause.
+    private func restoreViewFilterIfNeeded() {
+        guard !didRestoreViewFilter else {
+            if !isSharedAlbum && viewFilter.mode.requiresSharedAlbum {
+                viewFilter = AlbumViewFilter()
+            }
+            return
+        }
+        didRestoreViewFilter = true
+        let stored = AlbumViewModeStore.load(albumId: albumId)
+        viewFilter = (!isSharedAlbum && stored.mode.requiresSharedAlbum)
+            ? AlbumViewFilter()
+            : stored
+        draftViewConfig = viewFilter.config
+    }
+
     private func loadAlbum() async {
         isLoading = true
         do {
@@ -331,10 +538,13 @@ struct AlbumDetailView: View {
                 let id: Int
                 let name: String
                 let description: String?
-                let photos: [PhotoWithCuration]
+                let photos: [AlbumPhotoRow]
                 let role: String?
                 let my_access_level: String?
                 let display_mode: String?
+                /// True once the album has more than one participant (or an
+                /// active public link) — the gate for the consensus views.
+                let is_shared: Bool?
             }
             let response: AlbumResponse = try await APIClient.shared.get("/albums/\(albumId)")
             userRole = response.role ?? ""
@@ -355,7 +565,16 @@ struct AlbumDetailView: View {
                 updated_at: "",
                 my_access_level: response.my_access_level ?? response.role
             )
-            photos = response.photos
+            photos = response.photos.map(\.photo)
+            curationStats = Dictionary(
+                response.photos.compactMap { row in row.curation_stats.map { (row.id, $0) } },
+                uniquingKeysWith: { first, _ in first }
+            )
+            isSharedAlbum = response.is_shared ?? !curationStats.isEmpty
+            // A fresh vote is only authoritative until the server answers; the
+            // reload it just triggered is that answer.
+            curationOverrides = [:]
+            restoreViewFilterIfNeeded()
         } catch {
             errorMessage = error.localizedDescription
         }

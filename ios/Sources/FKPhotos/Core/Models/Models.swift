@@ -218,8 +218,32 @@ struct PersonDetailsResponse: Codable, Identifiable, Sendable {
 
 // MARK: - Album With Photos (download sync)
 
-struct PhotoCurationStats: Codable, Sendable {
+/// Anonymized curation counters for one photo inside a *shared* album
+/// ("3 von 5 mögen es"). The server only attaches them when the album has more
+/// than one participant — see `docs/album-photo-views.md`.
+///
+/// `hide_count` / `member_count` are optional purely for decode resilience: a
+/// server predating them would otherwise fail the whole album payload, which
+/// also carries the download sync. Read them through `hideCount` /
+/// `memberCount`, which fall back to 0.
+struct PhotoCurationStats: Codable, Sendable, Equatable {
     let fav_count: Int
+    let hide_count: Int?
+    let member_count: Int?
+
+    var favCount: Int { fav_count }
+    var hideCount: Int { hide_count ?? 0 }
+    var memberCount: Int { member_count ?? 0 }
+
+    /// True once at least one participant expressed an opinion — the gate for
+    /// showing badges at all, so untouched photos stay visually quiet.
+    var hasSignal: Bool { favCount > 0 || hideCount > 0 }
+
+    init(fav_count: Int, hide_count: Int? = nil, member_count: Int? = nil) {
+        self.fav_count = fav_count
+        self.hide_count = hide_count
+        self.member_count = member_count
+    }
 }
 
 struct AlbumPhotoWithMeta: Codable, Identifiable, Sendable {
@@ -257,6 +281,36 @@ struct AlbumPhotoWithMeta: Codable, Identifiable, Sendable {
     let added_by_user_id: Int?
     let added_at: String
     let curation_stats: PhotoCurationStats?
+}
+
+/// One photo row of `GET /albums/:id` as the album detail grid needs it: the
+/// regular photo payload plus the anonymized consensus counters that only
+/// shared albums carry (issue #760).
+///
+/// Decoded through the *same* container as `PhotoWithCuration` rather than
+/// re-listing its two dozen fields — the server sends one flat object, and
+/// mirroring that here keeps the two models from drifting apart.
+struct AlbumPhotoRow: Codable, Identifiable, Sendable {
+    let photo: PhotoWithCuration
+    let curation_stats: PhotoCurationStats?
+
+    var id: Int { photo.id }
+
+    private enum CodingKeys: String, CodingKey {
+        case curation_stats
+    }
+
+    init(from decoder: Decoder) throws {
+        photo = try PhotoWithCuration(from: decoder)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        curation_stats = try container.decodeIfPresent(PhotoCurationStats.self, forKey: .curation_stats)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        try photo.encode(to: encoder)
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(curation_stats, forKey: .curation_stats)
+    }
 }
 
 struct AlbumWithPhotos: Codable, Sendable {

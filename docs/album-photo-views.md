@@ -174,10 +174,37 @@ the quality score.
 - `frontend/src/components/PhotoDetailSidebar.vue` – opinions block with
   progress bars
 
+### iOS (issue #760)
+- `ios/Sources/FKPhotos/Features/Albums/AlbumViewMode.swift` – the presets as
+  pure, testable filter logic plus per-album persistence
+- `ios/Sources/FKPhotos/Features/Albums/AlbumConsensusViews.swift` – "3/5"
+  badges, the opinions block and the custom-threshold sheet
+- `ios/Sources/FKPhotos/Features/Albums/AlbumDetailView.swift` – view picker,
+  badge overlay, favorite voting from the grid
+- `ios/Sources/FKPhotos/Features/Photos/PhotoFullscreenView.swift` –
+  "Meinungen" section in the detail panel
+- `ios/Sources/FKPhotos/Core/Models/Models.swift` – `PhotoCurationStats`
+  extended to all three counters, `AlbumPhotoRow` wire type
+- `ios/Tests/FKPhotosTests/AlbumViewModeTests.swift` – locks the filter
+  semantics against `VIEW_PRESETS`
+
+**Why iOS filters on the device.** The web stopped using the server-side
+presets: `AlbumDetailView.vue` resets `active_view` to `"all"` on every load
+and narrows the full album client-side. An `active_view` persisted from iOS
+would therefore be undone the next time the album is opened in a browser, so
+the app keeps its lens local instead of racing the web for that setting.
+
+One consequence is worth knowing: because the server still applies its default
+`hideFilter: "mine"`, photos the current user hid never reach the device. In
+`consensus` the server-side preset would instead keep them and judge purely by
+`hide_count`. In practice that only omits photos you personally rejected, which
+matches what every other view does — accepted rather than worked around.
+
 ## Possible extensions (future)
 
-1. **Custom view dialog**: when "Custom" is selected, a panel with sliders
-   for the consensus thresholds.
+1. ~~**Custom view dialog**: when "Custom" is selected, a panel with sliders
+   for the consensus thresholds.~~ Implemented on iOS (`AlbumViewConfigSheet`,
+   steppers for "min favorites" / "max hides"); still open on the web.
 2. **Saved / named views**: multiple views per user per album
    ("Photobook selection", "For grandma").
 3. **Shared views**: a user creates a view and shares it with others.
