@@ -29,12 +29,17 @@ import { checkRateLimit, resetRateLimit } from "../user/rateLimiter";
 import db from "../db/database";
 import { financeBankcontact, financeTanSession } from "../db/schema";
 import {
+  keepClientAfterDialog,
   resumeFetchAfterTan,
   runSynchronize,
   takeCachedClient,
   type FintsClientSurface,
 } from "./fints-client";
-import { fetchAndPersist, type SyncApiResponse } from "./statements";
+import {
+  buildFetchPlan,
+  fetchAndPersist,
+  type SyncApiResponse,
+} from "./statements";
 import { persistFetchResult } from "./statement-persist";
 
 console.log("[boot] finance/tan-sessions.ts: all imports resolved");
@@ -146,6 +151,11 @@ export const completeTanSession = api(
       .where(eq(financeTanSession.tan_reference, p.tanReference));
 
     if (result.state === "error") {
+      console.warn(
+        `[finance.tan-sessions] bankcontact=${session.bankcontact_id} ` +
+          `init-TAN rejected: code=${result.errorCode ?? "unknown"} ` +
+          `msg=${result.errorMessage ?? ""}`,
+      );
       await db
         .update(financeBankcontact)
         .set({
@@ -163,8 +173,17 @@ export const completeTanSession = api(
     // still-open client so TAN is not re-triggered for a second time.
     // Only *linked* accounts receive data; unknown ones flow up in
     // the pending list for the user to resolve in the UI.
+    //
+    // userId matters: banks like comdirect demand a *second*, per-query
+    // TAN for the statement fetch that follows the init dialog. Without
+    // the userId, fetchAndPersist cannot persist a kind="statements"
+    // session for it, silently drops the challenge and answers
+    // state="idle" — the UI closes the dialog as if everything went
+    // through and the next sync starts over at the very same TAN.
     resetRateLimit(rateKey);
-    return await fetchAndPersist(session.bankcontact_id, result.client);
+    return await fetchAndPersist(session.bankcontact_id, result.client, {
+      userId,
+    });
   },
 );
 
@@ -217,11 +236,19 @@ async function resumeStatementsTan(
   }
   const info = session.banking_information as { fintsTanRef: string };
 
+  // Continue the paused loop with the same plan the original fetch
+  // used — linked accounts only, and each with its own `from` date.
+  // Fetching the queue unfiltered/unbounded is what made every queued
+  // account raise its own TAN challenge.
+  const plan = await buildFetchPlan(session.bankcontact_id);
   const fetched = await resumeFetchAfterTan(cached, {
     tanReference: info.fintsTanRef,
     tan: p.tan,
     currentAccountNumber: ctx.currentAccountNumber,
     remainingAccountNumbers: ctx.remainingAccountNumbers,
+    linkedAccountNumbers: plan.linkedAccountNumbers,
+    fromByAccountNumber: plan.fromByAccountNumber,
+    defaultFrom: plan.defaultFrom,
   });
   const stats = await persistFetchResult(session.bankcontact_id, fetched);
 
@@ -246,6 +273,12 @@ async function resumeStatementsTan(
       })
       .where(eq(financeTanSession.tan_reference, p.tanReference));
     await updateBankcontactSyncStatus(session.bankcontact_id, "tan-required");
+    console.log(
+      `[finance.tan-sessions] bankcontact=${session.bankcontact_id}: bank ` +
+        `asked for another TAN after the resume (account=` +
+        `${fetched.pendingTan.accountNumber}, ` +
+        `${fetched.pendingTan.remainingAccountNumbers.length} queued)`,
+    );
     return {
       state: "tan-required",
       tanReference: p.tanReference,
@@ -256,7 +289,13 @@ async function resumeStatementsTan(
     };
   }
 
-  // Done — drop session and report what was processed.
+  // Done — the bank accepted the TAN. Keep the SCA-approved client
+  // hot (and its bankingInformation persisted) so the next sync
+  // continues in the same session instead of opening a fresh dialog
+  // that the bank answers with another TAN challenge.
+  await keepClientAfterDialog(session.bankcontact_id, cached);
+
+  // Drop the session and report what was processed.
   resetRateLimit(rateKey);
   await db
     .delete(financeTanSession)

@@ -7,6 +7,7 @@ import db from "../db/database";
 import {
   financeAccount,
   financeAccountAccess,
+  financeAccountType,
   financeAccountBalance,
   financeBankcontact,
   financeTagTransaction,
@@ -30,6 +31,7 @@ vi.mock("./fints-client", async (orig) => {
     runSynchronize: vi.fn(),
     takeCachedClient: vi.fn(),
     resumeFetchAfterTan: vi.fn(),
+    runFetchAccounts: vi.fn(),
   };
 });
 
@@ -75,6 +77,7 @@ beforeEach(async () => {
   vi.mocked(fintsClient.runSynchronize).mockReset();
   vi.mocked(fintsClient.takeCachedClient).mockReset();
   vi.mocked(fintsClient.resumeFetchAfterTan).mockReset();
+  vi.mocked(fintsClient.runFetchAccounts).mockReset();
   vi.mocked(statementPersist.persistFetchResult).mockReset();
 });
 
@@ -256,6 +259,60 @@ describe("finance/tan-sessions — complete (error / retry paths)", () => {
   });
 });
 
+describe("finance/tan-sessions — TAN demanded again right after the init TAN", () => {
+  it("persists a statements session instead of reporting a clean 'idle'", async () => {
+    // comdirect (photoTAN) answers the init dialog's TAN, then wants a
+    // second, per-query TAN for the statement fetch that follows. That
+    // challenge has to become a kind="statements" session — otherwise
+    // the UI closes the dialog as if the sync had finished and the next
+    // sync starts over at the very same TAN.
+    setAuth("42", ["finance.accounts.manage"]);
+    const bcId = await insertBankcontact();
+    const ref = await insertSession({ userId: 42, bankcontactId: bcId });
+    vi.mocked(fintsClient.runSynchronize).mockResolvedValue({
+      state: "idle",
+      client: {} as never,
+    });
+    vi.mocked(fintsClient.runFetchAccounts).mockResolvedValue({
+      accounts: [],
+      partial: true,
+      pendingTan: {
+        tanReference: "fints-stmt-ref",
+        tanChallenge: "photoTAN für Umsatzabfrage",
+        accountNumber: "A",
+        remainingAccountNumbers: ["B"],
+      },
+    });
+    vi.mocked(statementPersist.persistFetchResult).mockResolvedValue({
+      accounts_seen: 0,
+      accounts_matched: 0,
+      accounts_closed: 0,
+      accounts_unknown: 0,
+      transactions_inserted: 0,
+      transactions_skipped_duplicate: 0,
+      balances_written: 0,
+      holdings_written: 0,
+      unknown: [],
+      errors: [],
+    });
+
+    const response = await completeTanSession({
+      tanReference: ref,
+      tan: "123456",
+    });
+
+    expect(response.state).toBe("tan-required");
+    const [session] = await db
+      .select()
+      .from(financeTanSession)
+      .where(eq(financeTanSession.bankcontact_id, bcId));
+    expect(session).toBeDefined();
+    expect(session.kind).toBe("statements");
+    expect(session.user_id).toBe(42);
+    expect(session.challenge).toBe("photoTAN für Umsatzabfrage");
+  });
+});
+
 describe("finance/tan-sessions — statement TAN status", () => {
   const emptyStats = {
     accounts_seen: 2,
@@ -306,6 +363,49 @@ describe("finance/tan-sessions — statement TAN status", () => {
       expect(contact.syncedAt).not.toBeNull();
     },
   );
+
+  it("resumes the queued accounts with the same linked-only / from-date plan", async () => {
+    // Without the plan the queued accounts are fetched unfiltered and
+    // without a `from` — an SCA push for accounts nobody linked, and an
+    // out-of-90-day-window query for the linked ones, i.e. a fresh TAN
+    // challenge per account.
+    setAuth("42", ["finance.accounts.manage"]);
+    const bcId = await insertBankcontact();
+    const [type] = await db
+      .select({ id: financeAccountType.id })
+      .from(financeAccountType)
+      .where(eq(financeAccountType.kind, "giro"))
+      .limit(1);
+    await db.insert(financeAccount).values({
+      bankcontact_id: bcId,
+      fints_account_number: "A",
+      type_id: type.id,
+      currency_code: "EUR",
+      account_number: "A",
+      label: "Girokonto",
+    });
+    const ref = await insertStatementsSession({
+      userId: 42,
+      bankcontactId: bcId,
+    });
+    vi.mocked(fintsClient.takeCachedClient).mockReturnValue({} as never);
+    vi.mocked(fintsClient.resumeFetchAfterTan).mockResolvedValue({
+      accounts: [],
+      partial: false,
+    });
+    vi.mocked(statementPersist.persistFetchResult).mockResolvedValue(emptyStats);
+
+    await completeTanSession({ tanReference: ref, tan: "123456" });
+
+    const arg = vi.mocked(fintsClient.resumeFetchAfterTan).mock.calls[0]?.[1];
+    expect(arg?.linkedAccountNumbers).toEqual(new Set(["A"]));
+    expect(arg?.defaultFrom).toBeInstanceOf(Date);
+    // Inside PSD2's 90-day read-only window, so the bank has no reason
+    // to demand another TAN for the queued accounts.
+    const daysBack =
+      (Date.now() - (arg!.defaultFrom as Date).getTime()) / 86_400_000;
+    expect(daysBack).toBeLessThan(90);
+  });
 
   it("keeps tan-required when the bank returns a follow-up challenge", async () => {
     setAuth("42", ["finance.accounts.manage"]);

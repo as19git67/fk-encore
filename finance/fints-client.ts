@@ -242,6 +242,23 @@ export function evictCachedClient(bankcontactId: number): void {
 }
 
 /**
+ * Keep a client that just finished a successful dialog available for
+ * the next sync: back into the hot cache (fresh TTL) and its
+ * bankingInformation persisted so a cold process still gets the warm
+ * path. Used by the mid-fetch TAN resume in tan-sessions, which
+ * otherwise would let the SCA-approved session go stale and make the
+ * next sync ask for a TAN again.
+ */
+export async function keepClientAfterDialog(
+  bankcontactId: number,
+  client: FintsClientSurface,
+): Promise<void> {
+  rememberClient(bankcontactId, client);
+  const bi = client.config?.bankingInformation;
+  if (bi) await persistBankingInformation(bankcontactId, bi);
+}
+
+/**
  * Test hook: clear every cached client. Tests that build a fresh
  * mock client per case need this to avoid leaks between cases.
  */
@@ -314,6 +331,17 @@ export async function runSynchronize(
         `[fints] resume sync ok for bankcontact=${bankcontactId}, ` +
           `bankingInformation cached for next warm-start, ` +
           `live client cached for hot-path reuse`,
+      );
+    } else {
+      // The TAN the user just typed did NOT finish the dialog. Log it
+      // — without this the only trace of a rejected TAN is an HTTP 200
+      // on completeTanSession, which looks like success in the access
+      // log and leaves the "why does it ask again?" question open.
+      console.warn(
+        `[fints] resume sync for bankcontact=${bankcontactId} → ` +
+          `state=${result.state}` +
+          (result.errorCode ? ` code=${result.errorCode}` : "") +
+          (result.errorMessage ? ` msg=${result.errorMessage}` : ""),
       );
     }
     return result;
@@ -1322,6 +1350,17 @@ export async function resumeFetchAfterTan(
     tan?: string;
     currentAccountNumber: string;
     remainingAccountNumbers: string[];
+    /**
+     * Same fetch plan the paused run used (see
+     * statements.buildFetchPlan). Without it the queued accounts would
+     * be fetched unfiltered and without a `from` date — which means an
+     * SCA push for accounts the user never linked, and an
+     * out-of-90-day-window query for the linked ones, i.e. a fresh TAN
+     * challenge for every single account behind the one we paused on.
+     */
+    linkedAccountNumbers?: ReadonlySet<string>;
+    fromByAccountNumber?: ReadonlyMap<string, Date>;
+    defaultFrom?: Date;
   },
   sleep: (ms: number) => Promise<void> = defaultSleep,
 ): Promise<FetchResult> {
@@ -1487,7 +1526,13 @@ export async function resumeFetchAfterTan(
       (a) => a.accountNumber === acn && (acType === undefined || a.accountType === acType),
     );
     if (!acc) continue;
-    const r = await fetchOneAccount(client, acc, sleep, { fetch: true });
+    const fetch = ctx.linkedAccountNumbers
+      ? ctx.linkedAccountNumbers.has(acc.accountNumber)
+      : true;
+    const from = fetch
+      ? ctx.fromByAccountNumber?.get(acc.accountNumber) ?? ctx.defaultFrom
+      : undefined;
+    const r = await fetchOneAccount(client, acc, sleep, { fetch, from });
     if (r.snapshot.errors.length > 0) partial = true;
     snapshots.push(r.snapshot);
     if (r.pendingTan) {

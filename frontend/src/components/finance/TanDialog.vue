@@ -43,9 +43,14 @@ const photoDataUri = computed(() => {
   return `data:${p.tanPhotoMime};base64,${p.tanPhotoBase64}`
 })
 
+/**
+ * A follow-up challenge keeps our session UUID, so the sequence
+ * counter is what tells "the bank sent a new challenge" apart from
+ * "nothing changed".
+ */
 watch(
-  () => store.pendingTan?.tanReference,
-  (ref) => {
+  () => [store.pendingTan?.tanReference, store.pendingTan?.challengeSeq],
+  ([ref]) => {
     tan.value = ''
     errorMsg.value = null
     // Each challenge (initial + follow-up after wrong-TAN) deserves
@@ -54,15 +59,20 @@ watch(
   },
 )
 
+/**
+ * Terminal failure reported by the backend. The TAN session is gone
+ * server-side, so the only sensible action left is closing the dialog
+ * — but it must stay open long enough to actually show this, otherwise
+ * a rejected TAN is indistinguishable from a successful one.
+ */
+const terminalError = computed(() => store.tanError)
+
 async function submit() {
   if (!store.pendingTan) return
   submitting.value = true
   errorMsg.value = null
   try {
-    const resp = await store.submitTan(tan.value || undefined)
-    if (resp.state === 'error') {
-      errorMsg.value = `${resp.errorCode}: ${resp.errorMessage}`
-    }
+    await store.submitTan(tan.value || undefined)
   } catch (err) {
     errorMsg.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -97,7 +107,7 @@ async function submit() {
         </figcaption>
       </figure>
 
-      <label>
+      <label v-if="!terminalError">
         <span>TAN (leer lassen bei decoupled / pushTAN)</span>
         <InputText
           ref="tanInput"
@@ -110,6 +120,12 @@ async function submit() {
         />
       </label>
 
+      <Message v-if="terminalError" severity="error" :closable="false">
+        {{ terminalError }}
+        <br />
+        Die Bank-Sitzung wurde beendet — bitte den Sync erneut starten.
+      </Message>
+
       <Message v-if="errorMsg" severity="error" :closable="false">
         {{ errorMsg }}
       </Message>
@@ -117,12 +133,13 @@ async function submit() {
 
     <template #footer>
       <Button
-        label="Abbrechen"
+        :label="terminalError ? 'Schließen' : 'Abbrechen'"
         severity="secondary"
         :disabled="submitting"
         @click="store.cancelTan()"
       />
       <Button
+        v-if="!terminalError"
         label="Bestätigen"
         :loading="submitting"
         @click="submit"
@@ -153,7 +170,7 @@ async function submit() {
   align-items: center;
   gap: 0.5rem;
   padding: 0.75rem;
-  background: var(--p-surface-50, var(--p-content-background));
+  background: var(--p-content-hover-background);
   border-radius: 0.5rem;
 }
 .tan-photo__img {
