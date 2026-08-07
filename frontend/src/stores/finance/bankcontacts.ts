@@ -36,6 +36,32 @@ export const useBankcontactsStore = defineStore('finance.bankcontacts', () => {
    */
   const tanError = ref<string | null>(null)
 
+  /**
+   * Result of the most recently *finished* sync, together with the
+   * bankcontact it belongs to. A sync that needs a TAN finishes inside
+   * the TAN dialog, not in the view that started it — the view has no
+   * other way to learn the outcome (counters, unknown accounts,
+   * per-account errors) and would keep showing its pre-TAN state until
+   * a page reload. Views watch this and render the summary.
+   *
+   * `seq` is bumped on every completion so two syncs with an identical
+   * response still register as two events.
+   */
+  const lastSyncResult = ref<{
+    bankcontactId: number
+    seq: number
+    response: api.SyncResponse
+  } | null>(null)
+
+  function recordSyncResult(bankcontactId: number, response: api.SyncResponse) {
+    if (response.state === 'tan-required') return
+    lastSyncResult.value = {
+      bankcontactId,
+      seq: (lastSyncResult.value?.seq ?? 0) + 1,
+      response,
+    }
+  }
+
   async function refresh() {
     loading.value = true
     error.value = null
@@ -93,6 +119,7 @@ export const useBankcontactsStore = defineStore('finance.bankcontacts', () => {
         challengeSeq: 0,
       }
     }
+    recordSyncResult(id, resp)
     // Pull the fresh row so last_sync_at / status update in the UI.
     await refresh()
     return resp
@@ -100,6 +127,7 @@ export const useBankcontactsStore = defineStore('finance.bankcontacts', () => {
 
   async function submitTan(tan?: string): Promise<api.SyncResponse> {
     if (!pendingTan.value) throw new Error('no TAN challenge pending')
+    const bankcontactId = pendingTan.value.bankcontactId
     const resp = await api.completeTan(pendingTan.value.tanReference, tan)
     if (resp.state === 'tan-required') {
       // Bank returned a fresh challenge for the same session — keep dialog open.
@@ -120,10 +148,12 @@ export const useBankcontactsStore = defineStore('finance.bankcontacts', () => {
       tanError.value = `${resp.errorCode ?? 'error'}: ${
         resp.errorMessage ?? 'TAN-Dialog fehlgeschlagen'
       }`
+      recordSyncResult(bankcontactId, resp)
       await refresh()
     } else {
       tanError.value = null
       pendingTan.value = null
+      recordSyncResult(bankcontactId, resp)
       await refresh()
     }
     return resp
@@ -140,6 +170,7 @@ export const useBankcontactsStore = defineStore('finance.bankcontacts', () => {
     error,
     pendingTan,
     tanError,
+    lastSyncResult,
     refresh,
     create,
     update,
