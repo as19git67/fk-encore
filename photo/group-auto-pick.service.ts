@@ -38,14 +38,72 @@ import {
   type AiPickDetails,
 } from "../db/schema";
 import {
+  REDUNDANCY_SIMILARITY,
   classifyOrientation,
   computeGroupPick,
   type AiConfidence,
   type Orientation,
   type PhotoSignals,
+  type RedundantPair,
   type ScoringWeights,
 } from "./group-auto-pick";
+import { fetchWithTimeout } from "./rpc-timeout";
 import { isHighConfidenceDuplicateGroup, recommendDuplicatePhoto, selectDeletableDuplicateMembers } from "./duplicate-candidates";
+
+const EMBEDDING_SERVICE_URL = process.env.EMBEDDING_SERVICE_URL || "http://localhost:8001";
+
+/**
+ * Ask the embedding service which members of each group show the same shot
+ * twice, so `computeGroupPick` can stop selecting both (see
+ * REDUNDANCY_SIMILARITY). One batched call per recompute run.
+ *
+ * Degrades to "no pairs known" on any failure: the redundancy rule then
+ * simply doesn't fire and the pick set is what it was before the rule
+ * existed. A scoring run must not fail because a diversity refinement was
+ * unavailable — the picks are still perfectly usable without it.
+ */
+async function loadRedundantPairs(
+  groups: Array<{ group_id: number; photo_ids: number[] }>,
+): Promise<Map<number, RedundantPair[]>> {
+  const byGroupId = new Map<number, RedundantPair[]>();
+  const scannable = groups.filter((g) => g.photo_ids.length >= 2);
+  if (scannable.length === 0) return byGroupId;
+
+  try {
+    const response = await fetchWithTimeout(`${EMBEDDING_SERVICE_URL}/redundant-pairs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        groups: scannable.map((g) => ({
+          group_id: g.group_id,
+          photo_ids: g.photo_ids.map((id) => id.toString()),
+        })),
+        min_similarity: REDUNDANCY_SIMILARITY,
+      }),
+      queue: "embedding",
+    });
+    if (!response.ok) throw new Error(`Embedding service returned ${response.status}`);
+    const data = await response.json() as {
+      groups: Array<{
+        group_id: number;
+        pairs: Array<{ photo_id_a: string; photo_id_b: string; similarity: number }>;
+      }>;
+    };
+    for (const group of data.groups) {
+      byGroupId.set(
+        group.group_id,
+        group.pairs.map((p) => ({
+          photo_id_a: parseInt(p.photo_id_a, 10),
+          photo_id_b: parseInt(p.photo_id_b, 10),
+          similarity: p.similarity,
+        })),
+      );
+    }
+  } catch (err: any) {
+    console.warn("Redundancy pairs unavailable, scoring without the diversity rule:", err.message);
+  }
+  return byGroupId;
+}
 
 interface PhotoSignalRow {
   photo_id: number;
@@ -224,6 +282,14 @@ export async function recomputeAiPicksForGroups(
     signalByPhotoId.set(row.photo_id, toPhotoSignals(row));
   }
 
+  // One batched redundancy scan for the whole run, before the scoring loop —
+  // per-group calls would multiply the round-trip count by the group count.
+  const redundantPairsByGroupId = await loadRedundantPairs(
+    groups
+      .map((g) => ({ group_id: g.id, photo_ids: byGroup.get(g.id) ?? [] }))
+      .filter((g) => g.photo_ids.length >= 2),
+  );
+
   let scored = 0;
   let skipped = 0;
   const nowSql = sql`NOW()`;
@@ -241,7 +307,11 @@ export async function recomputeAiPicksForGroups(
       },
     );
     const weights = weightsByUserId.get(groupUserId);
-    const result = computeGroupPick(groupSignals, weights);
+    const result = computeGroupPick(
+      groupSignals,
+      weights,
+      redundantPairsByGroupId.get(groupId) ?? [],
+    );
     await dbExec(
       db.update(photoGroups)
         .set({

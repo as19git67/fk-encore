@@ -141,6 +141,22 @@ struct ReviewDecision: Equatable, Sendable {
     let group: ReviewQueueGroup
     let kind: Kind
 
+    /// The decision a manually assembled keep set expresses (see
+    /// `ReviewSelectionSheet`).
+    ///
+    /// Two cases are deliberately not `.pick`:
+    /// - an empty set is **nil**, because `pick-photos` requires a non-empty
+    ///   keep set and hiding a whole group is not a decision the review flow
+    ///   makes on a slip;
+    /// - keeping every member is `.keepAll`, which says "reviewed, nothing
+    ///   hidden" directly instead of asking the server to hide an empty
+    ///   complement.
+    static func kind(forKeepSet keepIds: [Int], in group: ReviewQueueGroup) -> Kind? {
+        let kept = Set(keepIds)
+        guard !kept.isEmpty else { return nil }
+        return kept == Set(group.photos.map(\.id)) ? .keepAll : .pick(keepIds)
+    }
+
     /// The photos this decision keeps — everything else in the group gets
     /// hidden. Empty for `keepAll` / `peerConsensus`, where the server decides.
     var keptPhotoIds: [Int] {
@@ -251,7 +267,10 @@ struct ReviewQueueState: Equatable, Sendable {
 enum ReviewSwipe: Equatable, Sendable {
     case keepPick    // → right: accept the suggestion, hide the rest
     case keepAll     // ← left: keep everything, just mark reviewed
-    case favorite    // ↑ up: favorite the pick, then accept it
+    /// ↑ up: favorite the pick *and* accept it. Not a plain "mark as favorite"
+    /// — it resolves the group like `keepPick` does, which is why the label
+    /// spells both halves out.
+    case favorite
 
     /// Minimum travel before a drag counts as a decision.
     static let threshold: CGFloat = 96
@@ -289,7 +308,17 @@ enum ReviewSwipe: Equatable, Sendable {
         switch self {
         case .keepPick:  return "Übernehmen"
         case .keepAll:   return "Alle behalten"
-        case .favorite:  return "Favorit"
+        case .favorite:  return "Favorit & übernehmen"
+        }
+    }
+
+    /// Spelled-out consequence, shown under the action buttons so the swipe
+    /// vocabulary doesn't have to be learned by trial and error.
+    var explanation: String {
+        switch self {
+        case .keepPick: return "KI-Vorschlag behalten, Rest ausblenden"
+        case .keepAll:  return "Nichts ausblenden, nur als geprüft markieren"
+        case .favorite: return "Vorschlag favorisieren und übernehmen"
         }
     }
 

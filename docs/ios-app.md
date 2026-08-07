@@ -147,9 +147,16 @@ dokumentiert**:
   entstehen serverseitig.
 - **Gruppen-Review** (`ReviewQueueView`, Issue #761): Wisch-basierte Prüfung
   ähnlicher Fotos gegen `/photos/groups/review-queue`. Rechts = KI-Vorschlag
-  übernehmen, links = alle behalten, hoch = favorisieren und übernehmen,
-  Tippen auf ein Foto = nur dieses behalten; bei Peer-Signal zusätzlich
-  „Konsens übernehmen". Jede Geste hat einen gleichwertigen Button
+  übernehmen, links = alle behalten, hoch = favorisieren **und** übernehmen;
+  bei Peer-Signal zusätzlich „Konsens übernehmen". Tippen auf ein Foto öffnet
+  die zoombare Großansicht (`ReviewPhotoPreview`) und entscheidet nichts – „Nur
+  dieses Foto behalten" ist dort ein beschrifteter Button, ebenso im
+  Kontextmenü der Kachel. Wer den KI-Vorschlag überstimmen will, öffnet
+  „Auswahl anpassen …" (`ReviewSelectionSheet`): jedes Foto mit Daumen
+  hoch/runter, vorbelegt aus dem Vorschlag, lokal bis zum Commit – das
+  Gegenstück zur Bestätigungsphase des Web-Vergleichs. Die Großansicht zeigt
+  dieselben Daumen, sodass die Entscheidung direkt am großen Bild geändert
+  werden kann. Jede Geste hat einen gleichwertigen Button
   (VoiceOver). Fortschrittsbalken, Filter nach Sicherheitsstufe und ein
   garantiert einstufiges **Rückgängig** – die neueste Entscheidung wird lokal
   gepuffert und erst mit der nächsten (oder beim Verlassen) gesendet, weil das

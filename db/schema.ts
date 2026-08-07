@@ -320,6 +320,15 @@ export interface AiPickDetails {
   // Multi-pick threshold actually applied (default 0.92).
   multi_pick_threshold: number;
   scores: AiPickPhotoScore[];
+  // Photos the multi-pick rule had selected but that were dropped again
+  // because a better pick showed the same shot (see REDUNDANCY_SIMILARITY).
+  // Absent on groups scored before the redundancy rule existed, and on
+  // groups where it changed nothing.
+  redundancy_suppressed?: number[];
+  // Photos promoted into the pick set to fill a slot freed by the rule —
+  // visually different siblings that scored below the multi-pick threshold
+  // but above DIVERSITY_FLOOR.
+  diversity_promoted?: number[];
 }
 
 export const photoGroupMembers = pgTable(
