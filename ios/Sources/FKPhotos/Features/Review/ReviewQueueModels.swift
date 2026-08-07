@@ -141,6 +141,22 @@ struct ReviewDecision: Equatable, Sendable {
     let group: ReviewQueueGroup
     let kind: Kind
 
+    /// The decision a manually assembled keep set expresses (see
+    /// `ReviewSelectionSheet`).
+    ///
+    /// Two cases are deliberately not `.pick`:
+    /// - an empty set is **nil**, because `pick-photos` requires a non-empty
+    ///   keep set and hiding a whole group is not a decision the review flow
+    ///   makes on a slip;
+    /// - keeping every member is `.keepAll`, which says "reviewed, nothing
+    ///   hidden" directly instead of asking the server to hide an empty
+    ///   complement.
+    static func kind(forKeepSet keepIds: [Int], in group: ReviewQueueGroup) -> Kind? {
+        let kept = Set(keepIds)
+        guard !kept.isEmpty else { return nil }
+        return kept == Set(group.photos.map(\.id)) ? .keepAll : .pick(keepIds)
+    }
+
     /// The photos this decision keeps — everything else in the group gets
     /// hidden. Empty for `keepAll` / `peerConsensus`, where the server decides.
     var keptPhotoIds: [Int] {

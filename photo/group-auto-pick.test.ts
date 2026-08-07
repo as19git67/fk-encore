@@ -350,3 +350,133 @@ describe("computeGroupPick — persistence shape", () => {
     expect(result.confidence).toBe("low");
   });
 });
+
+describe("computeGroupPick — redundancy suppression", () => {
+  // The complaint this rule answers: two near-identical frames of the same
+  // burst both score just under the top and both get multi-picked, so the
+  // user is left with the same moment twice while a genuinely different
+  // sibling gets hidden.
+  // Scores (non-face branch): 0.40·blur + 0.30.
+  //   1 → 0.660  (top)      2 → 0.656  (clears the 0.92 multi-pick cutoff)
+  //   3 → 0.580  (below the cutoff, above the 0.85 diversity floor of 0.561)
+  // So 1 and 2 are the natural multi-pick and 3 is only ever reachable as a
+  // diversity replacement — which is exactly the case under test.
+  const burst = () => [
+    basePhoto({ photo_id: 1, blur_score: 0.90, orientation: "landscape" }),
+    basePhoto({ photo_id: 2, blur_score: 0.89, orientation: "landscape" }),
+    basePhoto({ photo_id: 3, blur_score: 0.70, orientation: "landscape" }),
+  ];
+
+  it("keeps both near-identical frames without the redundancy signal", () => {
+    // Baseline: this is the behaviour being fixed. 0.89/0.90 clears the
+    // 0.92 multi-pick threshold, so photo 2 joins photo 1.
+    const result = computeGroupPick(burst());
+    expect(result.picked_photo_ids).toEqual([1, 2]);
+  });
+
+  it("drops the weaker of two frames showing the same shot", () => {
+    const result = computeGroupPick(burst(), undefined, [
+      { photo_id_a: 1, photo_id_b: 2, similarity: 0.991 },
+    ]);
+    expect(result.picked_photo_ids).toContain(1);
+    expect(result.picked_photo_ids).not.toContain(2);
+    expect(result.details.redundancy_suppressed).toEqual([2]);
+  });
+
+  it("gives the freed slot to a visually different, slightly worse sibling", () => {
+    // Photo 3 scores below the multi-pick cutoff but above DIVERSITY_FLOOR,
+    // and is not redundant with photo 1 — exactly the trade the user asked
+    // for: a little less quality in exchange for showing something else.
+    const result = computeGroupPick(burst(), undefined, [
+      { photo_id_a: 1, photo_id_b: 2, similarity: 0.991 },
+    ]);
+    expect(result.picked_photo_ids).toEqual([1, 3]);
+    expect(result.details.diversity_promoted).toEqual([3]);
+  });
+
+  it("leaves the slot empty when every replacement is below the floor", () => {
+    const result = computeGroupPick(
+      [
+        basePhoto({ photo_id: 1, blur_score: 0.90, orientation: "landscape" }),
+        basePhoto({ photo_id: 2, blur_score: 0.89, orientation: "landscape" }),
+        basePhoto({ photo_id: 3, blur_score: 0.05, orientation: "landscape" }),
+      ],
+      undefined,
+      [{ photo_id_a: 1, photo_id_b: 2, similarity: 0.991 }],
+    );
+    expect(result.picked_photo_ids).toEqual([1]);
+    expect(result.details.diversity_promoted).toBeUndefined();
+  });
+
+  it("never promotes a replacement that repeats an accepted pick", () => {
+    // 3 is different from 2 but identical to the surviving pick 1 — it must
+    // not be promoted, otherwise the rule would reintroduce the very
+    // duplication it exists to remove.
+    const result = computeGroupPick(burst(), undefined, [
+      { photo_id_a: 1, photo_id_b: 2, similarity: 0.991 },
+      { photo_id_a: 1, photo_id_b: 3, similarity: 0.985 },
+    ]);
+    expect(result.picked_photo_ids).toEqual([1]);
+  });
+
+  it("never suppresses the top-scored photo", () => {
+    const result = computeGroupPick(burst(), undefined, [
+      { photo_id_a: 2, photo_id_b: 1, similarity: 0.999 },
+    ]);
+    expect(result.picked_photo_ids).toContain(1);
+  });
+
+  it("does not let different orientations suppress each other", () => {
+    // Portrait + landscape of the same subject are near-identical to DINOv2,
+    // but keeping both is the deliberate decision behind ORIENTATION_FLOOR.
+    const result = computeGroupPick(
+      [
+        basePhoto({ photo_id: 1, blur_score: 0.90, orientation: "portrait" }),
+        basePhoto({ photo_id: 2, blur_score: 0.89, orientation: "landscape" }),
+      ],
+      undefined,
+      [{ photo_id_a: 1, photo_id_b: 2, similarity: 0.994 }],
+    );
+    expect(result.picked_photo_ids).toEqual([1, 2]);
+    expect(result.details.redundancy_suppressed).toBeUndefined();
+  });
+
+  it("ignores pairs that do not involve two picks", () => {
+    const result = computeGroupPick(burst(), undefined, [
+      { photo_id_a: 2, photo_id_b: 3, similarity: 0.999 },
+    ]);
+    expect(result.picked_photo_ids).toEqual([1, 2]);
+  });
+
+  it("is a no-op for a single-pick group", () => {
+    const result = computeGroupPick(
+      [
+        basePhoto({ photo_id: 1, blur_score: 0.95, orientation: "landscape" }),
+        basePhoto({ photo_id: 2, blur_score: 0.30, orientation: "landscape" }),
+      ],
+      undefined,
+      [{ photo_id_a: 1, photo_id_b: 2, similarity: 0.999 }],
+    );
+    expect(result.picked_photo_ids).toEqual([1]);
+    expect(result.details.redundancy_suppressed).toBeUndefined();
+  });
+
+  it("recomputes the confidence gate against the surviving pick set", () => {
+    // Suppressing a pick turns it into a non-pick, so it becomes the
+    // runner-up the confidence Δ is measured against. Two near-identical
+    // frames therefore drop the group to low confidence instead of
+    // reporting a large gap to a distant third photo — which is honest:
+    // the AI is *not* sure which of the two to keep.
+    const result = computeGroupPick(
+      [
+        basePhoto({ photo_id: 1, blur_score: 0.90, orientation: "landscape" }),
+        basePhoto({ photo_id: 2, blur_score: 0.895, orientation: "landscape" }),
+        basePhoto({ photo_id: 3, blur_score: 0.20, orientation: "landscape" }),
+      ],
+      undefined,
+      [{ photo_id_a: 1, photo_id_b: 2, similarity: 0.998 }],
+    );
+    expect(result.picked_photo_ids).toEqual([1]);
+    expect(result.confidence).toBe("low");
+  });
+});

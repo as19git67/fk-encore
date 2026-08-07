@@ -39,6 +39,10 @@ from app.models.schemas import (
     ParseQueryRequest,
     ParseQueryResponse,
     PhotoRecord,
+    RedundantPair,
+    RedundantPairsGroupResult,
+    RedundantPairsRequest,
+    RedundantPairsResponse,
     ScenePair,
     SearchRequest,
     SearchResponse,
@@ -53,6 +57,7 @@ from app.services.embedding_service import clip_embedder_class, dino_embedder_cl
 from app.services.similar_groups import find_similar_groups
 from app.services.scene_pairs import find_scene_pairs
 from app.services.diverse_select import select_diverse
+from app.services.redundant_pairs import find_redundant_pairs
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -705,6 +710,46 @@ async def select_diverse_photos(request: DiverseSelectRequest, db: DbDep) -> Div
     ]
     chosen = select_diverse(items, request.count, request.similarity_threshold)
     return DiverseSelectResponse(photo_ids=chosen)
+
+
+# ---------------------------------------------------------------------------
+# /redundant-pairs
+# ---------------------------------------------------------------------------
+
+
+@router.post("/redundant-pairs", response_model=RedundantPairsResponse, tags=["embeddings"])
+async def redundant_pairs(request: RedundantPairsRequest, db: DbDep) -> RedundantPairsResponse:
+    """Report near-identical member pairs inside already-formed similar groups.
+
+    The main app's auto-pick uses this to stop selecting two shots of the same
+    moment: when two candidates for the multi-pick set are reported here, only
+    the better one survives and a visually different sibling gets the slot.
+
+    Batched over groups so a full recompute stays at one round-trip. Vectors
+    are looked up here and never cross the wire; only the redundant pairs come
+    back, which is a small fraction of the O(n²) pairs at the thresholds used.
+    """
+    all_ids = [pid for group in request.groups for pid in group.photo_ids]
+    photos = await repository.get_photos_by_ids(db, all_ids)
+    emb_by_id = {
+        p.photo_id: (list(p.embedding_dino) if p.embedding_dino is not None else None)
+        for p in photos
+    }
+
+    results: List[RedundantPairsGroupResult] = []
+    for group in request.groups:
+        items = [(pid, emb_by_id.get(pid)) for pid in group.photo_ids]
+        pairs = find_redundant_pairs(items, request.min_similarity)
+        results.append(
+            RedundantPairsGroupResult(
+                group_id=group.group_id,
+                pairs=[
+                    RedundantPair(photo_id_a=a, photo_id_b=b, similarity=round(sim, 4))
+                    for a, b, sim in pairs
+                ],
+            )
+        )
+    return RedundantPairsResponse(groups=results)
 
 
 # ---------------------------------------------------------------------------

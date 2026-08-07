@@ -22,6 +22,7 @@ struct ReviewQueueView: View {
     @State private var viewModel = ReviewQueueViewModel()
     @State private var dragOffset: CGSize = .zero
     @State private var previewTarget: PreviewTarget?
+    @State private var showSelectionSheet = false
     @Environment(AuthManager.self) private var authManager
 
     /// The photo the full-size preview opens on. A wrapper because
@@ -70,6 +71,13 @@ struct ReviewQueueView: View {
                     startPhotoId: target.id,
                     onPickOne: pickHandler
                 )
+            }
+        }
+        .sheet(isPresented: $showSelectionSheet) {
+            if let group = viewModel.state.current {
+                ReviewSelectionSheet(group: group) { keepIds in
+                    viewModel.pickPhotos(keepIds)
+                }
             }
         }
         .task {
@@ -224,6 +232,15 @@ struct ReviewQueueView: View {
                 actionButton(.keepPick, tint: .accentColor)
                     .disabled(!group.hasAiPick)
             }
+            // Overriding the AI needs its own, always-present entry point:
+            // the swipes can only accept or keep-all, and the per-photo
+            // controls live one level down in the preview.
+            Button {
+                showSelectionSheet = true
+            } label: {
+                Label("Auswahl anpassen …", systemImage: "slider.horizontal.3")
+                    .font(.subheadline)
+            }
             if group.hasPeerSignal {
                 Button {
                     viewModel.acceptPeerConsensus()
@@ -233,7 +250,7 @@ struct ReviewQueueView: View {
                 }
             }
             if !group.hasAiPick {
-                Text("Kein KI-Vorschlag für diese Gruppe – öffne das Foto, das bleiben soll, und wähle „Nur dieses Foto behalten“.")
+                Text("Kein KI-Vorschlag für diese Gruppe – lege über „Auswahl anpassen“ fest, was bleiben soll.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

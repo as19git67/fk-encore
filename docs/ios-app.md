@@ -151,7 +151,11 @@ dokumentiert**:
   bei Peer-Signal zusätzlich „Konsens übernehmen". Tippen auf ein Foto öffnet
   die zoombare Großansicht (`ReviewPhotoPreview`) und entscheidet nichts – „Nur
   dieses Foto behalten" ist dort ein beschrifteter Button, ebenso im
-  Kontextmenü der Kachel. Jede Geste hat einen gleichwertigen Button
+  Kontextmenü der Kachel. Wer den KI-Vorschlag überstimmen will, öffnet
+  „Auswahl anpassen …" (`ReviewSelectionSheet`): jedes Foto mit Daumen
+  hoch/runter, vorbelegt aus dem Vorschlag, lokal bis zum Commit – das
+  Gegenstück zur Bestätigungsphase des Web-Vergleichs. Jede Geste hat einen
+  gleichwertigen Button
   (VoiceOver). Fortschrittsbalken, Filter nach Sicherheitsstufe und ein
   garantiert einstufiges **Rückgängig** – die neueste Entscheidung wird lokal
   gepuffert und erst mit der nächsten (oder beim Verlassen) gesendet, weil das

@@ -123,6 +123,34 @@ confidence =
 
 **Orientation-Diversität:** Enthält die Gruppe gleichzeitig Portrait- und Landscape-Fotos derselben Szene, wird zusätzlich pro vorhandener Orientierung das jeweils beste Foto gepickt — sofern es mindestens `ORIENTATION_FLOOR · top.score` (0.75) erreicht. Square-Fotos werden ignoriert.
 
+### Redundanz-Unterdrückung
+
+Der Multi-Pick vergleicht **Scores**, nicht Bildinhalte — und zwei Aufnahmen derselben Sekunde scoren fast identisch, gerade *weil* sie dasselbe zeigen. Ergebnis vor dieser Regel: die Gruppe behielt zweimal denselben Moment, während ein inhaltlich anderes Geschwisterfoto ausgeblendet wurde.
+
+```
+redundant(a, b)  ⟺  DINOv2-Cosine(a, b) ≥ REDUNDANCY_SIMILARITY (0.97)
+                     ∧ orientation(a) = orientation(b)
+
+accepted = []
+für p ∈ picks (bester zuerst):
+    wenn accepted leer ODER ¬∃q ∈ accepted: redundant(p, q)  →  accepted += p
+    sonst                                                    →  suppressed += p
+
+# Nachrücken: pro unterdrücktem Pick ein inhaltlich anderes Foto
+für jeden unterdrückten Slot:
+    ersatz = bestes p ∉ accepted mit
+                 p.score ≥ DIVERSITY_FLOOR · top.score  (0.85)
+                 ∧ ¬∃q ∈ accepted: redundant(p, q)
+```
+
+Der Top-Score wird nie unterdrückt — es gibt nichts Besseres, mit dem er redundant sein könnte. Die Regel feuert nur bei **positivem** Redundanz-Beleg: Fotos ohne Embedding tauchen in keinem Paar auf und können deshalb nie aus dem Pick fallen.
+
+**Orientierung schlägt Redundanz.** Hoch- und Querformat derselben Szene sind für DINOv2 nahezu identisch, sollen aber laut Orientation-Regel bewusst beide erhalten bleiben. Redundanz wird deshalb ausschließlich *innerhalb* einer Orientierung beurteilt.
+
+**Auswirkung auf die Confidence:** Ein unterdrückter Pick wird zum Non-Pick und damit zum Bezugspunkt für Δ. Zwei fast gleiche Aufnahmen drücken die Gruppe also auf `low` statt einen großen Abstand zu einem entfernten dritten Foto zu melden — was ehrlich ist: die KI weiß gerade *nicht*, welche der beiden die richtige ist.
+
+Die paarweisen Ähnlichkeiten liefert der Embedding-Service über `POST /redundant-pairs` (gebatcht über alle Gruppen eines Recompute-Laufs, Vektoren verlassen den Service nicht). Fällt der Aufruf aus, wird ohne die Regel gescort und der Lauf läuft normal durch — eine Diversitäts-Verfeinerung darf kein Scoring scheitern lassen.
+
 ## UX
 
 ### Galerie (`VirtualGallery.vue`)
@@ -163,6 +191,7 @@ Gruppe pro Karte, aufgelöst mit einer einzigen Geste:
 | ↑ hoch | Vorschlag favorisieren **und** übernehmen | `PATCH /photos/:id/curation` + accept-ai-pick |
 | Tippen auf ein Foto | Großansicht öffnen (keine Entscheidung) | — |
 | „Nur dieses Foto behalten" in der Großansicht bzw. Kontextmenü | Nur dieses behalten | `POST /photos/groups/:id/pick-photos` |
+| „Auswahl anpassen …" | Freie Keep-Menge je Foto festlegen | `POST /photos/groups/:id/pick-photos` (bzw. `/review`, wenn alle behalten werden) |
 | Button (bei Peer-Signal) | Konsens übernehmen | `POST /photos/groups/:id/accept-peer-consensus` |
 
 Jede Wischgeste hat einen gleichwertigen Button — eine reine Gestenoberfläche
@@ -178,6 +207,8 @@ zwischen den Gruppenmitgliedern blätterbar. Das Behalten eines einzelnen Fotos
 ist dort ein beschrifteter Button, der die Konsequenz mitschreibt ("Die anderen
 3 Fotos werden ausgeblendet"), zusätzlich erreichbar über das Kontextmenü der
 Kachel und eine VoiceOver-Aktion.
+
+**KI-Vorschlag überstimmen.** Wischgesten können nur *annehmen* oder *alles behalten*; für alles dazwischen gibt es `ReviewSelectionSheet` — jedes Gruppenmitglied als Zeile mit Daumen hoch/runter, vorbelegt aus dem KI-Vorschlag, Großansicht per Tap auf das Thumbnail. Wie im Web (`PhotoCompareView.vue`) sind alle Umschaltungen **lokal**; erst „Übernehmen" schickt die fertige Keep-Menge. Eine leere Auswahl ist nicht committbar (`pick-photos` verlangt ≥ 1 Keeper), und „alle behalten" wird zu `/review` statt zu einem `pick-photos` mit leerem Komplement.
 
 **Die Hoch-Wischgeste ist keine reine Favoriten-Markierung.** Sie favorisiert
 den KI-Vorschlag *und* löst die Gruppe auf wie die Rechts-Geste. Label und
@@ -283,6 +314,8 @@ Alles in `photo/group-auto-pick.ts`:
 | `HIGH_CONFIDENCE_DELTA`    | 0.10    | Score-Abstand für `high` → Auto-Hide. |
 | `MEDIUM_CONFIDENCE_DELTA`  | 0.04    | Untere Grenze für `medium`. |
 | `ORIENTATION_FLOOR`        | 0.75    | Floor für Promotion via Orientation-Diversität. |
+| `REDUNDANCY_SIMILARITY`    | 0.97    | Ab dieser DINOv2-Cosine gelten zwei Mitglieder als dieselbe Aufnahme. |
+| `DIVERSITY_FLOOR`          | 0.85    | Mindest-Score (relativ zum Top) für ein nachrückendes Foto. |
 | `SATURATION` (in `normaliseFaceCoverage`) | 0.30 | Face-Coverage saturiert ab 30 %. |
 
 `DEFAULT_SCORING_WEIGHTS` enthält die Defaults. In `group-auto-pick.calibration.ts`:
@@ -488,6 +521,9 @@ iOS (SwiftUI, Issue #761):
 - `ios/Sources/FKPhotos/Features/Review/ReviewPhotoPreview.swift` — zoombare
   Großansicht der Gruppenmitglieder mit dem beschrifteten „Nur dieses Foto
   behalten"-Button
+- `ios/Sources/FKPhotos/Features/Review/ReviewSelectionSheet.swift` — manuelles
+  Überstimmen des KI-Vorschlags (Daumen hoch/runter je Foto, lokal bis zum
+  Commit)
 - `ios/Sources/FKPhotos/Features/Feed/FeedView.swift` — Einstiegspunkt in der
   Feed-Toolbar
 - `ios/Tests/FKPhotosTests/ReviewQueueTests.swift` — Tests für Mapping + Undo
