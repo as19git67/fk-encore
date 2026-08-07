@@ -114,3 +114,35 @@ USER_ID=1 POSTGRES_DATABASE=encore node scripts/photos/diagnose-autopick-delta.m
 Gruppen mit gemischten Zweigen (ein Foto mit, eines ohne Gesicht) werden
 übersprungen und ausgewiesen — dort sind die Signalmengen verschieden, eine
 termweise Differenz wäre bedeutungslos.
+
+## `diagnose-autopick-calibration.mjs`
+
+Etappe 0b. Prüft, ob die **Größe** des Δ überhaupt Trefferwahrscheinlichkeit
+vorhersagt.
+
+**Warum:** Etappe 0 fand keinen einzelnen Term, der die Fehlgriffe im
+`high`-Bucket erklärt (größte Differenz 0.0092 bei einem Median-Δ von
+0.1661). Damit steht die Schwelle selbst zur Prüfung, nicht mehr ein
+einzelnes Signal.
+
+**Kernmaß ist der Lift über einer Zufallsbasislinie**, nicht die nackte
+Trefferquote. Eine Gruppe aus 2 Fotos, von denen eines behalten wird, trifft
+man zu 50 % durch Raten; eine aus 5 Fotos mit 4 behaltenen zu 80 %. Ohne
+diese Korrektur vergleicht man unterschiedlich schwere Bins und liest
+Struktur, wo keine ist. Die Basislinie ist hypergeometrisch:
+`1 - C(hidden, picks) / C(members, picks)`.
+
+Verwendet wird der **gespeicherte** `runner_up_delta` — die Größe, die
+seinerzeit tatsächlich über die Einstufung entschied. Abschnitt 3 wiederholt
+die Messung auf der Teilmenge, deren Score sich mit den heutigen Gewichten
+exakt reproduzieren lässt (Robustheitsprüfung, weil in Etappe 0 nur 58,2 %
+reproduzierbar waren).
+
+```bash
+POSTGRES_DATABASE=encore node scripts/photos/diagnose-autopick-calibration.mjs
+```
+
+**Entscheidungslogik:** steigt der Lift mit dem Δ, taugt der Mechanismus und
+nur die Schwellenhöhe ist zu diskutieren. Bleibt er flach, trägt der Δ keine
+Information — dann würde eine höhere Schwelle nur weniger Gruppen
+auto-akzeptieren, ohne dass die verbleibenden zuverlässiger wären.
