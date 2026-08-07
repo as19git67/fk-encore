@@ -1086,3 +1086,13 @@ Betroffen sind auch Inhalte aus Beispieldokumenten, die zur Analyse (z. B. für 
 
 Vor jedem Commit, der neue Test-Fixtures, Seed-Daten oder Beispieltexte einführt: kurz prüfen, ob eine der obigen Kategorien betroffen ist, und ggf. durch synthetische Werte ersetzen.
 
+## GitLab-Zugriff (gitlab.scheggs.net)
+
+Das Repo liegt zusätzlich auf einer selbstgehosteten GitLab-Instanz (`schegg/fk-encore` auf `gitlab.scheggs.net`). Für `git clone`/`push` dorthin per Personal-Access-Token: der Token liegt als Environment-Secret unter dem Namen **`GITLAB_TOKEN`**. Beispiel:
+
+```bash
+git clone https://oauth2:${GITLAB_TOKEN}@gitlab.scheggs.net/schegg/fk-encore.git
+```
+
+`gitlab.scheggs.net` muss außerdem in der Netzwerk-Policy der Umgebung freigeschaltet sein, sonst schlägt der Verbindungsaufbau mit 403 fehl.
+
