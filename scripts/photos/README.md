@@ -76,3 +76,41 @@ formatiert den Report als Markdown-Datei statt als psql-Tabellen.
 ein Pick gespeichert ist. Reviewte Gruppen sind keine Zufallsstichprobe der
 Bibliothek. Gruppen, in denen der Nutzer nichts ausgeblendet hat, werden
 übersprungen — dort träfe jeder Pick trivial.
+
+## `diagnose-autopick-delta.mjs`
+
+Etappe 0 aus `docs/auto-pick-face-relevance.md`. Zerlegt den Score-Abstand Δ
+zwischen Top-Pick und bestem Nicht-Pick in die Beiträge der einzelnen
+Signale.
+
+**Warum:** Δ entscheidet über `ai_picked_confidence = 'high'` und damit
+darüber, was der Bulk-Accept ungefragt anwendet. Die erste Messung zeigte,
+dass `face_sharpness` den Δ rechnerisch gar nicht erzeugen kann (σ ≈ 0.035
+bei Gewicht 0.40 → ~0.014 Beitrag, Schwelle 0.10), das `high`-Bucket aber
+mit 75,9 % deutlich schlechter trifft als der Rest (97,3 %). Also: welcher
+Term macht den Abstand — und unterscheidet er sich zwischen Treffern und
+Fehlgriffen?
+
+**Aufbau des Reports:**
+
+1. **Validierung** — der gespeicherte Score wird aus den gespeicherten
+   Signalen nachgerechnet. Stimmt das nicht, wurden die Picks mit anderen
+   Gewichten erzeugt und der Rest ist nicht belastbar.
+2. Beitrag je Signal zum Δ, nach Konfidenz-Bucket.
+3. **Der eigentliche Befund:** unterscheidet sich die Zerlegung zwischen
+   `high`-Treffern und `high`-Fehlgriffen? Das Signal mit der größten
+   positiven Differenz ist der Verursacher.
+4. Wie oft trägt ein einzelnes Signal die Gruppe allein über die 0.10-Schwelle.
+
+Die Gewichte werden nicht dupliziert, sondern aus
+`photo/group-auto-pick.ts` gelesen; kalibrierte Per-Nutzer-Gewichte aus
+`ai_pick_user_weights` haben Vorrang.
+
+```bash
+POSTGRES_DATABASE=encore node scripts/photos/diagnose-autopick-delta.mjs
+USER_ID=1 POSTGRES_DATABASE=encore node scripts/photos/diagnose-autopick-delta.mjs
+```
+
+Gruppen mit gemischten Zweigen (ein Foto mit, eines ohne Gesicht) werden
+übersprungen und ausgewiesen — dort sind die Signalmengen verschieden, eine
+termweise Differenz wäre bedeutungslos.
