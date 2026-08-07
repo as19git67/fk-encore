@@ -27,12 +27,20 @@
  * Pick wurde vor dem Review berechnet, ist also eine echte Vorhersage —
  * aber die reviewten Gruppen sind keine Zufallsstichprobe der Bibliothek.
  *
- * Verbindung: identische Logik wie db/database.ts (POSTGRES_CONNECTION_STRING
- * oder POSTGRES_HOST/PORT/USER/PASSWORD/DATABASE). Standard-DB: fk_encore.
+ * Verbindung über POSTGRES_CONNECTION_STRING oder
+ * POSTGRES_HOST/PORT/USER/PASSWORD/DATABASE. Standard-DB: `encore` — der
+ * Name aus docker-compose.yml (DEPLOY_PG_DATABASE), NICHT der `fk_encore`-
+ * Default aus db/database.ts, der nur für lokale Entwicklung gilt.
+ *
+ * Läuft die Datenbank im Container und dieses Skript nicht auf demselben
+ * Host, ist die SQL-Variante ohne Node-Abhängigkeit der einfachere Weg:
+ * siehe diagnose-autopick-faces.sql und scripts/photos/README.md.
  *
  * Aufruf:
  *   node scripts/photos/diagnose-autopick-faces.mjs
  *   USER_ID=3 node scripts/photos/diagnose-autopick-faces.mjs   # nur ein Nutzer
+ *   POSTGRES_CONNECTION_STRING=postgres://postgres:postgres@dbhost:5432/encore \
+ *     node scripts/photos/diagnose-autopick-faces.mjs
  */
 
 import fs from "node:fs";

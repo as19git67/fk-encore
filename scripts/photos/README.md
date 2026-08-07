@@ -35,13 +35,42 @@ Nutzer-Entscheidung in `photo_curation`):
 **Aufruf:**
 
 ```bash
-node scripts/photos/diagnose-autopick-faces.mjs
-USER_ID=3 node scripts/photos/diagnose-autopick-faces.mjs   # nur ein Nutzer
+# Auf dem Docker-Host (Port ist via DEPLOY_HOST_PORT_POSTGRES veroeffentlicht)
+POSTGRES_DATABASE=encore node scripts/photos/diagnose-autopick-faces.mjs
+
+# Von woanders, oder mit abweichenden Zugangsdaten
+POSTGRES_CONNECTION_STRING=postgres://postgres:postgres@dbhost:5432/encore \
+  node scripts/photos/diagnose-autopick-faces.mjs
+
+# Nur ein Nutzer
+USER_ID=3 POSTGRES_DATABASE=encore node scripts/photos/diagnose-autopick-faces.mjs
 ```
 
-Verbindung wie `db/database.ts`: `POSTGRES_CONNECTION_STRING` oder
-`POSTGRES_HOST` / `PORT` / `USER` / `PASSWORD` / `DATABASE` (Standard-DB:
-`fk_encore`).
+Verbindung wie beim Taxonomie-Diagnoseskript: `POSTGRES_CONNECTION_STRING`
+oder `POSTGRES_HOST` / `PORT` / `USER` / `PASSWORD` / `DATABASE`.
+
+Standard-DB ist `encore` — der Name aus `docker-compose.yml`
+(`DEPLOY_PG_DATABASE`), nicht der `fk_encore`-Default aus `db/database.ts`,
+der nur für die lokale Entwicklung gilt.
+
+### Variante ohne Node: `diagnose-autopick-faces.sql`
+
+Identische Auswertung als reines SQL, für den Fall dass der Postgres-Port
+von der ausführenden Maschine aus **nicht** erreichbar ist (Firewall, DB nur
+im Docker-Netz). Läuft direkt im DB-Container, braucht weder Node noch das
+`pg`-Paket:
+
+```bash
+docker compose exec -T postgres \
+  psql -U postgres -d encore -f - < scripts/photos/diagnose-autopick-faces.sql
+
+# Nur ein Nutzer
+docker compose exec -T postgres \
+  psql -U postgres -d encore -v user_id=3 -f - < scripts/photos/diagnose-autopick-faces.sql
+```
+
+Ist der Port erreichbar, ist die `.mjs`-Variante der einfachere Weg — sie
+formatiert den Report als Markdown-Datei statt als psql-Tabellen.
 
 **Grenzen der Aussagekraft:** gemessen wird nur, wo bereits reviewt wurde und
 ein Pick gespeichert ist. Reviewte Gruppen sind keine Zufallsstichprobe der
