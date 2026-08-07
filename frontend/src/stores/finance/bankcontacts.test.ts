@@ -86,6 +86,79 @@ describe('finance/bankcontacts store — TAN flow', () => {
     expect(api.listBankcontacts).toHaveBeenCalled()
   })
 
+  it('refreshes the row so a completed TAN clears "tan-required"', async () => {
+    vi.mocked(api.listBankcontacts).mockResolvedValue({
+      items: [{ id: 7, name: 'Testbank', last_sync_status: 'tan-required' }],
+    } as never)
+    const store = await openTanDialog()
+    expect(store.items[0]?.last_sync_status).toBe('tan-required')
+
+    vi.mocked(api.listBankcontacts).mockResolvedValue({
+      items: [{ id: 7, name: 'Testbank', last_sync_status: 'ok' }],
+    } as never)
+    vi.mocked(api.completeTan).mockResolvedValue({ state: 'idle' } as never)
+
+    await store.submitTan('123456')
+
+    // Views read the row out of `items` — a stale copy here is what
+    // left the detail page showing "TAN offen" until a page reload.
+    expect(store.items[0]?.last_sync_status).toBe('ok')
+  })
+
+  it('does not report a result while the TAN is still outstanding', async () => {
+    const store = await openTanDialog()
+    // tan-required is not an outcome — the view must keep showing the
+    // pre-TAN state until the dialog resolves one way or the other.
+    expect(store.lastSyncResult).toBeNull()
+  })
+
+  it('reports the sync outcome after the TAN completes it', async () => {
+    const store = await openTanDialog()
+    vi.mocked(api.completeTan).mockResolvedValue({
+      state: 'idle',
+      accounts_matched: 3,
+      transactions_inserted: 12,
+    } as never)
+
+    await store.submitTan('123456')
+
+    // The sync was started by the detail view but finished inside the
+    // TAN dialog; without this the view kept rendering "TAN offen"
+    // until the page was reloaded.
+    expect(store.lastSyncResult).toMatchObject({
+      bankcontactId: 7,
+      seq: 1,
+      response: { state: 'idle', accounts_matched: 3, transactions_inserted: 12 },
+    })
+  })
+
+  it('reports a terminal TAN failure as a sync outcome too', async () => {
+    const store = await openTanDialog()
+    vi.mocked(api.completeTan).mockResolvedValue({
+      state: 'error',
+      errorCode: 'live-client-evicted',
+      errorMessage: 'Sitzung geschlossen',
+    } as never)
+
+    await store.submitTan('123456')
+
+    expect(store.lastSyncResult).toMatchObject({
+      bankcontactId: 7,
+      response: { state: 'error', errorCode: 'live-client-evicted' },
+    })
+  })
+
+  it('bumps seq so two identical outcomes stay distinguishable', async () => {
+    const store = useBankcontactsStore()
+    vi.mocked(api.triggerSync).mockResolvedValue({ state: 'idle' } as never)
+
+    await store.syncNow(7)
+    expect(store.lastSyncResult?.seq).toBe(1)
+
+    await store.syncNow(7)
+    expect(store.lastSyncResult?.seq).toBe(2)
+  })
+
   it('clears both dialog state and error on cancel', async () => {
     const store = await openTanDialog()
     vi.mocked(api.completeTan).mockResolvedValue({

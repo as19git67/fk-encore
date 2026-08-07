@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, computed } from 'vue'
+import { onMounted, ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import InputText from 'primevue/inputtext'
 import Password from 'primevue/password'
@@ -12,6 +12,7 @@ import { useAccountsStore } from '../../stores/finance/accounts'
 import {
   probeTanMethods,
   type Bankcontact,
+  type SyncResponse,
   type TanMethodOption,
   type UnknownBankAccount,
 } from '../../api/finance'
@@ -63,7 +64,17 @@ const syncInfo = ref<string | null>(null)
  *  of guessing TAN. Cleared at the start of each sync. */
 const lastSyncErrors = ref<string[]>([])
 const errorMsg = ref<string | null>(null)
-const bc = ref<Bankcontact | null>(null)
+/**
+ * Derived from the store rather than snapshotted into a local ref:
+ * a sync that needs a TAN finishes inside TanDialog, which refreshes
+ * the store but cannot reach back into this view. With a snapshot the
+ * header kept showing "TAN offen" until the page was reloaded.
+ */
+const bc = computed<Bankcontact | null>(() => {
+  if (isNew.value) return null
+  const id = Number(route.params.id)
+  return store.items.find((b) => b.id === id) ?? null
+})
 /** Bank-side accounts the most recent sync reported that aren't
  *  linked to any finance_account yet. User resolves row by row
  *  (Import / Link / Ignore). */
@@ -140,7 +151,6 @@ onMounted(async () => {
   const id = Number(route.params.id)
   const existing = store.items.find((b) => b.id === id)
   if (existing) {
-    bc.value = existing
     form.value.name = existing.name
     form.value.blz = existing.blz
     form.value.login = existing.login
@@ -173,18 +183,19 @@ async function save() {
       }
       void router.push({ name: 'finance-bankcontact-detail', params: { id: created.id } })
     } else if (bc.value) {
-      const updated = await store.update(bc.value.id, {
+      const id = bc.value.id
+      // Both calls write the updated row back into the store, which is
+      // what `bc` reads from — no local copy to keep in sync.
+      await store.update(id, {
         name: form.value.name.trim(),
         blz: form.value.blz.trim(),
         login: form.value.login.trim(),
         server_url: form.value.server_url.trim(),
         tan_method: form.value.tan_method.trim() || null,
       })
-      bc.value = updated
       if (pin.value) {
-        await store.setCredentials(bc.value.id, pin.value)
+        await store.setCredentials(id, pin.value)
         pin.value = ''
-        bc.value = { ...bc.value, credentials_set: true }
       }
     }
   } catch (err) {
@@ -207,8 +218,6 @@ async function probeMethods() {
       // the populated picker from the cache (the backend already
       // persisted resp.methods on finance_bankcontact).
       await store.refresh()
-      const refreshed = store.items.find((b) => b.id === bc.value!.id)
-      if (refreshed) bc.value = refreshed
       if (resp.methods.length === 0) {
         tanProbeInfo.value = 'Bank lieferte keine TAN-Verfahren.'
       } else {
@@ -226,6 +235,60 @@ async function probeMethods() {
   }
 }
 
+/**
+ * Render a finished sync. Called for a sync that completed right away
+ * *and*, via the `lastSyncResult` watcher, for one that only finished
+ * after the user entered a TAN — in that case the dialog owns the
+ * request and this view never sees the response directly.
+ */
+async function applySyncResult(resp: SyncResponse) {
+  if (resp.state === 'error') {
+    errorMsg.value = `${resp.errorCode}: ${resp.errorMessage}`
+    return
+  }
+  if (resp.state !== 'idle') return
+  const parts: string[] = []
+  if (resp.accounts_matched !== undefined) {
+    parts.push(`${resp.accounts_matched} Konten aktualisiert`)
+  }
+  if (resp.transactions_inserted !== undefined) {
+    parts.push(`${resp.transactions_inserted} neue Transaktionen`)
+  }
+  if (resp.balances_written !== undefined) {
+    parts.push(`${resp.balances_written} Salden`)
+  }
+  if (resp.accounts_unknown && resp.accounts_unknown > 0) {
+    parts.push(`${resp.accounts_unknown} noch nicht zugeordnete Konten`)
+  }
+  lastSyncErrors.value = resp.errors ?? []
+  syncInfo.value = parts.length
+    ? `Sync ${resp.partial ? 'teilweise erfolgreich' : 'erfolgreich'} — ${parts.join(', ')}.`
+    : `Sync ${resp.partial ? 'teilweise erfolgreich' : 'erfolgreich'}.`
+  pendingUnknown.value = resp.unknown_accounts ?? []
+  // Refresh accounts store so the "Konten"-section below
+  // reflects what the sync just wrote.
+  await accountsStore.refresh()
+}
+
+/**
+ * Every finished sync is rendered from here, no matter which component
+ * issued the request: the one started by the button below completes in
+ * `syncNow`, one that stopped for a TAN completes in TanDialog. Making
+ * the store the single source keeps both paths on the same code.
+ * `seq` is what tells two identical responses apart.
+ */
+watch(
+  () => store.lastSyncResult?.seq,
+  async () => {
+    const result = store.lastSyncResult
+    if (!result || result.bankcontactId !== bc.value?.id) return
+    errorMsg.value = null
+    syncInfo.value = null
+    lastSyncErrors.value = []
+    await applySyncResult(result.response)
+  },
+)
+
 async function triggerSync() {
   if (!bc.value) return
   syncing.value = true
@@ -233,34 +296,8 @@ async function triggerSync() {
   syncInfo.value = null
   lastSyncErrors.value = []
   try {
-    const resp = await store.syncNow(bc.value.id)
-    if (resp.state === 'error') {
-      errorMsg.value = `${resp.errorCode}: ${resp.errorMessage}`
-    } else if (resp.state === 'idle') {
-      const parts: string[] = []
-      if (resp.accounts_matched !== undefined) {
-        parts.push(`${resp.accounts_matched} Konten aktualisiert`)
-      }
-      if (resp.transactions_inserted !== undefined) {
-        parts.push(`${resp.transactions_inserted} neue Transaktionen`)
-      }
-      if (resp.balances_written !== undefined) {
-        parts.push(`${resp.balances_written} Salden`)
-      }
-      if (resp.accounts_unknown && resp.accounts_unknown > 0) {
-        parts.push(`${resp.accounts_unknown} noch nicht zugeordnete Konten`)
-      }
-      lastSyncErrors.value = resp.errors ?? []
-      syncInfo.value = parts.length
-        ? `Sync ${resp.partial ? 'teilweise erfolgreich' : 'erfolgreich'} — ${parts.join(', ')}.`
-        : `Sync ${resp.partial ? 'teilweise erfolgreich' : 'erfolgreich'}.`
-      pendingUnknown.value = resp.unknown_accounts ?? []
-      // Refresh accounts store so the "Konten"-section below
-      // reflects what the sync just wrote.
-      await accountsStore.refresh()
-    }
-    const refreshed = store.items.find((b) => b.id === bc.value!.id)
-    if (refreshed) bc.value = refreshed
+    // The response is rendered by the `lastSyncResult` watcher above.
+    await store.syncNow(bc.value.id)
   } catch (err) {
     errorMsg.value = err instanceof Error ? err.message : String(err)
   } finally {
