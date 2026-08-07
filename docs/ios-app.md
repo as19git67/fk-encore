@@ -154,8 +154,9 @@ dokumentiert**:
   Kontextmenü der Kachel. Wer den KI-Vorschlag überstimmen will, öffnet
   „Auswahl anpassen …" (`ReviewSelectionSheet`): jedes Foto mit Daumen
   hoch/runter, vorbelegt aus dem Vorschlag, lokal bis zum Commit – das
-  Gegenstück zur Bestätigungsphase des Web-Vergleichs. Jede Geste hat einen
-  gleichwertigen Button
+  Gegenstück zur Bestätigungsphase des Web-Vergleichs. Die Großansicht zeigt
+  dieselben Daumen, sodass die Entscheidung direkt am großen Bild geändert
+  werden kann. Jede Geste hat einen gleichwertigen Button
   (VoiceOver). Fortschrittsbalken, Filter nach Sicherheitsstufe und ein
   garantiert einstufiges **Rückgängig** – die neueste Entscheidung wird lokal
   gepuffert und erst mit der nächsten (oder beim Verlassen) gesendet, weil das

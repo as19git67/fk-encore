@@ -208,7 +208,9 @@ ist dort ein beschrifteter Button, der die Konsequenz mitschreibt ("Die anderen
 3 Fotos werden ausgeblendet"), zusätzlich erreichbar über das Kontextmenü der
 Kachel und eine VoiceOver-Aktion.
 
-**KI-Vorschlag überstimmen.** Wischgesten können nur *annehmen* oder *alles behalten*; für alles dazwischen gibt es `ReviewSelectionSheet` — jedes Gruppenmitglied als Zeile mit Daumen hoch/runter, vorbelegt aus dem KI-Vorschlag, Großansicht per Tap auf das Thumbnail. Wie im Web (`PhotoCompareView.vue`) sind alle Umschaltungen **lokal**; erst „Übernehmen" schickt die fertige Keep-Menge. Eine leere Auswahl ist nicht committbar (`pick-photos` verlangt ≥ 1 Keeper), und „alle behalten" wird zu `/review` statt zu einem `pick-photos` mit leerem Komplement.
+**KI-Vorschlag überstimmen.** Wischgesten können nur *annehmen* oder *alles behalten*; für alles dazwischen gibt es `ReviewSelectionSheet` — jedes Gruppenmitglied als Zeile mit Daumen hoch/runter, vorbelegt aus dem KI-Vorschlag. Wie im Web (`PhotoCompareView.vue`) sind alle Umschaltungen **lokal**; erst „Übernehmen" schickt die fertige Keep-Menge. Eine leere Auswahl ist nicht committbar (`pick-photos` verlangt ≥ 1 Keeper), und „alle behalten" wird zu `/review` statt zu einem `pick-photos` mit leerem Komplement.
+
+Ein Tap auf das Zeilen-Thumbnail öffnet dieselbe Großansicht, dort aber im **Bearbeitungsmodus**: der Footer trägt die gleichen Daumen, an die Keep-Menge des Sheets gebunden. Eine 64pt-Kachel reicht nicht, um Schärfe zu beurteilen — die Entscheidung muss also genau dort änderbar sein, wo das Foto lesbar ist, ohne den Umweg zurück in die Liste. `ReviewPhotoPreview` hat dafür zwei Modi: `onPickOne` (aus der Review-Karte, entscheidet die Gruppe sofort) und `keep:` (aus dem Sheet, schreibt in die schwebende Auswahl).
 
 **Die Hoch-Wischgeste ist keine reine Favoriten-Markierung.** Sie favorisiert
 den KI-Vorschlag *und* löst die Gruppe auf wie die Rechts-Geste. Label und

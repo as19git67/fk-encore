@@ -80,11 +80,11 @@ struct ReviewSelectionSheet: View {
                 }
             }
             .fullScreenCover(item: previewTargetBinding) { target in
-                // Judging a photo at thumbnail size is exactly what made the
-                // old tap-to-decide interaction wrong, so the override sheet
-                // offers the same full-size look — read-only here, since the
-                // decision is the toggle next to it.
-                ReviewPhotoPreview(group: group, startPhotoId: target.id, onPickOne: nil)
+                // Full size carries the same thumbs as the list: a 64pt
+                // thumbnail is not enough to judge sharpness, so the decision
+                // has to be changeable exactly where the photo is legible.
+                // The binding writes straight back into this sheet's keep set.
+                ReviewPhotoPreview(group: group, startPhotoId: target.id, keep: $keep)
             }
         }
     }
