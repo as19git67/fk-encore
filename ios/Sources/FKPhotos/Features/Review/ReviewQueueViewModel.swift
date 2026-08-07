@@ -91,6 +91,16 @@ final class ReviewQueueViewModel {
         decide(.pick([photoId]))
     }
 
+    /// Manual override of the AI's pick with an arbitrary keep set (see
+    /// `ReviewSelectionSheet`). An empty set is refused rather than sent:
+    /// `pick-photos` requires at least one keeper, and hiding a whole group is
+    /// not something the review flow should do on a slip.
+    func pickPhotos(_ photoIds: [Int]) {
+        guard let group = state.current,
+              let kind = ReviewDecision.kind(forKeepSet: photoIds, in: group) else { return }
+        decide(kind)
+    }
+
     func acceptPeerConsensus() {
         decide(.peerConsensus)
     }

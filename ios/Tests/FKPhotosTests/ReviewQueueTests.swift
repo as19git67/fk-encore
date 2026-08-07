@@ -328,3 +328,71 @@ final class ReviewQueueTests: XCTestCase {
         XCTAssertNil(g.confidence)
     }
 }
+
+/// The manual override of the AI's pick (`ReviewSelectionSheet`). The sheet
+/// itself is SwiftUI, but the translation from "what the user ticked" into a
+/// server decision is where a mistake would hide the wrong photos.
+final class ReviewKeepSetTests: XCTestCase {
+
+    private func photo(_ id: Int) -> ReviewQueuePhoto {
+        ReviewQueuePhoto(
+            id: id,
+            filename: "p\(id).jpg",
+            taken_at: nil,
+            curation: .visible,
+            ai_picked: id == 2,
+            ai_quality_score: 0.5,
+            peer_curation: nil
+        )
+    }
+
+    private func makeGroup() -> ReviewQueueGroup {
+        ReviewQueueGroup(
+            id: 1,
+            cover_photo_id: 1,
+            member_count: 3,
+            ai_picked_photo_ids: [2],
+            ai_picked_confidence: "high",
+            runner_up_delta: 0.2,
+            duplicate_candidate: false,
+            duplicate_recommended_photo_id: nil,
+            duplicate_deletable_count: nil,
+            photos: [photo(1), photo(2), photo(3)]
+        )
+    }
+
+    func testPartialKeepSetBecomesAPick() {
+        XCTAssertEqual(ReviewDecision.kind(forKeepSet: [1, 2], in: makeGroup()), .pick([1, 2]))
+    }
+
+    func testKeepingEveryMemberCollapsesToKeepAll() {
+        // Expressing "keep everything" as .pick would ask the server to hide
+        // an empty complement — same outcome, but a needlessly destructive
+        // shape for something that hides nothing.
+        XCTAssertEqual(ReviewDecision.kind(forKeepSet: [1, 2, 3], in: makeGroup()), .keepAll)
+    }
+
+    func testKeepingEveryMemberIsOrderIndependent() {
+        XCTAssertEqual(ReviewDecision.kind(forKeepSet: [3, 1, 2], in: makeGroup()), .keepAll)
+    }
+
+    func testEmptyKeepSetIsRefused() {
+        // pick-photos requires a non-empty keep set, and wiping a whole group
+        // must never be reachable by unticking everything.
+        XCTAssertNil(ReviewDecision.kind(forKeepSet: [], in: makeGroup()))
+    }
+
+    func testKeepSetMayOverrideTheAiPickEntirely() {
+        // The point of the override: the AI suggested 2, the user keeps 3.
+        XCTAssertEqual(ReviewDecision.kind(forKeepSet: [3], in: makeGroup()), .pick([3]))
+    }
+
+    func testKeptOrderIsPreserved() {
+        XCTAssertEqual(ReviewDecision.kind(forKeepSet: [3, 1], in: makeGroup()), .pick([3, 1]))
+    }
+
+    func testDecisionKeepsWhatTheKeepSetNames() {
+        let decision = ReviewDecision(group: makeGroup(), kind: .pick([1, 3]))
+        XCTAssertEqual(decision.keptPhotoIds, [1, 3])
+    }
+}

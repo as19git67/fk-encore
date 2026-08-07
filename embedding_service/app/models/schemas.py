@@ -159,3 +159,33 @@ class ScenePair(BaseModel):
 
 class FindScenePairsResponse(BaseModel):
     pairs: List[ScenePair]
+
+
+class RedundantPairsGroup(BaseModel):
+    group_id: int = Field(..., description="Caller-side group id, echoed back unchanged")
+    photo_ids: List[str] = Field(..., min_length=1, description="Members of this similar-photo group")
+
+
+class RedundantPairsRequest(BaseModel):
+    groups: List[RedundantPairsGroup] = Field(..., min_length=1, description="Groups to scan, batched to keep the auto-pick recompute at one round-trip")
+    min_similarity: float = Field(
+        default=0.97,
+        ge=0.0,
+        le=1.0,
+        description="Report member pairs whose DINOv2 cosine similarity reaches this. Well above the grouping threshold — this means 'the same shot again', not 'the same subject'",
+    )
+
+
+class RedundantPair(BaseModel):
+    photo_id_a: str
+    photo_id_b: str
+    similarity: float
+
+
+class RedundantPairsGroupResult(BaseModel):
+    group_id: int
+    pairs: List[RedundantPair]
+
+
+class RedundantPairsResponse(BaseModel):
+    groups: List[RedundantPairsGroupResult]

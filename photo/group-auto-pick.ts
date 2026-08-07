@@ -28,6 +28,12 @@
  * Multi-pick: Top-1 always picks. Plus any photo with
  *   score ≥ MULTI_PICK_THRESHOLD · top_score    (default 0.92)
  *
+ * Redundancy: a multi-pick that merely repeats a better pick (DINOv2 cosine
+ *   ≥ REDUNDANCY_SIMILARITY, same orientation) is dropped again, and its slot
+ *   offered to the best visually different sibling scoring ≥ DIVERSITY_FLOOR ·
+ *   top_score. Without this the pick set keeps two frames of the same burst,
+ *   because near-identical frames also score near-identically.
+ *
  * Confidence gate (drives the gallery auto-hide behaviour):
  *   Δ = top_score − best_non_pick_score
  *   Δ ≥ HIGH_CONFIDENCE_DELTA (0.10) → "high"   — auto-hide non-picks
@@ -54,6 +60,28 @@ export const MEDIUM_CONFIDENCE_DELTA = 0.04;
  * near-square outlier in a portrait burst should not steal a slot.
  */
 export const ORIENTATION_FLOOR = 0.75;
+
+/**
+ * Two members of a group count as *redundant* — the same shot twice — from
+ * this DINOv2 cosine similarity upward. Every member of a similar group is
+ * similar to every other one by construction (that is why they were grouped,
+ * see SIMILARITY_THRESHOLD in photo.service.ts), so this sits far above the
+ * grouping threshold and below DUPLICATE_VISUAL_THRESHOLD (0.995), which
+ * describes byte-level duplicates rather than "one more frame of the burst".
+ *
+ * Computed by the embedding service (`POST /redundant-pairs`) and passed in;
+ * this module stays pure.
+ */
+export const REDUNDANCY_SIMILARITY = 0.97;
+
+/**
+ * A photo promoted into the pick set *because* a redundant sibling was
+ * dropped must still be worth keeping. It has to reach this fraction of the
+ * top score — looser than MULTI_PICK_THRESHOLD (0.92), because the whole point
+ * is to accept a slightly weaker photo in exchange for it showing something
+ * different, but not so loose that a clearly bad frame gets promoted.
+ */
+export const DIVERSITY_FLOOR = 0.85;
 
 export type Orientation = "portrait" | "landscape" | "square";
 
@@ -100,6 +128,36 @@ export interface PhotoSignals {
 }
 
 export type AiConfidence = "high" | "medium" | "low";
+
+/**
+ * One near-identical member pair as reported by the embedding service.
+ * Order of the two ids carries no meaning.
+ */
+export interface RedundantPair {
+  photo_id_a: number;
+  photo_id_b: number;
+  similarity: number;
+}
+
+/**
+ * Symmetric lookup over the reported pairs. Photos without an embedding
+ * appear in no pair at all, so a missing vector can never cause a photo to be
+ * dropped — the rule only ever acts on positive evidence of redundancy.
+ */
+function buildRedundancyIndex(pairs: RedundantPair[]): Map<number, Set<number>> {
+  const index = new Map<number, Set<number>>();
+  const link = (a: number, b: number) => {
+    const set = index.get(a);
+    if (set) set.add(b);
+    else index.set(a, new Set([b]));
+  };
+  for (const pair of pairs) {
+    if (pair.photo_id_a === pair.photo_id_b) continue;
+    link(pair.photo_id_a, pair.photo_id_b);
+    link(pair.photo_id_b, pair.photo_id_a);
+  }
+  return index;
+}
 
 export interface AiPickResult {
   picked_photo_ids: number[];
@@ -239,6 +297,7 @@ export function scorePhoto(
 export function computeGroupPick(
   photos: PhotoSignals[],
   weights: ScoringWeights = DEFAULT_SCORING_WEIGHTS,
+  redundantPairs: RedundantPair[] = [],
 ): AiPickResult {
   if (photos.length < 2) {
     return {
@@ -288,6 +347,70 @@ export function computeGroupPick(
     }
   }
 
+  // Redundancy rule. The multi-pick threshold is a *score* comparison, and
+  // two frames of the same burst score near-identically precisely because they
+  // show the same thing — so the pick set could end up holding the same moment
+  // twice. Walk the picks best-first, drop any that merely repeats a pick
+  // already accepted, and give the freed slot to the best sibling that shows
+  // something else (if one clears DIVERSITY_FLOOR). Trading a hair of quality
+  // for a genuinely different photo is the whole point.
+  //
+  // Redundancy is only ever judged *within* one orientation: portrait and
+  // landscape of the same subject are visually near-identical, but keeping
+  // both is a deliberate product decision (see ORIENTATION_FLOOR), so they
+  // must never suppress each other.
+  const suppressed: number[] = [];
+  const promoted: number[] = [];
+  if (redundantPairs.length > 0 && pickedIds.size > 1) {
+    const redundancy = buildRedundancyIndex(redundantPairs);
+    const orientationByPhotoId = new Map(
+      photos.map((p) => [p.photo_id, p.orientation ?? "landscape"] as const),
+    );
+    const repeatsAccepted = (photoId: number, accepted: number[]): boolean => {
+      const alike = redundancy.get(photoId);
+      if (!alike) return false;
+      const orientation = orientationByPhotoId.get(photoId);
+      return accepted.some(
+        (acceptedId) =>
+          alike.has(acceptedId) &&
+          orientationByPhotoId.get(acceptedId) === orientation,
+      );
+    };
+
+    const accepted: number[] = [];
+    for (const candidate of ranked) {
+      if (!pickedIds.has(candidate.photo_id)) continue;
+      // The top-scored photo is never suppressed — there is nothing better
+      // for it to be redundant with.
+      if (accepted.length === 0 || !repeatsAccepted(candidate.photo_id, accepted)) {
+        accepted.push(candidate.photo_id);
+      } else {
+        suppressed.push(candidate.photo_id);
+      }
+    }
+
+    // Refill: one replacement per suppressed pick, best-first, and only from
+    // photos that are themselves not a repeat of anything already accepted.
+    for (let slot = 0; slot < suppressed.length; slot++) {
+      const replacement = ranked.find(
+        (s) =>
+          !accepted.includes(s.photo_id) &&
+          !suppressed.includes(s.photo_id) &&
+          !promoted.includes(s.photo_id) &&
+          s.score >= topScore * DIVERSITY_FLOOR &&
+          !repeatsAccepted(s.photo_id, accepted),
+      );
+      if (!replacement) break;
+      accepted.push(replacement.photo_id);
+      promoted.push(replacement.photo_id);
+    }
+
+    if (suppressed.length > 0) {
+      pickedIds.clear();
+      for (const id of accepted) pickedIds.add(id);
+    }
+  }
+
   const bestNonPick = ranked.find((s) => !pickedIds.has(s.photo_id));
   // Δ for confidence gate is measured against the best non-pick. With
   // multi-pick the "boring" runner-ups are excluded from the gap, so a
@@ -310,6 +433,8 @@ export function computeGroupPick(
       runner_up_delta: runnerUpDelta,
       multi_pick_threshold: MULTI_PICK_THRESHOLD,
       scores,
+      ...(suppressed.length > 0 ? { redundancy_suppressed: suppressed } : {}),
+      ...(promoted.length > 0 ? { diversity_promoted: promoted } : {}),
     },
   };
 }
