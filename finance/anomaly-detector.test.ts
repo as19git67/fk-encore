@@ -18,7 +18,9 @@ import {
 import {
   counterpartySimilarity,
   derivePaymentChannel,
+  extractTextDates,
   normalizeCounterparty,
+  purposeDatesContradict,
   runAnomalyDetection,
 } from "./anomaly-detector";
 
@@ -872,6 +874,141 @@ describe("finance/anomaly-detector — payment channel separation", () => {
       .where(eq(financeRecurringMandate.account_id, accountId));
     expect(mandates).toHaveLength(1);
     expect(mandates[0].payment_channel).toBe("direct_debit");
+  });
+});
+
+describe("finance/anomaly-detector — text dates in the purpose", () => {
+  it("reads ISO and German dates and ignores non-dates", () => {
+    expect(extractTextDates("Kartenzahlung 2026-07-07 00:00:00")).toEqual(["2026-07-07"]);
+    expect(extractTextDates("Einkauf am 7.7.2026")).toEqual(["2026-07-07"]);
+    expect(extractTextDates("Einkauf am 07.07.26")).toEqual(["2026-07-07"]);
+    expect(extractTextDates("Einkauf 07.07. Filiale 12")).toEqual(["07-07"]);
+    expect(extractTextDates("Karte Nr. 4871 78XX XXXX 8079 Betrag 19.99")).toEqual([]);
+    expect(extractTextDates("Beleg 34.99.2026")).toEqual([]);
+    expect(extractTextDates(null)).toEqual([]);
+  });
+
+  it("contradicts only when both texts name dates and none of them agree", () => {
+    const base = "STARBUCKS APP, MUSTERSTADT DE Kartenzahlung";
+    expect(purposeDatesContradict(`${base} 2026-07-07`, `${base} 2026-07-09`)).toBe(true);
+    expect(purposeDatesContradict(`${base} 2026-07-07`, `${base} 2026-07-07`)).toBe(false);
+    // A year-less German date still matches its full-date counterpart.
+    expect(purposeDatesContradict(`${base} 07.07.`, `${base} 2026-07-07`)).toBe(false);
+    // One side without any date says nothing.
+    expect(purposeDatesContradict(`${base} 2026-07-07`, base)).toBe(false);
+    expect(purposeDatesContradict(null, `${base} 2026-07-07`)).toBe(false);
+  });
+});
+
+describe("finance/anomaly-detector — duplicate", () => {
+  const CARD_PURPOSE = [
+    "STARBUCKS APP, MUSTERSTADT DE",
+    "Karte Nr. 0000 00XX XXXX 0000",
+    "Kartenzahlung",
+  ].join("\n");
+
+  it("does NOT flag two card payments of the same amount on different days", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+
+    for (const days of [4, 2]) {
+      await insertTx({
+        accountId,
+        bookingDate: daysAgo(days),
+        amount: "-5.90",
+        counterparty: "STARBUCKS APP, MUSTERSTADT DE",
+        entryText: "Kartenzahlung",
+        transactionType: "CCRD",
+        purpose: CARD_PURPOSE,
+      });
+    }
+
+    await runAnomalyDetection([accountId]);
+
+    const duplicates = await db
+      .select()
+      .from(financeAnomaly)
+      .where(eq(financeAnomaly.type, "duplicate"));
+    expect(duplicates).toHaveLength(0);
+  });
+
+  it("still flags a card payment booked twice on the same day", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+
+    for (let i = 0; i < 2; i++) {
+      await insertTx({
+        accountId,
+        bookingDate: daysAgo(2),
+        amount: "-5.90",
+        counterparty: "STARBUCKS APP, MUSTERSTADT DE",
+        entryText: "Kartenzahlung",
+        transactionType: "CCRD",
+        purpose: CARD_PURPOSE,
+      });
+    }
+
+    await runAnomalyDetection([accountId]);
+
+    const duplicates = await db
+      .select()
+      .from(financeAnomaly)
+      .where(eq(financeAnomaly.type, "duplicate"));
+    expect(duplicates).toHaveLength(1);
+  });
+
+  it("does NOT flag bookings whose purposes name different transaction dates", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+
+    for (const [days, textDate] of [[4, "2026-07-07"], [2, "2026-07-09"]] as const) {
+      await insertTx({
+        accountId,
+        bookingDate: daysAgo(days),
+        amount: "-5.90",
+        counterparty: "Musterhändler GmbH",
+        entryText: "Lastschrift",
+        transactionType: "RDDT",
+        mandateRef: "M-SHOP",
+        creditorId: "DE00SHOP0",
+        purpose: `Einkauf ${textDate} 00:00:00`,
+      });
+    }
+
+    await runAnomalyDetection([accountId]);
+
+    const duplicates = await db
+      .select()
+      .from(financeAnomaly)
+      .where(eq(financeAnomaly.type, "duplicate"));
+    expect(duplicates).toHaveLength(0);
+  });
+
+  it("still flags a direct debit booked twice within the window", async () => {
+    await ensureUser(1);
+    const accountId = await insertAccount();
+
+    for (const days of [4, 2]) {
+      await insertTx({
+        accountId,
+        bookingDate: daysAgo(days),
+        amount: "-49.00",
+        counterparty: "Musterhändler GmbH",
+        entryText: "Lastschrift",
+        transactionType: "RDDT",
+        mandateRef: "M-SHOP",
+        creditorId: "DE00SHOP0",
+        purpose: "Rechnung 2026-07-07",
+      });
+    }
+
+    await runAnomalyDetection([accountId]);
+
+    const duplicates = await db
+      .select()
+      .from(financeAnomaly)
+      .where(eq(financeAnomaly.type, "duplicate"));
+    expect(duplicates).toHaveLength(1);
   });
 });
 

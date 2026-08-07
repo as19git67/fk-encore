@@ -41,6 +41,16 @@ const AMOUNT_CHANGE_THRESHOLD = 0.15; // 15 %
 const AMOUNT_CHANGE_MIN_ABS = 5.00;
 /** Days within which a second identical booking is flagged as duplicate. */
 const DUPLICATE_WINDOW_DAYS = 5;
+/**
+ * Card payments are the one channel where the same merchant, the same
+ * amount and a gap of a few days is entirely normal — a coffee on Tuesday
+ * and another on Thursday is not a double booking. A genuine double
+ * capture of a card payment lands on the same booking date, so cards get
+ * a same-day-only window.
+ */
+const CARD_DUPLICATE_WINDOW_DAYS = 0;
+/** Candidates inspected per transaction before the text-date comparison. */
+const DUPLICATE_CANDIDATE_LIMIT = 20;
 /** Newly established recurring patterns above this amount get an alert. */
 const NEW_MANDATE_ALERT_AMOUNT = 10;
 /** Minimum real bookings required before a series can be called recurring. */
@@ -400,8 +410,12 @@ async function processAccount(
         }
       }
 
-      // Check for duplicate within window
-      const windowStart = shiftDate(tx.booking_date, -DUPLICATE_WINDOW_DAYS);
+      // Check for duplicate within window. Cards repeat legitimately, so
+      // they only look at the same booking date (see CARD_DUPLICATE_WINDOW_DAYS).
+      const windowDays = key.payment_channel === "card"
+        ? CARD_DUPLICATE_WINDOW_DAYS
+        : DUPLICATE_WINDOW_DAYS;
+      const windowStart = shiftDate(tx.booking_date, -windowDays);
       const duplicate = await findDuplicate(tx, mandate.id, windowStart);
       if (duplicate) {
         const inserted = await insertAnomalyIfAbsent({
@@ -729,6 +743,82 @@ async function getMandateTypicalInterval(mandateId: number): Promise<number | nu
   return Math.round(intervals.reduce((a, b) => a + b, 0) / intervals.length);
 }
 
+// -----------------------------------------------------------------------
+// Text dates inside the purpose
+// -----------------------------------------------------------------------
+
+/**
+ * ISO dates (2026-07-07) and German dates (7.7.2026, 07.07.26, 07.07.)
+ * as they appear inside a booking's purpose text. Card bookings in
+ * particular carry the date of the actual purchase, which is what tells
+ * two visits to the same merchant apart when the amount is identical.
+ */
+const ISO_DATE_IN_TEXT = /(?<!\d)(\d{4})-(\d{2})-(\d{2})(?!\d)/g;
+const GERMAN_DATE_IN_TEXT = /(?<!\d)(\d{1,2})\.(\d{1,2})\.(\d{2,4})?(?!\d)/g;
+
+/**
+ * All plausible calendar dates inside a free-text field, normalized to
+ * `YYYY-MM-DD` — or to `MM-DD` when the text carried no year (the common
+ * `07.07.` card form). Nonsense matches (month 34, day 0, amounts like
+ * `1.234.567`) are dropped.
+ */
+export function extractTextDates(text: string | null | undefined): string[] {
+  if (!text) return [];
+  const found = new Set<string>();
+
+  for (const m of text.matchAll(ISO_DATE_IN_TEXT)) {
+    const [, year, month, day] = m;
+    if (!isCalendarDate(Number(month), Number(day))) continue;
+    found.add(`${year}-${month}-${day}`);
+  }
+
+  for (const m of text.matchAll(GERMAN_DATE_IN_TEXT)) {
+    const [, day, month, year] = m;
+    if (!isCalendarDate(Number(month), Number(day))) continue;
+    const dd = day.padStart(2, "0");
+    const mm = month.padStart(2, "0");
+    if (year === undefined) {
+      found.add(`${mm}-${dd}`);
+      continue;
+    }
+    const yyyy = year.length === 2 ? `20${year}` : year.padStart(4, "0");
+    found.add(`${yyyy}-${mm}-${dd}`);
+  }
+
+  return [...found];
+}
+
+function isCalendarDate(month: number, day: number): boolean {
+  return month >= 1 && month <= 12 && day >= 1 && day <= 31;
+}
+
+/** `2026-07-07` and `07-07` describe the same day; `07-07` and `09-07` do not. */
+function textDatesMatch(left: string, right: string): boolean {
+  if (left.length === right.length) return left === right;
+  return left.endsWith(right) || right.endsWith(left);
+}
+
+/**
+ * True when both purposes name calendar dates and none of them agree —
+ * evidence that the two bookings describe two separate real-world
+ * payments (e.g. two card purchases at the same shop on different days)
+ * rather than the same payment booked twice.
+ *
+ * Deliberately conservative: when only one side carries a date, or the
+ * dates overlap, this says nothing and the caller keeps its own verdict.
+ * No LLM needed — the dates are machine-readable in the text.
+ */
+export function purposeDatesContradict(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): boolean {
+  const leftDates = extractTextDates(left);
+  if (leftDates.length === 0) return false;
+  const rightDates = extractTextDates(right);
+  if (rightDates.length === 0) return false;
+  return !leftDates.some((l) => rightDates.some((r) => textDatesMatch(l, r)));
+}
+
 async function findDuplicate(
   tx: typeof financeTransaction.$inferSelect,
   mandateId: number,
@@ -739,23 +829,38 @@ async function findDuplicate(
   // confirm the other transaction shares the same mandate (via mandate_id on
   // the anomaly that was already created for it, OR by matching mandate fields
   // directly on the transaction).
-  const rows = await db.execute<{ id: number }>(sql`
-    SELECT ft.id
+  //
+  // "Prior" is (booking_date, id): booking_date is a timestamp that is
+  // midnight for most importers, so a same-day double booking is only
+  // ordered by id. Without the tie-break those — the most likely real
+  // duplicates — would never be found.
+  const rows = await db.execute<{ id: number; purpose: string | null }>(sql`
+    SELECT ft.id, ft.purpose
     FROM finance_transaction ft
     JOIN finance_recurring_mandate frm ON frm.id = ${mandateId}
     WHERE ft.account_id = ${tx.account_id}
       AND ft.amount = ${tx.amount}
       AND ft.booking_date >= ${windowStart}
-      AND ft.booking_date < ${tx.booking_date}
+      AND (
+        ft.booking_date < ${tx.booking_date}
+        OR (ft.booking_date = ${tx.booking_date} AND ft.id < ${tx.id})
+      )
       AND ft.id <> ${tx.id}
       AND (
         (frm.mandate_ref IS NOT NULL AND ft.mandate_ref = frm.mandate_ref)
         OR (frm.mandate_ref IS NULL AND frm.counterparty_iban IS NOT NULL AND ft.counterparty_iban = frm.counterparty_iban)
         OR (frm.mandate_ref IS NULL AND frm.counterparty_iban IS NULL AND ft.counterparty = frm.counterparty)
       )
-    LIMIT 1
+    ORDER BY ft.booking_date DESC, ft.id DESC
+    LIMIT ${DUPLICATE_CANDIDATE_LIMIT}
   `);
-  return rows.rows[0] ?? undefined;
+
+  // Same merchant, same amount, same window — but if the purposes name
+  // different transaction dates, these are two independent payments.
+  const candidate = rows.rows.find(
+    (row) => !purposeDatesContradict(tx.purpose, row.purpose),
+  );
+  return candidate ? { id: candidate.id } : undefined;
 }
 
 // -----------------------------------------------------------------------
