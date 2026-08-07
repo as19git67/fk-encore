@@ -1,0 +1,886 @@
+# GitLab CI port of the former GitHub Actions workflows (.github/workflows/*.yml,
+# excluding claude.yml, which has no GitLab equivalent and was dropped).
+#
+# Registry: images now live on registry.scheggs.net instead of ghcr.io. The
+# main app keeps the project's own image path; sidecar services use sub-paths
+# under it (registry.scheggs.net/schegg/fk-encore/<service>) instead of GHCR's
+# sibling-repo-with-suffix naming (ghcr.io/as19git67/fk-encore-<service>) —
+# that's the GitLab-native way to group several images under one project.
+#
+# Login: assumes registry.scheggs.net IS this GitLab instance's integrated
+# Container Registry, so the predefined $CI_REGISTRY_USER / $CI_REGISTRY_PASSWORD
+# (gitlab-ci-token) work without extra setup. If registry.scheggs.net is a
+# *different*, external registry, define REGISTRY_USER / REGISTRY_PASSWORD as
+# CI/CD variables (Settings > CI/CD > Variables) and swap them into the
+# `docker login` calls below.
+#
+# Runners: the docker-build jobs need a Docker executor with access to a
+# Docker daemon (docker:dind service, privileged mode) or an equivalent
+# Docker-in-Docker setup. The iOS job needs a macOS runner with Xcode
+# registered with the `macos` tag — adjust the tag to match your fleet.
+#
+# Deploy: every former workflow POSTed to the *same* Watchtower webhook
+# regardless of which image it built, so instead of duplicating that call in
+# every build job, this file fires it once per pipeline via deploy:test /
+# deploy:prod, after whichever build jobs actually ran.
+
+stages:
+  - test
+  - build
+  - deploy
+  - cleanup
+
+variables:
+  REGISTRY: registry.scheggs.net
+  DOCKER_TLS_CERTDIR: ""
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_DRIVER: overlay2
+
+# Avoid duplicate pipelines for the same push (branch pipeline + MR pipeline).
+# Mirrors: push to main/tags, pull_request, workflow_dispatch (-> web/trigger),
+# and the daily cleanup schedule.
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+    - if: '$CI_PIPELINE_SOURCE == "trigger"'
+
+# ---------------------------------------------------------------------------
+# Shared building blocks
+# ---------------------------------------------------------------------------
+
+.docker_dind: &docker_dind
+  image: docker:27-cli
+  services:
+    - docker:27-dind
+
+# NOTE: these two anchors must stay single multi-line strings (YAML block
+# scalars), not one-element lists — `- *anchor` inside another job's
+# before_script list only flattens correctly when the anchor itself resolves
+# to a scalar. Anchoring a list here would nest as `- - echo ...` and break
+# at runtime (verified against gitlab.scheggs.net's CI lint API).
+.registry_login: &registry_login |
+  echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$REGISTRY"
+
+# Rebuild of docker/metadata-action's tag logic:
+#   latest        -> default-branch pushes
+#   <git tag>      -> semver tag pushes (the tag name itself, same as GH's type=semver,pattern={{version}})
+#   test          -> merge request pipelines
+# Writes a newline-separated list of image refs to tags.txt for the caller to loop over.
+.compute_tags: &compute_tags |
+  IMAGE="${REGISTRY}/${IMAGE_PATH}"
+  : > tags.txt
+  if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then
+    echo "${IMAGE}:latest" >> tags.txt
+  fi
+  if [ -n "$CI_COMMIT_TAG" ]; then
+    echo "${IMAGE}:${CI_COMMIT_TAG}" >> tags.txt
+  fi
+  if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ]; then
+    echo "${IMAGE}:test" >> tags.txt
+  fi
+  echo "Resolved tags:"; cat tags.txt
+
+# ---------------------------------------------------------------------------
+# compose-validate.yml -> validate / chown-init-smoke
+# ---------------------------------------------------------------------------
+
+compose:validate:
+  stage: test
+  image: docker:27-cli
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_HOST: tcp://docker:2375
+  rules:
+    - changes:
+        - docker-compose.yml
+        - docker-compose-dev.yml
+        - docker-compose.env.example
+        - docker-compose.env.test.example
+        - .gitlab-ci.yml
+  script:
+    # --quiet exits non-zero on any syntax / reference / volume-ref error, so
+    # this is a cheap guard against broken compose files. The prod file
+    # references unset env vars (WATCHTOWER_TOKEN etc.) which compose treats
+    # as empty strings — that is fine for a config check.
+    - docker compose -f docker-compose.yml config --quiet
+    - docker compose --env-file docker-compose.env.test.example -f docker-compose.yml config --quiet
+    - docker compose -f docker-compose-dev.yml config --quiet
+
+compose:chown-init-smoke:
+  stage: test
+  image: docker:27-cli
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_HOST: tcp://docker:2375
+  needs: ["compose:validate"]
+  rules:
+    - changes:
+        - docker-compose.yml
+        - docker-compose-dev.yml
+        - docker-compose.env.example
+        - docker-compose.env.test.example
+        - .gitlab-ci.yml
+  script:
+    # Spins up chown-init against a throwaway compose file mirroring the
+    # command + mount layout from docker-compose.yml but with default local
+    # volumes (no host bind paths — those point at a specific TrueNAS host
+    # and do not exist on CI runners). Proves the command sets 568:568
+    # recursively, across a directory that already contains root-owned files.
+    - |
+      cat > docker-compose.ci.yml <<'EOF'
+      services:
+        chown-init:
+          image: alpine:3.20
+          user: "0:0"
+          command: ["sh", "-c", "chown -R 568:568 /mnt/documents /mnt/documents-inbox /mnt/models"]
+          volumes:
+            - documents:/mnt/documents
+            - documents_inbox:/mnt/documents-inbox
+            - llm_models:/mnt/models
+      volumes:
+        documents:
+        documents_inbox:
+        llm_models:
+      EOF
+    - |
+      docker compose -f docker-compose.ci.yml run --rm --user 0:0 \
+        --entrypoint sh chown-init -c '
+          touch /mnt/documents/seed.pdf \
+                /mnt/documents-inbox/seed.pdf \
+                /mnt/models/seed.bin
+        '
+    - docker compose -f docker-compose.ci.yml run --rm chown-init
+    - |
+      docker compose -f docker-compose.ci.yml run --rm --user 0:0 \
+        --entrypoint sh chown-init -c '
+          set -e
+          for p in /mnt/documents /mnt/documents-inbox /mnt/models; do
+            dir_owner=$(stat -c "%u:%g" "$p")
+            file_owner=$(stat -c "%u:%g" "$p"/seed.*)
+            echo "$p: dir=$dir_owner file=$file_owner"
+            [ "$dir_owner" = "568:568" ] || { echo "FAIL: $p dir owner $dir_owner"; exit 1; }
+            [ "$file_owner" = "568:568" ] || { echo "FAIL: $p file owner $file_owner"; exit 1; }
+          done
+          echo "chown-init smoke OK"
+        '
+  after_script:
+    - docker compose -f docker-compose.ci.yml down -v || true
+
+# ---------------------------------------------------------------------------
+# docker-image.yml -> main Encore app (two-stage build)
+# ---------------------------------------------------------------------------
+
+app:test:
+  stage: test
+  image: node:24-bookworm
+  services:
+    - name: pgvector/pgvector:pg18
+      alias: postgres
+      variables:
+        POSTGRES_USER: postgres
+        POSTGRES_PASSWORD: postgres
+        POSTGRES_DB: postgres
+  variables:
+    NODE_ENV: test
+    VITEST: "true"
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: "5432"
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    POSTGRES_TEST_DB: encore_test
+    POSTGRES_TEST_CONNECTION_STRING: postgres://postgres:postgres@postgres:5432/encore_test
+  rules: &app_ignore_rules
+    # GitLab's `changes:` has no negation/exclude syntax (unlike GH's
+    # paths-ignore), so this approximates it: skip when the change set
+    # touches one of the ignored service dirs, run otherwise. Deviation from
+    # GH: paths-ignore only skips if *every* changed file is ignored; here a
+    # commit touching both an ignored dir and something else still skips.
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - "embedding_service/**/*"
+        - "insightface-service/**/*"
+        - "geo/**/*"
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: on_success
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
+      changes:
+        - "embedding_service/**/*"
+        - "insightface-service/**/*"
+        - "geo/**/*"
+      when: never
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
+      when: on_success
+  script:
+    # `npm install`, not `npm ci`: lockfiles have repeatedly drifted between
+    # dev platforms in this repo, and `npm ci` would fail CI on every drift.
+    - npm install
+    # geo/ is a standalone Node container with its own package.json, but
+    # Encore's source-code parser walks every .ts in the workspace; without
+    # geo/node_modules it fails to resolve `import express`.
+    - npm --prefix geo install
+    - npm test
+    - npm --prefix frontend install --legacy-peer-deps
+    - npm --prefix frontend run test
+  artifacts:
+    paths:
+      - frontend/dist
+    expire_in: 1 hour
+
+app:build:
+  <<: *docker_dind
+  stage: build
+  needs: ["app:test"]
+  variables:
+    IMAGE_PATH: "${CI_PROJECT_PATH}"
+    VITE_APP_BUILD: "${CI_PIPELINE_IID}-${CI_COMMIT_SHA}"
+  rules: *app_ignore_rules
+  before_script:
+    - apk add --no-cache nodejs npm curl bash
+    - *registry_login
+    - *compute_tags
+  script:
+    - npm --prefix frontend install --legacy-peer-deps
+    - npm --prefix frontend run build
+    # Installs the Encore CLI via the upstream install.sh, as documented at
+    # https://encore.dev/docs/ts/self-host/ci-cd. No `-v <version>`: the
+    # official docs install the latest GA release; pinning via -v caused
+    # install.sh to 403 on the CDN in the past.
+    - curl -fsSL --retry 3 --retry-delay 5 -o install.sh https://encore.dev/install.sh
+    - bash install.sh
+    - export PATH="${HOME}/.encore/bin:${PATH}"
+    - rm -f install.sh
+    - encore version
+    # Stage A — Encore's official production build. Produces a portable
+    # image (node:24-bookworm-slim base) with the compiled app + runtime,
+    # tagged locally; it never leaves the runner/dind daemon.
+    #
+    # --config bakes infra-config.json into the image; do NOT use
+    # --skip-config, the Encore runtime requires ENCORE_RUNTIME_CONFIG or
+    # ENCORE_INFRA_CONFIG_PATH at startup and --skip-config suppresses both,
+    # crashing the container immediately.
+    - |
+      encore build docker \
+        --config=infra-config.json \
+        --base=node:24-bookworm-slim \
+        --os=linux \
+        --arch=amd64 \
+        fk-encore-raw:build
+    # Stage B — thin runtime wrapper: TrueNAS SCALE apps user (568:568),
+    # bind-mount directories, the pre-built frontend SPA, APP_BUILD_NUMBER.
+    - |
+      docker build \
+        -f docker/Dockerfile.runtime \
+        --build-arg BASE_IMAGE=fk-encore-raw:build \
+        --build-arg BUILD_NUMBER="${CI_PIPELINE_IID}-${CI_COMMIT_SHA}" \
+        -t app-build:latest \
+        .
+    - |
+      while read -r tag; do
+        [ -z "$tag" ] && continue
+        docker tag app-build:latest "$tag"
+        docker push "$tag"
+      done < tags.txt
+
+# ---------------------------------------------------------------------------
+# docker-image-embedding.yml
+# ---------------------------------------------------------------------------
+
+embedding:test:
+  stage: test
+  image: python:3.11-slim
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: &embedding_paths
+        - "embedding_service/**/*"
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
+      changes: *embedding_paths
+  script:
+    - cd embedding_service
+    - pip install fastapi httpx pytest pytest-asyncio pydantic pydantic-settings python-multipart Pillow sqlalchemy[asyncio] numpy
+    - pytest tests/ -v
+
+embedding:build:
+  <<: *docker_dind
+  stage: build
+  needs: ["embedding:test"]
+  variables:
+    IMAGE_PATH: "${CI_PROJECT_PATH}/embedding"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: *embedding_paths
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
+      changes: *embedding_paths
+  before_script:
+    - *registry_login
+    - *compute_tags
+  script:
+    # Multi-arch: model weights live in the embedding_models volume, not the
+    # image, so the build no longer pulls the ~4.77 GB CLIP file twice.
+    - docker buildx create --use --driver docker-container
+    - |
+      TAG_ARGS=""
+      while read -r tag; do
+        [ -z "$tag" ] && continue
+        TAG_ARGS="$TAG_ARGS -t $tag"
+      done < tags.txt
+      docker buildx build ./embedding_service \
+        --platform linux/amd64,linux/arm64 \
+        $TAG_ARGS \
+        --push
+
+# ---------------------------------------------------------------------------
+# docker-image-geo.yml
+# ---------------------------------------------------------------------------
+
+geo:test:
+  stage: test
+  image: node:20-bookworm
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: &geo_paths
+        - "geo/**/*"
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
+      changes: *geo_paths
+  script:
+    - cd geo
+    - npm install
+    - npm run typecheck
+    - npm test
+
+geo:build:
+  <<: *docker_dind
+  stage: build
+  needs: ["geo:test"]
+  variables:
+    IMAGE_PATH: "${CI_PROJECT_PATH}/geo"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: *geo_paths
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
+      changes: *geo_paths
+  before_script:
+    - *registry_login
+    - *compute_tags
+  script:
+    # Single-arch (amd64) to match the current deploy target. Flip to
+    # linux/amd64,linux/arm64 once an arm64 host is actually in use.
+    - docker buildx create --use --driver docker-container
+    - |
+      TAG_ARGS=""
+      while read -r tag; do
+        [ -z "$tag" ] && continue
+        TAG_ARGS="$TAG_ARGS -t $tag"
+      done < tags.txt
+      docker buildx build ./geo \
+        --platform linux/amd64 \
+        $TAG_ARGS \
+        --push
+
+# ---------------------------------------------------------------------------
+# docker-image-insightface.yml
+# ---------------------------------------------------------------------------
+
+insightface:test:
+  stage: test
+  image: python:3.11-slim
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: &insightface_paths
+        - "insightface-service/**/*"
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
+      changes: *insightface_paths
+  script:
+    - cd insightface-service
+    - pip install fastapi httpx pytest pytest-asyncio numpy python-multipart Pillow sqlalchemy[asyncio]
+    - pytest tests/ -v
+
+insightface:build:
+  <<: *docker_dind
+  stage: build
+  needs: ["insightface:test"]
+  variables:
+    IMAGE_PATH: "${CI_PROJECT_PATH}/insightface"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: *insightface_paths
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
+      changes: *insightface_paths
+  before_script:
+    - *registry_login
+    - *compute_tags
+  script:
+    - docker buildx create --use --driver docker-container
+    - |
+      TAG_ARGS=""
+      while read -r tag; do
+        [ -z "$tag" ] && continue
+        TAG_ARGS="$TAG_ARGS -t $tag"
+      done < tags.txt
+      docker buildx build ./insightface-service \
+        --platform linux/amd64,linux/arm64 \
+        $TAG_ARGS \
+        --push
+
+# ---------------------------------------------------------------------------
+# docker-image-llm.yml (cpu + cuda matrix)
+# ---------------------------------------------------------------------------
+
+llm:test:
+  stage: test
+  image: python:3.11-slim
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: &llm_paths
+        - "llm-service/**/*"
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
+      changes: *llm_paths
+  script:
+    - cd llm-service
+    - pip install fastapi httpx pytest pydantic
+    - pytest tests/ -v
+
+# Both variants compile llama-cpp-python from source (PyPI ships only an
+# sdist, and the CPU build needs custom CMAKE_ARGS to disable AVX-512 — see
+# llm-service/Dockerfile). fail_fast: false so a broken CUDA build still
+# leaves a publishable CPU image. Registry-backed buildx cache per variant
+# (the `buildcache` tag) so touching main.py alone reuses the compiled layer.
+llm:build:
+  <<: *docker_dind
+  stage: build
+  needs: ["llm:test"]
+  parallel:
+    matrix:
+      - VARIANT: cpu
+        DOCKERFILE: llm-service/Dockerfile
+        SUFFIX: ""
+      - VARIANT: cuda
+        DOCKERFILE: llm-service/Dockerfile.gpu
+        SUFFIX: "-gpu"
+  variables:
+    IMAGE_PATH: "${CI_PROJECT_PATH}/llm${SUFFIX}"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: *llm_paths
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
+      changes: *llm_paths
+  before_script:
+    - *registry_login
+    - *compute_tags
+  script:
+    - docker buildx create --use --driver docker-container
+    - |
+      TAG_ARGS=""
+      while read -r tag; do
+        [ -z "$tag" ] && continue
+        TAG_ARGS="$TAG_ARGS -t $tag"
+      done < tags.txt
+      docker buildx build ./llm-service \
+        -f "$DOCKERFILE" \
+        --platform linux/amd64 \
+        $TAG_ARGS \
+        --cache-from "type=registry,ref=${REGISTRY}/${IMAGE_PATH}:buildcache" \
+        --cache-to "type=registry,ref=${REGISTRY}/${IMAGE_PATH}:buildcache,mode=max" \
+        --push
+
+# ---------------------------------------------------------------------------
+# docker-image-playwright-e2e.yml — pre-baked Playwright runner image
+# ---------------------------------------------------------------------------
+
+playwright-image:build:
+  <<: *docker_dind
+  stage: build
+  timeout: 30 minutes
+  variables:
+    IMAGE_PATH: "${CI_PROJECT_PATH}/playwright-e2e"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: &pw_image_paths
+        - "docker/Dockerfile.playwright-e2e"
+        - ".gitlab-ci.yml"
+        - "frontend/package.json"
+        - "frontend/package-lock.json"
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
+      changes: *pw_image_paths
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+  before_script:
+    - apk add --no-cache nodejs npm
+    - *registry_login
+  script:
+    # Read the Playwright version from frontend/package-lock.json so the
+    # baked-in chromium matches what `npx playwright test` runs later. Drift
+    # here surfaces as "browser executable doesn't exist" at runtime.
+    - PW_VERSION=$(node -p "require('./frontend/package-lock.json').packages['node_modules/@playwright/test'].version")
+    - echo "Resolved Playwright version ${PW_VERSION}"
+    - |
+      IMAGE="${REGISTRY}/${IMAGE_PATH}"
+      : > tags.txt
+      [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ] && echo "${IMAGE}:latest" >> tags.txt
+      [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ] && echo "${IMAGE}:pw-${PW_VERSION}" >> tags.txt
+      [ -n "$CI_COMMIT_TAG" ] && echo "${IMAGE}:${CI_COMMIT_TAG}" >> tags.txt
+      [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ] && echo "${IMAGE}:test" >> tags.txt
+      cat tags.txt
+    - docker buildx create --use --driver docker-container
+    - |
+      TAG_ARGS=""
+      while read -r tag; do
+        [ -z "$tag" ] && continue
+        TAG_ARGS="$TAG_ARGS -t $tag"
+      done < tags.txt
+      # mcr.microsoft.com hands out pre-signed Azure-blob URLs that
+      # intermittently 403; one retry after a short wait is plenty in
+      # practice (see GH run 26364805275).
+      docker buildx build . \
+        -f docker/Dockerfile.playwright-e2e \
+        --build-arg PLAYWRIGHT_VERSION="${PW_VERSION}" \
+        $TAG_ARGS \
+        --push \
+      || { echo "First build attempt failed (likely a transient MCR 403); retrying in 30s"; sleep 30; \
+           docker buildx build . -f docker/Dockerfile.playwright-e2e --build-arg PLAYWRIGHT_VERSION="${PW_VERSION}" $TAG_ARGS --push; }
+
+# ---------------------------------------------------------------------------
+# docker-image-receipt-ocr.yml
+# ---------------------------------------------------------------------------
+
+receipt-ocr:test:
+  stage: test
+  image: python:3.11-slim
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: &receipt_ocr_paths
+        - "receipt-ocr-service/**/*"
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
+      changes: *receipt_ocr_paths
+  script:
+    - cd receipt-ocr-service
+    - pip install fastapi pydantic pytest python-multipart opencv-python-headless numpy
+    - pytest tests/ -v
+
+receipt-ocr:build:
+  <<: *docker_dind
+  stage: build
+  needs: ["receipt-ocr:test"]
+  variables:
+    IMAGE_PATH: "${CI_PROJECT_PATH}/receipt-ocr"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: *receipt_ocr_paths
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
+      changes: *receipt_ocr_paths
+  before_script:
+    - *registry_login
+    - *compute_tags
+  script:
+    - docker buildx create --use --driver docker-container
+    - |
+      TAG_ARGS=""
+      while read -r tag; do
+        [ -z "$tag" ] && continue
+        TAG_ARGS="$TAG_ARGS -t $tag"
+      done < tags.txt
+      docker buildx build ./receipt-ocr-service \
+        --platform linux/amd64,linux/arm64 \
+        $TAG_ARGS \
+        --push
+
+# ---------------------------------------------------------------------------
+# docker-image-taxonomy-tools.yml
+# ---------------------------------------------------------------------------
+
+taxonomy-tools:build:
+  <<: *docker_dind
+  stage: build
+  variables:
+    IMAGE_PATH: "${CI_PROJECT_PATH}/taxonomy-tools"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: &taxonomy_paths
+        - "taxonomy-tools/**/*"
+        - "scripts/taxonomy/**/*"
+        - "documents/taxonomy.ts"
+        - "documents/tax-sections.ts"
+        - "documents/classify-prompts.ts"
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
+      changes: *taxonomy_paths
+  before_script:
+    - apk add --no-cache bash
+    - *registry_login
+    - *compute_tags
+  script:
+    - bash taxonomy-tools/build-context.sh
+    - docker buildx create --use --driver docker-container
+    - |
+      TAG_ARGS=""
+      while read -r tag; do
+        [ -z "$tag" ] && continue
+        TAG_ARGS="$TAG_ARGS -t $tag"
+      done < tags.txt
+      docker buildx build ./taxonomy-tools \
+        --platform linux/amd64,linux/arm64 \
+        $TAG_ARGS \
+        --push
+
+# ---------------------------------------------------------------------------
+# playwright-e2e.yml (Track M) — application E2E suite
+# ---------------------------------------------------------------------------
+
+e2e:playwright:
+  stage: test
+  image: ${REGISTRY}/${CI_PROJECT_PATH}/playwright-e2e:latest
+  timeout: 30 minutes
+  interruptible: true
+  services:
+    - name: pgvector/pgvector:pg18
+      alias: postgres
+      variables:
+        POSTGRES_USER: postgres
+        POSTGRES_PASSWORD: postgres
+        POSTGRES_DB: postgres
+  variables:
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: "5432"
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    POSTGRES_DATABASE: fk_encore
+    ADMIN_EMAIL: admin@example.com
+    ADMIN_PASSWORD: admin
+    ADMIN_NAME: Admin
+    E2E_SEED_DEMO: "1"
+    RP_ORIGIN: http://localhost:5173
+    RP_NAME: FK Encore E2E
+    RP_ID: localhost
+    ENCORE_TELEMETRY_DISABLED: "1"
+    CI: "true"
+    E2E_BASE_URL: http://localhost:5173/app/
+    E2E_API_URL: http://localhost:4000
+    E2E_ADMIN_EMAIL: admin@example.com
+    E2E_ADMIN_PASSWORD: admin
+    PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+    PHOTO_UPLOAD_DIR: ${CI_PROJECT_DIR}/e2e-data/photos
+    PHOTO_THUMBNAIL_DIR: ${CI_PROJECT_DIR}/e2e-data/thumbnails
+    PHOTO_LIBRARIES_ROOT: ${CI_PROJECT_DIR}/e2e-data/libraries
+    DOCUMENTS_DIR: ${CI_PROJECT_DIR}/e2e-data/documents
+    DOCUMENTS_INBOX_DIR: ${CI_PROJECT_DIR}/e2e-data/documents-inbox
+    BACKUP_DIR: ${CI_PROJECT_DIR}/e2e-data/backup
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: &e2e_paths
+        - "frontend/**/*"
+        - "user/**/*"
+        - "photo/**/*"
+        - "documents/**/*"
+        - "finance/**/*"
+        - "db/**/*"
+        - "web/**/*"
+        - "package*.json"
+        - ".gitlab-ci.yml"
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      changes: *e2e_paths
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+  before_script:
+    - node --version
+    - npm --version
+    - encore version
+    - playwright --version
+  script:
+    - npm install
+    - npm --prefix geo install
+    - npm --prefix frontend install --legacy-peer-deps
+    - mkdir -p e2e-logs
+    - nohup encore run --port=4000 --watch=false > e2e-logs/encore.log 2>&1 &
+    - echo $! > e2e-logs/encore.pid
+    # Migrations + seed (permissions, roles, taxonomy, admin user) run on
+    # first DB use during initializeDb(). Cold runners regularly take
+    # 60-90s; budget 180s to absorb the worst case while still failing
+    # decisively on genuine boot errors.
+    - |
+      ok=0
+      for i in $(seq 1 180); do
+        status=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+          -H 'Content-Type: application/json' \
+          -d '{"email":"admin@example.com","password":"admin"}' \
+          http://localhost:4000/auth/login || echo 000)
+        case "$status" in
+          200|401)
+            echo "[wait] backend ready after ${i}s (status=${status})"
+            ok=1
+            break
+            ;;
+        esac
+        sleep 1
+      done
+      if [ "$ok" != "1" ]; then
+        echo "[wait] backend did not become ready in 180s" >&2
+        tail -n 200 e2e-logs/encore.log >&2 || true
+        exit 1
+      fi
+    - cd frontend && npm run e2e
+  after_script:
+    - |
+      pid=$(cat e2e-logs/encore.pid 2>/dev/null || true)
+      if [ -n "$pid" ]; then kill "$pid" 2>/dev/null || true; fi
+      encore daemon stop >/dev/null 2>&1 || true
+  artifacts:
+    when: always
+    expire_in: 14 days
+    paths:
+      - frontend/e2e/.report
+      - frontend/e2e/.results
+      - e2e-logs/encore.log
+
+# ---------------------------------------------------------------------------
+# ios-tests.yml — needs a macOS/Xcode runner registered with the `macos` tag.
+# Adjust the tag below to match whatever runner fleet is actually available;
+# there is no GitLab.com-style hosted macOS runner on a self-managed instance
+# unless one has been set up.
+# ---------------------------------------------------------------------------
+
+ios:test:
+  stage: test
+  tags:
+    - macos
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: &ios_paths
+        - "ios/**/*"
+        - ".gitlab-ci.yml"
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      changes: *ios_paths
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+  script:
+    - cd ios
+    - sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+    - xcodebuild -version
+    - xcodebuild -showsdks | grep -i ios || true
+    - xcrun simctl list devices available | grep -i iphone || true
+    # xcodebuild prefers an .xcodeproj over Package.swift when both are
+    # present, which hides the package's FKPhotos-Package scheme (and the
+    # FKPhotosTests target). Move the app project out of the working dir so
+    # the package becomes the only project context.
+    - mv FKPhotos.xcodeproj "${CI_BUILDS_DIR}/FKPhotos.xcodeproj"
+    - xcodebuild -list || true
+    - |
+      SCHEME=$(xcodebuild -list -json 2>/dev/null | python3 -c "import sys, json; r = sys.stdin.read(); d = json.loads(r[r.find('{'):]); c = d.get('workspace') or d.get('project') or {}; s = c.get('schemes', []); p = [x for x in s if x.endswith('-Package')]; print(p[0] if p else (s[0] if s else ''))")
+      echo "Selected scheme: $SCHEME"
+      echo "IOS_SCHEME=$SCHEME" >> build.env
+    - source build.env
+    - |
+      xcodebuild test \
+        -scheme "$IOS_SCHEME" \
+        -destination 'platform=iOS Simulator,name=iPhone 16' \
+        -skipPackagePluginValidation \
+        -resultBundlePath TestResults.xcresult \
+        CODE_SIGNING_ALLOWED=NO
+  artifacts:
+    when: always
+    paths:
+      - ios/TestResults.xcresult
+
+# ---------------------------------------------------------------------------
+# Shared Watchtower deploy — fires once per pipeline, after whatever build
+# jobs actually ran, instead of once per (former) workflow.
+# ---------------------------------------------------------------------------
+
+.deploy_needs: &deploy_needs
+  - job: app:build
+    optional: true
+  - job: embedding:build
+    optional: true
+  - job: geo:build
+    optional: true
+  - job: insightface:build
+    optional: true
+  - job: llm:build
+    optional: true
+  - job: receipt-ocr:build
+    optional: true
+  - job: taxonomy-tools:build
+    optional: true
+  - job: playwright-image:build
+    optional: true
+
+deploy:test:
+  stage: deploy
+  image: curlimages/curl:8.11.1
+  needs: *deploy_needs
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - >
+      curl -f -X POST
+      --retry 5 --retry-delay 10 --retry-all-errors
+      -H "Authorization: Bearer ${WATCHTOWER_TOKEN}"
+      "${WATCHTOWER_URL_TEST}/v1/update"
+
+deploy:prod:
+  stage: deploy
+  image: curlimages/curl:8.11.1
+  needs: *deploy_needs
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  script:
+    - >
+      curl -f -X POST
+      --retry 5 --retry-delay 10 --retry-all-errors
+      -H "Authorization: Bearer ${WATCHTOWER_TOKEN}"
+      "${WATCHTOWER_URL_PROD}/v1/update"
+
+# ---------------------------------------------------------------------------
+# ghcr-cleanup.yml -> registry.scheggs.net cleanup
+#
+# GitLab's Container Registry has a native bulk-delete endpoint
+# (keep_n + name_regex_keep/name_regex_delete) that replaces the GHCR
+# script's two-step "find orphaned untagged manifests, then trim old tagged
+# versions" logic outright — GitLab's registry garbage-collects unreferenced
+# manifests on its own once a tag is deleted, so there is no need to hunt
+# down child-manifest digests by hand.
+#
+# NOTE: for this API GitLab needs a token with `api` scope on the project
+# (a Project Access Token works; $CI_JOB_TOKEN is enough on most GitLab
+# versions >= 13 for same-project registry management, but if a version here
+# rejects it, set CLEANUP_TOKEN as a masked CI/CD variable and swap it in for
+# $CI_JOB_TOKEN below).
+#
+# Consider instead configuring this natively under Settings > Packages and
+# registries > Container registry > Cleanup policy, which covers the same
+# "keep N, protect these tags" policy with zero pipeline code. This job is
+# kept for parity with the old workflow (same protected-tag regex, runs on
+# the same daily schedule) and to allow on-demand manual runs.
+# ---------------------------------------------------------------------------
+
+cleanup:registry:
+  stage: cleanup
+  image: alpine:3.20
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+      when: manual
+  variables:
+    # Protected: latest, buildcache, semver (1.2.3 / v1.2.3), pw-<x.y.z>.
+    PROTECTED_TAG_REGEX: '^(latest|buildcache|v?[0-9]+\.[0-9]+\.[0-9]+|pw-[0-9]+\.[0-9]+\.[0-9]+)$'
+    KEEP_N: "10"
+  before_script:
+    - apk add --no-cache curl jq
+  script:
+    - |
+      set -euo pipefail
+      TOKEN="${CLEANUP_TOKEN:-$CI_JOB_TOKEN}"
+      API="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/registry/repositories"
+
+      REPOS=$(curl -fsSL --header "JOB-TOKEN: ${TOKEN}" "${API}?per_page=100")
+      echo "${REPOS}" | jq -r '.[] | "\(.id)\t\(.path)"'
+
+      echo "${REPOS}" | jq -r '.[].id' | while read -r repo_id; do
+        [ -z "$repo_id" ] && continue
+        echo "Cleaning repository id ${repo_id}"
+        curl -fsSL --header "JOB-TOKEN: ${TOKEN}" -X DELETE \
+          "${API}/${repo_id}/tags?name_regex_delete=.*&name_regex_keep=${PROTECTED_TAG_REGEX}&keep_n=${KEEP_N}"
+      done
