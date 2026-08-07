@@ -302,25 +302,51 @@ export async function runSynchronize(
   }
 
   // ── Resume path ────────────────────────────────────────────────────
+  // lib-fints keeps the open dialog on the client instance
+  // (`FinTSClient.currentDialog`); `synchronizeWithTan` continues *that*
+  // dialog and throws "no customer dialog was started which can
+  // continue" on any other instance. Rebuilding a client from the
+  // persisted bankingInformation therefore cannot work — the TAN has to
+  // go back to the very client that raised the challenge, which
+  // liveClientCache holds for us.
   if (isResume) {
-    const result = await runWithRetry(async () => {
-      const config = FinTSConfig.fromBankingInformation(
-        productId(),
-        productVersion(),
-        opts.bankingInformation as unknown as BankingInformation,
-        bankcontact.login,
-        pin,
-        bankcontact.tan_method ? parseInt(bankcontact.tan_method, 10) : undefined,
+    const live = takeCachedClient(bankcontactId);
+    if (!live) {
+      console.warn(
+        `[fints] resume sync for bankcontact=${bankcontactId} → no live ` +
+          `client left (container restart or TTL expiry); the bank-side ` +
+          `dialog is gone too`,
       );
-      const client = factory(config);
-      const response = await client.synchronizeWithTan(
+      return {
+        state: "error",
+        errorCode: "live-client-evicted",
+        errorMessage:
+          "Die laufende Bank-Sitzung wurde geschlossen, bevor die TAN " +
+          "ankam — bitte den Sync erneut starten.",
+      };
+    }
+    // Deliberately not retry-wrapped: a failed continuation cannot be
+    // repaired by repeating it (the dialog is either open or gone), and
+    // retrying only delays the answer by the backoff budget.
+    let result: DialogResult;
+    try {
+      const response = await live.synchronizeWithTan(
         opts.tanReference!,
         opts.tanAnswer,
       );
-      const mapped = mapResponse(response, client.config.bankingInformation);
-      if (mapped.state === "idle") mapped.client = client;
-      return mapped;
-    }, sleep);
+      result = mapResponse(response, live.config.bankingInformation);
+      if (result.state === "idle") result.client = live;
+    } catch (err) {
+      result = {
+        state: "error",
+        errorCode: "resume-failed",
+        errorMessage: err instanceof Error ? err.message : String(err),
+      };
+    }
+    if (result.state === "tan-required") {
+      // Chained challenge — keep the client around for the next attempt.
+      rememberClient(bankcontactId, live);
+    }
     if (result.state === "idle" && result.client) {
       await persistBankingInformation(
         bankcontactId,
@@ -382,12 +408,19 @@ export async function runSynchronize(
         );
         return warm;
       }
-      // tan-required / coupled — return as-is, the UI / TAN flow
-      // takes over and the resume branch will persist BI later.
+      // tan-required / coupled — the UI / TAN flow takes over. The
+      // client carries the open lib-fints dialog that
+      // `synchronizeWithTan` must continue, so it has to stay in the
+      // cache until the user submits; a rebuilt client would fail with
+      // "no customer dialog was started which can continue".
       if (warm.state === "tan-required") {
+        if (warm.client) {
+          rememberClient(bankcontactId, warm.client as FintsClientSurface);
+        }
         console.log(
           `[fints] warm sync for bankcontact=${bankcontactId} → ` +
-            `tan-required (PSD2 90-day window likely expired)`,
+            `tan-required (PSD2 90-day window likely expired), live ` +
+            `client cached for the TAN continuation`,
         );
         return warm;
       }
@@ -446,7 +479,12 @@ export async function runSynchronize(
 
     if (firstSync.state !== "idle" || !firstSync.client) {
       const { client: _c, ...rest } = firstSync;
-      void _c;
+      // Rare, but real (some banks challenge on the BPD sync already):
+      // the dialog that raised the challenge lives on this client, so
+      // the TAN continuation needs it back.
+      if (rest.state === "tan-required" && _c) {
+        rememberClient(bankcontactId, _c as FintsClientSurface);
+      }
       return rest;
     }
     client = firstSync.client as FintsClientSurface;
@@ -506,6 +544,14 @@ export async function runSynchronize(
         `[fints] cold sync ok for bankcontact=${bankcontactId}, ` +
           `bankingInformation cached for next warm-start`,
       );
+    } else if (result.state === "tan-required") {
+      // Same reason as the warm path: the TAN continuation only works
+      // on this instance, so it must survive until the user submits.
+      rememberClient(bankcontactId, client);
+      console.log(
+        `[fints] cold sync for bankcontact=${bankcontactId} → ` +
+          `tan-required, live client cached for the TAN continuation`,
+      );
     }
     return result;
   } catch (err) {
@@ -547,7 +593,9 @@ async function runWarmSync(
   const response = await client.synchronize();
   const finalResponse = await pollDecoupledIfNeeded(client, response, sleep);
   const mapped = mapResponse(finalResponse, client.config.bankingInformation);
-  if (mapped.state === "idle") mapped.client = client;
+  // Also handed back on tan-required: the caller has to keep this exact
+  // instance alive, since it owns the dialog the TAN continues.
+  if (mapped.state !== "error") mapped.client = client;
   return mapped;
 }
 

@@ -268,6 +268,7 @@ sequenceDiagram
 
   UI->>API: POST /finance/statements { bankcontactId }
   API->>FC: runSynchronize(bankcontactId, {})
+  FC->>FC: liveClientCache[bankcontactId] = client (hält den offenen Dialog)
   FC-->>API: state=tan-required, challenge, bankingInformation, fintsTanRef
   API->>DB: INSERT tan_reference (uuid), banking_information (bi + fintsTanRef), challenge, expires_at
   API-->>UI: 200 { state: "tan-required", tanReference, challenge, tanMediaName? }
@@ -276,12 +277,40 @@ sequenceDiagram
   TAN->>DB: SELECT … WHERE tan_reference=? AND user_id=? AND expires_at>now()
   DB-->>TAN: banking_information (bi, fintsTanRef)
   TAN->>FC: runSynchronize(bankcontactId, { tanReference: fintsTanRef, tanAnswer, bankingInformation: bi })
+  FC->>FC: liveClientCache[bankcontactId] holen → client.synchronizeWithTan(ref, tan)
   FC-->>TAN: state=idle  (Etappe 5 liefert auch transactions + balances)
   TAN->>DB: DELETE tan_reference
   TAN-->>UI: 200 { state: "idle" }
 ```
 
+**Der Live-Client ist Teil des States.** `lib-fints` hängt den offenen
+Dialog an die Client-Instanz (`FinTSClient.currentDialog`);
+`synchronizeWithTan()` setzt genau diesen Dialog fort. Ein aus der
+persistierten `bankingInformation` neu gebauter Client hat kein
+`currentDialog` und wirft
+
+```
+no customer dialog was started which can continue
+```
+
+Deshalb legt `runSynchronize` den Client **auch bei `tan-required`** in
+den `liveClientCache` (TTL 30 min) und der Resume-Pfad nimmt ihn von
+dort, statt einen neuen zu bauen. Die in `finance_tan_session`
+gespeicherte `banking_information` bleibt trotzdem nützlich (Warm-Start
+beim nächsten Sync), taugt aber prinzipiell nicht zum Fortsetzen eines
+laufenden Dialogs.
+
+Der Resume-Aufruf ist bewusst **nicht** retry-gewrappt: ein Dialog ist
+entweder offen oder weg — Wiederholungen reparieren nichts und kosten
+nur das Backoff-Budget (2s + 4s), was den Fehler in der UI um 6
+Sekunden verzögert.
+
 Edge Cases:
+- **Live-Client weg** (Container-Neustart oder TTL-Ablauf zwischen
+  Challenge und Eingabe): Die Bank-Sitzung ist damit ebenfalls
+  beendet. `complete` liefert `state: "error"` mit
+  `errorCode: "live-client-evicted"` und der Bitte, den Sync neu zu
+  starten — statt eines nichtssagenden Transport-Fehlers.
 - **Abgelaufene Session**: `complete` wirft `deadline_exceeded` (HTTP
   504); die Zeile bleibt liegen und wird vom Cleanup-Cron gelöscht.
   UI startet einen frischen Dialog.

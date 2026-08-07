@@ -229,12 +229,41 @@ describe("fints-client — response mapping", () => {
 });
 
 describe("fints-client — resume path", () => {
-  it("calls synchronizeWithTan with the tanReference on resume, not synchronize", async () => {
+  /**
+   * Drive a sync into `tan-required` so the live client lands in the
+   * in-memory cache — exactly the state the UI's TAN dialog is opened
+   * from. Returns that client so the test can assert what the resume
+   * did with it.
+   *
+   * The resume *must* continue on this very instance: lib-fints keeps
+   * the open dialog on `FinTSClient.currentDialog`, and a client
+   * rebuilt from the persisted bankingInformation throws "no customer
+   * dialog was started which can continue".
+   */
+  async function syncUntilTanRequired(id: number): Promise<FintsClientSurface> {
+    const client = mockClient({
+      success: false,
+      requiresTan: true,
+      tanChallenge: "photoTAN scannen",
+      tanReference: "fints-ref-1",
+    });
+    // Cold start: BPD sync goes through, the UPD sync that follows the
+    // TAN-method selection is the one that raises the challenge.
+    (client.synchronize as any)
+      .mockResolvedValueOnce({ success: true, requiresTan: false, bankAnswers: [] });
+    const result = await runSynchronize(id, {
+      clientFactory: () => client,
+      sleep: async () => {},
+    });
+    expect(result.state).toBe("tan-required");
+    return client;
+  }
+
+  it("continues the dialog on the cached client instead of building a new one", async () => {
     const id = await insertBankcontact();
-    const client = mockClient({ success: true, requiresTan: false });
+    const client = await syncUntilTanRequired(id);
     let capturedRef: string | undefined;
     let capturedTan: string | undefined;
-
     (client.synchronizeWithTan as any).mockImplementation(
       async (ref: string, tan?: string) => {
         capturedRef = ref;
@@ -242,26 +271,29 @@ describe("fints-client — resume path", () => {
         return { success: true, requiresTan: false, bankAnswers: [] } as any;
       },
     );
+    const otherClient = mockClient({ success: true, requiresTan: false });
 
-    await runSynchronize(id, {
-      tanReference: "tanref-xyz",
+    const result = await runSynchronize(id, {
+      tanReference: "fints-ref-1",
       tanAnswer: "123456",
       bankingInformation: { systemId: "saved" },
-      clientFactory: () => client,
+      // A factory is offered but must be ignored — only the client
+      // holding the open dialog can continue it.
+      clientFactory: () => otherClient,
       sleep: async () => {},
     });
 
-    expect(client.synchronize).not.toHaveBeenCalled();
+    expect(result.state).toBe("idle");
     expect(client.synchronizeWithTan).toHaveBeenCalledOnce();
-    expect(capturedRef).toBe("tanref-xyz");
+    expect(capturedRef).toBe("fints-ref-1");
     expect(capturedTan).toBe("123456");
+    expect(otherClient.synchronizeWithTan).not.toHaveBeenCalled();
   });
 
   it("passes undefined TAN through for decoupled methods (pushTAN)", async () => {
     const id = await insertBankcontact();
-    const client = mockClient({ success: true, requiresTan: false });
+    const client = await syncUntilTanRequired(id);
     let capturedTan: string | undefined = "NOT-CALLED" as any;
-
     (client.synchronizeWithTan as any).mockImplementation(
       async (_ref: string, tan?: string) => {
         capturedTan = tan;
@@ -270,14 +302,65 @@ describe("fints-client — resume path", () => {
     );
 
     await runSynchronize(id, {
-      tanReference: "tanref-decoupled",
+      tanReference: "fints-ref-1",
       // no tanAnswer
       bankingInformation: { systemId: "saved" },
-      clientFactory: () => client,
       sleep: async () => {},
     });
 
     expect(capturedTan).toBeUndefined();
+  });
+
+  it("reports live-client-evicted instead of retrying a dialog that is gone", async () => {
+    // Container restart / TTL expiry between challenge and submit. The
+    // bank-side dialog is gone with it, so there is nothing to continue
+    // — surfacing this as a distinct code lets the UI tell the user to
+    // restart the sync rather than showing a bare transport error.
+    const id = await insertBankcontact();
+
+    const result = await runSynchronize(id, {
+      tanReference: "fints-ref-1",
+      tanAnswer: "123456",
+      bankingInformation: { systemId: "saved" },
+      sleep: async () => {},
+    });
+
+    expect(result).toMatchObject({ state: "error", errorCode: "live-client-evicted" });
+  });
+
+  it("keeps the client cached when the bank chains another challenge", async () => {
+    const id = await insertBankcontact();
+    const client = await syncUntilTanRequired(id);
+    (client.synchronizeWithTan as any).mockImplementation(async () => ({
+      success: false,
+      requiresTan: true,
+      tanChallenge: "Noch eine TAN",
+      tanReference: "fints-ref-2",
+      bankAnswers: [],
+    }));
+
+    const first = await runSynchronize(id, {
+      tanReference: "fints-ref-1",
+      tanAnswer: "wrong",
+      bankingInformation: { systemId: "saved" },
+      sleep: async () => {},
+    });
+    expect(first.state).toBe("tan-required");
+
+    // Second attempt still finds the live client — a wrong TAN must not
+    // strand the session.
+    (client.synchronizeWithTan as any).mockImplementation(async () => ({
+      success: true,
+      requiresTan: false,
+      bankAnswers: [],
+    }));
+    const second = await runSynchronize(id, {
+      tanReference: "fints-ref-2",
+      tanAnswer: "123456",
+      bankingInformation: { systemId: "saved" },
+      sleep: async () => {},
+    });
+    expect(second.state).toBe("idle");
   });
 });
 
@@ -806,15 +889,27 @@ describe("fints-client — warm-start path (cached bankingInformation)", () => {
   it("persists BI after a successful resume too (TAN-complete path)", async () => {
     const id = await insertBankcontact({ tan_method: "942" });
     const c = mockClient(
-      { success: true, requiresTan: false },
+      {
+        success: false,
+        requiresTan: true,
+        tanChallenge: "TAN bitte",
+        tanReference: "tanref-xyz",
+      },
       { systemId: "post-tan-sys" },
     );
+    // Get the client into the cache the way production does: a sync
+    // that ends in tan-required.
+    await runSynchronize(id, { clientFactory: () => c, sleep: async () => {} });
+    (c.synchronizeWithTan as any).mockResolvedValue({
+      success: true,
+      requiresTan: false,
+      bankAnswers: [],
+    });
 
     await runSynchronize(id, {
       tanReference: "tanref-xyz",
       tanAnswer: "123456",
       bankingInformation: { systemId: "saved-during-init" },
-      clientFactory: () => c,
       sleep: async () => {},
     });
 
@@ -1638,29 +1733,33 @@ describe("fints-client — in-memory client cache (hot path)", () => {
     expect(result.client).toBe(c2);
   });
 
-  it("does NOT use the cache for the resume path (TAN was just typed)", async () => {
+  it("resumes on the cached client, and does not short-circuit on the hot path", async () => {
     const id = await insertBankcontact({ tan_method: "942" });
-    const c = mockClient({ success: true, requiresTan: false });
-    // Pre-populate the cache by running a fresh sync.
-    await runSynchronize(id, {
-      clientFactory: () => c,
-      sleep: async () => {},
+    const c = mockClient({
+      success: false,
+      requiresTan: true,
+      tanChallenge: "TAN bitte",
+      tanReference: "ref",
+    });
+    await runSynchronize(id, { clientFactory: () => c, sleep: async () => {} });
+    (c.synchronizeWithTan as any).mockResolvedValue({
+      success: true,
+      requiresTan: false,
+      bankAnswers: [],
     });
 
-    // A resume call must never short-circuit on the hot path — the
-    // user just typed a TAN and supplied an explicit
-    // bankingInformation that may differ from the cache.
-    const c2 = mockClient({ success: true, requiresTan: false });
+    // The resume must continue the open dialog via synchronizeWithTan
+    // rather than returning the cached client as an already-idle hot
+    // hit — the bank is still waiting for the TAN.
     const resumed = await runSynchronize(id, {
       tanReference: "ref",
       tanAnswer: "111",
       bankingInformation: { systemId: "from-tan-session" },
-      clientFactory: () => c2,
       sleep: async () => {},
     });
     expect(resumed.state).toBe("idle");
-    expect(c2.synchronizeWithTan).toHaveBeenCalledTimes(1);
-    expect(resumed.client).toBe(c2);
+    expect(c.synchronizeWithTan).toHaveBeenCalledTimes(1);
+    expect(resumed.client).toBe(c);
   });
 });
 
