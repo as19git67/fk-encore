@@ -125,7 +125,14 @@ scene_pairs_stub = types.ModuleType("app.services.scene_pairs")
 scene_pairs_stub.find_scene_pairs = lambda items, min_time_gap_seconds, similarity_threshold, max_pairs: []
 sys.modules.setdefault("app.services.scene_pairs", scene_pairs_stub)
 
-sys.modules["app.services"] = types.ModuleType("app.services")
+# NOTE: do *not* replace sys.modules["app.services"] with a bare module here.
+# `app/services/__init__.py` is empty, so there is nothing heavy to shield the
+# test from — but a bare module has no __path__, which makes `app.services`
+# stop being a package. Every submodule that is not individually stubbed above
+# then fails to import with "'app.services' is not a package", and because the
+# mutation is global it breaks the other test modules in the same run too.
+# Keeping the real package means the stubs above still win (they are already in
+# sys.modules) while unstubbed submodules import normally.
 
 # ---------------------------------------------------------------------------
 # Now it is safe to import FastAPI test client and the router
@@ -405,4 +412,88 @@ class TestQualityEndpoint:
 
     def test_missing_file_returns_422(self):
         response = client.post("/quality")
+        assert response.status_code == 422
+
+
+class TestRedundantPairsEndpoint:
+    """`/redundant-pairs` reports which members of a similar-photo group show
+    the same shot, so the main app's auto-pick stops selecting both of them.
+
+    Unlike the other service stubs above, `find_redundant_pairs` runs for real
+    here — it only needs numpy, and the wiring between the request shape and
+    the pure function is exactly what this endpoint could get wrong.
+    """
+
+    @staticmethod
+    def _photo(photo_id: str, vector):
+        record = MagicMock()
+        record.photo_id = photo_id
+        record.embedding_dino = vector
+        return record
+
+    def test_reports_near_identical_members(self):
+        repo_stub.get_photos_by_ids = AsyncMock(return_value=[
+            self._photo("1", [1.0, 0.0]),
+            self._photo("2", [0.999, 0.0447]),   # ~2.6° apart → cosine ~0.999
+            self._photo("3", [0.0, 1.0]),        # orthogonal
+        ])
+        response = client.post("/redundant-pairs", json={
+            "groups": [{"group_id": 7, "photo_ids": ["1", "2", "3"]}],
+            "min_similarity": 0.97,
+        })
+        assert response.status_code == 200
+        groups = response.json()["groups"]
+        assert len(groups) == 1
+        assert groups[0]["group_id"] == 7
+        pairs = groups[0]["pairs"]
+        assert len(pairs) == 1
+        assert {pairs[0]["photo_id_a"], pairs[0]["photo_id_b"]} == {"1", "2"}
+        assert pairs[0]["similarity"] >= 0.97
+
+    def test_group_without_redundancy_returns_no_pairs(self):
+        repo_stub.get_photos_by_ids = AsyncMock(return_value=[
+            self._photo("1", [1.0, 0.0]),
+            self._photo("2", [0.0, 1.0]),
+        ])
+        response = client.post("/redundant-pairs", json={
+            "groups": [{"group_id": 1, "photo_ids": ["1", "2"]}],
+        })
+        assert response.status_code == 200
+        assert response.json()["groups"][0]["pairs"] == []
+
+    def test_every_requested_group_is_echoed_back(self):
+        # The caller maps the response by group_id, so a group that produced
+        # no pairs must still appear rather than silently vanish.
+        repo_stub.get_photos_by_ids = AsyncMock(return_value=[])
+        response = client.post("/redundant-pairs", json={
+            "groups": [
+                {"group_id": 1, "photo_ids": ["1", "2"]},
+                {"group_id": 2, "photo_ids": ["3", "4"]},
+            ],
+        })
+        assert response.status_code == 200
+        assert [g["group_id"] for g in response.json()["groups"]] == [1, 2]
+
+    def test_missing_embeddings_produce_no_pairs(self):
+        # A photo whose vector has not been computed must never be reported as
+        # redundant — otherwise the auto-pick could drop it on no evidence.
+        repo_stub.get_photos_by_ids = AsyncMock(return_value=[
+            self._photo("1", None),
+            self._photo("2", None),
+        ])
+        response = client.post("/redundant-pairs", json={
+            "groups": [{"group_id": 1, "photo_ids": ["1", "2"]}],
+        })
+        assert response.status_code == 200
+        assert response.json()["groups"][0]["pairs"] == []
+
+    def test_empty_groups_rejected(self):
+        response = client.post("/redundant-pairs", json={"groups": []})
+        assert response.status_code == 422
+
+    def test_similarity_above_one_rejected(self):
+        response = client.post("/redundant-pairs", json={
+            "groups": [{"group_id": 1, "photo_ids": ["1"]}],
+            "min_similarity": 1.5,
+        })
         assert response.status_code == 422
