@@ -160,17 +160,34 @@ Gruppe pro Karte, aufgelöst mit einer einzigen Geste:
 |---|---|---|
 | → rechts | KI-Vorschlag übernehmen | `POST /photos/groups/:id/accept-ai-pick` |
 | ← links | Alle behalten, nur als geprüft markieren | `POST /photos/groups/:id/review` |
-| ↑ hoch | Vorschlag favorisieren, dann übernehmen | `PATCH /photos/:id/curation` + accept-ai-pick |
-| Tippen auf ein Foto | Nur dieses behalten | `POST /photos/groups/:id/pick-photos` |
+| ↑ hoch | Vorschlag favorisieren **und** übernehmen | `PATCH /photos/:id/curation` + accept-ai-pick |
+| Tippen auf ein Foto | Großansicht öffnen (keine Entscheidung) | — |
+| „Nur dieses Foto behalten" in der Großansicht bzw. Kontextmenü | Nur dieses behalten | `POST /photos/groups/:id/pick-photos` |
 | Button (bei Peer-Signal) | Konsens übernehmen | `POST /photos/groups/:id/accept-peer-consensus` |
 
 Jede Wischgeste hat einen gleichwertigen Button — eine reine Gestenoberfläche
 wäre mit VoiceOver / Switch Control nicht bedienbar.
 
+**Antippen entscheidet bewusst nichts.** In der ersten Fassung löste ein Tap
+auf ein Thumbnail die Gruppe auf ("nur dieses behalten"). In der Praxis tippt
+man aber, um das Foto *größer zu sehen* und die Details überhaupt beurteilen zu
+können — Geste und Konsequenz zeigten in entgegengesetzte Richtungen, und ein
+Fehltipp blendete den Rest der Gruppe aus. Der Tap öffnet deshalb
+`ReviewPhotoPreview`: das vollständige Bild (nicht das Thumbnail), zoombar und
+zwischen den Gruppenmitgliedern blätterbar. Das Behalten eines einzelnen Fotos
+ist dort ein beschrifteter Button, der die Konsequenz mitschreibt ("Die anderen
+3 Fotos werden ausgeblendet"), zusätzlich erreichbar über das Kontextmenü der
+Kachel und eine VoiceOver-Aktion.
+
+**Die Hoch-Wischgeste ist keine reine Favoriten-Markierung.** Sie favorisiert
+den KI-Vorschlag *und* löst die Gruppe auf wie die Rechts-Geste. Label und
+Hinweistext schreiben beide Hälften aus ("Favorit & übernehmen"), weil eine
+Aktion mit zwei Wirkungen sonst nur durch Ausprobieren zu lernen wäre.
+
 **Gruppen ohne KI-Vorschlag** lassen sich per Wischgeste grundsätzlich nur
 "behalten": `pick-photos` verlangt eine nicht-leere Keep-Menge, und alle
 Mitglieder auszublenden wäre eine destruktive Überraschung. Solche Gruppen
-werden über Antippen eines Fotos aufgelöst.
+werden über die Großansicht bzw. das Kontextmenü aufgelöst.
 
 **Undo ohne Un-Review-Endpoint.** Serverseitig lässt sich `reviewed_at` nicht
 zurücksetzen. Statt zu kompensieren puffert die App die *jeweils neueste*
@@ -468,6 +485,9 @@ iOS (SwiftUI, Issue #761):
   Pagination, serialisierte Commit-Kette
 - `ios/Sources/FKPhotos/Features/Review/ReviewQueueView.swift` — Karten-UI mit
   Wischgesten und gleichwertigen Buttons
+- `ios/Sources/FKPhotos/Features/Review/ReviewPhotoPreview.swift` — zoombare
+  Großansicht der Gruppenmitglieder mit dem beschrifteten „Nur dieses Foto
+  behalten"-Button
 - `ios/Sources/FKPhotos/Features/Feed/FeedView.swift` — Einstiegspunkt in der
   Feed-Toolbar
 - `ios/Tests/FKPhotosTests/ReviewQueueTests.swift` — Tests für Mapping + Undo

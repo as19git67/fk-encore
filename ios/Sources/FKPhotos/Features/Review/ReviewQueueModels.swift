@@ -251,7 +251,10 @@ struct ReviewQueueState: Equatable, Sendable {
 enum ReviewSwipe: Equatable, Sendable {
     case keepPick    // → right: accept the suggestion, hide the rest
     case keepAll     // ← left: keep everything, just mark reviewed
-    case favorite    // ↑ up: favorite the pick, then accept it
+    /// ↑ up: favorite the pick *and* accept it. Not a plain "mark as favorite"
+    /// — it resolves the group like `keepPick` does, which is why the label
+    /// spells both halves out.
+    case favorite
 
     /// Minimum travel before a drag counts as a decision.
     static let threshold: CGFloat = 96
@@ -289,7 +292,17 @@ enum ReviewSwipe: Equatable, Sendable {
         switch self {
         case .keepPick:  return "Übernehmen"
         case .keepAll:   return "Alle behalten"
-        case .favorite:  return "Favorit"
+        case .favorite:  return "Favorit & übernehmen"
+        }
+    }
+
+    /// Spelled-out consequence, shown under the action buttons so the swipe
+    /// vocabulary doesn't have to be learned by trial and error.
+    var explanation: String {
+        switch self {
+        case .keepPick: return "KI-Vorschlag behalten, Rest ausblenden"
+        case .keepAll:  return "Nichts ausblenden, nur als geprüft markieren"
+        case .favorite: return "Vorschlag favorisieren und übernehmen"
         }
     }
 

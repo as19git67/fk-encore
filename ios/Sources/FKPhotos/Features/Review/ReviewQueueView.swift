@@ -8,15 +8,27 @@ import SwiftUI
 ///
 /// - **→ rechts** accept the suggestion (keep the pick, hide the rest)
 /// - **← links** keep everything, just mark the group reviewed
-/// - **↑ hoch** favorite the pick, then accept it
-/// - **Tippen** auf ein Foto: keep exactly that one instead
+/// - **↑ hoch** favorite the pick *and* accept it in one go
+/// - **Tippen** auf ein Foto: open it full-size to judge the detail
 ///
 /// Every swipe has an equivalent button underneath — a gesture-only interface
 /// would be unusable with VoiceOver or Switch Control.
+///
+/// Note that a tap deliberately does *not* decide anything. Keeping a single
+/// photo lives behind the labelled button in `ReviewPhotoPreview` and the
+/// tile's context menu, because a tap is how people ask to *look closer*, not
+/// how they ask to hide four photos.
 struct ReviewQueueView: View {
     @State private var viewModel = ReviewQueueViewModel()
     @State private var dragOffset: CGSize = .zero
+    @State private var previewTarget: PreviewTarget?
     @Environment(AuthManager.self) private var authManager
+
+    /// The photo the full-size preview opens on. A wrapper because
+    /// `fullScreenCover(item:)` needs an `Identifiable`.
+    private struct PreviewTarget: Identifiable {
+        let id: Int
+    }
 
     /// Hiding photos is what a decision ultimately does, so it is gated on the
     /// same permission the backend enforces on every one of these endpoints.
@@ -51,12 +63,25 @@ struct ReviewQueueView: View {
             }
         }
         .toast($viewModel.toastMessage)
+        .fullScreenCover(item: $previewTarget) { target in
+            if let group = viewModel.state.current {
+                ReviewPhotoPreview(
+                    group: group,
+                    startPhotoId: target.id,
+                    onPickOne: pickHandler
+                )
+            }
+        }
         .task {
             if viewModel.state.groups.isEmpty { await viewModel.load() }
         }
         // The buffered decision only reaches the server when the next one is
         // made — leaving the screen has to push it, or the last swipe is lost.
+        // Some iOS versions also fire this when the preview covers the screen;
+        // flushing there would quietly end the undo window while the user is
+        // merely looking at a photo, so that case is skipped.
         .onDisappear {
+            guard previewTarget == nil else { return }
             Task { await viewModel.flush() }
         }
     }
@@ -110,15 +135,19 @@ struct ReviewQueueView: View {
 
     // MARK: - Card
 
-    /// Tapping a single photo resolves the group to exactly that keeper. Nil
-    /// without the permission, which also makes the tiles non-tappable.
+    /// Resolves the group to exactly one keeper. Nil without the permission,
+    /// which also removes the corresponding controls from the UI.
     private var pickHandler: ((Int) -> Void)? {
         guard canDecide else { return nil }
         return { photoId in viewModel.pickOnly(photoId: photoId) }
     }
 
     private func cardArea(for group: ReviewQueueGroup) -> some View {
-        ReviewGroupCard(group: group, onPickOne: pickHandler)
+        ReviewGroupCard(
+            group: group,
+            onPreview: { photoId in previewTarget = PreviewTarget(id: photoId) },
+            onPickOne: pickHandler
+        )
         .offset(dragOffset)
         .rotationEffect(.degrees(Double(dragOffset.width) / 26))
         .overlay(alignment: .top) { swipeHint }
@@ -204,7 +233,7 @@ struct ReviewQueueView: View {
                 }
             }
             if !group.hasAiPick {
-                Text("Kein KI-Vorschlag für diese Gruppe – tippe das Foto an, das bleiben soll.")
+                Text("Kein KI-Vorschlag für diese Gruppe – öffne das Foto, das bleiben soll, und wähle „Nur dieses Foto behalten“.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -231,6 +260,8 @@ struct ReviewQueueView: View {
         .tint(tint)
         .buttonStyle(.plain)
         .foregroundStyle(tint)
+        .accessibilityLabel(swipe.label)
+        .accessibilityHint(swipe.explanation)
     }
 
     private var readOnlyNotice: some View {
@@ -293,7 +324,11 @@ struct ReviewQueueView: View {
 /// without opening anything.
 private struct ReviewGroupCard: View {
     let group: ReviewQueueGroup
-    /// nil when the user may not decide — the thumbnails then aren't tappable.
+    /// Opens the photo full-size. Always available — looking is never a
+    /// decision, so this works without the decide permission too.
+    let onPreview: (Int) -> Void
+    /// nil when the user may not decide — the "keep only this" affordances
+    /// then disappear.
     let onPickOne: ((Int) -> Void)?
 
     private var columns: [GridItem] {
@@ -374,10 +409,28 @@ private struct ReviewGroupCard: View {
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture { onPickOne?(photo.id) }
+        .onTapGesture { onPreview(photo.id) }
+        .contextMenu {
+            Button {
+                onPreview(photo.id)
+            } label: {
+                Label("Groß ansehen", systemImage: "arrow.up.left.and.arrow.down.right")
+            }
+            if let onPickOne {
+                Button {
+                    onPickOne(photo.id)
+                } label: {
+                    Label("Nur dieses behalten", systemImage: "checkmark.circle")
+                }
+            }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel(photo, isPicked: isPicked))
-        .accessibilityHint(onPickOne == nil ? "" : "Nur dieses Foto behalten")
+        .accessibilityHint("Öffnet das Foto in voller Größe")
+        // VoiceOver has no context menu, so the decision needs its own action.
+        .accessibilityAction(named: "Nur dieses behalten") {
+            onPickOne?(photo.id)
+        }
     }
 
     @ViewBuilder
