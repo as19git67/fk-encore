@@ -79,3 +79,4 @@ ios/DerivedData/
 
 # Taxonomy diagnostic reports (generated, see docs/taxonomy-tax-quality-improvement.md)
 scripts/taxonomy/out/
+scripts/photos/out/
