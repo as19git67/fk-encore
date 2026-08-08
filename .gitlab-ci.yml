@@ -293,6 +293,14 @@ app:build:
     - *registry_login
     - *compute_tags
   script:
+    # app:test and app:build are separate jobs in separate containers with
+    # separate checkouts — nothing from app:test's `npm install` carries
+    # over here, `needs:` only orders the jobs. encore build docker walks
+    # every .ts file in the workspace (including geo/src/server.ts) and
+    # needs geo/node_modules to resolve `import express`, the same reason
+    # app:test installs it — see the comment there.
+    - npm install
+    - npm --prefix geo install
     - npm --prefix frontend install --legacy-peer-deps
     - npm --prefix frontend run build
     # Installs the Encore CLI via the upstream install.sh, as documented at
