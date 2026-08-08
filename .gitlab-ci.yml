@@ -65,6 +65,13 @@ workflow:
 .registry_login: &registry_login |
   echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$REGISTRY"
 
+# Registers QEMU/binfmt emulation handlers on the dind daemon so
+# `--platform linux/amd64,linux/arm64` buildx builds can actually cross-build
+# the arm64 leg (mirrors docker/setup-qemu-action@v3 from the GH workflows —
+# missing this makes the arm64 build silently fail on an amd64 runner).
+.setup_qemu: &setup_qemu
+  docker run --rm --privileged tonistiigi/binfmt:latest --install all
+
 # Rebuild of docker/metadata-action's tag logic:
 #   latest        -> default-branch pushes
 #   <git tag>      -> semver tag pushes (the tag name itself, same as GH's type=semver,pattern={{version}})
@@ -301,6 +308,7 @@ embedding:test:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes: &embedding_paths
         - "embedding_service/**/*"
+        - ".gitlab-ci.yml"
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
       changes: *embedding_paths
   script:
@@ -325,6 +333,7 @@ embedding:build:
   script:
     # Multi-arch: model weights live in the embedding_models volume, not the
     # image, so the build no longer pulls the ~4.77 GB CLIP file twice.
+    - *setup_qemu
     - docker buildx create --use --driver docker-container
     - |
       TAG_ARGS=""
@@ -348,6 +357,7 @@ geo:test:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes: &geo_paths
         - "geo/**/*"
+        - ".gitlab-ci.yml"
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
       changes: *geo_paths
   script:
@@ -396,6 +406,7 @@ insightface:test:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes: &insightface_paths
         - "insightface-service/**/*"
+        - ".gitlab-ci.yml"
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
       changes: *insightface_paths
   script:
@@ -418,6 +429,7 @@ insightface:build:
     - *registry_login
     - *compute_tags
   script:
+    - *setup_qemu
     - docker buildx create --use --driver docker-container
     - |
       TAG_ARGS=""
@@ -441,6 +453,7 @@ llm:test:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes: &llm_paths
         - "llm-service/**/*"
+        - ".gitlab-ci.yml"
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
       changes: *llm_paths
   script:
@@ -527,6 +540,12 @@ playwright-image:build:
       [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ] && echo "${IMAGE}:pw-${PW_VERSION}" >> tags.txt
       [ -n "$CI_COMMIT_TAG" ] && echo "${IMAGE}:${CI_COMMIT_TAG}" >> tags.txt
       [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ] && echo "${IMAGE}:test" >> tags.txt
+      # Manual web-triggered one-off rebuild (e.g. testing a Dockerfile
+      # change on a feature branch) matches none of the above and would
+      # otherwise leave tags.txt empty -> buildx push with zero -t flags.
+      if [ ! -s tags.txt ]; then
+        echo "${IMAGE}:manual-${CI_COMMIT_SHORT_SHA}" >> tags.txt
+      fi
       cat tags.txt
     - docker buildx create --use --driver docker-container
     - |
@@ -557,6 +576,7 @@ receipt-ocr:test:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes: &receipt_ocr_paths
         - "receipt-ocr-service/**/*"
+        - ".gitlab-ci.yml"
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
       changes: *receipt_ocr_paths
   script:
@@ -579,6 +599,7 @@ receipt-ocr:build:
     - *registry_login
     - *compute_tags
   script:
+    - *setup_qemu
     - docker buildx create --use --driver docker-container
     - |
       TAG_ARGS=""
@@ -608,6 +629,7 @@ taxonomy-tools:build:
         - "documents/taxonomy.ts"
         - "documents/tax-sections.ts"
         - "documents/classify-prompts.ts"
+        - ".gitlab-ci.yml"
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
       changes: *taxonomy_paths
   before_script:
@@ -616,6 +638,7 @@ taxonomy-tools:build:
     - *compute_tags
   script:
     - bash taxonomy-tools/build-context.sh
+    - *setup_qemu
     - docker buildx create --use --driver docker-container
     - |
       TAG_ARGS=""
@@ -637,6 +660,13 @@ e2e:playwright:
   image: ${REGISTRY}/${CI_PROJECT_PATH}/playwright-e2e:latest
   timeout: 30 minutes
   interruptible: true
+  # GH used `concurrency: group: e2e-...; cancel-in-progress: true` because
+  # stale and fresh runs on the same branch fight over the Postgres/Encore
+  # ports. `interruptible: true` only helps if the project-level "auto-cancel
+  # redundant pipelines" setting is also on; resource_group additionally
+  # guarantees mutual exclusion per ref even without that setting (it queues
+  # instead of cancelling, but the port race is what actually matters here).
+  resource_group: e2e-$CI_COMMIT_REF_SLUG
   services:
     - name: pgvector/pgvector:pg18
       alias: postgres
@@ -789,6 +819,16 @@ ios:test:
 # jobs actually ran, instead of once per (former) workflow.
 # ---------------------------------------------------------------------------
 
+# Deploy has no `changes:` gate of its own — it relies on app:build's rule 2
+# (unconditional `on_success` whenever the pipeline source matches, with no
+# changes: filter) firing for virtually any diff that isn't confined to the
+# three service dirs ignored by app:test/app:build. That means deploy always
+# has at least one real `needs:` dependency in practice, EXCEPT when a change
+# touches only embedding_service/**, insightface-service/** or geo/** — and
+# in that case the matching sidecar build job (embedding:build/etc.) runs
+# instead, so deploy still has a genuine dependency. If app:build's rule 2
+# ever grows its own `changes:` filter, re-check this invariant — deploy
+# could start firing the Watchtower webhook with nothing new to serve.
 .deploy_needs: &deploy_needs
   - job: app:build
     optional: true
@@ -846,8 +886,8 @@ deploy:prod:
 # NOTE: for this API GitLab needs a token with `api` scope on the project
 # (a Project Access Token works; $CI_JOB_TOKEN is enough on most GitLab
 # versions >= 13 for same-project registry management, but if a version here
-# rejects it, set CLEANUP_TOKEN as a masked CI/CD variable and swap it in for
-# $CI_JOB_TOKEN below).
+# rejects it, set CLEANUP_TOKEN as a masked CI/CD variable — a Project/Personal
+# Access Token, sent as PRIVATE-TOKEN rather than JOB-TOKEN, see below).
 #
 # Consider instead configuring this natively under Settings > Packages and
 # registries > Container registry > Cleanup policy, which covers the same
@@ -872,15 +912,22 @@ cleanup:registry:
   script:
     - |
       set -euo pipefail
-      TOKEN="${CLEANUP_TOKEN:-$CI_JOB_TOKEN}"
+      # CI_JOB_TOKEN authenticates via the JOB-TOKEN header; a Project/Personal
+      # Access Token (CLEANUP_TOKEN) authenticates via PRIVATE-TOKEN instead —
+      # sending a PAT as JOB-TOKEN gets rejected with 401.
+      if [ -n "${CLEANUP_TOKEN:-}" ]; then
+        AUTH_HEADER="PRIVATE-TOKEN: ${CLEANUP_TOKEN}"
+      else
+        AUTH_HEADER="JOB-TOKEN: ${CI_JOB_TOKEN}"
+      fi
       API="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/registry/repositories"
 
-      REPOS=$(curl -fsSL --header "JOB-TOKEN: ${TOKEN}" "${API}?per_page=100")
+      REPOS=$(curl -fsSL --header "${AUTH_HEADER}" "${API}?per_page=100")
       echo "${REPOS}" | jq -r '.[] | "\(.id)\t\(.path)"'
 
       echo "${REPOS}" | jq -r '.[].id' | while read -r repo_id; do
         [ -z "$repo_id" ] && continue
         echo "Cleaning repository id ${repo_id}"
-        curl -fsSL --header "JOB-TOKEN: ${TOKEN}" -X DELETE \
+        curl -fsSL --header "${AUTH_HEADER}" -X DELETE \
           "${API}/${repo_id}/tags?name_regex_delete=.*&name_regex_keep=${PROTECTED_TAG_REGEX}&keep_n=${KEEP_N}"
       done
