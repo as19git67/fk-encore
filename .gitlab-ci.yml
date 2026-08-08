@@ -394,7 +394,7 @@ app:build:
       while read -r tag; do
         [ -z "$tag" ] && continue
         echo "Pushing ${tag}"
-        skopeo copy --dest-tls-verify=false \
+        skopeo copy --dest-tls-verify=false --src-tls-verify=false \
           --src-daemon-host "${DOCKER_HOST}" \
           --dest-authfile "${HOME}/.docker/config.json" \
           docker-daemon:app-build:latest \
