@@ -742,15 +742,39 @@ e2e:playwright:
     - npx --prefix frontend playwright install --with-deps chromium
     - npx --prefix frontend playwright --version
     - mkdir -p e2e-logs
-    - nohup encore run --port=4000 --watch=false > e2e-logs/encore.log 2>&1 &
-    - echo $! > e2e-logs/encore.pid
+    # `encore run` talks to a background `encored` daemon that it auto-spawns
+    # on first use; in a fresh container that spawn+handshake can race and
+    # `encore run` gives up with "dialing daemon: context deadline exceeded"
+    # (seen in CI: it exits almost immediately, so the wait loop below just
+    # polls a port nothing is listening on for the full budget). Warm the
+    # daemon up on its own first, with generous time and its own log, so
+    # `encore run` connects to an already-running daemon instead of racing
+    # its startup.
+    - nohup encore daemon > e2e-logs/encored.log 2>&1 &
+    - sleep 10
+    - |
+      start_backend() {
+        nohup encore run --port=4000 --watch=false > e2e-logs/encore.log 2>&1 &
+        echo $! > e2e-logs/encore.pid
+      }
+      start_backend
     # Migrations + seed (permissions, roles, taxonomy, admin user) run on
     # first DB use during initializeDb(). Cold runners regularly take
     # 60-90s; budget 180s to absorb the worst case while still failing
-    # decisively on genuine boot errors.
+    # decisively on genuine boot errors. One restart attempt if the process
+    # dies outright (e.g. the same daemon-dial race, now against a daemon
+    # that should already be up).
     - |
       ok=0
+      restarted=0
       for i in $(seq 1 180); do
+        pid=$(cat e2e-logs/encore.pid 2>/dev/null || true)
+        if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null && [ "$restarted" = "0" ]; then
+          echo "[wait] encore run process ($pid) died after ${i}s, restarting once:" >&2
+          cat e2e-logs/encore.log >&2 || true
+          restarted=1
+          start_backend
+        fi
         status=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
           -H 'Content-Type: application/json' \
           -d '{"email":"admin@example.com","password":"admin"}' \
@@ -766,7 +790,12 @@ e2e:playwright:
       done
       if [ "$ok" != "1" ]; then
         echo "[wait] backend did not become ready in 180s" >&2
-        tail -n 200 e2e-logs/encore.log >&2 || true
+        echo "----- encored.log -----" >&2
+        cat e2e-logs/encored.log >&2 || true
+        echo "----- encore.log -----" >&2
+        cat e2e-logs/encore.log >&2 || true
+        echo "----- ps aux -----" >&2
+        ps aux >&2 || true
         exit 1
       fi
     - cd frontend && npm run e2e
