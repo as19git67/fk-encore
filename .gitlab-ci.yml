@@ -65,13 +65,6 @@ workflow:
 .registry_login: &registry_login |
   echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$REGISTRY"
 
-# Registers QEMU/binfmt emulation handlers on the dind daemon so
-# `--platform linux/amd64,linux/arm64` buildx builds can actually cross-build
-# the arm64 leg (mirrors docker/setup-qemu-action@v3 from the GH workflows —
-# missing this makes the arm64 build silently fail on an amd64 runner).
-.setup_qemu: &setup_qemu
-  docker run --rm --privileged tonistiigi/binfmt:latest --install all
-
 # Rebuild of docker/metadata-action's tag logic:
 #   latest        -> default-branch pushes
 #   <git tag>      -> semver tag pushes (the tag name itself, same as GH's type=semver,pattern={{version}})
@@ -331,9 +324,9 @@ embedding:build:
     - *registry_login
     - *compute_tags
   script:
-    # Multi-arch: model weights live in the embedding_models volume, not the
-    # image, so the build no longer pulls the ~4.77 GB CLIP file twice.
-    - *setup_qemu
+    # amd64-only for now (no arm64 host in use yet). Flip back to
+    # linux/amd64,linux/arm64 + re-add QEMU/binfmt setup (tonistiigi/binfmt)
+    # before this buildx build once arm64 is actually needed.
     - docker buildx create --use --driver docker-container
     - |
       TAG_ARGS=""
@@ -342,7 +335,7 @@ embedding:build:
         TAG_ARGS="$TAG_ARGS -t $tag"
       done < tags.txt
       docker buildx build ./embedding_service \
-        --platform linux/amd64,linux/arm64 \
+        --platform linux/amd64 \
         $TAG_ARGS \
         --push
 
@@ -429,7 +422,9 @@ insightface:build:
     - *registry_login
     - *compute_tags
   script:
-    - *setup_qemu
+    # amd64-only for now (no arm64 host in use yet). Flip back to
+    # linux/amd64,linux/arm64 + re-add QEMU/binfmt setup (tonistiigi/binfmt)
+    # before this buildx build once arm64 is actually needed.
     - docker buildx create --use --driver docker-container
     - |
       TAG_ARGS=""
@@ -438,7 +433,7 @@ insightface:build:
         TAG_ARGS="$TAG_ARGS -t $tag"
       done < tags.txt
       docker buildx build ./insightface-service \
-        --platform linux/amd64,linux/arm64 \
+        --platform linux/amd64 \
         $TAG_ARGS \
         --push
 
@@ -599,7 +594,9 @@ receipt-ocr:build:
     - *registry_login
     - *compute_tags
   script:
-    - *setup_qemu
+    # amd64-only for now (no arm64 host in use yet). Flip back to
+    # linux/amd64,linux/arm64 + re-add QEMU/binfmt setup (tonistiigi/binfmt)
+    # before this buildx build once arm64 is actually needed.
     - docker buildx create --use --driver docker-container
     - |
       TAG_ARGS=""
@@ -608,7 +605,7 @@ receipt-ocr:build:
         TAG_ARGS="$TAG_ARGS -t $tag"
       done < tags.txt
       docker buildx build ./receipt-ocr-service \
-        --platform linux/amd64,linux/arm64 \
+        --platform linux/amd64 \
         $TAG_ARGS \
         --push
 
@@ -638,7 +635,9 @@ taxonomy-tools:build:
     - *compute_tags
   script:
     - bash taxonomy-tools/build-context.sh
-    - *setup_qemu
+    # amd64-only for now (no arm64 host in use yet). Flip back to
+    # linux/amd64,linux/arm64 + re-add QEMU/binfmt setup (tonistiigi/binfmt)
+    # before this buildx build once arm64 is actually needed.
     - docker buildx create --use --driver docker-container
     - |
       TAG_ARGS=""
@@ -647,7 +646,7 @@ taxonomy-tools:build:
         TAG_ARGS="$TAG_ARGS -t $tag"
       done < tags.txt
       docker buildx build ./taxonomy-tools \
-        --platform linux/amd64,linux/arm64 \
+        --platform linux/amd64 \
         $TAG_ARGS \
         --push
 
