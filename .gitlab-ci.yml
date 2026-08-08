@@ -270,14 +270,26 @@ app:test:
 
 app:build:
   <<: *docker_dind
+  # Overrides the anchor's Alpine-based docker:27-cli. The Encore CLI ships
+  # glibc-linked binaries, so on Alpine (musl) install.sh downloads fine and
+  # the very next call dies with "cannot execute: required file not found" —
+  # that is what a missing ld-linux looks like, not a missing `encore`. This
+  # job therefore runs on Debian and brings the Docker CLI in itself; only
+  # the client is needed here, the daemon is the dind service from the
+  # anchor. Node comes with the image, which the frontend build needs anyway.
+  image: node:24-bookworm
   stage: build
   needs: ["app:test"]
   variables:
     IMAGE_PATH: "${CI_PROJECT_PATH}"
     VITE_APP_BUILD: "${CI_PIPELINE_IID}-${CI_COMMIT_SHA}"
+    DOCKER_CLI_VERSION: "27.5.1"
   rules: *app_ignore_rules
   before_script:
-    - apk add --no-cache nodejs npm curl bash
+    - |
+      curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" \
+        | tar -xz -C /usr/local/bin --strip-components=1 docker/docker
+    - docker --version
     - *registry_login
     - *compute_tags
   script:
