@@ -51,14 +51,32 @@ async function ensureDatabaseExists(connectionString: string): Promise<void> {
   }
 }
 
-async function createDb(): Promise<DbInstance> {
+function resolveConnectionString(): string {
   const isTest = process.env.NODE_ENV === "test" || !!process.env.VITEST;
 
-  const connectionString = isTest
+  return isTest
     ? (process.env.POSTGRES_TEST_CONNECTION_STRING ||
        process.env.POSTGRES_CONNECTION_STRING ||
        buildConnectionString() + "_test")
     : (process.env.POSTGRES_CONNECTION_STRING || buildConnectionString());
+}
+
+// Where we are trying to connect, for log output. Deliberately rebuilt from
+// the parsed URL rather than printed verbatim: the connection string carries
+// the password.
+export function describeConnectionTarget(connectionString: string): string {
+  try {
+    const url = new URL(connectionString);
+    return `${url.hostname}:${url.port || "5432"}${url.pathname}`;
+  } catch {
+    return "(unparseable connection string)";
+  }
+}
+
+async function createDb(): Promise<DbInstance> {
+  const isTest = process.env.NODE_ENV === "test" || !!process.env.VITEST;
+
+  const connectionString = resolveConnectionString();
 
   // In test mode the DB is created/dropped by vitest.globalsetup.ts
   if (!isTest) {
@@ -104,6 +122,31 @@ async function createDb(): Promise<DbInstance> {
 
 const DB_RETRY_INITIAL_DELAY_MS = 2_000;
 const DB_RETRY_MAX_DELAY_MS = 30_000;
+const DB_RETRY_TEST_BUDGET_MS = 120_000;
+
+// How long initializeDb keeps retrying transient connection failures.
+//
+// Production stays unbounded on purpose: the app container is routinely
+// started alongside Postgres and simply has to outwait it, so giving up on
+// ECONNREFUSED would turn a slow database into a boot loop.
+//
+// Under test the same loop is a trap. A wrong host or port cannot fix itself,
+// so the run just hangs until the CI job hits its timeout and the actual
+// cause never surfaces — exactly what a hardcoded POSTGRES_HOST in
+// vitest.config.ts once did. Bound it there and let the last error through.
+//
+// DB_CONNECT_RETRY_BUDGET_MS overrides both; 0 means "retry forever".
+export function resolveConnectRetryBudgetMs(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const raw = env.DB_CONNECT_RETRY_BUDGET_MS;
+  if (raw !== undefined && raw.trim() !== "") {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  }
+  const isTest = env.NODE_ENV === "test" || !!env.VITEST;
+  return isTest ? DB_RETRY_TEST_BUDGET_MS : 0;
+}
 
 // Only these errors are treated as transient. Anything else (failed
 // migration, missing extension, bad credentials, syntax error…) is a
@@ -145,6 +188,8 @@ export async function initializeDb(): Promise<DbInstance> {
 
   let delay = DB_RETRY_INITIAL_DELAY_MS;
   let attempt = 0;
+  const budgetMs = resolveConnectRetryBudgetMs();
+  const deadline = budgetMs > 0 ? Date.now() + budgetMs : null;
 
   while (true) {
     attempt++;
@@ -205,6 +250,16 @@ export async function initializeDb(): Promise<DbInstance> {
       }
       const msg = err?.message ?? String(err);
       console.error(`[db] Connection failed (attempt ${attempt}): ${msg}`);
+      // Stop once the next sleep would run past the budget, so a
+      // misconfigured target fails with the real error instead of looping
+      // until something external kills the process.
+      if (deadline !== null && Date.now() + delay >= deadline) {
+        console.error(
+          `[db] Giving up after ${attempt} attempt(s) / ${budgetMs}ms — ` +
+            `could not reach ${describeConnectionTarget(resolveConnectionString())}.`,
+        );
+        throw err;
+      }
       console.log(`[db] Retrying in ${delay / 1000}s…`);
       await new Promise<void>((resolve) => setTimeout(resolve, delay));
       delay = Math.min(delay * 2, DB_RETRY_MAX_DELAY_MS);
