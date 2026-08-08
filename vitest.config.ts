@@ -3,6 +3,16 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     globalSetup: ["./vitest.globalsetup.ts"],
+    // Most of this suite talks to a real Postgres, so the wall-clock cost of a
+    // test tracks how loaded the host is rather than how much work the test
+    // does. Vitest's 5s/10s defaults are comfortable on an idle machine and
+    // far too tight on the CI host, where several service images build against
+    // the same disk while these run — that combination produced spurious
+    // "Test timed out in 5000ms" and "Hook timed out in 10000ms" failures in
+    // tests that pass reliably otherwise. Local runs keep the tight defaults
+    // so a genuine hang still surfaces quickly.
+    testTimeout: process.env.CI ? 30_000 : 5_000,
+    hookTimeout: process.env.CI ? 30_000 : 10_000,
     env: {
       ENABLE_LOCAL_FACES: "false",
       DB_TYPE: "postgres",
