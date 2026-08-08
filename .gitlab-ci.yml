@@ -1,18 +1,32 @@
 # GitLab CI port of the former GitHub Actions workflows (.github/workflows/*.yml,
 # excluding claude.yml, which has no GitLab equivalent and was dropped).
 #
-# Registry: images now live on registry.scheggs.net instead of ghcr.io. The
-# main app keeps the project's own image path; sidecar services use sub-paths
-# under it (registry.scheggs.net/schegg/fk-encore/<service>) instead of GHCR's
-# sibling-repo-with-suffix naming (ghcr.io/as19git67/fk-encore-<service>) —
-# that's the GitLab-native way to group several images under one project.
+# Registry: images now live on this GitLab's integrated Container Registry
+# instead of ghcr.io. The main app keeps the project's own image path; sidecar
+# services use sub-paths under it (<registry>/schegg/fk-encore/<service>)
+# instead of GHCR's sibling-repo-with-suffix naming
+# (ghcr.io/as19git67/fk-encore-<service>) — that's the GitLab-native way to
+# group several images under one project.
 #
-# Login: assumes registry.scheggs.net IS this GitLab instance's integrated
-# Container Registry, so the predefined $CI_REGISTRY_USER / $CI_REGISTRY_PASSWORD
-# (gitlab-ci-token) work without extra setup. If registry.scheggs.net is a
-# *different*, external registry, define REGISTRY_USER / REGISTRY_PASSWORD as
-# CI/CD variables (Settings > CI/CD > Variables) and swap them into the
-# `docker login` calls below.
+# Registry address: CI pushes to the registry's LOCAL origin address
+# (nas.schegg.net:45050, host port 45050 -> container port 5050), NOT the
+# public registry.scheggs.net. The public name is a Cloudflare Tunnel CNAME,
+# and tunnel traffic goes through Cloudflare's edge, which caps request bodies
+# at 100 MB — image layers here are bigger than that, so pushes died with
+# "413 Payload Too Large". Going straight to the origin skips Cloudflare
+# entirely. This changes nothing for consumers: a registry stores images by
+# repository PATH, so an image pushed as
+# nas.schegg.net:45050/schegg/fk-encore/embedding is the exact same image as
+# registry.scheggs.net/schegg/fk-encore/embedding — deployments and Watchtower
+# keep pulling the public name unchanged.
+#
+# Login: uses the predefined $CI_REGISTRY_USER / $CI_REGISTRY_PASSWORD
+# (gitlab-ci-token). The registry answers with a token realm pointing at the
+# public GitLab URL, which the runner reaches over the internet as usual — that
+# request is tiny, so the Cloudflare body limit is irrelevant for it.
+#
+# The origin speaks plain HTTP, so both the dind daemon (--insecure-registry)
+# and BuildKit (see .buildx_create below) have to be told to allow it.
 #
 # Runners: the docker-build jobs need a Docker executor with access to a
 # Docker daemon (docker:dind service, privileged mode) or an equivalent
@@ -31,7 +45,9 @@ stages:
   - cleanup
 
 variables:
-  REGISTRY: registry.scheggs.net
+  # Local origin address of the GitLab Container Registry — see the header
+  # comment for why this is not registry.scheggs.net.
+  REGISTRY: nas.schegg.net:45050
   DOCKER_TLS_CERTDIR: ""
   DOCKER_HOST: tcp://docker:2375
   DOCKER_DRIVER: overlay2
@@ -55,7 +71,15 @@ workflow:
 .docker_dind: &docker_dind
   image: docker:27-cli
   services:
-    - docker:27-dind
+    # --insecure-registry: the registry origin is plain HTTP (TLS is
+    # terminated by the Cloudflare Tunnel for public access, not here), and
+    # dockerd refuses non-TLS registries unless explicitly allowed. Covers
+    # plain `docker push`; buildx needs its own config, see .buildx_create.
+    # Spelled out rather than "$REGISTRY" on purpose: variable expansion in a
+    # service `command:` is not dependable. Keep in sync with the REGISTRY
+    # variable above if the registry address ever changes.
+    - name: docker:27-dind
+      command: ["--insecure-registry=nas.schegg.net:45050"]
 
 # NOTE: these two anchors must stay single multi-line strings (YAML block
 # scalars), not one-element lists — `- *anchor` inside another job's
@@ -64,6 +88,18 @@ workflow:
 # at runtime (verified against gitlab.scheggs.net's CI lint API).
 .registry_login: &registry_login |
   echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$REGISTRY"
+
+# Creates the buildx builder. The docker-container driver runs BuildKit in its
+# own container, which does NOT inherit dockerd's --insecure-registry flag —
+# without this config every `buildx build --push` to the plain-HTTP origin
+# fails with an HTTPS/TLS error.
+.buildx_create: &buildx_create |
+  cat > /tmp/buildkitd.toml <<EOF
+  [registry."${REGISTRY}"]
+    http = true
+    insecure = true
+  EOF
+  docker buildx create --use --driver docker-container --config /tmp/buildkitd.toml
 
 # Rebuild of docker/metadata-action's tag logic:
 #   latest        -> default-branch pushes
@@ -327,7 +363,7 @@ embedding:build:
     # amd64-only for now (no arm64 host in use yet). Flip back to
     # linux/amd64,linux/arm64 + re-add QEMU/binfmt setup (tonistiigi/binfmt)
     # before this buildx build once arm64 is actually needed.
-    - docker buildx create --use --driver docker-container
+    - *buildx_create
     - |
       TAG_ARGS=""
       while read -r tag; do
@@ -376,7 +412,7 @@ geo:build:
   script:
     # Single-arch (amd64) to match the current deploy target. Flip to
     # linux/amd64,linux/arm64 once an arm64 host is actually in use.
-    - docker buildx create --use --driver docker-container
+    - *buildx_create
     - |
       TAG_ARGS=""
       while read -r tag; do
@@ -425,7 +461,7 @@ insightface:build:
     # amd64-only for now (no arm64 host in use yet). Flip back to
     # linux/amd64,linux/arm64 + re-add QEMU/binfmt setup (tonistiigi/binfmt)
     # before this buildx build once arm64 is actually needed.
-    - docker buildx create --use --driver docker-container
+    - *buildx_create
     - |
       TAG_ARGS=""
       while read -r tag; do
@@ -484,7 +520,7 @@ llm:build:
     - *registry_login
     - *compute_tags
   script:
-    - docker buildx create --use --driver docker-container
+    - *buildx_create
     - |
       TAG_ARGS=""
       while read -r tag; do
@@ -542,7 +578,7 @@ playwright-image:build:
         echo "${IMAGE}:manual-${CI_COMMIT_SHORT_SHA}" >> tags.txt
       fi
       cat tags.txt
-    - docker buildx create --use --driver docker-container
+    - *buildx_create
     - |
       TAG_ARGS=""
       while read -r tag; do
@@ -597,7 +633,7 @@ receipt-ocr:build:
     # amd64-only for now (no arm64 host in use yet). Flip back to
     # linux/amd64,linux/arm64 + re-add QEMU/binfmt setup (tonistiigi/binfmt)
     # before this buildx build once arm64 is actually needed.
-    - docker buildx create --use --driver docker-container
+    - *buildx_create
     - |
       TAG_ARGS=""
       while read -r tag; do
@@ -638,7 +674,7 @@ taxonomy-tools:build:
     # amd64-only for now (no arm64 host in use yet). Flip back to
     # linux/amd64,linux/arm64 + re-add QEMU/binfmt setup (tonistiigi/binfmt)
     # before this buildx build once arm64 is actually needed.
-    - docker buildx create --use --driver docker-container
+    - *buildx_create
     - |
       TAG_ARGS=""
       while read -r tag; do
