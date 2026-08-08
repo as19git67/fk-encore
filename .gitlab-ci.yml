@@ -97,11 +97,32 @@ workflow:
           printf '{"insecure-registries":["nas.schegg.net:45050"]}' > /etc/docker/daemon.json
           exec dockerd-entrypoint.sh
 
-# NOTE: these two anchors must stay single multi-line strings (YAML block
+# NOTE: the anchors below must stay single multi-line strings (YAML block
 # scalars), not one-element lists — `- *anchor` inside another job's
 # before_script list only flattens correctly when the anchor itself resolves
 # to a scalar. Anchoring a list here would nest as `- - echo ...` and break
 # at runtime (verified against gitlab.scheggs.net's CI lint API).
+
+# GitLab waits 30s for a service to report healthy and then starts the job
+# regardless. Docker 27 deliberately slows its own startup when it binds TCP
+# without TLS ("Startup is intentionally being slowed down to show this
+# message"), so on a loaded host that window gets missed and the job races a
+# daemon that is not serving yet — taxonomy-tools:build hit exactly that and
+# died on `docker login` while sibling jobs minutes earlier were fine.
+.docker_ready: &docker_ready |
+  for i in $(seq 1 60); do
+    docker info >/dev/null 2>&1 && break
+    if [ "$i" = 60 ]; then echo "dockerd never became ready"; exit 1; fi
+    sleep 2
+  done
+  # Confirm the insecure-registry entry actually landed. Without this check a
+  # missing entry only surfaces minutes later, mid-push, as an opaque TLS error.
+  docker info 2>/dev/null | grep -qF "nas.schegg.net:45050" || {
+    echo "dockerd is up but nas.schegg.net:45050 is not among its insecure registries:"
+    docker info 2>/dev/null | sed -n '/Insecure Registries/,$p'
+    exit 1
+  }
+
 .registry_login: &registry_login |
   echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$REGISTRY"
 
@@ -309,6 +330,10 @@ app:build:
       curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" \
         | tar -xz -C /usr/local/bin --strip-components=1 docker/docker
     - docker --version
+    # skopeo does the registry push, see the comment on that step below.
+    - apt-get update -qq && apt-get install -y --no-install-recommends skopeo
+    - skopeo --version
+    - *docker_ready
     - *registry_login
     - *compute_tags
   script:
@@ -355,11 +380,25 @@ app:build:
         --build-arg BUILD_NUMBER="${CI_PIPELINE_IID}-${CI_COMMIT_SHA}" \
         -t app-build:latest \
         .
+    # Pushed with skopeo rather than `docker push`. The daemon honours its
+    # insecure-registries list for `docker login` (which succeeds) but still
+    # attempts HTTPS for the blob uploads, so the push died with "server gave
+    # HTTP response to HTTPS client" — reproducibly, with the setting supplied
+    # both as a --insecure-registry flag and via daemon.json. Every other image
+    # here goes out through BuildKit, which is told `http = true` explicitly and
+    # has never had the problem; skopeo takes the same kind of explicit switch,
+    # so this job stops depending on the daemon guessing right.
+    # `docker-daemon:` reads the image straight out of dockerd (via DOCKER_HOST),
+    # so Stage B does not have to be rebuilt somewhere BuildKit can see it.
     - |
       while read -r tag; do
         [ -z "$tag" ] && continue
-        docker tag app-build:latest "$tag"
-        docker push "$tag"
+        echo "Pushing ${tag}"
+        skopeo copy --dest-tls-verify=false \
+          --src-daemon-host "${DOCKER_HOST}" \
+          --dest-authfile "${HOME}/.docker/config.json" \
+          docker-daemon:app-build:latest \
+          "docker://${tag}"
       done < tags.txt
 
 # ---------------------------------------------------------------------------
@@ -393,6 +432,7 @@ embedding:build:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
       changes: *embedding_paths
   before_script:
+    - *docker_ready
     - *registry_login
     - *compute_tags
   script:
@@ -443,6 +483,7 @@ geo:build:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
       changes: *geo_paths
   before_script:
+    - *docker_ready
     - *registry_login
     - *compute_tags
   script:
@@ -491,6 +532,7 @@ insightface:build:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
       changes: *insightface_paths
   before_script:
+    - *docker_ready
     - *registry_login
     - *compute_tags
   script:
@@ -553,6 +595,7 @@ llm:build:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
       changes: *llm_paths
   before_script:
+    - *docker_ready
     - *registry_login
     - *compute_tags
   script:
@@ -593,6 +636,7 @@ playwright-image:build:
     - if: '$CI_PIPELINE_SOURCE == "web"'
   before_script:
     - apk add --no-cache nodejs npm
+    - *docker_ready
     - *registry_login
   script:
     # Read the Playwright version from frontend/package-lock.json so the
@@ -663,6 +707,7 @@ receipt-ocr:build:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
       changes: *receipt_ocr_paths
   before_script:
+    - *docker_ready
     - *registry_login
     - *compute_tags
   script:
@@ -703,6 +748,7 @@ taxonomy-tools:build:
       changes: *taxonomy_paths
   before_script:
     - apk add --no-cache bash
+    - *docker_ready
     - *registry_login
     - *compute_tags
   script:
