@@ -68,15 +68,34 @@ workflow:
 .docker_dind: &docker_dind
   image: docker:27-cli
   services:
-    # --insecure-registry: the registry origin is plain HTTP (TLS is
+    # insecure-registries: the registry origin is plain HTTP (TLS is
     # terminated by the Cloudflare Tunnel for public access, not here), and
     # dockerd refuses non-TLS registries unless explicitly allowed. Covers
     # plain `docker push`; buildx needs its own config, see .buildx_create.
-    # Spelled out rather than "$REGISTRY" on purpose: variable expansion in a
-    # service `command:` is not dependable. Keep in sync with the REGISTRY
-    # variable above if the registry address ever changes.
+    #
+    # Written to /etc/docker/daemon.json rather than passed as an
+    # --insecure-registry=... CLI flag: with the flag, `docker login`
+    # (registry.scheggs.net's own /v2/ check) went through fine but the
+    # later `docker push` to nas.schegg.net:45050 still failed with
+    # "server gave HTTP response to HTTPS client" — the flag was accepted
+    # (dockerd started, login worked) but evidently wasn't honoured for
+    # every registry client code path. daemon.json is the config dockerd
+    # actually reads its insecure-registries table from; the CLI flag is
+    # sugar over the same setting and apparently less reliable here. Do
+    # NOT also pass the CLI flag — dockerd refuses to start if the same
+    # setting comes from both a flag and the config file.
+    #
+    # Spelled out rather than "$REGISTRY" on purpose: variable expansion in
+    # a service `command:` is not dependable. Keep in sync with the
+    # REGISTRY variable above if the registry address ever changes.
     - name: docker:27-dind
-      command: ["--insecure-registry=nas.schegg.net:45050"]
+      command:
+        - sh
+        - -c
+        - |
+          mkdir -p /etc/docker
+          printf '{"insecure-registries":["nas.schegg.net:45050"]}' > /etc/docker/daemon.json
+          exec dockerd-entrypoint.sh
 
 # NOTE: these two anchors must stay single multi-line strings (YAML block
 # scalars), not one-element lists — `- *anchor` inside another job's
