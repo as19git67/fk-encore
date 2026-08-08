@@ -656,7 +656,16 @@ taxonomy-tools:build:
 
 e2e:playwright:
   stage: test
-  image: ${REGISTRY}/${CI_PROJECT_PATH}/playwright-e2e:latest
+  # Plain node image + self-installed Encore CLI/Playwright, not the
+  # pre-baked ${REGISTRY}/${CI_PROJECT_PATH}/playwright-e2e image: that image
+  # is built by playwright-image:build in *this same* pipeline, so depending
+  # on it here is circular on a fresh registry (nothing has ever been pushed
+  # yet) and unreliable on MR pipelines (that job only pushes :test, not
+  # :latest, unless the Dockerfile itself changed in the MR). Once the image
+  # has a proven build/push history, switch back to it as a speed
+  # optimization (setup drops from ~2-3 min to seconds) and add
+  # `needs: [{job: playwright-image:build, optional: true}]` for ordering.
+  image: node:24-bookworm
   timeout: 30 minutes
   interruptible: true
   # GH used `concurrency: group: e2e-...; cancel-in-progress: true` because
@@ -692,7 +701,6 @@ e2e:playwright:
     E2E_API_URL: http://localhost:4000
     E2E_ADMIN_EMAIL: admin@example.com
     E2E_ADMIN_PASSWORD: admin
-    PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
     PHOTO_UPLOAD_DIR: ${CI_PROJECT_DIR}/e2e-data/photos
     PHOTO_THUMBNAIL_DIR: ${CI_PROJECT_DIR}/e2e-data/thumbnails
     PHOTO_LIBRARIES_ROOT: ${CI_PROJECT_DIR}/e2e-data/libraries
@@ -717,12 +725,22 @@ e2e:playwright:
   before_script:
     - node --version
     - npm --version
+    # No pre-installed tooling here (see the image: comment above) — install
+    # the Encore CLI the same way app:build does.
+    - curl -fsSL --retry 3 --retry-delay 5 -o install.sh https://encore.dev/install.sh
+    - bash install.sh
+    - export PATH="${HOME}/.encore/bin:${PATH}"
+    - rm -f install.sh
     - encore version
-    - playwright --version
   script:
     - npm install
     - npm --prefix geo install
     - npm --prefix frontend install --legacy-peer-deps
+    # Chromium + OS deps, matching the version pinned in the frontend
+    # lockfile. Slower than the pre-baked image (see comment above) but has
+    # no bootstrap dependency on it.
+    - npx --prefix frontend playwright install --with-deps chromium
+    - npx --prefix frontend playwright --version
     - mkdir -p e2e-logs
     - nohup encore run --port=4000 --watch=false > e2e-logs/encore.log 2>&1 &
     - echo $! > e2e-logs/encore.pid
@@ -766,52 +784,53 @@ e2e:playwright:
       - e2e-logs/encore.log
 
 # ---------------------------------------------------------------------------
-# ios-tests.yml — needs a macOS/Xcode runner registered with the `macos` tag.
-# Adjust the tag below to match whatever runner fleet is actually available;
-# there is no GitLab.com-style hosted macOS runner on a self-managed instance
-# unless one has been set up.
+# ios-tests.yml — DISABLED for now: no macOS/Xcode runner available yet.
+# Uncomment once a macOS runner is registered with the `macos` tag (there is
+# no GitLab.com-style hosted macOS runner on a self-managed instance unless
+# one has been set up — see the earlier chat thread on setting up a Mac mini
+# as a runner).
 # ---------------------------------------------------------------------------
 
-ios:test:
-  stage: test
-  tags:
-    - macos
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-      changes: &ios_paths
-        - "ios/**/*"
-        - ".gitlab-ci.yml"
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
-      changes: *ios_paths
-    - if: '$CI_PIPELINE_SOURCE == "web"'
-  script:
-    - cd ios
-    - sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
-    - xcodebuild -version
-    - xcodebuild -showsdks | grep -i ios || true
-    - xcrun simctl list devices available | grep -i iphone || true
-    # xcodebuild prefers an .xcodeproj over Package.swift when both are
-    # present, which hides the package's FKPhotos-Package scheme (and the
-    # FKPhotosTests target). Move the app project out of the working dir so
-    # the package becomes the only project context.
-    - mv FKPhotos.xcodeproj "${CI_BUILDS_DIR}/FKPhotos.xcodeproj"
-    - xcodebuild -list || true
-    - |
-      SCHEME=$(xcodebuild -list -json 2>/dev/null | python3 -c "import sys, json; r = sys.stdin.read(); d = json.loads(r[r.find('{'):]); c = d.get('workspace') or d.get('project') or {}; s = c.get('schemes', []); p = [x for x in s if x.endswith('-Package')]; print(p[0] if p else (s[0] if s else ''))")
-      echo "Selected scheme: $SCHEME"
-      echo "IOS_SCHEME=$SCHEME" >> build.env
-    - source build.env
-    - |
-      xcodebuild test \
-        -scheme "$IOS_SCHEME" \
-        -destination 'platform=iOS Simulator,name=iPhone 16' \
-        -skipPackagePluginValidation \
-        -resultBundlePath TestResults.xcresult \
-        CODE_SIGNING_ALLOWED=NO
-  artifacts:
-    when: always
-    paths:
-      - ios/TestResults.xcresult
+# ios:test:
+#   stage: test
+#   tags:
+#     - macos
+#   rules:
+#     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+#       changes: &ios_paths
+#         - "ios/**/*"
+#         - ".gitlab-ci.yml"
+#     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+#       changes: *ios_paths
+#     - if: '$CI_PIPELINE_SOURCE == "web"'
+#   script:
+#     - cd ios
+#     - sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+#     - xcodebuild -version
+#     - xcodebuild -showsdks | grep -i ios || true
+#     - xcrun simctl list devices available | grep -i iphone || true
+#     # xcodebuild prefers an .xcodeproj over Package.swift when both are
+#     # present, which hides the package's FKPhotos-Package scheme (and the
+#     # FKPhotosTests target). Move the app project out of the working dir so
+#     # the package becomes the only project context.
+#     - mv FKPhotos.xcodeproj "${CI_BUILDS_DIR}/FKPhotos.xcodeproj"
+#     - xcodebuild -list || true
+#     - |
+#       SCHEME=$(xcodebuild -list -json 2>/dev/null | python3 -c "import sys, json; r = sys.stdin.read(); d = json.loads(r[r.find('{'):]); c = d.get('workspace') or d.get('project') or {}; s = c.get('schemes', []); p = [x for x in s if x.endswith('-Package')]; print(p[0] if p else (s[0] if s else ''))")
+#       echo "Selected scheme: $SCHEME"
+#       echo "IOS_SCHEME=$SCHEME" >> build.env
+#     - source build.env
+#     - |
+#       xcodebuild test \
+#         -scheme "$IOS_SCHEME" \
+#         -destination 'platform=iOS Simulator,name=iPhone 16' \
+#         -skipPackagePluginValidation \
+#         -resultBundlePath TestResults.xcresult \
+#         CODE_SIGNING_ALLOWED=NO
+#   artifacts:
+#     when: always
+#     paths:
+#       - ios/TestResults.xcresult
 
 # ---------------------------------------------------------------------------
 # Shared Watchtower deploy — fires once per pipeline, after whatever build
