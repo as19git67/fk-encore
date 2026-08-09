@@ -14,7 +14,7 @@ services:
 
   # ── InsightFace Service (Face Detection) ───────────────────────────────────
   insightface:
-    image: ghcr.io/as19git67/fk-encore-insightface:test
+    image: registry.scheggs.net/schegg/fk-encore/insightface:test
     container_name: fk-encore-insightface-test
     restart: unless-stopped
     user: "568:568"
@@ -31,7 +31,7 @@ services:
 
   # ── Embedding Service (CLIP + DINOv2) ──────────────────────────────────────
   embedding_service:
-    image: ghcr.io/as19git67/fk-encore-embedding:test
+    image: registry.scheggs.net/schegg/fk-encore/embedding:test
     container_name: fk-encore-embedding-test
     restart: unless-stopped
     user: "568:568"
@@ -79,7 +79,7 @@ services:
   # volume. Run `docker compose run --rm llm_service /usr/local/bin/download_model.sh`
   # once before first start to populate the volume.
   llm_service:
-    image: ghcr.io/as19git67/fk-encore-llm:test
+    image: registry.scheggs.net/schegg/fk-encore/llm:test
     container_name: fk-encore-llm-test
     restart: unless-stopped
     user: "568:568"
