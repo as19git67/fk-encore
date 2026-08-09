@@ -356,6 +356,23 @@ app:build:
     - export PATH="${HOME}/.encore/bin:${PATH}"
     - rm -f install.sh
     - encore version
+    # `encore build docker` talks to a background encored daemon that it
+    # auto-spawns on first use, and on a cold container that spawn+handshake
+    # can lose the race — the build then dies immediately with "dialing
+    # daemon: context deadline exceeded". Same failure e2e:playwright had;
+    # starting the daemon explicitly first fixed it there and that job has
+    # been green since. Poll for readiness rather than guessing at a sleep.
+    - nohup encore daemon > encored.log 2>&1 &
+    - |
+      for i in $(seq 1 30); do
+        encore daemon env >/dev/null 2>&1 && break
+        if [ "$i" = 30 ]; then
+          echo "encored did not become ready:" >&2
+          cat encored.log >&2 || true
+          exit 1
+        fi
+        sleep 2
+      done
     # Stage A — Encore's official production build. Produces a portable
     # image (node:24-bookworm-slim base) with the compiled app + runtime,
     # tagged locally; it never leaves the runner/dind daemon.
