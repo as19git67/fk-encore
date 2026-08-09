@@ -109,10 +109,16 @@ workflow:
 # message"), so on a loaded host that window gets missed and the job races a
 # daemon that is not serving yet — taxonomy-tools:build hit exactly that and
 # died on `docker login` while sibling jobs minutes earlier were fine.
+# The budget is 5 minutes, not the 2 it started as: receipt-ocr:build hit the
+# shorter one while dockerd was demonstrably still coming up (its own log shows
+# containerd only starting 16s in, after the deprecation delay). With several
+# privileged dind services competing for this host that is simply slow. If this
+# starts timing out too, the answer is fewer concurrent jobs on the runner
+# rather than a longer wait here.
 .docker_ready: &docker_ready |
-  for i in $(seq 1 60); do
+  for i in $(seq 1 150); do
     docker info >/dev/null 2>&1 && break
-    if [ "$i" = 60 ]; then echo "dockerd never became ready"; exit 1; fi
+    if [ "$i" = 150 ]; then echo "dockerd never became ready after 5 minutes"; exit 1; fi
     sleep 2
   done
   # Confirm the insecure-registry entry actually landed. Without this check a
@@ -405,26 +411,27 @@ app:build:
     # here goes out through BuildKit, which is told `http = true` explicitly and
     # has never had the problem; skopeo takes the same kind of explicit switch,
     # so this job stops depending on the daemon guessing right.
-    # `docker-daemon:` reads the image straight out of dockerd (via DOCKER_HOST),
-    # so Stage B does not have to be rebuilt somewhere BuildKit can see it.
+    #
+    # The image is handed over as a file rather than through skopeo's
+    # docker-daemon transport. Talking to dockerd directly meant matching it on
+    # two counts, and each was a separate failed pipeline: the URL scheme
+    # (skopeo maps tcp:// to https://, and --src-tls-verify=false only disables
+    # certificate checks, not the scheme) and the API version (bookworm's
+    # skopeo opens with 1.22, which dockerd 27 rejects as "too old"). `docker
+    # save` sidesteps both — the Docker CLI negotiates the API version itself —
+    # and leaves skopeo doing only the registry push, which is the part
+    # --dest-tls-verify=false actually covers.
+    - docker save app-build:latest -o /tmp/app-build.tar
     - |
-      # skopeo derives the URL scheme for the daemon from the host string, and
-      # maps tcp:// to https://. --src-tls-verify=false does NOT change that —
-      # it only turns off certificate checking — so with DOCKER_HOST's
-      # tcp://docker:2375 every read failed with "server gave HTTP response to
-      # HTTPS client". Handing it http:// is what actually makes it speak
-      # plain HTTP (verified against a plain-HTTP listener locally).
-      DAEMON_HOST=$(printf '%s' "$DOCKER_HOST" | sed 's|^tcp://|http://|')
-      echo "Reading images from ${DAEMON_HOST}"
       while read -r tag; do
         [ -z "$tag" ] && continue
         echo "Pushing ${tag}"
         skopeo copy --dest-tls-verify=false \
-          --src-daemon-host "${DAEMON_HOST}" \
           --dest-authfile "${HOME}/.docker/config.json" \
-          docker-daemon:app-build:latest \
+          docker-archive:/tmp/app-build.tar \
           "docker://${tag}"
       done < tags.txt
+    - rm -f /tmp/app-build.tar
 
 # ---------------------------------------------------------------------------
 # docker-image-embedding.yml
