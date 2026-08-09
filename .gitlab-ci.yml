@@ -391,11 +391,19 @@ app:build:
     # `docker-daemon:` reads the image straight out of dockerd (via DOCKER_HOST),
     # so Stage B does not have to be rebuilt somewhere BuildKit can see it.
     - |
+      # skopeo derives the URL scheme for the daemon from the host string, and
+      # maps tcp:// to https://. --src-tls-verify=false does NOT change that —
+      # it only turns off certificate checking — so with DOCKER_HOST's
+      # tcp://docker:2375 every read failed with "server gave HTTP response to
+      # HTTPS client". Handing it http:// is what actually makes it speak
+      # plain HTTP (verified against a plain-HTTP listener locally).
+      DAEMON_HOST=$(printf '%s' "$DOCKER_HOST" | sed 's|^tcp://|http://|')
+      echo "Reading images from ${DAEMON_HOST}"
       while read -r tag; do
         [ -z "$tag" ] && continue
         echo "Pushing ${tag}"
-        skopeo copy --dest-tls-verify=false --src-tls-verify=false \
-          --src-daemon-host "${DOCKER_HOST}" \
+        skopeo copy --dest-tls-verify=false \
+          --src-daemon-host "${DAEMON_HOST}" \
           --dest-authfile "${HOME}/.docker/config.json" \
           docker-daemon:app-build:latest \
           "docker://${tag}"
