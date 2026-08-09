@@ -3,15 +3,42 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     globalSetup: ["./vitest.globalsetup.ts"],
+    // Most of this suite talks to a real Postgres, so the wall-clock cost of a
+    // test tracks how loaded the host is rather than how much work the test
+    // does. Vitest's 5s/10s defaults are comfortable on an idle machine and
+    // far too tight on the CI host, where several service images build against
+    // the same disk while these run — that combination produced spurious
+    // "Test timed out in 5000ms" and "Hook timed out in 10000ms" failures in
+    // tests that pass reliably otherwise. Local runs keep the tight defaults
+    // so a genuine hang still surfaces quickly.
+    testTimeout: process.env.CI ? 30_000 : 5_000,
+    hookTimeout: process.env.CI ? 30_000 : 10_000,
     env: {
       ENABLE_LOCAL_FACES: "false",
       DB_TYPE: "postgres",
-      POSTGRES_HOST: "localhost",
-      POSTGRES_PORT: "5432",
-      POSTGRES_USER: "postgres",
-      POSTGRES_PASSWORD: "postgres",
-      POSTGRES_TEST_DB: "encore_test",
-      POSTGRES_TEST_CONNECTION_STRING: "postgres://postgres:postgres@localhost:5432/encore_test",
+      // Postgres connection details fall back to a local instance but must
+      // stay overridable from the real environment. `test.env` applies ONLY
+      // inside the test workers, never in globalSetup — so hardcoding a host
+      // here splits the two: globalSetup would create the test database on
+      // the host CI provides, while every test file then looked for it
+      // somewhere else and retried forever.
+      //
+      // This does not show up on a runner that publishes the database on the
+      // host (as GitHub Actions does for service containers), but it does
+      // wherever the job itself runs in a container and the database is only
+      // reachable under a service hostname — the same pitfall the E2E
+      // workflow already documents.
+      //
+      // `||` rather than `??` on purpose: an empty string should fall back
+      // to the default, not be honoured as a host/port.
+      POSTGRES_HOST: process.env.POSTGRES_HOST || "localhost",
+      POSTGRES_PORT: process.env.POSTGRES_PORT || "5432",
+      POSTGRES_USER: process.env.POSTGRES_USER || "postgres",
+      POSTGRES_PASSWORD: process.env.POSTGRES_PASSWORD || "postgres",
+      POSTGRES_TEST_DB: process.env.POSTGRES_TEST_DB || "encore_test",
+      POSTGRES_TEST_CONNECTION_STRING:
+        process.env.POSTGRES_TEST_CONNECTION_STRING ||
+        "postgres://postgres:postgres@localhost:5432/encore_test",
       RP_ID: "localhost",
       RP_NAME: "FK Encore App",
       RP_ORIGIN: "http://localhost:5173",

@@ -59,3 +59,16 @@ export function wakeWaiter(slotId: number): void {
 export function waiterCount(): number {
   return waiters.size;
 }
+
+/**
+ * Test helper: drop every registration without waking anyone.
+ *
+ * Only for test isolation. A test that fails mid-wait leaves its waiters
+ * registered, and because this registry is a module singleton the next test
+ * would inherit them and see a `waiterCount()` it never caused — turning one
+ * failure into a cascade of unrelated ones. Any promise abandoned this way
+ * simply never resolves; its owning test is already over.
+ */
+export function resetWaiters(): void {
+  waiters.clear();
+}

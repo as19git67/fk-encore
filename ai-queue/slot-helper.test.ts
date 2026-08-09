@@ -3,7 +3,15 @@ import { sql } from "drizzle-orm";
 
 import db from "../db/database";
 import { acquireSlot, releaseSlot, pollSlot } from "./api";
-import { waiterCount } from "./waiters";
+import { resetWaiters, waiterCount } from "./waiters";
+
+// Registering a waiter costs a Postgres round-trip, so "the waiter has
+// registered by now" is a latency assumption, not a logic one. On a busy CI
+// host — this repo's builds run several image builds against the same disk —
+// that round-trip has taken well over two seconds, which failed the wait and
+// then leaked a held slot into the following tests. Give CI real headroom;
+// keep it tight locally so a genuine regression still fails fast.
+const REGISTERED_TIMEOUT_MS = process.env.CI ? 20_000 : 2_000;
 
 // Wire the `~encore/clients` aiqueue stub (from vitest.setup.ts) to the REAL
 // api handlers so withAiSlot exercises the actual DB + waiter registry. The
@@ -26,6 +34,10 @@ import { withAiSlot, AiSlotTimeoutError } from "./slot-helper";
 
 beforeEach(async () => {
   await db.execute(sql`DELETE FROM ai_model_slot`);
+  // The registry is a module singleton and survives between tests, so a test
+  // that fails while waiting would otherwise hand its leftover waiters to the
+  // next one. Clearing the DB rows alone is not enough.
+  resetWaiters();
 });
 
 afterEach(() => {
@@ -77,7 +89,7 @@ describe("withAiSlot push wakeup", () => {
     });
 
     // Wait until the waiter has registered in the in-process registry.
-    await vi.waitFor(() => expect(waiterCount()).toBe(1), { timeout: 2000 });
+    await vi.waitFor(() => expect(waiterCount()).toBe(1), { timeout: REGISTERED_TIMEOUT_MS });
     expect(waiterRan).toBe(false);
 
     // Release the holder → promotes + wakes the waiter.
@@ -109,7 +121,7 @@ describe("withAiSlot push wakeup", () => {
       order.push("high");
     });
 
-    await vi.waitFor(() => expect(waiterCount()).toBe(2), { timeout: 2000 });
+    await vi.waitFor(() => expect(waiterCount()).toBe(2), { timeout: REGISTERED_TIMEOUT_MS });
 
     holderGate.resolve();
     await holder;
@@ -172,7 +184,7 @@ describe("withAiSlot push wakeup", () => {
       return "via-fallback";
     });
 
-    await vi.waitFor(() => expect(waiterCount()).toBe(1), { timeout: 2000 });
+    await vi.waitFor(() => expect(waiterCount()).toBe(1), { timeout: REGISTERED_TIMEOUT_MS });
 
     // Promote the waiter directly in the DB, bypassing releaseSlot's wakeWaiter
     // so the ONLY way the waiter can notice is its fallback poll.
