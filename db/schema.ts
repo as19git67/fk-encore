@@ -295,10 +295,13 @@ export interface AiPickPhotoScore {
   photo_id: number;
   score: number;
   has_face: boolean;
-  // Recorded only when known; pre-backfill rows carry no value rather
-  // than a misleading default. Stufe-D regression can ignore the field
-  // when it's absent.
   orientation?: "portrait" | "landscape" | "square";
+  /** Sum of per-face prominence weights (Etappe 1). Absent on rows
+   *  scored before prominence was introduced. */
+  face_prominence?: number;
+  /** Regime blend factor when between 0 and 1. Absent when the
+   *  regime is fully face (1) or fully non-face (0). */
+  face_regime_blend?: number;
   signals: {
     face_sharpness?: number;
     eyes_open?: number;
