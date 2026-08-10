@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  FACE_REGIME_THRESHOLD,
   HIGH_CONFIDENCE_DELTA,
   MEDIUM_CONFIDENCE_DELTA,
   MULTI_PICK_THRESHOLD,
   ORIENTATION_FLOOR,
+  PROMINENCE_FLOOR,
+  PROMINENCE_SATURATION,
+  KNOWN_BONUS,
   classifyOrientation,
+  computeFaceProminence,
   computeGroupPick,
   scorePhoto,
   type PhotoSignals,
@@ -24,45 +29,102 @@ function basePhoto(overrides: Partial<PhotoSignals> = {}): PhotoSignals {
     face_composition: 0.5,
     face_count: 0,
     face_coverage: 0,
+    face_prominence: 0,
     ...overrides,
   };
 }
 
+/** Convenience: a face_prominence value that puts the photo fully in face regime. */
+const FULL_FACE = FACE_REGIME_THRESHOLD + 0.01;
+
+describe("computeFaceProminence", () => {
+  it("returns 0 for faces below the floor", () => {
+    expect(computeFaceProminence(PROMINENCE_FLOOR * 0.5, false)).toBe(0);
+    expect(computeFaceProminence(0, false)).toBe(0);
+  });
+
+  it("returns a positive value for faces above the floor", () => {
+    expect(computeFaceProminence(PROMINENCE_FLOOR * 2, false)).toBeGreaterThan(0);
+  });
+
+  it("saturates at PROMINENCE_SATURATION", () => {
+    const atSat = computeFaceProminence(PROMINENCE_SATURATION, false);
+    const aboveSat = computeFaceProminence(PROMINENCE_SATURATION * 2, false);
+    expect(atSat).toBeCloseTo(1.0, 6);
+    expect(aboveSat).toBeCloseTo(1.0, 6);
+  });
+
+  it("applies the KNOWN_BONUS for known persons", () => {
+    const area = PROMINENCE_SATURATION / 2;
+    const unknown = computeFaceProminence(area, false);
+    const known = computeFaceProminence(area, true);
+    expect(known).toBeCloseTo(unknown * (1 + KNOWN_BONUS), 6);
+  });
+
+  it("never penalises — unknown and ignored faces stay at base prominence", () => {
+    const area = PROMINENCE_SATURATION / 2;
+    expect(computeFaceProminence(area, false)).toBeGreaterThan(0);
+  });
+});
+
 describe("scorePhoto", () => {
-  it("uses the face branch when face_count > 0", () => {
-    const result = scorePhoto(basePhoto({ photo_id: 1, face_count: 2 }));
+  it("uses the face branch when face_prominence is high", () => {
+    const result = scorePhoto(basePhoto({ photo_id: 1, face_count: 2, face_prominence: FULL_FACE }));
     expect(result.has_face).toBe(true);
     expect(result.signals.face_sharpness).toBeDefined();
     expect(result.signals.clip_composition).toBeUndefined();
   });
 
-  it("uses the non-face branch when face_count = 0", () => {
+  it("uses the non-face branch when face_prominence = 0", () => {
     const result = scorePhoto(basePhoto({ photo_id: 1 }));
     expect(result.has_face).toBe(false);
     expect(result.signals.face_sharpness).toBeUndefined();
     expect(result.signals.clip_composition).toBeDefined();
   });
 
+  it("blends both branches for intermediate face_prominence", () => {
+    const blend = FACE_REGIME_THRESHOLD / 2;
+    const result = scorePhoto(basePhoto({ photo_id: 1, face_count: 1, face_prominence: blend }));
+    expect(result.has_face).toBe(true);
+    expect(result.face_regime_blend).toBeCloseTo(0.5, 6);
+    expect(result.signals.face_sharpness).toBeDefined();
+    expect(result.signals.clip_composition).toBeDefined();
+  });
+
+  it("falls back to binary face_count when face_prominence is undefined", () => {
+    const withFace = scorePhoto(basePhoto({
+      photo_id: 1,
+      face_count: 2,
+      face_prominence: undefined,
+    }));
+    expect(withFace.has_face).toBe(true);
+    expect(withFace.signals.face_sharpness).toBeDefined();
+
+    const withoutFace = scorePhoto(basePhoto({
+      photo_id: 2,
+      face_count: 0,
+      face_prominence: undefined,
+    }));
+    expect(withoutFace.has_face).toBe(false);
+  });
+
   it("rewards face_sharpness most heavily in the face branch", () => {
     const sharp = scorePhoto(
-      basePhoto({ photo_id: 1, face_count: 1, face_sharpness: 1.0 }),
+      basePhoto({ photo_id: 1, face_count: 1, face_prominence: FULL_FACE, face_sharpness: 1.0 }),
     );
     const blurry = scorePhoto(
-      basePhoto({ photo_id: 1, face_count: 1, face_sharpness: 0.0 }),
+      basePhoto({ photo_id: 1, face_count: 1, face_prominence: FULL_FACE, face_sharpness: 0.0 }),
     );
-    // Weight 0.40 on face_sharpness → at least 0.35 spread between the
-    // two extremes, leaving headroom for the other signals.
     expect(sharp.score - blurry.score).toBeGreaterThanOrEqual(0.35);
   });
 
   it("rewards face_composition in the face branch", () => {
     const wellComposed = scorePhoto(
-      basePhoto({ photo_id: 1, face_count: 1, face_composition: 1.0 }),
+      basePhoto({ photo_id: 1, face_count: 1, face_prominence: FULL_FACE, face_composition: 1.0 }),
     );
     const badlyComposed = scorePhoto(
-      basePhoto({ photo_id: 1, face_count: 1, face_composition: 0.0 }),
+      basePhoto({ photo_id: 1, face_count: 1, face_prominence: FULL_FACE, face_composition: 0.0 }),
     );
-    // Weight 0.10 on face_composition → ~0.10 spread.
     expect(wellComposed.score - badlyComposed.score).toBeCloseTo(0.10, 5);
   });
 
@@ -80,10 +142,10 @@ describe("scorePhoto", () => {
 
   it("saturates face_coverage above 30% of the frame", () => {
     const tight = scorePhoto(
-      basePhoto({ photo_id: 1, face_count: 1, face_coverage: 0.30 }),
+      basePhoto({ photo_id: 1, face_count: 1, face_prominence: FULL_FACE, face_coverage: 0.30 }),
     );
     const huge = scorePhoto(
-      basePhoto({ photo_id: 1, face_count: 1, face_coverage: 0.95 }),
+      basePhoto({ photo_id: 1, face_count: 1, face_prominence: FULL_FACE, face_coverage: 0.95 }),
     );
     expect(huge.score).toBeCloseTo(tight.score, 6);
   });
@@ -93,8 +155,8 @@ describe("scorePhoto", () => {
       photo_id: 1,
       face_count: 0,
       face_coverage: 0,
+      face_prominence: 0,
     });
-    // Neutral inputs → score near 0.5 (weights sum to 1.0).
     expect(allMissing.score).toBeCloseTo(0.5, 6);
   });
 
@@ -102,6 +164,28 @@ describe("scorePhoto", () => {
     const huge = scorePhoto(basePhoto({ photo_id: 1, blur_score: 12.0 }));
     const clamped = scorePhoto(basePhoto({ photo_id: 1, blur_score: 1.0 }));
     expect(huge.score).toBeCloseTo(clamped.score, 6);
+  });
+
+  it("a tiny background face does not flip regime", () => {
+    const tinyFace = scorePhoto(basePhoto({
+      photo_id: 1,
+      face_count: 1,
+      face_prominence: 0,
+      blur_score: 1.0,
+    }));
+    const noFace = scorePhoto(basePhoto({
+      photo_id: 2,
+      face_count: 0,
+      face_prominence: 0,
+      blur_score: 1.0,
+    }));
+    expect(tinyFace.score).toBeCloseTo(noFace.score, 6);
+    expect(tinyFace.has_face).toBe(false);
+  });
+
+  it("records face_prominence on the output when present", () => {
+    const result = scorePhoto(basePhoto({ photo_id: 1, face_prominence: 0.15 }));
+    expect(result.face_prominence).toBe(0.15);
   });
 });
 
@@ -335,8 +419,8 @@ describe("computeGroupPick — orientation diversity", () => {
 describe("computeGroupPick — persistence shape", () => {
   it("persists every photo's sub-signal breakdown for calibration", () => {
     const result = computeGroupPick([
-      basePhoto({ photo_id: 1, face_count: 1, face_sharpness: 0.9 }),
-      basePhoto({ photo_id: 2, face_count: 0, blur_score: 0.4 }),
+      basePhoto({ photo_id: 1, face_count: 1, face_prominence: FULL_FACE, face_sharpness: 0.9 }),
+      basePhoto({ photo_id: 2, face_count: 0, face_prominence: 0, blur_score: 0.4 }),
     ]);
     expect(result.details.scores).toHaveLength(2);
     expect(result.details.scores.find((s) => s.photo_id === 1)?.has_face).toBe(true);
@@ -348,6 +432,15 @@ describe("computeGroupPick — persistence shape", () => {
     const result = computeGroupPick([basePhoto({ photo_id: 42 })]);
     expect(result.picked_photo_ids).toEqual([42]);
     expect(result.confidence).toBe("low");
+  });
+
+  it("persists face_prominence on score rows when available", () => {
+    const result = computeGroupPick([
+      basePhoto({ photo_id: 1, face_prominence: 0.15, face_count: 1 }),
+      basePhoto({ photo_id: 2, face_prominence: 0, face_count: 0 }),
+    ]);
+    const s1 = result.details.scores.find((s) => s.photo_id === 1);
+    expect(s1?.face_prominence).toBe(0.15);
   });
 });
 

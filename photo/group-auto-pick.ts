@@ -46,6 +46,33 @@ import type { AiPickDetails, AiPickPhotoScore } from "../db/schema";
 export const MULTI_PICK_THRESHOLD = 0.92;
 export const HIGH_CONFIDENCE_DELTA = 0.10;
 export const MEDIUM_CONFIDENCE_DELTA = 0.04;
+
+/**
+ * Face prominence thresholds — Etappe 1 of docs/auto-pick-face-relevance.md.
+ *
+ * Prominence replaces the binary `face_count > 0` switch with a smooth
+ * regime blend derived from bbox area and (optionally) person identity.
+ *
+ * Initial values are educated guesses; the doc requires them to be tuned
+ * via offline replay before any production formula change.
+ */
+
+/** Bbox area below which a face is too small to judge (background false
+ *  positive, tiny bystander). Roughly a 45×45 px face on a 12 MP image. */
+export const PROMINENCE_FLOOR = 0.0005;
+
+/** Bbox area at which prominence saturates to 1.0 (close-up portrait). */
+export const PROMINENCE_SATURATION = 0.08;
+
+/** Multiplier bonus for faces assigned to a known person. Applied as
+ *  `prominence * (1 + KNOWN_BONUS)`. Never as penalty — unassigned and
+ *  explicitly ignored faces stay at `prominence * 1`. */
+export const KNOWN_BONUS = 0.5;
+
+/** Sum of per-face prominence weights at which the scoring formula is
+ *  fully in the face regime (blend = 1.0). Below this, the score is a
+ *  linear blend of face-branch and non-face-branch. */
+export const FACE_REGIME_THRESHOLD = 0.20;
 /**
  * When a similar group contains photos of different orientations
  * (portrait + landscape of the same subject — typical for "I took
@@ -96,10 +123,29 @@ export function classifyOrientation(width: number | null | undefined, height: nu
   return "square";
 }
 
+/**
+ * Compute the prominence weight for a single detected face.
+ *
+ * Prominence is the primary criterion for deciding whether a face
+ * matters for quality scoring. A 15 px background face is not
+ * judgeable; a large portrait subject is.
+ *
+ * Returns 0 for faces below PROMINENCE_FLOOR (they are excluded from
+ * all face-based signals), otherwise a value in (0, 1+KNOWN_BONUS].
+ */
+export function computeFaceProminence(
+  bboxArea: number,
+  hasKnownPerson: boolean,
+): number {
+  if (bboxArea < PROMINENCE_FLOOR) return 0;
+  const normalized =
+    Math.min(bboxArea, PROMINENCE_SATURATION) / PROMINENCE_SATURATION;
+  return normalized * (1 + (hasKnownPerson ? KNOWN_BONUS : 0));
+}
+
 /** Quality signals for one photo as stored in photos.ai_quality_details. */
 export interface PhotoSignals {
   photo_id: number;
-  // From photos.ai_quality_details — all in [0, 1] when populated.
   blur_score?: number | null;
   contrast_score?: number | null;
   exposure_score?: number | null;
@@ -108,22 +154,14 @@ export interface PhotoSignals {
   clip_technical?: number | null;
   face_sharpness?: number | null;
   eyes_open_score?: number | null;
-  /**
-   * Face-composition score produced by the embedding service (e.g.
-   * eye line alignment, rule-of-thirds positioning of the dominant
-   * face). Range [0, 1]; missing on photos without a detected face.
-   */
   face_composition?: number | null;
-  // Derived from faces table:
-  //   face_count    = number of detected faces
-  //   face_coverage = Σ (bbox.width · bbox.height), normalised relative to
-  //                   the full image (bbox coords are already 0..1).
   face_count: number;
   face_coverage: number;
-  // Photo orientation post-EXIF-rotation. Drives the orientation
-  // diversity rule in computeGroupPick — see ORIENTATION_FLOOR.
-  // Defaults to "landscape" when dimensions are still NULL (backfill
-  // pending), so the rule no-ops until data is available.
+  /** Sum of per-face prominence weights (Etappe 1). Drives the regime
+   *  blend: 0 → pure non-face scoring, ≥ FACE_REGIME_THRESHOLD → pure
+   *  face scoring, in between → linear blend. Defaults to a legacy
+   *  fallback derived from face_count when not populated. */
+  face_prominence?: number;
   orientation?: Orientation;
 }
 
@@ -215,7 +253,34 @@ export const DEFAULT_SCORING_WEIGHTS: ScoringWeights = {
 };
 
 /**
+ * Resolve the face-regime blend factor from prominence.
+ *
+ * When `face_prominence` is populated (Etappe 1 data path), the blend
+ * is a smooth ramp from 0 (no prominent faces → pure non-face scoring)
+ * to 1 (total prominence ≥ FACE_REGIME_THRESHOLD → pure face scoring).
+ *
+ * Legacy fallback: when `face_prominence` is undefined (groups scored
+ * before Etappe 1 or photos without prominence data), fall back to the
+ * old binary switch: face_count > 0 → 1, else 0.
+ */
+function faceRegimeBlend(signals: PhotoSignals): number {
+  if (signals.face_prominence != null) {
+    if (signals.face_prominence <= 0) return 0;
+    if (signals.face_prominence >= FACE_REGIME_THRESHOLD) return 1;
+    return signals.face_prominence / FACE_REGIME_THRESHOLD;
+  }
+  return signals.face_count > 0 ? 1 : 0;
+}
+
+/**
  * Compute the per-photo score and its sub-signal breakdown.
+ *
+ * Etappe 1 change: the scoring regime is no longer a binary switch on
+ * `face_count > 0`. Instead, `face_prominence` (sum of per-face
+ * prominence weights) drives a linear blend between the face-branch
+ * and non-face-branch scores. A landscape photo with one tiny
+ * background false-positive gets almost pure non-face scoring; a
+ * portrait with a large prominent face gets pure face scoring.
  *
  * `weights` lets the caller override the default vectors (used for
  * per-user calibration — see group-auto-pick.calibration.ts). When
@@ -225,7 +290,7 @@ export function scorePhoto(
   signals: PhotoSignals,
   weights: ScoringWeights = DEFAULT_SCORING_WEIGHTS,
 ): AiPickPhotoScore {
-  const hasFace = signals.face_count > 0;
+  const blend = faceRegimeBlend(signals);
   const blur = clamp01(signals.blur_score);
   const contrast = clamp01(signals.contrast_score);
   const exposure = clamp01(signals.exposure_score);
@@ -234,22 +299,35 @@ export function scorePhoto(
   const technical = clamp01(signals.clip_technical);
   const exposureContrast = 0.5 * (exposure + contrast);
 
-  let score: number;
   const used: AiPickPhotoScore["signals"] = {};
-  if (hasFace) {
+
+  // Non-face branch (always computed — needed for the blend).
+  const wNf = weights.non_face;
+  const nonFaceScore =
+    wNf[0] * blur +
+    wNf[1] * aesthetics +
+    wNf[2] * composition +
+    wNf[3] * technical +
+    wNf[4] * exposureContrast;
+
+  let score: number;
+  if (blend > 0) {
     const faceSharpness = clamp01(signals.face_sharpness);
     const eyesOpen = clamp01(signals.eyes_open_score);
     const faceCoverage = normaliseFaceCoverage(signals.face_coverage);
     const faceComposition = clamp01(signals.face_composition);
-    const w = weights.face;
-    score =
-      w[0] * faceSharpness +
-      w[1] * eyesOpen +
-      w[2] * faceCoverage +
-      w[3] * faceComposition +
-      w[4] * blur +
-      w[5] * aesthetics +
-      w[6] * exposureContrast;
+    const wF = weights.face;
+    const faceScore =
+      wF[0] * faceSharpness +
+      wF[1] * eyesOpen +
+      wF[2] * faceCoverage +
+      wF[3] * faceComposition +
+      wF[4] * blur +
+      wF[5] * aesthetics +
+      wF[6] * exposureContrast;
+
+    score = blend * faceScore + (1 - blend) * nonFaceScore;
+
     used.face_sharpness = faceSharpness;
     used.eyes_open = eyesOpen;
     used.face_coverage = faceCoverage;
@@ -258,14 +336,12 @@ export function scorePhoto(
     used.clip_aesthetics = aesthetics;
     used.contrast = contrast;
     used.exposure = exposure;
+    if (blend < 1) {
+      used.clip_composition = composition;
+      used.clip_technical = technical;
+    }
   } else {
-    const w = weights.non_face;
-    score =
-      w[0] * blur +
-      w[1] * aesthetics +
-      w[2] * composition +
-      w[3] * technical +
-      w[4] * exposureContrast;
+    score = nonFaceScore;
     used.blur = blur;
     used.clip_aesthetics = aesthetics;
     used.clip_composition = composition;
@@ -277,7 +353,11 @@ export function scorePhoto(
   return {
     photo_id: signals.photo_id,
     score,
-    has_face: hasFace,
+    has_face: blend > 0,
+    ...(signals.face_prominence != null
+      ? { face_prominence: signals.face_prominence }
+      : {}),
+    ...(blend > 0 && blend < 1 ? { face_regime_blend: blend } : {}),
     ...(signals.orientation ? { orientation: signals.orientation } : {}),
     signals: used,
   };
