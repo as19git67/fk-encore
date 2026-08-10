@@ -27,11 +27,13 @@ import {
   photoGroups,
   photos,
   faces,
+  userFaceAssignments,
   type AiPickWeights,
   type AiPickWeightsMetadata,
 } from "../db/schema";
 import {
   classifyOrientation,
+  computeFaceProminence,
   type PhotoSignals,
 } from "./group-auto-pick";
 
@@ -280,6 +282,59 @@ async function loadTrainingData(userId: number): Promise<TrainingGroup[]> {
     curationRows.filter((r) => r.status === "hidden").map((r) => r.photo_id),
   );
 
+  // Etappe 1: compute per-face prominence and merge into signals.
+  const faceDetailRows = await dbAll<{
+    face_id: number;
+    photo_id: number;
+    bbox: string;
+    has_known_person: boolean;
+  }>(
+    db.select({
+      face_id: faces.id,
+      photo_id: faces.photo_id,
+      bbox: faces.bbox,
+      has_known_person: sql<boolean>`COALESCE(${userFaceAssignments.person_id} IS NOT NULL, false)`,
+    })
+      .from(faces)
+      .leftJoin(
+        userFaceAssignments,
+        and(
+          eq(userFaceAssignments.face_id, faces.id),
+          eq(userFaceAssignments.user_id, userId),
+        ),
+      )
+      .where(inArray(faces.photo_id, allPhotoIds)),
+  );
+  const facesByPhoto = new Map<number, typeof faceDetailRows>();
+  for (const row of faceDetailRows) {
+    const arr = facesByPhoto.get(row.photo_id);
+    if (arr) arr.push(row);
+    else facesByPhoto.set(row.photo_id, [row]);
+  }
+  for (const [photoId, faceRows] of facesByPhoto) {
+    const sig = signalsByPhoto.get(photoId);
+    if (!sig) continue;
+    let totalProminence = 0;
+    let prominentCoverage = 0;
+    for (const row of faceRows) {
+      let bboxArea = 0;
+      try {
+        const bbox = typeof row.bbox === "string" ? JSON.parse(row.bbox) : row.bbox;
+        bboxArea = (parseFloat(bbox.width) || 0) * (parseFloat(bbox.height) || 0);
+      } catch {
+        continue;
+      }
+      const prom = computeFaceProminence(bboxArea, row.has_known_person);
+      totalProminence += prom;
+      if (prom > 0) prominentCoverage += bboxArea;
+    }
+    sig.face_prominence = totalProminence;
+    sig.face_coverage = prominentCoverage;
+  }
+  for (const sig of signalsByPhoto.values()) {
+    if (sig.face_prominence == null) sig.face_prominence = 0;
+  }
+
   const out: TrainingGroup[] = [];
   for (const { id: groupId } of groups) {
     const photoIds = byGroup.get(groupId) ?? [];
@@ -291,7 +346,7 @@ async function loadTrainingData(userId: number): Promise<TrainingGroup[]> {
         photo_id: pid,
         user_kept: !hiddenIds.has(pid),
         signals: s,
-        has_face: s.face_count > 0,
+        has_face: (s.face_prominence ?? 0) > 0,
       });
     }
     if (trainPhotos.length >= 2) {

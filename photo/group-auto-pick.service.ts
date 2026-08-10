@@ -35,11 +35,16 @@ import {
   photoGroupMembers,
   photoGroups,
   photos,
+  userFaceAssignments,
   type AiPickDetails,
 } from "../db/schema";
 import {
+  PROMINENCE_FLOOR,
+  PROMINENCE_SATURATION,
+  KNOWN_BONUS,
   REDUNDANCY_SIMILARITY,
   classifyOrientation,
+  computeFaceProminence,
   computeGroupPick,
   type AiConfidence,
   type Orientation,
@@ -152,6 +157,84 @@ async function loadSignalsForPhotos(photoIds: number[]): Promise<PhotoSignalRow[
       .groupBy(photos.id),
   );
   return rows;
+}
+
+interface FaceProminenceRow {
+  face_id: number;
+  photo_id: number;
+  bbox: string;
+  has_known_person: boolean;
+}
+
+/**
+ * Load per-face prominence data for a set of photos and a specific user.
+ *
+ * Returns per-photo aggregated prominence metrics: total face prominence
+ * (regime blend input) and face coverage computed only over prominent
+ * faces (excludes tiny background detections below PROMINENCE_FLOOR).
+ *
+ * The user_id is needed because the identity bonus depends on
+ * user_face_assignments — a face assigned to a known person for this
+ * user gets a prominence boost.
+ */
+async function loadFaceProminenceData(
+  photoIds: number[],
+  userId: number,
+): Promise<Map<number, { face_prominence: number; face_coverage: number }>> {
+  const result = new Map<number, { face_prominence: number; face_coverage: number }>();
+  if (photoIds.length === 0) return result;
+
+  const rows = await dbAll<FaceProminenceRow>(
+    db.select({
+      face_id: faces.id,
+      photo_id: faces.photo_id,
+      bbox: faces.bbox,
+      has_known_person: sql<boolean>`COALESCE(${userFaceAssignments.person_id} IS NOT NULL, false)`,
+    })
+      .from(faces)
+      .leftJoin(
+        userFaceAssignments,
+        and(
+          eq(userFaceAssignments.face_id, faces.id),
+          eq(userFaceAssignments.user_id, userId),
+        ),
+      )
+      .where(inArray(faces.photo_id, photoIds)),
+  );
+
+  const byPhoto = new Map<number, FaceProminenceRow[]>();
+  for (const row of rows) {
+    const arr = byPhoto.get(row.photo_id);
+    if (arr) arr.push(row);
+    else byPhoto.set(row.photo_id, [row]);
+  }
+
+  for (const [photoId, faceRows] of byPhoto) {
+    let totalProminence = 0;
+    let prominentCoverage = 0;
+    for (const row of faceRows) {
+      let bboxArea = 0;
+      try {
+        const bbox = typeof row.bbox === "string" ? JSON.parse(row.bbox) : row.bbox;
+        const w = parseFloat(bbox.width) || 0;
+        const h = parseFloat(bbox.height) || 0;
+        bboxArea = w * h;
+      } catch {
+        continue;
+      }
+      const prominence = computeFaceProminence(bboxArea, row.has_known_person);
+      totalProminence += prominence;
+      if (prominence > 0) {
+        prominentCoverage += bboxArea;
+      }
+    }
+    result.set(photoId, {
+      face_prominence: totalProminence,
+      face_coverage: prominentCoverage,
+    });
+  }
+
+  return result;
 }
 
 /**
@@ -290,6 +373,18 @@ export async function recomputeAiPicksForGroups(
       .filter((g) => g.photo_ids.length >= 2),
   );
 
+  // Etappe 1: load per-face prominence data for each user. Prominence
+  // depends on user_face_assignments (identity bonus for known persons),
+  // so we compute one map per user.
+  const prominenceByUser = new Map<number, Map<number, { face_prominence: number; face_coverage: number }>>();
+  for (const userId of distinctUserIds) {
+    const userPhotoIds = groups
+      .filter((g) => g.user_id === userId)
+      .flatMap((g) => byGroup.get(g.id) ?? []);
+    const uniquePhotoIds = [...new Set(userPhotoIds)];
+    prominenceByUser.set(userId, await loadFaceProminenceData(uniquePhotoIds, userId));
+  }
+
   let scored = 0;
   let skipped = 0;
   const nowSql = sql`NOW()`;
@@ -299,13 +394,23 @@ export async function recomputeAiPicksForGroups(
       skipped++;
       continue;
     }
-    const groupSignals = photoIds.map((pid) =>
-      signalByPhotoId.get(pid) ?? {
+    const prominenceMap = prominenceByUser.get(groupUserId);
+    const groupSignals = photoIds.map((pid) => {
+      const base: PhotoSignals = signalByPhotoId.get(pid) ?? {
         photo_id: pid,
         face_count: 0,
         face_coverage: 0,
-      },
-    );
+      };
+      const prom = prominenceMap?.get(pid);
+      if (prom) {
+        return {
+          ...base,
+          face_prominence: prom.face_prominence,
+          face_coverage: prom.face_coverage,
+        };
+      }
+      return { ...base, face_prominence: 0 };
+    });
     const weights = weightsByUserId.get(groupUserId);
     const result = computeGroupPick(
       groupSignals,

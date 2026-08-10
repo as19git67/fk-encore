@@ -26,6 +26,7 @@
     "@simplewebauthn/browser": "^13.3.0",
     "@tanstack/vue-virtual": "^3.13.23",
     "@vue-leaflet/vue-leaflet": "^0.10.1",
+    "@vue/compiler-sfc": "^3.5.41",
     "chart.js": "^4.5.1",
     "leaflet": "^1.9.4",
     "pdfjs-dist": "^4.10.38",
