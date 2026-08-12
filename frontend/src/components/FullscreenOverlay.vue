@@ -219,19 +219,14 @@ function onTransformSaved() {
   invalidateUserTransform(props.photo.id)
 }
 
-// Track-I marker semantics — mirrors VirtualGallery's badge logic.
-const isAiHidingSiblings = computed(() => {
-  const g = props.group
-  if (!g) return false
-  if (g.reviewed) return false
-  return g.ai_confidence === 'high'
-})
+// Track-I marker semantics — mirrors VirtualGallery's badge logic. No
+// confidence level hides siblings anymore (see
+// docs/auto-pick-face-relevance.md §6), so the badge is always just a
+// prominent marker, never a claim that something is hidden.
 const groupBadgeTitle = computed(() => {
   const g = props.group
   if (!g) return ''
-  if (isAiHidingSiblings.value) {
-    return `${g.member_count - 1} ähnliche Fotos werden ausgeblendet – klicken zum Anzeigen`
-  }
+  if (g.ai_confidence === 'high') return 'KI-Vorschlag mit hoher Sicherheit – bitte prüfen'
   if (g.ai_confidence === 'medium') return 'KI-Vorschlag mit mittlerer Sicherheit – bitte prüfen'
   if (g.ai_confidence === 'low') return 'KI-Vorschlag mit niedriger Sicherheit'
   return `${g.member_count} ähnliche Fotos`
@@ -1064,14 +1059,14 @@ onUnmounted(() => {
         v-if="group && !group.reviewed"
         class="fs-stack-badge"
         :class="{
+          'fs-stack-badge--ai-high': group.ai_confidence === 'high',
           'fs-stack-badge--ai-medium': group.ai_confidence === 'medium',
           'fs-stack-badge--ai-low': group.ai_confidence === 'low',
         }"
         :title="groupBadgeTitle"
         @click.stop="emit('open-group-review')"
       >
-        <i v-if="isAiHidingSiblings" class="pi pi-thumbs-down-fill" />
-        <i v-else class="pi pi-images" />
+        <i class="pi pi-images" />
         <span class="fs-stack-badge-count">+{{ group.member_count - 1 }}</span>
       </button>
 
@@ -1479,6 +1474,12 @@ onUnmounted(() => {
 .fs-stack-badge:focus-visible {
   background: rgba(0,0,0,0.85);
   outline: none;
+}
+.fs-stack-badge--ai-high {
+  background: var(--p-red-500, #ef4444);
+}
+.fs-stack-badge--ai-high:hover {
+  background: var(--p-red-600, #dc2626);
 }
 .fs-stack-badge--ai-medium {
   background: var(--p-orange-500, #f97316);

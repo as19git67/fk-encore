@@ -386,7 +386,15 @@ export function buildPhotoFilterConditions(
   // AI's picks. Medium / low confidence groups never auto-hide so the
   // user always sees the runner-ups; reviewed groups respect the user's
   // own hide decisions exclusively.
-  const aiMode = filter.aiHiddenMode ?? "exclude";
+  //
+  // Default is "include" (no auto-hide): the offline replay in
+  // docs/auto-pick-face-relevance.md §1 found only 75.6% hit rate at
+  // high confidence for +7.8pp lift, while medium confidence delivers
+  // +23.7pp lift with zero hiding. Auto-hiding on a signal this weak
+  // silently drops the wrong photo from view too often to run
+  // unattended. "exclude" and "only" remain available as explicit
+  // query params for callers that still want the old behavior.
+  const aiMode = filter.aiHiddenMode ?? "include";
   const aiHiddenExists = sql`EXISTS (
     SELECT 1 FROM ${photoGroupMembers} pgm_ai
     JOIN ${photoGroups} pg_ai ON pg_ai.id = pgm_ai.group_id
