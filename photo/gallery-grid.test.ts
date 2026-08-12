@@ -155,7 +155,7 @@ describe("Gallery grid – album scope", () => {
     expect(library.photos.every((p) => p.comment_count === undefined)).toBe(true);
   });
 
-  it("album grid keeps AI auto-pick duplicates visible (library grid hides them)", async () => {
+  it("library grid keeps high-confidence AI-pick duplicates visible by default; aiHiddenMode=exclude still hides them", async () => {
     const album = await service.createAlbumLogic(owner.id, { name: "Burst" });
     const pick = await makePhoto(owner.id, "pick.jpg");
     const dup = await makePhoto(owner.id, "dup.jpg");
@@ -163,7 +163,9 @@ describe("Gallery grid – album scope", () => {
     await service.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: dup });
 
     // A high-confidence, unreviewed AI-picked similar-photo group: `dup`
-    // is a non-pick member, so the AI auto-pick hides it from the grid.
+    // is a non-pick member. Per docs/auto-pick-face-relevance.md §6 this
+    // no longer auto-hides `dup` by default — the offline replay found
+    // too weak a lift (+7.8pp at 75.6% hit rate) to hide unattended.
     const group = await dbInsertReturning<{ id: number }>(
       db
         .insert(photoGroups)
@@ -181,12 +183,22 @@ describe("Gallery grid – album scope", () => {
       { group_id: group!.id, photo_id: dup, similarity_rank: 1 },
     ]);
 
-    // Library grid: the AI auto-pick hides the duplicate.
+    // Library grid: default is "include" — no auto-hide.
     const library = await listGalleryGridLogic(owner.id, {}, opts);
-    expect(library.photos.map((p) => p.id)).toEqual([pick]);
+    expect(library.total).toBe(2);
+    expect(library.photos.map((p) => p.id).sort()).toEqual([dup, pick].sort());
 
-    // The global "n von m" denominator deliberately includes AI-hidden
-    // duplicates as well, so filters that reveal them can never exceed m.
+    // aiHiddenMode=exclude remains available for callers that still want
+    // the old behavior.
+    const excluded = await listGalleryGridLogic(
+      owner.id,
+      { aiHiddenMode: "exclude" },
+      opts,
+    );
+    expect(excluded.photos.map((p) => p.id)).toEqual([pick]);
+
+    // The global "n von m" denominator deliberately includes the AI-pick
+    // runner-up as well, so filters that reveal them can never exceed m.
     const completeLibrary = await listGalleryGridLogic(
       owner.id,
       { hiddenMode: "include", aiHiddenMode: "include" },

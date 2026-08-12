@@ -286,7 +286,12 @@ ist — nicht Automatisierung des Aussortierens.
 **Sofort, ohne Abhängigkeit: Auto-Ausblenden bei `high` abschalten** (oder
 hinter eine Bestätigung je Gruppe legen). Datenbelegt: 75,6 % Trefferquote
 bei +7,8 pp Lift, während `medium` ohne jedes Ausblenden +23,7 pp liefert.
-Produktentscheidung, technisch trivial.
+Produktentscheidung, technisch trivial. **Erledigt:** Default von
+`aiHiddenMode` in `photo/photo.filters.ts` von `exclude` auf `include`
+umgestellt — `high`-Konfidenz-Gruppen verhalten sich jetzt wie `medium`
+(auffälliger Marker, kein automatisches Verstecken). `exclude`/`only`
+bleiben als expliziter Query-Parameter für Aufrufer erhalten, die das
+alte Verhalten weiterhin brauchen.
 
 **Etappe 1 — Prominenz aus bbox.** Relevanzgewicht, gleitender
 Regime-Übergang statt `face_count > 0`, `face_coverage` nur über prominente
