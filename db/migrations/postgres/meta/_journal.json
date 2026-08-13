@@ -995,6 +995,13 @@
       "when": 1785283200000,
       "tag": "0141_sender_rule_overrides",
       "breakpoints": true
+    },
+    {
+      "idx": 142,
+      "version": "7",
+      "when": 1785369600000,
+      "tag": "0142_face_sharpness",
+      "breakpoints": true
     }
   ]
 }

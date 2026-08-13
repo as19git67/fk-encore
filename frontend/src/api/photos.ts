@@ -1074,6 +1074,25 @@ export function backfillPhotoDimensions() {
   )
 }
 
+export interface FaceSharpnessBackfillResult {
+  photos_scanned: number
+  faces_updated: number
+  faces_skipped: number
+  photos_failed: number
+  /** Cursor for the next batch; null once the pass is complete. */
+  next_photo_id: number | null
+  remaining_faces: number
+}
+
+/** One batch of the per-face sharpness backfill. Resumable — feed
+ *  `next_photo_id` back in until it returns null. */
+export function backfillFaceSharpness(afterPhotoId?: number) {
+  return apiFetch<FaceSharpnessBackfillResult>('/photos/backfill-face-sharpness', {
+    method: 'POST',
+    body: JSON.stringify(afterPhotoId != null ? { afterPhotoId } : {}),
+  })
+}
+
 export interface AiPickWeights {
   face: number[]
   non_face: number[]

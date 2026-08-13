@@ -166,6 +166,7 @@ import { isHighConfidenceDuplicateGroup, recommendDuplicatePhoto, selectDeletabl
 // photo.ts) keep working.
 import { convertHeicToJpeg } from "./heic-convert.service";
 export { convertHeicToJpeg, isHeicBuffer } from "./heic-convert.service";
+import { loadGrayImage, measureFaceSharpness, type GrayImage } from "./face-sharpness";
 
 console.log("[boot] photo/photo.service.ts: all imports resolved");
 
@@ -582,6 +583,59 @@ export async function hasFacesForPhoto(photoId: number): Promise<boolean> {
   return row != null;
 }
 
+/**
+ * Decode a photo into the grayscale plane the per-face sharpness measurement
+ * reads (Etappe 2 of docs/auto-pick-face-relevance.md).
+ *
+ * Face bboxes are stored normalised against the dimensions the InsightFace
+ * service reported. Those are resolution-independent, but *not*
+ * rotation-independent: if our decode ended up rotated differently than the
+ * detector's, a 90° mismatch would silently measure the wrong region. The
+ * aspect-ratio check catches exactly that case — on a mismatch we return
+ * `null` and the faces keep `sharpness = NULL` (honestly "unknown") instead of
+ * a plausible-looking wrong number.
+ *
+ * Pass `expected` only when the detector's dimensions are known; the backfill
+ * uses `photos.width`/`height`, which the face scan wrote from the same
+ * source.
+ */
+async function loadFaceMeasurementImage(
+  source: string | Buffer,
+  expected?: { width: number | null; height: number | null },
+): Promise<GrayImage | null> {
+  const image = await loadGrayImage(source);
+  if (!(image.width > 0) || !(image.height > 0)) return null;
+  const ew = expected?.width;
+  const eh = expected?.height;
+  if (ew && eh && ew > 0 && eh > 0) {
+    const decoded = image.width / image.height;
+    const detected = ew / eh;
+    if (Math.abs(decoded - detected) > 0.02 * detected) return null;
+  }
+  return image;
+}
+
+/**
+ * Measure sharpness for a set of bboxes against one decoded photo. Returns one
+ * entry per input bbox, `null` where the face is too small or the crop failed —
+ * a failed measurement must never abort the surrounding scan.
+ */
+async function measureFaceSharpnessBatch(
+  image: GrayImage,
+  bboxes: Array<FaceBBox | null>,
+): Promise<Array<number | null>> {
+  const out: Array<number | null> = [];
+  for (const bbox of bboxes) {
+    try {
+      out.push(await measureFaceSharpness(image, bbox));
+    } catch (err) {
+      console.warn(`[face-sharpness] crop failed:`, (err as Error).message);
+      out.push(null);
+    }
+  }
+  return out;
+}
+
 export async function detectPhotoFaces(photoId: number, force: boolean = false): Promise<void> {
   if (!ENABLE_LOCAL_FACES) {
     console.log("Local face indexing is disabled via ENABLE_LOCAL_FACES=false");
@@ -648,21 +702,45 @@ export async function detectPhotoFaces(photoId: number, force: boolean = false):
       );
     }
 
-    for (const f of facesDetected) {
-      const bbox = {
-        x: f.bbox[0] / imgWidth,
-        y: f.bbox[1] / imgHeight,
-        width: (f.bbox[2] - f.bbox[0]) / imgWidth,
-        height: (f.bbox[3] - f.bbox[1]) / imgHeight
-      };
+    const bboxes: FaceBBox[] = facesDetected.map((f) => ({
+      x: f.bbox[0] / imgWidth,
+      y: f.bbox[1] / imgHeight,
+      width: (f.bbox[2] - f.bbox[0]) / imgWidth,
+      height: (f.bbox[3] - f.bbox[1]) / imgHeight,
+    }));
 
+    // Per-face sharpness, measured on the same pixels the detector saw. Doing
+    // it here means new photos never need the backfill; the decode is one
+    // extra read of a file that is already warm in the page cache.
+    let sharpnessPerFace: Array<number | null> = bboxes.map(() => null);
+    if (bboxes.length > 0) {
+      try {
+        const image = await loadFaceMeasurementImage(processingPath, {
+          width: imgWidth,
+          height: imgHeight,
+        });
+        if (image) {
+          sharpnessPerFace = await measureFaceSharpnessBatch(image, bboxes);
+        } else {
+          console.warn(
+            `[face-sharpness] photo ${photoId}: decoded orientation disagrees with the detector, skipping measurement`,
+          );
+        }
+      } catch (err) {
+        console.warn(`[face-sharpness] photo ${photoId} failed:`, (err as Error).message);
+      }
+    }
+
+    for (let i = 0; i < facesDetected.length; i++) {
+      const f = facesDetected[i];
       await dbInsertReturning<typeof faces.$inferSelect>(
         db.insert(faces)
           .values({
             photo_id: photoId,
-            bbox: JSON.stringify(bbox),
+            bbox: JSON.stringify(bboxes[i]),
             embedding: JSON.stringify(f.embedding),
             quality: 100,
+            sharpness: sharpnessPerFace[i],
           })
           .returning()
       );
@@ -6785,6 +6863,156 @@ export async function backfillPhotoDimensionsLogic(userId?: number): Promise<{
     }
   }
   return { scanned: rows.length, updated, failed };
+}
+
+/** Photos per round-trip of the face-sharpness backfill. Each photo costs one
+ *  full decode (~50-150 ms for a 12 MP JPEG) plus a crop per face, so 200
+ *  keeps a batch well inside the gateway timeout even on a slow disk. */
+const FACE_SHARPNESS_BATCH_PHOTOS = 200;
+
+export interface FaceSharpnessBackfillResult {
+  /** Photos decoded in this batch. */
+  photos_scanned: number;
+  /** Faces that received a measurement. */
+  faces_updated: number;
+  /** Faces left at NULL because the crop is below MIN_FACE_PIXELS — not
+   *  judgeable, and deliberately not stored as 0. */
+  faces_skipped: number;
+  /** Photos whose file could not be read or decoded. */
+  photos_failed: number;
+  /** Cursor for the next batch, or null when the pass is complete. */
+  next_photo_id: number | null;
+  /** Faces still missing a measurement beyond the cursor. */
+  remaining_faces: number;
+}
+
+/**
+ * Backfill `faces.sharpness` for existing libraries — Etappe 2 of
+ * docs/auto-pick-face-relevance.md.
+ *
+ * Going forward `detectPhotoFaces` writes the value during the scan; this
+ * exists to seed the measurement on faces detected before the column existed.
+ * Pure pixel arithmetic (Laplace variance over the bbox crop): no CLIP, no
+ * GPU, no re-detection — the bboxes are already in the database.
+ *
+ * Batched by photo, resumable via `afterPhotoId`: one decode serves every face
+ * of a photo, and the caller loops until `next_photo_id` comes back null.
+ * Faces too small to judge keep NULL (see the column comment), so a fresh pass
+ * will visit their photo again — cheap, and preferable to inventing a
+ * sentinel value that the scoring would then have to know about.
+ */
+export async function backfillFaceSharpnessLogic(opts?: {
+  userId?: number;
+  afterPhotoId?: number;
+  limit?: number;
+}): Promise<FaceSharpnessBackfillResult> {
+  const limit = Math.max(1, Math.min(opts?.limit ?? FACE_SHARPNESS_BATCH_PHOTOS, 1000));
+  const afterPhotoId = opts?.afterPhotoId ?? 0;
+  const conds = [isNull(faces.sharpness), gt(photos.id, afterPhotoId)];
+  if (typeof opts?.userId === "number") conds.push(eq(photos.user_id, opts.userId));
+
+  const photoRows = await dbAll<{
+    id: number;
+    filename: string;
+    external_path: string | null;
+    width: number | null;
+    height: number | null;
+  }>(
+    db.select({
+      id: photos.id,
+      filename: photos.filename,
+      external_path: photos.external_path,
+      width: photos.width,
+      height: photos.height,
+    })
+      .from(photos)
+      .innerJoin(faces, eq(faces.photo_id, photos.id))
+      .where(and(...conds))
+      .groupBy(photos.id)
+      .orderBy(photos.id)
+      .limit(limit),
+  );
+
+  let facesUpdated = 0;
+  let facesSkipped = 0;
+  let photosFailed = 0;
+  let lastPhotoId = afterPhotoId;
+
+  for (const photo of photoRows) {
+    lastPhotoId = photo.id;
+    const faceRows = await dbAll<{ id: number; bbox: string }>(
+      db.select({ id: faces.id, bbox: faces.bbox })
+        .from(faces)
+        .where(and(eq(faces.photo_id, photo.id), isNull(faces.sharpness))),
+    );
+    if (faceRows.length === 0) continue;
+
+    const filePath = getPhotoDiskPath(photo);
+    try {
+      const ext = path.extname(photo.filename).toLowerCase();
+      const source: string | Buffer =
+        ext === ".heic" || ext === ".heif"
+          ? await convertHeicToJpeg(filePath)
+          : filePath;
+      const image = await loadFaceMeasurementImage(source, {
+        width: photo.width,
+        height: photo.height,
+      });
+      if (!image) {
+        photosFailed++;
+        console.warn(
+          `[backfill-face-sharpness] photo ${photo.id}: decoded orientation disagrees with the stored dimensions, skipping`,
+        );
+        continue;
+      }
+      const bboxes: Array<FaceBBox | null> = faceRows.map((row) => {
+        try {
+          return JSON.parse(row.bbox) as FaceBBox;
+        } catch {
+          return null;
+        }
+      });
+      const measured = await measureFaceSharpnessBatch(image, bboxes);
+      for (let i = 0; i < faceRows.length; i++) {
+        const value = measured[i];
+        if (value == null) {
+          facesSkipped++;
+          continue;
+        }
+        await dbExec(
+          db.update(faces).set({ sharpness: value }).where(eq(faces.id, faceRows[i].id)),
+        );
+        facesUpdated++;
+      }
+    } catch (err) {
+      photosFailed++;
+      console.warn(
+        `[backfill-face-sharpness] photo ${photo.id} (${filePath}) failed:`,
+        (err as Error).message,
+      );
+    }
+  }
+
+  const exhausted = photoRows.length < limit;
+  const remainingConds = [isNull(faces.sharpness), gt(photos.id, lastPhotoId)];
+  if (typeof opts?.userId === "number") remainingConds.push(eq(photos.user_id, opts.userId));
+  const remainingRow = exhausted
+    ? { c: 0 }
+    : await dbFirst<{ c: number }>(
+        db.select({ c: sql<number>`COUNT(*)::int` })
+          .from(faces)
+          .innerJoin(photos, eq(photos.id, faces.photo_id))
+          .where(and(...remainingConds)),
+      );
+
+  return {
+    photos_scanned: photoRows.length,
+    faces_updated: facesUpdated,
+    faces_skipped: facesSkipped,
+    photos_failed: photosFailed,
+    next_photo_id: exhausted ? null : lastPhotoId,
+    remaining_faces: remainingRow?.c ?? 0,
+  };
 }
 
 /**

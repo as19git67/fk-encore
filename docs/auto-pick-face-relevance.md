@@ -296,13 +296,43 @@ alte Verhalten weiterhin brauchen.
 **Etappe 1 — Prominenz aus bbox.** Relevanzgewicht, gleitender
 Regime-Übergang statt `face_count > 0`, `face_coverage` nur über prominente
 Gesichter, Anwesenheit bekannter Personen als schwaches Signal. Kein
-Re-Scan nötig, vollständig offline validierbar.
+Re-Scan nötig, vollständig offline validierbar. **Erledigt:**
+`computeFaceProminence()` und der Regime-Blend in
+`photo/group-auto-pick.ts`, gespeist aus `faces.bbox` +
+`user_face_assignments` (`loadFaceProminenceData()` in
+`photo/group-auto-pick.service.ts`). Die Schwellwerte
+(`PROMINENCE_FLOOR`, `PROMINENCE_SATURATION`, `KNOWN_BONUS`,
+`FACE_REGIME_THRESHOLD`) sind zunächst begründete Startwerte und werden
+über den Replay bestimmt.
 
 **Etappe 2 — Schärfe je Gesicht.** Neue Spalte `faces.sharpness`, gefüllt per
 Hintergrund-Job analog zum Dimensions-Backfill. Erst damit wird das
 eigentliche Kriterium messbar: „die Aufnahme, auf der das Gesicht der
 bekannten Person scharf ist". Nebeneffekt: Focus Peaking im Frontend könnte
 die Werte lesen, statt sie bei jedem Betrachten neu zu berechnen.
+**Erledigt — Datenerhebung, ohne jede Formeländerung:**
+
+- Spalte `faces.sharpness` (Migration `0142_face_sharpness.sql`), `NULL`
+  bleibt ein eigener Zustand: „noch nicht gemessen" bzw. „zu klein zum
+  Beurteilen" ist ausdrücklich *nicht* 0.0 — eine Winzdetektion mit 0.0
+  würde einen gewichteten Mittelwert genauso nach unten ziehen, wie es
+  `min()` heute tut.
+- `photo/face-sharpness.ts`: Laplace-Varianz über den bbox-Ausschnitt, mit
+  `sharp` serverseitig gespiegelt aus `frontend/src/utils/focusPeaking.ts`
+  (gleiche 128×128-Stichprobe, gleicher Vollausschlag 500, gleiches
+  Überspringen der Randzeile statt `np.roll`) — auf dem Bildschirm und im
+  Score steht damit dieselbe Zahl.
+- Gemessen wird beim Scan (`detectPhotoFaces`) und für den Bestand per
+  `POST /photos/backfill-face-sharpness` — foto-weise gebündelt (ein Decode
+  bedient alle Gesichter eines Fotos), fortsetzbar über einen Cursor, mit
+  Button „Gesichtsschärfe nachtragen" in der Datenverwaltung.
+- Stimmt die Orientierung des eigenen Decodes nicht mit der des Detektors
+  überein, bleibt der Wert `NULL` statt plausibel falsch zu sein.
+
+**Als Nächstes, und zwar zuerst:** `diagnose-face-sharpness-variance.mjs`
+gegen den produktiven Bestand laufen lassen — die Prüfung von V1. Erst deren
+Ergebnis entscheidet, ob die Aggregation in `scorePhoto()` überhaupt
+angefasst wird.
 
 **Etappe 3 — `kps` persistieren → Blickrichtung.** Erneute Detektion nötig,
 aber kein neues Modell.
@@ -339,7 +369,10 @@ Explizit formuliert, damit sie widerlegbar sind:
 - **V1:** Prominenzgewichtete Schärfe hat eine höhere Streuung innerhalb der
   Gruppe als das heutige Minimum. *Prüfbar direkt nach dem Backfill in
   Etappe 2, vor jeder Formeländerung.* Trifft V1 nicht zu, ist die
-  Kernannahme aus Abschnitt 2 falsch und Etappe 2 zwecklos.
+  Kernannahme aus Abschnitt 2 falsch und Etappe 2 zwecklos. Das Messskript
+  dafür steht: `scripts/photos/diagnose-face-sharpness-variance.mjs`
+  (read-only, Ergebnis noch offen — der Backfill muss auf der produktiven
+  Datenbank erst laufen).
 - **V2:** Ein erheblicher Teil der heutigen Δ≈0-Gruppen erhält einen von null
   verschiedenen Δ. *Offline prüfbar.*
 - **V3:** Die Lift-Kurve über Δ verliert ihren Abfall bei großem Δ.

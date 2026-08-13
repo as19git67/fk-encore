@@ -18,6 +18,7 @@ import {
   getAiPickCalibration,
   calibrateAiPickWeights,
   backfillPhotoDimensions,
+  backfillFaceSharpness,
   type AiPickWeightsCalibrationResult,
   getPhotosToRefreshMetadata, refreshPhotoMetadata,
   getPhotosNeedingGpsRescan, rescanPhotoGps,
@@ -246,6 +247,54 @@ async function handleBackfillDimensions() {
     aiPickError.value = err.message || 'Fehler beim Befüllen der Bildmaße'
   } finally {
     dimensionsLoading.value = false
+  }
+}
+
+// Per-face sharpness backfill (Etappe 2, docs/auto-pick-face-relevance.md).
+// The endpoint works in photo batches and hands back a cursor, so a single
+// click drives the whole pass here rather than making the admin click once
+// per batch. Totals accumulate across batches; a failing batch stops the loop
+// and keeps whatever was measured so far.
+const faceSharpnessProgress = ref<{
+  photos_scanned: number
+  faces_updated: number
+  faces_skipped: number
+  photos_failed: number
+  remaining_faces: number
+  done: boolean
+} | null>(null)
+const faceSharpnessLoading = ref(false)
+
+async function handleBackfillFaceSharpness() {
+  faceSharpnessProgress.value = null
+  aiPickError.value = ''
+  faceSharpnessLoading.value = true
+  const totals = {
+    photos_scanned: 0,
+    faces_updated: 0,
+    faces_skipped: 0,
+    photos_failed: 0,
+    remaining_faces: 0,
+    done: false,
+  }
+  try {
+    let cursor: number | undefined
+    for (;;) {
+      const batch = await backfillFaceSharpness(cursor)
+      totals.photos_scanned += batch.photos_scanned
+      totals.faces_updated += batch.faces_updated
+      totals.faces_skipped += batch.faces_skipped
+      totals.photos_failed += batch.photos_failed
+      totals.remaining_faces = batch.remaining_faces
+      totals.done = batch.next_photo_id === null
+      faceSharpnessProgress.value = { ...totals }
+      if (batch.next_photo_id === null) break
+      cursor = batch.next_photo_id
+    }
+  } catch (err: any) {
+    aiPickError.value = err.message || 'Fehler beim Messen der Gesichtsschärfe'
+  } finally {
+    faceSharpnessLoading.value = false
   }
 }
 
@@ -1305,6 +1354,25 @@ onBeforeUnmount(() => {
         :loading="dimensionsLoading"
         :disabled="dimensionsLoading || aiPickLoading || groupingLoading || isActive || rescanLoading || retryLoading"
         @click="handleBackfillDimensions"
+      />
+
+      <Message v-if="faceSharpnessProgress" severity="info" :closable="false" class="data-management-group__item">
+        Gesichtsschärfe gemessen: {{ faceSharpnessProgress.faces_updated }} Gesichter in
+        {{ faceSharpnessProgress.photos_scanned }} Fotos
+        (zu klein zum Messen: {{ faceSharpnessProgress.faces_skipped }}, fehlgeschlagen:
+        {{ faceSharpnessProgress.photos_failed }}).
+        <span v-if="!faceSharpnessProgress.done">
+          Noch offen: {{ faceSharpnessProgress.remaining_faces }} Gesichter.
+        </span>
+      </Message>
+      <Button class="data-management-group__item"
+        icon="pi pi-eye"
+        outlined
+        label="Gesichtsschärfe nachtragen"
+        v-tooltip.top="'Misst die Schärfe jedes erkannten Gesichts direkt aus den Bilddaten (Laplace-Varianz über die Gesichtsbox) und speichert sie pro Gesicht. Grundlage für die prominenzgewichtete Auswahl in ähnlichen Gruppen.'"
+        :loading="faceSharpnessLoading"
+        :disabled="faceSharpnessLoading || dimensionsLoading || aiPickLoading || groupingLoading || isActive || rescanLoading || retryLoading"
+        @click="handleBackfillFaceSharpness"
       />
 
       <Button class="data-management-group__item"
