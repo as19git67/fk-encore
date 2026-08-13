@@ -20,10 +20,12 @@ on:
       - 'documents/taxonomy.ts'
       - 'documents/tax-sections.ts'
       - 'documents/classify-prompts.ts'
+      - '.github/workflows/docker-image-taxonomy-tools.yml'
+      - 'documents/classify-prompts.ts'
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}-taxonomy-tools
+  IMAGE_NAME: ${{ github.repository }}/taxonomy-tools
 
 jobs:
 

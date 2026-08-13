@@ -30,10 +30,11 @@ on:
     branches: [ "main" ]
     paths:
       - 'llm-service/**'
+      - '.github/workflows/docker-image-llm.yml'
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}-llm
+  IMAGE_NAME: ${{ github.repository }}/llm
 
 jobs:
 

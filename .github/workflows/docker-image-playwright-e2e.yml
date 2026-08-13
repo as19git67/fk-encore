@@ -1,9 +1,19 @@
 name: Docker Image CI - Playwright E2E Runner
 
-# Builds and pushes the pre-baked Playwright runner image used by the E2E
-# pipeline (Track AB / Issue #421). The image carries Node 24 + Playwright +
-# chromium + Encore CLI so the per-run setup time in
-# .github/workflows/playwright-e2e.yml drops from minutes to seconds.
+# Builds and pushes the pre-baked Playwright runner image (Track AB /
+# Issue #421): Node 24 + Playwright + chromium + Encore CLI, meant to drop
+# the per-run setup time in .github/workflows/playwright-e2e.yml from
+# minutes to seconds.
+#
+# NOT currently consumed there: depending on an image built by a sibling
+# job in this same workflow set is circular on a path with no prior
+# successful push, which is exactly the state the image name is in right
+# after its hyphen-suffix -> slash-subpath rename (PR #972) — this workflow
+# publishes to the new path, but nothing has pulled from it yet. Once this
+# has built successfully a few times, switch playwright-e2e.yml back to
+# `container: image: ...` and add a `needs:` on the `build` job here for
+# ordering (see the comment in playwright-e2e.yml). Same reasoning already
+# applied on the GitLab side in .gitlab-ci.yml's e2e:playwright job.
 #
 # Trigger model:
 #   - pushes to main that touch the Dockerfile or the workflow itself;
@@ -34,7 +44,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}-playwright-e2e
+  IMAGE_NAME: ${{ github.repository }}/playwright-e2e
 
 jobs:
   build:
