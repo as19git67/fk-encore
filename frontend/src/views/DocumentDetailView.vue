@@ -8,6 +8,7 @@ import DatePicker from 'primevue/datepicker'
 import InputText from 'primevue/inputtext'
 import Dialog from 'primevue/dialog'
 import { toLocalIsoDate, parseLocalDate } from '../utils/dateFormat'
+import { buildCategoryOptions, filterOptions, type SlugOption } from '../utils/categoryOptions'
 import Message from 'primevue/message'
 import Select from 'primevue/select'
 import AutoComplete from 'primevue/autocomplete'
@@ -253,30 +254,18 @@ const taxCatalogByGroup = computed(() => {
     .filter((b) => b.items.length > 0)
 })
 
-interface SlugOption { label: string; slug: string }
-
-// Top-level categories alphabetically, each followed by its children
-// (also alphabetically sorted) — so every level of the taxonomy reads
-// A→Z instead of following the backend's sort_order.
-const categoryOptions = computed<SlugOption[]>(() => {
-  const byName = (a: DocumentCategory, b: DocumentCategory) => a.name.localeCompare(b.name, 'de')
-  const opts: SlugOption[] = []
-  const topLevel = categories.value.filter((c) => c.parent_id == null).slice().sort(byName)
-  for (const top of topLevel) {
-    opts.push({ label: top.name, slug: top.slug })
-    const children = categories.value.filter((c) => c.parent_id === top.id).slice().sort(byName)
-    for (const child of children) {
-      opts.push({ label: `— ${child.name}`, slug: child.slug })
-    }
-  }
-  return opts
-})
+// Every taxonomy level, alphabetically sorted, parents immediately followed
+// by their descendants — so the list reads A→Z instead of following the
+// backend's sort_order, deeper levels (e.g. Wohnen › Haus & Grund ›
+// Grundsteuer) are selectable at all, and typing a parent name reveals its
+// subcategories. See utils/categoryOptions.ts.
+const categoryOptions = computed<SlugOption[]>(() => buildCategoryOptions(categories.value))
 
 const documentTypeOptions = computed<SlugOption[]>(() =>
   documentTypes.value
     .slice()
     .sort((a, b) => a.name.localeCompare(b.name, 'de'))
-    .map((t) => ({ label: t.name, slug: t.slug })),
+    .map((t) => ({ label: t.name, slug: t.slug, search: t.name.toLowerCase() })),
 )
 
 // ─── Typeahead selects (Kategorie / Dokumentart) ────────────────────────────
@@ -290,10 +279,7 @@ function syncCategorySelection() {
 }
 
 function searchCategories(event: { query: string }) {
-  const q = event.query.trim().toLowerCase()
-  categorySuggestions.value = q
-    ? categoryOptions.value.filter((o) => o.label.toLowerCase().includes(q))
-    : categoryOptions.value
+  categorySuggestions.value = filterOptions(categoryOptions.value, event.query)
 }
 
 watch(selectedCategoryOption, (v) => {
@@ -310,10 +296,7 @@ function syncDocumentTypeSelection() {
 }
 
 function searchDocumentTypes(event: { query: string }) {
-  const q = event.query.trim().toLowerCase()
-  documentTypeSuggestions.value = q
-    ? documentTypeOptions.value.filter((o) => o.label.toLowerCase().includes(q))
-    : documentTypeOptions.value
+  documentTypeSuggestions.value = filterOptions(documentTypeOptions.value, event.query)
 }
 
 watch(selectedDocumentTypeOption, (v) => {

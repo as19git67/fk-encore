@@ -69,7 +69,7 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     slug: "anlage-g",
     group: "einkuenfte",
     name: "Anlage G — Gewerbe",
-    hint: "Einkünfte aus Gewerbebetrieb: Gewerbesteuerbescheid, Bilanz, Gewinn-/Verlustrechnung, Beteiligungsmitteilungen, Photovoltaik-Abrechnungen (Einspeisevergütung, Stromeinspeisung, kWp, Netzbetreiber-Abrechnung von z. B. Bayernwerk, E.ON, EnBW, Vattenfall). PV-Einspeiseabrechnungen sind IMMER steuerrelevant und gehören hierher.",
+    hint: "Einkünfte aus Gewerbebetrieb: Gewerbesteuerbescheid, Bilanz, Gewinn-/Verlustrechnung, Beteiligungsmitteilungen, Photovoltaik-Abrechnungen (Einspeisevergütung, Stromeinspeisung, kWp, Netzbetreiber-Abrechnung von z. B. Bayernwerk, E.ON, EnBW, Vattenfall). PV-Einspeiseabrechnungen sind IMMER steuerrelevant und gehören hierher; nicht: einzelne Ausgabenbelege des Betriebs bzw. der PV-Anlage (→ betriebsausgaben-g).",
   },
   {
     slug: "anlage-s",
@@ -81,7 +81,7 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     slug: "anlage-l",
     group: "einkuenfte",
     name: "Anlage L — Land- und Forstwirtschaft",
-    hint: "Einkünfte aus Land- und Forstwirtschaft (§13 EStG): Pachteinnahmen und Pachtverträge für verpachtete land-/forstwirtschaftliche Flächen oder Betriebe, Gewinnermittlung/EÜR der Land- und Forstwirtschaft, zugehörige Betriebsausgabenbelege; nicht: Vermietung/Verpachtung von Wohn-/Gewerbeimmobilien (→ anlage-v), nicht: Gewerbebetrieb (→ anlage-g).",
+    hint: "Einkünfte aus Land- und Forstwirtschaft (§13 EStG): Pachteinnahmen und Pachtverträge für verpachtete land-/forstwirtschaftliche Flächen oder Betriebe, Gewinnermittlung/EÜR der Land- und Forstwirtschaft; nicht: einzelne Ausgabenbelege des Betriebs (→ betriebsausgaben-l), nicht: Vermietung/Verpachtung von Wohn-/Gewerbeimmobilien (→ anlage-v), nicht: Gewerbebetrieb (→ anlage-g).",
   },
   {
     slug: "anlage-euer",
@@ -120,6 +120,18 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     group: "abzuege",
     name: "Werbungskosten (Anlage R)",
     hint: "Werbungskosten rund um Renteneinkünfte, z. B. Rechnung eines Rentenberaters, Prozesskosten gegen Rentenversicherung, Fahrten zur Rentenberatung.",
+  },
+  {
+    slug: "betriebsausgaben-l",
+    group: "abzuege",
+    name: "Betriebsausgaben (Anlage L)",
+    hint: "Ausgabenbelege des land- und forstwirtschaftlichen Betriebs (§13 EStG), die in die Gewinnermittlung/EÜR eingehen: Reparatur-, Wartungs- und Werkstattrechnungen für Landmaschinen (Traktor, Schlepper, Mähdrescher, Anbaugeräte) sowie für Betriebsgebäude (Scheune, Stall, Maschinenhalle), Ersatzteile, Betriebsmittel (Diesel, Saatgut, Dünger, Futter), Beiträge zur landwirtschaftlichen Berufsgenossenschaft (SVLFG), Versicherungen des Betriebs, gezahlte Pacht. NICHT: Handwerkerrechnung am selbst bewohnten Haus (→ haushaltsnahe), NICHT: Rechnung am vermieteten Wohnobjekt (→ werbungskosten-v), NICHT: Werkstattrechnung für den privaten PKW (nicht steuerrelevant).",
+  },
+  {
+    slug: "betriebsausgaben-g",
+    group: "abzuege",
+    name: "Betriebsausgaben (Anlage G)",
+    hint: "Ausgabenbelege eines Gewerbebetriebs, die in die Gewinnermittlung/EÜR eingehen — insbesondere rund um eine Photovoltaik-Anlage: Wartung und Reparatur der Anlage, Wechselrichter-Tausch, Zählermiete/Messstellenbetrieb, Versicherung der PV-Anlage, Finanzierungszinsen der Anlage. NICHT: Einspeise-/EEG-Abrechnung des Netzbetreibers (→ anlage-g), NICHT: Stromrechnung für den privaten Eigenverbrauch (nicht steuerrelevant), NICHT: land-/forstwirtschaftliche Betriebsausgaben (→ betriebsausgaben-l).",
   },
   {
     slug: "sonderausgaben",

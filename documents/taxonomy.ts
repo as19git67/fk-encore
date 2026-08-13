@@ -190,7 +190,7 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "landwirtschaft-instandhaltung",
         name: "Instandhaltung & Reparatur",
-        hint: "Rechnungen für Reparatur und Wartung landwirtschaftlicher Gebäude (Scheune, Stall, Maschinenhalle) und Maschinen (Traktor, Mähdrescher, Anbaugeräte), Ersatzteile, Handwerkerrechnungen am landwirtschaftlichen Betrieb. NICHT Handwerker am Eigenheim (→ wohnen-haus-instandhaltung), NICHT Kfz-Werkstatt PKW (→ fahrzeug-werkstatt).",
+        hint: "Rechnungen für Reparatur und Wartung landwirtschaftlicher Gebäude (Scheune, Stall, Maschinenhalle) und Maschinen (Traktor, Mähdrescher, Anbaugeräte), Ersatzteile, Handwerkerrechnungen am landwirtschaftlichen Betrieb. Steuerlich Betriebsausgaben der Land-/Forstwirtschaft (betriebsausgaben-l). NICHT Handwerker am Eigenheim (→ wohnen-haus-instandhaltung), NICHT Kfz-Werkstatt PKW (→ fahrzeug-werkstatt).",
       },
       {
         slug: "landwirtschaft-steuer",
