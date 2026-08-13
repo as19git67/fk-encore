@@ -15,7 +15,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}-insightface
+  IMAGE_NAME: ${{ github.repository }}/insightface
 
 jobs:
 

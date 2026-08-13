@@ -59,7 +59,7 @@ environment variables; InsightFace and photo embeddings remain on CPU. On a
 host with NVIDIA Container Toolkit installed, set these values in `.env`:
 
 ```env
-LLM_IMAGE=registry.scheggs.net/schegg/fk-encore/llm-gpu
+LLM_IMAGE_SUFFIX=-gpu
 LLM_MODEL_PATH=/models/Qwen3-14B-Q4_K_M.gguf
 LLM_MODEL_URL=https://huggingface.co/Qwen/Qwen3-14B-GGUF/resolve/main/Qwen3-14B-Q4_K_M.gguf
 LLM_ACCELERATOR=cuda

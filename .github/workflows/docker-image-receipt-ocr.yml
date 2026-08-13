@@ -15,7 +15,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}-receipt-ocr
+  IMAGE_NAME: ${{ github.repository }}/receipt-ocr
 
 jobs:
 

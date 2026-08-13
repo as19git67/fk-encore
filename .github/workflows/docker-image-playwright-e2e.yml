@@ -34,7 +34,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}-playwright-e2e
+  IMAGE_NAME: ${{ github.repository }}/playwright-e2e
 
 jobs:
   build:
