@@ -40,17 +40,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
-    # Pre-baked runner image (built by docker-image-playwright-e2e.yml,
-    # Track AB / Issue #421). Carries Node 24 + Playwright + chromium +
-    # OS deps + Encore CLI, so cold runs skip ~2-3 min of installs and
-    # boot straight into `npm install` + `encore run`.
-    #
-    # Pinned to `:latest`; the per-version `pw-<x.y.z>` tag is available
-    # for emergency rollback. PRs that change the Dockerfile push a
-    # `:test` tag — switch this line to `:test` in the same PR to probe
-    # the candidate image without flipping production.
-    container:
-      image: ghcr.io/as19git67/fk-encore/playwright-e2e:latest
+    # NOT running inside the pre-baked ghcr.io/as19git67/fk-encore/playwright-e2e
+    # runner image (built by docker-image-playwright-e2e.yml, Track AB /
+    # Issue #421) — that image is built by a job in this same workflow set, so
+    # depending on it here is circular on a registry path with no prior
+    # successful push (true right now: the image name just moved from the
+    # hyphen-suffix to slash-subpath convention, see PR #972) and unreliable
+    # on PRs that don't touch the Dockerfile, where only `:test` gets pushed,
+    # never `:latest`. Installing the toolchain directly removes the
+    # dependency on that image entirely. Slower per-run (~2-3 min) but no
+    # bootstrap requirement; switch back to the pre-baked image as a speed
+    # optimization once it has a proven build/push history, and add a `needs:`
+    # on docker-image-playwright-e2e.yml for ordering. Same trade-off already
+    # made in .gitlab-ci.yml's e2e:playwright job.
 
     services:
       postgres:
@@ -71,11 +73,15 @@ jobs:
           - 5432:5432
 
     env:
-      # Backend / DB. When the job runs inside the `container:` above,
-      # `localhost` resolves to the container itself, not the runner —
-      # GitHub maps the postgres service onto the bridge network under
-      # the hostname `postgres`. Use that instead of localhost.
-      POSTGRES_HOST: postgres
+      # Backend / DB. The job runs directly on the runner (no `container:`
+      # wrapper — see the comment above), so the postgres service is
+      # published on the runner's own localhost rather than a bridge-network
+      # alias. NOTE: this differs from .gitlab-ci.yml, which keeps
+      # POSTGRES_HOST=postgres for the equivalent job — GitLab's Docker
+      # executor always runs the job itself in a container and networks
+      # services under their alias regardless of which image the job uses,
+      # so the same env var value would be wrong here.
+      POSTGRES_HOST: localhost
       POSTGRES_PORT: '5432'
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -105,10 +111,6 @@ jobs:
       E2E_API_URL: http://localhost:4000
       E2E_ADMIN_EMAIL: admin@example.com
       E2E_ADMIN_PASSWORD: admin
-      # The pre-baked image ships chromium under /ms-playwright; make
-      # sure the project-local @playwright/test installed by `npm install`
-      # uses the same cache instead of trying to download its own copy.
-      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
       # Filesystem paths — since #144 the in-code defaults point at the
       # production container mounts (/mnt/data/photos etc.), which the
       # GitHub runner cannot mkdir. Pin them at workspace-relative dirs so
@@ -124,18 +126,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      # Node, Playwright (incl. chromium + OS deps) and Encore CLI are
-      # already in the container image — no setup-node, no playwright
-      # install, no Encore install step needed. We do still need to run
-      # `npm install` for the project's own dependencies because lockfile
-      # drift makes baking them into the image too brittle (same trade-off
-      # as docker-image.yml).
-      - name: Verify pre-installed tooling
-        run: |
-          node --version
-          npm --version
-          encore version
-          playwright --version
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
 
       - name: Install backend dependencies
         run: npm install
@@ -149,6 +143,28 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm --prefix frontend install --legacy-peer-deps
+
+      # No pre-installed browser (see the "NOT running inside..." comment
+      # above) — install chromium + OS deps matching the version pinned in
+      # the frontend lockfile.
+      - name: Install Playwright chromium
+        run: npx --prefix frontend playwright install --with-deps chromium
+
+      # Same install as docker-image.yml's "Install Encore CLI (latest GA)"
+      # step — see the comment there for why no `-v` version pin.
+      - name: Install Encore CLI (latest GA)
+        run: |
+          curl -fsSL --retry 3 --retry-delay 5 -o install.sh https://encore.dev/install.sh
+          bash install.sh
+          rm -f install.sh
+          echo "${HOME}/.encore/bin" >> "${GITHUB_PATH}"
+
+      - name: Verify installed tooling
+        run: |
+          node --version
+          npm --version
+          encore version
+          npx --prefix frontend playwright --version
 
       # Boot the backend in the background.
       # --watch=false:    chokidar / inotify churn delays the ready signal
