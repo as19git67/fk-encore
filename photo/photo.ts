@@ -1902,6 +1902,28 @@ export const backfillPhotoDimensions = api(
   }
 );
 
+/**
+ * Backfill `faces.sharpness` (Etappe 2 of
+ * docs/auto-pick-face-relevance.md) for faces detected before the column
+ * existed. Like the dimensions backfill this is a property of the file, so
+ * `data.manage` gates it server-wide.
+ *
+ * Batched and resumable: pass the `next_photo_id` of the previous response
+ * back as `afterPhotoId` until it comes back null.
+ */
+export const backfillFaceSharpness = api(
+  { expose: true, method: "POST", path: "/photos/backfill-face-sharpness", auth: true },
+  async (params: { afterPhotoId?: number; limit?: number }): Promise<service.FaceSharpnessBackfillResult> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "data.manage");
+    return await service.backfillFaceSharpnessLogic({
+      afterPhotoId: params.afterPhotoId,
+      limit: params.limit,
+    });
+  }
+);
+
 // ========== AI Auto-Pick (Track I) ==========
 
 /**

@@ -230,6 +230,11 @@ export const faces = pgTable("faces", {
   // Embedding als JSON-kodierte Float32-Liste (z. B. 128/512 Dimensionen)
   embedding: text("embedding").notNull(),
   quality: integer("quality").default(0),
+  // Per-face sharpness (0..1), Laplace variance over the bbox crop —
+  // see photo/face-sharpness.ts. NULL means "not measured yet" (backfill
+  // pending) or "too small to judge"; both must stay distinguishable from
+  // a measured 0.0, which means "measured, and out of focus".
+  sharpness: real("sharpness"),
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
 });
 

@@ -146,3 +146,52 @@ POSTGRES_DATABASE=encore node scripts/photos/diagnose-autopick-calibration.mjs
 nur die Schwellenhöhe ist zu diskutieren. Bleibt er flach, trägt der Δ keine
 Information — dann würde eine höhere Schwelle nur weniger Gruppen
 auto-akzeptieren, ohne dass die verbleibenden zuverlässiger wären.
+
+## `diagnose-face-sharpness-variance.mjs`
+
+Etappe 2. Prüft die Vorhersage **V1** aus
+`docs/auto-pick-face-relevance.md`: Hat eine prominenzgewichtete
+Aggregation von `faces.sharpness` innerhalb einer Ähnlichkeitsgruppe mehr
+Streuung als das heutige Minimum?
+
+**Warum das die wichtigste Einzelmessung des Umbaus ist:**
+`face_sharpness` ist das Minimum über alle Detektionen eines Fotos. Ist das
+unschärfste Gesicht in jedem Frame eines Bursts dasselbe winzige
+Hintergrundgesicht — bei kleinen Gesichtern der Regelfall — dann ist das
+Minimum über alle Frames identisch, und die Schärfeschwankung des
+Hauptmotivs wird gelöscht, bevor sie das Scoring erreicht. Trifft V1 nicht
+zu, ist diese Kernannahme falsch und an der Scoring-Formel darf nichts
+geändert werden.
+
+**Voraussetzung:** `faces.sharpness` ist befüllt — über den Button
+„Gesichtsschärfe nachtragen" in der Datenverwaltung bzw.
+`POST /photos/backfill-face-sharpness`. Abschnitt 1 des Reports weist die
+Abdeckung aus; Gruppen mit unvollständigem Backfill werden übersprungen und
+ausgewiesen, damit „heute" und „neu" nie auf verschiedenen Datenbeständen
+verglichen werden.
+
+**Aufbau des Reports:**
+
+1. Abdeckung des Backfills.
+2. Auswertbare Gruppen (inkl. Ausschlussgründen).
+3. **Die V1-Messung:** σ innerhalb der Gruppe, Minimum gegen
+   prominenzgewichtet, dazu der Anteil der Gruppen mit σ ≈ 0 — die
+   Enthaltungsquote in Rohform.
+4. Bewegungsmaß: wie oft das Minimum heute gar keinen Sieger benennt, wie
+   oft die gewichtete Variante den Gleichstand auflöst, und wie oft ein
+   heute eindeutiger Sieger wechselt.
+5. Urteil zu V1.
+
+Die Prominenz-Konstanten werden nicht dupliziert, sondern aus
+`photo/group-auto-pick.ts` gelesen.
+
+```bash
+POSTGRES_DATABASE=encore node scripts/photos/diagnose-face-sharpness-variance.mjs
+USER_ID=1 POSTGRES_DATABASE=encore node scripts/photos/diagnose-face-sharpness-variance.mjs
+```
+
+**Entscheidungslogik:** steigt die Streuung und fällt der σ ≈ 0-Anteil, war
+die Varianz vorhanden und wurde vom Minimum maskiert — dann ist der Weg zur
+Formeländerung frei (Schwellwerte weiterhin über den Replay, nicht geraten).
+Bleibt beides gleich, gehört das Ergebnis als dritte widerlegte Hypothese
+ins Konzept.
