@@ -201,7 +201,23 @@ WICHTIGE ABGRENZUNGSREGELN:
   Anlage Kind steuerrelevant (tax_relevant=true, tax_sections=[anlage-kind]).
   Sie gehören aber NICHT zu finanzen-steuern oder behoerden-steuerbescheid,
   auch wenn sie „Festsetzung", „§ 70" oder „Einkommensteuergesetz (EStG)"
-  enthalten. Der EStG-Verweis macht das Schreiben nicht zum Steuerbescheid.`;
+  enthalten. Der EStG-Verweis macht das Schreiben nicht zum Steuerbescheid.
+
+8) Betriebsausgaben Land- und Forstwirtschaft:
+- Reparatur-, Wartungs- und Werkstattrechnungen für LANDMASCHINEN (Traktor,
+  Schlepper, Mähdrescher, Anbaugeräte, Ballenpresse) oder für landwirt-
+  schaftliche Gebäude (Scheune, Stall, Maschinenhalle) sowie Belege über
+  Betriebsmittel (Diesel, Saatgut, Dünger, Futter), SVLFG-Beiträge oder
+  Versicherungen des Betriebs sind steuerrelevant (tax_relevant=true) und
+  gehören zu „betriebsausgaben-l", NICHT zu „haushaltsnahe" und NICHT zu
+  „anlage-l" (dort nur Pachteinnahmen und die Gewinnermittlung/EÜR selbst).
+- Analoge Ausgabenbelege eines Gewerbebetriebs — vor allem rund um eine
+  PV-Anlage (Wartung, Wechselrichter, Zählermiete, Versicherung der Anlage) —
+  gehören zu „betriebsausgaben-g", NICHT zu „anlage-g" (dort nur die
+  Einspeise-/EEG-Abrechnung des Netzbetreibers).
+- Abgrenzung: dieselbe Handwerkerleistung am selbst bewohnten Haus gehört zu
+  „haushaltsnahe", am vermieteten Objekt zu „werbungskosten-v". Eine
+  Werkstattrechnung für den privaten PKW ist nicht steuerrelevant.`;
 
 export const CLASSIFY_DOCUMENT_TYPE_PROMPT = `
 

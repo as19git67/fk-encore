@@ -17,6 +17,25 @@ describe("isValidTaxSectionSlug", () => {
   });
 });
 
+describe("TAX_SECTIONS catalogue", () => {
+  it("has unique slugs", () => {
+    const slugs = TAX_SECTIONS.map((s) => s.slug);
+    expect(new Set(slugs).size).toBe(slugs.length);
+  });
+
+  it("offers a deduction section for business expenses of a farm", () => {
+    // A tractor repair invoice is a Betriebsausgabe of the Land-/Forstwirtschaft,
+    // not a §35a household service — it needs its own checkbox under "Abzüge".
+    const section = TAX_SECTIONS.find((s) => s.slug === "betriebsausgaben-l");
+    expect(section?.group).toBe("abzuege");
+    expect(section?.hint.toLowerCase()).toContain("traktor");
+  });
+
+  it("offers a deduction section for business expenses of a trade/PV business", () => {
+    expect(TAX_SECTIONS.find((s) => s.slug === "betriebsausgaben-g")?.group).toBe("abzuege");
+  });
+});
+
 describe("orderTaxSectionSlugs", () => {
   it("returns the canonical group order (einkuenfte → abzuege → bescheid → rahmen)", () => {
     const ordered = orderTaxSectionSlugs([
