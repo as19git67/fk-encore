@@ -166,7 +166,12 @@ import { isHighConfidenceDuplicateGroup, recommendDuplicatePhoto, selectDeletabl
 // photo.ts) keep working.
 import { convertHeicToJpeg } from "./heic-convert.service";
 export { convertHeicToJpeg, isHeicBuffer } from "./heic-convert.service";
-import { loadGrayImage, measureFaceSharpness, type GrayImage } from "./face-sharpness";
+import {
+  loadGrayImage,
+  measureFaceSharpness,
+  type FaceSharpnessMeasurement,
+  type GrayImage,
+} from "./face-sharpness";
 
 console.log("[boot] photo/photo.service.ts: all imports resolved");
 
@@ -623,8 +628,8 @@ async function loadFaceMeasurementImage(
 async function measureFaceSharpnessBatch(
   image: GrayImage,
   bboxes: Array<FaceBBox | null>,
-): Promise<Array<number | null>> {
-  const out: Array<number | null> = [];
+): Promise<Array<FaceSharpnessMeasurement | null>> {
+  const out: Array<FaceSharpnessMeasurement | null> = [];
   for (const bbox of bboxes) {
     try {
       out.push(await measureFaceSharpness(image, bbox));
@@ -712,7 +717,7 @@ export async function detectPhotoFaces(photoId: number, force: boolean = false):
     // Per-face sharpness, measured on the same pixels the detector saw. Doing
     // it here means new photos never need the backfill; the decode is one
     // extra read of a file that is already warm in the page cache.
-    let sharpnessPerFace: Array<number | null> = bboxes.map(() => null);
+    let sharpnessPerFace: Array<FaceSharpnessMeasurement | null> = bboxes.map(() => null);
     if (bboxes.length > 0) {
       try {
         const image = await loadFaceMeasurementImage(processingPath, {
@@ -740,7 +745,8 @@ export async function detectPhotoFaces(photoId: number, force: boolean = false):
             bbox: JSON.stringify(bboxes[i]),
             embedding: JSON.stringify(f.embedding),
             quality: 100,
-            sharpness: sharpnessPerFace[i],
+            sharpness: sharpnessPerFace[i]?.score ?? null,
+            sharpness_variance: sharpnessPerFace[i]?.variance ?? null,
           })
           .returning()
       );
@@ -6865,6 +6871,15 @@ export async function backfillPhotoDimensionsLogic(userId?: number): Promise<{
   return { scanned: rows.length, updated, failed };
 }
 
+/**
+ * A face still owes a measurement when either column is missing. The raw
+ * variance was added after the first production pass had already written
+ * `sharpness` for part of the library, so "has a score but no variance" is a
+ * real state that has to be picked up again — the variance is what makes the
+ * normalisation re-tunable later without another read of every crop.
+ */
+const needsMeasurement = or(isNull(faces.sharpness), isNull(faces.sharpness_variance))!;
+
 /** Photos per round-trip of the face-sharpness backfill. Each photo costs one
  *  full decode (~50-150 ms for a 12 MP JPEG) plus a crop per face, so 200
  *  keeps a batch well inside the gateway timeout even on a slow disk. */
@@ -6908,7 +6923,7 @@ export async function backfillFaceSharpnessLogic(opts?: {
 }): Promise<FaceSharpnessBackfillResult> {
   const limit = Math.max(1, Math.min(opts?.limit ?? FACE_SHARPNESS_BATCH_PHOTOS, 1000));
   const afterPhotoId = opts?.afterPhotoId ?? 0;
-  const conds = [isNull(faces.sharpness), gt(photos.id, afterPhotoId)];
+  const conds = [needsMeasurement, gt(photos.id, afterPhotoId)];
   if (typeof opts?.userId === "number") conds.push(eq(photos.user_id, opts.userId));
 
   const photoRows = await dbAll<{
@@ -6943,7 +6958,7 @@ export async function backfillFaceSharpnessLogic(opts?: {
     const faceRows = await dbAll<{ id: number; bbox: string }>(
       db.select({ id: faces.id, bbox: faces.bbox })
         .from(faces)
-        .where(and(eq(faces.photo_id, photo.id), isNull(faces.sharpness))),
+        .where(and(eq(faces.photo_id, photo.id), needsMeasurement)),
     );
     if (faceRows.length === 0) continue;
 
@@ -6980,7 +6995,9 @@ export async function backfillFaceSharpnessLogic(opts?: {
           continue;
         }
         await dbExec(
-          db.update(faces).set({ sharpness: value }).where(eq(faces.id, faceRows[i].id)),
+          db.update(faces)
+            .set({ sharpness: value.score, sharpness_variance: value.variance })
+            .where(eq(faces.id, faceRows[i].id)),
         );
         facesUpdated++;
       }
@@ -6994,7 +7011,7 @@ export async function backfillFaceSharpnessLogic(opts?: {
   }
 
   const exhausted = photoRows.length < limit;
-  const remainingConds = [isNull(faces.sharpness), gt(photos.id, lastPhotoId)];
+  const remainingConds = [needsMeasurement, gt(photos.id, lastPhotoId)];
   if (typeof opts?.userId === "number") remainingConds.push(eq(photos.user_id, opts.userId));
   const remainingRow = exhausted
     ? { c: 0 }
