@@ -53,7 +53,8 @@ The full list of `DEPLOY_*` overrides:
 |---|---|---|
 | `COMPOSE_PROJECT_NAME` | `fk-encore` | Isolates compose state. |
 | `DEPLOY_NAME_SUFFIX` | _(empty)_ | Suffix on every `container_name`. |
-| `DEPLOY_IMAGE_TAG` | `latest` | Pulled from registry.scheggs.net/schegg/fk-encore*. |
+| `DEPLOY_IMAGE_BASE` | `ghcr.io/as19git67/fk-encore` | Registry + owner/repo every service image is pulled from (`<base>/<service>`). The one line to change to switch registries — e.g. `registry.scheggs.net/schegg/fk-encore` for a self-hosted GitLab instance. |
+| `DEPLOY_IMAGE_TAG` | `latest` | Pulled from `${DEPLOY_IMAGE_BASE}*`. |
 | `DEPLOY_WATCHTOWER_SCOPE` | `fkprod` | Watchtower auto-updates only matching scope. |
 | `DEPLOY_HOST_PORT_APP` | `8080` | Must be unique per deployment. |
 | `DEPLOY_HOST_PORT_POSTGRES` | `5432` | dito. |
@@ -74,7 +75,7 @@ driver and NVIDIA Container Toolkit on the host, then switch the `llm_service`
 variables in `.env`:
 
 ```env
-LLM_IMAGE=registry.scheggs.net/schegg/fk-encore/llm-gpu
+LLM_IMAGE_SUFFIX=-gpu
 LLM_MODEL_PATH=/models/Qwen3-14B-Q4_K_M.gguf
 LLM_MODEL_URL=https://huggingface.co/Qwen/Qwen3-14B-GGUF/resolve/main/Qwen3-14B-Q4_K_M.gguf
 LLM_ACCELERATOR=cuda
