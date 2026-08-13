@@ -12,6 +12,7 @@ on:
     branches: [ "main" ]
     paths:
       - 'embedding_service/**'
+      - '.github/workflows/docker-image-embedding.yml'
 
 env:
   REGISTRY: ghcr.io

@@ -12,6 +12,7 @@ on:
     branches: [ "main" ]
     paths:
       - 'receipt-ocr-service/**'
+      - '.github/workflows/docker-image-receipt-ocr.yml'
 
 env:
   REGISTRY: ghcr.io
