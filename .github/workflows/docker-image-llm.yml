@@ -33,7 +33,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}-llm
+  IMAGE_NAME: ${{ github.repository }}/llm
 
 jobs:
 

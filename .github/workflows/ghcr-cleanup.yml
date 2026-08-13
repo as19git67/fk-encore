@@ -2,12 +2,21 @@ name: GHCR Cleanup
 
 # Keeps the container packages on ghcr.io/as19git67/* tidy:
 #   * fk-encore                 (Encore backend, built by docker-image.yml)
-#   * fk-encore-embedding       (built by docker-image-embedding.yml)
-#   * fk-encore-geo             (built by docker-image-geo.yml)
-#   * fk-encore-insightface     (built by docker-image-insightface.yml)
-#   * fk-encore-llm             (built by docker-image-llm.yml)
-#   * fk-encore-playwright-e2e  (built by docker-image-playwright-e2e.yml,
+#   * fk-encore/embedding       (built by docker-image-embedding.yml)
+#   * fk-encore/geo             (built by docker-image-geo.yml)
+#   * fk-encore/insightface     (built by docker-image-insightface.yml)
+#   * fk-encore/llm             (built by docker-image-llm.yml)
+#   * fk-encore/playwright-e2e  (built by docker-image-playwright-e2e.yml,
 #                                Track AB / Issue #421)
+#
+# Package names containing "/" (every sidecar since the slash-subpath
+# rename) must be percent-encoded when addressed through GitHub's own
+# Packages REST API (/users|orgs/.../packages/container/<name>/versions) —
+# GitHub docs call this out explicitly for nested container package
+# names. The registry's own v2 API (ghcr.io/v2/<owner>/<name>/manifests/…)
+# takes the real slash unencoded, since there it is a genuine path
+# separator, not a package-name character. Both forms are used below;
+# PACKAGE_ENC is only for the former.
 #
 # Policy (applied per package):
 #   1. Delete ORPHANED untagged versions — those left behind when `latest`,
@@ -55,12 +64,12 @@ jobs:
       matrix:
         package:
           - fk-encore
-          - fk-encore-embedding
-          - fk-encore-geo
-          - fk-encore-insightface
-          - fk-encore-llm
-          - fk-encore-llm-gpu
-          - fk-encore-playwright-e2e
+          - fk-encore/embedding
+          - fk-encore/geo
+          - fk-encore/insightface
+          - fk-encore/llm
+          - fk-encore/llm-gpu
+          - fk-encore/playwright-e2e
     steps:
       # Step 1 — purge untagged versions that are NOT child manifests of a
       # still-tagged image.
@@ -86,13 +95,17 @@ jobs:
         run: |
           OWNER="${{ github.repository_owner }}"
           PACKAGE="${{ matrix.package }}"
+          # GitHub's Packages REST API requires "/" percent-encoded in the
+          # package_name path segment; the ghcr.io registry v2 API below
+          # takes the raw PACKAGE since there the slash is a real path.
+          PACKAGE_ENC="${PACKAGE//\//%2F}"
 
           # Detect user vs org so we hit the correct API namespace.
           TYPE=$(gh api "/users/${OWNER}" --jq '.type' 2>/dev/null || echo "Organization")
           if [ "$TYPE" = "User" ]; then
-            API_BASE="/users/${OWNER}/packages/container/${PACKAGE}/versions"
+            API_BASE="/users/${OWNER}/packages/container/${PACKAGE_ENC}/versions"
           else
-            API_BASE="/orgs/${OWNER}/packages/container/${PACKAGE}/versions"
+            API_BASE="/orgs/${OWNER}/packages/container/${PACKAGE_ENC}/versions"
           fi
 
           # Merge all paginated results into one JSON array.
@@ -159,12 +172,16 @@ jobs:
         run: |
           OWNER="${{ github.repository_owner }}"
           PACKAGE="${{ matrix.package }}"
+          # GitHub's Packages REST API requires "/" percent-encoded in the
+          # package_name path segment; the ghcr.io registry v2 API below
+          # takes the raw PACKAGE since there the slash is a real path.
+          PACKAGE_ENC="${PACKAGE//\//%2F}"
 
           TYPE=$(gh api "/users/${OWNER}" --jq '.type' 2>/dev/null || echo "Organization")
           if [ "$TYPE" = "User" ]; then
-            API_BASE="/users/${OWNER}/packages/container/${PACKAGE}/versions"
+            API_BASE="/users/${OWNER}/packages/container/${PACKAGE_ENC}/versions"
           else
-            API_BASE="/orgs/${OWNER}/packages/container/${PACKAGE}/versions"
+            API_BASE="/orgs/${OWNER}/packages/container/${PACKAGE_ENC}/versions"
           fi
 
           VERSIONS=$(gh api --paginate "${API_BASE}" --jq '.' 2>/dev/null \
