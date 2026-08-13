@@ -5,9 +5,12 @@ name: GHCR Cleanup
 #   * fk-encore/embedding       (built by docker-image-embedding.yml)
 #   * fk-encore/geo             (built by docker-image-geo.yml)
 #   * fk-encore/insightface     (built by docker-image-insightface.yml)
-#   * fk-encore/llm             (built by docker-image-llm.yml)
+#   * fk-encore/llm             (built by docker-image-llm.yml, CPU variant)
+#   * fk-encore/llm-gpu         (built by docker-image-llm.yml, CUDA variant)
 #   * fk-encore/playwright-e2e  (built by docker-image-playwright-e2e.yml,
 #                                Track AB / Issue #421)
+#   * fk-encore/receipt-ocr     (built by docker-image-receipt-ocr.yml)
+#   * fk-encore/taxonomy-tools  (built by docker-image-taxonomy-tools.yml)
 #
 # Package names containing "/" (every sidecar since the slash-subpath
 # rename) must be percent-encoded when addressed through GitHub's own
@@ -70,6 +73,8 @@ jobs:
           - fk-encore/llm
           - fk-encore/llm-gpu
           - fk-encore/playwright-e2e
+          - fk-encore/receipt-ocr
+          - fk-encore/taxonomy-tools
     steps:
       # Step 1 — purge untagged versions that are NOT child manifests of a
       # still-tagged image.
