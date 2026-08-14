@@ -114,14 +114,25 @@ Unterhaltszahlungen des Nutzers geht, darf eine Abzugs-Sektion gesetzt werden.
 WICHTIGE ABGRENZUNGSREGELN:
 
 1) Wertpapiere / Kapitalerträge:
-- Dividendengutschrift, Wertpapierabrechnung, Erträgnisaufstellung,
-  Jahressteuerbescheinigung einer Bank oder eines Brokers → IMMER
-  „anlage-kap", NIEMALS „anlage-n".
-- Dokumente, die Kapitalertragsteuer (KESt), Solidaritätszuschlag oder
-  Kirchensteuer im Zusammenhang mit Dividenden, Zinsen oder Wertpapieren
-  ausweisen (z. B. Steueraufstellung von Comdirect, ING, Trade Republic)
-  → „anlage-kap". Diese Steuerabzüge beziehen sich auf Kapitalerträge,
-  nicht auf Arbeitseinkommen.
+- Steuerbeleg ist NUR die Jahresbescheinigung der Bank bzw. des Brokers:
+  Jahressteuerbescheinigung, Steuerbescheinigung, Erträgnisaufstellung,
+  Verlustbescheinigung → „anlage-kap" (tax_relevant=true), NIEMALS „anlage-n".
+- EINZELNE Depotabrechnungen sind NICHT steuerrelevant (tax_relevant=false,
+  tax_sections=[]): Dividendengutschrift, „Steuerliche Behandlung: …
+  Dividende", Ertragsgutschrift, Wertpapierabrechnung (Kauf/Verkauf),
+  Vorabpauschale, Zinsgutschrift. Die Bank fasst diese Erträge und die
+  einbehaltene Kapitalertragsteuer am Jahresende in der Jahressteuer-
+  bescheinigung zusammen — genau wie bei den monatlichen Gehaltsabrechnungen
+  zählt nur der Jahresbeleg. Ein aufgedruckter Hinweis „KEINE
+  STEUERBESCHEINIGUNG" bestätigt das ausdrücklich.
+- Wenn ein Bank-/Broker-Beleg doch steuerrelevant ist, gehört er
+  AUSSCHLIESSLICH zu „anlage-kap" und bekommt KEINE weiteren Abzugs-Sektionen.
+  Die einbehaltene Kirchensteuer ist bereits im Steuerabzug verrechnet; auch
+  der übliche Fußnoten-Hinweis „Durch die Berücksichtigung der Kirchensteuer
+  als Sonderausgabe reduziert sich der Kapitalertragsteuersatz …" macht den
+  Beleg NICHT zu einem Sonderausgaben-Nachweis. Ebenso wenig gehören
+  „vorsorgeaufwand" oder „anlage-av" dazu — eine Depotabrechnung enthält keine
+  Vorsorgeaufwendungen.
 - Anlage N ist ausschließlich für Arbeitseinkommen (Gehalt,
   Lohnsteuerbescheinigung vom Arbeitgeber).
 - MONATLICHE Gehalts-/Entgeltabrechnungen sind NICHT steuerrelevant
