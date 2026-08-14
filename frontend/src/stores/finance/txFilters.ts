@@ -13,19 +13,23 @@ export const useTxFiltersStore = defineStore('finance.txFilters', () => {
   const formTags = ref<string[]>([])
   const formFromIso = ref<string | null>(null)
   const formToIso = ref<string | null>(null)
+  /** null = no tax filter, true = tax-relevant only, false = the rest. */
+  const formTaxRelevant = ref<boolean | null>(null)
 
   // Applied state (what was last submitted via "Suchen")
   const appliedQuery = ref('')
   const appliedTags = ref<string[]>([])
   const appliedFromIso = ref<string | null>(null)
   const appliedToIso = ref<string | null>(null)
+  const appliedTaxRelevant = ref<boolean | null>(null)
 
   const hasActiveFilters = computed(
     () =>
       appliedQuery.value.trim().length > 0 ||
       appliedTags.value.length > 0 ||
       appliedFromIso.value !== null ||
-      appliedToIso.value !== null,
+      appliedToIso.value !== null ||
+      appliedTaxRelevant.value !== null,
   )
 
   // Convenience: Date objects derived from ISO date strings
@@ -49,6 +53,7 @@ export const useTxFiltersStore = defineStore('finance.txFilters', () => {
     appliedTags.value = [...formTags.value]
     appliedFromIso.value = formFromIso.value
     appliedToIso.value = formToIso.value
+    appliedTaxRelevant.value = formTaxRelevant.value
   }
 
   function clear() {
@@ -56,10 +61,12 @@ export const useTxFiltersStore = defineStore('finance.txFilters', () => {
     formTags.value = []
     formFromIso.value = null
     formToIso.value = null
+    formTaxRelevant.value = null
     appliedQuery.value = ''
     appliedTags.value = []
     appliedFromIso.value = null
     appliedToIso.value = null
+    appliedTaxRelevant.value = null
   }
 
   return {
@@ -67,10 +74,12 @@ export const useTxFiltersStore = defineStore('finance.txFilters', () => {
     formTags,
     formFrom,
     formTo,
+    formTaxRelevant,
     appliedQuery,
     appliedTags,
     appliedFrom,
     appliedTo,
+    appliedTaxRelevant,
     hasActiveFilters,
     apply,
     clear,

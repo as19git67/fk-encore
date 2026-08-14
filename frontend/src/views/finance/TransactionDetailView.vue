@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Tag from 'primevue/tag'
+import Checkbox from 'primevue/checkbox'
 import Message from 'primevue/message'
 import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
@@ -55,6 +56,7 @@ const documentDecisionId = ref<number | null>(null)
 const expandedDocumentPreviews = ref<Set<number>>(new Set())
 const transactionSplits = ref<api.TransactionSplit[]>([])
 const splitDialogVisible = ref(false)
+const taxSaving = ref(false)
 const receiptInput = ref<HTMLInputElement | null>(null)
 const receiptUploading = ref(false)
 const receiptStatus = ref<string | null>(null)
@@ -71,6 +73,30 @@ function openSplitDialog() {
 
 function onSplitSaved(splits: api.TransactionSplit[]) {
   transactionSplits.value = splits
+}
+
+const taxRelevantSplitCount = computed(
+  () => transactionSplits.value.filter(split => split.is_tax_relevant).length,
+)
+
+/**
+ * Flag on the booking itself. Splits carry their own flag; both are
+ * matched by the "steuerrelevant" filter in the transaction list.
+ */
+async function setTaxRelevant(value: boolean) {
+  const current = tx.value
+  if (!current || taxSaving.value) return
+  taxSaving.value = true
+  error.value = null
+  try {
+    await api.batchTaxRelevant([current.id], value)
+    tx.value = { ...current, is_tax_relevant: value }
+    txStore.syncFrom([tx.value])
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    taxSaving.value = false
+  }
 }
 
 function toggleDocumentPreview(documentId: number) {
@@ -955,6 +981,28 @@ const extractedFields = computed(() => {
     </section>
 
     <section v-if="tx" class="card">
+      <h2>Steuer</h2>
+      <label class="tax-toggle">
+        <Checkbox
+          :model-value="!!tx.is_tax_relevant"
+          binary
+          :disabled="taxSaving"
+          aria-label="Buchung ist steuerrelevant"
+          @update:model-value="setTaxRelevant($event)"
+        />
+        <span>Buchung ist steuerrelevant</span>
+      </label>
+      <p v-if="taxRelevantSplitCount > 0" class="hint">
+        {{ taxRelevantSplitCount === 1 ? 'Ein Teilbetrag ist' : `${taxRelevantSplitCount} Teilbeträge sind` }}
+        separat als steuerrelevant markiert.
+      </p>
+      <p class="hint">
+        Über den Filter „Nur steuerrelevante“ in der Buchungsliste findest du sowohl
+        markierte Buchungen als auch Buchungen mit markierten Teilbeträgen.
+      </p>
+    </section>
+
+    <section v-if="tx" class="card">
       <div class="split-header">
         <h2>Aufteilung</h2>
         <Button
@@ -1705,6 +1753,7 @@ const extractedFields = computed(() => {
   z-index: 9999;
   pointer-events: none;
 }
+.tax-toggle { display: flex; align-items: center; gap: .5rem; cursor: pointer; }
 .split-header { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
 .split-header h2 { margin: 0; }
 .split-detail-list { list-style: none; margin: .75rem 0 0; padding: 0; display: grid; gap: .5rem; }
