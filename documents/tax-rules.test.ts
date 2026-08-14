@@ -4,6 +4,7 @@ import {
   applyInsuranceAdminTaxRule,
   applyKindergeldTaxRule,
   applyKirchensteuerBescheidYearTaxRule,
+  applySecuritiesSettlementTaxRule,
 } from "./tax-rules";
 
 const AV = [{ slug: "anlage-av", confidence: 0.95 }];
@@ -338,5 +339,149 @@ describe("applyKirchensteuerBescheidYearTaxRule", () => {
       taxYear: 2019,
       taxYearConfidence: 0.9,
     })).toEqual({ taxYear: 2019, taxYearConfidence: 0.9, matched: false });
+  });
+});
+
+
+describe("applySecuritiesSettlementTaxRule", () => {
+  // Synthetischer Nachbau einer comdirect-Dividendenabrechnung (keine echten
+  // personenbezogenen Daten).
+  const DIVIDEND_TEXT = `Steuerliche Behandlung: Ausländische Dividende vom 13.08.2026
+Stk. 160 MUSTER INC., WKN / ISIN: 000000 / US0000000000
+Depotnummer: 0000000 00
+Zu Ihren Gunsten vor Steuern: EUR 31,75
+Kapitalertragsteuer (2) EUR -3,67
+Solidaritätszuschlag EUR -0,20
+Kirchensteuer EUR -0,29
+(2) Durch die Berücksichtigung der Kirchensteuer (8% bzw. 9%) als Sonderausgabe
+reduziert sich der Kapitalertragsteuersatz auf 24,51% bzw. 24,45%.
+KEINE STEUERBESCHEINIGUNG`;
+
+  it("drops all tax sections from a single dividend settlement", () => {
+    const out = applySecuritiesSettlementTaxRule({
+      text: DIVIDEND_TEXT,
+      taxSections: [
+        { slug: "anlage-kap", confidence: 0.95 },
+        { slug: "sonderausgaben", confidence: 0.95 },
+        { slug: "vorsorgeaufwand", confidence: 0.75 },
+      ],
+      taxRelevant: true,
+    });
+    expect(out.taxSections).toEqual([]);
+    expect(out.taxRelevant).toBe(false);
+    expect(out.matched).toBe(true);
+  });
+
+  it("also drops a Wertpapierabrechnung, Vorabpauschale and Zinsgutschrift", () => {
+    for (const text of [
+      "Wertpapierabrechnung Kauf, WKN / ISIN: 000000 / DE0000000000",
+      "Steuerliche Behandlung: Vorabpauschale, ISIN DE0000000000, Kapitalertragsteuer",
+      "Zinsgutschrift zum Depotkonto, Kapitalertragsteuer einbehalten",
+    ]) {
+      const out = applySecuritiesSettlementTaxRule({
+        text,
+        taxSections: [{ slug: "anlage-kap", confidence: 0.9 }],
+        taxRelevant: true,
+      });
+      expect(out.taxSections).toEqual([]);
+      expect(out.taxRelevant).toBe(false);
+    }
+  });
+
+  it("reports no change when the settlement was already non-tax-relevant", () => {
+    expect(
+      applySecuritiesSettlementTaxRule({
+        text: DIVIDEND_TEXT,
+        taxSections: [],
+        taxRelevant: false,
+      }),
+    ).toEqual({ taxSections: [], taxRelevant: false, matched: false });
+  });
+
+  it("keeps the annual Jahressteuerbescheinigung in anlage-kap only", () => {
+    const out = applySecuritiesSettlementTaxRule({
+      text: "Jahressteuerbescheinigung 2025 — Depotnummer 0000000, Kapitalertragsteuer, Kirchensteuer als Sonderausgabe",
+      taxSections: [
+        { slug: "anlage-kap", confidence: 0.95 },
+        { slug: "sonderausgaben", confidence: 0.8 },
+      ],
+      taxRelevant: true,
+    });
+    expect(out.taxSections).toEqual([{ slug: "anlage-kap", confidence: 0.95 }]);
+    expect(out.taxRelevant).toBe(true);
+    expect(out.matched).toBe(true);
+  });
+
+  it("adds anlage-kap to an annual certificate the model mis-sectioned", () => {
+    expect(
+      applySecuritiesSettlementTaxRule({
+        text: "Erträgnisaufstellung 2025, Depotnummer 0000000, ISIN DE0000000000",
+        taxSections: [{ slug: "anlage-n", confidence: 0.7 }],
+        taxRelevant: true,
+      }).taxSections,
+    ).toEqual([{ slug: "anlage-kap", confidence: 0.95 }]);
+    expect(
+      applySecuritiesSettlementTaxRule({
+        text: "Verlustbescheinigung nach § 43a EStG zum Depot, ISIN DE0000000000",
+        taxSections: [],
+        taxRelevant: false,
+      }).taxSections,
+    ).toEqual([{ slug: "anlage-kap", confidence: 0.95 }]);
+  });
+
+  it("treats a settlement stamped KEINE STEUERBESCHEINIGUNG as a settlement", () => {
+    // The negation contains the word "Steuerbescheinigung" — it must not be
+    // read as the annual certificate.
+    const out = applySecuritiesSettlementTaxRule({
+      text: "Dividendengutschrift, ISIN DE0000000000\nKEINE STEUERBESCHEINIGUNG",
+      taxSections: [{ slug: "anlage-kap", confidence: 0.9 }],
+      taxRelevant: true,
+    });
+    expect(out.taxSections).toEqual([]);
+    expect(out.taxRelevant).toBe(false);
+  });
+
+  it("leaves a fund-linked pension statement alone", () => {
+    const sections = [{ slug: "vorsorgeaufwand", confidence: 0.9 }];
+    expect(
+      applySecuritiesSettlementTaxRule({
+        text: "Standmitteilung zur fondsgebundenen Rentenversicherung, Ausschüttung der Fonds, ISIN DE0000000000",
+        taxSections: sections,
+        taxRelevant: true,
+      }),
+    ).toEqual({ taxSections: sections, taxRelevant: true, matched: false });
+  });
+
+  it("leaves an Einkommensteuerbescheid alone", () => {
+    const sections = [{ slug: "steuerbescheid", confidence: 0.95 }];
+    expect(
+      applySecuritiesSettlementTaxRule({
+        text: "Finanzamt Musterstadt — Einkommensteuerbescheid für 2025: Kapitalertragsteuer, Ausschüttungen",
+        taxSections: sections,
+        taxRelevant: true,
+      }),
+    ).toEqual({ taxSections: sections, taxRelevant: true, matched: false });
+  });
+
+  it("does nothing without a securities context", () => {
+    const sections = [{ slug: "sonderausgaben", confidence: 0.9 }];
+    expect(
+      applySecuritiesSettlementTaxRule({
+        text: "Zuwendungsbestätigung — Ausschüttung von Spendengeldern an das Projekt",
+        taxSections: sections,
+        taxRelevant: true,
+      }).matched,
+    ).toBe(false);
+  });
+
+  it("does nothing for ordinary depot mail that is neither settlement nor certificate", () => {
+    const sections = [{ slug: "anlage-kap", confidence: 0.8 }];
+    expect(
+      applySecuritiesSettlementTaxRule({
+        text: "Änderung der Konditionen zu Ihrem Depotkonto — Preis- und Leistungsverzeichnis",
+        taxSections: sections,
+        taxRelevant: true,
+      }),
+    ).toEqual({ taxSections: sections, taxRelevant: true, matched: false });
   });
 });
