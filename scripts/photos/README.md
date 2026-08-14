@@ -172,7 +172,16 @@ verglichen werden.
 
 **Aufbau des Reports:**
 
-1. Abdeckung des Backfills.
+1. Abdeckung des Backfills — getrennt nach „noch nachzutragen" und „unter
+   der Messgrenze" (letztere bleiben dauerhaft `NULL`).
+1b. **Verteilung der Messwerte.** Anteil an der 1.0-Decke plus Perzentile
+   von Score und Rohvarianz. `LAPLACIAN_FULL_SCALE` ist am Frontend
+   kalibriert, das die *gerenderte* (herunterskalierte) Datei misst;
+   serverseitig wird das Original gelesen und kann sättigen. Sitzen die
+   Werte an der Decke, misst ein σ von 0 die Normalisierung und nicht die
+   Bilder — der Vollausschlag wird dann anhand der gespeicherten Rohvarianz
+   (`faces.sharpness_variance`) neu gesetzt, was ein `UPDATE` ist und kein
+   zweiter Messlauf.
 2. Auswertbare Gruppen (inkl. Ausschlussgründen).
 3. **Die V1-Messung:** σ innerhalb der Gruppe, Minimum gegen
    prominenzgewichtet, dazu der Anteil der Gruppen mit σ ≈ 0 — die
@@ -195,3 +204,9 @@ die Varianz vorhanden und wurde vom Minimum maskiert — dann ist der Weg zur
 Formeländerung frei (Schwellwerte weiterhin über den Replay, nicht geraten).
 Bleibt beides gleich, gehört das Ergebnis als dritte widerlegte Hypothese
 ins Konzept.
+
+**Das Skript verweigert das Urteil**, solange der Backfill unvollständig,
+die Skala gesättigt oder die auswertbare Menge kleiner als 30 Gruppen ist.
+Der erste Produktivlauf (3,3 % Abdeckung, alle Werte an der Decke) hätte
+sonst „V1 widerlegt" gemeldet, obwohl gar nichts gemessen war — siehe
+Etappe 2 in `docs/auto-pick-face-relevance.md`.

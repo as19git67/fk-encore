@@ -162,19 +162,34 @@ export async function loadGrayImage(input: string | Buffer): Promise<GrayImage> 
   return { data, width: info.width, height: info.height };
 }
 
+export interface FaceSharpnessMeasurement {
+  /** Raw Laplacian variance of the resampled crop. Unbounded. */
+  variance: number;
+  /** `variance` normalised into 0..1 against LAPLACIAN_FULL_SCALE. */
+  score: number;
+}
+
 /**
- * Sharpness (0..1) of one face inside an already-decoded photo, or `null`
- * when the face is too small to judge.
+ * Sharpness of one face inside an already-decoded photo, or `null` when the
+ * face is too small to judge.
  *
  * `null` is a deliberate third state, not a zero: "not measurable" must stay
  * distinguishable from "measured, and blurry", because a tiny background
  * detection scoring 0 would drag a prominence-weighted mean down exactly the
  * way `min()` does today.
+ *
+ * Both the raw variance and the normalised score are returned — and both get
+ * persisted. LAPLACIAN_FULL_SCALE is calibrated for the frontend, which
+ * measures the *rendered* (downscaled) image; the same crop read from the
+ * full-resolution original carries far more high-frequency detail and can run
+ * into the 1.0 ceiling, where every face looks equally sharp and the score
+ * stops discriminating. Keeping the raw value means re-calibrating the scale
+ * is an `UPDATE`, not another pass over every crop in the library.
  */
 export async function measureFaceSharpness(
   image: GrayImage,
   bbox: FaceBBox | null | undefined,
-): Promise<number | null> {
+): Promise<FaceSharpnessMeasurement | null> {
   const rect = faceCropRect(bbox, image.width, image.height);
   if (!rect) return null;
   const sharp = (await import("sharp")).default;
@@ -187,7 +202,6 @@ export async function measureFaceSharpness(
     .resize(FACE_SAMPLE_SIZE, FACE_SAMPLE_SIZE, { fit: "fill" })
     .raw()
     .toBuffer();
-  return normalizeSharpness(
-    laplacianVariance(crop, FACE_SAMPLE_SIZE, FACE_SAMPLE_SIZE),
-  );
+  const variance = laplacianVariance(crop, FACE_SAMPLE_SIZE, FACE_SAMPLE_SIZE);
+  return { variance, score: normalizeSharpness(variance) };
 }

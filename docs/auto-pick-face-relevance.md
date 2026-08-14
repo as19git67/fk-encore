@@ -329,10 +329,44 @@ die Werte lesen, statt sie bei jedem Betrachten neu zu berechnen.
 - Stimmt die Orientierung des eigenen Decodes nicht mit der des Detektors
   überein, bleibt der Wert `NULL` statt plausibel falsch zu sein.
 
-**Als Nächstes, und zwar zuerst:** `diagnose-face-sharpness-variance.mjs`
-gegen den produktiven Bestand laufen lassen — die Prüfung von V1. Erst deren
-Ergebnis entscheidet, ob die Aggregation in `scorePhoto()` überhaupt
-angefasst wird.
+**Erster Produktivlauf (2026-08-13): kein Urteil, Messaufbau defekt.** Der
+Report meldete „V1 trifft NICHT zu" — die Aussage ist wertlos, aus zwei
+unabhängigen Gründen, und beide sind inzwischen behoben:
+
+1. **Abdeckung 3,3 %** (4 218 von 129 633 Gesichtern). Auswertbar waren 70
+   von 6 801 Gruppen — eine winzige, nicht zufällige Teilmenge.
+2. **Die Skala sättigt.** σ war in *beiden* Spalten exakt 0 und „gewichtet >
+   min" in exakt 0,0 % der Gruppen. Zwei verschiedene Aggregationen, die nie
+   auseinanderlaufen, rechnen auf identischen Zahlen. Ursache:
+   `LAPLACIAN_FULL_SCALE` (500) ist am Frontend kalibriert, das die
+   *gerenderte*, herunterskalierte Datei misst (`img.naturalWidth` in
+   `useFocusPeaking.ts`). Serverseitig wird das Original gelesen — derselbe
+   Ausschnitt trägt dort deutlich mehr Hochfrequenzanteil und landet an der
+   1,0-Decke. Ein σ von 0 misst dann die Normalisierung, nicht die Bilder.
+
+Daraus folgt die eigentliche Lehre für diese Etappe: **eine Kennzahl, die
+nur einen Wert annehmen kann, widerlegt nichts.** Der Denkfehler ist derselbe
+wie bei der zweiten widerlegten Hypothese in Abschnitt 1 — aus einer
+Kennzahl auf eine Bedingung schließen, die sie nicht trägt.
+
+Konsequenzen, umgesetzt:
+
+- **Die Rohvarianz wird mitgespeichert** (`faces.sharpness_variance`,
+  Migration `0143`). Der Vollausschlag lässt sich damit aus den Daten
+  bestimmen — wie in Abschnitt 7 gefordert, gemessen statt geraten — und die
+  Neuskalierung ist ein `UPDATE`, kein zweiter Lauf über 130 000 Ausschnitte.
+- Der Backfill greift jetzt auch Gesichter wieder auf, die bereits einen
+  Score, aber noch keine Varianz haben.
+- Das Diagnoseskript weist die Verteilung aus (Anteil an der 1,0-Decke,
+  Perzentile von Score und Rohvarianz), trennt „noch nachzutragen" von
+  „unter der Messgrenze" — und **verweigert das Urteil**, solange die
+  Abdeckung unvollständig, die Skala gesättigt oder die auswertbare Menge zu
+  klein ist.
+
+**Als Nächstes:** Backfill vollständig durchlaufen lassen, Vollausschlag
+anhand der Rohvarianz-Verteilung neu setzen, dann erneut messen. Erst dann
+ist V1 überhaupt prüfbar — und erst deren Ergebnis entscheidet, ob die
+Aggregation in `scorePhoto()` angefasst wird.
 
 **Etappe 3 — `kps` persistieren → Blickrichtung.** Erneute Detektion nötig,
 aber kein neues Modell.

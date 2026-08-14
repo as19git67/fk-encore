@@ -79,6 +79,18 @@ function parseProminenceConstants() {
   };
 }
 
+/** Messgrenze, ebenfalls aus dem TS-Quelltext statt hier dupliziert. */
+function parseMinFacePixels() {
+  const src = fs.readFileSync(
+    path.join(REPO_ROOT, "photo/face-sharpness.ts"),
+    "utf8",
+  );
+  const m = src.match(/export const MIN_FACE_PIXELS = ([0-9]+)/);
+  if (!m) throw new Error("MIN_FACE_PIXELS konnte nicht aus photo/face-sharpness.ts gelesen werden");
+  return Number(m[1]);
+}
+const MIN_FACE_PIXELS = parseMinFacePixels();
+
 /** Mirror von computeFaceProminence() in photo/group-auto-pick.ts. */
 function faceProminence(bboxArea, known, c) {
   if (bboxArea < c.floor) return 0;
@@ -140,10 +152,29 @@ async function main() {
   out();
 
   // ── 1. Abdeckung des Backfills ──────────────────────────────────────────
+  //
+  // Die unvermessenen Gesichter werden aufgeteilt: unter der Messgrenze
+  // (bbox-Kantenlänge < 10 px im Original — die bleiben dauerhaft NULL) gegen
+  // schlicht noch nicht nachgetragen. Nur die zweite Zahl heißt „der Backfill
+  // ist noch nicht durch", und nur sie entscheidet, ob der Rest des Reports
+  // überhaupt etwas aussagt.
   const coverage = await pool.query(
     `
     SELECT COUNT(*)::int AS faces_total,
-           COUNT(f.sharpness)::int AS faces_measured
+           COUNT(f.sharpness)::int AS faces_measured,
+           COUNT(f.sharpness_variance)::int AS faces_with_variance,
+           COUNT(*) FILTER (
+             WHERE f.sharpness IS NULL
+               AND p.width IS NOT NULL AND p.height IS NOT NULL
+               AND (
+                 COALESCE(((f.bbox)::jsonb->>'width')::float, 0) * p.width < ${MIN_FACE_PIXELS}
+                 OR COALESCE(((f.bbox)::jsonb->>'height')::float, 0) * p.height < ${MIN_FACE_PIXELS}
+               )
+           )::int AS faces_too_small,
+           COUNT(*) FILTER (
+             WHERE f.sharpness IS NULL
+               AND (p.width IS NULL OR p.height IS NULL)
+           )::int AS faces_unknown_size
       FROM faces f
       JOIN photos p ON p.id = f.photo_id
      ${ONLY_USER != null ? "WHERE p.user_id = $1" : ""}
@@ -151,6 +182,9 @@ async function main() {
     ONLY_USER != null ? [ONLY_USER] : [],
   );
   const cov = coverage.rows[0];
+  const pending =
+    cov.faces_total - cov.faces_measured - cov.faces_too_small - cov.faces_unknown_size;
+  const measurable = cov.faces_total - cov.faces_too_small;
   out(`## 1. Abdeckung`);
   out();
   table(
@@ -158,11 +192,19 @@ async function main() {
     [
       ["Gesichter gesamt", cov.faces_total],
       ["davon vermessen", `${cov.faces_measured} (${pct(cov.faces_measured, cov.faces_total)})`],
+      ["unter der Messgrenze (bleiben NULL)", cov.faces_too_small],
+      ["ohne bekannte Bildmaße (nicht einzuordnen)", cov.faces_unknown_size],
+      ["**noch nachzutragen**", `**${pending}**`],
+      [
+        "vermessen von den messbaren",
+        `${cov.faces_measured} / ${measurable} (${pct(cov.faces_measured, measurable)})`,
+      ],
+      ["davon mit Rohvarianz", cov.faces_with_variance],
     ],
   );
   out(
     `Nicht vermessene Gesichter sind entweder noch nicht nachgetragen oder ` +
-      `unter der Messgrenze (Kantenlänge < 10 px im Original) — beides ` +
+      `unter der Messgrenze (Kantenlänge < ${MIN_FACE_PIXELS} px im Original) — beides ` +
       `\`NULL\`, beides absichtlich kein 0.0.`,
   );
   out();
@@ -174,6 +216,64 @@ async function main() {
     );
     await finish(pool);
     return;
+  }
+
+  // ── 1b. Verteilung der Messwerte ────────────────────────────────────────
+  //
+  // Vor jeder Aussage über Streuung *zwischen* Fotos gehört geprüft, ob die
+  // Messung überhaupt noch unterscheidet. LAPLACIAN_FULL_SCALE ist am
+  // Frontend kalibriert, das die *gerenderte* (herunterskalierte) Datei misst;
+  // derselbe Ausschnitt aus dem Original trägt deutlich mehr Detail und kann
+  // an die 1.0-Decke stoßen. Sitzt dort ein großer Teil der Werte, ist ein
+  // σ von 0 keine Eigenschaft der Bilder, sondern der Skala.
+  const dist = await pool.query(
+    `
+    SELECT COUNT(*)::int AS n,
+           COUNT(*) FILTER (WHERE f.sharpness >= 0.999)::int AS at_ceiling,
+           COUNT(*) FILTER (WHERE f.sharpness <= 0.001)::int AS at_floor,
+           MIN(f.sharpness)::float AS s_min,
+           percentile_cont(0.25) WITHIN GROUP (ORDER BY f.sharpness)::float AS s_p25,
+           percentile_cont(0.50) WITHIN GROUP (ORDER BY f.sharpness)::float AS s_median,
+           percentile_cont(0.75) WITHIN GROUP (ORDER BY f.sharpness)::float AS s_p75,
+           MAX(f.sharpness)::float AS s_max,
+           percentile_cont(0.05) WITHIN GROUP (ORDER BY f.sharpness_variance)::float AS v_p05,
+           percentile_cont(0.50) WITHIN GROUP (ORDER BY f.sharpness_variance)::float AS v_median,
+           percentile_cont(0.95) WITHIN GROUP (ORDER BY f.sharpness_variance)::float AS v_p95,
+           MAX(f.sharpness_variance)::float AS v_max
+      FROM faces f
+      JOIN photos p ON p.id = f.photo_id
+     WHERE f.sharpness IS NOT NULL
+     ${ONLY_USER != null ? "AND p.user_id = $1" : ""}
+    `,
+    ONLY_USER != null ? [ONLY_USER] : [],
+  );
+  const d = dist.rows[0];
+  const ceilingShare = d.n > 0 ? d.at_ceiling / d.n : 0;
+  out(`## 1b. Verteilung der Messwerte`);
+  out();
+  table(
+    ["Größe", "Wert"],
+    [
+      ["vermessene Gesichter", d.n],
+      ["**an der Decke (≥ 0.999)**", `**${d.at_ceiling} (${pct(d.at_ceiling, d.n)})**`],
+      ["am Boden (≤ 0.001)", `${d.at_floor} (${pct(d.at_floor, d.n)})`],
+      ["Score min / p25 / Median / p75 / max",
+        [d.s_min, d.s_p25, d.s_median, d.s_p75, d.s_max].map((v) => num(v, 3)).join(" / ")],
+      ["Rohvarianz p05 / Median / p95 / max",
+        [d.v_p05, d.v_median, d.v_p95, d.v_max].map((v) => num(v, 1)).join(" / ")],
+    ],
+  );
+  if (ceilingShare >= 0.5) {
+    out(
+      `**Die Skala sättigt.** ${pct(d.at_ceiling, d.n)} der Gesichter liegen ` +
+        `am Maximum — der Score unterscheidet sie nicht mehr, und ein σ von 0 ` +
+        `innerhalb der Gruppe sagt in diesem Zustand nichts über die Bilder ` +
+        `aus. Die Rohvarianz oben zeigt, wo der Vollausschlag stattdessen ` +
+        `liegen müsste (Größenordnung des Medians); sie ist gespeichert, ` +
+        `eine Neuskalierung ist also ein \`UPDATE\` und kein zweiter ` +
+        `Messlauf. **V1 ist erst danach prüfbar.**`,
+    );
+    out();
   }
 
   // ── 2. Rohdaten je Gruppe ───────────────────────────────────────────────
@@ -423,8 +523,57 @@ async function main() {
   const flatWeighted = all.filter((a) => a.sigmaWeighted < FLAT).length;
   const v1Holds = medianWeighted > medianMin && flatWeighted < flatMin;
 
+  // Ein Urteil setzt voraus, dass überhaupt gemessen wurde. Zwei
+  // Abbruchgründe, beide aus eigener Erfahrung: ein unvollständiger Backfill
+  // (dann ist die auswertbare Menge eine winzige, nicht zufällige Teilmenge)
+  // und eine gesättigte Skala (dann ist σ = 0 eine Eigenschaft der
+  // Normalisierung, nicht der Bilder). In beiden Fällen wäre „V1 widerlegt"
+  // genau der Denkfehler, den Abschnitt 1 des Konzepts bereits einmal
+  // festhält: der Schluss aus einer Kennzahl auf eine Bedingung, die sie
+  // nicht trägt.
+  const coverageOk = pending === 0 || cov.faces_measured / Math.max(measurable, 1) >= 0.9;
+  const scaleOk = ceilingShare < 0.5;
+  const enoughGroups = analysed.length >= 30;
+
   out(`## 5. Urteil zu V1`);
   out();
+  if (!coverageOk || !scaleOk || !enoughGroups) {
+    out(`**Kein Urteil möglich.** Offen ist:`);
+    out();
+    if (!coverageOk) {
+      out(
+        `- **Der Backfill ist nicht durch.** ${pending} messbare ` +
+          `${pending === 1 ? "Gesicht ist" : "Gesichter sind"} noch nicht ` +
+          `vermessen (${pct(cov.faces_measured, measurable)} ` +
+          `erledigt). Auswertbar sind nur Gruppen, in denen *jedes* Foto ` +
+          `mindestens einen Messwert hat — das ist derzeit eine kleine und ` +
+          `keineswegs zufällige Teilmenge.`,
+      );
+    }
+    if (!scaleOk) {
+      out(
+        `- **Die Skala sättigt** (${pct(d.at_ceiling, d.n)} der Werte an der ` +
+          `1.0-Decke). Ein σ von 0 misst dann die Normalisierung, nicht die ` +
+          `Bilder. Vollausschlag anhand der gespeicherten Rohvarianz neu ` +
+          `setzen (Median ${num(d.v_median, 1)}), danach erneut messen.`,
+      );
+    }
+    if (!enoughGroups) {
+      out(
+        `- **Zu wenige auswertbare Gruppen** (${analysed.length}). Unter 30 ` +
+          `trägt der Vergleich nicht.`,
+      );
+    }
+    out();
+    out(
+      `Die Zahlen oben bleiben stehen, sind aber Diagnose des Messaufbaus, ` +
+        `nicht Befund über die Bilder. V1 gilt weder als bestätigt noch als ` +
+        `widerlegt.`,
+    );
+    out();
+    await finish(pool);
+    return;
+  }
   out(
     v1Holds
       ? `**V1 trifft zu.** Die prominenzgewichtete Aggregation streut ` +

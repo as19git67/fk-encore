@@ -235,6 +235,9 @@ export const faces = pgTable("faces", {
   // pending) or "too small to judge"; both must stay distinguishable from
   // a measured 0.0, which means "measured, and out of focus".
   sharpness: real("sharpness"),
+  // Raw Laplace variance behind `sharpness`, kept so the normalisation scale
+  // can be re-calibrated without re-reading every crop in the library.
+  sharpness_variance: real("sharpness_variance"),
   created_at: timestamp("created_at", { mode: "string" }).defaultNow(),
 });
 

@@ -147,9 +147,24 @@ describe("measureFaceSharpness", () => {
     });
     expect(sharpFace).not.toBeNull();
     expect(blurredFace).not.toBeNull();
-    expect(sharpFace!).toBeGreaterThan(blurredFace!);
-    expect(sharpFace!).toBeLessThanOrEqual(1);
-    expect(blurredFace!).toBeGreaterThanOrEqual(0);
+    expect(sharpFace!.variance).toBeGreaterThan(blurredFace!.variance);
+    expect(sharpFace!.score).toBeLessThanOrEqual(1);
+    expect(blurredFace!.score).toBeGreaterThanOrEqual(0);
+  });
+
+  it("keeps the raw variance alongside the normalised score", async () => {
+    const image = await loadGrayImage(filePath);
+    const measured = await measureFaceSharpness(image, {
+      x: 0.05,
+      y: 0.3,
+      width: 0.3,
+      height: 0.3,
+    });
+    expect(measured).not.toBeNull();
+    // The score is the variance run through the same normalisation — keeping
+    // the raw number is what makes re-calibrating the full scale an UPDATE
+    // instead of a second pass over every crop.
+    expect(measured!.score).toBeCloseTo(normalizeSharpness(measured!.variance), 10);
   });
 
   it("returns null — not 0 — for a face too small to judge", async () => {
@@ -239,10 +254,12 @@ describe("backfillFaceSharpnessLogic", () => {
     expect(result.next_photo_id).toBeNull();
 
     const rows = await db.select().from(faces).where(eq(faces.photo_id, photoId));
-    const scores = rows.map((r) => r.sharpness!).sort((a, b) => a - b);
-    expect(scores.every((s) => s != null)).toBe(true);
+    expect(rows.every((r) => r.sharpness != null && r.sharpness_variance != null)).toBe(true);
     // Sharp half above blurred half — the whole point of measuring per face.
-    expect(scores[1]).toBeGreaterThan(scores[0]);
+    // Compared on the raw variance: the normalised score saturates at 1.0 and
+    // would hide the difference on a crop this detailed.
+    const variances = rows.map((r) => r.sharpness_variance!).sort((a, b) => a - b);
+    expect(variances[1]).toBeGreaterThan(variances[0]);
   });
 
   it("leaves faces too small to judge at NULL and counts them separately", async () => {
@@ -258,6 +275,7 @@ describe("backfillFaceSharpnessLogic", () => {
 
     const rows = await db.select().from(faces).where(eq(faces.photo_id, photoId));
     expect(rows[0]!.sharpness).toBeNull();
+    expect(rows[0]!.sharpness_variance).toBeNull();
   });
 
   it("is idempotent — a second pass finds nothing left to measure", async () => {

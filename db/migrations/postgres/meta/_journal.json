@@ -1002,6 +1002,13 @@
       "when": 1785369600000,
       "tag": "0142_face_sharpness",
       "breakpoints": true
+    },
+    {
+      "idx": 143,
+      "version": "7",
+      "when": 1785456000000,
+      "tag": "0143_face_sharpness_variance",
+      "breakpoints": true
     }
   ]
 }
