@@ -468,11 +468,14 @@ export async function runClassify(documentId: number): Promise<{ classification:
       }
     }
   }
-  // 7b-2. Bank-/Broker-Abrechnung über Kapitalerträge: die ausgewiesene
-  //       Kirchensteuer (und die comdirect-Fußnote „… als Sonderausgabe …")
-  //       verleitet das Modell dazu, zusätzlich `sonderausgaben` und
-  //       `vorsorgeaufwand` zu vergeben. Solche Belege gehören ausschließlich
-  //       in die KAP-Sektionen.
+  // 7b-2. Bank-/Broker-Post über Kapitalerträge: eine EINZELNE Depotabrechnung
+  //       (Dividendengutschrift, „Steuerliche Behandlung: …", Wertpapier-
+  //       abrechnung, Vorabpauschale) ist kein Steuerbeleg — die Bank fasst
+  //       alles in der Jahressteuerbescheinigung zusammen. Nur diese Jahres-
+  //       bescheinigung bleibt steuerrelevant, und zwar ausschließlich in den
+  //       KAP-Sektionen (die ausgewiesene Kirchensteuer und die comdirect-
+  //       Fußnote „… als Sonderausgabe …" verleiten das Modell sonst zu
+  //       `sonderausgaben`/`vorsorgeaufwand`).
   {
     const adjusted = applySecuritiesSettlementTaxRule({
       text: clipped,

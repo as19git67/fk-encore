@@ -39,7 +39,7 @@ export const TAX_SECTIONS: readonly TaxSection[] = [
     slug: "anlage-kap",
     group: "einkuenfte",
     name: "Anlage KAP — Kapitalerträge",
-    hint: "Jahressteuerbescheinigung/Erträgnisaufstellung von Bank oder Broker (ING, DKB, Comdirect, Trade Republic, Scalable), Dividendengutschrift, Zins-/Dividenden-/Verlustbescheinigungen, Wertpapierabrechnungen (Kauf/Verkauf), Erträgnisaufstellungen. Auch Dokumente, die Kapitalertragsteuer (KESt), Solidaritätszuschlag oder Kirchensteuer im Kontext von Wertpapieren/Dividenden/Bank ausweisen, gehören hierher. NICHT in Anlage N.",
+    hint: "Jahresbelege von Bank oder Broker (ING, DKB, Comdirect, Trade Republic, Scalable): Jahressteuerbescheinigung, Steuerbescheinigung, Erträgnisaufstellung, Verlustbescheinigung. Auch Dokumente, die Kapitalertragsteuer (KESt), Solidaritätszuschlag oder Kirchensteuer im Kontext von Wertpapieren/Dividenden/Bank ausweisen, gehören hierher und NICHT in Anlage N. NICHT: einzelne Depotabrechnungen (Dividendengutschrift, Steuerliche Behandlung einer Dividende, Wertpapierabrechnung, Vorabpauschale) — deren Werte stehen gesammelt in der Jahressteuerbescheinigung, sie sind nicht steuerrelevant.",
   },
   {
     slug: "anlage-v",
