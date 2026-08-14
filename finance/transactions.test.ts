@@ -11,6 +11,7 @@ import {
   financeTag,
   financeTagTransaction,
   financeTransaction,
+  financeTransactionSplit,
   users,
 } from "../db/schema";
 import {
@@ -324,6 +325,32 @@ describe("finance/transactions — list (ACL filter)", () => {
       to: "2024-08-31",
     });
     expect(july.total).toBe(2);
+  });
+
+  it("filters by tax relevance across bookings and their splits", async () => {
+    const { a } = await createAccounts();
+    const flagged = await insertTx(a, { counterparty: "Flagged", is_tax_relevant: true });
+    const viaSplit = await insertTx(a, { counterparty: "ViaSplit", amount: "-45.00" });
+    const plain = await insertTx(a, { counterparty: "Plain" });
+    await db.insert(financeTransactionSplit).values([
+      { transaction_id: viaSplit, amount: "-30.00", tags: [], is_tax_relevant: true },
+      { transaction_id: viaSplit, amount: "-15.00", tags: [], is_tax_relevant: false },
+    ]);
+
+    setAuth("7", ["finance.view"]);
+    await grant(a, 7, "read");
+
+    const relevant = await listTransactions({ taxRelevant: true });
+    expect(relevant.items.map((i) => i.counterparty).sort()).toEqual(["Flagged", "ViaSplit"]);
+    expect(relevant.items.find((i) => i.id === viaSplit)?.has_tax_relevant_split).toBe(true);
+    expect(relevant.items.find((i) => i.id === flagged)?.has_tax_relevant_split).toBe(false);
+
+    const notRelevant = await listTransactions({ taxRelevant: false });
+    expect(notRelevant.items.map((i) => i.counterparty)).toEqual(["Plain"]);
+
+    // Omitting the filter leaves the result set untouched.
+    expect((await listTransactions({})).total).toBe(3);
+    expect(plain).toBeGreaterThan(0);
   });
 
   it("annotates each transaction with its tags", async () => {

@@ -10,7 +10,7 @@ Basket ist die temporäre Auswahl von Transaktionen in der Finance-UI.
 ## UI-Verhalten
 
 Die Basket-Aktionen werden im Drawer `TxBasketIndicator` angeboten. Aktionen,
-die vor dem Anzeigen Daten laden (`Baskets`, `Split`), öffnen ihren
+die vor dem Anzeigen Daten laden (`Baskets`), öffnen ihren
 Dialog sofort und laden Inhalte anschließend nach. Fehler werden im jeweiligen
 Dialog angezeigt, damit ein Klick nicht „tot“ wirkt.
 
@@ -41,7 +41,9 @@ Modus im `applied`-Event mit), statt die Buchungen erneut zu laden.
 
 ## Split
 
-`Split` teilt eine einzelne Bankbuchung logisch in mehrere Teile auf.
+`Split` teilt eine einzelne Bankbuchung logisch in mehrere Teile auf. Die
+Aktion sitzt in der Transaktions-Detailansicht (`SplitTransactionDialog`),
+nicht mehr im Basket: eine Aufteilung betrifft immer genau eine Buchung.
 
 Die Originalbuchung bleibt unverändert in `finance_transaction`. Die
 Aufteilung wird als Overlay in `finance_transaction_split` gespeichert:
@@ -69,6 +71,34 @@ Die älteren typed Endpunkte bleiben backendseitig kompatibel:
 Das Frontend verwendet die raw JSON-Endpunkte mit statischem Pfad, analog zu
 den Basket-Snapshot-Endpunkten. Dadurch vermeiden wir Browser-/Runtime-Probleme
 mit Path-Param-Pattern-Decoding und typed API Encoding.
+
+Beträge werden im Dialog ohne Vorzeichen eingegeben; das Vorzeichen der
+Ausgangsbuchung wird beim Speichern angewendet. Dezimal- und Tausendertrenner
+folgen der UI-Locale (`utils/financeSplit.ts`).
+
+---
+
+## Steuerrelevanz
+
+Es gibt zwei unabhängige Flags:
+
+- `finance_transaction.is_tax_relevant` — die Buchung als Ganzes. Setzbar
+  über die Basket-Aktion `Steuerrelevant`
+  (`POST /finance/transactions/batch-tax-relevant`) oder einzeln über den
+  Schalter in der Detailansicht, der denselben Endpunkt mit einer ID aufruft.
+- `finance_transaction_split.is_tax_relevant` — pro Teilbetrag, gesetzt im
+  Split-Dialog.
+
+`GET /finance/transactions` filtert über `taxRelevant`:
+
+- `taxRelevant=true` → Buchungen, die selbst markiert sind **oder**
+  mindestens einen markierten Teilbetrag haben
+- `taxRelevant=false` → Buchungen, auf die beides nicht zutrifft
+- weggelassen → kein Filter
+
+Damit die gefilterte Liste erkennbar bleibt, liefert jede Buchung zusätzlich
+`has_tax_relevant_split`; die Liste zeigt entsprechend „Steuerrelevant“ bzw.
+„Teilbetrag steuerrelevant“ an.
 
 ---
 

@@ -24,7 +24,7 @@ import { createHash } from "node:crypto";
 import { createTransactionReportPdf } from "./pdf-report";
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
-import { and, desc, eq, gte, inArray, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte, not, or, sql } from "drizzle-orm";
 
 import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
@@ -38,6 +38,7 @@ import {
   financeTagTransaction,
   financeTransaction,
   financeTransactionDocument,
+  financeTransactionSplit,
 } from "../db/schema";
 import { enqueueTagSuggestion } from "./tag-queue";
 import { triggerTagWorker } from "./tag-worker";
@@ -190,6 +191,12 @@ interface TransactionView {
   notice: string | null;
   reviewed_at: string | null;
   is_tax_relevant: boolean;
+  /**
+   * True when at least one split of this transaction carries the
+   * tax-relevant flag. The booking itself can stay unflagged in that
+   * case — both are shown, and both are matched by `taxRelevant`.
+   */
+  has_tax_relevant_split: boolean;
   tags: TagOnTransaction[];
   created_at: string | null;
 }
@@ -224,6 +231,41 @@ async function annotateTags(
 }
 
 /**
+ * Ids (out of the given set) that own at least one tax-relevant split.
+ * One extra query per page, mirroring how tags are annotated.
+ */
+async function annotateTaxRelevantSplits(
+  transactionIds: number[],
+): Promise<Set<number>> {
+  if (transactionIds.length === 0) return new Set();
+  const rows = await db
+    .selectDistinct({ id: financeTransactionSplit.transaction_id })
+    .from(financeTransactionSplit)
+    .where(
+      and(
+        inArray(financeTransactionSplit.transaction_id, transactionIds),
+        eq(financeTransactionSplit.is_tax_relevant, true),
+      ),
+    );
+  return new Set(rows.map((r) => r.id));
+}
+
+/**
+ * Matches transactions that are tax-relevant themselves or have at
+ * least one tax-relevant split.
+ */
+function taxRelevantCondition() {
+  const flaggedSplits = db
+    .select({ id: financeTransactionSplit.transaction_id })
+    .from(financeTransactionSplit)
+    .where(eq(financeTransactionSplit.is_tax_relevant, true));
+  return or(
+    eq(financeTransaction.is_tax_relevant, true),
+    inArray(financeTransaction.id, flaggedSplits),
+  )!;
+}
+
+/**
  * Normalises Postgres timestamp string ('YYYY-MM-DD HH:MM:SS') to an
  * ISO date when the time component is zero, leaving ISO-formatted
  * inputs untouched. booking_date is conceptually a date for bank
@@ -238,6 +280,7 @@ function toDateString(s: string | null): string | null {
 function toView(
   row: typeof financeTransaction.$inferSelect,
   tags: TagOnTransaction[],
+  hasTaxRelevantSplit = false,
 ): TransactionView {
   return {
     id: row.id,
@@ -267,6 +310,7 @@ function toView(
     notice: row.notice,
     reviewed_at: row.reviewed_at,
     is_tax_relevant: row.is_tax_relevant,
+    has_tax_relevant_split: hasTaxRelevantSplit,
     tags,
     created_at: row.created_at,
   };
@@ -297,6 +341,12 @@ interface ListParams {
    * least one of its tags (any source) has a name in the set.
    */
   tagsCsv?: string;
+  /**
+   * Tax-relevance filter. `true` keeps transactions flagged themselves
+   * plus those with at least one tax-relevant split; `false` keeps only
+   * transactions where neither applies. Omitted means "don't filter".
+   */
+  taxRelevant?: boolean;
   from?: string; // ISO date
   to?: string;
   limit?: number;
@@ -342,6 +392,10 @@ export const listTransactions = api(
         visibleIds === null ? ids : ids.filter((n) => visibleIds.includes(n));
       if (allowed.length === 0) return { items: [], total: 0 };
       conds.push(inArray(financeTransaction.account_id, allowed));
+    }
+    if (p.taxRelevant !== undefined) {
+      const flagged = taxRelevantCondition();
+      conds.push(p.taxRelevant ? flagged : not(flagged));
     }
     if (p.from) conds.push(gte(financeTransaction.booking_date, p.from));
     if (p.to) conds.push(lte(financeTransaction.booking_date, p.to));
@@ -416,8 +470,9 @@ export const listTransactions = api(
 
     const txIds = rows.map((r) => r.id);
     const tagsByTx = await annotateTags(txIds);
+    const taxSplitIds = await annotateTaxRelevantSplits(txIds);
     return {
-      items: rows.map((r) => toView(r, tagsByTx.get(r.id) ?? [])),
+      items: rows.map((r) => toView(r, tagsByTx.get(r.id) ?? [], taxSplitIds.has(r.id))),
       total: totalRows.length,
     };
   },
@@ -449,7 +504,8 @@ export const getTransaction = api(
       throw APIError.notFound(`transaction ${id} not found`);
     }
     const tags = (await annotateTags([id])).get(id) ?? [];
-    return toView(row, tags);
+    const taxSplitIds = await annotateTaxRelevantSplits([id]);
+    return toView(row, tags, taxSplitIds.has(id));
   },
 );
 
@@ -646,7 +702,7 @@ export const updateTransaction = api(
 
     if (Object.keys(updates).length === 0) {
       const tags = (await annotateTags([p.id])).get(p.id) ?? [];
-      return toView(row, tags);
+      return toView(row, tags, (await annotateTaxRelevantSplits([p.id])).has(p.id));
     }
 
     const [updated] = await db
@@ -660,7 +716,7 @@ export const updateTransaction = api(
     await clearAiTagsForTransaction(p.id);
 
     const tags = (await annotateTags([p.id])).get(p.id) ?? [];
-    return toView(updated, tags);
+    return toView(updated, tags, (await annotateTaxRelevantSplits([p.id])).has(p.id));
   },
 );
 
