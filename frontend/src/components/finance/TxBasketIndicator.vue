@@ -2,7 +2,6 @@
 import { computed, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
-import InputNumber from 'primevue/inputnumber'
 import Select from 'primevue/select'
 import Drawer from 'primevue/drawer'
 import Dialog from 'primevue/dialog'
@@ -11,11 +10,9 @@ import Checkbox from 'primevue/checkbox'
 import { useConfirm } from 'primevue/useconfirm'
 import { useTxSelectionStore } from '../../stores/finance/selection'
 import { useTransactionsStore } from '../../stores/finance/transactions'
-import { useTagsStore } from '../../stores/finance/tags'
-import { batchReview, batchTaxRelevant, deleteBasketSnapshot, downloadTransactionsCsv, downloadTransactionsPdf, getTransaction, getTransactionSplits, listBasketSnapshots, loadBasketSnapshot, mergeCounterparties, saveBasketSnapshot, setTransactionSplits, suggestDocumentsForTransactions, decideDocumentMatch, getDocumentMatchMetrics, linkDocumentsToTransactions, type BasketSnapshot, type DocumentMatchSuggestion, type Transaction, type TransactionPdfExportOptions } from '../../api/finance'
+import { batchReview, batchTaxRelevant, deleteBasketSnapshot, downloadTransactionsCsv, downloadTransactionsPdf, getTransaction, listBasketSnapshots, loadBasketSnapshot, mergeCounterparties, saveBasketSnapshot, suggestDocumentsForTransactions, decideDocumentMatch, getDocumentMatchMetrics, linkDocumentsToTransactions, type BasketSnapshot, type DocumentMatchSuggestion, type Transaction, type TransactionPdfExportOptions } from '../../api/finance'
 import BatchTagDialog from './BatchTagDialog.vue'
 import BatchNoticeDialog from './BatchNoticeDialog.vue'
-import TagAutoComplete from './TagAutoComplete.vue'
 import { searchDocuments, type DocumentSummary } from '../../api/documents'
 import { basketTags, basketCounterparties, basketMonths, hasMixedCurrencies, type BasketAggregate } from '../../utils/financeBasketAnalysis'
 import { detectRecurringSelection } from '../../utils/financeRecurringSelection'
@@ -32,7 +29,6 @@ import { compareBasketCounterparties } from '../../utils/financeBasketCompare'
 
 const selectionStore = useTxSelectionStore()
 const txStore = useTransactionsStore()
-const tagsStore = useTagsStore()
 const confirm = useConfirm()
 const drawerVisible = ref(false)
 const tagDialogVisible = ref(false)
@@ -65,11 +61,6 @@ const compareA = ref<number | null>(null)
 const compareB = ref<number | null>(null)
 const comparisonRows = ref<Array<{ label: string; a: number; b: number }>>([])
 const comparisonCurrencyMismatch = ref(false)
-const splitDialogVisible = ref(false)
-const splitLoading = ref(false)
-const splitError = ref<string | null>(null)
-const editingExistingSplit = ref(false)
-const splitRows = ref<Array<{ amount: number; tags: string[]; notice: string; is_tax_relevant: boolean }>>([])
 const pdfDialogVisible = ref(false)
 const pdfTitle = ref('Transaktionsübersicht')
 const pdfExportOptions = ref<TransactionPdfExportOptions>({
@@ -393,56 +384,6 @@ async function compareSnapshots() {
   comparisonRows.value = comparison.rows
 }
 
-async function openSplit() {
-  const amount = Number(items.value[0]?.amount ?? 0)
-  const transactionId = items.value[0]?.id
-  splitError.value = null
-  if (tagsStore.items.length === 0) {
-    void tagsStore.refresh('user').catch(() => {})
-  }
-  editingExistingSplit.value = false
-  const first = Math.round(amount * 50) / 100
-  splitRows.value = [
-    { amount: first, tags: [], notice: '', is_tax_relevant: false },
-    { amount: Math.round((amount - first) * 100) / 100, tags: [], notice: '', is_tax_relevant: false },
-  ]
-  splitDialogVisible.value = true
-
-  if (transactionId) {
-    splitLoading.value = true
-    try {
-      const existing = await getTransactionSplits(transactionId)
-      if (existing.items.length) {
-        editingExistingSplit.value = true
-        splitRows.value = existing.items.map(row => ({
-          amount: Number(row.amount),
-          tags: [...row.tags],
-          notice: row.notice ?? '',
-          is_tax_relevant: !!row.is_tax_relevant,
-        }))
-      }
-    } catch (err) {
-      splitError.value = errorMessage(err)
-    } finally {
-      splitLoading.value = false
-    }
-  }
-}
-
-const splitDifference = computed(() => Number(items.value[0]?.amount ?? 0) - splitRows.value.reduce((sum, row) => sum + Number(row.amount || 0), 0))
-async function saveSplit() {
-  const tx = items.value[0]
-  if (!tx || Math.abs(splitDifference.value) >= 0.005) return
-  const rows = splitRows.value.map(row => ({
-    ...row,
-    tags: row.tags.map(tag => tag.trim()).filter(Boolean),
-  }))
-  await setTransactionSplits(tx.id, rows)
-  tagsStore.addLocal(rows.flatMap(row => row.tags))
-  splitDialogVisible.value = false
-  actionInfo.value = 'Split-Buchung gespeichert.'
-}
-
 </script>
 
 <template>
@@ -583,7 +524,6 @@ async function saveSplit() {
             />
             <Button label="Steuerrelevant" icon="pi pi-percentage" size="small" severity="secondary" outlined :loading="batchBusy" @click="toggleTaxRelevant" />
             <Button label="Gegenseite" icon="pi pi-users" size="small" severity="secondary" outlined :disabled="count === 0" @click="openCounterpartyMerge" />
-            <Button label="Split" icon="pi pi-sitemap" size="small" severity="secondary" outlined :disabled="count !== 1" :loading="splitLoading" @click="openSplit" />
             <Button label="Baskets" icon="pi pi-save" size="small" severity="secondary" outlined :loading="snapshotLoading" @click="openSnapshots" />
             <Button
               label="Tags"
@@ -666,23 +606,6 @@ async function saveSplit() {
       <Message v-if="comparisonCurrencyMismatch" severity="warn" :closable="false">Die Baskets enthalten unterschiedliche Währungen; es wird keine irreführende Gesamtsumme gebildet.</Message>
       <ul class="basket-analysis-list"><li v-for="row in comparisonRows" :key="row.label" class="basket-analysis-row"><span>{{ row.label }}</span><span>{{ formatAnalysisAmount(row.a) }} → {{ formatAnalysisAmount(row.b) }} (Δ {{ formatAnalysisAmount(row.b - row.a) }})</span></li></ul>
     </Dialog>
-    <Dialog v-model:visible="splitDialogVisible" header="Buchung aufteilen" modal :style="{ width: 'min(42rem, calc(100vw - 2rem))' }">
-      <div class="counterparty-form">
-        <Message v-if="splitLoading" severity="info" :closable="false">Vorhandene Split-Aufteilung wird geladen…</Message>
-        <Message v-if="splitError" severity="warn" :closable="false">Vorhandene Split-Aufteilung konnte nicht geladen werden: {{ splitError }}</Message>
-        <Message v-if="editingExistingSplit" severity="info" :closable="false">Diese Buchung besitzt bereits einen Split. Speichern ersetzt die bestehende Aufteilung vollständig.</Message>
-        <div v-for="(row, index) in splitRows" :key="index" class="split-row">
-          <InputNumber v-model="row.amount" mode="currency" :currency="items[0]?.currency_code ?? 'EUR'" locale="de-DE" />
-          <TagAutoComplete v-model="row.tags" placeholder="Tags" />
-          <InputText v-model="row.notice" placeholder="Notiz" />
-          <label class="split-tax"><Checkbox v-model="row.is_tax_relevant" binary /> Steuerrelevant</label>
-          <Button v-if="splitRows.length > 2" icon="pi pi-trash" text severity="danger" @click="splitRows.splice(index, 1)" />
-        </div>
-        <Button label="Teil hinzufügen" icon="pi pi-plus" text @click="splitRows.push({ amount: 0, tags: [], notice: '', is_tax_relevant: false })" />
-        <Message :severity="Math.abs(splitDifference) < .005 ? 'success' : 'warn'" :closable="false">Differenz: {{ formatAnalysisAmount(splitDifference) }}</Message>
-      </div>
-      <template #footer><Button label="Abbrechen" text @click="splitDialogVisible = false" /><Button label="Speichern" :disabled="Math.abs(splitDifference) >= .005" @click="saveSplit" /></template>
-    </Dialog>
     <Dialog v-model:visible="pdfDialogVisible" header="PDF exportieren" modal :style="{ width: 'min(32rem, calc(100vw - 2rem))' }">
       <div class="counterparty-form">
         <label>
@@ -764,10 +687,6 @@ async function saveSplit() {
   align-items: center;
   gap: .5rem;
   font-weight: 500;
-}
-.split-row { display: grid; grid-template-columns: minmax(8rem, .7fr) minmax(9rem, 1fr) minmax(9rem, 1fr) auto; gap: .5rem; align-items: center; }
-@media (max-width: 620px) {
-  .split-row { grid-template-columns: 1fr; }
 }
 
 .basket-match-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .5rem; margin-bottom: .5rem; }
