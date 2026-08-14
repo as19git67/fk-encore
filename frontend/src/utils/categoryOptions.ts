@@ -50,7 +50,9 @@ export function buildCategoryOptions(categories: readonly CategoryNode[]): SlugO
       opts.push({
         label: depth === 0 ? cat.name : `${'— '.repeat(depth)}${cat.name}`,
         slug: cat.slug,
-        search: path.join(' ').toLowerCase(),
+        // The slug joins the path so "landwirtschaft" also matches a child
+        // whose display name never repeats the parent's wording.
+        search: `${path.join(' ')} ${cat.slug.replace(/-/g, ' ')}`.toLowerCase(),
       })
       walk(cat.id, depth + 1, path)
     }
@@ -61,7 +63,11 @@ export function buildCategoryOptions(categories: readonly CategoryNode[]): SlugO
   // would be invisible otherwise — append them flat rather than lose them.
   for (const cat of categories.filter((c) => !seen.has(c.id)).slice().sort(byName)) {
     seen.add(cat.id)
-    opts.push({ label: cat.name, slug: cat.slug, search: cat.name.toLowerCase() })
+    opts.push({
+      label: cat.name,
+      slug: cat.slug,
+      search: `${cat.name} ${cat.slug.replace(/-/g, ' ')}`.toLowerCase(),
+    })
   }
 
   return opts

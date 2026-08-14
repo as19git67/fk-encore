@@ -69,6 +69,19 @@ describe('filterOptions', () => {
     ])
   })
 
+  it('matches via the slug when the child name does not repeat the parent', () => {
+    // "Versicherungen" exists under several areas; the slug carries the
+    // area, so an area term still narrows correctly.
+    const withInsurance = buildCategoryOptions([
+      ...CATEGORIES,
+      { id: 7, slug: 'landwirtschaft-versicherung', name: 'Versicherungen', parent_id: 4 },
+      { id: 8, slug: 'wohnen-versicherung', name: 'Versicherungen', parent_id: 1 },
+    ])
+    expect(filterOptions(withInsurance, 'landwirtschaft versicherung').map((o) => o.slug)).toEqual([
+      'landwirtschaft-versicherung',
+    ])
+  })
+
   it('returns the full list for an empty query', () => {
     expect(filterOptions(options, '   ')).toHaveLength(options.length)
   })
