@@ -460,6 +460,18 @@ export const MOCK_DOCUMENT_CATEGORIES: DocumentCategory[] = [
   { id: 4, slug: 'behoerden',       name: 'Behörden',        parent_id: null, icon: 'pi pi-building',    sort_order: 4 },
   { id: 5, slug: 'vertraege',       name: 'Verträge',        parent_id: null, icon: 'pi pi-file-edit',   sort_order: 5 },
   { id: 6, slug: 'medizin',         name: 'Medizin',         parent_id: null, icon: 'pi pi-heart',       sort_order: 6 },
+  // Deeper branches: the real taxonomy is three levels in places, and the
+  // category typeahead has to offer every level (and reveal a parent's
+  // children when the parent name is typed).
+  { id: 7, slug: 'landwirtschaft',                name: 'Landwirtschaft (verpachtet)', parent_id: null, icon: 'pi pi-warehouse', sort_order: 7 },
+  { id: 8, slug: 'landwirtschaft-pacht',          name: 'Pacht & Verträge',            parent_id: 7,    icon: null,              sort_order: 1 },
+  { id: 9, slug: 'landwirtschaft-versicherung',   name: 'Versicherungen',              parent_id: 7,    icon: null,              sort_order: 2 },
+  { id: 10, slug: 'landwirtschaft-instandhaltung', name: 'Instandhaltung & Reparatur', parent_id: 7,    icon: null,              sort_order: 3 },
+  { id: 11, slug: 'landwirtschaft-steuer',        name: 'Steuer & Buchhaltung',        parent_id: 7,    icon: null,              sort_order: 4 },
+  { id: 12, slug: 'wohnen',                       name: 'Wohnen',                      parent_id: null, icon: 'pi pi-home',      sort_order: 8 },
+  { id: 13, slug: 'wohnen-haus',                  name: 'Haus & Grund',                parent_id: 12,   icon: null,              sort_order: 1 },
+  { id: 14, slug: 'wohnen-haus-grundsteuer',      name: 'Grundsteuer',                 parent_id: 13,   icon: null,              sort_order: 1 },
+  { id: 15, slug: 'wohnen-haus-instandhaltung',   name: 'Instandhaltung / Handwerker', parent_id: 13,   icon: null,              sort_order: 2 },
 ]
 
 export const MOCK_DOCUMENTS: DocumentSummary[] = [

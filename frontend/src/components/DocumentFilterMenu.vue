@@ -10,8 +10,9 @@ import DateRangePresets from './DateRangePresets.vue'
 import { toLocalIsoDate, parseLocalDate } from '../utils/dateFormat'
 import type { DocumentFilter } from '../composables/useDocumentFilter'
 import type { DocumentCategory, SubjectPerson } from '../api/documents'
+import { buildCategoryOptions, filterOptions, type SlugOption } from '../utils/categoryOptions'
 
-interface CatOption { label: string; slug: string }
+type CatOption = SlugOption
 
 const props = defineProps<{
   visible: boolean
@@ -56,12 +57,9 @@ watch([dateFrom, dateTo], ([from, to]) => {
 
 // ── Category AutoComplete ──────────────────────────────────────────────────
 
-const allCatOptions = computed<CatOption[]>(() =>
-  props.categories.map((c) => ({
-    label: (c.parent_id == null ? '' : '— ') + c.name,
-    slug: c.slug,
-  })),
-)
+// Same option list as the document detail view: every taxonomy level, and a
+// parent name in the query also offers that parent's subcategories.
+const allCatOptions = computed<CatOption[]>(() => buildCategoryOptions(props.categories))
 
 const categorySuggestions = ref<CatOption[]>([])
 const selectedCategory = ref<CatOption | null>(null)
@@ -75,10 +73,7 @@ function syncCategorySelection() {
 syncCategorySelection()
 
 function searchCategories(event: { query: string }) {
-  const q = event.query.toLowerCase()
-  categorySuggestions.value = q
-    ? allCatOptions.value.filter((o) => o.label.toLowerCase().includes(q))
-    : allCatOptions.value
+  categorySuggestions.value = filterOptions(allCatOptions.value, event.query)
 }
 
 watch(selectedCategory, (v) => {
