@@ -122,6 +122,14 @@ WICHTIGE ABGRENZUNGSREGELN:
   ausweisen (z. B. Steueraufstellung von Comdirect, ING, Trade Republic)
   → „anlage-kap". Diese Steuerabzüge beziehen sich auf Kapitalerträge,
   nicht auf Arbeitseinkommen.
+- Solche Bank-/Broker-Belege gehören AUSSCHLIESSLICH zu „anlage-kap" und
+  bekommen KEINE weiteren Abzugs-Sektionen. Die dort einbehaltene
+  Kirchensteuer ist bereits im Steuerabzug verrechnet; auch der übliche
+  Fußnoten-Hinweis „Durch die Berücksichtigung der Kirchensteuer als
+  Sonderausgabe reduziert sich der Kapitalertragsteuersatz …" macht den Beleg
+  NICHT zu einem Sonderausgaben-Nachweis. Ebenso wenig gehören
+  „vorsorgeaufwand" oder „anlage-av" dazu — eine Depotabrechnung enthält keine
+  Vorsorgeaufwendungen.
 - Anlage N ist ausschließlich für Arbeitseinkommen (Gehalt,
   Lohnsteuerbescheinigung vom Arbeitgeber).
 - MONATLICHE Gehalts-/Entgeltabrechnungen sind NICHT steuerrelevant

@@ -76,6 +76,7 @@ import {
   applyKirchensteuerBescheidYearTaxRule,
   applyInsuranceAdminTaxRule,
   applyKindergeldTaxRule,
+  applySecuritiesSettlementTaxRule,
 } from "./tax-rules";
 import {
   buildUmlautRestorationMap,
@@ -466,6 +467,27 @@ export async function runClassify(documentId: number): Promise<{ classification:
         classification.tax_year_confidence = 0.9;
       }
     }
+  }
+  // 7b-2. Bank-/Broker-Abrechnung über Kapitalerträge: die ausgewiesene
+  //       Kirchensteuer (und die comdirect-Fußnote „… als Sonderausgabe …")
+  //       verleitet das Modell dazu, zusätzlich `sonderausgaben` und
+  //       `vorsorgeaufwand` zu vergeben. Solche Belege gehören ausschließlich
+  //       in die KAP-Sektionen.
+  {
+    const adjusted = applySecuritiesSettlementTaxRule({
+      text: clipped,
+      taxSections: classification.tax_sections,
+      taxRelevant: classification.tax_relevant,
+    });
+    if (adjusted.matched) {
+      console.log(
+        `[documents] securities settlement tax rule(${documentId}): ` +
+          `${classification.tax_sections.map((s) => s.slug).join(",") || "-"} → ` +
+          `${adjusted.taxSections.map((s) => s.slug).join(",")}`,
+      );
+    }
+    classification.tax_sections = adjusted.taxSections;
+    classification.tax_relevant = adjusted.taxRelevant;
   }
   {
     const adjusted = applyAgricultureFiscalYearTaxRule({
