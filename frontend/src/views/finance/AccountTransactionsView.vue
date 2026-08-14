@@ -185,6 +185,16 @@ const formQuery = computed({ get: () => filtersStore.formQuery, set: (v) => { fi
 const formTags = computed({ get: () => filtersStore.formTags, set: (v) => { filtersStore.formTags = v } })
 const formFrom = computed({ get: () => filtersStore.formFrom, set: (v) => { filtersStore.formFrom = v } })
 const formTo = computed({ get: () => filtersStore.formTo, set: (v) => { filtersStore.formTo = v } })
+const formTaxRelevant = computed({
+  get: () => filtersStore.formTaxRelevant,
+  set: (v) => { filtersStore.formTaxRelevant = v },
+})
+
+const taxRelevantOptions = [
+  { label: 'Steuer: alle', value: null },
+  { label: 'Nur steuerrelevante', value: true },
+  { label: 'Nur nicht steuerrelevante', value: false },
+]
 
 const hasActiveFilters = computed(() => filtersStore.hasActiveFilters)
 
@@ -215,6 +225,7 @@ function buildQuery(): ListTransactionsQuery {
   }
   if (filtersStore.appliedQuery.trim().length > 0) base.q = filtersStore.appliedQuery.trim()
   if (filtersStore.appliedTags.length > 0) base.tags = filtersStore.appliedTags
+  if (filtersStore.appliedTaxRelevant !== null) base.taxRelevant = filtersStore.appliedTaxRelevant
   if (filtersStore.appliedFrom) base.from = isoDate(filtersStore.appliedFrom)
   if (filtersStore.appliedTo) base.to = isoDate(filtersStore.appliedTo)
   return base
@@ -1314,6 +1325,15 @@ function goBack() {
           display="chip"
           class="tx-filter-input"
         />
+        <Select
+          v-model="formTaxRelevant"
+          :options="taxRelevantOptions"
+          option-label="label"
+          option-value="value"
+          placeholder="Steuer: alle"
+          aria-label="Steuerrelevanz filtern"
+          class="tx-filter-input"
+        />
         <DateRangePresets
           v-model:from="formFrom"
           v-model:to="formTo"
@@ -1329,7 +1349,7 @@ function goBack() {
           icon="pi pi-times"
           severity="secondary"
           aria-label="Filter zurücksetzen"
-          :disabled="!hasActiveFilters && formQuery.length === 0 && formTags.length === 0 && !formFrom && !formTo"
+          :disabled="!hasActiveFilters && formQuery.length === 0 && formTags.length === 0 && !formFrom && !formTo && formTaxRelevant === null"
           @click="clearFilters"
         />
       </div>
@@ -1787,6 +1807,10 @@ function goBack() {
                 <i class="pi pi-file-edit" />
                 {{ tx.notice }}
               </div>
+              <div v-if="tx.is_tax_relevant || tx.has_tax_relevant_split" class="tx-tax-flag">
+                <i class="pi pi-percentage" />
+                {{ tx.is_tax_relevant ? 'Steuerrelevant' : 'Teilbetrag steuerrelevant' }}
+              </div>
               <div v-if="tx.tags.length > 0" class="tx-tags">
                 <span
                   v-for="t in tx.tags"
@@ -2081,6 +2105,13 @@ function goBack() {
   font-size: 0.85rem;
   font-style: italic;
   word-break: break-word;
+}
+.tx-tax-flag {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  color: var(--p-text-muted-color);
+  font-size: 0.85rem;
 }
 .tx-tags {
   display: flex;

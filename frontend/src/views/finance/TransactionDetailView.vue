@@ -3,11 +3,13 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Tag from 'primevue/tag'
+import Checkbox from 'primevue/checkbox'
 import Message from 'primevue/message'
 import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import DatePicker from 'primevue/datepicker'
 import TagAutoComplete from '../../components/finance/TagAutoComplete.vue'
+import SplitTransactionDialog from '../../components/finance/SplitTransactionDialog.vue'
 import Textarea from 'primevue/textarea'
 import Dialog from 'primevue/dialog'
 import DocumentThumbnail from '../../components/DocumentThumbnail.vue'
@@ -53,9 +55,49 @@ const documentLinkingId = ref<number | null>(null)
 const documentDecisionId = ref<number | null>(null)
 const expandedDocumentPreviews = ref<Set<number>>(new Set())
 const transactionSplits = ref<api.TransactionSplit[]>([])
+const splitDialogVisible = ref(false)
+const taxSaving = ref(false)
 const receiptInput = ref<HTMLInputElement | null>(null)
 const receiptUploading = ref(false)
 const receiptStatus = ref<string | null>(null)
+
+/**
+ * Splitting concerns exactly one booking, so it lives here rather than in
+ * the basket, which acts on many bookings at once.
+ */
+function openSplitDialog() {
+  if (!tx.value) return
+  error.value = null
+  splitDialogVisible.value = true
+}
+
+function onSplitSaved(splits: api.TransactionSplit[]) {
+  transactionSplits.value = splits
+}
+
+const taxRelevantSplitCount = computed(
+  () => transactionSplits.value.filter(split => split.is_tax_relevant).length,
+)
+
+/**
+ * Flag on the booking itself. Splits carry their own flag; both are
+ * matched by the "steuerrelevant" filter in the transaction list.
+ */
+async function setTaxRelevant(value: boolean) {
+  const current = tx.value
+  if (!current || taxSaving.value) return
+  taxSaving.value = true
+  error.value = null
+  try {
+    await api.batchTaxRelevant([current.id], value)
+    tx.value = { ...current, is_tax_relevant: value }
+    txStore.syncFrom([tx.value])
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    taxSaving.value = false
+  }
+}
 
 function toggleDocumentPreview(documentId: number) {
   const next = new Set(expandedDocumentPreviews.value)
@@ -938,9 +980,41 @@ const extractedFields = computed(() => {
       </dl>
     </section>
 
-    <section v-if="transactionSplits.length" class="card">
-      <h2>Aufteilung</h2>
-      <ul class="split-detail-list">
+    <section v-if="tx" class="card">
+      <h2>Steuer</h2>
+      <label class="tax-toggle">
+        <Checkbox
+          :model-value="!!tx.is_tax_relevant"
+          binary
+          :disabled="taxSaving"
+          aria-label="Buchung ist steuerrelevant"
+          @update:model-value="setTaxRelevant($event)"
+        />
+        <span>Buchung ist steuerrelevant</span>
+      </label>
+      <p v-if="taxRelevantSplitCount > 0" class="hint">
+        {{ taxRelevantSplitCount === 1 ? 'Ein Teilbetrag ist' : `${taxRelevantSplitCount} Teilbeträge sind` }}
+        separat als steuerrelevant markiert.
+      </p>
+      <p class="hint">
+        Über den Filter „Nur steuerrelevante“ in der Buchungsliste findest du sowohl
+        markierte Buchungen als auch Buchungen mit markierten Teilbeträgen.
+      </p>
+    </section>
+
+    <section v-if="tx" class="card">
+      <div class="split-header">
+        <h2>Aufteilung</h2>
+        <Button
+          :label="transactionSplits.length ? 'Aufteilung bearbeiten' : 'Buchung aufteilen'"
+          icon="pi pi-sitemap"
+          size="small"
+          severity="secondary"
+          outlined
+          @click="openSplitDialog"
+        />
+      </div>
+      <ul v-if="transactionSplits.length" class="split-detail-list">
         <li v-for="(split, index) in transactionSplits" :key="split.id ?? index">
           <strong>{{ new Intl.NumberFormat('de-DE', { style: 'currency', currency: tx?.currency_code ?? 'EUR' }).format(Number(split.amount)) }}</strong>
           <span>{{ split.tags.join(', ') || 'Ohne Tags' }}</span>
@@ -948,6 +1022,9 @@ const extractedFields = computed(() => {
           <Tag v-if="split.is_tax_relevant" value="Steuerrelevant" severity="info" />
         </li>
       </ul>
+      <p v-else class="hint">
+        Diese Buchung ist nicht aufgeteilt. Teile sie auf, um Teilbeträge einzeln zu taggen oder als steuerrelevant zu markieren.
+      </p>
     </section>
 
     <!-- Tags + Notiz -->
@@ -1178,6 +1255,12 @@ const extractedFields = computed(() => {
         />
       </template>
     </Dialog>
+
+    <SplitTransactionDialog
+      v-model:visible="splitDialogVisible"
+      :transaction="tx"
+      @saved="onSplitSaved"
+    />
   </div>
 </template>
 
@@ -1670,7 +1753,10 @@ const extractedFields = computed(() => {
   z-index: 9999;
   pointer-events: none;
 }
-.split-detail-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .5rem; }
+.tax-toggle { display: flex; align-items: center; gap: .5rem; cursor: pointer; }
+.split-header { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
+.split-header h2 { margin: 0; }
+.split-detail-list { list-style: none; margin: .75rem 0 0; padding: 0; display: grid; gap: .5rem; }
 .split-detail-list li { display: grid; grid-template-columns: 7rem 1fr 1fr auto; gap: .75rem; align-items: center; padding: .55rem; border: 1px solid var(--p-content-border-color); border-radius: .4rem; }
 @media (max-width: 600px) { .split-detail-list li { grid-template-columns: 1fr; gap: .25rem; } }
 </style>
