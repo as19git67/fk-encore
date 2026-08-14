@@ -298,6 +298,101 @@ export function applyKirchensteuerBescheidYearTaxRule(input: {
   return { taxYear: settlementYear, taxYearConfidence: 0.95, matched: true };
 }
 
+/**
+ * Bank-/Broker-Abrechnungen über Kapitalerträge (Dividendengutschrift,
+ * "Steuerliche Behandlung: Ausländische Dividende", Wertpapierabrechnung,
+ * Erträgnisaufstellung, Jahressteuerbescheinigung) gehören ausschließlich in
+ * die KAP-Sektionen.
+ *
+ * Problem: solche Belege weisen Kapitalertragsteuer, Solidaritätszuschlag UND
+ * Kirchensteuer aus, und die comdirect-Fußnote erklärt zusätzlich, dass die
+ * Kirchensteuer „als Sonderausgabe" den KESt-Satz senkt. Das kleine Modell
+ * liest daraus Abzugs-Sektionen heraus und hängt `sonderausgaben` und
+ * `vorsorgeaufwand` an das Dokument — obwohl die Kirchensteuer hier bereits im
+ * Steuerabzug verrechnet ist und der Beleg mit Vorsorgeaufwendungen nichts zu
+ * tun hat. Der Prompt (Abgrenzungsregel 1) reicht dafür nicht aus, also wird es
+ * hier deterministisch erzwungen.
+ */
+
+/** Belegart: was für ein Bank-/Broker-Dokument ist das? */
+const SECURITIES_SETTLEMENT_MARKERS: readonly string[] = [
+  "steuerlichebehandlung",
+  "dividendengutschrift",
+  "dividendenabrechnung",
+  "ausländischedividende",
+  "inländischedividende",
+  "wertpapierabrechnung",
+  "erträgnisabrechnung",
+  "erträgnisaufstellung",
+  "ertragsgutschrift",
+  "ausschüttung",
+  "vorabpauschale",
+  "zinsgutschrift",
+  "jahressteuerbescheinigung",
+];
+
+/** Wertpapier-Kontext: belegt, dass es wirklich um ein Depot geht. */
+const SECURITIES_CONTEXT_MARKERS: readonly string[] = [
+  "isin",
+  "wkn",
+  "depotnummer",
+  "depotkonto",
+  "kapitalertragsteuer",
+];
+
+/**
+ * Kontexte, in denen dieselben Wörter etwas anderes bedeuten: eine
+ * fondsgebundene Renten-/Lebensversicherung nennt ISIN und Ausschüttung,
+ * gehört aber zu `vorsorgeaufwand`/`anlage-av`; ein Einkommensteuerbescheid
+ * des Finanzamts listet Kapitalerträge, ist aber ein `steuerbescheid`.
+ */
+const SECURITIES_EXCLUSION_MARKERS: readonly string[] = [
+  "rentenversicherung",
+  "lebensversicherung",
+  "riester",
+  "rürup",
+  "basisrente",
+  "versicherungsschein",
+  "versicherungsnummer",
+  "policennummer",
+  "pensionskasse",
+  "direktversicherung",
+  "krankenversicherung",
+  "beitragsbescheinigung",
+  "finanzamt",
+  "einkommensteuerbescheid",
+];
+
+/** Sektionen, die ein Kapitalertragsbeleg behalten darf. */
+const KAP_TAX_SLUGS = new Set(["anlage-kap", "werbungskosten-kap"]);
+
+export function applySecuritiesSettlementTaxRule(input: {
+  text: string;
+  taxSections: readonly TaxAssignment[];
+  taxRelevant: boolean;
+}): { taxSections: TaxAssignment[]; taxRelevant: boolean; matched: boolean } {
+  const unchanged = {
+    taxSections: [...input.taxSections],
+    taxRelevant: input.taxRelevant,
+    matched: false,
+  };
+
+  const ctx = normalizeForMatch(input.text);
+  if (!ctx) return unchanged;
+  if (!SECURITIES_SETTLEMENT_MARKERS.some((m) => ctx.includes(m))) return unchanged;
+  if (!SECURITIES_CONTEXT_MARKERS.some((m) => ctx.includes(m))) return unchanged;
+  if (SECURITIES_EXCLUSION_MARKERS.some((m) => ctx.includes(m))) return unchanged;
+
+  const kept = input.taxSections.filter((s) => KAP_TAX_SLUGS.has(s.slug));
+  if (!kept.some((s) => s.slug === "anlage-kap")) {
+    kept.unshift({ slug: "anlage-kap", confidence: 0.95 });
+  }
+
+  const changed =
+    kept.length !== input.taxSections.length || input.taxRelevant !== true;
+  return { taxSections: kept, taxRelevant: true, matched: changed };
+}
+
 /** Exposed for tests / diagnostics. */
 export const INSURANCE_ADMIN_TAX_RULE_INTERNALS = {
   INSURANCE_TAX_SLUGS,
@@ -313,4 +408,11 @@ export const KIRCHENSTEUER_TAX_RULE_INTERNALS = {
   KIRCHENSTEUER_NOTICE_MARKERS,
   KIRCHENSTEUER_SETTLEMENT_MARKERS,
   KIRCHENSTEUER_PREPAYMENT_ONLY_MARKERS,
+};
+
+export const SECURITIES_SETTLEMENT_TAX_RULE_INTERNALS = {
+  SECURITIES_SETTLEMENT_MARKERS,
+  SECURITIES_CONTEXT_MARKERS,
+  SECURITIES_EXCLUSION_MARKERS,
+  KAP_TAX_SLUGS,
 };

@@ -4,6 +4,7 @@ import {
   applyInsuranceAdminTaxRule,
   applyKindergeldTaxRule,
   applyKirchensteuerBescheidYearTaxRule,
+  applySecuritiesSettlementTaxRule,
 } from "./tax-rules";
 
 const AV = [{ slug: "anlage-av", confidence: 0.95 }];
@@ -338,5 +339,111 @@ describe("applyKirchensteuerBescheidYearTaxRule", () => {
       taxYear: 2019,
       taxYearConfidence: 0.9,
     })).toEqual({ taxYear: 2019, taxYearConfidence: 0.9, matched: false });
+  });
+});
+
+describe("applySecuritiesSettlementTaxRule", () => {
+  // Synthetischer Nachbau einer comdirect-Dividendenabrechnung (keine echten
+  // personenbezogenen Daten).
+  const DIVIDEND_TEXT = `Steuerliche Behandlung: Ausländische Dividende vom 13.08.2026
+Stk. 160 MUSTER INC., WKN / ISIN: 000000 / US0000000000
+Depotnummer: 0000000 00
+Zu Ihren Gunsten vor Steuern: EUR 31,75
+Kapitalertragsteuer (2) EUR -3,67
+Solidaritätszuschlag EUR -0,20
+Kirchensteuer EUR -0,29
+(2) Durch die Berücksichtigung der Kirchensteuer (8% bzw. 9%) als Sonderausgabe
+reduziert sich der Kapitalertragsteuersatz auf 24,51% bzw. 24,45%.
+KEINE STEUERBESCHEINIGUNG`;
+
+  it("strips sonderausgaben and vorsorgeaufwand from a dividend settlement", () => {
+    const out = applySecuritiesSettlementTaxRule({
+      text: DIVIDEND_TEXT,
+      taxSections: [
+        { slug: "anlage-kap", confidence: 0.95 },
+        { slug: "sonderausgaben", confidence: 0.95 },
+        { slug: "vorsorgeaufwand", confidence: 0.75 },
+      ],
+      taxRelevant: true,
+    });
+    expect(out.taxSections).toEqual([{ slug: "anlage-kap", confidence: 0.95 }]);
+    expect(out.taxRelevant).toBe(true);
+    expect(out.matched).toBe(true);
+  });
+
+  it("adds anlage-kap when the model assigned only the wrong sections", () => {
+    const out = applySecuritiesSettlementTaxRule({
+      text: DIVIDEND_TEXT,
+      taxSections: [{ slug: "sonderausgaben", confidence: 0.9 }],
+      taxRelevant: true,
+    });
+    expect(out.taxSections).toEqual([{ slug: "anlage-kap", confidence: 0.95 }]);
+    expect(out.taxRelevant).toBe(true);
+  });
+
+  it("keeps werbungskosten-kap and reports no change for a clean assignment", () => {
+    const out = applySecuritiesSettlementTaxRule({
+      text: DIVIDEND_TEXT,
+      taxSections: [
+        { slug: "anlage-kap", confidence: 0.9 },
+        { slug: "werbungskosten-kap", confidence: 0.6 },
+      ],
+      taxRelevant: true,
+    });
+    expect(out.taxSections).toEqual([
+      { slug: "anlage-kap", confidence: 0.9 },
+      { slug: "werbungskosten-kap", confidence: 0.6 },
+    ]);
+    expect(out.matched).toBe(false);
+  });
+
+  it("also fires for a Wertpapierabrechnung and a Jahressteuerbescheinigung", () => {
+    expect(
+      applySecuritiesSettlementTaxRule({
+        text: "Wertpapierabrechnung Kauf, WKN / ISIN: 000000 / DE0000000000",
+        taxSections: [{ slug: "sonderausgaben", confidence: 0.8 }],
+        taxRelevant: true,
+      }).taxSections,
+    ).toEqual([{ slug: "anlage-kap", confidence: 0.95 }]);
+    expect(
+      applySecuritiesSettlementTaxRule({
+        text: "Jahressteuerbescheinigung 2025 — Depotnummer 0000000, Kapitalertragsteuer",
+        taxSections: [{ slug: "anlage-n", confidence: 0.7 }],
+        taxRelevant: true,
+      }).taxSections,
+    ).toEqual([{ slug: "anlage-kap", confidence: 0.95 }]);
+  });
+
+  it("leaves a fund-linked pension statement alone", () => {
+    const sections = [{ slug: "vorsorgeaufwand", confidence: 0.9 }];
+    expect(
+      applySecuritiesSettlementTaxRule({
+        text: "Standmitteilung zur fondsgebundenen Rentenversicherung, Ausschüttung der Fonds, ISIN DE0000000000",
+        taxSections: sections,
+        taxRelevant: true,
+      }),
+    ).toEqual({ taxSections: sections, taxRelevant: true, matched: false });
+  });
+
+  it("leaves an Einkommensteuerbescheid alone", () => {
+    const sections = [{ slug: "steuerbescheid", confidence: 0.95 }];
+    expect(
+      applySecuritiesSettlementTaxRule({
+        text: "Finanzamt Musterstadt — Einkommensteuerbescheid für 2025: Kapitalertragsteuer, Ausschüttungen",
+        taxSections: sections,
+        taxRelevant: true,
+      }),
+    ).toEqual({ taxSections: sections, taxRelevant: true, matched: false });
+  });
+
+  it("does nothing without a securities context", () => {
+    const sections = [{ slug: "sonderausgaben", confidence: 0.9 }];
+    expect(
+      applySecuritiesSettlementTaxRule({
+        text: "Zuwendungsbestätigung — Ausschüttung von Spendengeldern an das Projekt",
+        taxSections: sections,
+        taxRelevant: true,
+      }).matched,
+    ).toBe(false);
   });
 });
