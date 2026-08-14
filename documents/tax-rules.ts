@@ -299,19 +299,30 @@ export function applyKirchensteuerBescheidYearTaxRule(input: {
 }
 
 /**
- * Bank-/Broker-Abrechnungen über Kapitalerträge (Dividendengutschrift,
- * "Steuerliche Behandlung: Ausländische Dividende", Wertpapierabrechnung,
- * Erträgnisaufstellung, Jahressteuerbescheinigung) gehören ausschließlich in
- * die KAP-Sektionen.
+ * Bank-/Broker-Post über Kapitalerträge, zwei Fälle:
  *
- * Problem: solche Belege weisen Kapitalertragsteuer, Solidaritätszuschlag UND
- * Kirchensteuer aus, und die comdirect-Fußnote erklärt zusätzlich, dass die
- * Kirchensteuer „als Sonderausgabe" den KESt-Satz senkt. Das kleine Modell
- * liest daraus Abzugs-Sektionen heraus und hängt `sonderausgaben` und
- * `vorsorgeaufwand` an das Dokument — obwohl die Kirchensteuer hier bereits im
- * Steuerabzug verrechnet ist und der Beleg mit Vorsorgeaufwendungen nichts zu
- * tun hat. Der Prompt (Abgrenzungsregel 1) reicht dafür nicht aus, also wird es
- * hier deterministisch erzwungen.
+ * 1. EINZELABRECHNUNG (Dividendengutschrift, "Steuerliche Behandlung:
+ *    Ausländische Dividende", Wertpapierabrechnung, Ertragsgutschrift,
+ *    Vorabpauschale). Diese Belege werden für die Einkommensteuererklärung
+ *    NICHT gebraucht: die Bank fasst am Jahresende alle Kapitalerträge,
+ *    einbehaltenen Steuern und Verrechnungssalden in der Jahressteuer-
+ *    bescheinigung zusammen. Genau wie bei den monatlichen Gehaltsabrechnungen
+ *    (nur die Lohnsteuerbescheinigung zählt) ist die laufende Depotpost damit
+ *    nicht steuerrelevant → `tax_sections = []`, `tax_relevant = false`.
+ *    Die comdirect druckt das sogar selbst auf den Beleg: "KEINE
+ *    STEUERBESCHEINIGUNG".
+ * 2. JAHRESBESCHEINIGUNG (Jahressteuerbescheinigung, Steuerbescheinigung,
+ *    Erträgnisaufstellung, Verlustbescheinigung). Das ist der eigentliche
+ *    Steuerbeleg → ausschließlich die KAP-Sektionen.
+ *
+ * Das kleine Modell macht bei beiden dieselben Fehler: es hält jede
+ * Dividendenabrechnung für einen Steuerbeleg und liest aus dem ausgewiesenen
+ * Steuerabzug (KESt, Soli, Kirchensteuer) plus der comdirect-Fußnote „Durch die
+ * Berücksichtigung der Kirchensteuer … als Sonderausgabe …" zusätzliche
+ * Abzugs-Sektionen (`sonderausgaben`, `vorsorgeaufwand`) heraus — obwohl die
+ * Kirchensteuer dort bereits im Abzug verrechnet ist und eine Depotabrechnung
+ * keine Vorsorgeaufwendungen enthält. Der Prompt allein reicht dafür nicht,
+ * also wird es hier deterministisch erzwungen.
  */
 
 /** Belegart: was für ein Bank-/Broker-Dokument ist das? */
@@ -323,12 +334,10 @@ const SECURITIES_SETTLEMENT_MARKERS: readonly string[] = [
   "inländischedividende",
   "wertpapierabrechnung",
   "erträgnisabrechnung",
-  "erträgnisaufstellung",
   "ertragsgutschrift",
   "ausschüttung",
   "vorabpauschale",
   "zinsgutschrift",
-  "jahressteuerbescheinigung",
 ];
 
 /** Wertpapier-Kontext: belegt, dass es wirklich um ein Depot geht. */
@@ -363,6 +372,28 @@ const SECURITIES_EXCLUSION_MARKERS: readonly string[] = [
   "einkommensteuerbescheid",
 ];
 
+/**
+ * Der eigentliche Jahres-Steuerbeleg der Bank — nur er wird eingereicht bzw.
+ * für die Anlage KAP gebraucht. Die Verlustbescheinigung gehört ausdrücklich
+ * dazu (§ 43a Abs. 3 EStG): ohne sie kann ein Verlusttopf nicht bankenüber-
+ * greifend verrechnet werden.
+ */
+const SECURITIES_ANNUAL_CERTIFICATE_MARKERS: readonly string[] = [
+  "jahressteuerbescheinigung",
+  "steuerbescheinigung",
+  "jahresbescheinigung",
+  "erträgnisaufstellung",
+  "verlustbescheinigung",
+];
+
+/**
+ * Ausdrücklicher Negativ-Vermerk auf jeder comdirect-Einzelabrechnung. Er
+ * enthält das Wort „Steuerbescheinigung" und muss daher vor der Prüfung auf
+ * eine Jahresbescheinigung entfernt werden — und beweist zugleich, dass der
+ * Beleg KEINE Jahresbescheinigung ist.
+ */
+const NO_CERTIFICATE_NOTICE = "keinesteuerbescheinigung";
+
 /** Sektionen, die ein Kapitalertragsbeleg behalten darf. */
 const KAP_TAX_SLUGS = new Set(["anlage-kap", "werbungskosten-kap"]);
 
@@ -379,18 +410,31 @@ export function applySecuritiesSettlementTaxRule(input: {
 
   const ctx = normalizeForMatch(input.text);
   if (!ctx) return unchanged;
-  if (!SECURITIES_SETTLEMENT_MARKERS.some((m) => ctx.includes(m))) return unchanged;
   if (!SECURITIES_CONTEXT_MARKERS.some((m) => ctx.includes(m))) return unchanged;
   if (SECURITIES_EXCLUSION_MARKERS.some((m) => ctx.includes(m))) return unchanged;
 
-  const kept = input.taxSections.filter((s) => KAP_TAX_SLUGS.has(s.slug));
-  if (!kept.some((s) => s.slug === "anlage-kap")) {
-    kept.unshift({ slug: "anlage-kap", confidence: 0.95 });
+  const declaredNoCertificate = ctx.includes(NO_CERTIFICATE_NOTICE);
+  const withoutNegation = ctx.split(NO_CERTIFICATE_NOTICE).join("");
+  const isAnnualCertificate =
+    !declaredNoCertificate &&
+    SECURITIES_ANNUAL_CERTIFICATE_MARKERS.some((m) => withoutNegation.includes(m));
+
+  if (isAnnualCertificate) {
+    const kept = input.taxSections.filter((s) => KAP_TAX_SLUGS.has(s.slug));
+    if (!kept.some((s) => s.slug === "anlage-kap")) {
+      kept.unshift({ slug: "anlage-kap", confidence: 0.95 });
+    }
+    const changed = kept.length !== input.taxSections.length || input.taxRelevant !== true;
+    return { taxSections: kept, taxRelevant: true, matched: changed };
   }
 
-  const changed =
-    kept.length !== input.taxSections.length || input.taxRelevant !== true;
-  return { taxSections: kept, taxRelevant: true, matched: changed };
+  // Einzelabrechnung: nur wenn wirklich eine solche Belegart erkennbar ist —
+  // sonst könnte die Regel beliebige Depotpost entwerten.
+  if (!SECURITIES_SETTLEMENT_MARKERS.some((m) => withoutNegation.includes(m))) {
+    return unchanged;
+  }
+  const changed = input.taxSections.length > 0 || input.taxRelevant;
+  return { taxSections: [], taxRelevant: false, matched: changed };
 }
 
 /** Exposed for tests / diagnostics. */
@@ -414,5 +458,7 @@ export const SECURITIES_SETTLEMENT_TAX_RULE_INTERNALS = {
   SECURITIES_SETTLEMENT_MARKERS,
   SECURITIES_CONTEXT_MARKERS,
   SECURITIES_EXCLUSION_MARKERS,
+  SECURITIES_ANNUAL_CERTIFICATE_MARKERS,
+  NO_CERTIFICATE_NOTICE,
   KAP_TAX_SLUGS,
 };
