@@ -7,6 +7,10 @@ export interface RunToolOptions {
   tax_sample?: number
   focus_sections?: string
   focus_categories?: string
+  /** scoreboard only: the name this measurement is filed under. */
+  label?: string
+  /** scoreboard only: an earlier label to compare the new measurement against. */
+  compare_with?: string
 }
 
 export interface ToolStatus {

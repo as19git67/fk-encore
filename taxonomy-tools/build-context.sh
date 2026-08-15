@@ -34,5 +34,6 @@ cp "$REPO_ROOT/scripts/taxonomy/_common.py"       "$SCRIPTS_DEST/"
 cp "$REPO_ROOT/scripts/taxonomy/diagnose.mjs"     "$SCRIPTS_DEST/"
 cp "$REPO_ROOT/scripts/taxonomy/cloud_audit.py"   "$SCRIPTS_DEST/"
 cp "$REPO_ROOT/scripts/taxonomy/cloud_teacher.py" "$SCRIPTS_DEST/"
+cp "$REPO_ROOT/scripts/taxonomy/model_scoreboard.py" "$SCRIPTS_DEST/"
 
 echo "Build context ready in $SCRIPT_DIR"
