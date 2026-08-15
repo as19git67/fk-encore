@@ -21,7 +21,56 @@ import { isValidDocumentTypeSlug } from "./document-types";
 console.log("[boot] documents/llm-client.ts: all imports resolved");
 
 const LLM_SERVICE_URL = (process.env.LLM_SERVICE_URL || "http://localhost:8002").replace(/\/$/, "");
-const DEFAULT_TIMEOUT_MS = parseInt(process.env.LLM_SERVICE_TIMEOUT_MS ?? "120000", 10);
+const ENV_TIMEOUT_MS = parseInt(process.env.LLM_SERVICE_TIMEOUT_MS ?? "120000", 10);
+
+// How long the activated configuration's app_timeout_ms is trusted before we
+// look again. A model swap changes it at most a few times a day, and the swap
+// itself takes minutes, so a stale minute costs nothing — while a query per
+// classify would be pure overhead.
+const TIMEOUT_CACHE_TTL_MS = 60_000;
+
+let cachedTimeoutMs: number | null = null;
+let cachedTimeoutAt = 0;
+
+/**
+ * Per-request budget for a call to the llm-service.
+ *
+ * A slow model needs a longer one — a MoE model with its experts in system RAM
+ * is minutes per document where the dense default is seconds — so the value
+ * belongs with the model rather than in the container's environment. The
+ * activated configuration supplies it; `LLM_SERVICE_TIMEOUT_MS` remains the
+ * fallback for a deployment that has not activated anything, and for the
+ * moments when the lookup fails.
+ */
+export async function resolveTimeoutMs(): Promise<number> {
+  const now = Date.now();
+  if (cachedTimeoutMs !== null && now - cachedTimeoutAt < TIMEOUT_CACHE_TTL_MS) {
+    return cachedTimeoutMs;
+  }
+  let resolved = ENV_TIMEOUT_MS;
+  try {
+    const { default: db } = await import("../db/database");
+    const { llmModelConfig } = await import("../db/schema");
+    const { eq } = await import("drizzle-orm");
+    const [row] = await db
+      .select({ app_timeout_ms: llmModelConfig.app_timeout_ms })
+      .from(llmModelConfig)
+      .where(eq(llmModelConfig.is_active, true));
+    if (row?.app_timeout_ms) resolved = row.app_timeout_ms;
+  } catch {
+    // The database being unreachable is the scan-worker's problem, not this
+    // function's — fall back rather than turning it into a classify failure.
+  }
+  cachedTimeoutMs = resolved;
+  cachedTimeoutAt = now;
+  return resolved;
+}
+
+/** Test seam: drop the cached value so the next call queries again. */
+export function resetTimeoutCache(): void {
+  cachedTimeoutMs = null;
+  cachedTimeoutAt = 0;
+}
 
 // Lower bound 1970 (not e.g. 2000): household documents legitimately span
 // decades — a 1997 Jahresdepotauszug is a real, unremarkable case. Must match
@@ -150,11 +199,12 @@ async function fetchJson<T>(
   method: "POST" | "PUT",
   endpoint: string,
   body: unknown,
-  timeoutMs = DEFAULT_TIMEOUT_MS,
+  timeoutMs?: number,
 ): Promise<T> {
   const url = `${LLM_SERVICE_URL}${endpoint}`;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const budget = timeoutMs ?? (await resolveTimeoutMs());
+  const timer = setTimeout(() => controller.abort(), budget);
   let res: Response;
   try {
     res = await fetch(url, {
@@ -193,7 +243,7 @@ async function fetchJson<T>(
   return (await res.json()) as T;
 }
 
-function postJson<T>(endpoint: string, body: unknown, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> {
+function postJson<T>(endpoint: string, body: unknown, timeoutMs?: number): Promise<T> {
   return fetchJson("POST", endpoint, body, timeoutMs);
 }
 

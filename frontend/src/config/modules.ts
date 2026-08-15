@@ -414,6 +414,12 @@ export const modules: ModuleConfig[] = [
         component: () => import('../views/TaxonomyCockpitView.vue'),
         meta: { permission: 'data.manage' },
       },
+      {
+        path: 'ki-modell',
+        name: 'admin-llm-models',
+        component: () => import('../views/LlmModelsView.vue'),
+        meta: { permission: 'data.manage' },
+      },
     ],
     menuItems: [
       { label: 'Benutzer', icon: 'pi pi-users', routeName: 'admin-users', permission: 'users.list' },
@@ -423,6 +429,7 @@ export const modules: ModuleConfig[] = [
       { label: 'Eingeplante Jobs', icon: 'pi pi-clock', routeName: 'admin-scheduled-jobs', permission: 'data.manage' },
       { label: 'Taxonomie-Cockpit', icon: 'pi pi-chart-line', routeName: 'admin-taxonomy-cockpit', permission: 'data.manage' },
       { label: 'Taxonomie-Tools', icon: 'pi pi-wrench', routeName: 'admin-tools', permission: 'data.manage' },
+      { label: 'KI-Modell', icon: 'pi pi-microchip-ai', routeName: 'admin-llm-models', permission: 'data.manage' },
     ],
   },
 ]
