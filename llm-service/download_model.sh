@@ -44,6 +44,25 @@ if [[ -n "${LLM_MODEL_SHA256}" ]]; then
   echo "${LLM_MODEL_SHA256}  ${LLM_MODEL_PATH}" | sha256sum -c -
 fi
 
+# ── 1b. Additional shards ──────────────────────────────────────────────────
+# Large quantisations are published as split GGUFs (…-00001-of-00003.gguf).
+# llama.cpp finds the siblings itself once LLM_MODEL_PATH points at the first
+# shard, but they still have to be on disk. Space-separated URLs; each lands in
+# MODELS_DIR under its own basename.
+if [[ -n "${LLM_MODEL_EXTRA_URLS:-}" ]]; then
+  for url in ${LLM_MODEL_EXTRA_URLS}; do
+    target="${MODELS_DIR}/$(basename "${url%%\?*}")"
+    if [[ -f "${target}" ]]; then
+      echo "[download] shard already present at ${target} ($(du -h "${target}" | cut -f1))"
+      continue
+    fi
+    echo "[download] Fetching shard from ${url}"
+    curl -L -C - --fail --retry 5 --retry-delay 5 -o "${target}.part" "${url}"
+    mv "${target}.part" "${target}"
+    echo "[download] shard saved to ${target}"
+  done
+fi
+
 # ── 2. Embedding model ─────────────────────────────────────────────────────
 echo "[download] Fetching embedding model ${EMBEDDING_MODEL} into ${SENTENCE_TRANSFORMERS_HOME}"
 python - <<PY
