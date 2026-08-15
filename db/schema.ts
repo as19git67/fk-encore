@@ -2179,6 +2179,69 @@ export const aiModelSlot = pgTable(
   ]
 );
 
+// ========== LLM inference configurations (migration 0144) ==========
+
+// Named, switchable llm_service setups — the same knobs compose passes as
+// LLM_* environment variables, kept as rows so several model configurations
+// can live side by side and be switched from the admin UI.
+//
+// The table is inert until a row is activated: llm_service prefers
+// /models/.active_config.json and falls back to its environment when that
+// file is absent, so a deployment that never activates anything keeps
+// running on its compose/.env values.
+export type LlmBackend = "inproc" | "server";
+export type LlmAccelerator = "cpu" | "cuda";
+export type LlmKvType = "f16" | "q8_0" | "q5_1" | "q5_0" | "q4_0";
+export type LlmReasoning = "off" | "auto" | "think";
+
+export const llmModelConfig = pgTable(
+  "llm_model_config",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    label: text("label").notNull().unique(),
+    description: text("description"),
+    is_active: boolean("is_active").notNull().default(false),
+
+    // Bare basename, resolved against the service's MODELS_DIR.
+    model_filename: text("model_filename").notNull(),
+    model_url: text("model_url"),
+    model_sha256: text("model_sha256"),
+    // Further shards of a split GGUF; model_filename points at the first.
+    extra_urls: text("extra_urls").array().notNull().default(sql`'{}'::text[]`),
+
+    backend: text("backend").$type<LlmBackend>().notNull().default("inproc"),
+    accelerator: text("accelerator").$type<LlmAccelerator>().notNull().default("cpu"),
+    ctx_size: integer("ctx_size").notNull().default(8192),
+    gpu_layers: integer("gpu_layers").notNull().default(0),
+    threads: integer("threads"),
+    batch_size: integer("batch_size").notNull().default(512),
+    ubatch_size: integer("ubatch_size").notNull().default(512),
+    flash_attn: boolean("flash_attn").notNull().default(false),
+    kv_type: text("kv_type").$type<LlmKvType>().notNull().default("f16"),
+
+    // server backend only: leading layers whose MoE experts stay in system RAM.
+    n_cpu_moe: integer("n_cpu_moe").notNull().default(0),
+    reasoning: text("reasoning").$type<LlmReasoning>().notNull().default("off"),
+    server_extra_args: text("server_extra_args"),
+    ready_timeout_s: integer("ready_timeout_s").notNull().default(900),
+    request_timeout_s: integer("request_timeout_s").notNull().default(900),
+
+    // Caller-side budget for one /classify. Travels with the model because a
+    // MoE split across RAM is minutes slower per document than a dense model.
+    app_timeout_ms: integer("app_timeout_ms").notNull().default(120000),
+
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Partial index over the flag itself: only true rows are indexed, so
+    // uniqueness makes a second active row fail.
+    uniqueIndex("llm_model_config_single_active")
+      .on(table.is_active)
+      .where(sql`${table.is_active}`),
+  ]
+);
+
 // ========== Scheduled job state (lib/local-cron.ts) ==========
 
 export const scheduledJobState = pgTable("scheduled_job_state", {

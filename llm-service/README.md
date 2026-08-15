@@ -9,12 +9,15 @@ A FastAPI-based microservice that hosts a local GGUF model for structured docume
 ```
 llm-service/
   main.py               # FastAPI application, model lifecycle, and UTF-8 repair
+  llm_config.py         # The knobs that pick a model, from env or from a file
   llama_server.py       # HTTP client for the llama-server backend
+  llama_supervisor.py   # Owns the llama-server subprocess (start/stop/crash)
+  model_downloads.py    # Runtime GGUF downloads, listing, deletion
   Dockerfile            # Python 3.12-slim base with llama-cpp-python
   Dockerfile.gpu        # CUDA 12.8 / RTX 50-series image, ships llama-server
   docker-compose.yml    # Service-local deployment config
   download_model.sh     # Idempotent downloader for GGUF and HF weights
-  entrypoint.sh         # Model download, then llama-server (+) uvicorn
+  entrypoint.sh         # Model download, then uvicorn
   requirements.txt      # Core dependencies (torch, llama-cpp-python, etc.)
   tests/                # Unit tests for classification and schemas
 ```
@@ -234,7 +237,73 @@ Generates warm, personal titles and subtitles for private photo recaps (e.g., "A
 
 ---
 
+## Switching models at runtime
+
+The service can be pointed at a different model without editing `.env` and
+recreating the container. The app stores named configurations in its
+`llm_model_config` table and activates one through the endpoints below.
+
+**Precedence — this is the part that matters for an existing deployment.** On
+start the service looks for `${MODELS_DIR}/.active_config.json`. That file only
+exists once something has been activated. Without it the service reads its
+environment exactly as it always has, so a deployment that never uses this
+feature keeps running on its compose/.env values, across image updates
+included. `POST /config/reset` deletes the file and goes back to that state.
+
+A configuration is persisted only *after* it has loaded successfully, so a
+model that cannot be read never becomes the one the container boots into. If a
+load fails the service rolls back to the previous configuration; only if that
+also fails does it stay down, at which point the compose healthcheck restarts
+it.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /config` | The live configuration and where it came from (`env` / `file`) |
+| `POST /reload` | Activate a configuration — accepts an `llm_model_config` row as JSON, answers `202` |
+| `GET /reload/status` | Progress of the swap: `idle` → `stopping` → `downloading` → `loading` → `ready` / `error` |
+| `POST /config/reset` | Discard the activated configuration and return to the environment |
+| `GET /models/files` | GGUF files on the volume, their sizes, and free space |
+| `POST /models/download` | Fetch a GGUF (plus shards) in the background, answers `202` |
+| `GET /models/download/status` | Bytes, throughput, ETA |
+| `POST /models/download/cancel` | Stop the transfer, keeping the `.part` file so the next attempt resumes |
+| `DELETE /models/files/{filename}` | Remove a model that is not currently loaded |
+
+Inference is unavailable while a swap runs: `_state["llm"]` is cleared first,
+which the existing guards turn into a `503`, and the app's `llm-client` already
+treats a `503` as "defer and retry later". Embeddings are unaffected — the
+embedder is a separate model and is never reloaded.
+
+Downloading is a separate step from activating on purpose. Fetching 26 GB and
+loading it are minutes apart in cost, so pull the weights first, watch the
+progress, and activate once the file is on the volume — that keeps the actual
+outage to the load itself.
+
+### Who owns llama-server
+
+For `LLM_BACKEND=server` the FastAPI process starts and stops the
+`llama-server` subprocess itself (`llama_supervisor.py`); `entrypoint.sh` no
+longer does. Switching models means stopping the old server and starting a new
+one with different arguments, which the app cannot do to a sibling process it
+did not spawn.
+
+The property `entrypoint.sh` provided with `wait -n` is preserved: a
+llama-server that exits on its own takes the service down rather than leaving
+it answering `503` forever. A stop the app asked for is not treated as a crash.
+
+If the image ships no `llama-server` binary, `LLM_BACKEND=server` still works
+against one running elsewhere — the app then only attaches over
+`LLM_SERVER_URL` and manages no process.
+
+---
+
 ## Configuration
+
+These are the *fallback* values: they apply whenever no configuration has been
+activated through the admin UI (see [Switching models at
+runtime](#switching-models-at-runtime)). Once one is active, everything from
+`LLM_MODEL_PATH` down to `LLM_SERVER_REQUEST_TIMEOUT` comes from it instead;
+`MODELS_DIR`, the embedder settings, `CLASSIFY_TEXT_CHAR_LIMIT`,
+`TAX_SECTIONS_MAX` and `LOG_LEVEL` are always read from the environment.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -253,7 +322,8 @@ Generates warm, personal titles and subtitles for private photo recaps (e.g., "A
 | `LLM_BACKEND` | `inproc` | Where the GGUF runs: `inproc` (llama-cpp-python) or `server` (llama-server sidecar). The `-gpu` image defaults to `server`. |
 | `LLM_NCMOE` | `0` | `server` only: keep the MoE expert tensors of the first N layers in system RAM (`--n-cpu-moe`). `0` disables it. |
 | `LLM_REASONING` | `off` | `server` only: `off`, `on` or `auto`. `/classify` is grammar-constrained, so a thinking block is wasted budget. |
-| `LLM_SERVER_URL` | `http://127.0.0.1:8080` | `server` only: sidecar address. The port is also what `entrypoint.sh` binds llama-server to. |
+| `LLM_SERVER_URL` | `http://127.0.0.1:8080` | `server` only: sidecar address. Its port is also the one the app binds llama-server to. |
+| `LLAMA_SERVER_BIN` | `/usr/local/bin/llama-server` | `server` only: the binary to launch. When absent the app attaches to an external llama-server at `LLM_SERVER_URL` instead of managing a process. |
 | `LLM_SERVER_EXTRA_ARGS` | — | `server` only: raw llama-server flags appended verbatim (e.g. `--override-tensor`). |
 | `LLM_SERVER_READY_TIMEOUT` | `900` | `server` only: seconds to wait for the sidecar to finish loading before startup fails. |
 | `LLM_SERVER_REQUEST_TIMEOUT` | `900` | `server` only: per-request deadline against the sidecar. Keep above the caller's `LLM_SERVICE_TIMEOUT_MS`. |

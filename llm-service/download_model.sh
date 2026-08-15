@@ -27,7 +27,13 @@ mkdir -p "${MODELS_DIR}" "${SENTENCE_TRANSFORMERS_HOME}"
 echo "[download] models dir: ${MODELS_DIR}"
 
 # ── 1. GGUF ────────────────────────────────────────────────────────────────
-if [[ -f "${LLM_MODEL_PATH}" ]]; then
+# LLM_SKIP_GGUF_DOWNLOAD=1 leaves the weights alone and only refreshes the
+# embedding model. Set by entrypoint.sh when a configuration has been activated
+# through the admin UI: that configuration names its own model, and the service
+# fetches it itself, so pulling LLM_MODEL_URL here would waste several GB.
+if [[ "${LLM_SKIP_GGUF_DOWNLOAD:-0}" == "1" ]]; then
+  echo "[download] LLM_SKIP_GGUF_DOWNLOAD=1 — skipping the GGUF, embedding model only"
+elif [[ -f "${LLM_MODEL_PATH}" ]]; then
   echo "[download] GGUF already present at ${LLM_MODEL_PATH} ($(du -h "${LLM_MODEL_PATH}" | cut -f1))"
 else
   echo "[download] Fetching GGUF from ${LLM_MODEL_URL}"
@@ -39,7 +45,7 @@ else
   echo "[download] GGUF saved to ${LLM_MODEL_PATH}"
 fi
 
-if [[ -n "${LLM_MODEL_SHA256}" ]]; then
+if [[ "${LLM_SKIP_GGUF_DOWNLOAD:-0}" != "1" && -n "${LLM_MODEL_SHA256}" ]]; then
   echo "[download] Verifying SHA256…"
   echo "${LLM_MODEL_SHA256}  ${LLM_MODEL_PATH}" | sha256sum -c -
 fi
@@ -49,7 +55,7 @@ fi
 # llama.cpp finds the siblings itself once LLM_MODEL_PATH points at the first
 # shard, but they still have to be on disk. Space-separated URLs; each lands in
 # MODELS_DIR under its own basename.
-if [[ -n "${LLM_MODEL_EXTRA_URLS:-}" ]]; then
+if [[ "${LLM_SKIP_GGUF_DOWNLOAD:-0}" != "1" && -n "${LLM_MODEL_EXTRA_URLS:-}" ]]; then
   for url in ${LLM_MODEL_EXTRA_URLS}; do
     target="${MODELS_DIR}/$(basename "${url%%\?*}")"
     if [[ -f "${target}" ]]; then
