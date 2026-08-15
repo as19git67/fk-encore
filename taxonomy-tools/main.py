@@ -1,9 +1,9 @@
 """taxonomy-tools sidecar — runs the offline taxonomy scripts on demand.
 
-Exposes three tools (diagnose, cloud-audit, cloud-teacher) as FastAPI
-endpoints. Each spawns the underlying script as a subprocess and streams
-its stdout/stderr back as Server-Sent Events, so the admin frontend can
-show a live log.
+Exposes four tools (diagnose, cloud-audit, cloud-teacher, scoreboard) as
+FastAPI endpoints. Each spawns the underlying script as a subprocess and
+streams its stdout/stderr back as Server-Sent Events, so the admin frontend
+can show a live log.
 
 Only one run per tool is allowed at a time (mutex per tool name).
 """
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import signal
 import time
 from enum import Enum
@@ -34,6 +35,13 @@ class ToolName(str, Enum):
     diagnose = "diagnose"
     cloud_audit = "cloud-audit"
     cloud_teacher = "cloud-teacher"
+    scoreboard = "scoreboard"
+
+
+# The scoreboard's label ends up in a filename and reaches us from an admin
+# form, so pin it to characters that cannot walk out of out/ or confuse the
+# glob that finds snapshots again. Mirrors _LABEL_RE in model_scoreboard.py.
+LABEL_RE = re.compile(r"^[A-Za-z0-9._-]{1,40}$")
 
 
 class RunOptions(BaseModel):
@@ -43,19 +51,33 @@ class RunOptions(BaseModel):
     tax_sample: int | None = Field(None, ge=1, le=5000)
     focus_sections: str | None = None
     focus_categories: str | None = None
+    # scoreboard only: the name this measurement is filed under (usually the
+    # model), and optionally an earlier label to compare it against.
+    label: str | None = Field(None, pattern=LABEL_RE.pattern)
+    compare_with: str | None = Field(None, pattern=LABEL_RE.pattern)
 
 
 _locks: dict[ToolName, asyncio.Lock] = {t: asyncio.Lock() for t in ToolName}
 _running: dict[ToolName, asyncio.subprocess.Process | None] = {t: None for t in ToolName}
 
 
-def _build_command(tool: ToolName) -> list[str]:
+def _build_command(tool: ToolName, opts: RunOptions) -> list[str]:
     if tool == ToolName.diagnose:
         return ["node", f"{SCRIPTS_DIR}/diagnose.mjs"]
     elif tool == ToolName.cloud_audit:
         return ["python3", f"{SCRIPTS_DIR}/cloud_audit.py"]
     elif tool == ToolName.cloud_teacher:
         return ["python3", f"{SCRIPTS_DIR}/cloud_teacher.py"]
+    elif tool == ToolName.scoreboard:
+        # Unlike the others this one takes arguments rather than environment
+        # variables, because the label is part of the output filename and the
+        # script validates it as such.
+        if not opts.label:
+            raise HTTPException(400, "scoreboard needs a label")
+        cmd = ["python3", f"{SCRIPTS_DIR}/model_scoreboard.py", "--label", opts.label]
+        if opts.compare_with:
+            cmd += ["--compare-with", opts.compare_with]
+        return cmd
     raise ValueError(f"unknown tool: {tool}")
 
 
@@ -107,9 +129,14 @@ async def run_tool(tool: ToolName, opts: RunOptions | None = None):
     if lock.locked():
         raise HTTPException(409, f"{tool.value} is already running")
 
+    # Validated before the stream opens: an SSE response has already committed
+    # to 200, so a bad label would otherwise surface as a log line rather than
+    # as a rejected request.
+    _build_command(tool, opts)
+
     async def event_stream():
         async with lock:
-            cmd = _build_command(tool)
+            cmd = _build_command(tool, opts)
             env = _build_env(tool, opts)
             start = time.monotonic()
             yield {"event": "start", "data": f"Starting {tool.value} ..."}
@@ -157,8 +184,6 @@ async def cancel_tool(tool: ToolName):
     return JSONResponse({"status": "cancelled"})
 
 
-import re
-
 # Base filenames (without date prefix) each tool can produce.  The actual
 # scripts prepend a YYYY-MM-DD- date prefix (e.g. "2026-07-28-diagnose.md").
 # _find_report_files() resolves the latest date-prefixed variant on disk.
@@ -178,6 +203,20 @@ _REPORT_BASES: dict[ToolName, list[str]] = {
 
 _DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
 
+# The scoreboard files carry the run's label in the name
+# ("2026-08-15-scoreboard-qwen3-14b.md"), so there is no fixed base to look up.
+# They are also worth keeping several of — the whole point is comparing runs —
+# so this tool lists a history rather than one newest file per name.
+_REPORT_PATTERNS: dict[ToolName, re.Pattern[str]] = {
+    ToolName.scoreboard: re.compile(
+        r"^\d{4}-\d{2}-\d{2}-scoreboard[-_][A-Za-z0-9._-]{1,40}\.(?:md|json)$"
+    ),
+}
+
+# How many scoreboard files to offer at once. Enough for a handful of
+# candidates measured on the same day, short of an unbounded list.
+_PATTERN_REPORT_LIMIT = 20
+
 CONTENT_TYPES: dict[str, str] = {
     ".md": "text/markdown; charset=utf-8",
     ".json": "application/json; charset=utf-8",
@@ -190,6 +229,12 @@ def _find_report_files(tool: ToolName) -> list[Path]:
     out_dir = Path(SCRIPTS_DIR) / "out"
     if not out_dir.is_dir():
         return []
+
+    pattern = _REPORT_PATTERNS.get(tool)
+    if pattern is not None:
+        matches = [p for p in out_dir.iterdir() if p.is_file() and pattern.match(p.name)]
+        matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        return matches[:_PATTERN_REPORT_LIMIT]
 
     bases = _REPORT_BASES.get(tool, [])
     result: list[Path] = []
@@ -224,6 +269,10 @@ async def list_reports(tool: ToolName):
 
 def _is_allowed_report(tool: ToolName, filename: str) -> bool:
     """Check that filename matches a known report pattern for the tool."""
+    pattern = _REPORT_PATTERNS.get(tool)
+    if pattern is not None:
+        return bool(pattern.match(filename))
+
     bases = _REPORT_BASES.get(tool, [])
     for base in bases:
         if filename == base:

@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -71,6 +72,29 @@ def _latest(base: str) -> Path | None:
     plain = OUT / base
     if plain.exists():
         matches.append(plain)
+    return matches[-1] if matches else None
+
+
+# Labels end up in a filename, and the admin UI lets an operator type one, so
+# restrict them to characters that cannot walk out of out/ or confuse the glob
+# that finds snapshots again.
+_LABEL_RE = re.compile(r"^[A-Za-z0-9._-]{1,40}$")
+
+
+def _check_label(label: str) -> str:
+    if not _LABEL_RE.match(label):
+        raise SystemExit(
+            f"[scoreboard] Ungültiges Label {label!r}: erlaubt sind 1–40 Zeichen "
+            "aus A–Z, a–z, 0–9, Punkt, Bindestrich und Unterstrich."
+        )
+    return label
+
+
+def _latest_snapshot(label: str, *, exclude: Path | None = None) -> Path | None:
+    """Neuester Scoreboard-Snapshot zu *label*."""
+    if not OUT.is_dir():
+        return None
+    matches = sorted(p for p in OUT.glob(f"*-scoreboard-{label}.json") if p != exclude)
     return matches[-1] if matches else None
 
 
@@ -392,6 +416,9 @@ def main() -> None:
                     help="cloud_audit_full.json (Default) oder cloud_audit_gold.json")
     ap.add_argument("--compare", type=Path, nargs="+", metavar="SNAPSHOT",
                     help="Zwei oder mehr Scoreboard-JSONs vergleichen statt neu zu messen")
+    ap.add_argument("--compare-with", metavar="LABEL",
+                    help="Nach dem Messen zusätzlich gegen den neuesten Snapshot dieses "
+                         "Labels vergleichen (spart das Heraussuchen der Dateinamen)")
     args = ap.parse_args()
 
     OUT.mkdir(parents=True, exist_ok=True)
@@ -408,6 +435,9 @@ def main() -> None:
 
     if not args.label:
         raise SystemExit("[scoreboard] --label fehlt (Name des Laufs, z.B. das Modell)")
+    _check_label(args.label)
+    if args.compare_with:
+        _check_label(args.compare_with)
 
     ref_path = args.reference or _latest("cloud_audit_full.json") or _latest("cloud_audit_gold.json")
     if ref_path is None or not ref_path.exists():
@@ -441,9 +471,26 @@ def main() -> None:
     print(f"[scoreboard] Steuer: Precision {_pct(tax['precision'])}, Recall {_pct(tax['recall'])}")
     print(f"[scoreboard] Report:   {md_path.relative_to(c.REPO_ROOT)}")
     print(f"[scoreboard] Snapshot: {json_path.relative_to(c.REPO_ROOT)}")
+
+    if args.compare_with:
+        previous = _latest_snapshot(args.compare_with, exclude=json_path)
+        if previous is None:
+            print(f"\n[scoreboard] Kein Snapshot zu --compare-with {args.compare_with!r} "
+                  f"gefunden — Vergleich übersprungen.")
+        else:
+            # Der ältere Lauf zuerst, damit "Neu richtig" die Dokumente meint,
+            # die *dieser* Lauf gewonnen hat.
+            report = _compare([previous, json_path])
+            cmp_path = OUT / f"{c.today_prefix()}scoreboard_compare.md"
+            cmp_path.write_text(report, encoding="utf8")
+            print(report)
+            print(f"[scoreboard] Vergleich mit {previous.name}: "
+                  f"{cmp_path.relative_to(c.REPO_ROOT)}")
+        return
+
     print(f"\n[scoreboard] Nächstes Modell messen, dann:\n"
-          f"  python3 scripts/taxonomy/model_scoreboard.py --compare "
-          f"{json_path.relative_to(c.REPO_ROOT)} <zweiter-snapshot>.json")
+          f"  python3 scripts/taxonomy/model_scoreboard.py --label <neues-modell> "
+          f"--compare-with {args.label}")
 
 
 if __name__ == "__main__":

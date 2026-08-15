@@ -129,7 +129,7 @@ tax categories, and banking.
 | `postgres`           | PostgreSQL 18 + `pgvector` – main application DB and the embeddings DB |
 | `insightface`        | Python – face detection & embeddings (InsightFace `buffalo_l`) |
 | `embedding_service`  | Python – CLIP + DINOv2 image embeddings                        |
-| `llm_service`        | Python – local Llama classifier + multilingual-e5 text embeddings (documents + finance) |
+| `llm_service`        | Python – local Llama classifier + multilingual-e5 text embeddings (documents + finance); model swappable at runtime under Admin → KI-Modell, see [`llm-service/README.md`](./llm-service/README.md#switching-models-at-runtime) |
 | `geo`                | Node – owns `osm2pgsql` + `osm2pgsql-replication`, serves reverse-geocoding and POI lookups |
 | `geo-db`             | PostGIS 16 – one database per imported OSM region              |
 

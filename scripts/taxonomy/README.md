@@ -21,6 +21,7 @@ Gesamtkonzept und Etappen: siehe `docs/taxonomy-tax-quality-improvement.md`.
 | `cluster.py` | B/C | Embeddings clustern, Cluster beschreiben, Repräsentanten + anonymisierten Export erzeugen. `npm run cluster:taxonomy` |
 | `mine_hints.py` | D | Absender/Keyword/Confusion-Mining → Hint-Entwürfe je Kategorie & Steuer-Sektion. `npm run mine-hints:taxonomy` |
 | `cloud_audit.py` | F | Cloud-LLM-Audit: Claude klassifiziert eine Stichprobe, Disagreement-Report + Gold-Set. `npm run audit:taxonomy` |
+| `model_scoreboard.py` | F | Misst den lokalen Klassifikator gegen das Audit-Referenzset und vergleicht Läufe. `npm run scoreboard:taxonomy` |
 
 ## Typischer Ablauf
 
@@ -86,14 +87,22 @@ dem Cloud-Audit und vergleicht mehrere Läufe. Damit wird ein Modellwechsel
 # 1. Baseline: Stichprobe mit dem aktuellen Modell klassifiziert lassen, dann
 npm run scoreboard:taxonomy -- --label qwen3-14b
 
-# 2. Anderes Modell in llm_service, Stichprobe neu klassifizieren, dann
-npm run scoreboard:taxonomy -- --label mistral-small
+# 2. Anderes Modell aktivieren (Admin → KI-Modell), Stichprobe neu
+#    klassifizieren, dann messen und direkt gegen die Baseline vergleichen
+npm run scoreboard:taxonomy -- --label mistral-small --compare-with qwen3-14b
 
-# 3. Vergleichen
+# Zwei bestimmte Snapshots vergleichen, ohne neu zu messen
 npm run scoreboard:taxonomy -- --compare \
   out/2026-08-15-scoreboard-qwen3-14b.json \
   out/2026-08-15-scoreboard-mistral-small.json
 ```
+
+Dasselbe geht ohne Kommandozeile über **Admin → Taxonomie-Tools → Modell-Scoreboard**:
+dort sind „Label" und „Vergleich mit" die beiden Eingabefelder, das Log läuft live
+mit und die Reports stehen danach zum Download bereit. `--label` ist Pflicht — es
+ist der Name, unter dem die Messung später wiedergefunden und verglichen wird —
+und auf `A–Z a–z 0–9 . - _` (max. 40 Zeichen) begrenzt, weil er in den
+Dateinamen wandert.
 
 Referenz ist standardmäßig `out/cloud_audit_full.json` — Claudes Urteil zu
 **jedem** Dokument der Stichprobe. `out/cloud_audit_gold.json` ist über

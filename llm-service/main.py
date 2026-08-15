@@ -1021,8 +1021,16 @@ async def reload_model(req: ReloadRequest) -> dict[str, Any]:
             detail="a model download is running — wait for it or cancel it first",
         )
 
+    payload = req.model_dump()
+    # The sidecar address is a property of this container, not of the stored
+    # configuration — the app has no business knowing the loopback port, and a
+    # row that omitted it would otherwise silently fall back to the dataclass
+    # default rather than to what LLM_SERVER_URL says.
+    if not payload.get("server_url"):
+        payload["server_url"] = _BOOT_CONFIG.server_url
+
     try:
-        cfg = LlmConfig.from_dict(req.model_dump(), models_dir=MODELS_DIR)
+        cfg = LlmConfig.from_dict(payload, models_dir=MODELS_DIR)
     except ConfigError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
