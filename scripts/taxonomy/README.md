@@ -76,6 +76,41 @@ Bestätigungsrate je Sektion), `out/cloud_audit_gold.json` (bestätigte
 Gold-Labels, inkl. Steuerfeldern wo auch dort Übereinstimmung besteht),
 `out/cloud_audit_full.json` (alle Ergebnisse).
 
+## Modell-Scoreboard (`model_scoreboard.py`)
+
+Misst den **aktuellen** lokalen Klassifikator gegen ein Referenz-Labelset aus
+dem Cloud-Audit und vergleicht mehrere Läufe. Damit wird ein Modellwechsel
+(Qwen3-14B → MoE, Mistral, …) messbar statt Geschmackssache.
+
+```bash
+# 1. Baseline: Stichprobe mit dem aktuellen Modell klassifiziert lassen, dann
+npm run scoreboard:taxonomy -- --label qwen3-14b
+
+# 2. Anderes Modell in llm_service, Stichprobe neu klassifizieren, dann
+npm run scoreboard:taxonomy -- --label mistral-small
+
+# 3. Vergleichen
+npm run scoreboard:taxonomy -- --compare \
+  out/2026-08-15-scoreboard-qwen3-14b.json \
+  out/2026-08-15-scoreboard-mistral-small.json
+```
+
+Referenz ist standardmäßig `out/cloud_audit_full.json` — Claudes Urteil zu
+**jedem** Dokument der Stichprobe. `out/cloud_audit_gold.json` ist über
+`--reference` nutzbar, aber als Vergleichsmaßstab zugunsten des damaligen
+Modells verzerrt: es enthält nur Dokumente, bei denen jenes Modell bereits mit
+Claude übereinstimmte, ein besserer Kandidat kann dort also nur verlieren.
+
+Gemessen werden Kategorie-Trefferquote (gesamt und je Referenzkategorie, mit
+den häufigsten Verwechslungen), Steuerrelevanz (Konfusionsmatrix, Precision,
+Recall) und Steuersektionen (exakte Mengengleichheit + Jaccard). Der Vergleich
+zweier Snapshots listet zusätzlich die Dokumente, die **gekippt** sind — dort
+steht, welche Art von Dokument der eine Kandidat besser trifft, was ein
+Mittelwert nie zeigt.
+
+Ergebnisse: `out/<datum>-scoreboard-<label>.{md,json}` und
+`out/<datum>-scoreboard_compare.md`.
+
 ## Anonymisierung
 
 `cluster.py` schreibt `out/representatives.anon.jsonl`: nur gescrubbte Summaries +

@@ -1,6 +1,6 @@
 # LLM Service
 
-A FastAPI-based microservice that hosts a local GGUF model for structured document classification and a **multilingual-e5-base** transformer for high-quality text embeddings. The default image uses Qwen2.5-7B on CPU; the optional document-AI GPU profile uses Qwen3-14B on NVIDIA CUDA.
+A FastAPI-based microservice that hosts a local GGUF model for structured document classification and a **multilingual-e5-base** transformer for high-quality text embeddings. The default image uses Qwen2.5-7B on CPU; the optional document-AI GPU profile runs Qwen3-14B — or a larger Mixture-of-Experts model with its experts offloaded to system RAM — on NVIDIA CUDA.
 
 ---
 
@@ -9,13 +9,35 @@ A FastAPI-based microservice that hosts a local GGUF model for structured docume
 ```
 llm-service/
   main.py               # FastAPI application, model lifecycle, and UTF-8 repair
+  llama_server.py       # HTTP client for the llama-server backend
   Dockerfile            # Python 3.12-slim base with llama-cpp-python
-  Dockerfile.gpu        # CUDA 12.8 / RTX 50-series image
+  Dockerfile.gpu        # CUDA 12.8 / RTX 50-series image, ships llama-server
   docker-compose.yml    # Service-local deployment config
   download_model.sh     # Idempotent downloader for GGUF and HF weights
+  entrypoint.sh         # Model download, then llama-server (+) uvicorn
   requirements.txt      # Core dependencies (torch, llama-cpp-python, etc.)
   tests/                # Unit tests for classification and schemas
 ```
+
+### Two inference backends
+
+`LLM_BACKEND` selects where the GGUF actually runs. The embedder is unaffected
+— sentence-transformers always runs inside the FastAPI process.
+
+| | `inproc` | `server` |
+|---|---|---|
+| Runtime | `llama-cpp-python` in-process | `llama-server` sidecar over HTTP |
+| Shipped by | CPU image | GPU image (its default) |
+| MoE expert offload | not available | `LLM_NCMOE` |
+
+The split exists for one reason: llama-cpp-python cannot pass llama.cpp's
+tensor-buffer overrides. `llama_model_params.tensor_buft_overrides` is present
+in its ctypes struct but marked `# NOTE: unused`, and `Llama.__init__` has no
+keyword for it. Those overrides are what `--n-cpu-moe` is built on, so a
+Mixture-of-Experts model larger than VRAM can only be placed sensibly by
+`llama-server`. Everything else about the two paths is identical — including
+`/classify`'s JSON-schema grammar, which llama-server compiles from the same
+schema object the binding does.
 
 ---
 
@@ -112,6 +134,51 @@ to system RAM with `LLM_EMBED_DEVICE=cpu`. Watch the llama.cpp load log — once
 `n_gpu_layers=-1` can no longer place all 41 layers, the layers that spill to the
 host dominate every request and classification latency collapses.
 
+#### Running a MoE model larger than VRAM
+
+The spill warning above is about *dense* models, where `n_gpu_layers` is the
+only lever and a spilled layer takes its attention with it. A Mixture-of-Experts
+model has a better option. Its bulk is in the expert FFN tensors, and only a
+few experts are read per token, so those tensors can sit in system RAM while
+attention, the shared weights and the KV cache stay on the GPU:
+
+```env
+LLM_IMAGE_SUFFIX=-gpu
+LLM_BACKEND=server
+LLM_NCMOE=32          # experts of the first 32 layers live in system RAM
+LLM_GPU_LAYERS=-1
+LLM_ACCELERATOR=cuda
+```
+
+`LLM_NCMOE` is a dial, not a switch. Start with it at the model's layer count
+(all experts on the CPU), then lower it until `nvidia-smi` shows the card nearly
+full during a `/classify` — every layer won back is expert arithmetic the CPU
+does not have to do. `LLM_SERVER_EXTRA_ARGS` takes raw `--override-tensor`
+patterns when a uniform split is not what you want.
+
+Two things decide whether this is worth doing, and both have to be measured on
+the actual host:
+
+* **Prefill, not decode.** The usual argument for MoE offload — only ~3 B of
+  parameters are active per token, so reading them from RAM is cheap — applies
+  to *generation*, which is bandwidth-bound and short here (a few hundred JSON
+  tokens). `/classify` is dominated by prefill of a five-figure prompt, and a
+  batch of thousands of tokens activates effectively every expert. That is the
+  regime where CPU-resident experts cost the most.
+* **Architecture support.** The GGUF loads only if the llama.cpp build pinned
+  in `Dockerfile.gpu` (`LLAMA_CPP_REF`) knows its architecture. Check before
+  deploying — `llama-server --model <file> --ctx-size 512` on the host either
+  prints the loaded tensor layout or fails with `unknown model architecture`.
+
+KV cache is usually *cheaper* for these models, not more expensive: a 48-layer
+A3B-class model with 4 KV heads × 128 dims spends ~96 KiB/token against
+Qwen3-14B's 160 KiB, i.e. ~1.7 GiB at `LLM_CTX=18000` instead of ~2.8 GiB.
+
+Budget the host side too: the offloaded experts are resident memory, not page
+cache, and `documents/llm-client.ts` gives up on a classification after
+`LLM_SERVICE_TIMEOUT_MS` (default 120 s) — raise it, and keep it below
+`LLM_SERVER_REQUEST_TIMEOUT`, if a document now takes longer than that.
+
 #### Why `LLM_CTX` changes latency so sharply
 
 `/classify` shrinks its prompt to fit the window: it drops the few-shot examples
@@ -173,6 +240,7 @@ Generates warm, personal titles and subtitles for private photo recaps (e.g., "A
 |---|---|---|
 | `MODELS_DIR` | `/models` | Root directory for model artefacts |
 | `LLM_MODEL_URL` | `https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf` | Download source for the LLM GGUF file |
+| `LLM_MODEL_EXTRA_URLS` | — | Space-separated URLs of further shards of a split GGUF. Point `LLM_MODEL_PATH` at shard 1; llama.cpp finds the rest. |
 | `LLM_MODEL_PATH` | `/models/qwen2.5-7b-instruct-q4_k_m.gguf` | Local path to the GGUF model file |
 | `LLM_CTX` | `8192` | Context window size |
 | `LLM_THREADS` | `$(nproc)` | CPU threads for inference |
@@ -182,6 +250,13 @@ Generates warm, personal titles and subtitles for private photo recaps (e.g., "A
 | `LLM_UBATCH` | `512` | Physical micro-batch (`n_ubatch`) inside each `LLM_BATCH`. |
 | `LLM_FLASH_ATTN` | `0` | Enable FlashAttention. Worthwhile at long context on CUDA, and required for a quantised V cache. |
 | `LLM_KV_TYPE` | `f16` | KV-cache element type: `f16`, `q8_0`, `q5_1`, `q5_0`, `q4_0`. `q8_0` halves KV memory at negligible quality cost — needs `LLM_FLASH_ATTN=1`. |
+| `LLM_BACKEND` | `inproc` | Where the GGUF runs: `inproc` (llama-cpp-python) or `server` (llama-server sidecar). The `-gpu` image defaults to `server`. |
+| `LLM_NCMOE` | `0` | `server` only: keep the MoE expert tensors of the first N layers in system RAM (`--n-cpu-moe`). `0` disables it. |
+| `LLM_REASONING` | `off` | `server` only: `off`, `on` or `auto`. `/classify` is grammar-constrained, so a thinking block is wasted budget. |
+| `LLM_SERVER_URL` | `http://127.0.0.1:8080` | `server` only: sidecar address. The port is also what `entrypoint.sh` binds llama-server to. |
+| `LLM_SERVER_EXTRA_ARGS` | — | `server` only: raw llama-server flags appended verbatim (e.g. `--override-tensor`). |
+| `LLM_SERVER_READY_TIMEOUT` | `900` | `server` only: seconds to wait for the sidecar to finish loading before startup fails. |
+| `LLM_SERVER_REQUEST_TIMEOUT` | `900` | `server` only: per-request deadline against the sidecar. Keep above the caller's `LLM_SERVICE_TIMEOUT_MS`. |
 | `LLM_EMBED_DEVICE` | `cpu` | Sentence-Transformer device: `cpu`, `cuda`, or `auto` |
 | `LLM_EMBED_BATCH_SIZE` | `32` | Chunk size `encode()` uses internally when `/embed` receives a large text list. Raise for higher GPU throughput on big batches; lower if VRAM is tight. |
 | `CLASSIFY_TEXT_CHAR_LIMIT` | `6000` | Max document characters fed to `/classify` (cheap pre-cap before the n_ctx token guard). Keep ≥ the app's `DOCUMENTS_CLASSIFY_CHAR_LIMIT`; raise both in lockstep with `LLM_CTX` to classify longer documents. |

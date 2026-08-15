@@ -1,6 +1,14 @@
 # NVIDIA Blackwell (RTX 50 series) requires CUDA 12.8 or newer for native
 # sm_120 code. This image is intentionally amd64-only; the CPU Dockerfile
 # remains the portable default.
+#
+# Unlike the CPU image this one does NOT ship llama-cpp-python. The GPU
+# deployment runs the model in a llama.cpp `llama-server` sidecar
+# (LLM_BACKEND=server) because MoE expert offload — `--n-cpu-moe`, the only way
+# to fit a 20-30 GB Mixture-of-Experts model onto a 16 GB card without
+# collapsing throughput — is not reachable through the Python binding. See
+# llama_server.py. Building llama.cpp here replaces, rather than adds to, the
+# CUDA compile this image used to pay for llama-cpp-python.
 FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04 AS builder
 
 WORKDIR /build
@@ -23,9 +31,44 @@ RUN python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir \
         --index-url https://download.pytorch.org/whl/cu128 \
         torch==2.7.1 \
-    && CMAKE_ARGS="-DGGML_CUDA=ON -DGGML_NATIVE=OFF -DCMAKE_CUDA_ARCHITECTURES=120" \
-        /opt/venv/bin/pip install --no-cache-dir llama-cpp-python==0.3.31 \
     && /opt/venv/bin/pip install --no-cache-dir -r requirements.gpu.txt
+
+# Pinned by tag so an image rebuild is reproducible. Raise it deliberately:
+# newer model architectures (qwen35moe and friends) only load on a build that
+# knows them, and that is the usual reason to move this.
+ARG LLAMA_CPP_REF=b10438
+
+# The embedded Web UI is switched off in both of its provisioning paths: the
+# npm build needs a Node toolchain this image does not have, and the prebuilt
+# fallback would pull assets from Hugging Face at build time. The service runs
+# llama-server with --no-webui regardless.
+#
+# --allow-shlib-undefined is what llama.cpp's own CUDA Dockerfile uses, and is
+# required rather than optional here: libggml-cuda references CUDA *driver*
+# symbols (cuMemCreate, cuGetErrorString, …) that live in libcuda.so.1, which
+# no build container has — the NVIDIA container runtime injects it from the
+# host at run time. Without the flag the final link fails on those symbols.
+#
+# Artefacts are copied out of build/bin rather than `cmake --install`ed: the
+# install rules cover every target in the project, and only llama-server (plus
+# what it links) is built here.
+RUN git clone --depth 1 --branch "${LLAMA_CPP_REF}" https://github.com/ggml-org/llama.cpp /build/llama.cpp \
+    && cmake -S /build/llama.cpp -B /build/llama.cpp/build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DGGML_CUDA=ON \
+        -DGGML_NATIVE=OFF \
+        -DCMAKE_CUDA_ARCHITECTURES=120 \
+        -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined \
+        -DLLAMA_BUILD_SERVER=ON \
+        -DLLAMA_BUILD_TESTS=OFF \
+        -DLLAMA_BUILD_EXAMPLES=OFF \
+        -DLLAMA_BUILD_UI=OFF \
+        -DLLAMA_USE_PREBUILT_UI=OFF \
+    && cmake --build /build/llama.cpp/build --config Release -j "$(nproc)" --target llama-server \
+    && mkdir -p /opt/llama/bin /opt/llama/lib \
+    && cp /build/llama.cpp/build/bin/llama-server /opt/llama/bin/ \
+    && (cp -a /build/llama.cpp/build/bin/*.so* /opt/llama/lib/ || true) \
+    && rm -rf /build/llama.cpp
 
 FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
 
@@ -38,7 +81,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     && groupadd --gid 568 apps \
     && useradd --uid 568 --gid 568 --create-home --shell /bin/bash apps
 
-ENV PATH=/opt/venv/bin:$PATH \
+ENV PATH=/opt/venv/bin:/opt/llama/bin:$PATH \
+    LD_LIBRARY_PATH=/opt/llama/lib:${LD_LIBRARY_PATH} \
     MODELS_DIR=/models \
     LLM_MODEL_PATH=/models/Qwen3-14B-Q4_K_M.gguf \
     SENTENCE_TRANSFORMERS_HOME=/models/st-cache \
@@ -51,6 +95,9 @@ ENV PATH=/opt/venv/bin:$PATH \
     LLM_BATCH=2048 \
     LLM_UBATCH=512 \
     LLM_FLASH_ATTN=1 \
+    LLM_BACKEND=server \
+    LLM_SERVER_URL=http://127.0.0.1:8080 \
+    LLAMA_SERVER_BIN=/opt/llama/bin/llama-server \
     LOG_LEVEL=INFO \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -58,7 +105,8 @@ ENV PATH=/opt/venv/bin:$PATH \
 WORKDIR /app
 
 COPY --from=builder /opt/venv /opt/venv
-COPY main.py ./
+COPY --from=builder /opt/llama /opt/llama
+COPY main.py llama_server.py ./
 COPY download_model.sh /usr/local/bin/download_model.sh
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 

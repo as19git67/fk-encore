@@ -52,7 +52,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY --from=builder /install /usr/local
-COPY main.py ./
+# llama_server.py is inert under this image's LLM_BACKEND=inproc default; it is
+# copied so the CPU image can still be pointed at an external llama-server.
+COPY main.py llama_server.py ./
 COPY download_model.sh /usr/local/bin/download_model.sh
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/download_model.sh /usr/local/bin/entrypoint.sh

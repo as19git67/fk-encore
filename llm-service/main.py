@@ -107,8 +107,37 @@ LLM_EMBED_DEVICE = (os.environ.get("LLM_EMBED_DEVICE") or "cpu").lower()
 # bigger chunks when a caller sends large text lists to /embed.
 LLM_EMBED_BATCH_SIZE = _env_int("LLM_EMBED_BATCH_SIZE", 32)
 
+# ── Backend selection ─────────────────────────────────────────────────────────
+#
+# "inproc": the historical path — llama-cpp-python mmaps the GGUF into this
+#   process. Default, and what the CPU image ships.
+# "server": a llama.cpp ``llama-server`` sidecar owns the model and we talk to
+#   it over HTTP (see llama_server.py). The GPU image uses this, because
+#   MoE expert offload (``--n-cpu-moe``) is reachable only from llama.cpp
+#   proper — the Python binding does not expose the tensor-buffer overrides it
+#   is built on.
+#
+# The embedder is unaffected either way: sentence-transformers keeps running
+# in this process in both modes.
+LLM_BACKEND = (os.environ.get("LLM_BACKEND") or "inproc").lower()
+LLM_SERVER_URL = (os.environ.get("LLM_SERVER_URL") or "http://127.0.0.1:8080").rstrip("/")
+# Startup deadline for the sidecar. A MoE model with most of its experts bound
+# for system RAM reads tens of GB off disk on a cold page cache, so this is
+# minutes, not seconds — and it gates the compose healthcheck, hence an env var.
+LLM_SERVER_READY_TIMEOUT = _env_int("LLM_SERVER_READY_TIMEOUT", 900)
+# Per-request deadline against the sidecar. Must stay above the caller's own
+# LLM_SERVICE_TIMEOUT_MS (documents/llm-client.ts) so the app gives up first and
+# we don't leave a half-finished generation behind.
+LLM_SERVER_REQUEST_TIMEOUT = _env_int("LLM_SERVER_REQUEST_TIMEOUT", 900)
+# Purely informational here — the sidecar is launched by entrypoint.sh, which
+# reads the same variable. Surfaced in /healthz so a deployment's expert-offload
+# split is visible without exec'ing into the container.
+LLM_NCMOE = _env_int("LLM_NCMOE", 0)
+
 if LLM_ACCELERATOR not in {"cpu", "cuda"}:
     raise ValueError("LLM_ACCELERATOR must be 'cpu' or 'cuda'")
+if LLM_BACKEND not in {"inproc", "server"}:
+    raise ValueError("LLM_BACKEND must be 'inproc' or 'server'")
 if LLM_EMBED_DEVICE not in {"cpu", "cuda", "auto"}:
     raise ValueError("LLM_EMBED_DEVICE must be 'cpu', 'cuda', or 'auto'")
 if LLM_KV_TYPE not in _GGML_KV_TYPES:
@@ -264,7 +293,14 @@ def _resolve_classify_response_format() -> dict[str, Any]:
     We only degrade on positive evidence of a problem. If the converter itself
     cannot be located we keep the schema and say so, rather than throwing the
     fix away because of a moved import path.
+
+    Not applicable to the server backend: there the schema travels as JSON and
+    llama-server builds the grammar itself, so there is no local converter to
+    pre-flight — and llama_cpp may not even be installed.
     """
+
+    if LLM_BACKEND == "server":
+        return _CLASSIFY_RESPONSE_FORMAT
 
     try:
         from llama_cpp.llama_grammar import LlamaGrammar
@@ -329,6 +365,82 @@ def _install_shutdown_logging(startup_monotonic: float) -> None:
             pass
 
 
+def _load_inproc_llm() -> None:
+    """Load the GGUF into this process via llama-cpp-python (LLM_BACKEND=inproc)."""
+
+    try:
+        import llama_cpp
+        from llama_cpp import Llama
+    except ImportError as exc:
+        raise RuntimeError(
+            "LLM_BACKEND=inproc needs llama-cpp-python, which this image does not "
+            "ship. The GPU image runs the model in a llama-server sidecar — set "
+            "LLM_BACKEND=server (its default) or use the CPU image."
+        ) from exc
+
+    if LLM_ACCELERATOR == "cuda":
+        supports_offload = getattr(llama_cpp, "llama_supports_gpu_offload", None)
+        if not callable(supports_offload) or not supports_offload():
+            raise RuntimeError(
+                "LLM_ACCELERATOR=cuda was requested, but llama-cpp-python "
+                "was built without CUDA offload support"
+            )
+
+    tuning = _optional_llama_kwargs(llama_cpp, Llama)
+    log.info("Loading Llama from %s (ctx=%d, threads=%d, gpu_layers=%d, tuning=%s)",
+             LLM_MODEL_PATH, LLM_CTX, LLM_THREADS, LLM_GPU_LAYERS, tuning or "{}")
+    base_kwargs: dict[str, Any] = dict(
+        model_path=str(LLM_MODEL_PATH),
+        n_ctx=LLM_CTX,
+        n_threads=LLM_THREADS,
+        n_gpu_layers=LLM_GPU_LAYERS,
+        verbose=False,
+    )
+    try:
+        _state["llm"] = Llama(**base_kwargs, **tuning)
+    except Exception:
+        # A rejected tuning value (unsupported KV type for the build, a
+        # FlashAttention kernel the backend lacks, …) must degrade to the
+        # previous behaviour rather than take the service down.
+        if not tuning:
+            raise
+        log.exception("Llama load failed with tuning kwargs %s — retrying without them", tuning)
+        _state["llm"] = Llama(**base_kwargs)
+    log.info("Llama loaded (RSS=%.0f MB)", _rss_mb())
+
+
+def _load_server_llm() -> None:
+    """Attach to the llama-server sidecar (LLM_BACKEND=server).
+
+    The sidecar is started by entrypoint.sh from the same LLM_* variables, so
+    all this does is wait for it to finish loading. No fallback to the
+    in-process backend: the sidecar exists precisely because the deployment
+    needs a flag the binding cannot pass, and silently loading the same model
+    the other way would either OOM the GPU or run at a fraction of the speed.
+    """
+
+    from llama_server import LlamaServerClient
+
+    client = LlamaServerClient(LLM_SERVER_URL, request_timeout=float(LLM_SERVER_REQUEST_TIMEOUT))
+    log.info(
+        "Waiting for llama-server at %s (ctx=%d, gpu_layers=%d, n_cpu_moe=%d, timeout=%ds)",
+        LLM_SERVER_URL, LLM_CTX, LLM_GPU_LAYERS, LLM_NCMOE, LLM_SERVER_READY_TIMEOUT,
+    )
+    props = client.wait_until_ready(float(LLM_SERVER_READY_TIMEOUT))
+    _state["llm"] = client
+    # n_ctx from /props is the server's actual window, which may differ from our
+    # LLM_CTX if the sidecar clamped it — and LLM_CTX is what /classify budgets
+    # its prompt against, so a mismatch is worth seeing in the log.
+    server_ctx = props.get("default_generation_settings", {}).get("n_ctx") if isinstance(props, dict) else None
+    if isinstance(server_ctx, int) and server_ctx < LLM_CTX:
+        log.warning(
+            "llama-server reports n_ctx=%d but LLM_CTX=%d: /classify will budget prompts "
+            "against the larger value and the server will truncate. Align them.",
+            server_ctx, LLM_CTX,
+        )
+    log.info("llama-server ready (model=%s)", props.get("model_path", "?") if isinstance(props, dict) else "?")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     startup_monotonic = time.monotonic()
@@ -362,42 +474,15 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
     # Lazy imports keep `python main.py --help`-style inspection cheap and
     # move the heavy native-library load into startup, after logging is set up.
-    import llama_cpp
     import torch
-    from llama_cpp import Llama
     from sentence_transformers import SentenceTransformer
 
-    if LLM_ACCELERATOR == "cuda":
-        supports_offload = getattr(llama_cpp, "llama_supports_gpu_offload", None)
-        if not callable(supports_offload) or not supports_offload():
-            raise RuntimeError(
-                "LLM_ACCELERATOR=cuda was requested, but llama-cpp-python "
-                "was built without CUDA offload support"
-            )
-
-    tuning = _optional_llama_kwargs(llama_cpp, Llama)
-    log.info("Loading Llama from %s (ctx=%d, threads=%d, gpu_layers=%d, tuning=%s)",
-             LLM_MODEL_PATH, LLM_CTX, LLM_THREADS, LLM_GPU_LAYERS, tuning or "{}")
-    base_kwargs: dict[str, Any] = dict(
-        model_path=str(LLM_MODEL_PATH),
-        n_ctx=LLM_CTX,
-        n_threads=LLM_THREADS,
-        n_gpu_layers=LLM_GPU_LAYERS,
-        verbose=False,
-    )
-    try:
-        _state["llm"] = Llama(**base_kwargs, **tuning)
-    except Exception:
-        # A rejected tuning value (unsupported KV type for the build, a
-        # FlashAttention kernel the backend lacks, …) must degrade to the
-        # previous behaviour rather than take the service down.
-        if not tuning:
-            raise
-        log.exception("Llama load failed with tuning kwargs %s — retrying without them", tuning)
-        _state["llm"] = Llama(**base_kwargs)
+    if LLM_BACKEND == "server":
+        _load_server_llm()
+    else:
+        _load_inproc_llm()
     _state["llm_accelerator"] = LLM_ACCELERATOR
     _state["classify_response_format"] = _resolve_classify_response_format()
-    log.info("Llama loaded (RSS=%.0f MB)", _rss_mb())
 
     embed_device = _resolve_embed_device(torch)
     log.info("Loading embedder %s on %s", EMBEDDING_MODEL, embed_device)
@@ -603,6 +688,11 @@ async def healthz() -> dict[str, Any]:
         "llm_model_path": str(LLM_MODEL_PATH),
         "llm_accelerator": _state["llm_accelerator"] or LLM_ACCELERATOR,
         "llm_gpu_layers": LLM_GPU_LAYERS,
+        "llm_backend": LLM_BACKEND,
+        # Expert-offload split, server backend only: the number of leading
+        # layers whose MoE experts live in system RAM. 0 on a dense model.
+        "llm_n_cpu_moe": LLM_NCMOE if LLM_BACKEND == "server" else None,
+        "llm_ctx": LLM_CTX,
         "embedding_model": EMBEDDING_MODEL,
         "embedder_device": _state["embedder_device"] or LLM_EMBED_DEVICE,
         "embed_batch_size": LLM_EMBED_BATCH_SIZE,
