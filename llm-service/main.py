@@ -24,13 +24,25 @@ import re
 import resource
 import signal
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable, TypeVar
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
+
+from llama_supervisor import LlamaServerProcess, terminate_own_process
+from llm_config import ConfigError, LlmConfig, clear_active, load_active, save_active
+from model_downloads import (
+    DownloadError,
+    DownloadManager,
+    DownloadTarget,
+    delete_model_file,
+    disk_usage,
+    filename_from_url,
+    list_model_files,
+)
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -52,19 +64,25 @@ def _env_int(name: str, default: int) -> int:
     return int(raw)
 
 
-def _env_bool(name: str, default: bool) -> bool:
-    raw = os.environ.get(name)
-    if raw is None or raw == "":
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
-
-
 MODELS_DIR = Path(os.environ.get("MODELS_DIR") or "/models")
-LLM_MODEL_PATH = Path(os.environ.get("LLM_MODEL_PATH") or str(MODELS_DIR / "qwen2.5-7b-instruct-q4_k_m.gguf"))
-LLM_CTX = _env_int("LLM_CTX", 8192)
-LLM_THREADS = _env_int("LLM_THREADS", os.cpu_count() or 4)
-LLM_GPU_LAYERS = _env_int("LLM_GPU_LAYERS", 0)
-LLM_ACCELERATOR = (os.environ.get("LLM_ACCELERATOR") or "cpu").lower()
+
+# The model-facing knobs below are no longer read one by one from the
+# environment: they arrive as an :class:`LlmConfig`, which comes either from
+# the environment (the compose/.env case, unchanged) or from a configuration
+# activated through the admin UI and persisted on the models volume.
+#
+# They stay module-level globals because every read site in this file — the
+# /classify token budget, /healthz, both loaders — already treats them as such.
+# :func:`_apply_config` is the single place that rebinds them, and it only runs
+# at startup and under the reload lock, so no request observes a half-applied
+# config.
+_BOOT_CONFIG = LlmConfig.from_env()
+
+LLM_MODEL_PATH = _BOOT_CONFIG.model_path
+LLM_CTX = _BOOT_CONFIG.ctx
+LLM_THREADS = _BOOT_CONFIG.threads
+LLM_GPU_LAYERS = _BOOT_CONFIG.gpu_layers
+LLM_ACCELERATOR = _BOOT_CONFIG.accelerator
 # ── Prefill / KV tuning ───────────────────────────────────────────────────────
 #
 # The classifier prompt is dominated by a fixed prefix — system prompts plus the
@@ -77,18 +95,18 @@ LLM_ACCELERATOR = (os.environ.get("LLM_ACCELERATOR") or "cpu").lower()
 # upstream default of 512 leaves GPU prefill throughput unused at five-figure
 # prompt lengths. Defaults kept at llama.cpp's own value so the CPU image is
 # unaffected — the CUDA image raises them via ENV.
-LLM_BATCH = _env_int("LLM_BATCH", 512)
-LLM_UBATCH = _env_int("LLM_UBATCH", 512)
+LLM_BATCH = _BOOT_CONFIG.batch
+LLM_UBATCH = _BOOT_CONFIG.ubatch
 # FlashAttention: fused attention kernel, a real win at long context on CUDA and
 # a prerequisite for quantising the V side of the KV cache. Off by default
 # (llama.cpp's default); the CUDA image turns it on.
-LLM_FLASH_ATTN = _env_bool("LLM_FLASH_ATTN", False)
+LLM_FLASH_ATTN = _BOOT_CONFIG.flash_attn
 # KV-cache element type. Qwen3-14B spends 160 KiB of KV per token (40 layers ×
 # 8 KV heads × 128 dims × [K+V] × 2 bytes) — 2.8 GiB at LLM_CTX=18500, the
 # largest VRAM item after the weights themselves. "q8_0" halves that at
 # negligible quality cost, buying headroom for a larger window. Quantising the
 # V cache requires LLM_FLASH_ATTN=1.
-LLM_KV_TYPE = (os.environ.get("LLM_KV_TYPE") or "f16").lower()
+LLM_KV_TYPE = _BOOT_CONFIG.kv_type
 
 # ggml_type enum values (ggml.h). Hard-coded as a fallback because the symbol
 # names are not guaranteed to be re-exported at the llama_cpp package root
@@ -119,29 +137,28 @@ LLM_EMBED_BATCH_SIZE = _env_int("LLM_EMBED_BATCH_SIZE", 32)
 #
 # The embedder is unaffected either way: sentence-transformers keeps running
 # in this process in both modes.
-LLM_BACKEND = (os.environ.get("LLM_BACKEND") or "inproc").lower()
-LLM_SERVER_URL = (os.environ.get("LLM_SERVER_URL") or "http://127.0.0.1:8080").rstrip("/")
+LLM_BACKEND = _BOOT_CONFIG.backend
+LLM_SERVER_URL = _BOOT_CONFIG.server_url
 # Startup deadline for the sidecar. A MoE model with most of its experts bound
 # for system RAM reads tens of GB off disk on a cold page cache, so this is
 # minutes, not seconds — and it gates the compose healthcheck, hence an env var.
-LLM_SERVER_READY_TIMEOUT = _env_int("LLM_SERVER_READY_TIMEOUT", 900)
+LLM_SERVER_READY_TIMEOUT = _BOOT_CONFIG.server_ready_timeout
 # Per-request deadline against the sidecar. Must stay above the caller's own
 # LLM_SERVICE_TIMEOUT_MS (documents/llm-client.ts) so the app gives up first and
 # we don't leave a half-finished generation behind.
-LLM_SERVER_REQUEST_TIMEOUT = _env_int("LLM_SERVER_REQUEST_TIMEOUT", 900)
-# Purely informational here — the sidecar is launched by entrypoint.sh, which
-# reads the same variable. Surfaced in /healthz so a deployment's expert-offload
-# split is visible without exec'ing into the container.
-LLM_NCMOE = _env_int("LLM_NCMOE", 0)
+LLM_SERVER_REQUEST_TIMEOUT = _BOOT_CONFIG.server_request_timeout
+# Expert-offload split: the number of leading layers whose MoE expert tensors
+# live in system RAM. Surfaced in /healthz so a deployment's split is visible
+# without exec'ing into the container.
+LLM_NCMOE = _BOOT_CONFIG.n_cpu_moe
+LLM_REASONING = _BOOT_CONFIG.reasoning
 
-if LLM_ACCELERATOR not in {"cpu", "cuda"}:
-    raise ValueError("LLM_ACCELERATOR must be 'cpu' or 'cuda'")
-if LLM_BACKEND not in {"inproc", "server"}:
-    raise ValueError("LLM_BACKEND must be 'inproc' or 'server'")
+# LLM_ACCELERATOR / LLM_BACKEND / LLM_KV_TYPE are validated by
+# LlmConfig.validate(), which runs on both the environment and the API paths so
+# the two reject the same values. The embedder is not part of that config — it
+# is unaffected by a model swap — so it keeps its own check here.
 if LLM_EMBED_DEVICE not in {"cpu", "cuda", "auto"}:
     raise ValueError("LLM_EMBED_DEVICE must be 'cpu', 'cuda', or 'auto'")
-if LLM_KV_TYPE not in _GGML_KV_TYPES:
-    raise ValueError(f"LLM_KV_TYPE must be one of {sorted(_GGML_KV_TYPES)}, got {LLM_KV_TYPE!r}")
 
 # Deterministic backstop for a known small-model failure mode: when the
 # classifier doesn't actually see a tax-section match, it sometimes returns
@@ -185,7 +202,54 @@ _state: dict[str, Any] = {
     "cuda_device_name": None,
     # Resolved once at startup — see _resolve_classify_response_format.
     "classify_response_format": None,
+    # The LlmConfig currently in force, and where it came from ("env" or "file").
+    "config": _BOOT_CONFIG,
+    "config_source": "env",
 }
+
+# Owns the llama-server subprocess for the server backend. Created eagerly so
+# /healthz and the reload machinery can ask about it before anything is loaded;
+# it starts no process until told to.
+_llama_server = LlamaServerProcess(on_unexpected_exit=terminate_own_process)
+
+# Downloads of model files requested at runtime through the admin UI. The
+# cold-start download still belongs to download_model.sh.
+_downloads = DownloadManager(MODELS_DIR)
+
+
+def _apply_config(cfg: LlmConfig, *, source: str) -> None:
+    """Publish *cfg* as this module's live configuration.
+
+    Rebinding module globals is deliberate: every read site in this file
+    already reads these names, and funnelling the writes through one function
+    keeps that true without threading a config object through the request
+    handlers. Only startup and the reload lock call it, so no in-flight request
+    can see a mix of old and new values.
+    """
+
+    global LLM_MODEL_PATH, LLM_CTX, LLM_THREADS, LLM_GPU_LAYERS, LLM_ACCELERATOR
+    global LLM_BATCH, LLM_UBATCH, LLM_FLASH_ATTN, LLM_KV_TYPE
+    global LLM_BACKEND, LLM_SERVER_URL, LLM_NCMOE, LLM_REASONING
+    global LLM_SERVER_READY_TIMEOUT, LLM_SERVER_REQUEST_TIMEOUT
+
+    LLM_MODEL_PATH = cfg.model_path
+    LLM_CTX = cfg.ctx
+    LLM_THREADS = cfg.threads
+    LLM_GPU_LAYERS = cfg.gpu_layers
+    LLM_ACCELERATOR = cfg.accelerator
+    LLM_BATCH = cfg.batch
+    LLM_UBATCH = cfg.ubatch
+    LLM_FLASH_ATTN = cfg.flash_attn
+    LLM_KV_TYPE = cfg.kv_type
+    LLM_BACKEND = cfg.backend
+    LLM_SERVER_URL = cfg.server_url
+    LLM_NCMOE = cfg.n_cpu_moe
+    LLM_REASONING = cfg.reasoning
+    LLM_SERVER_READY_TIMEOUT = cfg.server_ready_timeout
+    LLM_SERVER_REQUEST_TIMEOUT = cfg.server_request_timeout
+
+    _state["config"] = cfg
+    _state["config_source"] = source
 
 
 def _resolve_embed_device(torch: Any) -> str:
@@ -392,7 +456,9 @@ def _load_inproc_llm() -> None:
     base_kwargs: dict[str, Any] = dict(
         model_path=str(LLM_MODEL_PATH),
         n_ctx=LLM_CTX,
-        n_threads=LLM_THREADS,
+        # 0 means "unset" in a stored configuration; the binding wants a real
+        # number, so resolve it the way the environment default does.
+        n_threads=LLM_THREADS or (os.cpu_count() or 4),
         n_gpu_layers=LLM_GPU_LAYERS,
         verbose=False,
     )
@@ -410,16 +476,36 @@ def _load_inproc_llm() -> None:
 
 
 def _load_server_llm() -> None:
-    """Attach to the llama-server sidecar (LLM_BACKEND=server).
+    """Bring up the llama-server backend and attach to it (LLM_BACKEND=server).
 
-    The sidecar is started by entrypoint.sh from the same LLM_* variables, so
-    all this does is wait for it to finish loading. No fallback to the
-    in-process backend: the sidecar exists precisely because the deployment
-    needs a flag the binding cannot pass, and silently loading the same model
-    the other way would either OOM the GPU or run at a fraction of the speed.
+    This process owns the sidecar (see llama_supervisor) rather than inheriting
+    one from entrypoint.sh, because switching models means stopping the old
+    server and starting a new one with different arguments — something the app
+    cannot do to a process it did not spawn.
+
+    When the image ships no llama-server we only attach: pointing
+    LLM_BACKEND=server at a server running elsewhere (another compose service,
+    another host) is a legitimate setup, and the readiness wait against the URL
+    is then the only check that makes sense.
+
+    No fallback to the in-process backend either way: this backend exists
+    precisely because the deployment needs a flag the binding cannot pass, and
+    silently loading the same model the other way would either OOM the GPU or
+    run at a fraction of the speed.
     """
 
     from llama_server import LlamaServerClient
+
+    if _llama_server.available:
+        if not _llama_server.is_running:
+            _llama_server.start(_state["config"])
+    else:
+        log.warning(
+            "LLM_BACKEND=server but %s is not present — expecting an external "
+            "llama-server at %s",
+            _llama_server.binary,
+            LLM_SERVER_URL,
+        )
 
     client = LlamaServerClient(LLM_SERVER_URL, request_timeout=float(LLM_SERVER_REQUEST_TIMEOUT))
     log.info(
@@ -441,41 +527,83 @@ def _load_server_llm() -> None:
     log.info("llama-server ready (model=%s)", props.get("model_path", "?") if isinstance(props, dict) else "?")
 
 
-@asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    startup_monotonic = time.monotonic()
+def _resolve_startup_config() -> tuple[LlmConfig, str]:
+    """Pick the configuration to boot with: the activated one if there is one,
+    the environment otherwise.
 
-    if not LLM_MODEL_PATH.exists():
-        log.info("LLM model not found at %s. Attempting to download...", LLM_MODEL_PATH)
-        import subprocess
-        
-        # Look for the download script in the standard container path,
-        # or relative to main.py for local development.
-        script_path = Path("/usr/local/bin/download_model.sh")
-        if not script_path.exists():
-            script_path = Path(__file__).parent / "download_model.sh"
+    A broken persisted file is *not* fatal. It would otherwise wedge the
+    service into a crash loop that no endpoint could repair, since every
+    endpoint lives behind this startup — so we log it and fall back to the
+    environment, which is the configuration the deployment shipped with.
+    """
 
-        if script_path.exists():
-            try:
-                # We call the idempotent download script to populate both the GGUF
-                # and the sentence-transformers cache before loading begins.
-                subprocess.run([str(script_path)], check=True)
-            except Exception as e:
-                log.error("Auto-download failed: %s", e)
-                raise RuntimeError(
-                    f"LLM model not found at {LLM_MODEL_PATH} and auto-download failed. "
-                    "Run download_model.sh manually to investigate."
-                ) from e
-        else:
-            raise RuntimeError(
-                f"LLM model not found at {LLM_MODEL_PATH} and download script not found at {script_path}. "
-                "Please ensure the models volume is correctly populated."
-            )
+    try:
+        persisted = load_active(MODELS_DIR)
+    except Exception:
+        log.exception(
+            "could not read the activated configuration from %s — falling back to "
+            "the environment. Re-activate a configuration to replace the file.",
+            MODELS_DIR,
+        )
+        return _BOOT_CONFIG, "env"
 
-    # Lazy imports keep `python main.py --help`-style inspection cheap and
-    # move the heavy native-library load into startup, after logging is set up.
-    import torch
-    from sentence_transformers import SentenceTransformer
+    if persisted is None:
+        log.info("No activated configuration on the models volume — using the environment")
+        return _BOOT_CONFIG, "env"
+
+    log.info(
+        "Using activated configuration %r (model=%s, backend=%s, ctx=%d)",
+        persisted.label or "unnamed", persisted.model_path.name, persisted.backend, persisted.ctx,
+    )
+    return persisted, "file"
+
+
+def _ensure_model_present(cfg: LlmConfig) -> None:
+    """Make sure the GGUF for *cfg* is on the volume, downloading if it is not."""
+
+    if cfg.model_path.exists():
+        return
+
+    if cfg.model_url:
+        # An activated configuration carries its own URL, which is generally
+        # *not* the one in LLM_MODEL_URL — so fetch it directly rather than
+        # letting download_model.sh pull the environment's model.
+        log.info("Model %s missing — downloading from %s", cfg.model_path.name, cfg.model_url)
+        targets = [DownloadTarget(url=cfg.model_url, filename=cfg.model_path.name)]
+        targets += [DownloadTarget(url=u, filename=filename_from_url(u)) for u in cfg.extra_urls]
+        _downloads.run_blocking(targets, sha256=cfg.model_sha256)
+        if not cfg.model_path.exists():
+            raise RuntimeError(f"download finished but {cfg.model_path} is still missing")
+        return
+
+    log.info("LLM model not found at %s. Attempting to download...", cfg.model_path)
+    import subprocess
+
+    # Look for the download script in the standard container path,
+    # or relative to main.py for local development.
+    script_path = Path("/usr/local/bin/download_model.sh")
+    if not script_path.exists():
+        script_path = Path(__file__).parent / "download_model.sh"
+
+    if not script_path.exists():
+        raise RuntimeError(
+            f"LLM model not found at {cfg.model_path} and download script not found at "
+            f"{script_path}. Please ensure the models volume is correctly populated."
+        )
+    try:
+        # We call the idempotent download script to populate both the GGUF
+        # and the sentence-transformers cache before loading begins.
+        subprocess.run([str(script_path)], check=True)
+    except Exception as e:
+        log.error("Auto-download failed: %s", e)
+        raise RuntimeError(
+            f"LLM model not found at {cfg.model_path} and auto-download failed. "
+            "Run download_model.sh manually to investigate."
+        ) from e
+
+
+def _load_llm() -> None:
+    """Load the model described by the live configuration."""
 
     if LLM_BACKEND == "server":
         _load_server_llm()
@@ -483,6 +611,22 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         _load_inproc_llm()
     _state["llm_accelerator"] = LLM_ACCELERATOR
     _state["classify_response_format"] = _resolve_classify_response_format()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    startup_monotonic = time.monotonic()
+
+    cfg, source = _resolve_startup_config()
+    _apply_config(cfg, source=source)
+    _ensure_model_present(cfg)
+
+    # Lazy imports keep `python main.py --help`-style inspection cheap and
+    # move the heavy native-library load into startup, after logging is set up.
+    import torch
+    from sentence_transformers import SentenceTransformer
+
+    _load_llm()
 
     embed_device = _resolve_embed_device(torch)
     log.info("Loading embedder %s on %s", EMBEDDING_MODEL, embed_device)
@@ -497,7 +641,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
     log.info("Ready.")
     yield
-    # Nothing to clean up — process exit releases the mmaps.
+    # The mmaps go with the process, but the llama-server subprocess does not:
+    # left behind it would keep the GPU allocated and the port bound, so a
+    # container restart would find its own successor in the way.
+    _downloads.cancel()
+    _llama_server.stop()
 
 
 app = FastAPI(title="llm-service", version="1.0.0", lifespan=lifespan)
@@ -693,6 +841,13 @@ async def healthz() -> dict[str, Any]:
         # layers whose MoE experts live in system RAM. 0 on a dense model.
         "llm_n_cpu_moe": LLM_NCMOE if LLM_BACKEND == "server" else None,
         "llm_ctx": LLM_CTX,
+        # Which named configuration is loaded, and whether it came from an
+        # activated row or from the environment. "env" is the state of any
+        # deployment that has never used the admin UI.
+        "llm_config_label": _state["config"].label or None,
+        "llm_config_id": _state["config"].config_id,
+        "llm_config_source": _state["config_source"],
+        "llm_reload_state": _reload_status["state"],
         "embedding_model": EMBEDDING_MODEL,
         "embedder_device": _state["embedder_device"] or LLM_EMBED_DEVICE,
         "embed_batch_size": LLM_EMBED_BATCH_SIZE,
@@ -700,6 +855,302 @@ async def healthz() -> dict[str, Any]:
         "rss_mb": round(_rss_mb(), 1),
         "uptime_s": round(uptime_s, 1) if uptime_s is not None else None,
     }
+
+
+# ─── Runtime model configuration ──────────────────────────────────────────────
+#
+# A model swap is a multi-minute operation — stop the server, possibly fetch
+# 26 GB of weights, load them — so /reload accepts the request, answers 202 and
+# does the work in the background. Callers poll /reload/status.
+#
+# Inference is unavailable meanwhile: _state["llm"] is cleared first, which the
+# existing guards in /classify, /embed and /json-prompt already turn into a 503,
+# and the app's llm-client already treats a 503 as "defer and retry later".
+
+# How long a reload waits for an in-flight inference to finish before giving
+# up. Generous on purpose: a classify against a MoE model split across system
+# RAM can legitimately run for minutes, and cutting it off to swap the model
+# wastes the work rather than saving time.
+RELOAD_DRAIN_TIMEOUT = 900.0
+
+# Reloads run on their own thread, not on the inference executor and not as an
+# asyncio task. Not the inference executor because a multi-minute model load
+# would queue every /embed behind it, and the embedder is not part of the swap.
+# Not an asyncio task because it must outlive the request that started it, and
+# a task holds no claim on the loop once the response has been sent.
+_reload_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="llm-reload")
+
+_RELOAD_STATES = ("idle", "stopping", "downloading", "loading", "ready", "error")
+
+_reload_status: dict[str, Any] = {
+    "state": "idle",
+    "detail": None,
+    "label": "",
+    "started_at": None,
+    "finished_at": None,
+}
+# Rejects a second concurrent reload. Not a queue: two operators racing to
+# activate different models is a mistake to surface, not one to serialise.
+_reload_running = False
+
+
+def _set_reload_state(state: str, *, detail: str | None = None) -> None:
+    _reload_status["state"] = state
+    _reload_status["detail"] = detail
+    if state in {"ready", "error"}:
+        _reload_status["finished_at"] = time.time()
+
+
+def _config_view() -> dict[str, Any]:
+    cfg: LlmConfig = _state["config"]
+    data = cfg.to_dict()
+    data["source"] = _state["config_source"]
+    data["model_present"] = cfg.model_path.exists()
+    return data
+
+
+def _drain_inference() -> None:
+    """Block until nothing is running on the inference executor.
+
+    It has a single worker, so a no-op job returns only once whatever was in
+    front of it has finished. Cheaper than cancelling an in-flight classify,
+    and it means a swap never pulls the model out from under a request that
+    has already paid for most of its prefill.
+    """
+
+    _inference_executor.submit(lambda: None).result(timeout=RELOAD_DRAIN_TIMEOUT)
+
+
+def _reload_worker(cfg: LlmConfig) -> None:
+    """Swap the loaded model. Runs on the reload thread."""
+
+    previous: LlmConfig = _state["config"]
+
+    # Reject new work first, then wait for the work already accepted.
+    _state["llm"] = None
+    _drain_inference()
+
+    if _llama_server.is_running:
+        _set_reload_state("stopping")
+        _llama_server.stop()
+
+    try:
+        if not cfg.model_path.exists():
+            _set_reload_state("downloading")
+        _ensure_model_present(cfg)
+
+        _set_reload_state("loading")
+        _apply_config(cfg, source="file")
+        _load_llm()
+    except Exception:
+        # Try to get back to the model that was working. If that fails too the
+        # service stays down and the compose healthcheck restarts it, which is
+        # the right outcome — but the common case (a typo'd filename, a model
+        # this llama.cpp build cannot read) recovers without an outage.
+        log.exception("Reload failed — restoring the previous configuration")
+        try:
+            if _llama_server.is_running:
+                _llama_server.stop()
+            _apply_config(previous, source=_state["config_source"])
+            _load_llm()
+            log.info("Previous configuration restored")
+        except Exception:
+            log.exception("Could not restore the previous configuration either")
+        raise
+
+    # Persisted only now: a configuration that cannot load must not become the
+    # one the container boots into after a restart.
+    save_active(MODELS_DIR, cfg)
+    log.info("Reload complete: %s (%s)", cfg.model_path.name, cfg.label or "unnamed")
+
+
+def _submit_reload(worker: Callable[[], None], *, label: str) -> None:
+    """Hand *worker* to the reload thread and report its outcome through
+    /reload/status."""
+
+    global _reload_running
+
+    _reload_running = True
+    _reload_status.update(
+        {"label": label, "started_at": time.time(), "finished_at": None, "detail": None}
+    )
+    _set_reload_state("stopping")
+
+    def done(fut: "Future[None]") -> None:
+        global _reload_running
+        try:
+            fut.result()
+            _set_reload_state("ready")
+        except Exception as exc:  # noqa: BLE001 — reported through /reload/status
+            _set_reload_state("error", detail=f"{type(exc).__name__}: {exc}")
+        finally:
+            _reload_running = False
+
+    _reload_executor.submit(worker).add_done_callback(done)
+
+
+class ReloadRequest(BaseModel):
+    """One row of the app's llm_model_config table, as JSON.
+
+    Field names match the table's columns rather than this module's globals so
+    the app can hand a row over without a translation layer; LlmConfig.from_dict
+    owns the mapping and the validation.
+    """
+
+    # extra=allow: the app sends the whole row and LlmConfig.from_dict picks
+    # what it understands, so adding a column does not need a change here.
+    # protected_namespaces=(): pydantic reserves the "model_" prefix by
+    # default, and these field names come from the database schema.
+    model_config = {"extra": "allow", "protected_namespaces": ()}
+
+    model_filename: str = Field(..., min_length=1)
+
+
+@app.get("/config")
+async def get_config() -> dict[str, Any]:
+    return {"config": _config_view(), "reload": dict(_reload_status)}
+
+
+@app.post("/reload", status_code=202)
+async def reload_model(req: ReloadRequest) -> dict[str, Any]:
+    if _reload_running:
+        raise HTTPException(status_code=409, detail="a reload is already running")
+    if _downloads.busy:
+        raise HTTPException(
+            status_code=409,
+            detail="a model download is running — wait for it or cancel it first",
+        )
+
+    try:
+        cfg = LlmConfig.from_dict(req.model_dump(), models_dir=MODELS_DIR)
+    except ConfigError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if cfg.backend == "server" and not _llama_server.available:
+        # Loading it in-process instead would silently ignore the very flags
+        # this backend was chosen for, so refuse rather than degrade.
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"backend 'server' needs a llama-server binary; {_llama_server.binary} "
+                "is not present in this image (the GPU image ships it)"
+            ),
+        )
+    if not cfg.model_path.exists() and not cfg.model_url:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{cfg.model_path.name} is not on the models volume and no model_url was given",
+        )
+
+    _submit_reload(functools.partial(_reload_worker, cfg), label=cfg.label)
+    return {"status": "accepted", "reload": dict(_reload_status)}
+
+
+@app.get("/reload/status")
+async def reload_status() -> dict[str, Any]:
+    return {
+        "reload": dict(_reload_status),
+        "llm_loaded": _state["llm"] is not None,
+        "config": _config_view(),
+        "download": _downloads.status(),
+    }
+
+
+@app.post("/config/reset", status_code=202)
+async def reset_config() -> dict[str, Any]:
+    """Discard the activated configuration and go back to the environment.
+
+    The way out if an activated configuration turns out to be wrong: it
+    restores exactly what compose/.env describe, which is the state a
+    deployment that never used the UI is in.
+    """
+
+    if _reload_running:
+        raise HTTPException(status_code=409, detail="a reload is already running")
+
+    removed = clear_active(MODELS_DIR)
+    _submit_reload(_reload_worker_env, label="")
+    return {"status": "accepted", "removed_file": removed, "reload": dict(_reload_status)}
+
+
+def _reload_worker_env() -> None:
+    """Same as :func:`_reload_worker` for the environment config, minus the
+    persistence step — the whole point is that no file remains."""
+
+    _state["llm"] = None
+    _drain_inference()
+    if _llama_server.is_running:
+        _llama_server.stop()
+    _ensure_model_present(_BOOT_CONFIG)
+    _set_reload_state("loading")
+    _apply_config(_BOOT_CONFIG, source="env")
+    _load_llm()
+    log.info("Back on the environment configuration (%s)", _BOOT_CONFIG.model_path.name)
+
+
+# ─── Model files on the volume ────────────────────────────────────────────────
+
+
+class DownloadRequest(BaseModel):
+    url: str = Field(..., min_length=1)
+    # Defaults to the URL's basename, which is what an operator pasting a
+    # Hugging Face link almost always wants.
+    filename: str | None = None
+    sha256: str | None = None
+    # Further shards of a split GGUF; each lands under its own basename.
+    extra_urls: list[str] = Field(default_factory=list)
+
+
+@app.get("/models/files")
+async def models_files() -> dict[str, Any]:
+    return {
+        "models_dir": str(MODELS_DIR),
+        "files": list_model_files(MODELS_DIR),
+        "active_filename": LLM_MODEL_PATH.name,
+        "disk": disk_usage(MODELS_DIR),
+        "download": _downloads.status(),
+    }
+
+
+@app.post("/models/download", status_code=202)
+async def models_download(req: DownloadRequest) -> dict[str, Any]:
+    try:
+        targets = [
+            DownloadTarget(url=req.url, filename=req.filename or filename_from_url(req.url))
+        ]
+        targets += [DownloadTarget(url=u, filename=filename_from_url(u)) for u in req.extra_urls]
+        _downloads.start(targets, sha256=req.sha256 or "")
+    except DownloadError as exc:
+        # "already running" is a conflict, everything else is bad input.
+        status = 409 if "already running" in str(exc) else 422
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    return {"status": "accepted", "download": _downloads.status()}
+
+
+@app.get("/models/download/status")
+async def models_download_status() -> dict[str, Any]:
+    return {"download": _downloads.status()}
+
+
+@app.post("/models/download/cancel")
+async def models_download_cancel() -> dict[str, Any]:
+    cancelled = _downloads.cancel()
+    return {"cancelled": cancelled, "download": _downloads.status()}
+
+
+@app.delete("/models/files/{filename}")
+async def models_delete(filename: str) -> dict[str, Any]:
+    if filename == LLM_MODEL_PATH.name:
+        raise HTTPException(status_code=409, detail="cannot delete the model currently loaded")
+    if _downloads.busy and _downloads.status().get("filename") == filename:
+        raise HTTPException(status_code=409, detail="that file is being downloaded right now")
+    try:
+        delete_model_file(MODELS_DIR, filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DownloadError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"status": "deleted", "filename": filename, "disk": disk_usage(MODELS_DIR)}
 
 
 # ─── PUT /prompts ─────────────────────────────────────────────────────────────
