@@ -133,16 +133,20 @@ def test_f16_kv_type_adds_no_kwargs(tuning):
 
 
 def test_env_bool_parsing():
+    # The helper now lives with the rest of the configuration handling, since
+    # that is what reads the environment.
+    from llm_config import _env_bool
+
     for raw in ("1", "true", "TRUE", "yes", "on"):
         os.environ["_TEST_FLAG"] = raw
-        assert main._env_bool("_TEST_FLAG", False) is True
+        assert _env_bool("_TEST_FLAG", False) is True
     for raw in ("0", "false", "no", "off", "nonsense"):
         os.environ["_TEST_FLAG"] = raw
-        assert main._env_bool("_TEST_FLAG", True) is False
+        assert _env_bool("_TEST_FLAG", True) is False
     # Absent and empty both fall back to the default (compose passes "" for
     # unset ${VAR:-} overrides).
     del os.environ["_TEST_FLAG"]
-    assert main._env_bool("_TEST_FLAG", True) is True
+    assert _env_bool("_TEST_FLAG", True) is True
     os.environ["_TEST_FLAG"] = ""
-    assert main._env_bool("_TEST_FLAG", True) is True
+    assert _env_bool("_TEST_FLAG", True) is True
     del os.environ["_TEST_FLAG"]

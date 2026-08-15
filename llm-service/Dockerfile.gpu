@@ -106,7 +106,7 @@ WORKDIR /app
 
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /opt/llama /opt/llama
-COPY main.py llama_server.py ./
+COPY main.py llama_server.py llama_supervisor.py llm_config.py model_downloads.py ./
 COPY download_model.sh /usr/local/bin/download_model.sh
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
