@@ -114,6 +114,12 @@ services:
       INSIGHTFACE_SERVICE_URL: http://insightface:8000
       EMBEDDING_SERVICE_URL: http://embedding_service:8000
       LLM_SERVICE_URL: http://llm_service:8000
+      # Per-request deadline for /classify & friends (documents/llm-client.ts).
+      # The 120 s default fits a dense model held entirely in VRAM; a MoE model
+      # with its experts offloaded to system RAM prefills a five-figure prompt
+      # far more slowly, so raise this in lockstep with LLM_NCMOE — and keep it
+      # below the llm_service's own LLM_SERVER_REQUEST_TIMEOUT.
+      LLM_SERVICE_TIMEOUT_MS: ${LLM_SERVICE_TIMEOUT_MS:-120000}
       RECEIPT_OCR_SERVICE_URL: http://receipt_ocr_service:8000
       TAXONOMY_TOOLS_SERVICE_URL: http://taxonomy_tools:8000
       # ENABLE_LANDMARKS retired (Epic #383) — use ENABLE_POI_DETECTION instead.
@@ -254,6 +260,9 @@ services:
       LLM_MODEL_PATH: ${LLM_MODEL_PATH:-/models/qwen2.5-7b-instruct-q4_k_m.gguf}
       LLM_MODEL_URL: ${LLM_MODEL_URL:-https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf}
       LLM_MODEL_SHA256: ${LLM_MODEL_SHA256:-}
+      # Further shards of a split GGUF (space-separated URLs); LLM_MODEL_PATH
+      # points at the first one.
+      LLM_MODEL_EXTRA_URLS: ${LLM_MODEL_EXTRA_URLS:-}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-base}
       LLM_CTX: ${LLM_CTX:-8192}
       LLM_GPU_LAYERS: ${LLM_GPU_LAYERS:-0}
@@ -269,6 +278,20 @@ services:
       LLM_UBATCH: ${LLM_UBATCH:-512}
       LLM_FLASH_ATTN: ${LLM_FLASH_ATTN:-0}
       LLM_KV_TYPE: ${LLM_KV_TYPE:-f16}
+      # Inference backend. "inproc" = llama-cpp-python inside the FastAPI
+      # process. "server" = llama.cpp llama-server sidecar, which is the only
+      # place MoE expert offload (LLM_NCMOE) is reachable. The -gpu image sets
+      # "server" as its image ENV, but a mapping entry always wins over that,
+      # so the GPU profile must repeat LLM_BACKEND=server in .env — same rule
+      # as LLM_ACCELERATOR and LLM_GPU_LAYERS.
+      LLM_BACKEND: ${LLM_BACKEND:-inproc}
+      # MoE expert offload, server backend only: keep the expert tensors of the
+      # first N layers in system RAM. 0 = off (correct for a dense model).
+      LLM_NCMOE: ${LLM_NCMOE:-0}
+      LLM_REASONING: ${LLM_REASONING:-off}
+      LLM_SERVER_EXTRA_ARGS: ${LLM_SERVER_EXTRA_ARGS:-}
+      LLM_SERVER_READY_TIMEOUT: ${LLM_SERVER_READY_TIMEOUT:-900}
+      LLM_SERVER_REQUEST_TIMEOUT: ${LLM_SERVER_REQUEST_TIMEOUT:-900}
       CLASSIFY_TEXT_CHAR_LIMIT: ${CLASSIFY_TEXT_CHAR_LIMIT:-6000}
       TAX_SECTIONS_MAX: ${TAX_SECTIONS_MAX:-4}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
