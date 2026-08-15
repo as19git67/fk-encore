@@ -43,15 +43,21 @@ const LLM_SERVICE_URL = (process.env.LLM_SERVICE_URL || "http://localhost:8002")
 // either idle or busy loading — none of them wait on inference.
 const CONTROL_TIMEOUT_MS = 15_000;
 
-const BACKENDS = ["inproc", "server"] as const;
-const ACCELERATORS = ["cpu", "cuda"] as const;
-const KV_TYPES = ["f16", "q8_0", "q5_1", "q5_0", "q4_0"] as const;
-const REASONING_MODES = ["off", "auto", "think"] as const;
+// NOTE: keep these written out as literal unions rather than
+// `(typeof BACKENDS)[number]`. Encore.ts' source-code parser does not support
+// indexed-access type queries and refuses to build the service if it sees one
+// in a request or response schema — same trap as RegionStatus in
+// osm-admin/state-machine.ts. The arrays below are annotated with the union,
+// so a typo in either place is still a compile error.
+export type LlmBackend = "inproc" | "server";
+export type LlmAccelerator = "cpu" | "cuda";
+export type LlmKvType = "f16" | "q8_0" | "q5_1" | "q5_0" | "q4_0";
+export type LlmReasoning = "off" | "auto" | "think";
 
-export type LlmBackend = (typeof BACKENDS)[number];
-export type LlmAccelerator = (typeof ACCELERATORS)[number];
-export type LlmKvType = (typeof KV_TYPES)[number];
-export type LlmReasoning = (typeof REASONING_MODES)[number];
+const BACKENDS: readonly LlmBackend[] = ["inproc", "server"];
+const ACCELERATORS: readonly LlmAccelerator[] = ["cpu", "cuda"];
+const KV_TYPES: readonly LlmKvType[] = ["f16", "q8_0", "q5_1", "q5_0", "q4_0"];
+const REASONING_MODES: readonly LlmReasoning[] = ["off", "auto", "think"];
 
 export interface LlmConfigRow {
   id: number;
@@ -522,11 +528,16 @@ export interface ModelFile {
   partial: boolean;
 }
 
+export interface DiskUsage {
+  total_bytes: number | null;
+  free_bytes: number | null;
+}
+
 export interface ModelFilesResponse {
   files: ModelFile[];
   active_filename: string;
   models_dir: string;
-  disk: { total_bytes: number | null; free_bytes: number | null };
+  disk: DiskUsage;
   download: LlmDownloadState;
 }
 
@@ -595,7 +606,7 @@ export interface DeleteModelFileParams {
 
 export interface DeleteModelFileResponse {
   filename: string;
-  disk: { total_bytes: number | null; free_bytes: number | null };
+  disk: DiskUsage;
 }
 
 export const deleteLlmModelFile = api(
