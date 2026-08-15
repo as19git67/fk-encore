@@ -42,20 +42,33 @@ ARG LLAMA_CPP_REF=b10438
 # npm build needs a Node toolchain this image does not have, and the prebuilt
 # fallback would pull assets from Hugging Face at build time. The service runs
 # llama-server with --no-webui regardless.
+#
+# --allow-shlib-undefined is what llama.cpp's own CUDA Dockerfile uses, and is
+# required rather than optional here: libggml-cuda references CUDA *driver*
+# symbols (cuMemCreate, cuGetErrorString, …) that live in libcuda.so.1, which
+# no build container has — the NVIDIA container runtime injects it from the
+# host at run time. Without the flag the final link fails on those symbols.
+#
+# Artefacts are copied out of build/bin rather than `cmake --install`ed: the
+# install rules cover every target in the project, and only llama-server (plus
+# what it links) is built here.
 RUN git clone --depth 1 --branch "${LLAMA_CPP_REF}" https://github.com/ggml-org/llama.cpp /build/llama.cpp \
     && cmake -S /build/llama.cpp -B /build/llama.cpp/build \
         -DCMAKE_BUILD_TYPE=Release \
         -DGGML_CUDA=ON \
         -DGGML_NATIVE=OFF \
         -DCMAKE_CUDA_ARCHITECTURES=120 \
+        -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined \
         -DLLAMA_BUILD_SERVER=ON \
         -DLLAMA_BUILD_TESTS=OFF \
         -DLLAMA_BUILD_EXAMPLES=OFF \
         -DLLAMA_BUILD_UI=OFF \
         -DLLAMA_USE_PREBUILT_UI=OFF \
     && cmake --build /build/llama.cpp/build --config Release -j "$(nproc)" --target llama-server \
-    && cmake --install /build/llama.cpp/build --prefix /opt/llama \
-    && rm -rf /build/llama.cpp/build
+    && mkdir -p /opt/llama/bin /opt/llama/lib \
+    && cp /build/llama.cpp/build/bin/llama-server /opt/llama/bin/ \
+    && (cp -a /build/llama.cpp/build/bin/*.so* /opt/llama/lib/ || true) \
+    && rm -rf /build/llama.cpp
 
 FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
 
