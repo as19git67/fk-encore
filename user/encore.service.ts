@@ -5,6 +5,8 @@ console.log("[boot] user/encore.service.ts: begin");
 
 // Side-effect: registers /admin/scheduled-jobs.
 import "./scheduled-jobs";
+// Side-effect: registers /admin/llm-configs and /admin/llm-models.
+import "./llm-models";
 
 console.log("[boot] user/encore.service.ts: registering Service");
 export default new Service("user", {

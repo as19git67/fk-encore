@@ -28,6 +28,8 @@ interface ToolConfig {
     tax_sample: number | null
     focus_sections: string
     focus_categories: string
+    scoreboard_label: string
+    compare_with: string
   }
 }
 
@@ -44,6 +46,8 @@ const tools = ref<ToolConfig[]>([
       tax_sample: null,
       focus_sections: '',
       focus_categories: '',
+      scoreboard_label: '',
+      compare_with: '',
     },
   },
   {
@@ -58,6 +62,8 @@ const tools = ref<ToolConfig[]>([
       tax_sample: 100,
       focus_sections: '',
       focus_categories: '',
+      scoreboard_label: '',
+      compare_with: '',
     },
   },
   {
@@ -72,6 +78,25 @@ const tools = ref<ToolConfig[]>([
       tax_sample: null,
       focus_sections: '',
       focus_categories: '',
+      scoreboard_label: '',
+      compare_with: '',
+    },
+  },
+  {
+    name: 'scoreboard',
+    label: 'Modell-Scoreboard',
+    description:
+      'Misst den aktuellen Klassifikator gegen das Referenz-Labelset aus dem letzten Cloud Audit. ' +
+      'Damit wird ein Modellwechsel messbar statt Geschmackssache. Read-only.',
+    options: {
+      dry_run: false,
+      batch: null,
+      sample: null,
+      tax_sample: null,
+      focus_sections: '',
+      focus_categories: '',
+      scoreboard_label: '',
+      compare_with: '',
     },
   },
 ])
@@ -209,6 +234,8 @@ async function startTool(tool: ToolConfig) {
   if (tool.options.tax_sample) opts.tax_sample = tool.options.tax_sample
   if (tool.options.focus_sections) opts.focus_sections = tool.options.focus_sections
   if (tool.options.focus_categories) opts.focus_categories = tool.options.focus_categories
+  if (tool.options.scoreboard_label) opts.label = tool.options.scoreboard_label.trim()
+  if (tool.options.compare_with) opts.compare_with = tool.options.compare_with.trim()
 
   try {
     await runTool(tool.name, opts)
@@ -268,6 +295,14 @@ function clearLog(toolName: string) {
   persistState()
 }
 
+// The scoreboard files its result under the label, so a run without one has
+// nowhere to go — the backend rejects it too, this just says so before the
+// click rather than after.
+function canStart(tool: ToolConfig): boolean {
+  if (tool.name === 'scoreboard') return tool.options.scoreboard_label.trim().length > 0
+  return true
+}
+
 // Human-readable summary of the options a run was started with, per tool.
 function submittedSummary(tool: ToolConfig): string {
   const o = submittedOptions.value[tool.name]
@@ -285,6 +320,10 @@ function submittedSummary(tool: ToolConfig): string {
   if (tool.name === 'cloud-teacher') {
     if (o.batch) parts.push(`Batch: ${o.batch}`)
     if (o.focus_categories) parts.push(`Focus Categories: ${o.focus_categories}`)
+  }
+  if (tool.name === 'scoreboard') {
+    if (o.scoreboard_label) parts.push(`Label: ${o.scoreboard_label}`)
+    if (o.compare_with) parts.push(`Vergleich mit: ${o.compare_with}`)
   }
   return parts.join(' · ')
 }
@@ -387,9 +426,12 @@ onUnmounted(() => {
     </header>
 
     <p class="hint">
-      Offline-Werkzeuge für die Dokument-Taxonomie. Diagnose und Audit sind read-only;
+      Offline-Werkzeuge für die Dokument-Taxonomie. Diagnose, Audit und Scoreboard sind read-only;
       der Cloud-Teacher schreibt Labels in die Datenbank. Logs werden live über WebSocket gestreamt.
       Cloud Audit und Cloud Teacher rufen die Claude-API auf und können mehrere Minuten laufen.
+      Für einen Modellvergleich: erst <strong>Cloud Audit</strong> (liefert das Referenz-Labelset),
+      dann je Kandidat Modell unter <em>Admin → KI-Modell</em> aktivieren, Stichprobe neu
+      klassifizieren lassen und das <strong>Scoreboard</strong> mit einem Label laufen lassen.
     </p>
 
     <Message v-if="error" severity="error" :closable="true" @close="error = ''">
@@ -490,6 +532,24 @@ onUnmounted(() => {
               class="option-input"
             />
           </div>
+
+          <div v-if="tool.name === 'scoreboard'" class="option-row">
+            <label>Label</label>
+            <InputText
+              v-model="tool.options.scoreboard_label"
+              placeholder="z.B. qwen3-14b"
+              class="option-input"
+            />
+          </div>
+
+          <div v-if="tool.name === 'scoreboard'" class="option-row">
+            <label>Vergleich mit</label>
+            <InputText
+              v-model="tool.options.compare_with"
+              placeholder="Label eines früheren Laufs (optional)"
+              class="option-input"
+            />
+          </div>
         </div>
 
         <!-- Read-only summary of the config that is actually running. -->
@@ -505,7 +565,7 @@ onUnmounted(() => {
             label="Starten"
             size="small"
             :loading="starting[tool.name]"
-            :disabled="!!starting[tool.name]"
+            :disabled="!!starting[tool.name] || !canStart(tool)"
             @click="startTool(tool)"
           />
           <Button

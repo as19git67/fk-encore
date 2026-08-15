@@ -241,7 +241,9 @@ Generates warm, personal titles and subtitles for private photo recaps (e.g., "A
 
 The service can be pointed at a different model without editing `.env` and
 recreating the container. The app stores named configurations in its
-`llm_model_config` table and activates one through the endpoints below.
+`llm_model_config` table and activates one through the endpoints below; the
+operator-facing side of this is **Admin → KI-Modell** in the frontend, backed
+by `/admin/llm-configs` and `/admin/llm-models` in `user/llm-models.ts`.
 
 **Precedence — this is the part that matters for an existing deployment.** On
 start the service looks for `${MODELS_DIR}/.active_config.json`. That file only

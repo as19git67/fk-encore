@@ -44,6 +44,7 @@ vi.mock("encore.dev/api", () => {
       this.name = "APIError";
     }
     static abondoned(msg: string) { return new APIError("abondoned", msg); }
+    static aborted(msg: string) { return new APIError("aborted", msg); }
     static alreadyExists(msg: string) { return new APIError("already_exists", msg); }
     static deadlineExceeded(msg: string) { return new APIError("deadline_exceeded", msg); }
     static failedPrecondition(msg: string) { return new APIError("failed_precondition", msg); }
