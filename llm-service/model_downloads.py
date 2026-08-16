@@ -35,6 +35,12 @@ CHUNK = 1024 * 1024
 # does not pin the job forever. Applies per read, not to the whole transfer.
 SOCKET_TIMEOUT = 60.0
 
+# urllib's default User-Agent ("Python-urllib/3.x") gets a 401/403 from
+# Hugging Face's CDN, which treats it as scraper traffic — curl and browsers
+# work fine with the same URL. download_model.sh (curl-based) never hit this;
+# this module does its own HTTP and needs its own UA.
+DOWNLOAD_USER_AGENT = "fk-encore-llm-service/1.0 (+model-downloader)"
+
 # Files we consider "a model" when listing the volume. The service only ever
 # loads GGUF; anything else on the volume (the embedder cache, the active-config
 # file) is not the operator's business here.
@@ -291,7 +297,13 @@ class DownloadManager:
         # answer 200 with the whole body, which is handled below by restarting
         # the file rather than appending to it.
         offset = part.stat().st_size if part.exists() else 0
-        request = urllib.request.Request(target.url)
+        request = urllib.request.Request(target.url, headers={"User-Agent": DOWNLOAD_USER_AGENT})
+        # A gated repo needs this to resolve at all; an ungated one ignores it.
+        # huggingface_hub (used for the embedding model, below) reads the same
+        # env vars, so one token covers both.
+        hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+        if hf_token:
+            request.add_header("Authorization", f"Bearer {hf_token}")
         if offset:
             request.add_header("Range", f"bytes={offset}-")
             log.info("Resuming %s at %d bytes", target.filename, offset)
