@@ -40,7 +40,7 @@ services:
     # chown files dropped later by other host users — for the finance
     # dropbox the operator needs to land files as 568:568 (or g+r with
     # the apps group set as primary on the dataset).
-    command: ["sh", "-c", "chown -R 568:568 /mnt/documents /mnt/documents-inbox /mnt/models /mnt/embedding-models /mnt/receipt-ocr-models /mnt/finance-import /mnt/finance-export /mnt/backup /mnt/geo"]
+    command: ["sh", "-c", "chown -R 568:568 /mnt/documents /mnt/documents-inbox /mnt/models /mnt/embedding-models /mnt/receipt-ocr-models /mnt/finance-import /mnt/finance-export /mnt/backup /mnt/geo /mnt/taxonomy-out"]
     volumes:
       - documents:/mnt/documents
       - documents_inbox:/mnt/documents-inbox
@@ -51,6 +51,7 @@ services:
       - finance_export:/mnt/finance-export
       - backup:/mnt/backup
       - geo_data:/mnt/geo
+      - taxonomy_out:/mnt/taxonomy-out
 
   # ── Main Encore.ts Application ─────────────────────────────────────────────
   app:
@@ -447,6 +448,8 @@ services:
     labels:
       com.centurylinklabs.watchtower.scope: ${DEPLOY_WATCHTOWER_SCOPE:-fkprod}
     depends_on:
+      chown-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
     environment:
@@ -456,6 +459,8 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DATABASE: ${DEPLOY_PG_DATABASE:-encore}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      - taxonomy_out:/app/scripts/taxonomy/out
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
@@ -577,3 +582,9 @@ volumes:
       type: none
       o: bind
       device: ${DEPLOY_DATA_ROOT:-./data}/geo
+  taxonomy_out:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DEPLOY_DATA_ROOT:-./data}/taxonomy-out
