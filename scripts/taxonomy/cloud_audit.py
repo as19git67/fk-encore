@@ -446,11 +446,18 @@ def _is_rate_or_overload(exc: Exception) -> bool:
     """A sustained rate-limit / overload / credit exhaustion that even the
     SDK's retries couldn't ride out. Aborting the run then beats burning the
     rest of the sample on the same wall (and keeps the partial results already
-    gathered). 402 = credit/billing limit reached."""
+    gathered). 402 = credit/billing limit reached.
+
+    An exhausted credit balance is sometimes reported as 400 invalid_request_error
+    rather than 402 — the SDK doesn't retry it and every remaining document would
+    otherwise fail the same way, one quiet [!] line at a time. Catch it by message
+    text as well as status code."""
     if isinstance(exc, anthropic.RateLimitError):
         return True
     status = getattr(exc, "status_code", None)
-    return status in (402, 429, 529, 503)
+    if status in (402, 429, 529, 503):
+        return True
+    return "credit balance is too low" in str(exc).lower()
 
 
 def _classify_batch(
