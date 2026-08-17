@@ -30,6 +30,7 @@ interface ToolConfig {
     focus_categories: string
     scoreboard_label: string
     compare_with: string
+    reclassify_reference: boolean
   }
 }
 
@@ -48,6 +49,7 @@ const tools = ref<ToolConfig[]>([
       focus_categories: '',
       scoreboard_label: '',
       compare_with: '',
+      reclassify_reference: false,
     },
   },
   {
@@ -64,6 +66,7 @@ const tools = ref<ToolConfig[]>([
       focus_categories: '',
       scoreboard_label: '',
       compare_with: '',
+      reclassify_reference: false,
     },
   },
   {
@@ -80,6 +83,7 @@ const tools = ref<ToolConfig[]>([
       focus_categories: '',
       scoreboard_label: '',
       compare_with: '',
+      reclassify_reference: false,
     },
   },
   {
@@ -87,7 +91,8 @@ const tools = ref<ToolConfig[]>([
     label: 'Modell-Scoreboard',
     description:
       'Misst den aktuellen Klassifikator gegen das Referenz-Labelset aus dem letzten Cloud Audit. ' +
-      'Damit wird ein Modellwechsel messbar statt Geschmackssache. Read-only.',
+      'Damit wird ein Modellwechsel messbar statt Geschmackssache. Read-only, außer "Referenz vorher ' +
+      'neu klassifizieren" ist an — dann schreibt der Lauf die Referenz-Dokumente neu.',
     options: {
       dry_run: false,
       batch: null,
@@ -97,6 +102,7 @@ const tools = ref<ToolConfig[]>([
       focus_categories: '',
       scoreboard_label: '',
       compare_with: '',
+      reclassify_reference: false,
     },
   },
 ])
@@ -236,6 +242,7 @@ async function startTool(tool: ToolConfig) {
   if (tool.options.focus_categories) opts.focus_categories = tool.options.focus_categories
   if (tool.options.scoreboard_label) opts.label = tool.options.scoreboard_label.trim()
   if (tool.options.compare_with) opts.compare_with = tool.options.compare_with.trim()
+  if (tool.options.reclassify_reference) opts.reclassify_reference = true
 
   try {
     await runTool(tool.name, opts)
@@ -324,6 +331,7 @@ function submittedSummary(tool: ToolConfig): string {
   if (tool.name === 'scoreboard') {
     if (o.scoreboard_label) parts.push(`Label: ${o.scoreboard_label}`)
     if (o.compare_with) parts.push(`Vergleich mit: ${o.compare_with}`)
+    if (o.reclassify_reference) parts.push('Referenz wurde neu klassifiziert')
   }
   return parts.join(' · ')
 }
@@ -549,6 +557,11 @@ onUnmounted(() => {
               placeholder="Label eines früheren Laufs (optional)"
               class="option-input"
             />
+          </div>
+
+          <div v-if="tool.name === 'scoreboard'" class="option-row">
+            <label>Referenz vorher neu klassifizieren</label>
+            <ToggleSwitch v-model="tool.options.reclassify_reference" />
           </div>
         </div>
 

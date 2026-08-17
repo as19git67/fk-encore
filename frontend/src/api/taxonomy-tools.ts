@@ -11,6 +11,10 @@ export interface RunToolOptions {
   label?: string
   /** scoreboard only: an earlier label to compare the new measurement against. */
   compare_with?: string
+  /** scoreboard only: reclassify the reference-set documents with the
+   * currently active model before measuring. Can take a long time — the
+   * whole reference sample is re-run through the classification pipeline. */
+  reclassify_reference?: boolean
 }
 
 export interface ToolStatus {

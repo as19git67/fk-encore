@@ -104,6 +104,15 @@ ist der Name, unter dem die Messung später wiedergefunden und verglichen wird �
 und auf `A–Z a–z 0–9 . - _` (max. 40 Zeichen) begrenzt, weil er in den
 Dateinamen wandert.
 
+Der Schalter „Referenz vorher neu klassifizieren" spart Schritt 1 aus der obigen
+Liste: die App liest die Dokument-IDs der aktuellen Cloud-Audit-Referenz vom
+Sidecar, stößt für genau diese die reguläre Reclassify-Pipeline an und wartet,
+bis alle durch sind (Log zeigt den Fortschritt), bevor gemessen wird. Praktisch
+bei einem MoE-Modell, das Minuten pro Dokument braucht — das kann entsprechend
+dauern. Nur über die Admin-UI verfügbar, nicht über `--label` auf der
+Kommandozeile (dort bleibt das manuelle Reclassifizieren via Admin-UI/API
+weiterhin nötig, siehe oben Schritt 1).
+
 Referenz ist standardmäßig `out/cloud_audit_full.json` — Claudes Urteil zu
 **jedem** Dokument der Stichprobe. `out/cloud_audit_gold.json` ist über
 `--reference` nutzbar, aber als Vergleichsmaßstab zugunsten des damaligen

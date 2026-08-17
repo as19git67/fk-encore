@@ -120,4 +120,7 @@ vi.mock("~encore/clients", () => ({
     releaseSlot: vi.fn(() => Promise.resolve()),
     cancelSlot: vi.fn(() => Promise.resolve()),
   },
+  documents: {
+    batchReclassify: vi.fn(() => Promise.resolve({ affected_documents: 0 })),
+  },
 }));

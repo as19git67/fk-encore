@@ -14,10 +14,13 @@
  */
 
 import { APIError, api } from "encore.dev/api";
+import { inArray } from "drizzle-orm";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getAuthData } from "~encore/auth";
-import { realtime, user } from "~encore/clients";
+import { documents, realtime, user } from "~encore/clients";
 
+import db from "../db/database";
+import { documents as documentsTable } from "../db/schema";
 import { requirePermission } from "./auth-handler";
 
 console.log("[boot] user/taxonomy-tools.ts: all imports resolved");
@@ -49,6 +52,10 @@ interface RunToolBody {
   // model), and optionally an earlier label to compare it against.
   label?: string;
   compare_with?: string;
+  // scoreboard only: reclassify the reference-set documents with whatever
+  // model is currently active before measuring, so the DB reflects that
+  // model rather than whichever one classified them last.
+  reclassify_reference?: boolean;
 }
 
 interface RunToolResponse {
@@ -180,6 +187,154 @@ async function relaySseStream(
   await publishReportsEvent(tool, userIds);
 }
 
+/** POST /run/:tool on the sidecar and relay its SSE stream, publishing any
+ * failure to start as a log event instead of throwing — used from the
+ * reclassify-then-measure flow, where the caller's HTTP response is long
+ * gone by the time this runs. */
+async function startSidecarRun(
+  tool: ToolName,
+  body: Record<string, unknown>,
+  userIds: string[],
+): Promise<void> {
+  let sseResponse: Response;
+  try {
+    sseResponse = await fetch(`${SIDECAR_URL}/run/${tool}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    await publishToolEvent(
+      tool,
+      "error",
+      `taxonomy-tools sidecar unreachable: ${(err as Error).message}`,
+      userIds,
+    );
+    return;
+  }
+  if (sseResponse.status === 409) {
+    await publishToolEvent(tool, "error", `${tool} is already running`, userIds);
+    return;
+  }
+  if (!sseResponse.ok) {
+    const text = await sseResponse.text().catch(() => "");
+    await publishToolEvent(tool, "error", `sidecar error ${sseResponse.status}: ${text}`, userIds);
+    return;
+  }
+  await relaySseStream(tool, sseResponse, userIds);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Statuses the classification pipeline can still be working through. Mirrors
+// documentStatusEnum in db/schema.ts minus its terminal members ("ready",
+// "failed", "encrypted").
+const DOCUMENT_IN_FLIGHT_STATUSES = new Set(["pending", "extracting", "classifying"]);
+
+const RECLASSIFY_POLL_MS = 15_000;
+// Generous on purpose: a MoE model split across system RAM can take minutes
+// per document (see llm_model_config.app_timeout_ms), and the reference
+// sample runs into the hundreds.
+const RECLASSIFY_TIMEOUT_MS = 4 * 60 * 60 * 1000;
+
+/** Reclassifies the scoreboard's reference-set documents with whatever model
+ * is currently active, waits for the pipeline to settle, then runs the
+ * scoreboard measurement. The caller has already received its "started"
+ * response by the time this executes, so every failure is published as a
+ * log/error event rather than thrown. */
+async function reclassifyReferenceThenRunScoreboard(
+  body: Record<string, unknown>,
+  userIds: string[],
+): Promise<void> {
+  await publishToolEvent(
+    "scoreboard",
+    "log",
+    "Reclassifying reference documents with the currently active model …",
+    userIds,
+  );
+
+  let referenceDocIds: number[];
+  try {
+    const resp = await fetch(`${SIDECAR_URL}/scoreboard/reference-doc-ids`);
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => "");
+      throw new Error(`sidecar ${resp.status}: ${text}`);
+    }
+    const data = (await resp.json()) as { source: string; doc_ids: number[] };
+    referenceDocIds = data.doc_ids;
+    await publishToolEvent(
+      "scoreboard",
+      "log",
+      `Reference: ${data.source} (${referenceDocIds.length} documents)`,
+      userIds,
+    );
+  } catch (err) {
+    await publishToolEvent(
+      "scoreboard",
+      "error",
+      `Could not resolve the reference set: ${(err as Error).message}`,
+      userIds,
+    );
+    return;
+  }
+
+  if (referenceDocIds.length === 0) {
+    await publishToolEvent("scoreboard", "error", "Reference set is empty — nothing to reclassify", userIds);
+    return;
+  }
+
+  try {
+    // Auth propagates from this request automatically — batchReclassify only
+    // touches documents visible to the same admin who started this run.
+    const { affected_documents } = await documents.batchReclassify({ document_ids: referenceDocIds });
+    const note =
+      affected_documents < referenceDocIds.length ? " (the rest are not visible to this account)" : "";
+    await publishToolEvent(
+      "scoreboard",
+      "log",
+      `Queued ${affected_documents} of ${referenceDocIds.length} reference documents for reclassification${note}`,
+      userIds,
+    );
+  } catch (err) {
+    await publishToolEvent("scoreboard", "error", `Reclassify failed: ${(err as Error).message}`, userIds);
+    return;
+  }
+
+  const deadline = Date.now() + RECLASSIFY_TIMEOUT_MS;
+  let inFlight = referenceDocIds.length;
+  while (Date.now() < deadline) {
+    const rows = await db
+      .select({ status: documentsTable.status })
+      .from(documentsTable)
+      .where(inArray(documentsTable.id, referenceDocIds));
+    inFlight = rows.filter((r) => DOCUMENT_IN_FLIGHT_STATUSES.has(r.status)).length;
+    if (inFlight === 0) break;
+    await publishToolEvent(
+      "scoreboard",
+      "log",
+      `Reclassifying … ${referenceDocIds.length - inFlight}/${referenceDocIds.length} done`,
+      userIds,
+    );
+    await sleep(RECLASSIFY_POLL_MS);
+  }
+
+  if (inFlight > 0) {
+    await publishToolEvent(
+      "scoreboard",
+      "error",
+      `Timed out after ${Math.round(RECLASSIFY_TIMEOUT_MS / 60_000)} min waiting for reclassification ` +
+        `(${inFlight} documents still in progress) — measuring against the current state anyway`,
+      userIds,
+    );
+  } else {
+    await publishToolEvent("scoreboard", "log", "Reclassification complete — starting the measurement", userIds);
+  }
+
+  await startSidecarRun("scoreboard", body, userIds);
+}
+
 export const runTool = api(
   {
     expose: true,
@@ -226,6 +381,16 @@ export const runTool = api(
           );
         }
         body.compare_with = compareWith;
+      }
+
+      if (params.reclassify_reference) {
+        const userIds = await getAdminUserIds();
+        reclassifyReferenceThenRunScoreboard(body, userIds).catch((err) => {
+          console.error(
+            `[taxonomy-tools] reclassify-then-scoreboard error: ${(err as Error).message}`,
+          );
+        });
+        return { status: "started" };
       }
     }
 
