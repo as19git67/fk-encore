@@ -38,6 +38,7 @@ type ToolName = (typeof VALID_TOOLS)[number];
 // "must have just finished" to catch missed SSE terminal events) fires within
 // one poll tick and reports the run done with the previous, unchanged reports.
 const _backgroundRunning = new Set<ToolName>();
+const _backgroundAbort = new Map<ToolName, AbortController>();
 
 // The scoreboard's label becomes part of a report filename on the sidecar.
 // Mirrors LABEL_RE there and _LABEL_RE in model_scoreboard.py; checked here as
@@ -256,17 +257,21 @@ async function reclassifyReferenceThenRunScoreboard(
   body: Record<string, unknown>,
   userIds: string[],
 ): Promise<void> {
+  const ac = new AbortController();
   _backgroundRunning.add("scoreboard");
+  _backgroundAbort.set("scoreboard", ac);
   try {
-    await _reclassifyReferenceThenRunScoreboard(body, userIds);
+    await _reclassifyReferenceThenRunScoreboard(body, userIds, ac.signal);
   } finally {
     _backgroundRunning.delete("scoreboard");
+    _backgroundAbort.delete("scoreboard");
   }
 }
 
 async function _reclassifyReferenceThenRunScoreboard(
   body: Record<string, unknown>,
   userIds: string[],
+  signal: AbortSignal,
 ): Promise<void> {
   await publishToolEvent(
     "scoreboard",
@@ -325,6 +330,10 @@ async function _reclassifyReferenceThenRunScoreboard(
   const deadline = Date.now() + RECLASSIFY_TIMEOUT_MS;
   let inFlight = referenceDocIds.length;
   while (Date.now() < deadline) {
+    if (signal.aborted) {
+      await publishToolEvent("scoreboard", "log", "Cancelled during reclassification", userIds);
+      return;
+    }
     const rows = await db
       .select({ status: documentsTable.status })
       .from(documentsTable)
@@ -338,6 +347,11 @@ async function _reclassifyReferenceThenRunScoreboard(
       userIds,
     );
     await sleep(RECLASSIFY_POLL_MS);
+  }
+
+  if (signal.aborted) {
+    await publishToolEvent("scoreboard", "log", "Cancelled during reclassification", userIds);
+    return;
   }
 
   if (inFlight > 0) {
@@ -461,15 +475,15 @@ export const cancelTool = api(
     requirePermission(getAuthData()!, "data.manage");
     const tool = validateTool(params.tool);
 
+    let sidecarCancelled = false;
     try {
       const resp = await fetch(`${SIDECAR_URL}/cancel/${tool}`, {
         method: "POST",
       });
-      if (!resp.ok) {
+      if (resp.ok) {
+        sidecarCancelled = true;
+      } else if (resp.status !== 404) {
         const text = await resp.text().catch(() => "");
-        if (resp.status === 404) {
-          throw APIError.notFound(`${tool} is not running`);
-        }
         throw APIError.internal(`sidecar error ${resp.status}: ${text}`);
       }
     } catch (err) {
@@ -477,6 +491,16 @@ export const cancelTool = api(
       throw APIError.unavailable(
         `taxonomy-tools sidecar unreachable: ${(err as Error).message}`,
       );
+    }
+
+    const ac = _backgroundAbort.get(tool);
+    if (ac) {
+      ac.abort();
+      return { status: "cancelled" };
+    }
+
+    if (!sidecarCancelled) {
+      throw APIError.notFound(`${tool} is not running`);
     }
 
     return { status: "cancelled" };

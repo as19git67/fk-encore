@@ -14,7 +14,7 @@ import { documents as documentsClient, realtime, user } from "~encore/clients";
 
 import db from "../db/database";
 import { documents as documentsTable } from "../db/schema";
-import { runTool, toolsStatus } from "./taxonomy-tools";
+import { runTool, cancelTool, toolsStatus } from "./taxonomy-tools";
 
 /** Captures what the sidecar was asked to run, and answers like an SSE start. */
 function stubSidecar(status = 200) {
@@ -148,9 +148,6 @@ describe("runTool: scoreboard reclassify_reference", () => {
           } as unknown as Response;
         }
         if (method === "GET" && url.endsWith("/health")) {
-          // The sidecar itself is idle throughout the reclassify phase — it's
-          // the point of _backgroundRunning that toolsStatus does not take
-          // this at face value while that phase is in progress.
           calls.push({ url, method });
           return {
             ok: true,
@@ -160,6 +157,10 @@ describe("runTool: scoreboard reclassify_reference", () => {
               running: { diagnose: false, "cloud-audit": false, "cloud-teacher": false, scoreboard: false },
             }),
           } as unknown as Response;
+        }
+        if (method === "POST" && url.includes("/cancel/")) {
+          calls.push({ url, method });
+          return { ok: false, status: 404, text: async () => "not running" } as unknown as Response;
         }
         calls.push({ url, method, body: JSON.parse(String(init?.body ?? "{}")) });
         return {
@@ -289,5 +290,38 @@ describe("runTool: scoreboard reclassify_reference", () => {
     await runTool({ tool: "scoreboard", label: "candidate" });
     expect(documentsClient.batchReclassify).not.toHaveBeenCalled();
     expect(calls.some((c) => c.url.includes("/scoreboard/reference-doc-ids"))).toBe(false);
+  });
+
+  it("can be cancelled during the reclassify phase", async () => {
+    await seedDocuments("ready");
+    let releaseReclassify: (() => void) | undefined;
+    vi.mocked(documentsClient.batchReclassify).mockReturnValue(
+      new Promise((resolve) => {
+        releaseReclassify = () => resolve({ affected_documents: 2 });
+      }),
+    );
+    stubSidecarWithReference(DOC_IDS);
+
+    await runTool({ tool: "scoreboard", label: "candidate", reclassify_reference: true });
+
+    // The scoreboard is reported as running during reclassify …
+    const before = await toolsStatus();
+    expect(before.tools.find((t) => t.tool === "scoreboard")?.running).toBe(true);
+
+    // … and cancelling works even though the sidecar itself is idle.
+    const result = await cancelTool({ tool: "scoreboard" });
+    expect(result.status).toBe("cancelled");
+
+    releaseReclassify?.();
+
+    await vi.waitFor(async () => {
+      const after = await toolsStatus();
+      expect(after.tools.find((t) => t.tool === "scoreboard")?.running).toBe(false);
+    });
+  });
+
+  it("cancel says not-running when nothing is running anywhere", async () => {
+    stubSidecarWithReference(DOC_IDS);
+    await expect(cancelTool({ tool: "scoreboard" })).rejects.toThrow(/not running/);
   });
 });
