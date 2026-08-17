@@ -33,6 +33,7 @@ public struct ContentView: View {
 struct MainTabView: View {
     @State private var feedViewModel = FeedViewModel()
     @State private var tripStore = TripStore.shared
+    @State private var autoStart = TripAutoStartMonitor.shared
 
     var body: some View {
         TabView {
@@ -57,7 +58,12 @@ struct MainTabView: View {
             // A running trip is signalled two ways so it's unmistakable in the
             // tab bar: the icon switches to its filled variant, and a badge dot
             // appears (the same dynamic mechanism the Feed unread badge uses).
-            .badge(tripStore.isActive ? Text("●") : nil)
+            //
+            // The badge doubles as the quietest layer of the auto-start
+            // suggestion (docs/ios-trip-mode.md §9.2): if the notification was
+            // denied or dismissed and the user never opened the Trip tab, the
+            // dot is what's left to say there is something waiting.
+            .badge(tripStore.isActive || autoStart.pendingSuggestion != nil ? Text("●") : nil)
 
             Tab("Suche", systemImage: "magnifyingglass") {
                 NavigationStack {

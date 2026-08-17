@@ -27,7 +27,15 @@ final class TripPhotoLibraryObserver: NSObject, PHPhotoLibraryChangeObserver {
     func photoLibraryDidChange(_ changeInstance: PHChange) {
         // Called on an arbitrary queue; hop to the main actor to read the store.
         Task { @MainActor in
-            guard TripStore.shared.hasPendingTripWork else { return }
+            guard TripStore.shared.hasPendingTripWork else {
+                // No trip running — a new photo is instead a data point for
+                // "is the user travelling?" (docs/ios-trip-mode.md §9.2). This
+                // is the responsive path; the reliable one is the same check
+                // from `runFullSync`, which also sees photos taken while the
+                // app was suspended.
+                await TripAutoStartMonitor.shared.evaluate()
+                return
+            }
             let added = await TripStore.shared.runAutoAddPass()
             guard added > 0 else { return }
             // Adding to the album itself fires another change; that follow-up

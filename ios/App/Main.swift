@@ -36,22 +36,29 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     // MARK: - UNUserNotificationCenterDelegate
 
-    /// Handles the trip auto-end suggestion's actions. Runs whether the app was
-    /// foreground, backgrounded, or launched headless just for this — the
+    /// Handles the trip suggestions' notification actions. Runs whether the app
+    /// was foreground, backgrounded, or launched headless just for this — the
     /// system calls this delegate method in all three cases.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        guard response.notification.request.content.categoryIdentifier
-                == TripAutoEndMonitor.notificationCategoryId
-        else {
-            completionHandler()
-            return
-        }
-        Task { @MainActor in
-            TripAutoEndMonitor.shared.handleNotificationAction(response.actionIdentifier)
+        let category = response.notification.request.content.categoryIdentifier
+        let action = response.actionIdentifier
+
+        switch category {
+        case TripAutoEndMonitor.notificationCategoryId:
+            Task { @MainActor in
+                TripAutoEndMonitor.shared.handleNotificationAction(action)
+                completionHandler()
+            }
+        case TripAutoStartMonitor.notificationCategoryId:
+            Task { @MainActor in
+                TripAutoStartMonitor.shared.handleNotificationAction(action)
+                completionHandler()
+            }
+        default:
             completionHandler()
         }
     }
