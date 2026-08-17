@@ -203,7 +203,12 @@ public final class TripAutoStartMonitor {
         let request = UNNotificationRequest(
             identifier: "trip.autostart.suggestion", content: content, trigger: nil
         )
-        UNUserNotificationCenter.current().add(request)
+        // `try? await` because this is an async context: `add(_:)` resolves to
+        // the async throwing overload here, unlike the synchronous
+        // completion-handler form the auto-end monitor calls. A failure to post
+        // is not worth surfacing — `pendingSuggestion` is already stored, so
+        // the `TripView` banner still carries the suggestion.
+        try? await UNUserNotificationCenter.current().add(request)
     }
 
     /// Builds the name prefill: the reverse-geocoded place plus month and year
