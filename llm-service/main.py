@@ -207,10 +207,35 @@ _state: dict[str, Any] = {
     "config_source": "env",
 }
 
+def _handle_unexpected_exit(status: int) -> None:
+    """Route a llama-server crash to the right recovery.
+
+    Outside a reload, nothing owns the failure but compose's restart policy —
+    bring the whole container down, same as always. *During* a reload
+    (`_reload_running`), `_reload_worker`'s except block is that owner: it
+    stops whatever is left, restores the configuration that was working, and
+    reloads it. Killing the process here as well would win the race against
+    that rollback every time — the watcher notices a crash within
+    milliseconds, long before `_apply_config`/`_load_llm` for the previous
+    config could even start — turning a recoverable bad reload into a full
+    outage. still_starting (see `_load_server_llm`) is what makes the
+    rollback path fast rather than a wait for the full ready-timeout.
+    """
+
+    if _reload_running:
+        log.error(
+            "llama-server died (status=%s) during a reload — leaving recovery to the "
+            "reload worker instead of restarting the container",
+            status,
+        )
+        return
+    terminate_own_process(status)
+
+
 # Owns the llama-server subprocess for the server backend. Created eagerly so
 # /healthz and the reload machinery can ask about it before anything is loaded;
 # it starts no process until told to.
-_llama_server = LlamaServerProcess(on_unexpected_exit=terminate_own_process)
+_llama_server = LlamaServerProcess(on_unexpected_exit=_handle_unexpected_exit)
 
 # Downloads of model files requested at runtime through the admin UI. The
 # cold-start download still belongs to download_model.sh.
@@ -512,7 +537,15 @@ def _load_server_llm() -> None:
         "Waiting for llama-server at %s (ctx=%d, gpu_layers=%d, n_cpu_moe=%d, timeout=%ds)",
         LLM_SERVER_URL, LLM_CTX, LLM_GPU_LAYERS, LLM_NCMOE, LLM_SERVER_READY_TIMEOUT,
     )
-    props = client.wait_until_ready(float(LLM_SERVER_READY_TIMEOUT))
+    # still_starting lets a crash during load (bad --n-cpu-moe, OOM, an
+    # unsupported architecture) surface in seconds instead of only after the
+    # full timeout — the difference between _reload_worker's except block
+    # rolling back promptly and the caller sitting through the whole wait
+    # first. Only meaningful when we spawned the process ourselves.
+    props = client.wait_until_ready(
+        float(LLM_SERVER_READY_TIMEOUT),
+        still_starting=(lambda: _llama_server.is_running) if _llama_server.available else None,
+    )
     _state["llm"] = client
     # n_ctx from /props is the server's actual window, which may differ from our
     # LLM_CTX if the sidecar clamped it — and LLM_CTX is what /classify budgets
