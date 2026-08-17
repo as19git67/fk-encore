@@ -56,5 +56,15 @@
   },
   "optionalDependencies": {
     "@rollup/rollup-linux-x64-gnu": "^4.13.0"
+  },
+  "allowScripts": {
+    "esbuild@0.18.20": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.27.4": true,
+    "cpu-features@0.0.10": true,
+    "fsevents@2.3.3": true,
+    "protobufjs@7.5.8": true,
+    "sharp@0.33.5": true,
+    "ssh2@1.17.0": true
   }
 }
