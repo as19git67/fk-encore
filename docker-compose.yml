@@ -162,6 +162,7 @@ services:
     volumes:
       - photos:/mnt/data/photos
       - thumbnails:/mnt/data/thumbnails
+      - recap-music:/mnt/data/recap-music
       - documents:/mnt/data/documents
       - documents_inbox:/mnt/data/documents-inbox
       - finance_import:/mnt/data/finance-import
@@ -233,13 +234,6 @@ services:
       # bandwidth (extend further).
       start_period: ${DEPLOY_EMBEDDING_START_PERIOD:-600s}
 
-  # The Grounding-DINO `landmark` service was removed in Epic #383.
-  # POI detection now runs through the geo service (see below) backed
-  # by per-region PostGIS databases. Remove the leftover container /
-  # image after upgrade:
-  #   docker rm -f fk-encore-landmark
-  #   docker rmi registry.scheggs.net/schegg/fk-encore/landmark:latest
-
   # ── LLM Service (Llama GGUF classifier + multilingual-e5-base embedder) ───
   llm_service:
     image: ${LLM_IMAGE:-${DEPLOY_IMAGE_BASE:-ghcr.io/as19git67/fk-encore}/llm${LLM_IMAGE_SUFFIX:-}}:${DEPLOY_IMAGE_TAG:-latest}
@@ -271,7 +265,7 @@ services:
       LLM_ACCELERATOR: ${LLM_ACCELERATOR:-cpu}
       LLM_EMBED_DEVICE: ${LLM_EMBED_DEVICE:-cpu}
       LLM_EMBED_BATCH_SIZE: ${LLM_EMBED_BATCH_SIZE:-32}
-      LLM_THREADS: ${LLM_THREADS:-}
+      LLM_THREADS: ${LLM_THREADS:-4}
       # Prefill/KV tuning. The defaults here are llama.cpp's own, i.e. the CPU
       # profile; the GPU block in docker-compose.env.example raises them. A
       # mapping entry always wins over the image ENV, so these must repeat the
@@ -312,7 +306,7 @@ services:
       - llm_models:/models
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
-      interval: 15s
+      interval: 30s
       timeout: 10s
       retries: 5
       # llm_service mmap's the GGUF (~4.7 GB for the Qwen2.5-7B Q4_K_M
@@ -377,7 +371,7 @@ services:
       - pgdata:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d ${DEPLOY_PG_DATABASE:-encore}"]
-      interval: 5s
+      interval: 15s
       timeout: 5s
       retries: 10
 
@@ -397,7 +391,7 @@ services:
       - geo_db_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
-      interval: 5s
+      interval: 15s
       timeout: 5s
       retries: 10
 
@@ -432,8 +426,8 @@ services:
       - geo_data:/data
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:8080/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-      interval: 10s
-      timeout: 5s
+      interval: 30s
+      timeout: 10s
       retries: 5
       start_period: 30s
 
@@ -464,7 +458,7 @@ services:
       - taxonomy_out:/app/scripts/taxonomy/out
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 10s
+      interval: 120s
       timeout: 5s
       retries: 5
       start_period: 30s
@@ -583,6 +577,12 @@ volumes:
       type: none
       o: bind
       device: ${DEPLOY_DATA_ROOT:-./data}/geo
+  recap-music:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DEPLOY_DATA_ROOT:-./data}/recap-music
   taxonomy_out:
     driver: local
     driver_opts:
