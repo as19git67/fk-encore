@@ -14,7 +14,7 @@ import { documents as documentsClient, realtime, user } from "~encore/clients";
 
 import db from "../db/database";
 import { documents as documentsTable } from "../db/schema";
-import { runTool } from "./taxonomy-tools";
+import { runTool, toolsStatus } from "./taxonomy-tools";
 
 /** Captures what the sidecar was asked to run, and answers like an SSE start. */
 function stubSidecar(status = 200) {
@@ -147,6 +147,20 @@ describe("runTool: scoreboard reclassify_reference", () => {
             json: async () => ({ source: "2026-08-16-cloud_audit_full.json", doc_ids: docIds }),
           } as unknown as Response;
         }
+        if (method === "GET" && url.endsWith("/health")) {
+          // The sidecar itself is idle throughout the reclassify phase — it's
+          // the point of _backgroundRunning that toolsStatus does not take
+          // this at face value while that phase is in progress.
+          calls.push({ url, method });
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              status: "ok",
+              running: { diagnose: false, "cloud-audit": false, "cloud-teacher": false, scoreboard: false },
+            }),
+          } as unknown as Response;
+        }
         calls.push({ url, method, body: JSON.parse(String(init?.body ?? "{}")) });
         return {
           ok: true,
@@ -228,6 +242,33 @@ describe("runTool: scoreboard reclassify_reference", () => {
     expect(result).toEqual({ status: "started" }); // resolved before batchReclassify's promise did
 
     releaseReclassify?.();
+  });
+
+  it("reports scoreboard as running while reclassify is in progress, even though the sidecar is idle", async () => {
+    // This is the bug report: the sidecar's /health says "not running" for
+    // the whole reclassify phase (it hasn't been asked to do anything yet),
+    // and the frontend treats "sidecar says not running" as "must have just
+    // finished" to catch SSE terminal events it missed. Without
+    // _backgroundRunning that fires within one poll tick of clicking start.
+    await seedDocuments("ready");
+    let releaseReclassify: (() => void) | undefined;
+    vi.mocked(documentsClient.batchReclassify).mockReturnValue(
+      new Promise((resolve) => {
+        releaseReclassify = () => resolve({ affected_documents: 2 });
+      }),
+    );
+    stubSidecarWithReference(DOC_IDS);
+
+    await runTool({ tool: "scoreboard", label: "candidate", reclassify_reference: true });
+
+    const status = await toolsStatus();
+    expect(status.tools.find((t) => t.tool === "scoreboard")?.running).toBe(true);
+
+    releaseReclassify?.();
+    await vi.waitFor(async () => {
+      const settled = await toolsStatus();
+      expect(settled.tools.find((t) => t.tool === "scoreboard")?.running).toBe(false);
+    });
   });
 
   it("reports the reference set as empty instead of measuring against nothing", async () => {
