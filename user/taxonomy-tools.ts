@@ -31,6 +31,14 @@ const SIDECAR_URL =
 const VALID_TOOLS = ["diagnose", "cloud-audit", "cloud-teacher", "scoreboard"] as const;
 type ToolName = (typeof VALID_TOOLS)[number];
 
+// The sidecar's own /health only knows about its subprocess, so it reports
+// "not running" for the entire reclassify-then-measure sequence up until the
+// sidecar is actually invoked — which can be minutes. Without this, the
+// frontend's polling safety net (which treats "sidecar says not running" as
+// "must have just finished" to catch missed SSE terminal events) fires within
+// one poll tick and reports the run done with the previous, unchanged reports.
+const _backgroundRunning = new Set<ToolName>();
+
 // The scoreboard's label becomes part of a report filename on the sidecar.
 // Mirrors LABEL_RE there and _LABEL_RE in model_scoreboard.py; checked here as
 // well so a bad value is a 400 from the app rather than a 422 relayed from a
@@ -245,6 +253,18 @@ const RECLASSIFY_TIMEOUT_MS = 4 * 60 * 60 * 1000;
  * response by the time this executes, so every failure is published as a
  * log/error event rather than thrown. */
 async function reclassifyReferenceThenRunScoreboard(
+  body: Record<string, unknown>,
+  userIds: string[],
+): Promise<void> {
+  _backgroundRunning.add("scoreboard");
+  try {
+    await _reclassifyReferenceThenRunScoreboard(body, userIds);
+  } finally {
+    _backgroundRunning.delete("scoreboard");
+  }
+}
+
+async function _reclassifyReferenceThenRunScoreboard(
   body: Record<string, unknown>,
   userIds: string[],
 ): Promise<void> {
@@ -484,7 +504,7 @@ export const toolsStatus = api(
       return {
         tools: VALID_TOOLS.map((t) => ({
           tool: t,
-          running: data.running[t] ?? false,
+          running: (data.running[t] ?? false) || _backgroundRunning.has(t),
         })),
       };
     } catch (err) {
