@@ -11,6 +11,7 @@ Only one run per tool is allowed at a time (mutex per tool name).
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import signal
@@ -224,6 +225,20 @@ CONTENT_TYPES: dict[str, str] = {
 }
 
 
+def _latest_dated(out_dir: Path, base: str) -> Path | None:
+    """Newest date-prefixed variant of *base* in *out_dir*, or the exact
+    (legacy, non-prefixed) name if that's what's there."""
+    exact = out_dir / base
+    if exact.is_file():
+        return exact
+    candidates = sorted(out_dir.glob(f"*-{base}"), reverse=True)
+    for c in candidates:
+        prefix = c.name[: len(c.name) - len(base)]
+        if _DATE_PREFIX_RE.match(prefix):
+            return c
+    return None
+
+
 def _find_report_files(tool: ToolName) -> list[Path]:
     """Return the latest date-prefixed variant of each expected report file."""
     out_dir = Path(SCRIPTS_DIR) / "out"
@@ -239,19 +254,43 @@ def _find_report_files(tool: ToolName) -> list[Path]:
     bases = _REPORT_BASES.get(tool, [])
     result: list[Path] = []
     for base in bases:
-        # Try exact name first (legacy / non-prefixed).
-        exact = out_dir / base
-        if exact.is_file():
-            result.append(exact)
-            continue
-        # Glob for date-prefixed variants and pick the newest.
-        candidates = sorted(out_dir.glob(f"*-{base}"), reverse=True)
-        for c in candidates:
-            prefix = c.name[: len(c.name) - len(base)]
-            if _DATE_PREFIX_RE.match(prefix):
-                result.append(c)
-                break
+        found = _latest_dated(out_dir, base)
+        if found is not None:
+            result.append(found)
     return result
+
+
+# The cloud-audit reference the scoreboard measures against by default (see
+# model_scoreboard.py's _load_reference). Not in _REPORT_BASES/downloadable —
+# it's Claude's per-document judgement on the whole sample, an internal
+# working file rather than an operator-facing report.
+_REFERENCE_BASE = "cloud_audit_full.json"
+
+
+@app.get("/scoreboard/reference-doc-ids")
+async def scoreboard_reference_doc_ids():
+    """Document IDs the current cloud-audit reference covers.
+
+    Lets the app re-run the classification pipeline over exactly this set
+    before a scoreboard measurement, so the DB reflects the model actually
+    being scored rather than whatever last classified these documents.
+    """
+    out_dir = Path(SCRIPTS_DIR) / "out"
+    path = _latest_dated(out_dir, _REFERENCE_BASE) if out_dir.is_dir() else None
+    if path is None:
+        raise HTTPException(404, f"no {_REFERENCE_BASE} found — run cloud-audit first")
+
+    try:
+        rows = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        raise HTTPException(500, f"{path.name} is unreadable: {exc}") from exc
+
+    # ERROR rows are documents Claude never actually judged (see cloud_audit's
+    # _classify_batch) — nothing to compare against, so no reason to reclassify them.
+    doc_ids = sorted({
+        int(r["doc_id"]) for r in rows if isinstance(r, dict) and r.get("claude_slug") not in (None, "ERROR")
+    })
+    return {"source": path.name, "doc_ids": doc_ids}
 
 
 @app.get("/reports/{tool}")
