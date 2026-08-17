@@ -80,7 +80,7 @@ public final class BackgroundSyncManager {
         // false on every process start, so without this a trip survives a
         // relaunch but silently stops being watched for "back home".
         Task { @MainActor in
-            TripAutoEndMonitor.registerNotificationCategory()
+            TripNotificationCategories.registerAll()
             TripAutoEndMonitor.shared.resumeIfTripActive()
         }
     }
@@ -402,6 +402,19 @@ public final class BackgroundSyncManager {
         // skipped the catch-up entirely, so the photos missed the scan that was
         // running right then and waited for the next cycle.
         await TripStore.shared.runAutoAddPass()
+
+        // Trip suggestions (docs/ios-trip-mode.md §9). Both are cheap, local
+        // and idempotent, and both belong here rather than on a timer of their
+        // own: this method already runs on every occasion the app is awake
+        // (open, foreground resume, background task), which is exactly when a
+        // suggestion can be evaluated at all.
+        //
+        // The end suggestion in particular *must* be re-evaluated here and not
+        // only from location updates: significant-change updates are driven by
+        // movement, so a device parked at home stops producing them — which is
+        // precisely the state the suggestion is waiting for.
+        await TripAutoEndMonitor.shared.evaluateNow()
+        await TripAutoStartMonitor.shared.evaluate()
 
         guard await pipelineLock.tryAcquire() else {
             print("[BGSync] runFullSync: another pipeline already running, skipping")

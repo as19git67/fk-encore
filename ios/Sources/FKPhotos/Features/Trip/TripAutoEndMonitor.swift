@@ -1,5 +1,6 @@
 import CoreLocation
 import Foundation
+import UIKit
 import UserNotifications
 
 /// Watches for "the device is back home" while a trip is active and, once
@@ -35,24 +36,23 @@ public final class TripAutoEndMonitor: NSObject, CLLocationManagerDelegate {
         manager.delegate = self
     }
 
-    /// Registers the notification category (actions) once at launch, so a
-    /// notification delivered while the app isn't running still has them —
-    /// categories must be registered before the notification is presented, not
-    /// necessarily before it's scheduled, but doing it at launch is simplest.
-    static func registerNotificationCategory() {
+    /// The auto-end category (its actions). Registered together with every
+    /// other category at launch — see `TripNotificationCategories.registerAll()`
+    /// — so a notification delivered while the app isn't running still carries
+    /// its buttons.
+    static func notificationCategory() -> UNNotificationCategory {
         let end = UNNotificationAction(
             identifier: endActionId, title: "Trip beenden", options: [.destructive]
         )
         let dismiss = UNNotificationAction(
             identifier: dismissActionId, title: "Weiter unterwegs", options: []
         )
-        let category = UNNotificationCategory(
+        return UNNotificationCategory(
             identifier: notificationCategoryId,
             actions: [end, dismiss],
             intentIdentifiers: [],
             options: []
         )
-        UNUserNotificationCenter.current().setNotificationCategories([category])
     }
 
     /// Starts significant-change location monitoring for the active trip.
@@ -62,10 +62,17 @@ public final class TripAutoEndMonitor: NSObject, CLLocationManagerDelegate {
     /// foreground/background-only instead of working after a jetsam kill.
     /// Either way this never blocks trip start: a denied/undetermined status
     /// just means fewer updates, not a broken trip.
-    func start() {
+    ///
+    /// `resetTracking` must be true only when a *new* trip begins. Resuming
+    /// monitoring for a trip that was already running has to keep the arrival
+    /// clock — see `TripAutoEndPreferences.resetArrivalTracking()`.
+    func start(resetTracking: Bool = true) {
         guard !isMonitoring else { return }
         isMonitoring = true
-        TripAutoEndPreferences.resetArrivalTracking()
+        if resetTracking {
+            disarm()
+            TripAutoEndPreferences.resetArrivalTracking()
+        }
 
         let status = manager.authorizationStatus
         if status == .notDetermined || status == .authorizedWhenInUse {
@@ -74,6 +81,10 @@ public final class TripAutoEndMonitor: NSObject, CLLocationManagerDelegate {
         manager.startMonitoringSignificantLocationChanges()
 
         Task { await requestNotificationAuthorizationIfNeeded() }
+        // Evaluate straight away from the last known location instead of
+        // waiting for movement: a device that is already sitting at home
+        // produces no significant-change update at all.
+        Task { await evaluateNow() }
     }
 
     /// Stops monitoring. Called when the trip ends — the suggestion is only
@@ -84,6 +95,7 @@ public final class TripAutoEndMonitor: NSObject, CLLocationManagerDelegate {
         guard isMonitoring else { return }
         isMonitoring = false
         manager.stopMonitoringSignificantLocationChanges()
+        disarm()
         TripAutoEndPreferences.resetArrivalTracking()
     }
 
@@ -93,7 +105,20 @@ public final class TripAutoEndMonitor: NSObject, CLLocationManagerDelegate {
     /// moment the app was killed and relaunched.
     func resumeIfTripActive() {
         guard TripStore.shared.isActive else { return }
-        start()
+        start(resetTracking: false)
+    }
+
+    /// Re-runs the heuristic against the last known location, without waiting
+    /// for a location update to arrive.
+    ///
+    /// Needed because significant-change updates are movement-driven: arriving
+    /// home means the device goes still, so the "stayed here long enough"
+    /// moment produces no callback. Called on foreground resume and from the
+    /// sync pass, which between them cover every occasion the app is awake.
+    func evaluateNow() async {
+        guard TripStore.shared.isActive else { return }
+        guard let location = manager.location else { return }
+        await handle(location)
     }
 
     /// Clears the pending suggestion (if it matches the given trip) and starts
@@ -105,6 +130,7 @@ public final class TripAutoEndMonitor: NSObject, CLLocationManagerDelegate {
         guard TripAutoEndPreferences.pendingSuggestion?.tripIosAlbumId == albumId else { return }
         TripAutoEndPreferences.pendingSuggestion = nil
         TripAutoEndPreferences.lastSuggestionAt = Date()
+        disarm()
     }
 
     /// Entry point for `Main.swift`'s `UNUserNotificationCenterDelegate`: reacts
@@ -145,9 +171,15 @@ public final class TripAutoEndMonitor: NSObject, CLLocationManagerDelegate {
 
     private func handle(_ location: CLLocation) async {
         guard isMonitoring, let trip = TripStore.shared.activeTrip else { return }
+        // Switching the suggestions off mid-trip has to take back an ask that
+        // is already scheduled, not just stop new ones.
+        guard TripSuggestionSettings.enabled else { disarm(); return }
         guard TripAutoEndPreferences.pendingSuggestion == nil else { return }
 
         guard let home = await TripHomeLocation.resolve() else { return }
+        // Re-check: `resolve()` can await a network round-trip, and the trip may
+        // have been ended (or answered) while we were waiting.
+        guard isMonitoring, TripStore.shared.activeTrip?.iosAlbumId == trip.iosAlbumId else { return }
 
         let atHome = TripAutoEndHeuristic.isAtHome(location.coordinate, home: home)
         let decision = TripAutoEndHeuristic.evaluate(
@@ -157,9 +189,67 @@ public final class TripAutoEndMonitor: NSObject, CLLocationManagerDelegate {
             now: Date()
         )
         TripAutoEndPreferences.homeArrivalCandidateSince = decision.candidateSince
+
+        if decision.shouldDisarm { disarm() }
+        if let fireAt = decision.armFireAt { arm(for: trip, at: fireAt) }
         guard decision.shouldSuggest else { return }
 
         raiseSuggestion(for: trip)
+    }
+
+    /// Notification identifier for a trip's suggestion. One per trip, reused by
+    /// both the armed (time-triggered) and the immediate notification, so the
+    /// two can never stack into a double ask — posting the same identifier
+    /// replaces whatever was pending.
+    private static func notificationId(for trip: ActiveTrip) -> String {
+        "trip.autoend.\(trip.iosAlbumId)"
+    }
+
+    /// Schedules the suggestion for `fireAt`.
+    ///
+    /// This is what carries the suggestion across the app not running. The
+    /// system owns the timer, so the prompt arrives on a parked phone whose app
+    /// was suspended hours ago — which is exactly the situation the arrival at
+    /// home creates.
+    ///
+    /// Re-arming to the same instant is skipped so a burst of evaluations
+    /// (foreground resume plus a sync pass plus a location update) doesn't
+    /// churn the scheduled request.
+    private func arm(for trip: ActiveTrip, at fireAt: Date) {
+        guard TripAutoEndPreferences.armedFireAt != fireAt else { return }
+        let delay = fireAt.timeIntervalSinceNow
+        guard delay > 0 else { return }
+
+        let id = Self.notificationId(for: trip)
+        TripAutoEndPreferences.armedFireAt = fireAt
+        TripAutoEndPreferences.armedNotificationId = id
+        let request = UNNotificationRequest(
+            identifier: id,
+            content: suggestionContent(for: trip),
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: delay, repeats: false)
+        )
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    /// Cancels a scheduled suggestion. Safe to call when nothing is armed.
+    ///
+    /// Only *pending* (not yet delivered) requests are removed — a notification
+    /// the user has already been shown stays in Notification Centre, where
+    /// answering it is still meaningful.
+    private func disarm() {
+        guard let id = TripAutoEndPreferences.armedNotificationId else { return }
+        TripAutoEndPreferences.armedFireAt = nil
+        TripAutoEndPreferences.armedNotificationId = nil
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [id])
+    }
+
+    private func suggestionContent(for trip: ActiveTrip) -> UNMutableNotificationContent {
+        let content = UNMutableNotificationContent()
+        content.title = "Bist du zurück?"
+        content.body = "Sieht so aus, als wärst du wieder zuhause. Trip \"\(trip.name)\" beenden?"
+        content.categoryIdentifier = Self.notificationCategoryId
+        content.sound = .default
+        return content
     }
 
     private func raiseSuggestion(for trip: ActiveTrip) {
@@ -168,14 +258,16 @@ public final class TripAutoEndMonitor: NSObject, CLLocationManagerDelegate {
         )
         TripAutoEndPreferences.lastSuggestionAt = Date()
 
-        let content = UNMutableNotificationContent()
-        content.title = "Bist du zurück?"
-        content.body = "Sieht so aus, als wärst du wieder zuhause. Trip \"\(trip.name)\" beenden?"
-        content.categoryIdentifier = Self.notificationCategoryId
-        content.sound = .default
+        // While the app is in the foreground the `TripView` banner already
+        // carries the suggestion, and an armed notification may have fired
+        // moments ago — posting another one here would re-alert for something
+        // the user is already looking at.
+        guard UIApplication.shared.applicationState != .active else { return }
 
         let request = UNNotificationRequest(
-            identifier: "trip.autoend.\(trip.iosAlbumId)", content: content, trigger: nil
+            identifier: Self.notificationId(for: trip),
+            content: suggestionContent(for: trip),
+            trigger: nil
         )
         UNUserNotificationCenter.current().add(request)
     }

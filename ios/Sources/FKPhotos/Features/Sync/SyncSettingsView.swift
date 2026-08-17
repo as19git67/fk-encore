@@ -9,6 +9,9 @@ struct SyncSettingsView: View {
     @AppStorage("sync.enabled")            private var syncEnabled        = false
     @AppStorage("sync.wifiOnly")           private var wifiOnly           = true
     @AppStorage("sync.excludeScreenshots") private var excludeScreenshots = true
+    // Mirrors `TripSuggestionSettings.enabled` — same key, same default, so the
+    // toggle and the monitors that read it can never disagree.
+    @AppStorage("trip.suggestions.enabled") private var tripSuggestions = true
 
     @State private var showAuthAlert = false
     @State private var refreshTick   = 0  // Bump to re-read status values
@@ -20,6 +23,11 @@ struct SyncSettingsView: View {
 
     private var lastSyncDate:   Date? { PhotoSyncPreferences.lastSyncDate }
     private var uploadedCount:  Int   { PhotoSyncPreferences.uploadedCount }
+    /// Re-read via `refreshTick` so the row disappears right after resetting.
+    private var suppressedRegionCount: Int {
+        _ = refreshTick
+        return TripRegionSuppression.suppressedRegions.count
+    }
 
     var body: some View {
         Form {
@@ -106,6 +114,22 @@ struct SyncSettingsView: View {
                 Text("Netzwerk")
             } footer: {
                 Text("Wenn aktiviert, wird nur über WLAN synchronisiert.")
+            }
+
+            // ── Trip suggestions (docs/ios-trip-mode.md §9.3) ──────────
+            Section {
+                Toggle("Trip-Vorschläge", isOn: $tripSuggestions)
+                if tripSuggestions, suppressedRegionCount > 0 {
+                    Button("Ausgeblendete Orte zurücksetzen (\(suppressedRegionCount))") {
+                        TripRegionSuppression.resetAll()
+                        refreshTick += 1
+                    }
+                    .foregroundStyle(Color.accentColor)
+                }
+            } header: {
+                Text("Trip")
+            } footer: {
+                Text("F4mil Photos schlägt vor, Trip Mode einzuschalten, wenn deine Fotos zeigen, dass du weit weg von zuhause bist – und vor, ihn zu beenden, wenn du wieder da bist. Vorgeschlagen wird nur; gestartet und beendet wird nie automatisch. Orte, die du oft besuchst, werden mit der Zeit von selbst nicht mehr vorgeschlagen.")
             }
 
             // ── Debug ──────────────────────────────────────────────────

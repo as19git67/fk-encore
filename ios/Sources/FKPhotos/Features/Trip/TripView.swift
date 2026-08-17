@@ -9,7 +9,12 @@ import SwiftUI
 /// (siehe `docs/ios-trip-mode.md`).
 struct TripView: View {
     @State private var store = TripStore.shared
+    @State private var autoStart = TripAutoStartMonitor.shared
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showStartSheet = false
+    /// Prefill handed to `TripStartSheet`. Set from the auto-start suggestion,
+    /// `nil` for a manual start.
+    @State private var startSheetName: String?
     @State private var errorMessage: String?
     @State private var showError = false
 
@@ -24,7 +29,7 @@ struct TripView: View {
         .navigationTitle("Trip")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showStartSheet) {
-            TripStartSheet { name in
+            TripStartSheet(suggestedName: startSheetName) { name in
                 Task { await start(name: name) }
             }
         }
@@ -33,18 +38,78 @@ struct TripView: View {
         } message: {
             Text(errorMessage ?? "")
         }
+        .onAppear { consumeStartSuggestionHandoff() }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active { consumeStartSuggestionHandoff() }
+        }
     }
 
-    private var noTripView: some View {
-        ContentUnavailableView {
-            Label("Kein aktiver Trip", systemImage: "map")
-        } description: {
-            Text("Starte einen Trip, damit neue Fotos automatisch in ein gemeinsames Reise-Album synchronisiert werden – ohne vorher ein Album anzulegen.")
-        } actions: {
-            Button("Trip starten") { showStartSheet = true }
+    /// Opens the prefilled start sheet when the user chose "Trip starten" on
+    /// the suggestion notification. That action deliberately doesn't start the
+    /// trip itself — the name becomes an iOS *and* a server album, so it wants
+    /// confirming (`docs/ios-trip-mode.md` §9.2).
+    @MainActor
+    private func consumeStartSuggestionHandoff() {
+        guard !store.isActive, let name = autoStart.consumeStartSheetRequest() else { return }
+        startSheetName = name
+        showStartSheet = true
+    }
+
+    @ViewBuilder private var noTripView: some View {
+        VStack(spacing: 0) {
+            if let suggestion = autoStart.pendingSuggestion {
+                autoStartBanner(suggestion)
+                Divider()
+            }
+            ContentUnavailableView {
+                Label("Kein aktiver Trip", systemImage: "map")
+            } description: {
+                Text("Starte einen Trip, damit neue Fotos automatisch in ein gemeinsames Reise-Album synchronisiert werden – ohne vorher ein Album anzulegen.")
+            } actions: {
+                Button("Trip starten") {
+                    startSheetName = nil
+                    showStartSheet = true
+                }
                 .buttonStyle(.borderedProminent)
                 .disabled(store.isProvisioning)
+            }
         }
+    }
+
+    /// Fallback for the auto-start suggestion when the notification was denied,
+    /// missed or ignored — the mirror of `ActiveTripView`'s auto-end banner.
+    @MainActor
+    private func autoStartBanner(_ suggestion: PendingStartSuggestion) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Image(systemName: "airplane.departure")
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sieht aus, als wärst du unterwegs")
+                        .font(.subheadline.weight(.semibold))
+                    Text("\(suggestion.suggestedName) – seit \(suggestion.travellingSince.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            HStack(spacing: 8) {
+                Button("Trip starten") {
+                    startSheetName = suggestion.suggestedName
+                    autoStart.dismissSuggestion()
+                    showStartSheet = true
+                }
+                .buttonStyle(.borderedProminent)
+                Button("Nicht jetzt") { autoStart.dismissSuggestion() }
+                    .buttonStyle(.bordered)
+                Spacer()
+                Button("Hier nie fragen") { autoStart.suppressCurrentRegion() }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+            }
+        }
+        .padding()
+        .background(.thinMaterial)
     }
 
     private func start(name: String) async {

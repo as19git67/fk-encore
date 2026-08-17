@@ -48,6 +48,8 @@ enum TripAutoEndPreferences {
     private static let candidateSinceKey = "trip.autoend.candidateSince"
     private static let lastSuggestionAtKey = "trip.autoend.lastSuggestionAt"
     private static let pendingSuggestionKey = "trip.autoend.pendingSuggestion"
+    private static let armedFireAtKey = "trip.autoend.armedFireAt"
+    private static let armedNotificationIdKey = "trip.autoend.armedNotificationId"
 
     // MARK: - Home location cache
 
@@ -109,6 +111,41 @@ enum TripAutoEndPreferences {
         }
     }
 
+    /// When the currently scheduled suggestion notification is set to fire, or
+    /// `nil` when nothing is armed.
+    ///
+    /// This is what makes the suggestion survive the app not running. Arriving
+    /// home means the device stops moving, and significant-change updates only
+    /// arrive *while moving* — so the "stayed home for the grace period" moment
+    /// produces no location callback to evaluate in. Instead the arrival arms a
+    /// time-triggered local notification, which the system delivers on its own
+    /// whether or not the app ever runs again. Leaving the radius disarms it.
+    static var armedFireAt: Date? {
+        get { UserDefaults.standard.object(forKey: armedFireAtKey) as? Date }
+        set {
+            if let newValue {
+                UserDefaults.standard.set(newValue, forKey: armedFireAtKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: armedFireAtKey)
+            }
+        }
+    }
+
+    /// Identifier of the armed notification request. Persisted rather than
+    /// derived on demand because disarming routinely happens *after* the trip
+    /// it belongs to is gone — ending a trip clears `activeTrip` first, and the
+    /// scheduled request still has to be cancelled.
+    static var armedNotificationId: String? {
+        get { UserDefaults.standard.string(forKey: armedNotificationIdKey) }
+        set {
+            if let newValue {
+                UserDefaults.standard.set(newValue, forKey: armedNotificationIdKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: armedNotificationIdKey)
+            }
+        }
+    }
+
     static var pendingSuggestion: PendingAutoEndSuggestion? {
         get {
             guard let data = UserDefaults.standard.data(forKey: pendingSuggestionKey) else { return nil }
@@ -123,9 +160,17 @@ enum TripAutoEndPreferences {
         }
     }
 
-    /// Clears all per-trip arrival state. Called whenever the active trip
-    /// changes (started, ended, or a suggestion was resolved) so a new trip —
-    /// or the moment right after ending one — never inherits stale tracking.
+    /// Clears all per-trip arrival state. Called when a trip *starts or ends* —
+    /// deliberately **not** when monitoring merely resumes after a relaunch.
+    /// The arrival clock spans hours and the app is routinely relaunched inside
+    /// that window (the significant-change service relaunches it by design, and
+    /// jetsam kills happen), so resetting on resume meant the grace period
+    /// restarted from zero every time and could never elapse.
+    ///
+    /// The armed notification is deliberately **not** cleared here: cancelling
+    /// it needs `UNUserNotificationCenter`, so `TripAutoEndMonitor.disarm()`
+    /// owns that state end to end. Clearing it from underneath would orphan the
+    /// scheduled request, which would then fire for a trip that no longer runs.
     static func resetArrivalTracking() {
         homeArrivalCandidateSince = nil
     }
@@ -151,8 +196,28 @@ enum TripAutoEndHeuristic {
         var candidateSince: Date?
         /// Whether to raise a new suggestion now.
         var shouldSuggest: Bool
+        /// When to schedule the suggestion notification for, or `nil` when
+        /// nothing should be armed. Set whenever the device is at home but the
+        /// moment to ask is still in the future — the caller turns this into a
+        /// time-triggered notification so the suggestion doesn't depend on
+        /// another location update arriving (it won't: the device is parked).
+        var armFireAt: Date?
+        /// Whether any armed notification should be cancelled. True whenever
+        /// the state no longer wants the currently scheduled ask — the device
+        /// left home, or the suggestion is being raised right now.
+        var shouldDisarm: Bool
     }
 
+    /// The decision core. `now` is injected so this is testable without waiting
+    /// out a two-hour grace period.
+    ///
+    /// The key idea: rather than asking "should I suggest right now?" on every
+    /// location update, this computes the *instant* at which asking becomes
+    /// due — the later of "grace period elapsed" and "cooldown expired". If
+    /// that instant has passed, suggest; if it is still ahead, hand it back as
+    /// `armFireAt` so the caller can schedule it. Both branches work from a
+    /// single sample, which is what lets the suggestion fire while the device
+    /// sits motionless at home and no further updates arrive.
     static func evaluate(
         candidateSince: Date?,
         lastSuggestionAt: Date?,
@@ -160,23 +225,32 @@ enum TripAutoEndHeuristic {
         now: Date
     ) -> Decision {
         guard isAtHome else {
-            // Left the radius: the continuous stay is over, start fresh next time.
-            return Decision(candidateSince: nil, shouldSuggest: false)
+            // Left the radius: the continuous stay is over, start fresh next
+            // time, and drop any ask that was already scheduled.
+            return Decision(
+                candidateSince: nil, shouldSuggest: false, armFireAt: nil, shouldDisarm: true
+            )
         }
 
         let since = candidateSince ?? now
-        guard now.timeIntervalSince(since) >= TripAutoEndPreferences.homeArrivalGrace else {
-            return Decision(candidateSince: since, shouldSuggest: false)
+        let graceElapsesAt = since.addingTimeInterval(TripAutoEndPreferences.homeArrivalGrace)
+        // A suggestion raised recently pushes the next possible ask out by the
+        // cooldown; without a previous suggestion only the grace period counts.
+        let cooldownEndsAt = lastSuggestionAt?.addingTimeInterval(
+            TripAutoEndPreferences.suggestionCooldown
+        )
+        let dueAt = max(graceElapsesAt, cooldownEndsAt ?? .distantPast)
+
+        guard dueAt > now else {
+            // Due now — raise it directly instead of scheduling, and clear any
+            // armed request so the user isn't asked twice for the same arrival.
+            return Decision(
+                candidateSince: since, shouldSuggest: true, armFireAt: nil, shouldDisarm: true
+            )
         }
 
-        if let lastSuggestionAt,
-           now.timeIntervalSince(lastSuggestionAt) < TripAutoEndPreferences.suggestionCooldown {
-            // Long enough at home, but we already asked recently — keep the
-            // candidate timestamp so a later evaluation (once the cooldown
-            // passes) doesn't have to wait through the grace period again.
-            return Decision(candidateSince: since, shouldSuggest: false)
-        }
-
-        return Decision(candidateSince: since, shouldSuggest: true)
+        return Decision(
+            candidateSince: since, shouldSuggest: false, armFireAt: dueAt, shouldDisarm: false
+        )
     }
 }
