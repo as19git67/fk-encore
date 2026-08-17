@@ -203,6 +203,36 @@ def test_a_second_reload_is_refused(client, volume, monkeypatch):
     assert client.post("/reload", json=_row()).status_code == 409
 
 
+# ─── crash-vs-reload race ───────────────────────────────────────────────────────
+#
+# A llama-server that dies is normally fatal on purpose (see
+# llama_supervisor.terminate_own_process) — but not while a reload is in
+# progress, where the crash is exactly what _reload_worker's except block
+# exists to recover from. Killing the process here as well would win that
+# race every time: the watcher notices within milliseconds, long before a
+# rollback to the previous configuration could even start.
+
+
+def test_a_crash_during_reload_does_not_kill_the_service(monkeypatch):
+    killed = []
+    monkeypatch.setattr(main, "terminate_own_process", lambda status: killed.append(status))
+    monkeypatch.setattr(main, "_reload_running", True)
+
+    main._handle_unexpected_exit(-6)
+
+    assert killed == []
+
+
+def test_a_crash_outside_a_reload_still_kills_the_service(monkeypatch):
+    killed = []
+    monkeypatch.setattr(main, "terminate_own_process", lambda status: killed.append(status))
+    monkeypatch.setattr(main, "_reload_running", False)
+
+    main._handle_unexpected_exit(-6)
+
+    assert killed == [-6]
+
+
 # ─── /reload behaviour ─────────────────────────────────────────────────────────
 
 
