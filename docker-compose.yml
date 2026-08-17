@@ -40,7 +40,7 @@ services:
     # chown files dropped later by other host users — for the finance
     # dropbox the operator needs to land files as 568:568 (or g+r with
     # the apps group set as primary on the dataset).
-    command: ["sh", "-c", "chown -R 568:568 /mnt/documents /mnt/documents-inbox /mnt/models /mnt/embedding-models /mnt/receipt-ocr-models /mnt/finance-import /mnt/finance-export /mnt/backup /mnt/geo /mnt/taxonomy-out"]
+    command: ["sh", "-c", "chown -R 568:568 /mnt/documents /mnt/documents-inbox /mnt/models /mnt/embedding-models /mnt/receipt-ocr-models /mnt/finance-import /mnt/finance-export /mnt/backup /mnt/geo /mnt/taxonomy-out /mnt/recap-music"]
     volumes:
       - documents:/mnt/documents
       - documents_inbox:/mnt/documents-inbox
@@ -52,6 +52,7 @@ services:
       - backup:/mnt/backup
       - geo_data:/mnt/geo
       - taxonomy_out:/mnt/taxonomy-out
+      - recap-music:/mnt/recap-music
 
   # ── Main Encore.ts Application ─────────────────────────────────────────────
   app:
@@ -108,7 +109,7 @@ services:
       ADMIN_NAME: ${ADMIN_NAME:-Admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-changeme}   # override in .env!
       RP_ID: ${DEPLOY_RP_ID:-localhost}
-      RP_NAME: ${DEPLOY_RP_NAME:-F4mil App}
+      RP_NAME: ${DEPLOY_RP_NAME:-F4MIL App}
       RP_ORIGIN: ${DEPLOY_RP_ORIGIN:-http://localhost:8080}
       ENABLE_LOCAL_FACES: "true"
       FACE_DISTANCE_THRESHOLD: "0.42"

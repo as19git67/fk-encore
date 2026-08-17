@@ -53,5 +53,13 @@
     "vite": "^7.3.1",
     "vitest": "^4.1.0",
     "vue-tsc": "^3.1.5"
+  },
+  "allowScripts": {
+    "@swc/core@1.15.21": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.27.4": true,
+    "fsevents@2.3.3": true,
+    "fsevents@2.3.2": true,
+    "msw@2.12.14": true
   }
 }
