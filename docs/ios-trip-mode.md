@@ -160,8 +160,9 @@ Nutzer > X km vom Home-Zentroid für > Y Stunden → proaktiver Vorschlag „Sie
 aus, als wärst du unterwegs (Ort). Trip Mode einschalten?". Bewusst nur
 Vorschlag, nie automatisch (Zuverlässigkeit/Akku).
 
-**Start-Vorschlag: noch nicht umgesetzt.** Der Rest dieses Abschnitts (§9.1
-„Vorschlag dauerhaft abwählbar") beschreibt weiterhin nur den Plan.
+**Start-Vorschlag: noch nicht umgesetzt.** §9.2 spezifiziert ihn; §9.3
+„Vorschlag dauerhaft abwählbar" beschreibt weiterhin nur den Plan (gilt für
+beide Richtungen).
 
 ### 9.1 Auto-Ende-Vorschlag (umgesetzt)
 
@@ -201,8 +202,70 @@ Die spiegelbildliche Hälfte — „wieder länger in Home-Region → Trip beend
   unverändert weiter — der Monitor ist eine reine Zusatzfunktion über dem
   bestehenden manuellen „Beenden"-Button in `TripView`.
 
-**Vorschlag dauerhaft ortsbezogen abwählbar (wichtig):** Ohne das würde z. B.
-das tägliche Pendeln zum Arbeitsplatz jeden Tag „Trip Mode einschalten?" fragen.
+**Start und Ende sind bewusst kein Spiegelbild.** Beim Start läuft noch kein
+Trip — hier ist ein CoreLocation-Dauerbetrieb mit „Immer"-Berechtigung nicht
+zu rechtfertigen wie beim (bereits laufenden, explizit gestarteten) Trip oben.
+Der Start-Vorschlag nutzt stattdessen ein Signal, das ohnehin schon kostenlos
+anfällt: die GPS-Koordinaten neuer Fotos aus dem Auto-Add-/Sync-Pass.
+
+### 9.2 Start-Vorschlag (Spezifikation, noch nicht umgesetzt)
+
+- **Signalquelle:** `PHAsset.location` der Fotos, die der ohnehin laufende
+  Enumerations-Pass (`runFullSync`: Foreground-Resume, Kaltstart, BG-Task; plus
+  reaktiv über `PHPhotoLibraryChangeObserver`) sowieso schon sieht — kein
+  zusätzliches CoreLocation-Monitoring, keine neue Berechtigung. Ergänzend die
+  zuletzt bekannte `CLLocation`, falls die App gerade im Vordergrund ohnehin
+  eine Position hat (z. B. für den Auto-Ende-Monitor eines anderen, parallel
+  laufenden Aspekts — hier nur als Bonus, nie Voraussetzung).
+- **Heuristik (`TripAutoStartHeuristic`, pur/testbar, analog zu
+  `TripAutoEndHeuristic`):** Fotos mit GPS **> 100 km** vom Home-Zentroid
+  (`TripHomeLocation.resolve()`, dieselbe Quelle wie §9.1) UND über
+  **≥ 2 distinkte Aufnahmezeitpunkte hinweg mit ≥ 6 h Spanne** zwischen erstem
+  und letztem → Vorschlag. Die Zeitspanne verhindert, dass ein einzelnes Foto
+  vom Flughafen-Zwischenstopp sofort auslöst; 100 km ist deutlich mehr als der
+  2-km-Home-Radius aus §9.1 und mehr als ein typischer Tagesausflug.
+  - Läuft bereits ein Trip (`TripStore.shared.isActive`), wird nicht geprüft —
+    es gibt in Etappe 1 nur einen aktiven Trip (§14.4), ein zweiter Vorschlag
+    wäre bedeutungslos.
+  - Kein Home-Zentroid bekannt → keine Prüfung, kein Vorschlag (wie überall in
+    diesem Dokument: fehlende Geodaten sind kein Fehlerzustand, s. §14.3).
+- **Signalisierung — bewusst leiser als beim Ende (§9.1), weil Starten mehr
+  Konsequenzen hat als Beenden:**
+  1. **Lokale Notification** „Sieht aus, als wärst du unterwegs (Ort). Trip
+     Mode einschalten?" mit den Aktionen **„Trip starten"**, **„Nicht jetzt"**
+     und **„Für diesen Ort nicht mehr fragen"** (schreibt direkt in
+     `suppressedTripRegions`, §9.3).
+  2. **„Trip starten" öffnet das vorbefüllte `TripStartSheet`** statt den Trip
+     direkt zu starten — anders als beim Ende (§9.1: „Trip beenden" ist
+     Ein-Klick). Der Start-Flow braucht den vom Nutzer bestätigten Namen
+     (§14.3: Reverse-Geocoding → Vorschlag → Bestätigung/Editierbarkeit); das
+     darf eine Notification-Aktion nicht überspringen. Der grobe Ort aus dem
+     Foto-Cluster (statt Live-CoreLocation) füllt den Namensvorschlag vorab,
+     ersetzt aber nicht das übliche Reverse-Geocoding beim tatsächlichen Start.
+  3. **Banner in `TripView`** im „Kein aktiver Trip"-Zustand (`noTripView`,
+     `TripView.swift`) als Fallback, falls Notifications verweigert, verpasst
+     oder ignoriert wurden — analog zum Auto-Ende-Banner in `ActiveTripView`.
+  4. **Tab-Icon-Badge:** ein dezenter Punkt am Trip-Tab, solange ein
+     Start-Vorschlag offen ist (`pendingStartSuggestion` gesetzt) — ergänzt die
+     ohnehin geplante zustandsabhängige Einfärbung des Trip-Tab-Icons (§14.1)
+     um einen dritten Zustand. Trägt allein, falls sowohl Notification als auch
+     Banner verpasst wurden.
+  Ein bloßes Antippen der Notification ohne Aktion öffnet nur die App (das
+  vorbefüllte Sheet erscheint dann nicht automatisch) und ist kein implizites
+  Ja — genau wie beim Ende (§9.1) räumt erst eine explizite Aktion den
+  Vorschlag weg; „Nicht jetzt" startet zusätzlich den Cooldown.
+- **Persistenz:** `pendingStartSuggestion` (Ort/Name-Vorschlag, Gitterzelle,
+  `raisedAt`) analog zu `PendingAutoEndSuggestion` aus §9.1, in einer neuen
+  `TripAutoStartPreferences` (statt der bestehenden `TripAutoEndPreferences`,
+  die begrifflich ans Ende gebunden bleibt). Cooldown und
+  Regionsunterdrückung teilen sich Konzept und Speicherform mit §9.3, aber
+  eigene Keys — ein abgelehnter Start-Vorschlag für eine Region darf einen
+  späteren Ende-Vorschlag nicht beeinflussen und umgekehrt.
+
+### 9.3 Vorschlag dauerhaft ortsbezogen abwählbar (wichtig)
+
+Gilt für beide Richtungen (§9.1 Ende, §9.2 Start). Ohne das würde z. B. das
+tägliche Pendeln zum Arbeitsplatz jeden Tag „Trip Mode einschalten?" fragen.
 Drei ineinandergreifende Bremsen:
 
 1. **„Für diesen Ort nicht mehr fragen"** als Aktion am Vorschlag → die
