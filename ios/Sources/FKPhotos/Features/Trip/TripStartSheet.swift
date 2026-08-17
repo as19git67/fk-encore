@@ -10,7 +10,7 @@ import SwiftUI
 struct TripStartSheet: View {
     @Environment(\.dismiss) private var dismiss
 
-    private let initialName = TripStore.defaultTripName()
+    private let initialName: String
     @State private var name: String
     @State private var isLocating = false
     @State private var placeName: String?
@@ -19,9 +19,17 @@ struct TripStartSheet: View {
     /// Called with the confirmed name.
     let onStart: (String) -> Void
 
-    init(onStart: @escaping (String) -> Void) {
+    /// - Parameter suggestedName: Prefill from the auto-start suggestion
+    ///   (`docs/ios-trip-mode.md` §9.2), derived from where the recent photos
+    ///   were taken. `nil` for a manual start, which falls back to the
+    ///   date-based default. Either way the live location below may still
+    ///   refine it — the suggestion's coordinate comes from a photo cluster,
+    ///   the sheet's from the device standing right there.
+    init(suggestedName: String? = nil, onStart: @escaping (String) -> Void) {
         self.onStart = onStart
-        _name = State(initialValue: TripStore.defaultTripName())
+        let initial = suggestedName ?? TripStore.defaultTripName()
+        self.initialName = initial
+        _name = State(initialValue: initial)
     }
 
     private var canStart: Bool {
