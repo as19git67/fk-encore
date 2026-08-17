@@ -27,7 +27,7 @@ import logging
 import time
 import urllib.error
 import urllib.request
-from typing import Any
+from typing import Any, Callable
 
 log = logging.getLogger("llm-service.llama-server")
 
@@ -87,13 +87,25 @@ class LlamaServerClient:
 
     # ── lifecycle ─────────────────────────────────────────────────────────
 
-    def wait_until_ready(self, timeout_s: float, poll_interval: float = 2.0) -> dict[str, Any]:
+    def wait_until_ready(
+        self,
+        timeout_s: float,
+        poll_interval: float = 2.0,
+        still_starting: Callable[[], bool] | None = None,
+    ) -> dict[str, Any]:
         """Block until ``/props`` answers, or raise once *timeout_s* elapses.
 
         ``/health`` replies 503 while the model is still loading, and loading a
         MoE model whose experts stream into system RAM is slow — minutes on a
         cold page cache. The deadline therefore has to be a deployment knob,
         not a constant.
+
+        *still_starting*, when given, is polled alongside ``/props`` and lets
+        the caller report "the process I'm waiting on has already died" —
+        e.g. a bad ``--n-cpu-moe`` OOMing during context allocation. Without
+        it a dead process is indistinguishable from a slow-loading one until
+        the full timeout elapses, which is minutes too long for a caller that
+        wants to roll back to a known-good configuration instead of waiting.
         """
 
         deadline = time.monotonic() + timeout_s
@@ -101,6 +113,11 @@ class LlamaServerClient:
         attempt = 0
         while time.monotonic() < deadline:
             attempt += 1
+            if still_starting is not None and not still_starting():
+                raise LlamaServerError(
+                    f"llama-server at {self.base_url} exited before becoming ready"
+                    + (f": {last_error}" if last_error else "")
+                )
             try:
                 props = self._get("/props", timeout=10.0)
                 if isinstance(props, dict):

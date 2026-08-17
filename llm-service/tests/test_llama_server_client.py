@@ -166,6 +166,18 @@ def test_wait_until_ready_raises_when_never_ready(server):
         client.wait_until_ready(timeout_s=1.0, poll_interval=0.2)
 
 
+def test_wait_until_ready_bails_early_when_process_already_died(server):
+    """A crashed process is indistinguishable from a slow-loading one by
+    /props alone (both just refuse the connection) — still_starting is how a
+    caller with a reload to roll back to finds out in one poll interval
+    instead of after the full timeout."""
+
+    client = server({"/props": (503, {"error": "loading model"})})
+
+    with pytest.raises(LlamaServerError, match="exited before becoming ready"):
+        client.wait_until_ready(timeout_s=30.0, poll_interval=0.2, still_starting=lambda: False)
+
+
 def test_server_backend_keeps_the_json_schema(monkeypatch):
     """In server mode the grammar is built by llama-server, so the local
     pre-flight is skipped — but the schema itself must survive. Dropping to a
