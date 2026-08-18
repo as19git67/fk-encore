@@ -57,7 +57,7 @@ import {
 import { loadEffectiveTaxSections } from "./tax-hint-overrides";
 import { isValidTaxSectionSlug } from "./tax-sections";
 import { DOCUMENT_TYPES } from "./document-types";
-import { loadRemovedSubjectPersonIds, loadSubjectPersonsForMatch } from "./subject-persons";
+import { loadRemovedSubjectPersonIds, loadSubjectPersonHints, loadSubjectPersonsForMatch } from "./subject-persons";
 import { flattenTaxonomy, taxonomyHints } from "./taxonomy";
 import { matchContentRule, matchSenderRule } from "./sender-rules";
 import { loadSenderRuleOverrides } from "./sender-rule-overrides";
@@ -315,9 +315,11 @@ export async function runClassify(documentId: number): Promise<{ classification:
     hint: t.hint,
   }));
   const subjectPersons = await loadSubjectPersonsForMatch(row.user_id);
-  const subject_persons = subjectPersons.map(({ full_name, relation_tag }) => ({
+  const subjectPersonHints = await loadSubjectPersonHints(row.user_id);
+  const subject_persons = subjectPersonHints.map(({ full_name, relation_tag, relation_kind }) => ({
     full_name,
     relation_tag,
+    relation_kind,
   }));
   // Retrieval-augmented few-shot: anchor the LLM with the nearest already-
   // classified documents of this household. Best-effort — degrades to plain
