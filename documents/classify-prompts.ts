@@ -263,7 +263,16 @@ export const CLASSIFY_SUBJECT_PERSONS_PROMPT = `
 BEZUGSPERSONEN (nur wenn dir unten eine Liste von Bezugspersonen gezeigt wird)
 Der Nutzer verwaltet Dokumente, die ihn selbst oder ihm nahestehende
 Personen (Eltern, Kinder, Betreute) betreffen. Du bekommst eine Liste
-\`Bezugspersonen\` mit Name → Beziehungs-Tag.
+\`Bezugspersonen\` mit Name, Beziehungs-Tag und Beziehungsart (relation_kind).
+
+Die Beziehungsarten sind:
+- self: der Nutzer selbst
+- spouse: Ehepartner/Lebenspartner
+- child: Kind des Nutzers
+- parent: Elternteil
+- sibling: Geschwister
+- ward: betreute Person
+- other: sonstige Bezugsperson
 
 Wenn das Dokument eine der genannten Personen klar adressiert oder
 inhaltlich betrifft (Patient, Versicherte, Mieter, Empfänger, Betreuter),

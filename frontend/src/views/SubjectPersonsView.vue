@@ -2,41 +2,126 @@
 import { onMounted, ref } from 'vue'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
+import DatePicker from 'primevue/datepicker'
 import InputText from 'primevue/inputtext'
+import InputNumber from 'primevue/inputnumber'
 import Message from 'primevue/message'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
+import Select from 'primevue/select'
 import Tag from 'primevue/tag'
 import {
   createSubjectPerson,
   deleteSubjectPerson,
+  listAssessmentSettings,
   listSubjectPersons,
   updateSubjectPerson,
+  upsertAssessmentSetting,
+  type AssessmentSetting,
+  type AssessmentType,
+  type CostBearer,
+  type RelationKind,
   type SubjectPerson,
 } from '../api/documents'
+import { toLocalIsoDate } from '../utils/dateFormat'
+
+// ─── relation kind options ──────────────────────────────────────────────────
+
+const relationKindOptions: { value: RelationKind; label: string }[] = [
+  { value: 'self', label: 'Ich selbst' },
+  { value: 'spouse', label: 'Ehepartner:in' },
+  { value: 'child', label: 'Kind' },
+  { value: 'parent', label: 'Elternteil' },
+  { value: 'sibling', label: 'Geschwister' },
+  { value: 'ward', label: 'Betreute Person' },
+  { value: 'other', label: 'Sonstige' },
+]
+
+const costBearerOptions: { value: CostBearer; label: string }[] = [
+  { value: 'unknown', label: 'Unklar' },
+  { value: 'user', label: 'Ich selbst' },
+  { value: 'person', label: 'Die Person selbst' },
+]
+
+const assessmentTypeOptions: { value: AssessmentType; label: string }[] = [
+  { value: 'unknown', label: 'Unbekannt' },
+  { value: 'zusammen', label: 'Zusammenveranlagung' },
+  { value: 'einzeln', label: 'Einzelveranlagung' },
+]
+
+// ─── state ──────────────────────────────────────────────────────────────────
 
 const persons = ref<SubjectPerson[]>([])
+const assessmentSettings = ref<AssessmentSetting[]>([])
 const loading = ref(false)
 const error = ref('')
 const info = ref('')
 
-const form = ref({ full_name: '', relation_tag: '', requires_tax_review: false })
+const form = ref({
+  full_name: '',
+  relation_tag: '',
+  relation_kind: 'other' as RelationKind,
+  birth_date: null as Date | null,
+  in_household: false,
+  tax_cost_bearer: 'unknown' as CostBearer,
+})
 const adding = ref(false)
 const deletingId = ref<number | null>(null)
-const togglingId = ref<number | null>(null)
+const savingId = ref<number | null>(null)
+
+const assessmentForm = ref({
+  assessment_type: 'unknown' as AssessmentType,
+  valid_from_tax_year: null as number | null,
+})
+const savingAssessment = ref(false)
+
+// ─── data loading ───────────────────────────────────────────────────────────
 
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    const res = await listSubjectPersons()
-    persons.value = res.items
+    const [personsRes, settingsRes] = await Promise.all([
+      listSubjectPersons(),
+      listAssessmentSettings(),
+    ])
+    persons.value = personsRes.items
+    assessmentSettings.value = settingsRes.items
+    if (settingsRes.items.length > 0) {
+      const current = [...settingsRes.items].sort(
+        (a, b) => (b.valid_from_tax_year ?? 0) - (a.valid_from_tax_year ?? 0),
+      )[0]!
+      assessmentForm.value.assessment_type = current.assessment_type
+      assessmentForm.value.valid_from_tax_year = current.valid_from_tax_year
+    }
   } catch (err: any) {
-    error.value = err.message || 'Bezugspersonen konnten nicht geladen werden'
+    error.value = err.message || 'Daten konnten nicht geladen werden'
   } finally {
     loading.value = false
   }
 }
+
+// ─── assessment settings ────────────────────────────────────────────────────
+
+async function handleSaveAssessment() {
+  savingAssessment.value = true
+  error.value = ''
+  info.value = ''
+  try {
+    await upsertAssessmentSetting({
+      assessment_type: assessmentForm.value.assessment_type,
+      valid_from_tax_year: assessmentForm.value.valid_from_tax_year,
+    })
+    await load()
+    info.value = 'Veranlagungsart gespeichert'
+  } catch (err: any) {
+    error.value = err.message || 'Speichern fehlgeschlagen'
+  } finally {
+    savingAssessment.value = false
+  }
+}
+
+// ─── subject person CRUD ────────────────────────────────────────────────────
 
 async function handleAdd() {
   const full_name = form.value.full_name.trim()
@@ -49,14 +134,20 @@ async function handleAdd() {
     const created = await createSubjectPerson({
       full_name,
       relation_tag,
-      requires_tax_review: form.value.requires_tax_review,
+      relation_kind: form.value.relation_kind,
+      birth_date: form.value.birth_date ? toLocalIsoDate(form.value.birth_date) : null,
+      in_household: form.value.in_household,
+      tax_cost_bearer: form.value.tax_cost_bearer,
     })
     persons.value = [...persons.value, created].sort((a, b) =>
       a.full_name.localeCompare(b.full_name, 'de'),
     )
     form.value.full_name = ''
     form.value.relation_tag = ''
-    form.value.requires_tax_review = false
+    form.value.relation_kind = 'other'
+    form.value.birth_date = null
+    form.value.in_household = false
+    form.value.tax_cost_bearer = 'unknown'
     info.value = `${created.full_name} hinzugefügt`
   } catch (err: any) {
     error.value = err.message || 'Speichern fehlgeschlagen'
@@ -65,21 +156,39 @@ async function handleAdd() {
   }
 }
 
-async function handleToggleTaxReview(p: SubjectPerson, checked: boolean) {
-  togglingId.value = p.id
+async function handleFieldChange(
+  p: SubjectPerson,
+  patch: Partial<{
+    relation_kind: string
+    birth_date: string | null
+    in_household: boolean
+    tax_cost_bearer: string
+    requires_tax_review_override: boolean | null
+  }>,
+) {
+  savingId.value = p.id
   error.value = ''
   info.value = ''
   try {
-    const updated = await updateSubjectPerson(p.id, { requires_tax_review: checked })
+    const updated = await updateSubjectPerson(p.id, patch)
     persons.value = persons.value.map((x) => (x.id === p.id ? updated : x))
-    info.value = checked
-      ? `Steuerdokumente von ${p.full_name} werden ab sofort zur Prüfung markiert.`
-      : `Steuerdokumente von ${p.full_name} werden nicht mehr zur Prüfung markiert.`
   } catch (err: any) {
     error.value = err.message || 'Speichern fehlgeschlagen'
   } finally {
-    togglingId.value = null
+    savingId.value = null
   }
+}
+
+async function handleToggleTaxReview(p: SubjectPerson, checked: boolean) {
+  await handleFieldChange(p, { requires_tax_review_override: checked })
+  info.value = checked
+    ? `Steuerdokumente von ${p.full_name} werden ab sofort zur Prüfung markiert.`
+    : `Steuerdokumente von ${p.full_name} werden nicht mehr zur Prüfung markiert.`
+}
+
+async function handleResetTaxReviewOverride(p: SubjectPerson) {
+  await handleFieldChange(p, { requires_tax_review_override: null })
+  info.value = `Steuer-Prüfung für ${p.full_name} auf automatisch zurückgesetzt.`
 }
 
 async function handleDelete(p: SubjectPerson) {
@@ -103,21 +212,62 @@ onMounted(load)
 <template>
   <div class="subject-persons-view">
     <header class="page-header">
-      <h1>Bezugspersonen</h1>
+      <h1>Bezugspersonen &amp; Haushalt</h1>
       <p class="page-hint">
-        Wenn der Klassifizierer auf einem Dokument einen dieser Namen erkennt,
-        ergänzt er automatisch das hinterlegte Beziehungs-Tag (z.&nbsp;B.
-        <code>mutter</code>) — und die Volltext- und Semantik-Suche finden das
-        Dokument anschließend über das Tag.
+        Personen, die auf deinen Dokumenten vorkommen. Der Klassifizierer erkennt
+        ihre Namen und ergänzt automatisch das Beziehungs-Tag. Die Beziehungsart
+        bestimmt, ob Steuerdokumente dieser Person automatisch zur Prüfung
+        markiert werden.
       </p>
     </header>
 
     <Message v-if="error" severity="error" @close="error = ''">{{ error }}</Message>
     <Message v-if="info" severity="success" @close="info = ''">{{ info }}</Message>
 
+    <!-- Assessment type -->
+    <section class="assessment-section" aria-labelledby="assessment-heading">
+      <h2 id="assessment-heading">Veranlagungsart</h2>
+      <form class="assessment-form" @submit.prevent="handleSaveAssessment">
+        <label>
+          <span class="label">Veranlagung</span>
+          <Select
+            v-model="assessmentForm.assessment_type"
+            :options="assessmentTypeOptions"
+            option-label="label"
+            option-value="value"
+            :disabled="savingAssessment"
+          />
+        </label>
+        <label>
+          <span class="label">Gilt ab Steuerjahr (leer = immer)</span>
+          <InputNumber
+            v-model="assessmentForm.valid_from_tax_year"
+            :use-grouping="false"
+            :min="1990"
+            :max="2099"
+            placeholder="z. B. 2024"
+            :disabled="savingAssessment"
+          />
+        </label>
+        <Button
+          type="submit"
+          label="Speichern"
+          icon="pi pi-check"
+          :loading="savingAssessment"
+          size="small"
+        />
+      </form>
+      <p class="page-hint">
+        Bei Zusammenveranlagung sind Arztkosten des Ehepartners automatisch
+        absetzbar — die Steuer-Prüfung entfällt für Ehepartner:in und eigene
+        Kinder im Haushalt.
+      </p>
+    </section>
+
+    <!-- Add form -->
     <section class="add-form" aria-labelledby="add-heading">
       <h2 id="add-heading">Bezugsperson hinzufügen</h2>
-      <form class="add-form__row" @submit.prevent="handleAdd">
+      <form class="add-form__grid" @submit.prevent="handleAdd">
         <label>
           <span class="label">Name (wie auf dem Dokument)</span>
           <InputText
@@ -134,34 +284,60 @@ onMounted(load)
             :disabled="adding"
           />
         </label>
-        <label class="checkbox-label">
-          <Checkbox v-model="form.requires_tax_review" :binary="true" :disabled="adding" />
-          <span>Steuerdokumente dieser Person zur Prüfung markieren</span>
+        <label>
+          <span class="label">Beziehungsart</span>
+          <Select
+            v-model="form.relation_kind"
+            :options="relationKindOptions"
+            option-label="label"
+            option-value="value"
+            :disabled="adding"
+          />
         </label>
-        <Button
-          type="submit"
-          label="Hinzufügen"
-          icon="pi pi-plus"
-          :loading="adding"
-          :disabled="!form.full_name.trim() || !form.relation_tag.trim()"
-        />
+        <label>
+          <span class="label">Geburtsdatum (optional)</span>
+          <DatePicker
+            v-model="form.birth_date"
+            date-format="dd.mm.yy"
+            :show-icon="true"
+            :disabled="adding"
+            placeholder="TT.MM.JJJJ"
+          />
+        </label>
+        <label>
+          <span class="label">Kostenträger</span>
+          <Select
+            v-model="form.tax_cost_bearer"
+            :options="costBearerOptions"
+            option-label="label"
+            option-value="value"
+            :disabled="adding"
+          />
+        </label>
+        <label class="checkbox-label">
+          <Checkbox v-model="form.in_household" :binary="true" :disabled="adding" />
+          <span>Im Haushalt</span>
+        </label>
+        <div class="add-form__submit">
+          <Button
+            type="submit"
+            label="Hinzufügen"
+            icon="pi pi-plus"
+            :loading="adding"
+            :disabled="!form.full_name.trim() || !form.relation_tag.trim()"
+          />
+        </div>
       </form>
-      <p class="page-hint">
-        Betrifft ein Dokument eine absetzbare Position (Sonderausgaben,
-        haushaltsnahe Aufwendungen, …) und eine Bezugsperson, ist oft unklar,
-        ob <em>du</em> die Ausgabe getragen hast. Aktiviere die Option nur für
-        Personen außerhalb deines Haushalts, deren Rechnungen du nicht
-        automatisch bezahlst (z.&nbsp;B. ein Elternteil) — für Ehepartner:in
-        oder eigene Kinder lässt du sie i.&nbsp;d.&nbsp;R. aus.
-      </p>
     </section>
 
+    <!-- Table -->
     <DataTable
       :value="persons"
       :loading="loading"
       data-key="id"
       empty-message="Noch keine Bezugspersonen hinterlegt."
       class="persons-table"
+      responsive-layout="scroll"
     >
       <Column field="full_name" header="Name" />
       <Column header="Tag">
@@ -169,14 +345,62 @@ onMounted(load)
           <Tag :value="data.relation_tag" severity="info" />
         </template>
       </Column>
-      <Column header="Steuer-Prüfung" :style="{ width: '10rem' }">
+      <Column header="Beziehung">
+        <template #body="{ data }">
+          <Select
+            :model-value="data.relation_kind"
+            :options="relationKindOptions"
+            option-label="label"
+            option-value="value"
+            :disabled="savingId === data.id"
+            class="inline-select"
+            @update:model-value="(v: RelationKind) => handleFieldChange(data, { relation_kind: v })"
+          />
+        </template>
+      </Column>
+      <Column header="Haushalt" :style="{ width: '6rem' }">
         <template #body="{ data }">
           <Checkbox
-            :modelValue="data.requires_tax_review"
+            :model-value="data.in_household"
             :binary="true"
-            :disabled="togglingId === data.id"
-            @update:modelValue="(v: boolean) => handleToggleTaxReview(data, v)"
+            :disabled="savingId === data.id"
+            @update:model-value="(v: boolean) => handleFieldChange(data, { in_household: v })"
           />
+        </template>
+      </Column>
+      <Column header="Kostenträger">
+        <template #body="{ data }">
+          <Select
+            :model-value="data.tax_cost_bearer"
+            :options="costBearerOptions"
+            option-label="label"
+            option-value="value"
+            :disabled="savingId === data.id"
+            class="inline-select"
+            @update:model-value="(v: CostBearer) => handleFieldChange(data, { tax_cost_bearer: v })"
+          />
+        </template>
+      </Column>
+      <Column header="Steuer-Prüfung" :style="{ width: '10rem' }">
+        <template #body="{ data }">
+          <div class="tax-review-cell">
+            <Checkbox
+              :model-value="data.requires_tax_review"
+              :binary="true"
+              :disabled="savingId === data.id"
+              @update:model-value="(v: boolean) => handleToggleTaxReview(data, v)"
+            />
+            <Tag
+              v-if="data.requires_tax_review_override !== null"
+              value="manuell"
+              severity="warn"
+              class="override-tag"
+              :style="{ cursor: 'pointer' }"
+              @click="handleResetTaxReviewOverride(data)"
+              v-tooltip="'Klicken, um auf automatisch zurückzusetzen'"
+            />
+            <Tag v-else value="auto" severity="secondary" class="override-tag" />
+          </div>
         </template>
       </Column>
       <Column header="" :style="{ width: '4rem', textAlign: 'right' }">
@@ -198,7 +422,7 @@ onMounted(load)
 
 <style scoped>
 .subject-persons-view {
-  max-width: 56rem;
+  max-width: 72rem;
   margin: 0 auto;
   padding: 1rem;
   display: flex;
@@ -222,6 +446,30 @@ onMounted(load)
   font-size: 0.85em;
 }
 
+.assessment-section {
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: var(--p-content-background);
+}
+.assessment-section h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+.assessment-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+.assessment-form label {
+  flex: 1 1 12rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
 .add-form {
   border: 1px solid var(--p-content-border-color);
   border-radius: 0.5rem;
@@ -232,28 +480,46 @@ onMounted(load)
   margin: 0 0 0.5rem;
   font-size: 1rem;
 }
-.add-form__row {
+.add-form__grid {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
   align-items: flex-end;
 }
-.add-form__row label {
+.add-form__grid label {
   flex: 1 1 12rem;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
 }
-.add-form__row .checkbox-label {
-  flex: 1 1 18rem;
+.add-form__grid .checkbox-label {
+  flex: 0 0 auto;
   flex-direction: row;
   align-items: center;
   gap: 0.5rem;
   padding-bottom: 0.4rem;
 }
+.add-form__submit {
+  display: flex;
+  align-items: flex-end;
+  padding-bottom: 0.05rem;
+}
 .label {
   font-size: 0.85rem;
   color: var(--p-text-muted-color);
+}
+
+.inline-select {
+  min-width: 8rem;
+}
+
+.tax-review-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.override-tag {
+  font-size: 0.7rem;
 }
 </style>

@@ -64,8 +64,16 @@ import {
 import {
   createSubjectPerson,
   deleteSubjectPerson,
+  deleteAssessmentSetting,
+  listAssessmentSettings,
   listSubjectPersons,
+  recomputeDerivedTaxReviewForUser,
   updateSubjectPerson,
+  upsertAssessmentSetting,
+  type AssessmentSetting,
+  type AssessmentType,
+  type CostBearer,
+  type RelationKind,
 } from "./subject-persons";
 import { dropTaxLinks, relocateDocument } from "./relocate";
 import { withDocumentLock } from "./document-lock";
@@ -3693,7 +3701,12 @@ export interface SubjectPersonDTO {
   id: number;
   full_name: string;
   relation_tag: string;
+  relation_kind: RelationKind;
+  birth_date: string | null;
+  in_household: boolean;
+  tax_cost_bearer: CostBearer;
   requires_tax_review: boolean;
+  requires_tax_review_override: boolean | null;
   created_at: string;
   updated_at: string;
 }
@@ -3705,17 +3718,48 @@ export interface SubjectPersonListResponse {
 export interface CreateSubjectPersonRequest {
   full_name: string;
   relation_tag: string;
+  relation_kind?: string;
+  birth_date?: string | null;
+  in_household?: boolean;
+  tax_cost_bearer?: string;
   requires_tax_review?: boolean;
+  requires_tax_review_override?: boolean | null;
 }
 
 export interface UpdateSubjectPersonRequest {
   id: number;
   full_name?: string;
   relation_tag?: string;
+  relation_kind?: string;
+  birth_date?: string | null;
+  in_household?: boolean;
+  tax_cost_bearer?: string;
   requires_tax_review?: boolean;
+  requires_tax_review_override?: boolean | null;
 }
 
 export interface DeleteSubjectPersonRequest {
+  id: number;
+}
+
+export interface AssessmentSettingDTO {
+  id: number;
+  assessment_type: AssessmentType;
+  valid_from_tax_year: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AssessmentSettingsListResponse {
+  items: AssessmentSettingDTO[];
+}
+
+export interface UpsertAssessmentSettingRequest {
+  assessment_type: string;
+  valid_from_tax_year?: number | null;
+}
+
+export interface DeleteAssessmentSettingRequest {
   id: number;
 }
 
@@ -3846,16 +3890,21 @@ export const updateSubjectPersonEndpoint = api(
     const affectedDocumentIds = req.full_name !== undefined
       ? await documentIdsForOwnedSubjectPerson(userId, req.id)
       : [];
-    const updated = await updateSubjectPerson(userId, req.id, {
+    const { person, effectiveChanged } = await updateSubjectPerson(userId, req.id, {
       full_name: req.full_name,
       relation_tag: req.relation_tag,
+      relation_kind: req.relation_kind,
+      birth_date: req.birth_date,
+      in_household: req.in_household,
+      tax_cost_bearer: req.tax_cost_bearer,
       requires_tax_review: req.requires_tax_review,
+      requires_tax_review_override: req.requires_tax_review_override,
     });
     await relocateSubjectPersonDocuments(affectedDocumentIds);
-    if (req.requires_tax_review !== undefined) {
-      await syncTaxReviewFlagForSubjectPerson(userId, req.id, req.requires_tax_review);
+    if (effectiveChanged) {
+      await syncTaxReviewFlagForSubjectPerson(userId, req.id, person.requires_tax_review);
     }
-    return updated;
+    return person;
   },
 );
 
@@ -3867,6 +3916,46 @@ export const deleteSubjectPersonEndpoint = api(
     const affectedDocumentIds = await documentIdsForOwnedSubjectPerson(userId, req.id);
     await deleteSubjectPerson(userId, req.id);
     await relocateSubjectPersonDocuments(affectedDocumentIds);
+    return { success: true };
+  },
+);
+
+// ─── Assessment settings ────────────────────────────────────────────────────
+
+export const listAssessmentSettingsEndpoint = api(
+  { expose: true, method: "GET", path: "/documents/assessment-settings", auth: true },
+  async (): Promise<AssessmentSettingsListResponse> => {
+    checkModule();
+    const userId = getUserId();
+    const items = await listAssessmentSettings(userId);
+    return { items };
+  },
+);
+
+export const upsertAssessmentSettingEndpoint = api(
+  { expose: true, method: "PUT", path: "/documents/assessment-settings", auth: true },
+  async (req: UpsertAssessmentSettingRequest): Promise<AssessmentSettingDTO> => {
+    checkModule();
+    const userId = getUserId();
+    const setting = await upsertAssessmentSetting(userId, req);
+    const flipped = await recomputeDerivedTaxReviewForUser(userId);
+    for (const { id, newEffective } of flipped) {
+      await syncTaxReviewFlagForSubjectPerson(userId, id, newEffective);
+    }
+    return setting;
+  },
+);
+
+export const deleteAssessmentSettingEndpoint = api(
+  { expose: true, method: "DELETE", path: "/documents/assessment-settings/:id", auth: true },
+  async (req: DeleteAssessmentSettingRequest): Promise<{ success: boolean }> => {
+    checkModule();
+    const userId = getUserId();
+    await deleteAssessmentSetting(userId, req.id);
+    const flipped = await recomputeDerivedTaxReviewForUser(userId);
+    for (const { id, newEffective } of flipped) {
+      await syncTaxReviewFlagForSubjectPerson(userId, id, newEffective);
+    }
     return { success: true };
   },
 );

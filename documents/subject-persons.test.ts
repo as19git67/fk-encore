@@ -73,9 +73,8 @@ describe("documents.subject-persons CRUD", () => {
     expect(created.full_name).toBe("Erika Mustermann");
     // relation_tag is normalised to lowercase on the way in.
     expect(created.relation_tag).toBe("mutter");
-    // Opt-in tax-review signal (0137) defaults to off — most Bezugspersonen
-    // are dependents the user obviously pays for.
-    expect(created.requires_tax_review).toBe(false);
+    // relation_kind defaults to 'other' → deriveRequiresTaxReview returns true.
+    expect(created.requires_tax_review).toBe(true);
 
     const items = await listSubjectPersons(TEST_USER_ID);
     expect(items.map((i) => i.id)).toContain(created.id);
@@ -89,7 +88,7 @@ describe("documents.subject-persons CRUD", () => {
     });
     expect(created.requires_tax_review).toBe(true);
 
-    const toggledOff = await updateSubjectPerson(TEST_USER_ID, created.id, {
+    const { person: toggledOff } = await updateSubjectPerson(TEST_USER_ID, created.id, {
       requires_tax_review: false,
     });
     expect(toggledOff.requires_tax_review).toBe(false);
@@ -109,7 +108,7 @@ describe("documents.subject-persons CRUD", () => {
     expect(mine.map((i) => i.full_name)).toEqual(["Erika Mustermann"]);
 
     const hints = await loadSubjectPersonHints(TEST_USER_ID);
-    expect(hints).toEqual([{ full_name: "Erika Mustermann", relation_tag: "mutter" }]);
+    expect(hints).toEqual([{ full_name: "Erika Mustermann", relation_tag: "mutter", relation_kind: "other" }]);
   });
 
   it("rejects duplicate names for the same user (case-insensitive)", async () => {
@@ -159,7 +158,7 @@ describe("documents.subject-persons CRUD", () => {
       relation_tag: "fremd",
     });
 
-    const patched = await updateSubjectPerson(TEST_USER_ID, own.id, {
+    const { person: patched } = await updateSubjectPerson(TEST_USER_ID, own.id, {
       relation_tag: "mama",
     });
     expect(patched.relation_tag).toBe("mama");
