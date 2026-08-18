@@ -23,6 +23,10 @@ import "./hint-mining-cron";
 // for the admin dashboard (sonstiges-%, confidence, teacher queue, etc.).
 import "./taxonomy-cockpit";
 
+// Register the daily re-derivation of Bezugspersonen tax-review flags, which
+// depend on values that age on their own (child age limit, own tax returns).
+import "./tax-review-recompute-cron";
+
 startLocalCron();
 
 import { startInboxWatcher } from "./inbox-watcher";

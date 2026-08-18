@@ -64,6 +64,7 @@ const form = ref({
   birth_date: null as Date | null,
   in_household: false,
   tax_cost_bearer: 'unknown' as CostBearer,
+  own_tax_return_from_tax_year: null as number | null,
 })
 const adding = ref(false)
 const deletingId = ref<number | null>(null)
@@ -138,6 +139,7 @@ async function handleAdd() {
       birth_date: form.value.birth_date ? toLocalIsoDate(form.value.birth_date) : null,
       in_household: form.value.in_household,
       tax_cost_bearer: form.value.tax_cost_bearer,
+      own_tax_return_from_tax_year: form.value.own_tax_return_from_tax_year,
     })
     persons.value = [...persons.value, created].sort((a, b) =>
       a.full_name.localeCompare(b.full_name, 'de'),
@@ -148,6 +150,7 @@ async function handleAdd() {
     form.value.birth_date = null
     form.value.in_household = false
     form.value.tax_cost_bearer = 'unknown'
+    form.value.own_tax_return_from_tax_year = null
     info.value = `${created.full_name} hinzugefügt`
   } catch (err: any) {
     error.value = err.message || 'Speichern fehlgeschlagen'
@@ -164,6 +167,7 @@ async function handleFieldChange(
     in_household: boolean
     tax_cost_bearer: string
     requires_tax_review_override: boolean | null
+    own_tax_return_from_tax_year: number | null
   }>,
 ) {
   savingId.value = p.id
@@ -189,6 +193,15 @@ async function handleToggleTaxReview(p: SubjectPerson, checked: boolean) {
 async function handleResetTaxReviewOverride(p: SubjectPerson) {
   await handleFieldChange(p, { requires_tax_review_override: null })
   info.value = `Steuer-Prüfung für ${p.full_name} auf automatisch zurückgesetzt.`
+}
+
+async function handleOwnReturnChange(p: SubjectPerson, year: number | null) {
+  if (year === p.own_tax_return_from_tax_year) return
+  await handleFieldChange(p, { own_tax_return_from_tax_year: year })
+  info.value =
+    year === null
+      ? `${p.full_name} macht keine eigene Steuererklärung mehr — Dokumente kommen zurück in deine Prüfung.`
+      : `Steuerdokumente von ${p.full_name} ab Steuerjahr ${year} gehören ab sofort zur eigenen Steuerakte.`
 }
 
 async function handleDelete(p: SubjectPerson) {
@@ -218,6 +231,12 @@ onMounted(load)
         ihre Namen und ergänzt automatisch das Beziehungs-Tag. Die Beziehungsart
         bestimmt, ob Steuerdokumente dieser Person automatisch zur Prüfung
         markiert werden.
+      </p>
+      <p class="page-hint">
+        Wird ein Kind erwachsen und macht eine eigene Steuererklärung, trage das
+        erste betroffene Steuerjahr unter „Eigene Erklärung ab“ ein: Steuer&shy;dokumente
+        ab diesem Jahr wandern in die eigene Steuerakte der Person statt in deine
+        Prüf-Liste. Ältere Jahre bleiben unverändert bei dir.
       </p>
     </header>
 
@@ -314,6 +333,17 @@ onMounted(load)
             :disabled="adding"
           />
         </label>
+        <label>
+          <span class="label">Eigene Steuererklärung ab Steuerjahr</span>
+          <InputNumber
+            v-model="form.own_tax_return_from_tax_year"
+            :use-grouping="false"
+            :min="1990"
+            :max="2099"
+            placeholder="leer = keine"
+            :disabled="adding"
+          />
+        </label>
         <label class="checkbox-label">
           <Checkbox v-model="form.in_household" :binary="true" :disabled="adding" />
           <span>Im Haushalt</span>
@@ -381,17 +411,40 @@ onMounted(load)
           />
         </template>
       </Column>
+      <Column header="Eigene Erklärung ab" :style="{ width: '9rem' }">
+        <template #body="{ data }">
+          <InputNumber
+            :model-value="data.own_tax_return_from_tax_year"
+            :use-grouping="false"
+            :min="1990"
+            :max="2099"
+            placeholder="—"
+            :disabled="savingId === data.id"
+            class="inline-year"
+            @update:model-value="(v: number | null) => handleOwnReturnChange(data, v)"
+          />
+        </template>
+      </Column>
       <Column header="Steuer-Prüfung" :style="{ width: '10rem' }">
         <template #body="{ data }">
           <div class="tax-review-cell">
             <Checkbox
               :model-value="data.requires_tax_review"
               :binary="true"
-              :disabled="savingId === data.id"
+              :disabled="savingId === data.id || data.own_tax_return_from_tax_year !== null"
               @update:model-value="(v: boolean) => handleToggleTaxReview(data, v)"
             />
             <Tag
-              v-if="data.requires_tax_review_override !== null"
+              v-if="data.own_tax_return_from_tax_year !== null"
+              value="eigene Akte"
+              severity="info"
+              class="override-tag"
+              v-tooltip="
+                `Steuerdokumente ab ${data.own_tax_return_from_tax_year} gehören zur eigenen Steuerakte`
+              "
+            />
+            <Tag
+              v-else-if="data.requires_tax_review_override !== null"
               value="manuell"
               severity="warn"
               class="override-tag"
@@ -512,6 +565,13 @@ onMounted(load)
 
 .inline-select {
   min-width: 8rem;
+}
+
+.inline-year {
+  max-width: 7rem;
+}
+.inline-year :deep(input) {
+  width: 100%;
 }
 
 .tax-review-cell {

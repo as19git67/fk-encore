@@ -48,6 +48,10 @@ export interface SubjectPerson {
   tax_cost_bearer: CostBearer;
   requires_tax_review: boolean;
   requires_tax_review_override: boolean | null;
+  // NULL = no own tax return. A year means: this person's tax documents with
+  // tax_year >= this value belong to their own "Steuerakte", not the user's
+  // review queue (migration 0146).
+  own_tax_return_from_tax_year: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -112,9 +116,25 @@ function validateAssessmentType(value: string): AssessmentType {
   return value as AssessmentType;
 }
 
+// Must match the tax_year bounds in llm-client.ts / llm-service.
+const OWN_RETURN_YEAR_MIN = 1970;
+const OWN_RETURN_YEAR_MAX = 2100;
+
+function validateOwnTaxReturnYear(value: number | null): number | null {
+  if (value === null) return null;
+  if (!Number.isInteger(value) || value < OWN_RETURN_YEAR_MIN || value > OWN_RETURN_YEAR_MAX) {
+    throw APIError.invalidArgument(
+      `own_tax_return_from_tax_year must be an integer between ${OWN_RETURN_YEAR_MIN} and ${OWN_RETURN_YEAR_MAX}`,
+    );
+  }
+  return value;
+}
+
 // ─── Tax review derivation ──────────────────────────────────────────────────
 
-const CHILD_AGE_LIMIT_YEARS = 25;
+// § 32 Abs. 4 EStG: children in education count until their 25th year.
+// Deliberately a coarse year-granular heuristic — see deriveRequiresTaxReview.
+export const CHILD_AGE_LIMIT_YEARS = 25;
 
 function withinAgeLimit(birthDate: string, referenceYear?: number): boolean {
   const [y] = birthDate.split("-").map(Number);
@@ -123,10 +143,45 @@ function withinAgeLimit(birthDate: string, referenceYear?: number): boolean {
   return year - y < CHILD_AGE_LIMIT_YEARS;
 }
 
-export function deriveRequiresTaxReview(
-  p: { relation_kind: RelationKind; in_household: boolean; tax_cost_bearer: CostBearer; birth_date: string | null },
-  settings: { assessment_type: AssessmentType },
+export interface TaxReviewDerivationInput {
+  relation_kind: RelationKind;
+  in_household: boolean;
+  tax_cost_bearer: CostBearer;
+  birth_date: string | null;
+  own_tax_return_from_tax_year?: number | null;
+}
+
+/**
+ * True when this person files their own tax return for `taxYear` — their tax
+ * documents from that year belong to their own "Steuerakte", not the user's
+ * review queue. `taxYear=null` (document without a detected year) is treated
+ * as "current year" by callers that need a decision.
+ */
+export function hasOwnTaxReturn(
+  p: { own_tax_return_from_tax_year?: number | null },
+  taxYear: number,
 ): boolean {
+  const from = p.own_tax_return_from_tax_year;
+  return from != null && taxYear >= from;
+}
+
+/**
+ * Derive the default "requires tax review" for a person. `referenceYear` is
+ * the tax year the decision is for — the age heuristic (§ 32 Abs. 4 EStG,
+ * children count until their 25th year while in education) and the own-return
+ * cutoff both depend on the year the document belongs to, not on "today".
+ * Defaults to the current year for person-level decisions.
+ */
+export function deriveRequiresTaxReview(
+  p: TaxReviewDerivationInput,
+  settings: { assessment_type: AssessmentType },
+  referenceYear?: number,
+): boolean {
+  const year = referenceYear ?? new Date().getFullYear();
+  // A person filing their own return owns their tax documents from that year
+  // on — they never need review for the *user's* return. Routing into the
+  // person's Steuerakte happens separately (tax_return_person_id).
+  if (hasOwnTaxReturn(p, year)) return false;
   if (p.tax_cost_bearer === "user") return false;
   switch (p.relation_kind) {
     case "self":
@@ -134,18 +189,23 @@ export function deriveRequiresTaxReview(
     case "spouse":
       return settings.assessment_type !== "zusammen";
     case "child":
-      return !(p.in_household && (p.birth_date === null || withinAgeLimit(p.birth_date)));
+      return !(p.in_household && (p.birth_date === null || withinAgeLimit(p.birth_date, year)));
     default:
       return true;
   }
 }
 
 export function computeEffectiveRequiresTaxReview(
-  p: { relation_kind: RelationKind; in_household: boolean; tax_cost_bearer: CostBearer; birth_date: string | null; requires_tax_review_override: boolean | null },
+  p: TaxReviewDerivationInput & { requires_tax_review_override: boolean | null },
   settings: { assessment_type: AssessmentType },
+  referenceYear?: number,
 ): boolean {
+  // The own-return setting beats even a manual override: "files their own
+  // return since year X" is the more specific, explicit statement — the
+  // documents belong to the person's Steuerakte, not the user's queue.
+  if (hasOwnTaxReturn(p, referenceYear ?? new Date().getFullYear())) return false;
   if (p.requires_tax_review_override !== null) return p.requires_tax_review_override;
-  return deriveRequiresTaxReview(p, settings);
+  return deriveRequiresTaxReview(p, settings, referenceYear);
 }
 
 // ─── Assessment settings ────────────────────────────────────────────────────
@@ -259,6 +319,7 @@ const subjectPersonColumns = {
   tax_cost_bearer: userSubjectPersons.tax_cost_bearer,
   requires_tax_review: userSubjectPersons.requires_tax_review,
   requires_tax_review_override: userSubjectPersons.requires_tax_review_override,
+  own_tax_return_from_tax_year: userSubjectPersons.own_tax_return_from_tax_year,
   created_at: userSubjectPersons.created_at,
   updated_at: userSubjectPersons.updated_at,
 };
@@ -286,6 +347,7 @@ export async function createSubjectPerson(
     tax_cost_bearer?: string;
     requires_tax_review?: boolean;
     requires_tax_review_override?: boolean | null;
+    own_tax_return_from_tax_year?: number | null;
   },
 ): Promise<SubjectPerson> {
   const full_name = requireNonEmpty("full_name", input.full_name);
@@ -295,13 +357,14 @@ export async function createSubjectPerson(
   }
   const relation_kind = input.relation_kind ? validateRelationKind(input.relation_kind) : "other";
   const tax_cost_bearer = input.tax_cost_bearer ? validateCostBearer(input.tax_cost_bearer) : "unknown";
+  const ownReturnYear = validateOwnTaxReturnYear(input.own_tax_return_from_tax_year ?? null);
 
   const assessmentType = await getEffectiveAssessmentType(userId);
   const override = input.requires_tax_review_override !== undefined
     ? input.requires_tax_review_override
     : (input.requires_tax_review !== undefined ? input.requires_tax_review : null);
   const effective = computeEffectiveRequiresTaxReview(
-    { relation_kind, in_household: input.in_household ?? false, tax_cost_bearer, birth_date: input.birth_date ?? null, requires_tax_review_override: override },
+    { relation_kind, in_household: input.in_household ?? false, tax_cost_bearer, birth_date: input.birth_date ?? null, own_tax_return_from_tax_year: ownReturnYear, requires_tax_review_override: override },
     { assessment_type: assessmentType },
   );
 
@@ -318,6 +381,7 @@ export async function createSubjectPerson(
         tax_cost_bearer,
         requires_tax_review: effective,
         requires_tax_review_override: override,
+        own_tax_return_from_tax_year: ownReturnYear,
       })
       .returning(subjectPersonColumns);
     return row;
@@ -341,8 +405,9 @@ export async function updateSubjectPerson(
     tax_cost_bearer?: string;
     requires_tax_review?: boolean;
     requires_tax_review_override?: boolean | null;
+    own_tax_return_from_tax_year?: number | null;
   },
-): Promise<{ person: SubjectPerson; effectiveChanged: boolean }> {
+): Promise<{ person: SubjectPerson; effectiveChanged: boolean; ownReturnChanged: boolean }> {
   const existing = await dbFirst<SubjectPerson>(
     db.select(subjectPersonColumns).from(userSubjectPersons)
       .where(and(eq(userSubjectPersons.id, id), eq(userSubjectPersons.user_id, userId))),
@@ -377,6 +442,9 @@ export async function updateSubjectPerson(
   } else if (input.requires_tax_review !== undefined) {
     patch.requires_tax_review_override = input.requires_tax_review;
   }
+  if (input.own_tax_return_from_tax_year !== undefined) {
+    patch.own_tax_return_from_tax_year = validateOwnTaxReturnYear(input.own_tax_return_from_tax_year);
+  }
 
   const merged = {
     relation_kind: (patch.relation_kind ?? existing.relation_kind) as RelationKind,
@@ -386,12 +454,17 @@ export async function updateSubjectPerson(
     requires_tax_review_override: (patch.requires_tax_review_override !== undefined
       ? patch.requires_tax_review_override
       : existing.requires_tax_review_override) as boolean | null,
+    own_tax_return_from_tax_year: (patch.own_tax_return_from_tax_year !== undefined
+      ? patch.own_tax_return_from_tax_year
+      : existing.own_tax_return_from_tax_year) as number | null,
   };
 
   const assessmentType = await getEffectiveAssessmentType(userId);
   const newEffective = computeEffectiveRequiresTaxReview(merged, { assessment_type: assessmentType });
   patch.requires_tax_review = newEffective;
   const effectiveChanged = newEffective !== existing.requires_tax_review;
+  const ownReturnChanged =
+    merged.own_tax_return_from_tax_year !== existing.own_tax_return_from_tax_year;
 
   try {
     const [row] = await db
@@ -400,7 +473,7 @@ export async function updateSubjectPerson(
       .where(and(eq(userSubjectPersons.id, id), eq(userSubjectPersons.user_id, userId)))
       .returning(subjectPersonColumns);
     if (!row) throw APIError.notFound("subject person not found");
-    return { person: row, effectiveChanged };
+    return { person: row, effectiveChanged, ownReturnChanged };
   } catch (err: any) {
     if (isUniqueViolation(err)) {
       throw APIError.alreadyExists(`a subject person with this name already exists`);
@@ -431,7 +504,16 @@ export interface SubjectPersonMatch {
   id: number;
   full_name: string;
   relation_tag: string;
+  // Stored effective value (computed with the current year at person-edit
+  // time). Per-document decisions should prefer
+  // computeEffectiveRequiresTaxReview with the document's tax_year.
   requires_tax_review: boolean;
+  relation_kind: RelationKind;
+  birth_date: string | null;
+  in_household: boolean;
+  tax_cost_bearer: CostBearer;
+  requires_tax_review_override: boolean | null;
+  own_tax_return_from_tax_year: number | null;
 }
 
 export async function loadSubjectPersonsForMatch(userId: number): Promise<SubjectPersonMatch[]> {
@@ -442,6 +524,12 @@ export async function loadSubjectPersonsForMatch(userId: number): Promise<Subjec
         full_name: userSubjectPersons.full_name,
         relation_tag: userSubjectPersons.relation_tag,
         requires_tax_review: userSubjectPersons.requires_tax_review,
+        relation_kind: userSubjectPersons.relation_kind,
+        birth_date: userSubjectPersons.birth_date,
+        in_household: userSubjectPersons.in_household,
+        tax_cost_bearer: userSubjectPersons.tax_cost_bearer,
+        requires_tax_review_override: userSubjectPersons.requires_tax_review_override,
+        own_tax_return_from_tax_year: userSubjectPersons.own_tax_return_from_tax_year,
       })
       .from(userSubjectPersons)
       .where(eq(userSubjectPersons.user_id, userId))
