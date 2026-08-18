@@ -137,6 +137,7 @@ export interface Classification {
 export interface SubjectPersonRequestEntry {
   full_name: string;
   relation_tag: string;
+  relation_kind?: string;
 }
 
 /**
