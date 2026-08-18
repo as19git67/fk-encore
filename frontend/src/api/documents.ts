@@ -825,11 +825,28 @@ export function reclassifyTaxSection(slug: string, includeReviewed = false) {
 
 // ─── Subject persons (Bezugspersonen) ────────────────────────────────────
 
+export type RelationKind = 'self' | 'spouse' | 'child' | 'parent' | 'sibling' | 'ward' | 'other'
+export type CostBearer = 'user' | 'person' | 'unknown'
+export type AssessmentType = 'zusammen' | 'einzeln' | 'unknown'
+
 export interface SubjectPerson {
   id: number
   full_name: string
   relation_tag: string
+  relation_kind: RelationKind
+  birth_date: string | null
+  in_household: boolean
+  tax_cost_bearer: CostBearer
   requires_tax_review: boolean
+  requires_tax_review_override: boolean | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AssessmentSetting {
+  id: number
+  assessment_type: AssessmentType
+  valid_from_tax_year: number | null
   created_at: string
   updated_at: string
 }
@@ -841,7 +858,12 @@ export function listSubjectPersons() {
 export function createSubjectPerson(input: {
   full_name: string
   relation_tag: string
+  relation_kind?: string
+  birth_date?: string | null
+  in_household?: boolean
+  tax_cost_bearer?: string
   requires_tax_review?: boolean
+  requires_tax_review_override?: boolean | null
 }) {
   return apiFetch<SubjectPerson>('/documents/subject-persons', {
     method: 'POST',
@@ -851,7 +873,16 @@ export function createSubjectPerson(input: {
 
 export function updateSubjectPerson(
   id: number,
-  patch: { full_name?: string; relation_tag?: string; requires_tax_review?: boolean },
+  patch: {
+    full_name?: string
+    relation_tag?: string
+    relation_kind?: string
+    birth_date?: string | null
+    in_household?: boolean
+    tax_cost_bearer?: string
+    requires_tax_review?: boolean
+    requires_tax_review_override?: boolean | null
+  },
 ) {
   return apiFetch<SubjectPerson>(`/documents/subject-persons/${id}`, {
     method: 'PATCH',
@@ -861,6 +892,28 @@ export function updateSubjectPerson(
 
 export function deleteSubjectPerson(id: number) {
   return apiFetch<{ success: boolean }>(`/documents/subject-persons/${id}`, {
+    method: 'DELETE',
+  })
+}
+
+// ─── Assessment settings ────────────────────────────────────────────────
+
+export function listAssessmentSettings() {
+  return apiFetch<{ items: AssessmentSetting[] }>('/documents/assessment-settings')
+}
+
+export function upsertAssessmentSetting(input: {
+  assessment_type: string
+  valid_from_tax_year?: number | null
+}) {
+  return apiFetch<AssessmentSetting>('/documents/assessment-settings', {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  })
+}
+
+export function deleteAssessmentSetting(id: number) {
+  return apiFetch<{ success: boolean }>(`/documents/assessment-settings/${id}`, {
     method: 'DELETE',
   })
 }
