@@ -38,7 +38,24 @@ async function ensureUser(id: number): Promise<void> {
   );
 }
 
-async function addPerson(fullName: string, relation: string, requiresTaxReview: boolean): Promise<number> {
+/**
+ * `requires_tax_review` is the stored effective value; the explicit
+ * opt-in/opt-out lives in `requires_tax_review_override` (0145). Migration
+ * 0145 froze every pre-existing row's value into that column, so an explicit
+ * override is what a real "opted in/out" person looks like. Rows left on the
+ * override are re-derived per document tax year at classify time (0146).
+ */
+async function addPerson(
+  fullName: string,
+  relation: string,
+  requiresTaxReview: boolean,
+  extra: {
+    relation_kind?: "self" | "spouse" | "child" | "parent" | "sibling" | "ward" | "other";
+    birth_date?: string | null;
+    in_household?: boolean;
+    derived?: boolean;
+  } = {},
+): Promise<number> {
   const [row] = await db
     .insert(userSubjectPersons)
     .values({
@@ -46,6 +63,12 @@ async function addPerson(fullName: string, relation: string, requiresTaxReview: 
       full_name: fullName,
       relation_tag: relation,
       requires_tax_review: requiresTaxReview,
+      // `derived: true` leaves the override NULL so the per-year derivation
+      // decides; otherwise the value is pinned as an explicit override.
+      requires_tax_review_override: extra.derived ? null : requiresTaxReview,
+      relation_kind: extra.relation_kind ?? "other",
+      birth_date: extra.birth_date ?? null,
+      in_household: extra.in_household ?? false,
     })
     .returning({ id: userSubjectPersons.id });
   return row!.id;
@@ -89,6 +112,38 @@ describe("runClassify — subject-person tax review is opt-in (0137)", () => {
   it("flags a document for a subject person that opted into tax review", async () => {
     await addPerson("Maria Beispiel", "mutter", true);
     await insertDoc(DOC_ID_B, "Rechnung für Maria Beispiel, Pflegeleistungen.");
+
+    await runClassify(DOC_ID_B);
+
+    expect(await taxReviewNeeded(DOC_ID_B)).toBe(true);
+  });
+
+  // The classifier mock dates every document to tax year 2024, so these two
+  // cases pin the per-document-year derivation (0146).
+  it("does not flag a child still within the age limit in the document's tax year", async () => {
+    // Born 2005 → 19 in tax year 2024, so still the user's dependent.
+    await addPerson("Kim Beispiel", "kind", false, {
+      derived: true,
+      relation_kind: "child",
+      birth_date: "2005-03-02",
+      in_household: true,
+    });
+    await insertDoc(DOC_ID_A, "Rechnung für Kim Beispiel, Pflegeleistungen.");
+
+    await runClassify(DOC_ID_A);
+
+    expect(await taxReviewNeeded(DOC_ID_A)).toBe(false);
+  });
+
+  it("flags a child that aged past the limit in the document's tax year", async () => {
+    // Born 1995 → 29 in tax year 2024, past the § 32 Abs. 4 EStG limit.
+    await addPerson("Kim Beispiel", "kind", false, {
+      derived: true,
+      relation_kind: "child",
+      birth_date: "1995-03-02",
+      in_household: true,
+    });
+    await insertDoc(DOC_ID_B, "Rechnung für Kim Beispiel, Pflegeleistungen.");
 
     await runClassify(DOC_ID_B);
 
