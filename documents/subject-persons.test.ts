@@ -10,7 +10,7 @@ import {
   deriveRequiresTaxReview,
   hasOwnTaxReturn,
   listSubjectPersons,
-  loadSubjectPersonHints,
+  loadSubjectPersonsForMatch,
   normaliseRelationTag,
   updateSubjectPerson,
 } from "./subject-persons";
@@ -185,16 +185,15 @@ describe("documents.subject-persons CRUD", () => {
     const mine = await listSubjectPersons(TEST_USER_ID);
     expect(mine.map((i) => i.full_name)).toEqual(["Erika Mustermann"]);
 
-    const hints = await loadSubjectPersonHints(TEST_USER_ID);
-    expect(hints).toEqual([
-      {
-        full_name: "Erika Mustermann",
-        relation_tag: "mutter",
-        relation_kind: "other",
-        tax_cost_bearer: "unknown",
-        in_household: false,
-      },
-    ]);
+    const matches = await loadSubjectPersonsForMatch(TEST_USER_ID);
+    expect(matches.map((m) => m.full_name)).toEqual(["Erika Mustermann"]);
+    // Carries the household attributes runClassify forwards to the classifier.
+    expect(matches[0]).toMatchObject({
+      relation_tag: "mutter",
+      relation_kind: "other",
+      tax_cost_bearer: "unknown",
+      in_household: false,
+    });
   });
 
   it("rejects duplicate names for the same user (case-insensitive)", async () => {
