@@ -364,3 +364,126 @@ aber nur die Tax-Felder aktualisiert (spart Tokens).
   (`source='user'`) bleiben unangetastet.
 - Der LLM-Prompt liefert `tax_sections: Array<{slug, confidence}>`
   statt eines einzelnen Slug.
+
+---
+
+## 9. Bezugspersonen-Steuer-Prüfung (Migrationen 0137–0146)
+
+Ergänzt die dokumentenweite Steuer-Erkennung (§ 1–8) um eine
+**personenbezogene** Steuer-Prüf-Logik: Wird ein Dokument einer
+Bezugsperson zugeordnet (via Namensabgleich im Klassifizierer), bestimmt
+das System automatisch, ob das Dokument zur manuellen Steuer-Prüfung
+markiert werden soll — abhängig von Beziehungsart, Alter, Veranlagung
+und eigenem Steuererklärungsstatus der Person.
+
+### 9.1 Datenmodell
+
+**`user_subject_persons`** (erweitert in 0137/0145/0146):
+
+| Spalte | Typ | Beschreibung |
+|--------|-----|--------------|
+| `relation_kind` | enum | `self`, `spouse`, `child`, `parent`, `sibling`, `ward`, `other` |
+| `birth_date` | date | Geburtsdatum (optional, relevant für Altersgrenze) |
+| `in_household` | boolean | Lebt im selben Haushalt |
+| `tax_cost_bearer` | enum | `unknown`, `user`, `person` — wer die Kosten trägt |
+| `requires_tax_review` | boolean | Effektiv-Flag (gespeicherter Wert) |
+| `requires_tax_review_override` | boolean/null | Manuelles Override; `null` = automatisch ableiten |
+| `own_tax_return_from_tax_year` | integer/null | Ab welchem Steuerjahr die Person eine eigene Steuererklärung macht |
+
+**`documents`** (erweitert in 0146):
+
+| Spalte | Typ | Beschreibung |
+|--------|-----|--------------|
+| `tax_return_person_id` | FK → `user_subject_persons(id)` | Person, der das Dokument in deren eigener Steuerakte gehört (ON DELETE SET NULL) |
+
+### 9.2 Ableitungslogik (`documents/subject-persons.ts`)
+
+Die Steuer-Prüfung wird **pro Dokument und dessen Steuerjahr** abgeleitet
+(nicht pauschal für die Person):
+
+```
+deriveRequiresTaxReview(person, referenceYear):
+  1. person hat eigene Steuererklärung ab ≤ referenceYear → false
+  2. person.relation_kind = 'self' → false
+  3. person.relation_kind = 'spouse' UND Zusammenveranlagung → false
+  4. person.relation_kind = 'child' UND im Haushalt
+     UND Alter ≤ 25 im referenceYear → false  (§ 32 Abs. 4 EStG)
+  5. sonst → true (muss manuell geprüft werden)
+```
+
+**Prioritätsregel** (`computeEffectiveRequiresTaxReview`):
+- Eigene Steuererklärung (`own_tax_return_from_tax_year`) schlägt alles →
+  `false` (Dokument gehört in die eigene Akte, nicht in die Prüf-Liste).
+- Manuelles Override (`requires_tax_review_override`) schlägt die Ableitung.
+- Ohne Override → automatische Ableitung per `deriveRequiresTaxReview`.
+
+### 9.3 § 32 Abs. 4 EStG — Altersgrenze 25
+
+Kinder können steuerlich als Dependents (Kinderfreibetrag, Anlage Kind)
+berücksichtigt werden, solange sie das 25. Lebensjahr noch nicht vollendet
+haben. Die Prüfung arbeitet jahresgranular: Ein Kind, das im
+Steuerjahr 2025 25 wird, gilt 2025 noch als innerhalb der Grenze
+(`referenceYear − birthYear ≤ 25`), ab 2026 nicht mehr.
+
+### 9.4 Eigene Steuerakte (`tax_return_person_id`)
+
+Wenn eine Person unter „Eigene Erklärung ab" ein Steuerjahr eingetragen
+hat und ein Dokument diesem oder einem späteren Jahr zugeordnet ist,
+wird das Dokument in die **eigene Steuerakte** der Person verschoben:
+
+- **Beim Klassifizieren** (`document-ops.ts:runClassify`): Der
+  Klassifizierer prüft, ob genau eine der gematchten Personen eine
+  eigene Steuererklärung für das Dokumenten-Steuerjahr macht. Wenn ja,
+  setzt er `tax_return_person_id`. Bei Mehrdeutigkeit (mehrere
+  Kandidaten) bleibt das Feld leer.
+- **Retroaktiv** (`syncOwnTaxReturnAssignment`): Wird das
+  `own_tax_return_from_tax_year` einer Person geändert, werden alle
+  betroffenen Dokumente rückwirkend zugewiesen oder losgelöst.
+
+### 9.5 Frontend-Ansicht
+
+**SubjectPersonsView** (`frontend/src/views/SubjectPersonsView.vue`):
+- Spalte „Eigene Erklärung ab" mit Jahreseingabe.
+- Spalte „Steuer-Prüfung" zeigt den effektiven Status mit Tags:
+  - `auto` — automatisch abgeleitet.
+  - `manuell` — explizit ein-/ausgeschaltet (Klick setzt auf auto zurück).
+  - `eigene Akte` — Person hat eigene Steuererklärung.
+- Aufklappbare Spalten-Legende erklärt jede Spalte.
+
+**DocumentsSteuerView** (`frontend/src/views/DocumentsSteuerView.vue`):
+- Steuerakte-Switcher: Buttons filtern die Ansicht nach Person
+  (`?tax_return_person=<id>`).
+- Standard-Ansicht schließt Dokumente aus, die einer eigenen Akte
+  zugewiesen sind.
+
+### 9.6 Täglicher Cron (`tax-review-recompute-cron.ts`)
+
+Täglich um 02:15 UTC läuft ein Cron-Job, der für alle User die
+Steuer-Prüf-Flags neu berechnet. Zweck: Wenn ein Kind am 1.1. eines
+neuen Jahres die Altersgrenze überschreitet, ändert sich der
+Prüf-Status für künftige Steuerjahre — ohne dass der User etwas
+bearbeiten muss.
+
+Der Cron ruft pro User `recomputeDerivedTaxReviewForUser` und
+`syncTaxReviewFlagForAllSubjectPersons` auf. Jedes Dokument wird
+individuell gegen sein eigenes Steuerjahr bewertet.
+
+### 9.7 Sync-Logik (`documents/documents.ts`)
+
+`syncTaxReviewFlagForSubjectPerson` evaluiert **pro Dokument** statt
+pauschal per SQL-UPDATE:
+1. Lädt alle Derivation-Felder der Person.
+2. Lädt alle Dokumente, die mit der Person verknüpft sind.
+3. Bestimmt für jedes Dokument das `referenceYear` (= `doc.tax_year`
+   oder aktuelles Jahr als Fallback).
+4. Cached den `getEffectiveAssessmentType(userId, year)` pro Jahr.
+5. Schreibt `tax_review_needed` individuell pro Dokument.
+
+### 9.8 Migrationen (Übersicht)
+
+| Migration | Inhalt |
+|-----------|--------|
+| 0137 | `user_subject_persons`: `relation_kind`, `birth_date`, `in_household`, `tax_cost_bearer`, `requires_tax_review` → Steuer-Prüf-System |
+| 0138 | Assessment-Settings-Tabelle (`user_assessment_settings`) |
+| 0145 | `requires_tax_review_override` — trennt manuelles Override von effektivem Wert |
+| 0146 | `own_tax_return_from_tax_year` auf `user_subject_persons`, `tax_return_person_id` FK auf `documents` |
