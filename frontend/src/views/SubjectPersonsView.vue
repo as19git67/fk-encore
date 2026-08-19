@@ -360,6 +360,48 @@ onMounted(load)
       </form>
     </section>
 
+    <!-- Column legend -->
+    <details class="column-legend">
+      <summary>Spalten-Legende</summary>
+      <dl class="legend-list">
+        <div class="legend-item">
+          <dt>Name</dt>
+          <dd>Vollständiger Name, wie er auf Dokumenten erscheint. Der Klassifizierer gleicht erkannte Namen mit dieser Liste ab.</dd>
+        </div>
+        <div class="legend-item">
+          <dt>Tag</dt>
+          <dd>Kurzes Beziehungs-Kürzel (z.&nbsp;B. „mutter", „sohn"), das der Klassifizierer dem Dokument als Schlagwort zuweist.</dd>
+        </div>
+        <div class="legend-item">
+          <dt>Beziehung</dt>
+          <dd>Verwandtschaftsgrad zur Hauptperson (Ehepartner:in, Kind, Elternteil …). Bestimmt zusammen mit Alter und Haushalt, ob Steuerdokumente automatisch zur Prüfung markiert werden.</dd>
+        </div>
+        <div class="legend-item">
+          <dt>Haushalt</dt>
+          <dd>Lebt die Person im selben Haushalt? Relevant für die steuerliche Zuordnung — bei Zusammenveranlagung entfällt die Prüfung für Ehepartner:in und Kinder im Haushalt.</dd>
+        </div>
+        <div class="legend-item">
+          <dt>Kostenträger</dt>
+          <dd>Wer trägt die Kosten der auf diese Person lautenden Dokumente? „Ich selbst" = abzugsfähig in deiner Erklärung, „Die Person selbst" = nicht abzugsfähig.</dd>
+        </div>
+        <div class="legend-item">
+          <dt>Eigene Erklärung ab</dt>
+          <dd>Ab welchem Steuerjahr gibt die Person eine eigene Steuererklärung ab? Steuerdokumente ab diesem Jahr wandern in deren eigene Steuerakte und tauchen nicht mehr in deiner Prüf-Liste auf.</dd>
+        </div>
+        <div class="legend-item">
+          <dt>Steuer-Prüfung</dt>
+          <dd>
+            Ob Steuerdokumente dieser Person zur manuellen Prüfung markiert werden.
+            <ul class="legend-tags">
+              <li><Tag value="auto" severity="secondary" class="legend-tag-sample" /> — automatisch ermittelt (Beziehungsart, Alter, Veranlagung).</li>
+              <li><Tag value="manuell" severity="warn" class="legend-tag-sample" /> — du hast die Prüfung manuell ein- oder ausgeschaltet. Klicke auf den Tag, um auf „auto" zurückzusetzen.</li>
+              <li><Tag value="eigene Akte" severity="info" class="legend-tag-sample" /> — die Person hat eine eigene Steuerakte; Dokumente landen dort statt in deiner Prüfung.</li>
+            </ul>
+          </dd>
+        </div>
+      </dl>
+    </details>
+
     <!-- Table -->
     <DataTable
       :value="persons"
@@ -581,5 +623,62 @@ onMounted(load)
 }
 .override-tag {
   font-size: 0.7rem;
+}
+
+.column-legend {
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: var(--p-content-background);
+}
+.column-legend summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--p-text-muted-color);
+  user-select: none;
+}
+.legend-list {
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.legend-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.5rem;
+}
+.legend-item dt {
+  font-weight: 600;
+  font-size: 0.85rem;
+  min-width: 10rem;
+  color: var(--p-text-color);
+}
+.legend-item dd {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--p-text-muted-color);
+  line-height: 1.4;
+  flex: 1 1 20rem;
+}
+.legend-tags {
+  margin: 0.25rem 0 0;
+  padding-left: 1.2rem;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.legend-tags li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+}
+.legend-tag-sample {
+  font-size: 0.7rem;
+  flex-shrink: 0;
 }
 </style>
