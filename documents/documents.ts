@@ -62,9 +62,11 @@ import {
   type TaxHintEntry,
 } from "./tax-hint-overrides";
 import {
+  computeEffectiveRequiresTaxReview,
   createSubjectPerson,
   deleteSubjectPerson,
   deleteAssessmentSetting,
+  getEffectiveAssessmentType,
   listAssessmentSettings,
   listSubjectPersons,
   recomputeDerivedTaxReviewForUser,
@@ -3035,6 +3037,12 @@ interface ListTaxDocumentsQuery {
   section?: Query<string>;
   /** When true, only documents flagged for personal-deduction review (0136). */
   review_needed?: Query<boolean>;
+  /**
+   * Steuerakte scope (migration 0146). Omitted = the caller's own tax return:
+   * documents routed into a Bezugsperson's own return are excluded. Pass a
+   * subject-person id to browse exactly that person's Steuerakte instead.
+   */
+  tax_return_person?: Query<number>;
 }
 
 /**
@@ -3050,7 +3058,12 @@ interface ListTaxDocumentsQuery {
  */
 export const listTaxDocuments = api(
   { expose: true, method: "GET", path: "/documents/tax", auth: true },
-  async ({ year, section, review_needed }: ListTaxDocumentsQuery): Promise<ListTaxDocumentsResponse> => {
+  async ({
+    year,
+    section,
+    review_needed,
+    tax_return_person,
+  }: ListTaxDocumentsQuery): Promise<ListTaxDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -3076,6 +3089,26 @@ export const listTaxDocuments = api(
     ];
     if (yearFilter !== null) conds.push(eq(documents.tax_year, yearFilter));
     if (review_needed === true) conds.push(eq(documents.tax_review_needed, true));
+    // Documents routed into a Bezugsperson's own tax return belong to that
+    // person's Steuerakte, not to the caller's return — keep them out unless
+    // that person's file is explicitly what was asked for.
+    if (typeof tax_return_person === "number" && Number.isInteger(tax_return_person)) {
+      const owned = await dbFirst<{ id: number }>(
+        db
+          .select({ id: userSubjectPersons.id })
+          .from(userSubjectPersons)
+          .where(
+            and(
+              eq(userSubjectPersons.id, tax_return_person),
+              eq(userSubjectPersons.user_id, userId),
+            ),
+          ),
+      );
+      if (!owned) throw APIError.notFound("subject person not found");
+      conds.push(eq(documents.tax_return_person_id, tax_return_person));
+    } else {
+      conds.push(isNull(documents.tax_return_person_id));
+    }
 
     const docRows = await dbAll<typeof documents.$inferSelect & { cat_slug: string | null }>(
       db
@@ -3707,6 +3740,7 @@ export interface SubjectPersonDTO {
   tax_cost_bearer: CostBearer;
   requires_tax_review: boolean;
   requires_tax_review_override: boolean | null;
+  own_tax_return_from_tax_year: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -3724,6 +3758,7 @@ export interface CreateSubjectPersonRequest {
   tax_cost_bearer?: string;
   requires_tax_review?: boolean;
   requires_tax_review_override?: boolean | null;
+  own_tax_return_from_tax_year?: number | null;
 }
 
 export interface UpdateSubjectPersonRequest {
@@ -3736,6 +3771,7 @@ export interface UpdateSubjectPersonRequest {
   tax_cost_bearer?: string;
   requires_tax_review?: boolean;
   requires_tax_review_override?: boolean | null;
+  own_tax_return_from_tax_year?: number | null;
 }
 
 export interface DeleteSubjectPersonRequest {
@@ -3786,63 +3822,218 @@ async function documentIdsForOwnedSubjectPerson(
 }
 
 /**
- * Toggling requires_tax_review on/off (#0137) retroactively (re-)applies the
- * tax_review_needed signal to this subject person's already-classified
- * documents, so the user doesn't have to reclassify each one by hand after
- * e.g. marking "Mutter" as needing tax review. Mirrors the exact condition
- * document-ops.ts applies at classify time (see
- * detectSubjectPersonPersonalDeductionReview / the taxProtected guard).
+ * Retroactively re-evaluate the tax_review_needed signal on this subject
+ * person's already-classified documents (#0137), so the user doesn't have to
+ * reclassify each one by hand after changing the person's settings.
+ *
+ * Since migration 0146 the decision is made PER DOCUMENT against the
+ * document's own tax year, using the exact same derivation the classify path
+ * uses (computeEffectiveRequiresTaxReview): the child-age heuristic
+ * (§ 32 Abs. 4 EStG), the effective-dated assessment type, and the
+ * "files their own tax return since year X" cutoff all depend on the year a
+ * document belongs to, not on today. Documents without a detected tax year
+ * are evaluated against the current year.
+ *
+ * Guards mirror classify time: tax_reviewed (human-pinned) and cloud/user
+ * labelled documents are never touched, only documents with a
+ * personal-deduction tax section are flagged, and the flag survives when
+ * ANOTHER still-opted-in Bezugsperson on the same document justifies it.
  */
 export async function syncTaxReviewFlagForSubjectPerson(
   userId: number,
   subjectPersonId: number,
-  requiresReview: boolean,
 ): Promise<void> {
-  if (requiresReview) {
-    // A plain interpolated array is expanded by drizzle's sql tag into a
-    // comma-separated param list ("record"), which Postgres refuses to cast
-    // to text[] — so build the IN-list explicitly instead of ANY(...::text[]).
-    const slugList = sql.join(
-      PERSONAL_DEDUCTION_TAX_SECTION_SLUGS.map((slug) => sql`${slug}`),
-      sql`, `,
-    );
-    await db.execute(sql`
-      UPDATE documents d
-      SET tax_review_needed = true
-      WHERE d.user_id = ${userId}
-        AND d.tax_reviewed = false
-        AND d.category_source NOT IN ('cloud', 'user')
-        AND EXISTS (
-          SELECT 1 FROM document_subject_persons dsp
-          WHERE dsp.document_id = d.id AND dsp.subject_person_id = ${subjectPersonId}
-        )
-        AND EXISTS (
+  const person = await dbFirst<{
+    relation_kind: RelationKind;
+    in_household: boolean;
+    tax_cost_bearer: CostBearer;
+    birth_date: string | null;
+    requires_tax_review_override: boolean | null;
+    own_tax_return_from_tax_year: number | null;
+  }>(
+    db
+      .select({
+        relation_kind: userSubjectPersons.relation_kind,
+        in_household: userSubjectPersons.in_household,
+        tax_cost_bearer: userSubjectPersons.tax_cost_bearer,
+        birth_date: userSubjectPersons.birth_date,
+        requires_tax_review_override: userSubjectPersons.requires_tax_review_override,
+        own_tax_return_from_tax_year: userSubjectPersons.own_tax_return_from_tax_year,
+      })
+      .from(userSubjectPersons)
+      .where(
+        and(eq(userSubjectPersons.id, subjectPersonId), eq(userSubjectPersons.user_id, userId)),
+      ),
+  );
+  if (!person) return;
+
+  // A plain interpolated array is expanded by drizzle's sql tag into a
+  // comma-separated param list ("record"), which Postgres refuses to cast
+  // to text[] — so build the IN-list explicitly instead of ANY(...::text[]).
+  const slugList = sql.join(
+    PERSONAL_DEDUCTION_TAX_SECTION_SLUGS.map((slug) => sql`${slug}`),
+    sql`, `,
+  );
+
+  const docs = await dbAll<{
+    id: number;
+    tax_year: number | null;
+    tax_review_needed: boolean;
+    has_deduction_section: boolean;
+    other_opted_in: boolean;
+  }>(
+    db
+      .select({
+        id: documents.id,
+        tax_year: documents.tax_year,
+        tax_review_needed: documents.tax_review_needed,
+        has_deduction_section: sql<boolean>`EXISTS (
           SELECT 1 FROM document_tax_sections dts
-          WHERE dts.document_id = d.id
+          WHERE dts.document_id = ${documents.id}
             AND dts.tax_section IN (${slugList})
-        )
-    `);
-  } else {
-    // Only clear the flag when no OTHER still-opted-in subject person also
-    // matches the document — a doc can name more than one Bezugsperson.
-    await db.execute(sql`
-      UPDATE documents d
-      SET tax_review_needed = false
-      WHERE d.user_id = ${userId}
-        AND d.tax_review_needed = true
-        AND EXISTS (
-          SELECT 1 FROM document_subject_persons dsp
-          WHERE dsp.document_id = d.id AND dsp.subject_person_id = ${subjectPersonId}
-        )
-        AND NOT EXISTS (
+        )`,
+        other_opted_in: sql<boolean>`EXISTS (
           SELECT 1 FROM document_subject_persons dsp2
           JOIN user_subject_persons usp2 ON usp2.id = dsp2.subject_person_id
-          WHERE dsp2.document_id = d.id
+          WHERE dsp2.document_id = ${documents.id}
             AND usp2.requires_tax_review = true
             AND usp2.id <> ${subjectPersonId}
-        )
-    `);
+        )`,
+      })
+      .from(documents)
+      .innerJoin(
+        documentSubjectPersons,
+        and(
+          eq(documentSubjectPersons.document_id, documents.id),
+          eq(documentSubjectPersons.subject_person_id, subjectPersonId),
+        ),
+      )
+      .where(
+        and(
+          eq(documents.user_id, userId),
+          eq(documents.tax_reviewed, false),
+          sql`${documents.category_source} NOT IN ('cloud', 'user')`,
+        ),
+      ),
+  );
+
+  const currentYear = new Date().getFullYear();
+  const assessmentByYear = new Map<number, AssessmentType>();
+  const setIds: number[] = [];
+  const clearIds: number[] = [];
+
+  for (const doc of docs) {
+    const year = doc.tax_year ?? currentYear;
+    let assessment = assessmentByYear.get(year);
+    if (assessment === undefined) {
+      assessment = await getEffectiveAssessmentType(userId, year);
+      assessmentByYear.set(year, assessment);
+    }
+    const desired =
+      doc.has_deduction_section &&
+      computeEffectiveRequiresTaxReview(person, { assessment_type: assessment }, year);
+    if (desired && !doc.tax_review_needed) setIds.push(doc.id);
+    // Only clear when no OTHER still-opted-in subject person also matches
+    // the document — a doc can name more than one Bezugsperson.
+    if (!desired && doc.tax_review_needed && !doc.other_opted_in) clearIds.push(doc.id);
   }
+
+  if (setIds.length > 0) {
+    await db.update(documents).set({ tax_review_needed: true }).where(inArray(documents.id, setIds));
+  }
+  if (clearIds.length > 0) {
+    await db.update(documents).set({ tax_review_needed: false }).where(inArray(documents.id, clearIds));
+  }
+}
+
+/** Re-sync every subject person of a user — used when a change affects all of
+ *  them at once (e.g. the effective-dated assessment type). */
+export async function syncTaxReviewFlagForAllSubjectPersons(userId: number): Promise<void> {
+  const persons = await dbAll<{ id: number }>(
+    db
+      .select({ id: userSubjectPersons.id })
+      .from(userSubjectPersons)
+      .where(eq(userSubjectPersons.user_id, userId)),
+  );
+  for (const { id } of persons) {
+    await syncTaxReviewFlagForSubjectPerson(userId, id);
+  }
+}
+
+/**
+ * Retroactively (re-)assign this person's Steuerakte (migration 0146): tax
+ * documents with tax_year >= own_tax_return_from_tax_year that mention the
+ * person get tax_return_person_id set; documents that no longer qualify
+ * (setting removed or year lowered/raised) are released. Mirrors the
+ * classify-time routing in document-ops.ts, including its ambiguity rule
+ * (several own-return candidates on one document → leave unassigned) and its
+ * protection guards (tax_reviewed / cloud/user-labelled documents are never
+ * touched).
+ */
+export async function syncOwnTaxReturnAssignment(
+  userId: number,
+  subjectPersonId: number,
+  ownReturnFromTaxYear: number | null,
+): Promise<void> {
+  // Release documents currently assigned to this person that no longer
+  // qualify. When the setting was removed entirely, that is all of them.
+  const releaseCondition =
+    ownReturnFromTaxYear == null
+      ? sql``
+      : sql`AND (d.tax_year IS NULL OR d.tax_year < ${ownReturnFromTaxYear})`;
+  await db.execute(sql`
+    UPDATE documents d
+    SET tax_return_person_id = NULL
+    WHERE d.user_id = ${userId}
+      AND d.tax_return_person_id = ${subjectPersonId}
+      AND d.tax_reviewed = false
+      AND d.category_source NOT IN ('cloud', 'user')
+      ${releaseCondition}
+  `);
+
+  if (ownReturnFromTaxYear == null) return;
+
+  await db.execute(sql`
+    UPDATE documents d
+    SET tax_return_person_id = ${subjectPersonId}
+    WHERE d.user_id = ${userId}
+      AND d.tax_return_person_id IS NULL
+      AND d.tax_reviewed = false
+      AND d.category_source NOT IN ('cloud', 'user')
+      AND d.tax_relevant = true
+      AND d.tax_year IS NOT NULL
+      AND d.tax_year >= ${ownReturnFromTaxYear}
+      AND EXISTS (
+        SELECT 1 FROM document_subject_persons dsp
+        WHERE dsp.document_id = d.id AND dsp.subject_person_id = ${subjectPersonId}
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM document_subject_persons dsp2
+        JOIN user_subject_persons usp2 ON usp2.id = dsp2.subject_person_id
+        WHERE dsp2.document_id = d.id
+          AND usp2.id <> ${subjectPersonId}
+          AND usp2.own_tax_return_from_tax_year IS NOT NULL
+          AND d.tax_year >= usp2.own_tax_return_from_tax_year
+      )
+  `);
+
+  // Documents now living in the person's Steuerakte must not linger in the
+  // user's review queue: clear the flag unless ANOTHER opted-in person on the
+  // same document still justifies it.
+  await db.execute(sql`
+    UPDATE documents d
+    SET tax_review_needed = false
+    WHERE d.user_id = ${userId}
+      AND d.tax_return_person_id = ${subjectPersonId}
+      AND d.tax_review_needed = true
+      AND NOT EXISTS (
+        SELECT 1 FROM document_subject_persons dsp2
+        JOIN user_subject_persons usp2 ON usp2.id = dsp2.subject_person_id
+        WHERE dsp2.document_id = d.id
+          AND usp2.requires_tax_review = true
+          AND usp2.id <> ${subjectPersonId}
+      )
+  `);
 }
 
 async function relocateSubjectPersonDocuments(documentIds: readonly number[]): Promise<void> {
@@ -3890,7 +4081,7 @@ export const updateSubjectPersonEndpoint = api(
     const affectedDocumentIds = req.full_name !== undefined
       ? await documentIdsForOwnedSubjectPerson(userId, req.id)
       : [];
-    const { person, effectiveChanged } = await updateSubjectPerson(userId, req.id, {
+    const { person, effectiveChanged, ownReturnChanged } = await updateSubjectPerson(userId, req.id, {
       full_name: req.full_name,
       relation_tag: req.relation_tag,
       relation_kind: req.relation_kind,
@@ -3899,10 +4090,26 @@ export const updateSubjectPersonEndpoint = api(
       tax_cost_bearer: req.tax_cost_bearer,
       requires_tax_review: req.requires_tax_review,
       requires_tax_review_override: req.requires_tax_review_override,
+      own_tax_return_from_tax_year: req.own_tax_return_from_tax_year,
     });
     await relocateSubjectPersonDocuments(affectedDocumentIds);
-    if (effectiveChanged) {
-      await syncTaxReviewFlagForSubjectPerson(userId, req.id, person.requires_tax_review);
+    if (ownReturnChanged) {
+      await syncOwnTaxReturnAssignment(userId, req.id, person.own_tax_return_from_tax_year);
+    }
+    // The per-document decision depends on every derivation input, not only on
+    // the person-level effective value: a birth date correction can flip
+    // documents of some years while the current-year value stays put.
+    const derivationInputsChanged =
+      effectiveChanged ||
+      ownReturnChanged ||
+      req.relation_kind !== undefined ||
+      req.birth_date !== undefined ||
+      req.in_household !== undefined ||
+      req.tax_cost_bearer !== undefined ||
+      req.requires_tax_review !== undefined ||
+      req.requires_tax_review_override !== undefined;
+    if (derivationInputsChanged) {
+      await syncTaxReviewFlagForSubjectPerson(userId, req.id);
     }
     return person;
   },
@@ -3938,10 +4145,11 @@ export const upsertAssessmentSettingEndpoint = api(
     checkModule();
     const userId = getUserId();
     const setting = await upsertAssessmentSetting(userId, req);
-    const flipped = await recomputeDerivedTaxReviewForUser(userId);
-    for (const { id, newEffective } of flipped) {
-      await syncTaxReviewFlagForSubjectPerson(userId, id, newEffective);
-    }
+    await recomputeDerivedTaxReviewForUser(userId);
+    // Every person is re-synced, not only the ones whose person-level flag
+    // flipped: an effective-dated assessment change alters the decision for
+    // documents of the affected years even when the current-year value stays.
+    await syncTaxReviewFlagForAllSubjectPersons(userId);
     return setting;
   },
 );
@@ -3952,10 +4160,8 @@ export const deleteAssessmentSettingEndpoint = api(
     checkModule();
     const userId = getUserId();
     await deleteAssessmentSetting(userId, req.id);
-    const flipped = await recomputeDerivedTaxReviewForUser(userId);
-    for (const { id, newEffective } of flipped) {
-      await syncTaxReviewFlagForSubjectPerson(userId, id, newEffective);
-    }
+    await recomputeDerivedTaxReviewForUser(userId);
+    await syncTaxReviewFlagForAllSubjectPersons(userId);
     return { success: true };
   },
 );

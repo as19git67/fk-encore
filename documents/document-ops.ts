@@ -57,7 +57,14 @@ import {
 import { loadEffectiveTaxSections } from "./tax-hint-overrides";
 import { isValidTaxSectionSlug } from "./tax-sections";
 import { DOCUMENT_TYPES } from "./document-types";
-import { loadRemovedSubjectPersonIds, loadSubjectPersonHints, loadSubjectPersonsForMatch } from "./subject-persons";
+import {
+  computeEffectiveRequiresTaxReview,
+  getEffectiveAssessmentType,
+  hasOwnTaxReturn,
+  loadRemovedSubjectPersonIds,
+  loadSubjectPersonHints,
+  loadSubjectPersonsForMatch,
+} from "./subject-persons";
 import { flattenTaxonomy, taxonomyHints } from "./taxonomy";
 import { matchContentRule, matchSenderRule } from "./sender-rules";
 import { loadSenderRuleOverrides } from "./sender-rule-overrides";
@@ -530,11 +537,43 @@ export async function runClassify(documentId: number): Promise<{ classification:
   // valid tax document when the user paid it, so do not clear the tax
   // sections. Instead, remember the soft signal and apply the confidence
   // lowering after all later confidence bumps (e.g. learned category) ran.
-  // Only subject persons explicitly opted in (requires_tax_review, #0137) can
-  // trigger the review — most Bezugspersonen (spouse, own children) are
-  // dependents the user obviously pays for.
+  //
+  // The review need is evaluated against the DOCUMENT's tax year (migration
+  // 0146): the child-age heuristic (§ 32 Abs. 4 EStG) and the "files their
+  // own tax return since year X" cutoff both depend on the year the document
+  // belongs to, not on today. Documents without a detected tax year fall back
+  // to the current year.
+  const docTaxYear = classification.tax_year;
+  const reviewReferenceYear = docTaxYear ?? new Date().getFullYear();
+  const docAssessmentType = await getEffectiveAssessmentType(row.user_id, docTaxYear);
+  const matchedPersonSet = new Set(subjectPersonIds);
+  const matchedPersons = subjectPersons.filter((p) => matchedPersonSet.has(p.id));
+
+  // Steuerakte routing: when the document is tax-relevant, carries a tax
+  // year, and exactly ONE matched Bezugsperson files their own return for
+  // that year, the document belongs to that person's own tax file. With
+  // several own-return candidates the assignment is ambiguous — leave it
+  // unassigned rather than guessing.
+  const ownReturnCandidates =
+    classification.tax_relevant && docTaxYear != null
+      ? matchedPersons.filter((p) => hasOwnTaxReturn(p, docTaxYear))
+      : [];
+  const taxReturnPersonId = ownReturnCandidates.length === 1 ? ownReturnCandidates[0].id : null;
+  if (taxReturnPersonId != null) {
+    console.log(
+      `[documents] own-return routing(${documentId}): tax_year=${docTaxYear} → ` +
+        `subject person ${taxReturnPersonId} (${ownReturnCandidates[0].full_name})`,
+    );
+  }
+
+  // A person whose own return covers the document's year never triggers the
+  // USER's review queue — their documents live in their own Steuerakte.
   const reviewOptedInPersonIds = new Set(
-    subjectPersons.filter((p) => p.requires_tax_review).map((p) => p.id),
+    matchedPersons
+      .filter((p) =>
+        computeEffectiveRequiresTaxReview(p, { assessment_type: docAssessmentType }, reviewReferenceYear),
+      )
+      .map((p) => p.id),
   );
   const subjectPersonDeductionReview = detectSubjectPersonPersonalDeductionReview({
     detectedSubjectPersonIds: subjectPersonIds.filter((id) => reviewOptedInPersonIds.has(id)),
@@ -650,6 +689,9 @@ export async function runClassify(documentId: number): Promise<{ classification:
     // Follows the same protection rule as the other tax fields so a re-classify
     // clears a stale flag but a trusted source's tax data is never second-guessed.
     patch.tax_review_needed = forceTaxReviewConfidence;
+    // Steuerakte assignment (see own-return routing above). Written under the
+    // same protection so a re-classify also clears a stale assignment.
+    patch.tax_return_person_id = taxReturnPersonId;
   }
 
   await db.update(documents).set(patch).where(eq(documents.id, documentId));

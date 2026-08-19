@@ -8,9 +8,11 @@ import ProgressSpinner from 'primevue/progressspinner'
 import Tag from 'primevue/tag'
 import {
   backfillDocumentTax,
+  listSubjectPersons,
   listTaxDocuments,
   listTaxYears,
   type ListTaxDocumentsResponse,
+  type SubjectPerson,
   type TaxAssignmentSource,
   type TaxSectionGroup,
   type TaxYearCount,
@@ -25,7 +27,7 @@ const auth = useAuthStore()
 // Persisted in the URL (year/review) so the back arrow from the document
 // detail view restores the same filter instead of resetting to the newest
 // year with no review filter.
-const STEUER_QUERY_KEYS = ['year', 'review'] as const
+const STEUER_QUERY_KEYS = ['year', 'review', 'person'] as const
 
 function initialYearFromQuery(): number | null {
   const raw = route.query.year
@@ -36,6 +38,17 @@ function initialYearFromQuery(): number | null {
 const years = ref<TaxYearCount[]>([])
 const selectedYear = ref<number | null>(initialYearFromQuery())
 const reviewNeededOnly = ref(route.query.review === '1')
+// Steuerakte scope: null = the caller's own tax return, a subject-person id =
+// that person's own Steuerakte (an adult child filing their own return).
+const taxReturnPersonId = ref<number | null>(
+  route.query.person != null && route.query.person !== ''
+    ? Number(route.query.person) || null
+    : null,
+)
+const subjectPersons = ref<SubjectPerson[]>([])
+const ownReturnPersons = computed(() =>
+  subjectPersons.value.filter((p) => p.own_tax_return_from_tax_year !== null),
+)
 const data = ref<ListTaxDocumentsResponse | null>(null)
 const loading = ref(true)
 const error = ref('')
@@ -46,6 +59,7 @@ function syncQueryParams() {
   const query: Record<string, string> = {}
   if (selectedYear.value != null) query.year = String(selectedYear.value)
   if (reviewNeededOnly.value) query.review = '1'
+  if (taxReturnPersonId.value != null) query.person = String(taxReturnPersonId.value)
   return updateRouteQuery(router, (current) =>
     replaceQuerySlice(current, STEUER_QUERY_KEYS, query),
   )
@@ -102,6 +116,9 @@ async function loadData() {
     data.value = await listTaxDocuments({
       ...(selectedYear.value != null ? { year: selectedYear.value } : {}),
       ...(reviewNeededOnly.value ? { review_needed: true } : {}),
+      ...(taxReturnPersonId.value != null
+        ? { tax_return_person: taxReturnPersonId.value }
+        : {}),
     })
   } catch (err: any) {
     error.value = err.message || 'Steuerliste konnte nicht geladen werden'
@@ -160,9 +177,17 @@ function formatDate(dateStr: string | null): string {
 
 watch(selectedYear, () => { syncQueryParams(); loadData() })
 watch(reviewNeededOnly, () => { syncQueryParams(); loadData() })
+watch(taxReturnPersonId, () => { syncQueryParams(); loadData() })
 
 onMounted(async () => {
   await loadYears()
+  // Advisory: the Steuerakte switcher is a convenience, a failure here must
+  // not keep the tax list itself from rendering.
+  try {
+    subjectPersons.value = (await listSubjectPersons()).items
+  } catch {
+    subjectPersons.value = []
+  }
   await loadData()
 })
 </script>
@@ -213,6 +238,27 @@ onMounted(async () => {
         :outlined="!reviewNeededOnly"
         title="Nur Dokumente einer Bezugsperson mit absetzbarer Position, bei denen noch offen ist, ob du die Ausgabe getragen hast."
         @click="reviewNeededOnly = !reviewNeededOnly"
+      />
+    </div>
+
+    <div v-if="ownReturnPersons.length > 0" class="year-filters">
+      <span class="year-filters-label">Steuerakte:</span>
+      <Button
+        label="Meine Erklärung"
+        size="small"
+        :severity="taxReturnPersonId === null ? 'primary' : 'secondary'"
+        :outlined="taxReturnPersonId !== null"
+        @click="taxReturnPersonId = null"
+      />
+      <Button
+        v-for="p in ownReturnPersons"
+        :key="p.id"
+        :label="p.full_name"
+        size="small"
+        :severity="taxReturnPersonId === p.id ? 'primary' : 'secondary'"
+        :outlined="taxReturnPersonId !== p.id"
+        :title="`Eigene Steuererklärung ab Steuerjahr ${p.own_tax_return_from_tax_year}`"
+        @click="taxReturnPersonId = p.id"
       />
     </div>
 

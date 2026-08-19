@@ -4,8 +4,11 @@ import { APIError } from "encore.dev/api";
 
 import db from "../db/database";
 import {
+  computeEffectiveRequiresTaxReview,
   createSubjectPerson,
   deleteSubjectPerson,
+  deriveRequiresTaxReview,
+  hasOwnTaxReturn,
   listSubjectPersons,
   loadSubjectPersonHints,
   normaliseRelationTag,
@@ -51,6 +54,81 @@ describe("documents.subject-persons normaliseRelationTag", () => {
   it("returns an empty string when nothing usable remains", () => {
     expect(normaliseRelationTag("   ")).toBe("");
     expect(normaliseRelationTag("###")).toBe("");
+  });
+});
+
+describe("documents.subject-persons tax review derivation", () => {
+  const base = {
+    relation_kind: "other" as const,
+    in_household: false,
+    tax_cost_bearer: "unknown" as const,
+    birth_date: null,
+    own_tax_return_from_tax_year: null,
+  };
+  const einzeln = { assessment_type: "einzeln" as const };
+  const zusammen = { assessment_type: "zusammen" as const };
+
+  it("never reviews the user themselves or costs the user provably bears", () => {
+    expect(deriveRequiresTaxReview({ ...base, relation_kind: "self" }, einzeln)).toBe(false);
+    expect(deriveRequiresTaxReview({ ...base, tax_cost_bearer: "user" }, einzeln)).toBe(false);
+  });
+
+  it("reviews a spouse only under Einzelveranlagung", () => {
+    const spouse = { ...base, relation_kind: "spouse" as const };
+    expect(deriveRequiresTaxReview(spouse, zusammen)).toBe(false);
+    expect(deriveRequiresTaxReview(spouse, einzeln)).toBe(true);
+  });
+
+  it("applies the child age limit against the document's tax year", () => {
+    // Born 1998 — under 25 in tax year 2020, over the limit in 2024.
+    const kind = {
+      ...base,
+      relation_kind: "child" as const,
+      in_household: true,
+      birth_date: "1998-05-04",
+    };
+    expect(deriveRequiresTaxReview(kind, einzeln, 2020)).toBe(false);
+    expect(deriveRequiresTaxReview(kind, einzeln, 2024)).toBe(true);
+  });
+
+  it("reviews a child that no longer lives in the household", () => {
+    const kind = {
+      ...base,
+      relation_kind: "child" as const,
+      in_household: false,
+      birth_date: "2010-01-01",
+    };
+    expect(deriveRequiresTaxReview(kind, einzeln, 2024)).toBe(true);
+  });
+
+  it("hasOwnTaxReturn only covers years from the configured one on", () => {
+    const p = { own_tax_return_from_tax_year: 2023 };
+    expect(hasOwnTaxReturn(p, 2022)).toBe(false);
+    expect(hasOwnTaxReturn(p, 2023)).toBe(true);
+    expect(hasOwnTaxReturn(p, 2024)).toBe(true);
+    expect(hasOwnTaxReturn({ own_tax_return_from_tax_year: null }, 2024)).toBe(false);
+  });
+
+  it("skips review for years the person files their own return", () => {
+    const p = { ...base, own_tax_return_from_tax_year: 2023 };
+    expect(deriveRequiresTaxReview(p, einzeln, 2022)).toBe(true);
+    expect(deriveRequiresTaxReview(p, einzeln, 2023)).toBe(false);
+  });
+
+  it("lets a manual override win over the derived default", () => {
+    const p = { ...base, requires_tax_review_override: false };
+    expect(deriveRequiresTaxReview(p, einzeln)).toBe(true);
+    expect(computeEffectiveRequiresTaxReview(p, einzeln)).toBe(false);
+  });
+
+  it("lets the own-return cutoff win over a manual override", () => {
+    const p = {
+      ...base,
+      requires_tax_review_override: true,
+      own_tax_return_from_tax_year: 2023,
+    };
+    expect(computeEffectiveRequiresTaxReview(p, einzeln, 2022)).toBe(true);
+    expect(computeEffectiveRequiresTaxReview(p, einzeln, 2024)).toBe(false);
   });
 });
 
