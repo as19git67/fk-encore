@@ -38,7 +38,7 @@ import {
   buildReceiptDocumentCompletion,
   isReliableReceiptAmount,
 } from "./receipt-capture";
-import { deleteJobsForDocument } from "./scan-queue";
+import { deleteJobsForDocument, hasUnfinishedJob } from "./scan-queue";
 import { checkReceiptEnrichment, createSuggestionsForDocument } from "../finance/document-match.service";
 import {
   assertPathUnderDocumentsRoot,
@@ -62,7 +62,6 @@ import {
   getEffectiveAssessmentType,
   hasOwnTaxReturn,
   loadRemovedSubjectPersonIds,
-  loadSubjectPersonHints,
   loadSubjectPersonsForMatch,
 } from "./subject-persons";
 import { flattenTaxonomy, taxonomyHints } from "./taxonomy";
@@ -278,11 +277,16 @@ export async function runTextExtract(documentId: number): Promise<void> {
   const isReceiptCapture = row.receipt_ocr_state != null;
   const nextStatus: DocumentStatus = isReceiptCapture ? "ready" : "classifying";
 
+  // The status only ever moves FORWARD from here. Belt-and-braces against a
+  // classify that already settled this document on "ready" (see the
+  // hasUnfinishedJob guard in runClassify): pushing it back to "classifying"
+  // would strand it there, since no classify job is left to move it on.
   await db
     .update(documents)
     .set({
       extracted_text: text.length === 0 ? null : text,
-      status: nextStatus,
+      status: sql`CASE WHEN ${documents.status} IN ('pending', 'extracting')
+                       THEN ${nextStatus} ELSE ${documents.status} END`,
     })
     .where(eq(documents.id, documentId));
   await publishStatusChanged(documentId, row.user_id, nextStatus);
@@ -297,6 +301,15 @@ export async function runTextExtract(documentId: number): Promise<void> {
  */
 export async function runClassify(documentId: number): Promise<{ classification: Classification; lowConfidence: boolean } | { deferred: true }> {
   const row = await getDocumentOrThrow(documentId);
+  // Wait for text_extract even when the document still carries the text of a
+  // PREVIOUS run. Without this, a re-queue (batch reclassify, "Fehlende
+  // fortsetzen") lets classify overtake text_extract: it would classify the
+  // stale text, set status "ready", and then text_extract — landing after it —
+  // would push the status back to "classifying", where it stays forever
+  // because the classify job is already done.
+  if (await hasUnfinishedJob(documentId, "text_extract")) {
+    return { deferred: true };
+  }
   const text = (row.extracted_text ?? "").trim();
   if (text.length === 0) {
     if (isWaitingForTextExtraction(row.status)) {
@@ -322,16 +335,30 @@ export async function runClassify(documentId: number): Promise<{ classification:
     hint: t.hint,
   }));
   const subjectPersons = await loadSubjectPersonsForMatch(row.user_id);
-  const subjectPersonHints = await loadSubjectPersonHints(row.user_id);
-  const subject_persons = subjectPersonHints.map(
-    ({ full_name, relation_tag, relation_kind, tax_cost_bearer, in_household }) => ({
+  // Who this document names is a deterministic question: the name detector
+  // (metadata-extract.ts) answers it from the same OCR text the classifier
+  // sees, and more reliably than the small model does. So resolve it FIRST
+  // and send only the persons actually named here. Handing the model the
+  // whole household list makes it solve that lookup as a side task, and a
+  // wrong pick means it applies the PERSONENBEZUG rule to the wrong person's
+  // relation_kind / tax_cost_bearer — which is how a deductible bill of the
+  // user's ends up suppressed.
+  //
+  // Persons the user explicitly removed from this document (migration 0138)
+  // stay out here too. Learned persons cannot be included yet: the sender
+  // memory keys on classification.sender, which only exists after this call.
+  const detectedPersonIds = detectSubjectPersonIds(clipped, subjectPersons);
+  const removedPersonIds = await loadRemovedSubjectPersonIds(documentId);
+  const namedPersonIds = new Set(detectedPersonIds.filter((id) => !removedPersonIds.has(id)));
+  const subject_persons = subjectPersons
+    .filter((p) => namedPersonIds.has(p.id))
+    .map(({ full_name, relation_tag, relation_kind, tax_cost_bearer, in_household }) => ({
       full_name,
       relation_tag,
       relation_kind,
       tax_cost_bearer,
       in_household,
-    }),
-  );
+    }));
   // Joint vs. separate assessment decides whether a spouse's deduction lands
   // on the user's return (see the PERSONENBEZUG block in CLASSIFY_TAX_PROMPT).
   // The document's own tax year is only known *after* classification, so we
@@ -370,7 +397,10 @@ export async function runClassify(documentId: number): Promise<{ classification:
   }
   // 2. A recipient/Bezugsperson is never the sender — drop it if the
   //    classifier echoed a known subject person into the sender field.
-  if (isSubjectPersonSender(classification.sender, subject_persons)) {
+  //    Checked against the FULL household list, not the persons named in this
+  //    document: a sender the name detector didn't match (OCR noise, a lone
+  //    surname) can still be a Bezugsperson, and must not survive as sender.
+  if (isSubjectPersonSender(classification.sender, subjectPersons)) {
     classification.sender = null;
   }
   // 2b. The small model regularly transliterates umlauts ("pruefung",
@@ -408,8 +438,6 @@ export async function runClassify(documentId: number): Promise<{ classification:
   //    user explicitly REMOVED from this document (migration 0138) are
   //    filtered out of both sources: an explicit per-document removal beats
   //    name detection and sender memory alike.
-  const detectedPersonIds = detectSubjectPersonIds(clipped, subjectPersons);
-  const removedPersonIds = await loadRemovedSubjectPersonIds(documentId);
   const subjectPersonIds = mergeLearnedPersonIds(detectedPersonIds, learned).filter(
     (id) => !removedPersonIds.has(id),
   );
@@ -858,6 +886,11 @@ async function replaceAiSubjectPersons(
  */
 export async function runEmbed(documentId: number): Promise<{ chunks: number } | { deferred: true }> {
   const row = await getDocumentOrThrow(documentId);
+  // Same re-queue race as in runClassify: embedding the previous run's text
+  // would silently index content the document no longer has.
+  if (await hasUnfinishedJob(documentId, "text_extract")) {
+    return { deferred: true };
+  }
   const text = (row.extracted_text ?? "").trim();
   if (text.length === 0) {
     if (isWaitingForTextExtraction(row.status)) {

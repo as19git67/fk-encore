@@ -134,6 +134,36 @@ export async function markJobFailed(id: number, error: string): Promise<void> {
     .where(eq(documentScanQueue.id, id));
 }
 
+/**
+ * True while `service` still has work outstanding for this document — the job
+ * is queued or currently running.
+ *
+ * The pipeline stages run in independent workers, so a re-queue puts
+ * text_extract and classify in flight at the same time. On a RE-run the
+ * document already carries `extracted_text`, so classify no longer defers on
+ * empty text and can overtake text_extract — classifying stale text and then
+ * having its "ready" status overwritten by the text_extract that lands after
+ * it. Callers use this to hold a later stage back until the earlier one is
+ * really done.
+ */
+export async function hasUnfinishedJob(
+  documentId: number,
+  service: DocumentScanService,
+): Promise<boolean> {
+  const row = await db
+    .select({ id: documentScanQueue.id })
+    .from(documentScanQueue)
+    .where(
+      and(
+        eq(documentScanQueue.document_id, documentId),
+        eq(documentScanQueue.service, service),
+        inArray(documentScanQueue.status, ["pending", "processing"]),
+      ),
+    )
+    .limit(1);
+  return row.length > 0;
+}
+
 /** Delete all scan-queue entries for a document (used when the document is deleted). */
 export async function deleteJobsForDocument(documentId: number): Promise<void> {
   await db
