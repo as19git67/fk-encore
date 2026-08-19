@@ -100,16 +100,36 @@ zu KEINER. Vergib niemals mehrere Abzugs-Sektionen pauschal „auf Verdacht"
 Werbungskosten, Sonderausgaben usw.). Im Zweifel: leere Liste.
 
 PERSONENBEZUG / BEZAHLER (sehr wichtig): Die Steuer-Sektionen beziehen sich
-auf die Einkommensteuererklärung des Nutzers. Rechnungen, Beitragsbescheide,
-Spendenquittungen, Krankheits-/Pflege-/Handwerkerbelege oder sonstige
-Abzugsbelege, die erkennbar eine Bezugsperson betreffen (z. B. Mutter/Vater)
-und nicht vom Nutzer selbst getragen wurden, sind für den Nutzer NICHT
-steuerrelevant (tax_relevant=false, tax_sections=[]). Der bloße Umstand, dass
-das Dokument im Haushalt abgelegt ist oder eine Bezugsperson erkannt wurde,
-reicht niemals für Sonderausgaben, Vorsorgeaufwand, außergewöhnliche
-Belastungen oder haushaltsnahe Aufwendungen. Nur wenn das Dokument eindeutig
-belegt, dass der Nutzer selbst Zahlungspflichtiger/Zahler ist oder es um eigene
-Unterhaltszahlungen des Nutzers geht, darf eine Abzugs-Sektion gesetzt werden.
+auf die Einkommensteuererklärung des Nutzers. Ob ein Abzugsbeleg (Krankheits-,
+Pflege-, Handwerker-, Beitrags- oder Spendenbeleg) dorthin gehört, hängt davon
+ab, WELCHE Person er betrifft. Nutze dafür die Angaben aus der Bezugspersonen-
+Liste (\`relation_kind\`, \`tax_cost_bearer\`, \`in_household\`) und die
+Veranlagungsart \`assessment_type\`:
+
+- \`tax_cost_bearer = "user"\`: Der Nutzer trägt die Kosten dieser Person.
+  Der Beleg zählt für seine Erklärung — behandle ihn wie einen eigenen.
+- \`tax_cost_bearer = "person"\`: Die Person trägt ihre Kosten selbst.
+  Für den Nutzer NICHT steuerrelevant (tax_relevant=false, tax_sections=[]).
+- Sonst entscheidet die Beziehungsart:
+  - \`self\`: der Nutzer selbst → zählt.
+  - \`spouse\` bei \`assessment_type = "zusammen"\`: Zusammenveranlagung, der
+    Abzug gehört in dieselbe Erklärung → zählt. Bei "einzeln" oder
+    "unknown" gilt die strenge Regel unten.
+  - \`child\` mit \`in_household = true\`: unterhaltsberechtigtes Kind im
+    Haushalt, selbst getragene Kosten sind abziehbar → zählt.
+  - \`parent\`, \`sibling\`, \`ward\`, \`other\` und Personen ohne Angabe:
+    strenge Regel unten.
+
+STRENGE REGEL (für alle oben nicht ausdrücklich zählenden Fälle): Der bloße
+Umstand, dass das Dokument im Haushalt abgelegt ist oder eine Bezugsperson
+erkannt wurde, reicht niemals für Sonderausgaben, Vorsorgeaufwand,
+außergewöhnliche Belastungen oder haushaltsnahe Aufwendungen. Nur wenn das
+Dokument eindeutig belegt, dass der Nutzer selbst Zahlungspflichtiger/Zahler
+ist oder es um eigene Unterhaltszahlungen des Nutzers geht, darf eine
+Abzugs-Sektion gesetzt werden.
+
+Wird gar keine Bezugsperson erkannt, ist der Nutzer selbst gemeint — dann
+entscheidet allein die Art des Belegs.
 
 WICHTIGE ABGRENZUNGSREGELN:
 
@@ -263,7 +283,10 @@ export const CLASSIFY_SUBJECT_PERSONS_PROMPT = `
 BEZUGSPERSONEN (nur wenn dir unten eine Liste von Bezugspersonen gezeigt wird)
 Der Nutzer verwaltet Dokumente, die ihn selbst oder ihm nahestehende
 Personen (Eltern, Kinder, Betreute) betreffen. Du bekommst eine Liste
-\`Bezugspersonen\` mit Name, Beziehungs-Tag und Beziehungsart (relation_kind).
+\`Bezugspersonen\` mit Name, Beziehungs-Tag, Beziehungsart (relation_kind),
+Kostenträger (tax_cost_bearer) und Haushaltszugehörigkeit (in_household).
+Die letzten beiden Felder sind nur für die Steuer-Entscheidung relevant
+(siehe PERSONENBEZUG / BEZAHLER) und ändern nichts am Tagging.
 
 Die Beziehungsarten sind:
 - self: der Nutzer selbst

@@ -138,6 +138,13 @@ export interface SubjectPersonRequestEntry {
   full_name: string;
   relation_tag: string;
   relation_kind?: string;
+  // Who carries the cost of this person's bills ("user" | "person" |
+  // "unknown"). The tax prompt otherwise has to infer the payer from the
+  // document text — a question the household data already answers.
+  tax_cost_bearer?: string;
+  // Member of the user's tax household. Together with `relation_kind`
+  // "child" this decides whether a deduction is unambiguously the user's.
+  in_household?: boolean;
 }
 
 /**
@@ -167,6 +174,10 @@ export interface ClassifyRequest {
   // instructed to add the corresponding relation_tag to its `tags`
   // output. Omit/empty to disable that behaviour entirely.
   subject_persons?: SubjectPersonRequestEntry[];
+  // Joint vs. separate assessment ("zusammen" | "einzeln" | "unknown").
+  // Decides whether a spouse's deduction belongs on the user's return —
+  // see the PERSONENBEZUG block in CLASSIFY_TAX_PROMPT. Omit when unknown.
+  assessment_type?: string;
   // The k nearest already-classified documents (by embedding similarity),
   // rendered into the prompt as orientation. Omit/empty to disable few-shot.
   examples?: ClassifyExample[];

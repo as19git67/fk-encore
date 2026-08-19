@@ -498,6 +498,12 @@ export interface SubjectPersonHint {
   full_name: string;
   relation_tag: string;
   relation_kind: RelationKind;
+  // Forwarded to the classifier so the tax prompt can tell an unambiguous
+  // deduction of the user's (spouse under Zusammenveranlagung, own child in
+  // the household) from a genuinely open case (parent, ward) instead of
+  // suppressing every Bezugsperson alike.
+  tax_cost_bearer: CostBearer;
+  in_household: boolean;
 }
 
 export interface SubjectPersonMatch {
@@ -554,6 +560,8 @@ export async function loadSubjectPersonHints(userId: number): Promise<SubjectPer
         full_name: userSubjectPersons.full_name,
         relation_tag: userSubjectPersons.relation_tag,
         relation_kind: userSubjectPersons.relation_kind,
+        tax_cost_bearer: userSubjectPersons.tax_cost_bearer,
+        in_household: userSubjectPersons.in_household,
       })
       .from(userSubjectPersons)
       .where(eq(userSubjectPersons.user_id, userId))
