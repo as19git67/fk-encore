@@ -489,6 +489,53 @@ function zoomOut() {
 
 function fitWidth() { zoom.value = FIT_WIDTH }
 
+// ─── Pinch-to-zoom (touch) ──────────────────────────────────────────────────
+// The app disables native viewport pinch-zoom (user-scalable=no) so the
+// gesture has to be handled here. While pinching we only apply a cheap CSS
+// transform for immediate visual feedback — re-rasterising every page on
+// every touchmove would be far too slow. The real zoom (and re-render) is
+// committed once the gesture ends.
+const pinching = ref(false)
+const pinchScale = ref(1)
+let pinchStartDist = 0
+let pinchStartZoom = 1
+const pinchOriginX = ref(0)
+const pinchOriginY = ref(0)
+
+function touchDistance(a: Touch, b: Touch): number {
+  const dx = a.clientX - b.clientX
+  const dy = a.clientY - b.clientY
+  return Math.hypot(dx, dy)
+}
+
+function onTouchStart(e: TouchEvent) {
+  const [a, b] = e.touches
+  const wrapper = containerRef.value
+  if (e.touches.length !== 2 || !a || !b || !wrapper) return
+  pinching.value = true
+  pinchStartDist = touchDistance(a, b)
+  pinchStartZoom = effectiveZoom.value
+  pinchScale.value = 1
+  const rect = wrapper.getBoundingClientRect()
+  pinchOriginX.value = (a.clientX + b.clientX) / 2 - rect.left + wrapper.scrollLeft
+  pinchOriginY.value = (a.clientY + b.clientY) / 2 - rect.top + wrapper.scrollTop
+}
+
+function onTouchMove(e: TouchEvent) {
+  const [a, b] = e.touches
+  if (!pinching.value || e.touches.length !== 2 || !a || !b || pinchStartDist === 0) return
+  e.preventDefault()
+  pinchScale.value = touchDistance(a, b) / pinchStartDist
+}
+
+function onTouchEnd(e: TouchEvent) {
+  if (!pinching.value || e.touches.length >= 2) return
+  pinching.value = false
+  const finalZoom = pinchStartZoom * pinchScale.value
+  pinchScale.value = 1
+  zoom.value = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, finalZoom))
+}
+
 function onContainerResize() {
   // A height-only change (e.g. the panel resizing) doesn't affect the
   // fit-width scale, but it does change which pages are on screen.
@@ -621,7 +668,14 @@ onBeforeUnmount(() => {
       />
     </div>
 
-    <div ref="containerRef" class="canvas-wrapper">
+    <div
+      ref="containerRef"
+      class="canvas-wrapper"
+      @touchstart="onTouchStart"
+      @touchmove="onTouchMove"
+      @touchend="onTouchEnd"
+      @touchcancel="onTouchEnd"
+    >
       <div v-if="passwordPrompt" class="state-overlay password">
         <i class="pi pi-lock" />
         <span>Dieses PDF ist passwortgeschützt.</span>
@@ -649,7 +703,13 @@ onBeforeUnmount(() => {
         <span>PDF wird geladen…</span>
       </div>
 
-      <div class="page-list">
+      <div
+        class="page-list"
+        :style="pinching ? {
+          transform: `scale(${pinchScale})`,
+          transformOrigin: `${pinchOriginX}px ${pinchOriginY}px`,
+        } : undefined"
+      >
         <div
           v-for="p in pages"
           :key="p.pageNumber"
@@ -807,6 +867,9 @@ onBeforeUnmount(() => {
   display: flex;
   padding: 0.5rem;
   background: var(--p-surface-ground, #2a2a2a);
+  /* Allow one-finger panning natively, but keep two-finger pinch under our
+     own control (the app disables native viewport zoom globally). */
+  touch-action: pan-x pan-y;
 }
 
 /* All pages of the current chunk, one below the other. */
