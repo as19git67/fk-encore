@@ -289,6 +289,15 @@ onMounted(load)
             icon="pi pi-check"
             :loading="savingAssessment"
             size="small"
+            class="assessment-save-full"
+          />
+          <Button
+            type="submit"
+            icon="pi pi-check"
+            :loading="savingAssessment"
+            size="small"
+            class="assessment-save-icon"
+            v-tooltip="'Speichern'"
           />
         </div>
       </form>
@@ -650,6 +659,20 @@ onMounted(load)
   display: flex;
   align-items: flex-end;
   padding-bottom: 0.05rem;
+}
+.assessment-save-icon {
+  display: none;
+}
+@media (max-width: 480px) {
+  .assessment-form label {
+    flex: 1 1 100%;
+  }
+  .assessment-save-full {
+    display: none;
+  }
+  .assessment-save-icon {
+    display: inline-flex;
+  }
 }
 
 .column-legend {
