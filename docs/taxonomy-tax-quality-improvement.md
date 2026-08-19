@@ -19,6 +19,15 @@ Steuer-Einordnung ableiten. Bevorzugt lokal; Cloud nur für wenige hundert
 - **Klassifikation**: lokales Llama-GGUF (`llm-service/main.py`), **Zero-Shot**,
   JSON-Grammar, `temperature=0.2`, `max_tokens=768`. Prompt enthält Taxonomie-Outline,
   Steuer-Sektionen (gruppiert) und Bezugspersonen.
+- **Haushaltskontext für die Steuerentscheidung**: Die Bezugspersonen-Liste trägt
+  `relation_kind`, `tax_cost_bearer` und `in_household`; dazu kommt die
+  Veranlagungsart (`assessment_type`). Der `PERSONENBEZUG`-Block in
+  `CLASSIFY_TAX_PROMPT` unterscheidet damit einen eindeutigen Abzug des Nutzers
+  (Ehepartner bei Zusammenveranlagung, eigenes Kind im Haushalt) von einem
+  offenen Fall (Eltern, Betreute), statt jede Bezugsperson pauschal zu
+  unterdrücken. Die Altersgrenze bei Kindern (§ 32 Abs. 4 EStG) wertet erst die
+  nachgelagerte Review-Ableitung aus — der Klassifikator bekommt kein
+  Geburtsdatum.
 - **Embeddings**: `intfloat/multilingual-e5-base` (768-dim), pro Dokument-Chunk in
   `document_embeddings` gespeichert.
 - **Bereits persistierte Daten je Dokument** (das Rohmaterial dieses Plans):

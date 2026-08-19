@@ -1311,10 +1311,19 @@ class SubjectPersonEntry(BaseModel):
     """Per-user mapping of a literal name as it appears on documents to
     the user's relationship tag (e.g. "Erika Mustermann" → "mutter").
     When the OCR text mentions ``full_name`` the classifier is asked
-    to append ``relation_tag`` to its ``tags`` output."""
+    to append ``relation_tag`` to its ``tags`` output.
+
+    ``relation_kind``, ``tax_cost_bearer`` and ``in_household`` come from the
+    household model and drive the tax decision: they tell an unambiguous
+    deduction of the user's (spouse under Zusammenveranlagung, own child in
+    the household) from a genuinely open case (parent, ward). Optional —
+    older callers that only send name + tag keep working."""
 
     full_name: str
     relation_tag: str
+    relation_kind: str = ""
+    tax_cost_bearer: str = ""
+    in_household: bool | None = None
 
 
 class ExampleEntry(BaseModel):
@@ -1343,6 +1352,11 @@ class ClassifyRequest(BaseModel):
     # the prompt so address/recipient matches auto-tag the document.
     # Empty list = no Bezugsperson hints; prompt section is omitted.
     subject_persons: list[SubjectPersonEntry] = Field(default_factory=list)
+    # Joint vs. separate assessment ("zusammen" | "einzeln" | "unknown").
+    # Decides whether a spouse's deduction belongs on the user's return —
+    # rendered next to the Bezugspersonen list when tax detection is on.
+    # Empty string = unknown; the line is omitted.
+    assessment_type: str = ""
     # Nearest already-classified documents (retrieval-augmented few-shot).
     # Empty list = no examples; prompt section is omitted.
     examples: list[ExampleEntry] = Field(default_factory=list)
@@ -1477,10 +1491,26 @@ _TAX_GROUP_ORDER: tuple[str, ...] = ("einkuenfte", "abzuege", "bescheid", "rahme
 
 def _subject_persons_outline(entries: list[SubjectPersonEntry]) -> str:
     """Render the Bezugspersonen list. Empty input yields '' so the
-    caller can omit the prompt section entirely."""
+    caller can omit the prompt section entirely.
+
+    Household attributes are appended only when the caller supplied them, so
+    a list without them renders exactly as before."""
     if not entries:
         return ""
-    return "\n".join(f"- {e.full_name} → {e.relation_tag}" for e in entries)
+    lines: list[str] = []
+    for e in entries:
+        line = f"- {e.full_name} → {e.relation_tag}"
+        attrs: list[str] = []
+        if e.relation_kind:
+            attrs.append(f"relation_kind={e.relation_kind}")
+        if e.tax_cost_bearer:
+            attrs.append(f"tax_cost_bearer={e.tax_cost_bearer}")
+        if e.in_household is not None:
+            attrs.append(f"in_household={'ja' if e.in_household else 'nein'}")
+        if attrs:
+            line += f" ({', '.join(attrs)})"
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def _examples_outline(entries: list[ExampleEntry]) -> str:
@@ -1611,6 +1641,10 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
         if subjects_active
         else ""
     )
+    # The assessment type only matters for the tax decision (spouse under
+    # Zusammenveranlagung), so it rides along with the tax facet.
+    if tax_active and req.assessment_type:
+        subjects_block += f"\n\nVeranlagungsart: {req.assessment_type}"
 
     def _build_data_blocks(*, with_hints: bool) -> tuple[str, str, str]:
         h_label = " — Hinweis" if with_hints else ""

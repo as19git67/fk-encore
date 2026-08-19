@@ -186,7 +186,15 @@ describe("documents.subject-persons CRUD", () => {
     expect(mine.map((i) => i.full_name)).toEqual(["Erika Mustermann"]);
 
     const hints = await loadSubjectPersonHints(TEST_USER_ID);
-    expect(hints).toEqual([{ full_name: "Erika Mustermann", relation_tag: "mutter", relation_kind: "other" }]);
+    expect(hints).toEqual([
+      {
+        full_name: "Erika Mustermann",
+        relation_tag: "mutter",
+        relation_kind: "other",
+        tax_cost_bearer: "unknown",
+        in_household: false,
+      },
+    ]);
   });
 
   it("rejects duplicate names for the same user (case-insensitive)", async () => {

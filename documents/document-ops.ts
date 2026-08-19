@@ -323,11 +323,21 @@ export async function runClassify(documentId: number): Promise<{ classification:
   }));
   const subjectPersons = await loadSubjectPersonsForMatch(row.user_id);
   const subjectPersonHints = await loadSubjectPersonHints(row.user_id);
-  const subject_persons = subjectPersonHints.map(({ full_name, relation_tag, relation_kind }) => ({
-    full_name,
-    relation_tag,
-    relation_kind,
-  }));
+  const subject_persons = subjectPersonHints.map(
+    ({ full_name, relation_tag, relation_kind, tax_cost_bearer, in_household }) => ({
+      full_name,
+      relation_tag,
+      relation_kind,
+      tax_cost_bearer,
+      in_household,
+    }),
+  );
+  // Joint vs. separate assessment decides whether a spouse's deduction lands
+  // on the user's return (see the PERSONENBEZUG block in CLASSIFY_TAX_PROMPT).
+  // The document's own tax year is only known *after* classification, so we
+  // send the currently effective setting; the per-year value is applied
+  // afterwards where the review queue is derived (see below).
+  const assessment_type = await getEffectiveAssessmentType(row.user_id);
   // Retrieval-augmented few-shot: anchor the LLM with the nearest already-
   // classified documents of this household. Best-effort — degrades to plain
   // zero-shot when the embedder is down or no prior corpus exists.
@@ -342,6 +352,7 @@ export async function runClassify(documentId: number): Promise<{ classification:
     document_types,
     tax_sections,
     subject_persons,
+    assessment_type,
     examples,
   });
 
