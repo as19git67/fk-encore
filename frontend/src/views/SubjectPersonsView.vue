@@ -567,6 +567,7 @@ onMounted(load)
   border-radius: 0.5rem;
   padding: 0.75rem 1rem;
   background: var(--p-content-background);
+  overflow: hidden;
 }
 .assessment-section h2 {
   margin: 0 0 0.5rem;
@@ -585,12 +586,18 @@ onMounted(load)
   flex-direction: column;
   gap: 0.25rem;
 }
+.assessment-form label :deep(input),
+.assessment-form label :deep(.p-select),
+.assessment-form label :deep(.p-inputnumber) {
+  width: 100%;
+}
 
 .add-form {
   border: 1px solid var(--p-content-border-color);
   border-radius: 0.5rem;
   padding: 0.75rem 1rem;
   background: var(--p-content-background);
+  overflow: hidden;
 }
 .add-form h2 {
   margin: 0 0 0.5rem;
@@ -608,6 +615,12 @@ onMounted(load)
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
+}
+.add-form__grid label :deep(input),
+.add-form__grid label :deep(.p-select),
+.add-form__grid label :deep(.p-inputnumber),
+.add-form__grid label :deep(.p-datepicker) {
+  width: 100%;
 }
 .add-form__grid .checkbox-label {
   flex: 0 0 auto;
