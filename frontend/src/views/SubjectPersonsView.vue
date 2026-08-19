@@ -49,6 +49,20 @@ const assessmentTypeOptions: { value: AssessmentType; label: string }[] = [
   { value: 'einzeln', label: 'Einzelveranlagung' },
 ]
 
+type TaxReviewMode = 'auto' | 'on' | 'off' | 'own'
+const taxReviewModeOptions: { value: TaxReviewMode; label: string }[] = [
+  { value: 'auto', label: 'Automatisch' },
+  { value: 'on', label: 'Immer prüfen' },
+  { value: 'off', label: 'Nie prüfen' },
+]
+
+function getTaxReviewMode(p: SubjectPerson): TaxReviewMode {
+  if (p.own_tax_return_from_tax_year !== null) return 'own'
+  if (p.requires_tax_review_override === true) return 'on'
+  if (p.requires_tax_review_override === false) return 'off'
+  return 'auto'
+}
+
 // ─── state ──────────────────────────────────────────────────────────────────
 
 const persons = ref<SubjectPerson[]>([])
@@ -64,6 +78,7 @@ const form = ref({
   birth_date: null as Date | null,
   in_household: false,
   tax_cost_bearer: 'unknown' as CostBearer,
+  own_tax_return_from_tax_year: null as number | null,
 })
 const adding = ref(false)
 const deletingId = ref<number | null>(null)
@@ -138,6 +153,7 @@ async function handleAdd() {
       birth_date: form.value.birth_date ? toLocalIsoDate(form.value.birth_date) : null,
       in_household: form.value.in_household,
       tax_cost_bearer: form.value.tax_cost_bearer,
+      own_tax_return_from_tax_year: form.value.own_tax_return_from_tax_year,
     })
     persons.value = [...persons.value, created].sort((a, b) =>
       a.full_name.localeCompare(b.full_name, 'de'),
@@ -148,6 +164,7 @@ async function handleAdd() {
     form.value.birth_date = null
     form.value.in_household = false
     form.value.tax_cost_bearer = 'unknown'
+    form.value.own_tax_return_from_tax_year = null
     info.value = `${created.full_name} hinzugefügt`
   } catch (err: any) {
     error.value = err.message || 'Speichern fehlgeschlagen'
@@ -164,6 +181,7 @@ async function handleFieldChange(
     in_household: boolean
     tax_cost_bearer: string
     requires_tax_review_override: boolean | null
+    own_tax_return_from_tax_year: number | null
   }>,
 ) {
   savingId.value = p.id
@@ -179,16 +197,25 @@ async function handleFieldChange(
   }
 }
 
-async function handleToggleTaxReview(p: SubjectPerson, checked: boolean) {
-  await handleFieldChange(p, { requires_tax_review_override: checked })
-  info.value = checked
-    ? `Steuerdokumente von ${p.full_name} werden ab sofort zur Prüfung markiert.`
-    : `Steuerdokumente von ${p.full_name} werden nicht mehr zur Prüfung markiert.`
+async function handleTaxReviewModeChange(p: SubjectPerson, mode: TaxReviewMode) {
+  if (mode === 'own') return
+  const override = mode === 'auto' ? null : mode === 'on'
+  await handleFieldChange(p, { requires_tax_review_override: override })
+  const labels: Record<string, string> = {
+    auto: `Steuer-Prüfung für ${p.full_name} auf automatisch zurückgesetzt.`,
+    on: `Steuerdokumente von ${p.full_name} werden ab sofort zur Prüfung markiert.`,
+    off: `Steuerdokumente von ${p.full_name} werden nicht mehr zur Prüfung markiert.`,
+  }
+  info.value = labels[mode] ?? ''
 }
 
-async function handleResetTaxReviewOverride(p: SubjectPerson) {
-  await handleFieldChange(p, { requires_tax_review_override: null })
-  info.value = `Steuer-Prüfung für ${p.full_name} auf automatisch zurückgesetzt.`
+async function handleOwnReturnChange(p: SubjectPerson, year: number | null) {
+  if (year === p.own_tax_return_from_tax_year) return
+  await handleFieldChange(p, { own_tax_return_from_tax_year: year })
+  info.value =
+    year === null
+      ? `${p.full_name} macht keine eigene Steuererklärung mehr — Dokumente kommen zurück in deine Prüfung.`
+      : `Steuerdokumente von ${p.full_name} ab Steuerjahr ${year} gehören ab sofort zur eigenen Steuerakte.`
 }
 
 async function handleDelete(p: SubjectPerson) {
@@ -218,6 +245,12 @@ onMounted(load)
         ihre Namen und ergänzt automatisch das Beziehungs-Tag. Die Beziehungsart
         bestimmt, ob Steuerdokumente dieser Person automatisch zur Prüfung
         markiert werden.
+      </p>
+      <p class="page-hint">
+        Wird ein Kind erwachsen und macht eine eigene Steuererklärung, trage das
+        erste betroffene Steuerjahr unter „Eigene Erklärung ab“ ein: Steuer&shy;dokumente
+        ab diesem Jahr wandern in die eigene Steuerakte der Person statt in deine
+        Prüf-Liste. Ältere Jahre bleiben unverändert bei dir.
       </p>
     </header>
 
@@ -249,13 +282,24 @@ onMounted(load)
             :disabled="savingAssessment"
           />
         </label>
-        <Button
-          type="submit"
-          label="Speichern"
-          icon="pi pi-check"
-          :loading="savingAssessment"
-          size="small"
-        />
+        <div class="assessment-form__submit">
+          <Button
+            type="submit"
+            label="Speichern"
+            icon="pi pi-check"
+            :loading="savingAssessment"
+            size="small"
+            class="assessment-save-full"
+          />
+          <Button
+            type="submit"
+            icon="pi pi-check"
+            :loading="savingAssessment"
+            size="small"
+            class="assessment-save-icon"
+            v-tooltip="'Speichern'"
+          />
+        </div>
       </form>
       <p class="page-hint">
         Bei Zusammenveranlagung sind Arztkosten des Ehepartners automatisch
@@ -314,6 +358,17 @@ onMounted(load)
             :disabled="adding"
           />
         </label>
+        <label>
+          <span class="label">Eigene Steuererklärung ab Steuerjahr</span>
+          <InputNumber
+            v-model="form.own_tax_return_from_tax_year"
+            :use-grouping="false"
+            :min="1990"
+            :max="2099"
+            placeholder="leer = keine"
+            :disabled="adding"
+          />
+        </label>
         <label class="checkbox-label">
           <Checkbox v-model="form.in_household" :binary="true" :disabled="adding" />
           <span>Im Haushalt</span>
@@ -329,6 +384,50 @@ onMounted(load)
         </div>
       </form>
     </section>
+
+    <!-- Column legend -->
+    <details class="column-legend">
+      <summary>Spalten-Legende</summary>
+      <dl class="legend-list">
+        <div class="legend-item">
+          <dt>Name</dt>
+          <dd>Vollständiger Name, wie er auf Dokumenten erscheint. Der Klassifizierer gleicht erkannte Namen mit dieser Liste ab.</dd>
+        </div>
+        <div class="legend-item">
+          <dt>Tag</dt>
+          <dd>Kurzes Beziehungs-Kürzel (z.&nbsp;B. „mutter", „sohn"), das der Klassifizierer dem Dokument als Schlagwort zuweist.</dd>
+        </div>
+        <div class="legend-item">
+          <dt>Beziehung</dt>
+          <dd>Verwandtschaftsgrad zur Hauptperson (Ehepartner:in, Kind, Elternteil …). Bestimmt zusammen mit Alter und Haushalt, ob Steuerdokumente automatisch zur Prüfung markiert werden.</dd>
+        </div>
+        <div class="legend-item">
+          <dt>Haushalt</dt>
+          <dd>Lebt die Person im selben Haushalt? Relevant für die steuerliche Zuordnung — bei Zusammenveranlagung entfällt die Prüfung für Ehepartner:in und Kinder im Haushalt.</dd>
+        </div>
+        <div class="legend-item">
+          <dt>Kostenträger</dt>
+          <dd>Wer trägt die Kosten der auf diese Person lautenden Dokumente? „Ich selbst" = abzugsfähig in deiner Erklärung, „Die Person selbst" = nicht abzugsfähig.</dd>
+        </div>
+        <div class="legend-item">
+          <dt>Eigene Erklärung ab</dt>
+          <dd>Ab welchem Steuerjahr gibt die Person eine eigene Steuererklärung ab? Steuerdokumente ab diesem Jahr wandern in deren eigene Steuerakte und tauchen nicht mehr in deiner Prüf-Liste auf.</dd>
+        </div>
+        <div class="legend-item">
+          <dt>Steuer-Prüfung</dt>
+          <dd>
+            Ob Steuerdokumente dieser Person zur manuellen Prüfung markiert werden. Das Dropdown bietet drei Modi:
+            <ul class="legend-tags">
+              <li><strong>Automatisch</strong> — wird anhand von Beziehungsart, Alter und Veranlagung ermittelt.</li>
+              <li><strong>Immer prüfen</strong> — Prüfung ist dauerhaft eingeschaltet (manueller Override).</li>
+              <li><strong>Nie prüfen</strong> — Prüfung ist dauerhaft ausgeschaltet (manueller Override).</li>
+            </ul>
+            Wenn unter „Eigene Erklärung ab" ein Steuerjahr eingetragen ist, erscheint statt dem Dropdown ein
+            <Tag value="eigene Akte" severity="info" class="legend-tag-sample" />-Tag — Dokumente wandern dann in die eigene Steuerakte.
+          </dd>
+        </div>
+      </dl>
+    </details>
 
     <!-- Table -->
     <DataTable
@@ -381,25 +480,42 @@ onMounted(load)
           />
         </template>
       </Column>
-      <Column header="Steuer-Prüfung" :style="{ width: '10rem' }">
+      <Column header="Eigene Erklärung ab" :style="{ width: '9rem' }">
+        <template #body="{ data }">
+          <InputNumber
+            :model-value="data.own_tax_return_from_tax_year"
+            :use-grouping="false"
+            :min="1990"
+            :max="2099"
+            placeholder="—"
+            :disabled="savingId === data.id"
+            class="inline-year"
+            @update:model-value="(v: number | null) => handleOwnReturnChange(data, v)"
+          />
+        </template>
+      </Column>
+      <Column header="Steuer-Prüfung" :style="{ width: '12rem' }">
         <template #body="{ data }">
           <div class="tax-review-cell">
-            <Checkbox
-              :model-value="data.requires_tax_review"
-              :binary="true"
-              :disabled="savingId === data.id"
-              @update:model-value="(v: boolean) => handleToggleTaxReview(data, v)"
-            />
             <Tag
-              v-if="data.requires_tax_review_override !== null"
-              value="manuell"
-              severity="warn"
+              v-if="data.own_tax_return_from_tax_year !== null"
+              value="eigene Akte"
+              severity="info"
               class="override-tag"
-              :style="{ cursor: 'pointer' }"
-              @click="handleResetTaxReviewOverride(data)"
-              v-tooltip="'Klicken, um auf automatisch zurückzusetzen'"
+              v-tooltip="
+                `Steuerdokumente ab ${data.own_tax_return_from_tax_year} gehören zur eigenen Steuerakte`
+              "
             />
-            <Tag v-else value="auto" severity="secondary" class="override-tag" />
+            <Select
+              v-else
+              :model-value="getTaxReviewMode(data)"
+              :options="taxReviewModeOptions"
+              option-label="label"
+              option-value="value"
+              :disabled="savingId === data.id"
+              class="inline-select tax-review-select"
+              @update:model-value="(v: TaxReviewMode) => handleTaxReviewModeChange(data, v)"
+            />
           </div>
         </template>
       </Column>
@@ -451,6 +567,7 @@ onMounted(load)
   border-radius: 0.5rem;
   padding: 0.75rem 1rem;
   background: var(--p-content-background);
+  overflow: hidden;
 }
 .assessment-section h2 {
   margin: 0 0 0.5rem;
@@ -469,12 +586,18 @@ onMounted(load)
   flex-direction: column;
   gap: 0.25rem;
 }
+.assessment-form label :deep(input),
+.assessment-form label :deep(.p-select),
+.assessment-form label :deep(.p-inputnumber) {
+  width: 100%;
+}
 
 .add-form {
   border: 1px solid var(--p-content-border-color);
   border-radius: 0.5rem;
   padding: 0.75rem 1rem;
   background: var(--p-content-background);
+  overflow: hidden;
 }
 .add-form h2 {
   margin: 0 0 0.5rem;
@@ -493,12 +616,23 @@ onMounted(load)
   flex-direction: column;
   gap: 0.25rem;
 }
+.add-form__grid label :deep(input),
+.add-form__grid label :deep(.p-select),
+.add-form__grid label :deep(.p-inputnumber),
+.add-form__grid label :deep(.p-datepicker) {
+  width: 100%;
+}
 .add-form__grid .checkbox-label {
   flex: 0 0 auto;
   flex-direction: row;
   align-items: center;
   gap: 0.5rem;
   padding-bottom: 0.4rem;
+}
+@media (max-width: 480px) {
+  .add-form__grid .checkbox-label {
+    flex: 1 1 100%;
+  }
 }
 .add-form__submit {
   display: flex;
@@ -514,6 +648,13 @@ onMounted(load)
   min-width: 8rem;
 }
 
+.inline-year {
+  max-width: 7rem;
+}
+.inline-year :deep(input) {
+  width: 100%;
+}
+
 .tax-review-cell {
   display: flex;
   align-items: center;
@@ -521,5 +662,86 @@ onMounted(load)
 }
 .override-tag {
   font-size: 0.7rem;
+}
+
+.tax-review-select {
+  min-width: 10rem;
+}
+
+.assessment-form__submit {
+  display: flex;
+  align-items: flex-end;
+  padding-bottom: 0.05rem;
+}
+.assessment-save-icon {
+  display: none;
+}
+@media (max-width: 480px) {
+  .assessment-form label {
+    flex: 1 1 100%;
+  }
+  .assessment-save-full {
+    display: none;
+  }
+  .assessment-save-icon {
+    display: inline-flex;
+  }
+}
+
+.column-legend {
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: var(--p-content-background);
+}
+.column-legend summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--p-text-muted-color);
+  user-select: none;
+}
+.legend-list {
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.legend-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.5rem;
+}
+.legend-item dt {
+  font-weight: 600;
+  font-size: 0.85rem;
+  min-width: 10rem;
+  color: var(--p-text-color);
+}
+.legend-item dd {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--p-text-muted-color);
+  line-height: 1.4;
+  flex: 1 1 20rem;
+}
+.legend-tags {
+  margin: 0.25rem 0 0;
+  padding-left: 1.2rem;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.legend-tags li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+}
+.legend-tag-sample {
+  font-size: 0.7rem;
+  flex-shrink: 0;
 }
 </style>

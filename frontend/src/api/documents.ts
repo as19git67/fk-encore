@@ -768,7 +768,17 @@ export function listTaxYears() {
 }
 
 export function listTaxDocuments(
-  params: { year?: number; section?: string; review_needed?: boolean } = {},
+  params: {
+    year?: number
+    section?: string
+    review_needed?: boolean
+    /**
+     * Omitted = your own tax return (documents routed into a Bezugsperson's
+     * own return are excluded). Pass a subject-person id to browse exactly
+     * that person's Steuerakte.
+     */
+    tax_return_person?: number
+  } = {},
 ) {
   return apiFetch<ListTaxDocumentsResponse>(`/documents/tax${buildQuery(params as Record<string, unknown>)}`)
 }
@@ -839,6 +849,7 @@ export interface SubjectPerson {
   tax_cost_bearer: CostBearer
   requires_tax_review: boolean
   requires_tax_review_override: boolean | null
+  own_tax_return_from_tax_year: number | null
   created_at: string
   updated_at: string
 }
@@ -864,6 +875,7 @@ export function createSubjectPerson(input: {
   tax_cost_bearer?: string
   requires_tax_review?: boolean
   requires_tax_review_override?: boolean | null
+  own_tax_return_from_tax_year?: number | null
 }) {
   return apiFetch<SubjectPerson>('/documents/subject-persons', {
     method: 'POST',
@@ -882,6 +894,7 @@ export function updateSubjectPerson(
     tax_cost_bearer?: string
     requires_tax_review?: boolean
     requires_tax_review_override?: boolean | null
+    own_tax_return_from_tax_year?: number | null
   },
 ) {
   return apiFetch<SubjectPerson>(`/documents/subject-persons/${id}`, {

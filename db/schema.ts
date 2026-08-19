@@ -810,6 +810,13 @@ export const documents = pgTable("documents", {
   // category uncertainty; surfaced instead as a filter in the tax area. Cleared
   // when the user pins the tax fields (tax_reviewed = true).
   tax_review_needed: boolean("tax_review_needed").notNull().default(false),
+  // When set, this tax document belongs to the referenced Bezugsperson's own
+  // tax return ("Steuerakte") — e.g. an adult child filing their own return —
+  // and is excluded from the user's review queue (migration 0146).
+  tax_return_person_id: integer("tax_return_person_id").references(
+    () => userSubjectPersons.id,
+    { onDelete: "set null" },
+  ),
   // When true, a human has pinned the editable attributes (title, doc_date,
   // sender, document_number, summary, category) via the edit dialog and a
   // re-classify must not overwrite them (migration 0101). Mirrors
@@ -960,6 +967,10 @@ export const userSubjectPersons = pgTable("user_subject_persons", {
     .default("unknown"),
   requires_tax_review: boolean("requires_tax_review").notNull().default(false),
   requires_tax_review_override: boolean("requires_tax_review_override"),
+  // NULL = no own tax return. A year means: this person's tax documents with
+  // tax_year >= this value belong to their own return ("Steuerakte"), not the
+  // user's (migration 0146).
+  own_tax_return_from_tax_year: integer("own_tax_return_from_tax_year"),
   created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
   updated_at: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
 });
