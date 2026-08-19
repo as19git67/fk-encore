@@ -49,6 +49,20 @@ const assessmentTypeOptions: { value: AssessmentType; label: string }[] = [
   { value: 'einzeln', label: 'Einzelveranlagung' },
 ]
 
+type TaxReviewMode = 'auto' | 'on' | 'off' | 'own'
+const taxReviewModeOptions: { value: TaxReviewMode; label: string }[] = [
+  { value: 'auto', label: 'Automatisch' },
+  { value: 'on', label: 'Immer prüfen' },
+  { value: 'off', label: 'Nie prüfen' },
+]
+
+function getTaxReviewMode(p: SubjectPerson): TaxReviewMode {
+  if (p.own_tax_return_from_tax_year !== null) return 'own'
+  if (p.requires_tax_review_override === true) return 'on'
+  if (p.requires_tax_review_override === false) return 'off'
+  return 'auto'
+}
+
 // ─── state ──────────────────────────────────────────────────────────────────
 
 const persons = ref<SubjectPerson[]>([])
@@ -183,16 +197,16 @@ async function handleFieldChange(
   }
 }
 
-async function handleToggleTaxReview(p: SubjectPerson, checked: boolean) {
-  await handleFieldChange(p, { requires_tax_review_override: checked })
-  info.value = checked
-    ? `Steuerdokumente von ${p.full_name} werden ab sofort zur Prüfung markiert.`
-    : `Steuerdokumente von ${p.full_name} werden nicht mehr zur Prüfung markiert.`
-}
-
-async function handleResetTaxReviewOverride(p: SubjectPerson) {
-  await handleFieldChange(p, { requires_tax_review_override: null })
-  info.value = `Steuer-Prüfung für ${p.full_name} auf automatisch zurückgesetzt.`
+async function handleTaxReviewModeChange(p: SubjectPerson, mode: TaxReviewMode) {
+  if (mode === 'own') return
+  const override = mode === 'auto' ? null : mode === 'on'
+  await handleFieldChange(p, { requires_tax_review_override: override })
+  const labels: Record<string, string> = {
+    auto: `Steuer-Prüfung für ${p.full_name} auf automatisch zurückgesetzt.`,
+    on: `Steuerdokumente von ${p.full_name} werden ab sofort zur Prüfung markiert.`,
+    off: `Steuerdokumente von ${p.full_name} werden nicht mehr zur Prüfung markiert.`,
+  }
+  info.value = labels[mode] ?? ''
 }
 
 async function handleOwnReturnChange(p: SubjectPerson, year: number | null) {
@@ -268,13 +282,15 @@ onMounted(load)
             :disabled="savingAssessment"
           />
         </label>
-        <Button
-          type="submit"
-          label="Speichern"
-          icon="pi pi-check"
-          :loading="savingAssessment"
-          size="small"
-        />
+        <div class="assessment-form__submit">
+          <Button
+            type="submit"
+            label="Speichern"
+            icon="pi pi-check"
+            :loading="savingAssessment"
+            size="small"
+          />
+        </div>
       </form>
       <p class="page-hint">
         Bei Zusammenveranlagung sind Arztkosten des Ehepartners automatisch
@@ -391,12 +407,14 @@ onMounted(load)
         <div class="legend-item">
           <dt>Steuer-Prüfung</dt>
           <dd>
-            Ob Steuerdokumente dieser Person zur manuellen Prüfung markiert werden.
+            Ob Steuerdokumente dieser Person zur manuellen Prüfung markiert werden. Das Dropdown bietet drei Modi:
             <ul class="legend-tags">
-              <li><Tag value="auto" severity="secondary" class="legend-tag-sample" /> — automatisch ermittelt (Beziehungsart, Alter, Veranlagung).</li>
-              <li><Tag value="manuell" severity="warn" class="legend-tag-sample" /> — du hast die Prüfung manuell ein- oder ausgeschaltet. Klicke auf den Tag, um auf „auto" zurückzusetzen.</li>
-              <li><Tag value="eigene Akte" severity="info" class="legend-tag-sample" /> — die Person hat eine eigene Steuerakte; Dokumente landen dort statt in deiner Prüfung.</li>
+              <li><strong>Automatisch</strong> — wird anhand von Beziehungsart, Alter und Veranlagung ermittelt.</li>
+              <li><strong>Immer prüfen</strong> — Prüfung ist dauerhaft eingeschaltet (manueller Override).</li>
+              <li><strong>Nie prüfen</strong> — Prüfung ist dauerhaft ausgeschaltet (manueller Override).</li>
             </ul>
+            Wenn unter „Eigene Erklärung ab" ein Steuerjahr eingetragen ist, erscheint statt dem Dropdown ein
+            <Tag value="eigene Akte" severity="info" class="legend-tag-sample" />-Tag — Dokumente wandern dann in die eigene Steuerakte.
           </dd>
         </div>
       </dl>
@@ -467,15 +485,9 @@ onMounted(load)
           />
         </template>
       </Column>
-      <Column header="Steuer-Prüfung" :style="{ width: '10rem' }">
+      <Column header="Steuer-Prüfung" :style="{ width: '12rem' }">
         <template #body="{ data }">
           <div class="tax-review-cell">
-            <Checkbox
-              :model-value="data.requires_tax_review"
-              :binary="true"
-              :disabled="savingId === data.id || data.own_tax_return_from_tax_year !== null"
-              @update:model-value="(v: boolean) => handleToggleTaxReview(data, v)"
-            />
             <Tag
               v-if="data.own_tax_return_from_tax_year !== null"
               value="eigene Akte"
@@ -485,16 +497,16 @@ onMounted(load)
                 `Steuerdokumente ab ${data.own_tax_return_from_tax_year} gehören zur eigenen Steuerakte`
               "
             />
-            <Tag
-              v-else-if="data.requires_tax_review_override !== null"
-              value="manuell"
-              severity="warn"
-              class="override-tag"
-              :style="{ cursor: 'pointer' }"
-              @click="handleResetTaxReviewOverride(data)"
-              v-tooltip="'Klicken, um auf automatisch zurückzusetzen'"
+            <Select
+              v-else
+              :model-value="getTaxReviewMode(data)"
+              :options="taxReviewModeOptions"
+              option-label="label"
+              option-value="value"
+              :disabled="savingId === data.id"
+              class="inline-select tax-review-select"
+              @update:model-value="(v: TaxReviewMode) => handleTaxReviewModeChange(data, v)"
             />
-            <Tag v-else value="auto" severity="secondary" class="override-tag" />
           </div>
         </template>
       </Column>
@@ -595,6 +607,11 @@ onMounted(load)
   gap: 0.5rem;
   padding-bottom: 0.4rem;
 }
+@media (max-width: 480px) {
+  .add-form__grid .checkbox-label {
+    flex: 1 1 100%;
+  }
+}
 .add-form__submit {
   display: flex;
   align-items: flex-end;
@@ -623,6 +640,16 @@ onMounted(load)
 }
 .override-tag {
   font-size: 0.7rem;
+}
+
+.tax-review-select {
+  min-width: 10rem;
+}
+
+.assessment-form__submit {
+  display: flex;
+  align-items: flex-end;
+  padding-bottom: 0.05rem;
 }
 
 .column-legend {
