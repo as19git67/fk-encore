@@ -102,9 +102,11 @@ Werbungskosten, Sonderausgaben usw.). Im Zweifel: leere Liste.
 PERSONENBEZUG / BEZAHLER (sehr wichtig): Die Steuer-Sektionen beziehen sich
 auf die Einkommensteuererklärung des Nutzers. Ob ein Abzugsbeleg (Krankheits-,
 Pflege-, Handwerker-, Beitrags- oder Spendenbeleg) dorthin gehört, hängt davon
-ab, WELCHE Person er betrifft. Nutze dafür die Angaben aus der Bezugspersonen-
-Liste (\`relation_kind\`, \`tax_cost_bearer\`, \`in_household\`) und die
-Veranlagungsart \`assessment_type\`:
+ab, WELCHE Person er betrifft. Die Bezugspersonen-Liste enthält bereits nur
+die Personen, deren Name in DIESEM Dokument vorkommt — du musst also keine
+Namen mehr suchen, sondern nur noch entscheiden, um wen es inhaltlich geht.
+Nutze dafür die Angaben aus der Liste (\`relation_kind\`, \`tax_cost_bearer\`,
+\`in_household\`) und die Veranlagungsart \`assessment_type\`:
 
 - \`tax_cost_bearer = "user"\`: Der Nutzer trägt die Kosten dieser Person.
   Der Beleg zählt für seine Erklärung — behandle ihn wie einen eigenen.
@@ -128,8 +130,9 @@ Dokument eindeutig belegt, dass der Nutzer selbst Zahlungspflichtiger/Zahler
 ist oder es um eigene Unterhaltszahlungen des Nutzers geht, darf eine
 Abzugs-Sektion gesetzt werden.
 
-Wird gar keine Bezugsperson erkannt, ist der Nutzer selbst gemeint — dann
-entscheidet allein die Art des Belegs.
+Ist die Bezugspersonen-Liste leer, wird also keine der Personen des Haushalts
+im Dokument genannt, ist der Nutzer selbst gemeint — dann entscheidet allein
+die Art des Belegs.
 
 WICHTIGE ABGRENZUNGSREGELN:
 
@@ -287,6 +290,12 @@ Personen (Eltern, Kinder, Betreute) betreffen. Du bekommst eine Liste
 Kostenträger (tax_cost_bearer) und Haushaltszugehörigkeit (in_household).
 Die letzten beiden Felder sind nur für die Steuer-Entscheidung relevant
 (siehe PERSONENBEZUG / BEZAHLER) und ändern nichts am Tagging.
+
+Die Liste ist bereits maschinell gefiltert: Sie enthält ausschließlich
+Personen, deren Name tatsächlich im Dokumenttext steht. Dass ein Name
+vorkommt, heißt aber NICHT automatisch, dass das Dokument diese Person
+betrifft — das entscheidest du (siehe die Regel zu Gehaltsabrechnungen
+unten).
 
 Die Beziehungsarten sind:
 - self: der Nutzer selbst
