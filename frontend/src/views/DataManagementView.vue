@@ -583,7 +583,7 @@ async function handleFinanceTagReenqueue() {
 const docQueueStatus = ref<DocQueueStatus>({ services: [] })
 const docReclassifyLoading = ref(false)
 const docReclassifyError = ref('')
-const docReclassifyResult = ref<{ queued: number; skipped_encrypted?: number } | null>(null)
+const docReclassifyResult = ref<{ queued: number; skipped_encrypted?: number; status_breakdown?: Record<string, number> } | null>(null)
 const docRelocateLoading = ref(false)
 const docRelocateResult = ref<RelocateAllDocumentsResponse | null>(null)
 const docCancelLoading = ref(false)
@@ -1163,6 +1163,12 @@ onBeforeUnmount(() => {
           {{ docReclassifyResult.queued }} Dokument(e) in die Warteschlange eingereiht.
           <template v-if="docReclassifyResult.skipped_encrypted">
             {{ docReclassifyResult.skipped_encrypted }} verschlüsselte Dokument(e) übersprungen.
+          </template>
+          <template v-if="docReclassifyResult.status_breakdown">
+            <br>Status-Verteilung:
+            <span v-for="(count, status) in docReclassifyResult.status_breakdown" :key="status" style="margin-left:0.5em">
+              {{ status }}={{ count }}
+            </span>
           </template>
         </Message>
       </div>
