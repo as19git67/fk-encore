@@ -1009,9 +1009,16 @@ npm run test
 
 Erwartet: `Test Files X passed`, `Tests Y passed`, kein `failed`.
 
-### Sandbox-Setup (einmalig je Session)
+### Sandbox-Setup (bei jeder frischen Session prüfen)
 
-Die Sandbox nutzt PostgreSQL 16 mit pgvector, das lokal installiert ist. Docker ist **nicht** verfügbar.
+Die Sandbox nutzt PostgreSQL 16 mit pgvector. Docker ist **nicht** verfügbar.
+
+> **Nicht als gegeben annehmen:** In einer frischen Remote-Session (claude.ai/code)
+> ist der Container jedes Mal neu aufgesetzt. `node_modules/`, das
+> `postgres`-Passwort und die pgvector-Extension waren dabei schon mehrfach
+> **nicht** vorhanden, obwohl sie es in einer früheren Session waren. Vor dem
+> ersten Testlauf explizit prüfen statt davon auszugehen — die Befehle unten
+> sind idempotent und schaden nicht, falls doch schon alles da ist.
 
 ```bash
 # PostgreSQL starten (falls nicht bereits aktiv)
@@ -1019,12 +1026,25 @@ pg_ctlcluster 16 main start
 
 # Prüfen ob bereit
 pg_isready -h localhost -p 5432 -U postgres
-```
 
-Voraussetzungen (bereits installiert in dieser Sandbox):
-- PostgreSQL 16 mit pgvector (`postgresql-16-pgvector`)
-- Node.js mit allen npm-Abhängigkeiten (`node_modules/` vorhanden)
-- Passwort für den `postgres`-User: `postgres`
+# node_modules vorhanden? (Root UND frontend/ — der pre-commit-Hook
+# braucht @vue/compiler-sfc aus frontend/node_modules)
+ls node_modules/.bin/vitest frontend/node_modules 2>&1
+
+# Falls nicht vorhanden:
+npm install
+(cd frontend && npm install)
+
+# pgvector-Extension installiert? (nicht nur das Postgres-Paket selbst)
+ls /usr/share/postgresql/16/extension/ | grep -i vector
+
+# Falls nicht vorhanden:
+apt-get install -y postgresql-16-pgvector
+
+# postgres-Passwort setzen, falls der Testlauf mit
+# "password authentication failed" (Code 28P01) abbricht:
+su postgres -c "psql -c \"ALTER USER postgres WITH PASSWORD 'postgres';\""
+```
 
 Der Testlauf (`npm run test`) erstellt die `encore_test`-Datenbank automatisch, führt alle Migrationen aus und räumt danach auf.
 
