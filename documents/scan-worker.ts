@@ -110,7 +110,10 @@ class DocumentScanWorker {
       const msg = err?.message ?? String(err);
       console.error(`[documents.scan-worker] ${this.service} job ${job.id} failed:`, msg);
       await markJobFailed(job.id, msg).catch(() => {});
-      notifyDocScanQueueChanged();
+      // A failed upstream unblocks the downstream stages too (they wait for
+      // text_extract to have *no* outstanding job, not for it to succeed), so
+      // wake the siblings here as well instead of losing a poll interval.
+      triggerWorkers();
       // Only mark the document failed for the first-stage (text_extract)
       // and classify failures — a missing embedding is not worth
       // blocking the document from appearing in the UI.
