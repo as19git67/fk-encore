@@ -4,7 +4,7 @@ import {
   buildMeterReportBuckets,
 } from "./reports.service";
 
-describe("buildMeterReportBuckets", () => {
+describe("buildMeterReportBuckets — allocation 'interval_start'", () => {
   it("assigns each consumption interval to the month of the start reading", () => {
     const buckets = buildMeterReportBuckets(
       [
@@ -13,7 +13,7 @@ describe("buildMeterReportBuckets", () => {
         { takenAt: "2026-03-01T12:00:00.000Z", value: 170 },
       ],
       "month",
-      { decimals: 1 },
+      { decimals: 1, allocation: "interval_start" },
     );
 
     expect(buckets).toEqual([
@@ -45,7 +45,7 @@ describe("buildMeterReportBuckets", () => {
         { takenAt: "2027-01-01T12:00:00.000Z", value: 2000 },
       ],
       "year",
-      { decimals: 0 },
+      { decimals: 0, allocation: "interval_start" },
     );
 
     expect(buckets).toEqual([
@@ -67,6 +67,7 @@ describe("buildMeterReportBuckets", () => {
         from: new Date("2026-02-01T00:00:00.000Z"),
         to: new Date("2026-04-01T00:00:00.000Z"),
         decimals: 0,
+        allocation: "interval_start",
       },
     );
 
@@ -84,10 +85,170 @@ describe("buildMeterReportBuckets", () => {
         { takenAt: "2026-03-01T12:00:00.000Z", value: 120 },
       ],
       "month",
-      { decimals: 0 },
+      { decimals: 0, allocation: "interval_start" },
     );
 
     expect(buckets.map((b) => [b.key, b.consumption])).toEqual([["2026-02", 30]]);
+  });
+});
+
+describe("buildMeterReportBuckets — allocation 'interpolated' (default)", () => {
+  it("matches the legacy allocation when readings sit on period boundaries", () => {
+    const buckets = buildMeterReportBuckets(
+      [
+        { takenAt: "2026-01-01T00:00:00.000Z", value: 0 },
+        { takenAt: "2026-02-01T00:00:00.000Z", value: 31 },
+        { takenAt: "2026-03-01T00:00:00.000Z", value: 59 },
+      ],
+      "month",
+      { decimals: 1 },
+    );
+
+    expect(buckets.map((b) => [b.key, b.consumption, b.coverage])).toEqual([
+      ["2026-01", 31, 1],
+      ["2026-02", 28, 1],
+    ]);
+  });
+
+  it("splits an interval across the periods it overlaps, weighted by time", () => {
+    // 41 days at exactly 1 unit/day: 31 days fall into January, 10 into February.
+    const buckets = buildMeterReportBuckets(
+      [
+        { takenAt: "2026-01-01T00:00:00.000Z", value: 0 },
+        { takenAt: "2026-02-11T00:00:00.000Z", value: 41 },
+      ],
+      "month",
+      { decimals: 1 },
+    );
+
+    expect(buckets.map((b) => [b.key, b.consumption])).toEqual([
+      ["2026-01", 31],
+      ["2026-02", 10],
+    ]);
+  });
+
+  it("reports partial coverage for periods the readings do not span completely", () => {
+    const buckets = buildMeterReportBuckets(
+      [
+        { takenAt: "2026-01-01T00:00:00.000Z", value: 0 },
+        { takenAt: "2026-02-11T00:00:00.000Z", value: 41 },
+      ],
+      "month",
+      { decimals: 1 },
+    );
+
+    const february = buckets.find((b) => b.key === "2026-02")!;
+    // 10 of 28 days measured.
+    expect(february.coverage).toBeCloseTo(10 / 28, 3);
+    expect(february.coverage).toBeLessThan(1);
+  });
+
+  it("keeps an interval spanning a whole year out of the neighbouring months", () => {
+    const buckets = buildMeterReportBuckets(
+      [
+        { takenAt: "2026-01-01T00:00:00.000Z", value: 0 },
+        { takenAt: "2027-01-01T00:00:00.000Z", value: 365 },
+      ],
+      "year",
+      { decimals: 0 },
+    );
+
+    expect(buckets.map((b) => [b.key, b.consumption, b.intervals])).toEqual([["2026", 365, 1]]);
+  });
+
+  it("filters whole periods by their start, not the reading timestamps", () => {
+    const buckets = buildMeterReportBuckets(
+      [
+        { takenAt: "2026-01-01T00:00:00.000Z", value: 0 },
+        { takenAt: "2026-02-01T00:00:00.000Z", value: 31 },
+        { takenAt: "2026-03-01T00:00:00.000Z", value: 59 },
+        { takenAt: "2026-04-01T00:00:00.000Z", value: 90 },
+      ],
+      "month",
+      {
+        from: new Date("2026-02-01T00:00:00.000Z"),
+        to: new Date("2026-04-01T00:00:00.000Z"),
+        decimals: 0,
+      },
+    );
+
+    expect(buckets.map((b) => [b.key, b.consumption])).toEqual([
+      ["2026-02", 28],
+      ["2026-03", 31],
+    ]);
+  });
+
+  it("skips negative intervals instead of reporting negative consumption", () => {
+    const buckets = buildMeterReportBuckets(
+      [
+        { takenAt: "2026-01-01T00:00:00.000Z", value: 100 },
+        { takenAt: "2026-02-01T00:00:00.000Z", value: 90 },
+        { takenAt: "2026-03-01T00:00:00.000Z", value: 118 },
+      ],
+      "month",
+      { decimals: 0 },
+    );
+
+    expect(buckets.map((b) => [b.key, b.consumption])).toEqual([["2026-02", 28]]);
+  });
+});
+
+describe("buildMeterReportBuckets — previous-year comparison", () => {
+  /** Readings on the 1st of each month, `perMonth` units consumed per month. */
+  function monthlyReadings(startYear: number, months: number, perMonth: (index: number) => number) {
+    const readings: Array<{ takenAt: string; value: number }> = [];
+    let value = 0;
+    for (let i = 0; i <= months; i++) {
+      const date = new Date(Date.UTC(startYear, i, 1));
+      readings.push({ takenAt: date.toISOString(), value });
+      value += perMonth(i);
+    }
+    return readings;
+  }
+
+  it("compares each period with the same period one year earlier", () => {
+    const buckets = buildMeterReportBuckets(
+      // 2025: 100 per month, 2026: 120 per month.
+      monthlyReadings(2025, 15, (index) => (index < 12 ? 100 : 120)),
+      "month",
+      { decimals: 0 },
+    );
+
+    const january2026 = buckets.find((b) => b.key === "2026-01")!;
+    expect(january2026).toMatchObject({
+      consumption: 120,
+      previousConsumption: 100,
+      deltaAbsolute: 20,
+      deltaPercent: 0.2,
+    });
+  });
+
+  it("leaves the comparison empty when there is no reference period", () => {
+    const buckets = buildMeterReportBuckets(
+      monthlyReadings(2025, 3, () => 100),
+      "month",
+      { decimals: 0 },
+    );
+
+    expect(buckets[0]).toMatchObject({
+      previousConsumption: null,
+      deltaAbsolute: null,
+      deltaPercent: null,
+    });
+  });
+
+  it("keeps the reference period available when a from filter is applied", () => {
+    const buckets = buildMeterReportBuckets(
+      monthlyReadings(2025, 15, (index) => (index < 12 ? 100 : 120)),
+      "month",
+      { decimals: 0, from: new Date("2026-01-01T00:00:00.000Z") },
+    );
+
+    expect(buckets[0]).toMatchObject({
+      key: "2026-01",
+      previousConsumption: 100,
+      deltaAbsolute: 20,
+    });
   });
 });
 
@@ -103,6 +264,10 @@ describe("buildEnergyReportFromMeterReports", () => {
     endValue: consumption,
     consumption,
     intervals: 1,
+    coverage: 1,
+    previousConsumption: null,
+    deltaAbsolute: null,
+    deltaPercent: null,
   });
 
   const report = (name: string, buckets: Array<ReturnType<typeof bucket>>) => ({
@@ -111,6 +276,7 @@ describe("buildEnergyReportFromMeterReports", () => {
     unit: "kWh",
     decimals: 1,
     granularity: "month" as const,
+    allocation: "interpolated" as const,
     from: null,
     to: null,
     buckets,

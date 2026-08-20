@@ -234,6 +234,26 @@ export interface MeterReportBucket {
   endValue: number
   consumption: number
   intervals: number
+  /** Share of the period actually spanned by readings, 0..1. */
+  coverage: number
+  /** Same period one year earlier; null unless both periods are fully covered. */
+  previousConsumption: number | null
+  deltaAbsolute: number | null
+  deltaPercent: number | null
+}
+
+/**
+ * How an interval between two readings is charged to report buckets.
+ * `interpolated` spreads it over the periods it overlaps; `interval_start` is
+ * the original Excel logic that charges it to the period it starts in.
+ */
+export type MeterReportAllocation = 'interpolated' | 'interval_start'
+
+/** Coverage from which a period counts as fully measured (backend rule). */
+export const COMPLETE_COVERAGE_THRESHOLD = 0.99
+
+export function isCompletePeriod(bucket: { coverage: number }) {
+  return bucket.coverage >= COMPLETE_COVERAGE_THRESHOLD
 }
 
 export interface MeterReport {
@@ -242,14 +262,19 @@ export interface MeterReport {
   unit: string
   decimals: number
   granularity: MeterReportGranularity
+  allocation: MeterReportAllocation
   from: string | null
   to: string | null
   buckets: MeterReportBucket[]
   totalConsumption: number
 }
 
-export function getMeterReport(meterId: number, granularity: MeterReportGranularity = 'month') {
-  const q = new URLSearchParams({ granularity })
+export function getMeterReport(
+  meterId: number,
+  granularity: MeterReportGranularity = 'month',
+  allocation: MeterReportAllocation = 'interpolated',
+) {
+  const q = new URLSearchParams({ granularity, allocation })
   return apiFetch<MeterReport>(`/meters/${meterId}/report?${q}`)
 }
 
@@ -266,6 +291,8 @@ export interface EnergyReportBucket {
   label: string
   periodStart: string
   periodEnd: string
+  /** Lowest coverage among the contributing meters, 0..1. */
+  coverage: number
   gridImport: number | null
   gridExport: number | null
   production: number | null
@@ -303,18 +330,65 @@ export interface EnergyReport {
   unit: string
   decimals: number
   granularity: MeterReportGranularity
+  allocation: MeterReportAllocation
   from: string | null
   to: string | null
   meters: EnergyReportMeterRef[]
   missingRoles: EnergyReportRole[]
   buckets: EnergyReportBucket[]
-  totals: Omit<EnergyReportBucket, 'key' | 'label' | 'periodStart' | 'periodEnd'>
+  totals: Omit<EnergyReportBucket, 'key' | 'label' | 'periodStart' | 'periodEnd' | 'coverage'>
   hasTariffs: boolean
 }
 
-export function getEnergyReport(granularity: MeterReportGranularity = 'month') {
-  const q = new URLSearchParams({ granularity })
+export function getEnergyReport(
+  granularity: MeterReportGranularity = 'month',
+  allocation: MeterReportAllocation = 'interpolated',
+) {
+  const q = new URLSearchParams({ granularity, allocation })
   return apiFetch<EnergyReport>(`/meters/reports/energy?${q}`)
+}
+
+// ── Consumption trends ─────────────────────────────────────────────────────
+
+export type TrendDirection = 'rising' | 'falling' | 'stable' | 'unknown'
+
+export interface TrendPoint {
+  key: string
+  label: string
+  /** Consumption in that month; null if the month is not fully measured. */
+  value: number | null
+  /** That month plus the eleven before it; null if any of them is missing. */
+  rolling12: number | null
+}
+
+export interface ConsumptionTrend {
+  key: string
+  label: string
+  unit: string
+  decimals: number
+  meterIds: number[]
+  /** Last twelve fully measured months. */
+  current12: number | null
+  /** The twelve months before those. */
+  previous12: number | null
+  changeAbsolute: number | null
+  changePercent: number | null
+  /** Change of the annual total per year, from a regression over rolling12. */
+  slopePerYear: number | null
+  direction: TrendDirection
+  monthsAvailable: number
+  rangeStart: string | null
+  rangeEnd: string | null
+  points: TrendPoint[]
+}
+
+export interface ConsumptionTrendsReport {
+  generatedAt: string
+  trends: ConsumptionTrend[]
+}
+
+export function getConsumptionTrends() {
+  return apiFetch<ConsumptionTrendsReport>('/meters/reports/trends')
 }
 
 // ── Electricity tariffs / prices ───────────────────────────────────────────

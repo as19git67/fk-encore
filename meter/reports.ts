@@ -10,10 +10,15 @@ import {
   getEnergyReportForUser,
   getMeterReportForUser,
   parseReportBoundary,
+  type BucketAllocation,
   type EnergyReport,
   type MeterReport,
   type ReportGranularity,
 } from "./reports.service";
+import {
+  getConsumptionTrendsForUser,
+  type ConsumptionTrendsReport,
+} from "./trends.service";
 
 function requireUser(permission: string): number {
   const auth = getAuthData();
@@ -22,52 +27,72 @@ function requireUser(permission: string): number {
   return parseInt(auth.userID, 10);
 }
 
+function parseGranularity(value: ReportGranularity | undefined): ReportGranularity {
+  const granularity = value ?? "month";
+  if (granularity !== "month" && granularity !== "year") {
+    throw APIError.invalidArgument("granularity must be 'month' or 'year'");
+  }
+  return granularity;
+}
+
+function parseAllocation(value: BucketAllocation | undefined): BucketAllocation {
+  const allocation = value ?? "interpolated";
+  if (allocation !== "interpolated" && allocation !== "interval_start") {
+    throw APIError.invalidArgument("allocation must be 'interpolated' or 'interval_start'");
+  }
+  return allocation;
+}
+
 interface GetMeterReportRequest {
   id: number;
   granularity?: Query<ReportGranularity>;
+  allocation?: Query<BucketAllocation>;
   from?: Query<string>;
   to?: Query<string>;
 }
 
 export const getMeterReport = api(
   { expose: true, method: "GET", path: "/meters/:id/report", auth: true },
-  async ({ id, granularity, from, to }: GetMeterReportRequest): Promise<MeterReport> => {
+  async ({ id, granularity, allocation, from, to }: GetMeterReportRequest): Promise<MeterReport> => {
     const userId = requireUser("meters.view");
-    const resolvedGranularity = granularity ?? "month";
-    if (resolvedGranularity !== "month" && resolvedGranularity !== "year") {
-      throw APIError.invalidArgument("granularity must be 'month' or 'year'");
-    }
 
     return await getMeterReportForUser(
       userId,
       id,
-      resolvedGranularity,
+      parseGranularity(granularity),
       parseReportBoundary(from, "from"),
       parseReportBoundary(to, "to"),
+      parseAllocation(allocation),
     );
+  },
+);
+
+export const getConsumptionTrends = api(
+  { expose: true, method: "GET", path: "/meters/reports/trends", auth: true },
+  async (): Promise<ConsumptionTrendsReport> => {
+    const userId = requireUser("meters.view");
+    return await getConsumptionTrendsForUser(userId);
   },
 );
 
 interface GetEnergyReportRequest {
   granularity?: Query<ReportGranularity>;
+  allocation?: Query<BucketAllocation>;
   from?: Query<string>;
   to?: Query<string>;
 }
 
 export const getEnergyReport = api(
   { expose: true, method: "GET", path: "/meters/reports/energy", auth: true },
-  async ({ granularity, from, to }: GetEnergyReportRequest): Promise<EnergyReport> => {
+  async ({ granularity, allocation, from, to }: GetEnergyReportRequest): Promise<EnergyReport> => {
     const userId = requireUser("meters.view");
-    const resolvedGranularity = granularity ?? "month";
-    if (resolvedGranularity !== "month" && resolvedGranularity !== "year") {
-      throw APIError.invalidArgument("granularity must be 'month' or 'year'");
-    }
 
     return await getEnergyReportForUser(
       userId,
-      resolvedGranularity,
+      parseGranularity(granularity),
       parseReportBoundary(from, "from"),
       parseReportBoundary(to, "to"),
+      parseAllocation(allocation),
     );
   },
 );
