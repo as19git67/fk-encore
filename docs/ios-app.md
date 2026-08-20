@@ -99,7 +99,12 @@ dokumentiert**:
 - **Album teilen** wie im Web (`AlbumShareView`, `AlbumShareViewModel`,
   Issue #918): interne Nutzer mit „Nur lesen“, „Bearbeiten“ oder
   „Bearbeiten + Teilen“ einladen (letzteres nur als Eigentümer) sowie
-  öffentlicher Link mit Ablaufdatum, Kopieren und Share-Sheet. Die
+  öffentlicher Link mit Ablaufdatum, Kopieren und Share-Sheet. Der geteilte
+  Link zeigt auf die SPA-Route `/app/albums/shared/<token>`
+  (`AlbumPublicLinkURL`) — dieselbe URL, die `web/static.ts` serverseitig als
+  kanonische `pageUrl` baut und mit Open-Graph-Tags anreichert, damit
+  iMessage-Vorschauen Albumnamen und Cover zeigen. Nicht zu verwechseln mit
+  `/albums/public/<token>`, dem JSON-API-Endpunkt. Die
   einladbaren Nutzer kommen aus `/albums/:id/shareable-users`, sodass auch
   Nicht-Admins und `write_share`-Delegierte teilen können; Delegierte können
   nur ihre eigenen Einladungen wieder entfernen. Erreichbar aus der
@@ -217,7 +222,7 @@ Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders ·
 | Ansichtsmodi (Alle/Favoriten/Konsens/Eigen) | ✅ | ✅ `AlbumViewMode` |
 | Konsens-/anonyme Abstimmung | ⚡ | ✅ (Badges „3/5" + Favoriten-Vote) |
 | Mit Nutzern teilen (Rollen) | ✅ | ✅ |
-| Öffentliche Links (mit Ablauf) | ✅ | ❌ |
+| Öffentliche Links (mit Ablauf) | ✅ | ✅ |
 | Cover setzen / Album bearbeiten | ✅ | ❌ |
 | In Album hochladen | ✅ | ✅ |
 
@@ -296,8 +301,9 @@ Referenz stehen, was jeweils gebaut wurde.
 ### Etappe 2 – Mittlerer Nutzen
 5. **GPS-Ort setzen/ändern + interaktive Karten-/Trip-Ansicht** – Karte mit
    Foto-Clustern; Ort per Karten-Pin oder Suche zuweisen.
-6. **Öffentliche Album-Links** erstellen und per Share-Sheet teilen
-   (Ablaufdatum) – Endpunkte existieren bereits.
+6. ✅ **Öffentliche Album-Links** erstellen und per Share-Sheet teilen
+   (Ablaufdatum) – umgesetzt in `AlbumShareView`; der geteilte Link zeigt auf
+   die SPA-Route `/app/albums/shared/<token>` (`AlbumPublicLinkURL`).
 7. **Mehrfachauswahl in „Alle Fotos"** inkl. Stapelaktionen.
 8. **Reichere Such-Filter (Chips)** – strukturierte Filter analog
    `NaturalSearchBar`.

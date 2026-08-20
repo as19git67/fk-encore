@@ -36,7 +36,7 @@ struct AlbumShareView: View {
 
     var publicLinkURL: String? {
         guard let link = viewModel.publicLink else { return nil }
-        return "\(serverURL)/albums/public/\(link.token)"
+        return AlbumPublicLinkURL.make(serverURL: serverURL, token: link.token)
     }
 
     var body: some View {
@@ -239,9 +239,18 @@ struct AlbumShareView: View {
                 }
                 .foregroundStyle(copiedToClipboard ? .green : .accentColor)
 
-                // Share the link through the system share sheet
-                ShareLink(item: url) {
-                    Label("Link teilen", systemImage: "square.and.arrow.up")
+                // Share the link through the system share sheet. Sharing a URL
+                // rather than a plain String is what lets iMessage fetch the
+                // Open Graph tags web/static.ts injects for this route, so the
+                // recipient sees the album name and cover instead of raw text.
+                if let shareURL = URL(string: url) {
+                    ShareLink(item: shareURL) {
+                        Label("Link teilen", systemImage: "square.and.arrow.up")
+                    }
+                } else {
+                    ShareLink(item: url) {
+                        Label("Link teilen", systemImage: "square.and.arrow.up")
+                    }
                 }
 
                 // Delete link button
