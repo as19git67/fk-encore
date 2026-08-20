@@ -18,6 +18,67 @@ extension View {
     }
 }
 
+// MARK: - Selection state
+
+/// Multi-select state for a photo grid: which photos are picked, and whether
+/// the grid is in selection mode at all.
+///
+/// A value type so it drops straight into `@State` (same as `AlbumViewFilter`)
+/// and so the transition rules — long-press enters selection, deselecting the
+/// last photo leaves it again — are unit-testable without a view.
+struct PhotoSelection: Equatable, Sendable {
+    private(set) var isSelecting = false
+    private(set) var ids: Set<Int> = []
+
+    var count: Int { ids.count }
+    var isEmpty: Bool { ids.isEmpty }
+
+    func contains(_ id: Int) -> Bool { ids.contains(id) }
+
+    /// Enter selection mode with nothing picked yet — the toolbar entry point.
+    mutating func enter() {
+        isSelecting = true
+        ids = []
+    }
+
+    /// Enter selection mode with one photo already picked — the long-press
+    /// entry point, where tapping the photo that started it would otherwise
+    /// select nothing.
+    mutating func begin(with id: Int) {
+        isSelecting = true
+        ids = [id]
+    }
+
+    mutating func cancel() {
+        isSelecting = false
+        ids = []
+    }
+
+    /// Toggle one photo. Deselecting the last one leaves selection mode, so the
+    /// grid never sits in an empty selection the user has to cancel by hand.
+    mutating func toggle(_ id: Int) {
+        if ids.contains(id) {
+            ids.remove(id)
+            if ids.isEmpty { isSelecting = false }
+        } else {
+            ids.insert(id)
+        }
+    }
+
+    /// Drag-to-select: add every photo whose frame contains `point`.
+    ///
+    /// Additive on purpose — a drag across the grid extends the selection and
+    /// never clears it, so a wobbling finger cannot undo what it just picked.
+    mutating func selectItems(at point: CGPoint, frames: [Int: CGRect]) {
+        for (id, frame) in frames where frame.contains(point) {
+            ids.insert(id)
+        }
+    }
+
+    /// Navigation title while selecting, e.g. "3 ausgewählt".
+    var title: String { "\(count) ausgewählt" }
+}
+
 // MARK: - Selection checkmark overlay
 
 struct SelectionCheckmark: View {

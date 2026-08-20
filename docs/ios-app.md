@@ -52,6 +52,14 @@ dokumentiert**:
   (`ZoomableImageView`), Swipe-Navigation, Metadaten-Overlay.
 - **Filter & Sortierung** (`FilterSortViewModel`, `FilterSortMenuView`):
   Favorit, GPS vorhanden, Datumsbereich; Sortierung nach Datum etc.
+- **Mehrfachauswahl in „Alle Fotos"** (Issue #767, Etappe 2): in der
+  gefilterten Flach-Ansicht von `PhotoTimelineView` per Langdruck oder
+  Toolbar-Button, inkl. Drag-Select und den Stapel-Aktionen „zu Album
+  hinzufügen" und „teilen" — dieselben wie im Album und im Monats-Grid. Der
+  Zustand steckt im gemeinsamen `PhotoSelection` (`PhotoSelectionShare.swift`).
+  Nur in der gefilterten Ansicht verfügbar: unfiltert zeigt die Timeline
+  Jahres-Kacheln, keine Fotos. Ein Filterwechsel verwirft die Auswahl, damit
+  keine unsichtbaren Fotos in einer Stapel-Aktion landen.
 - **Metadaten-Ansicht** (`PhotoMetadataView`): Datei-Infos, Aufnahmedatum,
   Beschreibung, Qualitäts-Bewertung („x von 4"), erkannte Personen.
 - **Per-Foto-Karte**: MapKit-Mini-Karte mit Marker bei vorhandenem GPS.
@@ -186,8 +194,8 @@ Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders ·
 | Filter (Favorit, GPS, Datum, Medientyp) | ✅ | ✅ (Favorit, GPS, Datum) |
 | Sortierung (Datum/Qualität/Name/Größe) | ✅ | 🔶 (Teilmenge) |
 | Vollbild + Zoom | ✅ | ✅ native Pinch-Zoom |
-| Diashow / Slideshow | ✅ | ❌ |
-| Mehrfachauswahl + Stapelaktionen | ✅ (Galerie + Album) | 🔶 (Album/Monat, nicht in „Alle Fotos") |
+| Diashow / Slideshow | ✅ | ✅ |
+| Mehrfachauswahl + Stapelaktionen | ✅ (Galerie + Album) | ✅ (Album, Monat und „Alle Fotos") |
 | Fotos vergleichen | ✅ `PhotoCompareView` | ❌ |
 
 ### 3.2 Foto-Aktionen
@@ -304,10 +312,14 @@ Referenz stehen, was jeweils gebaut wurde.
 6. ✅ **Öffentliche Album-Links** erstellen und per Share-Sheet teilen
    (Ablaufdatum) – umgesetzt in `AlbumShareView`; der geteilte Link zeigt auf
    die SPA-Route `/app/albums/shared/<token>` (`AlbumPublicLinkURL`).
-7. **Mehrfachauswahl in „Alle Fotos"** inkl. Stapelaktionen.
+7. ✅ **Mehrfachauswahl in „Alle Fotos"** inkl. Stapelaktionen – umgesetzt
+   in `PhotoTimelineView` (gefilterte Flach-Ansicht) auf Basis des
+   gemeinsamen `PhotoSelection`-Zustands.
 8. **Reichere Such-Filter (Chips)** – strukturierte Filter analog
    `NaturalSearchBar`.
-9. **Diashow** im Vollbild.
+9. ✅ **Diashow** im Vollbild – umgesetzt in `PhotoFullscreenView`;
+   Entscheidungslogik in `Slideshow.swift`, Regeln in
+   `docs/photo-slideshow.md`.
 
 ### Etappe 3 – Nice-to-have / aufwändiger
 10. **Nicht-destruktiver Transform-/Crop-Editor** – komplex; ggf. später.

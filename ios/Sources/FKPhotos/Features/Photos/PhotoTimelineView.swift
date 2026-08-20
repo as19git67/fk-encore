@@ -15,6 +15,14 @@ struct PhotoTimelineView: View {
     @State private var fullscreenNav: FullscreenNav? = nil
     @State private var scrollTarget: Int?
 
+    // Multi-select + batch actions in the flat grid (issue #767, Stage 2).
+    // Only reachable in filtered mode: the unfiltered timeline shows year
+    // tiles, not photos, so there is nothing there to select.
+    @State private var selection = PhotoSelection()
+    @State private var shareManager = PhotoShareManager()
+    @State private var addToAlbum = AddToAlbumManager()
+    @State private var itemFrames: [Int: CGRect] = [:]
+
     private let tileColumns = [
         GridItem(.flexible(), spacing: 2),
         GridItem(.flexible(), spacing: 2),
@@ -39,7 +47,7 @@ struct PhotoTimelineView: View {
                 scrollTarget = nil
             }
         }
-        .navigationTitle("Fotos")
+        .navigationTitle(selection.isSelecting ? selection.title : "Fotos")
         .navigationDestination(item: $fullscreenNav) { _ in
             PhotoFullscreenView(
                 photos: photosVM.photos,
@@ -48,12 +56,46 @@ struct PhotoTimelineView: View {
             )
         }
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                FilterSortButton(viewModel: filterSort)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button { showUpload = true } label: {
-                    Image(systemName: "photo.badge.plus")
+            if selection.isSelecting {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") { selection.cancel() }
+                }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        addToAlbum.present(photoIds: selection.ids)
+                    } label: {
+                        Image(systemName: "rectangle.stack.badge.plus")
+                    }
+                    .disabled(selection.isEmpty)
+                    Button {
+                        let filenames = photosVM.photos
+                            .filter { selection.contains($0.id) }
+                            .map(\.filename)
+                        Task { await shareManager.share(filenames: filenames) }
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .disabled(selection.isEmpty || shareManager.isLoading)
+                }
+            } else {
+                ToolbarItem(placement: .topBarLeading) {
+                    FilterSortButton(viewModel: filterSort)
+                }
+                // Selecting only makes sense over the flat grid; the unfiltered
+                // timeline shows year tiles, which are not selectable.
+                if filterSort.activeCount > 0 {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            selection.enter()
+                        } label: {
+                            Image(systemName: "checkmark.circle")
+                        }
+                    }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button { showUpload = true } label: {
+                        Image(systemName: "photo.badge.plus")
+                    }
                 }
             }
         }
@@ -77,10 +119,43 @@ struct PhotoTimelineView: View {
         .refreshable { await reload() }
         .task { await reload() }
         .task(id: filterSort.applyToken) {
+            // The photo set is about to change under the selection, and ids
+            // picked from the previous result would be invisible but still
+            // batched. Drop them.
+            selection.cancel()
             if filterSort.activeCount > 0 {
                 await photosVM.loadPhotos(filter: filterSort.appliedFilter, sort: filterSort.appliedSort)
             }
         }
+        .sheet(isPresented: $shareManager.isPresented) {
+            ActivityView(images: shareManager.images)
+        }
+        .sheet(isPresented: $addToAlbum.isPresented) {
+            AddToAlbumPickerView(manager: addToAlbum)
+                .presentationDetents([.medium, .large])
+        }
+        .overlay {
+            if shareManager.isLoading {
+                ZStack {
+                    Color.black.opacity(0.3).ignoresSafeArea()
+                    ProgressView("Fotos laden…")
+                        .padding()
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+        }
+        .onChange(of: addToAlbum.resultMessage) { _, message in
+            guard message != nil else { return }
+            selection.cancel()
+            addToAlbum.resultMessage = nil
+        }
+    }
+
+    private var dragSelectGesture: some Gesture {
+        DragGesture(minimumDistance: 10, coordinateSpace: .named("timelineGrid"))
+            .onChanged { value in
+                selection.selectItems(at: value.location, frames: itemFrames)
+            }
     }
 
     @ViewBuilder
@@ -142,17 +217,35 @@ struct PhotoTimelineView: View {
         } else {
             LazyVGrid(columns: gridColumns, spacing: 2) {
                 ForEach(photosVM.photos) { photo in
-                    Button {
-                        fullscreenIndex = photosVM.photos.firstIndex(where: { $0.id == photo.id }) ?? 0
-                        fullscreenNav = FullscreenNav(startIndex: fullscreenIndex)
-                    } label: {
-                        PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop)
-                    }
-                    .buttonStyle(.plain)
-                    .id(photo.id)
+                    PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop)
+                        .overlay(alignment: .topLeading) {
+                            if selection.isSelecting {
+                                SelectionCheckmark(isSelected: selection.contains(photo.id))
+                                    .padding(4)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if selection.isSelecting {
+                                selection.toggle(photo.id)
+                            } else {
+                                fullscreenIndex = photosVM.photos.firstIndex(where: { $0.id == photo.id }) ?? 0
+                                fullscreenNav = FullscreenNav(startIndex: fullscreenIndex)
+                            }
+                        }
+                        .onLongPressGesture {
+                            if !selection.isSelecting {
+                                selection.begin(with: photo.id)
+                            }
+                        }
+                        .reportPhotoFrame(id: photo.id, space: "timelineGrid")
+                        .id(photo.id)
                 }
             }
             .padding(.horizontal, 2)
+            .coordinateSpace(name: "timelineGrid")
+            .onPreferenceChange(PhotoFramePreference.self) { itemFrames = $0 }
+            .simultaneousGesture(selection.isSelecting ? dragSelectGesture : nil)
         }
     }
 
