@@ -88,6 +88,8 @@ const IMPORT_METER_ROLES: Partial<Record<string, MeterRole>> = {
   fussbodenheizung_pv: "heat_heating_pv",
   warmwasser: "hot_water_total",
   warmwasser_pv: "hot_water_pv",
+  e_auto_wallbox: "ev_charger_total",
+  e_auto_pv: "ev_charger_pv",
 };
 
 const VIRTUAL_DEVICE_SWAPS: Record<
