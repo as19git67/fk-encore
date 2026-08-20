@@ -2114,6 +2114,9 @@ export interface ReclassifyAllRequest {
 
 export interface ReclassifyAllResponse {
   queued: number;
+  skipped_encrypted?: number;
+  /** In resume mode: status breakdown of the non-ready documents found. */
+  status_breakdown?: Record<string, number>;
 }
 
 export interface RelocateAllDocumentsResponse {
@@ -2137,14 +2140,43 @@ export const reclassifyAll = api(
       : ["classify", "embed"];
     const newStatus = (full || resume) ? "pending" : "classifying";
 
-    const baseQuery = db.select({ id: documents.id }).from(documents);
-    const rows = await dbAll<{ id: number }>(
+    const baseQuery = db.select({ id: documents.id, status: documents.status }).from(documents);
+    const rows = await dbAll<{ id: number; status: string }>(
       resume
-        ? baseQuery.where(ne(documents.status, "ready"))
+        ? baseQuery.where(and(
+            ne(documents.status, "ready"),
+            ne(documents.status, "encrypted"),
+          ))
         : baseQuery,
     );
 
-    if (rows.length === 0) return { queued: 0 };
+    // Count encrypted documents separately so the UI can inform the user.
+    let skippedEncrypted = 0;
+    let statusBreakdown: Record<string, number> | undefined;
+    if (resume) {
+      const encRows = await dbAll<{ id: number }>(
+        db.select({ id: documents.id }).from(documents)
+          .where(eq(documents.status, "encrypted")),
+      );
+      skippedEncrypted = encRows.length;
+      // Build a status breakdown so the UI/logs show WHY these documents
+      // weren't ready — crucial for diagnosing pipeline issues.
+      const counts: Record<string, number> = {};
+      for (const r of rows) {
+        counts[r.status] = (counts[r.status] ?? 0) + 1;
+      }
+      if (Object.keys(counts).length > 0) statusBreakdown = counts;
+    }
+
+    if (rows.length === 0) {
+      return { queued: 0, ...(skippedEncrypted > 0 ? { skipped_encrypted: skippedEncrypted } : {}) };
+    }
+
+    console.log(
+      `[documents] reclassify-all(resume): queuing ${rows.length} documents — ` +
+        `status breakdown: ${JSON.stringify(statusBreakdown)}, ` +
+        `skipped encrypted: ${skippedEncrypted}`,
+    );
 
     const ids = rows.map((r) => r.id);
     const patch: Partial<typeof documents.$inferInsert> = {
@@ -2159,7 +2191,11 @@ export const reclassifyAll = api(
     }
     triggerWorkers();
 
-    return { queued: ids.length };
+    return {
+      queued: ids.length,
+      ...(skippedEncrypted > 0 ? { skipped_encrypted: skippedEncrypted } : {}),
+      ...(statusBreakdown ? { status_breakdown: statusBreakdown } : {}),
+    };
   },
 );
 
@@ -3428,6 +3464,26 @@ export const getDocumentQueueStatus = api(
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
     return await getQueueStatus();
+  },
+);
+
+export const getDocumentStatusDistribution = api(
+  { expose: true, method: "GET", path: "/document-queue/status-distribution", auth: true },
+  async (): Promise<{ distribution: Record<string, number>; total: number }> => {
+    checkModule();
+    const authData = getAuthData()!;
+    requirePermission(authData, "documents.view");
+    const rows = await db.execute<{ status: string; count: string }>(sql`
+      SELECT status, COUNT(*)::int AS count FROM documents GROUP BY status
+    `);
+    const distribution: Record<string, number> = {};
+    let total = 0;
+    for (const r of rows.rows) {
+      const c = Number(r.count);
+      distribution[r.status] = c;
+      total += c;
+    }
+    return { distribution, total };
   },
 );
 
