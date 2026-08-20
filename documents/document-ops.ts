@@ -281,15 +281,17 @@ export async function runTextExtract(documentId: number): Promise<void> {
   // classify that already settled this document on "ready" (see the
   // hasUnfinishedJob guard in runClassify): pushing it back to "classifying"
   // would strand it there, since no classify job is left to move it on.
-  await db
+  const updated = await db
     .update(documents)
     .set({
       extracted_text: text.length === 0 ? null : text,
       status: sql`CASE WHEN ${documents.status} IN ('pending', 'extracting')
                        THEN ${nextStatus} ELSE ${documents.status} END`,
     })
-    .where(eq(documents.id, documentId));
-  await publishStatusChanged(documentId, row.user_id, nextStatus);
+    .where(eq(documents.id, documentId))
+    .returning({ status: documents.status });
+  const actualStatus = (updated[0]?.status as DocumentStatus) ?? nextStatus;
+  await publishStatusChanged(documentId, row.user_id, actualStatus);
 }
 
 /**
