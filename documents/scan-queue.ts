@@ -78,23 +78,54 @@ export async function enqueueDocumentScan(
 }
 
 /**
+ * The stage each service has to wait for. A job is only claimable once its
+ * upstream service has no outstanding work left for the same document.
+ */
+const UPSTREAM_SERVICE: Partial<Record<DocumentScanService, DocumentScanService>> = {
+  classify: "text_extract",
+  embed: "text_extract",
+};
+
+/**
  * Atomically claim the next pending job for a service. Uses
  * `FOR UPDATE SKIP LOCKED` so multiple workers never race on the same
  * row. Returns the claimed row or undefined if the queue is empty.
+ *
+ * Jobs whose upstream stage is still outstanding are skipped rather than
+ * claimed-and-deferred. Deferring them is what used to starve the pipeline:
+ * a defer bumps `enqueued_at`, so the deferred document moved to the back of
+ * the queue, and the worker stopped its tick loop (a deferred job counts as
+ * "no work"). With one wake-up per finished text_extract, classify got
+ * exactly one attempt per upstream completion — and that attempt always
+ * landed on the queue head, i.e. a document text_extract had not reached
+ * yet. classify and embed therefore made zero progress until text_extract
+ * had drained completely. Skipping in SQL hands the worker the oldest
+ * document that is genuinely ready instead.
  */
 export async function dequeueNextJob(
   service: DocumentScanService,
 ): Promise<typeof documentScanQueue.$inferSelect | undefined> {
+  const upstream = UPSTREAM_SERVICE[service];
+  const upstreamReady = upstream
+    ? sql`AND NOT EXISTS (
+        SELECT 1 FROM document_scan_queue up
+        WHERE up.document_id = q.document_id
+          AND up.service = ${upstream}
+          AND up.status IN ('pending', 'processing')
+      )`
+    : sql``;
+
   const rows = await db.execute<typeof documentScanQueue.$inferSelect>(sql`
     UPDATE document_scan_queue
     SET status = 'processing',
         started_at = NOW(),
         attempts = attempts + 1
     WHERE id = (
-      SELECT id FROM document_scan_queue
-      WHERE service = ${service}
-        AND status = 'pending'
-      ORDER BY priority ASC, enqueued_at ASC
+      SELECT q.id FROM document_scan_queue q
+      WHERE q.service = ${service}
+        AND q.status = 'pending'
+        ${upstreamReady}
+      ORDER BY q.priority ASC, q.enqueued_at ASC
       LIMIT 1
       FOR UPDATE SKIP LOCKED
     )
