@@ -2114,6 +2114,7 @@ export interface ReclassifyAllRequest {
 
 export interface ReclassifyAllResponse {
   queued: number;
+  skipped_encrypted?: number;
 }
 
 export interface RelocateAllDocumentsResponse {
@@ -2137,14 +2138,29 @@ export const reclassifyAll = api(
       : ["classify", "embed"];
     const newStatus = (full || resume) ? "pending" : "classifying";
 
-    const baseQuery = db.select({ id: documents.id }).from(documents);
-    const rows = await dbAll<{ id: number }>(
+    const baseQuery = db.select({ id: documents.id, status: documents.status }).from(documents);
+    const rows = await dbAll<{ id: number; status: string }>(
       resume
-        ? baseQuery.where(ne(documents.status, "ready"))
+        ? baseQuery.where(and(
+            ne(documents.status, "ready"),
+            ne(documents.status, "encrypted"),
+          ))
         : baseQuery,
     );
 
-    if (rows.length === 0) return { queued: 0 };
+    // Count encrypted documents separately so the UI can inform the user.
+    let skippedEncrypted = 0;
+    if (resume) {
+      const encRows = await dbAll<{ id: number }>(
+        db.select({ id: documents.id }).from(documents)
+          .where(eq(documents.status, "encrypted")),
+      );
+      skippedEncrypted = encRows.length;
+    }
+
+    if (rows.length === 0) {
+      return { queued: 0, ...(skippedEncrypted > 0 ? { skipped_encrypted: skippedEncrypted } : {}) };
+    }
 
     const ids = rows.map((r) => r.id);
     const patch: Partial<typeof documents.$inferInsert> = {
@@ -2159,7 +2175,10 @@ export const reclassifyAll = api(
     }
     triggerWorkers();
 
-    return { queued: ids.length };
+    return {
+      queued: ids.length,
+      ...(skippedEncrypted > 0 ? { skipped_encrypted: skippedEncrypted } : {}),
+    };
   },
 );
 

@@ -597,7 +597,7 @@ export function setUploadDefaults(payload: UploadDefaults) {
 export type ReclassifyAllMode = 'classify_only' | 'full' | 'resume'
 
 export function reclassifyAllDocuments(mode: ReclassifyAllMode) {
-  return apiFetch<{ queued: number }>('/documents/reclassify-all', {
+  return apiFetch<{ queued: number; skipped_encrypted?: number }>('/documents/reclassify-all', {
     method: 'POST',
     body: JSON.stringify({ mode }),
   })

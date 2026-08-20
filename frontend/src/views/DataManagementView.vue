@@ -583,7 +583,7 @@ async function handleFinanceTagReenqueue() {
 const docQueueStatus = ref<DocQueueStatus>({ services: [] })
 const docReclassifyLoading = ref(false)
 const docReclassifyError = ref('')
-const docReclassifyResult = ref<number | null>(null)
+const docReclassifyResult = ref<{ queued: number; skipped_encrypted?: number } | null>(null)
 const docRelocateLoading = ref(false)
 const docRelocateResult = ref<RelocateAllDocumentsResponse | null>(null)
 const docCancelLoading = ref(false)
@@ -623,8 +623,8 @@ async function handleDocReclassifyAll(mode: ReclassifyAllMode) {
   docRelocateResult.value = null
   docReclassifyLoading.value = true
   try {
-    const { queued } = await reclassifyAllDocuments(mode)
-    docReclassifyResult.value = queued
+    const result = await reclassifyAllDocuments(mode)
+    docReclassifyResult.value = result
     await fetchDocQueueStatus()
   } catch (err: any) {
     docReclassifyError.value = err.message || 'Fehler beim Einreihen'
@@ -1160,7 +1160,10 @@ onBeforeUnmount(() => {
 
       <div v-if="docReclassifyResult !== null" class="mb-3">
         <Message severity="info" :closable="false">
-          {{ docReclassifyResult }} Dokument(e) in die Warteschlange eingereiht.
+          {{ docReclassifyResult.queued }} Dokument(e) in die Warteschlange eingereiht.
+          <template v-if="docReclassifyResult.skipped_encrypted">
+            {{ docReclassifyResult.skipped_encrypted }} verschlüsselte Dokument(e) übersprungen.
+          </template>
         </Message>
       </div>
 
