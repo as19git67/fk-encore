@@ -108,6 +108,45 @@ Die Beschreibung ist in den Slideshow-Fotos verfügbar: Der Grid-Pfad
 hydratisiert das aktuelle Foto per `getPhotoDetailsBatch`, und die
 Album-/Karten-Fotos (`getAlbumLogic`) liefern `description` direkt mit.
 
+## iOS (`ios/`, Issue #767 Etappe 2)
+
+Die iOS-App hat die Diashow im Vollbild-Viewer (`PhotoFullscreenView`). Die
+Entscheidungslogik liegt — analog zum Web — in einer eigenen, unit-getesteten
+Datei (`Slideshow.swift` / `SlideshowTests.swift`), die View besitzt nur Timer
+und `isPlaying`-Flag.
+
+Gleich wie im Web:
+
+- **Kein Auto-Start**, manuelles Play/Pause über die Bottom-Bar.
+- **Intervall 3 / 5 / 10 / 15 / 20 / 30 s**, Default 5 s, pro Gerät
+  gespeichert (`UserDefaults`-Key `slideshow_interval_seconds`; das Web nutzt
+  `localStorage` — beide sind bewusst unabhängig, es gibt keinen Server-Sync).
+  Ein gespeicherter Wert außerhalb der Optionen fällt auf den Default zurück.
+- **Kein Wrap-around:** Am letzten Foto endet die Diashow und das Icon springt
+  zurück auf ▶.
+- **Details pausieren nicht**, blenden aber die Caption aus.
+- **Beschreibungs-Caption** einzeilig mit Ellipsis über dem Bild, nur während
+  des Laufs und nur bei nicht-leerer Beschreibung.
+
+Bewusst anders als im Web:
+
+- **Bedienung über `Menu(primaryAction:)`:** Ein Tap startet/pausiert, ein
+  Long-Press öffnet das Intervall-Menü. Das ist genau die Touch-Geste, die das
+  Web für Mobilgeräte von Hand nachbaut — auf iOS ist sie nativ, deshalb
+  entfällt der einmalige Long-Press-Hinweis samt „gesehen"-Flag.
+- **Play ist am letzten Foto deaktiviert** statt sichtbar wirkungslos: ohne
+  Wrap-around würde ein Start dort sofort wieder stoppen.
+- **Kein Datums-Banner und kein Idle-Reset.** Beide hängen im Web an der
+  Karten-/Trip-Ansicht bzw. an Pointer-/Wheel-Events; auf iOS gibt es dafür
+  bisher keinen entsprechenden Einstiegspunkt. Offen, falls die Trip-Karte
+  später ein durchlaufendes Vollbild bekommt.
+- **Kein Warten auf das geladene Bild.** Das Web schaltet erst weiter, wenn das
+  aktuelle Foto dekodiert ist (`currentLoaded`); auf iOS meldet
+  `PhotoPageView`/`ThumbnailLoader` seinen Ladezustand bisher nicht nach oben.
+  Der Timer läuft daher rein zeitgesteuert. Bei langsamer Verbindung kann ein
+  Foto dadurch kurz als Platzhalter erscheinen — nachziehen, sobald der Loader
+  seinen Zustand nach außen gibt.
+
 ## Betroffene Dateien
 
 | Datei | Rolle |
@@ -118,3 +157,6 @@ Album-/Karten-Fotos (`getAlbumLogic`) liefern `description` direkt mit.
 | `frontend/src/components/TripMap.vue` | `allStopPhotos`: ganzer Trip als Vollbild-Scope (`open-fullscreen`) |
 | `frontend/src/views/AlbumDetailView.vue` | Map-Overlay: `:markDayChanges="true"`, Stopp-Sync beim Schließen |
 | `frontend/src/views/SharedAlbumView.vue` | Overlay: `:markDayChanges="fullscreenFromMap"` |
+| `ios/Sources/FKPhotos/Features/Photos/Slideshow.swift` | iOS: reine Logik + Intervall-Optionen/Persistenz |
+| `ios/Sources/FKPhotos/Features/Photos/PhotoFullscreenView.swift` | iOS: Play/Pause-Menu, Advance-Timer, Caption |
+| `ios/Tests/FKPhotosTests/SlideshowTests.swift` | iOS: Unit-Tests der Logik |

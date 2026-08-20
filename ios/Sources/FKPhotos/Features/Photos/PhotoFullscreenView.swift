@@ -36,6 +36,12 @@ struct PhotoFullscreenView: View {
     @State private var isProcessingAction = false
     @State private var toastMessage: ToastMessage?
 
+    // Slideshow (issue #767, Stage 2; rules in docs/photo-slideshow.md).
+    // Never auto-starts — the user arms it from the bottom bar.
+    @State private var isPlaying = false
+    @AppStorage(Slideshow.intervalDefaultsKey)
+    private var slideshowIntervalSeconds: Double = Slideshow.defaultInterval
+
     // Person context (when navigated from PersonDetailView)
     private let personId: Int?
     private let onPersonRenamed: ((String) -> Void)?
@@ -108,6 +114,28 @@ struct PhotoFullscreenView: View {
             get: { curationOverrides[photo.id] ?? photo.curation_status },
             set: { curationOverrides[photo.id] = $0 }
         )
+    }
+
+    // MARK: - Slideshow
+
+    /// The stored value coerced back onto the offered set, so a stale default
+    /// from an older build cannot drive the timer.
+    private var slideshowInterval: TimeInterval {
+        Slideshow.normalizedInterval(slideshowIntervalSeconds)
+    }
+
+    private var hasNextPhoto: Bool {
+        photos.indices.contains(currentIndex + 1)
+    }
+
+    /// Re-arms the advance timer whenever playback, position or interval
+    /// changes — each change cancels the pending sleep and starts a fresh one.
+    private var slideshowTimerKey: String {
+        "\(isPlaying)-\(currentIndex)-\(slideshowInterval)"
+    }
+
+    private func toggleSlideshow() {
+        isPlaying.toggle()
     }
 
     var body: some View {
@@ -261,10 +289,71 @@ struct PhotoFullscreenView: View {
                                 .font(.title2)
                                 .foregroundStyle(showDetails ? Color.accentColor : .primary)
                         }
+
+                        // Tap plays/pauses; long-press opens the interval menu.
+                        // `Menu(primaryAction:)` is the native form of the same
+                        // gesture split the web hand-rolls for touch devices,
+                        // so no custom long-press hint is needed here.
+                        Menu {
+                            Picker("Intervall", selection: $slideshowIntervalSeconds) {
+                                ForEach(Slideshow.intervalOptions, id: \.self) { option in
+                                    Text(Slideshow.label(for: option)).tag(option)
+                                }
+                            }
+                        } label: {
+                            Image(systemName: isPlaying ? "pause.circle" : "play.circle")
+                                .font(.title2)
+                                .foregroundStyle(isPlaying ? Color.accentColor : .primary)
+                        } primaryAction: {
+                            toggleSlideshow()
+                        }
+                        // At the last photo there is nowhere to advance to and
+                        // the slideshow does not wrap, so starting would stop
+                        // again immediately. Disable rather than leave a
+                        // button that silently does nothing.
+                        .disabled(!hasNextPhoto && !isPlaying)
                     }
                 }
             }
         .toolbarBackground(showDetails ? .visible : .hidden, for: .bottomBar)
+        .overlay(alignment: .top) {
+            if Slideshow.shouldShowCaption(
+                playing: isPlaying,
+                showDetails: showDetails,
+                description: currentPhoto?.description
+            ) {
+                Text(currentPhoto?.description ?? "")
+                    .font(.subheadline)
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.black.opacity(0.6), in: Capsule())
+                    .padding(.horizontal, 24)
+                    // Never swallow a tap meant for the photo underneath.
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+        }
+        .task(id: slideshowTimerKey) {
+            guard Slideshow.shouldAdvance(
+                playing: isPlaying,
+                interval: slideshowInterval,
+                hasNext: hasNextPhoto
+            ) else {
+                // Running off the end is a real stop, not a silent pause, so
+                // the icon flips back to "play".
+                if Slideshow.reachedEnd(playing: isPlaying, hasNext: hasNextPhoto) {
+                    isPlaying = false
+                }
+                return
+            }
+            try? await Task.sleep(for: .seconds(slideshowInterval))
+            guard !Task.isCancelled else { return }
+            withAnimation { currentIndex += 1 }
+        }
+        .onDisappear { isPlaying = false }
         .confirmationDialog(
             "Foto löschen?",
             isPresented: $showDeleteConfirm,
