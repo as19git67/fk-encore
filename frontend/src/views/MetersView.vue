@@ -18,6 +18,7 @@ import {
   updateMeter,
   deleteMeter,
   getEnergyReport,
+  getConsumptionTrends,
   listElectricityTariffs,
   createElectricityTariff,
   updateElectricityTariff,
@@ -30,6 +31,7 @@ import {
   METER_ROLE_LABELS,
   ELECTRICITY_TARIFF_KIND_LABELS,
   ELECTRICITY_TARIFF_UNIT_LABELS,
+  type ConsumptionTrend,
   type EnergyReport,
   type ElectricityTariff,
   type ElectricityTariffKind,
@@ -39,6 +41,7 @@ import {
   type MeterRole,
   type MeterType,
 } from '../api/meters'
+import MeterTrendDashboard from '../components/MeterTrendDashboard.vue'
 import { listGroups, type GroupSummary } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
 import { toLocalIsoDateTime } from '../utils/dateFormat'
@@ -54,6 +57,8 @@ const energyReport = ref<EnergyReport | null>(null)
 const energyMonthlyReport = ref<EnergyReport | null>(null)
 const energyGranularity = ref<MeterReportGranularity>('month')
 const loadingEnergyReport = ref(false)
+const trends = ref<ConsumptionTrend[]>([])
+const loadingTrends = ref(false)
 const loading = ref(false)
 const error = ref('')
 
@@ -88,12 +93,29 @@ async function load() {
     const [mRes, gRes] = await Promise.all([listMeters(), loadGroups()])
     meters.value = mRes.meters
     groups.value = gRes
-    await loadEnergyReport()
+    await Promise.all([loadEnergyReport(), loadTrends()])
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Zähler'
   } finally {
     loading.value = false
   }
+}
+
+async function loadTrends() {
+  loadingTrends.value = true
+  try {
+    trends.value = (await getConsumptionTrends()).trends
+  } catch {
+    trends.value = []
+  } finally {
+    loadingTrends.value = false
+  }
+}
+
+/** Opens the meter behind a trend tile; derived tiles cover several meters. */
+function openTrend(trend: ConsumptionTrend) {
+  if (trend.meterIds.length !== 1) return
+  void router.push(`/zaehler/${trend.meterIds[0]}`)
 }
 
 async function loadEnergyReport() {
@@ -777,6 +799,13 @@ onMounted(load)
     <div v-else-if="meters.length === 0" class="info">Noch keine Zähler angelegt.</div>
 
     <template v-else>
+      <MeterTrendDashboard
+        v-if="loadingTrends || trends.length > 0"
+        :trends="trends"
+        :loading="loadingTrends"
+        @select="openTrend"
+      />
+
       <section v-if="energyReport && energyReport.meters.length > 0" class="energy-report-card">
         <div class="energy-report-head">
           <div>

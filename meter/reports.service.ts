@@ -12,6 +12,25 @@ import {
 
 export type ReportGranularity = "month" | "year";
 
+/**
+ * How an interval between two readings is charged to report buckets.
+ *
+ * - `interpolated` (default) spreads it over the buckets it overlaps, weighted
+ *   by time. A reading on the 3rd and the next on the 5th of the following
+ *   month therefore no longer pushes half a month into the earlier bucket.
+ * - `interval_start` charges the whole interval to the bucket its *start*
+ *   falls into. That is the original Excel logic and stays available so old
+ *   figures remain reproducible.
+ */
+export type BucketAllocation = "interpolated" | "interval_start";
+
+/**
+ * Coverage from which a bucket counts as fully measured. Readings rarely land
+ * exactly on a period boundary, so a month covered to 99% is treated as
+ * complete; anything below is a partial period and excluded from comparisons.
+ */
+export const COMPLETE_COVERAGE_THRESHOLD = 0.99;
+
 export interface AbsoluteReadingPoint {
   takenAt: string;
   value: number;
@@ -28,6 +47,12 @@ export interface MeterReportBucket {
   endValue: number;
   consumption: number;
   intervals: number;
+  /** Share of the period actually spanned by readings, 0..1. */
+  coverage: number;
+  /** Same period one year earlier; null unless both periods are fully covered. */
+  previousConsumption: number | null;
+  deltaAbsolute: number | null;
+  deltaPercent: number | null;
 }
 
 export interface MeterReport {
@@ -36,6 +61,7 @@ export interface MeterReport {
   unit: string;
   decimals: number;
   granularity: ReportGranularity;
+  allocation: BucketAllocation;
   from: string | null;
   to: string | null;
   buckets: MeterReportBucket[];
@@ -65,6 +91,8 @@ export interface EnergyReportBucket {
   label: string;
   periodStart: string;
   periodEnd: string;
+  /** Lowest coverage among the contributing meters, 0..1. */
+  coverage: number;
   gridImport: number | null;
   gridExport: number | null;
   production: number | null;
@@ -92,16 +120,17 @@ export interface EnergyReport {
   unit: string;
   decimals: number;
   granularity: ReportGranularity;
+  allocation: BucketAllocation;
   from: string | null;
   to: string | null;
   meters: EnergyReportMeterRef[];
   missingRoles: EnergyReportRole[];
   buckets: EnergyReportBucket[];
-  totals: Omit<EnergyReportBucket, "key" | "label" | "periodStart" | "periodEnd">;
+  totals: Omit<EnergyReportBucket, "key" | "label" | "periodStart" | "periodEnd" | "coverage">;
   hasTariffs: boolean;
 }
 
-const ENERGY_REPORT_ROLES: EnergyReportRole[] = [
+export const ENERGY_REPORT_ROLES: EnergyReportRole[] = [
   "grid_import",
   "grid_export",
   "pv_production",
@@ -141,6 +170,24 @@ function bucketLabel(key: string, granularity: ReportGranularity): string {
   return `${month}.${year}`;
 }
 
+/** Start of the bucket a timestamp falls into, as a UTC date. */
+function bucketStartDate(date: Date, granularity: ReportGranularity): Date {
+  if (granularity === "year") return new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
+}
+
+function nextBucketStart(bucketStart: Date, granularity: ReportGranularity): Date {
+  if (granularity === "year") return new Date(Date.UTC(bucketStart.getUTCFullYear() + 1, 0, 1));
+  return new Date(Date.UTC(bucketStart.getUTCFullYear(), bucketStart.getUTCMonth() + 1, 1));
+}
+
+/** Key of the same period one year earlier. */
+function previousYearKey(key: string, granularity: ReportGranularity): string {
+  if (granularity === "year") return String(Number(key) - 1);
+  const [year, month] = key.split("-");
+  return `${Number(year) - 1}-${month}`;
+}
+
 function bucketStartIso(key: string, granularity: ReportGranularity): string {
   if (granularity === "year") return `${key}-01-01T00:00:00.000Z`;
   return `${key}-01T00:00:00.000Z`;
@@ -167,16 +214,116 @@ function roundRatio(value: number | null): number | null {
   return Math.round(value * 1000) / 1000;
 }
 
+interface BucketAccumulator {
+  key: string;
+  startReading: AbsoluteReadingPoint;
+  endReading: AbsoluteReadingPoint;
+  consumption: number;
+  intervals: number;
+}
+
+/** Milliseconds of each bucket that lie between the first and last reading. */
+function accumulateCoverage(
+  intervals: Array<{ startDate: Date; endDate: Date }>,
+  granularity: ReportGranularity,
+): Map<string, number> {
+  const covered = new Map<string, number>();
+  for (const { startDate, endDate } of intervals) {
+    for (
+      let cursor = bucketStartDate(startDate, granularity);
+      cursor.getTime() < endDate.getTime();
+      cursor = nextBucketStart(cursor, granularity)
+    ) {
+      const bucketEnd = nextBucketStart(cursor, granularity);
+      const overlapMs =
+        Math.min(endDate.getTime(), bucketEnd.getTime()) -
+        Math.max(startDate.getTime(), cursor.getTime());
+      if (overlapMs <= 0) continue;
+      const key = bucketKey(cursor, granularity);
+      covered.set(key, (covered.get(key) ?? 0) + overlapMs);
+    }
+  }
+  return covered;
+}
+
+function bucketCoverage(key: string, granularity: ReportGranularity, coveredMs: number): number {
+  const periodMs =
+    new Date(bucketEndIso(key, granularity)).getTime() -
+    new Date(bucketStartIso(key, granularity)).getTime();
+  if (periodMs <= 0) return 0;
+  return Math.min(1, Math.round((coveredMs / periodMs) * 1000) / 1000);
+}
+
+/**
+ * Fills in the year-over-year comparison. Runs on the unfiltered bucket set so
+ * a `from` filter does not silently remove the reference period, and only
+ * compares periods that are both fully covered — a full March against a
+ * half-measured March would otherwise look like a real change.
+ */
+function attachPreviousYear(
+  buckets: MeterReportBucket[],
+  granularity: ReportGranularity,
+  decimals: number,
+): MeterReportBucket[] {
+  const byKey = new Map(buckets.map((bucket) => [bucket.key, bucket]));
+  for (const bucket of buckets) {
+    const previous = byKey.get(previousYearKey(bucket.key, granularity));
+    if (
+      !previous ||
+      bucket.coverage < COMPLETE_COVERAGE_THRESHOLD ||
+      previous.coverage < COMPLETE_COVERAGE_THRESHOLD
+    ) {
+      continue;
+    }
+    bucket.previousConsumption = previous.consumption;
+    bucket.deltaAbsolute = roundReportValue(bucket.consumption - previous.consumption, decimals);
+    bucket.deltaPercent =
+      previous.consumption > 0
+        ? roundRatio((bucket.consumption - previous.consumption) / previous.consumption)
+        : null;
+  }
+  return buckets;
+}
+
 export function buildMeterReportBuckets(
   readings: AbsoluteReadingPoint[],
   granularity: ReportGranularity,
-  options: { from?: Date | null; to?: Date | null; decimals?: number } = {},
+  options: {
+    from?: Date | null;
+    to?: Date | null;
+    decimals?: number;
+    allocation?: BucketAllocation;
+  } = {},
 ): MeterReportBucket[] {
   const sorted = [...readings].sort((a, b) => a.takenAt.localeCompare(b.takenAt));
   const from = options.from ?? null;
   const to = options.to ?? null;
   const decimals = options.decimals ?? 3;
-  const buckets = new Map<string, MeterReportBucket>();
+  const allocation = options.allocation ?? "interpolated";
+  const accumulators = new Map<string, BucketAccumulator>();
+  const spans: Array<{ startDate: Date; endDate: Date }> = [];
+
+  const charge = (
+    key: string,
+    start: AbsoluteReadingPoint,
+    end: AbsoluteReadingPoint,
+    consumption: number,
+  ) => {
+    const existing = accumulators.get(key);
+    if (existing) {
+      existing.endReading = end;
+      existing.consumption += consumption;
+      existing.intervals += 1;
+    } else {
+      accumulators.set(key, {
+        key,
+        startReading: start,
+        endReading: end,
+        consumption,
+        intervals: 1,
+      });
+    }
+  };
 
   for (let i = 0; i < sorted.length - 1; i++) {
     const start = sorted[i];
@@ -184,36 +331,72 @@ export function buildMeterReportBuckets(
     const startDate = new Date(start.takenAt);
     const endDate = new Date(end.takenAt);
     if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) continue;
-    if (from && startDate < from) continue;
-    if (to && startDate >= to) continue;
 
     const consumption = end.value - start.value;
     if (!Number.isFinite(consumption) || consumption < 0) continue;
 
-    const key = bucketKey(startDate, granularity);
-    const existing = buckets.get(key);
-    if (existing) {
-      existing.endReadingAt = end.takenAt;
-      existing.endValue = end.value;
-      existing.consumption = roundReportValue(existing.consumption + consumption, decimals);
-      existing.intervals += 1;
-    } else {
-      buckets.set(key, {
-        key,
-        label: bucketLabel(key, granularity),
-        periodStart: bucketStartIso(key, granularity),
-        periodEnd: bucketEndIso(key, granularity),
-        startReadingAt: start.takenAt,
-        endReadingAt: end.takenAt,
-        startValue: start.value,
-        endValue: end.value,
-        consumption: roundReportValue(consumption, decimals),
-        intervals: 1,
-      });
+    const durationMs = endDate.getTime() - startDate.getTime();
+    if (durationMs > 0) spans.push({ startDate, endDate });
+
+    if (allocation === "interval_start") {
+      // Legacy mode filters the intervals themselves, not the buckets.
+      if (from && startDate < from) continue;
+      if (to && startDate >= to) continue;
+      charge(bucketKey(startDate, granularity), start, end, consumption);
+      continue;
+    }
+
+    if (durationMs <= 0) continue;
+    for (
+      let cursor = bucketStartDate(startDate, granularity);
+      cursor.getTime() < endDate.getTime();
+      cursor = nextBucketStart(cursor, granularity)
+    ) {
+      const bucketEnd = nextBucketStart(cursor, granularity);
+      const overlapMs =
+        Math.min(endDate.getTime(), bucketEnd.getTime()) -
+        Math.max(startDate.getTime(), cursor.getTime());
+      if (overlapMs <= 0) continue;
+      charge(
+        bucketKey(cursor, granularity),
+        start,
+        end,
+        (consumption * overlapMs) / durationMs,
+      );
     }
   }
 
-  return [...buckets.values()].sort((a, b) => a.key.localeCompare(b.key));
+  const coveredMsByKey = accumulateCoverage(spans, granularity);
+  const buckets = [...accumulators.values()]
+    .sort((a, b) => a.key.localeCompare(b.key))
+    .map((entry): MeterReportBucket => ({
+      key: entry.key,
+      label: bucketLabel(entry.key, granularity),
+      periodStart: bucketStartIso(entry.key, granularity),
+      periodEnd: bucketEndIso(entry.key, granularity),
+      startReadingAt: entry.startReading.takenAt,
+      endReadingAt: entry.endReading.takenAt,
+      startValue: entry.startReading.value,
+      endValue: entry.endReading.value,
+      consumption: roundReportValue(entry.consumption, decimals),
+      intervals: entry.intervals,
+      coverage: bucketCoverage(entry.key, granularity, coveredMsByKey.get(entry.key) ?? 0),
+      previousConsumption: null,
+      deltaAbsolute: null,
+      deltaPercent: null,
+    }));
+
+  attachPreviousYear(buckets, granularity, decimals);
+
+  if (allocation === "interval_start") return buckets;
+  // Interpolated mode filters whole buckets: every period whose start lies in
+  // [from, to). Filtering after the comparison keeps the reference year usable.
+  return buckets.filter((bucket) => {
+    const periodStart = new Date(bucket.periodStart);
+    if (from && periodStart < from) return false;
+    if (to && periodStart >= to) return false;
+    return true;
+  });
 }
 
 export async function loadAbsoluteReadingSeries(
@@ -270,6 +453,7 @@ export async function getMeterReportForUser(
   granularity: ReportGranularity,
   fromDate: Date | null,
   toDate: Date | null,
+  allocation: BucketAllocation = "interpolated",
 ): Promise<MeterReport> {
   if (fromDate && toDate && fromDate >= toDate) {
     throw APIError.invalidArgument("from must be before to");
@@ -281,6 +465,7 @@ export async function getMeterReportForUser(
     from: fromDate,
     to: toDate,
     decimals: meter.decimals,
+    allocation,
   });
 
   return {
@@ -289,6 +474,7 @@ export async function getMeterReportForUser(
     unit: meter.unit,
     decimals: meter.decimals,
     granularity,
+    allocation,
     from: fromDate?.toISOString() ?? null,
     to: toDate?.toISOString() ?? null,
     buckets,
@@ -305,6 +491,7 @@ export function buildEnergyReportFromMeterReports(
   fromDate: Date | null,
   toDate: Date | null,
   tariffTimeline?: EnergyTariffTimeline,
+  allocation: BucketAllocation = "interpolated",
 ): Omit<EnergyReport, "meters" | "missingRoles"> {
   const decimals = Math.max(
     0,
@@ -386,11 +573,16 @@ export function buildEnergyReportFromMeterReports(
         ? roundReportValue(Math.max(0, totalConsumption - (heatPumpExclusion ?? 0) - (evChargerTotal ?? 0)), decimals)
         : null;
 
+    const contributingCoverages = ENERGY_REPORT_ROLES.map(
+      (role) => byRole.get(role)?.get(key)?.coverage,
+    ).filter((value): value is number => value !== undefined);
+
     const bucket: EnergyReportBucket = {
       key,
       label: source?.label ?? bucketLabel(key, granularity),
       periodStart: source?.periodStart ?? bucketStartIso(key, granularity),
       periodEnd: source?.periodEnd ?? bucketEndIso(key, granularity),
+      coverage: contributingCoverages.length > 0 ? Math.min(...contributingCoverages) : 0,
       gridImport,
       gridExport,
       production,
@@ -489,6 +681,7 @@ export function buildEnergyReportFromMeterReports(
     unit: "kWh",
     decimals,
     granularity,
+    allocation,
     from: fromDate?.toISOString() ?? null,
     to: toDate?.toISOString() ?? null,
     buckets: completeBuckets,
@@ -549,6 +742,7 @@ export async function getEnergyReportForUser(
   granularity: ReportGranularity,
   fromDate: Date | null,
   toDate: Date | null,
+  allocation: BucketAllocation = "interpolated",
 ): Promise<EnergyReport> {
   if (fromDate && toDate && fromDate >= toDate) {
     throw APIError.invalidArgument("from must be before to");
@@ -562,11 +756,25 @@ export async function getEnergyReportForUser(
 
   const reports: Partial<Record<EnergyReportRole, MeterReport>> = {};
   for (const [role, meter] of roleMeters) {
-    reports[role] = await getMeterReportForUser(userId, meter.id, granularity, fromDate, toDate);
+    reports[role] = await getMeterReportForUser(
+      userId,
+      meter.id,
+      granularity,
+      fromDate,
+      toDate,
+      allocation,
+    );
   }
 
   const tariffTimeline = await loadEnergyTariffTimeline(userId);
-  const base = buildEnergyReportFromMeterReports(reports, granularity, fromDate, toDate, tariffTimeline);
+  const base = buildEnergyReportFromMeterReports(
+    reports,
+    granularity,
+    fromDate,
+    toDate,
+    tariffTimeline,
+    allocation,
+  );
   return {
     ...base,
     meters: [...roleMeters.entries()].map(([role, meter]) => ({

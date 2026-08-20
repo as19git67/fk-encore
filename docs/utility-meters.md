@@ -231,16 +231,48 @@ nötig, Haushalts-Scope reicht).
 
 `GET /meters/:id/report?granularity=month|year&from=&to=`
 
-- Implementierter MVP: Verbrauch pro Bucket = Differenz zwischen zwei
-  aufeinanderfolgenden Absolutständen. Das Intervall wird dem Bucket des
-  Start-Zeitpunkts zugeordnet. Das entspricht der bisherigen Excel-Logik:
-  Ablesung am Monatsanfang beschreibt den Verbrauch bis zur nächsten Ablesung.
+- Verbrauch pro Bucket = Differenz zwischen zwei aufeinanderfolgenden
+  Absolutständen.
+- **Zuordnung (`allocation`)**: Standard ist `interpolated` — ein
+  Ableseintervall wird zeitanteilig auf die Buckets verteilt, die es
+  überlappt. `interval_start` rechnet das Intervall vollständig dem Bucket
+  seines Start-Zeitpunkts zu; das ist die ursprüngliche Excel-Logik und bleibt
+  für die Reproduktion alter Zahlen erhalten.
 - Die Berechnung ist generisch für alle Zählertypen und läuft über den
   Absolutstand der Messstelle, also auch über Gerätewechsel hinweg.
-- `from`/`to` filtern Intervalle nach Start-Zeitpunkt.
+- `from`/`to` filtern bei `interpolated` ganze Buckets nach Perioden-Start,
+  bei `interval_start` weiterhin die Intervalle nach Start-Zeitpunkt.
+- **`coverage`** je Bucket (0..1) gibt an, welcher Anteil der Periode
+  tatsächlich von Ablesungen abgedeckt ist. Ab `COMPLETE_COVERAGE_THRESHOLD`
+  (0,99) gilt eine Periode als vollständig gemessen; darunter ist sie eine
+  Teilperiode und fließt weder in den Vorjahresvergleich noch in die Trends
+  ein. Das Frontend markiert solche Perioden.
+- **Vorjahresvergleich**: jeder Bucket trägt `previousConsumption`,
+  `deltaAbsolute` und `deltaPercent` für dieselbe Periode ein Jahr früher —
+  nur wenn beide Perioden vollständig gemessen sind. Der Vergleich wird vor
+  dem `from`/`to`-Filter berechnet, damit ein Filter die Referenzperiode nicht
+  entfernt.
 - Bei Betriebsstundenzählern identisch (Einheit h).
-- Noch offen: lineare Interpolation auf exakte Bucket-Grenzen,
-  `day`/`week` und Vorjahresvergleich (`compare=previous_year`).
+- Noch offen: `day`/`week`-Granularität (zurückgestellt, siehe
+  `docs/utility-meters-reports.md` §3.1).
+
+### 5.1.1 Verbrauchstrends
+
+`GET /meters/reports/trends`
+
+Beantwortet „verbrauche ich tendenziell mehr oder weniger?“ je Kategorie:
+Haushaltsstrom (ohne Wärmepumpe und Wallbox), Heizung, Warmwasser,
+E-Auto/Wallbox, Netzbezug sowie je ein Eintrag pro sichtbarem Wasser-/Gaszähler.
+
+Alle Kennzahlen laufen über die **rollierende 12-Monats-Summe**, nicht über
+rohe Monatswerte — sonst misst eine Regression über zwölf Monate überwiegend
+die Jahreszeit. Je Kennzahl geliefert: `current12` (letzte zwölf vollständig
+gemessenen Monate), `previous12` (die zwölf davor), `changeAbsolute`,
+`changePercent`, `slopePerYear` (Regression über die Rollreihe) und
+`direction` (`rising`/`falling`/`stable`/`unknown`). Änderungen unter 2 %
+gelten als `stable`. Eine Lücke in den Ablesungen macht jedes Rollfenster,
+das sie enthält, `null` — ein fehlender Monat darf nicht wie ein Rückgang
+aussehen.
 
 ### 5.2 Strom-/PV-Gesamtreport
 
@@ -360,7 +392,7 @@ Storybook-Stories für Übersicht + Erfassungsdialog.
 | 3 | Manuelle Ablesungen | `readings.ts`, Absolutstand-Berechnung, Übersichts- + Detail-View, Erfassungsdialog | 2 |
 | 4 | Foto-OCR | `receipt-ocr-service`-Endpunkt `/meter-reading`, `readings-ocr.ts`, Foto-Ablage, Bestätigungs-UI | 3 |
 | 5 | API-Ingestion | `meter_api_keys`, `ingest.ts` (Bearer, Idempotenz, Rate-Limit), Key-Verwaltung in Admin-View | 3 |
-| 6 | Reports | MVP umgesetzt: `reports.ts`/`reports.service.ts`, Monats-/Jahres-Buckets aus Ableseintervallen, Chart + Tabelle in Detail-View, aggregierter Strom-/PV-Gesamtreport in der Übersicht, explizite Zählerrollen. Offen: Interpolation, Day/Week, Vorjahresvergleich. | 3 |
+| 6 | Reports | Umgesetzt: `reports.ts`/`reports.service.ts`, Monats-/Jahres-Buckets, Chart + Tabelle in Detail-View, aggregierter Strom-/PV-Gesamtreport, explizite Zählerrollen (6a: Interpolation, Coverage, Vorjahresvergleich, `trends.service.ts`; 6b: Trend-Dashboard). Offen: Day/Week (zurückgestellt), PV-Ersparnis/Amortisation (6c), Gas-/Benzin-Vergleich (6d) — siehe `docs/utility-meters-reports.md` | 3 |
 | 7 | Anomalien | Cron + `meter_anomalies`, Badge/Liste im Frontend | 6 |
 | 8 | Finance-Link | Link-Tabelle, Endpunkte, UI an Ablesung/Transaktion | 3 (+ Finance) |
 

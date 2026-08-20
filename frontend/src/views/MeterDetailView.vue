@@ -31,6 +31,7 @@ import {
   deleteApiKey,
   ocrMeterReading,
   getMeterReport,
+  isCompletePeriod,
   METER_TYPE_LABELS,
   METER_TYPE_ICONS,
   METER_ROLE_LABELS,
@@ -212,31 +213,61 @@ function fmtReportTrend(value: number | null) {
   return `${reportTrendLabel()}: ${sign}${fmt(value, detail.value.decimals)} ${detail.value.unit}`
 }
 
+function fmtDelta(value: number) {
+  const sign = value > 0 ? '+' : ''
+  return `${sign}${fmt(value, detail.value?.decimals ?? 1)}`
+}
+
+function fmtDeltaPercent(value: number) {
+  const sign = value > 0 ? '+' : ''
+  return `${sign}${(value * 100).toLocaleString('de-DE', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 1,
+  })} %`
+}
+
+const hasPreviousYearData = computed(() =>
+  recentReportBuckets.value.some((bucket) => bucket.previousConsumption !== null),
+)
+
 const reportChartData = computed(() => {
   if (!detail.value || recentReportBuckets.value.length === 0) return null
-  return {
-    labels: recentReportBuckets.value.map((bucket) => bucket.label),
-    datasets: [
-      {
-        label: `${detail.value.name} (${detail.value.unit})`,
-        data: recentReportBuckets.value.map((bucket) => bucket.consumption),
-        backgroundColor: 'rgba(245, 158, 11, 0.55)',
-        borderColor: 'rgb(217, 119, 6)',
-        borderWidth: 1,
-        borderRadius: 6,
-      },
-    ],
+  const datasets: Record<string, unknown>[] = [
+    {
+      label: `${detail.value.name} (${detail.value.unit})`,
+      data: recentReportBuckets.value.map((bucket) => bucket.consumption),
+      backgroundColor: 'rgba(245, 158, 11, 0.55)',
+      borderColor: 'rgb(217, 119, 6)',
+      borderWidth: 1,
+      borderRadius: 6,
+    },
+  ]
+  // Faded reference line for the same period a year earlier.
+  if (hasPreviousYearData.value) {
+    datasets.push({
+      type: 'line',
+      label: 'Vorjahr',
+      data: recentReportBuckets.value.map((bucket) => bucket.previousConsumption),
+      borderColor: 'rgba(120, 120, 120, 0.75)',
+      borderWidth: 2,
+      borderDash: [4, 3],
+      pointRadius: 0,
+      spanGaps: true,
+      fill: false,
+    })
   }
+  return { labels: recentReportBuckets.value.map((bucket) => bucket.label), datasets }
 })
 
 const reportChartOptions = computed(() => ({
   responsive: true,
   maintainAspectRatio: false,
   plugins: {
-    legend: { display: false },
+    legend: { display: hasPreviousYearData.value },
     tooltip: {
       callbacks: {
-        label: (ctx: any) => `${fmt(Number(ctx.raw ?? 0), detail.value?.decimals ?? 1)} ${detail.value?.unit ?? ''}`,
+        label: (ctx: any) =>
+          `${ctx.dataset?.label ?? ''}: ${fmt(Number(ctx.raw ?? 0), detail.value?.decimals ?? 1)} ${detail.value?.unit ?? ''}`,
       },
     },
   },
@@ -744,9 +775,33 @@ watch(meterId, () => loadDetail())
           <Chart type="bar" :data="reportChartData" :options="reportChartOptions" />
         </div>
         <DataTable :value="reportTableBuckets" size="small" class="report-table">
-          <Column field="label" :header="reportGranularity === 'month' ? 'Monat' : 'Jahr'" />
+          <Column field="label" :header="reportGranularity === 'month' ? 'Monat' : 'Jahr'">
+            <template #body="{ data }">
+              {{ data.label }}
+              <i
+                v-if="!isCompletePeriod(data)"
+                class="pi pi-exclamation-circle partial-marker"
+                v-tooltip.right="`Nur teilweise abgelesen (${Math.round(data.coverage * 100)} % des Zeitraums)`"
+              />
+            </template>
+          </Column>
           <Column header="Verbrauch">
             <template #body="{ data }">{{ fmt(data.consumption, detail!.decimals) }} {{ detail!.unit }}</template>
+          </Column>
+          <Column header="Vorjahr">
+            <template #body="{ data }">
+              <span v-if="data.previousConsumption === null" class="muted">–</span>
+              <template v-else>{{ fmt(data.previousConsumption, detail!.decimals) }} {{ detail!.unit }}</template>
+            </template>
+          </Column>
+          <Column header="Veränderung">
+            <template #body="{ data }">
+              <span v-if="data.deltaAbsolute === null" class="muted">–</span>
+              <span v-else :class="data.deltaAbsolute > 0 ? 'delta-up' : 'delta-down'">
+                {{ fmtDelta(data.deltaAbsolute) }} {{ detail!.unit }}
+                <template v-if="data.deltaPercent !== null">({{ fmtDeltaPercent(data.deltaPercent) }})</template>
+              </span>
+            </template>
           </Column>
           <Column header="Von">
             <template #body="{ data }">{{ fmtReportDate(data.startReadingAt) }}</template>
@@ -1286,5 +1341,20 @@ watch(meterId, () => loadDetail())
 .token-display code {
   flex: 1;
   font-size: 0.8rem;
+}
+.partial-marker {
+  margin-left: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
+}
+.muted {
+  color: var(--p-text-muted-color);
+}
+/* More consumption than a year ago is the unwelcome direction. */
+.delta-up {
+  color: var(--p-tag-warn-color);
+}
+.delta-down {
+  color: var(--p-tag-success-color);
 }
 </style>
