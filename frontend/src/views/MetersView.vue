@@ -633,12 +633,59 @@ const tariffUnitOptions = (Object.keys(ELECTRICITY_TARIFF_UNIT_LABELS) as Electr
   value,
 }))
 
-const visibleTariffs = computed(() =>
-  tariffs.value
-    .filter((tariff) =>
-      ['grid_import', 'base_price', 'feed_in', 'self_consumption_value'].includes(tariff.kind),
-    )
-    .sort((a, b) => b.validFrom.localeCompare(a.validFrom) || tariffKindLabel(a.kind).localeCompare(tariffKindLabel(b.kind), 'de')),
+/** Groups the flat kind list for display; order here is the display order. */
+const TARIFF_CATEGORIES: Array<{ key: string; label: string; kinds: ElectricityTariffKind[] }> = [
+  {
+    key: 'electricity',
+    label: 'Strom',
+    kinds: ['grid_import', 'base_price', 'feed_in', 'self_consumption_value'],
+  },
+  {
+    key: 'pv',
+    label: 'PV-Investition',
+    kinds: [
+      'pv_investment_net',
+      'pv_investment_vat',
+      'opportunity_cost_year',
+      'opportunity_cost_total',
+      'amortization_years',
+      'pv_capacity_kwp',
+    ],
+  },
+  {
+    key: 'heating',
+    label: 'Gasheizung (Vergleich)',
+    kinds: ['gas_price', 'gas_base_price', 'boiler_efficiency', 'heat_pump_scop'],
+  },
+  {
+    key: 'car',
+    label: 'Fahrzeug (Vergleich)',
+    kinds: ['ev_consumption', 'petrol_consumption', 'petrol_price'],
+  },
+  {
+    key: 'water',
+    label: 'Wasser',
+    kinds: ['water_price', 'water_base_price', 'sewage_price'],
+  },
+  {
+    key: 'co2',
+    label: 'CO₂-Faktoren',
+    kinds: ['grid_co2', 'gas_co2', 'petrol_co2'],
+  },
+]
+
+const sortedTariffs = computed(() =>
+  [...tariffs.value].sort(
+    (a, b) => b.validFrom.localeCompare(a.validFrom) || tariffKindLabel(a.kind).localeCompare(tariffKindLabel(b.kind), 'de'),
+  ),
+)
+
+/** All tariffs/assumptions, grouped by category; empty categories are omitted. */
+const groupedTariffs = computed(() =>
+  TARIFF_CATEGORIES.map((category) => ({
+    ...category,
+    items: sortedTariffs.value.filter((tariff) => category.kinds.includes(tariff.kind)),
+  })).filter((category) => category.items.length > 0),
 )
 
 const tariffImportKinds: ElectricityTariffKind[] = [
@@ -749,7 +796,7 @@ async function loadTariffs() {
     const res = await listElectricityTariffs()
     tariffs.value = res.tariffs
   } catch (err: any) {
-    error.value = err.message || 'Strompreise konnten nicht geladen werden'
+    error.value = err.message || 'Tarife & Annahmen konnten nicht geladen werden'
   } finally {
     loadingTariffs.value = false
   }
@@ -1286,36 +1333,34 @@ onMounted(load)
           </div>
         </div>
 
-        <div v-if="loadingTariffs" class="info info-compact"><i class="pi pi-spin pi-spinner" /> Strompreise…</div>
-        <div v-else-if="visibleTariffs.length === 0" class="info info-compact">
-          Noch keine Strompreise vorhanden.
+        <div v-if="loadingTariffs" class="info info-compact"><i class="pi pi-spin pi-spinner" /> Tarife &amp; Annahmen…</div>
+        <div v-else-if="groupedTariffs.length === 0" class="info info-compact">
+          Noch keine Tarife oder Annahmen vorhanden.
         </div>
-        <div v-else class="tariff-table-wrap">
-          <table class="energy-table tariff-table">
-            <thead>
-              <tr>
-                <th>Gültig ab</th>
-                <th>Art</th>
-                <th>Name</th>
-                <th>Betrag</th>
-                <th>Steuer</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="tariff in visibleTariffs" :key="tariff.id">
-                <td>{{ fmtDate(tariff.validFrom) }}</td>
-                <td>{{ tariffKindLabel(tariff.kind) }}</td>
-                <td>{{ tariff.name || '–' }}</td>
-                <td>{{ fmtTariffAmount(tariff) }}</td>
-                <td>{{ tariffTaxStatusLabel(tariff.taxStatus) }}</td>
-                <td class="tariff-actions">
-                  <Button icon="pi pi-pencil" text rounded severity="secondary" @click.stop="editTariff(tariff)" />
-                  <Button icon="pi pi-trash" text rounded severity="danger" @click.stop="handleDeleteTariff(tariff)" />
-                </td>
-              </tr>
-            </tbody>
-          </table>
+        <div v-else class="tariff-groups">
+          <div v-for="category in groupedTariffs" :key="category.key" class="tariff-group">
+            <h4 class="tariff-group-title">{{ category.label }}</h4>
+            <ul class="tariff-cards">
+              <li v-for="tariff in category.items" :key="tariff.id" class="tariff-card">
+                <div class="tariff-card-main">
+                  <div class="tariff-card-heading">
+                    <span class="tariff-card-kind">{{ tariffKindLabel(tariff.kind) }}</span>
+                    <span class="tariff-card-amount">{{ fmtTariffAmount(tariff) }}</span>
+                  </div>
+                  <div class="tariff-card-meta">
+                    <span>ab {{ fmtDate(tariff.validFrom) }}</span>
+                    <span v-if="tariff.name">· {{ tariff.name }}</span>
+                    <span v-if="tariff.taxStatus">· {{ tariffTaxStatusLabel(tariff.taxStatus) }}</span>
+                    <span v-if="tariff.capacityLimitKw !== null">· bis {{ fmt(tariff.capacityLimitKw, 1) }} kW</span>
+                  </div>
+                </div>
+                <div class="tariff-card-actions">
+                  <Button icon="pi pi-pencil" text rounded severity="secondary" v-tooltip.left="'Bearbeiten'" @click.stop="editTariff(tariff)" />
+                  <Button icon="pi pi-trash" text rounded severity="danger" v-tooltip.left="'Löschen'" @click.stop="handleDeleteTariff(tariff)" />
+                </div>
+              </li>
+            </ul>
+          </div>
         </div>
       </div>
     </Dialog>
@@ -1629,17 +1674,68 @@ onMounted(load)
   justify-content: flex-end;
   gap: 0.5rem;
 }
-.tariff-table-wrap {
-  max-width: 100%;
-  overflow-x: auto;
-}
-.tariff-table td,
-.tariff-table th {
-  text-align: left;
-}
-.tariff-actions {
+.tariff-groups {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+.tariff-group-title {
+  margin: 0 0 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--p-text-muted-color);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.tariff-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.tariff-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 8px;
+  background: var(--p-content-background);
+}
+.tariff-card-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   gap: 0.25rem;
+}
+.tariff-card-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.1rem 0.6rem;
+}
+.tariff-card-kind {
+  font-weight: 600;
+  color: var(--p-text-color);
+}
+.tariff-card-amount {
+  font-variant-numeric: tabular-nums;
+  color: var(--p-text-color);
+}
+.tariff-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.4rem;
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
+}
+.tariff-card-actions {
+  display: flex;
+  gap: 0.1rem;
+  flex-shrink: 0;
 }
 </style>
