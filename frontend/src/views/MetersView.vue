@@ -20,6 +20,8 @@ import {
   getEnergyReport,
   getConsumptionTrends,
   getEconomicsReport,
+  getComparisonsReport,
+  getEquipmentReport,
   listElectricityTariffs,
   createElectricityTariff,
   updateElectricityTariff,
@@ -33,6 +35,8 @@ import {
   ELECTRICITY_TARIFF_KIND_LABELS,
   ELECTRICITY_TARIFF_UNIT_LABELS,
   type ConsumptionTrend,
+  type ComparisonsReport,
+  type EquipmentReport,
   type EconomicsReport,
   type EnergyReport,
   type ElectricityTariff,
@@ -45,6 +49,8 @@ import {
 } from '../api/meters'
 import MeterTrendDashboard from '../components/MeterTrendDashboard.vue'
 import MeterEconomicsPanel from '../components/MeterEconomicsPanel.vue'
+import MeterComparisonsPanel from '../components/MeterComparisonsPanel.vue'
+import MeterEquipmentPanel from '../components/MeterEquipmentPanel.vue'
 import { listGroups, type GroupSummary } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
 import { toLocalIsoDateTime } from '../utils/dateFormat'
@@ -64,6 +70,10 @@ const trends = ref<ConsumptionTrend[]>([])
 const loadingTrends = ref(false)
 const economics = ref<EconomicsReport | null>(null)
 const loadingEconomics = ref(false)
+const comparisons = ref<ComparisonsReport | null>(null)
+const loadingComparisons = ref(false)
+const equipment = ref<EquipmentReport | null>(null)
+const loadingEquipment = ref(false)
 const loading = ref(false)
 const error = ref('')
 
@@ -98,11 +108,39 @@ async function load() {
     const [mRes, gRes] = await Promise.all([listMeters(), loadGroups()])
     meters.value = mRes.meters
     groups.value = gRes
-    await Promise.all([loadEnergyReport(), loadTrends(), loadEconomics()])
+    await Promise.all([
+      loadEnergyReport(),
+      loadTrends(),
+      loadEconomics(),
+      loadComparisons(),
+      loadEquipment(),
+    ])
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Zähler'
   } finally {
     loading.value = false
+  }
+}
+
+async function loadEquipment() {
+  loadingEquipment.value = true
+  try {
+    equipment.value = await getEquipmentReport(energyGranularity.value)
+  } catch {
+    equipment.value = null
+  } finally {
+    loadingEquipment.value = false
+  }
+}
+
+async function loadComparisons() {
+  loadingComparisons.value = true
+  try {
+    comparisons.value = await getComparisonsReport(energyGranularity.value)
+  } catch {
+    comparisons.value = null
+  } finally {
+    loadingComparisons.value = false
   }
 }
 
@@ -117,9 +155,14 @@ async function loadEconomics() {
   }
 }
 
-/** Both reports are priced from the tariffs, so a tariff change refreshes both. */
+/** Every one of these is priced from the tariffs, so a tariff change refreshes them. */
 async function reloadCostReports() {
-  await Promise.all([loadEnergyReport(), loadEconomics()])
+  await Promise.all([
+    loadEnergyReport(),
+    loadEconomics(),
+    loadComparisons(),
+    loadEquipment(),
+  ])
 }
 
 async function loadTrends() {
@@ -667,11 +710,30 @@ function tariffTaxStatusLabel(status: string | null) {
   return labels[status] ?? status
 }
 
+/** Default unit per tariff/assumption kind, so the form starts with a sensible value. */
+const TARIFF_KIND_DEFAULT_UNIT: Partial<Record<ElectricityTariffKind, ElectricityTariffUnit>> = {
+  base_price: 'eur_per_month',
+  gas_base_price: 'eur_per_month',
+  water_base_price: 'eur_per_month',
+  pv_investment_net: 'eur',
+  pv_investment_vat: 'eur',
+  opportunity_cost_total: 'eur',
+  amortization_years: 'years',
+  boiler_efficiency: 'ratio',
+  heat_pump_scop: 'ratio',
+  ev_consumption: 'kwh_per_100km',
+  petrol_consumption: 'l_per_100km',
+  petrol_price: 'eur_per_l',
+  grid_co2: 'kg_per_kwh',
+  gas_co2: 'kg_per_kwh',
+  petrol_co2: 'kg_per_l',
+  pv_capacity_kwp: 'kw',
+  water_price: 'eur_per_m3',
+  sewage_price: 'eur_per_m3',
+}
+
 function onTariffKindChange() {
-  if (tariffForm.value.kind === 'base_price') tariffForm.value.unit = 'eur_per_month'
-  else if (tariffForm.value.kind === 'pv_investment_net' || tariffForm.value.kind === 'pv_investment_vat') tariffForm.value.unit = 'eur'
-  else if (tariffForm.value.kind === 'amortization_years') tariffForm.value.unit = 'years'
-  else tariffForm.value.unit = 'eur_per_kwh'
+  tariffForm.value.unit = TARIFF_KIND_DEFAULT_UNIT[tariffForm.value.kind] ?? 'eur_per_kwh'
 }
 
 async function openTariffs() {
@@ -799,7 +861,7 @@ onMounted(load)
         />
         <Button
           v-if="canManage"
-          label="Strompreise"
+          label="Tarife & Annahmen"
           icon="pi pi-euro"
           severity="secondary"
           @click="openTariffs"
@@ -1003,6 +1065,18 @@ onMounted(load)
         :loading="loadingEconomics"
       />
 
+      <MeterComparisonsPanel
+        v-if="loadingComparisons || comparisons"
+        :report="comparisons"
+        :loading="loadingComparisons"
+      />
+
+      <MeterEquipmentPanel
+        v-if="loadingEquipment || equipment"
+        :report="equipment"
+        :loading="loadingEquipment"
+      />
+
       <div class="meter-grid">
       <div
         v-for="m in meters"
@@ -1157,13 +1231,20 @@ onMounted(load)
 
     <Dialog
       v-model:visible="showTariffs"
-      header="Strompreise verwalten"
+      header="Tarife & Annahmen verwalten"
       modal
       :style="{ width: '46rem', maxWidth: '95vw' }"
     >
       <div class="tariff-dialog">
         <div class="tariff-toolbar">
-          <p>Preisänderungen werden ab ihrem Gültigkeitsdatum für Kosten und PV-Ersparnis verwendet.</p>
+          <p>
+            Preisänderungen werden ab ihrem Gültigkeitsdatum für Kosten, PV-Ersparnis und
+            Wasserkosten verwendet. Hier stehen außerdem die Annahmen für die
+            Vergleichsrechnungen (Gasheizung, Benziner) sowie Anlagenwerte wie PV-Invest
+            und Anlagenleistung — als „Art“ auswählbar, z. B. Jahresarbeitszahl (JAZ),
+            Kesselwirkungsgrad, Gaspreis, Verbrauch E-Auto/Benziner, Benzinpreis,
+            PV-Anlagenleistung, Wasserpreis, CO₂-Faktoren.
+          </p>
           <Button
             :label="pricesAlreadyImported ? 'Importiert' : 'JSON-Grundlage importieren'"
             icon="pi pi-upload"

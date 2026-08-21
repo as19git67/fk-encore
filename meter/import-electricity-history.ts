@@ -90,6 +90,7 @@ const IMPORT_METER_ROLES: Partial<Record<string, MeterRole>> = {
   warmwasser_pv: "hot_water_pv",
   e_auto_wallbox: "ev_charger_total",
   e_auto_pv: "ev_charger_pv",
+  verdichter: "compressor_hours",
 };
 
 const VIRTUAL_DEVICE_SWAPS: Record<

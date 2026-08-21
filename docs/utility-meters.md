@@ -364,6 +364,95 @@ sondern nur in der Periodensumme geführt.
 Fehlen Preise (`hasTariffs === false`), bleiben beide Blöcke leer statt mit
 Platzhalterwerten zu rechnen.
 
+### 5.2.2 Vergleichsrechnungen (Gasheizung / Benziner)
+
+`GET /meters/reports/comparisons?granularity=month|year&from=&to=`
+
+Kontrafaktische Modellrechnungen — nur die Stromseite ist gemessen, die
+Gegenrechnung beruht auf Annahmen. Jede Response liefert deshalb die
+verwendeten Annahmen mit (`assumptions`), damit das Frontend sie anzeigen kann
+und die Zahl beurteilbar bleibt.
+
+**Wärmepumpe statt Gasheizung.** Wärmemenge = (Heizung + Warmwasser) [kWh el.]
+× JAZ; Gasbedarf = Wärmemenge ÷ Kesselwirkungsgrad; Gaskosten = Gasbedarf ×
+Gaspreis + Gas-Grundpreis. Gegengerechnet werden die *tatsächlichen*
+Stromkosten für Heizung + Warmwasser aus §5.2.1.
+
+Ohne Wärmemengenzähler ist die JAZ geschätzt. Das Ergebnis wird deshalb als
+**Bandbreite** über JAZ ± `SCOP_BAND` (0,5) ausgewiesen, nicht als eine Zahl.
+Eine niedrigere JAZ bedeutet weniger gelieferte Wärme und damit weniger Gas —
+die Bandbreite ist nach der JAZ geordnet, die Kostenwerte folgen ihr.
+
+**E-Auto statt Benziner.** km = Wallbox-kWh ÷ Verbrauch [kWh/100 km] × 100;
+Benzinbedarf = km ÷ 100 × [l/100 km]; Benzinkosten = Liter × Benzinpreis.
+Gegengerechnet werden die tatsächlichen Ladekosten. Zusätzlich ct/km für beide
+Varianten.
+
+**CO₂** wird nur berechnet, wenn die Emissionsfaktoren hinterlegt sind. Der
+Netzanteil von Wärmepumpe bzw. Ladestrom wird dabei gegengerechnet — die
+Alternative ist nicht emissionsfrei.
+
+Fehlen die Kern-Annahmen einer Vergleichsrechnung (JAZ + Kesselwirkungsgrad
+bzw. Verbrauch E-Auto + Verbrauch Benziner), liefert sie `null` statt mit
+Standardwerten zu rechnen.
+
+#### Annahmen als Stammdaten
+
+Die Annahmen liegen in `meter_electricity_tariffs` (Migration 0148). Sie sind
+keine gemessenen Tarife, haben aber dieselbe Form
+(`kind`, `valid_from`, `amount`, `unit`) und dieselbe „welcher Wert galt
+wann“-Logik — eine zweite Tabelle mit dupliziertem CRUD wäre reiner Overhead.
+
+| kind | Einheit | Bedeutung |
+|---|---|---|
+| `gas_price` | `eur_per_kwh` | Gas-Arbeitspreis |
+| `gas_base_price` | `eur_per_month` | Gas-Grundpreis |
+| `boiler_efficiency` | `ratio` | Kesselwirkungsgrad |
+| `heat_pump_scop` | `ratio` | Jahresarbeitszahl |
+| `ev_consumption` | `kwh_per_100km` | Verbrauch E-Auto |
+| `petrol_consumption` | `l_per_100km` | Verbrauch Benziner |
+| `petrol_price` | `eur_per_l` | Benzinpreis |
+| `grid_co2` / `gas_co2` | `kg_per_kwh` | Emissionsfaktoren |
+| `petrol_co2` | `kg_per_l` | Emissionsfaktor Benzin |
+
+Preise mit Zeitverlauf (Gas, Benzin) werden wie der Stromarbeitspreis
+zeitanteilig über Preisänderungen gewichtet.
+
+### 5.2.3 Anlagenzustand
+
+`GET /meters/reports/equipment?granularity=month|year&from=&to=`
+
+Frühindikatoren, die in den Verbrauchssummen untergehen:
+
+- **kWh je Verdichterstunde** — Wärmepumpen-Strom ÷ Verdichter-Betriebsstunden.
+  Ein steigender Wert heißt: mehr Strom für dieselbe Laufstunde (Vereisung,
+  Kältemittelverlust, verschmutzter Wärmetauscher). Braucht die Rolle
+  `compressor_hours` (Migration 0149, Import setzt sie für „Verdichter“).
+  Das Verhältnis wird nur gebildet, wenn **beide** Seiten vollständig gemessen
+  sind — sonst stünde ein voller Monat Strom gegen einen halben Monat Stunden.
+- **Laufzeitanteil** je Aggregat — Betriebsstunden ÷ gemessene Zeit der
+  Periode. Gemessen wird gegen die tatsächlich abgedeckte Zeit
+  (`coverage`), sonst wirkte ein halb abgelesener Monat halb so ausgelastet.
+- **Wasser-Grundlast** — der *kleinste* Tagesverbrauch einer Periode. Steigt
+  dieser Boden bei gleichbleibendem Gesamtverbrauch, ist das die klassische
+  Signatur eines laufenden Spülkastens oder Lecks. Berechnet aus den rohen
+  Ableseintervallen, **nicht** aus den interpolierten Buckets: ein Minimum
+  lässt sich nicht interpolieren, das Verteilen würde genau die ruhige Phase
+  verwischen, die das Leck sichtbar macht. Jedes Intervall zählt zur Periode
+  seines Startzeitpunkts.
+- **Ertrag je kWp** — Jahresertrag ÷ Anlagenleistung (`pv_capacity_kwp`).
+  Normalisiert das Wetterjahr heraus und ist damit der einzige belastbare
+  Frühindikator für Degradation oder verschmutzte Module. Teilperioden bleiben
+  außen vor, sonst sähe eine Messlücke wie Degradation aus.
+
+### 5.2.4 Wasserkosten
+
+Teil des Wirtschaftlichkeits-Reports (§5.2.1) als `water[]`, ein Eintrag je
+sichtbarem Wasserzähler. Frisch- und Abwasser werden beide auf die gemessene
+Menge berechnet (`water_price`, `sewage_price`), die Grundgebühr
+(`water_base_price`) anteilig über Monatsgrenzen. Ohne Wassertarife bleibt
+die Liste leer.
+
 ### 5.3 Anomalie-Erkennung
 
 Muster von `finance/anomaly-detector.ts` übernehmen:

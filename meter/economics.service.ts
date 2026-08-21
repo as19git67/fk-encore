@@ -12,10 +12,13 @@
  */
 
 import { APIError } from "encore.dev/api";
+import { listMeters } from "./meter.service";
 import {
   getEnergyReportForUser,
+  getMeterReportForUser,
   type EnergyReport,
   type EnergyReportBucket,
+  type MeterReportBucket,
   type ReportGranularity,
 } from "./reports.service";
 import { loadEnergyTariffTimeline, type EnergyTariffTimeline } from "./tariffs.service";
@@ -86,6 +89,27 @@ export interface UsageCostBucket {
   totalCostEur: number | null;
 }
 
+export interface WaterCostBucket {
+  key: string;
+  label: string;
+  periodStart: string;
+  periodEnd: string;
+  volume: number;
+  waterCostEur: number | null;
+  sewageCostEur: number | null;
+  baseCostEur: number | null;
+  totalCostEur: number | null;
+}
+
+export interface WaterCostReport {
+  meterId: number;
+  name: string;
+  unit: string;
+  buckets: WaterCostBucket[];
+  totalVolume: number;
+  totalCostEur: number | null;
+}
+
 export interface EconomicsReport {
   granularity: ReportGranularity;
   currency: "EUR";
@@ -105,6 +129,8 @@ export interface EconomicsReport {
     buckets: UsageCostBucket[];
     totals: Omit<UsageCostBucket, "key" | "label" | "periodStart" | "periodEnd">;
   };
+  /** One entry per visible water meter; empty without water tariffs. */
+  water: WaterCostReport[];
 }
 
 function emptyApplicationCost(): ApplicationCost {
@@ -354,6 +380,66 @@ function sumApplication(buckets: UsageCostBucket[], pick: (b: UsageCostBucket) =
   };
 }
 
+/**
+ * Water cost per period. Sewage is billed on the same metered volume as fresh
+ * water, so both rates apply to it; the standing charge is prorated across
+ * month boundaries like the electricity one.
+ */
+export function buildWaterCostReport(
+  meterId: number,
+  name: string,
+  unit: string,
+  buckets: MeterReportBucket[],
+  timeline: EnergyTariffTimeline,
+): WaterCostReport {
+  const costBuckets = buckets.map((bucket): WaterCostBucket => {
+    const waterPrice = timeline.weightedAmountForPeriod(
+      "water_price",
+      bucket.periodStart,
+      bucket.periodEnd,
+    );
+    const sewagePrice = timeline.weightedAmountForPeriod(
+      "sewage_price",
+      bucket.periodStart,
+      bucket.periodEnd,
+    );
+    const baseCostEur = timeline.monthlyChargeForPeriod(
+      "water_base_price",
+      bucket.periodStart,
+      bucket.periodEnd,
+    );
+
+    const waterCostEur = waterPrice === null ? null : bucket.consumption * waterPrice;
+    const sewageCostEur = sewagePrice === null ? null : bucket.consumption * sewagePrice;
+    const parts = [waterCostEur, sewageCostEur, baseCostEur].filter(
+      (value): value is number => value !== null,
+    );
+
+    return {
+      key: bucket.key,
+      label: bucket.label,
+      periodStart: bucket.periodStart,
+      periodEnd: bucket.periodEnd,
+      volume: bucket.consumption,
+      waterCostEur: roundMoney(waterCostEur),
+      sewageCostEur: roundMoney(sewageCostEur),
+      baseCostEur: roundMoney(baseCostEur),
+      totalCostEur:
+        parts.length === 0 ? null : roundMoney(parts.reduce((sum, value) => sum + value, 0)),
+    };
+  });
+
+  return {
+    meterId,
+    name,
+    unit,
+    buckets: costBuckets,
+    totalVolume:
+      Math.round(costBuckets.reduce((sum, bucket) => sum + bucket.volume, 0) * 1000) / 1000,
+    totalCostEur: sumOf(costBuckets.map((bucket) => bucket.totalCostEur)),
+  };
+}
+
 export async function getEconomicsReportForUser(
   userId: number,
   granularity: ReportGranularity,
@@ -384,6 +470,25 @@ export async function getEconomicsReportForUser(
     ? report.buckets.map((bucket) => buildUsageCostBucket(bucket, timeline))
     : [];
 
+  const hasWaterTariffs =
+    timeline.amountOf("water_price") !== null || timeline.amountOf("sewage_price") !== null;
+  const water: WaterCostReport[] = [];
+  if (hasWaterTariffs) {
+    for (const meter of await listMeters(userId)) {
+      if (meter.type !== "water") continue;
+      const meterReport = await getMeterReportForUser(
+        userId,
+        meter.id,
+        granularity,
+        fromDate,
+        toDate,
+      );
+      water.push(
+        buildWaterCostReport(meter.id, meter.name, meter.unit, meterReport.buckets, timeline),
+      );
+    }
+  }
+
   return {
     granularity,
     currency: "EUR",
@@ -410,5 +515,6 @@ export async function getEconomicsReportForUser(
         totalCostEur: sumOf(usageBuckets.map((bucket) => bucket.totalCostEur)),
       },
     },
+    water,
   };
 }

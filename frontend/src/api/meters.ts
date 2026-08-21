@@ -12,6 +12,7 @@ export type MeterRole =
   | 'hot_water_pv'
   | 'ev_charger_total'
   | 'ev_charger_pv'
+  | 'compressor_hours'
 
 export interface MeterListItem {
   id: number
@@ -464,11 +465,216 @@ export interface EconomicsReport {
     buckets: UsageCostBucket[]
     totals: Omit<UsageCostBucket, 'key' | 'label' | 'periodStart' | 'periodEnd'>
   }
+  /** One entry per visible water meter; empty without water tariffs. */
+  water: WaterCostReport[]
+}
+
+export interface WaterCostBucket {
+  key: string
+  label: string
+  periodStart: string
+  periodEnd: string
+  volume: number
+  waterCostEur: number | null
+  sewageCostEur: number | null
+  baseCostEur: number | null
+  totalCostEur: number | null
+}
+
+export interface WaterCostReport {
+  meterId: number
+  name: string
+  unit: string
+  buckets: WaterCostBucket[]
+  totalVolume: number
+  totalCostEur: number | null
 }
 
 export function getEconomicsReport(granularity: MeterReportGranularity = 'month') {
   const q = new URLSearchParams({ granularity })
   return apiFetch<EconomicsReport>(`/meters/reports/economics?${q}`)
+}
+
+// ── Technology comparisons (gas heating / petrol car) ──────────────────────
+
+export interface ComparisonAssumption {
+  kind: ElectricityTariffKind
+  label: string
+  amount: number
+  unit: ElectricityTariffUnit
+}
+
+/** A figure with the range the SCOP uncertainty spans. */
+export interface CostRange {
+  low: number | null
+  mid: number | null
+  high: number | null
+}
+
+export interface HeatingComparisonBucket {
+  key: string
+  label: string
+  periodStart: string
+  periodEnd: string
+  heatPumpKwh: number | null
+  heatPumpCostEur: number | null
+  heatDeliveredKwh: CostRange
+  gasKwh: CostRange
+  gasCostEur: CostRange
+  /** Positive = the heat pump was cheaper. */
+  savingsEur: CostRange
+}
+
+export interface HeatingComparison {
+  buckets: HeatingComparisonBucket[]
+  totalHeatPumpCostEur: number | null
+  totalGasCostEur: CostRange
+  totalSavingsEur: CostRange
+  avoidedCo2Kg: number | null
+  scop: number | null
+  scopRange: { low: number; high: number } | null
+  assumptions: ComparisonAssumption[]
+}
+
+export interface CarComparisonBucket {
+  key: string
+  label: string
+  periodStart: string
+  periodEnd: string
+  chargedKwh: number | null
+  evCostEur: number | null
+  kilometers: number | null
+  petrolLitres: number | null
+  petrolCostEur: number | null
+  savingsEur: number | null
+}
+
+export interface CarComparison {
+  buckets: CarComparisonBucket[]
+  totalChargedKwh: number | null
+  totalKilometers: number | null
+  totalEvCostEur: number | null
+  totalPetrolCostEur: number | null
+  totalSavingsEur: number | null
+  evCentsPerKm: number | null
+  petrolCentsPerKm: number | null
+  avoidedCo2Kg: number | null
+  assumptions: ComparisonAssumption[]
+}
+
+export interface ComparisonsReport {
+  granularity: MeterReportGranularity
+  currency: 'EUR'
+  from: string | null
+  to: string | null
+  hasHeatingAssumptions: boolean
+  hasCarAssumptions: boolean
+  heating: HeatingComparison | null
+  car: CarComparison | null
+}
+
+export function getComparisonsReport(granularity: MeterReportGranularity = 'month') {
+  const q = new URLSearchParams({ granularity })
+  return apiFetch<ComparisonsReport>(`/meters/reports/comparisons?${q}`)
+}
+
+// ── Equipment condition ────────────────────────────────────────────────────
+
+export interface OperatingHoursBucket {
+  key: string
+  label: string
+  periodStart: string
+  periodEnd: string
+  hours: number
+  /** Share of the measured time the machine actually ran, 0..1. */
+  runtimeShare: number | null
+  coverage: number
+}
+
+export interface OperatingHoursMetric {
+  meterId: number
+  name: string
+  unit: string
+  buckets: OperatingHoursBucket[]
+  totalHours: number
+  averageRuntimeShare: number | null
+}
+
+export interface CompressorEfficiencyBucket {
+  key: string
+  label: string
+  periodStart: string
+  periodEnd: string
+  electricityKwh: number | null
+  compressorHours: number | null
+  /** Electricity per hour of running — rising means losing efficiency. */
+  kwhPerHour: number | null
+}
+
+export interface CompressorEfficiency {
+  electricityMeterId: number
+  hoursMeterId: number
+  buckets: CompressorEfficiencyBucket[]
+  earliestKwhPerHour: number | null
+  latestKwhPerHour: number | null
+  changePercent: number | null
+  slopePerYear: number | null
+}
+
+export interface WaterBaselineBucket {
+  key: string
+  label: string
+  periodStart: string
+  periodEnd: string
+  /** Lowest daily rate among the reading intervals starting in this period. */
+  minDailyRate: number | null
+  averageDailyRate: number | null
+  intervals: number
+}
+
+export interface WaterBaseline {
+  meterId: number
+  name: string
+  unit: string
+  buckets: WaterBaselineBucket[]
+  latestMinDailyRate: number | null
+  previousYearMinDailyRate: number | null
+  changePercent: number | null
+  slopePerYear: number | null
+}
+
+export interface PvYieldBucket {
+  key: string
+  label: string
+  periodStart: string
+  periodEnd: string
+  productionKwh: number
+  yieldPerKwp: number | null
+  coverage: number
+}
+
+export interface PvYieldReport {
+  meterId: number
+  capacityKwp: number
+  buckets: PvYieldBucket[]
+  bestYieldPerKwp: number | null
+  latestYieldPerKwp: number | null
+  changeVsBestPercent: number | null
+}
+
+export interface EquipmentReport {
+  granularity: MeterReportGranularity
+  from: string | null
+  to: string | null
+  operatingHours: OperatingHoursMetric[]
+  compressorEfficiency: CompressorEfficiency | null
+  waterBaselines: WaterBaseline[]
+  pvYield: PvYieldReport | null
+}
+
+export function getEquipmentReport(granularity: MeterReportGranularity = 'month') {
+  const q = new URLSearchParams({ granularity })
+  return apiFetch<EquipmentReport>(`/meters/reports/equipment?${q}`)
 }
 
 // ── Electricity tariffs / prices ───────────────────────────────────────────
@@ -483,8 +689,35 @@ export type ElectricityTariffKind =
   | 'opportunity_cost_year'
   | 'opportunity_cost_total'
   | 'amortization_years'
+  // Assumptions for the gas-heating / petrol-car comparisons.
+  | 'gas_price'
+  | 'gas_base_price'
+  | 'boiler_efficiency'
+  | 'heat_pump_scop'
+  | 'ev_consumption'
+  | 'petrol_consumption'
+  | 'petrol_price'
+  | 'grid_co2'
+  | 'gas_co2'
+  | 'petrol_co2'
+  | 'pv_capacity_kwp'
+  | 'water_price'
+  | 'water_base_price'
+  | 'sewage_price'
 
-export type ElectricityTariffUnit = 'eur_per_kwh' | 'eur_per_month' | 'eur' | 'years'
+export type ElectricityTariffUnit =
+  | 'eur_per_kwh'
+  | 'eur_per_month'
+  | 'eur'
+  | 'years'
+  | 'ratio'
+  | 'kwh_per_100km'
+  | 'l_per_100km'
+  | 'eur_per_l'
+  | 'kg_per_kwh'
+  | 'kg_per_l'
+  | 'kw'
+  | 'eur_per_m3'
 
 export interface ElectricityTariff {
   id: number
@@ -647,6 +880,7 @@ export const METER_ROLE_LABELS: Record<MeterRole, string> = {
   hot_water_pv: 'Warmwasser PV',
   ev_charger_total: 'E-Auto/Wallbox gesamt',
   ev_charger_pv: 'E-Auto/Wallbox PV',
+  compressor_hours: 'Verdichter-Betriebsstunden',
 }
 
 export const ELECTRICITY_TARIFF_KIND_LABELS: Record<ElectricityTariffKind, string> = {
@@ -659,6 +893,20 @@ export const ELECTRICITY_TARIFF_KIND_LABELS: Record<ElectricityTariffKind, strin
   opportunity_cost_year: 'Opportunitätskosten/Jahr',
   opportunity_cost_total: 'Opportunitätskosten gesamt',
   amortization_years: 'Amortisation',
+  gas_price: 'Gaspreis',
+  gas_base_price: 'Gas-Grundpreis',
+  boiler_efficiency: 'Kesselwirkungsgrad',
+  heat_pump_scop: 'Jahresarbeitszahl (JAZ)',
+  ev_consumption: 'Verbrauch E-Auto',
+  petrol_consumption: 'Verbrauch Benziner',
+  petrol_price: 'Benzinpreis',
+  grid_co2: 'CO₂-Faktor Netzstrom',
+  gas_co2: 'CO₂-Faktor Erdgas',
+  petrol_co2: 'CO₂-Faktor Benzin',
+  pv_capacity_kwp: 'PV-Anlagenleistung',
+  water_price: 'Wasserpreis',
+  water_base_price: 'Wasser-Grundgebühr',
+  sewage_price: 'Abwasserpreis',
 }
 
 export const ELECTRICITY_TARIFF_UNIT_LABELS: Record<ElectricityTariffUnit, string> = {
@@ -666,4 +914,12 @@ export const ELECTRICITY_TARIFF_UNIT_LABELS: Record<ElectricityTariffUnit, strin
   eur_per_month: '€/Monat',
   eur: '€',
   years: 'Jahre',
+  ratio: 'Faktor',
+  kwh_per_100km: 'kWh/100 km',
+  l_per_100km: 'l/100 km',
+  eur_per_l: '€/l',
+  kg_per_kwh: 'kg CO₂/kWh',
+  kg_per_l: 'kg CO₂/l',
+  kw: 'kWp',
+  eur_per_m3: '€/m³',
 }
