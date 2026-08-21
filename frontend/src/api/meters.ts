@@ -312,6 +312,7 @@ export interface EnergyReportBucket {
   hotWaterPvShare: number | null
   evChargerTotal: number | null
   evChargerPv: number | null
+  evChargerGrid: number | null
   evChargerPvShare: number | null
   costs: EnergyTariffCosts | null
 }
@@ -389,6 +390,85 @@ export interface ConsumptionTrendsReport {
 
 export function getConsumptionTrends() {
   return apiFetch<ConsumptionTrendsReport>('/meters/reports/trends')
+}
+
+// ── PV economics / cost per application ────────────────────────────────────
+
+export interface PvEconomicsBucket {
+  key: string
+  label: string
+  periodStart: string
+  periodEnd: string
+  /** Electricity cost as it actually was, with the PV system. */
+  netElectricityCostEur: number | null
+  /** What the same consumption would have cost bought entirely from the grid. */
+  noPvElectricityCostEur: number | null
+  savingsEur: number | null
+  pvBenefitEur: number | null
+  cumulativeSavingsEur: number | null
+  cumulativePvBenefitEur: number | null
+}
+
+export interface PvAmortization {
+  investmentNetEur: number | null
+  investmentVatEur: number | null
+  investmentTotalEur: number | null
+  opportunityCostPerYearEur: number | null
+  cumulativePvBenefitEur: number
+  remainingEur: number | null
+  remainingWithOpportunityEur: number | null
+  benefitLast12MonthsEur: number | null
+  yearsElapsed: number
+  payoffReached: boolean
+  projectedPayoffDate: string | null
+  projectedPayoffDateWithOpportunity: string | null
+}
+
+export interface ApplicationCost {
+  totalKwh: number | null
+  pvKwh: number | null
+  gridKwh: number | null
+  costEur: number | null
+}
+
+export interface UsageCostBucket {
+  key: string
+  label: string
+  periodStart: string
+  periodEnd: string
+  heating: ApplicationCost
+  hotWater: ApplicationCost
+  evCharger: ApplicationCost
+  household: ApplicationCost
+  /** Standing charge, which belongs to no single application. */
+  baseCostEur: number | null
+  totalCostEur: number | null
+}
+
+export interface EconomicsReport {
+  granularity: MeterReportGranularity
+  currency: 'EUR'
+  from: string | null
+  to: string | null
+  hasTariffs: boolean
+  hasInvestmentData: boolean
+  pv: {
+    buckets: PvEconomicsBucket[]
+    totalSavingsEur: number | null
+    totalPvBenefitEur: number | null
+    totalNetElectricityCostEur: number | null
+    totalNoPvElectricityCostEur: number | null
+    amortization: PvAmortization | null
+  }
+  usageCosts: {
+    buckets: UsageCostBucket[]
+    totals: Omit<UsageCostBucket, 'key' | 'label' | 'periodStart' | 'periodEnd'>
+  }
+}
+
+export function getEconomicsReport(granularity: MeterReportGranularity = 'month') {
+  const q = new URLSearchParams({ granularity })
+  return apiFetch<EconomicsReport>(`/meters/reports/economics?${q}`)
 }
 
 // ── Electricity tariffs / prices ───────────────────────────────────────────

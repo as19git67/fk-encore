@@ -112,6 +112,7 @@ export interface EnergyReportBucket {
   hotWaterPvShare: number | null;
   evChargerTotal: number | null;
   evChargerPv: number | null;
+  evChargerGrid: number | null;
   evChargerPvShare: number | null;
   costs: EnergyTariffCostResult | null;
 }
@@ -551,6 +552,10 @@ export function buildEnergyReportFromMeterReports(
         : null;
     const evChargerTotal = byRole.get("ev_charger_total")?.get(key)?.consumption ?? null;
     const evChargerPv = byRole.get("ev_charger_pv")?.get(key)?.consumption ?? null;
+    const evChargerGrid =
+      evChargerTotal !== null && evChargerPv !== null
+        ? roundReportValue(Math.max(0, evChargerTotal - evChargerPv), decimals)
+        : null;
     const evChargerPvShare =
       evChargerTotal !== null && evChargerTotal > 0 && evChargerPv !== null
         ? roundRatio(evChargerPv / evChargerTotal)
@@ -608,6 +613,7 @@ export function buildEnergyReportFromMeterReports(
       hotWaterPvShare,
       evChargerTotal,
       evChargerPv,
+      evChargerGrid,
       evChargerPvShare,
       costs: null,
     };
@@ -717,6 +723,7 @@ export function buildEnergyReportFromMeterReports(
           : null,
       evChargerTotal,
       evChargerPv,
+      evChargerGrid: sum((bucket) => bucket.evChargerGrid),
       evChargerPvShare:
         evChargerTotal !== null && evChargerTotal > 0 && evChargerPv !== null
           ? roundRatio(evChargerPv / evChargerTotal)

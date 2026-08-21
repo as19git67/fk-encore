@@ -19,6 +19,7 @@ import {
   deleteMeter,
   getEnergyReport,
   getConsumptionTrends,
+  getEconomicsReport,
   listElectricityTariffs,
   createElectricityTariff,
   updateElectricityTariff,
@@ -32,6 +33,7 @@ import {
   ELECTRICITY_TARIFF_KIND_LABELS,
   ELECTRICITY_TARIFF_UNIT_LABELS,
   type ConsumptionTrend,
+  type EconomicsReport,
   type EnergyReport,
   type ElectricityTariff,
   type ElectricityTariffKind,
@@ -42,6 +44,7 @@ import {
   type MeterType,
 } from '../api/meters'
 import MeterTrendDashboard from '../components/MeterTrendDashboard.vue'
+import MeterEconomicsPanel from '../components/MeterEconomicsPanel.vue'
 import { listGroups, type GroupSummary } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
 import { toLocalIsoDateTime } from '../utils/dateFormat'
@@ -59,6 +62,8 @@ const energyGranularity = ref<MeterReportGranularity>('month')
 const loadingEnergyReport = ref(false)
 const trends = ref<ConsumptionTrend[]>([])
 const loadingTrends = ref(false)
+const economics = ref<EconomicsReport | null>(null)
+const loadingEconomics = ref(false)
 const loading = ref(false)
 const error = ref('')
 
@@ -93,12 +98,28 @@ async function load() {
     const [mRes, gRes] = await Promise.all([listMeters(), loadGroups()])
     meters.value = mRes.meters
     groups.value = gRes
-    await Promise.all([loadEnergyReport(), loadTrends()])
+    await Promise.all([loadEnergyReport(), loadTrends(), loadEconomics()])
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Zähler'
   } finally {
     loading.value = false
   }
+}
+
+async function loadEconomics() {
+  loadingEconomics.value = true
+  try {
+    economics.value = await getEconomicsReport(energyGranularity.value)
+  } catch {
+    economics.value = null
+  } finally {
+    loadingEconomics.value = false
+  }
+}
+
+/** Both reports are priced from the tariffs, so a tariff change refreshes both. */
+async function reloadCostReports() {
+  await Promise.all([loadEnergyReport(), loadEconomics()])
 }
 
 async function loadTrends() {
@@ -709,7 +730,7 @@ async function saveTariff() {
     else await updateElectricityTariff(tariffForm.value.id, req)
     tariffForm.value = emptyTariffForm()
     await loadTariffs()
-    await loadEnergyReport()
+    await reloadCostReports()
   } catch (err: any) {
     error.value = err.message || 'Strompreis konnte nicht gespeichert werden'
   } finally {
@@ -728,7 +749,7 @@ async function handleDeleteTariff(tariff: ElectricityTariff) {
     accept: async () => {
       await deleteElectricityTariff(tariff.id)
       await loadTariffs()
-      await loadEnergyReport()
+      await reloadCostReports()
     },
   })
 }
@@ -744,7 +765,7 @@ async function handleImportPrices() {
       ? `Strompreise waren bereits importiert; ${res.updated} Einträge aktualisiert.`
       : `Strompreise importiert: ${res.created} neu, ${res.updated} aktualisiert.`
     await loadTariffs()
-    await loadEnergyReport()
+    await reloadCostReports()
   } catch (err: any) {
     error.value = err.message || 'Strompreise konnten nicht importiert werden'
   } finally {
@@ -827,7 +848,7 @@ onMounted(load)
               option-value="value"
               size="small"
               :allow-empty="false"
-              @change="loadEnergyReport"
+              @change="reloadCostReports"
             />
           </div>
         </div>
@@ -975,6 +996,12 @@ onMounted(load)
           Noch keine vollständigen PV-Zeiträume mit Bezug, Einspeisung und Produktion vorhanden.
         </div>
       </section>
+
+      <MeterEconomicsPanel
+        v-if="loadingEconomics || economics"
+        :report="economics"
+        :loading="loadingEconomics"
+      />
 
       <div class="meter-grid">
       <div

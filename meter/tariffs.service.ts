@@ -53,6 +53,13 @@ export interface EnergyTariffCostInput {
   totalConsumption: number | null;
 }
 
+export interface EnergyPeriodPrices {
+  gridImportPricePerKwh: number | null;
+  feedInPricePerKwh: number | null;
+  selfConsumptionPricePerKwh: number | null;
+  baseCostEur: number | null;
+}
+
 export interface EnergyTariffCostResult {
   gridImportCostEur: number | null;
   baseCostEur: number | null;
@@ -338,6 +345,33 @@ export class EnergyTariffTimeline {
       cursor = segmentEnd;
     }
     return cost;
+  }
+
+  /**
+   * The prices in force over a period, time-weighted across price changes.
+   * Callers that value individual consumption shares (heating, hot water,
+   * wallbox) need the same prices the bucket costs are built from.
+   */
+  pricesForPeriod(periodStart: string, periodEnd: string): EnergyPeriodPrices {
+    const start = startOfUtcDay(periodStart);
+    const end = startOfUtcDay(periodEnd);
+    const gridImportPricePerKwh = this.weightedKwhPrice("grid_import", start, end);
+    return {
+      gridImportPricePerKwh,
+      feedInPricePerKwh: this.weightedKwhPrice("feed_in", start, end),
+      // Falls back to the grid price: a kWh used instead of bought is worth at
+      // least what buying it would have cost.
+      selfConsumptionPricePerKwh:
+        this.weightedKwhPrice("self_consumption_value", start, end) ?? gridImportPricePerKwh,
+      baseCostEur: this.baseCost(start, end),
+    };
+  }
+
+  /** Latest value of a single-figure tariff entry such as the PV investment. */
+  amountOf(kind: ElectricityTariffKind): number | null {
+    const entries = this.entries(kind);
+    if (entries.length === 0) return null;
+    return Number(entries[entries.length - 1].amount);
   }
 
   costsForBucket(input: EnergyTariffCostInput): EnergyTariffCostResult {
