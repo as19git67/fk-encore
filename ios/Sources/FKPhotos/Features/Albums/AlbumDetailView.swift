@@ -193,12 +193,13 @@ struct AlbumDetailView: View {
         }
         .navigationTitle(isSelecting ? "\(selectedIds.count) ausgewählt" : (album?.name ?? "Album"))
         .navigationBarTitleDisplayMode(.large)
-        .navigationDestination(item: $fullscreenNav) { _ in
+        .navigationDestination(item: $fullscreenNav) { nav in
             PhotoFullscreenView(
                 photos: displayedPhotos,
                 currentIndex: $fullscreenIndex,
                 albumContext: album.map { .init(id: albumId, name: $0.name) },
                 curationStats: curationStats,
+                autoStartSlideshow: nav.autoStartSlideshow,
                 onPhotoRemoved: { id in photos.removeAll { $0.id == id } }
             )
         }
@@ -264,9 +265,25 @@ struct AlbumDetailView: View {
                 // Sharing, properties and deletion share one overflow menu so
                 // the toolbar stays usable (same pattern as the iOS media
                 // library album detail).
-                if canShareAlbum || canEditAlbum || canDeleteAlbum {
+                if canStartSlideshow || canShareAlbum || canEditAlbum || canDeleteAlbum {
                     ToolbarItem(placement: .primaryAction) {
                         Menu {
+                            // Available to anyone who can see the album —
+                            // playing photos back needs no edit rights.
+                            if canStartSlideshow {
+                                Button {
+                                    fullscreenIndex = 0
+                                    fullscreenNav = FullscreenNav(
+                                        startIndex: 0,
+                                        autoStartSlideshow: true
+                                    )
+                                } label: {
+                                    Label("Diashow", systemImage: "play.rectangle")
+                                }
+                                if canShareAlbum || canEditAlbum || canDeleteAlbum {
+                                    Divider()
+                                }
+                            }
                             if canShareAlbum {
                                 Button {
                                     showShareSheet = true
@@ -581,7 +598,15 @@ struct AlbumDetailView: View {
         isLoading = false
     }
 
+    /// A slideshow needs something to advance to, so a single-photo album
+    /// does not offer one.
+    private var canStartSlideshow: Bool {
+        displayedPhotos.count > 1
+    }
+
     private struct FullscreenNav: Hashable {
         let startIndex: Int
+        /// Set by the Diashow menu item so the viewer opens already playing.
+        var autoStartSlideshow: Bool = false
     }
 }

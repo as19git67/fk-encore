@@ -141,6 +141,62 @@ final class SlideshowTests: XCTestCase {
         }
     }
 
+    // MARK: - Immersive chrome
+
+    /// Outside the slideshow the chrome is simply always up — immersive mode is
+    /// a property of playback, not of the viewer.
+    func testChromeIsAlwaysVisibleWhenNotPlaying() {
+        XCTAssertTrue(SlideshowChrome.isVisible(playing: false, revealed: false))
+        XCTAssertTrue(SlideshowChrome.isVisible(playing: false, revealed: true))
+    }
+
+    /// Starting playback drops to the photo alone.
+    func testChromeHidesWhilePlaying() {
+        XCTAssertFalse(SlideshowChrome.isVisible(playing: true, revealed: false))
+    }
+
+    /// A tap brings it back mid-playback.
+    func testRevealShowsChromeDuringPlayback() {
+        XCTAssertTrue(SlideshowChrome.isVisible(playing: true, revealed: true))
+    }
+
+    /// Only a playing slideshow has chrome worth revealing; otherwise the tap
+    /// is left to whatever else wants it.
+    func testTapOnlyRevealsWhilePlaying() {
+        XCTAssertTrue(SlideshowChrome.shouldReveal(playing: true))
+        XCTAssertFalse(SlideshowChrome.shouldReveal(playing: false))
+    }
+
+    /// The auto-hide countdown runs only while playing and revealed — never
+    /// against chrome that is up because playback is stopped, which would
+    /// otherwise hide the toolbar of a paused viewer.
+    func testAutoHideArmsOnlyWhilePlayingAndRevealed() {
+        XCTAssertTrue(SlideshowChrome.shouldArmAutoHide(playing: true, revealed: true))
+        XCTAssertFalse(SlideshowChrome.shouldArmAutoHide(playing: true, revealed: false))
+        XCTAssertFalse(SlideshowChrome.shouldArmAutoHide(playing: false, revealed: true))
+        XCTAssertFalse(SlideshowChrome.shouldArmAutoHide(playing: false, revealed: false))
+    }
+
+    /// Whenever the timer is armed the chrome is on screen — arming it against
+    /// already-hidden chrome would be a countdown to nothing.
+    func testAutoHideOnlyArmsWhileChromeIsVisible() {
+        for playing in [true, false] {
+            for revealed in [true, false] {
+                if SlideshowChrome.shouldArmAutoHide(playing: playing, revealed: revealed) {
+                    XCTAssertTrue(
+                        SlideshowChrome.isVisible(playing: playing, revealed: revealed),
+                        "playing=\(playing) revealed=\(revealed)"
+                    )
+                }
+            }
+        }
+    }
+
+    func testAutoHideDelayIsAFewSeconds() {
+        XCTAssertGreaterThanOrEqual(SlideshowChrome.autoHideDelay, 2)
+        XCTAssertLessThanOrEqual(SlideshowChrome.autoHideDelay, 6)
+    }
+
     // MARK: - Caption
 
     func testCaptionShowsWhilePlayingWithADescription() {
