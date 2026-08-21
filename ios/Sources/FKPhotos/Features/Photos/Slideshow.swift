@@ -80,3 +80,37 @@ enum Slideshow {
         return !trimmed.isEmpty
     }
 }
+
+/// Chrome (toolbars, status bar, captions) visibility while the slideshow runs.
+///
+/// A running slideshow is meant to be the photo and nothing else, so the chrome
+/// goes away when playback starts. A tap brings it back briefly — long enough to
+/// reach pause or step away — and it hides itself again if the tap isn't
+/// followed by another. Outside playback none of this applies: the chrome is
+/// simply always up.
+///
+/// Pure, like `Slideshow`: the view owns the reveal flag and the hide timer.
+enum SlideshowChrome {
+
+    /// How long a tap keeps the chrome on screen before it fades out again.
+    static let autoHideDelay: TimeInterval = 3
+
+    /// Whether the chrome belongs on screen. Outside the slideshow it always
+    /// does — immersive mode is a property of playback, not of the viewer.
+    static func isVisible(playing: Bool, revealed: Bool) -> Bool {
+        !playing || revealed
+    }
+
+    /// Whether a tap on the photo should reveal the chrome. Only meaningful
+    /// during playback; otherwise the chrome is already up and the tap is left
+    /// to whatever else wants it.
+    static func shouldReveal(playing: Bool) -> Bool {
+        playing
+    }
+
+    /// Whether the auto-hide timer should run. Re-armed on every tap, so a
+    /// second tap extends the reveal rather than cutting it short.
+    static func shouldArmAutoHide(playing: Bool, revealed: Bool) -> Bool {
+        playing && revealed
+    }
+}

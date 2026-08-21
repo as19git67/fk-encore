@@ -127,6 +127,18 @@ Gleich wie im Web:
 - **Details pausieren nicht**, blenden aber die Caption aus.
 - **Beschreibungs-Caption** einzeilig mit Ellipsis über dem Bild, nur während
   des Laufs und nur bei nicht-leerer Beschreibung.
+- **Immersiver Ablauf:** Während die Diashow läuft, zeigt der Viewer nur das
+  Bild — Navigations- und Bottom-Bar, Statusleiste und Home-Indicator werden
+  ausgeblendet. Ein **einfacher Tap** auf das Foto blendet die Bedienelemente
+  für `SlideshowChrome.autoHideDelay` (3 s) wieder ein; tippt der Nutzer erneut,
+  verlängert das die Anzeige, sonst verschwindet sie wieder. Der Doppel-Tap
+  bleibt der Zoom (`singleTap.require(toFail: doubleTap)`). Regeln in
+  `SlideshowChrome`, unit-getestet; das Web kennt diesen Modus (noch) nicht.
+- **Start aus dem Album-Raster:** Das Überlaufmenü oben rechts in
+  `AlbumDetailView` hat einen Punkt **„Diashow"**, der das Vollbild bei Foto 1
+  direkt spielend öffnet (`autoStartSlideshow`). Sichtbar ab zwei Fotos — für
+  ein einzelnes gibt es nichts weiterzuschalten — und unabhängig von
+  Schreibrechten.
 - **Warten auf das geladene Bild** (`currentLoaded`): Der Timer startet erst,
   wenn das aktuelle Foto steht, damit die Wartezeit die Betrachtungszeit ist
   und nicht am Platzhalter verstreicht. `ThumbnailLoader.onLoadSettled` meldet
@@ -164,4 +176,6 @@ Damit bleibt als inhaltlicher Unterschied zum Web nur noch der letzte Punkt.
 | `ios/Sources/FKPhotos/Features/Photos/Slideshow.swift` | iOS: reine Logik + Intervall-Optionen/Persistenz |
 | `ios/Sources/FKPhotos/Features/Photos/PhotoFullscreenView.swift` | iOS: Play/Pause-Menu, Advance-Timer, Caption, `settledPhotoIds` |
 | `ios/Sources/FKPhotos/Core/Storage/ThumbnailLoader.swift` | iOS: `onLoadSettled` / `isSettled` — Ladesignal für den Advance-Timer |
+| `ios/Sources/FKPhotos/Core/ZoomableImageView.swift` | iOS: `onSingleTap` — Tap zum Einblenden der Bedienelemente |
+| `ios/Sources/FKPhotos/Features/Albums/AlbumDetailView.swift` | iOS: Menüpunkt „Diashow" (`autoStartSlideshow`) |
 | `ios/Tests/FKPhotosTests/SlideshowTests.swift` | iOS: Unit-Tests der Logik |
