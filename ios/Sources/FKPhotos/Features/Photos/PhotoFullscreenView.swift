@@ -43,6 +43,11 @@ struct PhotoFullscreenView: View {
     /// rather than index so it survives a photo being spliced out of the list
     /// by a delete or an album removal.
     @State private var settledPhotoIds: Set<Int> = []
+    /// Chrome revealed by a tap during playback. Rules in `SlideshowChrome`.
+    @State private var chromeRevealed = false
+    /// Bumped on every reveal so the auto-hide timer re-arms — a second tap
+    /// extends the reveal instead of inheriting the first tap's countdown.
+    @State private var chromeRevealToken = 0
     @AppStorage(Slideshow.intervalDefaultsKey)
     private var slideshowIntervalSeconds: Double = Slideshow.defaultInterval
 
@@ -72,11 +77,16 @@ struct PhotoFullscreenView: View {
     }
 
     /// Multi-photo init for paged navigation (e.g. PhotoGridView).
+    ///
+    /// `autoStartSlideshow` is for entry points that mean "play this", such as
+    /// the album grid's Diashow menu item — everywhere else the viewer opens
+    /// stopped and the user arms it from the bottom bar.
     init(
         photos: [PhotoWithCuration],
         currentIndex: Binding<Int>,
         albumContext: AlbumContext? = nil,
         curationStats: [Int: PhotoCurationStats] = [:],
+        autoStartSlideshow: Bool = false,
         onPhotoRemoved: ((Int) -> Void)? = nil
     ) {
         self.photos = photos
@@ -88,6 +98,7 @@ struct PhotoFullscreenView: View {
         self.onPhotoRemoved = onPhotoRemoved
         self.albumContext = albumContext
         self.curationStats = curationStats
+        _isPlaying = State(initialValue: autoStartSlideshow)
     }
 
     /// Multi-photo init for person context: paged navigation with per-photo face boxes.
@@ -148,8 +159,30 @@ struct PhotoFullscreenView: View {
         "\(isPlaying)-\(currentIndex)-\(slideshowInterval)-\(currentPhotoLoaded)"
     }
 
+    /// Whether toolbars, status bar and captions are on screen.
+    private var chromeVisible: Bool {
+        SlideshowChrome.isVisible(playing: isPlaying, revealed: chromeRevealed)
+    }
+
     private func toggleSlideshow() {
         isPlaying.toggle()
+        // Starting drops straight into the photo-only view; stopping restores
+        // the chrome, so a stale reveal cannot linger into the next playback.
+        chromeRevealed = false
+        if isPlaying {
+            // The details split is reachable from the same bottom bar, so it can
+            // be open when playback starts — and it is exactly the "something
+            // other than the photo" immersive mode is meant to clear away.
+            withAnimation(.spring(duration: 0.4)) { showDetails = false }
+        }
+    }
+
+    /// A tap on the photo. Only meaningful while playing — otherwise the chrome
+    /// is already up and there is nothing to reveal.
+    private func revealChromeIfPlaying() {
+        guard SlideshowChrome.shouldReveal(playing: isPlaying) else { return }
+        withAnimation(.easeOut(duration: 0.2)) { chromeRevealed = true }
+        chromeRevealToken += 1
     }
 
     var body: some View {
@@ -161,7 +194,8 @@ struct PhotoFullscreenView: View {
                     showDetails: $showDetails,
                     curationStatus: curationBinding(for: photos[index]),
                     curationStats: curationStats[photos[index].id],
-                    onLoadSettled: { id in _ = settledPhotoIds.insert(id) }
+                    onLoadSettled: { id in _ = settledPhotoIds.insert(id) },
+                    onSingleTap: revealChromeIfPlaying
                 )
                 .tag(index)
             }
@@ -172,6 +206,12 @@ struct PhotoFullscreenView: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .tabBar)
+        // A running slideshow shows the photo and nothing else; a tap brings
+        // these back for a few seconds (SlideshowChrome).
+        .toolbar(chromeVisible ? .visible : .hidden, for: .navigationBar, .bottomBar)
+        .statusBarHidden(!chromeVisible)
+        .persistentSystemOverlays(chromeVisible ? .automatic : .hidden)
+        .animation(.easeInOut(duration: 0.25), value: chromeVisible)
         .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { dismiss() } label: {
@@ -368,6 +408,15 @@ struct PhotoFullscreenView: View {
             try? await Task.sleep(for: .seconds(slideshowInterval))
             guard !Task.isCancelled else { return }
             withAnimation { currentIndex += 1 }
+        }
+        .task(id: "\(chromeRevealToken)-\(isPlaying)-\(chromeRevealed)") {
+            guard SlideshowChrome.shouldArmAutoHide(
+                playing: isPlaying,
+                revealed: chromeRevealed
+            ) else { return }
+            try? await Task.sleep(for: .seconds(SlideshowChrome.autoHideDelay))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.25)) { chromeRevealed = false }
         }
         .onDisappear { isPlaying = false }
         .confirmationDialog(
@@ -600,6 +649,8 @@ private struct PhotoPageView: View {
     /// Reports this photo's id once its image has settled, so the slideshow in
     /// the parent can hold the advance until there is something to show.
     let onLoadSettled: ((Int) -> Void)?
+    /// Single tap on the photo, used to reveal the chrome the slideshow hides.
+    let onSingleTap: (() -> Void)?
 
     @State private var loader: ThumbnailLoader
     @State private var viewModel: PhotoMetadataViewModel
@@ -617,12 +668,14 @@ private struct PhotoPageView: View {
         showDetails: Binding<Bool>,
         curationStatus: Binding<CurationStatus>,
         curationStats: PhotoCurationStats? = nil,
-        onLoadSettled: ((Int) -> Void)? = nil
+        onLoadSettled: ((Int) -> Void)? = nil,
+        onSingleTap: (() -> Void)? = nil
     ) {
         self.photo = photo
         self.faceBBox = faceBBox
         self.curationStats = curationStats
         self.onLoadSettled = onLoadSettled
+        self.onSingleTap = onSingleTap
         _loader = State(initialValue: ThumbnailLoader(filename: photo.filename))
         _viewModel = State(initialValue: PhotoMetadataViewModel(photo: photo))
         _showDetails = showDetails
@@ -681,7 +734,7 @@ private struct PhotoPageView: View {
             // Photo (bbox rendered inside ZoomableImageView so it follows zoom/pan)
             Group {
                 if let image = loader.image {
-                    ZoomableImageView(image: image, faceBBox: faceBBox)
+                    ZoomableImageView(image: image, faceBBox: faceBBox, onSingleTap: onSingleTap)
                         .frame(width: geo.size.width, height: height)
                 } else if loader.hasError {
                     Color(.systemBackground)

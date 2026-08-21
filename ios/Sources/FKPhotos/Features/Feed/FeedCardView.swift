@@ -7,8 +7,11 @@ struct FeedCardView: View {
     let onToggleHide: () -> Void
 
     @State private var showComments = false
-    @State private var doubleTapScale: CGFloat = 0
     @State private var imageLoader: FeedImageLoader
+    /// Full photo for the fullscreen viewer, fetched on demand — the feed item
+    /// carries only the handful of fields the card needs.
+    @State private var fullscreenPhoto: PhotoWithCuration?
+    @State private var isOpeningFullscreen = false
 
     init(item: FeedPhotoItem, isHiddenByMe: Bool, onLike: @escaping () -> Void, onToggleHide: @escaping () -> Void) {
         self.item = item
@@ -79,25 +82,18 @@ struct FeedCardView: View {
                     Color.black.opacity(0.45)
                 }
 
-                // Double-tap heart animation
-                Image(systemName: "heart.fill")
-                    .font(.system(size: 80))
-                    .foregroundStyle(.white)
-                    .shadow(radius: 10)
-                    .scaleEffect(doubleTapScale)
-                    .opacity(doubleTapScale > 0 ? 1 : 0)
+                if isOpeningFullscreen {
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(.white)
+                        .shadow(radius: 10)
+                }
             }
             .contentShape(Rectangle())
+            // Double tap opens the photo fullscreen (where pinch-to-zoom
+            // lives); liking stays on the heart button below.
             .onTapGesture(count: 2) {
-                if !item.likedByMe {
-                    onLike()
-                }
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                    doubleTapScale = 1.2
-                }
-                withAnimation(.easeOut(duration: 0.3).delay(0.4)) {
-                    doubleTapScale = 0
-                }
+                Task { await openFullscreen() }
             }
 
             // Actions
@@ -173,10 +169,27 @@ struct FeedCardView: View {
             }
         }
         .opacity(isHiddenByMe ? 0.5 : 1.0)
+        // fullScreenCover rather than a navigation push: the feed card is deep
+        // inside a LazyVStack, and the viewer wants the whole screen anyway.
+        .fullScreenCover(item: $fullscreenPhoto) { photo in
+            NavigationStack {
+                PhotoFullscreenView(photo: photo)
+            }
+        }
         .background(Color(.systemBackground))
         .task {
             await imageLoader.load()
         }
+    }
+
+    /// Fetch the full photo and present it. The feed item has only a filename
+    /// and a few counters, while the viewer needs a real `PhotoWithCuration`.
+    @MainActor
+    private func openFullscreen() async {
+        guard !isOpeningFullscreen else { return }
+        isOpeningFullscreen = true
+        defer { isOpeningFullscreen = false }
+        fullscreenPhoto = try? await APIClient.shared.get("/photos/\(item.photoId)")
     }
 
     private func initials(for name: String?) -> String {

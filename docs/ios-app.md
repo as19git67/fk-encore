@@ -134,6 +134,10 @@ dokumentiert**:
 - **Feed-Tab** mit Ungelesen-Badge (`FeedViewModel.unreadCount`).
 - **Reaktionen / Likes** und **Ausblenden** je Foto.
 - **Kommentare ansehen und schreiben** (`FeedCommentSection`).
+- **Doppel-Tap öffnet das Vollbild** (und damit Pinch-to-Zoom über
+  `ZoomableImageView`); das Foto wird dafür per `GET /photos/:id` nachgeladen,
+  da der Feed-Eintrag nur Dateiname und Zähler enthält. Geherzt wird über den
+  Herz-Button, nicht mehr über den Doppel-Tap.
 
 ### 2.8 Backup & Sync (Kern-Stärke der iOS-App)
 - **Automatischer Upload** (`PhotoSyncService`, `AssetUploadEnqueuer`,
