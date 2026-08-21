@@ -146,13 +146,18 @@ const hasTrends = computed(() => props.trends.length > 0)
           <span class="trend-unit">{{ trend.unit }}</span>
         </span>
 
-        <span class="trend-change" :class="`is-${trend.direction}`">
+        <span
+          class="trend-change"
+          :class="`is-${trend.direction}`"
+          v-tooltip.top="'Letzte 12 Monate gegenüber den 12 Monaten davor'"
+        >
           <i :class="directionIcon[trend.direction]" />
           <template v-if="trend.changeAbsolute !== null">
             {{ fmtSigned(trend.changeAbsolute, trend.decimals) }} {{ trend.unit }}
             <span v-if="fmtPercent(trend.changePercent)" class="trend-percent">
               ({{ fmtPercent(trend.changePercent) }})
             </span>
+            <span class="trend-change-caption">ggü. Vorjahreszeitraum</span>
           </template>
           <template v-else>{{ directionText[trend.direction] }}</template>
         </span>
@@ -170,7 +175,12 @@ const hasTrends = computed(() => props.trends.length > 0)
         <span class="trend-foot">
           {{ periodLabel(trend) }}
           <template v-if="trend.slopePerYear !== null">
-            · {{ fmtSigned(trend.slopePerYear, trend.decimals) }} {{ trend.unit }}/Jahr
+            <br />
+            <span
+              v-tooltip.top="'Langfristige Trendrichtung aus einer Regression über die rollierenden 12-Monats-Summen — geglättet, weicht daher vom Vorjahresvergleich oben ab'"
+            >
+              Trend: {{ fmtSigned(trend.slopePerYear, trend.decimals) }} {{ trend.unit }}/Jahr
+            </span>
           </template>
         </span>
       </button>
@@ -258,12 +268,20 @@ const hasTrends = computed(() => props.trends.length > 0)
 .trend-change {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.35rem;
   font-size: 0.82rem;
   font-variant-numeric: tabular-nums;
-  padding: 0.1rem 0.45rem;
+  padding: 0.15rem 0.45rem;
   border-radius: var(--p-tag-border-radius);
   align-self: flex-start;
+}
+
+.trend-change-caption {
+  flex-basis: 100%;
+  font-size: 0.7rem;
+  font-variant-numeric: normal;
+  opacity: 0.8;
 }
 
 /* More consumption than before is the unwelcome direction, less is welcome. */
