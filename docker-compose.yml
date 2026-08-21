@@ -455,6 +455,8 @@ services:
       POSTGRES_DATABASE: ${DEPLOY_PG_DATABASE:-encore}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       AUDIT_MODEL: ${AUDIT_MODEL:-claude-opus-4-8}
+      TAXONOMY_SCRUB_EXTRA_NAMES: ${TAXONOMY_SCRUB_EXTRA_NAMES:-}
+      TAXONOMY_SCRUB_EXTRA_ADDRESS_FRAGMENTS: ${TAXONOMY_SCRUB_EXTRA_ADDRESS_FRAGMENTS:-}
     volumes:
       - taxonomy_out:/app/scripts/taxonomy/out
     healthcheck:
