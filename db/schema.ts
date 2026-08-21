@@ -2301,7 +2301,9 @@ export type MeterRole =
   | "hot_water_total"
   | "hot_water_pv"
   | "ev_charger_total"
-  | "ev_charger_pv";
+  | "ev_charger_pv"
+  // Compressor hour meter, for the kWh-per-hour efficiency trend (0149).
+  | "compressor_hours";
 export type MeterReadingSource = "manual" | "ocr" | "api";
 export type MeterElectricityTariffKind =
   | "grid_import"
@@ -2323,7 +2325,12 @@ export type MeterElectricityTariffKind =
   | "petrol_price"
   | "grid_co2"
   | "gas_co2"
-  | "petrol_co2";
+  | "petrol_co2"
+  // PV yield and water cost assumptions (migration 0149).
+  | "pv_capacity_kwp"
+  | "water_price"
+  | "water_base_price"
+  | "sewage_price";
 
 // Logical metering point. Persists across physical device swaps; visibility
 // is owner + members of group_id (same groups concept as documents).

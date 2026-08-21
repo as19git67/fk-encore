@@ -4,9 +4,9 @@ Ergänzung zu `docs/utility-meters.md` §5. Beschreibt, welche Auswertungen übe
 den bestehenden Report-MVP hinaus sinnvoll sind, was dafür an Daten und
 Annahmen fehlt, und in welcher Reihenfolge das umgesetzt werden sollte.
 
-Status: **Etappen 6a–6d umgesetzt** (Report-Kern, Rollen-Fix, Trend-Dashboard,
-PV-Ersparnis/Amortisation, Kosten je Anwendung, Gas-/Benzin-Vergleich + CO₂).
-6e offen.
+Status: **Etappe 6 vollständig umgesetzt** (6a–6e). Offen bleibt nur die
+Witterungsbereinigung C3, die eine Gradtagzahl-Quelle voraussetzt, sowie E3
+(Abschlagsvergleich), das an Etappe 8 hängt.
 
 ---
 
@@ -172,7 +172,7 @@ anzeigen kann und die Zahl nachvollziehbar bleibt.
 | **6b** ✅ | Trend-Dashboard (C1, C2, C4) im Frontend | Der direkt gewünschte Nutzen, sobald 6a steht |
 | **6c** ✅ | PV-Ersparnis kumuliert + Amortisation (A1, A2), Kosten je Anwendung (E1) | Nutzt nur vorhandene Tarife, keine neuen Annahmen |
 | **6d** ✅ | Annahmen-Stammdaten + Gas- und Benzin-Vergleich (B1, B2), CO₂ (B3) | Braucht 6c (Kosten je Anwendung) als Vergleichsbasis |
-| **6e** | Anlagenzustand (D1–D3), Saisonprofil (A3), Ertrag je kWp (A4), Wasserkosten (E2) | Nice-to-have, unabhängig voneinander |
+| **6e** ✅ | Anlagenzustand (D1–D3), Ertrag je kWp (A4), Wasserkosten (E2) — Saisonprofil (A3) zurückgestellt | Nice-to-have, unabhängig voneinander |
 | — | Witterungsbereinigung (C3), Abschlagsvergleich (E3) | C3 nur, wenn eine Gradtagzahl-Quelle akzeptiert wird; E3 hängt an Etappe 8 |
 
 Jede Etappe einzeln testbar und deploybar; `npm run test` vor jedem Push.

@@ -1044,6 +1044,13 @@
       "when": 1785888000000,
       "tag": "0148_meter_comparison_assumptions",
       "breakpoints": true
+    },
+    {
+      "idx": 149,
+      "version": "7",
+      "when": 1785974400000,
+      "tag": "0149_meter_equipment_reports",
+      "breakpoints": true
     }
   ]
 }

@@ -22,7 +22,9 @@ export type ElectricityTariffUnit =
   | "l_per_100km"
   | "eur_per_l"
   | "kg_per_kwh"
-  | "kg_per_l";
+  | "kg_per_l"
+  | "kw"
+  | "eur_per_m3";
 
 export interface ElectricityTariff {
   id: number;
@@ -100,6 +102,10 @@ const TARIFF_KINDS: ElectricityTariffKind[] = [
   "grid_co2",
   "gas_co2",
   "petrol_co2",
+  "pv_capacity_kwp",
+  "water_price",
+  "water_base_price",
+  "sewage_price",
 ];
 
 const TARIFF_UNITS: ElectricityTariffUnit[] = [
@@ -113,6 +119,8 @@ const TARIFF_UNITS: ElectricityTariffUnit[] = [
   "eur_per_l",
   "kg_per_kwh",
   "kg_per_l",
+  "kw",
+  "eur_per_m3",
 ];
 
 function parseValidFrom(value: string): string {

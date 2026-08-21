@@ -21,6 +21,7 @@ import {
   getConsumptionTrends,
   getEconomicsReport,
   getComparisonsReport,
+  getEquipmentReport,
   listElectricityTariffs,
   createElectricityTariff,
   updateElectricityTariff,
@@ -35,6 +36,7 @@ import {
   ELECTRICITY_TARIFF_UNIT_LABELS,
   type ConsumptionTrend,
   type ComparisonsReport,
+  type EquipmentReport,
   type EconomicsReport,
   type EnergyReport,
   type ElectricityTariff,
@@ -48,6 +50,7 @@ import {
 import MeterTrendDashboard from '../components/MeterTrendDashboard.vue'
 import MeterEconomicsPanel from '../components/MeterEconomicsPanel.vue'
 import MeterComparisonsPanel from '../components/MeterComparisonsPanel.vue'
+import MeterEquipmentPanel from '../components/MeterEquipmentPanel.vue'
 import { listGroups, type GroupSummary } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
 import { toLocalIsoDateTime } from '../utils/dateFormat'
@@ -69,6 +72,8 @@ const economics = ref<EconomicsReport | null>(null)
 const loadingEconomics = ref(false)
 const comparisons = ref<ComparisonsReport | null>(null)
 const loadingComparisons = ref(false)
+const equipment = ref<EquipmentReport | null>(null)
+const loadingEquipment = ref(false)
 const loading = ref(false)
 const error = ref('')
 
@@ -103,11 +108,28 @@ async function load() {
     const [mRes, gRes] = await Promise.all([listMeters(), loadGroups()])
     meters.value = mRes.meters
     groups.value = gRes
-    await Promise.all([loadEnergyReport(), loadTrends(), loadEconomics(), loadComparisons()])
+    await Promise.all([
+      loadEnergyReport(),
+      loadTrends(),
+      loadEconomics(),
+      loadComparisons(),
+      loadEquipment(),
+    ])
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Zähler'
   } finally {
     loading.value = false
+  }
+}
+
+async function loadEquipment() {
+  loadingEquipment.value = true
+  try {
+    equipment.value = await getEquipmentReport(energyGranularity.value)
+  } catch {
+    equipment.value = null
+  } finally {
+    loadingEquipment.value = false
   }
 }
 
@@ -133,9 +155,14 @@ async function loadEconomics() {
   }
 }
 
-/** All three reports are priced from the tariffs, so a tariff change refreshes them. */
+/** Every one of these is priced from the tariffs, so a tariff change refreshes them. */
 async function reloadCostReports() {
-  await Promise.all([loadEnergyReport(), loadEconomics(), loadComparisons()])
+  await Promise.all([
+    loadEnergyReport(),
+    loadEconomics(),
+    loadComparisons(),
+    loadEquipment(),
+  ])
 }
 
 async function loadTrends() {
@@ -1023,6 +1050,12 @@ onMounted(load)
         v-if="loadingComparisons || comparisons"
         :report="comparisons"
         :loading="loadingComparisons"
+      />
+
+      <MeterEquipmentPanel
+        v-if="loadingEquipment || equipment"
+        :report="equipment"
+        :loading="loadingEquipment"
       />
 
       <div class="meter-grid">

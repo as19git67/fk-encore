@@ -418,6 +418,41 @@ wann“-Logik — eine zweite Tabelle mit dupliziertem CRUD wäre reiner Overhea
 Preise mit Zeitverlauf (Gas, Benzin) werden wie der Stromarbeitspreis
 zeitanteilig über Preisänderungen gewichtet.
 
+### 5.2.3 Anlagenzustand
+
+`GET /meters/reports/equipment?granularity=month|year&from=&to=`
+
+Frühindikatoren, die in den Verbrauchssummen untergehen:
+
+- **kWh je Verdichterstunde** — Wärmepumpen-Strom ÷ Verdichter-Betriebsstunden.
+  Ein steigender Wert heißt: mehr Strom für dieselbe Laufstunde (Vereisung,
+  Kältemittelverlust, verschmutzter Wärmetauscher). Braucht die Rolle
+  `compressor_hours` (Migration 0149, Import setzt sie für „Verdichter“).
+  Das Verhältnis wird nur gebildet, wenn **beide** Seiten vollständig gemessen
+  sind — sonst stünde ein voller Monat Strom gegen einen halben Monat Stunden.
+- **Laufzeitanteil** je Aggregat — Betriebsstunden ÷ gemessene Zeit der
+  Periode. Gemessen wird gegen die tatsächlich abgedeckte Zeit
+  (`coverage`), sonst wirkte ein halb abgelesener Monat halb so ausgelastet.
+- **Wasser-Grundlast** — der *kleinste* Tagesverbrauch einer Periode. Steigt
+  dieser Boden bei gleichbleibendem Gesamtverbrauch, ist das die klassische
+  Signatur eines laufenden Spülkastens oder Lecks. Berechnet aus den rohen
+  Ableseintervallen, **nicht** aus den interpolierten Buckets: ein Minimum
+  lässt sich nicht interpolieren, das Verteilen würde genau die ruhige Phase
+  verwischen, die das Leck sichtbar macht. Jedes Intervall zählt zur Periode
+  seines Startzeitpunkts.
+- **Ertrag je kWp** — Jahresertrag ÷ Anlagenleistung (`pv_capacity_kwp`).
+  Normalisiert das Wetterjahr heraus und ist damit der einzige belastbare
+  Frühindikator für Degradation oder verschmutzte Module. Teilperioden bleiben
+  außen vor, sonst sähe eine Messlücke wie Degradation aus.
+
+### 5.2.4 Wasserkosten
+
+Teil des Wirtschaftlichkeits-Reports (§5.2.1) als `water[]`, ein Eintrag je
+sichtbarem Wasserzähler. Frisch- und Abwasser werden beide auf die gemessene
+Menge berechnet (`water_price`, `sewage_price`), die Grundgebühr
+(`water_base_price`) anteilig über Monatsgrenzen. Ohne Wassertarife bleibt
+die Liste leer.
+
 ### 5.3 Anomalie-Erkennung
 
 Muster von `finance/anomaly-detector.ts` übernehmen:

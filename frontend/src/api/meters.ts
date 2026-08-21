@@ -12,6 +12,7 @@ export type MeterRole =
   | 'hot_water_pv'
   | 'ev_charger_total'
   | 'ev_charger_pv'
+  | 'compressor_hours'
 
 export interface MeterListItem {
   id: number
@@ -464,6 +465,29 @@ export interface EconomicsReport {
     buckets: UsageCostBucket[]
     totals: Omit<UsageCostBucket, 'key' | 'label' | 'periodStart' | 'periodEnd'>
   }
+  /** One entry per visible water meter; empty without water tariffs. */
+  water: WaterCostReport[]
+}
+
+export interface WaterCostBucket {
+  key: string
+  label: string
+  periodStart: string
+  periodEnd: string
+  volume: number
+  waterCostEur: number | null
+  sewageCostEur: number | null
+  baseCostEur: number | null
+  totalCostEur: number | null
+}
+
+export interface WaterCostReport {
+  meterId: number
+  name: string
+  unit: string
+  buckets: WaterCostBucket[]
+  totalVolume: number
+  totalCostEur: number | null
 }
 
 export function getEconomicsReport(granularity: MeterReportGranularity = 'month') {
@@ -554,6 +578,105 @@ export function getComparisonsReport(granularity: MeterReportGranularity = 'mont
   return apiFetch<ComparisonsReport>(`/meters/reports/comparisons?${q}`)
 }
 
+// ── Equipment condition ────────────────────────────────────────────────────
+
+export interface OperatingHoursBucket {
+  key: string
+  label: string
+  periodStart: string
+  periodEnd: string
+  hours: number
+  /** Share of the measured time the machine actually ran, 0..1. */
+  runtimeShare: number | null
+  coverage: number
+}
+
+export interface OperatingHoursMetric {
+  meterId: number
+  name: string
+  unit: string
+  buckets: OperatingHoursBucket[]
+  totalHours: number
+  averageRuntimeShare: number | null
+}
+
+export interface CompressorEfficiencyBucket {
+  key: string
+  label: string
+  periodStart: string
+  periodEnd: string
+  electricityKwh: number | null
+  compressorHours: number | null
+  /** Electricity per hour of running — rising means losing efficiency. */
+  kwhPerHour: number | null
+}
+
+export interface CompressorEfficiency {
+  electricityMeterId: number
+  hoursMeterId: number
+  buckets: CompressorEfficiencyBucket[]
+  earliestKwhPerHour: number | null
+  latestKwhPerHour: number | null
+  changePercent: number | null
+  slopePerYear: number | null
+}
+
+export interface WaterBaselineBucket {
+  key: string
+  label: string
+  periodStart: string
+  periodEnd: string
+  /** Lowest daily rate among the reading intervals starting in this period. */
+  minDailyRate: number | null
+  averageDailyRate: number | null
+  intervals: number
+}
+
+export interface WaterBaseline {
+  meterId: number
+  name: string
+  unit: string
+  buckets: WaterBaselineBucket[]
+  latestMinDailyRate: number | null
+  previousYearMinDailyRate: number | null
+  changePercent: number | null
+  slopePerYear: number | null
+}
+
+export interface PvYieldBucket {
+  key: string
+  label: string
+  periodStart: string
+  periodEnd: string
+  productionKwh: number
+  yieldPerKwp: number | null
+  coverage: number
+}
+
+export interface PvYieldReport {
+  meterId: number
+  capacityKwp: number
+  buckets: PvYieldBucket[]
+  bestYieldPerKwp: number | null
+  latestYieldPerKwp: number | null
+  changeVsBestPercent: number | null
+}
+
+export interface EquipmentReport {
+  granularity: MeterReportGranularity
+  from: string | null
+  to: string | null
+  operatingHours: OperatingHoursMetric[]
+  compressorEfficiency: CompressorEfficiency | null
+  waterBaselines: WaterBaseline[]
+  pvYield: PvYieldReport | null
+}
+
+export function getEquipmentReport(granularity: MeterReportGranularity = 'month') {
+  const q = new URLSearchParams({ granularity })
+  return apiFetch<EquipmentReport>(`/meters/reports/equipment?${q}`)
+}
+
 // ── Electricity tariffs / prices ───────────────────────────────────────────
 
 export type ElectricityTariffKind =
@@ -577,6 +700,10 @@ export type ElectricityTariffKind =
   | 'grid_co2'
   | 'gas_co2'
   | 'petrol_co2'
+  | 'pv_capacity_kwp'
+  | 'water_price'
+  | 'water_base_price'
+  | 'sewage_price'
 
 export type ElectricityTariffUnit =
   | 'eur_per_kwh'
@@ -589,6 +716,8 @@ export type ElectricityTariffUnit =
   | 'eur_per_l'
   | 'kg_per_kwh'
   | 'kg_per_l'
+  | 'kw'
+  | 'eur_per_m3'
 
 export interface ElectricityTariff {
   id: number
@@ -751,6 +880,7 @@ export const METER_ROLE_LABELS: Record<MeterRole, string> = {
   hot_water_pv: 'Warmwasser PV',
   ev_charger_total: 'E-Auto/Wallbox gesamt',
   ev_charger_pv: 'E-Auto/Wallbox PV',
+  compressor_hours: 'Verdichter-Betriebsstunden',
 }
 
 export const ELECTRICITY_TARIFF_KIND_LABELS: Record<ElectricityTariffKind, string> = {
@@ -773,6 +903,10 @@ export const ELECTRICITY_TARIFF_KIND_LABELS: Record<ElectricityTariffKind, strin
   grid_co2: 'CO₂-Faktor Netzstrom',
   gas_co2: 'CO₂-Faktor Erdgas',
   petrol_co2: 'CO₂-Faktor Benzin',
+  pv_capacity_kwp: 'PV-Anlagenleistung',
+  water_price: 'Wasserpreis',
+  water_base_price: 'Wasser-Grundgebühr',
+  sewage_price: 'Abwasserpreis',
 }
 
 export const ELECTRICITY_TARIFF_UNIT_LABELS: Record<ElectricityTariffUnit, string> = {
@@ -786,4 +920,6 @@ export const ELECTRICITY_TARIFF_UNIT_LABELS: Record<ElectricityTariffUnit, strin
   eur_per_l: '€/l',
   kg_per_kwh: 'kg CO₂/kWh',
   kg_per_l: 'kg CO₂/l',
+  kw: 'kWp',
+  eur_per_m3: '€/m³',
 }
