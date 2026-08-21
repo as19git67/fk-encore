@@ -39,6 +39,10 @@ struct PhotoFullscreenView: View {
     // Slideshow (issue #767, Stage 2; rules in docs/photo-slideshow.md).
     // Never auto-starts — the user arms it from the bottom bar.
     @State private var isPlaying = false
+    /// Photo ids whose image has settled (decoded or failed). Keyed by id
+    /// rather than index so it survives a photo being spliced out of the list
+    /// by a delete or an album removal.
+    @State private var settledPhotoIds: Set<Int> = []
     @AppStorage(Slideshow.intervalDefaultsKey)
     private var slideshowIntervalSeconds: Double = Slideshow.defaultInterval
 
@@ -128,10 +132,20 @@ struct PhotoFullscreenView: View {
         photos.indices.contains(currentIndex + 1)
     }
 
-    /// Re-arms the advance timer whenever playback, position or interval
-    /// changes — each change cancels the pending sleep and starts a fresh one.
+    /// Whether the photo on screen has finished loading (or failed). The
+    /// slideshow does not advance off a photo that is still a spinner, so a
+    /// slow connection stretches the gap instead of flicking past placeholders.
+    private var currentPhotoLoaded: Bool {
+        guard let photo = currentPhoto else { return false }
+        return settledPhotoIds.contains(photo.id)
+    }
+
+    /// Re-arms the advance timer whenever playback, position, interval or the
+    /// current photo's load state changes — each change cancels the pending
+    /// sleep and starts a fresh one. Including the load state is what makes the
+    /// timer start counting from the moment the photo is actually visible.
     private var slideshowTimerKey: String {
-        "\(isPlaying)-\(currentIndex)-\(slideshowInterval)"
+        "\(isPlaying)-\(currentIndex)-\(slideshowInterval)-\(currentPhotoLoaded)"
     }
 
     private func toggleSlideshow() {
@@ -146,7 +160,8 @@ struct PhotoFullscreenView: View {
                     faceBBox: index < bboxes.count ? bboxes[index] : nil,
                     showDetails: $showDetails,
                     curationStatus: curationBinding(for: photos[index]),
-                    curationStats: curationStats[photos[index].id]
+                    curationStats: curationStats[photos[index].id],
+                    onLoadSettled: { id in _ = settledPhotoIds.insert(id) }
                 )
                 .tag(index)
             }
@@ -340,7 +355,8 @@ struct PhotoFullscreenView: View {
             guard Slideshow.shouldAdvance(
                 playing: isPlaying,
                 interval: slideshowInterval,
-                hasNext: hasNextPhoto
+                hasNext: hasNextPhoto,
+                currentLoaded: currentPhotoLoaded
             ) else {
                 // Running off the end is a real stop, not a silent pause, so
                 // the icon flips back to "play".
@@ -581,6 +597,9 @@ private struct PhotoPageView: View {
     /// Anonymized opinion counters for this photo, or nil outside a shared
     /// album — then the "Meinungen" block is omitted entirely.
     let curationStats: PhotoCurationStats?
+    /// Reports this photo's id once its image has settled, so the slideshow in
+    /// the parent can hold the advance until there is something to show.
+    let onLoadSettled: ((Int) -> Void)?
 
     @State private var loader: ThumbnailLoader
     @State private var viewModel: PhotoMetadataViewModel
@@ -597,11 +616,13 @@ private struct PhotoPageView: View {
         faceBBox: FaceBBox? = nil,
         showDetails: Binding<Bool>,
         curationStatus: Binding<CurationStatus>,
-        curationStats: PhotoCurationStats? = nil
+        curationStats: PhotoCurationStats? = nil,
+        onLoadSettled: ((Int) -> Void)? = nil
     ) {
         self.photo = photo
         self.faceBBox = faceBBox
         self.curationStats = curationStats
+        self.onLoadSettled = onLoadSettled
         _loader = State(initialValue: ThumbnailLoader(filename: photo.filename))
         _viewModel = State(initialValue: PhotoMetadataViewModel(photo: photo))
         _showDetails = showDetails
@@ -633,9 +654,15 @@ private struct PhotoPageView: View {
             if !isShowing { showAllAlbums = false }
         }
         .task {
-            async let img: Void = loader.load()
+            let reportSettled = onLoadSettled
+            let id = photo.id
+            loader.onLoadSettled = { reportSettled?(id) }
+            // Metadata still loads in parallel, but the slideshow waits on the
+            // image alone — holding the advance for the description too would
+            // stall playback on something the viewer isn't waiting to see.
             async let meta: Void = viewModel.loadAll()
-            _ = await (img, meta)
+            await loader.load()
+            _ = await meta
         }
         .sheet(isPresented: $showDatePicker) {
             datePicker
