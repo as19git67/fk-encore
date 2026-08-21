@@ -710,11 +710,30 @@ function tariffTaxStatusLabel(status: string | null) {
   return labels[status] ?? status
 }
 
+/** Default unit per tariff/assumption kind, so the form starts with a sensible value. */
+const TARIFF_KIND_DEFAULT_UNIT: Partial<Record<ElectricityTariffKind, ElectricityTariffUnit>> = {
+  base_price: 'eur_per_month',
+  gas_base_price: 'eur_per_month',
+  water_base_price: 'eur_per_month',
+  pv_investment_net: 'eur',
+  pv_investment_vat: 'eur',
+  opportunity_cost_total: 'eur',
+  amortization_years: 'years',
+  boiler_efficiency: 'ratio',
+  heat_pump_scop: 'ratio',
+  ev_consumption: 'kwh_per_100km',
+  petrol_consumption: 'l_per_100km',
+  petrol_price: 'eur_per_l',
+  grid_co2: 'kg_per_kwh',
+  gas_co2: 'kg_per_kwh',
+  petrol_co2: 'kg_per_l',
+  pv_capacity_kwp: 'kw',
+  water_price: 'eur_per_m3',
+  sewage_price: 'eur_per_m3',
+}
+
 function onTariffKindChange() {
-  if (tariffForm.value.kind === 'base_price') tariffForm.value.unit = 'eur_per_month'
-  else if (tariffForm.value.kind === 'pv_investment_net' || tariffForm.value.kind === 'pv_investment_vat') tariffForm.value.unit = 'eur'
-  else if (tariffForm.value.kind === 'amortization_years') tariffForm.value.unit = 'years'
-  else tariffForm.value.unit = 'eur_per_kwh'
+  tariffForm.value.unit = TARIFF_KIND_DEFAULT_UNIT[tariffForm.value.kind] ?? 'eur_per_kwh'
 }
 
 async function openTariffs() {
@@ -842,7 +861,7 @@ onMounted(load)
         />
         <Button
           v-if="canManage"
-          label="Strompreise"
+          label="Tarife & Annahmen"
           icon="pi pi-euro"
           severity="secondary"
           @click="openTariffs"
@@ -1212,13 +1231,20 @@ onMounted(load)
 
     <Dialog
       v-model:visible="showTariffs"
-      header="Strompreise verwalten"
+      header="Tarife & Annahmen verwalten"
       modal
       :style="{ width: '46rem', maxWidth: '95vw' }"
     >
       <div class="tariff-dialog">
         <div class="tariff-toolbar">
-          <p>Preisänderungen werden ab ihrem Gültigkeitsdatum für Kosten und PV-Ersparnis verwendet.</p>
+          <p>
+            Preisänderungen werden ab ihrem Gültigkeitsdatum für Kosten, PV-Ersparnis und
+            Wasserkosten verwendet. Hier stehen außerdem die Annahmen für die
+            Vergleichsrechnungen (Gasheizung, Benziner) sowie Anlagenwerte wie PV-Invest
+            und Anlagenleistung — als „Art“ auswählbar, z. B. Jahresarbeitszahl (JAZ),
+            Kesselwirkungsgrad, Gaspreis, Verbrauch E-Auto/Benziner, Benzinpreis,
+            PV-Anlagenleistung, Wasserpreis, CO₂-Faktoren.
+          </p>
           <Button
             :label="pricesAlreadyImported ? 'Importiert' : 'JSON-Grundlage importieren'"
             icon="pi pi-upload"
