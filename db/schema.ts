@@ -2312,7 +2312,18 @@ export type MeterElectricityTariffKind =
   | "pv_investment_vat"
   | "opportunity_cost_year"
   | "opportunity_cost_total"
-  | "amortization_years";
+  | "amortization_years"
+  // Assumptions for the gas-heating / petrol-car comparisons (migration 0148).
+  | "gas_price"
+  | "gas_base_price"
+  | "boiler_efficiency"
+  | "heat_pump_scop"
+  | "ev_consumption"
+  | "petrol_consumption"
+  | "petrol_price"
+  | "grid_co2"
+  | "gas_co2"
+  | "petrol_co2";
 
 // Logical metering point. Persists across physical device swaps; visibility
 // is owner + members of group_id (same groups concept as documents).

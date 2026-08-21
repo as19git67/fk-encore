@@ -12,7 +12,17 @@ import {
 } from "./import/electricity-price-data";
 
 export type ElectricityTariffKind = MeterElectricityTariffKind;
-export type ElectricityTariffUnit = "eur_per_kwh" | "eur_per_month" | "eur" | "years";
+export type ElectricityTariffUnit =
+  | "eur_per_kwh"
+  | "eur_per_month"
+  | "eur"
+  | "years"
+  | "ratio"
+  | "kwh_per_100km"
+  | "l_per_100km"
+  | "eur_per_l"
+  | "kg_per_kwh"
+  | "kg_per_l";
 
 export interface ElectricityTariff {
   id: number;
@@ -80,9 +90,30 @@ const TARIFF_KINDS: ElectricityTariffKind[] = [
   "opportunity_cost_year",
   "opportunity_cost_total",
   "amortization_years",
+  "gas_price",
+  "gas_base_price",
+  "boiler_efficiency",
+  "heat_pump_scop",
+  "ev_consumption",
+  "petrol_consumption",
+  "petrol_price",
+  "grid_co2",
+  "gas_co2",
+  "petrol_co2",
 ];
 
-const TARIFF_UNITS: ElectricityTariffUnit[] = ["eur_per_kwh", "eur_per_month", "eur", "years"];
+const TARIFF_UNITS: ElectricityTariffUnit[] = [
+  "eur_per_kwh",
+  "eur_per_month",
+  "eur",
+  "years",
+  "ratio",
+  "kwh_per_100km",
+  "l_per_100km",
+  "eur_per_l",
+  "kg_per_kwh",
+  "kg_per_l",
+];
 
 function parseValidFrom(value: string): string {
   const date = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00.000Z`) : new Date(value);
@@ -309,7 +340,7 @@ export class EnergyTariffTimeline {
     return candidates[candidates.length - 1];
   }
 
-  private weightedKwhPrice(kind: "grid_import" | "feed_in" | "self_consumption_value", start: Date, end: Date): number | null {
+  private weightedKwhPrice(kind: ElectricityTariffKind, start: Date, end: Date): number | null {
     const totalDays = daysBetween(start, end);
     if (totalDays <= 0) return null;
     let cursor = start;
@@ -328,14 +359,14 @@ export class EnergyTariffTimeline {
     return weighted / totalDays;
   }
 
-  private baseCost(start: Date, end: Date): number | null {
-    if (this.entries("base_price").length === 0) return null;
+  private baseCost(start: Date, end: Date, kind: ElectricityTariffKind = "base_price"): number | null {
+    if (this.entries(kind).length === 0) return null;
     let cursor = start;
     let cost = 0;
     while (cursor < end) {
       const monthEnd = addMonth(cursor);
       const segmentEnd = monthEnd < end ? monthEnd : end;
-      const tariff = this.entryAt("base_price", cursor);
+      const tariff = this.entryAt(kind, cursor);
       if (!tariff) return null;
       const fullMonthDays = daysBetween(
         new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), 1)),
@@ -365,6 +396,31 @@ export class EnergyTariffTimeline {
         this.weightedKwhPrice("self_consumption_value", start, end) ?? gridImportPricePerKwh,
       baseCostEur: this.baseCost(start, end),
     };
+  }
+
+  /**
+   * The value of any dated entry over a period, time-weighted across changes.
+   * Used for assumptions that move over time — gas and petrol prices — the
+   * same way the electricity work price does.
+   */
+  weightedAmountForPeriod(
+    kind: ElectricityTariffKind,
+    periodStart: string,
+    periodEnd: string,
+  ): number | null {
+    return this.weightedKwhPrice(kind, startOfUtcDay(periodStart), startOfUtcDay(periodEnd));
+  }
+
+  /**
+   * Standing charge for a period, prorated across month boundaries, for any
+   * per-month entry (electricity or gas).
+   */
+  monthlyChargeForPeriod(
+    kind: ElectricityTariffKind,
+    periodStart: string,
+    periodEnd: string,
+  ): number | null {
+    return this.baseCost(startOfUtcDay(periodStart), startOfUtcDay(periodEnd), kind);
   }
 
   /** Latest value of a single-figure tariff entry such as the PV investment. */

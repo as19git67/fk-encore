@@ -23,6 +23,10 @@ import {
   getEconomicsReportForUser,
   type EconomicsReport,
 } from "./economics.service";
+import {
+  getComparisonsReportForUser,
+  type ComparisonsReport,
+} from "./comparisons.service";
 
 function requireUser(permission: string): number {
   const auth = getAuthData();
@@ -67,6 +71,26 @@ export const getMeterReport = api(
       parseReportBoundary(from, "from"),
       parseReportBoundary(to, "to"),
       parseAllocation(allocation),
+    );
+  },
+);
+
+interface GetComparisonsReportRequest {
+  granularity?: Query<ReportGranularity>;
+  from?: Query<string>;
+  to?: Query<string>;
+}
+
+export const getComparisonsReport = api(
+  { expose: true, method: "GET", path: "/meters/reports/comparisons", auth: true },
+  async ({ granularity, from, to }: GetComparisonsReportRequest): Promise<ComparisonsReport> => {
+    const userId = requireUser("meters.view");
+
+    return await getComparisonsReportForUser(
+      userId,
+      parseGranularity(granularity),
+      parseReportBoundary(from, "from"),
+      parseReportBoundary(to, "to"),
     );
   },
 );

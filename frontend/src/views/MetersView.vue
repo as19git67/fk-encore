@@ -20,6 +20,7 @@ import {
   getEnergyReport,
   getConsumptionTrends,
   getEconomicsReport,
+  getComparisonsReport,
   listElectricityTariffs,
   createElectricityTariff,
   updateElectricityTariff,
@@ -33,6 +34,7 @@ import {
   ELECTRICITY_TARIFF_KIND_LABELS,
   ELECTRICITY_TARIFF_UNIT_LABELS,
   type ConsumptionTrend,
+  type ComparisonsReport,
   type EconomicsReport,
   type EnergyReport,
   type ElectricityTariff,
@@ -45,6 +47,7 @@ import {
 } from '../api/meters'
 import MeterTrendDashboard from '../components/MeterTrendDashboard.vue'
 import MeterEconomicsPanel from '../components/MeterEconomicsPanel.vue'
+import MeterComparisonsPanel from '../components/MeterComparisonsPanel.vue'
 import { listGroups, type GroupSummary } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
 import { toLocalIsoDateTime } from '../utils/dateFormat'
@@ -64,6 +67,8 @@ const trends = ref<ConsumptionTrend[]>([])
 const loadingTrends = ref(false)
 const economics = ref<EconomicsReport | null>(null)
 const loadingEconomics = ref(false)
+const comparisons = ref<ComparisonsReport | null>(null)
+const loadingComparisons = ref(false)
 const loading = ref(false)
 const error = ref('')
 
@@ -98,11 +103,22 @@ async function load() {
     const [mRes, gRes] = await Promise.all([listMeters(), loadGroups()])
     meters.value = mRes.meters
     groups.value = gRes
-    await Promise.all([loadEnergyReport(), loadTrends(), loadEconomics()])
+    await Promise.all([loadEnergyReport(), loadTrends(), loadEconomics(), loadComparisons()])
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Zähler'
   } finally {
     loading.value = false
+  }
+}
+
+async function loadComparisons() {
+  loadingComparisons.value = true
+  try {
+    comparisons.value = await getComparisonsReport(energyGranularity.value)
+  } catch {
+    comparisons.value = null
+  } finally {
+    loadingComparisons.value = false
   }
 }
 
@@ -117,9 +133,9 @@ async function loadEconomics() {
   }
 }
 
-/** Both reports are priced from the tariffs, so a tariff change refreshes both. */
+/** All three reports are priced from the tariffs, so a tariff change refreshes them. */
 async function reloadCostReports() {
-  await Promise.all([loadEnergyReport(), loadEconomics()])
+  await Promise.all([loadEnergyReport(), loadEconomics(), loadComparisons()])
 }
 
 async function loadTrends() {
@@ -1001,6 +1017,12 @@ onMounted(load)
         v-if="loadingEconomics || economics"
         :report="economics"
         :loading="loadingEconomics"
+      />
+
+      <MeterComparisonsPanel
+        v-if="loadingComparisons || comparisons"
+        :report="comparisons"
+        :loading="loadingComparisons"
       />
 
       <div class="meter-grid">

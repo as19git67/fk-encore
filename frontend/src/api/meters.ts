@@ -471,6 +471,89 @@ export function getEconomicsReport(granularity: MeterReportGranularity = 'month'
   return apiFetch<EconomicsReport>(`/meters/reports/economics?${q}`)
 }
 
+// ── Technology comparisons (gas heating / petrol car) ──────────────────────
+
+export interface ComparisonAssumption {
+  kind: ElectricityTariffKind
+  label: string
+  amount: number
+  unit: ElectricityTariffUnit
+}
+
+/** A figure with the range the SCOP uncertainty spans. */
+export interface CostRange {
+  low: number | null
+  mid: number | null
+  high: number | null
+}
+
+export interface HeatingComparisonBucket {
+  key: string
+  label: string
+  periodStart: string
+  periodEnd: string
+  heatPumpKwh: number | null
+  heatPumpCostEur: number | null
+  heatDeliveredKwh: CostRange
+  gasKwh: CostRange
+  gasCostEur: CostRange
+  /** Positive = the heat pump was cheaper. */
+  savingsEur: CostRange
+}
+
+export interface HeatingComparison {
+  buckets: HeatingComparisonBucket[]
+  totalHeatPumpCostEur: number | null
+  totalGasCostEur: CostRange
+  totalSavingsEur: CostRange
+  avoidedCo2Kg: number | null
+  scop: number | null
+  scopRange: { low: number; high: number } | null
+  assumptions: ComparisonAssumption[]
+}
+
+export interface CarComparisonBucket {
+  key: string
+  label: string
+  periodStart: string
+  periodEnd: string
+  chargedKwh: number | null
+  evCostEur: number | null
+  kilometers: number | null
+  petrolLitres: number | null
+  petrolCostEur: number | null
+  savingsEur: number | null
+}
+
+export interface CarComparison {
+  buckets: CarComparisonBucket[]
+  totalChargedKwh: number | null
+  totalKilometers: number | null
+  totalEvCostEur: number | null
+  totalPetrolCostEur: number | null
+  totalSavingsEur: number | null
+  evCentsPerKm: number | null
+  petrolCentsPerKm: number | null
+  avoidedCo2Kg: number | null
+  assumptions: ComparisonAssumption[]
+}
+
+export interface ComparisonsReport {
+  granularity: MeterReportGranularity
+  currency: 'EUR'
+  from: string | null
+  to: string | null
+  hasHeatingAssumptions: boolean
+  hasCarAssumptions: boolean
+  heating: HeatingComparison | null
+  car: CarComparison | null
+}
+
+export function getComparisonsReport(granularity: MeterReportGranularity = 'month') {
+  const q = new URLSearchParams({ granularity })
+  return apiFetch<ComparisonsReport>(`/meters/reports/comparisons?${q}`)
+}
+
 // ── Electricity tariffs / prices ───────────────────────────────────────────
 
 export type ElectricityTariffKind =
@@ -483,8 +566,29 @@ export type ElectricityTariffKind =
   | 'opportunity_cost_year'
   | 'opportunity_cost_total'
   | 'amortization_years'
+  // Assumptions for the gas-heating / petrol-car comparisons.
+  | 'gas_price'
+  | 'gas_base_price'
+  | 'boiler_efficiency'
+  | 'heat_pump_scop'
+  | 'ev_consumption'
+  | 'petrol_consumption'
+  | 'petrol_price'
+  | 'grid_co2'
+  | 'gas_co2'
+  | 'petrol_co2'
 
-export type ElectricityTariffUnit = 'eur_per_kwh' | 'eur_per_month' | 'eur' | 'years'
+export type ElectricityTariffUnit =
+  | 'eur_per_kwh'
+  | 'eur_per_month'
+  | 'eur'
+  | 'years'
+  | 'ratio'
+  | 'kwh_per_100km'
+  | 'l_per_100km'
+  | 'eur_per_l'
+  | 'kg_per_kwh'
+  | 'kg_per_l'
 
 export interface ElectricityTariff {
   id: number
@@ -659,6 +763,16 @@ export const ELECTRICITY_TARIFF_KIND_LABELS: Record<ElectricityTariffKind, strin
   opportunity_cost_year: 'Opportunitätskosten/Jahr',
   opportunity_cost_total: 'Opportunitätskosten gesamt',
   amortization_years: 'Amortisation',
+  gas_price: 'Gaspreis',
+  gas_base_price: 'Gas-Grundpreis',
+  boiler_efficiency: 'Kesselwirkungsgrad',
+  heat_pump_scop: 'Jahresarbeitszahl (JAZ)',
+  ev_consumption: 'Verbrauch E-Auto',
+  petrol_consumption: 'Verbrauch Benziner',
+  petrol_price: 'Benzinpreis',
+  grid_co2: 'CO₂-Faktor Netzstrom',
+  gas_co2: 'CO₂-Faktor Erdgas',
+  petrol_co2: 'CO₂-Faktor Benzin',
 }
 
 export const ELECTRICITY_TARIFF_UNIT_LABELS: Record<ElectricityTariffUnit, string> = {
@@ -666,4 +780,10 @@ export const ELECTRICITY_TARIFF_UNIT_LABELS: Record<ElectricityTariffUnit, strin
   eur_per_month: '€/Monat',
   eur: '€',
   years: 'Jahre',
+  ratio: 'Faktor',
+  kwh_per_100km: 'kWh/100 km',
+  l_per_100km: 'l/100 km',
+  eur_per_l: '€/l',
+  kg_per_kwh: 'kg CO₂/kWh',
+  kg_per_l: 'kg CO₂/l',
 }

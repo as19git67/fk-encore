@@ -364,6 +364,60 @@ sondern nur in der Periodensumme geführt.
 Fehlen Preise (`hasTariffs === false`), bleiben beide Blöcke leer statt mit
 Platzhalterwerten zu rechnen.
 
+### 5.2.2 Vergleichsrechnungen (Gasheizung / Benziner)
+
+`GET /meters/reports/comparisons?granularity=month|year&from=&to=`
+
+Kontrafaktische Modellrechnungen — nur die Stromseite ist gemessen, die
+Gegenrechnung beruht auf Annahmen. Jede Response liefert deshalb die
+verwendeten Annahmen mit (`assumptions`), damit das Frontend sie anzeigen kann
+und die Zahl beurteilbar bleibt.
+
+**Wärmepumpe statt Gasheizung.** Wärmemenge = (Heizung + Warmwasser) [kWh el.]
+× JAZ; Gasbedarf = Wärmemenge ÷ Kesselwirkungsgrad; Gaskosten = Gasbedarf ×
+Gaspreis + Gas-Grundpreis. Gegengerechnet werden die *tatsächlichen*
+Stromkosten für Heizung + Warmwasser aus §5.2.1.
+
+Ohne Wärmemengenzähler ist die JAZ geschätzt. Das Ergebnis wird deshalb als
+**Bandbreite** über JAZ ± `SCOP_BAND` (0,5) ausgewiesen, nicht als eine Zahl.
+Eine niedrigere JAZ bedeutet weniger gelieferte Wärme und damit weniger Gas —
+die Bandbreite ist nach der JAZ geordnet, die Kostenwerte folgen ihr.
+
+**E-Auto statt Benziner.** km = Wallbox-kWh ÷ Verbrauch [kWh/100 km] × 100;
+Benzinbedarf = km ÷ 100 × [l/100 km]; Benzinkosten = Liter × Benzinpreis.
+Gegengerechnet werden die tatsächlichen Ladekosten. Zusätzlich ct/km für beide
+Varianten.
+
+**CO₂** wird nur berechnet, wenn die Emissionsfaktoren hinterlegt sind. Der
+Netzanteil von Wärmepumpe bzw. Ladestrom wird dabei gegengerechnet — die
+Alternative ist nicht emissionsfrei.
+
+Fehlen die Kern-Annahmen einer Vergleichsrechnung (JAZ + Kesselwirkungsgrad
+bzw. Verbrauch E-Auto + Verbrauch Benziner), liefert sie `null` statt mit
+Standardwerten zu rechnen.
+
+#### Annahmen als Stammdaten
+
+Die Annahmen liegen in `meter_electricity_tariffs` (Migration 0148). Sie sind
+keine gemessenen Tarife, haben aber dieselbe Form
+(`kind`, `valid_from`, `amount`, `unit`) und dieselbe „welcher Wert galt
+wann“-Logik — eine zweite Tabelle mit dupliziertem CRUD wäre reiner Overhead.
+
+| kind | Einheit | Bedeutung |
+|---|---|---|
+| `gas_price` | `eur_per_kwh` | Gas-Arbeitspreis |
+| `gas_base_price` | `eur_per_month` | Gas-Grundpreis |
+| `boiler_efficiency` | `ratio` | Kesselwirkungsgrad |
+| `heat_pump_scop` | `ratio` | Jahresarbeitszahl |
+| `ev_consumption` | `kwh_per_100km` | Verbrauch E-Auto |
+| `petrol_consumption` | `l_per_100km` | Verbrauch Benziner |
+| `petrol_price` | `eur_per_l` | Benzinpreis |
+| `grid_co2` / `gas_co2` | `kg_per_kwh` | Emissionsfaktoren |
+| `petrol_co2` | `kg_per_l` | Emissionsfaktor Benzin |
+
+Preise mit Zeitverlauf (Gas, Benzin) werden wie der Stromarbeitspreis
+zeitanteilig über Preisänderungen gewichtet.
+
 ### 5.3 Anomalie-Erkennung
 
 Muster von `finance/anomaly-detector.ts` übernehmen:
