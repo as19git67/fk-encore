@@ -127,6 +127,14 @@ Gleich wie im Web:
 - **Details pausieren nicht**, blenden aber die Caption aus.
 - **Beschreibungs-Caption** einzeilig mit Ellipsis über dem Bild, nur während
   des Laufs und nur bei nicht-leerer Beschreibung.
+- **Warten auf das geladene Bild** (`currentLoaded`): Der Timer startet erst,
+  wenn das aktuelle Foto steht, damit die Wartezeit die Betrachtungszeit ist
+  und nicht am Platzhalter verstreicht. `ThumbnailLoader.onLoadSettled` meldet
+  das Ende eines Ladeversuchs, `PhotoPageView` reicht die Foto-ID nach oben,
+  `PhotoFullscreenView` sammelt sie in `settledPhotoIds`. Ein **fehlgeschlagener**
+  Ladeversuch zählt dabei als geladen — sonst würde ein einziges kaputtes Bild
+  die Diashow dauerhaft anhalten. Gewartet wird nur auf das Bild, nicht auf die
+  Metadaten, die parallel laden.
 
 Bewusst anders als im Web:
 
@@ -140,12 +148,8 @@ Bewusst anders als im Web:
   Karten-/Trip-Ansicht bzw. an Pointer-/Wheel-Events; auf iOS gibt es dafür
   bisher keinen entsprechenden Einstiegspunkt. Offen, falls die Trip-Karte
   später ein durchlaufendes Vollbild bekommt.
-- **Kein Warten auf das geladene Bild.** Das Web schaltet erst weiter, wenn das
-  aktuelle Foto dekodiert ist (`currentLoaded`); auf iOS meldet
-  `PhotoPageView`/`ThumbnailLoader` seinen Ladezustand bisher nicht nach oben.
-  Der Timer läuft daher rein zeitgesteuert. Bei langsamer Verbindung kann ein
-  Foto dadurch kurz als Platzhalter erscheinen — nachziehen, sobald der Loader
-  seinen Zustand nach außen gibt.
+
+Damit bleibt als inhaltlicher Unterschied zum Web nur noch der letzte Punkt.
 
 ## Betroffene Dateien
 
@@ -158,5 +162,6 @@ Bewusst anders als im Web:
 | `frontend/src/views/AlbumDetailView.vue` | Map-Overlay: `:markDayChanges="true"`, Stopp-Sync beim Schließen |
 | `frontend/src/views/SharedAlbumView.vue` | Overlay: `:markDayChanges="fullscreenFromMap"` |
 | `ios/Sources/FKPhotos/Features/Photos/Slideshow.swift` | iOS: reine Logik + Intervall-Optionen/Persistenz |
-| `ios/Sources/FKPhotos/Features/Photos/PhotoFullscreenView.swift` | iOS: Play/Pause-Menu, Advance-Timer, Caption |
+| `ios/Sources/FKPhotos/Features/Photos/PhotoFullscreenView.swift` | iOS: Play/Pause-Menu, Advance-Timer, Caption, `settledPhotoIds` |
+| `ios/Sources/FKPhotos/Core/Storage/ThumbnailLoader.swift` | iOS: `onLoadSettled` / `isSettled` — Ladesignal für den Advance-Timer |
 | `ios/Tests/FKPhotosTests/SlideshowTests.swift` | iOS: Unit-Tests der Logik |
