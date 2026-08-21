@@ -19,6 +19,10 @@ import {
   getConsumptionTrendsForUser,
   type ConsumptionTrendsReport,
 } from "./trends.service";
+import {
+  getEconomicsReportForUser,
+  type EconomicsReport,
+} from "./economics.service";
 
 function requireUser(permission: string): number {
   const auth = getAuthData();
@@ -63,6 +67,26 @@ export const getMeterReport = api(
       parseReportBoundary(from, "from"),
       parseReportBoundary(to, "to"),
       parseAllocation(allocation),
+    );
+  },
+);
+
+interface GetEconomicsReportRequest {
+  granularity?: Query<ReportGranularity>;
+  from?: Query<string>;
+  to?: Query<string>;
+}
+
+export const getEconomicsReport = api(
+  { expose: true, method: "GET", path: "/meters/reports/economics", auth: true },
+  async ({ granularity, from, to }: GetEconomicsReportRequest): Promise<EconomicsReport> => {
+    const userId = requireUser("meters.view");
+
+    return await getEconomicsReportForUser(
+      userId,
+      parseGranularity(granularity),
+      parseReportBoundary(from, "from"),
+      parseReportBoundary(to, "to"),
     );
   },
 );

@@ -335,6 +335,35 @@ Kostenrechnung die niedrigste passende Stufe.
 
 Nicht Teil der ersten Ausbaustufe: E-Auto, Gasvergleich/JAZ.
 
+### 5.2.1 Wirtschaftlichkeit
+
+`GET /meters/reports/economics?granularity=month|year&from=&to=`
+
+Zwei Blöcke, die die kWh-Reports nicht beantworten können:
+
+**PV-Ersparnis und Amortisation.** Je Bucket `netElectricityCostEur` (mit PV,
+tatsächlich) gegen `noPvElectricityCostEur` (dieselbe Verbrauchsmenge komplett
+aus dem Netz gekauft); die Differenz ist `savingsEur`, kumuliert in
+`cumulativeSavingsEur`. Die Amortisation stellt der Investition
+(`pv_investment_net` + `pv_investment_vat`) den über die **gesamte** gemessene
+Historie kumulierten PV-Nutzen gegenüber — unabhängig von `from`/`to`, denn
+die Frage ist, was die Anlage seit Inbetriebnahme eingebracht hat. Die
+Hochrechnung des Amortisationsdatums nutzt den Nutzen der letzten zwölf
+Monate. Die Variante mit Opportunitätskosten (`opportunity_cost_year`) zieht
+diese laufend ab: liegt der Jahresnutzen darunter, wird bewusst **kein** Datum
+geliefert statt eines geschönten.
+
+**Kosten je Anwendung.** Heizung, Warmwasser, E-Auto/Wallbox und der übrige
+Haushalt jeweils in €. Eigenverbrauchte kWh werden mit
+`self_consumption_value` bewertet, Netzbezug mit dem zeitgültigen
+Arbeitspreis. Der PV-Anteil des Haushalts ist der Rest der
+Gesamt-Eigenverbrauchsmenge, den kein Unterzähler beansprucht (begrenzt auf
+den Haushaltsverbrauch). Der Grundpreis wird keiner Anwendung zugeordnet,
+sondern nur in der Periodensumme geführt.
+
+Fehlen Preise (`hasTariffs === false`), bleiben beide Blöcke leer statt mit
+Platzhalterwerten zu rechnen.
+
 ### 5.3 Anomalie-Erkennung
 
 Muster von `finance/anomaly-detector.ts` übernehmen:
