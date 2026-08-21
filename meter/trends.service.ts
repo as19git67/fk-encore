@@ -97,7 +97,7 @@ function monthEndIso(key: string): string {
   ).toISOString();
 }
 
-function linearRegressionSlope(values: number[]): number | null {
+export function linearRegressionSlope(values: number[]): number | null {
   if (values.length < MIN_SLOPE_POINTS) return null;
   const n = values.length;
   const meanX = (n - 1) / 2;

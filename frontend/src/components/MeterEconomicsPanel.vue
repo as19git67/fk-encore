@@ -26,6 +26,14 @@ function fmtEur(value: number | null | undefined) {
   })} €`
 }
 
+function fmtNumber(value: number | null | undefined, decimals = 1) {
+  if (value === null || value === undefined) return '–'
+  return value.toLocaleString('de-DE', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  })
+}
+
 function fmtKwh(value: number | null | undefined) {
   if (value === null || value === undefined) return '–'
   return `${value.toLocaleString('de-DE', {
@@ -284,6 +292,26 @@ const hasPvData = computed(() => (props.report?.pv.buckets ?? []).some((b) => b.
         <p class="economics-note">
           Grundpreis {{ fmtEur(report.usageCosts.totals.baseCostEur) }} ist keiner Anwendung
           zugeordnet; Gesamtkosten {{ fmtEur(report.usageCosts.totals.totalCostEur) }}.
+        </p>
+      </div>
+
+      <!-- Water -->
+      <div v-if="report.water.length > 0" class="economics-block">
+        <h3>Wasserkosten</h3>
+        <DataTable :value="report.water" size="small" class="application-table">
+          <Column field="name" header="Zähler" />
+          <Column header="Kosten">
+            <template #body="{ data }">{{ fmtEur(data.totalCostEur) }}</template>
+          </Column>
+          <Column header="Verbrauch">
+            <template #body="{ data }">
+              {{ fmtNumber(data.totalVolume) }} {{ data.unit }}
+            </template>
+          </Column>
+        </DataTable>
+        <p class="economics-note">
+          Frisch- und Abwasser werden beide auf die gemessene Menge berechnet; die
+          Grundgebühr ist anteilig enthalten.
         </p>
       </div>
     </template>
