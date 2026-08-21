@@ -42,20 +42,67 @@ final class SlideshowTests: XCTestCase {
     // MARK: - Advancing
 
     func testAdvancesWhilePlayingWithSomewhereToGo() {
-        XCTAssertTrue(Slideshow.shouldAdvance(playing: true, interval: 5, hasNext: true))
+        XCTAssertTrue(Slideshow.shouldAdvance(playing: true, interval: 5, hasNext: true, currentLoaded: true))
     }
 
     func testDoesNotAdvanceWhenStopped() {
-        XCTAssertFalse(Slideshow.shouldAdvance(playing: false, interval: 5, hasNext: true))
+        XCTAssertFalse(Slideshow.shouldAdvance(playing: false, interval: 5, hasNext: true, currentLoaded: true))
     }
 
     func testDoesNotAdvanceAtTheLastPhoto() {
-        XCTAssertFalse(Slideshow.shouldAdvance(playing: true, interval: 5, hasNext: false))
+        XCTAssertFalse(Slideshow.shouldAdvance(playing: true, interval: 5, hasNext: false, currentLoaded: true))
     }
 
     func testNonPositiveIntervalDisablesAdvancing() {
-        XCTAssertFalse(Slideshow.shouldAdvance(playing: true, interval: 0, hasNext: true))
-        XCTAssertFalse(Slideshow.shouldAdvance(playing: true, interval: -1, hasNext: true))
+        XCTAssertFalse(Slideshow.shouldAdvance(playing: true, interval: 0, hasNext: true, currentLoaded: true))
+        XCTAssertFalse(Slideshow.shouldAdvance(playing: true, interval: -1, hasNext: true, currentLoaded: true))
+    }
+
+    // MARK: - Waiting for the current photo
+
+    /// The gap is meant to be time spent looking at a photo, so it starts once
+    /// the photo is up — not while it is still a spinner.
+    func testDoesNotAdvanceWhileTheCurrentPhotoIsStillLoading() {
+        XCTAssertFalse(Slideshow.shouldAdvance(
+            playing: true, interval: 5, hasNext: true, currentLoaded: false
+        ))
+    }
+
+    /// Waiting on a slow photo is a pause, not a stop: `reachedEnd` stays false
+    /// so the view leaves `isPlaying` alone and re-arms once the photo lands.
+    func testWaitingForALoadIsNotTreatedAsReachingTheEnd() {
+        XCTAssertFalse(Slideshow.shouldAdvance(
+            playing: true, interval: 5, hasNext: true, currentLoaded: false
+        ))
+        XCTAssertFalse(Slideshow.reachedEnd(playing: true, hasNext: true))
+    }
+
+    /// Once the photo settles, the same state advances — this is the transition
+    /// the view's timer key exists to catch.
+    func testAdvancesOnceTheCurrentPhotoSettles() {
+        let waiting = Slideshow.shouldAdvance(
+            playing: true, interval: 5, hasNext: true, currentLoaded: false
+        )
+        let settled = Slideshow.shouldAdvance(
+            playing: true, interval: 5, hasNext: true, currentLoaded: true
+        )
+        XCTAssertFalse(waiting)
+        XCTAssertTrue(settled)
+    }
+
+    /// A load that never completes must not be rescued by the other conditions:
+    /// nothing except settling may start the timer.
+    func testNoOtherConditionSubstitutesForLoading() {
+        for playing in [true, false] {
+            for hasNext in [true, false] {
+                XCTAssertFalse(
+                    Slideshow.shouldAdvance(
+                        playing: playing, interval: 5, hasNext: hasNext, currentLoaded: false
+                    ),
+                    "playing=\(playing) hasNext=\(hasNext)"
+                )
+            }
+        }
     }
 
     // MARK: - Reaching the end
@@ -80,9 +127,16 @@ final class SlideshowTests: XCTestCase {
     func testAdvanceAndEndAreMutuallyExclusive() {
         for playing in [true, false] {
             for hasNext in [true, false] {
-                let advancing = Slideshow.shouldAdvance(playing: playing, interval: 5, hasNext: hasNext)
-                let ending = Slideshow.reachedEnd(playing: playing, hasNext: hasNext)
-                XCTAssertFalse(advancing && ending, "playing=\(playing) hasNext=\(hasNext)")
+                for loaded in [true, false] {
+                    let advancing = Slideshow.shouldAdvance(
+                        playing: playing, interval: 5, hasNext: hasNext, currentLoaded: loaded
+                    )
+                    let ending = Slideshow.reachedEnd(playing: playing, hasNext: hasNext)
+                    XCTAssertFalse(
+                        advancing && ending,
+                        "playing=\(playing) hasNext=\(hasNext) loaded=\(loaded)"
+                    )
+                }
             }
         }
     }

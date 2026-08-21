@@ -48,12 +48,23 @@ enum Slideshow {
     }
 
     /// Whether the advance timer should be armed right now: the user started
-    /// playback, an interval is configured, and there is somewhere to go.
+    /// playback, an interval is configured, there is somewhere to go, and the
+    /// photo on screen has finished loading.
+    ///
+    /// `currentLoaded` matches the web's `shouldArmSlideshow`: the gap is meant
+    /// to be time spent *looking at* a photo, so it starts once the photo is up
+    /// rather than while it is still a spinner. A photo whose load failed counts
+    /// as loaded — otherwise one broken image stalls playback for good.
     ///
     /// Opening the details view deliberately does *not* pause — same as the
     /// web, where the description is in the sidebar anyway.
-    static func shouldAdvance(playing: Bool, interval: TimeInterval, hasNext: Bool) -> Bool {
-        playing && interval > 0 && hasNext
+    static func shouldAdvance(
+        playing: Bool,
+        interval: TimeInterval,
+        hasNext: Bool,
+        currentLoaded: Bool
+    ) -> Bool {
+        playing && interval > 0 && hasNext && currentLoaded
     }
 
     /// Whether the description caption belongs on screen: only while playing,
