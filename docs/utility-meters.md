@@ -355,13 +355,18 @@ Monate.
 Die Opportunitätskosten sind **kein Stammdatum**, sondern werden gerechnet.
 Einzige Annahme ist `expected_return_rate` — die Rendite, die das Geld
 anderswo erwartungsgemäß gebracht hätte (Faktor, 0,05 = 5 %/Jahr). Daraus
-folgt der entgangene Ertrag `opportunityCostEur` = Investition ×
-((1 + Rate)^Jahre − 1); **zinseszinslich**, denn das Geld bleibt so lange
-gebunden, wie sich die Anlage nicht bezahlt gemacht hat. Das
-Amortisationsdatum dieser Variante ist der Zeitpunkt, an dem der kumulierte
-PV-Nutzen die mitwachsende Investition einholt (monatsweise gesucht, da es
-gegen einen linear wachsenden Nutzen keine geschlossene Lösung gibt). Holt er
-sie nie ein, wird bewusst **kein** Datum geliefert statt eines geschönten.
+folgt der entgangene Ertrag als **fester Jahresbetrag** (Investition × Rate,
+einfache Verzinsung, nicht Zinseszins) — dieselbe Form wie die Formel der
+Ursprungs-Tabelle (`=B15*0.05`), nur aus der Rate statt als Ergebniszelle
+gespeichert. Zinseszins wurde bewusst verworfen: eine exponentiell wachsende
+"was hätte die Anlage anderswo verdient"-Kurve gegen einen ungefähr
+konstanten jährlichen PV-Nutzen holt diesen bei jeder positiven Rate
+irgendwann uneinholbar ein — das Amortisationsdatum wäre für praktisch jede
+reale Anlage "nie erreichbar" gewesen, was zwar rechnerisch stimmt, aber
+keine brauchbare Aussage über die Anlage ist. Mit dem festen Jahresbetrag ist
+die Bedingung wieder einfach: das Datum ist erreichbar, sobald der
+Jahresnutzen (letzte 12 Monate) über den jährlichen Opportunitätskosten
+liegt; sonst wird bewusst **kein** Datum geliefert statt eines geschönten.
 
 **Kosten je Anwendung.** Heizung, Warmwasser, E-Auto/Wallbox und der übrige
 Haushalt jeweils in €. Eigenverbrauchte kWh werden mit
@@ -395,8 +400,21 @@ die Bandbreite ist nach der JAZ geordnet, die Kostenwerte folgen ihr.
 
 **E-Auto statt Benziner.** km = Wallbox-kWh ÷ Verbrauch [kWh/100 km] × 100;
 Benzinbedarf = km ÷ 100 × [l/100 km]; Benzinkosten = Liter × Benzinpreis.
-Gegengerechnet werden die tatsächlichen Ladekosten. Zusätzlich ct/km für beide
-Varianten.
+Gegengerechnet werden die tatsächlichen Ladekosten **plus** die entgangene
+Einspeisevergütung auf den PV-Anteil des Ladestroms
+(`evChargerPv × zeitgültige Einspeisevergütung`, `lostFeedInEur`): diese kWh
+hätten alternativ eingespeist werden können, das ist ein echter Opportunitäts-
+kostenanteil des Ladens, kein hypothetischer. `evCostWithOpportunityEur` =
+gemessene Ladekosten + `lostFeedInEur` und ist die Basis für die Differenz und
+für ct/km — nicht die reinen gemessenen Kosten (`evCostEur`, weiterhin einzeln
+verfügbar). Ohne Einspeisevergütung bleibt `lostFeedInEur` `null` und
+`evCostWithOpportunityEur` entspricht `evCostEur`.
+
+Beide Vergleiche geben zusätzlich den tatsächlich abgedeckten Zeitraum aus
+(`periodStart`/`periodEnd` je Vergleich — die Spanne der Buckets mit
+Wärmepumpen- bzw. Ladeaktivität, nicht der ggf. leere `from`/`to`-Filter der
+Anfrage), damit im Frontend erkennbar ist, über welche Monate/Jahre die Zahlen
+gemittelt sind.
 
 **CO₂** wird nur berechnet, wenn die Emissionsfaktoren hinterlegt sind. Der
 Netzanteil von Wärmepumpe bzw. Ladestrom wird dabei gegengerechnet — die
@@ -427,6 +445,11 @@ wann“-Logik — eine zweite Tabelle mit dupliziertem CRUD wäre reiner Overhea
 
 Preise mit Zeitverlauf (Gas, Benzin) werden wie der Stromarbeitspreis
 zeitanteilig über Preisänderungen gewichtet.
+
+Zu jeder Art gibt es eine laienverständliche Erklärung
+(`ELECTRICITY_TARIFF_KIND_EXPLANATIONS` in `frontend/src/api/meters.ts`), die
+im Dialog unter der Art-Auswahl erscheint, sobald die jeweilige Art gewählt
+ist — reaktiv auf `tariffForm.kind`, keine eigene Legende nötig.
 
 #### Datei-Import von Reihen
 

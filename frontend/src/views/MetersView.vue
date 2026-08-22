@@ -34,6 +34,7 @@ import {
   METER_TYPE_LABELS,
   METER_TYPE_ICONS,
   METER_ROLE_LABELS,
+  ELECTRICITY_TARIFF_KIND_EXPLANATIONS,
   ELECTRICITY_TARIFF_KIND_LABELS,
   ELECTRICITY_TARIFF_UNIT_LABELS,
   type ConsumptionTrend,
@@ -642,6 +643,10 @@ const tariffUnitOptions = (Object.keys(ELECTRICITY_TARIFF_UNIT_LABELS) as Electr
   label: ELECTRICITY_TARIFF_UNIT_LABELS[value],
   value,
 }))
+
+const tariffKindExplanation = computed(
+  () => ELECTRICITY_TARIFF_KIND_EXPLANATIONS[tariffForm.value.kind] ?? '',
+)
 
 /** Groups the flat kind list for display; order here is the display order. */
 const TARIFF_CATEGORIES: Array<{ key: string; label: string; kinds: ElectricityTariffKind[] }> = [
@@ -1413,8 +1418,9 @@ onMounted(load)
           <div v-if="tariffForm.id !== null" class="tariff-edit-banner full">
             Bearbeite Preisänderung #{{ tariffForm.id }}. Änderungen mit „Speichern“ übernehmen oder mit „Neu“ abbrechen.
           </div>
-          <label>Art
+          <label class="full">Art
             <Select v-model="tariffForm.kind" :options="tariffKindOptions" option-label="label" option-value="value" @change="onTariffKindChange" />
+            <small v-if="tariffKindExplanation" class="tariff-kind-explanation">{{ tariffKindExplanation }}</small>
           </label>
           <label>Gültig ab
             <DatePicker v-model="tariffForm.validFrom" date-format="dd.mm.yy" />
@@ -1735,6 +1741,11 @@ onMounted(load)
 .form-grid :deep(.p-inputnumber-input),
 .form-grid :deep(.p-datepicker-input) {
   width: 100%;
+}
+.tariff-kind-explanation {
+  font-weight: normal;
+  font-style: italic;
+  line-height: 1.3;
 }
 .section-title {
   font-weight: 600;

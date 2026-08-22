@@ -227,20 +227,25 @@ describe("buildAmortization", () => {
     const amortization = buildAmortization(monthlyBenefit(24, 100), investmentTimeline())!;
 
     // The span covers a leap day, so it is a touch over two years — hence the
-    // tolerance. 24000 € compounded at 4 % for two years earns ~1958 €.
+    // tolerance. 24000 € x 4 %/year x ~2 years is ~1920 €.
     expect(amortization.yearsElapsed).toBeCloseTo(2, 1);
     expect(amortization.expectedReturnRate).toBe(0.04);
-    expect(amortization.opportunityCostEur).toBeCloseTo(1958, -1);
+    expect(amortization.opportunityCostEur).toBeCloseTo(1920, -1);
     // Investment + forgone return - benefit earned so far.
-    expect(amortization.remainingWithOpportunityEur).toBeCloseTo(23558, -1);
+    expect(amortization.remainingWithOpportunityEur).toBeCloseTo(23520, -1);
   });
 
-  it("compounds the forgone return rather than charging it linearly", () => {
+  it("charges the forgone return as a flat yearly amount, not compounded", () => {
+    // Compounding a fixed annual PV benefit against an exponentially growing
+    // "what if invested elsewhere" would make the opportunity-cost payoff
+    // unreachable for nearly every real system — the gap always widens in the
+    // long run, for any positive rate. Flat interest avoids that: it is the
+    // same shape as the source spreadsheet's own formula (investment x 5 %).
     const twenty = buildAmortization(monthlyBenefit(240, 100), investmentTimeline())!;
 
-    // Linear would be 24000 x 4 % x 20 = 19200; compounding is markedly more.
+    // 24000 € x 4 %/year x ~20 years.
     expect(twenty.yearsElapsed).toBeCloseTo(20, 0);
-    expect(twenty.opportunityCostEur).toBeGreaterThan(24000);
+    expect(twenty.opportunityCostEur).toBeCloseTo(24000 * 0.04 * 20, -2);
   });
 
   it("gives no payoff date when the benefit never outruns the expected return", () => {

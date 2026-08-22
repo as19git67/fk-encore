@@ -52,6 +52,20 @@ function fmtAssumption(assumption: ComparisonAssumption) {
   return `${assumption.label}: ${fmtNumber(assumption.amount, decimals)} ${unit}`.trim()
 }
 
+/** "MM.YYYY – MM.YYYY", or a single month when start and end fall in the same one. */
+function fmtPeriod(start: string | null, end: string | null) {
+  if (!start || !end) return null
+  const fmt = (iso: string) =>
+    new Date(iso).toLocaleDateString('de-DE', { month: '2-digit', year: 'numeric' })
+  // periodEnd is exclusive (the first instant of the following period), so
+  // the last covered month is the one before it.
+  const lastCovered = new Date(end)
+  lastCovered.setUTCDate(lastCovered.getUTCDate() - 1)
+  const from = fmt(start)
+  const to = fmt(lastCovered.toISOString())
+  return from === to ? from : `${from} – ${to}`
+}
+
 const heating = computed(() => props.report?.heating ?? null)
 const car = computed(() => props.report?.car ?? null)
 
@@ -100,7 +114,12 @@ function savingWord(value: number | null) {
     <template v-else>
       <!-- Heat pump vs gas boiler -->
       <div v-if="heating" class="comparison-block">
-        <h3>Wärmepumpe statt Gasheizung</h3>
+        <h3>
+          Wärmepumpe statt Gasheizung
+          <span v-if="fmtPeriod(heating.periodStart, heating.periodEnd)" class="comparison-period">
+            {{ fmtPeriod(heating.periodStart, heating.periodEnd) }}
+          </span>
+        </h3>
         <div class="figures-row">
           <div class="figure-tile">
             <span class="tile-label">Tatsächliche Stromkosten</span>
@@ -134,11 +153,16 @@ function savingWord(value: number | null) {
 
       <!-- EV vs petrol car -->
       <div v-if="car" class="comparison-block">
-        <h3>E-Auto statt Benziner</h3>
+        <h3>
+          E-Auto statt Benziner
+          <span v-if="fmtPeriod(car.periodStart, car.periodEnd)" class="comparison-period">
+            {{ fmtPeriod(car.periodStart, car.periodEnd) }}
+          </span>
+        </h3>
         <div class="figures-row">
           <div class="figure-tile">
             <span class="tile-label">Ladekosten</span>
-            <strong class="tile-value">{{ fmtEur(car.totalEvCostEur) }}</strong>
+            <strong class="tile-value">{{ fmtEur(car.totalEvCostWithOpportunityEur) }}</strong>
             <span class="tile-sub">
               {{ fmtNumber(car.totalChargedKwh) }} kWh ·
               {{ fmtNumber(car.evCentsPerKm, 1) }} ct/km
@@ -163,6 +187,11 @@ function savingWord(value: number | null) {
             </span>
           </div>
         </div>
+        <p v-if="car.totalLostFeedInEur" class="comparison-note">
+          Enthält {{ fmtEur(car.totalEvCostEur) }} gemessene Stromkosten
+          plus {{ fmtEur(car.totalLostFeedInEur) }} entgangene Einspeisevergütung: der
+          PV-Anteil des Ladestroms hätte alternativ eingespeist werden können.
+        </p>
         <p v-if="car.avoidedCo2Kg !== null" class="comparison-note">
           Vermiedenes CO₂ gegenüber dem Benziner: {{ fmtNumber(car.avoidedCo2Kg) }} kg
           (Netzanteil des Ladestroms gegengerechnet).
@@ -230,6 +259,16 @@ function savingWord(value: number | null) {
   margin: 0 0 0.6rem;
   font-size: 0.95rem;
   color: var(--p-text-color);
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.comparison-period {
+  font-size: 0.78rem;
+  font-weight: normal;
+  color: var(--p-text-muted-color);
 }
 
 .figures-row {
