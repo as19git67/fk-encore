@@ -115,7 +115,7 @@ struct PhotoDetailView: View {
 
     private func loadPhotoDetails() async {
         do {
-            photo = try await APIClient.shared.get("/photos/\(photoId)")
+            photo = try await PhotoFetch.byId(photoId)
         } catch {
             errorMessage = error.localizedDescription
         }

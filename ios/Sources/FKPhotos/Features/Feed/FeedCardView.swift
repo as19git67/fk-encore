@@ -189,7 +189,7 @@ struct FeedCardView: View {
         guard !isOpeningFullscreen else { return }
         isOpeningFullscreen = true
         defer { isOpeningFullscreen = false }
-        fullscreenPhoto = try? await APIClient.shared.get("/photos/\(item.photoId)")
+        fullscreenPhoto = try? await PhotoFetch.byId(item.photoId)
     }
 
     private func initials(for name: String?) -> String {
