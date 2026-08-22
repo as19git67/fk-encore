@@ -650,9 +650,7 @@ const TARIFF_CATEGORIES: Array<{ key: string; label: string; kinds: ElectricityT
     kinds: [
       'pv_investment_net',
       'pv_investment_vat',
-      'opportunity_cost_year',
-      'opportunity_cost_total',
-      'amortization_years',
+      'expected_return_rate',
       'pv_capacity_kwp',
     ],
   },
@@ -699,9 +697,7 @@ const tariffImportKinds: ElectricityTariffKind[] = [
   'self_consumption_value',
   'pv_investment_net',
   'pv_investment_vat',
-  'opportunity_cost_year',
-  'opportunity_cost_total',
-  'amortization_years',
+  'expected_return_rate',
 ]
 
 const pricesAlreadyImported = computed(() =>
@@ -768,8 +764,7 @@ const TARIFF_KIND_DEFAULT_UNIT: Partial<Record<ElectricityTariffKind, Electricit
   water_base_price: 'eur_per_month',
   pv_investment_net: 'eur',
   pv_investment_vat: 'eur',
-  opportunity_cost_total: 'eur',
-  amortization_years: 'years',
+  expected_return_rate: 'ratio',
   boiler_efficiency: 'ratio',
   heat_pump_scop: 'ratio',
   ev_consumption: 'kwh_per_100km',

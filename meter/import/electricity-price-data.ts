@@ -6,12 +6,10 @@ export interface ElectricityPriceImportEntry {
     | "self_consumption_value"
     | "pv_investment_net"
     | "pv_investment_vat"
-    | "opportunity_cost_year"
-    | "opportunity_cost_total"
-    | "amortization_years";
+    | "expected_return_rate";
   validFrom: string;
   amount: number;
-  unit: "eur_per_kwh" | "eur_per_month" | "eur" | "years";
+  unit: "eur_per_kwh" | "eur_per_month" | "eur" | "ratio";
   taxStatus?: string | null;
   name?: string | null;
   capacityLimitKw?: number | null;
@@ -50,7 +48,9 @@ export const electricityPriceData: ElectricityPriceImportEntry[] = [
 
   { kind: "pv_investment_net", validFrom: "2021-07-01", amount: 22587.73, unit: "eur", taxStatus: "net", source: source(15, "Anschaffungskosten E3DC + PV", null, "(ohne MwSt.)") },
   { kind: "pv_investment_vat", validFrom: "2021-07-01", amount: 4291.67, unit: "eur", source: source(16, "Mehrwertsteuer Anlage", null, null) },
-  { kind: "opportunity_cost_year", validFrom: "2021-07-01", amount: 1129.3865, unit: "eur", source: source(19, null, "=B15*0.05", "Opportunitätskosten pro Jahr") },
-  { kind: "opportunity_cost_total", validFrom: "2021-07-01", amount: 10829.6198866741, unit: "eur", source: source(20, null, "=B19*B22", "Opportunitätskosten gesamte Amortisationszeit") },
-  { kind: "amortization_years", validFrom: "2021-07-01", amount: 9.5889404439, unit: "years", source: source(22, "Amortisation nach rund", "=(B15+10470)/(MEDIAN(Zählerstände!BL24,Zählerstände!BL36,Zählerstände!BL48))", "Jahren") },
+  // Rows 19/20/22 of the sheet (opportunity cost per year and in total,
+  // amortization in years) were formula cells derived from this rate and the
+  // investment — they are computed in economics.service.ts instead of being
+  // imported as editable values.
+  { kind: "expected_return_rate", validFrom: "2021-07-01", amount: 0.05, unit: "ratio", source: source(19, null, "=B15*0.05", "erwartete Rendite pro Jahr, aus der die Opportunitätskosten gerechnet wurden") },
 ];

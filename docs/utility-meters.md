@@ -349,9 +349,18 @@ aus dem Netz gekauft); die Differenz ist `savingsEur`, kumuliert in
 Historie kumulierten PV-Nutzen gegenüber — unabhängig von `from`/`to`, denn
 die Frage ist, was die Anlage seit Inbetriebnahme eingebracht hat. Die
 Hochrechnung des Amortisationsdatums nutzt den Nutzen der letzten zwölf
-Monate. Die Variante mit Opportunitätskosten (`opportunity_cost_year`) zieht
-diese laufend ab: liegt der Jahresnutzen darunter, wird bewusst **kein** Datum
-geliefert statt eines geschönten.
+Monate.
+
+Die Opportunitätskosten sind **kein Stammdatum**, sondern werden gerechnet.
+Einzige Annahme ist `expected_return_rate` — die Rendite, die das Geld
+anderswo erwartungsgemäß gebracht hätte (Faktor, 0,05 = 5 %/Jahr). Daraus
+folgt der entgangene Ertrag `opportunityCostEur` = Investition ×
+((1 + Rate)^Jahre − 1); **zinseszinslich**, denn das Geld bleibt so lange
+gebunden, wie sich die Anlage nicht bezahlt gemacht hat. Das
+Amortisationsdatum dieser Variante ist der Zeitpunkt, an dem der kumulierte
+PV-Nutzen die mitwachsende Investition einholt (monatsweise gesucht, da es
+gegen einen linear wachsenden Nutzen keine geschlossene Lösung gibt). Holt er
+sie nie ein, wird bewusst **kein** Datum geliefert statt eines geschönten.
 
 **Kosten je Anwendung.** Heizung, Warmwasser, E-Auto/Wallbox und der übrige
 Haushalt jeweils in €. Eigenverbrauchte kWh werden mit

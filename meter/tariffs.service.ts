@@ -16,7 +16,6 @@ export type ElectricityTariffUnit =
   | "eur_per_kwh"
   | "eur_per_month"
   | "eur"
-  | "years"
   | "ratio"
   | "kwh_per_100km"
   | "l_per_100km"
@@ -89,9 +88,7 @@ const TARIFF_KINDS: ElectricityTariffKind[] = [
   "self_consumption_value",
   "pv_investment_net",
   "pv_investment_vat",
-  "opportunity_cost_year",
-  "opportunity_cost_total",
-  "amortization_years",
+  "expected_return_rate",
   "gas_price",
   "gas_base_price",
   "boiler_efficiency",
@@ -112,7 +109,6 @@ const TARIFF_UNITS: ElectricityTariffUnit[] = [
   "eur_per_kwh",
   "eur_per_month",
   "eur",
-  "years",
   "ratio",
   "kwh_per_100km",
   "l_per_100km",
