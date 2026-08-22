@@ -29,6 +29,8 @@ import {
   importWaterHistory,
   importElectricityHistory,
   importElectricityPrices,
+  importTariffFile,
+  type TariffImportEntry,
   METER_TYPE_LABELS,
   METER_TYPE_ICONS,
   METER_ROLE_LABELS,
@@ -559,6 +561,8 @@ async function performDelete(m: MeterListItem) {
 const importingWater = ref(false)
 const importingElec = ref(false)
 const importingPrices = ref(false)
+const importingTariffFile = ref(false)
+const tariffFileInput = ref<HTMLInputElement | null>(null)
 const importMsg = ref('')
 
 const showWaterImport = computed(
@@ -624,6 +628,8 @@ const loadingTariffs = ref(false)
 const savingTariff = ref(false)
 /** Save/load errors scoped to the tariff dialog — shown there, not on the main page. */
 const tariffError = ref('')
+/** Same for confirmations: a message behind the modal would go unread. */
+const tariffInfo = ref('')
 const tariffs = ref<ElectricityTariff[]>([])
 const tariffForm = ref<TariffForm>(emptyTariffForm())
 const tariffFormEl = ref<HTMLElement | null>(null)
@@ -788,6 +794,7 @@ async function openTariffs() {
   showTariffs.value = true
   tariffForm.value = emptyTariffForm()
   tariffError.value = ''
+  tariffInfo.value = ''
   await loadTariffs()
 }
 
@@ -893,10 +900,10 @@ async function handleImportPrices() {
   if (pricesAlreadyImported.value) return
   importingPrices.value = true
   tariffError.value = ''
-  importMsg.value = ''
+  tariffInfo.value = ''
   try {
     const res = await importElectricityPrices()
-    importMsg.value = res.alreadyImported
+    tariffInfo.value = res.alreadyImported
       ? `Strompreise waren bereits importiert; ${res.updated} Einträge aktualisiert.`
       : `Strompreise importiert: ${res.created} neu, ${res.updated} aktualisiert.`
     await loadTariffs()
@@ -905,6 +912,55 @@ async function handleImportPrices() {
     tariffError.value = err.message || 'Strompreise konnten nicht importiert werden'
   } finally {
     importingPrices.value = false
+  }
+}
+
+/**
+ * Reads an uploaded tariff/assumption file. Accepts either the documented
+ * `{ entries: [...] }` wrapper or a bare array, so a hand-written list works
+ * too. Everything beyond that is the backend's to judge — it validates each
+ * row and names the ones it could not take.
+ */
+function parseTariffFile(text: string): TariffImportEntry[] {
+  const parsed = JSON.parse(text)
+  const entries = Array.isArray(parsed) ? parsed : parsed?.entries
+  if (!Array.isArray(entries)) {
+    throw new Error('Die Datei enthält keine Liste "entries".')
+  }
+  return entries as TariffImportEntry[]
+}
+
+async function handleTariffFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  // Clear immediately so picking the same file again fires a fresh change event.
+  input.value = ''
+  if (!file) return
+
+  importingTariffFile.value = true
+  tariffError.value = ''
+  tariffInfo.value = ''
+  try {
+    const entries = parseTariffFile(await file.text())
+    const res = await importTariffFile(entries)
+    const parts = [`${res.created} neu`, `${res.updated} aktualisiert`]
+    if (res.failed > 0) parts.push(`${res.failed} fehlerhaft`)
+    tariffInfo.value = `Import aus ${file.name}: ${parts.join(', ')}.`
+    if (res.failed > 0) {
+      // Name the offending rows; a bare count leaves nothing to fix by.
+      tariffError.value = res.errors
+        .map((e) => `Zeile ${e.index + 1}: ${e.message}`)
+        .join(' · ')
+    }
+    await loadTariffs()
+    await reloadCostReports()
+  } catch (err: any) {
+    tariffError.value =
+      err instanceof SyntaxError
+        ? 'Die Datei ist kein gültiges JSON.'
+        : err.message || 'Die Datei konnte nicht importiert werden'
+  } finally {
+    importingTariffFile.value = false
   }
 }
 
@@ -1318,18 +1374,39 @@ onMounted(load)
             Kesselwirkungsgrad, Gaspreis, Verbrauch E-Auto/Benziner, Benzinpreis,
             PV-Anlagenleistung, Wasserpreis, CO₂-Faktoren.
           </p>
-          <Button
-            :label="pricesAlreadyImported ? 'Importiert' : 'JSON-Grundlage importieren'"
-            icon="pi pi-upload"
-            severity="secondary"
-            :loading="importingPrices"
-            :disabled="pricesAlreadyImported"
-            @click="handleImportPrices"
+          <div class="tariff-toolbar-actions">
+            <Button
+              :label="pricesAlreadyImported ? 'Importiert' : 'JSON-Grundlage importieren'"
+              icon="pi pi-upload"
+              severity="secondary"
+              :loading="importingPrices"
+              :disabled="pricesAlreadyImported"
+              @click="handleImportPrices"
+            />
+            <Button
+              label="Datei importieren"
+              icon="pi pi-file-import"
+              severity="secondary"
+              outlined
+              :loading="importingTariffFile"
+              v-tooltip.bottom="'JSON-Datei mit Preis-/Annahmereihen, z. B. historische Benzinpreise'"
+              @click="tariffFileInput?.click()"
+            />
+          </div>
+          <input
+            ref="tariffFileInput"
+            type="file"
+            accept="application/json,.json"
+            class="hidden-file"
+            @change="handleTariffFile"
           />
         </div>
 
         <Message v-if="tariffError" severity="error" @close="tariffError = ''" closable>
           {{ tariffError }}
+        </Message>
+        <Message v-if="tariffInfo" severity="success" @close="tariffInfo = ''" closable>
+          {{ tariffInfo }}
         </Message>
 
         <div ref="tariffFormEl" class="form-grid tariff-form" :class="{ 'tariff-form--editing': tariffForm.id !== null }">
@@ -1681,6 +1758,15 @@ onMounted(load)
   color: var(--p-text-muted-color);
   font-size: 0.9rem;
   max-width: 32rem;
+}
+/* Both import buttons stack on a narrow screen instead of being squeezed. */
+.tariff-toolbar-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.hidden-file {
+  display: none;
 }
 .tariff-form {
   padding: 0.75rem;

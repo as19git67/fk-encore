@@ -169,6 +169,7 @@ meter/
 | `GET /meters/:id/report?granularity=month\|year&from=&to=` | `meters.view` | Generische Verbrauchsreihen (§5) |
 | `GET /meters/reports/energy?granularity=month\|year&from=&to=` | `meters.view` | Strom-/PV-Gesamtreport (§5.2) |
 | `GET/POST/PUT/DELETE /meters/tariffs/electricity` | `meters.view` / `meters.manage` | Strompreise und Einspeisevergütung verwalten (§5.2) |
+| `POST /meters/tariffs/import` | `meters.manage` | Preis-/Annahmereihen aus einer Datei importieren (§5.2.2) |
 | `POST /meters/import/electricity-prices` | `meters.manage` | Historische Strompreise aus der Excel-Grundlage importieren |
 | `GET/POST/DELETE /meters/readings/:id/transactions` | `meters.view` + `finance.view` | Finance-Verknüpfung |
 
@@ -426,6 +427,42 @@ wann“-Logik — eine zweite Tabelle mit dupliziertem CRUD wäre reiner Overhea
 
 Preise mit Zeitverlauf (Gas, Benzin) werden wie der Stromarbeitspreis
 zeitanteilig über Preisänderungen gewichtet.
+
+#### Datei-Import von Reihen
+
+`POST /meters/tariffs/import` (`meters.manage`) nimmt eine ganze Reihe auf
+einmal entgegen — gedacht für historische Preisverläufe wie Benzin- oder
+Gaspreise, die monatsweise über Jahre laufen und im Dialog Zeile für Zeile
+einzugeben unzumutbar wäre. Im Dialog „Tarife & Annahmen“ hängt der Button
+**Datei importieren** daran.
+
+Format ist JSON, entweder als `{ "entries": [...] }` oder als blanke Liste:
+
+```json
+{
+  "version": 1,
+  "entries": [
+    {
+      "kind": "petrol_price",
+      "validFrom": "2021-11-01",
+      "amount": 1.68,
+      "unit": "eur_per_l",
+      "taxStatus": "gross",
+      "source": { "reference": "ADAC Kraftstoffpreisentwicklung" }
+    }
+  ]
+}
+```
+
+`kind` und `unit` sind im Request bewusst als freie Strings typisiert und
+werden je Zeile geprüft: als Union getippt würde ein einziger Tippfehler die
+komplette Datei am Gateway scheitern lassen, statt die fehlerhafte Zeile zu
+benennen. Der Import ist **idempotent** über denselben natürlichen Schlüssel
+wie der Unique-Index (`kind`, `valid_from`, `unit`, `name`) — eine schon
+vorhandene Zeile wird aktualisiert, nicht verdoppelt, ein korrigiertes File
+darf also erneut eingespielt werden. Fehlerhafte Zeilen stoppen den Rest
+nicht, sondern kommen mit ihrer Position in `errors` zurück (Muster:
+`finance/data-import.ts`).
 
 ### 5.2.3 Anlagenzustand
 

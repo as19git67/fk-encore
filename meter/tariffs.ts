@@ -9,10 +9,13 @@ import {
   createElectricityTariff,
   deleteElectricityTariff,
   importElectricityPrices,
+  importTariffEntries,
   listElectricityTariffs,
   updateElectricityTariff,
   type ElectricityPriceImportResult,
   type ElectricityTariff,
+  type TariffImportEntry,
+  type TariffImportResult,
   type UpsertElectricityTariffInput,
 } from "./tariffs.service";
 
@@ -61,6 +64,22 @@ export const deleteTariff = api(
     const userId = requireUser("meters.manage");
     await deleteElectricityTariff(userId, id);
     return { deleted: true };
+  },
+);
+
+interface ImportTariffsRequest {
+  entries: TariffImportEntry[];
+}
+
+/**
+ * Bulk import of tariffs and assumptions from a file, for historical series
+ * (petrol prices, gas prices, …) that are impractical to type row by row.
+ */
+export const importTariffs = api(
+  { expose: true, method: "POST", path: "/meters/tariffs/import", auth: true },
+  async (req: ImportTariffsRequest): Promise<TariffImportResult> => {
+    const userId = requireUser("meters.manage");
+    return await importTariffEntries(userId, req.entries);
   },
 );
 

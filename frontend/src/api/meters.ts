@@ -772,6 +772,32 @@ export function importElectricityPrices() {
   )
 }
 
+/** One row of a tariff/assumption import file. */
+export interface TariffImportEntry {
+  kind: string
+  validFrom: string
+  amount: number
+  unit: string
+  taxStatus?: string | null
+  name?: string | null
+  capacityLimitKw?: number | null
+  source?: Record<string, unknown> | null
+}
+
+export interface TariffImportResult {
+  created: number
+  updated: number
+  failed: number
+  errors: Array<{ index: number; message: string }>
+}
+
+export function importTariffFile(entries: TariffImportEntry[]) {
+  return apiFetch<TariffImportResult>('/meters/tariffs/import', {
+    method: 'POST',
+    body: JSON.stringify({ entries }),
+  })
+}
+
 // ── Import (Issue #792) ─────────────────────────────────────────────────────
 
 export interface WaterImportResult {
