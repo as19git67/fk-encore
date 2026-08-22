@@ -55,6 +55,7 @@ import { listGroups, type GroupSummary } from '../api/documents'
 import { ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { toLocalIsoDateTime } from '../utils/dateFormat'
+import { decimalInputPt } from '../utils/inputNumberPt'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -1229,7 +1230,7 @@ onMounted(load)
             <DatePicker v-model="form.deviceInstalledAt" show-time hour-format="24" date-format="dd.mm.yy" />
           </label>
           <label>Startwert
-            <InputNumber v-model="form.deviceStartValue" :min-fraction-digits="0" :max-fraction-digits="3" />
+            <InputNumber v-model="form.deviceStartValue" :min-fraction-digits="0" :max-fraction-digits="3" :pt="decimalInputPt" />
           </label>
         </template>
       </div>
@@ -1345,7 +1346,7 @@ onMounted(load)
             <DatePicker v-model="tariffForm.validFrom" date-format="dd.mm.yy" />
           </label>
           <label>Betrag
-            <InputNumber v-model="tariffForm.amount" :min="0" :min-fraction-digits="0" :max-fraction-digits="6" />
+            <InputNumber v-model="tariffForm.amount" :min="0" :min-fraction-digits="0" :max-fraction-digits="6" :pt="decimalInputPt" />
           </label>
           <label>Einheit
             <Select v-model="tariffForm.unit" :options="tariffUnitOptions" option-label="label" option-value="value" />
@@ -1354,7 +1355,7 @@ onMounted(load)
             <InputText v-model="tariffForm.name" placeholder="optional" />
           </label>
           <label>Grenze kW
-            <InputNumber v-model="tariffForm.capacityLimitKw" :min="0" :min-fraction-digits="0" :max-fraction-digits="3" />
+            <InputNumber v-model="tariffForm.capacityLimitKw" :min="0" :min-fraction-digits="0" :max-fraction-digits="3" :pt="decimalInputPt" />
           </label>
           <label>Steuerstatus
             <InputText v-model="tariffForm.taxStatus" placeholder="incl. MwSt., excl. MwSt., …" />
