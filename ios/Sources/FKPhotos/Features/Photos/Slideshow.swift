@@ -1,18 +1,16 @@
 import Foundation
 
-/// Decision logic and persisted settings for the fullscreen slideshow.
+/// Settings shared by every slideshow in the app.
 ///
-/// Mirrors the web's `frontend/src/utils/slideshow.ts` and
-/// `slideshowInterval.ts` so both clients behave the same way; the rules are
-/// documented once in `docs/photo-slideshow.md`. The view owns the timer and
-/// the `isPlaying` flag — everything here is pure, so the awkward parts (the
-/// no-wrap stop, when the caption may appear, a stale stored interval) are
-/// testable without a view.
+/// The playback machinery itself lives in `SlideshowPlan.swift` (planning and
+/// position) and `SlideshowStage.swift` (what one slide looks like); this is
+/// only the per-device pace and the caption rule. Documented once in
+/// `docs/photo-slideshow.md`.
 enum Slideshow {
 
     // MARK: - Interval
 
-    /// Selectable gaps between photos, in seconds. Same set the web offers.
+    /// Selectable gaps between slides, in seconds. Same set the web offers.
     static let intervalOptions: [TimeInterval] = [3, 5, 10, 15, 20, 30]
 
     /// Used until the user picks one.
@@ -38,79 +36,13 @@ enum Slideshow {
         "\(Int(interval.rounded()))s"
     }
 
-    // MARK: - Playback
+    // MARK: - Caption
 
-    /// The slideshow stops at the last photo — it never wraps around. Callers
-    /// use this to flip the button back to "play" so the icon keeps matching
-    /// what a tap would do.
-    static func reachedEnd(playing: Bool, hasNext: Bool) -> Bool {
-        playing && !hasNext
-    }
-
-    /// Whether the advance timer should be armed right now: the user started
-    /// playback, an interval is configured, there is somewhere to go, and the
-    /// photo on screen has finished loading.
-    ///
-    /// `currentLoaded` matches the web's `shouldArmSlideshow`: the gap is meant
-    /// to be time spent *looking at* a photo, so it starts once the photo is up
-    /// rather than while it is still a spinner. A photo whose load failed counts
-    /// as loaded — otherwise one broken image stalls playback for good.
-    ///
-    /// Opening the details view deliberately does *not* pause — same as the
-    /// web, where the description is in the sidebar anyway.
-    static func shouldAdvance(
-        playing: Bool,
-        interval: TimeInterval,
-        hasNext: Bool,
-        currentLoaded: Bool
-    ) -> Bool {
-        playing && interval > 0 && hasNext && currentLoaded
-    }
-
-    /// Whether the description caption belongs on screen: only while playing,
-    /// only when the details view is closed (it shows the description already),
-    /// and only when there is a non-blank description to show.
-    static func shouldShowCaption(
-        playing: Bool,
-        showDetails: Bool,
-        description: String?
-    ) -> Bool {
-        guard playing, !showDetails else { return false }
+    /// The description to show under a slide, or nil when there is nothing
+    /// worth a caption. Blank-but-present descriptions exist in the data, and
+    /// they must not render an empty bubble over the photo.
+    static func caption(_ description: String?) -> String? {
         let trimmed = (description ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return !trimmed.isEmpty
-    }
-}
-
-/// Chrome (toolbars, status bar, captions) visibility while the slideshow runs.
-///
-/// A running slideshow is meant to be the photo and nothing else, so the chrome
-/// goes away when playback starts. A tap brings it back briefly — long enough to
-/// reach pause or step away — and it hides itself again if the tap isn't
-/// followed by another. Outside playback none of this applies: the chrome is
-/// simply always up.
-///
-/// Pure, like `Slideshow`: the view owns the reveal flag and the hide timer.
-enum SlideshowChrome {
-
-    /// How long a tap keeps the chrome on screen before it fades out again.
-    static let autoHideDelay: TimeInterval = 3
-
-    /// Whether the chrome belongs on screen. Outside the slideshow it always
-    /// does — immersive mode is a property of playback, not of the viewer.
-    static func isVisible(playing: Bool, revealed: Bool) -> Bool {
-        !playing || revealed
-    }
-
-    /// Whether a tap on the photo should reveal the chrome. Only meaningful
-    /// during playback; otherwise the chrome is already up and the tap is left
-    /// to whatever else wants it.
-    static func shouldReveal(playing: Bool) -> Bool {
-        playing
-    }
-
-    /// Whether the auto-hide timer should run. Re-armed on every tap, so a
-    /// second tap extends the reveal rather than cutting it short.
-    static func shouldArmAutoHide(playing: Bool, revealed: Bool) -> Bool {
-        playing && revealed
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

@@ -198,7 +198,7 @@ Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders ·
 | Filter (Favorit, GPS, Datum, Medientyp) | ✅ | ✅ (Favorit, GPS, Datum) |
 | Sortierung (Datum/Qualität/Name/Größe) | ✅ | 🔶 (Teilmenge) |
 | Vollbild + Zoom | ✅ | ✅ native Pinch-Zoom |
-| Diashow / Slideshow | ✅ | ✅ |
+| Diashow / Slideshow | ✅ Modus im Vollbild | ✅ eigener Story-Player (`PhotoSlideshowView`), mit Foto-Paaren je nach Geräteausrichtung |
 | Mehrfachauswahl + Stapelaktionen | ✅ (Galerie + Album) | ✅ (Album, Monat und „Alle Fotos") |
 | Fotos vergleichen | ✅ `PhotoCompareView` | ❌ |
 
@@ -321,9 +321,10 @@ Referenz stehen, was jeweils gebaut wurde.
    gemeinsamen `PhotoSelection`-Zustands.
 8. **Reichere Such-Filter (Chips)** – strukturierte Filter analog
    `NaturalSearchBar`.
-9. ✅ **Diashow** im Vollbild – umgesetzt in `PhotoFullscreenView`;
-   Entscheidungslogik in `Slideshow.swift`, Regeln in
-   `docs/photo-slideshow.md`.
+9. ✅ **Diashow** – umgesetzt als eigener Vollbild-Player
+   (`PhotoSlideshowView`), derselbe Story-Player wie bei den Rückblicken.
+   Startbar aus Album, Auswahl, Mediathek und dem Vollbild-Viewer; reine Logik
+   in `SlideshowPlan.swift`, Regeln in `docs/photo-slideshow.md`.
 
 ### Etappe 3 – Nice-to-have / aufwändiger
 10. **Nicht-destruktiver Transform-/Crop-Editor** – komplex; ggf. später.

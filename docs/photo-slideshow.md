@@ -110,58 +110,98 @@ Album-/Karten-Fotos (`getAlbumLogic`) liefern `description` direkt mit.
 
 ## iOS (`ios/`, Issue #767 Etappe 2)
 
-Die iOS-App hat die Diashow im Vollbild-Viewer (`PhotoFullscreenView`). Die
-Entscheidungslogik liegt — analog zum Web — in einer eigenen, unit-getesteten
-Datei (`Slideshow.swift` / `SlideshowTests.swift`), die View besitzt nur Timer
-und `isPlaying`-Flag.
+Auf iOS ist die Diashow **kein Modus des Vollbild-Viewers**, sondern ein eigener
+Vollbild-Player (`PhotoSlideshowView`) — derselbe Story-Player, den die
+Rückblicke schon nutzen (`RecapPlayerView`). Der Viewer selbst spielt nichts
+mehr ab; sein Play-Button übergibt die Fotos an den Player.
 
-Gleich wie im Web:
+Der Player zeigt ausschließlich das Bild:
 
-- **Kein Auto-Start**, manuelles Play/Pause über die Bottom-Bar.
-- **Intervall 3 / 5 / 10 / 15 / 20 / 30 s**, Default 5 s, pro Gerät
-  gespeichert (`UserDefaults`-Key `slideshow_interval_seconds`; das Web nutzt
-  `localStorage` — beide sind bewusst unabhängig, es gibt keinen Server-Sync).
-  Ein gespeicherter Wert außerhalb der Optionen fällt auf den Default zurück.
-- **Kein Wrap-around:** Am letzten Foto endet die Diashow und das Icon springt
-  zurück auf ▶.
-- **Details pausieren nicht**, blenden aber die Caption aus.
-- **Beschreibungs-Caption** einzeilig mit Ellipsis über dem Bild, nur während
-  des Laufs und nur bei nicht-leerer Beschreibung.
-- **Immersiver Ablauf:** Während die Diashow läuft, zeigt der Viewer nur das
-  Bild — Navigations- und Bottom-Bar, Statusleiste und Home-Indicator werden
-  ausgeblendet. Ein **einfacher Tap** auf das Foto blendet die Bedienelemente
-  für `SlideshowChrome.autoHideDelay` (3 s) wieder ein; tippt der Nutzer erneut,
-  verlängert das die Anzeige, sonst verschwindet sie wieder. Der Doppel-Tap
-  bleibt der Zoom (`singleTap.require(toFail: doubleTap)`). Regeln in
-  `SlideshowChrome`, unit-getestet; das Web kennt diesen Modus (noch) nicht.
-- **Start aus dem Album-Raster:** Das Überlaufmenü oben rechts in
-  `AlbumDetailView` hat einen Punkt **„Diashow"**, der das Vollbild bei Foto 1
-  direkt spielend öffnet (`autoStartSlideshow`). Sichtbar ab zwei Fotos — für
-  ein einzelnes gibt es nichts weiterzuschalten — und unabhängig von
-  Schreibrechten.
-- **Warten auf das geladene Bild** (`currentLoaded`): Der Timer startet erst,
-  wenn das aktuelle Foto steht, damit die Wartezeit die Betrachtungszeit ist
-  und nicht am Platzhalter verstreicht. `ThumbnailLoader.onLoadSettled` meldet
-  das Ende eines Ladeversuchs, `PhotoPageView` reicht die Foto-ID nach oben,
-  `PhotoFullscreenView` sammelt sie in `settledPhotoIds`. Ein **fehlgeschlagener**
-  Ladeversuch zählt dabei als geladen — sonst würde ein einziges kaputtes Bild
-  die Diashow dauerhaft anhalten. Gewartet wird nur auf das Bild, nicht auf die
-  Metadaten, die parallel laden.
+- **Story-Fortschrittsleiste** oben, ein Segment pro Foto.
+- **Tippen links** = ein Bild zurück, **tippen rechts** = weiter.
+- **Langes Drücken** pausiert, solange der Finger liegt.
+- **Nach unten wischen** oder ✕ schließt.
+- **Ken-Burns-Bewegung** pro Bild plus Überblendung zwischen den Slides.
+- **Warten auf das geladene Bild:** Solange ein Foto der aktuellen Slide noch
+  lädt, steht der Fortschritt still — die Anzeigedauer ist Betrachtungszeit,
+  nicht Ladezeit. Ein **fehlgeschlagener** Ladeversuch zählt als geladen, sonst
+  würde ein einziges kaputtes Bild die Diashow dauerhaft anhalten.
+- **Intervall 3 / 5 / 10 / 15 / 20 / 30 s**, Default 5 s, pro Gerät gespeichert
+  (`UserDefaults`-Key `slideshow_interval_seconds`; das Web nutzt `localStorage`
+  — beide sind bewusst unabhängig, es gibt keinen Server-Sync). Ein
+  gespeicherter Wert außerhalb der Optionen fällt auf den Default zurück.
+  Umgestellt wird er über das Timer-Menü in der Kopfzeile des Players.
+  Rückblicke behalten ihre feste Taktung von 4 s.
+- **Beschreibungs-Caption** unten, zweizeilig, nur bei nicht-leerer
+  Beschreibung. Bei einem Foto-Paar gewinnt die erste vorhandene Beschreibung.
+- **Herz-Button** markiert das Gezeigte als Favorit — bei einem Paar beide
+  Fotos, weil sich der Tap auf das bezieht, was auf dem Schirm steht.
+- **Kein Wrap-around:** Nach dem letzten Foto endet der Player und schließt sich.
 
-Bewusst anders als im Web:
+### Woher die Fotos kommen
 
-- **Bedienung über `Menu(primaryAction:)`:** Ein Tap startet/pausiert, ein
-  Long-Press öffnet das Intervall-Menü. Das ist genau die Touch-Geste, die das
-  Web für Mobilgeräte von Hand nachbaut — auf iOS ist sie nativ, deshalb
-  entfällt der einmalige Long-Press-Hinweis samt „gesehen"-Flag.
-- **Play ist am letzten Foto deaktiviert** statt sichtbar wirkungslos: ohne
-  Wrap-around würde ein Start dort sofort wieder stoppen.
+| Einstieg | Umfang |
+|---|---|
+| Überlaufmenü „Diashow" in `AlbumDetailView` | alle angezeigten Album-Fotos |
+| Play-Button in der Auswahl-Toolbar (Album, Mediathek, Monat, gefilterte Timeline) | die ausgewählten Fotos |
+| Play-Button in der Toolbar ohne Auswahl | alles, was die Ansicht gerade zeigt |
+| Play-Button in der Bottom-Bar von `PhotoFullscreenView` | ab dem gezeigten Foto bis zum Ende |
+
+Der Einstieg ist überall ab **zwei** Fotos sichtbar/aktiv — für ein einzelnes
+gibt es nichts weiterzuschalten.
+
+### Zwei Bilder pro Slide (auch im Rückblick)
+
+Ein Querformat-Foto füllt auf einem hochkant gehaltenen Handy nur ein Band in
+der Mitte. Deshalb legt der Player **zwei Querformat-Fotos übereinander** auf
+eine Slide, wenn das Gerät im Hochformat ist — und **zwei Hochformat-Fotos
+nebeneinander**, wenn es quer gehalten wird. Die beiden Hälften fahren dabei
+von den gegenüberliegenden Rändern ein; einzelne Bilder blenden weiterhin über.
+Fast quadratische Fotos (±5 %) werden nie gepaart, weil ein Paar dort genauso
+viel Fläche verschenkt wie ein Einzelbild.
+
+Die Ausrichtung ist erst bekannt, wenn ein Bild dekodiert ist. Der Plan wird
+deshalb **inkrementell** gebaut (`SlideshowPlanner.extend`): Er legt so viele
+Slides fest, wie er entscheiden kann, und wartet am ersten Foto, dessen Partner
+noch fehlt. Bereits gezeigte Slides werden nie umnummeriert. Wartet der Player
+länger als 2 s auf ein Bild, gibt er **für dieses eine Foto** auf und zeigt es
+einzeln — der Rest wird danach wieder normal geplant. Dreht der Nutzer das
+Gerät, bleibt der bereits gespielte Teil stehen und nur der Rest wird neu
+gruppiert.
+
+Die Fortschrittsleiste hat deshalb ein Segment pro **Foto**, nicht pro Slide:
+So behält sie ihre Form, während der Plan noch wächst; die beiden Segmente
+eines Paares füllen sich gemeinsam.
+
+### Ken Burns und Gesichter
+
+Die Ken-Burns-Bewegung ist pro Foto deterministisch aus der Foto-ID abgeleitet
+(gleicher Hash wie im Web), damit ein Bild immer gleich driftet. Der
+Gesichtsbezug hat zwei Stufen:
+
+1. **Bildausschnitt:** Liegt ein serverseitiger Fokuspunkt vor (`auto_crop`,
+   Gesichtsmitte, 0..1 normalisiert), wird der Füll-Crop dorthin verschoben —
+   begrenzt durch den Überstand, analog zu CSS `object-position`. Ohne
+   Fokuspunkt bleibt es beim geometrischen Zentrum.
+2. **Bewegungsziel:** Das **herangezoomte** Ende der Fahrt liegt exakt auf
+   diesem Fokuspunkt (Versatz 0), nur das weite Ende wandert zufällig. Die
+   Bewegung läuft also immer auf das Gesicht zu (bzw. von ihm weg) statt
+   ziellos zu driften. Fotos ohne Fokuspunkt behalten die rein zufällige
+   Bewegung an beiden Enden.
+
+`auto_crop` wird serverseitig gesetzt und ist nicht für jedes Foto vorhanden;
+ohne Wert verhält sich die Bewegung wie vorher.
+
+### Bewusst anders als im Web
+
+- Der Web-Player ist ein Modus des `FullscreenOverlay` mit Play/Pause-Button;
+  auf iOS ist er eine eigene Ansicht. Entsprechend gibt es dort kein
+  Play/Pause-Icon, sondern Pause per Fingerdruck.
+- **Foto-Paare und der Gesichtsbezug der Ken-Burns-Bewegung existieren bisher
+  nur auf iOS.**
 - **Kein Datums-Banner und kein Idle-Reset.** Beide hängen im Web an der
   Karten-/Trip-Ansicht bzw. an Pointer-/Wheel-Events; auf iOS gibt es dafür
-  bisher keinen entsprechenden Einstiegspunkt. Offen, falls die Trip-Karte
-  später ein durchlaufendes Vollbild bekommt.
-
-Damit bleibt als inhaltlicher Unterschied zum Web nur noch der letzte Punkt.
+  bisher keinen entsprechenden Einstiegspunkt.
 
 ## Betroffene Dateien
 
@@ -173,9 +213,12 @@ Damit bleibt als inhaltlicher Unterschied zum Web nur noch der letzte Punkt.
 | `frontend/src/components/TripMap.vue` | `allStopPhotos`: ganzer Trip als Vollbild-Scope (`open-fullscreen`) |
 | `frontend/src/views/AlbumDetailView.vue` | Map-Overlay: `:markDayChanges="true"`, Stopp-Sync beim Schließen |
 | `frontend/src/views/SharedAlbumView.vue` | Overlay: `:markDayChanges="fullscreenFromMap"` |
-| `ios/Sources/FKPhotos/Features/Photos/Slideshow.swift` | iOS: reine Logik + Intervall-Optionen/Persistenz |
-| `ios/Sources/FKPhotos/Features/Photos/PhotoFullscreenView.swift` | iOS: Play/Pause-Menu, Advance-Timer, Caption, `settledPhotoIds` |
-| `ios/Sources/FKPhotos/Core/Storage/ThumbnailLoader.swift` | iOS: `onLoadSettled` / `isSettled` — Ladesignal für den Advance-Timer |
-| `ios/Sources/FKPhotos/Core/ZoomableImageView.swift` | iOS: `onSingleTap` — Tap zum Einblenden der Bedienelemente |
-| `ios/Sources/FKPhotos/Features/Albums/AlbumDetailView.swift` | iOS: Menüpunkt „Diashow" (`autoStartSlideshow`) |
-| `ios/Tests/FKPhotosTests/SlideshowTests.swift` | iOS: Unit-Tests der Logik |
+| `ios/Sources/FKPhotos/Features/Photos/PhotoSlideshowView.swift` | iOS: Story-Player über Album/Auswahl/Mediathek |
+| `ios/Sources/FKPhotos/Features/Recaps/RecapPlayerView.swift` | iOS: derselbe Player für Rückblicke (plus Musik/Intros) |
+| `ios/Sources/FKPhotos/Features/Photos/SlideshowPlan.swift` | iOS: reine Logik — Ausrichtung, Paar-Planung, Playback-Position |
+| `ios/Sources/FKPhotos/Features/Photos/SlideshowStage.swift` | iOS: Darstellung einer Slide (einzeln/Paar), Ken-Burns-Bewegung |
+| `ios/Sources/FKPhotos/Features/Photos/SlideshowImageStore.swift` | iOS: Vorausladen der Bilder + Ausrichtung nach dem Dekodieren |
+| `ios/Sources/FKPhotos/Features/Photos/Slideshow.swift` | iOS: Intervall-Optionen/Persistenz + Caption-Regel |
+| `ios/Sources/FKPhotos/Features/Albums/AlbumDetailView.swift` | iOS: Menüpunkt „Diashow" und Auswahl-Diashow |
+| `ios/Tests/FKPhotosTests/SlideshowPlanTests.swift` | iOS: Unit-Tests für Planung, Playback und Ken Burns |
+| `ios/Tests/FKPhotosTests/SlideshowTests.swift` | iOS: Unit-Tests für Intervall und Caption |

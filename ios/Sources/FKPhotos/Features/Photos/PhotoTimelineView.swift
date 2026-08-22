@@ -7,6 +7,8 @@ struct PhotoTimelineView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var showUpload = false
+    /// Story-style slideshow over the filtered photos (or the selected ones).
+    @State private var showSlideshow = false
     @State private var filterSort = FilterSortViewModel(persistenceKey: "photos.filterSort")
 
     // Used only in filtered mode
@@ -76,6 +78,12 @@ struct PhotoTimelineView: View {
                         Image(systemName: "square.and.arrow.up")
                     }
                     .disabled(selection.isEmpty || shareManager.isLoading)
+                    Button {
+                        showSlideshow = true
+                    } label: {
+                        Image(systemName: "play.rectangle")
+                    }
+                    .disabled(!canStartSlideshow)
                 }
             } else {
                 ToolbarItem(placement: .topBarLeading) {
@@ -91,6 +99,12 @@ struct PhotoTimelineView: View {
                             Image(systemName: "checkmark.circle")
                         }
                     }
+                    ToolbarItem(placement: .primaryAction) {
+                        Button { showSlideshow = true } label: {
+                            Image(systemName: "play.rectangle")
+                        }
+                        .disabled(!canStartSlideshow)
+                    }
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button { showUpload = true } label: {
@@ -98,6 +112,9 @@ struct PhotoTimelineView: View {
                     }
                 }
             }
+        }
+        .fullScreenCover(isPresented: $showSlideshow) {
+            PhotoSlideshowView(photos: slideshowPhotos, title: "Fotos")
         }
         .sheet(isPresented: $filterSort.isMenuPresented) {
             FilterSortMenuView(viewModel: filterSort)
@@ -247,6 +264,20 @@ struct PhotoTimelineView: View {
             .onPreferenceChange(PhotoFramePreference.self) { itemFrames = $0 }
             .simultaneousGesture(selection.isSelecting ? dragSelectGesture : nil)
         }
+    }
+
+
+    /// What a slideshow started right now would play: the selected photos
+    /// while picking, otherwise everything the filter left on screen.
+    private var slideshowPhotos: [PhotoWithCuration] {
+        guard selection.isSelecting, !selection.isEmpty else { return photosVM.photos }
+        return photosVM.photos.filter { selection.contains($0.id) }
+    }
+
+    /// A slideshow needs something to advance to, so a single photo does not
+    /// offer one.
+    private var canStartSlideshow: Bool {
+        slideshowPhotos.count > 1
     }
 
     private func reload() async {
