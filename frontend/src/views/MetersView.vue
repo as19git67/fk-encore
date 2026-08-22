@@ -656,8 +656,10 @@ const TARIFF_CATEGORIES: Array<{ key: string; label: string; kinds: ElectricityT
   },
   {
     key: 'heating',
-    label: 'Gasheizung (Vergleich)',
-    kinds: ['gas_price', 'gas_base_price', 'boiler_efficiency', 'heat_pump_scop'],
+    // Both sides of the comparison, like the vehicle section below: the JAZ
+    // describes the heat pump, the rest the gas boiler it is measured against.
+    label: 'Heizung (Vergleich)',
+    kinds: ['heat_pump_scop', 'gas_price', 'gas_base_price', 'boiler_efficiency'],
   },
   {
     key: 'car',
