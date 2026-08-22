@@ -23,17 +23,18 @@ struct RecapPlayerView: View {
     @State private var subtitle: String?
     @State private var isLoading = true
     @State private var loadError: String?
-    @State private var playback = RecapPlayback(count: 0)
+    @State private var playback = SlideshowPlayback()
+    /// How the photos are grouped into slides — see `SlideshowPlanner`. Two
+    /// landscape photos share one portrait screen (and vice versa).
+    @State private var plan: [SlideshowSlide] = []
+    @State private var screen: ScreenOrientation = .portrait
     @State private var isPaused = false
     @State private var ticker: Task<Void, Never>?
+    /// Consecutive ticks spent waiting for the planner; see `awaitPlan()`.
+    @State private var stalledTicks = 0
 
-    /// Loaded slide images keyed by position in `photos`.
-    @State private var slideImages: [Int: UIImage] = [:]
-    /// Slides whose download failed — rendered as an error glyph and skipped
-    /// by the buffering gate so playback doesn't hang forever.
-    @State private var failedSlides: Set<Int> = []
-    /// Slide indices with an in-flight download (dedupes prefetch tasks).
-    @State private var loadingSlides: Set<Int> = []
+    /// Downloads and holds the slide images; shared with the photo slideshow.
+    @State private var store = SlideshowImageStore()
 
     @State private var musicPlayer: AVAudioPlayer?
     @State private var isMusicMuted = false
@@ -59,6 +60,9 @@ struct RecapPlayerView: View {
     /// Seconds each slide stays on screen before auto-advancing.
     private let perItem: Double = 4.0
     private let tickStep: Double = 0.05
+    /// How long the ticker holds out for a photo that would let the planner
+    /// decide a pairing, before showing what it has as a single slide.
+    private let planStallGrace: Double = 2.0
     /// How many slides beyond the current one are fetched ahead of time.
     private let prefetchAhead = 3
 
@@ -115,10 +119,10 @@ struct RecapPlayerView: View {
     }
 
     private var player: some View {
-        let idx = min(playback.index, max(0, photos.count - 1))
-        return GeometryReader { geo in
+        GeometryReader { geo in
+            let orientation = ScreenOrientation(size: geo.size)
             ZStack(alignment: .top) {
-                slideContent(idx: idx)
+                slideContent(screen: orientation)
                     .frame(width: geo.size.width, height: geo.size.height)
                     .clipped()
 
@@ -144,7 +148,7 @@ struct RecapPlayerView: View {
                 topOverlay
 
                 if mapIntro == nil && compareIntro == nil {
-                    favoriteButton(for: idx)
+                    favoriteButton
                         .frame(
                             maxWidth: .infinity,
                             maxHeight: .infinity,
@@ -173,42 +177,92 @@ struct RecapPlayerView: View {
             .onLongPressGesture(minimumDuration: 0.2, pressing: { pressing in
                 isPaused = pressing
             }, perform: {})
+            .onAppear {
+                screen = orientation
+                extendPlan()
+            }
+            .onChange(of: orientation) { _, new in
+                screen = new
+                replanForOrientationChange()
+            }
         }
         .ignoresSafeArea()
-        .onChange(of: playback.index) { _, newIndex in
-            prefetch(around: newIndex)
+        // Newly arrived images unlock pairing decisions for the photos after
+        // the one on screen, so the plan grows as the recap runs.
+        .onChange(of: store.images.count) { _, _ in extendPlan() }
+        .onChange(of: store.failed.count) { _, _ in extendPlan() }
+        .onChange(of: playback.slideIndex) { _, _ in
+            if let slide = currentSlide {
+                store.prefetch(around: slide.first, ahead: prefetchAhead)
+            }
         }
     }
 
     @ViewBuilder
-    private func slideContent(idx: Int) -> some View {
-        ZStack {
-            Color.black
-            if let image = slideImages[idx] {
-                KenBurnsSlide(
-                    image: image,
-                    seed: photos[idx].id,
-                    duration: perItem + 1.0,
-                    focal: photos[idx].auto_crop.map { CGPoint(x: $0.x, y: $0.y) }
-                )
-                .id(photos[idx].id)
-                .transition(.opacity.animation(.easeInOut(duration: 0.5)))
-            } else if failedSlides.contains(idx) {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.largeTitle)
-                    .foregroundStyle(.white.opacity(0.6))
-            } else {
+    private func slideContent(screen orientation: ScreenOrientation) -> some View {
+        if let slide = currentSlide {
+            SlideshowStageView(
+                frames: slide.photoIndices.map { index in
+                    SlideshowFrame(
+                        id: photos[index].id,
+                        image: store.images[index],
+                        failed: store.failed.contains(index),
+                        focal: photos[index].auto_crop.map { CGPoint(x: $0.x, y: $0.y) }
+                    )
+                },
+                screen: orientation,
+                duration: perItem + 1.0
+            )
+            .id(slide.photoIndices.map { String(photos[$0].id) }.joined(separator: "+"))
+        } else {
+            ZStack {
+                Color.black
                 ProgressView().tint(.white)
             }
         }
+    }
+
+    // MARK: - Slide plan
+
+    private var currentSlide: SlideshowSlide? {
+        playback.currentSlide(in: plan)
+    }
+
+    /// True once every photo has been assigned to a slide — only then does
+    /// running off the last slide end the recap.
+    private var planComplete: Bool {
+        SlideshowPlanner.plannedPhotoCount(plan) >= photos.count
+    }
+
+    /// Commit slides for the photos whose shape is now known. `force` also
+    /// commits an undecidable photo as a single slide, which is what breaks a
+    /// stall when a download is slow.
+    private func extendPlan(force: Bool = false) {
+        let extended = SlideshowPlanner.extend(
+            plan: plan,
+            orientations: store.orientations,
+            screen: screen,
+            force: force
+        )
+        if extended != plan { plan = extended }
+    }
+
+    /// Turning the phone changes which photos are worth pairing. Slides already
+    /// shown keep their numbering — only the unplayed tail is rebuilt.
+    private func replanForOrientationChange() {
+        let keep = min(playback.slideIndex + 1, plan.count)
+        plan = Array(plan.prefix(keep))
+        extendPlan()
     }
 
     private var topOverlay: some View {
         VStack(spacing: 8) {
             HStack(spacing: 4) {
                 ForEach(photos.indices, id: \.self) { i in
-                    ProgressBar(fraction: playback.fillFraction(for: i))
-                        .frame(height: 3)
+                    SlideshowProgressBar(
+                        fraction: playback.fillFraction(forPhotoAt: i, plan: plan)
+                    )
+                    .frame(height: 3)
                 }
             }
 
@@ -305,7 +359,9 @@ struct RecapPlayerView: View {
                 }
             }
 
-            playback = RecapPlayback(count: photos.count)
+            playback = SlideshowPlayback()
+            plan = []
+            store.reset(filenames: photos.map(\.filename))
             isLoading = false
             onSeen?(recapId)
             if !photos.isEmpty {
@@ -322,7 +378,7 @@ struct RecapPlayerView: View {
                         label: seed.location_city
                     )
                 }
-                prefetch(around: 0)
+                store.prefetch(around: 0, ahead: prefetchAhead)
                 // With an intro (map or compare) the ticker starts once it
                 // finishes, so the first photo keeps its full screen time.
                 if mapIntro == nil && compareIntro == nil { startTicker() }
@@ -350,36 +406,42 @@ struct RecapPlayerView: View {
         favoriteOverrides[photo.id] ?? (photo.curation_status == "favorite")
     }
 
-    private func favoriteButton(for idx: Int) -> some View {
-        let fav = idx < photos.count ? isFavorite(photos[idx]) : false
-        return Button { toggleFavorite(at: idx) } label: {
+    /// Marks everything on the current slide as a favourite — on a pair both
+    /// photos, since the tap means "this, on screen, now".
+    private var favoriteButton: some View {
+        let slidePhotos = (currentSlide?.photoIndices ?? []).map { photos[$0] }
+        let fav = !slidePhotos.isEmpty && slidePhotos.allSatisfy { isFavorite($0) }
+        return Button { toggleFavorite(allFavorite: fav) } label: {
             Image(systemName: fav ? "heart.fill" : "heart")
                 .font(.title2)
                 .foregroundStyle(fav ? .red : .white)
                 .padding(12)
                 .background(.black.opacity(0.45), in: Circle())
         }
-        .disabled(favoriteBusy)
+        .disabled(favoriteBusy || slidePhotos.isEmpty)
         .accessibilityLabel(fav ? "Favorit entfernen" : "Als Favorit markieren")
     }
 
-    private func toggleFavorite(at idx: Int) {
-        guard idx < photos.count, !favoriteBusy else { return }
-        let photo = photos[idx]
-        let target = !isFavorite(photo)
-        favoriteOverrides[photo.id] = target
+    private func toggleFavorite(allFavorite: Bool) {
+        guard let slide = currentSlide, !favoriteBusy else { return }
+        let targets = slide.photoIndices.map { photos[$0] }
+        let target = !allFavorite
+        let previous = targets.map { isFavorite($0) }
+        for photo in targets { favoriteOverrides[photo.id] = target }
         favoriteBusy = true
         Task { @MainActor in
             defer { favoriteBusy = false }
             struct CurationBody: Encodable { let status: String }
             struct CurationResponse: Decodable { let success: Bool }
-            do {
-                let _: CurationResponse = try await APIClient.shared.patch(
-                    "/photos/\(photo.id)/curation",
-                    body: CurationBody(status: target ? "favorite" : "visible")
-                )
-            } catch {
-                favoriteOverrides[photo.id] = !target
+            for (photo, old) in zip(targets, previous) {
+                do {
+                    let _: CurationResponse = try await APIClient.shared.patch(
+                        "/photos/\(photo.id)/curation",
+                        body: CurationBody(status: target ? "favorite" : "visible")
+                    )
+                } catch {
+                    favoriteOverrides[photo.id] = old
+                }
             }
         }
     }
@@ -404,7 +466,10 @@ struct RecapPlayerView: View {
     /// the show running unchanged.
     private func excludeCurrentPhoto() {
         guard !excludeBusy, !photos.isEmpty else { return }
-        let idx = min(playback.index, photos.count - 1)
+        // On a pair the first of the two is the one the button removes; a
+        // second tap then catches the other.
+        let idx = currentSlide?.first ?? 0
+        guard idx < photos.count else { return }
         let photoId = photos[idx].id
         excludeBusy = true
         Task { @MainActor in
@@ -427,11 +492,10 @@ struct RecapPlayerView: View {
                 let ordered = res.photo_ids.compactMap { byId[$0] }
                 guard !ordered.isEmpty else { return }
                 photos = ordered
-                slideImages = [:]
-                failedSlides = []
-                loadingSlides = []
-                playback = RecapPlayback(count: ordered.count)
-                prefetch(around: 0)
+                store.reset(filenames: ordered.map(\.filename))
+                plan = []
+                playback = SlideshowPlayback()
+                store.prefetch(around: 0, ahead: prefetchAhead)
             } catch {
                 // Keep the show running on any failure.
             }
@@ -517,41 +581,13 @@ struct RecapPlayerView: View {
         musicPlayer?.setVolume(isMusicMuted ? 0 : musicVolume, fadeDuration: 0.3)
     }
 
-    private func cacheKey(_ filename: String) -> String { "photo-\(filename)" }
-
-    /// Kick off downloads for the slide at `idx` and the next few. Each slide
-    /// is fetched at most once; results land in the shared `ImageCache`, so a
-    /// replay or the photo grid can reuse them.
-    private func prefetch(around idx: Int) {
-        for i in idx...(idx + prefetchAhead) where i >= 0 && i < photos.count {
-            guard slideImages[i] == nil,
-                  !failedSlides.contains(i),
-                  !loadingSlides.contains(i) else { continue }
-            loadingSlides.insert(i)
-            Task { await loadSlide(i) }
-        }
-    }
-
-    @MainActor
-    private func loadSlide(_ idx: Int) async {
-        defer { loadingSlides.remove(idx) }
-        let filename = photos[idx].filename
-
-        if let cached = await ImageCache.shared.image(forKey: cacheKey(filename)) {
-            slideImages[idx] = cached
-            return
-        }
-        do {
-            let data = try await APIClient.shared.downloadData("/photos/file/\(filename)")
-            guard let image = UIImage(data: data) else {
-                failedSlides.insert(idx)
-                return
-            }
-            await ImageCache.shared.store(image, forKey: cacheKey(filename))
-            slideImages[idx] = image
-        } catch {
-            failedSlides.insert(idx)
-        }
+    /// Counts a tick spent waiting for the planner and reports whether the wait
+    /// has gone on long enough to stop holding out for a pairing partner.
+    private func awaitPlan() -> Bool {
+        stalledTicks += 1
+        guard Double(stalledTicks) * tickStep >= planStallGrace else { return false }
+        stalledTicks = 0
+        return true
     }
 
     // MARK: - Playback control
@@ -563,22 +599,44 @@ struct RecapPlayerView: View {
                 try? await Task.sleep(for: .seconds(tickStep))
                 if Task.isCancelled { return }
                 if isPaused { continue }
-                // Buffering gate: hold progress while the current slide is
-                // still downloading, so the photo gets its full screen time
-                // once it appears (failed slides advance normally).
-                let idx = playback.index
-                if slideImages[idx] == nil && !failedSlides.contains(idx) { continue }
-                playback.tick(delta: tickStep, perItem: perItem)
+
+                guard let slide = currentSlide else {
+                    // Nothing planned to show yet. Planning waits for the next
+                    // photo's size before it can pair the current one, so give
+                    // that a moment before falling back to a single slide.
+                    extendPlan()
+                    if awaitPlan() { extendPlan(force: true) }
+                    continue
+                }
+                // Buffering gate: hold progress while a photo of this slide is
+                // still downloading, so it gets its full screen time once it
+                // appears (failed photos count as settled and advance).
+                guard slide.photoIndices.allSatisfy({ store.isSettled($0) }) else { continue }
+
+                playback.tick(
+                    delta: tickStep,
+                    perSlide: perItem,
+                    slideCount: plan.count,
+                    planComplete: planComplete
+                )
                 if playback.finished {
                     dismiss()
                     return
+                }
+                // Parked at the end of the planned slides with photos left:
+                // the plan has to give, or the recap would hang here.
+                if playback.progress >= 1 && !planComplete {
+                    if awaitPlan() { extendPlan(force: true) }
+                } else {
+                    stalledTicks = 0
                 }
             }
         }
     }
 
     private func goNext() {
-        playback.next()
+        if !planComplete { extendPlan(force: true) }
+        playback.next(slideCount: plan.count, planComplete: planComplete)
         if playback.finished { dismiss() }
     }
 
@@ -768,105 +826,5 @@ private struct CompareTile: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .task { await loader.load() }
-    }
-}
-
-/// One segment of the story progress bar.
-private struct ProgressBar: View {
-    let fraction: Double
-
-    var body: some View {
-        GeometryReader { geo in
-            Capsule()
-                .fill(.white.opacity(0.3))
-                .overlay(alignment: .leading) {
-                    Capsule()
-                        .fill(.white)
-                        .frame(width: geo.size.width * min(max(fraction, 0), 1))
-                }
-        }
-    }
-}
-
-/// Renders one slide with a slow Ken-Burns pan/zoom. The motion is derived
-/// deterministically from the photo id (same hash as the web player), so a
-/// given photo always drifts the same way. When a focal point (`auto_crop`)
-/// is present, the fill crop is shifted so faces stay in view instead of
-/// the geometric centre.
-private struct KenBurnsSlide: View {
-    let image: UIImage
-    let seed: Int
-    let duration: Double
-    var focal: CGPoint? = nil
-
-    @State private var animate = false
-
-    private struct Motion {
-        let fromScale: CGFloat
-        let toScale: CGFloat
-        let fromX: CGFloat
-        let fromY: CGFloat
-        let toX: CGFloat
-        let toY: CGFloat
-    }
-
-    private var motion: Motion {
-        func r(_ x: Double) -> Double {
-            let s = sin(Double(seed) * 9301 + x * 49297) * 233280
-            return s - s.rounded(.down)
-        }
-        let zoomIn = r(1) > 0.5
-        // Offsets are fractions of the slide size; the minimum scale of 1.06
-        // leaves enough overscan that a ±1.5% pan never exposes an edge.
-        let amp = 0.015
-        return Motion(
-            fromScale: zoomIn ? 1.06 : 1.18,
-            toScale: zoomIn ? 1.18 : 1.06,
-            fromX: CGFloat((r(2) - 0.5) * 2 * amp),
-            fromY: CGFloat((r(3) - 0.5) * 2 * amp),
-            toX: CGFloat((r(4) - 0.5) * 2 * amp),
-            toY: CGFloat((r(5) - 0.5) * 2 * amp)
-        )
-    }
-
-    var body: some View {
-        let m = motion
-        GeometryReader { geo in
-            let base = focalOffset(in: geo.size)
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-                .frame(width: geo.size.width, height: geo.size.height)
-                .scaleEffect(animate ? m.toScale : m.fromScale)
-                .offset(
-                    x: base.width + (animate ? m.toX : m.fromX) * geo.size.width,
-                    y: base.height + (animate ? m.toY : m.fromY) * geo.size.height
-                )
-                .onAppear {
-                    withAnimation(.linear(duration: duration)) { animate = true }
-                }
-        }
-        .clipped()
-    }
-
-    /// `scaledToFill` centres the image; this shifts the crop so the focal
-    /// point moves towards the visible area. The offset is bounded by half
-    /// the fill overflow per axis (focal 0/1 aligns the image edge with the
-    /// container edge), matching CSS `object-position` semantics.
-    private func focalOffset(in size: CGSize) -> CGSize {
-        guard let focal else { return .zero }
-        let img = image.size
-        guard img.width > 0, img.height > 0, size.width > 0, size.height > 0 else {
-            return .zero
-        }
-        let scale = max(size.width / img.width, size.height / img.height)
-        let overflowX = max(0, img.width * scale - size.width)
-        let overflowY = max(0, img.height * scale - size.height)
-        let fx = min(max(focal.x, 0), 1)
-        let fy = min(max(focal.y, 0), 1)
-        return CGSize(
-            width: (0.5 - fx) * overflowX,
-            height: (0.5 - fy) * overflowY
-        )
     }
 }

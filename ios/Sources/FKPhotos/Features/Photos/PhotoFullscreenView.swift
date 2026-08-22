@@ -36,20 +36,11 @@ struct PhotoFullscreenView: View {
     @State private var isProcessingAction = false
     @State private var toastMessage: ToastMessage?
 
-    // Slideshow (issue #767, Stage 2; rules in docs/photo-slideshow.md).
-    // Never auto-starts — the user arms it from the bottom bar.
-    @State private var isPlaying = false
-    /// Photo ids whose image has settled (decoded or failed). Keyed by id
-    /// rather than index so it survives a photo being spliced out of the list
-    /// by a delete or an album removal.
-    @State private var settledPhotoIds: Set<Int> = []
-    /// Chrome revealed by a tap during playback. Rules in `SlideshowChrome`.
-    @State private var chromeRevealed = false
-    /// Bumped on every reveal so the auto-hide timer re-arms — a second tap
-    /// extends the reveal instead of inheriting the first tap's countdown.
-    @State private var chromeRevealToken = 0
-    @AppStorage(Slideshow.intervalDefaultsKey)
-    private var slideshowIntervalSeconds: Double = Slideshow.defaultInterval
+    /// Slideshow (issue #767, Stage 2; rules in docs/photo-slideshow.md).
+    /// The viewer does not play photos itself — the play button hands the
+    /// remaining photos to `PhotoSlideshowView`, the same story-style player
+    /// the recaps use.
+    @State private var showSlideshow = false
 
     // Person context (when navigated from PersonDetailView)
     private let personId: Int?
@@ -77,16 +68,11 @@ struct PhotoFullscreenView: View {
     }
 
     /// Multi-photo init for paged navigation (e.g. PhotoGridView).
-    ///
-    /// `autoStartSlideshow` is for entry points that mean "play this", such as
-    /// the album grid's Diashow menu item — everywhere else the viewer opens
-    /// stopped and the user arms it from the bottom bar.
     init(
         photos: [PhotoWithCuration],
         currentIndex: Binding<Int>,
         albumContext: AlbumContext? = nil,
         curationStats: [Int: PhotoCurationStats] = [:],
-        autoStartSlideshow: Bool = false,
         onPhotoRemoved: ((Int) -> Void)? = nil
     ) {
         self.photos = photos
@@ -98,7 +84,6 @@ struct PhotoFullscreenView: View {
         self.onPhotoRemoved = onPhotoRemoved
         self.albumContext = albumContext
         self.curationStats = curationStats
-        _isPlaying = State(initialValue: autoStartSlideshow)
     }
 
     /// Multi-photo init for person context: paged navigation with per-photo face boxes.
@@ -133,56 +118,10 @@ struct PhotoFullscreenView: View {
 
     // MARK: - Slideshow
 
-    /// The stored value coerced back onto the offered set, so a stale default
-    /// from an older build cannot drive the timer.
-    private var slideshowInterval: TimeInterval {
-        Slideshow.normalizedInterval(slideshowIntervalSeconds)
-    }
-
+    /// A slideshow plays *on* from the photo on screen, so the last photo has
+    /// nothing to play.
     private var hasNextPhoto: Bool {
         photos.indices.contains(currentIndex + 1)
-    }
-
-    /// Whether the photo on screen has finished loading (or failed). The
-    /// slideshow does not advance off a photo that is still a spinner, so a
-    /// slow connection stretches the gap instead of flicking past placeholders.
-    private var currentPhotoLoaded: Bool {
-        guard let photo = currentPhoto else { return false }
-        return settledPhotoIds.contains(photo.id)
-    }
-
-    /// Re-arms the advance timer whenever playback, position, interval or the
-    /// current photo's load state changes — each change cancels the pending
-    /// sleep and starts a fresh one. Including the load state is what makes the
-    /// timer start counting from the moment the photo is actually visible.
-    private var slideshowTimerKey: String {
-        "\(isPlaying)-\(currentIndex)-\(slideshowInterval)-\(currentPhotoLoaded)"
-    }
-
-    /// Whether toolbars, status bar and captions are on screen.
-    private var chromeVisible: Bool {
-        SlideshowChrome.isVisible(playing: isPlaying, revealed: chromeRevealed)
-    }
-
-    private func toggleSlideshow() {
-        isPlaying.toggle()
-        // Starting drops straight into the photo-only view; stopping restores
-        // the chrome, so a stale reveal cannot linger into the next playback.
-        chromeRevealed = false
-        if isPlaying {
-            // The details split is reachable from the same bottom bar, so it can
-            // be open when playback starts — and it is exactly the "something
-            // other than the photo" immersive mode is meant to clear away.
-            withAnimation(.spring(duration: 0.4)) { showDetails = false }
-        }
-    }
-
-    /// A tap on the photo. Only meaningful while playing — otherwise the chrome
-    /// is already up and there is nothing to reveal.
-    private func revealChromeIfPlaying() {
-        guard SlideshowChrome.shouldReveal(playing: isPlaying) else { return }
-        withAnimation(.easeOut(duration: 0.2)) { chromeRevealed = true }
-        chromeRevealToken += 1
     }
 
     var body: some View {
@@ -193,9 +132,7 @@ struct PhotoFullscreenView: View {
                     faceBBox: index < bboxes.count ? bboxes[index] : nil,
                     showDetails: $showDetails,
                     curationStatus: curationBinding(for: photos[index]),
-                    curationStats: curationStats[photos[index].id],
-                    onLoadSettled: { id in _ = settledPhotoIds.insert(id) },
-                    onSingleTap: revealChromeIfPlaying
+                    curationStats: curationStats[photos[index].id]
                 )
                 .tag(index)
             }
@@ -206,12 +143,6 @@ struct PhotoFullscreenView: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .tabBar)
-        // A running slideshow shows the photo and nothing else; a tap brings
-        // these back for a few seconds (SlideshowChrome).
-        .toolbar(chromeVisible ? .visible : .hidden, for: .navigationBar, .bottomBar)
-        .statusBarHidden(!chromeVisible)
-        .persistentSystemOverlays(chromeVisible ? .automatic : .hidden)
-        .animation(.easeInOut(duration: 0.25), value: chromeVisible)
         .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { dismiss() } label: {
@@ -345,80 +276,28 @@ struct PhotoFullscreenView: View {
                                 .foregroundStyle(showDetails ? Color.accentColor : .primary)
                         }
 
-                        // Tap plays/pauses; long-press opens the interval menu.
-                        // `Menu(primaryAction:)` is the native form of the same
-                        // gesture split the web hand-rolls for touch devices,
-                        // so no custom long-press hint is needed here.
-                        Menu {
-                            Picker("Intervall", selection: $slideshowIntervalSeconds) {
-                                ForEach(Slideshow.intervalOptions, id: \.self) { option in
-                                    Text(Slideshow.label(for: option)).tag(option)
-                                }
-                            }
+                        // Hands off to the full-screen player; the interval
+                        // lives there, next to the photos it paces.
+                        Button {
+                            showSlideshow = true
                         } label: {
-                            Image(systemName: isPlaying ? "pause.circle" : "play.circle")
+                            Image(systemName: "play.circle")
                                 .font(.title2)
-                                .foregroundStyle(isPlaying ? Color.accentColor : .primary)
-                        } primaryAction: {
-                            toggleSlideshow()
                         }
-                        // At the last photo there is nowhere to advance to and
-                        // the slideshow does not wrap, so starting would stop
-                        // again immediately. Disable rather than leave a
-                        // button that silently does nothing.
-                        .disabled(!hasNextPhoto && !isPlaying)
+                        // At the last photo there is nothing left to play, so
+                        // the button would open a show that ends immediately.
+                        .disabled(!hasNextPhoto)
                     }
                 }
             }
         .toolbarBackground(showDetails ? .visible : .hidden, for: .bottomBar)
-        .overlay(alignment: .top) {
-            if Slideshow.shouldShowCaption(
-                playing: isPlaying,
-                showDetails: showDetails,
-                description: currentPhoto?.description
-            ) {
-                Text(currentPhoto?.description ?? "")
-                    .font(.subheadline)
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(.black.opacity(0.6), in: Capsule())
-                    .padding(.horizontal, 24)
-                    // Never swallow a tap meant for the photo underneath.
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
-            }
+        .fullScreenCover(isPresented: $showSlideshow) {
+            PhotoSlideshowView(
+                photos: photos,
+                startIndex: currentIndex,
+                title: albumContext?.name ?? ""
+            )
         }
-        .task(id: slideshowTimerKey) {
-            guard Slideshow.shouldAdvance(
-                playing: isPlaying,
-                interval: slideshowInterval,
-                hasNext: hasNextPhoto,
-                currentLoaded: currentPhotoLoaded
-            ) else {
-                // Running off the end is a real stop, not a silent pause, so
-                // the icon flips back to "play".
-                if Slideshow.reachedEnd(playing: isPlaying, hasNext: hasNextPhoto) {
-                    isPlaying = false
-                }
-                return
-            }
-            try? await Task.sleep(for: .seconds(slideshowInterval))
-            guard !Task.isCancelled else { return }
-            withAnimation { currentIndex += 1 }
-        }
-        .task(id: "\(chromeRevealToken)-\(isPlaying)-\(chromeRevealed)") {
-            guard SlideshowChrome.shouldArmAutoHide(
-                playing: isPlaying,
-                revealed: chromeRevealed
-            ) else { return }
-            try? await Task.sleep(for: .seconds(SlideshowChrome.autoHideDelay))
-            guard !Task.isCancelled else { return }
-            withAnimation(.easeInOut(duration: 0.25)) { chromeRevealed = false }
-        }
-        .onDisappear { isPlaying = false }
         .confirmationDialog(
             "Foto löschen?",
             isPresented: $showDeleteConfirm,
@@ -646,11 +525,6 @@ private struct PhotoPageView: View {
     /// Anonymized opinion counters for this photo, or nil outside a shared
     /// album — then the "Meinungen" block is omitted entirely.
     let curationStats: PhotoCurationStats?
-    /// Reports this photo's id once its image has settled, so the slideshow in
-    /// the parent can hold the advance until there is something to show.
-    let onLoadSettled: ((Int) -> Void)?
-    /// Single tap on the photo, used to reveal the chrome the slideshow hides.
-    let onSingleTap: (() -> Void)?
 
     @State private var loader: ThumbnailLoader
     @State private var viewModel: PhotoMetadataViewModel
@@ -667,15 +541,11 @@ private struct PhotoPageView: View {
         faceBBox: FaceBBox? = nil,
         showDetails: Binding<Bool>,
         curationStatus: Binding<CurationStatus>,
-        curationStats: PhotoCurationStats? = nil,
-        onLoadSettled: ((Int) -> Void)? = nil,
-        onSingleTap: (() -> Void)? = nil
+        curationStats: PhotoCurationStats? = nil
     ) {
         self.photo = photo
         self.faceBBox = faceBBox
         self.curationStats = curationStats
-        self.onLoadSettled = onLoadSettled
-        self.onSingleTap = onSingleTap
         _loader = State(initialValue: ThumbnailLoader(filename: photo.filename))
         _viewModel = State(initialValue: PhotoMetadataViewModel(photo: photo))
         _showDetails = showDetails
@@ -707,12 +577,6 @@ private struct PhotoPageView: View {
             if !isShowing { showAllAlbums = false }
         }
         .task {
-            let reportSettled = onLoadSettled
-            let id = photo.id
-            loader.onLoadSettled = { reportSettled?(id) }
-            // Metadata still loads in parallel, but the slideshow waits on the
-            // image alone — holding the advance for the description too would
-            // stall playback on something the viewer isn't waiting to see.
             async let meta: Void = viewModel.loadAll()
             await loader.load()
             _ = await meta
@@ -734,7 +598,7 @@ private struct PhotoPageView: View {
             // Photo (bbox rendered inside ZoomableImageView so it follows zoom/pan)
             Group {
                 if let image = loader.image {
-                    ZoomableImageView(image: image, faceBBox: faceBBox, onSingleTap: onSingleTap)
+                    ZoomableImageView(image: image, faceBBox: faceBBox)
                         .frame(width: geo.size.width, height: height)
                 } else if loader.hasError {
                     Color(.systemBackground)

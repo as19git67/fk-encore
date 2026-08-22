@@ -12,6 +12,8 @@ struct PhotoMonthGridView: View {
     @State private var fullscreenNav: FullscreenNav? = nil
     @State private var scrollTarget: Int?
     @State private var showUpload = false
+    /// Story-style slideshow over the photos on screen (or the selected ones).
+    @State private var showSlideshow = false
     @State private var isSelecting = false
     @State private var selectedIds: Set<Int> = []
     @State private var shareManager = PhotoShareManager()
@@ -139,6 +141,12 @@ struct PhotoMonthGridView: View {
                         Image(systemName: "square.and.arrow.up")
                     }
                     .disabled(selectedIds.isEmpty || shareManager.isLoading)
+                    Button {
+                        showSlideshow = true
+                    } label: {
+                        Image(systemName: "play.rectangle")
+                    }
+                    .disabled(!canStartSlideshow)
                 }
             } else {
                 ToolbarItem(placement: .primaryAction) {
@@ -147,11 +155,20 @@ struct PhotoMonthGridView: View {
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {
+                    Button { showSlideshow = true } label: {
+                        Image(systemName: "play.rectangle")
+                    }
+                    .disabled(!canStartSlideshow)
+                }
+                ToolbarItem(placement: .primaryAction) {
                     Button { showUpload = true } label: {
                         Image(systemName: "photo.badge.plus")
                     }
                 }
             }
+        }
+        .fullScreenCover(isPresented: $showSlideshow) {
+            PhotoSlideshowView(photos: slideshowPhotos, title: title)
         }
         .navigationDestination(item: $fullscreenNav) { _ in
             PhotoFullscreenView(
@@ -252,5 +269,18 @@ struct PhotoMonthGridView: View {
 
     private struct FullscreenNav: Hashable {
         let startIndex: Int
+    }
+
+    /// What a slideshow started right now would play: the selected photos
+    /// while picking, otherwise everything on screen.
+    private var slideshowPhotos: [PhotoWithCuration] {
+        guard isSelecting, !selectedIds.isEmpty else { return photos }
+        return photos.filter { selectedIds.contains($0.id) }
+    }
+
+    /// A slideshow needs something to advance to, so a single photo does not
+    /// offer one.
+    private var canStartSlideshow: Bool {
+        slideshowPhotos.count > 1
     }
 }

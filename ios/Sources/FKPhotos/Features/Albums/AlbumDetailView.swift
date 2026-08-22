@@ -17,6 +17,9 @@ struct AlbumDetailView: View {
     /// Drives the "Mit iPhone verknüpfen…" sheet (issue #812).
     @State private var syncLinkAlbum: Album?
     @State private var showUpload = false
+    /// Story-style slideshow over the photos currently displayed (or the
+    /// selected ones, when the grid is in selection mode).
+    @State private var showSlideshow = false
     @State private var showDeleteConfirm = false
     @State private var isDeleting = false
     @State private var fullscreenIndex: Int = 0
@@ -193,15 +196,17 @@ struct AlbumDetailView: View {
         }
         .navigationTitle(isSelecting ? "\(selectedIds.count) ausgewählt" : (album?.name ?? "Album"))
         .navigationBarTitleDisplayMode(.large)
-        .navigationDestination(item: $fullscreenNav) { nav in
+        .navigationDestination(item: $fullscreenNav) { _ in
             PhotoFullscreenView(
                 photos: displayedPhotos,
                 currentIndex: $fullscreenIndex,
                 albumContext: album.map { .init(id: albumId, name: $0.name) },
                 curationStats: curationStats,
-                autoStartSlideshow: nav.autoStartSlideshow,
                 onPhotoRemoved: { id in photos.removeAll { $0.id == id } }
             )
+        }
+        .fullScreenCover(isPresented: $showSlideshow) {
+            PhotoSlideshowView(photos: slideshowPhotos, title: album?.name ?? "")
         }
         .sheet(isPresented: $filterSort.isMenuPresented) {
             FilterSortMenuView(viewModel: filterSort, available: [.favorite, .hasGps, .dateRange])
@@ -240,6 +245,12 @@ struct AlbumDetailView: View {
                         Image(systemName: "square.and.arrow.up")
                     }
                     .disabled(selectedIds.isEmpty || shareManager.isLoading)
+                    Button {
+                        showSlideshow = true
+                    } label: {
+                        Image(systemName: "play.rectangle")
+                    }
+                    .disabled(!canStartSlideshow)
                 }
             } else {
                 ToolbarItem(placement: .topBarLeading) {
@@ -272,11 +283,7 @@ struct AlbumDetailView: View {
                             // playing photos back needs no edit rights.
                             if canStartSlideshow {
                                 Button {
-                                    fullscreenIndex = 0
-                                    fullscreenNav = FullscreenNav(
-                                        startIndex: 0,
-                                        autoStartSlideshow: true
-                                    )
+                                    showSlideshow = true
                                 } label: {
                                     Label("Diashow", systemImage: "play.rectangle")
                                 }
@@ -598,15 +605,20 @@ struct AlbumDetailView: View {
         isLoading = false
     }
 
-    /// A slideshow needs something to advance to, so a single-photo album
-    /// does not offer one.
+    /// What a slideshow started right now would play: the selected photos
+    /// while picking, otherwise everything on screen.
+    private var slideshowPhotos: [PhotoWithCuration] {
+        guard isSelecting, !selectedIds.isEmpty else { return displayedPhotos }
+        return displayedPhotos.filter { selectedIds.contains($0.id) }
+    }
+
+    /// A slideshow needs something to advance to, so a single photo does not
+    /// offer one.
     private var canStartSlideshow: Bool {
-        displayedPhotos.count > 1
+        slideshowPhotos.count > 1
     }
 
     private struct FullscreenNav: Hashable {
         let startIndex: Int
-        /// Set by the Diashow menu item so the viewer opens already playing.
-        var autoStartSlideshow: Bool = false
     }
 }
