@@ -7,8 +7,10 @@ import db from "../db/database";
 import { users } from "../db/schema";
 import {
   createElectricityTariff,
+  importTariffEntries,
   listElectricityTariffs,
   updateElectricityTariff,
+  type TariffImportEntry,
   type UpsertElectricityTariffInput,
 } from "./tariffs.service";
 
@@ -105,5 +107,71 @@ describe("updateElectricityTariff", () => {
     const tariff = await createElectricityTariff(userId, sewagePrice());
     const updated = await updateElectricityTariff(userId, tariff.id, sewagePrice({ amount: 3.1 }));
     expect(updated.amount).toBe(3.1);
+  });
+});
+
+describe("importTariffEntries", () => {
+  function petrol(validFrom: string, amount: number): TariffImportEntry {
+    return { kind: "petrol_price", validFrom, amount, unit: "eur_per_l", taxStatus: "gross" };
+  }
+
+  it("imports a historical series in one go", async () => {
+    const result = await importTariffEntries(userId, [
+      petrol("2021-11-01", 1.68),
+      petrol("2021-12-01", 1.605),
+      petrol("2022-01-01", 1.67),
+    ]);
+
+    expect(result).toMatchObject({ created: 3, updated: 0, failed: 0 });
+    const stored = await listElectricityTariffs(userId);
+    expect(stored.filter((t) => t.kind === "petrol_price")).toHaveLength(3);
+  });
+
+  it("updates instead of duplicating when the same file is imported again", async () => {
+    await importTariffEntries(userId, [petrol("2021-11-01", 1.68)]);
+    const again = await importTariffEntries(userId, [petrol("2021-11-01", 1.72)]);
+
+    expect(again).toMatchObject({ created: 0, updated: 1, failed: 0 });
+    const stored = await listElectricityTariffs(userId);
+    expect(stored.filter((t) => t.kind === "petrol_price")).toHaveLength(1);
+    // The corrected value wins — that is the point of re-importing.
+    expect(stored.find((t) => t.kind === "petrol_price")?.amount).toBe(1.72);
+  });
+
+  it("reports the position of a bad row and imports the rest", async () => {
+    const result = await importTariffEntries(userId, [
+      petrol("2021-11-01", 1.68),
+      { ...petrol("2021-12-01", 1.6), kind: "petrol_pric" },
+      { ...petrol("2022-01-01", 1.67), unit: "eur_per_litre" },
+      { ...petrol("2022-02-01", 1.74), validFrom: "not-a-date" },
+      petrol("2022-03-01", 2.069),
+    ]);
+
+    expect(result).toMatchObject({ created: 2, updated: 0, failed: 3 });
+    expect(result.errors.map((e) => e.index)).toEqual([1, 2, 3]);
+    const stored = await listElectricityTariffs(userId);
+    expect(stored.filter((t) => t.kind === "petrol_price")).toHaveLength(2);
+  });
+
+  it("rejects an empty file rather than reporting a successful no-op", async () => {
+    await expect(importTariffEntries(userId, [])).rejects.toMatchObject({
+      code: "invalid_argument",
+    });
+  });
+
+  it("refuses a file far larger than any real price history", async () => {
+    const entries = Array.from({ length: 2001 }, (_, i) =>
+      petrol(`20${20 + Math.floor(i / 300)}-01-01`, 1 + i / 1000),
+    );
+    await expect(importTariffEntries(userId, entries)).rejects.toMatchObject({
+      code: "invalid_argument",
+    });
+  });
+
+  it("keeps a negative amount out of the database", async () => {
+    const result = await importTariffEntries(userId, [{ ...petrol("2021-11-01", -1.68) }]);
+
+    expect(result).toMatchObject({ created: 0, failed: 1 });
+    expect(await listElectricityTariffs(userId)).toHaveLength(0);
   });
 });

@@ -47,8 +47,11 @@ Wasser.
 4. **Keine Saisonbereinigung.** Rohe Monatswerte einer Heizung sind
    zwischen Januar und Juli nicht vergleichbar; eine Trendgerade über
    12 Rohmonate misst überwiegend die Jahreszeit.
-5. **PV-Invest ungenutzt.** `pv_investment_*`, `opportunity_cost_*`,
-   `amortization_years` sind gespeichert, fließen aber in keine Rechnung ein.
+5. **PV-Invest ungenutzt.** `pv_investment_*` und die aus dem Excel-Sheet
+   übernommenen Ergebniszellen (`opportunity_cost_*`, `amortization_years`)
+   sind gespeichert, fließen aber in keine Rechnung ein. Letztere sind
+   inzwischen entfallen: sie waren Resultate, keine Eingaben — geblieben ist
+   `expected_return_rate` als einzige Annahme dahinter (Migration 0150).
 
 ---
 
@@ -62,7 +65,7 @@ markiert.
 | # | Report | Inhalt | Braucht |
 |---|---|---|---|
 | A1 ⭐ | **PV-Ersparnis kumuliert** | Kumulierte Kurve „Stromkosten mit PV“ vs. „hypothetische Kosten ohne PV“ seit Inbetriebnahme; Differenzfläche = Ersparnis. Je Bucket bereits als `netElectricityCostEur` / `noPvElectricityCostEur` vorhanden — es fehlt nur Kumulierung + Darstellung. | — |
-| A2 ⭐ | **Amortisation** | Invest (netto + MwSt.) minus kumulierter PV-Nutzen → Restbetrag, prognostiziertes Amortisationsdatum aus dem Mittel der letzten 12 Monate. Optional zweite Linie *inkl.* Opportunitätskosten (5 %/a), da beide Werte schon in den Tarifen liegen. | `pv_investment_*`, `opportunity_cost_year` (vorhanden) |
+| A2 ⭐ | **Amortisation** | Invest (netto + MwSt.) minus kumulierter PV-Nutzen → Restbetrag, prognostiziertes Amortisationsdatum aus dem Mittel der letzten 12 Monate. Zweite Linie *inkl.* Opportunitätskosten: entgangene Rendite, zinseszinslich aus `expected_return_rate` gerechnet — nicht als fertiger Betrag gepflegt. | `pv_investment_*`, `expected_return_rate` |
 | A3 | **Saisonprofil Autarkie/Eigenverbrauch** | Heatmap Jahr × Monat für Autarkie und Eigenverbrauchsquote. Zeigt sofort, in welchen Monaten der Speicher/die Anlage trägt und ob sich das über die Jahre verbessert. | — |
 | A4 | **Ertrag je kWp / Performance-Ratio** | Jahresertrag pro kWp gegen Vorjahre — der einzige belastbare Frühindikator für Anlagendegradation oder verschmutzte Module. | Anlagenleistung kWp (neue Stammdatum-Annahme; wird ohnehin für die korrekte Einspeise-Leistungsstufe gebraucht, siehe `docs/utility-meters.md` §5.2) |
 
@@ -139,7 +142,7 @@ B1/B2/B3 brauchen datierte Annahmen (Gaspreis, Benzinpreis, JAZ,
 Kesselwirkungsgrad, kWh/100 km, l/100 km, kWp, Netzmix). Die vorhandene
 Tabelle `meter_electricity_tariffs` ist bereits ein generischer
 `(kind, valid_from, amount, unit)`-Speicher und enthält mit
-`pv_investment_*` / `opportunity_cost_*` schon nicht-tarifliche Werte.
+`pv_investment_*` / `expected_return_rate` schon nicht-tarifliche Werte.
 
 **Empfehlung:** Tabelle wiederverwenden und um neue `kind`s und `unit`s
 erweitern (`eur_per_l`, `eur_per_m3`, `kwh_per_100km`, `l_per_100km`,

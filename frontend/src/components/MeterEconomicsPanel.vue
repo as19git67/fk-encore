@@ -166,6 +166,12 @@ function fmtShare(value: number | null) {
   return `${(value * 100).toLocaleString('de-DE', { maximumFractionDigits: 0 })} %`
 }
 
+/** Like fmtShare, but keeps a decimal — a return rate of 4,2 % is not 4 %. */
+function fmtRate(value: number | null) {
+  if (value === null) return '–'
+  return `${(value * 100).toLocaleString('de-DE', { maximumFractionDigits: 2 })} %`
+}
+
 const hasPvData = computed(() => (props.report?.pv.buckets ?? []).some((b) => b.savingsEur !== null))
 </script>
 
@@ -252,9 +258,10 @@ const hasPvData = computed(() => (props.report?.pv.buckets ?? []).some((b) => b.
           <div class="payoff-fill" :style="{ width: `${payoffProgress * 100}%` }" />
         </div>
 
-        <p v-if="amortization.opportunityCostPerYearEur !== null" class="economics-note">
-          Mit Opportunitätskosten von {{ fmtEur(amortization.opportunityCostPerYearEur) }}/Jahr:
-          noch {{ fmtEur(amortization.remainingWithOpportunityEur) }} offen,
+        <p v-if="amortization.expectedReturnRate !== null" class="economics-note">
+          Bei {{ fmtRate(amortization.expectedReturnRate) }} erwarteter Rendite pro Jahr wären
+          bisher {{ fmtEur(amortization.opportunityCostEur) }} Zinsen entgangen:
+          damit noch {{ fmtEur(amortization.remainingWithOpportunityEur) }} offen,
           <template v-if="amortization.projectedPayoffDateWithOpportunity">
             voraussichtlich bezahlt {{ fmtDate(amortization.projectedPayoffDateWithOpportunity) }}.
           </template>

@@ -2312,9 +2312,10 @@ export type MeterElectricityTariffKind =
   | "self_consumption_value"
   | "pv_investment_net"
   | "pv_investment_vat"
-  | "opportunity_cost_year"
-  | "opportunity_cost_total"
-  | "amortization_years"
+  // Return the invested money was expected to earn elsewhere, as a ratio per
+  // year (0.05 = 5 %). Opportunity cost and amortization are derived from it
+  // and the measured PV benefit, never stored (migration 0150).
+  | "expected_return_rate"
   // Assumptions for the gas-heating / petrol-car comparisons (migration 0148).
   | "gas_price"
   | "gas_base_price"

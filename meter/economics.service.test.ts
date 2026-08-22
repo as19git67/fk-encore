@@ -200,7 +200,8 @@ describe("buildAmortization", () => {
       tariff("grid_import", 0.4, "eur_per_kwh"),
       tariff("pv_investment_net", 20000, "eur"),
       tariff("pv_investment_vat", 4000, "eur"),
-      tariff("opportunity_cost_year", 1000, "eur"),
+      // 24000 € at 4 % is ~960 €/year to start with.
+      tariff("expected_return_rate", 0.04, "ratio"),
     ]);
 
   it("subtracts the accumulated benefit from the investment", () => {
@@ -222,23 +223,33 @@ describe("buildAmortization", () => {
     expect(payoff.getUTCFullYear()).toBe(2044);
   });
 
-  it("counts forgone returns in the opportunity-cost variant", () => {
+  it("derives the forgone return from the expected rate instead of a stored figure", () => {
     const amortization = buildAmortization(monthlyBenefit(24, 100), investmentTimeline())!;
 
-    // Two years at 1000 €/year on top of the investment. The span covers a leap
-    // day, so it is a touch over two years — hence the tolerance.
+    // The span covers a leap day, so it is a touch over two years — hence the
+    // tolerance. 24000 € compounded at 4 % for two years earns ~1958 €.
     expect(amortization.yearsElapsed).toBeCloseTo(2, 1);
-    expect(amortization.remainingWithOpportunityEur).toBeCloseTo(23600, -1);
-    // 1200 €/year benefit against 1000 €/year opportunity cost still pays off,
-    // but only on the 200 € that are left over.
-    expect(amortization.projectedPayoffDateWithOpportunity).not.toBeNull();
+    expect(amortization.expectedReturnRate).toBe(0.04);
+    expect(amortization.opportunityCostEur).toBeCloseTo(1958, -1);
+    // Investment + forgone return - benefit earned so far.
+    expect(amortization.remainingWithOpportunityEur).toBeCloseTo(23558, -1);
   });
 
-  it("gives no payoff date when the benefit never outruns the opportunity cost", () => {
+  it("compounds the forgone return rather than charging it linearly", () => {
+    const twenty = buildAmortization(monthlyBenefit(240, 100), investmentTimeline())!;
+
+    // Linear would be 24000 x 4 % x 20 = 19200; compounding is markedly more.
+    expect(twenty.yearsElapsed).toBeCloseTo(20, 0);
+    expect(twenty.opportunityCostEur).toBeGreaterThan(24000);
+  });
+
+  it("gives no payoff date when the benefit never outruns the expected return", () => {
     const timeline = new EnergyTariffTimeline([
       tariff("grid_import", 0.4, "eur_per_kwh"),
       tariff("pv_investment_net", 20000, "eur"),
-      tariff("opportunity_cost_year", 5000, "eur"),
+      // 20000 € at 25 % grows by 5000 €/year — far beyond the 1200 €/year the
+      // system earns, so the gap only ever widens.
+      tariff("expected_return_rate", 0.25, "ratio"),
     ]);
 
     const amortization = buildAmortization(monthlyBenefit(24, 100), timeline)!;
@@ -246,6 +257,39 @@ describe("buildAmortization", () => {
     expect(amortization.projectedPayoffDateWithOpportunity).toBeNull();
     // The plain projection still works — it does not carry the opportunity cost.
     expect(amortization.projectedPayoffDate).not.toBeNull();
+  });
+
+  it("projects a payoff once the benefit outgrows the expected return", () => {
+    const timeline = new EnergyTariffTimeline([
+      tariff("grid_import", 0.4, "eur_per_kwh"),
+      tariff("pv_investment_net", 10000, "eur"),
+      tariff("expected_return_rate", 0.01, "ratio"),
+    ]);
+
+    // 3000 €/year against 10000 € growing at 1 % pays off within a few years.
+    const amortization = buildAmortization(monthlyBenefit(24, 250), timeline)!;
+
+    const withOpportunity = amortization.projectedPayoffDateWithOpportunity;
+    expect(withOpportunity).not.toBeNull();
+    // Always later than the projection that ignores the forgone return.
+    expect(new Date(withOpportunity!).getTime()).toBeGreaterThan(
+      new Date(amortization.projectedPayoffDate!).getTime(),
+    );
+  });
+
+  it("leaves the opportunity-cost variant empty without an expected return rate", () => {
+    const timeline = new EnergyTariffTimeline([
+      tariff("grid_import", 0.4, "eur_per_kwh"),
+      tariff("pv_investment_net", 20000, "eur"),
+    ]);
+
+    const amortization = buildAmortization(monthlyBenefit(24, 100), timeline)!;
+
+    expect(amortization.expectedReturnRate).toBeNull();
+    expect(amortization.opportunityCostEur).toBeNull();
+    expect(amortization.remainingWithOpportunityEur).toBeNull();
+    expect(amortization.projectedPayoffDateWithOpportunity).toBeNull();
+    expect(amortization.remainingEur).toBe(17600);
   });
 
   it("reports a reached payoff instead of projecting into the past", () => {

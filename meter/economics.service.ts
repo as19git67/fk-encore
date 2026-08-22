@@ -52,7 +52,10 @@ export interface PvAmortization {
   investmentNetEur: number | null;
   investmentVatEur: number | null;
   investmentTotalEur: number | null;
-  opportunityCostPerYearEur: number | null;
+  /** Return the money was expected to earn elsewhere, per year (0.05 = 5 %). */
+  expectedReturnRate: number | null;
+  /** Return forgone so far, compounded at that rate over `yearsElapsed`. */
+  opportunityCostEur: number | null;
   /** PV benefit accumulated over the whole measured history. */
   cumulativePvBenefitEur: number;
   /** Investment still to be earned back. */
@@ -274,25 +277,57 @@ export function buildPvEconomicsBuckets(buckets: EnergyReportBucket[]): PvEconom
   });
 }
 
+function addYears(from: Date, years: number): string {
+  return new Date(from.getTime() + years * DAYS_PER_YEAR * 86_400_000).toISOString();
+}
+
 /**
  * Extrapolates when the system has earned its cost back, from the benefit of
- * the last twelve months. `annualCost` is subtracted from the annual benefit so
- * the opportunity-cost variant accounts for the returns still being forgone
- * while the system pays itself off.
+ * the last twelve months.
  */
 function projectPayoff(
   remaining: number,
   benefitPerYear: number,
   lastPeriodEnd: string,
-  annualCost = 0,
 ): string | null {
-  const netPerYear = benefitPerYear - annualCost;
   if (remaining <= 0) return lastPeriodEnd;
-  if (netPerYear <= 0) return null;
-  const years = remaining / netPerYear;
+  if (benefitPerYear <= 0) return null;
   const end = new Date(lastPeriodEnd);
   if (Number.isNaN(end.getTime())) return null;
-  return new Date(end.getTime() + years * DAYS_PER_YEAR * 86_400_000).toISOString();
+  return addYears(end, remaining / benefitPerYear);
+}
+
+/** How far ahead the opportunity-cost payoff is searched before giving up. */
+const MAX_PROJECTION_YEARS = 60;
+
+/**
+ * Same projection, but against an investment that keeps growing at the expected
+ * return rate. The money is only tied up as long as the system has not paid for
+ * itself, so the forgone return compounds on the full sum every further year —
+ * which has no closed form against a linear benefit. Stepping month by month is
+ * precise enough for a projected date and makes no assumption about the two
+ * curves crossing exactly once.
+ */
+function projectPayoffWithReturn(
+  investmentTotal: number,
+  rate: number,
+  cumulativeBenefit: number,
+  benefitPerYear: number,
+  yearsElapsed: number,
+  lastPeriodEnd: string,
+): string | null {
+  const end = new Date(lastPeriodEnd);
+  if (Number.isNaN(end.getTime())) return null;
+  const openAt = (years: number) =>
+    investmentTotal * Math.pow(1 + rate, years) -
+    (cumulativeBenefit + benefitPerYear * (years - yearsElapsed));
+
+  if (openAt(yearsElapsed) <= 0) return lastPeriodEnd;
+  if (benefitPerYear <= 0) return null;
+  for (let month = 1; month <= MAX_PROJECTION_YEARS * 12; month += 1) {
+    if (openAt(yearsElapsed + month / 12) <= 0) return addYears(end, month / 12);
+  }
+  return null;
 }
 
 export function buildAmortization(
@@ -304,7 +339,7 @@ export function buildAmortization(
 
   const investmentNetEur = timeline.amountOf("pv_investment_net");
   const investmentVatEur = timeline.amountOf("pv_investment_vat");
-  const opportunityCostPerYearEur = timeline.amountOf("opportunity_cost_year");
+  const expectedReturnRate = timeline.amountOf("expected_return_rate");
   const investmentTotalEur =
     investmentNetEur === null && investmentVatEur === null
       ? null
@@ -330,19 +365,28 @@ export function buildAmortization(
 
   const remainingEur =
     investmentTotalEur === null ? null : roundMoney(investmentTotalEur - cumulativePvBenefitEur);
-  const opportunityAccrued =
-    opportunityCostPerYearEur === null ? null : opportunityCostPerYearEur * Math.max(0, yearsElapsed);
-  const remainingWithOpportunityEur =
-    investmentTotalEur === null || opportunityAccrued === null
+
+  // Forgone return, compounded over the time the money has been tied up — the
+  // yearly figure is no longer stored, only the rate it comes from.
+  const opportunityCostEur =
+    investmentTotalEur === null || expectedReturnRate === null
       ? null
-      : roundMoney(investmentTotalEur + opportunityAccrued - cumulativePvBenefitEur);
+      : roundMoney(
+          investmentTotalEur *
+            (Math.pow(1 + expectedReturnRate, Math.max(0, yearsElapsed)) - 1),
+        );
+  const remainingWithOpportunityEur =
+    investmentTotalEur === null || opportunityCostEur === null
+      ? null
+      : roundMoney(investmentTotalEur + opportunityCostEur - cumulativePvBenefitEur);
 
   const canProject = remainingEur !== null && benefitLast12MonthsEur !== null;
   return {
     investmentNetEur,
     investmentVatEur,
     investmentTotalEur,
-    opportunityCostPerYearEur,
+    expectedReturnRate,
+    opportunityCostEur,
     cumulativePvBenefitEur: roundMoney(cumulativePvBenefitEur) ?? 0,
     remainingEur,
     remainingWithOpportunityEur,
@@ -353,12 +397,14 @@ export function buildAmortization(
       ? projectPayoff(remainingEur!, benefitLast12MonthsEur!, last.periodEnd)
       : null,
     projectedPayoffDateWithOpportunity:
-      canProject && remainingWithOpportunityEur !== null && opportunityCostPerYearEur !== null
-        ? projectPayoff(
-            remainingWithOpportunityEur,
+      canProject && investmentTotalEur !== null && expectedReturnRate !== null
+        ? projectPayoffWithReturn(
+            investmentTotalEur,
+            expectedReturnRate,
+            cumulativePvBenefitEur,
             benefitLast12MonthsEur!,
+            yearsElapsed,
             last.periodEnd,
-            opportunityCostPerYearEur,
           )
         : null,
   };
