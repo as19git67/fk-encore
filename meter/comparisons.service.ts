@@ -81,6 +81,9 @@ export interface HeatingComparisonBucket {
 
 export interface HeatingComparison {
   buckets: HeatingComparisonBucket[];
+  /** Span actually covered by buckets with heat pump consumption; null if none. */
+  periodStart: string | null;
+  periodEnd: string | null;
   totalHeatPumpCostEur: number | null;
   totalGasCostEur: CostRange;
   totalSavingsEur: CostRange;
@@ -97,25 +100,37 @@ export interface CarComparisonBucket {
   periodStart: string;
   periodEnd: string;
   chargedKwh: number | null;
-  /** Actual cost of that charging electricity. */
+  /** Actual metered cost of that charging electricity (grid + self-consumption price). */
   evCostEur: number | null;
+  /**
+   * Feed-in revenue forgone on the PV share of the charge: that kWh could have
+   * been exported instead of used to charge. Null without a feed-in tariff.
+   */
+  lostFeedInEur: number | null;
+  /** evCostEur plus the forgone feed-in revenue — the true cost of charging at home. */
+  evCostWithOpportunityEur: number | null;
   /** Distance the charged energy covers, from the assumed consumption. */
   kilometers: number | null;
   /** Petrol the same distance would have needed. */
   petrolLitres: number | null;
   petrolCostEur: number | null;
-  /** Positive = charging was cheaper. */
+  /** Positive = charging was cheaper than the petrol car, against evCostWithOpportunityEur. */
   savingsEur: number | null;
 }
 
 export interface CarComparison {
   buckets: CarComparisonBucket[];
+  /** Span actually covered by buckets with charging activity; null if none. */
+  periodStart: string | null;
+  periodEnd: string | null;
   totalChargedKwh: number | null;
   totalKilometers: number | null;
   totalEvCostEur: number | null;
+  totalLostFeedInEur: number | null;
+  totalEvCostWithOpportunityEur: number | null;
   totalPetrolCostEur: number | null;
   totalSavingsEur: number | null;
-  /** Cost per kilometre, in cents. */
+  /** Cost per kilometre, in cents — against the opportunity-adjusted charging cost. */
   evCentsPerKm: number | null;
   petrolCentsPerKm: number | null;
   avoidedCo2Kg: number | null;
@@ -145,6 +160,7 @@ const ASSUMPTION_LABELS: Partial<Record<ElectricityTariffKind, string>> = {
   grid_co2: "CO₂-Faktor Netzstrom",
   gas_co2: "CO₂-Faktor Erdgas",
   petrol_co2: "CO₂-Faktor Benzin",
+  feed_in: "Einspeisevergütung",
 };
 
 const ASSUMPTION_UNITS: Partial<Record<ElectricityTariffKind, ElectricityTariffUnit>> = {
@@ -158,6 +174,7 @@ const ASSUMPTION_UNITS: Partial<Record<ElectricityTariffKind, ElectricityTariffU
   grid_co2: "kg_per_kwh",
   gas_co2: "kg_per_kwh",
   petrol_co2: "kg_per_l",
+  feed_in: "eur_per_kwh",
 };
 
 function collectAssumptions(
@@ -201,6 +218,23 @@ function sumRanges(ranges: CostRange[]): CostRange {
 function sumOf(values: Array<number | null>): number | null {
   const present = values.filter((value): value is number => value !== null);
   return present.length === 0 ? null : present.reduce((a, b) => a + b, 0);
+}
+
+/**
+ * Span actually covered by the buckets that carry a value — not the report's
+ * `from`/`to` filter, which is usually null (unbounded) and would leave the
+ * reader guessing which years the figures below are drawn from.
+ */
+function coveredPeriod<T extends { periodStart: string; periodEnd: string }>(
+  buckets: T[],
+  hasValue: (bucket: T) => boolean,
+): { periodStart: string | null; periodEnd: string | null } {
+  const relevant = buckets.filter(hasValue);
+  if (relevant.length === 0) return { periodStart: null, periodEnd: null };
+  return {
+    periodStart: relevant[0].periodStart,
+    periodEnd: relevant[relevant.length - 1].periodEnd,
+  };
 }
 
 /**
@@ -300,6 +334,7 @@ export function buildHeatingComparison(
 
   return {
     buckets,
+    ...coveredPeriod(buckets, (bucket) => bucket.heatPumpKwh !== null),
     totalHeatPumpCostEur: roundMoney(sumOf(buckets.map((bucket) => bucket.heatPumpCostEur))),
     totalGasCostEur: sumRanges(buckets.map((bucket) => bucket.gasCostEur)),
     totalSavingsEur: sumRanges(buckets.map((bucket) => bucket.savingsEur)),
@@ -335,6 +370,19 @@ export function buildCarComparison(
   const buckets = energyBuckets.map((bucket): CarComparisonBucket => {
     const chargedKwh = bucket.evChargerTotal;
     const evCostEur = usageByKey.get(bucket.key)?.evCharger.costEur ?? null;
+    // PV kWh spent charging could have been exported instead — that forgone
+    // feed-in revenue is a real cost of charging at home, not a saving.
+    const feedInPrice = timeline.weightedAmountForPeriod(
+      "feed_in",
+      bucket.periodStart,
+      bucket.periodEnd,
+    );
+    const lostFeedInEur =
+      feedInPrice === null || bucket.evChargerPv === null
+        ? null
+        : bucket.evChargerPv * feedInPrice;
+    const evCostWithOpportunityEur =
+      evCostEur === null ? null : evCostEur + (lostFeedInEur ?? 0);
 
     if (chargedKwh === null) {
       return {
@@ -344,6 +392,8 @@ export function buildCarComparison(
         periodEnd: bucket.periodEnd,
         chargedKwh: null,
         evCostEur: roundMoney(evCostEur),
+        lostFeedInEur: roundMoney(lostFeedInEur),
+        evCostWithOpportunityEur: roundMoney(evCostWithOpportunityEur),
         kilometers: null,
         petrolLitres: null,
         petrolCostEur: null,
@@ -367,19 +417,25 @@ export function buildCarComparison(
       periodEnd: bucket.periodEnd,
       chargedKwh: roundAmount(chargedKwh),
       evCostEur: roundMoney(evCostEur),
+      lostFeedInEur: roundMoney(lostFeedInEur),
+      evCostWithOpportunityEur: roundMoney(evCostWithOpportunityEur),
       kilometers: roundAmount(kilometers, 0),
       petrolLitres: roundAmount(petrolLitres),
       petrolCostEur: roundMoney(petrolCostEur),
       savingsEur:
-        petrolCostEur === null || evCostEur === null
+        petrolCostEur === null || evCostWithOpportunityEur === null
           ? null
-          : roundMoney(petrolCostEur - evCostEur),
+          : roundMoney(petrolCostEur - evCostWithOpportunityEur),
     };
   });
 
   const totalChargedKwh = sumOf(buckets.map((bucket) => bucket.chargedKwh));
   const totalKilometers = sumOf(buckets.map((bucket) => bucket.kilometers));
   const totalEvCostEur = sumOf(buckets.map((bucket) => bucket.evCostEur));
+  const totalLostFeedInEur = sumOf(buckets.map((bucket) => bucket.lostFeedInEur));
+  const totalEvCostWithOpportunityEur = sumOf(
+    buckets.map((bucket) => bucket.evCostWithOpportunityEur),
+  );
   const totalPetrolCostEur = sumOf(buckets.map((bucket) => bucket.petrolCostEur));
   const totalPetrolLitres = sumOf(buckets.map((bucket) => bucket.petrolLitres));
 
@@ -401,15 +457,18 @@ export function buildCarComparison(
 
   return {
     buckets,
+    ...coveredPeriod(buckets, (bucket) => bucket.chargedKwh !== null),
     totalChargedKwh: roundAmount(totalChargedKwh),
     totalKilometers: roundAmount(totalKilometers, 0),
     totalEvCostEur: roundMoney(totalEvCostEur),
+    totalLostFeedInEur: roundMoney(totalLostFeedInEur),
+    totalEvCostWithOpportunityEur: roundMoney(totalEvCostWithOpportunityEur),
     totalPetrolCostEur: roundMoney(totalPetrolCostEur),
     totalSavingsEur:
-      totalPetrolCostEur === null || totalEvCostEur === null
+      totalPetrolCostEur === null || totalEvCostWithOpportunityEur === null
         ? null
-        : roundMoney(totalPetrolCostEur - totalEvCostEur),
-    evCentsPerKm: centsPerKm(totalEvCostEur),
+        : roundMoney(totalPetrolCostEur - totalEvCostWithOpportunityEur),
+    evCentsPerKm: centsPerKm(totalEvCostWithOpportunityEur),
     petrolCentsPerKm: centsPerKm(totalPetrolCostEur),
     avoidedCo2Kg,
     assumptions: collectAssumptions(timeline, [
@@ -418,6 +477,7 @@ export function buildCarComparison(
       "petrol_price",
       "petrol_co2",
       "grid_co2",
+      "feed_in",
     ]),
   };
 }

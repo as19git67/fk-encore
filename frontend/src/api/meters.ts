@@ -530,6 +530,9 @@ export interface HeatingComparisonBucket {
 
 export interface HeatingComparison {
   buckets: HeatingComparisonBucket[]
+  /** Span actually covered by buckets with heat pump consumption; null if none. */
+  periodStart: string | null
+  periodEnd: string | null
   totalHeatPumpCostEur: number | null
   totalGasCostEur: CostRange
   totalSavingsEur: CostRange
@@ -545,7 +548,12 @@ export interface CarComparisonBucket {
   periodStart: string
   periodEnd: string
   chargedKwh: number | null
+  /** Actual metered cost of that charging electricity. */
   evCostEur: number | null
+  /** Feed-in revenue forgone on the PV share of the charge; null without a feed-in tariff. */
+  lostFeedInEur: number | null
+  /** evCostEur plus the forgone feed-in revenue — the true cost of charging at home. */
+  evCostWithOpportunityEur: number | null
   kilometers: number | null
   petrolLitres: number | null
   petrolCostEur: number | null
@@ -554,9 +562,14 @@ export interface CarComparisonBucket {
 
 export interface CarComparison {
   buckets: CarComparisonBucket[]
+  /** Span actually covered by buckets with charging activity; null if none. */
+  periodStart: string | null
+  periodEnd: string | null
   totalChargedKwh: number | null
   totalKilometers: number | null
   totalEvCostEur: number | null
+  totalLostFeedInEur: number | null
+  totalEvCostWithOpportunityEur: number | null
   totalPetrolCostEur: number | null
   totalSavingsEur: number | null
   evCentsPerKm: number | null
@@ -931,6 +944,36 @@ export const ELECTRICITY_TARIFF_KIND_LABELS: Record<ElectricityTariffKind, strin
   water_price: 'Wasserpreis',
   water_base_price: 'Wasser-Grundgebühr',
   sewage_price: 'Abwasserpreis',
+}
+
+/** Plain-language explanation of what the value means, shown under the tariff form. */
+export const ELECTRICITY_TARIFF_KIND_EXPLANATIONS: Record<ElectricityTariffKind, string> = {
+  grid_import: 'Was du pro kWh für Strom aus dem Netz zahlst.',
+  base_price: 'Monatliche Grundgebühr des Stromlieferanten, unabhängig vom Verbrauch.',
+  feed_in: 'Was du pro eingespeister kWh vom Netzbetreiber vergütet bekommst.',
+  self_consumption_value:
+    'Was dir eine selbst verbrauchte PV-kWh wert ist — üblicherweise dein Arbeitspreis Netzbezug, weil genau den sparst du dir.',
+  pv_investment_net: 'Anschaffungskosten der PV-Anlage ohne Mehrwertsteuer.',
+  pv_investment_vat: 'Mehrwertsteuer auf die Anschaffungskosten der PV-Anlage.',
+  expected_return_rate:
+    'Rendite pro Jahr, die das investierte Geld anderswo erwartungsgemäß gebracht hätte (z. B. 0,05 für 5 %). Daraus werden die Opportunitätskosten der Amortisation berechnet.',
+  gas_price: 'Gas-Arbeitspreis pro kWh, für den Vergleich mit einer Gasheizung.',
+  gas_base_price: 'Monatliche Grundgebühr eines Gasanschlusses, für den Vergleich mit einer Gasheizung.',
+  boiler_efficiency:
+    'Wirkungsgrad eines Gaskessels (0..1): wie viel der eingesetzten Gasenergie tatsächlich als Wärme ankommt. Ein moderner Brennwertkessel liegt nahe 1.',
+  heat_pump_scop:
+    'Jahresarbeitszahl (JAZ/SCOP) der Wärmepumpe: wie viel kWh Wärme sie im Schnitt aus 1 kWh Strom macht. Ohne Wärmemengenzähler eine Schätzung — der Report zeigt deshalb eine Bandbreite.',
+  ev_consumption: 'Stromverbrauch des E-Autos in kWh je 100 km.',
+  petrol_consumption: 'Verbrauch eines vergleichbaren Benziners in Liter je 100 km.',
+  petrol_price: 'Benzinpreis pro Liter, für den Vergleich mit einem Verbrenner.',
+  grid_co2: 'CO₂-Ausstoß pro kWh Netzstrom (Strommix), für die CO₂-Bilanz.',
+  gas_co2: 'CO₂-Ausstoß pro kWh verbranntes Erdgas, für die CO₂-Bilanz.',
+  petrol_co2: 'CO₂-Ausstoß pro Liter verbranntes Benzin, für die CO₂-Bilanz.',
+  pv_capacity_kwp: 'Installierte Anlagenleistung der PV-Anlage in kWp, für den Ertrag je kWp.',
+  water_price: 'Frischwasserpreis pro m³.',
+  water_base_price: 'Monatliche Grundgebühr des Wasseranschlusses.',
+  sewage_price:
+    'Abwasserpreis pro m³ — wird meist auf dieselbe gemessene Wassermenge berechnet wie der Frischwasserpreis.',
 }
 
 export const ELECTRICITY_TARIFF_UNIT_LABELS: Record<ElectricityTariffUnit, string> = {
