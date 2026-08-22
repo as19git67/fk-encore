@@ -1,5 +1,15 @@
 export const API_BASE_URL = import.meta.env.PROD ? '' : '/api'
 
+/** Error thrown by `apiFetch` for a non-OK response; carries the backend's error code. */
+export class ApiError extends Error {
+  code?: string
+  constructor(message: string, code?: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.code = code
+  }
+}
+
 const REFRESH_BUFFER_SECONDS = 60
 
 function tokenExpiresWithin(token: string, seconds: number): boolean {
@@ -158,7 +168,10 @@ export async function apiFetch<T>(
 
     if (!response.ok) {
       const body = await response.json().catch(() => ({}))
-      throw new Error(body.message || body.error || body.code || `Request failed: ${response.status}`)
+      throw new ApiError(
+        body.message || body.error || body.code || `Request failed: ${response.status}`,
+        body.code,
+      )
     }
 
     return response.json()

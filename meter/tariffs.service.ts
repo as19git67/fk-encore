@@ -173,32 +173,52 @@ export async function listElectricityTariffs(userId: number): Promise<Electricit
   return rows.map(mapTariff);
 }
 
+/**
+ * Matches meter_electricity_tariffs_unique_idx: same kind, validity date,
+ * unit and name (blank name folded together) already exists for this owner.
+ * The frontend has the localized kind labels and turns this into a proper
+ * message; this fallback text only matters for callers without that map.
+ */
+function duplicateTariffError(input: UpsertElectricityTariffInput): never {
+  throw APIError.alreadyExists(
+    `a ${input.kind} entry already exists for ${input.validFrom} (${input.unit}` +
+      `${input.name ? `, ${input.name}` : ""})`,
+  );
+}
+
 export async function createElectricityTariff(
   userId: number,
   input: UpsertElectricityTariffInput,
 ): Promise<ElectricityTariff> {
   assertTariff(input);
-  const row = await dbInsertReturning<typeof meterElectricityTariffs.$inferSelect>(
-    db
-      .insert(meterElectricityTariffs)
-      .values({
-        owner_user_id: userId,
-        kind: input.kind,
-        valid_from: parseValidFrom(input.validFrom),
-        amount: String(input.amount),
-        unit: input.unit,
-        tax_status: input.taxStatus ?? null,
-        name: input.name?.trim() || null,
-        capacity_limit_kw:
-          input.capacityLimitKw === undefined || input.capacityLimitKw === null
-            ? null
-            : String(input.capacityLimitKw),
-        source: input.source ?? null,
-      })
-      .returning(),
-  );
-  if (!row) throw APIError.internal("tariff was not created");
-  return mapTariff(row);
+  try {
+    const row = await dbInsertReturning<typeof meterElectricityTariffs.$inferSelect>(
+      db
+        .insert(meterElectricityTariffs)
+        .values({
+          owner_user_id: userId,
+          kind: input.kind,
+          valid_from: parseValidFrom(input.validFrom),
+          amount: String(input.amount),
+          unit: input.unit,
+          tax_status: input.taxStatus ?? null,
+          name: input.name?.trim() || null,
+          capacity_limit_kw:
+            input.capacityLimitKw === undefined || input.capacityLimitKw === null
+              ? null
+              : String(input.capacityLimitKw),
+          source: input.source ?? null,
+        })
+        .returning(),
+    );
+    if (!row) throw APIError.internal("tariff was not created");
+    return mapTariff(row);
+  } catch (err: any) {
+    // The native driver surfaces the SQLSTATE on `code`; drizzle wraps it and
+    // exposes it on `cause.code`.
+    if ((err?.code ?? err?.cause?.code) === "23505") duplicateTariffError(input);
+    throw err;
+  }
 }
 
 export async function updateElectricityTariff(
@@ -215,28 +235,33 @@ export async function updateElectricityTariff(
   );
   if (!existing) throw APIError.notFound("tariff not found");
 
-  const row = await dbInsertReturning<typeof meterElectricityTariffs.$inferSelect>(
-    db
-      .update(meterElectricityTariffs)
-      .set({
-        kind: input.kind,
-        valid_from: parseValidFrom(input.validFrom),
-        amount: String(input.amount),
-        unit: input.unit,
-        tax_status: input.taxStatus ?? null,
-        name: input.name?.trim() || null,
-        capacity_limit_kw:
-          input.capacityLimitKw === undefined || input.capacityLimitKw === null
-            ? null
-            : String(input.capacityLimitKw),
-        source: input.source ?? existing.source ?? null,
-        updated_at: new Date().toISOString(),
-      })
-      .where(eq(meterElectricityTariffs.id, id))
-      .returning(),
-  );
-  if (!row) throw APIError.internal("tariff was not updated");
-  return mapTariff(row);
+  try {
+    const row = await dbInsertReturning<typeof meterElectricityTariffs.$inferSelect>(
+      db
+        .update(meterElectricityTariffs)
+        .set({
+          kind: input.kind,
+          valid_from: parseValidFrom(input.validFrom),
+          amount: String(input.amount),
+          unit: input.unit,
+          tax_status: input.taxStatus ?? null,
+          name: input.name?.trim() || null,
+          capacity_limit_kw:
+            input.capacityLimitKw === undefined || input.capacityLimitKw === null
+              ? null
+              : String(input.capacityLimitKw),
+          source: input.source ?? existing.source ?? null,
+          updated_at: new Date().toISOString(),
+        })
+        .where(eq(meterElectricityTariffs.id, id))
+        .returning(),
+    );
+    if (!row) throw APIError.internal("tariff was not updated");
+    return mapTariff(row);
+  } catch (err: any) {
+    if ((err?.code ?? err?.cause?.code) === "23505") duplicateTariffError(input);
+    throw err;
+  }
 }
 
 export async function deleteElectricityTariff(userId: number, id: number): Promise<void> {
