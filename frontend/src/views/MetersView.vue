@@ -52,6 +52,7 @@ import MeterEconomicsPanel from '../components/MeterEconomicsPanel.vue'
 import MeterComparisonsPanel from '../components/MeterComparisonsPanel.vue'
 import MeterEquipmentPanel from '../components/MeterEquipmentPanel.vue'
 import { listGroups, type GroupSummary } from '../api/documents'
+import { ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { toLocalIsoDateTime } from '../utils/dateFormat'
 
@@ -620,6 +621,8 @@ interface TariffForm {
 const showTariffs = ref(false)
 const loadingTariffs = ref(false)
 const savingTariff = ref(false)
+/** Save/load errors scoped to the tariff dialog — shown there, not on the main page. */
+const tariffError = ref('')
 const tariffs = ref<ElectricityTariff[]>([])
 const tariffForm = ref<TariffForm>(emptyTariffForm())
 const tariffFormEl = ref<HTMLElement | null>(null)
@@ -786,17 +789,18 @@ function onTariffKindChange() {
 async function openTariffs() {
   showTariffs.value = true
   tariffForm.value = emptyTariffForm()
+  tariffError.value = ''
   await loadTariffs()
 }
 
 async function loadTariffs() {
   loadingTariffs.value = true
-  error.value = ''
+  tariffError.value = ''
   try {
     const res = await listElectricityTariffs()
     tariffs.value = res.tariffs
   } catch (err: any) {
-    error.value = err.message || 'Tarife & Annahmen konnten nicht geladen werden'
+    tariffError.value = err.message || 'Tarife & Annahmen konnten nicht geladen werden'
   } finally {
     loadingTariffs.value = false
   }
@@ -813,6 +817,7 @@ function editTariff(tariff: ElectricityTariff) {
     name: tariff.name ?? '',
     capacityLimitKw: tariff.capacityLimitKw,
   }
+  tariffError.value = ''
   window.setTimeout(() => {
     tariffFormEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   })
@@ -820,11 +825,24 @@ function editTariff(tariff: ElectricityTariff) {
 
 function resetTariffForm() {
   tariffForm.value = emptyTariffForm()
+  tariffError.value = ''
+}
+
+/** Builds a message the user can act on for a caught save error. */
+function tariffSaveErrorMessage(err: unknown, req: { kind: ElectricityTariffKind; validFrom: string; unit: ElectricityTariffUnit; name: string | null }) {
+  if (err instanceof ApiError && err.code === 'already_exists') {
+    return (
+      `${tariffKindLabel(req.kind)} ab ${fmtDate(req.validFrom)} (${tariffUnitLabel(req.unit)}` +
+      `${req.name ? `, ${req.name}` : ''}) ist bereits vorhanden. ` +
+      `Bitte ein anderes Gültigkeitsdatum wählen oder den bestehenden Eintrag bearbeiten.`
+    )
+  }
+  return err instanceof Error ? err.message : 'Eintrag konnte nicht gespeichert werden'
 }
 
 async function saveTariff() {
   savingTariff.value = true
-  error.value = ''
+  tariffError.value = ''
   try {
     const req = {
       kind: tariffForm.value.kind,
@@ -841,7 +859,12 @@ async function saveTariff() {
     await loadTariffs()
     await reloadCostReports()
   } catch (err: any) {
-    error.value = err.message || 'Strompreis konnte nicht gespeichert werden'
+    tariffError.value = tariffSaveErrorMessage(err, {
+      kind: tariffForm.value.kind,
+      validFrom: toLocalIsoDateTime(tariffForm.value.validFrom).slice(0, 10),
+      unit: tariffForm.value.unit,
+      name: tariffForm.value.name.trim() || null,
+    })
   } finally {
     savingTariff.value = false
   }
@@ -856,9 +879,14 @@ async function handleDeleteTariff(tariff: ElectricityTariff) {
     acceptLabel: 'Löschen',
     acceptClass: 'p-button-danger',
     accept: async () => {
-      await deleteElectricityTariff(tariff.id)
-      await loadTariffs()
-      await reloadCostReports()
+      tariffError.value = ''
+      try {
+        await deleteElectricityTariff(tariff.id)
+        await loadTariffs()
+        await reloadCostReports()
+      } catch (err: any) {
+        tariffError.value = err.message || 'Eintrag konnte nicht gelöscht werden'
+      }
     },
   })
 }
@@ -866,7 +894,7 @@ async function handleDeleteTariff(tariff: ElectricityTariff) {
 async function handleImportPrices() {
   if (pricesAlreadyImported.value) return
   importingPrices.value = true
-  error.value = ''
+  tariffError.value = ''
   importMsg.value = ''
   try {
     const res = await importElectricityPrices()
@@ -876,7 +904,7 @@ async function handleImportPrices() {
     await loadTariffs()
     await reloadCostReports()
   } catch (err: any) {
-    error.value = err.message || 'Strompreise konnten nicht importiert werden'
+    tariffError.value = err.message || 'Strompreise konnten nicht importiert werden'
   } finally {
     importingPrices.value = false
   }
@@ -1301,6 +1329,10 @@ onMounted(load)
             @click="handleImportPrices"
           />
         </div>
+
+        <Message v-if="tariffError" severity="error" @close="tariffError = ''" closable>
+          {{ tariffError }}
+        </Message>
 
         <div ref="tariffFormEl" class="form-grid tariff-form" :class="{ 'tariff-form--editing': tariffForm.id !== null }">
           <div v-if="tariffForm.id !== null" class="tariff-edit-banner full">
