@@ -176,6 +176,19 @@ describe("buildHeatingComparison", () => {
     expect(result.buckets[0].heatPumpKwh).toBeNull();
     expect(result.buckets[0].gasCostEur.mid).toBeNull();
   });
+
+  it("reports the span actually covered by heat pump readings, not empty periods", () => {
+    const timeline = heatingTimeline();
+    const empty = energyBucket({ key: "2025-12", periodStart: "2025-12-01T00:00:00.000Z", periodEnd: "2026-01-01T00:00:00.000Z" });
+    const result = buildHeatingComparison(
+      [empty, bucket],
+      [...withUsage(empty, timeline), ...withUsage(bucket, timeline)],
+      timeline,
+    )!;
+
+    expect(result.periodStart).toBe(bucket.periodStart);
+    expect(result.periodEnd).toBe(bucket.periodEnd);
+  });
 });
 
 describe("buildCarComparison", () => {
@@ -260,5 +273,73 @@ describe("buildCarComparison", () => {
     expect(result.totalKilometers).toBe(1000);
     expect(result.totalPetrolCostEur).toBeNull();
     expect(result.totalSavingsEur).toBeNull();
+  });
+
+  it("counts the forgone feed-in revenue on the PV share as part of the true charging cost", () => {
+    const pvBucket = energyBucket({
+      evChargerTotal: 200,
+      evChargerPv: 200,
+      evChargerGrid: 0,
+    });
+    const timeline = carTimeline([tariff("feed_in", 0.08, "eur_per_kwh")]);
+    const result = buildCarComparison([pvBucket], withUsage(pvBucket, timeline), timeline)!;
+
+    // 200 kWh self-consumed at 0.20 € = 40 € metered cost.
+    expect(result.totalEvCostEur).toBe(40);
+    // Same 200 kWh could have been exported at 0.08 €/kWh = 16 € forgone.
+    expect(result.totalLostFeedInEur).toBe(16);
+    expect(result.totalEvCostWithOpportunityEur).toBe(56);
+    // Savings and ct/km follow the opportunity-adjusted cost, not the raw one.
+    expect(result.totalSavingsEur).toBe(70);
+    expect(result.evCentsPerKm).toBe(5.6);
+  });
+
+  it("leaves the forgone feed-in revenue null without a feed-in tariff", () => {
+    const pvBucket = energyBucket({
+      evChargerTotal: 200,
+      evChargerPv: 200,
+      evChargerGrid: 0,
+    });
+    const timeline = carTimeline();
+    const result = buildCarComparison([pvBucket], withUsage(pvBucket, timeline), timeline)!;
+
+    expect(result.totalLostFeedInEur).toBeNull();
+    // Falls back to the metered cost alone rather than losing the whole figure.
+    expect(result.totalEvCostWithOpportunityEur).toBe(result.totalEvCostEur);
+  });
+
+  it("only charges the forgone feed-in revenue against the PV share, not the grid share", () => {
+    const mixedBucket = energyBucket({
+      evChargerTotal: 200,
+      evChargerPv: 50,
+      evChargerGrid: 150,
+    });
+    const timeline = carTimeline([tariff("feed_in", 0.08, "eur_per_kwh")]);
+    const result = buildCarComparison([mixedBucket], withUsage(mixedBucket, timeline), timeline)!;
+
+    // Only the 50 PV kWh could have been exported: 50 × 0.08 € = 4 €.
+    expect(result.totalLostFeedInEur).toBe(4);
+  });
+
+  it("reports the span actually covered by charging activity", () => {
+    const timeline = carTimeline();
+    const empty = energyBucket({ key: "2025-12", periodStart: "2025-12-01T00:00:00.000Z", periodEnd: "2026-01-01T00:00:00.000Z" });
+    const result = buildCarComparison(
+      [empty, bucket],
+      [...withUsage(empty, timeline), ...withUsage(bucket, timeline)],
+      timeline,
+    )!;
+
+    expect(result.periodStart).toBe(bucket.periodStart);
+    expect(result.periodEnd).toBe(bucket.periodEnd);
+  });
+
+  it("reports no covered span when nothing was charged", () => {
+    const timeline = carTimeline();
+    const empty = energyBucket();
+    const result = buildCarComparison([empty], withUsage(empty, timeline), timeline)!;
+
+    expect(result.periodStart).toBeNull();
+    expect(result.periodEnd).toBeNull();
   });
 });
