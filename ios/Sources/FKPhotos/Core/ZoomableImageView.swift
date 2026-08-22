@@ -7,21 +7,15 @@ import UIKit
 struct ZoomableImageView: UIViewRepresentable {
     let image: UIImage
     let faceBBox: FaceBBox?
-    /// Single tap on the photo. Used by the fullscreen slideshow to reveal the
-    /// chrome it hides during playback. Waits for the double-tap recognizer to
-    /// fail, so a double tap still zooms and never also counts as a single tap.
-    let onSingleTap: (() -> Void)?
 
-    init(image: UIImage, faceBBox: FaceBBox? = nil, onSingleTap: (() -> Void)? = nil) {
+    init(image: UIImage, faceBBox: FaceBBox? = nil) {
         self.image = image
         self.faceBBox = faceBBox
-        self.onSingleTap = onSingleTap
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> ZoomScrollView {
-        context.coordinator.onSingleTap = onSingleTap
         let sv = ZoomScrollView()
         sv.delegate = context.coordinator
         sv.minimumZoomScale = 1
@@ -60,31 +54,10 @@ struct ZoomableImageView: UIViewRepresentable {
         doubleTap.numberOfTapsRequired = 2
         sv.addGestureRecognizer(doubleTap)
 
-        // Only attached when a handler was supplied at creation. An
-        // unconditional recognizer would swallow taps at the call sites that
-        // don't want one (the detail and recap viewers), where the tap belongs
-        // to a parent SwiftUI gesture. Callers therefore decide once, up front.
-        if onSingleTap != nil {
-            let singleTap = UITapGestureRecognizer(
-                target: context.coordinator,
-                action: #selector(Coordinator.handleSingleTap)
-            )
-            singleTap.numberOfTapsRequired = 1
-            // Without this a double tap fires the single-tap action first, so
-            // zooming would also toggle the chrome.
-            singleTap.require(toFail: doubleTap)
-            sv.addGestureRecognizer(singleTap)
-        }
-
         return sv
     }
 
     func updateUIView(_ sv: ZoomScrollView, context: Context) {
-        // Refreshed every update: the closure captures view state that changes
-        // between renders, so a stale one would act on an old `isPlaying`.
-        // (Whether a recognizer exists at all is fixed in makeUIView; this only
-        // keeps an existing one pointed at the current closure.)
-        context.coordinator.onSingleTap = onSingleTap
         guard let iv = context.coordinator.imageView, iv.image !== image else { return }
         iv.image = image
         sv.setZoomScale(1, animated: false)
@@ -95,7 +68,6 @@ struct ZoomableImageView: UIViewRepresentable {
         weak var imageView: UIImageView?
         weak var bboxView: UIView?
         var faceBBox: FaceBBox?
-        var onSingleTap: (() -> Void)?
 
         func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
 
@@ -131,10 +103,6 @@ struct ZoomableImageView: UIViewRepresentable {
                 width: max(CGFloat(bbox.width) * rW, 4),
                 height: max(CGFloat(bbox.height) * rH, 4)
             )
-        }
-
-        @objc func handleSingleTap() {
-            onSingleTap?()
         }
 
         @objc func handleDoubleTap(_ gr: UITapGestureRecognizer) {
