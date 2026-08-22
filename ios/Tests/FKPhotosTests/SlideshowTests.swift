@@ -1,5 +1,5 @@
 import XCTest
-@testable import FKPhotos
+@testable import FKPhotosLib
 
 /// Per-device slideshow settings: the interval the user picks and the caption
 /// rule. Playback itself is covered by `SlideshowPlanTests`.

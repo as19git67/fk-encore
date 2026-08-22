@@ -1,6 +1,6 @@
 import CoreGraphics
 import XCTest
-@testable import FKPhotos
+@testable import FKPhotosLib
 
 /// Grouping photos into slides, and the playback position that runs over them.
 final class SlideshowPlanTests: XCTestCase {
