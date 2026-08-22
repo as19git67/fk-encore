@@ -414,7 +414,10 @@ export interface PvAmortization {
   investmentNetEur: number | null
   investmentVatEur: number | null
   investmentTotalEur: number | null
-  opportunityCostPerYearEur: number | null
+  /** Expected yearly return of the money, as a ratio (0.05 = 5 %). */
+  expectedReturnRate: number | null
+  /** Return forgone so far, compounded at that rate. */
+  opportunityCostEur: number | null
   cumulativePvBenefitEur: number
   remainingEur: number | null
   remainingWithOpportunityEur: number | null
@@ -686,9 +689,7 @@ export type ElectricityTariffKind =
   | 'self_consumption_value'
   | 'pv_investment_net'
   | 'pv_investment_vat'
-  | 'opportunity_cost_year'
-  | 'opportunity_cost_total'
-  | 'amortization_years'
+  | 'expected_return_rate'
   // Assumptions for the gas-heating / petrol-car comparisons.
   | 'gas_price'
   | 'gas_base_price'
@@ -709,7 +710,6 @@ export type ElectricityTariffUnit =
   | 'eur_per_kwh'
   | 'eur_per_month'
   | 'eur'
-  | 'years'
   | 'ratio'
   | 'kwh_per_100km'
   | 'l_per_100km'
@@ -770,6 +770,32 @@ export function importElectricityPrices() {
     '/meters/import/electricity-prices',
     { method: 'POST' },
   )
+}
+
+/** One row of a tariff/assumption import file. */
+export interface TariffImportEntry {
+  kind: string
+  validFrom: string
+  amount: number
+  unit: string
+  taxStatus?: string | null
+  name?: string | null
+  capacityLimitKw?: number | null
+  source?: Record<string, unknown> | null
+}
+
+export interface TariffImportResult {
+  created: number
+  updated: number
+  failed: number
+  errors: Array<{ index: number; message: string }>
+}
+
+export function importTariffFile(entries: TariffImportEntry[]) {
+  return apiFetch<TariffImportResult>('/meters/tariffs/import', {
+    method: 'POST',
+    body: JSON.stringify({ entries }),
+  })
 }
 
 // ── Import (Issue #792) ─────────────────────────────────────────────────────
@@ -890,9 +916,7 @@ export const ELECTRICITY_TARIFF_KIND_LABELS: Record<ElectricityTariffKind, strin
   self_consumption_value: 'Eigenverbrauchswert',
   pv_investment_net: 'PV-Invest netto',
   pv_investment_vat: 'PV-MwSt.',
-  opportunity_cost_year: 'Opportunitätskosten/Jahr',
-  opportunity_cost_total: 'Opportunitätskosten gesamt',
-  amortization_years: 'Amortisation',
+  expected_return_rate: 'Erwartete Rendite/Jahr',
   gas_price: 'Gaspreis',
   gas_base_price: 'Gas-Grundpreis',
   boiler_efficiency: 'Kesselwirkungsgrad',
@@ -913,7 +937,6 @@ export const ELECTRICITY_TARIFF_UNIT_LABELS: Record<ElectricityTariffUnit, strin
   eur_per_kwh: '€/kWh',
   eur_per_month: '€/Monat',
   eur: '€',
-  years: 'Jahre',
   ratio: 'Faktor',
   kwh_per_100km: 'kWh/100 km',
   l_per_100km: 'l/100 km',

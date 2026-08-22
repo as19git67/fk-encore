@@ -16,7 +16,6 @@ export type ElectricityTariffUnit =
   | "eur_per_kwh"
   | "eur_per_month"
   | "eur"
-  | "years"
   | "ratio"
   | "kwh_per_100km"
   | "l_per_100km"
@@ -56,6 +55,40 @@ export interface ElectricityPriceImportResult {
   alreadyImported: boolean;
 }
 
+/**
+ * One row of an uploaded tariff/assumption file. `kind` and `unit` stay plain
+ * strings on purpose: typed as unions, a single typo would make the gateway
+ * reject the whole file with an opaque message instead of naming the bad row.
+ */
+export interface TariffImportEntry {
+  kind: string;
+  validFrom: string;
+  amount: number;
+  unit: string;
+  taxStatus?: string | null;
+  name?: string | null;
+  capacityLimitKw?: number | null;
+  source?: Record<string, unknown> | null;
+}
+
+export interface TariffImportRowError {
+  /** Zero-based position in the uploaded list. */
+  index: number;
+  message: string;
+}
+
+export interface TariffImportResult {
+  created: number;
+  updated: number;
+  failed: number;
+  /** Capped at MAX_REPORTED_ERRORS; `failed` carries the true count. */
+  errors: TariffImportRowError[];
+}
+
+/** Guard against a wrong file turning into a very long import loop. */
+const MAX_IMPORT_ENTRIES = 2000;
+const MAX_REPORTED_ERRORS = 50;
+
 export interface EnergyTariffCostInput {
   periodStart: string;
   periodEnd: string;
@@ -89,9 +122,7 @@ const TARIFF_KINDS: ElectricityTariffKind[] = [
   "self_consumption_value",
   "pv_investment_net",
   "pv_investment_vat",
-  "opportunity_cost_year",
-  "opportunity_cost_total",
-  "amortization_years",
+  "expected_return_rate",
   "gas_price",
   "gas_base_price",
   "boiler_efficiency",
@@ -112,7 +143,6 @@ const TARIFF_UNITS: ElectricityTariffUnit[] = [
   "eur_per_kwh",
   "eur_per_month",
   "eur",
-  "years",
   "ratio",
   "kwh_per_100km",
   "l_per_100km",
@@ -273,7 +303,15 @@ export async function deleteElectricityTariff(userId: number, id: number): Promi
   if (result.changes === 0) throw APIError.notFound("tariff not found");
 }
 
-async function findExistingImportEntry(userId: number, entry: ElectricityPriceImportEntry) {
+/** Natural key of an import row: the columns of the unique index. */
+type TariffNaturalKey = {
+  kind: string;
+  validFrom: string;
+  unit: string;
+  name?: string | null;
+};
+
+async function findExistingImportEntry(userId: number, entry: TariffNaturalKey) {
   const validFrom = parseValidFrom(entry.validFrom);
   const rows = await dbAll<typeof meterElectricityTariffs.$inferSelect>(
     db
@@ -321,6 +359,60 @@ export async function importElectricityPrices(userId: number): Promise<Electrici
     total: electricityPriceData.length,
     alreadyImported: created === 0,
   };
+}
+
+/**
+ * Imports a tariff/assumption file — the way historical series (petrol prices,
+ * gas prices, …) get into the system without typing one dialog row per month.
+ *
+ * Idempotent by the same natural key the unique index uses: a row that is
+ * already there is updated, not duplicated, so re-importing a corrected file
+ * is safe. A bad row is reported with its position and does not stop the rest,
+ * following the finance importer (`finance/data-import.ts`).
+ */
+export async function importTariffEntries(
+  userId: number,
+  entries: TariffImportEntry[],
+): Promise<TariffImportResult> {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    throw APIError.invalidArgument("the file contains no entries");
+  }
+  if (entries.length > MAX_IMPORT_ENTRIES) {
+    throw APIError.invalidArgument(
+      `the file has ${entries.length} entries, at most ${MAX_IMPORT_ENTRIES} are imported at once`,
+    );
+  }
+
+  const result: TariffImportResult = { created: 0, updated: 0, failed: 0, errors: [] };
+  for (const [index, entry] of entries.entries()) {
+    const input: UpsertElectricityTariffInput = {
+      kind: entry.kind as ElectricityTariffKind,
+      validFrom: entry.validFrom,
+      amount: entry.amount,
+      unit: entry.unit as ElectricityTariffUnit,
+      taxStatus: entry.taxStatus ?? null,
+      name: entry.name ?? null,
+      capacityLimitKw: entry.capacityLimitKw ?? null,
+      source: entry.source ?? null,
+    };
+    try {
+      assertTariff(input);
+      const existing = await findExistingImportEntry(userId, input);
+      if (existing) {
+        await updateElectricityTariff(userId, existing.id, input);
+        result.updated += 1;
+      } else {
+        await createElectricityTariff(userId, input);
+        result.created += 1;
+      }
+    } catch (err: any) {
+      result.failed += 1;
+      if (result.errors.length < MAX_REPORTED_ERRORS) {
+        result.errors.push({ index, message: err?.message ?? "entry could not be imported" });
+      }
+    }
+  }
+  return result;
 }
 
 function startOfUtcDay(iso: string): Date {

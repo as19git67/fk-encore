@@ -1051,6 +1051,13 @@
       "when": 1785974400000,
       "tag": "0149_meter_equipment_reports",
       "breakpoints": true
+    },
+    {
+      "idx": 150,
+      "version": "7",
+      "when": 1786060800000,
+      "tag": "0150_meter_expected_return_rate",
+      "breakpoints": true
     }
   ]
 }
