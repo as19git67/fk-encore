@@ -47,6 +47,7 @@ import {
 import { listGroups, type GroupSummary } from '../api/documents'
 import { useAuthStore } from '../stores/auth'
 import { toLocalIsoDateTime } from '../utils/dateFormat'
+import { decimalInputPt } from '../utils/inputNumberPt'
 
 const route = useRoute()
 const router = useRouter()
@@ -968,13 +969,13 @@ watch(meterId, () => loadDetail())
           <DatePicker v-model="replaceForm.swapAt" show-time hour-format="24" date-format="dd.mm.yy" />
         </label>
         <label>Endstand altes Gerät
-          <InputNumber v-model="replaceForm.finalValue" :min-fraction-digits="0" :max-fraction-digits="3" />
+          <InputNumber v-model="replaceForm.finalValue" :min-fraction-digits="0" :max-fraction-digits="3" :pt="decimalInputPt" />
         </label>
         <label>Seriennummer neu
           <InputText v-model="replaceForm.newSerial" />
         </label>
         <label>Startwert neu
-          <InputNumber v-model="replaceForm.newStartValue" :min-fraction-digits="0" :max-fraction-digits="3" />
+          <InputNumber v-model="replaceForm.newStartValue" :min-fraction-digits="0" :max-fraction-digits="3" :pt="decimalInputPt" />
         </label>
       </div>
       <template #footer>
@@ -993,13 +994,13 @@ watch(meterId, () => loadDetail())
           <DatePicker v-model="deviceForm.installedAt" show-time hour-format="24" date-format="dd.mm.yy" />
         </label>
         <label>Startwert
-          <InputNumber v-model="deviceForm.startValue" :min-fraction-digits="0" :max-fraction-digits="3" />
+          <InputNumber v-model="deviceForm.startValue" :min-fraction-digits="0" :max-fraction-digits="3" :pt="decimalInputPt" />
         </label>
         <label>Ausgebaut am
           <DatePicker v-model="deviceForm.removedAt" show-time hour-format="24" date-format="dd.mm.yy" show-button-bar />
         </label>
         <label>Endwert
-          <InputNumber v-model="deviceForm.endValue" :min-fraction-digits="0" :max-fraction-digits="3" />
+          <InputNumber v-model="deviceForm.endValue" :min-fraction-digits="0" :max-fraction-digits="3" :pt="decimalInputPt" />
         </label>
         <label class="full">Notiz
           <Textarea v-model="deviceForm.notes" rows="2" auto-resize />
@@ -1024,7 +1025,7 @@ watch(meterId, () => loadDetail())
         </label>
         <label>Zählerstand
           <div class="ocr-row">
-            <InputNumber v-model="readingForm.value" :min-fraction-digits="0" :max-fraction-digits="3" autofocus class="ocr-input" />
+            <InputNumber v-model="readingForm.value" :min-fraction-digits="0" :max-fraction-digits="3" autofocus class="ocr-input" :pt="decimalInputPt" />
             <Button
               v-if="readingForm.id === null"
               icon="pi pi-camera"

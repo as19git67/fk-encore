@@ -14,6 +14,7 @@ import {
   type QuickEntryItem,
 } from '../api/meters'
 import { toLocalIsoDateTime } from '../utils/dateFormat'
+import { decimalInputPt } from '../utils/inputNumberPt'
 
 interface EntryRow {
   meter: QuickEntryItem
@@ -211,6 +212,7 @@ onMounted(load)
               :min-fraction-digits="0"
               :max-fraction-digits="row.meter.decimals"
               :placeholder="row.meter.unit"
+              :pt="decimalInputPt"
               fluid
               @update:model-value="row.saved = false"
             />
