@@ -137,6 +137,27 @@ const CLASSIFY_TEXT_LIMIT = parseInt(
   10,
 );
 
+/**
+ * Characters of document text the classifier is expected to actually read.
+ *
+ * The real limit is a token budget the llm-service computes per request —
+ * `n_ctx` minus the response reserve minus the prompt scaffolding (taxonomy,
+ * hints, tax guidance), which is far larger than the document itself. The
+ * service logs the number ("truncated document text to fit n_ctx
+ * (budget=N tokens)") but has no document id to log it against, and giving it
+ * one would mean rebuilding that image.
+ *
+ * So the app logs the other half: which document was long enough to be at
+ * risk. Set this to roughly the budget the service reports times ~3.2 (German
+ * averages about that many characters per token); 0 disables the warning.
+ * Correlating these ids with misclassifications is what tells you whether
+ * truncation actually costs accuracy, rather than assuming it does.
+ */
+const CLASSIFY_TRUNCATION_WARN_CHARS = parseInt(
+  process.env.DOCUMENTS_CLASSIFY_TRUNCATION_WARN_CHARS ?? "4700",
+  10,
+);
+
 /** Approx characters per embedding chunk. */
 const EMBED_CHUNK_CHARS = parseInt(
   process.env.DOCUMENTS_EMBED_CHUNK_CHARS ?? "1500",
@@ -322,6 +343,15 @@ export async function runClassify(documentId: number): Promise<{ classification:
 
   const taxonomy = await loadTaxonomyForClassifier();
   const clipped = text.slice(0, CLASSIFY_TEXT_LIMIT);
+  if (
+    CLASSIFY_TRUNCATION_WARN_CHARS > 0 &&
+    clipped.length > CLASSIFY_TRUNCATION_WARN_CHARS
+  ) {
+    console.warn(
+      `[documents] classify(${documentId}): ${clipped.length} chars of text, ` +
+        `beyond ~${CLASSIFY_TRUNCATION_WARN_CHARS} the classifier likely never sees it`,
+    );
+  }
   const effectiveSections = await loadEffectiveTaxSections();
   const tax_sections: TaxSectionRequestEntry[] = effectiveSections.map((s) => ({
     slug: s.slug,

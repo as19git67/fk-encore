@@ -76,28 +76,17 @@ export const CLASSIFY_CATEGORY_RULES = `
 
 KATEGORIE-WAHL
 
-SPEZIFISCHSTE KATEGORIE (sehr wichtig): Die Taxonomie ist zweistufig.
-Oberkategorien wie finanzen, gesundheit, fahrzeug, beruf, landwirtschaft,
-wohnen, bildung, altersvorsorge, kapitalanlage-immobilie, versicherungen,
-vertraege, familie, behoerden oder rechtliches haben Unterkategorien. Antworte
-IMMER mit der Unterkategorie, sobald eine davon passt. Eine Oberkategorie ist
-nur dann richtig, wenn das Dokument den gesamten Bereich betrifft und zu KEINER
-ihrer Unterkategorien gehört — das ist selten. Beispiele: ein Pachtvertrag oder
-ein Flurstücksverzeichnis gehört zu landwirtschaft-pacht, nicht zu
-landwirtschaft; eine Werkstattrechnung zu fahrzeug-werkstatt, nicht zu
-fahrzeug; eine Entgeltabrechnung zu finanzen-gehalt, nicht zu beruf.
+SPEZIFISCHSTE KATEGORIE: Antworte immer mit der Unterkategorie, sobald eine
+passt. Eine Oberkategorie (finanzen, gesundheit, fahrzeug, beruf,
+landwirtschaft, wohnen, …) ist nur richtig, wenn das Dokument zu KEINER ihrer
+Unterkategorien gehört — das ist selten. Pachtvertrag oder Flurstücksliste →
+landwirtschaft-pacht, nicht landwirtschaft. Werkstattrechnung →
+fahrzeug-werkstatt, nicht fahrzeug.
 
-DIE BEIDEN SAMMELKATEGORIEN: "sonstiges" und "finanzen-rechnungen" fangen beide
-Dokumente auf, für die keine fachliche Kategorie passt — sie sind aber nicht
-austauschbar. Prüfe in dieser Reihenfolge:
-1. Passt eine fachliche Unterkategorie? Dann diese.
-2. Sonst: Ist das Dokument eine Rechnung, ein Kaufbeleg oder eine
-   Zahlungsaufforderung über eine bezogene Lieferung oder Leistung (Hotel,
-   Reise, Software-Abo, Online-Händler, Dienstleister)? Dann
-   finanzen-rechnungen — auch wenn der Absender unbekannt ist.
-3. Erst wenn beides nicht zutrifft: sonstiges.
-Ein erkennbares Rechnungsdokument gehört niemals nach "sonstiges", nur weil der
-Absender nicht einzuordnen ist.`;
+SAMMELKATEGORIEN: "sonstiges" und "finanzen-rechnungen" sind nicht
+austauschbar. Reihenfolge: (1) passende fachliche Kategorie; (2) sonst, wenn
+Rechnung, Kaufbeleg oder Zahlungsaufforderung über eine Lieferung oder Leistung
+→ finanzen-rechnungen, auch bei unbekanntem Absender; (3) erst dann sonstiges.`;
 
 export const CLASSIFY_TAX_PROMPT = `
 

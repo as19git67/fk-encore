@@ -109,6 +109,6 @@ describe("category boundaries settled after the scoreboard", () => {
   });
 
   it("says belege is assigned by receipt capture, not by the classifier", () => {
-    expect(hints.get("belege")!).toMatch(/NICHT vom Klassifikator/);
+    expect(hints.get("belege")!).toMatch(/nicht vom Klassifikator vergeben/i);
   });
 });
