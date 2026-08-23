@@ -58,7 +58,7 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "finanzen-rechnungen",
         name: "Rechnungen",
-        hint: "Rechnungen, Kaufbelege und Zahlungsaufforderungen über bezogene Lieferungen oder Leistungen, für die keine fachliche Kategorie existiert: Hotel- und Reiserechnungen, Software-/Cloud-Abos, Online-Händler, Lieferscheine, sonstige Dienstleister. Rechnung erkannt und keine fachliche Kategorie passend? Dann hierher — NICHT nach sonstiges, auch wenn der Absender unbekannt ist. NICHT für: Gehaltsabrechnungen (finanzen-gehalt), Arzt-/Zahnarztrechnungen (gesundheit-arzt), Pflege (gesundheit-pflege), Handwerker am Eigenheim (wohnen-haus-instandhaltung), Kfz-Werkstatt (fahrzeug-werkstatt), Geräte-/Möbelkauf mit Garantie (anschaffungen), Kassenbons aus dem Einzelhandel (belege), Versicherungsbeiträge (versicherungen-*, altersvorsorge-*), Renten (altersvorsorge-gesetzlich), Steuerbescheide (behoerden-steuerbescheid), Kirchensteuer (finanzen-kirchensteuer).",
+        hint: "Rechnungen, Kaufbelege, Zahlungsaufforderungen über Lieferungen/Leistungen ohne eigene fachliche Kategorie: Hotel und Reise, Software-/Cloud-Abos, Online-Händler, Lieferscheine, Dienstleister. Rechnung erkannt, keine fachliche Kategorie passend? Hierher — NICHT nach sonstiges, auch bei unbekanntem Absender. NICHT: Gehalt (finanzen-gehalt), Arzt (gesundheit-arzt), Pflege (gesundheit-pflege), Handwerker am Eigenheim (wohnen-haus-instandhaltung), Kfz-Werkstatt (fahrzeug-werkstatt), Gerätekauf mit Garantie (anschaffungen), Kassenbons (belege), Beiträge (versicherungen-*, altersvorsorge-*), Steuerbescheide (behoerden-steuerbescheid), Kirchensteuer (finanzen-kirchensteuer).",
       },
       {
         slug: "finanzen-wertpapiere",
@@ -129,7 +129,7 @@ export const categoryTaxonomy: CategorySeed[] = [
           {
             slug: "wohnen-haus-kaufvertrag",
             name: "Kaufvertrag / Grundbuch",
-            hint: "Der gesamte Erwerbsvorgang der selbst bewohnten Immobilie, nicht nur der Vertrag: notarieller Kaufvertrag, Grundbuchauszug und Eintragungsbekanntmachungen des Grundbuchamts, Lage- und Vermessungspläne, Verkehrswert-/Marktwertgutachten, Übergabeprotokoll. NICHT dieselben Unterlagen für eine vermietete Immobilie (→ kapitalanlage-immobilie-kaufvertrag), NICHT land-/forstwirtschaftliche Flächen (→ landwirtschaft-pacht).",
+            hint: "Der ganze Erwerbsvorgang der selbst bewohnten Immobilie, nicht nur der Vertrag: Kaufvertrag, Grundbuchauszug und Eintragungsbekanntmachungen, Lage-/Vermessungspläne, Wertgutachten, Übergabeprotokoll. Dieselben Unterlagen für eine vermietete Immobilie → kapitalanlage-immobilie-kaufvertrag, für Felder → landwirtschaft-pacht.",
           },
           {
             slug: "wohnen-haus-photovoltaik",
@@ -175,7 +175,7 @@ export const categoryTaxonomy: CategorySeed[] = [
     slug: "landwirtschaft",
     name: "Landwirtschaft (verpachtet)",
     icon: "pi-warehouse",
-    hint: "Oberkategorie für den verpachteten land-/forstwirtschaftlichen Betrieb — NICHT direkt wählen, sondern immer die passende Unterkategorie: Pacht/Verträge/Flurstücke → landwirtschaft-pacht, Versicherungen → landwirtschaft-versicherung, Reparatur/Wartung → landwirtschaft-instandhaltung, EÜR/Steuer → landwirtschaft-steuer. Steuerlich Anlage L / Anlage EÜR. NICHT Vermietung von Wohn-/Gewerbeimmobilien (→ kapitalanlage-immobilie), NICHT Eigenheim (→ wohnen).",
+    hint: "Oberkategorie des verpachteten land-/forstwirtschaftlichen Betriebs — NICHT direkt wählen, immer die Unterkategorie: Pacht/Verträge/Flurstücke → landwirtschaft-pacht, Versicherung → landwirtschaft-versicherung, Reparatur → landwirtschaft-instandhaltung, EÜR/Steuer → landwirtschaft-steuer. Steuerlich Anlage L / EÜR. NICHT Wohn-/Gewerbevermietung (→ kapitalanlage-immobilie), NICHT Eigenheim (→ wohnen).",
     children: [
       {
         slug: "landwirtschaft-pacht",
@@ -355,13 +355,13 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "beruf-arbeitsvertrag",
         name: "Arbeitsvertrag",
-        hint: "Der Arbeitsvertrag selbst und seine Änderungen: Arbeitsvertrag, Berufsausbildungsvertrag, Stellenbeschreibung, Änderungsvertrag, Aufhebungsvertrag, Kündigung. NICHT der laufende Schriftverkehr mit dem Arbeitgeber — Anträge, Anzeigen, Bestätigungen und Bescheinigungen (Urlaubsantrag, Nebenbeschäftigung, Beschäftigungszeit, Zeiterfassung, Reisekosten) gehören zu beruf-betriebliche-unterlagen.",
+        hint: "Nur der Vertrag und seine Änderungen: Arbeits- und Ausbildungsvertrag, Stellenbeschreibung, Änderungs-/Aufhebungsvertrag, Kündigung. NICHT der laufende Schriftverkehr — Urlaubsantrag, Nebenbeschäftigung, Beschäftigungszeit, Zeiterfassung, Reisekosten → beruf-betriebliche-unterlagen.",
       },
       { slug: "beruf-zeugnisse", name: "Arbeitszeugnisse" },
       {
         slug: "beruf-betriebliche-unterlagen",
         name: "Betriebliche Unterlagen",
-        hint: "Alles rund um das laufende Arbeitsverhältnis außer dem Vertrag selbst: Anträge, Anzeigen und Bestätigungen (Urlaubsantrag, Anzeige und Bestätigung einer Nebenbeschäftigung, Festsetzung der Beschäftigungszeit, Zeiterfassung, Reisekostenerstattung) sowie Merkblätter, Betriebsvereinbarungen, Datenschutz-Verpflichtungen, Schweigepflicht-Erklärungen, Schulungsnachweise, Compliance-Dokumente und Arbeitsanweisungen vom Arbeitgeber. NICHT Arbeitsvertrag/Änderungsvertrag/Kündigung (→ beruf-arbeitsvertrag), NICHT Arbeitszeugnisse (→ beruf-zeugnisse), NICHT Gehaltsabrechnungen (→ finanzen-gehalt).",
+        hint: "Das laufende Arbeitsverhältnis außer dem Vertrag: Urlaubsantrag, Anzeige/Bestätigung einer Nebenbeschäftigung, Beschäftigungszeit, Zeiterfassung, Reisekosten sowie Merkblätter, Betriebsvereinbarungen, Datenschutz- und Schweigepflicht-Erklärungen, Schulungsnachweise, Arbeitsanweisungen. NICHT Vertrag/Kündigung (→ beruf-arbeitsvertrag), Zeugnisse (→ beruf-zeugnisse), Gehalt (→ finanzen-gehalt).",
       },
       {
         slug: "beruf-arbeitsagentur",
@@ -436,7 +436,7 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "behoerden-mitteilungen",
         name: "Mitteilungen",
-        hint: "Amtliche Mitteilungen und Informationsschreiben von Behörden, ohne eigene Regelungswirkung: Wahlbenachrichtigungen, Meldebescheinigungen, Anschreiben, Hinweisschreiben, Eingangs- und Empfangsbestätigungen zu Anträgen (z. B. BAFA), Nutzungs- und Lizenzbedingungen amtlicher Datenangebote, Widerrufs- und Rechtsbehelfsbelehrungen als eigenständiges Blatt. NICHT Bescheide mit eigener Regelung und Rechtsbehelfsbelehrung (→ behoerden-bescheide), NICHT Steuerbescheide (→ behoerden-steuerbescheid).",
+        hint: "Behördenschreiben ohne eigene Regelungswirkung: Wahlbenachrichtigung, Meldebescheinigung, Hinweisschreiben, Eingangs-/Empfangsbestätigung zu Anträgen, Nutzungs-/Lizenzbedingungen amtlicher Datenangebote, Belehrungen als eigenes Blatt. NICHT Bescheide mit eigener Regelung (→ behoerden-bescheide) oder Steuerbescheide (→ behoerden-steuerbescheid).",
       },
     ],
   },
@@ -509,13 +509,13 @@ export const categoryTaxonomy: CategorySeed[] = [
     slug: "belege",
     name: "Belege",
     icon: "pi-receipt",
-    hint: "Wird NICHT vom Klassifikator vergeben, sondern beim Upload durch die Beleg-Erfassung gesetzt (Foto an einer Bargeldbuchung) — die Zugehörigkeit ergibt sich aus der verknüpften Buchung, nicht aus dem Text. Kassenbons / Kaufbelege / Quittungen aus dem Einzelhandel (Supermarkt, Drogerie, Tankstelle, Restaurant). Ein gleich aussehender Beleg ohne Bargeldbuchung gehört zu finanzen-rechnungen.",
+    hint: "Wird nicht vom Klassifikator vergeben, sondern beim Upload durch die Beleg-Erfassung gesetzt — die Zugehörigkeit ergibt sich aus der verknüpften Bargeldbuchung, nicht aus dem Text. Ein gleich aussehender Beleg ohne Buchung gehört zu finanzen-rechnungen.",
   },
   {
     slug: "sonstiges",
     name: "Sonstiges",
     icon: "pi-file",
-    hint: "LETZTE WAHL — nur verwenden, wenn das Dokument in KEINE andere Kategorie passt. Prüfe zuerst: Schuldokumente → familie-schule, Rechnungen → finanzen-rechnungen, Steuererklärungen → finanzen-steuern, Impfdokumente → gesundheit-rezepte, Arztbriefe/Befunde/Laborwerte → gesundheit-befunde, Schwerbehindertenausweis/GdB → gesundheit-schwerbehinderung, Urkunden → familie-urkunden, Behördenschreiben → behoerden-bescheide oder behoerden-mitteilungen, Arbeitslosengeld/Jobcenter → beruf-arbeitsagentur, Konsum-/Ratenkredit → finanzen-kredite, Garantie/Bedienungsanleitung/Gerätekaufbeleg → anschaffungen, Erbschein/Nachlass/Erbschaftsteuer → rechtliches-nachlass, Vollmachten → rechtliches-vollmachten, Patientenverfügung/Testament → rechtliches-verfuegungen, Anwaltsschreiben/Klage/Ermittlungsverfahren/Staatsanwaltschaft → rechtliches-verfahren, betriebliche Merkblätter → beruf-betriebliche-unterlagen, WEG-Abrechnungen → kapitalanlage-immobilie-weg-jahresabrechnung oder wohnen-haus-weg-jahresabrechnung, Pachtvertrag/Traktor/Scheune/EÜR Landwirtschaft → landwirtschaft-*.",
+    hint: "LETZTE WAHL — nur, wenn das Dokument in KEINE andere Kategorie passt. Häufig hierher verlegt, gehört aber woanders hin: Rechnung/Kaufbeleg → finanzen-rechnungen, Gerätekauf/Garantie → anschaffungen, Karten und Flurstücke → landwirtschaft-pacht, Grundbuch/Vermessung/Wertgutachten → wohnen-haus-kaufvertrag, Schriftverkehr mit dem Arbeitgeber → beruf-betriebliche-unterlagen, ausländische Steuerunterlagen → finanzen-steuern, Beteiligungsberichte → finanzen-wertpapiere, amtliche Bestätigungen und Belehrungen → behoerden-mitteilungen.",
   },
 ];
 
