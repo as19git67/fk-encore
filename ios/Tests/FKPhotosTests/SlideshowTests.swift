@@ -41,6 +41,38 @@ final class SlideshowTests: XCTestCase {
         XCTAssertEqual(Slideshow.label(for: 30), "30s")
     }
 
+    /// The chooser is a list of plain actions with no selection state of its
+    /// own, so the interval in use has to be marked in the text.
+    func testLabelMarksTheIntervalInUse() {
+        XCTAssertEqual(Slideshow.label(for: 5, current: 5), "5s ✓")
+        XCTAssertEqual(Slideshow.label(for: 10, current: 5), "10s")
+    }
+
+    /// A stored value outside the options drives the timer at the default, so
+    /// that is the row the mark belongs on — not none of them.
+    func testTheMarkFollowsTheNormalizedValue() {
+        XCTAssertEqual(
+            Slideshow.label(for: Slideshow.defaultInterval, current: 7),
+            "\(Slideshow.label(for: Slideshow.defaultInterval)) ✓"
+        )
+        XCTAssertEqual(
+            Slideshow.intervalOptions.filter {
+                Slideshow.label(for: $0, current: 7).hasSuffix("✓")
+            },
+            [Slideshow.defaultInterval]
+        )
+    }
+
+    /// Exactly one row is ever marked.
+    func testOnlyOneIntervalIsMarked() {
+        for current in Slideshow.intervalOptions {
+            let marked = Slideshow.intervalOptions.filter {
+                Slideshow.label(for: $0, current: current).hasSuffix("✓")
+            }
+            XCTAssertEqual(marked, [current])
+        }
+    }
+
     // MARK: - Caption
 
     func testCaptionKeepsRealText() {

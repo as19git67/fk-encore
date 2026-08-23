@@ -22,6 +22,9 @@ struct PhotoSlideshowView: View {
     @State private var plan: [SlideshowSlide] = []
     @State private var playback = SlideshowPlayback()
     @State private var isPaused = false
+    /// The interval chooser is open. Owned here rather than by a `Menu`,
+    /// because the show has to hold still while it is up — see `isSuspended`.
+    @State private var isChoosingInterval = false
     @State private var ticker: Task<Void, Never>?
     /// Consecutive ticks spent waiting for the planner; see `awaitPlan()`.
     @State private var stalledTicks = 0
@@ -76,6 +79,17 @@ struct PhotoSlideshowView: View {
         Slideshow.normalizedInterval(intervalSeconds)
     }
 
+    /// Whether the show is standing still — held by a finger, or by the
+    /// interval chooser being open.
+    ///
+    /// The chooser has to stop the ticker, not just look nice doing it. The
+    /// ticker rewrites `playback` twenty times a second, and every write
+    /// rebuilds this view; a chooser presented from a view churning that fast
+    /// loses the taps on its own rows, which is exactly how the old `Menu`
+    /// behaved. A `Menu` has no "is open" state to read, so there was nothing
+    /// to hang the pause on — hence a presentation this view owns.
+    private var isSuspended: Bool { isPaused || isChoosingInterval }
+
     /// True once every photo has been assigned to a slide — only then does
     /// running off the last slide mean the show is over.
     private var planComplete: Bool {
@@ -128,8 +142,8 @@ struct PhotoSlideshowView: View {
             ticker?.cancel()
             music.stop()
         }
-        .onChange(of: isPaused) { _, paused in
-            music.setPaused(paused)
+        .onChange(of: isSuspended) { _, suspended in
+            music.setPaused(suspended)
         }
         // Both choices are the user's, and they outlive this one show.
         .onChange(of: music.isMuted) { _, muted in musicMuted = muted }
@@ -257,19 +271,25 @@ struct PhotoSlideshowView: View {
                     }
                 }
                 Spacer()
-                Menu {
-                    Picker("Intervall", selection: $intervalSeconds) {
-                        ForEach(Slideshow.intervalOptions, id: \.self) { option in
-                            Text(Slideshow.label(for: option)).tag(option)
-                        }
-                    }
-                } label: {
+                Button { isChoosingInterval = true } label: {
                     Image(systemName: "timer")
                         .font(.headline)
                         .foregroundStyle(.white)
                         .padding(8)
                 }
                 .accessibilityLabel("Intervall")
+                .confirmationDialog(
+                    "Bildwechsel",
+                    isPresented: $isChoosingInterval,
+                    titleVisibility: .visible
+                ) {
+                    ForEach(Slideshow.intervalOptions, id: \.self) { option in
+                        Button(Slideshow.label(for: option, current: intervalSeconds)) {
+                            intervalSeconds = option
+                        }
+                    }
+                    Button("Abbrechen", role: .cancel) {}
+                }
 
                 if music.isPlaying {
                     Button { music.toggleMuted() } label: {
@@ -415,7 +435,7 @@ struct PhotoSlideshowView: View {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(tickStep))
                 if Task.isCancelled { return }
-                if isPaused { continue }
+                if isSuspended { continue }
 
                 guard let slide = currentSlide else {
                     // Nothing planned to show yet. Planning waits for the next

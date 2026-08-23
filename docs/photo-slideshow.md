@@ -197,6 +197,20 @@ ausstehend. Zusätzlich ist die `ZStack` des Players fest auf die
 Bildschirmgröße genagelt, damit kein Overlay das Bild je wieder verschieben
 kann.
 
+### Warum die Intervall-Auswahl kein `Menu` ist
+
+Der Ticker schreibt zwanzigmal pro Sekunde in `playback`, und jeder Schreib­vorgang
+baut die View neu auf. Ein `Menu`, das aus einer so schnell wechselnden View
+heraus aufgeklappt wird, verliert die Taps auf seine eigenen Zeilen — die
+Auswahl ging auf. Ein `Menu` hat aber keinen „ist offen"-Zustand, an dem sich
+ein Anhalten festmachen ließe.
+
+Deshalb gehört die Auswahl jetzt dieser View (`isChoosingInterval` +
+`confirmationDialog`), und `isSuspended` hält Ticker **und** Musik an, solange
+sie offen ist — genau wie beim langen Drücken. Das aktuelle Intervall ist mit
+einem ✓ im Text markiert, weil eine Action-Sheet-Zeile keinen eigenen
+Auswahl­zustand hat.
+
 ### Chrome und die Kamera-Aussparung
 
 Das Foto ist bewusst randlos: Der `GeometryReader` des Players ignoriert die

@@ -36,6 +36,14 @@ enum Slideshow {
         "\(Int(interval.rounded()))s"
     }
 
+    /// The same label, marking the interval in use. The chooser is a plain
+    /// list of actions and carries no selection state of its own, so the
+    /// current value has to be visible in the text.
+    static func label(for interval: TimeInterval, current: TimeInterval) -> String {
+        let base = label(for: interval)
+        return interval == normalizedInterval(current) ? "\(base) ✓" : base
+    }
+
     // MARK: - Music
 
     /// `UserDefaults` key backing the per-device mute state. A recap decides
