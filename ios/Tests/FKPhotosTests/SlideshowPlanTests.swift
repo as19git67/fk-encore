@@ -468,3 +468,139 @@ final class SlideshowPlanTests: XCTestCase {
         )
     }
 }
+
+/// The story progress strip.
+///
+/// A slideshow over a whole album can run to hundreds of photos. One segment
+/// per photo stops fitting long before that, and an `HStack` that cannot fit
+/// widens its parent rather than shrinking — which shoved the entire player
+/// sideways until only a slice of the photo was left on screen.
+final class SlideshowProgressTrackTests: XCTestCase {
+
+    /// The real numbers behind the reported breakage: a 247-photo album on a
+    /// 402 pt screen, where the strip's spacing alone wanted 984 pt.
+    func testAFullAlbumDoesNotGetASegmentEach() {
+        XCTAssertFalse(
+            SlideshowProgressTrack.showsSegments(count: 247, width: 378)
+        )
+    }
+
+    func testASmallShowKeepsItsSegments() {
+        XCTAssertTrue(SlideshowProgressTrack.showsSegments(count: 1, width: 378))
+        XCTAssertTrue(SlideshowProgressTrack.showsSegments(count: 12, width: 378))
+    }
+
+    /// The exact tipping point: segments are kept while they still hold the
+    /// minimum width, and dropped one photo later.
+    func testTheThresholdIsTheMinimumSegmentWidth() {
+        let width: CGFloat = 378
+        let per = SlideshowProgressTrack.minimumSegment + SlideshowProgressTrack.spacing
+        let fits = Int((width + SlideshowProgressTrack.spacing) / per)
+        XCTAssertTrue(SlideshowProgressTrack.showsSegments(count: fits, width: width))
+        XCTAssertFalse(SlideshowProgressTrack.showsSegments(count: fits + 1, width: width))
+    }
+
+    /// The property that actually prevents the overflow: whenever segments are
+    /// drawn, the spacing between them — the `HStack`'s true minimum width,
+    /// since a segment can shrink to nothing — fits the space available.
+    func testSegmentedLayoutNeverOutgrowsItsWidth() {
+        for width in stride(from: 100.0, through: 1400.0, by: 37.0) {
+            for count in 1...400 {
+                guard SlideshowProgressTrack.showsSegments(
+                    count: count,
+                    width: CGFloat(width)
+                ) else { continue }
+                let spacingOnly = CGFloat(count - 1) * SlideshowProgressTrack.spacing
+                XCTAssertLessThanOrEqual(
+                    spacingOnly,
+                    CGFloat(width),
+                    "\(count) segments across \(width)pt overflow on spacing alone"
+                )
+            }
+        }
+    }
+
+    /// Degenerate inputs collapse rather than dividing by a zero width.
+    func testNothingToShowMeansNoSegments() {
+        XCTAssertFalse(SlideshowProgressTrack.showsSegments(count: 0, width: 378))
+        XCTAssertFalse(SlideshowProgressTrack.showsSegments(count: 10, width: 0))
+        XCTAssertFalse(SlideshowProgressTrack.showsSegments(count: -3, width: 378))
+    }
+}
+
+/// Overall progress, which is what the collapsed strip draws.
+final class SlideshowOverallFractionTests: XCTestCase {
+
+    private func slides(_ groups: [[Int]]) -> [SlideshowSlide] {
+        groups.map { SlideshowSlide(photoIndices: $0) }
+    }
+
+    func testStartsAtZero() {
+        let p = SlideshowPlayback()
+        XCTAssertEqual(
+            p.overallFraction(plan: slides([[0], [1], [2], [3]]), photoCount: 4),
+            0,
+            accuracy: 0.0001
+        )
+    }
+
+    /// Counted in photos, not slides: a pair moves the bar twice as far as a
+    /// single, which is what keeps the strip honest about how much is left.
+    func testAPairCountsForTwoPhotos() {
+        var p = SlideshowPlayback()
+        let slidePlan = slides([[0, 1], [2], [3]])
+        p.next(slideCount: 3, planComplete: true)
+        XCTAssertEqual(
+            p.overallFraction(plan: slidePlan, photoCount: 4),
+            0.5,
+            accuracy: 0.0001
+        )
+    }
+
+    /// Within a slide the bar fills across that slide's own photos.
+    func testProgressWithinASlideCountsPartially() {
+        var p = SlideshowPlayback()
+        let slidePlan = slides([[0], [1], [2], [3]])
+        p.tick(delta: 2, perSlide: 4, slideCount: 4, planComplete: true)
+        XCTAssertEqual(
+            p.overallFraction(plan: slidePlan, photoCount: 4),
+            0.125,
+            accuracy: 0.0001
+        )
+    }
+
+    /// Photos the planner has not reached yet count as still to come, so the
+    /// value never jumps backwards as the plan grows.
+    func testUnplannedPhotosCountAsRemaining() {
+        var p = SlideshowPlayback()
+        let partial = slides([[0], [1]])
+        p.next(slideCount: 2, planComplete: false)
+        let early = p.overallFraction(plan: partial, photoCount: 10)
+        XCTAssertEqual(early, 0.1, accuracy: 0.0001)
+
+        let grown = slides([[0], [1], [2], [3]])
+        XCTAssertGreaterThanOrEqual(
+            p.overallFraction(plan: grown, photoCount: 10),
+            early
+        )
+    }
+
+    func testStaysWithinBounds() {
+        var p = SlideshowPlayback()
+        let slidePlan = slides([[0], [1]])
+        for _ in 0..<200 {
+            p.tick(delta: 1, perSlide: 1, slideCount: 2, planComplete: true)
+        }
+        let f = p.overallFraction(plan: slidePlan, photoCount: 2)
+        XCTAssertGreaterThanOrEqual(f, 0)
+        XCTAssertLessThanOrEqual(f, 1)
+    }
+
+    func testAnEmptyShowIsNotADivisionByZero() {
+        XCTAssertEqual(
+            SlideshowPlayback().overallFraction(plan: [], photoCount: 0),
+            0,
+            accuracy: 0.0001
+        )
+    }
+}

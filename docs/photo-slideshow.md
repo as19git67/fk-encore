@@ -117,7 +117,8 @@ mehr ab; sein Play-Button übergibt die Fotos an den Player.
 
 Der Player zeigt ausschließlich das Bild:
 
-- **Story-Fortschrittsleiste** oben, ein Segment pro Foto.
+- **Story-Fortschrittsleiste** oben, ein Segment pro Foto — ab einer
+  gewissen Fotozahl ein durchgehender Balken, siehe unten.
 - **Tippen links** = ein Bild zurück, **tippen rechts** = weiter.
 - **Langes Drücken** pausiert, solange der Finger liegt.
 - **Nach unten wischen** oder ✕ schließt.
@@ -173,6 +174,27 @@ Die Fortschrittsleiste hat deshalb ein Segment pro **Foto**, nicht pro Slide:
 So behält sie ihre Form, während der Plan noch wächst; die beiden Segmente
 eines Paares füllen sich gemeinsam.
 
+### Fortschrittsleiste bei vielen Fotos
+
+Ein Rückblick hat eine Handvoll Bilder, eine Diashow über ein ganzes Album
+aber schnell mehrere hundert. Ein Segment pro Foto trägt so weit nicht:
+Die Segmente werden zu unsichtbaren Haarlinien, und schlimmer noch, allein
+die Abstände dazwischen werden breiter als der Bildschirm. Ein `HStack`,
+der nicht passt, schrumpft nicht — er macht sein Elternelement breiter.
+Damit wuchs die `ZStack` des Players mit, und das Foto darin wurde zur
+Seite geschoben: Bei 247 Fotos auf einem 402 pt breiten Gerät brauchte die
+Leiste 984 pt nur an Abständen, und vom Bild blieb ein 99 pt schmaler
+Streifen am rechten Rand übrig.
+
+`SlideshowProgressTrack` prüft deshalb zuerst, ob die Segmente überhaupt
+passen (mindestens 6 pt pro Segment plus 4 pt Abstand). Passen sie nicht,
+wird die Leiste zu **einem** durchgehenden Balken, der den Gesamtfortschritt
+in Fotos zeigt (`SlideshowPlayback.overallFraction`) — ein Paar rückt ihn
+doppelt so weit vor wie ein Einzelbild, noch ungeplante Fotos zählen als
+ausstehend. Zusätzlich ist die `ZStack` des Players fest auf die
+Bildschirmgröße genagelt, damit kein Overlay das Bild je wieder verschieben
+kann.
+
 ### Ken Burns und Gesichter
 
 Die Ken-Burns-Bewegung ist pro Foto deterministisch aus der Foto-ID abgeleitet
@@ -216,7 +238,7 @@ ohne Wert verhält sich die Bewegung wie vorher.
 | `ios/Sources/FKPhotos/Features/Photos/PhotoSlideshowView.swift` | iOS: Story-Player über Album/Auswahl/Mediathek |
 | `ios/Sources/FKPhotos/Features/Recaps/RecapPlayerView.swift` | iOS: derselbe Player für Rückblicke (plus Musik/Intros) |
 | `ios/Sources/FKPhotos/Features/Photos/SlideshowPlan.swift` | iOS: reine Logik — Ausrichtung, Paar-Planung, Playback-Position |
-| `ios/Sources/FKPhotos/Features/Photos/SlideshowStage.swift` | iOS: Darstellung einer Slide (einzeln/Paar), Ken-Burns-Bewegung |
+| `ios/Sources/FKPhotos/Features/Photos/SlideshowStage.swift` | iOS: Darstellung einer Slide (einzeln/Paar), Ken-Burns-Bewegung, Fortschrittsleiste |
 | `ios/Sources/FKPhotos/Features/Photos/SlideshowImageStore.swift` | iOS: Vorausladen der Bilder + Ausrichtung nach dem Dekodieren |
 | `ios/Sources/FKPhotos/Features/Photos/Slideshow.swift` | iOS: Intervall-Optionen/Persistenz + Caption-Regel |
 | `ios/Sources/FKPhotos/Features/Albums/AlbumDetailView.swift` | iOS: Menüpunkt „Diashow" und Auswahl-Diashow |
