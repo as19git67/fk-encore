@@ -36,6 +36,34 @@ enum Slideshow {
         "\(Int(interval.rounded()))s"
     }
 
+    // MARK: - Music
+
+    /// `UserDefaults` key backing the per-device mute state. A recap decides
+    /// its own sound each time it plays; a photo slideshow is started far more
+    /// casually, so silencing it once silences it for good.
+    static let musicMutedDefaultsKey = "slideshow_music_muted"
+
+    /// `UserDefaults` key backing the last track the user picked. An album has
+    /// no server-suggested track the way a recap does, so the previous choice
+    /// stands in for one.
+    static let musicTrackDefaultsKey = "slideshow_music_track"
+
+    /// The stored mute state, read directly because `@AppStorage` is not
+    /// available yet while a view's `init` is building its state.
+    static func storedMusicMuted(
+        _ defaults: UserDefaults = .standard
+    ) -> Bool {
+        defaults.bool(forKey: musicMutedDefaultsKey)
+    }
+
+    /// The stored track id, or nil when there is none to prefer. An empty
+    /// string is what `@AppStorage` yields for an unset key, and it must not
+    /// be offered as an id to match against.
+    static func storedMusicTrackId(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     // MARK: - Caption
 
     /// The description to show under a slide, or nil when there is nothing

@@ -60,3 +60,40 @@ final class SlideshowTests: XCTestCase {
         XCTAssertNil(Slideshow.caption("\n\t"))
     }
 }
+
+/// Per-device music settings for the photo slideshow.
+final class SlideshowMusicSettingsTests: XCTestCase {
+
+    /// `@AppStorage` yields "" for a key never written; that is "no preference",
+    /// not a track id to match against.
+    func testAnUnsetTrackIdIsNil() {
+        XCTAssertNil(Slideshow.storedMusicTrackId(""))
+        XCTAssertNil(Slideshow.storedMusicTrackId("   "))
+        XCTAssertNil(Slideshow.storedMusicTrackId("\n"))
+    }
+
+    func testAStoredTrackIdSurvives() {
+        XCTAssertEqual(Slideshow.storedMusicTrackId("calm/01_dawn.mp3"), "calm/01_dawn.mp3")
+        XCTAssertEqual(Slideshow.storedMusicTrackId(" calm/01_dawn.mp3 "), "calm/01_dawn.mp3")
+    }
+
+    /// Unset means "play the music", matching the recaps.
+    func testMuteDefaultsToOff() {
+        let defaults = UserDefaults(suiteName: "SlideshowMusicSettingsTests")!
+        defaults.removePersistentDomain(forName: "SlideshowMusicSettingsTests")
+        XCTAssertFalse(Slideshow.storedMusicMuted(defaults))
+        defaults.set(true, forKey: Slideshow.musicMutedDefaultsKey)
+        XCTAssertTrue(Slideshow.storedMusicMuted(defaults))
+        defaults.removePersistentDomain(forName: "SlideshowMusicSettingsTests")
+    }
+
+    /// The two keys must not collide with the interval key.
+    func testKeysAreDistinct() {
+        let keys = Set([
+            Slideshow.intervalDefaultsKey,
+            Slideshow.musicMutedDefaultsKey,
+            Slideshow.musicTrackDefaultsKey,
+        ])
+        XCTAssertEqual(keys.count, 3)
+    }
+}
