@@ -202,3 +202,72 @@ struct KenBurnsSlide: View {
         )
     }
 }
+
+/// The story progress strip along the top of a player.
+///
+/// One segment per photo, as long as the segments stay legible. A slideshow
+/// over a whole album can run to several hundred photos, and there the strip
+/// breaks twice over: the segments become invisible hairlines, and the spacing
+/// between them alone outgrows the screen. An `HStack` that cannot fit widens
+/// its parent instead of shrinking, so the over-wide strip took the player's
+/// `ZStack` with it and shoved the photo sideways off the screen — a 247-photo
+/// album needed 984 pt of spacing on a 402 pt screen and left a 99 pt slice of
+/// the photo hanging off the right edge. Past the point where segments fit,
+/// the strip therefore collapses to a single bar showing overall progress.
+struct SlideshowProgressTrack: View {
+    let photoCount: Int
+    /// Fill of one photo's segment, 0...1.
+    let fill: (Int) -> Double
+    /// Progress across the whole show, drawn when the strip has collapsed.
+    let overall: Double
+
+    /// Gap between segments, and the narrowest a segment may become before
+    /// segmenting is given up on entirely.
+    static let spacing: CGFloat = 4
+    static let minimumSegment: CGFloat = 6
+    static let height: CGFloat = 3
+
+    /// Whether `count` segments still fit across `width`.
+    ///
+    /// Also the guarantee that the strip never overflows: a segment can shrink
+    /// to nothing, so the `HStack`'s real minimum is the spacing alone, which
+    /// this bound comfortably covers.
+    static func showsSegments(count: Int, width: CGFloat) -> Bool {
+        guard count > 0, width > 0 else { return false }
+        let needed = CGFloat(count) * minimumSegment
+            + CGFloat(count - 1) * spacing
+        return needed <= width
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            if Self.showsSegments(count: photoCount, width: geo.size.width) {
+                HStack(spacing: Self.spacing) {
+                    ForEach(0..<photoCount, id: \.self) { i in
+                        SlideshowProgressBar(fraction: fill(i))
+                    }
+                }
+            } else {
+                SlideshowProgressBar(fraction: overall)
+            }
+        }
+        .frame(height: Self.height)
+    }
+}
+
+/// One segment of the story progress strip.
+struct SlideshowProgressBar: View {
+    let fraction: Double
+
+    var body: some View {
+        GeometryReader { geo in
+            Capsule()
+                .fill(.white.opacity(0.3))
+                .overlay(alignment: .leading) {
+                    Capsule()
+                        .fill(.white)
+                        .frame(width: geo.size.width * min(max(fraction, 0), 1))
+                }
+        }
+    }
+}

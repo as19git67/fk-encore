@@ -195,6 +195,19 @@ struct SlideshowPlayback: Equatable, Sendable {
         plan.indices.contains(slideIndex) ? plan[slideIndex] : nil
     }
 
+    /// How far the show has come, as a fraction of all its photos.
+    ///
+    /// Used by the progress strip when there are too many photos to give each
+    /// one its own segment. Photos not planned yet count as still to come, so
+    /// the value only ever grows as the plan fills in.
+    func overallFraction(plan: [SlideshowSlide], photoCount: Int) -> Double {
+        guard photoCount > 0 else { return 0 }
+        let done = plan.prefix(slideIndex).reduce(0) { $0 + $1.photoIndices.count }
+        let current = currentSlide(in: plan)?.photoIndices.count ?? 0
+        let photos = Double(done) + Double(current) * progress
+        return min(1, max(0, photos / Double(photoCount)))
+    }
+
     /// Fill fraction for the progress segment of photo `photoIndex`.
     ///
     /// The bar has one segment per *photo*, not per slide, so it keeps its

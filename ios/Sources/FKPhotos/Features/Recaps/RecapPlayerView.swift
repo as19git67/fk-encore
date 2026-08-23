@@ -167,6 +167,11 @@ struct RecapPlayerView: View {
                         .padding(.bottom, 28)
                 }
             }
+            // Pin the player to the screen. A `ZStack` grows to its widest
+            // child, so an overlay that cannot fit — the progress strip, once —
+            // would otherwise drag the photo out of the frame with it.
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
+            .clipped()
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 20)
@@ -257,14 +262,14 @@ struct RecapPlayerView: View {
 
     private var topOverlay: some View {
         VStack(spacing: 8) {
-            HStack(spacing: 4) {
-                ForEach(photos.indices, id: \.self) { i in
-                    SlideshowProgressBar(
-                        fraction: playback.fillFraction(forPhotoAt: i, plan: plan)
-                    )
-                    .frame(height: 3)
-                }
-            }
+            SlideshowProgressTrack(
+                photoCount: photos.count,
+                fill: { playback.fillFraction(forPhotoAt: $0, plan: plan) },
+                overall: playback.overallFraction(
+                    plan: plan,
+                    photoCount: photos.count
+                )
+            )
 
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
