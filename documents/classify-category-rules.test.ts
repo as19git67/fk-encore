@@ -77,3 +77,38 @@ describe("catch-all category hints", () => {
     }
   });
 });
+
+/**
+ * Boundaries the 2026-08-23 scoreboard showed both local models failing at or
+ * near 100 %. Each was a definition problem rather than a model one, so the
+ * settled definition is pinned here.
+ */
+describe("category boundaries settled after the scoreboard", () => {
+  const hints = taxonomyHints();
+
+  it("routes ongoing employer correspondence away from the contract category", () => {
+    // The old hint listed "Urlaubsanträge" under beruf-arbeitsvertrag, so the
+    // reference model was following it correctly while both local models put
+    // such documents in beruf-betriebliche-unterlagen. That reading won.
+    const contract = hints.get("beruf-arbeitsvertrag")!;
+    // It may still name the document — but only to send it elsewhere, so the
+    // mention has to sit after the NICHT clause, not in the positive list.
+    expect(contract.indexOf("NICHT")).toBeLessThan(contract.indexOf("Urlaubsantrag"));
+    expect(contract).toContain("beruf-betriebliche-unterlagen");
+    expect(hints.get("beruf-betriebliche-unterlagen")!).toMatch(/Urlaubsantrag/);
+  });
+
+  it("covers the whole acquisition in wohnen-haus-kaufvertrag", () => {
+    const hint = hints.get("wohnen-haus-kaufvertrag")!;
+    for (const probe of ["Eintragungsbekanntmachung", "Vermessung", "gutachten"]) {
+      expect(hint).toContain(probe);
+    }
+    // Same paperwork for a let property belongs to the other branch; the
+    // reference labelled two identical Grundbuch documents differently.
+    expect(hint).toContain("kapitalanlage-immobilie-kaufvertrag");
+  });
+
+  it("says belege is assigned by receipt capture, not by the classifier", () => {
+    expect(hints.get("belege")!).toMatch(/NICHT vom Klassifikator/);
+  });
+});

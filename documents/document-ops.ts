@@ -702,8 +702,18 @@ export async function runClassify(documentId: number): Promise<{ classification:
   // Cloud Teacher has asserted them. `attributes_reviewed=true` means a human
   // pinned them; `category_source IN ('cloud','user')` means a trusted source
   // labelled the category and the local classifier must not undo it.
+  //
+  // 'system' is the receipt-capture case: the upload route picked the category
+  // from how the document arrived, which the classifier cannot see in the text
+  // and must not second-guess. `receipt_ocr_state` covers the receipts stored
+  // before that value existed — migration 0151 could not backfill them, because
+  // Postgres refuses to use an enum value added in the same transaction.
   const categoryProtected =
-    row.attributes_reviewed || row.category_source === "cloud" || row.category_source === "user";
+    row.attributes_reviewed ||
+    row.category_source === "cloud" ||
+    row.category_source === "user" ||
+    row.category_source === "system" ||
+    row.receipt_ocr_state != null;
   if (!categoryProtected) {
     patch.category_id = cat?.id ?? null;
     patch.title = classification.title || row.title || row.original_filename;
@@ -978,8 +988,19 @@ export async function markDocumentFailed(documentId: number, reason: string): Pr
   }
 }
 
+/**
+ * Categories the classifier is allowed to choose from.
+ *
+ * 'belege' is withheld: it means "receipt attached to a cash booking", which is
+ * a property of how the document arrived, not of its text. The receipt-capture
+ * route assigns it directly, so offering it to the model only invited wrong
+ * guesses — a hotel invoice and a supermarket till slip read alike, and in the
+ * 2026-08-23 scoreboard both local models missed 4 of 5 'belege' documents.
+ */
+const CLASSIFIER_EXCLUDED_SLUGS = new Set(["belege"]);
+
 async function loadTaxonomyForClassifier(): Promise<TaxonomyEntry[]> {
-  const rows = await db
+  const allRows = await db
     .select({
       slug: documentCategories.slug,
       name: documentCategories.name,
@@ -988,8 +1009,12 @@ async function loadTaxonomyForClassifier(): Promise<TaxonomyEntry[]> {
     })
     .from(documentCategories);
 
+  // Parent lookup is built from every row, so a child of an excluded category
+  // would still resolve its parent name correctly.
   const byId = new Map<number, { slug: string; name: string }>();
-  for (const r of rows) byId.set(r.id, { slug: r.slug, name: r.name });
+  for (const r of allRows) byId.set(r.id, { slug: r.slug, name: r.name });
+
+  const rows = allRows.filter((r) => !CLASSIFIER_EXCLUDED_SLUGS.has(r.slug));
 
   // Hints live in the seed taxonomy (prompt-only, no DB column) and are
   // merged in by slug so borderline documents land in the right bucket.
