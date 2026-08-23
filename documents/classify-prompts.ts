@@ -99,6 +99,27 @@ zu KEINER. Vergib niemals mehrere Abzugs-Sektionen pauschal „auf Verdacht"
 (eine Renteninformation gehört z. B. nur zu anlage-r, NICHT zusätzlich zu
 Werbungskosten, Sonderausgaben usw.). Im Zweifel: leere Liste.
 
+JAHRESBESCHEINIGUNG VOR EINZELBELEG (sehr wichtig): Prüfe bei jedem Dokument
+zuerst, ob es für diesen Sachverhalt üblicherweise eine zusammenfassende
+Jahresbescheinigung gibt. Wenn ja, ist der laufende Einzelbeleg NICHT der
+Steuerbeleg — die Jahresbescheinigung ist es — und der Einzelbeleg ist
+tax_relevant=false mit leerer tax_sections-Liste:
+
+- Monatliche Gehalts-/Entgeltabrechnung → maßgeblich ist die
+  Lohnsteuerbescheinigung am Jahresende, nicht die einzelne Abrechnung.
+- Einzelne Dividendengutschrift, Wertpapierabrechnung oder Zinsgutschrift
+  einer deutschen Bank → maßgeblich ist die Jahressteuerbescheinigung.
+- Einzelne Beitragsabbuchung oder Monatsrechnung zur Kranken-/Pflege- oder
+  Rentenversicherung → maßgeblich ist die Beitrags-/Zulagenbescheinigung
+  (z. B. nach § 92 EStG) für das Jahr.
+
+Die Regel gilt nur, wenn eine solche Jahresbescheinigung tatsächlich üblich
+ist. Wo es keine gibt, IST der Einzelbeleg der Nachweis und bleibt
+steuerrelevant — etwa Handwerker- und Arztrechnungen, Spendenquittungen,
+Kinderbetreuungsrechnungen sowie Erträge ausländischer Banken und
+Beteiligungen, für die keine deutsche Jahressteuerbescheinigung ausgestellt
+wird. Die Jahresbescheinigung selbst ist immer steuerrelevant.
+
 PERSONENBEZUG / BEZAHLER (sehr wichtig): Die Steuer-Sektionen beziehen sich
 auf die Einkommensteuererklärung des Nutzers. Ob ein Abzugsbeleg (Krankheits-,
 Pflege-, Handwerker-, Beitrags- oder Spendenbeleg) dorthin gehört, hängt davon
