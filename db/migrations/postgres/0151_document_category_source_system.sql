@@ -1,0 +1,25 @@
+-- Migration 0151: 'system' provenance for structurally assigned categories.
+--
+-- The receipt-capture endpoint assigns the 'belege' category deterministically
+-- at upload (documents.ts, buildReceiptCapturePlan) — the category follows from
+-- how the document entered the system, not from anything a classifier could
+-- read out of its text. But the row was written with the enum default 'ai', and
+-- runClassify only protects 'cloud' and 'user', so the next re-classify
+-- overwrote that assignment while receipt_transaction_id kept pointing at the
+-- finance booking.
+--
+-- 'user' would have avoided the overwrite without a migration, but
+-- category_source is surfaced in the documents filter (DocumentsView.vue), and
+-- a receipt nobody touched would then claim a human had labelled it. Hence a
+-- fourth tier that says what actually happened: assigned by the application.
+--
+-- Ordering: 'system' sits between 'ai' and 'cloud' in trust — stronger than a
+-- classifier guess, weaker than a Claude- or human-asserted label. The enum is
+-- unordered in Postgres; the guards in document-ops.ts encode this.
+--
+-- NOTE: no backfill here, deliberately. PostgreSQL refuses to use an enum value
+-- added by ALTER TYPE inside the same transaction (see migration 0121's note on
+-- the same restriction), and on a fresh database every migration runs in one
+-- transaction. Existing receipt rows are instead recognised by their
+-- receipt_ocr_state marker in the classify guard, which needs no stored value.
+ALTER TYPE document_category_source ADD VALUE IF NOT EXISTS 'system';
