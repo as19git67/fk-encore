@@ -271,3 +271,49 @@ struct SlideshowProgressBar: View {
         }
     }
 }
+
+/// Padding that keeps a player's chrome clear of the hardware.
+///
+/// The photo is deliberately full-bleed — the player's `GeometryReader`
+/// ignores the safe area so the image reaches every edge. The chrome must not
+/// follow it there: at 12 pt from the top of the *screen*, the progress strip
+/// and the album title landed under the Dynamic Island. These insets put the
+/// chrome back inside the safe area while the photo stays where it is.
+struct SlideshowChromeInsets: Equatable, Sendable {
+    let top: CGFloat
+    let bottom: CGFloat
+    let leading: CGFloat
+    let trailing: CGFloat
+
+    /// The player's own margin, on top of whatever the hardware needs. The
+    /// bottom gets none: its callers carry their own, larger offsets.
+    static let margin: CGFloat = 12
+
+    /// - Parameter safeArea: `GeometryProxy.safeAreaInsets` of the player's
+    ///   reader. Negative values cannot occur in practice but would pull the
+    ///   chrome off screen, so they are floored.
+    static func around(
+        top: CGFloat,
+        bottom: CGFloat,
+        leading: CGFloat,
+        trailing: CGFloat
+    ) -> SlideshowChromeInsets {
+        SlideshowChromeInsets(
+            top: max(0, top) + margin,
+            bottom: max(0, bottom),
+            leading: max(0, leading) + margin,
+            trailing: max(0, trailing) + margin
+        )
+    }
+}
+
+extension SlideshowChromeInsets {
+    init(safeArea: EdgeInsets) {
+        self = .around(
+            top: safeArea.top,
+            bottom: safeArea.bottom,
+            leading: safeArea.leading,
+            trailing: safeArea.trailing
+        )
+    }
+}

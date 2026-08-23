@@ -604,3 +604,96 @@ final class SlideshowOverallFractionTests: XCTestCase {
         )
     }
 }
+
+/// Where the player's chrome may sit.
+///
+/// The player's reader ignores the safe area so the photo reaches every edge.
+/// The chrome followed it there, which put the progress strip and the album
+/// title under the Dynamic Island in portrait.
+final class SlideshowChromeInsetsTests: XCTestCase {
+
+    /// iPhone 16 Pro in portrait: the strip has to clear the island, not sit
+    /// 12 pt from the top of the glass.
+    func testTopClearsTheHardwareAndKeepsTheMargin() {
+        let chrome = SlideshowChromeInsets.around(
+            top: 59, bottom: 34, leading: 0, trailing: 0
+        )
+        XCTAssertEqual(chrome.top, 59 + SlideshowChromeInsets.margin)
+        XCTAssertEqual(chrome.leading, SlideshowChromeInsets.margin)
+        XCTAssertEqual(chrome.trailing, SlideshowChromeInsets.margin)
+    }
+
+    /// The bottom carries no margin of its own — its callers add larger
+    /// offsets (the caption sits 92 pt up) and would double-count it.
+    func testBottomIsTheBareInset() {
+        let chrome = SlideshowChromeInsets.around(
+            top: 59, bottom: 34, leading: 0, trailing: 0
+        )
+        XCTAssertEqual(chrome.bottom, 34)
+    }
+
+    /// Turned sideways the island moves to an edge, so the header has to be
+    /// inset horizontally instead.
+    func testLandscapeInsetsTheSides() {
+        let chrome = SlideshowChromeInsets.around(
+            top: 0, bottom: 21, leading: 59, trailing: 59
+        )
+        XCTAssertEqual(chrome.leading, 59 + SlideshowChromeInsets.margin)
+        XCTAssertEqual(chrome.trailing, 59 + SlideshowChromeInsets.margin)
+        XCTAssertEqual(chrome.top, SlideshowChromeInsets.margin)
+    }
+
+    /// A device with nothing to avoid still gets the player's own margin, so
+    /// the chrome never sits flush against the edge.
+    func testASquareScreenStillGetsTheMargin() {
+        let chrome = SlideshowChromeInsets.around(
+            top: 0, bottom: 0, leading: 0, trailing: 0
+        )
+        XCTAssertEqual(chrome.top, SlideshowChromeInsets.margin)
+        XCTAssertEqual(chrome.bottom, 0)
+    }
+
+    /// Negative insets cannot occur in practice but would pull the chrome off
+    /// screen, which is worse than the bug being fixed.
+    func testNegativeInsetsAreFloored() {
+        let chrome = SlideshowChromeInsets.around(
+            top: -20, bottom: -5, leading: -3, trailing: -3
+        )
+        XCTAssertEqual(chrome.top, SlideshowChromeInsets.margin)
+        XCTAssertEqual(chrome.bottom, 0)
+        XCTAssertEqual(chrome.leading, SlideshowChromeInsets.margin)
+    }
+}
+
+/// Picking the track a photo slideshow starts with.
+final class SlideshowMusicCycleTests: XCTestCase {
+
+    private func tracks(_ ids: [String]) -> [RecapMusicTrack] {
+        ids.map { RecapMusicTrack(id: $0, mood: "calm", title: $0, url: "/x/\($0)") }
+    }
+
+    /// A recap names its own track; the cycle starts there and wraps back.
+    func testTheSuggestedTrackLeads() {
+        let cycle = SlideshowMusic.orderedCycle(tracks(["a", "b", "c"]), suggestedId: "c")
+        XCTAssertEqual(cycle.map(\.id), ["c", "a", "b"])
+    }
+
+    /// A photo slideshow has no server suggestion, so the list stands as it
+    /// came — it must not end up empty or reordered arbitrarily.
+    func testNoSuggestionKeepsTheServerOrder() {
+        let cycle = SlideshowMusic.orderedCycle(tracks(["a", "b", "c"]), suggestedId: nil)
+        XCTAssertEqual(cycle.map(\.id), ["a", "b", "c"])
+    }
+
+    /// The slideshow's remembered track can be one the server has since
+    /// dropped; that only costs it its priority.
+    func testAnUnknownSuggestionFallsBackToTheFirst() {
+        let cycle = SlideshowMusic.orderedCycle(tracks(["a", "b"]), suggestedId: "gone")
+        XCTAssertEqual(cycle.map(\.id), ["a", "b"])
+    }
+
+    func testAnEmptyListStaysEmpty() {
+        XCTAssertTrue(SlideshowMusic.orderedCycle([], suggestedId: "a").isEmpty)
+        XCTAssertTrue(SlideshowMusic.orderedCycle([], suggestedId: nil).isEmpty)
+    }
+}
