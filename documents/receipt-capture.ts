@@ -7,6 +7,15 @@ const AUTO_BOOK_MIN_CONFIDENCE = 0.85;
 
 export interface ReceiptCapturePlan {
   categoryId: number;
+  /**
+   * Always 'system': `categoryId` is decided by the upload route, not by any
+   * classifier, so the row must say so. Without it the category lands as 'ai'
+   * and the next re-classify overwrites 'belege' with whatever the model reads
+   * out of the receipt text. Carried on the plan (rather than set at the insert
+   * site) so both branches below, including the legacy one without a cash
+   * account, are covered by construction.
+   */
+  categorySource: "system";
   receiptAccountId: number | null;
   receiptTransactionId: number | null;
   receiptOcrState: "pending" | null;
@@ -65,6 +74,7 @@ export function buildReceiptCapturePlan(
     // pipeline. The cash-transaction UI always supplies an account.
     return {
       categoryId,
+      categorySource: "system",
       receiptAccountId: null,
       receiptTransactionId: null,
       receiptOcrState: null,
@@ -74,6 +84,7 @@ export function buildReceiptCapturePlan(
 
   return {
     categoryId,
+    categorySource: "system",
     receiptAccountId,
     receiptTransactionId,
     receiptOcrState: "pending",

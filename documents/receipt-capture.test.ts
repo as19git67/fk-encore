@@ -20,12 +20,25 @@ describe("receipt capture queue plan", () => {
 
     expect(plan).toEqual({
       categoryId: 17,
+      categorySource: "system",
       receiptAccountId: 42,
       receiptTransactionId: null,
       receiptOcrState: "pending",
       scanServices: ["receipt_ocr"],
     });
     expect(plan.scanServices).not.toContain("text_extract");
+  });
+
+  // The category comes from the upload route, not from a classifier, and must
+  // survive a re-classify. Left at the 'ai' default it did not: runClassify
+  // overwrote 'belege' with whatever the model read out of the receipt text,
+  // while receipt_transaction_id kept pointing at the finance booking.
+  it("marks the category as system-assigned on every branch", () => {
+    expect(buildReceiptCapturePlan(17, 42).categorySource).toBe("system");
+    expect(buildReceiptCapturePlan(17, null, 50274).categorySource).toBe("system");
+    // Legacy/API callers without a cash account still get 'belege' set, so they
+    // need the same protection even though they take the regular pipeline.
+    expect(buildReceiptCapturePlan(17, null, null).categorySource).toBe("system");
   });
 
   it("creates independent complete plans for several rapid captures", () => {
@@ -44,6 +57,7 @@ describe("receipt capture queue plan", () => {
 
     expect(plan).toEqual({
       categoryId: 17,
+      categorySource: "system",
       receiptAccountId: null,
       receiptTransactionId: 50274,
       receiptOcrState: "pending",

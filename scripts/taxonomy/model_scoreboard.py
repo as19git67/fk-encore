@@ -140,6 +140,12 @@ def _load_reference(path: Path) -> tuple[list[dict], str]:
 def _load_current(doc_ids: list[int]) -> dict[int, dict]:
     conn = c.connect()
     cur = conn.cursor()
+    # LEFT JOIN on purpose. An INNER JOIN silently dropped documents whose
+    # category_id is NULL, and they were then reported as "not found in the DB"
+    # — which sent the reader looking for deleted rows when the document was
+    # right there without a category. The two cases have different causes and
+    # different fixes, so they are kept apart: a NULL category is reported as
+    # its own bucket below.
     cur.execute("""
         SELECT d.id,
                cat.slug,
@@ -152,7 +158,7 @@ def _load_current(doc_ids: list[int]) -> dict[int, dict]:
                  ARRAY[]::text[]
                )
         FROM documents d
-        JOIN document_categories cat ON cat.id = d.category_id
+        LEFT JOIN document_categories cat ON cat.id = d.category_id
         WHERE d.id = ANY(%s)
     """, (doc_ids,))
     rows = cur.fetchall()
@@ -180,11 +186,18 @@ def _jaccard(a: set[str], b: set[str]) -> float:
 def _score(reference: list[dict], current: dict[int, dict]) -> dict[str, Any]:
     per_doc: list[dict] = []
     missing: list[int] = []
+    # Row exists but carries no category. Scored as unrated like `missing`, but
+    # counted separately: the row being gone points at a deleted document, a
+    # NULL category at a classify run that could not resolve the slug it got.
+    uncategorised: list[int] = []
 
     for ref in reference:
         cur = current.get(ref["doc_id"])
         if cur is None:
             missing.append(ref["doc_id"])
+            continue
+        if cur["slug"] is None:
+            uncategorised.append(ref["doc_id"])
             continue
         ref_sections = set(ref["tax_sections"])
         cur_sections = set(cur["tax_sections"])
@@ -235,6 +248,8 @@ def _score(reference: list[dict], current: dict[int, dict]) -> dict[str, Any]:
         "n_scored": n,
         "n_missing": len(missing),
         "missing_doc_ids": missing[:50],
+        "n_uncategorised": len(uncategorised),
+        "uncategorised_doc_ids": uncategorised[:50],
         "category": {
             "hits": hits,
             "accuracy": round(hits / n, 4) if n else None,
@@ -291,7 +306,16 @@ def _report(label: str, ref_path: Path, ref_kind: str, s: dict[str, Any]) -> str
         n = s["n_missing"]
         L.append("")
         L.append(f"> {n} Referenz-{'Dokument' if n == 1 else 'Dokumente'} nicht in der DB "
-                 f"gefunden. Wurde die Stichprobe vollständig neu klassifiziert?")
+                 f"gefunden — die Zeile existiert nicht mehr (gelöscht?). "
+                 f"IDs: {', '.join(str(i) for i in s['missing_doc_ids'])}")
+    if s.get("n_uncategorised"):
+        n = s["n_uncategorised"]
+        L.append("")
+        L.append(f"> {n} Referenz-{'Dokument' if n == 1 else 'Dokumente'} ohne Kategorie in "
+                 f"der DB. Die Dokumente existieren, haben aber `category_id IS NULL` — "
+                 f"typischerweise, weil der Klassifikator einen Slug geliefert hat, den es "
+                 f"in der Taxonomie nicht gibt. "
+                 f"IDs: {', '.join(str(i) for i in s['uncategorised_doc_ids'])}")
     L.append("")
 
     cat = s["category"]

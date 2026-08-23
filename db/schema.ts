@@ -699,8 +699,13 @@ export const documentTaxSourceEnum = pgEnum("document_tax_source", [
 // 'ai' (raw local Qwen guess) < 'cloud' (Claude-verified via the offline
 // Cloud-Teacher) < 'user' (human-pinned). Replaces `attributes_reviewed` as the
 // category-guard source — see docs/design/cloud-teacher-gold-set.md.
+// Trust tiers for the category assignment, weakest first: 'ai' (local
+// classifier guess) < 'system' (assigned by the application from how the
+// document arrived — see receipt capture, migration 0151) < 'cloud'
+// (Claude-verified) < 'user' (human). runClassify may overwrite 'ai' only.
 export const documentCategorySourceEnum = pgEnum("document_category_source", [
   "ai",
+  "system",
   "cloud",
   "user",
 ]);

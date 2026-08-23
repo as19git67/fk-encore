@@ -652,6 +652,7 @@ export const uploadReceiptCapture = api.raw(
         userId,
         scanPriority: RECEIPT_CAPTURE_PRIORITY,
         categoryId: capturePlan.categoryId,
+        categorySource: capturePlan.categorySource,
         receiptAccountId: capturePlan.receiptAccountId,
         receiptTransactionId: capturePlan.receiptTransactionId,
         receiptOcrState: capturePlan.receiptOcrState,
@@ -817,6 +818,12 @@ async function storeDocumentBuffer(params: {
   scanServices?: readonly import("./scan-queue").DocumentScanService[];
   /** Initial category set before workers can observe the row. */
   categoryId?: number | null;
+  /**
+   * Provenance of `categoryId`. 'system' marks a category the upload route
+   * decided (receipt capture), which runClassify must not overwrite; the
+   * default 'ai' leaves it open for the classifier as usual.
+   */
+  categorySource?: "ai" | "system";
   /** Receipt metadata set in the INSERT, before enqueue/trigger. */
   receiptAccountId?: number | null;
   receiptTransactionId?: number | null;
@@ -830,6 +837,7 @@ async function storeDocumentBuffer(params: {
     scanPriority = 2,
     scanServices,
     categoryId = null,
+    categorySource = "ai",
     receiptAccountId = null,
     receiptTransactionId = null,
     receiptOcrState = null,
@@ -886,6 +894,7 @@ async function storeDocumentBuffer(params: {
         visibility: defaultGroupId != null ? "group" : "private",
         group_id: defaultGroupId,
         category_id: categoryId,
+        category_source: categorySource,
         // These fields must be present on the row before enqueueDocumentScan
         // calls triggerWorkers. Setting them afterwards allowed a worker to
         // race the category PATCH/relocate and retain a now-stale disk_path.
