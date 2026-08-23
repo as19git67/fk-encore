@@ -695,6 +695,31 @@ export async function runClassify(documentId: number): Promise<{ classification:
     db.select({ id: documentCategories.id }).from(documentCategories).where(eq(documentCategories.slug, catSlug)),
   );
 
+  // Nothing validates the slug the model returns (llm-client only checks that
+  // it is a non-empty string), so an invented one resolves to no row here.
+  // Writing `cat?.id ?? null` then did not merely fail to apply the label — it
+  // wiped whatever category the document already had, leaving it out of every
+  // category-joined query. That is how six documents vanished from the
+  // 2026-08-23 Gemma scoreboard as "not found in the DB".
+  //
+  // Keep the previous category instead, and only fall back to sonstiges when
+  // there is none. Never NULL: a categoryless document is invisible in places
+  // that join the category, and re-classifying is what is supposed to fix a bad
+  // label, not what destroys a good one.
+  let resolvedCategoryId = cat?.id ?? null;
+  if (cat == null) {
+    const fallback = await dbFirst<{ id: number }>(
+      db.select({ id: documentCategories.id })
+        .from(documentCategories)
+        .where(eq(documentCategories.slug, "sonstiges")),
+    );
+    resolvedCategoryId = row.category_id ?? fallback?.id ?? null;
+    console.warn(
+      `[documents] classify(${documentId}): unknown category slug "${catSlug}" — ` +
+        `keeping ${row.category_id != null ? "the previous category" : "sonstiges"}`,
+    );
+  }
+
   const patch: Partial<typeof documents.$inferInsert> = {
     status: "ready",
   };
@@ -715,7 +740,7 @@ export async function runClassify(documentId: number): Promise<{ classification:
     row.category_source === "system" ||
     row.receipt_ocr_state != null;
   if (!categoryProtected) {
-    patch.category_id = cat?.id ?? null;
+    patch.category_id = resolvedCategoryId;
     patch.title = classification.title || row.title || row.original_filename;
     patch.doc_date = classification.doc_date;
     patch.sender = classification.sender;
