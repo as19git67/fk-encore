@@ -58,7 +58,7 @@ export const categoryTaxonomy: CategorySeed[] = [
       {
         slug: "finanzen-rechnungen",
         name: "Rechnungen",
-        hint: "Sammelkategorie — NUR wählen, wenn keine spezifischere Kategorie und kein bekannter Absender passt. NICHT für: Gehaltsabrechnungen (finanzen-gehalt), Arzt-/Zahnarztrechnungen (gesundheit-arzt), Pflege (gesundheit-pflege), Versicherungsbeiträge (versicherungen-*, altersvorsorge-*), Renten (altersvorsorge-gesetzlich), Steuerbescheide (behoerden-steuerbescheid), Kirchensteuer (finanzen-kirchensteuer).",
+        hint: "Rechnungen, Kaufbelege und Zahlungsaufforderungen über bezogene Lieferungen oder Leistungen, für die keine fachliche Kategorie existiert: Hotel- und Reiserechnungen, Software-/Cloud-Abos, Online-Händler, Lieferscheine, sonstige Dienstleister. Rechnung erkannt und keine fachliche Kategorie passend? Dann hierher — NICHT nach sonstiges, auch wenn der Absender unbekannt ist. NICHT für: Gehaltsabrechnungen (finanzen-gehalt), Arzt-/Zahnarztrechnungen (gesundheit-arzt), Pflege (gesundheit-pflege), Handwerker am Eigenheim (wohnen-haus-instandhaltung), Kfz-Werkstatt (fahrzeug-werkstatt), Geräte-/Möbelkauf mit Garantie (anschaffungen), Kassenbons aus dem Einzelhandel (belege), Versicherungsbeiträge (versicherungen-*, altersvorsorge-*), Renten (altersvorsorge-gesetzlich), Steuerbescheide (behoerden-steuerbescheid), Kirchensteuer (finanzen-kirchensteuer).",
       },
       {
         slug: "finanzen-wertpapiere",
@@ -175,7 +175,7 @@ export const categoryTaxonomy: CategorySeed[] = [
     slug: "landwirtschaft",
     name: "Landwirtschaft (verpachtet)",
     icon: "pi-warehouse",
-    hint: "Verpachteter land-/forstwirtschaftlicher Betrieb oder Flächen: Pacht, Versicherungen, Instandhaltung, Steuer/EÜR. Steuerlich Anlage L / Anlage EÜR. NICHT Vermietung von Wohn-/Gewerbeimmobilien (→ kapitalanlage-immobilie), NICHT Eigenheim (→ wohnen).",
+    hint: "Oberkategorie für den verpachteten land-/forstwirtschaftlichen Betrieb — NICHT direkt wählen, sondern immer die passende Unterkategorie: Pacht/Verträge/Flurstücke → landwirtschaft-pacht, Versicherungen → landwirtschaft-versicherung, Reparatur/Wartung → landwirtschaft-instandhaltung, EÜR/Steuer → landwirtschaft-steuer. Steuerlich Anlage L / Anlage EÜR. NICHT Vermietung von Wohn-/Gewerbeimmobilien (→ kapitalanlage-immobilie), NICHT Eigenheim (→ wohnen).",
     children: [
       {
         slug: "landwirtschaft-pacht",

@@ -357,27 +357,35 @@ Antworte ausschließlich mit gültigem JSON (ohne Markdown-Fences):
 Wenn kein Taxonomie-Slug passt, verwende "sonstiges". Wenn das Dokument nicht
 steuerrelevant ist: tax_relevant=false, tax_year=null, tax_sections=[]."""
 
-def _load_tax_guidance() -> str:
-    """Lies CLASSIFY_TAX_PROMPT wortgleich aus documents/classify-prompts.ts.
+def _load_prompt_constant(name: str) -> str:
+    """Lies eine Prompt-Konstante wortgleich aus documents/classify-prompts.ts.
 
-    So bekommt Claude im Audit exakt dieselbe STEUER-ERKENNUNG-Anleitung wie der
-    lokale Klassifikator — ohne Drift, wenn der Prompt dort weiterentwickelt
-    wird. Der Vergleich misst damit Modellqualität, nicht Prompt-Unterschiede.
+    So bekommt Claude im Audit exakt dieselbe Anleitung wie der lokale
+    Klassifikator — ohne Drift, wenn der Prompt dort weiterentwickelt wird. Der
+    Vergleich misst damit Modellqualität, nicht Prompt-Unterschiede.
     """
     text = (c.REPO_ROOT / "documents" / "classify-prompts.ts").read_text("utf8")
-    m = re.search(r"CLASSIFY_TAX_PROMPT\s*=\s*`(.*?)`", text, re.DOTALL)
+    m = re.search(rf"{re.escape(name)}\s*=\s*`(.*?)`", text, re.DOTALL)
     if not m:
         raise RuntimeError(
-            "CLASSIFY_TAX_PROMPT nicht in documents/classify-prompts.ts gefunden"
+            f"{name} nicht in documents/classify-prompts.ts gefunden"
         )
     return m.group(1).strip()
 
 
-_TAX_GUIDANCE = _load_tax_guidance()
+_TAX_GUIDANCE = _load_prompt_constant("CLASSIFY_TAX_PROMPT")
+# Kategorie-Regeln (spezifischste Kategorie, Abgrenzung der beiden
+# Sammelkategorien). Bis 2026-08 bekam nur die Steuer-Hälfte des Prompts diese
+# Gleichbehandlung — die Kategorie-Hälfte driftete zwischen Referenz und
+# lokalem Modell auseinander, was im Scoreboard als Modellunterschied erschien.
+_CATEGORY_RULES = _load_prompt_constant("CLASSIFY_CATEGORY_RULES")
 
 
 def _build_system(tax_outline: str) -> str:
-    return f"{_SYSTEM_BASE}\n{_TAX_GUIDANCE}\n\nSteuer-Sektionen (slug: Name — Hinweis):\n{tax_outline}"
+    return (
+        f"{_SYSTEM_BASE}\n{_CATEGORY_RULES}\n{_TAX_GUIDANCE}\n\n"
+        f"Steuer-Sektionen (slug: Name — Hinweis):\n{tax_outline}"
+    )
 
 
 # ── Prompt-Caching ────────────────────────────────────────────────────────────

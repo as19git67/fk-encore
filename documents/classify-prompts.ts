@@ -57,6 +57,48 @@ Felder:
 Halluziniere keine Daten, Beträge oder Absender. Bei Unsicherheit: null bzw.
 niedrige confidence.`;
 
+/**
+ * Rules for picking `category_slug`, kept separate so `cloud_audit.py` can load
+ * this text verbatim the same way it already loads CLASSIFY_TAX_PROMPT. The
+ * audit compares a cloud model against the local one; if only one side gets
+ * these rules, the comparison measures the prompt gap instead of the models.
+ *
+ * Both rules below come from measurement, not guesswork: in the 2026-08-23
+ * scoreboard two unrelated local models (Qwen3.6-35B, Gemma-4-26B) scored an
+ * identical 248/352 and failed on the same 87 documents, ~46 of which they
+ * pushed into "sonstiges". The two dominant patterns were stopping at a parent
+ * category and confusing the two catch-alls.
+ *
+ * Contains no backticks — the loader on the Python side extracts it with a
+ * backtick-delimited regex.
+ */
+export const CLASSIFY_CATEGORY_RULES = `
+
+KATEGORIE-WAHL
+
+SPEZIFISCHSTE KATEGORIE (sehr wichtig): Die Taxonomie ist zweistufig.
+Oberkategorien wie finanzen, gesundheit, fahrzeug, beruf, landwirtschaft,
+wohnen, bildung, altersvorsorge, kapitalanlage-immobilie, versicherungen,
+vertraege, familie, behoerden oder rechtliches haben Unterkategorien. Antworte
+IMMER mit der Unterkategorie, sobald eine davon passt. Eine Oberkategorie ist
+nur dann richtig, wenn das Dokument den gesamten Bereich betrifft und zu KEINER
+ihrer Unterkategorien gehört — das ist selten. Beispiele: ein Pachtvertrag oder
+ein Flurstücksverzeichnis gehört zu landwirtschaft-pacht, nicht zu
+landwirtschaft; eine Werkstattrechnung zu fahrzeug-werkstatt, nicht zu
+fahrzeug; eine Entgeltabrechnung zu finanzen-gehalt, nicht zu beruf.
+
+DIE BEIDEN SAMMELKATEGORIEN: "sonstiges" und "finanzen-rechnungen" fangen beide
+Dokumente auf, für die keine fachliche Kategorie passt — sie sind aber nicht
+austauschbar. Prüfe in dieser Reihenfolge:
+1. Passt eine fachliche Unterkategorie? Dann diese.
+2. Sonst: Ist das Dokument eine Rechnung, ein Kaufbeleg oder eine
+   Zahlungsaufforderung über eine bezogene Lieferung oder Leistung (Hotel,
+   Reise, Software-Abo, Online-Händler, Dienstleister)? Dann
+   finanzen-rechnungen — auch wenn der Absender unbekannt ist.
+3. Erst wenn beides nicht zutrifft: sonstiges.
+Ein erkennbares Rechnungsdokument gehört niemals nach "sonstiges", nur weil der
+Absender nicht einzuordnen ist.`;
+
 export const CLASSIFY_TAX_PROMPT = `
 
 STEUER-ERKENNUNG (nur wenn dir unten eine Liste von Steuer-Sektionen gezeigt wird)
@@ -364,7 +406,10 @@ export interface ClassifyPromptsPayload {
 }
 
 export const CLASSIFY_PROMPTS: ClassifyPromptsPayload = {
-  classify_system: CLASSIFY_SYSTEM_PROMPT,
+  // Appended rather than sent as its own key: the llm-service accepts a fixed
+  // set of prompt keys, and adding one would mean rebuilding that image (~55
+  // min) for text the system prompt can carry just as well.
+  classify_system: CLASSIFY_SYSTEM_PROMPT + "\n" + CLASSIFY_CATEGORY_RULES,
   classify_document_type: CLASSIFY_DOCUMENT_TYPE_PROMPT,
   classify_tax: CLASSIFY_TAX_PROMPT,
   classify_subject_persons: CLASSIFY_SUBJECT_PERSONS_PROMPT,

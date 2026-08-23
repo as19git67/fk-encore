@@ -1,0 +1,79 @@
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+import {
+  CLASSIFY_CATEGORY_RULES,
+  CLASSIFY_PROMPTS,
+} from "./classify-prompts";
+import { categoryTaxonomy, taxonomyHints } from "./taxonomy";
+
+/**
+ * The category rules are shared with the cloud audit: `cloud_audit.py` pulls
+ * CLASSIFY_CATEGORY_RULES out of this file with a backtick-delimited regex so
+ * the reference model and the local classifier are given identical guidance.
+ * Both halves of that arrangement break silently — a stray backtick truncates
+ * the extracted text, and a rename makes the loader raise at import time — so
+ * they are pinned here.
+ */
+describe("CLASSIFY_CATEGORY_RULES", () => {
+  it("is reachable by the Python loader's regex", () => {
+    const source = readFileSync(
+      join(import.meta.dirname, "classify-prompts.ts"),
+      "utf8",
+    );
+    // Mirrors _load_prompt_constant() in scripts/taxonomy/cloud_audit.py.
+    const match = source.match(/CLASSIFY_CATEGORY_RULES\s*=\s*`(.*?)`/s);
+    expect(match).not.toBeNull();
+    expect(match![1].trim()).toBe(CLASSIFY_CATEGORY_RULES.trim());
+  });
+
+  it("contains no backtick, which would truncate that extraction", () => {
+    expect(CLASSIFY_CATEGORY_RULES).not.toContain("`");
+  });
+
+  it("is actually sent to the llm-service", () => {
+    expect(CLASSIFY_PROMPTS.classify_system).toContain(CLASSIFY_CATEGORY_RULES);
+  });
+
+  it("names only slugs that exist in the taxonomy", () => {
+    const known = new Set<string>();
+    const walk = (nodes: typeof categoryTaxonomy) => {
+      for (const n of nodes) {
+        known.add(n.slug);
+        if (n.children?.length) walk(n.children);
+      }
+    };
+    walk(categoryTaxonomy);
+
+    // Every slug-shaped token the rules use as an example must be real,
+    // otherwise the guidance points the model at a label it cannot pick.
+    const referenced = CLASSIFY_CATEGORY_RULES.match(/\b[a-z]+(?:-[a-z]+)+\b/g) ?? [];
+    const unknown = [...new Set(referenced)].filter((s) => !known.has(s));
+    expect(unknown).toEqual([]);
+  });
+});
+
+describe("catch-all category hints", () => {
+  it("gives finanzen-rechnungen a positive criterion, not only exclusions", () => {
+    const hint = taxonomyHints().get("finanzen-rechnungen")!;
+    // The old hint opened with "Sammelkategorie — NUR wählen, wenn …" and
+    // listed nothing but exclusions, leaving it indistinguishable from
+    // "sonstiges"; both local models resolved the ambiguity towards sonstiges.
+    expect(hint).toMatch(/Rechnungen, Kaufbelege/);
+    expect(hint).toContain("NICHT nach sonstiges");
+  });
+
+  it("keeps parent categories from advertising their children's scope", () => {
+    const hint = taxonomyHints().get("landwirtschaft")!;
+    expect(hint).toContain("NICHT direkt wählen");
+    for (const child of [
+      "landwirtschaft-pacht",
+      "landwirtschaft-versicherung",
+      "landwirtschaft-instandhaltung",
+      "landwirtschaft-steuer",
+    ]) {
+      expect(hint).toContain(child);
+    }
+  });
+});
