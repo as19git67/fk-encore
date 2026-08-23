@@ -138,10 +138,53 @@ def _address_rx() -> re.Pattern[str]:
     return re.compile("|".join(rf"\b{re.escape(f)}\b" for f in fragments), re.I)
 
 
+# Third-party person names — doctors, notaries, lawyers, case workers. These
+# are PII just like household names, but they can never be enumerated the way
+# `household_names()` enumerates the family: they come from whoever happened to
+# write the document. So instead of matching known names, match the *shape* of a
+# named person: a title or salutation followed by capitalised name tokens.
+#
+# Deliberately biased towards over-redaction — swallowing one extra capitalised
+# word costs a little classification signal, leaving a real name in place costs
+# privacy. Institution names without a personal title are untouched, so the
+# sender signal (and `scrub_for_teacher`'s institutional context) survives.
+_TITLE_CHAIN = (
+    r"(?:(?:Prof|Dr|Dres|DDr|PD|Priv\.-Doz|Dipl|Mag)\.?"
+    r"(?:\s*-?\s*(?:med|dent|rer|nat|phil|jur|iur|habil|Ing|Kfm|Kffr|oec|vet|h\.\s?c)\.?)*"
+    r"\s+)+"
+)
+# Salutations and professions that introduce a person by name.
+_ROLE_PREFIX = (
+    r"(?:Herrn?|Frau|Rechtsanw[äa]lt(?:in)?|Notar(?:in)?|Steuerberater(?:in)?|"
+    r"Zahn[äa]rzt(?:in)?|Sachbearbeiter(?:in)?)\s+"
+)
+# One to three capitalised tokens, allowing nobiliary particles and hyphens.
+_NAME_TOKENS = (
+    r"(?:(?:von|van|de[nrs]?|zu[rm]?)\s+)?"
+    r"[A-ZÄÖÜ][\wäöüß'’-]+(?:\s+[A-ZÄÖÜ][\wäöüß'’-]+){0,2}"
+)
+_TITLED_PERSON = re.compile(_TITLE_CHAIN + _NAME_TOKENS)
+_ROLE_PERSON = re.compile(r"\b" + _ROLE_PREFIX + _NAME_TOKENS)
+
+
+def scrub_third_party_names(text: str | None) -> str | None:
+    """Redact person names that are not household members (and so are absent
+    from `household_names()`): `Dr. med. <Name>`, `Notar <Name>`, `Frau <Name>`.
+
+    Runs before the other patterns in `scrub()` so it never matches the
+    bracketed placeholders they insert (`Dr. med. [DATUM]`).
+    """
+    if not text:
+        return text
+    t = _TITLED_PERSON.sub("[PERSON]", text)
+    return _ROLE_PERSON.sub("[PERSON]", t)
+
+
 def scrub(text: str | None) -> str | None:
     if not text:
         return text
-    t = _IBAN.sub("[IBAN]", text)
+    t = scrub_third_party_names(text) or ""
+    t = _IBAN.sub("[IBAN]", t)
     t = _EMAIL.sub("[EMAIL]", t)
     t = _AMOUNT.sub("[BETRAG]", t)
     t = _DATE.sub("[DATUM]", t)

@@ -61,6 +61,12 @@ MAX_RETRIES = int(os.environ.get("AUDIT_MAX_RETRIES", "8"))
 # Optional fixed delay (seconds) between requests to stay under the per-minute
 # rate limit proactively. 0 = as fast as the SDK allows.
 REQUEST_DELAY = float(os.environ.get("AUDIT_REQUEST_DELAY", "0"))
+# Output ceiling per document. Generous on purpose: models from Opus 5 onwards
+# run adaptive thinking by default (Opus 4.8 and 4.7 did not), and thinking
+# tokens are drawn from this same budget. At the previous 16k the answer was
+# routinely cut off mid-JSON — a tenth of the 2026-08-23 sample failed that way,
+# each one surfacing only as an opaque parse error.
+MAX_OUTPUT_TOKENS = int(os.environ.get("AUDIT_MAX_TOKENS", "32000"))
 
 # Sektionen, die in der letzten Diagnose auffällig waren: vorher tot
 # (anlage-euer, anlage-kind, mantelbogen, werbungskosten-v) oder plötzlich der
@@ -460,6 +466,95 @@ def _is_rate_or_overload(exc: Exception) -> bool:
     return "credit balance is too low" in str(exc).lower()
 
 
+class TruncatedResponseError(RuntimeError):
+    """The model hit `max_tokens` before finishing its answer.
+
+    Distinct from a malformed answer: the JSON is not wrong, it is cut off. Worth
+    retrying (adaptive thinking varies run to run) and worth naming in the report,
+    because the fix is to raise `AUDIT_MAX_TOKENS`, not to change the prompt.
+    """
+
+
+def _error_kind(exc: Exception) -> str:
+    """Short, groupable label for why a document produced no verdict."""
+    if isinstance(exc, TruncatedResponseError):
+        return f"Antwort abgeschnitten (max_tokens={MAX_OUTPUT_TOKENS})"
+    if isinstance(exc, json.JSONDecodeError):
+        return "Antwort war kein gültiges JSON"
+    if isinstance(exc, anthropic.APIError):
+        status = getattr(exc, "status_code", None)
+        return f"API-Fehler {status}" if status else f"API-Fehler ({type(exc).__name__})"
+    return f"{type(exc).__name__}: {exc}"
+
+
+def _request_classification(
+    client: anthropic.Anthropic,
+    doc: dict,
+    taxonomy: str,
+    system: str,
+) -> dict:
+    """One Claude call for one document; returns the parsed JSON answer.
+
+    Streams rather than blocking: with a `max_tokens` this size a non-streaming
+    request can outlive the SDK's HTTP timeout.
+    """
+    with client.messages.stream(
+        model=CLAUDE_MODEL,
+        max_tokens=MAX_OUTPUT_TOKENS,
+        system=_system_blocks(system),
+        messages=[{"role": "user", "content": _user_content_blocks(doc, taxonomy)}],
+    ) as stream:
+        resp = stream.get_final_message()
+
+    # Check this before looking for the text block: when thinking exhausts the
+    # budget there is no text block at all, and "no text block" would be a
+    # thoroughly misleading way to report "the answer did not fit".
+    if resp.stop_reason == "max_tokens":
+        raise TruncatedResponseError(
+            f"Antwort bei max_tokens={MAX_OUTPUT_TOKENS} abgeschnitten "
+            f"(output_tokens={resp.usage.output_tokens}) — AUDIT_MAX_TOKENS erhöhen"
+        )
+
+    text_block = next(
+        (b for b in resp.content if getattr(b, "type", None) == "text"),
+        None,
+    )
+    if text_block is None:
+        raise ValueError(f"no text block in response (stop_reason={resp.stop_reason})")
+    text = text_block.text.strip()
+    # Strip markdown fences
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    # raw_decode stops after the first complete JSON object
+    idx = text.index("{")
+    parsed, _ = json.JSONDecoder().raw_decode(text, idx)
+    return parsed
+
+
+def _classify_one(
+    client: anthropic.Anthropic,
+    doc: dict,
+    taxonomy: str,
+    system: str,
+) -> dict:
+    """As `_request_classification`, but retries once on a truncated or
+    unparseable answer. Both are non-deterministic — thinking depth varies per
+    run — so a second attempt usually succeeds where the first did not. API
+    errors are not retried here: the SDK already handles the retryable ones and
+    a rate limit has to reach the caller to abort the run.
+    """
+    last: Exception
+    for attempt in (1, 2):
+        try:
+            return _request_classification(client, doc, taxonomy, system)
+        except (TruncatedResponseError, json.JSONDecodeError, ValueError) as e:
+            last = e
+            if attempt == 1:
+                print(f"      … Versuch 1 fehlgeschlagen ({e}) — wiederhole")
+                time.sleep(2)
+    raise last
+
+
 def _classify_batch(
     client: anthropic.Anthropic,
     docs: list[dict],
@@ -489,25 +584,7 @@ def _classify_batch(
             "sender_type": doc["sender_type"],
         }
         try:
-            resp = client.messages.create(
-                model=CLAUDE_MODEL,
-                max_tokens=16_000,
-                system=_system_blocks(system),
-                messages=[{"role": "user", "content": _user_content_blocks(doc, taxonomy)}],
-            )
-            text_block = next(
-                (b for b in resp.content if getattr(b, "type", None) == "text"),
-                None,
-            )
-            if text_block is None:
-                raise ValueError("no text block in response")
-            text = text_block.text.strip()
-            # Strip markdown fences
-            text = re.sub(r"^```(?:json)?\s*", "", text)
-            text = re.sub(r"\s*```$", "", text)
-            # raw_decode stops after the first complete JSON object
-            idx = text.index("{")
-            parsed, _ = json.JSONDecoder().raw_decode(text, idx)
+            parsed = _classify_one(client, doc, taxonomy, system)
             claude_slug = parsed.get("slug", "?")
             match = "✓" if claude_slug == doc["qwen_slug"] else f"✗ (Qwen: {doc['qwen_slug']})"
             print(f"      → {claude_slug} {match}")
@@ -521,7 +598,13 @@ def _classify_batch(
                 "claude_tax_sections": _clean_claude_tax_sections(parsed.get("tax_sections")),
                 "tax_reasoning": parsed.get("tax_reasoning", ""),
             })
-        except (json.JSONDecodeError, anthropic.APIError, KeyError, ValueError) as e:
+        except (
+            TruncatedResponseError,
+            json.JSONDecodeError,
+            anthropic.APIError,
+            KeyError,
+            ValueError,
+        ) as e:
             if _is_rate_or_overload(e):
                 print(
                     f"  [!] Rate-Limit/Guthaben bei Dok {doc['id']} — Lauf wird "
@@ -533,6 +616,9 @@ def _classify_batch(
             results.append({
                 **base,
                 "claude_slug": "ERROR",
+                # Grouped in the report so a run that loses documents says *why*
+                # rather than only how many.
+                "error_kind": _error_kind(e),
                 "claude_confidence": 0,
                 "reasoning": str(e),
                 "claude_tax_relevant": None,
@@ -570,6 +656,25 @@ def _generate_report(results: list[dict]) -> tuple[str, list[dict]]:
         ["Kategorie-Übereinstimmung", f"{len(agree)} ({100*len(agree)/max(1,len(valid)):.1f}%)"],
         ["Kategorie-Disagreement", f"{len(disagree)} ({100*len(disagree)/max(1,len(valid)):.1f}%)"],
     ])
+
+    # Errors are documents Claude never judged — they silently shrink the sample
+    # every percentage above is computed over, so name the reasons rather than
+    # leaving a bare count.
+    if errors:
+        by_kind: dict[str, int] = {}
+        for r in errors:
+            by_kind[r.get("error_kind") or "unbekannt"] = (
+                by_kind.get(r.get("error_kind") or "unbekannt", 0) + 1
+            )
+        md("### 1a. Fehlerursachen")
+        md()
+        md(f"_{len(errors)} von {total} Dokumenten ohne Claude-Urteil — die Quoten oben "
+           f"beziehen sich auf die verbleibenden {len(valid)}._")
+        md()
+        md.table(
+            ["Ursache", "Dokumente"],
+            sorted(by_kind.items(), key=lambda kv: -kv[1]),
+        )
 
     # Disagreement by category
     md("## 2. Kategorie-Disagreements nach Qwen-Kategorie")
