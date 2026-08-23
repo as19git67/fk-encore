@@ -1,4 +1,3 @@
-import AVFoundation
 import MapKit
 import SwiftUI
 
@@ -36,12 +35,9 @@ struct RecapPlayerView: View {
     /// Downloads and holds the slide images; shared with the photo slideshow.
     @State private var store = SlideshowImageStore()
 
-    @State private var musicPlayer: AVAudioPlayer?
-    @State private var isMusicMuted = false
-    /// Track cycle for "Andere Musik", ordered so the recap's suggested track
-    /// leads; stepping wraps back to it. Empty / single => no change control.
-    @State private var musicTracks: [RecapMusicTrack] = []
-    @State private var musicCycleIndex = 0
+    /// Background music; shared with the photo slideshow. The recap's own
+    /// suggested track leads the cycle.
+    @State private var music = SlideshowMusic()
 
     /// Trip map intro shown before the slideshow; nil once finished/skipped.
     @State private var mapIntro: RecapMapIntroData?
@@ -54,8 +50,6 @@ struct RecapPlayerView: View {
     @State private var favoriteOverrides: [Int: Bool] = [:]
     @State private var favoriteBusy = false
     @State private var excludeBusy = false
-
-    private let musicVolume: Float = 0.55
 
     /// Seconds each slide stays on screen before auto-advancing.
     private let perItem: Double = 4.0
@@ -75,15 +69,10 @@ struct RecapPlayerView: View {
         .task { await load() }
         .onDisappear {
             ticker?.cancel()
-            stopMusic()
+            music.stop()
         }
         .onChange(of: isPaused) { _, paused in
-            guard let musicPlayer else { return }
-            if paused {
-                musicPlayer.pause()
-            } else {
-                musicPlayer.play()
-            }
+            music.setPaused(paused)
         }
     }
 
@@ -121,6 +110,9 @@ struct RecapPlayerView: View {
     private var player: some View {
         GeometryReader { geo in
             let orientation = ScreenOrientation(size: geo.size)
+            // The reader ignores the safe area so the photo is full-bleed;
+            // the chrome has to be put back inside it by hand.
+            let chrome = SlideshowChromeInsets(safeArea: geo.safeAreaInsets)
             ZStack(alignment: .top) {
                 slideContent(screen: orientation)
                     .frame(width: geo.size.width, height: geo.size.height)
@@ -145,7 +137,7 @@ struct RecapPlayerView: View {
                     RecapCompareIntroView(data: compare) { finishIntro() }
                 }
 
-                topOverlay
+                topOverlay(chrome)
 
                 if mapIntro == nil && compareIntro == nil {
                     favoriteButton
@@ -154,8 +146,8 @@ struct RecapPlayerView: View {
                             maxHeight: .infinity,
                             alignment: .bottomTrailing
                         )
-                        .padding(.trailing, 16)
-                        .padding(.bottom, 28)
+                        .padding(.trailing, 16 + chrome.trailing)
+                        .padding(.bottom, 28 + chrome.bottom)
 
                     excludeButton
                         .frame(
@@ -163,8 +155,8 @@ struct RecapPlayerView: View {
                             maxHeight: .infinity,
                             alignment: .bottomLeading
                         )
-                        .padding(.leading, 16)
-                        .padding(.bottom, 28)
+                        .padding(.leading, 16 + chrome.leading)
+                        .padding(.bottom, 28 + chrome.bottom)
                 }
             }
             // Pin the player to the screen. A `ZStack` grows to its widest
@@ -260,7 +252,7 @@ struct RecapPlayerView: View {
         extendPlan()
     }
 
-    private var topOverlay: some View {
+    private func topOverlay(_ chrome: SlideshowChromeInsets) -> some View {
         VStack(spacing: 8) {
             SlideshowProgressTrack(
                 photoCount: photos.count,
@@ -285,17 +277,17 @@ struct RecapPlayerView: View {
                     }
                 }
                 Spacer()
-                if musicPlayer != nil {
-                    Button { toggleMusicMuted() } label: {
-                        Image(systemName: isMusicMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                if music.isPlaying {
+                    Button { music.toggleMuted() } label: {
+                        Image(systemName: music.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                             .font(.headline)
                             .foregroundStyle(.white)
                             .padding(8)
                     }
-                    .accessibilityLabel(isMusicMuted ? "Musik einschalten" : "Musik stummschalten")
+                    .accessibilityLabel(music.isMuted ? "Musik einschalten" : "Musik stummschalten")
                 }
-                if musicPlayer != nil && musicTracks.count > 1 {
-                    Button { changeMusic() } label: {
+                if music.canChangeTrack {
+                    Button { music.next() } label: {
                         Image(systemName: "forward.fill")
                             .font(.headline)
                             .foregroundStyle(.white)
@@ -311,8 +303,9 @@ struct RecapPlayerView: View {
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 12)
+        .padding(.leading, chrome.leading)
+        .padding(.trailing, chrome.trailing)
+        .padding(.top, chrome.top)
         .background(
             LinearGradient(
                 colors: [.black.opacity(0.55), .clear],
@@ -388,8 +381,7 @@ struct RecapPlayerView: View {
                 // finishes, so the first photo keeps its full screen time.
                 if mapIntro == nil && compareIntro == nil { startTicker() }
                 if let track = detail.music {
-                    Task { await startMusic(track) }
-                    Task { await loadMusicCycle(suggested: track) }
+                    Task { await music.start(suggestedId: track.id, fallback: track) }
                 }
             }
         } catch {
@@ -505,85 +497,6 @@ struct RecapPlayerView: View {
                 // Keep the show running on any failure.
             }
         }
-    }
-
-    // MARK: - Music
-
-    /// Download the suggested track and loop it behind the slides. Any
-    /// failure keeps the recap silent — music is never worth an error UI.
-    @MainActor
-    private func startMusic(_ track: RecapMusicTrack) async {
-        do {
-            // `track.id` is the raw "<mood>/<filename>" pair; APIClient
-            // percent-encodes paths itself, so don't use the pre-encoded url.
-            let data = try await APIClient.shared.downloadData("/recaps-music/file/\(track.id)")
-            let player = try AVAudioPlayer(data: data)
-            player.numberOfLoops = -1
-            player.volume = 0
-            try? AVAudioSession.sharedInstance().setCategory(.playback)
-            try? AVAudioSession.sharedInstance().setActive(true)
-            guard !Task.isCancelled, !playback.finished else { return }
-            player.play()
-            player.setVolume(isMusicMuted ? 0 : musicVolume, fadeDuration: 1.5)
-            musicPlayer = player
-        } catch {
-            // Silent recap — intentionally no error surface.
-        }
-    }
-
-    private func stopMusic() {
-        guard let player = musicPlayer else { return }
-        musicPlayer = nil
-        player.setVolume(0, fadeDuration: 0.3)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            player.stop()
-            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        }
-    }
-
-    /// Order the track list so the recap's suggested track leads, enabling a
-    /// wrap-around cycle. Mirrors the web player's `orderedTrackCycle`.
-    static func orderedMusicCycle(
-        _ tracks: [RecapMusicTrack],
-        suggestedId: String
-    ) -> [RecapMusicTrack] {
-        guard !tracks.isEmpty else { return [] }
-        let start = tracks.firstIndex(where: { $0.id == suggestedId }) ?? 0
-        return Array(tracks[start...] + tracks[..<start])
-    }
-
-    /// Fetch the full track list and build the cycle. Failure leaves the recap
-    /// with just its suggested track (no change control) — never an error UI.
-    @MainActor
-    private func loadMusicCycle(suggested: RecapMusicTrack) async {
-        guard
-            let resp: RecapMusicListResponse = try? await APIClient.shared.get("/recaps-music")
-        else { return }
-        let ordered = Self.orderedMusicCycle(resp.tracks, suggestedId: suggested.id)
-        if ordered.count > 1 {
-            musicTracks = ordered
-            musicCycleIndex = 0
-        }
-    }
-
-    /// Step to the next track, wrapping back to the suggested one. Fades the
-    /// old player out without deactivating the session so the new track can
-    /// take over seamlessly.
-    private func changeMusic() {
-        guard musicTracks.count > 1 else { return }
-        musicCycleIndex = (musicCycleIndex + 1) % musicTracks.count
-        let next = musicTracks[musicCycleIndex]
-        if let old = musicPlayer {
-            musicPlayer = nil
-            old.setVolume(0, fadeDuration: 0.3)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { old.stop() }
-        }
-        Task { await startMusic(next) }
-    }
-
-    private func toggleMusicMuted() {
-        isMusicMuted.toggle()
-        musicPlayer?.setVolume(isMusicMuted ? 0 : musicVolume, fadeDuration: 0.3)
     }
 
     /// Counts a tick spent waiting for the planner and reports whether the wait

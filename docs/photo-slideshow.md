@@ -133,6 +133,8 @@ Der Player zeigt ausschließlich das Bild:
   gespeicherter Wert außerhalb der Optionen fällt auf den Default zurück.
   Umgestellt wird er über das Timer-Menü in der Kopfzeile des Players.
   Rückblicke behalten ihre feste Taktung von 4 s.
+- **Hintergrundmusik** wie im Rückblick (Lautsprecher-Button stummschalten,
+  ⏩ wechselt den Track) — siehe unten.
 - **Beschreibungs-Caption** unten, zweizeilig, nur bei nicht-leerer
   Beschreibung. Bei einem Foto-Paar gewinnt die erste vorhandene Beschreibung.
 - **Herz-Button** markiert das Gezeigte als Favorit — bei einem Paar beide
@@ -195,6 +197,51 @@ ausstehend. Zusätzlich ist die `ZStack` des Players fest auf die
 Bildschirmgröße genagelt, damit kein Overlay das Bild je wieder verschieben
 kann.
 
+### Warum die Intervall-Auswahl kein `Menu` ist
+
+Der Ticker schreibt zwanzigmal pro Sekunde in `playback`, und jeder Schreib­vorgang
+baut die View neu auf. Ein `Menu`, das aus einer so schnell wechselnden View
+heraus aufgeklappt wird, verliert die Taps auf seine eigenen Zeilen — die
+Auswahl ging auf. Ein `Menu` hat aber keinen „ist offen"-Zustand, an dem sich
+ein Anhalten festmachen ließe.
+
+Deshalb gehört die Auswahl jetzt dieser View (`isChoosingInterval` +
+`confirmationDialog`), und `isSuspended` hält Ticker **und** Musik an, solange
+sie offen ist — genau wie beim langen Drücken. Das aktuelle Intervall ist mit
+einem ✓ im Text markiert, weil eine Action-Sheet-Zeile keinen eigenen
+Auswahl­zustand hat.
+
+### Chrome und die Kamera-Aussparung
+
+Das Foto ist bewusst randlos: Der `GeometryReader` des Players ignoriert die
+Safe Area, damit das Bild bis an jede Kante reicht. Die Bedienelemente dürfen
+ihm dorthin **nicht** folgen — mit 12 pt Abstand zur *Bildschirmkante* lagen
+Fortschrittsleiste und Albumname im Hochformat unter der Dynamic Island.
+`SlideshowChromeInsets` legt sie deshalb wieder in die Safe Area: oben,
+unten (Home-Indicator) und im Querformat auch seitlich, jeweils plus dem
+eigenen Rand des Players von 12 pt. Der untere Wert kommt ohne diesen Rand,
+weil die Aufrufer dort schon größere Abstände mitbringen (Caption 92 pt).
+
+### Musik
+
+Beide Player nutzen dieselbe Klasse `SlideshowMusic` (Tracks aus
+`GET /recaps-music`, gestreamt über den `APIClient`, Endlosschleife, Einblenden
+über 1,5 s, Lautstärke 0,55). Fehler bleiben still — ein Fehler-UI ist Musik
+nie wert.
+
+Unterschied zwischen den beiden:
+
+| | Rückblick | Diashow |
+| --- | --- | --- |
+| Track-Vorschlag | vom Server (`GET /recaps/:id`, Feld `music`) | keiner — es gibt kein Album-„Mood" |
+| Startpunkt | der vorgeschlagene Track, der Zyklus kehrt zu ihm zurück | der zuletzt gewählte Track, sonst der erste der Liste |
+| Stummschaltung | pro Abspielvorgang | pro Gerät gemerkt (`slideshow_music_muted`) |
+
+Eine Diashow wird viel beiläufiger gestartet als ein Rückblick, deshalb merkt
+sie sich beide Entscheidungen (`slideshow_music_muted`,
+`slideshow_music_track`): Wer einmal stummschaltet, bekommt auch beim nächsten
+Mal Ruhe.
+
 ### Ken Burns und Gesichter
 
 Die Ken-Burns-Bewegung ist pro Foto deterministisch aus der Foto-ID abgeleitet
@@ -240,7 +287,8 @@ ohne Wert verhält sich die Bewegung wie vorher.
 | `ios/Sources/FKPhotos/Features/Photos/SlideshowPlan.swift` | iOS: reine Logik — Ausrichtung, Paar-Planung, Playback-Position |
 | `ios/Sources/FKPhotos/Features/Photos/SlideshowStage.swift` | iOS: Darstellung einer Slide (einzeln/Paar), Ken-Burns-Bewegung, Fortschrittsleiste |
 | `ios/Sources/FKPhotos/Features/Photos/SlideshowImageStore.swift` | iOS: Vorausladen der Bilder + Ausrichtung nach dem Dekodieren |
-| `ios/Sources/FKPhotos/Features/Photos/Slideshow.swift` | iOS: Intervall-Optionen/Persistenz + Caption-Regel |
+| `ios/Sources/FKPhotos/Features/Photos/Slideshow.swift` | iOS: Intervall-/Musik-Persistenz + Caption-Regel |
+| `ios/Sources/FKPhotos/Features/Photos/SlideshowMusic.swift` | iOS: Hintergrundmusik, geteilt von Diashow und Rückblick |
 | `ios/Sources/FKPhotos/Features/Albums/AlbumDetailView.swift` | iOS: Menüpunkt „Diashow" und Auswahl-Diashow |
 | `ios/Tests/FKPhotosTests/SlideshowPlanTests.swift` | iOS: Unit-Tests für Planung, Playback und Ken Burns |
 | `ios/Tests/FKPhotosTests/SlideshowTests.swift` | iOS: Unit-Tests für Intervall und Caption |

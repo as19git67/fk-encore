@@ -71,14 +71,14 @@ final class RecapModelsTests: XCTestCase {
         let tracks = ["a", "b", "c", "d"].map {
             RecapMusicTrack(id: $0, mood: "calm", title: $0, url: "/recaps-music/file/\($0)")
         }
-        let cycle = RecapPlayerView.orderedMusicCycle(tracks, suggestedId: "c")
+        let cycle = SlideshowMusic.orderedCycle(tracks, suggestedId: "c")
         XCTAssertEqual(cycle.map(\.id), ["c", "d", "a", "b"])
 
         // Unknown id falls back to the head; empty stays empty.
         XCTAssertEqual(
-            RecapPlayerView.orderedMusicCycle(tracks, suggestedId: "zzz").map(\.id),
+            SlideshowMusic.orderedCycle(tracks, suggestedId: "zzz").map(\.id),
             ["a", "b", "c", "d"]
         )
-        XCTAssertTrue(RecapPlayerView.orderedMusicCycle([], suggestedId: "a").isEmpty)
+        XCTAssertTrue(SlideshowMusic.orderedCycle([], suggestedId: "a").isEmpty)
     }
 }

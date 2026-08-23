@@ -22,6 +22,9 @@ struct PhotoSlideshowView: View {
     @State private var plan: [SlideshowSlide] = []
     @State private var playback = SlideshowPlayback()
     @State private var isPaused = false
+    /// The interval chooser is open. Owned here rather than by a `Menu`,
+    /// because the show has to hold still while it is up — see `isSuspended`.
+    @State private var isChoosingInterval = false
     @State private var ticker: Task<Void, Never>?
     /// Consecutive ticks spent waiting for the planner; see `awaitPlan()`.
     @State private var stalledTicks = 0
@@ -32,8 +35,17 @@ struct PhotoSlideshowView: View {
     @State private var curationOverrides: [Int: CurationStatus] = [:]
     @State private var favoriteBusy = false
 
+    /// Background music, the same player the recaps use. An album has no
+    /// server-suggested track, so the show reuses whatever the user last
+    /// picked and otherwise starts at the top of the list.
+    @State private var music: SlideshowMusic
+
     @AppStorage(Slideshow.intervalDefaultsKey)
     private var intervalSeconds: Double = Slideshow.defaultInterval
+    @AppStorage(Slideshow.musicMutedDefaultsKey)
+    private var musicMuted: Bool = false
+    @AppStorage(Slideshow.musicTrackDefaultsKey)
+    private var musicTrackId: String = ""
 
     private let tickStep: Double = 0.05
     /// How long the ticker holds out for a photo that would let the planner
@@ -57,6 +69,8 @@ struct PhotoSlideshowView: View {
         self.photos = photos.isEmpty ? [] : Array(photos[start...])
         self.title = title
         self.subtitle = subtitle
+        // @AppStorage is not readable this early, so seed from UserDefaults.
+        _music = State(initialValue: SlideshowMusic(muted: Slideshow.storedMusicMuted()))
     }
 
     // MARK: - Derived state
@@ -64,6 +78,17 @@ struct PhotoSlideshowView: View {
     private var interval: TimeInterval {
         Slideshow.normalizedInterval(intervalSeconds)
     }
+
+    /// Whether the show is standing still — held by a finger, or by the
+    /// interval chooser being open.
+    ///
+    /// The chooser has to stop the ticker, not just look nice doing it. The
+    /// ticker rewrites `playback` twenty times a second, and every write
+    /// rebuilds this view; a chooser presented from a view churning that fast
+    /// loses the taps on its own rows, which is exactly how the old `Menu`
+    /// behaved. A `Menu` has no "is open" state to read, so there was nothing
+    /// to hang the pause on — hence a presentation this view owns.
+    private var isSuspended: Bool { isPaused || isChoosingInterval }
 
     /// True once every photo has been assigned to a slide — only then does
     /// running off the last slide mean the show is over.
@@ -110,8 +135,21 @@ struct PhotoSlideshowView: View {
             store.reset(filenames: photos.map(\.filename))
             store.prefetch(around: 0, ahead: prefetchAhead)
             startTicker()
+            guard !photos.isEmpty else { return }
+            await music.start(suggestedId: Slideshow.storedMusicTrackId(musicTrackId))
         }
-        .onDisappear { ticker?.cancel() }
+        .onDisappear {
+            ticker?.cancel()
+            music.stop()
+        }
+        .onChange(of: isSuspended) { _, suspended in
+            music.setPaused(suspended)
+        }
+        // Both choices are the user's, and they outlive this one show.
+        .onChange(of: music.isMuted) { _, muted in musicMuted = muted }
+        .onChange(of: music.currentTrack?.id) { _, id in
+            if let id { musicTrackId = id }
+        }
     }
 
     private var emptyState: some View {
@@ -126,6 +164,9 @@ struct PhotoSlideshowView: View {
     private var player: some View {
         GeometryReader { geo in
             let orientation = ScreenOrientation(size: geo.size)
+            // The reader ignores the safe area so the photo is full-bleed;
+            // the chrome has to be put back inside it by hand.
+            let chrome = SlideshowChromeInsets(safeArea: geo.safeAreaInsets)
             ZStack(alignment: .top) {
                 Group {
                     if let slide = currentSlide {
@@ -154,16 +195,16 @@ struct PhotoSlideshowView: View {
                         .onTapGesture { goNext() }
                 }
 
-                topOverlay
+                topOverlay(chrome)
 
                 caption
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                    .padding(.bottom, 92)
+                    .padding(.bottom, 92 + chrome.bottom)
 
                 favoriteButton
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                    .padding(.trailing, 16)
-                    .padding(.bottom, 28)
+                    .padding(.trailing, 16 + chrome.trailing)
+                    .padding(.bottom, 28 + chrome.bottom)
             }
             // Pin the player to the screen. A `ZStack` grows to its widest
             // child, so an overlay that cannot fit — the progress strip, once —
@@ -203,7 +244,7 @@ struct PhotoSlideshowView: View {
 
     // MARK: - Overlays
 
-    private var topOverlay: some View {
+    private func topOverlay(_ chrome: SlideshowChromeInsets) -> some View {
         VStack(spacing: 8) {
             SlideshowProgressTrack(
                 photoCount: photos.count,
@@ -230,19 +271,44 @@ struct PhotoSlideshowView: View {
                     }
                 }
                 Spacer()
-                Menu {
-                    Picker("Intervall", selection: $intervalSeconds) {
-                        ForEach(Slideshow.intervalOptions, id: \.self) { option in
-                            Text(Slideshow.label(for: option)).tag(option)
-                        }
-                    }
-                } label: {
+                Button { isChoosingInterval = true } label: {
                     Image(systemName: "timer")
                         .font(.headline)
                         .foregroundStyle(.white)
                         .padding(8)
                 }
                 .accessibilityLabel("Intervall")
+                .confirmationDialog(
+                    "Bildwechsel",
+                    isPresented: $isChoosingInterval,
+                    titleVisibility: .visible
+                ) {
+                    ForEach(Slideshow.intervalOptions, id: \.self) { option in
+                        Button(Slideshow.label(for: option, current: intervalSeconds)) {
+                            intervalSeconds = option
+                        }
+                    }
+                    Button("Abbrechen", role: .cancel) {}
+                }
+
+                if music.isPlaying {
+                    Button { music.toggleMuted() } label: {
+                        Image(systemName: music.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .padding(8)
+                    }
+                    .accessibilityLabel(music.isMuted ? "Musik einschalten" : "Musik stummschalten")
+                }
+                if music.canChangeTrack {
+                    Button { music.next() } label: {
+                        Image(systemName: "forward.fill")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .padding(8)
+                    }
+                    .accessibilityLabel("Andere Musik")
+                }
 
                 Button { dismiss() } label: {
                     Image(systemName: "xmark")
@@ -253,8 +319,9 @@ struct PhotoSlideshowView: View {
                 .accessibilityLabel("Schließen")
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 12)
+        .padding(.leading, chrome.leading)
+        .padding(.trailing, chrome.trailing)
+        .padding(.top, chrome.top)
         .background(
             LinearGradient(
                 colors: [.black.opacity(0.55), .clear],
@@ -368,7 +435,7 @@ struct PhotoSlideshowView: View {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(tickStep))
                 if Task.isCancelled { return }
-                if isPaused { continue }
+                if isSuspended { continue }
 
                 guard let slide = currentSlide else {
                     // Nothing planned to show yet. Planning waits for the next

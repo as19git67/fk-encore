@@ -41,6 +41,38 @@ final class SlideshowTests: XCTestCase {
         XCTAssertEqual(Slideshow.label(for: 30), "30s")
     }
 
+    /// The chooser is a list of plain actions with no selection state of its
+    /// own, so the interval in use has to be marked in the text.
+    func testLabelMarksTheIntervalInUse() {
+        XCTAssertEqual(Slideshow.label(for: 5, current: 5), "5s ✓")
+        XCTAssertEqual(Slideshow.label(for: 10, current: 5), "10s")
+    }
+
+    /// A stored value outside the options drives the timer at the default, so
+    /// that is the row the mark belongs on — not none of them.
+    func testTheMarkFollowsTheNormalizedValue() {
+        XCTAssertEqual(
+            Slideshow.label(for: Slideshow.defaultInterval, current: 7),
+            "\(Slideshow.label(for: Slideshow.defaultInterval)) ✓"
+        )
+        XCTAssertEqual(
+            Slideshow.intervalOptions.filter {
+                Slideshow.label(for: $0, current: 7).hasSuffix("✓")
+            },
+            [Slideshow.defaultInterval]
+        )
+    }
+
+    /// Exactly one row is ever marked.
+    func testOnlyOneIntervalIsMarked() {
+        for current in Slideshow.intervalOptions {
+            let marked = Slideshow.intervalOptions.filter {
+                Slideshow.label(for: $0, current: current).hasSuffix("✓")
+            }
+            XCTAssertEqual(marked, [current])
+        }
+    }
+
     // MARK: - Caption
 
     func testCaptionKeepsRealText() {
@@ -58,5 +90,42 @@ final class SlideshowTests: XCTestCase {
         XCTAssertNil(Slideshow.caption(""))
         XCTAssertNil(Slideshow.caption("   "))
         XCTAssertNil(Slideshow.caption("\n\t"))
+    }
+}
+
+/// Per-device music settings for the photo slideshow.
+final class SlideshowMusicSettingsTests: XCTestCase {
+
+    /// `@AppStorage` yields "" for a key never written; that is "no preference",
+    /// not a track id to match against.
+    func testAnUnsetTrackIdIsNil() {
+        XCTAssertNil(Slideshow.storedMusicTrackId(""))
+        XCTAssertNil(Slideshow.storedMusicTrackId("   "))
+        XCTAssertNil(Slideshow.storedMusicTrackId("\n"))
+    }
+
+    func testAStoredTrackIdSurvives() {
+        XCTAssertEqual(Slideshow.storedMusicTrackId("calm/01_dawn.mp3"), "calm/01_dawn.mp3")
+        XCTAssertEqual(Slideshow.storedMusicTrackId(" calm/01_dawn.mp3 "), "calm/01_dawn.mp3")
+    }
+
+    /// Unset means "play the music", matching the recaps.
+    func testMuteDefaultsToOff() {
+        let defaults = UserDefaults(suiteName: "SlideshowMusicSettingsTests")!
+        defaults.removePersistentDomain(forName: "SlideshowMusicSettingsTests")
+        XCTAssertFalse(Slideshow.storedMusicMuted(defaults))
+        defaults.set(true, forKey: Slideshow.musicMutedDefaultsKey)
+        XCTAssertTrue(Slideshow.storedMusicMuted(defaults))
+        defaults.removePersistentDomain(forName: "SlideshowMusicSettingsTests")
+    }
+
+    /// The two keys must not collide with the interval key.
+    func testKeysAreDistinct() {
+        let keys = Set([
+            Slideshow.intervalDefaultsKey,
+            Slideshow.musicMutedDefaultsKey,
+            Slideshow.musicTrackDefaultsKey,
+        ])
+        XCTAssertEqual(keys.count, 3)
     }
 }
