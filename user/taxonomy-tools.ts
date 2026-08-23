@@ -100,8 +100,18 @@ async function getAdminUserIds(): Promise<string[]> {
     const { userIds } = await user.listUserIdsWithPermission({
       permission: "data.manage",
     });
+    // An empty list silences every publishToolEvent below, so the live log in
+    // the admin UI simply stays blank. Say so rather than failing quietly.
+    if (userIds.length === 0) {
+      console.warn(
+        "[taxonomy-tools] no users hold data.manage — the live log will stay empty",
+      );
+    }
     return userIds.map((id: number) => String(id));
-  } catch {
+  } catch (err) {
+    console.warn(
+      `[taxonomy-tools] could not resolve admin user ids, live log will stay empty: ${(err as Error).message}`,
+    );
     return [];
   }
 }

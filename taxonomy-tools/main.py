@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import signal
@@ -25,6 +26,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
+
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+)
+log = logging.getLogger("taxonomy-tools")
 
 app = FastAPI(title="taxonomy-tools", version="1.0.0")
 
@@ -140,6 +147,7 @@ async def run_tool(tool: ToolName, opts: RunOptions | None = None):
             cmd = _build_command(tool, opts)
             env = _build_env(tool, opts)
             start = time.monotonic()
+            log.info("%s: starting (%s)", tool.value, " ".join(cmd))
             yield {"event": "start", "data": f"Starting {tool.value} ..."}
 
             try:
@@ -154,16 +162,25 @@ async def run_tool(tool: ToolName, opts: RunOptions | None = None):
                 assert proc.stdout is not None
                 async for raw_line in proc.stdout:
                     line = raw_line.decode("utf-8", errors="replace").rstrip("\n")
+                    # Mirror into the container log as well as the SSE stream.
+                    # The stream is the only other consumer of this pipe, so
+                    # without this a run is invisible to `docker compose logs`
+                    # — and completely invisible if the relay to the browser is
+                    # not working (which is exactly when the log is needed).
+                    log.info("%s | %s", tool.value, line)
                     yield {"event": "log", "data": line}
 
                 code = await proc.wait()
                 elapsed = round(time.monotonic() - start, 1)
 
                 if code == 0:
+                    log.info("%s: finished in %ss (exit 0)", tool.value, elapsed)
                     yield {"event": "done", "data": f"Finished in {elapsed}s (exit 0)"}
                 else:
+                    log.error("%s: exited with code %s after %ss", tool.value, code, elapsed)
                     yield {"event": "error", "data": f"Exited with code {code} after {elapsed}s"}
             except asyncio.CancelledError:
+                log.warning("%s: cancelled", tool.value)
                 if _running.get(tool):
                     _running[tool].terminate()  # type: ignore[union-attr]
                 yield {"event": "error", "data": "Cancelled"}
