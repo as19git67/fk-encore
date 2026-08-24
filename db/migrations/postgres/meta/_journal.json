@@ -1072,6 +1072,13 @@
       "when": 1786147200001,
       "tag": "0152_prune_orphaned_document_categories",
       "breakpoints": true
+    },
+    {
+      "idx": 153,
+      "version": "7",
+      "when": 1786233600001,
+      "tag": "0153_classifier_decision_provenance",
+      "breakpoints": true
     }
   ]
 }

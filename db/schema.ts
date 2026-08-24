@@ -834,6 +834,25 @@ export const documents = pgTable("documents", {
   // (docs/design/cloud-teacher-gold-set.md, step 4). Backfilled to 'user' for
   // rows that were attributes_reviewed at migration time.
   category_source: documentCategorySourceEnum("category_source").notNull().default("ai"),
+  // Classify-time diagnostics (migration 0153). Three layers sit above the
+  // model's answer (content rule > sender rule > learned rule, see
+  // document-ops.ts), and a slug the model invents resolves to no row and
+  // silently keeps the previous category. Until now the only record of any of
+  // that was a console.log, so once the container restarted it became
+  // impossible to tell whether a stored category came from the model or from a
+  // rule — which is exactly what the 2026-08-24 audit needed to know and could
+  // not answer.
+  //
+  // `classifier_raw_category_slug` is what the model returned, verbatim and
+  // before any rule or lookup. `category_decided_by` names the layer that
+  // produced the stored category: 'model', 'content_rule', 'sender_rule',
+  // 'learned', 'unresolved_slug' (the chosen slug matched no category) or
+  // 'pinned' (a human/cloud/system label meant the classifier was not applied).
+  // Plain text rather than an enum on purpose: adding a value to a pgEnum needs
+  // its own migration and cannot be used in the transaction that adds it
+  // (migration 0151 hit exactly that), and this list will grow as layers do.
+  classifier_raw_category_slug: text("classifier_raw_category_slug"),
+  category_decided_by: text("category_decided_by"),
   // Manual "queue for Cloud-Teacher" flag (migration 0133). A user who finds a
   // document hard to classify sets this; the offline Cloud-Teacher picks flagged
   // documents first (priority bucket) and clears the flag once it writes a label.
