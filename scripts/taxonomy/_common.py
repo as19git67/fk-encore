@@ -291,3 +291,90 @@ class Md:
 def write_json(path: Path, obj) -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf8")
+
+
+# ── Checkpoints für lange API-Läufe ──────────────────────────────────────────
+# Ein Cloud-Lauf über mehrere hundert Dokumente dauert lange genug, dass ein
+# Container-Neustart (Deploy, Watchtower-Update, OOM) ihn zuverlaessig irgendwann
+# trifft. Ohne Checkpoint war die gesamte bereits bezahlte API-Arbeit dann weg.
+#
+# Aufteilung in zwei Dateien mit Absicht:
+#   <name>.json   Metadaten — einmal beim Start geschrieben (Fingerprint der
+#                 Lauf-Parameter + die gezogene Stichprobe). Die Stichprobe muss
+#                 mit, weil sie per ORDER BY random() gezogen wird: ohne sie
+#                 wuerde ein Resume eine voellig andere Menge auditieren.
+#   <name>.jsonl  Ergebnisse — nach JEDEM Dokument angehaengt und gefsynct, damit
+#                 ein Abbruch hoechstens das gerade laufende Dokument kostet.
+#
+# Beide liegen in OUT_DIR, das als Docker-Volume gemountet ist und den Container
+# ueberlebt. Bewusst ohne Datums-Prefix: ein Resume ueber Mitternacht hinweg
+# muss denselben Checkpoint wiederfinden.
+
+
+def checkpoint_paths(name: str) -> tuple[Path, Path]:
+    """(meta.json, results.jsonl) für einen Checkpoint-Namen."""
+    return OUT_DIR / f"{name}.json", OUT_DIR / f"{name}.jsonl"
+
+
+def checkpoint_begin(name: str, meta: dict) -> None:
+    """Startet einen Checkpoint neu: Metadaten schreiben, Ergebnisse leeren."""
+    meta_path, results_path = checkpoint_paths(name)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf8")
+    results_path.write_text("", encoding="utf8")
+
+
+def checkpoint_append(name: str, row: dict) -> None:
+    """Haengt ein Ergebnis an und erzwingt es auf die Platte.
+
+    fsync statt nur flush: ein `docker compose down` beendet den Prozess, ohne
+    dass der OS-Cache zwingend geschrieben wird — genau der Fall, fuer den der
+    Checkpoint existiert.
+    """
+    _, results_path = checkpoint_paths(name)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    line = json.dumps(row, ensure_ascii=False) + "\n"
+    with open(results_path, "a", encoding="utf8") as f:
+        f.write(line)
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def checkpoint_load(name: str) -> tuple[dict, list[dict]] | None:
+    """(meta, results) eines vorhandenen Checkpoints, oder None.
+
+    Eine abgeschnittene letzte Zeile — der Prozess starb mitten im Schreiben —
+    wird verworfen statt den ganzen Checkpoint unbrauchbar zu machen.
+    """
+    meta_path, results_path = checkpoint_paths(name)
+    if not meta_path.is_file():
+        return None
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(meta, dict):
+        return None
+
+    results: list[dict] = []
+    if results_path.is_file():
+        for line in results_path.read_text(encoding="utf8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue  # angebrochene letzte Zeile
+            if isinstance(row, dict):
+                results.append(row)
+    return meta, results
+
+
+def checkpoint_clear(name: str) -> None:
+    """Entfernt den Checkpoint. Idempotent."""
+    for path in checkpoint_paths(name):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
