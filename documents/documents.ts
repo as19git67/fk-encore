@@ -2621,6 +2621,9 @@ export interface UpdateDocumentTaxRequest {
   tax_relevant: boolean;
   tax_year?: number | null;
   tax_sections?: string[];
+  /** Explicit pin override. Defaults to true (any manual edit pins the doc).
+   *  Pass false to release the pin so the classifier may overwrite again. */
+  tax_reviewed?: boolean;
 }
 
 /**
@@ -2630,6 +2633,9 @@ export interface UpdateDocumentTaxRequest {
  * which keeps future classifier runs from overwriting the choice. Passing
  * `tax_relevant=false` wipes the year, confidence, and all section
  * assignments so the document disappears from the Steuer view.
+ *
+ * Pass `tax_reviewed=false` explicitly to release the pin without changing
+ * the tax fields, so the classifier may overwrite them on the next run.
  */
 export const updateDocumentTax = api(
   { expose: true, method: "POST", path: "/documents/:id/tax", auth: true },
@@ -2670,7 +2676,7 @@ export const updateDocumentTax = api(
         // A manual override has full confidence — the human *is* the
         // ground truth from here on.
         tax_year_confidence: req.tax_relevant ? 1 : 0,
-        tax_reviewed: true,
+        tax_reviewed: req.tax_reviewed !== undefined ? req.tax_reviewed : true,
         // The human just answered the "did you pay this deductible expense?"
         // question by pinning the tax fields — clear the review flag (0136).
         tax_review_needed: false,
