@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Cloud-LLM Audit: Claude klassifiziert eine Stichprobe und wird mit Qwen verglichen.
+"""Cloud-LLM Audit: Claude klassifiziert eine Stichprobe und wird mit dem lokalen Klassifikator verglichen.
 
 READ-ONLY auf der DB. Schreibt einen Disagreement-Report nach
 scripts/taxonomy/out/cloud_audit.md und die bestätigten Gold-Labels nach
 scripts/taxonomy/out/cloud_audit_gold.json.
 
-Prüft zwei unabhängige Achsen gegen Qwen (den lokalen Klassifikator):
+Prüft zwei unabhängige Achsen gegen den lokalen Klassifikator:
   1. Kategorie (category_slug) — wie schon bisher.
   2. Steuerrelevanz (tax_relevant / tax_year / tax_sections) — NEU. Claude
      bekommt exakt dieselbe STEUER-ERKENNUNG-Anleitung wie der lokale
@@ -126,7 +126,7 @@ _TAX_GROUP_ORDER = ("einkuenfte", "abzuege", "bescheid", "rahmen")
 
 def _load_tax_sections_outline() -> str:
     """Gruppierte Sektions-Übersicht — spiegelt _tax_sections_outline() aus
-    llm-service/main.py, damit Claude dieselbe Sicht wie Qwen bekommt."""
+    llm-service/main.py, damit Claude dieselbe Sicht wie der lokale Klassifikator bekommt."""
     sections = c.tax_sections_with_hints()
     by_group: dict[str, list[dict]] = {}
     for s in sections:
@@ -160,14 +160,14 @@ _BASE_COLUMNS = """
     c.slug AS cat_slug, c.name AS cat_name,
     d.classification_confidence AS confidence,
     d.tags_text AS tags,
-    d.tax_relevant AS qwen_tax_relevant,
-    d.tax_year AS qwen_tax_year,
+    d.tax_relevant AS local_tax_relevant,
+    d.tax_year AS local_tax_year,
     COALESCE(
       (SELECT array_agg(dts.tax_section || '::' || dts.confidence::text)
        FROM document_tax_sections dts
        WHERE dts.document_id = d.id AND dts.source = 'ai'),
       ARRAY[]::text[]
-    ) AS qwen_tax_sections_raw
+    ) AS local_tax_sections_raw
 """
 
 
@@ -186,7 +186,7 @@ def _rows_to_docs(cols: list[str], rows: list[tuple]) -> list[dict]:
     docs = []
     for row in rows:
         d = dict(zip(cols, row))
-        d["qwen_tax_sections"] = _parse_tax_sections(d.pop("qwen_tax_sections_raw", None))
+        d["local_tax_sections"] = _parse_tax_sections(d.pop("local_tax_sections_raw", None))
         docs.append(d)
     return docs
 
@@ -326,12 +326,12 @@ def _anonymize_doc(doc: dict, names: list[str]) -> dict:
         "text": c.scrub_names(c.scrub(raw_text), names) or "",
         "sender_type": c.sender_type(doc.get("sender")),
         "tags": c.scrub_names(c.scrub(doc.get("tags") or ""), names) or "",
-        "qwen_slug": doc["cat_slug"],
-        "qwen_name": doc["cat_name"],
-        "qwen_confidence": doc.get("confidence"),
-        "qwen_tax_relevant": bool(doc.get("qwen_tax_relevant")),
-        "qwen_tax_year": doc.get("qwen_tax_year"),
-        "qwen_tax_sections": doc.get("qwen_tax_sections") or [],
+        "local_slug": doc["cat_slug"],
+        "local_name": doc["cat_name"],
+        "local_confidence": doc.get("confidence"),
+        "local_tax_relevant": bool(doc.get("local_tax_relevant")),
+        "local_tax_year": doc.get("local_tax_year"),
+        "local_tax_sections": doc.get("local_tax_sections") or [],
     }
 
 
@@ -483,16 +483,44 @@ class TruncatedResponseError(RuntimeError):
     """
 
 
+class NoJsonInResponseError(ValueError):
+    """The response finished normally but contains no `{` at all — not cut off,
+    not malformed, just absent (e.g. Claude answered in prose instead of the
+    requested JSON schema).
+
+    Subclasses ValueError so it's still caught by every existing
+    `except (..., ValueError)` clause; the only change is that the raw text
+    travels with it instead of being discarded at the point of failure, since
+    a bare "substring not found" gives no way to tell why a document failed.
+    """
+
+    def __init__(self, text: str):
+        super().__init__("Antwort enthielt kein JSON-Objekt")
+        self.text = text
+
+
 def _error_kind(exc: Exception) -> str:
     """Short, groupable label for why a document produced no verdict."""
     if isinstance(exc, TruncatedResponseError):
         return f"Antwort abgeschnitten (max_tokens={MAX_OUTPUT_TOKENS})"
+    if isinstance(exc, NoJsonInResponseError):
+        return "Antwort enthielt kein JSON"
     if isinstance(exc, json.JSONDecodeError):
         return "Antwort war kein gültiges JSON"
     if isinstance(exc, anthropic.APIError):
         status = getattr(exc, "status_code", None)
         return f"API-Fehler {status}" if status else f"API-Fehler ({type(exc).__name__})"
     return f"{type(exc).__name__}: {exc}"
+
+
+def _no_json_snippet(exc: Exception, limit: int = 400) -> str:
+    """PII-scrubbed preview of the raw text behind a NoJsonInResponseError, for
+    logging next to the opaque "kein JSON" label. Empty string for any other
+    exception so call sites can append it unconditionally."""
+    if not isinstance(exc, NoJsonInResponseError):
+        return ""
+    snippet = (c.scrub(exc.text) or "")[:limit].strip()
+    return f" — Rohtext: {snippet!r}"
 
 
 def _request_classification(
@@ -533,6 +561,8 @@ def _request_classification(
     # Strip markdown fences
     text = re.sub(r"^```(?:json)?\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
+    if "{" not in text:
+        raise NoJsonInResponseError(text)
     # raw_decode stops after the first complete JSON object
     idx = text.index("{")
     parsed, _ = json.JSONDecoder().raw_decode(text, idx)
@@ -558,7 +588,7 @@ def _classify_one(
         except (TruncatedResponseError, json.JSONDecodeError, ValueError) as e:
             last = e
             if attempt == 1:
-                print(f"      … Versuch 1 fehlgeschlagen ({e}) — wiederhole")
+                print(f"      … Versuch 1 fehlgeschlagen ({e}){_no_json_snippet(e)} — wiederhole")
                 time.sleep(2)
     raise last
 
@@ -581,12 +611,12 @@ def _classify_batch(
         print(f"    [{di}/{batch_total}] Dok {doc['id']} — sende an Claude …")
         base = {
             "doc_id": doc["id"],
-            "qwen_slug": doc["qwen_slug"],
-            "qwen_name": doc["qwen_name"],
-            "qwen_confidence": doc["qwen_confidence"],
-            "qwen_tax_relevant": doc["qwen_tax_relevant"],
-            "qwen_tax_year": doc["qwen_tax_year"],
-            "qwen_tax_sections": doc["qwen_tax_sections"],
+            "local_slug": doc["local_slug"],
+            "local_name": doc["local_name"],
+            "local_confidence": doc["local_confidence"],
+            "local_tax_relevant": doc["local_tax_relevant"],
+            "local_tax_year": doc["local_tax_year"],
+            "local_tax_sections": doc["local_tax_sections"],
             "title": doc["title"],
             "text": doc["text"][:1500],
             "sender_type": doc["sender_type"],
@@ -594,7 +624,7 @@ def _classify_batch(
         try:
             parsed = _classify_one(client, doc, taxonomy, system)
             claude_slug = parsed.get("slug", "?")
-            match = "✓" if claude_slug == doc["qwen_slug"] else f"✗ (Qwen: {doc['qwen_slug']})"
+            match = "✓" if claude_slug == doc["local_slug"] else f"✗ (Lokal: {doc['local_slug']})"
             print(f"      → {claude_slug} {match}")
             results.append({
                 **base,
@@ -620,7 +650,7 @@ def _classify_batch(
                     file=sys.stderr,
                 )
                 return results, True
-            print(f"  [!] Dok {doc['id']}: {e}", file=sys.stderr)
+            print(f"  [!] Dok {doc['id']}: {e}{_no_json_snippet(e)}", file=sys.stderr)
             results.append({
                 **base,
                 "claude_slug": "ERROR",
@@ -644,7 +674,7 @@ def _classify_batch(
 def _generate_report(results: list[dict]) -> tuple[str, list[dict]]:
     """Generate markdown report + gold-set JSON."""
     md = c.Md()
-    md("# Cloud-Audit: Claude vs. Qwen — Kategorie & Steuer")
+    md("# Cloud-Audit: Claude vs. lokaler Klassifikator — Kategorie & Steuer")
     md()
     md(f"_Erzeugt: {time.strftime('%Y-%m-%dT%H:%M:%S')} — "
        f"Modell: {CLAUDE_MODEL}, Stichprobe: {len(results)}_")
@@ -653,8 +683,8 @@ def _generate_report(results: list[dict]) -> tuple[str, list[dict]]:
     total = len(results)
     errors = [r for r in results if r["claude_slug"] == "ERROR"]
     valid = [r for r in results if r["claude_slug"] != "ERROR"]
-    agree = [r for r in valid if r["claude_slug"] == r["qwen_slug"]]
-    disagree = [r for r in valid if r["claude_slug"] != r["qwen_slug"]]
+    agree = [r for r in valid if r["claude_slug"] == r["local_slug"]]
+    disagree = [r for r in valid if r["claude_slug"] != r["local_slug"]]
 
     md("## 1. Übersicht")
     md()
@@ -685,13 +715,13 @@ def _generate_report(results: list[dict]) -> tuple[str, list[dict]]:
         )
 
     # Disagreement by category
-    md("## 2. Kategorie-Disagreements nach Qwen-Kategorie")
+    md("## 2. Kategorie-Disagreements nach lokaler Kategorie")
     md()
-    by_qwen: dict[str, list[dict]] = {}
+    by_local: dict[str, list[dict]] = {}
     for r in disagree:
-        by_qwen.setdefault(r["qwen_slug"], []).append(r)
-    rows = sorted(by_qwen.items(), key=lambda x: -len(x[1]))
-    md.table(["Qwen-Kategorie", "Fälle", "Claude-Vorschläge (Top 3)"], [
+        by_local.setdefault(r["local_slug"], []).append(r)
+    rows = sorted(by_local.items(), key=lambda x: -len(x[1]))
+    md.table(["Lokale Kategorie", "Fälle", "Claude-Vorschläge (Top 3)"], [
         [
             slug,
             len(items),
@@ -706,17 +736,17 @@ def _generate_report(results: list[dict]) -> tuple[str, list[dict]]:
     md("## 3. Alle Kategorie-Disagreements (Details)")
     md()
     md.table(
-        ["Dok-ID", "Titel", "Absender-Typ", "Qwen", "Claude", "Begründung"],
+        ["Dok-ID", "Titel", "Absender-Typ", "Lokal", "Claude", "Begründung"],
         [
             [
                 r["doc_id"],
                 (r["title"] or "")[:50],
                 r["sender_type"],
-                r["qwen_slug"],
+                r["local_slug"],
                 r["claude_slug"],
                 (r["reasoning"] or "")[:80],
             ]
-            for r in sorted(disagree, key=lambda x: x["qwen_slug"])
+            for r in sorted(disagree, key=lambda x: x["local_slug"])
         ],
     )
 
@@ -725,11 +755,11 @@ def _generate_report(results: list[dict]) -> tuple[str, list[dict]]:
     md()
     all_by_cat: dict[str, dict] = {}
     for r in valid:
-        cat = r["qwen_slug"]
+        cat = r["local_slug"]
         if cat not in all_by_cat:
             all_by_cat[cat] = {"total": 0, "agree": 0}
         all_by_cat[cat]["total"] += 1
-        if r["claude_slug"] == r["qwen_slug"]:
+        if r["claude_slug"] == r["local_slug"]:
             all_by_cat[cat]["agree"] += 1
     md.table(
         ["Kategorie", "Gesamt", "Übereinstimmung", "Rate"],
@@ -751,32 +781,32 @@ def _generate_report(results: list[dict]) -> tuple[str, list[dict]]:
        f"(via `AUDIT_TAX_FOCUS_SECTIONS` einstellbar).")
     md()
 
-    qwen_true = [r for r in tax_valid if r["qwen_tax_relevant"]]
-    qwen_false = [r for r in tax_valid if not r["qwen_tax_relevant"]]
-    tp = sum(1 for r in qwen_true if r["claude_tax_relevant"])  # Qwen true, Claude true
-    fp = sum(1 for r in qwen_true if not r["claude_tax_relevant"])  # Qwen true, Claude false
-    fn = sum(1 for r in qwen_false if r["claude_tax_relevant"])  # Qwen false, Claude true
-    tn = sum(1 for r in qwen_false if not r["claude_tax_relevant"])
+    local_true = [r for r in tax_valid if r["local_tax_relevant"]]
+    local_false = [r for r in tax_valid if not r["local_tax_relevant"]]
+    tp = sum(1 for r in local_true if r["claude_tax_relevant"])  # lokal true, Claude true
+    fp = sum(1 for r in local_true if not r["claude_tax_relevant"])  # lokal true, Claude false
+    fn = sum(1 for r in local_false if r["claude_tax_relevant"])  # lokal false, Claude true
+    tn = sum(1 for r in local_false if not r["claude_tax_relevant"])
 
     md.table(["", "Claude: steuerrelevant", "Claude: nicht steuerrelevant"], [
-        ["Qwen: steuerrelevant", tp, f"**{fp}**  ← mögliche False Positives"],
-        ["Qwen: nicht steuerrelevant", f"{fn}  ← mögliche False Negatives", tn],
+        ["Lokal: steuerrelevant", tp, f"**{fp}**  ← mögliche False Positives"],
+        ["Lokal: nicht steuerrelevant", f"{fn}  ← mögliche False Negatives", tn],
     ])
     md()
-    if qwen_true:
-        md(f"**Von {len(qwen_true)} Qwen-als-steuerrelevant markierten Dokumenten "
-           f"bestätigt Claude {tp} ({100*tp/len(qwen_true):.1f}%).** "
-           f"{fp} ({100*fp/len(qwen_true):.1f}%) hält Claude für NICHT steuerrelevant.")
+    if local_true:
+        md(f"**Von {len(local_true)} lokal als steuerrelevant markierten Dokumenten "
+           f"bestätigt Claude {tp} ({100*tp/len(local_true):.1f}%).** "
+           f"{fp} ({100*fp/len(local_true):.1f}%) hält Claude für NICHT steuerrelevant.")
         md()
 
-    # Per-section breakdown: for every Qwen-assigned section, does Claude's own
+    # Per-section breakdown: for every locally-assigned section, does Claude's own
     # tax_sections list for the same doc contain the same slug?
-    md("### 5a. Bestätigungsrate je Qwen-Steuer-Sektion")
+    md("### 5a. Bestätigungsrate je lokaler Steuer-Sektion")
     md()
     per_section: dict[str, dict] = {}
     for r in tax_valid:
         claude_slugs = {s["slug"] for s in r["claude_tax_sections"]}
-        for qs in r["qwen_tax_sections"]:
+        for qs in r["local_tax_sections"]:
             slug = qs["slug"]
             stat = per_section.setdefault(slug, {"total": 0, "confirmed": 0, "rejected": 0, "reassigned": 0})
             stat["total"] += 1
@@ -787,7 +817,7 @@ def _generate_report(results: list[dict]) -> tuple[str, list[dict]]:
             else:
                 stat["reassigned"] += 1
     md.table(
-        ["Sektion", "Dok. (Qwen)", "Bestätigt", "Rate", "Von Claude verworfen", "Claude anderer Meinung"],
+        ["Sektion", "Dok. (Lokal)", "Bestätigt", "Rate", "Von Claude verworfen", "Claude anderer Meinung"],
         sorted(
             [
                 [slug, s["total"], s["confirmed"], f"{100*s['confirmed']/s['total']:.0f}%",
@@ -802,33 +832,33 @@ def _generate_report(results: list[dict]) -> tuple[str, list[dict]]:
     md()
     md("### 5b. Steuer-Disagreements (Details)")
     md()
-    tax_disagree = [r for r in tax_valid if r["qwen_tax_relevant"] != r["claude_tax_relevant"]]
+    tax_disagree = [r for r in tax_valid if r["local_tax_relevant"] != r["claude_tax_relevant"]]
     md.table(
-        ["Dok-ID", "Titel", "Absender-Typ", "Qwen-Sektionen", "Claude", "Begründung"],
+        ["Dok-ID", "Titel", "Absender-Typ", "Lokale Sektionen", "Claude", "Begründung"],
         [
             [
                 r["doc_id"],
                 (r["title"] or "")[:45],
                 r["sender_type"],
-                ", ".join(s["slug"] for s in r["qwen_tax_sections"]) or "—",
+                ", ".join(s["slug"] for s in r["local_tax_sections"]) or "—",
                 "steuerrelevant: " + ", ".join(s["slug"] for s in r["claude_tax_sections"])
                 if r["claude_tax_relevant"] else "NICHT steuerrelevant",
                 (r["tax_reasoning"] or "")[:80],
             ]
             for r in sorted(
                 tax_disagree,
-                key=lambda x: (not x["qwen_tax_relevant"], x["qwen_slug"]),
+                key=lambda x: (not x["local_tax_relevant"], x["local_slug"]),
             )
         ],
     )
 
-    # Gold set: documents where Claude and Qwen agree on category. Carries tax
-    # fields too whenever Claude and Qwen also agree on tax_relevant, so the
+    # Gold set: documents where Claude and the local classifier agree on category. Carries tax
+    # fields too whenever Claude and the local classifier also agree on tax_relevant, so the
     # same run can grow both the category- and the steuer-Gold-Set.
     gold = []
     for r in agree:
         entry = {"doc_id": r["doc_id"], "slug": r["claude_slug"], "confidence": r["claude_confidence"]}
-        if r["claude_tax_relevant"] is not None and r["qwen_tax_relevant"] == r["claude_tax_relevant"]:
+        if r["claude_tax_relevant"] is not None and r["local_tax_relevant"] == r["claude_tax_relevant"]:
             entry["tax_relevant"] = r["claude_tax_relevant"]
             entry["tax_sections"] = r["claude_tax_sections"]
         gold.append(entry)
@@ -836,7 +866,7 @@ def _generate_report(results: list[dict]) -> tuple[str, list[dict]]:
     md()
     md("---")
     md()
-    md(f"_Gold-Set: {len(gold)} Dokumente, bei denen Claude und Qwen bei der Kategorie "
+    md(f"_Gold-Set: {len(gold)} Dokumente, bei denen Claude und der lokale Klassifikator bei der Kategorie "
        f"übereinstimmen ({sum(1 for g in gold if 'tax_relevant' in g)} davon auch bei der "
        f"Steuerrelevanz) → `cloud_audit_gold.json`_")
 
@@ -863,10 +893,10 @@ def _write_dry_run(anon_docs: list[dict], taxonomy: str, tax_outline: str) -> No
                 "doc_id": doc["id"],
                 "system": system,
                 "user_message": _build_user_msg(doc, taxonomy),
-                "qwen_slug": doc["qwen_slug"],
-                "qwen_name": doc["qwen_name"],
-                "qwen_tax_relevant": doc["qwen_tax_relevant"],
-                "qwen_tax_sections": doc["qwen_tax_sections"],
+                "local_slug": doc["local_slug"],
+                "local_name": doc["local_name"],
+                "local_tax_relevant": doc["local_tax_relevant"],
+                "local_tax_sections": doc["local_tax_sections"],
             }, ensure_ascii=False) + "\n")
     print(f"\n[cloud_audit] DRY RUN — {len(anon_docs)} Prompts geschrieben:")
     print(f"  {out_path.relative_to(c.REPO_ROOT)}")
@@ -937,16 +967,16 @@ def main() -> None:
 
     # Summary
     valid = [r for r in all_results if r["claude_slug"] != "ERROR"]
-    agree = sum(1 for r in valid if r["claude_slug"] == r["qwen_slug"])
+    agree = sum(1 for r in valid if r["claude_slug"] == r["local_slug"])
     tax_valid = [r for r in valid if r["claude_tax_relevant"] is not None]
-    qwen_tax_true = [r for r in tax_valid if r["qwen_tax_relevant"]]
-    tax_confirmed = sum(1 for r in qwen_tax_true if r["claude_tax_relevant"])
+    local_tax_true = [r for r in tax_valid if r["local_tax_relevant"]]
+    tax_confirmed = sum(1 for r in local_tax_true if r["claude_tax_relevant"])
     print(f"\n[cloud_audit] Kategorie: {agree}/{len(valid)} Übereinstimmung "
           f"({100*agree/max(1,len(valid)):.1f}%)")
-    if qwen_tax_true:
-        print(f"[cloud_audit] Steuer: {tax_confirmed}/{len(qwen_tax_true)} der "
-              f"Qwen-als-steuerrelevant markierten Dokumente von Claude bestätigt "
-              f"({100*tax_confirmed/len(qwen_tax_true):.1f}%)")
+    if local_tax_true:
+        print(f"[cloud_audit] Steuer: {tax_confirmed}/{len(local_tax_true)} der "
+              f"lokal als steuerrelevant markierten Dokumente von Claude bestätigt "
+              f"({100*tax_confirmed/len(local_tax_true):.1f}%)")
     print(f"[cloud_audit] Report: {(OUT / f'{_P}cloud_audit.md').relative_to(c.REPO_ROOT)}")
     print(f"[cloud_audit] Gold-Set: {len(gold)} bestätigte Labels → {_P}cloud_audit_gold.json")
 
