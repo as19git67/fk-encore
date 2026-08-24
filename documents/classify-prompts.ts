@@ -151,6 +151,25 @@ Kinderbetreuungsrechnungen sowie Erträge ausländischer Banken und
 Beteiligungen, für die keine deutsche Jahressteuerbescheinigung ausgestellt
 wird. Die Jahresbescheinigung selbst ist immer steuerrelevant.
 
+KEIN BETRAG, KEIN BELEG (sehr wichtig): Ein Steuerbeleg weist einen
+tatsächlich angefallenen, vom Nutzer getragenen Betrag aus. Fehlt dieser
+Betrag, ist das Dokument tax_relevant=false mit leerer tax_sections-Liste —
+auch wenn Thema und Kategorie steuerlich einschlägig sind:
+
+- Verordnung, Rezept, Brillenverordnung, Befund-/Arztbericht, Heil- und
+  Kostenplan → erst die bezahlte Rechnung ist der Beleg.
+- Angebot, Kostenvoranschlag, Wirtschaftsplan, Sonderumlagen-Ankündigung →
+  geplant, nicht angefallen.
+- Standmitteilung, Jahresinformation, Beitragsanpassung ohne bescheinigte
+  Beiträge → erst die Beitragsbescheinigung ist der Beleg.
+- Erstattungs-/Leistungsabrechnung der Kranken-/Pflegeversicherung: Geld
+  fließt ZUM Nutzer — eine Erstattung ist keine Aufwendung.
+- Anschreiben, Informationsschreiben, Eingangsbestätigung, Merkblatt,
+  Preis-/Leistungsverzeichnis, Vollmacht, Protokoll, Beschlusssammlung.
+
+AUSNAHME: Weist eine Handwerkerrechnung einen Lohn-/Arbeitskostenanteil nach
+§ 35a EStG aus, ist sie auch ohne Zahlungsnachweis steuerrelevant (Regel 2).
+
 PERSONENBEZUG / BEZAHLER (sehr wichtig): Die Steuer-Sektionen beziehen sich
 auf die Einkommensteuererklärung des Nutzers. Ob ein Abzugsbeleg (Krankheits-,
 Pflege-, Handwerker-, Beitrags- oder Spendenbeleg) dorthin gehört, hängt davon
@@ -252,6 +271,12 @@ WICHTIGE ABGRENZUNGSREGELN:
 - Verwechsle solche Belege niemals mit einer Meldung zur Sozialversicherung;
   diese stammt typischerweise vom Arbeitgeber und bezieht sich auf gemeldete
   Sozialversicherungsentgelte.
+- Auch der Nachweis über einen gezahlten MITGLIEDSBEITRAG an eine Partei ist
+  steuerbegünstigt (§ 34g / § 10b EStG) → „sonderausgaben". Das gilt für den
+  Zahlungsnachweis (Beitragsquittung, Kontoumsatz mit erkennbarem Partei-
+  Empfänger), NICHT für Aufnahme-/Austrittsschreiben ohne Betrag. Beiträge an
+  Vereine, Berufsverbände und Gewerkschaften sind hiervon nicht erfasst
+  (Gewerkschaftsbeitrag → „werbungskosten-n").
 
 5) Renten-/Lebens-/Riester-Versicherungen (WICHTIG — häufigste Fehlerquelle):
 - Steuerrelevant (tax_relevant=true) ist bei privaten Renten-, Lebens- und

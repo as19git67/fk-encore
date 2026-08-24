@@ -256,7 +256,12 @@ export async function seed(db: any): Promise<void> {
 
   for (const row of taxonomyRows) {
     const existing = (await db
-      .select({ id: schema.documentCategories.id })
+      .select({
+        id: schema.documentCategories.id,
+        name: schema.documentCategories.name,
+        icon: schema.documentCategories.icon,
+        sort_order: schema.documentCategories.sort_order,
+      })
       .from(schema.documentCategories)
       .where(eq(schema.documentCategories.slug, row.slug)))[0];
     if (!existing) {
@@ -266,6 +271,23 @@ export async function seed(db: any): Promise<void> {
         icon: row.icon,
         sort_order: row.sort_order,
       });
+      continue;
+    }
+    // Keep the presentation columns in step with the seed taxonomy. Inserting
+    // once and never updating meant a category renamed in taxonomy.ts kept its
+    // original label on every database that already had the row — the new name
+    // only ever showed up on a fresh install. Slugs stay untouched: they are
+    // the identity documents are attached by, so a slug change is a different
+    // category and belongs in a migration.
+    if (
+      existing.name !== row.name ||
+      existing.icon !== row.icon ||
+      existing.sort_order !== row.sort_order
+    ) {
+      await db
+        .update(schema.documentCategories)
+        .set({ name: row.name, icon: row.icon, sort_order: row.sort_order })
+        .where(eq(schema.documentCategories.id, existing.id));
     }
   }
 
@@ -283,6 +305,26 @@ export async function seed(db: any): Promise<void> {
       .where(eq(schema.documentCategories.slug, row.slug));
   }
   console.log(`[seed] Ensured ${taxonomyRows.length} document categories`);
+
+  // Categories the database has but the seed taxonomy does not. The classifier
+  // reads its label set from this table and its hints from taxonomy.ts, so such
+  // a row is a label the model can pick but nothing describes — and the cloud
+  // audit, which reads taxonomy.ts, can never agree with it. Reported rather
+  // than deleted: removing a category moves documents, which is a migration's
+  // job (0152), not a side effect of seeding.
+  const seededSlugs = new Set(taxonomyRows.map((r) => r.slug));
+  const orphans = (await db
+    .select({ slug: schema.documentCategories.slug })
+    .from(schema.documentCategories))
+    .map((r) => r.slug)
+    .filter((slug) => !seededSlugs.has(slug));
+  if (orphans.length > 0) {
+    console.warn(
+      `[seed] ${orphans.length} document categor${orphans.length === 1 ? "y is" : "ies are"} ` +
+        `not in the seed taxonomy and have no hint: ${orphans.join(", ")}. ` +
+        `The classifier can still choose them. Remove them in a migration.`,
+    );
+  }
 
   // --- 7. Initial admin user ---
   const adminEmail = process.env.ADMIN_EMAIL || "admin@example.com";

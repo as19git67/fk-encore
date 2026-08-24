@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   CLASSIFY_CATEGORY_RULES,
   CLASSIFY_PROMPTS,
+  CLASSIFY_TAX_PROMPT,
 } from "./classify-prompts";
 import { categoryTaxonomy, taxonomyHints } from "./taxonomy";
 
@@ -16,22 +17,41 @@ import { categoryTaxonomy, taxonomyHints } from "./taxonomy";
  * the extracted text, and a rename makes the loader raise at import time — so
  * they are pinned here.
  */
+/**
+ * Mirrors _load_prompt_constant() in scripts/taxonomy/cloud_audit.py: read the
+ * constant back out of the source the way the Python loader does, and undo the
+ * template-literal escapes.
+ *
+ * Getting this wrong is silent and expensive. The loader used to stop at the
+ * first backtick of any kind (`(.*?)`), so CLASSIFY_TAX_PROMPT — which quotes
+ * field names as \`relation_kind\` — reached the audit truncated at 5303 of
+ * 14440 characters. Claude was judging tax relevance without the PERSONENBEZUG
+ * section or any of the eight ABGRENZUNGSREGELN while the local model had them
+ * all, so the run measured the prompt gap it exists to rule out. Comparing the
+ * round trip against the real constant is the only check that catches that.
+ */
+function extractAsPythonDoes(name: string): string {
+  const source = readFileSync(join(import.meta.dirname, "classify-prompts.ts"), "utf8");
+  const match = source.match(new RegExp(`${name}\\s*=\\s*\`((?:[^\`\\\\]|\\\\.)*)\``, "s"));
+  expect(match, `${name} not found by the loader's regex`).not.toBeNull();
+  return match![1]
+    .replaceAll("\\`", "`")
+    .replaceAll("\\$", "$")
+    .replaceAll("\\\\", "\\")
+    .trim();
+}
+
+describe("prompt constants shared with the cloud audit", () => {
+  it("hands the Python loader the whole of CLASSIFY_CATEGORY_RULES", () => {
+    expect(extractAsPythonDoes("CLASSIFY_CATEGORY_RULES")).toBe(CLASSIFY_CATEGORY_RULES.trim());
+  });
+
+  it("hands the Python loader the whole of CLASSIFY_TAX_PROMPT", () => {
+    expect(extractAsPythonDoes("CLASSIFY_TAX_PROMPT")).toBe(CLASSIFY_TAX_PROMPT.trim());
+  });
+});
+
 describe("CLASSIFY_CATEGORY_RULES", () => {
-  it("is reachable by the Python loader's regex", () => {
-    const source = readFileSync(
-      join(import.meta.dirname, "classify-prompts.ts"),
-      "utf8",
-    );
-    // Mirrors _load_prompt_constant() in scripts/taxonomy/cloud_audit.py.
-    const match = source.match(/CLASSIFY_CATEGORY_RULES\s*=\s*`(.*?)`/s);
-    expect(match).not.toBeNull();
-    expect(match![1].trim()).toBe(CLASSIFY_CATEGORY_RULES.trim());
-  });
-
-  it("contains no backtick, which would truncate that extraction", () => {
-    expect(CLASSIFY_CATEGORY_RULES).not.toContain("`");
-  });
-
   it("is actually sent to the llm-service", () => {
     expect(CLASSIFY_PROMPTS.classify_system).toContain(CLASSIFY_CATEGORY_RULES);
   });
@@ -110,5 +130,48 @@ describe("category boundaries settled after the scoreboard", () => {
 
   it("says belege is assigned by receipt capture, not by the classifier", () => {
     expect(hints.get("belege")!).toMatch(/nicht vom Klassifikator vergeben/i);
+  });
+});
+
+/**
+ * The 2026-08-24 cloud audit rejected 33 of 125 locally tax-flagged documents.
+ * 29 of them failed for one reason: the document names a tax topic but no
+ * amount anybody actually paid — a prescription, an estimate, a status letter,
+ * a reimbursement. The prompt had eight specific rules and nothing covering
+ * that, which is also why werbungskosten-v confirmed at only 42 %.
+ */
+describe("CLASSIFY_TAX_PROMPT: proof of payment", () => {
+  it("requires an amount the user actually bore", () => {
+    expect(CLASSIFY_TAX_PROMPT).toContain("KEIN BETRAG, KEIN BELEG");
+    expect(CLASSIFY_TAX_PROMPT).toMatch(/tatsächlich angefallenen, vom Nutzer getragenen Betrag/);
+  });
+
+  it("names each document kind the audit saw misfiled", () => {
+    for (const probe of [
+      "Verordnung", "Rezept", "Befund-", "Kostenvoranschlag", "Angebot",
+      "Wirtschaftsplan", "Standmitteilung", "Erstattungs-", "Merkblatt",
+    ]) {
+      expect(CLASSIFY_TAX_PROMPT, `missing: ${probe}`).toContain(probe);
+    }
+  });
+
+  it("keeps the §35a exception, which needs no payment proof", () => {
+    // Rule 2 states a craftsman's invoice showing a §35a labour share counts on
+    // its own. A blanket "no amount, no document" rule would silently revoke
+    // that, so the carve-out has to sit inside the new rule.
+    const rule = CLASSIFY_TAX_PROMPT.slice(CLASSIFY_TAX_PROMPT.indexOf("KEIN BETRAG, KEIN BELEG"));
+    const exception = rule.slice(0, rule.indexOf("PERSONENBEZUG"));
+    expect(exception).toContain("AUSNAHME");
+    expect(exception).toMatch(/35a/);
+  });
+
+  it("treats a party membership fee as a deduction, but only with an amount", () => {
+    // Two CSU contribution records were the audit's clearest false negatives.
+    const spenden = CLASSIFY_TAX_PROMPT.slice(CLASSIFY_TAX_PROMPT.indexOf("4) Spenden"));
+    expect(spenden).toMatch(/MITGLIEDSBEITRAG an eine Partei/);
+    expect(spenden).toMatch(/34g/);
+    expect(spenden).toContain("NICHT für Aufnahme-/Austrittsschreiben ohne Betrag");
+    // Union dues are Werbungskosten, not Sonderausgaben — a neighbouring trap.
+    expect(spenden).toContain("werbungskosten-n");
   });
 });
