@@ -213,14 +213,24 @@ Auswahl­zustand hat.
 
 ### Chrome und die Kamera-Aussparung
 
-Das Foto ist bewusst randlos: Der `GeometryReader` des Players ignoriert die
-Safe Area, damit das Bild bis an jede Kante reicht. Die Bedienelemente dürfen
-ihm dorthin **nicht** folgen — mit 12 pt Abstand zur *Bildschirmkante* lagen
+Das Foto ist bewusst randlos: Der Inhalt des Players ignoriert die Safe Area,
+damit das Bild bis an jede Kante reicht. Die Bedienelemente dürfen ihm dorthin
+**nicht** folgen — mit 12 pt Abstand zur *Bildschirmkante* lagen
 Fortschrittsleiste und Albumname im Hochformat unter der Dynamic Island.
 `SlideshowChromeInsets` legt sie deshalb wieder in die Safe Area: oben,
 unten (Home-Indicator) und im Querformat auch seitlich, jeweils plus dem
 eigenen Rand des Players von 12 pt. Der untere Wert kommt ohne diesen Rand,
 weil die Aufrufer dort schon größere Abstände mitbringen (Caption 92 pt).
+
+**Wichtig:** `.ignoresSafeArea()` muss auf den *Inhalt* des `GeometryReader`
+gelegt werden, nicht auf den Reader selbst. Am Reader angebracht, meldet er ab
+diesem Punkt `safeAreaInsets` von **null** — er wurde ja schon auf Vollbild
+erweitert, bevor sein Closure läuft, hat also aus eigener Sicht nichts mehr,
+wovon er absetzen könnte. Genau das ist beim ersten Anlauf passiert: `chrome`
+existierte, wurde aber immer mit Null-Insets berechnet, also landete die
+Chrome weiterhin exakt an der alten, kaputten Position unter der Insel — ein
+Fehler, der sich nur am Gerät zeigt, keine Unit-Test-Assertion verletzt und
+sich rein an der Reihenfolge der Modifier festmacht.
 
 ### Musik
 

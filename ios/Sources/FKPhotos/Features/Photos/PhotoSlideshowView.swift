@@ -164,8 +164,13 @@ struct PhotoSlideshowView: View {
     private var player: some View {
         GeometryReader { geo in
             let orientation = ScreenOrientation(size: geo.size)
-            // The reader ignores the safe area so the photo is full-bleed;
-            // the chrome has to be put back inside it by hand.
+            // `ignoresSafeArea()` has to sit on the *content* below, not on
+            // this reader — applied to the reader itself, it reports zero
+            // safeAreaInsets (the reader has already been expanded to cover
+            // the safe area before its closure runs, so from its own
+            // perspective there is nothing left to inset by). That silently
+            // put the chrome back at the unfixed 12 pt-from-glass position,
+            // right under the Dynamic Island, despite `chrome` existing.
             let chrome = SlideshowChromeInsets(safeArea: geo.safeAreaInsets)
             ZStack(alignment: .top) {
                 Group {
@@ -229,8 +234,8 @@ struct PhotoSlideshowView: View {
                 screen = new
                 replanForOrientationChange()
             }
+            .ignoresSafeArea()
         }
-        .ignoresSafeArea()
         // Newly arrived images unlock pairing decisions for the photos after
         // the one on screen, so the plan grows as the show runs.
         .onChange(of: store.images.count) { _, _ in extendPlan() }
