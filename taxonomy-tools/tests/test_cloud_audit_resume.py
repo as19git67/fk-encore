@@ -163,3 +163,58 @@ def test_a_checkpoint_without_a_sample_is_not_resumed(out_dir, no_db):
 
     assert resumed is False
     assert [d["id"] for d in remaining] == [10, 11, 12]
+
+
+class _Recorder:
+    """Fake Anthropic client whose answers are scripted per attempt."""
+
+    def __init__(self, answers):
+        self.answers = list(answers)
+        self.calls = 0
+
+
+def _install_scripted(monkeypatch, rec):
+    def fake(client, doc, taxonomy, system):
+        rec.calls += 1
+        answer = rec.answers[min(rec.calls - 1, len(rec.answers) - 1)]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+    monkeypatch.setattr(ca, "_request_classification", fake)
+    monkeypatch.setattr(ca.time, "sleep", lambda _s: None)
+
+
+def test_a_document_gets_three_attempts_before_it_is_given_up_on(monkeypatch):
+    """A document that reaches the report as ERROR has cost its tokens for
+    nothing, and every one of these failures is non-deterministic."""
+    rec = _Recorder([ca.NoJsonInResponseError("Notiz statt JSON")])
+    _install_scripted(monkeypatch, rec)
+
+    with pytest.raises(ca.NoJsonInResponseError):
+        ca._classify_one(None, {"id": 1}, "tax", "system")
+
+    assert rec.calls == ca._CLASSIFY_ATTEMPTS == 3
+
+
+def test_a_late_success_still_counts(monkeypatch):
+    rec = _Recorder([
+        ca.NoJsonInResponseError("Notiz statt JSON"),
+        ca.NoJsonInResponseError("wieder Notiz"),
+        {"slug": "wohnen", "confidence": 0.9},
+    ])
+    _install_scripted(monkeypatch, rec)
+
+    assert ca._classify_one(None, {"id": 1}, "tax", "system")["slug"] == "wohnen"
+    assert rec.calls == 3
+
+
+def test_the_json_instruction_is_repeated_after_the_document_text():
+    """The system prompt says it once, but the raw OCR text comes after that —
+    and that is where the model started writing notes instead."""
+    msg = ca._build_doc_msg({
+        "id": 7, "title": "T", "sender_type": "unbekannt", "tags": "",
+        "text": "Bezugspersonen (nicht user):\n- jemand",
+    })
+    instruction = msg[msg.index("- Text:"):]
+    assert "NUR mit dem JSON-Objekt" in instruction
+    assert msg.rstrip().endswith("keine Markdown-Fences.")

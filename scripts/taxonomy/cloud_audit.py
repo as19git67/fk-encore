@@ -73,6 +73,9 @@ MAX_OUTPUT_TOKENS = int(os.environ.get("AUDIT_MAX_TOKENS", "32000"))
 # Name of the checkpoint that lets an interrupted run pick up where it stopped
 # (see the checkpoint helpers in _common.py). AUDIT_RESUME=0 forces a fresh
 # sample even when a usable checkpoint is lying around.
+# Attempts per document before it is recorded as an ERROR in the report.
+_CLASSIFY_ATTEMPTS = int(os.environ.get("AUDIT_CLASSIFY_ATTEMPTS", "3"))
+
 CHECKPOINT_NAME = "cloud_audit_checkpoint"
 RESUME_ENABLED = os.environ.get("AUDIT_RESUME", "1").lower() not in ("0", "false", "no")
 # Bump when the checkpoint's own layout changes so old files are not resumed
@@ -401,12 +404,25 @@ def _load_prompt_constant(name: str) -> str:
     Vergleich misst damit Modellqualität, nicht Prompt-Unterschiede.
     """
     text = (c.REPO_ROOT / "documents" / "classify-prompts.ts").read_text("utf8")
-    m = re.search(rf"{re.escape(name)}\s*=\s*`(.*?)`", text, re.DOTALL)
+    # Bis zum ersten NICHT escapten Backtick — ein Template-Literal darf welche
+    # enthalten, und CLASSIFY_TAX_PROMPT tut es: es zitiert Feldnamen als
+    # \`relation_kind\`. Das frühere `(.*?)` stoppte am ersten Backtick
+    # überhaupt und lieferte deshalb nur die ersten ~5300 von ~13000 Zeichen —
+    # der gesamte PERSONENBEZUG-Abschnitt und alle acht
+    # ABGRENZUNGSREGELN fehlten still. Der Audit verglich damit ein Claude
+    # OHNE diese Regeln gegen ein lokales Modell MIT ihnen und maß genau den
+    # Prompt-Unterschied, den diese Funktion verhindern soll.
+    m = re.search(rf"{re.escape(name)}\s*=\s*`((?:[^`\\]|\\.)*)`", text, re.DOTALL)
     if not m:
         raise RuntimeError(
             f"{name} nicht in documents/classify-prompts.ts gefunden"
         )
-    return m.group(1).strip()
+    # Escapes des Template-Literals auflösen, damit der Text ankommt wie er
+    # zur Laufzeit im TS-Prompt steht.
+    body = m.group(1)
+    for escaped, literal in (("\\`", "`"), ("\\$", "$"), ("\\\\", "\\")):
+        body = body.replace(escaped, literal)
+    return body.strip()
 
 
 _TAX_GUIDANCE = _load_prompt_constant("CLASSIFY_TAX_PROMPT")
@@ -447,13 +463,25 @@ def _taxonomy_cache_block(taxonomy: str) -> dict:
 
 
 def _build_doc_msg(doc: dict) -> str:
-    """Der NICHT-cacheable, pro Dokument einzigartige Teil der User-Message."""
+    """Der NICHT-cacheable, pro Dokument einzigartige Teil der User-Message.
+
+    Schließt mit einer Wiederholung der JSON-Anweisung. Die steht zwar schon im
+    System-Prompt, aber davor liegt hier der rohe OCR-Text — und ein 2026-08-24
+    Lauf verlor 17 von 400 Dokumenten daran, dass das Modell danach in
+    Notizform weiterschrieb (\"Bezugspersonen (nicht user): ...\") statt ein
+    JSON-Objekt zu liefern. Die Anweisung als Letztes zu wiederholen kostet
+    wenige Token und wirkt genau gegen dieses Abdriften. Ein Assistant-Prefill
+    (\"{\") wäre das schärfere Mittel, ist aber bei aktiviertem Thinking — dem
+    Default ab Opus 5 — nicht erlaubt.
+    """
     return (
         f"Dokument (ID {doc['id']}):\n"
         f"- Titel: {doc['title']}\n"
         f"- Absender-Typ: {doc['sender_type']}\n"
         f"- Tags: {doc['tags']}\n"
         f"- Text:\n{doc['text']}\n"
+        f"\nAntworte NUR mit dem JSON-Objekt für dieses Dokument — kein "
+        f"Fließtext, keine Notizen, keine Markdown-Fences.\n"
     )
 
 
@@ -611,20 +639,27 @@ def _classify_one(
     taxonomy: str,
     system: str,
 ) -> dict:
-    """As `_request_classification`, but retries once on a truncated or
-    unparseable answer. Both are non-deterministic — thinking depth varies per
-    run — so a second attempt usually succeeds where the first did not. API
-    errors are not retried here: the SDK already handles the retryable ones and
-    a rate limit has to reach the caller to abort the run.
+    """As `_request_classification`, but retries a truncated or unparseable
+    answer. All of these failures are non-deterministic — thinking depth varies
+    per run — so a repeat usually succeeds where the first attempt did not.
+
+    Three attempts rather than two: in the 2026-08-24 run a single retry still
+    left 17 of 400 documents without a verdict, and a document that reaches the
+    report as ERROR has cost its tokens without buying anything. API errors are
+    not retried here: the SDK already handles the retryable ones and a rate
+    limit has to reach the caller to abort the run.
     """
     last: Exception
-    for attempt in (1, 2):
+    for attempt in range(1, _CLASSIFY_ATTEMPTS + 1):
         try:
             return _request_classification(client, doc, taxonomy, system)
         except (TruncatedResponseError, json.JSONDecodeError, ValueError) as e:
             last = e
-            if attempt == 1:
-                print(f"      … Versuch 1 fehlgeschlagen ({e}){_no_json_snippet(e)} — wiederhole")
+            if attempt < _CLASSIFY_ATTEMPTS:
+                print(
+                    f"      … Versuch {attempt}/{_CLASSIFY_ATTEMPTS} fehlgeschlagen "
+                    f"({e}){_no_json_snippet(e)} — wiederhole"
+                )
                 time.sleep(2)
     raise last
 
