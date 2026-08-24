@@ -293,7 +293,21 @@ export async function seed(db: any): Promise<void> {
 
   // Resolve parent_id references for rows whose parent slug exists.
   for (const row of taxonomyRows) {
-    if (!row.parent_slug) continue;
+    if (!row.parent_slug) {
+      // A category promoted to top level in taxonomy.ts used to keep its old
+      // parent_id forever: the loop skipped every row without a parent_slug and
+      // so never cleared one. The classifier renders the taxonomy by walking
+      // down from the roots (`_taxonomy_outline`), so a stale parent misfiles
+      // the category in the outline — and if the old parent has meanwhile
+      // become a child of this very category, the resulting cycle drops both,
+      // plus everything beneath them, out of the prompt entirely. A label the
+      // model is never shown can never be chosen.
+      await db
+        .update(schema.documentCategories)
+        .set({ parent_id: null })
+        .where(eq(schema.documentCategories.slug, row.slug));
+      continue;
+    }
     const parent = (await db
       .select({ id: schema.documentCategories.id })
       .from(schema.documentCategories)

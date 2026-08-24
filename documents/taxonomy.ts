@@ -288,7 +288,11 @@ export const categoryTaxonomy: CategorySeed[] = [
         hint: "Kfz-Haftpflicht-, Teilkasko-, Vollkaskoversicherung: Beitragsrechnungen, Versicherungsscheine, Schadenmeldungen, Deckungskarten (z. B. HDI, HUK-COBURG, Allianz). Auch THG-Bonus/Prämie. NICHT Sachversicherung (→ versicherungen-sach).",
       },
       { slug: "fahrzeug-tuev", name: "TÜV / Hauptuntersuchung" },
-      { slug: "fahrzeug-werkstatt", name: "Werkstatt" },
+      {
+        slug: "fahrzeug-werkstatt",
+        name: "Werkstatt",
+        hint: "Rechnungen und Kostenvoranschläge einer Kfz-Werkstatt oder eines Reifendienstes: Reparatur, Wartung, Inspektion, Reifenwechsel, Ersatzteile, Karosserie. Auch wenn der Absender nur ein Firmenname ohne Branchenhinweis ist. NICHT Kfz-Versicherung (→ fahrzeug-versicherung), NICHT HU/AU (→ fahrzeug-tuev).",
+      },
     ],
   },
   {

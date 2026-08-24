@@ -131,6 +131,19 @@ describe("category boundaries settled after the scoreboard", () => {
   it("says belege is assigned by receipt capture, not by the classifier", () => {
     expect(hints.get("belege")!).toMatch(/nicht vom Klassifikator vergeben/i);
   });
+
+  it("describes fahrzeug-werkstatt, which the 2026-08-24 audit found undescribed", () => {
+    // It scored 0/6 while carrying no hint at all — the name "Werkstatt" was
+    // the only thing distinguishing it, and six unambiguous garage invoices
+    // went to sonstiges and finanzen-rechnungen instead. Of the categories the
+    // audit exercised it was the only one both hintless and at zero.
+    const hint = hints.get("fahrzeug-werkstatt");
+    expect(hint, "fahrzeug-werkstatt has no hint").toBeTruthy();
+    expect(hint!).toMatch(/Reparatur|Wartung|Inspektion/);
+    // The audit's six were all invoices from a plain company name with nothing
+    // automotive in it, which is what sent them to the generic buckets.
+    expect(hint!).toMatch(/Firmenname/);
+  });
 });
 
 /**

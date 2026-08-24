@@ -71,4 +71,17 @@ describe("taxonomy / database drift", () => {
     expect(updates.length).toBeGreaterThan(0);
     for (const u of updates) expect(u).not.toMatch(/set\([^)]*slug:/);
   });
+
+  it("clears a stale parent_id when a category moves to the top level", () => {
+    // The parent-resolution loop used to `continue` on every row without a
+    // parent_slug, so a category promoted to top level in taxonomy.ts kept its
+    // old parent_id forever. That matters because the classifier renders the
+    // taxonomy by walking down from the roots (`_taxonomy_outline` in the
+    // llm-service): a stale parent misfiles the category in the outline, and if
+    // the old parent has meanwhile become a child of this very category the
+    // resulting cycle drops both — and everything beneath them — out of the
+    // prompt altogether. A label the model is never shown cannot be chosen.
+    const branch = seed.match(/if \(!row\.parent_slug\)[\s\S]{0,900}?continue;/)?.[0] ?? "";
+    expect(branch, "top-level rows must have their parent_id cleared").toContain("parent_id: null");
+  });
 });

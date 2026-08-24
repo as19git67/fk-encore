@@ -741,6 +741,14 @@ export async function runClassify(documentId: number): Promise<{ classification:
   const patch: Partial<typeof documents.$inferInsert> = {
     status: "ready",
   };
+  // Provenance of the category decision (migration 0153). Written on every
+  // classify, including the protected case, because the question it answers —
+  // did the model or one of the three rule layers produce this label? — was
+  // previously recoverable only from a console.log line and therefore lost on
+  // the next container restart. The 2026-08-24 audit found nine slugs that were
+  // never once stored across 380 documents and could not tell a model that
+  // never picks them from a rule that overrides them.
+  patch.classifier_raw_category_slug = classification.category_slug || null;
   // Only overwrite the human-editable attributes when neither a human nor the
   // Cloud Teacher has asserted them. `attributes_reviewed=true` means a human
   // pinned them; `category_source IN ('cloud','user')` means a trusted source
@@ -757,6 +765,21 @@ export async function runClassify(documentId: number): Promise<{ classification:
     row.category_source === "user" ||
     row.category_source === "system" ||
     row.receipt_ocr_state != null;
+  // Mirrors the precedence on the `catSlug` line above. 'unresolved_slug' takes
+  // priority over naming a layer: when the chosen slug matched no category row
+  // the document kept its previous label, so no layer's answer was actually
+  // applied and naming one would misreport what happened.
+  patch.category_decided_by = categoryProtected
+    ? "pinned"
+    : cat == null
+      ? "unresolved_slug"
+      : contentSlug
+        ? "content_rule"
+        : ruleSlug
+          ? "sender_rule"
+          : learnedCatSlug
+            ? "learned"
+            : "model";
   if (!categoryProtected) {
     patch.category_id = resolvedCategoryId;
     patch.title = classification.title || row.title || row.original_filename;
