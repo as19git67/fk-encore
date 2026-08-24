@@ -63,10 +63,62 @@ class RunOptions(BaseModel):
     # model), and optionally an earlier label to compare it against.
     label: str | None = Field(None, pattern=LABEL_RE.pattern)
     compare_with: str | None = Field(None, pattern=LABEL_RE.pattern)
+    # cloud-audit only: set False to ignore an existing checkpoint and draw a
+    # fresh sample. Default (None) resumes whatever is on disk.
+    resume: bool | None = None
 
 
 _locks: dict[ToolName, asyncio.Lock] = {t: asyncio.Lock() for t in ToolName}
 _running: dict[ToolName, asyncio.subprocess.Process | None] = {t: None for t in ToolName}
+
+# Checkpoint base names each tool leaves in out/ (see the checkpoint helpers in
+# scripts/taxonomy/_common.py). A long cloud run writes one result per finished
+# document, so an interrupted run can carry on rather than re-paying for work
+# already done.
+_CHECKPOINT_NAMES: dict[ToolName, str] = {
+    ToolName.cloud_audit: "cloud_audit_checkpoint",
+}
+
+# Which tools were stopped by an operator rather than by the host.
+#
+# This is the whole distinction the checkpoint rests on, and it cannot be made
+# from the signal itself: a container stop and an explicit cancel both arrive at
+# the script as SIGTERM. What separates them is where the decision was made —
+# an explicit cancel comes through /cancel and sets this, while a restart kills
+# this process too, so on the way back up nothing is marked and the checkpoint
+# is still there to resume. In-memory on purpose: it must not survive a restart.
+_cancelled: dict[ToolName, bool] = {t: False for t in ToolName}
+
+# How long to wait for a cancelled run to stop on its own. The script finishes
+# the document it is holding before exiting, so this has to cover one API call.
+_CANCEL_GRACE_SECONDS = 30.0
+
+
+def _checkpoint_files(tool: ToolName) -> list[Path]:
+    name = _CHECKPOINT_NAMES.get(tool)
+    if name is None:
+        return []
+    out_dir = Path(SCRIPTS_DIR) / "out"
+    return [out_dir / f"{name}.json", out_dir / f"{name}.jsonl"]
+
+
+def _has_checkpoint(tool: ToolName) -> bool:
+    files = _checkpoint_files(tool)
+    return bool(files) and files[0].is_file()
+
+
+def _clear_checkpoint(tool: ToolName) -> bool:
+    """Discard a tool's resume state. Returns whether anything was there."""
+    removed = False
+    for path in _checkpoint_files(tool):
+        try:
+            path.unlink()
+            removed = True
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            log.warning("%s: could not remove %s: %s", tool.value, path.name, exc)
+    return removed
 
 
 def _build_command(tool: ToolName, opts: RunOptions) -> list[str]:
@@ -109,6 +161,8 @@ def _build_env(tool: ToolName, opts: RunOptions) -> dict[str, str]:
             env["AUDIT_TAX_SAMPLE"] = str(opts.tax_sample)
         if opts.focus_sections:
             env["AUDIT_TAX_FOCUS_SECTIONS"] = opts.focus_sections
+        if opts.resume is False:
+            env["AUDIT_RESUME"] = "0"
     elif tool == ToolName.cloud_teacher:
         if opts.dry_run:
             env["TEACHER_DRY_RUN"] = "1"
@@ -125,7 +179,10 @@ def _build_env(tool: ToolName, opts: RunOptions) -> dict[str, str]:
 @app.get("/health")
 async def health() -> dict[str, Any]:
     running = {t.value: _running[t] is not None for t in ToolName}
-    return {"status": "ok", "running": running}
+    # Which tools have an interrupted run waiting to be continued. Lets the
+    # admin UI say "start to continue" rather than silently resuming.
+    resumable = {t.value: _has_checkpoint(t) for t in ToolName if t in _CHECKPOINT_NAMES}
+    return {"status": "ok", "running": running, "resumable": resumable}
 
 
 @app.post("/run/{tool}")
@@ -147,8 +204,19 @@ async def run_tool(tool: ToolName, opts: RunOptions | None = None):
             cmd = _build_command(tool, opts)
             env = _build_env(tool, opts)
             start = time.monotonic()
-            log.info("%s: starting (%s)", tool.value, " ".join(cmd))
-            yield {"event": "start", "data": f"Starting {tool.value} ..."}
+            _cancelled[tool] = False
+            resuming = _has_checkpoint(tool) and opts.resume is not False
+            log.info(
+                "%s: starting (%s)%s",
+                tool.value, " ".join(cmd), " [resuming]" if resuming else "",
+            )
+            yield {
+                "event": "start",
+                "data": (
+                    f"Resuming {tool.value} from checkpoint ..."
+                    if resuming else f"Starting {tool.value} ..."
+                ),
+            }
 
             try:
                 proc = await asyncio.create_subprocess_exec(
@@ -173,14 +241,37 @@ async def run_tool(tool: ToolName, opts: RunOptions | None = None):
                 code = await proc.wait()
                 elapsed = round(time.monotonic() - start, 1)
 
-                if code == 0:
+                if _cancelled[tool]:
+                    # /cancel already cleared the checkpoint; repeat it here in
+                    # case the script wrote another result on its way out.
+                    _clear_checkpoint(tool)
+                    log.info("%s: cancelled by operator after %ss", tool.value, elapsed)
+                    yield {"event": "error", "data": f"Cancelled after {elapsed}s"}
+                elif code == 0:
                     log.info("%s: finished in %ss (exit 0)", tool.value, elapsed)
                     yield {"event": "done", "data": f"Finished in {elapsed}s (exit 0)"}
+                elif _has_checkpoint(tool):
+                    # Stopped without being cancelled and left resume state
+                    # behind — a restart, a deploy, or a rate-limit wall.
+                    log.warning(
+                        "%s: exited with code %s after %ss, checkpoint kept",
+                        tool.value, code, elapsed,
+                    )
+                    yield {
+                        "event": "error",
+                        "data": (
+                            f"Interrupted after {elapsed}s (exit {code}) — progress saved, "
+                            f"start again to continue where it stopped"
+                        ),
+                    }
                 else:
                     log.error("%s: exited with code %s after %ss", tool.value, code, elapsed)
                     yield {"event": "error", "data": f"Exited with code {code} after {elapsed}s"}
             except asyncio.CancelledError:
-                log.warning("%s: cancelled", tool.value)
+                # The browser went away, which says nothing about whether the
+                # operator wants the run discarded — so the checkpoint stays and
+                # the next start picks it up.
+                log.warning("%s: log stream closed, stopping run", tool.value)
                 if _running.get(tool):
                     _running[tool].terminate()  # type: ignore[union-attr]
                 yield {"event": "error", "data": "Cancelled"}
@@ -192,13 +283,47 @@ async def run_tool(tool: ToolName, opts: RunOptions | None = None):
 
 @app.post("/cancel/{tool}")
 async def cancel_tool(tool: ToolName):
+    """Stop a run for good — the only path that discards its resume state.
+
+    Everything else that ends a run (container stop, deploy, the browser
+    closing the log stream) leaves the checkpoint alone so the next start
+    continues where this one stopped. Cancelling is the operator saying they do
+    not want the rest of it, so the checkpoint goes too.
+    """
     proc = _running.get(tool)
+    had_checkpoint = _has_checkpoint(tool)
+
     if proc is None:
+        # Nothing running, but a checkpoint from an interrupted run may still be
+        # waiting to resume — cancelling that is a legitimate thing to want.
+        if had_checkpoint:
+            _clear_checkpoint(tool)
+            log.info("%s: discarded checkpoint (nothing was running)", tool.value)
+            return JSONResponse({"status": "checkpoint-discarded"})
         raise HTTPException(404, f"{tool.value} is not running")
+
+    _cancelled[tool] = True
+    log.info("%s: cancel requested", tool.value)
     try:
         proc.send_signal(signal.SIGTERM)
     except ProcessLookupError:
         pass
+
+    # Wait for the run to stop before clearing, so the checkpoint cannot be
+    # re-created by a document finishing after the delete.
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=_CANCEL_GRACE_SECONDS)
+    except asyncio.TimeoutError:
+        log.warning(
+            "%s: still running %ss after SIGTERM — killing", tool.value, _CANCEL_GRACE_SECONDS
+        )
+        try:
+            proc.kill()
+            await proc.wait()
+        except ProcessLookupError:
+            pass
+
+    _clear_checkpoint(tool)
     return JSONResponse({"status": "cancelled"})
 
 

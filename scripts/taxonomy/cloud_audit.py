@@ -33,8 +33,10 @@ Aufruf:
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
+import signal
 import sys
 import time
 from pathlib import Path
@@ -67,6 +69,15 @@ REQUEST_DELAY = float(os.environ.get("AUDIT_REQUEST_DELAY", "0"))
 # routinely cut off mid-JSON — a tenth of the 2026-08-23 sample failed that way,
 # each one surfacing only as an opaque parse error.
 MAX_OUTPUT_TOKENS = int(os.environ.get("AUDIT_MAX_TOKENS", "32000"))
+
+# Name of the checkpoint that lets an interrupted run pick up where it stopped
+# (see the checkpoint helpers in _common.py). AUDIT_RESUME=0 forces a fresh
+# sample even when a usable checkpoint is lying around.
+CHECKPOINT_NAME = "cloud_audit_checkpoint"
+RESUME_ENABLED = os.environ.get("AUDIT_RESUME", "1").lower() not in ("0", "false", "no")
+# Bump when the checkpoint's own layout changes so old files are not resumed
+# into code that no longer understands them.
+_CHECKPOINT_VERSION = 1
 
 # Sektionen, die in der letzten Diagnose auffällig waren: vorher tot
 # (anlage-euer, anlage-kind, mantelbogen, werbungskosten-v) oder plötzlich der
@@ -189,6 +200,31 @@ def _rows_to_docs(cols: list[str], rows: list[tuple]) -> list[dict]:
         d["local_tax_sections"] = _parse_tax_sections(d.pop("local_tax_sections_raw", None))
         docs.append(d)
     return docs
+
+
+def _fetch_documents_by_ids(conn, doc_ids: list[int]) -> list[dict]:
+    """Re-read an earlier run's sample, in the order it was drawn.
+
+    A resume cannot re-run `_sample_documents`: three of its four buckets use
+    ORDER BY random(), so a second draw would audit a different set of
+    documents and the results already paid for would not belong to it. The
+    checkpoint therefore stores the ids and this reads exactly those back.
+    """
+    if not doc_ids:
+        return []
+    cur = conn.cursor()
+    cur.execute(f"""
+        SELECT {_BASE_COLUMNS}
+        FROM documents d
+        JOIN document_categories c ON c.id = d.category_id
+        WHERE d.id = ANY(%s)
+    """, (doc_ids,))
+    cols = [desc[0] for desc in cur.description]
+    docs = _rows_to_docs(cols, cur.fetchall())
+    cur.close()
+    by_id = {d["id"]: d for d in docs}
+    # Documents deleted since the run started simply drop out of the sample.
+    return [by_id[i] for i in doc_ids if i in by_id]
 
 
 def _sample_documents(conn) -> list[dict]:
@@ -593,21 +629,84 @@ def _classify_one(
     raise last
 
 
+# ── Checkpoint / geordnetes Herunterfahren ───────────────────────────────────
+
+_shutdown_requested = False
+
+
+def _install_shutdown_handler() -> None:
+    """Turn SIGTERM/SIGINT into a request to stop between documents.
+
+    A container stop (deploy, watchtower update, `docker compose down`) arrives
+    as SIGTERM. Without a handler Python dies immediately, which is survivable
+    — every finished document is already fsynced to the checkpoint — but it
+    also kills the run mid-request and wastes that document's tokens. Stopping
+    between documents costs at most one in-flight request instead.
+
+    Deliberately does NOT clear the checkpoint: a signal cannot tell us whether
+    the operator cancelled or the host merely restarted, so the run stays
+    resumable and only an explicit cancel through the sidecar discards it.
+    """
+    def handler(signum, _frame):
+        global _shutdown_requested
+        if _shutdown_requested:
+            return  # second signal: let the default behaviour take over
+        _shutdown_requested = True
+        print(
+            f"\n[cloud_audit] Signal {signum} empfangen — beende nach dem "
+            f"laufenden Dokument. Der Checkpoint bleibt erhalten, ein neuer "
+            f"Lauf macht dort weiter.",
+            file=sys.stderr,
+        )
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(sig, handler)
+        except (ValueError, OSError):
+            pass  # not on the main thread — nothing to install
+
+
+def _run_fingerprint() -> str:
+    """Identity of a run's parameters.
+
+    A checkpoint may only be resumed by a run that would have drawn the same
+    kind of sample. Changing the model or the sample sizes makes the stored
+    results answer a different question, so the fingerprint changes with them
+    and the old checkpoint is discarded rather than silently mixed in.
+    """
+    payload = json.dumps({
+        "version": _CHECKPOINT_VERSION,
+        "model": CLAUDE_MODEL,
+        "sample": SAMPLE_SIZE,
+        "tax_sample": TAX_SAMPLE_SIZE,
+        "focus_sections": sorted(TAX_FOCUS_SECTIONS),
+    }, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf8")).hexdigest()[:16]
+
+
 def _classify_batch(
     client: anthropic.Anthropic,
     docs: list[dict],
     taxonomy: str,
     tax_outline: str,
+    on_result=None,
 ) -> tuple[list[dict], bool]:
     """Classify a batch of documents via Claude. Returns (results, aborted).
 
     `aborted` is True when a sustained rate-limit/overload made us stop early;
     the caller keeps the partial results and skips the rest of the run.
+
+    `on_result` is called with each finished document — success or ERROR row
+    alike — before the next request starts. That is what makes a run
+    resumable: it is the only moment at which we know a document is done and
+    have not yet risked anything on the next one.
     """
     system = _build_system(tax_outline)
     results: list[dict] = []
     batch_total = len(docs)
     for di, doc in enumerate(docs, 1):
+        if _shutdown_requested:
+            return results, False
         print(f"    [{di}/{batch_total}] Dok {doc['id']} — sende an Claude …")
         base = {
             "doc_id": doc["id"],
@@ -664,6 +763,8 @@ def _classify_batch(
                 "claude_tax_sections": [],
                 "tax_reasoning": "",
             })
+        if on_result is not None:
+            on_result(results[-1])
         if REQUEST_DELAY > 0:
             time.sleep(REQUEST_DELAY)
     return results, False
@@ -904,6 +1005,53 @@ def _write_dry_run(anon_docs: list[dict], taxonomy: str, tax_outline: str) -> No
     print(f"  Danach ohne AUDIT_DRY_RUN erneut starten.")
 
 
+def _resume_or_sample(conn) -> tuple[list[dict], list[dict], bool]:
+    """(already classified, still to classify, resumed?).
+
+    Resumes an interrupted run when the checkpoint on disk was written by a run
+    with the same parameters; otherwise draws a fresh sample and starts a new
+    checkpoint.
+    """
+    stored = c.checkpoint_load(CHECKPOINT_NAME) if RESUME_ENABLED else None
+    if stored is not None:
+        meta, done_results = stored
+        fingerprint = _run_fingerprint()
+        doc_ids = [int(i) for i in meta.get("doc_ids") or []]
+        if meta.get("fingerprint") != fingerprint:
+            print(
+                "[cloud_audit] Checkpoint gehört zu anderen Lauf-Parametern "
+                "(Modell/Stichprobengröße/Fokus-Sektionen) — wird verworfen.",
+                file=sys.stderr,
+            )
+        elif not doc_ids:
+            print("[cloud_audit] Checkpoint ohne Stichprobe — wird verworfen.", file=sys.stderr)
+        else:
+            docs = _fetch_documents_by_ids(conn, doc_ids)
+            done_ids = {r.get("doc_id") for r in done_results}
+            remaining = [d for d in docs if d["id"] not in done_ids]
+            missing = len(doc_ids) - len(docs)
+            print(
+                f"[cloud_audit] Setze unterbrochenen Lauf fort: "
+                f"{len(done_results)}/{len(doc_ids)} Dokumente bereits klassifiziert, "
+                f"{len(remaining)} offen."
+                + (f" {missing} Dokument(e) existieren nicht mehr." if missing else "")
+            )
+            return done_results, remaining, True
+    elif not RESUME_ENABLED and c.checkpoint_paths(CHECKPOINT_NAME)[0].is_file():
+        print("[cloud_audit] AUDIT_RESUME=0 — vorhandener Checkpoint wird ignoriert.")
+
+    print("[cloud_audit] Wähle Stichprobe aus …")
+    docs = _sample_documents(conn)
+    if docs:
+        c.checkpoint_begin(CHECKPOINT_NAME, {
+            "fingerprint": _run_fingerprint(),
+            "model": CLAUDE_MODEL,
+            "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "doc_ids": [d["id"] for d in docs],
+        })
+    return [], docs, False
+
+
 def main() -> None:
     print(f"[cloud_audit] Modell: {CLAUDE_MODEL}, Kategorie-Stichprobe: {SAMPLE_SIZE}, "
           f"Steuer-Stichprobe: {TAX_SAMPLE_SIZE}")
@@ -919,11 +1067,19 @@ def main() -> None:
     print("[cloud_audit] Lade Taxonomie …")
     taxonomy = _load_taxonomy_outline()
     tax_outline = _load_tax_sections_outline()
-    print("[cloud_audit] Wähle Stichprobe aus …")
-    docs = _sample_documents(conn)
+
+    # A dry run sends nothing and costs nothing, so it neither resumes an
+    # earlier run nor leaves a checkpoint behind for the next one.
+    done_results: list[dict] = []
+    resumed = False
+    if not DRY_RUN:
+        done_results, docs, resumed = _resume_or_sample(conn)
+    else:
+        print("[cloud_audit] Wähle Stichprobe aus …")
+        docs = _sample_documents(conn)
     conn.close()
 
-    if not docs:
+    if not docs and not done_results:
         print("[cloud_audit] Keine Dokumente gefunden.", file=sys.stderr)
         sys.exit(1)
 
@@ -939,23 +1095,45 @@ def main() -> None:
         print("[cloud_audit] FEHLER: ANTHROPIC_API_KEY nicht gesetzt.", file=sys.stderr)
         sys.exit(1)
 
+    _install_shutdown_handler()
+
     print(f"[cloud_audit] Starte Klassifikation mit {CLAUDE_MODEL} …")
     client = anthropic.Anthropic(api_key=api_key, max_retries=MAX_RETRIES)
-    all_results: list[dict] = []
+    all_results: list[dict] = list(done_results)
     total = len(anon_docs)
+    aborted = False
     for i in range(0, total, BATCH_SIZE):
+        if _shutdown_requested:
+            break
         batch = anon_docs[i:i + BATCH_SIZE]
         print(f"  Batch {i//BATCH_SIZE + 1}/{(total + BATCH_SIZE - 1)//BATCH_SIZE} "
               f"({len(batch)} Dokumente)...")
-        results, aborted = _classify_batch(client, batch, taxonomy, tax_outline)
+        results, aborted = _classify_batch(
+            client, batch, taxonomy, tax_outline,
+            on_result=lambda row: c.checkpoint_append(CHECKPOINT_NAME, row),
+        )
         all_results.extend(results)
         if aborted:
             print(
-                f"[cloud_audit] Rate-Limit — Abbruch nach {len(all_results)}/{total} "
-                f"Dokumenten. Teilergebnis wird ausgewertet und gespeichert.",
+                f"[cloud_audit] Rate-Limit — Abbruch nach {len(all_results)} "
+                f"Dokumenten. Teilergebnis wird ausgewertet und gespeichert; der "
+                f"Checkpoint bleibt erhalten, ein neuer Lauf macht dort weiter.",
                 file=sys.stderr,
             )
             break
+
+    # A signal means the host is taking the process away, not that the audit is
+    # done. Writing a report over the previous one would replace a complete
+    # measurement with a partial one, so leave the reports alone and let the
+    # checkpoint carry the work into the next run.
+    if _shutdown_requested:
+        print(
+            f"[cloud_audit] Abgebrochen nach {len(all_results)} Dokumenten "
+            f"(davon {len(done_results)} aus einem früheren Lauf). "
+            f"Kein Report geschrieben — erneut starten, um fortzusetzen.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
     # Generate report
     report, gold = _generate_report(all_results)
@@ -979,6 +1157,15 @@ def main() -> None:
               f"({100*tax_confirmed/len(local_tax_true):.1f}%)")
     print(f"[cloud_audit] Report: {(OUT / f'{_P}cloud_audit.md').relative_to(c.REPO_ROOT)}")
     print(f"[cloud_audit] Gold-Set: {len(gold)} bestätigte Labels → {_P}cloud_audit_gold.json")
+    if resumed:
+        print(f"[cloud_audit] (davon {len(done_results)} Dokumente aus einem "
+              f"früheren, unterbrochenen Lauf übernommen)")
+
+    # Only a run that reached its report is finished. A rate-limit abort wrote a
+    # partial report but keeps its checkpoint, so a later run can still fill in
+    # the documents it never got to.
+    if not aborted:
+        c.checkpoint_clear(CHECKPOINT_NAME)
 
 
 if __name__ == "__main__":

@@ -39,7 +39,7 @@ Ergebnisse reviewen unter `scripts/taxonomy/out/`:
 ## Cloud-Audit (Etappe F)
 
 `cloud_audit.py` lässt Claude eine Stichprobe klassifizieren und vergleicht das
-Ergebnis mit der lokalen Qwen-Klassifikation auf zwei unabhängigen Achsen:
+Ergebnis mit der lokalen Klassifikation auf zwei unabhängigen Achsen:
 
 - **Kategorie** (Default-Stichprobe 300: sonstiges + low-confidence + random).
 - **Steuerrelevanz / -sektionen** (Default-Stichprobe 100, gezielt aus den
@@ -72,10 +72,41 @@ AUDIT_REQUEST_DELAY=1.5 AUDIT_TAX_SAMPLE=60 AUDIT_SAMPLE=0 npm run audit:taxonom
 ```
 
 Ergebnisse: `out/cloud_audit.md` (Disagreement-Report — §1–4 Kategorie, §5
-Steuer inkl. Confusion-Matrix "Qwen steuerrelevant vs. Claude bestätigt" und
+Steuer inkl. Confusion-Matrix "lokal steuerrelevant vs. Claude bestätigt" und
 Bestätigungsrate je Sektion), `out/cloud_audit_gold.json` (bestätigte
 Gold-Labels, inkl. Steuerfeldern wo auch dort Übereinstimmung besteht),
 `out/cloud_audit_full.json` (alle Ergebnisse).
+
+### Fortsetzbarkeit (Checkpoint)
+
+Ein voller Lauf dauert lange genug, dass ihn irgendwann ein Container-Neustart
+(Deploy, Watchtower-Update, OOM) mitten in der Stichprobe trifft. Damit die
+bereits bezahlte API-Arbeit dabei nicht verloren geht, schreibt der Lauf nach
+**jedem** Dokument in einen Checkpoint in `out/`:
+
+- `cloud_audit_checkpoint.json` — Lauf-Parameter + die gezogene Stichprobe
+- `cloud_audit_checkpoint.jsonl` — ein Ergebnis pro Zeile, `fsync` nach jedem
+
+Beim nächsten Start wird der Checkpoint gefunden und der Lauf macht dort
+weiter; höchstens das eine Dokument, das gerade unterwegs war, geht verloren.
+Die Stichprobe steht mit im Checkpoint, weil sie per `ORDER BY random()`
+gezogen wird — ohne sie würde eine Fortsetzung eine ganz andere Menge
+auditieren. Der Checkpoint wird gelöscht, sobald ein Lauf seinen Report
+geschrieben hat.
+
+Wieder aufgenommen wird nur, wenn die Lauf-Parameter (Modell, Stichprobengrößen,
+Fokus-Sektionen) dieselben sind — sonst würden Urteile über zwei verschiedene
+Fragestellungen in einem Report landen. Bei Abweichung wird der Checkpoint
+verworfen und frisch gezogen. `AUDIT_RESUME=0` erzwingt das auch bei
+passenden Parametern.
+
+**Abbrechen heißt wirklich abbrechen.** Ein Container-Stop und ein Klick auf
+„Abbrechen" kommen beim Skript beide als SIGTERM an — unterscheidbar sind sie
+nur daran, wo die Entscheidung fiel. Nur der Weg über `/cancel` im Sidecar
+(also der Button im Admin-UI) löscht den Checkpoint; alles andere — Neustart,
+Deploy, geschlossener Browser-Tab, Rate-Limit-Abbruch — lässt ihn liegen und
+der nächste Start setzt fort. Ist gerade nichts am Laufen, verwirft „Abbrechen"
+einen wartenden Checkpoint (Antwort `checkpoint-discarded`).
 
 ## Modell-Scoreboard (`model_scoreboard.py`)
 

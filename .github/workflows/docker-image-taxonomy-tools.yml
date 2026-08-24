@@ -41,6 +41,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: pip install fastapi httpx pytest pydantic sse-starlette anthropic psycopg2-binary
+
+      - name: Run tests
+        working-directory: taxonomy-tools
+        run: pytest tests/ -v
+
       - name: Assemble build context
         run: bash taxonomy-tools/build-context.sh
 
