@@ -761,6 +761,7 @@ export interface UpdateDocumentTaxPayload {
   tax_relevant: boolean
   tax_year?: number | null
   tax_sections?: string[]
+  tax_reviewed?: boolean
 }
 
 export function listTaxYears() {

@@ -487,6 +487,29 @@ async function onUnpinAttributes() {
   }
 }
 
+async function onUnpinTax() {
+  if (!doc.value) return
+  savingTax.value = true
+  error.value = ''
+  info.value = ''
+  try {
+    // Release the pin so the classifier may overwrite tax fields on the next run.
+    doc.value = await updateDocumentTax(doc.value.id, {
+      tax_relevant: doc.value.tax_relevant,
+      tax_year: doc.value.tax_year,
+      tax_sections: doc.value.tax_sections.map((s) => s.slug),
+      tax_reviewed: false,
+    })
+    await reclassifyDocument(doc.value.id, {})
+    info.value = 'Steuer-Pin aufgehoben — KI-Neuanalyse läuft.'
+    setTimeout(load, 1500)
+  } catch (err: any) {
+    error.value = err.message || 'Aktion fehlgeschlagen'
+  } finally {
+    savingTax.value = false
+  }
+}
+
 async function onReclassify(options: { forceOcr?: boolean } = {}) {
   if (!doc.value) return
   saving.value = true
@@ -1186,6 +1209,29 @@ onBeforeUnmount(() => {
           </div>
 
           <div v-if="!editingTax" class="tax-view-mode">
+            <Message
+              v-if="doc.tax_reviewed"
+              severity="info"
+              :closable="false"
+              icon="pi pi-lock"
+              class="pinned-notice"
+            >
+              <div class="pinned-notice-body">
+                <span>
+                  Die Steuer-Zuordnung wurde manuell festgelegt und wird bei
+                  KI-Neuanalysen nicht überschrieben.
+                </span>
+                <Button
+                  v-if="auth.hasPermission('documents.edit')"
+                  label="Wieder von KI bestimmen lassen"
+                  icon="pi pi-sparkles"
+                  size="small"
+                  severity="secondary"
+                  :loading="savingTax"
+                  @click="onUnpinTax"
+                />
+              </div>
+            </Message>
             <div v-if="doc.tax_review_needed" class="tax-review-hint">
               <i class="pi pi-question-circle" />
               <span>
