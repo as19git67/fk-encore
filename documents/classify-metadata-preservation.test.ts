@@ -145,6 +145,31 @@ describe("runClassify — metadata a previous run extracted", () => {
     expect(row.category_id).toBe(await ensureCategory("fahrzeug-werkstatt", "Werkstatt"));
   });
 
+  it("reads the sender off the letterhead when the model returned none", async () => {
+    // The stored value is not the only source: a document that never had a
+    // sender still has one printed on it. Before extractSender existed the
+    // sender came from the model alone, so a quiet run left the field empty
+    // even when the letterhead named the company unmistakably.
+    await db.delete(documents).where(eq(documents.id, DOC_ID));
+    await db.execute(
+      sql`INSERT INTO documents
+            (id, user_id, sha256, original_filename, mime_type, size_bytes, disk_path,
+             status, extracted_text, sender, doc_date)
+          VALUES
+            (${DOC_ID}, ${USER_ID}, ${`sha-${DOC_ID}`}, 'doc.pdf', 'application/pdf', 1,
+             ${`/tmp/doc-${DOC_ID}.pdf`}, 'classifying',
+             ${"Muster Lebensversicherung AG\nBeispielplatz 1\n50679 Musterstadt\n\nMusterstadt, im Mai 2009"},
+             NULL, NULL)`,
+    );
+
+    await runClassify(DOC_ID);
+
+    const row = await readDoc();
+    expect(row.sender).toBe("Muster Lebensversicherung AG");
+    // and the month-only letterhead date resolves to the first of the month
+    expect(row.doc_date).toBe("2009-05-01");
+  });
+
   it("still clears a sender that names a household member", async () => {
     // The one case where an empty sender is an assertion rather than silence:
     // the model put a Bezugsperson in the sender field and the metadata cleanup

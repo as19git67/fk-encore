@@ -92,6 +92,7 @@ import {
   extractDocumentNumber,
   extractReferenceNumberTags,
   isSubjectPersonSender,
+  extractSender,
   reconcileSubjectPersonTags,
   restoreUmlautSpellings,
 } from "./metadata-extract";
@@ -448,6 +449,18 @@ export async function runClassify(documentId: number): Promise<{ classification:
   //
   //     An explicit rejection above is the exception: that stored value is
   //     known-wrong, so reinstating it would undo the rejection.
+  // 2b. Nothing from the model: read the sender off the letterhead ourselves
+  //     (see extractSender). Vetted against the household list exactly as the
+  //     model's answer was — a scan that grabbed the recipient block must not
+  //     get through a door the model's answer would have been stopped at — but
+  //     a rejection here is not recorded as one: it says the scan failed, not
+  //     that the stored sender is wrong.
+  if (!classification.sender) {
+    const scanned = extractSender(clipped);
+    if (scanned && !isSubjectPersonSender(scanned, subjectPersons)) {
+      classification.sender = scanned;
+    }
+  }
   if (!classification.sender && !senderRejected) {
     classification.sender = row.sender;
   }
