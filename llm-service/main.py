@@ -1756,8 +1756,9 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
     # empty/near-empty (observed in production: a completion that omitted
     # every field without a default — category_slug/title/summary/tags/
     # confidence — while returning in <500ms, i.e. a degenerate short
-    # completion, not a real classification attempt). At temperature=0.2 a
-    # second sample is not guaranteed to differ, but this class of failure is
+    # completion, not a real classification attempt). The first attempt decodes
+    # greedily, so a second sample would reproduce it exactly unless the retry
+    # changes something — see the temperature note below. This class of failure is
     # a one-off sampling artifact, unlike a value that validates as JSON *and*
     # parses into the schema but violates a constraint (e.g. a confidence
     # outside 0..1) — that reflects a real fact about the document and would
@@ -1776,14 +1777,35 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
     _CLASSIFY_MAX_ATTEMPTS = 2
 
     for attempt in range(1, _CLASSIFY_MAX_ATTEMPTS + 1):
+        # The first attempt decodes greedily (temperature 0). Classification is
+        # a labelling task with one right answer, not open-ended generation, so
+        # sampling buys nothing here — it only picks between candidates the
+        # model already ranks, and it made the pipeline irreproducible: the same
+        # document re-classified twice could land in different categories, and a
+        # field the model filled in one run could come back null in the next.
+        # That is not a hypothetical. It cost real data — `sender` and `doc_date`
+        # were written straight through, so a run that happened to stay quiet
+        # erased what an earlier one had extracted — and it made the model
+        # scoreboard unreadable, because the difference between two runs was
+        # partly sampling noise rather than the change under test.
+        #
+        # Greedy decoding does not make a wrong answer right; it makes a wrong
+        # answer *consistent*, which is the difference between a fixable
+        # taxonomy/hint problem and unfixable noise. Expect the first scoreboard
+        # after this to be able to drop: documents that were landing correctly
+        # only by chance now land wrong every time, and that is information, not
+        # a regression. (Batching can still flip a near-tie numerically, so this
+        # is reproducible rather than guaranteed identical.)
+        #
         # Retry variation: a degenerate first sample (empty/near-empty output)
-        # at temperature 0.2 tends to reproduce identically on a second call
-        # with the same prompt, so the retry MUST change the sampling. Raise
-        # the temperature and shed the few-shot examples — pure orientation,
-        # and the bulkiest optional prompt block; a small model overwhelmed by
-        # a long prompt is a plausible cause of a `{}` completion.
+        # reproduces exactly on a second greedy call with the same prompt, so
+        # the retry MUST change the sampling — all the more so now that the
+        # first attempt is deterministic. Raise the temperature and shed the
+        # few-shot examples — pure orientation, and the bulkiest optional prompt
+        # block; a small model overwhelmed by a long prompt is a plausible cause
+        # of a `{}` completion.
         retry = attempt > 1
-        temperature = 0.55 if retry else 0.2
+        temperature = 0.55 if retry else 0.0
         if retry and examples_active:
             # Keep whatever hint state the budget guard settled on — dropping
             # the examples is the retry's variation; re-adding shed hints would

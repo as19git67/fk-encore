@@ -436,9 +436,10 @@ export async function runClassify(documentId: number): Promise<{ classification:
     senderRejected = true;
   }
   // 2a. Absent is not the same as empty. Classification is sampled, not
-  //     deterministic (temperature 0.2, 0.55 on retry), so a re-classify in
-  //     which the model simply stays quiet about the sender must not erase one
-  //     an earlier run extracted. Carried forward HERE rather than at the patch
+  //     guaranteed to repeat — the first classify attempt now decodes greedily,
+  //     but a model change, a prompt change or a re-extracted text all produce
+  //     a different answer — so a re-classify in which the model simply stays
+  //     quiet about the sender must not erase one an earlier run extracted. Carried forward HERE rather than at the patch
   //     because the rule layers below key on `classification.sender`: the
   //     sender rules and the learned category/tag/tax memory. A document that
   //     silently lost its sender for one run also lost the learned rule that

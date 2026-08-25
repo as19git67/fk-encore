@@ -6,11 +6,14 @@ import { eq, sql } from "drizzle-orm";
  *
  * `doc_date` and `sender` used to be written straight through from the
  * classifier's answer, while the neighbouring `title` fell back to the stored
- * value. Classification is sampled rather than deterministic (the llm-service
- * uses temperature 0.2, 0.55 on retry), so the model returning null is not a
- * statement that the document has no sender — it is silence. Writing that
- * silence through erased good data, and the 2026-08-25 re-classify of the full
- * ~7000-document corpus did exactly that to a sizeable share of it.
+ * value. The model returning null is not a statement that the document has no
+ * sender — it is silence. Writing that silence through erased good data, and
+ * the 2026-08-25 re-classify of the full ~7000-document corpus did exactly that
+ * to a sizeable share of it: classification was sampled at the time, so a
+ * document could go quiet on one run and not the next. The first attempt now
+ * decodes greedily, which removes that particular flip-flop but not the need
+ * for this guard — a model change, a prompt change or a re-extracted text all
+ * still produce a different answer for the same document.
  *
  * The loss was not confined to the two columns. `classification.sender` is what
  * the sender rules and the learned category/tag/tax memory key on, and
