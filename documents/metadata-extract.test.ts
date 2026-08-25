@@ -274,6 +274,43 @@ describe("extractSender", () => {
     expect(extractSender("Herrn\nFrau\nFirma")).toBeNull();
   });
 
+  it("cuts the address off a line that carries both name and address", () => {
+    // Production regression: this whole line was stored as the sender, and
+    // then became the key the learned rules and the correspondent folder are
+    // built on. Note the single comma — the return-address strategy needs two,
+    // so the line fell through to the bare-letterhead one, which took it whole.
+    expect(extractSender("Beispiel Lebensversicherungs-AG, 10850 Musterstadt Es betreut Sie"))
+      .toBe("Beispiel Lebensversicherungs-AG");
+    // Same without any comma at all.
+    expect(extractSender("Beispiel Lebensversicherungs-AG 10850 Musterstadt"))
+      .toBe("Beispiel Lebensversicherungs-AG");
+    // …and with a PO box in between.
+    expect(extractSender("Beispiel AG, Postfach 12 34 56, 10850 Musterstadt")).toBe("Beispiel AG");
+  });
+
+  it("cuts a street tail even when no postcode follows it", () => {
+    expect(extractSender("Beispiel Versicherung AG, Beispielstr. 19")).toBe("Beispiel Versicherung AG");
+  });
+
+  it("keeps a comma that belongs to the name", () => {
+    // Why the cut is anchored on the address and not on the first comma: a
+    // comma is not reliably a boundary in a German company name.
+    expect(extractSender("Muster GmbH & Co. KG, Zweigniederlassung Musterstadt"))
+      .toBe("Muster GmbH & Co. KG, Zweigniederlassung Musterstadt");
+  });
+
+  it("does not mistake a five-digit document number for a postcode", () => {
+    // A postcode is only a postcode when a place name follows it. Without that
+    // check this line was cut down to "Rechnung Nr.".
+    expect(extractSender("Beispiel GmbH, Rechnung 12345 vom 01.02.2024"))
+      .toBe("Beispiel GmbH, Rechnung 12345 vom 01.02.2024");
+  });
+
+  it("does not take a line that opens with the kind of document it is", () => {
+    expect(extractSender("Rechnung Nr. 12345 der Beispiel GmbH")).toBeNull();
+    expect(extractSender("Mahnung der Beispiel GmbH")).toBeNull();
+  });
+
   it("ignores a letterhead far below the top of the document", () => {
     // Small print in a footer or an enclosed third-party document is not this
     // document's sender.

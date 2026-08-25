@@ -415,15 +415,45 @@ const RETURN_ADDRESS_LINE_RE =
   /^(?:absender\s*:?\s*)?(.{3,80}?)\s*,\s*[^,]{3,60}\s*,\s*(?:D\s*-\s*)?\d{5}\s+\p{Lu}/iu;
 
 /** Lines that are never a sender name, however organisation-like they look. */
-const SENDER_REJECT_RE = /^(?:an|herr|herrn|frau|firma|betreff|betr\.?|seite)\b|@|^\W*$/i;
+const SENDER_REJECT_RE =
+  /^(?:an|herr|herrn|frau|firma|betreff|betr\.?|seite|rechnung|mahnung|angebot|bescheid|mitteilung|kostenvoranschlag)\b|@|^\W*$/i;
 
 /** How far into the document a sender may be found. Letterheads are at the top. */
 const SENDER_SCAN_LINES = 40;
 /** A letterhead name is a name, not a paragraph. */
 const SENDER_MAX_CHARS = 80;
 
+/**
+ * Everything from a five-digit postcode onward, with any separator in front of
+ * it. A postcode begins the address; it is never part of the organisation's
+ * name, so this is a boundary the text states rather than one we guess at.
+ *
+ * The obvious alternative — cut at the first comma — is wrong. A comma is not
+ * reliably a boundary in a German company name: "Muster GmbH & Co. KG,
+ * Zweigniederlassung Musterstadt" and "Dr. Beispiel, Rechtsanwälte" would both
+ * lose half their name to it.
+ *
+ * The postcode must be followed by a capitalised place name. Five digits alone
+ * are not enough: "Rechnung Nr. 12345 der Beispiel GmbH" would otherwise be cut
+ * down to "Rechnung Nr." — a five-digit invoice or customer number looks exactly
+ * like a postcode, and only the place name after it settles which it is.
+ */
+const ADDRESS_TAIL_RE = /\s*[,;·|]?\s*(?:D\s*-\s*)?\b\d{5}\s+\p{Lu}.*$/u;
+
+/**
+ * A street-and-number tail after a comma, for the same line without a
+ * postcode ("Muster GmbH, Beispielstr. 19"). Requires the trailing number, so
+ * a branch or division name after the comma is left alone.
+ */
+const STREET_TAIL_RE = /\s*,\s*[^,]{2,40}?\s\d{1,4}\s*[a-zA-Z]?$/;
+
 function cleanSenderCandidate(value: string): string | null {
-  const cleaned = value.replace(/\s+/g, " ").replace(/[,;·|]+$/, "").trim();
+  // Strategy 3 takes a whole line, and a letterhead routinely prints the name
+  // and the address on one of them — "Beispiel Lebensversicherungs-AG, 10850
+  // Musterstadt Es betreut Sie" was stored verbatim as a sender, which then
+  // became the key the learned rules and the correspondent folder are built on.
+  const trimmed = value.replace(ADDRESS_TAIL_RE, "").replace(STREET_TAIL_RE, "");
+  const cleaned = trimmed.replace(/\s+/g, " ").replace(/[,;·|]+$/, "").trim();
   if (cleaned.length < 3 || cleaned.length > SENDER_MAX_CHARS) return null;
   if (!/\p{L}/u.test(cleaned)) return null;
   if (SENDER_REJECT_RE.test(cleaned)) return null;
