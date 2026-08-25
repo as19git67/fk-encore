@@ -220,6 +220,90 @@ describe("extractDocumentDate — month without a day", () => {
   });
 });
 
+describe("extractDocumentDate — the letterhead dates the document", () => {
+  it("prefers the month above the salutation over a full date in the body", () => {
+    // Production case: a letter headed "Oktober 2025" that later mentions a
+    // validity start in 2027 was filed under 2027. The old ordering ranked a
+    // fully stated date above a month-only one regardless of where each sat,
+    // so it was precise about the wrong date. A letter dates itself in its
+    // letterhead; everything below the salutation belongs to what the letter
+    // is about.
+    const text = [
+      "Beispiel AG",
+      "",
+      "Oktober 2025",
+      "",
+      "Sehr geehrte Damen und Herren,",
+      "",
+      "Ihr Vertrag ist gültig vom 01.01.2027 an.",
+    ].join("\n");
+    expect(extractDocumentDate(text)).toBe("2025-10-01");
+  });
+
+  it("applies the same rule to the 'Ort, im Monat Jahr' spelling", () => {
+    const text = [
+      "Musterstadt, im Oktober 2025",
+      "",
+      "Sehr geehrter Herr Muster,",
+      "",
+      "gültig vom 01.01.2027.",
+    ].join("\n");
+    expect(extractDocumentDate(text)).toBe("2025-10-01");
+  });
+
+  it("skips the reference block, which also sits above the salutation", () => {
+    // "Ihr Schreiben vom …" names the date of the letter being answered. The
+    // position rule would otherwise promote it over the real letterhead date,
+    // making this change actively worse than what it replaces.
+    const text = [
+      "Beispiel AG",
+      "Ihr Schreiben vom 12.03.2024",
+      "Datum 05.04.2024",
+      "",
+      "Sehr geehrte Damen und Herren,",
+    ].join("\n");
+    expect(extractDocumentDate(text)).toBe("2024-04-05");
+  });
+
+  it("does not take a month named in the subject line", () => {
+    // A subject line names the month the document is *about*.
+    const text = [
+      "Beispiel AG",
+      "Musterstadt, 05.04.2024",
+      "Betreff: Beitrag Oktober 2025",
+      "",
+      "Sehr geehrte Damen und Herren,",
+    ].join("\n");
+    expect(extractDocumentDate(text)).toBe("2024-04-05");
+  });
+
+  it("still ranks by anchor strength when there is no salutation", () => {
+    // Invoices, statements and tables have no salutation, so nothing marks
+    // where the letterhead ends. Those keep the old ordering entirely: a fully
+    // stated date outranks a month-only one wherever it sits.
+    expect(extractDocumentDate("Musterstadt, im Mai 2009\nRechnungsdatum 18.06.2009"))
+      .toBe("2009-06-18");
+  });
+
+  it("still finds a date that only appears below the salutation", () => {
+    const text = [
+      "Beispiel AG",
+      "",
+      "Sehr geehrte Damen und Herren,",
+      "",
+      "Rechnungsdatum 18.01.2021",
+    ].join("\n");
+    expect(extractDocumentDate(text)).toBe("2021-01-18");
+  });
+
+  it("does not accept a bare month-year below the salutation", () => {
+    // Above the letterhead boundary a lone month and year is the document
+    // dating itself; below it, it is prose.
+    expect(extractDocumentDate("Sehr geehrte Damen und Herren,\n\nab Oktober 2025 gilt …"))
+      .toBeNull();
+  });
+});
+
 describe("extractSender", () => {
   it("reads the comma-joined return address above the address window", () => {
     const text = [
@@ -272,6 +356,43 @@ describe("extractSender", () => {
   it("never returns a street, a postcode line or an address label", () => {
     expect(extractSender("Beispielstraße 1\n12345 Musterstadt")).toBeNull();
     expect(extractSender("Herrn\nFrau\nFirma")).toBeNull();
+  });
+
+  it("cuts the address off a line that carries both name and address", () => {
+    // Production regression: this whole line was stored as the sender, and
+    // then became the key the learned rules and the correspondent folder are
+    // built on. Note the single comma — the return-address strategy needs two,
+    // so the line fell through to the bare-letterhead one, which took it whole.
+    expect(extractSender("Beispiel Lebensversicherungs-AG, 10850 Musterstadt Es betreut Sie"))
+      .toBe("Beispiel Lebensversicherungs-AG");
+    // Same without any comma at all.
+    expect(extractSender("Beispiel Lebensversicherungs-AG 10850 Musterstadt"))
+      .toBe("Beispiel Lebensversicherungs-AG");
+    // …and with a PO box in between.
+    expect(extractSender("Beispiel AG, Postfach 12 34 56, 10850 Musterstadt")).toBe("Beispiel AG");
+  });
+
+  it("cuts a street tail even when no postcode follows it", () => {
+    expect(extractSender("Beispiel Versicherung AG, Beispielstr. 19")).toBe("Beispiel Versicherung AG");
+  });
+
+  it("keeps a comma that belongs to the name", () => {
+    // Why the cut is anchored on the address and not on the first comma: a
+    // comma is not reliably a boundary in a German company name.
+    expect(extractSender("Muster GmbH & Co. KG, Zweigniederlassung Musterstadt"))
+      .toBe("Muster GmbH & Co. KG, Zweigniederlassung Musterstadt");
+  });
+
+  it("does not mistake a five-digit document number for a postcode", () => {
+    // A postcode is only a postcode when a place name follows it. Without that
+    // check this line was cut down to "Rechnung Nr.".
+    expect(extractSender("Beispiel GmbH, Rechnung 12345 vom 01.02.2024"))
+      .toBe("Beispiel GmbH, Rechnung 12345 vom 01.02.2024");
+  });
+
+  it("does not take a line that opens with the kind of document it is", () => {
+    expect(extractSender("Rechnung Nr. 12345 der Beispiel GmbH")).toBeNull();
+    expect(extractSender("Mahnung der Beispiel GmbH")).toBeNull();
   });
 
   it("ignores a letterhead far below the top of the document", () => {

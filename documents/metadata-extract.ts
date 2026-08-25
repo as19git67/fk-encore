@@ -327,6 +327,121 @@ function extractAlignedColumnDate(text: string): string | null {
 }
 
 /**
+ * The salutation is the boundary between a German letter's letterhead and its
+ * body. Everything above it — the sender block, the reference block, the date
+ * line, the subject — is the document describing itself; everything below is
+ * what the document is about, including any number of dates belonging to other
+ * things (a validity start, a payment term, a policy anniversary).
+ */
+/** Patterns that may decide the date anywhere in the document (see below). */
+const RANKED_PATTERN_COUNT =
+  DATE_ANCHOR_PATTERNS.length + DATE_ANCHOR_MONTHNAME_PATTERNS.length +
+  DATE_ANCHOR_MONTHYEAR_PATTERNS.length;
+
+const SALUTATION_RE = /^[ \t]*(?:sehr geehrte|sehr geehrter|guten tag|liebe[rs]?\b|hallo\b)/im;
+
+/**
+ * The reference block ("Ihr Schreiben vom 12.03.2024", "Ihre Nachricht vom …")
+ * names the date of the letter being answered, not of this one — and it sits
+ * *above* the salutation, so the position rule below would otherwise promote it
+ * over the real letterhead date. Matched by looking back from the anchor, the
+ * same way `isNonDocumentDateMatch` recovers its label.
+ */
+const REFERENCE_DATE_RE =
+  /\b(?:ihr(?:e|es|em)?\s+(?:schreiben|nachricht|brief|anfrage|antrag|mail|e-?mail|fax)|ihr zeichen|bezugnehmend|in bezug auf)\b[^.\n]{0,20}$/i;
+
+function isReferenceDateMatch(text: string, m: RegExpExecArray): boolean {
+  return REFERENCE_DATE_RE.test(text.slice(Math.max(0, m.index - 60), m.index));
+}
+
+/** A bare "Oktober 2025" with no city and no "im" in front of it. */
+const BARE_MONTHYEAR_RE = /\b([A-ZÄÖÜ][a-zäöü]{2,8})\.?[ \t]+(\d{4})\b/g;
+
+/** Subject lines name the month the document is *about*, not its own. */
+const SUBJECT_LINE_RE = /^[ \t]*(?:betreff|betr\.?|thema|ihr zeichen|unser zeichen)\b/i;
+
+function isOnSubjectLine(text: string, index: number): boolean {
+  const lineStart = text.lastIndexOf("\n", index) + 1;
+  return SUBJECT_LINE_RE.test(text.slice(lineStart, index));
+}
+
+/**
+ * A date found in the text, with where it was found and how strong the evidence
+ * was. `rank` is the position of the pattern that produced it in the list
+ * below, so ordering by rank reproduces the pattern precedence exactly.
+ */
+interface DateCandidate {
+  iso: string;
+  index: number;
+  rank: number;
+}
+
+function collectDateCandidates(text: string, salutationAt: number): DateCandidate[] {
+  const found: DateCandidate[] = [];
+  let rank = 0;
+
+  // Iterate all matches per pattern (not just the first): a hit on a
+  // non-document label like "Geburtsdatum" must be skipped in favour of a
+  // later, real one rather than abandoning the pattern.
+  for (const re of DATE_ANCHOR_PATTERNS) {
+    const own = rank++;
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      if (isNonDocumentDateMatch(text, m) || isReferenceDateMatch(text, m)) continue;
+      const iso = toIsoDate(m[1], m[2], m[3]);
+      if (iso) found.push({ iso, index: m.index, rank: own });
+    }
+  }
+  // Written-month dates ("8. September 2017"). The month word is captured
+  // broadly, so a non-month word (e.g. "Datum: sehr geehrte …") must be skipped
+  // rather than aborting the scan.
+  for (const re of DATE_ANCHOR_MONTHNAME_PATTERNS) {
+    const own = rank++;
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      if (isNonDocumentDateMatch(text, m) || isReferenceDateMatch(text, m)) continue;
+      const month = monthFromName(m[2]);
+      if (month == null) continue;
+      const iso = toIsoDate(m[1], String(month), m[3]);
+      if (iso) found.push({ iso, index: m.index, rank: own });
+    }
+  }
+  // Month-year letterhead ("Wiesloch, im Mai 2009") — day defaults to the 1st.
+  for (const re of DATE_ANCHOR_MONTHYEAR_PATTERNS) {
+    const own = rank++;
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      const month = monthFromName(m[1]);
+      if (month == null) continue;
+      const iso = toIsoDate("1", String(month), m[2]);
+      if (iso) found.push({ iso, index: m.index, rank: own });
+    }
+  }
+  // A bare "Oktober 2025", accepted ONLY above the salutation and not on a
+  // subject line. In the letterhead a lone month and year is the document
+  // dating itself; anywhere else it is prose, which is why this pattern is not
+  // in the list above and cannot contribute to the fallback ordering.
+  if (salutationAt > 0) {
+    const own = rank++;
+    BARE_MONTHYEAR_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = BARE_MONTHYEAR_RE.exec(text)) !== null) {
+      if (m.index >= salutationAt) break;
+      if (isOnSubjectLine(text, m.index)) continue;
+      if (isReferenceDateMatch(text, m)) continue;
+      const month = monthFromName(m[1]);
+      if (month == null) continue;
+      const iso = toIsoDate("1", String(month), m[2]);
+      if (iso) found.push({ iso, index: m.index, rank: own });
+    }
+  }
+  return found;
+}
+
+/**
  * Deterministic fallback for the document date. The small model regularly
  * returns `doc_date=null` even when the date is plainly in the text
  * ("Datum: 11.08.14", "Rechnungsdatum        18.01.2021", "Datum: 09.05.2014").
@@ -341,46 +456,39 @@ function extractAlignedColumnDate(text: string): string | null {
  * date. Applied as a *fallback* in runClassify: it never overrides a date the
  * LLM did produce, whose nuanced choice (salary month, invoice date, …) is
  * better. Returns null when no anchored date is found. (#date-fallback)
+ *
+ * Two rules decide between several candidates, and the first one is the one
+ * that matters:
+ *
+ * 1. **Above the salutation, position wins over precision.** A letter dates
+ *    itself in its letterhead; every date below the salutation belongs to what
+ *    the letter is *about*. A document headed "Oktober 2025" that later
+ *    mentions "gültig vom 01.01.2027" is an October 2025 document, and the old
+ *    ordering picked 2027 because a full date outranked a month — precision
+ *    about the wrong date. The reference block is excluded from this, or the
+ *    rule would promote the date of the letter being answered.
+ * 2. **Below it, the strongest anchor wins**, as before: a "…datum" label beats
+ *    a "vom", which beats the "Ort, TT.MM.JJJJ" convention, which beats a
+ *    month without a day. Position only breaks ties. Documents with no
+ *    salutation at all — invoices, statements, tables — are decided entirely
+ *    this way, unchanged.
  */
 export function extractDocumentDate(text: string): string | null {
-  // Iterate all matches per pattern (not just the first): a hit on a
-  // non-document label like "Geburtsdatum" must be skipped in favour of a
-  // later, real one rather than abandoning the pattern.
-  for (const re of DATE_ANCHOR_PATTERNS) {
-    re.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(text)) !== null) {
-      if (isNonDocumentDateMatch(text, m)) continue;
-      const iso = toIsoDate(m[1], m[2], m[3]);
-      if (iso) return iso;
+  const salutationAt = SALUTATION_RE.exec(text)?.index ?? -1;
+  const candidates = collectDateCandidates(text, salutationAt);
+
+  if (salutationAt > 0) {
+    const letterhead = candidates.filter((c) => c.index < salutationAt);
+    if (letterhead.length > 0) {
+      letterhead.sort((a, b) => a.index - b.index || a.rank - b.rank);
+      return letterhead[0].iso;
     }
   }
-  // Written-month dates ("8. September 2017"). Iterate all matches per pattern:
-  // the month word is captured broadly, so a non-month word (e.g. "Datum: sehr
-  // geehrte …") must be skipped rather than aborting the scan.
-  for (const re of DATE_ANCHOR_MONTHNAME_PATTERNS) {
-    re.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(text)) !== null) {
-      if (isNonDocumentDateMatch(text, m)) continue;
-      const month = monthFromName(m[2]);
-      if (month == null) continue;
-      const iso = toIsoDate(m[1], String(month), m[3]);
-      if (iso) return iso;
-    }
-  }
-  // Month-year letterhead ("Wiesloch, im Mai 2009") — day defaults to the 1st.
-  // Runs after every day-bearing pattern: a date the document states in full is
-  // always the better answer.
-  for (const re of DATE_ANCHOR_MONTHYEAR_PATTERNS) {
-    re.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(text)) !== null) {
-      const month = monthFromName(m[1]);
-      if (month == null) continue;
-      const iso = toIsoDate("1", String(month), m[2]);
-      if (iso) return iso;
-    }
+
+  const rest = candidates.filter((c) => c.rank < RANKED_PATTERN_COUNT);
+  if (rest.length > 0) {
+    rest.sort((a, b) => a.rank - b.rank || a.index - b.index);
+    return rest[0].iso;
   }
   return extractColumnHeaderDate(text) ?? extractAlignedColumnDate(text);
 }
@@ -415,15 +523,45 @@ const RETURN_ADDRESS_LINE_RE =
   /^(?:absender\s*:?\s*)?(.{3,80}?)\s*,\s*[^,]{3,60}\s*,\s*(?:D\s*-\s*)?\d{5}\s+\p{Lu}/iu;
 
 /** Lines that are never a sender name, however organisation-like they look. */
-const SENDER_REJECT_RE = /^(?:an|herr|herrn|frau|firma|betreff|betr\.?|seite)\b|@|^\W*$/i;
+const SENDER_REJECT_RE =
+  /^(?:an|herr|herrn|frau|firma|betreff|betr\.?|seite|rechnung|mahnung|angebot|bescheid|mitteilung|kostenvoranschlag)\b|@|^\W*$/i;
 
 /** How far into the document a sender may be found. Letterheads are at the top. */
 const SENDER_SCAN_LINES = 40;
 /** A letterhead name is a name, not a paragraph. */
 const SENDER_MAX_CHARS = 80;
 
+/**
+ * Everything from a five-digit postcode onward, with any separator in front of
+ * it. A postcode begins the address; it is never part of the organisation's
+ * name, so this is a boundary the text states rather than one we guess at.
+ *
+ * The obvious alternative — cut at the first comma — is wrong. A comma is not
+ * reliably a boundary in a German company name: "Muster GmbH & Co. KG,
+ * Zweigniederlassung Musterstadt" and "Dr. Beispiel, Rechtsanwälte" would both
+ * lose half their name to it.
+ *
+ * The postcode must be followed by a capitalised place name. Five digits alone
+ * are not enough: "Rechnung Nr. 12345 der Beispiel GmbH" would otherwise be cut
+ * down to "Rechnung Nr." — a five-digit invoice or customer number looks exactly
+ * like a postcode, and only the place name after it settles which it is.
+ */
+const ADDRESS_TAIL_RE = /\s*[,;·|]?\s*(?:D\s*-\s*)?\b\d{5}\s+\p{Lu}.*$/u;
+
+/**
+ * A street-and-number tail after a comma, for the same line without a
+ * postcode ("Muster GmbH, Beispielstr. 19"). Requires the trailing number, so
+ * a branch or division name after the comma is left alone.
+ */
+const STREET_TAIL_RE = /\s*,\s*[^,]{2,40}?\s\d{1,4}\s*[a-zA-Z]?$/;
+
 function cleanSenderCandidate(value: string): string | null {
-  const cleaned = value.replace(/\s+/g, " ").replace(/[,;·|]+$/, "").trim();
+  // Strategy 3 takes a whole line, and a letterhead routinely prints the name
+  // and the address on one of them — "Beispiel Lebensversicherungs-AG, 10850
+  // Musterstadt Es betreut Sie" was stored verbatim as a sender, which then
+  // became the key the learned rules and the correspondent folder are built on.
+  const trimmed = value.replace(ADDRESS_TAIL_RE, "").replace(STREET_TAIL_RE, "");
+  const cleaned = trimmed.replace(/\s+/g, " ").replace(/[,;·|]+$/, "").trim();
   if (cleaned.length < 3 || cleaned.length > SENDER_MAX_CHARS) return null;
   if (!/\p{L}/u.test(cleaned)) return null;
   if (SENDER_REJECT_RE.test(cleaned)) return null;
