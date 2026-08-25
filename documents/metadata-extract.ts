@@ -86,6 +86,23 @@ function isNonDocumentDateMatch(text: string, m: RegExpExecArray): boolean {
   return NON_DOCUMENT_DATE_LABEL_RE.test(text.slice(start, m.index) + m[0]);
 }
 
+/**
+ * The letterhead convention with no day at all — "Wiesloch, im Mai 2009". The
+ * document states a month, so the day is genuinely unknown; the first of the
+ * month is the conventional reading and is what a human filing the document
+ * would write. Resolved to that rather than left null, because a document with
+ * no date at all drops out of every year-based view and out of the tax-year
+ * derivation.
+ *
+ * The `im` is required, not optional. Without it the pattern degrades to
+ * "<Capitalised word>, <Monat> <Jahr>", which matches ordinary prose ("Der
+ * Vertrag, Mai 2009 geschlossen, …") and would put a body-text month on the
+ * document. With it the match is the letterhead phrasing and little else.
+ */
+const DATE_ANCHOR_MONTHYEAR_PATTERNS: readonly RegExp[] = [
+  /\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-]+,[ \t]{0,3}im[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4})\b/g,
+];
+
 // Same anchors as above, but for German month-name dates ("8. September 2017").
 // The month word is captured broadly and validated against MONTHS afterwards
 // (so a non-month word never blocks a real match — the caller scans all matches
@@ -210,6 +227,106 @@ function extractColumnHeaderDate(text: string): string | null {
 }
 
 /**
+ * Cells of a line together with the column each one starts at. The index-based
+ * pass above needs only the cell order; aligning a value under its header needs
+ * the offset as well.
+ */
+function splitCellsWithOffsets(line: string): { text: string; start: number }[] {
+  const out: { text: string; start: number }[] = [];
+  const sep = /(?: {3,}|\t+)/g;
+  let pos = 0;
+  let m: RegExpExecArray | null;
+  const push = (raw: string, at: number) => {
+    const lead = raw.length - raw.trimStart().length;
+    out.push({ text: raw.trim(), start: at + lead });
+  };
+  while ((m = sep.exec(line)) !== null) {
+    push(line.slice(pos, m.index), pos);
+    pos = m.index + m[0].length;
+  }
+  push(line.slice(pos), pos);
+  return out;
+}
+
+/** A "…datum" word anywhere inside a cell, not necessarily alone in it. */
+const DATE_LABEL_WORD_RE = /\b[A-Za-zÄÖÜäöüß]*datum\b/gi;
+
+/** As CELL_DATE_RE / CELL_MONTHNAME_DATE_RE, but scanning for every match. */
+const LINE_DATE_RE = /\b(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})\b/g;
+const LINE_MONTHNAME_DATE_RE = /\b(\d{1,2})\.?[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4})\b/g;
+
+// A header cell has to look like a header. Without this a sentence that merely
+// contains the word "Datum" would turn the following line into a date source —
+// the guard the index-based pass gets from requiring the label to be alone in
+// its cell, which this pass deliberately relaxes.
+const HEADER_CELL_MAX_CHARS = 32;
+const HEADER_CELL_MAX_WORDS = 3;
+// How far a value may sit from its header before the two stop being one column.
+// OCR column offsets wobble by a few characters between the header row and the
+// data row; a neighbouring column is much further away than this.
+const COLUMN_ALIGN_TOLERANCE = 12;
+
+/** Every date in `line`, with the character span it occupies. */
+function datesWithOffsets(line: string): { iso: string; start: number; end: number }[] {
+  const out: { iso: string; start: number; end: number }[] = [];
+  for (const re of [LINE_DATE_RE, LINE_MONTHNAME_DATE_RE]) {
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(line)) !== null) {
+      const month = re === LINE_DATE_RE ? m[2] : String(monthFromName(m[2]) ?? 0);
+      const iso = toIsoDate(m[1], month, m[3]);
+      if (iso) out.push({ iso, start: m.index, end: m.index + m[0].length });
+    }
+  }
+  return out;
+}
+
+/**
+ * Second pass over the column-header layout, for the rows the index-based pass
+ * cannot read. It compares *character offsets* rather than cell counts, which
+ * is the information actually present in the two production shapes it exists
+ * for:
+ *
+ *     Nummer Kunden-Nr, Datum     Seite
+ *     5135897          52312 14.09.2010       I
+ *
+ * Here the header's own columns are not separated by wide gaps at all — three
+ * labels share one cell — so no cell index corresponds to anything. The date
+ * nevertheless sits directly beneath the word "Datum", which is the document
+ * stating which column it belongs to. The same applies when a value cell is
+ * missing and the counts no longer match: a date printed under the header is
+ * evidence about that header regardless of what its neighbours did.
+ *
+ * Runs after the index-based pass so the stricter reading always wins.
+ */
+function extractAlignedColumnDate(text: string): string | null {
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length - 1; i++) {
+    const values = datesWithOffsets(lines[i + 1]);
+    if (values.length === 0) continue;
+    for (const cell of splitCellsWithOffsets(lines[i])) {
+      if (!cell.text || cell.text.length > HEADER_CELL_MAX_CHARS) continue;
+      if (cell.text.split(/\s+/).length > HEADER_CELL_MAX_WORDS) continue;
+      DATE_LABEL_WORD_RE.lastIndex = 0;
+      let label: RegExpExecArray | null;
+      while ((label = DATE_LABEL_WORD_RE.exec(cell.text)) !== null) {
+        if (NON_DOCUMENT_DATE_LABEL_RE.test(label[0])) continue;
+        const from = cell.start + label.index;
+        const to = from + label[0].length;
+        let best: { iso: string; distance: number } | null = null;
+        for (const v of values) {
+          const distance = v.start > to ? v.start - to : v.end < from ? from - v.end : 0;
+          if (distance > COLUMN_ALIGN_TOLERANCE) continue;
+          if (!best || distance < best.distance) best = { iso: v.iso, distance };
+        }
+        if (best) return best.iso;
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Deterministic fallback for the document date. The small model regularly
  * returns `doc_date=null` even when the date is plainly in the text
  * ("Datum: 11.08.14", "Rechnungsdatum        18.01.2021", "Datum: 09.05.2014").
@@ -252,7 +369,125 @@ export function extractDocumentDate(text: string): string | null {
       if (iso) return iso;
     }
   }
-  return extractColumnHeaderDate(text);
+  // Month-year letterhead ("Wiesloch, im Mai 2009") — day defaults to the 1st.
+  // Runs after every day-bearing pattern: a date the document states in full is
+  // always the better answer.
+  for (const re of DATE_ANCHOR_MONTHYEAR_PATTERNS) {
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      const month = monthFromName(m[1]);
+      if (month == null) continue;
+      const iso = toIsoDate("1", String(month), m[2]);
+      if (iso) return iso;
+    }
+  }
+  return extractColumnHeaderDate(text) ?? extractAlignedColumnDate(text);
+}
+
+/**
+ * Legal forms and institution words that mark a line as naming an organisation
+ * rather than a person, a street or a subject line. Every sender strategy below
+ * requires one, which is what keeps the scan from picking up the recipient
+ * block: the recipient of a household's post is a household member, and their
+ * name carries no legal form.
+ */
+const ORGANISATION_RE =
+  /(?:\bg?mbh\b|\bag\b|\bkgaa\b|\bkg\b|\bohg\b|\bgbr\b|\bug\b|\bse\b|\be\.?\s?[vVgG]\.?(?:\s|$|,)|\bpartg(?:mbb)?\b|stiftung|sparkasse|volksbank|raiffeisenbank|\bbank\b|versicherung|krankenkasse|finanzamt|landratsamt|stadtwerke|stadtverwaltung|\bgemeinde\b|genossenschaft|apotheke|klinik|praxis|kanzlei|\bverlag\b|\bwerke\b)/i;
+
+/** "Rosenstraße 19", "Beispielweg 1a", "Musterplatz 1" — a street-and-number. */
+const STREET_LINE_RE = /^[^\d\n]{2,60}\s\d{1,4}\s*[a-zA-Z]?$/;
+
+/** "12345 Musterstadt", "D-12345 Musterstadt". */
+const POSTCODE_LINE_RE = /^(?:D\s*-\s*)?\d{5}\s+\p{Lu}[\p{L}.\-/ ]{1,40}$/u;
+
+/**
+ * The single-line return address printed above the address window, which German
+ * business letters set in small type and join with commas:
+ *
+ *     MUSTER & BEISPIEL GmbH, Beispielstraße 19, D-12345 Musterstadt
+ *
+ * The name is everything before the first comma. This shape is unambiguous —
+ * the recipient block is never comma-joined onto one line — so unlike the two
+ * strategies below it does not additionally require an organisation word.
+ */
+const RETURN_ADDRESS_LINE_RE =
+  /^(?:absender\s*:?\s*)?(.{3,80}?)\s*,\s*[^,]{3,60}\s*,\s*(?:D\s*-\s*)?\d{5}\s+\p{Lu}/iu;
+
+/** Lines that are never a sender name, however organisation-like they look. */
+const SENDER_REJECT_RE = /^(?:an|herr|herrn|frau|firma|betreff|betr\.?|seite)\b|@|^\W*$/i;
+
+/** How far into the document a sender may be found. Letterheads are at the top. */
+const SENDER_SCAN_LINES = 40;
+/** A letterhead name is a name, not a paragraph. */
+const SENDER_MAX_CHARS = 80;
+
+function cleanSenderCandidate(value: string): string | null {
+  const cleaned = value.replace(/\s+/g, " ").replace(/[,;·|]+$/, "").trim();
+  if (cleaned.length < 3 || cleaned.length > SENDER_MAX_CHARS) return null;
+  if (!/\p{L}/u.test(cleaned)) return null;
+  if (SENDER_REJECT_RE.test(cleaned)) return null;
+  if (STREET_LINE_RE.test(cleaned) || POSTCODE_LINE_RE.test(cleaned)) return null;
+  return cleaned;
+}
+
+/**
+ * Deterministic fallback for the sender, and the counterpart to
+ * `extractDocumentDate`. Until this existed the sender came from the LLM alone:
+ * `document_number` had the "#" rule and the date had the label scan, but a
+ * model that stayed quiet about the sender left the field empty even when the
+ * letterhead named the company unmistakably — a scan of the corpus after a full
+ * re-classify found that to be the common case, not the exception.
+ *
+ * Three shapes, most distinctive first:
+ *
+ *   1. the comma-joined return address above the address window,
+ *      "MUSTER & BEISPIEL GmbH, Beispielstraße 19, D-12345 Musterstadt";
+ *   2. an address block — a name line naming an organisation, followed by a
+ *      street line and a postcode line;
+ *   3. a letterhead line naming an organisation, e.g. "Beispiel
+ *      Finanzdienstleistungen AG" standing on its own at the top.
+ *
+ * Only the first `SENDER_SCAN_LINES` lines are considered, and 2 and 3 require
+ * an organisation word, so the recipient block — a household member's name over
+ * their own address — cannot win. `runClassify` additionally puts the result
+ * through `isSubjectPersonSender`, so a household member who does trade under a
+ * company name is still caught.
+ *
+ * Applied as a fallback only: it never overrides a sender the LLM produced.
+ */
+export function extractSender(text: string): string | null {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .slice(0, SENDER_SCAN_LINES);
+
+  // 1. Return-address line.
+  for (const line of lines) {
+    if (line.length > 160) continue;
+    const m = RETURN_ADDRESS_LINE_RE.exec(line);
+    if (!m) continue;
+    const candidate = cleanSenderCandidate(m[1]);
+    if (candidate) return candidate;
+  }
+
+  // 2. Address block: name over street over postcode.
+  for (let i = 0; i < lines.length - 2; i++) {
+    if (!ORGANISATION_RE.test(lines[i])) continue;
+    if (!STREET_LINE_RE.test(lines[i + 1])) continue;
+    if (!POSTCODE_LINE_RE.test(lines[i + 2])) continue;
+    const candidate = cleanSenderCandidate(lines[i]);
+    if (candidate) return candidate;
+  }
+
+  // 3. A bare letterhead line naming an organisation.
+  for (const line of lines) {
+    if (!ORGANISATION_RE.test(line)) continue;
+    const candidate = cleanSenderCandidate(line);
+    if (candidate) return candidate;
+  }
+
+  return null;
 }
 
 /**
