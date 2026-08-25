@@ -6,6 +6,7 @@ import {
   extractDocumentDate,
   extractDocumentNumber,
   extractReferenceNumberTags,
+  extractSender,
   isSubjectPersonSender,
   reconcileSubjectPersonTags,
   restoreUmlautSpellings,
@@ -136,11 +137,31 @@ describe("extractDocumentDate", () => {
       expect(extractDocumentDate("Datum\n8. September 2017")).toBe("2017-09-08");
     });
 
-    it("skips the row when the columns do not line up", () => {
-      // One value cell missing — the indices no longer correspond, so taking
-      // any of them would be a guess.
+    it("reads a mis-celled row by the column the date is printed in", () => {
+      // One value cell missing, so the cell indices no longer correspond. This
+      // used to return null on the grounds that picking any cell would be a
+      // guess — but it is not a guess: the date is printed directly beneath the
+      // word "Datum", which is the document saying which column it belongs to.
+      // `extractAlignedColumnDate` compares character offsets and reads it.
       const text = ["Kunden-Nr.   Datum        Betrag", "4711         18.01.2021"].join("\n");
+      expect(extractDocumentDate(text)).toBe("2021-01-18");
+    });
+
+    it("does not take a date printed under a different column", () => {
+      // The offset pass must stay a column alignment and not degrade into
+      // "any date on the following line".
+      const text = ["Datum        Kunden-Nr.                     Betrag",
+                    "             4711            30.06.2021    20,11"].join("\n");
       expect(extractDocumentDate(text)).toBeNull();
+    });
+
+    it("reads a header whose labels share one cell", () => {
+      // Production shape: the header's own columns are not separated by wide
+      // gaps at all, so no cell index corresponds to anything — but the date
+      // still sits under the word "Datum".
+      const text = ["Nummer Kunden-Nr, Datum     Seite",
+                    "5135897          52312 14.09.2010       I"].join("\n");
+      expect(extractDocumentDate(text)).toBe("2010-09-14");
     });
 
     it("does not treat a sentence mentioning 'Datum' as a column header", () => {
@@ -178,6 +199,86 @@ describe("extractDocumentDate", () => {
         "2019-03-12",
       );
     });
+  });
+});
+
+describe("extractDocumentDate — month without a day", () => {
+  it("reads the 'Ort, im Monat Jahr' letterhead convention as the 1st", () => {
+    expect(extractDocumentDate("Musterstadt, im Mai 2009")).toBe("2009-05-01");
+    expect(extractDocumentDate("Beispielheim, im September 2017\nSehr geehrte …")).toBe("2017-09-01");
+  });
+
+  it("prefers a fully stated date over a month-only one", () => {
+    const text = "Musterstadt, im Mai 2009\nRechnungsdatum 18.06.2009";
+    expect(extractDocumentDate(text)).toBe("2009-06-18");
+  });
+
+  it("does not read a month out of running prose", () => {
+    // Why the "im" is required: without it this shape is indistinguishable
+    // from an ordinary sentence naming a month.
+    expect(extractDocumentDate("Der Vertrag, Mai 2009 geschlossen, endet …")).toBeNull();
+  });
+});
+
+describe("extractSender", () => {
+  it("reads the comma-joined return address above the address window", () => {
+    const text = [
+      "MUSTER & BEISPIEL GmbH, Beispielstr. 19, D-72119 Musterhausen",
+      "",
+      "Erika Mustermann",
+      "Beispielstraße 1",
+      "12345 Musterstadt",
+    ].join("\n");
+    expect(extractSender(text)).toBe("MUSTER & BEISPIEL GmbH");
+  });
+
+  it("reads an address block whose name line names an organisation", () => {
+    const text = [
+      "Muster Lebensversicherung AG",
+      "Beispielplatz 1",
+      "50679 Musterstadt",
+      "",
+      "Ihre Rentenversicherung",
+    ].join("\n");
+    expect(extractSender(text)).toBe("Muster Lebensversicherung AG");
+  });
+
+  it("reads a bare letterhead line", () => {
+    const text = ["Beispiel Finanzdienstleistungen AG", "", "Musterstadt, im Mai 2009"].join("\n");
+    expect(extractSender(text)).toBe("Beispiel Finanzdienstleistungen AG");
+  });
+
+  it("takes the sender's block, not the recipient's", () => {
+    // The recipient of a household's post is a household member, whose name
+    // carries no legal form — which is what the organisation requirement buys.
+    const text = [
+      "Beispiel Versicherung AG",
+      "Beispielallee 7",
+      "50679 Musterstadt",
+      "",
+      "Herrn",
+      "Max Mustermann",
+      "Beispielstraße 1",
+      "12345 Musterstadt",
+    ].join("\n");
+    expect(extractSender(text)).toBe("Beispiel Versicherung AG");
+  });
+
+  it("returns null rather than guessing when no organisation is named", () => {
+    const text = ["Max Mustermann", "Beispielstraße 1", "12345 Musterstadt", "", "Hallo,"].join("\n");
+    expect(extractSender(text)).toBeNull();
+  });
+
+  it("never returns a street, a postcode line or an address label", () => {
+    expect(extractSender("Beispielstraße 1\n12345 Musterstadt")).toBeNull();
+    expect(extractSender("Herrn\nFrau\nFirma")).toBeNull();
+  });
+
+  it("ignores a letterhead far below the top of the document", () => {
+    // Small print in a footer or an enclosed third-party document is not this
+    // document's sender.
+    const text = [...Array(45).fill("Fließtext ohne Absender."), "Beispiel Muster GmbH"].join("\n");
+    expect(extractSender(text)).toBeNull();
   });
 });
 

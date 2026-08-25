@@ -92,6 +92,7 @@ import {
   extractDocumentNumber,
   extractReferenceNumberTags,
   isSubjectPersonSender,
+  extractSender,
   reconcileSubjectPersonTags,
   restoreUmlautSpellings,
 } from "./metadata-extract";
@@ -415,13 +416,54 @@ export async function runClassify(documentId: number): Promise<{ classification:
   if (!classification.doc_date) {
     classification.doc_date = extractDocumentDate(clipped);
   }
+  //     And if neither the model nor the scan produced one, keep the date the
+  //     document already carries rather than blanking it (see 2a below); the
+  //     tax-year derivation further down reads it too.
+  if (!classification.doc_date) {
+    classification.doc_date = row.doc_date;
+  }
   // 2. A recipient/Bezugsperson is never the sender — drop it if the
   //    classifier echoed a known subject person into the sender field.
   //    Checked against the FULL household list, not the persons named in this
   //    document: a sender the name detector didn't match (OCR noise, a lone
   //    surname) can still be a Bezugsperson, and must not survive as sender.
+  // Tracked separately from "the model returned nothing": this is a deliberate
+  // rejection and must clear the stored sender, whereas an absent answer must
+  // leave the stored one alone (see the patch below).
+  let senderRejected = false;
   if (isSubjectPersonSender(classification.sender, subjectPersons)) {
     classification.sender = null;
+    senderRejected = true;
+  }
+  // 2a. Absent is not the same as empty. Classification is sampled, not
+  //     guaranteed to repeat — the first classify attempt now decodes greedily,
+  //     but a model change, a prompt change or a re-extracted text all produce
+  //     a different answer — so a re-classify in which the model simply stays
+  //     quiet about the sender must not erase one an earlier run extracted. Carried forward HERE rather than at the patch
+  //     because the rule layers below key on `classification.sender`: the
+  //     sender rules and the learned category/tag/tax memory. A document that
+  //     silently lost its sender for one run also lost the learned rule that
+  //     had been filing it correctly, and fell back to whatever the model
+  //     guessed unaided. The stored value has a second reader as well —
+  //     `relocate.ts` derives the correspondent folder from `row.sender` — so
+  //     blanking it also moved the file on the next relocate.
+  //
+  //     An explicit rejection above is the exception: that stored value is
+  //     known-wrong, so reinstating it would undo the rejection.
+  // 2b. Nothing from the model: read the sender off the letterhead ourselves
+  //     (see extractSender). Vetted against the household list exactly as the
+  //     model's answer was — a scan that grabbed the recipient block must not
+  //     get through a door the model's answer would have been stopped at — but
+  //     a rejection here is not recorded as one: it says the scan failed, not
+  //     that the stored sender is wrong.
+  if (!classification.sender) {
+    const scanned = extractSender(clipped);
+    if (scanned && !isSubjectPersonSender(scanned, subjectPersons)) {
+      classification.sender = scanned;
+    }
+  }
+  if (!classification.sender && !senderRejected) {
+    classification.sender = row.sender;
   }
   // 2b. The small model regularly transliterates umlauts ("pruefung",
   //     "Gebuehrenbescheid") despite the prompt forbidding it. Restore the
@@ -783,6 +825,9 @@ export async function runClassify(documentId: number): Promise<{ classification:
   if (!categoryProtected) {
     patch.category_id = resolvedCategoryId;
     patch.title = classification.title || row.title || row.original_filename;
+    // Already carried forward from the stored row when this run produced
+    // nothing (steps 1b/2a above), so these write the effective value, not a
+    // stray null.
     patch.doc_date = classification.doc_date;
     patch.sender = classification.sender;
     patch.document_number = classification.document_number;
