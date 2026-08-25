@@ -372,6 +372,22 @@ describe("extractSender", () => {
     expect(extractSender("Beispiel AG, Postfach 12 34 56, 10850 Musterstadt")).toBe("Beispiel AG");
   });
 
+  it("cuts a return address separated by hyphens or dots rather than commas", () => {
+    // Production letterhead shape: "<Name> - Postfach <n> - <PLZ> <Ort>".
+    // Cutting only at the postcode left the box number attached to the name.
+    for (const sep of [" - ", " · ", " | "]) {
+      const line = `Beispiel Lebensversicherung AG${sep}Postfach 103969${sep}69029 Musterstadt`;
+      expect(extractSender(line), line).toBe("Beispiel Lebensversicherung AG");
+    }
+  });
+
+  it("keeps an unspaced hyphen, which belongs to the name", () => {
+    // The separator must be spaced on both sides — "Beispiel-Versicherung AG"
+    // and "Charles-de-Gaulle-Platz" are one token, not two fields.
+    expect(extractSender("Beispiel-Versicherung AG, 10850 Musterstadt"))
+      .toBe("Beispiel-Versicherung AG");
+  });
+
   it("cuts a street tail even when no postcode follows it", () => {
     expect(extractSender("Beispiel Versicherung AG, Beispielstr. 19")).toBe("Beispiel Versicherung AG");
   });
