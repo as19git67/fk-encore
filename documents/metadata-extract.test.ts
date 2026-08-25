@@ -220,6 +220,90 @@ describe("extractDocumentDate — month without a day", () => {
   });
 });
 
+describe("extractDocumentDate — the letterhead dates the document", () => {
+  it("prefers the month above the salutation over a full date in the body", () => {
+    // Production case: a letter headed "Oktober 2025" that later mentions a
+    // validity start in 2027 was filed under 2027. The old ordering ranked a
+    // fully stated date above a month-only one regardless of where each sat,
+    // so it was precise about the wrong date. A letter dates itself in its
+    // letterhead; everything below the salutation belongs to what the letter
+    // is about.
+    const text = [
+      "Beispiel AG",
+      "",
+      "Oktober 2025",
+      "",
+      "Sehr geehrte Damen und Herren,",
+      "",
+      "Ihr Vertrag ist gültig vom 01.01.2027 an.",
+    ].join("\n");
+    expect(extractDocumentDate(text)).toBe("2025-10-01");
+  });
+
+  it("applies the same rule to the 'Ort, im Monat Jahr' spelling", () => {
+    const text = [
+      "Musterstadt, im Oktober 2025",
+      "",
+      "Sehr geehrter Herr Muster,",
+      "",
+      "gültig vom 01.01.2027.",
+    ].join("\n");
+    expect(extractDocumentDate(text)).toBe("2025-10-01");
+  });
+
+  it("skips the reference block, which also sits above the salutation", () => {
+    // "Ihr Schreiben vom …" names the date of the letter being answered. The
+    // position rule would otherwise promote it over the real letterhead date,
+    // making this change actively worse than what it replaces.
+    const text = [
+      "Beispiel AG",
+      "Ihr Schreiben vom 12.03.2024",
+      "Datum 05.04.2024",
+      "",
+      "Sehr geehrte Damen und Herren,",
+    ].join("\n");
+    expect(extractDocumentDate(text)).toBe("2024-04-05");
+  });
+
+  it("does not take a month named in the subject line", () => {
+    // A subject line names the month the document is *about*.
+    const text = [
+      "Beispiel AG",
+      "Musterstadt, 05.04.2024",
+      "Betreff: Beitrag Oktober 2025",
+      "",
+      "Sehr geehrte Damen und Herren,",
+    ].join("\n");
+    expect(extractDocumentDate(text)).toBe("2024-04-05");
+  });
+
+  it("still ranks by anchor strength when there is no salutation", () => {
+    // Invoices, statements and tables have no salutation, so nothing marks
+    // where the letterhead ends. Those keep the old ordering entirely: a fully
+    // stated date outranks a month-only one wherever it sits.
+    expect(extractDocumentDate("Musterstadt, im Mai 2009\nRechnungsdatum 18.06.2009"))
+      .toBe("2009-06-18");
+  });
+
+  it("still finds a date that only appears below the salutation", () => {
+    const text = [
+      "Beispiel AG",
+      "",
+      "Sehr geehrte Damen und Herren,",
+      "",
+      "Rechnungsdatum 18.01.2021",
+    ].join("\n");
+    expect(extractDocumentDate(text)).toBe("2021-01-18");
+  });
+
+  it("does not accept a bare month-year below the salutation", () => {
+    // Above the letterhead boundary a lone month and year is the document
+    // dating itself; below it, it is prose.
+    expect(extractDocumentDate("Sehr geehrte Damen und Herren,\n\nab Oktober 2025 gilt …"))
+      .toBeNull();
+  });
+});
+
 describe("extractSender", () => {
   it("reads the comma-joined return address above the address window", () => {
     const text = [
