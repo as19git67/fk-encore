@@ -546,22 +546,38 @@ const SENDER_MAX_CHARS = 80;
  * down to "Rechnung Nr." — a five-digit invoice or customer number looks exactly
  * like a postcode, and only the place name after it settles which it is.
  */
-const ADDRESS_TAIL_RE = /\s*[,;·|]?\s*(?:D\s*-\s*)?\b\d{5}\s+\p{Lu}.*$/u;
+const ADDRESS_TAIL_RE = /\s*(?:\s[-–]\s|[,;·|])?\s*(?:D\s*-\s*)?\b\d{5}\s+\p{Lu}.*$/u;
+
+/**
+ * A PO box tail. Letterheads print the return address with a spaced hyphen or a
+ * middle dot as often as with a comma — "Beispiel Lebensversicherung AG -
+ * Postfach 103969 - 69029 Musterstadt" — and cutting only at the postcode
+ * leaves the box number attached to the name.
+ *
+ * The hyphen must be spaced on both sides. An unspaced one belongs to the name
+ * ("Beispiel-Versicherung AG", "Charles-de-Gaulle-Platz").
+ */
+const POBOX_TAIL_RE = /\s*(?:\s[-–]\s|[,;·|])\s*Postfach\b.*$/i;
 
 /**
  * A street-and-number tail after a comma, for the same line without a
  * postcode ("Muster GmbH, Beispielstr. 19"). Requires the trailing number, so
  * a branch or division name after the comma is left alone.
  */
-const STREET_TAIL_RE = /\s*,\s*[^,]{2,40}?\s\d{1,4}\s*[a-zA-Z]?$/;
+const STREET_TAIL_RE = /\s*(?:\s[-–]\s|[,;·|])\s*[^,;·|]{2,40}?\s\d{1,4}\s*[a-zA-Z]?$/;
 
 function cleanSenderCandidate(value: string): string | null {
   // Strategy 3 takes a whole line, and a letterhead routinely prints the name
   // and the address on one of them — "Beispiel Lebensversicherungs-AG, 10850
   // Musterstadt Es betreut Sie" was stored verbatim as a sender, which then
   // became the key the learned rules and the correspondent folder are built on.
-  const trimmed = value.replace(ADDRESS_TAIL_RE, "").replace(STREET_TAIL_RE, "");
-  const cleaned = trimmed.replace(/\s+/g, " ").replace(/[,;·|]+$/, "").trim();
+  const trimmed = value
+    .replace(ADDRESS_TAIL_RE, "")
+    .replace(POBOX_TAIL_RE, "")
+    .replace(STREET_TAIL_RE, "");
+  // Trailing separators are left behind by the cuts above ("… AG - Postfach
+  // 103969 -" once the postcode goes) and are never part of a name.
+  const cleaned = trimmed.replace(/\s+/g, " ").replace(/[,;·|\-–\s]+$/, "").trim();
   if (cleaned.length < 3 || cleaned.length > SENDER_MAX_CHARS) return null;
   if (!/\p{L}/u.test(cleaned)) return null;
   if (SENDER_REJECT_RE.test(cleaned)) return null;
