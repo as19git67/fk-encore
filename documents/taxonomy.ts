@@ -341,8 +341,8 @@ export const categoryTaxonomy: CategorySeed[] = [
       },
       {
         slug: "versicherungen-sach",
-        name: "Sach- & Haftpflichtversicherung",
-        hint: "Privathaftpflicht-, Hausrat-, Rechtsschutz-, Unfallversicherung: Beiträge, Policen, Schadenfälle (z. B. Janitos Privatschutz Haftpflicht; Makler wie Marsh, HVS). NICHT: Kfz-Versicherung (→ fahrzeug-versicherung), NICHT Wohngebäudeversicherung (→ wohnen-haus-gebaeudeversicherung oder wohnen-versicherung), NICHT Führerschein/Fahrzeugpapiere (→ fahrzeug-papiere).",
+        name: "Sach-, Haftpflicht- & Rechtsschutzversicherung",
+        hint: "Rechtsschutz-, Privathaftpflicht-, Hausrat-, Unfallversicherung: Beiträge, Policen, Schadenfälle (z. B. Janitos Privatschutz Haftpflicht; Makler wie Marsh, HVS). Es gibt keine eigene Rechtsschutz-Kategorie — eine Rechtsschutzversicherung gehört immer hierher. NICHT: Kfz-Versicherung (→ fahrzeug-versicherung), NICHT Wohngebäudeversicherung (→ wohnen-haus-gebaeudeversicherung oder wohnen-versicherung), NICHT Führerschein/Fahrzeugpapiere (→ fahrzeug-papiere).",
       },
       {
         slug: "versicherungen-berufsunfaehigkeit",

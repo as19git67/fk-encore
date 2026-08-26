@@ -86,7 +86,12 @@ fahrzeug-werkstatt, nicht fahrzeug.
 SAMMELKATEGORIEN: "sonstiges" und "finanzen-rechnungen" sind nicht
 austauschbar. Reihenfolge: (1) passende fachliche Kategorie; (2) sonst, wenn
 Rechnung, Kaufbeleg oder Zahlungsaufforderung über eine Lieferung oder Leistung
-→ finanzen-rechnungen, auch bei unbekanntem Absender; (3) erst dann sonstiges.`;
+→ finanzen-rechnungen, auch bei unbekanntem Absender; (3) erst dann sonstiges.
+
+NIEMALS EINEN SLUG ERFINDEN: category_slug MUSS wörtlich aus der Taxonomie
+stammen, auch wenn ein plausibel klingender Slug nach demselben Muster fehlt.
+Passt keine Unterkategorie exakt, wähle die nächstbeste vorhandene statt einen
+neuen Slug zu bilden.`;
 
 export const CLASSIFY_TAX_PROMPT = `
 
