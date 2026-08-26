@@ -144,6 +144,31 @@ describe("category boundaries settled after the scoreboard", () => {
     // automotive in it, which is what sent them to the generic buckets.
     expect(hint!).toMatch(/Firmenname/);
   });
+
+  it("names versicherungen-sach as the home for Rechtsschutz, which production hallucinated a slug for", () => {
+    // Production: classify(3198) returned category_slug="versicherungen-rechtsschutz",
+    // a slug that does not exist. The unresolved-slug guard in document-ops.ts
+    // caught it — the document kept its previous category rather than losing
+    // one — but the model still spent a classify call inventing a plausible
+    // sibling of fahrzeug-versicherung / wohnen-versicherung instead of using
+    // the real category, whose *name* did not say "Rechtsschutz" even though
+    // its hint always has.
+    const hint = hints.get("versicherungen-sach")!;
+    expect(hint).toMatch(/^Rechtsschutz/);
+    expect(hint).toMatch(/keine eigene Rechtsschutz-Kategorie/i);
+  });
+});
+
+describe("CLASSIFY_CATEGORY_RULES: never invent a slug", () => {
+  it("forbids a slug that merely follows the pattern of real ones", () => {
+    // The general-purpose counterpart to the versicherungen-sach hint above:
+    // category_slug had no "use only the given taxonomy" instruction at all,
+    // unlike tax_sections, which has had one twice over since #820. A model
+    // free to name any plausible-looking slug will do exactly that when the
+    // real category's name doesn't contain the word it is pattern-matching on.
+    expect(CLASSIFY_CATEGORY_RULES).toMatch(/niemals.{0,40}erfinden|nicht.{0,40}erfinden|erfinde.{0,40}nicht/i);
+    expect(CLASSIFY_CATEGORY_RULES).toMatch(/wörtlich/);
+  });
 });
 
 /**

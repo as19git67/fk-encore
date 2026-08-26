@@ -132,7 +132,7 @@ export const SENDER_RULES: readonly SenderRule[] = [
     category: "altersvorsorge-lebensversicherung",
   },
   {
-    note: "Janitos / Marsh / HVS → Sach- & Haftpflichtversicherung",
+    note: "Janitos / Marsh / HVS → Sach-, Haftpflicht- & Rechtsschutzversicherung",
     senders: ["janitos", "marshgmbh", "hvsversicherung"],
     category: "versicherungen-sach",
   },
