@@ -427,34 +427,36 @@ export async function extractPdfText(
     const textLayerLooksGood =
       textLayer.length >= MIN_TEXT_LAYER_CHARS && !hasPoorSpacing(textLayer);
 
+    // A born-digital PDF's own text layer is cleaner than anything OCR can
+    // recover from a rasterization of it, so it wins outright — and the
+    // decision rests on the text layer alone. Returning here rather than after
+    // the OCR call is the whole point: `ocrPdf` renders every page with
+    // pdftoppm and runs tesseract over each one, which is by far the most
+    // expensive step in the pipeline. It used to run for these documents too,
+    // and its result was then discarded unread on the very next line. Nothing
+    // consumed it — `source` is not persisted, and the `ocr_confidence` column
+    // belongs to the receipt extractor, not to this path.
+    if (!options.forceOcr && textLayerLooksGood) {
+      console.log(`[documents.text-extract] text layer looks good — skipping OCR`);
+      return { text: textLayer, source: "text_layer", pageCount, searchablePdf: null };
+    }
+
     if (options.forceOcr) {
       console.log(`[documents.text-extract] force_ocr=true — skipping text layer`);
-    } else if (textLayerLooksGood) {
-      console.log(
-        `[documents.text-extract] text layer looks good — running OCR anyway for consistency`,
-      );
     } else if (textLayer.length >= MIN_TEXT_LAYER_CHARS) {
       console.log(
         `[documents.text-extract] text layer looks broken (low space ratio) — running OCR`,
       );
     }
 
-    // Only spend the extra tesseract PDF-rendering pass when the original
-    // lacks a usable text layer — born-digital PDFs are already selectable in
-    // the viewer, so a sandwich PDF would just duplicate them.
-    const wantSearchablePdf = options.forceOcr || !textLayerLooksGood;
+    // Every path that reaches here either forced OCR or has no usable text
+    // layer, so the sandwich PDF is always wanted: without it a scanned page
+    // would have no selectable text in the viewer at all.
     const ocr = await ocrPdf(workPath, {
       repairFirst: pdfParseBrokenXref,
-      wantSearchablePdf,
+      wantSearchablePdf: true,
     });
     const ocrText = ocr.text;
-
-    // When forceOcr is set or the text layer is broken, prefer OCR outright.
-    // When the text layer looks good and OCR also succeeded, prefer the text
-    // layer — it's typically cleaner than OCR for born-digital PDFs.
-    if (!options.forceOcr && textLayerLooksGood) {
-      return { text: textLayer, source: "text_layer", pageCount, searchablePdf: null };
-    }
 
     if (
       !options.forceOcr &&
