@@ -144,6 +144,210 @@ export function buildVisualRows(words: OcrWord[]): OcrWord[][] {
   return rows.map((row) => [...row.words].sort((a, b) => a.left - b.left));
 }
 
+/**
+ * A vertical whitespace corridor has to be at least this many times the local
+ * text height before it reads as a column boundary rather than a wide word gap.
+ */
+const COLUMN_CORRIDOR_FACTOR = 4;
+
+/**
+ * A corridor spanning fewer rows than this is not a column. Two rows with a gap
+ * between them are a table header and its values far more often than they are
+ * two independent blocks.
+ */
+const MIN_BAND_ROWS = 3;
+
+/**
+ * The share of a band's rows that have content on BOTH sides of the corridor,
+ * above which the band is treated as a table and left joined.
+ *
+ * This is what separates the two cases that look identical to a gap detector.
+ * In a table nearly every row reaches across — that is what a row *is*, and
+ * splitting it would put "Datum" and the date it heads into different lines,
+ * which `extractAlignedColumnDate` reads by their shared column. Two blocks
+ * printed side by side have their own line rhythms and their own vertical
+ * extents, so most rows touch only one side.
+ */
+const TABLE_ROW_CORRESPONDENCE = 0.6;
+
+/**
+ * Both columns have to be running over at least this many rows before the
+ * corridor between them counts as a column boundary.
+ *
+ * Without it a single line with a wide gap inside it — a salutation, a spaced
+ * heading — forms a band with whatever short rows precede it, and the
+ * correspondence test waves it through: most rows fail to reach across not
+ * because there are two columns but because they are short. Measured, that
+ * split "Sehr geehrte" from "Damen und Herren,".
+ */
+const MIN_SIDE_ROWS = 2;
+
+interface Interval {
+  from: number;
+  to: number;
+}
+
+/**
+ * A lone punctuation mark is a scan artefact, not content. The page edges of a
+ * scanned letter routinely produce a column of stray "|" and "!" marks, and
+ * they are enough to make a row look like it reaches across a corridor — which
+ * would keep a band alive far past the two columns that justify it. They are
+ * still rendered; they just do not get a vote on where the columns are.
+ */
+function isContent(word: OcrWord): boolean {
+  const text = word.text.trim();
+  return text.length > 1 || /[\p{L}\p{N}]/u.test(text);
+}
+
+/** The horizontal gaps no word of rows `from`..`to` reaches into. */
+function freeIntervals(rows: OcrWord[][], from: number, to: number): Interval[] {
+  const spans: Interval[] = [];
+  for (let i = from; i <= to; i++) {
+    for (const word of rows[i]) {
+      if (isContent(word)) spans.push({ from: word.left, to: word.right });
+    }
+  }
+  if (spans.length === 0) return [];
+  spans.sort((a, b) => a.from - b.from);
+
+  const gaps: Interval[] = [];
+  let cursor = spans[0].to;
+  for (const span of spans) {
+    if (span.from > cursor) gaps.push({ from: cursor, to: span.from });
+    cursor = Math.max(cursor, span.to);
+  }
+  return gaps;
+}
+
+/** Median word height over a set of rows — the unit the corridor scales with. */
+function medianHeight(rows: OcrWord[][], from: number, to: number): number {
+  const heights: number[] = [];
+  for (let i = from; i <= to; i++) {
+    for (const word of rows[i]) heights.push(Math.max(1, word.bottom - word.top));
+  }
+  if (heights.length === 0) return 1;
+  heights.sort((a, b) => a - b);
+  return heights[Math.floor(heights.length / 2)];
+}
+
+/** Share of rows in the band with words on both sides of `splitAt`. */
+function rowCorrespondence(
+  rows: OcrWord[][], from: number, to: number, splitAt: number,
+): number {
+  let both = 0;
+  for (let i = from; i <= to; i++) {
+    if (reachesAcross(rows[i], splitAt)) both++;
+  }
+  return both / (to - from + 1);
+}
+
+/** True when this row has real content on both sides of the corridor. */
+function reachesAcross(row: OcrWord[], splitAt: number): boolean {
+  const content = row.filter(isContent);
+  return (
+    content.some((w) => w.right <= splitAt) && content.some((w) => w.left >= splitAt)
+  );
+}
+
+/**
+ * Split runs of rows that are really two blocks printed side by side, and emit
+ * each block's rows in turn instead of interleaved.
+ *
+ * `buildVisualRows` groups by baseline, which is right for a table and wrong
+ * for a letterhead: on a German business letter the recipient's address window
+ * sits to the left of the sender's contact block, the two share baselines, and
+ * the reconstruction merged them into single lines. The address block and the
+ * company's phone number ended up on the same line, which is what the
+ * classifier and the deterministic sender scan then had to read.
+ *
+ * Tesseract's own `block_num` looked like the answer and is not: measured on a
+ * production insurance letter it put the return-address line and the right-hand
+ * column's postcode line in one block, and the recipient's name in a block
+ * with fragments of the contact column. The geometry it derives those blocks
+ * from is sounder than the blocks themselves — between the two columns runs a
+ * corridor no word reaches into, and it ends exactly where the body text starts
+ * spanning the full width. That corridor is what this looks for.
+ *
+ * Deliberately one level deep and driven by the widest corridor: this is not a
+ * general page-segmentation pass, it is the two-column letterhead. A band is
+ * only split when it spans at least MIN_BAND_ROWS rows and its rows mostly do
+ * NOT reach across the corridor — see TABLE_ROW_CORRESPONDENCE.
+ */
+export function splitColumnBands(rows: OcrWord[][]): OcrWord[][] {
+  if (rows.length < MIN_BAND_ROWS) return rows;
+
+  const out: OcrWord[][] = [];
+  let i = 0;
+  while (i < rows.length) {
+    let bandEnd = -1;
+    let splitAt = -1;
+
+    // Grow the band while a corridor survives across all of its rows. The
+    // intersection can only shrink, so the first row that closes it ends the
+    // band — and that is the row where the body text starts spanning the page.
+    for (let j = i + MIN_BAND_ROWS - 1; j < rows.length; j++) {
+      const unit = medianHeight(rows, i, j);
+      const wide = freeIntervals(rows, i, j)
+        .filter((gap) => gap.to - gap.from >= COLUMN_CORRIDOR_FACTOR * unit);
+      if (wide.length === 0) break;
+      // The corridor already chosen has to survive. Without this the band grows
+      // on into the body text, where the two columns have long since merged but
+      // some unrelated gap — the margin, an indent — is still open, and the
+      // split jumps to that one. Measured on a production letter this made the
+      // pass separate the page's edge artefacts and leave the address block
+      // exactly as merged as it was.
+      const usable = splitAt < 0
+        ? wide
+        : wide.filter((gap) => gap.from <= splitAt && splitAt <= gap.to);
+      if (usable.length === 0) break;
+      const widest = usable.reduce((a, b) => (b.to - b.from > a.to - a.from ? b : a));
+      bandEnd = j;
+      splitAt = (widest.from + widest.to) / 2;
+    }
+
+    // Everything is judged over the corridor's full extent, and only then
+    // trimmed for output. Measuring after the trim would be circular: the trim
+    // ends the band on a row that reaches across, which is exactly the quantity
+    // the correspondence test is trying to estimate.
+    const corridorEnd = bandEnd;
+    let leftRows = 0;
+    let rightRows = 0;
+    for (let k = i; k <= corridorEnd; k++) {
+      const content = rows[k].filter(isContent);
+      if (content.some((w) => w.right <= splitAt)) leftRows++;
+      if (content.some((w) => w.left >= splitAt)) rightRows++;
+    }
+
+    // Past the last row that reaches across, the corridor is just empty page.
+    // Splitting there would move text below it above text that precedes it —
+    // on a real letter that moved the date line below the salutation.
+    while (bandEnd > i && !reachesAcross(rows[bandEnd], splitAt)) bandEnd--;
+
+    if (
+      corridorEnd - i + 1 < MIN_BAND_ROWS ||
+      leftRows < MIN_SIDE_ROWS ||
+      rightRows < MIN_SIDE_ROWS ||
+      rowCorrespondence(rows, i, corridorEnd, splitAt) >= TABLE_ROW_CORRESPONDENCE
+    ) {
+      out.push(rows[i]);
+      i++;
+      continue;
+    }
+
+    for (const side of [
+      (w: OcrWord) => w.right <= splitAt,
+      (w: OcrWord) => w.left > splitAt,
+    ]) {
+      for (let k = i; k <= bandEnd; k++) {
+        const part = rows[k].filter(side);
+        if (part.length > 0) out.push(part);
+      }
+    }
+    i = bandEnd + 1;
+  }
+  return out;
+}
+
 /** Render one visual row, keeping wide gaps as column separators. */
 export function formatVisualRow(words: OcrWord[]): string {
   let out = "";
@@ -171,7 +375,7 @@ export function formatVisualRow(words: OcrWord[]): string {
  * render, which the caller reads as "fall back to Tesseract's own text".
  */
 export function layoutTextFromWords(words: OcrWord[]): string {
-  return buildVisualRows(words)
+  return splitColumnBands(buildVisualRows(words))
     .map(formatVisualRow)
     .filter((line) => line.length > 0)
     .join("\n")

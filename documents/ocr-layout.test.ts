@@ -7,6 +7,7 @@ import {
   meanWordConfidence,
   parseTesseractTsv,
   shouldUseLayoutText,
+  splitColumnBands,
   type OcrWord,
 } from "./ocr-layout";
 
@@ -131,6 +132,105 @@ describe("layoutTextFromTsv", () => {
 
   it("yields an empty string for unusable output", () => {
     expect(layoutTextFromTsv("")).toBe("");
+  });
+});
+
+/**
+ * Measured on a production insurance letter, whose letterhead prints the
+ * recipient's address window on the left and the sender's contact block on the
+ * right. Sharing baselines, the two were merged into single lines: the
+ * recipient's name and the sender's agent details ended up on one line, and the
+ * return-address line picked up the right-hand column's postcode.
+ *
+ * Tesseract's own `block_num` does not separate them — on that letter it put
+ * the return-address line and the right column's postcode in one block. The
+ * corridor between the columns does, and it closes by itself where the body
+ * text starts spanning the page.
+ *
+ * Geometry only; every fixture below is synthetic.
+ */
+describe("splitColumnBands", () => {
+  /**
+   * Two columns of a letterhead, at x=100 (left) and x=700 (right). The left
+   * block is a four-line address window, the right one a longer contact block,
+   * so most rows carry only one of them — which is what tells the two apart
+   * from a table, where nearly every row reaches across.
+   */
+  function letterhead(): OcrWord[][] {
+    return [
+      [word("Empfänger", 100, 100)],
+      [word("Beispielstraße", 100, 130), word("Postanschrift:", 700, 130)],
+      [word("12345", 100, 160), word("Beispiel", 700, 160), word("AG", 745, 160)],
+      [word("Telefon:", 700, 190)],
+      [word("E-Mail:", 700, 220)],
+      [word("Internet:", 700, 250)],
+    ];
+  }
+
+  it("separates two blocks printed side by side", () => {
+    const out = splitColumnBands(letterhead()).map(formatVisualRow);
+    // Left column first, whole, then the right one — neither line mixes them.
+    expect(out).toEqual([
+      "Empfänger", "Beispielstraße", "12345",
+      "Postanschrift:", "Beispiel AG",
+      "Telefon:", "E-Mail:", "Internet:",
+    ]);
+  });
+
+  it("leaves a table joined", () => {
+    // The case the corridor detector cannot tell apart on gap width alone: a
+    // table has the same wide gaps, but nearly every row reaches across them,
+    // and splitting would separate a header from the value beneath it —
+    // exactly what extractAlignedColumnDate reads by their shared column.
+    const table: OcrWord[][] = [
+      [word("Datum", 100, 100), word("Rechnungs-Nr.", 700, 100)],
+      [word("12.03.19", 100, 130), word("77213-9042", 700, 130)],
+      [word("13.03.19", 100, 160), word("77213-9043", 700, 160)],
+      [word("14.03.19", 100, 190), word("77213-9044", 700, 190)],
+    ];
+    expect(splitColumnBands(table).map(formatVisualRow)).toEqual([
+      "Datum   Rechnungs-Nr.",
+      "12.03.19   77213-9042",
+      "13.03.19   77213-9043",
+      "14.03.19   77213-9044",
+    ]);
+  });
+
+  it("stops where the body text starts spanning the page", () => {
+    const rows = [
+      ...letterhead(),
+      [word("Sehr", 100, 280), word("geehrte", 145, 280), word("Damen", 400, 280),
+       word("und", 600, 280), word("Herren,", 700, 280)],
+    ];
+    const out = splitColumnBands(rows).map(formatVisualRow);
+    expect(out[out.length - 1]).toBe("Sehr geehrte   Damen   und   Herren,");
+  });
+
+  it("is not kept alive by the stray marks a scan leaves at the page edge", () => {
+    // A column of lone "|" marks down the margin is enough to make every row
+    // look like it reaches across some corridor. Left counting, it kept the
+    // band growing past the two real columns, and the split then landed on the
+    // margin instead of between them.
+    const rows = letterhead().map((row, i) => [...row, word("|", 1200, 100 + i * 30, 4)]);
+    const out = splitColumnBands(rows).map(formatVisualRow);
+    expect(out.slice(0, 3)).toEqual(["Empfänger", "Beispielstraße", "12345"]);
+  });
+
+  it("does not split a band too short to be a column", () => {
+    const two = letterhead().slice(1, 3);
+    expect(splitColumnBands(two).map(formatVisualRow)).toEqual([
+      "Beispielstraße   Postanschrift:",
+      "12345   Beispiel AG",
+    ]);
+  });
+
+  it("changes nothing on a single-column page", () => {
+    const rows = [
+      [word("Rechnung", 100, 100)],
+      [word("Position", 100, 130)],
+      [word("Summe", 100, 160)],
+    ];
+    expect(splitColumnBands(rows)).toEqual(rows);
   });
 });
 
