@@ -48,11 +48,18 @@ The starting position is better than it looks:
   fields. There is no "OCR this page image, give me boxes" endpoint.
 - **llm-service** runs GGUF models through llama.cpp, in-process or via a
   `llama-server` sidecar, with runtime model switching and a model download
-  manager. It is **text-only today** — no `mmproj` projector, no image content
-  parts, no vision model in the catalog.
+  manager. The *service* is text-only today — it exposes `/classify` and
+  `/embed`, never sends image content parts, and `build_args` in
+  [`llama_supervisor.py`](../llm-service/llama_supervisor.py) has no `--mmproj`
+  field. **The active model is not the limitation.** Gemma 4 is an
+  image-text-to-text family, so `gemma-4-26B-A4B-it-qat` can already see; what
+  is missing is the *projector file* and the plumbing to hand it an image.
+  llama.cpp keeps the vision tower in a separate `mmproj-*.gguf` that must be
+  downloaded alongside the weights and passed with `--mmproj`. Without it the
+  running server is text-only regardless of what the model can do.
 
-So: one new endpoint on the receipt service, one new capability on the LLM
-service, and a fusion layer in between.
+So: one new endpoint on the receipt service, an image path into the LLM service,
+and a fusion layer in between.
 
 ## The target pipeline
 
@@ -190,34 +197,58 @@ simply right — no VLM call needed. Flag: `DOCUMENTS_OCR_SECOND_ENGINE=1`.
 
 ### Stage 4 — the VLM resolver
 
-**Service side** (`llm-service`): a vision capability alongside the existing
-text model.
+**Service side** (`llm-service`): reach the vision half of the model that is
+already loaded.
 
-- `llama-server` supports multimodal projectors (`--mmproj`), and its
-  OpenAI-compatible endpoint accepts image content parts, so the *server*
-  backend is the path of least resistance; the in-process `llama-cpp-python`
-  path (pinned at 0.3.2) needs a chat handler per model family and should not
-  be the first target. Practically: the vision model runs as its **own
-  `llama-server` sidecar** — separate from the classifier — so switching or
-  unloading one does not disturb the other.
-- Model: a small VLM with a GGUF + `mmproj` pair. Gemma 3 (4B/12B) and the
-  Qwen VL line are the realistic candidates; note that the exact generation
-  names the request mentions ("Gemma 4", "Qwen 3.6") do not map onto shipping
-  GGUF releases, so stage 4 starts by pinning two concrete repo/file pairs and
-  measuring both against the stage-1 corpus before committing.
-- Endpoint `POST /vision/transcribe`: `{ image_b64, hint?, expected_type? }` →
-  `{ text, confidence, model }`, greedy decoding, tiny `max_tokens`, JSON
-  response format (`_resolve_classify_response_format` already does this for
-  the classifier), and a hard per-call timeout.
-- The prompt states the task once and defends against invention:
-  *"Transcribe exactly the text visible in this image. The OCR proposal is only
-  a hint and may be wrong. Do not use meaning or expectation to invent
-  characters. If a character is not legible, output `?`."*
-  `expected_type` (`date` | `amount` | `iban` | `document_number` | `text`) is
-  passed as a *format hint for the output*, never as permission to guess.
-- Cataloged and downloadable through the existing model manager, admin-visible
-  in `/models/files`, and reported in `/healthz` so an absent projector is
-  diagnosable.
+Three of the four pieces exist:
+
+- **The projector download.** `extra_urls` (`LLM_MODEL_EXTRA_URLS`, and the
+  per-configuration `extra_urls` column behind
+  [`user/llm-models.ts`](../user/llm-models.ts)) already fetches additional
+  files next to the GGUF — it was built for split shards, and an
+  `mmproj-*.gguf` is just another file. **No code change.**
+- **The llama-server flag.** `server_extra_args` (`LLM_SERVER_EXTRA_ARGS`) is
+  word-split and appended to the command line as an escape hatch for exactly
+  this case, so `--mmproj /models/mmproj-gemma-4-...gguf` can be passed today.
+  **No code change** — though stage 4 should promote it to a first-class
+  `mmproj` field on `LlmConfig` once it works, so the admin UI can show it and
+  `/healthz` can report it. `/props` on llama-server states whether multimodal
+  support actually came up; that is the cheap verification.
+- **The transport.** `LlamaServerClient.create_chat_completion` posts `messages`
+  through to `/v1/chat/completions` verbatim, so OpenAI-style `image_url`
+  content parts flow through untouched. **No code change.**
+- **The endpoint** — the part that must be written. `POST /vision/transcribe`:
+  `{ image_b64, hint?, expected_type? }` → `{ text, confidence, model }`, greedy
+  decoding, tiny `max_tokens`, JSON response format
+  (`_resolve_classify_response_format` already does this for the classifier),
+  hard per-call timeout.
+
+This means stage 4 can start as a **spike with zero service code**: point
+`extra_urls` at the projector, add `--mmproj` to `server_extra_args`, and curl
+`/v1/chat/completions` with a crop. If the transcription quality is there, the
+rest is an endpoint and a config field.
+
+Two constraints follow from the shared server:
+
+- **`LLM_BACKEND` must be `server`.** The in-process `llama-cpp-python` path
+  (pinned at 0.3.2) has no multimodal support for this model family, so an
+  `inproc` deployment — still the default in `docker-compose.env.example` —
+  stays text-only. The GPU image already runs the server backend.
+- **Vision requests queue behind classification.** `_run_blocking` funnels every
+  request through a single-worker executor and a semaphore with a 10 s acquire
+  timeout, and a busy classify takes 10–60 s. Crop transcriptions arriving
+  during a classification burst would 503. Options, to be decided on measured
+  latency: raise the acquire timeout for this endpoint, or run a second
+  `llama-server` for vision. A *separate* 26B model is a large RAM bill, so
+  sharing the loaded one is strongly preferred — the contention is a scheduling
+  problem, not a capacity one.
+
+The prompt states the task once and defends against invention:
+*"Transcribe exactly the text visible in this image. The OCR proposal is only a
+hint and may be wrong. Do not use meaning or expectation to invent characters.
+If a character is not legible, output `?`."*
+`expected_type` (`date` | `amount` | `iban` | `document_number` | `text`) is
+passed as a *format hint for the output*, never as permission to guess.
 
 **Caller side** (`documents/`): crop construction, which is where the accuracy
 actually comes from.
@@ -285,9 +316,10 @@ would paper over a bad one.
 
 ### Stage 7 — operations
 
-- Compose wiring for the vision sidecar (CPU and GPU images), memory notes:
-  PaddleOCR + embedder + classifier + VLM on one box is a real RAM budget, and
-  the vision sidecar should be startable independently.
+- Compose wiring: the projector URL in `extra_urls`, `--mmproj` promoted out of
+  `server_extra_args`, and the `LLM_BACKEND=server` requirement documented.
+  Memory notes: PaddleOCR + embedder + a 26B classifier on one box is already a
+  real RAM budget, which is why the vision path reuses the loaded model.
 - Timing lines extended the way the existing summary is
   (`resolver 1832ms — 7 spans, 3 paddle-resolved, 4 vlm, 1 rejected`), so the
   cost is visible in the same grep as the rest of the extraction.
@@ -305,7 +337,7 @@ would paper over a bad one.
 | `DOCUMENTS_OCR_VLM_MAX_SPANS` | `8` | Hard cap on VLM calls per document |
 | `DOCUMENTS_OCR_VLM_BUDGET_MS` | `30000` | Per-document resolver budget, checked between spans |
 | `DOCUMENTS_OCR_VLM_MARGIN` | `0.2` | Crop margin as a fraction of the span box |
-| `VLM_SERVICE_URL` | — | Vision sidecar base URL; unset disables the stage |
+| `LLM_MMPROJ_PATH` | — | Multimodal projector handed to llama-server; unset disables the stage |
 
 ## Risks and how each is contained
 
@@ -313,7 +345,7 @@ would paper over a bad one.
 | --- | --- |
 | VLM invents plausible text | Transcription-only prompt, crop-scoped, stage-5 validation, decision falls back to OCR |
 | Latency on a CPU-only deployment | Spans only, hard cap and time budget, whole stage flag-off by default |
-| Memory pressure from a fourth model | Separate sidecar, startable independently, GPU image sizing documented |
+| Memory pressure from a second model | Reuse the loaded multimodal model rather than starting a second one; a separate sidecar only if contention measurements demand it |
 | Paddle and Tesseract boxes don't align | Overlap-based alignment with a confusable-folded comparison; a failed alignment degrades to "no second voice", not to a wrong merge |
 | Regression on documents that work today | Every stage flagged off; the resolver only ever *replaces* spans it flagged, and only when validation passes |
 | Effort spent on the wrong bottleneck | Stage 1 measures first; if the corpus shows Paddle alone closes most of the gap, stage 4 can be deferred indefinitely |
