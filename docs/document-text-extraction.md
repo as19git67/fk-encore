@@ -28,7 +28,7 @@ runTextExtract(documentId)
 ├── thumbnail warm-up                    (best-effort, never blocks)
 ├── extractPdfText(path, { forceOcr, docId })
 │   ├── 1. encryption gate               qpdf --requires-password
-│   ├── 2. text layer                    pdf-parse
+│   ├── 2. text layer                    pdf-parse + pdf-text-layout.ts
 │   ├── 3. the decision                  ── text layer usable? → return
 │   └── 4. ocrPdf()                      ── otherwise
 │       ├── rasterize                    pdftoppm -r 200 -png
@@ -189,46 +189,68 @@ returns nothing — falls back to deterministic scans in
 All of these read *lines*. They assume that a line in `extracted_text`
 corresponds to a line on the page — which is what the layout rebuild provides.
 
-## Known limitation: the text-layer path gets no layout reconstruction
+## The text-layer path: separators recovered, reading order not
 
-`layoutTextFromTsv` is reachable only from `ocrPdf`. A born-digital PDF returns
-`pdf-parse`'s output verbatim, with no geometric reconstruction at all — no
-visual rows, no column separation, no `splitColumnBands`.
+`pdf-parse` renders a page by walking text items in content-stream order,
+breaking a line whenever the baseline y changes and **concatenating items that
+share a baseline with nothing between them**. Two defects follow.
 
-The reading order of a text layer is whatever its producer chose. Extracting the
-same two-column letterhead without geometry (`pdftotext` without `-layout`,
-which is structurally what this path does) yields:
+**Missing separators — fixed.** Items printed far apart on one line arrived
+fused: `12345 MusterstadtMax Mustermann`, `Versicherungsnummer:R-00000000-00`,
+and on a real PDF from pdf-parse's own corpus
+`Categories and Subject DescriptorsD.3.4` and `KeywordsJavaScript`. Nothing
+downstream noticed: `hasPoorSpacing` looks for spaces lost *inside* words, and a
+fused pair trips at most one of its four signals.
 
-```
-Postanschrift:
-Beispiel Versicherung AG - Postfach 103969 - 12345 Musterstadt   ← left column
-Beispiel Versicherung AG
-Postfach 103969
-12345 Musterstadt
-Max Mustermann                                                   ← recipient
-...
-Versicherungsnummer:
-Versicherungsnehmer:          ← both labels first
-R-00000000-00
-Max Mustermann                ← then both values
-```
+`pdf-text-layout.ts` supplies a `pagerender` that keeps pdf-parse's item order
+and line breaks exactly, and inserts a separator only where the items' own
+coordinates prove there is horizontal space — a single space across an ordinary
+word gap, the same three-space `COLUMN_SEPARATOR` the OCR path uses across a
+column-width one. An item that starts *left* of the previous one cannot be that
+one continuing (a split word advances rightward), so it is separated too; this
+is the common case where content-stream order emits a right-hand column before
+the left-hand one sharing its baseline. Items that genuinely abut are left
+fused, because that is a word split by a style change and a space would break
+it.
 
-Two failures the OCR path does not have: the columns are interleaved, and a
-label is separated from its value. `pdf-parse` also concatenates visually
-separated items without inserting a space (observed: `Headers:DejaVuSans Bold`),
-where `formatVisualRow` would emit a column separator.
+The change can only ever add characters. Verified on pdf-parse's corpus: ink
+(whitespace stripped) is identical before and after on all four documents, and
+the two-column journal article is byte-for-byte unchanged.
+`DOCUMENTS_TEXT_LAYER_SPACING=0` restores the fused rendering.
 
-So the answer to "can the deterministic extractors read a born-digital PDF as
-well as a scanned one?" is: **not necessarily, and we do not currently control
-it.** For a simple single-column document the text layer is cleaner than any
-OCR of it. For a structured one it can be worse, and nothing in the pipeline
-detects the difference — `hasPoorSpacing` catches lost *spaces*, not a
-scrambled reading order.
+**Reading order — still whatever the producer chose.** Content-stream order is
+the order the text was written, not the order it appears. Rebuilding the page
+from geometry the way the OCR path does was built and measured, and is not safe
+to ship:
 
-Closing this would mean rebuilding the layout from the text layer's own
-geometry (pdf.js exposes per-item transforms; `pdftotext -layout` is the
-off-the-shelf equivalent) and feeding it through the same `buildVisualRows` /
-`splitColumnBands` path the OCR side uses. Not implemented.
+- On a two-column letterhead it worked, pairing rows correctly
+  (`Versicherungsnummer:   R-00000000-00`).
+- On a two-column journal article it destroyed the page. Merging by baseline
+  fused the two columns of every visual line and `splitColumnBands` did not
+  separate them again — it is tuned on Tesseract's word boxes, which are many
+  and narrow, while text-layer items are few and wide, so its gap statistics
+  read completely differently. Splitting items into words to imitate that input
+  shape produced interleaved word salad.
+
+Both variants passed `shouldUseLayoutText`, which compares *ink* — 15782
+characters either way on the article. Ink cannot see a scrambled reading order,
+the same blind spot `hasPoorSpacing` has. Closing this needs column separation
+that works on text-layer geometry; `splitColumnBands` does not currently provide
+it. Not implemented.
+
+## Small PDFs never reached the text layer at all
+
+Node pools allocations under 8 KB, so `fs.readFile` on a small file returns a
+Buffer that is a *view* into a shared 8192-byte pool at a non-zero
+`byteOffset`. The pdf.js build bundled in pdf-parse reads the underlying
+ArrayBuffer without honouring that offset, parses the pool instead of the PDF,
+and throws `bad XRef entry` on a document poppler reads without complaint.
+
+Every PDF under ~8 KB therefore failed the text-layer read and fell through to
+OCR — slower, and worse than the text layer it already had. Larger files get
+their own ArrayBuffer at offset 0 and were never affected, which is why it went
+unnoticed. `ownedBytes` copies into a `new Uint8Array(n)`, which always owns an
+exactly-sized ArrayBuffer.
 
 ## Where the time goes
 
@@ -303,6 +325,7 @@ dominates, and the stages have completely different remedies.
 | `DOCUMENTS_OCR_LAYOUT` | `1` | Layout rebuild incl. column splitting; `0` uses Tesseract's plain text |
 | `DOCUMENTS_OCR_NUMBER_FALLBACK` | `1` | Sparse-text pass for a missing `#1234` marker |
 | `DOCUMENTS_OCR_TIMING_PAGES` | `1` | Per-page timing lines; `0` keeps only the summary |
+| `DOCUMENTS_TEXT_LAYER_SPACING` | `1` | Restore separators between fused text-layer items; `0` keeps pdf-parse's rendering |
 | `DOCUMENTS_OCR_ROTATE_REUSE` | `1` | Reuse a confident upright verdict across pages of the same shape; `0` detects every page |
 | `DOC_SCAN_TEXT_CONCURRENCY` | `1` | Parallel text-extract workers (Tesseract is CPU-bound) |
 
