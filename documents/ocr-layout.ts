@@ -32,6 +32,15 @@ export interface OcrWord {
   top: number;
   right: number;
   bottom: number;
+  /**
+   * Tesseract's per-word recognition confidence, 0..100. It arrives in the
+   * same TSV the boxes come from, so carrying it costs nothing — and it is
+   * what `ocr-uncertainty.ts` uses to decide which words deserve a second
+   * opinion. Structural rows carry -1; those never become words. A word built
+   * by hand (a test, or the resolver writing a corrected reading back) may
+   * legitimately have no measured confidence, hence optional.
+   */
+  confidence?: number;
 }
 
 /**
@@ -47,7 +56,7 @@ const ROW_BASELINE_TOLERANCE = 0.35;
  * a column break rather than a word space. Matches the receipt service's
  * `_format_visual_row` factor.
  */
-const COLUMN_GAP_FACTOR = 2.2;
+export const COLUMN_GAP_FACTOR = 2.2;
 
 /** What a column break becomes in the reconstructed text. */
 const COLUMN_SEPARATOR = "   ";
@@ -73,6 +82,7 @@ export function parseTesseractTsv(tsv: string): OcrWord[] {
   const iWidth = col("width");
   const iHeight = col("height");
   const iText = col("text");
+  const iConf = col("conf");
   if (iLevel < 0 || iLeft < 0 || iTop < 0 || iWidth < 0 || iHeight < 0 || iText < 0) {
     return [];
   }
@@ -89,7 +99,20 @@ export function parseTesseractTsv(tsv: string): OcrWord[] {
     const width = Number(cells[iWidth]);
     const height = Number(cells[iHeight]);
     if (![left, top, width, height].every(Number.isFinite)) continue;
-    words.push({ text, left, top, right: left + width, bottom: top + height });
+    // `conf` is optional in the sense that output without the column still
+    // parses — the boxes are what the layout rebuild needs. A negative value
+    // is Tesseract's marker for "not a word-level measurement" and is dropped
+    // rather than propagated as a real score.
+    const conf = iConf >= 0 ? Number(cells[iConf]) : NaN;
+    const confidence = Number.isFinite(conf) && conf >= 0 ? conf : undefined;
+    words.push({
+      text,
+      left,
+      top,
+      right: left + width,
+      bottom: top + height,
+      ...(confidence === undefined ? {} : { confidence }),
+    });
   }
   return words;
 }
@@ -375,7 +398,22 @@ export function formatVisualRow(words: OcrWord[]): string {
  * render, which the caller reads as "fall back to Tesseract's own text".
  */
 export function layoutTextFromWords(words: OcrWord[]): string {
-  return splitColumnBands(buildVisualRows(words))
+  return layoutTextFromRows(visualRowsFromWords(words));
+}
+
+/**
+ * The page's visual rows, in reading order — the intermediate the resolver
+ * works on. Exposed separately from `layoutTextFromWords` because a second
+ * opinion has to be formed on the *rows* (a span must never straddle a column
+ * boundary) and the text rendered afterwards from the corrected rows.
+ */
+export function visualRowsFromWords(words: OcrWord[]): OcrWord[][] {
+  return splitColumnBands(buildVisualRows(words));
+}
+
+/** Render already-grouped rows. The second half of `layoutTextFromWords`. */
+export function layoutTextFromRows(rows: OcrWord[][]): string {
+  return rows
     .map(formatVisualRow)
     .filter((line) => line.length > 0)
     .join("\n")

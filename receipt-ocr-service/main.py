@@ -1262,6 +1262,90 @@ async def extract_meter_reading(
     return MeterReadingResult(**result)
 
 
+class PageOcrLine(BaseModel):
+    text: str
+    confidence: float
+    left: float
+    top: float
+    right: float
+    bottom: float
+
+
+class PageOcrResult(BaseModel):
+    lines: list[PageOcrLine] = Field(default_factory=list)
+    full_text: str = ""
+    mean_confidence: float = 0.0
+    processing_ms: int = 0
+
+
+@app.post("/ocr/page", response_model=PageOcrResult)
+async def ocr_page(file: UploadFile = File(...)) -> PageOcrResult:
+    """Recognise a *document page* image and return line boxes with confidence.
+
+    Deliberately not /extract. That endpoint is receipt-shaped: it corrects
+    perspective on a photographed till roll, crops to the receipt, retries with
+    enhanced variants and then runs an LLM over the result. A document page
+    arriving here has already been rasterised from a PDF at a known DPI and
+    deskewed/contrast-cleaned by the caller (documents/ocr-preprocess.ts), so
+    all of that would at best waste time and at worst warp a page that was
+    already flat.
+
+    What the caller wants is exactly one thing: PaddleOCR's own reading of the
+    page, with the geometry and per-line confidence, so it can be compared
+    against Tesseract's reading of the same pixels. Any preprocessing done here
+    would make the two engines disagree about the *image* rather than about the
+    text, which is the one thing that would make the comparison worthless.
+    """
+
+    t0 = time.monotonic()
+    img_bytes = await file.read()
+    if len(img_bytes) == 0:
+        raise HTTPException(status_code=400, detail="empty file")
+    if len(img_bytes) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="file too large (max 20 MB)")
+
+    def _pipeline(data: bytes) -> dict[str, Any]:
+        buf = np.frombuffer(data, dtype=np.uint8)
+        img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+        if img is None:
+            raise HTTPException(status_code=400, detail="undecodable image")
+
+        full_text, lines, _rows = run_ocr(img)
+        out = [
+            {
+                "text": line["text"],
+                "confidence": round(float(line["confidence"]), 4),
+                "left": round(float(line["left"]), 1),
+                "top": round(float(line["top"]), 1),
+                "right": round(float(line["right"]), 1),
+                "bottom": round(float(line["bottom"]), 1),
+            }
+            for line in lines
+            if str(line.get("text", "")).strip()
+        ]
+        # Character-weighted, like _ocr_quality: a long line read badly should
+        # weigh more than a two-character line read perfectly.
+        chars = sum(len(re.sub(r"\s+", "", entry["text"])) for entry in out)
+        mean = (
+            sum(
+                entry["confidence"] * len(re.sub(r"\s+", "", entry["text"]))
+                for entry in out
+            )
+            / chars
+            if chars
+            else 0.0
+        )
+        return {"lines": out, "full_text": full_text, "mean_confidence": round(mean, 4)}
+
+    result = await _run_blocking(_pipeline, img_bytes)
+    result["processing_ms"] = int((time.monotonic() - t0) * 1000)
+    log.info(
+        "Page OCR: %d line(s) mean_conf=%.3f time=%dms",
+        len(result["lines"]), result["mean_confidence"], result["processing_ms"],
+    )
+    return PageOcrResult(**result)
+
+
 @app.get("/healthz")
 async def healthz() -> dict[str, Any]:
     return {

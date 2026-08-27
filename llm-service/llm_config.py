@@ -96,6 +96,18 @@ class LlmConfig:
     # Number of leading layers whose MoE expert tensors are kept in system RAM.
     # 0 is a no-op and correct for a dense model.
     n_cpu_moe: int = 0
+    # Multimodal projector ("mmproj") handed to llama-server with --mmproj.
+    #
+    # llama.cpp keeps a vision model's image encoder in a file *separate* from
+    # the GGUF weights, so an image-text-to-text model such as Gemma 4 loads
+    # text-only unless this is supplied — the model can see, the server cannot.
+    # Empty means text-only, which is the default and what every existing
+    # deployment gets.
+    #
+    # Server backend only: llama-cpp-python needs a per-family chat handler for
+    # images, which the pinned CPU version does not provide, so `inproc` stays
+    # text-only regardless of this value.
+    mmproj_path: str = ""
     reasoning: str = "off"
     server_url: str = "http://127.0.0.1:8080"
     server_extra_args: str = ""
@@ -131,6 +143,7 @@ class LlmConfig:
             flash_attn=_env_bool("LLM_FLASH_ATTN", False),
             kv_type=_env_str("LLM_KV_TYPE", "f16").lower(),
             n_cpu_moe=_env_int("LLM_NCMOE", 0),
+            mmproj_path=_env_str("LLM_MMPROJ_PATH", ""),
             reasoning=_env_str("LLM_REASONING", "off").lower(),
             server_url=_env_str("LLM_SERVER_URL", "http://127.0.0.1:8080").rstrip("/"),
             server_extra_args=_env_str("LLM_SERVER_EXTRA_ARGS", ""),
@@ -174,6 +187,7 @@ class LlmConfig:
             flash_attn=bool(data.get("flash_attn", base.flash_attn)),
             kv_type=str(data.get("kv_type", base.kv_type)).lower(),
             n_cpu_moe=int(data.get("n_cpu_moe", base.n_cpu_moe)),
+            mmproj_path=str(data.get("mmproj_path") or ""),
             reasoning=str(data.get("reasoning", base.reasoning)).lower(),
             server_url=str(data.get("server_url", base.server_url)).rstrip("/"),
             server_extra_args=str(data.get("server_extra_args") or ""),
@@ -203,6 +217,7 @@ class LlmConfig:
             "flash_attn": self.flash_attn,
             "kv_type": self.kv_type,
             "n_cpu_moe": self.n_cpu_moe,
+            "mmproj_path": self.mmproj_path,
             "reasoning": self.reasoning,
             "server_url": self.server_url,
             "server_extra_args": self.server_extra_args,
@@ -238,6 +253,11 @@ class LlmConfig:
             raise ConfigError("threads must not be negative")
         if self.n_cpu_moe < 0:
             raise ConfigError("n_cpu_moe must not be negative")
+        if self.mmproj_path and self.backend != "server":
+            raise ConfigError(
+                "mmproj_path needs backend=server; the in-process runtime cannot "
+                "load a multimodal projector"
+            )
         if self.server_ready_timeout <= 0 or self.server_request_timeout <= 0:
             raise ConfigError("timeouts must be positive")
         if not self.server_url.startswith(("http://", "https://")):

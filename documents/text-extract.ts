@@ -44,7 +44,20 @@ import path from "path";
 import { createRequire } from "module";
 import { spawn } from "child_process";
 import { PageRotationSampler, preprocessOcrImage } from "./ocr-preprocess";
-import { layoutTextFromTsv, shouldUseLayoutText } from "./ocr-layout";
+import {
+  layoutTextFromRows,
+  parseTesseractTsv,
+  shouldUseLayoutText,
+  visualRowsFromWords,
+} from "./ocr-layout";
+import { findUncertainSpans } from "./ocr-uncertainty";
+import {
+  newVlmBudget,
+  resolvePage,
+  SECOND_ENGINE_ENABLED,
+  VLM_ENABLED,
+  type ResolvedSpan,
+} from "./ocr-resolver";
 import { tesseractEnv } from "./tesseract-env";
 import { renderPageWithSpacing } from "./pdf-text-layout";
 import { DOCUMENT_NUMBER_RE } from "./metadata-extract";
@@ -193,6 +206,30 @@ async function timed<T>(fn: () => Promise<T>): Promise<{ value: T; ms: number }>
 const OCR_DPI = parseInt(process.env.DOCUMENTS_OCR_DPI ?? "200", 10);
 
 /**
+ * Word confidence below which a span is handed to the resolver. Only read when
+ * a resolver stage is actually enabled — with both off, the uncertainty scan
+ * does not run at all and this costs nothing.
+ */
+const OCR_CONF_THRESHOLD = parseInt(process.env.DOCUMENTS_OCR_CONF_THRESHOLD ?? "70", 10);
+
+/**
+ * Emit one JSON line per resolved span under the document id.
+ *
+ * Deliberately a log line rather than a file next to the `_ocr` sidecar: the
+ * pipeline already exposes its internals this way (see the timing lines), so
+ * a whole resolution can be grepped out with the same document id as the rest
+ * of the extraction — and there is no derived artifact to invalidate, clean up
+ * or hard-delete alongside the document.
+ */
+const OCR_RESOLVER_DEBUG =
+  (process.env.DOCUMENTS_OCR_DEBUG ?? "0") === "1";
+
+/** True when any stage that needs the uncertainty scan is switched on. */
+function resolverActive(): boolean {
+  return SECOND_ENGINE_ENABLED() || VLM_ENABLED();
+}
+
+/**
  * Ghostscript is much slower than qpdf and can get stuck on deeply
  * corrupted PDFs. It is only used after poppler has also rejected the
  * original input, and this timeout keeps one bad file from occupying the
@@ -266,6 +303,12 @@ export interface ExtractResult {
   text: string;
   source: "text_layer" | "ocr" | "mixed";
   pageCount: number;
+  /**
+   * Mean per-word tesseract confidence (0..100) when OCR ran, null otherwise.
+   * Persisted so "how badly did this document read?" survives the container,
+   * and so a re-extraction can be aimed at the worst documents first.
+   */
+  ocrMeanConfidence: number | null;
   /**
    * A searchable ("sandwich") PDF — the rasterized pages with an
    * invisible, positioned OCR text layer baked in — produced whenever the
@@ -521,7 +564,13 @@ export async function extractPdfText(
     // belongs to the receipt extractor, not to this path.
     if (!options.forceOcr && textLayerLooksGood) {
       log(`done in ${since(wholeStarted)}ms — source=text_layer, OCR skipped`);
-      return { text: textLayer, source: "text_layer", pageCount, searchablePdf: null };
+      return {
+        text: textLayer,
+        source: "text_layer",
+        pageCount,
+        searchablePdf: null,
+        ocrMeanConfidence: null,
+      };
     }
 
     log(
@@ -557,9 +606,16 @@ export async function extractPdfText(
         source,
         pageCount,
         searchablePdf: ocr.searchablePdf,
+        ocrMeanConfidence: ocr.meanConfidence,
       };
     }
-    return { text: ocrText, source, pageCount, searchablePdf: ocr.searchablePdf };
+    return {
+      text: ocrText,
+      source,
+      pageCount,
+      searchablePdf: ocr.searchablePdf,
+      ocrMeanConfidence: ocr.meanConfidence,
+    };
   } finally {
     if (tmpDir) {
       fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
@@ -569,6 +625,11 @@ export async function extractPdfText(
 
 export interface OcrResult {
   text: string;
+  /**
+   * Mean per-word tesseract confidence (0..100) over every page, or null when
+   * nothing was recognized. Persisted as `documents.ocr_mean_confidence`.
+   */
+  meanConfidence: number | null;
   /**
    * Merged searchable PDF (rasterized pages + invisible OCR text layer),
    * present only when `wantSearchablePdf` was requested and the build
@@ -648,7 +709,7 @@ async function ocrPdf(
       .sort();
     if (entries.length === 0) {
       log(`ocr aborted after ${since(ocrStarted)}ms — rasterizing produced no pages`);
-      return { text: "", searchablePdf: null };
+      return { text: "", searchablePdf: null, meanConfidence: null };
     }
     log(
       `rasterize ${rasterMs}ms → ${entries.length} page(s) @${OCR_DPI}dpi` +
@@ -664,6 +725,18 @@ async function ocrPdf(
     let prepTotal = 0;
     let tessTotal = 0;
     let layoutTotal = 0;
+    let paddleTotal = 0;
+    let vlmTotal = 0;
+    // Word-weighted so a page with three words does not count as much as a
+    // dense one — the same weighting meanWordConfidence uses within a page.
+    let confidenceSum = 0;
+    let confidenceWords = 0;
+    const resolverCounts = { spans: 0, agreement: 0, accepted: 0, rejected: 0, kept: 0 };
+
+    // One budget for the whole document, not per page: a scan whose first page
+    // is a mess must not spend the entire allowance before page two is seen.
+    const vlmBudget = newVlmBudget();
+    const resolveEnabled = resolverActive() && OCR_LAYOUT_REBUILD_ENABLED;
 
     // Rotation is a property of the scan, not of each individual page, so the
     // sampler measures it once per page shape and lets the rest of the
@@ -716,13 +789,44 @@ async function ocrPdf(
         const txt = await fs.promises
           .readFile(`${outBase}.txt`, "utf8")
           .catch(() => "");
+        let pagePaddleMs = 0;
+        let pageVlmMs = 0;
         const layoutStep = await timed(async () =>
           OCR_LAYOUT_REBUILD_ENABLED
-            ? await layoutTextForPage(`${outBase}.tsv`, txt)
-            : txt.trim(),
+            ? await layoutTextForPage(
+                `${outBase}.tsv`,
+                txt,
+                resolveEnabled
+                  ? {
+                      pageImagePath: pagePath,
+                      vlmBudget,
+                      log,
+                      onResolved: (spans, paddleMs, vlmMs) => {
+                        pagePaddleMs = paddleMs;
+                        pageVlmMs = vlmMs;
+                        paddleTotal += paddleMs;
+                        vlmTotal += vlmMs;
+                        resolverCounts.spans += spans.length;
+                        for (const span of spans) {
+                          if (span.decision === "ocr_agreement") resolverCounts.agreement++;
+                          else if (span.decision === "vlm_accepted") resolverCounts.accepted++;
+                          else if (span.decision === "vlm_rejected") resolverCounts.rejected++;
+                          else resolverCounts.kept++;
+                          if (OCR_RESOLVER_DEBUG) log(`resolver-span ${JSON.stringify(span)}`);
+                        }
+                      },
+                    }
+                  : undefined,
+              )
+            : { text: txt.trim(), confidenceSum: 0, wordCount: 0 },
         );
-        layoutTotal += layoutStep.ms;
-        const pageText = layoutStep.value;
+        // The resolver's service calls happen inside the layout step, so its
+        // milliseconds would otherwise be silently attributed to layout
+        // reconstruction — which measures at ~3ms and would look absurd.
+        layoutTotal += layoutStep.ms - pagePaddleMs - pageVlmMs;
+        const pageText = layoutStep.value.text;
+        confidenceSum += layoutStep.value.confidenceSum;
+        confidenceWords += layoutStep.value.wordCount;
         if (pageText.length > 0) parts.push(pageText);
         if (options.wantSearchablePdf) {
           const pdf = `${outBase}.pdf`;
@@ -733,7 +837,10 @@ async function ocrPdf(
             `page ${i + 1}/${entries.length}: ` +
               `rotate ${rotateStep.ms}ms${rotateStep.value.detected ? "" : " (reused)"}, ` +
               `clean ${prepStep.ms}ms, tesseract ${tessStep.ms}ms, ` +
-              `layout ${layoutStep.ms}ms → ${pageText.length} chars`,
+              `layout ${layoutStep.ms - pagePaddleMs - pageVlmMs}ms` +
+              (pagePaddleMs > 0 ? `, paddle ${pagePaddleMs}ms` : "") +
+              (pageVlmMs > 0 ? `, vlm ${pageVlmMs}ms` : "") +
+              ` → ${pageText.length} chars`,
           );
         }
       } catch (err) {
@@ -783,11 +890,30 @@ async function ocrPdf(
         `rotate ${rotateTotal}ms${rotateReused > 0 ? ` (${rotateReused} reused)` : ""}, ` +
         `clean ${prepTotal}ms, ` +
         `tesseract ${tessTotal}ms, layout ${layoutTotal}ms` +
+        (paddleTotal > 0 ? `, paddle ${paddleTotal}ms` : "") +
+        (vlmTotal > 0 ? `, vlm ${vlmTotal}ms` : "") +
         (mergeMs > 0 ? `, sandwich pdf ${mergeMs}ms` : "") +
         (markerMs > 0 ? `, number fallback ${markerMs}ms` : ""),
     );
 
-    return { text, searchablePdf };
+    if (resolverCounts.spans > 0) {
+      // Read this line first when asking whether the resolver is earning its
+      // keep: `rejected` climbing is a model or prompt regression, `kept`
+      // dominating means the spans found are ones nothing can resolve.
+      log(
+        `resolver: ${resolverCounts.spans} span(s) — ` +
+          `${resolverCounts.agreement} engine agreement, ` +
+          `${resolverCounts.accepted} vlm accepted, ` +
+          `${resolverCounts.rejected} vlm rejected, ` +
+          `${resolverCounts.kept} ocr kept`,
+      );
+    }
+
+    return {
+      text,
+      searchablePdf,
+      meanConfidence: confidenceWords > 0 ? confidenceSum / confidenceWords : null,
+    };
   } finally {
     // Best-effort cleanup — never throw from the finally block.
     fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
@@ -859,11 +985,48 @@ async function fileReadable(p: string): Promise<boolean> {
  * visibly incomplete. Best-effort: never throws, so a layout problem can only
  * cost the reconstruction, never the page.
  */
-async function layoutTextForPage(tsvPath: string, plainText: string): Promise<string> {
+async function layoutTextForPage(
+  tsvPath: string,
+  plainText: string,
+  resolve?: {
+    pageImagePath: string;
+    vlmBudget: { calls: number; deadline: number };
+    log: (msg: string) => void;
+    onResolved: (spans: ResolvedSpan[], paddleMs: number, vlmMs: number) => void;
+  },
+): Promise<{ text: string; confidenceSum: number; wordCount: number }> {
+  let confidenceSum = 0;
+  let wordCount = 0;
   try {
     const tsv = await fs.promises.readFile(tsvPath, "utf8");
-    const layout = layoutTextFromTsv(tsv);
-    if (shouldUseLayoutText(layout, plainText)) return layout;
+    const words = parseTesseractTsv(tsv);
+    for (const word of words) {
+      if (word.confidence === undefined) continue;
+      confidenceSum += word.confidence;
+      wordCount++;
+    }
+    let rows = visualRowsFromWords(words);
+
+    // The second opinion runs on the rows, before they are rendered: a span
+    // must never straddle a column boundary, and `splitColumnBands` is what
+    // establishes where those are.
+    if (resolve) {
+      const spans = findUncertainSpans(rows, { confidenceThreshold: OCR_CONF_THRESHOLD });
+      if (spans.length > 0) {
+        const result = await resolvePage({
+          pageImagePath: resolve.pageImagePath,
+          rows,
+          spans,
+          vlmBudget: resolve.vlmBudget,
+          log: resolve.log,
+        });
+        rows = result.rows;
+        resolve.onResolved(result.resolved, result.paddleMs, result.vlmMs);
+      }
+    }
+
+    const layout = layoutTextFromRows(rows);
+    if (shouldUseLayoutText(layout, plainText)) return { text: layout, confidenceSum, wordCount };
     if (layout.trim().length > 0) {
       console.warn(
         `[documents.text-extract] layout reconstruction looked incomplete for ${path.basename(tsvPath)} — using tesseract's plain text`,
@@ -874,7 +1037,7 @@ async function layoutTextForPage(tsvPath: string, plainText: string): Promise<st
       `[documents.text-extract] reading ${path.basename(tsvPath)} failed: ${(err as Error).message}`,
     );
   }
-  return plainText.trim();
+  return { text: plainText.trim(), confidenceSum, wordCount };
 }
 
 /**

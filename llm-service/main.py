@@ -874,6 +874,10 @@ async def healthz() -> dict[str, Any]:
         # layers whose MoE experts live in system RAM. 0 on a dense model.
         "llm_n_cpu_moe": LLM_NCMOE if LLM_BACKEND == "server" else None,
         "llm_ctx": LLM_CTX,
+        # The vision tower, or None for a text-only service. Without it
+        # /vision/transcribe answers 503 while everything else works normally,
+        # which is otherwise a puzzling state to diagnose.
+        "llm_mmproj_path": _state["config"].mmproj_path or None,
         # Which named configuration is loaded, and whether it came from an
         # activated row or from the environment. "env" is the state of any
         # deployment that has never used the admin UI.
@@ -1981,6 +1985,173 @@ class JsonPromptRequest(BaseModel):
     system: str | None = None
     max_tokens: int = Field(default=768, gt=0, le=4096)
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
+
+
+# ─── Visual transcription ─────────────────────────────────────────────────────
+#
+# The narrowest possible use of a vision model: hand it a *crop* of a page and
+# ask what characters are printed in it. Not "read this document", not "fix
+# this OCR" — transcribe these pixels.
+#
+# The distinction is not stylistic. A model told to correct OCR output uses its
+# language knowledge to do so, which is exactly right for "23 aus oz" → "23 AUG
+# 02" and exactly wrong for "7.500" → "7.800" on a bank statement. It cannot
+# tell the two situations apart, so it must not be asked to try. The caller
+# (documents/ocr-resolver.ts) additionally validates every answer before
+# accepting it, and falls back to the OCR reading when validation fails.
+
+VISION_SYSTEM_PROMPT = (
+    "You transcribe text from small images of printed documents. "
+    "Reproduce exactly the characters that are visibly printed. "
+    "Do not translate, expand, reformat, spell-check or complete anything. "
+    "Do not use meaning, context or expectation to invent characters. "
+    "If a character is not legible, output '?' in its place. "
+    "If the image contains no readable text, return an empty string."
+)
+
+# Output shape. Constrained server-side into a grammar, like /classify, so a
+# chatty model cannot answer with a sentence about what it sees.
+VISION_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "json_object",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "text": {"type": "string"},
+            "confidence": {"type": "number"},
+        },
+        "required": ["text", "confidence"],
+    },
+}
+
+# What the caller may say it expects to find. Passed as a *format* hint for the
+# output only — never as licence to produce a value of that shape when the
+# pixels do not show one.
+VISION_EXPECTED_TYPES = ("date", "amount", "iban", "document_number", "text")
+
+
+class VisionTranscribeRequest(BaseModel):
+    """One crop, plus what the OCR engines made of it."""
+
+    image_b64: str = Field(..., min_length=1)
+    image_mime: str = Field(default="image/png")
+    # The OCR reading, offered to the model as an unreliable hint. Optional:
+    # withholding it is the cleanest test of whether the model is transcribing
+    # or merely agreeing, and the caller uses that when measuring.
+    hint: str | None = None
+    expected_type: str | None = None
+    max_tokens: int = Field(default=64, gt=0, le=512)
+
+
+class VisionTranscribeResponse(BaseModel):
+    text: str
+    confidence: float
+    model: str
+    processing_ms: int
+
+
+@app.post("/vision/transcribe", response_model=VisionTranscribeResponse)
+async def vision_transcribe(req: VisionTranscribeRequest) -> VisionTranscribeResponse:
+    llm = _state["llm"]
+    if llm is None:
+        raise HTTPException(status_code=503, detail="llm not loaded")
+    cfg = _state["config"]
+    if not cfg.mmproj_path:
+        # A precise 503 rather than a confusing model error: the weights are
+        # loaded and answering text prompts, the vision tower simply is not
+        # there. Naming the knob is the difference between a five-minute fix
+        # and an afternoon.
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "no multimodal projector loaded — set LLM_MMPROJ_PATH (or the "
+                "configuration's mmproj_path) to the model's mmproj-*.gguf and "
+                "run with LLM_BACKEND=server"
+            ),
+        )
+    if req.expected_type is not None and req.expected_type not in VISION_EXPECTED_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"expected_type must be one of {list(VISION_EXPECTED_TYPES)}",
+        )
+
+    t0 = time.monotonic()
+
+    instruction = "Transcribe the text visible in this image."
+    if req.expected_type and req.expected_type != "text":
+        instruction += (
+            f" It is expected to be a {req.expected_type.replace('_', ' ')}, but"
+            " transcribe what is printed even if it is not."
+        )
+    if req.hint:
+        instruction += (
+            f" An OCR engine read it as {req.hint!r}. That reading is unreliable"
+            " and may be wrong; use it only as a hint, never as the answer."
+        )
+    instruction += (
+        ' Reply as JSON: {"text": "<what is printed>", "confidence": <0..1 how'
+        " certain you are that you read every character correctly>}."
+    )
+
+    messages = [
+        {"role": "system", "content": VISION_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{req.image_mime};base64,{req.image_b64}"},
+                },
+                {"type": "text", "text": instruction},
+            ],
+        },
+    ]
+
+    try:
+        completion = await _run_blocking(
+            llm.create_chat_completion,
+            messages=messages,
+            response_format=VISION_RESPONSE_SCHEMA,
+            # Greedy. A transcription has one right answer, and sampling a
+            # second-choice character is precisely the failure mode.
+            temperature=0.0,
+            max_tokens=req.max_tokens,
+            # Generous: a busy classification run holds the single inference
+            # worker for up to a minute, and a crop that waits is far better
+            # than a crop that 503s and silently leaves the OCR reading in.
+            acquire_timeout=60.0,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("/vision/transcribe: llm.create_chat_completion failed")
+        raise HTTPException(status_code=500, detail=f"llm failure: {exc}") from exc
+
+    raw = completion["choices"][0]["message"]["content"].strip()
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        log.warning("/vision/transcribe: model returned non-JSON: %r", raw[:200])
+        raise HTTPException(status_code=502, detail=f"model returned invalid JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=502, detail="model returned non-object JSON")
+
+    text = _repair_mojibake(str(data.get("text", ""))) or ""
+    try:
+        confidence = float(data.get("confidence", 0.0))
+    except (TypeError, ValueError):
+        confidence = 0.0
+
+    elapsed_ms = int((time.monotonic() - t0) * 1000)
+    log.info(
+        "vision transcribe: %d char(s) confidence=%.2f expected=%s time=%dms",
+        len(text), confidence, req.expected_type or "-", elapsed_ms,
+    )
+    return VisionTranscribeResponse(
+        text=text,
+        confidence=max(0.0, min(1.0, confidence)),
+        model=LLM_MODEL_PATH.name,
+        processing_ms=elapsed_ms,
+    )
 
 
 @app.post("/json-prompt")

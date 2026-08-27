@@ -4,8 +4,24 @@ A staged plan for making the documents pipeline read the characters Tesseract
 loses — `23 AUG 02` recognized as `23 aus oz` — without handing whole documents
 to a language model.
 
-Status: **plan only**. Nothing here is implemented yet. Each stage below is
-meant to ship as its own PR, in order, and each one is useful on its own.
+Status: **stages 1–5 implemented** (PR #1050), all of it flag-gated and off by
+default. Stage 6 (document-aware expected types) and the operational parts of
+stage 7 are not built. What shipped is described in
+[document-text-extraction.md](./document-text-extraction.md#the-resolver-a-second-opinion-on-suspect-spans);
+this document remains the reasoning behind it.
+
+Two deviations from the plan below, both deliberate:
+
+- **The debug artifact is a log line, not a file.** `DOCUMENTS_OCR_DEBUG=1`
+  emits one `resolver-span {...}` JSON line per span under the document id.
+  The pipeline already exposes its internals this way, a whole resolution
+  greps out with the same id as the rest of the extraction, and there is no
+  derived artifact to invalidate, clean up or hard-delete alongside the
+  document.
+- **Character-level confidence (§10 of the original sketch) is not built.**
+  Tesseract's word-level confidence turned out to be enough to select spans;
+  per-character scores would have to come from the model itself, and that is
+  worth adding only once word level is shown to be insufficient.
 
 ## The diagnosis
 
