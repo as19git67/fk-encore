@@ -95,6 +95,40 @@ The **contract downstream is unchanged**: the resolver produces the same word
 list the layout rebuild already consumes, so `buildVisualRows`,
 `splitColumnBands` and `shouldUseLayoutText` keep working untouched.
 
+## Which decision is settled when
+
+Two different questions get confused easily, and they are decided at different
+times by different mechanisms.
+
+**Which engine owns the page — static, one flag, settled by measurement.**
+Exactly one engine produces the word list that `buildVisualRows` and
+`splitColumnBands` rebuild the page from, and therefore the line structure that
+`extractSender` and `extractDocumentDate` read. That chain is calibrated on one
+box shape. Switching it per document would mean maintaining two calibrated
+paths and never knowing from a stored document which one produced it. Stage 1's
+corpus decides this once, and the outcome is a deployment flag — not runtime
+behaviour.
+
+**Whose reading of a span wins — per span, every time, at runtime.** That is the
+resolver (stage 5), and no measurement changes it. The measurement only decides
+which reading is the starting point and which is the second opinion.
+
+Short version: **the measurement decides structure, the resolver decides
+characters.**
+
+What the stage-1 corpus can conclude, and what follows:
+
+| Outcome | Consequence |
+| --- | --- |
+| Tesseract better or level | Nothing changes structurally; PaddleOCR stays the second voice. The cheapest outcome, and the expected one. |
+| PaddleOCR better throughout | A primary swap, as its own larger piece of work: the layout rebuild has to be re-calibrated on line boxes, with the existing fixtures as the regression net. Explicitly *not* a side effect of stage 3. |
+| PaddleOCR better only on some document classes | Sounds like routing, but the class is known only *after* classification, which reads `extracted_text` — the wrong way round. Only cheap image-level signals (contrast distribution, page shape) are available beforehand, and building that on speculation is not worth it. Take the globally better engine and let the resolver catch the weaker class; that is what it is for. |
+
+A per-document "use whichever turned out better" is not available without an
+a-priori signal: knowing which was better means running both in full, so the
+cost is always doubled — and the question of which layout calibration to apply
+to the winner remains open either way.
+
 ## Non-negotiable design rules
 
 1. **Never send the whole document to the VLM.** Crops only. Fewer tokens,
@@ -190,6 +224,14 @@ Ships on its own: even without any new engine, this gives a per-document
 - Three outcomes per span: **agree** → accept, drop the span; **agree after
   confusable folding** → prefer the higher-confidence engine, keep as
   low-priority; **disagree** → `engine_disagreement`, escalate.
+
+**Paddle runs per page, and only on pages stage 2 flagged.** Running it on every
+page would double the OCR cost of a pipeline that is single-threaded and already
+spends ~23 s on a ten-page scan; a clean page then costs nothing extra. The
+alternative — running Paddle only on the crops — is cheaper still but gives up
+Paddle's own detection: it would inherit Tesseract's box, and therefore
+Tesseract's segmentation errors, which are part of the failure being chased.
+Per flagged page keeps the second opinion genuinely independent.
 
 This is the highest value-per-risk stage: on the `23 AUG 02` class of failure,
 two engines disagreeing already identifies the problem, and Paddle is often
