@@ -43,7 +43,7 @@ import os from "os";
 import path from "path";
 import { createRequire } from "module";
 import { spawn } from "child_process";
-import { detectOcrRotation, preprocessOcrImage } from "./ocr-preprocess";
+import { PageRotationSampler, preprocessOcrImage } from "./ocr-preprocess";
 import { layoutTextFromTsv, shouldUseLayoutText } from "./ocr-layout";
 import { tesseractEnv } from "./tesseract-env";
 import { DOCUMENT_NUMBER_RE } from "./metadata-extract";
@@ -626,9 +626,16 @@ async function ocrPdf(
     // asks. Recognition normally dwarfs the rest, but a pathological scan can
     // spend more in rotation detection than in tesseract.
     let rotateTotal = 0;
+    let rotateReused = 0;
     let prepTotal = 0;
     let tessTotal = 0;
     let layoutTotal = 0;
+
+    // Rotation is a property of the scan, not of each individual page, so the
+    // sampler measures it once per page shape and lets the rest of the
+    // document inherit an upright verdict. Scoped to this call: a cache that
+    // outlived the document would be claiming knowledge it does not have.
+    const rotationSampler = new PageRotationSampler();
 
     const parts: string[] = [];
     const pagePdfs: string[] = [];
@@ -650,9 +657,10 @@ async function ocrPdf(
       // The searchable PDF is built from `pagePath`, so any rotation applied
       // here is baked into the downloaded/served sandwich PDF as well.
       let pagePath = rawPagePath;
-      const rotateStep = await timed(() => detectOcrRotation(rawPagePath));
-      const rotate = rotateStep.value;
+      const rotateStep = await timed(() => rotationSampler.resolve(rawPagePath));
+      const rotate = rotateStep.value.rotate;
       rotateTotal += rotateStep.ms;
+      if (!rotateStep.value.detected) rotateReused++;
       const prepPath = path.join(tmpDir, `prep-${String(i).padStart(4, "0")}.png`);
       const prepStep = await timed(() =>
         preprocessOcrImage(rawPagePath, prepPath, { rotate }),
@@ -688,7 +696,8 @@ async function ocrPdf(
         }
         if (OCR_TIMING_PER_PAGE) {
           log(
-            `page ${i + 1}/${entries.length}: rotate ${rotateStep.ms}ms, ` +
+            `page ${i + 1}/${entries.length}: ` +
+              `rotate ${rotateStep.ms}ms${rotateStep.value.detected ? "" : " (reused)"}, ` +
               `clean ${prepStep.ms}ms, tesseract ${tessStep.ms}ms, ` +
               `layout ${layoutStep.ms}ms → ${pageText.length} chars`,
           );
@@ -736,7 +745,9 @@ async function ocrPdf(
     const pages = entries.length;
     log(
       `ocr done in ${totalMs}ms — ${pages} page(s), ${Math.round(totalMs / pages)}ms/page: ` +
-        `rasterize ${rasterMs}ms, rotate ${rotateTotal}ms, clean ${prepTotal}ms, ` +
+        `rasterize ${rasterMs}ms, ` +
+        `rotate ${rotateTotal}ms${rotateReused > 0 ? ` (${rotateReused} reused)` : ""}, ` +
+        `clean ${prepTotal}ms, ` +
         `tesseract ${tessTotal}ms, layout ${layoutTotal}ms` +
         (mergeMs > 0 ? `, sandwich pdf ${mergeMs}ms` : "") +
         (markerMs > 0 ? `, number fallback ${markerMs}ms` : ""),

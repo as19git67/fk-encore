@@ -33,7 +33,8 @@ runTextExtract(documentId)
 │   └── 4. ocrPdf()                      ── otherwise
 │       ├── rasterize                    pdftoppm -r 200 -png
 │       └── per page:
-│           ├── rotation detection       tesseract --psm 0 (+ verification)
+│           ├── rotation detection       tesseract --psm 0 (+ verification),
+│           │                             reused across same-shape pages
 │           ├── contrast cleanup         sharp
 │           ├── recognition              tesseract --psm 3 → txt + tsv (+ pdf)
 │           └── layout rebuild           ocr-layout.ts
@@ -92,11 +93,24 @@ expensive.
 
 **Per page**, strictly serially:
 
-1. **Rotation detection** (`detectOcrRotation`) — a Tesseract OSD pass
+1. **Rotation detection** (`PageRotationSampler`) — a Tesseract OSD pass
    (`--psm 0`). A confident 90°/270° is trusted directly. 180° is
    indistinguishable from 0° to OSD, so an ambiguous result is *verified* by
    recognizing the page both as-is and rotated and comparing mean word
    confidence. **That verification costs two more full recognition passes.**
+
+   The OSD pass is not free either — it is a full Tesseract start-up plus a
+   pass over the page, measured at ~1.6 s against ~1.8 s for the recognition
+   that actually produces text. So a *confident upright* verdict is reused
+   across the document's remaining pages instead of being re-derived on each:
+   pages are keyed by shape (portrait/landscape, read from the PNG's IHDR
+   chunk), and only `0°` is ever extended. The asymmetry is deliberate —
+   wrongly extending "upright" leaves a page unrotated, which is what the
+   pipeline did before auto-rotate existed; wrongly extending `90°` would spin
+   a page that was already fine and destroy text that reads perfectly. A
+   document that genuinely needs rotating therefore keeps paying full
+   detection on every page. `DOCUMENTS_OCR_ROTATE_REUSE=0` restores per-page
+   detection.
 2. **Contrast cleanup** — grayscale, percentile-clip normalize, gentle linear
    stretch, so gray-paper scans reach Tesseract as black-on-white. Best-effort:
    a failure leaves the untouched raster in place, so OCR never regresses.
@@ -106,7 +120,8 @@ expensive.
 4. **Layout rebuild** — see below.
 
 A page can therefore cost up to **four Tesseract invocations**, only one of
-which produces the text that is kept. See "Where the time goes".
+which produces the text that is kept. With the rotation verdict reused, the
+usual page costs one. See "Where the time goes".
 
 **Document-number fallback.** If the primary pass found no `#1234`-style marker,
 page 1 gets one extra `--psm 11` (sparse text) pass. Such markers sit isolated
@@ -255,10 +270,24 @@ refresh:
 
 **The measurement above is the point.** On that ten-page document, rotation
 detection cost **10.3 s against recognition's 7.8 s** — 44 % of the total OCR
-time spent deciding that pages were upright. That is the verification pass from
-step 1: whenever OSD reports 0° with low confidence, the page is recognized
-twice more just to rule out 180°. The `rotation probe: as-is=… rotated(…)=…`
-line from `ocr-preprocess.ts` marks each page where that happened.
+time spent deciding that pages were upright.
+
+The obvious suspect was the verification pass from step 1, but measuring it
+separately showed otherwise: on a real scan the OSD call alone takes ~1.6 s
+against ~1.8 s for recognition, and it returned `Rotate: 0` at confidence 8.4 —
+comfortably above the threshold, so verification never ran. The cost was simply
+one full Tesseract start-up per page to confirm the page was upright.
+
+Reusing that verdict across pages of the same shape (step 1) is what the
+`(reused)` markers in the timing lines report. On a five-page scan:
+
+```
+rotate 14549ms                → rotate 3746ms (4 reused)
+```
+
+−74 % on the stage, with byte-identical output (6808 chars either way). The
+`rotation probe: as-is=… rotated(…)=…` line from `ocr-preprocess.ts` still
+marks each page where the verification pass did run.
 
 If OCR is starving the queue, read the summary line first: it names which stage
 dominates, and the stages have completely different remedies.
@@ -274,6 +303,7 @@ dominates, and the stages have completely different remedies.
 | `DOCUMENTS_OCR_LAYOUT` | `1` | Layout rebuild incl. column splitting; `0` uses Tesseract's plain text |
 | `DOCUMENTS_OCR_NUMBER_FALLBACK` | `1` | Sparse-text pass for a missing `#1234` marker |
 | `DOCUMENTS_OCR_TIMING_PAGES` | `1` | Per-page timing lines; `0` keeps only the summary |
+| `DOCUMENTS_OCR_ROTATE_REUSE` | `1` | Reuse a confident upright verdict across pages of the same shape; `0` detects every page |
 | `DOC_SCAN_TEXT_CONCURRENCY` | `1` | Parallel text-extract workers (Tesseract is CPU-bound) |
 
 Rotation and contrast have their own switches — see
