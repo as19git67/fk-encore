@@ -127,6 +127,34 @@ const OCR_TIMEOUT_MS = parseInt(
   10,
 );
 
+/**
+ * Whether to log one timing line per OCR'd page. On by default: OCR is the
+ * pipeline's slowest step by a wide margin, and a per-document total says that
+ * a document was slow without saying which stage was — rasterizing, rotation
+ * detection, contrast cleanup, recognition, or the layout rebuild are wildly
+ * different costs with wildly different fixes. One line per page is
+ * proportional to the work actually done. Set DOCUMENTS_OCR_TIMING_PAGES=0 to
+ * keep only the per-document summary.
+ */
+const OCR_TIMING_PER_PAGE =
+  (process.env.DOCUMENTS_OCR_TIMING_PAGES ?? "1") !== "0";
+
+/** Milliseconds since `from`, rounded — the unit every timing log below uses. */
+function since(from: number): number {
+  return Math.round(Date.now() - from);
+}
+
+/**
+ * Run `fn`, returning its value alongside how long it took. Keeps the timing
+ * out of the call sites, which otherwise need a `const t = Date.now()` line
+ * per step and drift out of sync with what they claim to measure.
+ */
+async function timed<T>(fn: () => Promise<T>): Promise<{ value: T; ms: number }> {
+  const started = Date.now();
+  const value = await fn();
+  return { value, ms: since(started) };
+}
+
 /** Poppler DPI for OCR rasterization. 200 is a good speed/quality trade-off. */
 const OCR_DPI = parseInt(process.env.DOCUMENTS_OCR_DPI ?? "200", 10);
 
@@ -222,6 +250,12 @@ export interface ExtractOptions {
    * garbled Unicode, …).
    */
   forceOcr?: boolean;
+  /**
+   * Document id, used only to tag this extraction's log lines. Without it a
+   * concurrent worker's lines interleave indistinguishably; with it the whole
+   * extraction can be grepped out of the container log by one id.
+   */
+  docId?: number;
 }
 
 /**
@@ -382,11 +416,16 @@ export async function extractPdfText(
   absPath: string,
   options: ExtractOptions = {},
 ): Promise<ExtractResult> {
+  const wholeStarted = Date.now();
+  const tag = options.docId != null ? `(${options.docId})` : "";
+  const log = (msg: string) => console.log(`[documents.text-extract] extract${tag} ${msg}`);
+
   // Encryption gate. A document needing an open password can't be read at
   // all — surface that distinctly so the pipeline can prompt the user.
   // Owner/permission-only encryption opens without a password; transparently
   // strip it into a temp copy so pdf-parse/poppler/tesseract see plain bytes.
-  const encryption = await inspectPdfEncryption(absPath);
+  const encryptionStep = await timed(() => inspectPdfEncryption(absPath));
+  const encryption = encryptionStep.value;
   if (encryption === "password") {
     throw new PdfPasswordRequiredError();
   }
@@ -394,22 +433,24 @@ export async function extractPdfText(
   let tmpDir: string | null = null;
   let workPath = absPath;
   try {
+    let decryptMs = 0;
     if (encryption === "restrictions") {
       tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "fk-docdec-"));
-      const decrypted = await runQpdfDecrypt(absPath, tmpDir);
-      if (decrypted) {
-        workPath = decrypted;
-        console.log(
-          `[documents.text-extract] stripped owner/permission encryption before extraction`,
-        );
+      const step = await timed(() => runQpdfDecrypt(absPath, tmpDir!));
+      decryptMs = step.ms;
+      if (step.value) {
+        workPath = step.value;
+        log(`stripped owner/permission encryption in ${step.ms}ms`);
       }
     }
 
-    const buffer = await fs.promises.readFile(workPath);
+    const readStep = await timed(() => fs.promises.readFile(workPath));
+    const buffer = readStep.value;
 
     let textLayer = "";
     let pageCount = 0;
     let pdfParseBrokenXref = false;
+    const parseStarted = Date.now();
     try {
       const parsed = await pdfParseQuiet(buffer);
       textLayer = stripNulBytes((parsed.text ?? "").trim());
@@ -424,8 +465,16 @@ export async function extractPdfText(
       console.warn(`[documents.text-extract] pdf-parse failed: ${msg}`);
     }
 
+    const parseMs = since(parseStarted);
     const textLayerLooksGood =
       textLayer.length >= MIN_TEXT_LAYER_CHARS && !hasPoorSpacing(textLayer);
+    log(
+      `read ${(buffer.length / 1024).toFixed(0)}KB in ${readStep.ms}ms, ` +
+        `encryption check ${encryptionStep.ms}ms` +
+        (decryptMs > 0 ? `, decrypt ${decryptMs}ms` : "") +
+        `, text layer ${parseMs}ms → ${pageCount} pages, ${textLayer.length} chars, ` +
+        `${textLayerLooksGood ? "usable" : "unusable"}`,
+    );
 
     // A born-digital PDF's own text layer is cleaner than anything OCR can
     // recover from a rasterization of it, so it wins outright — and the
@@ -437,17 +486,17 @@ export async function extractPdfText(
     // consumed it — `source` is not persisted, and the `ocr_confidence` column
     // belongs to the receipt extractor, not to this path.
     if (!options.forceOcr && textLayerLooksGood) {
-      console.log(`[documents.text-extract] text layer looks good — skipping OCR`);
+      log(`done in ${since(wholeStarted)}ms — source=text_layer, OCR skipped`);
       return { text: textLayer, source: "text_layer", pageCount, searchablePdf: null };
     }
 
-    if (options.forceOcr) {
-      console.log(`[documents.text-extract] force_ocr=true — skipping text layer`);
-    } else if (textLayer.length >= MIN_TEXT_LAYER_CHARS) {
-      console.log(
-        `[documents.text-extract] text layer looks broken (low space ratio) — running OCR`,
-      );
-    }
+    log(
+      options.forceOcr
+        ? "force_ocr=true — skipping text layer, running OCR"
+        : textLayer.length >= MIN_TEXT_LAYER_CHARS
+          ? "text layer looks broken (low space ratio) — running OCR"
+          : "no usable text layer — running OCR",
+    );
 
     // Every path that reaches here either forced OCR or has no usable text
     // layer, so the sandwich PDF is always wanted: without it a scanned page
@@ -455,23 +504,28 @@ export async function extractPdfText(
     const ocr = await ocrPdf(workPath, {
       repairFirst: pdfParseBrokenXref,
       wantSearchablePdf: true,
+      log,
     });
     const ocrText = ocr.text;
 
-    if (
+    const source =
       !options.forceOcr &&
       textLayer.length > 0 &&
       textLayer.length < MIN_TEXT_LAYER_CHARS &&
       ocrText.length > 0
-    ) {
+        ? "mixed"
+        : "ocr";
+    log(`done in ${since(wholeStarted)}ms — source=${source}, ${ocrText.length} chars`);
+
+    if (source === "mixed") {
       return {
         text: `${textLayer}\n\n${ocrText}`.trim(),
-        source: "mixed",
+        source,
         pageCount,
         searchablePdf: ocr.searchablePdf,
       };
     }
-    return { text: ocrText, source: "ocr", pageCount, searchablePdf: ocr.searchablePdf };
+    return { text: ocrText, source, pageCount, searchablePdf: ocr.searchablePdf };
   } finally {
     if (tmpDir) {
       fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
@@ -509,16 +563,26 @@ export interface OcrResult {
  */
 async function ocrPdf(
   absPath: string,
-  options: { repairFirst?: boolean; wantSearchablePdf?: boolean } = {},
+  options: {
+    repairFirst?: boolean;
+    wantSearchablePdf?: boolean;
+    /** Tagged logger from the caller, so OCR lines carry the document id. */
+    log?: (msg: string) => void;
+  } = {},
 ): Promise<OcrResult> {
+  const log = options.log ?? ((msg: string) => console.log(`[documents.text-extract] ${msg}`));
+  const ocrStarted = Date.now();
   const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "fk-docscan-"));
   try {
     let pdfPath = absPath;
+    let repairMs = 0;
     if (options.repairFirst) {
-      const repaired = await repairPdfWithQpdf(pdfPath, tmpDir);
-      if (repaired) pdfPath = repaired;
+      const step = await timed(() => repairPdfWithQpdf(pdfPath, tmpDir));
+      repairMs = step.ms;
+      if (step.value) pdfPath = step.value;
     }
 
+    const rasterStarted = Date.now();
     try {
       await runPdftoppm(pdfPath, path.join(tmpDir, "page"));
     } catch (err) {
@@ -543,10 +607,28 @@ async function ocrPdf(
       }
     }
 
+    const rasterMs = since(rasterStarted);
+
     const entries = (await fs.promises.readdir(tmpDir))
       .filter((n) => n.toLowerCase().endsWith(".png"))
       .sort();
-    if (entries.length === 0) return { text: "", searchablePdf: null };
+    if (entries.length === 0) {
+      log(`ocr aborted after ${since(ocrStarted)}ms — rasterizing produced no pages`);
+      return { text: "", searchablePdf: null };
+    }
+    log(
+      `rasterize ${rasterMs}ms → ${entries.length} page(s) @${OCR_DPI}dpi` +
+        (repairMs > 0 ? ` (after ${repairMs}ms PDF repair)` : ""),
+    );
+
+    // Totals across pages, so the summary can name the dominant stage rather
+    // than only the total — which is the question "why is OCR slow" actually
+    // asks. Recognition normally dwarfs the rest, but a pathological scan can
+    // spend more in rotation detection than in tesseract.
+    let rotateTotal = 0;
+    let prepTotal = 0;
+    let tessTotal = 0;
+    let layoutTotal = 0;
 
     const parts: string[] = [];
     const pagePdfs: string[] = [];
@@ -568,9 +650,15 @@ async function ocrPdf(
       // The searchable PDF is built from `pagePath`, so any rotation applied
       // here is baked into the downloaded/served sandwich PDF as well.
       let pagePath = rawPagePath;
-      const rotate = await detectOcrRotation(rawPagePath);
+      const rotateStep = await timed(() => detectOcrRotation(rawPagePath));
+      const rotate = rotateStep.value;
+      rotateTotal += rotateStep.ms;
       const prepPath = path.join(tmpDir, `prep-${String(i).padStart(4, "0")}.png`);
-      if (await preprocessOcrImage(rawPagePath, prepPath, { rotate })) {
+      const prepStep = await timed(() =>
+        preprocessOcrImage(rawPagePath, prepPath, { rotate }),
+      );
+      prepTotal += prepStep.ms;
+      if (prepStep.value) {
         pagePath = prepPath;
       }
       if (i === 0) firstPagePath = pagePath;
@@ -581,17 +669,29 @@ async function ocrPdf(
       if (OCR_LAYOUT_REBUILD_ENABLED) configs.push("tsv");
       if (options.wantSearchablePdf) configs.push("pdf");
       try {
-        await runTesseract(pagePath, outBase, configs);
+        const tessStep = await timed(() => runTesseract(pagePath, outBase, configs));
+        tessTotal += tessStep.ms;
         const txt = await fs.promises
           .readFile(`${outBase}.txt`, "utf8")
           .catch(() => "");
-        const pageText = OCR_LAYOUT_REBUILD_ENABLED
-          ? await layoutTextForPage(`${outBase}.tsv`, txt)
-          : txt.trim();
+        const layoutStep = await timed(async () =>
+          OCR_LAYOUT_REBUILD_ENABLED
+            ? await layoutTextForPage(`${outBase}.tsv`, txt)
+            : txt.trim(),
+        );
+        layoutTotal += layoutStep.ms;
+        const pageText = layoutStep.value;
         if (pageText.length > 0) parts.push(pageText);
         if (options.wantSearchablePdf) {
           const pdf = `${outBase}.pdf`;
           if (await fileReadable(pdf)) pagePdfs.push(pdf);
+        }
+        if (OCR_TIMING_PER_PAGE) {
+          log(
+            `page ${i + 1}/${entries.length}: rotate ${rotateStep.ms}ms, ` +
+              `clean ${prepStep.ms}ms, tesseract ${tessStep.ms}ms, ` +
+              `layout ${layoutStep.ms}ms → ${pageText.length} chars`,
+          );
         }
       } catch (err) {
         console.warn(
@@ -601,28 +701,46 @@ async function ocrPdf(
     }
 
     let searchablePdf: Buffer | null = null;
+    let mergeMs = 0;
     if (options.wantSearchablePdf && pagePdfs.length > 0) {
-      searchablePdf = await mergePdfs(pagePdfs, tmpDir).catch((err) => {
-        console.warn(
-          `[documents.text-extract] merging OCR page PDFs failed: ${(err as Error).message}`,
-        );
-        return null;
-      });
+      const step = await timed(() =>
+        mergePdfs(pagePdfs, tmpDir).catch((err) => {
+          console.warn(
+            `[documents.text-extract] merging OCR page PDFs failed: ${(err as Error).message}`,
+          );
+          return null;
+        }),
+      );
+      searchablePdf = step.value;
+      mergeMs = step.ms;
     }
 
     let text = parts.join("\n\n").trim();
+    let markerMs = 0;
     if (
       shouldRunNumberMarkerFallback(text, firstPagePath != null) &&
       Date.now() - started <= OCR_TIMEOUT_MS
     ) {
-      const marker = await recoverDocumentNumberMarker(firstPagePath!);
-      if (marker) {
-        console.log(
-          `[documents.text-extract] recovered document-number marker "${marker}" via sparse-text fallback`,
-        );
-        text = `${marker}\n\n${text}`.trim();
+      const step = await timed(() => recoverDocumentNumberMarker(firstPagePath!));
+      markerMs = step.ms;
+      if (step.value) {
+        log(`recovered document-number marker via sparse-text fallback in ${step.ms}ms`);
+        text = `${step.value}\n\n${text}`.trim();
       }
     }
+
+    // The summary line. Names every stage's share so "OCR was slow" can be
+    // answered without re-reading the per-page lines, and so the answer
+    // survives DOCUMENTS_OCR_TIMING_PAGES=0.
+    const totalMs = since(ocrStarted);
+    const pages = entries.length;
+    log(
+      `ocr done in ${totalMs}ms — ${pages} page(s), ${Math.round(totalMs / pages)}ms/page: ` +
+        `rasterize ${rasterMs}ms, rotate ${rotateTotal}ms, clean ${prepTotal}ms, ` +
+        `tesseract ${tessTotal}ms, layout ${layoutTotal}ms` +
+        (mergeMs > 0 ? `, sandwich pdf ${mergeMs}ms` : "") +
+        (markerMs > 0 ? `, number fallback ${markerMs}ms` : ""),
+    );
 
     return { text, searchablePdf };
   } finally {
