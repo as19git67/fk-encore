@@ -200,6 +200,12 @@ async function freshDiskPath(id: number): Promise<string> {
  * so the UI shows accurate progress.
  */
 export async function runTextExtract(documentId: number): Promise<void> {
+  // text_extract is the pipeline's slowest job by a wide margin, and it runs
+  // single-threaded (DOC_SCAN_TEXT_CONCURRENCY defaults to 1, tesseract being
+  // CPU-bound), so one slow document holds up every document behind it. These
+  // timings exist to answer "which part was slow" from the container log alone
+  // — extractPdfText logs its own stages under the same document id.
+  const jobStarted = Date.now();
   const row = await getDocumentOrThrow(documentId);
   assertPathUnderDocumentsRoot(row.disk_path);
 
@@ -211,13 +217,17 @@ export async function runTextExtract(documentId: number): Promise<void> {
 
   // Warm the preview-thumbnail cache while we already hold the PDF on
   // disk. Best-effort: a failed render must never block text extraction.
+  const thumbStarted = Date.now();
   await buildThumbnail(documentId, row.disk_path).catch(() => null);
+  const thumbMs = Date.now() - thumbStarted;
 
   let result;
+  const extractStarted = Date.now();
   try {
     const currentPath = await freshDiskPath(documentId);
     result = await extractPdfText(currentPath, {
       forceOcr: row.force_ocr ?? false,
+      docId: documentId,
     });
   } catch (err) {
     if (err instanceof PdfPasswordRequiredError) {
@@ -235,6 +245,7 @@ export async function runTextExtract(documentId: number): Promise<void> {
     }
     throw err;
   }
+  const extractMs = Date.now() - extractStarted;
   const text = result.text ?? "";
 
   // Persist (or clear) the searchable OCR sidecar so the viewer and the
@@ -260,6 +271,7 @@ export async function runTextExtract(documentId: number): Promise<void> {
   // rebuilt from the same file, so grid and viewer agree on which way is up.
   // The early warm-up above already rendered a thumbnail from the original;
   // this replaces it only when the served PDF turns out to differ.
+  const previewStarted = Date.now();
   try {
     const servedPdf = await ensureSearchablePdf(documentId, await freshDiskPath(documentId));
     if (servedPdf) await buildThumbnail(documentId, servedPdf);
@@ -268,6 +280,7 @@ export async function runTextExtract(documentId: number): Promise<void> {
       `[documents] refreshing preview for doc=${documentId} failed: ${(err as Error).message}`,
     );
   }
+  const previewMs = Date.now() - previewStarted;
 
   // Receipt captures (identified by a set receipt_ocr_state) run a trimmed
   // pipeline — only text_extract + receipt_ocr, no classify/embed — so
@@ -293,6 +306,12 @@ export async function runTextExtract(documentId: number): Promise<void> {
     .returning({ status: documents.status });
   const actualStatus = (updated[0]?.status as DocumentStatus) ?? nextStatus;
   await publishStatusChanged(documentId, row.user_id, actualStatus);
+
+  console.log(
+    `[documents] text_extract(${documentId}) done in ${Date.now() - jobStarted}ms — ` +
+      `thumbnail ${thumbMs}ms, extract ${extractMs}ms, preview ${previewMs}ms, ` +
+      `source=${result.source}, ${text.length} chars`,
+  );
 }
 
 /**
