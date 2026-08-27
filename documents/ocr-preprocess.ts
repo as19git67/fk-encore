@@ -90,6 +90,33 @@ const ROTATE_VERIFY_ENABLED = envFlag("DOCUMENTS_OCR_ROTATE_VERIFY", true);
  */
 const ROTATE_VERIFY_MIN_MARGIN = envFloat("DOCUMENTS_OCR_ROTATE_VERIFY_MARGIN", 10);
 
+/**
+ * Reuse a confident "this page is upright" verdict across the remaining pages
+ * of the same document instead of re-deriving it page by page.
+ *
+ * Detection is not cheap: `--psm 0` is a full Tesseract start-up plus a pass
+ * over the page, measured at ~1.6 s against ~1.8 s for the recognition pass
+ * that actually produces the text — on a page whose OSD answer was a
+ * confident `Rotate: 0`. Across a ten-page document that was 10.3 s of
+ * rotation detection against 7.8 s of recognition: the pipeline spent more
+ * time confirming that pages were upright than reading them.
+ *
+ * Only `0°` is ever reused, and the asymmetry is the whole point. Wrongly
+ * extending "upright" leaves a page unrotated — the behaviour from before
+ * auto-rotate existed, costing the text on that one page. Wrongly extending
+ * `90°` would rotate a page that was already fine and destroy text that
+ * currently reads perfectly. The first risk is worth 8 s a document; the
+ * second is not, so a document that genuinely needs rotating keeps paying
+ * full detection on every page.
+ *
+ * The reuse is additionally keyed by page shape (see `readPngAspect`), so a
+ * landscape page inside a portrait document is measured on its own rather
+ * than inheriting the portrait verdict.
+ *
+ * Set `DOCUMENTS_OCR_ROTATE_REUSE=0` to detect every page as before.
+ */
+const ROTATE_REUSE_ENABLED = envFlag("DOCUMENTS_OCR_ROTATE_REUSE", true);
+
 /** Convert the page to grayscale before contrast work (scans rarely need color). */
 const GRAYSCALE_ENABLED = envFlag("DOCUMENTS_OCR_GRAYSCALE", true);
 
@@ -111,6 +138,28 @@ const CONTRAST = envFloat("DOCUMENTS_OCR_CONTRAST", 1.15);
  * enough — a global threshold destroys faint print, so it is off by default.
  */
 const THRESHOLD = envInt("DOCUMENTS_OCR_THRESHOLD", 0);
+
+/**
+ * A rotation verdict plus whether it is solid enough to extend to sibling
+ * pages of the same document.
+ *
+ * The distinction matters because `rotate: 0` is heavily overloaded. It is
+ * returned when OSD confidently says the page is upright, but equally when
+ * OSD could not be parsed, the `osd` model is missing, tesseract errored,
+ * confidence fell below the threshold, or a probed rotation was rejected.
+ * Only the first of those is knowledge; the rest are shrugs. A caller that
+ * wants to skip work on later pages needs to tell them apart.
+ */
+export interface RotationDetection {
+  /** Clockwise degrees to rotate the page upright (0/90/180/270). */
+  rotate: number;
+  /**
+   * True when this verdict came from a signal we trust — a confident OSD
+   * reading, or a rotation confirmed by recognition — rather than from a
+   * failure or an inconclusive probe falling back to 0.
+   */
+  confident: boolean;
+}
 
 export interface OsdResult {
   /** Clockwise degrees the page must be rotated to become upright (0/90/180/270). */
@@ -184,33 +233,50 @@ export function chooseOsdRotation(
  * "flipped" at low confidence for the same class of documents.
  */
 export async function detectOcrRotation(imagePath: string): Promise<number> {
-  if (!PREPROCESS_ENABLED || !AUTOROTATE_ENABLED) return 0;
+  return (await detectOcrRotationDetailed(imagePath)).rotate;
+}
+
+/**
+ * As `detectOcrRotation`, but also reports whether the verdict is trustworthy
+ * enough to reuse on other pages — see `RotationDetection`.
+ */
+export async function detectOcrRotationDetailed(
+  imagePath: string,
+): Promise<RotationDetection> {
+  if (!PREPROCESS_ENABLED || !AUTOROTATE_ENABLED) {
+    // Disabled, not measured: nothing here is knowledge about the page.
+    return { rotate: 0, confident: false };
+  }
   let osd: OsdResult | null = null;
   try {
     osd = parseOsdRotation(await runTesseractOsd(imagePath));
     const confident = chooseOsdRotation(osd);
     // 90° / 270°: OSD is reliable — trust a confident result directly.
-    if (confident === 90 || confident === 270) return confident;
+    if (confident === 90 || confident === 270) {
+      return { rotate: confident, confident: true };
+    }
     // 180°: OSD cannot distinguish it from 0° — fall through to verification.
   } catch (err) {
     console.warn(
       `[documents.ocr-preprocess] OSD detection failed for ${imagePath}: ${(err as Error).message}`,
     );
-    return 0;
+    return { rotate: 0, confident: false };
   }
 
-  if (!ROTATE_VERIFY_ENABLED || !osd) return 0;
+  // A confident "upright" is a real reading, and the only one of these
+  // branches that lets a caller skip work on sibling pages.
+  if (osd && osd.rotate === 0 && osd.confidence >= ROTATE_MIN_CONFIDENCE) {
+    return { rotate: 0, confident: true };
+  }
 
-  // Determine which angle to verify:
+  if (!ROTATE_VERIFY_ENABLED || !osd) return { rotate: 0, confident: false };
+
+  // Determine which angle to verify. The confident-0° case already returned
+  // above, so what is left is:
   //  • OSD said 180° (any confidence): test 180°
   //  • OSD said 90°/270° low confidence: test that angle
   //  • OSD said 0° low confidence: probe 180° (the ambiguous twin)
-  //  • OSD said 0° high confidence: page is very likely upright — skip
-  const angleToTest =
-    osd.rotate === 0
-      ? osd.confidence < ROTATE_MIN_CONFIDENCE ? 180 : 0
-      : osd.rotate;
-  if (angleToTest === 0) return 0;
+  const angleToTest = osd.rotate === 0 ? 180 : osd.rotate;
 
   try {
     const verified = await verifyRotationByRecognition(imagePath, angleToTest);
@@ -218,14 +284,16 @@ export async function detectOcrRotation(imagePath: string): Promise<number> {
       console.log(
         `[documents.ocr-preprocess] OSD (${osd.rotate}° @ ${osd.confidence}) → ${angleToTest}° confirmed by recognition — rotating`,
       );
-      return angleToTest;
+      return { rotate: angleToTest, confident: true };
     }
   } catch (err) {
     console.warn(
       `[documents.ocr-preprocess] rotation verification failed for ${imagePath}: ${(err as Error).message}`,
     );
   }
-  return 0;
+  // The probe came back negative, or blew up. The page is probably upright,
+  // but "probably" is exactly what must not spread to other pages.
+  return { rotate: 0, confident: false };
 }
 
 /**
@@ -376,6 +444,89 @@ export async function preprocessOcrImage(
       `[documents.ocr-preprocess] preprocessing ${srcPath} failed: ${(err as Error).message}`,
     );
     return false;
+  }
+}
+
+/**
+ * Whether a verdict may stand in for detection on the document's other pages.
+ * Pure; see `ROTATE_REUSE_ENABLED` for why only upright qualifies.
+ */
+export function isReusableRotation(
+  detection: RotationDetection,
+  enabled: boolean = ROTATE_REUSE_ENABLED,
+): boolean {
+  return enabled && detection.confident && detection.rotate === 0;
+}
+
+/**
+ * Read a PNG's pixel dimensions from its IHDR chunk and report the page
+ * shape. A PNG always opens with the 8-byte signature, then a 25-byte IHDR
+ * whose width and height sit at offsets 16 and 20 as big-endian uint32 — so
+ * this is a 24-byte read, not a decode, and costs nothing next to the
+ * Tesseract call it decides to skip.
+ *
+ * Returns null when the file is unreadable or not a PNG, which makes the
+ * caller fall back to detecting the page rather than guessing its shape.
+ * Exported for unit testing.
+ */
+export async function readPngAspect(
+  imagePath: string,
+): Promise<"portrait" | "landscape" | null> {
+  let handle: fs.promises.FileHandle | null = null;
+  try {
+    handle = await fs.promises.open(imagePath, "r");
+    const header = Buffer.alloc(24);
+    const { bytesRead } = await handle.read(header, 0, 24, 0);
+    if (bytesRead < 24) return null;
+    if (header.readUInt32BE(0) !== 0x89504e47) return null; // \x89PNG
+    const width = header.readUInt32BE(16);
+    const height = header.readUInt32BE(20);
+    if (width === 0 || height === 0) return null;
+    // Square pages are vanishingly rare and either bucket is defensible;
+    // "portrait" keeps them with the common case.
+    return width > height ? "landscape" : "portrait";
+  } catch {
+    return null;
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+
+/**
+ * Resolves each page's rotation for one document, reusing a confident upright
+ * verdict across pages of the same shape instead of re-running detection.
+ *
+ * One instance per document — the cache must not outlive it, since a verdict
+ * is only evidence about the pages it was measured on.
+ */
+export class PageRotationSampler {
+  private readonly uprightAspects = new Set<string>();
+
+  /**
+   * `detect` is injectable so the reuse policy can be tested without starting
+   * Tesseract; production always uses the real detector.
+   */
+  constructor(
+    private readonly detect: (
+      imagePath: string,
+    ) => Promise<RotationDetection> = detectOcrRotationDetailed,
+  ) {}
+
+  /**
+   * The rotation to apply to `imagePath`. `detected` is false when the answer
+   * came from a sibling page and no Tesseract process was started, which is
+   * what makes the saving visible in the timing log.
+   */
+  async resolve(imagePath: string): Promise<{ rotate: number; detected: boolean }> {
+    const aspect = await readPngAspect(imagePath);
+    if (aspect != null && this.uprightAspects.has(aspect)) {
+      return { rotate: 0, detected: false };
+    }
+    const detection = await this.detect(imagePath);
+    if (aspect != null && isReusableRotation(detection)) {
+      this.uprightAspects.add(aspect);
+    }
+    return { rotate: detection.rotate, detected: true };
   }
 }
 

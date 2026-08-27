@@ -43,16 +43,21 @@ import os from "os";
 import path from "path";
 import { createRequire } from "module";
 import { spawn } from "child_process";
-import { detectOcrRotation, preprocessOcrImage } from "./ocr-preprocess";
+import { PageRotationSampler, preprocessOcrImage } from "./ocr-preprocess";
 import { layoutTextFromTsv, shouldUseLayoutText } from "./ocr-layout";
 import { tesseractEnv } from "./tesseract-env";
+import { renderPageWithSpacing } from "./pdf-text-layout";
 import { DOCUMENT_NUMBER_RE } from "./metadata-extract";
 
 // pdf-parse is CJS and its default import pulls in a debug routine that
 // tries to read `test/05-versions-space.pdf` when `module.parent` is
 // null. Loading it via createRequire bypasses that.
 const _require = createRequire(import.meta.url);
-type PdfParseFn = (buffer: Buffer) => Promise<{ text: string; numpages: number }>;
+type PdfParseOptions = { pagerender?: (page: never) => Promise<string> };
+type PdfParseFn = (
+  buffer: Buffer,
+  options?: PdfParseOptions,
+) => Promise<{ text: string; numpages: number }>;
 const pdfParse: PdfParseFn = _require("pdf-parse");
 
 // PDF.js (bundled inside pdf-parse) emits noisy "Warning: ..." lines
@@ -71,6 +76,31 @@ export function isSuppressedPdfJsWarning(message: string): boolean {
     /^Warning:\s+TT:\s+undefined function:\s+\d+\s*$/u.test(message);
 }
 
+/**
+ * Hand pdf-parse bytes that own their `ArrayBuffer`.
+ *
+ * Node pools allocations under 8 KB: `fs.readFile` on a small file returns a
+ * Buffer that is a *view* into a shared 8192-byte pool, with a non-zero
+ * `byteOffset`. The pdf.js build bundled inside pdf-parse reads the underlying
+ * ArrayBuffer without honouring that offset, so it parses the pool — other
+ * files' bytes — instead of the PDF, and throws `bad XRef entry` on a document
+ * that is perfectly valid (poppler reads it without complaint).
+ *
+ * The effect is silent and one-directional: every PDF under ~8 KB fails the
+ * text-layer read and falls through to OCR, which is both far slower and worse
+ * than the text layer it already had. Larger files get their own ArrayBuffer at
+ * offset 0 and were never affected, which is why this went unnoticed.
+ *
+ * `new Uint8Array(n)` always allocates its own exactly-sized ArrayBuffer, so
+ * copying into one sidesteps the pool. The copy costs a few microseconds on
+ * files this small.
+ */
+export function ownedBytes(buffer: Buffer): Uint8Array {
+  const bytes = new Uint8Array(buffer.byteLength);
+  bytes.set(buffer);
+  return bytes;
+}
+
 async function pdfParseQuiet(buffer: Buffer): ReturnType<PdfParseFn> {
   const originalLog = console.log;
   console.log = (...args: unknown[]) => {
@@ -84,7 +114,11 @@ async function pdfParseQuiet(buffer: Buffer): ReturnType<PdfParseFn> {
     originalLog(...args);
   };
   try {
-    return await pdfParse(buffer);
+    // Restore the separators pdf-parse drops between items on one baseline —
+    // see pdf-text-layout.ts.
+    return await pdfParse(ownedBytes(buffer) as unknown as Buffer, {
+      pagerender: renderPageWithSpacing as PdfParseOptions["pagerender"],
+    });
   } finally {
     console.log = originalLog;
   }
@@ -626,9 +660,16 @@ async function ocrPdf(
     // asks. Recognition normally dwarfs the rest, but a pathological scan can
     // spend more in rotation detection than in tesseract.
     let rotateTotal = 0;
+    let rotateReused = 0;
     let prepTotal = 0;
     let tessTotal = 0;
     let layoutTotal = 0;
+
+    // Rotation is a property of the scan, not of each individual page, so the
+    // sampler measures it once per page shape and lets the rest of the
+    // document inherit an upright verdict. Scoped to this call: a cache that
+    // outlived the document would be claiming knowledge it does not have.
+    const rotationSampler = new PageRotationSampler();
 
     const parts: string[] = [];
     const pagePdfs: string[] = [];
@@ -650,9 +691,10 @@ async function ocrPdf(
       // The searchable PDF is built from `pagePath`, so any rotation applied
       // here is baked into the downloaded/served sandwich PDF as well.
       let pagePath = rawPagePath;
-      const rotateStep = await timed(() => detectOcrRotation(rawPagePath));
-      const rotate = rotateStep.value;
+      const rotateStep = await timed(() => rotationSampler.resolve(rawPagePath));
+      const rotate = rotateStep.value.rotate;
       rotateTotal += rotateStep.ms;
+      if (!rotateStep.value.detected) rotateReused++;
       const prepPath = path.join(tmpDir, `prep-${String(i).padStart(4, "0")}.png`);
       const prepStep = await timed(() =>
         preprocessOcrImage(rawPagePath, prepPath, { rotate }),
@@ -688,7 +730,8 @@ async function ocrPdf(
         }
         if (OCR_TIMING_PER_PAGE) {
           log(
-            `page ${i + 1}/${entries.length}: rotate ${rotateStep.ms}ms, ` +
+            `page ${i + 1}/${entries.length}: ` +
+              `rotate ${rotateStep.ms}ms${rotateStep.value.detected ? "" : " (reused)"}, ` +
               `clean ${prepStep.ms}ms, tesseract ${tessStep.ms}ms, ` +
               `layout ${layoutStep.ms}ms → ${pageText.length} chars`,
           );
@@ -736,7 +779,9 @@ async function ocrPdf(
     const pages = entries.length;
     log(
       `ocr done in ${totalMs}ms — ${pages} page(s), ${Math.round(totalMs / pages)}ms/page: ` +
-        `rasterize ${rasterMs}ms, rotate ${rotateTotal}ms, clean ${prepTotal}ms, ` +
+        `rasterize ${rasterMs}ms, ` +
+        `rotate ${rotateTotal}ms${rotateReused > 0 ? ` (${rotateReused} reused)` : ""}, ` +
+        `clean ${prepTotal}ms, ` +
         `tesseract ${tessTotal}ms, layout ${layoutTotal}ms` +
         (mergeMs > 0 ? `, sandwich pdf ${mergeMs}ms` : "") +
         (markerMs > 0 ? `, number fallback ${markerMs}ms` : ""),
