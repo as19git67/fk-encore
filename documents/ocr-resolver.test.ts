@@ -207,7 +207,12 @@ describe("decideSpan", () => {
       { vlm: { text: "something else entirely", confidence: 0.99 } },
     );
     expect(result.decision).toBe("ocr_agreement");
-    expect(result.final_text).toBe("23 AUG 02");
+    // Agreement is a statement that the two readings are equivalent, not that
+    // the higher-scoring one is correct — so the incumbent stands. The cost is
+    // visible right here: `AUC` is the less likely month, and it is kept. What
+    // taking the other reading cost instead was `TT.MM.JJJJ` -> `T.T.MM.JJJJ`,
+    // where the fold hid a real difference and the swap was pure loss.
+    expect(result.final_text).toBe("23 AUC 02");
   });
 
   it("takes a validated model answer when the engines differ", () => {
@@ -228,13 +233,35 @@ describe("decideSpan", () => {
     expect(result.rejection).toBeTruthy();
   });
 
-  it("keeps the best OCR reading when no model answered", () => {
+  it("keeps the incumbent reading when no model answered", () => {
+    // The second engine detects the disagreement; it does not settle it.
+    // Choosing on confidence handed PaddleOCR 97.5 % of disagreements over a
+    // real corpus, because its scale sits 0.44 higher than Tesseract's — and
+    // it lost a diacritic 89 times against 25 gained doing so.
     const result = decideSpan(
       span,
       candidates(["tesseract", "23 aus oz", 0.4], ["paddleocr", "23 AUG 02", 0.94]),
     );
     expect(result.decision).toBe("ocr_kept");
-    expect(result.final_text).toBe("23 AUG 02");
+    expect(result.final_text).toBe("23 aus oz");
+  });
+
+  it("does not let a high-confidence second engine overwrite the incumbent", () => {
+    // The shape of the regression this guards: PaddleOCR truncating a line and
+    // turning a German decimal comma into a period, at 0.98 against 0.84.
+    const result = decideSpan(
+      { ...span, text: "19.560.187,27 DM 9,0%" },
+      candidates(
+        ["tesseract", "19.560.187,27 DM 9,0%", 0.84],
+        ["paddleocr", "19.560.187.27 DM", 0.98],
+      ),
+    );
+    expect(result.final_text).toBe("19.560.187,27 DM 9,0%");
+  });
+
+  it("falls back to the span text when Tesseract contributed no candidate", () => {
+    const result = decideSpan(span, candidates(["paddleocr", "23 AUG 02", 0.94]));
+    expect(result.final_text).toBe("23 aus oz");
   });
 
   it("records every candidate it saw, whatever it decided", () => {

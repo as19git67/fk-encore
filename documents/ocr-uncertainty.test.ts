@@ -5,6 +5,7 @@ import {
   hasImplausibleCharset,
   patternMiss,
   spanBbox,
+  tooSmallToRead,
 } from "./ocr-uncertainty";
 import type { OcrWord } from "./ocr-layout";
 
@@ -173,5 +174,64 @@ describe("spanBbox", () => {
       right: 340,
       bottom: 120,
     });
+  });
+});
+
+describe("tooSmallToRead", () => {
+  const box = (width: number, height: number) => ({
+    left: 100,
+    top: 100,
+    right: 100 + width,
+    bottom: 100 + height,
+  });
+
+  it("accepts a box the size of a printed glyph", () => {
+    // ~10x18 px at the pipeline's default 200 dpi.
+    expect(tooSmallToRead(box(10, 18))).toBe(false);
+  });
+
+  it("rejects the specks a scan leaves behind", () => {
+    // Every one of these appeared in production as its own uncertain span,
+    // read as `.`, `|` or `'`.
+    expect(tooSmallToRead(box(2, 2))).toBe(true);
+    expect(tooSmallToRead(box(9, 3))).toBe(true);
+    expect(tooSmallToRead(box(3, 3))).toBe(true);
+  });
+
+  it("rejects a long thin box, which an area test would let through", () => {
+    // A table rule read as punctuation: 1x27 px is 27 px2, but no glyph is
+    // one pixel wide.
+    expect(tooSmallToRead(box(1, 27))).toBe(true);
+  });
+});
+
+describe("findUncertainSpans — degenerate boxes", () => {
+  /** A speck: flagged by confidence, far too small to be a character. */
+  function speck(text: string, left: number): OcrWord {
+    return { text, left, top: 100, right: left + 2, bottom: 102, confidence: 30 };
+  }
+
+  it("does not emit a span for a box too small to hold a glyph", () => {
+    // Left in, such a span costs a crop and a model call — and because
+    // `overlapRatio` normalises by the span's own area, it sits fully inside
+    // any PaddleOCR line containing it and captures that line as its "second
+    // reading". One 2x2 px speck drew in a whole unrelated line that way.
+    expect(findUncertainSpans([[speck(".", 100)]])).toEqual([]);
+  });
+
+  it("still emits the real spans on a row that also carries specks", () => {
+    const row = [speck(".", 100), word("aus", 300, 41), speck("|", 900)];
+    const spans = findUncertainSpans([row]);
+
+    expect(spans).toHaveLength(1);
+    expect(spans[0].text).toBe("aus");
+  });
+
+  it("honours a caller-supplied minimum", () => {
+    // A deployment rasterizing at a different DPI scales the threshold rather
+    // than losing every small glyph.
+    const row = [word("aus", 300, 41, 12)];
+    expect(findUncertainSpans([row], { minSpanWidth: 40 })).toEqual([]);
+    expect(findUncertainSpans([row], { minSpanWidth: 4 })).toHaveLength(1);
   });
 });

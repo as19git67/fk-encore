@@ -377,16 +377,67 @@ column.
 [`ocr-resolver.ts`](../documents/ocr-resolver.ts) collects up to three readings
 of the same pixels and decides between them in a fixed order:
 
-1. **Two engines agree** → that reading, and no model is called. Agreement is
-   tested on a *confusable fold*: `AUG` and `AUC` fold together, `7.500` and
-   `7.800` deliberately do not. That asymmetry is what makes folding safe —
-   two engines reading a different amount can never look like agreement.
+1. **Two engines agree** → no model is called, and the *incumbent* reading
+   stands. Agreement is tested on a *confusable fold*: `AUG` and `AUC` fold
+   together, `7.500` and `7.800` deliberately do not. That asymmetry is what
+   makes folding safe — two engines reading a different amount can never look
+   like agreement.
 2. **A model answer passes validation** → the model's reading.
-3. **Otherwise** → the best OCR reading.
+3. **Otherwise** → the incumbent reading, and the disagreement is recorded.
 
 Step 3 is the property the whole stage rests on: **the pipeline can never end
 up worse than it is today.** A model that is absent, slow, wrong or
 hallucinating yields the text the pipeline would have produced anyway.
+
+### Why PaddleOCR never overwrites Tesseract
+
+Steps 1 and 3 used to take the *highest-confidence* OCR reading. Measured over
+3440 spans of real paperwork, that handed PaddleOCR **1194 of 1224
+disagreements — 97.5 %**. Not because it read better: the two confidence scales
+are simply not comparable. On flagged spans Tesseract averages **0.516** and
+PaddleOCR **0.953**, so a maximum over the two is a standing preference for one
+engine dressed up as a decision.
+
+The preference cost accuracy. Of the disagreements whose outcome can be
+classified without a ground truth, every measurable class pointed the same way:
+
+| | |
+| --- | ---: |
+| PaddleOCR loses a diacritic | 89 |
+| PaddleOCR gains a diacritic | 25 |
+| PaddleOCR truncates the line | 41 |
+| German decimal comma → period | 4 |
+
+For German documents the first row is the expensive one — 3.6 losses per gain.
+
+So the incumbent stands until something can actually adjudicate, which is the
+vision stage. PaddleOCR's job is to *find* the disagreement, and it does that
+well: 1224 genuine flags is exactly the worklist the third stage exists for.
+The cost is real and accepted — where PaddleOCR was right and Tesseract wrong,
+the span keeps the worse reading. But it is flagged, and a flagged error is
+reachable in a way a silent one is not.
+
+The same measurement showed PaddleOCR contributing **no reading at all** for
+44.3 % of flagged spans, which is a further reason not to promote it: it is
+silent on nearly half of exactly the material it was brought in for.
+
+These numbers come from [`analyze-resolver-log.mjs`](../scripts/ocr/analyze-resolver-log.mjs),
+which reads them out of the `resolver-span` debug lines.
+
+### Specks are not spans
+
+A box smaller than a printed glyph is scanner noise, not text. Tesseract reads
+such specks as `.`, `|` or `'` with low confidence, so they flagged as
+uncertain, consumed the per-page span budget — and, because `overlapRatio`
+normalises by the span's *own* area, sat fully inside any PaddleOCR line that
+contained them and matched it at ratio 1.0. One 2 × 2 px speck pulled in an
+entire unrelated line as its "second reading".
+
+`tooSmallToRead` now drops them before a span is emitted: below 4 px wide or
+8 px tall at the default 200 dpi. The thresholds are dimensions rather than an
+area, because a 1 × 27 px table rule is just as degenerate as a dot. On the
+measured corpus this removed **530 of 3440 spans (15.4 %)**, none of them
+text.
 
 PaddleOCR is reached through a new `POST /ocr/page` on the `receipt-ocr-service`
 — deliberately not `/extract`, which corrects perspective on a photographed

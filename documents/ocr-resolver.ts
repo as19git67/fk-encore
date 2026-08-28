@@ -300,11 +300,42 @@ export function validateVlmAnswer(
   return OK;
 }
 
-/** The OCR candidate to fall back to: highest confidence wins. */
+/**
+ * The highest-scoring OCR reading, used as a *reference* — never to choose the
+ * stored text. See `incumbentReading` for why.
+ */
 export function bestOcrCandidate(candidates: readonly Candidate[]): Candidate | null {
   const ocr = candidates.filter((c) => c.source !== "vlm");
   if (ocr.length === 0) return null;
   return ocr.reduce((a, b) => (b.confidence > a.confidence ? b : a));
+}
+
+/**
+ * The reading already in the extracted text — Tesseract's.
+ *
+ * This used to be `bestOcrCandidate`, i.e. whichever engine reported the
+ * higher confidence. Measured over 3440 spans of real paperwork, that handed
+ * PaddleOCR **1194 of 1224 disagreements** (97.5 %) — not because it read
+ * better, but because the two confidence scales are not comparable: Tesseract
+ * averages 0.516 on flagged spans, PaddleOCR 0.953. A maximum over those two
+ * numbers is a standing preference for one engine, not a decision.
+ *
+ * And the preference costs accuracy. Of the disagreements whose outcome can be
+ * classified without a ground truth, PaddleOCR loses a diacritic 89 times and
+ * gains one 25 times, truncates the line 41 times, and turns a German decimal
+ * comma into a period 4 times — every measurable class pointing the same way.
+ *
+ * So the incumbent stands until something can actually adjudicate. That is the
+ * vision stage; PaddleOCR's job is to *find* the disagreement, and it does that
+ * well. The cost is real and accepted: where PaddleOCR was right and Tesseract
+ * wrong, the span now keeps the worse reading — but it is flagged, which is
+ * what makes the improvement reachable at all.
+ */
+export function incumbentReading(
+  candidates: readonly Candidate[],
+  fallback: string,
+): string {
+  return candidates.find((c) => c.source === "tesseract")?.text ?? fallback;
 }
 
 // ─── Pure: the decision ───────────────────────────────────────────────────
@@ -330,15 +361,19 @@ export function decideSpan(
     reasons: [...span.reasons],
     candidates,
   };
-  const fallback = bestOcrCandidate(candidates)?.text ?? span.text;
+  const fallback = incumbentReading(candidates, span.text);
 
   // 1. Two engines agreeing settles it — and is the cheap path, since it is
   //    reached without ever calling the model.
   if (ocr.length >= 2) {
     const agreement = compareReadings(ocr[0].text, ocr[1].text);
     if (agreement !== "differ") {
-      const winner = ocr.reduce((a, b) => (b.confidence > a.confidence ? b : a));
-      return { ...base, final_text: winner.text, decision: "ocr_agreement" };
+      // Agreement means the two readings are equivalent, so switching to the
+      // other one buys nothing and can lose something: `confusableFold` strips
+      // `.`, which folds `TT.MM.JJJJ` together with PaddleOCR's `T.T.MM.JJJJ`.
+      // Taking the higher-confidence variant there replaced a correct reading
+      // with a wrong one on the strength of a tie.
+      return { ...base, final_text: fallback, decision: "ocr_agreement" };
     }
   }
 
@@ -352,7 +387,8 @@ export function decideSpan(
     return { ...base, final_text: fallback, decision: "vlm_rejected", rejection: verdict.reason };
   }
 
-  // 3. Nothing better than what OCR already said.
+  // 3. Nothing that can adjudicate has spoken, so the incumbent stands and the
+  //    disagreement is recorded rather than acted on.
   return { ...base, final_text: fallback, decision: "ocr_kept" };
 }
 
