@@ -51,6 +51,7 @@ import {
   visualRowsFromWords,
 } from "./ocr-layout";
 import { findUncertainSpans } from "./ocr-uncertainty";
+import { buildFieldMap } from "./ocr-fields";
 import {
   newVlmBudget,
   resolvePage,
@@ -737,6 +738,12 @@ async function ocrPdf(
     // is a mess must not spend the entire allowance before page two is seen.
     const vlmBudget = newVlmBudget();
     const resolveEnabled = resolverActive() && OCR_LAYOUT_REBUILD_ENABLED;
+    if (OCR_RESOLVER_DEBUG && !resolveEnabled) {
+      // The field map is emitted from inside the layout step, so say plainly
+      // that it is running on its own rather than as part of a resolver pass —
+      // otherwise the absent `resolver:` summary reads like a failure.
+      log("resolver stages off — emitting the field map only");
+    }
 
     // Rotation is a property of the scan, not of each individual page, so the
     // sampler measures it once per page shape and lets the rest of the
@@ -817,6 +824,7 @@ async function ocrPdf(
                       },
                     }
                   : undefined,
+                OCR_RESOLVER_DEBUG ? log : undefined,
               )
             : { text: txt.trim(), confidenceSum: 0, wordCount: 0 },
         );
@@ -994,6 +1002,7 @@ async function layoutTextForPage(
     log: (msg: string) => void;
     onResolved: (spans: ResolvedSpan[], paddleMs: number, vlmMs: number) => void;
   },
+  debugLog?: (msg: string) => void,
 ): Promise<{ text: string; confidenceSum: number; wordCount: number }> {
   let confidenceSum = 0;
   let wordCount = 0;
@@ -1006,6 +1015,16 @@ async function layoutTextForPage(
       wordCount++;
     }
     let rows = visualRowsFromWords(words);
+
+    // The label → value map the page's own geometry supports. Nothing depends
+    // on it yet — it is emitted so its pairing quality can be judged against
+    // real layouts before anything is built on top of it. Pure and cheap, so
+    // it costs nothing when the debug flag is off.
+    if (debugLog) {
+      for (const pair of buildFieldMap(rows)) {
+        debugLog(`resolver-field ${JSON.stringify(pair)}`);
+      }
+    }
 
     // The second opinion runs on the rows, before they are rendered: a span
     // must never straddle a column boundary, and `splitColumnBands` is what

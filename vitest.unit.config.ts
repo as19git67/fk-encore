@@ -12,6 +12,7 @@ export default defineConfig({
       "documents/document-filename.test.ts",
       "documents/filesystem-grouping.test.ts",
       "documents/metadata-extract.test.ts",
+      "documents/ocr-fields.test.ts",
       "documents/ocr-layout.test.ts",
       "documents/ocr-resolver.test.ts",
       "documents/ocr-preprocess.test.ts",
