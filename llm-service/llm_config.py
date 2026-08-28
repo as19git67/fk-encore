@@ -101,8 +101,16 @@ class LlmConfig:
     # llama.cpp keeps a vision model's image encoder in a file *separate* from
     # the GGUF weights, so an image-text-to-text model such as Gemma 4 loads
     # text-only unless this is supplied — the model can see, the server cannot.
-    # Empty means text-only, which is the default and what every existing
-    # deployment gets.
+    #
+    # **Normally left empty.** The projector is just another file next to the
+    # weights, so it belongs in `extra_urls` with them, and `resolve_mmproj`
+    # finds it on the volume by name. Setting this makes the path a second
+    # thing to keep in sync with the download, and the two drift: a
+    # configuration switched to a different model keeps pointing at the old
+    # model's projector, and the failure is a wrong answer, not an error.
+    #
+    # It stays as an escape hatch for a projector that does not follow the
+    # `mmproj-*.gguf` convention or lives outside the models volume.
     #
     # Server backend only: llama-cpp-python needs a per-family chat handler for
     # images, which the pinned CPU version does not provide, so `inproc` stays
@@ -232,6 +240,25 @@ class LlmConfig:
 
     # ── validation ───────────────────────────────────────────────────────────
 
+    def resolve_mmproj(self) -> str:
+        """The projector to hand llama-server, or "" for text-only.
+
+        An explicit `mmproj_path` wins — it exists precisely for the cases
+        discovery cannot cover. Otherwise the models volume is searched by
+        convention, so the normal way to gain vision is to add the projector's
+        URL to `extra_urls` and change nothing else.
+
+        Empty for any backend but `server`: the in-process runtime cannot load
+        a projector, and reporting one that is present on disk would tell
+        /healthz to advertise vision that no request can use.
+        """
+
+        if self.backend != "server":
+            return ""
+        if self.mmproj_path:
+            return self.mmproj_path
+        return discover_mmproj(self.model_path.parent, self.model_path.name)
+
     def validate(self) -> None:
         if self.backend not in BACKENDS:
             raise ConfigError(f"backend must be one of {list(BACKENDS)}, got {self.backend!r}")
@@ -262,6 +289,64 @@ class LlmConfig:
             raise ConfigError("timeouts must be positive")
         if not self.server_url.startswith(("http://", "https://")):
             raise ConfigError(f"server_url must be an http(s) URL, got {self.server_url!r}")
+
+
+
+# ─── Multimodal projector ─────────────────────────────────────────────────────
+
+# What llama.cpp's own tooling and every published quant call the file. The
+# leading `mmproj` is the convention; the rest is the model's name and quant.
+MMPROJ_GLOB = "mmproj*.gguf"
+
+
+def _shared_prefix(a: str, b: str) -> int:
+    """How many leading characters two names have in common, case-folded."""
+
+    a, b = a.lower(), b.lower()
+    n = 0
+    while n < len(a) and n < len(b) and a[n] == b[n]:
+        n += 1
+    return n
+
+
+def discover_mmproj(models_dir: Path, model_filename: str) -> str:
+    """The projector belonging to *model_filename*, or "" if none is there.
+
+    Files land flat on the models volume under their upstream basename, so a
+    projector fetched through `extra_urls` is simply a sibling of the weights.
+    Discovery therefore needs no configuration at all — which is the point: a
+    path that is derived cannot drift out of sync with the download.
+
+    With several projectors present — one volume, several models — the one
+    sharing the longest name prefix with the model wins:
+    `mmproj-gemma-4-26B-A4B-it-qat-F16.gguf` beats
+    `mmproj-qwen3-8b-F16.gguf` for `gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf`.
+    Prefix rather than fuzzy matching, because that is exactly how upstream
+    names them and a wrong projector is worse than none: the server starts,
+    answers, and is quietly wrong about every image.
+    """
+
+    try:
+        candidates = sorted(models_dir.glob(MMPROJ_GLOB))
+    except OSError:
+        # A missing or unreadable volume is a deployment problem, and the
+        # caller reports "text-only" for it just as it would for no projector.
+        return ""
+
+    # `.part` files are excluded by the glob's .gguf suffix, so a download in
+    # flight cannot be handed to llama-server as a complete projector.
+    best: Path | None = None
+    best_score = -1
+    for candidate in candidates:
+        stem = candidate.name
+        for prefix in ("mmproj-", "mmproj."):
+            if stem.lower().startswith(prefix):
+                stem = stem[len(prefix):]
+                break
+        score = _shared_prefix(stem, model_filename)
+        if score > best_score:
+            best, best_score = candidate, score
+    return str(best) if best is not None else ""
 
 
 # ─── Persistence ──────────────────────────────────────────────────────────────

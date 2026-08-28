@@ -430,7 +430,8 @@ would paper over a bad one.
 | `DOCUMENTS_OCR_VLM_MAX_SPANS` | `8` | Hard cap on VLM calls per document |
 | `DOCUMENTS_OCR_VLM_BUDGET_MS` | `30000` | Per-document resolver budget, checked between spans |
 | `DOCUMENTS_OCR_VLM_MARGIN` | `0.2` | Crop margin as a fraction of the span box |
-| `LLM_MMPROJ_PATH` | — | Multimodal projector handed to llama-server; unset disables the stage |
+| `LLM_MODEL_EXTRA_URLS` | — | Files fetched next to the weights. The projector's URL belongs here; it is then found by name, and no path is configured |
+| `LLM_MMPROJ_PATH` | — | Override for a projector that does not follow the `mmproj-*.gguf` convention or lives off the models volume |
 
 ## Risks and how each is contained
 

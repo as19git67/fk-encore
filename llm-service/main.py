@@ -591,10 +591,43 @@ def _resolve_startup_config() -> tuple[LlmConfig, str]:
     return persisted, "file"
 
 
+def _ensure_extras_present(cfg: LlmConfig) -> None:
+    """Fetch any `extra_urls` file that is not on the volume yet.
+
+    Extras used to be fetched only as a side effect of the *model* being
+    absent, which made adding one to an existing configuration a no-op until
+    someone deleted the weights. That is exactly the shape of the multimodal
+    projector: the model has been there for months, the projector is new, and
+    the reasonable expectation is that it appears on the next start.
+
+    Best-effort. A projector that fails to download leaves the service running
+    text-only, which is what it did before — losing classification over a
+    missing vision tower would be the worse trade.
+    """
+
+    missing = [
+        DownloadTarget(url=u, filename=filename_from_url(u))
+        for u in cfg.extra_urls
+        if not (cfg.model_path.parent / filename_from_url(u)).exists()
+    ]
+    if not missing:
+        return
+
+    log.info("Fetching %d missing extra file(s): %s", len(missing),
+             ", ".join(t.filename for t in missing))
+    try:
+        _downloads.run_blocking(missing)
+    except Exception:
+        log.exception("Extra file download failed — continuing without it")
+
+
 def _ensure_model_present(cfg: LlmConfig) -> None:
     """Make sure the GGUF for *cfg* is on the volume, downloading if it is not."""
 
     if cfg.model_path.exists():
+        # The weights are here, but an extra added since the last download may
+        # not be — see _ensure_extras_present.
+        _ensure_extras_present(cfg)
         return
 
     if cfg.model_url:
@@ -877,7 +910,14 @@ async def healthz() -> dict[str, Any]:
         # The vision tower, or None for a text-only service. Without it
         # /vision/transcribe answers 503 while everything else works normally,
         # which is otherwise a puzzling state to diagnose.
-        "llm_mmproj_path": _state["config"].mmproj_path or None,
+        "llm_mmproj_path": _state["config"].resolve_mmproj() or None,
+        # Whether the path above was configured or found by convention. Without
+        # it "vision is off" and "vision is off because the file never landed"
+        # look identical from outside.
+        "llm_mmproj_source": (
+            "configured" if _state["config"].mmproj_path
+            else ("discovered" if _state["config"].resolve_mmproj() else None)
+        ),
         # Which named configuration is loaded, and whether it came from an
         # activated row or from the environment. "env" is the state of any
         # deployment that has never used the admin UI.
@@ -2055,7 +2095,7 @@ async def vision_transcribe(req: VisionTranscribeRequest) -> VisionTranscribeRes
     if llm is None:
         raise HTTPException(status_code=503, detail="llm not loaded")
     cfg = _state["config"]
-    if not cfg.mmproj_path:
+    if not cfg.resolve_mmproj():
         # A precise 503 rather than a confusing model error: the weights are
         # loaded and answering text prompts, the vision tower simply is not
         # there. Naming the knob is the difference between a five-minute fix
@@ -2063,9 +2103,10 @@ async def vision_transcribe(req: VisionTranscribeRequest) -> VisionTranscribeRes
         raise HTTPException(
             status_code=503,
             detail=(
-                "no multimodal projector loaded — set LLM_MMPROJ_PATH (or the "
-                "configuration's mmproj_path) to the model's mmproj-*.gguf and "
-                "run with LLM_BACKEND=server"
+                "no multimodal projector loaded — add the model's "
+                "mmproj-*.gguf to the configuration's extra_urls (or "
+                "LLM_MODEL_EXTRA_URLS) so it is fetched onto the models volume "
+                "alongside the weights, and run with LLM_BACKEND=server"
             ),
         )
     if req.expected_type is not None and req.expected_type not in VISION_EXPECTED_TYPES:
@@ -2234,13 +2275,14 @@ async def vision_fields(req: VisionFieldsRequest) -> VisionFieldsResponse:
     if llm is None:
         raise HTTPException(status_code=503, detail="llm not loaded")
     cfg = _state["config"]
-    if not cfg.mmproj_path:
+    if not cfg.resolve_mmproj():
         raise HTTPException(
             status_code=503,
             detail=(
-                "no multimodal projector loaded — set LLM_MMPROJ_PATH (or the "
-                "configuration's mmproj_path) to the model's mmproj-*.gguf and "
-                "run with LLM_BACKEND=server"
+                "no multimodal projector loaded — add the model's "
+                "mmproj-*.gguf to the configuration's extra_urls (or "
+                "LLM_MODEL_EXTRA_URLS) so it is fetched onto the models volume "
+                "alongside the weights, and run with LLM_BACKEND=server"
             ),
         )
 

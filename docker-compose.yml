@@ -332,12 +332,21 @@ services:
       # Further shards of a split GGUF (space-separated URLs); LLM_MODEL_PATH
       # points at the first one.
       LLM_MODEL_EXTRA_URLS: ${LLM_MODEL_EXTRA_URLS:-}
-      # Multimodal projector for POST /vision/transcribe. llama.cpp keeps a
-      # vision model's image encoder in a file separate from the GGUF weights,
-      # so an image-text-to-text model loads text-only without this — the model
-      # can see, the server cannot. Fetch the mmproj via LLM_MODEL_EXTRA_URLS
-      # and point this at it. Server backend only; empty = text-only, and
-      # /vision/transcribe then answers 503 naming this variable.
+      # Multimodal projector for POST /vision/transcribe — an override, and
+      # normally left empty. llama.cpp keeps a vision model's image encoder in
+      # a file separate from the GGUF weights, so an image-text-to-text model
+      # loads text-only without one: the model can see, the server cannot.
+      #
+      # The projector is just another file next to the weights, so append its
+      # URL to LLM_MODEL_EXTRA_URLS (or the configuration's extra_urls) and the
+      # service finds it on the volume by its mmproj-*.gguf name. Set this only
+      # for a projector that does not follow that convention or lives outside
+      # the models volume — a configured path is a second thing to keep in sync
+      # with the download, and the two drift.
+      #
+      # Server backend only; no projector = text-only, and /vision/transcribe
+      # answers 503 saying so. `/healthz` reports llm_mmproj_path and whether
+      # it was configured or discovered.
       LLM_MMPROJ_PATH: ${LLM_MMPROJ_PATH:-}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-base}
       LLM_CTX: ${LLM_CTX:-8192}
