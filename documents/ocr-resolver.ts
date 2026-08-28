@@ -238,6 +238,31 @@ export interface ValidationResult {
 const OK: ValidationResult = { ok: true, reason: "" };
 
 /**
+ * A German amount, formed well enough that OCR clearly read a *number* rather
+ * than a digit that happens to sit in a word.
+ *
+ * Either a grouped thousands part or a decimal comma is required, so `23` in
+ * `23 aus oz` is not an amount while `19.560.187,27` and `7.500,00` are. That
+ * distinction is the whole point: the guard below must bind on numbers and stay
+ * out of the way everywhere else.
+ */
+const AMOUNT_BODY = String.raw`-?\d{1,3}(?:\.\d{3})+(?:,\d{2})?|-?\d+,\d{2}`;
+const GERMAN_AMOUNT = new RegExp(
+  // Nothing digit-like may touch either end. Without this, `7.5O0,00` yields
+  // `0,00` — a *wrong* value read out of the middle of a damaged number, which
+  // would make the guard block the very repair it should allow.
+  String.raw`(?<![\p{L}\d.,])(?:${AMOUNT_BODY})(?![\p{L}\d.,])`,
+  "gu",
+);
+
+/** Every German amount in a string, as numbers. */
+export function amountValues(text: string): number[] {
+  return (text.match(GERMAN_AMOUNT) ?? []).map((raw) =>
+    Number(raw.replace(/\./g, "").replace(",", ".")),
+  );
+}
+
+/**
  * Decide whether a model's transcription may replace the OCR reading.
  *
  * Every rule here exists to stop one specific way a vision model turns a
@@ -293,6 +318,27 @@ export function validateVlmAnswer(
       return {
         ok: false,
         reason: "third reading on a span whose only defect was engine disagreement",
+      };
+    }
+  }
+
+  // The amount guard. Where OCR already read a well-formed number, the model is
+  // correcting the characters *around* it, not revaluing it — and a confidently
+  // wrong amount is the most expensive thing this pipeline can produce, because
+  // nothing downstream will ever question it.
+  //
+  // Matching any one engine's amount is enough: two engines may read different
+  // numbers, and picking between them is exactly the model's job. Matching
+  // none of them means it invented a third value, which is not a reading.
+  const ocrAmounts = [...new Set(ocrCandidates.flatMap((c) => amountValues(c.text)))];
+  if (ocrAmounts.length > 0) {
+    const answered = new Set(amountValues(text));
+    if (!ocrAmounts.some((value) => answered.has(value))) {
+      return {
+        ok: false,
+        reason: `revalues the amount — OCR read ${ocrAmounts.join(" / ")}, answer has ${
+          [...answered].join(" / ") || "none"
+        }`,
       };
     }
   }

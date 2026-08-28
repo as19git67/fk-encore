@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it, expect } from "vitest";
 import {
   alignPaddleLine,
   applySpanToRow,
+  amountValues,
   bestOcrCandidate,
   compareReadings,
   decideSpan,
@@ -174,11 +175,13 @@ describe("validateVlmAnswer", () => {
   });
 
   it("allows a new reading when OCR itself flagged the span as weak", () => {
+    // Weak OCR licenses a genuinely new reading — that is the whole point of
+    // asking the model. Deliberately not an amount: the guard further down
+    // narrows this licence for numbers, where a new value is unverifiable.
     const verdict = validateVlmAnswer(
-      "7.300",
-      candidates(["tesseract", "7.500", 0.31], ["paddleocr", "7.800", 0.28]),
+      "Mühlenberg",
+      candidates(["tesseract", "Muhlenberq", 0.31], ["paddleocr", "Muhlenherg", 0.28]),
       ["low_confidence", "engine_disagreement"],
-      "amount",
     );
     expect(verdict.ok).toBe(true);
   });
@@ -542,5 +545,106 @@ describe("tallyDecisions", () => {
       "resolver: 3 span(s) — 1 engine agreement, 0 vlm accepted, 0 vlm rejected, " +
         "2 ocr kept (1 engine disagreement, 1 no second reading)",
     );
+  });
+});
+
+describe("amountValues", () => {
+  it("reads German amounts and ignores digits that are not one", () => {
+    expect(amountValues("19.560.187,27 DM 9,0%")).toEqual([19560187.27]);
+    expect(amountValues("7.500,00")).toEqual([7500]);
+    expect(amountValues("20,11 EUR")).toEqual([20.11]);
+    // `23` is a number but not an amount — no grouping, no decimal comma.
+    // Treating it as one would make the guard below bind on every date.
+    expect(amountValues("23 aus oz")).toEqual([]);
+    expect(amountValues("Rechnung ohne Betrag")).toEqual([]);
+  });
+
+  it("does not read a damaged amount as a valid one", () => {
+    // A letter where a digit belongs is exactly the case the model exists to
+    // fix, so it must not count as "OCR already read a number".
+    expect(amountValues("7.5O0,00")).toEqual([]);
+  });
+});
+
+describe("validateVlmAnswer — the amount guard", () => {
+  const reasons: UncertaintyReason[] = ["low_confidence"];
+
+  it("rejects an answer that revalues an amount OCR read cleanly", () => {
+    const verdict = validateVlmAnswer(
+      "19.560.188,27 DM",
+      candidates(["tesseract", "19.560.187,27 DM", 0.84]),
+      reasons,
+    );
+    expect(verdict.ok).toBe(false);
+    expect(verdict.ok === false && verdict.reason).toMatch(/revalues the amount/);
+  });
+
+  it("rejects an answer that drops the amount entirely", () => {
+    const verdict = validateVlmAnswer(
+      "Rechnungsbetrag",
+      candidates(["tesseract", "7.500,00", 0.6]),
+      reasons,
+    );
+    expect(verdict.ok).toBe(false);
+  });
+
+  it("accepts an answer that keeps the value and fixes what surrounds it", () => {
+    const verdict = validateVlmAnswer(
+      "1.963.985,69 EUR",
+      candidates(["tesseract", "1.963.985,69 EWR", 0.6]),
+      reasons,
+    );
+    expect(verdict.ok).toBe(true);
+  });
+
+  it("accepts an answer matching one engine when the two read different numbers", () => {
+    // Choosing between two readings is the model's job; only a third value is
+    // an invention.
+    const verdict = validateVlmAnswer(
+      "1.963.985,69 DM",
+      candidates(
+        ["tesseract", "1.963.985,69 DM", 0.84],
+        ["paddleocr", "1.963.985.69 DM", 0.98],
+      ),
+      reasons,
+    );
+    expect(verdict.ok).toBe(true);
+  });
+
+  it("holds even where OCR itself was unsure", () => {
+    // The one place the model's licence is narrower than "OCR was weak".
+    // A blurry number is exactly where a plausible-looking invention does the
+    // most damage: nothing downstream re-reads an amount to check it.
+    const verdict = validateVlmAnswer(
+      "7.300,00",
+      candidates(["tesseract", "7.500,00", 0.31], ["paddleocr", "7.800,00", 0.28]),
+      ["low_confidence", "engine_disagreement"],
+      "amount",
+    );
+    expect(verdict.ok).toBe(false);
+  });
+
+  it("stays out of the way where OCR read no amount", () => {
+    // The case the whole pipeline exists for must not be caught by a guard
+    // meant for numbers: `23` on its own is not an amount.
+    const verdict = validateVlmAnswer(
+      "23 AUG 02",
+      candidates(["tesseract", "23 aus oz", 0.4]),
+      reasons,
+      "date",
+    );
+    expect(verdict.ok).toBe(true);
+  });
+
+  it("lets the model repair an amount OCR could not read", () => {
+    // A letter among the digits means OCR did not read a number at all, so
+    // there is no value to preserve and the model is free to supply one.
+    const verdict = validateVlmAnswer(
+      "7.500,00",
+      candidates(["tesseract", "7.5O0,00", 0.4]),
+      reasons,
+      "amount",
+    );
+    expect(verdict.ok).toBe(true);
   });
 });

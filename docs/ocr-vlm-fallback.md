@@ -379,11 +379,17 @@ Validation is the safety-critical part, and rejects a VLM answer that:
   transcription of a crop cannot be a paragraph);
 - is not plausibly derivable from the crop — edit distance to the best OCR
   candidate above a threshold *when neither engine was low-confidence*;
-- changes digits in a span whose reasons did not include a digit-bearing token
-  (a "date fix" must not rewrite an amount) — **not built**, and the one rule
-  from this list still missing. Worth adding before the stage is switched on:
-  PaddleOCR was observed turning `19.560.187,27 DM` into `19.560.187.27 DM`,
-  so the failure it guards against is real on this material;
+- **revalues an amount** OCR already read cleanly. Built, but not in the shape
+  this line originally described ("changes digits in a span whose reasons did
+  not include a digit-bearing token"). Taken literally that would have blocked
+  `23 aus oz` → `23 AUG 02`, the case the whole plan exists for, since the
+  answer's digits do change. The rule that ships instead binds only where OCR
+  produced a *well-formed German amount* — a grouped thousands part or a
+  decimal comma, so `23` is not one and `7.5O0,00` is not one either — and
+  then requires the answer to preserve at least one engine's value. It is the
+  single place where the model's licence is narrower than "OCR was weak":
+  a blurry number is where a plausible invention does the most damage, because
+  nothing downstream ever re-reads an amount to check it;
 - contains characters outside the expected charset for `expected_type`;
 - is empty, or is the prompt echoed back.
 
