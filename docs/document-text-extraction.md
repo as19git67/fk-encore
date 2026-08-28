@@ -471,12 +471,23 @@ ten-page scan already costs ~23 s, so:
 extract(3198) page 1/10: rotate 2411ms, clean 292ms, tesseract 1163ms,
               layout 3ms, paddle 812ms, vlm 4210ms → 451 chars
 extract(3198) resolver: 7 span(s) — 3 engine agreement, 3 vlm accepted,
-              1 vlm rejected, 0 ocr kept
+              1 vlm rejected, 0 ocr kept (0 engine disagreement, 0 no second reading)
 ```
 
-Read the resolver line first: `rejected` climbing is a model or prompt
-regression; `kept` dominating means the spans being found are ones nothing can
-resolve. `DOCUMENTS_OCR_DEBUG=1` additionally emits one JSON line per span
+Read the resolver line first. `vlm rejected` climbing is a model or prompt
+regression. Inside `ocr kept` the two figures mean opposite things and are
+counted apart for that reason:
+
+- **engine disagreement** — PaddleOCR read the span and said something else.
+  Real signal, and exactly the work the vision stage exists for.
+- **no second reading** — PaddleOCR contributed nothing to that span, because
+  it detected nothing there or its line boxes did not align. The second engine
+  is not doing its job on those, and the alignment is what to look at.
+
+The distinction was added after a first production run reported 182 spans with
+132 of them "ocr kept": a number that could equally have meant "the engines
+disagree constantly" or "the second engine is inert", which lead to opposite
+next steps. `DOCUMENTS_OCR_DEBUG=1` additionally emits one JSON line per span
 (`resolver-span {...}`) carrying the box, the reasons, every candidate and the
 decision — a log line rather than a file, so a whole resolution greps out under
 the same document id as the rest of the extraction, and there is no derived

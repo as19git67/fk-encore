@@ -53,10 +53,13 @@ import {
 import { findUncertainSpans } from "./ocr-uncertainty";
 import { buildFieldMap, findUnpairedLabels } from "./ocr-fields";
 import {
+  formatResolverTally,
+  newResolverTally,
   newVlmBudget,
   resolveFieldAssignment,
   resolvePage,
   shouldAskForFieldAssignment,
+  tallyDecisions,
   SECOND_ENGINE_ENABLED,
   VLM_ENABLED,
   type ResolvedSpan,
@@ -755,7 +758,7 @@ async function ocrPdf(
     // dense one — the same weighting meanWordConfidence uses within a page.
     let confidenceSum = 0;
     let confidenceWords = 0;
-    const resolverCounts = { spans: 0, agreement: 0, accepted: 0, rejected: 0, kept: 0 };
+    const resolverCounts = newResolverTally();
     const fieldCounts = { assigned: 0, refused: 0, ms: 0 };
 
     // One budget for the whole document, not per page: a scan whose first page
@@ -856,13 +859,9 @@ async function ocrPdf(
                         pageVlmMs = vlmMs;
                         paddleTotal += paddleMs;
                         vlmTotal += vlmMs;
-                        resolverCounts.spans += spans.length;
-                        for (const span of spans) {
-                          if (span.decision === "ocr_agreement") resolverCounts.agreement++;
-                          else if (span.decision === "vlm_accepted") resolverCounts.accepted++;
-                          else if (span.decision === "vlm_rejected") resolverCounts.rejected++;
-                          else resolverCounts.kept++;
-                          if (OCR_RESOLVER_DEBUG) log(`resolver-span ${JSON.stringify(span)}`);
+                        tallyDecisions(spans, resolverCounts);
+                        if (OCR_RESOLVER_DEBUG) {
+                          for (const span of spans) log(`resolver-span ${JSON.stringify(span)}`);
                         }
                       },
                     }
@@ -961,15 +960,12 @@ async function ocrPdf(
 
     if (resolverCounts.spans > 0) {
       // Read this line first when asking whether the resolver is earning its
-      // keep: `rejected` climbing is a model or prompt regression, `kept`
-      // dominating means the spans found are ones nothing can resolve.
-      log(
-        `resolver: ${resolverCounts.spans} span(s) — ` +
-          `${resolverCounts.agreement} engine agreement, ` +
-          `${resolverCounts.accepted} vlm accepted, ` +
-          `${resolverCounts.rejected} vlm rejected, ` +
-          `${resolverCounts.kept} ocr kept`,
-      );
+      // keep. `vlm rejected` climbing is a model or prompt regression. Inside
+      // `ocr kept`, the two figures mean opposite things: `engine
+      // disagreement` is work the vision stage could do, while `no second
+      // reading` means PaddleOCR contributed nothing to that span and it is
+      // the alignment, not the model, that needs attention.
+      log(formatResolverTally(resolverCounts));
     }
 
     return {
