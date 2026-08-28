@@ -96,6 +96,19 @@ services:
       DOCUMENTS_INBOX_USER_EMAIL: ${DOCUMENTS_INBOX_USER_EMAIL:-}
       DOCUMENTS_OCR_LANG: ${DOCUMENTS_OCR_LANG:-deu+eng}
       DOCUMENTS_OCR_DPI: ${DOCUMENTS_OCR_DPI:-200}
+      # OCR resolver (docs/document-text-extraction.md). Both stages default
+      # off: with them off the uncertainty scan does not run at all and page
+      # text is byte-for-byte what it was before.
+      DOCUMENTS_OCR_SECOND_ENGINE: ${DOCUMENTS_OCR_SECOND_ENGINE:-0}
+      DOCUMENTS_OCR_VLM: ${DOCUMENTS_OCR_VLM:-0}
+      DOCUMENTS_OCR_CONF_THRESHOLD: ${DOCUMENTS_OCR_CONF_THRESHOLD:-70}
+      DOCUMENTS_OCR_VLM_MAX_SPANS: ${DOCUMENTS_OCR_VLM_MAX_SPANS:-8}
+      DOCUMENTS_OCR_VLM_BUDGET_MS: ${DOCUMENTS_OCR_VLM_BUDGET_MS:-30000}
+      DOCUMENTS_OCR_VLM_MARGIN: ${DOCUMENTS_OCR_VLM_MARGIN:-0.2}
+      DOCUMENTS_OCR_VLM_CROP_HEIGHT: ${DOCUMENTS_OCR_VLM_CROP_HEIGHT:-96}
+      DOCUMENTS_OCR_VLM_TIMEOUT_MS: ${DOCUMENTS_OCR_VLM_TIMEOUT_MS:-90000}
+      DOCUMENTS_OCR_PAGE_TIMEOUT_MS: ${DOCUMENTS_OCR_PAGE_TIMEOUT_MS:-30000}
+      DOCUMENTS_OCR_DEBUG: ${DOCUMENTS_OCR_DEBUG:-0}
       DOCUMENTS_GS_REPAIR_TIMEOUT_MS: ${DOCUMENTS_GS_REPAIR_TIMEOUT_MS:-90000}
       DOCUMENTS_GS_PDFSETTINGS: ${DOCUMENTS_GS_PDFSETTINGS:-/printer}
       # Max document characters sent to /classify. Keep <= the llm-service's
@@ -259,6 +272,13 @@ services:
       # Further shards of a split GGUF (space-separated URLs); LLM_MODEL_PATH
       # points at the first one.
       LLM_MODEL_EXTRA_URLS: ${LLM_MODEL_EXTRA_URLS:-}
+      # Multimodal projector for POST /vision/transcribe. llama.cpp keeps a
+      # vision model's image encoder in a file separate from the GGUF weights,
+      # so an image-text-to-text model loads text-only without this — the model
+      # can see, the server cannot. Fetch the mmproj via LLM_MODEL_EXTRA_URLS
+      # and point this at it. Server backend only; empty = text-only, and
+      # /vision/transcribe then answers 503 naming this variable.
+      LLM_MMPROJ_PATH: ${LLM_MMPROJ_PATH:-}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-base}
       LLM_CTX: ${LLM_CTX:-8192}
       LLM_GPU_LAYERS: ${LLM_GPU_LAYERS:-0}
