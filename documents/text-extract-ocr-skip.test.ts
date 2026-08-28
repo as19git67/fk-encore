@@ -24,8 +24,17 @@ import { join } from "node:path";
 describe("documents.text-extract: OCR is not run for a usable text layer", () => {
   const source = readFileSync(join(import.meta.dirname, "text-extract.ts"), "utf8");
 
+  // The text-layer return, located by the one part of it that is not
+  // formatting: the discriminant, with its trailing comma. Matching the whole
+  // return statement made this test fail the moment a field was added to
+  // ExtractResult and the object wrapped onto several lines — a reformat, with
+  // the property under test untouched. The comma is what keeps this off the
+  // `source: "text_layer" | "ocr" | "mixed"` union in the interface far above,
+  // which would otherwise be found first and put `decision` before the guard.
+  const TEXT_LAYER_RETURN = 'source: "text_layer",';
+
   it("returns the text layer before reaching the OCR call", () => {
-    const decision = source.indexOf('return { text: textLayer, source: "text_layer"');
+    const decision = source.indexOf(TEXT_LAYER_RETURN);
     const ocrCall = source.indexOf("await ocrPdf(");
     expect(decision, "text-layer return not found").toBeGreaterThan(-1);
     expect(ocrCall, "ocrPdf call not found").toBeGreaterThan(-1);
@@ -36,7 +45,7 @@ describe("documents.text-extract: OCR is not run for a usable text layer", () =>
     // force_ocr exists to rescue documents whose text layer is broken in a way
     // `hasPoorSpacing` does not catch. Returning early regardless would make
     // that option silently do nothing.
-    const decision = source.indexOf('return { text: textLayer, source: "text_layer"');
+    const decision = source.indexOf(TEXT_LAYER_RETURN);
     const guard = source.lastIndexOf("if (!options.forceOcr && textLayerLooksGood) {", decision);
     expect(guard).toBeGreaterThan(-1);
   });

@@ -66,6 +66,12 @@ def build_args(cfg: LlmConfig) -> list[str]:
         "--no-webui",
     ]
 
+    # The vision tower. Without it an image-text-to-text model still loads and
+    # answers text prompts perfectly well, and every image request fails at the
+    # server — which is why /healthz reports the resolved path rather than
+    # leaving "why does OCR never use the VLM" to be guessed.
+    if cfg.mmproj_path:
+        args += ["--mmproj", cfg.mmproj_path]
     # Expert offload — the reason this backend exists at all. 0 is a no-op.
     if cfg.n_cpu_moe > 0:
         args += ["--n-cpu-moe", str(cfg.n_cpu_moe)]
