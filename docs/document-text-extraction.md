@@ -135,7 +135,21 @@ Because it is built from the *cleaned* rasters, the served PDF keeps the
 corrected rotation. Best-effort — a failure here never affects the text.
 
 **Timeout.** `OCR_TIMEOUT_MS` (default 10 min) is checked between pages, so it
-truncates a long document rather than aborting a page mid-recognition.
+truncates a long document rather than aborting a page mid-recognition. **A
+truncated document looks exactly like a complete one from the outside** —
+partial text, status `ready`, no error — so it is reported in the log under the
+document id and persisted as `pages_ocred < pages_total`:
+
+```
+extract(3198) OCR time budget of 600000ms exhausted after 241/380 page(s) —
+              TRUNCATING. Raise DOCUMENTS_OCR_TIMEOUT_MS to extract this document in full.
+extract(3198) INCOMPLETE — 241/380 page(s) recognized before the time budget ran out
+```
+
+At the measured ~1.4 s/page (Tesseract alone) or ~2.5 s/page (with the second
+engine) the default reaches roughly 430 resp. 240 pages. Raising it is cheap in
+itself; the cost is that `DOC_SCAN_TEXT_CONCURRENCY=1` makes one such document
+block the queue for the whole duration.
 
 ## Layout reconstruction
 
@@ -404,6 +418,42 @@ on a span whose only defect was that two engines disagreed. In that last case
 the model is arbitrating between two candidates, not resolving a weak glyph,
 and a brand-new value would be unverifiable.
 
+### When the pairing fails, not the reading
+
+[`ocr-fields.ts`](../documents/ocr-fields.ts) pairs labels with values off the
+page's geometry — `Rechnungsdatum  23.08.2002` on one row, a lone label with
+its value beneath, a header row with values in columns — and each label yields
+the type its value should satisfy. That is what makes `Invoice No.  E0300008SA`
+an identifier rather than an implausible token needing a rule to excuse it.
+
+Sometimes the geometry does not deliver: a form whose captions and fields do
+not line up, a value printed somewhere its label does not predict. Then the
+characters are fine and the *assignment* is what is missing — and a crop cannot
+supply it, because the layout is exactly what a crop removes. This is the one
+place a whole page goes to the model.
+
+**It fires on three conditions together:**
+
+| | Default | Why |
+| --- | --- | --- |
+| typed labels with no value | ≥ 2 | One is usually a false positive — a `vom` inside prose, a column empty on this page |
+| …as a share of the page's labels | ≥ 50 % | Below that one field slipped; above it the positional assumptions do not hold for this layout at all |
+| a span still in doubt after the crops | required | A better pairing buys nothing where the text is already right — this is what keeps the call off clean pages |
+
+Plus its own per-document budget (`DOCUMENTS_OCR_FIELD_VLM_MAX_PAGES`, default
+1), separate from the crop budget because a page costs a multiple of a crop,
+and a downscale to `DOCUMENTS_OCR_FIELD_VLM_MAX_PX` — a 200-dpi A4 page is
+~2480 px wide, far more than a vision encoder uses.
+
+**The safety argument for handing over a page** is different from the crop's
+and stricter: the model may *rearrange* what OCR read, never add to it. Every
+value it returns is located among the page's own words
+(`locateValue`, matched on the confusable skeleton) and dropped when it is not
+there — so a plausible invented date cannot survive, and the accepted field
+carries the page's own reading rather than the model's rendering of it. That
+lookup does double duty: it is the validation, and it recovers the geometry the
+model cannot supply.
+
 ### Cost control
 
 Text extraction is single-threaded (`DOC_SCAN_TEXT_CONCURRENCY=1`) and a
@@ -481,10 +531,48 @@ real scans.
 | `DOCUMENTS_OCR_VLM_CROP_HEIGHT` | `96` | Height a crop is upscaled to before it is sent |
 | `DOCUMENTS_OCR_VLM_TIMEOUT_MS` | `90000` | Per-crop budget for the vision call |
 | `DOCUMENTS_OCR_PAGE_TIMEOUT_MS` | `30000` | Per-page budget for the PaddleOCR call |
-| `DOCUMENTS_OCR_DEBUG` | `0` | Emit one `resolver-span` JSON line per resolved span |
+| `DOCUMENTS_OCR_DEBUG` | `0` | Emit one `resolver-span` / `resolver-field` JSON line per span and field pair |
+| `DOCUMENTS_OCR_FIELD_VLM_MIN_UNPAIRED` | `2` | Typed labels without a value before a whole-page look is considered |
+| `DOCUMENTS_OCR_FIELD_VLM_MIN_RATIO` | `0.5` | …and their minimum share of the page's typed labels |
+| `DOCUMENTS_OCR_FIELD_VLM_MAX_PAGES` | `1` | Whole-page assignment calls per document |
+| `DOCUMENTS_OCR_FIELD_VLM_MAX_PX` | `1600` | Longest edge a page is scaled to before it is sent |
+| `DOCUMENTS_OCR_FIELD_VLM_TIMEOUT_MS` | `180000` | Per-page budget for the assignment call |
 
 Rotation and contrast have their own switches — see
 [ocr-improvements.md](./ocr-improvements.md).
+
+## The search index has a ceiling, and it no longer fails the write
+
+`text_tsv` feeds the lexical half of search. It used to be a
+`GENERATED ALWAYS ... STORED` column, so `to_tsvector` ran as part of every
+write — and PostgreSQL caps a tsvector's lexeme content at 1 MB. Because the
+column was generated, hitting that cap aborted the whole `UPDATE`: the document
+went to `failed` and its entire extracted text was discarded, over an index
+that could simply have been shorter.
+
+The cap is reachable, though not by prose. What accumulates distinct lexemes is
+**tables of numbers** — every date, amount and reference on a bank statement is
+its own lexeme — and pathological OCR where nearly every token is unique
+garbage. Measured on PostgreSQL 16:
+
+| Text | Size | tsvector |
+| --- | --- | --- |
+| Business-letter prose | 2.26 MB | 4.7 KB |
+| Statement, 40 000 transactions | 3.15 MB | 885 KB |
+| Statement, 80 000 transactions | 6.3 MB | **error** |
+
+At ~50 transaction lines per page that puts the ceiling near 1 200–1 600 pages,
+i.e. roughly an hour of OCR — so the time budget binds long before the index
+does, and raising `DOCUMENTS_OCR_TIMEOUT_MS` to 30 minutes stays well clear.
+Documents whose OCR produces mostly unique garbage reach it sooner, at a couple
+of hundred pages.
+
+Migration 0155 replaces the generated column with a trigger that catches the
+failure and retries on the first 400 000 characters. Everything that fits is
+indexed in full; the pathological case is indexed up to the cut and logs a
+warning; `extracted_text` is never touched, so the document keeps all of its
+text either way. The trigger fires on the same columns the generated
+expression covered, including `tags_text`, which the tag triggers maintain.
 
 ## External binaries
 
@@ -504,7 +592,9 @@ path.
 
 `documents.text_source` (`text_layer` | `ocr` | `mixed`) and
 `documents.ocr_mean_confidence` (mean per-word Tesseract confidence, 0..100,
-word-weighted across pages) now carry both. Diagnostics only — nothing decides
+word-weighted across pages) now carry both, and `documents.pages_total` /
+`documents.pages_ocred` (migration 0155) record whether the OCR time budget cut
+the document short. Diagnostics only — nothing decides
 anything on them — and NULL means "extracted before the migration". A partial
 index on `text_source` keeps the "everything that needed OCR" selection cheap.
 

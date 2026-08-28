@@ -21,6 +21,15 @@ const LLM_SERVICE_URL = (process.env.LLM_SERVICE_URL || "http://localhost:8002")
  */
 const VLM_TIMEOUT_MS = parseInt(process.env.DOCUMENTS_OCR_VLM_TIMEOUT_MS ?? "90000", 10);
 
+/**
+ * Per-page budget for the field-assignment call. Longer than a crop's: the
+ * image is a whole page, and prefilling it dominates the call.
+ */
+const FIELDS_TIMEOUT_MS = parseInt(
+  process.env.DOCUMENTS_OCR_FIELD_VLM_TIMEOUT_MS ?? "180000",
+  10,
+);
+
 export type VlmExpectedType = "date" | "amount" | "iban" | "document_number" | "text";
 
 export interface VlmTranscription {
@@ -89,6 +98,66 @@ export async function transcribeCrop(
   }
 
   return (await res.json()) as VlmTranscription;
+}
+
+export interface VlmField {
+  label: string;
+  value: string;
+}
+
+export interface VlmFieldAssignment {
+  fields: VlmField[];
+  model: string;
+  processing_ms: number;
+}
+
+/**
+ * Ask which value belongs to which label, over a whole page.
+ *
+ * The expensive call, and the one that needs the most care: a page image is a
+ * large input, and a model looking at a whole document has far more room to
+ * invent than one looking at a crop. Two things contain that — only labels the
+ * caller could not pair are asked about, and the caller drops every returned
+ * value that is not already present in the page's OCR text.
+ *
+ * Its own timeout, longer than a crop's: prefilling a page image takes
+ * substantially more than a line of it.
+ */
+export async function assignFields(
+  imagePng: Buffer,
+  labels: string[],
+  options: { timeoutMs?: number } = {},
+): Promise<VlmFieldAssignment> {
+  const url = `${LLM_SERVICE_URL}/vision/fields`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? FIELDS_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        image_b64: imagePng.toString("base64"),
+        image_mime: "image/png",
+        labels,
+      }),
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    throw new VlmUnavailableError(`POST ${url} failed: ${err?.message ?? String(err)}`);
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (res.status >= 500 || res.status === 408 || res.status === 429) {
+    throw new VlmUnavailableError(`POST ${url} returned ${res.status}`);
+  }
+  if (!res.ok) {
+    throw new Error(`POST ${url} returned ${res.status}`);
+  }
+
+  return (await res.json()) as VlmFieldAssignment;
 }
 
 export async function isVlmAvailable(timeoutMs = 2000): Promise<boolean> {

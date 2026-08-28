@@ -51,9 +51,12 @@ import {
   visualRowsFromWords,
 } from "./ocr-layout";
 import { findUncertainSpans } from "./ocr-uncertainty";
+import { buildFieldMap, findUnpairedLabels } from "./ocr-fields";
 import {
   newVlmBudget,
+  resolveFieldAssignment,
   resolvePage,
+  shouldAskForFieldAssignment,
   SECOND_ENGINE_ENABLED,
   VLM_ENABLED,
   type ResolvedSpan,
@@ -309,6 +312,13 @@ export interface ExtractResult {
    * and so a re-extraction can be aimed at the worst documents first.
    */
   ocrMeanConfidence: number | null;
+  /**
+   * Pages recognized vs. pages present. Equal on every complete extraction;
+   * `ocrPagesOcred < ocrPagesTotal` marks a document the OCR time budget cut
+   * short. Null on the text-layer path, which reads the whole document.
+   */
+  ocrPagesTotal: number | null;
+  ocrPagesOcred: number | null;
   /**
    * A searchable ("sandwich") PDF — the rasterized pages with an
    * invisible, positioned OCR text layer baked in — produced whenever the
@@ -570,6 +580,8 @@ export async function extractPdfText(
         pageCount,
         searchablePdf: null,
         ocrMeanConfidence: null,
+        ocrPagesTotal: null,
+        ocrPagesOcred: null,
       };
     }
 
@@ -607,6 +619,8 @@ export async function extractPdfText(
         pageCount,
         searchablePdf: ocr.searchablePdf,
         ocrMeanConfidence: ocr.meanConfidence,
+        ocrPagesTotal: ocr.pagesTotal,
+        ocrPagesOcred: ocr.pagesOcred,
       };
     }
     return {
@@ -615,6 +629,8 @@ export async function extractPdfText(
       pageCount,
       searchablePdf: ocr.searchablePdf,
       ocrMeanConfidence: ocr.meanConfidence,
+      ocrPagesTotal: ocr.pagesTotal,
+      ocrPagesOcred: ocr.pagesOcred,
     };
   } finally {
     if (tmpDir) {
@@ -630,6 +646,14 @@ export interface OcrResult {
    * nothing was recognized. Persisted as `documents.ocr_mean_confidence`.
    */
   meanConfidence: number | null;
+  /** Pages the rasterizer produced. */
+  pagesTotal: number;
+  /**
+   * Pages recognition actually reached. Below `pagesTotal` means the time
+   * budget truncated the document — the one failure this pipeline has that
+   * leaves a plausible-looking result behind.
+   */
+  pagesOcred: number;
   /**
    * Merged searchable PDF (rasterized pages + invisible OCR text layer),
    * present only when `wantSearchablePdf` was requested and the build
@@ -709,7 +733,7 @@ async function ocrPdf(
       .sort();
     if (entries.length === 0) {
       log(`ocr aborted after ${since(ocrStarted)}ms — rasterizing produced no pages`);
-      return { text: "", searchablePdf: null, meanConfidence: null };
+      return { text: "", searchablePdf: null, meanConfidence: null, pagesTotal: 0, pagesOcred: 0 };
     }
     log(
       `rasterize ${rasterMs}ms → ${entries.length} page(s) @${OCR_DPI}dpi` +
@@ -732,11 +756,21 @@ async function ocrPdf(
     let confidenceSum = 0;
     let confidenceWords = 0;
     const resolverCounts = { spans: 0, agreement: 0, accepted: 0, rejected: 0, kept: 0 };
+    const fieldCounts = { assigned: 0, refused: 0, ms: 0 };
 
     // One budget for the whole document, not per page: a scan whose first page
     // is a mess must not spend the entire allowance before page two is seen.
     const vlmBudget = newVlmBudget();
+    // The whole-page assignment call has its own allowance: a page image costs
+    // a multiple of a crop, so it must not be able to eat the crop budget.
+    const fieldBudget = { pages: 0 };
     const resolveEnabled = resolverActive() && OCR_LAYOUT_REBUILD_ENABLED;
+    if (OCR_RESOLVER_DEBUG && !resolveEnabled) {
+      // The field map is emitted from inside the layout step, so say plainly
+      // that it is running on its own rather than as part of a resolver pass —
+      // otherwise the absent `resolver:` summary reads like a failure.
+      log("resolver stages off — emitting the field map only");
+    }
 
     // Rotation is a property of the scan, not of each individual page, so the
     // sampler measures it once per page shape and lets the rest of the
@@ -750,9 +784,17 @@ async function ocrPdf(
     // remember its final (post-preprocessing) image for the fallback pass.
     let firstPagePath: string | null = null;
     const started = Date.now();
+    let pagesOcred = 0;
     for (let i = 0; i < entries.length; i++) {
       if (Date.now() - started > OCR_TIMEOUT_MS) {
-        console.warn("[documents.text-extract] OCR timeout reached, truncating");
+        // Tagged with the document id like every other line of the extraction:
+        // without it the log says a document was truncated but not which one,
+        // and the result — partial text, status "ready" — looks completely
+        // ordinary from the outside.
+        log(
+          `OCR time budget of ${OCR_TIMEOUT_MS}ms exhausted after ${i}/${entries.length} ` +
+            `page(s) — TRUNCATING. Raise DOCUMENTS_OCR_TIMEOUT_MS to extract this document in full.`,
+        );
         break;
       }
       const rawPagePath = path.join(tmpDir, entries[i]);
@@ -800,7 +842,15 @@ async function ocrPdf(
                   ? {
                       pageImagePath: pagePath,
                       vlmBudget,
+                      fieldBudget,
                       log,
+                      onAssigned: (accepted, rejected, ms) => {
+                        fieldCounts.assigned += accepted;
+                        fieldCounts.refused += rejected;
+                        fieldCounts.ms += ms;
+                        vlmTotal += ms;
+                        pageVlmMs += ms;
+                      },
                       onResolved: (spans, paddleMs, vlmMs) => {
                         pagePaddleMs = paddleMs;
                         pageVlmMs = vlmMs;
@@ -817,6 +867,7 @@ async function ocrPdf(
                       },
                     }
                   : undefined,
+                OCR_RESOLVER_DEBUG ? log : undefined,
               )
             : { text: txt.trim(), confidenceSum: 0, wordCount: 0 },
         );
@@ -824,6 +875,7 @@ async function ocrPdf(
         // milliseconds would otherwise be silently attributed to layout
         // reconstruction — which measures at ~3ms and would look absurd.
         layoutTotal += layoutStep.ms - pagePaddleMs - pageVlmMs;
+        pagesOcred = i + 1;
         const pageText = layoutStep.value.text;
         confidenceSum += layoutStep.value.confidenceSum;
         confidenceWords += layoutStep.value.wordCount;
@@ -884,6 +936,9 @@ async function ocrPdf(
     // survives DOCUMENTS_OCR_TIMING_PAGES=0.
     const totalMs = since(ocrStarted);
     const pages = entries.length;
+    if (pagesOcred < pages) {
+      log(`INCOMPLETE — ${pagesOcred}/${pages} page(s) recognized before the time budget ran out`);
+    }
     log(
       `ocr done in ${totalMs}ms — ${pages} page(s), ${Math.round(totalMs / pages)}ms/page: ` +
         `rasterize ${rasterMs}ms, ` +
@@ -895,6 +950,14 @@ async function ocrPdf(
         (mergeMs > 0 ? `, sandwich pdf ${mergeMs}ms` : "") +
         (markerMs > 0 ? `, number fallback ${markerMs}ms` : ""),
     );
+
+    if (fieldCounts.assigned + fieldCounts.refused > 0) {
+      log(
+        `field assignment: ${fieldCounts.assigned} accepted, ` +
+          `${fieldCounts.refused} refused (not printed on the page), ` +
+          `${fieldCounts.ms}ms`,
+      );
+    }
 
     if (resolverCounts.spans > 0) {
       // Read this line first when asking whether the resolver is earning its
@@ -913,6 +976,8 @@ async function ocrPdf(
       text,
       searchablePdf,
       meanConfidence: confidenceWords > 0 ? confidenceSum / confidenceWords : null,
+      pagesTotal: entries.length,
+      pagesOcred,
     };
   } finally {
     // Best-effort cleanup — never throw from the finally block.
@@ -991,9 +1056,13 @@ async function layoutTextForPage(
   resolve?: {
     pageImagePath: string;
     vlmBudget: { calls: number; deadline: number };
+    /** Whole-page assignment calls already spent on this document. */
+    fieldBudget: { pages: number };
     log: (msg: string) => void;
     onResolved: (spans: ResolvedSpan[], paddleMs: number, vlmMs: number) => void;
+    onAssigned: (accepted: number, rejected: number, ms: number) => void;
   },
+  debugLog?: (msg: string) => void,
 ): Promise<{ text: string; confidenceSum: number; wordCount: number }> {
   let confidenceSum = 0;
   let wordCount = 0;
@@ -1006,6 +1075,15 @@ async function layoutTextForPage(
       wordCount++;
     }
     let rows = visualRowsFromWords(words);
+
+    // The label → value map the page's own geometry supports. Pure and cheap,
+    // so it is built whenever anyone might look at it.
+    const fieldPairs = debugLog || resolve ? buildFieldMap(rows) : [];
+    if (debugLog) {
+      for (const pair of fieldPairs) {
+        debugLog(`resolver-field ${JSON.stringify(pair)}`);
+      }
+    }
 
     // The second opinion runs on the rows, before they are rendered: a span
     // must never straddle a column boundary, and `splitColumnBands` is what
@@ -1022,6 +1100,45 @@ async function layoutTextForPage(
         });
         rows = result.rows;
         resolve.onResolved(result.resolved, result.paddleMs, result.vlmMs);
+
+        // Only now, with the spans decided, is it clear whether anything is
+        // still in doubt — and a better pairing is worth a whole page only if
+        // something is. A span that ended on the OCR reading is exactly a
+        // question neither engine nor crop could answer.
+        const unpaired = findUnpairedLabels(rows, fieldPairs);
+        const stillInDoubt = result.resolved.some(
+          (span) => span.decision === "ocr_kept" || span.decision === "vlm_rejected",
+        );
+        const decision = shouldAskForFieldAssignment({
+          pairs: fieldPairs,
+          unpaired,
+          hasUnresolvedSpan: stillInDoubt,
+          pagesUsed: resolve.fieldBudget.pages,
+        });
+        if (decision.ask) {
+          resolve.fieldBudget.pages++;
+          const started = Date.now();
+          const assignment = await resolveFieldAssignment({
+            pageImagePath: resolve.pageImagePath,
+            rows,
+            unpaired,
+            log: resolve.log,
+          });
+          resolve.onAssigned(
+            assignment.accepted.length,
+            assignment.rejected.length,
+            Date.now() - started,
+          );
+          if (debugLog) {
+            for (const field of assignment.accepted) {
+              debugLog(`resolver-field-assigned ${JSON.stringify(field)}`);
+            }
+          }
+        } else if (debugLog && unpaired.length > 0) {
+          debugLog(
+            `field assignment skipped — ${unpaired.length} unpaired label(s): ${decision.reason}`,
+          );
+        }
       }
     }
 
