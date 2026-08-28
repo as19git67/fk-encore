@@ -299,6 +299,8 @@ export async function runTextExtract(documentId: number): Promise<void> {
     .update(documents)
     .set({
       extracted_text: text.length === 0 ? null : text,
+      text_source: result.source,
+      ocr_mean_confidence: result.ocrMeanConfidence,
       status: sql`CASE WHEN ${documents.status} IN ('pending', 'extracting')
                        THEN ${nextStatus} ELSE ${documents.status} END`,
     })

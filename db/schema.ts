@@ -800,6 +800,13 @@ export const documents = pgTable("documents", {
   // OCR. Used to recover documents whose pre-baked text layer lost its
   // spaces (see migration 0028).
   force_ocr: boolean("force_ocr").notNull().default(false),
+  // Which path produced `extracted_text` — 'text_layer' | 'ocr' | 'mixed' —
+  // and how well the OCR pass read, when it ran (migration 0154). Diagnostics
+  // only: nothing decides anything on them. They exist so "which documents
+  // needed OCR?" is answerable in SQL, which targeted re-extraction and any
+  // before/after measurement of an OCR change both start from.
+  text_source: text("text_source"),
+  ocr_mean_confidence: real("ocr_mean_confidence"),
   // Tax-return metadata (migration 0029). Filled by the LLM classifier;
   // the user can override via the tax-detail endpoint (flips
   // `tax_reviewed` to true). Section assignments live in the N:M

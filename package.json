@@ -17,6 +17,7 @@
     "mine-hints:taxonomy": "python3 scripts/taxonomy/mine_hints.py",
     "audit:taxonomy": "python3 scripts/taxonomy/cloud_audit.py",
     "scoreboard:taxonomy": "python3 scripts/taxonomy/model_scoreboard.py",
+    "measure:ocr": "node scripts/ocr/measure.mjs",
     "prepare": "husky"
   },
   "devDependencies": {

@@ -15,8 +15,15 @@ const TSV_HEADER =
   "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext";
 
 /** Build one word-level TSV row (level 5) with the given geometry and text. */
-function tsvWord(left: number, top: number, width: number, height: number, text: string): string {
-  return `5\t1\t1\t1\t1\t1\t${left}\t${top}\t${width}\t${height}\t96\t${text}`;
+function tsvWord(
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+  text: string,
+  conf = 96,
+): string {
+  return `5\t1\t1\t1\t1\t1\t${left}\t${top}\t${width}\t${height}\t${conf}\t${text}`;
 }
 
 function word(text: string, left: number, top: number, width = 40, height = 20): OcrWord {
@@ -34,8 +41,29 @@ describe("parseTesseractTsv", () => {
     ].join("\n");
 
     expect(parseTesseractTsv(tsv)).toEqual([
-      { text: "Rechnung", left: 100, top: 200, right: 160, bottom: 220 },
-      { text: "20,11", left: 200, top: 200, right: 240, bottom: 220 },
+      { text: "Rechnung", left: 100, top: 200, right: 160, bottom: 220, confidence: 96 },
+      { text: "20,11", left: 200, top: 200, right: 240, bottom: 220, confidence: 96 },
+    ]);
+  });
+
+  it("carries the per-word confidence the TSV already contains", () => {
+    const tsv = [TSV_HEADER, tsvWord(100, 200, 60, 20, "23", 94), tsvWord(200, 200, 60, 20, "aus", 41)].join("\n");
+    expect(parseTesseractTsv(tsv).map((w) => w.confidence)).toEqual([94, 41]);
+  });
+
+  it("drops the structural -1 confidence rather than reading it as a score", () => {
+    // Tesseract writes conf=-1 on rows that are not a word-level measurement.
+    // A word row should never carry it, but output we do not fully understand
+    // must not turn it into "confidence: -1" for the uncertainty scan.
+    const tsv = [TSV_HEADER, tsvWord(100, 200, 60, 20, "Datum", -1)].join("\n");
+    expect(parseTesseractTsv(tsv)[0].confidence).toBeUndefined();
+  });
+
+  it("still parses output without a conf column", () => {
+    const header = "level\tleft\ttop\twidth\theight\ttext";
+    const tsv = [header, "5\t100\t200\t60\t20\tDatum"].join("\n");
+    expect(parseTesseractTsv(tsv)).toEqual([
+      { text: "Datum", left: 100, top: 200, right: 160, bottom: 220 },
     ]);
   });
 

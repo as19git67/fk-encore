@@ -26,6 +26,15 @@ const DEFAULT_TIMEOUT_MS = parseInt(
   10,
 );
 
+// Page OCR runs inside the text-extraction budget rather than in an
+// interactive request, and DOC_SCAN_TEXT_CONCURRENCY is 1 — a call that hangs
+// stalls every document behind it. So it gives up far sooner than the receipt
+// path, and the caller simply proceeds without a second opinion.
+const PAGE_OCR_TIMEOUT_MS = parseInt(
+  process.env.DOCUMENTS_OCR_PAGE_TIMEOUT_MS ?? "30000",
+  10,
+);
+
 export class ReceiptOcrUnavailableError extends Error {
   constructor(reason: string) {
     super(reason);
@@ -151,6 +160,77 @@ export async function extractReceiptItems(
   }
 
   return (await res.json()) as ReceiptItemsResult;
+}
+
+/**
+ * PaddleOCR's reading of one already-rasterized document page.
+ *
+ * Used as the *second* optical opinion in the documents pipeline: Tesseract
+ * stays the engine that produces the page text, and this result exists only to
+ * be compared against it (`ocr-resolver.ts`). Paddle returns line boxes where
+ * Tesseract returns word boxes, so the comparison is geometric, not positional.
+ */
+export interface PageOcrLine {
+  text: string;
+  /** PaddleOCR's per-line confidence, 0..1 — note the scale differs from Tesseract's 0..100. */
+  confidence: number;
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+export interface PageOcrResult {
+  lines: PageOcrLine[];
+  full_text: string;
+  mean_confidence: number;
+  processing_ms: number;
+}
+
+/**
+ * Recognize a document page with PaddleOCR.
+ *
+ * The image must already be the cleaned, upright raster the caller fed to
+ * Tesseract — the endpoint does no preprocessing of its own, deliberately, so
+ * that the two engines disagree about the *text* rather than about the pixels.
+ *
+ * Timeout is separate from the receipt path's: this runs inside the text
+ * extraction budget, where a stalled call would hold up every document behind
+ * it, so it gives up much sooner.
+ */
+export async function ocrPage(
+  imageBuffer: Buffer,
+  filename = "page.png",
+  timeoutMs = PAGE_OCR_TIMEOUT_MS,
+): Promise<PageOcrResult> {
+  const url = `${RECEIPT_OCR_SERVICE_URL}/ocr/page`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  const formData = new FormData();
+  formData.append("file", new Blob([imageBuffer], { type: "image/png" }), filename);
+
+  let res: Response;
+  try {
+    res = await fetch(url, { method: "POST", body: formData, signal: controller.signal });
+  } catch (err: any) {
+    throw new ReceiptOcrUnavailableError(
+      `POST ${url} failed: ${err?.message ?? String(err)}`,
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (res.status >= 500 || res.status === 408 || res.status === 429) {
+    throw new ReceiptOcrUnavailableError(
+      `POST ${url} returned ${res.status}: ${await safeBody(res)}`,
+    );
+  }
+  if (!res.ok) {
+    throw new Error(`POST ${url} returned ${res.status}: ${await safeBody(res)}`);
+  }
+
+  return (await res.json()) as PageOcrResult;
 }
 
 export async function isReceiptOcrHealthy(timeoutMs = 2000): Promise<boolean> {
