@@ -70,10 +70,37 @@ export interface UncertaintyOptions {
   confidenceThreshold?: number;
   /** Hard cap on spans returned per page, highest score first. */
   maxSpans?: number;
+  /**
+   * Smallest box still treated as text, in pixels. Both dimensions must be
+   * met. Scale these with `DOCUMENTS_OCR_DPI` if a deployment rasterizes at
+   * something other than the default 200.
+   */
+  minSpanWidth?: number;
+  minSpanHeight?: number;
 }
 
 const DEFAULT_CONFIDENCE_THRESHOLD = 70;
 const DEFAULT_MAX_SPANS = 12;
+
+/**
+ * A span smaller than this is a speck, not text.
+ *
+ * Measured at the pipeline's default 200 dpi, where a printed glyph is roughly
+ * 18 px tall and 10 px wide. Scanner noise, JPEG ringing and dust leave boxes
+ * of 2x2 to 9x3 px that Tesseract dutifully reads as `.`, `|` or `'` with low
+ * confidence. They therefore flag as uncertain, consume the per-page span
+ * budget, and — because `overlapRatio` in the resolver normalises by the
+ * span's own area — sit fully inside any PaddleOCR line that contains them,
+ * matching it at ratio 1.0. One 2x2 px speck drew in an entire unrelated line
+ * as its "second reading".
+ *
+ * The thresholds sit below the smallest legible glyph and above the largest
+ * speck seen in production, where 530 of 3440 spans fell under them and none
+ * of those was text. They are dimensions rather than an area because a long
+ * thin box (a table rule read as punctuation) is just as degenerate as a dot.
+ */
+const DEFAULT_MIN_SPAN_WIDTH = 4;
+const DEFAULT_MIN_SPAN_HEIGHT = 8;
 
 /**
  * Characters Tesseract swaps for one another, as a canonical folding map over
@@ -120,6 +147,21 @@ export function spanBbox(words: OcrWord[]): SpanBox {
     right: Math.max(...words.map((w) => w.right)),
     bottom: Math.max(...words.map((w) => w.bottom)),
   };
+}
+
+/**
+ * Is this box too small to hold a readable glyph?
+ *
+ * Applied before a span is emitted at all, so a speck never reaches the
+ * resolver: it costs no crop, no model call, and cannot capture a PaddleOCR
+ * line it merely happens to sit inside.
+ */
+export function tooSmallToRead(
+  box: SpanBox,
+  minWidth = DEFAULT_MIN_SPAN_WIDTH,
+  minHeight = DEFAULT_MIN_SPAN_HEIGHT,
+): boolean {
+  return box.right - box.left < minWidth || box.bottom - box.top < minHeight;
 }
 
 /**
@@ -280,6 +322,8 @@ export function findUncertainSpans(
 ): UncertainSpan[] {
   const threshold = options.confidenceThreshold ?? DEFAULT_CONFIDENCE_THRESHOLD;
   const maxSpans = options.maxSpans ?? DEFAULT_MAX_SPANS;
+  const minWidth = options.minSpanWidth ?? DEFAULT_MIN_SPAN_WIDTH;
+  const minHeight = options.minSpanHeight ?? DEFAULT_MIN_SPAN_HEIGHT;
   const spans: UncertainSpan[] = [];
 
   for (const row of rows) {
@@ -314,9 +358,15 @@ export function findUncertainSpans(
       const text = words.map((w) => w.text).join(" ");
       if (patternMiss(text) !== null) reasons.add("pattern_miss");
 
+      const bbox = spanBbox(words);
+      if (tooSmallToRead(bbox, minWidth, minHeight)) {
+        i = end + 1;
+        continue;
+      }
+
       spans.push({
         words,
-        bbox: spanBbox(words),
+        bbox,
         text,
         reasons: [...reasons],
         score: scoreSpan(words, [...reasons], threshold),
