@@ -3,6 +3,8 @@ import {
   alignPaddleLine,
   applySpanToRow,
   amountValues,
+  newVlmBudget,
+  vlmBudgetLeft,
   bestOcrCandidate,
   compareReadings,
   decideSpan,
@@ -646,5 +648,44 @@ describe("validateVlmAnswer — the amount guard", () => {
       "amount",
     );
     expect(verdict.ok).toBe(true);
+  });
+});
+
+describe("the VLM budget", () => {
+  it("starts with calls and model time to spend", () => {
+    const budget = newVlmBudget();
+    expect(budget.calls).toBeGreaterThan(0);
+    expect(budget.budgetMs).toBeGreaterThan(0);
+    expect(vlmBudgetLeft(budget)).toBe(true);
+  });
+
+  it("is spent by calls", () => {
+    const budget = { calls: 1, budgetMs: 30_000, spentMs: 0 };
+    budget.calls--;
+    expect(vlmBudgetLeft(budget)).toBe(false);
+  });
+
+  it("is spent by model time", () => {
+    const budget = { calls: 8, budgetMs: 30_000, spentMs: 30_000 };
+    expect(vlmBudgetLeft(budget)).toBe(false);
+  });
+
+  it("counts model time, not the wait for a slot", () => {
+    // The regression this guards. Every call now queues for the single shared
+    // llama.cpp session, so a document can sit for longer than its whole
+    // allowance before its first crop is even sent. Measured as wall-clock
+    // since the document started, the budget would already be gone and the
+    // resolver would look switched off rather than starved. Wall-clock stays
+    // bounded one level up, by DOCUMENTS_OCR_TIMEOUT_MS.
+    const budget = { calls: 8, budgetMs: 30_000, spentMs: 0 };
+
+    // 40s of queueing changes nothing …
+    expect(vlmBudgetLeft(budget)).toBe(true);
+
+    // … and only the model's own seconds are charged.
+    budget.spentMs += 12_000;
+    expect(vlmBudgetLeft(budget)).toBe(true);
+    budget.spentMs += 20_000;
+    expect(vlmBudgetLeft(budget)).toBe(false);
   });
 });
