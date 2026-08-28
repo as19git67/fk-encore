@@ -580,6 +580,82 @@ function meanConfidence(words: readonly OcrWord[]): number {
   return measured.reduce((a, b) => a + b, 0) / measured.length;
 }
 
+// ─── Reporting ────────────────────────────────────────────────────────────
+
+export interface ResolverTally {
+  spans: number;
+  agreement: number;
+  vlmAccepted: number;
+  vlmRejected: number;
+  /** Kept because the two engines read the span differently. */
+  keptDisagreement: number;
+  /**
+   * Kept because no second reading covered the span at all — PaddleOCR
+   * detected nothing there, or its line boxes did not align.
+   */
+  keptNoSecondReading: number;
+}
+
+export function newResolverTally(): ResolverTally {
+  return {
+    spans: 0,
+    agreement: 0,
+    vlmAccepted: 0,
+    vlmRejected: 0,
+    keptDisagreement: 0,
+    keptNoSecondReading: 0,
+  };
+}
+
+/**
+ * Accumulate a page's decisions into a per-document tally.
+ *
+ * The split inside `ocr_kept` is the point. A first production run reported
+ * 182 spans with 132 of them "ocr kept", and that number could not be acted
+ * on: it conflates *the engines disagreed* — a real signal, and exactly what
+ * the vision stage exists for — with *there was no second reading at all*,
+ * which means the second engine contributed nothing and the alignment or
+ * PaddleOCR's own detection is what needs looking at. Those two readings of
+ * the same number lead to opposite conclusions, so they are counted apart.
+ */
+export function tallyDecisions(
+  spans: readonly ResolvedSpan[],
+  into: ResolverTally = newResolverTally(),
+): ResolverTally {
+  for (const span of spans) {
+    into.spans++;
+    const hadSecondReading = span.candidates.some((c) => c.source === "paddleocr");
+    switch (span.decision) {
+      case "ocr_agreement":
+        into.agreement++;
+        break;
+      case "vlm_accepted":
+        into.vlmAccepted++;
+        break;
+      case "vlm_rejected":
+        into.vlmRejected++;
+        break;
+      default:
+        if (hadSecondReading) into.keptDisagreement++;
+        else into.keptNoSecondReading++;
+    }
+  }
+  return into;
+}
+
+/** The summary line. Empty when nothing was flagged on the document. */
+export function formatResolverTally(tally: ResolverTally): string {
+  return (
+    `resolver: ${tally.spans} span(s) — ` +
+    `${tally.agreement} engine agreement, ` +
+    `${tally.vlmAccepted} vlm accepted, ` +
+    `${tally.vlmRejected} vlm rejected, ` +
+    `${tally.keptDisagreement + tally.keptNoSecondReading} ocr kept ` +
+    `(${tally.keptDisagreement} engine disagreement, ` +
+    `${tally.keptNoSecondReading} no second reading)`
+  );
+}
+
 // ─── Whole-page field assignment ──────────────────────────────────────────
 //
 // The other failure mode: the characters read fine, but the *pairing* of
