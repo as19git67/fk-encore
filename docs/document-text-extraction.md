@@ -135,7 +135,21 @@ Because it is built from the *cleaned* rasters, the served PDF keeps the
 corrected rotation. Best-effort — a failure here never affects the text.
 
 **Timeout.** `OCR_TIMEOUT_MS` (default 10 min) is checked between pages, so it
-truncates a long document rather than aborting a page mid-recognition.
+truncates a long document rather than aborting a page mid-recognition. **A
+truncated document looks exactly like a complete one from the outside** —
+partial text, status `ready`, no error — so it is reported in the log under the
+document id and persisted as `pages_ocred < pages_total`:
+
+```
+extract(3198) OCR time budget of 600000ms exhausted after 241/380 page(s) —
+              TRUNCATING. Raise DOCUMENTS_OCR_TIMEOUT_MS to extract this document in full.
+extract(3198) INCOMPLETE — 241/380 page(s) recognized before the time budget ran out
+```
+
+At the measured ~1.4 s/page (Tesseract alone) or ~2.5 s/page (with the second
+engine) the default reaches roughly 430 resp. 240 pages. Raising it is cheap in
+itself; the cost is that `DOC_SCAN_TEXT_CONCURRENCY=1` makes one such document
+block the queue for the whole duration.
 
 ## Layout reconstruction
 
@@ -527,6 +541,39 @@ real scans.
 Rotation and contrast have their own switches — see
 [ocr-improvements.md](./ocr-improvements.md).
 
+## The search index has a ceiling, and it no longer fails the write
+
+`text_tsv` feeds the lexical half of search. It used to be a
+`GENERATED ALWAYS ... STORED` column, so `to_tsvector` ran as part of every
+write — and PostgreSQL caps a tsvector's lexeme content at 1 MB. Because the
+column was generated, hitting that cap aborted the whole `UPDATE`: the document
+went to `failed` and its entire extracted text was discarded, over an index
+that could simply have been shorter.
+
+The cap is reachable, though not by prose. What accumulates distinct lexemes is
+**tables of numbers** — every date, amount and reference on a bank statement is
+its own lexeme — and pathological OCR where nearly every token is unique
+garbage. Measured on PostgreSQL 16:
+
+| Text | Size | tsvector |
+| --- | --- | --- |
+| Business-letter prose | 2.26 MB | 4.7 KB |
+| Statement, 40 000 transactions | 3.15 MB | 885 KB |
+| Statement, 80 000 transactions | 6.3 MB | **error** |
+
+At ~50 transaction lines per page that puts the ceiling near 1 200–1 600 pages,
+i.e. roughly an hour of OCR — so the time budget binds long before the index
+does, and raising `DOCUMENTS_OCR_TIMEOUT_MS` to 30 minutes stays well clear.
+Documents whose OCR produces mostly unique garbage reach it sooner, at a couple
+of hundred pages.
+
+Migration 0155 replaces the generated column with a trigger that catches the
+failure and retries on the first 400 000 characters. Everything that fits is
+indexed in full; the pathological case is indexed up to the cut and logs a
+warning; `extracted_text` is never touched, so the document keeps all of its
+text either way. The trigger fires on the same columns the generated
+expression covered, including `tags_text`, which the tag triggers maintain.
+
 ## External binaries
 
 `pdftoppm` (poppler-utils), `tesseract` (tesseract-ocr, with `deu`/`eng`/`osd`),
@@ -545,7 +592,9 @@ path.
 
 `documents.text_source` (`text_layer` | `ocr` | `mixed`) and
 `documents.ocr_mean_confidence` (mean per-word Tesseract confidence, 0..100,
-word-weighted across pages) now carry both. Diagnostics only — nothing decides
+word-weighted across pages) now carry both, and `documents.pages_total` /
+`documents.pages_ocred` (migration 0155) record whether the OCR time budget cut
+the document short. Diagnostics only — nothing decides
 anything on them — and NULL means "extracted before the migration". A partial
 index on `text_source` keeps the "everything that needed OCR" selection cheap.
 

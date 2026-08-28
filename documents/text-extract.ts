@@ -313,6 +313,13 @@ export interface ExtractResult {
    */
   ocrMeanConfidence: number | null;
   /**
+   * Pages recognized vs. pages present. Equal on every complete extraction;
+   * `ocrPagesOcred < ocrPagesTotal` marks a document the OCR time budget cut
+   * short. Null on the text-layer path, which reads the whole document.
+   */
+  ocrPagesTotal: number | null;
+  ocrPagesOcred: number | null;
+  /**
    * A searchable ("sandwich") PDF — the rasterized pages with an
    * invisible, positioned OCR text layer baked in — produced whenever the
    * original lacked a usable text layer (source "ocr"/"mixed" or
@@ -573,6 +580,8 @@ export async function extractPdfText(
         pageCount,
         searchablePdf: null,
         ocrMeanConfidence: null,
+        ocrPagesTotal: null,
+        ocrPagesOcred: null,
       };
     }
 
@@ -610,6 +619,8 @@ export async function extractPdfText(
         pageCount,
         searchablePdf: ocr.searchablePdf,
         ocrMeanConfidence: ocr.meanConfidence,
+        ocrPagesTotal: ocr.pagesTotal,
+        ocrPagesOcred: ocr.pagesOcred,
       };
     }
     return {
@@ -618,6 +629,8 @@ export async function extractPdfText(
       pageCount,
       searchablePdf: ocr.searchablePdf,
       ocrMeanConfidence: ocr.meanConfidence,
+      ocrPagesTotal: ocr.pagesTotal,
+      ocrPagesOcred: ocr.pagesOcred,
     };
   } finally {
     if (tmpDir) {
@@ -633,6 +646,14 @@ export interface OcrResult {
    * nothing was recognized. Persisted as `documents.ocr_mean_confidence`.
    */
   meanConfidence: number | null;
+  /** Pages the rasterizer produced. */
+  pagesTotal: number;
+  /**
+   * Pages recognition actually reached. Below `pagesTotal` means the time
+   * budget truncated the document — the one failure this pipeline has that
+   * leaves a plausible-looking result behind.
+   */
+  pagesOcred: number;
   /**
    * Merged searchable PDF (rasterized pages + invisible OCR text layer),
    * present only when `wantSearchablePdf` was requested and the build
@@ -712,7 +733,7 @@ async function ocrPdf(
       .sort();
     if (entries.length === 0) {
       log(`ocr aborted after ${since(ocrStarted)}ms — rasterizing produced no pages`);
-      return { text: "", searchablePdf: null, meanConfidence: null };
+      return { text: "", searchablePdf: null, meanConfidence: null, pagesTotal: 0, pagesOcred: 0 };
     }
     log(
       `rasterize ${rasterMs}ms → ${entries.length} page(s) @${OCR_DPI}dpi` +
@@ -763,9 +784,17 @@ async function ocrPdf(
     // remember its final (post-preprocessing) image for the fallback pass.
     let firstPagePath: string | null = null;
     const started = Date.now();
+    let pagesOcred = 0;
     for (let i = 0; i < entries.length; i++) {
       if (Date.now() - started > OCR_TIMEOUT_MS) {
-        console.warn("[documents.text-extract] OCR timeout reached, truncating");
+        // Tagged with the document id like every other line of the extraction:
+        // without it the log says a document was truncated but not which one,
+        // and the result — partial text, status "ready" — looks completely
+        // ordinary from the outside.
+        log(
+          `OCR time budget of ${OCR_TIMEOUT_MS}ms exhausted after ${i}/${entries.length} ` +
+            `page(s) — TRUNCATING. Raise DOCUMENTS_OCR_TIMEOUT_MS to extract this document in full.`,
+        );
         break;
       }
       const rawPagePath = path.join(tmpDir, entries[i]);
@@ -846,6 +875,7 @@ async function ocrPdf(
         // milliseconds would otherwise be silently attributed to layout
         // reconstruction — which measures at ~3ms and would look absurd.
         layoutTotal += layoutStep.ms - pagePaddleMs - pageVlmMs;
+        pagesOcred = i + 1;
         const pageText = layoutStep.value.text;
         confidenceSum += layoutStep.value.confidenceSum;
         confidenceWords += layoutStep.value.wordCount;
@@ -906,6 +936,9 @@ async function ocrPdf(
     // survives DOCUMENTS_OCR_TIMING_PAGES=0.
     const totalMs = since(ocrStarted);
     const pages = entries.length;
+    if (pagesOcred < pages) {
+      log(`INCOMPLETE — ${pagesOcred}/${pages} page(s) recognized before the time budget ran out`);
+    }
     log(
       `ocr done in ${totalMs}ms — ${pages} page(s), ${Math.round(totalMs / pages)}ms/page: ` +
         `rasterize ${rasterMs}ms, ` +
@@ -943,6 +976,8 @@ async function ocrPdf(
       text,
       searchablePdf,
       meanConfidence: confidenceWords > 0 ? confidenceSum / confidenceWords : null,
+      pagesTotal: entries.length,
+      pagesOcred,
     };
   } finally {
     // Best-effort cleanup — never throw from the finally block.

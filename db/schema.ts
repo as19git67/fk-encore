@@ -807,6 +807,12 @@ export const documents = pgTable("documents", {
   // before/after measurement of an OCR change both start from.
   text_source: text("text_source"),
   ocr_mean_confidence: real("ocr_mean_confidence"),
+  // Pages present vs. pages OCR actually reached (migration 0155). Unequal
+  // means the OCR time budget truncated the document — which otherwise looks
+  // exactly like a complete extraction from the outside: partial text, status
+  // 'ready', no error anywhere.
+  pages_total: integer("pages_total"),
+  pages_ocred: integer("pages_ocred"),
   // Tax-return metadata (migration 0029). Filled by the LLM classifier;
   // the user can override via the tax-detail endpoint (flips
   // `tax_reviewed` to true). Section assignments live in the N:M
