@@ -7,10 +7,13 @@ import {
   decideSpan,
   editDistance,
   expectedTypeFor,
+  formatResolverTally,
+  newResolverTally,
   overlapRatio,
   paddleConfirms,
   paddleReadingFor,
   shouldAskForFieldAssignment,
+  tallyDecisions,
   validateFieldAssignment,
   validateVlmAnswer,
   type Candidate,
@@ -441,5 +444,76 @@ describe("validateFieldAssignment", () => {
     );
     expect(result.accepted).toHaveLength(1);
     expect(result.rejected[0].reason).toMatch(/already assigned/);
+  });
+});
+
+describe("tallyDecisions", () => {
+  function resolved(
+    decision: "ocr_agreement" | "vlm_accepted" | "vlm_rejected" | "ocr_kept",
+    sources: Array<"tesseract" | "paddleocr" | "vlm">,
+  ) {
+    return {
+      bbox: SPAN,
+      reasons: [] as UncertaintyReason[],
+      candidates: sources.map((source) => ({ source, text: "x", confidence: 0.5 })),
+      final_text: "x",
+      decision,
+    };
+  }
+
+  it("splits ocr_kept by whether a second reading existed at all", () => {
+    // The distinction the first production run could not make: 132 spans
+    // reported as "ocr kept" said nothing about whether PaddleOCR disagreed or
+    // simply had nothing to offer — opposite conclusions from one number.
+    const tally = tallyDecisions([
+      resolved("ocr_kept", ["tesseract", "paddleocr"]),
+      resolved("ocr_kept", ["tesseract"]),
+      resolved("ocr_kept", ["tesseract"]),
+    ]);
+
+    expect(tally.keptDisagreement).toBe(1);
+    expect(tally.keptNoSecondReading).toBe(2);
+  });
+
+  it("counts the other decisions without touching the split", () => {
+    const tally = tallyDecisions([
+      resolved("ocr_agreement", ["tesseract", "paddleocr"]),
+      resolved("vlm_accepted", ["tesseract", "vlm"]),
+      resolved("vlm_rejected", ["tesseract", "vlm"]),
+    ]);
+
+    expect(tally).toMatchObject({
+      spans: 3,
+      agreement: 1,
+      vlmAccepted: 1,
+      vlmRejected: 1,
+      keptDisagreement: 0,
+      keptNoSecondReading: 0,
+    });
+  });
+
+  it("accumulates across pages", () => {
+    // One tally per document, fed a page at a time.
+    const tally = newResolverTally();
+    tallyDecisions([resolved("ocr_agreement", ["tesseract", "paddleocr"])], tally);
+    tallyDecisions([resolved("ocr_kept", ["tesseract"])], tally);
+
+    expect(tally.spans).toBe(2);
+    expect(tally.agreement).toBe(1);
+    expect(tally.keptNoSecondReading).toBe(1);
+  });
+
+  it("renders both figures in the summary line", () => {
+    const line = formatResolverTally(
+      tallyDecisions([
+        resolved("ocr_agreement", ["tesseract", "paddleocr"]),
+        resolved("ocr_kept", ["tesseract", "paddleocr"]),
+        resolved("ocr_kept", ["tesseract"]),
+      ]),
+    );
+    expect(line).toBe(
+      "resolver: 3 span(s) — 1 engine agreement, 0 vlm accepted, 0 vlm rejected, " +
+        "2 ocr kept (1 engine disagreement, 1 no second reading)",
+    );
   });
 });
