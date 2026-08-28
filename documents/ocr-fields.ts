@@ -41,7 +41,7 @@
  */
 
 import { COLUMN_GAP_FACTOR, type OcrWord } from "./ocr-layout";
-import { spanBbox, type SpanBox } from "./ocr-uncertainty";
+import { confusableFold, spanBbox, type SpanBox } from "./ocr-uncertainty";
 
 console.log("[boot] documents/ocr-fields.ts: all imports resolved");
 
@@ -320,6 +320,85 @@ export function buildFieldMap(rows: OcrWord[][]): FieldPair[] {
   }
 
   return pairs;
+}
+
+/** A label the page carries that no value could be paired with. */
+export interface UnpairedLabel {
+  label: string;
+  labelBox: SpanBox;
+  expectedType: FieldType;
+}
+
+/**
+ * The typed labels that found no value.
+ *
+ * This is the signal that the *pairing* failed rather than the reading: the
+ * page says `Rechnungsdatum` and geometry has nothing to offer for it. One
+ * such label is usually a false positive — a `vom` inside prose, a header with
+ * its column empty on this page. Several of them on one page mean the
+ * positional assumptions do not hold for this layout at all, which is the only
+ * situation worth a whole-page look.
+ *
+ * Colon-only labels (`text`) are excluded: they are the weakest evidence of
+ * being a label in the first place, and an unpaired one carries no expectation
+ * that anything downstream could use.
+ */
+export function findUnpairedLabels(
+  rows: OcrWord[][],
+  pairs: readonly FieldPair[],
+): UnpairedLabel[] {
+  const paired = new Set(pairs.map((p) => `${p.labelBox.left},${p.labelBox.top}`));
+  const out: UnpairedLabel[] = [];
+
+  for (const row of rows) {
+    for (const cell of splitRowCells(row)) {
+      const text = textOf(cell);
+      const type = labelType(text);
+      if (type === null || type === "text") continue;
+      const box = spanBbox(cell);
+      if (paired.has(`${box.left},${box.top}`)) continue;
+      // A cell holding `Betrag: 7.500,00` types as a label but was paired
+      // under its own label box, which covers only the part up to the colon.
+      // Checking the whole cell against that box would report it unpaired.
+      if (pairs.some((p) => p.labelBox.left === box.left && p.labelBox.top === box.top)) continue;
+      if (pairs.some((p) => p.labelBox.left >= box.left && p.labelBox.right <= box.right &&
+                            p.labelBox.top === box.top)) continue;
+      out.push({ label: text, labelBox: box, expectedType: type });
+    }
+  }
+  return out;
+}
+
+/**
+ * Find a value's words on the page, or null when they are not there.
+ *
+ * This does double duty, and that is the point. It recovers the geometry a
+ * model's answer cannot supply — the model returns text, not boxes — and in
+ * doing so it *is* the validation: a value that cannot be located among the
+ * words OCR actually read is one the model contributed rather than found, and
+ * is refused. So the whole-page call can only ever rearrange what was read.
+ *
+ * Matched on the confusable skeleton, because the model transcribes what it
+ * sees while OCR may have read the same characters slightly differently — the
+ * two must still be recognised as the same place on the page. Folding keeps
+ * digits that no misreading conflates apart, so this cannot match a different
+ * amount.
+ */
+export function locateValue(rows: OcrWord[][], value: string): OcrWord[] | null {
+  const needle = confusableFold(value);
+  if (needle.length === 0) return null;
+
+  for (const row of rows) {
+    for (let start = 0; start < row.length; start++) {
+      let joined = "";
+      for (let end = start; end < row.length; end++) {
+        joined += confusableFold(row[end].text);
+        if (joined.length > needle.length) break;
+        if (joined === needle) return row.slice(start, end + 1);
+      }
+    }
+  }
+  return null;
 }
 
 /**

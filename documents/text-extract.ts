@@ -51,10 +51,12 @@ import {
   visualRowsFromWords,
 } from "./ocr-layout";
 import { findUncertainSpans } from "./ocr-uncertainty";
-import { buildFieldMap } from "./ocr-fields";
+import { buildFieldMap, findUnpairedLabels } from "./ocr-fields";
 import {
   newVlmBudget,
+  resolveFieldAssignment,
   resolvePage,
+  shouldAskForFieldAssignment,
   SECOND_ENGINE_ENABLED,
   VLM_ENABLED,
   type ResolvedSpan,
@@ -733,10 +735,14 @@ async function ocrPdf(
     let confidenceSum = 0;
     let confidenceWords = 0;
     const resolverCounts = { spans: 0, agreement: 0, accepted: 0, rejected: 0, kept: 0 };
+    const fieldCounts = { assigned: 0, refused: 0, ms: 0 };
 
     // One budget for the whole document, not per page: a scan whose first page
     // is a mess must not spend the entire allowance before page two is seen.
     const vlmBudget = newVlmBudget();
+    // The whole-page assignment call has its own allowance: a page image costs
+    // a multiple of a crop, so it must not be able to eat the crop budget.
+    const fieldBudget = { pages: 0 };
     const resolveEnabled = resolverActive() && OCR_LAYOUT_REBUILD_ENABLED;
     if (OCR_RESOLVER_DEBUG && !resolveEnabled) {
       // The field map is emitted from inside the layout step, so say plainly
@@ -807,7 +813,15 @@ async function ocrPdf(
                   ? {
                       pageImagePath: pagePath,
                       vlmBudget,
+                      fieldBudget,
                       log,
+                      onAssigned: (accepted, rejected, ms) => {
+                        fieldCounts.assigned += accepted;
+                        fieldCounts.refused += rejected;
+                        fieldCounts.ms += ms;
+                        vlmTotal += ms;
+                        pageVlmMs += ms;
+                      },
                       onResolved: (spans, paddleMs, vlmMs) => {
                         pagePaddleMs = paddleMs;
                         pageVlmMs = vlmMs;
@@ -904,6 +918,14 @@ async function ocrPdf(
         (markerMs > 0 ? `, number fallback ${markerMs}ms` : ""),
     );
 
+    if (fieldCounts.assigned + fieldCounts.refused > 0) {
+      log(
+        `field assignment: ${fieldCounts.assigned} accepted, ` +
+          `${fieldCounts.refused} refused (not printed on the page), ` +
+          `${fieldCounts.ms}ms`,
+      );
+    }
+
     if (resolverCounts.spans > 0) {
       // Read this line first when asking whether the resolver is earning its
       // keep: `rejected` climbing is a model or prompt regression, `kept`
@@ -999,8 +1021,11 @@ async function layoutTextForPage(
   resolve?: {
     pageImagePath: string;
     vlmBudget: { calls: number; deadline: number };
+    /** Whole-page assignment calls already spent on this document. */
+    fieldBudget: { pages: number };
     log: (msg: string) => void;
     onResolved: (spans: ResolvedSpan[], paddleMs: number, vlmMs: number) => void;
+    onAssigned: (accepted: number, rejected: number, ms: number) => void;
   },
   debugLog?: (msg: string) => void,
 ): Promise<{ text: string; confidenceSum: number; wordCount: number }> {
@@ -1016,12 +1041,11 @@ async function layoutTextForPage(
     }
     let rows = visualRowsFromWords(words);
 
-    // The label → value map the page's own geometry supports. Nothing depends
-    // on it yet — it is emitted so its pairing quality can be judged against
-    // real layouts before anything is built on top of it. Pure and cheap, so
-    // it costs nothing when the debug flag is off.
+    // The label → value map the page's own geometry supports. Pure and cheap,
+    // so it is built whenever anyone might look at it.
+    const fieldPairs = debugLog || resolve ? buildFieldMap(rows) : [];
     if (debugLog) {
-      for (const pair of buildFieldMap(rows)) {
+      for (const pair of fieldPairs) {
         debugLog(`resolver-field ${JSON.stringify(pair)}`);
       }
     }
@@ -1041,6 +1065,45 @@ async function layoutTextForPage(
         });
         rows = result.rows;
         resolve.onResolved(result.resolved, result.paddleMs, result.vlmMs);
+
+        // Only now, with the spans decided, is it clear whether anything is
+        // still in doubt — and a better pairing is worth a whole page only if
+        // something is. A span that ended on the OCR reading is exactly a
+        // question neither engine nor crop could answer.
+        const unpaired = findUnpairedLabels(rows, fieldPairs);
+        const stillInDoubt = result.resolved.some(
+          (span) => span.decision === "ocr_kept" || span.decision === "vlm_rejected",
+        );
+        const decision = shouldAskForFieldAssignment({
+          pairs: fieldPairs,
+          unpaired,
+          hasUnresolvedSpan: stillInDoubt,
+          pagesUsed: resolve.fieldBudget.pages,
+        });
+        if (decision.ask) {
+          resolve.fieldBudget.pages++;
+          const started = Date.now();
+          const assignment = await resolveFieldAssignment({
+            pageImagePath: resolve.pageImagePath,
+            rows,
+            unpaired,
+            log: resolve.log,
+          });
+          resolve.onAssigned(
+            assignment.accepted.length,
+            assignment.rejected.length,
+            Date.now() - started,
+          );
+          if (debugLog) {
+            for (const field of assignment.accepted) {
+              debugLog(`resolver-field-assigned ${JSON.stringify(field)}`);
+            }
+          }
+        } else if (debugLog && unpaired.length > 0) {
+          debugLog(
+            `field assignment skipped — ${unpaired.length} unpaired label(s): ${decision.reason}`,
+          );
+        }
       }
     }
 
