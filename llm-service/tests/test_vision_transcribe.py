@@ -134,3 +134,88 @@ def test_non_json_completion_is_a_502_not_a_transcription(vision_llm):
 def test_confidence_is_clamped(vision_llm):
     vision_llm.payload = {"text": "x", "confidence": 7.5}
     assert _post({"image_b64": PIXEL_B64}).json()["confidence"] == 1.0
+
+
+# ─── /vision/fields ──────────────────────────────────────────────────────────
+#
+# The other vision call: the characters read fine, the *pairing* of labels to
+# values did not. Answering that needs the whole page, which is why the
+# guardrails here are about scope and honesty rather than about transcription.
+
+
+def _post_fields(body: dict) -> "object":
+    return TestClient(main.app).post("/vision/fields", json=body)
+
+
+def test_assigns_the_requested_labels(vision_llm):
+    vision_llm.payload = {"fields": [{"label": "Rechnungsdatum", "value": "23.08.2002"}]}
+    res = _post_fields({"image_b64": PIXEL_B64, "labels": ["Rechnungsdatum"]})
+    assert res.status_code == 200
+    assert res.json()["fields"] == [{"label": "Rechnungsdatum", "value": "23.08.2002"}]
+
+
+def test_sends_the_page_as_an_image_part(vision_llm):
+    _post_fields({"image_b64": PIXEL_B64, "labels": ["Betrag"]})
+    content = vision_llm.calls[0]["messages"][1]["content"]
+    assert content[0]["type"] == "image_url"
+    assert "Betrag" in content[1]["text"]
+
+
+def test_prompt_forbids_inventing_a_value(vision_llm):
+    # The whole reason a page may be handed over: the model reassigns what is
+    # printed, it does not contribute content. The caller checks this too, by
+    # locating every value in the OCR text — belt and braces, deliberately.
+    _post_fields({"image_b64": PIXEL_B64, "labels": ["Betrag"]})
+    system = vision_llm.calls[0]["messages"][0]["content"]
+    assert "invent" in system.lower()
+    assert "omit" in system.lower()
+
+
+def test_drops_labels_nobody_asked_about(vision_llm):
+    # A model that starts reporting the whole page is off task; keeping only
+    # what was asked stops that from reaching the caller at all.
+    vision_llm.payload = {
+        "fields": [
+            {"label": "Rechnungsdatum", "value": "23.08.2002"},
+            {"label": "Geburtsdatum", "value": "01.01.1970"},
+        ]
+    }
+    res = _post_fields({"image_b64": PIXEL_B64, "labels": ["Rechnungsdatum"]})
+    assert [f["label"] for f in res.json()["fields"]] == ["Rechnungsdatum"]
+
+
+def test_drops_an_empty_value(vision_llm):
+    vision_llm.payload = {"fields": [{"label": "Betrag", "value": "   "}]}
+    assert _post_fields({"image_b64": PIXEL_B64, "labels": ["Betrag"]}).json()["fields"] == []
+
+
+def test_decodes_greedily_here_too(vision_llm):
+    _post_fields({"image_b64": PIXEL_B64, "labels": ["Betrag"]})
+    assert vision_llm.calls[0]["temperature"] == 0.0
+
+
+def test_rejects_an_empty_label_list(vision_llm):
+    assert _post_fields({"image_b64": PIXEL_B64, "labels": ["  "]}).status_code == 400
+
+
+def test_caps_how_many_labels_may_be_asked(vision_llm):
+    res = _post_fields({"image_b64": PIXEL_B64, "labels": [f"L{i}" for i in range(50)]})
+    assert res.status_code == 400
+
+
+def test_fields_without_a_projector_says_so():
+    original = main._state["config"]
+    main._state["llm"] = _RecordingLlm()
+    _with_mmproj("")
+    try:
+        res = _post_fields({"image_b64": PIXEL_B64, "labels": ["Betrag"]})
+        assert res.status_code == 503
+        assert "mmproj" in res.json()["detail"].lower()
+    finally:
+        main._state["llm"] = None
+        main._state["config"] = original
+
+
+def test_fields_non_json_is_a_502(vision_llm):
+    vision_llm.payload = "The document shows several fields."
+    assert _post_fields({"image_b64": PIXEL_B64, "labels": ["Betrag"]}).status_code == 502

@@ -2154,6 +2154,177 @@ async def vision_transcribe(req: VisionTranscribeRequest) -> VisionTranscribeRes
     )
 
 
+# ─── Field assignment ─────────────────────────────────────────────────────────
+#
+# A second, narrower use of the vision model, for a different failure than
+# /vision/transcribe handles.
+#
+# There, the characters are in doubt. Here they are not: OCR read the page
+# fine, but the *pairing* of labels to values could not be derived from the
+# geometry — a form whose captions and fields do not line up, a value printed
+# somewhere its label does not predict. The question is "which value belongs to
+# this label", and answering it needs a view of the whole page rather than a
+# crop, because that is precisely the information a crop removes.
+#
+# The safety property is different too, and stricter. The model is not allowed
+# to contribute *content*: the caller checks every returned value against the
+# page's own OCR text and drops anything that is not already there. So the
+# model can only rearrange what was read, never add to it — which is what makes
+# handing over a whole page acceptable at all.
+
+FIELDS_SYSTEM_PROMPT = (
+    "You read printed documents and report which value belongs to which label. "
+    "Copy values exactly as printed, character for character. "
+    "Never translate, reformat, complete or correct a value. "
+    "Never invent a value: if a label has no value visibly printed for it, omit "
+    "that label entirely from your answer. "
+    "Report only the labels you were asked about."
+)
+
+FIELDS_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "json_object",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "fields": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "label": {"type": "string"},
+                        "value": {"type": "string"},
+                    },
+                    "required": ["label", "value"],
+                },
+            }
+        },
+        "required": ["fields"],
+    },
+}
+
+# A page carries far more labels than a resolver ever needs answered, and each
+# one costs output tokens the model could spend hallucinating. The cap is a
+# guard on the request, not a judgement about the page.
+MAX_REQUESTED_LABELS = 24
+
+
+class VisionFieldsRequest(BaseModel):
+    """One page image, plus the labels whose values geometry could not find."""
+
+    image_b64: str = Field(..., min_length=1)
+    image_mime: str = Field(default="image/png")
+    labels: list[str] = Field(..., min_length=1)
+    max_tokens: int = Field(default=512, gt=0, le=2048)
+
+
+class VisionField(BaseModel):
+    label: str
+    value: str
+
+
+class VisionFieldsResponse(BaseModel):
+    fields: list[VisionField]
+    model: str
+    processing_ms: int
+
+
+@app.post("/vision/fields", response_model=VisionFieldsResponse)
+async def vision_fields(req: VisionFieldsRequest) -> VisionFieldsResponse:
+    llm = _state["llm"]
+    if llm is None:
+        raise HTTPException(status_code=503, detail="llm not loaded")
+    cfg = _state["config"]
+    if not cfg.mmproj_path:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "no multimodal projector loaded — set LLM_MMPROJ_PATH (or the "
+                "configuration's mmproj_path) to the model's mmproj-*.gguf and "
+                "run with LLM_BACKEND=server"
+            ),
+        )
+
+    labels = [label.strip() for label in req.labels if label.strip()]
+    if not labels:
+        raise HTTPException(status_code=400, detail="labels must contain a non-empty entry")
+    if len(labels) > MAX_REQUESTED_LABELS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"at most {MAX_REQUESTED_LABELS} labels per request, got {len(labels)}",
+        )
+
+    t0 = time.monotonic()
+    listed = "\n".join(f"- {label}" for label in labels)
+    instruction = (
+        "This is a page from a printed document. For each of the following "
+        "labels, report the value printed for it on the page:\n"
+        f"{listed}\n"
+        "Copy each value exactly as printed. Omit any label whose value is not "
+        'visibly printed. Reply as JSON: {"fields": [{"label": "...", '
+        '"value": "..."}]}.'
+    )
+
+    messages = [
+        {"role": "system", "content": FIELDS_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{req.image_mime};base64,{req.image_b64}"},
+                },
+                {"type": "text", "text": instruction},
+            ],
+        },
+    ]
+
+    try:
+        completion = await _run_blocking(
+            llm.create_chat_completion,
+            messages=messages,
+            response_format=FIELDS_RESPONSE_SCHEMA,
+            temperature=0.0,
+            max_tokens=req.max_tokens,
+            acquire_timeout=60.0,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("/vision/fields: llm.create_chat_completion failed")
+        raise HTTPException(status_code=500, detail=f"llm failure: {exc}") from exc
+
+    raw = completion["choices"][0]["message"]["content"].strip()
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        log.warning("/vision/fields: model returned non-JSON: %r", raw[:200])
+        raise HTTPException(status_code=502, detail=f"model returned invalid JSON: {exc}") from exc
+    if not isinstance(data, dict) or not isinstance(data.get("fields"), list):
+        raise HTTPException(status_code=502, detail="model returned no fields array")
+
+    # Drop anything for a label we did not ask about. The caller validates the
+    # *values* against the page text — this only keeps the answer on topic.
+    requested = {label.casefold() for label in labels}
+    out: list[VisionField] = []
+    for entry in data["fields"]:
+        if not isinstance(entry, dict):
+            continue
+        label = _repair_mojibake(str(entry.get("label", ""))) or ""
+        value = _repair_mojibake(str(entry.get("value", ""))) or ""
+        if not label.strip() or not value.strip():
+            continue
+        if label.strip().casefold() not in requested:
+            continue
+        out.append(VisionField(label=label.strip(), value=value.strip()))
+
+    elapsed_ms = int((time.monotonic() - t0) * 1000)
+    log.info(
+        "vision fields: asked %d, answered %d, time=%dms",
+        len(labels), len(out), elapsed_ms,
+    )
+    return VisionFieldsResponse(fields=out, model=LLM_MODEL_PATH.name, processing_ms=elapsed_ms)
+
+
 @app.post("/json-prompt")
 async def json_prompt(req: JsonPromptRequest) -> dict[str, Any]:
     llm = _state["llm"]

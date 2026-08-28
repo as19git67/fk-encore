@@ -38,8 +38,15 @@ import {
   type UncertainSpan,
   type UncertaintyReason,
 } from "./ocr-uncertainty";
+import { locateValue, type FieldPair, type UnpairedLabel } from "./ocr-fields";
 import { ocrPage, type PageOcrLine } from "./receipt-ocr-client";
-import { transcribeCrop, VlmUnavailableError, type VlmExpectedType } from "./vlm-client";
+import {
+  assignFields,
+  transcribeCrop,
+  VlmUnavailableError,
+  type VlmExpectedType,
+  type VlmField,
+} from "./vlm-client";
 
 console.log("[boot] documents/ocr-resolver.ts: all imports resolved");
 
@@ -571,6 +578,195 @@ function meanConfidence(words: readonly OcrWord[]): number {
   const measured = words.map((w) => w.confidence).filter((c): c is number => c !== undefined);
   if (measured.length === 0) return 100;
   return measured.reduce((a, b) => a + b, 0) / measured.length;
+}
+
+// ─── Whole-page field assignment ──────────────────────────────────────────
+//
+// The other failure mode: the characters read fine, but the *pairing* of
+// labels to values cannot be derived from the geometry. A crop cannot answer
+// that — the layout is exactly what a crop removes — so this is the one place
+// a whole page goes to the model.
+
+/**
+ * At least this many typed labels must have found no value. One unpaired label
+ * is usually a false positive: a `vom` inside prose, a table column empty on
+ * this page. Two independent failures are not.
+ */
+const FIELD_VLM_MIN_UNPAIRED = () => envInt("DOCUMENTS_OCR_FIELD_VLM_MIN_UNPAIRED", 2);
+
+/**
+ * …and they must be at least this share of the page's typed labels. Below it,
+ * one field slipped; above it, the positional assumptions do not hold for this
+ * layout at all — which is the only situation where a whole page is worth its
+ * cost.
+ */
+const FIELD_VLM_MIN_RATIO = () => {
+  const raw = Number(process.env.DOCUMENTS_OCR_FIELD_VLM_MIN_RATIO ?? "0.5");
+  return Number.isFinite(raw) ? Math.max(0, Math.min(1, raw)) : 0.5;
+};
+
+/** Whole-page calls allowed per document — its own budget, not the crops'. */
+const FIELD_VLM_MAX_PAGES = () => envInt("DOCUMENTS_OCR_FIELD_VLM_MAX_PAGES", 1);
+
+/**
+ * Longest edge the page is scaled to before it is sent. A 200-dpi A4 page is
+ * ~2480px wide, far more than a vision encoder uses and a large prefill cost
+ * for detail that does not survive its patching anyway.
+ */
+const FIELD_VLM_MAX_PX = () => envInt("DOCUMENTS_OCR_FIELD_VLM_MAX_PX", 1600);
+
+export interface FieldAssignmentDecision {
+  ask: boolean;
+  /** Why not, for the log. Empty when `ask`. */
+  reason: string;
+}
+
+/**
+ * Whether this page's pairing failed badly enough to be worth a whole-page
+ * look. Pure, so the threshold can be reasoned about without a model.
+ *
+ * `hasUnresolvedSpan` is the precondition that keeps the call off clean pages:
+ * a better assignment buys nothing where nothing is in doubt — the text is
+ * already right, and the pairing would only be used to judge values that need
+ * no judging.
+ */
+export function shouldAskForFieldAssignment(input: {
+  pairs: readonly FieldPair[];
+  unpaired: readonly UnpairedLabel[];
+  hasUnresolvedSpan: boolean;
+  pagesUsed: number;
+}): FieldAssignmentDecision {
+  if (!VLM_ENABLED()) return { ask: false, reason: "vlm disabled" };
+  if (input.pagesUsed >= FIELD_VLM_MAX_PAGES()) {
+    return { ask: false, reason: "per-document page budget spent" };
+  }
+  if (!input.hasUnresolvedSpan) {
+    return { ask: false, reason: "nothing on the page is in doubt" };
+  }
+  const unpaired = input.unpaired.length;
+  if (unpaired < FIELD_VLM_MIN_UNPAIRED()) {
+    return { ask: false, reason: `only ${unpaired} unpaired label(s)` };
+  }
+  const typed = input.pairs.length + unpaired;
+  const ratio = typed > 0 ? unpaired / typed : 0;
+  if (ratio < FIELD_VLM_MIN_RATIO()) {
+    return { ask: false, reason: `${(ratio * 100).toFixed(0)}% of labels unpaired` };
+  }
+  return { ask: true, reason: "" };
+}
+
+export interface AssignedField {
+  label: string;
+  value: string;
+  words: OcrWord[];
+  bbox: SpanBox;
+  expectedType: VlmExpectedType;
+}
+
+export interface FieldAssignmentResult {
+  accepted: AssignedField[];
+  /** Values the model returned that are not on the page. */
+  rejected: Array<{ label: string; value: string; reason: string }>;
+}
+
+/**
+ * Keep only the fields whose value is actually printed on the page.
+ *
+ * This is the whole safety argument for handing over a page. The model may
+ * re-assign what OCR read; it may not add to it. A value that cannot be
+ * located among the words is one the model produced rather than found, and is
+ * dropped — no matter how plausible it looks, and especially when it looks
+ * plausible.
+ */
+export function validateFieldAssignment(
+  fields: readonly VlmField[],
+  rows: OcrWord[][],
+  unpaired: readonly UnpairedLabel[],
+): FieldAssignmentResult {
+  const expected = new Map(unpaired.map((u) => [u.label.trim().toLowerCase(), u.expectedType]));
+  const accepted: AssignedField[] = [];
+  const rejected: FieldAssignmentResult["rejected"] = [];
+  const claimed = new Set<string>();
+
+  for (const field of fields) {
+    const key = field.label.trim().toLowerCase();
+    const type = expected.get(key);
+    if (type === undefined) {
+      rejected.push({ ...field, reason: "label was not one of the unpaired ones" });
+      continue;
+    }
+    if (claimed.has(key)) {
+      rejected.push({ ...field, reason: "label already assigned" });
+      continue;
+    }
+    const words = locateValue(rows, field.value);
+    if (words === null) {
+      rejected.push({ ...field, reason: "value is not printed anywhere on the page" });
+      continue;
+    }
+    claimed.add(key);
+    accepted.push({
+      label: field.label,
+      // The page's own reading wins over the model's rendering of it: the
+      // words are what the rest of the pipeline works with, and taking the
+      // model's string here would smuggle its transcription in through a call
+      // that is only supposed to decide assignment.
+      value: words.map((w) => w.text).join(" "),
+      words,
+      bbox: spanBbox(words),
+      expectedType: type,
+    });
+  }
+  return { accepted, rejected };
+}
+
+/**
+ * Scale a page down before sending it, and encode it.
+ *
+ * Only ever shrinks: a page smaller than the cap is already cheap, and
+ * enlarging it would add prefill cost for no additional detail.
+ */
+export async function pageImageForAssignment(
+  pageImagePath: string,
+  maxPx = FIELD_VLM_MAX_PX(),
+): Promise<Buffer> {
+  return sharp(pageImagePath, { failOn: "none" })
+    .resize({ width: maxPx, height: maxPx, fit: "inside", withoutEnlargement: true })
+    .png()
+    .toBuffer();
+}
+
+/**
+ * Ask the model to assign the unpaired labels, and keep what survives
+ * validation. Never throws: a service that is down leaves the pairing as the
+ * geometry produced it.
+ */
+export async function resolveFieldAssignment(options: {
+  pageImagePath: string;
+  rows: OcrWord[][];
+  unpaired: readonly UnpairedLabel[];
+  log: (msg: string) => void;
+}): Promise<FieldAssignmentResult> {
+  const empty: FieldAssignmentResult = { accepted: [], rejected: [] };
+  try {
+    const image = await pageImageForAssignment(options.pageImagePath);
+    const answer = await assignFields(
+      image,
+      options.unpaired.map((u) => u.label),
+    );
+    const result = validateFieldAssignment(answer.fields, options.rows, options.unpaired);
+    for (const drop of result.rejected) {
+      options.log(
+        `rejected field ${JSON.stringify(drop.label)} = ${JSON.stringify(drop.value)} — ${drop.reason}`,
+      );
+    }
+    return result;
+  } catch (err) {
+    if (!(err instanceof VlmUnavailableError)) {
+      options.log(`field assignment failed: ${(err as Error).message}`);
+    }
+    return empty;
+  }
 }
 
 /** Fresh per-document budget for the model calls. */

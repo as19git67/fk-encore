@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect } from "vitest";
 import {
   alignPaddleLine,
   applySpanToRow,
@@ -10,6 +10,8 @@ import {
   overlapRatio,
   paddleConfirms,
   paddleReadingFor,
+  shouldAskForFieldAssignment,
+  validateFieldAssignment,
   validateVlmAnswer,
   type Candidate,
 } from "./ocr-resolver";
@@ -281,5 +283,163 @@ describe("expectedTypeFor", () => {
 
   it("falls back to free text", () => {
     expect(expectedTypeFor("Sehr geehrte Damen")).toBe("text");
+  });
+});
+
+describe("shouldAskForFieldAssignment", () => {
+  const label = (name: string, type: "date" | "amount" = "date") => ({
+    label: name,
+    labelBox: { left: 0, top: 0, right: 10, bottom: 10 },
+    expectedType: type as "date" | "amount",
+  });
+  const pair = () =>
+    ({
+      label: "x",
+      labelBox: SPAN,
+      valueWords: [],
+      valueText: "v",
+      valueBox: SPAN,
+      pairing: "same_row" as const,
+      expectedType: "text" as const,
+    });
+
+  const base = {
+    pairs: [] as any[],
+    unpaired: [label("Rechnungsdatum"), label("Betrag", "amount")],
+    hasUnresolvedSpan: true,
+    pagesUsed: 0,
+  };
+
+  beforeEach(() => {
+    process.env.DOCUMENTS_OCR_VLM = "1";
+  });
+  afterEach(() => {
+    delete process.env.DOCUMENTS_OCR_VLM;
+  });
+
+  it("asks when several labels found no value and something is in doubt", () => {
+    expect(shouldAskForFieldAssignment(base).ask).toBe(true);
+  });
+
+  it("does not ask when nothing on the page is in doubt", () => {
+    // The precondition that keeps a whole page off clean documents: a better
+    // pairing buys nothing where the text is already right.
+    const decision = shouldAskForFieldAssignment({ ...base, hasUnresolvedSpan: false });
+    expect(decision.ask).toBe(false);
+    expect(decision.reason).toMatch(/in doubt/);
+  });
+
+  it("does not ask over a single unpaired label", () => {
+    // One is usually a false positive — a `vom` inside prose, an empty column.
+    const decision = shouldAskForFieldAssignment({ ...base, unpaired: [label("vom")] });
+    expect(decision.ask).toBe(false);
+    expect(decision.reason).toMatch(/1 unpaired/);
+  });
+
+  it("does not ask when most labels did pair", () => {
+    // Two failures out of twelve labels is one field slipping, not a layout
+    // the geometry cannot read.
+    const decision = shouldAskForFieldAssignment({
+      ...base,
+      pairs: Array.from({ length: 10 }, pair),
+    });
+    expect(decision.ask).toBe(false);
+    expect(decision.reason).toMatch(/% of labels unpaired/);
+  });
+
+  it("respects the per-document page budget", () => {
+    expect(shouldAskForFieldAssignment({ ...base, pagesUsed: 1 }).ask).toBe(false);
+  });
+
+  it("never asks while the vlm stage is off", () => {
+    process.env.DOCUMENTS_OCR_VLM = "0";
+    expect(shouldAskForFieldAssignment(base).ask).toBe(false);
+  });
+});
+
+describe("validateFieldAssignment", () => {
+  function row(...words: Array<[string, number]>) {
+    return words.map(([text, left]) => ({
+      text,
+      left,
+      top: 100,
+      right: left + 40 * text.length,
+      bottom: 120,
+      confidence: 90,
+    }));
+  }
+
+  const unpaired = [
+    {
+      label: "Rechnungsdatum",
+      labelBox: { left: 0, top: 0, right: 10, bottom: 10 },
+      expectedType: "date" as const,
+    },
+  ];
+
+  it("accepts a value that is printed on the page and recovers its box", () => {
+    const rows = [row(["Rechnungsdatum", 100]), row(["23.08.2002", 900])];
+    const result = validateFieldAssignment(
+      [{ label: "Rechnungsdatum", value: "23.08.2002" }],
+      rows,
+      unpaired,
+    );
+
+    expect(result.accepted).toHaveLength(1);
+    expect(result.accepted[0].bbox.left).toBe(900);
+    expect(result.accepted[0].expectedType).toBe("date");
+  });
+
+  it("refuses a value that appears nowhere on the page", () => {
+    // The safety property of handing over a whole page: the model may
+    // rearrange what OCR read, never add to it. A plausible invented date is
+    // exactly the answer this has to stop.
+    const rows = [row(["Rechnungsdatum", 100]), row(["23.08.2002", 900])];
+    const result = validateFieldAssignment(
+      [{ label: "Rechnungsdatum", value: "01.01.2020" }],
+      rows,
+      unpaired,
+    );
+
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected[0].reason).toMatch(/not printed/);
+  });
+
+  it("keeps the page's own reading rather than the model's rendering of it", () => {
+    // The call decides assignment, not transcription. Taking the model's
+    // string here would smuggle a transcription in through the back door.
+    const rows = [row(["23.O8.2002", 900])];
+    const result = validateFieldAssignment(
+      [{ label: "Rechnungsdatum", value: "23.08.2002" }],
+      rows,
+      unpaired,
+    );
+
+    expect(result.accepted[0].value).toBe("23.O8.2002");
+  });
+
+  it("refuses a label that was not among the unpaired ones", () => {
+    const rows = [row(["23.08.2002", 900])];
+    const result = validateFieldAssignment(
+      [{ label: "Geburtsdatum", value: "23.08.2002" }],
+      rows,
+      unpaired,
+    );
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected[0].reason).toMatch(/not one of the unpaired/);
+  });
+
+  it("assigns each label at most once", () => {
+    const rows = [row(["23.08.2002", 900]), row(["24.08.2002", 900])];
+    const result = validateFieldAssignment(
+      [
+        { label: "Rechnungsdatum", value: "23.08.2002" },
+        { label: "Rechnungsdatum", value: "24.08.2002" },
+      ],
+      rows,
+      unpaired,
+    );
+    expect(result.accepted).toHaveLength(1);
+    expect(result.rejected[0].reason).toMatch(/already assigned/);
   });
 });

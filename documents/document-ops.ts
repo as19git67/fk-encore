@@ -301,6 +301,8 @@ export async function runTextExtract(documentId: number): Promise<void> {
       extracted_text: text.length === 0 ? null : text,
       text_source: result.source,
       ocr_mean_confidence: result.ocrMeanConfidence,
+      pages_total: result.ocrPagesTotal,
+      pages_ocred: result.ocrPagesOcred,
       status: sql`CASE WHEN ${documents.status} IN ('pending', 'extracting')
                        THEN ${nextStatus} ELSE ${documents.status} END`,
     })
