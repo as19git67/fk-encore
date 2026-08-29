@@ -3,6 +3,7 @@ import {
   alignPaddleLine,
   applySpanToRow,
   amountValues,
+  tokenOverlap,
   newVlmBudget,
   vlmBudgetLeft,
   bestOcrCandidate,
@@ -730,5 +731,76 @@ describe("decideSpan — the model's answer is in the record", () => {
       vlm: { text: "Raiffeisenbank", confidence: 0.9 },
     });
     expect(result.final_text).toBe("Pe rau ozaarer");
+  });
+});
+
+describe("tokenOverlap", () => {
+  it("is order-free", () => {
+    expect(tokenOverlap("Raiffeisenbank\nKissing-Mering eG", "Kissing-Mering Raiffeisenbank gTerng eG")).toBe(1);
+  });
+
+  it("counts only the answer's own words", () => {
+    // The OCR reading may be longer; what matters is whether the answer is
+    // anchored in it, not whether it reproduces all of it.
+    expect(tokenOverlap("eG", "Kissing-Mering Raiffeisenbank gTerng eG")).toBe(1);
+  });
+
+  it("is zero for an answer sharing nothing", () => {
+    expect(tokenOverlap("粤", ",y")).toBe(0);
+    expect(tokenOverlap("*422*0022279*\nFrau", "Pe rau ozaarer")).toBe(0);
+  });
+
+  it("ignores punctuation-only tokens", () => {
+    // A stray `/` must neither pad the denominator nor count as agreement.
+    expect(tokenOverlap("Der / Die", "Der Die")).toBe(1);
+  });
+
+  it("is zero for an empty answer", () => {
+    expect(tokenOverlap("", "irgendetwas")).toBe(0);
+    expect(tokenOverlap("  ", "irgendetwas")).toBe(0);
+  });
+});
+
+describe("validateVlmAnswer — multi-line answers", () => {
+  const reasons: UncertaintyReason[] = ["low_confidence"];
+
+  it("accepts a reordered multi-line reading the character distance refused", () => {
+    // Production: a two-line logo whose span box is 100px tall. Every word of
+    // the answer is one Tesseract read; only the order differs, and character
+    // distance measures exactly that. It was refused at 0.64.
+    const verdict = validateVlmAnswer(
+      "Raiffeisenbank\nKissing-Mering eG",
+      candidates(["tesseract", "Kissing-Mering Raiffeisenbank gTerng eG", 0.84]),
+      reasons,
+    );
+    expect(verdict.ok).toBe(true);
+  });
+
+  it("still refuses a multi-line answer sharing no words", () => {
+    const verdict = validateVlmAnswer(
+      "*422*0022279*\nFrau",
+      candidates(["tesseract", "Pe rau ozaarer", 0.37]),
+      reasons,
+    );
+    expect(verdict.ok).toBe(false);
+    expect(verdict.ok === false && verdict.reason).toMatch(/words occur in any OCR reading/);
+  });
+
+  it("refuses a multi-line answer that read the neighbouring line too", () => {
+    // Mostly new words means the model answered about more than the span.
+    const verdict = validateVlmAnswer(
+      "Dem Kontoinhaber / Der\n[X] für das Kalenderjahr 2",
+      candidates(["tesseract", "| [X] fir das Kalenderjahr", 0.77]),
+      reasons,
+    );
+    expect(verdict.ok).toBe(false);
+  });
+
+  it("leaves the single-line hallucination guard alone", () => {
+    // Order is meaningful on one line, so the character test still applies —
+    // and it is what caught a CJK glyph on a German bank statement.
+    const verdict = validateVlmAnswer("粤", candidates(["tesseract", ",y", 0.09]), reasons);
+    expect(verdict.ok).toBe(false);
+    expect(verdict.ok === false && verdict.reason).toMatch(/edit distance/);
   });
 });
