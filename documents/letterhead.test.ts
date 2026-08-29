@@ -110,3 +110,24 @@ describe("rankReadings — several places point at the same field", () => {
     expect(picked?.value).toBe("B");
   });
 });
+
+describe("anchor — against the resolver's rows, not Tesseract's", () => {
+  // Why the caller hands over the rows the layout step *ends* with.
+  //
+  // The span resolver has usually just repaired the letterhead the model is
+  // reading — that is what it is for. Anchoring against the raw TSV compares
+  // the answer with text the pipeline itself no longer believes, and it fails
+  // precisely on the badly-read letterheads where being located is worth the
+  // most. On a cleanly-read one both agree and the choice does not matter.
+  const answer = "Musterbank Beispielstadt eG";
+
+  it("locates the answer in the corrected reading", () => {
+    const corrected = [row(40, "Musterbank", "Beispielstadt", "eG")];
+    expect(anchor(answer, corrected)?.similarity).toBe(1);
+  });
+
+  it("cannot locate it in the reading the resolver replaced", () => {
+    const raw = [row(40, "Beispielstadt", "Musterbank", "gTerng", "eG")];
+    expect(anchor(answer, raw)).toBeNull();
+  });
+});

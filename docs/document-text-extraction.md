@@ -38,7 +38,11 @@ runTextExtract(documentId)
 │           ├── contrast cleanup         sharp
 │           ├── recognition              tesseract --psm 3 → txt + tsv (+ pdf)
 │           ├── layout rebuild           ocr-layout.ts
-│           └── resolver (opt-in)        ocr-uncertainty.ts → ocr-resolver.ts
+│           │   ├── field map            ocr-fields.ts   (label → value by geometry)
+│           │   ├── suspect spans        ocr-uncertainty.ts
+│           │   ├── resolve each span    ocr-resolver.ts (opt-in, see below)
+│           │   └── field assignment     /vision/fields  (only if still in doubt)
+│           └── letterhead  (page 1)     letterhead.ts   → /vision/letterhead
 │       ├── document-number fallback     tesseract --psm 11, page 1 only
 │       └── sandwich PDF                 pdfunite
 ├── persist / remove the OCR sidecar
@@ -668,6 +672,25 @@ answer is located in the OCR words, which already carry coordinates
 **the model proposes, the page disposes** — which is the same discipline
 `assignFields` applies to its values, and the reason a hallucinated sender
 cannot reach the database.
+
+It anchors against the rows the layout step **ends** with — the resolver's
+corrections included, not Tesseract's raw output. The distinction decides
+whether anchoring can work at all on the documents that need it: the resolver
+has usually just repaired the very letterhead the model is reading, so matching
+against the raw TSV compares the answer with text the pipeline itself no longer
+believes.
+
+```
+raw (TSV)          Kissing-Mering Raiffeisenbank gTerng eG
+corrected          Raiffeisenbank Kissing-Mering eG
+model's answer     Raiffeisenbank Kissing-Mering eG
+```
+
+Against the corrected rows that is an exact match; against the raw ones it is
+six wrong characters in thirty-one plus two transposed blocks, which no
+tolerance worth having would accept. On a cleanly-read letterhead the two rows
+agree and the choice does not matter — the difference only ever shows up where
+a located reading is worth the most.
 
 `anchor` compares on `confusableFold`, which drops whitespace, hyphens and dots
 and folds the glyph pairs OCR confuses. Two consequences matter:
