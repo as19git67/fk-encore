@@ -631,6 +631,8 @@ export interface ResolvePageResult {
   resolved: ResolvedSpan[];
   paddleMs: number;
   vlmMs: number;
+  /** Of `vlmMs`, the part spent queueing for the shared model rather than in it. */
+  vlmWaitMs: number;
 }
 
 /**
@@ -645,8 +647,9 @@ export async function resolvePage(options: ResolvePageOptions): Promise<ResolveP
   const resolved: ResolvedSpan[] = [];
   let paddleMs = 0;
   let vlmMs = 0;
+  let vlmWaitMs = 0;
 
-  if (options.spans.length === 0) return { rows, resolved, paddleMs, vlmMs };
+  if (options.spans.length === 0) return { rows, resolved, paddleMs, vlmMs, vlmWaitMs };
 
   // ── second engine, once for the whole page ──
   let paddleLines: PageOcrLine[] = [];
@@ -700,13 +703,22 @@ export async function resolvePage(options: ResolvePageOptions): Promise<ResolveP
       const crop = await cropSpan(options.pageImagePath, span.bbox).catch(() => null);
       if (crop) {
         const started = Date.now();
+        // Only the time *inside* the slot is the model's. The wait in front of
+        // it is other documents' work, and charging it to this document would
+        // spend the whole allowance on its first crop — see newVlmBudget.
+        let modelMs = 0;
         try {
-          const transcription = await withVlmSlot(() =>
-            transcribeCrop(crop, {
-              hint: span.text,
-              expectedType: expectedTypeFor(span.text),
-            }),
-          );
+          const transcription = await withVlmSlot(async () => {
+            const call = Date.now();
+            try {
+              return await transcribeCrop(crop, {
+                hint: span.text,
+                expectedType: expectedTypeFor(span.text),
+              });
+            } finally {
+              modelMs = Date.now() - call;
+            }
+          });
           answer = { text: transcription.text, confidence: transcription.confidence };
           options.vlmBudget.calls--;
         } catch (err) {
@@ -717,7 +729,8 @@ export async function resolvePage(options: ResolvePageOptions): Promise<ResolveP
         }
         const elapsed = Date.now() - started;
         vlmMs += elapsed;
-        options.vlmBudget.spentMs += elapsed;
+        vlmWaitMs += elapsed - modelMs;
+        options.vlmBudget.spentMs += modelMs;
       }
     }
 
@@ -735,7 +748,7 @@ export async function resolvePage(options: ResolvePageOptions): Promise<ResolveP
     }
   }
 
-  return { rows, resolved, paddleMs, vlmMs };
+  return { rows, resolved, paddleMs, vlmMs, vlmWaitMs };
 }
 
 function applyToRows(rows: OcrWord[][], bbox: SpanBox, finalText: string): OcrWord[][] {
@@ -1026,12 +1039,18 @@ export async function resolveFieldAssignment(options: {
 /**
  * The per-document allowance for model work.
  *
- * `spentMs` counts time the model was *working*, not wall-clock since the
- * document started. The difference matters because every call now queues for
- * the shared llama.cpp session: with a wall-clock deadline, a document that
- * waited 40 s behind other work would arrive at its first crop with the whole
- * 30 s budget already gone and silently do no vision at all — the resolver
- * would look switched off rather than starved.
+ * `spentMs` counts time the model was *working* — measured inside the AI slot,
+ * excluding the wait in front of it. Every call queues for the shared
+ * llama.cpp session, and time spent in that queue is other documents' work, so
+ * charging it here would starve the stage in exactly the way the budget exists
+ * to prevent.
+ *
+ * It has done so, measurably. In a 27-document batch with a 30 s budget, a
+ * crop that took ~800 ms of model time when a document ran alone was billed
+ * 13–32 s under concurrency, almost all of it queueing. Every document
+ * exhausted its allowance on its first two or three crops, and 298 of 485
+ * flagged spans — 61 % — were never shown to the model at all. The log said
+ * `ocr kept`, which reads like a decision; nothing had been decided.
  *
  * Wall-clock is still bounded, one level up: DOCUMENTS_OCR_TIMEOUT_MS stops
  * the page loop, and a document that runs past it is truncated and says so.

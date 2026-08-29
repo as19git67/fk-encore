@@ -754,6 +754,9 @@ async function ocrPdf(
     let layoutTotal = 0;
     let paddleTotal = 0;
     let vlmTotal = 0;
+    // Queueing for the shared model is not the model working. Reported apart
+    // so a slow batch is legible as contention rather than as slow vision.
+    let vlmWaitTotal = 0;
     // Word-weighted so a page with three words does not count as much as a
     // dense one — the same weighting meanWordConfidence uses within a page.
     let confidenceSum = 0;
@@ -854,11 +857,12 @@ async function ocrPdf(
                         vlmTotal += ms;
                         pageVlmMs += ms;
                       },
-                      onResolved: (spans, paddleMs, vlmMs) => {
+                      onResolved: (spans, paddleMs, vlmMs, vlmWaitMs) => {
                         pagePaddleMs = paddleMs;
                         pageVlmMs = vlmMs;
                         paddleTotal += paddleMs;
                         vlmTotal += vlmMs;
+                        vlmWaitTotal += vlmWaitMs;
                         tallyDecisions(spans, resolverCounts);
                         if (OCR_RESOLVER_DEBUG) {
                           for (const span of spans) log(`resolver-span ${JSON.stringify(span)}`);
@@ -945,7 +949,9 @@ async function ocrPdf(
         `clean ${prepTotal}ms, ` +
         `tesseract ${tessTotal}ms, layout ${layoutTotal}ms` +
         (paddleTotal > 0 ? `, paddle ${paddleTotal}ms` : "") +
-        (vlmTotal > 0 ? `, vlm ${vlmTotal}ms` : "") +
+        (vlmTotal > 0
+          ? `, vlm ${vlmTotal}ms${vlmWaitTotal > 0 ? ` (${vlmWaitTotal}ms queued)` : ""}`
+          : "") +
         (mergeMs > 0 ? `, sandwich pdf ${mergeMs}ms` : "") +
         (markerMs > 0 ? `, number fallback ${markerMs}ms` : ""),
     );
@@ -1055,7 +1061,12 @@ async function layoutTextForPage(
     /** Whole-page assignment calls already spent on this document. */
     fieldBudget: { pages: number };
     log: (msg: string) => void;
-    onResolved: (spans: ResolvedSpan[], paddleMs: number, vlmMs: number) => void;
+    onResolved: (
+      spans: ResolvedSpan[],
+      paddleMs: number,
+      vlmMs: number,
+      vlmWaitMs: number,
+    ) => void;
     onAssigned: (accepted: number, rejected: number, ms: number) => void;
   },
   debugLog?: (msg: string) => void,
@@ -1095,7 +1106,7 @@ async function layoutTextForPage(
           log: resolve.log,
         });
         rows = result.rows;
-        resolve.onResolved(result.resolved, result.paddleMs, result.vlmMs);
+        resolve.onResolved(result.resolved, result.paddleMs, result.vlmMs, result.vlmWaitMs);
 
         // Only now, with the spans decided, is it clear whether anything is
         // still in doubt — and a better pairing is worth a whole page only if
