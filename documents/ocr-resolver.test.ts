@@ -689,3 +689,46 @@ describe("the VLM budget", () => {
     expect(vlmBudgetLeft(budget)).toBe(false);
   });
 });
+
+describe("decideSpan — the model's answer is in the record", () => {
+  const span = {
+    bbox: SPAN,
+    reasons: ["low_confidence"] as UncertaintyReason[],
+    text: "Pe rau ozaarer",
+  };
+
+  it("records a rejected answer so the rejection can be read", () => {
+    // Without this the debug line printed candidates.at(-1) — the last OCR
+    // reading — so every rejection showed the text OCR produced instead of the
+    // answer that was refused, and "edit distance 1.00" appeared beside a
+    // reading identical to Tesseract's.
+    const result = decideSpan(span, candidates(["tesseract", "Pe rau ozaarer", 0.37]), {
+      vlm: { text: "Raiffeisenbank", confidence: 0.9 },
+    });
+
+    expect(result.decision).toBe("vlm_rejected");
+    expect(result.candidates.find((c) => c.source === "vlm")?.text).toBe("Raiffeisenbank");
+  });
+
+  it("records an accepted answer too", () => {
+    const result = decideSpan(span, candidates(["tesseract", "5,00 ,", 0.66]), {
+      vlm: { text: "5,00", confidence: 0.9 },
+      expectedType: "amount",
+    });
+
+    expect(result.decision).toBe("vlm_accepted");
+    expect(result.candidates.find((c) => c.source === "vlm")?.text).toBe("5,00");
+  });
+
+  it("adds nothing when the model did not answer", () => {
+    const result = decideSpan(span, candidates(["tesseract", "Pe rau ozaarer", 0.37]));
+    expect(result.candidates.some((c) => c.source === "vlm")).toBe(false);
+  });
+
+  it("still falls back to the incumbent, not to the recorded answer", () => {
+    const result = decideSpan(span, candidates(["tesseract", "Pe rau ozaarer", 0.37]), {
+      vlm: { text: "Raiffeisenbank", confidence: 0.9 },
+    });
+    expect(result.final_text).toBe("Pe rau ozaarer");
+  });
+});

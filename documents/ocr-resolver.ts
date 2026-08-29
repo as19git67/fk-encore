@@ -427,10 +427,24 @@ export function decideSpan(
   options: DecideOptions = {},
 ): ResolvedSpan {
   const ocr = candidates.filter((c) => c.source !== "vlm");
+  const answer = options.vlm;
+
+  // The model's answer belongs in the record, not only in the decision. It was
+  // reachable through `options.vlm` alone, so the debug line meant to print it
+  // reached for `candidates.at(-1)` — the last *OCR* reading — and every
+  // rejection was logged showing the text OCR produced rather than the answer
+  // that was refused. `edit distance 1.00` beside a reading identical to
+  // Tesseract's is the contradiction that gave it away: a diagnostic that
+  // cannot be read is worse than none, because it looks like evidence.
+  const recorded: Candidate[] =
+    answer && answer.text.trim().length > 0
+      ? [...candidates, { source: "vlm", text: answer.text.trim(), confidence: answer.confidence }]
+      : candidates;
+
   const base: Omit<ResolvedSpan, "final_text" | "decision"> = {
     bbox: span.bbox,
     reasons: [...span.reasons],
-    candidates,
+    candidates: recorded,
   };
   const fallback = incumbentReading(candidates, span.text);
 
@@ -449,7 +463,6 @@ export function decideSpan(
   }
 
   // 2. The model, if it answered and the answer survives validation.
-  const answer = options.vlm;
   if (answer && answer.text.trim().length > 0) {
     const verdict = validateVlmAnswer(answer.text, ocr, span.reasons, options.expectedType ?? "text");
     if (verdict.ok) {
@@ -670,7 +683,8 @@ export async function resolvePage(options: ResolvePageOptions): Promise<ResolveP
       rows = applyToRows(rows, span.bbox, decision.final_text);
     }
     if (decision.decision === "vlm_rejected") {
-      log(`rejected model reading ${JSON.stringify(decision.candidates.at(-1)?.text)} — ${decision.rejection}`);
+      const refused = decision.candidates.find((c) => c.source === "vlm")?.text;
+      log(`rejected model reading ${JSON.stringify(refused)} — ${decision.rejection}`);
     }
   }
 
