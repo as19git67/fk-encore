@@ -29,7 +29,8 @@ Felder:
   Fälligkeits-/Zahlungsziel, Druck-/Zustelldatum, Geburtsdatum,
   Bankleitzahl-Änderung.
   Formate erkennen und nach ISO umwandeln: "01.07.2024", "1. Juli 2024",
-  "Juli 2024" (→ Monatserster). Zweistellige Jahreszahlen expandieren:
+  "Juli 2024" (→ Monatserster), und englische: "August 23, 2026",
+  "12-MAY-2013". Zweistellige Jahreszahlen expandieren:
   JJ 00–68 → 20JJ, 69–99 → 19JJ (z. B. "11.08.14" → 2014-08-11,
   "31.12.98" → 1998-12-31).
   Gib null NUR zurück, wenn im Text wirklich kein Datum steht — nicht schon
@@ -436,7 +437,8 @@ export const LETTERHEAD_SYSTEM_PROMPT = `You read printed correspondence and rep
 export const LETTERHEAD_INSTRUCTION_PROMPT = `This is the first page of a letter. Report two things that are usually printed without any label naming them.
 1. date: the date the sender put on this letter. It is normally in the letterhead, often alone on its line at the top right, above the salutation. It is NOT a due date, a period of validity, a date of birth, a franking or printing date, or the date of an earlier letter being answered. Copy it exactly as printed, in the document's own format.
 2. sender: the organisation or person who WROTE the letter, as printed in the letterhead, logo block or return address. It is NOT the addressee whose name appears in the address window. Copy the name only, without its street or postcode. A letterhead is often set across two lines - report the whole name, not the line carrying the legal form.
-Reply as JSON: {"date": "...", "sender": "..."}. Use null for anything not visibly printed.`;
+3. language: the ISO 639-1 code of the language the letter is WRITTEN in ("de", "en", ...) - judged from its prose, not from the sender's country or the format of its dates. A letter can be written in one language and dated in another's convention.
+Reply as JSON: {"date": "...", "sender": "...", "language": ".."}. Use null for anything not visibly printed.`;
 
 export interface ClassifyPromptsPayload {
   classify_system: string;

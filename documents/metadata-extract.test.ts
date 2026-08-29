@@ -4,7 +4,8 @@ import {
   detectSubjectPersonIds,
   detectSubjectPersonPersonalDeductionReview,
   extractDocumentDate,
-  normalizeGermanDate,
+  inferDateConvention,
+  normalizeDocumentDate,
   extractDocumentNumber,
   extractReferenceNumberTags,
   extractSender,
@@ -423,45 +424,201 @@ describe("extractSender — the letterhead set across two lines", () => {
   });
 });
 
-describe("normalizeGermanDate — what the vision model read off the page", () => {
+describe("normalizeDocumentDate — what the vision model read off the page", () => {
   // The model is told to copy the date exactly as printed, because
   // reformatting is where a small model quietly changes the day. So the
   // conversion happens here.
   it("reads the German numeric form", () => {
-    expect(normalizeGermanDate("24.04.2023")).toBe("2023-04-24");
+    expect(normalizeDocumentDate("24.04.2023")).toBe("2023-04-24");
   });
 
   it("reads it without leading zeros", () => {
-    expect(normalizeGermanDate("8.9.2017")).toBe("2017-09-08");
+    expect(normalizeDocumentDate("8.9.2017")).toBe("2017-09-08");
   });
 
   it("expands a two-digit year the same way every other route does", () => {
-    expect(normalizeGermanDate("11.08.14")).toBe("2014-08-11");
-    expect(normalizeGermanDate("31.12.98")).toBe("1998-12-31");
+    expect(normalizeDocumentDate("11.08.14")).toBe("2014-08-11");
+    expect(normalizeDocumentDate("31.12.98")).toBe("1998-12-31");
   });
 
   it("reads a written month", () => {
-    expect(normalizeGermanDate("8. September 2017")).toBe("2017-09-08");
+    expect(normalizeDocumentDate("8. September 2017")).toBe("2017-09-08");
   });
 
   it("accepts ISO from a model that reformatted anyway", () => {
-    expect(normalizeGermanDate("2023-04-24")).toBe("2023-04-24");
+    expect(normalizeDocumentDate("2023-04-24")).toBe("2023-04-24");
   });
 
   it("refuses an impossible date", () => {
     // Same validation every other route uses, so a misread digit contributes
     // nothing rather than a wrong day.
-    expect(normalizeGermanDate("31.02.2023")).toBeNull();
-    expect(normalizeGermanDate("24.13.2023")).toBeNull();
+    expect(normalizeDocumentDate("31.02.2023")).toBeNull();
+    expect(normalizeDocumentDate("24.13.2023")).toBeNull();
   });
 
   it("refuses a sentence", () => {
-    expect(normalizeGermanDate("kein Datum erkennbar")).toBeNull();
-    expect(normalizeGermanDate("")).toBeNull();
+    expect(normalizeDocumentDate("kein Datum erkennbar")).toBeNull();
+    expect(normalizeDocumentDate("")).toBeNull();
   });
 
   it("refuses a month name that is not one", () => {
-    expect(normalizeGermanDate("8. Beispielmonat 2017")).toBeNull();
+    expect(normalizeDocumentDate("8. Beispielmonat 2017")).toBeNull();
+  });
+});
+
+describe("inferDateConvention — which number is the day", () => {
+  // The document's own numbers first, its language only after. Every value is
+  // invented.
+  it("reads a day above 12 as proof of day-first", () => {
+    expect(inferDateConvention("Rechnungsdatum 25/12/2013")).toBe("dmy");
+  });
+
+  it("reads a second component above 12 as proof of month-first", () => {
+    expect(inferDateConvention("Date of issue 12/25/2013")).toBe("mdy");
+  });
+
+  it("ignores a date that proves nothing", () => {
+    // 03/04 is consistent with both readings and must not vote.
+    expect(inferDateConvention("Datum 03/04/2013", "en")).toBe("mdy");
+  });
+
+  it("lets the document outvote its own language", () => {
+    // The counter-example that rules out deciding on language alone: an
+    // invoice written in English and dated the European way round.
+    const invoice = "Invoice date 03/04/2013\nDue 25/12/2013\nThank you for your order.";
+    expect(inferDateConvention(invoice, "en")).toBe("dmy");
+  });
+
+  it("falls back to the language when the numbers say nothing", () => {
+    expect(inferDateConvention("Date 03/04/2013", "en")).toBe("mdy");
+    expect(inferDateConvention("Datum 03/04/2013", "de")).toBe("dmy");
+  });
+
+  it("falls back to day-first with neither evidence", () => {
+    // What this archive is full of.
+    expect(inferDateConvention("Datum 03/04/2013")).toBe("dmy");
+    expect(inferDateConvention("Datum 03/04/2013", null)).toBe("dmy");
+  });
+
+  it("does not let contradictory evidence pick a side", () => {
+    // A mixed-format document or a misread digit: fall through rather than
+    // trust a coin flip.
+    expect(inferDateConvention("25/12/2013 and 12/25/2013", "en")).toBe("mdy");
+    expect(inferDateConvention("25/12/2013 and 12/25/2013", "de")).toBe("dmy");
+  });
+
+  it("is not confused by dotted dates, which are never month-first", () => {
+    expect(inferDateConvention("Rechnungsdatum 03.04.2013", "en")).toBe("mdy");
+  });
+});
+
+describe("normalizeDocumentDate — English forms and the ambiguous one", () => {
+  it("reads a month-first written date", () => {
+    expect(normalizeDocumentDate("August 23, 2026")).toBe("2026-08-23");
+    expect(normalizeDocumentDate("May 12, 2013")).toBe("2013-05-12");
+  });
+
+  it("reads an ordinal suffix", () => {
+    expect(normalizeDocumentDate("August 23rd, 2026")).toBe("2026-08-23");
+  });
+
+  it("reads the hyphenated day-month form", () => {
+    expect(normalizeDocumentDate("12-MAY-2013")).toBe("2013-05-12");
+  });
+
+  it("reads a dotted date day-first whatever the convention says", () => {
+    // Nobody writes an American date with dots, so the convention must not be
+    // able to reinterpret the format this archive is full of.
+    expect(normalizeDocumentDate("03.04.2013", "mdy")).toBe("2013-04-03");
+  });
+
+  it("lets the convention decide a slash date, and only that", () => {
+    expect(normalizeDocumentDate("03/04/2013", "dmy")).toBe("2013-04-03");
+    expect(normalizeDocumentDate("03/04/2013", "mdy")).toBe("2013-03-04");
+  });
+
+  it("still refuses an impossible date under either convention", () => {
+    expect(normalizeDocumentDate("25/12/2013", "mdy")).toBeNull();
+    expect(normalizeDocumentDate("31/02/2013", "dmy")).toBeNull();
+  });
+
+  it("refuses an English month that is not one", () => {
+    expect(normalizeDocumentDate("Smarch 23, 2026")).toBeNull();
+  });
+});
+
+describe("extractDocumentDate — English documents", () => {
+  it("reads a labelled month-first date", () => {
+    expect(extractDocumentDate("Date of issue   August 23, 2026\n\nDear Sir,")).toBe(
+      "2026-08-23",
+    );
+  });
+
+  it("reads the hyphenated form without needing a label", () => {
+    expect(extractDocumentDate("12-MAY-2013 (Entered Date)\n\nDear Sir,")).toBe("2013-05-12");
+  });
+
+  it("reads a labelled slash date the caller's way round", () => {
+    const text = "Invoice date 03/04/2013\n\nDear Sir,";
+    expect(extractDocumentDate(text, "mdy")).toBe("2013-03-04");
+    expect(extractDocumentDate(text, "dmy")).toBe("2013-04-03");
+  });
+
+  it("does not read an unlabelled slash date at all", () => {
+    // The shape where a wrong guess is silent, so it is only ever taken next
+    // to a label. A reference or a period must not become a date.
+    expect(extractDocumentDate("Ref 03/04/2013\n\nDear Sir,")).toBeNull();
+  });
+
+  it("never takes an English date of birth or due date", () => {
+    expect(extractDocumentDate("Date of birth   August 23, 1970\n\nDear Sir,")).toBeNull();
+    expect(extractDocumentDate("Due date   August 23, 2026\n\nDear Sir,")).toBeNull();
+  });
+
+  it("recognises an English salutation as the end of the letterhead", () => {
+    // Without one there is no letterhead region and the bare-date rules never
+    // run — the same failure the German salutation fix addresses.
+    expect(extractDocumentDate("Muster Ltd\n\n23 August 2026\n\nDear Ms Beispiel,")).toBe(
+      "2026-08-23",
+    );
+  });
+});
+
+describe("extractDocumentDate — the three findings from a real letter", () => {
+  // All values invented; the shapes are what a scanned German insurance letter
+  // actually produced.
+  it("keeps the day of an unlabelled written-month letterhead date", () => {
+    // The month-year rule matched the "Oktober 2023" inside it and defaulted
+    // the day to the 1st. Eight days wrong looks right, which is worse than
+    // empty.
+    expect(extractDocumentDate("Muster AG\n\n09. Oktober 2023\n\nSehr geehrter Herr X,")).toBe(
+      "2023-10-09",
+    );
+  });
+
+  it("does not take the date something starts applying from", () => {
+    // A subject line with no "Betreff:" in front of it, so the subject-line
+    // guard cannot see it. The letter is dated October and announces a change
+    // for January.
+    const letter = [
+      "Muster AG",
+      "y   Änderung des Beitrags ab dem 1. Januar 2024",
+      "09. Oktober 2023",
+      "",
+      "Sehr geehrter Herr X,",
+    ].join("\n");
+    expect(extractDocumentDate(letter)).toBe("2023-10-09");
+  });
+
+  it("finds the salutation even when OCR ran a reference number into it", () => {
+    // Anchored on start-of-line this is not a salutation, the letter has no
+    // letterhead, and every position rule silently stops applying.
+    const letter = [
+      "Muster AG",
+      "09. Oktober 2023",
+      "7933150000013509   Sehr geehrter Herr X,",
+    ].join("\n");
+    expect(extractDocumentDate(letter)).toBe("2023-10-09");
   });
 });
 

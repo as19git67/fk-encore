@@ -2415,8 +2415,10 @@ LETTERHEAD_INSTRUCTION = (
     "the letterhead, logo block or return address. It is NOT the addressee "
     "whose name appears in the address window. Copy the name only, without its "
     "street or postcode.\n"
-    'Reply as JSON: {"date": "...", "sender": "..."}. Use null for anything '
-    "not visibly printed."
+    "3. language: the ISO 639-1 code of the language the letter is WRITTEN in "
+    '("de", "en", ...) - judged from its prose, not from the sender\'s country.\n'
+    'Reply as JSON: {"date": "...", "sender": "...", "language": ".."}. Use '
+    "null for anything not visibly printed."
 )
 
 LETTERHEAD_RESPONSE_SCHEMA: dict[str, Any] = {
@@ -2426,6 +2428,7 @@ LETTERHEAD_RESPONSE_SCHEMA: dict[str, Any] = {
         "properties": {
             "date": {"type": ["string", "null"]},
             "sender": {"type": ["string", "null"]},
+            "language": {"type": ["string", "null"]},
         },
         "required": ["date", "sender"],
     },
@@ -2458,6 +2461,9 @@ class VisionLetterheadRequest(BaseModel):
 class VisionLetterheadResponse(BaseModel):
     date: str | None
     sender: str | None
+    # ISO 639-1, used to disambiguate a numeric date whose order the document's
+    # own numbers do not settle. Advisory only - see inferDateConvention.
+    language: str | None = None
     model: str
     processing_ms: int
 
@@ -2532,12 +2538,20 @@ async def vision_letterhead(req: VisionLetterheadRequest) -> VisionLetterheadRes
 
     elapsed_ms = int((time.monotonic() - t0) * 1000)
     date, sender = field("date"), field("sender")
+    # A language is a code, not prose: anything longer is the model answering a
+    # different question ("German business letter") and is not usable as one.
+    raw_language = field("language")
+    language = raw_language[:5].lower() if raw_language and len(raw_language) <= 20 else None
     log.info(
-        "vision letterhead: date=%s sender=%s time=%dms",
-        "yes" if date else "no", "yes" if sender else "no", elapsed_ms,
+        "vision letterhead: date=%s sender=%s language=%s time=%dms",
+        "yes" if date else "no", "yes" if sender else "no", language or "-", elapsed_ms,
     )
     return VisionLetterheadResponse(
-        date=date, sender=sender, model=LLM_MODEL_PATH.name, processing_ms=elapsed_ms
+        date=date,
+        sender=sender,
+        language=language,
+        model=LLM_MODEL_PATH.name,
+        processing_ms=elapsed_ms,
     )
 
 

@@ -90,7 +90,8 @@ import {
   detectSubjectPersonIds,
   detectSubjectPersonPersonalDeductionReview,
   extractDocumentDate,
-  normalizeGermanDate,
+  inferDateConvention,
+  normalizeDocumentDate,
   extractDocumentNumber,
   extractReferenceNumberTags,
   isSubjectPersonSender,
@@ -454,15 +455,22 @@ export async function runClassify(documentId: number): Promise<{ classification:
   // has more room to go wrong than a label-anchored scan, and agreement
   // between any two of the three outranks all of them individually.
   const letterhead = row.letterhead ?? null;
+  // Which way round this document's numeric dates read. Decided from the
+  // document's own numbers first and only then from the language the vision
+  // model reported — an Apple invoice is written in English and dated in
+  // German, so language alone reads its dates a month wrong.
+  const convention = inferDateConvention(clipped, letterhead?.language);
   const dateReadings: Reading<string>[] = [];
   if (classification.doc_date) {
     dateReadings.push({ value: classification.doc_date, source: "classify", bbox: null });
   }
-  const visionDate = letterhead?.date ? normalizeGermanDate(letterhead.date.value) : null;
+  const visionDate = letterhead?.date
+    ? normalizeDocumentDate(letterhead.date.value, convention)
+    : null;
   if (visionDate) {
     dateReadings.push({ value: visionDate, source: "vision", bbox: letterhead!.date!.bbox });
   }
-  const scannedDate = extractDocumentDate(clipped);
+  const scannedDate = extractDocumentDate(clipped, convention);
   if (scannedDate) dateReadings.push({ value: scannedDate, source: "scan", bbox: null });
 
   let dateFrom: "llm" | "scan" | "vision" | "stored" | "none" = "none";

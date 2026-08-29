@@ -339,6 +339,13 @@ export interface LetterheadReading {
 export interface DocumentLetterhead {
   date: LetterheadReading | null;
   sender: LetterheadReading | null;
+  /**
+   * ISO 639-1 code of the language the page is written in, as the vision model
+   * judged it. Used only to break a tie when a numeric date's order is not
+   * settled by the document's own numbers — never on its own, because a letter
+   * can be written in one language and dated in another's convention.
+   */
+  language?: string | null;
 }
 
 export interface AiPickDetails {
