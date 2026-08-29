@@ -1051,7 +1051,7 @@ async function layoutTextForPage(
   plainText: string,
   resolve?: {
     pageImagePath: string;
-    vlmBudget: { calls: number; deadline: number };
+    vlmBudget: VlmBudget;
     /** Whole-page assignment calls already spent on this document. */
     fieldBudget: { pages: number };
     log: (msg: string) => void;

@@ -47,7 +47,22 @@ function read(source) {
   return spans;
 }
 
-const area = (b) => Math.max(0, b.right - b.left) * Math.max(0, b.bottom - b.top);
+/**
+ * Dieselbe Schwelle wie `tooSmallToRead` in documents/ocr-uncertainty.ts.
+ *
+ * Bewusst als zwei Kantenlängen statt als Fläche: ein 1x27px breiter
+ * Tabellenstrich hat 27px² und ist genauso entartet wie ein Punkt, während ein
+ * schmales `1` mit 5x15px nur 75px² hat und echter Text ist. Eine Flächen-
+ * schwelle verwirft das eine oder behält das andere — beides falsch.
+ *
+ * Weicht dieses Skript von der Pipeline ab, meldet es einen Rest, der keiner
+ * ist. Bei einer Änderung dort also hier mitziehen.
+ */
+const MIN_SPAN_WIDTH = 4;
+const MIN_SPAN_HEIGHT = 8;
+
+const tooSmallToRead = (b) =>
+  b.right - b.left < MIN_SPAN_WIDTH || b.bottom - b.top < MIN_SPAN_HEIGHT;
 
 function main() {
   const spans = read(process.argv[2]);
@@ -64,7 +79,9 @@ function main() {
   for (const span of spans) {
     // Ein Span von wenigen Pixeln deckt sich per Flächenanteil mit jeder
     // Zeile, die ihn enthält — solche Treffer sagen nichts über die Engine.
-    if (area(span.bbox) < 100) degenerate++;
+    // Seit dem Filter in findUncertainSpans muss das 0 sein; steht hier etwas
+    // anderes, läuft ein Container mit älterem Code.
+    if (tooSmallToRead(span.bbox)) degenerate++;
     const t = span.candidates.find((c) => c.source === "tesseract");
     const p = span.candidates.find((c) => c.source === "paddleocr");
     if (t) conf.tesseract.push(t.confidence);
@@ -93,7 +110,7 @@ function main() {
   const pct = (n) => `${((n / spans.length) * 100).toFixed(1)} %`;
 
   console.log(`Spans gesamt                    ${spans.length}`);
-  console.log(`  davon entartet (<100 px²)     ${degenerate}  ${pct(degenerate)}`);
+  console.log(`  davon entartet (Speck)        ${degenerate}  ${pct(degenerate)}`);
   console.log(`  ohne Paddle-Lesung            ${tessOnly}  ${pct(tessOnly)}`);
   console.log(`  mit beiden Lesungen           ${pairs.length}  ${pct(pairs.length)}`);
   console.log(`    davon uneinig               ${differ.length}`);

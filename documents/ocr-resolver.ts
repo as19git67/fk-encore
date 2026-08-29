@@ -40,6 +40,7 @@ import {
 } from "./ocr-uncertainty";
 import { locateValue, type FieldPair, type UnpairedLabel } from "./ocr-fields";
 import { ocrPage, type PageOcrLine } from "./receipt-ocr-client";
+import { withAiSlot } from "../ai-queue/slot-helper";
 import {
   assignFields,
   transcribeCrop,
@@ -238,6 +239,31 @@ export interface ValidationResult {
 const OK: ValidationResult = { ok: true, reason: "" };
 
 /**
+ * A German amount, formed well enough that OCR clearly read a *number* rather
+ * than a digit that happens to sit in a word.
+ *
+ * Either a grouped thousands part or a decimal comma is required, so `23` in
+ * `23 aus oz` is not an amount while `19.560.187,27` and `7.500,00` are. That
+ * distinction is the whole point: the guard below must bind on numbers and stay
+ * out of the way everywhere else.
+ */
+const AMOUNT_BODY = String.raw`-?\d{1,3}(?:\.\d{3})+(?:,\d{2})?|-?\d+,\d{2}`;
+const GERMAN_AMOUNT = new RegExp(
+  // Nothing digit-like may touch either end. Without this, `7.5O0,00` yields
+  // `0,00` — a *wrong* value read out of the middle of a damaged number, which
+  // would make the guard block the very repair it should allow.
+  String.raw`(?<![\p{L}\d.,])(?:${AMOUNT_BODY})(?![\p{L}\d.,])`,
+  "gu",
+);
+
+/** Every German amount in a string, as numbers. */
+export function amountValues(text: string): number[] {
+  return (text.match(GERMAN_AMOUNT) ?? []).map((raw) =>
+    Number(raw.replace(/\./g, "").replace(",", ".")),
+  );
+}
+
+/**
  * Decide whether a model's transcription may replace the OCR reading.
  *
  * Every rule here exists to stop one specific way a vision model turns a
@@ -297,6 +323,27 @@ export function validateVlmAnswer(
     }
   }
 
+  // The amount guard. Where OCR already read a well-formed number, the model is
+  // correcting the characters *around* it, not revaluing it — and a confidently
+  // wrong amount is the most expensive thing this pipeline can produce, because
+  // nothing downstream will ever question it.
+  //
+  // Matching any one engine's amount is enough: two engines may read different
+  // numbers, and picking between them is exactly the model's job. Matching
+  // none of them means it invented a third value, which is not a reading.
+  const ocrAmounts = [...new Set(ocrCandidates.flatMap((c) => amountValues(c.text)))];
+  if (ocrAmounts.length > 0) {
+    const answered = new Set(amountValues(text));
+    if (!ocrAmounts.some((value) => answered.has(value))) {
+      return {
+        ok: false,
+        reason: `revalues the amount — OCR read ${ocrAmounts.join(" / ")}, answer has ${
+          [...answered].join(" / ") || "none"
+        }`,
+      };
+    }
+  }
+
   return OK;
 }
 
@@ -336,6 +383,30 @@ export function incumbentReading(
   fallback: string,
 ): string {
   return candidates.find((c) => c.source === "tesseract")?.text ?? fallback;
+}
+
+/**
+ * Run one model call holding the shared `llm` slot.
+ *
+ * llama.cpp serves a single session, and text extraction reaches it through
+ * the same server as classification. Without the queue, `DOC_SCAN_TEXT_
+ * CONCURRENCY` workers would fire at it concurrently *and* bypass the
+ * discipline `classify` and `embed` already submit to.
+ *
+ * The slot is taken per call rather than per job. Wrapping the whole
+ * text_extract job — the obvious move, and what AI_MODEL_MAP would do — holds
+ * the model for the entire extraction: rasterizing, rotating, Tesseract,
+ * PaddleOCR, all of it, minutes on a long PDF, with llama.cpp idle throughout
+ * and every other worker blocked. It would also collapse OCR to one concurrent
+ * document, since each worker would be holding the only slot there is. Per
+ * call, the model is held for the seconds it is actually busy.
+ *
+ * Priority 2 — the same as an ordinary classify job. Promoting crops above it
+ * would let a queue of documents starve classification, and the calls are
+ * short enough that FIFO within a priority is fair on its own.
+ */
+function withVlmSlot<T>(fn: () => Promise<T>): Promise<T> {
+  return withAiSlot("llm", 2, "documents:text_extract:vlm", fn);
 }
 
 // ─── Pure: the decision ───────────────────────────────────────────────────
@@ -491,7 +562,7 @@ export interface ResolvePageOptions {
   /** Spans `findUncertainSpans` flagged on this page. */
   spans: UncertainSpan[];
   /** Remaining model calls for this document. */
-  vlmBudget: { calls: number; deadline: number };
+  vlmBudget: VlmBudget;
   log?: (msg: string) => void;
 }
 
@@ -563,27 +634,31 @@ export async function resolvePage(options: ResolvePageOptions): Promise<ResolveP
     }
 
     let answer: { text: string; confidence: number } | null = null;
-    if (
-      VLM_ENABLED() &&
-      options.vlmBudget.calls > 0 &&
-      Date.now() < options.vlmBudget.deadline
-    ) {
-      const started = Date.now();
-      try {
-        const crop = await cropSpan(options.pageImagePath, span.bbox);
-        const transcription = await transcribeCrop(crop, {
-          hint: span.text,
-          expectedType: expectedTypeFor(span.text),
-        });
-        answer = { text: transcription.text, confidence: transcription.confidence };
-        options.vlmBudget.calls--;
-      } catch (err) {
-        // A missing projector, a busy worker, a timeout — all the same to us.
-        if (!(err instanceof VlmUnavailableError)) {
-          log(`vlm call failed: ${(err as Error).message}`);
+    if (VLM_ENABLED() && vlmBudgetLeft(options.vlmBudget)) {
+      // Cropping is local work — do it before queueing, so the slot is held
+      // for the model call and nothing else.
+      const crop = await cropSpan(options.pageImagePath, span.bbox).catch(() => null);
+      if (crop) {
+        const started = Date.now();
+        try {
+          const transcription = await withVlmSlot(() =>
+            transcribeCrop(crop, {
+              hint: span.text,
+              expectedType: expectedTypeFor(span.text),
+            }),
+          );
+          answer = { text: transcription.text, confidence: transcription.confidence };
+          options.vlmBudget.calls--;
+        } catch (err) {
+          // A missing projector, a busy worker, a timeout — all the same to us.
+          if (!(err instanceof VlmUnavailableError)) {
+            log(`vlm call failed: ${(err as Error).message}`);
+          }
         }
+        const elapsed = Date.now() - started;
+        vlmMs += elapsed;
+        options.vlmBudget.spentMs += elapsed;
       }
-      vlmMs += Date.now() - started;
     }
 
     const decision = decideSpan({ ...span, reasons }, candidates, {
@@ -861,10 +936,15 @@ export async function resolveFieldAssignment(options: {
 }): Promise<FieldAssignmentResult> {
   const empty: FieldAssignmentResult = { accepted: [], rejected: [] };
   try {
+    // Downscaling the page happens outside the slot; only the model call is
+    // inside it. A whole page costs a multiple of a crop, so holding the slot
+    // across the resize would block the queue on image work.
     const image = await pageImageForAssignment(options.pageImagePath);
-    const answer = await assignFields(
-      image,
-      options.unpaired.map((u) => u.label),
+    const answer = await withVlmSlot(() =>
+      assignFields(
+        image,
+        options.unpaired.map((u) => u.label),
+      ),
     );
     const result = validateFieldAssignment(answer.fields, options.rows, options.unpaired);
     for (const drop of result.rejected) {
@@ -882,6 +962,31 @@ export async function resolveFieldAssignment(options: {
 }
 
 /** Fresh per-document budget for the model calls. */
-export function newVlmBudget(): { calls: number; deadline: number } {
-  return { calls: MAX_VLM_SPANS(), deadline: Date.now() + VLM_BUDGET_MS() };
+/**
+ * The per-document allowance for model work.
+ *
+ * `spentMs` counts time the model was *working*, not wall-clock since the
+ * document started. The difference matters because every call now queues for
+ * the shared llama.cpp session: with a wall-clock deadline, a document that
+ * waited 40 s behind other work would arrive at its first crop with the whole
+ * 30 s budget already gone and silently do no vision at all — the resolver
+ * would look switched off rather than starved.
+ *
+ * Wall-clock is still bounded, one level up: DOCUMENTS_OCR_TIMEOUT_MS stops
+ * the page loop, and a document that runs past it is truncated and says so.
+ */
+export function newVlmBudget(): VlmBudget {
+  return { calls: MAX_VLM_SPANS(), budgetMs: VLM_BUDGET_MS(), spentMs: 0 };
+}
+
+/** Calls and model-time left for one document. Mutated as they are spent. */
+export interface VlmBudget {
+  calls: number;
+  budgetMs: number;
+  spentMs: number;
+}
+
+/** Is there anything left to spend? */
+export function vlmBudgetLeft(budget: VlmBudget): boolean {
+  return budget.calls > 0 && budget.spentMs < budget.budgetMs;
 }
