@@ -37,8 +37,21 @@ function hintChars(): number {
   return total;
 }
 
+/**
+ * Only the parts that are assembled into a classify request.
+ *
+ * `CLASSIFY_PROMPTS` is the payload of `PUT /prompts`, which also carries the
+ * vision prompts for the letterhead read. Those travel over the same endpoint
+ * but are stored separately in the service (`_VISION_PROMPTS`, not
+ * `_CLASSIFY_PROMPTS`) and are sent with a page image on a different call, so
+ * they cost the classifier's context window nothing. Counting them here would
+ * charge the document budget for text no classify request ever contains, and
+ * would make this ceiling fire on a change that cannot affect it.
+ */
 function promptChars(): number {
-  return Object.values(CLASSIFY_PROMPTS).reduce((sum, p) => sum + p.length, 0);
+  return Object.entries(CLASSIFY_PROMPTS)
+    .filter(([key]) => key.startsWith("classify_"))
+    .reduce((sum, [, p]) => sum + p.length, 0);
 }
 
 describe("classifier prompt budget", () => {
@@ -54,6 +67,18 @@ describe("classifier prompt budget", () => {
       `(~${Math.round(total / 3.2)} tokens). Ceiling ${SCAFFOLDING_CHAR_CEILING}.`;
 
     expect(total, detail).toBeLessThanOrEqual(SCAFFOLDING_CHAR_CEILING);
+  });
+
+  it("still ships the vision prompts, which simply are not part of this budget", () => {
+    // The exclusion above is only correct while these exist and go somewhere
+    // else. If they were dropped from the payload the service would silently
+    // fall back to its compiled-in copies and prompt changes would stop taking
+    // effect — with nothing failing to say so.
+    expect(CLASSIFY_PROMPTS.letterhead_instruction.length).toBeGreaterThan(0);
+    expect(CLASSIFY_PROMPTS.letterhead_system.length).toBeGreaterThan(0);
+    expect(promptChars()).toBeLessThan(
+      Object.values(CLASSIFY_PROMPTS).reduce((sum, p) => sum + p.length, 0),
+    );
   });
 
   it("keeps the hints from dwarfing the slugs they disambiguate", () => {

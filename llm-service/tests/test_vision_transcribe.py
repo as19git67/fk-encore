@@ -248,3 +248,107 @@ def test_inproc_backend_reports_no_projector():
     finally:
         main._state["llm"] = None
         main._state["config"] = original
+
+
+# ─── /vision/letterhead ──────────────────────────────────────────────────────
+#
+# The third vision call, and the one that needs no label. A German business
+# letter names neither its date nor its sender: both are identified by where
+# they sit on the page, which is exactly what the text pipeline discards.
+
+
+def _post_letterhead(body: dict) -> "object":
+    return TestClient(main.app).post("/vision/letterhead", json=body)
+
+
+def test_reports_the_two_unlabelled_fields(vision_llm):
+    vision_llm.payload = {"date": "24.04.2023", "sender": "Muster Bauspar AG"}
+    res = _post_letterhead({"image_b64": PIXEL_B64})
+    assert res.status_code == 200
+    assert res.json()["date"] == "24.04.2023"
+    assert res.json()["sender"] == "Muster Bauspar AG"
+
+
+def test_asks_without_naming_a_label(vision_llm):
+    # The distinguishing property. /vision/fields is handed labels to look up;
+    # here there is nothing to look up, so the instruction must describe the
+    # two fields by where they sit and what they are not.
+    _post_letterhead({"image_b64": PIXEL_B64})
+    content = vision_llm.calls[0]["messages"][1]["content"]
+    assert content[0]["type"] == "image_url"
+    instruction = content[1]["text"].lower()
+    assert "salutation" in instruction
+    assert "addressee" in instruction
+
+
+def test_a_missing_field_comes_back_as_null(vision_llm):
+    vision_llm.payload = {"date": None, "sender": "Muster Bauspar AG"}
+    assert _post_letterhead({"image_b64": PIXEL_B64}).json()["date"] is None
+
+
+def test_a_model_that_says_null_in_words_means_null(vision_llm):
+    # A small model reports "not visible" as readily with a word as with a JSON
+    # null. Storing the word would put the string "none" in the date column.
+    vision_llm.payload = {"date": "none", "sender": "  "}
+    body = _post_letterhead({"image_b64": PIXEL_B64}).json()
+    assert body["date"] is None
+    assert body["sender"] is None
+
+
+def test_prompt_forbids_inferring_a_value(vision_llm):
+    # The caller anchors every answer in the page's own OCR words, but the
+    # model should not be trying in the first place.
+    _post_letterhead({"image_b64": PIXEL_B64})
+    system = vision_llm.calls[0]["messages"][0]["content"].lower()
+    assert "never infer" in system
+
+
+def test_letterhead_decodes_greedily(vision_llm):
+    _post_letterhead({"image_b64": PIXEL_B64})
+    assert vision_llm.calls[0]["temperature"] == 0.0
+
+
+def test_letterhead_non_json_is_a_502(vision_llm):
+    vision_llm.payload = "The letter is from a building society."
+    assert _post_letterhead({"image_b64": PIXEL_B64}).status_code == 502
+
+
+def test_letterhead_without_a_projector_says_so():
+    original = main._state["config"]
+    main._state["llm"] = _RecordingLlm()
+    main._state["config"] = replace(original, mmproj_path="", backend="server")
+    try:
+        res = _post_letterhead({"image_b64": PIXEL_B64})
+        assert res.status_code == 503
+        assert "mmproj" in res.json()["detail"].lower()
+    finally:
+        main._state["llm"] = None
+        main._state["config"] = original
+
+
+def test_prompts_can_be_replaced_without_rebuilding_the_image(vision_llm):
+    # The service image takes ~55 minutes to build, so a prompt compiled into
+    # it cannot be iterated on — which is why the classify prompts already live
+    # in the app. Wording is most of what decides whether this endpoint answers
+    # well, so it gets the same treatment.
+    original = dict(main._VISION_PROMPTS)
+    try:
+        TestClient(main.app).put(
+            "/prompts",
+            json={
+                "classify_system": "s",
+                "classify_document_type": "d",
+                "classify_tax": "t",
+                "classify_subject_persons": "p",
+                "classify_examples": "e",
+                "letterhead_instruction": "Report the date and the sender.",
+            },
+        )
+        _post_letterhead({"image_b64": PIXEL_B64})
+        content = vision_llm.calls[0]["messages"][1]["content"]
+        assert content[1]["text"] == "Report the date and the sender."
+        # The part that was not pushed keeps its compiled-in default.
+        assert main._VISION_PROMPTS["letterhead_system"] == original["letterhead_system"]
+    finally:
+        main._VISION_PROMPTS.clear()
+        main._VISION_PROMPTS.update(original)

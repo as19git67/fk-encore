@@ -324,6 +324,23 @@ export interface AiPickPhotoScore {
   };
 }
 
+/**
+ * One field read off a letterhead, with the evidence for it.
+ *
+ * `bbox` is where the reading was located in the page's own OCR words — null
+ * when the model's answer could not be found there at all, which is how a
+ * hallucinated value is told apart from a real one without re-reading the page.
+ */
+export interface LetterheadReading {
+  value: string;
+  bbox: { left: number; top: number; right: number; bottom: number } | null;
+}
+
+export interface DocumentLetterhead {
+  date: LetterheadReading | null;
+  sender: LetterheadReading | null;
+}
+
 export interface AiPickDetails {
   // Score-difference between top-1 and the best non-pick. Drives the
   // confidence gate (see migration 0075).
@@ -805,6 +822,14 @@ export const documents = pgTable("documents", {
   // only: nothing decides anything on them. They exist so "which documents
   // needed OCR?" is answerable in SQL, which targeted re-extraction and any
   // before/after measurement of an OCR change both start from.
+  // What the vision model read off page 1's letterhead, and where each reading
+  // was located in the page's own OCR words (migration 0156). Written by
+  // text_extract, read by classify: the two run as separate jobs, and the
+  // evidence a reading rests on — the page raster and the word boxes — exists
+  // only inside text_extract. NULL means no reading was taken (stage off, or
+  // the document predates it), which is not the same as a reading that found
+  // nothing.
+  letterhead: jsonb("letterhead").$type<DocumentLetterhead>(),
   text_source: text("text_source"),
   ocr_mean_confidence: real("ocr_mean_confidence"),
   // Pages present vs. pages OCR actually reached (migration 0155). Unequal

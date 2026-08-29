@@ -150,6 +150,36 @@ function toIsoDate(dayStr: string, monthStr: string, yearStr: string): string | 
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
+/**
+ * Turn a date a model read off the page into ISO, or null.
+ *
+ * The vision model is asked to copy the date *as printed*, which is the right
+ * instruction — reformatting is where a small model quietly invents a
+ * different day — so what comes back is German ("24.04.2023", "8. September
+ * 2017", "24.4.23") and has to be converted here rather than there.
+ *
+ * Validation is the same `toIsoDate` every other route uses: an impossible day,
+ * an out-of-range year or a month name that is not one all return null. A
+ * model that answered with a sentence therefore contributes nothing rather
+ * than a wrong date.
+ */
+export function normalizeGermanDate(value: string): string | null {
+  const text = value.trim();
+  const numeric = /^(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{2,4})$/.exec(text);
+  if (numeric) return toIsoDate(numeric[1], numeric[2], numeric[3]);
+  const written = /^(\d{1,2})\.?\s+([A-Za-zÄÖÜäöü.]{3,})\s+(\d{4})$/.exec(text);
+  if (written) {
+    const month = monthFromName(written[2]);
+    if (month == null) return null;
+    return toIsoDate(written[1], String(month), written[3]);
+  }
+  // Already ISO — a model that reformatted despite the instruction is still
+  // giving a usable answer, and refusing it would be pedantry.
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (iso) return toIsoDate(iso[3], iso[2], iso[1]);
+  return null;
+}
+
 /** A date label standing alone in a table cell ("Datum", "Rechnungsdatum"). */
 const DATE_HEADER_CELL_RE = /^\W*\w*datum\W*$/i;
 

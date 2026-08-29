@@ -1249,6 +1249,10 @@ class PromptsConfig(BaseModel):
     classify_tax: str = Field(..., min_length=1)
     classify_subject_persons: str = Field(..., min_length=1)
     classify_examples: str = Field(..., min_length=1)
+    # Optional so an older app can still configure an newer service. The
+    # vision prompts have compiled-in defaults; these override them.
+    letterhead_system: str | None = Field(default=None, min_length=1)
+    letterhead_instruction: str | None = Field(default=None, min_length=1)
 
 
 @app.put("/prompts")
@@ -1261,6 +1265,10 @@ async def configure_prompts(config: PromptsConfig) -> dict[str, Any]:
         "subject_persons": config.classify_subject_persons,
         "examples": config.classify_examples,
     }
+    if config.letterhead_system:
+        _VISION_PROMPTS["letterhead_system"] = config.letterhead_system
+    if config.letterhead_instruction:
+        _VISION_PROMPTS["letterhead_instruction"] = config.letterhead_instruction
     total = sum(len(v) for v in _CLASSIFY_PROMPTS.values())
     log.info("Prompts configured (%d chars total)", total)
     return {"status": "ok", "total_chars": total}
@@ -2365,6 +2373,172 @@ async def vision_fields(req: VisionFieldsRequest) -> VisionFieldsResponse:
         len(labels), len(out), elapsed_ms,
     )
     return VisionFieldsResponse(fields=out, model=LLM_MODEL_PATH.name, processing_ms=elapsed_ms)
+
+
+# ─── Letterhead ───────────────────────────────────────────────────────────────
+#
+# The third vision use, and the one that needs no label at all.
+#
+# /vision/transcribe doubts the characters; /vision/fields doubts the pairing.
+# Both still require a label to exist: something printed on the page that says
+# what the value next to it is. A German business letter prints no label for
+# the two fields that matter most. The date stands alone at the top right and
+# the sender in the logo block, and a reader identifies both from *where they
+# are*, not from a caption.
+#
+# That is information the text pipeline destroys before any model sees it: in
+# reading order the date lands between a franking mark and a routing code, and
+# nothing distinguishes it from a contract number. So this endpoint puts the
+# question to a reader who can still see the page.
+#
+# The safety property is the caller's, and it is the same one /vision/fields
+# relies on: the answer is located in the page's own OCR words before it is
+# used, and discarded when it cannot be found. The model proposes; the page
+# disposes. That is what makes handing over a whole page acceptable here too.
+
+LETTERHEAD_SYSTEM_PROMPT = (
+    "You read printed correspondence and report what is printed on it. "
+    "Copy values exactly as printed, character for character. "
+    "Never translate, reformat, complete or correct a value. "
+    "Never infer a value that is not visible: report null instead."
+)
+
+LETTERHEAD_INSTRUCTION = (
+    "This is the first page of a letter. Report two things that are usually "
+    "printed without any label naming them.\n"
+    "1. date: the date the sender put on this letter. It is normally in the "
+    "letterhead, often alone on its line at the top right, above the "
+    "salutation. It is NOT a due date, a period of validity, a date of birth, "
+    "a franking or printing date, or the date of an earlier letter being "
+    "answered. Copy it exactly as printed, in the document's own format.\n"
+    "2. sender: the organisation or person who WROTE the letter, as printed in "
+    "the letterhead, logo block or return address. It is NOT the addressee "
+    "whose name appears in the address window. Copy the name only, without its "
+    "street or postcode.\n"
+    'Reply as JSON: {"date": "...", "sender": "..."}. Use null for anything '
+    "not visibly printed."
+)
+
+LETTERHEAD_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "json_object",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "date": {"type": ["string", "null"]},
+            "sender": {"type": ["string", "null"]},
+        },
+        "required": ["date", "sender"],
+    },
+}
+
+
+# Overridable at runtime by PUT /prompts, and the reason the endpoint reads
+# from here rather than from the constants directly.
+#
+# The classify prompts already live in the Encore app for exactly this reason:
+# the service image takes ~55 minutes to rebuild, so a prompt compiled into it
+# cannot be iterated on. The vision prompts had no such route, which would have
+# put every wording change on that cycle — and wording is most of what decides
+# whether this endpoint answers well. The defaults below keep the service
+# self-sufficient when nothing has been pushed yet.
+_VISION_PROMPTS: dict[str, str] = {
+    "letterhead_system": LETTERHEAD_SYSTEM_PROMPT,
+    "letterhead_instruction": LETTERHEAD_INSTRUCTION,
+}
+
+
+class VisionLetterheadRequest(BaseModel):
+    """One page image. No labels — that is the point of this endpoint."""
+
+    image_b64: str = Field(..., min_length=1)
+    image_mime: str = Field(default="image/png")
+    max_tokens: int = Field(default=256, gt=0, le=2048)
+
+
+class VisionLetterheadResponse(BaseModel):
+    date: str | None
+    sender: str | None
+    model: str
+    processing_ms: int
+
+
+@app.post("/vision/letterhead", response_model=VisionLetterheadResponse)
+async def vision_letterhead(req: VisionLetterheadRequest) -> VisionLetterheadResponse:
+    llm = _state["llm"]
+    if llm is None:
+        raise HTTPException(status_code=503, detail="llm not loaded")
+    cfg = _state["config"]
+    if not cfg.resolve_mmproj():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "no multimodal projector loaded — add the model's "
+                "mmproj-*.gguf to the configuration's extra_urls (or "
+                "LLM_MODEL_EXTRA_URLS) so it is fetched onto the models volume "
+                "alongside the weights, and run with LLM_BACKEND=server"
+            ),
+        )
+
+    t0 = time.monotonic()
+    prompts = _VISION_PROMPTS
+    messages = [
+        {"role": "system", "content": prompts["letterhead_system"]},
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{req.image_mime};base64,{req.image_b64}"},
+                },
+                {"type": "text", "text": prompts["letterhead_instruction"]},
+            ],
+        },
+    ]
+
+    try:
+        completion = await _run_blocking(
+            llm.create_chat_completion,
+            messages=messages,
+            response_format=LETTERHEAD_RESPONSE_SCHEMA,
+            temperature=0.0,
+            max_tokens=req.max_tokens,
+            acquire_timeout=60.0,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("/vision/letterhead: llm.create_chat_completion failed")
+        raise HTTPException(status_code=500, detail=f"llm failure: {exc}") from exc
+
+    raw = completion["choices"][0]["message"]["content"].strip()
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        log.warning("/vision/letterhead: model returned non-JSON: %r", raw[:200])
+        raise HTTPException(status_code=502, detail=f"model returned invalid JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=502, detail="model returned no object")
+
+    def field(name: str) -> str | None:
+        value = data.get(name)
+        if not isinstance(value, str):
+            return None
+        cleaned = (_repair_mojibake(value) or "").strip()
+        # A model with nothing to report says so in words as readily as with a
+        # JSON null. Neither is a value.
+        if not cleaned or cleaned.casefold() in {"null", "none", "n/a", "-"}:
+            return None
+        return cleaned
+
+    elapsed_ms = int((time.monotonic() - t0) * 1000)
+    date, sender = field("date"), field("sender")
+    log.info(
+        "vision letterhead: date=%s sender=%s time=%dms",
+        "yes" if date else "no", "yes" if sender else "no", elapsed_ms,
+    )
+    return VisionLetterheadResponse(
+        date=date, sender=sender, model=LLM_MODEL_PATH.name, processing_ms=elapsed_ms
+    )
 
 
 @app.post("/json-prompt")

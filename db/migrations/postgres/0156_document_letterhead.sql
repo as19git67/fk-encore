@@ -1,0 +1,13 @@
+-- The letterhead reading: what the vision model reported for the two fields a
+-- German business letter never labels, and where those readings were found in
+-- the page's own OCR words.
+--
+-- Written by text_extract and read by classify. It has to be persisted rather
+-- than passed between them because the two run as separate jobs, and the
+-- evidence the reading rests on -- the page raster and the word boxes -- exists
+-- only inside text_extract and is gone by the time classify runs.
+--
+-- Nullable: a document extracted before this existed, or one whose vision stage
+-- is switched off, simply has no reading, which is distinct from a reading that
+-- found nothing.
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS letterhead jsonb;

@@ -416,12 +416,36 @@ Die Liste zeigt bereits eingeordnete, ähnliche Dokumente desselben Haushalts
 meist in derselben Kategorie. Nicht bindend — entscheide nach dem Dokumenttext
 und weiche bei klarer Abweichung ab.`;
 
+/**
+ * The letterhead read (see documents/letterhead.ts), which asks a vision model
+ * for the two fields a German business letter prints without any label.
+ *
+ * English, unlike every prompt above it. The instruction describes *positions*
+ * on a page rather than German document vocabulary, and the vision models this
+ * runs on follow spatial instructions markedly better in English — the page
+ * itself supplies the German. Kept here rather than in the service for the
+ * same reason the classify prompts are: the service image takes ~55 minutes to
+ * build, and wording is most of what decides whether this answers well.
+ *
+ * Each bullet says what the field is NOT, because that is where the failures
+ * were: the due date instead of the letter's date, the addressee instead of
+ * the sender.
+ */
+export const LETTERHEAD_SYSTEM_PROMPT = `You read printed correspondence and report what is printed on it. Copy values exactly as printed, character for character. Never translate, reformat, complete or correct a value. Never infer a value that is not visible: report null instead.`;
+
+export const LETTERHEAD_INSTRUCTION_PROMPT = `This is the first page of a letter. Report two things that are usually printed without any label naming them.
+1. date: the date the sender put on this letter. It is normally in the letterhead, often alone on its line at the top right, above the salutation. It is NOT a due date, a period of validity, a date of birth, a franking or printing date, or the date of an earlier letter being answered. Copy it exactly as printed, in the document's own format.
+2. sender: the organisation or person who WROTE the letter, as printed in the letterhead, logo block or return address. It is NOT the addressee whose name appears in the address window. Copy the name only, without its street or postcode. A letterhead is often set across two lines - report the whole name, not the line carrying the legal form.
+Reply as JSON: {"date": "...", "sender": "..."}. Use null for anything not visibly printed.`;
+
 export interface ClassifyPromptsPayload {
   classify_system: string;
   classify_document_type: string;
   classify_tax: string;
   classify_subject_persons: string;
   classify_examples: string;
+  letterhead_system: string;
+  letterhead_instruction: string;
 }
 
 export const CLASSIFY_PROMPTS: ClassifyPromptsPayload = {
@@ -433,4 +457,10 @@ export const CLASSIFY_PROMPTS: ClassifyPromptsPayload = {
   classify_tax: CLASSIFY_TAX_PROMPT,
   classify_subject_persons: CLASSIFY_SUBJECT_PERSONS_PROMPT,
   classify_examples: CLASSIFY_EXAMPLES_PROMPT,
+  // These two DO get their own keys: the service takes them as optional
+  // fields and falls back to its compiled-in copies, so an older service and a
+  // newer app still agree. That is what buys prompt iteration without the
+  // 55-minute image build the comment above is about.
+  letterhead_system: LETTERHEAD_SYSTEM_PROMPT,
+  letterhead_instruction: LETTERHEAD_INSTRUCTION_PROMPT,
 };
