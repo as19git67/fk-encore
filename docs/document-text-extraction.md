@@ -38,7 +38,11 @@ runTextExtract(documentId)
 │           ├── contrast cleanup         sharp
 │           ├── recognition              tesseract --psm 3 → txt + tsv (+ pdf)
 │           ├── layout rebuild           ocr-layout.ts
-│           └── resolver (opt-in)        ocr-uncertainty.ts → ocr-resolver.ts
+│           │   ├── field map            ocr-fields.ts   (label → value by geometry)
+│           │   ├── suspect spans        ocr-uncertainty.ts
+│           │   ├── resolve each span    ocr-resolver.ts (opt-in, see below)
+│           │   └── field assignment     /vision/fields  (only if still in doubt)
+│           └── letterhead  (page 1)     letterhead.ts   → /vision/letterhead
 │       ├── document-number fallback     tesseract --psm 11, page 1 only
 │       └── sandwich PDF                 pdfunite
 ├── persist / remove the OCR sidecar
