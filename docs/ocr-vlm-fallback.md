@@ -4,11 +4,29 @@ A staged plan for making the documents pipeline read the characters Tesseract
 loses — `23 AUG 02` recognized as `23 aus oz` — without handing whole documents
 to a language model.
 
-Status: **stages 1–5 implemented** (PR #1050), all of it flag-gated and off by
-default. Stage 6 (document-aware expected types) and the operational parts of
-stage 7 are not built. What shipped is described in
+Status: **stages 1–5 implemented** (PR #1050), all of it flag-gated. The second
+engine has since been run over real documents and measured; the vision stage
+(`DOCUMENTS_OCR_VLM`) is still off, and turning it on is the one step between
+the pipeline flagging its errors and correcting them. Stage 6 (document-aware
+expected types) and the operational parts of stage 7 are not built. What
+shipped is described in
 [document-text-extraction.md](./document-text-extraction.md#the-resolver-a-second-opinion-on-suspect-spans);
 this document remains the reasoning behind it.
+
+**What the measurement changed.** Two claims below were written before the
+stage-3 output could be measured, and both turned out wrong:
+
+- Stage 5's step 3 said *keep the highest-confidence OCR reading*. Over 3440
+  spans that handed PaddleOCR 97.5 % of all disagreements — the two confidence
+  scales differ by 0.44 and are not comparable — and cost 89 diacritics against
+  25 gained. The incumbent reading now stands instead; see
+  [document-text-extraction.md](./document-text-extraction.md#why-paddleocr-never-overwrites-tesseract).
+- The risk table treated a failed box alignment as a contained edge case. It
+  affects **28 % of flagged spans**, which makes PaddleOCR's detection coverage
+  an open question rather than a footnote.
+
+Both are corrected in place below, with the original reasoning left visible
+where it still holds.
 
 Two deviations from the plan below, both deliberate:
 
@@ -342,10 +360,18 @@ to produce. One record per span, persisted in the stage-1 debug artifact:
 
 Decision order, deterministic and unit-tested:
 
-1. Two engines agree (after confusable folding) → that reading wins; no VLM.
+1. Two engines agree (after confusable folding) → no VLM, and the **incumbent**
+   (Tesseract) reading stands.
 2. VLM answer **passes validation** → VLM wins.
-3. Otherwise → keep the highest-confidence OCR reading. **The pipeline never
-   ends up worse than today.**
+3. Otherwise → the **incumbent** reading stands and the disagreement is
+   recorded. **The pipeline never ends up worse than today.**
+
+> Steps 1 and 3 originally read *highest-confidence OCR reading*. Measurement
+> retired that: confidence is not comparable across engines, so a maximum over
+> the two is a standing preference for PaddleOCR dressed up as a decision, and
+> every measurable failure class showed the preference losing. PaddleOCR's job
+> is to *find* the disagreement — 1224 genuine flags over 3440 spans is exactly
+> the worklist step 2 exists for.
 
 Validation is the safety-critical part, and rejects a VLM answer that:
 
@@ -353,8 +379,17 @@ Validation is the safety-critical part, and rejects a VLM answer that:
   transcription of a crop cannot be a paragraph);
 - is not plausibly derivable from the crop — edit distance to the best OCR
   candidate above a threshold *when neither engine was low-confidence*;
-- changes digits in a span whose reasons did not include a digit-bearing token
-  (a "date fix" must not rewrite an amount);
+- **revalues an amount** OCR already read cleanly. Built, but not in the shape
+  this line originally described ("changes digits in a span whose reasons did
+  not include a digit-bearing token"). Taken literally that would have blocked
+  `23 aus oz` → `23 AUG 02`, the case the whole plan exists for, since the
+  answer's digits do change. The rule that ships instead binds only where OCR
+  produced a *well-formed German amount* — a grouped thousands part or a
+  decimal comma, so `23` is not one and `7.5O0,00` is not one either — and
+  then requires the answer to preserve at least one engine's value. It is the
+  single place where the model's licence is narrower than "OCR was weak":
+  a blurry number is where a plausible invention does the most damage, because
+  nothing downstream ever re-reads an amount to check it;
 - contains characters outside the expected charset for `expected_type`;
 - is empty, or is the prompt echoed back.
 
@@ -395,7 +430,8 @@ would paper over a bad one.
 | `DOCUMENTS_OCR_VLM_MAX_SPANS` | `8` | Hard cap on VLM calls per document |
 | `DOCUMENTS_OCR_VLM_BUDGET_MS` | `30000` | Per-document resolver budget, checked between spans |
 | `DOCUMENTS_OCR_VLM_MARGIN` | `0.2` | Crop margin as a fraction of the span box |
-| `LLM_MMPROJ_PATH` | — | Multimodal projector handed to llama-server; unset disables the stage |
+| `LLM_MODEL_EXTRA_URLS` | — | Files fetched next to the weights. The projector's URL belongs here; it is then found by name, and no path is configured |
+| `LLM_MMPROJ_PATH` | — | Override for a projector that does not follow the `mmproj-*.gguf` convention or lives off the models volume |
 
 ## Risks and how each is contained
 
@@ -404,7 +440,7 @@ would paper over a bad one.
 | VLM invents plausible text | Transcription-only prompt, crop-scoped, stage-5 validation, decision falls back to OCR |
 | Latency on a CPU-only deployment | Spans only, hard cap and time budget, whole stage flag-off by default |
 | Memory pressure from a second model | Reuse the loaded multimodal model rather than starting a second one; a separate sidecar only if contention measurements demand it |
-| Paddle and Tesseract boxes don't align | Overlap-based alignment with a confusable-folded comparison; a failed alignment degrades to "no second voice", not to a wrong merge |
+| Paddle and Tesseract boxes don't align | Overlap-based alignment with a confusable-folded comparison; a failed alignment degrades to "no second voice", not to a wrong merge. **Measured: this is 28 % of flagged spans, not an edge case.** The containment holds — nothing merges wrongly — but PaddleOCR contributing nothing on a quarter of the hard cases is an open question for stage 4, not a solved one. An earlier reading of 44 % was inflated by specks: boxes too small to hold a glyph, since filtered out before a span is emitted |
 | Regression on documents that work today | Every stage flagged off; the resolver only ever *replaces* spans it flagged, and only when validation passes |
 | Effort spent on the wrong bottleneck | Stage 1 measures first; if the corpus shows Paddle alone closes most of the gap, stage 4 can be deferred indefinitely |
 
@@ -414,3 +450,16 @@ If only part of this gets built: **stages 1–3**. Confidence data, an uncertain
 detector and a second OCR engine address a large share of the `23 aus oz` class
 at a fraction of the cost and risk of the VLM path — and they are exactly the
 prerequisites the VLM path needs anyway.
+
+**This is now measured, and it needs one correction.** Stages 1–3 are built and
+they do their half of the job: they *find* the errors, reliably and cheaply.
+They do not fix them. A second engine cannot adjudicate against the first,
+because there is no comparable ground on which to prefer one — which is what
+the 97.5 % adoption rate exposed. So the honest form of the recommendation is:
+
+> Stages 1–3 make the problem visible and bound its size. Closing it is
+> stage 4.
+
+The size is bounded: **1224 disagreements over 3440 flagged spans**, each one a
+place where one of the two engines is demonstrably wrong. That is the return on
+turning the vision stage on, and it was not knowable before stage 3 shipped.

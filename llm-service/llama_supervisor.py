@@ -70,8 +70,9 @@ def build_args(cfg: LlmConfig) -> list[str]:
     # answers text prompts perfectly well, and every image request fails at the
     # server — which is why /healthz reports the resolved path rather than
     # leaving "why does OCR never use the VLM" to be guessed.
-    if cfg.mmproj_path:
-        args += ["--mmproj", cfg.mmproj_path]
+    mmproj = cfg.resolve_mmproj()
+    if mmproj:
+        args += ["--mmproj", mmproj]
     # Expert offload — the reason this backend exists at all. 0 is a no-op.
     if cfg.n_cpu_moe > 0:
         args += ["--n-cpu-moe", str(cfg.n_cpu_moe)]

@@ -44,6 +44,22 @@ console.log("[boot] documents/scan-worker.ts: all imports resolved");
 
 const POLL_INTERVAL_MS = parseInt(process.env.DOC_SCAN_POLL_INTERVAL_MS ?? "30000", 10);
 
+/**
+ * Which workers take a slot in the AI queue around their *whole job*.
+ *
+ * `text_extract` is deliberately absent even though it reaches the shared
+ * llama.cpp session once DOCUMENTS_OCR_VLM is on. There is exactly one active
+ * slot per model (see ai-queue/api.ts), so a job-level slot here would hold
+ * the model for the entire extraction — rasterizing, rotating, Tesseract,
+ * PaddleOCR, minutes on a long PDF — with llama.cpp idle throughout, and would
+ * collapse OCR to one concurrent document however high
+ * DOC_SCAN_TEXT_CONCURRENCY is set. It would also deadlock against the
+ * per-call slot the resolver takes: the job holds the only slot while its own
+ * model call queues behind it.
+ *
+ * Text extraction therefore queues at the granularity that matches its use —
+ * one slot per model call, in `withVlmSlot` (documents/ocr-resolver.ts).
+ */
 const AI_MODEL_MAP: Partial<Record<DocumentScanService, AiModel>> = {
   classify: "llm",
   embed: "embedding",

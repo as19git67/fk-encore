@@ -41,8 +41,16 @@ class _RecordingLlm:
 
 
 def _with_mmproj(path: str) -> None:
-    """LlmConfig is frozen, so swap in a replaced copy rather than mutating."""
-    main._state["config"] = replace(main._state["config"], mmproj_path=path)
+    """LlmConfig is frozen, so swap in a replaced copy rather than mutating.
+
+    `backend="server"` is part of the precondition, not decoration: a projector
+    is only ever handed to llama-server, so `resolve_mmproj` reports none for
+    the in-process runtime however the path is set. Saying so here keeps the
+    fixture honest about what the endpoints actually require.
+    """
+    main._state["config"] = replace(
+        main._state["config"], mmproj_path=path, backend="server",
+    )
 
 
 @pytest.fixture
@@ -219,3 +227,24 @@ def test_fields_without_a_projector_says_so():
 def test_fields_non_json_is_a_502(vision_llm):
     vision_llm.payload = "The document shows several fields."
     assert _post_fields({"image_b64": PIXEL_B64, "labels": ["Betrag"]}).status_code == 502
+
+
+def test_inproc_backend_reports_no_projector():
+    """A projector on disk is not vision the in-process runtime can offer.
+
+    llama-cpp-python has no per-family image chat handler in the pinned CPU
+    build, so answering anything but 503 here would promise a capability no
+    request can use — and the promise would only break at the model call.
+    """
+    original = main._state["config"]
+    main._state["llm"] = _RecordingLlm()
+    main._state["config"] = replace(
+        original, mmproj_path="/models/mmproj-test.gguf", backend="inproc",
+    )
+    try:
+        res = _post({"image_b64": PIXEL_B64})
+        assert res.status_code == 503
+        assert "mmproj" in res.json()["detail"].lower()
+    finally:
+        main._state["llm"] = None
+        main._state["config"] = original
