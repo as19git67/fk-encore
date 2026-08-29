@@ -446,6 +446,36 @@ of its own, so the two engines disagree about the *text* rather than about the
 pixels. Paddle returns *line* boxes where Tesseract returns *word* boxes, so
 alignment is by geometric overlap.
 
+### Judging an answer against a span that is not one line
+
+A validated model answer replaces OCR's, so the validator decides what reaches
+the stored text. One of its tests measures how far the answer is from what OCR
+read — and that test is meaningless on a span covering more than one visual
+line.
+
+Those exist. The row grouping merges a two-line logo into a single "row", and
+its box comes out ~100 px tall where a line at 200 dpi is ~18 px. Tesseract
+emits the words of such a box in its own reading order, the model in visual
+line order:
+
+```
+tesseract   Kissing-Mering Raiffeisenbank gTerng eG
+model       Raiffeisenbank
+            Kissing-Mering eG
+```
+
+Every word of the answer is one Tesseract also read, and the correction of
+`gTerng` is exactly what the stage exists for — but character-by-character the
+distance is 0.64, over the 0.5 threshold, and it was refused. The metric was
+measuring the ordering, not the reading.
+
+So the test depends on the shape of the answer. A single-line answer keeps the
+character distance, where order is meaningful and which caught a CJK glyph
+answered for a speck on a German bank statement. A multi-line answer is judged
+on `tokenOverlap` instead: at least half its words must be words some OCR
+engine also read. An answer that reached into the neighbouring line brings
+mostly new words with it and is still refused.
+
 ### Why the model only ever sees a crop
 
 Handing a whole page to a vision model costs tokens, invites hallucination, and
