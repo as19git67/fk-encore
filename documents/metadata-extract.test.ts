@@ -4,6 +4,7 @@ import {
   detectSubjectPersonIds,
   detectSubjectPersonPersonalDeductionReview,
   extractDocumentDate,
+  normalizeGermanDate,
   extractDocumentNumber,
   extractReferenceNumberTags,
   extractSender,
@@ -419,6 +420,48 @@ describe("extractSender — the letterhead set across two lines", () => {
       "\n",
     );
     expect(extractSender(text)).toBe("Muster Bauspar AG");
+  });
+});
+
+describe("normalizeGermanDate — what the vision model read off the page", () => {
+  // The model is told to copy the date exactly as printed, because
+  // reformatting is where a small model quietly changes the day. So the
+  // conversion happens here.
+  it("reads the German numeric form", () => {
+    expect(normalizeGermanDate("24.04.2023")).toBe("2023-04-24");
+  });
+
+  it("reads it without leading zeros", () => {
+    expect(normalizeGermanDate("8.9.2017")).toBe("2017-09-08");
+  });
+
+  it("expands a two-digit year the same way every other route does", () => {
+    expect(normalizeGermanDate("11.08.14")).toBe("2014-08-11");
+    expect(normalizeGermanDate("31.12.98")).toBe("1998-12-31");
+  });
+
+  it("reads a written month", () => {
+    expect(normalizeGermanDate("8. September 2017")).toBe("2017-09-08");
+  });
+
+  it("accepts ISO from a model that reformatted anyway", () => {
+    expect(normalizeGermanDate("2023-04-24")).toBe("2023-04-24");
+  });
+
+  it("refuses an impossible date", () => {
+    // Same validation every other route uses, so a misread digit contributes
+    // nothing rather than a wrong day.
+    expect(normalizeGermanDate("31.02.2023")).toBeNull();
+    expect(normalizeGermanDate("24.13.2023")).toBeNull();
+  });
+
+  it("refuses a sentence", () => {
+    expect(normalizeGermanDate("kein Datum erkennbar")).toBeNull();
+    expect(normalizeGermanDate("")).toBeNull();
+  });
+
+  it("refuses a month name that is not one", () => {
+    expect(normalizeGermanDate("8. Beispielmonat 2017")).toBeNull();
   });
 });
 

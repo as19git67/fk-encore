@@ -636,6 +636,110 @@ The guard for this lives in `documents/ocr-resolver-budget.test.ts` and drives
 `vlmBudgetLeft`, so it stayed green throughout — a test that cannot fail on the
 bug it names is worth less than no test, because it is read as coverage.
 
+## The letterhead: the two fields nothing labels
+
+Every route to the document date and the sender was keyed on a *printed label*:
+
+| layer | needs |
+| --- | --- |
+| layout pairing | a label it can pair a value to |
+| `assignFields` (whole-page vision) | an **unpaired label** to ask the model about |
+| regex fallbacks | an anchor word (`…datum`, `vom`, `Ort,`) |
+
+A German business letter prints none of them. It sets the date alone at the top
+right and the sender in the logo block, and expects the reader to know what
+they are from *where they are on the page*. So the vision stage could not reach
+this case at all — no label, no question, no model call — and the classifier
+could not either: it is handed reading-order text, in which the date lands
+between a franking mark and a routing code, indistinguishable from a contract
+number. The position was discarded before any model saw the document.
+
+### Text, not coordinates
+
+`/vision/letterhead` is asked no labels. It asks what the letter's date is and
+who wrote it, and the model answers by **reading the values out** — not by
+returning bounding boxes.
+
+That choice is deliberate. Small vision models are unreliable at grounding but
+good at reading, and a box that cannot be verified is worse than no box: it
+would aim the crop stage at the wrong pixels with full confidence. Instead the
+answer is located in the OCR words, which already carry coordinates
+(`anchor` in `documents/letterhead.ts`). The trust runs the other way round —
+**the model proposes, the page disposes** — which is the same discipline
+`assignFields` applies to its values, and the reason a hallucinated sender
+cannot reach the database.
+
+`anchor` compares on `confusableFold`, which drops whitespace, hyphens and dots
+and folds the glyph pairs OCR confuses. Two consequences matter:
+
+- a window may **cross a row boundary**, because a letterhead name is routinely
+  set across two lines and a matcher confined to one row would find only half
+  of it;
+- the match tolerates a quarter of its length in edit distance, because the
+  model and the OCR disagree about exactly the glyphs this pipeline exists to
+  repair. Demanding equality would reject precisely the answers worth having.
+
+### Ranking, not preference
+
+The vision reading does not simply win. A model reading a whole page has more
+room to go wrong than a label-anchored scan, so all three readers — vision, the
+scan, the classifier — are offered to `rankReadings`, which orders them by
+evidence:
+
+1. **two readers agree** on a value, which is stronger than any single reader;
+2. **the reading was located** in the page's own words;
+3. source order, as a last tie-break.
+
+A reading that could not be anchored is kept rather than dropped: absence of a
+match is a weaker claim, not a disqualification, and it is the one reader that
+can still see the layout when OCR mangled the letterhead badly enough that
+nothing matches — which is when it is most useful.
+
+### Where it runs, and why it must
+
+Inside `text_extract`, on page 1 only. Anchoring needs the word boxes and the
+model needs the page raster; by the time `classify` runs, the temporary rasters
+are gone and the text has been flattened into reading order. The result is
+persisted (`documents.letterhead`, migration 0156) because the two are separate
+jobs.
+
+It has **no switch**, unlike the span resolver, and deliberately so. There is
+no configuration under which not doing it is the better answer: it costs one
+call, it cannot make the stored text worse — the ranking has to prefer it, and
+it is discarded unless the page's own words carry it — and a deployment without
+a projector gets a 503 on the first round trip and carries on unchanged. The
+one thing it requires is the Tesseract TSV, which is where the word boxes come
+from, so it runs whenever the layout rebuild does.
+
+The cost is real and worth stating: one page-sized call per document, on the
+same single AI slot the span resolver queues for. A page image prefills at a
+multiple of a crop, so on a large batch this is the dominant addition — and it
+is visible as such, since the per-document summary reports it separately
+(`letterhead 4310ms`).
+
+### Prompt changes no longer need an image build
+
+The vision prompts now live in `documents/classify-prompts.ts` and are pushed
+with the classify prompts over `PUT /prompts`; the service keeps compiled-in
+copies as defaults so an older service and a newer app still agree. Without
+this every wording change cost the ~55-minute `llm-service` image build — and
+wording is most of what decides whether this endpoint answers well.
+
+They are in **English**, unlike every classify prompt, because the instruction
+describes *positions on a page* rather than German document vocabulary, and the
+models follow spatial instructions markedly better in English. The page itself
+supplies the German.
+
+### What this does not fix
+
+The regex fallbacks stay. They are now a cross-check rather than the primary
+reader, and `rankReadings` will prefer a value they and the model both arrive
+at over either alone. The provenance line says which reader won:
+
+```
+[documents] metadata(7326): date=vision, sender=scan
+```
+
 ## Configuration
 
 | Variable | Default | Effect |

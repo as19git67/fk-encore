@@ -67,6 +67,8 @@ import {
 import { tesseractEnv } from "./tesseract-env";
 import { renderPageWithSpacing } from "./pdf-text-layout";
 import { DOCUMENT_NUMBER_RE } from "./metadata-extract";
+import { readLetterheadForPage } from "./letterhead";
+import type { DocumentLetterhead } from "../db/schema";
 
 // pdf-parse is CJS and its default import pulls in a debug routine that
 // tries to read `test/05-versions-space.pdf` when `module.parent` is
@@ -331,6 +333,8 @@ export interface ExtractResult {
    * a selectable text layer) or when the OCR-PDF build failed.
    */
   searchablePdf: Buffer | null;
+  /** See OcrResult.letterhead. Null on the text-layer path, which sees no page. */
+  letterhead: DocumentLetterhead | null;
 }
 
 export interface ExtractOptions {
@@ -585,6 +589,7 @@ export async function extractPdfText(
         ocrMeanConfidence: null,
         ocrPagesTotal: null,
         ocrPagesOcred: null,
+        letterhead: null,
       };
     }
 
@@ -624,6 +629,7 @@ export async function extractPdfText(
         ocrMeanConfidence: ocr.meanConfidence,
         ocrPagesTotal: ocr.pagesTotal,
         ocrPagesOcred: ocr.pagesOcred,
+        letterhead: ocr.letterhead,
       };
     }
     return {
@@ -634,6 +640,7 @@ export async function extractPdfText(
       ocrMeanConfidence: ocr.meanConfidence,
       ocrPagesTotal: ocr.pagesTotal,
       ocrPagesOcred: ocr.pagesOcred,
+      letterhead: ocr.letterhead,
     };
   } finally {
     if (tmpDir) {
@@ -663,6 +670,12 @@ export interface OcrResult {
    * succeeded. Null otherwise.
    */
   searchablePdf: Buffer | null;
+  /**
+   * What the vision model read off page 1's letterhead, located in that page's
+   * own words. Null when the stage is off, the service was unavailable, or the
+   * document has no page 1 raster to look at.
+   */
+  letterhead: DocumentLetterhead | null;
 }
 
 /**
@@ -736,7 +749,14 @@ async function ocrPdf(
       .sort();
     if (entries.length === 0) {
       log(`ocr aborted after ${since(ocrStarted)}ms — rasterizing produced no pages`);
-      return { text: "", searchablePdf: null, meanConfidence: null, pagesTotal: 0, pagesOcred: 0 };
+      return {
+        text: "",
+        searchablePdf: null,
+        meanConfidence: null,
+        pagesTotal: 0,
+        pagesOcred: 0,
+        letterhead: null,
+      };
     }
     log(
       `rasterize ${rasterMs}ms → ${entries.length} page(s) @${OCR_DPI}dpi` +
@@ -789,6 +809,8 @@ async function ocrPdf(
     // The document-number marker (see below) lives on page 1 in practice —
     // remember its final (post-preprocessing) image for the fallback pass.
     let firstPagePath: string | null = null;
+    let letterhead: DocumentLetterhead | null = null;
+    let letterheadMs = 0;
     const started = Date.now();
     let pagesOcred = 0;
     for (let i = 0; i < entries.length; i++) {
@@ -879,6 +901,36 @@ async function ocrPdf(
         // reconstruction — which measures at ~3ms and would look absurd.
         layoutTotal += layoutStep.ms - pagePaddleMs - pageVlmMs;
         pagesOcred = i + 1;
+        // The letterhead read: page 1 only, and only here. It needs the page
+        // raster and the word boxes together, and classify has neither — by
+        // then the rasters are gone and the text is flat reading order, which
+        // is precisely the loss that leaves the date and the sender empty.
+        //
+        // Unconditional, unlike the span resolver. It has no switch because
+        // there is no configuration under which its absence is the better
+        // answer: it costs one call, it cannot make the stored text worse (the
+        // ranking has to prefer it, and it is discarded unless the page's own
+        // words carry it), and a deployment without a projector gets a 503 on
+        // the first round trip and moves on. The one thing it does require is
+        // the TSV, which is where the word boxes come from.
+        if (i === 0 && OCR_LAYOUT_REBUILD_ENABLED) {
+          const step = await timed(async () => {
+            const tsv = await fs.promises.readFile(`${outBase}.tsv`, "utf8").catch(() => "");
+            if (tsv.length === 0) return null;
+            return readLetterheadForPage({
+              pageImagePath: pagePath,
+              rows: visualRowsFromWords(parseTesseractTsv(tsv)),
+              log,
+            });
+          });
+          letterhead = step.value;
+          // Reported as its own segment rather than folded into `vlm`. The
+          // timing line reads as a disjoint breakdown of the total, and this
+          // is now the one vision call that runs with the span resolver off —
+          // counting it twice would make `vlm` overlap `letterhead` and stop
+          // the segments from summing.
+          letterheadMs = step.ms;
+        }
         const pageText = layoutStep.value.text;
         confidenceSum += layoutStep.value.confidenceSum;
         confidenceWords += layoutStep.value.wordCount;
@@ -952,6 +1004,7 @@ async function ocrPdf(
         (vlmTotal > 0
           ? `, vlm ${vlmTotal}ms${vlmWaitTotal > 0 ? ` (${vlmWaitTotal}ms queued)` : ""}`
           : "") +
+        (letterheadMs > 0 ? `, letterhead ${letterheadMs}ms` : "") +
         (mergeMs > 0 ? `, sandwich pdf ${mergeMs}ms` : "") +
         (markerMs > 0 ? `, number fallback ${markerMs}ms` : ""),
     );
@@ -980,6 +1033,7 @@ async function ocrPdf(
       meanConfidence: confidenceWords > 0 ? confidenceSum / confidenceWords : null,
       pagesTotal: entries.length,
       pagesOcred,
+      letterhead,
     };
   } finally {
     // Best-effort cleanup — never throw from the finally block.
