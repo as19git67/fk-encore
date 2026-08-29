@@ -264,6 +264,26 @@ export function amountValues(text: string): number[] {
 }
 
 /**
+ * The share of an answer's words that also occur in an OCR reading, 0..1.
+ *
+ * Order-free on purpose — see the multi-line case in `validateVlmAnswer`.
+ * Punctuation-only tokens are dropped so a stray `/` neither pads the
+ * denominator nor counts as agreement.
+ */
+export function tokenOverlap(answer: string, reading: string): number {
+  const words = (text: string) =>
+    text
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((t) => t.length > 0 && /[\p{L}\p{N}]/u.test(t));
+
+  const answerWords = words(answer);
+  if (answerWords.length === 0) return 0;
+  const seen = new Set(words(reading));
+  return answerWords.filter((w) => seen.has(w)).length / answerWords.length;
+}
+
+/**
  * Decide whether a model's transcription may replace the OCR reading.
  *
  * Every rule here exists to stop one specific way a vision model turns a
@@ -297,14 +317,41 @@ export function validateVlmAnswer(
     return { ok: false, reason: `characters outside the expected ${expectedType} charset` };
   }
 
-  // More than half the characters rewritten is not a second reading of the
-  // same pixels — it is a different answer.
-  const distance = Math.min(
-    ...ocrCandidates.map((c) => editDistance(text.toLowerCase(), c.text.trim().toLowerCase())),
-  );
-  const normalized = distance / Math.max(text.length, reference.length);
-  if (normalized > 0.5) {
-    return { ok: false, reason: `edit distance ${normalized.toFixed(2)} from every OCR reading` };
+  // Is the answer anchored in what OCR saw, or is it a different answer?
+  //
+  // Two metrics, because one of them is meaningless on a span that covers more
+  // than one visual line — and those exist: the row grouping merges a
+  // two-line logo into a single "row", so its box is 100px tall where a line
+  // is 18px. Tesseract emits the words of such a box in its own reading order,
+  // the model in visual line order, and comparing the two character by
+  // character measures the *ordering* rather than the reading:
+  //
+  //   tesseract  Kissing-Mering Raiffeisenbank gTerng eG
+  //   model      Raiffeisenbank / Kissing-Mering eG        (two lines)
+  //
+  // Every word of the model's answer is one Tesseract also read, yet the
+  // character distance is 0.64 and the correction was refused. A multi-line
+  // span has no canonical linear order to measure against, so for those the
+  // test is which words are shared, not in which sequence they appear.
+  const multiLine = /\n/.test(text);
+  if (multiLine) {
+    const overlap = Math.max(...ocrCandidates.map((c) => tokenOverlap(text, c.text)));
+    if (overlap < 0.5) {
+      return {
+        ok: false,
+        reason: `only ${(overlap * 100).toFixed(0)}% of the answer's words occur in any OCR reading`,
+      };
+    }
+  } else {
+    // Single line: order is meaningful, so more than half the characters
+    // rewritten is not a second reading of the same pixels.
+    const distance = Math.min(
+      ...ocrCandidates.map((c) => editDistance(text.toLowerCase(), c.text.trim().toLowerCase())),
+    );
+    const normalized = distance / Math.max(text.length, reference.length);
+    if (normalized > 0.5) {
+      return { ok: false, reason: `edit distance ${normalized.toFixed(2)} from every OCR reading` };
+    }
   }
 
   // The digit guard. When the only thing suspect about a span is that two
