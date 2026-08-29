@@ -673,6 +673,25 @@ answer is located in the OCR words, which already carry coordinates
 `assignFields` applies to its values, and the reason a hallucinated sender
 cannot reach the database.
 
+It anchors against the rows the layout step **ends** with — the resolver's
+corrections included, not Tesseract's raw output. The distinction decides
+whether anchoring can work at all on the documents that need it: the resolver
+has usually just repaired the very letterhead the model is reading, so matching
+against the raw TSV compares the answer with text the pipeline itself no longer
+believes.
+
+```
+raw (TSV)          Kissing-Mering Raiffeisenbank gTerng eG
+corrected          Raiffeisenbank Kissing-Mering eG
+model's answer     Raiffeisenbank Kissing-Mering eG
+```
+
+Against the corrected rows that is an exact match; against the raw ones it is
+six wrong characters in thirty-one plus two transposed blocks, which no
+tolerance worth having would accept. On a cleanly-read letterhead the two rows
+agree and the choice does not matter — the difference only ever shows up where
+a located reading is worth the most.
+
 `anchor` compares on `confusableFold`, which drops whitespace, hyphens and dots
 and folds the glyph pairs OCR confuses. Two consequences matter:
 

@@ -49,6 +49,7 @@ import {
   parseTesseractTsv,
   shouldUseLayoutText,
   visualRowsFromWords,
+  type OcrWord,
 } from "./ocr-layout";
 import { findUncertainSpans } from "./ocr-uncertainty";
 import { buildFieldMap, findUnpairedLabels } from "./ocr-fields";
@@ -894,7 +895,7 @@ async function ocrPdf(
                   : undefined,
                 OCR_RESOLVER_DEBUG ? log : undefined,
               )
-            : { text: txt.trim(), confidenceSum: 0, wordCount: 0 },
+            : { text: txt.trim(), confidenceSum: 0, wordCount: 0, rows: [] },
         );
         // The resolver's service calls happen inside the layout step, so its
         // milliseconds would otherwise be silently attributed to layout
@@ -913,16 +914,20 @@ async function ocrPdf(
         // words carry it), and a deployment without a projector gets a 503 on
         // the first round trip and moves on. The one thing it does require is
         // the TSV, which is where the word boxes come from.
-        if (i === 0 && OCR_LAYOUT_REBUILD_ENABLED) {
-          const step = await timed(async () => {
-            const tsv = await fs.promises.readFile(`${outBase}.tsv`, "utf8").catch(() => "");
-            if (tsv.length === 0) return null;
-            return readLetterheadForPage({
+        if (i === 0 && layoutStep.value.rows.length > 0) {
+          const step = await timed(() =>
+            readLetterheadForPage({
               pageImagePath: pagePath,
-              rows: visualRowsFromWords(parseTesseractTsv(tsv)),
+              // The rows the layout step ends with, corrections included. The
+              // resolver has often just repaired the letterhead the model is
+              // about to read — anchoring against the raw TSV would compare
+              // the answer with text the pipeline itself no longer believes,
+              // and would fail exactly on the badly-read letterheads where a
+              // located reading is worth the most.
+              rows: layoutStep.value.rows,
               log,
-            });
-          });
+            }),
+          );
           letterhead = step.value;
           // Reported as its own segment rather than folded into `vlm`. The
           // timing line reads as a disjoint breakdown of the total, and this
@@ -1124,9 +1129,25 @@ async function layoutTextForPage(
     onAssigned: (accepted: number, rejected: number, ms: number) => void;
   },
   debugLog?: (msg: string) => void,
-): Promise<{ text: string; confidenceSum: number; wordCount: number }> {
+): Promise<{
+  text: string;
+  confidenceSum: number;
+  wordCount: number;
+  /**
+   * The visual rows *after* the resolver corrected them — not what Tesseract
+   * emitted. The letterhead read anchors the model's answer against these, and
+   * the difference decides whether it can: the resolver has often just
+   * repaired the very letterhead the model is reading, and matching against
+   * the uncorrected rows means matching against text nobody believes any more.
+   *
+   * Empty when the TSV could not be read, which is the same condition that
+   * makes `text` fall back to Tesseract's plain output.
+   */
+  rows: OcrWord[][];
+}> {
   let confidenceSum = 0;
   let wordCount = 0;
+  let rows: OcrWord[][] = [];
   try {
     const tsv = await fs.promises.readFile(tsvPath, "utf8");
     const words = parseTesseractTsv(tsv);
@@ -1135,7 +1156,7 @@ async function layoutTextForPage(
       confidenceSum += word.confidence;
       wordCount++;
     }
-    let rows = visualRowsFromWords(words);
+    rows = visualRowsFromWords(words);
 
     // The label → value map the page's own geometry supports. Pure and cheap,
     // so it is built whenever anyone might look at it.
@@ -1204,7 +1225,9 @@ async function layoutTextForPage(
     }
 
     const layout = layoutTextFromRows(rows);
-    if (shouldUseLayoutText(layout, plainText)) return { text: layout, confidenceSum, wordCount };
+    if (shouldUseLayoutText(layout, plainText)) {
+      return { text: layout, confidenceSum, wordCount, rows };
+    }
     if (layout.trim().length > 0) {
       console.warn(
         `[documents.text-extract] layout reconstruction looked incomplete for ${path.basename(tsvPath)} — using tesseract's plain text`,
@@ -1215,7 +1238,7 @@ async function layoutTextForPage(
       `[documents.text-extract] reading ${path.basename(tsvPath)} failed: ${(err as Error).message}`,
     );
   }
-  return { text: plainText.trim(), confidenceSum, wordCount };
+  return { text: plainText.trim(), confidenceSum, wordCount, rows };
 }
 
 /**
