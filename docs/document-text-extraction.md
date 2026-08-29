@@ -600,6 +600,42 @@ the repository — so it answers *which engine reads these failure classes
 better*, which is what a ranking needs. It is not a substitute for measuring on
 real scans.
 
+### The budget must not be billed for the queue
+
+Each crop takes the single shared AI slot for the model call, so a document
+whose neighbours are busy waits before its call runs. That wait was being
+charged to the document's own allowance: the timer started before the slot was
+acquired, and `spentMs` grew by the wait plus the call.
+
+The effect is not subtle. Measured over a 27-document batch:
+
+| | model time per crop | crops examined |
+| --- | ---: | ---: |
+| document running alone | 804 ms | 21 of 23 spans |
+| documents running concurrently | 13 000 – 32 000 ms | 2 – 3 per document |
+
+The second row is not the model getting slower; it is the queue being counted
+as model work. With a 30 s allowance, one wait exhausted it. **298 of 485
+flagged spans — 61 % — were never sent to the model.** They appear in the log
+as `ocr kept`, a phrase that reads like a decision was made. None was.
+
+The timer now runs inside the slot, so only the call is charged. The wait is
+still reported, separately, in the per-document summary:
+
+```
+vlm 50835ms (46200ms queued)
+```
+
+Contention is a real cost and worth seeing — it just is not this document's
+allowance to spend. Wall-clock stays bounded one level up, by
+`DOCUMENTS_OCR_TIMEOUT_MS`.
+
+The guard for this lives in `documents/ocr-resolver-budget.test.ts` and drives
+`resolvePage` against a slot that makes every call wait. The older assertion in
+`ocr-resolver.test.ts` named this property but exercised only the predicate
+`vlmBudgetLeft`, so it stayed green throughout — a test that cannot fail on the
+bug it names is worth less than no test, because it is read as coverage.
+
 ## Configuration
 
 | Variable | Default | Effect |

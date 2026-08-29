@@ -357,6 +357,18 @@ function isReferenceDateMatch(text: string, m: RegExpExecArray): boolean {
 /** A bare "Oktober 2025" with no city and no "im" in front of it. */
 const BARE_MONTHYEAR_RE = /\b([A-ZÄÖÜ][a-zäöü]{2,8})\.?[ \t]+(\d{4})\b/g;
 
+/**
+ * A bare "24.04.2023" — no label, no city in front of it. German business
+ * letters set the date alone at the top right, and the OCR text carries it as
+ * a line of its own with nothing to anchor it to. Every ranked pattern needs
+ * an anchor, so this shape produced no candidate at all and the field stayed
+ * empty on letters that are plainly dated.
+ *
+ * Accepted only as a last resort, and only in the letterhead — see
+ * `bareLetterheadDate`.
+ */
+const BARE_FULL_DATE_RE = /(?:^|[\s(])(\d{1,2})\.[ \t]*(\d{1,2})\.[ \t]*(\d{2,4})(?=$|[\s.,;)])/gm;
+
 /** Subject lines name the month the document is *about*, not its own. */
 const SUBJECT_LINE_RE = /^[ \t]*(?:betreff|betr\.?|thema|ihr zeichen|unser zeichen)\b/i;
 
@@ -490,7 +502,47 @@ export function extractDocumentDate(text: string): string | null {
     rest.sort((a, b) => a.rank - b.rank || a.index - b.index);
     return rest[0].iso;
   }
-  return extractColumnHeaderDate(text) ?? extractAlignedColumnDate(text);
+  return (
+    extractColumnHeaderDate(text) ??
+    extractAlignedColumnDate(text) ??
+    bareLetterheadDate(text, salutationAt)
+  );
+}
+
+/**
+ * The unlabelled date in a letterhead, as a last resort.
+ *
+ * Consulted only after every anchored strategy has come up empty, so it can
+ * never outrank evidence — which is the whole reason it is safe to accept a
+ * date with no label at all. Three conditions keep it honest:
+ *
+ *   1. **Above the salutation.** Below it, an unanchored date belongs to what
+ *      the letter is about — a due date, a period, a date being confirmed.
+ *      Without a salutation there is no letterhead to speak of and no way to
+ *      tell the two apart, so nothing is returned.
+ *   2. **Not the reference block or a subject line**, the two places above the
+ *      salutation that carry someone else's date. Same guards the ranked
+ *      patterns use.
+ *   3. **The last one wins.** The letterhead runs sender block, then postal
+ *      matter, then the recipient's address, and the date sits at the end of
+ *      that run, closest to the salutation. Earlier numbers up there —
+ *      a franking date, a form revision like "DV 04.23" — are printing
+ *      apparatus, not the letter dating itself.
+ */
+function bareLetterheadDate(text: string, salutationAt: number): string | null {
+  if (salutationAt <= 0) return null;
+  BARE_FULL_DATE_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  let last: string | null = null;
+  while ((m = BARE_FULL_DATE_RE.exec(text)) !== null) {
+    if (m.index >= salutationAt) break;
+    if (isOnSubjectLine(text, m.index)) continue;
+    if (isReferenceDateMatch(text, m)) continue;
+    if (isNonDocumentDateMatch(text, m)) continue;
+    const iso = toIsoDate(m[1], m[2], m[3]);
+    if (iso) last = iso;
+  }
+  return last;
 }
 
 /**
@@ -546,7 +598,7 @@ const SENDER_MAX_CHARS = 80;
  * down to "Rechnung Nr." — a five-digit invoice or customer number looks exactly
  * like a postcode, and only the place name after it settles which it is.
  */
-const ADDRESS_TAIL_RE = /\s*(?:\s[-–]\s|[,;·|])?\s*(?:D\s*-\s*)?\b\d{5}\s+\p{Lu}.*$/u;
+const ADDRESS_TAIL_RE = /\s*(?:\s[-–]\s|[,;·|:•∙])?\s*(?:D\s*-\s*)?\b\d{5}\s+\p{Lu}.*$/u;
 
 /**
  * A PO box tail. Letterheads print the return address with a spaced hyphen or a
@@ -556,15 +608,22 @@ const ADDRESS_TAIL_RE = /\s*(?:\s[-–]\s|[,;·|])?\s*(?:D\s*-\s*)?\b\d{5}\s+\p{
  *
  * The hyphen must be spaced on both sides. An unspaced one belongs to the name
  * ("Beispiel-Versicherung AG", "Charles-de-Gaulle-Platz").
+ *
+ * The separator class carries ":" and the bullet glyphs alongside the middle
+ * dot because OCR rarely returns a "·" as one — a scanned return address comes
+ * back as "Muster Bauspar AG : Postfach 1307" as readily as with the dot.
+ * Without them the tail stays attached, and the line then matches
+ * STREET_LINE_RE (name, space, digits) and is discarded as an address — the
+ * sender is lost rather than merely truncated.
  */
-const POBOX_TAIL_RE = /\s*(?:\s[-–]\s|[,;·|])\s*Postfach\b.*$/i;
+const POBOX_TAIL_RE = /\s*(?:\s[-–]\s|[,;·|:•∙])\s*Postfach\b.*$/i;
 
 /**
  * A street-and-number tail after a comma, for the same line without a
  * postcode ("Muster GmbH, Beispielstr. 19"). Requires the trailing number, so
  * a branch or division name after the comma is left alone.
  */
-const STREET_TAIL_RE = /\s*(?:\s[-–]\s|[,;·|])\s*[^,;·|]{2,40}?\s\d{1,4}\s*[a-zA-Z]?$/;
+const STREET_TAIL_RE = /\s*(?:\s[-–]\s|[,;·|:•∙])\s*[^,;·|:•∙]{2,40}?\s\d{1,4}\s*[a-zA-Z]?$/;
 
 function cleanSenderCandidate(value: string): string | null {
   // Strategy 3 takes a whole line, and a letterhead routinely prints the name
@@ -635,13 +694,47 @@ export function extractSender(text: string): string | null {
   }
 
   // 3. A bare letterhead line naming an organisation.
+  const bare: string[] = [];
   for (const line of lines) {
     if (!ORGANISATION_RE.test(line)) continue;
     const candidate = cleanSenderCandidate(line);
-    if (candidate) return candidate;
+    if (candidate) bare.push(candidate);
   }
+  if (bare.length > 0) return mostCompletePrinting(bare);
 
   return null;
+}
+
+/**
+ * Of several letterhead lines that name an organisation, the one that prints
+ * the name most completely.
+ *
+ * A letterhead is often set across two lines, with the legal form on the
+ * second:
+ *
+ *     Muster Bauspar          <- no organisation word, so not a candidate
+ *     Bauspar AG              <- first candidate, and only half the name
+ *     Muster Bauspar AG : Postfach 1307
+ *
+ * Taking the first candidate stored "Bauspar AG" — which is not a company, and
+ * worse, becomes the key the learned rules and the correspondent folder are
+ * built on, so the same institution accumulates under two different names.
+ *
+ * The upgrade is deliberately narrow: a later candidate is preferred only when
+ * it *contains* the first as a whole-word substring. The letterhead is then
+ * printing one name at two lengths and the longer one is simply the fuller
+ * printing — never a different entity. A candidate naming something else can
+ * never win this way, which is what makes the rule safe without a second
+ * organisation check.
+ */
+function mostCompletePrinting(candidates: readonly string[]): string {
+  let best = candidates[0];
+  const escaped = () => best.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  for (const candidate of candidates) {
+    if (candidate.length <= best.length) continue;
+    if (new RegExp(`(?:^|\\W)${escaped()}(?:$|\\W)`, "iu").test(candidate)) best = candidate;
+  }
+  return best;
 }
 
 /**

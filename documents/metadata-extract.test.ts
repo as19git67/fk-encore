@@ -304,6 +304,124 @@ describe("extractDocumentDate — the letterhead dates the document", () => {
   });
 });
 
+describe("extractDocumentDate — the unlabelled letterhead date", () => {
+  // Every value below is invented. German business letters set the date alone
+  // at the top right with no label at all, which is the one common shape the
+  // anchored patterns cannot see.
+  const letter = (top: string) =>
+    [
+      "Muster Bauspar AG",
+      "Postfach 1307",
+      "12345 Musterstadt",
+      "",
+      "Frau",
+      "Erika Beispiel",
+      "Beispielstr. 10a",
+      "12345 Musterstadt",
+      "",
+      top,
+      "",
+      "Sehr geehrte Frau Beispiel,",
+      "",
+      "vielen Dank für Ihre Mitteilung.",
+    ].join("\n");
+
+  it("takes a bare date above the salutation", () => {
+    expect(extractDocumentDate(letter("24.04.2023"))).toBe("2023-04-24");
+  });
+
+  it("never outranks a labelled date", () => {
+    // The last resort must stay last: an anchored date anywhere wins, even
+    // when the bare one sits higher up the page.
+    const text = letter("24.04.2023").replace(
+      "vielen Dank für Ihre Mitteilung.",
+      "Rechnungsdatum 18.01.2021",
+    );
+    expect(extractDocumentDate(text)).toBe("2021-01-18");
+  });
+
+  it("ignores a bare date below the salutation", () => {
+    // Down there an unanchored date is what the letter is about — a deadline,
+    // a period, a date being confirmed — not the letter's own.
+    const text = [
+      "Muster Bauspar AG",
+      "",
+      "Sehr geehrte Frau Beispiel,",
+      "",
+      "bitte überweisen Sie den Betrag bis 30.06.2024.",
+    ].join("\n");
+    expect(extractDocumentDate(text)).toBeNull();
+  });
+
+  it("returns nothing when there is no salutation to mark the letterhead", () => {
+    // Without one there is no way to tell a letterhead date from any other.
+    expect(extractDocumentDate("Anlage 3\n\n24.04.2023\n\nBetrag 100,00")).toBeNull();
+  });
+
+  it("takes the date nearest the salutation, not the postal apparatus", () => {
+    // Franking marks and form revisions print numbers up there too. The letter
+    // dates itself at the end of the letterhead run, closest to the salutation.
+    const text = [
+      "Muster Bauspar AG : Postfach 1307",
+      "DV 04.23   0,85   Deutsche Post",
+      "01.02.2020",
+      "24.04.2023",
+      "",
+      "Sehr geehrte Frau Beispiel,",
+    ].join("\n");
+    expect(extractDocumentDate(text)).toBe("2023-04-24");
+  });
+
+  it("does not take the date of the letter being answered", () => {
+    const text = [
+      "Muster Bauspar AG",
+      "Ihr Schreiben vom 12.03.2024",
+      "",
+      "Sehr geehrte Frau Beispiel,",
+    ].join("\n");
+    expect(extractDocumentDate(text)).toBeNull();
+  });
+});
+
+describe("extractSender — the letterhead set across two lines", () => {
+  it("prefers the fullest printing of the same name", () => {
+    // The legal form lands on the second line, so the first candidate is the
+    // tail of the name. Stored as-is it becomes the key the learned rules and
+    // the correspondent folder are built on.
+    const text = [
+      "Muster Bauspar",
+      "Bauspar AG",
+      "",
+      "Muster Bauspar AG : Postfach 1307",
+      "12345 Musterstadt",
+      "",
+      "Sehr geehrte Frau Beispiel,",
+    ].join("\n");
+    expect(extractSender(text)).toBe("Muster Bauspar AG");
+  });
+
+  it("never swaps in a different organisation", () => {
+    // A longer candidate wins only when it contains the first as a whole word.
+    // Two unrelated names leave the first one standing.
+    const text = [
+      "Muster Bauspar AG",
+      "Ein ganz anderes Beispielunternehmen GmbH",
+      "",
+      "Sehr geehrte Frau Beispiel,",
+    ].join("\n");
+    expect(extractSender(text)).toBe("Muster Bauspar AG");
+  });
+
+  it("reads a return address whose middle dot OCR turned into a colon", () => {
+    // Without the colon in the separator class the tail stays attached, the
+    // line then looks like "name, space, digits" — a street — and is dropped.
+    const text = ["Muster Bauspar AG : Postfach 1307", "", "Sehr geehrte Frau Beispiel,"].join(
+      "\n",
+    );
+    expect(extractSender(text)).toBe("Muster Bauspar AG");
+  });
+});
+
 describe("extractSender", () => {
   it("reads the comma-joined return address above the address window", () => {
     const text = [
