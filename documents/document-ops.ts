@@ -436,14 +436,21 @@ export async function runClassify(documentId: number): Promise<{ classification:
   //     18.01.2021"). Fill it — but never OVERRIDE a date the LLM did produce,
   //     whose nuanced choice (salary month vs. delivery date, …) is better —
   //     from a deterministic label-anchored scan (see metadata-extract.ts).
+  // Where each of the two came from is recorded and logged below. Without it
+  // an empty field is indistinguishable from a field the model declined to
+  // fill, and "the model is barely involved" and "the model answered null"
+  // look identical from the outside.
+  let dateFrom: "llm" | "scan" | "stored" | "none" = classification.doc_date ? "llm" : "none";
   if (!classification.doc_date) {
     classification.doc_date = extractDocumentDate(clipped);
+    if (classification.doc_date) dateFrom = "scan";
   }
   //     And if neither the model nor the scan produced one, keep the date the
   //     document already carries rather than blanking it (see 2a below); the
   //     tax-year derivation further down reads it too.
   if (!classification.doc_date) {
     classification.doc_date = row.doc_date;
+    if (classification.doc_date) dateFrom = "stored";
   }
   // 2. A recipient/Bezugsperson is never the sender — drop it if the
   //    classifier echoed a known subject person into the sender field.
@@ -454,9 +461,13 @@ export async function runClassify(documentId: number): Promise<{ classification:
   // rejection and must clear the stored sender, whereas an absent answer must
   // leave the stored one alone (see the patch below).
   let senderRejected = false;
+  let senderFrom: "llm" | "scan" | "stored" | "rejected" | "none" = classification.sender
+    ? "llm"
+    : "none";
   if (isSubjectPersonSender(classification.sender, subjectPersons)) {
     classification.sender = null;
     senderRejected = true;
+    senderFrom = "rejected";
   }
   // 2a. Absent is not the same as empty. Classification is sampled, not
   //     guaranteed to repeat — the first classify attempt now decodes greedily,
@@ -483,11 +494,20 @@ export async function runClassify(documentId: number): Promise<{ classification:
     const scanned = extractSender(clipped);
     if (scanned && !isSubjectPersonSender(scanned, subjectPersons)) {
       classification.sender = scanned;
+      senderFrom = "scan";
     }
   }
   if (!classification.sender && !senderRejected) {
     classification.sender = row.sender;
+    if (classification.sender) senderFrom = "stored";
   }
+  // Names and dates are the document's own content, so only the *provenance*
+  // is logged, never the value.
+  console.log(
+    `[documents] metadata(${documentId}): date=${dateFrom}` +
+      `${classification.doc_date ? "" : " (empty)"}, sender=${senderFrom}` +
+      `${classification.sender ? "" : " (empty)"}`,
+  );
   // 2b. The small model regularly transliterates umlauts ("pruefung",
   //     "Gebuehrenbescheid") despite the prompt forbidding it. Restore the
   //     spellings that literally occur in the OCR text (dictionary-based, so
