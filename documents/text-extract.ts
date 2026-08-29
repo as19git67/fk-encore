@@ -232,18 +232,6 @@ const OCR_CONF_THRESHOLD = parseInt(process.env.DOCUMENTS_OCR_CONF_THRESHOLD ?? 
 const OCR_RESOLVER_DEBUG =
   (process.env.DOCUMENTS_OCR_DEBUG ?? "0") === "1";
 
-/**
- * The letterhead read (letterhead.ts): one vision call on page 1 for the two
- * fields a German business letter prints without a label.
- *
- * Its own switch rather than riding on DOCUMENTS_OCR_VLM, because it is a
- * different bargain: one page-sized call per document, not a crop per suspect
- * span, and it answers a question the span resolver never asks. Ships off, so
- * turning the resolver on does not silently add a call per document.
- */
-const LETTERHEAD_ENABLED =
-  (process.env.DOCUMENTS_OCR_LETTERHEAD ?? "0") === "1";
-
 /** True when any stage that needs the uncertainty scan is switched on. */
 function resolverActive(): boolean {
   return SECOND_ENGINE_ENABLED() || VLM_ENABLED();
@@ -917,7 +905,15 @@ async function ocrPdf(
         // raster and the word boxes together, and classify has neither — by
         // then the rasters are gone and the text is flat reading order, which
         // is precisely the loss that leaves the date and the sender empty.
-        if (i === 0 && resolveEnabled && LETTERHEAD_ENABLED) {
+        //
+        // Unconditional, unlike the span resolver. It has no switch because
+        // there is no configuration under which its absence is the better
+        // answer: it costs one call, it cannot make the stored text worse (the
+        // ranking has to prefer it, and it is discarded unless the page's own
+        // words carry it), and a deployment without a projector gets a 503 on
+        // the first round trip and moves on. The one thing it does require is
+        // the TSV, which is where the word boxes come from.
+        if (i === 0 && OCR_LAYOUT_REBUILD_ENABLED) {
           const step = await timed(async () => {
             const tsv = await fs.promises.readFile(`${outBase}.tsv`, "utf8").catch(() => "");
             if (tsv.length === 0) return null;
@@ -928,8 +924,12 @@ async function ocrPdf(
             });
           });
           letterhead = step.value;
+          // Reported as its own segment rather than folded into `vlm`. The
+          // timing line reads as a disjoint breakdown of the total, and this
+          // is now the one vision call that runs with the span resolver off —
+          // counting it twice would make `vlm` overlap `letterhead` and stop
+          // the segments from summing.
           letterheadMs = step.ms;
-          vlmTotal += step.ms;
         }
         const pageText = layoutStep.value.text;
         confidenceSum += layoutStep.value.confidenceSum;

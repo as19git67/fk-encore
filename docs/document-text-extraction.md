@@ -703,9 +703,19 @@ are gone and the text has been flattened into reading order. The result is
 persisted (`documents.letterhead`, migration 0156) because the two are separate
 jobs.
 
-Switched on with `DOCUMENTS_OCR_LETTERHEAD=1`, separately from
-`DOCUMENTS_OCR_VLM`: it is a different bargain — one page-sized call per
-document rather than a crop per suspect span.
+It has **no switch**, unlike the span resolver, and deliberately so. There is
+no configuration under which not doing it is the better answer: it costs one
+call, it cannot make the stored text worse — the ranking has to prefer it, and
+it is discarded unless the page's own words carry it — and a deployment without
+a projector gets a 503 on the first round trip and carries on unchanged. The
+one thing it requires is the Tesseract TSV, which is where the word boxes come
+from, so it runs whenever the layout rebuild does.
+
+The cost is real and worth stating: one page-sized call per document, on the
+same single AI slot the span resolver queues for. A page image prefills at a
+multiple of a crop, so on a large batch this is the dominant addition — and it
+is visible as such, since the per-document summary reports it separately
+(`letterhead 4310ms`).
 
 ### Prompt changes no longer need an image build
 
