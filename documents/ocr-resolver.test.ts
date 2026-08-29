@@ -671,19 +671,14 @@ describe("the VLM budget", () => {
     expect(vlmBudgetLeft(budget)).toBe(false);
   });
 
-  it("counts model time, not the wait for a slot", () => {
-    // The regression this guards. Every call now queues for the single shared
-    // llama.cpp session, so a document can sit for longer than its whole
-    // allowance before its first crop is even sent. Measured as wall-clock
-    // since the document started, the budget would already be gone and the
-    // resolver would look switched off rather than starved. Wall-clock stays
-    // bounded one level up, by DOCUMENTS_OCR_TIMEOUT_MS.
+  it("is unspent by anything the caller does not charge to it", () => {
+    // Note what this does *not* prove. It exercises the predicate only, so it
+    // stayed green while resolvePage charged the wait for the AI slot to
+    // spentMs and starved the stage in production. Whether the right number
+    // reaches spentMs is settled in ocr-resolver-budget.test.ts, against
+    // resolvePage itself.
     const budget = { calls: 8, budgetMs: 30_000, spentMs: 0 };
-
-    // 40s of queueing changes nothing …
     expect(vlmBudgetLeft(budget)).toBe(true);
-
-    // … and only the model's own seconds are charged.
     budget.spentMs += 12_000;
     expect(vlmBudgetLeft(budget)).toBe(true);
     budget.spentMs += 20_000;
