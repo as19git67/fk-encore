@@ -153,6 +153,10 @@ services:
       # text is byte-for-byte what it was before.
       DOCUMENTS_OCR_SECOND_ENGINE: ${DOCUMENTS_OCR_SECOND_ENGINE:-0}
       DOCUMENTS_OCR_VLM: ${DOCUMENTS_OCR_VLM:-0}
+      # One vision call on page 1 for the document date and the sender — the
+      # two fields a German business letter prints without a label. Its own
+      # switch: a page-sized call per document, not a crop per suspect span.
+      DOCUMENTS_OCR_LETTERHEAD: ${DOCUMENTS_OCR_LETTERHEAD:-0}
       DOCUMENTS_OCR_CONF_THRESHOLD: ${DOCUMENTS_OCR_CONF_THRESHOLD:-70}
       DOCUMENTS_OCR_VLM_MAX_SPANS: ${DOCUMENTS_OCR_VLM_MAX_SPANS:-8}
       DOCUMENTS_OCR_VLM_BUDGET_MS: ${DOCUMENTS_OCR_VLM_BUDGET_MS:-30000}

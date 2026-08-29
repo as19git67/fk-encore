@@ -77,6 +77,7 @@ import {
   resolveLearned,
 } from "./learned-rules";
 import { recordUncategorizedDocument } from "./suggestion-writer";
+import { rankReadings, type Reading } from "./letterhead";
 import {
   applyAgricultureFiscalYearTaxRule,
   applyKirchensteuerBescheidYearTaxRule,
@@ -89,6 +90,7 @@ import {
   detectSubjectPersonIds,
   detectSubjectPersonPersonalDeductionReview,
   extractDocumentDate,
+  normalizeGermanDate,
   extractDocumentNumber,
   extractReferenceNumberTags,
   isSubjectPersonSender,
@@ -303,6 +305,11 @@ export async function runTextExtract(documentId: number): Promise<void> {
       ocr_mean_confidence: result.ocrMeanConfidence,
       pages_total: result.ocrPagesTotal,
       pages_ocred: result.ocrPagesOcred,
+      // Only written when a reading was actually taken. A run with the stage
+      // off must not erase what an earlier run found — the same rule the
+      // sender already follows, and for the same reason: a field that silently
+      // empties also drops the learned rule that was filing the document.
+      ...(result.letterhead ? { letterhead: result.letterhead } : {}),
       status: sql`CASE WHEN ${documents.status} IN ('pending', 'extracting')
                        THEN ${nextStatus} ELSE ${documents.status} END`,
     })
@@ -440,10 +447,29 @@ export async function runClassify(documentId: number): Promise<{ classification:
   // an empty field is indistinguishable from a field the model declined to
   // fill, and "the model is barely involved" and "the model answered null"
   // look identical from the outside.
-  let dateFrom: "llm" | "scan" | "stored" | "none" = classification.doc_date ? "llm" : "none";
-  if (!classification.doc_date) {
-    classification.doc_date = extractDocumentDate(clipped);
-    if (classification.doc_date) dateFrom = "scan";
+  //
+  // The letterhead reading (letterhead.ts) is the one reader that saw the page
+  // rather than its text, so it is offered alongside the other two and the
+  // ranking decides. It is not simply preferred: a model reading a whole page
+  // has more room to go wrong than a label-anchored scan, and agreement
+  // between any two of the three outranks all of them individually.
+  const letterhead = row.letterhead ?? null;
+  const dateReadings: Reading<string>[] = [];
+  if (classification.doc_date) {
+    dateReadings.push({ value: classification.doc_date, source: "classify", bbox: null });
+  }
+  const visionDate = letterhead?.date ? normalizeGermanDate(letterhead.date.value) : null;
+  if (visionDate) {
+    dateReadings.push({ value: visionDate, source: "vision", bbox: letterhead!.date!.bbox });
+  }
+  const scannedDate = extractDocumentDate(clipped);
+  if (scannedDate) dateReadings.push({ value: scannedDate, source: "scan", bbox: null });
+
+  let dateFrom: "llm" | "scan" | "vision" | "stored" | "none" = "none";
+  const pickedDate = rankReadings(dateReadings);
+  if (pickedDate) {
+    classification.doc_date = pickedDate.value;
+    dateFrom = pickedDate.source === "classify" ? "llm" : pickedDate.source;
   }
   //     And if neither the model nor the scan produced one, keep the date the
   //     document already carries rather than blanking it (see 2a below); the
@@ -461,9 +487,17 @@ export async function runClassify(documentId: number): Promise<{ classification:
   // rejection and must clear the stored sender, whereas an absent answer must
   // leave the stored one alone (see the patch below).
   let senderRejected = false;
-  let senderFrom: "llm" | "scan" | "stored" | "rejected" | "none" = classification.sender
-    ? "llm"
-    : "none";
+  let senderFrom: "llm" | "scan" | "vision" | "stored" | "rejected" | "none" =
+    classification.sender ? "llm" : "none";
+  // The letterhead reading gets the same treatment as the model's own answer:
+  // offered first, then put through the Bezugsperson check below like any
+  // other candidate. A sender that could not be located in the page's words is
+  // still offered — `anchor` proves presence, and its absence is a weaker
+  // claim, not a disqualification — but it ranks below one that was.
+  if (!classification.sender && letterhead?.sender) {
+    classification.sender = letterhead.sender.value;
+    senderFrom = "vision";
+  }
   if (isSubjectPersonSender(classification.sender, subjectPersons)) {
     classification.sender = null;
     senderRejected = true;

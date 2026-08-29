@@ -67,6 +67,8 @@ import {
 import { tesseractEnv } from "./tesseract-env";
 import { renderPageWithSpacing } from "./pdf-text-layout";
 import { DOCUMENT_NUMBER_RE } from "./metadata-extract";
+import { readLetterheadForPage } from "./letterhead";
+import type { DocumentLetterhead } from "../db/schema";
 
 // pdf-parse is CJS and its default import pulls in a debug routine that
 // tries to read `test/05-versions-space.pdf` when `module.parent` is
@@ -230,6 +232,18 @@ const OCR_CONF_THRESHOLD = parseInt(process.env.DOCUMENTS_OCR_CONF_THRESHOLD ?? 
 const OCR_RESOLVER_DEBUG =
   (process.env.DOCUMENTS_OCR_DEBUG ?? "0") === "1";
 
+/**
+ * The letterhead read (letterhead.ts): one vision call on page 1 for the two
+ * fields a German business letter prints without a label.
+ *
+ * Its own switch rather than riding on DOCUMENTS_OCR_VLM, because it is a
+ * different bargain: one page-sized call per document, not a crop per suspect
+ * span, and it answers a question the span resolver never asks. Ships off, so
+ * turning the resolver on does not silently add a call per document.
+ */
+const LETTERHEAD_ENABLED =
+  (process.env.DOCUMENTS_OCR_LETTERHEAD ?? "0") === "1";
+
 /** True when any stage that needs the uncertainty scan is switched on. */
 function resolverActive(): boolean {
   return SECOND_ENGINE_ENABLED() || VLM_ENABLED();
@@ -331,6 +345,8 @@ export interface ExtractResult {
    * a selectable text layer) or when the OCR-PDF build failed.
    */
   searchablePdf: Buffer | null;
+  /** See OcrResult.letterhead. Null on the text-layer path, which sees no page. */
+  letterhead: DocumentLetterhead | null;
 }
 
 export interface ExtractOptions {
@@ -585,6 +601,7 @@ export async function extractPdfText(
         ocrMeanConfidence: null,
         ocrPagesTotal: null,
         ocrPagesOcred: null,
+        letterhead: null,
       };
     }
 
@@ -624,6 +641,7 @@ export async function extractPdfText(
         ocrMeanConfidence: ocr.meanConfidence,
         ocrPagesTotal: ocr.pagesTotal,
         ocrPagesOcred: ocr.pagesOcred,
+        letterhead: ocr.letterhead,
       };
     }
     return {
@@ -634,6 +652,7 @@ export async function extractPdfText(
       ocrMeanConfidence: ocr.meanConfidence,
       ocrPagesTotal: ocr.pagesTotal,
       ocrPagesOcred: ocr.pagesOcred,
+      letterhead: ocr.letterhead,
     };
   } finally {
     if (tmpDir) {
@@ -663,6 +682,12 @@ export interface OcrResult {
    * succeeded. Null otherwise.
    */
   searchablePdf: Buffer | null;
+  /**
+   * What the vision model read off page 1's letterhead, located in that page's
+   * own words. Null when the stage is off, the service was unavailable, or the
+   * document has no page 1 raster to look at.
+   */
+  letterhead: DocumentLetterhead | null;
 }
 
 /**
@@ -736,7 +761,14 @@ async function ocrPdf(
       .sort();
     if (entries.length === 0) {
       log(`ocr aborted after ${since(ocrStarted)}ms — rasterizing produced no pages`);
-      return { text: "", searchablePdf: null, meanConfidence: null, pagesTotal: 0, pagesOcred: 0 };
+      return {
+        text: "",
+        searchablePdf: null,
+        meanConfidence: null,
+        pagesTotal: 0,
+        pagesOcred: 0,
+        letterhead: null,
+      };
     }
     log(
       `rasterize ${rasterMs}ms → ${entries.length} page(s) @${OCR_DPI}dpi` +
@@ -789,6 +821,8 @@ async function ocrPdf(
     // The document-number marker (see below) lives on page 1 in practice —
     // remember its final (post-preprocessing) image for the fallback pass.
     let firstPagePath: string | null = null;
+    let letterhead: DocumentLetterhead | null = null;
+    let letterheadMs = 0;
     const started = Date.now();
     let pagesOcred = 0;
     for (let i = 0; i < entries.length; i++) {
@@ -879,6 +913,24 @@ async function ocrPdf(
         // reconstruction — which measures at ~3ms and would look absurd.
         layoutTotal += layoutStep.ms - pagePaddleMs - pageVlmMs;
         pagesOcred = i + 1;
+        // The letterhead read: page 1 only, and only here. It needs the page
+        // raster and the word boxes together, and classify has neither — by
+        // then the rasters are gone and the text is flat reading order, which
+        // is precisely the loss that leaves the date and the sender empty.
+        if (i === 0 && resolveEnabled && LETTERHEAD_ENABLED) {
+          const step = await timed(async () => {
+            const tsv = await fs.promises.readFile(`${outBase}.tsv`, "utf8").catch(() => "");
+            if (tsv.length === 0) return null;
+            return readLetterheadForPage({
+              pageImagePath: pagePath,
+              rows: visualRowsFromWords(parseTesseractTsv(tsv)),
+              log,
+            });
+          });
+          letterhead = step.value;
+          letterheadMs = step.ms;
+          vlmTotal += step.ms;
+        }
         const pageText = layoutStep.value.text;
         confidenceSum += layoutStep.value.confidenceSum;
         confidenceWords += layoutStep.value.wordCount;
@@ -952,6 +1004,7 @@ async function ocrPdf(
         (vlmTotal > 0
           ? `, vlm ${vlmTotal}ms${vlmWaitTotal > 0 ? ` (${vlmWaitTotal}ms queued)` : ""}`
           : "") +
+        (letterheadMs > 0 ? `, letterhead ${letterheadMs}ms` : "") +
         (mergeMs > 0 ? `, sandwich pdf ${mergeMs}ms` : "") +
         (markerMs > 0 ? `, number fallback ${markerMs}ms` : ""),
     );
@@ -980,6 +1033,7 @@ async function ocrPdf(
       meanConfidence: confidenceWords > 0 ? confidenceSum / confidenceWords : null,
       pagesTotal: entries.length,
       pagesOcred,
+      letterhead,
     };
   } finally {
     // Best-effort cleanup — never throw from the finally block.

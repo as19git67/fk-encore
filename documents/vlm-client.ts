@@ -160,6 +160,60 @@ export async function assignFields(
   return (await res.json()) as VlmFieldAssignment;
 }
 
+export interface VlmLetterhead {
+  date: string | null;
+  sender: string | null;
+  model: string;
+  processing_ms: number;
+}
+
+/**
+ * Read the two fields a letterhead never labels.
+ *
+ * Unlike `assignFields` this is asked no labels — that is the point. The date
+ * and the sender of a German business letter are identified by where they sit
+ * on the page, and every label-driven route to them therefore comes up empty.
+ *
+ * The answer is a *claim*, not a value: the caller locates it in the page's
+ * own OCR words and discards what cannot be found there. Same page-sized
+ * budget as the field assignment, for the same reason — prefilling the image
+ * dominates the call.
+ */
+export async function readLetterhead(
+  imagePng: Buffer,
+  options: { timeoutMs?: number } = {},
+): Promise<VlmLetterhead> {
+  const url = `${LLM_SERVICE_URL}/vision/letterhead`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? FIELDS_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        image_b64: imagePng.toString("base64"),
+        image_mime: "image/png",
+      }),
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    throw new VlmUnavailableError(`POST ${url} failed: ${err?.message ?? String(err)}`);
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (res.status >= 500 || res.status === 408 || res.status === 429) {
+    throw new VlmUnavailableError(`POST ${url} returned ${res.status}`);
+  }
+  if (!res.ok) {
+    throw new Error(`POST ${url} returned ${res.status}`);
+  }
+
+  return (await res.json()) as VlmLetterhead;
+}
+
 export async function isVlmAvailable(timeoutMs = 2000): Promise<boolean> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
