@@ -303,6 +303,46 @@ def test_prompt_forbids_inferring_a_value(vision_llm):
     assert "never infer" in system
 
 
+def test_reports_the_document_language(vision_llm):
+    # Used to break a tie when a numeric date's order is not settled by the
+    # document's own numbers.
+    vision_llm.payload = {"date": "24.04.2023", "sender": "Muster AG", "language": "de"}
+    assert _post_letterhead({"image_b64": PIXEL_B64}).json()["language"] == "de"
+
+
+def test_a_language_answered_as_prose_is_not_a_language(vision_llm):
+    # A code, not a description. "German business letter" is the model
+    # answering a different question, and storing it would feed nonsense into
+    # the date-convention decision.
+    vision_llm.payload = {
+        "date": None,
+        "sender": None,
+        "language": "This letter is written in German",
+    }
+    assert _post_letterhead({"image_b64": PIXEL_B64}).json()["language"] is None
+
+
+def test_language_is_normalised_to_a_short_code(vision_llm):
+    vision_llm.payload = {"date": None, "sender": None, "language": "DE-de"}
+    assert _post_letterhead({"image_b64": PIXEL_B64}).json()["language"] == "de-de"
+
+
+def test_an_older_model_answer_without_a_language_still_works(vision_llm):
+    vision_llm.payload = {"date": "24.04.2023", "sender": "Muster AG"}
+    body = _post_letterhead({"image_b64": PIXEL_B64}).json()
+    assert body["language"] is None
+    assert body["date"] == "24.04.2023"
+
+
+def test_asks_for_the_language_of_the_prose_not_the_sender(vision_llm):
+    # The distinction the Apple case turns on: a letter can be written in one
+    # language and dated in another's convention.
+    _post_letterhead({"image_b64": PIXEL_B64})
+    instruction = vision_llm.calls[0]["messages"][1]["content"][1]["text"].lower()
+    assert "language" in instruction
+    assert "639-1" in instruction
+
+
 def test_letterhead_decodes_greedily(vision_llm):
     _post_letterhead({"image_b64": PIXEL_B64})
     assert vision_llm.calls[0]["temperature"] == 0.0

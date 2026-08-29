@@ -67,7 +67,7 @@ const DATE_ANCHOR_PATTERNS: readonly RegExp[] = [
 // through. A birthdate is the costly one — see the doctor's invoice that
 // prompted this, where the patient's birth year also reached the classifier.
 const NON_DOCUMENT_DATE_LABEL_RE =
-  /\b(geburts|fälligkeits|faelligkeits|gültigkeits|gueltigkeits|ablauf|verfalls|sterbe)datum\b/i;
+  /\b(geburts|fälligkeits|faelligkeits|gültigkeits|gueltigkeits|ablauf|verfalls|sterbe)datum\b|\b(?:date\s+of\s+birth|birth\s*date|due\s+date|expiry\s+date|expiration\s+date)\b/i;
 
 /**
  * True when `m` was anchored on a label naming someone else's date.
@@ -80,10 +80,22 @@ const NON_DOCUMENT_DATE_LABEL_RE =
  * or digit, so a "Geburtsdatum" on the line before can never suppress a real
  * "Datum" match on this one.
  */
+/**
+ * Qualifiers that turn a bare English "date" into someone else's date.
+ *
+ * German compounds them into one word ("Fälligkeitsdatum"), which the
+ * letter-only walk below recovers. English writes them separately ("due
+ * date"), so the walk stops at the space and sees only "date" — the guard
+ * would pass and a payment deadline would be filed as the document's date.
+ */
+const EN_DATE_QUALIFIER_RE =
+  /\b(?:due|birth|expiry|expiration|maturity|valid|effective|start|end|payment|delivery)\s+$/i;
+
 function isNonDocumentDateMatch(text: string, m: RegExpExecArray): boolean {
   let start = m.index;
   while (start > 0 && /[A-Za-zÄÖÜäöüß]/.test(text[start - 1])) start--;
-  return NON_DOCUMENT_DATE_LABEL_RE.test(text.slice(start, m.index) + m[0]);
+  if (NON_DOCUMENT_DATE_LABEL_RE.test(text.slice(start, m.index) + m[0])) return true;
+  return EN_DATE_QUALIFIER_RE.test(text.slice(Math.max(0, m.index - 24), m.index));
 }
 
 /**
@@ -109,23 +121,134 @@ const DATE_ANCHOR_MONTHYEAR_PATTERNS: readonly RegExp[] = [
 // via the /g flag). 4-digit year only. The `den` is the common
 // "München, den 8. September 2017" letterhead phrasing. The letterhead pattern
 // stays case-sensitive on the city's leading capital (no /i).
+// English date labels, for the paperwork a household archive collects from
+// abroad. Kept to labels that name the document's OWN date; a bare "date" is
+// included because on such forms it is nearly always the field caption, and
+// the same NON_DOCUMENT_DATE_LABEL guard that protects "...datum" does not
+// apply — an English "date of birth" is caught by its own entry below.
+const EN_DATE_LABEL = String.raw`(?:date\s+of\s+issue|issue\s+date|invoice\s+date|statement\s+date|entered\s+date|date)`;
+
+// "Date of issue   August 23, 2026" — a spelled-out month, then the day. The
+// order is fixed by the month being a word, so this needs no convention.
+const DATE_ANCHOR_MONTHDAY_PATTERNS: readonly RegExp[] = [
+  new RegExp(
+    String.raw`\b${EN_DATE_LABEL}\b[ \t:]{0,80}([A-Za-z]{3,})\.?[ \t]+(\d{1,2})(?:st|nd|rd|th)?,?[ \t]+(\d{4})\b`,
+    "gi",
+  ),
+];
+
+// "12-MAY-2013", with or without a label in front of or behind it. Also
+// unambiguous: the month is spelled out.
+const DATE_ANCHOR_DAYMONTH_HYPHEN_PATTERNS: readonly RegExp[] = [
+  /\b(\d{1,2})-([A-Za-z]{3,})-(\d{4})\b/g,
+];
+
+// Numeric dates separated by a slash or a hyphen. THE ONE SHAPE WHOSE READING
+// IS NOT SETTLED BY ITS CHARACTERS: 03/04/2013 is 3 April in most of Europe
+// and 4 March in the US, so the caller's `convention` decides which capture is
+// the day. Every other pattern in this file is order-safe.
+//
+// Only ever matched next to a label. A bare slash date in running text is as
+// likely to be a fraction, a reference or a period as a date, and this is
+// precisely the shape where guessing wrong is silent.
+const DATE_ANCHOR_AMBIGUOUS_PATTERNS: readonly RegExp[] = [
+  new RegExp(
+    String.raw`\b(?:\w*datum|${EN_DATE_LABEL})\b[ \t:]{0,80}(\d{1,2})[/-](\d{1,2})[/-](\d{4}|\d{2})\b`,
+    "gi",
+  ),
+  /\bvom\b[ \t:]{0,5}(\d{1,2})[/-](\d{1,2})[/-](\d{4}|\d{2})\b/gi,
+];
+
 const DATE_ANCHOR_MONTHNAME_PATTERNS: readonly RegExp[] = [
   /\b\w*datum\b[ \t:]{0,80}(\d{1,2})\.?[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4})\b/gi,
   /\bvom\b[ \t:]{0,5}(?:den[ \t]+)?(\d{1,2})\.?[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4})\b/gi,
   /\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-]+,[ \t]{0,3}(?:den[ \t]+)?(\d{1,2})\.?[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4})\b/g,
 ];
 
-// German month names + common abbreviations → month number.
+// German and English month names + common abbreviations → month number.
+//
+// English earns its place because a household archive is not monolingual — an
+// invoice from a US service, a bank confirmation, an insurance certificate.
+// The two sets never collide: where a spelling is shared ("jun", "jul", "sep",
+// "nov", "august", "september", "november") both languages mean the same
+// month, so one table can serve both without knowing which language it is
+// reading.
+//
+// A spelled-out month is also the only date form that cannot be misread as to
+// its ORDER — which is what makes "August 23, 2026" and "12-MAY-2013" safe to
+// accept unconditionally, while the numeric forms need `inferDateConvention`.
 const MONTHS: Readonly<Record<string, number>> = {
-  januar: 1, jan: 1, februar: 2, feb: 2, "märz": 3, maerz: 3, mrz: 3,
-  april: 4, apr: 4, mai: 5, juni: 6, jun: 6, juli: 7, jul: 7, august: 8, aug: 8,
-  september: 9, sept: 9, sep: 9, oktober: 10, okt: 10,
-  november: 11, nov: 11, dezember: 12, dez: 12,
+  januar: 1, jan: 1, january: 1,
+  februar: 2, feb: 2, february: 2,
+  "märz": 3, maerz: 3, mrz: 3, mar: 3, march: 3,
+  april: 4, apr: 4,
+  mai: 5, may: 5,
+  juni: 6, jun: 6, june: 6,
+  juli: 7, jul: 7, july: 7,
+  august: 8, aug: 8,
+  september: 9, sept: 9, sep: 9,
+  oktober: 10, okt: 10, oct: 10, october: 10,
+  november: 11, nov: 11,
+  dezember: 12, dez: 12, dec: 12, december: 12,
 };
 
 function monthFromName(word: string): number | null {
   const key = word.trim().toLowerCase().replace(/\.$/, "");
   return MONTHS[key] ?? null;
+}
+
+/**
+ * Which number comes first in a numeric date whose separator is a slash or a
+ * hyphen: `03/04/2013` is 3 April to most of Europe and 4 March to the US.
+ *
+ * Dotted dates are deliberately NOT covered — `03.04.2013` is day-first
+ * everywhere it occurs, nobody writes an American date with dots — which is
+ * why this convention question is entirely new surface rather than a
+ * reinterpretation of anything already stored.
+ */
+export type DateConvention = "dmy" | "mdy";
+
+/** A slash- or hyphen-separated numeric date, wherever it appears. */
+const AMBIGUOUS_NUMERIC_DATE_RE = /\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b/g;
+
+/**
+ * Decide which way round to read this document's numeric dates.
+ *
+ * The evidence is ranked, and the first rank is the one that matters:
+ *
+ * 1. **The document's own numbers.** A single date in it with a first
+ *    component above 12 proves day-first for the whole document; one with a
+ *    second component above 12 proves month-first. This is decisive, it needs
+ *    no model, and it is *language-independent* — which is exactly what the
+ *    counter-example requires: an Apple invoice is written in English and
+ *    dated in German, and any rule keyed on language alone reads its dates a
+ *    month wrong. When both kinds appear (a mixed-format document, or a
+ *    misread digit) the majority wins, and a tie falls through to the next
+ *    rank rather than guessing.
+ * 2. **The document's language**, as the vision model reported it. Weaker: it
+ *    describes the prose, and the prose does not always date the document.
+ * 3. **Day-first**, the default, because that is what this archive is full of.
+ *
+ * Note what is NOT here: the sender's country, or a locale from anywhere
+ * outside the document. Guessing from an address would fail on exactly the
+ * cross-border paperwork this exists for.
+ */
+export function inferDateConvention(text: string, language?: string | null): DateConvention {
+  let dayFirst = 0;
+  let monthFirst = 0;
+  AMBIGUOUS_NUMERIC_DATE_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = AMBIGUOUS_NUMERIC_DATE_RE.exec(text)) !== null) {
+    const first = Number(m[1]);
+    const second = Number(m[2]);
+    // Only a component that cannot be a month carries information. 03/04 says
+    // nothing and must not be counted as a vote for either reading.
+    if (first > 12 && second <= 12) dayFirst++;
+    else if (second > 12 && first <= 12) monthFirst++;
+  }
+  if (dayFirst !== monthFirst) return dayFirst > monthFirst ? "dmy" : "mdy";
+
+  return (language ?? "").trim().toLowerCase().startsWith("en") ? "mdy" : "dmy";
 }
 
 const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
@@ -155,28 +278,63 @@ function toIsoDate(dayStr: string, monthStr: string, yearStr: string): string | 
  *
  * The vision model is asked to copy the date *as printed*, which is the right
  * instruction — reformatting is where a small model quietly invents a
- * different day — so what comes back is German ("24.04.2023", "8. September
- * 2017", "24.4.23") and has to be converted here rather than there.
+ * different day — so what comes back carries the document's own convention and
+ * has to be converted here rather than there.
  *
- * Validation is the same `toIsoDate` every other route uses: an impossible day,
- * an out-of-range year or a month name that is not one all return null. A
- * model that answered with a sentence therefore contributes nothing rather
+ * Five shapes, and the order is the point: every unambiguous one is tried
+ * before the one that needs `convention` to be read at all.
+ *
+ *   24.04.2023          dotted numeric — always day-first
+ *   8. September 2017   day, month name, year
+ *   August 23, 2026     month name, day, year
+ *   12-MAY-2013         day, month name, year, hyphenated
+ *   2026-08-23          ISO, from a model that reformatted anyway
+ *   03/04/2013          numeric, slash/hyphen — CONVENTION DECIDES
+ *
+ * Validation is the same `toIsoDate` every other route uses: an impossible
+ * day, an out-of-range year or a month name that is not one all return null.
+ * A model that answered with a sentence therefore contributes nothing rather
  * than a wrong date.
  */
-export function normalizeGermanDate(value: string): string | null {
+export function normalizeDocumentDate(
+  value: string,
+  convention: DateConvention = "dmy",
+): string | null {
   const text = value.trim();
-  const numeric = /^(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{2,4})$/.exec(text);
-  if (numeric) return toIsoDate(numeric[1], numeric[2], numeric[3]);
-  const written = /^(\d{1,2})\.?\s+([A-Za-zÄÖÜäöü.]{3,})\s+(\d{4})$/.exec(text);
-  if (written) {
-    const month = monthFromName(written[2]);
-    if (month == null) return null;
-    return toIsoDate(written[1], String(month), written[3]);
+
+  // Dotted: day-first everywhere it occurs.
+  const dotted = /^(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{2,4})$/.exec(text);
+  if (dotted) return toIsoDate(dotted[1], dotted[2], dotted[3]);
+
+  // "8. September 2017" / "12-MAY-2013" — day, then a spelled-out month.
+  const dayMonth = /^(\d{1,2})[.\-]?[ \t]*[-\s][ \t]*([A-Za-zÄÖÜäöü.]{3,})[-\s][ \t]*(\d{4})$/.exec(
+    text,
+  );
+  if (dayMonth) {
+    const month = monthFromName(dayMonth[2]);
+    if (month != null) return toIsoDate(dayMonth[1], String(month), dayMonth[3]);
   }
+
+  // "August 23, 2026" — a spelled-out month, then the day.
+  const monthDay = /^([A-Za-z]{3,})\.?[ \t]+(\d{1,2})(?:st|nd|rd|th)?,?[ \t]+(\d{4})$/.exec(text);
+  if (monthDay) {
+    const month = monthFromName(monthDay[1]);
+    if (month != null) return toIsoDate(monthDay[2], String(month), monthDay[3]);
+  }
+
   // Already ISO — a model that reformatted despite the instruction is still
   // giving a usable answer, and refusing it would be pedantry.
   const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
   if (iso) return toIsoDate(iso[3], iso[2], iso[1]);
+
+  // Numeric with a slash or hyphen: the only shape whose reading is not
+  // settled by the characters themselves. Tried last so it can never take a
+  // string one of the unambiguous forms above would have claimed.
+  const ambiguous = /^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/.exec(text);
+  if (ambiguous) {
+    const [, a, b, year] = ambiguous;
+    return convention === "mdy" ? toIsoDate(b, a, year) : toIsoDate(a, b, year);
+  }
   return null;
 }
 
@@ -365,10 +523,30 @@ function extractAlignedColumnDate(text: string): string | null {
  */
 /** Patterns that may decide the date anywhere in the document (see below). */
 const RANKED_PATTERN_COUNT =
-  DATE_ANCHOR_PATTERNS.length + DATE_ANCHOR_MONTHNAME_PATTERNS.length +
+  DATE_ANCHOR_PATTERNS.length +
+  DATE_ANCHOR_MONTHDAY_PATTERNS.length +
+  DATE_ANCHOR_DAYMONTH_HYPHEN_PATTERNS.length +
+  DATE_ANCHOR_AMBIGUOUS_PATTERNS.length +
+  DATE_ANCHOR_MONTHNAME_PATTERNS.length +
   DATE_ANCHOR_MONTHYEAR_PATTERNS.length;
 
-const SALUTATION_RE = /^[ \t]*(?:sehr geehrte|sehr geehrter|guten tag|liebe[rs]?\b|hallo\b)/im;
+/**
+ * The salutation, which is what separates a letter's head from its body — and
+ * therefore what the whole position rule below rests on.
+ *
+ * The leading class is "anything that is not a letter" rather than just
+ * whitespace, because OCR routinely runs a reference number into the
+ * salutation's line:
+ *
+ *     7933150000013509   Sehr geehrter Herr Beispiel,
+ *
+ * Anchored on `^[ \t]*` that is not a salutation, the letter has no
+ * letterhead, and every rule that depends on one silently stops applying. It
+ * stays tight where it matters: a letter before the phrase still blocks the
+ * match, so this cannot fire inside prose.
+ */
+const SALUTATION_RE =
+  /^[^\p{L}\n]*(?:sehr geehrte|sehr geehrter|guten tag|liebe[rs]?\b|hallo\b|dear\b)/imu;
 
 /**
  * The reference block ("Ihr Schreiben vom 12.03.2024", "Ihre Nachricht vom …")
@@ -388,6 +566,16 @@ function isReferenceDateMatch(text: string, m: RegExpExecArray): boolean {
 const BARE_MONTHYEAR_RE = /\b([A-ZÄÖÜ][a-zäöü]{2,8})\.?[ \t]+(\d{4})\b/g;
 
 /**
+ * A bare "09. Oktober 2023" — the day included.
+ *
+ * Without this the month-year rule above matched the "Oktober 2023" inside it
+ * and defaulted the day to the 1st, so a letter dated the 9th was stored as
+ * the 1st. Eight days wrong is worse than empty, because it looks right.
+ */
+const BARE_DAY_MONTHNAME_RE =
+  /\b(\d{1,2})\.?[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4})\b/g;
+
+/**
  * A bare "24.04.2023" — no label, no city in front of it. German business
  * letters set the date alone at the top right, and the OCR text carries it as
  * a line of its own with nothing to anchor it to. Every ranked pattern needs
@@ -398,6 +586,24 @@ const BARE_MONTHYEAR_RE = /\b([A-ZÄÖÜ][a-zäöü]{2,8})\.?[ \t]+(\d{4})\b/g;
  * `bareLetterheadDate`.
  */
 const BARE_FULL_DATE_RE = /(?:^|[\s(])(\d{1,2})\.[ \t]*(\d{1,2})\.[ \t]*(\d{2,4})(?=$|[\s.,;)])/gm;
+
+/**
+ * Phrases introducing a date the document is *about* rather than its own: the
+ * day something starts applying.
+ *
+ * "gilt ab" was already on the label exclusion list, but that list only guards
+ * the *anchored* patterns. An unlabelled "… ab dem 1. Januar 2024" in a
+ * subject line reached the letterhead rule untouched and won it on position —
+ * so a letter dated October announcing a January change was filed under
+ * January. Checked against the text directly before a match, the same way the
+ * label exclusion recovers its label.
+ */
+const VALIDITY_PHRASE_RE =
+  /\b(?:ab|zum|per|beginnend|gültig|gueltig|wirksam|geltung|wirkung)\s+(?:dem\s+|den\s+)?$/i;
+
+function isValidityDateMatch(text: string, m: RegExpExecArray): boolean {
+  return VALIDITY_PHRASE_RE.test(text.slice(Math.max(0, m.index - 40), m.index));
+}
 
 /** Subject lines name the month the document is *about*, not its own. */
 const SUBJECT_LINE_RE = /^[ \t]*(?:betreff|betr\.?|thema|ihr zeichen|unser zeichen)\b/i;
@@ -418,7 +624,11 @@ interface DateCandidate {
   rank: number;
 }
 
-function collectDateCandidates(text: string, salutationAt: number): DateCandidate[] {
+function collectDateCandidates(
+  text: string,
+  salutationAt: number,
+  convention: DateConvention,
+): DateCandidate[] {
   const found: DateCandidate[] = [];
   let rank = 0;
 
@@ -432,6 +642,48 @@ function collectDateCandidates(text: string, salutationAt: number): DateCandidat
     while ((m = re.exec(text)) !== null) {
       if (isNonDocumentDateMatch(text, m) || isReferenceDateMatch(text, m)) continue;
       const iso = toIsoDate(m[1], m[2], m[3]);
+      if (iso) found.push({ iso, index: m.index, rank: own });
+    }
+  }
+  // "Date of issue August 23, 2026" — month word first, then the day.
+  for (const re of DATE_ANCHOR_MONTHDAY_PATTERNS) {
+    const own = rank++;
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      if (isNonDocumentDateMatch(text, m) || isReferenceDateMatch(text, m)) continue;
+      const month = monthFromName(m[1]);
+      if (month == null) continue;
+      const iso = toIsoDate(m[2], String(month), m[3]);
+      if (iso) found.push({ iso, index: m.index, rank: own });
+    }
+  }
+  // "12-MAY-2013". Needs no label: the hyphenated spelled-out month is a shape
+  // that does not occur by accident.
+  for (const re of DATE_ANCHOR_DAYMONTH_HYPHEN_PATTERNS) {
+    const own = rank++;
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      if (isNonDocumentDateMatch(text, m) || isReferenceDateMatch(text, m)) continue;
+      const month = monthFromName(m[2]);
+      if (month == null) continue;
+      const iso = toIsoDate(m[1], String(month), m[3]);
+      if (iso) found.push({ iso, index: m.index, rank: own });
+    }
+  }
+  // The one convention-dependent shape, and the lowest-ranked of the anchored
+  // ones for that reason.
+  for (const re of DATE_ANCHOR_AMBIGUOUS_PATTERNS) {
+    const own = rank++;
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      if (isNonDocumentDateMatch(text, m) || isReferenceDateMatch(text, m)) continue;
+      const iso =
+        convention === "mdy"
+          ? toIsoDate(m[2], m[1], m[3])
+          : toIsoDate(m[1], m[2], m[3]);
       if (iso) found.push({ iso, index: m.index, rank: own });
     }
   }
@@ -467,6 +719,23 @@ function collectDateCandidates(text: string, salutationAt: number): DateCandidat
   // dating itself; anywhere else it is prose, which is why this pattern is not
   // in the list above and cannot contribute to the fallback ordering.
   if (salutationAt > 0) {
+    // The day-bearing form first, and ranked above the month-only one: where
+    // both match the same text ("09. Oktober 2023") the one that keeps the day
+    // has to win, or the date lands on the 1st.
+    const dayOwn = rank++;
+    BARE_DAY_MONTHNAME_RE.lastIndex = 0;
+    let d: RegExpExecArray | null;
+    while ((d = BARE_DAY_MONTHNAME_RE.exec(text)) !== null) {
+      if (d.index >= salutationAt) break;
+      if (isOnSubjectLine(text, d.index)) continue;
+      if (isReferenceDateMatch(text, d)) continue;
+      if (isValidityDateMatch(text, d)) continue;
+      const month = monthFromName(d[2]);
+      if (month == null) continue;
+      const iso = toIsoDate(d[1], String(month), d[3]);
+      if (iso) found.push({ iso, index: d.index, rank: dayOwn });
+    }
+
     const own = rank++;
     BARE_MONTHYEAR_RE.lastIndex = 0;
     let m: RegExpExecArray | null;
@@ -474,6 +743,10 @@ function collectDateCandidates(text: string, salutationAt: number): DateCandidat
       if (m.index >= salutationAt) break;
       if (isOnSubjectLine(text, m.index)) continue;
       if (isReferenceDateMatch(text, m)) continue;
+      if (isValidityDateMatch(text, m)) continue;
+      // A day printed in front of it means the day-bearing rule above has
+      // already claimed this date with its day intact.
+      if (/\d{1,2}\.?[ \t]+$/.test(text.slice(Math.max(0, m.index - 5), m.index))) continue;
       const month = monthFromName(m[1]);
       if (month == null) continue;
       const iso = toIsoDate("1", String(month), m[2]);
@@ -515,9 +788,12 @@ function collectDateCandidates(text: string, salutationAt: number): DateCandidat
  *    salutation at all — invoices, statements, tables — are decided entirely
  *    this way, unchanged.
  */
-export function extractDocumentDate(text: string): string | null {
+export function extractDocumentDate(
+  text: string,
+  convention: DateConvention = "dmy",
+): string | null {
   const salutationAt = SALUTATION_RE.exec(text)?.index ?? -1;
-  const candidates = collectDateCandidates(text, salutationAt);
+  const candidates = collectDateCandidates(text, salutationAt, convention);
 
   if (salutationAt > 0) {
     const letterhead = candidates.filter((c) => c.index < salutationAt);

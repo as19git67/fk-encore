@@ -225,12 +225,13 @@ export async function readLetterheadForPage(options: {
   const result: DocumentLetterhead = {
     date: locate(answer.date),
     sender: locate(answer.sender),
+    language: answer.language ?? null,
   };
   // The values are the document's own content, so only whether each was found
   // and whether the page confirmed it is logged — never what it said.
   options.log(
     `letterhead: date=${describe(result.date)}, sender=${describe(result.sender)}, ` +
-      `${answer.processing_ms}ms`,
+      `language=${result.language ?? "-"}, ${answer.processing_ms}ms`,
   );
   return result;
 }

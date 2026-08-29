@@ -753,6 +753,84 @@ describes *positions on a page* rather than German document vocabulary, and the
 models follow spatial instructions markedly better in English. The page itself
 supplies the German.
 
+### Dates that are not German
+
+A household archive is not monolingual, and none of the date handling was:
+`MONTHS` held German names only, so `August 23, 2026` and `12-MAY-2013`
+produced nothing — not even with an explicit label in front of them. It was a
+conversion failure, not a detection one, and it hit the vision reading hardest:
+the model is told to copy the date *as printed*, answers correctly, and the
+conversion then threw the answer away.
+
+English month names are in the table now. The two sets never collide — where a
+spelling is shared (`jun`, `sep`, `august`) both languages mean the same month
+— so one table serves both without knowing which it is reading.
+
+**A spelled-out month is the only date form whose order cannot be misread.**
+That is why the named-month shapes are accepted unconditionally, and why the
+numeric ones needed a decision:
+
+| shape | how it is read |
+| --- | --- |
+| `24.04.2023` (dotted) | day-first, always — nobody writes an American date with dots |
+| `8. September 2017`, `August 23, 2026`, `12-MAY-2013` | the month is a word; order is fixed |
+| `03/04/2013` (slash or hyphen) | `inferDateConvention` decides |
+
+The last row is entirely new surface: no pattern here previously matched a
+slash date at all, so nothing already stored can be reinterpreted by it. It is
+also only ever taken next to a label — a bare slash date in running text is as
+likely to be a fraction, a reference or a period, and this is precisely the
+shape where guessing wrong is silent.
+
+#### Deciding the convention
+
+`inferDateConvention(text, language)` ranks its evidence:
+
+1. **The document's own numbers.** One date in it with a first component above
+   12 proves day-first for the whole document; one with a second component
+   above 12 proves month-first. Decisive, needs no model, and *independent of
+   language* — which is what the awkward case demands: an Apple invoice is
+   written in English and dated in German, so any rule keyed on language alone
+   reads its dates a month wrong. A component that could be either (`03/04`)
+   carries no information and does not vote. Contradictory evidence falls
+   through rather than guessing.
+2. **The language the vision model reported.** Weaker: it describes the prose,
+   and the prose does not always date the document.
+3. **Day-first**, because that is what this archive is full of.
+
+What is deliberately absent: the sender's country, or any locale from outside
+the document. Guessing from an address fails on exactly the cross-border
+paperwork this exists for.
+
+### Three ways a German letter lost its date
+
+All three came out of one scanned insurance letter, and the second and third
+are worse than an empty field because they look right.
+
+**The day fell off an unlabelled letterhead date.** `09. Oktober 2023` was
+matched by the month-year rule as `Oktober 2023`, which defaults to the first
+of the month. Eight days wrong. A day-bearing pattern now runs ahead of it, and
+the month-year rule skips a match with a day printed in front of it.
+
+**A subject line outranked the letterhead.** *"Änderung des Beitrags ab dem 1.
+Januar 2024"* sits above the salutation, so the position rule took it: a letter
+dated October, filed under January. `gilt ab` was already on the label
+exclusion list, but that list only guards the *anchored* patterns.
+`VALIDITY_PHRASE_RE` now catches the unlabelled ones too — `ab`, `zum`, `per`,
+`mit Wirkung`, and their relatives.
+
+**OCR glued a reference number onto the salutation.**
+
+```
+7933150000013509   Sehr geehrter Herr Beispiel,
+```
+
+Anchored on `^[ \t]*` that is not a salutation. With no salutation there is no
+letterhead, and *every* position rule silently stops applying — including the
+bare-date last resort. The anchor now allows anything that is not a letter in
+front of the phrase, which admits the reference number while still refusing a
+match inside prose.
+
 ### What this does not fix
 
 The regex fallbacks stay. They are now a cross-check rather than the primary
