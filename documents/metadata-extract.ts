@@ -157,6 +157,10 @@ const DATE_ANCHOR_AMBIGUOUS_PATTERNS: readonly RegExp[] = [
     "gi",
   ),
   /\bvom\b[ \t:]{0,5}(\d{1,2})[/-](\d{1,2})[/-](\d{4}|\d{2})\b/gi,
+  // The "Ort, TT/MM/JJJJ" letterhead, which the dotted patterns have always
+  // covered but the slash form never did. Four-digit year only, exactly as the
+  // dotted one: a two-digit year after a word is too easily a false match.
+  /\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-]+,[ \t]{0,3}(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b/g,
 ];
 
 const DATE_ANCHOR_MONTHNAME_PATTERNS: readonly RegExp[] = [
@@ -307,25 +311,47 @@ function toIsoDate(dayStr: string, monthStr: string, yearStr: string): string | 
  * month found in the body.
  */
 export function isMonthOnlyReading(value: string): boolean {
-  const text = value.trim();
+  // The same place prefix normalizeDocumentDate strips. The two have to agree
+  // about what they are looking at, or a place-prefixed month resolves to an
+  // assumed first while this reports a stated day — and the guard that keeps
+  // assumed days from outranking stated ones stops firing exactly there.
+  const text = value.trim().replace(PLACE_PREFIX_RE, "");
   return (
     /^(?:i[mn][ \t]+)?[A-Za-zÄÖÜäöü.]{3,}[ \t]+\d{4}$/i.test(text) ||
     /^\d{1,2}[/.-]\d{4}$/.test(text)
   );
 }
 
+/**
+ * The place a letter names before dating itself: "München, 05.03.2022",
+ * "Caorle,03/09/2016".
+ *
+ * A convention across most of Europe, and the model returns it because it was
+ * told to copy what is printed. Stripping it here rather than teaching every
+ * shape below about it keeps the five date patterns about dates.
+ *
+ * Deliberately narrow: letters, spaces and the punctuation that occurs inside
+ * place names, and no digits at all. A prefix carrying a number is a reference,
+ * an address or a line of a table, and dropping it would be a guess.
+ */
+const PLACE_PREFIX_RE = /^\p{L}[\p{L} .\-'’]{1,38},[ \t]*/u;
+
 export function normalizeDocumentDate(
   value: string,
   convention: DateConvention = "dmy",
 ): string | null {
-  const text = value.trim();
+  const text = value.trim().replace(PLACE_PREFIX_RE, "");
 
   // Dotted: day-first everywhere it occurs.
   const dotted = /^(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{2,4})$/.exec(text);
   if (dotted) return toIsoDate(dotted[1], dotted[2], dotted[3]);
 
   // "8. September 2017" / "12-MAY-2013" — day, then a spelled-out month.
-  const dayMonth = /^(\d{1,2})[.\-]?[ \t]*[-\s][ \t]*([A-Za-zÄÖÜäöü.]{3,})[-\s][ \t]*(\d{4})$/.exec(
+  // The "den" is the German letterhead phrasing ("Musterstadt, den 8. September
+  // 2017"), which survives the place strip and which the text scan's anchored
+  // patterns already tolerate.
+  const dayMonth =
+    /^(?:den[ \t]+)?(\d{1,2})[.\-]?[ \t]*[-\s][ \t]*([A-Za-zÄÖÜäöü.]{3,})[-\s][ \t]*(\d{4})$/i.exec(
     text,
   );
   if (dayMonth) {

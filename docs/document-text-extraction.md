@@ -846,6 +846,28 @@ missing: the German letterhead `im`, an English `October 2012`, and a numeric
 be a day). The month-first pattern was also ASCII-only, so every German month
 carrying an umlaut failed in that position.
 
+#### "Ort, Datum"
+
+A letter that names its place before dating itself — `München, 05.03.2022`,
+`Caorle,03/09/2016` — is the letterhead convention across most of Europe, and
+the model returns the place because it was told to copy what is printed. The
+text scan has read this shape since the beginning; the vision path never could,
+**not even for the German form the scan has an anchored pattern for**.
+
+The prefix is stripped once, before the shapes are tried, so the five date
+patterns stay about dates. It is deliberately narrow — letters, spaces and the
+punctuation that occurs inside place names, and no digits at all. A prefix
+carrying a number is a reference, an address or a table row, and dropping it
+would be a guess.
+
+Stripping the place settles nothing about the *order* of a numeric date:
+`Caorle,03/09/2016` still reads 3 September under `dmy` and 9 March under
+`mdy`. The place is not evidence about convention — an Italian letterhead over
+an American date format is the same trap the Apple invoice sets in reverse.
+
+The slash form of the same convention (`Ort, TT/MM/JJJJ`) is now in the
+anchored patterns too, where only the dotted one was.
+
 #### Assumed days must not outrank stated ones
 
 Resolving a month to its first is a convention, not a reading, and `2012-10-01`
