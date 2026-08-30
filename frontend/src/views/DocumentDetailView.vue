@@ -1343,6 +1343,48 @@ onBeforeUnmount(() => {
           <div v-if="doc.classification_confidence != null">
             <strong>Konfidenz:</strong> {{ (doc.classification_confidence * 100).toFixed(0) }}%
           </div>
+          <div class="letterhead">
+            <strong>Briefkopf (Bildmodell):</strong>
+            <template v-if="doc.letterhead">
+              <div class="letterhead__row">
+                <span class="letterhead__label">Datum</span>
+                <span v-if="doc.letterhead.date" class="letterhead__value">
+                  {{ doc.letterhead.date.value }}
+                  <Tag
+                    :value="doc.letterhead.date.located ? 'belegt' : 'unbelegt'"
+                    :severity="doc.letterhead.date.located ? 'success' : 'warn'"
+                  />
+                </span>
+                <span v-else class="letterhead__value letterhead__value--none">nichts gefunden</span>
+              </div>
+              <div class="letterhead__row">
+                <span class="letterhead__label">Absender</span>
+                <span v-if="doc.letterhead.sender" class="letterhead__value">
+                  {{ doc.letterhead.sender.value }}
+                  <Tag
+                    :value="doc.letterhead.sender.located ? 'belegt' : 'unbelegt'"
+                    :severity="doc.letterhead.sender.located ? 'success' : 'warn'"
+                  />
+                </span>
+                <span v-else class="letterhead__value letterhead__value--none">nichts gefunden</span>
+              </div>
+              <div v-if="doc.letterhead.language" class="letterhead__row">
+                <span class="letterhead__label">Sprache</span>
+                <span class="letterhead__value">{{ doc.letterhead.language }}</span>
+              </div>
+              <p class="letterhead__hint">
+                Was das Modell auf der Seite gelesen hat — noch nicht umgerechnet.
+                „belegt“ heißt: der Text wurde in den OCR-Wörtern der Seite wiedergefunden.
+                Ob der Wert auch übernommen wurde, entscheidet das Ranking gegen
+                Textsuche und Klassifikation.
+              </p>
+            </template>
+            <p v-else class="letterhead__hint">
+              Für dieses Dokument nicht gelesen — es wurde extrahiert, bevor es diese
+              Stufe gab. Eine erneute Textextraktion füllt die Werte.
+            </p>
+          </div>
+
           <div v-if="doc.extracted_text_preview" class="text-preview">
             <strong>{{ fullTextVisible ? 'Extrahierter Text (vollständig):' : 'Text-Vorschau:' }}</strong>
             <p :class="{ 'text-preview--full': fullTextVisible }">
@@ -1764,6 +1806,42 @@ onBeforeUnmount(() => {
   /* Long unbroken filenames must wrap, not push the column wider. */
   overflow-wrap: anywhere;
 }
+.letterhead {
+  margin-bottom: 0.75rem;
+}
+
+.letterhead__row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  margin-top: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.letterhead__label {
+  flex: 0 0 5.5rem;
+  color: var(--p-text-muted-color);
+}
+
+.letterhead__value {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+
+.letterhead__value--none {
+  color: var(--p-text-muted-color);
+  font-style: italic;
+}
+
+.letterhead__hint {
+  margin: 0.4rem 0 0;
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color);
+}
+
 .text-preview p {
   margin: 0.25rem 0 0;
   padding: 0.5rem;
