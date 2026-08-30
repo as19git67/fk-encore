@@ -618,6 +618,12 @@ export const MOCK_DOCUMENT_DETAIL: DocumentDetail = {
     'Monatliche Stromrechnung der Stadtwerke München für März 2024 über 98,40 EUR. Fällig am 10.04.2024. Kundennummer 123456.',
   extracted_text_preview:
     'STADTWERKE MÜNCHEN GmbH\nRechnung Nr. 2024-03-1156\nKunden-Nr.: 123456\nAbrechnungszeitraum: 01.03.2024 - 31.03.2024\nVerbrauch: 312 kWh\nGesamtbetrag: 98,40 EUR\n\nBitte überweisen Sie den Betrag bis zum 10.04.2024...',
+  // One located and one not, so the story shows both states of the badge.
+  letterhead: {
+    date: { value: '15. März 2024', located: true },
+    sender: { value: 'Muster Stadtwerke GmbH', located: false },
+    language: 'de',
+  },
   tax_reviewed: false,
   tax_year_confidence: null,
   tax_sections: [],
@@ -637,6 +643,8 @@ export const MOCK_DOCUMENT_DETAIL_CLASSIFYING: DocumentDetail = {
   ...MOCK_DOCUMENTS[2]!,
   summary: null,
   extracted_text_preview: null,
+  // Still classifying, so nothing has been read off the page yet.
+  letterhead: null,
   tax_reviewed: false,
   tax_year_confidence: null,
   tax_sections: [],
@@ -656,6 +664,7 @@ export const MOCK_DOCUMENT_DETAIL_FAILED: DocumentDetail = {
   ...MOCK_DOCUMENTS[3]!,
   summary: null,
   extracted_text_preview: null,
+  letterhead: null,
   tax_reviewed: false,
   tax_year_confidence: null,
   tax_sections: [],

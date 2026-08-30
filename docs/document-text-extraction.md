@@ -831,6 +831,30 @@ bare-date last resort. The anchor now allows anything that is not a letter in
 front of the phrase, which admits the reference number while still refusing a
 match inside prose.
 
+### A document that addresses nobody
+
+The whole letterhead notion was tied to the salutation: no salutation, no
+letterhead, and every unanchored rule silently stopped applying. A circular, a
+statement or a contribution notice frequently dates itself `Im Januar 2020` at
+the top and then greets no one, so those came out with no date at all.
+
+The boundary is now the salutation where there is one and `letterheadEnd`
+where there is not — the first 25 lines. Two things keep that from becoming
+"any date near the top":
+
+- **A document under `LETTERHEAD_MIN_LINES` (8) has no letterhead at all.**
+  "The top of the document" only means something when there is a rest for it to
+  be the top *of*. Without this rule a three-line fragment is entirely
+  letterhead, and `Bitte zahlen Sie bis zum 30.06.2021.` dates itself from its
+  own payment deadline.
+- **`VALIDITY_PHRASE_RE` guards every unanchored form**, so `seit Januar 2020`
+  and `gültig ab Januar 2020` are still refused. A month named as the start of
+  something is not the document's own date.
+
+The bare candidates are consulted only after every anchored pattern and both
+column heuristics have come up empty, so a labelled date anywhere in the
+document still wins.
+
 ### What this does not fix
 
 The regex fallbacks stay. They are now a cross-check rather than the primary

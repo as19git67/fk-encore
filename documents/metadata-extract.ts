@@ -599,7 +599,7 @@ const BARE_FULL_DATE_RE = /(?:^|[\s(])(\d{1,2})\.[ \t]*(\d{1,2})\.[ \t]*(\d{2,4}
  * label exclusion recovers its label.
  */
 const VALIDITY_PHRASE_RE =
-  /\b(?:ab|zum|per|beginnend|gültig|gueltig|wirksam|geltung|wirkung)\s+(?:dem\s+|den\s+)?$/i;
+  /\b(?:ab|seit|bis|zum|per|beginnend|gültig|gueltig|fällig|faellig|wirksam|geltung|wirkung|since|from|effective|due)\s*(?:dem\s+|den\s+)?$/i;
 
 function isValidityDateMatch(text: string, m: RegExpExecArray): boolean {
   return VALIDITY_PHRASE_RE.test(text.slice(Math.max(0, m.index - 40), m.index));
@@ -626,7 +626,7 @@ interface DateCandidate {
 
 function collectDateCandidates(
   text: string,
-  salutationAt: number,
+  headEnd: number,
   convention: DateConvention,
 ): DateCandidate[] {
   const found: DateCandidate[] = [];
@@ -718,7 +718,7 @@ function collectDateCandidates(
   // subject line. In the letterhead a lone month and year is the document
   // dating itself; anywhere else it is prose, which is why this pattern is not
   // in the list above and cannot contribute to the fallback ordering.
-  if (salutationAt > 0) {
+  if (headEnd > 0) {
     // The day-bearing form first, and ranked above the month-only one: where
     // both match the same text ("09. Oktober 2023") the one that keeps the day
     // has to win, or the date lands on the 1st.
@@ -726,7 +726,7 @@ function collectDateCandidates(
     BARE_DAY_MONTHNAME_RE.lastIndex = 0;
     let d: RegExpExecArray | null;
     while ((d = BARE_DAY_MONTHNAME_RE.exec(text)) !== null) {
-      if (d.index >= salutationAt) break;
+      if (d.index >= headEnd) break;
       if (isOnSubjectLine(text, d.index)) continue;
       if (isReferenceDateMatch(text, d)) continue;
       if (isValidityDateMatch(text, d)) continue;
@@ -740,7 +740,7 @@ function collectDateCandidates(
     BARE_MONTHYEAR_RE.lastIndex = 0;
     let m: RegExpExecArray | null;
     while ((m = BARE_MONTHYEAR_RE.exec(text)) !== null) {
-      if (m.index >= salutationAt) break;
+      if (m.index >= headEnd) break;
       if (isOnSubjectLine(text, m.index)) continue;
       if (isReferenceDateMatch(text, m)) continue;
       if (isValidityDateMatch(text, m)) continue;
@@ -793,7 +793,8 @@ export function extractDocumentDate(
   convention: DateConvention = "dmy",
 ): string | null {
   const salutationAt = SALUTATION_RE.exec(text)?.index ?? -1;
-  const candidates = collectDateCandidates(text, salutationAt, convention);
+  const headEnd = salutationAt > 0 ? salutationAt : letterheadEnd(text);
+  const candidates = collectDateCandidates(text, headEnd, convention);
 
   if (salutationAt > 0) {
     const letterhead = candidates.filter((c) => c.index < salutationAt);
@@ -808,11 +809,69 @@ export function extractDocumentDate(
     rest.sort((a, b) => a.rank - b.rank || a.index - b.index);
     return rest[0].iso;
   }
-  return (
+
+  const unanchored =
     extractColumnHeaderDate(text) ??
     extractAlignedColumnDate(text) ??
-    bareLetterheadDate(text, salutationAt)
-  );
+    bareLetterheadDate(text, headEnd);
+  if (unanchored) return unanchored;
+
+  // The bare month-year and day-month forms in the head region, for a document
+  // with no salutation at all.
+  //
+  // A circular, a statement or a contribution notice frequently dates itself
+  // "Im Januar 2020" at the top and then addresses nobody — and the whole
+  // letterhead notion was tied to a salutation, so for those the block above
+  // never ran and the date came out empty. Reached only after every anchored
+  // pattern and both column heuristics found nothing, and the head region is
+  // bounded by `letterheadEnd`, so a month named halfway down a contract
+  // cannot arrive here.
+  const bare = candidates.filter((c) => c.rank >= RANKED_PATTERN_COUNT);
+  if (bare.length > 0) {
+    bare.sort((a, b) => a.index - b.index || a.rank - b.rank);
+    return bare[0].iso;
+  }
+  return null;
+}
+
+/**
+ * How far down a document without a salutation still counts as its letterhead.
+ *
+ * The salutation is the better boundary and is used whenever there is one.
+ * This is the fallback for the documents that address nobody — statements,
+ * circulars, notices — where the alternative was to treat the whole document
+ * as body text and find no date at all.
+ *
+ * Counted in lines rather than characters because that is what the shape
+ * actually is: a sender block, some postal matter, an address, a subject.
+ * OCR line lengths vary far too much for a character budget to mean the same
+ * thing on two different scans.
+ */
+const LETTERHEAD_MAX_LINES = 25;
+
+/**
+ * Below this a document has no letterhead at all, and 0 is returned.
+ *
+ * "The top of the document" only means something when there is a rest for it
+ * to be the top *of*. Without this a three-line fragment is entirely
+ * letterhead, and "Bitte zahlen Sie bis zum 30.06.2021." dates itself from its
+ * own payment deadline — which is precisely what the unanchored rules exist
+ * not to do. A real letterhead is already several lines before the date: a
+ * sender line, an address block, usually a contact block.
+ */
+const LETTERHEAD_MIN_LINES = 8;
+
+function letterheadEnd(text: string): number {
+  const offsets: number[] = [];
+  let offset = 0;
+  while (offsets.length <= LETTERHEAD_MAX_LINES) {
+    const next = text.indexOf("\n", offset);
+    if (next === -1) break;
+    offset = next + 1;
+    offsets.push(offset);
+  }
+  if (offsets.length < LETTERHEAD_MIN_LINES) return 0;
+  return offsets[Math.min(offsets.length, LETTERHEAD_MAX_LINES) - 1];
 }
 
 /**
@@ -835,16 +894,17 @@ export function extractDocumentDate(
  *      a franking date, a form revision like "DV 04.23" — are printing
  *      apparatus, not the letter dating itself.
  */
-function bareLetterheadDate(text: string, salutationAt: number): string | null {
-  if (salutationAt <= 0) return null;
+function bareLetterheadDate(text: string, headEnd: number): string | null {
+  if (headEnd <= 0) return null;
   BARE_FULL_DATE_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
   let last: string | null = null;
   while ((m = BARE_FULL_DATE_RE.exec(text)) !== null) {
-    if (m.index >= salutationAt) break;
+    if (m.index >= headEnd) break;
     if (isOnSubjectLine(text, m.index)) continue;
     if (isReferenceDateMatch(text, m)) continue;
     if (isNonDocumentDateMatch(text, m)) continue;
+    if (isValidityDateMatch(text, m)) continue;
     const iso = toIsoDate(m[1], m[2], m[3]);
     if (iso) last = iso;
   }
