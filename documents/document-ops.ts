@@ -91,6 +91,7 @@ import {
   detectSubjectPersonPersonalDeductionReview,
   extractDocumentDate,
   inferDateConvention,
+  isMonthOnlyReading,
   normalizeDocumentDate,
   extractDocumentNumber,
   extractReferenceNumberTags,
@@ -467,10 +468,24 @@ export async function runClassify(documentId: number): Promise<{ classification:
   const visionDate = letterhead?.date
     ? normalizeDocumentDate(letterhead.date.value, convention)
     : null;
-  if (visionDate) {
+  const scannedDate = extractDocumentDate(clipped, convention);
+  // A letterhead that prints only a month ("Im Oktober 2012") resolves to the
+  // first of it by convention, not because the document said so — and 2012-10-01
+  // cannot be told from a genuine first once it is an ISO string. So where the
+  // scan found a full date in that same month, it is the more precise reading of
+  // the same fact and the month-only one is dropped rather than allowed to
+  // outrank it on source order. Different months are a real disagreement and
+  // both still go to the ranking.
+  const visionIsMonthOnly =
+    letterhead?.date != null && isMonthOnlyReading(letterhead.date.value);
+  const supersededByScan =
+    visionIsMonthOnly &&
+    visionDate != null &&
+    scannedDate != null &&
+    scannedDate.slice(0, 7) === visionDate.slice(0, 7);
+  if (visionDate && !supersededByScan) {
     dateReadings.push({ value: visionDate, source: "vision", bbox: letterhead!.date!.bbox });
   }
-  const scannedDate = extractDocumentDate(clipped, convention);
   if (scannedDate) dateReadings.push({ value: scannedDate, source: "scan", bbox: null });
 
   let dateFrom: "llm" | "scan" | "vision" | "stored" | "none" = "none";
