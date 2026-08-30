@@ -76,9 +76,30 @@ export interface DocumentRetention {
   retain_until_year: number | null
 }
 
+/** One field the vision model read off page 1's letterhead. */
+export interface DocumentLetterheadReading {
+  /** As the model read it — the document's own spelling and date format. */
+  value: string
+  /** Whether the reading was found in the page's own OCR words. */
+  located: boolean
+}
+
+export interface DocumentLetterhead {
+  date: DocumentLetterheadReading | null
+  sender: DocumentLetterheadReading | null
+  /** ISO 639-1, as the model judged the page's prose. */
+  language: string | null
+}
+
 export interface DocumentDetail extends DocumentSummary {
   summary: string | null
   extracted_text_preview: string | null
+  /**
+   * What the vision model read off the letterhead, or null when that stage
+   * never ran for this document. The distinction matters when a date is
+   * missing: "found nothing" and "was never asked" look identical otherwise.
+   */
+  letterhead: DocumentLetterhead | null
   tax_reviewed: boolean
   tax_year_confidence: number | null
   tax_sections: DocumentTaxSection[]

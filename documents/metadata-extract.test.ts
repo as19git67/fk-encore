@@ -622,6 +622,70 @@ describe("extractDocumentDate — the three findings from a real letter", () => 
   });
 });
 
+describe("extractDocumentDate — a document that addresses nobody", () => {
+  // A circular, a statement or a contribution notice dates itself at the top
+  // and greets no one. The whole letterhead notion was tied to a salutation,
+  // so for those the bare-date rules never ran at all.
+  // A realistic shape: a sender block and an address, then the dating. A
+  // three-line fragment has no "top" to speak of and is deliberately excluded
+  // — see LETTERHEAD_MIN_LINES.
+  const notice = (top: string) =>
+    [
+      "Muster Versicherung AG",
+      "Beispielstraße 1",
+      "12345 Musterstadt",
+      "",
+      "Frau",
+      "Erika Beispiel",
+      "Beispielweg 10a",
+      "12345 Musterstadt",
+      "",
+      top,
+      "",
+      "Unsere Leistungen im Überblick",
+    ].join("\n");
+
+  it("dates itself from an unlabelled month and year", () => {
+    expect(extractDocumentDate(notice("Im Januar 2020"))).toBe("2020-01-01");
+  });
+
+  it("does the same with a full date", () => {
+    expect(extractDocumentDate(notice("24.04.2023"))).toBe("2023-04-24");
+  });
+
+  it("still refuses a month the document only mentions", () => {
+    // The guard that makes the relaxation safe: a month named as the start of
+    // something is not the document's own date.
+    expect(extractDocumentDate(notice("Mitglied seit Januar 2020"))).toBeNull();
+    expect(extractDocumentDate(notice("gültig ab Januar 2020"))).toBeNull();
+  });
+
+  it("does not reach a month named further down", () => {
+    // Bounded by LETTERHEAD_MAX_LINES, so a date in a contract's body cannot
+    // become the document's date just because nobody was greeted.
+    const long = "Muster AG\n" + "Zeile\n".repeat(30) + "Im Januar 2020\n";
+    expect(extractDocumentDate(long)).toBeNull();
+  });
+
+  it("never outranks a labelled date", () => {
+    const both = notice("Im Januar 2020").replace(
+      "Muster Versicherung AG",
+      "Muster Versicherung AG\nRechnungsdatum 05.03.2021",
+    );
+    expect(extractDocumentDate(both)).toBe("2021-03-05");
+  });
+
+  it("leaves a letter with a salutation deciding exactly as before", () => {
+    // The salutation stays the boundary wherever there is one.
+    expect(extractDocumentDate("Muster AG\n\nIm Januar 2020\n\nSehr geehrte Damen,")).toBe(
+      "2020-01-01",
+    );
+    expect(
+      extractDocumentDate("Muster AG\n\nSehr geehrte Damen,\n\nIm Januar 2020 ändert sich"),
+    ).toBeNull();
+  });
+});
+
 describe("extractSender", () => {
   it("reads the comma-joined return address above the address window", () => {
     const text = [

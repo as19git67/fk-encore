@@ -33,6 +33,7 @@ import {
   financeTransaction,
   financeTransactionDocument,
   userSubjectPersons,
+  type DocumentLetterhead,
 } from "../db/schema";
 import {
   DOCUMENTS_MAX_BYTES,
@@ -210,9 +211,37 @@ export interface DocumentSubjectPersonDTO {
   source: "ai" | "cloud" | "user";
 }
 
+/** One field the vision model read off the letterhead (documents/letterhead.ts). */
+export interface DocumentLetterheadReadingDTO {
+  /** As the model read it — the document's own spelling and date format. */
+  value: string;
+  /**
+   * Whether the reading was found in the page's own OCR words.
+   *
+   * The box itself is not exposed: on screen the question is "did the page
+   * confirm this?", and four coordinates answer it worse than a yes does. An
+   * unlocated reading is still a reading — it just ranks below a confirmed one.
+   */
+  located: boolean;
+}
+
+export interface DocumentLetterheadDTO {
+  date: DocumentLetterheadReadingDTO | null;
+  sender: DocumentLetterheadReadingDTO | null;
+  /** ISO 639-1, as the model judged the page's prose. */
+  language: string | null;
+}
+
 export interface DocumentDetail extends DocumentSummary {
   summary: string | null;
   extracted_text_preview: string | null;
+  /**
+   * What the vision model read off page 1's letterhead, or null when that
+   * stage never ran for this document — which is the distinction that matters
+   * when a date is missing: "the model found nothing" and "the model was never
+   * asked" look identical everywhere else.
+   */
+  letterhead: DocumentLetterheadDTO | null;
   tax_reviewed: boolean;
   tax_year_confidence: number | null;
   tax_sections: DocumentTaxSectionDTO[];
@@ -4239,6 +4268,19 @@ export const deleteAssessmentSettingEndpoint = api(
 
 // ─── Internal helpers ───────────────────────────────────────────────────────
 
+function toLetterheadDTO(
+  stored: DocumentLetterhead | null | undefined,
+): DocumentLetterheadDTO | null {
+  if (!stored) return null;
+  const reading = (r: { value: string; bbox: unknown } | null | undefined) =>
+    r ? { value: r.value, located: r.bbox != null } : null;
+  return {
+    date: reading(stored.date),
+    sender: reading(stored.sender),
+    language: stored.language ?? null,
+  };
+}
+
 async function loadDetail(userId: number, id: number, isAdmin = false): Promise<DocumentDetail> {
   const row = await loadVisibleDocument(userId, id, isAdmin);
   const cat = row.category_id
@@ -4259,6 +4301,7 @@ async function loadDetail(userId: number, id: number, isAdmin = false): Promise<
     ...toSummary(row, cat?.slug ?? null, tagsMap.get(id) ?? []),
     summary: row.summary,
     extracted_text_preview: preview.length > 0 ? preview : null,
+    letterhead: toLetterheadDTO(row.letterhead),
     tax_reviewed: row.tax_reviewed ?? false,
     tax_year_confidence: row.tax_year_confidence ?? null,
     tax_sections: taxSections,
