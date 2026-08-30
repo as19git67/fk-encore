@@ -831,6 +831,33 @@ bare-date last resort. The anchor now allows anything that is not a letter in
 front of the phrase, which admits the reference number while still refusing a
 match inside prose.
 
+### A letterhead that names only a month
+
+`Im Oktober 2012` is how a statement or an annual notice dates itself, and the
+model copies it faithfully because it was told to copy what is printed. The
+conversion did not know the shape, so a document whose date the model *found*
+and the page *confirmed* still ended up with no date at all — while the text
+scan, on the same printed words, had always resolved it to the first of the
+month. Two readers disagreeing about the same date for no defensible reason.
+
+`normalizeDocumentDate` now covers it, along with three neighbours it was
+missing: the German letterhead `im`, an English `October 2012`, and a numeric
+`10/2012` (unambiguous despite the slash — a four-digit second component cannot
+be a day). The month-first pattern was also ASCII-only, so every German month
+carrying an umlaut failed in that position.
+
+#### Assumed days must not outrank stated ones
+
+Resolving a month to its first is a convention, not a reading, and `2012-10-01`
+cannot be told from a genuine first once it is an ISO string. So where the
+letterhead names only a month **and** the text scan found a full date in that
+same month, the scan is the more precise reading of the same fact and the
+month-only one is dropped rather than allowed to win on source order.
+Different months are a real disagreement, and both still go to the ranking.
+
+`isMonthOnlyReading` answers that question of the raw reading, because the
+normalised form cannot.
+
 ### A document that addresses nobody
 
 The whole letterhead notion was tied to the salutation: no salutation, no
