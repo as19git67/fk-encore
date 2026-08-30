@@ -588,6 +588,54 @@ describe("normalizeDocumentDate — a letterhead that names only a month", () =>
   });
 });
 
+describe("normalizeDocumentDate — a letter that names its place first", () => {
+  // "Ort, Datum" is the letterhead convention across most of Europe, and the
+  // model returns the place because it was told to copy what is printed. The
+  // text scan has always read this shape; the vision path never could — not
+  // even for the German form it has an anchored pattern for.
+  it("reads the German letterhead form", () => {
+    expect(normalizeDocumentDate("München, 05.03.2022")).toBe("2022-03-05");
+    expect(normalizeDocumentDate("Musterstadt, den 8. September 2017")).toBe("2017-09-08");
+  });
+
+  it("reads a slash date after a place, with or without a space", () => {
+    expect(normalizeDocumentDate("Caorle,03/09/2016", "dmy")).toBe("2016-09-03");
+    expect(normalizeDocumentDate("Caorle, 03/09/2016", "dmy")).toBe("2016-09-03");
+  });
+
+  it("still lets the convention decide the order", () => {
+    // Stripping the place must not settle a question the place cannot answer:
+    // the document's own numbers and its language do that.
+    expect(normalizeDocumentDate("Caorle,03/09/2016", "mdy")).toBe("2016-03-09");
+  });
+
+  it("reads a place before a month with no day", () => {
+    expect(normalizeDocumentDate("Musterstadt, im Oktober 2012")).toBe("2012-10-01");
+  });
+
+  it("refuses a prefix carrying a number", () => {
+    // A prefix with a digit is a reference, an address or a table row, not a
+    // place. Dropping it would be a guess.
+    expect(normalizeDocumentDate("Rechnung 5, 03/09/2016", "dmy")).toBeNull();
+  });
+
+  it("keeps isMonthOnlyReading reading the same string", () => {
+    // The two must agree about what they are looking at, or a place-prefixed
+    // month resolves to an assumed first while the guard sees a stated day —
+    // and stops protecting the precise scan date it exists for.
+    expect(isMonthOnlyReading("Musterstadt, im Oktober 2012")).toBe(true);
+    expect(isMonthOnlyReading("München, 05.03.2022")).toBe(false);
+  });
+});
+
+describe("extractDocumentDate — the place-prefixed slash letterhead", () => {
+  it("reads it, the way the dotted form has always been read", () => {
+    const letter = "Caorle, 03/09/2016\n\nSpett.le cliente,";
+    expect(extractDocumentDate(letter, "dmy")).toBe("2016-09-03");
+    expect(extractDocumentDate(letter, "mdy")).toBe("2016-03-09");
+  });
+});
+
 describe("isMonthOnlyReading — was the day stated, or assumed", () => {
   // 2012-10-01 cannot be told from a genuine first once it is an ISO string,
   // so the question has to be asked of the raw reading.
