@@ -296,6 +296,24 @@ function toIsoDate(dayStr: string, monthStr: string, yearStr: string): string | 
  * A model that answered with a sentence therefore contributes nothing rather
  * than a wrong date.
  */
+/**
+ * True when a reading names a month but no day, so its ISO form is the first of
+ * that month by convention rather than because the document said so.
+ *
+ * `normalizeDocumentDate` cannot express this in its return value — 2012-10-01
+ * is indistinguishable from a genuine first — so the caller asks separately
+ * when the difference matters. It matters in exactly one place: a letterhead
+ * that prints only a month must not outrank a labelled full date in the same
+ * month found in the body.
+ */
+export function isMonthOnlyReading(value: string): boolean {
+  const text = value.trim();
+  return (
+    /^(?:i[mn][ \t]+)?[A-Za-zÄÖÜäöü.]{3,}[ \t]+\d{4}$/i.test(text) ||
+    /^\d{1,2}[/.-]\d{4}$/.test(text)
+  );
+}
+
 export function normalizeDocumentDate(
   value: string,
   convention: DateConvention = "dmy",
@@ -315,8 +333,10 @@ export function normalizeDocumentDate(
     if (month != null) return toIsoDate(dayMonth[1], String(month), dayMonth[3]);
   }
 
-  // "August 23, 2026" — a spelled-out month, then the day.
-  const monthDay = /^([A-Za-z]{3,})\.?[ \t]+(\d{1,2})(?:st|nd|rd|th)?,?[ \t]+(\d{4})$/.exec(text);
+  // "August 23, 2026" / "März 8, 2020" — a spelled-out month, then the day.
+  const monthDay = /^([A-Za-zÄÖÜäöü.]{3,})\.?[ \t]+(\d{1,2})(?:st|nd|rd|th)?,?[ \t]+(\d{4})$/.exec(
+    text,
+  );
   if (monthDay) {
     const month = monthFromName(monthDay[1]);
     if (month != null) return toIsoDate(monthDay[2], String(month), monthDay[3]);
@@ -326,6 +346,31 @@ export function normalizeDocumentDate(
   // giving a usable answer, and refusing it would be pedantry.
   const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
   if (iso) return toIsoDate(iso[3], iso[2], iso[1]);
+
+  // "Oktober 2012", "Im Oktober 2012" — a month with no day.
+  //
+  // The letterhead of a statement or an annual notice frequently dates itself
+  // to the month alone, and the model copies that faithfully because it was
+  // told to. The text scan has always resolved this shape to the first of the
+  // month (BARE_MONTHYEAR_RE); without it here the same printed date produced
+  // a date through one reader and null through the other, which is not a
+  // defensible difference.
+  //
+  // The leading "im"/"in" is the German letterhead phrasing ("Im Oktober
+  // 2012") and is part of what is printed, so the model returns it.
+  const monthYear = /^(?:i[mn][ \t]+)?([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4})$/i.exec(text);
+  if (monthYear) {
+    const month = monthFromName(monthYear[1]);
+    if (month != null) return toIsoDate("1", String(month), monthYear[2]);
+  }
+
+  // "10/2012" — a numeric month and a four-digit year. Unambiguous despite the
+  // slash: a four-digit second component cannot be a day, so no convention is
+  // needed.
+  const numericMonthYear = /^(\d{1,2})[/.-](\d{4})$/.exec(text);
+  if (numericMonthYear) {
+    return toIsoDate("1", numericMonthYear[1], numericMonthYear[2]);
+  }
 
   // Numeric with a slash or hyphen: the only shape whose reading is not
   // settled by the characters themselves. Tried last so it can never take a

@@ -5,6 +5,7 @@ import {
   detectSubjectPersonPersonalDeductionReview,
   extractDocumentDate,
   inferDateConvention,
+  isMonthOnlyReading,
   normalizeDocumentDate,
   extractDocumentNumber,
   extractReferenceNumberTags,
@@ -544,6 +545,63 @@ describe("normalizeDocumentDate — English forms and the ambiguous one", () => 
 
   it("refuses an English month that is not one", () => {
     expect(normalizeDocumentDate("Smarch 23, 2026")).toBeNull();
+  });
+});
+
+describe("normalizeDocumentDate — a letterhead that names only a month", () => {
+  // The reported failure: the model read "Oktober 2012" off the page, the
+  // anchor confirmed it, and the conversion returned null — so a document
+  // whose date was found still ended up without one. The text scan has always
+  // resolved this shape to the first of the month, which made the two readers
+  // disagree about the same printed date for no defensible reason.
+  it("resolves a month and year to the first of that month", () => {
+    expect(normalizeDocumentDate("Oktober 2012")).toBe("2012-10-01");
+    expect(normalizeDocumentDate("Juli 2024")).toBe("2024-07-01");
+  });
+
+  it("accepts the German letterhead phrasing", () => {
+    // "Im Oktober 2012" is what is printed, and the model was told to copy
+    // what is printed.
+    expect(normalizeDocumentDate("Im Oktober 2012")).toBe("2012-10-01");
+    expect(normalizeDocumentDate("im Oktober 2012")).toBe("2012-10-01");
+  });
+
+  it("accepts an English month", () => {
+    expect(normalizeDocumentDate("October 2012")).toBe("2012-10-01");
+  });
+
+  it("accepts a numeric month and a four-digit year", () => {
+    // No convention needed: a four-digit second component cannot be a day.
+    expect(normalizeDocumentDate("10/2012")).toBe("2012-10-01");
+  });
+
+  it("reads a month name carrying an umlaut", () => {
+    // The month-first pattern was ASCII-only, so every German month with an
+    // umlaut failed in that position.
+    expect(normalizeDocumentDate("März 2020")).toBe("2020-03-01");
+    expect(normalizeDocumentDate("März 8, 2020")).toBe("2020-03-08");
+  });
+
+  it("refuses a word that is not a month", () => {
+    expect(normalizeDocumentDate("Rechnung 2012")).toBeNull();
+    expect(normalizeDocumentDate("Sehr geehrte")).toBeNull();
+  });
+});
+
+describe("isMonthOnlyReading — was the day stated, or assumed", () => {
+  // 2012-10-01 cannot be told from a genuine first once it is an ISO string,
+  // so the question has to be asked of the raw reading.
+  it("recognises the shapes that name no day", () => {
+    expect(isMonthOnlyReading("Oktober 2012")).toBe(true);
+    expect(isMonthOnlyReading("Im Oktober 2012")).toBe(true);
+    expect(isMonthOnlyReading("10/2012")).toBe(true);
+  });
+
+  it("does not fire on a reading that states one", () => {
+    expect(isMonthOnlyReading("8. März 2020")).toBe(false);
+    expect(isMonthOnlyReading("24.04.2023")).toBe(false);
+    expect(isMonthOnlyReading("August 23, 2026")).toBe(false);
+    expect(isMonthOnlyReading("01.10.2012")).toBe(false);
   });
 });
 
