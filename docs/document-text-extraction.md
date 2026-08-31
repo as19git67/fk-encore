@@ -702,6 +702,57 @@ and folds the glyph pairs OCR confuses. Two consequences matter:
   model and the OCR disagree about exactly the glyphs this pipeline exists to
   repair. Demanding equality would reject precisely the answers worth having.
 
+### Asking about a document, not a letter
+
+The first version of the prompt opened *"This is the first page of a letter"*
+and asked for *"the date the sender put on this letter"*. That is the wrong
+question for a delivery note — and one answered it correctly with `null` while
+printing `Lieferdatum` twice on the page it was shown.
+
+It now names the shapes it might be seeing (letter, invoice, statement,
+delivery note, certificate) and asks for **the date this document was issued —
+the date a filing clerk would write on it**.
+
+What it deliberately does *not* do is enumerate document types with per-type
+rules. Those rules already exist, in the classify prompt, and a second
+catalogue would be a second thing to keep in step — the failure mode
+["the two readers keep drifting apart"](#the-two-readers-keep-drifting-apart)
+documents one level down. One word settles it: `Lieferdatum` is an
+administrative side-date on an ELStAM notice and the document's own date on a
+delivery note. No catalogue survives that; the classifier, which knows the
+type, resolves it.
+
+#### The exclusions are ranked, not absolute
+
+| tier | dates | why |
+| --- | --- | --- |
+| **never** | due date, period of validity, date of birth, the date of an earlier document being answered | belongs to something other than this document |
+| **last resort** | franking, printing, dispatch | a poor answer, but better than an empty field when the document prints nothing else |
+
+The second tier was a correction: the first draft refused franking dates
+outright. On a document that carries no other date, refusing it gains nothing
+and loses the only date there is.
+
+#### `date_label` is what makes that safe
+
+The model reports the caption it took the date from, or `null` when the date
+stood unlabelled. That turns the answer from a claim into a checkable one:
+
+- **no caption** → the document dating itself, which is what this stage exists
+  for;
+- **a caption** → weighable against what that caption means on this kind of
+  document, and a last-resort answer (`Freimachung`) is recognisable as one.
+
+It is bounded on both length and word count, because either alone lets prose
+through: `Rechnungsdatum` is one long word, `Date of issue` is three short ones,
+and a model explaining where it looked exceeds both.
+
+The wider point is the same division of labour the value already follows: the
+model reports **evidence**, the code does the reasoning. Which date wins on
+which kind of document is a question our code can answer, because it knows the
+type; where the date sits on the page and what it is called is a question only
+the model can answer.
+
 ### Ranking, not preference
 
 The vision reading does not simply win. A model reading a whole page has more
@@ -718,9 +769,69 @@ match is a weaker claim, not a disqualification, and it is the one reader that
 can still see the layout when OCR mangled the letterhead badly enough that
 nothing matches — which is when it is most useful.
 
+### The two ends of a document, never its middle
+
+A document dates itself at one of two ends: the letterhead of its first page,
+or beside the signature of its last. A contract is dated where it is signed.
+The pages next to those sometimes carry a continuation of either — a second
+sheet whose head repeats the dating, a signature block pushed onto its own
+final leaf.
+
+`letterheadSearchOrder` asks in that order, stopping at the first page that
+yields a date:
+
+```
+[ first, last, second, second-to-last ]
+```
+
+The **middle is never asked**. That is where a date is *most* likely to be
+something other than the document's own — a period, a deadline, a row in a
+table — so walking inward would raise the cost and the chance of a wrong answer
+together.
+
+| | calls |
+| --- | ---: |
+| page 1 answers | 1 |
+| nothing found, 26-page document | 4 |
+| walking every page | 26 |
+
+Four is the ceiling whatever the page count. Duplicates collapse for short
+documents: a three-page document's second page is also its second-to-last, and
+a one-page document is asked once.
+
+The prompt names both places rather than claiming to look at page 1 — the same
+instruction is sent for every page.
+
+The search runs **after** the page loop, not inside it, because the order the
+pages are wanted in is not the order they arrive in: page 2 is processed long
+before the last page but must only be asked once the last page has failed to
+answer. The rows of at most four pages are held for that, which is cheaper than
+a second pass over the rasters — and they are the resolver's corrected rows,
+which a re-read of the TSV would not be.
+
+`mergeLetterhead` combines the two and is deliberately **not** symmetric:
+
+- the **date** may come from either page, so a later one fills in what the
+  first lacked;
+- the **sender** and **language** may not. A last page carries a footer, a page
+  number and sometimes a second company's imprint, and taking a sender from
+  there would quietly replace the letterhead's name with whoever printed the
+  form.
+
+Each reading records the page it came from, so a signature date is visible as
+the weaker evidence it is: the letterhead dates the document, the signature
+dates the act of signing it, and those are usually but not always the same day.
+
+A page the time budget never reached is absent from the collection and skipped,
+so a truncated document falls back to whichever of its ends it did manage to
+read.
+
+Page 1 is asked even when a later page ends up supplying the date, because it
+is the only page whose *sender* can be trusted.
+
 ### Where it runs, and why it must
 
-Inside `text_extract`, on page 1 only. Anchoring needs the word boxes and the
+Inside `text_extract`. Anchoring needs the word boxes and the
 model needs the page raster; by the time `classify` runs, the temporary rasters
 are gone and the text has been flattened into reading order. The result is
 persisted (`documents.letterhead`, migration 0156) because the two are separate
@@ -845,6 +956,29 @@ missing: the German letterhead `im`, an English `October 2012`, and a numeric
 `10/2012` (unambiguous despite the slash — a four-digit second component cannot
 be a day). The month-first pattern was also ASCII-only, so every German month
 carrying an umlaut failed in that position.
+
+#### The two readers keep drifting apart
+
+Three missing dates in a row have had the same shape: the vision path knew a
+form the text scan did not, or the reverse.
+
+| form | scan | vision |
+| --- | --- | --- |
+| `Oktober 2012` | always read it | did not (fixed) |
+| `München, 05.03.2022` | always read it | did not (fixed) |
+| `Lieferdatum 2014-11-17` | did not (fixed) | always read it |
+
+The cause is structural, not a series of oversights: the two enumerate their
+date shapes independently — `collectDateCandidates` in anchored patterns,
+`normalizeDocumentDate` in a chain of `if`s — so a shape added to one is
+invisible to the other. Nothing fails when they disagree; the document just has
+no date, and only a spot check reveals which side was blind.
+
+ISO now reaches the anchored patterns, the table-cell reader and the column
+alignment. It needs no convention: a four-digit year cannot be a day.
+
+Worth folding into one table of shapes at some point, so a form added once is
+read everywhere.
 
 #### "Ort, Datum"
 

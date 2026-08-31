@@ -128,6 +128,22 @@ const DATE_ANCHOR_MONTHYEAR_PATTERNS: readonly RegExp[] = [
 // apply — an English "date of birth" is caught by its own entry below.
 const EN_DATE_LABEL = String.raw`(?:date\s+of\s+issue|issue\s+date|invoice\s+date|statement\s+date|entered\s+date|date)`;
 
+// "Lieferdatum   2014-11-17", "Datum: 2014-11-17" — an ISO date behind a
+// label. Unambiguous by construction: a four-digit year cannot be a day or a
+// month, so no convention is needed and the order cannot be misread.
+//
+// `normalizeDocumentDate` has read this shape from the start, so until now the
+// two readers disagreed about the same printed characters: a delivery note
+// whose "Lieferdatum" is written the ISO way had a date the vision path could
+// have used and the text scan could not see.
+const DATE_ANCHOR_ISO_PATTERNS: readonly RegExp[] = [
+  new RegExp(
+    String.raw`\b(?:\w*datum|${EN_DATE_LABEL})\b[ \t:]{0,80}(\d{4})-(\d{2})-(\d{2})\b`,
+    "gi",
+  ),
+  /\bvom\b[ \t:]{0,5}(\d{4})-(\d{2})-(\d{2})\b/gi,
+];
+
 // "Date of issue   August 23, 2026" — a spelled-out month, then the day. The
 // order is fixed by the month being a word, so this needs no convention.
 const DATE_ANCHOR_MONTHDAY_PATTERNS: readonly RegExp[] = [
@@ -419,6 +435,9 @@ function isDocumentDateLabel(cell: string): boolean {
 /** Numeric date anywhere inside a table cell. */
 const CELL_DATE_RE = /\b(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})\b/;
 
+/** ISO inside a table cell — "Lieferdatum" over "2014-11-17". */
+const CELL_ISO_DATE_RE = /\b(\d{4})-(\d{2})-(\d{2})\b/;
+
 /** Written-month date inside a table cell ("8. September 2017"). */
 const CELL_MONTHNAME_DATE_RE = /\b(\d{1,2})\.?[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4})\b/;
 
@@ -434,6 +453,13 @@ function splitCells(line: string): string[] {
 }
 
 function dateFromCell(cell: string): string | null {
+  // ISO first: unambiguous, and its four-digit year cannot be mistaken by the
+  // patterns below.
+  const iso8601 = CELL_ISO_DATE_RE.exec(cell);
+  if (iso8601) {
+    const iso = toIsoDate(iso8601[3], iso8601[2], iso8601[1]);
+    if (iso) return iso;
+  }
   const numeric = CELL_DATE_RE.exec(cell);
   if (numeric) {
     const iso = toIsoDate(numeric[1], numeric[2], numeric[3]);
@@ -512,6 +538,7 @@ const DATE_LABEL_WORD_RE = /\b[A-Za-zÄÖÜäöüß]*datum\b/gi;
 
 /** As CELL_DATE_RE / CELL_MONTHNAME_DATE_RE, but scanning for every match. */
 const LINE_DATE_RE = /\b(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})\b/g;
+const LINE_ISO_DATE_RE = /\b(\d{4})-(\d{2})-(\d{2})\b/g;
 const LINE_MONTHNAME_DATE_RE = /\b(\d{1,2})\.?[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4})\b/g;
 
 // A header cell has to look like a header. Without this a sentence that merely
@@ -528,12 +555,15 @@ const COLUMN_ALIGN_TOLERANCE = 12;
 /** Every date in `line`, with the character span it occupies. */
 function datesWithOffsets(line: string): { iso: string; start: number; end: number }[] {
   const out: { iso: string; start: number; end: number }[] = [];
-  for (const re of [LINE_DATE_RE, LINE_MONTHNAME_DATE_RE]) {
+  for (const re of [LINE_DATE_RE, LINE_ISO_DATE_RE, LINE_MONTHNAME_DATE_RE]) {
     re.lastIndex = 0;
     let m: RegExpExecArray | null;
     while ((m = re.exec(line)) !== null) {
-      const month = re === LINE_DATE_RE ? m[2] : String(monthFromName(m[2]) ?? 0);
-      const iso = toIsoDate(m[1], month, m[3]);
+      // ISO reverses the capture order; the other two share it.
+      const iso =
+        re === LINE_ISO_DATE_RE
+          ? toIsoDate(m[3], m[2], m[1])
+          : toIsoDate(m[1], re === LINE_DATE_RE ? m[2] : String(monthFromName(m[2]) ?? 0), m[3]);
       if (iso) out.push({ iso, start: m.index, end: m.index + m[0].length });
     }
   }
@@ -595,6 +625,7 @@ function extractAlignedColumnDate(text: string): string | null {
 /** Patterns that may decide the date anywhere in the document (see below). */
 const RANKED_PATTERN_COUNT =
   DATE_ANCHOR_PATTERNS.length +
+  DATE_ANCHOR_ISO_PATTERNS.length +
   DATE_ANCHOR_MONTHDAY_PATTERNS.length +
   DATE_ANCHOR_DAYMONTH_HYPHEN_PATTERNS.length +
   DATE_ANCHOR_AMBIGUOUS_PATTERNS.length +
@@ -713,6 +744,18 @@ function collectDateCandidates(
     while ((m = re.exec(text)) !== null) {
       if (isNonDocumentDateMatch(text, m) || isReferenceDateMatch(text, m)) continue;
       const iso = toIsoDate(m[1], m[2], m[3]);
+      if (iso) found.push({ iso, index: m.index, rank: own });
+    }
+  }
+  // ISO behind a label. Ranked directly after the dotted numeric form: both
+  // are a label plus digits, and neither needs interpreting.
+  for (const re of DATE_ANCHOR_ISO_PATTERNS) {
+    const own = rank++;
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      if (isNonDocumentDateMatch(text, m) || isReferenceDateMatch(text, m)) continue;
+      const iso = toIsoDate(m[3], m[2], m[1]);
       if (iso) found.push({ iso, index: m.index, rank: own });
     }
   }

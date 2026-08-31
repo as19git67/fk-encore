@@ -82,10 +82,14 @@ export interface DocumentLetterheadReading {
   value: string
   /** Whether the reading was found in the page's own OCR words. */
   located: boolean
+  /** The 1-based page it was read from, when recorded. */
+  page: number | null
 }
 
 export interface DocumentLetterhead {
   date: DocumentLetterheadReading | null
+  /** The caption the date was taken from, or null when it stood unlabelled. */
+  date_label: string | null
   sender: DocumentLetterheadReading | null
   /** ISO 639-1, as the model judged the page's prose. */
   language: string | null
