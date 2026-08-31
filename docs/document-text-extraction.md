@@ -846,6 +846,29 @@ missing: the German letterhead `im`, an English `October 2012`, and a numeric
 be a day). The month-first pattern was also ASCII-only, so every German month
 carrying an umlaut failed in that position.
 
+#### The two readers keep drifting apart
+
+Three missing dates in a row have had the same shape: the vision path knew a
+form the text scan did not, or the reverse.
+
+| form | scan | vision |
+| --- | --- | --- |
+| `Oktober 2012` | always read it | did not (fixed) |
+| `München, 05.03.2022` | always read it | did not (fixed) |
+| `Lieferdatum 2014-11-17` | did not (fixed) | always read it |
+
+The cause is structural, not a series of oversights: the two enumerate their
+date shapes independently — `collectDateCandidates` in anchored patterns,
+`normalizeDocumentDate` in a chain of `if`s — so a shape added to one is
+invisible to the other. Nothing fails when they disagree; the document just has
+no date, and only a spot check reveals which side was blind.
+
+ISO now reaches the anchored patterns, the table-cell reader and the column
+alignment. It needs no convention: a four-digit year cannot be a day.
+
+Worth folding into one table of shapes at some point, so a form added once is
+read everywhere.
+
 #### "Ort, Datum"
 
 A letter that names its place before dating itself — `München, 05.03.2022`,
