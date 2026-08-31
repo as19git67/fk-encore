@@ -303,6 +303,75 @@ def test_prompt_forbids_inferring_a_value(vision_llm):
     assert "never infer" in system
 
 
+def test_reports_the_caption_the_date_came_from(vision_llm):
+    # Evidence, not decoration: an unlabelled date is the document dating
+    # itself, a labelled one has to be weighed against what that caption means
+    # on this kind of document.
+    vision_llm.payload = {
+        "date": "2014-11-17",
+        "date_label": "Lieferdatum",
+        "sender": "Muster GmbH",
+        "language": "de",
+    }
+    assert _post_letterhead({"image_b64": PIXEL_B64}).json()["date_label"] == "Lieferdatum"
+
+
+def test_an_unlabelled_date_reports_no_caption(vision_llm):
+    vision_llm.payload = {"date": "24.04.2023", "date_label": None, "sender": None}
+    assert _post_letterhead({"image_b64": PIXEL_B64}).json()["date_label"] is None
+
+
+def test_a_caption_answered_as_a_sentence_is_not_a_caption(vision_llm):
+    # A caption is a caption. Anything longer is the model explaining itself,
+    # and storing it would put prose in the evidence field.
+    vision_llm.payload = {
+        "date": "24.04.2023",
+        "date_label": "The date printed at the top right of the letterhead block",
+        "sender": None,
+    }
+    assert _post_letterhead({"image_b64": PIXEL_B64}).json()["date_label"] is None
+
+
+def test_keeps_the_captions_that_actually_occur(vision_llm):
+    # The bound has to admit the real ones: one long German compound, and a
+    # short English phrase of three words.
+    for caption in ("Rechnungsdatum", "Date of issue", "Datum der Leistungserbringung"):
+        vision_llm.payload = {"date": "24.04.2023", "date_label": caption, "sender": None}
+        assert _post_letterhead({"image_b64": PIXEL_B64}).json()["date_label"] == caption
+
+
+def test_asks_about_a_document_not_a_letter(vision_llm):
+    # "The date the sender put on this letter" is the wrong question for a
+    # delivery note, which answered it correctly with null while printing
+    # "Lieferdatum" twice.
+    _post_letterhead({"image_b64": PIXEL_B64})
+    instruction = vision_llm.calls[0]["messages"][1]["content"][1]["text"].lower()
+    assert "delivery note" in instruction
+    assert "invoice" in instruction
+
+
+def test_asks_about_a_page_not_the_first_one(vision_llm):
+    # The same instruction is sent for the last page, where a contract is dated
+    # beside its signature. A prompt certain it is looking at page 1 describes
+    # a page the model is not being shown.
+    _post_letterhead({"image_b64": PIXEL_B64})
+    instruction = vision_llm.calls[0]["messages"][1]["content"][1]["text"].lower()
+    assert "a page from a document" in instruction
+    assert "signature" in instruction
+    assert "first page of a document" not in instruction
+
+
+def test_separates_never_from_last_resort(vision_llm):
+    # The exclusions are not equally absolute. A due date belongs to something
+    # else and is never the answer; a franking date is merely a poor one, and
+    # on a document printing nothing better it beats an empty field.
+    _post_letterhead({"image_b64": PIXEL_B64})
+    instruction = vision_llm.calls[0]["messages"][1]["content"][1]["text"]
+    assert "NEVER report" in instruction
+    assert "LAST RESORT" in instruction
+    assert "franking" in instruction.lower()
+
+
 def test_reports_the_document_language(vision_llm):
     # Used to break a tie when a numeric date's order is not settled by the
     # document's own numbers.

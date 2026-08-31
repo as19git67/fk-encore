@@ -588,6 +588,62 @@ describe("normalizeDocumentDate — a letterhead that names only a month", () =>
   });
 });
 
+describe("extractDocumentDate — an ISO date behind a label", () => {
+  // No anchored pattern handled ISO at all, in any language, behind any label
+  // — while normalizeDocumentDate has read it from the start. A delivery note
+  // whose "Lieferdatum" is written the ISO way therefore had a date the vision
+  // path could have used and the text scan could not see.
+  it("reads it after a German label", () => {
+    expect(extractDocumentDate("Lieferdatum   2014-11-17")).toBe("2014-11-17");
+    expect(extractDocumentDate("Datum: 2014-11-17")).toBe("2014-11-17");
+    expect(extractDocumentDate("Rechnung vom 2014-11-17")).toBe("2014-11-17");
+  });
+
+  it("reads it after an English label", () => {
+    expect(extractDocumentDate("Date of issue 2014-11-17")).toBe("2014-11-17");
+  });
+
+  it("needs no convention — a four-digit year cannot be a day", () => {
+    expect(extractDocumentDate("Datum: 2014-11-17", "mdy")).toBe("2014-11-17");
+    expect(extractDocumentDate("Datum: 2014-11-17", "dmy")).toBe("2014-11-17");
+  });
+
+  it("still refuses someone else's date and an unlabelled one", () => {
+    expect(extractDocumentDate("Geburtsdatum 1950-04-12")).toBeNull();
+    expect(extractDocumentDate("Referenz 2014-11-17")).toBeNull();
+  });
+
+  it("reads it from a table, where a delivery note puts it", () => {
+    expect(extractDocumentDate("Datum\n2014-11-17")).toBe("2014-11-17");
+    const row = ["Kunden-Nr.   Datum        Betrag", "4711         2014-11-17   20,11"].join("\n");
+    expect(extractDocumentDate(row)).toBe("2014-11-17");
+  });
+
+  it("does not take an ISO date printed under a different column", () => {
+    // The column alignment must not degrade into "any date on the next line",
+    // exactly as for the dotted form.
+    const text = [
+      "Datum        Kunden-Nr.                     Betrag",
+      "             4711            2014-11-17    20,11",
+    ].join("\n");
+    expect(extractDocumentDate(text)).toBeNull();
+  });
+
+  it("reads a delivery note whose only dates are labelled and ISO", () => {
+    // The reported document, with invented values.
+    const note = [
+      "# 3620",
+      "LIEFERSCHEIN",
+      "Kundennummer   111111DE   Lieferadresse   1",
+      "Lieferdatum   2014-11-17   Max Beispiel",
+      "Lieferscheinnummer 3000250482   Beispielstr. 10a",
+      "Bestellnummer   0000246960",
+      "Bestelldatum   2014-11-17",
+    ].join("\n");
+    expect(extractDocumentDate(note)).toBe("2014-11-17");
+  });
+});
+
 describe("normalizeDocumentDate — a letter that names its place first", () => {
   // "Ort, Datum" is the letterhead convention across most of Europe, and the
   // model returns the place because it was told to copy what is printed. The

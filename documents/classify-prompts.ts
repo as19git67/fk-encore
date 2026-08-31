@@ -431,14 +431,43 @@ und weiche bei klarer Abweichung ab.`;
  * Each bullet says what the field is NOT, because that is where the failures
  * were: the due date instead of the letter's date, the addressee instead of
  * the sender.
+ *
+ * It asks about a *document*, not a letter. Asking for "the date the sender put
+ * on this letter" is the wrong question for a delivery note, and a delivery
+ * note answered it correctly with null while printing "Lieferdatum" twice.
+ *
+ * It also asks about *a page*, not the first one, and names both places a date
+ * lives: the letterhead of a first page and the signature of a last one. A
+ * contract is dated where it is signed, and a prompt certain it is looking at
+ * page 1 describes a page the model is not being shown.
+ *
+ * The exclusions are in two tiers, because they are not equally absolute. A
+ * due date or a date of birth belongs to something other than this document and
+ * is never the answer. A franking or printing date is merely a *poor* answer —
+ * on a document that prints nothing else it is the best available one, and
+ * refusing it leaves the field empty for no gain.
+ *
+ * `date_label` is what makes that safe, and it is the reason this asks for a
+ * fourth field at all: the model reports the caption it took the date from, so
+ * a fallback is recognisable as one and a wrong choice is diagnosable instead
+ * of merely wrong. It also keeps the type-dependent reasoning out of here —
+ * which date wins on which kind of document is already written down in the
+ * classify prompt, and duplicating it would give us two catalogues to keep in
+ * step. The one word that proves the point: "Lieferdatum" is an administrative
+ * side-date on an ELStAM notice and the document's own date on a delivery note.
  */
 export const LETTERHEAD_SYSTEM_PROMPT = `You read printed correspondence and report what is printed on it. Copy values exactly as printed, character for character. Never translate, reformat, complete or correct a value. Never infer a value that is not visible: report null instead.`;
 
-export const LETTERHEAD_INSTRUCTION_PROMPT = `This is the first page of a letter. Report two things that are usually printed without any label naming them.
-1. date: the date the sender put on this letter. It is normally in the letterhead, often alone on its line at the top right, above the salutation. It is NOT a due date, a period of validity, a date of birth, a franking or printing date, or the date of an earlier letter being answered. Copy it exactly as printed, in the document's own format.
-2. sender: the organisation or person who WROTE the letter, as printed in the letterhead, logo block or return address. It is NOT the addressee whose name appears in the address window. Copy the name only, without its street or postcode. A letterhead is often set across two lines - report the whole name, not the line carrying the legal form.
-3. language: the ISO 639-1 code of the language the letter is WRITTEN in ("de", "en", ...) - judged from its prose, not from the sender's country or the format of its dates. A letter can be written in one language and dated in another's convention.
-Reply as JSON: {"date": "...", "sender": "...", "language": ".."}. Use null for anything not visibly printed.`;
+export const LETTERHEAD_INSTRUCTION_PROMPT = `This is a page from a document - a letter, an invoice, a statement, a delivery note, a certificate.
+1. date: the date this document was issued by whoever sent it - the date a filing clerk would write on it. Copy it exactly as printed, in the document's own format.
+   It is often printed with no label at all. On a first page it stands near the top, alone on its line, above the salutation; on a last page it stands next to a signature.
+   NEVER report: a due date or payment deadline, a period of validity ("gueltig ab", "valid from"), a date of birth, or the date of an earlier document being answered ("Ihr Schreiben vom"). Those describe something other than this document.
+   LAST RESORT: a franking, printing or dispatch date is a poor answer but an acceptable one when the document prints nothing better. Report it rather than null, and name it in date_label so it can be recognised as the fallback it is.
+   If several dates could be meant, choose the one that names this document's own issue - and put its caption in date_label so the choice can be checked.
+2. date_label: the caption printed next to the date you reported ("Rechnungsdatum", "Lieferdatum", "Date of issue", "Freimachung"), copied exactly. Use null when the date stands with no caption.
+3. sender: the organisation or person who WROTE the document, as printed in the letterhead, logo block or return address. It is NOT the addressee whose name appears in the address window. Copy the name only, without its street or postcode. A letterhead is often set across two lines - report the whole name, not the line carrying the legal form.
+4. language: the ISO 639-1 code of the language the document is WRITTEN in ("de", "en", ...) - judged from its prose, not from the sender's country or the format of its dates. A document can be written in one language and dated in another's convention.
+Reply as JSON: {"date": "...", "date_label": "...", "sender": "...", "language": ".."}. Use null for anything not visibly printed.`;
 
 export interface ClassifyPromptsPayload {
   classify_system: string;

@@ -2404,21 +2404,31 @@ LETTERHEAD_SYSTEM_PROMPT = (
 )
 
 LETTERHEAD_INSTRUCTION = (
-    "This is the first page of a letter. Report two things that are usually "
-    "printed without any label naming them.\n"
-    "1. date: the date the sender put on this letter. It is normally in the "
-    "letterhead, often alone on its line at the top right, above the "
-    "salutation. It is NOT a due date, a period of validity, a date of birth, "
-    "a franking or printing date, or the date of an earlier letter being "
-    "answered. Copy it exactly as printed, in the document's own format.\n"
-    "2. sender: the organisation or person who WROTE the letter, as printed in "
-    "the letterhead, logo block or return address. It is NOT the addressee "
+    "This is a page from a document - a letter, an invoice, a "
+    "statement, a delivery note, a certificate.\n"
+    "1. date: the date this document was issued by whoever sent it - the date "
+    "a filing clerk would write on it. Copy it exactly as printed, in the "
+    "document's own format. It is often printed with no label at all. On a "
+    "first page it stands near the top, alone on its line, above the "
+    "salutation; on a last page it stands next to a signature.\n"
+    "   NEVER report: a due date or payment deadline, a period of validity, a "
+    "date of birth, or the date of an earlier document being answered. Those "
+    "describe something other than this document.\n"
+    "   LAST RESORT: a franking, printing or dispatch date is a poor answer "
+    "but an acceptable one when the document prints nothing better. Report it "
+    "rather than null, and name it in date_label.\n"
+    "2. date_label: the caption printed next to the date you reported "
+    '("Rechnungsdatum", "Date of issue"), copied exactly. Use null when the '
+    "date stands with no caption.\n"
+    "3. sender: the organisation or person who WROTE the document, as printed "
+    "in the letterhead, logo block or return address. It is NOT the addressee "
     "whose name appears in the address window. Copy the name only, without its "
     "street or postcode.\n"
-    "3. language: the ISO 639-1 code of the language the letter is WRITTEN in "
-    '("de", "en", ...) - judged from its prose, not from the sender\'s country.\n'
-    'Reply as JSON: {"date": "...", "sender": "...", "language": ".."}. Use '
-    "null for anything not visibly printed."
+    "4. language: the ISO 639-1 code of the language the document is WRITTEN "
+    'in ("de", "en", ...) - judged from its prose, not from the sender\'s '
+    "country or the format of its dates.\n"
+    'Reply as JSON: {"date": "...", "date_label": "...", "sender": "...", '
+    '"language": ".."}. Use null for anything not visibly printed.'
 )
 
 LETTERHEAD_RESPONSE_SCHEMA: dict[str, Any] = {
@@ -2427,6 +2437,7 @@ LETTERHEAD_RESPONSE_SCHEMA: dict[str, Any] = {
         "type": "object",
         "properties": {
             "date": {"type": ["string", "null"]},
+            "date_label": {"type": ["string", "null"]},
             "sender": {"type": ["string", "null"]},
             "language": {"type": ["string", "null"]},
         },
@@ -2460,6 +2471,11 @@ class VisionLetterheadRequest(BaseModel):
 
 class VisionLetterheadResponse(BaseModel):
     date: str | None
+    # The caption the date was taken from, or None when it stands unlabelled.
+    # Turns the answer from a claim into a checkable one: an unlabelled date is
+    # the letterhead dating itself, a labelled one can be weighed against what
+    # that label means on this kind of document.
+    date_label: str | None = None
     sender: str | None
     # ISO 639-1, used to disambiguate a numeric date whose order the document's
     # own numbers do not settle. Advisory only - see inferDateConvention.
@@ -2538,16 +2554,31 @@ async def vision_letterhead(req: VisionLetterheadRequest) -> VisionLetterheadRes
 
     elapsed_ms = int((time.monotonic() - t0) * 1000)
     date, sender = field("date"), field("sender")
+    # A caption is a caption, not a sentence. Bounded on both length and word
+    # count, because either alone lets prose through: "Rechnungsdatum" is one
+    # long word and "Date of issue" is three short ones, while a model
+    # explaining where it looked exceeds both.
+    raw_label = field("date_label")
+    date_label = (
+        raw_label
+        if raw_label and len(raw_label) <= 40 and len(raw_label.split()) <= 4
+        else None
+    )
     # A language is a code, not prose: anything longer is the model answering a
     # different question ("German business letter") and is not usable as one.
     raw_language = field("language")
     language = raw_language[:5].lower() if raw_language and len(raw_language) <= 20 else None
     log.info(
-        "vision letterhead: date=%s sender=%s language=%s time=%dms",
-        "yes" if date else "no", "yes" if sender else "no", language or "-", elapsed_ms,
+        "vision letterhead: date=%s label=%s sender=%s language=%s time=%dms",
+        "yes" if date else "no",
+        "yes" if date_label else "-",
+        "yes" if sender else "no",
+        language or "-",
+        elapsed_ms,
     )
     return VisionLetterheadResponse(
         date=date,
+        date_label=date_label,
         sender=sender,
         language=language,
         model=LLM_MODEL_PATH.name,

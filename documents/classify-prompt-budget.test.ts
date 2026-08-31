@@ -81,6 +81,30 @@ describe("classifier prompt budget", () => {
     );
   });
 
+  it("keeps the letterhead prompt generic and its exclusions ranked", () => {
+    // Two properties that took a wrong answer each to learn, and that a
+    // reworded prompt could quietly drop.
+    const instruction = CLASSIFY_PROMPTS.letterhead_instruction;
+
+    // Not "letter": that is the wrong question for a delivery note, which
+    // answered it correctly with null while printing "Lieferdatum" twice.
+    expect(instruction).toContain("delivery note");
+
+    // The exclusions are not equally absolute. A due date belongs to something
+    // else; a franking date is merely a poor answer, and on a document that
+    // prints nothing better it beats an empty field.
+    expect(instruction).toContain("NEVER report");
+    expect(instruction).toContain("LAST RESORT");
+
+    // The caption is what makes a fallback recognisable as one.
+    expect(instruction).toContain("date_label");
+
+    // Not "the first page": the same prompt is sent for the last page, where a
+    // contract is dated beside its signature.
+    expect(instruction).toContain("a page from a document");
+    expect(instruction).toContain("signature");
+  });
+
   it("keeps the hints from dwarfing the slugs they disambiguate", () => {
     // Hints cost several times what the slug + name list costs. A hint earns
     // its place by resolving a confusion that actually happens; prose that

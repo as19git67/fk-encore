@@ -620,8 +620,9 @@ export const MOCK_DOCUMENT_DETAIL: DocumentDetail = {
     'STADTWERKE MÜNCHEN GmbH\nRechnung Nr. 2024-03-1156\nKunden-Nr.: 123456\nAbrechnungszeitraum: 01.03.2024 - 31.03.2024\nVerbrauch: 312 kWh\nGesamtbetrag: 98,40 EUR\n\nBitte überweisen Sie den Betrag bis zum 10.04.2024...',
   // One located and one not, so the story shows both states of the badge.
   letterhead: {
-    date: { value: '15. März 2024', located: true },
-    sender: { value: 'Muster Stadtwerke GmbH', located: false },
+    date: { value: '15. März 2024', located: true, page: 1 },
+    date_label: null,
+    sender: { value: 'Muster Stadtwerke GmbH', located: false, page: 1 },
     language: 'de',
   },
   tax_reviewed: false,

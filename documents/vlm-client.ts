@@ -162,6 +162,8 @@ export async function assignFields(
 
 export interface VlmLetterhead {
   date: string | null;
+  /** The caption the date was taken from, or null when it stands unlabelled. */
+  date_label: string | null;
   sender: string | null;
   /** ISO 639-1, as the model judged the letter's prose. Advisory. */
   language: string | null;

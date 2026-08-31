@@ -334,10 +334,31 @@ export interface AiPickPhotoScore {
 export interface LetterheadReading {
   value: string;
   bbox: { left: number; top: number; right: number; bottom: number } | null;
+  /**
+   * The 1-based page the reading came from.
+   *
+   * A date lives in one of two places: the letterhead of the first page or
+   * beside the signature of the last. Recording which one answered makes a
+   * signature date recognisable as the weaker evidence it is — the letterhead
+   * dates the document, the signature dates the act of signing it, and they
+   * are usually but not always the same day.
+   */
+  page?: number;
 }
 
 export interface DocumentLetterhead {
   date: LetterheadReading | null;
+  /**
+   * The caption the model took the date from ("Rechnungsdatum", "Lieferdatum"),
+   * or null when it stood unlabelled.
+   *
+   * Evidence, not a value: an unlabelled date is the document dating itself,
+   * which is what the vision stage is for; a labelled one can be weighed
+   * against what that caption means on this kind of document. It also makes a
+   * last-resort answer — a franking date, taken because nothing better was
+   * printed — recognisable as one.
+   */
+  date_label?: string | null;
   sender: LetterheadReading | null;
   /**
    * ISO 639-1 code of the language the page is written in, as the vision model

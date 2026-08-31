@@ -193,6 +193,8 @@ export function rankReadings<T>(readings: readonly Reading<T>[]): Reading<T> | n
 export async function readLetterheadForPage(options: {
   pageImagePath: string;
   rows: readonly (readonly OcrWord[])[];
+  /** 1-based, recorded on each reading so a later page is recognisable. */
+  page: number;
   log: (msg: string) => void;
 }): Promise<DocumentLetterhead | null> {
   let answer: VlmLetterhead;
@@ -219,21 +221,80 @@ export async function readLetterheadForPage(options: {
     // below anything the page confirms. Dropping it here would throw away the
     // one reader that can see the layout whenever OCR mangled the letterhead
     // badly enough that nothing matches — which is when it is most useful.
-    return { value: value.trim(), bbox: found?.bbox ?? null };
+    return { value: value.trim(), bbox: found?.bbox ?? null, page: options.page };
   };
 
   const result: DocumentLetterhead = {
     date: locate(answer.date),
+    date_label: answer.date_label ?? null,
     sender: locate(answer.sender),
     language: answer.language ?? null,
   };
   // The values are the document's own content, so only whether each was found
   // and whether the page confirmed it is logged — never what it said.
   options.log(
-    `letterhead: date=${describe(result.date)}, sender=${describe(result.sender)}, ` +
+    `letterhead p${options.page}: date=${describe(result.date)}` +
+      `${result.date_label ? " (labelled)" : ""}, sender=${describe(result.sender)}, ` +
       `language=${result.language ?? "-"}, ${answer.processing_ms}ms`,
   );
   return result;
+}
+
+/**
+ * Which pages to ask about, in the order to ask, as 0-based indices.
+ *
+ * A document dates itself at one of two ends: the letterhead of its first page
+ * or beside the signature of its last. The two after those are the pages that
+ * sometimes carry a continuation of either — a second sheet whose head repeats
+ * the dating, a signature block pushed onto its own final leaf.
+ *
+ *     [ first, last, second, second-to-last ]
+ *
+ * The middle of a document is never asked. That is where a date is *most*
+ * likely to be something other than the document's own — a period, a deadline,
+ * a row in a table — so walking inward would raise the cost and the chance of
+ * a wrong answer together. Four calls is the ceiling whatever the page count,
+ * and a 26-page document costs at most four rather than 26.
+ *
+ * Duplicates fall out for short documents: a three-page document's second page
+ * is also its second-to-last, and a one-page document is asked once.
+ */
+export function letterheadSearchOrder(pageCount: number): number[] {
+  if (pageCount <= 0) return [];
+  const wanted = [0, pageCount - 1, 1, pageCount - 2];
+  const seen = new Set<number>();
+  return wanted.filter((i) => {
+    if (i < 0 || i >= pageCount || seen.has(i)) return false;
+    seen.add(i);
+    return true;
+  });
+}
+
+/**
+ * Combine the readings of two pages, first page first.
+ *
+ * Not symmetric, and the asymmetry is the point. The **date** may legitimately
+ * come from either — the letterhead of page 1 or the signature of the last —
+ * so the later page fills it in when the first had none. The **sender** and
+ * the **language** may not: a last page carries a footer, a page number and
+ * sometimes a second company's imprint, and taking a sender from there would
+ * quietly replace the letterhead's name with whoever printed the form.
+ *
+ * So: everything from the earlier reading survives, and the later one may only
+ * supply a date that was missing.
+ */
+export function mergeLetterhead(
+  first: DocumentLetterhead | null,
+  later: DocumentLetterhead | null,
+): DocumentLetterhead | null {
+  if (!first) return later;
+  if (!later) return first;
+  if (first.date) return first;
+  return {
+    ...first,
+    date: later.date,
+    date_label: later.date_label ?? null,
+  };
 }
 
 function describe(reading: LetterheadReading | null): string {

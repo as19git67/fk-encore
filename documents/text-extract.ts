@@ -68,7 +68,11 @@ import {
 import { tesseractEnv } from "./tesseract-env";
 import { renderPageWithSpacing } from "./pdf-text-layout";
 import { DOCUMENT_NUMBER_RE } from "./metadata-extract";
-import { readLetterheadForPage } from "./letterhead";
+import {
+  letterheadSearchOrder,
+  mergeLetterhead,
+  readLetterheadForPage,
+} from "./letterhead";
 import type { DocumentLetterhead } from "../db/schema";
 
 // pdf-parse is CJS and its default import pulls in a debug routine that
@@ -812,6 +816,11 @@ async function ocrPdf(
     let firstPagePath: string | null = null;
     let letterhead: DocumentLetterhead | null = null;
     let letterheadMs = 0;
+    const letterheadWanted = new Set(letterheadSearchOrder(entries.length));
+    const letterheadPages = new Map<
+      number,
+      { pageImagePath: string; rows: OcrWord[][] }
+    >();
     const started = Date.now();
     let pagesOcred = 0;
     for (let i = 0; i < entries.length; i++) {
@@ -914,27 +923,19 @@ async function ocrPdf(
         // words carry it), and a deployment without a projector gets a 503 on
         // the first round trip and moves on. The one thing it does require is
         // the TSV, which is where the word boxes come from.
-        if (i === 0 && layoutStep.value.rows.length > 0) {
-          const step = await timed(() =>
-            readLetterheadForPage({
-              pageImagePath: pagePath,
-              // The rows the layout step ends with, corrections included. The
-              // resolver has often just repaired the letterhead the model is
-              // about to read — anchoring against the raw TSV would compare
-              // the answer with text the pipeline itself no longer believes,
-              // and would fail exactly on the badly-read letterheads where a
-              // located reading is worth the most.
-              rows: layoutStep.value.rows,
-              log,
-            }),
-          );
-          letterhead = step.value;
-          // Reported as its own segment rather than folded into `vlm`. The
-          // timing line reads as a disjoint breakdown of the total, and this
-          // is now the one vision call that runs with the span resolver off —
-          // counting it twice would make `vlm` overlap `letterhead` and stop
-          // the segments from summing.
-          letterheadMs = step.ms;
+        // Remember the pages the letterhead search may want, with the rows the
+        // layout step ends with — corrections included. The resolver has often
+        // just repaired the letterhead the model is about to read, and
+        // anchoring against the raw TSV would compare the answer with text the
+        // pipeline itself no longer believes.
+        //
+        // Collected here and asked AFTER the loop, because the order they are
+        // wanted in is not the order they arrive in: page 2 is processed long
+        // before the last page but must only be asked once the last page has
+        // failed to answer. Holding the rows of at most four pages is cheaper
+        // than a second pass over the rasters.
+        if (letterheadWanted.has(i) && layoutStep.value.rows.length > 0) {
+          letterheadPages.set(i, { pageImagePath: pagePath, rows: layoutStep.value.rows });
         }
         const pageText = layoutStep.value.text;
         confidenceSum += layoutStep.value.confidenceSum;
@@ -989,6 +990,24 @@ async function ocrPdf(
         log(`recovered document-number marker via sparse-text fallback in ${step.ms}ms`);
         text = `${step.value}\n\n${text}`.trim();
       }
+    }
+
+    // The letterhead search: the two ends of the document, then the two pages
+    // next to them, stopping at the first page that yields a date.
+    //
+    // Page 1 is always asked even when a later page ends up supplying the
+    // date, because it is the only page whose sender can be trusted —
+    // `mergeLetterhead` will not take one from anywhere else. A page the time
+    // budget never reached is simply absent from the map and skipped.
+    for (const index of letterheadSearchOrder(entries.length)) {
+      const candidate = letterheadPages.get(index);
+      if (!candidate) continue;
+      const step = await timed(() =>
+        readLetterheadForPage({ ...candidate, page: index + 1, log }),
+      );
+      letterheadMs += step.ms;
+      letterhead = mergeLetterhead(letterhead, step.value);
+      if (letterhead?.date) break;
     }
 
     // The summary line. Names every stage's share so "OCR was slow" can be
