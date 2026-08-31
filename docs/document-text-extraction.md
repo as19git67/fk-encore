@@ -769,9 +769,46 @@ match is a weaker claim, not a disqualification, and it is the one reader that
 can still see the layout when OCR mangled the letterhead badly enough that
 nothing matches — which is when it is most useful.
 
+### First page and last page — not first to last
+
+A document dates itself in one of **two** places: the letterhead of its first
+page, or beside the signature of its last. A contract is dated where it is
+signed.
+
+The pages between are body text, and that is where a date is *most* likely to
+be something other than the document's own — a period, a deadline, a row in a
+table. Walking them in order would raise cost and the chance of a wrong answer
+at the same time. So the search is first-and-last:
+
+| | calls |
+| --- | ---: |
+| page 1 answers | 1 |
+| page 1 has no date, 26-page document | 2 |
+| walking every page | 26 |
+
+The last page is asked **only** when page 1 produced no date, and the prompt
+names both places rather than claiming to look at page 1 — the same instruction
+is sent for both.
+
+`mergeLetterhead` combines the two and is deliberately **not** symmetric:
+
+- the **date** may come from either page, so a later one fills in what the
+  first lacked;
+- the **sender** and **language** may not. A last page carries a footer, a page
+  number and sometimes a second company's imprint, and taking a sender from
+  there would quietly replace the letterhead's name with whoever printed the
+  form.
+
+Each reading records the page it came from, so a signature date is visible as
+the weaker evidence it is: the letterhead dates the document, the signature
+dates the act of signing it, and those are usually but not always the same day.
+
+A truncated document never reaches its last page and simply gets the one call —
+the same answer it would have got before.
+
 ### Where it runs, and why it must
 
-Inside `text_extract`, on page 1 only. Anchoring needs the word boxes and the
+Inside `text_extract`. Anchoring needs the word boxes and the
 model needs the page raster; by the time `classify` runs, the temporary rasters
 are gone and the text has been flattened into reading order. The result is
 persisted (`documents.letterhead`, migration 0156) because the two are separate
