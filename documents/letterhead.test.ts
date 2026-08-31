@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { anchor, mergeLetterhead, rankReadings, type Reading } from "./letterhead";
+import {
+  anchor,
+  letterheadSearchOrder,
+  mergeLetterhead,
+  rankReadings,
+  type Reading,
+} from "./letterhead";
 import type { OcrWord } from "./ocr-layout";
 
 /** A row of words laid out left to right at a given height. */
@@ -143,13 +149,13 @@ describe("mergeLetterhead — the first page and the last", () => {
   it("keeps the first page's date and never asks again", () => {
     const first = { date: reading("24.04.2023", 1), sender: reading("Muster AG", 1), language: "de" };
     const later = { date: reading("01.01.1999", 9), sender: null, language: null };
-    expect(mergeLetterhead(first, later).date?.value).toBe("24.04.2023");
+    expect(mergeLetterhead(first, later)?.date?.value).toBe("24.04.2023");
   });
 
   it("takes a signature date when the letterhead had none", () => {
     const first = { date: null, sender: reading("Muster AG", 1), language: "de" };
     const later = { date: reading("12.05.2016", 9), sender: null, language: null };
-    const merged = mergeLetterhead(first, later);
+    const merged = mergeLetterhead(first, later)!;
     expect(merged.date?.value).toBe("12.05.2016");
     expect(merged.date?.page).toBe(9);
   });
@@ -160,7 +166,7 @@ describe("mergeLetterhead — the first page and the last", () => {
     // letterhead's name with whoever printed the form.
     const first = { date: null, sender: reading("Muster AG", 1), language: "de" };
     const later = { date: reading("12.05.2016", 9), sender: reading("Druckerei Beispiel", 9), language: "en" };
-    const merged = mergeLetterhead(first, later);
+    const merged = mergeLetterhead(first, later)!;
     expect(merged.sender?.value).toBe("Muster AG");
     expect(merged.language).toBe("de");
   });
@@ -168,7 +174,7 @@ describe("mergeLetterhead — the first page and the last", () => {
   it("carries the label of whichever date it took", () => {
     const first = { date: null, date_label: "Fälligkeitsdatum", sender: null, language: null };
     const later = { date: reading("12.05.2016", 9), date_label: "Unterschrift", sender: null, language: null };
-    expect(mergeLetterhead(first, later).date_label).toBe("Unterschrift");
+    expect(mergeLetterhead(first, later)?.date_label).toBe("Unterschrift");
   });
 
   it("copes with either side being absent", () => {
@@ -176,5 +182,36 @@ describe("mergeLetterhead — the first page and the last", () => {
     expect(mergeLetterhead(null, only)).toBe(only);
     expect(mergeLetterhead(only, null)).toBe(only);
     expect(mergeLetterhead(null, null)).toBeNull();
+  });
+});
+
+
+describe("letterheadSearchOrder — which pages get asked", () => {
+  // 1-based for readability; the function returns indices.
+  const pages = (n: number) => letterheadSearchOrder(n).map((i) => i + 1);
+
+  it("asks the two ends first, then the two next to them", () => {
+    expect(pages(26)).toEqual([1, 26, 2, 25]);
+    expect(pages(4)).toEqual([1, 4, 2, 3]);
+  });
+
+  it("never asks the middle, however long the document", () => {
+    // Where a date is most likely to be something other than the document's
+    // own — a period, a deadline, a row in a table. Walking inward would raise
+    // cost and the chance of a wrong answer together.
+    expect(letterheadSearchOrder(200)).toHaveLength(4);
+    expect(pages(200)).toEqual([1, 200, 2, 199]);
+  });
+
+  it("collapses the duplicates a short document produces", () => {
+    // A three-page document's second page is also its second-to-last.
+    expect(pages(3)).toEqual([1, 3, 2]);
+    expect(pages(2)).toEqual([1, 2]);
+    expect(pages(1)).toEqual([1]);
+  });
+
+  it("returns nothing for a document with no pages", () => {
+    expect(letterheadSearchOrder(0)).toEqual([]);
+    expect(letterheadSearchOrder(-1)).toEqual([]);
   });
 });

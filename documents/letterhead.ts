@@ -241,6 +241,36 @@ export async function readLetterheadForPage(options: {
 }
 
 /**
+ * Which pages to ask about, in the order to ask, as 0-based indices.
+ *
+ * A document dates itself at one of two ends: the letterhead of its first page
+ * or beside the signature of its last. The two after those are the pages that
+ * sometimes carry a continuation of either — a second sheet whose head repeats
+ * the dating, a signature block pushed onto its own final leaf.
+ *
+ *     [ first, last, second, second-to-last ]
+ *
+ * The middle of a document is never asked. That is where a date is *most*
+ * likely to be something other than the document's own — a period, a deadline,
+ * a row in a table — so walking inward would raise the cost and the chance of
+ * a wrong answer together. Four calls is the ceiling whatever the page count,
+ * and a 26-page document costs at most four rather than 26.
+ *
+ * Duplicates fall out for short documents: a three-page document's second page
+ * is also its second-to-last, and a one-page document is asked once.
+ */
+export function letterheadSearchOrder(pageCount: number): number[] {
+  if (pageCount <= 0) return [];
+  const wanted = [0, pageCount - 1, 1, pageCount - 2];
+  const seen = new Set<number>();
+  return wanted.filter((i) => {
+    if (i < 0 || i >= pageCount || seen.has(i)) return false;
+    seen.add(i);
+    return true;
+  });
+}
+
+/**
  * Combine the readings of two pages, first page first.
  *
  * Not symmetric, and the asymmetry is the point. The **date** may legitimately

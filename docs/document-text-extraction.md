@@ -769,26 +769,45 @@ match is a weaker claim, not a disqualification, and it is the one reader that
 can still see the layout when OCR mangled the letterhead badly enough that
 nothing matches — which is when it is most useful.
 
-### First page and last page — not first to last
+### The two ends of a document, never its middle
 
-A document dates itself in one of **two** places: the letterhead of its first
-page, or beside the signature of its last. A contract is dated where it is
-signed.
+A document dates itself at one of two ends: the letterhead of its first page,
+or beside the signature of its last. A contract is dated where it is signed.
+The pages next to those sometimes carry a continuation of either — a second
+sheet whose head repeats the dating, a signature block pushed onto its own
+final leaf.
 
-The pages between are body text, and that is where a date is *most* likely to
-be something other than the document's own — a period, a deadline, a row in a
-table. Walking them in order would raise cost and the chance of a wrong answer
-at the same time. So the search is first-and-last:
+`letterheadSearchOrder` asks in that order, stopping at the first page that
+yields a date:
+
+```
+[ first, last, second, second-to-last ]
+```
+
+The **middle is never asked**. That is where a date is *most* likely to be
+something other than the document's own — a period, a deadline, a row in a
+table — so walking inward would raise the cost and the chance of a wrong answer
+together.
 
 | | calls |
 | --- | ---: |
 | page 1 answers | 1 |
-| page 1 has no date, 26-page document | 2 |
+| nothing found, 26-page document | 4 |
 | walking every page | 26 |
 
-The last page is asked **only** when page 1 produced no date, and the prompt
-names both places rather than claiming to look at page 1 — the same instruction
-is sent for both.
+Four is the ceiling whatever the page count. Duplicates collapse for short
+documents: a three-page document's second page is also its second-to-last, and
+a one-page document is asked once.
+
+The prompt names both places rather than claiming to look at page 1 — the same
+instruction is sent for every page.
+
+The search runs **after** the page loop, not inside it, because the order the
+pages are wanted in is not the order they arrive in: page 2 is processed long
+before the last page but must only be asked once the last page has failed to
+answer. The rows of at most four pages are held for that, which is cheaper than
+a second pass over the rasters — and they are the resolver's corrected rows,
+which a re-read of the TSV would not be.
 
 `mergeLetterhead` combines the two and is deliberately **not** symmetric:
 
@@ -803,8 +822,12 @@ Each reading records the page it came from, so a signature date is visible as
 the weaker evidence it is: the letterhead dates the document, the signature
 dates the act of signing it, and those are usually but not always the same day.
 
-A truncated document never reaches its last page and simply gets the one call —
-the same answer it would have got before.
+A page the time budget never reached is absent from the collection and skipped,
+so a truncated document falls back to whichever of its ends it did manage to
+read.
+
+Page 1 is asked even when a later page ends up supplying the date, because it
+is the only page whose *sender* can be trusted.
 
 ### Where it runs, and why it must
 
