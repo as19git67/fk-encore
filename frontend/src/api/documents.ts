@@ -86,6 +86,8 @@ export interface DocumentLetterheadReading {
 
 export interface DocumentLetterhead {
   date: DocumentLetterheadReading | null
+  /** The caption the date was taken from, or null when it stood unlabelled. */
+  date_label: string | null
   sender: DocumentLetterheadReading | null
   /** ISO 639-1, as the model judged the page's prose. */
   language: string | null

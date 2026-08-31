@@ -338,6 +338,17 @@ export interface LetterheadReading {
 
 export interface DocumentLetterhead {
   date: LetterheadReading | null;
+  /**
+   * The caption the model took the date from ("Rechnungsdatum", "Lieferdatum"),
+   * or null when it stood unlabelled.
+   *
+   * Evidence, not a value: an unlabelled date is the document dating itself,
+   * which is what the vision stage is for; a labelled one can be weighed
+   * against what that caption means on this kind of document. It also makes a
+   * last-resort answer — a franking date, taken because nothing better was
+   * printed — recognisable as one.
+   */
+  date_label?: string | null;
   sender: LetterheadReading | null;
   /**
    * ISO 639-1 code of the language the page is written in, as the vision model

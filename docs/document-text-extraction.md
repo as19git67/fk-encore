@@ -702,6 +702,57 @@ and folds the glyph pairs OCR confuses. Two consequences matter:
   model and the OCR disagree about exactly the glyphs this pipeline exists to
   repair. Demanding equality would reject precisely the answers worth having.
 
+### Asking about a document, not a letter
+
+The first version of the prompt opened *"This is the first page of a letter"*
+and asked for *"the date the sender put on this letter"*. That is the wrong
+question for a delivery note — and one answered it correctly with `null` while
+printing `Lieferdatum` twice on the page it was shown.
+
+It now names the shapes it might be seeing (letter, invoice, statement,
+delivery note, certificate) and asks for **the date this document was issued —
+the date a filing clerk would write on it**.
+
+What it deliberately does *not* do is enumerate document types with per-type
+rules. Those rules already exist, in the classify prompt, and a second
+catalogue would be a second thing to keep in step — the failure mode
+["the two readers keep drifting apart"](#the-two-readers-keep-drifting-apart)
+documents one level down. One word settles it: `Lieferdatum` is an
+administrative side-date on an ELStAM notice and the document's own date on a
+delivery note. No catalogue survives that; the classifier, which knows the
+type, resolves it.
+
+#### The exclusions are ranked, not absolute
+
+| tier | dates | why |
+| --- | --- | --- |
+| **never** | due date, period of validity, date of birth, the date of an earlier document being answered | belongs to something other than this document |
+| **last resort** | franking, printing, dispatch | a poor answer, but better than an empty field when the document prints nothing else |
+
+The second tier was a correction: the first draft refused franking dates
+outright. On a document that carries no other date, refusing it gains nothing
+and loses the only date there is.
+
+#### `date_label` is what makes that safe
+
+The model reports the caption it took the date from, or `null` when the date
+stood unlabelled. That turns the answer from a claim into a checkable one:
+
+- **no caption** → the document dating itself, which is what this stage exists
+  for;
+- **a caption** → weighable against what that caption means on this kind of
+  document, and a last-resort answer (`Freimachung`) is recognisable as one.
+
+It is bounded on both length and word count, because either alone lets prose
+through: `Rechnungsdatum` is one long word, `Date of issue` is three short ones,
+and a model explaining where it looked exceeds both.
+
+The wider point is the same division of labour the value already follows: the
+model reports **evidence**, the code does the reasoning. Which date wins on
+which kind of document is a question our code can answer, because it knows the
+type; where the date sits on the page and what it is called is a question only
+the model can answer.
+
 ### Ranking, not preference
 
 The vision reading does not simply win. A model reading a whole page has more

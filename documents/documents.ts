@@ -227,6 +227,12 @@ export interface DocumentLetterheadReadingDTO {
 
 export interface DocumentLetterheadDTO {
   date: DocumentLetterheadReadingDTO | null;
+  /**
+   * The caption the date was taken from, or null when it stood unlabelled.
+   * Shown so a reader can see WHY the model chose that date — an unlabelled one
+   * is the document dating itself; "Freimachung" is the last-resort answer.
+   */
+  date_label: string | null;
   sender: DocumentLetterheadReadingDTO | null;
   /** ISO 639-1, as the model judged the page's prose. */
   language: string | null;
@@ -4276,6 +4282,7 @@ function toLetterheadDTO(
     r ? { value: r.value, located: r.bbox != null } : null;
   return {
     date: reading(stored.date),
+    date_label: stored.date_label ?? null,
     sender: reading(stored.sender),
     language: stored.language ?? null,
   };

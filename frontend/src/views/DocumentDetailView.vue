@@ -1354,6 +1354,9 @@ onBeforeUnmount(() => {
                     :value="doc.letterhead.date.located ? 'belegt' : 'unbelegt'"
                     :severity="doc.letterhead.date.located ? 'success' : 'warn'"
                   />
+                  <span class="letterhead__caption">
+                    {{ doc.letterhead.date_label ?? 'ohne Beschriftung' }}
+                  </span>
                 </span>
                 <span v-else class="letterhead__value letterhead__value--none">nichts gefunden</span>
               </div>
@@ -1829,6 +1832,11 @@ onBeforeUnmount(() => {
   align-items: center;
   flex-wrap: wrap;
   overflow-wrap: anywhere;
+}
+
+.letterhead__caption {
+  color: var(--p-text-muted-color);
+  font-size: 0.75rem;
 }
 
 .letterhead__value--none {

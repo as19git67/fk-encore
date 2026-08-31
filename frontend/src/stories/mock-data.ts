@@ -621,6 +621,7 @@ export const MOCK_DOCUMENT_DETAIL: DocumentDetail = {
   // One located and one not, so the story shows both states of the badge.
   letterhead: {
     date: { value: '15. März 2024', located: true },
+    date_label: null,
     sender: { value: 'Muster Stadtwerke GmbH', located: false },
     language: 'de',
   },
