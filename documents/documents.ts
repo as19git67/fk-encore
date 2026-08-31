@@ -223,6 +223,12 @@ export interface DocumentLetterheadReadingDTO {
    * unlocated reading is still a reading — it just ranks below a confirmed one.
    */
   located: boolean;
+  /**
+   * The 1-based page it was read from. A date from a later page came from
+   * beside a signature rather than from a letterhead, which is weaker evidence
+   * and worth seeing.
+   */
+  page: number | null;
 }
 
 export interface DocumentLetterheadDTO {
@@ -4278,8 +4284,8 @@ function toLetterheadDTO(
   stored: DocumentLetterhead | null | undefined,
 ): DocumentLetterheadDTO | null {
   if (!stored) return null;
-  const reading = (r: { value: string; bbox: unknown } | null | undefined) =>
-    r ? { value: r.value, located: r.bbox != null } : null;
+  const reading = (r: { value: string; bbox: unknown; page?: number } | null | undefined) =>
+    r ? { value: r.value, located: r.bbox != null, page: r.page ?? null } : null;
   return {
     date: reading(stored.date),
     date_label: stored.date_label ?? null,

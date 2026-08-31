@@ -193,6 +193,8 @@ export function rankReadings<T>(readings: readonly Reading<T>[]): Reading<T> | n
 export async function readLetterheadForPage(options: {
   pageImagePath: string;
   rows: readonly (readonly OcrWord[])[];
+  /** 1-based, recorded on each reading so a later page is recognisable. */
+  page: number;
   log: (msg: string) => void;
 }): Promise<DocumentLetterhead | null> {
   let answer: VlmLetterhead;
@@ -219,7 +221,7 @@ export async function readLetterheadForPage(options: {
     // below anything the page confirms. Dropping it here would throw away the
     // one reader that can see the layout whenever OCR mangled the letterhead
     // badly enough that nothing matches — which is when it is most useful.
-    return { value: value.trim(), bbox: found?.bbox ?? null };
+    return { value: value.trim(), bbox: found?.bbox ?? null, page: options.page };
   };
 
   const result: DocumentLetterhead = {
@@ -231,11 +233,38 @@ export async function readLetterheadForPage(options: {
   // The values are the document's own content, so only whether each was found
   // and whether the page confirmed it is logged — never what it said.
   options.log(
-    `letterhead: date=${describe(result.date)}` +
+    `letterhead p${options.page}: date=${describe(result.date)}` +
       `${result.date_label ? " (labelled)" : ""}, sender=${describe(result.sender)}, ` +
       `language=${result.language ?? "-"}, ${answer.processing_ms}ms`,
   );
   return result;
+}
+
+/**
+ * Combine the readings of two pages, first page first.
+ *
+ * Not symmetric, and the asymmetry is the point. The **date** may legitimately
+ * come from either — the letterhead of page 1 or the signature of the last —
+ * so the later page fills it in when the first had none. The **sender** and
+ * the **language** may not: a last page carries a footer, a page number and
+ * sometimes a second company's imprint, and taking a sender from there would
+ * quietly replace the letterhead's name with whoever printed the form.
+ *
+ * So: everything from the earlier reading survives, and the later one may only
+ * supply a date that was missing.
+ */
+export function mergeLetterhead(
+  first: DocumentLetterhead | null,
+  later: DocumentLetterhead | null,
+): DocumentLetterhead | null {
+  if (!first) return later;
+  if (!later) return first;
+  if (first.date) return first;
+  return {
+    ...first,
+    date: later.date,
+    date_label: later.date_label ?? null,
+  };
 }
 
 function describe(reading: LetterheadReading | null): string {

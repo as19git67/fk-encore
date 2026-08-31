@@ -350,6 +350,17 @@ def test_asks_about_a_document_not_a_letter(vision_llm):
     assert "invoice" in instruction
 
 
+def test_asks_about_a_page_not_the_first_one(vision_llm):
+    # The same instruction is sent for the last page, where a contract is dated
+    # beside its signature. A prompt certain it is looking at page 1 describes
+    # a page the model is not being shown.
+    _post_letterhead({"image_b64": PIXEL_B64})
+    instruction = vision_llm.calls[0]["messages"][1]["content"][1]["text"].lower()
+    assert "a page from a document" in instruction
+    assert "signature" in instruction
+    assert "first page of a document" not in instruction
+
+
 def test_separates_never_from_last_resort(vision_llm):
     # The exclusions are not equally absolute. A due date belongs to something
     # else and is never the answer; a franking date is merely a poor one, and

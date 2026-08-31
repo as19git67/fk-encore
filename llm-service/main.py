@@ -2404,12 +2404,13 @@ LETTERHEAD_SYSTEM_PROMPT = (
 )
 
 LETTERHEAD_INSTRUCTION = (
-    "This is the first page of a document - a letter, an invoice, a "
+    "This is a page from a document - a letter, an invoice, a "
     "statement, a delivery note, a certificate.\n"
     "1. date: the date this document was issued by whoever sent it - the date "
     "a filing clerk would write on it. Copy it exactly as printed, in the "
-    "document's own format. It is often printed with no label at all, alone on "
-    "its line near the top, and on a letter it stands above the salutation.\n"
+    "document's own format. It is often printed with no label at all. On a "
+    "first page it stands near the top, alone on its line, above the "
+    "salutation; on a last page it stands next to a signature.\n"
     "   NEVER report: a due date or payment deadline, a period of validity, a "
     "date of birth, or the date of an earlier document being answered. Those "
     "describe something other than this document.\n"

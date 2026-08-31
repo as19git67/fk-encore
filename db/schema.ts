@@ -334,6 +334,16 @@ export interface AiPickPhotoScore {
 export interface LetterheadReading {
   value: string;
   bbox: { left: number; top: number; right: number; bottom: number } | null;
+  /**
+   * The 1-based page the reading came from.
+   *
+   * A date lives in one of two places: the letterhead of the first page or
+   * beside the signature of the last. Recording which one answered makes a
+   * signature date recognisable as the weaker evidence it is — the letterhead
+   * dates the document, the signature dates the act of signing it, and they
+   * are usually but not always the same day.
+   */
+  page?: number;
 }
 
 export interface DocumentLetterhead {

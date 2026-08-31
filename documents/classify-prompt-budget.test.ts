@@ -98,6 +98,11 @@ describe("classifier prompt budget", () => {
 
     // The caption is what makes a fallback recognisable as one.
     expect(instruction).toContain("date_label");
+
+    // Not "the first page": the same prompt is sent for the last page, where a
+    // contract is dated beside its signature.
+    expect(instruction).toContain("a page from a document");
+    expect(instruction).toContain("signature");
   });
 
   it("keeps the hints from dwarfing the slugs they disambiguate", () => {

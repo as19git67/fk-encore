@@ -1356,6 +1356,9 @@ onBeforeUnmount(() => {
                   />
                   <span class="letterhead__caption">
                     {{ doc.letterhead.date_label ?? 'ohne Beschriftung' }}
+                    <template v-if="(doc.letterhead.date.page ?? 1) > 1">
+                      · Seite {{ doc.letterhead.date.page }} (bei der Unterschrift)
+                    </template>
                   </span>
                 </span>
                 <span v-else class="letterhead__value letterhead__value--none">nichts gefunden</span>

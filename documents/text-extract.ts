@@ -68,7 +68,7 @@ import {
 import { tesseractEnv } from "./tesseract-env";
 import { renderPageWithSpacing } from "./pdf-text-layout";
 import { DOCUMENT_NUMBER_RE } from "./metadata-extract";
-import { readLetterheadForPage } from "./letterhead";
+import { mergeLetterhead, readLetterheadForPage } from "./letterhead";
 import type { DocumentLetterhead } from "../db/schema";
 
 // pdf-parse is CJS and its default import pulls in a debug routine that
@@ -914,7 +914,25 @@ async function ocrPdf(
         // words carry it), and a deployment without a projector gets a 503 on
         // the first round trip and moves on. The one thing it does require is
         // the TSV, which is where the word boxes come from.
-        if (i === 0 && layoutStep.value.rows.length > 0) {
+        // Page 1 always; the LAST page as well, but only when page 1 produced
+        // no date.
+        //
+        // A document dates itself in one of two places — the letterhead of its
+        // first page, or beside the signature of its last — and a contract is
+        // dated where it is signed. The pages between are body text, where a
+        // date is most likely to be something other than the document's own: a
+        // period, a deadline, a row in a table. Asking them would raise cost
+        // and the chance of a wrong answer at the same time, which is why this
+        // is first-and-last rather than first-to-last. A 26-page document costs
+        // two calls, not 26.
+        //
+        // A truncated document never reaches its last page and simply gets the
+        // one call, which is the same answer it would have got before.
+        const isLastPage = i === entries.length - 1;
+        const wantLetterhead =
+          layoutStep.value.rows.length > 0 &&
+          (i === 0 || (isLastPage && letterhead?.date == null));
+        if (wantLetterhead) {
           const step = await timed(() =>
             readLetterheadForPage({
               pageImagePath: pagePath,
@@ -925,16 +943,17 @@ async function ocrPdf(
               // and would fail exactly on the badly-read letterheads where a
               // located reading is worth the most.
               rows: layoutStep.value.rows,
+              page: i + 1,
               log,
             }),
           );
-          letterhead = step.value;
+          letterhead = mergeLetterhead(letterhead, step.value);
           // Reported as its own segment rather than folded into `vlm`. The
           // timing line reads as a disjoint breakdown of the total, and this
           // is now the one vision call that runs with the span resolver off —
           // counting it twice would make `vlm` overlap `letterhead` and stop
           // the segments from summing.
-          letterheadMs = step.ms;
+          letterheadMs += step.ms;
         }
         const pageText = layoutStep.value.text;
         confidenceSum += layoutStep.value.confidenceSum;
