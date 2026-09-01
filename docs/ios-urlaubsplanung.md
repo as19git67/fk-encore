@@ -603,8 +603,12 @@ Deshalb in zwei Stufen, und die erste kommt ohne Zuordnung aus:
 
 1. **Im Reisetagebuch** (§3.6) erscheinen Belege und Zahlungen schlicht am
    jeweiligen Reisetag. Das braucht nur den Zeitraum, den der Trip ohnehin
-   kennt, ist sofort nützlich und kann nichts falsch zuordnen. Als Nebenprodukt
-   fällt eine **Reisekostenübersicht** ab.
+   kennt, ist sofort nützlich und kann nichts falsch zuordnen. Daraus ergibt
+   sich zugleich die **Kostenübersicht des Trips** — beschlossen: Der Trip weist
+   seine Kosten selbst aus, statt sie nur im finance-Bereich sichtbar zu machen.
+   Er braucht dafür keine eigene Buchhaltung, nur die Summe über seinen
+   Zeitraum, aufgeschlüsselt nach den Tagen und, wo bestätigt (Stufe 2), nach
+   Orten.
 2. **Als Planungssignal erst nach Bestätigung.** Tippt der Nutzer im Tagebuch
    „das war das Café am Markt", wird die Zuordnung gespeichert und gilt künftig
    automatisch. Das ist dasselbe Muster wie beim Benennen von Gesichtern und
@@ -614,6 +618,55 @@ Deshalb in zwei Stufen, und die erste kommt ohne Zuordnung aus:
 Damit bleibt der Aufwand klein und proportional zum Nutzen — der ohnehin erst
 bei Wiederholungsbesuchen entsteht. Ein sinnvoller später Schritt, kein
 Baustein für den Anfang.
+
+### 9.7 Geprüft und verworfen: Bewertungen per API
+
+Naheliegende Frage, deshalb hier die Prüfung samt Ergebnis — damit sie nicht
+später erneut aufgerollt wird.
+
+**Technisch gibt es das.** Die **Google Places API (New)** liefert zu einem Ort
+`rating`, `userRatingCount`, einige Rezensionstexte, Preisniveau, aktuelle
+Öffnungszeiten und Fotos; Suche per Text, Umkreis oder Place-ID. Sie braucht
+einen API-Schlüssel und ein Abrechnungskonto, hat ein monatliches Freikontingent
+und kostet darüber hinaus pro Abfrage. Für ein Familiensystem wäre das Volumen
+kein Kostenproblem.
+
+**Drei Gründe sprechen trotzdem dagegen:**
+
+1. **Die Nutzungsbedingungen verbieten genau das, was wir bräuchten.** Inhalte
+   der Places API dürfen (mit Ausnahme der Place-IDs) nicht dauerhaft
+   gespeichert werden, und die Darstellung zusammen mit einer **Nicht-Google-Karte**
+   ist untersagt. Unser Planer lebt aber von einem **vorab bewerteten Vorrat**
+   (§4.3) und zeichnet auf einer MapKit-Karte (§8.3). Beides zusammen geht
+   nicht. Ein Ranking, das bei jedem Öffnen neu eingekauft werden muss und
+   offline nicht existiert, ist kein Vorrat.
+2. **Es widerspricht dem Kern des Produkts.** Jede Abfrage sendet Ort, Zeitpunkt
+   und Absicht an Google — genau das, was §3 als Unterschied zu Google Maps
+   ausweist. Ein Planer, der im Hintergrund Google fragt, ist ein
+   Google-Frontend mit Extraschritten.
+3. **Es macht das System von einem fremden Schlüssel abhängig.** Preismodell,
+   Kontingente und Bedingungen ändern sich; ein selbst gehostetes System sollte
+   nicht ausfallen, weil ein Abrechnungskonto abläuft.
+
+**Die Alternativen sind nicht besser.** Apples MapKit-Suche liefert Orte, aber
+**keine Bewertungen**. Yelp hat eine brauchbare API, außerhalb Nordamerikas aber
+dünne Abdeckung — für Prag oder Osaka wenig hilfreich. Die TripAdvisor-Content-API
+deckt Touristisches ordentlich ab, verlangt aber Logo und Verlinkung an jeder
+Anzeigestelle und beschränkt das Speichern ebenfalls. Foursquare hat Bewertungen
+nur im kommerziellen Dienst, nicht im offenen Datensatz (§9.1).
+
+**Ergebnis: kein Rating-Backend, sondern der Fingertipp.** Die Übergabe aus §8.1
+liefert dasselbe Ergebnis ohne Schlüssel, ohne Kosten, ohne
+Speicherbeschränkung und ohne dass fk-encore selbst zum Datenlieferanten an
+Google wird: Du tippst auf „in Karten ansehen", siehst dort Bewertungen, Fotos
+und aktuelle Öffnungszeiten, und kommst zurück. Diese Frage bestätigt die
+Arbeitsteilung aus §8, statt einen neuen Weg zu eröffnen.
+
+*Sollte sich das ändern* — etwa weil eine Quelle mit freundlicheren Bedingungen
+auftaucht —, wäre die verträglichste Form eine **einzelne, vom Nutzer ausgelöste
+Abfrage** für einen Spot („Bewertung laden"), nur zur Anzeige, ohne Speicherung
+und ohne Einfluss auf das Ranking. Als Massenanreicherung des Vorrats jedoch
+nie.
 
 ## 10. Architektur-Skizze
 
@@ -795,11 +848,7 @@ hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
 5. **Hotelwahl:** Soll der Planer aus einer Ankerzone (§4.2) aktiv Viertel
    vorschlagen — „diese Gegenden liegen im Radius und haben abends noch etwas
    offen" — oder bleibt die Unterkunft ausdrücklich außerhalb seines Auftrags?
-6. **Reisekosten:** Belege und Zahlungen dienen als Signal, aber erst nach
-   Bestätigung (§9.6 — entschieden). Offen bleibt der Nebenertrag: Soll der Trip
-   eine **Kostenübersicht** über seinen Zeitraum ausweisen, oder gehört das
-   ausschließlich in den finance-Bereich?
-7. **Web-Frontend:** nur iOS, oder Planung auch in der Vue-App? Planen am großen
+6. **Web-Frontend:** nur iOS, oder Planung auch in der Vue-App? Planen am großen
    Bildschirm, Umplanen am Telefon wäre eine naheliegende Arbeitsteilung.
 
 ---
