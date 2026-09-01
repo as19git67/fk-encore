@@ -957,7 +957,39 @@ missing: the German letterhead `im`, an English `October 2012`, and a numeric
 be a day). The month-first pattern was also ASCII-only, so every German month
 carrying an umlaut failed in that position.
 
-#### The two readers keep drifting apart
+#### One table of shapes, read by both
+
+Two readers look for dates. `collectDateCandidates` scans the OCR text for one
+behind a label; `normalizeDocumentDate` converts a whole string the vision model
+read off the page. They used to enumerate the shapes they understood
+separately, and that produced the same bug four times running:
+
+| shape | scan | vision |
+| --- | --- | --- |
+| `Oktober 2012` | read it | did not |
+| `München, 05.03.2022` | read it | did not |
+| `Lieferdatum 2014-11-17` | did not | read it |
+| `2024/07/28` | did not | did not, until the separator was widened |
+
+**Nothing fails when they disagree.** The document simply has no date, and only
+a spot check reveals which side was blind — which is why every one of those was
+found by a person noticing a missing date, never by the pipeline.
+
+So the shape of a date now lives in `SHAPE` once, as a regex *body*: the date
+itself, with no anchor, no label and no `^…$`. The scan composes a label in
+front of it (`labelled`, `afterPlace`); the converter anchors it end to end.
+
+`DATE_SHAPE_EXAMPLES` carries one example per shape, and the cross-check test
+runs every one through **both** readers — the converter on the bare string, the
+scan behind a `Rechnungsdatum` label. A shape added to one and not the other
+fails it.
+
+It earned its keep on the first run: `Rechnungsdatum 10/2012` came back `null`
+from the scan, because the month-year loop resolves month *names* and this
+shape's first capture is a number. That gap had been there since the shape was
+added and nothing had noticed.
+
+#### The drift this replaced
 
 Three missing dates in a row have had the same shape: the vision path knew a
 form the text scan did not, or the reverse.

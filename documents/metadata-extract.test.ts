@@ -4,6 +4,7 @@ import {
   detectSubjectPersonIds,
   detectSubjectPersonPersonalDeductionReview,
   extractDocumentDate,
+  DATE_SHAPE_EXAMPLES,
   inferDateConvention,
   isMonthOnlyReading,
   normalizeDocumentDate,
@@ -1252,5 +1253,33 @@ describe("umlaut restoration (buildUmlautRestorationMap / restoreUmlautSpellings
   it("returns the input untouched when the document has no umlauts at all", () => {
     const empty = buildUmlautRestorationMap("Invoice without any special letters");
     expect(restoreUmlautSpellings("pruefung", empty)).toBe("pruefung");
+  });
+});
+
+
+describe("both readers understand the same shapes", () => {
+  // The guard for the bug that appeared four times running: a date shape one
+  // reader knew and the other did not. Nothing failed when they disagreed —
+  // the document simply had no date — so every instance was found by a person
+  // noticing a missing date, never by the pipeline.
+  //
+  // Both now compose their patterns from the same SHAPE table, and this runs
+  // every shape through both of them.
+  it.each(DATE_SHAPE_EXAMPLES)(
+    "$shape: $text",
+    ({ text, iso, convention }) => {
+      // The converter, on the bare string the vision model would return.
+      expect(normalizeDocumentDate(text, convention)).toBe(iso);
+      // The scan, on the same date behind a label.
+      expect(extractDocumentDate(`Rechnungsdatum   ${text}`, convention)).toBe(iso);
+    },
+  );
+
+  it("covers every shape in the table", () => {
+    // A shape added to SHAPE without an example would be untested by the case
+    // above, which would quietly restore the hole this closes.
+    const covered = new Set(DATE_SHAPE_EXAMPLES.map((e) => e.shape));
+    expect(covered.size).toBe(DATE_SHAPE_EXAMPLES.length);
+    expect(DATE_SHAPE_EXAMPLES.length).toBeGreaterThanOrEqual(8);
   });
 });
