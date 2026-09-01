@@ -287,7 +287,7 @@ change*. iOS weckt die App bei Bedarf; dazwischen kostet es praktisch nichts.
 Der Trip Mode holt sich ohnehin schon eine `CLLocation` beim Start.
 
 **Datenschutz:** Der Standort bleibt für die Planung auf dem Gerät — der Vorrat
-liegt lokal, die Neuverteilung rechnet lokal (§10). Zum eigenen Server geht er
+liegt lokal, die Neuverteilung rechnet lokal (§11). Zum eigenen Server geht er
 nur, wenn geteilt geplant wird; nach außen (Wetter) nur gerundet (§6.2).
 
 ### 6.2 Wetter, vor allem Niederschlag
@@ -522,7 +522,7 @@ Konkret fehlt die Datenbasis noch ganz. Der Lua-Filter nimmt aus `amenity` nur
 das **Foto-POI-Matching** gebaut, nicht fürs Planen. In `osm_pois` steht kein
 einziges Café.
 
-Die Erweiterung ist die dritte und größte der Importänderungen aus §10 und
+Die Erweiterung ist die dritte und größte der Importänderungen aus §11 und
 verdient zwei Anmerkungen:
 
 - **Sie vergrößert die Regionsdatenbanken spürbar.** Gastronomie und
@@ -668,7 +668,129 @@ Abfrage** für einen Spot („Bewertung laden"), nur zur Anzeige, ohne Speicheru
 und ohne Einfluss auf das Ranking. Als Massenanreicherung des Vorrats jedoch
 nie.
 
-## 10. Architektur-Skizze
+## 10. Wenn ein Frontier-Modell zur Verfügung steht
+
+Alle bisherigen Entscheidungen sind unter einer Randbedingung gefallen: Das
+einzige verfügbare Sprachmodell ist ein lokales Qwen2.5-7B. Stünde stattdessen
+die Claude API mit **Opus 5** (`claude-opus-5`, 1M Kontext, $5 / $25 je Mio.
+Ein-/Ausgabe-Token) bereit, änderte sich einiges — aber weniger, als man
+zunächst vermutet, und an anderer Stelle als erwartet.
+
+### 10.1 Die Trennlinie liegt schon im Konzept
+
+Der Planer zerfällt ohnehin in zwei Welten (§4.3): die **Reiseauflösung**
+entsteht vorher, zu Hause, am Netz und ohne Zeitdruck — die **Tagesauflösung
+und alles unterwegs** muss offline, sofort und verlässlich funktionieren.
+Genau entlang dieser Naht verläuft die sinnvolle Aufteilung zwischen den
+Modellen:
+
+| | lokal (Qwen) | Opus 5 (online, opt-in) |
+|---|---|---|
+| Kandidaten kuratieren | Gewichtete Summe | **deutlich besser** |
+| Anfrage verstehen | brüchig | **deutlich besser** |
+| Dokumente auswerten | ordentlich | **deutlich besser** |
+| Verhandlungs-Chat vorab | knapp ausreichend | **deutlich besser** |
+| Tagebuch-/Recap-Texte | ordentlich | besser |
+| Umplanen unterwegs | **zwingend lokal** | ungeeignet |
+| Solver | **keins von beiden** | keins von beiden |
+
+**Die harte Regel: Opus 5 darf nie auf dem kritischen Pfad des Umplanens
+liegen.** „Wir hängen hinterher" muss im Funkloch in Hakata funktionieren. Ein
+Netzaufruf ist dort keine Verbesserung, sondern ein Ausfall.
+
+### 10.2 Was sich nicht ändert
+
+- **Der Solver bleibt Arithmetik.** Rucksack pro Block plus Kurzrundreise über
+  zwei bis vier Stopps ist exakt, in Millisekunden lösbar, deterministisch und
+  offline. Kein Modell der Welt macht das besser; es macht es langsamer, teurer
+  und nicht reproduzierbar. Was Opus 5 beisteuern kann, ist die **Auswahl**, die
+  in den Solver geht — nicht die Rechnung.
+- **Die Halluzinationsregel aus §9.4 bleibt.** Opus 5 erfindet drastisch
+  seltener, aber „seltener" ist nicht „nie", und der Fehler ist unsichtbar. Jeder
+  Ortsname wird weiter gegen den Vorrat validiert. Technisch billig, deshalb
+  keine Ausnahme.
+- **Die Ellipsen-Vorfilterung, die Lichtrechnung, die Blocklogik** — alles
+  Rechenverfahren, alles unberührt.
+
+### 10.3 Was deutlich besser würde
+
+1. **Kandidatenkuration statt Tag-Ranking.** Heute entscheidet eine gewichtete
+   Summe aus OSM-Tags und Wikipedia-Artikellänge, was ein Favorit ist — grob.
+   In 1M Kontext passt der komplette Vorrat einer Stadt samt Wikipedia-Auszügen
+   in **eine** Anfrage, und heraus kommt eine begründete, thematisch
+   ausgewogene Auswahl: „diese 12 von 34, und warum". Das ist der größte
+   Qualitätssprung — und ausgerechnet der billigste, weil er vorab und
+   stapelweise läuft (Batch-API: halber Preis).
+2. **Anfrageverständnis.** „Mit Oma, entspannt, kein Auto" zuverlässig in
+   Constraints zu übersetzen, ist für ein 7B-Modell brüchig. Mit **Structured
+   Outputs** (`output_config.format`) bzw. `strict: true` an den Tools kommt ein
+   schemavalides Objekt zurück — genau das, was §7.2 als Chips anzeigt.
+3. **Der Verhandlungs-Chat vor der Reise.** Opus 5 könnte per Tool-Use die
+   Planer-API selbst bedienen (`vorrat_durchsuchen`, `constraint_setzen`,
+   `anheften`, `neu_verteilen`), statt nur Constraints auszuwerfen. Aus „zu viel
+   Laufen" wird ein Werkzeugaufruf mit sichtbarer Wirkung statt einer Umschreibung.
+4. **Dokumentenauswertung.** Fixpunkte aus OCR-Text zu ziehen — Flugzeiten,
+   Check-in-Regeln im Kleingedruckten, fremdsprachige Bestätigungen — ist genau
+   die Disziplin, in der ein Frontier-Modell ein 7B klar schlägt. Pro Dokument
+   einmal, cachebar, nicht zeitkritisch.
+5. **Texte im Reisetagebuch.** Geringes Risiko, sichtbarer Gewinn.
+
+### 10.4 Kosten sind nicht das Hindernis
+
+Grob geschätzt: Die Kuration einer Stadt liegt im Bereich einiger
+zehntausend Eingabe-Token — also **deutlich unter einem Euro**, halbiert über
+die Batch-API. Ein Chat-Verlauf mit Prompt-Caching kostet Cent-Beträge, weil
+zwischengespeicherte Token nur etwa ein Zehntel kosten. Für ein Familiensystem
+ist das irrelevant.
+
+Zwei Caching-Details, die dabei zählen: Die Reihenfolge ist
+`tools` → `system` → `messages`, Stabiles nach vorn, Veränderliches ans Ende —
+also Vorrat und Systemprompt zuerst, die aktuelle Frage zuletzt. Und Opus 5
+erlaubt **Systemnachrichten mitten im Verlauf** (`role: "system"` innerhalb von
+`messages`, ohne Beta-Header), was den zwischengespeicherten Präfix erhält,
+wenn sich während der Verhandlung eine Regel ändert.
+
+### 10.5 Der eigentliche Preis: Privatsphäre
+
+Das ist die einzige ernsthafte Frage, und sie ist keine technische. „Alles bleibt
+im Haus" ist die Rückgratzusage des Produkts (§3). Ein Kurationsaufruf schickt
+Kandidatenlisten, Interessen, Reisezeitraum und Gruppenzusammensetzung an einen
+Dienst.
+
+Abschwächen lässt sich das erheblich, weil die Aufgabe die Identitäten gar nicht
+braucht:
+
+- **Öffentliches nach draußen, Privates nicht.** Der Vorrat besteht aus
+  OSM- und Wikipedia-Daten — öffentlich. Was ihn privat macht, sind die
+  Präferenzen, und die lassen sich abstrakt fassen: „zwei Erwachsene, ein Kind
+  (7), eine Person mit begrenzter Gehstrecke" statt Namen und Gesichtern.
+- **Keine Anker-Adressen.** Die Ankerzone genügt als Koordinatenschwerpunkt;
+  die Hoteladresse muss nicht mit.
+- **Nichts aus Dokumenten, Fotos oder Finanzen** verlässt das Haus für die
+  Kuration — die Dokumentenauswertung (10.3.4) wäre ein getrennter,
+  eigenständig zuschaltbarer Fall.
+- **Pro Funktion zuschaltbar, nicht global.** Ein einzelner „KI besser machen"-Schalter
+  wäre die falsche Granularität.
+
+Ausdrücklich nicht empfohlen ist die dritte Möglichkeit: das
+**Websuche-Werkzeug** (`web_search_20260209`) als Lückenfüller für
+Öffnungszeiten, Schließungen und Veranstaltungen. Es würde die
+Echtzeitschwäche aus §13 tatsächlich schließen — aber mit demselben Handel,
+der in §9.7 schon gegen die Google-API entschieden wurde, nur an anderer Stelle.
+Wenn diese Lücke geschlossen werden soll, dann als bewusste, eigene
+Entscheidung, nicht als Nebenwirkung eines Modellwechsels.
+
+### 10.6 Fazit
+
+Opus 5 würde den Planer **klüger in der Vorbereitung** machen und am Verhalten
+unterwegs nichts ändern — was gut ist, denn unterwegs zählt Verlässlichkeit,
+nicht Klugheit. Die Architektur bliebe dieselbe, mit einem zusätzlichen,
+optionalen Kurationsschritt zwischen Kandidatensuche und Solver. Das ist
+bemerkenswert wenig Umbau für spürbar bessere Vorschläge — und ein Hinweis
+darauf, dass die Aufteilung „Modell versteht und formuliert, Rechenverfahren
+plant" unabhängig davon richtig ist, wie gut das Modell wird.
+
+## 11. Architektur-Skizze
 
 ```
 iOS (SwiftUI, Feature „Trip/Planen")
@@ -724,7 +846,9 @@ Fassadenausrichtung wird beim Kandidatenaufbau einmal aus der OSM-Geometrie
 abgeleitet und am Spot gespeichert. Extern ist nur die Wettervorhersage.
 
 **Das LLM plant nicht.** Es übersetzt Sprache in validierte Constraints und
-schreibt Begründungen. So halluziniert es weder Öffnungszeiten noch Wege.
+schreibt Begründungen. So halluziniert es weder Öffnungszeiten noch Wege. Diese
+Rollenteilung gilt unabhängig davon, wie gut das Modell ist — §10 spielt durch,
+was sich mit einem Frontier-Modell änderte (Kuration ja, Solver nein).
 
 **Ranking-Signale** (gewichtete Summe, Gewichte im UI sichtbar):
 Prominenz (Wikidata/Wikipedia vorhanden, Artikellänge) · Passung zu den
@@ -746,7 +870,7 @@ Indoor/Outdoor, Fassadenazimut) ·
 `weather_forecasts` (gerundete Koordinate + Tag → stündliche Werte, Cache) ·
 `plan_votes` (Nutzer/KI pro Kandidat, analog zum Album-Voting).
 
-## 11. Mögliche Umsetzungsschritte
+## 12. Mögliche Umsetzungsschritte
 
 > „Etappe" meint in diesem Dokument durchgehend einen **Reiseabschnitt**
 > (§4.2); die Umsetzung ist in **Schritte** gegliedert.
@@ -784,7 +908,7 @@ Schritte 1–3 sind der ehrliche Test: Liefert die Maschine für *einen* Tag in
 *einer* Stadt eine Blockeinteilung, die man tatsächlich so ablaufen würde — und
 hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
 
-## 12. Bekannte Schwachstellen
+## 13. Bekannte Schwachstellen
 
 - **OSM-Datenqualität.** `opening_hours` ist lückenhaft, Restaurantqualität
   steht dort gar nicht. Gegenmittel: die grobe Auflösung (§4) verzeiht
@@ -830,7 +954,7 @@ hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
   ein eigener großer Baustein. Zunächst MapKit online; offline gibt es
   Blockliste, Spots und Wegbeschreibung, aber keine Kartendarstellung.
 
-## 13. Offene Fragen an den Nutzer
+## 14. Offene Fragen an den Nutzer
 
 1. **Blockschema:** Sind Vormittag / Mittag / Nachmittag / Abend die richtige
    Einteilung, oder lieber frei definierbare Blöcke pro Tag?
@@ -853,24 +977,24 @@ hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
 
 ---
 
-## 14. Durchgespielt: 20 Tage Japan
+## 15. Durchgespielt: 20 Tage Japan
 
 Drei durchgespielte Fälle prüfen die Mechanik an ihren Rändern: eine lange
-Mehrstädtereise (§14), ein Kurztrip mit dem Auto und geplanter Anreise (§15) und
-ein einzelner Tagesausflug (§16). Jeder hat das Konzept verändert.
+Mehrstädtereise (§15), ein Kurztrip mit dem Auto und geplanter Anreise (§16) und
+ein einzelner Tagesausflug (§17). Jeder hat das Konzept verändert.
 
 Zuerst der lange Fall — **3.9. bis 22.9.2027,
 Tokio, Osaka und Hakata, zu zweit**. Bewusst ein harter Fall: lang, mehrere
 Orte, weit in der Zukunft, nicht-lateinische Schrift, andere Zeitzone.
 
-### 14.1 Vorbereitung: die Regionen
+### 15.1 Vorbereitung: die Regionen
 
 Vor jeder Planung müssen die OSM-Daten im Haus sein: drei Geofabrik-Sub-Regionen
 Japans — **Kanto** (Tokio), **Kansai** (Osaka), **Kyushu** (Hakata/Fukuoka).
 Das ist heute ein Admin-Vorgang, dauert, und passiert Wochen vorher, nicht beim
-Planen (siehe offene Frage 2 in §13).
+Planen (siehe offene Frage 2 in §14).
 
-### 14.2 Eingabe
+### 15.2 Eingabe
 
 ```
 3.9. bis 22.9.2027, Tokio, Osaka und Hakata,
@@ -883,13 +1007,13 @@ Aussicht, Märkte`. Findet der documents-Service Flug- und Hotelbestätigungen f
 den Zeitraum, werden sie als Fixpunkte vorgeschlagen — Ankunft Haneda, drei
 Hotels, und damit implizit die Etappengrenzen.
 
-### 14.3 Etappen und Transfers
+### 15.3 Etappen und Transfers
 
 Tokio 3.–11.9., Osaka 11.–18.9., Hakata 18.–22.9. (§4.2). Die Shinkansen-Fahrten
 dazwischen sind Fixpunkte, die je einen halben Tag kosten; jede Etappe bekommt
 ihr Hotel als Tagesanker und ihre eigene Regionsdatenbank.
 
-### 14.4 Grob planen, nicht alles planen
+### 15.4 Grob planen, nicht alles planen
 
 In der Reiseauflösung (§4.3) entsteht pro Etappe ein bewerteter Vorrat — „Tokio:
 34 Kandidaten, 12 klare Favoriten" — plus die terminlich gebundenen Punkte
@@ -898,14 +1022,14 @@ stimmt mit. Ergebnis ist keine Route, sondern eine Rangfolge: Sie entscheidet
 später, was zuerst wegfällt. Konkrete Blöcke entstehen erst ein bis zwei Tage
 vorher.
 
-### 14.5 Wetter acht Monate im Voraus
+### 15.5 Wetter acht Monate im Voraus
 
 Gibt es nicht. In der Reiseauflösung zählen deshalb die Klimanormalen (§6.2):
 September in Japan ist heiß, schwül und **Taifunsaison**. Praktische Folge im
 Plan — genug Indoor-Kandidaten im Vorrat und ein nicht verplanter Puffertag je
 Etappe. Ab etwa zwei Wochen vorher detailliert die echte Vorhersage tageweise.
 
-### 14.6 Ein Tag in Tokio
+### 15.6 Ein Tag in Tokio
 
 Am Vorabend entsteht der Plan für Asakusa und Umgebung:
 
@@ -924,7 +1048,7 @@ Hakata, gut neun Längengrade weiter westlich, liegt derselbe Moment rund
 35 Minuten später. Kein Reiseführer sagt einem das, und berechnen lässt es sich
 offline in Millisekunden (§6.3).
 
-### 14.7 Unterwegs
+### 15.7 Unterwegs
 
 Um 14 Uhr steht ihr noch beim Sensō-ji. Der Geofence merkt es, die App bietet an:
 *„Der Nachmittag wird knapp — Museum raus, rutscht auf Freitag Vormittag. Der
@@ -935,31 +1059,31 @@ Zieht ein Taifunausläufer durch, greift dieselbe Mechanik eine Ebene höher: De
 Regentag tauscht mit einem trockenen Tag **derselben Etappe**, Outdoor wandert
 in den Vorrat, Indoor rückt nach.
 
-### 14.8 Etappenwechsel und danach
+### 15.8 Etappenwechsel und danach
 
 Am 11.9. ist der Vormittag durch den Shinkansen belegt; ab Osaka gelten neue
 Regionsdatenbank und neuer Anker, der Vorrat für Osaka ist längst bewertet.
 Parallel sammelt der Trip Mode die Fotos ein — am Ende steht das Reisetagebuch
 mit geplanten gegen tatsächlich besuchte Blöcke und der Recap.
 
-### 14.9 Was dieses Beispiel am Konzept geändert hat
+### 15.9 Was dieses Beispiel am Konzept geändert hat
 
 Der Durchgang hat fünf Lücken aufgedeckt, die jetzt eingearbeitet sind:
 Etappen als Ebene über den Tagen (§4.2), zwei Planungsauflösungen (§4.3),
 Klimanormale statt Vorhersage jenseits des Prognosehorizonts und Hitze als
 Budgetfaktor (§6.2), das Fassadenazimut, das wegen der Zentroid-Reduktion beim
 Import berechnet werden muss (§6.3), und `name:en` in der Tag-Allowlist, ohne
-das im Plan 浅草寺 statt „Sensō-ji" stünde (§10).
+das im Plan 浅草寺 statt „Sensō-ji" stünde (§11).
 
 ---
 
-## 15. Durchgespielt: vier Tage Prag mit dem Auto
+## 16. Durchgespielt: vier Tage Prag mit dem Auto
 
 **30.8. bis 2.9.2027, Augsburg → Prag und zurück, mit dem Auto.** Der
 Gegenentwurf zu Japan: kurz, ein Ziel, aber mit einer Anreise, die selbst
 geplant werden will, und einem Moduswechsel unterwegs.
 
-### 15.1 Eingabe und Rahmen
+### 16.1 Eingabe und Rahmen
 
 ```
 30.8. bis 2.9.2027 Prag, mit dem Auto ab Augsburg.
@@ -981,7 +1105,7 @@ Daraus wird **eine** Etappe (Prag) mit zwei Transfers, dazu:
 - **Nur eine Auflösung** (§4.3): Vier Tage sind kurz genug, dass Reise- und
   Tagesauflösung zusammenfallen.
 
-### 15.2 Der Anreisetag — die interessanteste Rechnung
+### 16.2 Der Anreisetag — die interessanteste Rechnung
 
 Die Fahrt Augsburg–Prag liegt bei gut vier Stunden reiner Fahrzeit. Der
 Check-in **ab** 15 Uhr ist kein Hindernis, sondern die Quelle des freien
@@ -1007,7 +1131,7 @@ Der Tag sieht danach so aus:
 | ab 15:00 | Check-in (Fixpunkt) |
 | Restnachmittag | erster kurzer Block zu Fuß rund um den Anker |
 
-### 15.3 Die beiden vollen Tage und die Abreise
+### 16.3 Die beiden vollen Tage und die Abreise
 
 31.8. und 1.9. sind normale Blocktage, ab dem Anker, zu Fuß und mit der Metro —
 also genau der Fall aus §4.1 Der 2.9. ist wieder ein halber: Check-out am
@@ -1015,7 +1139,7 @@ Vormittag, Rückfahrt. Ob der Rückweg noch einen Korridorstopp verträgt, häng
 davon ab, wann ihr zu Hause sein wollt — dieselbe Rechnung wie bei der Anreise,
 nur mit dem Fixpunkt am anderen Ende (§4.4).
 
-### 15.4 Was dieses Beispiel beigetragen hat
+### 16.4 Was dieses Beispiel beigetragen hat
 
 Drei Mechaniken, die jetzt im Konzept stehen: die **Ankerzone** für noch nicht
 gebuchte Unterkünfte, der **Modus je Etappe** samt Moduswechsel als Fixpunkt,
@@ -1024,13 +1148,13 @@ ohne Router auskommt.
 
 ---
 
-## 16. Durchgespielt: ein Tag Nürnberg mit dem Zug
+## 17. Durchgespielt: ein Tag Nürnberg mit dem Zug
 
 Der kleinstmögliche Trip — **Augsburg → Nürnberg und zurück, an einem Tag, mit
 der Bahn**. Wertvoll als Testfall, weil hier jede Vereinfachung des Konzepts
 an ihre Grenze kommt.
 
-### 16.1 Was hier alles wegfällt
+### 17.1 Was hier alles wegfällt
 
 Ein Tagesausflug ist eine Etappe mit einem Tag, ohne Hotel und ohne
 Reiseauflösung. Der **Anker ist der Hauptbahnhof** — Start- und Endpunkt
@@ -1042,7 +1166,7 @@ Das System muss also **nach unten sauber abbauen** — kein leerer
 Etappen-Assistent, keine Aufforderung, ein Hotel zu wählen, kein
 Vier-Wochen-Vorrat.
 
-### 16.2 Der Tag hängt zwischen zwei Zügen
+### 17.2 Der Tag hängt zwischen zwei Zügen
 
 Hier zeigt §4.4 seinen Nutzen. Beide Enden sind harte Uhrzeiten:
 
@@ -1061,15 +1185,15 @@ kein „dann eben morgen", der Vorrat hat keinen Folgetag mehr. Genau deshalb
 zählt hier die Rangfolge aus der Abstimmung am meisten: Was zuerst wegfällt,
 sollte nicht das sein, wofür man gefahren ist.
 
-### 16.3 Das Ticket als Randbedingung
+### 17.3 Das Ticket als Randbedingung
 
 Liegt ein Ticket als Dokument vor, wird seine Einschränkung zum Fixpunkt: Ein
 Sparpreis mit Zugbindung legt beide Enden fest, ein Bayern-Ticket ist werktags
 erst ab 9 Uhr gültig und verschiebt damit den Beginn des Vormittagsblocks. Das
-ist derselbe Mechanismus wie die Hotelbuchung in §14 — nur enger, weil ein Tag
+ist derselbe Mechanismus wie die Hotelbuchung in §15 — nur enger, weil ein Tag
 keine Reserve hat.
 
-### 16.4 Was dieses Beispiel beigetragen hat
+### 17.4 Was dieses Beispiel beigetragen hat
 
 Es hat die Formulierung von §4.4 erzwungen: Fixpunkte sind absolut und tragen
 eine Uhrzeit, Blöcke bleiben relativ. Ohne diese Trennung wäre die grobe Planung
