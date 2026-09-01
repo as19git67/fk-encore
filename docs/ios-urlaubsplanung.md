@@ -546,10 +546,8 @@ verdient zwei Anmerkungen:
    nach einer Qualität, die wir nicht kennen. Jeder Eintrag mit einem Knopf „in
    Karten ansehen" (§8.1) und, wo getaggt, `tel:`.
 3. **Eigene Signale, wo vorhanden.** Gruppen-Votes; Fotos, die ihr dort gemacht
-   habt; auf Wunsch Belege aus dem receipt-Service und Kartenzahlungen aus
-   `finance` („hier wart ihr, Beleg vom 12.4."). Stark bei Wiederholung, im
-   Regelfall leer — Leitentscheidung 3 gilt auch hier. Finanzdaten nur
-   ausdrücklich zugeschaltet.
+   habt; auf Wunsch Belege und Kartenzahlungen (§9.6). Stark bei Wiederholung,
+   im Regelfall leer — Leitentscheidung 3 gilt auch hier.
 
 ### 9.4 Die harte Regel für das LLM
 
@@ -572,6 +570,50 @@ jeden Vorbehalt nutzbar.
 Die Datenbasis ist also genau dort stark, wo **Funktion** zählt, und genau dort
 schwach, wo **Geschmack** zählt. Der Planer sollte sich entsprechend verhalten:
 selbstbewusst beim Finden einer Apotheke, zurückhaltend beim Abendessen.
+
+### 9.6 Belege und Zahlungen: was realistisch geht
+
+Kassenbelege und Kartenzahlungen als Signal sind **dünn gesät** — und die naive
+Umsetzung („Airline-Buchung → Flug → Trip → Ort") ist zu Recht abschreckend.
+Sie ist aber auch nicht nötig: Der Weg zerfällt in zwei viel einfachere Fragen,
+und die schwierige Richtung ist die falsche.
+
+**Flüge: das Dokument ist die Quelle, nicht die Transaktion.** Eine
+Banktransaktion einer Fluggesellschaft nennt Händler und Betrag — mehr nicht.
+Kein Ziel, keine Flugzeiten, und ihr Datum ist das **Buchungsdatum**, das
+Monate vor dem Flug liegt. Daraus einen Trip abzuleiten, ist aussichtslos. Die
+Buchungsbestätigung als PDF dagegen liegt bereits OCR-verarbeitet und
+klassifiziert im documents-Service und enthält alles: Flugnummer, Datum,
+Uhrzeiten, Flughäfen. Sie ist der Fixpunktlieferant (§3.4), die Transaktion ist
+es nicht.
+
+**Umgekehrt ist die Verknüpfung leicht.** Steht das Dokument mit Betrag, Datum
+und Airline fest, findet sich die passende Transaktion mit hoher Sicherheit —
+und das Datenmodell sieht die Verbindung bereits vor (`receipt_document_id` in
+`finance/transactions.ts`). Dokument → Transaktion, nie Transaktion → Reise.
+
+**Für Essensvorschläge braucht es überhaupt keine Trip-Zuordnung.** Gefragt ist
+nur „haben wir hier schon einmal bezahlt?" — dafür genügen Händlername und
+Datum. Der schwierige Teil ist ein anderer: **Händlername → POI**. Was auf dem
+Kontoauszug steht, ist abgekürzt, groß geschrieben, oft der Zahlungsdienstleister
+statt des Lokals und manchmal die Firmierung statt des Aushängeschilds. Ein
+automatischer Treffer ist die Ausnahme.
+
+Deshalb in zwei Stufen, und die erste kommt ohne Zuordnung aus:
+
+1. **Im Reisetagebuch** (§3.6) erscheinen Belege und Zahlungen schlicht am
+   jeweiligen Reisetag. Das braucht nur den Zeitraum, den der Trip ohnehin
+   kennt, ist sofort nützlich und kann nichts falsch zuordnen. Als Nebenprodukt
+   fällt eine **Reisekostenübersicht** ab.
+2. **Als Planungssignal erst nach Bestätigung.** Tippt der Nutzer im Tagebuch
+   „das war das Café am Markt", wird die Zuordnung gespeichert und gilt künftig
+   automatisch. Das ist dasselbe Muster wie beim Benennen von Gesichtern und
+   beim Duplikat-Review: Vorschlag, Bestätigung, gelernte Regel. Ohne
+   Bestätigung wird nichts zugeordnet.
+
+Damit bleibt der Aufwand klein und proportional zum Nutzen — der ohnehin erst
+bei Wiederholungsbesuchen entsteht. Ein sinnvoller später Schritt, kein
+Baustein für den Anfang.
 
 ## 10. Architektur-Skizze
 
@@ -753,9 +795,10 @@ hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
 5. **Hotelwahl:** Soll der Planer aus einer Ankerzone (§4.2) aktiv Viertel
    vorschlagen — „diese Gegenden liegen im Radius und haben abends noch etwas
    offen" — oder bleibt die Unterkunft ausdrücklich außerhalb seines Auftrags?
-6. **Eigene Belege als Signal:** Sollen Kassenbelege und Kartenzahlungen aus
-   `finance` für Essensvorschläge herangezogen werden (§9.3), oder bleiben
-   Finanzdaten vom Reiseplaner strikt getrennt?
+6. **Reisekosten:** Belege und Zahlungen dienen als Signal, aber erst nach
+   Bestätigung (§9.6 — entschieden). Offen bleibt der Nebenertrag: Soll der Trip
+   eine **Kostenübersicht** über seinen Zeitraum ausweisen, oder gehört das
+   ausschließlich in den finance-Bereich?
 7. **Web-Frontend:** nur iOS, oder Planung auch in der Vue-App? Planen am großen
    Bildschirm, Umplanen am Telefon wäre eine naheliegende Arbeitsteilung.
 
