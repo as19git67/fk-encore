@@ -159,7 +159,15 @@ Eine Reise ist selten ein Ort. „20 Tage Tokio, Osaka und Hakata" braucht
 zwischen Reise und Tag eine dritte Ebene, die **Etappe**:
 
 - eigener Zeitraum (Tokio 3.–11.9., Osaka 11.–18.9., Hakata 18.–22.9.),
-- eigener **Anker** — das Hotel dieser Etappe, Start- und Endpunkt jedes Tages,
+- eigener **Anker** — das Hotel dieser Etappe, Start- und Endpunkt jedes Tages.
+  Ist noch nichts gebucht, genügt eine **Ankerzone** statt einer Adresse
+  („höchstens fünf Metro-Stationen vom Wenzelsplatz"): Der Planer rechnet mit
+  ihrem Schwerpunkt und kann sie zugleich als Suchhilfe für die Hotelwahl
+  ausgeben,
+- eigener **Fortbewegungsmodus.** Der Modus gehört zur Etappe, nicht zur Reise:
+  Mit dem Auto anzureisen heißt nicht, in der Innenstadt Auto zu fahren. Wechselt
+  der Modus am Etappenanfang, wird das Umsteigen selbst zum Fixpunkt — Park & Ride
+  am Stadtrand, Mietwagenrückgabe, Gepäck ins Hotel,
 - eigene **Regionsdatenbank** (Kanto, Kansai, Kyushu) und damit ein eigener
   Kandidatenvorrat,
 - **Transfertage:** Die Fahrt zwischen zwei Etappen ist ein Fixpunkt, der einen
@@ -170,6 +178,18 @@ Liegen Hotelbuchungen als Dokumente vor, ergeben sich die Etappengrenzen daraus
 von selbst; sonst schlägt der Planer eine Aufteilung vor, die der Nutzer
 verschiebt. Umverteilt wird immer nur **innerhalb** einer Etappe — was in Tokio
 ausfällt, rutscht nicht nach Osaka.
+
+**Der Transfer selbst kann ein Planungsobjekt sein.** „Auf dem Weg noch etwas
+anschauen, ohne groß umzuwegen" ist keine Umkreissuche mehr, sondern eine
+**Korridorsuche mit Umwegbudget**: gesucht sind Spots, die die Fahrt um höchstens
+*n* Minuten verlängern. Billig lösbar auch ohne Router — die Punkte, für die
+`Entfernung(Start, P) + Entfernung(P, Ziel) ≤ Entfernung(Start, Ziel) + Budget`
+gilt, bilden eine **Ellipse mit Start und Ziel als Brennpunkten**. Das ist eine
+einzige Bedingung in PostGIS, filtert aus einem ganzen Land ein schmales Band
+heraus, und erst die paar Überlebenden bekommen (später, mit Router) eine echte
+Umwegrechnung. Wie viel Zeit dabei überhaupt zur Verfügung steht, ergibt sich aus
+den Fixpunkten der Etappe — eine Anreise mit Check-in erst ab 15 Uhr *schafft*
+den Zwischenstopp, statt ihn zu verhindern.
 
 ### 4.3 Zwei Auflösungen: grob für die Reise, fein für morgen
 
@@ -190,12 +210,31 @@ an **das eigentliche Planungsergebnis** — die Tagesblöcke sind nur seine
 jeweils nächste Konkretisierung. Für einen Wochenendtrip fallen beide
 Auflösungen zusammen, für drei Wochen nicht.
 
+### 4.4 Harte Uhrzeiten: der Rahmen, nicht der Inhalt
+
+Leitentscheidung 1 vermeidet Uhrzeiten — aber manche sind unausweichlich: der
+letzte Zug zurück, das gebuchte Zeitfenster, der Check-in ab 15 Uhr, die
+Fährabfahrt. Die Auflösung ist eine Arbeitsteilung:
+
+- **Fixpunkte sind absolut** und tragen eine echte Uhrzeit. Sie spannen den
+  Rahmen eines Tages auf.
+- **Blöcke sind relativ** und füllen den Raum dazwischen. Sie behalten ihre
+  grobe Natur.
+
+Ein Fixpunkt am Tagesende wird **rückwärts** gerechnet: Vom letzten Zug gehen
+der Weg zum Bahnhof und ein Sicherheitspuffer ab, der Rest ist das Budget des
+letzten Blocks. Je näher der Tag an diesen Rand kommt, desto härter greift das
+Budget — und desto eher schlägt die Neuverteilung (§5) vor, etwas zu streichen.
+Der Puffer ist verhandelbar, aber nie null: Einen Zug zu verpassen ist teurer
+als ein ausgelassener Spot.
+
 ## 5. Umplanen als Kernmechanik
 
 Ein Plan besteht aus drei Schichten:
 
 - **Fixpunkte** — aus Dokumenten oder vom Nutzer angeheftet (Hotel-Check-in,
-  gebuchtes Zeitfenster, Zugabfahrt). Werden nie automatisch verschoben.
+  gebuchtes Zeitfenster, Zugabfahrt, Moduswechsel). Werden nie automatisch
+  verschoben und sind die einzigen Elemente mit echter Uhrzeit (§4.4).
 - **Eingeplante Spots** — pro Block, mit Reihenfolge.
 - **Vorrat** — bewertete Kandidaten der Region, die (noch) nicht eingeplant
   sind. Der Vorrat ist der Grund, warum Umplanen schnell geht: die Kandidaten
@@ -485,8 +524,11 @@ Indoor/Outdoor, Fassadenazimut) ·
    Bewusst **vor** dem hübschen UI, weil es die Kernmechanik ist.
 4. **NL-Eingabe** über llm-service (JSON-Schema, strikte Validierung) +
    Mehrtagesplanung.
-5. **Etappen und zwei Auflösungen** (§4.2/§4.3) — Reisen über mehrere Orte,
-   Transfertage, Vorrat je Etappe, Detaillierung erst am Vorabend.
+5. **Etappen, Fixpunkte, zwei Auflösungen** (§4.2–§4.4) — Reisen über mehrere
+   Orte, Modus je Etappe, Ankerzonen, Transfertage, harte Uhrzeiten mit
+   Rückwärtsrechnung, Vorrat je Etappe, Detaillierung erst am Vorabend.
+   Enthält die **Korridorsuche** für geplante Anreisen (Ellipsenfilter, noch
+   ohne Router).
 6. **iOS-Oberfläche** — Blockkarten, Karte, Wischgesten, „Heute"-Modus.
 7. **Standort** — Geofences um die nächsten Stopps, Erledigt-Erkennung,
    angebotene Neuverteilung, „was ist in der Nähe".
@@ -530,6 +572,11 @@ hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
   Griechenland oder Thailand unlesbare Namen im Plan. Auch mit dem Tag bleibt
   eine Lücke, wo OSM keinen englischen Namen führt — dann hilft nur die
   Originalschreibweise plus Wikidata-Label als Fallback.
+- **Der Korridorfilter ist eine Näherung.** Die Ellipse rechnet mit Luftlinien;
+  Berge, Flüsse und Grenzübergänge sieht sie nicht. Ein Spot mit „+10 Min." laut
+  Ellipse kann real eine halbe Stunde kosten. Solange kein Router mitrechnet,
+  gehört die Umwegangabe deshalb als Schätzung gekennzeichnet, und das Budget
+  wird großzügig angesetzt, damit die Vorauswahl nichts Gutes verwirft.
 - **Keine Echtzeit.** Verkehr, Streiks, spontane Schließungen sieht das System
   nicht — bewusste Übergabe an Apple/Google Maps für die Navigation.
 - **Speicherbedarf** eines späteren Routers (Valhalla-Kacheln zusätzlich zu den
@@ -554,14 +601,21 @@ hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
 4. **Lichthinweise für alle?** Sichtbar für jeden, oder ein Schalter für die,
    die tatsächlich fotografieren wollen — und darf Licht auch einen Abendblock
    vorschlagen, den es sonst nicht gäbe?
-5. **Web-Frontend:** nur iOS, oder Planung auch in der Vue-App? Planen am großen
+5. **Hotelwahl:** Soll der Planer aus einer Ankerzone (§4.2) aktiv Viertel
+   vorschlagen — „diese Gegenden liegen im Radius und haben abends noch etwas
+   offen" — oder bleibt die Unterkunft ausdrücklich außerhalb seines Auftrags?
+6. **Web-Frontend:** nur iOS, oder Planung auch in der Vue-App? Planen am großen
    Bildschirm, Umplanen am Telefon wäre eine naheliegende Arbeitsteilung.
 
 ---
 
 ## 12. Durchgespielt: 20 Tage Japan
 
-Ein Beispiel, an dem sich die Mechanik prüfen lässt — **3.9. bis 22.9.2027,
+Drei durchgespielte Fälle prüfen die Mechanik an ihren Rändern: eine lange
+Mehrstädtereise (§12), ein Kurztrip mit dem Auto und geplanter Anreise (§13) und
+ein einzelner Tagesausflug (§14). Jeder hat das Konzept verändert.
+
+Zuerst der lange Fall — **3.9. bis 22.9.2027,
 Tokio, Osaka und Hakata, zu zweit**. Bewusst ein harter Fall: lang, mehrere
 Orte, weit in der Zukunft, nicht-lateinische Schrift, andere Zeitzone.
 
@@ -652,3 +706,129 @@ Klimanormale statt Vorhersage jenseits des Prognosehorizonts und Hitze als
 Budgetfaktor (§6.2), das Fassadenazimut, das wegen der Zentroid-Reduktion beim
 Import berechnet werden muss (§6.3), und `name:en` in der Tag-Allowlist, ohne
 das im Plan 浅草寺 statt „Sensō-ji" stünde (§8).
+
+---
+
+## 13. Durchgespielt: vier Tage Prag mit dem Auto
+
+**30.8. bis 2.9.2027, Augsburg → Prag und zurück, mit dem Auto.** Der
+Gegenentwurf zu Japan: kurz, ein Ziel, aber mit einer Anreise, die selbst
+geplant werden will, und einem Moduswechsel unterwegs.
+
+### 13.1 Eingabe und Rahmen
+
+```
+30.8. bis 2.9.2027 Prag, mit dem Auto ab Augsburg.
+Hotel etwa 5 Metro-Stationen vom Wenzelsplatz.
+Check-in ab 15 Uhr. Auf dem Weg gern was anschauen,
+wenn es nicht groß umwegt.
+```
+
+Daraus wird **eine** Etappe (Prag) mit zwei Transfers, dazu:
+
+- **Ankerzone statt Anker** (§4.2): Das Hotel ist noch nicht gebucht. Der Planer
+  rechnet mit dem Schwerpunkt der Zone rund um Muzeum/Můstek und gibt sie als
+  Suchhilfe aus — welche Viertel innerhalb von etwa fünfzehn Minuten Metrofahrt
+  liegen, weiß er aus den OSM-Daten besser als ein Buchungsportal.
+- **Modus je Etappe** (§4.2): Auto für Hin- und Rückweg, in Prag **Fuß und
+  Metro**. In die Innenstadt fährt man nicht — der Wechsel ist ein Fixpunkt:
+  Park & Ride an einer Metro-Endstation oder das Hotelparkhaus, dann Gepäck ab,
+  dann zu Fuß weiter.
+- **Nur eine Auflösung** (§4.3): Vier Tage sind kurz genug, dass Reise- und
+  Tagesauflösung zusammenfallen.
+
+### 13.2 Der Anreisetag — die interessanteste Rechnung
+
+Die Fahrt Augsburg–Prag liegt bei gut vier Stunden reiner Fahrzeit. Der
+Check-in **ab** 15 Uhr ist kein Hindernis, sondern die Quelle des freien
+Zeitfensters: Bei Abfahrt um acht wäre man um kurz nach zwölf da und stünde drei
+Stunden vor einer verschlossenen Rezeption. Der Planer dreht das um und sucht im
+**Korridor** (§4.2) nach einem Zwischenstopp mit rund zwei Stunden Aufenthalt und
+kleinem Umwegbudget.
+
+Die Ellipsenbedingung zieht dabei ein schmales Band entlang der Strecke aus der
+Regionsdatenbank — Kandidaten mit nahezu null Umweg liegen ohnehin auf dem Weg,
+weiter entfernte müssen ihr Budget rechtfertigen. Ergebnis ist ein kleiner
+Vorrat statt einer einzelnen Empfehlung, mit der Umwegzeit als sichtbarer
+Kennzahl („+5 Min.", „+25 Min."), über den ihr entscheidet.
+
+Der Tag sieht danach so aus:
+
+| Zeit | Element |
+|---|---|
+| ~8:00 | Abfahrt (Fixpunkt, selbst gesetzt) |
+| Vormittag | Fahrt, ein Teilstück |
+| Mittagsblock | Zwischenstopp im Korridor, ca. 2 h |
+| Nachmittag | Rest der Fahrt, P+R, Gepäck ins Hotel |
+| ab 15:00 | Check-in (Fixpunkt) |
+| Restnachmittag | erster kurzer Block zu Fuß rund um den Anker |
+
+### 13.3 Die beiden vollen Tage und die Abreise
+
+31.8. und 1.9. sind normale Blocktage, ab dem Anker, zu Fuß und mit der Metro —
+also genau der Fall aus §4.1. Der 2.9. ist wieder ein halber: Check-out am
+Vormittag, Rückfahrt. Ob der Rückweg noch einen Korridorstopp verträgt, hängt
+davon ab, wann ihr zu Hause sein wollt — dieselbe Rechnung wie bei der Anreise,
+nur mit dem Fixpunkt am anderen Ende (§4.4).
+
+### 13.4 Was dieses Beispiel beigetragen hat
+
+Drei Mechaniken, die jetzt im Konzept stehen: die **Ankerzone** für noch nicht
+gebuchte Unterkünfte, der **Modus je Etappe** samt Moduswechsel als Fixpunkt,
+und die **Korridorsuche mit Umwegbudget** samt der Ellipsen-Vorfilterung, die
+ohne Router auskommt.
+
+---
+
+## 14. Durchgespielt: ein Tag Nürnberg mit dem Zug
+
+Der kleinstmögliche Trip — **Augsburg → Nürnberg und zurück, an einem Tag, mit
+der Bahn**. Wertvoll als Testfall, weil hier jede Vereinfachung des Konzepts
+an ihre Grenze kommt.
+
+### 14.1 Was hier alles wegfällt
+
+Ein Tagesausflug ist eine Etappe mit einem Tag, ohne Hotel und ohne
+Reiseauflösung. Der **Anker ist der Hauptbahnhof** — Start- und Endpunkt
+zugleich, und in Nürnberg praktischerweise direkt an der Altstadt, sodass der
+ganze Tag zu Fuß funktioniert. Der Vorrat ist klein, die Abstimmung entfällt,
+und Klimanormale braucht niemand: Für morgen gibt es eine echte Vorhersage.
+
+Das System muss also **nach unten sauber abbauen** — kein leerer
+Etappen-Assistent, keine Aufforderung, ein Hotel zu wählen, kein
+Vier-Wochen-Vorrat.
+
+### 14.2 Der Tag hängt zwischen zwei Zügen
+
+Hier zeigt §4.4 seinen Nutzen. Beide Enden sind harte Uhrzeiten:
+
+| | |
+|---|---|
+| Hinfahrt | Fixpunkt — je nach Zug rund eine bis zwei Stunden |
+| Vormittag | Altstadt und Burgberg, ab Hauptbahnhof zu Fuß |
+| Mittag | offen |
+| Nachmittag | Museum oder ein zweiter Stadtteil |
+| **Rückfahrt** | **Fixpunkt, rückwärts gerechnet** |
+
+Vom letzten sinnvollen Zug gehen der Fußweg zum Bahnhof und ein Sicherheitspuffer
+ab; was bleibt, ist das Budget des Nachmittagsblocks. Fällt ihr um drei Uhr
+zurück, greift die Neuverteilung (§5) härter als in Prag oder Tokio — es gibt
+kein „dann eben morgen", der Vorrat hat keinen Folgetag mehr. Genau deshalb
+zählt hier die Rangfolge aus der Abstimmung am meisten: Was zuerst wegfällt,
+sollte nicht das sein, wofür man gefahren ist.
+
+### 14.3 Das Ticket als Randbedingung
+
+Liegt ein Ticket als Dokument vor, wird seine Einschränkung zum Fixpunkt: Ein
+Sparpreis mit Zugbindung legt beide Enden fest, ein Bayern-Ticket ist werktags
+erst ab 9 Uhr gültig und verschiebt damit den Beginn des Vormittagsblocks. Das
+ist derselbe Mechanismus wie die Hotelbuchung in §12 — nur enger, weil ein Tag
+keine Reserve hat.
+
+### 14.4 Was dieses Beispiel beigetragen hat
+
+Es hat die Formulierung von §4.4 erzwungen: Fixpunkte sind absolut und tragen
+eine Uhrzeit, Blöcke bleiben relativ. Ohne diese Trennung wäre die grobe Planung
+ausgerechnet dort gescheitert, wo Pünktlichkeit zählt. Dazu die Erkenntnis, dass
+das System **nach unten abbauen** können muss: Ein Tagesausflug darf sich nicht
+anfühlen wie eine amputierte Weltreise.
