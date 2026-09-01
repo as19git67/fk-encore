@@ -42,6 +42,115 @@ export function extractDocumentNumber(text: string): string | null {
   return text.match(DOCUMENT_NUMBER_RE)?.[1] ?? null;
 }
 
+// ─── The date shapes, in one table ────────────────────────────────────────
+//
+// Two readers look for dates: `collectDateCandidates` scans the OCR text for a
+// date behind a label, and `normalizeDocumentDate` converts a whole string the
+// vision model read off the page. They used to enumerate the shapes they
+// understood separately, and that produced the same bug four times running —
+// a shape one reader knew and the other did not:
+//
+//     Oktober 2012              scan read it, vision did not
+//     München, 05.03.2022       scan read it, vision did not
+//     Lieferdatum 2014-11-17    vision read it, scan did not
+//     2024/07/28                neither, until the separator was widened
+//
+// Nothing fails when they disagree. The document simply has no date, and only
+// a spot check reveals which side was blind — which is why every one of those
+// was found by a person noticing a missing date, never by the pipeline.
+//
+// So the shape of a date lives here once, as a regex BODY: the date itself,
+// with no anchor, no label and no `^…$`. The scan composes a label in front of
+// it; the converter anchors it end to end. A shape added here reaches both,
+// and `documents/metadata-extract.test.ts` runs every example below through
+// both readers so a one-sided addition cannot pass.
+
+/**
+ * What may separate the parts of a year-first date.
+ *
+ * Hyphen is the ISO 8601 one, but a slash is just as common on invoices from
+ * software that formats dates programmatically — a charging invoice dates
+ * itself "2024/07/28" — and a dot occurs in the same places. The order is not
+ * in question whichever it is: a four-digit first component cannot be a day or
+ * a month, which is what makes this shape safe to widen at all.
+ */
+const YEAR_FIRST_SEP = String.raw`[-/.]`;
+
+/**
+ * English date labels, for the paperwork a household archive collects from
+ * abroad. Kept to labels that name the document's OWN date; a bare "date" is
+ * included because on such forms it is nearly always the field caption, and
+ * the same NON_DOCUMENT_DATE_LABEL guard that protects "…datum" does not apply
+ * — an English "date of birth" is caught by its own entry.
+ */
+const EN_DATE_LABEL = String.raw`(?:date\s+of\s+issue|issue\s+date|invoice\s+date|statement\s+date|entered\s+date|date)`;
+
+/** Any label that reliably precedes a document's own date, either language. */
+const ANY_DATE_LABEL = String.raw`(?:\w*datum|${EN_DATE_LABEL})`;
+
+/**
+ * The date shapes, as bodies. Capture groups are named in each comment because
+ * every consumer reads them positionally.
+ */
+const SHAPE = {
+  /** 18.01.2021 — day, month, year. Day-first everywhere it occurs. */
+  dotted: String.raw`(\d{1,2})\.[ \t]*(\d{1,2})\.[ \t]*(\d{4}|\d{2})`,
+  /** 2024-07-28, 2024/07/28 — year, month, day. Order fixed by the 4-digit year. */
+  yearFirst: String.raw`(\d{4})${YEAR_FIRST_SEP}(\d{2})${YEAR_FIRST_SEP}(\d{2})`,
+  /** 8. September 2017, 25 MAI 01 — day, month name, year. */
+  dayMonthName: String.raw`(\d{1,2})\.?[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4}|\d{2})`,
+  /** 12-MAY-2013 — the same, hyphenated. */
+  dayMonthHyphen: String.raw`(\d{1,2})-([A-Za-zÄÖÜäöü.]{3,})-(\d{4}|\d{2})`,
+  /** August 23, 2026 — month name, day, year. */
+  monthNameDay: String.raw`([A-Za-zÄÖÜäöü.]{3,})\.?[ \t]+(\d{1,2})(?:st|nd|rd|th)?,?[ \t]+(\d{4}|\d{2})`,
+  /** Oktober 2012 — month name, year. No day; the first is a convention. */
+  monthNameYear: String.raw`([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4})`,
+  /** 10/2012 — numeric month, four-digit year. No day. */
+  numericMonthYear: String.raw`(\d{1,2})[/.-](\d{4})`,
+  /** 03/04/2013 — the ONE shape whose order the characters do not settle. */
+  ambiguous: String.raw`(\d{1,2})[/-](\d{1,2})[/-](\d{4}|\d{2})`,
+} as const;
+
+/**
+ * One example per shape, with what it must resolve to.
+ *
+ * Exported for the cross-check test, which runs every example through BOTH
+ * readers — the converter on the bare string, the scan behind a "Rechnungsdatum"
+ * label. A shape added to one reader and not the other fails it, which is the
+ * whole reason the table above exists.
+ *
+ * `ambiguous` carries the convention it is read under, because it is the one
+ * shape whose answer depends on something outside the characters.
+ */
+export const DATE_SHAPE_EXAMPLES: ReadonlyArray<{
+  shape: keyof typeof SHAPE;
+  text: string;
+  iso: string;
+  convention?: DateConvention;
+}> = [
+  { shape: "dotted", text: "18.01.2021", iso: "2021-01-18" },
+  { shape: "yearFirst", text: "2024/07/28", iso: "2024-07-28" },
+  { shape: "dayMonthName", text: "8. September 2017", iso: "2017-09-08" },
+  { shape: "dayMonthHyphen", text: "12-MAY-2013", iso: "2013-05-12" },
+  { shape: "monthNameDay", text: "August 23, 2026", iso: "2026-08-23" },
+  { shape: "monthNameYear", text: "Oktober 2012", iso: "2012-10-01" },
+  { shape: "numericMonthYear", text: "10/2012", iso: "2012-10-01" },
+  { shape: "ambiguous", text: "03/04/2013", iso: "2013-04-03", convention: "dmy" },
+];
+
+/** A shape behind a label, on the same line. The gap tolerates OCR spacing. */
+function labelled(label: string, body: string, gap = 80): RegExp {
+  return new RegExp(String.raw`\b${label}\b[ \t:]{0,${gap}}${body}\b`, "gi");
+}
+
+/** A shape after the "Ort," letterhead convention. Case-sensitive on the city. */
+function afterPlace(body: string, lead = ""): RegExp {
+  return new RegExp(
+    String.raw`\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-]+,[ \t]{0,3}${lead}${body}\b`,
+    "g",
+  );
+}
+
 // Date labels/anchors, most-specific first, that reliably precede a document's
 // own date in German paperwork. `\w*datum` covers "Datum", "Rechnungsdatum",
 // "Bescheiddatum", "Belegdatum", "Ausstellungsdatum", "Auftragsdatum", … in one
@@ -52,12 +161,12 @@ export function extractDocumentNumber(text: string): string | null {
 // be the date's first digit — making even a large gap safe (it can't span an
 // intervening field or word).
 const DATE_ANCHOR_PATTERNS: readonly RegExp[] = [
-  /\b\w*datum\b[ \t:]{0,80}(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})\b/gi,
+  labelled(String.raw`\w*datum`, SHAPE.dotted),
   // "Rechnung vom 18.01.2021"
-  /\bvom\b[ \t:]{0,5}(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})\b/gi,
+  labelled("vom", SHAPE.dotted, 5),
   // German letterhead convention "Ort, TT.MM.JJJJ" (4-digit year only, to keep
   // precision — a bare 2-digit year after a word is too easily a false match).
-  /\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-]+,[ \t]{0,3}(\d{1,2})\.(\d{1,2})\.(\d{4})\b/g,
+  afterPlace(String.raw`(\d{1,2})\.[ \t]*(\d{1,2})\.[ \t]*(\d{4})`),
 ];
 
 // `\w*datum` is deliberately broad, which also makes it swallow compounds that
@@ -112,7 +221,23 @@ function isNonDocumentDateMatch(text: string, m: RegExpExecArray): boolean {
  * document. With it the match is the letterhead phrasing and little else.
  */
 const DATE_ANCHOR_MONTHYEAR_PATTERNS: readonly RegExp[] = [
-  /\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-]+,[ \t]{0,3}im[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4})\b/g,
+  afterPlace(SHAPE.monthNameYear, String.raw`im[ \t]+`),
+  // Behind a label the "im" is not needed and the month alone is the answer:
+  // "Rechnungsdatum Oktober 2012" on a statement. Found by the cross-check
+  // test — the converter has read this shape since it learned bare months, and
+  // the scan had no way to.
+  labelled(ANY_DATE_LABEL, SHAPE.monthNameYear),
+];
+
+/**
+ * "Rechnungsdatum 10/2012" — a numeric month and a four-digit year.
+ *
+ * Its own list because its first capture is the month NUMBER, not a name, so
+ * it cannot share the loop that resolves month words. Unambiguous despite the
+ * slash: a four-digit second component cannot be a day.
+ */
+const DATE_ANCHOR_NUMERIC_MONTHYEAR_PATTERNS: readonly RegExp[] = [
+  labelled(ANY_DATE_LABEL, SHAPE.numericMonthYear),
 ];
 
 // Same anchors as above, but for German month-name dates ("8. September 2017").
@@ -131,8 +256,6 @@ const DATE_ANCHOR_MONTHYEAR_PATTERNS: readonly RegExp[] = [
 // included because on such forms it is nearly always the field caption, and
 // the same NON_DOCUMENT_DATE_LABEL guard that protects "...datum" does not
 // apply — an English "date of birth" is caught by its own entry below.
-const EN_DATE_LABEL = String.raw`(?:date\s+of\s+issue|issue\s+date|invoice\s+date|statement\s+date|entered\s+date|date)`;
-
 // "Lieferdatum   2014-11-17", "Datum: 2014-11-17" — an ISO date behind a
 // label. Unambiguous by construction: a four-digit year cannot be a day or a
 // month, so no convention is needed and the order cannot be misread.
@@ -142,26 +265,20 @@ const EN_DATE_LABEL = String.raw`(?:date\s+of\s+issue|issue\s+date|invoice\s+dat
 // whose "Lieferdatum" is written the ISO way had a date the vision path could
 // have used and the text scan could not see.
 const DATE_ANCHOR_ISO_PATTERNS: readonly RegExp[] = [
-  new RegExp(
-    String.raw`\b(?:\w*datum|${EN_DATE_LABEL})\b[ \t:]{0,80}(\d{4})-(\d{2})-(\d{2})\b`,
-    "gi",
-  ),
-  /\bvom\b[ \t:]{0,5}(\d{4})-(\d{2})-(\d{2})\b/gi,
+  labelled(ANY_DATE_LABEL, SHAPE.yearFirst),
+  labelled("vom", SHAPE.yearFirst, 5),
 ];
 
 // "Date of issue   August 23, 2026" — a spelled-out month, then the day. The
 // order is fixed by the month being a word, so this needs no convention.
 const DATE_ANCHOR_MONTHDAY_PATTERNS: readonly RegExp[] = [
-  new RegExp(
-    String.raw`\b${EN_DATE_LABEL}\b[ \t:]{0,80}([A-Za-z]{3,})\.?[ \t]+(\d{1,2})(?:st|nd|rd|th)?,?[ \t]+(\d{4})\b`,
-    "gi",
-  ),
+  labelled(ANY_DATE_LABEL, SHAPE.monthNameDay),
 ];
 
 // "12-MAY-2013", with or without a label in front of or behind it. Also
 // unambiguous: the month is spelled out.
 const DATE_ANCHOR_DAYMONTH_HYPHEN_PATTERNS: readonly RegExp[] = [
-  /\b(\d{1,2})-([A-Za-z]{3,})-(\d{4})\b/g,
+  new RegExp(String.raw`\b${SHAPE.dayMonthHyphen}\b`, "g"),
 ];
 
 // Numeric dates separated by a slash or a hyphen. THE ONE SHAPE WHOSE READING
@@ -173,21 +290,20 @@ const DATE_ANCHOR_DAYMONTH_HYPHEN_PATTERNS: readonly RegExp[] = [
 // likely to be a fraction, a reference or a period as a date, and this is
 // precisely the shape where guessing wrong is silent.
 const DATE_ANCHOR_AMBIGUOUS_PATTERNS: readonly RegExp[] = [
-  new RegExp(
-    String.raw`\b(?:\w*datum|${EN_DATE_LABEL})\b[ \t:]{0,80}(\d{1,2})[/-](\d{1,2})[/-](\d{4}|\d{2})\b`,
-    "gi",
-  ),
-  /\bvom\b[ \t:]{0,5}(\d{1,2})[/-](\d{1,2})[/-](\d{4}|\d{2})\b/gi,
-  // The "Ort, TT/MM/JJJJ" letterhead, which the dotted patterns have always
-  // covered but the slash form never did. Four-digit year only, exactly as the
+  labelled(ANY_DATE_LABEL, SHAPE.ambiguous),
+  labelled("vom", SHAPE.ambiguous, 5),
+  // The "Ort, TT/MM/JJJJ" letterhead. Four-digit year only, exactly as the
   // dotted one: a two-digit year after a word is too easily a false match.
-  /\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-]+,[ \t]{0,3}(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b/g,
+  afterPlace(String.raw`(\d{1,2})[/-](\d{1,2})[/-](\d{4})`),
 ];
 
 const DATE_ANCHOR_MONTHNAME_PATTERNS: readonly RegExp[] = [
-  /\b\w*datum\b[ \t:]{0,80}(\d{1,2})\.?[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{2,4})\b/gi,
-  /\bvom\b[ \t:]{0,5}(?:den[ \t]+)?(\d{1,2})\.?[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{2,4})\b/gi,
-  /\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-]+,[ \t]{0,3}(?:den[ \t]+)?(\d{1,2})\.?[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4})\b/g,
+  labelled(String.raw`\w*datum`, SHAPE.dayMonthName),
+  labelled("vom", String.raw`(?:den[ \t]+)?${SHAPE.dayMonthName}`, 5),
+  afterPlace(
+    String.raw`(\d{1,2})\.?[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4})`,
+    String.raw`(?:den[ \t]+)?`,
+  ),
 ];
 
 // German and English month names + common abbreviations → month number.
@@ -363,73 +479,57 @@ export function normalizeDocumentDate(
 ): string | null {
   const text = value.trim().replace(PLACE_PREFIX_RE, "");
 
-  // Dotted: day-first everywhere it occurs.
-  const dotted = /^(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{2,4})$/.exec(text);
+  // Every branch below anchors a shape from SHAPE end to end. The scan
+  // composes the same bodies behind a label; adding one here without adding it
+  // there — or the reverse — is what the cross-check test exists to catch.
+  const whole = (body: string, flags = "") => new RegExp(`^${body}$`, flags);
+
+  // Dotted: day-first everywhere it occurs, whatever the convention says.
+  const dotted = whole(SHAPE.dotted).exec(text);
   if (dotted) return toIsoDate(dotted[1], dotted[2], dotted[3]);
 
-  // "8. September 2017" / "12-MAY-2013" / "25 MAI 01" — day, then a spelled-out
-  // month.
-  //
-  // The year may be two digits, which the written-month shapes refused until a
-  // credit card statement from 2001 dated itself "25 MAI 01". Safe here in a
-  // way it is not for a bare month and year: the day has already been consumed,
-  // so a trailing number can only be the year. `toIsoDate` applies the same
-  // 00-68 / 69-99 pivot the dotted form has always used.
-  // The "den" is the German letterhead phrasing ("Musterstadt, den 8. September
-  // 2017"), which survives the place strip and which the text scan's anchored
-  // patterns already tolerate.
-  const dayMonth =
-    /^(?:den[ \t]+)?(\d{1,2})[.\-]?[ \t]*[-\s][ \t]*([A-Za-zÄÖÜäöü.]{3,})[-\s][ \t]*(\d{2,4})$/i.exec(
-    text,
-  );
-  if (dayMonth) {
-    const month = monthFromName(dayMonth[2]);
-    if (month != null) return toIsoDate(dayMonth[1], String(month), dayMonth[3]);
+  // "8. September 2017" / "25 MAI 01", and the hyphenated "12-MAY-2013".
+  // The "den" is the German letterhead phrasing, which survives the place
+  // strip and which the scan's anchored patterns already tolerate.
+  for (const body of [
+    String.raw`(?:den[ \t]+)?${SHAPE.dayMonthName}`,
+    SHAPE.dayMonthHyphen,
+  ]) {
+    const m = whole(body, "i").exec(text);
+    if (!m) continue;
+    const month = monthFromName(m[2]);
+    if (month != null) return toIsoDate(m[1], String(month), m[3]);
   }
 
   // "August 23, 2026" / "März 8, 2020" — a spelled-out month, then the day.
-  const monthDay = /^([A-Za-zÄÖÜäöü.]{3,})\.?[ \t]+(\d{1,2})(?:st|nd|rd|th)?,?[ \t]+(\d{2,4})$/.exec(
-    text,
-  );
+  const monthDay = whole(SHAPE.monthNameDay).exec(text);
   if (monthDay) {
     const month = monthFromName(monthDay[1]);
     if (month != null) return toIsoDate(monthDay[2], String(month), monthDay[3]);
   }
 
-  // Already ISO — a model that reformatted despite the instruction is still
-  // giving a usable answer, and refusing it would be pedantry.
-  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
-  if (iso) return toIsoDate(iso[3], iso[2], iso[1]);
+  // Year first. Already ISO from a model that reformatted despite the
+  // instruction is still a usable answer, and refusing it would be pedantry.
+  const yearFirst = whole(SHAPE.yearFirst).exec(text);
+  if (yearFirst) return toIsoDate(yearFirst[3], yearFirst[2], yearFirst[1]);
 
-  // "Oktober 2012", "Im Oktober 2012" — a month with no day.
-  //
-  // The letterhead of a statement or an annual notice frequently dates itself
-  // to the month alone, and the model copies that faithfully because it was
-  // told to. The text scan has always resolved this shape to the first of the
-  // month (BARE_MONTHYEAR_RE); without it here the same printed date produced
-  // a date through one reader and null through the other, which is not a
-  // defensible difference.
-  //
-  // The leading "im"/"in" is the German letterhead phrasing ("Im Oktober
-  // 2012") and is part of what is printed, so the model returns it.
-  const monthYear = /^(?:i[mn][ \t]+)?([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4})$/i.exec(text);
+  // "Oktober 2012", "Im Oktober 2012" — a month with no day, resolved to the
+  // first of it. The leading "im"/"in" is the German letterhead phrasing and is
+  // part of what is printed, so the model returns it.
+  const monthYear = whole(String.raw`(?:i[mn][ \t]+)?${SHAPE.monthNameYear}`, "i").exec(text);
   if (monthYear) {
     const month = monthFromName(monthYear[1]);
     if (month != null) return toIsoDate("1", String(month), monthYear[2]);
   }
 
   // "10/2012" — a numeric month and a four-digit year. Unambiguous despite the
-  // slash: a four-digit second component cannot be a day, so no convention is
-  // needed.
-  const numericMonthYear = /^(\d{1,2})[/.-](\d{4})$/.exec(text);
-  if (numericMonthYear) {
-    return toIsoDate("1", numericMonthYear[1], numericMonthYear[2]);
-  }
+  // slash: a four-digit second component cannot be a day.
+  const numericMonthYear = whole(SHAPE.numericMonthYear).exec(text);
+  if (numericMonthYear) return toIsoDate("1", numericMonthYear[1], numericMonthYear[2]);
 
-  // Numeric with a slash or hyphen: the only shape whose reading is not
-  // settled by the characters themselves. Tried last so it can never take a
-  // string one of the unambiguous forms above would have claimed.
-  const ambiguous = /^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/.exec(text);
+  // The one shape whose reading is not settled by its characters. Tried last so
+  // it can never take a string one of the unambiguous forms above would claim.
+  const ambiguous = whole(SHAPE.ambiguous).exec(text);
   if (ambiguous) {
     const [, a, b, year] = ambiguous;
     return convention === "mdy" ? toIsoDate(b, a, year) : toIsoDate(a, b, year);
@@ -448,7 +548,7 @@ function isDocumentDateLabel(cell: string): boolean {
 const CELL_DATE_RE = /\b(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})\b/;
 
 /** ISO inside a table cell — "Lieferdatum" over "2014-11-17". */
-const CELL_ISO_DATE_RE = /\b(\d{4})-(\d{2})-(\d{2})\b/;
+const CELL_ISO_DATE_RE = /\b(\d{4})[-/.](\d{2})[-/.](\d{2})\b/;
 
 /** Written-month date inside a table cell ("8. September 2017"). */
 const CELL_MONTHNAME_DATE_RE = /\b(\d{1,2})\.?[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4})\b/;
@@ -550,7 +650,7 @@ const DATE_LABEL_WORD_RE = /\b[A-Za-zÄÖÜäöüß]*datum\b/gi;
 
 /** As CELL_DATE_RE / CELL_MONTHNAME_DATE_RE, but scanning for every match. */
 const LINE_DATE_RE = /\b(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})\b/g;
-const LINE_ISO_DATE_RE = /\b(\d{4})-(\d{2})-(\d{2})\b/g;
+const LINE_ISO_DATE_RE = /\b(\d{4})[-/.](\d{2})[-/.](\d{2})\b/g;
 const LINE_MONTHNAME_DATE_RE = /\b(\d{1,2})\.?[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4})\b/g;
 
 // A header cell has to look like a header. Without this a sentence that merely
@@ -642,6 +742,7 @@ const RANKED_PATTERN_COUNT =
   DATE_ANCHOR_DAYMONTH_HYPHEN_PATTERNS.length +
   DATE_ANCHOR_AMBIGUOUS_PATTERNS.length +
   DATE_ANCHOR_MONTHNAME_PATTERNS.length +
+  DATE_ANCHOR_NUMERIC_MONTHYEAR_PATTERNS.length +
   DATE_ANCHOR_MONTHYEAR_PATTERNS.length;
 
 /**
@@ -825,6 +926,17 @@ function collectDateCandidates(
       const month = monthFromName(m[2]);
       if (month == null) continue;
       const iso = toIsoDate(m[1], String(month), m[3]);
+      if (iso) found.push({ iso, index: m.index, rank: own });
+    }
+  }
+  // "Rechnungsdatum 10/2012" — month number and year, day defaults to the 1st.
+  for (const re of DATE_ANCHOR_NUMERIC_MONTHYEAR_PATTERNS) {
+    const own = rank++;
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      if (isNonDocumentDateMatch(text, m) || isReferenceDateMatch(text, m)) continue;
+      const iso = toIsoDate("1", m[1], m[2]);
       if (iso) found.push({ iso, index: m.index, rank: own });
     }
   }

@@ -957,7 +957,39 @@ missing: the German letterhead `im`, an English `October 2012`, and a numeric
 be a day). The month-first pattern was also ASCII-only, so every German month
 carrying an umlaut failed in that position.
 
-#### The two readers keep drifting apart
+#### One table of shapes, read by both
+
+Two readers look for dates. `collectDateCandidates` scans the OCR text for one
+behind a label; `normalizeDocumentDate` converts a whole string the vision model
+read off the page. They used to enumerate the shapes they understood
+separately, and that produced the same bug four times running:
+
+| shape | scan | vision |
+| --- | --- | --- |
+| `Oktober 2012` | read it | did not |
+| `München, 05.03.2022` | read it | did not |
+| `Lieferdatum 2014-11-17` | did not | read it |
+| `2024/07/28` | did not | did not, until the separator was widened |
+
+**Nothing fails when they disagree.** The document simply has no date, and only
+a spot check reveals which side was blind — which is why every one of those was
+found by a person noticing a missing date, never by the pipeline.
+
+So the shape of a date now lives in `SHAPE` once, as a regex *body*: the date
+itself, with no anchor, no label and no `^…$`. The scan composes a label in
+front of it (`labelled`, `afterPlace`); the converter anchors it end to end.
+
+`DATE_SHAPE_EXAMPLES` carries one example per shape, and the cross-check test
+runs every one through **both** readers — the converter on the bare string, the
+scan behind a `Rechnungsdatum` label. A shape added to one and not the other
+fails it.
+
+It earned its keep on the first run: `Rechnungsdatum 10/2012` came back `null`
+from the scan, because the month-year loop resolves month *names* and this
+shape's first capture is a number. That gap had been there since the shape was
+added and nothing had noticed.
+
+#### The drift this replaced
 
 Three missing dates in a row have had the same shape: the vision path knew a
 form the text scan did not, or the reverse.
@@ -979,6 +1011,22 @@ alignment. It needs no convention: a four-digit year cannot be a day.
 
 Worth folding into one table of shapes at some point, so a form added once is
 read everywhere.
+
+#### A year-first date that is not hyphenated
+
+`2024/07/28` — a charging invoice from software that formats its dates
+programmatically. The year-first shape was hyphen-only, so both readers were
+blind to it: the same asymmetry ISO itself produced one PR earlier, one
+separator further along.
+
+Hyphen, slash and dot are now all accepted there, and none of them raises the
+convention question: **a four-digit first component cannot be a day or a
+month.** That is what makes widening this shape safe where widening
+`03/04/2013` is not.
+
+Widening the dot is the one that could have broken something, and does not:
+`28.07.2024` cannot match a year-first pattern, because `28` is not four
+digits.
 
 #### A two-digit year after a spelled-out month
 
