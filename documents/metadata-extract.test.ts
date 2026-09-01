@@ -644,6 +644,41 @@ describe("extractDocumentDate — an ISO date behind a label", () => {
   });
 });
 
+describe("a written-month date with a two-digit year", () => {
+  // A credit card statement from 2001 dated itself "25 MAI 01". Only the
+  // DOTTED numeric form accepted a two-digit year; every written-month shape
+  // insisted on four — so "12-MAY-13" failed as well.
+  it("is read once the day has been consumed", () => {
+    expect(normalizeDocumentDate("25 MAI 01")).toBe("2001-05-25");
+    expect(normalizeDocumentDate("25. Mai 01")).toBe("2001-05-25");
+    expect(normalizeDocumentDate("12-MAY-13")).toBe("2013-05-12");
+    expect(normalizeDocumentDate("MAI 25, 01")).toBe("2001-05-25");
+  });
+
+  it("uses the same century pivot as every other route", () => {
+    expect(normalizeDocumentDate("25 MAI 68")).toBe("2068-05-25");
+    expect(normalizeDocumentDate("25 MAI 69")).toBe("1969-05-25");
+  });
+
+  it("still refuses a bare month whose trailing number could be a day", () => {
+    // "Mai 01" is May 2001 or the first of May and nothing in it decides
+    // which. The day-bearing shapes above are safe precisely because the day
+    // is already spoken for.
+    expect(normalizeDocumentDate("Mai 01")).toBeNull();
+    expect(normalizeDocumentDate("Mai 2001")).toBe("2001-05-01");
+  });
+
+  it("is read by the scan behind a label, but not without one", () => {
+    // A label is what makes a two-digit year safe: nothing follows
+    // "Rechnungsdatum" but the date, while a bare number after a city name is
+    // as easily a house number or a reference.
+    expect(extractDocumentDate("Rechnungsdatum 25. Mai 01")).toBe("2001-05-25");
+    expect(extractDocumentDate("Rechnung vom 25. Mai 01")).toBe("2001-05-25");
+    expect(extractDocumentDate("München, 25. Mai 01\nSehr geehrte")).toBeNull();
+    expect(extractDocumentDate("München, 25. Mai 2001\nSehr geehrte")).toBe("2001-05-25");
+  });
+});
+
 describe("normalizeDocumentDate — a letter that names its place first", () => {
   // "Ort, Datum" is the letterhead convention across most of Europe, and the
   // model returns the place because it was told to copy what is printed. The

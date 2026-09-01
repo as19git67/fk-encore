@@ -116,6 +116,11 @@ const DATE_ANCHOR_MONTHYEAR_PATTERNS: readonly RegExp[] = [
 ];
 
 // Same anchors as above, but for German month-name dates ("8. September 2017").
+//
+// The two LABELLED patterns take a two- or four-digit year; the unanchored
+// "Ort," one still insists on four. The label is what makes the difference — a
+// bare two-digit year after a city name is too easily a house number or a
+// reference, while nothing follows "Rechnungsdatum" but the date.
 // The month word is captured broadly and validated against MONTHS afterwards
 // (so a non-month word never blocks a real match — the caller scans all matches
 // via the /g flag). 4-digit year only. The `den` is the common
@@ -180,8 +185,8 @@ const DATE_ANCHOR_AMBIGUOUS_PATTERNS: readonly RegExp[] = [
 ];
 
 const DATE_ANCHOR_MONTHNAME_PATTERNS: readonly RegExp[] = [
-  /\b\w*datum\b[ \t:]{0,80}(\d{1,2})\.?[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4})\b/gi,
-  /\bvom\b[ \t:]{0,5}(?:den[ \t]+)?(\d{1,2})\.?[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4})\b/gi,
+  /\b\w*datum\b[ \t:]{0,80}(\d{1,2})\.?[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{2,4})\b/gi,
+  /\bvom\b[ \t:]{0,5}(?:den[ \t]+)?(\d{1,2})\.?[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{2,4})\b/gi,
   /\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-]+,[ \t]{0,3}(?:den[ \t]+)?(\d{1,2})\.?[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4})\b/g,
 ];
 
@@ -362,12 +367,19 @@ export function normalizeDocumentDate(
   const dotted = /^(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{2,4})$/.exec(text);
   if (dotted) return toIsoDate(dotted[1], dotted[2], dotted[3]);
 
-  // "8. September 2017" / "12-MAY-2013" — day, then a spelled-out month.
+  // "8. September 2017" / "12-MAY-2013" / "25 MAI 01" — day, then a spelled-out
+  // month.
+  //
+  // The year may be two digits, which the written-month shapes refused until a
+  // credit card statement from 2001 dated itself "25 MAI 01". Safe here in a
+  // way it is not for a bare month and year: the day has already been consumed,
+  // so a trailing number can only be the year. `toIsoDate` applies the same
+  // 00-68 / 69-99 pivot the dotted form has always used.
   // The "den" is the German letterhead phrasing ("Musterstadt, den 8. September
   // 2017"), which survives the place strip and which the text scan's anchored
   // patterns already tolerate.
   const dayMonth =
-    /^(?:den[ \t]+)?(\d{1,2})[.\-]?[ \t]*[-\s][ \t]*([A-Za-zÄÖÜäöü.]{3,})[-\s][ \t]*(\d{4})$/i.exec(
+    /^(?:den[ \t]+)?(\d{1,2})[.\-]?[ \t]*[-\s][ \t]*([A-Za-zÄÖÜäöü.]{3,})[-\s][ \t]*(\d{2,4})$/i.exec(
     text,
   );
   if (dayMonth) {
@@ -376,7 +388,7 @@ export function normalizeDocumentDate(
   }
 
   // "August 23, 2026" / "März 8, 2020" — a spelled-out month, then the day.
-  const monthDay = /^([A-Za-zÄÖÜäöü.]{3,})\.?[ \t]+(\d{1,2})(?:st|nd|rd|th)?,?[ \t]+(\d{4})$/.exec(
+  const monthDay = /^([A-Za-zÄÖÜäöü.]{3,})\.?[ \t]+(\d{1,2})(?:st|nd|rd|th)?,?[ \t]+(\d{2,4})$/.exec(
     text,
   );
   if (monthDay) {

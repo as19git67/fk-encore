@@ -980,6 +980,24 @@ alignment. It needs no convention: a four-digit year cannot be a day.
 Worth folding into one table of shapes at some point, so a form added once is
 read everywhere.
 
+#### A two-digit year after a spelled-out month
+
+Only the *dotted* numeric form accepted a two-digit year. Every written-month
+shape insisted on four, so a credit card statement dating itself `25 MAI 01`
+produced nothing — and `12-MAY-13` failed with it.
+
+The rule is about what is left to interpret:
+
+| shape | two-digit year | why |
+| --- | --- | --- |
+| `25 MAI 01`, `12-MAY-13`, `MAI 25, 01` | accepted | the day is already consumed, so a trailing number can only be a year |
+| `Mai 01` | refused | May 2001 or the first of May, and nothing in it decides which |
+| `Rechnungsdatum 25. Mai 01` | accepted | nothing follows the label but the date |
+| `München, 25. Mai 01` | refused | a bare number after a city name is as easily a house number or a reference |
+
+`toIsoDate` applies the same 00–68 / 69–99 pivot everywhere, so the century
+question is answered in one place.
+
 #### "Ort, Datum"
 
 A letter that names its place before dating itself — `München, 05.03.2022`,
