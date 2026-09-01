@@ -4,6 +4,7 @@ import {
   detectSubjectPersonIds,
   detectSubjectPersonPersonalDeductionReview,
   extractDocumentDate,
+  DATE_SHAPE_EXAMPLES,
   inferDateConvention,
   isMonthOnlyReading,
   normalizeDocumentDate,
@@ -644,6 +645,54 @@ describe("extractDocumentDate — an ISO date behind a label", () => {
   });
 });
 
+describe("a year-first date that is not hyphenated", () => {
+  // A Tesla charging invoice dates itself "2024/07/28". The year-first shape
+  // was hyphen-only, so both readers were blind to it — the same asymmetry
+  // that ISO itself produced two PRs ago, one separator further along.
+  it("reads a slash and a dot as readily as a hyphen", () => {
+    expect(normalizeDocumentDate("2024/07/28")).toBe("2024-07-28");
+    expect(normalizeDocumentDate("2024.07.28")).toBe("2024-07-28");
+    expect(normalizeDocumentDate("2024-07-28")).toBe("2024-07-28");
+  });
+
+  it("needs no convention, whatever the separator", () => {
+    // A four-digit first component cannot be a day or a month. That is what
+    // makes widening this shape safe where widening the ambiguous one is not.
+    expect(normalizeDocumentDate("2024/07/28", "mdy")).toBe("2024-07-28");
+    expect(normalizeDocumentDate("2024/07/28", "dmy")).toBe("2024-07-28");
+  });
+
+  it("leaves a dotted German date day-first", () => {
+    // The one thing widening the dot could have broken.
+    expect(normalizeDocumentDate("28.07.2024")).toBe("2024-07-28");
+    expect(normalizeDocumentDate("07.08.2024")).toBe("2024-08-07");
+  });
+
+  it("still refuses an impossible date", () => {
+    expect(normalizeDocumentDate("2024/13/28")).toBeNull();
+    expect(normalizeDocumentDate("2024/07/32")).toBeNull();
+  });
+
+  it("is read by the scan behind a label and in a table, but not bare", () => {
+    expect(extractDocumentDate("Rechnungsdatum   2024/07/28")).toBe("2024-07-28");
+    expect(extractDocumentDate("Rechnung vom 2024/07/28")).toBe("2024-07-28");
+    expect(extractDocumentDate("Datum\n2024/07/28")).toBe("2024-07-28");
+    expect(extractDocumentDate("Referenz 2024/07/28")).toBeNull();
+  });
+
+  it("reads the reported invoice", () => {
+    // Invented values; the shape is what a Tesla charging invoice produced.
+    const invoice = [
+      "MUSTER   Rechnung",
+      "Muster Energie S.a.r.l.",
+      "Beispielstr. 1   Rechnungsnummer   4031P0006951728",
+      "12345 Musterstadt, FR   Rechnungsdatum   2024/07/28",
+      "www.beispiel.test   Kundennummer   5801691",
+    ].join("\n");
+    expect(extractDocumentDate(invoice)).toBe("2024-07-28");
+  });
+});
+
 describe("a written-month date with a two-digit year", () => {
   // A credit card statement from 2001 dated itself "25 MAI 01". Only the
   // DOTTED numeric form accepted a two-digit year; every written-month shape
@@ -1204,5 +1253,33 @@ describe("umlaut restoration (buildUmlautRestorationMap / restoreUmlautSpellings
   it("returns the input untouched when the document has no umlauts at all", () => {
     const empty = buildUmlautRestorationMap("Invoice without any special letters");
     expect(restoreUmlautSpellings("pruefung", empty)).toBe("pruefung");
+  });
+});
+
+
+describe("both readers understand the same shapes", () => {
+  // The guard for the bug that appeared four times running: a date shape one
+  // reader knew and the other did not. Nothing failed when they disagreed —
+  // the document simply had no date — so every instance was found by a person
+  // noticing a missing date, never by the pipeline.
+  //
+  // Both now compose their patterns from the same SHAPE table, and this runs
+  // every shape through both of them.
+  it.each(DATE_SHAPE_EXAMPLES)(
+    "$shape: $text",
+    ({ text, iso, convention }) => {
+      // The converter, on the bare string the vision model would return.
+      expect(normalizeDocumentDate(text, convention)).toBe(iso);
+      // The scan, on the same date behind a label.
+      expect(extractDocumentDate(`Rechnungsdatum   ${text}`, convention)).toBe(iso);
+    },
+  );
+
+  it("covers every shape in the table", () => {
+    // A shape added to SHAPE without an example would be untested by the case
+    // above, which would quietly restore the hole this closes.
+    const covered = new Set(DATE_SHAPE_EXAMPLES.map((e) => e.shape));
+    expect(covered.size).toBe(DATE_SHAPE_EXAMPLES.length);
+    expect(DATE_SHAPE_EXAMPLES.length).toBeGreaterThanOrEqual(8);
   });
 });
