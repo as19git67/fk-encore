@@ -980,6 +980,22 @@ alignment. It needs no convention: a four-digit year cannot be a day.
 Worth folding into one table of shapes at some point, so a form added once is
 read everywhere.
 
+#### A year-first date that is not hyphenated
+
+`2024/07/28` — a charging invoice from software that formats its dates
+programmatically. The year-first shape was hyphen-only, so both readers were
+blind to it: the same asymmetry ISO itself produced one PR earlier, one
+separator further along.
+
+Hyphen, slash and dot are now all accepted there, and none of them raises the
+convention question: **a four-digit first component cannot be a day or a
+month.** That is what makes widening this shape safe where widening
+`03/04/2013` is not.
+
+Widening the dot is the one that could have broken something, and does not:
+`28.07.2024` cannot match a year-first pattern, because `28` is not four
+digits.
+
 #### A two-digit year after a spelled-out month
 
 Only the *dotted* numeric form accepted a two-digit year. Every written-month

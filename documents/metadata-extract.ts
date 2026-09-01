@@ -131,6 +131,17 @@ const DATE_ANCHOR_MONTHYEAR_PATTERNS: readonly RegExp[] = [
 // included because on such forms it is nearly always the field caption, and
 // the same NON_DOCUMENT_DATE_LABEL guard that protects "...datum" does not
 // apply — an English "date of birth" is caught by its own entry below.
+/**
+ * What may separate the parts of a year-first date.
+ *
+ * Hyphen is the ISO 8601 one, but a slash is just as common on invoices from
+ * software that formats dates programmatically — a Tesla charging invoice
+ * dates itself "2024/07/28" — and a dot occurs in the same places. The order
+ * is not in question whichever it is: a four-digit first component cannot be a
+ * day or a month, which is what makes this shape safe to widen at all.
+ */
+const YEAR_FIRST_SEP = String.raw`[-/.]`;
+
 const EN_DATE_LABEL = String.raw`(?:date\s+of\s+issue|issue\s+date|invoice\s+date|statement\s+date|entered\s+date|date)`;
 
 // "Lieferdatum   2014-11-17", "Datum: 2014-11-17" — an ISO date behind a
@@ -143,10 +154,10 @@ const EN_DATE_LABEL = String.raw`(?:date\s+of\s+issue|issue\s+date|invoice\s+dat
 // have used and the text scan could not see.
 const DATE_ANCHOR_ISO_PATTERNS: readonly RegExp[] = [
   new RegExp(
-    String.raw`\b(?:\w*datum|${EN_DATE_LABEL})\b[ \t:]{0,80}(\d{4})-(\d{2})-(\d{2})\b`,
+    String.raw`\b(?:\w*datum|${EN_DATE_LABEL})\b[ \t:]{0,80}(\d{4})${YEAR_FIRST_SEP}(\d{2})${YEAR_FIRST_SEP}(\d{2})\b`,
     "gi",
   ),
-  /\bvom\b[ \t:]{0,5}(\d{4})-(\d{2})-(\d{2})\b/gi,
+  /\bvom\b[ \t:]{0,5}(\d{4})[-/.](\d{2})[-/.](\d{2})\b/gi,
 ];
 
 // "Date of issue   August 23, 2026" — a spelled-out month, then the day. The
@@ -398,7 +409,7 @@ export function normalizeDocumentDate(
 
   // Already ISO — a model that reformatted despite the instruction is still
   // giving a usable answer, and refusing it would be pedantry.
-  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  const iso = /^(\d{4})[-/.](\d{2})[-/.](\d{2})$/.exec(text);
   if (iso) return toIsoDate(iso[3], iso[2], iso[1]);
 
   // "Oktober 2012", "Im Oktober 2012" — a month with no day.
@@ -448,7 +459,7 @@ function isDocumentDateLabel(cell: string): boolean {
 const CELL_DATE_RE = /\b(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})\b/;
 
 /** ISO inside a table cell — "Lieferdatum" over "2014-11-17". */
-const CELL_ISO_DATE_RE = /\b(\d{4})-(\d{2})-(\d{2})\b/;
+const CELL_ISO_DATE_RE = /\b(\d{4})[-/.](\d{2})[-/.](\d{2})\b/;
 
 /** Written-month date inside a table cell ("8. September 2017"). */
 const CELL_MONTHNAME_DATE_RE = /\b(\d{1,2})\.?[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4})\b/;
@@ -550,7 +561,7 @@ const DATE_LABEL_WORD_RE = /\b[A-Za-zÄÖÜäöüß]*datum\b/gi;
 
 /** As CELL_DATE_RE / CELL_MONTHNAME_DATE_RE, but scanning for every match. */
 const LINE_DATE_RE = /\b(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})\b/g;
-const LINE_ISO_DATE_RE = /\b(\d{4})-(\d{2})-(\d{2})\b/g;
+const LINE_ISO_DATE_RE = /\b(\d{4})[-/.](\d{2})[-/.](\d{2})\b/g;
 const LINE_MONTHNAME_DATE_RE = /\b(\d{1,2})\.?[ \t]+([A-Za-zÄÖÜäöü.]{3,})[ \t]+(\d{4})\b/g;
 
 // A header cell has to look like a header. Without this a sentence that merely
