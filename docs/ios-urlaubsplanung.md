@@ -116,7 +116,9 @@ Leitentscheidung 3.
 navigiert, fk-encore teilt den Tag ein. Für Turn-by-turn wird bewusst per
 Deep-Link an Apple/Google Maps übergeben.
 
-## 4. Planungsgranularität: der Zeitblock
+## 4. Planungsgranularität: Etappe, Tag, Block
+
+### 4.1 Der Zeitblock
 
 Ein Tag besteht aus **Blöcken**, nicht aus einem Zeitstrahl:
 
@@ -150,6 +152,43 @@ minutengenaue Angabe und passt exakt zur Blockeinteilung.
 
 Die Untergrenze der Genauigkeit ist bewusst gewählt: **lieber eine Aussage, die
 stimmt, als eine Uhrzeit, die nicht hält.**
+
+### 4.2 Etappen: die Ebene über den Tagen
+
+Eine Reise ist selten ein Ort. „20 Tage Tokio, Osaka und Hakata" braucht
+zwischen Reise und Tag eine dritte Ebene, die **Etappe**:
+
+- eigener Zeitraum (Tokio 3.–11.9., Osaka 11.–18.9., Hakata 18.–22.9.),
+- eigener **Anker** — das Hotel dieser Etappe, Start- und Endpunkt jedes Tages,
+- eigene **Regionsdatenbank** (Kanto, Kansai, Kyushu) und damit ein eigener
+  Kandidatenvorrat,
+- **Transfertage:** Die Fahrt zwischen zwei Etappen ist ein Fixpunkt, der einen
+  halben Tag frisst. Ein Anreisetag hat keinen vollen Vormittagsblock, und der
+  erste Block danach beginnt am neuen Anker.
+
+Liegen Hotelbuchungen als Dokumente vor, ergeben sich die Etappengrenzen daraus
+von selbst; sonst schlägt der Planer eine Aufteilung vor, die der Nutzer
+verschiebt. Umverteilt wird immer nur **innerhalb** einer Etappe — was in Tokio
+ausfällt, rutscht nicht nach Osaka.
+
+### 4.3 Zwei Auflösungen: grob für die Reise, fein für morgen
+
+Zwanzig Tage sind rund sechzig Blöcke. Die will niemand vorab durchsehen, und
+es wäre auch verschwendete Mühe: Das Wetter ist unbekannt, und nach drei Tagen
+weiß man ohnehin besser, was einem liegt. Deshalb plant das System in zwei
+Auflösungen:
+
+- **Reiseauflösung** (die ganze Zeit, sofort): pro Etappe ein bewerteter Vorrat
+  („Tokio: 34 Kandidaten, davon 12 klare Favoriten") plus alles, was terminlich
+  gebunden ist — gebuchte Zeitfenster, Tagesausflüge, Transfertage. Das ist
+  das, worüber die Familie vorab abstimmt.
+- **Tagesauflösung** (ein bis zwei Tage im Voraus): konkrete Blöcke mit
+  Reihenfolge, Wegen und Lichtfenstern, üblicherweise am Vorabend.
+
+Der Vorrat aus §5 ist damit nicht nur Reserve fürs Umplanen, sondern von Anfang
+an **das eigentliche Planungsergebnis** — die Tagesblöcke sind nur seine
+jeweils nächste Konkretisierung. Für einen Wochenendtrip fallen beide
+Auflösungen zusammen, für drei Wochen nicht.
 
 ## 5. Umplanen als Kernmechanik
 
@@ -229,9 +268,23 @@ nass — und die wirken so:
 - Ein Regentag verschiebt sich als Ganzes: was heute nass wäre, wird auf einen
   trockenen Folgetag getauscht, solange noch Tage übrig sind.
 
+**Hitze zählt genauso wie Regen.** 33 °C bei hoher Luftfeuchte verkürzt eine
+Tagesgehstrecke so wirksam wie ein Regenguss. Temperatur und Luftfeuchte gehen
+deshalb ebenfalls ins Blockbudget ein und schieben Outdoor-Spots in die
+Randzeiten des Tages — was sich zwanglos mit dem Lichtfenster aus §6.3 deckt.
+
+**Jenseits des Prognosehorizonts zählt Klima, nicht Vorhersage.** Vorhersagen
+reichen etwa zwei Wochen; für eine Reise, die in acht Monaten beginnt, gibt es
+keine. In der Reiseauflösung (§4.3) arbeitet der Planer deshalb mit
+**Klimanormalen** für Region und Monat — „September in Japan: heiß, schwül,
+Taifunsaison". Daraus folgen keine Tagespläne, sondern Vorkehrungen: genug
+Indoor-Kandidaten im Vorrat und ein nicht verplanter Puffertag je Etappe. Erst
+in den letzten zwei Wochen schaltet sich die echte Vorhersage tageweise zu.
+
 **Quelle:** [Open-Meteo](https://open-meteo.com) — stündliche Werte für
 `precipitation`, `cloud_cover` und `sunshine_duration`, ohne API-Schlüssel und
-ohne Registrierung, weltweit. Für Deutschland alternativ Bright Sky (DWD).
+ohne Registrierung, weltweit — dieselbe Schnittstelle liefert auch die
+Klimanormalen. Für Deutschland alternativ Bright Sky (DWD).
 `open-meteo.com` muss in die Netzwerk-Policy der Umgebung.
 
 **Was das Haus verlässt:** ausschließlich eine auf ca. 5 km **gerundete**
@@ -260,6 +313,12 @@ Allgemeinheit:
 - Für Gebäude liefert die OSM-Geometrie die **Ausrichtung der Hauptfassade**
   (Normale der längsten Kante des Polygons). Steht die Sonne in diesem Halbraum,
   ist die Fassade frontbeleuchtet — eine Westfassade also abends.
+  **Achtung, das geht heute noch nicht:** Der Import reduziert flächige POIs auf
+  ihren Zentroid (`geo/src/osm2pgsql.lua`, `as_polygon():centroid()`), das
+  Polygon ist danach verloren. Das Fassadenazimut muss deshalb **beim Import
+  einmal berechnet** und als Spalte an `osm_pois` mitgeführt werden — billiger,
+  als die Polygone dauerhaft zu speichern, und ohnehin nur einmal pro Objekt
+  nötig.
 - Für Aussichtspunkte trägt OSM häufig `direction=*`; sonst hilft die
   **Blickrichtung aus den eigenen Fotos**: der POI-Matcher verarbeitet den
   EXIF-Kompasskurs (`GPSImgDirection`) bereits (`osm-admin/poi-matcher.ts`).
@@ -373,6 +432,13 @@ den Wert) plus **kurze Rundreise innerhalb des Blocks** (bei 2–4 Stopps
 erschöpfend lösbar). Beides in TypeScript in Millisekunden — wichtig, weil die
 Neuverteilung unterwegs sofort reagieren muss und im Zweifel offline läuft.
 
+**Zwei kleine Änderungen am OSM-Import** sind Voraussetzung und gehören in den
+ersten Umsetzungsschritt, weil sie einen Neuimport der Regionen erfordern:
+`name:en` in die Tag-Allowlist (`geo/src/osm2pgsql.lua` kennt heute nur `name`
+und `name:de` — in Japan steht in `name` Kanji), und das beim Import berechnete
+Fassadenazimut als eigene Spalte (§6.3). Beides ist im Lua-Filter je eine
+Handvoll Zeilen.
+
 **Die Lichtberechnung braucht keine externe Quelle.** Sonnenhöhe und -azimut
 sind aus Koordinate und Zeitpunkt berechenbar (~100 Zeilen, keine Abhängigkeit,
 kein Netz) — bewusst doppelt implementiert in TypeScript für den Server und in
@@ -393,36 +459,44 @@ Kategorie-Vielfalt (keine drei Kirchen hintereinander) · optionaler
 Historien-Bonus/-Malus.
 
 **Datenmodell** (neu, Drizzle):
-`trip_plans` (Trip, Zeitraum, Region, Constraints als JSONB) ·
+`trip_plans` (Trip, Zeitraum, Constraints als JSONB) ·
+`plan_legs` (Etappe: Zeitraum, Region/Datenbank, Anker-Adresse, Transfer) ·
 `plan_days` · `plan_blocks` (Typ, Zeitbudget, Start-/Endpunkt) ·
 `plan_stops` (POI-Referenz, Position im Block, geschätzte Dauer, Status
 `geplant|erledigt|übersprungen`, gepinnt) ·
-`plan_pool` (bewertete Kandidaten samt Score-Begründung, Indoor/Outdoor,
-Fassadenazimut) ·
+`plan_pool` (bewertete Kandidaten je Etappe samt Score-Begründung,
+Indoor/Outdoor, Fassadenazimut) ·
 `weather_forecasts` (gerundete Koordinate + Tag → stündliche Werte, Cache) ·
 `plan_votes` (Nutzer/KI pro Kandidat, analog zum Album-Voting).
 
-## 9. Mögliche Etappen
+## 9. Mögliche Umsetzungsschritte
 
-1. **`geo /pois/search`** — Flächen-/Umkreissuche mit Kategorie- und grobem
-   Öffnungsfilter. Die Lua-Importregel muss dafür mehr Tags mitnehmen
-   (`opening_hours`, `cuisine`, `wheelchair`, `fee`, `website`).
+> „Etappe" meint in diesem Dokument durchgehend einen **Reiseabschnitt**
+> (§4.2); die Umsetzung ist in **Schritte** gegliedert.
+
+1. **`geo /pois/search` + Importänderungen** — Flächen-/Umkreissuche mit
+   Kategorie- und grobem Öffnungsfilter. Der Lua-Filter muss dafür mehr Tags
+   mitnehmen (`opening_hours`, `cuisine`, `wheelchair`, `fee`, `website`,
+   **`name:en`**) und das **Fassadenazimut** beim Import berechnen. Alles, was
+   einen Neuimport erzwingt, gehört in diesen einen Schritt.
 2. **`trip-planner`, ein Tag, Fußwege per Heuristik** — Constraints per API,
    kein LLM, kein Frontend. Liefert Blöcke mit Spots. Deterministisch testbar.
 3. **Neuverteilung** — „ab hier, ab jetzt", Vorrat, Verschieben auf Folgetage.
    Bewusst **vor** dem hübschen UI, weil es die Kernmechanik ist.
 4. **NL-Eingabe** über llm-service (JSON-Schema, strikte Validierung) +
    Mehrtagesplanung.
-5. **iOS-Oberfläche** — Blockkarten, Karte, Wischgesten, „Heute"-Modus.
-6. **Standort** — Geofences um die nächsten Stopps, Erledigt-Erkennung,
+5. **Etappen und zwei Auflösungen** (§4.2/§4.3) — Reisen über mehrere Orte,
+   Transfertage, Vorrat je Etappe, Detaillierung erst am Vorabend.
+6. **iOS-Oberfläche** — Blockkarten, Karte, Wischgesten, „Heute"-Modus.
+7. **Standort** — Geofences um die nächsten Stopps, Erledigt-Erkennung,
    angebotene Neuverteilung, „was ist in der Nähe".
-7. **Wetter & Licht** — Open-Meteo-Anbindung mit Cache, Indoor/Outdoor-Ableitung,
+8. **Wetter & Licht** — Open-Meteo-Anbindung mit Cache, Indoor/Outdoor-Ableitung,
    Sonnenstandsmodul, Lichthinweise und Abendblock-Vorschlag.
-8. **Weitere Kontextsignale** — Dokumenten-Fixpunkte, Reisegruppe, Gruppen-Voting.
-9. **Verfeinerung, optional** — Valhalla für echte Reisezeiten, GTFS pro
+9. **Weitere Kontextsignale** — Dokumenten-Fixpunkte, Reisegruppe, Gruppen-Voting.
+10. **Verfeinerung, optional** — Valhalla für echte Reisezeiten, GTFS pro
    Region, Offline-Bundle, Verknüpfung mit Trip-Album und Recap.
 
-Etappen 1–3 sind der ehrliche Test: Liefert die Maschine für *einen* Tag in
+Schritte 1–3 sind der ehrliche Test: Liefert die Maschine für *einen* Tag in
 *einer* Stadt eine Blockeinteilung, die man tatsächlich so ablaufen würde — und
 hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
 
@@ -436,7 +510,7 @@ hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
   Daten, und eine erfundene Empfehlung wäre schlechter als keine.
 - **Geschätzte Reisezeiten.** Die Heuristik kann bei Flüssen, Bergen oder
   schlechter ÖPNV-Anbindung deutlich danebenliegen. Gegenmittel: Puffer im
-  Blockbudget, ehrliche Kennzeichnung als Schätzung, und Etappe 7 für die
+  Blockbudget, ehrliche Kennzeichnung als Schätzung, und Schritt 10 für die
   Regionen, wo es sich lohnt.
 - **Wettervorhersagen sind unsicher.** Drei Tage im Voraus ist die
   Niederschlagsmenge eine grobe Tendenz. Gegenmittel: nur die drei Klassen
@@ -452,10 +526,14 @@ hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
   statt Dauer-GPS, alles Planungsrelevante on-device, nach außen nur die
   gerundete Wetter-Koordinate — und ein Schalter, der die ganze Automatik
   abstellt.
+- **Nicht-lateinische Schriften.** Ohne `name:en` im Import stehen in Japan,
+  Griechenland oder Thailand unlesbare Namen im Plan. Auch mit dem Tag bleibt
+  eine Lücke, wo OSM keinen englischen Namen führt — dann hilft nur die
+  Originalschreibweise plus Wikidata-Label als Fallback.
 - **Keine Echtzeit.** Verkehr, Streiks, spontane Schließungen sieht das System
   nicht — bewusste Übergabe an Apple/Google Maps für die Navigation.
 - **Speicherbedarf** eines späteren Routers (Valhalla-Kacheln zusätzlich zu den
-  PostGIS-Region-DBs) muss in Etappe 7 gemessen und in die Regionsverwaltung
+  PostGIS-Region-DBs) muss in Schritt 10 gemessen und in die Regionsverwaltung
   integriert werden (Region löschen = auch Kacheln löschen).
 - **Offline-Karten.** Vektorkacheln aus den PBFs (planetiler + MapLibre) wären
   ein eigener großer Baustein. Zunächst MapKit online; offline gibt es
@@ -465,9 +543,12 @@ hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
 
 1. **Blockschema:** Sind Vormittag / Mittag / Nachmittag / Abend die richtige
    Einteilung, oder lieber frei definierbare Blöcke pro Tag?
-2. **Regionsumfang:** Soll für einen geplanten Urlaub automatisch die passende
-   Geofabrik-Region importiert werden (Speicher!), oder bleibt das eine
-   bewusste Admin-Entscheidung wie heute?
+2. **Regionsumfang:** Eine Japanreise braucht drei Regionsdatenbanken (Kanto,
+   Kansai, Kyushu), die vor der Planung importiert sein müssen — das ist heute
+   eine bewusste Admin-Entscheidung und dauert. Soll der Planer bei einem
+   unbekannten Ziel den Import selbst anbieten („für Tokio habe ich keine
+   Daten — jetzt importieren?"), oder bleibt es getrennt? Und wie lange darf
+   eine Etappenregion nach der Reise liegen bleiben?
 3. **Automatik-Schwelle:** Soll die App bei Rückstand oder Wetterumschwung nur
    einen Hinweis zeigen, oder den neuen Vorschlag gleich fertig danebenlegen?
 4. **Lichthinweise für alle?** Sichtbar für jeden, oder ein Schalter für die,
@@ -475,3 +556,99 @@ hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
    vorschlagen, den es sonst nicht gäbe?
 5. **Web-Frontend:** nur iOS, oder Planung auch in der Vue-App? Planen am großen
    Bildschirm, Umplanen am Telefon wäre eine naheliegende Arbeitsteilung.
+
+---
+
+## 12. Durchgespielt: 20 Tage Japan
+
+Ein Beispiel, an dem sich die Mechanik prüfen lässt — **3.9. bis 22.9.2027,
+Tokio, Osaka und Hakata, zu zweit**. Bewusst ein harter Fall: lang, mehrere
+Orte, weit in der Zukunft, nicht-lateinische Schrift, andere Zeitzone.
+
+### 12.1 Vorbereitung: die Regionen
+
+Vor jeder Planung müssen die OSM-Daten im Haus sein: drei Geofabrik-Sub-Regionen
+Japans — **Kanto** (Tokio), **Kansai** (Osaka), **Kyushu** (Hakata/Fukuoka).
+Das ist heute ein Admin-Vorgang, dauert, und passiert Wochen vorher, nicht beim
+Planen (siehe offene Frage 2 in §11).
+
+### 12.2 Eingabe
+
+```
+3.9. bis 22.9.2027, Tokio, Osaka und Hakata,
+zu zweit, viel zu Fuß und mit der Bahn,
+wir mögen Tempel, Aussicht und Märkte
+```
+
+→ Chips: `20 Tage` · `3 Etappen` · `Modi: Fuß, ÖPNV` · `Interessen: Tempel,
+Aussicht, Märkte`. Findet der documents-Service Flug- und Hotelbestätigungen für
+den Zeitraum, werden sie als Fixpunkte vorgeschlagen — Ankunft Haneda, drei
+Hotels, und damit implizit die Etappengrenzen.
+
+### 12.3 Etappen und Transfers
+
+Tokio 3.–11.9., Osaka 11.–18.9., Hakata 18.–22.9. (§4.2). Die Shinkansen-Fahrten
+dazwischen sind Fixpunkte, die je einen halben Tag kosten; jede Etappe bekommt
+ihr Hotel als Tagesanker und ihre eigene Regionsdatenbank.
+
+### 12.4 Grob planen, nicht alles planen
+
+In der Reiseauflösung (§4.3) entsteht pro Etappe ein bewerteter Vorrat — „Tokio:
+34 Kandidaten, 12 klare Favoriten" — plus die terminlich gebundenen Punkte
+(Zeitfenster-Tickets, ein Tagesausflug). Darüber stimmt ihr zu zweit ab, die KI
+stimmt mit. Ergebnis ist keine Route, sondern eine Rangfolge: Sie entscheidet
+später, was zuerst wegfällt. Konkrete Blöcke entstehen erst ein bis zwei Tage
+vorher.
+
+### 12.5 Wetter acht Monate im Voraus
+
+Gibt es nicht. In der Reiseauflösung zählen deshalb die Klimanormalen (§6.2):
+September in Japan ist heiß, schwül und **Taifunsaison**. Praktische Folge im
+Plan — genug Indoor-Kandidaten im Vorrat und ein nicht verplanter Puffertag je
+Etappe. Ab etwa zwei Wochen vorher detailliert die echte Vorhersage tageweise.
+
+### 12.6 Ein Tag in Tokio
+
+Am Vorabend entsteht der Plan für Asakusa und Umgebung:
+
+| Block | Inhalt |
+|---|---|
+| Vormittag (ca. 3,5 h) | Sensō-ji → Nakamise → Sumida-Ufer |
+| Mittag | offen, in der Gegend |
+| Nachmittag (ca. 3 h) | eine Fahrt nach Ueno → Museum → Park |
+| Abend (vorgeschlagen) | Aussichtspunkt ab ca. 17:00 |
+
+Der Abendblock kommt vom Lichtmodul — und hier zahlt es konkret: **Tokio liegt
+am östlichen Rand seiner Zeitzone**, die Sonne geht Anfang September gegen 18 Uhr
+unter. Die goldene Stunde ist dort später Nachmittag, nicht Abend; wer nach
+europäischem Gefühl um 19:30 zur Aussicht aufbricht, steht im Dunkeln. In
+Hakata, gut neun Längengrade weiter westlich, liegt derselbe Moment rund
+35 Minuten später. Kein Reiseführer sagt einem das, und berechnen lässt es sich
+offline in Millisekunden (§6.3).
+
+### 12.7 Unterwegs
+
+Um 14 Uhr steht ihr noch beim Sensō-ji. Der Geofence merkt es, die App bietet an:
+*„Der Nachmittag wird knapp — Museum raus, rutscht auf Freitag Vormittag. Der
+Aussichtspunkt um 17 Uhr bleibt."* Ein Tipp genügt; das Museum ist nicht
+gelöscht, es liegt wieder im Vorrat.
+
+Zieht ein Taifunausläufer durch, greift dieselbe Mechanik eine Ebene höher: Der
+Regentag tauscht mit einem trockenen Tag **derselben Etappe**, Outdoor wandert
+in den Vorrat, Indoor rückt nach.
+
+### 12.8 Etappenwechsel und danach
+
+Am 11.9. ist der Vormittag durch den Shinkansen belegt; ab Osaka gelten neue
+Regionsdatenbank und neuer Anker, der Vorrat für Osaka ist längst bewertet.
+Parallel sammelt der Trip Mode die Fotos ein — am Ende steht das Reisetagebuch
+mit geplanten gegen tatsächlich besuchte Blöcke und der Recap.
+
+### 12.9 Was dieses Beispiel am Konzept geändert hat
+
+Der Durchgang hat fünf Lücken aufgedeckt, die jetzt eingearbeitet sind:
+Etappen als Ebene über den Tagen (§4.2), zwei Planungsauflösungen (§4.3),
+Klimanormale statt Vorhersage jenseits des Prognosehorizonts und Hitze als
+Budgetfaktor (§6.2), das Fassadenazimut, das wegen der Zentroid-Reduktion beim
+Import berechnet werden muss (§6.3), und `name:en` in der Tag-Allowlist, ohne
+das im Plan 浅草寺 statt „Sensō-ji" stünde (§8).
