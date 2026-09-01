@@ -1,161 +1,221 @@
-# Urlaubsplanung („Spots & Routen") – Konzept
+# Urlaubsplanung („Spots & Blöcke") – Konzept
 
-Stand: 2026-09-01 · Status: Ideensammlung / Vorentwurf (noch keine gesperrten
-Entscheidungen)
+Stand: 2026-09-01 · Status: Ideensammlung / Vorentwurf (Leitentscheidungen in
+§2 gesetzt, sonst offen)
 
 ## 1. Die Idee in einem Satz
 
 Der Nutzer sagt in natürlicher Sprache, was er vorhat — *„ich bin vier Tage in
 Lissabon"*, *„wir fahren von München nach Bozen und haben zwei Tage Zeit"* —
-und bekommt daraufhin **Tagespläne mit konkreten Spots** (Sehenswürdigkeit,
-Museum, Café, Restaurant, Aussichtspunkt) in einer **sinnvollen Reihenfolge**,
-inklusive der Wege dazwischen zu Fuß, mit ÖPNV oder mit dem Auto.
+und bekommt daraufhin pro Tag **grobe Zeitblöcke mit je zwei bis vier Spots**
+(Sehenswürdigkeit, Museum, Café, Aussichtspunkt) in sinnvoller Reihenfolge:
+*„Vormittag: A → B → C, Nachmittag: D → E"*. Läuft der Tag anders als gedacht,
+wird der Rest in Sekunden neu verteilt.
 
-## 2. Warum das kein Google-Maps-Klon wird
+## 2. Drei Leitentscheidungen
+
+Diese drei prägen alles Weitere und stehen deshalb vorne:
+
+1. **Grobe Zeitblöcke statt Uhrzeiten.** Der Plan sagt „Vormittag: A, B, C",
+   nicht „9:47 ab Haltestelle X". Alles Weitere folgt daraus — insbesondere
+   entfällt der Zwang zu exakten Fahrplandaten.
+2. **Umplanen ist der Normalfall, nicht die Ausnahme.** Ein Plan ist kein
+   Drehbuch, das man abarbeitet, sondern ein Vorrat mit Reihenfolge. Das
+   System muss jederzeit „wir sind noch bei B und es ist schon 14 Uhr"
+   verarbeiten können, ohne dass der Nutzer neu plant.
+3. **Die eigene Fotohistorie ist ein nettes Extra, keine Säule.** Am selben Ort
+   schon einmal gewesen zu sein, ist der Ausnahmefall. Wo es zufällig zutrifft,
+   ist es eine hübsche Notiz („hier wart ihr 2019") — es darf aber weder das
+   Ranking tragen noch Voraussetzung für einen brauchbaren Plan sein. Für den
+   Erstbesuch, also den Regelfall, muss das System ohne jede Historie
+   vollständig funktionieren.
+
+## 3. Warum das kein Google-Maps-Klon wird
 
 Google Maps ist bei **Live-Daten** (Verkehr, Echtzeit-ÖPNV, aktuelle
 Öffnungszeiten, Bewertungen, Innenraumfotos) uneinholbar. Ein Nachbau dieser
-Ebene wäre sinnlos. Der Mehrwert von fk-encore liegt an einer anderen Stelle:
-**Google kennt die Welt, aber nicht die Familie.** fk-encore kennt die Familie
-— und zwar in einer Tiefe, die kein Cloud-Anbieter je bekommt, weil die Daten
-das Haus nie verlassen.
+Ebene wäre sinnlos. Der Unterschied liegt woanders: **Google Maps optimiert
+eine Route, die man schon gewählt hat. Es beantwortet nicht die Frage, was
+überhaupt in einen Nachmittag passt — und schon gar nicht, was davon
+wegfällt, wenn man in Verzug gerät.** Genau das ist die Lücke.
 
-Sieben konkrete Hebel:
+### 3.1 Der Kern: Was passt in einen halben Tag?
+Die eigentliche Planungsfrage ist nicht „wie komme ich von A nach B", sondern
+„ich habe zwölf Kandidaten und einen Nachmittag — welche vier davon gehen sich
+aus, ohne dass es Stress wird?". Google Maps kann das nicht beantworten; es
+kann nur eine bereits getroffene Auswahl in eine Route legen. Dieses
+Zuschneiden auf ein Zeitbudget ist der Kern des Features.
 
-### 2.1 Eigene Fotohistorie als Ranking-Signal
-Die POI-Erkennung (`osm-admin/poi-matcher.ts`, DINOv2 + OSM-PostGIS +
-Wikidata) weiß bereits **an welchen konkreten Sehenswürdigkeiten die Familie
-schon war**. Daraus folgt direkt:
-- *„Den Torre de Belém habt ihr 2019 schon gesehen — dafür diesmal lieber …"*
-- *„Ihr fotografiert auffällig viele Klöster und Aussichtspunkte, aber kaum
-  Museen"* → das Ranking wird an echtem, beobachtetem Verhalten kalibriert,
-  nicht an einem Interessen-Fragebogen.
-- Beim Wiederbesuch: *„2019 stand ihr hier"* mit dem eigenen Foto daneben.
+### 3.2 Umplanen ohne Neuplanen
+Der Museumsbesuch dauert doppelt so lange, es regnet, das Kind ist müde, das
+Restaurant hat zu. Ein Knopf **„wir sind hier, es ist jetzt"** rechnet den Rest
+des Tages neu: Was nicht mehr passt, wandert nicht in den Papierkorb, sondern
+in den Vorrat für morgen. Google Maps hat dafür kein Konzept — dort löscht man
+Wegpunkte von Hand.
 
-Google kann das prinzipiell auch — mit Google Photos und Standortverlauf. Hier
-passiert es lokal, ohne dass jemand die Bewegungsprofile bekommt.
-
-### 2.2 Dokumente als Fixpunkte des Plans
+### 3.3 Dokumente als Fixpunkte
 Der documents-Service hat bereits OCR, Klassifikation und semantische Suche.
-Hotelbestätigung, Bahnticket, Mietwagenvertrag, Museums-/Städtepass, Fährticket
-liegen also **schon im Haus und sind maschinenlesbar**. Der Plan wird damit
-nicht um eine leere Karte herum gebaut, sondern um reale Fixpunkte:
-Check-in-Zeit, Hoteladresse als Start-/Endpunkt jedes Tages, Rückgabetermin des
-Mietwagens, gebuchtes Zeitfenster für die Sagrada Família. Genau das kann
-Google Maps strukturell nicht — es sei denn, man legt sein Postfach offen.
+Hotelbestätigung, Bahnticket, Mietwagenvertrag, Museums-/Städtepass liegen also
+**schon im Haus und sind maschinenlesbar**. Der Plan wird um reale Fixpunkte
+gebaut: Hoteladresse als Tagesstart und -ende, Check-in-Zeit, Rückgabetermin
+des Mietwagens, gebuchtes Zeitfenster für die Sagrada Família. Das kann Google
+strukturell nicht, ohne dass man sein Postfach öffnet.
 
-### 2.3 Mit wem gereist wird
+### 3.4 Mit wem gereist wird
 Die Personenerkennung kennt die Reisegruppe. „Wir" ist nicht generisch: zwei
-Kinder unter zehn → kürzere Etappen, Spielplatz-/Eis-Pausen, keine drei Museen
-am Stück; Großeltern dabei → Steigung, Gehstrecke und Sitzgelegenheiten als
-harte Nebenbedingung statt als Sternchen-Hinweis.
+Kinder unter zehn → kürzere Blöcke, Pausen, keine drei Museen am Stück;
+Großeltern dabei → Gehstrecke und Steigung als harte Nebenbedingung statt als
+Sternchen-Hinweis. Das wirkt direkt auf das Zeitbudget eines Blocks.
 
-### 2.4 Familienabstimmung mit vorhandener Mechanik
+### 3.5 Familienabstimmung mit vorhandener Mechanik
 Das Album-Voting (Nutzer **und** KI stimmen über Fotos ab) ist eins zu eins auf
-Spot-Kandidaten übertragbar: Jeder in der Gruppe wischt vor der Reise durch die
-Vorschläge, der Planer optimiert gegen die aggregierten Stimmen. Google Maps
-hat Listen — aber keine Gruppenentscheidung, die anschließend automatisch in
-eine Route fließt.
+Spot-Kandidaten übertragbar: Jeder wischt vor der Reise durch die Vorschläge,
+der Planer optimiert gegen die aggregierten Stimmen. Das zahlt sich vor allem
+beim Umplanen aus — wenn etwas wegfallen muss, fällt zuerst weg, was der Gruppe
+am wenigsten wichtig war. Google Maps hat Listen, aber keine Gruppenentscheidung,
+die anschließend in eine Auswahl fließt.
 
-### 2.5 Der Kreis schließt sich mit dem Trip Mode
+### 3.6 Der Kreis schließt sich mit dem Trip Mode
 `docs/ios-trip-mode.md` bringt Fotos des Tages automatisch ins Trip-Album. Ein
 Plan plus dieses Album ergibt ohne Zusatzaufwand ein **Reisetagebuch**: geplante
-Route vs. tatsächlich gelaufene, pro Stopp die dort entstandenen Fotos, und am
-Ende ein Recap (`docs/recaps.md`), das bereits existiert. Danach fließt das
-Ergebnis wieder als Historie ins Ranking (2.1) zurück.
+Blöcke gegen tatsächlich Besuchtes, pro Stopp die dort entstandenen Fotos, und
+am Ende ein Recap (`docs/recaps.md`), das bereits existiert.
 
-### 2.6 Erklärbar und verhandelbar statt Blackbox
-Jeder Vorschlag trägt eine Begründung („2,3 km vom Hotel, ab 10 Uhr geöffnet,
-passt zwischen die beiden gebuchten Termine, ihr mögt Aussichtspunkte"), und
-jede Gewichtung ist verstellbar. Es gibt kein bezahltes Ranking, keine
-Werbeplätze, keine gesponserten Restaurants — das ist bei einem selbst
-gehosteten System kein Marketing-Versprechen, sondern eine Eigenschaft der
-Architektur.
+### 3.7 Erklärbar, verhandelbar, werbefrei
+Jeder Vorschlag trägt eine Begründung („20 Min. zu Fuß vom Hotel, passt in den
+Vormittag, ihr mögt Aussichtspunkte"), jede Gewichtung ist verstellbar. Kein
+bezahltes Ranking, keine gesponserten Einträge — bei einem selbst gehosteten
+System keine Marketing-Aussage, sondern eine Eigenschaft der Architektur.
 
-### 2.7 Offline und ohne Roaming
+### 3.8 Offline und ohne Roaming
 Die OSM-Regionsdatenbanken liegen ohnehin im Haus. Ein fertiger Plan lässt sich
-komplett aufs iPhone laden (Spots, Texte, Referenzbilder, vorberechnete
-Routen-Polylines) und funktioniert im Ausland ohne Datenverbindung. Google Maps
-Offline-Karten können navigieren, aber nicht planen.
+komplett aufs iPhone laden und funktioniert im Ausland ohne Datenverbindung.
+Weil grob geplant wird, ist auch der Offline-Plan vollwertig — es fehlen keine
+Minutenangaben, die es ohnehin nie gab. Google Maps Offline-Karten können
+navigieren, aber nicht planen.
+
+### 3.9 Nachrang: die eigene Fotohistorie
+Wo die Familie zufällig schon war, weiß der POI-Matcher (`poi-matcher.ts`,
+DINOv2 + OSM + Wikidata) bereits. Das ergibt eine nette Anzeige beim
+Wiederbesuch und einen kleinen Ranking-Bonus oder -Malus, den der Nutzer selbst
+setzt („schon Gesehenes lieber wieder / lieber nicht"). Mehr nicht — siehe
+Leitentscheidung 3.
 
 **Fazit:** Nicht „besser als Google Maps", sondern **eine andere Ebene**: Google
-navigiert, fk-encore plant. Für Turn-by-turn wird bewusst per Deep-Link an
-Apple/Google Maps übergeben.
+navigiert, fk-encore teilt den Tag ein. Für Turn-by-turn wird bewusst per
+Deep-Link an Apple/Google Maps übergeben.
 
-## 3. Was schon da ist (Wiederverwendung)
+## 4. Planungsgranularität: der Zeitblock
 
-| Baustein | Status |
-|---|---|
-| OSM-POIs mit Namen, Wikidata, Wikipedia, Geometrie (PostGIS pro Region) | vorhanden (`geo/src/pois.ts`, `osm2pgsql.lua`) |
-| Reverse-Geocoding / Adressauflösung | vorhanden (`geo/src/reverse.ts`) |
-| Regionsverwaltung, Geofabrik-Import, stündliche Aktualisierung | vorhanden (`osm-admin/`) |
-| Besuchte POIs aus eigenen Fotos | vorhanden (`poi-matcher.ts`, `poi-detection.ts`) |
-| Referenzbilder (Wikimedia Commons) + Wikipedia-Link je POI | vorhanden (`poi-reference-cache.ts`) |
-| Lokales LLM (Qwen2.5-7B) für NL-Verstehen und Textbausteine | vorhanden (`llm-service/`) |
-| Semantische Suche / Embeddings (multilingual-e5) | vorhanden (`embedding_service/`) |
-| Reisegruppe (Personen), Gruppen/Sharing, Push | vorhanden |
-| Dokumente mit OCR + Klassifikation (Tickets, Buchungen) | vorhanden (`documents/`) |
-| Trip-Klammer auf iOS, Trip-Album, Recap | vorhanden / geplant (`docs/ios-trip-mode.md`) |
-| **Routing (Fuß/Auto/Rad) mit Reisezeit-Matrix** | **NEU** |
-| **ÖPNV-Routing (GTFS)** | **NEU** |
-| **Spot-Kandidatensuche über Fläche + Kategorie + Öffnungszeiten** | **NEU (Erweiterung von `/pois`)** |
-| **Tagesplan-Optimierer** | **NEU** |
-| **Plan-Datenmodell + API + iOS-Oberfläche** | **NEU** |
+Ein Tag besteht aus **Blöcken**, nicht aus einem Zeitstrahl:
 
-Der teuerste neue Baustein ist das Routing — alles Übrige ist im Kern
-Orchestrierung über bereits vorhandenen Diensten.
+| Block | Default-Budget | typische Füllung |
+|---|---|---|
+| Vormittag | ca. 3,5 h | 2–3 Spots |
+| Mittag | ca. 1,5 h | Essen (freie Wahl vor Ort) |
+| Nachmittag | ca. 3,5 h | 2–3 Spots |
+| Abend | optional | 1 Spot / Essen |
 
-## 4. Wie sich das in der iOS-App anfühlt
+Die Budgets skalieren mit dem Tempo („entspannt" schrumpft sie, „viel sehen"
+dehnt sie) und mit der Reisegruppe. Innerhalb eines Blocks gibt es eine
+**Reihenfolge, aber keine Uhrzeiten**: „Vormittag: Kathedrale → Markthalle →
+Aussichtsterrasse, zusammen ca. 3 h inkl. Wege".
 
-### 4.1 Einstieg
+**Reisezeiten werden nur klassifiziert, nicht berechnet:** „kurzer Fußweg"
+(< 10 Min.), „längerer Fußweg" (10–25), „eine Fahrt" (ÖPNV/Auto, grob
+geschätzt). Für den Block zählt nur die Summe gegen das Budget.
+
+**Damit fällt der Zwang zu Fahrplandaten weg.** Eine ÖPNV-Fahrt wird zunächst
+heuristisch geschätzt (Luftlinie ÷ typische Netzgeschwindigkeit + Zuschlag für
+Warten und Umsteigen), im Innenstadtbereich ist das für eine Blockeinteilung
+genau genug. Liegt für eine Region ein GTFS-Fahrplan vor, verfeinert er die
+Schätzung — er ist aber **keine Voraussetzung** mehr, sondern Kür. Damit ist
+das Feature auch außerhalb Deutschlands sofort brauchbar, wo GTFS-Feeds mühsam
+zu beschaffen sind.
+
+**Öffnungszeiten ebenfalls grob:** relevant ist nur, ob ein Spot „vormittags
+offen" bzw. „montags zu" ist — das ist aus OSM verlässlicher zu holen als eine
+minutengenaue Angabe und passt exakt zur Blockeinteilung.
+
+Die Untergrenze der Genauigkeit ist bewusst gewählt: **lieber eine Aussage, die
+stimmt, als eine Uhrzeit, die nicht hält.**
+
+## 5. Umplanen als Kernmechanik
+
+Ein Plan besteht aus drei Schichten:
+
+- **Fixpunkte** — aus Dokumenten oder vom Nutzer angeheftet (Hotel-Check-in,
+  gebuchtes Zeitfenster, Zugabfahrt). Werden nie automatisch verschoben.
+- **Eingeplante Spots** — pro Block, mit Reihenfolge.
+- **Vorrat** — bewertete Kandidaten der Region, die (noch) nicht eingeplant
+  sind. Der Vorrat ist der Grund, warum Umplanen schnell geht: die Kandidaten
+  sind bereits gesucht, bewertet und mit groben Reisezeiten versehen.
+
+**Auslöser für eine Neuverteilung:**
+
+- Der Nutzer tippt „wir sind hier, es ist jetzt" (oder die App merkt es selbst,
+  wenn der Trip Mode ohnehin läuft).
+- Ein Spot wird als erledigt, übersprungen oder als „hat länger gedauert"
+  markiert.
+- Eine Bedingung ändert sich per Chat: *„es regnet — was Drinnen"*, *„zu viel
+  Laufen"*, *„wir haben keine Lust mehr auf Museen"*.
+
+**Was dann passiert:** Nur der **Rest ab jetzt** wird neu verteilt, Vergangenes
+bleibt unangetastet (es ist der Anfang des Reisetagebuchs). Was nicht mehr
+passt, wird nicht gelöscht, sondern wandert in den Vorrat zurück — mit erhöhter
+Priorität für die Folgetage, sofern noch welche da sind. Ausgeworfen wird
+zuerst, was die niedrigsten Gruppenstimmen hat.
+
+**Für den Nutzer sichtbar** ist immer nur die Konsequenz, nicht die Rechnung:
+*„Der Nachmittag wird knapp — E fällt raus und rutscht auf morgen Vormittag."*
+Mit Rückgängig-Knopf.
+
+## 6. Wie sich das in der iOS-App anfühlt
+
+### 6.1 Einstieg
 Im bestehenden **Trip**-Tab kommt neben „Aufnehmen" (Trip Mode) ein zweiter
 Bereich **„Planen"** dazu. Beides sind Ansichten desselben Trips: erst planen,
-dann unterwegs fotografieren, danach der Rückblick.
+dann unterwegs anpassen und fotografieren, danach der Rückblick.
 
-### 4.2 Eingabe
-Ein Textfeld mit Beispielen plus Chips für das, was das LLM nicht raten soll:
+### 6.2 Eingabe
+Ein Textfeld plus Chips für das, was das LLM nicht raten soll:
 
 ```
 „4 Tage Lissabon, mit Oma, wir mögen Aussicht und gutes Essen,
  kein Auto, entspanntes Tempo"
 ```
 
-→ vom LLM in ein **striktes JSON-Constraint-Objekt** übersetzt und dem Nutzer
-als editierbare Chips gezeigt: `Ort: Lissabon` · `4 Tage` · `Modi: Fuß, ÖPNV` ·
-`Tempo: entspannt (≈3 Stopps/Tag)` · `max. 4 km Gehstrecke/Tag` ·
-`Interessen: Aussicht, Essen`. **Nichts wird stillschweigend angenommen** —
-falsch Verstandenes korrigiert man mit einem Tipp, nicht mit einem neuen Satz.
+→ vom LLM in ein **striktes JSON-Constraint-Objekt** übersetzt und als
+editierbare Chips gezeigt: `Ort: Lissabon` · `4 Tage` · `Modi: Fuß, ÖPNV` ·
+`Tempo: entspannt` · `max. 4 km Gehstrecke/Tag` · `Interessen: Aussicht, Essen`.
+Nichts wird stillschweigend angenommen. Erkannte Dokumente werden vorgeschlagen:
+*„Ich habe eine Hotelbuchung für diesen Zeitraum gefunden — als Basis nehmen?"*
 
-Erkannte Dokumente werden als Vorschlag eingeblendet: *„Ich habe eine
-Hotelbuchung für diesen Zeitraum gefunden — als Basis verwenden?"*
+### 6.3 Ergebnis
+Pro Tag eine **Karte je Block** (Vormittag / Mittag / Nachmittag / Abend), darin
+die Spots als kompakte Zeile mit Referenzbild, geschätzter Aufenthaltsdauer und
+Wegsymbol dazwischen. Darunter eine Auslastungsanzeige: „ca. 3 h von 3,5 h".
+Kartenansicht mit nummerierten Pins pro Tag. „Warum hier?" pro Spot
+aufklappbar.
 
-### 4.3 Ergebnis
-- **Tages-Timeline** (vertikal, wie eine Foto-Timeline): Karte pro Stopp mit
-  Uhrzeit, Aufenthaltsdauer, Referenzbild, dazwischen ein schmales Wege-Segment
-  („12 Min. zu Fuß" / „Tram 28, 9 Min.").
-- **Kartenansicht** des Tages mit nummerierten Pins und Route.
-- **„Warum hier?"** aufklappbar pro Stopp — inklusive der eigenen Fotos, falls
-  die Familie schon einmal dort war.
+### 6.4 Verhandeln
+- Spot wischen → **ersetzen** (Alternativen aus dem Vorrat, die ins selbe
+  Zeitbudget passen) oder **in den Vorrat zurück**.
+- Anheften (📌) → Fixpunkt.
+- Zwischen Blöcken und Tagen ziehen → Budgets rechnen sich sofort neu, ein
+  überfüllter Block wird rot.
+- Chat für alles, was sich nicht ziehen lässt.
 
-### 4.4 Verhandeln statt neu suchen
-- Stopp nach links wischen → **ersetzen** (Alternativen an derselben Stelle im
-  Zeitfenster, gleiche Reisezeit-Klasse).
-- Stopp anheften (📌) → Fixpunkt, alles andere wird darum herum neu optimiert.
-- Ziehen zum Umsortieren → Zeiten und Wege rechnen sich sofort neu.
-- Chat-Eingabe: *„Nachmittags soll es regnen — mach etwas Drinnen daraus"*, *„zu
-  viel Laufen"*, *„ein Tag mehr Auto"*. Das LLM ändert dabei **nur die
-  Constraints**, die eigentliche Route rechnet der Optimierer.
+### 6.5 Modus „Heute"
+Der unterwegs wichtigste Screen: aktueller Block, was noch drin ist, wie viel
+Budget übrig ist. Ein großer Knopf **„umplanen"** (siehe §5) und pro Spot ein
+Wisch für „erledigt" / „übersprungen". Navigation per Deep-Link an Apple Maps.
 
-### 4.5 Modus „Heute"
-Unterwegs: aktueller Stopp, nächster Weg, Restpuffer. Ein Knopf **„wir hängen
-hinterher"** kürzt den Rest des Tages (Stopps mit den niedrigsten Stimmen
-fallen zuerst). Navigation per Deep-Link an Apple Maps.
+### 6.6 Danach
+Geplant gegen tatsächlich besucht, Fotos je Spot aus dem Trip-Album, Übergabe an
+den Recap.
 
-### 4.6 Danach
-Der Plan wird zum Reisetagebuch: geplant vs. tatsächlich, Fotos pro Stopp aus
-dem Trip-Album, besuchte Spots wandern in die Historie.
-
-## 5. Architektur-Skizze
+## 7. Architektur-Skizze
 
 ```
 iOS (SwiftUI, Feature „Trip/Planen")
@@ -164,103 +224,104 @@ iOS (SwiftUI, Feature „Trip/Planen")
 │ Encore-Service  trip-planner                          │
 │  · NL → Constraints (llm-service, JSON-Schema)        │
 │  · Kandidatensuche  → geo /pois/search                │
-│  · Ranking          → Fotohistorie, Personen, Votes   │
-│  · Reisezeit-Matrix → routing-Container               │
-│  · Optimierer (Auswahl + Reihenfolge + Zeitfenster)   │
-│  · Persistenz: plans / days / stops / candidates      │
+│  · Ranking          → Interessen, Votes, Prominenz    │
+│  · Reisezeit: Heuristik, optional Matrix vom Router   │
+│  · Block-Zuschnitt + Reihenfolge (Solver)             │
+│  · Neuverteilung ab „jetzt/hier"                      │
+│  · Persistenz: plans / days / blocks / stops / pool   │
 └───┬──────────────┬──────────────────┬─────────────────┘
     │              │                  │
- geo (PostGIS)  llm-service      routing (NEU)
+ geo (PostGIS)  llm-service      routing (NEU, Stufe 2)
  OSM-POIs,      Qwen2.5-7B       Valhalla: Fuß/Auto/Rad
- Adressen                        + GTFS-Feed für ÖPNV
+ Adressen                        (GTFS optional, später)
 ```
 
-**Routing-Empfehlung: Valhalla.** Ein Container bedient Fuß, Rad und Auto
-*und* liefert eine Matrix-API (`sources_to_targets`) — genau das, was der
-Optimierer braucht. Er frisst dieselben Geofabrik-PBFs, die `osm-admin`
-ohnehin schon herunterlädt, und kann mit einem GTFS-Feed (für Deutschland
-z. B. der DELFI-Gesamtdatensatz) auch multimodal mit ÖPNV rechnen. OSRM wäre
-schneller, braucht aber pro Modus eine eigene Instanz; ein separater
-OpenTripPlanner nur für ÖPNV wäre der zweite Container, den man sich sparen
-kann.
+**Das Routing rückt nach hinten.** Weil Blöcke nur Summen brauchen, reicht für
+den ersten Wurf eine Heuristik auf Luftlinie mit Umwegfaktor (Fußweg ≈ Luftlinie
+× 1,3 bei 4,5 km/h). Ein echter Router (Valhalla — ein Container für Fuß, Rad
+und Auto, mit Matrix-API, auf denselben Geofabrik-PBFs, die `osm-admin` schon
+lädt) verbessert das später messbar, ist aber nicht mehr der Blocker, den er im
+ersten Entwurf noch darstellte. GTFS wird von der Voraussetzung zur optionalen
+Verfeinerung.
 
-**Der Optimierer ist kein LLM-Job.** Fachlich ist das ein *Team Orienteering
-Problem with Time Windows*: aus vielen Kandidaten die wertvollsten auswählen
-**und** so anordnen, dass Öffnungszeiten, Fixtermine, Gehbudget und Tageslänge
-eingehalten werden. Praktisch reicht dafür Greedy-Einfügen nach
-Wert/Zeit-Verhältnis plus lokale Suche (2-opt / or-opt) in TypeScript —
-bei ~50 Kandidaten und 3 Tagen liegt das im Sekundenbereich. Das LLM macht
-ausschließlich das, was es gut kann: Sprache verstehen und Begründungen
-formulieren. Damit halluziniert es keine Öffnungszeiten und keine Wege.
+**Der Solver wird durch die Blöcke deutlich einfacher.** Statt eines
+*Orienteering Problem with Time Windows* mit harten Uhrzeiten ist es jetzt
+**Rucksackproblem pro Block** (welche Spots passen ins Zeitbudget, maximiere
+den Wert) plus **kurze Rundreise innerhalb des Blocks** (bei 2–4 Stopps
+erschöpfend lösbar). Beides in TypeScript in Millisekunden — wichtig, weil die
+Neuverteilung unterwegs sofort reagieren muss und im Zweifel offline läuft.
 
-**Ranking-Signale** (gewichtete Summe, jedes Gewicht in den Einstellungen
-sichtbar):
+**Das LLM plant nicht.** Es übersetzt Sprache in validierte Constraints und
+schreibt Begründungen. So halluziniert es weder Öffnungszeiten noch Wege.
+
+**Ranking-Signale** (gewichtete Summe, Gewichte im UI sichtbar):
 Prominenz (Wikidata/Wikipedia vorhanden, Artikellänge) · Passung zu den
-Interessen (Embedding-Ähnlichkeit gegen die OSM-Tags/Beschreibung) ·
-Fotohistorie der Familie · Gruppen-Votes · Nähe zu bereits gesetzten Stopps ·
-Öffnungszeit passt ins Fenster · Kategorie-Vielfalt am Tag (keine drei Kirchen
-hintereinander).
+Interessen (Embedding-Ähnlichkeit gegen OSM-Tags/Beschreibung) ·
+Gruppen-Votes · Nähe zu bereits gesetzten Spots des Blocks · Öffnung passt zum
+Block · Kategorie-Vielfalt (keine drei Kirchen hintereinander) · optionaler
+Historien-Bonus/-Malus.
 
 **Datenmodell** (neu, Drizzle):
 `trip_plans` (Trip, Zeitraum, Region, Constraints als JSONB) ·
-`plan_days` (Datum, Start-/Endpunkt, Modi) ·
-`plan_stops` (POI-Referenz, Ankunft, Dauer, Wegsegment zum nächsten, gepinnt) ·
-`plan_candidates` (verworfene/alternative Kandidaten samt Score-Begründung) ·
+`plan_days` · `plan_blocks` (Typ, Zeitbudget, Start-/Endpunkt) ·
+`plan_stops` (POI-Referenz, Position im Block, geschätzte Dauer, Status
+`geplant|erledigt|übersprungen`, gepinnt) ·
+`plan_pool` (bewertete Kandidaten samt Score-Begründung) ·
 `plan_votes` (Nutzer/KI pro Kandidat, analog zum Album-Voting).
 
-## 6. Mögliche Etappen
+## 8. Mögliche Etappen
 
-0. **Machbarkeit Routing** — Valhalla-Container gegen eine bestehende
-   Region-PBF, Matrix-Abfrage, Speicher-/Laufzeitmessung. Entscheidet, ob das
-   Feature auf der vorhandenen Hardware überhaupt trägt.
-1. **`geo /pois/search`** — Flächen-/Umkreissuche mit Kategorie- und
-   `opening_hours`-Filter (die Lua-Importregel muss dafür mehr Tags mitnehmen:
-   `opening_hours`, `cuisine`, `wheelchair`, `fee`, `website`).
-2. **`trip-planner`-Service, ein Tag, nur zu Fuß** — feste Constraints per
-   API, kein LLM, kein Frontend. Testbar, deterministisch.
-3. **NL-Eingabe** über llm-service (JSON-Schema, strikte Validierung) +
-   Mehrtagesplanung + Auto/ÖPNV.
-4. **iOS-Oberfläche** — Timeline, Karte, Ersetzen/Pinnen/Umsortieren.
-5. **Kontextsignale** — Fotohistorie, Personen, Gruppen-Voting,
-   Dokumenten-Fixpunkte.
-6. **Unterwegs & danach** — „Heute"-Modus, Offline-Bundle, Verknüpfung mit
-   Trip-Album und Recap.
+1. **`geo /pois/search`** — Flächen-/Umkreissuche mit Kategorie- und grobem
+   Öffnungsfilter. Die Lua-Importregel muss dafür mehr Tags mitnehmen
+   (`opening_hours`, `cuisine`, `wheelchair`, `fee`, `website`).
+2. **`trip-planner`, ein Tag, Fußwege per Heuristik** — Constraints per API,
+   kein LLM, kein Frontend. Liefert Blöcke mit Spots. Deterministisch testbar.
+3. **Neuverteilung** — „ab hier, ab jetzt", Vorrat, Verschieben auf Folgetage.
+   Bewusst **vor** dem hübschen UI, weil es die Kernmechanik ist.
+4. **NL-Eingabe** über llm-service (JSON-Schema, strikte Validierung) +
+   Mehrtagesplanung.
+5. **iOS-Oberfläche** — Blockkarten, Karte, Wischgesten, „Heute"-Modus.
+6. **Kontextsignale** — Dokumenten-Fixpunkte, Reisegruppe, Gruppen-Voting.
+7. **Verfeinerung, optional** — Valhalla für echte Reisezeiten, GTFS pro
+   Region, Offline-Bundle, Verknüpfung mit Trip-Album und Recap.
 
-Etappen 0–2 sind der ehrliche Test: liefert die Maschine für *einen* Tag in
-*einer* Stadt einen Plan, den man tatsächlich ablaufen würde? Alles danach ist
-Ausbau.
+Etappen 1–3 sind der ehrliche Test: Liefert die Maschine für *einen* Tag in
+*einer* Stadt eine Blockeinteilung, die man tatsächlich so ablaufen würde — und
+hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
 
-## 7. Bekannte Schwachstellen
+## 9. Bekannte Schwachstellen
 
 - **OSM-Datenqualität.** `opening_hours` ist lückenhaft, Restaurantqualität
-  steht dort überhaupt nicht. Gegenmittel: Öffnungszeiten als weiches Signal
-  behandeln und im UI ehrlich als „laut OSM, ungeprüft" kennzeichnen;
-  Bewertungen bewusst weglassen, statt schlechte zu erfinden. Für Essen ist
-  ehrliche Kommunikation besser als ein Halbergebnis: fk-encore plant den
-  *Rahmen*, die Restaurantwahl bleibt beim Nutzer (oder kommt aus der eigenen
-  Historie: „hier wart ihr, hier gibt es Fotos vom Essen").
-- **Speicherbedarf.** Valhalla-Kacheln kommen zusätzlich zu den PostGIS-Region-
-  DBs. Muss in Etappe 0 gemessen und in die Regionsverwaltung integriert
-  werden (Region löschen = auch Routing-Kacheln löschen).
-- **ÖPNV-Abdeckung.** GTFS ist pro Land/Region zu beschaffen und zu pflegen;
-  außerhalb Deutschlands wird das schnell mühsam. Fallback: Fuß + Auto, ÖPNV
-  als optionaler Zusatz pro Region.
+  steht dort gar nicht. Gegenmittel: die grobe Auflösung (§4) verzeiht
+  Ungenauigkeit, fehlende Angaben werden als „ungeprüft" gekennzeichnet.
+  Restaurants plant das System bewusst nur als Zeitfenster („Mittag, irgendwo
+  in der Gegend von B"), nicht als konkrete Empfehlung — dafür fehlen die
+  Daten, und eine erfundene Empfehlung wäre schlechter als keine.
+- **Geschätzte Reisezeiten.** Die Heuristik kann bei Flüssen, Bergen oder
+  schlechter ÖPNV-Anbindung deutlich danebenliegen. Gegenmittel: Puffer im
+  Blockbudget, ehrliche Kennzeichnung als Schätzung, und Etappe 7 für die
+  Regionen, wo es sich lohnt.
 - **Keine Echtzeit.** Verkehr, Streiks, spontane Schließungen sieht das System
-  nicht. Deshalb großzügige Puffer und die bewusste Übergabe an Apple/Google
-  Maps für die eigentliche Navigation.
+  nicht — bewusste Übergabe an Apple/Google Maps für die Navigation.
+- **Speicherbedarf** eines späteren Routers (Valhalla-Kacheln zusätzlich zu den
+  PostGIS-Region-DBs) muss in Etappe 7 gemessen und in die Regionsverwaltung
+  integriert werden (Region löschen = auch Kacheln löschen).
 - **Offline-Karten.** Vektorkacheln aus den PBFs (planetiler + MapLibre) wären
-  ein eigener großer Baustein. Zunächst MapKit online; offline gibt es Liste,
-  Zeiten und Wegbeschreibung, aber keine Kartendarstellung.
+  ein eigener großer Baustein. Zunächst MapKit online; offline gibt es
+  Blockliste, Spots und Wegbeschreibung, aber keine Kartendarstellung.
 
-## 8. Offene Fragen an den Nutzer
+## 10. Offene Fragen an den Nutzer
 
-1. **Regionsumfang:** Soll für einen geplanten Urlaub automatisch die passende
+1. **Blockschema:** Sind Vormittag / Mittag / Nachmittag / Abend die richtige
+   Einteilung, oder lieber frei definierbare Blöcke pro Tag?
+2. **Regionsumfang:** Soll für einen geplanten Urlaub automatisch die passende
    Geofabrik-Region importiert werden (Speicher!), oder bleibt das eine
    bewusste Admin-Entscheidung wie heute?
-2. **Restaurants/Cafés:** ohne Bewertungsdaten mitplanen (nur Kategorie + Lage
-   + eigene Historie) oder außen vor lassen?
-3. **ÖPNV:** von Anfang an, oder erst Fuß + Auto und ÖPNV als spätere Etappe?
+3. **Standort unterwegs:** Darf die App für „wir sind hier, es ist jetzt" den
+   Standort automatisch ziehen, oder soll das Umplanen immer eine bewusste
+   Nutzeraktion bleiben?
 4. **Wetter:** externe Wetter-API (verlässt das Haus, aber nur mit Koordinate
-   und Datum) oder bewusst nicht?
-5. **Web-Frontend:** nur iOS, oder Planung auch in der Vue-App (Planen am
-   großen Bildschirm, Ausführen am Telefon wäre naheliegend)?
+   und Datum) oder bewusst nicht? Für „es regnet — was Drinnen" wäre sie der
+   naheliegende Auslöser.
+5. **Web-Frontend:** nur iOS, oder Planung auch in der Vue-App? Planen am großen
+   Bildschirm, Umplanen am Telefon wäre eine naheliegende Arbeitsteilung.
