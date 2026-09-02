@@ -1,5 +1,12 @@
 import SwiftUI
 
+/// Searching the photo library.
+///
+/// The field is the system one (`.searchable`) rather than a hand-built row:
+/// it puts the magnifier inside the field where iOS expects it, and brings the
+/// clear button, the „Abbrechen" button and the collapse-on-scroll behaviour
+/// with it — three things the hand-built version either lacked or had to
+/// reimplement.
 struct SearchView: View {
     @State private var viewModel = SearchViewModel()
 
@@ -10,32 +17,6 @@ struct SearchView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                // Search bar
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-                    TextField("Fotos suchen...", text: $viewModel.query)
-                        #if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        #endif
-                        .autocorrectionDisabled()
-                        .onSubmit {
-                            Task { await viewModel.search() }
-                        }
-                    if !viewModel.query.isEmpty {
-                        Button {
-                            viewModel.clear()
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                .padding()
-                .background(.quaternary)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .padding(.horizontal)
-
                 // What the server made of the query. Only drawn once a search
                 // has actually returned something to report.
                 if !viewModel.isSearching && !viewModel.chips.isEmpty {
@@ -51,7 +32,7 @@ struct SearchView: View {
                     ContentUnavailableView {
                         Label("Keine Ergebnisse", systemImage: "magnifyingglass")
                     } description: {
-                        Text("Keine Fotos für \"\(viewModel.query)\" gefunden.")
+                        Text("Keine Fotos für „\(viewModel.parsedQuery)“ gefunden.")
                     }
                 } else if !viewModel.results.isEmpty {
                     Text("\(viewModel.results.count) Ergebnis(se)")
@@ -82,6 +63,27 @@ struct SearchView: View {
                         .padding(.horizontal)
                 }
             }
+        }
+        .searchable(
+            text: $viewModel.query,
+            placement: .navigationBarDrawer(displayMode: .always),
+            prompt: "Fotos suchen"
+        )
+        #if os(iOS)
+        .textInputAutocapitalization(.never)
+        #endif
+        .autocorrectionDisabled()
+        // The search runs on submit, not per keystroke: every query is a
+        // round trip through the embedding service, and searching for each
+        // half-typed word would spend that on nothing.
+        .onSubmit(of: .search) {
+            Task { await viewModel.search() }
+        }
+        // Clearing the field (its own × button, or „Abbrechen") empties the
+        // results with it. Without this the grid would keep showing hits for
+        // a query no longer on screen.
+        .onChange(of: viewModel.query) { _, text in
+            if text.isEmpty { viewModel.clear() }
         }
         .navigationTitle("Suche")
         .navigationDestination(for: Int.self) { photoId in
