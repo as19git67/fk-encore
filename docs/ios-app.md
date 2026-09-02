@@ -198,6 +198,28 @@ dokumentiert**:
 - Noch offen (#1019 Etappe B): der interaktive Cropper und die Regler für
   Belichtung/Kontrast/Gamma inkl. „Auto-Levels".
 
+### 2.6c Foto-Vergleich (Gruppen-Review)
+
+- **Vergleichsansicht** (`PhotoCompareView`), erreichbar über „Vergleichen …"
+  in der Gruppen-Review-Karte, sobald eine Gruppe mindestens zwei Fotos hat.
+  Zwei Aufnahmen nebeneinander (im Hochformat übereinander).
+- Der entscheidende Zug ist derselbe wie im Web: **ein Tipp auf ein Gesicht
+  zoomt beide Fotos darauf, auf dieselbe Bildschirmgröße.** Zwei unabhängig
+  gezoomte Gesichter lassen sich nicht vergleichen, gleich große schon. Die
+  Geometrie liegt in `PhotoCompare.swift` (Port von
+  `frontend/src/utils/compareZoom.ts`).
+- Beide Zooms werden **gemeinsam** gelöst: jede Seite braucht die Maße des
+  anderen Fotos, sonst kämen die zwei Hälften auf verschiedene Ergebnisse.
+  Maßgeblich ist das kleinere der beiden Gesichter — andersherum liefe das
+  zweite aus seinem Ausschnitt heraus.
+- Ein Tipp auf ein **benanntes** Gesicht richtet beide Seiten auf dieselbe
+  Person aus; ohne Namen gibt es nichts zum Abgleichen, dann nimmt jede Seite
+  ihr eigenes Hauptgesicht. Ein Tipp ins Leere zoomt trotzdem auf das
+  Hauptgesicht, statt nichts zu tun.
+- Die Auswahl selbst bleibt beim `ReviewSelectionSheet` — diese Ansicht zeigt
+  nur. Noch offen (#1021 Etappe B): Schärfe-Overlay (Focus Peaking),
+  Qualitäts-Aufschlüsselung und Wisch-zum-Verwerfen.
+
 ### 2.7 Feed (Aktivität, Kommentare, Reaktionen)
 - **Feed-Tab** mit Ungelesen-Badge (`FeedViewModel.unreadCount`).
 - **Reaktionen / Likes** und **Ausblenden** je Foto.
@@ -268,7 +290,7 @@ Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders ·
 | Vollbild + Zoom | ✅ | ✅ native Pinch-Zoom |
 | Diashow / Slideshow | ✅ Modus im Vollbild | ✅ eigener Story-Player (`PhotoSlideshowView`), mit Foto-Paaren je nach Geräteausrichtung |
 | Mehrfachauswahl + Stapelaktionen | ✅ (Galerie + Album) | ✅ (Album, Monat und „Alle Fotos") |
-| Fotos vergleichen | ✅ `PhotoCompareView` | ❌ |
+| Fotos vergleichen | ✅ `PhotoCompareView` | 🔶 `PhotoCompareView` (Seite an Seite + synchroner Gesichts-Zoom; Schärfe-Overlay und Qualitäts-Tabelle offen) |
 
 ### 3.2 Foto-Aktionen
 | Feature | Web | iOS |
@@ -403,7 +425,10 @@ Referenz stehen, was jeweils gebaut wurde.
 ### Etappe 3 – Nice-to-have / aufwändiger
 10. **Nicht-destruktiver Transform-/Crop-Editor** – komplex; ggf. später.
 11. **Collage-Erstellung**.
-12. **Fotos vergleichen**.
+12. 🔶 **Fotos vergleichen** – umgesetzt als `PhotoCompareView` im
+    Gruppen-Review: zwei Aufnahmen nebeneinander, ein Tipp auf ein Gesicht
+    zoomt beide gleich groß darauf (#1021 Etappe A). Offen: Schärfe-Overlay
+    und Qualitäts-Aufschlüsselung.
 
 ### Bewusst **nicht** portieren (Web sinnvoller)
 - Vollständige Datenverwaltung, geplante Jobs, Purge → bleibt Web-/Admin-Domäne.
