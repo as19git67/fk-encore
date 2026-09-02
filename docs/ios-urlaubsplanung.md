@@ -373,8 +373,12 @@ Reisetagebuch (§3.6) schreibt sich von selbst.
 
 Erledigt ist dabei **pro Person**, nicht pro Gruppe — sonst zerfällt die
 Zuordnung beim Split (§6.5), und die Historie wüsste später nicht, wer den Tempel
-gesehen hat. Geteilt wird ausschließlich das Ereignis „X war an Spot Y", nie ein
-laufender Standort; auch das abschaltbar. Eine Live-Karte mit den Punkten der
+gesehen hat. Sichtbar sind die Besuche **für alle Trip-Teilnehmer** (entschieden, §15.4):
+Nach einem Split muss klar sein, was der andere Zweig gesehen hat, und das
+gemeinsame Tagebuch soll stimmen. Geteilt wird dabei ausschließlich das
+Ereignis „X war an Spot Y", nie ein laufender Standort; pro Person abschaltbar
+(dann erscheint der Stopp für die anderen nur als erledigt, ohne Namen); und
+die Sichtbarkeit endet mit dem Trip. Eine Live-Karte mit den Punkten der
 Familie ist ein anderes Produkt.
 
 ### 6.5 Splits: getrennt unterwegs, gemeinsam geplant
@@ -1269,19 +1273,47 @@ Vorgabewerten bauen.
    folgt derselben Regel wie jede andere Automatik (§15.3, Frage 7) — höchstens
    einer offen, abgelehnt heißt erledigt. Abschaltbar bleibt es trotzdem, nur
    eben nicht standardmäßig aus.
-9. **Hotelwahl:** Soll der Planer aus einer Ankerzone (§4.2) aktiv Viertel
-   vorschlagen, oder bleibt die Unterkunft außerhalb seines Auftrags?
+9. **Hotelwahl — entschieden: Gegenden bewerten, keine Häuser.** Der Planer
+   bewertet Lagen, nicht Betten: „von hier sind zwei Drittel eurer Favoriten in
+   20 Minuten erreichbar, und abends hat in der Nähe noch etwas offen". Das
+   lässt sich aus OSM belastbar herleiten — Preis, Zimmerqualität und
+   Verfügbarkeit nicht, und eine Häuserliste ohne diese Angaben sähe aus wie
+   eine Empfehlung, ohne eine zu sein (derselbe Fehler, den §10 für Restaurants
+   vermeidet). Gebucht wird woanders; das Ergebnis der Buchung kommt als
+   Dokument zurück und macht aus der Zone einen Anker (§3.4).
+   Umsetzung: Die Bewertung einer Gegend ist keine neue Maschinerie, sondern
+   der vorhandene Planer, probeweise auf mehrere Ankerkandidaten angewandt —
+   wie viel Vorrat liegt im Zeitbudget, wenn der Tag hier beginnt und endet.
 
 ### 15.4 Aus dem Mehrbenutzerbetrieb (§6), erst für Schritt 11
 
-10. **Kontingent der Herzenswünsche:** zwei je drei Tage — zu knapp, zu
-    großzügig, oder pro Trip statt pro Etappe?
-11. **Splits proaktiv?** Soll der Planer eine Trennung von sich aus vorschlagen,
-    wenn die Stimmen auseinandergehen (§6.5), oder nur auf Anforderung? Ein
-    ungefragter Vorschlag, sich zu trennen, kann als Einmischung gelesen werden.
-12. **Sichtbarkeit in der Familie:** Sollen Besuchsereignisse anderer Personen
-    („X war am Tempel") für alle sichtbar sein, nur für den Organisator, oder
-    gar nicht?
+10. **Kontingent der Herzenswünsche — entschieden: zwei je drei Tage, pro
+    Etappe.** Es skaliert mit der Reiselänge und setzt sich je Etappe zurück —
+    wer in Tokio seine zwei gesetzt hat, startet in Osaka wieder frei.
+    Aufgerundet, damit eine Zwei-Tage-Etappe nicht leer ausgeht. Zu beachten:
+    Bei vier Personen sind das acht Setzungen je drei Tage, genug, um einen
+    Tagesplan zu füllen — passt ein Herzenswunsch nicht mehr ins Budget, wird
+    er deshalb nicht stillschweigend fallen gelassen, sondern ausdrücklich
+    gemeldet („X' Wunsch passt nur, wenn etwas anderes weicht"), und der Zähler
+    verfällt nicht.
+11. **Splits proaktiv — entschieden: ja, aber nur bei klarem Konflikt.** Der
+    Vorschlag erscheint nur, wenn zwei Spots sich zeitlich ausschließen **und**
+    jeder für eine andere Person stark gewichtet ist — nicht bei jeder
+    rechnerischen Verbesserung. Bei kleinerer Uneinigkeit bleibt der Planer
+    still. Formuliert wird er neutral und als eine Möglichkeit unter mehreren
+    („eine Möglichkeit wäre …"), nie als Empfehlung an die Gruppe; von Hand
+    anzulegen sind Splits ohnehin jederzeit. Für die Schwelle heißt das: Sie
+    braucht beide Bedingungen, sonst wird aus der Konfliktlösung eine App, die
+    ständig Trennungen anregt.
+12. **Sichtbarkeit in der Familie — entschieden: für alle im Trip sichtbar.**
+    Jeder sieht, wer welchen Spot besucht hat. Das ist nötig, damit nach einem
+    Split klar ist, was der andere Zweig gesehen hat (§6.5), und damit das
+    gemeinsame Reisetagebuch stimmt. Drei Grenzen dazu: Geteilt wird
+    **ausschließlich das Ereignis** („X war am Tempel"), nie ein laufender
+    Standort; die Freigabe ist **pro Person abschaltbar**, dann erscheint der
+    Stopp für die anderen nur als erledigt, ohne Namen; und sie endet **mit dem
+    Trip** — Besuche werden nicht rückwirkend über abgeschlossene Reisen hinweg
+    einsehbar.
 
 ---
 
