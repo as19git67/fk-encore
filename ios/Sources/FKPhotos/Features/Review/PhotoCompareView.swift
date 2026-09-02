@@ -1,12 +1,14 @@
 import SwiftUI
 import UIKit
 
-/// Two shots of the same moment, side by side, so the sharper one is obvious.
+/// Comparing a group of near-duplicates, two at a time, until one keep set is
+/// left — the web's `PhotoCompareView` (#1021 stage A, #1085 §2a).
 ///
-/// The web's `PhotoCompareView` in its comparison half (#1021, stage A). The
-/// deciding move is the same one: tap a face and **both** photos zoom to it at
-/// the same on-screen size. Two independently-zoomed faces cannot be compared;
-/// matched ones can. The geometry is in `PhotoCompare`.
+/// Two shots of the same moment, side by side, so the sharper one is obvious.
+/// The deciding move is the same one the web has: tap a face and **both**
+/// photos zoom to it at the same on-screen size. Two independently-zoomed
+/// faces cannot be compared; matched ones can. The geometry is in
+/// `PhotoCompare`.
 ///
 /// The two zooms are solved **together, here** — each needs the other photo's
 /// dimensions, so a pane cannot work its own out alone without the two halves
@@ -16,15 +18,25 @@ import UIKit
 /// which is the web's fling gesture — every direction discards except the one
 /// pointing at the partner photo, and the quality breakdown
 /// (`PhotoQualityDetails`) says *why* one photo scored higher than the other.
-/// The full keep set still belongs to `ReviewSelectionSheet`.
+///
+/// A verdict does **not** end the group. It settles one pair and the next pair
+/// is chosen; only when the pairs run out does the keep set go up for
+/// confirmation and reach the server, once. That loop is `CompareTournament`,
+/// which holds no view and no network so its ordering can be tested.
 struct PhotoCompareView: View {
-    let first: ReviewQueuePhoto
-    let second: ReviewQueuePhoto
-    /// Called with the photo that was flung away. The caller decides what a
-    /// discard means for the group — this view only reports the gesture.
-    var onDiscard: ((Int) -> Void)?
+    /// The whole group. Two of them are on screen at any moment; which two is
+    /// the tournament's business.
+    let photos: [ReviewQueuePhoto]
+    /// Called with the photos to keep, once, when the user confirms. The
+    /// caller commits — this view never talks to the server about a decision.
+    var onCommit: ([Int]) -> Void
 
     @Environment(\.dismiss) private var dismiss
+
+    @State private var tournament: CompareTournament
+    /// Which photos the confirmation will keep. Seeded from the tournament's
+    /// proposal and still the user's to change.
+    @State private var keepIds: Set<Int> = []
 
     @State private var images: [Int: UIImage] = [:]
     @State private var faces: [Int: [PhotoCompare.Candidate]] = [:]
@@ -43,6 +55,23 @@ struct PhotoCompareView: View {
     /// predate the scan, and it carries no breakdown at all.
     @State private var quality: [Int: PhotoQualityDetails.Fresh] = [:]
     @State private var showQuality = false
+
+    init(photos: [ReviewQueuePhoto], onCommit: @escaping ([Int]) -> Void) {
+        self.photos = photos
+        self.onCommit = onCommit
+        // The AI's ratings are a starting position, not a verdict: they only
+        // decide which pair is asked about first.
+        let seeds = CompareTournament.seedScores(
+            qualities: Dictionary(
+                uniqueKeysWithValues: photos.map { ($0.id, $0.ai_quality_score) }
+            )
+        )
+        _tournament = State(
+            initialValue: CompareTournament(
+                photoIds: photos.map(\.id), seedScores: seeds
+            )
+        )
+    }
 
     private struct Flung: Equatable {
         let id: Int
@@ -65,94 +94,286 @@ struct PhotoCompareView: View {
         }
     }
 
+    private var photoById: [Int: ReviewQueuePhoto] {
+        Dictionary(uniqueKeysWithValues: photos.map { ($0.id, $0) })
+    }
+
+    /// The pair on screen, or nil once the pairwise half is over.
+    private var pair: (first: ReviewQueuePhoto, second: ReviewQueuePhoto)? {
+        guard let current = tournament.current else { return nil }
+        let byId = photoById
+        guard let first = byId[current.low], let second = byId[current.high] else {
+            return nil
+        }
+        return (first, second)
+    }
+
     var body: some View {
         NavigationStack {
-            GeometryReader { geo in
-                let isPortrait = geo.size.height > geo.size.width
-                let paneSize = isPortrait
-                    ? CGSize(width: geo.size.width, height: (geo.size.height - 2) / 2)
-                    : CGSize(width: (geo.size.width - 2) / 2, height: geo.size.height)
-                let zooms = syncedZooms(paneSize: paneSize)
-                let layout = isPortrait
-                    ? AnyLayout(VStackLayout(spacing: 2))
-                    : AnyLayout(HStackLayout(spacing: 2))
-
-                layout {
-                    ComparePane(
-                        photo: first,
-                        image: images[first.id],
-                        paneSize: paneSize,
-                        zoom: zooms.first,
-                        faces: showPeaking ? (faces[first.id] ?? []) : [],
-                        sharpness: sharpness[first.id] ?? [],
-                        qualityPercent: qualityPercent(for: first),
-                        flungOffset: flung?.id == first.id ? flung?.offset : nil,
-                        onTap: { handleTap(at: $0, photo: first, paneSize: paneSize) },
-                        onDrag: { handleFling(
-                            $0, photo: first, indexInPair: 0,
-                            isPortrait: isPortrait, screen: geo.size
-                        ) }
-                    )
-                    ComparePane(
-                        photo: second,
-                        image: images[second.id],
-                        paneSize: paneSize,
-                        zoom: zooms.second,
-                        faces: showPeaking ? (faces[second.id] ?? []) : [],
-                        sharpness: sharpness[second.id] ?? [],
-                        qualityPercent: qualityPercent(for: second),
-                        flungOffset: flung?.id == second.id ? flung?.offset : nil,
-                        onTap: { handleTap(at: $0, photo: second, paneSize: paneSize) },
-                        onDrag: { handleFling(
-                            $0, photo: second, indexInPair: 1,
-                            isPortrait: isPortrait, screen: geo.size
-                        ) }
-                    )
+            Group {
+                if let pair {
+                    comparing(pair)
+                } else {
+                    confirmation
                 }
             }
             .background(Color.black)
-            .navigationTitle("Vergleich")
+            .navigationTitle(pair == nil ? "Auswahl" : "Vergleich")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Fertig") { dismiss() }
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        showPeaking.toggle()
-                    } label: {
-                        Label(
-                            "Schärfe",
-                            systemImage: showPeaking ? "viewfinder.circle.fill" : "viewfinder.circle"
-                        )
-                    }
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        showQuality = true
-                    } label: {
-                        Label("Bewertung", systemImage: "chart.bar.doc.horizontal")
-                    }
-                }
-                if focus != nil {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button("Ganzes Bild") { focus = nil }
-                    }
-                }
-            }
-            .task { await load() }
+            .toolbar { toolbarContent }
+            // Keyed on the pair, so moving to the next one fetches it — and
+            // the first pair is fetched by the same task on appear.
+            .task(id: tournament.current) { await load() }
             .sheet(isPresented: $showQuality) {
-                QualityBreakdownSheet(
-                    first: first,
-                    second: second,
-                    firstQuality: quality[first.id],
-                    secondQuality: quality[second.id]
-                )
-                .presentationDetents([.medium, .large])
+                if let pair {
+                    QualityBreakdownSheet(
+                        first: pair.first,
+                        second: pair.second,
+                        firstQuality: quality[pair.first.id],
+                        secondQuality: quality[pair.second.id]
+                    )
+                    .presentationDetents([.medium, .large])
+                }
             }
         }
+    }
+
+    // MARK: - Comparing
+
+    private func comparing(
+        _ pair: (first: ReviewQueuePhoto, second: ReviewQueuePhoto)
+    ) -> some View {
+        GeometryReader { geo in
+            let isPortrait = geo.size.height > geo.size.width
+            let paneSize = isPortrait
+                ? CGSize(width: geo.size.width, height: (geo.size.height - 2) / 2)
+                : CGSize(width: (geo.size.width - 2) / 2, height: geo.size.height)
+            let zooms = syncedZooms(pair: pair, paneSize: paneSize)
+            let layout = isPortrait
+                ? AnyLayout(VStackLayout(spacing: 2))
+                : AnyLayout(HStackLayout(spacing: 2))
+
+            VStack(spacing: 0) {
+                layout {
+                    pane(pair.first, indexInPair: 0, zoom: zooms.first,
+                         paneSize: paneSize, isPortrait: isPortrait, screen: geo.size)
+                    pane(pair.second, indexInPair: 1, zoom: zooms.second,
+                         paneSize: paneSize, isPortrait: isPortrait, screen: geo.size)
+                }
+                actionBar(pair, isPortrait: isPortrait)
+            }
+        }
+    }
+
+    private func pane(
+        _ photo: ReviewQueuePhoto,
+        indexInPair: Int,
+        zoom: PhotoCompare.Zoom?,
+        paneSize: CGSize,
+        isPortrait: Bool,
+        screen: CGSize
+    ) -> some View {
+        ComparePane(
+            photo: photo,
+            image: images[photo.id],
+            paneSize: paneSize,
+            zoom: zoom,
+            faces: showPeaking ? (faces[photo.id] ?? []) : [],
+            sharpness: sharpness[photo.id] ?? [],
+            qualityPercent: qualityPercent(for: photo),
+            flungOffset: flung?.id == photo.id ? flung?.offset : nil,
+            onTap: { handleTap(at: $0, photo: photo, paneSize: paneSize) },
+            onDrag: { handleFling(
+                $0, photo: photo, indexInPair: indexInPair,
+                isPortrait: isPortrait, screen: screen
+            ) }
+        )
+    }
+
+    /// Every gesture, as a labelled button.
+    ///
+    /// A fling is quick but invisible: nothing on screen says it exists, and
+    /// nothing about it works with VoiceOver or Switch Control. These are the
+    /// same four verdicts the web offers under its panes.
+    private func actionBar(
+        _ pair: (first: ReviewQueuePhoto, second: ReviewQueuePhoto),
+        isPortrait: Bool
+    ) -> some View {
+        HStack(spacing: 12) {
+            verdictButton(
+                isPortrait ? "Oberes raus" : "Linkes raus",
+                systemImage: "hand.thumbsdown"
+            ) { discard(pair.first.id) }
+
+            verdictButton("Gleich gut", systemImage: "equal.circle") {
+                withAnimation { tournament.draw() }
+                focus = nil
+            }
+
+            verdictButton("Später", systemImage: "arrow.uturn.forward") {
+                withAnimation { tournament.skip() }
+                focus = nil
+            }
+
+            verdictButton(
+                isPortrait ? "Unteres raus" : "Rechtes raus",
+                systemImage: "hand.thumbsdown"
+            ) { discard(pair.second.id) }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity)
+        .background(.ultraThinMaterial)
+    }
+
+    private func verdictButton(
+        _ title: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: systemImage)
+                Text(title)
+                    .font(.caption2)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.plain)
+        .disabled(flung != nil)
+    }
+
+    // MARK: - Confirming
+
+    /// What the comparisons came to, before anything is committed.
+    ///
+    /// Nothing has reached the server at this point: the whole tournament is
+    /// local, and this one screen is where it turns into a decision. Toggling
+    /// a photo here is still free.
+    private var confirmation: some View {
+        ScrollView {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 110), spacing: 8)],
+                spacing: 8
+            ) {
+                ForEach(tournament.ranked, id: \.self) { id in
+                    if let photo = photoById[id] {
+                        confirmationTile(photo)
+                    }
+                }
+            }
+            .padding(12)
+        }
+        .background(Color(.systemBackground))
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: 6) {
+                Text(keepSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button {
+                    onCommit(Array(keepIds).sorted())
+                    dismiss()
+                } label: {
+                    Text("Auswahl übernehmen")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(keepIds.isEmpty)
+            }
+            .padding(12)
+            .background(.ultraThinMaterial)
+        }
+    }
+
+    private var keepSummary: String {
+        let keep = keepIds.count
+        let hide = photos.count - keep
+        if keep == 0 {
+            return "Mindestens ein Foto muss behalten werden."
+        }
+        return "\(keep) behalten · \(hide) ausblenden"
+    }
+
+    private func confirmationTile(_ photo: ReviewQueuePhoto) -> some View {
+        let kept = keepIds.contains(photo.id)
+        return Button {
+            if kept { keepIds.remove(photo.id) } else { keepIds.insert(photo.id) }
+        } label: {
+            PhotoThumbnailView(filename: photo.filename, photoId: photo.id)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .opacity(kept ? 1 : 0.35)
+                .overlay(alignment: .topTrailing) {
+                    Image(systemName: kept ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(kept ? Color.accentColor : .secondary)
+                        .padding(6)
+                }
+                .overlay(alignment: .bottomLeading) {
+                    if let percent = qualityPercent(for: photo) {
+                        Text("\(percent) %")
+                            .font(.caption2.bold())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(.black.opacity(0.6), in: Capsule())
+                            .padding(5)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(kept ? "Behalten" : "Ausblenden")
+    }
+
+    // MARK: - Toolbar
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            Button("Abbrechen") { dismiss() }
+        }
+        if pair != nil {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showPeaking.toggle()
+                } label: {
+                    Label(
+                        "Schärfe",
+                        systemImage: showPeaking ? "viewfinder.circle.fill" : "viewfinder.circle"
+                    )
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showQuality = true
+                } label: {
+                    Label("Bewertung", systemImage: "chart.bar.doc.horizontal")
+                }
+            }
+            if focus != nil {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Ganzes Bild") { focus = nil }
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                // Long groups need a way out that is not „compare all fifteen
+                // pairs": the scores so far are already an answer.
+                Button("Fertig") {
+                    withAnimation { tournament.finishComparing() }
+                }
+            }
+        }
+        ToolbarItem(placement: .principal) {
+            Text(progressLabel)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+    }
+
+    private var progressLabel: String {
+        if pair == nil { return "\(photos.count) Fotos" }
+        return "Vergleich \(tournament.comparisons + 1) von \(tournament.totalPairs)"
     }
 
     /// The score to show on a photo: the fresh read when there is one, the
@@ -172,15 +393,16 @@ struct PhotoCompareView: View {
     /// The two zooms, solved as a pair. Nil on either side means that photo is
     /// shown at its plain fit — no image yet, or no face to line up on.
     private func syncedZooms(
+        pair: (first: ReviewQueuePhoto, second: ReviewQueuePhoto),
         paneSize: CGSize
     ) -> (first: PhotoCompare.Zoom?, second: PhotoCompare.Zoom?) {
         guard let focus,
-              let firstImage = images[first.id],
-              let secondImage = images[second.id],
+              let firstImage = images[pair.first.id],
+              let secondImage = images[pair.second.id],
               let boxes = PhotoCompare.matchedBoxes(
                   personId: focus.personId,
-                  first: faces[first.id] ?? [],
-                  second: faces[second.id] ?? []
+                  first: faces[pair.first.id] ?? [],
+                  second: faces[pair.second.id] ?? []
               )
         else { return (nil, nil) }
 
@@ -246,22 +468,41 @@ struct PhotoCompareView: View {
                 offset: CompareSwipe.offscreenOffset(direction, screen: screen)
             )
         }
-        // The decision waits for the tile to actually leave, so the discard is
-        // something the user watches happen rather than a photo that blinks out.
+        // The verdict waits for the tile to actually leave, so the discard is
+        // something the user watches happen rather than a photo that blinks
+        // out — and then the *next pair* comes up, rather than the group
+        // ending on one gesture.
         let id = photo.id
-        Task {
+        Task { @MainActor in
             try? await Task.sleep(
                 nanoseconds: UInt64(CompareSwipe.animationDuration * 1_000_000_000)
             )
-            onDiscard?(id)
-            dismiss()
+            discard(id)
         }
+    }
+
+    /// Record a verdict and move on. The photo is not hidden here — nothing
+    /// reaches the server until the keep set is confirmed.
+    private func discard(_ photoId: Int) {
+        withAnimation { tournament.discard(photoId) }
+        flung = nil
+        focus = nil
+        if tournament.current == nil { seedKeepIds() }
+    }
+
+    private func seedKeepIds() {
+        keepIds = Set(tournament.suggestedKeepIds)
     }
 
     // MARK: - Loading
 
     private func load() async {
-        for photo in [first, second] {
+        // Only the pair on screen, plus nothing else: a group of ten would
+        // otherwise pull ten full-size photos before the first comparison.
+        let wanted = [tournament.current?.low, tournament.current?.high]
+            .compactMap { $0 }
+            .compactMap { photoById[$0] }
+        for photo in wanted {
             // The breakdown never comes with the review queue — the queue
             // photo carries a score and nothing else — so it is read per
             // photo here, the same fresh fetch the web makes.
@@ -284,6 +525,7 @@ struct PhotoCompareView: View {
             }
             measureSharpness(of: photo)
         }
+        if tournament.current == nil, keepIds.isEmpty { seedKeepIds() }
     }
 
     /// Measure every face in a photo once both its pixels and its boxes are in.
