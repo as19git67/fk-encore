@@ -32,7 +32,7 @@ Diese vier prägen alles Weitere und stehen deshalb vorne:
 4. **Standort, Wetter und Licht sind erstklassige Eingaben.** Die App kennt den
    Standort und nutzt ihn aktiv. Niederschlag steuert, *was* geplant wird;
    Sonnenstand und Bewölkung steuern, *wann* — denn fk-encore plant nicht nur
-   Besuche, sondern gute Fotos (§6).
+   Besuche, sondern gute Fotos (§7).
 
 ## 3. Warum das kein Google-Maps-Klon wird
 
@@ -61,7 +61,7 @@ Wegpunkte von Hand.
 Weil fk-encore eine Foto-App ist, plant der Trip Planer nicht nur Besuche,
 sondern gute Fotos: Sonnenstand, Fassadenausrichtung und Bewölkung ergeben pro
 Spot ein Lichtfenster, das die Reihenfolge im Block bestimmt und einen
-Abendtermin vorschlagen kann (§6.3). Google Maps kennt Öffnungszeiten — aber
+Abendtermin vorschlagen kann (§7.3). Google Maps kennt Öffnungszeiten — aber
 nicht, dass die Aussichtsterrasse erst ab halb acht lohnt.
 
 ### 3.4 Dokumente als Fixpunkte
@@ -81,7 +81,8 @@ Sternchen-Hinweis. Das wirkt direkt auf das Zeitbudget eines Blocks.
 ### 3.6 Familienabstimmung mit vorhandener Mechanik
 Das Album-Voting (Nutzer **und** KI stimmen über Fotos ab) ist eins zu eins auf
 Spot-Kandidaten übertragbar: Jeder wischt vor der Reise durch die Vorschläge,
-der Planer optimiert gegen die aggregierten Stimmen. Das zahlt sich vor allem
+der Planer optimiert gegen die aggregierten Stimmen — wobei „aggregiert" gerade
+nicht Mittelwert heißt (§6.1). Das zahlt sich vor allem
 beim Umplanen aus — wenn etwas wegfallen muss, fällt zuerst weg, was der Gruppe
 am wenigsten wichtig war. Google Maps hat Listen, aber keine Gruppenentscheidung,
 die anschließend in eine Auswahl fließt.
@@ -244,9 +245,9 @@ Ein Plan besteht aus drei Schichten:
 
 - Der Nutzer tippt „wir sind hier, es ist jetzt".
 - **Die App merkt es selbst** am Standort: die Gruppe hängt hinter dem Block
-  zurück (§6.1). Sie *bietet* die Neuverteilung an, führt sie nicht ungefragt aus.
+  zurück (§7.1). Sie *bietet* die Neuverteilung an, führt sie nicht ungefragt aus.
 - **Die Wettervorhersage ändert sich** — aus dem trockenen Nachmittag wird ein
-  nasser (§6.2).
+  nasser (§7.2).
 - Ein Spot wird als erledigt, übersprungen oder als „hat länger gedauert"
   markiert.
 - Eine Bedingung ändert sich per Chat: *„es regnet — was Drinnen"*, *„zu viel
@@ -256,18 +257,170 @@ Ein Plan besteht aus drei Schichten:
 bleibt unangetastet (es ist der Anfang des Reisetagebuchs). Was nicht mehr
 passt, wird nicht gelöscht, sondern wandert in den Vorrat zurück — mit erhöhter
 Priorität für die Folgetage, sofern noch welche da sind. Ausgeworfen wird
-zuerst, was die niedrigsten Gruppenstimmen hat.
+zuerst, was die niedrigsten Gruppenstimmen hat — Herzenswünsche und das
+Fairness-Konto (§6.1) schützen dabei einzelne Setzungen davor, als Erstes zu
+fallen.
 
 **Für den Nutzer sichtbar** ist immer nur die Konsequenz, nicht die Rechnung:
 *„Der Nachmittag wird knapp — E fällt raus und rutscht auf morgen Vormittag."*
 Mit Rückgängig-Knopf.
 
-## 6. Standort, Wetter und Licht
+## 6. Zu mehreren unterwegs: Beiträge, Rollen, Splits
+
+Bis hierher liest sich das Konzept, als plante eine Person. Tatsächlich benutzen
+mehrere Familienmitglieder die App, tragen Spots bei, gewichten sie
+unterschiedlich und laufen unterwegs zeitweise auseinander. Das ist keine
+Randbedingung, sondern prägt Datenmodell und Mechanik.
+
+### 6.1 Der Vorrat ist gemeinsam, die Bewertung ist persönlich
+
+Alle Teilnehmer speisen **denselben Vorrat** (§5): über die Kandidatensuche,
+über geteilte Orte aus anderen Apps (§9.2) oder von Hand. Sichtbar bleibt, wer
+was beigetragen hat — das kostet nichts und ist sozial wichtig.
+
+Bewertet wird dagegen **pro Person**: durchwischen mit *will ich* / *egal* /
+*lieber nicht*. Wer kein eigenes Konto hat (kleine Kinder), bekommt eine
+stellvertretend geführte Stimme.
+
+**Der Mittelwert ist dabei die falsche Aggregation** — und das ist der wichtigste
+Punkt dieses Kapitels. Ein Durchschnitt wählt aus, was alle *mittelmäßig*
+finden, und streicht, was einer Person *sehr viel* und den übrigen nichts
+bedeutet. Das Ergebnis ist ein Plan, den niemand geliebt hat. Deshalb zwei
+Korrektive:
+
+- **Herzenswünsche mit Kontingent.** Jede Person hat pro Etappe eine kleine
+  feste Zahl an Setzungen (etwa zwei je drei Tage). Ein so markierter Spot kommt
+  in den Plan, solange er physisch möglich ist — unabhängig von der Mehrheit.
+  Das schützt genau die Vorlieben, die ein Durchschnitt zermahlt.
+- **Ein Fairness-Konto.** Für alles Übrige zählt die Stimmensumme, aber der
+  Planer merkt sich, wessen Wünsche schon erfüllt wurden, und bevorzugt bei
+  Gleichstand die Person, die zuletzt zurückstecken musste. Ein Zähler, kein
+  Verfahren — und erklärbar: *„heute ist mal wieder X dran."*
+
+Ein *lieber nicht* ist ein starkes Minus, aber kein Veto. Echte Ausschlüsse
+(„keine Höhenwege") sind keine Stimmen, sondern Nebenbedingungen der Person
+(§3.5) und wirken auf den Solver, nicht auf das Ranking.
+
+### 6.2 Braucht es einen Trip Leader?
+
+**Ja — aber als Organisator, nicht als Chef, und nur für die Vorbereitung.**
+
+Ohne eine verantwortliche Person gibt es bei Konflikten keinen definierten
+Zustand. Eine starke Leitungsrolle wäre aber sozial falsch: Urlaub ist keine
+Hierarchie, und eine App, die das erzwingt, wird lästig. Der Organisator bekommt
+deshalb genau drei Sonderrechte:
+
+1. **Das Gerüst ändern** — Zeitraum, Etappen, Anker (§4.2).
+2. **Teilnehmer einladen und entfernen.**
+3. **Stichentscheid**, wenn das Fairness-Konto unentschieden bleibt.
+
+Alles andere darf jeder: Spots beitragen, bewerten, Alternativen vorschlagen,
+Splits eröffnen, unterwegs umplanen. Organisator ist zunächst, wer den Trip
+angelegt hat; die Rolle ist übertragbar. Technisch fügt sich das in die
+vorhandene Freigabemechanik (`albumShares`), an der das Trip-Album ohnehin
+hängt.
+
+**Unterwegs gibt es keinen Leader.** Wer vor Ort ist, darf umplanen — eine
+Verspätung ist ein Fakt, keine Entscheidung. Müsste die Gruppe warten, bis der
+Organisator sein Telefon zückt, wäre die Mechanik aus §5 wertlos.
+
+### 6.3 Gleichzeitige Änderungen
+
+Mehrere Geräte, teils offline, ändern denselben Plan — das ist der teuerste
+Teil des Mehrbenutzerbetriebs und verdient eine klare Entscheidung: **Der Plan
+wird nie als Ganzes überschrieben.** Geschrieben werden feingranulare Vorgänge
+(*Stopp streichen*, *Stopp verschieben*, *Constraint ändern*, *Spot beitragen*),
+die der Server zusammenführt; offline entstandene Vorgänge werden gepuffert und
+beim Verbinden angewandt. Wer den ganzen Plan als Dokument speichert, verliert
+regelmäßig die Änderungen der anderen.
+
+Sichtbar bleibt, wer was geändert hat, mit Rückgängig-Möglichkeit. Push für die
+Gruppe gibt es bereits (`push`, `sharedalbum`) — sinnvoll ist er sparsam: bei
+Streichungen, Splits und verschobenen Treffpunkten, nicht bei jeder Umsortierung.
+
+### 6.4 Automatisch erkennen, dass ein Spot erledigt ist
+
+Drei Signale, von denen zwei ohne Zusatzaufwand anfallen:
+
+1. **Aufenthalt.** Geofence um den Spot, Radius nach Objektgröße (Aussichtspunkt
+   ~50 m, Park ~300 m), und entscheidend ist die **Verweildauer**, nicht der
+   Eintritt: an einem Museum vorbeizulaufen ist kein Besuch. Schwelle etwa zehn
+   Minuten oder ein Viertel der geplanten Dauer; für Spots, die zwischen zwei
+   anderen auf dem Weg liegen, höher.
+2. **Fotos.** Der Trip Mode sammelt ohnehin Aufnahmen mit Ort und Zeit ein, und
+   der POI-Matcher ordnet sie konkreten Sehenswürdigkeiten zu
+   (`osm-admin/poi-matcher.ts`). Trifft ein Foto den geplanten Spot, ist das der
+   beste denkbare Beleg — und er kostet nichts, weil die Maschinerie existiert.
+3. **Zahlung.** Ein Beleg oder eine Kartenzahlung im Zeitfenster (§10.6), vor
+   allem bei Eintritt und Gastronomie.
+
+**Ein Signal ergibt einen Vorschlag** („wart ihr hier? ✓ / ✗"), **zwei Signale
+setzen den Status stumm** — Fehler sind mit einer Wischgeste billig korrigierbar,
+Fehlalarme dagegen nerven.
+
+Wertvoller als das Abhaken ist die Umkehrung: **auch ungeplante Aufenthalte
+erkennen.** *„13:40–14:20 wart ihr hier — als Stopp übernehmen?"* Damit zeichnet
+die App den tatsächlichen Tag auf, statt nur den geplanten abzuhaken, und das
+Reisetagebuch (§3.6) schreibt sich von selbst.
+
+Erledigt ist dabei **pro Person**, nicht pro Gruppe — sonst zerfällt die
+Zuordnung beim Split (§6.5), und die Historie wüsste später nicht, wer den Tempel
+gesehen hat. Geteilt wird ausschließlich das Ereignis „X war an Spot Y", nie ein
+laufender Standort; auch das abschaltbar. Eine Live-Karte mit den Punkten der
+Familie ist ein anderes Produkt.
+
+### 6.5 Splits: getrennt unterwegs, gemeinsam geplant
+
+Der Fall ist häufiger als gedacht: Einer ins Technikmuseum, die anderen auf den
+Markt; ein Elternteil bleibt beim schlafenden Kind im Hotel; unterschiedliche
+Rückfahrten.
+
+**Ein Split ist ein Blockattribut, kein zweiter Trip.** Ein Block bekommt statt
+einer Stoppfolge zwei oder mehr **Zweige**, jeder mit eigener Teilnehmermenge,
+eigener Folge und eigenem Budget. Alle Zweige beginnen am Trennpunkt und enden
+am **Treffpunkt** — und der ist ein echter Fixpunkt mit Uhrzeit im Sinne von
+§4.4. Vom Treffpunkt rückwärts ergibt sich das Budget jedes Zweigs, und der
+vorhandene Solver läuft einfach *n*-mal. Mehr Mechanik braucht es nicht.
+
+**Der Planer sollte Splits aktiv vorschlagen.** Gehen die Stimmen zu zwei Spots
+weit auseinander, ist der übliche Kompromiss — beides halb, oder das eine
+gestrichen — schlechter als die Trennung:
+
+> *„Diese beiden Spots spalten die Gruppe. Ihr könntet euch vormittags trennen
+> und um 13 Uhr am Markt wieder treffen."*
+
+Das ist der Punkt, an dem die Stimmdaten aus §6.1 ihren eigentlichen Nutzen
+entfalten: **Der Split ist Konfliktlösung statt Kompromiss** — die billigste Art,
+allen ihren Wunsch zu erfüllen. Er verbraucht deshalb auch keine
+Herzenswunsch-Kontingente. Wer in welchen Zweig gehört, schlägt der Planer
+anhand der Stimmen vor; entschieden wird es von Hand.
+
+Weiteres:
+
+- **Umplanen** geschieht je Zweig. Verzögert sich einer, verschiebt sich der
+  Treffpunkt für alle — genau hier ist ein Push sinnvoll („Zweig B braucht
+  20 Minuten länger").
+- **Erledigt** gilt nur im eigenen Zweig (§6.4).
+- **Grenze:** Splits laufen innerhalb eines Blocks, höchstens über einen Tag.
+  Wer sich für drei Tage trennt, plant zwei Trips — dafür braucht es keine
+  Sonderlogik.
+
+### 6.6 Was das am Datenmodell ändert
+
+Ergänzend zu §12: `trip_members` (Person, Rolle, ob stellvertretend geführt) ·
+`plan_votes` (Person, Kandidat, Wertung, Herzenswunsch-Flag) ·
+`member_fairness` (erfüllte und zurückgestellte Wünsche je Person und Etappe) ·
+`plan_branches` (Block, Teilnehmermenge, Treffpunkt und -zeit) ·
+`plan_stops.branch_id` · `stop_visits` (Person, Spot, von–bis, Quelle:
+Geofence / Foto / Zahlung / manuell) — Letzteres ist zugleich die Grundlage des
+Reisetagebuchs.
+
+## 7. Standort, Wetter und Licht
 
 Drei Umgebungssignale, die den Plan prägen. Alle drei sind grob genug, um zur
 Blockeinteilung zu passen, und keins davon erzwingt eine Uhrzeit.
 
-### 6.1 Standort
+### 7.1 Standort
 
 Die App kennt den Standort und nutzt ihn für vier Dinge:
 
@@ -276,8 +429,9 @@ Die App kennt den Standort und nutzt ihn für vier Dinge:
   Spots steht, während der Block halb vorbei ist, und **bietet** eine
   Neuverteilung an. Angeboten, nicht durchgeführt — ungefragt umzuräumen wäre
   übergriffig.
-- **Erledigt-Erkennung.** Wer länger als ein paar Minuten am Spot war, hat ihn
-  gesehen; der Status setzt sich selbst und speist das Reisetagebuch.
+- **Erledigt-Erkennung.** Verweildauer am Spot setzt den Status selbst und
+  speist das Reisetagebuch — die Signale, Schwellen und Fallstricke stehen in
+  §6.4.
 - **„Was ist hier in der Nähe?"** — spontan, ohne Plan, aus demselben Vorrat.
 - **Wegschätzung ab dem echten Standort** statt ab dem geplanten Punkt.
 
@@ -287,10 +441,10 @@ change*. iOS weckt die App bei Bedarf; dazwischen kostet es praktisch nichts.
 Der Trip Mode holt sich ohnehin schon eine `CLLocation` beim Start.
 
 **Datenschutz:** Der Standort bleibt für die Planung auf dem Gerät — der Vorrat
-liegt lokal, die Neuverteilung rechnet lokal (§11). Zum eigenen Server geht er
-nur, wenn geteilt geplant wird; nach außen (Wetter) nur gerundet (§6.2).
+liegt lokal, die Neuverteilung rechnet lokal (§12). Zum eigenen Server geht er
+nur, wenn geteilt geplant wird; nach außen (Wetter) nur gerundet (§7.2).
 
-### 6.2 Wetter, vor allem Niederschlag
+### 7.2 Wetter, vor allem Niederschlag
 
 Pro Tag und Block: erwartete **Niederschlagsmenge** (mm), Bewölkungsgrad,
 Temperatur. Für die Planung reichen drei Klassen — trocken / etwas Regen /
@@ -310,7 +464,7 @@ nass — und die wirken so:
 **Hitze zählt genauso wie Regen.** 33 °C bei hoher Luftfeuchte verkürzt eine
 Tagesgehstrecke so wirksam wie ein Regenguss. Temperatur und Luftfeuchte gehen
 deshalb ebenfalls ins Blockbudget ein und schieben Outdoor-Spots in die
-Randzeiten des Tages — was sich zwanglos mit dem Lichtfenster aus §6.3 deckt.
+Randzeiten des Tages — was sich zwanglos mit dem Lichtfenster aus §7.3 deckt.
 
 **Jenseits des Prognosehorizonts zählt Klima, nicht Vorhersage.** Vorhersagen
 reichen etwa zwei Wochen; für eine Reise, die in acht Monaten beginnt, gibt es
@@ -331,7 +485,7 @@ Koordinate plus ein Datum. Das genügt für eine Stadtvorhersage und taugt nicht
 als Bewegungsprofil. Die Antwort wird pro Ort und Tag zwischengespeichert, ein
 Abruf pro Tag reicht.
 
-### 6.3 Licht: wann die Fotos gut werden
+### 7.3 Licht: wann die Fotos gut werden
 
 Der Teil, den nur eine Foto-App bauen würde — und der Grund, warum ein
 Abendblock überhaupt im Plan auftaucht.
@@ -363,7 +517,7 @@ Allgemeinheit:
   EXIF-Kompasskurs (`GPSImgDirection`) bereits (`osm-admin/poi-matcher.ts`).
   Wer nach Westen schaut, hat abends Gegenlicht — je nach Geschmack Sonnenuntergang
   oder Blendung.
-- **Die Bewölkung aus §6.2 moduliert das Ganze:** bei geschlossener Decke ist
+- **Die Bewölkung aus §7.2 moduliert das Ganze:** bei geschlossener Decke ist
   die goldene Stunde wertlos, dafür ist das diffuse Licht ideal für Innenhöfe,
   Wald, Details und Fassaden ohne Schattenkanten. Bei klarem Himmel gilt das
   Umgekehrte.
@@ -384,14 +538,14 @@ Uhrzeit, die man verpassen kann, entsteht erst, wenn der Nutzer Vorschlag 3
 annimmt — und dann hat er sie selbst gewollt. Abschaltbar in einem Schalter, denn
 nicht jede Reise soll sich nach dem Sonnenstand richten.
 
-## 7. Wie sich das in der iOS-App anfühlt
+## 8. Wie sich das in der iOS-App anfühlt
 
-### 7.1 Einstieg
+### 8.1 Einstieg
 Im bestehenden **Trip**-Tab kommt neben „Aufnehmen" (Trip Mode) ein zweiter
 Bereich **„Planen"** dazu. Beides sind Ansichten desselben Trips: erst planen,
 dann unterwegs anpassen und fotografieren, danach der Rückblick.
 
-### 7.2 Eingabe
+### 8.2 Eingabe
 Ein Textfeld plus Chips für das, was das LLM nicht raten soll:
 
 ```
@@ -405,14 +559,14 @@ editierbare Chips gezeigt: `Ort: Lissabon` · `4 Tage` · `Modi: Fuß, ÖPNV` ·
 Nichts wird stillschweigend angenommen. Erkannte Dokumente werden vorgeschlagen:
 *„Ich habe eine Hotelbuchung für diesen Zeitraum gefunden — als Basis nehmen?"*
 
-### 7.3 Ergebnis
+### 8.3 Ergebnis
 Pro Tag eine **Karte je Block** (Vormittag / Mittag / Nachmittag / Abend), darin
 die Spots als kompakte Zeile mit Referenzbild, geschätzter Aufenthaltsdauer und
 Wegsymbol dazwischen. Darunter eine Auslastungsanzeige: „ca. 3 h von 3,5 h".
 Kartenansicht mit nummerierten Pins pro Tag. „Warum hier?" pro Spot
 aufklappbar.
 
-### 7.4 Verhandeln
+### 8.4 Verhandeln
 - Spot wischen → **ersetzen** (Alternativen aus dem Vorrat, die ins selbe
   Zeitbudget passen) oder **in den Vorrat zurück**.
 - Anheften (📌) → Fixpunkt.
@@ -420,7 +574,7 @@ aufklappbar.
   überfüllter Block wird rot.
 - Chat für alles, was sich nicht ziehen lässt.
 
-### 7.5 Modus „Heute"
+### 8.5 Modus „Heute"
 Der unterwegs wichtigste Screen: aktueller Block, was noch drin ist, wie viel
 Budget übrig ist. Ein großer Knopf **„umplanen"** (siehe §5) und pro Spot ein
 Wisch für „erledigt" / „übersprungen" — Letzteres setzt sich am Standort oft
@@ -428,17 +582,17 @@ schon selbst. Über dem Block ein schmales Band mit Regenrisiko und, wenn heute
 etwas im guten Licht liegt, dem Lichthinweis. Navigation per Deep-Link an Apple
 Maps.
 
-### 7.6 Danach
+### 8.6 Danach
 Geplant gegen tatsächlich besucht, Fotos je Spot aus dem Trip-Album, Übergabe an
 den Recap.
 
-## 8. Übergänge zu Karten-Apps
+## 9. Übergänge zu Karten-Apps
 
 Die Arbeitsteilung aus §3 wird hier konkret: **fk-encore plant, Apple und Google
 navigieren und bewerten.** Das ist kein Notbehelf, sondern Absicht — Echtzeit
-und Publikumsmeinung sind nicht nachbaubar (§9), Tagesplanung dafür schon.
+und Publikumsmeinung sind nicht nachbaubar (§10), Tagesplanung dafür schon.
 
-### 8.1 Hinaus: was die App abgibt
+### 9.1 Hinaus: was die App abgibt
 
 - **Navigation zum nächsten Stopp** im Modus des Blocks (Fuß, ÖPNV, Auto),
   **wahlweise mit Apple Karten oder Google Maps** — siehe die Zielapp-Wahl
@@ -450,7 +604,7 @@ und Publikumsmeinung sind nicht nachbaubar (§9), Tagesplanung dafür schon.
   schwächsten ist (§4.1). Die Karten-App hat den Echtzeitfahrplan, wir nicht.
 - **Spot in Karten nachschlagen** — Bewertungen, Innenraumfotos, aktuelle
   Öffnungszeiten. Der bewusste Ausgleich für das, was offene Daten nicht
-  hergeben (§9).
+  hergeben (§10).
 - **Parken / Park & Ride** beim Moduswechsel einer Auto-Etappe (§4.2).
 - Verwandt, ohne Karten-App: `tel:` und `website` stehen als OSM-Tags bereit
   (Tisch reservieren, Öffnungszeit erfragen), und die Fixpunkte eines Tages
@@ -480,7 +634,7 @@ besser sind. Deshalb:
   Navigation: Nachschlagen, ÖPNV-Verbindung und Parksuche folgen derselben
   Einstellung.
 
-### 8.2 Herein: der unterschätzte Weg
+### 9.2 Herein: der unterschätzte Weg
 
 **Teilen aus einer Karten-App in den Trip-Vorrat.** Wer in Google Maps, einem
 Blog oder einer Nachricht auf einen Ort stößt, schickt ihn über das Teilen-Sheet
@@ -497,7 +651,7 @@ Karte mit der Bitte, den Ort zu bestätigen; danach wird per Umkreissuche und
 Reverse-Geocoding (`geo/src/reverse.ts`) ein OSM-POI zugeordnet oder der Punkt
 frei übernommen.
 
-### 8.3 Die Karte in der App
+### 9.3 Die Karte in der App
 
 Die eingebettete Karte ist MapKit, also **Apples Kartenmaterial** — die
 Sachdaten (Kandidaten, Kategorien, Öffnung) kommen dagegen aus den eigenen
@@ -508,20 +662,20 @@ Nützlich und wenig bekannt: **Look Around** lässt sich seit iOS 16 über
 Aussichtspunkt überhaupt?" beantwortet sich damit ohne App-Wechsel — dort, wo
 Apple Daten hat; sonst entfällt der Knopf stillschweigend.
 
-### 8.4 Die Grenze
+### 9.4 Die Grenze
 
 Kein Deep-Link gibt etwas zurück. Die App erfährt nie, ob ihr wirklich
 losgefahren seid oder was ihr in Google gelesen habt. Alles, was nach der
-Übergabe passiert, kommt ausschließlich über den Standort zurück (§6.1) — was
+Übergabe passiert, kommt ausschließlich über den Standort zurück (§7.1) — was
 die Rückkehr in die App bewusst billig machen muss: eine Wischgeste für
 „erledigt", kein Formular.
 
-## 9. Essen, Café und andere Alltagsspots
+## 10. Essen, Café und andere Alltagsspots
 
 Die Frage nach der Datenbasis ist hier am unbequemsten, deshalb ein eigenes
 Kapitel.
 
-### 9.1 Der Befund: offene Daten kennen Existenz, nicht Meinung
+### 10.1 Der Befund: offene Daten kennen Existenz, nicht Meinung
 
 OSM führt Gastronomie zuverlässig als **Existenz mit Eigenschaften**:
 `amenity=restaurant|cafe|fast_food|bar|pub|ice_cream|bakery`, dazu `cuisine`,
@@ -535,18 +689,18 @@ offenen Datensätze (Overture Places, Foursquare Open Source Places) ändern dar
 nichts: Sie liefern mehr Existenz und bessere Kategorien, aber keine
 Bewertungen. Publikumsmeinung ist faktisch nirgends als offene Daten verfügbar.
 
-**Daraus folgt die Arbeitsteilung mit §8** — nicht als Ausrede, sondern als
+**Daraus folgt die Arbeitsteilung mit §9** — nicht als Ausrede, sondern als
 einzige ehrliche Lösung: Wir liefern Struktur, Nähe und Zeit, Google liefert die
 Meinung, ein Fingertipp verbindet beides.
 
-### 9.2 Der Import kennt heute keine Gastronomie
+### 10.2 Der Import kennt heute keine Gastronomie
 
 Konkret fehlt die Datenbasis noch ganz. Der Lua-Filter nimmt aus `amenity` nur
 `place_of_worship` und `theatre` mit (`geo/src/osm2pgsql.lua`) — er wurde für
 das **Foto-POI-Matching** gebaut, nicht fürs Planen. In `osm_pois` steht kein
 einziges Café.
 
-Die Erweiterung ist die dritte und größte der Importänderungen aus §11 und
+Die Erweiterung ist die dritte und größte der Importänderungen aus §12 und
 verdient zwei Anmerkungen:
 
 - **Sie vergrößert die Regionsdatenbanken spürbar.** Gastronomie und
@@ -559,7 +713,7 @@ verdient zwei Anmerkungen:
   Grund, warum keine zweite Tabelle nötig ist; sie darf beim Umbau nicht
   verlorengehen.
 
-### 9.3 Drei Stufen, was der Planer damit tut
+### 10.3 Drei Stufen, was der Planer damit tut
 
 1. **In der Planung nur der Rahmen.** Der Mittagsblock ist Zeit plus Gegend
    („Mittag irgendwo um B"), kein Lokal. Das ist die einzige Aussage, die
@@ -568,12 +722,12 @@ verdient zwei Anmerkungen:
    Standort, gefiltert nach dem, was OSM verlässlich weiß (Küche, vegetarisch,
    Außenplätze, barrierefrei, grob geöffnet), **sortiert nach Entfernung** — nicht
    nach einer Qualität, die wir nicht kennen. Jeder Eintrag mit einem Knopf „in
-   Karten ansehen" (§8.1) und, wo getaggt, `tel:`.
+   Karten ansehen" (§9.1) und, wo getaggt, `tel:`.
 3. **Eigene Signale, wo vorhanden.** Gruppen-Votes; Fotos, die ihr dort gemacht
-   habt; auf Wunsch Belege und Kartenzahlungen (§9.6). Stark bei Wiederholung,
+   habt; auf Wunsch Belege und Kartenzahlungen (§10.6). Stark bei Wiederholung,
    im Regelfall leer — Leitentscheidung 3 gilt auch hier.
 
-### 9.4 Die harte Regel für das LLM
+### 10.4 Die harte Regel für das LLM
 
 **Das Modell darf ausschließlich aus dem Kandidatenvorrat formulieren, niemals
 aus seinem Weltwissen empfehlen.** Ein lokales Modell nennt sonst bereitwillig
@@ -583,7 +737,7 @@ gesamten Planer, auch dort, wo er richtig liegt. Praktisch heißt das: Jeder Nam
 im erzeugten Text wird gegen den Vorrat validiert; was dort nicht steht, fliegt
 raus.
 
-### 9.5 Wo dieselbe Datenbasis glänzt
+### 10.5 Wo dieselbe Datenbasis glänzt
 
 Apotheke, Supermarkt, Bäckerei, öffentliche Toilette, Trinkbrunnen, Spielplatz,
 Bank, Gepäckaufbewahrung: Hier genügt **Existenz**, niemand braucht
@@ -595,7 +749,7 @@ Die Datenbasis ist also genau dort stark, wo **Funktion** zählt, und genau dort
 schwach, wo **Geschmack** zählt. Der Planer sollte sich entsprechend verhalten:
 selbstbewusst beim Finden einer Apotheke, zurückhaltend beim Abendessen.
 
-### 9.6 Belege und Zahlungen: was realistisch geht
+### 10.6 Belege und Zahlungen: was realistisch geht
 
 Kassenbelege und Kartenzahlungen als Signal sind **dünn gesät** — und die naive
 Umsetzung („Airline-Buchung → Flug → Trip → Ort") ist zu Recht abschreckend.
@@ -643,7 +797,7 @@ Damit bleibt der Aufwand klein und proportional zum Nutzen — der ohnehin erst
 bei Wiederholungsbesuchen entsteht. Ein sinnvoller später Schritt, kein
 Baustein für den Anfang.
 
-### 9.7 Geprüft und verworfen: Bewertungen per API
+### 10.7 Geprüft und verworfen: Bewertungen per API
 
 Naheliegende Frage, deshalb hier die Prüfung samt Ergebnis — damit sie nicht
 später erneut aufgerollt wird.
@@ -661,7 +815,7 @@ kein Kostenproblem.
    der Places API dürfen (mit Ausnahme der Place-IDs) nicht dauerhaft
    gespeichert werden, und die Darstellung zusammen mit einer **Nicht-Google-Karte**
    ist untersagt. Unser Planer lebt aber von einem **vorab bewerteten Vorrat**
-   (§4.3) und zeichnet auf einer MapKit-Karte (§8.3). Beides zusammen geht
+   (§4.3) und zeichnet auf einer MapKit-Karte (§9.3). Beides zusammen geht
    nicht. Ein Ranking, das bei jedem Öffnen neu eingekauft werden muss und
    offline nicht existiert, ist kein Vorrat.
 2. **Es widerspricht dem Kern des Produkts.** Jede Abfrage sendet Ort, Zeitpunkt
@@ -677,14 +831,14 @@ kein Kostenproblem.
 dünne Abdeckung — für Prag oder Osaka wenig hilfreich. Die TripAdvisor-Content-API
 deckt Touristisches ordentlich ab, verlangt aber Logo und Verlinkung an jeder
 Anzeigestelle und beschränkt das Speichern ebenfalls. Foursquare hat Bewertungen
-nur im kommerziellen Dienst, nicht im offenen Datensatz (§9.1).
+nur im kommerziellen Dienst, nicht im offenen Datensatz (§10.1).
 
-**Ergebnis: kein Rating-Backend, sondern der Fingertipp.** Die Übergabe aus §8.1
+**Ergebnis: kein Rating-Backend, sondern der Fingertipp.** Die Übergabe aus §9.1
 liefert dasselbe Ergebnis ohne Schlüssel, ohne Kosten, ohne
 Speicherbeschränkung und ohne dass fk-encore selbst zum Datenlieferanten an
 Google wird: Du tippst auf „in Karten ansehen", siehst dort Bewertungen, Fotos
 und aktuelle Öffnungszeiten, und kommst zurück. Diese Frage bestätigt die
-Arbeitsteilung aus §8, statt einen neuen Weg zu eröffnen.
+Arbeitsteilung aus §9, statt einen neuen Weg zu eröffnen.
 
 *Sollte sich das ändern* — etwa weil eine Quelle mit freundlicheren Bedingungen
 auftaucht —, wäre die verträglichste Form eine **einzelne, vom Nutzer ausgelöste
@@ -692,7 +846,7 @@ Abfrage** für einen Spot („Bewertung laden"), nur zur Anzeige, ohne Speicheru
 und ohne Einfluss auf das Ranking. Als Massenanreicherung des Vorrats jedoch
 nie.
 
-## 10. Wenn ein Frontier-Modell zur Verfügung steht
+## 11. Wenn ein Frontier-Modell zur Verfügung steht
 
 Alle bisherigen Entscheidungen sind unter einer Randbedingung gefallen: Das
 einzige verfügbare Sprachmodell ist ein lokales Qwen2.5-7B. Stünde stattdessen
@@ -700,7 +854,7 @@ die Claude API mit **Opus 5** (`claude-opus-5`, 1M Kontext, $5 / $25 je Mio.
 Ein-/Ausgabe-Token) bereit, änderte sich einiges — aber weniger, als man
 zunächst vermutet, und an anderer Stelle als erwartet.
 
-### 10.1 Die Trennlinie liegt schon im Konzept
+### 11.1 Die Trennlinie liegt schon im Konzept
 
 Der Planer zerfällt ohnehin in zwei Welten (§4.3): die **Reiseauflösung**
 entsteht vorher, zu Hause, am Netz und ohne Zeitdruck — die **Tagesauflösung
@@ -722,21 +876,21 @@ Modellen:
 liegen.** „Wir hängen hinterher" muss im Funkloch in Hakata funktionieren. Ein
 Netzaufruf ist dort keine Verbesserung, sondern ein Ausfall.
 
-### 10.2 Was sich nicht ändert
+### 11.2 Was sich nicht ändert
 
 - **Der Solver bleibt Arithmetik.** Rucksack pro Block plus Kurzrundreise über
   zwei bis vier Stopps ist exakt, in Millisekunden lösbar, deterministisch und
   offline. Kein Modell der Welt macht das besser; es macht es langsamer, teurer
   und nicht reproduzierbar. Was Opus 5 beisteuern kann, ist die **Auswahl**, die
   in den Solver geht — nicht die Rechnung.
-- **Die Halluzinationsregel aus §9.4 bleibt.** Opus 5 erfindet drastisch
+- **Die Halluzinationsregel aus §10.4 bleibt.** Opus 5 erfindet drastisch
   seltener, aber „seltener" ist nicht „nie", und der Fehler ist unsichtbar. Jeder
   Ortsname wird weiter gegen den Vorrat validiert. Technisch billig, deshalb
   keine Ausnahme.
 - **Die Ellipsen-Vorfilterung, die Lichtrechnung, die Blocklogik** — alles
   Rechenverfahren, alles unberührt.
 
-### 10.3 Was deutlich besser würde
+### 11.3 Was deutlich besser würde
 
 1. **Kandidatenkuration statt Tag-Ranking.** Heute entscheidet eine gewichtete
    Summe aus OSM-Tags und Wikipedia-Artikellänge, was ein Favorit ist — grob.
@@ -748,7 +902,7 @@ Netzaufruf ist dort keine Verbesserung, sondern ein Ausfall.
 2. **Anfrageverständnis.** „Mit Oma, entspannt, kein Auto" zuverlässig in
    Constraints zu übersetzen, ist für ein 7B-Modell brüchig. Mit **Structured
    Outputs** (`output_config.format`) bzw. `strict: true` an den Tools kommt ein
-   schemavalides Objekt zurück — genau das, was §7.2 als Chips anzeigt.
+   schemavalides Objekt zurück — genau das, was §8.2 als Chips anzeigt.
 3. **Der Verhandlungs-Chat vor der Reise.** Opus 5 könnte per Tool-Use die
    Planer-API selbst bedienen (`vorrat_durchsuchen`, `constraint_setzen`,
    `anheften`, `neu_verteilen`), statt nur Constraints auszuwerfen. Aus „zu viel
@@ -759,7 +913,7 @@ Netzaufruf ist dort keine Verbesserung, sondern ein Ausfall.
    einmal, cachebar, nicht zeitkritisch.
 5. **Texte im Reisetagebuch.** Geringes Risiko, sichtbarer Gewinn.
 
-### 10.4 Kosten sind nicht das Hindernis
+### 11.4 Kosten sind nicht das Hindernis
 
 Grob geschätzt: Die Kuration einer Stadt liegt im Bereich einiger
 zehntausend Eingabe-Token — also **deutlich unter einem Euro**, halbiert über
@@ -774,7 +928,7 @@ erlaubt **Systemnachrichten mitten im Verlauf** (`role: "system"` innerhalb von
 `messages`, ohne Beta-Header), was den zwischengespeicherten Präfix erhält,
 wenn sich während der Verhandlung eine Regel ändert.
 
-### 10.5 Der eigentliche Preis: Privatsphäre
+### 11.5 Der eigentliche Preis: Privatsphäre
 
 Das ist die einzige ernsthafte Frage, und sie ist keine technische. „Alles bleibt
 im Haus" ist die Rückgratzusage des Produkts (§3). Ein Kurationsaufruf schickt
@@ -799,12 +953,12 @@ braucht:
 Ausdrücklich nicht empfohlen ist die dritte Möglichkeit: das
 **Websuche-Werkzeug** (`web_search_20260209`) als Lückenfüller für
 Öffnungszeiten, Schließungen und Veranstaltungen. Es würde die
-Echtzeitschwäche aus §13 tatsächlich schließen — aber mit demselben Handel,
-der in §9.7 schon gegen die Google-API entschieden wurde, nur an anderer Stelle.
+Echtzeitschwäche aus §14 tatsächlich schließen — aber mit demselben Handel,
+der in §10.7 schon gegen die Google-API entschieden wurde, nur an anderer Stelle.
 Wenn diese Lücke geschlossen werden soll, dann als bewusste, eigene
 Entscheidung, nicht als Nebenwirkung eines Modellwechsels.
 
-### 10.6 Fazit
+### 11.6 Fazit
 
 Opus 5 würde den Planer **klüger in der Vorbereitung** machen und am Verhalten
 unterwegs nichts ändern — was gut ist, denn unterwegs zählt Verlässlichkeit,
@@ -814,7 +968,7 @@ bemerkenswert wenig Umbau für spürbar bessere Vorschläge — und ein Hinweis
 darauf, dass die Aufteilung „Modell versteht und formuliert, Rechenverfahren
 plant" unabhängig davon richtig ist, wie gut das Modell wird.
 
-## 11. Architektur-Skizze
+## 12. Architektur-Skizze
 
 ```
 iOS (SwiftUI, Feature „Trip/Planen")
@@ -857,8 +1011,8 @@ Neuverteilung unterwegs sofort reagieren muss und im Zweifel offline läuft.
 Umsetzungsschritt, weil jede einen Neuimport der Regionen erfordert:
 `name:en` in die Tag-Allowlist (`geo/src/osm2pgsql.lua` kennt heute nur `name`
 und `name:de` — in Japan steht in `name` Kanji), das beim Import berechnete
-Fassadenazimut als eigene Spalte (§6.3), und die **Aufnahme von Gastronomie und
-Alltagsinfrastruktur** in den Filter (§9.2), die heute vollständig fehlt. Die
+Fassadenazimut als eigene Spalte (§7.3), und die **Aufnahme von Gastronomie und
+Alltagsinfrastruktur** in den Filter (§10.2), die heute vollständig fehlt. Die
 ersten beiden sind je eine Handvoll Zeilen, die dritte vergrößert die
 Regionsdatenbanken spürbar und will vorher gemessen werden.
 
@@ -871,7 +1025,7 @@ abgeleitet und am Spot gespeichert. Extern ist nur die Wettervorhersage.
 
 **Das LLM plant nicht.** Es übersetzt Sprache in validierte Constraints und
 schreibt Begründungen. So halluziniert es weder Öffnungszeiten noch Wege. Diese
-Rollenteilung gilt unabhängig davon, wie gut das Modell ist — §10 spielt durch,
+Rollenteilung gilt unabhängig davon, wie gut das Modell ist — §11 spielt durch,
 was sich mit einem Frontier-Modell änderte (Kuration ja, Solver nein).
 
 **Ranking-Signale** (gewichtete Summe, Gewichte im UI sichtbar):
@@ -892,9 +1046,10 @@ Historien-Bonus/-Malus.
 `plan_pool` (bewertete Kandidaten je Etappe samt Score-Begründung,
 Indoor/Outdoor, Fassadenazimut) ·
 `weather_forecasts` (gerundete Koordinate + Tag → stündliche Werte, Cache) ·
-`plan_votes` (Nutzer/KI pro Kandidat, analog zum Album-Voting).
+`plan_votes` (Nutzer/KI pro Kandidat, analog zum Album-Voting) — die
+Mehrbenutzer-Tabellen (Rollen, Fairness, Zweige, Besuche) stehen in §6.6.
 
-## 12. Mögliche Umsetzungsschritte
+## 13. Mögliche Umsetzungsschritte
 
 > „Etappe" meint in diesem Dokument durchgehend einen **Reiseabschnitt**
 > (§4.2); die Umsetzung ist in **Schritte** gegliedert.
@@ -903,7 +1058,7 @@ Indoor/Outdoor, Fassadenazimut) ·
    Kategorie- und grobem Öffnungsfilter. Der Lua-Filter muss dafür mehr Tags
    mitnehmen (`opening_hours`, `cuisine`, `wheelchair`, `fee`, `website`,
    **`name:en`**, `diet:*`, `outdoor_seating`), **Gastronomie und
-   Alltagsinfrastruktur überhaupt erst importieren** (§9.2) und das
+   Alltagsinfrastruktur überhaupt erst importieren** (§10.2) und das
    **Fassadenazimut** berechnen. Alles, was einen Neuimport erzwingt, gehört in
    diesen einen Schritt — inklusive einer Messung, wie stark die Regionen
    dadurch wachsen.
@@ -919,29 +1074,34 @@ Indoor/Outdoor, Fassadenazimut) ·
    Enthält die **Korridorsuche** für geplante Anreisen (Ellipsenfilter, noch
    ohne Router).
 6. **iOS-Oberfläche** — Blockkarten, Karte, Wischgesten, „Heute"-Modus,
-   **Übergaben an Karten-Apps** (§8.1) und die Essensliste vor Ort (§9.3).
+   **Übergaben an Karten-Apps** (§9.1) und die Essensliste vor Ort (§10.3).
 7. **Standort** — Geofences um die nächsten Stopps, Erledigt-Erkennung,
    angebotene Neuverteilung, „was ist in der Nähe".
 8. **Wetter & Licht** — Open-Meteo-Anbindung mit Cache, Indoor/Outdoor-Ableitung,
    Sonnenstandsmodul, Lichthinweise und Abendblock-Vorschlag.
-9. **Weitere Kontextsignale** — Dokumenten-Fixpunkte, Reisegruppe, Gruppen-Voting.
-10. **Verfeinerung, optional** — Valhalla für echte Reisezeiten, GTFS pro
+9. **Weitere Kontextsignale** — Dokumenten-Fixpunkte, Reisegruppe.
+10. **Mehrbenutzerbetrieb** (§6) — Beiträge und Stimmen je Person,
+    Herzenswünsche und Fairness-Konto, Organisatorrolle, feingranulare
+    Zusammenführung gleichzeitiger Änderungen, automatische Erledigt-Erkennung,
+    Splits mit Treffpunkt. Bewusst spät: Ein Trip, den eine Person plant, muss
+    vorher vollständig funktionieren.
+11. **Verfeinerung, optional** — Valhalla für echte Reisezeiten, GTFS pro
    Region, Offline-Bundle, Verknüpfung mit Trip-Album und Recap.
 
 Schritte 1–3 sind der ehrliche Test: Liefert die Maschine für *einen* Tag in
 *einer* Stadt eine Blockeinteilung, die man tatsächlich so ablaufen würde — und
 hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
 
-## 13. Bekannte Schwachstellen
+## 14. Bekannte Schwachstellen
 
 - **OSM-Datenqualität.** `opening_hours` ist lückenhaft, Restaurantqualität
   steht dort gar nicht. Gegenmittel: die grobe Auflösung (§4) verzeiht
   Ungenauigkeit, fehlende Angaben werden als „ungeprüft" gekennzeichnet. Für
-  Gastronomie gilt das doppelt — §9 behandelt Datenlage und Konsequenz
+  Gastronomie gilt das doppelt — §10 behandelt Datenlage und Konsequenz
   ausführlich.
 - **Geschätzte Reisezeiten.** Die Heuristik kann bei Flüssen, Bergen oder
   schlechter ÖPNV-Anbindung deutlich danebenliegen. Gegenmittel: Puffer im
-  Blockbudget, ehrliche Kennzeichnung als Schätzung, und Schritt 10 für die
+  Blockbudget, ehrliche Kennzeichnung als Schätzung, und Schritt 11 für die
   Regionen, wo es sich lohnt.
 - **Wettervorhersagen sind unsicher.** Drei Tage im Voraus ist die
   Niederschlagsmenge eine grobe Tendenz. Gegenmittel: nur die drei Klassen
@@ -967,18 +1127,24 @@ hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
   gehört die Umwegangabe deshalb als Schätzung gekennzeichnet, und das Budget
   wird großzügig angesetzt, damit die Vorauswahl nichts Gutes verwirft.
 - **Übergaben sind Einbahnstraßen.** Was nach dem Deep-Link passiert, sieht die
-  App nicht (§8.4). Der Rückweg in den Plan muss deshalb so billig sein, dass
+  App nicht (§9.4). Der Rückweg in den Plan muss deshalb so billig sein, dass
   ihn niemand vergisst — eine Wischgeste, kein Formular.
+- **Gleichzeitige Änderungen sind aufwendig.** Mehrere Geräte, teils offline,
+  am selben Plan (§6.3) sind der teuerste Teil des Mehrbenutzerbetriebs — und
+  ohne feingranulare Zusammenführung gehen still Änderungen verloren. Ebenso
+  ist die automatische Erledigt-Erkennung (§6.4) in dichten Innenstädten und
+  Innenräumen ungenau; deshalb Verweildauer statt Eintritt, zwei Signale für
+  stummes Setzen und eine Wischgeste zum Korrigieren.
 - **Keine Echtzeit.** Verkehr, Streiks, spontane Schließungen sieht das System
   nicht — bewusste Übergabe an Apple/Google Maps für die Navigation.
 - **Speicherbedarf** eines späteren Routers (Valhalla-Kacheln zusätzlich zu den
-  PostGIS-Region-DBs) muss in Schritt 10 gemessen und in die Regionsverwaltung
+  PostGIS-Region-DBs) muss in Schritt 11 gemessen und in die Regionsverwaltung
   integriert werden (Region löschen = auch Kacheln löschen).
 - **Offline-Karten.** Vektorkacheln aus den PBFs (planetiler + MapLibre) wären
   ein eigener großer Baustein. Zunächst MapKit online; offline gibt es
   Blockliste, Spots und Wegbeschreibung, aber keine Kartendarstellung.
 
-## 14. Offene Fragen an den Nutzer
+## 15. Offene Fragen an den Nutzer
 
 1. **Blockschema:** Sind Vormittag / Mittag / Nachmittag / Abend die richtige
    Einteilung, oder lieber frei definierbare Blöcke pro Tag?
@@ -1001,24 +1167,24 @@ hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
 
 ---
 
-## 15. Durchgespielt: 20 Tage Japan
+## 16. Durchgespielt: 20 Tage Japan
 
 Drei durchgespielte Fälle prüfen die Mechanik an ihren Rändern: eine lange
-Mehrstädtereise (§15), ein Kurztrip mit dem Auto und geplanter Anreise (§16) und
-ein einzelner Tagesausflug (§17). Jeder hat das Konzept verändert.
+Mehrstädtereise (§16), ein Kurztrip mit dem Auto und geplanter Anreise (§17) und
+ein einzelner Tagesausflug (§18). Jeder hat das Konzept verändert.
 
 Zuerst der lange Fall — **3.9. bis 22.9.2027,
 Tokio, Osaka und Hakata, zu zweit**. Bewusst ein harter Fall: lang, mehrere
 Orte, weit in der Zukunft, nicht-lateinische Schrift, andere Zeitzone.
 
-### 15.1 Vorbereitung: die Regionen
+### 16.1 Vorbereitung: die Regionen
 
 Vor jeder Planung müssen die OSM-Daten im Haus sein: drei Geofabrik-Sub-Regionen
 Japans — **Kanto** (Tokio), **Kansai** (Osaka), **Kyushu** (Hakata/Fukuoka).
 Das ist heute ein Admin-Vorgang, dauert, und passiert Wochen vorher, nicht beim
-Planen (siehe offene Frage 2 in §14).
+Planen (siehe offene Frage 2 in §15).
 
-### 15.2 Eingabe
+### 16.2 Eingabe
 
 ```
 3.9. bis 22.9.2027, Tokio, Osaka und Hakata,
@@ -1031,13 +1197,13 @@ Aussicht, Märkte`. Findet der documents-Service Flug- und Hotelbestätigungen f
 den Zeitraum, werden sie als Fixpunkte vorgeschlagen — Ankunft Haneda, drei
 Hotels, und damit implizit die Etappengrenzen.
 
-### 15.3 Etappen und Transfers
+### 16.3 Etappen und Transfers
 
 Tokio 3.–11.9., Osaka 11.–18.9., Hakata 18.–22.9. (§4.2). Die Shinkansen-Fahrten
 dazwischen sind Fixpunkte, die je einen halben Tag kosten; jede Etappe bekommt
 ihr Hotel als Tagesanker und ihre eigene Regionsdatenbank.
 
-### 15.4 Grob planen, nicht alles planen
+### 16.4 Grob planen, nicht alles planen
 
 In der Reiseauflösung (§4.3) entsteht pro Etappe ein bewerteter Vorrat — „Tokio:
 34 Kandidaten, 12 klare Favoriten" — plus die terminlich gebundenen Punkte
@@ -1046,14 +1212,14 @@ stimmt mit. Ergebnis ist keine Route, sondern eine Rangfolge: Sie entscheidet
 später, was zuerst wegfällt. Konkrete Blöcke entstehen erst ein bis zwei Tage
 vorher.
 
-### 15.5 Wetter acht Monate im Voraus
+### 16.5 Wetter acht Monate im Voraus
 
-Gibt es nicht. In der Reiseauflösung zählen deshalb die Klimanormalen (§6.2):
+Gibt es nicht. In der Reiseauflösung zählen deshalb die Klimanormalen (§7.2):
 September in Japan ist heiß, schwül und **Taifunsaison**. Praktische Folge im
 Plan — genug Indoor-Kandidaten im Vorrat und ein nicht verplanter Puffertag je
 Etappe. Ab etwa zwei Wochen vorher detailliert die echte Vorhersage tageweise.
 
-### 15.6 Ein Tag in Tokio
+### 16.6 Ein Tag in Tokio
 
 Am Vorabend entsteht der Plan für Asakusa und Umgebung:
 
@@ -1070,9 +1236,9 @@ unter. Die goldene Stunde ist dort später Nachmittag, nicht Abend; wer nach
 europäischem Gefühl um 19:30 zur Aussicht aufbricht, steht im Dunkeln. In
 Hakata, gut neun Längengrade weiter westlich, liegt derselbe Moment rund
 35 Minuten später. Kein Reiseführer sagt einem das, und berechnen lässt es sich
-offline in Millisekunden (§6.3).
+offline in Millisekunden (§7.3).
 
-### 15.7 Unterwegs
+### 16.7 Unterwegs
 
 Um 14 Uhr steht ihr noch beim Sensō-ji. Der Geofence merkt es, die App bietet an:
 *„Der Nachmittag wird knapp — Museum raus, rutscht auf Freitag Vormittag. Der
@@ -1083,31 +1249,31 @@ Zieht ein Taifunausläufer durch, greift dieselbe Mechanik eine Ebene höher: De
 Regentag tauscht mit einem trockenen Tag **derselben Etappe**, Outdoor wandert
 in den Vorrat, Indoor rückt nach.
 
-### 15.8 Etappenwechsel und danach
+### 16.8 Etappenwechsel und danach
 
 Am 11.9. ist der Vormittag durch den Shinkansen belegt; ab Osaka gelten neue
 Regionsdatenbank und neuer Anker, der Vorrat für Osaka ist längst bewertet.
 Parallel sammelt der Trip Mode die Fotos ein — am Ende steht das Reisetagebuch
 mit geplanten gegen tatsächlich besuchte Blöcke und der Recap.
 
-### 15.9 Was dieses Beispiel am Konzept geändert hat
+### 16.9 Was dieses Beispiel am Konzept geändert hat
 
 Der Durchgang hat fünf Lücken aufgedeckt, die jetzt eingearbeitet sind:
 Etappen als Ebene über den Tagen (§4.2), zwei Planungsauflösungen (§4.3),
 Klimanormale statt Vorhersage jenseits des Prognosehorizonts und Hitze als
-Budgetfaktor (§6.2), das Fassadenazimut, das wegen der Zentroid-Reduktion beim
-Import berechnet werden muss (§6.3), und `name:en` in der Tag-Allowlist, ohne
-das im Plan 浅草寺 statt „Sensō-ji" stünde (§11).
+Budgetfaktor (§7.2), das Fassadenazimut, das wegen der Zentroid-Reduktion beim
+Import berechnet werden muss (§7.3), und `name:en` in der Tag-Allowlist, ohne
+das im Plan 浅草寺 statt „Sensō-ji" stünde (§12).
 
 ---
 
-## 16. Durchgespielt: vier Tage Prag mit dem Auto
+## 17. Durchgespielt: vier Tage Prag mit dem Auto
 
 **30.8. bis 2.9.2027, Augsburg → Prag und zurück, mit dem Auto.** Der
 Gegenentwurf zu Japan: kurz, ein Ziel, aber mit einer Anreise, die selbst
 geplant werden will, und einem Moduswechsel unterwegs.
 
-### 16.1 Eingabe und Rahmen
+### 17.1 Eingabe und Rahmen
 
 ```
 30.8. bis 2.9.2027 Prag, mit dem Auto ab Augsburg.
@@ -1129,7 +1295,7 @@ Daraus wird **eine** Etappe (Prag) mit zwei Transfers, dazu:
 - **Nur eine Auflösung** (§4.3): Vier Tage sind kurz genug, dass Reise- und
   Tagesauflösung zusammenfallen.
 
-### 16.2 Der Anreisetag — die interessanteste Rechnung
+### 17.2 Der Anreisetag — die interessanteste Rechnung
 
 Die Fahrt Augsburg–Prag liegt bei gut vier Stunden reiner Fahrzeit. Der
 Check-in **ab** 15 Uhr ist kein Hindernis, sondern die Quelle des freien
@@ -1155,7 +1321,7 @@ Der Tag sieht danach so aus:
 | ab 15:00 | Check-in (Fixpunkt) |
 | Restnachmittag | erster kurzer Block zu Fuß rund um den Anker |
 
-### 16.3 Die beiden vollen Tage und die Abreise
+### 17.3 Die beiden vollen Tage und die Abreise
 
 31.8. und 1.9. sind normale Blocktage, ab dem Anker, zu Fuß und mit der Metro —
 also genau der Fall aus §4.1 Der 2.9. ist wieder ein halber: Check-out am
@@ -1163,7 +1329,7 @@ Vormittag, Rückfahrt. Ob der Rückweg noch einen Korridorstopp verträgt, häng
 davon ab, wann ihr zu Hause sein wollt — dieselbe Rechnung wie bei der Anreise,
 nur mit dem Fixpunkt am anderen Ende (§4.4).
 
-### 16.4 Was dieses Beispiel beigetragen hat
+### 17.4 Was dieses Beispiel beigetragen hat
 
 Drei Mechaniken, die jetzt im Konzept stehen: die **Ankerzone** für noch nicht
 gebuchte Unterkünfte, der **Modus je Etappe** samt Moduswechsel als Fixpunkt,
@@ -1172,13 +1338,13 @@ ohne Router auskommt.
 
 ---
 
-## 17. Durchgespielt: ein Tag Nürnberg mit dem Zug
+## 18. Durchgespielt: ein Tag Nürnberg mit dem Zug
 
 Der kleinstmögliche Trip — **Augsburg → Nürnberg und zurück, an einem Tag, mit
 der Bahn**. Wertvoll als Testfall, weil hier jede Vereinfachung des Konzepts
 an ihre Grenze kommt.
 
-### 17.1 Was hier alles wegfällt
+### 18.1 Was hier alles wegfällt
 
 Ein Tagesausflug ist eine Etappe mit einem Tag, ohne Hotel und ohne
 Reiseauflösung. Der **Anker ist der Hauptbahnhof** — Start- und Endpunkt
@@ -1190,7 +1356,7 @@ Das System muss also **nach unten sauber abbauen** — kein leerer
 Etappen-Assistent, keine Aufforderung, ein Hotel zu wählen, kein
 Vier-Wochen-Vorrat.
 
-### 17.2 Der Tag hängt zwischen zwei Zügen
+### 18.2 Der Tag hängt zwischen zwei Zügen
 
 Hier zeigt §4.4 seinen Nutzen. Beide Enden sind harte Uhrzeiten:
 
@@ -1209,15 +1375,15 @@ kein „dann eben morgen", der Vorrat hat keinen Folgetag mehr. Genau deshalb
 zählt hier die Rangfolge aus der Abstimmung am meisten: Was zuerst wegfällt,
 sollte nicht das sein, wofür man gefahren ist.
 
-### 17.3 Das Ticket als Randbedingung
+### 18.3 Das Ticket als Randbedingung
 
 Liegt ein Ticket als Dokument vor, wird seine Einschränkung zum Fixpunkt: Ein
 Sparpreis mit Zugbindung legt beide Enden fest, ein Bayern-Ticket ist werktags
 erst ab 9 Uhr gültig und verschiebt damit den Beginn des Vormittagsblocks. Das
-ist derselbe Mechanismus wie die Hotelbuchung in §15 — nur enger, weil ein Tag
+ist derselbe Mechanismus wie die Hotelbuchung in §16 — nur enger, weil ein Tag
 keine Reserve hat.
 
-### 17.4 Was dieses Beispiel beigetragen hat
+### 18.4 Was dieses Beispiel beigetragen hat
 
 Es hat die Formulierung von §4.4 erzwungen: Fixpunkte sind absolut und tragen
 eine Uhrzeit, Blöcke bleiben relativ. Ohne diese Trennung wäre die grobe Planung
