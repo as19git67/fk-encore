@@ -660,11 +660,8 @@ Kandidat mit allen anderen konkurriert.
 2. **Ein Artikel oder Blogbeitrag.** Der häufigste Fall bei echter Recherche
    („die zehn schönsten Cafés in Lissabon") — und der schwierigste, weil eine
    Seite *keine* Koordinate liefert, dafür aber oft gleich mehrere Orte nennt.
-   Hier liest das Sprachmodell die Seite und zieht die **Ortsnamen** heraus, die
-   anschließend gegen den Kandidatenbestand der Etappe abgeglichen werden.
-   Die harte Regel aus §10.4 gilt unverändert: Was sich keinem realen Eintrag
-   zuordnen lässt, wird **nicht erfunden**, sondern bleibt als Notiz mit Link
-   liegen, bis jemand es von Hand auflöst.
+   Hier liest das Sprachmodell die Seite und zieht die **Ortsnamen** heraus —
+   der Ablauf dazu in §9.3.
 3. **Ein Screenshot.** Aus einer App, die nicht teilt, oder von einer Karte im
    Reiseführer. Fast geschenkt, weil die Share-Extension Bilder ohnehin annimmt
    und der documents-Service bereits OCR mitbringt (Tesseract) — der Text
@@ -703,7 +700,63 @@ Vorrat verwahrlost:
   Planer fragt dann einmal nach der geschätzten Dauer und markiert die
   Öffnungszeit als unbekannt, statt mit erfundenen Werten zu rechnen.
 
-### 9.3 Die Karte in der App
+### 9.3 Eine Webseite auslesen
+
+Der Weg von einem Reiseblog zu Kandidaten im Vorrat, in vier Stufen. Er ist der
+aufwendigste der vier Wege und verdient deshalb eine eigene Beschreibung.
+
+**Stufe 1: An den Text kommen — vom Gerät, nicht vom Server.** Naheliegend wäre,
+nur die URL zu teilen und den Server die Seite laden zu lassen. Der bessere Weg
+läuft aber über das Gerät: Eine Share-Extension kann per
+`NSExtensionJavaScriptPreprocessingFile` ein kleines Skript **in der bereits
+geöffneten Seite** ausführen und deren sichtbaren Text mitgeben. Damit sind vier
+Probleme auf einen Schlag erledigt, an denen ein Server-Abruf scheitert:
+JavaScript-gerenderte Seiten, Cookie-Banner, Anmeldung oder Bezahlschranke, und
+Bot-Sperren gegen Rechenzentrums-IPs. Der Browser des Nutzers hat den schweren
+Teil schon gelöst.
+
+Der Server-Abruf bleibt als Rückfallebene für Fälle, in denen nur eine URL
+ankommt (aus einer Nachricht etwa). Dann gelten die üblichen Vorsichtsmaßnahmen,
+die hier ausdrücklich genannt seien, weil ein Dienst, der **beliebige vom Nutzer
+gelieferte URLs** abruft, eine neue Angriffsfläche ist: nur `https`, keine
+privaten oder link-lokalen Adressbereiche (auch nicht nach einer Weiterleitung —
+sonst zeigt jemand auf den geo-Container oder einen Metadatendienst), Zeit- und
+Größenbegrenzung. Das Muster dafür steht schon im Repo
+(`osm-admin/wikidata-client.ts` mit `AbortController` und Timeout).
+
+**Stufe 2: Den Artikel freilegen.** Navigation, Werbung, Kommentare und
+Related-Blöcke blähen den Text auf und verwirren die Extraktion. Also den
+Artikelkörper isolieren (Readability-Verfahren) und die Länge deckeln. Für den
+lokalen Qwen ist das nicht Kosmetik, sondern Voraussetzung — sein Kontext ist
+klein, und Nebengeräusch verdrängt den Inhalt.
+
+**Stufe 3: Extrahieren, mit Beleg.** Das Modell bekommt genau eine Aufgabe und
+ein striktes Schema: eine Liste aus *Name*, optionaler *Ortsangabe*, optionaler
+*Kategorie* und einem **wörtlichen Zitat** aus der Seite. Das Zitat ist der
+Trick: Es lässt sich mechanisch gegen den Quelltext prüfen. Steht es dort nicht
+buchstäblich, fliegt der Eintrag raus — eine erfundene Empfehlung überlebt diese
+Prüfung nicht. Extrahieren ist ohnehin die freundlichere Aufgabe als Empfehlen:
+Die Antwort steht im vorgelegten Text, weshalb hier auch ein kleines lokales
+Modell brauchbar ist.
+
+**Stufe 4: Namen auflösen.** Jeder extrahierte Name wird gegen die
+Regionsdatenbank der Etappe aufgelöst — normalisierter Namensvergleich im
+passenden Gebiet, mit der Ortsangabe aus dem Artikel als Eingrenzung. Drei
+Ausgänge: **eindeutig** → Kandidat mit allen OSM-Daten; **mehrdeutig** →
+Rückfrage mit Karte; **kein Treffer** → Notiz mit Link und Zitat, die im Vorrat
+liegen bleibt, bis jemand sie von Hand auflöst. Erfunden wird nichts (§10.4).
+
+Diese Auflösung ist **dieselbe Aufgabe wie Händlername → POI** aus §10.6. Beide
+sollten einen Baustein teilen: *Name plus grober Ort → POI in dieser Region*,
+mit den Ausgängen eindeutig / mehrdeutig / keiner. Das ist der einzige Ort im
+Konzept, an dem zwei entfernte Funktionen exakt dasselbe Problem haben.
+
+**Nebenbei zur Modellwahl:** Ein Artikel ist öffentlicher Text. Damit ist diese
+Aufgabe der **unbedenklichste Kandidat für die API-Spur** aus §11 — anders als
+die Kuration, die Vorlieben und Gruppenzusammensetzung mitschickt. Gespeichert
+wird ohnehin nur das Ergebnis samt kurzem Zitat und Link, nie die ganze Seite.
+
+### 9.4 Die Karte in der App
 
 Die eingebettete Karte ist MapKit, also **Apples Kartenmaterial** — die
 Sachdaten (Kandidaten, Kategorien, Öffnung) kommen dagegen aus den eigenen
@@ -714,7 +767,7 @@ Nützlich und wenig bekannt: **Look Around** lässt sich seit iOS 16 über
 Aussichtspunkt überhaupt?" beantwortet sich damit ohne App-Wechsel — dort, wo
 Apple Daten hat; sonst entfällt der Knopf stillschweigend.
 
-### 9.4 Die Grenze
+### 9.5 Die Grenze
 
 Kein Deep-Link gibt etwas zurück. Die App erfährt nie, ob ihr wirklich
 losgefahren seid oder was ihr in Google gelesen habt. Alles, was nach der
@@ -867,7 +920,7 @@ kein Kostenproblem.
    der Places API dürfen (mit Ausnahme der Place-IDs) nicht dauerhaft
    gespeichert werden, und die Darstellung zusammen mit einer **Nicht-Google-Karte**
    ist untersagt. Unser Planer lebt aber von einem **vorab bewerteten Vorrat**
-   (§4.3) und zeichnet auf einer MapKit-Karte (§9.3). Beides zusammen geht
+   (§4.3) und zeichnet auf einer MapKit-Karte (§9.4). Beides zusammen geht
    nicht. Ein Ranking, das bei jedem Öffnen neu eingekauft werden muss und
    offline nicht existiert, ist kein Vorrat.
 2. **Es widerspricht dem Kern des Produkts.** Jede Abfrage sendet Ort, Zeitpunkt
@@ -1214,7 +1267,7 @@ hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
   gehört die Umwegangabe deshalb als Schätzung gekennzeichnet, und das Budget
   wird großzügig angesetzt, damit die Vorauswahl nichts Gutes verwirft.
 - **Übergaben sind Einbahnstraßen.** Was nach dem Deep-Link passiert, sieht die
-  App nicht (§9.4). Der Rückweg in den Plan muss deshalb so billig sein, dass
+  App nicht (§9.5). Der Rückweg in den Plan muss deshalb so billig sein, dass
   ihn niemand vergisst — eine Wischgeste, kein Formular.
 - **Gleichzeitige Änderungen sind aufwendig.** Mehrere Geräte, teils offline,
   am selben Plan (§6.3) sind der teuerste Teil des Mehrbenutzerbetriebs — und
