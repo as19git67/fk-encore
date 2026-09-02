@@ -318,4 +318,31 @@ enum PhotoCompare {
               relativeY >= 0, relativeY <= rect.height else { return nil }
         return CGPoint(x: relativeX / rect.width, y: relativeY / rect.height)
     }
+
+    /// The two boxes the panes should line up on, solved together.
+    ///
+    /// A tapped face names a person when it has one, and lining both photos up
+    /// on *that* person is the best case. But the person need not appear in
+    /// the other photo — a burst where someone walked out of frame — and a
+    /// missing box on one side used to leave **both** panes unzoomed while the
+    /// „Ganzes Bild" button still appeared, so the tap looked like it had
+    /// silently failed.
+    ///
+    /// So a person that is not on both sides falls back to each photo's own
+    /// primary face: every tap either zooms or leaves the state alone.
+    static func matchedBoxes(
+        personId: Int?,
+        first: [Candidate],
+        second: [Candidate]
+    ) -> (first: BBox, second: BBox)? {
+        if let personId,
+           let a = face(forPerson: personId, in: first),
+           let b = face(forPerson: personId, in: second) {
+            return (a.bbox, b.bbox)
+        }
+        guard let a = primaryFace(in: first), let b = primaryFace(in: second) else {
+            return nil
+        }
+        return (a.bbox, b.bbox)
+    }
 }
