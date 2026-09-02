@@ -1,20 +1,24 @@
 import SwiftUI
 
-/// Full-size look at the members of one review group, pageable and zoomable.
+/// Full-size look at the members of one review group.
 ///
 /// This exists because tapping a thumbnail on the review card used to *decide*
-/// the group ("keep only this one"). A tap is what people reach for to judge
-/// whether a photo is sharp enough to survive — gesture and consequence pointed
-/// in opposite directions, and a mis-tap hid the rest of the group behind an
-/// undo most users never noticed. Tapping now opens this preview; keeping a
-/// single photo became an explicit, labelled button that says what it costs.
+/// the group („keep only this one"). A tap is what people reach for to judge
+/// whether a photo is sharp enough to survive — gesture and consequence
+/// pointed in opposite directions, and a mis-tap hid the rest of the group
+/// behind an undo most users never noticed. Tapping opens this preview;
+/// keeping a single photo is an explicit, labelled button that says what it
+/// costs.
 ///
-/// The image is the full file (`ThumbnailLoader` downloads `/photos/file/...`),
-/// so pinch-zoom actually resolves the detail the decision hangs on.
+/// It used to be a viewer of its own — its own pager, its own zoom, its own
+/// loading — which meant everything the real viewer gained (crop rendering,
+/// the info panel, delete, download, the location map) stopped at its edge.
+/// It is now `PhotoFullscreenView` with a footer passed in (#1085 §4): the
+/// review-specific part is the footer and nothing else.
 ///
 /// ## Two modes
 ///
-/// - **Decide** (opened from the review card): the footer offers "Nur dieses
+/// - **Decide** (opened from the review card): the footer offers „Nur dieses
 ///   Foto behalten", which resolves the group immediately.
 /// - **Edit a pending selection** (opened from `ReviewSelectionSheet`): the
 ///   footer carries the same thumbs up/down as the list behind it, bound to
@@ -26,17 +30,23 @@ struct ReviewPhotoPreview: View {
     /// nil when the user lacks `photos.delete` — the preview then only shows.
     let onPickOne: ((Int) -> Void)?
     /// Bound in edit mode; the toggles write straight through to the sheet, so
-    /// closing the preview needs no separate "apply" step.
+    /// closing the preview needs no separate „apply" step.
     private let keep: Binding<Set<Int>>?
+    private let startPhotoId: Int
 
-    @State private var selection: Int
+    /// The group's photos as the viewer wants them. The review queue carries
+    /// a trimmed row — id, filename, score — and the viewer shows the full
+    /// metadata, so the rows are fetched once here.
+    @State private var rows: [PhotoWithCuration] = []
+    @State private var index = 0
+    @State private var isLoading = true
     @Environment(\.dismiss) private var dismiss
 
     init(group: ReviewQueueGroup, startPhotoId: Int, onPickOne: ((Int) -> Void)?) {
         self.group = group
         self.onPickOne = onPickOne
         self.keep = nil
-        _selection = State(initialValue: startPhotoId)
+        self.startPhotoId = startPhotoId
     }
 
     /// Edit mode — see the type comment.
@@ -44,50 +54,66 @@ struct ReviewPhotoPreview: View {
         self.group = group
         self.onPickOne = nil
         self.keep = keep
-        _selection = State(initialValue: startPhotoId)
+        self.startPhotoId = startPhotoId
     }
 
     private var photos: [ReviewQueuePhoto] { group.orderedPhotos }
 
-    private var currentPhoto: ReviewQueuePhoto? {
-        photos.first { $0.id == selection }
-    }
-
-    private var currentPosition: Int {
-        (photos.firstIndex { $0.id == selection } ?? 0) + 1
+    private var queuePhotoById: [Int: ReviewQueuePhoto] {
+        Dictionary(uniqueKeysWithValues: photos.map { ($0.id, $0) })
     }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                TabView(selection: $selection) {
-                    ForEach(photos) { photo in
-                        ReviewPreviewPage(photo: photo, isPicked: group.pickedPhotoIds.contains(photo.id))
-                            .tag(photo.id)
+            Group {
+                if !rows.isEmpty {
+                    PhotoFullscreenView(
+                        photos: rows,
+                        currentIndex: $index,
+                        contextFooter: { photo in AnyView(footer(for: photo)) }
+                    )
+                } else if isLoading {
+                    ProgressView("Foto laden…")
+                } else {
+                    ContentUnavailableView(
+                        "Fotos nicht verfügbar",
+                        systemImage: "photo",
+                        description: Text("Die Fotos dieser Gruppe konnten nicht geladen werden.")
+                    )
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Fertig") { dismiss() }
+                        }
                     }
                 }
-                .tabViewStyle(.page(indexDisplayMode: photos.count > 1 ? .automatic : .never))
-                .ignoresSafeArea(edges: .bottom)
+            }
+            .task { await load() }
+        }
+    }
 
-                if let photo = currentPhoto {
-                    footer(for: photo)
-                }
-            }
-            .background(Color(.systemBackground))
-            .navigationTitle("\(currentPosition) von \(photos.count)")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Fertig") { dismiss() }
-                }
-            }
+    private func load() async {
+        isLoading = true
+        defer { isLoading = false }
+        let ids = photos.map(\.id)
+        guard !ids.isEmpty else { return }
+        do {
+            // The group's own order, not the batch endpoint's: the AI's pick
+            // leads the card, and the preview has to agree with it.
+            rows = try await PhotoFetch.byIds(ids)
+            index = rows.firstIndex { $0.id == startPhotoId } ?? 0
+        } catch {
+            rows = []
         }
     }
 
     // MARK: - Footer
 
+    /// Everything the review knows and the viewer does not: whether this is
+    /// the AI's pick, what it scored, how the album's other members voted, and
+    /// what deciding would cost.
     @ViewBuilder
-    private func footer(for photo: ReviewQueuePhoto) -> some View {
+    private func footer(for photo: PhotoWithCuration) -> some View {
+        let queuePhoto = queuePhotoById[photo.id]
         VStack(spacing: 10) {
             HStack(spacing: 10) {
                 if group.pickedPhotoIds.contains(photo.id) {
@@ -95,13 +121,13 @@ struct ReviewPhotoPreview: View {
                         .font(.caption).bold()
                         .foregroundStyle(.tint)
                 }
-                if let percent = photo.qualityPercent {
+                if let percent = queuePhoto?.qualityPercent {
                     Label("\(percent) %", systemImage: "wand.and.stars")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
-                if let peer = photo.peer_curation, peer.hasSignal {
+                if let peer = queuePhoto?.peer_curation, peer.hasSignal {
                     if peer.favorite > 0 {
                         Label("\(peer.favorite)", systemImage: "heart.fill")
                             .font(.caption)
@@ -117,7 +143,7 @@ struct ReviewPhotoPreview: View {
             }
 
             if let keep {
-                keepControls(for: photo, keep: keep)
+                keepControls(for: photo.id, keep: keep)
             } else if let onPickOne {
                 Button {
                     // Dismiss first: the card underneath advances immediately,
@@ -153,8 +179,8 @@ struct ReviewPhotoPreview: View {
     // MARK: - Edit mode
 
     @ViewBuilder
-    private func keepControls(for photo: ReviewQueuePhoto, keep: Binding<Set<Int>>) -> some View {
-        let isKept = keep.wrappedValue.contains(photo.id)
+    private func keepControls(for photoId: Int, keep: Binding<Set<Int>>) -> some View {
+        let isKept = keep.wrappedValue.contains(photoId)
         VStack(spacing: 6) {
             HStack(spacing: 10) {
                 thumbButton(
@@ -163,7 +189,7 @@ struct ReviewPhotoPreview: View {
                     tint: .accentColor,
                     active: isKept
                 ) {
-                    keep.wrappedValue.insert(photo.id)
+                    keep.wrappedValue.insert(photoId)
                 }
 
                 thumbButton(
@@ -172,7 +198,7 @@ struct ReviewPhotoPreview: View {
                     tint: .secondary,
                     active: !isKept
                 ) {
-                    keep.wrappedValue.remove(photo.id)
+                    keep.wrappedValue.remove(photoId)
                 }
             }
 
@@ -214,40 +240,5 @@ struct ReviewPhotoPreview: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
-    }
-}
-
-/// One zoomable page of the preview. Mirrors `PhotoPageView`'s loading so the
-/// review reuses the same cache entry as the rest of the app.
-private struct ReviewPreviewPage: View {
-    let photo: ReviewQueuePhoto
-    let isPicked: Bool
-
-    @State private var loader: ThumbnailLoader
-
-    init(photo: ReviewQueuePhoto, isPicked: Bool) {
-        self.photo = photo
-        self.isPicked = isPicked
-        _loader = State(initialValue: ThumbnailLoader(filename: photo.filename, photoId: photo.id))
-    }
-
-    var body: some View {
-        GeometryReader { geo in
-            Group {
-                if let image = loader.image {
-                    ZoomableImageView(image: image)
-                } else if loader.hasError {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.largeTitle)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
-            .frame(width: geo.size.width, height: geo.size.height)
-        }
-        .task { await loader.load() }
     }
 }
