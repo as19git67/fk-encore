@@ -39,6 +39,14 @@ struct PhotoFullscreenView: View {
     /// view for shared albums (issue #760). Empty everywhere else, which makes
     /// the "Meinungen" block collapse to nothing.
     private let curationStats: [Int: PhotoCurationStats]
+    /// An extra strip under the photo, supplied by whoever opened the viewer.
+    ///
+    /// This is how a context adds what only it knows about — the review's
+    /// „Nur dieses Foto behalten" and its keep toggles — without a viewer of
+    /// its own being written for it (#1085 §4). The same idea as
+    /// `albumContext`, which adds „aus Album entfernen" only where an album is
+    /// the thing being looked at.
+    private let contextFooter: ((PhotoWithCuration) -> AnyView)?
     @State private var showDeleteConfirm = false
     /// Non-destructive crop / tone review (#1019).
     @State private var showTransforms = false
@@ -74,6 +82,7 @@ struct PhotoFullscreenView: View {
         self.onPhotoRemoved = onPhotoRemoved
         self.albumContext = nil
         self.curationStats = [:]
+        self.contextFooter = nil
     }
 
     /// Multi-photo init for paged navigation (e.g. PhotoGridView).
@@ -82,7 +91,8 @@ struct PhotoFullscreenView: View {
         currentIndex: Binding<Int>,
         albumContext: AlbumContext? = nil,
         curationStats: [Int: PhotoCurationStats] = [:],
-        onPhotoRemoved: ((Int) -> Void)? = nil
+        onPhotoRemoved: ((Int) -> Void)? = nil,
+        contextFooter: ((PhotoWithCuration) -> AnyView)? = nil
     ) {
         self.photos = photos
         self.bboxes = Array(repeating: nil, count: photos.count)
@@ -93,6 +103,7 @@ struct PhotoFullscreenView: View {
         self.onPhotoRemoved = onPhotoRemoved
         self.albumContext = albumContext
         self.curationStats = curationStats
+        self.contextFooter = contextFooter
     }
 
     /// Multi-photo init for person context: paged navigation with per-photo face boxes.
@@ -107,6 +118,7 @@ struct PhotoFullscreenView: View {
         self.onPhotoRemoved = onPhotoRemoved
         self.albumContext = nil
         self.curationStats = [:]
+        self.contextFooter = nil
     }
 
     private var currentPhoto: PhotoWithCuration? {
@@ -307,6 +319,11 @@ struct PhotoFullscreenView: View {
                     }
                 }
             }
+        .safeAreaInset(edge: .bottom) {
+            if let contextFooter, let photo = currentPhoto {
+                contextFooter(photo)
+            }
+        }
         .toolbarBackground(showDetails ? .visible : .hidden, for: .bottomBar)
         .fullScreenCover(isPresented: $showSlideshow) {
             PhotoSlideshowView(

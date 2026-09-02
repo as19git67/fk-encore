@@ -99,4 +99,49 @@ final class PhotoFetchTests: XCTestCase {
         )
         XCTAssertTrue(response.photos.isEmpty)
     }
+
+    // MARK: - Batch ordering
+
+    private func row(id: Int) -> PhotoWithCuration {
+        PhotoWithCuration(
+            id: id,
+            user_id: 1,
+            filename: "photo-\(id).jpg",
+            original_name: "photo-\(id).jpg",
+            mime_type: "image/jpeg",
+            size: 100,
+            hash: nil,
+            taken_at: nil,
+            created_at: "2026-01-15T08:00:00.000Z",
+            latitude: nil,
+            longitude: nil,
+            location_name: nil,
+            location_city: nil,
+            location_country: nil,
+            ai_quality_score: nil,
+            ai_quality_details: nil,
+            auto_crop: nil,
+            curation_status: .visible,
+            description: nil,
+            keywords: nil
+        )
+    }
+
+    /// The batch endpoint answers in its own order, and every caller has an
+    /// order that matters — a search's ranking, a review group's
+    /// AI-pick-first sequence.
+    func testRowsComeBackInTheOrderAskedFor() {
+        let ordered = PhotoFetch.ordered(
+            [row(id: 3), row(id: 1), row(id: 2)],
+            byIds: [2, 3, 1]
+        )
+        XCTAssertEqual(ordered.map(\.id), [2, 3, 1])
+    }
+
+    /// A deleted photo, or one the caller may no longer see, is simply absent
+    /// from the answer — the rest of the list still arrives.
+    func testAnIdWithoutARowDropsOut() {
+        let ordered = PhotoFetch.ordered([row(id: 1)], byIds: [1, 99])
+        XCTAssertEqual(ordered.map(\.id), [1])
+    }
 }

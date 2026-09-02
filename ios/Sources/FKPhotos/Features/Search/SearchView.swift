@@ -14,6 +14,11 @@ struct SearchView: View {
         GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 2)
     ]
 
+    /// Where the viewer opens, and what pushes it. Paging is over the whole
+    /// result set, so the next hit is a swipe away.
+    @State private var fullscreenIndex = 0
+    @State private var fullscreenNav: FullscreenNav?
+
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
@@ -43,11 +48,16 @@ struct SearchView: View {
 
                     LazyVGrid(columns: columns, spacing: 2) {
                         ForEach(viewModel.results) { photo in
-                            NavigationLink(value: photo.id) {
+                            Button {
+                                fullscreenIndex = viewModel.results
+                                    .firstIndex(where: { $0.id == photo.id }) ?? 0
+                                fullscreenNav = FullscreenNav(startIndex: fullscreenIndex)
+                            } label: {
                                 PhotoThumbnailView(filename: photo.filename, photoId: photo.id)
                                     .aspectRatio(1, contentMode: .fill)
                                     .clipped()
                             }
+                            .buttonStyle(.plain)
                         }
                     }
                     .padding(.horizontal, 2)
@@ -86,9 +96,21 @@ struct SearchView: View {
             if text.isEmpty { viewModel.clear() }
         }
         .navigationTitle("Suche")
-        .navigationDestination(for: Int.self) { photoId in
-            PhotoDetailView(photoId: photoId)
+        // The same viewer the album, the grid, the timeline, the person view,
+        // the map and the feed use. A search hit used to open a screen of its
+        // own — a scrolling page with no paging, no zoom and its own curation
+        // row that called a route the server does not have (#1085 §3, §4).
+        .navigationDestination(item: $fullscreenNav) { _ in
+            PhotoFullscreenView(
+                photos: viewModel.results,
+                currentIndex: $fullscreenIndex,
+                onPhotoRemoved: { id in viewModel.remove(photoId: id) }
+            )
         }
+    }
+
+    private struct FullscreenNav: Hashable {
+        let startIndex: Int
     }
 }
 
