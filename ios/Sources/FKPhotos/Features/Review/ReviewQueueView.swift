@@ -23,6 +23,8 @@ struct ReviewQueueView: View {
     @State private var dragOffset: CGSize = .zero
     @State private var previewTarget: PreviewTarget?
     @State private var showSelectionSheet = false
+    /// Side-by-side comparison of the two leading candidates (#1021).
+    @State private var showCompare = false
     @Environment(AuthManager.self) private var authManager
 
     /// The photo the full-size preview opens on. A wrapper because
@@ -78,6 +80,17 @@ struct ReviewQueueView: View {
                 ReviewSelectionSheet(group: group) { keepIds in
                     viewModel.pickPhotos(keepIds)
                 }
+            }
+        }
+        .fullScreenCover(isPresented: $showCompare) {
+            // The two leading candidates: `orderedPhotos` puts the AI's picks
+            // first, so these are the two the decision is actually between.
+            if let group = viewModel.state.current,
+               group.orderedPhotos.count >= 2 {
+                PhotoCompareView(
+                    first: group.orderedPhotos[0],
+                    second: group.orderedPhotos[1]
+                )
             }
         }
         .task {
@@ -240,6 +253,17 @@ struct ReviewQueueView: View {
             } label: {
                 Label("Auswahl anpassen …", systemImage: "slider.horizontal.3")
                     .font(.subheadline)
+            }
+            // Deciding between two near-identical shots needs them at the
+            // same size, not one after the other. Only offered where there
+            // are actually two to compare.
+            if group.orderedPhotos.count >= 2 {
+                Button {
+                    showCompare = true
+                } label: {
+                    Label("Vergleichen …", systemImage: "rectangle.split.2x1")
+                        .font(.subheadline)
+                }
             }
             if group.hasPeerSignal {
                 Button {
