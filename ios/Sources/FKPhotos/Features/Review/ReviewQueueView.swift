@@ -83,22 +83,18 @@ struct ReviewQueueView: View {
             }
         }
         .fullScreenCover(isPresented: $showCompare) {
-            // The two leading candidates: `orderedPhotos` puts the AI's picks
-            // first, so these are the two the decision is actually between.
+            // The whole group, not its two leading candidates: the comparison
+            // is a tournament over every pair, and it commits once at the end
+            // rather than on the first verdict.
             if let group = viewModel.state.current,
                group.orderedPhotos.count >= 2 {
-                PhotoCompareView(
-                    first: group.orderedPhotos[0],
-                    second: group.orderedPhotos[1],
-                    // A flung-away photo is a decision about the group: keep
-                    // everything else. `pick-photos` needs at least one
-                    // keeper, so a group of one is left alone.
-                    onDiscard: { discardedId in
-                        let keep = group.photos.map(\.id).filter { $0 != discardedId }
-                        guard !keep.isEmpty else { return }
-                        viewModel.pickPhotos(keep)
-                    }
-                )
+                PhotoCompareView(photos: group.orderedPhotos) { keep in
+                    // `pick-photos` needs at least one keeper. The tournament
+                    // guarantees one, but the guard is cheap and the failure
+                    // would be silent.
+                    guard !keep.isEmpty else { return }
+                    viewModel.pickPhotos(keep)
+                }
             }
         }
         .task {

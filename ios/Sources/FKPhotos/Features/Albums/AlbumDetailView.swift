@@ -22,6 +22,8 @@ struct AlbumDetailView: View {
     @State private var showSlideshow = false
     /// Map over the album's photos (#1016).
     @State private var showMap = false
+    /// Near-duplicate review over this album's own photos (#1085 §2b).
+    @State private var showGroupReview = false
     /// Collage from the selected photos (#1020).
     @State private var showCollage = false
     @State private var showDeleteConfirm = false
@@ -35,6 +37,7 @@ struct AlbumDetailView: View {
     @State private var addToAlbum = AddToAlbumManager()
     @State private var itemFrames: [Int: CGRect] = [:]
     @Environment(\.dismiss) private var dismiss
+    @Environment(AuthManager.self) private var authManager
 
     // ── Album views + consensus (issue #760) ──────────────────────────────
     /// Anonymized opinion counters per photo id. Only populated for shared
@@ -228,6 +231,16 @@ struct AlbumDetailView: View {
                     }
             }
         }
+        .sheet(isPresented: $showGroupReview) {
+            AlbumGroupReviewSheet(
+                photos: photos,
+                curationOverrides: curationOverrides
+            ) { hidden in
+                // The server has hidden these; reflect it in the grid rather
+                // than reloading the whole album for a handful of ids.
+                for id in hidden { curationOverrides[id] = .hidden }
+            }
+        }
         .sheet(isPresented: $filterSort.isMenuPresented) {
             FilterSortMenuView(viewModel: filterSort, available: [.favorite, .hasGps, .dateRange])
                 .presentationDetents([.medium, .large])
@@ -304,7 +317,8 @@ struct AlbumDetailView: View {
                 // Sharing, properties and deletion share one overflow menu so
                 // the toolbar stays usable (same pattern as the iOS media
                 // library album detail).
-                if canStartSlideshow || canShowMap || canShareAlbum || canEditAlbum || canDeleteAlbum {
+                if canStartSlideshow || canShowMap || canReviewGroups
+                    || canShareAlbum || canEditAlbum || canDeleteAlbum {
                     ToolbarItem(placement: .primaryAction) {
                         Menu {
                             // Available to anyone who can see the album —
@@ -323,7 +337,14 @@ struct AlbumDetailView: View {
                                     Label("Karte", systemImage: "map")
                                 }
                             }
-                            if canStartSlideshow || canShowMap {
+                            if canReviewGroups {
+                                Button {
+                                    showGroupReview = true
+                                } label: {
+                                    Label("Ähnliche Fotos", systemImage: "square.stack.3d.down.right")
+                                }
+                            }
+                            if canStartSlideshow || canShowMap || canReviewGroups {
                                 if canShareAlbum || canEditAlbum || canDeleteAlbum {
                                     Divider()
                                 }
@@ -737,6 +758,13 @@ struct AlbumDetailView: View {
     /// offer one.
     private var canStartSlideshow: Bool {
         slideshowPhotos.count > 1
+    }
+
+    /// Reviewing near-duplicates ends in photos being hidden, so it is gated
+    /// on the same permission the backend enforces on `pick-photos` — and it
+    /// needs two photos to have anything to compare.
+    private var canReviewGroups: Bool {
+        authManager.hasPermission("photos.delete") && photos.count >= 2
     }
 
     /// The map is only worth offering when something would land on it.
