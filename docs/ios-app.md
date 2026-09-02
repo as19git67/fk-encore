@@ -145,11 +145,19 @@ dokumentiert**:
 
 - **Kartenansicht** (`PhotoMapView`, MapKit) über die Fotos eines Albums,
   erreichbar aus dem Überlauf-Menü der Album-Detailansicht („Karte").
-  Zwei Modi wie im Web: **„Ganze Reise"** zeigt einen Pin je Region
+  Darunter die **Zeitleiste** wie im Web: ein „Übersicht"-Eintrag, danach
+  jeder Stopp über alle Tage hinweg als eine durchgehende chronologische
+  Reihe. Der erste Stopp eines Tages trägt die Tagesfarbe
+  (`PhotoStops.dayColors`, identisch zum Web), damit die Tagesgrenzen in einer
+  langen Reihe lesbar bleiben.
+- Eine Auswahl, zwei Ansichten: „Übersicht" zeigt einen Pin je Region
   (Übersichts-Cluster über alle Tage) samt gestrichelten Linien für die
-  größten Sprünge; die Auswahl eines **Tages** zeigt dessen einzelne Stopps.
-  Auf dem Pin sitzt das Titelbild, Tippen öffnet dessen Fotos im
-  Vollbild-Viewer.
+  größten Sprünge. Die Auswahl eines Stopps zeigt **dessen Tag**, damit die
+  Nachbarstopps sichtbar bleiben, zentriert die Karte darauf und hebt Pin wie
+  Karte hervor. Karte und Zeitleiste folgen einander.
+- Auf dem Pin sitzt das Titelbild; Tippen öffnet dessen Fotos im
+  Vollbild-Viewer. Ein Tipp auf eine Zeitleisten-Karte wählt nur aus — so
+  reißt Scrollen nie den Viewer auf.
 - Die Gruppierungsregeln liegen in `PhotoStops.swift` — eine Portierung von
   `frontend/src/composables/usePhotoStops.ts` mit denselben Konstanten, damit
   Web und iOS für dasselbe Album dieselben Pins zeichnen: Gruppierung nach
@@ -158,8 +166,7 @@ dokumentiert**:
   unterhalb des Separations-Radius), Radien skaliert an der Ausdehnung des
   Tages, Übersichts-Cluster über alle Tage, sowie die längsten ~10 % der
   Sprünge zwischen aufeinanderfolgenden Stopps als gestrichelte Linien.
-- Noch offen (#1016): die Tages-/Stopp-Zeitleiste neben der Karte und das
-  Nach-Zoom-Neuclustern der Pins.
+- Noch offen (#1016 Etappe C): das Nach-Zoom-Neuclustern der Pins.
 
 ### 2.7 Feed (Aktivität, Kommentare, Reaktionen)
 - **Feed-Tab** mit Ungelesen-Badge (`FeedViewModel.unreadCount`).
@@ -245,7 +252,7 @@ Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders ·
 | Aus Album entfernen | ✅ | ✅ (im Album-Kontext) |
 | Aufnahmedatum ändern | ✅ | ✅ |
 | GPS-Ort setzen/ändern | ❌ (auch Web nicht — nur `POST /photos/:id/rescan-gps` liest EXIF neu) | ❌ |
-| Karte über eine Sammlung (Stopps/Trip) | ✅ `TripMap` | 🔶 `PhotoMapView` (Pins + Tagesfilter; Zeitleiste und Zoom-Clustering offen) |
+| Karte über eine Sammlung (Stopps/Trip) | ✅ `TripMap` | 🔶 `PhotoMapView` (Pins + Zeitleiste; Zoom-Clustering offen) |
 | Reindex / Metadaten aktualisieren | ✅ | ❌ |
 | Nicht-destruktive Transformationen (Crop/Rotate) | ✅ `PhotoTransformEditor` | ❌ |
 | Collage erstellen | ✅ `CollageDialog` | ❌ |
@@ -343,9 +350,9 @@ Referenz stehen, was jeweils gebaut wurde.
    Schließt alltägliche Lücken; nutzt vorhandene Endpunkte.
 
 ### Etappe 2 – Mittlerer Nutzen
-5. 🔶 **Interaktive Karten-/Trip-Ansicht** – Karte mit Foto-Clustern,
-   umgesetzt als `PhotoMapView` auf Basis der portierten `PhotoStops`-Regeln
-   (#1016 Etappe A). Offen: Tages-/Stopp-Zeitleiste und Zoom-Clustering.
+5. 🔶 **Interaktive Karten-/Trip-Ansicht** – Karte mit Foto-Clustern und
+   Stopp-Zeitleiste, umgesetzt als `PhotoMapView` auf Basis der portierten
+   `PhotoStops`-Regeln (#1016 Etappen A und B). Offen: Zoom-Clustering.
    *Ort per Karten-Pin zuweisen* gehört nicht hierher — das kann das Web
    ebenfalls nicht, es ist also kein Parity-Gap.
 6. ✅ **Öffentliche Album-Links** erstellen und per Share-Sheet teilen

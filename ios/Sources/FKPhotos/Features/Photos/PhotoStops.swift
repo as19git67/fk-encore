@@ -328,6 +328,84 @@ enum PhotoStops {
         Dictionary(grouping: stops, by: \.day)
     }
 
+    // MARK: - Timeline
+
+    /// The palette the web assigns to days, in order, wrapping when a trip
+    /// outlasts it. Kept identical so a trip is coloured the same on both.
+    static let dayColors: [String] = [
+        "#4285F4", "#EA4335", "#34A853", "#FBBC05", "#9C27B0",
+        "#FF6D00", "#00ACC1", "#C62828", "#2E7D32", "#F06292",
+    ]
+
+    /// A `#RRGGBB` string as channel values in 0…1, or nil when it is not one.
+    /// The palette is kept as hex so it can be compared to the web's literally;
+    /// this is what turns it into something SwiftUI can draw.
+    static func rgb(fromHex hex: String) -> (red: Double, green: Double, blue: Double)? {
+        var digits = hex.trimmingCharacters(in: .whitespaces)
+        if digits.hasPrefix("#") { digits.removeFirst() }
+        guard digits.count == 6, let value = UInt32(digits, radix: 16) else { return nil }
+        return (
+            Double((value >> 16) & 0xFF) / 255,
+            Double((value >> 8) & 0xFF) / 255,
+            Double(value & 0xFF) / 255
+        )
+    }
+
+    /// Each day's colour, by its position in the trip.
+    static func colors(forDays days: [String]) -> [String: String] {
+        var map: [String: String] = [:]
+        for (index, day) in days.enumerated() {
+            map[day] = dayColors[index % dayColors.count]
+        }
+        return map
+    }
+
+    /// A stop's caption, falling back to its number when nothing reverse-
+    /// geocoded. `id` is zero-based, so the reader sees „Stopp 1" first.
+    static func title(of stop: Stop) -> String {
+        stop.locationLabel.isEmpty ? "Stopp \(stop.id + 1)" : stop.locationLabel
+    }
+
+    /// One card in the timeline strip.
+    ///
+    /// The web shows every stop across every day as one continuous
+    /// chronological run, led by an overview card, with same-day stops sharing
+    /// a colour and the first of each day marked so the boundaries stay
+    /// readable. This produces exactly that list.
+    enum TimelineEntry: Identifiable, Sendable {
+        case overview(dayCount: Int)
+        case stop(Stop, isFirstOfDay: Bool, color: String)
+
+        /// Distinct across the two cases: the overview card is `-1`, stops
+        /// carry their own id.
+        var id: Int {
+            switch self {
+            case .overview: return -1
+            case .stop(let stop, _, _): return stop.id
+            }
+        }
+    }
+
+    static func timeline(for stops: [Stop]) -> [TimelineEntry] {
+        guard !stops.isEmpty else { return [] }
+        let orderedDays = days(of: stops)
+        let colorForDay = colors(forDays: orderedDays)
+
+        var entries: [TimelineEntry] = [.overview(dayCount: orderedDays.count)]
+        var previousDay: String?
+        // `stops` is already day-ordered and chronological within a day, so
+        // walking it in order is the run the web draws.
+        for stop in stops {
+            entries.append(.stop(
+                stop,
+                isFirstOfDay: stop.day != previousDay,
+                color: colorForDay[stop.day] ?? dayColors[0]
+            ))
+            previousDay = stop.day
+        }
+        return entries
+    }
+
     // MARK: - Overview
 
     /// One pin per visited region: stops across all days merged while their

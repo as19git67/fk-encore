@@ -410,14 +410,170 @@ final class PhotoStopsTests: XCTestCase {
     }
 }
 
-/// The map view's own presentation rules.
-final class PhotoMapViewLabelTests: XCTestCase {
+/// The timeline strip beside the map: the run of cards, the day colours and
+/// the captions on them.
+final class PhotoStopsTimelineTests: XCTestCase {
 
-    func testADayKeyIsReadBackAsADate() {
-        XCTAssertEqual(PhotoMapView.dayLabel("2024-06-01"), "1. Juni 2024")
+    private let calendar: Calendar = {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "Europe/Berlin")!
+        return cal
+    }()
+
+    private func photo(
+        id: Int,
+        lat: Double,
+        lon: Double,
+        takenAt: String,
+        city: String? = nil
+    ) -> PhotoWithCuration {
+        PhotoWithCuration(
+            id: id,
+            user_id: 1,
+            filename: "photo-\(id).jpg",
+            original_name: "photo-\(id).jpg",
+            mime_type: "image/jpeg",
+            size: 0,
+            hash: nil,
+            taken_at: takenAt,
+            created_at: takenAt,
+            latitude: lat,
+            longitude: lon,
+            location_name: nil,
+            location_city: city,
+            location_country: nil,
+            ai_quality_score: nil,
+            auto_crop: nil,
+            curation_status: .visible,
+            description: nil,
+            keywords: nil
+        )
     }
 
-    func testAnUnparseableKeyIsShownAsIs() {
-        XCTAssertEqual(PhotoMapView.dayLabel("irgendwann"), "irgendwann")
+    /// Three stops: two on the first day, one on the second.
+    private func threeStops() -> [PhotoStops.Stop] {
+        let photos = [
+            photo(id: 1, lat: 48.0, lon: 11.0, takenAt: "2024-06-01T10:00:00.000Z", city: "Musterstadt"),
+            photo(id: 2, lat: 48.5, lon: 11.0, takenAt: "2024-06-01T16:00:00.000Z", city: "Kleinstadt"),
+            photo(id: 3, lat: 49.0, lon: 11.0, takenAt: "2024-06-02T10:00:00.000Z", city: "Beispieldorf"),
+        ]
+        return PhotoStops.stops(for: photos, calendar: calendar)
+    }
+
+    // MARK: - Colours
+
+    func testEachDayGetsThePaletteInOrder() {
+        let colors = PhotoStops.colors(forDays: ["2024-06-01", "2024-06-02", "2024-06-03"])
+        XCTAssertEqual(colors["2024-06-01"], PhotoStops.dayColors[0])
+        XCTAssertEqual(colors["2024-06-02"], PhotoStops.dayColors[1])
+        XCTAssertEqual(colors["2024-06-03"], PhotoStops.dayColors[2])
+    }
+
+    func testATripLongerThanThePaletteWrapsAround() {
+        let days = (1...12).map { String(format: "2024-06-%02d", $0) }
+        let colors = PhotoStops.colors(forDays: days)
+        XCTAssertEqual(colors[days[10]], PhotoStops.dayColors[0])
+        XCTAssertEqual(colors[days[11]], PhotoStops.dayColors[1])
+    }
+
+    func testHexColoursParseToChannels() throws {
+        let white = try XCTUnwrap(PhotoStops.rgb(fromHex: "#FFFFFF"))
+        XCTAssertEqual(white.red, 1, accuracy: 0.001)
+        XCTAssertEqual(white.green, 1, accuracy: 0.001)
+        XCTAssertEqual(white.blue, 1, accuracy: 0.001)
+
+        let blue = try XCTUnwrap(PhotoStops.rgb(fromHex: "#4285F4"))
+        XCTAssertEqual(blue.red, 66.0 / 255, accuracy: 0.001)
+        XCTAssertEqual(blue.green, 133.0 / 255, accuracy: 0.001)
+        XCTAssertEqual(blue.blue, 244.0 / 255, accuracy: 0.001)
+    }
+
+    func testTheHashIsOptional() throws {
+        let withHash = try XCTUnwrap(PhotoStops.rgb(fromHex: "#4285F4"))
+        let without = try XCTUnwrap(PhotoStops.rgb(fromHex: "4285F4"))
+        XCTAssertEqual(withHash.red, without.red, accuracy: 0.0001)
+    }
+
+    func testEveryPaletteEntryParses() {
+        for hex in PhotoStops.dayColors {
+            XCTAssertNotNil(PhotoStops.rgb(fromHex: hex), "\(hex) should parse")
+        }
+    }
+
+    func testNonsenseIsNotAColour() {
+        XCTAssertNil(PhotoStops.rgb(fromHex: ""))
+        XCTAssertNil(PhotoStops.rgb(fromHex: "#FFF"))
+        XCTAssertNil(PhotoStops.rgb(fromHex: "#GGGGGG"))
+    }
+
+    // MARK: - Titles
+
+    func testAStopIsTitledByItsPlace() {
+        let stops = threeStops()
+        XCTAssertEqual(PhotoStops.title(of: stops[0]), "Musterstadt")
+    }
+
+    func testAStopWithoutAPlaceIsNumberedFromOne() {
+        let photos = [photo(id: 1, lat: 48.0, lon: 11.0, takenAt: "2024-06-01T10:00:00.000Z")]
+        let stops = PhotoStops.stops(for: photos, calendar: calendar)
+        XCTAssertEqual(PhotoStops.title(of: stops[0]), "Stopp 1")
+    }
+
+    // MARK: - Entries
+
+    func testTheStripLeadsWithTheOverviewCard() throws {
+        let entries = PhotoStops.timeline(for: threeStops())
+        guard case .overview(let dayCount) = try XCTUnwrap(entries.first) else {
+            return XCTFail("expected the overview card first")
+        }
+        XCTAssertEqual(dayCount, 2)
+    }
+
+    func testEveryStopGetsACardInOrder() {
+        let stops = threeStops()
+        let entries = PhotoStops.timeline(for: stops)
+        XCTAssertEqual(entries.count, stops.count + 1)
+        let ids = entries.dropFirst().map(\.id)
+        XCTAssertEqual(ids, stops.map(\.id))
+    }
+
+    func testOnlyTheFirstStopOfADayIsMarked() {
+        let entries = PhotoStops.timeline(for: threeStops()).dropFirst()
+        let marks = entries.map { entry -> Bool in
+            guard case .stop(_, let isFirstOfDay, _) = entry else { return false }
+            return isFirstOfDay
+        }
+        // Two stops on day one, one on day two.
+        XCTAssertEqual(marks, [true, false, true])
+    }
+
+    func testStopsOfOneDayShareTheirColour() {
+        let entries = PhotoStops.timeline(for: threeStops()).dropFirst()
+        let colors = entries.compactMap { entry -> String? in
+            guard case .stop(_, _, let color) = entry else { return nil }
+            return color
+        }
+        XCTAssertEqual(colors[0], colors[1], "same day, same colour")
+        XCTAssertNotEqual(colors[1], colors[2], "a new day changes colour")
+    }
+
+    func testTheOverviewCardNeverCollidesWithAStop() {
+        let entries = PhotoStops.timeline(for: threeStops())
+        XCTAssertEqual(Set(entries.map(\.id)).count, entries.count)
+    }
+
+    func testNoStopsMeansNoStrip() {
+        XCTAssertTrue(PhotoStops.timeline(for: []).isEmpty)
+    }
+
+    // MARK: - Card date
+
+    func testACardCarriesItsStopsDate() {
+        let stops = threeStops()
+        let label = PhotoMapView.stopDate(
+            of: stops[0],
+            timeZone: TimeZone(identifier: "Europe/Berlin")!
+        )
+        XCTAssertTrue(label.hasPrefix("01."), "expected 01. …, got \(label)")
     }
 }
