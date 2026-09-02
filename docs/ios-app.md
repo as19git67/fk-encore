@@ -410,7 +410,7 @@ Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders ·
 | Vollbild + Zoom | ✅ | ✅ native Pinch-Zoom |
 | Diashow / Slideshow | ✅ Modus im Vollbild | ✅ eigener Story-Player (`PhotoSlideshowView`), mit Foto-Paaren je nach Geräteausrichtung |
 | Mehrfachauswahl + Stapelaktionen | ✅ (Galerie + Album) | ✅ (Album, Monat und „Alle Fotos") |
-| Fotos vergleichen | ✅ `PhotoCompareView` | 🔶 `PhotoCompareView` (Seite an Seite, synchroner Gesichts-Zoom, Schärfe-Overlay; Qualitäts-Tabelle offen) |
+| Fotos vergleichen | ✅ `PhotoCompareView` | ✅ `PhotoCompareView` (Seite an Seite, synchroner Gesichts-Zoom, Schärfe-Overlay, Wisch-zum-Verwerfen, Qualitäts-Aufschlüsselung) |
 
 ### 3.2 Foto-Aktionen
 | Feature | Web | iOS |
@@ -426,8 +426,8 @@ Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders ·
 | GPS-Ort setzen/ändern | ❌ (auch Web nicht — nur `POST /photos/:id/rescan-gps` liest EXIF neu) | ❌ |
 | Karte über eine Sammlung (Stopps/Trip) | ✅ `TripMap` | ✅ `PhotoMapView` (Pins, Zeitleiste, Zoom-Clustering) |
 | Reindex / Metadaten aktualisieren | ✅ | ❌ |
-| Nicht-destruktive Transformationen (Crop/Rotate) | ✅ `PhotoTransformEditor` | 🔶 `PhotoTransformsView` (Ansehen/Anwenden/Übernehmen/Zurücksetzen; Cropper und Regler offen) |
-| Collage erstellen | ✅ `CollageDialog` | 🔶 `CollageView` (Layouts, Vorschau, Rendern + Upload; Textüberlagerung offen) |
+| Nicht-destruktive Transformationen (Crop/Rotate) | ✅ `PhotoTransformEditor` | ✅ `PhotoTransformsView` (Ansehen/Anwenden/Übernehmen/Zurücksetzen) + `PhotoRecipeEditorView` (Cropper, Drehung, Tonwert-Regler, Auto-Levels) |
+| Collage erstellen | ✅ `CollageDialog` | ✅ `CollageView` (Layouts, Vorschau, Rendern + Upload, Textüberlagerung) |
 
 ### 3.3 Metadaten
 | Feature | Web | iOS |
