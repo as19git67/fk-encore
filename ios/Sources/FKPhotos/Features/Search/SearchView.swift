@@ -24,9 +24,7 @@ struct SearchView: View {
                         }
                     if !viewModel.query.isEmpty {
                         Button {
-                            viewModel.query = ""
-                            viewModel.results = []
-                            viewModel.hasSearched = false
+                            viewModel.clear()
                         } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .foregroundStyle(.secondary)
@@ -37,6 +35,13 @@ struct SearchView: View {
                 .background(.quaternary)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .padding(.horizontal)
+
+                // What the server made of the query. Only drawn once a search
+                // has actually returned something to report.
+                if !viewModel.isSearching && !viewModel.chips.isEmpty {
+                    SearchParseChips(chips: viewModel.chips)
+                        .padding(.horizontal)
+                }
 
                 // Results
                 if viewModel.isSearching {
@@ -100,6 +105,32 @@ struct SearchView: View {
         .navigationDestination(for: Int.self) { photoId in
             PhotoDetailView(photoId: photoId)
         }
+    }
+}
+
+/// The "Verstanden als:" row — the web's `NaturalSearchBar` chips, wrapped so
+/// a long parse scrolls sideways instead of squeezing the labels.
+struct SearchParseChips: View {
+    let chips: [NaturalSearch.Chip]
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                Text("Verstanden als:")
+                    .foregroundStyle(.secondary)
+                    .padding(.trailing, 2)
+                ForEach(chips) { chip in
+                    Label(chip.label, systemImage: chip.systemImage)
+                        .labelStyle(.titleAndIcon)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(.quaternary, in: Capsule())
+                        .italic(chip.kind == .semantic)
+                }
+            }
+        }
+        .font(.caption)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
