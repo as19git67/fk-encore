@@ -271,10 +271,29 @@ dokumentiert**:
 - Ein Wisch braucht 64 pt Weg (derselbe Wert wie im Web), damit ein
   Streifschuss kein Foto wegwirft; im gezoomten Zustand ist eine Ziehbewegung
   Verschieben und löst nichts aus.
-- Die vollständige Auswahl bleibt beim `ReviewSelectionSheet`. Noch offen
-  (#1021 Etappe B): die Qualitäts-Aufschlüsselung — dafür fehlt
-  `ai_quality_details` auf `ReviewQueuePhoto`, das heute nur den Gesamtwert
-  trägt.
+- **Qualitäts-Aufschlüsselung** (`PhotoQualityDetails`, Portierung von
+  `compareQualityDetails.ts` + `comparePhotoScore.ts`), über „Bewertung" in
+  der Werkzeugleiste: je Kriterium beide Werte nebeneinander, der höhere
+  hervorgehoben. Dass 71 % gegen 68 % steht, sagt nichts; dass das eine Foto
+  schärfer und das andere besser komponiert ist, entscheidet.
+- **Die Aufschlüsselung kommt nicht aus der Review-Queue.** `ReviewQueuePhoto`
+  trägt nur den Gesamtwert. Statt den Queue-Endpunkt zu verbreitern (die
+  Details würden dann bei jeder Seite mitgeschleppt, für eine selten geöffnete
+  Tabelle), werden beim Öffnen des Vergleichs genau die zwei Fotos über
+  `GET /photos/details` nachgeladen — dasselbe Vorgehen wie im Web. Der
+  Endpunkt liefert `ai_quality_details` seit jeher; nur der Client hat es
+  bisher im Decoder weggeworfen.
+- Der frische Wert überschreibt nur die Qualitätsfelder, nie den
+  Kurations-Status — sonst nähme das Öffnen der Tabelle ein Ausblenden aus
+  derselben Sitzung zurück. Ein frisches `null` fällt auf den bekannten Wert
+  zurück, damit ein noch nicht fertig bewertetes Foto keine Bewertung verliert.
+- **„–" heißt „nicht gemessen", nicht „null Punkte"**, und ein nicht gemessenes
+  Kriterium gewinnt auch nicht gegen ein gemessenes.
+- Sortiert wird nach dem rohen Schlüssel, nicht nach der deutschen
+  Beschriftung: so steht die Tabelle auf beiden Clients in derselben
+  Reihenfolge, und eine umformulierte Beschriftung wirbelt sie nicht durch.
+  Ein unbekanntes Kriterium behält seinen Rohnamen, statt zu verschwinden.
+- Die vollständige Auswahl bleibt beim `ReviewSelectionSheet`.
 
 ### 2.6d Collage
 
@@ -529,10 +548,10 @@ Referenz stehen, was jeweils gebaut wurde.
     #1019 Etappe A) und `PhotoRecipeEditorView` (Cropper, Drehung, Tonwert-
     Regler, Auto-Levels, Etappe B).
 11. **Collage-Erstellung**.
-12. 🔶 **Fotos vergleichen** – umgesetzt als `PhotoCompareView` im
-    Gruppen-Review: zwei Aufnahmen nebeneinander, ein Tipp auf ein Gesicht
-    zoomt beide gleich groß darauf (#1021 Etappe A), Schärfe-Overlay und
-    Wisch-zum-Verwerfen (Etappe B). Offen: Qualitäts-Aufschlüsselung.
+12. ✅ **Fotos vergleichen** – `PhotoCompareView` im Gruppen-Review: zwei
+    Aufnahmen nebeneinander, ein Tipp auf ein Gesicht zoomt beide gleich groß
+    darauf (#1021 Etappe A), dazu Schärfe-Overlay, Wisch-zum-Verwerfen und
+    Qualitäts-Aufschlüsselung (Etappe B).
 
 ### Bewusst **nicht** portieren (Web sinnvoller)
 - Vollständige Datenverwaltung, geplante Jobs, Purge → bleibt Web-/Admin-Domäne.

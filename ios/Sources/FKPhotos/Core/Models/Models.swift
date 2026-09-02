@@ -121,6 +121,14 @@ struct PhotoWithCuration: Codable, Identifiable, Sendable {
     let location_city: String?
     let location_country: String?
     let ai_quality_score: Double?
+    /// The per-criterion breakdown behind `ai_quality_score` — sharpness,
+    /// exposure, the CLIP scores, the face ones. `GET /photos/details` has
+    /// always sent it; until #1021 nothing on the phone read it.
+    ///
+    /// Nil means the photo has not been scored, or came from an endpoint that
+    /// does not carry the breakdown — which is not the same as a photo that
+    /// scored zero on everything.
+    let ai_quality_details: [String: Double]?
     let auto_crop: AutoCrop?
     let curation_status: CurationStatus
     let description: String?

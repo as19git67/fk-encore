@@ -70,28 +70,10 @@ struct SearchView: View {
                         }
                     }
                     .padding(.horizontal, 2)
-                } else {
-                    // Search suggestions
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("Suchvorschläge")
-                            .font(.headline)
-                            .padding(.horizontal)
-
-                        SearchSuggestionButton(icon: "text.magnifyingglass", label: "Natürliche Sprache") {
-                            viewModel.query = "Sonnenuntergang am Meer"
-                            Task { await viewModel.search() }
-                        }
-                        SearchSuggestionButton(icon: "mappin", label: "Nach Ort suchen") {
-                            viewModel.query = "Zürich"
-                            Task { await viewModel.search() }
-                        }
-                        SearchSuggestionButton(icon: "building.columns", label: "Sehenswürdigkeiten") {
-                            viewModel.query = "Eiffelturm"
-                            Task { await viewModel.search() }
-                        }
-                    }
-                    .padding(.top, 24)
                 }
+                // Nothing below the field before a search: the example
+                // queries that used to sit here read as results rather than
+                // as suggestions, and an empty field explains itself.
 
                 if let error = viewModel.errorMessage {
                     Text(error)
@@ -131,28 +113,5 @@ struct SearchParseChips: View {
         }
         .font(.caption)
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-struct SearchSuggestionButton: View {
-    let icon: String
-    let label: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: icon)
-                    .frame(width: 24)
-                    .foregroundStyle(.blue)
-                Text(label)
-                    .foregroundStyle(.primary)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-        }
     }
 }
