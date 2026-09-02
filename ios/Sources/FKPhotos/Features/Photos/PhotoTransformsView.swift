@@ -4,10 +4,11 @@ import UIKit
 /// Reviewing a photo's non-destructive edits: what the AI proposes, what other
 /// people in the household saved, and what this user has applied.
 ///
-/// The web's `PhotoTransformEditor` in its review half (#1019, stage A). The
-/// hand cropper and the tone sliders are stage B; everything here is a
-/// confirmation of something the server already computed — apply a suggested
-/// crop at one ratio, adopt someone else's recipe, or go back to the original.
+/// The web's `PhotoTransformEditor` in its review half (#1019, stage A):
+/// everything here is a confirmation of something the server already computed
+/// — apply a suggested crop at one ratio, adopt someone else's recipe, or go
+/// back to the original. Making an edit by hand is `PhotoRecipeEditorView`
+/// (stage B), reachable from „Selbst bearbeiten…".
 @Observable
 final class PhotoTransformsViewModel {
     let photoId: Int
@@ -106,6 +107,7 @@ final class PhotoTransformsViewModel {
 
 struct PhotoTransformsView: View {
     @State private var viewModel: PhotoTransformsViewModel
+    @State private var showEditor = false
     @Environment(AuthManager.self) private var authManager
     @Environment(\.dismiss) private var dismiss
 
@@ -132,6 +134,14 @@ struct PhotoTransformsView: View {
                 }
             }
             .task { await viewModel.load() }
+            .sheet(isPresented: $showEditor) {
+                PhotoRecipeEditorView(
+                    photoId: viewModel.photoId,
+                    existing: viewModel.bundle?.mine,
+                    suggestion: viewModel.bundle?.suggestion,
+                    onSaved: { Task { await viewModel.load() } }
+                )
+            }
         }
     }
 
@@ -146,6 +156,18 @@ struct PhotoTransformsView: View {
             }
 
             previewSection
+
+            Section {
+                Button {
+                    showEditor = true
+                } label: {
+                    Label("Selbst bearbeiten…", systemImage: "slider.horizontal.3")
+                }
+                .disabled(viewModel.isLoading || viewModel.isSaving)
+            } footer: {
+                Text("Zuschnitt, Drehung und Tonwerte von Hand — mit Vorschau, bevor etwas gespeichert wird.")
+            }
+
             suggestionSection
             adoptSection
 
