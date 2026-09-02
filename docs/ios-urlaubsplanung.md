@@ -282,8 +282,9 @@ Randbedingung, sondern prägt Datenmodell und Mechanik.
 
 ### 6.1 Der Vorrat ist gemeinsam, die Bewertung ist persönlich
 
-Alle Teilnehmer speisen **denselben Vorrat** (§5): über die Kandidatensuche,
-über geteilte Orte aus anderen Apps (§9.2) oder von Hand. Sichtbar bleibt, wer
+Alle Teilnehmer speisen **denselben Vorrat** (§5): über die automatische
+Kandidatensuche, über eigene Funde aus Karten-Apps, Artikeln und Screenshots
+(§9.2) oder über die Suche in der App. Sichtbar bleibt, wer
 was beigetragen hat — das kostet nichts und ist sozial wichtig.
 
 Bewertet wird dagegen **pro Person**: durchwischen mit *will ich* / *egal* /
@@ -598,7 +599,7 @@ Maps.
 Geplant gegen tatsächlich besucht, Fotos je Spot aus dem Trip-Album, Übergabe an
 den Recap.
 
-## 9. Übergänge zu Karten-Apps
+## 9. Übergänge nach außen und von außen
 
 Die Arbeitsteilung aus §3 wird hier konkret: **fk-encore plant, Apple und Google
 navigieren und bewerten.** Das ist kein Notbehelf, sondern Absicht — Echtzeit
@@ -646,22 +647,61 @@ besser sind. Deshalb:
   Navigation: Nachschlagen, ÖPNV-Verbindung und Parksuche folgen derselben
   Einstellung.
 
-### 9.2 Herein: der unterschätzte Weg
+### 9.2 Herein: eigene Funde in den Vorrat bringen
 
-**Teilen aus einer Karten-App in den Trip-Vorrat.** Wer in Google Maps, einem
-Blog oder einer Nachricht auf einen Ort stößt, schickt ihn über das Teilen-Sheet
-in den Vorrat der laufenden Etappe — und beim nächsten Umplanen ist er ein
-Kandidat wie jeder andere. Damit ist Recherche in fremden Apps kein Bruch mehr,
-sondern eine Zulieferung.
+Der Planer schlägt Kandidaten selbst vor (§5) — aber die eigene Recherche im
+Netz ist die zweite, mindestens ebenso wichtige Quelle. Sie darf kein Bruch
+sein: Was man findet, gehört mit **einer** Geste in den Vorrat, wo es als
+Kandidat mit allen anderen konkurriert.
 
-Die **Share-Extension existiert bereits** (`ios/App/ShareExtension`), nimmt
-heute aber nur Bilder entgegen (`NSExtensionActivationSupportsImageWithMaxCount`).
-Sie müsste um URLs und Ortsangaben erweitert werden. Ehrlich dazu: Aus einem
-geteilten Karten-Link die Koordinate zu ziehen, ist fragil — die Formate ändern
-sich ohne Ankündigung. Der Fallback ist deshalb kein Fehlerdialog, sondern eine
-Karte mit der Bitte, den Ort zu bestätigen; danach wird per Umkreissuche und
-Reverse-Geocoding (`geo/src/reverse.ts`) ein OSM-POI zugeordnet oder der Punkt
+**Vier Wege herein**, in der Reihenfolge ihrer Verlässlichkeit:
+
+1. **Ein Ort aus einer Karten-App.** Der klarste Fall — es gibt eine Koordinate.
+2. **Ein Artikel oder Blogbeitrag.** Der häufigste Fall bei echter Recherche
+   („die zehn schönsten Cafés in Lissabon") — und der schwierigste, weil eine
+   Seite *keine* Koordinate liefert, dafür aber oft gleich mehrere Orte nennt.
+   Hier liest das Sprachmodell die Seite und zieht die **Ortsnamen** heraus, die
+   anschließend gegen den Kandidatenbestand der Etappe abgeglichen werden.
+   Die harte Regel aus §10.4 gilt unverändert: Was sich keinem realen Eintrag
+   zuordnen lässt, wird **nicht erfunden**, sondern bleibt als Notiz mit Link
+   liegen, bis jemand es von Hand auflöst.
+3. **Ein Screenshot.** Aus einer App, die nicht teilt, oder von einer Karte im
+   Reiseführer. Fast geschenkt, weil die Share-Extension Bilder ohnehin annimmt
+   und der documents-Service bereits OCR mitbringt (Tesseract) — der Text
+   daraus geht denselben Weg wie Fall 2.
+4. **Suche in der App.** Ohne Umweg über andere Apps: nach Name suchen und
+   direkt in den Vorrat legen. Der einfachste Weg, und er muss unabhängig von
+   allem anderen existieren.
+
+**Die Share-Extension existiert bereits** (`ios/App/ShareExtension`), nimmt aber
+laut `Info.plist` nur Bilder entgegen
+(`NSExtensionActivationSupportsImageWithMaxCount`). Für die Fälle 1 und 2 muss
+sie um URLs und Textauswahl erweitert werden. Ehrlich dazu: Aus einem geteilten
+Karten-Link die Koordinate zu ziehen, ist fragil — die Formate ändern sich ohne
+Ankündigung. Der Fallback ist deshalb kein Fehlerdialog, sondern eine Karte mit
+der Bitte, den Ort zu bestätigen; danach ordnet eine Umkreissuche mit
+Reverse-Geocoding (`geo/src/reverse.ts`) einen OSM-POI zu, oder der Punkt wird
 frei übernommen.
+
+**Was mit einem Fund dann geschieht** — fünf Regeln, die verhindern, dass der
+Vorrat verwahrlost:
+
+- **Er landet in der richtigen Etappe**, automatisch nach Lage: Ein Café in
+  Osaka geht in die Osaka-Etappe, auch wenn du gerade in Tokio bist. Liegt es
+  in keiner, wird nachgefragt.
+- **Er ist ein Vorschlag, kein Termin.** Der Fund konkurriert im Vorrat wie
+  jeder andere Kandidat. Wer sicher hin will, macht ihn zum Herzenswunsch
+  (§6.1) — das ist genau der Zweck dieses Kontingents.
+- **Dubletten werden zusammengeführt.** Schlägt jemand etwas vor, das schon im
+  Vorrat liegt, entsteht kein zweiter Eintrag: Notiz, Quelle und Stimme wandern
+  an den vorhandenen.
+- **Herkunft und Link bleiben erhalten.** *Warum* ein Spot gespeichert wurde
+  („beste Pastéis laut Blog"), ist beim Planen wichtiger als der Name — und wer
+  ihn beigesteuert hat, gehört sichtbar dazu (§6.1).
+- **Fehlende Daten werden benannt, nicht geraten.** Konnte kein OSM-Eintrag
+  zugeordnet werden, fehlen Öffnungszeiten, Kategorie und Aufenthaltsdauer. Der
+  Planer fragt dann einmal nach der geschätzten Dauer und markiert die
+  Öffnungszeit als unbekannt, statt mit erfundenen Werten zu rechnen.
 
 ### 9.3 Die Karte in der App
 
