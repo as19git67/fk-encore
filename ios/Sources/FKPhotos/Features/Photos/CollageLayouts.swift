@@ -71,9 +71,9 @@ enum CollageLayouts {
     /// Rows of differing widths are what make the asymmetric variants.
     private static func rowBands(_ counts: [Int], in region: Cell = full) -> [Cell] {
         let cellHeight = region.height / Double(counts.count)
-        return counts.enumerated().flatMap { row, count -> [Cell] in
-            let cellWidth = region.width / Double(count)
-            return (0..<count).map { column in
+        return counts.indices.flatMap { row -> [Cell] in
+            let cellWidth = region.width / Double(counts[row])
+            return (0..<counts[row]).map { column in
                 Cell(
                     x: region.x + Double(column) * cellWidth,
                     y: region.y + Double(row) * cellHeight,
@@ -87,9 +87,9 @@ enum CollageLayouts {
     /// The transpose of `rowBands`: equal-width columns, each split vertically.
     private static func columnBands(_ counts: [Int], in region: Cell = full) -> [Cell] {
         let cellWidth = region.width / Double(counts.count)
-        return counts.enumerated().flatMap { column, count -> [Cell] in
-            let cellHeight = region.height / Double(count)
-            return (0..<count).map { row in
+        return counts.indices.flatMap { column -> [Cell] in
+            let cellHeight = region.height / Double(counts[column])
+            return (0..<counts[column]).map { row in
                 Cell(
                     x: region.x + Double(column) * cellWidth,
                     y: region.y + Double(row) * cellHeight,
@@ -241,8 +241,8 @@ enum CollageLayouts {
     /// percentages, so the value carries over unchanged.
     static func alignment(focal: CGPoint?) -> UnitPoint {
         UnitPoint(
-            x: clamped(focal.map { Double($0.x) }),
-            y: clamped(focal.map { Double($0.y) })
+            x: CGFloat(clamped(focal.map { Double($0.x) })),
+            y: CGFloat(clamped(focal.map { Double($0.y) }))
         )
     }
 

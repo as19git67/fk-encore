@@ -237,7 +237,9 @@ final class CollageLayoutsTests: XCTestCase {
     func testANonsenseFocalPointFallsBackToTheCentre() {
         let rect = CollageLayouts.coverCrop(
             photoWidth: 4000, photoHeight: 2000, destinationAspect: 1,
-            focal: CGPoint(x: .nan, y: .nan)
+            // Spelled out: `CGPoint` takes CGFloat, Double and Int, so a bare
+            // `.nan` has nothing to resolve against.
+            focal: CGPoint(x: CGFloat.nan, y: CGFloat.nan)
         )
         XCTAssertEqual(rect.x, 1000, accuracy: 0.001)
     }
@@ -295,7 +297,7 @@ final class CollageLayoutsTests: XCTestCase {
         // Out of range must not trap — a drag off the edge is not a crash.
         XCTAssertEqual(CollageLayouts.swap([0, 1, 2], 0, 9), [0, 1, 2])
         XCTAssertEqual(CollageLayouts.swap([0, 1, 2], -1, 1), [0, 1, 2])
-        XCTAssertEqual(CollageLayouts.swap([], 0, 1), [])
+        XCTAssertEqual(CollageLayouts.swap([Int](), 0, 1), [Int]())
     }
 
     func testSwappingLeavesTheOriginalUntouched() {
