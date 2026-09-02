@@ -4,6 +4,13 @@ import MapKit
 
 // MARK: - Container (supports swipe paging between multiple photos)
 
+/// The fullscreen photo viewer.
+///
+/// **Must be presented inside a `NavigationStack`** — pushed with
+/// `navigationDestination`, or wrapped in one when shown as a
+/// `fullScreenCover`. Its only exit is the chevron in `.toolbar`, and it turns
+/// the interactive pop gesture off so a swipe pans the photo instead of
+/// leaving; without a navigation bar there is nothing left to escape with.
 struct PhotoFullscreenView: View {
     /// Album the viewer was opened from, enabling the contextual
     /// "remove from this album" action (issue #762). Nil for the timeline,

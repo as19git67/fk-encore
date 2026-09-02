@@ -276,7 +276,7 @@ dokumentiert**:
   `ai_quality_details` auf `ReviewQueuePhoto`, das heute nur den Gesamtwert
   trägt.
 
-### 2.6d Collage (Layout-Hälfte)
+### 2.6d Collage
 
 - **Collage-Ansicht** (`CollageView`), erreichbar über das Raster-Symbol in
   der Auswahl-Leiste der Album-Detailansicht, sobald zwischen 2 und 9 Fotos
@@ -296,7 +296,30 @@ dokumentiert**:
   weg von ihren Quellfotos einsortiert.
 - Zellkanten werden nach außen auf ganze Pixel gerundet, damit zwischen zwei
   Feldern kein Haarstrich Hintergrund stehen bleibt.
-- Noch offen (#1020 Etappe C): die Textüberlagerung.
+- **Textüberlagerung** (#1020 Etappe C, `CollageText.swift`): beliebig viele
+  Beschriftungen über der ganzen Leinwand, per Finger verschiebbar, in drei
+  Größen, links/mittig/rechts, in Weiß, Schwarz oder einer Farbe aus den
+  Fotos selbst.
+- **Die Schriftgröße ist ein Anteil der Leinwandhöhe**, keine Punktgröße —
+  0,05 / 0,08 / 0,13 wie im Web. Nur so zeigt die Vorschau (ein paar hundert
+  Punkte hoch) dasselbe Bild wie der Export (2400 px): die Beschriftung
+  bedeckt in beiden denselben Anteil.
+- **Positioniert wird über den Mittelpunkt**, normiert (0…1). Ein Wechsel der
+  Aufteilung ändert das Seitenverhältnis der Leinwand, nicht aber, wo der Text
+  darin sitzt.
+- Umbrochen wird zwischen Wörtern, gemessen mit der Schrift, die auch gezeichnet
+  wird; ausdrückliche Zeilenumbrüche bleiben erhalten (auch leere Zeilen), und
+  ein Wort, das breiter als die Zeile ist, wird nicht mitten
+  auseinandergerissen — ein umbrochener Name liest sich schlechter als einer,
+  der übersteht.
+- Gezeichnet wird mit dunkler Kontur unter der Füllfarbe, damit Text auch über
+  einem unruhigen Foto lesbar bleibt; die Kontur wird nie dünner als 2 px.
+- **Die Farbvorschläge kommen aus den Fotos**: 64×64 verkleinert, Pixel in
+  16er-Stufen gebündelt und nach Häufigkeit × Sättigung² bewertet, graue und
+  sehr dunkle Pixel übersprungen (sie taugen nicht als Schriftfarbe), zu
+  ähnliche Ergebnisse verworfen. Weiß und Schwarz stehen immer davor.
+  Eine Abweichung vom Web: dort kann das Runden auf 256 laufen und erzeugt
+  eine siebenstellige, unlesbare Hex-Farbe; hier wird bei 255 geklemmt.
 
 ### 2.7 Feed (Aktivität, Kommentare, Reaktionen)
 - **Feed-Tab** mit Ungelesen-Badge (`FeedViewModel.unreadCount`).
