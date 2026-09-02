@@ -89,7 +89,15 @@ struct ReviewQueueView: View {
                group.orderedPhotos.count >= 2 {
                 PhotoCompareView(
                     first: group.orderedPhotos[0],
-                    second: group.orderedPhotos[1]
+                    second: group.orderedPhotos[1],
+                    // A flung-away photo is a decision about the group: keep
+                    // everything else. `pick-photos` needs at least one
+                    // keeper, so a group of one is left alone.
+                    onDiscard: { discardedId in
+                        let keep = group.photos.map(\.id).filter { $0 != discardedId }
+                        guard !keep.isEmpty else { return }
+                        viewModel.pickPhotos(keep)
+                    }
                 )
             }
         }
