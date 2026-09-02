@@ -727,8 +727,8 @@ Größenbegrenzung. Das Muster dafür steht schon im Repo
 **Stufe 2: Den Artikel freilegen.** Navigation, Werbung, Kommentare und
 Related-Blöcke blähen den Text auf und verwirren die Extraktion. Also den
 Artikelkörper isolieren (Readability-Verfahren) und die Länge deckeln. Für den
-lokalen Qwen ist das nicht Kosmetik, sondern Voraussetzung — sein Kontext ist
-klein, und Nebengeräusch verdrängt den Inhalt.
+lokalen Modell ist das keine Kosmetik: Kontext ist die knappste Ressource, und
+Nebengeräusch verdrängt den Inhalt.
 
 **Stufe 3: Extrahieren, mit Beleg.** Das Modell bekommt genau eine Aufgabe und
 ein striktes Schema: eine Liste aus *Name*, optionaler *Ortsangabe*, optionaler
@@ -954,10 +954,36 @@ nie.
 ## 11. Wenn ein Frontier-Modell zur Verfügung steht
 
 Alle bisherigen Entscheidungen sind unter einer Randbedingung gefallen: Das
-einzige verfügbare Sprachmodell ist ein lokales Qwen2.5-7B. Stünde stattdessen
+einzige verfügbare Sprachmodell läuft lokal (§11.0). Stünde stattdessen
 die Claude API mit **Opus 5** (`claude-opus-5`, 1M Kontext, $5 / $25 je Mio.
 Ein-/Ausgabe-Token) bereit, änderte sich einiges — aber weniger, als man
 zunächst vermutet, und an anderer Stelle als erwartet.
+
+### 11.0 Welches lokale Modell
+
+Der llm-service ist **modellagnostisch**: Das aktive Modell wird zur Laufzeit
+gewählt und persistiert (`load_active` / `save_active` in `llm-service/main.py`),
+nicht im Code festgelegt. Die lokale Spur ist damit schon heute austauschbar —
+was die Entscheidung aus §15.3 (zweispurig bauen) billiger macht, als sie
+klingt.
+
+**Aktuell geladen ist `gemma-4-26B-A4B-it-qat-UD-Q4_K_XL`** (Stand 2026-09-02) —
+ein instruction-tuntes Modell mit 26 Mrd. Parametern gesamt und rund 4 Mrd.
+aktiven je Token, quantisierungsbewusst trainiert und in einer dynamischen
+4-Bit-Quantisierung ausgeliefert. Es hat das früher hier dokumentierte
+Qwen2.5-7B abgelöst.
+
+**Was das für dieses Kapitel bedeutet:** Die Einschätzungen weiter unten — „für
+ein lokales Modell brüchig", „Frontier-Modell klar überlegen" — stammen aus der
+7B-Zeit und sind **nicht nachgemessen**. Ein Modell dieser Größenordnung dürfte
+beim Anfrageverständnis, bei der strukturierten Ausgabe und beim Auslesen von
+Webseiten (§9.3) deutlich näher an der API-Spur liegen, als die Tabelle in §11.1
+unterstellt. Vor jeder Entscheidung für die kostenpflichtige Spur gehört deshalb
+**erst die lokale gemessen** — sonst kauft man Qualität ein, die man schon hat.
+Zwei Größen sind dafür konkret zu prüfen: das nutzbare Kontextfenster (es
+entscheidet, ob ein ganzer Etappenvorrat für die Kuration hineinpasst) und die
+Antwortzeit auf der vorhandenen Hardware (sie entscheidet, ob das Modell im
+Verhandlungs-Chat überhaupt erträglich ist).
 
 ### 11.1 Die Trennlinie liegt schon im Konzept
 
@@ -967,7 +993,7 @@ und alles unterwegs** muss offline, sofort und verlässlich funktionieren.
 Genau entlang dieser Naht verläuft die sinnvolle Aufteilung zwischen den
 Modellen:
 
-| | lokal (Qwen) | Opus 5 (online, opt-in) |
+| | lokal | Opus 5 (online, opt-in) |
 |---|---|---|
 | Kandidaten kuratieren | Gewichtete Summe | **deutlich besser** |
 | Anfrage verstehen | brüchig | **deutlich besser** |
@@ -1005,7 +1031,7 @@ Netzaufruf ist dort keine Verbesserung, sondern ein Ausfall.
    Qualitätssprung — und ausgerechnet der billigste, weil er vorab und
    stapelweise läuft (Batch-API: halber Preis).
 2. **Anfrageverständnis.** „Mit Oma, entspannt, kein Auto" zuverlässig in
-   Constraints zu übersetzen, ist für ein 7B-Modell brüchig. Mit **Structured
+   Constraints zu übersetzen, ist für ein lokales Modell brüchig. Mit **Structured
    Outputs** (`output_config.format`) bzw. `strict: true` an den Tools kommt ein
    schemavalides Objekt zurück — genau das, was §8.2 als Chips anzeigt.
 3. **Der Verhandlungs-Chat vor der Reise.** Opus 5 könnte per Tool-Use die
@@ -1014,7 +1040,8 @@ Netzaufruf ist dort keine Verbesserung, sondern ein Ausfall.
    Laufen" wird ein Werkzeugaufruf mit sichtbarer Wirkung statt einer Umschreibung.
 4. **Dokumentenauswertung.** Fixpunkte aus OCR-Text zu ziehen — Flugzeiten,
    Check-in-Regeln im Kleingedruckten, fremdsprachige Bestätigungen — ist genau
-   die Disziplin, in der ein Frontier-Modell ein 7B klar schlägt. Pro Dokument
+   die Disziplin, in der ein Frontier-Modell ein lokales Modell klar schlägt.
+   Pro Dokument
    einmal, cachebar, nicht zeitkritisch.
 5. **Texte im Reisetagebuch.** Geringes Risiko, sichtbarer Gewinn.
 
@@ -1091,7 +1118,7 @@ iOS (SwiftUI, Feature „Trip/Planen")
 └───┬──────────────┬────────────┬──────────┬────────────┘
     │              │            │          │
  geo (PostGIS)  llm-service  Open-Meteo  routing (NEU,
- OSM-POIs,      Qwen2.5-7B   (extern,     Stufe 2)
+ OSM-POIs,      lokales LLM  (extern,     Stufe 2)
  Adressen,                    gerundete   Valhalla,
  Gebäude-                     Koordinate) GTFS optional
  geometrie
@@ -1343,7 +1370,7 @@ während der Umsetzung entstehen, gehören hier ergänzt.
    Löschen vor — vorgeschlagen, nicht ausgeführt. Mit zu löschen sind dann auch
    die abgeleiteten Daten der Region (Routing-Kacheln, §12).
 6. **Claude API — entschieden: zweispurig bauen.** Jeder Modellaufruf geht über
-   eine austauschbare Schnittstelle; lokales Qwen ist die Vorgabe, Opus 5 ein
+   eine austauschbare Schnittstelle; das lokale Modell ist die Vorgabe, Opus 5 ein
    **pro Funktion** zuschaltbarer Anbieter (§11.5 — ein globaler Schalter wäre
    die falsche Granularität). Wichtig ist, was die Abstraktion umfassen muss,
    damit sie später trägt: strukturierte Ausgabe mit Schemavalidierung,
