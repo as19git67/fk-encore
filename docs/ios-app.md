@@ -126,9 +126,20 @@ dokumentiert**:
   das neueste Jahr gerendert.
 
 ### 2.6 Suche
-- Volltext-/Natürliche-Sprache-Suche (`SearchView`, `SearchViewModel`) über
-  denselben Backend-Endpunkt wie das Web (semantisch, Ort, POI, Radius via
-  Query-Parsing). UI aktuell: einzelnes Suchfeld + Vorschläge.
+- Natürliche-Sprache-Suche (`SearchView`, `SearchViewModel`) über denselben
+  Endpunkt wie das Web (`POST /photos/search/natural`): Ort und Zeitraum
+  werden aus der Anfrage herausgeparst und als **Filter** angewendet, statt
+  als Wörter mitgesucht zu werden. „Kirchen in München von 2004 bis 2017"
+  bedeutet damit auf beiden Clients dasselbe.
+- **„Verstanden als:"-Chips** (`NaturalSearch`, `SearchParseChips`) zeigen die
+  Lesart des Servers — semantischer Rest, Ort, Zeitraum. Gleiche Regeln wie
+  `useNaturalSearch` im Web: ganze Jahre kollabieren zu „2004–2017", und der
+  semantische Chip erscheint nur, wenn tatsächlich etwas aus der Anfrage
+  herausgelöst wurde.
+- Der Endpunkt liefert nur bewertete IDs; die Zeilen kommen über den
+  Batch-Endpunkt `GET /photos/details` nach und werden wieder in die
+  Ranking-Reihenfolge gebracht.
+- Ort/POI/Radius zusätzlich über `searchByLocation` (`/photos/search/location`).
 
 ### 2.7 Feed (Aktivität, Kommentare, Reaktionen)
 - **Feed-Tab** mit Ungelesen-Badge (`FeedViewModel.unreadCount`).
@@ -250,7 +261,7 @@ Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders ·
 |---|---|---|
 | Semantisch / natürliche Sprache | ✅ | ✅ |
 | Ort / POI / Radius | ✅ | ✅ (gleiches Backend) |
-| Filter-Chips / strukturierte Filter-UI | ✅ `NaturalSearchBar` + Chips | 🔶 (einzelnes Feld) |
+| Filter-Chips / strukturierte Filter-UI | ✅ `NaturalSearchBar` + Chips | ✅ `SearchParseChips` |
 
 ### 3.7 Feed / Soziales
 | Feature | Web | iOS |
@@ -319,8 +330,10 @@ Referenz stehen, was jeweils gebaut wurde.
 7. ✅ **Mehrfachauswahl in „Alle Fotos"** inkl. Stapelaktionen – umgesetzt
    in `PhotoTimelineView` (gefilterte Flach-Ansicht) auf Basis des
    gemeinsamen `PhotoSelection`-Zustands.
-8. **Reichere Such-Filter (Chips)** – strukturierte Filter analog
-   `NaturalSearchBar`.
+8. ✅ **Reichere Such-Filter (Chips)** – die Suche geht jetzt auf
+   `/photos/search/natural` (Ort und Zeitraum filtern, statt mitgesucht zu
+   werden) und zeigt die Lesart des Servers als „Verstanden als"-Chips
+   (`NaturalSearch`, `SearchParseChips`), analog `NaturalSearchBar`.
 9. ✅ **Diashow** – umgesetzt als eigener Vollbild-Player
    (`PhotoSlideshowView`), derselbe Story-Player wie bei den Rückblicken.
    Startbar aus Album, Auswahl, Mediathek und dem Vollbild-Viewer; reine Logik
