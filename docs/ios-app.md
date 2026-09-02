@@ -230,11 +230,17 @@ dokumentiert**:
   `frontend/src/utils/collageLayouts.ts` mit derselben Tabelle (gleiche IDs,
   Namen, Seitenverhältnisse, Zellen), damit dieselben Fotos auf beiden
   Clients dieselbe Collage ergeben.
-- **Noch nichts wird gespeichert.** Es gibt keinen Collage-Endpunkt: das Web
-  rendert die Leinwand selbst und lädt das Ergebnis als gewöhnliches Foto
-  hoch (mit `X-Date-Taken` auf das älteste Quellfoto, damit die Collage neben
-  ihren Quellen einsortiert). Das On-Device-Rendern und der Upload sind
-  #1020 Etappe B, der Textüberlagerung Etappe C.
+- **Sichern** rendert die Leinwand auf dem Gerät (`CollageRenderer`,
+  `UIGraphicsImageRenderer`) und lädt das Ergebnis als gewöhnliches Foto hoch —
+  einen Collage-Endpunkt gibt es nicht, das Web macht es genauso.
+- Die Collage erbt das Aufnahmedatum ihres **ältesten** Quellfotos, per
+  `X-Date-Taken`. Dieser Header **überschreibt** das EXIF der Datei, anders
+  als `X-Captured-At`, das nur einspringt, wenn EXIF nichts hergibt: eine
+  frisch gerenderte Collage trägt „jetzt" in den Pixeln und würde sonst weit
+  weg von ihren Quellfotos einsortiert.
+- Zellkanten werden nach außen auf ganze Pixel gerundet, damit zwischen zwei
+  Feldern kein Haarstrich Hintergrund stehen bleibt.
+- Noch offen (#1020 Etappe C): die Textüberlagerung.
 
 ### 2.7 Feed (Aktivität, Kommentare, Reaktionen)
 - **Feed-Tab** mit Ungelesen-Badge (`FeedViewModel.unreadCount`).
@@ -323,7 +329,7 @@ Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders ·
 | Karte über eine Sammlung (Stopps/Trip) | ✅ `TripMap` | ✅ `PhotoMapView` (Pins, Zeitleiste, Zoom-Clustering) |
 | Reindex / Metadaten aktualisieren | ✅ | ❌ |
 | Nicht-destruktive Transformationen (Crop/Rotate) | ✅ `PhotoTransformEditor` | 🔶 `PhotoTransformsView` (Ansehen/Anwenden/Übernehmen/Zurücksetzen; Cropper und Regler offen) |
-| Collage erstellen | ✅ `CollageDialog` | 🔶 `CollageView` (Layouts + Vorschau; Rendern/Upload offen) |
+| Collage erstellen | ✅ `CollageDialog` | 🔶 `CollageView` (Layouts, Vorschau, Rendern + Upload; Textüberlagerung offen) |
 
 ### 3.3 Metadaten
 | Feature | Web | iOS |
