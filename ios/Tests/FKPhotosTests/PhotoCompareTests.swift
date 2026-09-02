@@ -338,4 +338,51 @@ final class PhotoCompareTests: XCTestCase {
         )
         XCTAssertEqual(Double(point.y), 0, accuracy: 0.001)
     }
+
+    // MARK: - Matching the two panes
+
+    func testTheSamePersonInBothPhotosLinesUpOnThatPerson() {
+        let left = [
+            PhotoCompare.Candidate(bbox: bbox(x: 0.1, y: 0.1, w: 0.1, h: 0.1), personId: 7),
+            PhotoCompare.Candidate(bbox: bbox(x: 0.5, y: 0.5, w: 0.3, h: 0.3), personId: 9)
+        ]
+        let right = [
+            PhotoCompare.Candidate(bbox: bbox(x: 0.6, y: 0.2, w: 0.1, h: 0.1), personId: 7)
+        ]
+        let matched = PhotoCompare.matchedBoxes(personId: 7, first: left, second: right)
+        XCTAssertEqual(matched?.first.x, 0.1)
+        XCTAssertEqual(matched?.second.x, 0.6)
+    }
+
+    /// The reported bug: the person is only in one of the two photos, so the
+    /// pair used to resolve to nothing and neither pane zoomed — while the
+    /// toolbar still offered „Ganzes Bild". Each side falls back to its own
+    /// subject instead.
+    func testAPersonMissingFromTheOtherPhotoFallsBackToEachPrimaryFace() {
+        let left = [PhotoCompare.Candidate(bbox: bbox(x: 0.1, y: 0.1, w: 0.2, h: 0.2), personId: 7)]
+        let right = [PhotoCompare.Candidate(bbox: bbox(x: 0.6, y: 0.6, w: 0.3, h: 0.3))]
+        let matched = PhotoCompare.matchedBoxes(personId: 7, first: left, second: right)
+        XCTAssertEqual(matched?.first.x, 0.1)
+        XCTAssertEqual(matched?.second.x, 0.6)
+    }
+
+    func testAnUnnamedTapUsesEachPhotosPrimaryFace() {
+        let left = [
+            PhotoCompare.Candidate(bbox: bbox(x: 0.1, y: 0.1, w: 0.1, h: 0.1), quality: 0.2),
+            PhotoCompare.Candidate(bbox: bbox(x: 0.4, y: 0.4, w: 0.3, h: 0.3), quality: 0.9)
+        ]
+        let right = [PhotoCompare.Candidate(bbox: bbox(x: 0.7, y: 0.7, w: 0.2, h: 0.2))]
+        let matched = PhotoCompare.matchedBoxes(personId: nil, first: left, second: right)
+        XCTAssertEqual(matched?.first.x, 0.4)
+        XCTAssertEqual(matched?.second.x, 0.7)
+    }
+
+    /// A photo with no usable face at all still has nothing to zoom to, and
+    /// that has to stay a nil — the caller shows the plain fit.
+    func testNoUsableFaceOnOneSideMatchesNothing() {
+        let left = [PhotoCompare.Candidate(bbox: bbox(), personId: 7)]
+        let right: [PhotoCompare.Candidate] = []
+        XCTAssertNil(PhotoCompare.matchedBoxes(personId: 7, first: left, second: right))
+        XCTAssertNil(PhotoCompare.matchedBoxes(personId: nil, first: left, second: right))
+    }
 }
