@@ -31,6 +31,15 @@ enum PhotoStops {
     /// not shatter into dozens of single-photo stops.
     static let minRadiusScale: Double = 0.25
 
+    /// Floor for the zoom-driven radius. GPS jitter is 5–10 m, so without this
+    /// a burst taken at one spot shatters into single-photo stops once the map
+    /// is zoomed all the way in.
+    static let minZoomClusterRadiusMeters: Double = 25
+
+    /// Two pins closer than this on screen overlap, which is what the
+    /// zoom-driven radius is derived from.
+    static let pinOverlapPoints: Double = 60
+
     // MARK: - Types
 
     struct Coordinate: Equatable, Sendable {
@@ -184,6 +193,50 @@ enum PhotoStops {
         return (clusterIncludeMeters * scale, minClusterSeparationMeters * scale)
     }
 
+    /// The radii for a caller-supplied radius — the map's "pins closer than
+    /// this overlap" threshold, projected to meters at the current zoom.
+    ///
+    /// This is what keeps pins and timeline cards 1:1 at every zoom level:
+    /// zooming in splits stops, zooming out merges them, and both views read
+    /// the same clustering pass. The include/separation ratio mirrors the
+    /// static defaults (400/600).
+    static func radii(forZoomRadius radiusMeters: Double) -> (include: Double, separation: Double) {
+        let separation = max(minZoomClusterRadiusMeters, radiusMeters)
+        return (separation * (clusterIncludeMeters / minClusterSeparationMeters), separation)
+    }
+
+    /// How many meters one screen point covers, from the span the map is
+    /// showing and how wide it is drawn.
+    ///
+    /// A degree of longitude shrinks with the cosine of the latitude, which is
+    /// the same correction the web makes via the Web Mercator
+    /// `156543.03 · cos(lat) / 2^zoom`; deriving it from the visible region
+    /// avoids needing a "zoom level" MapKit does not hand out.
+    static func metersPerPoint(
+        longitudeDelta: Double,
+        latitude: Double,
+        widthInPoints: Double
+    ) -> Double? {
+        guard widthInPoints > 0, longitudeDelta > 0 else { return nil }
+        let metersPerDegree = 111_320 * cos(latitude * .pi / 180)
+        guard metersPerDegree > 0 else { return nil }
+        return longitudeDelta * metersPerDegree / widthInPoints
+    }
+
+    /// The cluster radius for what the map is currently showing: the distance
+    /// at which two pins would start to overlap.
+    static func clusterRadius(
+        longitudeDelta: Double,
+        latitude: Double,
+        widthInPoints: Double
+    ) -> Double? {
+        metersPerPoint(
+            longitudeDelta: longitudeDelta,
+            latitude: latitude,
+            widthInPoints: widthInPoints
+        ).map { $0 * pinOverlapPoints }
+    }
+
     // MARK: - Clustering
 
     private struct Centroid {
@@ -277,8 +330,20 @@ enum PhotoStops {
     /// chronological order, so walking the list traces the trip.
     ///
     /// Photos without coordinates are not on a map and are dropped.
+    ///
+    /// - Parameter clusterRadiusMeters: when given, drives the clustering
+    ///   instead of the day-span heuristic — the map passes what its current
+    ///   zoom makes two pins overlap at, so pins and timeline cards stay 1:1.
+    ///   Nil before the map has a view, and in any caller that just wants the
+    ///   stops.
+    ///
+    /// - Important: stop ids are positions in *this* result. A different
+    ///   radius produces a different set, so nothing may hold on to an id
+    ///   across a re-cluster — anchor on a photo id and re-resolve with
+    ///   `stop(containing:in:)`.
     static func stops(
         for photos: [PhotoWithCuration],
+        clusterRadiusMeters: Double? = nil,
         calendar: Calendar = .current
     ) -> [Stop] {
         var byDay: [String: [(photo: PhotoWithCuration, coordinate: Coordinate)]] = [:]
@@ -292,7 +357,8 @@ enum PhotoStops {
         var nextId = 0
         for day in byDay.keys.sorted() {
             let entries = byDay[day]!
-            let (include, separation) = radii(forDaySpan: span(of: entries.map(\.coordinate)))
+            let (include, separation) = clusterRadiusMeters.map(radii(forZoomRadius:))
+                ?? radii(forDaySpan: span(of: entries.map(\.coordinate)))
             var clusters = clusterDay(entries, include: include, separation: separation)
             // Within a day, order stops by their earliest photo so the path
             // between them follows the movement rather than the merge order.
@@ -326,6 +392,15 @@ enum PhotoStops {
     /// Stops grouped by their day.
     static func byDay(_ stops: [Stop]) -> [String: [Stop]] {
         Dictionary(grouping: stops, by: \.day)
+    }
+
+    /// The stop a photo ended up in.
+    ///
+    /// A re-cluster renumbers every stop, so a selection cannot be an id — it
+    /// is a photo, and this finds where that photo lives now. The web does the
+    /// same with its `selectedAnchorPhotoId`.
+    static func stop(containing photoId: Int, in stops: [Stop]) -> Stop? {
+        stops.first { $0.photos.contains { $0.id == photoId } }
     }
 
     // MARK: - Timeline
@@ -372,15 +447,19 @@ enum PhotoStops {
     /// chronological run, led by an overview card, with same-day stops sharing
     /// a colour and the first of each day marked so the boundaries stay
     /// readable. This produces exactly that list.
+    /// The overview card's id. Stop ids count up from zero, so a negative one
+    /// can never collide with them.
+    static let overviewEntryId = -1
+
     enum TimelineEntry: Identifiable, Sendable {
         case overview(dayCount: Int)
         case stop(Stop, isFirstOfDay: Bool, color: String)
 
-        /// Distinct across the two cases: the overview card is `-1`, stops
-        /// carry their own id.
+        /// Distinct across the two cases: the overview card has its own
+        /// reserved id, stops carry theirs.
         var id: Int {
             switch self {
-            case .overview: return -1
+            case .overview: return PhotoStops.overviewEntryId
             case .stop(let stop, _, _): return stop.id
             }
         }
