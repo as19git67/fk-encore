@@ -65,7 +65,7 @@ struct PhotoMonthGridView: View {
                         ForEach(photos.indices, id: \.self) { index in
                             let photo = photos[index]
                             let isFav = (curationOverrides[photo.id] ?? photo.curation_status) == .favorite
-                            PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop)
+                            PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop, photoId: photo.id)
                                 .overlay(alignment: .topLeading) {
                                     if isSelecting {
                                         SelectionCheckmark(isSelected: selectedIds.contains(photo.id))

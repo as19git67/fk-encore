@@ -173,6 +173,10 @@ final class PhotoRecipeEditorViewModel {
             recipe = PhotoRecipe.Recipe(row)
             saved = recipe
             isDirty = false
+            // Every grid in the app reads this to decide whether to load the
+            // original or the rendered version, and the revision bump inside
+            // is what stops the disk cache serving the pre-edit pixels.
+            TransformedPhotosIndex.shared.mark(photoId: photoId, hasRecipe: true)
             return true
         } catch {
             errorMessage = error.localizedDescription

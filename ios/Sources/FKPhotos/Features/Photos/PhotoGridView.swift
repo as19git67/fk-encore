@@ -44,7 +44,7 @@ struct PhotoGridView: View {
                 } else {
                     LazyVGrid(columns: columns, spacing: 2) {
                         ForEach(viewModel.photos) { photo in
-                            PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop)
+                            PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop, photoId: photo.id)
                                 .overlay(alignment: .topLeading) {
                                     if isSelecting {
                                         SelectionCheckmark(isSelected: selectedIds.contains(photo.id))
@@ -241,10 +241,22 @@ struct PhotoGridView: View {
 struct PhotoThumbnailView: View {
     @State private var loader: ThumbnailLoader
     let autoCrop: AutoCrop?
+    /// nil for a photo known only by filename — a cover row, a face row. Those
+    /// keep showing the original; with an id, a photo the user has edited is
+    /// shown through their recipe (#1085 §1a).
+    let photoId: Int?
 
-    init(filename: String, autoCrop: AutoCrop? = nil) {
-        _loader = State(initialValue: ThumbnailLoader(filename: filename))
+    init(filename: String, autoCrop: AutoCrop? = nil, photoId: Int? = nil) {
+        _loader = State(initialValue: ThumbnailLoader(filename: filename, photoId: photoId))
         self.autoCrop = autoCrop
+        self.photoId = photoId
+    }
+
+    /// The AI's focal point is of the original frame, so it is meaningless
+    /// once the user has framed the photo themselves — their crop *is* the
+    /// answer to „what is this photo of".
+    private var effectiveAutoCrop: AutoCrop? {
+        loader.isRecipeRendered ? nil : autoCrop
     }
 
     var body: some View {
@@ -292,8 +304,9 @@ struct PhotoThumbnailView: View {
 
         // Desired shift to bring focal point to the container centre.
         // Formula: offset = renderedDim × (0.5 − focal), positive = shift image right/down
-        let cropX = CGFloat(autoCrop?.x ?? 0.5)
-        let cropY = CGFloat(autoCrop?.y ?? 0.5)
+        let focal = effectiveAutoCrop
+        let cropX = CGFloat(focal?.x ?? 0.5)
+        let cropY = CGFloat(focal?.y ?? 0.5)
         let rawX = renderedW * (0.5 - cropX)
         let rawY = renderedH * (0.5 - cropY)
 

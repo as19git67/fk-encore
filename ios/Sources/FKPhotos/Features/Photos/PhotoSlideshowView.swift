@@ -132,7 +132,7 @@ struct PhotoSlideshowView: View {
         }
         .statusBarHidden(true)
         .task {
-            store.reset(filenames: photos.map(\.filename))
+            store.reset(photos: photos.map(SlideshowImageStore.Item.init))
             store.prefetch(around: 0, ahead: prefetchAhead)
             startTicker()
             guard !photos.isEmpty else { return }

@@ -228,7 +228,7 @@ private struct ReviewPreviewPage: View {
     init(photo: ReviewQueuePhoto, isPicked: Bool) {
         self.photo = photo
         self.isPicked = isPicked
-        _loader = State(initialValue: ThumbnailLoader(filename: photo.filename))
+        _loader = State(initialValue: ThumbnailLoader(filename: photo.filename, photoId: photo.id))
     }
 
     var body: some View {

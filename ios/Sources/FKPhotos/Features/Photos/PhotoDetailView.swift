@@ -96,7 +96,7 @@ struct PhotoDetailView: View {
         .task {
             await loadPhotoDetails()
             if let filename = photo?.filename {
-                let l = ThumbnailLoader(filename: filename)
+                let l = ThumbnailLoader(filename: filename, photoId: photoId)
                 loader = l
                 await l.load()
             }

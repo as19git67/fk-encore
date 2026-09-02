@@ -226,13 +226,18 @@ struct CollageView: View {
     /// otherwise decode nine full images to fill a row of six swatches. The
     /// images come from the same cache the preview thumbnails use, so this is
     /// usually free.
+    @MainActor
     private func loadPalette() async {
         var images: [UIImage] = []
+        await TransformedPhotosIndex.shared.load()
         for photo in photos.prefix(3) {
-            if let cached = await ImageCache.shared.image(forKey: "photo-\(photo.filename)") {
+            let source = TransformedPhotosIndex.shared.request(
+                photoId: photo.id, filename: photo.filename
+            )
+            if let cached = await ImageCache.shared.image(forKey: source.cacheKey) {
                 images.append(cached)
             } else if let data = try? await APIClient.shared.downloadData(
-                "/photos/file/\(photo.filename)"
+                source.path, query: source.query.isEmpty ? nil : source.query
             ), let image = UIImage(data: data) {
                 images.append(image)
             }
@@ -256,12 +261,24 @@ struct CollageView: View {
         defer { isSaving = false }
 
         var tiles: [CollageRenderer.Tile] = []
+        await TransformedPhotosIndex.shared.load()
         for index in order {
             let photo = photos[index]
+            // Full resolution: no `w`, so an edited photo comes back rendered
+            // through its recipe at full size, exactly as the preview tile
+            // showed it.
+            let source = TransformedPhotosIndex.shared.request(
+                photoId: photo.id, filename: photo.filename
+            )
             guard let data = try? await APIClient.shared.downloadData(
-                "/photos/file/\(photo.filename)"
+                source.path, query: source.query.isEmpty ? nil : source.query
             ), let image = UIImage(data: data) else { continue }
-            tiles.append(CollageRenderer.Tile(image: image, focal: photo.auto_crop.map { CGPoint(x: $0.x, y: $0.y) }))
+            // A recipe-rendered photo is already framed by its owner; the AI's
+            // focal point belongs to the original frame and would re-shift it.
+            let focal = TransformedPhotosIndex.shared.hasRecipe(photo.id)
+                ? nil
+                : photo.auto_crop.map { CGPoint(x: $0.x, y: $0.y) }
+            tiles.append(CollageRenderer.Tile(image: image, focal: focal))
         }
 
         guard !tiles.isEmpty,
@@ -389,7 +406,7 @@ private struct CollageCanvas: View {
     ) -> some View {
         let width = cell.width * canvas.width
         let height = cell.height * canvas.height
-        return PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop)
+        return PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop, photoId: photo.id)
             .frame(width: width, height: height)
             .clipped()
             .overlay {
