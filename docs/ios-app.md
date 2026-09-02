@@ -236,9 +236,20 @@ dokumentiert**:
   Gruppenbild sagt weniger als keines.
 - Rahmenstärke und Beschriftung skalieren gegen den Zoom, damit eine 2-pt-Linie
   beim Hineinzoomen nicht zum Balken wird.
-- Die Auswahl selbst bleibt beim `ReviewSelectionSheet` — diese Ansicht zeigt
-  nur. Noch offen (#1021 Etappe B): Qualitäts-Aufschlüsselung und
-  Wisch-zum-Verwerfen.
+- **Wisch-zum-Verwerfen** (`CompareSwipe`, Portierung von
+  `frontend/src/utils/compareSwipe.ts`): ein Foto vom Bildschirm zu werfen
+  verwirft es — die Gruppe behält alle übrigen. Jede Richtung zählt **außer
+  der, die auf das Partnerfoto zeigt**: die beiden ineinander zu schieben sagt
+  nichts darüber aus, welches weg soll. Welche Richtung das ist, hängt an der
+  Anordnung — im Hochformat übereinander (unten/oben), im Querformat
+  nebeneinander (rechts/links).
+- Ein Wisch braucht 64 pt Weg (derselbe Wert wie im Web), damit ein
+  Streifschuss kein Foto wegwirft; im gezoomten Zustand ist eine Ziehbewegung
+  Verschieben und löst nichts aus.
+- Die vollständige Auswahl bleibt beim `ReviewSelectionSheet`. Noch offen
+  (#1021 Etappe B): die Qualitäts-Aufschlüsselung — dafür fehlt
+  `ai_quality_details` auf `ReviewQueuePhoto`, das heute nur den Gesamtwert
+  trägt.
 
 ### 2.6d Collage (Layout-Hälfte)
 
@@ -469,8 +480,8 @@ Referenz stehen, was jeweils gebaut wurde.
 11. **Collage-Erstellung**.
 12. 🔶 **Fotos vergleichen** – umgesetzt als `PhotoCompareView` im
     Gruppen-Review: zwei Aufnahmen nebeneinander, ein Tipp auf ein Gesicht
-    zoomt beide gleich groß darauf (#1021 Etappe A). Offen: Schärfe-Overlay
-    und Qualitäts-Aufschlüsselung.
+    zoomt beide gleich groß darauf (#1021 Etappe A), Schärfe-Overlay und
+    Wisch-zum-Verwerfen (Etappe B). Offen: Qualitäts-Aufschlüsselung.
 
 ### Bewusst **nicht** portieren (Web sinnvoller)
 - Vollständige Datenverwaltung, geplante Jobs, Purge → bleibt Web-/Admin-Domäne.

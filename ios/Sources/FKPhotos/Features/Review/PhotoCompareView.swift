@@ -12,11 +12,16 @@ import UIKit
 /// dimensions, so a pane cannot work its own out alone without the two halves
 /// disagreeing.
 ///
-/// Choosing which to keep stays with `ReviewSelectionSheet`; the sharpness
-/// overlay and the quality table are stage B.
+/// A photo can also be thrown off the screen to drop it (`CompareSwipe`),
+/// which is the web's fling gesture — every direction discards except the one
+/// pointing at the partner photo. The full keep set still belongs to
+/// `ReviewSelectionSheet`; the quality table is the rest of stage B.
 struct PhotoCompareView: View {
     let first: ReviewQueuePhoto
     let second: ReviewQueuePhoto
+    /// Called with the photo that was flung away. The caller decides what a
+    /// discard means for the group — this view only reports the gesture.
+    var onDiscard: ((Int) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
 
@@ -29,6 +34,15 @@ struct PhotoCompareView: View {
     @State private var showPeaking = true
     /// What both photos are zoomed to. Nil is the plain fit.
     @State private var focus: Focus?
+    /// The photo currently flying off the screen, and where to. Set for the
+    /// length of the animation, which is also what keeps a second fling from
+    /// starting while the first is still in the air.
+    @State private var flung: Flung?
+
+    private struct Flung: Equatable {
+        let id: Int
+        let offset: CGSize
+    }
 
     /// What the two sides line up on.
     private enum Focus: Equatable {
@@ -60,7 +74,12 @@ struct PhotoCompareView: View {
                         zoom: zooms.first,
                         faces: showPeaking ? (faces[first.id] ?? []) : [],
                         sharpness: sharpness[first.id] ?? [],
-                        onTap: { handleTap(at: $0, photo: first, paneSize: paneSize) }
+                        flungOffset: flung?.id == first.id ? flung?.offset : nil,
+                        onTap: { handleTap(at: $0, photo: first, paneSize: paneSize) },
+                        onDrag: { handleFling(
+                            $0, photo: first, indexInPair: 0,
+                            isPortrait: isPortrait, screen: geo.size
+                        ) }
                     )
                     ComparePane(
                         photo: second,
@@ -69,7 +88,12 @@ struct PhotoCompareView: View {
                         zoom: zooms.second,
                         faces: showPeaking ? (faces[second.id] ?? []) : [],
                         sharpness: sharpness[second.id] ?? [],
-                        onTap: { handleTap(at: $0, photo: second, paneSize: paneSize) }
+                        flungOffset: flung?.id == second.id ? flung?.offset : nil,
+                        onTap: { handleTap(at: $0, photo: second, paneSize: paneSize) },
+                        onDrag: { handleFling(
+                            $0, photo: second, indexInPair: 1,
+                            isPortrait: isPortrait, screen: geo.size
+                        ) }
                     )
                 }
             }
@@ -162,6 +186,44 @@ struct PhotoCompareView: View {
         focus = candidate.personId.map(Focus.person(id:)) ?? .primary
     }
 
+    /// A drag that ended: discard the photo if it was thrown decisively away
+    /// from its partner, otherwise leave it be.
+    ///
+    /// Skipped while zoomed in, where a drag means panning, and while another
+    /// tile is already on its way out.
+    private func handleFling(
+        _ translation: CGSize,
+        photo: ReviewQueuePhoto,
+        indexInPair: Int,
+        isPortrait: Bool,
+        screen: CGSize
+    ) {
+        guard flung == nil, focus == nil else { return }
+        guard let direction = CompareSwipe.discardDirection(
+            indexInPair: indexInPair,
+            isPortrait: isPortrait,
+            dx: Double(translation.width),
+            dy: Double(translation.height)
+        ) else { return }
+
+        withAnimation(.easeIn(duration: CompareSwipe.animationDuration)) {
+            flung = Flung(
+                id: photo.id,
+                offset: CompareSwipe.offscreenOffset(direction, screen: screen)
+            )
+        }
+        // The decision waits for the tile to actually leave, so the discard is
+        // something the user watches happen rather than a photo that blinks out.
+        let id = photo.id
+        Task {
+            try? await Task.sleep(
+                nanoseconds: UInt64(CompareSwipe.animationDuration * 1_000_000_000)
+            )
+            onDiscard?(id)
+            dismiss()
+        }
+    }
+
     // MARK: - Loading
 
     private func load() async {
@@ -208,7 +270,11 @@ private struct ComparePane: View {
     let zoom: PhotoCompare.Zoom?
     let faces: [PhotoCompare.Candidate]
     let sharpness: [Double?]
+    /// Where this pane has been thrown, if it is being discarded.
+    let flungOffset: CGSize?
     let onTap: (CGPoint) -> Void
+    /// The total translation of a finished drag.
+    let onDrag: (CGSize) -> Void
 
     var body: some View {
         ZStack {
@@ -228,7 +294,15 @@ private struct ComparePane: View {
         .frame(width: paneSize.width, height: paneSize.height)
         .clipped()
         .contentShape(Rectangle())
+        .offset(flungOffset ?? .zero)
+        .opacity(flungOffset == nil ? 1 : 0)
         .onTapGesture { location in onTap(location) }
+        // Simultaneous so a fling does not swallow the tap that zooms to a
+        // face; `CompareSwipe` decides which of the two a gesture was.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 20)
+                .onEnded { onDrag($0.translation) }
+        )
         .overlay(alignment: .topLeading) {
             if let percent = photo.qualityPercent {
                 Text("\(percent) %")
