@@ -566,6 +566,11 @@ final class PhotoStopsTimelineTests: XCTestCase {
         XCTAssertTrue(PhotoStops.timeline(for: []).isEmpty)
     }
 
+    func testTheOverviewIdIsReserved() {
+        // Stop ids count up from zero, so the overview card must sit below.
+        XCTAssertLessThan(PhotoStops.overviewEntryId, 0)
+    }
+
     // MARK: - Card date
 
     func testACardCarriesItsStopsDate() {
@@ -575,5 +580,203 @@ final class PhotoStopsTimelineTests: XCTestCase {
             timeZone: TimeZone(identifier: "Europe/Berlin")!
         )
         XCTAssertTrue(label.hasPrefix("01."), "expected 01. …, got \(label)")
+    }
+}
+
+/// Clustering driven by what the map is showing, rather than by the day-span
+/// heuristic — zooming in splits stops, zooming out merges them.
+final class PhotoStopsZoomTests: XCTestCase {
+
+    private let calendar: Calendar = {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "Europe/Berlin")!
+        return cal
+    }()
+
+    private func photo(id: Int, lat: Double, lon: Double, takenAt: String) -> PhotoWithCuration {
+        PhotoWithCuration(
+            id: id,
+            user_id: 1,
+            filename: "photo-\(id).jpg",
+            original_name: "photo-\(id).jpg",
+            mime_type: "image/jpeg",
+            size: 0,
+            hash: nil,
+            taken_at: takenAt,
+            created_at: takenAt,
+            latitude: lat,
+            longitude: lon,
+            location_name: nil,
+            location_city: nil,
+            location_country: nil,
+            ai_quality_score: nil,
+            auto_crop: nil,
+            curation_status: .visible,
+            description: nil,
+            keywords: nil
+        )
+    }
+
+    private func latOffset(_ meters: Double) -> Double { meters / 111_320 }
+
+    /// Four photos on one day, each 500 m from the last.
+    private func fourStopsApart() -> [PhotoWithCuration] {
+        (0..<4).map { i in
+            photo(
+                id: i + 1,
+                lat: 48.0 + latOffset(Double(i) * 500),
+                lon: 11.0,
+                takenAt: "2024-06-01T1\(i):00:00.000Z"
+            )
+        }
+    }
+
+    // MARK: - Radii
+
+    func testTheZoomRadiusBecomesTheSeparation() {
+        let (include, separation) = PhotoStops.radii(forZoomRadius: 1_200)
+        XCTAssertEqual(separation, 1_200, accuracy: 0.001)
+        // Same include/separation ratio as the static defaults.
+        XCTAssertEqual(
+            include / separation,
+            PhotoStops.clusterIncludeMeters / PhotoStops.minClusterSeparationMeters,
+            accuracy: 0.001
+        )
+    }
+
+    func testZoomingAllTheWayInStopsAtTheFloor() {
+        // Otherwise GPS jitter shatters a burst into single-photo stops.
+        let (_, separation) = PhotoStops.radii(forZoomRadius: 1)
+        XCTAssertEqual(separation, PhotoStops.minZoomClusterRadiusMeters, accuracy: 0.001)
+    }
+
+    // MARK: - Projection
+
+    func testAWiderSpanOverTheSameScreenMeansMoreMetersPerPoint() throws {
+        let narrow = try XCTUnwrap(
+            PhotoStops.metersPerPoint(longitudeDelta: 0.01, latitude: 48, widthInPoints: 400)
+        )
+        let wide = try XCTUnwrap(
+            PhotoStops.metersPerPoint(longitudeDelta: 0.1, latitude: 48, widthInPoints: 400)
+        )
+        XCTAssertEqual(wide / narrow, 10, accuracy: 0.01)
+    }
+
+    func testADegreeOfLongitudeShrinksTowardsThePoles() throws {
+        let equator = try XCTUnwrap(
+            PhotoStops.metersPerPoint(longitudeDelta: 1, latitude: 0, widthInPoints: 400)
+        )
+        let north = try XCTUnwrap(
+            PhotoStops.metersPerPoint(longitudeDelta: 1, latitude: 60, widthInPoints: 400)
+        )
+        // cos(60°) = 0.5.
+        XCTAssertEqual(north / equator, 0.5, accuracy: 0.01)
+    }
+
+    func testAMapWithNoSizeOrNoSpanHasNoScale() {
+        XCTAssertNil(PhotoStops.metersPerPoint(longitudeDelta: 0.01, latitude: 48, widthInPoints: 0))
+        XCTAssertNil(PhotoStops.metersPerPoint(longitudeDelta: 0, latitude: 48, widthInPoints: 400))
+    }
+
+    func testTheClusterRadiusIsThePinOverlapInMeters() throws {
+        let perPoint = try XCTUnwrap(
+            PhotoStops.metersPerPoint(longitudeDelta: 0.05, latitude: 48, widthInPoints: 390)
+        )
+        let radius = try XCTUnwrap(
+            PhotoStops.clusterRadius(longitudeDelta: 0.05, latitude: 48, widthInPoints: 390)
+        )
+        XCTAssertEqual(radius, perPoint * PhotoStops.pinOverlapPoints, accuracy: 0.001)
+    }
+
+    // MARK: - Clustering at a radius
+
+    func testZoomedOutTheStopsMergeIntoOne() {
+        // A radius wide enough to swallow all four spots.
+        let stops = PhotoStops.stops(
+            for: fourStopsApart(),
+            clusterRadiusMeters: 5_000,
+            calendar: calendar
+        )
+        XCTAssertEqual(stops.count, 1)
+        XCTAssertEqual(stops.first?.photos.count, 4)
+    }
+
+    func testZoomedInTheyBecomeSeparateStops() {
+        // Well below the 500 m gaps.
+        let stops = PhotoStops.stops(
+            for: fourStopsApart(),
+            clusterRadiusMeters: 50,
+            calendar: calendar
+        )
+        XCTAssertEqual(stops.count, 4)
+    }
+
+    func testZoomingInNeverLosesAPhoto() {
+        let photos = fourStopsApart()
+        for radius in [30.0, 100, 300, 700, 2_000, 10_000] {
+            let stops = PhotoStops.stops(
+                for: photos,
+                clusterRadiusMeters: radius,
+                calendar: calendar
+            )
+            let placed = stops.flatMap { $0.photos.map(\.id) }
+            XCTAssertEqual(Set(placed), Set(photos.map(\.id)), "radius \(radius)")
+            XCTAssertEqual(placed.count, photos.count, "radius \(radius): no duplicates")
+        }
+    }
+
+    func testTighterRadiiNeverYieldFewerStops() {
+        let photos = fourStopsApart()
+        var previous = 0
+        for radius in [10_000.0, 2_000, 700, 300, 100, 30] {
+            let count = PhotoStops.stops(
+                for: photos,
+                clusterRadiusMeters: radius,
+                calendar: calendar
+            ).count
+            XCTAssertGreaterThanOrEqual(count, previous, "radius \(radius) split fewer than a wider one")
+            previous = count
+        }
+    }
+
+    func testWithoutARadiusTheDaySpanHeuristicStillDecides() {
+        let photos = fourStopsApart()
+        let heuristic = PhotoStops.stops(for: photos, calendar: calendar)
+        let explicit = PhotoStops.stops(
+            for: photos,
+            clusterRadiusMeters: nil,
+            calendar: calendar
+        )
+        XCTAssertEqual(heuristic.count, explicit.count)
+    }
+
+    // MARK: - Anchoring
+
+    func testAPhotoFindsTheStopItLandedIn() throws {
+        let stops = PhotoStops.stops(
+            for: fourStopsApart(),
+            clusterRadiusMeters: 50,
+            calendar: calendar
+        )
+        let stop = try XCTUnwrap(PhotoStops.stop(containing: 3, in: stops))
+        XCTAssertTrue(stop.photos.contains { $0.id == 3 })
+    }
+
+    func testAnAnchorSurvivesAReclusterEvenThoughIdsDoNot() throws {
+        let photos = fourStopsApart()
+        let zoomedIn = PhotoStops.stops(for: photos, clusterRadiusMeters: 50, calendar: calendar)
+        let zoomedOut = PhotoStops.stops(for: photos, clusterRadiusMeters: 5_000, calendar: calendar)
+
+        // The stop ids genuinely differ between the two passes…
+        XCTAssertNotEqual(zoomedIn.count, zoomedOut.count)
+        // …but the photo is found in both, which is why the selection anchors
+        // on it rather than on an id.
+        XCTAssertNotNil(PhotoStops.stop(containing: 4, in: zoomedIn))
+        XCTAssertNotNil(PhotoStops.stop(containing: 4, in: zoomedOut))
+    }
+
+    func testAPhotoThatIsNotThereAnchorsNothing() {
+        let stops = PhotoStops.stops(for: fourStopsApart(), calendar: calendar)
+        XCTAssertNil(PhotoStops.stop(containing: 999, in: stops))
     }
 }

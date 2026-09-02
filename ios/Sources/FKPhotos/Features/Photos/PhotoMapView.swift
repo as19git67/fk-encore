@@ -3,19 +3,26 @@ import SwiftUI
 
 /// A map over a photo collection, with the trip's stops as a strip below it.
 ///
-/// The web's `TripMap` counterpart (#1016, stages A and B). The grouping rules
-/// live in `PhotoStops`, shared with the web via the same constants; this view
-/// draws them and owns the selection.
+/// The web's `TripMap` counterpart (#1016). The grouping rules live in
+/// `PhotoStops`, shared with the web via the same constants; this view draws
+/// them and owns the selection.
 ///
-/// One source of truth, as on the web: `selection`. The overview entry shows
-/// the whole trip — one pin per region, the biggest hops between them. Picking
-/// a stop shows *that stop's day*, so the neighbours stay visible, centres the
-/// map on it and highlights both its pin and its card.
+/// Two things follow the web's design closely enough to be worth naming:
 ///
-/// Not here yet: pins that re-split as the map zooms in (#1016 stage C).
+/// **The zoom drives the clustering.** What counts as one stop is whatever
+/// would fit under one pin at the current zoom, so zooming in splits stops and
+/// zooming out merges them, with the strip below following exactly — pins and
+/// cards stay 1:1 because they read one clustering pass.
+///
+/// **The selection is a photo, not a stop.** Re-clustering renumbers every
+/// stop, so an id held across a zoom would point at something else. The
+/// selection anchors on a photo id and the stop is re-resolved from it, as the
+/// web does with `selectedAnchorPhotoId`.
 struct PhotoMapView: View {
     /// Shown as the navigation title — an album's name, usually.
     let title: String
+
+    private let photos: [PhotoWithCuration]
 
     /// What one pin stands for — a stop, or a whole region in overview mode.
     struct Pin: Identifiable {
@@ -26,58 +33,66 @@ struct PhotoMapView: View {
         let coverPhoto: PhotoWithCuration
     }
 
-    /// The overview entry, or one stop.
+    /// The overview entry, or the stop a photo is in.
     enum Selection: Equatable {
         case overview
-        case stop(id: Int)
+        case stop(anchorPhotoId: Int)
     }
 
-    /// Clustered once, in `init`. Both clustering passes are quadratic in the
-    /// number of stops and `body` reads the results several times over, so
-    /// computing them per render would redo that work on every pan and zoom —
-    /// neither of which changes the grouping.
-    private let stops: [PhotoStops.Stop]
-    private let stopsById: [Int: PhotoStops.Stop]
-    private let stopsByDay: [String: [PhotoStops.Stop]]
-    private let entries: [PhotoStops.TimelineEntry]
-    private let overviewPins: [Pin]
-    private let tripJumps: [PhotoStops.Jump]
+    /// Everything one clustering pass yields. Held together because they are
+    /// computed together: the overview merge is quadratic in the number of
+    /// stops and the strip sorts the days, so reading them as computed
+    /// properties would redo that work on every render — for a pan, a tap, a
+    /// scroll. They change only when the radius does.
+    private struct Clustered {
+        var stops: [PhotoStops.Stop] = []
+        var entries: [PhotoStops.TimelineEntry] = []
+        var overviewPins: [Pin] = []
+        var jumps: [PhotoStops.Jump] = []
 
+        init() {}
+
+        init(stops: [PhotoStops.Stop]) {
+            self.stops = stops
+            self.entries = PhotoStops.timeline(for: stops)
+            self.jumps = PhotoStops.longJumps(for: stops)
+            self.overviewPins = PhotoStops.overviewClusters(for: stops).map { cluster in
+                Pin(
+                    id: cluster.id,
+                    coordinate: cluster.coordinate,
+                    label: PhotoStops.locationLabel(for: cluster.coverPhoto),
+                    photos: cluster.photos,
+                    coverPhoto: cluster.coverPhoto
+                )
+            }
+        }
+    }
+
+    @State private var clustered = Clustered()
+    @State private var clusterRadius: Double?
     @State private var selection: Selection = .overview
     @State private var position: MapCameraPosition = .automatic
     @State private var openedPin: Pin?
     @State private var openedIndex = 0
 
     init(photos: [PhotoWithCuration], title: String) {
-        let stops = PhotoStops.stops(for: photos)
+        self.photos = photos
         self.title = title
-        self.stops = stops
-        self.stopsById = Dictionary(stops.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        self.stopsByDay = PhotoStops.byDay(stops)
-        self.entries = PhotoStops.timeline(for: stops)
-        self.tripJumps = PhotoStops.longJumps(for: stops)
-        self.overviewPins = PhotoStops.overviewClusters(for: stops).map { cluster in
-            Pin(
-                id: cluster.id,
-                coordinate: cluster.coordinate,
-                label: PhotoStops.locationLabel(for: cluster.coverPhoto),
-                photos: cluster.photos,
-                coverPhoto: cluster.coverPhoto
-            )
-        }
     }
 
-    /// The stop the selection points at, if any.
+    // MARK: - Derived
+
+    /// The stop the selection points at, re-resolved from its anchor photo.
     private var selectedStop: PhotoStops.Stop? {
-        guard case .stop(let id) = selection else { return nil }
-        return stopsById[id]
+        guard case .stop(let anchorPhotoId) = selection else { return nil }
+        return PhotoStops.stop(containing: anchorPhotoId, in: clustered.stops)
     }
 
     /// Overview: one pin per region. A stop: that stop's whole day, so the
     /// neighbours it sits between stay on the map.
     private var pins: [Pin] {
-        guard let selectedStop else { return overviewPins }
-        return (stopsByDay[selectedStop.day] ?? []).map { stop in
+        guard let selectedStop else { return clustered.overviewPins }
+        return clustered.stops.filter { $0.day == selectedStop.day }.map { stop in
             Pin(
                 id: stop.id,
                 coordinate: stop.coordinate,
@@ -91,12 +106,14 @@ struct PhotoMapView: View {
     /// Hops belong to the trip as a whole. Within one day every move is a
     /// short hop, so the 90th-percentile rule would just pick an arbitrary one.
     private var jumps: [PhotoStops.Jump] {
-        selection == .overview ? tripJumps : []
+        selection == .overview ? clustered.jumps : []
     }
+
+    // MARK: - Body
 
     var body: some View {
         Group {
-            if stops.isEmpty {
+            if clustered.stops.isEmpty {
                 ContentUnavailableView {
                     Label("Keine Orte", systemImage: "mappin.slash")
                 } description: {
@@ -107,6 +124,13 @@ struct PhotoMapView: View {
                     map
                     timeline
                 }
+            }
+        }
+        // The first clustering uses the day-span heuristic; the map replaces
+        // it with its own radius as soon as it has a view to measure.
+        .onAppear {
+            if clustered.stops.isEmpty {
+                clustered = Clustered(stops: PhotoStops.stops(for: photos))
             }
         }
         .navigationTitle(title)
@@ -123,37 +147,68 @@ struct PhotoMapView: View {
     // MARK: - Map
 
     private var map: some View {
-        Map(position: $position) {
-            ForEach(jumps.indices, id: \.self) { index in
-                let jump = jumps[index]
-                MapPolyline(coordinates: [
-                    CLLocationCoordinate2D(latitude: jump.from.latitude, longitude: jump.from.longitude),
-                    CLLocationCoordinate2D(latitude: jump.to.latitude, longitude: jump.to.longitude),
-                ])
-                .stroke(.secondary, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
-            }
-            ForEach(pins) { pin in
-                Annotation(
-                    pin.label,
-                    coordinate: CLLocationCoordinate2D(
-                        latitude: pin.coordinate.latitude,
-                        longitude: pin.coordinate.longitude
-                    )
-                ) {
-                    PhotoStopPin(
-                        cover: pin.coverPhoto,
-                        count: pin.photos.count,
-                        isSelected: selectedStop?.id == pin.id
+        GeometryReader { geo in
+            Map(position: $position) {
+                ForEach(jumps.indices, id: \.self) { index in
+                    let jump = jumps[index]
+                    MapPolyline(coordinates: [
+                        CLLocationCoordinate2D(latitude: jump.from.latitude, longitude: jump.from.longitude),
+                        CLLocationCoordinate2D(latitude: jump.to.latitude, longitude: jump.to.longitude),
+                    ])
+                    .stroke(.secondary, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+                }
+                ForEach(pins) { pin in
+                    Annotation(
+                        pin.label,
+                        coordinate: CLLocationCoordinate2D(
+                            latitude: pin.coordinate.latitude,
+                            longitude: pin.coordinate.longitude
+                        )
                     ) {
-                        openedIndex = 0
-                        openedPin = pin
+                        PhotoStopPin(
+                            cover: pin.coverPhoto,
+                            count: pin.photos.count,
+                            isSelected: selectedStop?.id == pin.id
+                        ) {
+                            openedIndex = 0
+                            openedPin = pin
+                        }
                     }
                 }
             }
+            // Only when the gesture settles — the web re-clusters on `zoomend`
+            // for the same reason, and a pass per frame would be far too much.
+            .onMapCameraChange(frequency: .onEnd) { context in
+                recluster(for: context.region, width: geo.size.width)
+            }
+            .onAppear { frameSelection() }
+            .onChange(of: selection) { _, _ in
+                withAnimation { frameSelection() }
+            }
         }
-        .onAppear { frameSelection() }
-        .onChange(of: selection) { _, _ in
-            withAnimation { frameSelection() }
+    }
+
+    /// Re-cluster for what the map now shows, if the radius moved enough to
+    /// change anything. A pan keeps the zoom, so it must not cost a pass.
+    private func recluster(for region: MKCoordinateRegion, width: CGFloat) {
+        guard let radius = PhotoStops.clusterRadius(
+            longitudeDelta: region.span.longitudeDelta,
+            latitude: region.center.latitude,
+            widthInPoints: Double(width)
+        ) else { return }
+
+        // A 2 % move cannot split or merge anything a reader would notice, and
+        // MapKit reports slightly different spans for the same zoom after a pan.
+        if let current = clusterRadius, abs(radius - current) / current < 0.02 { return }
+
+        clusterRadius = radius
+        clustered = Clustered(stops: PhotoStops.stops(for: photos, clusterRadiusMeters: radius))
+        // The selection survives as its anchor photo; if that photo is gone
+        // from the collection entirely, fall back to the overview rather than
+        // pointing at nothing.
+        if case .stop(let anchorPhotoId) = selection,
+           PhotoStops.stop(containing: anchorPhotoId, in: clustered.stops) == nil {
+            selection = .overview
         }
     }
 
@@ -171,7 +226,7 @@ struct PhotoMapView: View {
             ))
             return
         }
-        guard let bounds = PhotoStops.bounds(for: overviewPins.map(\.coordinate)) else {
+        guard let bounds = PhotoStops.bounds(for: clustered.stops) else {
             position = .automatic
             return
         }
@@ -197,7 +252,7 @@ struct PhotoMapView: View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    ForEach(entries) { entry in
+                    ForEach(clustered.entries) { entry in
                         card(for: entry).id(entry.id)
                     }
                 }
@@ -205,14 +260,11 @@ struct PhotoMapView: View {
                 .padding(.vertical, 10)
             }
             .background(.bar)
-            .onChange(of: selection) { _, new in
+            .onChange(of: selection) { _, _ in
                 // Follow a selection made on the map; a tap on a card is
                 // already where the reader is looking.
                 withAnimation {
-                    switch new {
-                    case .overview: proxy.scrollTo(-1, anchor: .center)
-                    case .stop(let id): proxy.scrollTo(id, anchor: .center)
-                    }
+                    proxy.scrollTo(selectedStop?.id ?? PhotoStops.overviewEntryId, anchor: .center)
                 }
             }
         }
@@ -234,7 +286,7 @@ struct PhotoMapView: View {
             }
         case .stop(let stop, let isFirstOfDay, let color):
             TimelineCard(
-                isSelected: selection == .stop(id: stop.id),
+                isSelected: selectedStop?.id == stop.id,
                 // Only the first stop of a day carries the day's colour, which
                 // is what makes the day boundaries readable in a long run.
                 accent: isFirstOfDay ? PhotoStops.rgb(fromHex: color).map {
@@ -245,7 +297,9 @@ struct PhotoMapView: View {
                 detail: "\(stop.photos.count) \(stop.photos.count == 1 ? "Foto" : "Fotos")",
                 thumbnail: stop.coverPhoto
             ) {
-                selection = .stop(id: stop.id)
+                // Anchor on the stop's cover photo: the id would be renumbered
+                // by the next re-cluster, the photo would not.
+                selection = .stop(anchorPhotoId: stop.coverPhoto.id)
             }
         }
     }
