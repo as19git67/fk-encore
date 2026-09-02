@@ -20,6 +20,8 @@ struct AlbumDetailView: View {
     /// Story-style slideshow over the photos currently displayed (or the
     /// selected ones, when the grid is in selection mode).
     @State private var showSlideshow = false
+    /// Map over the album's photos (#1016).
+    @State private var showMap = false
     @State private var showDeleteConfirm = false
     @State private var isDeleting = false
     @State private var fullscreenIndex: Int = 0
@@ -208,6 +210,16 @@ struct AlbumDetailView: View {
         .fullScreenCover(isPresented: $showSlideshow) {
             PhotoSlideshowView(photos: slideshowPhotos, title: album?.name ?? "")
         }
+        .sheet(isPresented: $showMap) {
+            NavigationStack {
+                PhotoMapView(photos: displayedPhotos, title: album?.name ?? "Karte")
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Fertig") { showMap = false }
+                        }
+                    }
+            }
+        }
         .sheet(isPresented: $filterSort.isMenuPresented) {
             FilterSortMenuView(viewModel: filterSort, available: [.favorite, .hasGps, .dateRange])
                 .presentationDetents([.medium, .large])
@@ -276,7 +288,7 @@ struct AlbumDetailView: View {
                 // Sharing, properties and deletion share one overflow menu so
                 // the toolbar stays usable (same pattern as the iOS media
                 // library album detail).
-                if canStartSlideshow || canShareAlbum || canEditAlbum || canDeleteAlbum {
+                if canStartSlideshow || canShowMap || canShareAlbum || canEditAlbum || canDeleteAlbum {
                     ToolbarItem(placement: .primaryAction) {
                         Menu {
                             // Available to anyone who can see the album —
@@ -287,6 +299,15 @@ struct AlbumDetailView: View {
                                 } label: {
                                     Label("Diashow", systemImage: "play.rectangle")
                                 }
+                            }
+                            if canShowMap {
+                                Button {
+                                    showMap = true
+                                } label: {
+                                    Label("Karte", systemImage: "map")
+                                }
+                            }
+                            if canStartSlideshow || canShowMap {
                                 if canShareAlbum || canEditAlbum || canDeleteAlbum {
                                     Divider()
                                 }
@@ -616,6 +637,11 @@ struct AlbumDetailView: View {
     /// offer one.
     private var canStartSlideshow: Bool {
         slideshowPhotos.count > 1
+    }
+
+    /// The map is only worth offering when something would land on it.
+    private var canShowMap: Bool {
+        displayedPhotos.contains { $0.latitude != nil && $0.longitude != nil }
     }
 
     private struct FullscreenNav: Hashable {
