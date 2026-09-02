@@ -139,8 +139,15 @@ struct PhotoMapView: View {
         #endif
         // A pin opens straight into the fullscreen viewer over its own photos,
         // so paging stays inside the place that was tapped.
+        //
+        // The NavigationStack is not decoration: the viewer's only way out is
+        // a toolbar chevron, and it deliberately disables the interactive pop
+        // gesture. Presented bare in a cover it has no navigation bar to draw
+        // that chevron in, and no swipe either — the photo is a dead end.
         .fullScreenCover(item: $openedPin) { pin in
-            PhotoFullscreenView(photos: pin.photos, currentIndex: $openedIndex)
+            NavigationStack {
+                PhotoFullscreenView(photos: pin.photos, currentIndex: $openedIndex)
+            }
         }
     }
 

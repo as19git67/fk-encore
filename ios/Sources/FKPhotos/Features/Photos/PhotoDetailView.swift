@@ -85,8 +85,13 @@ struct PhotoDetailView: View {
                 }
             }
         }
+        .navigationTitle("Foto")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        // Without these two the bar is empty *and* transparent, and the photo
+        // scrolls underneath it: a white chevron over a bright picture is a
+        // back button nobody can see, which reads as being stuck on the photo.
+        .toolbarBackground(.visible, for: .navigationBar)
         #endif
         .task {
             await loadPhotoDetails()

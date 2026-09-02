@@ -70,6 +70,7 @@ enum CollageRenderer {
     static func render(
         layout: CollageLayouts.Layout,
         tiles: [Tile],
+        overlays: [CollageText.Overlay] = [],
         background: UIColor = .white,
         maxEdge: Double = maxEdge
     ) -> UIImage? {
@@ -92,6 +93,66 @@ enum CollageRenderer {
                 let destination = destinationRect(for: cell, canvas: canvas)
                 draw(tile, into: destination, context: context.cgContext)
             }
+
+            // Captions go on last, over every cell: a caption is placed
+            // against the whole picture, not against one photo in it.
+            for overlay in overlays {
+                draw(overlay, canvas: canvas)
+            }
+        }
+    }
+
+    /// The font a caption is drawn in.
+    ///
+    /// Bold and system, matching the web's bold Inter closely enough that the
+    /// same caption wraps at roughly the same word. The exact metrics differ
+    /// between the two, which is why the wrap is measured rather than assumed.
+    static func font(ofSize size: Double) -> UIFont {
+        UIFont.systemFont(ofSize: CGFloat(size), weight: .bold)
+    }
+
+    /// Measure a line as it will be drawn.
+    static func measure(_ line: String, size: Double) -> Double {
+        guard !line.isEmpty else { return 0 }
+        return Double((line as NSString).size(
+            withAttributes: [.font: font(ofSize: size)]
+        ).width)
+    }
+
+    /// Draw one caption: a dark outline for legibility over any photo, then
+    /// the chosen fill on top.
+    private static func draw(_ overlay: CollageText.Overlay, canvas: CGSize) {
+        guard let block = CollageText.block(
+            for: overlay, canvas: canvas, measure: measure(_:size:)
+        ) else { return }
+
+        let uiFont = font(ofSize: block.fontSize)
+        let fill = CollageText.color(fromHex: overlay.colorHex) ?? .white
+        // `strokeWidth` is a percentage of the font size, and a negative one
+        // means "stroke *and* fill" — a positive value would draw the outline
+        // only, leaving hollow letters.
+        let strokePercent = -100 * CollageText.strokeWidth(fontSize: block.fontSize)
+            / max(block.fontSize, 1)
+
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: uiFont,
+            .foregroundColor: fill,
+            .strokeColor: UIColor.black.withAlphaComponent(0.7),
+            .strokeWidth: strokePercent,
+        ]
+
+        for (index, line) in block.lines.enumerated() where !line.isEmpty {
+            let width = measure(line, size: block.fontSize)
+            let left: Double
+            switch overlay.align {
+            case .left: left = block.anchorX
+            case .right: left = block.anchorX - width
+            case .center: left = block.centerX - width / 2
+            }
+            (line as NSString).draw(
+                at: CGPoint(x: left, y: block.lineTop(index)),
+                withAttributes: attributes
+            )
         }
     }
 
