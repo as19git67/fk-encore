@@ -121,7 +121,7 @@ struct ReviewSelectionSheet: View {
             Button {
                 previewPhotoId = photo.id
             } label: {
-                PhotoThumbnailView(filename: photo.filename)
+                PhotoThumbnailView(filename: photo.filename, photoId: photo.id)
                     .frame(width: 64, height: 64)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(alignment: .topLeading) {

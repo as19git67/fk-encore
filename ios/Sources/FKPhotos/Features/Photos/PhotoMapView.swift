@@ -348,7 +348,7 @@ private struct TimelineCard: View {
                         .frame(width: 3, height: 34)
                 }
                 if let thumbnail {
-                    PhotoThumbnailView(filename: thumbnail.filename, autoCrop: thumbnail.auto_crop)
+                    PhotoThumbnailView(filename: thumbnail.filename, autoCrop: thumbnail.auto_crop, photoId: thumbnail.id)
                         .frame(width: 34, height: 34)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 } else {
@@ -394,7 +394,7 @@ private struct PhotoStopPin: View {
 
     var body: some View {
         Button(action: action) {
-            PhotoThumbnailView(filename: cover.filename, autoCrop: cover.auto_crop)
+            PhotoThumbnailView(filename: cover.filename, autoCrop: cover.auto_crop, photoId: cover.id)
                 .frame(width: isSelected ? 56 : 44, height: isSelected ? 56 : 44)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .overlay {

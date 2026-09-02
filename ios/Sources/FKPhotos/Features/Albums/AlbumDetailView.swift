@@ -130,7 +130,7 @@ struct AlbumDetailView: View {
             } else {
                 LazyVGrid(columns: columns, spacing: 2) {
                     ForEach(displayedPhotos) { photo in
-                        PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop)
+                        PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop, photoId: photo.id)
                             .overlay(alignment: .topLeading) {
                                 if isSelecting {
                                     SelectionCheckmark(isSelected: selectedIds.contains(photo.id))

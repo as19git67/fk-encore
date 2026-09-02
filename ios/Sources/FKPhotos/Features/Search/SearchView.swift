@@ -44,7 +44,7 @@ struct SearchView: View {
                     LazyVGrid(columns: columns, spacing: 2) {
                         ForEach(viewModel.results) { photo in
                             NavigationLink(value: photo.id) {
-                                PhotoThumbnailView(filename: photo.filename)
+                                PhotoThumbnailView(filename: photo.filename, photoId: photo.id)
                                     .aspectRatio(1, contentMode: .fill)
                                     .clipped()
                             }

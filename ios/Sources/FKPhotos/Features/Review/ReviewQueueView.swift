@@ -425,7 +425,7 @@ private struct ReviewGroupCard: View {
     private func photoTile(_ photo: ReviewQueuePhoto) -> some View {
         let isPicked = group.pickedPhotoIds.contains(photo.id)
         return VStack(spacing: 4) {
-            PhotoThumbnailView(filename: photo.filename)
+            PhotoThumbnailView(filename: photo.filename, photoId: photo.id)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
                 .overlay(
                     RoundedRectangle(cornerRadius: 10)

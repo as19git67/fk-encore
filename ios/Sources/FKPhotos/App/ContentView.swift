@@ -19,6 +19,12 @@ public struct ContentView: View {
             // Inject the AuthManager into APIClient so requests can attach the token.
             await APIClient.shared.setAuthManager(authManager)
         }
+        .task(id: authManager.currentUser?.id) {
+            // Which photos this user has edited, fetched once for the whole
+            // app. Recipes are per user, so signing in as someone else has to
+            // drop the set rather than carry it over.
+            TransformedPhotosIndex.shared.configure(userId: authManager.currentUser?.id)
+        }
         .onChange(of: scenePhase) { _, newPhase in
             // If the initial restore ran while the device was locked (background
             // launch / pre-first-unlock), recover the session when the user
