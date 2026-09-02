@@ -22,6 +22,11 @@ struct PhotoCompareView: View {
 
     @State private var images: [Int: UIImage] = [:]
     @State private var faces: [Int: [PhotoCompare.Candidate]] = [:]
+    /// Sharpness per photo, in the same order as that photo's faces. A `nil`
+    /// entry is a face that could not be measured — which is not the same as
+    /// one measured as blurry, so it gets no frame rather than a red one.
+    @State private var sharpness: [Int: [Double?]] = [:]
+    @State private var showPeaking = true
     /// What both photos are zoomed to. Nil is the plain fit.
     @State private var focus: Focus?
 
@@ -53,6 +58,8 @@ struct PhotoCompareView: View {
                         image: images[first.id],
                         paneSize: paneSize,
                         zoom: zooms.first,
+                        faces: showPeaking ? (faces[first.id] ?? []) : [],
+                        sharpness: sharpness[first.id] ?? [],
                         onTap: { handleTap(at: $0, photo: first, paneSize: paneSize) }
                     )
                     ComparePane(
@@ -60,6 +67,8 @@ struct PhotoCompareView: View {
                         image: images[second.id],
                         paneSize: paneSize,
                         zoom: zooms.second,
+                        faces: showPeaking ? (faces[second.id] ?? []) : [],
+                        sharpness: sharpness[second.id] ?? [],
                         onTap: { handleTap(at: $0, photo: second, paneSize: paneSize) }
                     )
                 }
@@ -72,6 +81,16 @@ struct PhotoCompareView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Fertig") { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showPeaking.toggle()
+                    } label: {
+                        Label(
+                            "Schärfe",
+                            systemImage: showPeaking ? "viewfinder.circle.fill" : "viewfinder.circle"
+                        )
+                    }
                 }
                 if focus != nil {
                     ToolbarItem(placement: .primaryAction) {
@@ -160,6 +179,23 @@ struct PhotoCompareView: View {
                let image = UIImage(data: data) {
                 images[photo.id] = image
             }
+            measureSharpness(of: photo)
+        }
+    }
+
+    /// Measure every face in a photo once both its pixels and its boxes are in.
+    ///
+    /// Off the main actor: each face is a crop, a redraw and a pass over its
+    /// pixels, and a burst of them would otherwise stall the scroll.
+    private func measureSharpness(of photo: ReviewQueuePhoto) {
+        guard sharpness[photo.id] == nil,
+              let cgImage = images[photo.id]?.cgImage,
+              let candidates = faces[photo.id], !candidates.isEmpty
+        else { return }
+        let boxes = candidates.map(\.bbox)
+        Task.detached(priority: .userInitiated) {
+            let scores = boxes.map { FocusPeaking.sharpness(of: $0, in: cgImage) }
+            await MainActor.run { sharpness[photo.id] = scores }
         }
     }
 }
@@ -170,6 +206,8 @@ private struct ComparePane: View {
     let image: UIImage?
     let paneSize: CGSize
     let zoom: PhotoCompare.Zoom?
+    let faces: [PhotoCompare.Candidate]
+    let sharpness: [Double?]
     let onTap: (CGPoint) -> Void
 
     var body: some View {
@@ -179,6 +217,7 @@ private struct ComparePane: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
+                    .overlay { peaking(image: image) }
                     .scaleEffect(zoom?.zoom ?? 1)
                     .offset(zoom?.offset ?? .zero)
                     .animation(.easeInOut(duration: 0.25), value: zoom?.zoom)
@@ -201,5 +240,72 @@ private struct ComparePane: View {
                     .padding(6)
             }
         }
+    }
+
+    /// A frame around each measured face, coloured by how sharp it is.
+    ///
+    /// Drawn inside the image's own space so the boxes track the photo as it
+    /// zooms; the border and label counter-scale so they stay the same size on
+    /// screen instead of thickening into a smudge.
+    @ViewBuilder
+    private func peaking(image: UIImage) -> some View {
+        GeometryReader { geo in
+            let chrome = FocusPeaking.chromeScale(zoom: zoom?.zoom ?? 1)
+            ForEach(faces.indices, id: \.self) { index in
+                if let score = sharpness[safe: index] ?? nil {
+                    let bbox = faces[index].bbox
+                    let width = bbox.width * Double(geo.size.width)
+                    let height = bbox.height * Double(geo.size.height)
+                    // A face rendered this small says nothing framed, and a
+                    // crowd of overlapping labels says less than none.
+                    if FocusPeaking.isLegible(
+                        width: width * (zoom?.zoom ?? 1),
+                        height: height * (zoom?.zoom ?? 1)
+                    ) {
+                        PeakingFrame(score: score, chromeScale: chrome)
+                            .frame(width: width, height: height)
+                            .position(
+                                x: (bbox.x + bbox.width / 2) * Double(geo.size.width),
+                                y: (bbox.y + bbox.height / 2) * Double(geo.size.height)
+                            )
+                    }
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+/// One face's frame: the traffic-light border and its percentage.
+private struct PeakingFrame: View {
+    let score: Double
+    let chromeScale: Double
+
+    private var color: Color {
+        switch FocusPeaking.classify(score) {
+        case .sharp: return .green
+        case .medium: return .yellow
+        case .unsharp: return .red
+        }
+    }
+
+    var body: some View {
+        Rectangle()
+            .strokeBorder(color, lineWidth: 2 * chromeScale)
+            .overlay(alignment: .bottomLeading) {
+                Text(FocusPeaking.label(score: score))
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 3)
+                    .background(color)
+                    .scaleEffect(chromeScale, anchor: .bottomLeading)
+            }
+            .accessibilityLabel(FocusPeaking.describe(score: score))
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }

@@ -216,9 +216,29 @@ dokumentiert**:
   Person aus; ohne Namen gibt es nichts zum Abgleichen, dann nimmt jede Seite
   ihr eigenes Hauptgesicht. Ein Tipp ins Leere zoomt trotzdem auf das
   Hauptgesicht, statt nichts zu tun.
+- **Schärfe-Overlay** (`FocusPeaking`, Portierung von
+  `frontend/src/utils/focusPeaking.ts`): jedes gemessene Gesicht bekommt einen
+  Rahmen in Ampelfarbe plus Prozentwert. Gemessen wird die Varianz des
+  Laplace-Operators über den Gesichts-Crop, normiert gegen denselben
+  Full-Scale-Wert wie im Embedding-Service — die Farben stimmen also mit den
+  daneben angezeigten KI-Qualitätswerten überein. Per Sucher-Symbol
+  abschaltbar.
+- **Der Rand wird übersprungen, nicht umgeschlagen.** Der Embedding-Service
+  nähert den Laplace mit `np.roll` an, das Nachbarn um die Ränder herumwickelt.
+  Auf einem ganzen Foto harmlos; auf einem kleinen Gesichts-Crop macht es aus
+  jedem Helligkeitsunterschied zwischen gegenüberliegenden Rändern eine
+  Scheinkante, und ein weich ausgeleuchtetes, unscharfes Gesicht läse sich als
+  scharf. Das Web weicht aus demselben Grund ab.
+- **„Nicht messbar" ist nicht „unscharf".** Gesichter ohne brauchbaren Crop
+  bekommen gar keinen Rahmen statt eines roten — für die Entscheidung zwischen
+  zwei Aufnahmen sind das verschiedene Aussagen. Ebenso bleiben zu klein
+  gerenderte Gesichter ungerahmt: ein Dutzend überlappender Kästchen auf einem
+  Gruppenbild sagt weniger als keines.
+- Rahmenstärke und Beschriftung skalieren gegen den Zoom, damit eine 2-pt-Linie
+  beim Hineinzoomen nicht zum Balken wird.
 - Die Auswahl selbst bleibt beim `ReviewSelectionSheet` — diese Ansicht zeigt
-  nur. Noch offen (#1021 Etappe B): Schärfe-Overlay (Focus Peaking),
-  Qualitäts-Aufschlüsselung und Wisch-zum-Verwerfen.
+  nur. Noch offen (#1021 Etappe B): Qualitäts-Aufschlüsselung und
+  Wisch-zum-Verwerfen.
 
 ### 2.6d Collage (Layout-Hälfte)
 
@@ -312,7 +332,7 @@ Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders ·
 | Vollbild + Zoom | ✅ | ✅ native Pinch-Zoom |
 | Diashow / Slideshow | ✅ Modus im Vollbild | ✅ eigener Story-Player (`PhotoSlideshowView`), mit Foto-Paaren je nach Geräteausrichtung |
 | Mehrfachauswahl + Stapelaktionen | ✅ (Galerie + Album) | ✅ (Album, Monat und „Alle Fotos") |
-| Fotos vergleichen | ✅ `PhotoCompareView` | 🔶 `PhotoCompareView` (Seite an Seite + synchroner Gesichts-Zoom; Schärfe-Overlay und Qualitäts-Tabelle offen) |
+| Fotos vergleichen | ✅ `PhotoCompareView` | 🔶 `PhotoCompareView` (Seite an Seite, synchroner Gesichts-Zoom, Schärfe-Overlay; Qualitäts-Tabelle offen) |
 
 ### 3.2 Foto-Aktionen
 | Feature | Web | iOS |
