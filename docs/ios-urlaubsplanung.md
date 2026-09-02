@@ -130,6 +130,14 @@ Ein Tag besteht aus **Blöcken**, nicht aus einem Zeitstrahl:
 | Nachmittag | ca. 3,5 h | 2–3 Spots |
 | Abend | optional | 1 Spot / Essen |
 
+**Diese Vierteilung ist die Vorgabe, kein Zwang** (entschieden, §15.2): Jeder Tag
+entsteht mit diesen vier Blöcken, aber jeder einzelne lässt sich umbenennen,
+teilen, zusammenlegen oder streichen. Der Regelfall bleibt damit vorhersehbar
+und ohne Konfiguration, während Anreisetage, Zugbindungen (§4.4) und Splits
+(§6.5) die Struktur bekommen, die sie brauchen. Für das Datenmodell heißt das:
+Der Blocktyp ist ein **Etikett samt Standardbudget**, keine feste Aufzählung —
+ein Tag hält eine geordnete Liste von Blöcken, nicht vier Felder.
+
 Die Budgets skalieren mit dem Tempo („entspannt" schrumpft sie, „viel sehen"
 dehnt sie) und mit der Reisegruppe. Innerhalb eines Blocks gibt es eine
 **Reihenfolge, aber keine Uhrzeiten**: „Vormittag: Kathedrale → Markthalle →
@@ -1058,22 +1066,29 @@ Mehrbenutzer-Tabellen (Rollen, Fairness, Zweige, Besuche) stehen in §6.6.
 
 Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
 
-- **Testbarkeit der Kandidatensuche entscheiden.** Die geo-Tests arbeiten heute
-  mit skriptgesteuerten Query-Attrappen (`geo/src/replication.test.ts`) und
-  laufen außerhalb des Haupt-Testlaufs (`geo/**` ist in `vitest.config.ts`
-  ausgeschlossen). Für eine räumliche Tag-Query liegt das Risiko aber gerade in
-  der SQL-Semantik, nicht im Zusammenbau des Strings. Empfehlung: **PostGIS in
-  die Testumgebung aufnehmen** und `osm_pois` für Tests von Hand befüllen —
-  ohne osm2pgsql, nur ein paar Dutzend Zeilen Saatdaten.
+- **PostGIS in die Testumgebung aufnehmen** (entschieden, §15.1). Die geo-Tests
+  arbeiten heute mit skriptgesteuerten Query-Attrappen
+  (`geo/src/replication.test.ts`) und laufen außerhalb des Haupt-Testlaufs
+  (`geo/**` ist in `vitest.config.ts` ausgeschlossen). Für eine räumliche
+  Tag-Query liegt das Risiko aber in der SQL-Semantik. Zu tun: PostGIS-Extension
+  in Sandbox und CI verfügbar machen, einen Testhelfer schreiben, der eine
+  `osm_pois`-Tabelle anlegt und mit einigen Dutzend Zeilen befüllt, und
+  entscheiden, ob die neuen Tests im Haupt-Testlauf mitlaufen (dafür müsste
+  `geo/**` teilweise aus dem Ausschluss heraus) oder im eigenen geo-Lauf
+  bleiben.
 - **Die dreifache Tag-Liste zusammenführen.** Dieselbe Tag-Kenntnis steht in
   `geo/src/osm2pgsql.lua` (Importfilter), `geo/src/pois.ts` (Query-Defaults) und
   `osm-admin/poi.config.ts` (Aufruferfilter) — mit zwei „must stay in
   sync"-Kommentaren als einziger Absicherung. Die Planung erweitert alle drei.
   Vorher: Lua-Tabellen aus der TS-Konfiguration erzeugen, oder wenigstens ein
   Test, der die Lua-Datei liest und die Mengen vergleicht.
-- **Eine kleine Entwicklungsregion festlegen.** Jede Filteränderung erzwingt
-  einen Neuimport, und der dauert für ein Bundesland 10–30 Minuten
-  (`osm-admin/importer.ts`). Für die Entwicklung genügt eine Stadt.
+- **Entwicklungsregion ist Bayern** (entschieden, §15.1) — enthält München,
+  Nürnberg und Augsburg, taugt also auch für Etappen- und Korridortests. Da ein
+  Neuimport für ein Bundesland 10–30 Minuten dauert (`osm-admin/importer.ts`)
+  und jede Filteränderung einen erzwingt, zwei Regeln: **Filteränderungen
+  bündeln** statt einzeln durchzuziehen (der Grund, warum Schritt 4 alles
+  Import-Relevante zusammenfasst), und für schnelle Iterationen am Lua-Filter
+  eine Unterregion (Schwaben) daneben halten.
 - **Den Zuwachs messen**, bevor Gastronomie und Alltagsinfrastruktur zugesagt
   werden (§10.2) — auf dem echten Host, mit einer echten Region.
 
@@ -1180,21 +1195,32 @@ Vorgabewerten bauen.
 
 ### 15.1 Vor Schritt 1 zu entscheiden
 
-1. **Testumgebung:** PostGIS in die Testumgebung aufnehmen und `osm_pois` für
-   Tests von Hand befüllen (§13.0), oder bei den Query-Attrappen bleiben und
-   nur den SQL-Zusammenbau prüfen? Empfehlung: PostGIS — die Query *ist*
-   Schritt 1.
-2. **Entwicklungsregion:** Welche kleine Region dient als Spielwiese, damit ein
-   Neuimport Minuten und nicht Stunden dauert?
+1. **Testumgebung — entschieden: PostGIS.** Die Testumgebung (Sandbox und CI)
+   bekommt PostGIS, `osm_pois` wird für Tests von Hand mit einigen Dutzend
+   Zeilen befüllt, ganz ohne osm2pgsql. Damit werden Radius, Tag-Prädikat,
+   Sortierung und die Reihenfolge von Filter und `LIMIT` (§10.2) wirklich
+   geprüft und nicht nur der zusammengebaute SQL-String. Siehe §13.0.
+2. **Entwicklungsregion — entschieden: Bayern.** Groß genug für realistische
+   Etappenreisen (München, Nürnberg, Augsburg in einer Datenbank) und
+   voraussichtlich ohnehin schon importiert. Preis dafür ist ein spürbar
+   längerer Neuimport je Filteränderung — deshalb die Gegenmaßnahmen in §13.0:
+   Filteränderungen sammeln statt einzeln importieren, und für schnelle
+   Iterationen ein Ausschnitt (Geofabrik liefert Schwaben und Oberbayern als
+   Unterregionen).
 
 ### 15.2 Vor Schritt 2 zu entscheiden
 
-3. **Blockschema:** Sind Vormittag / Mittag / Nachmittag / Abend die richtige
-   Einteilung, oder lieber frei definierbare Blöcke pro Tag? Vorgabewert für
-   den Anfang: die feste Vierteilung.
-4. **Web-Frontend:** nur iOS, oder Planung auch in der Vue-App? Beeinflusst den
-   Schnitt der API. Empfehlung unabhängig davon: die Endpunkte
-   frontend-neutral halten — das kostet jetzt nichts und hält die Tür offen.
+3. **Blockschema — entschieden: Vierteilung als Vorgabe, anpassbar.** Jeder Tag
+   entsteht mit Vormittag / Mittag / Nachmittag / Abend; jeder Block lässt sich
+   umbenennen, teilen, zusammenlegen oder streichen (§4.1).
+4. **Web-Frontend — entschieden: nur iOS, API bleibt neutral.** Die Oberfläche
+   entsteht ausschließlich in der iOS-App; dort sind Standort, Geofences,
+   Kamera und Trip Mode ohnehin zu Hause. Die Endpunkte werden trotzdem
+   frontend-neutral geschnitten, damit ein Web-Frontend später ohne API-Umbau
+   nachrüstbar bleibt. Konkret heißt „neutral": keine iOS-spezifischen
+   Datenformate oder Feldnamen in den Antworten, kein Zustand, der nur auf dem
+   Gerät existiert, und Darstellungsentscheidungen (Formulierungen, Symbole,
+   Farben) im Client statt im Server.
 
 ### 15.3 Später, aber gut früh zu wissen
 
