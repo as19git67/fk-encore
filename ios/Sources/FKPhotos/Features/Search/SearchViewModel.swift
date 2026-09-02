@@ -13,12 +13,14 @@ final class SearchViewModel {
     /// stale reading never sits under a fresh result set.
     var parsed: NaturalSearch.ParsedQuery?
 
-    /// The query `parsed` belongs to. The semantic chip only shows when the
+    /// The query the results on screen belong to — the text that was actually
+    /// sent, which is what „keine Fotos für X gefunden" has to name. The
+    /// semantic chip only shows when the
     /// parse differs from what was asked, and "what was asked" has to be the
     /// text that was actually sent — `query` keeps changing as the user types
     /// the next search, which would otherwise make the chip flicker under a
     /// result set it has nothing to do with.
-    private var parsedQuery = ""
+    private(set) var parsedQuery = ""
 
     /// The chips for `parsed`, empty when there is nothing to report.
     var chips: [NaturalSearch.Chip] {
