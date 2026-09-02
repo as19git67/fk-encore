@@ -1224,20 +1224,51 @@ Vorgabewerten bauen.
 
 ### 15.3 Später, aber gut früh zu wissen
 
-5. **Regionsumfang:** Eine Japanreise braucht drei Regionsdatenbanken (Kanto,
-   Kansai, Kyushu), die vor der Planung importiert sein müssen — heute eine
-   bewusste Admin-Entscheidung, die dauert. Soll der Planer bei einem
-   unbekannten Ziel den Import selbst anbieten, oder bleibt es getrennt? Und wie
-   lange darf eine Etappenregion nach der Reise liegen bleiben?
-6. **Claude API überhaupt eine Option?** §11 beschreibt, was ein
-   Frontier-Modell brächte. Ob es ein Konto, ein Budget und die Bereitschaft
-   gibt, kuratierte Daten das Haus verlassen zu lassen, entscheidet, ob Schritt
-   5 einspurig lokal oder gleich zweispurig gebaut wird.
-7. **Automatik-Schwelle:** Soll die App bei Rückstand oder Wetterumschwung nur
-   einen Hinweis zeigen, oder den fertigen Vorschlag gleich danebenlegen?
-8. **Lichthinweise für alle?** Sichtbar für jeden, oder ein Schalter für die,
-   die tatsächlich fotografieren wollen — und darf Licht einen Abendblock
-   vorschlagen, den es sonst nicht gäbe?
+5. **Regionsumfang — entschieden: automatisch importieren, nach Frist zum
+   Löschen vorschlagen.** Wird ein Reiseziel geplant, für das keine
+   Regionsdatenbank existiert, löst der Planer den passenden
+   Geofabrik-Import selbst aus — ohne Rückfrage. Der Plattenschutz dafür ist
+   bereits vorhanden: Der Importer probt die PBF-Größe per HEAD, rechnet sie mit
+   dem Ausdehnungsfaktor hoch und geht bei zu wenig freiem Platz in
+   `blocked_disk`, statt die Platte vollzuschreiben
+   (`osm-admin/importer.ts`). Zwei Dinge sind dafür noch zu bauen: die
+   **Zuordnung Reiseziel → Geofabrik-Ausschnitt** (ein Ortsname muss zur
+   richtigen Unterregion führen, und „Hakata" zu Kyushu), und eine ehrliche
+   **Fortschrittsanzeige** — ein Import dauert Minuten bis Stunden, so lange gibt
+   es für diese Etappe noch keinen Vorrat, und das muss der Planer sagen statt
+   leere Ergebnisse zu liefern. Läuft `blocked_disk` an, wird daraus ein
+   Hinweis mit Aufräumvorschlag statt einer Fehlermeldung.
+   **Aufräumen:** Drei Monate nach Reiseende schlägt die Regionsverwaltung das
+   Löschen vor — vorgeschlagen, nicht ausgeführt. Mit zu löschen sind dann auch
+   die abgeleiteten Daten der Region (Routing-Kacheln, §12).
+6. **Claude API — entschieden: zweispurig bauen.** Jeder Modellaufruf geht über
+   eine austauschbare Schnittstelle; lokales Qwen ist die Vorgabe, Opus 5 ein
+   **pro Funktion** zuschaltbarer Anbieter (§11.5 — ein globaler Schalter wäre
+   die falsche Granularität). Wichtig ist, was die Abstraktion umfassen muss,
+   damit sie später trägt: strukturierte Ausgabe mit Schemavalidierung,
+   Werkzeugaufrufe, ein Kostenzähler je Funktion und ein **Rückfall auf lokal**,
+   wenn kein Netz oder kein Guthaben da ist. Die Anonymisierung aus §11.5
+   (abstrakte Gruppenbeschreibung statt Namen, Ankerzone statt Adresse) gehört
+   in diese Schicht, nicht in die Aufrufer — sonst wird sie irgendwann
+   vergessen.
+7. **Automatik-Schwelle — entschieden: fertigen Vorschlag danebenlegen.** Merkt
+   die App einen Rückstand oder einen Wetterumschwung, rechnet sie die
+   Neuverteilung sofort durch und zeigt das Ergebnis konkret an („Museum raus,
+   rutscht auf Freitag — übernehmen?"). Ein Tipp genügt, ein zweiter macht es
+   rückgängig. Genau dafür ist der Solver schnell genug (§12), und unterwegs
+   will niemand erst einen Knopf suchen, der etwas ausrechnet. Zwei Leitplanken
+   dagegen, dass es zur Nörgelei wird: **stets nur ein offener Vorschlag** — ein
+   neuer ersetzt den alten, sie stapeln sich nicht —, und ein abgelehnter
+   Vorschlag kommt für dieselbe Ursache nicht wieder, bis sich die Lage
+   wesentlich ändert.
+8. **Lichthinweise — entschieden: voll aktiv für alle.** Lichtfenster stehen auf
+   jeder Spot-Karte, beeinflussen still die Reihenfolge im Block und dürfen
+   einen Abendblock vorschlagen, den es sonst nicht gäbe. Damit das nicht
+   kippt, bleiben die Gewichte aus §7.3 klein: Licht ordnet und schlägt vor, es
+   wählt nicht aus und ist nie eine harte Nebenbedingung. Ein Abendvorschlag
+   folgt derselben Regel wie jede andere Automatik (§15.3, Frage 7) — höchstens
+   einer offen, abgelehnt heißt erledigt. Abschaltbar bleibt es trotzdem, nur
+   eben nicht standardmäßig aus.
 9. **Hotelwahl:** Soll der Planer aus einer Ankerzone (§4.2) aktiv Viertel
    vorschlagen, oder bleibt die Unterkunft außerhalb seines Auftrags?
 
