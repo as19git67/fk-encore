@@ -141,6 +141,26 @@ dokumentiert**:
   Ranking-Reihenfolge gebracht.
 - Ort/POI/Radius zusätzlich über `searchByLocation` (`/photos/search/location`).
 
+### 2.6a Karte über eine Foto-Sammlung
+
+- **Kartenansicht** (`PhotoMapView`, MapKit) über die Fotos eines Albums,
+  erreichbar aus dem Überlauf-Menü der Album-Detailansicht („Karte").
+  Zwei Modi wie im Web: **„Ganze Reise"** zeigt einen Pin je Region
+  (Übersichts-Cluster über alle Tage) samt gestrichelten Linien für die
+  größten Sprünge; die Auswahl eines **Tages** zeigt dessen einzelne Stopps.
+  Auf dem Pin sitzt das Titelbild, Tippen öffnet dessen Fotos im
+  Vollbild-Viewer.
+- Die Gruppierungsregeln liegen in `PhotoStops.swift` — eine Portierung von
+  `frontend/src/composables/usePhotoStops.ts` mit denselben Konstanten, damit
+  Web und iOS für dasselbe Album dieselben Pins zeichnen: Gruppierung nach
+  **lokalem** Tag, je Tag zwei Clustering-Durchgänge (gierig nach nächstem
+  Zentroid innerhalb des Include-Radius, danach Zusammenlegen aller Paare
+  unterhalb des Separations-Radius), Radien skaliert an der Ausdehnung des
+  Tages, Übersichts-Cluster über alle Tage, sowie die längsten ~10 % der
+  Sprünge zwischen aufeinanderfolgenden Stopps als gestrichelte Linien.
+- Noch offen (#1016): die Tages-/Stopp-Zeitleiste neben der Karte und das
+  Nach-Zoom-Neuclustern der Pins.
+
 ### 2.7 Feed (Aktivität, Kommentare, Reaktionen)
 - **Feed-Tab** mit Ungelesen-Badge (`FeedViewModel.unreadCount`).
 - **Reaktionen / Likes** und **Ausblenden** je Foto.
@@ -224,7 +244,8 @@ Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders ·
 | Zu Album hinzufügen | ✅ | ✅ |
 | Aus Album entfernen | ✅ | ✅ (im Album-Kontext) |
 | Aufnahmedatum ändern | ✅ | ✅ |
-| GPS-Ort setzen/ändern | ✅ `PhotoLocationMenu` | ❌ (nur Anzeige) |
+| GPS-Ort setzen/ändern | ❌ (auch Web nicht — nur `POST /photos/:id/rescan-gps` liest EXIF neu) | ❌ |
+| Karte über eine Sammlung (Stopps/Trip) | ✅ `TripMap` | 🔶 `PhotoMapView` (Pins + Tagesfilter; Zeitleiste und Zoom-Clustering offen) |
 | Reindex / Metadaten aktualisieren | ✅ | ❌ |
 | Nicht-destruktive Transformationen (Crop/Rotate) | ✅ `PhotoTransformEditor` | ❌ |
 | Collage erstellen | ✅ `CollageDialog` | ❌ |
@@ -322,8 +343,11 @@ Referenz stehen, was jeweils gebaut wurde.
    Schließt alltägliche Lücken; nutzt vorhandene Endpunkte.
 
 ### Etappe 2 – Mittlerer Nutzen
-5. **GPS-Ort setzen/ändern + interaktive Karten-/Trip-Ansicht** – Karte mit
-   Foto-Clustern; Ort per Karten-Pin oder Suche zuweisen.
+5. 🔶 **Interaktive Karten-/Trip-Ansicht** – Karte mit Foto-Clustern,
+   umgesetzt als `PhotoMapView` auf Basis der portierten `PhotoStops`-Regeln
+   (#1016 Etappe A). Offen: Tages-/Stopp-Zeitleiste und Zoom-Clustering.
+   *Ort per Karten-Pin zuweisen* gehört nicht hierher — das kann das Web
+   ebenfalls nicht, es ist also kein Parity-Gap.
 6. ✅ **Öffentliche Album-Links** erstellen und per Share-Sheet teilen
    (Ablaufdatum) – umgesetzt in `AlbumShareView`; der geteilte Link zeigt auf
    die SPA-Route `/app/albums/shared/<token>` (`AlbumPublicLinkURL`).
