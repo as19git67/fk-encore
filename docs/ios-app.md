@@ -220,6 +220,22 @@ dokumentiert**:
   nur. Noch offen (#1021 Etappe B): Schärfe-Overlay (Focus Peaking),
   Qualitäts-Aufschlüsselung und Wisch-zum-Verwerfen.
 
+### 2.6d Collage (Layout-Hälfte)
+
+- **Collage-Ansicht** (`CollageView`), erreichbar über das Raster-Symbol in
+  der Auswahl-Leiste der Album-Detailansicht, sobald zwischen 2 und 9 Fotos
+  ausgewählt sind. Drei kuratierte Varianten je Fotoanzahl, Tausch zweier
+  Felder per zwei Tipps.
+- Die Layout-Regeln liegen in `CollageLayouts.swift` — eine Portierung von
+  `frontend/src/utils/collageLayouts.ts` mit derselben Tabelle (gleiche IDs,
+  Namen, Seitenverhältnisse, Zellen), damit dieselben Fotos auf beiden
+  Clients dieselbe Collage ergeben.
+- **Noch nichts wird gespeichert.** Es gibt keinen Collage-Endpunkt: das Web
+  rendert die Leinwand selbst und lädt das Ergebnis als gewöhnliches Foto
+  hoch (mit `X-Date-Taken` auf das älteste Quellfoto, damit die Collage neben
+  ihren Quellen einsortiert). Das On-Device-Rendern und der Upload sind
+  #1020 Etappe B, der Textüberlagerung Etappe C.
+
 ### 2.7 Feed (Aktivität, Kommentare, Reaktionen)
 - **Feed-Tab** mit Ungelesen-Badge (`FeedViewModel.unreadCount`).
 - **Reaktionen / Likes** und **Ausblenden** je Foto.
@@ -307,7 +323,7 @@ Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders ·
 | Karte über eine Sammlung (Stopps/Trip) | ✅ `TripMap` | ✅ `PhotoMapView` (Pins, Zeitleiste, Zoom-Clustering) |
 | Reindex / Metadaten aktualisieren | ✅ | ❌ |
 | Nicht-destruktive Transformationen (Crop/Rotate) | ✅ `PhotoTransformEditor` | 🔶 `PhotoTransformsView` (Ansehen/Anwenden/Übernehmen/Zurücksetzen; Cropper und Regler offen) |
-| Collage erstellen | ✅ `CollageDialog` | ❌ |
+| Collage erstellen | ✅ `CollageDialog` | 🔶 `CollageView` (Layouts + Vorschau; Rendern/Upload offen) |
 
 ### 3.3 Metadaten
 | Feature | Web | iOS |

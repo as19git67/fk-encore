@@ -22,6 +22,8 @@ struct AlbumDetailView: View {
     @State private var showSlideshow = false
     /// Map over the album's photos (#1016).
     @State private var showMap = false
+    /// Collage from the selected photos (#1020).
+    @State private var showCollage = false
     @State private var showDeleteConfirm = false
     @State private var isDeleting = false
     @State private var fullscreenIndex: Int = 0
@@ -210,6 +212,9 @@ struct AlbumDetailView: View {
         .fullScreenCover(isPresented: $showSlideshow) {
             PhotoSlideshowView(photos: slideshowPhotos, title: album?.name ?? "")
         }
+        .sheet(isPresented: $showCollage) {
+            CollageView(photos: displayedPhotos.filter { selectedIds.contains($0.id) })
+        }
         .sheet(isPresented: $showMap) {
             NavigationStack {
                 PhotoMapView(photos: displayedPhotos, title: album?.name ?? "Karte")
@@ -263,6 +268,14 @@ struct AlbumDetailView: View {
                         Image(systemName: "play.rectangle")
                     }
                     .disabled(!canStartSlideshow)
+                    // A collage needs between two and nine photos; outside
+                    // that range there is no layout to offer.
+                    Button {
+                        showCollage = true
+                    } label: {
+                        Image(systemName: "square.grid.2x2")
+                    }
+                    .disabled(!CollageLayouts.canCollage(selectedIds.count))
                 }
             } else {
                 ToolbarItem(placement: .topBarLeading) {
