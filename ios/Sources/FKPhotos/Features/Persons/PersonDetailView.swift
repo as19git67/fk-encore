@@ -409,6 +409,7 @@ struct PersonDetailView: View {
             location_city: nil,
             location_country: nil,
             ai_quality_score: nil,
+            ai_quality_details: nil,
             auto_crop: nil,
             curation_status: .visible,
             description: nil,

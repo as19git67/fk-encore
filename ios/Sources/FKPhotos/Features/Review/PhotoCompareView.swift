@@ -14,8 +14,9 @@ import UIKit
 ///
 /// A photo can also be thrown off the screen to drop it (`CompareSwipe`),
 /// which is the web's fling gesture — every direction discards except the one
-/// pointing at the partner photo. The full keep set still belongs to
-/// `ReviewSelectionSheet`; the quality table is the rest of stage B.
+/// pointing at the partner photo, and the quality breakdown
+/// (`PhotoQualityDetails`) says *why* one photo scored higher than the other.
+/// The full keep set still belongs to `ReviewSelectionSheet`.
 struct PhotoCompareView: View {
     let first: ReviewQueuePhoto
     let second: ReviewQueuePhoto
@@ -38,6 +39,10 @@ struct PhotoCompareView: View {
     /// length of the animation, which is also what keeps a second fling from
     /// starting while the first is still in the air.
     @State private var flung: Flung?
+    /// Freshly fetched quality per photo id. The review queue's copy can
+    /// predate the scan, and it carries no breakdown at all.
+    @State private var quality: [Int: PhotoQualityDetails.Fresh] = [:]
+    @State private var showQuality = false
 
     private struct Flung: Equatable {
         let id: Int
@@ -74,6 +79,7 @@ struct PhotoCompareView: View {
                         zoom: zooms.first,
                         faces: showPeaking ? (faces[first.id] ?? []) : [],
                         sharpness: sharpness[first.id] ?? [],
+                        qualityPercent: qualityPercent(for: first),
                         flungOffset: flung?.id == first.id ? flung?.offset : nil,
                         onTap: { handleTap(at: $0, photo: first, paneSize: paneSize) },
                         onDrag: { handleFling(
@@ -88,6 +94,7 @@ struct PhotoCompareView: View {
                         zoom: zooms.second,
                         faces: showPeaking ? (faces[second.id] ?? []) : [],
                         sharpness: sharpness[second.id] ?? [],
+                        qualityPercent: qualityPercent(for: second),
                         flungOffset: flung?.id == second.id ? flung?.offset : nil,
                         onTap: { handleTap(at: $0, photo: second, paneSize: paneSize) },
                         onDrag: { handleFling(
@@ -116,6 +123,13 @@ struct PhotoCompareView: View {
                         )
                     }
                 }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showQuality = true
+                    } label: {
+                        Label("Bewertung", systemImage: "chart.bar.doc.horizontal")
+                    }
+                }
                 if focus != nil {
                     ToolbarItem(placement: .primaryAction) {
                         Button("Ganzes Bild") { focus = nil }
@@ -123,7 +137,28 @@ struct PhotoCompareView: View {
                 }
             }
             .task { await load() }
+            .sheet(isPresented: $showQuality) {
+                QualityBreakdownSheet(
+                    first: first,
+                    second: second,
+                    firstQuality: quality[first.id],
+                    secondQuality: quality[second.id]
+                )
+                .presentationDetents([.medium, .large])
+            }
         }
+    }
+
+    /// The score to show on a photo: the fresh read when there is one, the
+    /// queue's own otherwise. A queue entry loaded before the scan finished
+    /// shows „?" until this arrives.
+    private func qualityPercent(for photo: ReviewQueuePhoto) -> Int? {
+        let merged = PhotoQualityDetails.merged(
+            score: photo.ai_quality_score,
+            details: nil,
+            fresh: quality[photo.id]
+        )
+        return merged.score.map { Int(($0 * 100).rounded()) }
     }
 
     // MARK: - Zoom
@@ -228,6 +263,13 @@ struct PhotoCompareView: View {
 
     private func load() async {
         for photo in [first, second] {
+            // The breakdown never comes with the review queue — the queue
+            // photo carries a score and nothing else — so it is read per
+            // photo here, the same fresh fetch the web makes.
+            if quality[photo.id] == nil,
+               let fresh = try? await PhotoFetch.byId(photo.id) {
+                quality[photo.id] = PhotoQualityDetails.Fresh(fresh)
+            }
             if faces[photo.id] == nil,
                let response: ListFacesResponse = try? await APIClient.shared.get(
                    "/photos/\(photo.id)/faces"
@@ -270,6 +312,8 @@ private struct ComparePane: View {
     let zoom: PhotoCompare.Zoom?
     let faces: [PhotoCompare.Candidate]
     let sharpness: [Double?]
+    /// The AI score to show, already merged with a fresh read.
+    let qualityPercent: Int?
     /// Where this pane has been thrown, if it is being discarded.
     let flungOffset: CGSize?
     let onTap: (CGPoint) -> Void
@@ -304,7 +348,7 @@ private struct ComparePane: View {
                 .onEnded { onDrag($0.translation) }
         )
         .overlay(alignment: .topLeading) {
-            if let percent = photo.qualityPercent {
+            if let percent = qualityPercent {
                 Text("\(percent) %")
                     .font(.caption.bold())
                     .foregroundStyle(.white)
@@ -381,5 +425,104 @@ private struct PeakingFrame: View {
 private extension Array {
     subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
+    }
+}
+
+/// The score, broken into what it was made of.
+///
+/// Two photos of the same moment scoring 71 % and 68 % says nothing about
+/// why. This says one is sharper and the other better composed, which is what
+/// actually decides which to keep.
+private struct QualityBreakdownSheet: View {
+    let first: ReviewQueuePhoto
+    let second: ReviewQueuePhoto
+    let firstQuality: PhotoQualityDetails.Fresh?
+    let secondQuality: PhotoQualityDetails.Fresh?
+
+    @Environment(\.dismiss) private var dismiss
+
+    private var rows: [PhotoQualityDetails.Row] {
+        PhotoQualityDetails.rows(
+            first: firstQuality?.details,
+            second: secondQuality?.details
+        )
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if rows.isEmpty {
+                    ContentUnavailableView(
+                        "Keine Bewertung",
+                        systemImage: "chart.bar.doc.horizontal",
+                        description: Text("Für diese Fotos liegt noch keine KI-Bewertung vor.")
+                    )
+                } else {
+                    List {
+                        Section {
+                            ForEach(rows) { row in
+                                criterion(row)
+                            }
+                        } header: {
+                            HStack {
+                                Text("Kriterium")
+                                Spacer()
+                                Text("Links")
+                                    .frame(width: 54, alignment: .trailing)
+                                Text("Rechts")
+                                    .frame(width: 54, alignment: .trailing)
+                            }
+                        } footer: {
+                            Text("„–" heißt: für dieses Foto wurde das Kriterium nicht gemessen — nicht, dass es null Punkte bekam.")
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Bewertung")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Fertig") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func criterion(_ row: PhotoQualityDetails.Row) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(row.label)
+                Spacer()
+                value(row.first, isLeader: row.leader == .first)
+                value(row.second, isLeader: row.leader == .second)
+            }
+            HStack(spacing: 4) {
+                bar(row.first, isLeader: row.leader == .first)
+                bar(row.second, isLeader: row.leader == .second)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func value(_ score: Double?, isLeader: Bool) -> some View {
+        Text(PhotoQualityDetails.percent(score))
+            .font(.callout.monospacedDigit())
+            .fontWeight(isLeader ? .bold : .regular)
+            .foregroundStyle(isLeader ? Color.accentColor : .secondary)
+            .frame(width: 54, alignment: .trailing)
+    }
+
+    private func bar(_ score: Double?, isLeader: Bool) -> some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(.quaternary)
+                Capsule()
+                    .fill(isLeader ? Color.accentColor : Color.secondary)
+                    .frame(width: geo.size.width * CGFloat(score ?? 0))
+            }
+        }
+        .frame(height: 4)
     }
 }
