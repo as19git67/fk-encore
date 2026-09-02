@@ -234,7 +234,7 @@ struct PhotoTimelineView: View {
         } else {
             LazyVGrid(columns: gridColumns, spacing: 2) {
                 ForEach(photosVM.photos) { photo in
-                    PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop)
+                    PhotoThumbnailView(filename: photo.filename, autoCrop: photo.auto_crop, photoId: photo.id)
                         .overlay(alignment: .topLeading) {
                             if selection.isSelecting {
                                 SelectionCheckmark(isSelected: selection.contains(photo.id))

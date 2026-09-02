@@ -90,6 +90,11 @@ final class PhotoTransformsViewModel {
 
     /// Run a change and re-read the bundle, so what is on screen is what the
     /// server now holds rather than a guess at it.
+    ///
+    /// The shared index is told about the change as well: every grid in the
+    /// app decides from it whether to load the original or the rendered
+    /// version, and the bump to that photo's revision is what keeps the
+    /// disk cache from handing back the pixels from before the edit.
     @MainActor
     private func mutate(_ work: () async throws -> Void) async {
         isSaving = true
@@ -98,6 +103,7 @@ final class PhotoTransformsViewModel {
             try await work()
             isSaving = false
             await load()
+            TransformedPhotosIndex.shared.mark(photoId: photoId, hasRecipe: hasOwnRecipe)
         } catch {
             errorMessage = error.localizedDescription
             isSaving = false

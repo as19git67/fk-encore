@@ -364,7 +364,7 @@ struct RecapPlayerView: View {
 
             playback = SlideshowPlayback()
             plan = []
-            store.reset(filenames: photos.map(\.filename))
+            store.reset(photos: photos.map { SlideshowImageStore.Item(id: $0.id, filename: $0.filename) })
             isLoading = false
             onSeen?(recapId)
             if !photos.isEmpty {
@@ -494,7 +494,7 @@ struct RecapPlayerView: View {
                 let ordered = res.photo_ids.compactMap { byId[$0] }
                 guard !ordered.isEmpty else { return }
                 photos = ordered
-                store.reset(filenames: ordered.map(\.filename))
+                store.reset(photos: ordered.map { SlideshowImageStore.Item(id: $0.id, filename: $0.filename) })
                 plan = []
                 playback = SlideshowPlayback()
                 store.prefetch(around: 0, ahead: prefetchAhead)
@@ -693,10 +693,12 @@ private struct RecapCompareIntroView: View {
                 : AnyLayout(VStackLayout(spacing: 6))
             layout {
                 CompareTile(
+                    photoId: data.then.id,
                     filename: data.then.filename,
                     label: "Damals · \(data.thenYear)"
                 )
                 CompareTile(
+                    photoId: data.now.id,
                     filename: data.now.filename,
                     label: "Heute · \(data.nowYear)"
                 )
@@ -719,9 +721,9 @@ private struct CompareTile: View {
     let label: String
     @State private var loader: ThumbnailLoader
 
-    init(filename: String, label: String) {
+    init(photoId: Int?, filename: String, label: String) {
         self.label = label
-        _loader = State(initialValue: ThumbnailLoader(filename: filename))
+        _loader = State(initialValue: ThumbnailLoader(filename: filename, photoId: photoId))
     }
 
     var body: some View {

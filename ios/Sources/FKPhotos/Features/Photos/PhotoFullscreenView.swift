@@ -568,7 +568,15 @@ private struct PhotoPageView: View {
         self.photo = photo
         self.faceBBox = faceBBox
         self.curationStats = curationStats
-        _loader = State(initialValue: ThumbnailLoader(filename: photo.filename))
+        // A face box is in the *original*'s coordinates, so a page that draws
+        // one has to show the original — a recipe-cropped render would put the
+        // box somewhere else entirely.
+        _loader = State(
+            initialValue: ThumbnailLoader(
+                filename: photo.filename,
+                photoId: faceBBox == nil ? photo.id : nil
+            )
+        )
         _viewModel = State(initialValue: PhotoMetadataViewModel(photo: photo))
         _showDetails = showDetails
         _curationStatus = curationStatus
