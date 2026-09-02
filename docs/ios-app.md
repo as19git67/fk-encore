@@ -166,7 +166,18 @@ dokumentiert**:
   unterhalb des Separations-Radius), Radien skaliert an der Ausdehnung des
   Tages, Übersichts-Cluster über alle Tage, sowie die längsten ~10 % der
   Sprünge zwischen aufeinanderfolgenden Stopps als gestrichelte Linien.
-- Noch offen (#1016 Etappe C): das Nach-Zoom-Neuclustern der Pins.
+- **Der Zoom steuert das Clustering** (wie im Web): Was ein Stopp ist, ist das,
+  was bei der aktuellen Zoomstufe unter einen Pin passt. Hineinzoomen teilt
+  Stopps auf, Herauszoomen führt sie zusammen — die Zeitleiste folgt exakt,
+  weil Pins und Karten denselben Clustering-Durchgang lesen. Der Radius wird
+  aus dem sichtbaren Bereich projiziert (`PhotoStops.clusterRadius`) und nur
+  neu berechnet, wenn die Geste zur Ruhe kommt und sich der Radius um mehr als
+  2 % ändert — ein reines Verschieben kostet also keinen Durchgang.
+- **Die Auswahl ist ein Foto, kein Stopp.** Ein Neuclustern vergibt alle
+  Stopp-IDs neu; eine über den Zoom gehaltene ID zeigte danach auf etwas
+  anderes. Die Auswahl hängt deshalb an einer Foto-ID, der Stopp wird daraus
+  neu aufgelöst (`PhotoStops.stop(containing:in:)`) — wie im Web über
+  `selectedAnchorPhotoId`.
 
 ### 2.7 Feed (Aktivität, Kommentare, Reaktionen)
 - **Feed-Tab** mit Ungelesen-Badge (`FeedViewModel.unreadCount`).
@@ -252,7 +263,7 @@ Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders ·
 | Aus Album entfernen | ✅ | ✅ (im Album-Kontext) |
 | Aufnahmedatum ändern | ✅ | ✅ |
 | GPS-Ort setzen/ändern | ❌ (auch Web nicht — nur `POST /photos/:id/rescan-gps` liest EXIF neu) | ❌ |
-| Karte über eine Sammlung (Stopps/Trip) | ✅ `TripMap` | 🔶 `PhotoMapView` (Pins + Zeitleiste; Zoom-Clustering offen) |
+| Karte über eine Sammlung (Stopps/Trip) | ✅ `TripMap` | ✅ `PhotoMapView` (Pins, Zeitleiste, Zoom-Clustering) |
 | Reindex / Metadaten aktualisieren | ✅ | ❌ |
 | Nicht-destruktive Transformationen (Crop/Rotate) | ✅ `PhotoTransformEditor` | ❌ |
 | Collage erstellen | ✅ `CollageDialog` | ❌ |
@@ -350,9 +361,9 @@ Referenz stehen, was jeweils gebaut wurde.
    Schließt alltägliche Lücken; nutzt vorhandene Endpunkte.
 
 ### Etappe 2 – Mittlerer Nutzen
-5. 🔶 **Interaktive Karten-/Trip-Ansicht** – Karte mit Foto-Clustern und
-   Stopp-Zeitleiste, umgesetzt als `PhotoMapView` auf Basis der portierten
-   `PhotoStops`-Regeln (#1016 Etappen A und B). Offen: Zoom-Clustering.
+5. ✅ **Interaktive Karten-/Trip-Ansicht** – Karte mit Foto-Clustern,
+   Stopp-Zeitleiste und zoomabhängigem Neuclustern, umgesetzt als
+   `PhotoMapView` auf Basis der portierten `PhotoStops`-Regeln (#1016).
    *Ort per Karten-Pin zuweisen* gehört nicht hierher — das kann das Web
    ebenfalls nicht, es ist also kein Parity-Gap.
 6. ✅ **Öffentliche Album-Links** erstellen und per Share-Sheet teilen
