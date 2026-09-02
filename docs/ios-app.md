@@ -195,8 +195,33 @@ dokumentiert**:
 - **Vorschläge werden nie automatisch angewendet** — und es gibt nur
   Seitenverhältnisse, für die ein Gesicht als Bildmitte gefunden wurde; ohne
   erkanntes Gesicht liefert der Server bewusst gar keinen Zuschnitt.
-- Noch offen (#1019 Etappe B): der interaktive Cropper und die Regler für
-  Belichtung/Kontrast/Gamma inkl. „Auto-Levels".
+- **Selbst bearbeiten** (#1019 Etappe B, `PhotoRecipeEditorView` +
+  `PhotoRecipe.swift`), erreichbar über „Selbst bearbeiten…": Zuschnitt-Rahmen
+  ziehen, Ecken anfassen, in 90°-Schritten drehen, Regler für Belichtung,
+  Kontrast und Gamma — alles mit Live-Vorschau, gespeichert per
+  `PUT /photos/:id/transforms`.
+- **Der Zuschnitt gilt im unrotierten Bild.** Der Server schneidet zuerst zu
+  und dreht danach (`photo/photo-transforms-render.service.ts`); ein Rahmen,
+  der beim Drehen mitwandert, ergäbe beim Rendern einen anderen Ausschnitt als
+  der Editor gezeigt hat.
+- **Die Vorschau rechnet auf dem Gerät**, nicht per Anfrage: eine Runde zum
+  Server pro Reglerschritt wäre unbenutzbar. `PhotoRecipe.toneCurve` ist die
+  Kurve des Renderers selbst (Belichtung × Kontrast um 128/255, dann
+  Schwarz-/Weißpunkt, dann Gamma), damit die Vorschau der später gerenderten
+  Datei entspricht. Bearbeitet wird eine auf 1600 px verkleinerte Kopie — der
+  Crop ist normiert, die Kurve gilt pro Pixel, also ändert das am Ergebnis
+  nichts.
+- **Gamma unter 1 wird nicht versprochen.** `sharp` nimmt nur 1…3; die
+  Vorschau klemmt genauso, statt eine Bearbeitung zu zeigen, die die Datei
+  nicht bekommt.
+- **Regler-Bereich ≠ Server-Bereich.** Die Regler enden bei ±2 EV wie im Web,
+  gespeichert wird gegen die Server-Grenzen (±3 EV) geklemmt — ein von
+  außerhalb übernommenes Rezept wird so nicht abgelehnt, nur weil es neben dem
+  Regler liegt. Schwarzpunkt ≥ Weißpunkt lehnt der Server ab; welcher der
+  beiden gemeint war, ist nicht erkennbar, also fallen beide weg.
+- **Auto-Levels speichert nicht.** Es misst die Pixel *innerhalb* des
+  aktuellen Zuschnitts und füllt nur die Regler; gespeichert wird erst mit
+  „Sichern".
 
 ### 2.6c Foto-Vergleich (Gruppen-Review)
 
@@ -476,7 +501,10 @@ Referenz stehen, was jeweils gebaut wurde.
    in `SlideshowPlan.swift`, Regeln in `docs/photo-slideshow.md`.
 
 ### Etappe 3 – Nice-to-have / aufwändiger
-10. **Nicht-destruktiver Transform-/Crop-Editor** – komplex; ggf. später.
+10. ✅ **Nicht-destruktiver Transform-/Crop-Editor** – `PhotoTransformsView`
+    (Vorschläge ansehen/anwenden, fremde Fassung übernehmen, zurücksetzen,
+    #1019 Etappe A) und `PhotoRecipeEditorView` (Cropper, Drehung, Tonwert-
+    Regler, Auto-Levels, Etappe B).
 11. **Collage-Erstellung**.
 12. 🔶 **Fotos vergleichen** – umgesetzt als `PhotoCompareView` im
     Gruppen-Review: zwei Aufnahmen nebeneinander, ein Tipp auf ein Gesicht
