@@ -179,6 +179,25 @@ dokumentiert**:
   neu aufgelöst (`PhotoStops.stop(containing:in:)`) — wie im Web über
   `selectedAnchorPhotoId`.
 
+### 2.6b Nicht-destruktive Bearbeitung (Zuschnitt/Tonwerte)
+
+- **Zuschnitt-Ansicht** (`PhotoTransformsView`), erreichbar über „Zuschnitt…"
+  im Überlauf-Menü des Vollbild-Viewers. Der Backend-Stack existierte bereits
+  vollständig (`photo/photo-transforms-crud.service.ts`,
+  `docs/photos-ai-transforms.md`) — es fehlte nur der Client.
+- Eine „Rezeptur" (Crop, Rotation, Belichtung, Kontrast, Gamma, Schwarz-/
+  Weißpunkt) gilt **pro Nutzer und pro Foto**; die Originaldatei wird nie
+  verändert. Drei Quellen: die eigene, die anderer Haushaltsmitglieder (per
+  Klick übernehmbar) und der KI-Vorschlag.
+- Umgesetzt (#1019 Etappe A): Vorschlag je Seitenverhältnis ansehen und
+  anwenden, fremde Fassung übernehmen, auf das Original zurücksetzen. Regeln
+  und Drahtformat in `PhotoTransforms.swift`.
+- **Vorschläge werden nie automatisch angewendet** — und es gibt nur
+  Seitenverhältnisse, für die ein Gesicht als Bildmitte gefunden wurde; ohne
+  erkanntes Gesicht liefert der Server bewusst gar keinen Zuschnitt.
+- Noch offen (#1019 Etappe B): der interaktive Cropper und die Regler für
+  Belichtung/Kontrast/Gamma inkl. „Auto-Levels".
+
 ### 2.7 Feed (Aktivität, Kommentare, Reaktionen)
 - **Feed-Tab** mit Ungelesen-Badge (`FeedViewModel.unreadCount`).
 - **Reaktionen / Likes** und **Ausblenden** je Foto.
@@ -265,7 +284,7 @@ Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders ·
 | GPS-Ort setzen/ändern | ❌ (auch Web nicht — nur `POST /photos/:id/rescan-gps` liest EXIF neu) | ❌ |
 | Karte über eine Sammlung (Stopps/Trip) | ✅ `TripMap` | ✅ `PhotoMapView` (Pins, Zeitleiste, Zoom-Clustering) |
 | Reindex / Metadaten aktualisieren | ✅ | ❌ |
-| Nicht-destruktive Transformationen (Crop/Rotate) | ✅ `PhotoTransformEditor` | ❌ |
+| Nicht-destruktive Transformationen (Crop/Rotate) | ✅ `PhotoTransformEditor` | 🔶 `PhotoTransformsView` (Ansehen/Anwenden/Übernehmen/Zurücksetzen; Cropper und Regler offen) |
 | Collage erstellen | ✅ `CollageDialog` | ❌ |
 
 ### 3.3 Metadaten

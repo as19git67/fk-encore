@@ -33,6 +33,8 @@ struct PhotoFullscreenView: View {
     /// the "Meinungen" block collapse to nothing.
     private let curationStats: [Int: PhotoCurationStats]
     @State private var showDeleteConfirm = false
+    /// Non-destructive crop / tone review (#1019).
+    @State private var showTransforms = false
     @State private var isProcessingAction = false
     @State private var toastMessage: ToastMessage?
 
@@ -190,6 +192,14 @@ struct PhotoFullscreenView: View {
                             Label(SyncWording.saveOriginal, systemImage: SyncWording.saveOriginalSymbol)
                         }
 
+                        // Non-destructive: the original file is never touched,
+                        // so this needs no more than view rights (#1019).
+                        Button {
+                            showTransforms = true
+                        } label: {
+                            Label("Zuschnitt…", systemImage: "crop")
+                        }
+
                         if let album = albumContext {
                             Button {
                                 Task { await removeFromAlbum(album) }
@@ -309,6 +319,11 @@ struct PhotoFullscreenView: View {
             Button("Abbrechen", role: .cancel) {}
         } message: {
             Text("Das Foto wird in den Papierkorb verschoben.")
+        }
+        .sheet(isPresented: $showTransforms) {
+            if let photo = currentPhoto {
+                PhotoTransformsView(photoId: photo.id)
+            }
         }
         .toast($toastMessage)
         .alert("Umbenennen", isPresented: $isRenaming) {
