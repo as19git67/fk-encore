@@ -182,6 +182,9 @@ struct AlbumDetailView: View {
                                             systemImage: curation(photo) == .favorite ? "heart.slash" : "heart"
                                         )
                                     }
+                                    if canEditAlbum {
+                                        coverButtons(for: photo)
+                                    }
                                     if let stats = curationStats[photo.id], stats.hasSignal {
                                         Section("Meinungen") {
                                             Text(consensusSummary(stats))
@@ -539,6 +542,90 @@ struct AlbumDetailView: View {
 
     /// Reflects saved album properties locally (title, description, map view)
     /// so the detail view updates without another round trip.
+    // MARK: - Album cover
+
+    /// „Als Albumcover festlegen", and taking it back off.
+    ///
+    /// Without a cover the album shows its newest photo, which keeps moving as
+    /// photos are added — so clearing one is a real choice, not a no-op, and
+    /// gets its own entry.
+    @ViewBuilder
+    private func coverButtons(for photo: PhotoWithCuration) -> some View {
+        if AlbumCover.canSetCover(
+            photoId: photo.id,
+            currentCoverId: album?.cover_photo_id,
+            albumPhotoIds: photos.map(\.id)
+        ) {
+            Button {
+                Task { await setCover(photoId: photo.id) }
+            } label: {
+                Label("Als Albumcover festlegen", systemImage: "rectangle.on.rectangle")
+            }
+        }
+        if AlbumCover.isCover(photoId: photo.id, currentCoverId: album?.cover_photo_id) {
+            Button {
+                Task { await setCover(photoId: nil) }
+            } label: {
+                Label("Albumcover entfernen", systemImage: "rectangle.slash")
+            }
+        }
+    }
+
+    /// Send the new cover, and adopt what the server stored.
+    ///
+    /// Passing nil clears it. Only the cover is sent, so this cannot overwrite
+    /// a name or description someone else changed in the meantime.
+    private func setCover(photoId: Int?) async {
+        guard let album else { return }
+        let request: AlbumCover.Request?
+        if let photoId {
+            request = AlbumCover.request(
+                albumId: albumId,
+                photoId: photoId,
+                currentCoverId: album.cover_photo_id,
+                albumPhotoIds: photos.map(\.id)
+            )
+        } else {
+            request = AlbumCover.clearRequest(
+                albumId: albumId, currentCoverId: album.cover_photo_id
+            )
+        }
+        guard let request else { return }
+
+        do {
+            let updated: AlbumCover.Response = try await APIClient.shared.patch(
+                "/albums", body: request
+            )
+            applyCover(coverPhotoId: updated.cover_photo_id, coverFilename: updated.cover_filename)
+            toastMessage = ToastMessage(
+                text: updated.cover_photo_id == nil ? "Albumcover entfernt." : "Albumcover gesetzt.",
+                style: .success
+            )
+        } catch {
+            toastMessage = ToastMessage(text: error.localizedDescription, style: .error)
+        }
+    }
+
+    private func applyCover(coverPhotoId: Int?, coverFilename: String?) {
+        guard let current = album else { return }
+        album = Album(
+            id: current.id,
+            user_id: current.user_id,
+            name: current.name,
+            description: current.description,
+            cover_photo_id: coverPhotoId,
+            cover_filename: coverFilename,
+            display_mode: current.display_mode,
+            newest_photo_at: current.newest_photo_at,
+            oldest_photo_at: current.oldest_photo_at,
+            photo_count: current.photo_count,
+            is_shared: current.is_shared,
+            created_at: current.created_at,
+            updated_at: current.updated_at,
+            my_access_level: current.my_access_level
+        )
+    }
+
     private func applySettings(_ saved: AlbumSettingsView.Saved) {
         guard let current = album else { return }
         album = Album(

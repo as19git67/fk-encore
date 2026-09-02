@@ -88,6 +88,18 @@ dokumentiert**:
   „Von anderen favorisiert" und eine „Eigene Ansicht" mit einstellbaren
   Schwellenwerten. Die zählerbasierten Modi erscheinen nur bei geteilten Alben.
   Der gewählte Modus wird pro Album gemerkt.
+- **Albumcover** (`AlbumCover`): „Als Albumcover festlegen" im Kontextmenü des
+  Grids, für alle mit Schreibrecht. Ohne gesetztes Cover zeigt das Album sein
+  neuestes Foto — das wandert mit jedem Upload weiter, deshalb ist „Cover
+  entfernen" eine eigene Entscheidung und ein eigener Eintrag.
+- **Nur das Cover geht über die Leitung.** `PATCH /albums` behandelt ein
+  fehlendes Feld als „unverändert", also überschreibt eine Cover-Änderung
+  keinen Namen und keine Beschreibung, die jemand anderes inzwischen geändert
+  hat. Umgekehrt heißt das: das Entfernen muss ein ausdrückliches `null`
+  senden — Swift ließe ein `nil` beim Kodieren sonst weg, und das Entfernen
+  täte stillschweigend nichts.
+- Der Server nimmt nur Fotos **aus dem Album** als Cover; dieselbe Regel
+  entscheidet hier, was das Menü überhaupt anbietet.
 - **Anonymisierte Abstimmung**: In geteilten Alben zeigt jedes Thumbnail
   „3/5"-Badges für Favoriten und Ausblendungen, das Vollbild einen
   „Meinungen"-Block mit Anteilsbalken. Die eigene Favoriten-Stimme lässt sich
@@ -126,6 +138,18 @@ dokumentiert**:
   das neueste Jahr gerendert.
 
 ### 2.6 Suche
+- **Systemsuchfeld** (`.searchable`): Lupe im Feld, Löschkreuz und
+  „Abbrechen" kommen von iOS, statt von Hand nachgebaut zu werden. Das Feld
+  bleibt beim Scrollen stehen (`.navigationBarDrawer(displayMode: .always)`) —
+  in einem Tab, der nur zum Suchen da ist, wäre ein wegscrollendes Suchfeld
+  eine Suche, die man erst wiederfinden muss. Gesucht wird beim Absenden,
+  nicht bei jedem Tastendruck — jede
+  Anfrage ist eine Runde durch den Embedding-Service, und halb getippte Wörter
+  dafür auszugeben wäre verschwendet. Leert man das Feld (per × oder
+  „Abbrechen"), verschwinden die Treffer mit; sonst stünde das Raster voll mit
+  Ergebnissen zu einer Anfrage, die nicht mehr auf dem Bildschirm steht.
+- Unter dem Feld steht vor einer Suche **nichts**. Die früheren Beispiel-
+  Anfragen saßen dort, wo Ergebnisse erscheinen, und lasen sich als solche.
 - Natürliche-Sprache-Suche (`SearchView`, `SearchViewModel`) über denselben
   Endpunkt wie das Web (`POST /photos/search/natural`): Ort und Zeitraum
   werden aus der Anfrage herausgeparst und als **Filter** angewendet, statt
@@ -446,7 +470,8 @@ Legende: ✅ vorhanden · ⚡ vorhanden & überlegen · 🔶 teilweise/anders ·
 | Konsens-/anonyme Abstimmung | ⚡ | ✅ (Badges „3/5" + Favoriten-Vote) |
 | Mit Nutzern teilen (Rollen) | ✅ | ✅ |
 | Öffentliche Links (mit Ablauf) | ✅ | ✅ |
-| Cover setzen / Album bearbeiten | ✅ | ❌ |
+| Album bearbeiten (Name, Beschreibung, Kartenmodus) | ✅ | ✅ `AlbumSettingsView` |
+| Cover setzen | ✅ | ✅ (Grid-Kontextmenü, `AlbumCover`) |
 | In Album hochladen | ✅ | ✅ |
 
 ### 3.5 Personen & Gesichter
