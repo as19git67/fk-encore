@@ -221,7 +221,8 @@ actor APIClient {
         capturedAtString: String,
         assetLocalId: String,
         latitude: Double? = nil,
-        longitude: Double? = nil
+        longitude: Double? = nil,
+        dateTaken: String? = nil
     ) async throws -> UploadResult {
         var request = URLRequest(url: buildURL(path: "/photos"), timeoutInterval: 120)
         request.httpMethod = "POST"
@@ -243,6 +244,13 @@ actor APIClient {
         }
         if let longitude, longitude.isFinite {
             request.setValue(String(longitude), forHTTPHeaderField: "X-GPS-Lng")
+        }
+        // Overrides the file's own EXIF date, unlike X-Captured-At which only
+        // fills in when EXIF has none. A collage carries a real capture date in
+        // its pixels — "now" — that would sort it away from the photos it was
+        // made from, so it needs overriding rather than supplementing (#1020).
+        if let dateTaken, !dateTaken.isEmpty {
+            request.setValue(dateTaken, forHTTPHeaderField: "X-Date-Taken")
         }
         request.httpBody = data
         applyAuth(&request)
