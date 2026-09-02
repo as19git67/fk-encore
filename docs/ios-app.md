@@ -78,6 +78,32 @@ dokumentiert**:
   **Löschen** (nur mit `photos.delete`, mit Rückfrage) und **Original in die
   Fotos-Mediathek sichern** – alle im Überlauf-Menü des Vollbilds (Issue #762).
 
+### 2.3a Ein Vollbild-Viewer, nicht einer je Kontext
+
+- `PhotoFullscreenView` ist **die** Ansicht für ein einzelnes Server-Foto:
+  Blättern, Zoom, Herz/Info/Diashow, Ausblenden, Löschen, Download,
+  „Zuschnitt…", aus dem Album entfernen, Ortskarte, Gesichter. Erreichbar aus
+  Album, Raster, Zeitleiste, Personen-Ansicht, Karte, Feed — und seit #1085
+  auch aus den Suchergebnissen und der Review-Vorschau.
+- Vorher wurde je Kontext eine neue Einzelbild-Ansicht erfunden. Das
+  Suchergebnis hatte eine eigene Scroll-Seite ohne Blättern und ohne Zoom,
+  deren Kurations-Knöpfe eine Route riefen, die es nicht gibt
+  (`PUT /photos/curation` statt `PATCH /photos/:id/curation`), deren Fehler
+  nirgends gerendert wurden und in der „sichtbar" als **grüner Daumen runter**
+  neben einem zweiten Daumen runter stand. Alle drei Mängel gab es nur, weil
+  die Seite separat geschrieben und danach nie mitgezogen wurde; mit der Seite
+  sind sie verschwunden (#1085 §3).
+- Was ein Kontext zusätzlich braucht, wird **hineingereicht** statt nachgebaut:
+  `albumContext` blendet „aus Album entfernen" nur dort ein, wo ein Album
+  betrachtet wird, und `contextFooter` hängt eine Leiste unter das Foto. Die
+  Review-Vorschau ist damit nur noch dieser Fuß („Nur dieses Foto behalten",
+  die Behalten-Schalter, KI-Pick, Bewertung, Peer-Stimmen) — Pager, Zoom und
+  alles andere sind die des Viewers.
+- **Bewusste Ausnahme:** `LibraryPhotoFullscreenView` zeigt **Geräte**-Fotos
+  (`PHAsset`). Der kanonische Viewer ist auf `PhotoWithCuration` und
+  `/photos/file/…` gebaut; ihn über seine Bildquelle zu verallgemeinern wäre
+  eine eigene Entscheidung.
+
 ### 2.4 Alben
 - Liste mit Suche, **Anpinnen** (`AlbumPinPreferences`), Wisch-Aktionen,
   Erstellen/Löschen.
@@ -162,7 +188,9 @@ dokumentiert**:
   herausgelöst wurde.
 - Der Endpunkt liefert nur bewertete IDs; die Zeilen kommen über den
   Batch-Endpunkt `GET /photos/details` nach und werden wieder in die
-  Ranking-Reihenfolge gebracht.
+  Ranking-Reihenfolge gebracht (`PhotoFetch.byIds`).
+- Ein Tipp auf einen Treffer öffnet **denselben Vollbild-Viewer wie überall
+  sonst**, geblättert über die ganze Trefferliste (#1085 §3/§4) — siehe 2.3a.
 - Ort/POI/Radius zusätzlich über `searchByLocation` (`/photos/search/location`).
 
 ### 2.6a Karte über eine Foto-Sammlung
@@ -216,9 +244,40 @@ dokumentiert**:
 - Umgesetzt (#1019 Etappe A): Vorschlag je Seitenverhältnis ansehen und
   anwenden, fremde Fassung übernehmen, auf das Original zurücksetzen. Regeln
   und Drahtformat in `PhotoTransforms.swift`.
-- **Vorschläge werden nie automatisch angewendet** — und es gibt nur
-  Seitenverhältnisse, für die ein Gesicht als Bildmitte gefunden wurde; ohne
-  erkanntes Gesicht liefert der Server bewusst gar keinen Zuschnitt.
+- **Vorschläge werden nie automatisch angewendet** — und einen KI-Vorschlag
+  gibt es nur für Seitenverhältnisse, für die ein Gesicht als Bildmitte
+  gefunden wurde; ohne erkanntes Gesicht liefert der Server bewusst gar keinen
+  Zuschnitt.
+- **Die Seitenverhältnisse stehen trotzdem alle in der Zuschnitt-Ansicht**
+  (#1085 §1b). Vorher baute sie ihre Auswahl aus den KI-Vorschlägen — ein Foto
+  ohne erkanntes Gesicht zeigte also gar kein Seitenverhältnis und las sich, als
+  fehle die Funktion. Ein Tipp auf ein Verhältnis öffnet den Editor bereits auf
+  diesen Zuschnitt gesetzt; wo die KI komponiert hat (mit ✨ markiert), auf
+  ihren Ausschnitt, sonst mittig. 2:1 gibt es bewusst nicht — weder Web noch
+  Server kennen es, das wäre eine Änderung an allen dreien.
+- **Eine gespeicherte Bearbeitung ist überall zu sehen, nicht nur im Editor**
+  (#1085 §1a). Bis dahin rendert nur `PhotoTransformsView` durch die Rezeptur;
+  jede andere Fläche lud `/photos/file/<filename>`, also das unveränderte
+  Original — der Zuschnitt war im Blatt sichtbar, das ihn gemacht hat, und
+  sonst nirgends. Fotos mit eigener Rezeptur kommen jetzt über
+  `GET /photos/:id/render?v=user`; welche das sind, sagt
+  `GET /photos/transforms/mine` einmal für die ganze App
+  (`TransformedPhotosIndex`, wie `useTransformedPhotosIndex` im Web).
+- **Der Cache-Schlüssel ist die Falle.** `ImageCache` liegt auf der Platte, ein
+  unveränderter Schlüssel überlebt also den Neustart und lieferte weiter die
+  Pixel von vor der Bearbeitung — der Fix hätte ausgesehen wie der Fehler.
+  Gerenderte Fotos tragen Nutzer und eine Revision im Schlüssel, und die
+  Revision reist auch in der Query mit: die Render-Route antwortet
+  `Cache-Control: immutable`, `URLSession` hielte sonst die alten Bytes.
+- Bewusst beim Original bleiben: eine Vollbildseite, die einen Gesichtsrahmen
+  zeichnet (der Rahmen liegt in den Koordinaten des Originals), und der
+  Download in die Gerätemediathek (das Original ist die Archivkopie). Wo
+  gerendert wird, entfällt der KI-Fokuspunkt — der eigene Zuschnitt *ist* die
+  Antwort darauf, was das Foto zeigt.
+- Bekannte Lücke: eine anderswo (Web, zweites Gerät) gemachte **zweite**
+  Bearbeitung erhöht hier keine Revision und kann bis zum Verfallen des Caches
+  alt ausgeliefert werden. Die *erste* Rezeptur eines Fotos erscheint immer,
+  weil sie das Foto in den Index bringt.
 - **Selbst bearbeiten** (#1019 Etappe B, `PhotoRecipeEditorView` +
   `PhotoRecipe.swift`), erreichbar über „Selbst bearbeiten…": Zuschnitt-Rahmen
   ziehen, Ecken anfassen, in 90°-Schritten drehen, Regler für Belichtung,
@@ -265,6 +324,12 @@ dokumentiert**:
   Person aus; ohne Namen gibt es nichts zum Abgleichen, dann nimmt jede Seite
   ihr eigenes Hauptgesicht. Ein Tipp ins Leere zoomt trotzdem auf das
   Hauptgesicht, statt nichts zu tun.
+- **Ist die Person nur auf einem der beiden Fotos, fällt der Abgleich auf das
+  jeweilige Hauptgesicht zurück** (#1085 §2c). Vorher lieferte die andere Seite
+  nichts, `syncedZooms` braucht aber beide Rahmen — also zoomte *keines* der
+  Fotos, während „Ganzes Bild" trotzdem in der Werkzeugleiste erschien. Von
+  außen: getippt, nichts passiert, ein neuer Knopf ist da. Jetzt zoomt jeder
+  Tipp entweder oder ändert gar nichts (`PhotoCompare.matchedBoxes`).
 - **Schärfe-Overlay** (`FocusPeaking`, Portierung von
   `frontend/src/utils/focusPeaking.ts`): jedes gemessene Gesicht bekommt einen
   Rahmen in Ampelfarbe plus Prozentwert. Gemessen wird die Varianz des
@@ -317,6 +382,30 @@ dokumentiert**:
   Beschriftung: so steht die Tabelle auf beiden Clients in derselben
   Reihenfolge, und eine umformulierte Beschriftung wirbelt sie nicht durch.
   Ein unbekanntes Kriterium behält seinen Rohnamen, statt zu verschwinden.
+- **Ein Urteil beendet die Gruppe nicht** (#1085 §2a). Es ist ein
+  Schweizer-System-Turnier wie im Web (`CompareTournament`): der Verlierer geht
+  runter, der Gewinner rauf, *dieses Paar* ist erledigt, und als nächstes kommt
+  das Paar mit dem geringsten Punktabstand, das noch offen ist. Erst wenn keine
+  Paare mehr übrig sind, geht die Auswahl in die Bestätigung — und **einmal**
+  an den Server. Vorher entschied der erste Wisch für die ganze Gruppe, bei
+  vier Fotos wurden also drei nie angesehen.
+- Die KI-Bewertungen setzen nur die Startpunkte; liegen sie alle dicht
+  beieinander (Spanne < 0,12 — der Normalfall bei einer Serie), werden sie
+  innerhalb der Gruppe normiert, sonst sagte die absolute Zuordnung nichts.
+- **Eine ungeprüfte Gruppe schlägt vor, alles zu behalten**, und der Vorschlag
+  ist nie leer: `pick-photos` verlangt mindestens einen Behalter, und Fotos
+  ohne jeden Anhaltspunkt auszublenden ist genau der Fehler, den das ersetzt.
+- Jedes Urteil gibt es auch als beschrifteten Knopf — je Seite verwerfen,
+  „gleich gut", „später" — und der Vergleich lässt sich bei langen Gruppen
+  vorzeitig beenden. Ein Wisch ist unsichtbar und mit VoiceOver nicht
+  erreichbar.
+- **Der Gruppen-Review läuft auch innerhalb eines Albums** (#1085 §2b), über
+  „Ähnliche Fotos" im Überlauf-Menü der Album-Detailansicht.
+  `GET /photos/groups` ist nicht album-fähig und muss es nicht sein:
+  `AlbumGroupReview.scoped` schneidet jede Gruppe auf die **sichtbaren**
+  Album-Mitglieder zu und verwirft die mit weniger als zwei — dieselbe
+  clientseitige Verschneidung wie in `AlbumDetailView.vue`. Erlaubt ist es mit
+  `photos.delete`, der Berechtigung, die der Server auf `pick-photos` prüft.
 - Die vollständige Auswahl bleibt beim `ReviewSelectionSheet`.
 
 ### 2.6d Collage

@@ -90,21 +90,19 @@ final class SearchViewModel {
         hasSearched = false
     }
 
+    /// Drop a photo the viewer deleted, so the grid does not keep a hit that
+    /// no longer exists. The search is not re-run: the ranking of what is left
+    /// is still the ranking the server gave.
+    func remove(photoId: Int) {
+        results.removeAll { $0.id == photoId }
+    }
+
     /// Resolve hit ids into full photo rows, keeping the search's own ranking.
     ///
     /// The natural endpoint returns scored ids, not photos; the batch endpoint
     /// returns rows in its own order. Ids it does not answer for (deleted, or
     /// no longer visible) simply drop out.
     private func photos(forRankedIds ids: [Int]) async throws -> [PhotoWithCuration] {
-        guard !ids.isEmpty else { return [] }
-        let response: PhotoDetailsBatchResponse = try await APIClient.shared.get(
-            "/photos/details",
-            query: ["ids": ids.map(String.init).joined(separator: ",")]
-        )
-        let byId = Dictionary(
-            response.photos.map { ($0.id, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
-        return ids.compactMap { byId[$0] }
+        try await PhotoFetch.byIds(ids)
     }
 }

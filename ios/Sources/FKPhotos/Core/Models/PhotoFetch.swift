@@ -26,6 +26,36 @@ enum PhotoFetch {
         }
         return photo
     }
+
+    /// Several photos at once, **in the order asked for**.
+    ///
+    /// The batch endpoint answers in its own order, and every caller so far
+    /// has an order that matters — a search's ranking, a review group's
+    /// AI-pick-first sequence — so the reordering belongs here rather than
+    /// being written out again per call site. Ids the server does not answer
+    /// for (deleted, or no longer visible) simply drop out.
+    static func byIds(_ ids: [Int]) async throws -> [PhotoWithCuration] {
+        guard !ids.isEmpty else { return [] }
+        let response: PhotoDetailsBatchResponse = try await APIClient.shared.get(
+            "/photos/details",
+            query: ["ids": ids.map(String.init).joined(separator: ",")]
+        )
+        return ordered(response.photos, byIds: ids)
+    }
+
+    /// Put rows back into the order they were asked for, dropping the ids the
+    /// server had no answer for. Pure, so the ordering is testable without a
+    /// server.
+    static func ordered(
+        _ photos: [PhotoWithCuration],
+        byIds ids: [Int]
+    ) -> [PhotoWithCuration] {
+        let byId = Dictionary(
+            photos.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return ids.compactMap { byId[$0] }
+    }
 }
 
 /// Response of `GET /photos/details`. The server normalizes the nullable
