@@ -473,7 +473,9 @@ private struct QualityBreakdownSheet: View {
                                     .frame(width: 54, alignment: .trailing)
                             }
                         } footer: {
-                            Text("„–" heißt: für dieses Foto wurde das Kriterium nicht gemessen — nicht, dass es null Punkte bekam.")
+                            // Typographic quotes here, not an escaped ASCII
+                            // one: a stray \" is what broke this build.
+                            Text("„–“ heißt: für dieses Foto wurde das Kriterium nicht gemessen — nicht, dass es null Punkte bekam.")
                         }
                     }
                 }
