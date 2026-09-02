@@ -282,22 +282,30 @@ struct PhotoRecipeEditorView: View {
     @State private var viewModel: PhotoRecipeEditorViewModel
     /// The AI's crops, so picking a ratio by hand starts from its framing.
     let suggestion: PhotoTransforms.Suggestion?
+    /// The ratio to open on, when the editor was entered through a preset
+    /// rather than through „selbst bearbeiten". Nil leaves the crop as saved.
+    let startRatio: PhotoTransforms.AspectRatio?
     /// Called after a successful save, so the caller can reload its bundle.
     var onSaved: () -> Void = {}
 
     @Environment(\.dismiss) private var dismiss
+    /// Guards the one-off ratio preselection: `.task` can run again for the
+    /// same editor, and re-selecting would throw away a crop already dragged.
+    @State private var appliedStartRatio = false
 
     @MainActor
     init(
         photoId: Int,
         existing: PhotoTransforms.Row?,
         suggestion: PhotoTransforms.Suggestion?,
+        startRatio: PhotoTransforms.AspectRatio? = nil,
         onSaved: @escaping () -> Void = {}
     ) {
         _viewModel = State(
             initialValue: PhotoRecipeEditorViewModel(photoId: photoId, existing: existing)
         )
         self.suggestion = suggestion
+        self.startRatio = startRatio
         self.onSaved = onSaved
     }
 
@@ -340,7 +348,16 @@ struct PhotoRecipeEditorView: View {
                     }
                 }
             }
-            .task { await viewModel.load() }
+            .task {
+                await viewModel.load()
+                // A preset opened this editor: frame the crop to it, using the
+                // AI's composition for that ratio when there is one. Same
+                // starting point the one-tap action would have used.
+                if let startRatio, !appliedStartRatio, viewModel.original != nil {
+                    appliedStartRatio = true
+                    viewModel.select(ratio: startRatio, suggestion: suggestion)
+                }
+            }
         }
     }
 

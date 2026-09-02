@@ -57,6 +57,12 @@ struct PhotoCompareView: View {
         /// A tapped face with no person attached. There is nothing to match
         /// across, so each side falls back to its own primary face.
         case primary
+
+        /// The person to line both sides up on, if there is one.
+        var personId: Int? {
+            if case .person(let id) = self { return id }
+            return nil
+        }
     }
 
     var body: some View {
@@ -171,13 +177,16 @@ struct PhotoCompareView: View {
         guard let focus,
               let firstImage = images[first.id],
               let secondImage = images[second.id],
-              let firstBox = box(for: first, focus: focus),
-              let secondBox = box(for: second, focus: focus)
+              let boxes = PhotoCompare.matchedBoxes(
+                  personId: focus.personId,
+                  first: faces[first.id] ?? [],
+                  second: faces[second.id] ?? []
+              )
         else { return (nil, nil) }
 
         return PhotoCompare.syncedZoom(
-            (bbox: firstBox, viewport: viewport(paneSize: paneSize, image: firstImage)),
-            (bbox: secondBox, viewport: viewport(paneSize: paneSize, image: secondImage))
+            (bbox: boxes.first, viewport: viewport(paneSize: paneSize, image: firstImage)),
+            (bbox: boxes.second, viewport: viewport(paneSize: paneSize, image: secondImage))
         )
     }
 
@@ -188,16 +197,6 @@ struct PhotoCompareView: View {
             photoWidth: Double(image.size.width),
             photoHeight: Double(image.size.height)
         )
-    }
-
-    private func box(for photo: ReviewQueuePhoto, focus: Focus) -> PhotoCompare.BBox? {
-        let candidates = faces[photo.id] ?? []
-        switch focus {
-        case .person(let id):
-            return PhotoCompare.face(forPerson: id, in: candidates)?.bbox
-        case .primary:
-            return PhotoCompare.primaryFace(in: candidates)?.bbox
-        }
     }
 
     // MARK: - Interaction

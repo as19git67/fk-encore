@@ -107,9 +107,17 @@ final class PhotoTransformsViewModel {
 
 struct PhotoTransformsView: View {
     @State private var viewModel: PhotoTransformsViewModel
-    @State private var showEditor = false
+    @State private var editorTarget: EditorTarget?
     @Environment(AuthManager.self) private var authManager
     @Environment(\.dismiss) private var dismiss
+
+    /// Which ratio the hand editor should open on. A wrapper because
+    /// `sheet(item:)` needs an `Identifiable`, and because „frei" is a real
+    /// choice rather than the absence of one.
+    private struct EditorTarget: Identifiable {
+        let ratio: PhotoTransforms.AspectRatio?
+        var id: String { ratio?.rawValue ?? "frei" }
+    }
 
     init(photoId: Int) {
         _viewModel = State(initialValue: PhotoTransformsViewModel(photoId: photoId))
@@ -134,11 +142,12 @@ struct PhotoTransformsView: View {
                 }
             }
             .task { await viewModel.load() }
-            .sheet(isPresented: $showEditor) {
+            .sheet(item: $editorTarget) { target in
                 PhotoRecipeEditorView(
                     photoId: viewModel.photoId,
                     existing: viewModel.bundle?.mine,
                     suggestion: viewModel.bundle?.suggestion,
+                    startRatio: target.ratio,
                     onSaved: { Task { await viewModel.load() } }
                 )
             }
@@ -156,18 +165,7 @@ struct PhotoTransformsView: View {
             }
 
             previewSection
-
-            Section {
-                Button {
-                    showEditor = true
-                } label: {
-                    Label("Selbst bearbeiten…", systemImage: "slider.horizontal.3")
-                }
-                .disabled(viewModel.isLoading || viewModel.isSaving)
-            } footer: {
-                Text("Zuschnitt, Drehung und Tonwerte von Hand — mit Vorschau, bevor etwas gespeichert wird.")
-            }
-
+            cropSection
             suggestionSection
             adoptSection
 
@@ -224,6 +222,67 @@ struct PhotoTransformsView: View {
         return "Original"
     }
 
+    // MARK: - Cropping
+
+    /// The ratios, where the user looks for them.
+    ///
+    /// These used to live one level down, inside the hand editor, and the only
+    /// ratios this screen offered were the ones the AI had composed a crop for
+    /// — so a photo with no detected face showed no ratios at all and read as
+    /// „the feature is missing". The full set is always offered now; a ratio
+    /// the AI did compose for still starts from its framing, because
+    /// `select(ratio:suggestion:)` prefers the suggested crop over a centred
+    /// one.
+    private var cropSection: some View {
+        Section {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(PhotoTransforms.AspectRatio.allCases) { ratio in
+                        ratioChip(ratio)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            Button {
+                editorTarget = EditorTarget(ratio: nil)
+            } label: {
+                Label("Frei zuschneiden und bearbeiten…", systemImage: "slider.horizontal.3")
+            }
+            .disabled(viewModel.isLoading || viewModel.isSaving)
+        } header: {
+            Text("Zuschneiden")
+        } footer: {
+            Text("Ein Seitenverhältnis öffnet den Editor mit diesem Zuschnitt — auf das Motiv gesetzt, wenn die KI einen Vorschlag dafür hat. Dort kommen auch Drehung und Tonwerte dazu; gespeichert wird erst dort.")
+        }
+    }
+
+    private func ratioChip(_ ratio: PhotoTransforms.AspectRatio) -> some View {
+        let composed = viewModel.suggestedRatios.contains(ratio)
+        return Button {
+            editorTarget = EditorTarget(ratio: ratio)
+        } label: {
+            HStack(spacing: 4) {
+                Text(ratio.rawValue)
+                if composed {
+                    // The AI has a framing for this one, so it opens on the
+                    // subject rather than on the middle of the photo.
+                    Image(systemName: "sparkles").font(.caption2)
+                }
+            }
+            .font(.caption)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.secondary.opacity(0.12), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(viewModel.isLoading || viewModel.isSaving)
+        .accessibilityLabel(
+            composed
+                ? "Seitenverhältnis \(ratio.rawValue), mit KI-Vorschlag"
+                : "Seitenverhältnis \(ratio.rawValue)"
+        )
+    }
+
     // MARK: - Suggestion
 
     @ViewBuilder
@@ -252,7 +311,7 @@ struct PhotoTransformsView: View {
             }
         } else if viewModel.bundle != nil {
             Section {
-                Text("Für dieses Foto gibt es keinen Zuschnitt-Vorschlag — es wurde kein Gesicht erkannt, um den Bildausschnitt daran auszurichten.")
+                Text("Für dieses Foto gibt es keinen Zuschnitt-Vorschlag — es wurde kein Gesicht erkannt, um den Bildausschnitt daran auszurichten. Die Seitenverhältnisse oben lassen sich trotzdem verwenden; der Zuschnitt startet dann mittig.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             } header: {
