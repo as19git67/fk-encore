@@ -72,8 +72,10 @@ tax categories, and banking.
   refreshed hourly), matched against a photo's DINOv2 embedding to identify
   concrete points of interest (Brandenburger Tor, Marienplatz, …) with a
   Wikipedia link and a Wikimedia Commons reference image
-- **Document classification & embeddings** – local Qwen2.5-7B-Instruct (GGUF) plus a
-  multilingual-e5 sentence-transformer
+- **Document classification & embeddings** – a local instruction-tuned LLM in
+  GGUF form (the active model is chosen at runtime; currently
+  `gemma-4-26B-A4B-it-qat-UD-Q4_K_XL`) plus a multilingual-e5
+  sentence-transformer
 - **Semantic image search** – OpenCLIP embeddings
 - **Visual similarity** – DINOv2 embeddings, plus a hybrid CLIP + DINOv2 mode
 - **Photo quality scoring** – AI score with detail metrics, used for AI-driven
