@@ -440,12 +440,12 @@ und Publikumsmeinung sind nicht nachbaubar (§9), Tagesplanung dafür schon.
 
 ### 8.1 Hinaus: was die App abgibt
 
-- **Navigation zum nächsten Stopp** im Modus des Blocks (Fuß, ÖPNV, Auto). Unter
-  iOS nativ über `MKMapItem.openMaps(with:launchOptions:)` statt selbst
-  gebastelter URLs; Google Maps zusätzlich, aber nur wenn installiert.
-- **Ein ganzer Block als Sequenz.** `openMaps` nimmt ein Array von Zielen, die
-  Google-Maps-URL kennt Wegpunkte — damit wandert nicht nur der nächste Punkt,
-  sondern der ganze Vormittag am Stück hinüber.
+- **Navigation zum nächsten Stopp** im Modus des Blocks (Fuß, ÖPNV, Auto),
+  **wahlweise mit Apple Karten oder Google Maps** — siehe die Zielapp-Wahl
+  unten.
+- **Ein ganzer Block als Sequenz.** Apples `openMaps` nimmt ein Array von
+  Zielen, die Google-Maps-URL kennt Wegpunkte — damit wandert nicht nur der
+  nächste Punkt, sondern der ganze Vormittag am Stück hinüber.
 - **ÖPNV-Verbindung nachschlagen** — genau dort, wo unsere Schätzung am
   schwächsten ist (§4.1). Die Karten-App hat den Echtzeitfahrplan, wir nicht.
 - **Spot in Karten nachschlagen** — Bewertungen, Innenraumfotos, aktuelle
@@ -455,6 +455,30 @@ und Publikumsmeinung sind nicht nachbaubar (§9), Tagesplanung dafür schon.
 - Verwandt, ohne Karten-App: `tel:` und `website` stehen als OSM-Tags bereit
   (Tisch reservieren, Öffnungszeit erfragen), und die Fixpunkte eines Tages
   lassen sich per EventKit in den Kalender exportieren.
+
+**Die Zielapp ist eine Nutzerwahl, keine Vorgabe.** Viele navigieren
+gewohnheitsmäßig mit Google Maps — gerade im Ausland, wo dessen ÖPNV-Daten oft
+besser sind. Deshalb:
+
+- Eine Einstellung **„Navigation öffnen mit"** mit den Werten *Apple Karten*,
+  *Google Maps* und *jedes Mal fragen*; Standard ist Apple Karten, weil sie
+  immer vorhanden sind.
+- Google Maps erscheint als Option nur, wenn es installiert ist — geprüft über
+  `canOpenURL` auf `comgooglemaps://`, was einen Eintrag in
+  `LSApplicationQueriesSchemes` der `Info.plist` voraussetzt. Fehlt der Eintrag,
+  meldet die Prüfung stillschweigend „nicht vorhanden", und die Option
+  verschwindet grundlos — ein klassischer Stolperstein.
+- Als Rückfallebene taugt die universelle `https://www.google.com/maps/dir/`-URL:
+  Sie öffnet die App, wenn sie da ist, sonst den Browser. Damit funktioniert die
+  Auswahl auch dann, wenn die Schema-Prüfung scheitert.
+- **Der Modus muss mitgehen.** Was intern „zu Fuß / ÖPNV / Auto" heißt, wird pro
+  Zielapp übersetzt (Apple: `MKLaunchOptionsDirectionsModeKey`; Google:
+  `directionsmode` bzw. `travelmode`). Ein Block, der zu Fuß geplant ist, darf
+  nicht als Autoroute aufgehen — sonst stimmt die Ankunftszeit nicht, mit der
+  der Plan rechnet.
+- Die Wahl gilt für **alle** Übergaben dieses Kapitels, nicht nur für die
+  Navigation: Nachschlagen, ÖPNV-Verbindung und Parksuche folgen derselben
+  Einstellung.
 
 ### 8.2 Herein: der unterschätzte Weg
 
