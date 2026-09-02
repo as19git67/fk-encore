@@ -1054,41 +1054,69 @@ Mehrbenutzer-Tabellen (Rollen, Fairness, Zweige, Besuche) stehen in §6.6.
 > „Etappe" meint in diesem Dokument durchgehend einen **Reiseabschnitt**
 > (§4.2); die Umsetzung ist in **Schritte** gegliedert.
 
-1. **`geo /pois/search` + Importänderungen** — Flächen-/Umkreissuche mit
-   Kategorie- und grobem Öffnungsfilter. Der Lua-Filter muss dafür mehr Tags
-   mitnehmen (`opening_hours`, `cuisine`, `wheelchair`, `fee`, `website`,
-   **`name:en`**, `diet:*`, `outdoor_seating`), **Gastronomie und
-   Alltagsinfrastruktur überhaupt erst importieren** (§10.2) und das
-   **Fassadenazimut** berechnen. Alles, was einen Neuimport erzwingt, gehört in
-   diesen einen Schritt — inklusive einer Messung, wie stark die Regionen
-   dadurch wachsen.
+### 13.0 Vorarbeiten, bevor Schritt 1 sinnvoll beginnt
+
+Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
+
+- **Testbarkeit der Kandidatensuche entscheiden.** Die geo-Tests arbeiten heute
+  mit skriptgesteuerten Query-Attrappen (`geo/src/replication.test.ts`) und
+  laufen außerhalb des Haupt-Testlaufs (`geo/**` ist in `vitest.config.ts`
+  ausgeschlossen). Für eine räumliche Tag-Query liegt das Risiko aber gerade in
+  der SQL-Semantik, nicht im Zusammenbau des Strings. Empfehlung: **PostGIS in
+  die Testumgebung aufnehmen** und `osm_pois` für Tests von Hand befüllen —
+  ohne osm2pgsql, nur ein paar Dutzend Zeilen Saatdaten.
+- **Die dreifache Tag-Liste zusammenführen.** Dieselbe Tag-Kenntnis steht in
+  `geo/src/osm2pgsql.lua` (Importfilter), `geo/src/pois.ts` (Query-Defaults) und
+  `osm-admin/poi.config.ts` (Aufruferfilter) — mit zwei „must stay in
+  sync"-Kommentaren als einziger Absicherung. Die Planung erweitert alle drei.
+  Vorher: Lua-Tabellen aus der TS-Konfiguration erzeugen, oder wenigstens ein
+  Test, der die Lua-Datei liest und die Mengen vergleicht.
+- **Eine kleine Entwicklungsregion festlegen.** Jede Filteränderung erzwingt
+  einen Neuimport, und der dauert für ein Bundesland 10–30 Minuten
+  (`osm-admin/importer.ts`). Für die Entwicklung genügt eine Stadt.
+- **Den Zuwachs messen**, bevor Gastronomie und Alltagsinfrastruktur zugesagt
+  werden (§10.2) — auf dem echten Host, mit einer echten Region.
+
+### 13.1 Die Schritte
+
+1. **`geo /pois/search` gegen den heutigen Datenbestand** — Flächen- und
+   Umkreissuche mit Kategoriefilter. **Ohne Neuimport:** Sehenswürdigkeiten
+   liegen bereits in `osm_pois`, und für den ersten Planer genügen sie, weil
+   der Mittagsblock ohnehin nur ein Zeitfenster ist (§10.3). Damit ist der
+   langsame Teil (Import) vom schnellen (Query, Solver) entkoppelt.
 2. **`trip-planner`, ein Tag, Fußwege per Heuristik** — Constraints per API,
    kein LLM, kein Frontend. Liefert Blöcke mit Spots. Deterministisch testbar.
 3. **Neuverteilung** — „ab hier, ab jetzt", Vorrat, Verschieben auf Folgetage.
    Bewusst **vor** dem hübschen UI, weil es die Kernmechanik ist.
-4. **NL-Eingabe** über llm-service (JSON-Schema, strikte Validierung) +
+4. **Importerweiterung** — jetzt, wo der Planer läuft und zeigt, welche Tags er
+   wirklich braucht: `opening_hours`, `cuisine`, `wheelchair`, `fee`,
+   `website`, **`name:en`**, `diet:*`, `outdoor_seating`, dazu **Gastronomie
+   und Alltagsinfrastruktur** (§10.2) und das **Fassadenazimut** (§7.3). Alles,
+   was einen Neuimport erzwingt, in einem Zug.
+5. **NL-Eingabe** über llm-service (JSON-Schema, strikte Validierung) +
    Mehrtagesplanung.
-5. **Etappen, Fixpunkte, zwei Auflösungen** (§4.2–§4.4) — Reisen über mehrere
+6. **Etappen, Fixpunkte, zwei Auflösungen** (§4.2–§4.4) — Reisen über mehrere
    Orte, Modus je Etappe, Ankerzonen, Transfertage, harte Uhrzeiten mit
    Rückwärtsrechnung, Vorrat je Etappe, Detaillierung erst am Vorabend.
    Enthält die **Korridorsuche** für geplante Anreisen (Ellipsenfilter, noch
    ohne Router).
-6. **iOS-Oberfläche** — Blockkarten, Karte, Wischgesten, „Heute"-Modus,
+7. **iOS-Oberfläche** — Blockkarten, Karte, Wischgesten, „Heute"-Modus,
    **Übergaben an Karten-Apps** (§9.1) und die Essensliste vor Ort (§10.3).
-7. **Standort** — Geofences um die nächsten Stopps, Erledigt-Erkennung,
+8. **Standort** — Geofences um die nächsten Stopps, Erledigt-Erkennung,
    angebotene Neuverteilung, „was ist in der Nähe".
-8. **Wetter & Licht** — Open-Meteo-Anbindung mit Cache, Indoor/Outdoor-Ableitung,
+9. **Wetter & Licht** — Open-Meteo-Anbindung mit Cache, Indoor/Outdoor-Ableitung,
    Sonnenstandsmodul, Lichthinweise und Abendblock-Vorschlag.
-9. **Weitere Kontextsignale** — Dokumenten-Fixpunkte, Reisegruppe.
-10. **Mehrbenutzerbetrieb** (§6) — Beiträge und Stimmen je Person,
+10. **Weitere Kontextsignale** — Dokumenten-Fixpunkte, Reisegruppe.
+11. **Mehrbenutzerbetrieb** (§6) — Beiträge und Stimmen je Person,
     Herzenswünsche und Fairness-Konto, Organisatorrolle, feingranulare
     Zusammenführung gleichzeitiger Änderungen, automatische Erledigt-Erkennung,
     Splits mit Treffpunkt. Bewusst spät: Ein Trip, den eine Person plant, muss
     vorher vollständig funktionieren.
-11. **Verfeinerung, optional** — Valhalla für echte Reisezeiten, GTFS pro
+12. **Verfeinerung, optional** — Valhalla für echte Reisezeiten, GTFS pro
    Region, Offline-Bundle, Verknüpfung mit Trip-Album und Recap.
 
-Schritte 1–3 sind der ehrliche Test: Liefert die Maschine für *einen* Tag in
+Schritte 1–3 sind der ehrliche Test — und sie kommen **ohne einen einzigen
+Neuimport** aus: Liefert die Maschine für *einen* Tag in
 *einer* Stadt eine Blockeinteilung, die man tatsächlich so ablaufen würde — und
 hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
 
@@ -1101,7 +1129,7 @@ hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
   ausführlich.
 - **Geschätzte Reisezeiten.** Die Heuristik kann bei Flüssen, Bergen oder
   schlechter ÖPNV-Anbindung deutlich danebenliegen. Gegenmittel: Puffer im
-  Blockbudget, ehrliche Kennzeichnung als Schätzung, und Schritt 11 für die
+  Blockbudget, ehrliche Kennzeichnung als Schätzung, und Schritt 12 für die
   Regionen, wo es sich lohnt.
 - **Wettervorhersagen sind unsicher.** Drei Tage im Voraus ist die
   Niederschlagsmenge eine grobe Tendenz. Gegenmittel: nur die drei Klassen
@@ -1138,7 +1166,7 @@ hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
 - **Keine Echtzeit.** Verkehr, Streiks, spontane Schließungen sieht das System
   nicht — bewusste Übergabe an Apple/Google Maps für die Navigation.
 - **Speicherbedarf** eines späteren Routers (Valhalla-Kacheln zusätzlich zu den
-  PostGIS-Region-DBs) muss in Schritt 11 gemessen und in die Regionsverwaltung
+  PostGIS-Region-DBs) muss in Schritt 12 gemessen und in die Regionsverwaltung
   integriert werden (Region löschen = auch Kacheln löschen).
 - **Offline-Karten.** Vektorkacheln aus den PBFs (planetiler + MapLibre) wären
   ein eigener großer Baustein. Zunächst MapKit online; offline gibt es
@@ -1146,24 +1174,57 @@ hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
 
 ## 15. Offene Fragen an den Nutzer
 
-1. **Blockschema:** Sind Vormittag / Mittag / Nachmittag / Abend die richtige
-   Einteilung, oder lieber frei definierbare Blöcke pro Tag?
-2. **Regionsumfang:** Eine Japanreise braucht drei Regionsdatenbanken (Kanto,
-   Kansai, Kyushu), die vor der Planung importiert sein müssen — das ist heute
-   eine bewusste Admin-Entscheidung und dauert. Soll der Planer bei einem
-   unbekannten Ziel den Import selbst anbieten („für Tokio habe ich keine
-   Daten — jetzt importieren?"), oder bleibt es getrennt? Und wie lange darf
-   eine Etappenregion nach der Reise liegen bleiben?
-3. **Automatik-Schwelle:** Soll die App bei Rückstand oder Wetterumschwung nur
-   einen Hinweis zeigen, oder den neuen Vorschlag gleich fertig danebenlegen?
-4. **Lichthinweise für alle?** Sichtbar für jeden, oder ein Schalter für die,
-   die tatsächlich fotografieren wollen — und darf Licht auch einen Abendblock
+Sortiert danach, wann eine Antwort gebraucht wird. **Nichts davon blockiert den
+Anfang** — die Schritte 1–3 lassen sich mit den hier vorgeschlagenen
+Vorgabewerten bauen.
+
+### 15.1 Vor Schritt 1 zu entscheiden
+
+1. **Testumgebung:** PostGIS in die Testumgebung aufnehmen und `osm_pois` für
+   Tests von Hand befüllen (§13.0), oder bei den Query-Attrappen bleiben und
+   nur den SQL-Zusammenbau prüfen? Empfehlung: PostGIS — die Query *ist*
+   Schritt 1.
+2. **Entwicklungsregion:** Welche kleine Region dient als Spielwiese, damit ein
+   Neuimport Minuten und nicht Stunden dauert?
+
+### 15.2 Vor Schritt 2 zu entscheiden
+
+3. **Blockschema:** Sind Vormittag / Mittag / Nachmittag / Abend die richtige
+   Einteilung, oder lieber frei definierbare Blöcke pro Tag? Vorgabewert für
+   den Anfang: die feste Vierteilung.
+4. **Web-Frontend:** nur iOS, oder Planung auch in der Vue-App? Beeinflusst den
+   Schnitt der API. Empfehlung unabhängig davon: die Endpunkte
+   frontend-neutral halten — das kostet jetzt nichts und hält die Tür offen.
+
+### 15.3 Später, aber gut früh zu wissen
+
+5. **Regionsumfang:** Eine Japanreise braucht drei Regionsdatenbanken (Kanto,
+   Kansai, Kyushu), die vor der Planung importiert sein müssen — heute eine
+   bewusste Admin-Entscheidung, die dauert. Soll der Planer bei einem
+   unbekannten Ziel den Import selbst anbieten, oder bleibt es getrennt? Und wie
+   lange darf eine Etappenregion nach der Reise liegen bleiben?
+6. **Claude API überhaupt eine Option?** §11 beschreibt, was ein
+   Frontier-Modell brächte. Ob es ein Konto, ein Budget und die Bereitschaft
+   gibt, kuratierte Daten das Haus verlassen zu lassen, entscheidet, ob Schritt
+   5 einspurig lokal oder gleich zweispurig gebaut wird.
+7. **Automatik-Schwelle:** Soll die App bei Rückstand oder Wetterumschwung nur
+   einen Hinweis zeigen, oder den fertigen Vorschlag gleich danebenlegen?
+8. **Lichthinweise für alle?** Sichtbar für jeden, oder ein Schalter für die,
+   die tatsächlich fotografieren wollen — und darf Licht einen Abendblock
    vorschlagen, den es sonst nicht gäbe?
-5. **Hotelwahl:** Soll der Planer aus einer Ankerzone (§4.2) aktiv Viertel
-   vorschlagen — „diese Gegenden liegen im Radius und haben abends noch etwas
-   offen" — oder bleibt die Unterkunft ausdrücklich außerhalb seines Auftrags?
-6. **Web-Frontend:** nur iOS, oder Planung auch in der Vue-App? Planen am großen
-   Bildschirm, Umplanen am Telefon wäre eine naheliegende Arbeitsteilung.
+9. **Hotelwahl:** Soll der Planer aus einer Ankerzone (§4.2) aktiv Viertel
+   vorschlagen, oder bleibt die Unterkunft außerhalb seines Auftrags?
+
+### 15.4 Aus dem Mehrbenutzerbetrieb (§6), erst für Schritt 11
+
+10. **Kontingent der Herzenswünsche:** zwei je drei Tage — zu knapp, zu
+    großzügig, oder pro Trip statt pro Etappe?
+11. **Splits proaktiv?** Soll der Planer eine Trennung von sich aus vorschlagen,
+    wenn die Stimmen auseinandergehen (§6.5), oder nur auf Anforderung? Ein
+    ungefragter Vorschlag, sich zu trennen, kann als Einmischung gelesen werden.
+12. **Sichtbarkeit in der Familie:** Sollen Besuchsereignisse anderer Personen
+    („X war am Tempel") für alle sichtbar sein, nur für den Organisator, oder
+    gar nicht?
 
 ---
 
