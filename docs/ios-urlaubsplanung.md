@@ -1191,13 +1191,17 @@ hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
   ein eigener großer Baustein. Zunächst MapKit online; offline gibt es
   Blockliste, Spots und Wegbeschreibung, aber keine Kartendarstellung.
 
-## 15. Offene Fragen an den Nutzer
+## 15. Entschiedene Fragen
 
-Sortiert danach, wann eine Antwort gebraucht wird. **Nichts davon blockiert den
-Anfang** — die Schritte 1–3 lassen sich mit den hier vorgeschlagenen
-Vorgabewerten bauen.
+Stand 2026-09-02 sind alle zwölf offenen Fragen beantwortet; die Antworten
+stehen unten bei der jeweiligen Frage und sind in die betroffenen Kapitel
+eingearbeitet. Die Gliederung nach Dringlichkeit bleibt erhalten, weil sie
+zeigt, welche Entscheidung welchen Umsetzungsschritt betrifft.
 
-### 15.1 Vor Schritt 1 zu entscheiden
+**Damit ist nichts mehr offen, was den Anfang blockiert.** Neue Fragen, die
+während der Umsetzung entstehen, gehören hier ergänzt.
+
+### 15.1 Betrifft Schritt 1
 
 1. **Testumgebung — entschieden: PostGIS.** Die Testumgebung (Sandbox und CI)
    bekommt PostGIS, `osm_pois` wird für Tests von Hand mit einigen Dutzend
@@ -1212,7 +1216,7 @@ Vorgabewerten bauen.
    Iterationen ein Ausschnitt (Geofabrik liefert Schwaben und Oberbayern als
    Unterregionen).
 
-### 15.2 Vor Schritt 2 zu entscheiden
+### 15.2 Betrifft Schritt 2
 
 3. **Blockschema — entschieden: Vierteilung als Vorgabe, anpassbar.** Jeder Tag
    entsteht mit Vormittag / Mittag / Nachmittag / Abend; jeder Block lässt sich
@@ -1226,7 +1230,7 @@ Vorgabewerten bauen.
    Gerät existiert, und Darstellungsentscheidungen (Formulierungen, Symbole,
    Farben) im Client statt im Server.
 
-### 15.3 Später, aber gut früh zu wissen
+### 15.3 Betrifft die Schritte 5 bis 9
 
 5. **Regionsumfang — entschieden: automatisch importieren, nach Frist zum
    Löschen vorschlagen.** Wird ein Reiseziel geplant, für das keine
@@ -1270,7 +1274,7 @@ Vorgabewerten bauen.
    einen Abendblock vorschlagen, den es sonst nicht gäbe. Damit das nicht
    kippt, bleiben die Gewichte aus §7.3 klein: Licht ordnet und schlägt vor, es
    wählt nicht aus und ist nie eine harte Nebenbedingung. Ein Abendvorschlag
-   folgt derselben Regel wie jede andere Automatik (§15.3, Frage 7) — höchstens
+   folgt derselben Regel wie jede andere Automatik (Frage 7) — höchstens
    einer offen, abgelehnt heißt erledigt. Abschaltbar bleibt es trotzdem, nur
    eben nicht standardmäßig aus.
 9. **Hotelwahl — entschieden: Gegenden bewerten, keine Häuser.** Der Planer
@@ -1285,7 +1289,7 @@ Vorgabewerten bauen.
    der vorhandene Planer, probeweise auf mehrere Ankerkandidaten angewandt —
    wie viel Vorrat liegt im Zeitbudget, wenn der Tag hier beginnt und endet.
 
-### 15.4 Aus dem Mehrbenutzerbetrieb (§6), erst für Schritt 11
+### 15.4 Betrifft den Mehrbenutzerbetrieb (§6), Schritt 11
 
 10. **Kontingent der Herzenswünsche — entschieden: zwei je drei Tage, pro
     Etappe.** Es skaliert mit der Reiselänge und setzt sich je Etappe zurück —
