@@ -113,6 +113,9 @@ Wiederbesuch und einen kleinen Ranking-Bonus oder -Malus, den der Nutzer selbst
 setzt („schon Gesehenes lieber wieder / lieber nicht"). Mehr nicht — siehe
 Leitentscheidung 3.
 
+Wie sich das zu den KI-Reiseplanern am Markt verhält — die es inzwischen
+zahlreich gibt —, steht in §19.
+
 **Fazit:** Nicht „besser als Google Maps", sondern **eine andere Ebene**: Google
 navigiert, fk-encore teilt den Tag ein. Für Turn-by-turn wird bewusst per
 Deep-Link an Apple/Google Maps übergeben.
@@ -530,6 +533,17 @@ Allgemeinheit:
   EXIF-Kompasskurs (`GPSImgDirection`) bereits (`osm-admin/poi-matcher.ts`).
   Wer nach Westen schaut, hat abends Gegenlicht — je nach Geschmack Sonnenuntergang
   oder Blendung.
+- **Das Gelände schneidet das Fenster ab.** Die Rechnung oben unterstellt einen
+  freien Horizont — in einem Tal, hinter einem Hügelzug oder in einer Stadt mit
+  Steilhang ist die Sonne lange vor dem astronomischen Sonnenuntergang weg. Ohne
+  Korrektur verspricht der Planer goldenes Licht um 19:30, während der
+  Aussichtspunkt seit 19:00 im Schatten liegt — ein Fehler in genau die
+  unangenehme Richtung. Abhilfe ist eine **Vorberechnung wie beim
+  Fassadenazimut**: einmal je Spot aus einem freien Höhenmodell (SRTM,
+  Copernicus) das **Horizontprofil** bestimmen — welche Geländehöhe in welcher
+  Himmelsrichtung ansteht — und das Lichtfenster dort abschneiden, wo die
+  Sonnenhöhe darunter fällt. Zur Laufzeit kostet das nichts, es ist ein
+  Vergleich zweier Winkel.
 - **Die Bewölkung aus §7.2 moduliert das Ganze:** bei geschlossener Decke ist
   die goldene Stunde wertlos, dafür ist das diffuse Licht ideal für Innenhöfe,
   Wald, Details und Fassaden ohne Schattenkanten. Bei klarem Himmel gilt das
@@ -579,6 +593,14 @@ Wegsymbol dazwischen. Darunter eine Auslastungsanzeige: „ca. 3 h von 3,5 h".
 Kartenansicht mit nummerierten Pins pro Tag. „Warum hier?" pro Spot
 aufklappbar.
 
+Dazu ein **Zeit-Regler über den Tag**: Beim Schieben wandert die Sonne mit — und
+zugleich die Markierung, **wo ihr zu dieser Stunde laut Plan wärt**. Damit wird
+aus dem Lichthinweis („beste Zeit ca. 19:30") etwas Nachprüfbares statt einer
+Behauptung, und der Tagesplan bekommt nebenbei eine räumliche Vorschau. Beides
+ist ohnehin gerechnet — Sonnenstand (§7.3) und Blockzeiten (§4.1) —, der Regler
+macht es nur sichtbar und verbindet zwei Kapitel, die sonst nebeneinanderher
+laufen.
+
 ### 8.4 Verhandeln
 - Spot wischen → **ersetzen** (Alternativen aus dem Vorrat, die ins selbe
   Zeitbudget passen) oder **in den Vorrat zurück**.
@@ -595,7 +617,34 @@ schon selbst. Über dem Block ein schmales Band mit Regenrisiko und, wenn heute
 etwas im guten Licht liegt, dem Lichthinweis. Navigation per Deep-Link an Apple
 Maps.
 
-### 8.6 Danach
+### 8.6 Der Vorabend: Reisebereitschaft und Packliste
+
+Zwischen „Plan steht" und „erster Reisetag" liegt ein Moment, in dem sich die
+Fehler entscheiden, die den ganzen Planer entwerten würden — und für den
+fk-encore die Teile schon hat. Eine **Reisebereitschafts-Prüfung** geht sie am
+Vorabend durch:
+
+- Liegen die **Tickets und Buchungen** als Dokumente vor (§3.4)? Fehlt eines,
+  ist jetzt die Zeit, es zu suchen, nicht am Bahnsteig.
+- Ist die **Regionsdatenbank** der ersten Etappe fertig importiert (§15.3)?
+  Ohne sie gibt es vor Ort keinen Vorrat — der schlimmste denkbare Ausfall.
+- Ist das **Offline-Bündel** geladen (§14)?
+- Haben alle Teilnehmer **abgestimmt** (§6.1), oder plant ihr an jemandem vorbei?
+
+Nichts davon ist neue Maschinerie; es ist eine Liste über vorhandene Zustände.
+Gerade deshalb lohnt sie: Die beiden Fehler, die eine Reise wirklich verderben —
+kein Kartenmaterial im Ausland, kein Ticket zur Hand — sind beide am Vorabend
+noch billig zu beheben.
+
+**Die Packliste** fällt aus demselben Wissen fast nebenbei ab, und zwar als
+einzige, die nicht generisch ist: Outdoor-Blöcke plus Regenprognose →
+Regenjacke; Hitze → Sonnenhut und Wasserflasche; eine Kirche mit Kleiderordnung
+im Plan → lange Hose; ein Lichtfenster am Abend → Stativ; ein Kind im
+Fairness-Konto → Wechselsachen. Kein „zehn Dinge für Japan", sondern abgeleitet
+aus **diesem** Plan, diesem Wetter und dieser Gruppe. Ausbau, nicht Kern — aber
+billig, weil alle Eingaben schon dastehen.
+
+### 8.7 Danach
 Geplant gegen tatsächlich besucht, Fotos je Spot aus dem Trip-Album, Übergabe an
 den Recap.
 
@@ -1244,8 +1293,12 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
 8. **Standort** — Geofences um die nächsten Stopps, Erledigt-Erkennung,
    angebotene Neuverteilung, „was ist in der Nähe".
 9. **Wetter & Licht** — Open-Meteo-Anbindung mit Cache, Indoor/Outdoor-Ableitung,
-   Sonnenstandsmodul, Lichthinweise und Abendblock-Vorschlag.
-10. **Weitere Kontextsignale** — Dokumenten-Fixpunkte, Reisegruppe.
+   Sonnenstandsmodul, Lichthinweise, Abendblock-Vorschlag und der Zeit-Regler
+   (§8.3). Das **Horizontprofil** aus dem Höhenmodell (§7.3) gehört hierher —
+   ohne es ist die Lichtangabe in bergigem Gelände falsch, nicht bloß ungenau.
+10. **Weitere Kontextsignale** — Dokumenten-Fixpunkte, Reisegruppe, dazu die
+    **Reisebereitschafts-Prüfung** und die Packliste (§8.6), die beide nur
+    vorhandene Zustände zusammentragen.
 11. **Mehrbenutzerbetrieb** (§6) — Beiträge und Stimmen je Person,
     Herzenswünsche und Fairness-Konto, Organisatorrolle, feingranulare
     Zusammenführung gleichzeitiger Änderungen, automatische Erledigt-Erkennung,
@@ -1302,6 +1355,10 @@ hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
   ist die automatische Erledigt-Erkennung (§6.4) in dichten Innenstädten und
   Innenräumen ungenau; deshalb Verweildauer statt Eintritt, zwei Signale für
   stummes Setzen und eine Wischgeste zum Korrigieren.
+- **Das Lichtmodell kennt kein Gelände**, solange das Horizontprofil (§7.3)
+  nicht vorberechnet ist. In Tälern und Hügelstädten — Lissabon, Prag, alles
+  Alpine — liegt es dann systematisch zu spät. Bis dahin gehört die Angabe als
+  „bei freiem Horizont" gekennzeichnet.
 - **Keine Echtzeit.** Verkehr, Streiks, spontane Schließungen sieht das System
   nicht — bewusste Übergabe an Apple/Google Maps für die Navigation.
 - **Speicherbedarf** eines späteren Routers (Valhalla-Kacheln zusätzlich zu den
@@ -1664,3 +1721,63 @@ eine Uhrzeit, Blöcke bleiben relativ. Ohne diese Trennung wäre die grobe Planu
 ausgerechnet dort gescheitert, wo Pünktlichkeit zählt. Dazu die Erkenntnis, dass
 das System **nach unten abbauen** können muss: Ein Tagesausflug darf sich nicht
 anfühlen wie eine amputierte Weltreise.
+
+---
+
+## 19. Marktumfeld
+
+Stand 2026-09-02, auf Basis einer Web-Recherche — teils von Herstellerseiten,
+also **Werbeaussagen, keine geprüften Fakten**. Vor strategischen Schlüssen
+wäre ein Nachmittag mit zwei, drei dieser Apps und einer echten Reise mehr wert
+als jede weitere Suche.
+
+### 19.1 Zwei reife Lager
+
+**KI-Reiseplaner** sind ein voller Markt: Layla baut Mehrstädte-Routen und
+Roadtrips mit Tagesplan und Live-Preisen, Mindtrip fährt eine POI-Datenbank in
+Millionenhöhe samt Buchungsanbindung auf, Wanderlog ist stark beim
+kartenbasierten Umsortieren, Stardrift wirbt mit dem Ändern einzelner Tage ohne
+Neubau des Plans (also §5), Stippl ergänzt Budget, Packliste und
+Gruppenfreigabe.
+
+**Lichtplaner für Fotografen** sind ebenso ausgereift: PhotoPills, Sun Surveyor,
+LightPlan (3D-Gelände, Wolkenüberlagerung), PhotoTime (offline), Golden Hour
+(Sonnenazimut, Zeit-Regler). Sie rechnen §7.3 — teils besser, siehe die
+Geländeverschattung, die von dort übernommen wurde.
+
+### 19.2 Die Lücke liegt zwischen den Lagern
+
+Es war nichts zu finden, das beides verbindet. **Die Lichtapps planen einen
+Shot, die Reiseplaner planen einen Tag — niemand plant den Tag nach dem Licht.**
+Dazu kommen zwei Dinge, die keine Marktapp abdeckt, und zwar strukturell:
+
+- **Der private Kontext.** Keine dieser Apps liest die eigene
+  Hotelbestätigung aus dem eigenen Dokumentenbestand, weiß aus der
+  Gesichtserkennung, wer mitfährt, oder kennt die eigenen Belege. Sie können es
+  auch nicht — dafür müssten sie das digitale Leben ihrer Nutzer hosten.
+  fk-encore tut das bereits; das ist der eigentliche Graben.
+- **Die Schleife unterwegs.** Die Marktapps *erzeugen* Pläne. Dass ein Geofence
+  bemerkt, dass die Gruppe um 14 Uhr noch beim ersten Stopp steht, und den
+  fertigen Ersatzplan hinlegt (§5, §7.1), war nirgends zu sehen — ebenso wenig
+  Gruppenfairness und Splits (§6).
+
+### 19.3 Was daraus für die Prioritäten folgt
+
+**Das Erzeugen eines Reiseplans ist inzwischen ein Gebrauchsartikel.** Dort
+gegen Anbieter mit Buchungsdaten und Millionen POIs anzutreten, wäre verlorene
+Mühe. Der Wert liegt in der anderen Hälfte: privater Kontext, die Schleife
+unterwegs, das Licht.
+
+Das verschiebt die Messlatte für die Schritte 1–3 (§13): Der ehrliche Test ist
+nicht „ist der erzeugte Plan so gut wie bei den Großen", sondern **„hält er
+stand, wenn der Tag anders läuft, und nutzt er, was nur wir wissen"**.
+
+### 19.4 Ausdrücklicher Nicht-Auftrag: Buchen
+
+Buchungsanbindungen (Unterkunft, Touren, Tickets) sind bei den Marktapps der
+Kern des Geschäftsmodells. Für ein selbst gehostetes Familiensystem sind sie
+**kein Ziel** — sie brächten Provisionslogik, kommerzielle Datenabhängigkeiten
+und genau das bezahlte Ranking, gegen das §3.8 und §10.7 sich entschieden
+haben. Der Planer hört bei der Empfehlung auf; gebucht wird woanders, und das
+Ergebnis kommt als Dokument zurück (§3.4). Das steht hier, damit die Lücke in
+einem Jahr als Entscheidung erkennbar ist und nicht als Versäumnis.
