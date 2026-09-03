@@ -30,6 +30,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { adminPool, connectionInfo, poolFor } from "./db.ts";
+import { refreshFacadeAzimuth } from "./facade-azimuth.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -183,6 +184,19 @@ export async function runReplicationUpdate(
     "--number-processes", String(parseInt(process.env.GEO_OSM2PGSQL_PROCS ?? "2", 10)),
   ]);
   const after = await readState(postgresDb);
+
+  // An append re-inserts changed POIs through the same table
+  // definition, so a rebuilt area POI arrives with an outline and no
+  // azimuth. The pass is incremental and does nothing when the diff
+  // touched no area POI.
+  await refreshFacadeAzimuth(postgresDb).catch((err: unknown) => {
+    // A missing azimuth degrades the light hint; it must not fail an
+    // otherwise successful replication update.
+    console.warn(
+      `[geo] facade azimuth refresh after update failed for ${postgresDb}: ` +
+        `${(err as Error).message}`,
+    );
+  });
 
   return {
     postgresDb,

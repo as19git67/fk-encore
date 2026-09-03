@@ -32,6 +32,7 @@ import { fileURLToPath } from "node:url";
 
 import { adminPool, connectionInfo, dropPool, poolFor } from "./db.ts";
 import { initReplication } from "./replication.ts";
+import { refreshFacadeAzimuth } from "./facade-azimuth.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -177,6 +178,10 @@ async function runImport(req: ImportRequest): Promise<RunResult> {
   await runOsm2pgsql(req.postgresDb, pbfPath);
 
   await postImportIndexes(req.postgresDb);
+  // The outline only exists during the import; turn it into the one
+  // number the planner needs before anything else touches the table.
+  const oriented = await refreshFacadeAzimuth(req.postgresDb);
+  console.log(`[geo] facade azimuth computed for ${oriented} area POIs in ${req.postgresDb}`);
   await runAnalyze(req.postgresDb);
   await verifyImportData(req.postgresDb);
 
@@ -310,6 +315,12 @@ async function postImportIndexes(database: string): Promise<void> {
   const pool = poolFor(database);
   await pool.query(`CREATE INDEX IF NOT EXISTS osm_pois_kind_idx     ON osm_pois (kind)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS osm_pois_tags_idx     ON osm_pois USING GIN (tags)`);
+  // Partial: only area POIs still awaiting an azimuth are ever scanned
+  // by the refresh pass, and after an import that set is empty again.
+  await pool.query(
+    `CREATE INDEX IF NOT EXISTS osm_pois_pending_azimuth_idx ON osm_pois (osm_id)
+       WHERE shape IS NOT NULL AND facade_azimuth IS NULL`,
+  );
   await pool.query(`CREATE INDEX IF NOT EXISTS osm_admin_level_idx   ON osm_admin (admin_level)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS osm_highways_name_idx ON osm_highways (name)`);
 }

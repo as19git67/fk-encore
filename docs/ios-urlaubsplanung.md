@@ -1246,10 +1246,20 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
   Tag-Query liegt das Risiko aber in der SQL-Semantik. Zu tun: PostGIS-Extension
   in Sandbox und CI verfügbar machen, einen Testhelfer schreiben, der eine
   `osm_pois`-Tabelle anlegt und mit einigen Dutzend Zeilen befüllt, und
-  entscheiden, ob die neuen Tests im Haupt-Testlauf mitlaufen (dafür müsste
-  `geo/**` teilweise aus dem Ausschluss heraus) oder im eigenen geo-Lauf
-  bleiben.
-- **Die dreifache Tag-Liste zusammenführen.** Dieselbe Tag-Kenntnis steht in
+  entscheiden, ob die neuen Tests im Haupt-Testlauf mitlaufen oder im eigenen
+  geo-Lauf bleiben.
+
+  **Umgesetzt (Schritt 1):** Die Suchtests bleiben im geo-eigenen Lauf
+  (`geo/src/poi-search.test.ts`, `node:test`), weil geo ein eigenständiges Paket
+  mit eigenem Container und eigener Datenbank ist; der geo-Workflow bekommt dafür
+  einen PostGIS-Service. Ohne erreichbare Datenbank **überspringen** sie sich mit
+  klarer Begründung, statt rot zu werden — eine rote Suite, die nur „hier ist
+  keine Datenbank" bedeutet, erzieht dazu, rote Suiten zu ignorieren. Die
+  Verbindung zum Haupt-Testlauf hält stattdessen
+  `osm-admin/poi-tag-sync.test.ts`: Er liest die geo-Dateien von der Platte und
+  schlägt fehl, sobald die Tag-Listen auseinanderlaufen.
+- **Die dreifache Tag-Liste zusammenführen** (umgesetzt in Schritt 1 als
+  Drift-Test, siehe unten). Dieselbe Tag-Kenntnis steht in
   `geo/src/osm2pgsql.lua` (Importfilter), `geo/src/pois.ts` (Query-Defaults) und
   `osm-admin/poi.config.ts` (Aufruferfilter) — mit zwei „must stay in
   sync"-Kommentaren als einziger Absicherung. Die Planung erweitert alle drei.
@@ -1274,13 +1284,55 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    langsame Teil (Import) vom schnellen (Query, Solver) entkoppelt.
 2. **`trip-planner`, ein Tag, Fußwege per Heuristik** — Constraints per API,
    kein LLM, kein Frontend. Liefert Blöcke mit Spots. Deterministisch testbar.
+
+   **Umgesetzt:** `POST /trip-planner/day`. Bewusst **zustandslos** — der Plan
+   wird berechnet und zurückgegeben, nicht gespeichert. Persistenz (§12) käme
+   mit Schritt 3, wenn die Neuverteilung sie tatsächlich braucht; sie jetzt
+   anzulegen hieße, ein Datenmodell für Mechanik zu bauen, die es noch nicht
+   gibt. Die Reihenfolge im Block ist exakt gelöst (Permutation bis sieben
+   Stopps), die Auswahl greedy nach Wert je Minute. Nur der letzte
+   Spots-Block zahlt den Rückweg zum Anker — das ist der Weg, den man
+   tatsächlich geht.
 3. **Neuverteilung** — „ab hier, ab jetzt", Vorrat, Verschieben auf Folgetage.
    Bewusst **vor** dem hübschen UI, weil es die Kernmechanik ist.
+
+   **Umgesetzt:** `POST /trip-planner/plans` legt einen mehrtägigen Plan an
+   (Tage werden nacheinander aus einem schrumpfenden Vorrat gelöst, damit kein
+   Spot zweimal vorkommt), `POST /trip-planner/plans/:id/redistribute` rechnet
+   den Rest neu. Hier kommt die Persistenz dazu (Migration `0157_trip_planner`):
+   Plan → Tage → Blöcke → Stopps, dazu der Vorrat. Die Entscheidungen bleiben
+   in den reinen Modulen — `redistribute.ts` bekommt Zustand herein und gibt
+   Zustand heraus, ohne Uhr, Netz oder Datenbank, damit die Neuverteilung im
+   Funkloch läuft. Vier Regeln sind wörtlich umgesetzt: nur der Rest wird neu
+   gerechnet, angeheftete Stopps bleiben, Verdrängtes geht mit Bonus in den
+   Vorrat zurück statt in den Papierkorb, und fallen gelassen wird das
+   Niedrigstbewertete.
 4. **Importerweiterung** — jetzt, wo der Planer läuft und zeigt, welche Tags er
    wirklich braucht: `opening_hours`, `cuisine`, `wheelchair`, `fee`,
    `website`, **`name:en`**, `diet:*`, `outdoor_seating`, dazu **Gastronomie
    und Alltagsinfrastruktur** (§10.2) und das **Fassadenazimut** (§7.3). Alles,
    was einen Neuimport erzwingt, in einem Zug.
+
+   **Umgesetzt.** Zwei Dinge sind dabei anders gekommen als hier geplant:
+
+   - **Das Polygon bleibt liegen.** Vorgesehen war, das Azimut beim Import zu
+     berechnen und die Umrisse zu verwerfen. Das geht nicht: Die stündliche
+     Replikation fügt geänderte POIs über dieselbe Tabellendefinition wieder
+     ein, und `osm2pgsql --append` scheitert an einer Tabelle, deren Spalten
+     nicht mehr passen. Der Umriss bleibt also als Spalte, und ein
+     **inkrementeller Nachlauf** (`refreshFacadeAzimuth`) berechnet das Azimut
+     für alles, was noch keins hat — nach dem Import und nach jedem
+     Replikationslauf.
+   - **Berechnet wird über die orientierte Hülle**, nicht über die längste
+     Polygonkante: das kleinste gedrehte Rechteck um den Umriss, dessen längere
+     Seite die Hauptrichtung angibt. Robuster gegenüber einer einzelnen langen
+     Rückwand und ohne Eckpunkt-Iteration, die die Lua-Schnittstelle nicht
+     hergibt.
+
+   Die Trennung aus §10.2 ist damit auch im Test verankert: Die Filter des
+   Foto-Matchers sind ab jetzt eine **Teilmenge** des Imports, nicht mehr
+   deckungsgleich mit ihm — sonst konkurrierten Bäckereien mit
+   Sehenswürdigkeiten.
 5. **NL-Eingabe** über llm-service (JSON-Schema, strikte Validierung) +
    Mehrtagesplanung.
 6. **Etappen, Fixpunkte, zwei Auflösungen** (§4.2–§4.4) — Reisen über mehrere
