@@ -236,6 +236,55 @@ export async function remove(
  * Map a Geofabrik hierarchical slug to a safe Postgres database name.
  * "europe/germany/bayern" → "nom_europe_germany_bayern".
  */
+/**
+ * Size breakdown for one region, for the before/after measurement the
+ * import rework needs (docs/ios-urlaubsplanung.md §13.0).
+ *
+ * Read it once before a re-import and once after; the difference is
+ * what carrying gastronomy and everyday infrastructure costs. Compare
+ * like with like — `totalMb` against `totalMb` — since the total
+ * includes indexes and TOAST while `tableMb` is the heap alone.
+ */
+export async function regionStorage(
+  slug: string,
+  deps: { db?: typeof dbDefault; geo?: GeoClient } = {},
+): Promise<RegionStorageResult> {
+  const db = deps.db ?? dbDefault;
+  const geo = deps.geo ?? getGeoClient();
+
+  const [row] = await db
+    .select()
+    .from(osmRegionImports)
+    .where(eq(osmRegionImports.slug, slug))
+    .limit(1);
+  if (!row) throw new RegionNotFoundError(`no region '${slug}'`);
+
+  try {
+    const storage = await geo.regionStorage(row.postgres_db);
+    return { slug, ...storage };
+  } catch (err) {
+    // A region that was never imported has no database yet. That is a
+    // state, not a fault, and saying so beats a 500.
+    throw new RegionStorageUnavailableError(
+      `no storage figures for '${slug}': ${(err as Error).message}`,
+    );
+  }
+}
+
+export class RegionNotFoundError extends Error {}
+export class RegionStorageUnavailableError extends Error {}
+
+export interface RegionStorageResult {
+  slug: string;
+  database: string;
+  sizeMb: number;
+  tables: { table: string; totalMb: number; tableMb: number; rows: number }[];
+  poisByKind: { kind: string; count: number }[];
+  poiTotal: number;
+  poisWithShape: number;
+  poisWithFacadeAzimuth: number;
+}
+
 export function slugToPostgresDb(slug: string): string {
   const safe = slug.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/_+/g, "_");
   return `nom_${safe}`.replace(/_$/, "");
