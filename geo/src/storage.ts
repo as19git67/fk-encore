@@ -93,14 +93,36 @@ export async function readRegionStorage(database: string): Promise<RegionStorage
       )
     : { rows: [] as { kind: string; count: string }[] };
 
-  const shapes = hasPois
-    ? await pool.query<{ total: string; with_shape: string; with_azimuth: string }>(
-        `SELECT count(*)::text                                              AS total,
-                count(*) FILTER (WHERE shape IS NOT NULL)::text             AS with_shape,
-                count(*) FILTER (WHERE facade_azimuth IS NOT NULL)::text    AS with_azimuth
-           FROM osm_pois`,
+  // A region imported before the `shape`/`facade_azimuth` columns were
+  // added to the osm2pgsql schema still has an `osm_pois` table without
+  // them — osm2pgsql only applies this schema on create, it doesn't
+  // migrate existing tables. Check for the columns rather than assuming
+  // they exist, so an old region reports what it has instead of a 500.
+  const hasShapeColumns = hasPois
+    ? await pool.query<{ column_name: string }>(
+        `SELECT column_name FROM information_schema.columns
+          WHERE table_name = 'osm_pois' AND column_name IN ('shape', 'facade_azimuth')`,
       )
-    : { rows: [{ total: "0", with_shape: "0", with_azimuth: "0" }] };
+    : { rows: [] as { column_name: string }[] };
+  const columnNames = new Set(hasShapeColumns.rows.map((r) => r.column_name));
+
+  const shapes =
+    hasPois && columnNames.has("shape") && columnNames.has("facade_azimuth")
+      ? await pool.query<{ total: string; with_shape: string; with_azimuth: string }>(
+          `SELECT count(*)::text                                              AS total,
+                  count(*) FILTER (WHERE shape IS NOT NULL)::text             AS with_shape,
+                  count(*) FILTER (WHERE facade_azimuth IS NOT NULL)::text    AS with_azimuth
+             FROM osm_pois`,
+        )
+      : {
+          rows: [
+            {
+              total: hasPois ? String(byKind.rows.reduce((n, r) => n + Number(r.count), 0)) : "0",
+              with_shape: "0",
+              with_azimuth: "0",
+            },
+          ],
+        };
 
   const counts = shapes.rows[0] ?? { total: "0", with_shape: "0", with_azimuth: "0" };
 

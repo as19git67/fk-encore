@@ -286,7 +286,16 @@ export class HttpGeoClient implements GeoClient {
       { method: "GET", headers: this.headers(), signal: AbortSignal.timeout(STATUS_TIMEOUT_MS) },
     );
     if (!res.ok) {
-      throw new Error(`geo: GET /storage/${postgresDb} → HTTP ${res.status}`);
+      let detail = "";
+      try {
+        const j = (await res.json()) as { error?: string };
+        detail = j.error ?? "";
+      } catch {
+        /* ignore */
+      }
+      throw new Error(
+        `geo: GET /storage/${postgresDb} → HTTP ${res.status}${detail ? `: ${detail}` : ""}`,
+      );
     }
     return (await res.json()) as GeoRegionStorage;
   }
