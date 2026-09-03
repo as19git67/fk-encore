@@ -55,6 +55,20 @@ struct PhotoCompareView: View {
     /// predate the scan, and it carries no breakdown at all.
     @State private var quality: [Int: PhotoQualityDetails.Fresh] = [:]
     @State private var showQuality = false
+    @State private var showGestureHelp = false
+    /// The group as the fullscreen viewer wants it, for the final check on the
+    /// confirmation screen. Fetched once, because the queue's row carries only
+    /// id, filename and score.
+    @State private var rows: [PhotoWithCuration] = []
+    @State private var checkIndex = 0
+    @State private var isChecking = false
+    /// Whether the confirmation has been filled from the tournament's proposal
+    /// already. See `seedKeepIds()`.
+    @State private var didSeedKeep = false
+    /// The panes' arrangement, mirrored out of the `GeometryReader` because the
+    /// bottom bar is chrome and sits outside it — „linkes" and „oberes" are
+    /// the same button in different orientations.
+    @State private var orientationIsPortrait = true
 
     init(photos: [ReviewQueuePhoto], onCommit: @escaping ([Int]) -> Void) {
         self.photos = photos
@@ -126,6 +140,21 @@ struct PhotoCompareView: View {
             // Keyed on the pair, so moving to the next one fetches it — and
             // the first pair is fetched by the same task on appear.
             .task(id: tournament.current) { await load() }
+            .fullScreenCover(isPresented: $isChecking) {
+                NavigationStack {
+                    PhotoFullscreenView(
+                        photos: rows,
+                        currentIndex: $checkIndex,
+                        contextFooter: { photo in
+                            AnyView(checkFooter(photoId: photo.id))
+                        }
+                    )
+                }
+            }
+            .popover(isPresented: $showGestureHelp) {
+                GestureHelp(isPortrait: orientationIsPortrait)
+                    .presentationCompactAdaptation(.popover)
+            }
             .sheet(isPresented: $showQuality) {
                 if let pair {
                     QualityBreakdownSheet(
@@ -155,14 +184,23 @@ struct PhotoCompareView: View {
                 ? AnyLayout(VStackLayout(spacing: 2))
                 : AnyLayout(HStackLayout(spacing: 2))
 
-            VStack(spacing: 0) {
-                layout {
-                    pane(pair.first, indexInPair: 0, zoom: zooms.first,
-                         paneSize: paneSize, isPortrait: isPortrait, screen: geo.size)
-                    pane(pair.second, indexInPair: 1, zoom: zooms.second,
-                         paneSize: paneSize, isPortrait: isPortrait, screen: geo.size)
-                }
-                actionBar(pair, isPortrait: isPortrait)
+            layout {
+                pane(pair.first, indexInPair: 0, zoom: zooms.first,
+                     paneSize: paneSize, isPortrait: isPortrait, screen: geo.size)
+                pane(pair.second, indexInPair: 1, zoom: zooms.second,
+                     paneSize: paneSize, isPortrait: isPortrait, screen: geo.size)
+            }
+            // The verdicts live in the system bottom bar, not in a strip
+            // added here. A `VStack` of panes-plus-bar put the bar past the
+            // bottom edge, because the panes are sized against the *whole*
+            // GeometryReader and `ComparePane` pins that size — so nothing
+            // could shrink to make room (#1091 §1). The bar is chrome: the
+            // system reserves its height, this reader measures what is left,
+            // and the panes stay as large as the screen allows without
+            // covering the photos the way a floating bar would.
+            .onAppear { orientationIsPortrait = isPortrait }
+            .onChange(of: isPortrait) { _, portrait in
+                orientationIsPortrait = portrait
             }
         }
     }
@@ -192,40 +230,44 @@ struct PhotoCompareView: View {
         )
     }
 
-    /// Every gesture, as a labelled button.
+    /// Every verdict, as a labelled button.
     ///
     /// A fling is quick but invisible: nothing on screen says it exists, and
     /// nothing about it works with VoiceOver or Switch Control. These are the
-    /// same four verdicts the web offers under its panes.
-    private func actionBar(
-        _ pair: (first: ReviewQueuePhoto, second: ReviewQueuePhoto),
-        isPortrait: Bool
-    ) -> some View {
-        HStack(spacing: 12) {
+    /// same four verdicts the web offers under its panes — in the system
+    /// bottom bar, so their height is reserved rather than taken from the
+    /// photos and their insets are the system's problem.
+    @ToolbarContentBuilder
+    private func verdictBar(
+        _ pair: (first: ReviewQueuePhoto, second: ReviewQueuePhoto)
+    ) -> some ToolbarContent {
+        ToolbarItemGroup(placement: .bottomBar) {
             verdictButton(
-                isPortrait ? "Oberes raus" : "Linkes raus",
-                systemImage: "hand.thumbsdown"
+                orientationIsPortrait ? "Oberes raus" : "Linkes raus",
+                systemImage: orientationIsPortrait ? "arrow.up.circle" : "arrow.left.circle"
             ) { discard(pair.first.id) }
+
+            Spacer()
 
             verdictButton("Gleich gut", systemImage: "equal.circle") {
                 withAnimation { tournament.draw() }
                 focus = nil
             }
 
+            Spacer()
+
             verdictButton("Später", systemImage: "arrow.uturn.forward") {
                 withAnimation { tournament.skip() }
                 focus = nil
             }
 
+            Spacer()
+
             verdictButton(
-                isPortrait ? "Unteres raus" : "Rechtes raus",
-                systemImage: "hand.thumbsdown"
+                orientationIsPortrait ? "Unteres raus" : "Rechtes raus",
+                systemImage: orientationIsPortrait ? "arrow.down.circle" : "arrow.right.circle"
             ) { discard(pair.second.id) }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity)
-        .background(.ultraThinMaterial)
     }
 
     private func verdictButton(
@@ -234,15 +276,12 @@ struct PhotoCompareView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            VStack(spacing: 2) {
-                Image(systemName: systemImage)
-                Text(title)
-                    .font(.caption2)
-            }
-            .frame(maxWidth: .infinity)
+            Label(title, systemImage: systemImage)
         }
-        .buttonStyle(.plain)
+        // While a tile is still flying off the screen its verdict is already
+        // committed; a second one would decide a pair that is no longer up.
         .disabled(flung != nil)
+        .accessibilityLabel(title)
     }
 
     // MARK: - Confirming
@@ -272,6 +311,18 @@ struct PhotoCompareView: View {
                 Text(keepSummary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                // Only offered while a pair is genuinely unjudged — ending the
+                // comparison used to be one-way, and „weiter vergleichen" on a
+                // finished tournament would open an empty screen (#1091 §2c).
+                if tournament.hasUnsettledPairs {
+                    Button {
+                        withAnimation { tournament.resumeComparing() }
+                    } label: {
+                        Label("Weiter vergleichen", systemImage: "rectangle.on.rectangle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
                 Button {
                     onCommit(Array(keepIds).sorted())
                     dismiss()
@@ -296,33 +347,98 @@ struct PhotoCompareView: View {
         return "\(keep) behalten · \(hide) ausblenden"
     }
 
+    /// One photo in the confirmation.
+    ///
+    /// A tap on the image opens it full size, because this is the screen where
+    /// photos get hidden and it shows them at about 110 pt — deciding from a
+    /// thumbnail is the thing the whole comparison exists to avoid. Keeping
+    /// and hiding moved onto the check icon, which gets a hit area worth
+    /// aiming at rather than the glyph's own size (#1091 §2a, §2b).
     private func confirmationTile(_ photo: ReviewQueuePhoto) -> some View {
         let kept = keepIds.contains(photo.id)
+        return PhotoThumbnailView(filename: photo.filename, photoId: photo.id)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .opacity(kept ? 1 : 0.35)
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+            .onTapGesture { openCheck(photo.id) }
+            .accessibilityLabel("Foto ansehen")
+            .overlay(alignment: .bottomLeading) {
+                if let percent = qualityPercent(for: photo) {
+                    Text("\(percent) %")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(.black.opacity(0.6), in: Capsule())
+                        .padding(5)
+                }
+            }
+            // On top of the image, so its own hits win over the tap that
+            // opens the photo. 44 pt is the smallest thing worth aiming at.
+            .overlay(alignment: .topTrailing) {
+                keepToggle(photo.id)
+            }
+    }
+
+    private func keepToggle(_ photoId: Int) -> some View {
+        let kept = keepIds.contains(photoId)
         return Button {
-            if kept { keepIds.remove(photo.id) } else { keepIds.insert(photo.id) }
+            toggleKeep(photoId)
         } label: {
-            PhotoThumbnailView(filename: photo.filename, photoId: photo.id)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .opacity(kept ? 1 : 0.35)
-                .overlay(alignment: .topTrailing) {
-                    Image(systemName: kept ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(kept ? Color.accentColor : .secondary)
-                        .padding(6)
-                }
-                .overlay(alignment: .bottomLeading) {
-                    if let percent = qualityPercent(for: photo) {
-                        Text("\(percent) %")
-                            .font(.caption2.bold())
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(.black.opacity(0.6), in: Capsule())
-                            .padding(5)
-                    }
-                }
+            Image(systemName: kept ? "checkmark.circle.fill" : "circle")
+                .font(.title3)
+                .foregroundStyle(kept ? Color.accentColor : .white)
+                .shadow(radius: 2)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(kept ? "Behalten" : "Ausblenden")
+        .accessibilityLabel(kept ? "Behalten, ausgewählt" : "Ausblenden, nicht ausgewählt")
+    }
+
+    private func toggleKeep(_ photoId: Int) {
+        if keepIds.contains(photoId) {
+            keepIds.remove(photoId)
+        } else {
+            keepIds.insert(photoId)
+        }
+    }
+
+    /// Open one photo of the group full size, for the last look before
+    /// anything is committed.
+    private func openCheck(_ photoId: Int) {
+        guard !rows.isEmpty else { return }
+        checkIndex = rows.firstIndex { $0.id == photoId } ?? 0
+        isChecking = true
+    }
+
+    /// Keeping and hiding, inside the full-size check — so „look at it, then
+    /// decide" does not send the user back to the grid to act on what they
+    /// just saw.
+    private func checkFooter(photoId: Int) -> some View {
+        let kept = keepIds.contains(photoId)
+        return HStack(spacing: 12) {
+            Button {
+                toggleKeep(photoId)
+            } label: {
+                Label(
+                    kept ? "Behalten" : "Ausblenden",
+                    systemImage: kept ? "checkmark.circle.fill" : "circle"
+                )
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(
+                    kept ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.12),
+                    in: RoundedRectangle(cornerRadius: 12)
+                )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 6)
+        .background(.bar)
     }
 
     // MARK: - Toolbar
@@ -356,12 +472,24 @@ struct PhotoCompareView: View {
                 }
             }
             ToolbarItem(placement: .primaryAction) {
+                // The gestures are the fast path and completely invisible;
+                // without a legend somewhere they are not discoverable.
+                Button {
+                    showGestureHelp = true
+                } label: {
+                    Label("Hilfe", systemImage: "questionmark.circle")
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
                 // Long groups need a way out that is not „compare all fifteen
                 // pairs": the scores so far are already an answer.
                 Button("Fertig") {
                     withAnimation { tournament.finishComparing() }
                 }
             }
+        }
+        if let pair {
+            verdictBar(pair)
         }
         ToolbarItem(placement: .principal) {
             Text(progressLabel)
@@ -490,7 +618,15 @@ struct PhotoCompareView: View {
         if tournament.current == nil { seedKeepIds() }
     }
 
+    /// Fill the confirmation from what the comparisons came to — once.
+    ///
+    /// „Weiter vergleichen" can bring the user back here a second time, and
+    /// re-seeding then would silently undo the toggles they set by hand the
+    /// first time round. The proposal is a starting point, not a verdict that
+    /// gets re-imposed.
     private func seedKeepIds() {
+        guard !didSeedKeep else { return }
+        didSeedKeep = true
         keepIds = Set(tournament.suggestedKeepIds)
     }
 
@@ -525,7 +661,20 @@ struct PhotoCompareView: View {
             }
             measureSharpness(of: photo)
         }
-        if tournament.current == nil, keepIds.isEmpty { seedKeepIds() }
+        if tournament.current == nil {
+            seedKeepIds()
+            await loadRowsForCheck()
+        }
+    }
+
+    /// The group's full rows, for the final-check viewer on the confirmation.
+    ///
+    /// Fetched when the confirmation is reached rather than up front: during
+    /// the comparison nothing needs them, and a group of ten would pay for a
+    /// batch it might never use.
+    private func loadRowsForCheck() async {
+        guard rows.isEmpty else { return }
+        rows = (try? await PhotoFetch.byIds(tournament.ranked)) ?? []
     }
 
     /// Measure every face in a photo once both its pixels and its boxes are in.
@@ -541,6 +690,63 @@ struct PhotoCompareView: View {
         Task.detached(priority: .userInitiated) {
             let scores = boxes.map { FocusPeaking.sharpness(of: $0, in: cgImage) }
             await MainActor.run { sharpness[photo.id] = scores }
+        }
+    }
+}
+
+/// What the screen can do without a button being pressed.
+///
+/// The comparison is gesture-first — fling a photo away, tap a face to line
+/// both sides up on it — and none of that is visible. Every gesture also has a
+/// button, but the buttons do not explain the gestures, so this does (#1091
+/// §1).
+private struct GestureHelp: View {
+    let isPortrait: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Bedienung")
+                .font(.headline)
+            row(
+                "hand.draw",
+                "Ein Foto wegwerfen",
+                isPortrait
+                    ? "Nach oben oder unten aus dem Bild schieben — jede Richtung außer der zum anderen Foto."
+                    : "Nach links oder rechts aus dem Bild schieben — jede Richtung außer der zum anderen Foto."
+            )
+            row(
+                "hand.tap",
+                "Gesichter vergleichen",
+                "Auf ein Gesicht tippen: beide Fotos zoomen gleich weit darauf. Nochmal tippen zeigt wieder das ganze Bild."
+            )
+            row(
+                "equal.circle",
+                "Gleich gut",
+                "Das Paar ist erledigt, ohne dass eines gewinnt."
+            )
+            row(
+                "arrow.uturn.forward",
+                "Später",
+                "Das Paar wird zurückgestellt und kommt am Ende wieder."
+            )
+            Divider()
+            Text("Nichts wird ausgeblendet, solange die Auswahl am Ende nicht bestätigt ist.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(20)
+        .frame(maxWidth: 340)
+    }
+
+    private func row(_ systemImage: String, _ title: String, _ detail: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: systemImage)
+                .frame(width: 22)
+                .foregroundStyle(.tint)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.subheadline.weight(.semibold))
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 }
