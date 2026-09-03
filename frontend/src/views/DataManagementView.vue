@@ -44,9 +44,10 @@ import {
 import {
   listOsmRegions, suggestOsmRegion, createOsmRegion,
   approveOsmRegion, deleteOsmRegion, reverseGeocodeViaOsm,
-  bulkSuggestOsmRegions, refreshOsmRegion,
+  bulkSuggestOsmRegions, refreshOsmRegion, getOsmRegionStorage,
   type OsmRegionImport, type RegionSuggestion,
   type BulkSuggestResult, type BulkRegionSuggestion, type RedundantRegion,
+  type RegionStorage,
 } from '../api/osmAdmin'
 import { getBuildInfo } from '../api/system'
 import { useAuthStore } from '../stores/auth'
@@ -816,6 +817,25 @@ async function handleDeleteOsmRegion(slug: string) {
     osmError.value = (err as Error).message ?? String(err)
   } finally {
     osmLoading.value = false
+  }
+}
+
+const storageDialogVisible = ref(false)
+const storageLoading = ref(false)
+const storageError = ref('')
+const storageResult = ref<RegionStorage | null>(null)
+
+async function handleShowStorage(slug: string) {
+  storageDialogVisible.value = true
+  storageLoading.value = true
+  storageError.value = ''
+  storageResult.value = null
+  try {
+    storageResult.value = await getOsmRegionStorage(slug)
+  } catch (err) {
+    storageError.value = (err as Error).message ?? String(err)
+  } finally {
+    storageLoading.value = false
   }
 }
 
@@ -1796,6 +1816,14 @@ onBeforeUnmount(() => {
                   @click="handleRefreshOsmRegion(r.slug)"
                 />
                 <Button
+                  v-if="r.status === 'ready_running' || r.status === 'ready_stopped'"
+                  icon="pi pi-database"
+                  label="DB-Größe"
+                  size="small"
+                  text
+                  @click="handleShowStorage(r.slug)"
+                />
+                <Button
                   icon="pi pi-trash"
                   label="Entfernen"
                   size="small"
@@ -1851,6 +1879,14 @@ onBeforeUnmount(() => {
               text
               :loading="osmLoading"
               @click="handleRefreshOsmRegion(r.slug)"
+            />
+            <Button
+              v-if="r.status === 'ready_running' || r.status === 'ready_stopped'"
+              icon="pi pi-database"
+              label="DB-Größe"
+              size="small"
+              text
+              @click="handleShowStorage(r.slug)"
             />
             <Button
               icon="pi pi-trash"
@@ -2000,6 +2036,55 @@ onBeforeUnmount(() => {
         <template v-else>
           <Button label="Schließen" @click="purgeDialogVisible = false" />
         </template>
+      </template>
+    </Dialog>
+
+    <!-- Region storage detail dialog -->
+    <Dialog
+      v-model:visible="storageDialogVisible"
+      modal
+      header="Datenbankgröße"
+      :style="{ width: 'min(560px, 92vw)' }"
+    >
+      <div v-if="storageLoading" class="storage-dialog__loading">
+        <i class="pi pi-spin pi-spinner" /> Wird geladen …
+      </div>
+      <Message v-else-if="storageError" severity="error" :closable="false">{{ storageError }}</Message>
+      <div v-else-if="storageResult" class="storage-dialog">
+        <div class="storage-dialog__summary">
+          <code>{{ storageResult.database }}</code>
+          <span class="storage-dialog__total">{{ storageResult.sizeMb }} MB</span>
+        </div>
+
+        <table class="storage-dialog__table">
+          <thead>
+            <tr><th>Tabelle</th><th>Gesamt</th><th>Heap</th><th>Zeilen</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="t in storageResult.tables" :key="t.table">
+              <td><code>{{ t.table }}</code></td>
+              <td>{{ t.totalMb }} MB</td>
+              <td>{{ t.tableMb }} MB</td>
+              <td>{{ t.rows.toLocaleString('de-DE') }}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="storage-dialog__pois">
+          <strong>POIs: {{ storageResult.poiTotal.toLocaleString('de-DE') }}</strong>
+          <span class="storage-dialog__hint">
+            {{ storageResult.poisWithShape }} mit Umriss, {{ storageResult.poisWithFacadeAzimuth }} mit Fassaden-Azimut
+          </span>
+          <ul class="storage-dialog__kinds">
+            <li v-for="k in storageResult.poisByKind" :key="k.kind">
+              {{ k.kind }}: {{ k.count.toLocaleString('de-DE') }}
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <template #footer>
+        <Button label="Schließen" @click="storageDialogVisible = false" />
       </template>
     </Dialog>
 
@@ -2500,5 +2585,56 @@ onBeforeUnmount(() => {
 }
 .purge-result__warn {
   color: var(--p-red-600, #c62828);
+}
+.storage-dialog__loading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--p-text-muted-color);
+}
+.storage-dialog__summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.storage-dialog__total {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+.storage-dialog__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin-bottom: 1rem;
+}
+.storage-dialog__table th {
+  color: var(--p-text-muted-color);
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  text-align: left;
+  padding-bottom: 0.3rem;
+}
+.storage-dialog__table td {
+  padding: 0.2rem 0;
+  border-top: 1px solid var(--p-content-border-color);
+}
+.storage-dialog__pois {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.9rem;
+}
+.storage-dialog__hint {
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
+}
+.storage-dialog__kinds {
+  margin: 0.3rem 0 0;
+  padding-left: 1.2rem;
+  font-size: 0.85rem;
+  color: var(--p-text-muted-color);
 }
 </style>

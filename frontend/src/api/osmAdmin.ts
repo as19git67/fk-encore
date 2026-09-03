@@ -161,6 +161,36 @@ export async function bulkSuggestOsmRegions(): Promise<BulkSuggestResult> {
   return apiFetch('/osm/regions/bulk-suggest')
 }
 
+export interface RegionStorageTable {
+  table: string
+  totalMb: number
+  tableMb: number
+  rows: number
+}
+
+export interface RegionStorageKindCount {
+  kind: string
+  count: number
+}
+
+export interface RegionStorage {
+  slug: string
+  database: string
+  sizeMb: number
+  tables: RegionStorageTable[]
+  poisByKind: RegionStorageKindCount[]
+  poiTotal: number
+  poisWithShape: number
+  poisWithFacadeAzimuth: number
+}
+
+export async function getOsmRegionStorage(slug: string): Promise<RegionStorage> {
+  return apiFetch('/osm/regions/storage', {
+    method: 'POST',
+    body: JSON.stringify({ slug }),
+  })
+}
+
 export async function reverseGeocodeViaOsm(
   lat: number,
   lon: number,
