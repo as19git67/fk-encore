@@ -2,6 +2,8 @@ import SwiftUI
 
 struct AlbumsListView: View {
     @State private var viewModel = AlbumsViewModel()
+    /// Unreviewed similar-photo groups, for the „Gruppen-Review“ row (#968).
+    @State private var reviewCount = ReviewQueueCount.shared
     @State private var filterSort = AlbumFilterSortViewModel(persistenceKey: "albums.filterSort")
     @State private var showCreateSheet = false
     @State private var showErrorAlert = false
@@ -118,6 +120,33 @@ struct AlbumsListView: View {
                         }
                         .padding(.vertical, 4)
                     }
+
+                    // The web has the review as a regular item in the photo
+                    // navigation; on iOS it only ever existed as a glyph in
+                    // the feed toolbar (#968, proposal 2). This is the same
+                    // rank as „Alle Fotos" and „Personen" without a sixth tab
+                    // for a maintenance task.
+                    NavigationLink(value: GroupReviewRef()) {
+                        HStack(spacing: 12) {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.accentColor.opacity(0.15))
+                                .frame(width: 60, height: 60)
+                                .overlay {
+                                    Image(systemName: "checklist")
+                                        .font(.title2)
+                                        .foregroundStyle(Color.accentColor)
+                                }
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Gruppen-Review")
+                                    .font(.headline)
+                                Text(ReviewQueueNotice.subtitle(reviewCount.pending))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .badge(reviewCount.pending ?? 0)
                 }
 
                 if !pinnedAlbums.isEmpty {
@@ -204,6 +233,9 @@ struct AlbumsListView: View {
         .navigationDestination(for: PersonsRef.self) { _ in
             PersonsListView()
         }
+        .navigationDestination(for: GroupReviewRef.self) { _ in
+            ReviewQueueView()
+        }
         .navigationDestination(for: TimelineYear.self) { year in
             PhotoYearView(year: year)
         }
@@ -251,6 +283,9 @@ struct AlbumsListView: View {
         }
         .task {
             await viewModel.loadAlbums()
+        }
+        .task {
+            await reviewCount.refresh()
         }
         .alert("Neues Album", isPresented: $showCreateSheet) {
             TextField("Name", text: $newAlbumName)

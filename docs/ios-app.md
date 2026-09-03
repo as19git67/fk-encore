@@ -524,6 +524,28 @@ dokumentiert**:
   garantiert einstufiges **Rückgängig** – die neueste Entscheidung wird lokal
   gepuffert und erst mit der nächsten (oder beim Verlassen) gesendet, weil das
   Backend kein „Un-Review" kennt. Entscheiden erfordert `photos.delete`.
+- **Weitere Einstiegspunkte** (#968): bis dahin gab es genau einen — das stille
+  Checklisten-Icon in der Feed-Toolbar. `ReviewQueueCount` liest `total` aus
+  `/photos/groups/review-queue` (`limit=1`) einmal für die ganze App und hält
+  die Zahl lokal aktuell, wenn eine Entscheidung fällt oder rückgängig gemacht
+  wird — der Server wird dafür nicht erneut gefragt.
+  - **Badge** auf dem Checklisten-Icon (`ReviewCountBadge`).
+  - **Eintrag „Gruppen-Review"** im Fotos-Hub (`AlbumsListView`), auf gleicher
+    Stufe wie „Alle Fotos" und „Personen" — das iOS-Gegenstück zum Web-
+    Menüpunkt in `frontend/src/config/modules.ts`.
+  - **Banner im Feed**, wenn etwas offen ist, mit Sprung direkt ins Review;
+    lässt sich für die aktuelle Sitzung ausblenden.
+  - **Deep Link** `f4milphotos://review-queue` (`ReviewDeepLink`,
+    `CFBundleURLTypes` in `Info.plist`), geroutet über einen `fullScreenCover`
+    in `ContentView` statt über einen Tab, weil die Review-Queue zu keinem Tab
+    gehört.
+  - **Lokale Benachrichtigung** (`ReviewQueueNotifier`), nach jedem
+    Hintergrund-Sync geprüft: nur wenn die Zahl gegenüber dem letzten
+    mitgeteilten Stand gestiegen ist, nie beim allerersten Stand nach der
+    Installation (sonst würde ein Neuling mit einer bereits vorhandenen Liste
+    begrüßt). **Keine Push-Infrastruktur** — der Server hat keinen APNs-Pfad;
+    das ist eine rein lokale Prüfung nach dem ohnehin laufenden Sync.
+    Abschaltbar unter Einstellungen → „Hinweis auf neue Gruppen".
 
 ### 2.10 Einstellungen / Admin
 - Profil-Anzeige (Name, E-Mail, Rollen).

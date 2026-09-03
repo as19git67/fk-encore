@@ -3,9 +3,30 @@ import SwiftUI
 struct FeedView: View {
     let viewModel: FeedViewModel
 
+    /// The open-group count, shown as a badge on the toolbar icon and as a
+    /// banner above the stream (#968).
+    @State private var reviewCount = ReviewQueueCount.shared
+    /// Dismissing the banner silences it for this appearance only. A tile that
+    /// stayed gone would take the count with it; the badge is the permanent
+    /// reminder and this is the loud one.
+    @State private var bannerDismissed = false
+    @State private var openReview = false
+
+    private var pendingGroups: Int {
+        reviewCount.pending ?? 0
+    }
+
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 1) {
+                if pendingGroups > 0, !bannerDismissed {
+                    ReviewQueueBanner(
+                        count: pendingGroups,
+                        onOpen: { openReview = true },
+                        onDismiss: { withAnimation { bannerDismissed = true } }
+                    )
+                }
+
                 RecapFeedStripView()
 
                 ForEach(viewModel.items) { item in
@@ -41,8 +62,15 @@ struct FeedView: View {
                     ReviewQueueView()
                 } label: {
                     Image(systemName: "checklist")
+                        .overlay(alignment: .topTrailing) {
+                            ReviewCountBadge(count: reviewCount.pending)
+                        }
                 }
-                .accessibilityLabel("Gruppen-Review")
+                .accessibilityLabel(
+                    pendingGroups > 0
+                        ? "Gruppen-Review, \(pendingGroups) offen"
+                        : "Gruppen-Review"
+                )
             }
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink {
@@ -71,6 +99,12 @@ struct FeedView: View {
             if viewModel.items.isEmpty {
                 await viewModel.loadInitial()
             }
+        }
+        .task {
+            await reviewCount.refresh()
+        }
+        .navigationDestination(isPresented: $openReview) {
+            ReviewQueueView()
         }
     }
 }

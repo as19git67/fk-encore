@@ -457,6 +457,10 @@ public final class BackgroundSyncManager {
         }
         await taskGuard.endIfNeeded()
         await pipelineLock.release()
+        // A sync is what makes new similar-photo groups appear, so it is also
+        // the moment to notice and say so (#968, proposal 5). Silent unless
+        // the queue actually grew since the user was last told.
+        await ReviewQueueNotifier.checkAndNotify()
     }
 
     /// Ends a `beginBackgroundTask` assertion exactly once, however many

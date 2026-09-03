@@ -58,6 +58,16 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 TripAutoStartMonitor.shared.handleNotificationAction(action)
                 completionHandler()
             }
+        case ReviewQueueNotice.notificationCategoryId:
+            // No action buttons on this one — any tap on it means „show me",
+            // which is the deep link it was posted with (#968).
+            Task { @MainActor in
+                if let urlString = response.notification.request.content.userInfo["url"] as? String,
+                   let url = URL(string: urlString) {
+                    ReviewDeepLinkRouter.shared.handle(url)
+                }
+                completionHandler()
+            }
         default:
             completionHandler()
         }
