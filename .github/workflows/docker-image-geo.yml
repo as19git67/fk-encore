@@ -28,6 +28,23 @@ jobs:
       contents: read
       packages: write
 
+    # The area search is tested against a real database rather than query
+    # doubles — a spatial tag query's risk is in the SQL, not in how the
+    # string was assembled. Without this service the tests skip
+    # themselves and the suite stays green but proves nothing.
+    services:
+      postgis:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -48,6 +65,11 @@ jobs:
       - name: Test
         run: npm test
         working-directory: geo
+        env:
+          GEO_DB_HOST: localhost
+          GEO_DB_PORT: 5432
+          GEO_DB_USER: postgres
+          GEO_DB_PASSWORD: postgres
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3

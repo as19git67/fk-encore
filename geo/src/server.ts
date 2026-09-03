@@ -7,6 +7,8 @@
  *   GET    /replication/status/:postgresDb — replication state for one region
  *   POST   /reverse               — { database, lat, lon } → ReverseResult
  *   POST   /pois                  — { database, lat, lon, radiusM?, maxCandidates? }
+ *   POST   /pois/search           — area search for trip planning
+ *   GET    /pois/categories       — the category vocabulary /pois/search accepts
  *   POST   /import                — { slug, postgresDb, pbfUrl }
  *   DELETE /regions/:database     — drop a region database (admin)
  *
@@ -20,6 +22,8 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { adminPool, closeAllPools } from "./db.ts";
 import { reverseGeocode } from "./reverse.ts";
 import { findPoiCandidates } from "./pois.ts";
+import { POI_CATEGORIES } from "./poi-categories.ts";
+import { PoiSearchError, searchPois, type PoiSearchOptions } from "./poi-search.ts";
 import {
   dropRegion,
   getImportStatus,
@@ -109,6 +113,22 @@ app.post("/pois", async (req, res, next) => {
   }
 });
 
+app.get("/pois/categories", (_req, res) => {
+  res.json({
+    categories: POI_CATEGORIES.map((c) => ({ id: c.id, description: c.description })),
+  });
+});
+
+app.post("/pois/search", async (req, res, next) => {
+  try {
+    const { database, options } = parseSearchBody(req.body);
+    const page = await searchPois(database, options);
+    res.json({ database, ...page });
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.post("/import", async (req, res, next) => {
   try {
     const body = req.body as Partial<ImportRequest>;
@@ -183,6 +203,12 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     res.status(err.status).json({ error: err.message });
     return;
   }
+  // Rejected search arguments (bad bbox, unknown category, oversized
+  // radius) are the caller's mistake, not ours — 400, not 500.
+  if (err instanceof PoiSearchError) {
+    res.status(400).json({ error: err.message });
+    return;
+  }
   const msg = err instanceof Error ? err.message : String(err);
   console.error("[geo] unhandled error:", err);
   res.status(500).json({ error: msg });
@@ -254,6 +280,56 @@ function requireFiniteNumber(v: unknown, field: string): number {
     throw new HttpError(400, `${field} must be a finite number`);
   }
   return v;
+}
+
+function parseSearchBody(body: unknown): { database: string; options: PoiSearchOptions } {
+  if (!body || typeof body !== "object") {
+    throw new HttpError(400, "request body must be a JSON object");
+  }
+  const b = body as Record<string, unknown>;
+  const database = requireString(b.database, "database");
+  if (!/^[a-z0-9_]+$/.test(database)) {
+    throw new HttpError(400, `database must match [a-z0-9_]+, got '${database}'`);
+  }
+
+  const options: PoiSearchOptions = {
+    limit: optionalPositiveInt(b.limit),
+    offset: optionalNonNegativeInt(b.offset),
+  };
+
+  if (b.bbox !== undefined && b.bbox !== null) {
+    const bbox = b.bbox as Record<string, unknown>;
+    options.bbox = {
+      minLat: requireFiniteNumber(bbox.minLat, "bbox.minLat"),
+      minLon: requireFiniteNumber(bbox.minLon, "bbox.minLon"),
+      maxLat: requireFiniteNumber(bbox.maxLat, "bbox.maxLat"),
+      maxLon: requireFiniteNumber(bbox.maxLon, "bbox.maxLon"),
+    };
+  }
+  if (b.center !== undefined && b.center !== null) {
+    const center = b.center as Record<string, unknown>;
+    options.center = {
+      lat: requireFiniteNumber(center.lat, "center.lat"),
+      lon: requireFiniteNumber(center.lon, "center.lon"),
+      radiusM: requireFiniteNumber(center.radiusM, "center.radiusM"),
+    };
+  }
+  if (b.categories !== undefined && b.categories !== null) {
+    if (!Array.isArray(b.categories) || b.categories.some((c) => typeof c !== "string")) {
+      throw new HttpError(400, "categories must be an array of strings");
+    }
+    options.categories = b.categories as string[];
+  }
+
+  return { database, options };
+}
+
+function optionalNonNegativeInt(v: unknown): number | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== "number" || !Number.isFinite(v) || v < 0) {
+    throw new HttpError(400, "value must be zero or a positive number");
+  }
+  return Math.floor(v);
 }
 
 function optionalPositiveInt(v: unknown): number | undefined {
