@@ -3,6 +3,10 @@ import SwiftUI
 public struct ContentView: View {
     @Environment(AuthManager.self) private var authManager
     @Environment(\.scenePhase) private var scenePhase
+    /// Where a review-queue deep link (a notification tap, or the
+    /// `f4milphotos://review-queue` URL) should land — see the router's own
+    /// comment (#968, proposal 6).
+    @State private var deepLinkRouter = ReviewDeepLinkRouter.shared
 
     public init() {}
 
@@ -31,6 +35,14 @@ public struct ContentView: View {
             // brings the app forward — instead of showing the login screen.
             if newPhase == .active {
                 authManager.retryRestoreIfNeeded()
+            }
+        }
+        .onOpenURL { url in
+            deepLinkRouter.handle(url)
+        }
+        .fullScreenCover(isPresented: $deepLinkRouter.isPresentingReviewQueue) {
+            NavigationStack {
+                ReviewQueueView()
             }
         }
     }

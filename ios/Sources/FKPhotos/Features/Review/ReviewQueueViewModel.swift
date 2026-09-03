@@ -111,6 +111,10 @@ final class ReviewQueueViewModel {
     private func decide(_ kind: ReviewDecision.Kind) {
         guard state.current != nil else { return }
         enqueueCommit(state.decide(kind))
+        // The shared count drives the badge and the feed banner. Dropping it
+        // here rather than on the next fetch keeps them from claiming seven
+        // groups while the user is already looking at the sixth (#968).
+        ReviewQueueCount.shared.noteDecided()
         Task { await loadMoreIfNeeded() }
     }
 
@@ -118,6 +122,7 @@ final class ReviewQueueViewModel {
     /// one, because everything older has already reached the server.
     func undo() {
         guard state.undo() else { return }
+        ReviewQueueCount.shared.noteUndone()
         toastMessage = .info("Rückgängig gemacht")
     }
 
