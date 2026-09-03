@@ -9,7 +9,7 @@ import Foundation
 /// here: the badge, the hub row, the feed banner and the notification. Pure,
 /// so the plural forms and the „is this news?" rule are testable without a
 /// server or a screen.
-enum ReviewQueueNotice {
+public enum ReviewQueueNotice {
 
     /// Above this, the exact number stops being useful and starts being wide.
     static let badgeCap = 99
@@ -38,7 +38,9 @@ enum ReviewQueueNotice {
 
     // MARK: - Notification
 
-    static let notificationCategoryId = "review-queue-pending"
+    /// Read from `Main.swift` (a separate module) to match a notification's
+    /// `categoryIdentifier` when routing a tap, so this has to be public.
+    public static let notificationCategoryId = "review-queue-pending"
     static let notificationRequestId = "review-queue-pending"
 
     /// Whether a freshly read count is worth a notification.

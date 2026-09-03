@@ -59,12 +59,16 @@ enum ReviewDeepLink: Equatable, Sendable {
 /// where the app happened to be.
 @MainActor
 @Observable
-final class ReviewDeepLinkRouter {
-    static let shared = ReviewDeepLinkRouter()
+public final class ReviewDeepLinkRouter {
+    // `Main.swift` (a separate module — the App target's own Package.swift
+    // build never compiles it, which is how this stayed internal and broke
+    // the app build without CI noticing) calls `.shared.handle(_:)` from its
+    // notification-tap delegate, so both have to be public.
+    public static let shared = ReviewDeepLinkRouter()
 
     var isPresentingReviewQueue = false
 
-    func handle(_ url: URL) {
+    public func handle(_ url: URL) {
         guard ReviewDeepLink.parse(url) == .reviewQueue else { return }
         isPresentingReviewQueue = true
     }
