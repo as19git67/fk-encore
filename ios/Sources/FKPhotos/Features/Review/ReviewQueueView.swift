@@ -18,6 +18,10 @@ import SwiftUI
 /// photo lives behind the labelled button in `ReviewPhotoPreview` and the
 /// tile's context menu, because a tap is how people ask to *look closer*, not
 /// how they ask to hide four photos.
+/// Navigation value for the review queue, so the photo hub can push it the
+/// same way it pushes „Alle Fotos" and „Personen" (#968, proposal 2).
+struct GroupReviewRef: Hashable {}
+
 struct ReviewQueueView: View {
     @State private var viewModel = ReviewQueueViewModel()
     @State private var dragOffset: CGSize = .zero
@@ -99,6 +103,10 @@ struct ReviewQueueView: View {
         }
         .task {
             if viewModel.state.groups.isEmpty { await viewModel.load() }
+            // Whatever is in the queue now has been seen, so a later
+            // notification is only about what arrives after this (#968).
+            await ReviewQueueCount.shared.refresh()
+            ReviewQueueCount.shared.recordSeen()
         }
         // The buffered decision only reaches the server when the next one is
         // made — leaving the screen has to push it, or the last swipe is lost.
