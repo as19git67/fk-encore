@@ -1295,6 +1295,18 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    tatsächlich geht.
 3. **Neuverteilung** — „ab hier, ab jetzt", Vorrat, Verschieben auf Folgetage.
    Bewusst **vor** dem hübschen UI, weil es die Kernmechanik ist.
+
+   **Umgesetzt:** `POST /trip-planner/plans` legt einen mehrtägigen Plan an
+   (Tage werden nacheinander aus einem schrumpfenden Vorrat gelöst, damit kein
+   Spot zweimal vorkommt), `POST /trip-planner/plans/:id/redistribute` rechnet
+   den Rest neu. Hier kommt die Persistenz dazu (Migration `0157_trip_planner`):
+   Plan → Tage → Blöcke → Stopps, dazu der Vorrat. Die Entscheidungen bleiben
+   in den reinen Modulen — `redistribute.ts` bekommt Zustand herein und gibt
+   Zustand heraus, ohne Uhr, Netz oder Datenbank, damit die Neuverteilung im
+   Funkloch läuft. Vier Regeln sind wörtlich umgesetzt: nur der Rest wird neu
+   gerechnet, angeheftete Stopps bleiben, Verdrängtes geht mit Bonus in den
+   Vorrat zurück statt in den Papierkorb, und fallen gelassen wird das
+   Niedrigstbewertete.
 4. **Importerweiterung** — jetzt, wo der Planer läuft und zeigt, welche Tags er
    wirklich braucht: `opening_hours`, `cuisine`, `wheelchair`, `fee`,
    `website`, **`name:en`**, `diet:*`, `outdoor_seating`, dazu **Gastronomie

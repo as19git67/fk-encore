@@ -13,5 +13,6 @@ import { Service } from "encore.dev/service";
 
 // Side-effect import: registers the endpoints on the service.
 import "./plan";
+import "./plans";
 
 export default new Service("trip-planner");

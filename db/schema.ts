@@ -2595,3 +2595,115 @@ export const meterElectricityTariffs = pgTable(
     ),
   ],
 );
+
+// ========== Trip planner ==========
+//
+// A plan is the persisted form of what the solver produced: days, each
+// holding an ordered list of blocks, each holding ordered stops — plus
+// the pool of scored candidates that did not make it in.
+//
+// The pool is not a leftovers bin. Redistribution moves stops back into
+// it and pulls replacements out of it, so it is the working set the
+// whole mechanic turns on (docs/ios-urlaubsplanung.md §5).
+
+export const tripPlans = pgTable(
+  "trip_plans",
+  {
+    id: serial("id").primaryKey(),
+    owner_id: integer("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    title: text("title"),
+    // The leg's anchor: where each day starts and the last block returns to.
+    anchor_lat: doublePrecision("anchor_lat").notNull(),
+    anchor_lon: doublePrecision("anchor_lon").notNull(),
+    // Which geo region database the candidates came from.
+    region_db: text("region_db").notNull(),
+    // The request that produced this plan, kept so a replan can reuse it.
+    constraints: jsonb("constraints").notNull().default({}),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("trip_plans_owner_idx").on(table.owner_id)]
+);
+
+export const tripPlanDays = pgTable(
+  "trip_plan_days",
+  {
+    id: serial("id").primaryKey(),
+    plan_id: integer("plan_id")
+      .notNull()
+      .references(() => tripPlans.id, { onDelete: "cascade" }),
+    // 0-based position in the plan. Dates arrive with legs (§4.2).
+    day_index: integer("day_index").notNull(),
+  },
+  (table) => [uniqueIndex("trip_plan_days_plan_index_key").on(table.plan_id, table.day_index)]
+);
+
+export const tripPlanBlocks = pgTable(
+  "trip_plan_blocks",
+  {
+    id: serial("id").primaryKey(),
+    day_id: integer("day_id")
+      .notNull()
+      .references(() => tripPlanDays.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    // The template id ("morning") and its label — a block is a label plus
+    // a budget, not a fixed enumeration (§4.1).
+    template_id: text("template_id").notNull(),
+    label: text("label").notNull(),
+    kind: text("kind").notNull(),
+    budget_minutes: integer("budget_minutes").notNull(),
+  },
+  (table) => [uniqueIndex("trip_plan_blocks_day_position_key").on(table.day_id, table.position)]
+);
+
+export const tripPlanStops = pgTable(
+  "trip_plan_stops",
+  {
+    id: serial("id").primaryKey(),
+    block_id: integer("block_id")
+      .notNull()
+      .references(() => tripPlanBlocks.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    osm_ref: text("osm_ref").notNull(),
+    name: text("name"),
+    lat: doublePrecision("lat").notNull(),
+    lon: doublePrecision("lon").notNull(),
+    category: text("category").notNull(),
+    dwell_minutes: integer("dwell_minutes").notNull(),
+    // The walk from the previous position, as shown on the block card.
+    travel_minutes: integer("travel_minutes").notNull().default(0),
+    travel_distance_m: integer("travel_distance_m").notNull().default(0),
+    // planned | done | skipped — what redistribution treats as past.
+    status: text("status").notNull().default("planned"),
+    // Pinned stops are fixed points: never moved automatically (§5).
+    pinned: boolean("pinned").notNull().default(false),
+  },
+  (table) => [
+    uniqueIndex("trip_plan_stops_block_position_key").on(table.block_id, table.position),
+    index("trip_plan_stops_block_idx").on(table.block_id),
+  ]
+);
+
+export const tripPlanPool = pgTable(
+  "trip_plan_pool",
+  {
+    id: serial("id").primaryKey(),
+    plan_id: integer("plan_id")
+      .notNull()
+      .references(() => tripPlans.id, { onDelete: "cascade" }),
+    osm_ref: text("osm_ref").notNull(),
+    name: text("name"),
+    lat: doublePrecision("lat").notNull(),
+    lon: doublePrecision("lon").notNull(),
+    category: text("category").notNull(),
+    dwell_minutes: integer("dwell_minutes").notNull(),
+    score: real("score").notNull(),
+    reasons: jsonb("reasons").notNull().default([]),
+    // Raised when a stop was displaced, so it comes back first on a
+    // following day rather than sinking in the ranking (§5).
+    priority_boost: real("priority_boost").notNull().default(0),
+  },
+  (table) => [uniqueIndex("trip_plan_pool_plan_ref_key").on(table.plan_id, table.osm_ref)]
+);

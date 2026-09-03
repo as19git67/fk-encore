@@ -42,6 +42,12 @@ export interface PlannedStop {
   lon: number;
   category: string;
   dwellMinutes: number;
+  /**
+   * The score this stop was chosen on. Carried through so a later
+   * redistribution can rank it honestly against the pool instead of
+   * guessing (see redistribute.ts).
+   */
+  score: number;
   /** The walk from the previous position (the block's start for the first). */
   travelFromPrevious: TravelLeg;
 }
@@ -57,8 +63,14 @@ export interface PlannedBlock {
 }
 
 export interface SolveOptions {
-  /** Where the day starts, and where its last block returns to. */
+  /** Where the last block returns to — the leg's anchor. */
   anchor: Coordinate;
+  /**
+   * Where the first block begins. Defaults to the anchor, which is the
+   * normal case; redistribution passes the group's actual position, and
+   * a day after a transfer would pass the station.
+   */
+  start?: Coordinate;
   blocks: readonly PlannedBlockShape[];
   candidates: readonly Candidate[];
   /** Legs longer than this are never proposed. */
@@ -87,7 +99,7 @@ export function solveDay(opts: SolveOptions): SolvedDay {
   // Each block picks up where the previous one left off; only the last
   // one pays for the walk back to the anchor, because that is the walk
   // you actually make.
-  let position = opts.anchor;
+  let position = opts.start ?? opts.anchor;
   const lastSpotsBlockIndex = lastIndexOfSpotsBlock(opts.blocks);
 
   opts.blocks.forEach((shape, index) => {
@@ -189,6 +201,7 @@ function fillBlock(args: FillArgs): PlannedBlock {
         lon: candidate.lon,
         category: candidate.category,
         dwellMinutes: candidate.dwellMinutes,
+        score: candidate.score,
         travelFromPrevious: leg,
       });
       from = candidate;
