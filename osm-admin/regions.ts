@@ -265,11 +265,16 @@ export const deleteRegion = api(
 /**
  * Size breakdown for one region — the numbers for the before/after
  * measurement described in `regionStorage` (region.service.ts).
+ *
+ * Slug in body for the same multi-segment reason as approveRegion.
  */
 export const regionStorage = api(
-  { expose: true, auth: true, method: "GET", path: "/osm/regions/:slug/storage" },
+  { expose: true, auth: true, method: "POST", path: "/osm/regions/storage" },
   async ({ slug }: { slug: string }): Promise<RegionStorageResponse> => {
     requirePermission(getAuthData()!, "osm.admin");
+    if (!slug || typeof slug !== "string") {
+      throw APIError.invalidArgument("slug is required");
+    }
     try {
       return await readRegionStorage(slug);
     } catch (err) {
