@@ -1265,15 +1265,30 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
   sync"-Kommentaren als einziger Absicherung. Die Planung erweitert alle drei.
   Vorher: Lua-Tabellen aus der TS-Konfiguration erzeugen, oder wenigstens ein
   Test, der die Lua-Datei liest und die Mengen vergleicht.
-- **Entwicklungsregion ist Bayern** (entschieden, §15.1) — enthält München,
-  Nürnberg und Augsburg, taugt also auch für Etappen- und Korridortests. Da ein
-  Neuimport für ein Bundesland 10–30 Minuten dauert (`osm-admin/importer.ts`)
-  und jede Filteränderung einen erzwingt, zwei Regeln: **Filteränderungen
-  bündeln** statt einzeln durchzuziehen (der Grund, warum Schritt 4 alles
-  Import-Relevante zusammenfasst), und für schnelle Iterationen am Lua-Filter
-  eine Unterregion (Schwaben) daneben halten.
-- **Den Zuwachs messen**, bevor Gastronomie und Alltagsinfrastruktur zugesagt
-  werden (§10.2) — auf dem echten Host, mit einer echten Region.
+- **Entwicklungsregionen sind Schwaben und Oberbayern** (entschieden, §15.1) —
+  Regierungsbezirke, keine Bundesländer. Schwaben trägt die Fixtures rund um
+  Augsburg, Oberbayern kommt für Etappen-, Transfer- und Korridortests dazu.
+  Weil jede Filteränderung einen Neuimport erzwingt, bleibt die Regel:
+  **Filteränderungen bündeln** statt einzeln durchzuziehen — der Grund, warum
+  Schritt 4 alles Import-Relevante zusammenfasst.
+- **Den Zuwachs messen**, bevor Gastronomie und Alltagsinfrastruktur produktiv
+  gehen (§10.2) — auf dem echten Host. Schwaben ist dafür die richtige
+  Messgröße: klein genug, dass der Lauf nicht abschreckt, und repräsentativ
+  genug, um von dort auf die übrigen Bezirke hochzurechnen.
+
+  **Dafür gibt es jetzt einen Knopf:** `GET /osm/regions/:slug/storage`
+  (`osm.admin`) liefert die Größe der Regionsdatenbank, aufgeschlüsselt nach
+  Tabellen, dazu die POI-Zahl je getroffenem Tag. Einmal vor dem Neuimport
+  lesen, einmal danach — die Differenz ist der Preis.
+
+  Beim Vergleichen zwei Dinge beachten. Erstens: `totalMb` gegen `totalMb`
+  vergleichen, nicht gegen `tableMb`. Der Gesamtwert enthält Indizes und TOAST
+  und ist das, was die Platte spürt; `tableMb` ist nur der Heap. Zweitens: Der
+  größte Teil einer Region sind die **osm2pgsql-Middle-Tables**
+  (`planet_osm_*`), die für die Replikation vorgehalten werden und mit einem
+  breiteren POI-Filter kaum wachsen. Wer nur die Gesamtgröße betrachtet,
+  unterschätzt den relativen Zuwachs von `osm_pois` deshalb erheblich — die
+  Aufschlüsselung ist genau dafür da.
 
 ### 13.1 Die Schritte
 
@@ -1437,13 +1452,24 @@ während der Umsetzung entstehen, gehören hier ergänzt.
    Zeilen befüllt, ganz ohne osm2pgsql. Damit werden Radius, Tag-Prädikat,
    Sortierung und die Reihenfolge von Filter und `LIMIT` (§10.2) wirklich
    geprüft und nicht nur der zusammengebaute SQL-String. Siehe §13.0.
-2. **Entwicklungsregion — entschieden: Bayern.** Groß genug für realistische
-   Etappenreisen (München, Nürnberg, Augsburg in einer Datenbank) und
-   voraussichtlich ohnehin schon importiert. Preis dafür ist ein spürbar
-   längerer Neuimport je Filteränderung — deshalb die Gegenmaßnahmen in §13.0:
-   Filteränderungen sammeln statt einzeln importieren, und für schnelle
-   Iterationen ein Ausschnitt (Geofabrik liefert Schwaben und Oberbayern als
-   Unterregionen).
+2. **Entwicklungsregion — entschieden: Schwaben, dazu Oberbayern.** Korrektur
+   einer früheren Fassung, die hier „Bayern" stehen hatte: Importiert sind
+   nicht Bundesländer, sondern **Regierungsbezirke**, und ein bayernweiter
+   Datenbestand existiert gar nicht.
+
+   Das ist für die Entwicklung kein Nachteil, sondern ein Vorteil, und zwar aus
+   zwei Gründen. Erstens ist ein Regierungsbezirk deutlich kleiner als ein
+   Bundesland, der Neuimport nach einer Filteränderung also entsprechend
+   kürzer — genau der Zyklus, den Schritt 4 oft durchläuft. Zweitens, und
+   wichtiger: **Zwei benachbarte Regionen sind der bessere Testfall als eine
+   große.** Etappen haben je eine eigene Regionsdatenbank (§4.2), und
+   Augsburg → München ist damit ein echter Etappenwechsel samt Transfer und
+   Korridorsuche — in einer einzigen Bayern-Datenbank wäre genau dieser
+   Mechanismus nicht prüfbar gewesen.
+
+   **Schwaben** ist die primäre Spielwiese (Augsburg; auch die Testfixtures
+   liegen dort), **Oberbayern** die zweite Region für Etappen-, Transfer- und
+   Korridortests.
 
 ### 15.2 Betrifft Schritt 2
 

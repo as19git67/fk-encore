@@ -11,6 +11,7 @@
  *   POST   /reverse               — Nominatim-shaped reverse geocoding
  *   POST   /pois                  — radius-based POI candidate lookup
  *   POST   /pois/search           — area search for trip planning
+ *   GET    /storage/:postgresDb   — per-table size breakdown for one region
  *   DELETE /regions/:postgresDb   — drop a region database
  *   GET    /health                — liveness
  *
@@ -51,6 +52,25 @@ export interface GeoReverseResult {
     display_name: string;
     address: Record<string, string>;
   };
+}
+
+export interface GeoTableStorage {
+  table: string;
+  /** Heap, indexes and TOAST — what the volume feels. */
+  totalMb: number;
+  /** Heap alone. */
+  tableMb: number;
+  rows: number;
+}
+
+export interface GeoRegionStorage {
+  database: string;
+  sizeMb: number;
+  tables: GeoTableStorage[];
+  poisByKind: { kind: string; count: number }[];
+  poiTotal: number;
+  poisWithShape: number;
+  poisWithFacadeAzimuth: number;
 }
 
 export interface GeoPoiSearchQuery {
@@ -144,6 +164,8 @@ export interface GeoClient {
   ): Promise<GeoPoiCandidate[]>;
   /** Area search for trip planning — see the method on HttpGeoClient. */
   searchPois(postgresDb: string, query: GeoPoiSearchQuery): Promise<GeoPoiSearchPage>;
+  /** Per-table size breakdown, for before/after import measurements. */
+  regionStorage(postgresDb: string): Promise<GeoRegionStorage>;
   /**
    * Apply replication diffs. `pbfUrl` is optional but lets the geo
    * service auto-initialise replication for a region whose status table
@@ -251,6 +273,22 @@ export class HttpGeoClient implements GeoClient {
       limit: query.limit,
       offset: query.offset,
     });
+  }
+
+  /**
+   * Size breakdown for one region. Read-only and cheap — the numbers
+   * come from the catalog and the statistics collector, not from
+   * scanning the tables.
+   */
+  async regionStorage(postgresDb: string): Promise<GeoRegionStorage> {
+    const res = await this.fetcher(
+      `${this.baseUrl}/storage/${encodeURIComponent(postgresDb)}`,
+      { method: "GET", headers: this.headers(), signal: AbortSignal.timeout(STATUS_TIMEOUT_MS) },
+    );
+    if (!res.ok) {
+      throw new Error(`geo: GET /storage/${postgresDb} → HTTP ${res.status}`);
+    }
+    return (await res.json()) as GeoRegionStorage;
   }
 
   async refresh(postgresDb: string, pbfUrl?: string): Promise<GeoRefreshResult> {

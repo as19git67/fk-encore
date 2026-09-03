@@ -23,6 +23,7 @@ import type {
   GeoPoiCandidate,
   GeoPoiQueryOptions,
   GeoPoiSearchPage,
+  GeoRegionStorage,
   GeoPoiSearchQuery,
   GeoPoiSearchSpot,
   GeoRefreshResult,
@@ -41,6 +42,7 @@ export class InMemoryGeoClient implements GeoClient {
   private reverseResults = new Map<string, GeoReverseResult["result"]>();
   private poiCandidates = new Map<string, GeoPoiCandidate[]>();
   private searchSpots = new Map<string, GeoPoiSearchSpot[]>();
+  private storage = new Map<string, GeoRegionStorage>();
   private searchCalls: Array<{ postgresDb: string; query: GeoPoiSearchQuery }> = [];
   private refreshResults = new Map<string, GeoRefreshResult>();
   private replicationStatuses = new Map<string, GeoReplicationStatus>();
@@ -134,6 +136,16 @@ export class InMemoryGeoClient implements GeoClient {
       display_name: `stub for ${postgresDb} @ (${lat},${lon})`,
       address: { country: "Stubland" },
     };
+  }
+
+  setRegionStorage(postgresDb: string, storage: GeoRegionStorage): void {
+    this.storage.set(postgresDb, storage);
+  }
+
+  async regionStorage(postgresDb: string): Promise<GeoRegionStorage> {
+    const known = this.storage.get(postgresDb);
+    if (!known) throw new Error(`geo: GET /storage/${postgresDb} → HTTP 404`);
+    return known;
   }
 
   setSearchSpots(postgresDb: string, spots: GeoPoiSearchSpot[]): void {

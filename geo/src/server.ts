@@ -4,6 +4,7 @@
  * Endpoints:
  *   GET    /health                — liveness + db reachability
  *   GET    /status                — list known region databases
+ *   GET    /storage/:database     — per-table size breakdown for one region
  *   GET    /replication/status/:postgresDb — replication state for one region
  *   POST   /reverse               — { database, lat, lon } → ReverseResult
  *   POST   /pois                  — { database, lat, lon, radiusM?, maxCandidates? }
@@ -22,6 +23,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { adminPool, closeAllPools } from "./db.ts";
 import { reverseGeocode } from "./reverse.ts";
 import { findPoiCandidates } from "./pois.ts";
+import { readRegionStorage } from "./storage.ts";
 import { POI_CATEGORIES } from "./poi-categories.ts";
 import { PoiSearchError, searchPois, type PoiSearchOptions } from "./poi-search.ts";
 import {
@@ -83,6 +85,18 @@ app.get("/status", async (_req, res, next) => {
         sizeMb: Number(r.size_mb),
       })),
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get("/storage/:database", async (req, res, next) => {
+  try {
+    const database = req.params.database ?? "";
+    if (!/^[a-z0-9_]+$/.test(database)) {
+      throw new HttpError(400, `database must match [a-z0-9_]+, got '${database}'`);
+    }
+    res.json(await readRegionStorage(database));
   } catch (err) {
     next(err);
   }

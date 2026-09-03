@@ -1,0 +1,125 @@
+/**
+ * What a region database actually costs on disk, and where it goes.
+ *
+ * `/status` already reports the total size per region, which answers
+ * "how full is the volume". It does not answer the question the import
+ * rework raises (docs/ios-urlaubsplanung.md §13.0): **how much did
+ * carrying gastronomy and everyday infrastructure add?** For that the
+ * total has to be broken down, because most of a region's bytes are the
+ * osm2pgsql slim middle tables — kept so replication can append — and
+ * those barely move when the POI filter widens.
+ *
+ * Two numbers matter, and they are easy to confuse: `totalMb` includes
+ * indexes and TOAST, which is what fills a volume; `tableMb` is the heap
+ * alone, which is what a wider filter directly inflates. Both are
+ * reported rather than one, so a measurement cannot silently compare
+ * unlike things.
+ */
+
+import { poolFor } from "./db.ts";
+
+export interface TableStorage {
+  table: string;
+  /** Heap, indexes and TOAST — what the volume feels. */
+  totalMb: number;
+  /** Heap alone. */
+  tableMb: number;
+  rows: number;
+}
+
+export interface KindCount {
+  kind: string;
+  count: number;
+}
+
+export interface RegionStorage {
+  database: string;
+  sizeMb: number;
+  tables: TableStorage[];
+  /** POI rows per matched OSM tag, biggest first. */
+  poisByKind: KindCount[];
+  poiTotal: number;
+  /** Area POIs that carry an outline, and how many have an azimuth. */
+  poisWithShape: number;
+  poisWithFacadeAzimuth: number;
+}
+
+/** Only the tables this service owns or depends on, in a stable order. */
+const TABLES = [
+  "osm_pois",
+  "osm_highways",
+  "osm_admin",
+  "planet_osm_nodes",
+  "planet_osm_ways",
+  "planet_osm_rels",
+] as const;
+
+export async function readRegionStorage(database: string): Promise<RegionStorage> {
+  const pool = poolFor(database);
+
+  const size = await pool.query<{ size_mb: string }>(
+    "SELECT (pg_database_size(current_database()) / 1024.0 / 1024.0)::text AS size_mb",
+  );
+
+  // `to_regclass` returns null instead of raising for a table that does
+  // not exist, so a half-imported region reports what it has rather
+  // than failing the whole call.
+  const tables = await pool.query<{
+    table: string;
+    total_mb: string;
+    table_mb: string;
+    rows: string;
+  }>(
+    `
+    SELECT t.name                                                        AS table,
+           (pg_total_relation_size(c.oid) / 1024.0 / 1024.0)::text       AS total_mb,
+           (pg_table_size(c.oid) / 1024.0 / 1024.0)::text                AS table_mb,
+           COALESCE(s.n_live_tup, 0)::text                               AS rows
+      FROM unnest($1::text[]) WITH ORDINALITY AS t(name, ord)
+      JOIN pg_class c ON c.oid = to_regclass(t.name)
+      LEFT JOIN pg_stat_user_tables s ON s.relid = c.oid
+     ORDER BY t.ord
+    `,
+    [[...TABLES]],
+  );
+
+  const hasPois = tables.rows.some((r) => r.table === "osm_pois");
+  const byKind = hasPois
+    ? await pool.query<{ kind: string; count: string }>(
+        `SELECT COALESCE(kind, '(none)') AS kind, count(*)::text AS count
+           FROM osm_pois
+          GROUP BY 1
+          ORDER BY count(*) DESC, 1`,
+      )
+    : { rows: [] as { kind: string; count: string }[] };
+
+  const shapes = hasPois
+    ? await pool.query<{ total: string; with_shape: string; with_azimuth: string }>(
+        `SELECT count(*)::text                                              AS total,
+                count(*) FILTER (WHERE shape IS NOT NULL)::text             AS with_shape,
+                count(*) FILTER (WHERE facade_azimuth IS NOT NULL)::text    AS with_azimuth
+           FROM osm_pois`,
+      )
+    : { rows: [{ total: "0", with_shape: "0", with_azimuth: "0" }] };
+
+  const counts = shapes.rows[0] ?? { total: "0", with_shape: "0", with_azimuth: "0" };
+
+  return {
+    database,
+    sizeMb: round2(size.rows[0]?.size_mb),
+    tables: tables.rows.map((r) => ({
+      table: r.table,
+      totalMb: round2(r.total_mb),
+      tableMb: round2(r.table_mb),
+      rows: Number(r.rows),
+    })),
+    poisByKind: byKind.rows.map((r) => ({ kind: r.kind, count: Number(r.count) })),
+    poiTotal: Number(counts.total),
+    poisWithShape: Number(counts.with_shape),
+    poisWithFacadeAzimuth: Number(counts.with_azimuth),
+  };
+}
+
+function round2(value: string | undefined): number {
+  return Math.round(Number(value ?? 0) * 100) / 100;
+}
