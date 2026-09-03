@@ -199,8 +199,12 @@ struct PhotoFullscreenView: View {
                             curationOverrides[photo.id] = next
                         }
                     } label: {
+                        // Neutral when the photo is *not* hidden, like the
+                        // heart and the info button below. The filled/outline
+                        // pair already carries the state; tinting the off
+                        // state as well made the toggle read as switched on.
                         Image(systemName: currentCuration == .hidden ? "hand.thumbsdown.fill" : "hand.thumbsdown")
-                            .foregroundStyle(currentCuration == .hidden ? Color.red : Color.accentColor)
+                            .foregroundStyle(currentCuration == .hidden ? Color.red : .primary)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
