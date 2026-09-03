@@ -28,6 +28,9 @@ export interface SeedPoi {
   lon: number;
   kind: string;
   tags: Record<string, string>;
+  /** WKT outline for an area POI, in EPSG:4326. */
+  shapeWkt?: string;
+  facadeAzimuth?: number;
 }
 
 function adminClient(): pg.Client {
@@ -80,20 +83,25 @@ export async function createSeededRegion(name: string, pois: readonly SeedPoi[])
     await client.query("CREATE EXTENSION IF NOT EXISTS postgis");
     await client.query(`
       CREATE TABLE osm_pois (
-        osm_id   bigint,
-        osm_type char(1),
-        kind     text,
-        name     text,
-        tags     jsonb,
-        geom     geometry(Point, 4326) NOT NULL
+        osm_id         bigint,
+        osm_type       char(1),
+        kind           text,
+        name           text,
+        tags           jsonb,
+        geom           geometry(Point, 4326) NOT NULL,
+        shape          geometry(Geometry, 4326),
+        facade_azimuth real
       )
     `);
     await client.query("CREATE INDEX osm_pois_geom_idx ON osm_pois USING GIST (geom)");
 
     for (const poi of pois) {
       await client.query(
-        `INSERT INTO osm_pois (osm_id, osm_type, kind, name, tags, geom)
-         VALUES ($1, $2, $3, $4, $5::jsonb, ST_SetSRID(ST_Point($6, $7), 4326))`,
+        `INSERT INTO osm_pois (osm_id, osm_type, kind, name, tags, geom, shape, facade_azimuth)
+         VALUES ($1, $2, $3, $4, $5::jsonb, ST_SetSRID(ST_Point($6, $7), 4326),
+                 CASE WHEN $8::text IS NULL THEN NULL
+                      ELSE ST_SetSRID(ST_GeomFromText($8), 4326) END,
+                 $9)`,
         [
           poi.osmId,
           poi.osmType ?? "N",
@@ -102,6 +110,8 @@ export async function createSeededRegion(name: string, pois: readonly SeedPoi[])
           JSON.stringify(poi.tags),
           poi.lon,
           poi.lat,
+          poi.shapeWkt ?? null,
+          poi.facadeAzimuth ?? null,
         ],
       );
     }

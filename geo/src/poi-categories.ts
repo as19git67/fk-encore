@@ -12,10 +12,11 @@
  * that invariant across the two files, so adding a category here fails
  * the test until the import knows about it.
  *
- * Gastronomy and everyday infrastructure (restaurants, cafés,
- * pharmacies, toilets) are deliberately absent: the import does not
- * carry them yet. They arrive together with the import rework — see
- * docs/ios-urlaubsplanung.md §10.2 and step 4 in §13.
+ * A word on the food categories: they exist so a caller can *find*
+ * places to eat, not so the planner can recommend one. Open data knows
+ * existence, not opinion — no quality, no popularity, no price level —
+ * so the planner keeps lunch as a slot plus an area and leaves the
+ * choice to the people eating (docs/ios-urlaubsplanung.md §10).
  */
 
 /** A tag predicate: key must be present, and — unless `values` is
@@ -64,6 +65,36 @@ export const POI_CATEGORIES: readonly PoiCategory[] = [
     id: "theatre",
     description: "Theatres and opera houses",
     rules: [{ key: "amenity", values: ["theatre"] }],
+  },
+  {
+    id: "food",
+    description:
+      "Places to eat — listed by distance and attributes, never ranked by quality (§10.3)",
+    rules: [
+      { key: "amenity", values: ["restaurant", "fast_food", "biergarten", "pub", "bar"] },
+    ],
+  },
+  {
+    id: "cafe",
+    description: "Cafés, ice cream and bakeries — the short break between two spots",
+    rules: [
+      { key: "amenity", values: ["cafe", "ice_cream"] },
+      { key: "shop", values: ["bakery"] },
+    ],
+  },
+  {
+    id: "essentials",
+    description:
+      "What a trip runs on rather than admires: pharmacy, toilets, water, cash, groceries (§10.5)",
+    rules: [
+      { key: "amenity", values: ["pharmacy", "toilets", "drinking_water", "bank", "atm"] },
+      { key: "shop", values: ["supermarket", "convenience"] },
+    ],
+  },
+  {
+    id: "outdoors",
+    description: "Parks and playgrounds — where a block with children needs a pause",
+    rules: [{ key: "leisure", values: ["park", "playground"] }],
   },
 ] as const;
 

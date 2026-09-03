@@ -1312,6 +1312,27 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    `website`, **`name:en`**, `diet:*`, `outdoor_seating`, dazu **Gastronomie
    und Alltagsinfrastruktur** (§10.2) und das **Fassadenazimut** (§7.3). Alles,
    was einen Neuimport erzwingt, in einem Zug.
+
+   **Umgesetzt.** Zwei Dinge sind dabei anders gekommen als hier geplant:
+
+   - **Das Polygon bleibt liegen.** Vorgesehen war, das Azimut beim Import zu
+     berechnen und die Umrisse zu verwerfen. Das geht nicht: Die stündliche
+     Replikation fügt geänderte POIs über dieselbe Tabellendefinition wieder
+     ein, und `osm2pgsql --append` scheitert an einer Tabelle, deren Spalten
+     nicht mehr passen. Der Umriss bleibt also als Spalte, und ein
+     **inkrementeller Nachlauf** (`refreshFacadeAzimuth`) berechnet das Azimut
+     für alles, was noch keins hat — nach dem Import und nach jedem
+     Replikationslauf.
+   - **Berechnet wird über die orientierte Hülle**, nicht über die längste
+     Polygonkante: das kleinste gedrehte Rechteck um den Umriss, dessen längere
+     Seite die Hauptrichtung angibt. Robuster gegenüber einer einzelnen langen
+     Rückwand und ohne Eckpunkt-Iteration, die die Lua-Schnittstelle nicht
+     hergibt.
+
+   Die Trennung aus §10.2 ist damit auch im Test verankert: Die Filter des
+   Foto-Matchers sind ab jetzt eine **Teilmenge** des Imports, nicht mehr
+   deckungsgleich mit ihm — sonst konkurrierten Bäckereien mit
+   Sehenswürdigkeiten.
 5. **NL-Eingabe** über llm-service (JSON-Schema, strikte Validierung) +
    Mehrtagesplanung.
 6. **Etappen, Fixpunkte, zwei Auflösungen** (§4.2–§4.4) — Reisen über mehrere

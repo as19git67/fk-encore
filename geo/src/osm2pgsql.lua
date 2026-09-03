@@ -32,6 +32,16 @@ tables.pois = osm2pgsql.define_table({
     { column = 'name', type = 'text' },
     { column = 'tags', type = 'jsonb' },
     { column = 'geom', type = 'point', projection = 4326, not_null = true },
+    -- Outline of an area POI, kept so the facade azimuth can be derived
+    -- after the import (see computeFacadeAzimuth in import.ts). Null for
+    -- node POIs, which have no outline to orient.
+    --
+    -- It has to persist rather than being dropped once the azimuth is
+    -- computed: replication appends re-insert rows through this same
+    -- table definition, and osm2pgsql --append fails on a table whose
+    -- columns no longer match the style.
+    { column = 'shape', type = 'geometry', projection = 4326 },
+    { column = 'facade_azimuth', type = 'real' },
   },
 })
 
@@ -56,10 +66,33 @@ local highway_values = {
 
 -- POI tag filters — must stay in sync with osm-admin/poi.config.ts.
 -- A value of '*' means "match any non-empty value for this key".
+-- Two families live in this table, and the difference matters.
+--
+-- The first is what people photograph — it feeds the photo POI matcher,
+-- and osm-admin/poi.config.ts sends exactly this subset when querying.
+--
+-- The second is what a *planner* needs: gastronomy, and the everyday
+-- infrastructure a trip actually runs on. Open data is weak on taste and
+-- strong on existence, so these are here to be found, not to be ranked
+-- (docs/ios-urlaubsplanung.md §10).
+--
+-- Adding to this table forces a re-import of every region and grows the
+-- databases noticeably — gastronomy and everyday infrastructure are
+-- orders of magnitude more numerous than landmarks.
 local poi_filters = {
   tourism  = { attraction = true, museum = true, artwork = true, viewpoint = true, gallery = true, monument = true },
   historic = '*',
-  amenity  = { place_of_worship = true, theatre = true },
+  amenity  = {
+    -- Photographed:
+    place_of_worship = true, theatre = true,
+    -- Eaten at (§10.3):
+    restaurant = true, cafe = true, fast_food = true, bar = true, pub = true,
+    ice_cream = true, biergarten = true,
+    -- Needed rather than admired (§10.5):
+    pharmacy = true, toilets = true, drinking_water = true, bank = true, atm = true,
+  },
+  shop     = { bakery = true, supermarket = true, convenience = true },
+  leisure  = { playground = true, park = true },
   building = { castle = true, cathedral = true, church = true, monastery = true, palace = true },
   man_made = { tower = true, lighthouse = true, bridge = true, obelisk = true },
 }
@@ -69,10 +102,23 @@ local poi_filters = {
 -- keys are also kept so the admin UI can render "why was this a
 -- candidate".
 local poi_tag_allowlist = {
-  ['name']     = true, ['name:de']  = true,
+  -- Names. `name:en` is what keeps a plan for Japan or Greece readable;
+  -- without it the plan shows the local script and nothing else.
+  ['name'] = true, ['name:de'] = true, ['name:en'] = true,
   ['wikidata'] = true, ['wikipedia'] = true,
-  ['tourism']  = true, ['historic']  = true, ['amenity'] = true,
-  ['building'] = true, ['man_made']  = true,
+  -- Matched filter keys, so the admin UI can render "why was this a
+  -- candidate" and the search can report categories.
+  ['tourism']  = true, ['historic'] = true, ['amenity'] = true,
+  ['building'] = true, ['man_made'] = true,
+  ['shop']     = true, ['leisure']  = true,
+  -- Planning attributes. Coarse on purpose: the plan asks "open in the
+  -- morning?", not "open at 09:47" (§4.1).
+  ['opening_hours'] = true, ['fee'] = true, ['website'] = true, ['phone'] = true,
+  ['wheelchair'] = true, ['indoor'] = true,
+  -- Gastronomy attributes worth filtering on — the things OSM actually
+  -- knows, as opposed to quality (§10.1).
+  ['cuisine'] = true, ['outdoor_seating'] = true, ['takeaway'] = true,
+  ['diet:vegetarian'] = true, ['diet:vegan'] = true,
 }
 
 local function matches_poi(tags)
@@ -119,11 +165,13 @@ function osm2pgsql.process_way(object)
 
   local kind, val = matches_poi(object.tags)
   if kind and object.is_closed then
+    local polygon = object:as_polygon()
     tables.pois:insert({
       kind = kind .. '=' .. val,
       name = object.tags.name,
       tags = poi_tag_subset(object.tags),
-      geom = object:as_polygon():centroid(),
+      geom = polygon:centroid(),
+      shape = polygon,
     })
   end
 end
@@ -145,11 +193,13 @@ function osm2pgsql.process_relation(object)
   if object.tags.type == 'multipolygon' then
     local kind, val = matches_poi(object.tags)
     if kind then
+      local area = object:as_multipolygon()
       tables.pois:insert({
         kind = kind .. '=' .. val,
         name = object.tags.name,
         tags = poi_tag_subset(object.tags),
-        geom = object:as_multipolygon():centroid(),
+        geom = area:centroid(),
+        shape = area,
       })
     end
   end

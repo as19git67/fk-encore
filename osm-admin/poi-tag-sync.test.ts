@@ -21,9 +21,17 @@
  * normal `npm run test` rather than surfacing as an empty result set in
  * production.
  *
- * The invariant that matters most is the last one: **a search category
- * may only reference tags the import actually carries.** A category
- * whose tags never reach the table returns nothing, silently.
+ * Two invariants, and the difference between them is the point:
+ *
+ *   - The photo matcher's filters must be a **subset** of what the
+ *     import carries — not equal to it. Since the planner arrived, the
+ *     import also brings gastronomy and everyday infrastructure, which
+ *     the matcher must never see: it looks for what a photo could show,
+ *     and a bakery among the candidates would push out a landmark.
+ *   - A search category may only reference tags the import **does**
+ *     carry. A category whose tags never reach the table returns
+ *     nothing, silently, and nobody notices until a trip has no
+ *     candidates.
  */
 
 import { readFileSync } from "node:fs";
@@ -96,34 +104,55 @@ function parseCategoryValuesByKey(): Map<string, Set<string>> {
 describe("OSM tag knowledge stays in sync across packages", () => {
   const luaFilters = parseLuaPoiFilters();
 
-  it("the Lua import filter matches osm-admin's POI_TAG_FILTERS", () => {
-    const configured: Record<string, string[] | "*"> = {};
+  it("the photo matcher only asks for tags the import carries", () => {
     for (const filter of POI_TAG_FILTERS) {
-      configured[filter.key] = filter.values === "*" ? "*" : [...filter.values];
-    }
+      const imported = luaFilters[filter.key];
+      expect(
+        imported,
+        `poi.config.ts filters on '${filter.key}', which osm2pgsql.lua never imports`,
+      ).toBeDefined();
 
-    expect(Object.keys(luaFilters).sort()).toEqual(Object.keys(configured).sort());
-    for (const [key, values] of Object.entries(configured)) {
-      const lua = luaFilters[key];
-      if (values === "*") {
-        expect(lua, `${key} should be a wildcard in the Lua filter`).toBe("*");
+      if (filter.values === "*") {
+        expect(
+          imported,
+          `poi.config.ts wants every '${filter.key}', so the import must be a wildcard too`,
+        ).toBe("*");
         continue;
       }
-      expect(lua, `${key} should be a value list in the Lua filter`).not.toBe("*");
-      expect([...(lua as string[])].sort()).toEqual([...values].sort());
+      if (imported === "*") continue; // a wildcard import covers any value
+      for (const value of filter.values) {
+        expect(
+          (imported as string[]).includes(value),
+          `the matcher asks for '${filter.key}=${value}', which the import drops`,
+        ).toBe(true);
+      }
     }
   });
 
-  it("geo's query defaults cover the same tags the import keeps", () => {
-    // pois.ts spells its defaults out as a literal; checking the values
-    // appear at all is enough to catch a key being dropped on one side.
-    for (const [key, values] of Object.entries(luaFilters)) {
-      if (values === "*") {
-        expect(poisSource, `pois.ts should still handle ${key}=*`).toContain("historicAny");
+  it("the matcher does not see what only the planner needs", () => {
+    // Deliberately asymmetric: the import is the larger set. If these
+    // ever appear in the matcher's filters, photo POI detection starts
+    // competing with bakeries — see poi-categories.ts.
+    const plannerOnly = ["restaurant", "cafe", "pharmacy", "supermarket", "playground"];
+    const matcherValues = new Set(
+      POI_TAG_FILTERS.flatMap((f) => (f.values === "*" ? [] : [...f.values])),
+    );
+    for (const value of plannerOnly) {
+      expect(matcherValues.has(value), `'${value}' must stay out of poi.config.ts`).toBe(false);
+    }
+  });
+
+  it("geo's matcher defaults still spell out every value the matcher asks for", () => {
+    // pois.ts carries the same narrow set as poi.config.ts, as the
+    // defaults the photo matcher gets when it sends none. Checking the
+    // values appear at all is enough to catch one being dropped.
+    for (const filter of POI_TAG_FILTERS) {
+      if (filter.values === "*") {
+        expect(poisSource, `pois.ts should still handle ${filter.key}=*`).toContain("historicAny");
         continue;
       }
-      for (const value of values) {
-        expect(poisSource, `pois.ts lost '${value}' from ${key}`).toContain(`"${value}"`);
+      for (const value of filter.values) {
+        expect(poisSource, `pois.ts lost '${value}' from ${filter.key}`).toContain(`"${value}"`);
       }
     }
   });

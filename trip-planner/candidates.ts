@@ -24,6 +24,14 @@ export const DEFAULT_DWELL_MINUTES: Readonly<Record<string, number>> = {
   viewpoint: 20,
   worship: 25,
   theatre: 60,
+  // A meal is a block of its own (§10.3); these durations apply when a
+  // caller deliberately searches for one, not when the planner fills a
+  // block — it never picks a venue.
+  food: 60,
+  cafe: 30,
+  // Needed rather than admired: a stop, not a visit (§10.5).
+  essentials: 10,
+  outdoors: 45,
 };
 
 const FALLBACK_DWELL_MINUTES = 30;

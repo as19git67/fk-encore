@@ -17,6 +17,11 @@ function spot(overrides: Partial<GeoPoiSearchSpot> = {}): GeoPoiSearchSpot {
     categories: ["museum"],
     wikidataQid: null,
     wikipedia: null,
+    openingHours: null,
+    cuisine: null,
+    wheelchair: null,
+    outdoorSeating: null,
+    facadeAzimuth: null,
     ...overrides,
   };
 }

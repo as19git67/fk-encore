@@ -54,7 +54,6 @@ export interface PoiSearchResult {
   distanceM: number | null;
   name: string | null;
   nameDe: string | null;
-  /** Stays null until the import carries `name:en` (step 4). */
   nameEn: string | null;
   /** The matched OSM tag, e.g. `tourism=museum`. */
   kind: string | null;
@@ -62,6 +61,22 @@ export interface PoiSearchResult {
   categories: string[];
   wikidataQid: string | null;
   wikipedia: string | null;
+  /**
+   * Planning attributes, straight from OSM and unverified. Coarse on
+   * purpose — the plan asks "open in the morning?", not "open at 09:47"
+   * — and frequently absent, which the caller must treat as unknown
+   * rather than as "no".
+   */
+  openingHours: string | null;
+  cuisine: string | null;
+  wheelchair: string | null;
+  outdoorSeating: string | null;
+  /**
+   * Facade orientation in degrees clockwise from north, in [0, 180),
+   * derived from the outline at import time. Null for POIs mapped as a
+   * node, and for anything imported before the outline was kept.
+   */
+  facadeAzimuth: number | null;
 }
 
 export interface PoiSearchPage {
@@ -89,6 +104,11 @@ type Row = {
   tags: Record<string, string> | null;
   wikidata: string | null;
   wikipedia: string | null;
+  opening_hours: string | null;
+  cuisine: string | null;
+  wheelchair: string | null;
+  outdoor_seating: string | null;
+  facade_azimuth: number | null;
   lat: number;
   lon: number;
   distance_m: number | null;
@@ -119,8 +139,14 @@ export async function searchPois(
   // Nearest-first only makes sense with a centre. Without one, order by a
   // prominence proxy so the first page is the useful one, then by osm_id
   // so paging cannot repeat or skip rows.
+  // Ordering must use the same measure as the reported distance. The
+  // planar `<->` on geometry counts degrees, and away from the equator a
+  // degree of longitude is shorter than one of latitude — so a spot due
+  // east could sort behind a nearer one due north, and the list would
+  // not match the metres shown beside it. Casting to geography makes the
+  // operator measure on the spheroid, and it stays index-assisted.
   const orderBy = opts.center
-    ? `geom <-> ${centrePoint(opts.center)}, osm_id`
+    ? `geom::geography <-> ${centrePoint(opts.center)}::geography, osm_id`
     : `((tags ? 'wikidata')::int + (tags ? 'wikipedia')::int + (tags ? 'name')::int) DESC, osm_id`;
 
   const sql = `
@@ -134,6 +160,11 @@ export async function searchPois(
       tags,
       tags->>'wikidata' AS wikidata,
       tags->>'wikipedia' AS wikipedia,
+      tags->>'opening_hours'   AS opening_hours,
+      tags->>'cuisine'         AS cuisine,
+      tags->>'wheelchair'      AS wheelchair,
+      tags->>'outdoor_seating' AS outdoor_seating,
+      facade_azimuth,
       ST_Y(geom)        AS lat,
       ST_X(geom)        AS lon,
       ${distanceSelect} AS distance_m
@@ -271,6 +302,11 @@ function toResult(row: Row, requested: readonly string[]): PoiSearchResult {
     categories: matchedCategories(row.tags ?? {}, requested),
     wikidataQid: row.wikidata,
     wikipedia: row.wikipedia,
+    openingHours: row.opening_hours,
+    cuisine: row.cuisine,
+    wheelchair: row.wheelchair,
+    outdoorSeating: row.outdoor_seating,
+    facadeAzimuth: row.facade_azimuth === null ? null : Number(row.facade_azimuth),
   };
 }
 

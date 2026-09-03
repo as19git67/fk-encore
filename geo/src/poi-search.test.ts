@@ -32,7 +32,15 @@ const SEED: SeedPoi[] = [
     osmId: 1,
     ...at(0, 0),
     kind: "tourism=museum",
-    tags: { tourism: "museum", name: "Stadtmuseum Beispielstadt", wikidata: "Q1", wikipedia: "de:Stadtmuseum" },
+    tags: {
+      tourism: "museum",
+      name: "Stadtmuseum Beispielstadt",
+      "name:en": "Example City Museum",
+      wikidata: "Q1",
+      wikipedia: "de:Stadtmuseum",
+      opening_hours: "Tu-Su 10:00-17:00",
+      wheelchair: "yes",
+    },
   },
   {
     osmId: 2,
@@ -52,6 +60,8 @@ const SEED: SeedPoi[] = [
     ...at(0.003, 0),
     kind: "amenity=place_of_worship",
     tags: { amenity: "place_of_worship", name: "Beispielkirche" },
+    // A pre-computed azimuth, as an import would have left behind.
+    facadeAzimuth: 90,
   },
   {
     osmId: 5,
@@ -59,6 +69,12 @@ const SEED: SeedPoi[] = [
     kind: "tourism=gallery",
     // Deliberately unnamed: the prominence proxy must still order it last.
     tags: { tourism: "gallery" },
+  },
+  {
+    osmId: 7,
+    ...at(0.0005, 0.001),
+    kind: "amenity=cafe",
+    tags: { amenity: "cafe", name: "Café am Beispielplatz", outdoor_seating: "yes" },
   },
   {
     // Far away — inside no test bbox and outside every test radius.
@@ -97,8 +113,9 @@ test("radius search returns only spots inside the disc, nearest first", async (t
     center: { ...CENTRE, radiusM: 500 },
   });
   const ids = spots.map((s) => s.id);
-  // 0.004° of latitude is ~445 m, so ids 1-5 are inside and 6 is not.
-  assert.deepEqual(ids, [1, 2, 3, 4, 5]);
+  // 0.004° of latitude is ~445 m, so everything but the distant id 6 is
+  // inside. The café (7) sits ~93 m out, between ids 1 and 2.
+  assert.deepEqual(ids, [1, 7, 2, 3, 4, 5]);
   assert.ok(spots[0].distanceM !== null && spots[0].distanceM < 1);
   for (let i = 1; i < spots.length; i += 1) {
     assert.ok(
@@ -111,8 +128,8 @@ test("radius search returns only spots inside the disc, nearest first", async (t
 test("a tight radius excludes what lies just outside it", async (t) => {
   if (skipUnlessDb(t)) return;
   const { spots } = await searchPois(DB, { center: { ...CENTRE, radiusM: 150 } });
-  // ~111 m per 0.001° of latitude: ids 1 and 2 are in, 3 (~222 m) is out.
-  assert.deepEqual(spots.map((s) => s.id), [1, 2]);
+  // ~111 m per 0.001° of latitude: ids 1, 7 and 2 are in, 3 (~222 m) is out.
+  assert.deepEqual(spots.map((s) => s.id), [1, 7, 2]);
 });
 
 test("bbox search returns what the rectangle covers, without distances", async (t) => {
@@ -120,7 +137,7 @@ test("bbox search returns what the rectangle covers, without distances", async (
   const { spots } = await searchPois(DB, {
     bbox: { minLat: CENTRE.lat - 0.01, minLon: CENTRE.lon - 0.01, maxLat: CENTRE.lat + 0.01, maxLon: CENTRE.lon + 0.01 },
   });
-  assert.deepEqual(spots.map((s) => s.id).sort((a, b) => a - b), [1, 2, 3, 4, 5]);
+  assert.deepEqual(spots.map((s) => s.id).sort((a, b) => a - b), [1, 2, 3, 4, 5, 7]);
   assert.ok(spots.every((s) => s.distanceM === null));
 });
 
@@ -168,7 +185,7 @@ test("paging is stable and reports whether more remain", async (t) => {
   assert.equal(second.hasMore, true);
   assert.equal(third.hasMore, false);
   const seen = [...first.spots, ...second.spots, ...third.spots].map((s) => s.id);
-  assert.deepEqual(seen, [1, 2, 3, 4, 5], "pages must not repeat or skip rows");
+  assert.deepEqual(seen, [1, 7, 2, 3, 4, 5], "pages must not repeat or skip rows");
 });
 
 test("limit is capped rather than honoured blindly", async (t) => {
@@ -180,14 +197,38 @@ test("limit is capped rather than honoured blindly", async (t) => {
   assert.ok(spots.length <= MAX_LIMIT);
 });
 
-test("english and german names come back when tagged", async (t) => {
+test("names and planning attributes come back when tagged", async (t) => {
   if (skipUnlessDb(t)) return;
   const { spots } = await searchPois(DB, { center: { ...CENTRE, radiusM: 50 } });
   assert.equal(spots[0].name, "Stadtmuseum Beispielstadt");
-  // name:en is not imported yet (step 4) — the column must stay null,
-  // not undefined, so callers can tell "absent" from "missing field".
-  assert.equal(spots[0].nameEn, null);
+  assert.equal(spots[0].nameEn, "Example City Museum");
+  // Absent tags must come back as null rather than undefined, so a
+  // caller can tell "OSM does not say" from "field missing".
   assert.equal(spots[0].nameDe, null);
+  assert.equal(spots[0].openingHours, "Tu-Su 10:00-17:00");
+  assert.equal(spots[0].wheelchair, "yes");
+  assert.equal(spots[0].cuisine, null);
+  assert.equal(spots[0].facadeAzimuth, null);
+});
+
+test("a café is found by its category but never ranked by quality", async (t) => {
+  if (skipUnlessDb(t)) return;
+  const { spots } = await searchPois(DB, {
+    center: { ...CENTRE, radiusM: 1000 },
+    categories: ["cafe"],
+  });
+  assert.deepEqual(spots.map((s) => s.id), [7]);
+  assert.equal(spots[0].outdoorSeating, "yes");
+  assert.deepEqual(spots[0].categories, ["cafe"]);
+});
+
+test("the facade azimuth is returned where the outline provided one", async (t) => {
+  if (skipUnlessDb(t)) return;
+  const { spots } = await searchPois(DB, {
+    center: { ...CENTRE, radiusM: 1000 },
+    categories: ["worship"],
+  });
+  assert.equal(spots[0].facadeAzimuth, 90);
 });
 
 test("bad arguments are rejected before touching the database", async () => {

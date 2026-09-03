@@ -79,6 +79,13 @@ export interface GeoPoiSearchSpot {
   categories: string[];
   wikidataQid: string | null;
   wikipedia: string | null;
+  /** Straight from OSM and unverified — absent means unknown, not "no". */
+  openingHours: string | null;
+  cuisine: string | null;
+  wheelchair: string | null;
+  outdoorSeating: string | null;
+  /** Degrees clockwise from north, in [0, 180); null for node POIs. */
+  facadeAzimuth: number | null;
 }
 
 export interface GeoPoiSearchPage {

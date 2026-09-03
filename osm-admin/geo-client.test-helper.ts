@@ -22,6 +22,9 @@ import type {
   GeoImportStatus,
   GeoPoiCandidate,
   GeoPoiQueryOptions,
+  GeoPoiSearchPage,
+  GeoPoiSearchQuery,
+  GeoPoiSearchSpot,
   GeoRefreshResult,
   GeoReplicationStatus,
   GeoReverseResult,
@@ -37,6 +40,8 @@ export class InMemoryGeoClient implements GeoClient {
   private imports = new Map<string, ImportEntry>();
   private reverseResults = new Map<string, GeoReverseResult["result"]>();
   private poiCandidates = new Map<string, GeoPoiCandidate[]>();
+  private searchSpots = new Map<string, GeoPoiSearchSpot[]>();
+  private searchCalls: Array<{ postgresDb: string; query: GeoPoiSearchQuery }> = [];
   private refreshResults = new Map<string, GeoRefreshResult>();
   private replicationStatuses = new Map<string, GeoReplicationStatus>();
   private droppedRegions: string[] = [];
@@ -129,6 +134,24 @@ export class InMemoryGeoClient implements GeoClient {
       display_name: `stub for ${postgresDb} @ (${lat},${lon})`,
       address: { country: "Stubland" },
     };
+  }
+
+  setSearchSpots(postgresDb: string, spots: GeoPoiSearchSpot[]): void {
+    this.searchSpots.set(postgresDb, spots);
+  }
+
+  /** What the planner asked for, so a test can assert on the query. */
+  getSearchCalls(): ReadonlyArray<{ postgresDb: string; query: GeoPoiSearchQuery }> {
+    return this.searchCalls;
+  }
+
+  async searchPois(postgresDb: string, query: GeoPoiSearchQuery): Promise<GeoPoiSearchPage> {
+    this.searchCalls.push({ postgresDb, query });
+    const spots = this.searchSpots.get(postgresDb) ?? [];
+    const offset = query.offset ?? 0;
+    const limit = query.limit ?? spots.length;
+    const page = spots.slice(offset, offset + limit);
+    return { database: postgresDb, spots: page, hasMore: offset + limit < spots.length };
   }
 
   async findPois(
