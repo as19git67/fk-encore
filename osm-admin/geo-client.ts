@@ -10,6 +10,7 @@
  *   GET    /replication/status/:postgresDb — replication initialization state
  *   POST   /reverse               — Nominatim-shaped reverse geocoding
  *   POST   /pois                  — radius-based POI candidate lookup
+ *   POST   /pois/search           — area search for trip planning
  *   DELETE /regions/:postgresDb   — drop a region database
  *   GET    /health                — liveness
  *
@@ -50,6 +51,40 @@ export interface GeoReverseResult {
     display_name: string;
     address: Record<string, string>;
   };
+}
+
+export interface GeoPoiSearchQuery {
+  /** Search a rectangle. Mutually exclusive with `center`. */
+  bbox?: { minLat: number; minLon: number; maxLat: number; maxLon: number };
+  /** Search a disc. Mutually exclusive with `bbox`. */
+  center?: { lat: number; lon: number; radiusM: number };
+  /** Category ids from GET /pois/categories. Omitted = all of them. */
+  categories?: string[];
+  limit?: number;
+  offset?: number;
+}
+
+export interface GeoPoiSearchSpot {
+  osmRef: string;
+  type: "node" | "way" | "relation";
+  id: number;
+  lat: number;
+  lon: number;
+  /** Only set when the query carried a centre. */
+  distanceM: number | null;
+  name: string | null;
+  nameDe: string | null;
+  nameEn: string | null;
+  kind: string | null;
+  categories: string[];
+  wikidataQid: string | null;
+  wikipedia: string | null;
+}
+
+export interface GeoPoiSearchPage {
+  database: string;
+  spots: GeoPoiSearchSpot[];
+  hasMore: boolean;
 }
 
 export interface GeoPoiCandidate {
@@ -190,6 +225,23 @@ export class HttpGeoClient implements GeoClient {
       maxCandidates: opts.maxCandidates,
     });
     return body.candidates;
+  }
+
+  /**
+   * Area search for trip planning. Unlike `findPois`, which answers
+   * "what could this photo show?" for one point, this walks a bounding
+   * box or a generous radius and returns candidates by category, in
+   * pages. Ranking them is the planner's job, not geo's.
+   */
+  async searchPois(postgresDb: string, query: GeoPoiSearchQuery): Promise<GeoPoiSearchPage> {
+    return await this.postJson<GeoPoiSearchPage>("/pois/search", {
+      database: postgresDb,
+      bbox: query.bbox,
+      center: query.center,
+      categories: query.categories,
+      limit: query.limit,
+      offset: query.offset,
+    });
   }
 
   async refresh(postgresDb: string, pbfUrl?: string): Promise<GeoRefreshResult> {

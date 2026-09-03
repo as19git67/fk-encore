@@ -1246,10 +1246,20 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
   Tag-Query liegt das Risiko aber in der SQL-Semantik. Zu tun: PostGIS-Extension
   in Sandbox und CI verfügbar machen, einen Testhelfer schreiben, der eine
   `osm_pois`-Tabelle anlegt und mit einigen Dutzend Zeilen befüllt, und
-  entscheiden, ob die neuen Tests im Haupt-Testlauf mitlaufen (dafür müsste
-  `geo/**` teilweise aus dem Ausschluss heraus) oder im eigenen geo-Lauf
-  bleiben.
-- **Die dreifache Tag-Liste zusammenführen.** Dieselbe Tag-Kenntnis steht in
+  entscheiden, ob die neuen Tests im Haupt-Testlauf mitlaufen oder im eigenen
+  geo-Lauf bleiben.
+
+  **Umgesetzt (Schritt 1):** Die Suchtests bleiben im geo-eigenen Lauf
+  (`geo/src/poi-search.test.ts`, `node:test`), weil geo ein eigenständiges Paket
+  mit eigenem Container und eigener Datenbank ist; der geo-Workflow bekommt dafür
+  einen PostGIS-Service. Ohne erreichbare Datenbank **überspringen** sie sich mit
+  klarer Begründung, statt rot zu werden — eine rote Suite, die nur „hier ist
+  keine Datenbank" bedeutet, erzieht dazu, rote Suiten zu ignorieren. Die
+  Verbindung zum Haupt-Testlauf hält stattdessen
+  `osm-admin/poi-tag-sync.test.ts`: Er liest die geo-Dateien von der Platte und
+  schlägt fehl, sobald die Tag-Listen auseinanderlaufen.
+- **Die dreifache Tag-Liste zusammenführen** (umgesetzt in Schritt 1 als
+  Drift-Test, siehe unten). Dieselbe Tag-Kenntnis steht in
   `geo/src/osm2pgsql.lua` (Importfilter), `geo/src/pois.ts` (Query-Defaults) und
   `osm-admin/poi.config.ts` (Aufruferfilter) — mit zwei „must stay in
   sync"-Kommentaren als einziger Absicherung. Die Planung erweitert alle drei.
