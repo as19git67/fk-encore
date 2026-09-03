@@ -1274,9 +1274,21 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
 - **Den Zuwachs messen**, bevor Gastronomie und Alltagsinfrastruktur produktiv
   gehen (§10.2) — auf dem echten Host. Schwaben ist dafür die richtige
   Messgröße: klein genug, dass der Lauf nicht abschreckt, und repräsentativ
-  genug, um von dort auf die übrigen Bezirke hochzurechnen. Zu messen ist die
-  Größe der Regionsdatenbank vor und nach dem Neuimport, nicht die Zahl der
-  Zeilen — Plattenplatz ist die Grenze, nicht die Zeilenzahl.
+  genug, um von dort auf die übrigen Bezirke hochzurechnen.
+
+  **Dafür gibt es jetzt einen Knopf:** `GET /osm/regions/:slug/storage`
+  (`osm.admin`) liefert die Größe der Regionsdatenbank, aufgeschlüsselt nach
+  Tabellen, dazu die POI-Zahl je getroffenem Tag. Einmal vor dem Neuimport
+  lesen, einmal danach — die Differenz ist der Preis.
+
+  Beim Vergleichen zwei Dinge beachten. Erstens: `totalMb` gegen `totalMb`
+  vergleichen, nicht gegen `tableMb`. Der Gesamtwert enthält Indizes und TOAST
+  und ist das, was die Platte spürt; `tableMb` ist nur der Heap. Zweitens: Der
+  größte Teil einer Region sind die **osm2pgsql-Middle-Tables**
+  (`planet_osm_*`), die für die Replikation vorgehalten werden und mit einem
+  breiteren POI-Filter kaum wachsen. Wer nur die Gesamtgröße betrachtet,
+  unterschätzt den relativen Zuwachs von `osm_pois` deshalb erheblich — die
+  Aufschlüsselung ist genau dafür da.
 
 ### 13.1 Die Schritte
 

@@ -16,6 +16,10 @@ import { requirePermission } from "../user/auth-handler";
 import { getAuthData } from "~encore/auth";
 import {
   approve,
+  regionStorage as readRegionStorage,
+  RegionNotFoundError,
+  RegionStorageUnavailableError,
+  type RegionStorageResult,
   createPending,
   remove,
   suggestForCoord,
@@ -257,6 +261,28 @@ export const deleteRegion = api(
     return { slug: req.slug, deleted };
   },
 );
+
+/**
+ * Size breakdown for one region — the numbers for the before/after
+ * measurement described in `regionStorage` (region.service.ts).
+ */
+export const regionStorage = api(
+  { expose: true, auth: true, method: "GET", path: "/osm/regions/:slug/storage" },
+  async ({ slug }: { slug: string }): Promise<RegionStorageResponse> => {
+    requirePermission(getAuthData()!, "osm.admin");
+    try {
+      return await readRegionStorage(slug);
+    } catch (err) {
+      if (err instanceof RegionNotFoundError) throw APIError.notFound(err.message);
+      if (err instanceof RegionStorageUnavailableError) {
+        throw APIError.failedPrecondition(err.message);
+      }
+      throw err;
+    }
+  },
+);
+
+export type RegionStorageResponse = RegionStorageResult;
 
 function validateLatLon(lat: number, lon: number): void {
   if (typeof lat !== "number" || Number.isNaN(lat) || lat < -90 || lat > 90) {
