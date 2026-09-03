@@ -135,6 +135,8 @@ export interface GeoClient {
     lon: number,
     opts?: GeoPoiQueryOptions,
   ): Promise<GeoPoiCandidate[]>;
+  /** Area search for trip planning — see the method on HttpGeoClient. */
+  searchPois(postgresDb: string, query: GeoPoiSearchQuery): Promise<GeoPoiSearchPage>;
   /**
    * Apply replication diffs. `pbfUrl` is optional but lets the geo
    * service auto-initialise replication for a region whose status table

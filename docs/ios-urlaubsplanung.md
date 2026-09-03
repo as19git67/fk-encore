@@ -1284,6 +1284,15 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    langsame Teil (Import) vom schnellen (Query, Solver) entkoppelt.
 2. **`trip-planner`, ein Tag, Fußwege per Heuristik** — Constraints per API,
    kein LLM, kein Frontend. Liefert Blöcke mit Spots. Deterministisch testbar.
+
+   **Umgesetzt:** `POST /trip-planner/day`. Bewusst **zustandslos** — der Plan
+   wird berechnet und zurückgegeben, nicht gespeichert. Persistenz (§12) käme
+   mit Schritt 3, wenn die Neuverteilung sie tatsächlich braucht; sie jetzt
+   anzulegen hieße, ein Datenmodell für Mechanik zu bauen, die es noch nicht
+   gibt. Die Reihenfolge im Block ist exakt gelöst (Permutation bis sieben
+   Stopps), die Auswahl greedy nach Wert je Minute. Nur der letzte
+   Spots-Block zahlt den Rückweg zum Anker — das ist der Weg, den man
+   tatsächlich geht.
 3. **Neuverteilung** — „ab hier, ab jetzt", Vorrat, Verschieben auf Folgetage.
    Bewusst **vor** dem hübschen UI, weil es die Kernmechanik ist.
 4. **Importerweiterung** — jetzt, wo der Planer läuft und zeigt, welche Tags er
