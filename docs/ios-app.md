@@ -399,6 +399,29 @@ dokumentiert**:
   „gleich gut", „später" — und der Vergleich lässt sich bei langen Gruppen
   vorzeitig beenden. Ein Wisch ist unsichtbar und mit VoiceOver nicht
   erreichbar.
+- **Diese Knöpfe liegen in der System-Werkzeugleiste unten**, nicht in einer
+  selbst gebauten Leiste (#1091 §1). Ein `VStack` aus Panes und Leiste schob
+  die Leiste über die Unterkante hinaus: die Panes werden gegen die *ganze*
+  `GeometryReader` bemessen und `ComparePane` nagelt diese Größe fest, es
+  konnte also nichts schrumpfen, um Platz zu machen. Als Chrome reserviert das
+  System die Höhe, der Reader misst den Rest — und im Gegensatz zu einer
+  schwebenden Leiste verdeckt nichts die Fotos, um die es gerade geht.
+- **Ein „?" erklärt die Gesten.** Wischen und der Gesichts-Tipp sind der
+  schnelle Weg und vollkommen unsichtbar; die Knöpfe erklären sie nicht, also
+  tut es ein Popover (`GestureHelp`).
+- **Aus der Bestätigung führt ein Weg zurück in den Vergleich**
+  (`resumeComparing`, #1091 §2c). Vorher war das Beenden endgültig: die einzigen
+  Ausgänge waren „übernehmen" und „abbrechen", letzteres verwarf das ganze
+  Turnier. Angeboten wird es nur, solange wirklich ein Paar offen ist; die
+  Punkte und die erledigten Paare bleiben, entschieden bleibt entschieden. Die
+  Vorauswahl wird dabei **nicht** neu gesetzt — sonst nähme der zweite Durchgang
+  die von Hand gesetzten Schalter zurück.
+- **In der Bestätigung öffnet ein Tipp auf das Bild es in groß**, nicht die
+  Auswahl (#1091 §2a/§2b): das ist der Bildschirm, auf dem Fotos ausgeblendet
+  werden, und er zeigt sie 110 pt groß — aus einer Miniatur zu entscheiden ist
+  genau das, was der Vergleich vermeiden soll. Behalten/Ausblenden sitzt auf dem
+  Auswahl-Icon (44 pt Trefferfläche) und zusätzlich im Fuß der Vollbildansicht,
+  damit „ansehen, dann entscheiden" nicht ins Raster zurückführt.
 - **Der Gruppen-Review läuft auch innerhalb eines Albums** (#1085 §2b), über
   „Ähnliche Fotos" im Überlauf-Menü der Album-Detailansicht.
   `GET /photos/groups` ist nicht album-fähig und muss es nicht sein:

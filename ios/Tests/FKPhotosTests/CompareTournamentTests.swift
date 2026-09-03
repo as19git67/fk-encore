@@ -175,4 +175,51 @@ final class CompareTournamentTests: XCTestCase {
         let seeds = CompareTournament.seedScores(qualities: qualities)
         XCTAssertEqual(seeds[1], 0)
     }
+
+    // MARK: - Going back into the comparison
+
+    func testTheComparisonCanBeResumedAfterEndingItEarly() {
+        var tournament = CompareTournament(photoIds: [1, 2, 3, 4])
+        tournament.finishComparing()
+        XCTAssertEqual(tournament.phase, .confirming)
+        tournament.resumeComparing()
+        XCTAssertEqual(tournament.phase, .comparing)
+        XCTAssertNotNil(tournament.current)
+    }
+
+    /// Resuming continues; it does not start over. Pairs already judged stay
+    /// judged, and their scores stand.
+    func testResumingKeepsWhatWasAlreadyDecided() {
+        var tournament = CompareTournament(photoIds: [1, 2, 3])
+        let first = tournament.current!
+        tournament.discard(first.low)
+        let settledCount = tournament.comparisons
+        tournament.finishComparing()
+        tournament.resumeComparing()
+        XCTAssertEqual(tournament.comparisons, settledCount)
+        XCTAssertEqual(tournament.score(of: first.low), -1)
+        XCTAssertNotEqual(tournament.current, first)
+    }
+
+    /// With every pair judged there is nothing to go back to, so resuming is a
+    /// no-op rather than an empty comparison screen.
+    func testResumingAFinishedTournamentDoesNothing() {
+        var tournament = CompareTournament(photoIds: [1, 2])
+        tournament.draw()
+        XCTAssertFalse(tournament.hasUnsettledPairs)
+        tournament.resumeComparing()
+        XCTAssertEqual(tournament.phase, .confirming)
+        XCTAssertNil(tournament.current)
+    }
+
+    /// A pair postponed with „später" is unjudged, so it is something to come
+    /// back to.
+    func testASkippedPairIsSomethingToResumeInto() {
+        var tournament = CompareTournament(photoIds: [1, 2, 3])
+        tournament.skip()
+        tournament.finishComparing()
+        XCTAssertTrue(tournament.hasUnsettledPairs)
+        tournament.resumeComparing()
+        XCTAssertEqual(tournament.phase, .comparing)
+    }
 }

@@ -140,6 +140,27 @@ struct CompareTournament: Equatable, Sendable {
         phase = .confirming
     }
 
+    /// Go back to comparing, from the confirmation.
+    ///
+    /// Ending the pairwise half used to be one-way: whether the pairs ran out
+    /// or the user pressed „Fertig", the only exits from the confirmation were
+    /// committing and throwing the whole tournament away (#1091 §2c). Nothing
+    /// about the state prevented resuming — the scores and the settled pairs
+    /// were all still here — so this picks up the next unjudged pair and
+    /// leaves everything already decided decided.
+    ///
+    /// A no-op when every pair has been judged, so the caller can offer it
+    /// unconditionally and get „nothing left to compare" rather than an empty
+    /// comparison screen.
+    mutating func resumeComparing() {
+        guard let next = Self.nextPair(
+            photoIds: photoIds, scores: scores, excluding: settled
+        ) else { return }
+        skipped = []
+        current = next
+        phase = .comparing
+    }
+
     // MARK: - Reading
 
     /// Whether any pair at all is still unjudged.
