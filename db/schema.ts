@@ -2716,6 +2716,11 @@ export const tripPlanBlocks = pgTable(
     label: text("label").notNull(),
     kind: text("kind").notNull(),
     budget_minutes: integer("budget_minutes").notNull(),
+    // Where the block sits on the day's notional clock, in minutes past
+    // midnight (§8.3). Null for plans written before the frame time was
+    // kept — inventing one would put the traveller somewhere they were
+    // never planned to be.
+    start_minutes: integer("start_minutes"),
   },
   (table) => [uniqueIndex("trip_plan_blocks_day_position_key").on(table.day_id, table.position)]
 );

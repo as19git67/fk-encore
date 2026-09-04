@@ -63,10 +63,18 @@ struct TripBlock: Codable, Identifiable, Sendable {
     let budgetMinutes: Int
     /// Travel plus dwell actually used. Never exceeds the budget.
     let usedMinutes: Int
+    /// Where the block sits on the day's notional clock, in minutes past
+    /// midnight (§8.3). Null for plans written before the frame time was
+    /// kept — the slider then has nothing to show for that day, which is
+    /// more honest than a guessed hour.
+    let startMinutes: Int?
     let stops: [TripStop]
 
     /// A meal block holds time and a rough area, not a venue (§10.3).
     var isMeal: Bool { kind == "meal" }
+
+    /// When the block ends, if it has an hour at all.
+    var endMinutes: Int? { startMinutes.map { $0 + budgetMinutes } }
 
     /// "ca. 3 h von 3,5 h" — the utilisation line under a block (§8.3).
     var utilisation: Double {

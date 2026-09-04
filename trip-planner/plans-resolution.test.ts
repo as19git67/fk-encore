@@ -260,6 +260,53 @@ describe("detailing a day on the eve", () => {
   });
 });
 
+describe("the hour each block begins", () => {
+  it("is kept, so the day can be shown as well as planned", async () => {
+    const { plan } = await createTripPlan({ anchor: ANCHOR, days: 2 });
+    const blocks = plan.legs[0].days[0].blocks;
+    // The default day starts at 09:00 and the blocks run back to back.
+    expect(blocks.map((b) => b.startMinutes)).toEqual([
+      9 * 60,
+      9 * 60 + 210,
+      9 * 60 + 210 + 90,
+      9 * 60 + 210 + 90 + 210,
+    ]);
+  });
+
+  it("follows the fixpoints that moved the block", async () => {
+    const { plan } = await createTripPlan({
+      legs: [
+        {
+          anchor: ANCHOR,
+          fixpoints: [
+            { dayIndex: 0, label: "Führung", at: "14:00", durationMinutes: 90 },
+          ],
+        },
+      ],
+    });
+    const blocks = plan.legs[0].days[0].blocks;
+    // The tour binds at 13:40 and ends at 15:30; the afternoon cannot
+    // begin before that.
+    expect(blocks.find((b) => b.id === "afternoon")?.startMinutes).toBe(15 * 60 + 30);
+  });
+
+  it("is kept for a day that has no spots yet", async () => {
+    // The frame is trip-resolution information, so its hours exist from
+    // the start (§4.3).
+    const { plan } = await createTripPlan({ anchor: ANCHOR, days: 4 });
+    const later = plan.legs[0].days[3];
+    expect(later.detailed).toBe(false);
+    expect(later.blocks[0].startMinutes).toBe(9 * 60);
+  });
+
+  it("survives detailing the day later", async () => {
+    const { plan } = await createTripPlan({ anchor: ANCHOR, days: 4 });
+    const before = plan.legs[0].days[2].blocks.map((b) => b.startMinutes);
+    const { plan: after } = await detailTripDay({ planId: plan.id, dayIndex: 2 });
+    expect(after.legs[0].days[2].blocks.map((b) => b.startMinutes)).toEqual(before);
+  });
+});
+
 describe("ticking a spot off", () => {
   it("marks it done without rearranging the day", async () => {
     const { plan } = await createTripPlan({ anchor: ANCHOR, days: 2 });

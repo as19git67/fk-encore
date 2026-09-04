@@ -580,6 +580,10 @@ async function planLeg(
     // empty: the pool *is* the plan at trip resolution (§4.3), and
     // filling day nineteen now would only be undone by the weather.
     const detailed = dayIndex < (trip.detailDays ?? Number.POSITIVE_INFINITY);
+    // The hour each block begins is part of the frame, so it is kept
+    // whether or not the day has spots yet (§8.3).
+    const startsByBlock = new Map(framed.blocks.map((b) => [b.id, b.startMinutes]));
+
     if (!detailed) {
       days.push({
         blocks: framed.blocks.map((b) => ({ ...b, usedMinutes: 0, stops: [] })),
@@ -597,7 +601,7 @@ async function planLeg(
       mode,
     });
     days.push({
-      blocks: solved.blocks,
+      blocks: solved.blocks.map((b) => ({ ...b, startMinutes: startsByBlock.get(b.id) })),
       fixpoints: fixpoints.map((f) => f.stored),
       detailed: true,
     });

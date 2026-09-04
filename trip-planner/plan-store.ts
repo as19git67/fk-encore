@@ -87,6 +87,13 @@ export interface StoredFixpoint extends Fixpoint {
 export interface StoredBlock extends CurrentBlock {
   /** Database id, distinct from the template id used by the solver. */
   rowId: number;
+  /**
+   * Where the block sits on the day's notional clock, in minutes past
+   * midnight (§8.3). Null for plans written before the frame time was
+   * kept — the time slider then has nothing to show for that day, which
+   * is more honest than a guessed hour.
+   */
+  startMinutes: number | null;
   stops: StoredStop[];
 }
 
@@ -101,8 +108,11 @@ export interface CreateFixpointInput extends Fixpoint {
   lon?: number | null;
 }
 
+/** A block as it goes in, with the hour the frame gave it. */
+export type CreateBlockInput = PlannedBlock & { startMinutes?: number };
+
 export interface CreateDayInput {
-  blocks: readonly PlannedBlock[];
+  blocks: readonly CreateBlockInput[];
   fixpoints?: readonly CreateFixpointInput[];
   /** Defaults to true — a day written with stops is a detailed day. */
   detailed?: boolean;
@@ -182,6 +192,7 @@ export async function createPlan(input: CreatePlanInput, db: Db = dbDefault): Pr
             label: block.label,
             kind: block.kind,
             budget_minutes: block.budgetMinutes,
+            start_minutes: block.startMinutes ?? null,
           })
           .returning({ id: tripPlanBlocks.id });
 
@@ -451,6 +462,7 @@ export async function loadPlan(
       label: row.label,
       kind: row.kind as CurrentBlock["kind"],
       budgetMinutes: row.budget_minutes,
+      startMinutes: row.start_minutes,
       usedMinutes: stops
         .filter((s) => s.status === "planned")
         .reduce((sum, s) => sum + s.dwellMinutes + s.travelFromPrevious.minutes, 0),

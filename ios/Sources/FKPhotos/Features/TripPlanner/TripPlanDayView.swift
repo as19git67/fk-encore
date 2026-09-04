@@ -29,6 +29,24 @@ struct TripPlanDayView: View {
         }
         .navigationTitle(viewModel.leg?.title ?? viewModel.plan?.title ?? "Plan")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if let day = viewModel.day, let leg = viewModel.leg {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        TripDayMapView(day: day, anchor: leg.anchor)
+                    } label: {
+                        Label("Karte", systemImage: "map")
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        TripTodayView(viewModel: viewModel)
+                    } label: {
+                        Label("Heute", systemImage: "sun.max")
+                    }
+                }
+            }
+        }
         .task { await viewModel.load() }
     }
 
