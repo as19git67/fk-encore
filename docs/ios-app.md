@@ -423,7 +423,9 @@ dokumentiert**:
   Auswahl-Icon (44 pt Trefferfläche) und zusätzlich im Fuß der Vollbildansicht,
   damit „ansehen, dann entscheiden" nicht ins Raster zurückführt.
 - **Der Gruppen-Review läuft auch innerhalb eines Albums** (#1085 §2b), über
-  „Ähnliche Fotos" im Überlauf-Menü der Album-Detailansicht.
+  „Gruppen-Review" im Überlauf-Menü der Album-Detailansicht — derselbe Name
+  und dasselbe Icon (`checklist`) wie im Feed und im Fotos-Hub, damit es als
+  ein Feature statt als drei verschiedene liest.
   `GET /photos/groups` ist nicht album-fähig und muss es nicht sein:
   `AlbumGroupReview.scoped` schneidet jede Gruppe auf die **sichtbaren**
   Album-Mitglieder zu und verwirft die mit weniger als zwei — dieselbe

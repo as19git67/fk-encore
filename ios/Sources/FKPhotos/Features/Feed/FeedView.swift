@@ -62,6 +62,12 @@ struct FeedView: View {
                     ReviewQueueView()
                 } label: {
                     Image(systemName: "checklist")
+                        // Reserves the badge's corner *inside* this label's
+                        // reported bounds — see ReviewCountBadge's doc for
+                        // why that has to be padding, not the overlay's own
+                        // offset, under iOS 26's Liquid Glass toolbar.
+                        .padding(.top, 5)
+                        .padding(.trailing, 5)
                         .overlay(alignment: .topTrailing) {
                             ReviewCountBadge(count: reviewCount.pending)
                         }

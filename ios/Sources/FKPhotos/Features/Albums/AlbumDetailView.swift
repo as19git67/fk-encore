@@ -341,7 +341,11 @@ struct AlbumDetailView: View {
                                 Button {
                                     showGroupReview = true
                                 } label: {
-                                    Label("Ähnliche Fotos", systemImage: "square.stack.3d.down.right")
+                                    // Same name, same glyph as the Feed
+                                    // toolbar and the photo hub row — one
+                                    // feature, reached from three places,
+                                    // should not read as three features.
+                                    Label("Gruppen-Review", systemImage: "checklist")
                                 }
                             }
                             if canStartSlideshow || canShowMap || canReviewGroups {
