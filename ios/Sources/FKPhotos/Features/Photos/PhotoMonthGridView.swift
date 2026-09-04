@@ -127,24 +127,26 @@ struct PhotoMonthGridView: View {
                         selectedIds = []
                     }
                 }
+                // Titled labels so the system's „…" overflow menu has
+                // something to draw — see `PhotoGridView`.
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
                         addToAlbum.present(photoIds: selectedIds)
                     } label: {
-                        Image(systemName: "rectangle.stack.badge.plus")
+                        Label("Zu Album hinzufügen", systemImage: "rectangle.stack.badge.plus")
                     }
                     .disabled(selectedIds.isEmpty)
                     Button {
                         let filenames = photos.filter { selectedIds.contains($0.id) }.map(\.filename)
                         Task { await shareManager.share(filenames: filenames) }
                     } label: {
-                        Image(systemName: "square.and.arrow.up")
+                        Label("Teilen", systemImage: "square.and.arrow.up")
                     }
                     .disabled(selectedIds.isEmpty || shareManager.isLoading)
                     Button {
                         showSlideshow = true
                     } label: {
-                        Image(systemName: "play.rectangle")
+                        Label("Diashow", systemImage: "play.rectangle")
                     }
                     .disabled(!canStartSlideshow)
                 }
@@ -217,11 +219,16 @@ struct PhotoMonthGridView: View {
         }
     }
 
+    /// Drag-to-select, gated behind a hold so the grid still scrolls while
+    /// selecting — see `PhotoGridView.dragSelectGesture` for why.
     private var dragSelectGesture: some Gesture {
-        DragGesture(minimumDistance: 10, coordinateSpace: .named("monthGrid"))
+        LongPressGesture(minimumDuration: 0.25)
+            .sequenced(
+                before: DragGesture(minimumDistance: 0, coordinateSpace: .named("monthGrid"))
+            )
             .onChanged { value in
-                let point = value.location
-                for (id, frame) in itemFrames where frame.contains(point) {
+                guard case .second(_, let drag?) = value else { return }
+                for (id, frame) in itemFrames where frame.contains(drag.location) {
                     selectedIds.insert(id)
                 }
             }
