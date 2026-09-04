@@ -121,18 +121,32 @@ final class TripMapsHandoffTests: XCTestCase {
         }
     }
 
-    func testTheQuerySchemeIsDeclaredInTheBundle() {
+    func testTheAppsInfoPlistDeclaresTheQueryScheme() throws {
         // Without the Info.plist entry, canOpenURL answers "not
         // installed" however the device is set up, and the Google option
         // disappears with no error anywhere — the classic stumbling
-        // block the concept warns about (§9.1). This is the only way to
-        // notice it before a user does.
-        XCTAssertTrue(
-            TripMapsApp.googleSchemeIsDeclared(in: Bundle(for: TripMapsHandoffTests.self))
-                || TripMapsApp.googleSchemeIsDeclared(),
-            "LSApplicationQueriesSchemes must list comgooglemaps",
+        // block the concept warns about (§9.1).
+        //
+        // Read from disk rather than through a Bundle: in a unit-test
+        // target `Bundle.main` is the test runner and the test bundle
+        // has its own Info.plist, so neither can see the app's. The
+        // thing being guarded is a file, so the test opens the file.
+        let plist = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // FKPhotosTests
+            .deletingLastPathComponent()   // Tests
+            .deletingLastPathComponent()   // ios
+            .appendingPathComponent("Sources/FKPhotos/Info.plist")
+
+        let data = try Data(contentsOf: plist)
+        let parsed = try PropertyListSerialization.propertyList(from: data, format: nil)
+        let schemes = (parsed as? [String: Any])?["LSApplicationQueriesSchemes"] as? [String]
+
+        XCTAssertEqual(
+            schemes?.contains(TripMapsApp.googleScheme), true,
+            "LSApplicationQueriesSchemes in \(plist.path) must list \(TripMapsApp.googleScheme)",
         )
     }
+
 
     // MARK: - The setting
 

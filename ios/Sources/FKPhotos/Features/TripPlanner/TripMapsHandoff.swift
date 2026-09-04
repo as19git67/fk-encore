@@ -18,8 +18,9 @@ import Foundation
 ///     `canOpenURL` on `comgooglemaps://` — which needs an entry in
 ///     `LSApplicationQueriesSchemes`. Without it the check silently
 ///     answers "not installed" and the option vanishes for no visible
-///     reason. `TripMapsApp.googleSchemeIsDeclared` exists so a test can
-///     hold the Info.plist to that.
+///     reason. Nothing at runtime can tell the two apart, so the
+///     Info.plist entry is guarded by a test that reads the file
+///     (`TripMapsHandoffTests`) rather than by code here.
 ///   - **A whole block goes over at once.** Apple's `openMaps` takes an
 ///     array of destinations and Google's URL knows waypoints, so the
 ///     morning travels as one route rather than one leg at a time.
@@ -39,15 +40,6 @@ enum TripMapsApp: String, CaseIterable, Sendable {
 
     /// The scheme whose presence says Google Maps is installed.
     static let googleScheme = "comgooglemaps"
-
-    /// Whether the app's Info.plist declares the query scheme the check
-    /// needs. A missing entry makes `canOpenURL` answer "no" whatever is
-    /// installed, and the Google option then disappears with no error
-    /// anywhere — the classic stumbling block (§9.1).
-    static func googleSchemeIsDeclared(in bundle: Bundle = .main) -> Bool {
-        let declared = bundle.object(forInfoDictionaryKey: "LSApplicationQueriesSchemes") as? [String]
-        return declared?.contains(googleScheme) ?? false
-    }
 }
 
 /// What a route is for. Named separately from `TripTransportMode`
