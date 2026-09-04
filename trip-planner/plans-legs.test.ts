@@ -16,7 +16,7 @@ import { clearRouterCache } from "../osm-admin/region-router";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
-import { createTripPlan } from "./plans";
+import { createTripPlan, listTripPlans } from "./plans";
 
 /** Two invented towns, far enough apart to need two regions. */
 const WEST = { lat: 48.37, lon: 10.9 };
@@ -166,6 +166,54 @@ describe("POST /trip-planner/plans with legs", () => {
       // The endpoint is typed, but nothing stops a hand-written request.
       createTripPlan({ legs: [{ anchor: WEST, mode: "helicopter" as never }] }),
     ).rejects.toThrow(/mode must be one of/);
+  });
+
+  it("lists the user's plans, newest first, without the whole plan", async () => {
+    await seedRegion("europe/west", [48.2, 10.5, 48.6, 11.2]);
+    await seedRegion("europe/east", [48.0, 11.3, 48.4, 11.9]);
+    geo.setSearchSpots("nom_europe_west", [spot("node:1", WEST)]);
+    geo.setSearchSpots("nom_europe_east", [spot("node:2", EAST)]);
+
+    await createTripPlan({ title: "Wochenende", anchor: WEST, days: 2 });
+    await createTripPlan({
+      title: "Zwei Städte",
+      legs: [
+        { title: "Weststadt", anchor: WEST, days: 3, startDate: "2026-09-03" },
+        { title: "Oststadt", anchor: EAST, days: 2 },
+      ],
+    });
+
+    const { plans } = await listTripPlans();
+    expect(plans.map((p) => p.title)).toEqual(["Zwei Städte", "Wochenende"]);
+
+    const [twoCities] = plans;
+    // Enough to choose between trips: a name, a route, a length, a date.
+    expect(twoCities.legTitles).toEqual(["Weststadt", "Oststadt"]);
+    expect(twoCities.dayCount).toBe(5);
+    expect(twoCities.startDate).toBe("2026-09-03");
+    // And not the plan itself — a twenty-day trip is hundreds of stops.
+    expect(twoCities).not.toHaveProperty("legs");
+  });
+
+  it("lists nothing for a user with no plans", async () => {
+    await expect(listTripPlans()).resolves.toEqual({ plans: [] });
+  });
+
+  it("does not list another user's plans", async () => {
+    await seedRegion("europe/west", [48.2, 10.5, 48.6, 11.2]);
+    geo.setSearchSpots("nom_europe_west", [spot("node:1", WEST)]);
+    await createTripPlan({ title: "Meine Reise", anchor: WEST });
+
+    const [other] = await db
+      .insert(users)
+      .values({ email: `other-${Date.now()}@test.invalid`, name: "Other", password_hash: "x" })
+      .returning({ id: users.id });
+    vi.mocked(getAuthData).mockReturnValue({
+      userID: String(other.id),
+      permissions: ["photos.view"],
+    });
+
+    await expect(listTripPlans()).resolves.toEqual({ plans: [] });
   });
 
   it("refuses a start date that is not a plain date", async () => {

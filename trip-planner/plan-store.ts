@@ -16,7 +16,7 @@
  * database never has an opinion about what belongs in a block.
  */
 
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import dbDefault from "../db/database";
 import {
   tripPlanBlocks,
@@ -220,6 +220,74 @@ export async function createPlan(input: CreatePlanInput, db: Db = dbDefault): Pr
   }
 
   return plan.id;
+}
+
+/** One row of the plan list: enough to choose, not the whole plan. */
+export interface PlanSummary {
+  id: number;
+  title: string | null;
+  /** The legs in order, so a list row can read "Beispielstadt → Musterstadt". */
+  legTitles: (string | null)[];
+  /** Days across the whole trip. */
+  dayCount: number;
+  /** The first leg's start date, when the trip has dates at all. */
+  startDate: string | null;
+  updatedAt: string;
+}
+
+/**
+ * The user's plans, newest first.
+ *
+ * Deliberately a summary rather than a list of full plans: a
+ * twenty-day trip carries hundreds of stops, and a chooser needs a
+ * name, a length and a date.
+ */
+export async function listPlans(
+  ownerId: number,
+  db: Db = dbDefault,
+): Promise<PlanSummary[]> {
+  const planRows = await db
+    .select()
+    .from(tripPlans)
+    .where(eq(tripPlans.owner_id, ownerId))
+    .orderBy(desc(tripPlans.updated_at));
+  if (planRows.length === 0) return [];
+
+  const planIds = planRows.map((p) => p.id);
+  const legRows = await db
+    .select()
+    .from(tripPlanLegs)
+    .where(inArray(tripPlanLegs.plan_id, planIds))
+    .orderBy(asc(tripPlanLegs.plan_id), asc(tripPlanLegs.position));
+
+  const legIds = legRows.map((l) => l.id);
+  const dayRows = legIds.length
+    ? await db.select({ leg_id: tripPlanDays.leg_id }).from(tripPlanDays).where(inArray(tripPlanDays.leg_id, legIds))
+    : [];
+
+  const daysByLeg = new Map<number, number>();
+  for (const row of dayRows) {
+    daysByLeg.set(row.leg_id, (daysByLeg.get(row.leg_id) ?? 0) + 1);
+  }
+
+  const legsByPlan = new Map<number, typeof legRows>();
+  for (const leg of legRows) {
+    const list = legsByPlan.get(leg.plan_id) ?? [];
+    list.push(leg);
+    legsByPlan.set(leg.plan_id, list);
+  }
+
+  return planRows.map((plan) => {
+    const legs = legsByPlan.get(plan.id) ?? [];
+    return {
+      id: plan.id,
+      title: plan.title,
+      legTitles: legs.map((l) => l.title),
+      dayCount: legs.reduce((sum, l) => sum + (daysByLeg.get(l.id) ?? 0), 0),
+      startDate: legs[0]?.start_date ?? null,
+      updatedAt: plan.updated_at,
+    };
+  });
 }
 
 export async function loadPlan(

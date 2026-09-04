@@ -35,12 +35,14 @@ import {
 } from "./fixpoints";
 import {
   createPlan,
+  listPlans,
   loadPlan,
   saveDayDetail,
   saveRedistribution,
   type CreateDayInput,
   type CreateFixpointInput,
   type CreateLegInput,
+  type PlanSummary,
   type StoredPlan,
 } from "./plan-store";
 
@@ -241,6 +243,24 @@ export const createTripPlan = api(
     const plan = await loadPlan(planId, userId);
     if (!plan) throw APIError.internal("plan vanished right after being written");
     return { plan, droppedBlocks };
+  },
+);
+
+export interface ListPlansResponse {
+  plans: PlanSummary[];
+}
+
+/**
+ * The user's plans, newest first — what the app needs to offer a
+ * choice. A summary rather than the plans themselves: a twenty-day trip
+ * carries hundreds of stops, and choosing one needs a name, a length
+ * and a date.
+ */
+export const listTripPlans = api(
+  { expose: true, method: "GET", path: "/trip-planner/plans", auth: true },
+  async (): Promise<ListPlansResponse> => {
+    const userId = requireUser();
+    return { plans: await listPlans(userId) };
   },
 );
 
