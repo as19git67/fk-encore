@@ -27,9 +27,18 @@ import { redistribute, type CurrentBlock } from "./redistribute";
 import { solveDay, type PlannedBlock } from "./solver";
 import { DEFAULT_MAX_WALK_MINUTES, type TransportMode } from "./travel";
 import {
+  parseMinutes,
+  scheduleDay,
+  type DroppedBlock,
+  type Fixpoint,
+  type FixpointKind,
+} from "./fixpoints";
+import {
   createPlan,
   loadPlan,
   saveRedistribution,
+  type CreateDayInput,
+  type CreateFixpointInput,
   type CreateLegInput,
   type StoredPlan,
 } from "./plan-store";
@@ -41,6 +50,7 @@ const MAX_DAYS = 14;
 /** More than this is a life, not a trip — and every leg costs a search. */
 const MAX_LEGS = 10;
 const TRANSPORT_MODES: readonly TransportMode[] = ["foot", "bike", "transit", "car"];
+const FIXPOINT_KINDS: readonly FixpointKind[] = ["appointment", "departure"];
 
 /** One stop on the trip: a place, a stretch of days, a way of getting around. */
 export interface LegRequest {
@@ -63,6 +73,35 @@ export interface LegRequest {
   radiusM?: number;
   /** ISO date (YYYY-MM-DD) of the leg's first day, when the trip has dates. */
   startDate?: string;
+  /** When the day starts, as "HH:MM". Defaults to 09:00. */
+  dayStartsAt?: string;
+  /** Hard times that frame individual days of this leg (§4.4). */
+  fixpoints?: FixpointRequest[];
+}
+
+/**
+ * A hard clock time on one day of a leg.
+ *
+ * `kind` is the field that matters: after an `appointment` the day goes
+ * on, after a `departure` it is over. Calling a last train an
+ * appointment would plan an evening block behind a train that has
+ * already left.
+ */
+export interface FixpointRequest {
+  /** Which day of the leg, counted from zero. */
+  dayIndex: number;
+  label: string;
+  /** "18:40". */
+  at: string;
+  kind?: FixpointKind;
+  /** How long it occupies. Zero for a departure. */
+  durationMinutes?: number;
+  /** The way there, in minutes. */
+  travelMinutes?: number;
+  /** Margin in front of it. Defaults to 20, never below 5. */
+  bufferMinutes?: number;
+  lat?: number;
+  lon?: number;
 }
 
 export interface CreatePlanRequest {
@@ -89,6 +128,18 @@ export interface CreatePlanRequest {
 
 export interface PlanResponse {
   plan: StoredPlan;
+  /**
+   * Blocks the fixpoints left no room for, per leg and day. Empty for a
+   * plan with no hard times. Reported rather than silently absent: "der
+   * Zug lässt für den Abend keine Zeit mehr" is the sentence the app
+   * shows (§8.3).
+   */
+  droppedBlocks?: DroppedBlockReport[];
+}
+
+export interface DroppedBlockReport extends DroppedBlock {
+  legIndex: number;
+  dayIndex: number;
 }
 
 export const createTripPlan = api(
@@ -100,16 +151,17 @@ export const createTripPlan = api(
     const shape = shapeDay(req.blocks ?? DEFAULT_DAY, req.pace ?? "normal", req.group);
 
     const legs: CreateLegInput[] = [];
-    for (const legReq of legRequests) {
-      legs.push(
-        await planLeg(legReq, {
-          shape,
-          maxWalkMinutes,
-          categories: req.categories,
-          interests: req.interests,
-          dwellMinutes: req.dwellMinutes,
-        }),
-      );
+    const droppedBlocks: DroppedBlockReport[] = [];
+    for (const [legIndex, legReq] of legRequests.entries()) {
+      const planned = await planLeg(legReq, {
+        shape,
+        maxWalkMinutes,
+        categories: req.categories,
+        interests: req.interests,
+        dwellMinutes: req.dwellMinutes,
+      });
+      legs.push(planned.leg);
+      for (const d of planned.dropped) droppedBlocks.push({ ...d, legIndex });
     }
 
     const planId = await createPlan({
@@ -127,7 +179,7 @@ export const createTripPlan = api(
 
     const plan = await loadPlan(planId, userId);
     if (!plan) throw APIError.internal("plan vanished right after being written");
-    return { plan };
+    return { plan, droppedBlocks };
   },
 );
 
@@ -251,13 +303,15 @@ async function planLeg(
     interests?: string[];
     dwellMinutes?: Record<string, number>;
   },
-): Promise<CreateLegInput> {
+): Promise<{ leg: CreateLegInput; dropped: Array<DroppedBlock & { dayIndex: number }> }> {
   const anchor = validateAnchor(legReq.anchor);
   const radiusM = validateRadius(legReq.radiusM);
   const dayCount = validateDays(legReq.days);
   const mode = validateMode(legReq.mode);
   const anchorRadiusM = validateAnchorRadius(legReq.anchorRadiusM);
   const startDate = validateStartDate(legReq.startDate);
+  const dayStartMinutes = validateTimeOfDay(legReq.dayStartsAt, "dayStartsAt");
+  const fixpointsByDay = groupFixpoints(legReq.fixpoints, dayCount);
 
   const region = await pickRegion(anchor.lat, anchor.lon);
   if (!region) {
@@ -279,30 +333,125 @@ async function planLeg(
   });
 
   let available = [...scored];
-  const days: PlannedBlock[][] = [];
-  for (let i = 0; i < dayCount; i += 1) {
+  const days: CreateDayInput[] = [];
+  const dropped: Array<DroppedBlock & { dayIndex: number }> = [];
+
+  for (let dayIndex = 0; dayIndex < dayCount; dayIndex += 1) {
+    // The fixpoints frame the day before anything is placed in it: the
+    // solver fills the budget it is given and never learns what a clock
+    // is (§4.4).
+    const fixpoints = fixpointsByDay.get(dayIndex) ?? [];
+    const framed = scheduleDay({
+      blocks: trip.shape,
+      fixpoints: fixpoints.map((f) => f.fixpoint),
+      dayStartMinutes: dayStartMinutes ?? undefined,
+    });
+    for (const d of framed.dropped) dropped.push({ ...d, dayIndex });
+
     const solved = solveDay({
       anchor,
-      blocks: trip.shape,
+      blocks: framed.blocks,
       candidates: available,
       maxWalkMinutes: trip.maxWalkMinutes,
       mode,
     });
-    days.push(solved.blocks);
+    days.push({
+      blocks: solved.blocks,
+      fixpoints: fixpoints.map((f) => f.stored),
+    });
     const placed = new Set(solved.blocks.flatMap((b) => b.stops.map((s) => s.osmRef)));
     available = available.filter((c) => !placed.has(c.osmRef));
   }
 
   return {
-    title: legReq.title,
-    anchor,
-    anchorRadiusM,
-    mode,
-    regionDb: region.postgresDb,
-    startDate,
-    days,
-    pool: available,
+    leg: {
+      title: legReq.title,
+      anchor,
+      anchorRadiusM,
+      mode,
+      regionDb: region.postgresDb,
+      startDate,
+      days,
+      pool: available,
+    },
+    dropped,
   };
+}
+
+/**
+ * Validate the leg's fixpoints and file them under the day they belong
+ * to. A fixpoint on a day the leg does not have is a mistake worth
+ * naming rather than a row nothing ever reads.
+ */
+function groupFixpoints(
+  requests: FixpointRequest[] | undefined,
+  dayCount: number,
+): Map<number, Array<{ fixpoint: Fixpoint; stored: CreateFixpointInput }>> {
+  const byDay = new Map<number, Array<{ fixpoint: Fixpoint; stored: CreateFixpointInput }>>();
+  if (!requests) return byDay;
+  if (!Array.isArray(requests)) {
+    throw APIError.invalidArgument("fixpoints must be an array");
+  }
+
+  for (const [i, req] of requests.entries()) {
+    if (!Number.isInteger(req.dayIndex) || req.dayIndex < 0 || req.dayIndex >= dayCount) {
+      throw APIError.invalidArgument(
+        `fixpoints[${i}].dayIndex must be between 0 and ${dayCount - 1} for this leg`,
+      );
+    }
+    const label = typeof req.label === "string" ? req.label.trim() : "";
+    if (!label) throw APIError.invalidArgument(`fixpoints[${i}].label is required`);
+
+    const startMinutes = validateTimeOfDay(req.at, `fixpoints[${i}].at`);
+    if (startMinutes === null) {
+      throw APIError.invalidArgument(`fixpoints[${i}].at is required`);
+    }
+    const kind = req.kind ?? "appointment";
+    if (!FIXPOINT_KINDS.includes(kind)) {
+      throw APIError.invalidArgument(
+        `fixpoints[${i}].kind must be one of ${FIXPOINT_KINDS.join(", ")}`,
+      );
+    }
+
+    const shared = {
+      // The row id is not known yet; the day index and position are
+      // enough to be unique within the day being scheduled.
+      id: `${req.dayIndex}:${i}`,
+      label,
+      kind,
+      startMinutes,
+      durationMinutes: nonNegativeMinutes(req.durationMinutes, `fixpoints[${i}].durationMinutes`),
+      travelMinutes: nonNegativeMinutes(req.travelMinutes, `fixpoints[${i}].travelMinutes`),
+      bufferMinutes: req.bufferMinutes === undefined
+        ? undefined
+        : nonNegativeMinutes(req.bufferMinutes, `fixpoints[${i}].bufferMinutes`),
+    };
+
+    const list = byDay.get(req.dayIndex) ?? [];
+    list.push({
+      fixpoint: shared,
+      stored: { ...shared, lat: req.lat ?? null, lon: req.lon ?? null },
+    });
+    byDay.set(req.dayIndex, list);
+  }
+  return byDay;
+}
+
+function validateTimeOfDay(text: string | undefined, label: string): number | null {
+  if (text === undefined) return null;
+  const minutes = typeof text === "string" ? parseMinutes(text) : null;
+  if (minutes === null) {
+    throw APIError.invalidArgument(`${label} must be a time of day as HH:MM, got '${text}'`);
+  }
+  return minutes;
+}
+
+function nonNegativeMinutes(value: number | undefined, label: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isFinite(value) || value < 0) {
+    throw APIError.invalidArgument(`${label} must be zero or a positive number of minutes`);
+  }
+  return Math.round(value);
 }
 
 /**

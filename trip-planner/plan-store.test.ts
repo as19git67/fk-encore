@@ -79,7 +79,7 @@ describe("plan persistence", () => {
         {
           anchor: ANCHOR,
           regionDb: "nom_test",
-          days: [[block("morning", [stop("node:a", 200), stop("node:b", 400)])]],
+          days: [{ blocks: [block("morning", [stop("node:a", 200), stop("node:b", 400)])] }],
           pool: POOL,
         },
       ],
@@ -112,8 +112,8 @@ describe("plan persistence", () => {
           anchor: ANCHOR,
           regionDb: "nom_test",
           days: [
-            [block("morning", [stop("node:d1a", 100)]), block("evening", [stop("node:d1b", 200)])],
-            [block("morning", [stop("node:d2a", 300)])],
+            { blocks: [block("morning", [stop("node:d1a", 100)]), block("evening", [stop("node:d1b", 200)])] },
+            { blocks: [block("morning", [stop("node:d2a", 300)])] },
           ],
           pool: [],
         },
@@ -135,7 +135,7 @@ describe("plan persistence", () => {
         {
           anchor: ANCHOR,
           regionDb: "nom_test",
-          days: [[block("morning", [stop("node:a", 200)])]],
+          days: [{ blocks: [block("morning", [stop("node:a", 200)])] }],
           pool: [],
         },
       ],
@@ -156,7 +156,7 @@ describe("plan persistence", () => {
         {
           anchor: ANCHOR,
           regionDb: "nom_test",
-          days: [[block("morning", [stop("node:a", 200), stop("node:b", 400)])]],
+          days: [{ blocks: [block("morning", [stop("node:a", 200), stop("node:b", 400)])] }],
           pool: [],
         },
       ],
@@ -195,7 +195,7 @@ describe("plan persistence", () => {
         {
           anchor: ANCHOR,
           regionDb: "nom_test",
-          days: [[block("morning", [stop("node:old", 200)])]],
+          days: [{ blocks: [block("morning", [stop("node:old", 200)])] }],
           pool: POOL,
         },
       ],
@@ -252,7 +252,7 @@ describe("plan persistence", () => {
           regionDb: "nom_bayern",
           mode: "foot",
           startDate: "2026-09-03",
-          days: [[block("morning", [stop("node:a", 200)])]],
+          days: [{ blocks: [block("morning", [stop("node:a", 200)])] }],
           pool: POOL,
         },
         {
@@ -263,8 +263,8 @@ describe("plan persistence", () => {
           mode: "transit",
           startDate: "2026-09-11",
           days: [
-            [block("morning", [stop("node:b", 300)])],
-            [block("morning", [stop("node:c", 400)])],
+            { blocks: [block("morning", [stop("node:b", 300)])] },
+            { blocks: [block("morning", [stop("node:c", 400)])] },
           ],
           pool: [],
         },
@@ -303,14 +303,14 @@ describe("plan persistence", () => {
           anchor: ANCHOR,
           regionDb: "nom_bayern",
           mode: "foot",
-          days: [[block("morning", [stop("node:a", 200)])]],
+          days: [{ blocks: [block("morning", [stop("node:a", 200)])] }],
           pool: [],
         },
         {
           anchor: ANCHOR,
           regionDb: "nom_kansai",
           mode: "transit",
-          days: [[block("morning", [stop("node:b", 200)])]],
+          days: [{ blocks: [block("morning", [stop("node:b", 200)])] }],
           pool: [],
         },
       ],
@@ -331,13 +331,13 @@ describe("plan persistence", () => {
         {
           anchor: ANCHOR,
           regionDb: "nom_bayern",
-          days: [[block("morning", [stop("node:a", 200)])]],
+          days: [{ blocks: [block("morning", [stop("node:a", 200)])] }],
           pool: POOL,
         },
         {
           anchor: ANCHOR,
           regionDb: "nom_kansai",
-          days: [[block("morning", [stop("node:b", 300)])]],
+          days: [{ blocks: [block("morning", [stop("node:b", 300)])] }],
           pool: POOL,
         },
       ],
@@ -353,6 +353,76 @@ describe("plan persistence", () => {
     expect(after!.legs[1].pool).toEqual([]);
   });
 
+  it("stores a day's fixpoints and hands them back with the day", async () => {
+    const planId = await createPlan({
+      ownerId,
+      constraints: {},
+      legs: [
+        {
+          anchor: ANCHOR,
+          regionDb: "nom_test",
+          days: [
+            {
+              blocks: [block("morning", [stop("node:a", 200)])],
+              fixpoints: [
+                {
+                  id: "0:1",
+                  kind: "departure",
+                  label: "Letzter Zug 18:40",
+                  startMinutes: 18 * 60 + 40,
+                  travelMinutes: 15,
+                  bufferMinutes: 20,
+                },
+                {
+                  id: "0:0",
+                  label: "Führung 14:00",
+                  startMinutes: 14 * 60,
+                  durationMinutes: 90,
+                  lat: ANCHOR.lat,
+                  lon: ANCHOR.lon,
+                },
+              ],
+            },
+          ],
+          pool: [],
+        },
+      ],
+    });
+
+    const plan = await loadPlan(planId, ownerId);
+    const fixpoints = plan!.legs[0].days[0].fixpoints;
+    // Ordered by time of day, whatever order they were written in.
+    expect(fixpoints.map((f) => f.label)).toEqual(["Führung 14:00", "Letzter Zug 18:40"]);
+    expect(fixpoints.map((f) => f.kind)).toEqual(["appointment", "departure"]);
+
+    const train = fixpoints[1];
+    expect(train.startMinutes).toBe(18 * 60 + 40);
+    expect(train.travelMinutes).toBe(15);
+    expect(train.bufferMinutes).toBe(20);
+    expect(train.durationMinutes).toBe(0);
+    // A departure has no place of its own here; the tour does.
+    expect(train.lat).toBeNull();
+    expect(fixpoints[0].lat).toBeCloseTo(ANCHOR.lat, 6);
+  });
+
+  it("leaves a day without hard times with an empty list, not undefined", async () => {
+    const planId = await createPlan({
+      ownerId,
+      constraints: {},
+      legs: [
+        {
+          anchor: ANCHOR,
+          regionDb: "nom_test",
+          days: [{ blocks: [block("morning", [stop("node:a", 200)])] }],
+          pool: [],
+        },
+      ],
+    });
+
+    const plan = await loadPlan(planId, ownerId);
+    expect(plan!.legs[0].days[0].fixpoints).toEqual([]);
+  });
+
   it("removes everything below it when a plan is deleted", async () => {
     const planId = await createPlan({
       ownerId,
@@ -361,7 +431,7 @@ describe("plan persistence", () => {
         {
           anchor: ANCHOR,
           regionDb: "nom_test",
-          days: [[block("morning", [stop("node:a", 200)])]],
+          days: [{ blocks: [block("morning", [stop("node:a", 200)])] }],
           pool: POOL,
         },
       ],
