@@ -51,7 +51,11 @@ struct AlbumGroupReviewSheet: View {
                     list
                 }
             }
-            .navigationTitle("Ähnliche Fotos")
+            // Same name as the menu entry that opens this, and as the
+            // global queue it is a scoped version of — "Ähnliche Fotos"
+            // used to name this screen while everything pointing at it
+            // said "Gruppen-Review", which read as two features.
+            .navigationTitle("Gruppen-Review")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif

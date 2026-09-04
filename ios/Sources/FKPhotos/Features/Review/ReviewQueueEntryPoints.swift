@@ -10,8 +10,18 @@ import SwiftUI
 /// A count over an icon, drawn the way the system draws a tab badge.
 ///
 /// `.badge()` only works on tab items and list rows, not on a toolbar button,
-/// so this is the same idea by hand: a capsule pinned to the icon's corner,
-/// offset outwards so it clears the glyph rather than sitting on it.
+/// so this is the same idea by hand: a capsule meant to sit at the icon's
+/// corner.
+///
+/// **It has to be positioned by the caller, not by an offset in here.** A
+/// toolbar button under iOS 26's "Liquid Glass" is rendered inside a capsule
+/// that clips to the *reported* size of its label — and `.overlay` paints
+/// without changing that reported size, so an early version that pushed
+/// itself outward with `.offset` got its corner clipped clean off, chopping
+/// „99+" down to „9…". The fix is for the caller to reserve room with
+/// `.padding` before overlaying this (padding *does* grow the reported
+/// size), so the whole badge lands inside the bounds the glass capsule
+/// clips to instead of bleeding past them.
 struct ReviewCountBadge: View {
     let count: Int?
 
@@ -20,12 +30,11 @@ struct ReviewCountBadge: View {
             Text(text)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.white)
+                .lineLimit(1)
+                .fixedSize()
                 .padding(.horizontal, text.count > 1 ? 4 : 5)
                 .padding(.vertical, 1)
                 .background(Color.red, in: Capsule())
-                // Outside the icon's own bounds: over it, the number and the
-                // glyph fight and neither reads.
-                .offset(x: 10, y: -8)
                 .accessibilityHidden(true)
         }
     }
