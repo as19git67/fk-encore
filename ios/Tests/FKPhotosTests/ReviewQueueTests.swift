@@ -15,7 +15,9 @@ final class ReviewQueueTests: XCTestCase {
         quality: Double? = nil,
         curation: CurationStatus = .visible,
         peerHidden: Int = 0,
-        peerFavorite: Int = 0
+        peerFavorite: Int = 0,
+        width: Int? = nil,
+        height: Int? = nil
     ) -> ReviewQueuePhoto {
         ReviewQueuePhoto(
             id: id,
@@ -24,7 +26,9 @@ final class ReviewQueueTests: XCTestCase {
             curation: curation,
             ai_picked: picked,
             ai_quality_score: quality,
-            peer_curation: ReviewPeerCuration(hidden: peerHidden, favorite: peerFavorite)
+            peer_curation: ReviewPeerCuration(hidden: peerHidden, favorite: peerFavorite),
+            width: width,
+            height: height
         )
     }
 
@@ -305,6 +309,31 @@ final class ReviewQueueTests: XCTestCase {
         XCTAssertEqual(g.photos.first?.qualityPercent, 82)
         XCTAssertNil(g.photos.last?.ai_quality_score)
         XCTAssertEqual(g.photos.last?.curation, .hidden)
+        // This payload carries no dimensions — a server predating them must
+        // still decode, and every photo then reads as `.unknown` rather than
+        // being guessed into an orientation.
+        XCTAssertEqual(g.photos.first?.orientation, .unknown)
+    }
+
+    func testPhotoDimensionsDecodeIntoAnOrientation() throws {
+        let json = """
+        {
+          "id": 101,
+          "filename": "a.jpg",
+          "taken_at": null,
+          "curation": "visible",
+          "ai_picked": true,
+          "ai_quality_score": 0.82,
+          "peer_curation": { "hidden": 0, "favorite": 0 },
+          "width": 3024,
+          "height": 4032
+        }
+        """.data(using: .utf8)!
+
+        let photo = try JSONDecoder().decode(ReviewQueuePhoto.self, from: json)
+        XCTAssertEqual(photo.width, 3024)
+        XCTAssertEqual(photo.height, 4032)
+        XCTAssertEqual(photo.orientation, .portrait)
     }
 
     func testGroupDecodesWithoutTheOptionalDuplicateFields() throws {
@@ -342,7 +371,9 @@ final class ReviewKeepSetTests: XCTestCase {
             curation: .visible,
             ai_picked: id == 2,
             ai_quality_score: 0.5,
-            peer_curation: nil
+            peer_curation: nil,
+            width: nil,
+            height: nil
         )
     }
 

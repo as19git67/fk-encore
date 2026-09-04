@@ -873,6 +873,29 @@ describe("listReviewQueueLogic — peer_curation aggregate (Phase 1)", () => {
     expect(b.ai_quality_score).toBeNull();
   });
 
+  it("surfaces each photo's dimensions, null when the face scan hasn't run", async () => {
+    // The compare view splits its keep set by orientation, so that a burst
+    // holding the same motif upright and wide is not thinned down to one
+    // shape. That split needs the dimensions here — and needs a photo the
+    // face scan has not measured to arrive as null rather than a guess, so
+    // the client can treat it as its own class.
+    const owner = await makeUser("owner-dimensions@test.com");
+    const wide = await makePhoto(owner, { width: 4032, height: 3024 });
+    const tall = await makePhoto(owner, { width: 3024, height: 4032 });
+    const unmeasured = await makePhoto(owner);
+    await makeGroup(owner, wide, [wide, tall, unmeasured]);
+
+    const res = await listReviewQueueLogic(owner);
+    const group = res.groups[0];
+    const w = group.photos.find((p) => p.id === wide)!;
+    const t = group.photos.find((p) => p.id === tall)!;
+    const u = group.photos.find((p) => p.id === unmeasured)!;
+    expect([w.width, w.height]).toEqual([4032, 3024]);
+    expect([t.width, t.height]).toEqual([3024, 4032]);
+    expect(u.width).toBeNull();
+    expect(u.height).toBeNull();
+  });
+
   it("excludes the requester's own curation from the peer count", async () => {
     // Self-curation must never show up as "peer signal" — that would
     // be a confusing echo of the user's own past decisions.
