@@ -10,6 +10,7 @@ function spot(overrides: Partial<GeoPoiSearchSpot> = {}): GeoPoiSearchSpot {
     lat: 48.37,
     lon: 10.9,
     distanceM: 100,
+    detourM: null,
     name: "Beispielmuseum",
     nameDe: null,
     nameEn: null,

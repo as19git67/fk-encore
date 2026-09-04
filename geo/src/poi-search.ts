@@ -13,6 +13,7 @@
  * candidates in a stable, explainable order and stops there:
  *
  *   - with a centre, nearest first;
+ *   - with a corridor, least detour first;
  *   - with a bounding box, by a cheap prominence proxy (has Wikidata,
  *     has Wikipedia, has a name) and then by `osm_id`, so paging is
  *     deterministic.
@@ -28,11 +29,25 @@ export interface BoundingBox {
   maxLon: number;
 }
 
+export interface Corridor {
+  from: { lat: number; lon: number };
+  to: { lat: number; lon: number };
+  /**
+   * How much longer the journey may get, in metres, counting the way
+   * there and back again. A spot 500 m off a straight road costs about
+   * 1000 m of budget.
+   */
+  detourBudgetM: number;
+}
+
+/** Exactly one of these three picks the area to search. */
 export interface PoiSearchArea {
-  /** Search a rectangle. Mutually exclusive with `center`. */
+  /** Search a rectangle. */
   bbox?: BoundingBox;
-  /** Search a disc. Mutually exclusive with `bbox`. */
+  /** Search a disc. */
   center?: { lat: number; lon: number; radiusM: number };
+  /** Search what lies along a journey — see `buildCorridorClause`. */
+  corridor?: Corridor;
 }
 
 export interface PoiSearchOptions extends PoiSearchArea {
@@ -52,6 +67,11 @@ export interface PoiSearchResult {
   lon: number;
   /** Present only when the search had a centre. */
   distanceM: number | null;
+  /**
+   * How much longer the journey gets if this spot is visited on the
+   * way, in metres. Present only for a corridor search.
+   */
+  detourM: number | null;
   name: string | null;
   nameDe: string | null;
   nameEn: string | null;
@@ -91,6 +111,16 @@ export const MAX_LIMIT = 1000;
 export const MAX_RADIUS_M = 50_000;
 /** Guards against a bbox that would do the same, in degrees per side. */
 export const MAX_BBOX_SPAN_DEG = 2;
+/** A corridor is a transfer between legs, not a route across a continent. */
+export const MAX_CORRIDOR_LENGTH_M = 400_000;
+/** A detour larger than this is a second destination, not a stop on the way. */
+export const MAX_DETOUR_BUDGET_M = 50_000;
+/**
+ * Mean earth radius in metres, matching what `ST_DistanceSphere` uses.
+ * Only the pre-filter radius is computed with it; the ellipse itself is
+ * evaluated by PostGIS.
+ */
+const EARTH_RADIUS_M = 6_371_008;
 
 export class PoiSearchError extends Error {}
 
@@ -112,6 +142,7 @@ type Row = {
   lat: number;
   lon: number;
   distance_m: number | null;
+  detour_m: number | null;
 };
 
 export async function searchPois(
@@ -135,10 +166,12 @@ export async function searchPois(
   const distanceSelect = opts.center
     ? `ST_DistanceSphere(geom, ${centrePoint(opts.center)})`
     : "NULL::double precision";
+  const detourSelect = opts.corridor ? detourExpression(opts.corridor) : "NULL::double precision";
 
-  // Nearest-first only makes sense with a centre. Without one, order by a
-  // prominence proxy so the first page is the useful one, then by osm_id
-  // so paging cannot repeat or skip rows.
+  // Nearest-first only makes sense with a centre, least-detour-first
+  // only with a corridor. With neither, order by a prominence proxy so
+  // the first page is the useful one, then by osm_id so paging cannot
+  // repeat or skip rows.
   // Ordering must use the same measure as the reported distance. The
   // planar `<->` on geometry counts degrees, and away from the equator a
   // degree of longitude is shorter than one of latitude — so a spot due
@@ -147,7 +180,12 @@ export async function searchPois(
   // operator measure on the spheroid, and it stays index-assisted.
   const orderBy = opts.center
     ? `geom::geography <-> ${centrePoint(opts.center)}::geography, osm_id`
-    : `((tags ? 'wikidata')::int + (tags ? 'wikipedia')::int + (tags ? 'name')::int) DESC, osm_id`;
+    : opts.corridor
+      // No index helps here: the detour is a sum of two distances, and
+      // the ellipse clause has already cut the candidate set down to a
+      // narrow band, so the sort runs over few rows.
+      ? `${detourExpression(opts.corridor)}, osm_id`
+      : `((tags ? 'wikidata')::int + (tags ? 'wikipedia')::int + (tags ? 'name')::int) DESC, osm_id`;
 
   const sql = `
     SELECT
@@ -167,7 +205,8 @@ export async function searchPois(
       facade_azimuth,
       ST_Y(geom)        AS lat,
       ST_X(geom)        AS lon,
-      ${distanceSelect} AS distance_m
+      ${distanceSelect} AS distance_m,
+      ${detourSelect}   AS detour_m
     FROM osm_pois
     WHERE ${areaClause}
       AND (${tagClause})
@@ -225,9 +264,15 @@ function numeric(value: number): string {
 }
 
 function buildAreaClause(area: PoiSearchArea, params: unknown[]): string {
-  if (area.bbox && area.center) {
-    throw new PoiSearchError("pass either bbox or center, not both");
+  const given = [
+    area.bbox ? "bbox" : null,
+    area.center ? "center" : null,
+    area.corridor ? "corridor" : null,
+  ].filter((v): v is string => v !== null);
+  if (given.length > 1) {
+    throw new PoiSearchError(`pass exactly one of bbox, center or corridor — got ${given.join(", ")}`);
   }
+  if (area.corridor) return buildCorridorClause(area.corridor, params);
   if (area.bbox) {
     const { minLat, minLon, maxLat, maxLon } = area.bbox;
     for (const [name, v] of Object.entries(area.bbox)) {
@@ -260,7 +305,104 @@ function buildAreaClause(area: PoiSearchArea, params: unknown[]): string {
     params.push(radiusM);
     return `ST_DWithin(geom::geography, ${centrePoint(area.center)}::geography, $${params.length})`;
   }
-  throw new PoiSearchError("either bbox or center is required");
+  throw new PoiSearchError("one of bbox, center or corridor is required");
+}
+
+/**
+ * "What can we see on the way without a real detour?" (§4.2).
+ *
+ * The spots whose journey-with-a-stop costs at most `detourBudgetM`
+ * more than the direct journey are exactly those satisfying
+ *
+ *   dist(from, P) + dist(P, to) ≤ dist(from, to) + budget
+ *
+ * which is an **ellipse** with `from` and `to` as its foci. One
+ * condition, no router — and once a real router exists, this stays the
+ * cheap pre-filter that decides which handful of spots are worth
+ * routing.
+ *
+ * That sum is not indexable, so it is paired with one that is: every
+ * point of the ellipse lies within its semi-minor axis `b` of the
+ * segment between the foci, and `ST_DWithin` against the segment uses
+ * the geography index. `b ≥ budget/2` always, so the buffer also covers
+ * the two ends of the ellipse, which stick out past the foci — the
+ * pre-filter can never drop a point the exact clause would keep.
+ *
+ * With `from` equal to `to` the ellipse degenerates to a disc of radius
+ * `budget/2`, which is the right answer for "a round trip of at most
+ * this much extra".
+ */
+function buildCorridorClause(corridor: Corridor, params: unknown[]): string {
+  const { from, to, detourBudgetM } = corridor;
+  validatePoint(from, "corridor.from");
+  validatePoint(to, "corridor.to");
+  if (!Number.isFinite(detourBudgetM) || detourBudgetM <= 0) {
+    throw new PoiSearchError("corridor.detourBudgetM must be a positive number");
+  }
+  if (detourBudgetM > MAX_DETOUR_BUDGET_M) {
+    throw new PoiSearchError(`corridor.detourBudgetM may be at most ${MAX_DETOUR_BUDGET_M} m`);
+  }
+
+  const direct = greatCircleMetres(from, to);
+  if (direct > MAX_CORRIDOR_LENGTH_M) {
+    throw new PoiSearchError(
+      `corridor may span at most ${MAX_CORRIDOR_LENGTH_M} m, got ${Math.round(direct)} m`,
+    );
+  }
+
+  // Semi-minor axis of the ellipse: b = sqrt(a² - c²) with a the
+  // semi-major axis and c the focal half-distance.
+  const a = (direct + detourBudgetM) / 2;
+  const c = direct / 2;
+  // A generous margin, because `direct` is computed here on a sphere
+  // while PostGIS measures the exact clause on the spheroid. The
+  // pre-filter only has to not lose rows; being a little wide costs
+  // nothing.
+  const semiMinor = Math.sqrt(Math.max(a * a - c * c, 0)) * 1.02 + 100;
+
+  params.push(semiMinor, detourBudgetM);
+  const semiMinorParam = `$${params.length - 1}`;
+  const budgetParam = `$${params.length}`;
+  const fromPoint = centrePoint(from);
+  const toPoint = centrePoint(to);
+
+  return `ST_DWithin(geom::geography, ST_MakeLine(${fromPoint}, ${toPoint})::geography, ${semiMinorParam})
+      AND ST_DistanceSphere(geom, ${fromPoint}) + ST_DistanceSphere(geom, ${toPoint})
+          <= ST_DistanceSphere(${fromPoint}, ${toPoint}) + ${budgetParam}`;
+}
+
+/** The extra metres a stop at this spot adds to the journey. */
+function detourExpression(corridor: Corridor): string {
+  const fromPoint = centrePoint(corridor.from);
+  const toPoint = centrePoint(corridor.to);
+  return `(ST_DistanceSphere(geom, ${fromPoint}) + ST_DistanceSphere(geom, ${toPoint})
+           - ST_DistanceSphere(${fromPoint}, ${toPoint}))`;
+}
+
+function validatePoint(point: { lat: number; lon: number }, label: string): void {
+  if (!point || typeof point !== "object") {
+    throw new PoiSearchError(`${label} is required`);
+  }
+  if (!Number.isFinite(point.lat) || point.lat < -90 || point.lat > 90) {
+    throw new PoiSearchError(`${label}.lat out of range: ${point.lat}`);
+  }
+  if (!Number.isFinite(point.lon) || point.lon < -180 || point.lon > 180) {
+    throw new PoiSearchError(`${label}.lon out of range: ${point.lon}`);
+  }
+}
+
+/** Haversine, used only to size the pre-filter buffer. */
+function greatCircleMetres(
+  a: { lat: number; lon: number },
+  b: { lat: number; lon: number },
+): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLon = toRad(b.lon - a.lon);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLon / 2) ** 2;
+  return 2 * EARTH_RADIUS_M * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
 function buildTagClause(categories: readonly string[], params: unknown[]): string {
@@ -295,6 +437,7 @@ function toResult(row: Row, requested: readonly string[]): PoiSearchResult {
     lat: Number(row.lat),
     lon: Number(row.lon),
     distanceM: row.distance_m === null ? null : Number(row.distance_m),
+    detourM: row.detour_m === null ? null : Number(row.detour_m),
     name: row.name,
     nameDe: row.name_de,
     nameEn: row.name_en,
