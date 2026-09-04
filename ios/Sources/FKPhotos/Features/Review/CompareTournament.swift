@@ -190,16 +190,26 @@ struct CompareTournament: Equatable, Sendable {
         }
     }
 
-    /// What the tournament proposes to keep: everything that did not end up
-    /// below zero.
+    /// What the tournament proposes to keep: whoever actually *won* a
+    /// comparison, plus the best-ranked photo as a floor so the proposal is
+    /// never empty.
     ///
-    /// A photo only goes negative by losing more comparisons than it won, so a
-    /// group nobody judged proposes keeping all of it — never „hide the lot"
-    /// off the back of no evidence. `pick-photos` also needs at least one
-    /// keeper, so a clean sweep falls back to the best-ranked photo.
+    /// A tie earns nothing on its own. Two photos that only ever drew against
+    /// each other are, as far as the tournament could tell, indistinguishable
+    /// — and a group exists to be thinned out, so proposing to keep both of
+    /// them defeats the point. A photo has to have beaten something to be
+    /// suggested for its own sake; a group where every pair came back „Gleich
+    /// gut" (the near-duplicate-burst case this screen exists for) proposes
+    /// exactly the one best-ranked photo rather than the whole burst.
+    /// `ranked.first` is deterministic even among equal scores — ties break on
+    /// the group's own order — so that single keeper is always the same
+    /// photo, not a random survivor. None of this is final: the confirmation
+    /// grid can still restore anyone before the choice is committed.
     var suggestedKeepIds: [Int] {
-        let kept = photoIds.filter { score(of: $0) >= 0 }
-        if kept.isEmpty, let best = ranked.first { return [best] }
+        var kept = photoIds.filter { score(of: $0) > 0 }
+        if let best = ranked.first, !kept.contains(best) {
+            kept.append(best)
+        }
         return kept
     }
 
