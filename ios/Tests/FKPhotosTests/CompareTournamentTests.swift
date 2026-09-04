@@ -139,6 +139,63 @@ final class CompareTournamentTests: XCTestCase {
         XCTAssertEqual(tournament.suggestedKeepIds, [1])
     }
 
+    // MARK: - Orientation
+
+    /// The same motif shot upright and wide is two photos worth having, not
+    /// one plus a duplicate — so thinning „down to one" is per shape.
+    func testEachOrientationKeepsItsOwnBestEvenWhenEverythingDrew() {
+        let tournament = CompareTournament(
+            photoIds: [1, 2, 3, 4],
+            orientations: [
+                1: .landscape, 2: .landscape, 3: .landscape, 4: .portrait,
+            ]
+        )
+        // Nothing judged: one landscape (the first) and the single portrait.
+        XCTAssertEqual(tournament.suggestedKeepIds, [1, 4])
+    }
+
+    /// Within one orientation the winner still wins outright — the split adds
+    /// a floor per shape, it does not stop the thinning.
+    func testAnOrientationWithAWinnerProposesOnlyTheWinner() {
+        var tournament = CompareTournament(
+            photoIds: [1, 2, 3],
+            orientations: [1: .landscape, 2: .landscape, 3: .portrait]
+        )
+        // 1 loses to 2; 3 is the only portrait and never wins anything.
+        while let pair = tournament.current {
+            // Only settle the all-landscape pair decisively; everything else
+            // draws, so the portrait keeps its floor rather than a win.
+            if pair == CompareTournament.Pair(1, 2) {
+                tournament.discard(1)
+            } else {
+                tournament.draw()
+            }
+        }
+        XCTAssertEqual(tournament.suggestedKeepIds, [2, 3])
+    }
+
+    /// A photo the face scan has not measured has no orientation to be
+    /// grouped by, and guessing one could hide the only frame of a shape —
+    /// so „unknown" is a class of its own.
+    func testUnmeasuredPhotosAreTheirOwnClass() {
+        let tournament = CompareTournament(
+            photoIds: [1, 2],
+            orientations: [1: .landscape]
+        )
+        XCTAssertEqual(tournament.orientation(of: 2), .unknown)
+        XCTAssertEqual(tournament.suggestedKeepIds, [1, 2])
+    }
+
+    /// Orientation comes off the dimensions the server sends, and a photo it
+    /// has not measured yet decodes to `.unknown` rather than a guess.
+    func testOrientationIsDerivedFromDimensions() {
+        XCTAssertEqual(PhotoOrientation(width: 4032, height: 3024), .landscape)
+        XCTAssertEqual(PhotoOrientation(width: 3024, height: 4032), .portrait)
+        XCTAssertEqual(PhotoOrientation(width: 1000, height: 1000), .square)
+        XCTAssertEqual(PhotoOrientation(width: nil, height: nil), .unknown)
+        XCTAssertEqual(PhotoOrientation(width: 0, height: 100), .unknown)
+    }
+
     /// `pick-photos` refuses an empty keep set, so the proposal can never be
     /// empty either.
     func testSomethingIsAlwaysKept() {
