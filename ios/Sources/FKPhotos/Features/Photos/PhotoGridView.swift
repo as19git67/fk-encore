@@ -93,24 +93,29 @@ struct PhotoGridView: View {
                         selectedIds = []
                     }
                 }
+                // Titled labels, not bare images: in selection mode the title
+                // („N ausgewählt") plus these leaves too little room, so the
+                // system folds them into its „…" overflow menu — and a menu
+                // row built from an `Image` alone has nothing to draw, which
+                // is why tapping the three dots looked like it did nothing.
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
                         addToAlbum.present(photoIds: selectedIds)
                     } label: {
-                        Image(systemName: "rectangle.stack.badge.plus")
+                        Label("Zu Album hinzufügen", systemImage: "rectangle.stack.badge.plus")
                     }
                     .disabled(selectedIds.isEmpty)
                     Button {
                         let filenames = viewModel.photos.filter { selectedIds.contains($0.id) }.map(\.filename)
                         Task { await shareManager.share(filenames: filenames) }
                     } label: {
-                        Image(systemName: "square.and.arrow.up")
+                        Label("Teilen", systemImage: "square.and.arrow.up")
                     }
                     .disabled(selectedIds.isEmpty || shareManager.isLoading)
                     Button {
                         showSlideshow = true
                     } label: {
-                        Image(systemName: "play.rectangle")
+                        Label("Diashow", systemImage: "play.rectangle")
                     }
                     .disabled(!canStartSlideshow)
                 }
@@ -227,11 +232,24 @@ struct PhotoGridView: View {
         let startIndex: Int
     }
 
+    /// Paint a selection by dragging across tiles — *after* holding still for
+    /// a moment.
+    ///
+    /// The hold is what makes the grid scrollable while selecting. A bare
+    /// `DragGesture` on content inside a `ScrollView` competes with the
+    /// scroll view's own pan and wins as soon as it recognises, so selection
+    /// mode used to freeze the grid completely: no vertical scrolling at all
+    /// while anything was selected. Sequencing the drag behind a long press
+    /// means an ordinary swipe is never claimed — it scrolls — and only a
+    /// deliberate press-then-drag paints, which is also how Photos does it.
     private var dragSelectGesture: some Gesture {
-        DragGesture(minimumDistance: 10, coordinateSpace: .named("photoGrid"))
+        LongPressGesture(minimumDuration: 0.25)
+            .sequenced(
+                before: DragGesture(minimumDistance: 0, coordinateSpace: .named("photoGrid"))
+            )
             .onChanged { value in
-                let point = value.location
-                for (id, frame) in itemFrames where frame.contains(point) {
+                guard case .second(_, let drag?) = value else { return }
+                for (id, frame) in itemFrames where frame.contains(drag.location) {
                     selectedIds.insert(id)
                 }
             }
