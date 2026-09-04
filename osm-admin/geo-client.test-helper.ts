@@ -21,6 +21,7 @@ import type {
   GeoImportRequest,
   GeoImportStatus,
   GeoPoiCandidate,
+  GeoPoiCategory,
   GeoPoiQueryOptions,
   GeoPoiSearchPage,
   GeoRegionStorage,
@@ -42,6 +43,7 @@ export class InMemoryGeoClient implements GeoClient {
   private reverseResults = new Map<string, GeoReverseResult["result"]>();
   private poiCandidates = new Map<string, GeoPoiCandidate[]>();
   private searchSpots = new Map<string, GeoPoiSearchSpot[]>();
+  private categories: GeoPoiCategory[] = [];
   private storage = new Map<string, GeoRegionStorage>();
   private searchCalls: Array<{ postgresDb: string; query: GeoPoiSearchQuery }> = [];
   private refreshResults = new Map<string, GeoRefreshResult>();
@@ -164,6 +166,14 @@ export class InMemoryGeoClient implements GeoClient {
     const limit = query.limit ?? spots.length;
     const page = spots.slice(offset, offset + limit);
     return { database: postgresDb, spots: page, hasMore: offset + limit < spots.length };
+  }
+
+  setPoiCategories(categories: GeoPoiCategory[]): void {
+    this.categories = categories;
+  }
+
+  async poiCategories(): Promise<GeoPoiCategory[]> {
+    return this.categories;
   }
 
   async findPois(
