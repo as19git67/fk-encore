@@ -118,22 +118,25 @@ final class CompareTournamentTests: XCTestCase {
 
     // MARK: - The keep set
 
-    func testOnlyPhotosThatLostMoreThanTheyWonAreProposedForHiding() {
+    /// Breaking even is not the same as winning: only the outright winner
+    /// (3) is proposed, not 2, which merely didn't lose on balance.
+    func testOnlyPhotosThatOutrightWonAreProposedForKeeping() {
         var tournament = CompareTournament(photoIds: [1, 2, 3])
         // The lower id loses every pair it appears in, so 1 loses twice, 2
         // breaks even and 3 wins twice.
         while let pair = tournament.current {
             tournament.discard(pair.low)
         }
-        XCTAssertFalse(tournament.suggestedKeepIds.contains(1))
-        XCTAssertEqual(Set(tournament.suggestedKeepIds), [2, 3])
+        XCTAssertEqual(tournament.suggestedKeepIds, [3])
     }
 
-    /// A group nobody judged proposes keeping everything. Hiding photos off
-    /// the back of no evidence is exactly the failure this replaces.
-    func testAnUnjudgedGroupKeepsEverything() {
+    /// A group nobody judged — and a group that only ever drew, which is what
+    /// happens to a genuine burst of near-identical photos — proposes exactly
+    /// one keeper, not the whole thing. Thinning the group is the point of
+    /// this screen; a tie is not a reason to keep everyone.
+    func testAnUnjudgedGroupProposesOnlyTheBestRankedPhoto() {
         let tournament = CompareTournament(photoIds: [1, 2, 3])
-        XCTAssertEqual(Set(tournament.suggestedKeepIds), [1, 2, 3])
+        XCTAssertEqual(tournament.suggestedKeepIds, [1])
     }
 
     /// `pick-photos` refuses an empty keep set, so the proposal can never be

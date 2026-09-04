@@ -140,16 +140,24 @@ struct PhotoCompareView: View {
             // Keyed on the pair, so moving to the next one fetches it — and
             // the first pair is fetched by the same task on appear.
             .task(id: tournament.current) { await load() }
-            .fullScreenCover(isPresented: $isChecking) {
-                NavigationStack {
-                    PhotoFullscreenView(
-                        photos: rows,
-                        currentIndex: $checkIndex,
-                        contextFooter: { photo in
-                            AnyView(checkFooter(photoId: photo.id))
-                        }
-                    )
-                }
+            // Pushed onto this screen's own NavigationStack rather than a
+            // second `fullScreenCover` — this view is itself already reached
+            // through one (from the review queue), and stacking a full-screen
+            // cover on top of a full-screen cover is a known bad pairing:
+            // the inner cover's content can end up presented before its
+            // GeometryReader-driven layout ever gets a non-zero size, so the
+            // toolbar appears but the photo never does. `PhotoFullscreenView`
+            // is documented to support exactly this — pushed via
+            // `navigationDestination` — which is also the plainer fix: no
+            // second modal, no second NavigationStack to nest.
+            .navigationDestination(isPresented: $isChecking) {
+                PhotoFullscreenView(
+                    photos: rows,
+                    currentIndex: $checkIndex,
+                    contextFooter: { photo in
+                        AnyView(checkFooter(photoId: photo.id))
+                    }
+                )
             }
             .popover(isPresented: $showGestureHelp) {
                 GestureHelp(isPortrait: orientationIsPortrait)
@@ -244,7 +252,14 @@ struct PhotoCompareView: View {
         ToolbarItemGroup(placement: .bottomBar) {
             verdictButton(
                 orientationIsPortrait ? "Oberes raus" : "Linkes raus",
-                systemImage: orientationIsPortrait ? "arrow.up.circle" : "arrow.left.circle"
+                systemImage: orientationIsPortrait ? "arrow.up.circle" : "arrow.left.circle",
+                // The other two verdicts read fine as bare glyphs — an equals
+                // sign and a redo arrow are self-explanatory. „Which photo
+                // does this arrow throw out" is not: read on its own, an
+                // up/down (or left/right) arrow reads as easily as „select
+                // this one" as „discard this one" (reported confusion). The
+                // discard pair is the one that needs the word spelled out.
+                showsTitle: true
             ) { discard(pair.first.id) }
 
             Spacer()
@@ -256,7 +271,11 @@ struct PhotoCompareView: View {
 
             Spacer()
 
-            verdictButton("Später", systemImage: "arrow.uturn.forward") {
+            // Not a uturn arrow — that reads as "undo", the opposite of what
+            // this does. An hourglass says "not now" without implying
+            // anything gets taken back, and it doesn't collide with the
+            // discard buttons' own directional arrows.
+            verdictButton("Später", systemImage: "hourglass") {
                 withAnimation { tournament.skip() }
                 focus = nil
             }
@@ -265,7 +284,8 @@ struct PhotoCompareView: View {
 
             verdictButton(
                 orientationIsPortrait ? "Unteres raus" : "Rechtes raus",
-                systemImage: orientationIsPortrait ? "arrow.down.circle" : "arrow.right.circle"
+                systemImage: orientationIsPortrait ? "arrow.down.circle" : "arrow.right.circle",
+                showsTitle: true
             ) { discard(pair.second.id) }
         }
     }
@@ -273,11 +293,13 @@ struct PhotoCompareView: View {
     private func verdictButton(
         _ title: String,
         systemImage: String,
+        showsTitle: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
         }
+        .labelStyle(showsTitle ? .titleAndIcon : .iconOnly)
         // While a tile is still flying off the screen its verdict is already
         // committed; a second one would decide a pair that is no longer up.
         .disabled(flung != nil)
@@ -725,7 +747,7 @@ private struct GestureHelp: View {
                 "Das Paar ist erledigt, ohne dass eines gewinnt."
             )
             row(
-                "arrow.uturn.forward",
+                "hourglass",
                 "Später",
                 "Das Paar wird zurückgestellt und kommt am Ende wieder."
             )
