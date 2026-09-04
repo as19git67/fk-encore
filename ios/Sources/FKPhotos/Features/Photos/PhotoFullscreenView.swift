@@ -47,18 +47,28 @@ struct PhotoFullscreenView: View {
     /// `albumContext`, which adds „aus Album entfernen" only where an album is
     /// the thing being looked at.
     private let contextFooter: ((PhotoWithCuration) -> AnyView)?
-    /// Whether the top-bar thumbs-down (global curation, saved to the server
-    /// immediately) is shown at all.
+    /// A hide decision that belongs to the presenting context rather than to
+    /// the photo's global curation status.
     ///
     /// A `contextFooter` can carry its own keep/hide control over a
-    /// completely different, *local* decision (the review's pending keep
-    /// set, not committed until the group is confirmed) — two thumbs-down
-    /// glyphs on screen reading as one control was reported confusion, and
-    /// the top one silently persisting to the server mid-review was worse
-    /// than confusing. So a `contextFooter` that already offers its own
-    /// hide control turns this one off rather than duplicating — and
-    /// disagreeing with — it.
-    private let showsHideToggle: Bool
+    /// completely different, *local* decision — the review's pending keep
+    /// set, not committed until the group is confirmed. Left to itself the
+    /// toolbar's thumbs-down would then be a second, identical-looking glyph
+    /// standing for something else entirely, and tapping it would silently
+    /// persist a curation change to the server mid-review.
+    ///
+    /// Supplying this makes the two agree instead: the thumbs-down shows the
+    /// *same* state the footer shows and flips the *same* decision, so the
+    /// screen has one hide state in two places rather than two hide states.
+    private let hideDecision: HideDecision?
+
+    /// A hide state owned by whoever presented the viewer.
+    struct HideDecision {
+        /// Whether this photo is currently marked to be hidden.
+        let isHidden: (PhotoWithCuration) -> Bool
+        /// Flips that mark. Local to the context — nothing is sent here.
+        let toggle: (PhotoWithCuration) -> Void
+    }
     @State private var showDeleteConfirm = false
     /// Non-destructive crop / tone review (#1019).
     @State private var showTransforms = false
@@ -95,7 +105,7 @@ struct PhotoFullscreenView: View {
         self.albumContext = nil
         self.curationStats = [:]
         self.contextFooter = nil
-        self.showsHideToggle = true
+        self.hideDecision = nil
     }
 
     /// Multi-photo init for paged navigation (e.g. PhotoGridView).
@@ -106,7 +116,7 @@ struct PhotoFullscreenView: View {
         curationStats: [Int: PhotoCurationStats] = [:],
         onPhotoRemoved: ((Int) -> Void)? = nil,
         contextFooter: ((PhotoWithCuration) -> AnyView)? = nil,
-        showsHideToggle: Bool = true
+        hideDecision: HideDecision? = nil
     ) {
         self.photos = photos
         self.bboxes = Array(repeating: nil, count: photos.count)
@@ -118,7 +128,7 @@ struct PhotoFullscreenView: View {
         self.albumContext = albumContext
         self.curationStats = curationStats
         self.contextFooter = contextFooter
-        self.showsHideToggle = showsHideToggle
+        self.hideDecision = hideDecision
     }
 
     /// Multi-photo init for person context: paged navigation with per-photo face boxes.
@@ -134,7 +144,7 @@ struct PhotoFullscreenView: View {
         self.albumContext = nil
         self.curationStats = [:]
         self.contextFooter = nil
-        self.showsHideToggle = true
+        self.hideDecision = nil
     }
 
     private var currentPhoto: PhotoWithCuration? {
@@ -144,6 +154,15 @@ struct PhotoFullscreenView: View {
     private var currentCuration: CurationStatus {
         guard let photo = currentPhoto else { return .visible }
         return curationOverrides[photo.id] ?? photo.curation_status
+    }
+
+    /// What the thumbs-down shows: the presenting context's own decision
+    /// where there is one — so it reads the same as that context's footer
+    /// control — and the photo's global curation status otherwise.
+    private var isMarkedHidden: Bool {
+        guard let photo = currentPhoto else { return false }
+        if let hideDecision { return hideDecision.isHidden(photo) }
+        return currentCuration == .hidden
     }
 
     private func curationBinding(for photo: PhotoWithCuration) -> Binding<CurationStatus> {
@@ -201,29 +220,35 @@ struct PhotoFullscreenView: View {
                         }
                     }
                 }
-                if showsHideToggle {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            Task {
-                                guard let photo = currentPhoto else { return }
-                                let next: CurationStatus = currentCuration == .hidden ? .visible : .hidden
-                                struct Body: Codable { let status: CurationStatus }
-                                struct Response: Codable { let success: Bool }
-                                _ = try? await APIClient.shared.patch(
-                                    "/photos/\(photo.id)/curation",
-                                    body: Body(status: next)
-                                ) as Response
-                                curationOverrides[photo.id] = next
-                            }
-                        } label: {
-                            // Neutral when the photo is *not* hidden, like the
-                            // heart and the info button below. The filled/outline
-                            // pair already carries the state; tinting the off
-                            // state as well made the toggle read as switched on.
-                            Image(systemName: currentCuration == .hidden ? "hand.thumbsdown.fill" : "hand.thumbsdown")
-                                .foregroundStyle(currentCuration == .hidden ? Color.red : .primary)
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        // A context that owns the decision gets it flipped
+                        // locally; without one this is the photo's global
+                        // curation status and goes to the server.
+                        if let hideDecision {
+                            if let photo = currentPhoto { hideDecision.toggle(photo) }
+                            return
                         }
+                        Task {
+                            guard let photo = currentPhoto else { return }
+                            let next: CurationStatus = currentCuration == .hidden ? .visible : .hidden
+                            struct Body: Codable { let status: CurationStatus }
+                            struct Response: Codable { let success: Bool }
+                            _ = try? await APIClient.shared.patch(
+                                "/photos/\(photo.id)/curation",
+                                body: Body(status: next)
+                            ) as Response
+                            curationOverrides[photo.id] = next
+                        }
+                    } label: {
+                        // Neutral when the photo is *not* hidden, like the
+                        // heart and the info button below. The filled/outline
+                        // pair already carries the state; tinting the off
+                        // state as well made the toggle read as switched on.
+                        Image(systemName: isMarkedHidden ? "hand.thumbsdown.fill" : "hand.thumbsdown")
+                            .foregroundStyle(isMarkedHidden ? Color.red : .primary)
                     }
+                    .accessibilityLabel(isMarkedHidden ? "Ausblenden, aktiv" : "Ausblenden")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {

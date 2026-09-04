@@ -165,14 +165,17 @@ struct PhotoCompareView: View {
                         AnyView(checkFooter(photoId: photo.id))
                     },
                     // The footer below already carries this photo's
-                    // keep/hide state for *this review*. The viewer's own
-                    // thumbs-down is a different thing entirely — it writes
-                    // the global curation status straight to the server —
-                    // so showing both put two hide controls on one screen
-                    // that looked alike, meant different things, and could
-                    // disagree. The review's decision is the one that
-                    // belongs here.
-                    showsHideToggle: false
+                    // keep/hide state for *this review*, and the viewer's own
+                    // thumbs-down would otherwise stand for something else
+                    // entirely — the global curation status, written straight
+                    // to the server. Pointing both at the review's keep set
+                    // makes them one control shown twice: the thumbs-down
+                    // fills in exactly when the footer says „Ausblenden", and
+                    // either one flips the same pending decision.
+                    hideDecision: .init(
+                        isHidden: { !keepIds.contains($0.id) },
+                        toggle: { toggleKeep($0.id) }
+                    )
                 )
             }
             .popover(isPresented: $showGestureHelp) {

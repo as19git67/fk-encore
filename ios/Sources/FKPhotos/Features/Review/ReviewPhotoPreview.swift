@@ -74,11 +74,24 @@ struct ReviewPhotoPreview: View {
                         // In edit mode the footer already carries a
                         // thumbs-down for this photo — over the sheet's
                         // pending keep set, which is a different thing from
-                        // the viewer's own global curation toggle. Two
-                        // identical glyphs meaning different things on one
-                        // screen is the confusion; in decide mode there is
-                        // no second thumbs-down, so the toggle stays.
-                        showsHideToggle: keep == nil
+                        // the viewer's own global curation toggle. Rather
+                        // than two identical glyphs standing for different
+                        // things, the toolbar one is pointed at the same
+                        // pending keep set, so both show and flip one state.
+                        // In decide mode there is no keep set to share, and
+                        // the toggle keeps its usual global meaning.
+                        hideDecision: keep.map { binding in
+                            PhotoFullscreenView.HideDecision(
+                                isHidden: { !binding.wrappedValue.contains($0.id) },
+                                toggle: { photo in
+                                    if binding.wrappedValue.contains(photo.id) {
+                                        binding.wrappedValue.remove(photo.id)
+                                    } else {
+                                        binding.wrappedValue.insert(photo.id)
+                                    }
+                                }
+                            )
+                        }
                     )
                 } else if isLoading {
                     ProgressView("Foto laden…")
