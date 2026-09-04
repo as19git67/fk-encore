@@ -66,6 +66,11 @@ export interface StoredLeg {
 export interface StoredDay {
   id: number;
   dayIndex: number;
+  /**
+   * False while the day is still only at trip resolution (§4.3): it has
+   * its frame — blocks with budgets, fixpoints — but no stops yet.
+   */
+  detailed: boolean;
   blocks: StoredBlock[];
   /** The hard times framing this day (§4.4), earliest binding first. */
   fixpoints: StoredFixpoint[];
@@ -99,6 +104,8 @@ export interface CreateFixpointInput extends Fixpoint {
 export interface CreateDayInput {
   blocks: readonly PlannedBlock[];
   fixpoints?: readonly CreateFixpointInput[];
+  /** Defaults to true — a day written with stops is a detailed day. */
+  detailed?: boolean;
 }
 
 export interface CreateLegInput {
@@ -148,7 +155,7 @@ export async function createPlan(input: CreatePlanInput, db: Db = dbDefault): Pr
     for (const [dayIndex, dayInput] of legInput.days.entries()) {
       const [day] = await db
         .insert(tripPlanDays)
-        .values({ leg_id: leg.id, day_index: dayIndex })
+        .values({ leg_id: leg.id, day_index: dayIndex, detailed: dayInput.detailed ?? true })
         .returning({ id: tripPlanDays.id });
 
       for (const fix of dayInput.fixpoints ?? []) {
@@ -347,6 +354,7 @@ export async function loadPlan(
     list.push({
       id: row.id,
       dayIndex: row.day_index,
+      detailed: row.detailed,
       blocks: blocksByDay.get(row.id) ?? [],
       fixpoints: fixpointsByDay.get(row.id) ?? [],
     });
@@ -405,6 +413,33 @@ export async function saveRedistribution(
   blocks: readonly CurrentBlock[],
   pool: readonly Candidate[],
   db: Db = dbDefault,
+): Promise<void> {
+  await rewriteDay(planId, legId, day, blocks, pool, db);
+}
+
+/**
+ * Fill in a day that was only at trip resolution: same write as a
+ * redistribution, plus the flag that says the day now has stops (§4.3).
+ */
+export async function saveDayDetail(
+  planId: number,
+  legId: number,
+  day: StoredDay,
+  blocks: readonly CurrentBlock[],
+  pool: readonly Candidate[],
+  db: Db = dbDefault,
+): Promise<void> {
+  await rewriteDay(planId, legId, day, blocks, pool, db);
+  await db.update(tripPlanDays).set({ detailed: true }).where(eq(tripPlanDays.id, day.id));
+}
+
+async function rewriteDay(
+  planId: number,
+  legId: number,
+  day: StoredDay,
+  blocks: readonly CurrentBlock[],
+  pool: readonly Candidate[],
+  db: Db,
 ): Promise<void> {
   const byTemplateId = new Map(day.blocks.map((b) => [b.id, b]));
 

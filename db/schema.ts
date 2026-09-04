@@ -2668,6 +2668,9 @@ export const tripPlanDays = pgTable(
       .references(() => tripPlanLegs.id, { onDelete: "cascade" }),
     // 0-based position within the leg, not within the whole trip.
     day_index: integer("day_index").notNull(),
+    // False while the day is still only at trip resolution: it has its
+    // frame — blocks with budgets, fixpoints — but no stops yet (§4.3).
+    detailed: boolean("detailed").notNull().default(true),
   },
   (table) => [uniqueIndex("trip_plan_days_leg_index_key").on(table.leg_id, table.day_index)]
 );
