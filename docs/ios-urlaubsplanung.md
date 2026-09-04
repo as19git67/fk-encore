@@ -1439,6 +1439,37 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    Rückwärtsrechnung, Vorrat je Etappe, Detaillierung erst am Vorabend.
    Enthält die **Korridorsuche** für geplante Anreisen (Ellipsenfilter, noch
    ohne Router).
+
+   **Teilweise umgesetzt — die Korridorsuche.** `POST /trip-planner/corridor`
+   beantwortet „was liegt auf dem Weg, ohne groß umzuwegen?" für eine Fahrt
+   von A nach B. In geo ist das eine `corridor`-Option der Flächensuche neben
+   `bbox` und `center`; die Bedingung ist die Ellipse aus §4.2, ausgewertet
+   von PostGIS.
+
+   Drei Dinge, die dabei entschieden wurden:
+
+   - **Das Umwegbudget zählt hin und zurück.** Ein Spot 500 m neben der Route
+     kostet rund 1000 m. Das ist keine Feinheit, sondern der Unterschied
+     zwischen einem brauchbaren und einem doppelt so weiten Korridor — die
+     Tests pinnen es fest.
+   - **Die Ellipse reicht über beide Brennpunkte hinaus.** Ein Ort 300 m
+     hinter dem Ziel ist ein legitimer Zwischenstopp. Der Index-Vorfilter ist
+     deshalb ein Puffer der halben Nebenachse um die Strecke, nicht um sie
+     herum knapp bemessen: `b ≥ Budget/2` gilt immer, damit kann der
+     Vorfilter keine Zeile verlieren, die die exakte Bedingung behalten
+     würde.
+   - **Beide Enden müssen in derselben importierten Region liegen.** Zwei
+     Regionen zusammenzunähen hieße, zwei Seiten zu mischen und neu zu
+     sortieren — und ließe trotzdem ein Loch, wo nur eine importiert ist. Der
+     Endpunkt sagt lieber, welches Ende nicht abgedeckt ist (§15.3).
+
+   Weiterhin **ohne Router**: gemessen wird Luftlinie, was Straßen
+   überschätzt und Umwege um einen See unterschätzt. Für ein grobes Budget
+   ist das der richtige Tausch, und wenn ein Router kommt, bleibt die
+   Ellipse der billige Vorfilter davor.
+
+   Offen aus diesem Schritt: Etappen als Datenmodell, Ankerzonen,
+   Transfertage, Fixpunkte mit Rückwärtsrechnung und die zwei Auflösungen.
 7. **iOS-Oberfläche** — Blockkarten, Karte, Wischgesten, „Heute"-Modus,
    **Übergaben an Karten-Apps** (§9.1) und die Essensliste vor Ort (§10.3).
 8. **Standort** — Geofences um die nächsten Stopps, Erledigt-Erkennung,

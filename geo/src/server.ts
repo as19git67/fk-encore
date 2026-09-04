@@ -328,6 +328,22 @@ function parseSearchBody(body: unknown): { database: string; options: PoiSearchO
       radiusM: requireFiniteNumber(center.radiusM, "center.radiusM"),
     };
   }
+  if (b.corridor !== undefined && b.corridor !== null) {
+    const corridor = b.corridor as Record<string, unknown>;
+    const from = (corridor.from ?? {}) as Record<string, unknown>;
+    const to = (corridor.to ?? {}) as Record<string, unknown>;
+    options.corridor = {
+      from: {
+        lat: requireFiniteNumber(from.lat, "corridor.from.lat"),
+        lon: requireFiniteNumber(from.lon, "corridor.from.lon"),
+      },
+      to: {
+        lat: requireFiniteNumber(to.lat, "corridor.to.lat"),
+        lon: requireFiniteNumber(to.lon, "corridor.to.lon"),
+      },
+      detourBudgetM: requireFiniteNumber(corridor.detourBudgetM, "corridor.detourBudgetM"),
+    };
+  }
   if (b.categories !== undefined && b.categories !== null) {
     if (!Array.isArray(b.categories) || b.categories.some((c) => typeof c !== "string")) {
       throw new HttpError(400, "categories must be an array of strings");

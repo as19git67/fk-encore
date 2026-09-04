@@ -74,10 +74,20 @@ export interface GeoRegionStorage {
 }
 
 export interface GeoPoiSearchQuery {
-  /** Search a rectangle. Mutually exclusive with `center`. */
+  /** Search a rectangle. */
   bbox?: { minLat: number; minLon: number; maxLat: number; maxLon: number };
-  /** Search a disc. Mutually exclusive with `bbox`. */
+  /** Search a disc. */
   center?: { lat: number; lon: number; radiusM: number };
+  /**
+   * Search what lies along a journey (§4.2): the spots that lengthen it
+   * by at most `detourBudgetM`, counting the way back. Exactly one of
+   * bbox, center and corridor may be given.
+   */
+  corridor?: {
+    from: { lat: number; lon: number };
+    to: { lat: number; lon: number };
+    detourBudgetM: number;
+  };
   /** Category ids from GET /pois/categories. Omitted = all of them. */
   categories?: string[];
   limit?: number;
@@ -92,6 +102,8 @@ export interface GeoPoiSearchSpot {
   lon: number;
   /** Only set when the query carried a centre. */
   distanceM: number | null;
+  /** Extra metres the journey costs if visited. Corridor searches only. */
+  detourM: number | null;
   name: string | null;
   nameDe: string | null;
   nameEn: string | null;

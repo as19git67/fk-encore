@@ -15,5 +15,6 @@ import { Service } from "encore.dev/service";
 import "./plan";
 import "./plans";
 import "./interpret";
+import "./corridor";
 
 export default new Service("trip-planner");
