@@ -90,6 +90,16 @@ test("reports the database size and the tables it knows about", async (t) => {
   assert.ok(pois.totalMb >= pois.tableMb);
 });
 
+test("refreshes stale row-count statistics instead of reporting a false zero", async (t) => {
+  if (skipUnlessDb(t)) return;
+  // createSeededRegion only inserts rows — nothing ANALYZEs the table
+  // first, so pg_stat_user_tables.n_live_tup starts at the same 0 a
+  // server restart or a paused-replication region would show.
+  const storage = await readRegionStorage(DB);
+  const pois = storage.tables.find((tbl) => tbl.table === "osm_pois");
+  assert.equal(pois?.rows, SEED.length, "a cold stats counter must not read as an empty table");
+});
+
 test("skips tables the region does not have instead of failing", async (t) => {
   if (skipUnlessDb(t)) return;
   const storage = await readRegionStorage(DB);

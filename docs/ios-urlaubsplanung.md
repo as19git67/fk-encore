@@ -1290,6 +1290,22 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
   unterschätzt den relativen Zuwachs von `osm_pois` deshalb erheblich — die
   Aufschlüsselung ist genau dafür da.
 
+  **Vorher-Messung** (vor dem Reimport mit dem breiteren Filter, gelesen über
+  den Knopf in der Admin-Oberfläche):
+
+  | Region     | DB gesamt  | `osm_pois` gesamt | `osm_pois` Heap | POIs   |
+  |------------|-----------:|-------------------:|----------------:|-------:|
+  | Schwaben   | 729.17 MB  | 4.82 MB             | 2.62 MB          | 16.249 |
+  | Oberbayern | 1337.6 MB  | 8.75 MB             | 4.84 MB          | 31.017 |
+
+  Beide Regionen sind zu diesem Zeitpunkt noch vor dem Schema, das
+  `shape`/`facade_azimuth` mitführt — `poisWithShape`/`poisWithFacadeAzimuth`
+  stehen entsprechend auf 0. Die POI-Verteilung ist heute stark von
+  `historic=*` und `tourism=*` dominiert (`historic=wayside_cross` allein
+  8.630 Zeilen in Oberbayern); Gastronomie und Alltagsinfrastruktur fehlen
+  komplett — das ist genau der Zuwachs, den die Nachher-Messung zeigen soll.
+  Nachher-Werte folgen hier, sobald der Reimport gelaufen ist.
+
 ### 13.1 Die Schritte
 
 1. **`geo /pois/search` gegen den heutigen Datenbestand** — Flächen- und

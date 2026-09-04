@@ -83,6 +83,35 @@ export async function readRegionStorage(database: string): Promise<RegionStorage
     [[...TABLES]],
   );
 
+  // `n_live_tup` is the stats collector's running count, not a catalog
+  // fact — a server restart (or pg_stat_reset) zeroes it for every table
+  // until something touches the table again: a write, or ANALYZE. A
+  // region whose replication is paused (e.g. ahead of a reimport) can
+  // sit at a stale 0 indefinitely while actively-replicated regions look
+  // fine, which reads as "this region is empty" even though it isn't.
+  // Refreshing just the tables reporting 0 keeps the common case (stats
+  // already warm) free of extra queries.
+  const staleTables = tables.rows.filter((r) => r.rows === "0").map((r) => r.table);
+  if (staleTables.length > 0) {
+    for (const table of staleTables) {
+      await pool.query(`ANALYZE ${table}`);
+    }
+    const refreshed = await pool.query<{ table: string; rows: string }>(
+      `
+      SELECT t.name AS table, COALESCE(s.n_live_tup, 0)::text AS rows
+        FROM unnest($1::text[]) AS t(name)
+        JOIN pg_class c ON c.oid = to_regclass(t.name)
+        LEFT JOIN pg_stat_user_tables s ON s.relid = c.oid
+      `,
+      [staleTables],
+    );
+    const refreshedRows = new Map(refreshed.rows.map((r) => [r.table, r.rows]));
+    for (const r of tables.rows) {
+      const updated = refreshedRows.get(r.table);
+      if (updated !== undefined) r.rows = updated;
+    }
+  }
+
   const hasPois = tables.rows.some((r) => r.table === "osm_pois");
   const byKind = hasPois
     ? await pool.query<{ kind: string; count: string }>(
