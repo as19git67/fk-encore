@@ -1121,6 +1121,13 @@
       "when": 1786233600007,
       "tag": "0159_trip_plan_legs",
       "breakpoints": true
+    },
+    {
+      "idx": 160,
+      "version": "7",
+      "when": 1786233600008,
+      "tag": "0160_trip_plan_fixpoints",
+      "breakpoints": true
     }
   ]
 }

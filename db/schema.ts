@@ -2672,6 +2672,33 @@ export const tripPlanDays = pgTable(
   (table) => [uniqueIndex("trip_plan_days_leg_index_key").on(table.leg_id, table.day_index)]
 );
 
+/**
+ * Hard clock times that frame a day (§4.4). `kind` separates the two
+ * shapes they come in: after an `appointment` the day goes on, after a
+ * `departure` it is over.
+ */
+export const tripPlanFixpoints = pgTable(
+  "trip_plan_fixpoints",
+  {
+    id: serial("id").primaryKey(),
+    day_id: integer("day_id")
+      .notNull()
+      .references(() => tripPlanDays.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull().default("appointment"),
+    label: text("label").notNull(),
+    // Minutes past midnight, local to the leg. 18:40 is 1120.
+    start_minutes: integer("start_minutes").notNull(),
+    duration_minutes: integer("duration_minutes").notNull().default(0),
+    travel_minutes: integer("travel_minutes").notNull().default(0),
+    buffer_minutes: integer("buffer_minutes").notNull().default(20),
+    // Where it happens, when that is known.
+    lat: doublePrecision("lat"),
+    lon: doublePrecision("lon"),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("trip_plan_fixpoints_day_idx").on(table.day_id, table.start_minutes)]
+);
+
 export const tripPlanBlocks = pgTable(
   "trip_plan_blocks",
   {
