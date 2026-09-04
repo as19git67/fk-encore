@@ -38,7 +38,7 @@ import {
   buildReceiptDocumentCompletion,
   isReliableReceiptAmount,
 } from "./receipt-capture";
-import { deleteJobsForDocument, hasUnfinishedJob } from "./scan-queue";
+import { deleteJobsForDocument, hasAnyJob, hasUnfinishedJob } from "./scan-queue";
 import { checkReceiptEnrichment, createSuggestionsForDocument } from "../finance/document-match.service";
 import {
   assertPathUnderDocumentsRoot,
@@ -347,7 +347,16 @@ export async function runClassify(documentId: number): Promise<{ classification:
   }
   const text = (row.extracted_text ?? "").trim();
   if (text.length === 0) {
-    if (isWaitingForTextExtraction(row.status)) {
+    // Only wait when text extraction is actually still coming, and let the
+    // QUEUE decide that — not `documents.status`. The status is set to
+    // `pending` up-front by a re-queue and stays there when a run is
+    // interrupted, so trusting it alone means deferring forever. The window
+    // this defer is for is narrow: a status already flipped to `pending`
+    // while the matching text_extract row is not inserted yet. Once a
+    // text_extract row exists it is either outstanding (handled above) or
+    // finished — and a finished extraction that produced nothing is a
+    // failure, not something to keep waiting for.
+    if (isWaitingForTextExtraction(row.status) && !(await hasAnyJob(documentId, "text_extract"))) {
       return { deferred: true };
     }
     throw new Error("classify: no extracted text available after text extraction");
@@ -1116,7 +1125,12 @@ export async function runEmbed(documentId: number): Promise<{ chunks: number } |
   }
   const text = (row.extracted_text ?? "").trim();
   if (text.length === 0) {
-    if (isWaitingForTextExtraction(row.status)) {
+    // Same reasoning as in runClassify: the queue, not the document status,
+    // decides whether text extraction is still on its way. A stale
+    // `pending`/`extracting` status used to keep this job deferring forever —
+    // and since `embed` never touches the document status, the document was
+    // impossible to find from the list while its job sat in "wartend".
+    if (isWaitingForTextExtraction(row.status) && !(await hasAnyJob(documentId, "text_extract"))) {
       return { deferred: true };
     }
     return { chunks: 0 };

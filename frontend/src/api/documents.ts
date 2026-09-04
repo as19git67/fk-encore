@@ -215,8 +215,26 @@ export interface DocQueueServiceStatus {
   done: number
 }
 
+/** One outstanding job, so a stalled counter can be traced to a document. */
+export interface DocQueueJob {
+  id: number
+  document_id: number
+  service: string
+  status: string
+  priority: number
+  attempts: number
+  defer_count: number
+  enqueued_at: string
+  started_at: string | null
+  error_msg: string | null
+  document_status: string
+  /** null when the document is not visible to the current user. */
+  document_title: string | null
+}
+
 export interface DocQueueStatus {
   services: DocQueueServiceStatus[]
+  jobs: DocQueueJob[]
 }
 
 function buildQuery(params: Record<string, unknown>): string {
