@@ -2619,12 +2619,8 @@ export const tripPlans = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     title: text("title"),
-    // The leg's anchor: where each day starts and the last block returns to.
-    anchor_lat: doublePrecision("anchor_lat").notNull(),
-    anchor_lon: doublePrecision("anchor_lon").notNull(),
-    // Which geo region database the candidates came from.
-    region_db: text("region_db").notNull(),
     // The request that produced this plan, kept so a replan can reuse it.
+    // Anchor, region and mode live on the leg (§4.2), not here.
     constraints: jsonb("constraints").notNull().default({}),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
     updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
@@ -2632,17 +2628,48 @@ export const tripPlans = pgTable(
   (table) => [index("trip_plans_owner_idx").on(table.owner_id)]
 );
 
-export const tripPlanDays = pgTable(
-  "trip_plan_days",
+/**
+ * The level between the trip and the day (§4.2): its own period, anchor,
+ * way of getting around, region database — and therefore its own pool.
+ * Redistribution stays inside a leg.
+ */
+export const tripPlanLegs = pgTable(
+  "trip_plan_legs",
   {
     id: serial("id").primaryKey(),
     plan_id: integer("plan_id")
       .notNull()
       .references(() => tripPlans.id, { onDelete: "cascade" }),
-    // 0-based position in the plan. Dates arrive with legs (§4.2).
+    // 0-based order along the trip.
+    position: integer("position").notNull(),
+    title: text("title"),
+    // Where each day of this leg starts and the last block returns to.
+    anchor_lat: doublePrecision("anchor_lat").notNull(),
+    anchor_lon: doublePrecision("anchor_lon").notNull(),
+    // Set when the anchor is a zone rather than an address: the anchor is
+    // its centroid and this is how far the real base may sit from it.
+    anchor_radius_m: integer("anchor_radius_m"),
+    // foot | bike | transit | car — per leg, not per trip.
+    mode: text("mode").notNull().default("foot"),
+    region_db: text("region_db").notNull(),
+    // Optional real dates; absent means "day 1, day 2, …".
+    start_date: date("start_date"),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("trip_plan_legs_plan_position_key").on(table.plan_id, table.position)]
+);
+
+export const tripPlanDays = pgTable(
+  "trip_plan_days",
+  {
+    id: serial("id").primaryKey(),
+    leg_id: integer("leg_id")
+      .notNull()
+      .references(() => tripPlanLegs.id, { onDelete: "cascade" }),
+    // 0-based position within the leg, not within the whole trip.
     day_index: integer("day_index").notNull(),
   },
-  (table) => [uniqueIndex("trip_plan_days_plan_index_key").on(table.plan_id, table.day_index)]
+  (table) => [uniqueIndex("trip_plan_days_leg_index_key").on(table.leg_id, table.day_index)]
 );
 
 export const tripPlanBlocks = pgTable(
@@ -2695,9 +2722,10 @@ export const tripPlanPool = pgTable(
   "trip_plan_pool",
   {
     id: serial("id").primaryKey(),
-    plan_id: integer("plan_id")
+    // The pool is per leg: the candidates come from the leg's region.
+    leg_id: integer("leg_id")
       .notNull()
-      .references(() => tripPlans.id, { onDelete: "cascade" }),
+      .references(() => tripPlanLegs.id, { onDelete: "cascade" }),
     osm_ref: text("osm_ref").notNull(),
     name: text("name"),
     lat: doublePrecision("lat").notNull(),
@@ -2710,5 +2738,5 @@ export const tripPlanPool = pgTable(
     // following day rather than sinking in the ranking (§5).
     priority_boost: real("priority_boost").notNull().default(0),
   },
-  (table) => [uniqueIndex("trip_plan_pool_plan_ref_key").on(table.plan_id, table.osm_ref)]
+  (table) => [uniqueIndex("trip_plan_pool_leg_ref_key").on(table.leg_id, table.osm_ref)]
 );

@@ -6,6 +6,12 @@
  * calls its core can work on it: "we are here, it is now", the pool,
  * and moving what no longer fits to a following day.
  *
+ * A plan is a list of **legs** (§4.2). Each has its own anchor, way of
+ * getting around and region database, and therefore its own pool —
+ * redistribution stays inside a leg, so what falls out in Tokyo does not
+ * slide to Osaka. A one-city trip is a plan with one leg, which is why
+ * the flat single-anchor request still works and simply builds one.
+ *
  * The decisions stay in the pure modules (`solver.ts`,
  * `redistribute.ts`); these endpoints only load, call, and save.
  */
@@ -19,11 +25,12 @@ import { DEFAULT_DAY, shapeDay, type BlockTemplate, type GroupProfile, type Pace
 import { toCandidates } from "./candidates";
 import { redistribute, type CurrentBlock } from "./redistribute";
 import { solveDay, type PlannedBlock } from "./solver";
-import { DEFAULT_MAX_WALK_MINUTES } from "./travel";
+import { DEFAULT_MAX_WALK_MINUTES, type TransportMode } from "./travel";
 import {
   createPlan,
   loadPlan,
   saveRedistribution,
+  type CreateLegInput,
   type StoredPlan,
 } from "./plan-store";
 
@@ -31,13 +38,46 @@ const DEFAULT_SEARCH_RADIUS_M = 2_500;
 const MAX_SEARCH_RADIUS_M = 20_000;
 const CANDIDATE_LIMIT = 150;
 const MAX_DAYS = 14;
+/** More than this is a life, not a trip — and every leg costs a search. */
+const MAX_LEGS = 10;
+const TRANSPORT_MODES: readonly TransportMode[] = ["foot", "bike", "transit", "car"];
+
+/** One stop on the trip: a place, a stretch of days, a way of getting around. */
+export interface LegRequest {
+  /** What to call it — usually the city. */
+  title?: string;
+  /** Where each day starts and ends. With `anchorRadiusM`, its centroid. */
+  anchor: { lat: number; lon: number };
+  /**
+   * Set when nothing is booked yet and the base is only known as a zone
+   * ("at most five metro stops from the main square"). The planner still
+   * reckons with the centroid; recording the tolerance keeps the plan
+   * from claiming an address it does not have (§4.2).
+   */
+  anchorRadiusM?: number;
+  /** foot | bike | transit | car. On foot by default. */
+  mode?: TransportMode;
+  /** How many days this leg lasts. One by default. */
+  days?: number;
+  /** Search radius around this leg's anchor. */
+  radiusM?: number;
+  /** ISO date (YYYY-MM-DD) of the leg's first day, when the trip has dates. */
+  startDate?: string;
+}
 
 export interface CreatePlanRequest {
   title?: string;
-  anchor: { lat: number; lon: number };
+  /**
+   * The legs of the trip, in order. A single-city trip may instead pass
+   * the flat `anchor`/`days`/`radiusM` fields below, which build one leg.
+   */
+  legs?: LegRequest[];
+  /** Shorthand for a one-leg trip. Ignored when `legs` is given. */
+  anchor?: { lat: number; lon: number };
   /** How many days to plan. One by default. */
   days?: number;
   radiusM?: number;
+  /** These apply to the whole trip: who is travelling and what they like. */
   categories?: string[];
   interests?: string[];
   pace?: Pace;
@@ -55,56 +95,34 @@ export const createTripPlan = api(
   { expose: true, method: "POST", path: "/trip-planner/plans", auth: true },
   async (req: CreatePlanRequest): Promise<PlanResponse> => {
     const userId = requireUser();
-    const anchor = validateAnchor(req.anchor);
-    const radiusM = validateRadius(req.radiusM);
-    const dayCount = validateDays(req.days);
+    const legRequests = normalizeLegs(req);
     const maxWalkMinutes = validateMaxWalk(req.maxWalkMinutes);
-
-    const region = await pickRegion(anchor.lat, anchor.lon);
-    if (!region) {
-      throw APIError.failedPrecondition(
-        "no imported OSM region covers this location — import it in the region admin first",
-      );
-    }
-
-    const page = await getGeoClient().searchPois(region.postgresDb, {
-      center: { lat: anchor.lat, lon: anchor.lon, radiusM },
-      categories: req.categories,
-      limit: CANDIDATE_LIMIT,
-    });
-
-    const scored = toCandidates(page.spots, {
-      interests: req.interests,
-      dwellMinutes: req.dwellMinutes,
-    });
-
-    // Days are solved one after another out of a shrinking pool, so the
-    // same spot is never planned twice across the trip.
     const shape = shapeDay(req.blocks ?? DEFAULT_DAY, req.pace ?? "normal", req.group);
-    let available = [...scored];
-    const days: PlannedBlock[][] = [];
-    for (let i = 0; i < dayCount; i += 1) {
-      const solved = solveDay({ anchor, blocks: shape, candidates: available, maxWalkMinutes });
-      days.push(solved.blocks);
-      const placed = new Set(solved.blocks.flatMap((b) => b.stops.map((s) => s.osmRef)));
-      available = available.filter((c) => !placed.has(c.osmRef));
+
+    const legs: CreateLegInput[] = [];
+    for (const legReq of legRequests) {
+      legs.push(
+        await planLeg(legReq, {
+          shape,
+          maxWalkMinutes,
+          categories: req.categories,
+          interests: req.interests,
+          dwellMinutes: req.dwellMinutes,
+        }),
+      );
     }
 
     const planId = await createPlan({
       ownerId: userId,
       title: req.title,
-      anchor,
-      regionDb: region.postgresDb,
       constraints: {
-        radiusM,
         categories: req.categories ?? null,
         interests: req.interests ?? null,
         pace: req.pace ?? "normal",
         group: req.group ?? null,
         maxWalkMinutes,
       },
-      days,
-      pool: available,
+      legs,
     });
 
     const plan = await loadPlan(planId, userId);
@@ -125,6 +143,9 @@ export const getTripPlan = api(
 
 export interface RedistributeRequestBody {
   planId: number;
+  /** Which leg of the trip. The first one by default (§4.2). */
+  legIndex?: number;
+  /** Which day of that leg, counted from zero within the leg. */
   dayIndex: number;
   /** The block the group is standing in. */
   currentBlockId: string;
@@ -160,8 +181,12 @@ export const redistributeDay = api(
     const plan = await loadPlan(req.planId, userId);
     if (!plan) throw APIError.notFound("plan not found");
 
-    const day = plan.days.find((d) => d.dayIndex === req.dayIndex);
-    if (!day) throw APIError.notFound(`day ${req.dayIndex} not found in this plan`);
+    const legIndex = req.legIndex ?? 0;
+    const leg = plan.legs.find((l) => l.position === legIndex);
+    if (!leg) throw APIError.notFound(`leg ${legIndex} not found in this plan`);
+
+    const day = leg.days.find((d) => d.dayIndex === req.dayIndex);
+    if (!day) throw APIError.notFound(`day ${req.dayIndex} not found in leg ${legIndex}`);
 
     const visited = new Set(req.visited ?? []);
     const skipped = new Set(req.skipped ?? []);
@@ -186,18 +211,21 @@ export const redistributeDay = api(
     try {
       result = redistribute({
         blocks,
-        pool: plan.pool,
+        // The leg's own pool: a spot in Osaka is not a replacement for
+        // one missed in Tokyo (§4.2).
+        pool: leg.pool,
         position,
-        anchor: plan.anchor,
+        anchor: leg.anchor,
         currentBlockId: req.currentBlockId,
         remainingMinutes: Math.round(req.remainingMinutes),
         maxWalkMinutes,
+        mode: leg.mode,
       });
     } catch (err) {
       throw APIError.invalidArgument((err as Error).message);
     }
 
-    await saveRedistribution(plan.id, day, result.blocks, result.pool);
+    await saveRedistribution(plan.id, leg.id, day, result.blocks, result.pool);
 
     const updated = await loadPlan(plan.id, userId);
     if (!updated) throw APIError.internal("plan vanished during redistribution");
@@ -208,6 +236,126 @@ export const redistributeDay = api(
   },
 );
 
+/**
+ * One leg's search and solve. Days are solved one after another out of
+ * a shrinking pool, so the same spot is never planned twice — within
+ * the leg. Across legs the pools are separate by construction, because
+ * each leg searches its own region around its own anchor.
+ */
+async function planLeg(
+  legReq: LegRequest,
+  trip: {
+    shape: ReturnType<typeof shapeDay>;
+    maxWalkMinutes: number;
+    categories?: string[];
+    interests?: string[];
+    dwellMinutes?: Record<string, number>;
+  },
+): Promise<CreateLegInput> {
+  const anchor = validateAnchor(legReq.anchor);
+  const radiusM = validateRadius(legReq.radiusM);
+  const dayCount = validateDays(legReq.days);
+  const mode = validateMode(legReq.mode);
+  const anchorRadiusM = validateAnchorRadius(legReq.anchorRadiusM);
+  const startDate = validateStartDate(legReq.startDate);
+
+  const region = await pickRegion(anchor.lat, anchor.lon);
+  if (!region) {
+    const where = legReq.title ? `'${legReq.title}'` : "this location";
+    throw APIError.failedPrecondition(
+      `no imported OSM region covers ${where} — import it in the region admin first`,
+    );
+  }
+
+  const page = await getGeoClient().searchPois(region.postgresDb, {
+    center: { lat: anchor.lat, lon: anchor.lon, radiusM },
+    categories: trip.categories,
+    limit: CANDIDATE_LIMIT,
+  });
+
+  const scored = toCandidates(page.spots, {
+    interests: trip.interests,
+    dwellMinutes: trip.dwellMinutes,
+  });
+
+  let available = [...scored];
+  const days: PlannedBlock[][] = [];
+  for (let i = 0; i < dayCount; i += 1) {
+    const solved = solveDay({
+      anchor,
+      blocks: trip.shape,
+      candidates: available,
+      maxWalkMinutes: trip.maxWalkMinutes,
+      mode,
+    });
+    days.push(solved.blocks);
+    const placed = new Set(solved.blocks.flatMap((b) => b.stops.map((s) => s.osmRef)));
+    available = available.filter((c) => !placed.has(c.osmRef));
+  }
+
+  return {
+    title: legReq.title,
+    anchor,
+    anchorRadiusM,
+    mode,
+    regionDb: region.postgresDb,
+    startDate,
+    days,
+    pool: available,
+  };
+}
+
+/**
+ * `legs` wins; the flat fields are the one-leg shorthand a weekend trip
+ * uses. Accepting both keeps the simple request simple without giving
+ * the planner two notions of what a plan is — everything downstream
+ * sees legs.
+ */
+function normalizeLegs(req: CreatePlanRequest): LegRequest[] {
+  if (req.legs !== undefined) {
+    if (!Array.isArray(req.legs) || req.legs.length === 0) {
+      throw APIError.invalidArgument("legs must be a non-empty array");
+    }
+    if (req.legs.length > MAX_LEGS) {
+      throw APIError.invalidArgument(`a plan may have at most ${MAX_LEGS} legs`);
+    }
+    return req.legs;
+  }
+  if (!req.anchor) {
+    throw APIError.invalidArgument("either legs or anchor is required");
+  }
+  return [{ anchor: req.anchor, days: req.days, radiusM: req.radiusM }];
+}
+
+function validateMode(mode: TransportMode | undefined): TransportMode {
+  if (mode === undefined) return "foot";
+  if (!TRANSPORT_MODES.includes(mode)) {
+    throw APIError.invalidArgument(`mode must be one of ${TRANSPORT_MODES.join(", ")}`);
+  }
+  return mode;
+}
+
+function validateAnchorRadius(radiusM: number | undefined): number | null {
+  if (radiusM === undefined) return null;
+  if (!Number.isFinite(radiusM) || radiusM <= 0) {
+    throw APIError.invalidArgument("anchorRadiusM must be a positive number");
+  }
+  if (radiusM > MAX_SEARCH_RADIUS_M) {
+    throw APIError.invalidArgument(`anchorRadiusM may be at most ${MAX_SEARCH_RADIUS_M} m`);
+  }
+  return Math.round(radiusM);
+}
+
+function validateStartDate(date: string | undefined): string | null {
+  if (date === undefined) return null;
+  // Date-only, and no timezone anywhere near it: a leg starts on a day,
+  // not at an instant.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw APIError.invalidArgument(`startDate must be YYYY-MM-DD, got '${date}'`);
+  }
+  return date;
+}
+
 function requireUser(): number {
   const auth = getAuthData();
   if (!auth) throw APIError.unauthenticated("Unauthorized");
@@ -215,7 +363,7 @@ function requireUser(): number {
   return parseInt(auth.userID, 10);
 }
 
-function validateAnchor(anchor: { lat: number; lon: number }): { lat: number; lon: number } {
+function validateAnchor(anchor: { lat: number; lon: number } | undefined): { lat: number; lon: number } {
   if (!anchor || typeof anchor !== "object") {
     throw APIError.invalidArgument("a coordinate is required");
   }

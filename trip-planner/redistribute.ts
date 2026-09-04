@@ -28,7 +28,7 @@
 
 import type { PlannedBlockShape } from "./blocks";
 import { solveDay, type Candidate, type PlannedBlock, type PlannedStop } from "./solver";
-import { walkingLeg, type Coordinate } from "./travel";
+import { travelLeg, type Coordinate, type TransportMode } from "./travel";
 
 /**
  * How much a displaced stop is favoured when it competes again. Enough
@@ -62,6 +62,8 @@ export interface RedistributeRequest {
   /** Minutes left of that block's budget. */
   remainingMinutes: number;
   maxWalkMinutes: number;
+  /** How the group gets around on this leg (§4.2). On foot by default. */
+  mode?: TransportMode;
 }
 
 export interface RedistributeResult {
@@ -124,9 +126,10 @@ export function redistribute(req: RedistributeRequest): RedistributeResult {
     blocks: shapes,
     candidates: available,
     maxWalkMinutes: req.maxWalkMinutes,
+    mode: req.mode,
   });
 
-  const blocks = rebuildBlocks(rest, keptPerBlock, solved.blocks, req.position);
+  const blocks = rebuildBlocks(rest, keptPerBlock, solved.blocks, req.position, req.mode ?? "foot");
   const placed = new Set(blocks.flatMap((b) => b.stops.map((s) => s.osmRef)));
   const freedRefs = new Set(freed.map((c) => c.osmRef));
 
@@ -170,6 +173,7 @@ function rebuildBlocks(
   keptPerBlock: readonly CurrentStop[][],
   solved: readonly PlannedBlock[],
   position: Coordinate,
+  mode: TransportMode,
 ): CurrentBlock[] {
   const out: CurrentBlock[] = [];
   let from: Coordinate = position;
@@ -186,7 +190,7 @@ function rebuildBlocks(
     for (const stop of solved[offset]?.stops ?? []) {
       stops.push({
         ...stop,
-        travelFromPrevious: walkingLeg(from, stop),
+        travelFromPrevious: travelLeg(from, stop, mode),
         status: "planned",
         pinned: false,
       });
