@@ -1493,8 +1493,32 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    statt am Plan; jeder bestehende Plan wird zur Ein-Etappen-Reise mit
    seinem bisherigen Anker und seiner Region.
 
-   Offen aus diesem Schritt: Transfertage, Fixpunkte mit Rückwärtsrechnung
-   und die zwei Auflösungen.
+   **Teilweise umgesetzt — Fixpunkte.** `fixpoints.ts` legt die Blöcke eines
+   Tages auf eine gedachte Uhr und lässt die Fixpunkte sich nehmen, was ihnen
+   zusteht. Der Solver bekommt danach nur ein kleineres Budget und erfährt nie,
+   was eine Uhrzeit ist — genau die Arbeitsteilung aus §4.4.
+
+   - **Zwei Arten von Fixpunkt, und der Unterschied ist der ganze Punkt.**
+     Nach einem `appointment` (gebuchte Führung) ist man zurück und der Tag
+     geht weiter; nach einer `departure` (letzter Zug) ist man weg. Beides
+     gleich zu behandeln plante einen Abendblock hinter einen Zug, der schon
+     abgefahren war — der erste Testlauf hat genau das gezeigt.
+   - **Rückwärts gerechnet.** Ein Zug um 18:40 mit 15 min Weg und 20 min
+     Puffer bindet ab 18:05; ein Abendblock ab 17:30 behält 35 statt 120
+     Minuten. Je näher der Rand, desto härter greift das Budget.
+   - **Der Puffer ist nie null.** `MIN_BUFFER_MINUTES` ist ein Boden, kein
+     Vorgabewert: Wer ihn auf 0 setzt, hat nicht entschieden zu rennen,
+     sondern nicht darüber nachzudenken.
+   - **Ein verdrängter Block verschwindet nicht stillschweigend.** Die Antwort
+     nennt ihn mit Grund („Letzter Zug 17:45 lässt für ‚Abend' keine Zeit
+     mehr") — der Satz, den die App zeigt.
+
+   Migration `0160_trip_plan_fixpoints`: Fixpunkte hängen am Tag, Zeiten als
+   Minuten nach Mitternacht ohne Zeitzone. Ein Fixpunkt ist „der 18:40-Zug",
+   kein Zeitpunkt auf einer globalen Uhr — und offline auf dem Gerät muss
+   dieselbe Rechnung herauskommen.
+
+   Offen aus diesem Schritt: Transfertage und die zwei Auflösungen.
 7. **iOS-Oberfläche** — Blockkarten, Karte, Wischgesten, „Heute"-Modus,
    **Übergaben an Karten-Apps** (§9.1) und die Essensliste vor Ort (§10.3).
 8. **Standort** — Geofences um die nächsten Stopps, Erledigt-Erkennung,

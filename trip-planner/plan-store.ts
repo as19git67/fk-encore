@@ -21,6 +21,7 @@ import dbDefault from "../db/database";
 import {
   tripPlanBlocks,
   tripPlanDays,
+  tripPlanFixpoints,
   tripPlanLegs,
   tripPlanPool,
   tripPlanStops,
@@ -30,6 +31,7 @@ import type { Candidate, PlannedBlock } from "./solver";
 import type { CurrentBlock, CurrentStop, StopStatus } from "./redistribute";
 import type { ScoredCandidate } from "./candidates";
 import { travelClassFor, type TransportMode } from "./travel";
+import { DEFAULT_BUFFER_MINUTES, type Fixpoint, type FixpointKind } from "./fixpoints";
 
 type Db = typeof dbDefault;
 
@@ -65,6 +67,16 @@ export interface StoredDay {
   id: number;
   dayIndex: number;
   blocks: StoredBlock[];
+  /** The hard times framing this day (§4.4), earliest binding first. */
+  fixpoints: StoredFixpoint[];
+}
+
+export interface StoredFixpoint extends Fixpoint {
+  rowId: number;
+  kind: FixpointKind;
+  /** Where it happens, when that is known. */
+  lat: number | null;
+  lon: number | null;
 }
 
 export interface StoredBlock extends CurrentBlock {
@@ -77,6 +89,18 @@ export interface StoredStop extends CurrentStop {
   rowId: number;
 }
 
+/** A fixpoint as it arrives, before it has a row. */
+export interface CreateFixpointInput extends Fixpoint {
+  kind?: FixpointKind;
+  lat?: number | null;
+  lon?: number | null;
+}
+
+export interface CreateDayInput {
+  blocks: readonly PlannedBlock[];
+  fixpoints?: readonly CreateFixpointInput[];
+}
+
 export interface CreateLegInput {
   title?: string;
   anchor: { lat: number; lon: number };
@@ -84,7 +108,7 @@ export interface CreateLegInput {
   mode?: TransportMode;
   regionDb: string;
   startDate?: string | null;
-  days: readonly (readonly PlannedBlock[])[];
+  days: readonly CreateDayInput[];
   pool: readonly ScoredCandidate[];
 }
 
@@ -121,13 +145,27 @@ export async function createPlan(input: CreatePlanInput, db: Db = dbDefault): Pr
       })
       .returning({ id: tripPlanLegs.id });
 
-    for (const [dayIndex, blocks] of legInput.days.entries()) {
+    for (const [dayIndex, dayInput] of legInput.days.entries()) {
       const [day] = await db
         .insert(tripPlanDays)
         .values({ leg_id: leg.id, day_index: dayIndex })
         .returning({ id: tripPlanDays.id });
 
-      for (const [blockPosition, block] of blocks.entries()) {
+      for (const fix of dayInput.fixpoints ?? []) {
+        await db.insert(tripPlanFixpoints).values({
+          day_id: day.id,
+          kind: fix.kind ?? "appointment",
+          label: fix.label,
+          start_minutes: fix.startMinutes,
+          duration_minutes: fix.durationMinutes ?? 0,
+          travel_minutes: fix.travelMinutes ?? 0,
+          buffer_minutes: fix.bufferMinutes ?? DEFAULT_BUFFER_MINUTES,
+          lat: fix.lat ?? null,
+          lon: fix.lon ?? null,
+        });
+      }
+
+      for (const [blockPosition, block] of dayInput.blocks.entries()) {
         const [row] = await db
           .insert(tripPlanBlocks)
           .values({
@@ -226,6 +264,34 @@ export async function loadPlan(
     ? await db.select().from(tripPlanPool).where(inArray(tripPlanPool.leg_id, legIds))
     : [];
 
+  const fixpointRows = dayIds.length
+    ? await db
+        .select()
+        .from(tripPlanFixpoints)
+        .where(inArray(tripPlanFixpoints.day_id, dayIds))
+        .orderBy(asc(tripPlanFixpoints.day_id), asc(tripPlanFixpoints.start_minutes))
+    : [];
+
+  const fixpointsByDay = new Map<number, StoredFixpoint[]>();
+  for (const row of fixpointRows) {
+    const list = fixpointsByDay.get(row.day_id) ?? [];
+    list.push({
+      rowId: row.id,
+      // The solver keys fixpoints by id; the row id is the only handle
+      // that is stable across a reload.
+      id: String(row.id),
+      kind: row.kind as FixpointKind,
+      label: row.label,
+      startMinutes: row.start_minutes,
+      durationMinutes: row.duration_minutes,
+      travelMinutes: row.travel_minutes,
+      bufferMinutes: row.buffer_minutes,
+      lat: row.lat,
+      lon: row.lon,
+    });
+    fixpointsByDay.set(row.day_id, list);
+  }
+
   // The travel class is derived rather than stored, and the mode it
   // depends on lives on the leg — so map each block back to its leg
   // before rebuilding a stop.
@@ -278,7 +344,12 @@ export async function loadPlan(
   const daysByLeg = new Map<number, StoredDay[]>();
   for (const row of dayRows) {
     const list = daysByLeg.get(row.leg_id) ?? [];
-    list.push({ id: row.id, dayIndex: row.day_index, blocks: blocksByDay.get(row.id) ?? [] });
+    list.push({
+      id: row.id,
+      dayIndex: row.day_index,
+      blocks: blocksByDay.get(row.id) ?? [],
+      fixpoints: fixpointsByDay.get(row.id) ?? [],
+    });
     daysByLeg.set(row.leg_id, list);
   }
 
