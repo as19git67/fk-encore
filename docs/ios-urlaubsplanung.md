@@ -1300,11 +1300,49 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
 
   Beide Regionen sind zu diesem Zeitpunkt noch vor dem Schema, das
   `shape`/`facade_azimuth` mitführt — `poisWithShape`/`poisWithFacadeAzimuth`
-  stehen entsprechend auf 0. Die POI-Verteilung ist heute stark von
-  `historic=*` und `tourism=*` dominiert (`historic=wayside_cross` allein
+  stehen entsprechend auf 0. Die POI-Verteilung ist zu diesem Zeitpunkt stark
+  von `historic=*` und `tourism=*` dominiert (`historic=wayside_cross` allein
   8.630 Zeilen in Oberbayern); Gastronomie und Alltagsinfrastruktur fehlen
-  komplett — das ist genau der Zuwachs, den die Nachher-Messung zeigen soll.
-  Nachher-Werte folgen hier, sobald der Reimport gelaufen ist.
+  komplett.
+
+  **Nachher-Messung** (nach dem Reimport mit dem breiteren Filter):
+
+  | Region     | DB gesamt  | `osm_pois` gesamt | `osm_pois` Heap | POIs   |
+  |------------|-----------:|-------------------:|----------------:|-------:|
+  | Schwaben   | 1484.74 MB | 20.2 MB             | 12.01 MB         | 30.443 |
+  | Oberbayern | 3059.78 MB | 43.12 MB            | 25.54 MB         | 67.310 |
+
+  **Differenz:**
+
+  | Region     | DB gesamt         | `osm_pois` gesamt | `osm_pois` Heap | POIs             |
+  |------------|-------------------:|-------------------:|-----------------:|------------------:|
+  | Schwaben   | +755.57 MB (+104 %) | +15.38 MB          | +9.39 MB          | +14.194 (+87 %)   |
+  | Oberbayern | +1722.18 MB (+129 %) | +34.37 MB         | +20.7 MB          | +36.293 (+117 %)  |
+
+  **Der eigentliche Befund liegt woanders, als die Vorüberlegung vermutet
+  hat:** Fast der gesamte Größenzuwachs kommt nicht von Gastronomie und
+  Alltagsinfrastruktur, sondern davon, dass `planet_osm_nodes` — vorher in
+  keiner der beiden Regionen überhaupt vorhanden — jetzt mitgeführt wird:
+  741.3 MB in Schwaben (98 % des gesamten Zuwachses dort), 1484.65 MB in
+  Oberbayern (86 % des Zuwachses). `osm_pois` selbst wächst nur um
+  15–34 MB — trivial gegen die Node-Tabelle.
+
+  Das ist keine Folge der breiteren POI-Filter. `geo/src/import.ts` ruft
+  osm2pgsql seit jeher mit `--slim` **ohne** `--drop` auf — bewusst so, weil
+  `osm2pgsql-replication update` (die stündliche Diff-Anwendung) genau diese
+  Middle-Tables braucht und ohne sie mit Exit 1 abbricht (Kommentar dort).
+  `planet_osm_nodes` hätte also immer da sein müssen. Dass es vorher fehlte,
+  heißt: Schwaben und Oberbayern wurden lange vor dieser Replikations-Policy
+  importiert, vermutlich noch mit `--drop` oder einer anderen osm2pgsql-
+  Konfiguration — dasselbe Muster wie beim `shape`/`facade_azimuth`-Fehlen
+  (§13.0 Sturz-Fix). Der Reimport hat diese Regionen also nicht nur auf den
+  neuen POI-Filter, sondern gleich auf mehrere seither eingeführte
+  Policies nachgezogen. Für die Kapazitätsplanung heißt das: **Der Faktor
+  2–2.3 in der Gesamtgröße ist überwiegend der Preis fürs
+  Replikationsfähig-Werden (Node-Vorhalten), nicht für Gastronomie.** Bei
+  einem Rollout auf weitere Regierungsbezirke, die noch nie reimportiert
+  wurden, dürfte ein ähnlicher Sprung auftreten — planbar ist er trotzdem:
+  einmalig pro Region, nicht laufend.
 
 ### 13.1 Die Schritte
 
