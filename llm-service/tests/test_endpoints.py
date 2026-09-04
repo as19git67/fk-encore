@@ -157,6 +157,87 @@ def test_embed_applies_prefix_to_encoder_input(monkeypatch):
         main._state["embedder"] = None
 
 
+class _OomVec(list):
+    def tolist(self):
+        return [[0.1, 0.2]] * len(self)
+
+
+def test_embed_halves_the_batch_on_out_of_memory(monkeypatch):
+    """The GPU is shared with llama-server, which keeps its weights resident.
+    What is left for the encoder is small, so a batch that fits all day can
+    OOM on one document. Shrinking the batch changes nothing about the
+    vectors — only the peak activation memory — so /embed must not surface
+    that as a 500 (which the documents pipeline retries forever)."""
+
+    monkeypatch.setattr(main, "LLM_EMBED_BATCH_SIZE", 32)
+    main._state["embed_batch_size"] = None
+    tried: list[int] = []
+
+    class _StubEmbedder:
+        def encode(self, texts, normalize_embeddings=True, batch_size=32):
+            tried.append(batch_size)
+            if batch_size > 8:
+                raise RuntimeError("CUDA out of memory. Tried to allocate 192.00 MiB")
+            return _OomVec(texts)
+
+    main._state["embedder"] = _StubEmbedder()
+    try:
+        client = TestClient(main.app)
+        resp = client.post("/embed", json={"texts": ["hallo", "welt"]})
+        assert resp.status_code == 200
+        assert len(resp.json()["embeddings"]) == 2
+        assert tried == [32, 16, 8]
+
+        # The smaller batch sticks: the GPU does not get roomier on its own,
+        # so the next request must not repeat the failed forward passes.
+        tried.clear()
+        assert client.post("/embed", json={"texts": ["x"]}).status_code == 200
+        assert tried == [8]
+        assert client.get("/healthz").json()["embed_batch_size_effective"] == 8
+    finally:
+        main._state["embedder"] = None
+        main._state["embed_batch_size"] = None
+
+
+def test_embed_returns_503_when_even_one_text_does_not_fit(monkeypatch):
+    """A 503 is retryable and bounded by the caller's defer budget; a 500 was
+    read as a transient outage and retried forever."""
+
+    monkeypatch.setattr(main, "LLM_EMBED_BATCH_SIZE", 4)
+    main._state["embed_batch_size"] = None
+
+    class _StubEmbedder:
+        def encode(self, texts, normalize_embeddings=True, batch_size=32):
+            raise RuntimeError("CUDA out of memory. Tried to allocate 192.00 MiB")
+
+    main._state["embedder"] = _StubEmbedder()
+    try:
+        client = TestClient(main.app)
+        resp = client.post("/embed", json={"texts": ["hallo"]})
+        assert resp.status_code == 503
+        assert "out of memory" in resp.json()["detail"]
+    finally:
+        main._state["embedder"] = None
+        main._state["embed_batch_size"] = None
+
+
+def test_embed_does_not_swallow_other_encoder_errors(monkeypatch):
+    monkeypatch.setattr(main, "LLM_EMBED_BATCH_SIZE", 4)
+    main._state["embed_batch_size"] = None
+
+    class _StubEmbedder:
+        def encode(self, texts, normalize_embeddings=True, batch_size=32):
+            raise ValueError("tokenizer exploded")
+
+    main._state["embedder"] = _StubEmbedder()
+    try:
+        client = TestClient(main.app, raise_server_exceptions=False)
+        assert client.post("/embed", json={"texts": ["hallo"]}).status_code == 500
+    finally:
+        main._state["embedder"] = None
+        main._state["embed_batch_size"] = None
+
+
 def test_classify_returns_503_when_llm_missing():
     main._state["llm"] = None
     client = TestClient(main.app)

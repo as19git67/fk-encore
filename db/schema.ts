@@ -1144,6 +1144,11 @@ export const documentScanQueue = pgTable("document_scan_queue", {
   status: documentJobStatusEnum("status").notNull().default("pending"),
   priority: integer("priority").notNull().default(2),
   attempts: integer("attempts").notNull().default(0),
+  // How often this job was put back to `pending` without counting as a
+  // failure (upstream not finished, llm-service unavailable, ai-queue slot
+  // timeout). Bounded by DOC_SCAN_MAX_DEFERS so a permanently-deferring job
+  // ends up as a visible failure instead of sitting in "wartend" forever.
+  defer_count: integer("defer_count").notNull().default(0),
   error_msg: text("error_msg"),
   enqueued_at: timestamp("enqueued_at", { mode: "string" }).notNull().defaultNow(),
   started_at: timestamp("started_at", { mode: "string" }),

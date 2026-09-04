@@ -22,6 +22,7 @@ import {
   deferJob,
   markJobDone,
   markJobFailed,
+  MAX_JOB_DEFERS,
   resetStuckJobs,
   type DocumentScanService,
 } from "./scan-queue";
@@ -119,8 +120,28 @@ class DocumentScanWorker {
       triggerWorkers();
     } catch (err: any) {
       if (err instanceof DeferJobError || err instanceof LlmServiceUnavailableError || err instanceof AiSlotTimeoutError || err instanceof ReceiptOcrUnavailableError) {
-        console.log(`[documents.scan-worker] deferring ${this.service} job ${job.id}: ${err.message}`);
-        await deferJob(job.id).catch(() => {});
+        const deferred = await deferJob(job.id, err.message).catch(() => null);
+        if (deferred?.exhausted) {
+          // The defer condition is not clearing. Keeping the job pending would
+          // hide it in the queue forever (see MAX_JOB_DEFERS); a failure is
+          // visible, retryable from the panel, and names the reason.
+          const msg =
+            `gave up after ${deferred.deferCount} deferrals — last reason: ${err.message}`;
+          console.error(
+            `[documents.scan-worker] ${this.service} job ${job.id} ` +
+              `(document ${job.document_id}): ${msg}`,
+          );
+          await markJobFailed(job.id, msg).catch(() => {});
+          triggerWorkers();
+          if (this.service !== "embed") {
+            await markDocumentFailed(job.document_id, msg).catch(() => {});
+          }
+          return true;
+        }
+        console.log(
+          `[documents.scan-worker] deferring ${this.service} job ${job.id} ` +
+            `(${deferred?.deferCount ?? "?"}/${MAX_JOB_DEFERS}): ${err.message}`,
+        );
         return false;
       }
       const msg = err?.message ?? String(err);

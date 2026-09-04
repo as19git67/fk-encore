@@ -205,6 +205,12 @@ _state: dict[str, Any] = {
     # The LlmConfig currently in force, and where it came from ("env" or "file").
     "config": _BOOT_CONFIG,
     "config_source": "env",
+    # Batch size /embed actually uses. Starts at LLM_EMBED_BATCH_SIZE and is
+    # lowered for good once an out-of-memory fallback had to shrink it — the
+    # GPU this shares with llama-server does not get roomier on its own, so
+    # re-learning the same limit on every request would just burn a failed
+    # forward pass each time.
+    "embed_batch_size": None,
 }
 
 def _handle_unexpected_exit(status: int) -> None:
@@ -928,6 +934,9 @@ async def healthz() -> dict[str, Any]:
         "embedding_model": EMBEDDING_MODEL,
         "embedder_device": _state["embedder_device"] or LLM_EMBED_DEVICE,
         "embed_batch_size": LLM_EMBED_BATCH_SIZE,
+        # What /embed is actually using — below the configured value when an
+        # out-of-memory fallback had to shrink it.
+        "embed_batch_size_effective": _effective_embed_batch_size(),
         "cuda_device_name": _state["cuda_device_name"],
         "rss_mb": round(_rss_mb(), 1),
         "uptime_s": round(uptime_s, 1) if uptime_s is not None else None,
@@ -1311,17 +1320,122 @@ def _apply_embedding_prefix(texts: list[str], kind: str) -> list[str]:
     return [prefix + t for t in texts]
 
 
+def _effective_embed_batch_size() -> int:
+    """The batch size /embed uses right now — see ``_state["embed_batch_size"]``."""
+
+    learned = _state.get("embed_batch_size")
+    if isinstance(learned, int) and learned >= 1:
+        return min(learned, max(1, LLM_EMBED_BATCH_SIZE))
+    return max(1, LLM_EMBED_BATCH_SIZE)
+
+
+class EmbedOutOfMemoryError(Exception):
+    """The encoder ran out of device memory even at a batch size of one."""
+
+
+def _optional_torch() -> Any | None:
+    """torch if it is importable, else None.
+
+    The endpoint tests run without torch (and without sentence-transformers)
+    by leaving the models unloaded, so nothing on the request path may make
+    the import mandatory.
+    """
+
+    try:
+        import torch
+    except Exception:  # noqa: BLE001 — absence is a valid state here
+        return None
+    return torch
+
+
+def _is_oom(err: BaseException) -> bool:
+    """True for a CUDA/MPS out-of-memory error, across torch versions.
+
+    ``torch.OutOfMemoryError`` only exists from torch 2.4 on (and was
+    ``torch.cuda.OutOfMemoryError`` before that); both derive from
+    ``RuntimeError``, whose message is the last resort.
+    """
+
+    torch = _optional_torch()
+    if torch is not None:
+        oom_types = tuple(
+            t
+            for t in (
+                getattr(torch, "OutOfMemoryError", None),
+                getattr(getattr(torch, "cuda", None), "OutOfMemoryError", None),
+            )
+            if isinstance(t, type)
+        )
+        if oom_types and isinstance(err, oom_types):
+            return True
+    return isinstance(err, RuntimeError) and "out of memory" in str(err).lower()
+
+
+def _encode_with_oom_fallback(embedder: Any, prepared: list[str]) -> list[list[float]]:
+    """Encode *prepared*, shrinking the batch when the GPU is short on memory.
+
+    This service shares one GPU with the llama.cpp server, which holds its
+    weights resident for its whole lifetime. What is left for the encoder is
+    therefore small and, worse, varies with what the LLM is doing — so a batch
+    size that works all day can OOM on the one document that happens to be
+    encoded while the LLM is mid-generation. That used to surface as a 500,
+    which the documents pipeline treats as a transient outage and retries
+    forever: a handful of documents sat in the embedding queue on "wartend"
+    for hours after a re-classify, with nothing but a traceback in the log.
+
+    Halving the batch is the cheap, correct answer — the vectors are identical
+    regardless of how the texts are grouped, only the peak activation memory
+    differs. Only when a single text will not fit do we give up, and then with
+    a 503 (retryable, and now bounded by the caller's defer budget) rather
+    than a 500.
+    """
+
+    batch_size = _effective_embed_batch_size()
+    while True:
+        try:
+            return embedder.encode(
+                prepared, normalize_embeddings=True, batch_size=batch_size
+            ).tolist()
+        except Exception as err:  # noqa: BLE001 — re-raised unless it is an OOM
+            if not _is_oom(err):
+                raise
+            # Hand the freed blocks back before retrying; without this the
+            # cached allocator keeps the fragments that just failed to fit.
+            torch = _optional_torch()
+            try:
+                if torch is not None and torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:  # noqa: BLE001 — cleanup must not mask the OOM
+                pass
+            if batch_size == 1:
+                raise EmbedOutOfMemoryError(str(err)) from err
+            batch_size = max(1, batch_size // 2)
+            _state["embed_batch_size"] = batch_size
+            log.warning(
+                "Embedder out of memory for %d text(s); retrying with batch_size=%d "
+                "(and keeping that as the effective batch size)",
+                len(prepared),
+                batch_size,
+            )
+
+
 @app.post("/embed", response_model=EmbedResponse)
 async def embed(req: EmbedRequest) -> EmbedResponse:
     embedder = _state["embedder"]
     if embedder is None:
         raise HTTPException(status_code=503, detail="embedder not loaded")
     prepared = _apply_embedding_prefix(req.texts, req.kind)
-    vectors = await _run_blocking(
-        lambda: embedder.encode(
-            prepared, normalize_embeddings=True, batch_size=LLM_EMBED_BATCH_SIZE
-        ).tolist()
-    )
+    try:
+        vectors = await _run_blocking(_encode_with_oom_fallback, embedder, prepared)
+    except EmbedOutOfMemoryError as err:
+        log.error(
+            "Embedder out of memory at batch_size=1 for %d text(s): %s",
+            len(prepared),
+            err,
+        )
+        raise HTTPException(
+            status_code=503, detail=f"embedder out of memory: {err}"
+        ) from err
     return EmbedResponse(embeddings=vectors, dim=len(vectors[0]) if vectors else 0)
 
 

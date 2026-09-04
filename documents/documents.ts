@@ -3519,7 +3519,32 @@ export const getDocumentQueueStatus = api(
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
-    return await getQueueStatus();
+    const status = await getQueueStatus();
+
+    // The counts have always been global (the queue is one pipeline for the
+    // whole installation), but a title is document content — blank it for
+    // documents this caller cannot see. The job itself stays listed, so a
+    // stalled counter can still be traced to a document id.
+    const userId = getUserId();
+    const groupIds = await loadUserGroupIds(userId);
+    const docIds = Array.from(new Set(status.jobs.map((j) => j.document_id)));
+    const visible = new Set<number>();
+    if (docIds.length > 0) {
+      const rows = await dbAll<{ id: number }>(
+        db
+          .select({ id: documents.id })
+          .from(documents)
+          .where(and(inArray(documents.id, docIds), visibleDocumentsWhere(userId, groupIds))),
+      );
+      for (const r of rows) visible.add(r.id);
+    }
+
+    return {
+      ...status,
+      jobs: status.jobs.map((j) =>
+        visible.has(j.document_id) ? j : { ...j, document_title: null },
+      ),
+    };
   },
 );
 

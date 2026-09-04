@@ -687,6 +687,7 @@ export const MOCK_DOCUMENT_QUEUE_IDLE: DocumentQueueStatus = {
     { service: 'classify',     pending: 0, processing: 0, failed: 0, done: 120 },
     { service: 'embed',        pending: 0, processing: 0, failed: 0, done: 120 },
   ],
+  jobs: [],
 }
 
 export const MOCK_DOCUMENT_QUEUE_BUSY: DocumentQueueStatus = {
@@ -694,5 +695,21 @@ export const MOCK_DOCUMENT_QUEUE_BUSY: DocumentQueueStatus = {
     { service: 'text_extract', pending: 4, processing: 2, failed: 0, done: 114 },
     { service: 'classify',     pending: 5, processing: 1, failed: 1, done: 113 },
     { service: 'embed',        pending: 0, processing: 0, failed: 0, done: 120 },
+  ],
+  jobs: [
+    {
+      id: 901,
+      document_id: 42,
+      service: 'text_extract',
+      status: 'processing',
+      priority: 2,
+      attempts: 1,
+      defer_count: 0,
+      enqueued_at: new Date(Date.now() - 4 * 60_000).toISOString(),
+      started_at: new Date(Date.now() - 60_000).toISOString(),
+      error_msg: null,
+      document_status: 'extracting',
+      document_title: 'Stromabrechnung 2024',
+    },
   ],
 }

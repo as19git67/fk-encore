@@ -581,7 +581,7 @@ async function handleFinanceTagReenqueue() {
 
 // ── Document Scan-Queue & Reclassify-All ─────────────────────────────────────
 
-const docQueueStatus = ref<DocQueueStatus>({ services: [] })
+const docQueueStatus = ref<DocQueueStatus>({ services: [], jobs: [] })
 const docReclassifyLoading = ref(false)
 const docReclassifyError = ref('')
 const docReclassifyResult = ref<{ queued: number; skipped_encrypted?: number; status_breakdown?: Record<string, number> } | null>(null)
