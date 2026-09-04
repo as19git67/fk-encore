@@ -296,14 +296,24 @@ struct PhotoCompareView: View {
         showsTitle: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
+        let button = Button(action: action) {
             Label(title, systemImage: systemImage)
         }
-        .labelStyle(showsTitle ? .titleAndIcon : .iconOnly)
         // While a tile is still flying off the screen its verdict is already
         // committed; a second one would decide a pair that is no longer up.
         .disabled(flung != nil)
         .accessibilityLabel(title)
+
+        // `.titleAndIcon` and `.iconOnly` are different concrete
+        // `LabelStyle` types, so a ternary picking between them doesn't
+        // type-check — this branches in the view builder instead.
+        return Group {
+            if showsTitle {
+                button.labelStyle(.titleAndIcon)
+            } else {
+                button.labelStyle(.iconOnly)
+            }
+        }
     }
 
     // MARK: - Confirming
