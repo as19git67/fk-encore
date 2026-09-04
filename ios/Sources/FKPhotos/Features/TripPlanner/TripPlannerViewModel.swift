@@ -82,6 +82,28 @@ final class TripPlannerViewModel {
         }
     }
 
+    /// Tick a spot off, or skip it (§8.5).
+    ///
+    /// A single write, not a replan: swiping a spot done is not a
+    /// request to rearrange the afternoon. What it does do is set what a
+    /// later redistribution reads as past.
+    func mark(_ stop: TripStop, as status: TripStopStatus) async {
+        guard let plan else { return }
+        struct Body: Encodable {
+            let stopId: Int
+            let status: String
+        }
+        do {
+            let response: TripPlanResponse = try await APIClient.shared.post(
+                "/trip-planner/plans/\(plan.id)/stops/status",
+                body: Body(stopId: stop.rowId, status: status.rawValue),
+            )
+            apply(response)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func toggleReasons(for osmRef: String) {
         if expandedReasons.contains(osmRef) {
             expandedReasons.remove(osmRef)

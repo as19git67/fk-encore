@@ -290,6 +290,49 @@ export async function listPlans(
   });
 }
 
+/**
+ * Mark one stop done or skipped.
+ *
+ * Deliberately its own write rather than a redistribution: ticking a
+ * spot off is not a request to replan the day, and making it one would
+ * rearrange the afternoon under the traveller's thumb (§5, §8.5). The
+ * status is what a later redistribution reads as "past".
+ *
+ * Scoped by plan and owner in one statement, so a stop id from another
+ * user's plan simply matches nothing.
+ */
+export async function setStopStatus(
+  planId: number,
+  ownerId: number,
+  stopId: number,
+  status: StopStatus,
+  db: Db = dbDefault,
+): Promise<boolean> {
+  const [stop] = await db
+    .select({ id: tripPlanStops.id })
+    .from(tripPlanStops)
+    .innerJoin(tripPlanBlocks, eq(tripPlanBlocks.id, tripPlanStops.block_id))
+    .innerJoin(tripPlanDays, eq(tripPlanDays.id, tripPlanBlocks.day_id))
+    .innerJoin(tripPlanLegs, eq(tripPlanLegs.id, tripPlanDays.leg_id))
+    .innerJoin(tripPlans, eq(tripPlans.id, tripPlanLegs.plan_id))
+    .where(
+      and(
+        eq(tripPlanStops.id, stopId),
+        eq(tripPlans.id, planId),
+        eq(tripPlans.owner_id, ownerId),
+      ),
+    )
+    .limit(1);
+  if (!stop) return false;
+
+  await db.update(tripPlanStops).set({ status }).where(eq(tripPlanStops.id, stopId));
+  await db
+    .update(tripPlans)
+    .set({ updated_at: new Date().toISOString() })
+    .where(eq(tripPlans.id, planId));
+  return true;
+}
+
 export async function loadPlan(
   planId: number,
   ownerId: number,

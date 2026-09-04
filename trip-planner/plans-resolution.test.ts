@@ -18,7 +18,7 @@ import { clearRouterCache } from "../osm-admin/region-router";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
-import { createTripPlan, detailTripDay } from "./plans";
+import { createTripPlan, detailTripDay, setTripStopStatus } from "./plans";
 
 const ANCHOR = { lat: 48.37, lon: 10.9 };
 const DB = "nom_west";
@@ -257,5 +257,85 @@ describe("detailing a day on the eve", () => {
     await expect(detailTripDay({ planId: plan.id, dayIndex: 2 })).rejects.toThrow(
       /plan not found/,
     );
+  });
+});
+
+describe("ticking a spot off", () => {
+  it("marks it done without rearranging the day", async () => {
+    const { plan } = await createTripPlan({ anchor: ANCHOR, days: 2 });
+    const day = plan.legs[0].days[0];
+    const before = day.blocks.flatMap((b) => b.stops.map((s) => s.osmRef));
+    const target = day.blocks.flatMap((b) => b.stops)[0];
+
+    const { plan: after } = await setTripStopStatus({
+      planId: plan.id,
+      stopId: target.rowId,
+      status: "done",
+    });
+
+    const stops = after.legs[0].days[0].blocks.flatMap((b) => b.stops);
+    expect(stops.find((s) => s.rowId === target.rowId)?.status).toBe("done");
+    // Swiping a spot done is not a request to replan: the order and the
+    // rest of the day are untouched (§8.5).
+    expect(stops.map((s) => s.osmRef)).toEqual(before);
+    expect(after.legs[0].pool.length).toBe(plan.legs[0].pool.length);
+  });
+
+  it("undoes a mistaken swipe", async () => {
+    const { plan } = await createTripPlan({ anchor: ANCHOR, days: 2 });
+    const target = plan.legs[0].days[0].blocks.flatMap((b) => b.stops)[0];
+
+    await setTripStopStatus({ planId: plan.id, stopId: target.rowId, status: "skipped" });
+    const { plan: after } = await setTripStopStatus({
+      planId: plan.id,
+      stopId: target.rowId,
+      status: "planned",
+    });
+
+    const stop = after.legs[0].days[0].blocks
+      .flatMap((b) => b.stops)
+      .find((s) => s.rowId === target.rowId);
+    expect(stop?.status).toBe("planned");
+  });
+
+  it("stops counting a done spot against the block's used minutes", async () => {
+    const { plan } = await createTripPlan({ anchor: ANCHOR, days: 2 });
+    const block = plan.legs[0].days[0].blocks.find((b) => b.stops.length > 0)!;
+    const usedBefore = block.usedMinutes;
+
+    const { plan: after } = await setTripStopStatus({
+      planId: plan.id,
+      stopId: block.stops[0].rowId,
+      status: "skipped",
+    });
+
+    const updated = after.legs[0].days[0].blocks.find((b) => b.id === block.id)!;
+    expect(updated.usedMinutes).toBeLessThan(usedBefore);
+  });
+
+  it("refuses a status it cannot reason about", async () => {
+    const { plan } = await createTripPlan({ anchor: ANCHOR, days: 2 });
+    const target = plan.legs[0].days[0].blocks.flatMap((b) => b.stops)[0];
+    await expect(
+      setTripStopStatus({ planId: plan.id, stopId: target.rowId, status: "vielleicht" as never }),
+    ).rejects.toThrow(/status must be one of/);
+  });
+
+  it("does not touch another user's stop", async () => {
+    const { plan } = await createTripPlan({ anchor: ANCHOR, days: 2 });
+    const target = plan.legs[0].days[0].blocks.flatMap((b) => b.stops)[0];
+
+    const [other] = await db
+      .insert(users)
+      .values({ email: `other-${Date.now()}@test.invalid`, name: "Other", password_hash: "x" })
+      .returning({ id: users.id });
+    vi.mocked(getAuthData).mockReturnValue({
+      userID: String(other.id),
+      permissions: ["photos.view"],
+    });
+
+    await expect(
+      setTripStopStatus({ planId: plan.id, stopId: target.rowId, status: "done" }),
+    ).rejects.toThrow(/not found/);
   });
 });

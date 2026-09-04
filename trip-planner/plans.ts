@@ -23,7 +23,7 @@ import { getGeoClient } from "../osm-admin/geo-client";
 import { pickRegion } from "../osm-admin/region-router";
 import { DEFAULT_DAY, shapeDay, type BlockTemplate, type GroupProfile, type Pace } from "./blocks";
 import { toCandidates } from "./candidates";
-import { redistribute, type CurrentBlock } from "./redistribute";
+import { redistribute, type CurrentBlock, type StopStatus } from "./redistribute";
 import { solveDay, type PlannedBlock } from "./solver";
 import { DEFAULT_MAX_WALK_MINUTES, type TransportMode } from "./travel";
 import {
@@ -37,6 +37,7 @@ import {
   createPlan,
   listPlans,
   loadPlan,
+  setStopStatus,
   saveDayDetail,
   saveRedistribution,
   type CreateDayInput,
@@ -62,6 +63,7 @@ const FIXPOINT_KINDS: readonly FixpointKind[] = ["appointment", "departure"];
  * weekend trip this covers everything, so both resolutions coincide.
  */
 const DEFAULT_DETAIL_DAYS = 2;
+const STOP_STATUSES: readonly StopStatus[] = ["planned", "done", "skipped"];
 
 /** One stop on the trip: a place, a stretch of days, a way of getting around. */
 export interface LegRequest {
@@ -361,6 +363,47 @@ export const detailTripDay = api(
     const updated = await loadPlan(plan.id, userId);
     if (!updated) throw APIError.internal("plan vanished while detailing a day");
     return { plan: updated, droppedBlocks: [] };
+  },
+);
+
+export interface StopStatusRequestBody {
+  planId: number;
+  /** The stop's row id, as the plan returns it. */
+  stopId: number;
+  /** done | skipped | planned — the last one undoes a mistaken swipe. */
+  status: StopStatus;
+}
+
+/**
+ * Tick a spot off, or skip it (§8.5).
+ *
+ * Its own endpoint rather than a redistribution on purpose: marking a
+ * stop done is not a request to replan the day, and treating it as one
+ * would rearrange the afternoon under the traveller's thumb. What it
+ * does do is set what a later redistribution reads as "past" (§5).
+ */
+export const setTripStopStatus = api(
+  {
+    expose: true,
+    method: "POST",
+    path: "/trip-planner/plans/:planId/stops/status",
+    auth: true,
+  },
+  async (req: StopStatusRequestBody): Promise<PlanResponse> => {
+    const userId = requireUser();
+    if (!STOP_STATUSES.includes(req.status)) {
+      throw APIError.invalidArgument(`status must be one of ${STOP_STATUSES.join(", ")}`);
+    }
+    if (!Number.isInteger(req.stopId)) {
+      throw APIError.invalidArgument("stopId must be a stop's row id");
+    }
+
+    const changed = await setStopStatus(req.planId, userId, req.stopId, req.status);
+    if (!changed) throw APIError.notFound("stop not found in this plan");
+
+    const plan = await loadPlan(req.planId, userId);
+    if (!plan) throw APIError.notFound("plan not found");
+    return { plan, droppedBlocks: [] };
   },
 );
 
