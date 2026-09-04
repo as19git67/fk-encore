@@ -1404,6 +1404,36 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    Sehenswürdigkeiten.
 5. **NL-Eingabe** über llm-service (JSON-Schema, strikte Validierung) +
    Mehrtagesplanung.
+
+   **Umgesetzt:** `POST /trip-planner/interpret` — Satz rein, Vorgaben raus.
+   Die Mehrtagesplanung kam schon mit Schritt 3 (`days` bis 14), hier kommt
+   nur noch die Sprache dazu.
+
+   Drei Entscheidungen, die dabei getroffen wurden:
+
+   - **Getrennter Aufruf statt Textfeld am Plan-Endpunkt.** Der Reisende
+     sieht erst, *was verstanden wurde*, und baut dann darauf einen Plan.
+     Ein missverstandener Satz kostet so eine Korrektur statt einer falschen
+     Reise. `rejected` führt auf, was das Modell vorgeschlagen hat und nicht
+     verwendet werden konnte — ein stilles Verschlucken ist damit
+     ausgeschlossen.
+   - **Das Modell schlägt vor, es bestimmt nicht.** `constraints.ts` ist ein
+     reines Modul, das jedes Feld gegen dieselben Grenzen prüft, die auch die
+     getippten Endpunkte durchsetzen: erfundene Kategorien fliegen raus, 90
+     Tage werden auf 14 gekappt, ein Tempo außerhalb der drei Werte wird
+     verworfen. Getestet wird genau das, was Sprachmodelle real falsch machen
+     — Prosa statt JSON, Zahlen als Wörter, gedoppelte Einträge.
+   - **Keine Koordinaten aus Ortsnamen.** Der Dienst hat keinen
+     Vorwärts-Geocoder; `placeHint` gibt den genannten Ort nur zurück, den
+     Anker liefert weiterhin der Aufrufer. Aus „Augsburg" Koordinaten zu
+     raten wäre genau die selbstbewusste Halb-Antwort, die §15.3 ausschließt.
+
+   Das Kategorien-Vokabular wird zur Laufzeit aus geo geholt (neu:
+   `GET /pois/categories` im geo-Client), nicht hier kopiert — eine in geo
+   ergänzte Kategorie ist damit sofort per Satz erreichbar. Ein Drift-Test
+   (`prompt-vocabulary-sync.test.ts`) hält fest, dass jede Kategorie auch
+   wirklich im Prompt landet; sonst bliebe sie unerreichbar, ohne dass
+   irgendetwas rot würde.
 6. **Etappen, Fixpunkte, zwei Auflösungen** (§4.2–§4.4) — Reisen über mehrere
    Orte, Modus je Etappe, Ankerzonen, Transfertage, harte Uhrzeiten mit
    Rückwärtsrechnung, Vorrat je Etappe, Detaillierung erst am Vorabend.

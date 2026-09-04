@@ -114,6 +114,12 @@ export interface GeoPoiSearchPage {
   hasMore: boolean;
 }
 
+/** One entry of the search's category vocabulary. */
+export interface GeoPoiCategory {
+  id: string;
+  description: string;
+}
+
 export interface GeoPoiCandidate {
   osmRef: string;
   type: "node" | "way" | "relation";
@@ -164,6 +170,8 @@ export interface GeoClient {
   ): Promise<GeoPoiCandidate[]>;
   /** Area search for trip planning — see the method on HttpGeoClient. */
   searchPois(postgresDb: string, query: GeoPoiSearchQuery): Promise<GeoPoiSearchPage>;
+  /** The category vocabulary `searchPois` accepts. Region-independent. */
+  poiCategories(): Promise<GeoPoiCategory[]>;
   /** Per-table size breakdown, for before/after import measurements. */
   regionStorage(postgresDb: string): Promise<GeoRegionStorage>;
   /**
@@ -273,6 +281,24 @@ export class HttpGeoClient implements GeoClient {
       limit: query.limit,
       offset: query.offset,
     });
+  }
+
+  /**
+   * The category vocabulary the area search accepts. Lives in geo
+   * (`poi-categories.ts`) and is fetched rather than duplicated here, so
+   * a category added there needs no second edit to become usable.
+   */
+  async poiCategories(): Promise<GeoPoiCategory[]> {
+    const res = await this.fetcher(`${this.baseUrl}/pois/categories`, {
+      method: "GET",
+      headers: this.headers(),
+      signal: AbortSignal.timeout(STATUS_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      throw new Error(`geo: GET /pois/categories → HTTP ${res.status}`);
+    }
+    const body = (await res.json()) as { categories?: GeoPoiCategory[] };
+    return body.categories ?? [];
   }
 
   /**
