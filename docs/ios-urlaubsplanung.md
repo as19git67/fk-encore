@@ -1468,8 +1468,33 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    ist das der richtige Tausch, und wenn ein Router kommt, bleibt die
    Ellipse der billige Vorfilter davor.
 
-   Offen aus diesem Schritt: Etappen als Datenmodell, Ankerzonen,
-   Transfertage, Fixpunkte mit Rückwärtsrechnung und die zwei Auflösungen.
+   **Teilweise umgesetzt — Etappen.** Ein Plan ist jetzt eine Liste von
+   Etappen statt eines einzelnen Ankers. Jede Etappe hat eigenen Anker,
+   eigenen Fortbewegungsmodus, eigene Regionsdatenbank, optionales
+   Startdatum — und damit einen **eigenen Vorrat**: Umverteilt wird nur
+   innerhalb einer Etappe, was in der einen Stadt ausfällt, rutscht nicht
+   in die nächste.
+
+   - **Die Ankerzone ist eine Toleranz, keine Adresse.** Ist noch nichts
+     gebucht, speichert `anchorRadiusM` neben dem Schwerpunkt, wie weit die
+     echte Bleibe davon liegen darf. Der Planer rechnet mit dem Schwerpunkt
+     und behauptet dabei keine Adresse, die er nicht hat.
+   - **Der Modus gehört zur Etappe.** `travelLeg` trennt dafür
+     Fahrgeschwindigkeit und Fixkosten je Modus. Das ist nicht Feintuning:
+     Nur so verliert der ÖPNV auf 1,5 km gegen das Rad und gewinnt auf
+     6 km — eine einzelne Durchschnittsgeschwindigkeit kann das nicht
+     ausdrücken, und das Blockbudget wäre an einem der beiden Enden falsch.
+   - **Der flache Ein-Stadt-Request bleibt.** Ein Wochenendtrip schickt
+     weiterhin `anchor`/`days`; daraus wird eine Etappe. Zwei Vorstellungen
+     davon, was ein Plan ist, gibt es dadurch nicht — flussabwärts sieht
+     alles nur Etappen.
+
+   Migration `0159_trip_plan_legs`: Tage und Vorrat hängen an der Etappe
+   statt am Plan; jeder bestehende Plan wird zur Ein-Etappen-Reise mit
+   seinem bisherigen Anker und seiner Region.
+
+   Offen aus diesem Schritt: Transfertage, Fixpunkte mit Rückwärtsrechnung
+   und die zwei Auflösungen.
 7. **iOS-Oberfläche** — Blockkarten, Karte, Wischgesten, „Heute"-Modus,
    **Übergaben an Karten-Apps** (§9.1) und die Essensliste vor Ort (§10.3).
 8. **Standort** — Geofences um die nächsten Stopps, Erledigt-Erkennung,

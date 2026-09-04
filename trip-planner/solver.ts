@@ -19,7 +19,7 @@
  */
 
 import type { PlannedBlockShape } from "./blocks";
-import { walkingLeg, type Coordinate, type TravelLeg } from "./travel";
+import { travelLeg, type Coordinate, type TransportMode, type TravelLeg } from "./travel";
 
 /** Above this many stops, exhaustive ordering stops being free. */
 const EXACT_ORDER_LIMIT = 7;
@@ -75,6 +75,8 @@ export interface SolveOptions {
   candidates: readonly Candidate[];
   /** Legs longer than this are never proposed. */
   maxWalkMinutes: number;
+  /** How the group gets around on this leg (§4.2). On foot by default. */
+  mode?: TransportMode;
   /**
    * Repeat of a category already in the same block multiplies its score
    * by this — "no three churches in a row" (§12), expressed as a
@@ -93,6 +95,7 @@ const DEFAULT_DIVERSITY_DECAY = 0.6;
 
 export function solveDay(opts: SolveOptions): SolvedDay {
   const decay = opts.diversityDecay ?? DEFAULT_DIVERSITY_DECAY;
+  const mode = opts.mode ?? "foot";
   const remaining = new Map(opts.candidates.map((c) => [c.osmRef, c]));
   const blocks: PlannedBlock[] = [];
 
@@ -115,6 +118,7 @@ export function solveDay(opts: SolveOptions): SolvedDay {
       start: position,
       candidates: [...remaining.values()],
       maxWalkMinutes: opts.maxWalkMinutes,
+      mode,
       diversityDecay: decay,
       returnTo: returnToAnchor ? opts.anchor : null,
     });
@@ -147,6 +151,7 @@ interface FillArgs {
   start: Coordinate;
   candidates: Candidate[];
   maxWalkMinutes: number;
+  mode: TransportMode;
   diversityDecay: number;
   /** When set, the walk back here is charged to this block's budget. */
   returnTo: Coordinate | null;
@@ -165,14 +170,14 @@ function fillBlock(args: FillArgs): PlannedBlock {
     for (const candidate of pool) {
       if (chosen.includes(candidate)) continue;
       const trial = [...chosen, candidate];
-      const route = bestRoute(args.start, trial, args.returnTo);
+      const route = bestRoute(args.start, trial, args.returnTo, args.mode);
       if (route === null) continue;
       if (route.longestLegMinutes > args.maxWalkMinutes) continue;
       if (route.totalMinutes > args.shape.budgetMinutes) continue;
 
       const currentCost = chosen.length === 0
         ? 0
-        : (bestRoute(args.start, chosen, args.returnTo)?.totalMinutes ?? 0);
+        : (bestRoute(args.start, chosen, args.returnTo, args.mode)?.totalMinutes ?? 0);
       const cost = route.totalMinutes - currentCost;
       const value = candidate.score * args.diversityDecay ** countCategory(chosen, candidate.category);
       // A zero-cost stop cannot happen (dwell is positive), but guard
@@ -188,12 +193,12 @@ function fillBlock(args: FillArgs): PlannedBlock {
     chosen.push(best.candidate);
   }
 
-  const route = bestRoute(args.start, chosen, args.returnTo);
+  const route = bestRoute(args.start, chosen, args.returnTo, args.mode);
   const stops: PlannedStop[] = [];
   if (route) {
     let from = args.start;
     for (const candidate of route.order) {
-      const leg = walkingLeg(from, candidate);
+      const leg = travelLeg(from, candidate, args.mode);
       stops.push({
         osmRef: candidate.osmRef,
         name: candidate.name,
@@ -235,13 +240,14 @@ function bestRoute(
   start: Coordinate,
   stops: readonly Candidate[],
   returnTo: Coordinate | null,
+  mode: TransportMode,
 ): Route | null {
   if (stops.length === 0) return { order: [], totalMinutes: 0, longestLegMinutes: 0 };
-  if (stops.length > EXACT_ORDER_LIMIT) return measureRoute(start, stops, returnTo);
+  if (stops.length > EXACT_ORDER_LIMIT) return measureRoute(start, stops, returnTo, mode);
 
   let best: Route | null = null;
   for (const order of permutations([...stops])) {
-    const route = measureRoute(start, order, returnTo);
+    const route = measureRoute(start, order, returnTo, mode);
     if (
       best === null ||
       route.totalMinutes < best.totalMinutes ||
@@ -259,18 +265,19 @@ function measureRoute(
   start: Coordinate,
   order: readonly Candidate[],
   returnTo: Coordinate | null,
+  mode: TransportMode,
 ): Route {
   let total = 0;
   let longest = 0;
   let from: Coordinate = start;
   for (const stop of order) {
-    const leg = walkingLeg(from, stop);
+    const leg = travelLeg(from, stop, mode);
     total += leg.minutes + stop.dwellMinutes;
     longest = Math.max(longest, leg.minutes);
     from = stop;
   }
   if (returnTo) {
-    const back = walkingLeg(from, returnTo);
+    const back = travelLeg(from, returnTo, mode);
     total += back.minutes;
     longest = Math.max(longest, back.minutes);
   }

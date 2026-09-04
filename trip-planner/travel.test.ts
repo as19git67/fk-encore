@@ -3,6 +3,7 @@ import {
   DETOUR_FACTOR,
   WALKING_SPEED_M_PER_MIN,
   haversineMeters,
+  travelLeg,
   walkingLeg,
 } from "./travel";
 
@@ -52,5 +53,58 @@ describe("walkingLeg", () => {
   it("costs nothing to stay where you are", () => {
     const leg = walkingLeg({ lat: 48.37, lon: 10.9 }, { lat: 48.37, lon: 10.9 });
     expect(leg).toEqual({ distanceM: 0, minutes: 0, travelClass: "short_walk" });
+  });
+});
+
+describe("travelLeg across modes", () => {
+  const FROM = { lat: 48.37, lon: 10.9 };
+  /** ~1.5 km straight north. */
+  const FAR = { lat: 48.3835, lon: 10.9 };
+  /** ~110 m straight north — a few steps. */
+  const NEAR = { lat: 48.371, lon: 10.9 };
+
+  it("makes walking the slowest way to cover a real distance", () => {
+    const minutes = (mode: Parameters<typeof travelLeg>[2]) =>
+      travelLeg(FROM, FAR, mode).minutes;
+    for (const mode of ["bike", "transit", "car"] as const) {
+      expect(minutes("foot")).toBeGreaterThan(minutes(mode));
+    }
+  });
+
+  it("lets the bicycle beat transit over a short hop and lose over a long one", () => {
+    // This is why speed and overhead are separate. Waiting for a
+    // departure dominates a 1.5 km hop and disappears into a 6 km one;
+    // one average speed per mode could not say that, and the block
+    // budget would be wrong at one end or the other.
+    const NEARBY = { lat: 48.3835, lon: 10.9 }; // ~1.5 km
+    const FURTHER = { lat: 48.424, lon: 10.9 }; // ~6 km
+    expect(travelLeg(FROM, NEARBY, "bike").minutes)
+      .toBeLessThan(travelLeg(FROM, NEARBY, "transit").minutes);
+    expect(travelLeg(FROM, FURTHER, "bike").minutes)
+      .toBeGreaterThan(travelLeg(FROM, FURTHER, "transit").minutes);
+  });
+
+  it("does not make a few steps into a bus ride", () => {
+    // Below 150 m the waiting and parking overheads do not apply:
+    // charging seven minutes for crossing the square would push real
+    // stops out of a block for nothing.
+    expect(travelLeg(FROM, NEAR, "transit").minutes).toBeLessThan(3);
+    expect(travelLeg(FROM, NEAR, "car").minutes).toBeLessThan(3);
+  });
+
+  it("charges transit for the stop and the wait once the distance is real", () => {
+    // ~1.5 km × 1.5 detour ÷ 400 m/min is under six minutes of moving;
+    // most of what the block pays is getting to the platform.
+    expect(travelLeg(FROM, FAR, "transit").minutes).toBeGreaterThan(14);
+  });
+
+  it("calls a hop that is not on foot a ride, not a walk", () => {
+    expect(travelLeg(FROM, NEAR, "bike").travelClass).toBe("short_ride");
+    expect(travelLeg(FROM, FAR, "transit").travelClass).toBe("long_ride");
+    expect(travelLeg(FROM, FAR, "foot").travelClass).toBe("long_walk");
+  });
+
+  it("is the pedestrian case by default", () => {
+    expect(travelLeg(FROM, FAR)).toEqual(walkingLeg(FROM, FAR));
   });
 });
