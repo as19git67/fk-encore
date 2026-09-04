@@ -82,7 +82,14 @@ struct PhotoCompareView: View {
         )
         _tournament = State(
             initialValue: CompareTournament(
-                photoIds: photos.map(\.id), seedScores: seeds
+                photoIds: photos.map(\.id),
+                seedScores: seeds,
+                // Portrait and landscape frames of the same motif are not
+                // redundant with each other — the keep set thins each shape
+                // on its own rather than the group as a whole.
+                orientations: Dictionary(
+                    uniqueKeysWithValues: photos.map { ($0.id, $0.orientation) }
+                )
             )
         )
     }
@@ -156,7 +163,16 @@ struct PhotoCompareView: View {
                     currentIndex: $checkIndex,
                     contextFooter: { photo in
                         AnyView(checkFooter(photoId: photo.id))
-                    }
+                    },
+                    // The footer below already carries this photo's
+                    // keep/hide state for *this review*. The viewer's own
+                    // thumbs-down is a different thing entirely — it writes
+                    // the global curation status straight to the server —
+                    // so showing both put two hide controls on one screen
+                    // that looked alike, meant different things, and could
+                    // disagree. The review's decision is the one that
+                    // belongs here.
+                    showsHideToggle: false
                 )
             }
             .popover(isPresented: $showGestureHelp) {
@@ -230,40 +246,39 @@ struct PhotoCompareView: View {
             sharpness: sharpness[photo.id] ?? [],
             qualityPercent: qualityPercent(for: photo),
             flungOffset: flung?.id == photo.id ? flung?.offset : nil,
+            discardDisabled: flung != nil,
             onTap: { handleTap(at: $0, photo: photo, paneSize: paneSize) },
             onDrag: { handleFling(
                 $0, photo: photo, indexInPair: indexInPair,
                 isPortrait: isPortrait, screen: screen
-            ) }
+            ) },
+            // A directional button in the bottom bar ("throw the top one
+            // out") turned out to be exactly as readable as its opposite —
+            // reported confusion, and toolbar bottom-bar items render
+            // icon-only regardless of `.labelStyle`, so there was never a
+            // label to disambiguate it with. Putting the discard action
+            // directly on the photo it discards removes the ambiguity
+            // instead of trying to caption it: the familiar thumbs-down
+            // already used everywhere else in the app (feed, fullscreen
+            // viewer, review queue) for "hide this one".
+            onDiscard: { discard(photo.id) }
         )
     }
 
-    /// Every verdict, as a labelled button.
+    /// The two verdicts that apply to the *pair*, not to either photo on its
+    /// own — discarding one of them lives on the photo itself now (see
+    /// `ComparePane`'s thumbs-down).
     ///
     /// A fling is quick but invisible: nothing on screen says it exists, and
-    /// nothing about it works with VoiceOver or Switch Control. These are the
-    /// same four verdicts the web offers under its panes — in the system
-    /// bottom bar, so their height is reserved rather than taken from the
-    /// photos and their insets are the system's problem.
+    /// nothing about it works with VoiceOver or Switch Control, so both stay
+    /// available as buttons too — in the system bottom bar, so their height
+    /// is reserved rather than taken from the photos and their insets are
+    /// the system's problem.
     @ToolbarContentBuilder
     private func verdictBar(
         _ pair: (first: ReviewQueuePhoto, second: ReviewQueuePhoto)
     ) -> some ToolbarContent {
         ToolbarItemGroup(placement: .bottomBar) {
-            verdictButton(
-                orientationIsPortrait ? "Oberes raus" : "Linkes raus",
-                systemImage: orientationIsPortrait ? "arrow.up.circle" : "arrow.left.circle",
-                // The other two verdicts read fine as bare glyphs — an equals
-                // sign and a redo arrow are self-explanatory. „Which photo
-                // does this arrow throw out" is not: read on its own, an
-                // up/down (or left/right) arrow reads as easily as „select
-                // this one" as „discard this one" (reported confusion). The
-                // discard pair is the one that needs the word spelled out.
-                showsTitle: true
-            ) { discard(pair.first.id) }
-
-            Spacer()
-
             verdictButton("Gleich gut", systemImage: "equal.circle") {
                 withAnimation { tournament.draw() }
                 focus = nil
@@ -272,48 +287,27 @@ struct PhotoCompareView: View {
             Spacer()
 
             // Not a uturn arrow — that reads as "undo", the opposite of what
-            // this does. An hourglass says "not now" without implying
-            // anything gets taken back, and it doesn't collide with the
-            // discard buttons' own directional arrows.
-            verdictButton("Später", systemImage: "hourglass") {
+            // this does. A skip-forward glyph is the same one media players
+            // use for "move on to the next thing", which is exactly this.
+            verdictButton("Später", systemImage: "forward.fill") {
                 withAnimation { tournament.skip() }
                 focus = nil
             }
-
-            Spacer()
-
-            verdictButton(
-                orientationIsPortrait ? "Unteres raus" : "Rechtes raus",
-                systemImage: orientationIsPortrait ? "arrow.down.circle" : "arrow.right.circle",
-                showsTitle: true
-            ) { discard(pair.second.id) }
         }
     }
 
     private func verdictButton(
         _ title: String,
         systemImage: String,
-        showsTitle: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
-        let button = Button(action: action) {
+        Button(action: action) {
             Label(title, systemImage: systemImage)
         }
         // While a tile is still flying off the screen its verdict is already
         // committed; a second one would decide a pair that is no longer up.
         .disabled(flung != nil)
         .accessibilityLabel(title)
-
-        // `.titleAndIcon` and `.iconOnly` are different concrete
-        // `LabelStyle` types, so a ternary picking between them doesn't
-        // type-check — this branches in the view builder instead.
-        return Group {
-            if showsTitle {
-                button.labelStyle(.titleAndIcon)
-            } else {
-                button.labelStyle(.iconOnly)
-            }
-        }
     }
 
     // MARK: - Confirming
@@ -743,8 +737,8 @@ private struct GestureHelp: View {
                 "hand.draw",
                 "Ein Foto wegwerfen",
                 isPortrait
-                    ? "Nach oben oder unten aus dem Bild schieben — jede Richtung außer der zum anderen Foto."
-                    : "Nach links oder rechts aus dem Bild schieben — jede Richtung außer der zum anderen Foto."
+                    ? "Nach oben oder unten aus dem Bild schieben — jede Richtung außer der zum anderen Foto. Oder auf das Daumen-runter-Symbol auf dem Foto tippen."
+                    : "Nach links oder rechts aus dem Bild schieben — jede Richtung außer der zum anderen Foto. Oder auf das Daumen-runter-Symbol auf dem Foto tippen."
             )
             row(
                 "hand.tap",
@@ -757,7 +751,7 @@ private struct GestureHelp: View {
                 "Das Paar ist erledigt, ohne dass eines gewinnt."
             )
             row(
-                "hourglass",
+                "forward.fill",
                 "Später",
                 "Das Paar wird zurückgestellt und kommt am Ende wieder."
             )
@@ -795,9 +789,16 @@ private struct ComparePane: View {
     let qualityPercent: Int?
     /// Where this pane has been thrown, if it is being discarded.
     let flungOffset: CGSize?
+    /// Mirrors the parent's "a tile is already on its way out" guard onto
+    /// this pane's own discard button.
+    let discardDisabled: Bool
     let onTap: (CGPoint) -> Void
     /// The total translation of a finished drag.
     let onDrag: (CGSize) -> Void
+    /// Discards *this* photo — the button form of the fling gesture,
+    /// attached to the photo it acts on rather than a direction in a bar
+    /// below both photos.
+    let onDiscard: () -> Void
 
     var body: some View {
         ZStack {
@@ -837,6 +838,30 @@ private struct ComparePane: View {
                     .padding(6)
             }
         }
+        // Bottom-trailing so it never sits under the quality badge
+        // (top-leading) or a face frame drawn near the photo's centre.
+        .overlay(alignment: .bottomTrailing) {
+            discardButton
+        }
+    }
+
+    /// The same thumbs-down used everywhere else in the app for "hide this
+    /// one" (feed, fullscreen viewer, review queue) — so this reads as the
+    /// same action rather than a new one invented for this screen.
+    private var discardButton: some View {
+        Button(action: onDiscard) {
+            Image(systemName: "hand.thumbsdown")
+                .font(.title3)
+                .foregroundStyle(.white)
+                .shadow(radius: 2)
+                .frame(width: 44, height: 44)
+                .background(.black.opacity(0.35), in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(discardDisabled)
+        .padding(6)
+        .accessibilityLabel("Dieses Foto ausblenden")
     }
 
     /// A frame around each measured face, coloured by how sharp it is.

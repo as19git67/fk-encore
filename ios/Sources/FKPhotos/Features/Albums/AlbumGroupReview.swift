@@ -101,7 +101,15 @@ enum AlbumGroupReview {
                 curation: photo.curation_status,
                 ai_picked: picked.contains(photo.id),
                 ai_quality_score: photo.ai_quality_score,
-                peer_curation: nil
+                peer_curation: nil,
+                // `GET /photos/details` does not carry dimensions, so the
+                // album-scoped comparison cannot split its keep set by
+                // orientation the way the review queue does — every photo
+                // reads as `.unknown` and the group is thinned as one. That
+                // is the behaviour this path already had; giving it the
+                // split too means widening the shared photo payload.
+                width: nil,
+                height: nil
             )
         }
     }

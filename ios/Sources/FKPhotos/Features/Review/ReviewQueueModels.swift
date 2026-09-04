@@ -40,6 +40,33 @@ struct ReviewPeerCuration: Codable, Sendable, Equatable {
     var hasSignal: Bool { hidden > 0 || favorite > 0 }
 }
 
+/// Which way round a photo is.
+///
+/// A burst can hold the same motif shot both ways, and those two are not
+/// redundant with each other however similar the group thinks they are — so
+/// thinning a group down happens *per orientation* rather than across the
+/// whole thing (`CompareTournament.suggestedKeepIds`).
+enum PhotoOrientation: String, Sendable, Hashable {
+    case portrait
+    case landscape
+    case square
+    /// Dimensions the server hasn't written yet (they come from the face
+    /// scan). Kept as its own case rather than folded into one of the
+    /// others: guessing wrong here would hide the only frame in an
+    /// orientation, which is the one mistake this split exists to prevent.
+    case unknown
+
+    init(width: Int?, height: Int?) {
+        guard let width, let height, width > 0, height > 0 else {
+            self = .unknown
+            return
+        }
+        if width > height { self = .landscape }
+        else if height > width { self = .portrait }
+        else { self = .square }
+    }
+}
+
 struct ReviewQueuePhoto: Codable, Identifiable, Sendable, Equatable {
     let id: Int
     let filename: String
@@ -49,9 +76,18 @@ struct ReviewQueuePhoto: Codable, Identifiable, Sendable, Equatable {
     /// 0…1, or nil while the quality scan hasn't reached this photo.
     let ai_quality_score: Double?
     let peer_curation: ReviewPeerCuration?
+    /// Pixel dimensions. Optional for the same decode-resilience reason as
+    /// the group's `duplicate_*` fields: a server that predates them must
+    /// not fail the whole queue.
+    let width: Int?
+    let height: Int?
 
     var qualityPercent: Int? {
         ai_quality_score.map { Int(($0 * 100).rounded()) }
+    }
+
+    var orientation: PhotoOrientation {
+        PhotoOrientation(width: width, height: height)
     }
 }
 

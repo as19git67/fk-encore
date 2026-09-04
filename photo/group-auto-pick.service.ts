@@ -938,6 +938,16 @@ export interface ReviewQueuePhoto {
     hidden: number;
     favorite: number;
   };
+  // Pixel dimensions, as written by the face scan. Null for a photo that
+  // has not been scanned yet — which is why the client treats "unknown"
+  // as its own orientation rather than guessing one.
+  //
+  // Surfaced so the compare view can tell a portrait shot of a motif from
+  // a landscape one: those are not redundant with each other, and a keep
+  // set that thins the group down to one photo must not throw away the
+  // only frame in the other orientation.
+  width: number | null;
+  height: number | null;
 }
 
 export interface ReviewQueueGroup {
@@ -1312,6 +1322,8 @@ export async function listReviewQueueLogic(
         ai_picked: pickedSet.has(m.photo_id),
         ai_quality_score: m.ai_quality_score ?? null,
         peer_curation: peerByPhotoId.get(m.photo_id) ?? { hidden: 0, favorite: 0 },
+        width: m.width ?? null,
+        height: m.height ?? null,
       })),
     };
   });

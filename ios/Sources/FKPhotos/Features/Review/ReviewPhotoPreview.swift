@@ -70,7 +70,15 @@ struct ReviewPhotoPreview: View {
                     PhotoFullscreenView(
                         photos: rows,
                         currentIndex: $index,
-                        contextFooter: { photo in AnyView(footer(for: photo)) }
+                        contextFooter: { photo in AnyView(footer(for: photo)) },
+                        // In edit mode the footer already carries a
+                        // thumbs-down for this photo — over the sheet's
+                        // pending keep set, which is a different thing from
+                        // the viewer's own global curation toggle. Two
+                        // identical glyphs meaning different things on one
+                        // screen is the confusion; in decide mode there is
+                        // no second thumbs-down, so the toggle stays.
+                        showsHideToggle: keep == nil
                     )
                 } else if isLoading {
                     ProgressView("Foto laden…")

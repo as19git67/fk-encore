@@ -61,13 +61,23 @@ struct CompareTournament: Equatable, Sendable {
     /// offered again while another pair is available.
     private var skipped: Set<Pair>
 
+    /// Which way round each photo is, for the keep set (see
+    /// `suggestedKeepIds`). Photos the caller said nothing about are
+    /// `.unknown`, which is its own class rather than a guess.
+    private let orientations: [Int: PhotoOrientation]
+
     // MARK: - Starting
 
-    init(photoIds: [Int], seedScores: [Int: Int] = [:]) {
+    init(
+        photoIds: [Int],
+        seedScores: [Int: Int] = [:],
+        orientations: [Int: PhotoOrientation] = [:]
+    ) {
         self.photoIds = photoIds
         self.scores = Dictionary(
             uniqueKeysWithValues: photoIds.map { ($0, seedScores[$0] ?? 0) }
         )
+        self.orientations = orientations
         self.settled = []
         self.skipped = []
         self.comparisons = 0
@@ -190,27 +200,51 @@ struct CompareTournament: Equatable, Sendable {
         }
     }
 
-    /// What the tournament proposes to keep: whoever actually *won* a
-    /// comparison, plus the best-ranked photo as a floor so the proposal is
-    /// never empty.
+    /// What the tournament proposes to keep: per orientation, whoever
+    /// actually *won* a comparison, plus that orientation's best-ranked photo
+    /// as a floor so no orientation is wiped out entirely.
     ///
     /// A tie earns nothing on its own. Two photos that only ever drew against
     /// each other are, as far as the tournament could tell, indistinguishable
     /// — and a group exists to be thinned out, so proposing to keep both of
     /// them defeats the point. A photo has to have beaten something to be
-    /// suggested for its own sake; a group where every pair came back „Gleich
-    /// gut" (the near-duplicate-burst case this screen exists for) proposes
-    /// exactly the one best-ranked photo rather than the whole burst.
+    /// suggested for its own sake; a burst where every pair came back „Gleich
+    /// gut" proposes one keeper rather than the whole burst.
     /// `ranked.first` is deterministic even among equal scores — ties break on
-    /// the group's own order — so that single keeper is always the same
-    /// photo, not a random survivor. None of this is final: the confirmation
-    /// grid can still restore anyone before the choice is committed.
+    /// the group's own order — so that keeper is always the same photo, not a
+    /// random survivor.
+    ///
+    /// The split by orientation is what keeps that from going too far. The
+    /// same motif shot once upright and once wide is *not* redundant, however
+    /// alike the grouping thinks the two are, and thinning „down to one" would
+    /// otherwise throw away the only frame in one of the two shapes. So each
+    /// orientation is thinned on its own and keeps at least its own best:
+    /// a burst of eight landscape frames and two portrait ones proposes one
+    /// of each, not one in total. `.unknown` (a photo the face scan hasn't
+    /// measured yet) is its own class for the same reason — erring toward one
+    /// keeper too many, never toward hiding a shape entirely.
+    ///
+    /// None of this is final: the confirmation grid can still restore anyone
+    /// before the choice is committed.
     var suggestedKeepIds: [Int] {
-        var kept = photoIds.filter { score(of: $0) > 0 }
-        if let best = ranked.first, !kept.contains(best) {
-            kept.append(best)
+        let ranking = ranked
+        var kept: Set<Int> = []
+        for group in Dictionary(grouping: photoIds, by: orientation(of:)).values {
+            let members = Set(group)
+            let winners = group.filter { score(of: $0) > 0 }
+            kept.formUnion(winners)
+            if winners.isEmpty, let best = ranking.first(where: { members.contains($0) }) {
+                kept.insert(best)
+            }
         }
-        return kept
+        // Back into the group's own order, so the confirmation grid and the
+        // committed keep set don't depend on how the buckets happened to
+        // enumerate.
+        return photoIds.filter { kept.contains($0) }
+    }
+
+    func orientation(of photoId: Int) -> PhotoOrientation {
+        orientations[photoId] ?? .unknown
     }
 
     // MARK: - Pair selection
