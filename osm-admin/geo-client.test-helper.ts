@@ -43,6 +43,7 @@ export class InMemoryGeoClient implements GeoClient {
   private reverseResults = new Map<string, GeoReverseResult["result"]>();
   private poiCandidates = new Map<string, GeoPoiCandidate[]>();
   private searchSpots = new Map<string, GeoPoiSearchSpot[]>();
+  private failingSearches = new Set<string>();
   private categories: GeoPoiCategory[] = [];
   private storage = new Map<string, GeoRegionStorage>();
   private searchCalls: Array<{ postgresDb: string; query: GeoPoiSearchQuery }> = [];
@@ -150,6 +151,16 @@ export class InMemoryGeoClient implements GeoClient {
     return known;
   }
 
+  /**
+   * Make the area search fail for one region, the way an unreachable
+   * geo container does. A caller that spans several regions has to
+   * survive one of them being down, and there is no other way to put
+   * it in that state.
+   */
+  failSearchFor(postgresDb: string): void {
+    this.failingSearches.add(postgresDb);
+  }
+
   setSearchSpots(postgresDb: string, spots: GeoPoiSearchSpot[]): void {
     this.searchSpots.set(postgresDb, spots);
   }
@@ -161,6 +172,9 @@ export class InMemoryGeoClient implements GeoClient {
 
   async searchPois(postgresDb: string, query: GeoPoiSearchQuery): Promise<GeoPoiSearchPage> {
     this.searchCalls.push({ postgresDb, query });
+    if (this.failingSearches.has(postgresDb)) {
+      throw new Error(`geo: POST /pois/search → connect ECONNREFUSED (${postgresDb})`);
+    }
     let spots = this.searchSpots.get(postgresDb) ?? [];
     if (query.name !== undefined) {
       // An approximation of the real filter, which also folds away

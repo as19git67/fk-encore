@@ -45,6 +45,15 @@ struct TripPlanDayView: View {
                         Label("Heute", systemImage: "sun.max")
                     }
                 }
+                // The way into the pool that needs nothing else — no
+                // share sheet, no map app, no model (§9.2, case 4).
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        TripPlaceSearchView(planId: viewModel.planId, legIndex: leg.position)
+                    } label: {
+                        Label("Ort suchen", systemImage: "magnifyingglass")
+                    }
+                }
             }
         }
         .task { await viewModel.load() }

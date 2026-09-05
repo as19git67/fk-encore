@@ -38,7 +38,10 @@ final class TripPlannerViewModel {
     /// Spots whose "Warum hier?" is open (§8.3), keyed by `osmRef`.
     var expandedReasons: Set<String> = []
 
-    private let planId: Int
+    /// Which plan this is. Read by the screens that need to address
+    /// the same plan through a different endpoint — searching for a
+    /// place, reviewing a shared find.
+    let planId: Int
 
     init(planId: Int) {
         self.planId = planId
