@@ -1616,7 +1616,45 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
      umgeräumter Nachmittag auf Basis einer geratenen Position ist schlechter
      als keiner.
 
+   **Nachtrag — der Einstieg fehlte.** Schritt 7 galt als abgeschlossen,
+   obwohl die Planerliste zwar „Sag, wohin und wie lange" versprach, aber
+   nirgends eine Stelle bot, das zu sagen: es gab keine Aktion zum Anlegen
+   einer Reise. Damit war *alles* aus den Schritten 1–8 aus der App heraus
+   unerreichbar — der leere Zustand war das ganze Feature. Nachgereicht als
+   `TripNewPlanView`: Formular zuerst, Satz als Beschleuniger darunter, weil
+   das Modell auf der eigenen Kiste regelmäßig kalt ist und ein Bildschirm,
+   der nur mit Modellantwort funktioniert, manchmal gar nicht funktioniert.
+   Der Ort wird über MapKit auf dem Gerät gesucht und muss bestätigt werden;
+   ein Satz, der eine andere Stadt nennt, verschiebt das Suchfeld, nie die
+   Nadel (§15.3).
+
    Damit ist Schritt 7 abgeschlossen.
+
+   **§9.2 und §9.3 — eigene Funde herein.** Nicht Teil der nummerierten
+   Schritte, aber hier eingehängt, weil es die Oberfläche braucht:
+
+   - **Karten-Link** (Fall 1): `trip-planner/map-link.ts` liest Apple-, Google-,
+     OSM- und `geo:`-Links. Fragil per Entwurf, also wird nie eine Koordinate
+     *abgeleitet* — ein Link mit bloßem Suchbegriff liefert einen Namen und
+     keine Position, und der Rückfall ist eine Karte zum Bestätigen.
+   - **Artikel** (Fall 2) und **Screenshot** (Fall 3) laufen zusammen, sobald
+     Text vorliegt: `article.ts` legt ihn frei, `extract-places.ts` lässt das
+     Modell Namen mit **wörtlichem Zitat** ziehen, und ein Eintrag, dessen
+     Zitat nicht buchstäblich in der Seite steht, fällt mechanisch weg.
+   - **Auflösen** (§9.3 Stufe 4) über `geo`s neuen Namensfilter und
+     `resolve-place.ts` — eindeutig / mehrdeutig / keiner, derselbe Baustein,
+     den §10.6 für Händlername → POI braucht.
+   - **Der Server-Abruf** ist nur die Rückfallebene und hat alle in §9.3
+     genannten Vorkehrungen: nur `https`, keine privaten Adressbereiche
+     *auch nach einer Weiterleitung*, Zeit- und Größenbegrenzung.
+   - **Die Extension gibt ab, sie entscheidet nicht.** Sie legt Link und Text
+     in die App-Group; die Bestätigung — welche Reise, welcher von drei Cafés,
+     wie lange — passiert in der App, wo der Bildschirm dafür ohnehin steht.
+
+   **Noch offen:** Der Textauszug aus der *geöffneten* Seite (§9.3 Stufe 1,
+   `NSExtensionJavaScriptPreprocessingFile`) und damit `WebPage`-Aktivierung;
+   solange greift für einen geteilten Link der Server-Abruf. Ebenso Fall 4,
+   die Suche in der App.
 8. **Standort** — Geofences um die nächsten Stopps, Erledigt-Erkennung,
    angebotene Neuverteilung, „was ist in der Nähe".
 

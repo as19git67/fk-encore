@@ -292,3 +292,64 @@ test("returns the attributes a food list is filtered by", async (t) => {
   assert.equal(museum.dietVegetarian, null);
   assert.equal(museum.phone, null);
 });
+
+test("a name search folds away case and accents", async (t) => {
+  if (skipUnlessDb(t)) return;
+  const { spots } = await searchPois(DB, {
+    center: { ...CENTRE, radiusM: 500 },
+    name: "cafe am beispielplatz",
+  });
+  assert.deepEqual(spots.map((s) => s.id), [7]);
+});
+
+test("a name search matches part of a name, not the whole of it", async (t) => {
+  if (skipUnlessDb(t)) return;
+  // What a blog calls "das Stadtmuseum" is "Stadtmuseum Beispielstadt"
+  // in OSM. Insisting on the whole string would find nothing at all.
+  const { spots } = await searchPois(DB, {
+    center: { ...CENTRE, radiusM: 500 },
+    name: "Stadtmuseum",
+  });
+  assert.deepEqual(spots.map((s) => s.id), [1]);
+});
+
+test("a name search also looks at the localised names", async (t) => {
+  if (skipUnlessDb(t)) return;
+  // Only `name:en` carries this; a search restricted to `name` would
+  // miss every place an English-language article names.
+  const { spots } = await searchPois(DB, {
+    center: { ...CENTRE, radiusM: 500 },
+    name: "example city museum",
+  });
+  assert.deepEqual(spots.map((s) => s.id), [1]);
+});
+
+test("a name search stays inside its area and its categories", async (t) => {
+  if (skipUnlessDb(t)) return;
+  // Id 6 is a museum named "Fernes Museum" 400 km away: a name is a
+  // filter on top of the area, never a way around it.
+  const far = await searchPois(DB, { center: { ...CENTRE, radiusM: 500 }, name: "Museum" });
+  assert.ok(!far.spots.some((s) => s.id === 6));
+
+  const wrongCategory = await searchPois(DB, {
+    center: { ...CENTRE, radiusM: 500 },
+    name: "Stadtmuseum",
+    categories: ["food"],
+  });
+  assert.deepEqual(wrongCategory.spots, []);
+});
+
+test("wildcards in a name are searched for, not obeyed", async (t) => {
+  if (skipUnlessDb(t)) return;
+  // Unescaped, "%" would match every named spot in the disc.
+  const { spots } = await searchPois(DB, { center: { ...CENTRE, radiusM: 500 }, name: "%" });
+  assert.deepEqual(spots, []);
+});
+
+test("a blank name is rejected rather than silently ignored", async (t) => {
+  if (skipUnlessDb(t)) return;
+  await assert.rejects(
+    () => searchPois(DB, { center: { ...CENTRE, radiusM: 500 }, name: "   " }),
+    PoiSearchError,
+  );
+});

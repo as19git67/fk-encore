@@ -28,6 +28,15 @@
 			<dict>
 				<key>NSExtensionActivationSupportsImageWithMaxCount</key>
 				<integer>50</integer>
+				<!-- A shared link is the clearest way a find reaches the
+				     trip planner: a map pin, or an article about a city
+				     (docs/ios-urlaubsplanung.md §9.2, cases 1 and 2). -->
+				<key>NSExtensionActivationSupportsWebURLWithMaxCount</key>
+				<integer>1</integer>
+				<!-- Selected text, and anything a chat app shares as
+				     plain text rather than as a link. -->
+				<key>NSExtensionActivationSupportsText</key>
+				<true/>
 			</dict>
 		</dict>
 		<key>NSExtensionPointIdentifier</key>

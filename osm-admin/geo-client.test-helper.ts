@@ -161,7 +161,18 @@ export class InMemoryGeoClient implements GeoClient {
 
   async searchPois(postgresDb: string, query: GeoPoiSearchQuery): Promise<GeoPoiSearchPage> {
     this.searchCalls.push({ postgresDb, query });
-    const spots = this.searchSpots.get(postgresDb) ?? [];
+    let spots = this.searchSpots.get(postgresDb) ?? [];
+    if (query.name !== undefined) {
+      // An approximation of the real filter, which also folds away
+      // diacritics. Applying it at all matters more than matching it
+      // exactly: a fake that ignores a filter lets a caller pass a test
+      // it would fail against the service.
+      const wanted = query.name.toLowerCase();
+      spots = spots.filter((spot) =>
+        [spot.name, spot.nameDe, spot.nameEn].some(
+          (n) => typeof n === "string" && n.toLowerCase().includes(wanted),
+        ));
+    }
     const offset = query.offset ?? 0;
     const limit = query.limit ?? spots.length;
     const page = spots.slice(offset, offset + limit);
