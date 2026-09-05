@@ -55,6 +55,10 @@ function spot(ref: string, at: { lat: number; lon: number }): GeoPoiSearchSpot {
     cuisine: null,
     wheelchair: null,
     outdoorSeating: null,
+    dietVegetarian: null,
+    dietVegan: null,
+    phone: null,
+    website: null,
     facadeAzimuth: null,
   };
 }

@@ -92,6 +92,21 @@ export interface PoiSearchResult {
   wheelchair: string | null;
   outdoorSeating: string | null;
   /**
+   * `diet:vegetarian` / `diet:vegan` as OSM has them: "yes", "only",
+   * "no", "limited" — kept verbatim rather than reduced to a boolean.
+   * "limited" is a real answer and flattening it to false would turn a
+   * usable place into an excluded one (§10.3).
+   */
+  dietVegetarian: string | null;
+  dietVegan: string | null;
+  /**
+   * Reaching the place without a map app: reserve a table, ask whether
+   * they are really open (§9.1, §10.3). Both `phone`/`website` and the
+   * `contact:` prefix are in use; whichever is present is returned.
+   */
+  phone: string | null;
+  website: string | null;
+  /**
    * Facade orientation in degrees clockwise from north, in [0, 180),
    * derived from the outline at import time. Null for POIs mapped as a
    * node, and for anything imported before the outline was kept.
@@ -138,6 +153,10 @@ type Row = {
   cuisine: string | null;
   wheelchair: string | null;
   outdoor_seating: string | null;
+  diet_vegetarian: string | null;
+  diet_vegan: string | null;
+  phone: string | null;
+  website: string | null;
   facade_azimuth: number | null;
   lat: number;
   lon: number;
@@ -202,6 +221,12 @@ export async function searchPois(
       tags->>'cuisine'         AS cuisine,
       tags->>'wheelchair'      AS wheelchair,
       tags->>'outdoor_seating' AS outdoor_seating,
+      tags->>'diet:vegetarian'  AS diet_vegetarian,
+      tags->>'diet:vegan'       AS diet_vegan,
+      -- Both spellings are in live use; the plain key wins where a POI
+      -- carries each.
+      COALESCE(tags->>'phone',   tags->>'contact:phone')   AS phone,
+      COALESCE(tags->>'website', tags->>'contact:website') AS website,
       facade_azimuth,
       ST_Y(geom)        AS lat,
       ST_X(geom)        AS lon,
@@ -449,6 +474,10 @@ function toResult(row: Row, requested: readonly string[]): PoiSearchResult {
     cuisine: row.cuisine,
     wheelchair: row.wheelchair,
     outdoorSeating: row.outdoor_seating,
+    dietVegetarian: row.diet_vegetarian,
+    dietVegan: row.diet_vegan,
+    phone: row.phone,
+    website: row.website,
     facadeAzimuth: row.facade_azimuth === null ? null : Number(row.facade_azimuth),
   };
 }
