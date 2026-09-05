@@ -123,11 +123,13 @@ final class TripPlannerViewModel {
     /// button says why instead of redistributing around a made-up
     /// position. A rearranged afternoon built on a guess is worse than
     /// no rearrangement.
+    /// - Parameter locationProvider: injectable for tests. Built here
+    ///   rather than as a default argument because default arguments are
+    ///   evaluated outside the actor, and `TripLocationProvider` is
+    ///   main-actor isolated.
     func redistributeNow(
         now: Date = Date(),
-        locationProvider: TripLocationProvider = TripLocationProvider(
-            accuracy: kCLLocationAccuracyNearestTenMeters,
-        ),
+        locationProvider: TripLocationProvider? = nil,
     ) async {
         guard let plan, let day else { return }
         redistributeBlockedReason = nil
@@ -143,7 +145,10 @@ final class TripPlannerViewModel {
         isRedistributing = true
         defer { isRedistributing = false }
 
-        guard let location = await locationProvider.currentLocation() else {
+        // Only now, so a day with no running block never asks for a fix.
+        let provider = locationProvider
+            ?? TripLocationProvider(accuracy: kCLLocationAccuracyNearestTenMeters)
+        guard let location = await provider.currentLocation() else {
             redistributeBlockedReason =
                 "Ohne Standort lässt sich nicht umplanen — der Plan müsste raten, wo ihr seid."
             return
@@ -241,6 +246,12 @@ final class TripPlannerViewModel {
 
     private func apply(_ response: TripPlanResponse) {
         plan = response.plan
+        // Both describe the last action, not the plan: a red block and a
+        // "back in the pool" list must not outlive the change that
+        // produced them. Callers that still have something to say set
+        // them again right after.
+        overfullBlockIds = []
+        displaced = []
         // A plan can come back with fewer legs or days than the screen
         // was showing — clamp rather than leave the view pointing at
         // something that no longer exists.
