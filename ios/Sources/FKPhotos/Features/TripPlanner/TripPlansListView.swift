@@ -13,35 +13,20 @@ struct TripPlansListView: View {
     /// Set to the id of a plan just created, so the list opens it
     /// straight away — nobody makes a trip in order to look at a list.
     @State private var openPlanId: Int?
+    /// Something the share sheet left for the planner (§9.2). Peeked
+    /// rather than taken, so leaving the screen without confirming does
+    /// not lose it.
+    @State private var pendingShare: TripSharePayload?
+    /// Which plan a pending share is being reviewed against.
+    @State private var reviewing: TripShareReview?
 
     var body: some View {
-        Group {
-            if isLoading && plans.isEmpty {
-                ProgressView("Pläne werden geladen…")
-            } else if let errorMessage {
-                ContentUnavailableView("Pläne nicht verfügbar", systemImage: "map",
-                                       description: Text(errorMessage))
-            } else if plans.isEmpty {
-                ContentUnavailableView {
-                    Label("Noch keine Reise geplant", systemImage: "map")
-                } description: {
-                    Text("Sag, wohin und wie lange — den Rest schlägt der Planer vor.")
-                } actions: {
-                    // The sentence above promised somewhere to say it.
-                    // For a while there was nowhere, which left the
-                    // whole planner unreachable from the app.
-                    Button("Reise planen") { isCreating = true }
-                        .buttonStyle(.borderedProminent)
-                }
-            } else {
-                List(plans) { plan in
-                    NavigationLink {
-                        TripPlanDayView(viewModel: TripPlannerViewModel(planId: plan.id))
-                    } label: {
-                        row(plan)
-                    }
-                }
+        VStack(spacing: 0) {
+            if let pendingShare {
+                shareBanner(pendingShare)
+                Divider()
             }
+            content
         }
         .navigationTitle("Urlaubsplanung")
         .toolbar {
@@ -60,16 +45,111 @@ struct TripPlansListView: View {
                 }
             }
         }
+        .sheet(item: $reviewing) { review in
+            NavigationStack {
+                TripShareReviewView(planId: review.planId, payload: review.payload)
+            }
+        }
         .navigationDestination(item: $openPlanId) { planId in
             TripPlanDayView(viewModel: TripPlannerViewModel(planId: planId))
         }
-        .task { await load() }
+        .task {
+            await load()
+            pendingShare = TripShareInbox.peek()
+        }
         .refreshable { await load() }
         .onChange(of: isCreating) { _, nowCreating in
             // The new trip has to appear in the list behind the sheet,
             // not only in the screen that opened on top of it.
             if !nowCreating { Task { await load() } }
         }
+        .onChange(of: reviewing) { _, nowReviewing in
+            // Taken only once it has actually been offered: a find that
+            // was never reviewed should still be there next time.
+            if nowReviewing == nil {
+                _ = TripShareInbox.take()
+                pendingShare = nil
+            }
+        }
+    }
+
+    @ViewBuilder private var content: some View {
+        if isLoading && plans.isEmpty {
+            ProgressView("Pläne werden geladen…")
+        } else if let errorMessage {
+            ContentUnavailableView("Pläne nicht verfügbar", systemImage: "map",
+                                   description: Text(errorMessage))
+        } else if plans.isEmpty {
+            ContentUnavailableView {
+                Label("Noch keine Reise geplant", systemImage: "map")
+            } description: {
+                Text("Sag, wohin und wie lange — den Rest schlägt der Planer vor.")
+            } actions: {
+                // The sentence above promised somewhere to say it. For
+                // a while there was nowhere, which left the whole
+                // planner unreachable from the app.
+                Button("Reise planen") { isCreating = true }
+                    .buttonStyle(.borderedProminent)
+            }
+        } else {
+            List(plans) { plan in
+                NavigationLink {
+                    TripPlanDayView(viewModel: TripPlannerViewModel(planId: plan.id))
+                } label: {
+                    row(plan)
+                }
+            }
+        }
+    }
+
+    /// A find is waiting from the share sheet.
+    ///
+    /// It asks which trip rather than assuming the first one: a shared
+    /// café belongs to the trip you are planning, and with two trips
+    /// open there is nothing here that could know which.
+    @ViewBuilder private func shareBanner(_ payload: TripSharePayload) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Ein geteilter Fund wartet", systemImage: "link.badge.plus")
+                .font(.subheadline.weight(.semibold))
+            if let url = payload.url {
+                Text(url).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            } else if let text = payload.text {
+                Text(text).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
+            HStack {
+                if plans.isEmpty {
+                    Text("Erst eine Reise anlegen.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if plans.count == 1, let only = plans.first {
+                    Button("Übernehmen") {
+                        reviewing = TripShareReview(planId: only.id, payload: payload)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                } else {
+                    Menu("Zu welcher Reise?") {
+                        ForEach(plans) { plan in
+                            Button(plan.displayTitle) {
+                                reviewing = TripShareReview(planId: plan.id, payload: payload)
+                            }
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+                Spacer()
+                Button("Verwerfen") {
+                    TripShareInbox.clear()
+                    pendingShare = nil
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.accentColor.opacity(0.08))
     }
 
     private func row(_ plan: TripPlanSummary) -> some View {
@@ -100,6 +180,16 @@ struct TripPlansListView: View {
             errorMessage = error.localizedDescription
         }
     }
+}
+
+/// A pending share plus the trip it is being reviewed against — one
+/// value, so the sheet can be driven by `item:` and cannot be presented
+/// without knowing both.
+struct TripShareReview: Identifiable, Equatable {
+    let planId: Int
+    let payload: TripSharePayload
+
+    var id: String { "\(planId)-\(payload.capturedAt.timeIntervalSince1970)" }
 }
 
 struct ListTripPlansResponse: Codable, Sendable {
