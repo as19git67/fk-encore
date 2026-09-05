@@ -100,8 +100,10 @@ struct TripShareCaptureView: View {
         var text: String?
 
         for provider in itemProviders {
-            if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
-                url = url ?? (await loadItem(provider, UTType.url.identifier) as? URL)?.absoluteString
+            if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier), url == nil {
+                if let loadedURL = await loadItem(provider, UTType.url.identifier) as? URL {
+                    url = loadedURL.absoluteString
+                }
             }
             if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) {
                 let loaded = await loadItem(provider, UTType.plainText.identifier)
