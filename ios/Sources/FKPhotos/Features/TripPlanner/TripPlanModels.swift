@@ -14,10 +14,29 @@ struct TripPlan: Codable, Identifiable, Sendable {
     let id: Int
     let ownerId: Int
     let title: String?
+    /// How the trip is planned — pace, group, interests. Changeable
+    /// after the fact through `PATCH …/settings`; decoded leniently
+    /// because it is a free-form object on the server and an older plan
+    /// may carry fields this build has not learned about.
+    let constraints: TripConstraints?
     let legs: [TripLeg]
 
     enum CodingKeys: String, CodingKey {
-        case id, ownerId, title, legs
+        case id, ownerId, title, constraints, legs
+    }
+}
+
+/// The settings a trip was planned with.
+struct TripConstraints: Codable, Sendable {
+    var pace: String?
+    var categories: [String]?
+    var interests: [String]?
+    var maxWalkMinutes: Int?
+    var group: Group?
+
+    struct Group: Codable, Sendable {
+        var withChildren: Bool?
+        var limitedMobility: Bool?
     }
 }
 

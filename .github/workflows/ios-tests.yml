@@ -80,6 +80,30 @@ jobs:
             -resultBundlePath TestResults.xcresult \
             CODE_SIGNING_ALLOWED=NO
 
+      - name: Put the app .xcodeproj back
+        # The app targets are needed for the compile check below, which is
+        # the only thing in CI that looks at them at all.
+        run: mv "$RUNNER_TEMP/FKPhotos.xcodeproj" FKPhotos.xcodeproj
+
+      - name: Compile the share extension
+        # The unit tests above build only the SwiftPM package
+        # (Sources/FKPhotos). The share extension in F4milShare/ is a
+        # separate target of the app project and is not part of it, so
+        # until this step nothing in CI ever compiled it — a share
+        # extension that did not build at all could be merged, and was.
+        #
+        # `-target` rather than `-scheme`: the project ships no shared
+        # schemes, so there is no scheme to name. No tests run here; the
+        # extension has none, and it is the compile that was missing.
+        run: |
+          xcodebuild build \
+            -project FKPhotos.xcodeproj \
+            -target F4milShare \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4

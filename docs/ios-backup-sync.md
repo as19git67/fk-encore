@@ -26,7 +26,7 @@ Feature-Inventar in [`ios-app.md`](./ios-app.md) um die technischen Details.
 | `Features/Sync/SyncSettingsView.swift` / `DownloadSettingsView.swift` | Einstellungen. |
 | `Features/Sync/ServerAlbumPickerView.swift` | Geräte-Album → Server-Album-Zuordnung. |
 | `Core/Storage/SharedStorage.swift` | App-Group-UserDefaults (Token-/Server-URL-Sharing mit der Share-Extension). |
-| `App/ShareExtension/`, `F4milShare/` | Share-Extension zum Upload aus anderen Apps. |
+| `F4milShare/` | Share-Extension zum Upload aus anderen Apps (Code). `App/ShareExtension/` enthält nur ihre `Info.plist`. |
 
 App-Group: **`group.dev.fk-encore.F4milPhotos`** (gemeinsamer Container für
 Queue-Datei, Temp-Dateien und geteilte UserDefaults).

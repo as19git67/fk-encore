@@ -170,17 +170,64 @@ export class InMemoryGeoClient implements GeoClient {
     return this.searchCalls;
   }
 
+  /**
+   * The area search, filtering the way the service does.
+   *
+   * Every filter is applied, and that is the point rather than
+   * tidiness. A fake that ignores a filter lets a caller pass a test it
+   * would fail against the running service — which is exactly how the
+   * corridor search stayed broken for a release: the HTTP client
+   * dropped the corridor on the way out, and nothing noticed because
+   * the planner's tests ran against a fake that would have returned the
+   * same rows either way.
+   *
+   * The filters are approximations, deliberately: the radius is
+   * measured on a sphere rather than PostGIS's spheroid, the name match
+   * does not fold diacritics, and the corridor is the same
+   * sum-of-two-distances rule without the ellipse pre-filter. Being
+   * approximately right is worth a great deal here; being absent is
+   * worth less than nothing.
+   */
   async searchPois(postgresDb: string, query: GeoPoiSearchQuery): Promise<GeoPoiSearchPage> {
     this.searchCalls.push({ postgresDb, query });
     if (this.failingSearches.has(postgresDb)) {
       throw new Error(`geo: POST /pois/search → connect ECONNREFUSED (${postgresDb})`);
     }
+    const areas = [query.bbox, query.center, query.corridor].filter((a) => a !== undefined);
+    if (areas.length !== 1) {
+      // The service refuses this outright, and a fake that shrugs at it
+      // is how a caller sending no area at all reaches production.
+      throw new Error(
+        `geo: POST /pois/search → 400 (pass exactly one of bbox, center or corridor, got ${areas.length})`,
+      );
+    }
+
     let spots = this.searchSpots.get(postgresDb) ?? [];
+
+    if (query.bbox) {
+      const { minLat, minLon, maxLat, maxLon } = query.bbox;
+      spots = spots.filter((s) =>
+        s.lat >= minLat && s.lat <= maxLat && s.lon >= minLon && s.lon <= maxLon);
+    }
+    if (query.center) {
+      const centre = query.center;
+      spots = spots
+        .filter((s) => metresBetween(centre, s) <= centre.radiusM)
+        // The service returns a centre search nearest first, and a
+        // caller that pages or slices depends on that order.
+        .sort((a, b) => metresBetween(centre, a) - metresBetween(centre, b));
+    }
+    if (query.corridor) {
+      const { from, to, detourBudgetM } = query.corridor;
+      const direct = metresBetween(from, to);
+      spots = spots.filter(
+        (s) => metresBetween(from, s) + metresBetween(s, to) <= direct + detourBudgetM);
+    }
+    if (query.categories?.length) {
+      const wanted = new Set(query.categories);
+      spots = spots.filter((s) => s.categories.some((c) => wanted.has(c)));
+    }
     if (query.name !== undefined) {
-      // An approximation of the real filter, which also folds away
-      // diacritics. Applying it at all matters more than matching it
-      // exactly: a fake that ignores a filter lets a caller pass a test
-      // it would fail against the service.
       const wanted = query.name.toLowerCase();
       spots = spots.filter((spot) =>
         [spot.name, spot.nameDe, spot.nameEn].some(
@@ -237,4 +284,26 @@ export class InMemoryGeoClient implements GeoClient {
     this.poiCandidates.delete(postgresDb);
     return had;
   }
+}
+
+/**
+ * Great-circle metres between two points.
+ *
+ * The service measures on PostGIS's spheroid; this is the sphere, which
+ * differs by a few parts in a thousand. That is close enough for a fake
+ * whose job is to apply the filter at all — a test written around the
+ * difference would be a test about the earth's shape.
+ */
+function metresBetween(
+  a: { lat: number; lon: number },
+  b: { lat: number; lon: number },
+): number {
+  const earthRadiusM = 6_371_000;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLon = toRad(b.lon - a.lon);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLon / 2) ** 2;
+  return 2 * earthRadiusM * Math.asin(Math.min(1, Math.sqrt(h)));
 }

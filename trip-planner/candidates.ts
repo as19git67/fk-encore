@@ -42,6 +42,13 @@ export interface ScoredCandidate extends Candidate {
 }
 
 export interface ScoringOptions {
+  /**
+   * Drop candidates with no sign of being worth a visit.
+   *
+   * Set when building the pool a day is planned out of. Left off for a
+   * lookup — "what is near me" legitimately answers with the ordinary.
+   */
+  requireProminence?: boolean;
   /** Category ids the travellers said they care about. */
   interests?: readonly string[];
   /** Per-category overrides for the dwell defaults. */
@@ -63,24 +70,44 @@ export function toCandidates(
 
     const reasons: string[] = [];
     let score = 1;
+    // Signals that this is somewhere people go *to*, rather than
+    // somewhere that merely exists. A name is not one of them: every
+    // savings bank has a name, and counting it as prominence is how an
+    // ordinary parish church came to score exactly what a Sparkasse
+    // did, and both ended up in a morning.
+    let prominence = 0;
 
     if (spot.wikidataQid) {
       score += 1;
+      prominence += 1;
       reasons.push("in Wikidata verzeichnet");
     }
     if (spot.wikipedia) {
       score += 1;
+      prominence += 1;
       reasons.push("hat einen Wikipedia-Artikel");
     }
-    if (spot.name) {
+    // Somebody tagged it as a thing to see, which is a judgement a
+    // mapper made on the ground.
+    if (spot.kind === "tourism=attraction" || spot.kind === "tourism=museum"
+        || spot.kind === "tourism=gallery" || spot.kind === "tourism=viewpoint") {
       score += 0.5;
-    } else {
+      prominence += 1;
+      reasons.push("als Sehenswürdigkeit erfasst");
+    }
+    if (!spot.name) {
       reasons.push("unbenannt in OpenStreetMap");
     }
     if (interests.has(category)) {
       score += 2;
       reasons.push("passt zu euren Interessen");
     }
+
+    // Nothing says this is worth a block. Keep it out of the pool a day
+    // is planned from rather than let it pad a morning: a shorter
+    // Vormittag is a better answer than a filled one nobody wanted
+    // (§15.3 in spirit — do not present what you do not know).
+    if (opts.requireProminence && prominence === 0) continue;
 
     candidates.push({
       osmRef: spot.osmRef,
