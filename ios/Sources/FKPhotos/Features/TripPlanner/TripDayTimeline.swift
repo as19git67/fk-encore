@@ -64,6 +64,24 @@ enum TripDayTimeline {
         }
     }
 
+    /// How much of `block` is left at `minutes` — what a redistribution
+    /// is told it has to work with (§5).
+    ///
+    /// Zero rather than a negative number when the block is already
+    /// over: "we are out of time" is the true statement, and a negative
+    /// budget would have the solver plan backwards.
+    static func remainingMinutes(of block: TripBlock, at minutes: Int) -> Int {
+        guard let start = block.startMinutes else { return block.budgetMinutes }
+        return max(0, start + block.budgetMinutes - minutes)
+    }
+
+    /// Minutes past midnight for a wall-clock instant, in the device's
+    /// own timezone — which is the one the traveller is standing in.
+    static func minutesOfDay(_ date: Date, calendar: Calendar = .current) -> Int {
+        let parts = calendar.dateComponents([.hour, .minute], from: date)
+        return (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+    }
+
     /// The span the slider should cover: the first block's start to the
     /// last one's end. Nil when no block carries an hour.
     static func span(of day: TripDay) -> ClosedRange<Int>? {

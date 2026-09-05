@@ -15,12 +15,15 @@ final class TripLocationProvider: NSObject, CLLocationManagerDelegate {
     private var continuation: CheckedContinuation<CLLocation?, Never>?
     private var didResume = false
 
-    override init() {
+    /// - Parameter accuracy: kilometre-coarse by default, which is plenty for
+    ///   a place name and a ~25 km geofence centre and returns a fix faster
+    ///   and cheaper. The trip planner asks for `kCLLocationAccuracyNearestTenMeters`
+    ///   instead: it feeds the position into a redistribution, where being a
+    ///   kilometre out would rearrange the afternoon around the wrong corner.
+    init(accuracy: CLLocationAccuracy = kCLLocationAccuracyKilometer) {
         super.init()
         manager.delegate = self
-        // Coarse accuracy is plenty for a place name and a ~25 km geofence
-        // centre, and it returns a fix faster and cheaper.
-        manager.desiredAccuracy = kCLLocationAccuracyKilometer
+        manager.desiredAccuracy = accuracy
     }
 
     /// Returns the device's current location, or nil if permission is denied /

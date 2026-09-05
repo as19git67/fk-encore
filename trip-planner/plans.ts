@@ -24,6 +24,7 @@ import { pickRegion } from "../osm-admin/region-router";
 import { DEFAULT_DAY, shapeDay, type BlockTemplate, type GroupProfile, type Pace } from "./blocks";
 import { toCandidates } from "./candidates";
 import { redistribute, type CurrentBlock, type StopStatus } from "./redistribute";
+import { MoveError, moveStop } from "./move";
 import { solveDay, type PlannedBlock } from "./solver";
 import { DEFAULT_MAX_WALK_MINUTES, type TransportMode } from "./travel";
 import {
@@ -37,6 +38,8 @@ import {
   createPlan,
   listPlans,
   loadPlan,
+  saveMovedDays,
+  setStopPinned,
   setStopStatus,
   saveDayDetail,
   saveRedistribution,
@@ -404,6 +407,134 @@ export const setTripStopStatus = api(
     const plan = await loadPlan(req.planId, userId);
     if (!plan) throw APIError.notFound("plan not found");
     return { plan, droppedBlocks: [] };
+  },
+);
+
+export interface PinStopRequestBody {
+  planId: number;
+  stopId: number;
+  pinned: boolean;
+}
+
+/**
+ * Pin a stop, or release it (§8.4). A pinned stop is a fixed point:
+ * redistribution keeps it where it is, whatever else moves (§5).
+ */
+export const pinTripStop = api(
+  { expose: true, method: "POST", path: "/trip-planner/plans/:planId/stops/pin", auth: true },
+  async (req: PinStopRequestBody): Promise<PlanResponse> => {
+    const userId = requireUser();
+    if (!Number.isInteger(req.stopId)) {
+      throw APIError.invalidArgument("stopId must be a stop's row id");
+    }
+    const changed = await setStopPinned(req.planId, userId, req.stopId, req.pinned === true);
+    if (!changed) throw APIError.notFound("stop not found in this plan");
+
+    const plan = await loadPlan(req.planId, userId);
+    if (!plan) throw APIError.notFound("plan not found");
+    return { plan, droppedBlocks: [] };
+  },
+);
+
+export interface MoveStopRequestBody {
+  planId: number;
+  /** The stop being dragged, by row id. */
+  stopId: number;
+  /** Which leg. Moves never cross legs — see below. */
+  legIndex?: number;
+  /** Which day of that leg to drop it in. */
+  toDayIndex: number;
+  /** Which block of that day. */
+  toBlockId: string;
+  /** Where in the block, from zero. Past the end, or omitted, means last. */
+  toPosition?: number;
+}
+
+export interface MoveStopResponseBody {
+  plan: StoredPlan;
+  /**
+   * Blocks now over their budget — the ones the app turns red (§8.4).
+   * Reported rather than refused: the traveller dragged it there on
+   * purpose, and a rejected gesture says less than a red block.
+   */
+  overfullBlockIds: string[];
+}
+
+/**
+ * Drag a spot to another block, or another day (§8.4).
+ *
+ * The arithmetic is `move.ts`, which recomputes the walks of every
+ * affected day rather than patching two blocks — a block starts where
+ * the previous one left off, so a move ripples.
+ *
+ * **Within one leg only.** Redistribution is scoped to a leg because a
+ * leg has its own anchor, its own way of getting around and its own
+ * region (§4.2); a spot dragged from Tokyo into an Osaka day would be
+ * measured against the wrong anchor and reached by the wrong mode. The
+ * endpoint says so rather than doing something plausible-looking.
+ */
+export const moveTripStop = api(
+  { expose: true, method: "POST", path: "/trip-planner/plans/:planId/stops/move", auth: true },
+  async (req: MoveStopRequestBody): Promise<MoveStopResponseBody> => {
+    const userId = requireUser();
+
+    const plan = await loadPlan(req.planId, userId);
+    if (!plan) throw APIError.notFound("plan not found");
+
+    const legIndex = req.legIndex ?? 0;
+    const leg = plan.legs.find((l) => l.position === legIndex);
+    if (!leg) throw APIError.notFound(`leg ${legIndex} not found in this plan`);
+
+    const sourceDay = leg.days.find((d) =>
+      d.blocks.some((b) => b.stops.some((s) => s.rowId === req.stopId)),
+    );
+    if (!sourceDay) {
+      throw APIError.notFound(`stop ${req.stopId} not found in leg ${legIndex}`);
+    }
+    const targetDay = leg.days.find((d) => d.dayIndex === req.toDayIndex);
+    if (!targetDay) {
+      throw APIError.notFound(`day ${req.toDayIndex} not found in leg ${legIndex}`);
+    }
+    if (!targetDay.detailed) {
+      // A day at trip resolution has a frame but no stops (§4.3).
+      // Dropping one in would half-plan it behind the traveller's back.
+      throw APIError.failedPrecondition(
+        "that day is not planned yet — plan it first, then move spots into it",
+      );
+    }
+
+    const osmRef = sourceDay.blocks
+      .flatMap((b) => b.stops)
+      .find((s) => s.rowId === req.stopId)!.osmRef;
+
+    let moved;
+    try {
+      moved = moveStop({
+        fromBlocks: sourceDay.blocks,
+        toBlocks: sourceDay.id === targetDay.id ? sourceDay.blocks : targetDay.blocks,
+        osmRef,
+        toBlockId: req.toBlockId,
+        toPosition: req.toPosition,
+        anchor: leg.anchor,
+        mode: leg.mode,
+      });
+    } catch (err) {
+      if (err instanceof MoveError) throw APIError.invalidArgument(err.message);
+      throw err;
+    }
+
+    const days =
+      sourceDay.id === targetDay.id
+        ? [{ day: sourceDay, blocks: moved.fromBlocks }]
+        : [
+            { day: sourceDay, blocks: moved.fromBlocks },
+            { day: targetDay, blocks: moved.toBlocks },
+          ];
+    await saveMovedDays(plan.id, days);
+
+    const updated = await loadPlan(plan.id, userId);
+    if (!updated) throw APIError.internal("plan vanished while moving a spot");
+    return { plan: updated, overfullBlockIds: moved.overfullBlockIds };
   },
 );
 

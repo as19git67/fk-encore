@@ -231,3 +231,25 @@ struct TripDroppedBlock: Codable, Sendable {
     let label: String
     let reason: String
 }
+
+/// What a redistribution moved out of the day (§5). The sentence the
+/// app shows is built from this, not from a count: "Museum raus,
+/// rutscht auf Freitag" is what makes the change reviewable.
+struct TripDisplacedStop: Codable, Identifiable, Sendable {
+    let osmRef: String
+    let name: String?
+
+    var id: String { osmRef }
+    var displayName: String { name ?? "Unbenannter Ort" }
+}
+
+struct RedistributeResponse: Codable, Sendable {
+    let plan: TripPlan
+    let displaced: [TripDisplacedStop]
+}
+
+struct MoveStopResponse: Codable, Sendable {
+    let plan: TripPlan
+    /// Blocks now over their budget — the ones the day view turns red.
+    let overfullBlockIds: [String]
+}

@@ -42,6 +42,45 @@ struct TripTodayView: View {
     @ViewBuilder
     private func content(day: TripDay, leg: TripLeg) -> some View {
         List {
+            Section {
+                Button {
+                    Task { await viewModel.redistributeNow() }
+                } label: {
+                    if viewModel.isRedistributing {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        Label("Umplanen", systemImage: "arrow.triangle.2.circlepath")
+                            .frame(maxWidth: .infinity)
+                            .font(.headline)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(viewModel.isRedistributing || !day.detailed)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+
+                if let reason = viewModel.redistributeBlockedReason {
+                    // Why it did not run, in words that say what to do
+                    // about it — never a silent no-op.
+                    Text(reason)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                if !viewModel.displaced.isEmpty {
+                    // What lost its place. A count would not be
+                    // reviewable; the names are (§5).
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Zurück in den Vorrat:").font(.footnote.weight(.semibold))
+                        ForEach(viewModel.displaced) { stop in
+                            Text("· \(stop.displayName)").font(.footnote)
+                        }
+                    }
+                    .foregroundStyle(.secondary)
+                }
+            }
+
             if !day.detailed {
                 Section {
                     Text("Dieser Tag ist noch nicht im Detail geplant.")
@@ -64,8 +103,14 @@ struct TripTodayView: View {
                     HStack {
                         Text(block.label)
                         Spacer()
-                        Text("noch \(TripClock.duration(max(0, block.budgetMinutes - block.usedMinutes)))")
-                            .foregroundStyle(block.usedMinutes > block.budgetMinutes ? .red : .secondary)
+                        Text(block.usedMinutes > block.budgetMinutes
+                             ? "\(TripClock.duration(block.usedMinutes - block.budgetMinutes)) zu viel"
+                             : "noch \(TripClock.duration(block.budgetMinutes - block.usedMinutes))")
+                            .foregroundStyle(
+                                block.usedMinutes > block.budgetMinutes
+                                    || viewModel.overfullBlockIds.contains(block.id)
+                                    ? .red : .secondary,
+                            )
                     }
                 } footer: {
                     if block.isMeal {
@@ -125,6 +170,37 @@ struct TripTodayView: View {
                 Label("Erledigt", systemImage: "checkmark")
             }
             .tint(.green)
+
+            Button {
+                Task { await viewModel.setPinned(stop, !stop.pinned) }
+            } label: {
+                Label(stop.pinned ? "Lösen" : "Anheften", systemImage: stop.pinned ? "pin.slash" : "pin")
+            }
+            .tint(.orange)
+        }
+        .contextMenu {
+            // Dragging is the gesture the concept names, but a menu is
+            // what makes the same move reachable one-handed and with
+            // VoiceOver — and it is the only way to reach another day.
+            if let leg = viewModel.leg {
+                ForEach(leg.days.filter(\.detailed)) { target in
+                    Menu(target.dayIndex == viewModel.dayIndex
+                         ? "In diesem Tag verschieben"
+                         : "Auf Tag \(target.dayIndex + 1) verschieben") {
+                        ForEach(target.blocks.filter { !$0.isMeal }) { block in
+                            Button(block.label) {
+                                Task {
+                                    await viewModel.move(
+                                        stop,
+                                        toDayIndex: target.dayIndex,
+                                        toBlockId: block.id,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
         .swipeActions(edge: .trailing) {
             Button {
