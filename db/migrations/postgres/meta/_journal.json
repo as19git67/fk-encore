@@ -1128,6 +1128,20 @@
       "when": 1786233600008,
       "tag": "0160_trip_plan_fixpoints",
       "breakpoints": true
+    },
+    {
+      "idx": 161,
+      "version": "7",
+      "when": 1786233600009,
+      "tag": "0161_trip_plan_day_detail",
+      "breakpoints": true
+    },
+    {
+      "idx": 162,
+      "version": "7",
+      "when": 1786233600010,
+      "tag": "0162_trip_plan_block_start",
+      "breakpoints": true
     }
   ]
 }

@@ -104,8 +104,19 @@ export interface ScheduleDayOptions {
   blocks: readonly PlannedBlockShape[];
   /** Sorted or not; this module sorts them. */
   fixpoints?: readonly Fixpoint[];
-  /** When the first block begins. Defaults to 09:00. */
+  /** When the day actually begins. Defaults to 09:00. */
   dayStartMinutes?: number;
+  /**
+   * When the block list assumes the day begins. Defaults to 09:00, and
+   * only matters when it differs from `dayStartMinutes` — which is what
+   * an arrival day is: the shape still describes a whole day, but the
+   * travellers only get there at four (§4.2).
+   *
+   * Where the two differ, the blocks the day has already passed are
+   * dropped rather than shifted. A "Vormittag" starting at 16:00 would
+   * be a lie the rest of the plan then reasons with.
+   */
+  nominalStartMinutes?: number;
 }
 
 export interface ScheduledDay {
@@ -150,8 +161,27 @@ export function scheduleDay(opts: ScheduleDayOptions): ScheduledDay {
   const dropped: DroppedBlock[] = [];
 
   let cursor = opts.dayStartMinutes ?? DEFAULT_DAY_START_MINUTES;
+  // Where the shape thinks each block sits. Only consulted until the
+  // first block is actually placed: after that the day is relative
+  // again and fixpoints push it about freely (§4.1).
+  let nominal = opts.nominalStartMinutes ?? DEFAULT_DAY_START_MINUTES;
+  let started = false;
 
   for (const shape of opts.blocks) {
+    const nominalStart = nominal;
+    const nominalEnd = nominal + shape.budgetMinutes;
+    nominal = nominalEnd;
+
+    // A late start does not move the morning, it removes it.
+    if (!started && nominalEnd <= cursor) {
+      dropped.push({
+        id: shape.id,
+        label: shape.label,
+        reason: `der Tag beginnt erst um ${formatMinutes(cursor)}, „${shape.label}" ist vorbei`,
+      });
+      continue;
+    }
+
     // A departure whose guard has passed ends the day. Everything from
     // here on is lost, and saying which departure took it is the point.
     const gone = fixpoints.find(
@@ -175,7 +205,13 @@ export function scheduleDay(opts: ScheduleDayOptions): ScheduledDay {
       }
     }
 
-    let budget = shape.budgetMinutes;
+    // The first block the day still catches is entered part-way
+    // through: arriving at 16:00 leaves ninety minutes of an afternoon
+    // that nominally ran to 17:30, not a fresh full one.
+    let budget =
+      !started && nominalStart < cursor
+        ? Math.max(0, nominalEnd - cursor)
+        : shape.budgetMinutes;
     let blame: ResolvedFixpoint | null = null;
 
     // Each fixpoint that starts inside this block's span cuts it short.
@@ -211,6 +247,7 @@ export function scheduleDay(opts: ScheduleDayOptions): ScheduledDay {
       startMinutes: cursor,
     });
     cursor += budget;
+    started = true;
   }
 
   return { blocks, dropped, fixpoints };

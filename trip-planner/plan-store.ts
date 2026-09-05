@@ -16,7 +16,7 @@
  * database never has an opinion about what belongs in a block.
  */
 
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import dbDefault from "../db/database";
 import {
   tripPlanBlocks,
@@ -66,6 +66,11 @@ export interface StoredLeg {
 export interface StoredDay {
   id: number;
   dayIndex: number;
+  /**
+   * False while the day is still only at trip resolution (§4.3): it has
+   * its frame — blocks with budgets, fixpoints — but no stops yet.
+   */
+  detailed: boolean;
   blocks: StoredBlock[];
   /** The hard times framing this day (§4.4), earliest binding first. */
   fixpoints: StoredFixpoint[];
@@ -82,6 +87,13 @@ export interface StoredFixpoint extends Fixpoint {
 export interface StoredBlock extends CurrentBlock {
   /** Database id, distinct from the template id used by the solver. */
   rowId: number;
+  /**
+   * Where the block sits on the day's notional clock, in minutes past
+   * midnight (§8.3). Null for plans written before the frame time was
+   * kept — the time slider then has nothing to show for that day, which
+   * is more honest than a guessed hour.
+   */
+  startMinutes: number | null;
   stops: StoredStop[];
 }
 
@@ -96,9 +108,14 @@ export interface CreateFixpointInput extends Fixpoint {
   lon?: number | null;
 }
 
+/** A block as it goes in, with the hour the frame gave it. */
+export type CreateBlockInput = PlannedBlock & { startMinutes?: number };
+
 export interface CreateDayInput {
-  blocks: readonly PlannedBlock[];
+  blocks: readonly CreateBlockInput[];
   fixpoints?: readonly CreateFixpointInput[];
+  /** Defaults to true — a day written with stops is a detailed day. */
+  detailed?: boolean;
 }
 
 export interface CreateLegInput {
@@ -148,7 +165,7 @@ export async function createPlan(input: CreatePlanInput, db: Db = dbDefault): Pr
     for (const [dayIndex, dayInput] of legInput.days.entries()) {
       const [day] = await db
         .insert(tripPlanDays)
-        .values({ leg_id: leg.id, day_index: dayIndex })
+        .values({ leg_id: leg.id, day_index: dayIndex, detailed: dayInput.detailed ?? true })
         .returning({ id: tripPlanDays.id });
 
       for (const fix of dayInput.fixpoints ?? []) {
@@ -175,6 +192,7 @@ export async function createPlan(input: CreatePlanInput, db: Db = dbDefault): Pr
             label: block.label,
             kind: block.kind,
             budget_minutes: block.budgetMinutes,
+            start_minutes: block.startMinutes ?? null,
           })
           .returning({ id: tripPlanBlocks.id });
 
@@ -213,6 +231,117 @@ export async function createPlan(input: CreatePlanInput, db: Db = dbDefault): Pr
   }
 
   return plan.id;
+}
+
+/** One row of the plan list: enough to choose, not the whole plan. */
+export interface PlanSummary {
+  id: number;
+  title: string | null;
+  /** The legs in order, so a list row can read "Beispielstadt → Musterstadt". */
+  legTitles: (string | null)[];
+  /** Days across the whole trip. */
+  dayCount: number;
+  /** The first leg's start date, when the trip has dates at all. */
+  startDate: string | null;
+  updatedAt: string;
+}
+
+/**
+ * The user's plans, newest first.
+ *
+ * Deliberately a summary rather than a list of full plans: a
+ * twenty-day trip carries hundreds of stops, and a chooser needs a
+ * name, a length and a date.
+ */
+export async function listPlans(
+  ownerId: number,
+  db: Db = dbDefault,
+): Promise<PlanSummary[]> {
+  const planRows = await db
+    .select()
+    .from(tripPlans)
+    .where(eq(tripPlans.owner_id, ownerId))
+    .orderBy(desc(tripPlans.updated_at));
+  if (planRows.length === 0) return [];
+
+  const planIds = planRows.map((p) => p.id);
+  const legRows = await db
+    .select()
+    .from(tripPlanLegs)
+    .where(inArray(tripPlanLegs.plan_id, planIds))
+    .orderBy(asc(tripPlanLegs.plan_id), asc(tripPlanLegs.position));
+
+  const legIds = legRows.map((l) => l.id);
+  const dayRows = legIds.length
+    ? await db.select({ leg_id: tripPlanDays.leg_id }).from(tripPlanDays).where(inArray(tripPlanDays.leg_id, legIds))
+    : [];
+
+  const daysByLeg = new Map<number, number>();
+  for (const row of dayRows) {
+    daysByLeg.set(row.leg_id, (daysByLeg.get(row.leg_id) ?? 0) + 1);
+  }
+
+  const legsByPlan = new Map<number, typeof legRows>();
+  for (const leg of legRows) {
+    const list = legsByPlan.get(leg.plan_id) ?? [];
+    list.push(leg);
+    legsByPlan.set(leg.plan_id, list);
+  }
+
+  return planRows.map((plan) => {
+    const legs = legsByPlan.get(plan.id) ?? [];
+    return {
+      id: plan.id,
+      title: plan.title,
+      legTitles: legs.map((l) => l.title),
+      dayCount: legs.reduce((sum, l) => sum + (daysByLeg.get(l.id) ?? 0), 0),
+      startDate: legs[0]?.start_date ?? null,
+      updatedAt: plan.updated_at,
+    };
+  });
+}
+
+/**
+ * Mark one stop done or skipped.
+ *
+ * Deliberately its own write rather than a redistribution: ticking a
+ * spot off is not a request to replan the day, and making it one would
+ * rearrange the afternoon under the traveller's thumb (§5, §8.5). The
+ * status is what a later redistribution reads as "past".
+ *
+ * Scoped by plan and owner in one statement, so a stop id from another
+ * user's plan simply matches nothing.
+ */
+export async function setStopStatus(
+  planId: number,
+  ownerId: number,
+  stopId: number,
+  status: StopStatus,
+  db: Db = dbDefault,
+): Promise<boolean> {
+  const [stop] = await db
+    .select({ id: tripPlanStops.id })
+    .from(tripPlanStops)
+    .innerJoin(tripPlanBlocks, eq(tripPlanBlocks.id, tripPlanStops.block_id))
+    .innerJoin(tripPlanDays, eq(tripPlanDays.id, tripPlanBlocks.day_id))
+    .innerJoin(tripPlanLegs, eq(tripPlanLegs.id, tripPlanDays.leg_id))
+    .innerJoin(tripPlans, eq(tripPlans.id, tripPlanLegs.plan_id))
+    .where(
+      and(
+        eq(tripPlanStops.id, stopId),
+        eq(tripPlans.id, planId),
+        eq(tripPlans.owner_id, ownerId),
+      ),
+    )
+    .limit(1);
+  if (!stop) return false;
+
+  await db.update(tripPlanStops).set({ status }).where(eq(tripPlanStops.id, stopId));
+  await db
+    .update(tripPlans)
+    .set({ updated_at: new Date().toISOString() })
+    .where(eq(tripPlans.id, planId));
+  return true;
 }
 
 export async function loadPlan(
@@ -333,6 +462,7 @@ export async function loadPlan(
       label: row.label,
       kind: row.kind as CurrentBlock["kind"],
       budgetMinutes: row.budget_minutes,
+      startMinutes: row.start_minutes,
       usedMinutes: stops
         .filter((s) => s.status === "planned")
         .reduce((sum, s) => sum + s.dwellMinutes + s.travelFromPrevious.minutes, 0),
@@ -347,6 +477,7 @@ export async function loadPlan(
     list.push({
       id: row.id,
       dayIndex: row.day_index,
+      detailed: row.detailed,
       blocks: blocksByDay.get(row.id) ?? [],
       fixpoints: fixpointsByDay.get(row.id) ?? [],
     });
@@ -405,6 +536,33 @@ export async function saveRedistribution(
   blocks: readonly CurrentBlock[],
   pool: readonly Candidate[],
   db: Db = dbDefault,
+): Promise<void> {
+  await rewriteDay(planId, legId, day, blocks, pool, db);
+}
+
+/**
+ * Fill in a day that was only at trip resolution: same write as a
+ * redistribution, plus the flag that says the day now has stops (§4.3).
+ */
+export async function saveDayDetail(
+  planId: number,
+  legId: number,
+  day: StoredDay,
+  blocks: readonly CurrentBlock[],
+  pool: readonly Candidate[],
+  db: Db = dbDefault,
+): Promise<void> {
+  await rewriteDay(planId, legId, day, blocks, pool, db);
+  await db.update(tripPlanDays).set({ detailed: true }).where(eq(tripPlanDays.id, day.id));
+}
+
+async function rewriteDay(
+  planId: number,
+  legId: number,
+  day: StoredDay,
+  blocks: readonly CurrentBlock[],
+  pool: readonly Candidate[],
+  db: Db,
 ): Promise<void> {
   const byTemplateId = new Map(day.blocks.map((b) => [b.id, b]));
 

@@ -2668,6 +2668,9 @@ export const tripPlanDays = pgTable(
       .references(() => tripPlanLegs.id, { onDelete: "cascade" }),
     // 0-based position within the leg, not within the whole trip.
     day_index: integer("day_index").notNull(),
+    // False while the day is still only at trip resolution: it has its
+    // frame — blocks with budgets, fixpoints — but no stops yet (§4.3).
+    detailed: boolean("detailed").notNull().default(true),
   },
   (table) => [uniqueIndex("trip_plan_days_leg_index_key").on(table.leg_id, table.day_index)]
 );
@@ -2713,6 +2716,11 @@ export const tripPlanBlocks = pgTable(
     label: text("label").notNull(),
     kind: text("kind").notNull(),
     budget_minutes: integer("budget_minutes").notNull(),
+    // Where the block sits on the day's notional clock, in minutes past
+    // midnight (§8.3). Null for plans written before the frame time was
+    // kept — inventing one would put the traveller somewhere they were
+    // never planned to be.
+    start_minutes: integer("start_minutes"),
   },
   (table) => [uniqueIndex("trip_plan_blocks_day_position_key").on(table.day_id, table.position)]
 );
