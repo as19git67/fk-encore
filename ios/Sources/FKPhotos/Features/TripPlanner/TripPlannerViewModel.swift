@@ -1,3 +1,4 @@
+import CoreLocation
 import SwiftUI
 
 /// Loads one plan and holds what the day screen needs.
@@ -18,6 +19,14 @@ final class TripPlannerViewModel {
     private(set) var isLoading = false
     /// Set while a day is being detailed, so the button can say so.
     private(set) var isDetailing = false
+    /// Set while a redistribution is running (§5, §8.5).
+    private(set) var isRedistributing = false
+    /// What the last redistribution moved out — the sentence to show (§5).
+    private(set) var displaced: [TripDisplacedStop] = []
+    /// Blocks the last drag pushed over budget — the red ones (§8.4).
+    private(set) var overfullBlockIds: Set<String> = []
+    /// Why a redistribution could not run, in words the traveller can act on.
+    var redistributeBlockedReason: String?
     var errorMessage: String?
 
     /// Which leg and day are on screen. Both are positions within their
@@ -104,6 +113,121 @@ final class TripPlannerViewModel {
         }
     }
 
+    /// "Umplanen" — the big button of §8.5.
+    ///
+    /// Everything it needs beyond the plan is *where* and *when*: the
+    /// position comes from CoreLocation, and which block the group is
+    /// in, plus how much of it is left, come from the day's own frame
+    /// (§4.1). None of it is guessed — if the day carries no block
+    /// times, or the clock is outside them, or there is no fix, the
+    /// button says why instead of redistributing around a made-up
+    /// position. A rearranged afternoon built on a guess is worse than
+    /// no rearrangement.
+    /// - Parameter locationProvider: injectable for tests. Built here
+    ///   rather than as a default argument because default arguments are
+    ///   evaluated outside the actor, and `TripLocationProvider` is
+    ///   main-actor isolated.
+    func redistributeNow(
+        now: Date = Date(),
+        locationProvider: TripLocationProvider? = nil,
+    ) async {
+        guard let plan, let day else { return }
+        redistributeBlockedReason = nil
+
+        let minutes = TripDayTimeline.minutesOfDay(now)
+        guard let block = TripDayTimeline.block(in: day, at: minutes) else {
+            redistributeBlockedReason = day.blocks.contains(where: { $0.startMinutes != nil })
+                ? "Gerade läuft kein Block dieses Tages — umplanen lohnt erst, wenn ihr unterwegs seid."
+                : "Für diesen Tag sind keine Blockzeiten gespeichert."
+            return
+        }
+
+        isRedistributing = true
+        defer { isRedistributing = false }
+
+        // Only now, so a day with no running block never asks for a fix.
+        let provider = locationProvider
+            ?? TripLocationProvider(accuracy: kCLLocationAccuracyNearestTenMeters)
+        guard let location = await provider.currentLocation() else {
+            redistributeBlockedReason =
+                "Ohne Standort lässt sich nicht umplanen — der Plan müsste raten, wo ihr seid."
+            return
+        }
+
+        struct Body: Encodable {
+            let legIndex: Int
+            let dayIndex: Int
+            let currentBlockId: String
+            let remainingMinutes: Int
+            let position: TripCoordinate
+        }
+        do {
+            let response: RedistributeResponse = try await APIClient.shared.post(
+                "/trip-planner/plans/\(plan.id)/redistribute",
+                body: Body(
+                    legIndex: legIndex,
+                    dayIndex: dayIndex,
+                    currentBlockId: block.id,
+                    remainingMinutes: TripDayTimeline.remainingMinutes(of: block, at: minutes),
+                    position: TripCoordinate(
+                        lat: location.coordinate.latitude,
+                        lon: location.coordinate.longitude,
+                    ),
+                ),
+            )
+            apply(TripPlanResponse(plan: response.plan, droppedBlocks: nil))
+            displaced = response.displaced
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Drag a spot into another block or day (§8.4).
+    func move(_ stop: TripStop, toDayIndex: Int, toBlockId: String, position: Int? = nil) async {
+        guard let plan else { return }
+        struct Body: Encodable {
+            let stopId: Int
+            let legIndex: Int
+            let toDayIndex: Int
+            let toBlockId: String
+            let toPosition: Int?
+        }
+        do {
+            let response: MoveStopResponse = try await APIClient.shared.post(
+                "/trip-planner/plans/\(plan.id)/stops/move",
+                body: Body(
+                    stopId: stop.rowId,
+                    legIndex: legIndex,
+                    toDayIndex: toDayIndex,
+                    toBlockId: toBlockId,
+                    toPosition: position,
+                ),
+            )
+            apply(TripPlanResponse(plan: response.plan, droppedBlocks: nil))
+            overfullBlockIds = Set(response.overfullBlockIds)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Pin a spot, or release it (§8.4).
+    func setPinned(_ stop: TripStop, _ pinned: Bool) async {
+        guard let plan else { return }
+        struct Body: Encodable {
+            let stopId: Int
+            let pinned: Bool
+        }
+        do {
+            let response: TripPlanResponse = try await APIClient.shared.post(
+                "/trip-planner/plans/\(plan.id)/stops/pin",
+                body: Body(stopId: stop.rowId, pinned: pinned),
+            )
+            apply(response)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func toggleReasons(for osmRef: String) {
         if expandedReasons.contains(osmRef) {
             expandedReasons.remove(osmRef)
@@ -122,6 +246,12 @@ final class TripPlannerViewModel {
 
     private func apply(_ response: TripPlanResponse) {
         plan = response.plan
+        // Both describe the last action, not the plan: a red block and a
+        // "back in the pool" list must not outlive the change that
+        // produced them. Callers that still have something to say set
+        // them again right after.
+        overfullBlockIds = []
+        displaced = []
         // A plan can come back with fewer legs or days than the screen
         // was showing — clamp rather than leave the view pointing at
         // something that no longer exists.
