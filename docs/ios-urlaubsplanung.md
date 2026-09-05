@@ -1562,6 +1562,41 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    gelten als detailliert.
 7. **iOS-Oberfläche** — Blockkarten, Karte, Wischgesten, „Heute"-Modus,
    **Übergaben an Karten-Apps** (§9.1) und die Essensliste vor Ort (§10.3).
+
+   **Weitgehend umgesetzt.** Planliste, Tagesansicht mit Blockkarten und
+   Auslastung, Karte mit nummerierten Pins, Zeit-Regler, „Heute" mit
+   Wischgesten, Kartenübergabe und Essensliste stehen. Erreichbar über den
+   Trip-Tab („Urlaubsplanung"); eine eigene Tab-Leiste ist voll, und der
+   laufende Trip und die geplante Reise gehören nebeneinander.
+
+   Drei Stellen, an denen die Umsetzung eine Entscheidung erzwang:
+
+   - **Der Zeit-Regler antwortet `nil`, statt zu raten** — vor Tagesbeginn,
+     nach Tagesende, in der Lücke einer gebuchten Führung und bei jedem Plan
+     ohne Blockzeiten. Ein Regler, der immer irgendwohin zeigt, macht genau
+     die Prüfung unmöglich, für die er da ist. Dafür speichert Migration
+     `0162` die Uhrzeit jedes Blocks, die `scheduleDay` ohnehin rechnete und
+     bis dahin wegwarf.
+   - **Abhaken ist kein Umplanen.** `POST /trip-planner/plans/:id/stops/status`
+     setzt nur den Status, den eine spätere Umverteilung als „vergangen"
+     liest. Über `redistribute` zu gehen hätte den Nachmittag unter dem
+     Daumen des Reisenden umsortiert.
+   - **`LSApplicationQueriesSchemes` fehlte tatsächlich** — der Stolperstein
+     aus §9.1, wörtlich. Ohne den Eintrag meldet `canOpenURL` immer „nicht
+     installiert", und die Google-Maps-Option verschwindet ohne Fehler. Ein
+     Test liest jetzt die Info.plist als Datei; über `Bundle.main` ging es
+     nicht, weil das im Test-Target der Test-Runner ist.
+
+   **Die Essensliste** (`POST /trip-planner/food`) hält die Regeln aus §10.3
+   ein: sortiert nach Entfernung, nie nach einer Qualität, die wir nicht
+   kennen. Ein fehlendes Tag heißt **unbekannt**, nicht „nein" — ungefilterte
+   Listen behalten also alles Ungetaggte, und eine Zeile ohne Angaben bekommt
+   keine durchgestrichenen Symbole, sondern gar keine Zeile. `limited` bleibt
+   `limited`: „vegan (begrenzt)" ist eine echte Antwort, und sie auf `false`
+   zu reduzieren würde ein brauchbares Lokal ausschließen.
+
+   Offen: Ziehen zwischen Blöcken und Tagen, der große „umplanen"-Knopf
+   (braucht CoreLocation).
 8. **Standort** — Geofences um die nächsten Stopps, Erledigt-Erkennung,
    angebotene Neuverteilung, „was ist in der Nähe".
 9. **Wetter & Licht** — Open-Meteo-Anbindung mit Cache, Indoor/Outdoor-Ableitung,

@@ -116,6 +116,12 @@ export interface GeoPoiSearchSpot {
   cuisine: string | null;
   wheelchair: string | null;
   outdoorSeating: string | null;
+  /** "yes" | "only" | "no" | "limited" as OSM has it, never a boolean. */
+  dietVegetarian: string | null;
+  dietVegan: string | null;
+  /** For reserving a table or asking whether they are really open. */
+  phone: string | null;
+  website: string | null;
   /** Degrees clockwise from north, in [0, 180); null for node POIs. */
   facadeAzimuth: number | null;
 }
