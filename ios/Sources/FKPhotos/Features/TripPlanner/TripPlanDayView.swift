@@ -56,7 +56,33 @@ struct TripPlanDayView: View {
                 }
             }
         }
-        .task { await viewModel.load() }
+        .task {
+            await viewModel.load()
+            watchStops()
+        }
+        .onDisappear { TripVisitMonitor.shared.stop() }
+        .onChange(of: viewModel.dayIndex) { _, _ in watchStops() }
+        .onChange(of: viewModel.legIndex) { _, _ in watchStops() }
+    }
+
+    /// Put geofences around the next stops of the day on screen (§7.1).
+    ///
+    /// Driven from the day view rather than started once at launch: the
+    /// fences are only worth having around the day you are actually on,
+    /// and re-deriving them when the day or leg changes is cheaper than
+    /// keeping a second copy of "which day are we looking at".
+    private func watchStops() {
+        let stops = viewModel.stopsOfDay
+        guard !stops.isEmpty else {
+            TripVisitMonitor.shared.stop()
+            return
+        }
+        TripVisitMonitor.shared.watch(
+            planId: viewModel.planId,
+            stops: stops,
+            stopIdsByRef: Dictionary(stops.map { ($0.osmRef, $0.rowId) },
+                                     uniquingKeysWith: { first, _ in first }),
+        )
     }
 
     @ViewBuilder

@@ -1699,8 +1699,41 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
      Zwei Bremsen halten es vom Nörgeln ab: nicht vor der Blockhälfte, und
      einmal je Block.
 
-   Offen: die Geofences selbst (Region Monitoring um die nächsten ein bis zwei
-   Stopps) und die Foto-/Zahlungssignale, die die Erkennung speisen.
+   - **Die Geofences selbst** (`TripGeofencePlan`, `TripDwellTracker`,
+     `TripVisitMonitor`): Region Monitoring um die nächsten ein bis zwei Stopps
+     plus significant location change, wie §7.1 es vorgibt. Der Radius richtet
+     sich nach der Objektgröße — ein Aussichtspunkt ist ein Punkt, ein Park ist
+     dreihundert Meter in jede Richtung, und ein Radius für beides verfehlt
+     entweder den einen oder zählt den Vorbeiweg am anderen. Erledigte *und*
+     verworfene Stopps bekommen keinen Zaun: der eine wäre eine Weckung ohne
+     Inhalt, der andere fragte nach etwas, das man bewusst gestrichen hat.
+
+     Drei Fälle, die still schiefgehen und deshalb ausgeschrieben sind: ein
+     doppeltes „entered" (iOS liefert Regionsereignisse mehrfach) darf die Uhr
+     nicht zurückstellen, kurz bevor die Verweildauer greift; ein „exited" ohne
+     vorheriges „entered" (Kaltstart außerhalb) darf keinen Aufenthalt
+     erfinden; und ein laufender Aufenthalt ist „noch hier", nicht „null
+     Minuten". Was das Gerät verlässt, ist ausschließlich das Ereignis, nie die
+     Spur (§7.1).
+
+   - **Das Fotosignal** (`TripPhotoSignal`): Ein Foto zählt nur, wenn es *dort*
+     und *dann* aufgenommen wurde. Streng in beiden Hälften, weil ein Signal
+     mit der Verweildauer zusammen ohne Nachfrage handelt — ein Foto *von* der
+     Kathedrale vom Hügel gegenüber ist kein Beleg dafür, *an* ihr gewesen zu
+     sein.
+
+   **Signal 3 (Zahlung) — entschieden: vorerst weggelassen.** Mit den heutigen
+   Daten ist es nicht sauber zu bauen, und ein unsauberes zweites Signal ist
+   schlimmer als keines, weil zwei Signale ohne Nachfrage handeln.
+   `finance_transaction` führt zwar `counterparty`, aber `booking_date` ist das
+   *Buchungs*datum: eine Kartenzahlung bucht typischerweise am nächsten
+   Werktag, es gibt also kein Zeitfenster, sondern bestenfalls einen Tag.
+   `document_receipt_extraction` führt weder Kaufzeit noch Händlernamen. Dazu
+   kommt: **der trip-planner liest keine Finanzdaten** (entschieden). Verweil-
+   dauer und Foto tragen die Erkennung; Signal 3 wird erst wieder zum Thema,
+   wenn Belege eine echte Kaufzeit samt Händlernamen mitbringen — dann über den
+   Baustein aus §10.6, der mit §9.3 Stufe 4 geteilt wird und schon existiert
+   (`resolve-place.ts`).
 
    **Nachgezogen aus §9.1: die Einstellung „Navigation öffnen mit".** Die
    Mechanik stand seit der Kartenübergabe, aber es gab keine Oberfläche, die
