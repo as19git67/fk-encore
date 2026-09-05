@@ -17,6 +17,13 @@ struct TripView: View {
     @State private var startSheetName: String?
     @State private var errorMessage: String?
     @State private var showError = false
+    /// A planned trip (§8.1) whose dates say it is happening today.
+    /// Loaded so the two halves of "Reise" can find each other: the one
+    /// you planned and the one your photos go into.
+    @State private var runningPlan: TripPlanSummary?
+    /// The planned trip the toolbar link should open, when the tap came
+    /// from the banner.
+    @State private var openPlans = false
 
     var body: some View {
         Group {
@@ -50,9 +57,38 @@ struct TripView: View {
         } message: {
             Text(errorMessage ?? "")
         }
+        .navigationDestination(isPresented: $openPlans) { TripPlansListView() }
         .onAppear { consumeStartSuggestionHandoff() }
+        .task { await loadRunningPlan() }
         .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .active { consumeStartSuggestionHandoff() }
+            if newPhase == .active {
+                consumeStartSuggestionHandoff()
+                Task { await loadRunningPlan() }
+            }
+        }
+    }
+
+    /// Is one of the planned trips happening today?
+    ///
+    /// Answered from the dates rather than from anything anybody
+    /// pressed. A "start" button would have to be pressed on the one
+    /// morning nobody has their phone out, and it would be wrong the
+    /// moment a flight moved.
+    @MainActor
+    private func loadRunningPlan() async {
+        guard !store.isActive else {
+            runningPlan = nil
+            return
+        }
+        do {
+            let response: ListTripPlansResponse =
+                try await APIClient.shared.get("/trip-planner/plans")
+            let today = Date()
+            runningPlan = response.plans.first { $0.schedule(on: today).isRunning }
+        } catch {
+            // Silent: this is an offer, not a feature. A planner that
+            // cannot be reached must not put an error on the trip tab.
+            runningPlan = nil
         }
     }
 
@@ -72,6 +108,9 @@ struct TripView: View {
             if let suggestion = autoStart.pendingSuggestion {
                 autoStartBanner(suggestion)
                 Divider()
+            } else if let runningPlan {
+                plannedTripBanner(runningPlan)
+                Divider()
             }
             ContentUnavailableView {
                 Label("Kein aktiver Trip", systemImage: "map")
@@ -86,6 +125,44 @@ struct TripView: View {
                 .disabled(store.isProvisioning)
             }
         }
+    }
+
+    /// The planned trip is happening today, and trip mode is not on.
+    ///
+    /// The two "Reise" halves are separate on purpose — you plan months
+    /// ahead and you photograph on the day — but nothing connected them,
+    /// so a traveller standing on Marienplatz with a planned Munich trip
+    /// saw no sign of it. This is that connection, and it is an offer
+    /// rather than an automatism: starting trip mode creates an album,
+    /// which is not something to do behind somebody's back.
+    @MainActor
+    private func plannedTripBanner(_ plan: TripPlanSummary) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Image(systemName: "calendar.badge.clock")
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("„\(plan.displayTitle)“ läuft heute")
+                        .font(.subheadline.weight(.semibold))
+                    Text(plan.schedule(on: Date()).label)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            HStack(spacing: 8) {
+                Button("Trip starten") {
+                    startSheetName = plan.displayTitle
+                    showStartSheet = true
+                }
+                .buttonStyle(.borderedProminent)
+                Button("Plan öffnen") { openPlans = true }
+                    .buttonStyle(.bordered)
+                Spacer()
+            }
+        }
+        .padding()
+        .background(.thinMaterial)
     }
 
     /// Fallback for the auto-start suggestion when the notification was denied,

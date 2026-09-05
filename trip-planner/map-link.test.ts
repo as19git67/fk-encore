@@ -132,3 +132,23 @@ describe("parseMapLink", () => {
     });
   });
 });
+
+describe("what is not a map link", () => {
+  it("does not read a Google document as a place", () => {
+    // docs.google.com ends in google.com, and its `q=` is a search
+    // inside the document. A shared document becoming a place named
+    // after its title is worse than not recognising a link at all.
+    expect(parseMapLink("https://docs.google.com/document/d/abc/edit?q=Oststadt")).toBeNull();
+  });
+
+  it("does not read a Google search as a place", () => {
+    expect(parseMapLink("https://www.google.com/search?q=Museum+Musterstadt")).toBeNull();
+  });
+
+  it("still reads the real map paths", () => {
+    expect(parseMapLink("https://www.google.com/maps/search/?api=1&query=48.1,11.5")?.position)
+      .toEqual({ lat: 48.1, lon: 11.5 });
+    expect(parseMapLink("https://maps.google.com/?q=48.1,11.5")?.position)
+      .toEqual({ lat: 48.1, lon: 11.5 });
+  });
+});

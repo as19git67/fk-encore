@@ -35,6 +35,15 @@ final class TripPlannerViewModel {
     var legIndex: Int = 0
     var dayIndex: Int = 0
 
+    /// Set once the screen has landed on a day of its own accord, so
+    /// that reloading after a change does not yank the traveller back
+    /// to today while they are looking at Thursday.
+    private var hasPositioned = false
+
+    /// What "today" means. Injectable so the tests are not at the mercy
+    /// of the date the suite happens to run on.
+    var now: () -> Date = { Date() }
+
     /// Spots whose "Warum hier?" is open (§8.3), keyed by `osmRef`.
     var expandedReasons: Set<String> = []
 
@@ -318,6 +327,15 @@ final class TripPlannerViewModel {
         // was showing — clamp rather than leave the view pointing at
         // something that no longer exists.
         if let plan {
+            // A trip that is running opens on the day you are actually
+            // on. That is what "starting a trip" amounts to here: there
+            // is no button, because a button has to be pressed on the
+            // one morning nobody has their phone out (§8.5).
+            if !hasPositioned, let position = plan.position(on: now()) {
+                legIndex = position.legIndex
+                dayIndex = position.dayIndex
+            }
+            hasPositioned = true
             legIndex = min(legIndex, max(0, plan.legs.count - 1))
             if let leg = plan.legs.first(where: { $0.position == legIndex }) {
                 dayIndex = min(dayIndex, max(0, leg.days.count - 1))

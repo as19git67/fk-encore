@@ -108,3 +108,54 @@ describe("travelLeg across modes", () => {
     expect(travelLeg(FROM, FAR)).toEqual(walkingLeg(FROM, FAR));
   });
 });
+
+describe("transit means public transport and walking", () => {
+  const FROM = { lat: 48.37, lon: 10.9 };
+  /** ~330 m — three corners. */
+  const ROUND_THE_CORNER = { lat: 48.373, lon: 10.9 };
+  /** ~2.2 km — across town. */
+  const ACROSS_TOWN = { lat: 48.39, lon: 10.9 };
+
+  it("walks a hop that is quicker on foot than by tram", () => {
+    // Nobody waits ten minutes for a tram to go three corners, and a
+    // planner that charges the block for it plans a day nobody has.
+    const leg = travelLeg(FROM, ROUND_THE_CORNER, "transit");
+    expect(leg).toEqual(walkingLeg(FROM, ROUND_THE_CORNER));
+  });
+
+  it("says so on the card when the hop was walked", () => {
+    // The traveller sees which of the two won: "zu Fuß" for the hop
+    // across the square, "mit Öffentlichen" for the one across town.
+    expect(travelLeg(FROM, ROUND_THE_CORNER, "transit").travelClass).toBe("short_walk");
+    expect(travelLeg(FROM, ACROSS_TOWN, "transit").travelClass).toBe("long_ride");
+  });
+
+  it("takes the tram once it is quicker than walking", () => {
+    const ride = travelLeg(FROM, ACROSS_TOWN, "transit");
+    expect(ride.minutes).toBeLessThan(walkingLeg(FROM, ACROSS_TOWN).minutes);
+  });
+
+  it("is never slower than walking, at any distance", () => {
+    // The property that matters: choosing "ÖPNV" can only ever make the
+    // day cheaper than choosing "zu Fuß", never dearer. Without the
+    // per-hop choice this failed everywhere under ~740 m.
+    for (let metres = 50; metres <= 3_000; metres += 50) {
+      const to = { lat: FROM.lat + metres / 111_320, lon: FROM.lon };
+      expect(travelLeg(FROM, to, "transit").minutes)
+        .toBeLessThanOrEqual(walkingLeg(FROM, to).minutes);
+    }
+  });
+
+  it("leaves the car and the bicycle alone", () => {
+    // Both stay with you: abandoning the car for one hop and finding it
+    // again for the next is a decision with Park & Ride behind it, not
+    // an estimate the planner may quietly make (§4.2).
+    for (const mode of ["bike", "car"] as const) {
+      const leg = travelLeg(FROM, ROUND_THE_CORNER, mode);
+      expect(leg.travelClass).toBe("short_ride");
+      expect(leg.minutes).toBeGreaterThanOrEqual(
+        Math.round(leg.distanceM / (mode === "bike" ? 200 : 330)),
+      );
+    }
+  });
+});

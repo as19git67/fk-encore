@@ -280,8 +280,23 @@ enum TripTransportMode: String, CaseIterable, Sendable {
         switch self {
         case .foot:    return "zu Fuß"
         case .bike:    return "mit dem Rad"
-        case .transit: return "mit Öffentlichen"
+        // Not "mit Öffentlichen": the planner walks any hop that is
+        // quicker on foot than by tram, which is most hops in an old
+        // town. Naming only half of that would make the choice read
+        // like a promise never to walk again.
+        case .transit: return "ÖPNV & zu Fuß"
         case .car:     return "mit dem Auto"
+        }
+    }
+
+    /// The line under the option: what choosing it actually does to the
+    /// plan. Short enough for a picker row.
+    var hint: String {
+        switch self {
+        case .foot:    return "Alles im Laufradius"
+        case .bike:    return "Räder sind immer dabei"
+        case .transit: return "Kurze Wege laufen, lange fahren"
+        case .car:     return "Mit Parken gerechnet"
         }
     }
 }

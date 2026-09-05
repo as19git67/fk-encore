@@ -29,6 +29,7 @@ import {
   slugToPostgresDb,
   suggestForCoord,
 } from "../osm-admin/region.service";
+import { isCalendarDate, redateLegs } from "./leg-dates";
 import { redistribute, type CurrentBlock, type StopStatus } from "./redistribute";
 import { MoveError, moveStop } from "./move";
 import { solveDay, type PlannedBlock } from "./solver";
@@ -52,6 +53,8 @@ import {
   renamePlan,
   deletePlan,
   replanPlan,
+  updateLegFrames,
+  type LegFrameUpdate,
   type CreateDayInput,
   type CreateFixpointInput,
   type CreateLegInput,
@@ -314,6 +317,27 @@ export interface UpdateSettingsRequest {
   interests?: string[];
   maxWalkMinutes?: number;
   /**
+   * How the group gets around, for every leg of the trip (§4.2).
+   *
+   * The mode belongs to the leg, and a trip through three cities may
+   * genuinely want three different ones; this sets them all, because
+   * that is the question the settings screen asks. Changing it
+   * re-plans: the mode decides what is reachable within a block, so
+   * storing it and leaving the days alone would be a switch with
+   * nothing behind it.
+   */
+  mode?: TransportMode;
+  /**
+   * When the trip starts, as `YYYY-MM-DD`, or null to take the dates
+   * off again (§6.2 — "das Gerüst ändern: Zeitraum").
+   *
+   * Every leg moves with it, keeping the gaps between them. This does
+   * **not** re-plan and is not refused once a day has begun: which
+   * museum to see does not depend on the date, and a trip whose flight
+   * moved should not have to be planned again.
+   */
+  startDate?: string | null;
+  /**
    * Rebuild the days from the new settings. True by default. Pass false
    * to record the change and leave the plan exactly as it stands.
    */
@@ -335,13 +359,19 @@ export const updateTripSettings = api(
       await renamePlan(req.planId, userId, req.title.trim() || null);
     }
 
-    const replan = req.replan ?? true;
-    if (!replan) {
-      await replanPlan(req.planId, mergedConstraints(plan.constraints, req), []);
-      return { plan: await reload(req.planId, userId) };
-    }
+    // Not `validateMode` on its own: there, an absent mode means "on
+    // foot", and here it means "leave it as it is".
+    const mode = req.mode === undefined ? undefined : validateMode(req.mode);
 
-    const settled = firstSettledStop(plan);
+    // A change that only moves the frame — the name, the dates — is not
+    // a re-plan and is never refused: which museum to see does not
+    // depend on what day it is, and a flight that moved must not cost
+    // the traveller their plan.
+    const replan = (req.replan ?? true) && changesTheDays(req, mode);
+
+    // Before anything is written, so a refusal leaves the trip exactly
+    // as it was rather than with a new mode and the old days.
+    const settled = replan ? firstSettledStop(plan) : null;
     if (settled) {
       throw APIError.failedPrecondition(
         `„${settled}" ist schon abgehakt — ein begonnener Tag wird nicht neu geplant. `
@@ -349,10 +379,18 @@ export const updateTripSettings = api(
       );
     }
 
+    await moveFrame(plan, mode, req.startDate);
+
+    if (!replan) {
+      await replanPlan(req.planId, mergedConstraints(plan.constraints, req), []);
+      return { plan: await reload(req.planId, userId) };
+    }
+
     return await replanFromStoredSettings(
       plan,
       userId,
       mergedConstraints(plan.constraints, req),
+      { mode },
     );
   },
 );
@@ -371,6 +409,7 @@ async function replanFromStoredSettings(
   plan: StoredPlan,
   userId: number,
   override?: Record<string, unknown>,
+  frame?: { mode?: TransportMode },
 ): Promise<PlanResponse> {
   const constraints = override ?? plan.constraints;
         const pace = constraints.pace as Pace;
@@ -387,7 +426,7 @@ async function replanFromStoredSettings(
           title: leg.title ?? undefined,
           anchor: leg.anchor,
           anchorRadiusM: leg.anchorRadiusM ?? undefined,
-          mode: leg.mode,
+          mode: frame?.mode ?? leg.mode,
           days: leg.days.length,
           radiusM: leg.radiusM ?? undefined,
           startDate: leg.startDate ?? undefined,
@@ -456,6 +495,67 @@ function firstSettledStop(plan: StoredPlan): string | null {
     }
   }
   return null;
+}
+
+/**
+ * Does this change need the days planned again?
+ *
+ * The pace, the group, the interests, the longest walk and the mode all
+ * decide what fits in a block, so each of them makes the stored days
+ * stale. The name and the dates do not. Getting this wrong in the
+ * generous direction is not harmless: an unnecessary re-plan throws
+ * away the solver's arrangement of a trip and is refused outright once
+ * a day has begun, so renaming a running trip would fail for no reason.
+ */
+function changesTheDays(req: UpdateSettingsRequest, mode: TransportMode | undefined): boolean {
+  return mode !== undefined
+    || req.pace !== undefined
+    || req.group !== undefined
+    || req.categories !== undefined
+    || req.interests !== undefined
+    || req.maxWalkMinutes !== undefined;
+}
+
+/**
+ * Write the two frame properties a settings change may move: the mode
+ * of every leg, and when the trip starts.
+ *
+ * Both are on the legs rather than in the constraints, which is why
+ * they cannot ride along in `mergedConstraints`. Writing the mode here
+ * as well as passing it to the re-plan is deliberate: the re-plan
+ * rewrites days, not legs, and a mode that only reached the solver
+ * would be back to the old value on the next one.
+ */
+async function moveFrame(
+  plan: StoredPlan,
+  mode: TransportMode | undefined,
+  startDate: string | null | undefined,
+): Promise<void> {
+  const updates = new Map<number, LegFrameUpdate>();
+  if (mode !== undefined) {
+    for (const leg of plan.legs) updates.set(leg.id, { legId: leg.id, mode });
+  }
+  if (startDate !== undefined) {
+    if (startDate === null) {
+      for (const leg of plan.legs) {
+        updates.set(leg.id, { ...updates.get(leg.id), legId: leg.id, startDate: null });
+      }
+    } else {
+      if (!isCalendarDate(startDate)) {
+        throw APIError.invalidArgument(`startDate must be YYYY-MM-DD, got '${startDate}'`);
+      }
+      const dated = redateLegs(
+        [...plan.legs]
+          .sort((a, b) => a.position - b.position)
+          .map((leg) => ({ legId: leg.id, startDate: leg.startDate, days: leg.days.length })),
+        startDate,
+      );
+      for (const leg of dated) {
+        updates.set(leg.legId, { ...updates.get(leg.legId), legId: leg.legId, startDate: leg.startDate });
+      }
+    }
+  }
+  if (updates.size > 0) await updateLegFrames(plan.id, [...updates.values()]);
 }
 
 /**
