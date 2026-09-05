@@ -16,5 +16,6 @@ import "./plan";
 import "./plans";
 import "./interpret";
 import "./corridor";
+import "./food";
 
 export default new Service("trip-planner");

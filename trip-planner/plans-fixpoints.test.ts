@@ -42,6 +42,10 @@ function spot(n: number): GeoPoiSearchSpot {
     cuisine: null,
     wheelchair: null,
     outdoorSeating: null,
+    dietVegetarian: null,
+    dietVegan: null,
+    phone: null,
+    website: null,
     facadeAzimuth: null,
   };
 }

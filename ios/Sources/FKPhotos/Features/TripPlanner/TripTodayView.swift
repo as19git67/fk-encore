@@ -68,6 +68,18 @@ struct TripTodayView: View {
                             .foregroundStyle(block.usedMinutes > block.budgetMinutes ? .red : .secondary)
                     }
                 } footer: {
+                    if block.isMeal {
+                        // The planner framed the meal and stopped there
+                        // (§10.3, stage 1). Finding somewhere is stage
+                        // two, and it happens here, on the spot.
+                        NavigationLink {
+                            TripFoodListView(position: leg.anchor)
+                        } label: {
+                            Label("Essen in der Nähe", systemImage: "fork.knife")
+                                .font(.footnote)
+                        }
+                        .padding(.top, 4)
+                    }
                     if !block.stops.isEmpty {
                         Button {
                             // The whole block at once: Apple takes an

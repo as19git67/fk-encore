@@ -74,7 +74,15 @@ const SEED: SeedPoi[] = [
     osmId: 7,
     ...at(0.0005, 0.001),
     kind: "amenity=cafe",
-    tags: { amenity: "cafe", name: "Café am Beispielplatz", outdoor_seating: "yes" },
+    tags: {
+      amenity: "cafe",
+      name: "Café am Beispielplatz",
+      outdoor_seating: "yes",
+      "diet:vegetarian": "yes",
+      "diet:vegan": "limited",
+      phone: "+49 000 0000000",
+      "contact:website": "https://beispiel.test/cafe",
+    },
   },
   {
     // Far away — inside no test bbox and outside every test radius.
@@ -260,4 +268,27 @@ test("bad arguments are rejected before touching the database", async () => {
       }),
     PoiSearchError,
   );
+});
+
+test("returns the attributes a food list is filtered by", async (t) => {
+  if (skipUnlessDb(t)) return;
+  const { spots } = await searchPois(DB, { center: { ...CENTRE, radiusM: 500 } });
+  const cafe = spots.find((s) => s.id === 7)!;
+
+  // Kept verbatim rather than reduced to booleans: "limited" is a real
+  // answer, and flattening it to false would turn a usable place into
+  // an excluded one (§10.3).
+  assert.equal(cafe.dietVegetarian, "yes");
+  assert.equal(cafe.dietVegan, "limited");
+  assert.equal(cafe.outdoorSeating, "yes");
+
+  // Both `phone`/`website` and the `contact:` prefix are in live use.
+  assert.equal(cafe.phone, "+49 000 0000000");
+  assert.equal(cafe.website, "https://beispiel.test/cafe");
+
+  // Absent means unknown, not "no" — the caller must not read a missing
+  // tag as a refusal.
+  const museum = spots.find((s) => s.id === 1)!;
+  assert.equal(museum.dietVegetarian, null);
+  assert.equal(museum.phone, null);
 });
