@@ -101,6 +101,58 @@ struct TripBlock: Codable, Identifiable, Sendable {
     }
 }
 
+/// The nine categories the region search knows, in words.
+///
+/// Needed because a pool full of rows reading "Unbenannter Ort" is
+/// unusable: OpenStreetMap has no name for a great many viewpoints and
+/// not a few attractions, and after the prominence rule those are
+/// exactly the unnamed things that still deserve a place in a day. The
+/// name is genuinely missing and is never invented (§15.3) — but "ein
+/// Aussichtspunkt" is what the data actually says, and it is the
+/// difference between a list you can read and eleven identical lines.
+enum TripCategory {
+    private static let labels: [String: String] = [
+        "sight": "Sehenswürdigkeit",
+        "museum": "Museum",
+        "viewpoint": "Aussichtspunkt",
+        "worship": "Kirche oder Tempel",
+        "theatre": "Theater oder Kino",
+        "food": "Essen",
+        "cafe": "Café",
+        "essentials": "Alltägliches",
+        "outdoors": "Park oder Natur",
+    ]
+
+    static func label(_ id: String) -> String {
+        labels[id] ?? id
+    }
+
+    /// What to call a place OpenStreetMap left unnamed.
+    ///
+    /// Says which of the two it is — "ein Aussichtspunkt" reads as a
+    /// description, "Aussichtspunkt" as a name — so nobody mistakes it
+    /// for something the data provided.
+    static func unnamed(_ id: String) -> String {
+        labels[id].map { "\($0), ohne Namen" } ?? "Unbenannter Ort"
+    }
+
+    static let symbols: [String: String] = [
+        "sight": "building.columns",
+        "museum": "building.columns",
+        "viewpoint": "binoculars",
+        "worship": "building.2",
+        "theatre": "theatermasks",
+        "food": "fork.knife",
+        "cafe": "cup.and.saucer",
+        "essentials": "cart",
+        "outdoors": "tree",
+    ]
+
+    static func symbol(_ id: String) -> String {
+        symbols[id] ?? "mappin"
+    }
+}
+
 struct TripStop: Codable, Identifiable, Sendable {
     let rowId: Int
     let osmRef: String
@@ -115,13 +167,19 @@ struct TripStop: Codable, Identifiable, Sendable {
     let status: String
     /// Pinned stops are fixed points: kept where they are (§8.4).
     let pinned: Bool
+    /// Why it was saved and where from, carried over from the pool
+    /// entry when a find was planned (§9.2). Optional so a response
+    /// from an older server still decodes.
+    let note: String?
+    let sourceUrl: String?
 
     var id: Int { rowId }
     var stopStatus: TripStopStatus { TripStopStatus(raw: status) }
     var coordinate: TripCoordinate { TripCoordinate(lat: lat, lon: lon) }
     /// What to show when OpenStreetMap has no name for the place. Never
-    /// invented — an unnamed spot says so (§15.3).
-    var displayName: String { name ?? "Unbenannter Ort" }
+    /// invented — an unnamed spot says so (§15.3), in the words of what
+    /// it is rather than as eleven identical lines.
+    var displayName: String { name ?? TripCategory.unnamed(category) }
 }
 
 struct TripTravel: Codable, Sendable {
@@ -167,9 +225,22 @@ struct TripCandidate: Codable, Identifiable, Sendable {
     /// Why this scored as it did, in plain language — the "Warum hier?"
     /// the concept insists on (§3.8, §8.3).
     let reasons: [String]
+    /// search | manual — found by the planner, or brought in by a person
+    /// (§9.2). Optional so a response from an older server still decodes.
+    let origin: String?
+    /// Why somebody saved it, in their words. "Beste Pastéis laut Blog"
+    /// matters more than the name when you are choosing what to do with
+    /// an afternoon (§9.2).
+    let note: String?
+    /// Where it came from — the article, the map link (§9.2).
+    let sourceUrl: String?
+    /// True when no OSM entry matched: opening hours and category are
+    /// unknown rather than known-and-boring (§10.4).
+    let unmatched: Bool?
 
     var id: String { osmRef }
-    var displayName: String { name ?? "Unbenannter Ort" }
+    var isManual: Bool { origin == "manual" }
+    var displayName: String { name ?? TripCategory.unnamed(category) }
     var coordinate: TripCoordinate { TripCoordinate(lat: lat, lon: lon) }
 }
 

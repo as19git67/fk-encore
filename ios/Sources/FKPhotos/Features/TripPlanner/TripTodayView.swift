@@ -1,4 +1,3 @@
-import MapKit
 import SwiftUI
 
 /// The screen that matters while you are out (§8.5): the block you are
@@ -20,10 +19,16 @@ struct TripTodayView: View {
             if let day = viewModel.day, let leg = viewModel.leg {
                 content(day: day, leg: leg)
             } else {
-                ContentUnavailableView("Kein Tag geladen", systemImage: "sun.max")
+                ContentUnavailableView(
+                    "Kein Tag geladen",
+                    systemImage: "figure.walk",
+                    description: Text("Diese Ansicht ist die für unterwegs: der Block, in dem "
+                                      + "ihr gerade steckt, was davon noch aussteht, und "
+                                      + "„Umplanen“, wenn es anders kommt."),
+                )
             }
         }
-        .navigationTitle("Heute")
+        .navigationTitle("Unterwegs")
         .navigationBarTitleDisplayMode(.inline)
         .task { await viewModel.load() }
         .confirmationDialog(
@@ -146,14 +151,20 @@ struct TripTodayView: View {
 
     private func stopRow(_ stop: TripStop, leg: TripLeg) -> some View {
         HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(stop.displayName)
-                    .strikethrough(stop.stopStatus != .planned)
-                    .foregroundStyle(stop.stopStatus == .planned ? .primary : .secondary)
-                Text(TripClock.duration(stop.dwellMinutes))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            // The same detail screen the pool and the day view open.
+            NavigationLink {
+                TripSpotDetailView(spot: TripSpotDetail(stop), mode: leg.transportMode)
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(stop.displayName)
+                        .strikethrough(stop.stopStatus != .planned)
+                        .foregroundStyle(stop.stopStatus == .planned ? .primary : .secondary)
+                    Text(TripClock.duration(stop.dwellMinutes))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
+            .buttonStyle(.plain)
             Spacer()
             // Routing somewhere is only useful once you are travelling.
             // Planning at the kitchen table, the same tap should answer
@@ -229,12 +240,10 @@ struct TripTodayView: View {
     private func offer(_ choice: TripMapsChoice) {
         let availability = TripMapsAvailability(
             preference: TripMapsApp(rawValue: mapsPreference) ?? .apple,
-            googleAppInstalled: UIApplication.shared.canOpenURL(
-                URL(string: "\(TripMapsApp.googleScheme)://")!,
-            ),
+            googleAppInstalled: TripMapsOpen.googleInstalled,
         )
         if let app = availability.resolved {
-            open(choice, with: app)
+            TripMapsOpen.route(choice, using: app)
         } else {
             mapsChoice = choice
         }
@@ -242,20 +251,7 @@ struct TripTodayView: View {
 
     private func open(_ choice: TripMapsChoice, with app: TripMapsApp) {
         mapsChoice = nil
-        switch app {
-        case .apple:
-            openInAppleMaps(choice)
-        case .google, .ask:
-            // The universal URL rather than the scheme: it opens the app
-            // when it is there and the browser otherwise, so the choice
-            // still works if the scheme check failed for want of an
-            // Info.plist entry (§9.1).
-            guard let url = TripMapsURL.googleUniversal(
-                through: choice.coordinates,
-                mode: choice.routeMode,
-            ) else { return }
-            UIApplication.shared.open(url)
-        }
+        TripMapsOpen.route(choice, using: app)
     }
 
     /// Is a trip actually running?
@@ -269,46 +265,11 @@ struct TripTodayView: View {
 
     /// Show the spot, without a route.
     ///
-    /// Uses the same map app the traveller chose for everything else
-    /// (§9.1): the setting is about which app, not about which kind of
-    /// question.
+    /// The same map app the traveller chose for everything else (§9.1):
+    /// the setting is about which app, not about which question.
     private func showOnMap(_ stop: TripStop) {
-        switch TripMapsPreference.load() {
-        case .google:
-            if let url = TripMapsURL.googleLookup(stop.coordinate, name: stop.name) {
-                UIApplication.shared.open(url)
-                return
-            }
-            openPinInAppleMaps(stop)
-        case .apple, .ask:
-            // "Ask each time" is a question about routing — which app
-            // should take you there. Showing a pin is not that question,
-            // so it goes to Apple Maps, which is always installed.
-            openPinInAppleMaps(stop)
-        }
-    }
-
-    private func openPinInAppleMaps(_ stop: TripStop) {
-        let item = MKMapItem(placemark: MKPlacemark(
-            coordinate: CLLocationCoordinate2D(
-                latitude: stop.coordinate.lat, longitude: stop.coordinate.lon),
-        ))
-        item.name = stop.name
-        // No directions mode: without one, Maps shows the place rather
-        // than a route to it.
-        item.openInMaps()
-    }
-
-    private func openInAppleMaps(_ choice: TripMapsChoice) {
-        let items = choice.coordinates.map { coordinate in
-            MKMapItem(placemark: MKPlacemark(
-                coordinate: CLLocationCoordinate2D(latitude: coordinate.lat, longitude: coordinate.lon),
-            ))
-        }
-        guard !items.isEmpty else { return }
-        MKMapItem.openMaps(with: items, launchOptions: [
-            MKLaunchOptionsDirectionsModeKey: choice.routeMode.appleDirectionsMode,
-        ])
+        TripMapsOpen.pin(stop.coordinate, name: stop.name,
+                         using: TripMapsPreference.load())
     }
 }
 

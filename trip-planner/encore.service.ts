@@ -23,5 +23,6 @@ import "./add-find";
 import "./share";
 import "./search";
 import "./shares";
+import "./pool";
 
 export default new Service("trip-planner");

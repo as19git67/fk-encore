@@ -2777,6 +2777,11 @@ export const tripPlanStops = pgTable(
     status: text("status").notNull().default("planned"),
     // Pinned stops are fixed points: never moved automatically (§5).
     pinned: boolean("pinned").notNull().default(false),
+    // Carried over from the pool entry when a find is planned (§9.2):
+    // "Herkunft und Link bleiben erhalten" has to survive the one
+    // moment somebody acts on the find, which deletes the pool row.
+    note: text("note"),
+    source_url: text("source_url"),
   },
   (table) => [
     uniqueIndex("trip_plan_stops_block_position_key").on(table.block_id, table.position),

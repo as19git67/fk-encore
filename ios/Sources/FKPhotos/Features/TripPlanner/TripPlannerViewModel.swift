@@ -116,6 +116,65 @@ final class TripPlannerViewModel {
         }
     }
 
+    /// Put a candidate from the pool into a block (§5, §8.4).
+    ///
+    /// The traveller overruling the solver, which is a thing the
+    /// concept wants to be possible: the solver picks what fits a
+    /// budget, a person picks what they want. An overfull block is
+    /// reported and coloured, never refused — §8.4 is explicit that the
+    /// app shows the cost of the gesture rather than blocking it.
+    func place(_ candidate: TripCandidate, inBlock blockId: String, onDay day: Int) async {
+        struct Body: Encodable {
+            let legIndex: Int
+            let dayIndex: Int
+            let blockId: String
+            let osmRef: String
+        }
+        struct Response: Decodable {
+            let plan: TripPlan
+            let overfullBlockIds: [String]
+        }
+        do {
+            let response: Response = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/pool/place",
+                body: Body(legIndex: legIndex, dayIndex: day, blockId: blockId,
+                           osmRef: candidate.osmRef),
+            )
+            plan = response.plan
+            overfullBlockIds = Set(response.overfullBlockIds)
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Take a candidate out of the pool — "not this".
+    ///
+    /// No tombstone: a re-plan may well find it again, because the leg
+    /// really does still contain that museum. A hidden list of banished
+    /// spots nobody could see or undo would be worse than the honest
+    /// repeat.
+    func drop(_ candidate: TripCandidate) async {
+        struct Body: Encodable {
+            let legIndex: Int
+            let osmRef: String
+        }
+        struct Response: Decodable {
+            let plan: TripPlan
+            let dropped: Bool
+        }
+        do {
+            let response: Response = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/pool/drop",
+                body: Body(legIndex: legIndex, osmRef: candidate.osmRef),
+            )
+            plan = response.plan
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     /// "Umplanen" — the big button of §8.5.
     ///
     /// Everything it needs beyond the plan is *where* and *when*: the

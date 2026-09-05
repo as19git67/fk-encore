@@ -110,10 +110,16 @@ final class TripPlanModelsTests: XCTestCase {
         XCTAssertEqual(TripTransportMode(raw: "hovercraft"), .foot)
     }
 
-    func testUnnamedSpotSaysSoRatherThanShowingNothing() throws {
+    func testUnnamedSpotSaysWhatItIsRatherThanShowingNothing() throws {
+        // It used to read "Unbenannter Ort", which is true and useless:
+        // OpenStreetMap leaves most viewpoints and plenty of
+        // attractions unnamed, so a pool of them was a column of
+        // identical lines. The name is still missing and still never
+        // invented (§10.4) — the row just says which kind of thing it
+        // is, which the data does know.
         let stop = try decodePlan().plan.legs[0].days[0].blocks[0].stops[1]
         XCTAssertNil(stop.name)
-        XCTAssertEqual(stop.displayName, "Unbenannter Ort")
+        XCTAssertEqual(stop.displayName, "Sehenswürdigkeit, ohne Namen")
     }
 
     func testStopStatusAndPinning() throws {

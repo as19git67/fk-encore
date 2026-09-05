@@ -19,6 +19,9 @@ struct TripPlansListView: View {
     @State private var pendingShare: TripSharePayload?
     /// Which plan a pending share is being reviewed against.
     @State private var reviewing: TripShareReview?
+    /// The trip a deletion is being confirmed for. Held as the summary
+    /// rather than as a flag so the alert can say which one.
+    @State private var deleting: TripPlanSummary?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -52,6 +55,17 @@ struct TripPlansListView: View {
         }
         .navigationDestination(item: $openPlanId) { planId in
             TripPlanDayView(viewModel: TripPlannerViewModel(planId: planId))
+        }
+        .alert("Reise löschen?", isPresented: Binding(
+            get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+               presenting: deleting) { plan in
+            Button("Löschen", role: .destructive) {
+                Task { await delete(plan) }
+            }
+            Button("Abbrechen", role: .cancel) { deleting = nil }
+        } message: { plan in
+            Text("„\(plan.displayTitle)“ wird mit allen Tagen, Spots und dem Vorrat gelöscht. "
+                 + "Auch für alle, mit denen die Reise geteilt ist.")
         }
         .task {
             await load()
@@ -97,6 +111,17 @@ struct TripPlansListView: View {
                     TripPlanDayView(viewModel: TripPlannerViewModel(planId: plan.id))
                 } label: {
                     row(plan)
+                }
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        // Asked first, and by name. Everything else in
+                        // the planner is reversible; this is the one
+                        // thing that is not, and it takes the trip away
+                        // from everybody it was shared with.
+                        deleting = plan
+                    } label: {
+                        Label("Löschen", systemImage: "trash")
+                    }
                 }
             }
         }
@@ -166,6 +191,26 @@ struct TripPlansListView: View {
             .foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
+    }
+
+    /// Delete a trip (§6.2).
+    ///
+    /// Only the person who created it may: it goes for everybody it was
+    /// shared with, not only for whoever tapped. A companion who simply
+    /// wants out leaves through "Mitreisende" and needs nobody's
+    /// permission — the server says as much, and the message is shown
+    /// rather than swallowed.
+    private func delete(_ plan: TripPlanSummary) async {
+        deleting = nil
+        struct Response: Decodable { let deleted: Bool }
+        do {
+            let _: Response = try await APIClient.shared.delete(
+                "/trip-planner/plans/\(plan.id)")
+            plans.removeAll { $0.id == plan.id }
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func load() async {

@@ -42,6 +42,14 @@ export type StopStatus = "planned" | "done" | "skipped";
 export interface CurrentStop extends PlannedStop {
   status: StopStatus;
   pinned: boolean;
+  /**
+   * Why it was saved and where from, carried over from the pool entry
+   * when a find is planned (§9.2). Absent for the ordinary case: a spot
+   * the region search proposed has no note, and its reasons are the
+   * scoring ones.
+   */
+  note?: string | null;
+  sourceUrl?: string | null;
 }
 
 export interface CurrentBlock extends Omit<PlannedBlock, "stops"> {

@@ -63,3 +63,44 @@ struct TripSharePayload: Codable, Equatable, Sendable {
         case capturedAt
     }
 }
+
+/// Reading the open page (§9.3 stage 1).
+///
+/// In an extension rather than in the struct's body on purpose: a
+/// struct that declares an initialiser inside its own declaration
+/// loses the memberwise one, and every other construction of a
+/// payload goes through that.
+extension TripSharePayload {
+    /// What the page-reading script handed back (§9.3 stage 1).
+    ///
+    /// Safari runs `TripSharePageReading.js` inside the page the reader
+    /// is looking at and passes its result through as a property list.
+    /// Parsing it here, in the file both targets share, keeps it under
+    /// test: the extension itself cannot be unit-tested, and a key
+    /// renamed on one side of that boundary would make every share
+    /// arrive as a bare link with nobody the wiser.
+    ///
+    /// A selection wins over the whole page when there is one. Selecting
+    /// a paragraph before sharing is a deliberate act and says something
+    /// the page cannot: "this cafe", not "the eleven cafes in this
+    /// list". Below a few words it is treated as a slip of the finger
+    /// rather than an instruction.
+    init?(javaScriptResults: [String: Any], capturedAt: Date = Date()) {
+        let string = { (key: String) -> String? in
+            guard let value = javaScriptResults[key] as? String else { return nil }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+
+        let selection = string("selection")
+        let page = string("text")
+        let chosen = (selection?.count ?? 0) >= Self.minimumSelectionLength ? selection : page
+
+        self.init(url: string("url"), text: chosen, title: string("title"),
+                  capturedAt: capturedAt)
+        if isEmpty { return nil }
+    }
+
+    /// Shorter than this, a "selection" is a stray tap, not a choice.
+    static let minimumSelectionLength = 12
+}

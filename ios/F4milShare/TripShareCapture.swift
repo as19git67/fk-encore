@@ -88,14 +88,28 @@ struct TripShareCaptureView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// Read the attachments, preferring a URL over the text around it.
+    /// Read the attachments.
     ///
-    /// Safari shares both: the page's URL and, sometimes, a selection.
-    /// Both are useful and both are kept — the URL is where the find
-    /// came from (its provenance, §9.2), and the text saves the server
-    /// from having to fetch the page at all.
+    /// The page reading comes first and wins outright when it is there
+    /// (§9.3 stage 1). Safari runs `TripSharePageReading.js` inside the
+    /// page the reader is looking at and hands back its visible text,
+    /// which beats anything the server can fetch afterwards: the
+    /// browser has already dealt with the JavaScript, the cookie
+    /// banner, the login and the bot block. Everything below is the
+    /// fallback for a share that carries no page — a link out of a chat
+    /// app, a piece of text off a screenshot.
+    ///
+    /// Both a URL and text are kept when both arrive: the URL is where
+    /// the find came from (its provenance, §9.2), the text is what the
+    /// server would otherwise have to go and get.
     private func read() async {
         defer { isReading = false }
+
+        if let fromPage = await readOpenPage() {
+            payload = fromPage
+            return
+        }
+
         var url: String?
         var text: String?
 
@@ -127,6 +141,22 @@ struct TripShareCaptureView: View {
             return
         }
         payload = candidate
+    }
+
+    /// The result of the page-reading script, if Safari ran one.
+    ///
+    /// It arrives as a property list under a well-known key rather than
+    /// as its own attachment, which is why this cannot simply ask for a
+    /// text item and be done.
+    private func readOpenPage() async -> TripSharePayload? {
+        let type = UTType.propertyList.identifier
+        for provider in itemProviders where provider.hasItemConformingToTypeIdentifier(type) {
+            guard let item = await loadItem(provider, type) as? [String: Any],
+                  let results = item[NSExtensionJavaScriptPreprocessingResultsKey] as? [String: Any]
+            else { continue }
+            if let payload = TripSharePayload(javaScriptResults: results) { return payload }
+        }
+        return nil
     }
 
     private func loadItem(_ provider: NSItemProvider, _ typeIdentifier: String) async -> Any? {
@@ -184,6 +214,9 @@ enum ShareKind {
         let hasLinkOrText = providers.contains {
             $0.hasItemConformingToTypeIdentifier(UTType.url.identifier)
                 || $0.hasItemConformingToTypeIdentifier(UTType.plainText.identifier)
+                // A page Safari has already read for us (§9.3 stage 1)
+                // arrives as a property list and nothing else.
+                || $0.hasItemConformingToTypeIdentifier(UTType.propertyList.identifier)
         }
         return hasLinkOrText ? .tripFind : .photos
     }
