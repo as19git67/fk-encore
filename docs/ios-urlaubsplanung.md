@@ -1518,7 +1518,48 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    kein Zeitpunkt auf einer globalen Uhr — und offline auf dem Gerät muss
    dieselbe Rechnung herauskommen.
 
-   Offen aus diesem Schritt: Transfertage und die zwei Auflösungen.
+   **Umgesetzt — Transfertage.** Eine Etappe kann einen `transfer` tragen: die
+   Fahrt *in* sie hinein. Daraus werden zwei Dinge, die der Planer schon
+   versteht — ein `departure`-Fixpunkt am letzten Tag der Etappe, die man
+   verlässt, und ein späterer Beginn am ersten Tag der Etappe, die man betritt.
+   Ein Transfertag ist damit keine neue Art Tag, sondern ein gewöhnlicher mit
+   einer harten Kante an einem Ende.
+
+   Dabei kam ein Fehler heraus, den erst der Testlauf zeigte: Blöcke sind rein
+   relativ, ein späterer Beginn *verschob* sie also, statt sie wegfallen zu
+   lassen — der Ankunftstag hatte einen „Vormittag", der um 16:00 begann.
+   `scheduleDay` kennt jetzt neben dem tatsächlichen auch den *angenommenen*
+   Tagesbeginn: Blöcke, an denen der Tag vorbeigelaufen ist, fallen weg, der
+   erste noch erreichte wird angebrochen (Ankunft 16:00 → 90 Minuten Nachmittag,
+   dann ganzer Abend). Das greift nur beim Ankunftstag; danach ist der Tag
+   wieder relativ und Fixpunkte schieben ihn frei.
+
+   Was *auf* dem Weg liegt, bleibt eine getrennte Frage — die beantwortet die
+   Korridorsuche. Wie der Tag gerahmt wird, hängt nicht davon ab, ob jemand
+   anhalten will.
+
+   **Umgesetzt — zwei Auflösungen.** `detailDays` (Vorgabe 2) sagt, wie viele
+   Tage ab Reisebeginn sofort bis auf Spots geplant werden. Spätere Tage
+   bekommen ihren **Rahmen** — Blöcke mit Budgets, Fixpunkte — und bleiben
+   ansonsten in Reiseauflösung; `POST /trip-planner/plans/:planId/days/detail`
+   konkretisiert einen davon, üblicherweise am Vorabend.
+
+   - **Ein ungeplanter Tag ist kein leerer Tag.** Der Rahmen ist genau das,
+     worüber die Familie vorab abstimmt, also existiert er von Anfang an — der
+     letzte Zug hat den Nachmittag des vierten Tages schon gekürzt, bevor
+     überhaupt ein Spot für ihn erwogen wurde.
+   - **Das Detailbudget wird über die Reise verteilt, nicht je Etappe.** „Die
+     nächsten zwei Tage" heißt die nächsten zwei Tage, in welcher Etappe auch
+     immer sie liegen.
+   - **Der Vorrat wird nicht auf Tage verbraucht, die niemand angeschaut hat.**
+     Für einen Wochenendtrip fallen beide Auflösungen zusammen, genau wie §4.3
+     es beschreibt.
+   - **Einen schon geplanten Tag erneut zu detaillieren wird abgelehnt.** Es
+     würde stillschweigend wegwerfen, was angepinnt oder schon besucht ist;
+     dafür ist `redistribute` da.
+
+   Migration `0161_trip_plan_day_detail`: `detailed` am Tag, bestehende Zeilen
+   gelten als detailliert.
 7. **iOS-Oberfläche** — Blockkarten, Karte, Wischgesten, „Heute"-Modus,
    **Übergaben an Karten-Apps** (§9.1) und die Essensliste vor Ort (§10.3).
 8. **Standort** — Geofences um die nächsten Stopps, Erledigt-Erkennung,

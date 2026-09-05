@@ -33,6 +33,13 @@
 	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<!-- Without this, canOpenURL("comgooglemaps://") always answers "no"
+	     however the device is set up, and the Google Maps option in the
+	     planner's handoff vanishes with no error anywhere (§9.1). -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>comgooglemaps</string>
+	</array>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.photography</string>
 	<key>NSCameraUsageDescription</key>

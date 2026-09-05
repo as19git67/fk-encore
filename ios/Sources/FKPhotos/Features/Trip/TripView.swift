@@ -28,6 +28,18 @@ struct TripView: View {
         }
         .navigationTitle("Trip")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // The vacation planner lives next to trip mode rather than in
+            // a tab of its own: one is the trip you are on, the other the
+            // trip you are planning, and the tab bar is full.
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink {
+                    TripPlansListView()
+                } label: {
+                    Label("Urlaubsplanung", systemImage: "calendar.badge.clock")
+                }
+            }
+        }
         .sheet(isPresented: $showStartSheet) {
             TripStartSheet(suggestedName: startSheetName) { name in
                 Task { await start(name: name) }
