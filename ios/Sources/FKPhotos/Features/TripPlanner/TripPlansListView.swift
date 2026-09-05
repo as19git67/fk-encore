@@ -9,6 +9,10 @@ struct TripPlansListView: View {
     @State private var plans: [TripPlanSummary] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var isCreating = false
+    /// Set to the id of a plan just created, so the list opens it
+    /// straight away — nobody makes a trip in order to look at a list.
+    @State private var openPlanId: Int?
 
     var body: some View {
         Group {
@@ -18,11 +22,17 @@ struct TripPlansListView: View {
                 ContentUnavailableView("Pläne nicht verfügbar", systemImage: "map",
                                        description: Text(errorMessage))
             } else if plans.isEmpty {
-                ContentUnavailableView(
-                    "Noch keine Reise geplant",
-                    systemImage: "map",
-                    description: Text("Sag, wohin und wie lange — den Rest schlägt der Planer vor."),
-                )
+                ContentUnavailableView {
+                    Label("Noch keine Reise geplant", systemImage: "map")
+                } description: {
+                    Text("Sag, wohin und wie lange — den Rest schlägt der Planer vor.")
+                } actions: {
+                    // The sentence above promised somewhere to say it.
+                    // For a while there was nowhere, which left the
+                    // whole planner unreachable from the app.
+                    Button("Reise planen") { isCreating = true }
+                        .buttonStyle(.borderedProminent)
+                }
             } else {
                 List(plans) { plan in
                     NavigationLink {
@@ -34,8 +44,32 @@ struct TripPlansListView: View {
             }
         }
         .navigationTitle("Urlaubsplanung")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    isCreating = true
+                } label: {
+                    Label("Neue Reise", systemImage: "plus")
+                }
+            }
+        }
+        .sheet(isPresented: $isCreating) {
+            NavigationStack {
+                TripNewPlanView { planId in
+                    openPlanId = planId
+                }
+            }
+        }
+        .navigationDestination(item: $openPlanId) { planId in
+            TripPlanDayView(viewModel: TripPlannerViewModel(planId: planId))
+        }
         .task { await load() }
         .refreshable { await load() }
+        .onChange(of: isCreating) { _, nowCreating in
+            // The new trip has to appear in the list behind the sheet,
+            // not only in the screen that opened on top of it.
+            if !nowCreating { Task { await load() } }
+        }
     }
 
     private func row(_ plan: TripPlanSummary) -> some View {
