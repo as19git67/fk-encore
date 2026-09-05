@@ -1653,8 +1653,16 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
 
    **Noch offen:** Der Textauszug aus der *geöffneten* Seite (§9.3 Stufe 1,
    `NSExtensionJavaScriptPreprocessingFile`) und damit `WebPage`-Aktivierung;
-   solange greift für einen geteilten Link der Server-Abruf. Ebenso Fall 4,
-   die Suche in der App.
+   solange greift für einen geteilten Link der Server-Abruf.
+
+   **Fall 4, die Suche in der App** (`POST …/search`, `TripPlaceSearchView`):
+   der Weg herein, der funktionieren muss, wenn nichts anderes es tut — kein
+   Share Sheet, keine Karten-App, kein Sprachmodell. Zwei Dinge sagt die Liste
+   ausdrücklich statt durch Weglassen: Was schon im Plan ist, wird **markiert,
+   nicht versteckt** (eine still kürzere Liste liest sich wie „nicht in
+   OpenStreetMap"), und eine Region, die nicht erreichbar war, wird benannt —
+   „nichts gefunden" und „eine Region war nicht erreichbar" sind verschiedene
+   Antworten.
 8. **Standort** — Geofences um die nächsten Stopps, Erledigt-Erkennung,
    angebotene Neuverteilung, „was ist in der Nähe".
 

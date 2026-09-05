@@ -21,5 +21,6 @@ import "./visit";
 import "./nearby";
 import "./add-find";
 import "./share";
+import "./search";
 
 export default new Service("trip-planner");
