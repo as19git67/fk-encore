@@ -23,6 +23,7 @@ import { getGeoClient } from "../osm-admin/geo-client";
 import { pickRegion } from "../osm-admin/region-router";
 import { DEFAULT_DAY, shapeDay, type BlockTemplate, type GroupProfile, type Pace } from "./blocks";
 import { toCandidates, type ScoredCandidate } from "./candidates";
+import { requireOrganiser } from "./plan-access";
 import {
   createPending,
   slugToPostgresDb,
@@ -324,6 +325,10 @@ export const updateTripSettings = api(
     const userId = requireUser();
     const plan = await loadPlan(req.planId, userId);
     if (!plan) throw APIError.notFound("plan not found");
+    // Changing the frame is the organiser's, and only theirs (§6.2).
+    // Everything else on a trip — contributing spots, re-planning on
+    // the road — stays open to everybody who is on it.
+    await requireOrganiser(req.planId, userId, "Tempo und Begleitung");
 
     if (req.title !== undefined) {
       await renamePlan(req.planId, userId, req.title.trim() || null);

@@ -1707,6 +1707,30 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    Daten: „für Juli geplant" und „gerade unterwegs" sind verschiedene Zustände,
    und nur Trip Mode weiß, welcher gilt.
 
+   **Nachgereicht: die Reise teilen (§6.2).** Ein Plan gehörte strikt dem, der
+   ihn angelegt hatte — jede Abfrage filterte auf `owner_id`, also konnte
+   niemand sonst ihn auch nur sehen. Damit plante eine Person den
+   Familienurlaub, während alle anderen zusahen; §6.2 will das Gegenteil.
+
+   Umgesetzt als **eine Liste von Leuten**, nicht als Rechtematrix, weil es
+   genau eine Unterscheidung gibt: Der Organisator — wer die Reise angelegt hat
+   — darf den Rahmen ändern und einladen/entfernen. *Alles andere darf jeder*,
+   und nichts davon ist unterwegs eingeschränkt: „Wer vor Ort ist, darf
+   umplanen." Der Organisator ist bewusst **keine Freigabezeile**, sondern der
+   Eigentümer des Plans: eine versehentlich gelöschte Zeile könnte sonst eine
+   Reise zurücklassen, zu der niemand mehr jemanden einladen kann. Verlassen
+   darf sich jeder selbst — um Erlaubnis zu bitten, den Urlaub eines anderen
+   nicht weiter zu planen, wäre absurd.
+
+   Zwei Dinge, die die Tests festhalten, weil sie in die falsche Richtung
+   kippen können: Ein Mitreisender darf **Funde beitragen** (das ist der Zweck
+   des Teilens), und wer nie eingeladen wurde, bekommt **„plan not found"**
+   statt „keine Berechtigung" — dass es diesen Plan gibt, geht ihn nichts an.
+
+   Migration 0166 legt `trip_plan_shares` an; die `role`-Spalte existiert, damit
+   die Übergabe der Rolle (§6.2, „übertragbar") später ohne weitere Migration
+   auskommt.
+
    Damit ist Schritt 7 abgeschlossen.
 
    **§9.2 und §9.3 — eigene Funde herein.** Nicht Teil der nummerierten

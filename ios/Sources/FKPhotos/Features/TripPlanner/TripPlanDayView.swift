@@ -63,6 +63,12 @@ struct TripPlanDayView: View {
                         } label: {
                             Label("Ort suchen", systemImage: "magnifyingglass")
                         }
+                        // Who else is on the trip (§6.2).
+                        NavigationLink {
+                            TripParticipantsView(planId: viewModel.planId)
+                        } label: {
+                            Label("Mitreisende", systemImage: "person.2")
+                        }
                         Divider()
                         Button {
                             showSettings = true

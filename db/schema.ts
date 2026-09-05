@@ -2633,6 +2633,31 @@ export const tripPlans = pgTable(
  * way of getting around, region database — and therefore its own pool.
  * Redistribution stays inside a leg.
  */
+// Who else is on this trip (§6.2). The organiser is the plan's owner
+// and is not a row here; everyone else is a participant, who may do
+// everything except the organiser's three reserved rights.
+export const tripPlanShares = pgTable(
+  "trip_plan_shares",
+  {
+    id: serial("id").primaryKey(),
+    plan_id: integer("plan_id")
+      .notNull()
+      .references(() => tripPlans.id, { onDelete: "cascade" }),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // participant — the role column exists so a hand-over of the
+    // organiser role has somewhere to write (§6.2, "übertragbar").
+    role: text("role").notNull().default("participant"),
+    invited_by: integer("invited_by").references(() => users.id, { onDelete: "set null" }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("trip_plan_shares_plan_user_key").on(table.plan_id, table.user_id),
+    index("trip_plan_shares_user_idx").on(table.user_id),
+  ]
+);
+
 export const tripPlanLegs = pgTable(
   "trip_plan_legs",
   {

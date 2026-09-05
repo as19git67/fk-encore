@@ -17,6 +17,7 @@
  */
 
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { visibleToUser } from "./plan-access";
 import dbDefault from "../db/database";
 import {
   tripPlanBlocks,
@@ -291,7 +292,8 @@ export async function listPlans(
   const planRows = await db
     .select()
     .from(tripPlans)
-    .where(eq(tripPlans.owner_id, ownerId))
+    // Trips you created and trips you were invited to (§6.2).
+    .where(visibleToUser(ownerId))
     .orderBy(desc(tripPlans.updated_at));
   if (planRows.length === 0) return [];
 
@@ -403,7 +405,7 @@ async function stopBelongsToPlan(
       and(
         eq(tripPlanStops.id, stopId),
         eq(tripPlans.id, planId),
-        eq(tripPlans.owner_id, ownerId),
+        visibleToUser(ownerId),
       ),
     )
     .limit(1);
@@ -463,7 +465,7 @@ export async function loadPlan(
   const [plan] = await db
     .select()
     .from(tripPlans)
-    .where(and(eq(tripPlans.id, planId), eq(tripPlans.owner_id, ownerId)))
+    .where(and(eq(tripPlans.id, planId), visibleToUser(ownerId)))
     .limit(1);
   if (!plan) return null;
 
@@ -778,7 +780,15 @@ export async function replanPlan(
   }
 }
 
-/** Rename a trip. Separate from re-planning: a name changes nothing. */
+/**
+ * Rename a trip. Separate from re-planning: a name changes nothing.
+ *
+ * Owner-scoped rather than participant-scoped — the name is part of the
+ * frame, which §6.2 reserves for the organiser. The caller has already
+ * been through `requireOrganiser`; this is the second lock on the same
+ * door, because a store function that trusts its caller is one refactor
+ * away from being called by somebody who did not check.
+ */
 export async function renamePlan(
   planId: number,
   ownerId: number,
