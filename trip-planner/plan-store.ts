@@ -58,6 +58,14 @@ export interface StoredLeg {
   regionDb: string;
   /** ISO date of this leg's first day, or null when the trip has no dates. */
   startDate: string | null;
+  /**
+   * What this leg was searched with (migration 0165). Null means the
+   * planner default — which is also what legs written before that
+   * migration were planned with, so reading null and applying the
+   * default reproduces them exactly.
+   */
+  radiusM: number | null;
+  dayStartMinutes: number | null;
   days: StoredDay[];
   /** This leg's pool — redistribution never reaches across legs. */
   pool: ScoredCandidate[];
@@ -125,6 +133,12 @@ export interface CreateLegInput {
   mode?: TransportMode;
   regionDb: string;
   startDate?: string | null;
+  /**
+   * What this leg was searched with, kept so a re-plan can reproduce it
+   * (migration 0165). Null or absent means the planner default.
+   */
+  radiusM?: number | null;
+  dayStartMinutes?: number | null;
   days: readonly CreateDayInput[];
   pool: readonly ScoredCandidate[];
 }
@@ -159,59 +173,12 @@ export async function createPlan(input: CreatePlanInput, db: Db = dbDefault): Pr
         mode: legInput.mode ?? "foot",
         region_db: legInput.regionDb,
         start_date: legInput.startDate ?? null,
+        radius_m: legInput.radiusM ?? null,
+        day_starts_at: legInput.dayStartMinutes ?? null,
       })
       .returning({ id: tripPlanLegs.id });
 
-    for (const [dayIndex, dayInput] of legInput.days.entries()) {
-      const [day] = await db
-        .insert(tripPlanDays)
-        .values({ leg_id: leg.id, day_index: dayIndex, detailed: dayInput.detailed ?? true })
-        .returning({ id: tripPlanDays.id });
-
-      for (const fix of dayInput.fixpoints ?? []) {
-        await db.insert(tripPlanFixpoints).values({
-          day_id: day.id,
-          kind: fix.kind ?? "appointment",
-          label: fix.label,
-          start_minutes: fix.startMinutes,
-          duration_minutes: fix.durationMinutes ?? 0,
-          travel_minutes: fix.travelMinutes ?? 0,
-          buffer_minutes: fix.bufferMinutes ?? DEFAULT_BUFFER_MINUTES,
-          lat: fix.lat ?? null,
-          lon: fix.lon ?? null,
-        });
-      }
-
-      for (const [blockPosition, block] of dayInput.blocks.entries()) {
-        const [row] = await db
-          .insert(tripPlanBlocks)
-          .values({
-            day_id: day.id,
-            position: blockPosition,
-            template_id: block.id,
-            label: block.label,
-            kind: block.kind,
-            budget_minutes: block.budgetMinutes,
-            start_minutes: block.startMinutes ?? null,
-          })
-          .returning({ id: tripPlanBlocks.id });
-
-        for (const [stopPosition, stop] of block.stops.entries()) {
-          await db.insert(tripPlanStops).values({
-            block_id: row.id,
-            position: stopPosition,
-            osm_ref: stop.osmRef,
-            name: stop.name,
-            lat: stop.lat,
-            lon: stop.lon,
-            category: stop.category,
-            dwell_minutes: stop.dwellMinutes,
-            travel_minutes: stop.travelFromPrevious.minutes,
-            travel_distance_m: stop.travelFromPrevious.distanceM,
-          });
-        }
-      }
-    }
+    await insertDays(leg.id, legInput.days, db);
 
     if (legInput.pool.length > 0) {
       await db.insert(tripPlanPool).values(
@@ -231,6 +198,70 @@ export async function createPlan(input: CreatePlanInput, db: Db = dbDefault): Pr
   }
 
   return plan.id;
+}
+
+/**
+ * Write a leg's days, with their fixpoints, blocks and stops.
+ *
+ * Shared by creating a plan and re-planning one: the two write exactly
+ * the same rows, and a second copy of this loop is a second place for
+ * a column to be forgotten.
+ */
+async function insertDays(
+  legId: number,
+  days: readonly CreateDayInput[],
+  db: Db,
+): Promise<void> {
+  for (const [dayIndex, dayInput] of days.entries()) {
+    const [day] = await db
+      .insert(tripPlanDays)
+      .values({ leg_id: legId, day_index: dayIndex, detailed: dayInput.detailed ?? true })
+      .returning({ id: tripPlanDays.id });
+
+    for (const fix of dayInput.fixpoints ?? []) {
+      await db.insert(tripPlanFixpoints).values({
+        day_id: day.id,
+        kind: fix.kind ?? "appointment",
+        label: fix.label,
+        start_minutes: fix.startMinutes,
+        duration_minutes: fix.durationMinutes ?? 0,
+        travel_minutes: fix.travelMinutes ?? 0,
+        buffer_minutes: fix.bufferMinutes ?? DEFAULT_BUFFER_MINUTES,
+        lat: fix.lat ?? null,
+        lon: fix.lon ?? null,
+      });
+    }
+
+    for (const [blockPosition, block] of dayInput.blocks.entries()) {
+      const [row] = await db
+        .insert(tripPlanBlocks)
+        .values({
+          day_id: day.id,
+          position: blockPosition,
+          template_id: block.id,
+          label: block.label,
+          kind: block.kind,
+          budget_minutes: block.budgetMinutes,
+          start_minutes: block.startMinutes ?? null,
+        })
+        .returning({ id: tripPlanBlocks.id });
+
+      for (const [stopPosition, stop] of block.stops.entries()) {
+        await db.insert(tripPlanStops).values({
+          block_id: row.id,
+          position: stopPosition,
+          osm_ref: stop.osmRef,
+          name: stop.name,
+          lat: stop.lat,
+          lon: stop.lon,
+          category: stop.category,
+          dwell_minutes: stop.dwellMinutes,
+          travel_minutes: stop.travelFromPrevious.minutes,
+          travel_distance_m: stop.travelFromPrevious.distanceM,
+        });
+      }
+    }
+  }
 }
 
 /** One row of the plan list: enough to choose, not the whole plan. */
@@ -594,6 +625,8 @@ export async function loadPlan(
       mode: l.mode as TransportMode,
       regionDb: l.region_db,
       startDate: l.start_date,
+      radiusM: l.radius_m,
+      dayStartMinutes: l.day_starts_at,
       days: daysByLeg.get(l.id) ?? [],
       pool: poolByLeg.get(l.id) ?? [],
     })),
@@ -686,4 +719,74 @@ async function rewriteDay(
   }
 
   await db.update(tripPlans).set({ updated_at: new Date().toISOString() }).where(eq(tripPlans.id, planId));
+}
+
+/**
+ * Re-plan a trip in place: new days, new pool, same legs.
+ *
+ * The legs keep their rows on purpose. They carry the frame the
+ * traveller set — anchor, dates, mode, search radius — which a settings
+ * change does not touch, and they are what the manual pool entries hang
+ * off. Deleting and re-creating them would throw away everybody's own
+ * finds (§9.2) to change the pace, which is not a trade anyone offered.
+ *
+ * For the same reason the pool is replaced only where it came from the
+ * search: rows whose `origin` is not `search` were put there by a
+ * person and survive.
+ */
+export async function replanPlan(
+  planId: number,
+  constraints: Record<string, unknown>,
+  perLeg: ReadonlyArray<{ legId: number; days: readonly CreateDayInput[]; pool: readonly ScoredCandidate[] }>,
+  db: Db = dbDefault,
+): Promise<void> {
+  await db.update(tripPlans).set({ constraints }).where(eq(tripPlans.id, planId));
+
+  for (const leg of perLeg) {
+    await db.delete(tripPlanDays).where(eq(tripPlanDays.leg_id, leg.legId));
+    await insertDays(leg.legId, leg.days, db);
+
+    await db
+      .delete(tripPlanPool)
+      .where(and(eq(tripPlanPool.leg_id, leg.legId), eq(tripPlanPool.origin, "search")));
+
+    // What a person put there survives, and (leg_id, osm_ref) is
+    // unique — so a search result for a place somebody already added by
+    // hand is dropped rather than inserted on top of their note.
+    const kept = await db
+      .select({ osmRef: tripPlanPool.osm_ref })
+      .from(tripPlanPool)
+      .where(eq(tripPlanPool.leg_id, leg.legId));
+    const keptRefs = new Set(kept.map((r) => r.osmRef));
+    const fresh = leg.pool.filter((c) => !keptRefs.has(c.osmRef));
+
+    if (fresh.length > 0) {
+      await db.insert(tripPlanPool).values(
+        fresh.map((c) => ({
+          leg_id: leg.legId,
+          osm_ref: c.osmRef,
+          name: c.name,
+          lat: c.lat,
+          lon: c.lon,
+          category: c.category,
+          dwell_minutes: c.dwellMinutes,
+          score: c.score,
+          reasons: c.reasons,
+        })),
+      );
+    }
+  }
+}
+
+/** Rename a trip. Separate from re-planning: a name changes nothing. */
+export async function renamePlan(
+  planId: number,
+  ownerId: number,
+  title: string | null,
+  db: Db = dbDefault,
+): Promise<void> {
+  await db
+    .update(tripPlans)
+    .set({ title })
+    .where(and(eq(tripPlans.id, planId), eq(tripPlans.owner_id, ownerId)));
 }

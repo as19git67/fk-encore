@@ -2654,6 +2654,12 @@ export const tripPlanLegs = pgTable(
     region_db: text("region_db").notNull(),
     // Optional real dates; absent means "day 1, day 2, …".
     start_date: date("start_date"),
+    // What this leg was searched with, so it can be searched again when
+    // the settings change and the days are re-planned (migration 0165).
+    // Null means "the planner default", which is what rows written
+    // before that migration were planned with.
+    radius_m: integer("radius_m"),
+    day_starts_at: integer("day_starts_at"),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [uniqueIndex("trip_plan_legs_plan_position_key").on(table.plan_id, table.position)]

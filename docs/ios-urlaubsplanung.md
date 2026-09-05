@@ -1651,6 +1651,37 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    ein Satz, der eine andere Stadt nennt, verschiebt das Suchfeld, nie die
    Nadel (§15.3).
 
+   **Nachgereicht: Einstellungen ändern und der Vorrat.** Zwei Lücken, beim
+   Ausprobieren gemeldet.
+
+   Das „Wie" — Tempo, Begleitung, Interessen — war genau einmal einstellbar,
+   beim Anlegen. `PATCH …/plans/:planId/settings` ändert es nachträglich und
+   **plant die Tage neu**, weil Tempo und Begleitung das Blockbudget skalieren:
+   ein gespeicherter Wert, der die Tage unberührt ließe, wäre ein Schalter ohne
+   Wirkung. Erhalten bleiben der Rahmen (Etappen, Anker, Daten, Modus,
+   Suchradius) und **alles, was jemand von Hand in den Vorrat gelegt hat**
+   (§9.2) — den Pace zu ändern darf niemandes Recherche kosten. Abgelehnt wird,
+   sobald ein Stopp abgehakt ist: ein begonnener Tag ist eine Aufzeichnung, und
+   ihn einer nachträglich geänderten Einstellung anzupassen hieße, sie
+   umzuschreiben. Dafür gibt es unterwegs „Umplanen" (§5, §8.5), und die
+   Ablehnung sagt das.
+
+   Dabei fiel auf, dass die Etappe ihren **Suchradius gar nicht speicherte**
+   (ebenso wenig den Tagesbeginn). Ein Neuplanen hätte still auf die Vorgaben
+   zurückgegriffen — ein anderes Gebiet als das gewählte. Migration 0165 legt
+   beides zur Etappe; `null` heißt weiterhin „Vorgabe", was genau dem
+   entspricht, womit ältere Zeilen geplant wurden.
+
+   Der **Vorrat** war seit dem ersten Tag Daten und nirgends sichtbar — nur
+   indirekt über „Warum hier?" und die Zeile „Zurück in den Vorrat" nach einer
+   Umverteilung. Inzwischen führen vier Wege hinein (§9.2) und keiner führte
+   irgendwohin, wo man nachsehen konnte. `TripPoolView` zeigt ihn, bestbewertet
+   zuerst, mit den Begründungen und der Markierung „schon eingeplant". Bewusst
+   nur lesend: einen Kandidaten in einen bestimmten Block zu setzen ist eine
+   Entscheidung, die der Solver mit Budget und Fußweg im Blick trifft — ein
+   Bildschirm, der ihn irgendwohin fallen ließe, würde diese Rechnung entweder
+   verdoppeln oder ignorieren.
+
    Damit ist Schritt 7 abgeschlossen.
 
    **§9.2 und §9.3 — eigene Funde herein.** Nicht Teil der nummerierten

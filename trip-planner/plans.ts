@@ -22,7 +22,7 @@ import { requirePermission } from "../user/auth-handler";
 import { getGeoClient } from "../osm-admin/geo-client";
 import { pickRegion } from "../osm-admin/region-router";
 import { DEFAULT_DAY, shapeDay, type BlockTemplate, type GroupProfile, type Pace } from "./blocks";
-import { toCandidates } from "./candidates";
+import { toCandidates, type ScoredCandidate } from "./candidates";
 import { redistribute, type CurrentBlock, type StopStatus } from "./redistribute";
 import { MoveError, moveStop } from "./move";
 import { solveDay, type PlannedBlock } from "./solver";
@@ -43,6 +43,8 @@ import {
   setStopStatus,
   saveDayDetail,
   saveRedistribution,
+  renamePlan,
+  replanPlan,
   type CreateDayInput,
   type CreateFixpointInput,
   type CreateLegInput,
@@ -250,6 +252,177 @@ export const createTripPlan = api(
     return { plan, droppedBlocks };
   },
 );
+
+/**
+ * Changing how a trip is planned, after it was planned (§4.1, §6.2).
+ *
+ * The pace, who is travelling and what they like were settable exactly
+ * once — when the plan was created — and nowhere afterwards. "Eher
+ * gemütlich" is the sort of thing you learn on the second day, and §6.2
+ * lists changing the frame among the three things the organiser may do.
+ *
+ * **Changing a setting re-plans the days**, and it has to: the pace and
+ * the group scale a block's budget, so storing the value and leaving
+ * the days alone would be a switch with nothing behind it. What
+ * survives is the frame the traveller set — the legs, their anchors,
+ * dates, modes and search radius — plus every pool entry a person put
+ * there themselves (§9.2). What is thrown away is the solver's choice
+ * of spots, which is the thing the new setting is meant to change.
+ *
+ * **It refuses once a stop has been settled.** A day with something
+ * ticked off is a record of what happened, and re-planning it would
+ * rewrite that to match a setting changed afterwards. Adjusting a day
+ * you are standing in has its own mechanism and its own name —
+ * `POST …/redistribute` (§5, §8.5) — and the refusal says so rather
+ * than leaving the traveller to work it out.
+ */
+export interface UpdateSettingsRequest {
+  planId: number;
+  /** Every field is optional; an omitted one keeps its stored value. */
+  title?: string;
+  pace?: Pace;
+  group?: GroupProfile;
+  categories?: string[];
+  interests?: string[];
+  maxWalkMinutes?: number;
+  /**
+   * Rebuild the days from the new settings. True by default. Pass false
+   * to record the change and leave the plan exactly as it stands.
+   */
+  replan?: boolean;
+}
+
+export const updateTripSettings = api(
+  { expose: true, method: "PATCH", path: "/trip-planner/plans/:planId/settings", auth: true },
+  async (req: UpdateSettingsRequest): Promise<PlanResponse> => {
+    const userId = requireUser();
+    const plan = await loadPlan(req.planId, userId);
+    if (!plan) throw APIError.notFound("plan not found");
+
+    if (req.title !== undefined) {
+      await renamePlan(req.planId, userId, req.title.trim() || null);
+    }
+
+    const replan = req.replan ?? true;
+    if (!replan) {
+      await replanPlan(req.planId, mergedConstraints(plan.constraints, req), []);
+      return { plan: await reload(req.planId, userId) };
+    }
+
+    const settled = firstSettledStop(plan);
+    if (settled) {
+      throw APIError.failedPrecondition(
+        `„${settled}" ist schon abgehakt — ein begonnener Tag wird nicht neu geplant. `
+          + "Unterwegs hilft „Umplanen“; oder die Einstellung mit replan=false nur speichern.",
+      );
+    }
+
+    const constraints = mergedConstraints(plan.constraints, req);
+    const pace = constraints.pace as Pace;
+    const group = (constraints.group ?? undefined) as GroupProfile | undefined;
+    const maxWalkMinutes = validateMaxWalk((constraints.maxWalkMinutes ?? undefined) as number | undefined);
+    const shape = shapeDay(DEFAULT_DAY, pace, group);
+
+    const perLeg: Array<{ legId: number; days: CreateDayInput[]; pool: ScoredCandidate[] }> = [];
+    const droppedBlocks: DroppedBlockReport[] = [];
+    for (const leg of plan.legs) {
+      const planned = await planLeg(
+        {
+          title: leg.title ?? undefined,
+          anchor: leg.anchor,
+          anchorRadiusM: leg.anchorRadiusM ?? undefined,
+          mode: leg.mode,
+          days: leg.days.length,
+          radiusM: leg.radiusM ?? undefined,
+          startDate: leg.startDate ?? undefined,
+          dayStartsAt: leg.dayStartMinutes === null
+            ? undefined
+            : formatMinutesOfDay(leg.dayStartMinutes),
+          fixpoints: leg.days.flatMap((day) =>
+            day.fixpoints.map((f) => ({
+              dayIndex: day.dayIndex,
+              label: f.label,
+              at: formatMinutesOfDay(f.startMinutes),
+              kind: f.kind,
+              durationMinutes: f.durationMinutes,
+              travelMinutes: f.travelMinutes,
+              bufferMinutes: f.bufferMinutes,
+              lat: f.lat ?? undefined,
+              lon: f.lon ?? undefined,
+            }))),
+        },
+        {
+          shape,
+          maxWalkMinutes,
+          categories: (constraints.categories ?? undefined) as string[] | undefined,
+          interests: (constraints.interests ?? undefined) as string[] | undefined,
+          // How far a day is planned out stays as it was: re-planning
+          // answers "what should we see", not "how far ahead".
+          detailDays: leg.days.filter((d) => d.detailed).length,
+        },
+      );
+      perLeg.push({
+        legId: leg.id,
+        days: [...planned.leg.days] as CreateDayInput[],
+        pool: [...planned.leg.pool],
+      });
+      for (const d of planned.dropped) droppedBlocks.push({ ...d, legIndex: leg.position });
+    }
+
+    await replanPlan(req.planId, constraints, perLeg);
+    return { plan: await reload(req.planId, userId), droppedBlocks };
+  },
+);
+
+async function reload(planId: number, userId: number): Promise<StoredPlan> {
+  const plan = await loadPlan(planId, userId);
+  if (!plan) throw APIError.internal("plan vanished while it was being written");
+  return plan;
+}
+
+/**
+ * The first stop anybody has settled, by name.
+ *
+ * A name rather than a boolean: "„Stadtmuseum“ ist schon abgehakt" is a
+ * sentence the traveller can act on; "the trip has started" leaves them
+ * hunting for what started it.
+ */
+function firstSettledStop(plan: StoredPlan): string | null {
+  for (const leg of plan.legs) {
+    for (const day of leg.days) {
+      for (const block of day.blocks) {
+        for (const stop of block.stops) {
+          if (stop.status !== "planned") return stop.name ?? stop.osmRef;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Stored settings plus what the request changed. An omitted field keeps
+ * its value — a screen changing the pace must not quietly drop the
+ * interests along with it.
+ */
+function mergedConstraints(
+  stored: Record<string, unknown>,
+  req: UpdateSettingsRequest,
+): Record<string, unknown> {
+  return {
+    categories: req.categories ?? stored.categories ?? null,
+    interests: req.interests ?? stored.interests ?? null,
+    pace: req.pace ?? stored.pace ?? "normal",
+    group: req.group ?? stored.group ?? null,
+    maxWalkMinutes: req.maxWalkMinutes ?? stored.maxWalkMinutes ?? null,
+  };
+}
+
+/** Minutes past midnight back to the "HH:MM" the request types use. */
+function formatMinutesOfDay(minutes: number): string {
+  const wrapped = ((minutes % 1440) + 1440) % 1440;
+  return `${String(Math.floor(wrapped / 60)).padStart(2, "0")}:${String(wrapped % 60).padStart(2, "0")}`;
+}
 
 export interface ListPlansResponse {
   plans: PlanSummary[];
@@ -752,6 +925,10 @@ async function planLeg(
       mode,
       regionDb: region.postgresDb,
       startDate,
+      // Kept with the leg so a re-plan searches the same area at the
+      // same hour rather than falling back to the defaults (0165).
+      radiusM,
+      dayStartMinutes,
       days,
       pool: available,
     },
