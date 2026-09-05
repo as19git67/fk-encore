@@ -40,8 +40,21 @@ export async function interpretTripRequest(
   categories: readonly CategoryVocabularyEntry[],
   timeoutMs = DEFAULT_TIMEOUT_MS,
 ): Promise<unknown> {
-  const prompt = buildInterpretPrompt(text, categories);
+  return await askForJson(buildInterpretPrompt(text, categories), timeoutMs);
+}
 
+/**
+ * Put one prompt to the model and hand back whatever JSON came out.
+ *
+ * The transport, and nothing else. Every caller pairs it with a
+ * validator of its own — `normalizeConstraints` for a sentence,
+ * `parseExtractedPlaces` for an article — because the one thing this
+ * layer must not do is decide that a response is usable.
+ */
+export async function askForJson(
+  prompt: string,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let resp: Response;

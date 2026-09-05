@@ -90,6 +90,13 @@ export interface GeoPoiSearchQuery {
   };
   /** Category ids from GET /pois/categories. Omitted = all of them. */
   categories?: string[];
+  /**
+   * Keep only spots whose name contains this, case and diacritics
+   * folded away. A substring, not an identity — which of the matches is
+   * the place meant is decided by the caller (see
+   * `trip-planner/resolve-place.ts`).
+   */
+  name?: string;
   limit?: number;
   offset?: number;
 }
@@ -295,7 +302,9 @@ export class HttpGeoClient implements GeoClient {
       database: postgresDb,
       bbox: query.bbox,
       center: query.center,
+      corridor: query.corridor,
       categories: query.categories,
+      name: query.name,
       limit: query.limit,
       offset: query.offset,
     });

@@ -13,11 +13,21 @@ class ShareViewController: UIViewController {
         super.viewDidLoad()
         let providers = (extensionContext?.inputItems as? [NSExtensionItem])?
             .flatMap { $0.attachments ?? [] } ?? []
-        let root = ShareUploadView(
-            extensionContext: extensionContext!,
-            itemProviders: providers
-        )
-        let host = UIHostingController(rootView: root)
+        // Photos keep the flow they have always had; a link or a piece
+        // of text is a find for the trip planner (§9.2).
+        let host: UIHostingController<AnyView>
+        switch ShareKind.of(providers) {
+        case .photos:
+            host = UIHostingController(rootView: AnyView(ShareUploadView(
+                extensionContext: extensionContext!,
+                itemProviders: providers
+            )))
+        case .tripFind:
+            host = UIHostingController(rootView: AnyView(TripShareCaptureView(
+                extensionContext: extensionContext!,
+                itemProviders: providers
+            )))
+        }
         addChild(host)
         view.addSubview(host.view)
         host.view.translatesAutoresizingMaskIntoConstraints = false

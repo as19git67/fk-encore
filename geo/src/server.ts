@@ -350,6 +350,10 @@ function parseSearchBody(body: unknown): { database: string; options: PoiSearchO
     }
     options.categories = b.categories as string[];
   }
+  if (b.name !== undefined && b.name !== null) {
+    if (typeof b.name !== "string") throw new HttpError(400, "name must be a string");
+    options.name = b.name;
+  }
 
   return { database, options };
 }

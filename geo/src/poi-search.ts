@@ -20,6 +20,7 @@
  */
 
 import { poolFor } from "./db.ts";
+import { foldName, foldNameSql, foldedLikePattern } from "./name-fold.ts";
 import { allCategoryIds, categoryById } from "./poi-categories.ts";
 
 export interface BoundingBox {
@@ -53,6 +54,19 @@ export interface PoiSearchArea {
 export interface PoiSearchOptions extends PoiSearchArea {
   /** Category ids from `poi-categories.ts`. Omitted or empty = all. */
   categories?: readonly string[];
+  /**
+   * Keep only spots whose name contains this, compared with diacritics
+   * and case folded away (see `name-fold.ts`). Matched against `name`,
+   * `name:de` and `name:en`, because the name a person has is often not
+   * the one the local language uses.
+   *
+   * A substring rather than an exact match: a blog writes "Pastéis de
+   * Belém" where OSM has "Fábrica dos Pastéis de Belém", and an exact
+   * comparison would find nothing at all. Deciding which of the
+   * returned rows is *the* place asked for is the caller's job — this
+   * narrows, it does not resolve.
+   */
+  name?: string;
   /** Page size. Defaults to 200, capped at MAX_LIMIT. */
   limit?: number;
   /** Rows to skip, for paging. Defaults to 0. */
@@ -175,6 +189,7 @@ export async function searchPois(
   const params: unknown[] = [];
   const areaClause = buildAreaClause(opts, params);
   const tagClause = buildTagClause(categories, params);
+  const nameClause = buildNameClause(opts.name, params);
 
   // One row beyond the page tells us whether a next page exists without
   // a second COUNT(*) over the same area.
@@ -234,7 +249,7 @@ export async function searchPois(
       ${detourSelect}   AS detour_m
     FROM osm_pois
     WHERE ${areaClause}
-      AND (${tagClause})
+      AND (${tagClause})${nameClause}
     ORDER BY ${orderBy}
     LIMIT ${limitParam} OFFSET ${offsetParam}
   `;
@@ -428,6 +443,28 @@ function greatCircleMetres(
     Math.sin(dLat / 2) ** 2 +
     Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLon / 2) ** 2;
   return 2 * EARTH_RADIUS_M * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/**
+ * The name filter, or the empty string when there is none.
+ *
+ * Both sides of the comparison are folded, which rules out an index on
+ * the raw name — but the area clause has already narrowed the rows to
+ * one disc or box, so this runs over a bounded set rather than a
+ * region. Searching a whole country by name would need its own index
+ * and is not what this is for.
+ */
+function buildNameClause(name: string | undefined, params: unknown[]): string {
+  if (name === undefined) return "";
+  const folded = foldName(name);
+  if (folded.length === 0) {
+    throw new PoiSearchError("name must not be blank");
+  }
+  params.push(foldedLikePattern(folded));
+  const pattern = `$${params.length}`;
+  const fields = ["tags->>'name'", "tags->>'name:de'", "tags->>'name:en'"];
+  const clauses = fields.map((f) => `${foldNameSql(`coalesce(${f}, '')`)} LIKE ${pattern}`);
+  return `\n      AND (${clauses.join(" OR ")})`;
 }
 
 function buildTagClause(categories: readonly string[], params: unknown[]): string {

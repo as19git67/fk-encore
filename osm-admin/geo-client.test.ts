@@ -50,3 +50,47 @@ describe("HttpGeoClient replication API", () => {
     );
   });
 });
+
+describe("HttpGeoClient POI search", () => {
+  /**
+   * The corridor search was unreachable for a while: geo understood it,
+   * the planner sent it, and this client quietly dropped it on the way
+   * — every corridor request arrived without an area and came back a
+   * 400. Nothing noticed, because the planner's own tests use a fake
+   * client and geo's tests call the search function directly.
+   *
+   * So this test does not assert one field. It walks the query object
+   * and insists every key of it reaches the wire, which is the property
+   * that was actually violated and the one that breaks again the next
+   * time a search option is added.
+   */
+  it("forwards every field of the query to the geo service", async () => {
+    let sent: Record<string, unknown> = {};
+    const fetcher = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      sent = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ database: "nom_bayern", spots: [], hasMore: false }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const client = new HttpGeoClient({ fetcher: fetcher as typeof fetch });
+
+    const query = {
+      corridor: {
+        from: { lat: 48.1, lon: 11.5 },
+        to: { lat: 49.4, lon: 11.0 },
+        detourBudgetM: 4000,
+      },
+      categories: ["museum"],
+      name: "Beispielmuseum",
+      limit: 25,
+      offset: 50,
+    };
+    await client.searchPois("nom_bayern", query);
+
+    expect(sent.database).toBe("nom_bayern");
+    for (const [key, value] of Object.entries(query)) {
+      expect(sent[key], `query.${key} never reached the request body`).toEqual(value);
+    }
+  });
+});
