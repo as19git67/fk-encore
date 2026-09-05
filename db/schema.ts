@@ -2753,6 +2753,53 @@ export const tripPlanStops = pgTable(
   ]
 );
 
+/**
+ * Where the travellers actually were (§6.4). Only the event ever leaves
+ * the phone — the position itself stays on the device (§7.1).
+ *
+ * Per person, not per group: after a split the history would otherwise
+ * not know who saw the temple.
+ */
+export const tripPlanVisits = pgTable(
+  "trip_plan_visits",
+  {
+    id: serial("id").primaryKey(),
+    plan_id: integer("plan_id")
+      .notNull()
+      .references(() => tripPlans.id, { onDelete: "cascade" }),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // The planned stop this confirms, when it confirms one. Null for an
+    // unplanned stay — the more valuable half of §6.4.
+    stop_id: integer("stop_id").references(() => tripPlanStops.id, { onDelete: "set null" }),
+    osm_ref: text("osm_ref"),
+    name: text("name"),
+    lat: doublePrecision("lat").notNull(),
+    lon: doublePrecision("lon").notNull(),
+    arrived_at: timestamp("arrived_at", { mode: "string", withTimezone: true }).notNull(),
+    left_at: timestamp("left_at", { mode: "string", withTimezone: true }),
+    // dwell | photo | payment | manual — the list, not a boolean, so the
+    // row can say why it believes what it believes.
+    sources: jsonb("sources").notNull().default([]),
+    confirmed: boolean("confirmed").notNull().default(false),
+    // Set when the traveller answered no, so the stay is not offered again.
+    dismissed: boolean("dismissed").notNull().default(false),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("trip_plan_visits_plan_idx").on(table.plan_id, table.arrived_at),
+    index("trip_plan_visits_stop_idx").on(table.stop_id),
+    // The migration declares this one NULLS NOT DISTINCT, which this
+    // drizzle version cannot express: two unplanned stays by the same
+    // person at the same instant are the same stay, so a re-sync does
+    // not double the diary. Declared here for the query builder, which
+    // needs the columns to infer the upsert's conflict target.
+    uniqueIndex("trip_plan_visits_person_place_arrival_key")
+      .on(table.plan_id, table.user_id, table.osm_ref, table.arrived_at),
+  ]
+);
+
 export const tripPlanPool = pgTable(
   "trip_plan_pool",
   {

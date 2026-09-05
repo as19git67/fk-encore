@@ -1619,6 +1619,42 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    Damit ist Schritt 7 abgeschlossen.
 8. **Standort** — Geofences um die nächsten Stopps, Erledigt-Erkennung,
    angebotene Neuverteilung, „was ist in der Nähe".
+
+   **Teilweise umgesetzt.** Die Grenze aus §7.1 hat die Aufteilung bestimmt:
+   Der Standort bleibt auf dem Gerät, zum Server geht nur das *Ereignis*
+   („X war an Y von 13:40 bis 14:20, weil Verweildauer und Foto").
+   Eine Tabelle von Koordinaten über die Zeit wäre ein anderes Produkt als ein
+   Reisetagebuch.
+
+   - **Erledigt-Erkennung** (`visits.ts`, `POST …/visits`): Die Schwelle ist das
+     Größere aus zehn Minuten und einem Viertel der geplanten Dauer — nicht das
+     Kleinere. Ein Viertel allein ließe zwei Minuten am Aussichtspunkt zählen,
+     zehn Minuten allein einen Gang über den Museumsvorplatz. Für Spots, die
+     zwischen zwei anderen liegen, das Anderthalbfache.
+   - **Ein Signal fragt, zwei handeln.** Ein falscher Haken kostet einen Wisch,
+     ein Fehlalarm unterbricht den Urlaub. Das Urteil wird **serverseitig neu
+     gebildet**, nicht dem Gerät geglaubt: Die Regel ist eine Produkt-
+     entscheidung, und eine, die an zwei Stellen lebt, driftet.
+   - **Ein „nein" wird gemerkt, nicht gelöscht.** Sonst erkennt der nächste Sync
+     denselben Aufenthalt und fragt wieder — genau das Nörgeln, das §6.4
+     vermeiden will.
+   - **Ungeplante Aufenthalte** werden mitgeschrieben (`stop_id` null). Das ist
+     die wertvollere Hälfte: die App zeichnet den Tag auf, der stattfand, statt
+     den geplanten abzuhaken.
+   - **„Was ist in der Nähe?"** (`POST /trip-planner/nearby`) zieht **zuerst aus
+     dem Vorrat der Etappe**, erst dahinter aus der Regionssuche. Die Reisenden
+     haben dem Planer schon gesagt, was sie mögen; eine frische ungefilterte
+     Suche beantwortete eine andere Frage als der Plan, und beide widersprächen
+     sich still. Bereits Eingeplantes wird markiert, nicht versteckt.
+   - **Die angebotene Neuverteilung** (`TripArrivalHeuristic`) prüft die direkte
+     Frage — passt das Übrige in die übrige Zeit? —, nicht einen
+     Fortschrittsbruch. „Zwei von vier bei halbem Block" klingt richtig und ist
+     es nicht: zwei lange und zwei kurze Stopps machen die Zahl bedeutungslos.
+     Zwei Bremsen halten es vom Nörgeln ab: nicht vor der Blockhälfte, und
+     einmal je Block.
+
+   Offen: die Geofences selbst (Region Monitoring um die nächsten ein bis zwei
+   Stopps) und die Foto-/Zahlungssignale, die die Erkennung speisen.
 9. **Wetter & Licht** — Open-Meteo-Anbindung mit Cache, Indoor/Outdoor-Ableitung,
    Sonnenstandsmodul, Lichthinweise, Abendblock-Vorschlag und der Zeit-Regler
    (§8.3). Das **Horizontprofil** aus dem Höhenmodell (§7.3) gehört hierher —
