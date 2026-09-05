@@ -1682,6 +1682,31 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    Bildschirm, der ihn irgendwohin fallen ließe, würde diese Rechnung entweder
    verdoppeln oder ignorieren.
 
+   **Nachgereicht: eine Reise ohne importierte Region.** Der Planer lehnte ab
+   („no imported OSM region covers this location") und warf damit alles weg,
+   was der Reisende getippt hatte — wegen eines Downloads, den er selbst gar
+   nicht anstoßen konnte. §4.3 hat dafür längst eine Auflösung: Der Plan wird
+   **mit Rahmen, aber ohne Spots** gespeichert, und der Import wird angefragt.
+   Null Kandidaten ergeben genau diesen Rahmen — der Solver füllt das Budget,
+   das er bekommt, und ohne Kandidaten entstehen Blöcke ohne Stopps.
+
+   Die Anfrage läuft über dasselbe `createPending` wie die Regionsverwaltung
+   und erbt damit deren Regel, statt sie zu umgehen: eine kleine Region lädt
+   sofort, eine große wartet auf Freigabe. Wer eine Reise plant, verpflichtet
+   den Server nicht durch Eintippen eines Städtenamens zu fünfzig Gigabyte.
+   Die Antwort nennt unter `pendingRegions`, worauf welche Etappe wartet;
+   `POST …/plans/:planId/plan` füllt sie später und lehnt ab, solange die
+   Karten fehlen — „es lädt noch" ist etwas, worauf man warten kann, ein leerer
+   Tag ohne Erklärung nicht.
+
+   **Nachgereicht: das Karten-Icon am Stopp.** Es öffnete immer eine Route.
+   Eine Route von zu Hause zu einem Café, zu dem man nächsten Monat laufen
+   wird, ist eine Zahl, die niemand haben will — am Küchentisch ist die Frage
+   „wo ist das?". Läuft kein Trip (`TripStore.isActive`), zeigt dasselbe Icon
+   deshalb nur den Punkt. Der Planer entscheidet das nicht selbst anhand von
+   Daten: „für Juli geplant" und „gerade unterwegs" sind verschiedene Zustände,
+   und nur Trip Mode weiß, welcher gilt.
+
    Damit ist Schritt 7 abgeschlossen.
 
    **§9.2 und §9.3 — eigene Funde herein.** Nicht Teil der nummerierten

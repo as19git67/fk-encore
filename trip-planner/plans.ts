@@ -23,6 +23,11 @@ import { getGeoClient } from "../osm-admin/geo-client";
 import { pickRegion } from "../osm-admin/region-router";
 import { DEFAULT_DAY, shapeDay, type BlockTemplate, type GroupProfile, type Pace } from "./blocks";
 import { toCandidates, type ScoredCandidate } from "./candidates";
+import {
+  createPending,
+  slugToPostgresDb,
+  suggestForCoord,
+} from "../osm-admin/region.service";
 import { redistribute, type CurrentBlock, type StopStatus } from "./redistribute";
 import { MoveError, moveStop } from "./move";
 import { solveDay, type PlannedBlock } from "./solver";
@@ -189,12 +194,25 @@ export interface CreatePlanRequest {
 export interface PlanResponse {
   plan: StoredPlan;
   /**
+   * Legs whose OpenStreetMap region is not imported yet (§4.3). Their
+   * days have their frame — blocks with budgets, fixpoints — and no
+   * spots, and the import has been asked for. Empty for the ordinary
+   * case, which is what makes it safe to ignore.
+   */
+  pendingRegions?: PendingRegionReport[];
+  /**
    * Blocks the fixpoints left no room for, per leg and day. Empty for a
    * plan with no hard times. Reported rather than silently absent: "der
    * Zug lässt für den Abend keine Zeit mehr" is the sentence the app
    * shows (§8.3).
    */
   droppedBlocks?: DroppedBlockReport[];
+}
+
+export interface PendingRegionReport extends PendingRegion {
+  legIndex: number;
+  /** What to call the leg in a sentence. */
+  legTitle: string | null;
 }
 
 export interface DroppedBlockReport extends DroppedBlock {
@@ -215,6 +233,7 @@ export const createTripPlan = api(
 
     const legs: CreateLegInput[] = [];
     const droppedBlocks: DroppedBlockReport[] = [];
+    const pendingRegions: PendingRegionReport[] = [];
     // The detail budget is spent across the trip in order, not per leg:
     // "the next two days" means the next two days, whichever leg they
     // fall in.
@@ -232,6 +251,13 @@ export const createTripPlan = api(
       legs.push(planned.leg);
       detailBudget = Math.max(0, detailBudget - planned.leg.days.length);
       for (const d of planned.dropped) droppedBlocks.push({ ...d, legIndex });
+      if (planned.pending) {
+        pendingRegions.push({
+          ...planned.pending,
+          legIndex,
+          legTitle: leg.request.title ?? null,
+        });
+      }
     }
 
     const planId = await createPlan({
@@ -249,7 +275,7 @@ export const createTripPlan = api(
 
     const plan = await loadPlan(planId, userId);
     if (!plan) throw APIError.internal("plan vanished right after being written");
-    return { plan, droppedBlocks };
+    return { plan, droppedBlocks, pendingRegions };
   },
 );
 
@@ -317,14 +343,38 @@ export const updateTripSettings = api(
       );
     }
 
-    const constraints = mergedConstraints(plan.constraints, req);
-    const pace = constraints.pace as Pace;
+    return await replanFromStoredSettings(
+      plan,
+      userId,
+      mergedConstraints(plan.constraints, req),
+    );
+  },
+);
+
+/**
+ * Re-plan every leg of a trip from its stored settings.
+ *
+ * Shared by changing a setting and by filling in a trip that was saved
+ * before its region existed: both throw away the solver's choice of
+ * spots and keep everything else. One copy, because the list of what
+ * survives — legs, anchors, dates, the search radius, the pool entries
+ * a person added — is exactly the part that goes quietly wrong when it
+ * is written twice.
+ */
+async function replanFromStoredSettings(
+  plan: StoredPlan,
+  userId: number,
+  override?: Record<string, unknown>,
+): Promise<PlanResponse> {
+  const constraints = override ?? plan.constraints;
+        const pace = constraints.pace as Pace;
     const group = (constraints.group ?? undefined) as GroupProfile | undefined;
     const maxWalkMinutes = validateMaxWalk((constraints.maxWalkMinutes ?? undefined) as number | undefined);
     const shape = shapeDay(DEFAULT_DAY, pace, group);
 
     const perLeg: Array<{ legId: number; days: CreateDayInput[]; pool: ScoredCandidate[] }> = [];
     const droppedBlocks: DroppedBlockReport[] = [];
+    const pendingRegions: PendingRegionReport[] = [];
     for (const leg of plan.legs) {
       const planned = await planLeg(
         {
@@ -367,12 +417,14 @@ export const updateTripSettings = api(
         pool: [...planned.leg.pool],
       });
       for (const d of planned.dropped) droppedBlocks.push({ ...d, legIndex: leg.position });
+      if (planned.pending) {
+        pendingRegions.push({ ...planned.pending, legIndex: leg.position, legTitle: leg.title });
+      }
     }
 
-    await replanPlan(req.planId, constraints, perLeg);
-    return { plan: await reload(req.planId, userId), droppedBlocks };
-  },
-);
+  await replanPlan(plan.id, constraints, perLeg);
+  return { plan: await reload(plan.id, userId), droppedBlocks, pendingRegions };
+}
 
 async function reload(planId: number, userId: number): Promise<StoredPlan> {
   const plan = await loadPlan(planId, userId);
@@ -807,6 +859,50 @@ export const redistributeDay = api(
 );
 
 /**
+ * "Plant es jetzt" — fill in a trip that was saved before its region
+ * was ready (§4.3).
+ *
+ * The counterpart to saving a plan whose OpenStreetMap region is still
+ * importing: the days have had their frame all along, and this is what
+ * puts spots in them. It plans the whole trip rather than one leg,
+ * because a trip with one city filled in and another empty is a state
+ * nobody asked for and the arithmetic is the same either way.
+ *
+ * Refuses while a region is still missing, naming which — "es lädt
+ * noch" is an answer the traveller can wait on; an empty day with no
+ * explanation is not.
+ */
+export const planPendingTrip = api(
+  { expose: true, method: "POST", path: "/trip-planner/plans/:planId/plan", auth: true },
+  async (req: { planId: number }): Promise<PlanResponse> => {
+    const userId = requireUser();
+    const plan = await loadPlan(req.planId, userId);
+    if (!plan) throw APIError.notFound("plan not found");
+
+    const settled = firstSettledStop(plan);
+    if (settled) {
+      throw APIError.failedPrecondition(
+        `„${settled}" ist schon abgehakt — dieser Plan ist nicht mehr ungeplant.`,
+      );
+    }
+
+    const waiting: string[] = [];
+    for (const leg of plan.legs) {
+      if (await pickRegion(leg.anchor.lat, leg.anchor.lon)) continue;
+      waiting.push(leg.title ?? `Etappe ${leg.position + 1}`);
+    }
+    if (waiting.length > 0) {
+      throw APIError.failedPrecondition(
+        `die Karten für ${waiting.join(", ")} sind noch nicht da — `
+          + "der Import läuft oder wartet auf Freigabe.",
+      );
+    }
+
+    return await replanFromStoredSettings(plan, userId);
+  },
+);
+
+/**
  * One leg's search and solve. Days are solved one after another out of
  * a shrinking pool, so the same spot is never planned twice — within
  * the leg. Across legs the pools are separate by construction, because
@@ -825,7 +921,12 @@ async function planLeg(
     /** How many of this leg's days to plan down to spots (§4.3). */
     detailDays?: number;
   },
-): Promise<{ leg: CreateLegInput; dropped: Array<DroppedBlock & { dayIndex: number }> }> {
+): Promise<{
+  leg: CreateLegInput;
+  dropped: Array<DroppedBlock & { dayIndex: number }>;
+  /** Set when this leg is waiting for its region to be imported. */
+  pending: PendingRegion | null;
+}> {
   const anchor = validateAnchor(legReq.anchor);
   const radiusM = validateRadius(legReq.radiusM);
   const dayCount = validateDays(legReq.days);
@@ -835,19 +936,23 @@ async function planLeg(
   const dayStartMinutes = validateTimeOfDay(legReq.dayStartsAt, "dayStartsAt");
   const fixpointsByDay = groupFixpoints(legReq.fixpoints, dayCount);
 
+  // No imported region here yet. The trip is still worth saving: §4.3
+  // already has a resolution for "framed but not filled in", and a
+  // refusal at this point throws away everything the traveller typed
+  // over a download nobody asked them to arrange. The import is
+  // requested, the days get their frame, and the spots come later.
   const region = await pickRegion(anchor.lat, anchor.lon);
-  if (!region) {
-    const where = legReq.title ? `'${legReq.title}'` : "this location";
-    throw APIError.failedPrecondition(
-      `no imported OSM region covers ${where} — import it in the region admin first`,
-    );
-  }
+  const pending = region ? null : await requestRegion(anchor);
 
-  const page = await getGeoClient().searchPois(region.postgresDb, {
-    center: { lat: anchor.lat, lon: anchor.lon, radiusM },
-    categories: trip.categories,
-    limit: CANDIDATE_LIMIT,
-  });
+  const page = region
+    ? await getGeoClient().searchPois(region.postgresDb, {
+        center: { lat: anchor.lat, lon: anchor.lon, radiusM },
+        categories: trip.categories,
+        limit: CANDIDATE_LIMIT,
+      })
+    // Zero candidates is exactly a frame: the solver fills the budget it
+    // is given, and given nothing it produces blocks with no stops.
+    : { spots: [] };
 
   const scored = toCandidates(page.spots, {
     interests: trip.interests,
@@ -923,7 +1028,9 @@ async function planLeg(
       anchor,
       anchorRadiusM,
       mode,
-      regionDb: region.postgresDb,
+      // Known before the import finishes: the database name follows
+      // from the slug, so the leg can point at where its data will be.
+      regionDb: region?.postgresDb ?? pending!.postgresDb,
       startDate,
       // Kept with the leg so a re-plan searches the same area at the
       // same hour rather than falling back to the defaults (0165).
@@ -933,6 +1040,57 @@ async function planLeg(
       pool: available,
     },
     dropped,
+    pending,
+  };
+}
+
+export interface PendingRegion {
+  /** The Geofabrik region asked for, e.g. "europe/portugal/lisboa". */
+  slug: string;
+  /** pending_approval | importing | … — what the admin queue says. */
+  status: string;
+  postgresDb: string;
+  /** True when nobody has to do anything: it is already downloading. */
+  autoApproved: boolean;
+}
+
+/**
+ * Ask for the region this anchor needs.
+ *
+ * Goes through the same `createPending` the region admin uses, and so
+ * inherits its policy rather than routing around it: a small region
+ * starts importing at once, a large one waits for an admin. A traveller
+ * planning a trip does not get to commit the server to a fifty-gigabyte
+ * download by typing a city name.
+ *
+ * Idempotent — a region already tracked comes back with whatever status
+ * it has, which is what makes a second trip to the same place cheap.
+ */
+async function requestRegion(anchor: { lat: number; lon: number }): Promise<PendingRegion> {
+  let suggestion;
+  try {
+    suggestion = await suggestForCoord(anchor.lat, anchor.lon);
+  } catch (err) {
+    // Working out *which* region is a lookup against Geofabrik's index,
+    // so it can fail for reasons that have nothing to do with the trip.
+    // Saying which beats a five-hundred.
+    throw APIError.unavailable(
+      "das Regionsverzeichnis von Geofabrik ist gerade nicht erreichbar — "
+        + `ohne das lässt sich nicht sagen, welche Karten dieser Ort braucht (${(err as Error).message})`,
+    );
+  }
+  if (!suggestion) {
+    throw APIError.failedPrecondition(
+      "für diesen Ort gibt es keine OpenStreetMap-Region bei Geofabrik — "
+        + "liegt er vielleicht auf dem Meer?",
+    );
+  }
+  const created = await createPending(suggestion.slug);
+  return {
+    slug: suggestion.slug,
+    status: created.status,
+    postgresDb: slugToPostgresDb(suggestion.slug),
+    autoApproved: created.status === "importing",
   };
 }
 

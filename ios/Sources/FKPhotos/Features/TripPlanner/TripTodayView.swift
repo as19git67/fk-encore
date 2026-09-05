@@ -155,13 +155,25 @@ struct TripTodayView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            // Routing somewhere is only useful once you are travelling.
+            // Planning at the kitchen table, the same tap should answer
+            // "where is that?" — a route from home to a café you will
+            // walk to next month is a number nobody wants.
             Button {
-                offer(.single(stop.coordinate, mode: leg.transportMode))
+                if isTravelling {
+                    offer(.single(stop.coordinate, mode: leg.transportMode))
+                } else {
+                    showOnMap(stop)
+                }
             } label: {
-                Image(systemName: "arrow.triangle.turn.up.right.circle")
+                Image(systemName: isTravelling
+                      ? "arrow.triangle.turn.up.right.circle"
+                      : "mappin.circle")
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Navigation zu \(stop.displayName)")
+            .accessibilityLabel(isTravelling
+                                ? "Navigation zu \(stop.displayName)"
+                                : "\(stop.displayName) auf der Karte zeigen")
         }
         .swipeActions(edge: .leading) {
             Button {
@@ -244,6 +256,47 @@ struct TripTodayView: View {
             ) else { return }
             UIApplication.shared.open(url)
         }
+    }
+
+    /// Is a trip actually running?
+    ///
+    /// Trip mode is what knows: it is the thing that gets started when
+    /// you set off. The planner deliberately keeps out of that decision
+    /// rather than guessing from dates — a trip planned for July and a
+    /// trip you are on are different states, and only one of them
+    /// wants turn-by-turn.
+    private var isTravelling: Bool { TripStore.shared.isActive }
+
+    /// Show the spot, without a route.
+    ///
+    /// Uses the same map app the traveller chose for everything else
+    /// (§9.1): the setting is about which app, not about which kind of
+    /// question.
+    private func showOnMap(_ stop: TripStop) {
+        switch TripMapsPreference.load() {
+        case .google:
+            if let url = TripMapsURL.googleLookup(stop.coordinate, name: stop.name) {
+                UIApplication.shared.open(url)
+                return
+            }
+            openPinInAppleMaps(stop)
+        case .apple, .ask:
+            // "Ask each time" is a question about routing — which app
+            // should take you there. Showing a pin is not that question,
+            // so it goes to Apple Maps, which is always installed.
+            openPinInAppleMaps(stop)
+        }
+    }
+
+    private func openPinInAppleMaps(_ stop: TripStop) {
+        let item = MKMapItem(placemark: MKPlacemark(
+            coordinate: CLLocationCoordinate2D(
+                latitude: stop.coordinate.lat, longitude: stop.coordinate.lon),
+        ))
+        item.name = stop.name
+        // No directions mode: without one, Maps shows the place rather
+        // than a route to it.
+        item.openInMaps()
     }
 
     private func openInAppleMaps(_ choice: TripMapsChoice) {
