@@ -19,5 +19,6 @@ import "./corridor";
 import "./food";
 import "./visit";
 import "./nearby";
+import "./add-find";
 
 export default new Service("trip-planner");

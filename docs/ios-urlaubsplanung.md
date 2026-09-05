@@ -1655,6 +1655,34 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
 
    Offen: die Geofences selbst (Region Monitoring um die nächsten ein bis zwei
    Stopps) und die Foto-/Zahlungssignale, die die Erkennung speisen.
+
+   **Nachgezogen aus §9.1: die Einstellung „Navigation öffnen mit".** Die
+   Mechanik stand seit der Kartenübergabe, aber es gab keine Oberfläche, die
+   den Wert setzt — praktisch also immer Apple Karten. Google Maps erscheint
+   nur, wenn es installiert ist; steht es eingestellt und fehlt, sagt der
+   Bildschirm das, statt still Apple zu öffnen.
+
+   **Umgesetzt aus §9.2: der Weg in den Vorrat** (`POST …/finds`). Alle fünf
+   Regeln sind im Code sichtbar:
+
+   - **Die richtige Etappe nach Lage.** Ein Café in Osaka geht in die
+     Osaka-Etappe, auch wenn du in Tokio stehst. In keiner Etappe → nachfragen,
+     nicht die nächstgelegene nehmen: das legte den Fund auf die falsche Woche.
+   - **Vorschlag, kein Termin.** Der Fund landet im Vorrat und konkurriert
+     dort; nichts plant ihn in einen Tag.
+   - **Dubletten werden zusammengeführt**, und die Notizen **beider** bleiben.
+     Zwei Leute, die dasselbe Café aus verschiedenen Gründen gut finden, sind
+     der Fall, der gut behandelt gehört.
+   - **Herkunft bleibt.** Notiz, Quelle und wer ihn beigetragen hat.
+   - **Fehlendes wird benannt, nicht geraten.** Ohne OSM-Treffer heißt die
+     Kategorie `unknown` und die Antwort nennt, was fehlt. Statt eine Dauer zu
+     erfinden, lehnt der Endpunkt ab und bittet um die geschätzte — das ist die
+     eine Frage, die §9.2 dem Planer zugesteht. Die Referenz bekommt den
+     Präfix `manual:`: ein erfundener `node:`-Eintrag wäre eine Behauptung über
+     Daten, die es nicht gibt.
+
+   Offen aus §9.2: die Share-Extension (Fälle 1–3 — Karten-Link, Artikel,
+   Screenshot) und die Suche in der App (Fall 4).
 9. **Wetter & Licht** — Open-Meteo-Anbindung mit Cache, Indoor/Outdoor-Ableitung,
    Sonnenstandsmodul, Lichthinweise, Abendblock-Vorschlag und der Zeit-Regler
    (§8.3). Das **Horizontprofil** aus dem Höhenmodell (§7.3) gehört hierher —

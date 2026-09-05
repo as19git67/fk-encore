@@ -65,6 +65,12 @@ struct AdminView: View {
                     Label("Server-Verbindung", systemImage: "server.rack")
                 }
 
+                NavigationLink {
+                    TripMapsSettingsView()
+                } label: {
+                    Label("Karten-App", systemImage: "map")
+                }
+
                 Toggle(isOn: $reviewNotificationsEnabled) {
                     Label("Hinweis auf neue Gruppen", systemImage: "checklist")
                 }
