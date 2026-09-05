@@ -24,6 +24,8 @@ final class TripDayTimelineTests: XCTestCase {
             travelFromPrevious: TripTravel(minutes: travel, distanceM: travel * 75, travelClass: "short_walk"),
             status: "planned",
             pinned: false,
+            note: nil,
+            sourceUrl: nil,
         )
     }
 

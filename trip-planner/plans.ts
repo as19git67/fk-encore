@@ -50,6 +50,7 @@ import {
   saveDayDetail,
   saveRedistribution,
   renamePlan,
+  deletePlan,
   replanPlan,
   type CreateDayInput,
   type CreateFixpointInput,
@@ -765,6 +766,44 @@ export const moveTripStop = api(
     const updated = await loadPlan(plan.id, userId);
     if (!updated) throw APIError.internal("plan vanished while moving a spot");
     return { plan: updated, overfullBlockIds: moved.overfullBlockIds };
+  },
+);
+
+export interface DeletePlanRequest {
+  planId: number;
+}
+
+export interface DeletePlanResponse {
+  deleted: boolean;
+}
+
+/**
+ * Delete a trip (§6.2).
+ *
+ * There was no way to do this at all, which made the plan list a
+ * one-way street: a trip typed to try the planner out stayed there for
+ * good. Everything else in the planner is reversible, so this being the
+ * one exception was not a decision, it was an omission.
+ *
+ * **The organiser's, and only theirs.** §6.2 reserves changing the
+ * frame to the person who created the trip, and deleting it is the
+ * largest possible change to the frame — it takes the trip away from
+ * everybody it was shared with, not only from the person tapping.
+ * Somebody who merely wants out has `…/participants/remove` and needs
+ * nobody's permission for it.
+ *
+ * The stops, days, pool and share rows go with it: they cascade from
+ * the plan and mean nothing without it.
+ */
+export const deleteTripPlan = api(
+  { expose: true, method: "DELETE", path: "/trip-planner/plans/:planId", auth: true },
+  async (req: DeletePlanRequest): Promise<DeletePlanResponse> => {
+    const userId = requireUser();
+    await requireOrganiser(req.planId, userId, "Die Reise löschen");
+
+    const deleted = await deletePlan(req.planId);
+    if (!deleted) throw APIError.notFound("plan not found");
+    return { deleted: true };
   },
 );
 
