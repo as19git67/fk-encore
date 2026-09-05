@@ -170,7 +170,7 @@ enum TripStopStatus: String, Sendable {
 /// How the group gets around on a leg (§4.2). Unknown values decode to
 /// `foot` rather than failing: a mode the app has not learned about yet
 /// is still a leg worth showing.
-enum TripTransportMode: String, Sendable {
+enum TripTransportMode: String, CaseIterable, Sendable {
     case foot, bike, transit, car
 
     init(raw: String) {
