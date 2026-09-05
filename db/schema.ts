@@ -2819,6 +2819,17 @@ export const tripPlanPool = pgTable(
     // Raised when a stop was displaced, so it comes back first on a
     // following day rather than sinking in the ranking (§5).
     priority_boost: real("priority_boost").notNull().default(0),
+    // search | manual — a candidate the region search produced, or one a
+    // person brought in (§9.2).
+    origin: text("origin").notNull().default("search"),
+    // Why it was saved, and where from. When planning, "beste Pastéis
+    // laut Blog" matters more than the name (§9.2).
+    note: text("note"),
+    source_url: text("source_url"),
+    added_by: integer("added_by").references(() => users.id, { onDelete: "set null" }),
+    // True when no OSM entry could be matched: opening hours and category
+    // are unknown, and the planner says so rather than inventing them.
+    unmatched: boolean("unmatched").notNull().default(false),
   },
   (table) => [uniqueIndex("trip_plan_pool_leg_ref_key").on(table.leg_id, table.osm_ref)]
 );
