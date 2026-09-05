@@ -1754,9 +1754,26 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
      in die App-Group; die Bestätigung — welche Reise, welcher von drei Cafés,
      wie lange — passiert in der App, wo der Bildschirm dafür ohnehin steht.
 
-   **Noch offen:** Der Textauszug aus der *geöffneten* Seite (§9.3 Stufe 1,
-   `NSExtensionJavaScriptPreprocessingFile`) und damit `WebPage`-Aktivierung;
-   solange greift für einen geteilten Link der Server-Abruf.
+   - **Der Textauszug aus der geöffneten Seite** (§9.3 Stufe 1) läuft über
+     `NSExtensionJavaScriptPreprocessingFile`: `TripSharePageReading.js` wird
+     von Safari *in der bereits geöffneten Seite* ausgeführt und gibt deren
+     sichtbaren Text zurück, samt Titel, kanonischer URL und — falls vorhanden
+     — der Auswahl des Lesers. Das Skript legt Navigation, Werbung und
+     Cookie-Banner vorher weg (§9.3 Stufe 2) und arbeitet auf einer Kopie des
+     DOM, damit die Seite, die der Leser danach weiter vor sich hat, unberührt
+     bleibt. Eine *Auswahl* schlägt den Seitentext, weil sie eine Absicht
+     ausdrückt, die die Seite nicht kennt („dieses Café", nicht „die elf Cafés
+     in dieser Liste") — unterhalb weniger Zeichen aber als Fehlgriff behandelt
+     wird. Der Server-Abruf bleibt die Rückfallebene für einen Link ohne Seite,
+     etwa aus einer Nachricht.
+
+     Das Skript selbst läuft in Safari und ist von einem Test nicht erreichbar.
+     Festgehalten ist deshalb die *Grenze*: dass die Datei unter dem Namen
+     existiert, den die `Info.plist` registriert, dass die `WebPage`-Aktivierung
+     dazu gesetzt ist, dass das Skript weiterhin genau die vier Schlüssel
+     schreibt, die die Swift-Seite liest — und was aus einer solchen Antwort
+     wird. Jeder dieser Fehler erzeugt eine Übernahme, die funktioniert
+     aussieht und weniger mitbringt, als sie sollte.
 
    **Fall 4, die Suche in der App** (`POST …/search`, `TripPlaceSearchView`):
    der Weg herein, der funktionieren muss, wenn nichts anderes es tut — kein

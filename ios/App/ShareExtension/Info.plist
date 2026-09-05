@@ -37,7 +37,18 @@
 				     plain text rather than as a link. -->
 				<key>NSExtensionActivationSupportsText</key>
 				<true/>
+				<!-- Lets Safari run the preprocessing script below in the
+				     page that is already open, so its visible text comes
+				     across without the server having to fetch anything
+				     (§9.3 Stufe 1). -->
+				<key>NSExtensionActivationSupportsWebPageWithMaxCount</key>
+				<integer>1</integer>
 			</dict>
+			<!-- Without the .js: the value is the file's base name, and
+			     the file itself is a resource of the F4milShare target
+			     (ios/F4milShare/TripSharePageReading.js). -->
+			<key>NSExtensionJavaScriptPreprocessingFile</key>
+			<string>TripSharePageReading</string>
 		</dict>
 		<key>NSExtensionPointIdentifier</key>
 		<string>com.apple.share-services</string>
