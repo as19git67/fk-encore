@@ -679,6 +679,10 @@ async function planLeg(
   const scored = toCandidates(page.spots, {
     interests: trip.interests,
     dwellMinutes: trip.dwellMinutes,
+    // This pool is what a day gets built out of, so it holds only what
+    // is worth a block. A lookup ("what is near me") asks its own
+    // question and keeps the ordinary.
+    requireProminence: true,
   });
 
   let available = [...scored];

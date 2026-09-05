@@ -903,6 +903,29 @@ Die Datenbasis ist also genau dort stark, wo **Funktion** zählt, und genau dort
 schwach, wo **Geschmack** zählt. Der Planer sollte sich entsprechend verhalten:
 selbstbewusst beim Finden einer Apotheke, zurückhaltend beim Abendessen.
 
+**Daraus folgt eine Trennung, die anfangs fehlte** (gemeldet: Apotheken,
+Discounter, Sparkassen und unbedeutende Kirchen im vorgeschlagenen Plan). Jede
+Kategorie hat einen `purpose`: `visit` — man geht hin, weil man es sehen will —
+oder `service` — die Reise läuft darauf, bewundert es aber nicht. Eine Suche
+ohne Kategorieangabe liefert nur noch `visit`; wer eine Apotheke sucht, nennt
+`essentials` ausdrücklich. Vorher hieß „keine Kategorie" schlicht *alle*, und
+damit lagen Geldautomat und Supermarkt im Kandidatenvorrat eines Vormittags.
+
+Zweitens: **ein Name ist kein Zeichen von Bedeutung.** Jede Sparkasse hat einen.
+Solange „hat einen Namen" in die Prominenz einging, punktete eine gewöhnliche
+Dorfkirche genau wie eine Bankfiliale, und beide rückten nach, sobald die
+lohnenden Spots verplant waren. Als Prominenz zählen jetzt nur Wikidata,
+Wikipedia und die ausdrückliche Erfassung als Sehenswürdigkeit (`tourism=*`) —
+Letzteres ist das Urteil eines Menschen, der davorstand. Wer keines davon hat,
+kommt gar nicht erst in den Vorrat, aus dem ein Tag gebaut wird: **ein kürzerer
+Vormittag ist die bessere Antwort als ein gefüllter, den niemand wollte.** Für
+„was ist hier in der Nähe" gilt das nicht — dort ist das Gewöhnliche die
+richtige Antwort.
+
+Drittens war `sight` zu weit gefasst: `historic` ohne Werteliste trifft jedes
+Wegkreuz, jeden Grenzstein und jede Gedenktafel, in einer deutschen Stadt
+Tausende. Jetzt steht dort eine Liste.
+
 ### 10.6 Belege und Zahlungen: was realistisch geht
 
 Kassenbelege und Kartenzahlungen als Signal sind **dünn gesät** — und die naive
