@@ -92,6 +92,12 @@ struct TripPlanDayView: View {
                     planId: viewModel.planId,
                     constraints: viewModel.plan?.constraints,
                     title: viewModel.plan?.title,
+                    // The mode and the dates live on the legs rather
+                    // than in the constraints, so they are handed over
+                    // separately — from the first leg, which is what
+                    // "the trip" means for a screen with one of each.
+                    mode: viewModel.plan?.legs.first?.transportMode ?? .foot,
+                    startDate: viewModel.plan?.startDate,
                 ) {
                     // Saving re-plans the days, so the screen behind has
                     // to be told rather than left showing the old ones.
@@ -176,6 +182,16 @@ struct TripPlanDayView: View {
                         VStack(spacing: 2) {
                             Text("Tag \(day.dayIndex + 1)")
                                 .font(.subheadline.weight(day.dayIndex == viewModel.dayIndex ? .semibold : .regular))
+                            // The date, once the trip has one. Without
+                            // it "Tag 3" is a number the traveller has
+                            // to work out from the calendar.
+                            if let date = leg.date(ofDayIndex: day.dayIndex) {
+                                Text(date)
+                                    .font(.caption2)
+                                    .foregroundStyle(
+                                        leg.isToday(dayIndex: day.dayIndex)
+                                            ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                            }
                             // A day still at trip resolution is marked, so
                             // an empty-looking day never reads as a day
                             // with nothing to do (§4.3).

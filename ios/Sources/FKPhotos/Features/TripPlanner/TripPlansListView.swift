@@ -22,6 +22,12 @@ struct TripPlansListView: View {
     /// The trip a deletion is being confirmed for. Held as the summary
     /// rather than as a flag so the alert can say which one.
     @State private var deleting: TripPlanSummary?
+    /// Coming back from the share sheet is not a fresh appearance of
+    /// this screen — the app was running the whole time. Without this
+    /// the banner only ever showed up on a cold launch, so a find
+    /// shared from Apple Maps was announced as "gemerkt" and then
+    /// nowhere to be seen.
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         VStack(spacing: 0) {
@@ -71,7 +77,13 @@ struct TripPlansListView: View {
             await load()
             pendingShare = TripShareInbox.peek()
         }
-        .refreshable { await load() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { pendingShare = TripShareInbox.peek() }
+        }
+        .refreshable {
+            await load()
+            pendingShare = TripShareInbox.peek()
+        }
         .onChange(of: isCreating) { _, nowCreating in
             // The new trip has to appear in the list behind the sheet,
             // not only in the screen that opened on top of it.
@@ -178,8 +190,22 @@ struct TripPlansListView: View {
     }
 
     private func row(_ plan: TripPlanSummary) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(plan.displayTitle).font(.headline)
+        let schedule = plan.schedule(on: Date())
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text(plan.displayTitle).font(.headline)
+                if schedule.isRunning {
+                    // Which trip you are actually on, at a glance. It is
+                    // also the trip whose day screen opens on today —
+                    // the two have to agree, so both read the same
+                    // schedule.
+                    Text("läuft")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.accentColor.opacity(0.15), in: Capsule())
+                }
+            }
             HStack(spacing: 6) {
                 Text(plan.dayCountLabel)
                 if let route = plan.routeLabel {
@@ -189,6 +215,9 @@ struct TripPlansListView: View {
             }
             .font(.subheadline)
             .foregroundStyle(.secondary)
+            Text(schedule.label)
+                .font(.caption)
+                .foregroundStyle(schedule.isRunning ? Color.accentColor : .secondary)
         }
         .padding(.vertical, 2)
     }

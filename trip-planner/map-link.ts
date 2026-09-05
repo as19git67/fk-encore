@@ -69,9 +69,23 @@ export function parseMapLink(shared: string): MapLink | null {
     return { position: null, name: null, needsRedirect: true, source: "google" };
   }
   if (host === "maps.apple.com" || url.protocol === "maps:") return parseAppleLink(url);
-  if (host.endsWith("google.com") || host === "maps.google.com") return parseGoogleLink(url);
+  if (isGoogleMaps(host, url.pathname)) return parseGoogleLink(url);
   if (host === "openstreetmap.org") return parseOsmLink(url);
   return null;
+}
+
+/**
+ * Is this a Google *Maps* link, rather than merely a Google one?
+ *
+ * The distinction earns its keep: `docs.google.com/document/…` and
+ * `google.com/search?q=…` both end in google.com, and reading either as
+ * a pin would turn a shared document into a place named after its
+ * title. Only `maps.google.com` and a `/maps` path are maps.
+ */
+function isGoogleMaps(host: string, pathname: string): boolean {
+  if (host === "maps.google.com") return true;
+  if (!host.endsWith("google.com")) return false;
+  return pathname === "/maps" || pathname.startsWith("/maps/");
 }
 
 /**

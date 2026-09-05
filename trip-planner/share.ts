@@ -124,11 +124,19 @@ export const analyseShare = api(
       throw APIError.invalidArgument(`text ist länger als ${MAX_SHARED_TEXT} Zeichen`);
     }
 
-    // A map link is checked first and only when no page text came with
-    // it: a share carrying the text of an article is an article, even
-    // if the article happens to live on a map service.
-    if (url && !text.trim()) {
-      const proposal = await mapLinkProposal(url, plan);
+    // A map link is a pin, and text arriving with it does not change
+    // that: what the share sheet puts next to a pin is the pin's own
+    // name and address, not an article. Reading that caption as an
+    // article sent the whole share off to fetch a page that has no
+    // article on it, and the traveller was told there was no text on
+    // the page — for a share that carried a perfectly good coordinate.
+    //
+    // This leans on `parseMapLink` recognising only real map links; a
+    // shared Google document must not become a place named after its
+    // title, which is why that function tells a `/maps` path from the
+    // rest of google.com.
+    if (url) {
+      const proposal = await mapLinkProposal(url, plan, text);
       if (proposal) {
         return { kind: "map-link", sourceUrl: url, proposals: [proposal], rejected: [] };
       }
@@ -146,7 +154,11 @@ type LoadedPlan = NonNullable<Awaited<ReturnType<typeof loadPlan>>>;
  * Answers null when the link is not a map link at all, which sends the
  * caller on to the article path — a URL that is not a pin is a page.
  */
-async function mapLinkProposal(url: string, plan: LoadedPlan): Promise<ShareProposal | null> {
+async function mapLinkProposal(
+  url: string,
+  plan: LoadedPlan,
+  caption = "",
+): Promise<ShareProposal | null> {
   let link = parseMapLink(url);
   if (!link) return null;
 
@@ -162,11 +174,16 @@ async function mapLinkProposal(url: string, plan: LoadedPlan): Promise<ShareProp
     }
   }
 
-  if (!link.position && !link.name) return null;
+  // The link itself may carry no name — Apple's `?ll=` form often does
+  // not — while the share sheet put one in the text next to it. Its
+  // first line is the place's name; what follows is the address.
+  const name = link.name ?? firstLine(caption);
+
+  if (!link.position && !name) return null;
 
   const legIndex = link.position ? legFor(link.position, plan) : null;
   return {
-    name: link.name,
+    name,
     // With a position the traveller only has to confirm the pin; with
     // only a name there is a name to resolve, and that is the article
     // path's job rather than a second copy of it here.
@@ -180,6 +197,16 @@ async function mapLinkProposal(url: string, plan: LoadedPlan): Promise<ShareProp
     placeHint: null,
     kindHint: null,
   };
+}
+
+/** The first non-empty line of a caption, or null. */
+function firstLine(text: string): string | null {
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    // A line that is only the link again is not a name.
+    if (trimmed.length > 0 && !/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return trimmed;
+  }
+  return null;
 }
 
 /**

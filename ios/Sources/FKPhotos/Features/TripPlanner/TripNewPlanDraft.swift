@@ -33,6 +33,12 @@ struct TripNewPlanDraft: Equatable {
     /// The place name a sentence mentioned, kept so the search field can
     /// offer it and the traveller can confirm what it means.
     var placeHint: String?
+    /// Whether the trip has a date at all. A plan for "some time" is a
+    /// real plan (§4.2), so this is off by default rather than quietly
+    /// dating every trip today.
+    var isDated = false
+    /// The first day, used only when `isDated`.
+    var startDate = Date()
 
     /// Bounds mirror `constraints.ts`, so the screen refuses what the
     /// endpoint would refuse — with a stepper that stops rather than an
@@ -99,6 +105,10 @@ struct TripNewPlanDraft: Equatable {
                     mode: mode.rawValue,
                     days: days,
                     radiusM: radiusM,
+                    // The date is what later lets the app know which day
+                    // of the trip today is — there is no "start trip"
+                    // button, and there should not be one.
+                    startDate: isDated ? TripCalendar.isoDay(startDate) : nil,
                 ),
             ],
             categories: categories.isEmpty ? nil : categories,
@@ -176,6 +186,7 @@ struct TripCreatePlanRequest: Encodable, Sendable {
         let mode: String
         let days: Int
         let radiusM: Int
+        let startDate: String?
     }
 
     struct Group: Encodable, Sendable {

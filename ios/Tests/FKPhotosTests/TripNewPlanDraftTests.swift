@@ -129,4 +129,22 @@ final class TripNewPlanDraftTests: XCTestCase {
         draft.categories = ["museum"]
         XCTAssertEqual(draft.createRequest()?.categories, ["museum"])
     }
+
+    func testATripWithoutADateSendsNone() {
+        // "Vier Tage Lissabon, irgendwann" is a real plan (§4.2), and
+        // dating it today would be an invention.
+        var draft = TripNewPlanDraft()
+        draft.anchor = lisbon
+        XCTAssertNil(draft.createRequest()?.legs.first?.startDate)
+    }
+
+    func testADatedTripSendsTheDayTheTravellerPicked() {
+        // The date is what later tells the app which day of the trip
+        // today is — there is no "start trip" button.
+        var draft = TripNewPlanDraft()
+        draft.anchor = lisbon
+        draft.isDated = true
+        draft.startDate = TripCalendar.date(fromIsoDay: "2026-09-17")!
+        XCTAssertEqual(draft.createRequest()?.legs.first?.startDate, "2026-09-17")
+    }
 }

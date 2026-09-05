@@ -93,6 +93,10 @@ export const placeFromPool = api(
           lon: candidate.lon,
           category: candidate.category,
           dwellMinutes: candidate.dwellMinutes,
+          // The score travels with the stop: a later redistribution
+          // ranks what is on the day against what is in the pool, and a
+          // stop with no score would be the first thing it dropped.
+          score: candidate.score,
           // Travel is recomputed for the whole day the moment it lands,
           // so what goes in here is a placeholder, not an estimate.
           travelFromPrevious: { minutes: 0, distanceM: 0, travelClass: "short_walk" },
