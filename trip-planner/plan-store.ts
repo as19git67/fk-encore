@@ -319,7 +319,49 @@ export async function setStopStatus(
   status: StopStatus,
   db: Db = dbDefault,
 ): Promise<boolean> {
-  const [stop] = await db
+  const owned = await stopBelongsToPlan(planId, ownerId, stopId, db);
+  if (!owned) return false;
+
+  await db.update(tripPlanStops).set({ status }).where(eq(tripPlanStops.id, stopId));
+  await db
+    .update(tripPlans)
+    .set({ updated_at: new Date().toISOString() })
+    .where(eq(tripPlans.id, planId));
+  return true;
+}
+
+/**
+ * Pin a stop, or release it (§8.4). A pinned stop is a fixed point:
+ * redistribution keeps it where it is, whatever else moves (§5).
+ */
+export async function setStopPinned(
+  planId: number,
+  ownerId: number,
+  stopId: number,
+  pinned: boolean,
+  db: Db = dbDefault,
+): Promise<boolean> {
+  const owned = await stopBelongsToPlan(planId, ownerId, stopId, db);
+  if (!owned) return false;
+  await db.update(tripPlanStops).set({ pinned }).where(eq(tripPlanStops.id, stopId));
+  await db
+    .update(tripPlans)
+    .set({ updated_at: new Date().toISOString() })
+    .where(eq(tripPlans.id, planId));
+  return true;
+}
+
+/**
+ * One statement rather than a load-then-check, so a stop id from
+ * another user's plan simply matches nothing.
+ */
+async function stopBelongsToPlan(
+  planId: number,
+  ownerId: number,
+  stopId: number,
+  db: Db,
+): Promise<boolean> {
+  const [row] = await db
     .select({ id: tripPlanStops.id })
     .from(tripPlanStops)
     .innerJoin(tripPlanBlocks, eq(tripPlanBlocks.id, tripPlanStops.block_id))
@@ -334,14 +376,52 @@ export async function setStopStatus(
       ),
     )
     .limit(1);
-  if (!stop) return false;
+  return row !== undefined;
+}
 
-  await db.update(tripPlanStops).set({ status }).where(eq(tripPlanStops.id, stopId));
+/**
+ * Write back the days a move touched (§8.4).
+ *
+ * Both days are rewritten wholesale for the same reason a
+ * redistribution is: a day holds a handful of rows, and a rewrite
+ * cannot leave the positions inconsistent the way a partial update can.
+ * The pool is untouched — a move rearranges what is planned, it does
+ * not plan or unplan anything.
+ */
+export async function saveMovedDays(
+  planId: number,
+  days: ReadonlyArray<{ day: StoredDay; blocks: readonly CurrentBlock[] }>,
+  db: Db = dbDefault,
+): Promise<void> {
+  for (const { day, blocks } of days) {
+    const byTemplateId = new Map(day.blocks.map((b) => [b.id, b]));
+    for (const block of blocks) {
+      const stored = byTemplateId.get(block.id);
+      if (!stored) continue;
+      await db.delete(tripPlanStops).where(eq(tripPlanStops.block_id, stored.rowId));
+      for (const [position, stop] of block.stops.entries()) {
+        await db.insert(tripPlanStops).values({
+          block_id: stored.rowId,
+          position,
+          osm_ref: stop.osmRef,
+          name: stop.name,
+          lat: stop.lat,
+          lon: stop.lon,
+          category: stop.category,
+          dwell_minutes: stop.dwellMinutes,
+          travel_minutes: stop.travelFromPrevious.minutes,
+          travel_distance_m: stop.travelFromPrevious.distanceM,
+          status: stop.status,
+          pinned: stop.pinned,
+        });
+      }
+    }
+  }
+
   await db
     .update(tripPlans)
     .set({ updated_at: new Date().toISOString() })
     .where(eq(tripPlans.id, planId));
-  return true;
 }
 
 export async function loadPlan(

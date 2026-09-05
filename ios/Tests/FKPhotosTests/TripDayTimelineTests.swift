@@ -151,4 +151,51 @@ final class TripDayTimelineTests: XCTestCase {
         XCTAssertEqual(position.block.id, "evening")
         XCTAssertNil(position.stop)
     }
+
+    // MARK: - What a redistribution is told it has to work with
+
+    func testRemainingMinutesCountsDownWithinTheBlock() {
+        // Morning 09:00 + 210 min ends at 12:30 (750).
+        let morning = block("morning", start: 9 * 60, budget: 210)
+        XCTAssertEqual(TripDayTimeline.remainingMinutes(of: morning, at: 9 * 60), 210)
+        XCTAssertEqual(TripDayTimeline.remainingMinutes(of: morning, at: 10 * 60), 150)
+        XCTAssertEqual(TripDayTimeline.remainingMinutes(of: morning, at: 12 * 60 + 29), 1)
+        XCTAssertEqual(TripDayTimeline.remainingMinutes(of: morning, at: 12 * 60 + 30), 0)
+    }
+
+    func testAnOverrunBlockHasNoTimeLeftRatherThanNegativeTime() {
+        // "We are out of time" is the true statement. A negative budget
+        // would have the solver plan backwards.
+        let short = block("morning", start: 9 * 60, budget: 60)
+        XCTAssertEqual(TripDayTimeline.remainingMinutes(of: short, at: 11 * 60), 0)
+    }
+
+    func testABlockWithoutAnHourReportsItsWholeBudget() {
+        // Nothing is known about where the day stands, so nothing is
+        // subtracted — better than pretending the block is half gone.
+        let old = block("morning", start: nil, budget: 210)
+        XCTAssertEqual(TripDayTimeline.remainingMinutes(of: old, at: 12 * 60), 210)
+    }
+
+    func testMinutesOfDayReadsTheWallClock() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Berlin")!
+        var parts = DateComponents()
+        parts.year = 2026; parts.month = 9; parts.day = 4
+        parts.hour = 18; parts.minute = 40
+        let date = calendar.date(from: parts)!
+
+        XCTAssertEqual(TripDayTimeline.minutesOfDay(date, calendar: calendar), 18 * 60 + 40)
+    }
+
+    func testMidnightIsZeroNotFourteenFourty() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Berlin")!
+        var parts = DateComponents()
+        parts.year = 2026; parts.month = 9; parts.day = 4
+        parts.hour = 0; parts.minute = 0
+        XCTAssertEqual(
+            TripDayTimeline.minutesOfDay(calendar.date(from: parts)!, calendar: calendar), 0,
+        )
+    }
 }

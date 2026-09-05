@@ -1595,8 +1595,28 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    `limited`: „vegan (begrenzt)" ist eine echte Antwort, und sie auf `false`
    zu reduzieren würde ein brauchbares Lokal ausschließen.
 
-   Offen: Ziehen zwischen Blöcken und Tagen, der große „umplanen"-Knopf
-   (braucht CoreLocation).
+   **Verhandeln (§8.4) und der „umplanen"-Knopf (§8.5) sind ebenfalls drin.**
+
+   - **Verschieben rechnet den ganzen Tag neu, nicht die zwei Blöcke.** Ein
+     Block beginnt dort, wo der vorige endete — nimmt man den letzten Spot aus
+     dem Vormittag, verschiebt sich der Beginn des Nachmittags. Ein Patch der
+     beiden angefassten Blöcke ließe den Rest des Tages einen Weg beschreiben,
+     den niemand geht.
+   - **Ein überfüllter Block wird gemeldet, nicht verweigert.** Der Reisende
+     hat bewusst dorthin gezogen; ein roter Block sagt mehr als eine
+     abgelehnte Geste. Verschieben *über Etappengrenzen* wird dagegen
+     abgelehnt: ein Spot aus Tokio in einem Osaka-Tag würde am falschen Anker
+     gemessen und mit dem falschen Modus erreicht.
+   - **Der Mittagsblock nimmt nichts an.** Er ist Zeit plus Gegend, kein Lokal
+     (§10.3) — ein Museum hineinzuziehen würde ihn stillschweigend zu etwas
+     anderem machen.
+   - **Umplanen rät nichts.** Position kommt von CoreLocation, aktueller Block
+     und Restbudget aus dem Tagesrahmen. Fehlt eines davon — kein Fix, keine
+     Blockzeiten, oder gerade läuft kein Block —, sagt der Knopf warum. Ein
+     umgeräumter Nachmittag auf Basis einer geratenen Position ist schlechter
+     als keiner.
+
+   Damit ist Schritt 7 abgeschlossen.
 8. **Standort** — Geofences um die nächsten Stopps, Erledigt-Erkennung,
    angebotene Neuverteilung, „was ist in der Nähe".
 9. **Wetter & Licht** — Open-Meteo-Anbindung mit Cache, Indoor/Outdoor-Ableitung,
