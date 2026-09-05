@@ -1142,6 +1142,13 @@
       "when": 1786233600010,
       "tag": "0162_trip_plan_block_start",
       "breakpoints": true
+    },
+    {
+      "idx": 163,
+      "version": "7",
+      "when": 1786233600011,
+      "tag": "0163_trip_plan_visits",
+      "breakpoints": true
     }
   ]
 }
