@@ -107,6 +107,67 @@ export function moveStop(req: MoveStopRequest): MoveStopResult {
   return { fromBlocks: from, toBlocks: to, overfullBlockIds: overfull };
 }
 
+export interface InsertStopRequest {
+  /** The day it is joining, as it stands. */
+  blocks: readonly CurrentBlock[];
+  /** The candidate, straight out of the pool. */
+  stop: CurrentStop;
+  /** Template id of the block it is dropped into. */
+  toBlockId: string;
+  /** Where in that block, from zero. Past the end, or omitted, means last. */
+  toPosition?: number;
+  anchor: Coordinate;
+  mode?: TransportMode;
+}
+
+export interface InsertStopResult {
+  blocks: CurrentBlock[];
+  overfullBlockIds: string[];
+}
+
+/**
+ * Put a candidate from the pool into a block (§5, §8.4).
+ *
+ * The other half of `moveStop`, and separate from it on purpose rather
+ * than folded in behind an optional `fromBlocks`: a move takes a stop
+ * that is already somewhere and a placement takes one that is nowhere,
+ * and the difference decides whether "not in this day" is an error or
+ * the precondition. Everything after the splice is shared, because a
+ * day that was walked one way by a move and another way by a placement
+ * would be two different features wearing one name.
+ *
+ * It does not refuse an overfull block, for the same reason a move does
+ * not: the traveller put it there deliberately, and a red block says
+ * more than a rejected gesture.
+ */
+export function insertStop(req: InsertStopRequest): InsertStopResult {
+  const mode = req.mode ?? "foot";
+  const blocks = req.blocks.map(cloneBlock);
+
+  if (blocks.some((b) => b.stops.some((s) => s.osmRef === req.stop.osmRef))) {
+    // Twice in one day is never what anybody meant, and the second copy
+    // would silently eat the budget of the first.
+    throw new MoveError(`'${req.stop.osmRef}' is already planned on this day`);
+  }
+
+  const target = blocks.find((b) => b.id === req.toBlockId);
+  if (!target) throw new MoveError(`no block '${req.toBlockId}' in this day`);
+  if (target.kind !== "spots") {
+    // A meal block holds time and a rough area, never a venue (§10.3).
+    throw new MoveError(`'${req.toBlockId}' holds time, not places — nothing can be dropped in it`);
+  }
+
+  const at = clampPosition(req.toPosition, target.stops.length);
+  target.stops.splice(at, 0, { ...req.stop });
+
+  recomputeDay(blocks, req.anchor, mode);
+
+  return {
+    blocks,
+    overfullBlockIds: blocks.filter((b) => b.usedMinutes > b.budgetMinutes).map((b) => b.id),
+  };
+}
+
 /**
  * Rewalk a whole day: each block starts where the previous one left
  * off, and the last block with spots pays for the way back to the

@@ -44,14 +44,19 @@ struct TripPlanDayView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
+                        // Not "Heute": the screen is not a date, it is
+                        // the one you use while you are actually out —
+                        // the block you are in, what is left of it, and
+                        // the big "umplanen" (§8.5). A sun said nothing
+                        // about any of that.
                         NavigationLink {
                             TripTodayView(viewModel: viewModel)
                         } label: {
-                            Label("Heute", systemImage: "sun.max")
+                            Label("Unterwegs", systemImage: "figure.walk")
                         }
                         // Everything this leg could do, and why (§5).
                         NavigationLink {
-                            TripPoolView(leg: leg)
+                            TripPoolView(viewModel: viewModel, legIndex: leg.position)
                         } label: {
                             Label("Vorrat (\(leg.pool.count))", systemImage: "tray.full")
                         }
@@ -278,9 +283,23 @@ struct TripPlanDayView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else if block.stops.isEmpty {
-                Text("Nichts geplant.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                // "Nichts geplant" on its own is a dead end: the pool
+                // next door is full of things that would fit, and until
+                // now nothing on this screen said so or led there.
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Nichts geplant.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    if let leg = viewModel.leg, !leg.pool.isEmpty {
+                        NavigationLink {
+                            TripPoolView(viewModel: viewModel, legIndex: leg.position)
+                        } label: {
+                            Label("Aus dem Vorrat füllen (\(leg.pool.count))",
+                                  systemImage: "tray.full")
+                                .font(.footnote)
+                        }
+                    }
+                }
             } else {
                 ForEach(Array(block.stops.enumerated()), id: \.element.rowId) { index, stop in
                     if index > 0 || stop.travelFromPrevious.minutes > 0 {
@@ -313,13 +332,24 @@ struct TripPlanDayView: View {
                 if stop.pinned {
                     Image(systemName: "pin.fill").foregroundStyle(.orange)
                 }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(stop.displayName)
-                        .strikethrough(stop.stopStatus == .skipped)
-                    Text(TripClock.duration(stop.dwellMinutes))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                // The same screen a pool candidate opens: "where is
+                // that, and why is it on the list" is one question, and
+                // answering it twice is how two screens drift apart.
+                NavigationLink {
+                    TripSpotDetailView(
+                        spot: TripSpotDetail(stop),
+                        mode: viewModel.leg?.transportMode ?? .foot,
+                    )
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(stop.displayName)
+                            .strikethrough(stop.stopStatus == .skipped)
+                        Text(TripClock.duration(stop.dwellMinutes))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .buttonStyle(.plain)
                 Spacer()
                 if stop.stopStatus == .done {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)

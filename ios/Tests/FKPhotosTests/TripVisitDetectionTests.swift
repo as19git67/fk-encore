@@ -27,6 +27,8 @@ final class TripGeofencePlanTests: XCTestCase {
             travelFromPrevious: TripTravel(minutes: 10, distanceM: 800, travelClass: "short_walk"),
             status: status,
             pinned: false,
+            note: nil,
+            sourceUrl: nil,
         )
     }
 

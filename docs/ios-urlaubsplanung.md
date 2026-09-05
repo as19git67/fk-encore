@@ -1783,6 +1783,41 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    OpenStreetMap"), und eine Region, die nicht erreichbar war, wird benannt —
    „nichts gefunden" und „eine Region war nicht erreichbar" sind verschiedene
    Antworten.
+   **Der Vorrat als Arbeitsfläche.** Er war Daten ab dem ersten Tag und dann
+   eine Liste zum Ansehen — die falsche Hälfte, um stehenzubleiben: Mit vier
+   Wegen hinein ist ein Stapel, der nur wächst, kein Vorrat, sondern ein
+   Rückstand. Dazugekommen sind die drei Gesten, nach denen man sofort greift:
+   *wo ist das* (dieselbe Detailansicht wie für einen geplanten Stopp, mit
+   Absprung in Apple Karten oder Google Maps), *dieses nicht* (`…/pool/drop`)
+   und *in Dienstagvormittag* (`…/pool/place`). Dazu ein Suchfeld, weil ein
+   Vorrat aus 150 Kandidaten sonst nur durchgescrollt werden kann; gesucht wird
+   auch in der **Notiz**, denn „beste Pastéis laut Blog" ist oft das Einzige,
+   woran sich jemand erinnert.
+
+   Zwei Entscheidungen dabei: Ein von Hand gesetzter Spot wird **angeheftet** —
+   die eine bewusste Entscheidung auf diesem Bildschirm darf die nächste
+   Neuverteilung nicht wegräumen (§5). Und ein überfüllter Block wird **rot,
+   nicht abgelehnt** (§8.4): Die Reisende hat ihn absichtlich dorthin gesetzt.
+   Entfernen hinterlässt keinen Grabstein — beim nächsten Neuplanen kann der
+   Planer denselben Spot wiederfinden, denn er liegt ja weiterhin in der
+   Gegend; eine unsichtbare Verbannungsliste wäre schlimmer als die ehrliche
+   Wiederholung.
+
+   **Migration 0167** trägt Notiz und Quelle an den *Stopp*. §9.2 verlangt
+   „Herkunft und Link bleiben erhalten" — genau bis zu dem Moment, in dem
+   jemand den Fund tatsächlich einplant, war das nicht so: Die Vorratszeile war
+   ihr einziger Ort, und das Einplanen löscht sie.
+
+   **Eine Reise löschen** (`DELETE …/plans/:planId`) gab es nie — die
+   Planliste war eine Einbahnstraße. Es gehört der Person, die die Reise
+   angelegt hat (§6.2): Es nimmt die Reise allen weg, mit denen sie geteilt
+   ist, nicht nur der tippenden Person. Wer bloß aussteigen will, verlässt sie
+   über „Mitreisende" und braucht dafür niemandes Erlaubnis.
+
+   **„Heute" heißt jetzt „Unterwegs".** Die Ansicht ist kein Datum, sondern die
+   für draußen: der Block, in dem die Gruppe steckt, was davon aussteht, und
+   der große Umplanen-Knopf (§8.5). Eine Sonne sagte darüber nichts.
+
 8. **Standort** — Geofences um die nächsten Stopps, Erledigt-Erkennung,
    angebotene Neuverteilung, „was ist in der Nähe".
 

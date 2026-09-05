@@ -69,7 +69,32 @@ export interface StoredLeg {
   dayStartMinutes: number | null;
   days: StoredDay[];
   /** This leg's pool — redistribution never reaches across legs. */
-  pool: ScoredCandidate[];
+  pool: StoredCandidate[];
+}
+
+/**
+ * A pool entry as it comes back out of the database.
+ *
+ * More than the scoring produced, because the two things §9.2 calls
+ * decisive about a find — *why* somebody saved it and where from — are
+ * written by `addFind` and were being dropped on the way back: the
+ * screen that shows the pool could only ever show a score. "Beste
+ * Pastéis laut Blog" matters more than the name when you are choosing
+ * what to do with an afternoon.
+ */
+export interface StoredCandidate extends ScoredCandidate {
+  /** search | manual — found by the planner, or brought in by a person. */
+  origin: string;
+  /** Why it was saved, in the words of whoever saved it (§9.2). */
+  note: string | null;
+  /** Where it came from, kept as provenance (§9.2). */
+  sourceUrl: string | null;
+  /**
+   * True when no OSM entry could be matched: opening hours, category
+   * and dwell time are guesses at best, and the app says so rather than
+   * presenting them as data (§10.4).
+   */
+  unmatched: boolean;
 }
 
 export interface StoredDay {
@@ -446,6 +471,8 @@ export async function saveMovedDays(
           travel_distance_m: stop.travelFromPrevious.distanceM,
           status: stop.status,
           pinned: stop.pinned,
+          note: stop.note ?? null,
+          source_url: stop.sourceUrl ?? null,
         });
       }
     }
@@ -561,6 +588,8 @@ export async function loadPlan(
       },
       status: row.status as StopStatus,
       pinned: row.pinned,
+      note: row.note,
+      sourceUrl: row.source_url,
     });
     stopsByBlock.set(row.block_id, list);
   }
@@ -597,7 +626,7 @@ export async function loadPlan(
     daysByLeg.set(row.leg_id, list);
   }
 
-  const poolByLeg = new Map<number, ScoredCandidate[]>();
+  const poolByLeg = new Map<number, StoredCandidate[]>();
   for (const row of poolRows) {
     const list = poolByLeg.get(row.leg_id) ?? [];
     list.push({
@@ -609,6 +638,10 @@ export async function loadPlan(
       dwellMinutes: row.dwell_minutes,
       score: row.score,
       reasons: (row.reasons ?? []) as string[],
+      origin: row.origin,
+      note: row.note,
+      sourceUrl: row.source_url,
+      unmatched: row.unmatched,
     });
     poolByLeg.set(row.leg_id, list);
   }
@@ -799,4 +832,74 @@ export async function renamePlan(
     .update(tripPlans)
     .set({ title })
     .where(and(eq(tripPlans.id, planId), eq(tripPlans.owner_id, ownerId)));
+}
+
+/**
+ * Delete a trip and everything hanging off it.
+ *
+ * Every child table cascades from `trip_plans`, so one delete is the
+ * whole thing — legs, days, blocks, stops, fixpoints, pool and the
+ * share rows. Spelled out here rather than left implicit because a
+ * missing `onDelete: "cascade"` on a table added later would turn this
+ * into a foreign-key error at exactly the wrong moment.
+ *
+ * Answers false when the plan is not there, so the caller can say "not
+ * found" rather than reporting a success that deleted nothing.
+ */
+export async function deletePlan(planId: number, db: Db = dbDefault): Promise<boolean> {
+  const deleted = await db
+    .delete(tripPlans)
+    .where(eq(tripPlans.id, planId))
+    .returning({ id: tripPlans.id });
+  return deleted.length > 0;
+}
+
+/**
+ * Drop one candidate from a leg's pool (§5).
+ *
+ * A plain delete: the pool is a suggestion list, and a suggestion
+ * somebody has rejected has no business coming back on the next
+ * re-plan. It will though, if it is still what the region search finds
+ * — which is honest, since the leg really does still have that museum
+ * in it, and the alternative is a hidden list of banished spots nobody
+ * can see or undo.
+ */
+export async function removeFromPool(
+  legId: number,
+  osmRef: string,
+  db: Db = dbDefault,
+): Promise<boolean> {
+  const deleted = await db
+    .delete(tripPlanPool)
+    .where(and(eq(tripPlanPool.leg_id, legId), eq(tripPlanPool.osm_ref, osmRef)))
+    .returning({ id: tripPlanPool.id });
+  return deleted.length > 0;
+}
+
+/** One pool entry, or undefined. */
+export async function findInPool(
+  legId: number,
+  osmRef: string,
+  db: Db = dbDefault,
+): Promise<StoredCandidate | undefined> {
+  const [row] = await db
+    .select()
+    .from(tripPlanPool)
+    .where(and(eq(tripPlanPool.leg_id, legId), eq(tripPlanPool.osm_ref, osmRef)))
+    .limit(1);
+  if (!row) return undefined;
+  return {
+    osmRef: row.osm_ref,
+    name: row.name,
+    lat: row.lat,
+    lon: row.lon,
+    category: row.category,
+    dwellMinutes: row.dwell_minutes,
+    score: row.score,
+    reasons: (row.reasons ?? []) as string[],
+    origin: row.origin,
+    note: row.note,
+    sourceUrl: row.source_url,
+    unmatched: row.unmatched,
+  };
 }
