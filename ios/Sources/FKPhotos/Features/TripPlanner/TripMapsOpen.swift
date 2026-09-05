@@ -66,7 +66,33 @@ enum TripMapsOpen {
         }
     }
 
+    /// Show a place in Apple Maps — as the place, where Maps knows it.
+    ///
+    /// A `MKMapItem` built from a bare coordinate opens a pin with a
+    /// coordinate under it: no opening hours, no photos, no reviews.
+    /// Those are the very things the handoff exists for, so the stop's
+    /// name is looked up first and Maps' own item opened when the hit
+    /// is plausibly the same place (`TripAppleMapsLookup`). A miss
+    /// falls back to the coordinate, which is never wrong, only poorer.
+    ///
+    /// The lookup runs in a task rather than blocking the tap: it takes
+    /// a round trip, and a screen that freezes for it would be a worse
+    /// trade than the pin it is trying to improve.
     private static func applePin(_ place: TripCoordinate, name: String?) {
+        guard let name, !name.isEmpty else {
+            openCoordinate(place, name: nil)
+            return
+        }
+        Task { @MainActor in
+            if let found = await TripAppleMapsLookup.mapItem(named: name, near: place) {
+                found.openInMaps()
+                return
+            }
+            openCoordinate(place, name: name)
+        }
+    }
+
+    private static func openCoordinate(_ place: TripCoordinate, name: String?) {
         let item = MKMapItem(placemark: MKPlacemark(coordinate: CLLocationCoordinate2D(
             latitude: place.lat, longitude: place.lon)))
         item.name = name

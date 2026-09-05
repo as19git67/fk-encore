@@ -153,6 +153,41 @@ describe("POST /trip-planner/plans/:planId/shares", () => {
       expect(res.proposals[0].legIndex).toBeNull();
     });
 
+    it("stays a pin when the share sheet adds the pin's own caption", async () => {
+      // What Apple Maps hands over is the link *and* the name and
+      // address as text. Reading that as an article sent the whole
+      // share off to fetch a page that has no article on it, and the
+      // traveller was told there was no text on the page — for a share
+      // that carried a perfectly good coordinate.
+      const plan = await twoLegPlan();
+      const res = await analyseShare({
+        planId: plan.id,
+        url: `https://maps.apple.com/?ll=${EAST.lat},${EAST.lon}`,
+        text: "Beispielhof\nBeispielstraße 1, 12345 Musterstadt",
+      });
+
+      expect(res.kind).toBe("map-link");
+      expect(res.proposals[0].position).toEqual({ lat: EAST.lat, lon: EAST.lon });
+      // The link carried no name; the caption's first line is one.
+      expect(res.proposals[0].name).toBe("Beispielhof");
+      expect(res.proposals[0].legIndex).toBe(1);
+    });
+
+    it("does not read a shared Google document as a pin", async () => {
+      // The other half of the rule, and the reason it is safe: only a
+      // real map link wins. docs.google.com ends in google.com too, and
+      // a document turning into a place named after its title would be
+      // a far worse bug than the one this fixes.
+      const plan = await twoLegPlan();
+      stubModel([]);
+      const res = await analyseShare({
+        planId: plan.id,
+        url: "https://docs.google.com/document/d/abc/edit?q=Oststadt",
+        text: ARTICLE,
+      });
+      expect(res.kind).toBe("article");
+    });
+
     it("treats a link with only a search term as a page, not a pin", async () => {
       const plan = await twoLegPlan();
       stubModel([]);

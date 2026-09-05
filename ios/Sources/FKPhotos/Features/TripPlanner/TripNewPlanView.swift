@@ -138,6 +138,11 @@ struct TripNewPlanView: View {
                 Text(model.draft.days == 1 ? "1 Tag" : "\(model.draft.days) Tage")
             }
             TextField("Name der Reise (optional)", text: $model.draft.title)
+            Toggle("Termin steht fest", isOn: $model.draft.isDated)
+            if model.draft.isDated {
+                DatePicker("Erster Tag", selection: $model.draft.startDate,
+                           displayedComponents: .date)
+            }
         }
     }
 
@@ -155,12 +160,16 @@ struct TripNewPlanView: View {
                     Label(mode.label, systemImage: mode.systemImage).tag(mode)
                 }
             }
+            Text(model.draft.mode.hint)
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Toggle("Mit Kind", isOn: $model.draft.withChildren)
             Toggle("Schlecht zu Fuß", isOn: $model.draft.limitedMobility)
         } header: {
             Text("Wie?")
         } footer: {
-            Text("Tempo und Begleitung bestimmen, wie viel an einem Tag Platz hat.")
+            Text("Verkehrsmittel, Tempo und Begleitung bestimmen, wie viel an einem Tag "
+                 + "Platz hat. Alles davon lässt sich später in den Einstellungen ändern.")
         }
     }
 

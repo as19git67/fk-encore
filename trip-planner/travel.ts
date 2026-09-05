@@ -31,6 +31,11 @@ export const WALKING_SPEED_M_PER_MIN = 75;
  * How the group gets around on this leg (§4.2). It belongs to the leg
  * rather than the trip: arriving by car does not mean driving around
  * the old town.
+ *
+ * `transit` means **public transport and walking**, not public
+ * transport instead of walking — see `travelLeg`. It is the mode for a
+ * city where you take the tram across town and walk the last three
+ * corners, which is what most city days actually look like.
  */
 export type TransportMode = "foot" | "bike" | "transit" | "car";
 
@@ -127,17 +132,53 @@ export function haversineMeters(a: Coordinate, b: Coordinate): number {
   return 2 * EARTH_RADIUS_M * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+/**
+ * Modes where each hop is decided on its own, because the vehicle is
+ * not something you carry with you.
+ *
+ * Public transport is the case that matters (§4.2). "Zu Fuß oder mit
+ * der Tram?" is not a question about the trip, it is a question about
+ * *this hop*: nobody waits ten minutes for a tram to cross a square,
+ * and nobody walks an hour to the far end of the city because the leg
+ * says "on foot". Charging every hop the fare — ten minutes of
+ * overhead before you have moved at all — pushed real stops out of
+ * blocks for hops the travellers would simply have walked.
+ *
+ * A bicycle and a car are different: both stay with you. Abandoning
+ * the car for one hop and finding it again for the next is not a
+ * choice the planner may quietly make on the traveller's behalf, and
+ * the concept gives the mode switch its own machinery — Park & Ride as
+ * a fixpoint — rather than hiding it in an estimate.
+ */
+const WALKABLE_MODES: ReadonlySet<TransportMode> = new Set<TransportMode>(["transit"]);
+
 /** Straight line × detour factor ÷ speed + overhead, rounded to a minute. */
-export function travelLeg(
-  from: Coordinate,
-  to: Coordinate,
-  mode: TransportMode = "foot",
-): TravelLeg {
+function rawLeg(from: Coordinate, to: Coordinate, mode: TransportMode): TravelLeg {
   const straight = haversineMeters(from, to);
   const distanceM = Math.round(straight * DETOUR_FACTOR_BY_MODE[mode]);
   const overhead = straight < OVERHEAD_FLOOR_M ? 0 : OVERHEAD_MINUTES[mode];
   const minutes = Math.round(distanceM / SPEED_M_PER_MIN[mode] + overhead);
   return { distanceM, minutes, travelClass: travelClassFor(minutes, mode) };
+}
+
+/**
+ * How long this hop takes — walking it when walking is quicker.
+ *
+ * For a walkable mode the answer is the better of the two, and the
+ * returned `travelClass` says which won, so the block card reads "zu
+ * Fuß" for the hop across the square and "mit Öffentlichen" for the one
+ * across town. The tie goes to walking: no wait, no ticket, no
+ * timetable.
+ */
+export function travelLeg(
+  from: Coordinate,
+  to: Coordinate,
+  mode: TransportMode = "foot",
+): TravelLeg {
+  const ride = rawLeg(from, to, mode);
+  if (!WALKABLE_MODES.has(mode)) return ride;
+  const walk = rawLeg(from, to, "foot");
+  return walk.minutes <= ride.minutes ? walk : ride;
 }
 
 /** The pedestrian case, which is the default everywhere. */

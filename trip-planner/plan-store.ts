@@ -835,6 +835,50 @@ export async function renamePlan(
 }
 
 /**
+ * What one leg's frame says, as far as a settings change may move it.
+ *
+ * Not a general leg editor: only the two things the settings screen
+ * offers. The anchor, the days and the search radius are the frame the
+ * traveller set when the trip was made, and moving them is a different
+ * gesture with different consequences.
+ */
+export interface LegFrameUpdate {
+  legId: number;
+  mode?: TransportMode;
+  /** ISO date, or null to take the dates off the trip again. */
+  startDate?: string | null;
+}
+
+/**
+ * Move the frame of one or more legs.
+ *
+ * Written as one statement per leg rather than a single bulk update
+ * because the two fields are independent: a request that only sets the
+ * dates must not reset a leg's mode to the default, and drizzle's
+ * `set` writes exactly the keys it is given.
+ */
+export async function updateLegFrames(
+  planId: number,
+  updates: readonly LegFrameUpdate[],
+  db: Db = dbDefault,
+): Promise<void> {
+  for (const update of updates) {
+    const values: { mode?: string; start_date?: string | null } = {};
+    if (update.mode !== undefined) values.mode = update.mode;
+    if (update.startDate !== undefined) values.start_date = update.startDate;
+    if (Object.keys(values).length === 0) continue;
+    await db
+      .update(tripPlanLegs)
+      .set(values)
+      .where(and(eq(tripPlanLegs.id, update.legId), eq(tripPlanLegs.plan_id, planId)));
+  }
+  await db
+    .update(tripPlans)
+    .set({ updated_at: new Date().toISOString() })
+    .where(eq(tripPlans.id, planId));
+}
+
+/**
  * Delete a trip and everything hanging off it.
  *
  * Every child table cascades from `trip_plans`, so one delete is the

@@ -280,3 +280,134 @@ describe("a trip in a region nobody has imported (§4.3)", () => {
     expect(filled.legs[0].days[0].blocks.some((b) => b.stops.length > 0)).toBe(true);
   });
 });
+
+describe("changing the frame: the mode and the dates", () => {
+  it("changes the mode of every leg", async () => {
+    const created = await plan();
+    expect(created.legs[0].mode).toBe("foot");
+
+    const { plan: after } = await updateTripSettings({ planId: created.id, mode: "transit" });
+
+    expect(after.legs[0].mode).toBe("transit");
+    // And it stays changed: the re-plan rewrites days, not legs, so a
+    // mode that only reached the solver would be back to "foot" here.
+    const { plan: reloaded } = await getTripPlan({ planId: created.id });
+    expect(reloaded.legs[0].mode).toBe("transit");
+  });
+
+  it("still walks the short hops on a transit leg", async () => {
+    // "ÖPNV" does not mean "take the tram across the square". With
+    // every spot inside walking distance the day comes out exactly as
+    // the walking day did — no fares, no waiting, no difference.
+    const created = await plan();
+    const before = created.legs[0].days[0].blocks;
+
+    const { plan: after } = await updateTripSettings({ planId: created.id, mode: "transit" });
+
+    const now = after.legs[0].days[0].blocks;
+    expect(now.map((b) => b.stops.map((s) => s.osmRef)))
+      .toEqual(before.map((b) => b.stops.map((s) => s.osmRef)));
+    // Never dearer than walking, hop by hop — the property that makes
+    // "ÖPNV" a safe choice for a city day rather than a gamble.
+    for (const [i, block] of now.entries()) {
+      expect(block.usedMinutes).toBeLessThanOrEqual(before[i].usedMinutes);
+    }
+  });
+
+  it("reaches on a transit leg what a walking leg cannot", async () => {
+    // ~3 km out: a 52-minute walk, past any sane longest-walk limit,
+    // and a 21-minute ride. This is what choosing "ÖPNV" is for.
+    geo.setSearchSpots("nom_west", [
+      spot(1),
+      spot(2),
+      { ...spot(3), osmRef: "node:99", id: 99, name: "Museum am Rand", lat: WEST.lat + 0.027 },
+    ]);
+    const created = await plan();
+    const walked = created.legs[0].days.flatMap((d) =>
+      d.blocks.flatMap((b) => b.stops.map((s) => s.osmRef)));
+    expect(walked).not.toContain("node:99");
+
+    const { plan: after } = await updateTripSettings({ planId: created.id, mode: "transit" });
+
+    const ridden = after.legs[0].days.flatMap((d) =>
+      d.blocks.flatMap((b) => b.stops.map((s) => s.osmRef)));
+    expect(ridden).toContain("node:99");
+  });
+
+  it("puts dates on a trip that had none", async () => {
+    const created = await plan();
+    expect(created.legs[0].startDate).toBeNull();
+
+    const { plan: after } = await updateTripSettings({
+      planId: created.id,
+      startDate: "2026-09-17",
+    });
+
+    expect(after.legs[0].startDate).toBe("2026-09-17");
+  });
+
+  it("moves the dates without planning the trip again", async () => {
+    // A flight that moved is not a reason to lose the plan. The stops
+    // stay exactly as they were, in the same order.
+    const created = await plan();
+    await updateTripSettings({ planId: created.id, startDate: "2026-09-17" });
+    const before = (await getTripPlan({ planId: created.id })).plan;
+    const refs = before.legs[0].days[0].blocks.flatMap((b) => b.stops.map((s) => s.osmRef));
+
+    const { plan: after } = await updateTripSettings({
+      planId: created.id,
+      startDate: "2026-10-01",
+    });
+
+    expect(after.legs[0].startDate).toBe("2026-10-01");
+    expect(after.legs[0].days[0].blocks.flatMap((b) => b.stops.map((s) => s.osmRef)))
+      .toEqual(refs);
+  });
+
+  it("moves the dates of a trip somebody has already begun", async () => {
+    // The refusal exists to protect a record of what happened. A date
+    // does not rewrite that record, so refusing here would only cost
+    // the traveller the one correction they actually need on the road.
+    const created = await plan();
+    const stop = created.legs[0].days[0].blocks.flatMap((b) => b.stops)[0];
+    await setTripStopStatus({ planId: created.id, stopId: stop.rowId, status: "done" });
+
+    const { plan: after } = await updateTripSettings({
+      planId: created.id,
+      startDate: "2026-09-17",
+    });
+
+    expect(after.legs[0].startDate).toBe("2026-09-17");
+  });
+
+  it("still refuses to re-plan a begun trip for a new mode", async () => {
+    const created = await plan();
+    const stop = created.legs[0].days[0].blocks.flatMap((b) => b.stops)[0];
+    await setTripStopStatus({ planId: created.id, stopId: stop.rowId, status: "done" });
+
+    await expect(updateTripSettings({ planId: created.id, mode: "transit" }))
+      .rejects.toThrow(/abgehakt/);
+
+    // And the refusal left nothing half-written: the leg still has the
+    // mode it was planned with, not the one the days do not match.
+    const { plan: after } = await getTripPlan({ planId: created.id });
+    expect(after.legs[0].mode).toBe("foot");
+  });
+
+  it("takes the dates off again", async () => {
+    const created = await plan();
+    await updateTripSettings({ planId: created.id, startDate: "2026-09-17" });
+
+    const { plan: after } = await updateTripSettings({ planId: created.id, startDate: null });
+
+    expect(after.legs[0].startDate).toBeNull();
+  });
+
+  it("refuses a date that is not a date", async () => {
+    const created = await plan();
+    await expect(updateTripSettings({ planId: created.id, startDate: "17.09.2026" }))
+      .rejects.toThrow(/YYYY-MM-DD/);
+    await expect(updateTripSettings({ planId: created.id, startDate: "2026-02-30" }))
+      .rejects.toThrow(/YYYY-MM-DD/);
+  });
+});
