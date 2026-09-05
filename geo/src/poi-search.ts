@@ -21,7 +21,7 @@
 
 import { poolFor } from "./db.ts";
 import { foldName, foldNameSql, foldedLikePattern } from "./name-fold.ts";
-import { allCategoryIds, categoryById } from "./poi-categories.ts";
+import { categoryById, visitCategoryIds } from "./poi-categories.ts";
 
 export interface BoundingBox {
   minLat: number;
@@ -277,7 +277,10 @@ function clampOffset(offset: number | undefined): number {
 }
 
 function resolveCategories(requested: readonly string[] | undefined): string[] {
-  if (!requested || requested.length === 0) return allCategoryIds();
+  // Omitting the categories means "somewhere worth going", not
+  // "everything in the database" — see `visitCategoryIds` (§10.5). A
+  // caller that wants a pharmacy asks for `essentials` by name.
+  if (!requested || requested.length === 0) return visitCategoryIds();
   const unknown = requested.filter((id) => !categoryById(id));
   if (unknown.length > 0) {
     throw new PoiSearchError(`unknown categories: ${unknown.join(", ")}`);

@@ -12,6 +12,7 @@ import SwiftUI
 ///   - "Warum hier?" is one tap away on every spot. A plan nobody can
 ///     interrogate is a plan nobody trusts (§3.8).
 struct TripPlanDayView: View {
+    @State private var showSettings = false
     @State var viewModel: TripPlannerViewModel
 
     var body: some View {
@@ -31,6 +32,9 @@ struct TripPlanDayView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if let day = viewModel.day, let leg = viewModel.leg {
+                // The map is the one thing reached often enough to earn
+                // a button of its own; the rest live in a menu, because
+                // five icons across a title bar is a puzzle.
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink {
                         TripDayMapView(day: day, anchor: leg.anchor)
@@ -39,20 +43,54 @@ struct TripPlanDayView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    NavigationLink {
-                        TripTodayView(viewModel: viewModel)
+                    Menu {
+                        NavigationLink {
+                            TripTodayView(viewModel: viewModel)
+                        } label: {
+                            Label("Heute", systemImage: "sun.max")
+                        }
+                        // Everything this leg could do, and why (§5).
+                        NavigationLink {
+                            TripPoolView(leg: leg)
+                        } label: {
+                            Label("Vorrat (\(leg.pool.count))", systemImage: "tray.full")
+                        }
+                        // The way into the pool that needs nothing else
+                        // — no share sheet, no map app, no model
+                        // (§9.2, case 4).
+                        NavigationLink {
+                            TripPlaceSearchView(planId: viewModel.planId, legIndex: leg.position)
+                        } label: {
+                            Label("Ort suchen", systemImage: "magnifyingglass")
+                        }
+                        // Who else is on the trip (§6.2).
+                        NavigationLink {
+                            TripParticipantsView(planId: viewModel.planId)
+                        } label: {
+                            Label("Mitreisende", systemImage: "person.2")
+                        }
+                        Divider()
+                        Button {
+                            showSettings = true
+                        } label: {
+                            Label("Einstellungen", systemImage: "slider.horizontal.3")
+                        }
                     } label: {
-                        Label("Heute", systemImage: "sun.max")
+                        Label("Mehr", systemImage: "ellipsis.circle")
                     }
                 }
-                // The way into the pool that needs nothing else — no
-                // share sheet, no map app, no model (§9.2, case 4).
-                ToolbarItem(placement: .topBarTrailing) {
-                    NavigationLink {
-                        TripPlaceSearchView(planId: viewModel.planId, legIndex: leg.position)
-                    } label: {
-                        Label("Ort suchen", systemImage: "magnifyingglass")
-                    }
+            }
+        }
+        .sheet(isPresented: $showSettings) {
+            NavigationStack {
+                TripPlanSettingsView(
+                    planId: viewModel.planId,
+                    constraints: viewModel.plan?.constraints,
+                    title: viewModel.plan?.title,
+                ) {
+                    // Saving re-plans the days, so the screen behind has
+                    // to be told rather than left showing the old ones.
+                    Task { await viewModel.load() }
                 }
             }
         }

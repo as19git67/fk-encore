@@ -28,8 +28,8 @@ Erweiterungen vorgeschlagen, die nur auf dem Gerät sinnvoll sind.
 - **Auth:** `Core/Auth/` – `AuthManager`, `KeychainHelper`, `PasskeyManager`.
 - **Storage/Cache:** `Core/Storage/` – `ImageCache`, `ThumbnailLoader`,
   `SharedStorage` (geteilt mit der Share-Extension).
-- **App-Targets:** Haupt-App, **Share-Extension** (`App/ShareExtension/`,
-  `F4milShare/`) zum Hochladen aus anderen Apps.
+- **App-Targets:** Haupt-App, **Share-Extension** (Code in `F4milShare/`, ihre
+  `Info.plist` in `App/ShareExtension/`) zum Hochladen aus anderen Apps.
 
 ---
 

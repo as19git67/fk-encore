@@ -16,6 +16,26 @@ import { clearRouterCache } from "../osm-admin/region-router";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
+vi.mock("../osm-admin/region.service", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../osm-admin/region.service")>();
+  return {
+    ...actual,
+    // The region lookup goes to Geofabrik over the network; faked so the
+    // suite does not depend on a download.
+    suggestForCoord: async () => ({
+      slug: "europe/east",
+      pbfUrl: "https://example.com/east.pbf",
+      pbfSizeMb: 100,
+      autoApprove: false,
+    }),
+    createPending: async () => ({
+      slug: "europe/east",
+      status: "pending_approval" as const,
+      created: true,
+    }),
+  };
+});
+
 import { createTripPlan, listTripPlans } from "./plans";
 
 /** Two invented towns, far enough apart to need two regions. */
@@ -126,13 +146,23 @@ describe("POST /trip-planner/plans with legs", () => {
     expect(refsOf(1)).toEqual(["node:2"]);
   });
 
-  it("names the leg whose region is missing", async () => {
+  it("names the leg whose region is missing, and saves the trip anyway", async () => {
+    // It used to refuse outright, which threw away everything the
+    // traveller had typed over a download they had no way to arrange.
+    // §4.3 already has a resolution for "framed but not filled in", so
+    // the leg gets its days and the import is asked for.
     await seedRegion("europe/west", [48.2, 10.5, 48.6, 11.2]);
     geo.setSearchSpots("nom_europe_west", [spot("node:1", WEST)]);
 
-    await expect(
-      createTripPlan({ legs: [{ anchor: WEST }, { title: "Oststadt", anchor: EAST }] }),
-    ).rejects.toThrow(/Oststadt/);
+    const { plan, pendingRegions } = await createTripPlan({
+      legs: [{ anchor: WEST }, { title: "Oststadt", anchor: EAST }],
+    });
+
+    expect(pendingRegions).toHaveLength(1);
+    expect(pendingRegions?.[0].legTitle).toBe("Oststadt");
+    // The western leg was planned as usual; only the eastern one waits.
+    expect(plan.legs[0].days[0].blocks.some((b) => b.stops.length > 0)).toBe(true);
+    expect(plan.legs[1].days[0].blocks.every((b) => b.stops.length === 0)).toBe(true);
   });
 
   it("still accepts the flat one-city request and makes one leg of it", async () => {

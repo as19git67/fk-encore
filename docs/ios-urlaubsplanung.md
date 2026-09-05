@@ -903,6 +903,29 @@ Die Datenbasis ist also genau dort stark, wo **Funktion** zählt, und genau dort
 schwach, wo **Geschmack** zählt. Der Planer sollte sich entsprechend verhalten:
 selbstbewusst beim Finden einer Apotheke, zurückhaltend beim Abendessen.
 
+**Daraus folgt eine Trennung, die anfangs fehlte** (gemeldet: Apotheken,
+Discounter, Sparkassen und unbedeutende Kirchen im vorgeschlagenen Plan). Jede
+Kategorie hat einen `purpose`: `visit` — man geht hin, weil man es sehen will —
+oder `service` — die Reise läuft darauf, bewundert es aber nicht. Eine Suche
+ohne Kategorieangabe liefert nur noch `visit`; wer eine Apotheke sucht, nennt
+`essentials` ausdrücklich. Vorher hieß „keine Kategorie" schlicht *alle*, und
+damit lagen Geldautomat und Supermarkt im Kandidatenvorrat eines Vormittags.
+
+Zweitens: **ein Name ist kein Zeichen von Bedeutung.** Jede Sparkasse hat einen.
+Solange „hat einen Namen" in die Prominenz einging, punktete eine gewöhnliche
+Dorfkirche genau wie eine Bankfiliale, und beide rückten nach, sobald die
+lohnenden Spots verplant waren. Als Prominenz zählen jetzt nur Wikidata,
+Wikipedia und die ausdrückliche Erfassung als Sehenswürdigkeit (`tourism=*`) —
+Letzteres ist das Urteil eines Menschen, der davorstand. Wer keines davon hat,
+kommt gar nicht erst in den Vorrat, aus dem ein Tag gebaut wird: **ein kürzerer
+Vormittag ist die bessere Antwort als ein gefüllter, den niemand wollte.** Für
+„was ist hier in der Nähe" gilt das nicht — dort ist das Gewöhnliche die
+richtige Antwort.
+
+Drittens war `sight` zu weit gefasst: `historic` ohne Werteliste trifft jedes
+Wegkreuz, jeden Grenzstein und jede Gedenktafel, in einer deutschen Stadt
+Tausende. Jetzt steht dort eine Liste.
+
 ### 10.6 Belege und Zahlungen: was realistisch geht
 
 Kassenbelege und Kartenzahlungen als Signal sind **dünn gesät** — und die naive
@@ -1627,6 +1650,86 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    Der Ort wird über MapKit auf dem Gerät gesucht und muss bestätigt werden;
    ein Satz, der eine andere Stadt nennt, verschiebt das Suchfeld, nie die
    Nadel (§15.3).
+
+   **Nachgereicht: Einstellungen ändern und der Vorrat.** Zwei Lücken, beim
+   Ausprobieren gemeldet.
+
+   Das „Wie" — Tempo, Begleitung, Interessen — war genau einmal einstellbar,
+   beim Anlegen. `PATCH …/plans/:planId/settings` ändert es nachträglich und
+   **plant die Tage neu**, weil Tempo und Begleitung das Blockbudget skalieren:
+   ein gespeicherter Wert, der die Tage unberührt ließe, wäre ein Schalter ohne
+   Wirkung. Erhalten bleiben der Rahmen (Etappen, Anker, Daten, Modus,
+   Suchradius) und **alles, was jemand von Hand in den Vorrat gelegt hat**
+   (§9.2) — den Pace zu ändern darf niemandes Recherche kosten. Abgelehnt wird,
+   sobald ein Stopp abgehakt ist: ein begonnener Tag ist eine Aufzeichnung, und
+   ihn einer nachträglich geänderten Einstellung anzupassen hieße, sie
+   umzuschreiben. Dafür gibt es unterwegs „Umplanen" (§5, §8.5), und die
+   Ablehnung sagt das.
+
+   Dabei fiel auf, dass die Etappe ihren **Suchradius gar nicht speicherte**
+   (ebenso wenig den Tagesbeginn). Ein Neuplanen hätte still auf die Vorgaben
+   zurückgegriffen — ein anderes Gebiet als das gewählte. Migration 0165 legt
+   beides zur Etappe; `null` heißt weiterhin „Vorgabe", was genau dem
+   entspricht, womit ältere Zeilen geplant wurden.
+
+   Der **Vorrat** war seit dem ersten Tag Daten und nirgends sichtbar — nur
+   indirekt über „Warum hier?" und die Zeile „Zurück in den Vorrat" nach einer
+   Umverteilung. Inzwischen führen vier Wege hinein (§9.2) und keiner führte
+   irgendwohin, wo man nachsehen konnte. `TripPoolView` zeigt ihn, bestbewertet
+   zuerst, mit den Begründungen und der Markierung „schon eingeplant". Bewusst
+   nur lesend: einen Kandidaten in einen bestimmten Block zu setzen ist eine
+   Entscheidung, die der Solver mit Budget und Fußweg im Blick trifft — ein
+   Bildschirm, der ihn irgendwohin fallen ließe, würde diese Rechnung entweder
+   verdoppeln oder ignorieren.
+
+   **Nachgereicht: eine Reise ohne importierte Region.** Der Planer lehnte ab
+   („no imported OSM region covers this location") und warf damit alles weg,
+   was der Reisende getippt hatte — wegen eines Downloads, den er selbst gar
+   nicht anstoßen konnte. §4.3 hat dafür längst eine Auflösung: Der Plan wird
+   **mit Rahmen, aber ohne Spots** gespeichert, und der Import wird angefragt.
+   Null Kandidaten ergeben genau diesen Rahmen — der Solver füllt das Budget,
+   das er bekommt, und ohne Kandidaten entstehen Blöcke ohne Stopps.
+
+   Die Anfrage läuft über dasselbe `createPending` wie die Regionsverwaltung
+   und erbt damit deren Regel, statt sie zu umgehen: eine kleine Region lädt
+   sofort, eine große wartet auf Freigabe. Wer eine Reise plant, verpflichtet
+   den Server nicht durch Eintippen eines Städtenamens zu fünfzig Gigabyte.
+   Die Antwort nennt unter `pendingRegions`, worauf welche Etappe wartet;
+   `POST …/plans/:planId/plan` füllt sie später und lehnt ab, solange die
+   Karten fehlen — „es lädt noch" ist etwas, worauf man warten kann, ein leerer
+   Tag ohne Erklärung nicht.
+
+   **Nachgereicht: das Karten-Icon am Stopp.** Es öffnete immer eine Route.
+   Eine Route von zu Hause zu einem Café, zu dem man nächsten Monat laufen
+   wird, ist eine Zahl, die niemand haben will — am Küchentisch ist die Frage
+   „wo ist das?". Läuft kein Trip (`TripStore.isActive`), zeigt dasselbe Icon
+   deshalb nur den Punkt. Der Planer entscheidet das nicht selbst anhand von
+   Daten: „für Juli geplant" und „gerade unterwegs" sind verschiedene Zustände,
+   und nur Trip Mode weiß, welcher gilt.
+
+   **Nachgereicht: die Reise teilen (§6.2).** Ein Plan gehörte strikt dem, der
+   ihn angelegt hatte — jede Abfrage filterte auf `owner_id`, also konnte
+   niemand sonst ihn auch nur sehen. Damit plante eine Person den
+   Familienurlaub, während alle anderen zusahen; §6.2 will das Gegenteil.
+
+   Umgesetzt als **eine Liste von Leuten**, nicht als Rechtematrix, weil es
+   genau eine Unterscheidung gibt: Der Organisator — wer die Reise angelegt hat
+   — darf den Rahmen ändern und einladen/entfernen. *Alles andere darf jeder*,
+   und nichts davon ist unterwegs eingeschränkt: „Wer vor Ort ist, darf
+   umplanen." Der Organisator ist bewusst **keine Freigabezeile**, sondern der
+   Eigentümer des Plans: eine versehentlich gelöschte Zeile könnte sonst eine
+   Reise zurücklassen, zu der niemand mehr jemanden einladen kann. Verlassen
+   darf sich jeder selbst — um Erlaubnis zu bitten, den Urlaub eines anderen
+   nicht weiter zu planen, wäre absurd.
+
+   Zwei Dinge, die die Tests festhalten, weil sie in die falsche Richtung
+   kippen können: Ein Mitreisender darf **Funde beitragen** (das ist der Zweck
+   des Teilens), und wer nie eingeladen wurde, bekommt **„plan not found"**
+   statt „keine Berechtigung" — dass es diesen Plan gibt, geht ihn nichts an.
+
+   Migration 0166 legt `trip_plan_shares` an; die `role`-Spalte existiert, damit
+   die Übergabe der Rolle (§6.2, „übertragbar") später ohne weitere Migration
+   auskommt.
 
    Damit ist Schritt 7 abgeschlossen.
 
