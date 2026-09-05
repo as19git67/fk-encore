@@ -42,7 +42,10 @@ final class TripCalendarTests: XCTestCase {
     }
 
     func testARoundTripThroughADateKeepsTheDay() {
-        let day = "2026-02-29"
+        // A leap day, which is the one a formatter is most likely to
+        // move. 2028, because 2026 has no 29th of February — and a
+        // formatter asked for one answers with the 1st of March.
+        let day = "2028-02-29"
         let date = TripCalendar.date(fromIsoDay: day, timeZone: tokyo)
         XCTAssertNotNil(date)
         XCTAssertEqual(TripCalendar.isoDay(date!, timeZone: tokyo), day)
