@@ -247,10 +247,9 @@ function resolveDwell(stated: number | undefined, category: string | null): numb
  * "Warum hier?" for a find is what the person said, not what the data
  * says. Where it came from is part of the answer.
  */
-function reasonsFor(note: string | null, sourceUrl: string | undefined): string[] {
-  const reasons = ["von euch selbst gefunden"];
+function reasonsFor(note: string | null, _sourceUrl: string | undefined): string[] {
+  const reasons = ["selbst hinzugefügt"];
   if (note) reasons.push(note);
-  if (sourceUrl) reasons.push(`Quelle: ${sourceUrl}`);
   return reasons;
 }
 
