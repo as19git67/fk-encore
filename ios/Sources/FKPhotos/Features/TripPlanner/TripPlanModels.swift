@@ -60,6 +60,13 @@ struct TripLeg: Codable, Identifiable, Sendable {
     let pool: [TripCandidate]
 
     var transportMode: TripTransportMode { TripTransportMode(raw: mode) }
+
+    /// What to call this city. Never invents a name for a leg nobody
+    /// named (§15.3) — it says which one it is instead.
+    var displayTitle: String {
+        if let title, !title.isEmpty { return title }
+        return "Etappe \(position + 1)"
+    }
 }
 
 struct TripDay: Codable, Identifiable, Sendable {

@@ -68,6 +68,14 @@ struct TripPlanDayView: View {
                         } label: {
                             Label("Ort suchen", systemImage: "magnifyingglass")
                         }
+                        // The cities of the trip (§4.2) — add one,
+                        // move an anchor, drop one that fell through.
+                        NavigationLink {
+                            TripLegsView(viewModel: viewModel)
+                        } label: {
+                            Label("Etappen (\(viewModel.plan?.legs.count ?? 1))",
+                                  systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                        }
                         // Who else is on the trip (§6.2).
                         NavigationLink {
                             TripParticipantsView(planId: viewModel.planId)
