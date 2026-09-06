@@ -149,6 +149,33 @@ describe("what may fill a day (§10.5)", () => {
     expect(a.score).toBe(b.score);
   });
 
+  it("names a place so the traveller can read it", () => {
+    // OpenStreetMap's `name` is the *local* name, and until now the
+    // fallback only fired when it was missing — so in Tokyo every row
+    // of the plan was in a script the reader does not know. The rule is
+    // about script rather than country: a European name stays exactly
+    // as it is (§10.4).
+    const [tokyo, munich] = toCandidates([
+      plain({
+        osmRef: "node:1",
+        name: "東京国立博物館",
+        nameDe: "Tokioter Nationalmuseum",
+        nameEn: "Tokyo National Museum",
+      }),
+      plain({ osmRef: "node:2", name: "Marienplatz", nameEn: "St Mary's Square" }),
+    ]);
+
+    expect(tokyo.name).toBe("Tokioter Nationalmuseum");
+    expect(munich.name).toBe("Marienplatz");
+  });
+
+  it("keeps an unreadable name rather than inventing a readable one", () => {
+    const [candidate] = toCandidates([
+      plain({ osmRef: "node:1", name: "วัดโพธิ์", nameDe: null, nameEn: null }),
+    ]);
+    expect(candidate.name).toBe("วัดโพธิ์");
+  });
+
   it("takes a mapper's own judgement as a signal", () => {
     // Someone standing there tagged it as a thing to see. That is worth
     // more than a name and less than a Wikipedia article.

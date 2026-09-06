@@ -16,6 +16,7 @@
 
 import { getGeoClient, type GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { resolvePlace, type PlaceCandidate, type PlaceResolution } from "./resolve-place";
+import { displayName } from "./readable-name";
 
 /**
  * How far around a leg's anchor to look for a name.
@@ -105,7 +106,9 @@ export async function lookupPlace(
 function toCandidate(spot: GeoPoiSearchSpot): PlaceCandidate {
   return {
     osmRef: spot.osmRef,
-    name: spot.name,
+    // Matching still uses all three (see `resolve-place.ts`); what is
+    // shown is the readable one.
+    name: displayName(spot),
     nameDe: spot.nameDe,
     nameEn: spot.nameEn,
     lat: spot.lat,

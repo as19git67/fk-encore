@@ -22,6 +22,7 @@
  * search; a silently shorter list is not.
  */
 
+import { displayName } from "./readable-name";
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
@@ -141,7 +142,7 @@ export const searchPlaces = api(
       for (const spot of spots) {
         results.push({
           osmRef: spot.osmRef,
-          name: spot.name,
+          name: displayName(spot),
           lat: spot.lat,
           lon: spot.lon,
           distanceM: spot.distanceM,
