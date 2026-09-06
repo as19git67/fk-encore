@@ -203,14 +203,23 @@ struct TripStop: Codable, Identifiable, Sendable {
     /// from an older server still decodes.
     let note: String?
     let sourceUrl: String?
+    /// What the group calls it, when they have renamed it (§10.4). Not
+    /// a correction of the map: `name` stays what OpenStreetMap says.
+    let title: String?
+    /// The name on the sign, when `name` is not it — Tokyo, Jerusalem
+    /// (§10.4). Null wherever the two are the same.
+    let localName: String?
+    /// The Wikipedia article, where OpenStreetMap knows of one.
+    let wikipediaUrl: String?
 
     var id: Int { rowId }
     var stopStatus: TripStopStatus { TripStopStatus(raw: status) }
     var coordinate: TripCoordinate { TripCoordinate(lat: lat, lon: lon) }
     /// What to show when OpenStreetMap has no name for the place. Never
     /// invented — an unnamed spot says so (§15.3), in the words of what
-    /// it is rather than as eleven identical lines.
-    var displayName: String { name ?? TripCategory.unnamed(category) }
+    /// it is rather than as eleven identical lines. A title the group
+    /// gave it wins: they chose it precisely to recognise the place.
+    var displayName: String { title ?? name ?? TripCategory.unnamed(category) }
 }
 
 struct TripTravel: Codable, Sendable {
@@ -268,11 +277,25 @@ struct TripCandidate: Codable, Identifiable, Sendable {
     /// True when no OSM entry matched: opening hours and category are
     /// unknown rather than known-and-boring (§10.4).
     let unmatched: Bool?
+    /// See `TripStop.title`.
+    let title: String?
+    /// See `TripStop.localName`.
+    let localName: String?
+    /// See `TripStop.wikipediaUrl`.
+    let wikipediaUrl: String?
 
     var id: String { osmRef }
     var isManual: Bool { origin == "manual" }
-    var displayName: String { name ?? TripCategory.unnamed(category) }
+    var displayName: String { title ?? name ?? TripCategory.unnamed(category) }
     var coordinate: TripCoordinate { TripCoordinate(lat: lat, lon: lon) }
+}
+
+/// What the group wrote about one spot, as the server answers it.
+struct TripSpotNote: Codable, Sendable {
+    let osmRef: String
+    let title: String?
+    let note: String?
+    let url: String?
 }
 
 struct TripCoordinate: Codable, Sendable, Equatable {

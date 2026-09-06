@@ -10,7 +10,8 @@
  * rather than hidden in a number.
  */
 
-import { displayName } from "./readable-name";
+import { readableName } from "./readable-name";
+import { wikipediaUrl } from "./spot-links";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import type { Candidate } from "./solver";
 
@@ -110,13 +111,18 @@ export function toCandidates(
     // (§15.3 in spirit — do not present what you do not know).
     if (opts.requireProminence && prominence === 0) continue;
 
+    // The name the traveller can read, which in Tokyo or Jerusalem is
+    // not the local one (§10.4). Choosing it here rather than in the
+    // app keeps the pool, the day and the search saying the same thing
+    // about the same place — and the local name comes along, because
+    // it is the one written on the building.
+    const names = readableName(spot);
+
     candidates.push({
       osmRef: spot.osmRef,
-      // The name the traveller can read, which in Tokyo or Jerusalem
-      // is not the local one (§10.4). Choosing it here rather than in
-      // the app keeps the pool, the day and the search saying the same
-      // thing about the same place.
-      name: displayName(spot),
+      name: names.display,
+      localName: names.local,
+      wikipediaUrl: wikipediaUrl(spot.wikipedia),
       lat: spot.lat,
       lon: spot.lon,
       category,

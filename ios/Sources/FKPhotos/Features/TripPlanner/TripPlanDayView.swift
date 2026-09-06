@@ -467,6 +467,7 @@ struct TripPlanDayView: View {
                     TripSpotDetailView(
                         spot: TripSpotDetail(stop),
                         mode: viewModel.leg?.transportMode ?? .foot,
+                        onSave: { await viewModel.saveNote($0) },
                     )
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
