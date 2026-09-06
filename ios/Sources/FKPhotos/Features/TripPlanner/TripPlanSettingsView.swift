@@ -24,11 +24,12 @@ struct TripPlanSettingsView: View {
         title: String?,
         mode: TripTransportMode = .foot,
         startDate: String? = nil,
+        firstLeg: TripLeg? = nil,
         onSaved: @escaping () -> Void,
     ) {
         _model = State(initialValue: TripPlanSettingsViewModel(
             planId: planId, constraints: constraints, title: title,
-            mode: mode, startDate: startDate))
+            mode: mode, startDate: startDate, firstLeg: firstLeg))
         self.onSaved = onSaved
     }
 
@@ -44,11 +45,22 @@ struct TripPlanSettingsView: View {
                     DatePicker("Erster Tag", selection: $model.startDate,
                                displayedComponents: .date)
                 }
+                Toggle("Ankunft ist bekannt", isOn: Binding(
+                    get: { model.arriveAt != nil },
+                    set: { on in
+                        model.arriveAt = on
+                            ? (model.arriveAt ?? TripPlanSettingsViewModel.defaultArrival)
+                            : nil
+                    },
+                ))
+                if let arrival = model.arriveAt {
+                    DatePicker("Ankunft am ersten Tag", selection: Binding(
+                        get: { arrival }, set: { model.arriveAt = $0 }),
+                               displayedComponents: .hourAndMinute)
+                }
             } header: {
                 Text("Wann?")
             } footer: {
-                // Why this is worth setting: it is the whole mechanism
-                // behind "die Reise läuft". There is no start button.
                 Text("Mit einem Datum weiß die App, welcher Tag heute ist, und öffnet die "
                      + "Reise unterwegs auf dem richtigen Tag. Die Tage werden dabei nicht "
                      + "neu geplant.")
@@ -138,6 +150,8 @@ final class TripPlanSettingsViewModel {
     /// leaving a date nobody meant.
     var isDated: Bool
     var startDate: Date
+    /// When the group arrives on the first day, nil when unknown.
+    var arriveAt: Date?
 
     private(set) var isSaving = false
     /// Set when the server refused to re-plan because the trip has
@@ -154,6 +168,22 @@ final class TripPlanSettingsViewModel {
     /// that did not touch them sends nothing at all.
     private let originalStartDate: String?
     private let originalMode: TripTransportMode
+    /// What was stored for first-leg arrival (formatted as "HH:MM"), for
+    /// change detection so an untouched arrival is never patched.
+    private let originalArriveAt: String?
+    /// First leg metadata needed when patching arrival.
+    private let firstLegTitle: String
+    private let firstLegPosition: Int
+
+    /// Default arrival time (14:00) when "Ankunft ist bekannt" is toggled on.
+    static var defaultArrival: Date {
+        Calendar.current.date(bySettingHour: 14, minute: 0, second: 0, of: Date()) ?? Date()
+    }
+
+    private static func time(fromMinutes minutes: Int) -> Date? {
+        Calendar.current.date(
+            bySettingHour: (minutes / 60) % 24, minute: minutes % 60, second: 0, of: Date())
+    }
 
     init(
         planId: Int,
@@ -161,6 +191,7 @@ final class TripPlanSettingsViewModel {
         title: String?,
         mode: TripTransportMode = .foot,
         startDate: String? = nil,
+        firstLeg: TripLeg? = nil,
     ) {
         self.planId = planId
         self.title = title ?? ""
@@ -179,6 +210,10 @@ final class TripPlanSettingsViewModel {
         self.categories = constraints?.categories
         self.interests = constraints?.interests
         self.maxWalkMinutes = constraints?.maxWalkMinutes
+        self.firstLegTitle = firstLeg?.title ?? ""
+        self.firstLegPosition = firstLeg?.position ?? 0
+        self.originalArriveAt = firstLeg?.arriveMinutes.map(TripClock.format(_:))
+        self.arriveAt = firstLeg?.arriveMinutes.flatMap(Self.time(fromMinutes:))
     }
 
     /// What to send for the dates: nothing, a date, or an explicit
@@ -190,7 +225,8 @@ final class TripPlanSettingsViewModel {
         return .some(wanted)
     }
 
-    /// Answers true when the plan was saved.
+    /// Answers true when the plan was saved (and, if the arrival changed,
+    /// the first leg was patched too).
     func save(replan: Bool) async -> Bool {
         isSaving = true
         defer { isSaving = false }
@@ -247,7 +283,6 @@ final class TripPlanSettingsViewModel {
                 ))
             errorMessage = nil
             blockedReason = nil
-            return true
         } catch {
             let message = error.localizedDescription
             // The server's refusal is a sentence the traveller can act
@@ -261,5 +296,32 @@ final class TripPlanSettingsViewModel {
             }
             return false
         }
+
+        // Patch first-leg arrival separately when it changed — the
+        // settings endpoint does not own per-leg arrival times.
+        let wantedArrival: String? = arriveAt.map(TripDraftTransfer.time(_:))
+        if wantedArrival != originalArriveAt {
+            struct LegBody: Encodable {
+                let title: String
+                let arriveAt: String??
+                enum CodingKeys: String, CodingKey { case title, arriveAt }
+                func encode(to encoder: Encoder) throws {
+                    var c = encoder.container(keyedBy: CodingKeys.self)
+                    try c.encode(title, forKey: .title)
+                    if let arriveAt { try c.encode(arriveAt, forKey: .arriveAt) }
+                }
+            }
+            struct LegResponse: Decodable { let plan: TripPlan }
+            do {
+                let _: LegResponse = try await APIClient.shared.patch(
+                    "/trip-planner/plans/\(planId)/legs/\(firstLegPosition)",
+                    body: LegBody(title: firstLegTitle, arriveAt: .some(wantedArrival)))
+            } catch {
+                errorMessage = error.localizedDescription
+                return false
+            }
+        }
+
+        return true
     }
 }

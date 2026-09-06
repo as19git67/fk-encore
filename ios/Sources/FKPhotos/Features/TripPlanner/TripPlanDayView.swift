@@ -37,7 +37,8 @@ struct TripPlanDayView: View {
                 // five icons across a title bar is a puzzle.
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink {
-                        TripDayMapView(day: day, anchor: leg.anchor)
+                        TripDayMapView(day: day, anchor: leg.anchor,
+                                       isRunning: leg.schedule(on: Date()).isRunning)
                     } label: {
                         Label("Karte", systemImage: "map")
                     }
@@ -106,6 +107,7 @@ struct TripPlanDayView: View {
                     // "the trip" means for a screen with one of each.
                     mode: viewModel.plan?.legs.first?.transportMode ?? .foot,
                     startDate: viewModel.plan?.startDate,
+                    firstLeg: viewModel.plan?.legs.first,
                 ) {
                     // Saving re-plans the days, so the screen behind has
                     // to be told rather than left showing the old ones.

@@ -39,9 +39,16 @@ final class TripShareReviewViewModel {
     let planId: Int
     private let payload: TripSharePayload
 
-    init(planId: Int, payload: TripSharePayload) {
+    /// Title the user typed in the picker — overrides the proposal name when non-empty.
+    let userTitle: String
+    /// Note the user typed in the picker — prepended to the proposal's extracted note.
+    let userNote: String
+
+    init(planId: Int, payload: TripSharePayload, userTitle: String = "", userNote: String = "") {
         self.planId = planId
         self.payload = payload
+        self.userTitle = userTitle
+        self.userNote = userNote
     }
 
     var sourceUrl: String? { response?.sourceUrl ?? payload.url }
@@ -49,6 +56,18 @@ final class TripShareReviewViewModel {
     func analyse() async {
         isAnalysing = true
         defer { isAnalysing = false }
+
+        // Apple Maps URLs carry coordinates in `ll=lat,lon` but the server
+        // routes them through the LLM article-extraction path, which fails.
+        // Short links (maps.apple/p/…) need a redirect follow to reach the
+        // full URL with coordinates; maps.apple.com/?ll=… can be parsed
+        // directly.  Google Maps links reach the server successfully.
+        if let urlString = payload.url,
+           let synthetic = await resolvedAppleMapsResponse(from: urlString) {
+            response = synthetic
+            return
+        }
+
         struct Body: Encodable {
             let url: String?
             let text: String?
@@ -65,13 +84,71 @@ final class TripShareReviewViewModel {
         }
     }
 
+    /// Resolve an Apple Maps URL to a coordinate proposal, following HTTP
+    /// redirects when the URL is a short link without inline coordinates.
+    private func resolvedAppleMapsResponse(from urlString: String) async -> TripAnalyseShareResponse? {
+        guard let url = URL(string: urlString), isAppleMapsUrl(url) else { return nil }
+        if let response = coordinateResponse(from: url, sourceUrl: urlString) { return response }
+        // Short link — follow redirects (URLSession resolves the chain
+        // automatically; response.url is the final destination).
+        guard let resolved = await followAppleMapsRedirect(url),
+              let resolvedUrl = URL(string: resolved)
+        else { return nil }
+        return coordinateResponse(from: resolvedUrl, sourceUrl: urlString)
+    }
+
+    private func isAppleMapsUrl(_ url: URL) -> Bool {
+        url.host == "maps.apple.com" || url.host == "maps.apple" || url.scheme == "maps"
+    }
+
+    /// Parse `ll=lat,lon` (and optionally `q=name`) from a URL.
+    ///
+    /// Apple Maps share URLs:
+    ///   https://maps.apple.com/?ll=48.3705,10.8978&q=Ort+Name&t=m
+    ///   https://maps.apple.com/place?auid=…&ll=48.3705,10.8978&q=…
+    ///   maps:q=Ort+Name&ll=48.3705,10.8978
+    private func coordinateResponse(from url: URL, sourceUrl: String) -> TripAnalyseShareResponse? {
+        var params: [String: String] = [:]
+        if let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems {
+            for item in items { if let v = item.value { params[item.name] = v } }
+        }
+        guard let ll = params["ll"] else { return nil }
+        let parts = ll.split(separator: ",")
+        guard parts.count >= 2,
+              let lat = Double(parts[0].trimmingCharacters(in: .whitespaces)),
+              let lon = Double(parts[1].trimmingCharacters(in: .whitespaces)),
+              (-90...90).contains(lat), (-180...180).contains(lon)
+        else { return nil }
+        // URLComponents percent-decodes query values; replace + just in case.
+        let name = params["q"].map { $0.replacingOccurrences(of: "+", with: " ") }
+        let proposal = TripShareProposal(
+            name: name,
+            verdict: TripShareProposal.Verdict.coordinate.rawValue,
+            position: .init(lat: lat, lon: lon),
+            osmRef: nil, categories: [], legIndex: nil, options: [],
+            quote: nil, placeHint: nil, kindHint: nil
+        )
+        return TripAnalyseShareResponse(kind: "map-link", sourceUrl: sourceUrl,
+                                        proposals: [proposal], rejected: [])
+    }
+
+    private func followAppleMapsRedirect(_ url: URL) async -> String? {
+        let session = URLSession(configuration: .ephemeral)
+        do {
+            let (_, response) = try await session.data(from: url)
+            return response.url?.absoluteString
+        } catch {
+            return nil
+        }
+    }
+
     /// Is this one ready to be added, given what has been answered?
     func isReady(_ proposal: TripShareProposal) -> Bool {
         guard proposal.isAddable, added[proposal.id] == nil else { return false }
         switch proposal.missing {
         case .nothing: return true
         case .whichPlace: return chosenOption[proposal.id] != nil
-        case .howLong: return (dwellMinutes[proposal.id] ?? 0) > 0
+        case .howLong: return (dwellMinutes[proposal.id] ?? TripShareReviewViewModel.suggestedDwellMinutes) > 0
         }
     }
 
@@ -119,18 +196,27 @@ final class TripShareReviewViewModel {
         // A resolved place brings its own duration from OSM; sending
         // one anyway would override real data with a default.
         let needsDuration = chosen == nil && proposal.missing == .howLong
-        let dwell = dwellMinutes[proposal.id]
-        if needsDuration && (dwell ?? 0) <= 0 { return nil }
+        let dwell = dwellMinutes[proposal.id] ?? TripShareReviewViewModel.suggestedDwellMinutes
+        if needsDuration && dwell <= 0 { return nil }
 
         return TripAddFindRequest(
             lat: position.lat,
             lon: position.lon,
-            name: chosen?.name ?? proposal.name,
-            note: noteFor(proposal),
+            name: userTitle.isEmpty ? (chosen?.name ?? proposal.name) : userTitle,
+            note: combinedNote(proposal),
             sourceUrl: sourceUrl,
             legIndex: chosen?.legIndex ?? proposal.legIndex,
             dwellMinutes: needsDuration ? dwell : nil,
         )
+    }
+
+    /// The note sent to the server: user's own note (if any) followed by
+    /// whatever the server extracted from the article.
+    private func combinedNote(_ proposal: TripShareProposal) -> String? {
+        var parts: [String] = []
+        if !userNote.isEmpty { parts.append(userNote) }
+        if let n = noteFor(proposal), !n.isEmpty { parts.append(n) }
+        return parts.isEmpty ? nil : parts.joined(separator: " \u{00B7} ")
     }
 
     /// Why this was saved, which the concept says matters more than the

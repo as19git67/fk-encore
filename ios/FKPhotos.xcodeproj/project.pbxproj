@@ -48,8 +48,6 @@
 		3AD616922FA623F80036EE1F /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				ShareViewController.swift,
-				TripShareCapture.swift,
 				TripSharePayload.swift,
 			);
 			target = 1A0000000000000000000002 /* FKPhotos */;
