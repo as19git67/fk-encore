@@ -110,7 +110,7 @@ public struct UploadQueueItem: Codable, Identifiable, Sendable {
 actor UploadQueue {
     static let shared = UploadQueue()
 
-    private static let appGroupID = "group.dev.fk-encore.F4milPhotos"
+    private static let appGroupID = SharedStorage.appGroupID
     private static let queueFilename = "upload_queue.json"
     private static let tempDirName = "pending_uploads"
 

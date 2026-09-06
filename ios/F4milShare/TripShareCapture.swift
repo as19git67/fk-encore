@@ -176,8 +176,15 @@ struct TripShareCaptureView: View {
 
     private func save() {
         guard let payload else { return }
-        guard let defaults = UserDefaults(suiteName: TripSharePayload.appGroupID) else {
-            errorMessage = "Der geteilte Speicher ist nicht erreichbar."
+        // Checked rather than assumed: without the entitlement the
+        // write below would succeed, reading it back here would
+        // succeed, this screen would say "Gemerkt", and the app would
+        // never see a thing (see `ShareConfig.appGroupReachable`).
+        // Claiming success is worse than failing.
+        guard ShareConfig.appGroupReachable,
+              let defaults = UserDefaults(suiteName: TripSharePayload.appGroupID) else {
+            errorMessage = "Der geteilte Speicher ist nicht erreichbar — der Fund kommt so "
+                + "nicht bei F4mil an. (App-Gruppe \(TripSharePayload.appGroupID))"
             return
         }
         do {

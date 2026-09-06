@@ -807,7 +807,7 @@ struct ShareQueueEntry: Codable {
 }
 
 enum ShareUploadQueueWriter {
-    private static let appGroupID   = "group.dev.fk-encore.F4milPhotos"
+    private static let appGroupID   = "group.de.f4mil.photos"
     private static let queueFile    = "upload_queue.json"
     private static let tempDirName  = "pending_uploads"
 
@@ -980,7 +980,7 @@ enum ShareSyncedState {
 // MARK: - Shared configuration
 
 enum ShareConfig {
-    static let appGroupID        = "group.dev.fk-encore.F4milPhotos"
+    static let appGroupID        = "group.de.f4mil.photos"
     static let tokenKey          = "shared.auth_token"
     static let refreshTokenKey   = "shared.refresh_token"
     static let serverURLKey      = "shared.serverURL"
@@ -988,6 +988,18 @@ enum ShareConfig {
 
     static var defaults: UserDefaults {
         UserDefaults(suiteName: appGroupID) ?? .standard
+    }
+
+    /// Whether this process is really entitled to the App Group.
+    ///
+    /// `UserDefaults(suiteName:)` cannot answer this: for a group the
+    /// process is not signed for it still returns a defaults object,
+    /// one backed by a plist inside this extension's own sandbox.
+    /// Writes succeed, reads succeed, and nothing crosses to the app.
+    /// The group's container is the question that has an answer — nil
+    /// unless the entitlement is actually there.
+    static var appGroupReachable: Bool {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID) != nil
     }
 
     static var recentAlbumIds: [Int] {
@@ -1010,6 +1022,17 @@ enum ShareAPIError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notConfigured:
+            // Two very different causes, and telling them apart saves a
+            // pointless round of logging in and out: either nobody has
+            // logged in yet, or this extension cannot reach the App
+            // Group at all — in which case the app's token is there and
+            // simply invisible from here, and no amount of logging in
+            // will help.
+            if !ShareConfig.appGroupReachable {
+                return "Der geteilte Speicher ist nicht erreichbar (App-Gruppe "
+                    + "\(ShareConfig.appGroupID)). Anmelden hilft hier nicht — "
+                    + "die Erweiterung sieht die Daten der App nicht."
+            }
             return "F4mil ist nicht eingerichtet. Bitte öffne die App und melde dich an."
         case .notAuthenticated:
             return "Nicht angemeldet – bitte öffne F4mil und melde dich an."
