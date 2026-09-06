@@ -153,7 +153,14 @@ struct TripTodayView: View {
         HStack(spacing: 10) {
             // The same detail screen the pool and the day view open.
             NavigationLink {
-                TripSpotDetailView(spot: TripSpotDetail(stop), mode: leg.transportMode)
+                // Editable here too: "Eingang um die Ecke" is learned
+                // standing in front of the door, not at the planning
+                // table (§9.2).
+                TripSpotDetailView(
+                    spot: TripSpotDetail(stop),
+                    mode: leg.transportMode,
+                    onSave: { await viewModel.saveNote($0) },
+                )
             } label: {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(stop.displayName)

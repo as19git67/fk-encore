@@ -27,6 +27,13 @@ const EXACT_ORDER_LIMIT = 7;
 export interface Candidate extends Coordinate {
   osmRef: string;
   name: string | null;
+  /**
+   * The name on the sign, when `name` is not it (§10.4). Set only
+   * where the two differ — in Tokyo or Jerusalem, not in Lisbon.
+   */
+  localName?: string | null;
+  /** The Wikipedia article, where OpenStreetMap knows of one. */
+  wikipediaUrl?: string | null;
   /** Category id from the geo search, e.g. "museum". */
   category: string;
   /** How long one typically stays, in minutes. */
@@ -38,6 +45,10 @@ export interface Candidate extends Coordinate {
 export interface PlannedStop {
   osmRef: string;
   name: string | null;
+  /** See `Candidate.localName`. */
+  localName?: string | null;
+  /** See `Candidate.wikipediaUrl`. */
+  wikipediaUrl?: string | null;
   lat: number;
   lon: number;
   category: string;
@@ -202,6 +213,8 @@ function fillBlock(args: FillArgs): PlannedBlock {
       stops.push({
         osmRef: candidate.osmRef,
         name: candidate.name,
+        localName: candidate.localName ?? null,
+        wikipediaUrl: candidate.wikipediaUrl ?? null,
         lat: candidate.lat,
         lon: candidate.lon,
         category: candidate.category,

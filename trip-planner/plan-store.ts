@@ -27,6 +27,7 @@ import {
   tripPlanPool,
   tripPlanStops,
   tripPlans,
+  tripSpotNotes,
 } from "../db/schema";
 import type { Candidate, PlannedBlock } from "./solver";
 import type { CurrentBlock, CurrentStop, StopStatus } from "./redistribute";
@@ -108,6 +109,12 @@ export interface StoredCandidate extends ScoredCandidate {
    * presenting them as data (§10.4).
    */
   unmatched: boolean;
+  /** What the group calls it, when they have renamed it (§10.4). */
+  title?: string | null;
+  /** The name on the sign, when the readable name is not it (§10.4). */
+  localName?: string | null;
+  /** The Wikipedia article, where OpenStreetMap knows of one. */
+  wikipediaUrl?: string | null;
 }
 
 export interface StoredDay {
@@ -146,6 +153,22 @@ export interface StoredBlock extends CurrentBlock {
 
 export interface StoredStop extends CurrentStop {
   rowId: number;
+  /** What the group calls it, when they have renamed it (§10.4). */
+  title?: string | null;
+}
+
+/**
+ * What a person wrote about one place on one leg (§9.2).
+ *
+ * Keyed on (leg, osmRef) rather than on the stop row, because the stop
+ * row does not survive a re-plan and the sentence somebody wrote about
+ * the entrance being round the back does.
+ */
+export interface SpotNote {
+  osmRef: string;
+  title: string | null;
+  note: string | null;
+  url: string | null;
 }
 
 /** A fixpoint as it arrives, before it has a row. */
@@ -251,6 +274,8 @@ export async function insertLeg(
         leg_id: leg.id,
         osm_ref: c.osmRef,
         name: c.name,
+        local_name: c.localName ?? null,
+        wikipedia_url: c.wikipediaUrl ?? null,
         lat: c.lat,
         lon: c.lon,
         category: c.category,
@@ -473,6 +498,8 @@ async function insertDays(
           dwell_minutes: stop.dwellMinutes,
           travel_minutes: stop.travelFromPrevious.minutes,
           travel_distance_m: stop.travelFromPrevious.distanceM,
+          local_name: stop.localName ?? null,
+          wikipedia_url: stop.wikipediaUrl ?? null,
         });
       }
     }
@@ -662,6 +689,8 @@ export async function saveMovedDays(
           pinned: stop.pinned,
           note: stop.note ?? null,
           source_url: stop.sourceUrl ?? null,
+          local_name: stop.localName ?? null,
+          wikipedia_url: stop.wikipediaUrl ?? null,
         });
       }
     }
@@ -722,6 +751,24 @@ export async function loadPlan(
     ? await db.select().from(tripPlanPool).where(inArray(tripPlanPool.leg_id, legIds))
     : [];
 
+  // What people wrote about individual places on these legs (§9.2).
+  // Applied on the way out rather than stored on the rows, because a
+  // re-plan rewrites the rows and would take the sentences with them.
+  const noteRows = legIds.length
+    ? await db.select().from(tripSpotNotes).where(inArray(tripSpotNotes.leg_id, legIds))
+    : [];
+  const notesByLeg = new Map<number, Map<string, SpotNote>>();
+  for (const row of noteRows) {
+    const byRef = notesByLeg.get(row.leg_id) ?? new Map<string, SpotNote>();
+    byRef.set(row.osm_ref, {
+      osmRef: row.osm_ref,
+      title: row.title,
+      note: row.note,
+      url: row.url,
+    });
+    notesByLeg.set(row.leg_id, byRef);
+  }
+
   const fixpointRows = dayIds.length
     ? await db
         .select()
@@ -759,12 +806,16 @@ export async function loadPlan(
 
   const stopsByBlock = new Map<number, StoredStop[]>();
   for (const row of stopRows) {
-    const mode = modeByLeg.get(legByBlock.get(row.block_id)!) ?? "foot";
+    const legId = legByBlock.get(row.block_id)!;
+    const mode = modeByLeg.get(legId) ?? "foot";
+    const written = notesByLeg.get(legId)?.get(row.osm_ref);
     const list = stopsByBlock.get(row.block_id) ?? [];
     list.push({
       rowId: row.id,
       osmRef: row.osm_ref,
       name: row.name,
+      localName: row.local_name,
+      wikipediaUrl: row.wikipedia_url,
       lat: row.lat,
       lon: row.lon,
       category: row.category,
@@ -777,8 +828,12 @@ export async function loadPlan(
       },
       status: row.status as StopStatus,
       pinned: row.pinned,
-      note: row.note,
-      sourceUrl: row.source_url,
+      // What a person wrote wins over what the find brought with it:
+      // the note on the row is provenance from whoever saved the place,
+      // and an edit is somebody saying that is not what matters now.
+      note: written?.note ?? row.note,
+      sourceUrl: written?.url ?? row.source_url,
+      title: written?.title ?? null,
     });
     stopsByBlock.set(row.block_id, list);
   }
@@ -817,10 +872,13 @@ export async function loadPlan(
 
   const poolByLeg = new Map<number, StoredCandidate[]>();
   for (const row of poolRows) {
+    const written = notesByLeg.get(row.leg_id)?.get(row.osm_ref);
     const list = poolByLeg.get(row.leg_id) ?? [];
     list.push({
       osmRef: row.osm_ref,
       name: row.name,
+      localName: row.local_name,
+      wikipediaUrl: row.wikipedia_url,
       lat: row.lat,
       lon: row.lon,
       category: row.category,
@@ -828,8 +886,9 @@ export async function loadPlan(
       score: row.score,
       reasons: (row.reasons ?? []) as string[],
       origin: row.origin,
-      note: row.note,
-      sourceUrl: row.source_url,
+      note: written?.note ?? row.note,
+      sourceUrl: written?.url ?? row.source_url,
+      title: written?.title ?? null,
       unmatched: row.unmatched,
     });
     poolByLeg.set(row.leg_id, list);
@@ -924,6 +983,8 @@ async function rewriteDay(
         travel_distance_m: stop.travelFromPrevious.distanceM,
         status: stop.status,
         pinned: stop.pinned,
+        local_name: stop.localName ?? null,
+        wikipedia_url: stop.wikipediaUrl ?? null,
       });
     }
   }
@@ -935,6 +996,8 @@ async function rewriteDay(
         leg_id: legId,
         osm_ref: c.osmRef,
         name: c.name,
+        local_name: c.localName ?? null,
+        wikipedia_url: c.wikipediaUrl ?? null,
         lat: c.lat,
         lon: c.lon,
         category: c.category,
@@ -993,6 +1056,8 @@ export async function replanPlan(
           leg_id: leg.legId,
           osm_ref: c.osmRef,
           name: c.name,
+          local_name: c.localName ?? null,
+          wikipedia_url: c.wikipediaUrl ?? null,
           lat: c.lat,
           lon: c.lon,
           category: c.category,
@@ -1112,6 +1177,67 @@ export async function removeFromPool(
   return deleted.length > 0;
 }
 
+/**
+ * Write what a person has to say about one place on one leg (§9.2).
+ *
+ * An upsert on (leg, osmRef): the pair is what a person means, and
+ * they mean the same place whether it currently sits in the pool, on a
+ * day, or nowhere at all. A row whose fields are all empty is deleted
+ * rather than kept, so "clear the note" leaves no trace behind and the
+ * spot goes back to showing what the find brought with it.
+ */
+export async function saveSpotNote(
+  legId: number,
+  osmRef: string,
+  fields: { title: string | null; note: string | null; url: string | null },
+  userId: number,
+  db: Db = dbDefault,
+): Promise<void> {
+  const empty = fields.title === null && fields.note === null && fields.url === null;
+  if (empty) {
+    await db
+      .delete(tripSpotNotes)
+      .where(and(eq(tripSpotNotes.leg_id, legId), eq(tripSpotNotes.osm_ref, osmRef)));
+    return;
+  }
+
+  await db
+    .insert(tripSpotNotes)
+    .values({
+      leg_id: legId,
+      osm_ref: osmRef,
+      title: fields.title,
+      note: fields.note,
+      url: fields.url,
+      updated_by: userId,
+    })
+    .onConflictDoUpdate({
+      target: [tripSpotNotes.leg_id, tripSpotNotes.osm_ref],
+      set: {
+        title: fields.title,
+        note: fields.note,
+        url: fields.url,
+        updated_by: userId,
+        updated_at: new Date().toISOString(),
+      },
+    });
+}
+
+/** What is written about one place on one leg, or undefined. */
+export async function findSpotNote(
+  legId: number,
+  osmRef: string,
+  db: Db = dbDefault,
+): Promise<SpotNote | undefined> {
+  const [row] = await db
+    .select()
+    .from(tripSpotNotes)
+    .where(and(eq(tripSpotNotes.leg_id, legId), eq(tripSpotNotes.osm_ref, osmRef)))
+    .limit(1);
+  if (!row) return undefined;
+  return { osmRef: row.osm_ref, title: row.title, note: row.note, url: row.url };
+}
+
 /** One pool entry, or undefined. */
 export async function findInPool(
   legId: number,
@@ -1127,6 +1253,8 @@ export async function findInPool(
   return {
     osmRef: row.osm_ref,
     name: row.name,
+    localName: row.local_name,
+    wikipediaUrl: row.wikipedia_url,
     lat: row.lat,
     lon: row.lon,
     category: row.category,

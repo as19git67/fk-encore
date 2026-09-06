@@ -749,6 +749,26 @@ Vorrat verwahrlost:
   Planer fragt dann einmal nach der geschätzten Dauer und markiert die
   Öffnungszeit als unbekannt, statt mit erfundenen Werten zu rechnen.
 
+**Nachgereicht: notieren darf man auch später.** Notiz und Link gab es
+zunächst nur als Herkunft eines Funds — wer einen Spot einbrachte, durfte in
+diesem einen Moment sagen warum, und danach niemand mehr ein Wort. Die Sätze,
+die einen Vormittag tatsächlich entscheiden („Eingang um die Ecke", „Tickets
+vorher kaufen", „Karten mitnehmen"), lernt man aber hinterher: aus einem Blog,
+von der Familie, weil man einmal davorstand. Jeder Spot nimmt deshalb drei
+Felder an, die jede und jeder auf der Reise ändern darf (§6.2):
+
+- **Titel** — wie *ihr* den Ort nennt („das Museum mit dem Dachgarten"). Das
+  korrigiert OpenStreetMap nicht: der Kartenname bleibt darunter stehen, denn
+  an der Kasse gilt der.
+- **Notiz** — warum er zählt, in euren Worten.
+- **Link** — die offizielle Seite, die Buchung, der Blogeintrag.
+
+Geschrieben wird gegen **Etappe und OSM-Referenz**, nicht gegen die geplante
+Stopp-Zeile. Jedes Neuplanen löscht die Stopps eines Tages und schreibt sie neu;
+eine Notiz an der Zeile hielte genau bis zur nächsten Einstellungsänderung. Das
+Paar (Etappe, Ort) ist das, was ein Mensch meint — und es gilt, ob der Spot
+gerade im Vorrat liegt, auf einem Tag steht oder nirgends.
+
 ### 9.3 Eine Webseite auslesen
 
 Der Weg von einem Reiseblog zu Kandidaten im Vorrat, in vier Stufen. Er ist der
@@ -890,6 +910,21 @@ ohne Quelle. Ein einziges erfundenes Restaurant beschädigt das Vertrauen in den
 gesamten Planer, auch dort, wo er richtig liegt. Praktisch heißt das: Jeder Name
 im erzeugten Text wird gegen den Vorrat validiert; was dort nicht steht, fliegt
 raus.
+
+**Nachgereicht: lesbar heißt nicht namenlos.** Spots heißen inzwischen so, wie
+die Reisenden sie lesen können — in Tokio kommt „Nationalmuseum Beispielstadt"
+statt 東京国立博物館 zurück, entschieden an der Schrift und nie erfunden. Das ist
+der richtige Name zum Planen und der falsche, um vor dem Gebäude zu stehen:
+**der lokale Name steht daneben**, wo er ein anderer ist. In Europa ist das
+Feld leer, denn zweimal dieselbe Zeile ist kein Zugewinn.
+
+**Nachgereicht: der Wikipedia-Artikel.** Das `wikipedia`-Tag wird seit dem
+ersten Tag gelesen und zählte bisher nur auf die Prominenz ein — ein Ort hatte
+einen Artikel oder eben nicht, der Artikel selbst wurde weggeworfen. Er wird
+jetzt als fertige URL mitgeführt (einmal gebaut, damit Vorrat, Tag und Suche
+nicht je eine eigene zusammensetzen) und in der Detailansicht verlinkt. Ohne
+Sprachpräfix im Tag gibt es keinen Link: „de" für einen Ort in Kyoto zu raten
+führt auf einen Artikel, den es nicht gibt (§15.3).
 
 ### 10.5 Wo dieselbe Datenbasis glänzt
 

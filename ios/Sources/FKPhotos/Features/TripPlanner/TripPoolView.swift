@@ -103,7 +103,11 @@ struct TripPoolView: View {
     @ViewBuilder
     private func row(_ candidate: TripCandidate, leg: TripLeg) -> some View {
         NavigationLink {
-            TripSpotDetailView(spot: TripSpotDetail(candidate), mode: leg.transportMode) {
+            TripSpotDetailView(
+                spot: TripSpotDetail(candidate),
+                mode: leg.transportMode,
+                onSave: { await viewModel.saveNote($0) },
+            ) {
                 Section {
                     Button {
                         placing = candidate

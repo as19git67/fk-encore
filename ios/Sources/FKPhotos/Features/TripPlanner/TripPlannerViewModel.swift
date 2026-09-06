@@ -172,6 +172,38 @@ final class TripPlannerViewModel {
         }
     }
 
+    /// Write a title, a note and a link against one spot (§9.2, §10.4).
+    ///
+    /// Against the leg and the OSM reference, never against the stop
+    /// row: a re-plan deletes and rewrites the day's stops, so a note
+    /// kept on the row would last until the next settings change. The
+    /// whole plan comes back, because a title changes what the day
+    /// screen reads too.
+    func saveNote(_ edit: TripSpotEdit) async {
+        struct Body: Encodable {
+            let osmRef: String
+            let title: String
+            let note: String
+            let url: String
+        }
+        struct Response: Decodable {
+            let spotNote: TripSpotNote?
+        }
+        do {
+            let _: Response = try await APIClient.shared.patch(
+                "/trip-planner/plans/\(planId)/legs/\(legIndex)/spot",
+                body: Body(osmRef: edit.osmRef, title: edit.title, note: edit.note,
+                           url: edit.url),
+            )
+            // The written note reaches the screens through the plan,
+            // which carries it onto every copy of the spot at once —
+            // the pool row, the day row and the detail view.
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     /// Put a candidate from the pool into a block (§5, §8.4).
     ///
     /// The traveller overruling the solver, which is a thing the

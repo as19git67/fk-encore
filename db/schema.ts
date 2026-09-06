@@ -2793,6 +2793,13 @@ export const tripPlanStops = pgTable(
     // moment somebody acts on the find, which deletes the pool row.
     note: text("note"),
     source_url: text("source_url"),
+    // The name on the sign, when the readable name is not it (§10.4).
+    // Null across most of Europe, where the two are the same and a
+    // second identical line would be noise.
+    local_name: text("local_name"),
+    // The Wikipedia article, where OSM knows of one — built once in
+    // spot-links.ts so the pool, the day and the search agree.
+    wikipedia_url: text("wikipedia_url"),
   },
   (table) => [
     uniqueIndex("trip_plan_stops_block_position_key").on(table.block_id, table.position),
@@ -2877,6 +2884,38 @@ export const tripPlanPool = pgTable(
     // True when no OSM entry could be matched: opening hours and category
     // are unknown, and the planner says so rather than inventing them.
     unmatched: boolean("unmatched").notNull().default(false),
+    /** See `trip_plan_stops.local_name`. */
+    local_name: text("local_name"),
+    /** See `trip_plan_stops.wikipedia_url`. */
+    wikipedia_url: text("wikipedia_url"),
   },
   (table) => [uniqueIndex("trip_plan_pool_leg_ref_key").on(table.leg_id, table.osm_ref)]
+);
+
+/**
+ * What a person has to say about one spot (§9.2, §10.4).
+ *
+ * Keyed on the leg and the OSM reference, never on the stop row: a
+ * re-plan deletes the day's stops and writes them again, so a note
+ * hanging off the row would last until the next settings change. The
+ * pair (leg, place) is what a person means, and it holds whether the
+ * place currently sits in the pool, on a day, or nowhere.
+ */
+export const tripSpotNotes = pgTable(
+  "trip_spot_notes",
+  {
+    id: serial("id").primaryKey(),
+    leg_id: integer("leg_id")
+      .notNull()
+      .references(() => tripPlanLegs.id, { onDelete: "cascade" }),
+    osm_ref: text("osm_ref").notNull(),
+    // The group's own name for the place, not a correction of the map:
+    // OpenStreetMap's name stays where it is.
+    title: text("title"),
+    note: text("note"),
+    url: text("url"),
+    updated_by: integer("updated_by").references(() => users.id, { onDelete: "set null" }),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("trip_spot_notes_leg_ref_key").on(table.leg_id, table.osm_ref)]
 );

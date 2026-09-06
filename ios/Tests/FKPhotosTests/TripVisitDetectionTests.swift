@@ -29,6 +29,9 @@ final class TripGeofencePlanTests: XCTestCase {
             pinned: false,
             note: nil,
             sourceUrl: nil,
+            title: nil,
+            localName: nil,
+            wikipediaUrl: nil,
         )
     }
 
