@@ -99,6 +99,13 @@ struct TripLegsView: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+            if leg.isAwaitingRegion {
+                // Which city the trip is waiting for, in the one list
+                // that shows them all.
+                Label("Karten werden noch geladen", systemImage: "map.circle")
+                    .font(.caption2)
+                    .foregroundStyle(Color.accentColor)
+            }
             if leg.anchorRadiusM != nil {
                 // An anchor zone is not an address (§4.2).
                 Text("Unterkunft noch offen")

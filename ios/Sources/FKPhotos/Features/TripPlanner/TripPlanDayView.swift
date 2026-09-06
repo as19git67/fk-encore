@@ -147,6 +147,9 @@ struct TripPlanDayView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 legHeader(leg)
+                if leg.isAwaitingRegion {
+                    awaitingRegionCard(leg)
+                }
                 if !day.fixpoints.isEmpty {
                     fixpointBand(day.fixpoints)
                 }
@@ -160,10 +163,59 @@ struct TripPlanDayView: View {
             }
             .padding()
         }
-        .safeAreaInset(edge: .top) { dayPicker(leg) }
+        .safeAreaInset(edge: .top) {
+            VStack(spacing: 0) {
+                // Only for a trip that has more than one: a chooser
+                // with a single entry is noise on the screen people
+                // look at most.
+                if (viewModel.plan?.legs.count ?? 1) > 1 { legPicker }
+                dayPicker(leg)
+            }
+        }
     }
 
     // MARK: - Header and navigation between days
+
+    /// The leg is framed and empty because its maps are still being
+    /// imported (§4.3).
+    ///
+    /// Said out loud, because the alternative is a day with nothing on
+    /// it and no explanation — and "es lädt noch" is something a person
+    /// can wait out, while an empty day is something they conclude the
+    /// app is broken over (§8.3). The button is for the impatient: the
+    /// server fills these in by itself once the import lands.
+    private func awaitingRegionCard(_ leg: TripLeg) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Die Karten für \(leg.displayTitle) fehlen noch",
+                  systemImage: "map.circle")
+                .font(.subheadline.weight(.semibold))
+            Text("Der Kartenausschnitt wird heruntergeladen — das dauert je nach Region "
+                 + "eine Weile und kann auf eine Freigabe warten. Die Tage stehen schon: "
+                 + "sobald die Karten da sind, füllen sie sich von selbst.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            if let reason = viewModel.fillBlockedReason {
+                Text(reason)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Button {
+                Task { await viewModel.fillPending() }
+            } label: {
+                if viewModel.isFilling {
+                    ProgressView()
+                } else {
+                    Label("Jetzt nachsehen", systemImage: "arrow.clockwise")
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(viewModel.isFilling)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+    }
 
     private func legHeader(_ leg: TripLeg) -> some View {
         HStack(spacing: 6) {
@@ -178,6 +230,45 @@ struct TripPlanDayView: View {
         }
         .font(.footnote)
         .foregroundStyle(.secondary)
+    }
+
+    /// Which city of the trip is on screen (§4.2).
+    ///
+    /// Without this a trip through three cities showed the first one
+    /// and nothing else: every screen behind the day — the pool, the
+    /// map, moving a spot — is scoped to the leg on screen, so the
+    /// other two were unreachable rather than merely unshown.
+    private var legPicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(viewModel.plan?.legs.sorted(by: { $0.position < $1.position }) ?? []) { leg in
+                    Button {
+                        viewModel.select(leg: leg.position)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(leg.displayTitle)
+                                .font(.subheadline.weight(
+                                    leg.position == viewModel.legIndex ? .semibold : .regular))
+                            if leg.isAwaitingRegion {
+                                Image(systemName: "map.circle").font(.caption2)
+                            }
+                        }
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 12)
+                        .background(
+                            leg.position == viewModel.legIndex
+                                ? AnyShapeStyle(.tint.opacity(0.15))
+                                : AnyShapeStyle(.clear),
+                            in: .capsule,
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.top, 6)
+        }
+        .background(.bar)
     }
 
     private func dayPicker(_ leg: TripLeg) -> some View {
