@@ -22,7 +22,7 @@ import Foundation
 /// what was shared, put it down, say so — and the app picks it up.
 struct TripSharePayload: Codable, Equatable, Sendable {
     /// The App Group both targets can see.
-    static let appGroupID = "group.dev.fk-encore.F4milPhotos"
+    static let appGroupID = "group.de.f4mil.photos"
     /// One key holding one JSON payload. A second share overwrites the
     /// first: an inbox that queues would need a way to empty it, and
     /// "the last thing you shared" is what anyone would expect.
