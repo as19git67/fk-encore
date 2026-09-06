@@ -2674,6 +2674,12 @@ export const tripPlanLegs = pgTable(
     // Set when the anchor is a zone rather than an address: the anchor is
     // its centroid and this is how far the real base may sit from it.
     anchor_radius_m: integer("anchor_radius_m"),
+    // What the anchor is called: the hotel, the campsite, the friends'
+    // address. Distinct from `title`, which is the city (migration 0169).
+    anchor_label: text("anchor_label"),
+    // When the group reaches this city, in minutes past midnight — the
+    // start of its *first* day only, unlike `day_starts_at`.
+    arrive_minutes: integer("arrive_minutes"),
     // foot | bike | transit | car — per leg, not per trip.
     mode: text("mode").notNull().default("foot"),
     region_db: text("region_db").notNull(),

@@ -29,8 +29,21 @@ struct TripDraftLegView: View {
                     finder.query = place.name
                     finder.clearResults()
                 }
+                if leg.place != nil {
+                    TextField("Stadt (optional)", text: $leg.title)
+                        .textInputAutocapitalization(.words)
+                    Toggle("Noch nichts gebucht", isOn: $leg.anchorIsApproximate)
+                    if leg.anchorIsApproximate {
+                        Stepper(value: $leg.anchorRadiusM, in: 300...10_000, step: 250) {
+                            Text("Ungefähr im Umkreis von \(leg.anchorRadiusM) m")
+                        }
+                    }
+                }
             } header: {
-                Text("Wohin?")
+                Text("Unterkunft")
+            } footer: {
+                Text("Hotel, Campingplatz oder Adresse — hier fängt jeder Tag dieser Stadt "
+                     + "an und hier endet er.")
             }
 
             Section {
@@ -60,7 +73,7 @@ struct TripDraftLegView: View {
                      + "Abfahrt ist der Tag vorbei, vor der Ankunft fängt der nächste nicht an.")
             }
         }
-        .navigationTitle(leg.place?.name ?? "Stadt \(position + 1)")
+        .navigationTitle(leg.effectiveTitle ?? "Stadt \(position + 1)")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             if let name = leg.place?.name, finder.query.isEmpty { finder.query = name }

@@ -49,6 +49,13 @@ struct TripLeg: Codable, Identifiable, Sendable {
     /// planner reckons with the centroid and this says how far the real
     /// base may sit from it. The UI must not show a zone as a pin.
     let anchorRadiusM: Int?
+    /// What the anchor is called — "Hotel Beispielhof", "Beispielstraße
+    /// 1". Distinct from `title`, which names the city. Optional so a
+    /// response from an older server still decodes.
+    let anchorLabel: String?
+    /// When the group reaches this city, in minutes past midnight. The
+    /// start of the leg's *first* day only.
+    let arriveMinutes: Int?
     let mode: String
     let regionDb: String
     /// True while this leg has its frame and no spots because its
@@ -64,6 +71,15 @@ struct TripLeg: Codable, Identifiable, Sendable {
     let pool: [TripCandidate]
 
     var transportMode: TripTransportMode { TripTransportMode(raw: mode) }
+
+    /// Where every day of this leg starts and ends (§4.2): the hotel,
+    /// the campsite, the friends' address. Falls back to the leg's own
+    /// name, which for a trip anchored on a city centre is the truest
+    /// thing there is to say.
+    var anchorTitle: String {
+        if let anchorLabel, !anchorLabel.isEmpty { return anchorLabel }
+        return displayTitle
+    }
 
     /// Is this leg waiting for its maps? Absent means no — an older
     /// server that never had the flag never had a waiting leg either.

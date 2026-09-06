@@ -179,8 +179,10 @@ struct TripAddLegView: View {
         isSaving = true
         defer { isSaving = false }
         struct Body: Encodable {
-            let title: String
+            let title: String?
             let anchor: TripCreatePlanRequest.Coordinate
+            let anchorLabel: String
+            let anchorRadiusM: Int?
             let mode: String
             let days: Int
             let radiusM: Int
@@ -190,8 +192,10 @@ struct TripAddLegView: View {
             let response: TripPlanResponse = try await APIClient.shared.post(
                 "/trip-planner/plans/\(viewModel.planId)/legs",
                 body: Body(
-                    title: place.name,
+                    title: leg.effectiveTitle,
                     anchor: .init(lat: place.latitude, lon: place.longitude),
+                    anchorLabel: place.name,
+                    anchorRadiusM: leg.anchorIsApproximate ? leg.anchorRadiusM : nil,
                     mode: leg.mode.rawValue,
                     days: leg.days,
                     radiusM: leg.radiusM,
@@ -225,12 +229,22 @@ struct TripLegEditView: View {
     @State private var mode: TripTransportMode = .foot
     @State private var isDated = false
     @State private var startDate = Date()
+    @State private var arriveAt: Date?
     @State private var isSaving = false
     @State private var loaded = false
     @State private var errorMessage: String?
 
     private var leg: TripLeg? {
         viewModel.plan?.legs.first { $0.position == legIndex }
+    }
+
+    private static var defaultArrival: Date {
+        Calendar.current.date(bySettingHour: 14, minute: 0, second: 0, of: Date()) ?? Date()
+    }
+
+    private static func time(fromMinutes minutes: Int) -> Date? {
+        Calendar.current.date(
+            bySettingHour: (minutes / 60) % 24, minute: minutes % 60, second: 0, of: Date())
     }
 
     var body: some View {
@@ -271,10 +285,31 @@ struct TripLegEditView: View {
                     finder.clearResults()
                 }
             } header: {
-                Text("Ausgangspunkt")
+                Text("Unterkunft")
             } footer: {
-                Text("Das Hotel oder die Wohnung: hier fängt jeder Tag an und hier endet er. "
-                     + "Verschieben plant die Tage neu.")
+                Text("Hotel, Campingplatz oder Adresse: hier fängt jeder Tag an und hier endet "
+                     + "er, und von hier aus werden die Wege gerechnet. Verschieben plant die "
+                     + "Tage neu.")
+            }
+
+            Section {
+                Toggle("Ankunft ist bekannt", isOn: Binding(
+                    get: { arriveAt != nil },
+                    set: { on in
+                        arriveAt = on ? (arriveAt ?? Self.defaultArrival) : nil
+                    },
+                ))
+                if let arrival = arriveAt {
+                    DatePicker("Ankunft", selection: Binding(
+                        get: { arrival }, set: { arriveAt = $0 }),
+                               displayedComponents: .hourAndMinute)
+                }
+            } header: {
+                Text("Ankunft in dieser Stadt")
+            } footer: {
+                Text("Der erste Tag fängt dann erst dann an. Unabhängig davon, ab wann das "
+                     + "Zimmer frei ist — ankommen und einchecken sind zwei Zeiten, und "
+                     + "geplant wird ab der ersten.")
             }
 
             if let errorMessage {
@@ -302,6 +337,7 @@ struct TripLegEditView: View {
             mode = leg.transportMode
             isDated = leg.startDate != nil
             startDate = leg.startDate.flatMap { TripCalendar.date(fromIsoDay: $0) } ?? Date()
+            arriveAt = leg.arriveMinutes.flatMap(Self.time(fromMinutes:))
             loaded = true
         }
     }
@@ -313,36 +349,47 @@ struct TripLegEditView: View {
         struct Body: Encodable {
             let title: String
             let anchor: TripCreatePlanRequest.Coordinate?
+            let anchorLabel: String?
             let mode: String?
             let days: Int?
             let startDate: String??
+            let arriveAt: String??
 
-            enum CodingKeys: String, CodingKey { case title, anchor, mode, days, startDate }
+            enum CodingKeys: String, CodingKey {
+                case title, anchor, anchorLabel, mode, days, startDate, arriveAt
+            }
 
             func encode(to encoder: Encoder) throws {
                 var c = encoder.container(keyedBy: CodingKeys.self)
                 try c.encode(title, forKey: .title)
                 try c.encodeIfPresent(anchor, forKey: .anchor)
+                try c.encodeIfPresent(anchorLabel, forKey: .anchorLabel)
                 try c.encodeIfPresent(mode, forKey: .mode)
                 try c.encodeIfPresent(days, forKey: .days)
-                // Double optional: absent leaves the date alone, an
+                // Double optionals: absent leaves the value alone, an
                 // explicit null takes it off.
                 if let startDate { try c.encode(startDate, forKey: .startDate) }
+                if let arriveAt { try c.encode(arriveAt, forKey: .arriveAt) }
             }
         }
         let wantedDate: String? = isDated ? TripCalendar.isoDay(startDate) : nil
+        let wantedArrival: String? = arriveAt.map(TripDraftTransfer.time(_:))
+        let storedArrival: String? = leg.arriveMinutes.map(TripClock.format(_:))
         do {
             let response: TripPlanResponse = try await APIClient.shared.patch(
                 "/trip-planner/plans/\(viewModel.planId)/legs/\(legIndex)",
                 body: Body(
                     title: title.trimmingCharacters(in: .whitespacesAndNewlines),
                     anchor: movedTo.map { .init(lat: $0.latitude, lon: $0.longitude) },
+                    // The anchor's own name travels with the anchor.
+                    anchorLabel: movedTo?.name,
                     // Only what actually changed: an unchanged mode
                     // would turn every save into a re-plan, and a
                     // re-plan is refused once a day has begun.
                     mode: mode == leg.transportMode ? nil : mode.rawValue,
                     days: days == leg.days.count ? nil : days,
                     startDate: wantedDate == leg.startDate ? nil : .some(wantedDate),
+                    arriveAt: wantedArrival == storedArrival ? nil : .some(wantedArrival),
                 ))
             viewModel.replace(with: response)
             dismiss()
