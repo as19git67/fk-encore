@@ -1184,6 +1184,13 @@
       "when": 1786320000015,
       "tag": "0168_trip_leg_awaiting_region",
       "breakpoints": true
+    },
+    {
+      "idx": 169,
+      "version": "7",
+      "when": 1786406400015,
+      "tag": "0169_trip_leg_anchor_label",
+      "breakpoints": true
     }
   ]
 }

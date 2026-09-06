@@ -80,8 +80,12 @@ struct TripNewPlanDraft: Equatable {
     var isPlannable: Bool { !legs.isEmpty && legs.allSatisfy { $0.place != nil } }
 
     /// "Beispielstadt → Musterstadt", or nil when nothing is picked.
+    ///
+    /// The cities, not the hotels: a trip anchored on "Hotel
+    /// Beispielhof" is still a trip to Beispielstadt, and naming it
+    /// after the hotel was what one field for both produced.
     var routeLabel: String? {
-        let names = legs.compactMap(\.place?.name)
+        let names = legs.compactMap(\.effectiveTitle)
         return names.isEmpty ? nil : names.joined(separator: " → ")
     }
 
@@ -137,8 +141,13 @@ struct TripNewPlanDraft: Equatable {
         let wire: [TripCreatePlanRequest.Leg] = legs.enumerated().compactMap { index, leg in
             guard let place = leg.place else { return nil }
             return TripCreatePlanRequest.Leg(
-                title: place.name,
+                title: leg.effectiveTitle,
                 anchor: .init(lat: place.latitude, lon: place.longitude),
+                // The anchor's own name, kept apart from the city's:
+                // picking a hotel on the map used to name the trip
+                // after the hotel.
+                anchorLabel: place.name,
+                anchorRadiusM: leg.anchorIsApproximate ? leg.anchorRadiusM : nil,
                 mode: leg.mode.rawValue,
                 days: leg.days,
                 radiusM: leg.radiusM,
@@ -146,10 +155,9 @@ struct TripNewPlanDraft: Equatable {
                 // the rest in sequence, and two sources for the same
                 // fact is how they come to disagree.
                 startDate: index == 0 && isDated ? TripCalendar.isoDay(startDate) : nil,
-                // Nobody transfers into the start of a trip; how the
-                // travellers reached the first city is not this plan's
-                // business (§4.2).
-                transfer: index == 0 ? nil : leg.transfer,
+                // On the first city only the arrival is sent: there is
+                // no earlier leg for a departure to shorten (§4.2).
+                transfer: index == 0 ? leg.arrivalOnly : leg.transfer,
             )
         }
         guard wire.count == legs.count else { return nil }
@@ -228,6 +236,8 @@ struct TripCreatePlanRequest: Encodable, Sendable {
     struct Leg: Encodable, Sendable {
         let title: String?
         let anchor: Coordinate
+        let anchorLabel: String?
+        let anchorRadiusM: Int?
         let mode: String
         let days: Int
         let radiusM: Int
@@ -260,6 +270,14 @@ struct TripCreatePlanResponse: Decodable, Sendable {
 /// town, which is why the mode belongs here and not to the trip.
 struct TripDraftLeg: Identifiable, Equatable {
     let id = UUID()
+    /// What the city is called, when it is not simply the anchor's own
+    /// name. Empty means "call it after the place I picked".
+    var title: String = ""
+    /// Set when nothing is booked yet and the base is only known as an
+    /// area (§4.2): the planner reckons with the centroid, and the plan
+    /// says so rather than claiming an address it does not have.
+    var anchorIsApproximate = false
+    var anchorRadiusM: Int = 1_500
     /// Nil until a coordinate was actually chosen. A name is not a
     /// place: the planner has no forward geocoder and inventing one is
     /// the confident guess §15.3 exists to forbid.
@@ -270,8 +288,27 @@ struct TripDraftLeg: Identifiable, Equatable {
     /// When you leave the city before this one, as a time of day. Nil
     /// when nobody knows yet — an unknown train is not a train at 00:00.
     var departAt: Date?
-    /// When you reach this one.
+    /// When you reach this one. Set on the first city too: nobody
+    /// transfers into the start of a holiday, but they do arrive, and a
+    /// day one that starts at nine for a group landing at two is a
+    /// morning the plan invented.
     var arriveAt: Date?
+
+    /// What to call this city: what was typed, or the picked place's
+    /// own name.
+    var effectiveTitle: String? {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        return place?.name
+    }
+
+    /// Just the arrival, for the first city — where a departure has no
+    /// earlier day to sit on.
+    var arrivalOnly: TripDraftTransfer? {
+        guard let arriveAt else { return nil }
+        return TripDraftTransfer(
+            departAt: nil, arriveAt: TripDraftTransfer.time(arriveAt), label: nil)
+    }
 
     /// The journey into this leg, as the endpoint wants it, or nil when
     /// neither end is known.

@@ -218,15 +218,28 @@ struct TripPlanDayView: View {
     }
 
     private func legHeader(_ leg: TripLeg) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: leg.transportMode.systemImage)
-            Text(leg.transportMode.label)
-            if leg.anchorRadiusM != nil {
-                // An anchor zone is not an address. Saying so keeps the
-                // plan from claiming a precision it does not have (§4.2).
-                Text("· Unterkunft noch offen")
+        VStack(alignment: .leading, spacing: 2) {
+            // Where the day begins and ends, said out loud. It is the
+            // value the whole plan is measured from (§4.2), and the
+            // screen used to show only how the group gets around.
+            HStack(spacing: 6) {
+                Image(systemName: leg.anchorRadiusM == nil ? "house" : "circle.dashed")
+                Text(leg.anchorRadiusM == nil
+                     ? "Start & Ziel: \(leg.anchorTitle)"
+                     : "Rund um \(leg.anchorTitle) · Unterkunft noch offen")
+                    .lineLimit(1)
+                Spacer()
             }
-            Spacer()
+            HStack(spacing: 6) {
+                Image(systemName: leg.transportMode.systemImage)
+                Text(leg.transportMode.label)
+                if viewModel.dayIndex == 0, let arrival = leg.arriveMinutes {
+                    // Only on the day it applies to: the arrival
+                    // shortens the first day and no other.
+                    Text("· Ankunft \(TripClock.format(arrival))")
+                }
+                Spacer()
+            }
         }
         .font(.footnote)
         .foregroundStyle(.secondary)

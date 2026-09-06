@@ -62,17 +62,50 @@ struct TripNewPlanView: View {
 
     // MARK: - Where
 
+    /// Where the trip is based (§4.2).
+    ///
+    /// It says "Unterkunft" rather than "Wohin?" because that is what
+    /// the value actually is: the hotel, the campsite, the friends'
+    /// address — the point every day starts and ends at, and what the
+    /// walking times are measured from. Asking for a city and planning
+    /// from its centre is a different, worse trip, and the screen used
+    /// to ask for one while storing the other.
     private var placeSection: some View {
         Section {
             TripPlaceFinderRows(model: model.finder, picked: model.draft.anchor) { place in
                 model.pick(place)
             }
+            if model.draft.anchor != nil {
+                TextField("Stadt (optional)", text: $model.draft.legs[0].title)
+                    .textInputAutocapitalization(.words)
+                anchorZoneRows(for: 0)
+            }
         } header: {
-            Text("Wohin?")
+            Text("Unterkunft")
         } footer: {
-            // Saying why the pin matters beats a plan quietly anchored
-            // in the wrong Springfield.
-            Text("Der Ort ist der Ausgangspunkt: von hier aus werden die Tage geplant.")
+            Text("Hotel, Campingplatz oder Adresse — hier fängt jeder Tag an und hier endet "
+                 + "er, und von hier aus werden die Wege gerechnet. Eine Stadt geht auch; "
+                 + "dann plant der Planer um deren Mitte herum.")
+        }
+    }
+
+    /// Nothing booked yet (§4.2).
+    ///
+    /// The concept has always allowed an anchor that is a zone rather
+    /// than an address — "höchstens fünf Stationen vom Hauptplatz" —
+    /// and the endpoint has always taken it. It simply had nowhere to
+    /// be said. Saying it keeps the plan from claiming a precision it
+    /// does not have.
+    @ViewBuilder
+    private func anchorZoneRows(for index: Int) -> some View {
+        Toggle("Noch nichts gebucht", isOn: $model.draft.legs[index].anchorIsApproximate)
+        if model.draft.legs[index].anchorIsApproximate {
+            Stepper(value: $model.draft.legs[index].anchorRadiusM, in: 300...10_000, step: 250) {
+                Text("Ungefähr im Umkreis von \(model.draft.legs[index].anchorRadiusM) m")
+            }
+            Text("Der Planer rechnet mit der Mitte und zeigt die Unterkunft nicht als Adresse an.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -152,7 +185,37 @@ struct TripNewPlanView: View {
                 DatePicker("Erster Tag", selection: $model.draft.startDate,
                            displayedComponents: .date)
             }
+            arrivalRows(for: 0)
         }
+    }
+
+    /// When the group actually gets there (§4.2).
+    ///
+    /// Without it day one gets a full Vormittag for a city the group
+    /// reaches at two in the afternoon — the planner cannot know, and
+    /// what it plans instead is a morning nobody has. Independent of
+    /// when the room is ready: arriving and checking in are two
+    /// different times, and this is the one the day is built on.
+    @ViewBuilder
+    private func arrivalRows(for index: Int) -> some View {
+        Toggle("Ankunft ist bekannt", isOn: Binding(
+            get: { model.draft.legs[index].arriveAt != nil },
+            set: { on in
+                model.draft.legs[index].arriveAt = on
+                    ? (model.draft.legs[index].arriveAt ?? Self.defaultArrival)
+                    : nil
+            },
+        ))
+        if let arrival = model.draft.legs[index].arriveAt {
+            DatePicker("Ankunft am ersten Tag", selection: Binding(
+                get: { arrival },
+                set: { model.draft.legs[index].arriveAt = $0 },
+            ), displayedComponents: .hourAndMinute)
+        }
+    }
+
+    private static var defaultArrival: Date {
+        Calendar.current.date(bySettingHour: 14, minute: 0, second: 0, of: Date()) ?? Date()
     }
 
     // MARK: - How

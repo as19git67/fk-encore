@@ -73,6 +73,8 @@ export interface AddLegRequest {
   /** What to call it — usually the city. */
   title?: string;
   anchor: { lat: number; lon: number };
+  /** What the base is called — the hotel, not the city (§4.2). */
+  anchorLabel?: string;
   anchorRadiusM?: number;
   mode?: TransportMode;
   days?: number;
@@ -110,6 +112,7 @@ export const addTripLeg = api(
     const incoming: LegRequest = {
       title: req.title,
       anchor: req.anchor,
+      anchorLabel: req.anchorLabel,
       anchorRadiusM: req.anchorRadiusM,
       mode: req.mode,
       days: req.days,
@@ -155,6 +158,7 @@ export const addTripLeg = api(
     if (replanPrevious && previous) {
       const before = await planLegForTrip(plan, replanPrevious.request, {
         detailDays: previous.days.filter((d) => d.detailed).length,
+        firstDayStartMinutes: previous.arriveMinutes,
       });
       await replanPlan(req.planId, plan.constraints, [{
         legId: previous.id,
@@ -183,8 +187,15 @@ export interface UpdateLegRequest {
   title?: string;
   /** Moving the base: the hotel changed, or the pin was off. */
   anchor?: { lat: number; lon: number };
+  /** What the base is called — the hotel, not the city (§4.2). */
+  anchorLabel?: string | null;
   /** Null to say the base is an address again rather than a zone. */
   anchorRadiusM?: number | null;
+  /**
+   * When the group reaches this city, as "HH:MM", or null to say
+   * nobody knows. It shortens the leg's first day and no other.
+   */
+  arriveAt?: string | null;
   mode?: TransportMode;
   days?: number;
   radiusM?: number;
@@ -217,7 +228,9 @@ export const updateTripLeg = api(
       || req.days !== undefined
       || req.radiusM !== undefined
       || req.anchorRadiusM !== undefined
-      || req.dayStartsAt !== undefined;
+      || req.dayStartsAt !== undefined
+      // The arrival decides how much of day one there is.
+      || req.arriveAt !== undefined;
 
     if (replans) {
       const settled = firstSettledStop(leg);
@@ -244,6 +257,11 @@ export const updateTripLeg = api(
     if (req.title !== undefined) {
       await updateLegPlace(req.planId, leg.id, { title: req.title.trim() || null });
     }
+    if (req.anchorLabel !== undefined) {
+      await updateLegPlace(req.planId, leg.id, {
+        anchorLabel: req.anchorLabel?.trim() || null,
+      });
+    }
 
     if (!replans) return { plan: await reload(req.planId, userId) };
 
@@ -265,8 +283,15 @@ export const updateTripLeg = api(
         .filter((f) => f.dayIndex < (req.days ?? stored.days.length)),
     };
 
+    const arriveMinutes = req.arriveAt === undefined
+      // Kept across the edit: moving a hotel two streets does not
+      // change when the plane lands.
+      ? stored.arriveMinutes
+      : req.arriveAt === null ? null : parseArrival(req.arriveAt);
+
     const planned = await planLegForTrip(reloaded, request, {
       detailDays: Math.max(1, stored.days.filter((d) => d.detailed).length),
+      firstDayStartMinutes: arriveMinutes,
     });
 
     // The row itself carries the anchor and the radius; the re-plan
@@ -275,6 +300,7 @@ export const updateTripLeg = api(
     await updateLegPlace(req.planId, leg.id, {
       anchor: req.anchor,
       anchorRadiusM: req.anchorRadiusM,
+      arriveMinutes,
       radiusM: req.radiusM,
       regionDb: planned.leg.regionDb,
       dayStartMinutes: planned.leg.dayStartMinutes,
@@ -362,6 +388,17 @@ function firstSettledStop(leg: StoredPlan["legs"][number]): string | null {
     }
   }
   return null;
+}
+
+/** "14:00" to minutes past midnight, or a named refusal. */
+function parseArrival(at: string): number {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(at.trim());
+  const hours = match ? Number(match[1]) : NaN;
+  const minutes = match ? Number(match[2]) : NaN;
+  if (!match || hours > 23 || minutes > 59) {
+    throw APIError.invalidArgument(`arriveAt must be HH:MM, got '${at}'`);
+  }
+  return hours * 60 + minutes;
 }
 
 function validatePosition(position: number | undefined, legCount: number): number {

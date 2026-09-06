@@ -56,6 +56,13 @@ export interface StoredLeg {
    */
   anchorRadiusM: number | null;
   mode: TransportMode;
+  /** What the anchor is called — the hotel, not the city (§4.2). */
+  anchorLabel: string | null;
+  /**
+   * When the group reaches this city, in minutes past midnight, or null
+   * when nobody said. The start of the leg's *first* day only.
+   */
+  arriveMinutes: number | null;
   regionDb: string;
   /**
    * True while this leg has its frame and no spots because its region
@@ -162,6 +169,8 @@ export interface CreateLegInput {
   title?: string;
   anchor: { lat: number; lon: number };
   anchorRadiusM?: number | null;
+  anchorLabel?: string | null;
+  arriveMinutes?: number | null;
   mode?: TransportMode;
   regionDb: string;
   /** Defaults to false — a leg planned against a ready region. */
@@ -223,6 +232,8 @@ export async function insertLeg(
       anchor_lat: legInput.anchor.lat,
       anchor_lon: legInput.anchor.lon,
       anchor_radius_m: legInput.anchorRadiusM ?? null,
+      anchor_label: legInput.anchorLabel ?? null,
+      arrive_minutes: legInput.arriveMinutes ?? null,
       mode: legInput.mode ?? "foot",
       region_db: legInput.regionDb,
       awaiting_region: legInput.awaitingRegion ?? false,
@@ -357,6 +368,8 @@ export async function planOwner(
 /** What a leg edit may move. Every field is optional. */
 export interface LegPlaceUpdate {
   title?: string | null;
+  anchorLabel?: string | null;
+  arriveMinutes?: number | null;
   anchor?: { lat: number; lon: number };
   anchorRadiusM?: number | null;
   radiusM?: number | null;
@@ -385,6 +398,8 @@ export async function updateLegPlace(
     values.anchor_lat = update.anchor.lat;
     values.anchor_lon = update.anchor.lon;
   }
+  if (update.anchorLabel !== undefined) values.anchor_label = update.anchorLabel;
+  if (update.arriveMinutes !== undefined) values.arrive_minutes = update.arriveMinutes;
   if (update.anchorRadiusM !== undefined) values.anchor_radius_m = update.anchorRadiusM;
   if (update.radiusM !== undefined) values.radius_m = update.radiusM;
   if (update.regionDb !== undefined) values.region_db = update.regionDb;
@@ -832,6 +847,8 @@ export async function loadPlan(
       anchor: { lat: l.anchor_lat, lon: l.anchor_lon },
       anchorRadiusM: l.anchor_radius_m,
       mode: l.mode as TransportMode,
+      anchorLabel: l.anchor_label,
+      arriveMinutes: l.arrive_minutes,
       regionDb: l.region_db,
       awaitingRegion: l.awaiting_region,
       startDate: l.start_date,

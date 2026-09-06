@@ -88,6 +88,13 @@ export interface LegRequest {
   /** Where each day starts and ends. With `anchorRadiusM`, its centroid. */
   anchor: { lat: number; lon: number };
   /**
+   * What the anchor is called: "Hotel Beispielhof", "Beispielstraße 1",
+   * "Campingplatz am See". Distinct from `title`, which names the city
+   * — one field could not be both, and picking a hotel on the map used
+   * to name the whole trip after it.
+   */
+  anchorLabel?: string;
+  /**
    * Set when nothing is booked yet and the base is only known as a zone
    * ("at most five metro stops from the main square"). The planner still
    * reckons with the centroid; recording the tolerance keeps the plan
@@ -107,9 +114,13 @@ export interface LegRequest {
   /** Hard times that frame individual days of this leg (§4.4). */
   fixpoints?: FixpointRequest[];
   /**
-   * The journey *into* this leg. Ignored on the first leg of a trip,
-   * which nobody transfers into — how the travellers reached the first
-   * city is not this plan's business.
+   * The journey *into* this leg.
+   *
+   * On the first leg only `arriveAt` is read: how the travellers
+   * reached the first city is not this plan's business, but *when* they
+   * get there decides whether day one has a morning at all — and a
+   * planner that gives a full Vormittag to a day the group spends on a
+   * plane has promised something nobody has.
    */
   transfer?: TransferRequest;
 }
@@ -426,6 +437,9 @@ async function replanFromStoredSettings(
       const planned = await planLeg(
         { ...legRequestFromStored(leg), mode: frame?.mode ?? leg.mode },
         {
+          // The stored arrival, replayed. Without it every settings
+          // change handed back a morning the group spends travelling.
+          firstDayStartMinutes: leg.arriveMinutes,
           shape,
           maxWalkMinutes,
           categories: (constraints.categories ?? undefined) as string[] | undefined,
@@ -609,7 +623,11 @@ export function legRequestFromStored(leg: StoredPlan["legs"][number]): LegReques
     title: leg.title ?? undefined,
     anchor: leg.anchor,
     anchorRadiusM: leg.anchorRadiusM ?? undefined,
+    anchorLabel: leg.anchorLabel ?? undefined,
     mode: leg.mode,
+    transfer: leg.arriveMinutes === null
+      ? undefined
+      : { arriveAt: formatMinutesOfDay(leg.arriveMinutes) },
     days: leg.days.length,
     radiusM: leg.radiusM ?? undefined,
     startDate: leg.startDate ?? undefined,
@@ -1245,6 +1263,10 @@ async function planLeg(
       mode,
       // Known before the import finishes: the database name follows
       // from the slug, so the leg can point at where its data will be.
+      anchorLabel: legReq.anchorLabel?.trim() || null,
+      // Kept on the leg so a re-plan cannot hand the morning back: the
+      // arrival used to live in the request and nowhere else.
+      arriveMinutes: trip.firstDayStartMinutes ?? null,
       regionDb: region?.postgresDb ?? pending!.postgresDb,
       // The leg says it is waiting, rather than the waiting being
       // guessed from "has no stops" — which a leg whose search
@@ -1336,13 +1358,21 @@ export function applyTransfers(
 
   for (const [legIndex, leg] of prepared.entries()) {
     const transfer = leg.request.transfer;
-    if (!transfer || legIndex === 0) continue;
+    if (!transfer) continue;
 
     const arriveAt = validateTimeOfDay(transfer.arriveAt, `legs[${legIndex}].transfer.arriveAt`);
     const departAt = validateTimeOfDay(transfer.departAt, `legs[${legIndex}].transfer.departAt`);
     const label = transfer.label?.trim() || `Weiterreise${leg.request.title ? ` nach ${leg.request.title}` : ""}`;
 
+    // The arrival is read on every leg, the first one included. Nobody
+    // transfers *into* the start of a trip — but they do arrive there,
+    // and a first day that begins at 09:00 for a group landing at 14:00
+    // is a morning the plan invented.
     if (arriveAt !== null) leg.firstDayStartMinutes = arriveAt;
+
+    // The departure belongs to the leg *before* this one, and the first
+    // leg has none: there is no day to put it on.
+    if (legIndex === 0) continue;
 
     if (departAt !== null) {
       // The departure belongs to the day you are leaving, which is the
