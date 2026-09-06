@@ -27,6 +27,11 @@ final class TripPlannerViewModel {
     private(set) var overfullBlockIds: Set<String> = []
     /// Why a redistribution could not run, in words the traveller can act on.
     var redistributeBlockedReason: String?
+    /// Set while a pending trip is being filled in (§4.3).
+    private(set) var isFilling = false
+    /// Why the fill-in did not happen — usually "die Karten sind noch
+    /// nicht da", which is a state rather than a fault.
+    var fillBlockedReason: String?
     var errorMessage: String?
 
     /// Which leg and day are on screen. Both are positions within their
@@ -54,6 +59,24 @@ final class TripPlannerViewModel {
 
     init(planId: Int) {
         self.planId = planId
+    }
+
+    /// Switch to another city of the trip (§4.2).
+    ///
+    /// Lands on today when that city is the one being travelled and on
+    /// its first day otherwise — the same rule the screen uses when a
+    /// trip is opened, because "which day of Osaka?" has the same
+    /// answer whether you got there by opening the trip or by tapping
+    /// across from Tokyo.
+    func select(leg position: Int) {
+        guard let plan, let leg = plan.legs.first(where: { $0.position == position })
+        else { return }
+        legIndex = position
+        if let today = plan.position(on: now()), today.legIndex == position {
+            dayIndex = today.dayIndex
+        } else {
+            dayIndex = leg.days.map(\.dayIndex).min() ?? 0
+        }
     }
 
     var leg: TripLeg? {
@@ -100,6 +123,30 @@ final class TripPlannerViewModel {
             apply(response)
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Fill in a trip that was saved before its maps existed (§4.3).
+    ///
+    /// The server does this by itself on a timer once the import lands,
+    /// so this button is for the impatient and for the case the timer
+    /// cannot cover — an import that failed and was restarted. It is
+    /// the same endpoint either way, and it refuses in words when the
+    /// maps are still missing.
+    func fillPending() async {
+        guard let plan else { return }
+        isFilling = true
+        defer { isFilling = false }
+        struct Empty: Encodable {}
+        do {
+            let response: TripPlanResponse = try await APIClient.shared.post(
+                "/trip-planner/plans/\(plan.id)/plan", body: Empty())
+            apply(response)
+            fillBlockedReason = nil
+        } catch {
+            // "die Karten sind noch nicht da" is a state to wait out,
+            // not a failure — shown as such rather than in red.
+            fillBlockedReason = error.localizedDescription
         }
     }
 
