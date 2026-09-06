@@ -154,6 +154,8 @@ function stopToCandidate(stop: CurrentStop): Candidate {
   return {
     osmRef: stop.osmRef,
     name: stop.name,
+    localName: stop.localName ?? null,
+    wikipediaUrl: stop.wikipediaUrl ?? null,
     lat: stop.lat,
     lon: stop.lon,
     category: stop.category,

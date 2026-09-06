@@ -26,6 +26,9 @@ final class TripDayTimelineTests: XCTestCase {
             pinned: false,
             note: nil,
             sourceUrl: nil,
+            title: nil,
+            localName: nil,
+            wikipediaUrl: nil,
         )
     }
 

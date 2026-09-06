@@ -16,18 +16,25 @@ struct TripSpotDetailView<Actions: View>: View {
     let spot: TripSpotDetail
     /// Which leg this belongs to, for the route's travel mode.
     let mode: TripTransportMode
+    /// Where an edit goes. Nil where nothing can take one — a spot
+    /// looked up on the map belongs to no leg, and offering a pencil
+    /// that saves nowhere is worse than not offering one.
+    let onSave: ((TripSpotEdit) async -> Void)?
     @ViewBuilder var actions: () -> Actions
 
     @State private var routeChoice: TripMapsChoice?
+    @State private var editing: TripSpotEdit?
     @AppStorage(TripMapsPreference.key) private var mapsPreference: String = TripMapsApp.apple.rawValue
 
     init(
         spot: TripSpotDetail,
         mode: TripTransportMode = .foot,
+        onSave: ((TripSpotEdit) async -> Void)? = nil,
         @ViewBuilder actions: @escaping () -> Actions,
     ) {
         self.spot = spot
         self.mode = mode
+        self.onSave = onSave
         self.actions = actions
     }
 
@@ -47,6 +54,18 @@ struct TripSpotDetailView<Actions: View>: View {
             }
 
             Section {
+                // What is written on the building, when it is not what
+                // the app just called the place (§10.4). The readable
+                // name is the one to plan with and the wrong one to
+                // stand in front of a door with.
+                if let localName = spot.localName {
+                    LabeledContent("Vor Ort", value: localName)
+                }
+                // The map's own name, kept visible under a name the
+                // group chose: the ticket desk answers to this one.
+                if let official = spot.officialName {
+                    LabeledContent("In OpenStreetMap", value: official)
+                }
                 LabeledContent("Art", value: TripCategory.label(spot.category))
                 LabeledContent("Aufenthalt", value: TripClock.duration(spot.dwellMinutes))
                 if spot.name == nil {
@@ -75,6 +94,14 @@ struct TripSpotDetailView<Actions: View>: View {
                 Section("Herkunft") {
                     Link(destination: url) {
                         Label(url.host() ?? source, systemImage: "link")
+                    }
+                }
+            }
+
+            if let article = spot.wikipediaUrl, let url = URL(string: article) {
+                Section("Wikipedia") {
+                    Link(destination: url) {
+                        Label("Artikel lesen", systemImage: "book")
                     }
                 }
             }
@@ -115,6 +142,25 @@ struct TripSpotDetailView<Actions: View>: View {
         }
         .navigationTitle(spot.displayName)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if onSave != nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Bearbeiten", systemImage: "square.and.pencil") {
+                        editing = TripSpotEdit(spot)
+                    }
+                }
+            }
+        }
+        .sheet(item: $editing) { edit in
+            NavigationStack {
+                TripSpotEditView(edit: edit, spotName: spot.name) { saved in
+                    editing = nil
+                    await onSave?(saved)
+                } onCancel: {
+                    editing = nil
+                }
+            }
+        }
         .confirmationDialog(
             "Route öffnen mit",
             isPresented: Binding(get: { routeChoice != nil },
@@ -157,8 +203,12 @@ struct TripSpotDetailView<Actions: View>: View {
 /// value cannot tell the compiler what `Actions` is, so
 /// `TripSpotDetailView(spot:)` would not type-check without this.
 extension TripSpotDetailView where Actions == EmptyView {
-    init(spot: TripSpotDetail, mode: TripTransportMode = .foot) {
-        self.init(spot: spot, mode: mode) { EmptyView() }
+    init(
+        spot: TripSpotDetail,
+        mode: TripTransportMode = .foot,
+        onSave: ((TripSpotEdit) async -> Void)? = nil,
+    ) {
+        self.init(spot: spot, mode: mode, onSave: onSave) { EmptyView() }
     }
 }
 
@@ -172,6 +222,12 @@ extension TripSpotDetailView where Actions == EmptyView {
 struct TripSpotDetail: Identifiable, Sendable {
     let osmRef: String
     let name: String?
+    /// What the group calls it, when they have renamed it (§10.4).
+    let title: String?
+    /// The name on the sign, when `name` is not it (§10.4).
+    let localName: String?
+    /// The Wikipedia article, where OpenStreetMap knows of one.
+    let wikipediaUrl: String?
     let category: String
     let coordinate: TripCoordinate
     let dwellMinutes: Int
@@ -181,11 +237,21 @@ struct TripSpotDetail: Identifiable, Sendable {
     let unmatched: Bool
 
     var id: String { osmRef }
-    var displayName: String { name ?? TripCategory.unnamed(category) }
+    /// A title the group gave it wins over the map's name: they chose
+    /// it precisely so they would recognise the place.
+    var displayName: String { title ?? name ?? TripCategory.unnamed(category) }
+    /// The map's name, shown underneath a title the group gave it —
+    /// renaming a spot here is their shorthand, not a correction of
+    /// OpenStreetMap, and the official name is what the ticket desk
+    /// answers to.
+    var officialName: String? { title == nil ? nil : name }
 
     init(_ candidate: TripCandidate) {
         osmRef = candidate.osmRef
         name = candidate.name
+        title = candidate.title
+        localName = candidate.localName
+        wikipediaUrl = candidate.wikipediaUrl
         category = candidate.category
         coordinate = candidate.coordinate
         dwellMinutes = candidate.dwellMinutes
@@ -198,6 +264,9 @@ struct TripSpotDetail: Identifiable, Sendable {
     init(_ stop: TripStop) {
         osmRef = stop.osmRef
         name = stop.name
+        title = stop.title
+        localName = stop.localName
+        wikipediaUrl = stop.wikipediaUrl
         category = stop.category
         coordinate = stop.coordinate
         dwellMinutes = stop.dwellMinutes

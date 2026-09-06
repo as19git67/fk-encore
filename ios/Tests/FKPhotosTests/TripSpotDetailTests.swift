@@ -37,6 +37,9 @@ final class TripSpotDetailTests: XCTestCase {
         note: String? = nil,
         sourceUrl: String? = nil,
         unmatched: Bool? = nil,
+        title: String? = nil,
+        localName: String? = nil,
+        wikipediaUrl: String? = nil,
     ) -> TripCandidate {
         TripCandidate(
             osmRef: "node:1",
@@ -51,10 +54,19 @@ final class TripSpotDetailTests: XCTestCase {
             note: note,
             sourceUrl: sourceUrl,
             unmatched: unmatched,
+            title: title,
+            localName: localName,
+            wikipediaUrl: wikipediaUrl,
         )
     }
 
-    private func stop(note: String? = nil, sourceUrl: String? = nil) -> TripStop {
+    private func stop(
+        note: String? = nil,
+        sourceUrl: String? = nil,
+        title: String? = nil,
+        localName: String? = nil,
+        wikipediaUrl: String? = nil,
+    ) -> TripStop {
         TripStop(
             rowId: 7,
             osmRef: "node:1",
@@ -68,6 +80,9 @@ final class TripSpotDetailTests: XCTestCase {
             pinned: true,
             note: note,
             sourceUrl: sourceUrl,
+            title: title,
+            localName: localName,
+            wikipediaUrl: wikipediaUrl,
         )
     }
 
@@ -124,5 +139,101 @@ final class TripSpotDetailTests: XCTestCase {
     func testAFindBroughtInByHandSaysSo() {
         XCTAssertTrue(candidate(note: "beste Pastéis laut Blog").isManual)
         XCTAssertFalse(candidate().isManual)
+    }
+
+    // MARK: - Names and links (§10.4)
+
+    func testATitleTheGroupGaveItWinsOverTheMapsName() {
+        let detail = TripSpotDetail(candidate(title: "Das mit dem Dachgarten"))
+        XCTAssertEqual(detail.displayName, "Das mit dem Dachgarten")
+        // And the official one stays visible: the ticket desk answers
+        // to that one, not to the family's shorthand.
+        XCTAssertEqual(detail.officialName, "Museum Beispiel")
+    }
+
+    func testWithoutATitleThereIsNoSecondNameToShow() {
+        // Otherwise every spot in Europe would carry the same line
+        // twice, once as the title and once as "in OpenStreetMap".
+        XCTAssertNil(TripSpotDetail(candidate()).officialName)
+    }
+
+    func testTheLocalNameTravelsWithTheReadableOne() {
+        let detail = TripSpotDetail(candidate(
+            name: "Nationalmuseum Beispielstadt", localName: "東京国立博物館"))
+        XCTAssertEqual(detail.displayName, "Nationalmuseum Beispielstadt")
+        XCTAssertEqual(detail.localName, "東京国立博物館")
+    }
+
+    func testAStopKeepsWhatTheMapKnowsAboutIt() {
+        let detail = TripSpotDetail(stop(
+            title: "Unser Café", localName: "カフェ",
+            wikipediaUrl: "https://de.wikipedia.org/wiki/Beispiel"))
+        XCTAssertEqual(detail.displayName, "Unser Café")
+        XCTAssertEqual(detail.officialName, "Café Beispielhof")
+        XCTAssertEqual(detail.localName, "カフェ")
+        XCTAssertEqual(detail.wikipediaUrl, "https://de.wikipedia.org/wiki/Beispiel")
+    }
+
+    func testAnOlderServerWithoutTheNameFieldsStillDecodes() throws {
+        let json = """
+        {"osmRef":"node:1","name":"Museum","lat":48.37,"lon":10.9,"category":"museum",
+         "dwellMinutes":90,"score":3,"reasons":[]}
+        """
+        let decoded = try JSONDecoder().decode(TripCandidate.self, from: Data(json.utf8))
+
+        XCTAssertNil(decoded.title)
+        XCTAssertNil(decoded.localName)
+        XCTAssertNil(decoded.wikipediaUrl)
+        XCTAssertEqual(TripSpotDetail(decoded).displayName, "Museum")
+    }
+}
+
+/// The rules the edit sheet applies before anything is sent (§9.2).
+final class TripSpotEditTests: XCTestCase {
+    private func detail(title: String? = nil, note: String? = nil,
+                        sourceUrl: String? = nil) -> TripSpotDetail {
+        TripSpotDetail(TripCandidate(
+            osmRef: "node:1", name: "Museum Beispiel", lat: 48.37, lon: 10.9,
+            category: "museum", dwellMinutes: 90, score: 3, reasons: [],
+            origin: "search", note: note, sourceUrl: sourceUrl, unmatched: nil,
+            title: title, localName: nil, wikipediaUrl: nil,
+        ))
+    }
+
+    func testTheSheetOpensOnWhatIsThere() {
+        let edit = TripSpotEdit(detail(title: "Dachgarten", note: "Früh hin.",
+                                       sourceUrl: "https://beispiel.test"))
+        XCTAssertEqual(edit.title, "Dachgarten")
+        XCTAssertEqual(edit.note, "Früh hin.")
+        XCTAssertEqual(edit.url, "https://beispiel.test")
+    }
+
+    func testAnUntitledSpotOpensWithAnEmptyTitleRatherThanTheMapsName() {
+        // Pre-filling "Museum Beispiel" would turn every save into a
+        // rename nobody asked for.
+        XCTAssertEqual(TripSpotEdit(detail()).title, "")
+    }
+
+    func testWhitespaceIsNotAValue() {
+        var edit = TripSpotEdit(osmRef: "node:1")
+        edit.note = "   \n "
+        XCTAssertEqual(edit.trimmed.note, "")
+    }
+
+    func testAnEmptyLinkIsFineAndAHalfOneIsNot() {
+        var edit = TripSpotEdit(osmRef: "node:1")
+        XCTAssertTrue(edit.urlIsUsable)
+
+        edit.url = "beispiel.test"
+        XCTAssertFalse(edit.urlIsUsable, "no scheme is not a link the app can open")
+
+        edit.url = "https://beispiel.test/museum"
+        XCTAssertTrue(edit.urlIsUsable)
+    }
+
+    func testALinkThatIsNotTheWebIsRefusedBeforeItIsSent() {
+        var edit = TripSpotEdit(osmRef: "node:1")
+        edit.url = "javascript:alert(1)"
+        XCTAssertFalse(edit.urlIsUsable)
     }
 }

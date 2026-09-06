@@ -89,6 +89,11 @@ export const placeFromPool = api(
         stop: {
           osmRef: candidate.osmRef,
           name: candidate.name,
+          // The readable name and the one on the sign travel together
+          // (§10.4), and so does the article: a placement must not be
+          // the moment a spot loses what is known about it.
+          localName: candidate.localName ?? null,
+          wikipediaUrl: candidate.wikipediaUrl ?? null,
           lat: candidate.lat,
           lon: candidate.lon,
           category: candidate.category,
