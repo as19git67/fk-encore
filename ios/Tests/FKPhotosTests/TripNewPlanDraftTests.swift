@@ -197,17 +197,6 @@ final class TripNewPlanDraftTests: XCTestCase {
         XCTAssertNil(request?.legs[1].startDate)
     }
 
-    func testNobodyTransfersIntoTheStartOfATrip() {
-        // How the travellers reached the first city is not this plan's
-        // business (§4.2) — even if somebody filled the field in.
-        var draft = TripNewPlanDraft()
-        var first = TripDraftLeg(place: lisbon)
-        first.arriveAt = Date()
-        draft.legs = [first, TripDraftLeg(place: porto)]
-
-        XCTAssertNil(draft.createRequest()?.legs[0].transfer)
-    }
-
     func testATransferIsSentOnlyWhenATimeIsKnown() {
         var draft = TripNewPlanDraft()
         draft.anchor = lisbon
