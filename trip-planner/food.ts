@@ -27,6 +27,7 @@ import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import { getGeoClient, type GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { pickRegion } from "../osm-admin/region-router";
+import { displayName } from "./readable-name";
 
 /** Walking distance for a meal, not a search across town. */
 const DEFAULT_RADIUS_M = 1_000;
@@ -152,7 +153,7 @@ function matches(spot: GeoPoiSearchSpot, req: NearbyFoodRequest): boolean {
 function toFoodPlace(spot: GeoPoiSearchSpot): FoodPlace {
   return {
     osmRef: spot.osmRef,
-    name: spot.name ?? spot.nameDe ?? spot.nameEn,
+    name: displayName(spot),
     lat: spot.lat,
     lon: spot.lon,
     distanceM: Math.round(spot.distanceM ?? 0),
