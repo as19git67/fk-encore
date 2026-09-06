@@ -422,30 +422,7 @@ async function replanFromStoredSettings(
     const pendingRegions: PendingRegionReport[] = [];
     for (const leg of plan.legs) {
       const planned = await planLeg(
-        {
-          title: leg.title ?? undefined,
-          anchor: leg.anchor,
-          anchorRadiusM: leg.anchorRadiusM ?? undefined,
-          mode: frame?.mode ?? leg.mode,
-          days: leg.days.length,
-          radiusM: leg.radiusM ?? undefined,
-          startDate: leg.startDate ?? undefined,
-          dayStartsAt: leg.dayStartMinutes === null
-            ? undefined
-            : formatMinutesOfDay(leg.dayStartMinutes),
-          fixpoints: leg.days.flatMap((day) =>
-            day.fixpoints.map((f) => ({
-              dayIndex: day.dayIndex,
-              label: f.label,
-              at: formatMinutesOfDay(f.startMinutes),
-              kind: f.kind,
-              durationMinutes: f.durationMinutes,
-              travelMinutes: f.travelMinutes,
-              bufferMinutes: f.bufferMinutes,
-              lat: f.lat ?? undefined,
-              lon: f.lon ?? undefined,
-            }))),
-        },
+        { ...legRequestFromStored(leg), mode: frame?.mode ?? leg.mode },
         {
           shape,
           maxWalkMinutes,
@@ -573,6 +550,78 @@ function mergedConstraints(
     pace: req.pace ?? stored.pace ?? "normal",
     group: req.group ?? stored.group ?? null,
     maxWalkMinutes: req.maxWalkMinutes ?? stored.maxWalkMinutes ?? null,
+  };
+}
+
+/**
+ * Plan one leg with the trip's own settings (§4.2).
+ *
+ * The bridge between "a trip has settings" and "a leg is planned": pace
+ * and group shape the day, the interests and the longest walk steer the
+ * choice, and all four live on the trip rather than on the leg. Exported
+ * because adding a city to an existing trip needs exactly this and must
+ * not grow a second reading of the same constraints — a leg added on
+ * Tuesday has to come out like a leg named at the start.
+ */
+export async function planLegForTrip(
+  plan: StoredPlan,
+  request: LegRequest,
+  options: { detailDays: number; firstDayStartMinutes?: number | null },
+): Promise<{
+  leg: CreateLegInput;
+  dropped: Array<DroppedBlock & { dayIndex: number }>;
+  pending: PendingRegion | null;
+}> {
+  const constraints = plan.constraints;
+  const shape = shapeDay(
+    DEFAULT_DAY,
+    constraints.pace as Pace,
+    (constraints.group ?? undefined) as GroupProfile | undefined,
+  );
+  return await planLeg(request, {
+    shape,
+    maxWalkMinutes: validateMaxWalk(
+      (constraints.maxWalkMinutes ?? undefined) as number | undefined),
+    categories: (constraints.categories ?? undefined) as string[] | undefined,
+    interests: (constraints.interests ?? undefined) as string[] | undefined,
+    detailDays: options.detailDays,
+    firstDayStartMinutes: options.firstDayStartMinutes,
+  });
+}
+
+/**
+ * A stored leg, read back as the request that would produce it.
+ *
+ * The frame the traveller set, in the shape `planLeg` takes: anchor,
+ * mode, length, search radius, date, day start and every fixpoint,
+ * including the departure a transfer left on the last day. Everything
+ * that re-plans a leg goes through here, so "what survives a re-plan"
+ * is one list rather than one per caller.
+ */
+export function legRequestFromStored(leg: StoredPlan["legs"][number]): LegRequest {
+  return {
+    title: leg.title ?? undefined,
+    anchor: leg.anchor,
+    anchorRadiusM: leg.anchorRadiusM ?? undefined,
+    mode: leg.mode,
+    days: leg.days.length,
+    radiusM: leg.radiusM ?? undefined,
+    startDate: leg.startDate ?? undefined,
+    dayStartsAt: leg.dayStartMinutes === null
+      ? undefined
+      : formatMinutesOfDay(leg.dayStartMinutes),
+    fixpoints: leg.days.flatMap((day) =>
+      day.fixpoints.map((f) => ({
+        dayIndex: day.dayIndex,
+        label: f.label,
+        at: formatMinutesOfDay(f.startMinutes),
+        kind: f.kind,
+        durationMinutes: f.durationMinutes,
+        travelMinutes: f.travelMinutes,
+        bufferMinutes: f.bufferMinutes,
+        lat: f.lat ?? undefined,
+        lon: f.lon ?? undefined,
+      }))),
   };
 }
 
@@ -1251,7 +1300,7 @@ async function requestRegion(anchor: { lat: number; lon: number }): Promise<Pend
  * start of the trip, and how the travellers reached it is not this
  * plan's business.
  */
-function applyTransfers(
+export function applyTransfers(
   legRequests: readonly LegRequest[],
 ): Array<{ request: LegRequest; firstDayStartMinutes: number | null }> {
   const prepared = legRequests.map((request) => ({
@@ -1394,7 +1443,7 @@ function validateDetailDays(days: number | undefined): number {
   return Math.floor(days);
 }
 
-function validateMode(mode: TransportMode | undefined): TransportMode {
+export function validateMode(mode: TransportMode | undefined): TransportMode {
   if (mode === undefined) return "foot";
   if (!TRANSPORT_MODES.includes(mode)) {
     throw APIError.invalidArgument(`mode must be one of ${TRANSPORT_MODES.join(", ")}`);

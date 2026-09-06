@@ -1814,6 +1814,43 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    ist, nicht nur der tippenden Person. Wer bloß aussteigen will, verlässt sie
    über „Mitreisende" und braucht dafür niemandes Erlaubnis.
 
+   **Mehrere Städte, auch nachträglich (§4.2).** Der Server nahm seit
+   dem ersten Tag bis zu zehn Etappen — eigener Anker, eigener Modus,
+   eigene Region, eigener Vorrat — aber *nur beim Anlegen*, und die App
+   baute davon genau eine. Die zwanzig Tage Japan aus §16 waren damit in
+   einem Request planbar und danach unveränderlich, was nicht ist, wie
+   irgendwer zwanzig Tage plant.
+
+   Drei Endpunkte (`trip-planner/legs.ts`) und zwei Bildschirme schließen
+   das: eine Stadt hinzufügen — auch mittendrin, die folgenden rücken
+   auf —, ihren Anker verschieben, wenn das Hotel wechselt, und eine
+   streichen, die nicht zustande kam. Vier Dinge, die dabei leicht still
+   schiefgehen und deshalb Tests haben:
+
+   - **Eine später hinzugefügte Etappe ist eine Etappe wie jede andere.**
+     Sie geht durch dasselbe `planLegForTrip`, erbt also Tempo, Gruppe,
+     Interessen und den längsten Fußweg der Reise, fragt ihre Region auf
+     demselben Weg an und kommt gerahmt-und-leer zurück, wenn die noch
+     importiert wird (§4.3). Ein zweites Lesen derselben Constraints wäre
+     ein zweiter Ort, an dem sie auseinanderlaufen.
+   - **Ein Transfer rahmt beide Enden.** Ankunft um 14:00 kürzt den
+     Ankunftstag, Abfahrt um 09:30 setzt einen `departure`-Fixpunkt auf
+     den *letzten Tag der Etappe davor* — die wird deshalb mitgeplant,
+     denn dieser Tag hat sich wirklich geändert. Nur die Abfahrtszeit
+     greift zurück; eine Etappe, die schon einen Zahnarzttermin trägt,
+     ist kein Grund, sie neu zu planen.
+   - **Der Rahmen gehört dem Organisator** (§6.2), der Rest der Reise
+     allen. Wer nie eingeladen wurde, bekommt „plan not found".
+   - **Ein begonnener Tag wird nicht überschrieben.** Anker verschieben,
+     Länge ändern, Etappe löschen: alles abgelehnt, sobald ein Stopp
+     abgehakt ist, und die Meldung nennt welcher. Name und Datum gehen
+     weiterhin — ein Name ist kein Plan.
+
+   Positionen werden beim Einfügen und Löschen lückenlos nachgezogen,
+   denn `position` ist, worüber jeder Endpunkt eine Etappe adressiert:
+   ein Loch in der Folge hieße, dass „Etappe 2" vorher und nachher
+   verschiedene Städte meint.
+
    **„Heute" heißt jetzt „Unterwegs".** Die Ansicht ist kein Datum, sondern die
    für draußen: der Block, in dem die Gruppe steckt, was davon aussteht, und
    der große Umplanen-Knopf (§8.5). Eine Sonne sagte darüber nichts.

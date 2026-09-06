@@ -24,6 +24,7 @@ struct TripNewPlanView: View {
     var body: some View {
         Form {
             placeSection
+            routeSection
             lengthSection
             styleSection
             sentenceSection
@@ -63,42 +64,8 @@ struct TripNewPlanView: View {
 
     private var placeSection: some View {
         Section {
-            HStack {
-                TextField("Stadt oder Ort", text: $model.placeQuery)
-                    .textInputAutocapitalization(.words)
-                    .autocorrectionDisabled()
-                    .submitLabel(.search)
-                    .onSubmit { model.searchPlaces() }
-                if model.isSearching {
-                    ProgressView()
-                } else {
-                    Button("Suchen") { model.searchPlaces() }
-                        .buttonStyle(.borderless)
-                        .disabled(model.placeQuery.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-            }
-
-            ForEach(model.searchResults, id: \.self) { place in
-                Button {
-                    model.pick(place)
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(place.name).foregroundStyle(.primary)
-                        if let subtitle = place.subtitle {
-                            Text(subtitle).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
-
-            if model.searchFailed {
-                Text("Die Ortssuche hat nicht geantwortet. Noch einmal versuchen?")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-
-            if let anchor = model.draft.anchor {
-                pickedPlace(anchor)
+            TripPlaceFinderRows(model: model.finder, picked: model.draft.anchor) { place in
+                model.pick(place)
             }
         } header: {
             Text("Wohin?")
@@ -109,24 +76,63 @@ struct TripNewPlanView: View {
         }
     }
 
-    private func pickedPlace(_ anchor: TripPlace) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(anchor.name, systemImage: "mappin.circle.fill")
-                .font(.headline)
-            Map(initialPosition: .region(MKCoordinateRegion(
-                center: CLLocationCoordinate2D(latitude: anchor.latitude,
-                                               longitude: anchor.longitude),
-                latitudinalMeters: 4_000,
-                longitudinalMeters: 4_000,
-            ))) {
-                Marker(anchor.name, coordinate: CLLocationCoordinate2D(
-                    latitude: anchor.latitude, longitude: anchor.longitude))
+    // MARK: - Further cities
+
+    /// The rest of the route (§4.2).
+    ///
+    /// Kept below the first city rather than turning the screen into a
+    /// list of equals: most trips have one city, and a screen that asks
+    /// "how many cities?" first makes the common case pay for the rare
+    /// one. Adding the second one is one tap away, and from then on the
+    /// two read alike.
+    private var routeSection: some View {
+        Section {
+            ForEach(Array(model.draft.legs.enumerated().dropFirst()), id: \.element.id) { pair in
+                NavigationLink {
+                    TripDraftLegView(
+                        leg: Binding(
+                            get: { model.draft.legs[pair.offset] },
+                            set: { model.draft.legs[pair.offset] = $0 },
+                        ),
+                        position: pair.offset,
+                        previousName: model.draft.legs[pair.offset - 1].place?.name,
+                    )
+                } label: {
+                    legRow(pair.element, position: pair.offset)
+                }
             }
-            .frame(height: 160)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .allowsHitTesting(false)
+            .onDelete { offsets in
+                for index in offsets.sorted(by: >) { model.removeLeg(at: index) }
+            }
+
+            Button {
+                model.addLeg()
+            } label: {
+                Label("Noch eine Stadt", systemImage: "plus.circle")
+            }
+            .disabled(model.draft.legs.count >= TripNewPlanDraft.maxLegs)
+        } header: {
+            Text("Weiter nach")
+        } footer: {
+            Text("Jede Stadt hat ihren eigenen Ausgangspunkt, ihre eigene Länge und ihr "
+                 + "eigenes Verkehrsmittel. Die Fahrt dazwischen kürzt beide Tage: der "
+                 + "Abreisetag hat keinen Abend, der Ankunftstag keinen Vormittag.")
         }
-        .padding(.vertical, 4)
+    }
+
+    private func legRow(_ leg: TripDraftLeg, position: Int) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(leg.place?.name ?? "Stadt \(position + 1) — noch offen")
+                .foregroundStyle(leg.place == nil ? .secondary : .primary)
+            HStack(spacing: 6) {
+                Text(leg.days == 1 ? "1 Tag" : "\(leg.days) Tage")
+                Text("·")
+                Label(leg.mode.label, systemImage: leg.mode.systemImage)
+                    .labelStyle(.titleAndIcon)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
     }
 
     // MARK: - How long

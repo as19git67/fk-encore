@@ -1,5 +1,3 @@
-import CoreLocation
-import MapKit
 import SwiftUI
 
 /// The "new trip" screen's state: searching for a place, reading a
@@ -20,12 +18,9 @@ import SwiftUI
 final class TripNewPlanViewModel {
     var draft = TripNewPlanDraft()
 
-    /// What is typed in the place field. Kept apart from the picked
+    /// The place search for the first city. Kept apart from the picked
     /// place: typing again after picking should not silently unpick.
-    var placeQuery = ""
-    private(set) var searchResults: [TripPlace] = []
-    private(set) var isSearching = false
-    private(set) var searchFailed = false
+    let finder = TripPlaceFinderModel()
 
     /// The sentence, and what the model made of it.
     var sentence = ""
@@ -38,88 +33,42 @@ final class TripNewPlanViewModel {
     private(set) var isCreating = false
     var errorMessage: String?
 
-    /// Cancels a search still in flight when a newer one starts, so a
-    /// slow answer for "Lis" cannot land on top of "Lissabon".
-    private var searchTask: Task<Void, Never>?
-
     // MARK: - Place search
-
-    /// Look up what was typed, through MapKit.
-    ///
-    /// Deliberately explicit rather than search-as-you-type: each call
-    /// is a network request on someone's holiday data plan, and the
-    /// field is usually filled once.
-    func searchPlaces() {
-        let query = placeQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        searchTask?.cancel()
-        guard !query.isEmpty else {
-            searchResults = []
-            searchFailed = false
-            return
-        }
-        isSearching = true
-        searchFailed = false
-        searchTask = Task { [weak self] in
-            let found = await Self.mapKitSearch(query)
-            guard let self, !Task.isCancelled else { return }
-            self.isSearching = false
-            self.searchResults = found ?? []
-            // No results and a failure look different to the traveller:
-            // one means "try another name", the other "try again".
-            self.searchFailed = found == nil
-        }
-    }
 
     func pick(_ place: TripPlace) {
         draft.anchor = place
-        placeQuery = place.name
-        searchResults = []
+        finder.query = place.name
+        finder.clearResults()
     }
 
     /// Take the place name a sentence mentioned into the search field
     /// and look it up — the traveller still confirms which one it is.
     func searchPlaceHint() {
         guard let hint = draft.placeHint, !hint.isEmpty else { return }
-        placeQuery = hint
-        searchPlaces()
+        finder.lookUp(hint)
     }
 
-    private nonisolated static func mapKitSearch(_ query: String) async -> [TripPlace]? {
-        let request = MKLocalSearch.Request()
-        request.naturalLanguageQuery = query
-        do {
-            let response = try await MKLocalSearch(request: request).start()
-            return response.mapItems.compactMap(place(from:))
-        } catch {
-            // MapKit reports "nothing found" as an error too. Both end
-            // up here; the caller shows "nichts gefunden" either way
-            // once the list is empty.
-            return nil
-        }
+    // MARK: - The legs
+
+    /// Add a city after the ones already there (§4.2).
+    ///
+    /// Its length and mode start from the previous leg's rather than
+    /// from the defaults: a second city on a trip you are cycling
+    /// through is almost certainly also cycled.
+    func addLeg() {
+        let previous = draft.legs.last
+        draft.legs.append(TripDraftLeg(
+            days: previous?.days ?? 3,
+            mode: previous?.mode ?? .foot,
+            radiusM: previous?.radiusM ?? 3_000,
+        ))
     }
 
-    private nonisolated static func place(from item: MKMapItem) -> TripPlace? {
-        let coordinate = item.placemark.coordinate
-        guard CLLocationCoordinate2DIsValid(coordinate) else { return nil }
-        let name = item.name ?? item.placemark.locality ?? item.placemark.name
-        guard let name, !name.isEmpty else { return nil }
-        return TripPlace(
-            name: name,
-            subtitle: Self.subtitle(for: item.placemark),
-            latitude: coordinate.latitude,
-            longitude: coordinate.longitude,
-        )
-    }
-
-    /// Enough to tell two places of the same name apart, which is the
-    /// only job this line has.
-    private nonisolated static func subtitle(for placemark: MKPlacemark) -> String? {
-        let parts = [placemark.locality, placemark.administrativeArea, placemark.country]
-            .compactMap { $0 }
-            .filter { !$0.isEmpty }
-        var seen: [String] = []
-        for part in parts where !seen.contains(part) { seen.append(part) }
-        return seen.isEmpty ? nil : seen.joined(separator: ", ")
+    /// Remove a city. The first one is not removable — a trip with no
+    /// place is not a trip, and the screen offers to change it instead.
+    func removeLeg(at index: Int) {
+        guard index > 0, draft.legs.indices.contains(index) else { return }
+        draft.legs.remove(at: index)
     }
 
     // MARK: - The sentence

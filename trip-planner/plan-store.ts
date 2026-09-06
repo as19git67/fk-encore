@@ -16,7 +16,7 @@
  * database never has an opinion about what belongs in a block.
  */
 
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, sql } from "drizzle-orm";
 import { visibleToUser } from "./plan-access";
 import dbDefault from "../db/database";
 import {
@@ -187,43 +187,154 @@ export async function createPlan(input: CreatePlanInput, db: Db = dbDefault): Pr
     .returning({ id: tripPlans.id });
 
   for (const [position, legInput] of input.legs.entries()) {
-    const [leg] = await db
-      .insert(tripPlanLegs)
-      .values({
-        plan_id: plan.id,
-        position,
-        title: legInput.title ?? null,
-        anchor_lat: legInput.anchor.lat,
-        anchor_lon: legInput.anchor.lon,
-        anchor_radius_m: legInput.anchorRadiusM ?? null,
-        mode: legInput.mode ?? "foot",
-        region_db: legInput.regionDb,
-        start_date: legInput.startDate ?? null,
-        radius_m: legInput.radiusM ?? null,
-        day_starts_at: legInput.dayStartMinutes ?? null,
-      })
-      .returning({ id: tripPlanLegs.id });
-
-    await insertDays(leg.id, legInput.days, db);
-
-    if (legInput.pool.length > 0) {
-      await db.insert(tripPlanPool).values(
-        legInput.pool.map((c) => ({
-          leg_id: leg.id,
-          osm_ref: c.osmRef,
-          name: c.name,
-          lat: c.lat,
-          lon: c.lon,
-          category: c.category,
-          dwell_minutes: c.dwellMinutes,
-          score: c.score,
-          reasons: c.reasons,
-        })),
-      );
-    }
+    await insertLeg(plan.id, position, legInput, db);
   }
 
   return plan.id;
+}
+
+/**
+ * Write one leg — its row, its days and its pool.
+ *
+ * Shared by creating a trip and adding a city to one later (§4.2).
+ * Nothing about a leg added on Tuesday should differ from a leg named
+ * at the start, and one copy of this is how it stays that way.
+ */
+export async function insertLeg(
+  planId: number,
+  position: number,
+  legInput: CreateLegInput,
+  db: Db = dbDefault,
+): Promise<number> {
+  const [leg] = await db
+    .insert(tripPlanLegs)
+    .values({
+      plan_id: planId,
+      position,
+      title: legInput.title ?? null,
+      anchor_lat: legInput.anchor.lat,
+      anchor_lon: legInput.anchor.lon,
+      anchor_radius_m: legInput.anchorRadiusM ?? null,
+      mode: legInput.mode ?? "foot",
+      region_db: legInput.regionDb,
+      start_date: legInput.startDate ?? null,
+      radius_m: legInput.radiusM ?? null,
+      day_starts_at: legInput.dayStartMinutes ?? null,
+    })
+    .returning({ id: tripPlanLegs.id });
+
+  await insertDays(leg.id, legInput.days, db);
+
+  if (legInput.pool.length > 0) {
+    await db.insert(tripPlanPool).values(
+      legInput.pool.map((c) => ({
+        leg_id: leg.id,
+        osm_ref: c.osmRef,
+        name: c.name,
+        lat: c.lat,
+        lon: c.lon,
+        category: c.category,
+        dwell_minutes: c.dwellMinutes,
+        score: c.score,
+        reasons: c.reasons,
+      })),
+    );
+  }
+  return leg.id;
+}
+
+/**
+ * Make room at `position` by pushing every leg from there on one along.
+ *
+ * Two statements rather than one per leg: `position` is unique per plan
+ * only by convention, but doing it in descending order would still be
+ * a window in which two legs share a number. A single `UPDATE … SET
+ * position = position + 1` has no such window.
+ */
+export async function shiftLegsFrom(
+  planId: number,
+  position: number,
+  db: Db = dbDefault,
+): Promise<void> {
+  await db
+    .update(tripPlanLegs)
+    .set({ position: sql`${tripPlanLegs.position} + 1` })
+    .where(and(eq(tripPlanLegs.plan_id, planId), gte(tripPlanLegs.position, position)));
+}
+
+/**
+ * Remove a leg and close the gap it leaves.
+ *
+ * Days, blocks, stops, fixpoints and the pool go with it by cascade.
+ * The renumbering matters more than it looks: `position` is what every
+ * endpoint addresses a leg by, so a hole in the sequence would make
+ * "leg 2" mean different things before and after.
+ */
+export async function removeLeg(
+  planId: number,
+  legId: number,
+  db: Db = dbDefault,
+): Promise<boolean> {
+  const [gone] = await db
+    .delete(tripPlanLegs)
+    .where(and(eq(tripPlanLegs.id, legId), eq(tripPlanLegs.plan_id, planId)))
+    .returning({ position: tripPlanLegs.position });
+  if (!gone) return false;
+  await db
+    .update(tripPlanLegs)
+    .set({ position: sql`${tripPlanLegs.position} - 1` })
+    .where(and(eq(tripPlanLegs.plan_id, planId), gt(tripPlanLegs.position, gone.position)));
+  await db
+    .update(tripPlans)
+    .set({ updated_at: new Date().toISOString() })
+    .where(eq(tripPlans.id, planId));
+  return true;
+}
+
+/** What a leg edit may move. Every field is optional. */
+export interface LegPlaceUpdate {
+  title?: string | null;
+  anchor?: { lat: number; lon: number };
+  anchorRadiusM?: number | null;
+  radiusM?: number | null;
+  regionDb?: string;
+  dayStartMinutes?: number | null;
+}
+
+/**
+ * Move a leg's place: where it is based, what it is called, how far the
+ * planner may look.
+ *
+ * Separate from `updateLegFrames` (the mode and the dates) because the
+ * two have different consequences — an anchor is what every day of the
+ * leg starts and ends at, so moving it needs the days planned again,
+ * and a date does not.
+ */
+export async function updateLegPlace(
+  planId: number,
+  legId: number,
+  update: LegPlaceUpdate,
+  db: Db = dbDefault,
+): Promise<void> {
+  const values: Record<string, unknown> = {};
+  if (update.title !== undefined) values.title = update.title;
+  if (update.anchor !== undefined) {
+    values.anchor_lat = update.anchor.lat;
+    values.anchor_lon = update.anchor.lon;
+  }
+  if (update.anchorRadiusM !== undefined) values.anchor_radius_m = update.anchorRadiusM;
+  if (update.radiusM !== undefined) values.radius_m = update.radiusM;
+  if (update.regionDb !== undefined) values.region_db = update.regionDb;
+  if (update.dayStartMinutes !== undefined) values.day_starts_at = update.dayStartMinutes;
+  if (Object.keys(values).length === 0) return;
+  await db
+    .update(tripPlanLegs)
+    .set(values)
+    .where(and(eq(tripPlanLegs.id, legId), eq(tripPlanLegs.plan_id, planId)));
+  await db
+    .update(tripPlans)
+    .set({ updated_at: new Date().toISOString() })
+    .where(eq(tripPlans.id, planId));
 }
 
 /**

@@ -24,5 +24,6 @@ import "./share";
 import "./search";
 import "./shares";
 import "./pool";
+import "./legs";
 
 export default new Service("trip-planner");
