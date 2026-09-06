@@ -39,6 +39,7 @@ import {
   loadPlan,
   removeLeg,
   replanPlan,
+  setLegsAwaitingRegion,
   shiftLegsFrom,
   updateLegFrames,
   updateLegPlace,
@@ -160,6 +161,9 @@ export const addTripLeg = api(
         days: [...before.leg.days] as CreateDayInput[],
         pool: [...before.leg.pool],
       }]);
+      await setLegsAwaitingRegion([
+        { legId: previous.id, awaiting: before.pending !== null },
+      ]);
     }
 
     return {
@@ -280,6 +284,9 @@ export const updateTripLeg = api(
       days: [...planned.leg.days] as CreateDayInput[],
       pool: [...planned.leg.pool],
     }]);
+    // Moving an anchor can move a leg out of an imported region and
+    // into one that is not there yet — and back again.
+    await setLegsAwaitingRegion([{ legId: leg.id, awaiting: planned.pending !== null }]);
 
     return {
       plan: await reload(req.planId, userId),

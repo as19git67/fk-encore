@@ -51,6 +51,10 @@ struct TripLeg: Codable, Identifiable, Sendable {
     let anchorRadiusM: Int?
     let mode: String
     let regionDb: String
+    /// True while this leg has its frame and no spots because its
+    /// OpenStreetMap region is still being imported (§4.3). Optional so
+    /// a response from an older server still decodes.
+    let awaitingRegion: Bool?
     /// "YYYY-MM-DD", or nil when the trip has no dates yet.
     let startDate: String?
     let days: [TripDay]
@@ -60,6 +64,10 @@ struct TripLeg: Codable, Identifiable, Sendable {
     let pool: [TripCandidate]
 
     var transportMode: TripTransportMode { TripTransportMode(raw: mode) }
+
+    /// Is this leg waiting for its maps? Absent means no — an older
+    /// server that never had the flag never had a waiting leg either.
+    var isAwaitingRegion: Bool { awaitingRegion == true }
 
     /// What to call this city. Never invents a name for a leg nobody
     /// named (§15.3) — it says which one it is instead.

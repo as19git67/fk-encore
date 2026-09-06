@@ -57,6 +57,12 @@ export interface StoredLeg {
   anchorRadiusM: number | null;
   mode: TransportMode;
   regionDb: string;
+  /**
+   * True while this leg has its frame and no spots because its region
+   * was not imported yet (§4.3). The worker that fills such legs in
+   * once the import lands reads exactly this — see migration 0168.
+   */
+  awaitingRegion: boolean;
   /** ISO date of this leg's first day, or null when the trip has no dates. */
   startDate: string | null;
   /**
@@ -158,6 +164,8 @@ export interface CreateLegInput {
   anchorRadiusM?: number | null;
   mode?: TransportMode;
   regionDb: string;
+  /** Defaults to false — a leg planned against a ready region. */
+  awaitingRegion?: boolean;
   startDate?: string | null;
   /**
    * What this leg was searched with, kept so a re-plan can reproduce it
@@ -217,6 +225,7 @@ export async function insertLeg(
       anchor_radius_m: legInput.anchorRadiusM ?? null,
       mode: legInput.mode ?? "foot",
       region_db: legInput.regionDb,
+      awaiting_region: legInput.awaitingRegion ?? false,
       start_date: legInput.startDate ?? null,
       radius_m: legInput.radiusM ?? null,
       day_starts_at: legInput.dayStartMinutes ?? null,
@@ -289,6 +298,60 @@ export async function removeLeg(
     .set({ updated_at: new Date().toISOString() })
     .where(eq(tripPlans.id, planId));
   return true;
+}
+
+/**
+ * Which legs are still waiting for their region, and which plan each
+ * belongs to (§4.3).
+ *
+ * The whole query the fill-in worker needs, and deliberately the whole
+ * of it: a plan with nothing waiting must cost nothing to skip, because
+ * this runs on a timer for ever and finds nothing almost every time.
+ */
+export async function legsAwaitingRegion(
+  db: Db = dbDefault,
+): Promise<Array<{ planId: number; legId: number; regionDb: string }>> {
+  const rows = await db
+    .select({
+      planId: tripPlanLegs.plan_id,
+      legId: tripPlanLegs.id,
+      regionDb: tripPlanLegs.region_db,
+    })
+    .from(tripPlanLegs)
+    .where(eq(tripPlanLegs.awaiting_region, true));
+  return rows;
+}
+
+/**
+ * Record, or clear, that a leg is waiting for its map.
+ *
+ * Written per leg rather than per plan because the two states genuinely
+ * coexist: a trip through three cities may be waiting for the third
+ * one's region while the first two are planned down to their spots.
+ */
+export async function setLegsAwaitingRegion(
+  updates: ReadonlyArray<{ legId: number; awaiting: boolean }>,
+  db: Db = dbDefault,
+): Promise<void> {
+  for (const update of updates) {
+    await db
+      .update(tripPlanLegs)
+      .set({ awaiting_region: update.awaiting })
+      .where(eq(tripPlanLegs.id, update.legId));
+  }
+}
+
+/** The owner of a plan, for a worker that runs without a user. */
+export async function planOwner(
+  planId: number,
+  db: Db = dbDefault,
+): Promise<number | null> {
+  const [row] = await db
+    .select({ ownerId: tripPlans.owner_id })
+    .from(tripPlans)
+    .where(eq(tripPlans.id, planId))
+    .limit(1);
+  return row?.ownerId ?? null;
 }
 
 /** What a leg edit may move. Every field is optional. */
@@ -770,6 +833,7 @@ export async function loadPlan(
       anchorRadiusM: l.anchor_radius_m,
       mode: l.mode as TransportMode,
       regionDb: l.region_db,
+      awaitingRegion: l.awaiting_region,
       startDate: l.start_date,
       radiusM: l.radius_m,
       dayStartMinutes: l.day_starts_at,

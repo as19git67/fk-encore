@@ -2677,6 +2677,11 @@ export const tripPlanLegs = pgTable(
     // foot | bike | transit | car — per leg, not per trip.
     mode: text("mode").notNull().default("foot"),
     region_db: text("region_db").notNull(),
+    // True while this leg has its frame and no spots because its OSM
+    // region was not imported yet (§4.3). Cleared the moment the days
+    // are filled — see migration 0168 for why the flag has to exist
+    // rather than being inferred from "has no stops".
+    awaiting_region: boolean("awaiting_region").notNull().default(false),
     // Optional real dates; absent means "day 1, day 2, …".
     start_date: date("start_date"),
     // What this leg was searched with, so it can be searched again when

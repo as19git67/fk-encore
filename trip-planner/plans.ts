@@ -53,6 +53,7 @@ import {
   renamePlan,
   deletePlan,
   replanPlan,
+  setLegsAwaitingRegion,
   updateLegFrames,
   type LegFrameUpdate,
   type CreateDayInput,
@@ -418,6 +419,7 @@ async function replanFromStoredSettings(
     const shape = shapeDay(DEFAULT_DAY, pace, group);
 
     const perLeg: Array<{ legId: number; days: CreateDayInput[]; pool: ScoredCandidate[] }> = [];
+    const awaiting: Array<{ legId: number; awaiting: boolean }> = [];
     const droppedBlocks: DroppedBlockReport[] = [];
     const pendingRegions: PendingRegionReport[] = [];
     for (const leg of plan.legs) {
@@ -438,6 +440,7 @@ async function replanFromStoredSettings(
         days: [...planned.leg.days] as CreateDayInput[],
         pool: [...planned.leg.pool],
       });
+      awaiting.push({ legId: leg.id, awaiting: planned.pending !== null });
       for (const d of planned.dropped) droppedBlocks.push({ ...d, legIndex: leg.position });
       if (planned.pending) {
         pendingRegions.push({ ...planned.pending, legIndex: leg.position, legTitle: leg.title });
@@ -445,6 +448,9 @@ async function replanFromStoredSettings(
     }
 
   await replanPlan(plan.id, constraints, perLeg);
+  // Whether each leg is still waiting is decided here, by whether the
+  // region answered this time — not by whoever called us.
+  await setLegsAwaitingRegion(awaiting);
   return { plan: await reload(plan.id, userId), droppedBlocks, pendingRegions };
 }
 
@@ -1065,6 +1071,22 @@ export const redistributeDay = api(
  * noch" is an answer the traveller can wait on; an empty day with no
  * explanation is not.
  */
+/**
+ * Plan a trip that was saved without its maps (§4.3).
+ *
+ * The endpoint below and the worker in `fill-pending.ts` are the two
+ * callers, and they must not differ: what survives a fill-in — the
+ * legs, their anchors, dates, modes, the search radius and every pool
+ * entry somebody added by hand (§9.2) — is exactly the list that goes
+ * quietly wrong when it is written twice.
+ */
+export async function fillPendingPlan(
+  plan: StoredPlan,
+  userId: number,
+): Promise<PlanResponse> {
+  return await replanFromStoredSettings(plan, userId);
+}
+
 export const planPendingTrip = api(
   { expose: true, method: "POST", path: "/trip-planner/plans/:planId/plan", auth: true },
   async (req: { planId: number }): Promise<PlanResponse> => {
@@ -1224,6 +1246,10 @@ async function planLeg(
       // Known before the import finishes: the database name follows
       // from the slug, so the leg can point at where its data will be.
       regionDb: region?.postgresDb ?? pending!.postgresDb,
+      // The leg says it is waiting, rather than the waiting being
+      // guessed from "has no stops" — which a leg whose search
+      // genuinely found nothing also looks like (migration 0168).
+      awaitingRegion: region === null,
       startDate,
       // Kept with the leg so a re-plan searches the same area at the
       // same hour rather than falling back to the defaults (0165).

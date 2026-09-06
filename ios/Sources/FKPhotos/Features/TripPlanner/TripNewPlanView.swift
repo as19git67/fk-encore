@@ -87,22 +87,25 @@ struct TripNewPlanView: View {
     /// two read alike.
     private var routeSection: some View {
         Section {
-            ForEach(Array(model.draft.legs.enumerated().dropFirst()), id: \.element.id) { pair in
+            // Addressed by identity, never by index. A row bound to
+            // `legs[2]` keeps that index after the list shrinks, and
+            // SwiftUI evaluates a pushed destination once more on the
+            // way out — which is a crash rather than a stale screen.
+            ForEach(model.draft.legs.dropFirst()) { leg in
                 NavigationLink {
                     TripDraftLegView(
-                        leg: Binding(
-                            get: { model.draft.legs[pair.offset] },
-                            set: { model.draft.legs[pair.offset] = $0 },
-                        ),
-                        position: pair.offset,
-                        previousName: model.draft.legs[pair.offset - 1].place?.name,
+                        leg: model.binding(for: leg.id),
+                        position: model.position(of: leg.id) ?? 1,
+                        previousName: model.legBefore(leg.id)?.place?.name,
                     )
                 } label: {
-                    legRow(pair.element, position: pair.offset)
+                    legRow(leg, position: model.position(of: leg.id) ?? 1)
                 }
             }
             .onDelete { offsets in
-                for index in offsets.sorted(by: >) { model.removeLeg(at: index) }
+                // These index the *displayed* rows, which start at the
+                // second city — so offset 0 is `legs[1]`.
+                model.removeLegs(displayedAt: offsets)
             }
 
             Button {

@@ -1177,6 +1177,13 @@
       "when": 1786233600015,
       "tag": "0167_trip_stop_provenance",
       "breakpoints": true
+    },
+    {
+      "idx": 168,
+      "version": "7",
+      "when": 1786320000015,
+      "tag": "0168_trip_leg_awaiting_region",
+      "breakpoints": true
     }
   ]
 }

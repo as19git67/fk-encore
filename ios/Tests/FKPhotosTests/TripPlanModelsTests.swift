@@ -224,3 +224,35 @@ final class TripPlanSummaryTests: XCTestCase {
         XCTAssertEqual(try decodeList()[1].dayCountLabel, "1 Tag")
     }
 }
+
+/// A leg whose maps have not arrived yet (§4.3).
+final class TripAwaitingRegionTests: XCTestCase {
+    private func leg(_ json: String) throws -> TripLeg {
+        try JSONDecoder().decode(TripLeg.self, from: json.data(using: .utf8)!)
+    }
+
+    private func body(_ awaiting: String) -> String {
+        """
+        { "id": 1, "position": 0, "title": "Lissabon",
+          "anchor": { "lat": 38.71, "lon": -9.14 },
+          "anchorRadiusM": null, "mode": "foot", "regionDb": "nom_pt",
+          \(awaiting)
+          "startDate": null, "days": [], "pool": [] }
+        """
+    }
+
+    func testAWaitingLegSaysSo() throws {
+        XCTAssertTrue(try leg(body("\"awaitingRegion\": true,")).isAwaitingRegion)
+    }
+
+    func testAPlannedLegDoesNot() throws {
+        XCTAssertFalse(try leg(body("\"awaitingRegion\": false,")).isAwaitingRegion)
+    }
+
+    func testAnOlderServerWithoutTheFieldIsNotWaiting() throws {
+        // The field arrived with migration 0168. A response that
+        // predates it never had a waiting leg either, so absent means
+        // no — and must not fail the decode.
+        XCTAssertFalse(try leg(body("")).isAwaitingRegion)
+    }
+}

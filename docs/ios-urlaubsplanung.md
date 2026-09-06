@@ -1968,6 +1968,11 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
     vorher vollständig funktionieren.
 12. **Verfeinerung, optional** — Valhalla für echte Reisezeiten, GTFS pro
    Region, Offline-Bundle, Verknüpfung mit Trip-Album und Recap.
+13. **Der Ideenvorrat** (§20) — ein geteilter Vorrat ohne Reise, die Meldung
+    bei Nähe, der Tourvorschlag aus mehreren Ideen und die Gebietssuche.
+    Bewusst nach Schritt 8: Er lebt von der Standortschleife, und ohne sie
+    wäre er eine Merkliste. Veranstaltungen (§20.4) hängen an einer Quelle,
+    die es noch nicht gibt, und sind deshalb kein Teil dieses Schritts.
 
 Schritte 1–3 sind der ehrliche Test — und sie kommen **ohne einen einzigen
 Neuimport** aus: Liefert die Maschine für *einen* Tag in
@@ -2454,3 +2459,128 @@ und genau das bezahlte Ranking, gegen das §3.8 und §10.7 sich entschieden
 haben. Der Planer hört bei der Empfehlung auf; gebucht wird woanders, und das
 Ergebnis kommt als Dokument zurück (§3.4). Das steht hier, damit die Lücke in
 einem Jahr als Entscheidung erkennbar ist und nicht als Versäumnis.
+
+## 20. Der Ideenvorrat: Dinge, die man mal machen möchte
+
+Bis hierher setzt alles eine **Reise** voraus. Man legt eine an, nennt einen
+Ort, bekommt Tage. Das ist die Hälfte, die man plant — und die seltenere. Die
+häufigere ist die, die man *sammelt*: der Biergarten, von dem jemand erzählt
+hat, die Ausstellung im Nachbarort, die Wanderung, die zweimal im Gespräch
+vorkam. Dinge ohne Datum, ohne Stadt, ohne Rahmen. Heute haben sie in diesem
+Konzept keinen Ort, obwohl der Baustein dafür längst existiert: der **Vorrat**
+(§5) ist genau eine bewertete Liste von Möglichkeiten — er hängt bloß an einer
+Etappe.
+
+### 20.1 Was es ist
+
+Ein **Vorrat ohne Reise**, je Haushalt: eine Ideensammlung, in die alle
+hineinlegen, was ihnen begegnet. Dieselben vier Wege hinein wie in §9.2 — ein
+Kartenlink, ein Artikel, ein Screenshot, die Suche in der App — und derselbe
+Eintrag am Ende: ein Ort mit Koordinate, Kategorie, geschätzter Dauer, Notiz
+und Herkunft. Was fehlt, ist ausschließlich die Zuordnung zu einer Etappe.
+
+Zwei Eigenschaften, die ihn von einer Merkliste unterscheiden:
+
+- **Er ist geteilt.** Nicht als Kopie je Person, sondern als eine Liste, in die
+  die Familie schreibt (§6). Wer etwas hineinlegt, bleibt sichtbar — „Papa
+  wollte da hin" ist die halbe Information.
+- **Er ist ortsbezogen, nicht listenförmig.** Eine Ideensammlung, die nur eine
+  Liste ist, wird gelesen, bis sie zu lang ist, und danach nie wieder. Der
+  Nutzen entsteht, wenn sie sich **von selbst meldet**.
+
+### 20.2 Der eigentliche Mechanismus: der Vorrat meldet sich
+
+Die Maschinerie dafür steht bereits vollständig. §7.1 überwacht Regionen um die
+nächsten Stopps und meldet Ereignisse ans Gerät zurück; §7.2 kennt „was ist in
+der Nähe" und zieht dabei **zuerst aus dem Vorrat der Etappe**. Der Ideenvorrat
+ist derselbe Griff mit einem anderen Bezug:
+
+- **Ein Spot in der Nähe.** „Der Biergarten, den Anna gemerkt hat, ist zehn
+  Minuten von hier." Einmal, nicht zweimal — und nie wieder für denselben Spot
+  in derselben Woche, sonst ist es Nörgeln (§6.4).
+- **Mehrere Spots in der Nähe: ein Tourvorschlag.** Das ist der Punkt, an dem
+  aus einer Merkliste ein Planer wird. Liegen drei Einträge dicht genug
+  beieinander, ist die Frage nicht „willst du zu diesem?", sondern **„soll ich
+  daraus einen Nachmittag machen?"** — und die Antwort darauf ist ein
+  Tagesplan, den `solver.ts` heute schon rechnet. Ein Vorrat plus ein Anker
+  plus ein Zeitbudget *ist* die Eingabe des Planers; es fehlt nur der Anlass.
+- **Ein Gebiet statt eines Zufalls.** Umgekehrt genauso brauchbar: „Wir haben
+  Samstag frei — such uns etwas im Umkreis von 50 km." Dann ist nicht der
+  Standort der Auslöser, sondern die Zeit, und das Gebiet wird angegeben statt
+  gemessen.
+- **Nicht nur aus dem Vorrat.** Findet sich zu wenig, darf die Regionssuche
+  auffüllen — mit derselben Rangfolge wie in §7.2: was die Familie selbst
+  gemerkt hat, steht vor dem, was OpenStreetMap anbietet. Beides wird
+  **markiert**, damit „von uns" und „gefunden" unterscheidbar bleiben.
+
+Damit wird der Ideenvorrat zum **Tagesausflugsplaner** — und das ist die
+eigentliche Erweiterung des Konzepts, nicht die Liste selbst. Bisher plant
+dieses System Urlaube; das hier plant den Samstag, und es benutzt dafür jeden
+vorhandenen Baustein.
+
+### 20.3 Wie er sich zur Reise verhält
+
+Kein zweiter Mechanismus, sondern eine Quelle mehr:
+
+- **Beim Anlegen einer Reise** werden Einträge des Ideenvorrats, die in einer
+  ihrer Etappen liegen, angeboten — nicht automatisch übernommen. „Ihr habt
+  vier Ideen für Lissabon gesammelt" ist eine Frage, keine Handlung, denn eine
+  Idee vom letzten Jahr ist nicht automatisch der Wunsch dieser Reise.
+- **Übernommen** wird über denselben Weg wie ein Fund (§9.2, `POST …/finds`):
+  richtige Etappe nach Lage, Dubletten zusammengeführt, Herkunft erhalten. Der
+  Eintrag bleibt dabei im Ideenvorrat stehen — er ist nicht verbraucht, nur
+  benutzt.
+- **Umgekehrt**: was auf einer Reise im Etappenvorrat übrig blieb und niemand
+  gesehen hat, darf am Ende in den Ideenvorrat wandern. „Beim nächsten Mal" ist
+  die ehrlichste Ablage für einen Spot, der es nicht in den Plan geschafft hat.
+
+### 20.4 Veranstaltungen: interessant, aber ohne Quelle kein Feature
+
+Ein Ideenvorrat, der auch Termine kennt — Konzert, Markt, Ausstellung bis
+Sonntag — wäre deutlich mehr wert als einer aus lauter dauerhaften Orten. Genau
+daran hängt aber die offene Frage: **es gibt keine gute Quelle.**
+
+Was es gibt, taugt jeweils nur halb:
+
+- **OpenStreetMap** kennt Veranstaltungs*orte*, keine Veranstaltungen.
+- **Kommunale Portale** haben brauchbare Daten, aber jede Stadt ein anderes
+  Format; einige liefern iCal oder RSS. Das skaliert nicht über einen
+  Landkreis hinaus, ist aber für die eigene Gegend erstaunlich tragfähig — und
+  die eigene Gegend ist genau der Fall, für den der Ideenvorrat gedacht ist.
+- **Kommerzielle Aggregatoren** (Ticketanbieter) hätten Abdeckung, bringen
+  aber Lizenzbedingungen und bezahltes Ranking mit — gegen beides hat sich
+  dieses Konzept entschieden (§3.8, §10.7, §19.4).
+- **Wikidata/Wikipedia** taugen für wiederkehrende Großereignisse, nicht für
+  das Wochenende.
+
+Daraus folgt die Reihenfolge, nicht die Absage: **Der Ideenvorrat wird ohne
+Veranstaltungen gebaut** und bekommt sie als eigene Quelle nachgerüstet, sobald
+eine steht, die den Anspruch aushält. Als erster Schritt ist die realistische
+Form ein **iCal-Abonnement je Quelle**, das der Haushalt selbst einträgt — wie
+ein Kalender-Abo, mit demselben Vertrauensmodell und ohne einen Anbieter im
+Datenpfad. Ein Termin ist dann ein Ideenvorrat-Eintrag mit Gültigkeitsfenster,
+und alles Übrige — Nähe, Tour, Übernahme in eine Reise — gilt unverändert.
+
+Was hier ausdrücklich **nicht** getan wird: Veranstaltungen aus Webseiten
+zusammenkratzen. Das ist der Punkt, an dem eine Erkennung ohne Beleg beginnt,
+und §9.3 hat dafür eine klare Antwort — ein Eintrag ohne wörtlichen Beleg fällt
+weg.
+
+### 20.5 Was das an Daten braucht
+
+Wenig, und fast alles davon existiert:
+
+- `idea_pool` — dieselben Spalten wie `plan_pool` (§12), ohne `leg_id` und mit
+  `household`-Bezug, `created_by` und optionalem Gültigkeitsfenster für
+  Termine.
+- Eine **Nähe-Regel** je Eintrag, damit „einmal gemeldet" haltbar ist: wann
+  zuletzt vorgeschlagen, wie oft weggewischt. Dieselbe Mechanik, mit der §7.1
+  ein „nein" merkt statt es zu löschen.
+- Der **Tourvorschlag** braucht keine neue Tabelle: er ist ein Aufruf von
+  `solveDay` mit dem Standort als Anker und einem Zeitfenster, und was dabei
+  herauskommt, ist entweder ein Vorschlag auf dem Bildschirm oder — wenn
+  angenommen — eine ganz normale eintägige Reise mit einer Etappe.
+
+Das ist der Grund, warum diese Erweiterung trotz ihres Umfangs spät und
+billig ist: Sie erfindet keinen Mechanismus, sie gibt den vorhandenen einen
+zweiten Anlass.

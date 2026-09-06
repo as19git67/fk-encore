@@ -234,3 +234,99 @@ final class TripNewPlanDraftTests: XCTestCase {
         XCTAssertEqual(draft.createRequest()?.legs.first?.startDate, "2026-09-17")
     }
 }
+
+/// Removing a city from a route being drafted.
+///
+/// Two mistakes met here, and both are the same mistake: addressing a
+/// city by where it sits rather than by which one it is. The list shows
+/// the route from the *second* city on, so a delete offset of 0 means
+/// `legs[1]` — read as an absolute index it deleted the wrong city and
+/// ignored the first row entirely. And a row bound to `legs[2]` keeps
+/// that index after the list shrinks, which SwiftUI evaluates once more
+/// while dismissing the pushed screen: a crash, not a stale label.
+@MainActor
+final class TripDraftLegRemovalTests: XCTestCase {
+    private func place(_ name: String) -> TripPlace {
+        TripPlace(name: name, subtitle: nil, latitude: 48.1, longitude: 11.5)
+    }
+
+    /// Three cities, as the screen would have them.
+    private func model() -> TripNewPlanViewModel {
+        let model = TripNewPlanViewModel()
+        model.draft.anchor = place("Erste")
+        model.draft.legs.append(TripDraftLeg(place: place("Zweite")))
+        model.draft.legs.append(TripDraftLeg(place: place("Dritte")))
+        return model
+    }
+
+    func testDeletingTheFirstShownRowRemovesTheSecondCity() {
+        // Offset 0 is the first *displayed* row, which is legs[1].
+        let model = model()
+        model.removeLegs(displayedAt: IndexSet(integer: 0))
+        XCTAssertEqual(model.draft.legs.compactMap(\.place?.name), ["Erste", "Dritte"])
+    }
+
+    func testDeletingTheSecondShownRowRemovesTheThirdCity() {
+        let model = model()
+        model.removeLegs(displayedAt: IndexSet(integer: 1))
+        XCTAssertEqual(model.draft.legs.compactMap(\.place?.name), ["Erste", "Zweite"])
+    }
+
+    func testDeletingSeveralAtOnceRemovesExactlyThose() {
+        // Every removal moves the indices of what follows, so the rows
+        // are resolved to ids before anything goes.
+        let model = model()
+        model.draft.legs.append(TripDraftLeg(place: place("Vierte")))
+        model.removeLegs(displayedAt: IndexSet([0, 2]))
+        XCTAssertEqual(model.draft.legs.compactMap(\.place?.name), ["Erste", "Dritte"])
+    }
+
+    func testAnOffsetPastTheEndRemovesNothing() {
+        let model = model()
+        model.removeLegs(displayedAt: IndexSet(integer: 9))
+        XCTAssertEqual(model.draft.legs.count, 3)
+    }
+
+    func testTheFirstCityIsNotRemovableThisWay() {
+        // There is no row for it: the route list starts at the second.
+        let model = model()
+        model.removeLegs(displayedAt: IndexSet())
+        XCTAssertEqual(model.draft.legs.compactMap(\.place?.name), ["Erste", "Zweite", "Dritte"])
+    }
+
+    func testABindingSurvivesItsCityBeingRemoved() {
+        // What actually crashed: the pushed editor is evaluated once
+        // more on its way out, after the list has shrunk.
+        let model = model()
+        let id = model.draft.legs[1].id
+        let binding = model.binding(for: id)
+        model.removeLegs(displayedAt: IndexSet(integer: 0))
+
+        XCTAssertNil(binding.wrappedValue.place)
+        // And writing through a dead binding changes nothing rather
+        // than resurrecting a city or overwriting its neighbour.
+        binding.wrappedValue.days = 9
+        XCTAssertEqual(model.draft.legs.compactMap(\.place?.name), ["Erste", "Dritte"])
+        XCTAssertFalse(model.draft.legs.contains { $0.days == 9 })
+    }
+
+    func testABindingWritesThroughToTheRightCity() {
+        let model = model()
+        let binding = model.binding(for: model.draft.legs[2].id)
+        binding.wrappedValue.days = 5
+        XCTAssertEqual(model.draft.legs[2].days, 5)
+        XCTAssertNotEqual(model.draft.legs[1].days, 5)
+    }
+
+    func testPositionsFollowTheCityRatherThanTheRow() {
+        let model = model()
+        let third = model.draft.legs[2].id
+        XCTAssertEqual(model.position(of: third), 2)
+        XCTAssertEqual(model.legBefore(third)?.place?.name, "Zweite")
+
+        model.removeLegs(displayedAt: IndexSet(integer: 0))
+
+        XCTAssertEqual(model.position(of: third), 1)
+        XCTAssertEqual(model.legBefore(third)?.place?.name, "Erste")
+    }
+}
