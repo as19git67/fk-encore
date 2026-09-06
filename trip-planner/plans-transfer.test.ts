@@ -17,7 +17,7 @@ import { clearRouterCache } from "../osm-admin/region-router";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
 import { InMemoryGeoClient } from "../osm-admin/geo-client.test-helper";
-import { createTripPlan } from "./plans";
+import { createTripPlan, updateTripSettings } from "./plans";
 
 /** Two invented towns, each in its own imported region. */
 const WEST = { lat: 48.37, lon: 10.9 };
@@ -167,14 +167,54 @@ describe("a transfer between two legs", () => {
     expect(plan.legs[0].days[1].blocks.map((b) => b.id)).toHaveLength(4);
   });
 
-  it("ignores a transfer on the first leg", async () => {
-    // Nobody transfers into the start of a trip; how they got to the
-    // first city is not this plan's business.
+  it("ignores a departure on the first leg", async () => {
+    // Nobody transfers *into* the start of a trip: there is no earlier
+    // leg, so there is no day to put a departure fixpoint on.
     const { plan } = await createTripPlan({
-      legs: [{ title: "Weststadt", anchor: WEST, transfer: { departAt: "08:00", arriveAt: "11:00" } }],
+      legs: [{ title: "Weststadt", anchor: WEST, transfer: { departAt: "08:00" } }],
     });
     expect(plan.legs[0].days[0].fixpoints).toEqual([]);
     expect(plan.legs[0].days[0].blocks).toHaveLength(4);
+  });
+
+  it("shortens the first day of the trip to when the group arrives", async () => {
+    // They do arrive, even on day one. A plan that gives a full
+    // Vormittag to a day the group spends on a plane has promised
+    // something nobody has.
+    const early = await createTripPlan({
+      legs: [{ title: "Weststadt", anchor: WEST }],
+    });
+    const { plan } = await createTripPlan({
+      legs: [{ title: "Weststadt", anchor: WEST, transfer: { arriveAt: "14:00" } }],
+    });
+
+    const first = plan.legs[0].days[0];
+    expect(first.blocks.length).toBeLessThan(early.plan.legs[0].days[0].blocks.length);
+    expect(Math.min(...first.blocks.map((b) => b.startMinutes ?? 0)))
+      .toBeGreaterThanOrEqual(14 * 60);
+    // And only the first day: the second one starts when a day starts.
+    const second = plan.legs[0].days[1];
+    if (second) {
+      expect(Math.min(...second.blocks.map((b) => b.startMinutes ?? 0)))
+        .toBeLessThan(14 * 60);
+    }
+  });
+
+  it("keeps the arrival across a re-plan", async () => {
+    // It used to live in the request and nowhere else, so the next
+    // settings change quietly handed the morning back (migration 0169).
+    const { plan } = await createTripPlan({
+      legs: [{ title: "Weststadt", anchor: WEST, days: 2, transfer: { arriveAt: "14:00" } }],
+      pace: "normal",
+    });
+    const before = plan.legs[0].days[0].blocks.length;
+
+    const { plan: after } = await updateTripSettings({ planId: plan.id, pace: "relaxed" });
+
+    expect(after.legs[0].arriveMinutes).toBe(14 * 60);
+    expect(Math.min(...after.legs[0].days[0].blocks.map((b) => b.startMinutes ?? 0)))
+      .toBeGreaterThanOrEqual(14 * 60);
+    expect(after.legs[0].days[0].blocks.length).toBeLessThanOrEqual(before);
   });
 
   it("takes a label from the caller when there is one", async () => {

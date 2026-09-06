@@ -1557,6 +1557,31 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    dann ganzer Abend). Das greift nur beim Ankunftstag; danach ist der Tag
    wieder relativ und Fixpunkte schieben ihn frei.
 
+   **Nachgereicht: die Ankunft gilt auch für die erste Etappe.** „In den
+   Reisebeginn transferiert niemand" stimmt für die *Abfahrt* — es gibt keinen
+   Tag davor, auf den ein Fixpunkt könnte. Für die *Ankunft* stimmt es nicht:
+   Man kommt auch am ersten Tag irgendwann an, und ein voller Vormittag für
+   eine Stadt, die die Gruppe um 14 Uhr erreicht, ist ein Vormittag, den der
+   Plan erfunden hat. Die Ankunftszeit ist deshalb unabhängig vom Anker und
+   unabhängig vom Check-in zu setzen: Ankommen und Einchecken sind zwei
+   Zeiten, und geplant wird ab der ersten.
+
+   Dabei fiel ein zweiter Fehler auf: Die Ankunft lebte nur im Request. Jedes
+   Neuplanen — jede Einstellungsänderung — gab den Vormittag still zurück.
+   Migration 0169 legt sie als `arrive_minutes` an die Etappe, neben
+   `day_starts_at`, von dem sie sich unterscheidet: `day_starts_at` ist, wann
+   *jeder* Tag beginnt, `arrive_minutes` nur der erste.
+
+   **Nachgereicht: der Anker hat einen eigenen Namen.** `title` ist die Stadt,
+   der Anker ist das Hotel — eine Spalte konnte nicht beides sein, also hieß
+   eine Reise nach der Unterkunft, sobald man ein Hotel auf der Karte wählte,
+   und der Tagesbildschirm konnte nicht sagen, wo der Tag anfängt. Migration
+   0169 trennt beides (`anchor_label`). In der App heißt der Abschnitt
+   entsprechend „Unterkunft" statt „Wohin?" — gefragt war die Stadt, gespeichert
+   wurde der Anker — und die **Ankerzone** aus §4.2 („noch nichts gebucht,
+   ungefähr im Umkreis von…") hat endlich eine Oberfläche statt nur ein Feld
+   im Request.
+
    Was *auf* dem Weg liegt, bleibt eine getrennte Frage — die beantwortet die
    Korridorsuche. Wie der Tag gerahmt wird, hängt nicht davon ab, ob jemand
    anhalten will.

@@ -99,7 +99,7 @@ final class TripCalendarTests: XCTestCase {
         }
         func leg(_ position: Int, _ start: String?, _ days: Int) -> TripLeg {
             TripLeg(id: 10 + position, position: position, title: "Etappe \(position)",
-                    anchor: TripCoordinate(lat: 48.1, lon: 11.5), anchorRadiusM: nil,
+                    anchor: TripCoordinate(lat: 48.1, lon: 11.5), anchorRadiusM: nil, anchorLabel: nil, arriveMinutes: nil,
                     mode: "foot", regionDb: "nom_test", awaitingRegion: false,
                     startDate: start, days: (0..<days).map(day), pool: [])
         }
@@ -145,7 +145,7 @@ final class TripCalendarTests: XCTestCase {
         XCTAssertEqual(plan.legs[0].displayTitle, "Etappe 0")
         let unnamed = TripLeg(
             id: 9, position: 1, title: nil,
-            anchor: TripCoordinate(lat: 48.1, lon: 11.5), anchorRadiusM: nil,
+            anchor: TripCoordinate(lat: 48.1, lon: 11.5), anchorRadiusM: nil, anchorLabel: nil, arriveMinutes: nil,
             mode: "foot", regionDb: "nom_test", awaitingRegion: nil,
             startDate: nil, days: [], pool: [])
         XCTAssertEqual(unnamed.displayTitle, "Etappe 2")

@@ -19,7 +19,7 @@ final class TripLegSelectionTests: XCTestCase {
     private func leg(_ position: Int, _ start: String?, days: Int) -> TripLeg {
         TripLeg(
             id: 10 + position, position: position, title: "Stadt \(position)",
-            anchor: TripCoordinate(lat: 48.1, lon: 11.5), anchorRadiusM: nil,
+            anchor: TripCoordinate(lat: 48.1, lon: 11.5), anchorRadiusM: nil, anchorLabel: nil, arriveMinutes: nil,
             mode: "foot", regionDb: "nom_test", awaitingRegion: false,
             startDate: start, days: (0..<days).map(day), pool: [])
     }

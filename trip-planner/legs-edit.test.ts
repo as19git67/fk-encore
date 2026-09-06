@@ -425,6 +425,77 @@ describe("PATCH /trip-planner/plans/:planId/legs/:legIndex", () => {
     expect(plan.legs[0].pool.some((c) => c.name === "Café Beispielhof")).toBe(true);
   });
 
+  it("names the anchor apart from the city", async () => {
+    // One field could not be both: picking a hotel on the map used to
+    // name the whole trip after the hotel (§4.2, migration 0169).
+    const { plan } = await addTripLeg({
+      planId: (await oneLegPlan()).id,
+      title: "Oststadt",
+      anchor: EAST,
+      anchorLabel: "Hotel Beispielhof",
+      days: 1,
+    });
+    expect(plan.legs[1].title).toBe("Oststadt");
+    expect(plan.legs[1].anchorLabel).toBe("Hotel Beispielhof");
+  });
+
+  it("moves the anchor's name with the anchor", async () => {
+    const created = await oneLegPlan();
+    const { plan } = await updateTripLeg({
+      planId: created.id, legIndex: 0,
+      anchor: EAST, anchorLabel: "Pension Musterhof",
+    });
+    expect(plan.legs[0].anchorLabel).toBe("Pension Musterhof");
+    expect(plan.legs[0].title).toBe("Weststadt");
+  });
+
+  it("shortens the first day to the arrival, and only the first", async () => {
+    const created = await oneLegPlan();
+    const before = created.legs[0].days[0].blocks.length;
+
+    const { plan } = await updateTripLeg({
+      planId: created.id, legIndex: 0, arriveAt: "14:00",
+    });
+
+    expect(plan.legs[0].arriveMinutes).toBe(14 * 60);
+    expect(plan.legs[0].days[0].blocks.length).toBeLessThan(before);
+    expect(plan.legs[0].days[1].blocks.length).toBe(before);
+  });
+
+  it("takes the arrival off again", async () => {
+    const created = await oneLegPlan();
+    await updateTripLeg({ planId: created.id, legIndex: 0, arriveAt: "14:00" });
+
+    const { plan } = await updateTripLeg({
+      planId: created.id, legIndex: 0, arriveAt: null,
+    });
+
+    expect(plan.legs[0].arriveMinutes).toBeNull();
+    expect(plan.legs[0].days[0].blocks.length)
+      .toBe(created.legs[0].days[0].blocks.length);
+  });
+
+  it("keeps the arrival when something else is edited", async () => {
+    // Moving a hotel two streets does not change when the plane lands.
+    const created = await oneLegPlan();
+    await updateTripLeg({ planId: created.id, legIndex: 0, arriveAt: "14:00" });
+
+    const { plan } = await updateTripLeg({
+      planId: created.id, legIndex: 0,
+      anchor: { lat: WEST.lat + 0.001, lon: WEST.lon },
+    });
+
+    expect(plan.legs[0].arriveMinutes).toBe(14 * 60);
+  });
+
+  it("refuses an arrival that is not a time", async () => {
+    const created = await oneLegPlan();
+    await expect(updateTripLeg({ planId: created.id, legIndex: 0, arriveAt: "nachmittags" }))
+      .rejects.toThrow(/HH:MM/);
+    await expect(updateTripLeg({ planId: created.id, legIndex: 0, arriveAt: "25:00" }))
+      .rejects.toThrow(/HH:MM/);
+  });
+
   it("says which leg it cannot find", async () => {
     const created = await oneLegPlan();
     await expect(updateTripLeg({ planId: created.id, legIndex: 7, title: "X" }))

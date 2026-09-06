@@ -224,6 +224,63 @@ final class TripNewPlanDraftTests: XCTestCase {
         XCTAssertNil(transfer?.arriveAt)
     }
 
+    // MARK: - The anchor (§4.2)
+
+    func testTheAnchorIsNamedApartFromTheCity() {
+        // One field could not be both: picking "Hotel Beispielhof" on
+        // the map used to name the whole trip after the hotel.
+        var draft = TripNewPlanDraft()
+        draft.anchor = TripPlace(name: "Hotel Beispielhof", subtitle: nil,
+                                 latitude: 38.7, longitude: -9.1)
+        draft.legs[0].title = "Beispielstadt"
+
+        let leg = draft.createRequest()?.legs.first
+        XCTAssertEqual(leg?.anchorLabel, "Hotel Beispielhof")
+        XCTAssertEqual(leg?.title, "Beispielstadt")
+        XCTAssertEqual(draft.effectiveTitle, "Beispielstadt")
+    }
+
+    func testAnUnnamedCityFallsBackToTheAnchorsName() {
+        var draft = TripNewPlanDraft()
+        draft.anchor = lisbon
+        XCTAssertEqual(draft.createRequest()?.legs.first?.title, "Beispielstadt")
+    }
+
+    func testAnAnchorZoneIsSentOnlyWhenNothingIsBooked() {
+        // §4.2: the planner reckons with the centroid, and the plan
+        // must not claim an address it does not have.
+        var draft = TripNewPlanDraft()
+        draft.anchor = lisbon
+        XCTAssertNil(draft.createRequest()?.legs.first?.anchorRadiusM)
+
+        draft.legs[0].anchorIsApproximate = true
+        draft.legs[0].anchorRadiusM = 2_000
+        XCTAssertEqual(draft.createRequest()?.legs.first?.anchorRadiusM, 2_000)
+    }
+
+    // MARK: - Arriving (§4.2)
+
+    func testTheFirstCityTakesAnArrivalButNoDeparture() {
+        // Nobody transfers into the start of a holiday — but they do
+        // arrive, and day one has no morning if they land at two.
+        var draft = TripNewPlanDraft()
+        draft.anchor = lisbon
+        draft.legs[0].arriveAt = Calendar.current.date(
+            bySettingHour: 14, minute: 0, second: 0, of: Date())!
+        draft.legs[0].departAt = Calendar.current.date(
+            bySettingHour: 8, minute: 0, second: 0, of: Date())!
+
+        let transfer = draft.createRequest()?.legs.first?.transfer
+        XCTAssertEqual(transfer?.arriveAt, "14:00")
+        XCTAssertNil(transfer?.departAt)
+    }
+
+    func testNoArrivalMeansNoTransferAtAllOnTheFirstCity() {
+        var draft = TripNewPlanDraft()
+        draft.anchor = lisbon
+        XCTAssertNil(draft.createRequest()?.legs.first?.transfer)
+    }
+
     func testADatedTripSendsTheDayTheTravellerPicked() {
         // The date is what later tells the app which day of the trip
         // today is — there is no "start trip" button.
