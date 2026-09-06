@@ -1,12 +1,28 @@
 import Foundation
 
 /// Shared UserDefaults suite accessible by both the main app and the Share Extension
-/// via the App Group `group.dev.fk-encore.F4milPhotos`.
+/// via the App Group `group.de.f4mil.photos`.
 ///
 /// The main app mirrors the auth token and server URL here so the extension can
 /// make API calls without needing access to the main app's Keychain items.
+///
+/// **The id has to be the one both targets are signed for.** For an app
+/// group a process is not entitled to, `UserDefaults(suiteName:)` does
+/// not fail — it hands back a defaults object backed by a plist inside
+/// that process's own sandbox. The app writes its token, the extension
+/// reads and finds nothing, and the extension's honest conclusion is
+/// "not set up: please log in". Both targets' entitlements grant
+/// `group.de.f4mil.photos`; the code used to name a group nobody was
+/// signed for, so the two processes were talking into separate boxes
+/// with the same label. `SharedStorageGroupTests` reads the
+/// entitlements files and fails if they ever drift apart again.
+///
+/// Nothing needs migrating out of the old suite: the Keychain holds the
+/// session, and `AuthManager.restoreSession()` mirrors it here on every
+/// launch. Correcting the id is enough for the extension to find a
+/// token again the next time the app starts.
 enum SharedStorage {
-    static let appGroupID        = "group.dev.fk-encore.F4milPhotos"
+    static let appGroupID        = "group.de.f4mil.photos"
     static let tokenKey          = "shared.auth_token"
     static let refreshTokenKey   = "shared.refresh_token"
     /// Access-token expiry as epoch seconds (Double). Lets the APIClient and the
