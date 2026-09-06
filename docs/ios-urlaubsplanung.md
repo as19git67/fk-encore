@@ -719,15 +719,16 @@ Kandidat mit allen anderen konkurriert.
    direkt in den Vorrat legen. Der einfachste Weg, und er muss unabhängig von
    allem anderen existieren.
 
-**Die Share-Extension existiert bereits** (`ios/App/ShareExtension`), nimmt aber
-laut `Info.plist` nur Bilder entgegen
-(`NSExtensionActivationSupportsImageWithMaxCount`). Für die Fälle 1 und 2 muss
-sie um URLs und Textauswahl erweitert werden. Ehrlich dazu: Aus einem geteilten
-Karten-Link die Koordinate zu ziehen, ist fragil — die Formate ändern sich ohne
-Ankündigung. Der Fallback ist deshalb kein Fehlerdialog, sondern eine Karte mit
-der Bitte, den Ort zu bestätigen; danach ordnet eine Umkreissuche mit
-Reverse-Geocoding (`geo/src/reverse.ts`) einen OSM-POI zu, oder der Punkt wird
-frei übernommen.
+**Die Share-Extension** (`ios/F4milShare`, `Info.plist` unter
+`ios/App/ShareExtension`) nahm anfangs nur Bilder entgegen
+(`NSExtensionActivationSupportsImageWithMaxCount`) und ist für die Fälle 1 bis 3
+um URLs, Textauswahl und die gelesene Seite erweitert worden; die Weiche
+entscheidet nach dem, was der Share dabei hat, damit das Fototeilen so schnell
+bleibt, wie es war. Ehrlich dazu: Aus einem geteilten Karten-Link die Koordinate
+zu ziehen, ist fragil — die Formate ändern sich ohne Ankündigung. Der Fallback
+ist deshalb kein Fehlerdialog, sondern eine Karte mit der Bitte, den Ort zu
+bestätigen; danach ordnet eine Umkreissuche mit Reverse-Geocoding
+(`geo/src/reverse.ts`) einen OSM-POI zu, oder der Punkt wird frei übernommen.
 
 **Was mit einem Fund dann geschieht** — fünf Regeln, die verhindern, dass der
 Vorrat verwahrlost:
@@ -1814,6 +1815,29 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
      in die App-Group; die Bestätigung — welche Reise, welcher von drei Cafés,
      wie lange — passiert in der App, wo der Bildschirm dafür ohnehin steht.
 
+   **Nachgereicht: die Übergabe war lange nur scheinbar da.** Die Extension
+   sagte „Gemerkt", in der App wartete nichts, und beim Fototeilen kam „F4mil
+   ist nicht eingerichtet. Bitte öffne die App und melde dich an." — an
+   jemanden, der angemeldet war und seine Alben sah. Beide Ziele sind auf die
+   App-Gruppe `group.de.f4mil.photos` signiert; der Code fragte überall nach
+   `group.dev.fk-encore.F4milPhotos`: Tokenspiegel, Uploadschlange, zuletzt
+   benutzte Alben und der Briefkasten des Planers.
+
+   Das Fehlerbild ist lehrreicher als der Fehler. `UserDefaults(suiteName:)`
+   scheitert **nicht** an einer Gruppe, für die der Prozess keine Berechtigung
+   hat — es liefert einen Speicher, der in der eigenen Sandbox landet.
+   Schreiben gelingt, Lesen gelingt, jede Seite verhält sich korrekt, und
+   trotzdem reden zwei Prozesse in zwei Kisten mit demselben Etikett. Ein
+   Handover ohne Rückfrage ist deshalb nur so verlässlich wie die Frage, die er
+   stellt: die Berechtigung hat allein der *Container* der Gruppe als Antwort
+   (`containerURL(forSecurityApplicationGroupIdentifier:)`, `nil` ohne
+   Entitlement). Genau die wird jetzt gestellt, bevor die Extension „Gemerkt"
+   behauptet oder „nicht eingerichtet" der Anmeldung anlastet — §15.3 gilt auch
+   für die eigene Infrastruktur, nicht nur für OSM-Daten. Ein Test liest beide
+   Entitlements-Dateien und schlägt an, sobald App und Extension auf
+   verschiedene Gruppen signiert sind oder eine Quelldatei eine nennt, für die
+   niemand signiert ist.
+
    - **Der Textauszug aus der geöffneten Seite** (§9.3 Stufe 1) läuft über
      `NSExtensionJavaScriptPreprocessingFile`: `TripSharePageReading.js` wird
      von Safari *in der bereits geöffneten Seite* ausgeführt und gibt deren
@@ -1910,6 +1934,17 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    denn `position` ist, worüber jeder Endpunkt eine Etappe adressiert:
    ein Loch in der Folge hieße, dass „Etappe 2" vorher und nachher
    verschiedene Städte meint.
+
+   **Nachgereicht: die Etappe wählen.** Die Tagesansicht zeigte immer die
+   erste Etappe. Vorrat, Karte und Verschieben hängen aber an der Etappe auf
+   dem Bildschirm, also waren die anderen Städte nicht bloß ungezeigt, sondern
+   unerreichbar — eine dreistädtige Reise ließ sich zu zwei Dritteln nicht
+   bearbeiten. Dazu ein Absturz beim Anlegen: Die Zeilen der Städte hielten
+   ihre `Binding`s über den Index, und SwiftUI wertet ein aufgeschobenes Ziel
+   noch einmal aus, während es verschwindet — die zweite von drei zu wischen
+   griff auf einen Index, den es nicht mehr gab. Zeilen werden seither über
+   ihre Identität aufgelöst, nicht über ihre Position, und `.onDelete` rechnet
+   die Versätze der *angezeigten* Liste in Städte um.
 
    **„Heute" heißt jetzt „Unterwegs".** Die Ansicht ist kein Datum, sondern die
    für draußen: der Block, in dem die Gruppe steckt, was davon aussteht, und
@@ -2012,8 +2047,9 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
      Präfix `manual:`: ein erfundener `node:`-Eintrag wäre eine Behauptung über
      Daten, die es nicht gibt.
 
-   Offen aus §9.2: die Share-Extension (Fälle 1–3 — Karten-Link, Artikel,
-   Screenshot) und die Suche in der App (Fall 4).
+   Die übrigen Wege aus §9.2 — die Share-Extension (Fälle 1–3: Karten-Link,
+   Artikel, Screenshot) und die Suche in der App (Fall 4) — sind inzwischen
+   gebaut und stehen bei Schritt 7.
 9. **Wetter & Licht** — Open-Meteo-Anbindung mit Cache, Indoor/Outdoor-Ableitung,
    Sonnenstandsmodul, Lichthinweise, Abendblock-Vorschlag und der Zeit-Regler
    (§8.3). Das **Horizontprofil** aus dem Höhenmodell (§7.3) gehört hierher —
