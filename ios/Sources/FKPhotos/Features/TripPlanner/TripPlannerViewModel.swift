@@ -315,6 +315,15 @@ final class TripPlannerViewModel {
         leg?.pool.first { $0.osmRef == stop.osmRef }?.reasons ?? []
     }
 
+    /// Take a plan an endpoint just returned.
+    ///
+    /// The screens that change the *shape* of a trip — its cities —
+    /// live outside this view model but have to leave it holding the
+    /// new plan, or the day behind them would still show the old one.
+    func replace(with response: TripPlanResponse) {
+        apply(response)
+    }
+
     private func apply(_ response: TripPlanResponse) {
         plan = response.plan
         // Both describe the last action, not the plan: a red block and a

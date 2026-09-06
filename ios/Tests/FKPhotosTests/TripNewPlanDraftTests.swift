@@ -138,6 +138,92 @@ final class TripNewPlanDraftTests: XCTestCase {
         XCTAssertNil(draft.createRequest()?.legs.first?.startDate)
     }
 
+    // MARK: - Several cities (§4.2)
+
+    private let porto = TripPlace(
+        name: "Musterstadt",
+        subtitle: "Beispielland",
+        latitude: 41.1,
+        longitude: -8.6,
+    )
+
+    func testASecondCityBecomesASecondLeg() {
+        var draft = TripNewPlanDraft()
+        draft.anchor = lisbon
+        draft.days = 3
+        draft.legs.append(TripDraftLeg(place: porto, days: 2, mode: .transit))
+
+        let request = draft.createRequest()
+        XCTAssertEqual(request?.legs.count, 2)
+        XCTAssertEqual(request?.legs[1].anchor.lat, 41.1)
+        XCTAssertEqual(request?.legs[1].days, 2)
+        // The mode belongs to the leg: arriving by car does not mean
+        // driving around the old town (§4.2).
+        XCTAssertEqual(request?.legs[0].mode, "foot")
+        XCTAssertEqual(request?.legs[1].mode, "transit")
+    }
+
+    func testAHalfPickedSecondCityIsNotPlannable() {
+        // Not "plan what you have": it is a trip missing a city, and
+        // planning around the gap would quietly drop it.
+        var draft = TripNewPlanDraft()
+        draft.anchor = lisbon
+        draft.legs.append(TripDraftLeg())
+
+        XCTAssertFalse(draft.isPlannable)
+        XCTAssertNil(draft.createRequest())
+    }
+
+    func testTheTripIsNamedAfterItsRoute() {
+        var draft = TripNewPlanDraft()
+        draft.anchor = lisbon
+        draft.legs.append(TripDraftLeg(place: porto))
+
+        XCTAssertEqual(draft.effectiveTitle, "Beispielstadt → Musterstadt")
+        XCTAssertEqual(draft.totalDays, 6)
+    }
+
+    func testOnlyTheFirstLegCarriesTheDate() {
+        // The server dates the rest in sequence. Two sources for the
+        // same fact is how they come to disagree.
+        var draft = TripNewPlanDraft()
+        draft.anchor = lisbon
+        draft.legs.append(TripDraftLeg(place: porto))
+        draft.isDated = true
+        draft.startDate = TripCalendar.date(fromIsoDay: "2026-09-17")!
+
+        let request = draft.createRequest()
+        XCTAssertEqual(request?.legs[0].startDate, "2026-09-17")
+        XCTAssertNil(request?.legs[1].startDate)
+    }
+
+    func testNobodyTransfersIntoTheStartOfATrip() {
+        // How the travellers reached the first city is not this plan's
+        // business (§4.2) — even if somebody filled the field in.
+        var draft = TripNewPlanDraft()
+        var first = TripDraftLeg(place: lisbon)
+        first.arriveAt = Date()
+        draft.legs = [first, TripDraftLeg(place: porto)]
+
+        XCTAssertNil(draft.createRequest()?.legs[0].transfer)
+    }
+
+    func testATransferIsSentOnlyWhenATimeIsKnown() {
+        var draft = TripNewPlanDraft()
+        draft.anchor = lisbon
+        var second = TripDraftLeg(place: porto)
+        draft.legs.append(second)
+        XCTAssertNil(draft.createRequest()?.legs[1].transfer)
+
+        // A time nobody knows is not a departure at midnight (§15.3).
+        second.departAt = Calendar.current.date(
+            bySettingHour: 9, minute: 30, second: 0, of: Date())!
+        draft.legs[1] = second
+        let transfer = draft.createRequest()?.legs[1].transfer
+        XCTAssertEqual(transfer?.departAt, "09:30")
+        XCTAssertNil(transfer?.arriveAt)
+    }
+
     func testADatedTripSendsTheDayTheTravellerPicked() {
         // The date is what later tells the app which day of the trip
         // today is — there is no "start trip" button.

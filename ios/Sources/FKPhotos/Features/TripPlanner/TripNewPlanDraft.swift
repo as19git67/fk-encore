@@ -17,14 +17,12 @@ import Foundation
 /// current location, or by dropping a pin. A sentence can fill in
 /// everything else; it can never fill in that.
 struct TripNewPlanDraft: Equatable {
-    /// Set once a place was picked. Nil until then, and the only reason
-    /// a filled-in draft may still not be plannable.
-    var anchor: TripPlace?
+    /// The cities of the trip, in order (§4.2). Always at least one —
+    /// index zero is "the place" for a single-city trip, and the screen
+    /// edits it in exactly the same fields it always did.
+    var legs: [TripDraftLeg] = [TripDraftLeg()]
     var title: String = ""
-    var days: Int = 3
     var pace: TripPace = .normal
-    var mode: TripTransportMode = .foot
-    var radiusM: Int = 3_000
     var withChildren = false
     var limitedMobility = false
     var categories: [String] = []
@@ -40,6 +38,33 @@ struct TripNewPlanDraft: Equatable {
     /// The first day, used only when `isDated`.
     var startDate = Date()
 
+    /// The first leg, as the screen's original fields.
+    ///
+    /// Kept as accessors rather than removed: the place search, the
+    /// stepper and the sentence all talk about "the trip's place" and
+    /// "how long", and for a one-city trip that is exactly leg zero.
+    /// A second set of names for the same value would be the start of
+    /// two of them drifting.
+    var anchor: TripPlace? {
+        get { legs.first?.place }
+        set { legs[0].place = newValue }
+    }
+
+    var days: Int {
+        get { legs.first?.days ?? 1 }
+        set { legs[0].days = newValue }
+    }
+
+    var mode: TripTransportMode {
+        get { legs.first?.mode ?? .foot }
+        set { legs[0].mode = newValue }
+    }
+
+    var radiusM: Int {
+        get { legs.first?.radiusM ?? Self.minRadiusM }
+        set { legs[0].radiusM = newValue }
+    }
+
     /// Bounds mirror `constraints.ts`, so the screen refuses what the
     /// endpoint would refuse — with a stepper that stops rather than an
     /// error after the fact.
@@ -47,8 +72,18 @@ struct TripNewPlanDraft: Equatable {
     static let maxDays = 14
     static let minRadiusM = 100
     static let maxRadiusM = 20_000
+    /// Mirrors the endpoint: more than this is a life, not a trip.
+    static let maxLegs = 10
 
-    var isPlannable: Bool { anchor != nil }
+    /// Every city needs a coordinate — a half-picked second leg is not
+    /// "plan what you have", it is a trip missing a city.
+    var isPlannable: Bool { !legs.isEmpty && legs.allSatisfy { $0.place != nil } }
+
+    /// "Beispielstadt → Musterstadt", or nil when nothing is picked.
+    var routeLabel: String? {
+        let names = legs.compactMap(\.place?.name)
+        return names.isEmpty ? nil : names.joined(separator: " → ")
+    }
 
     /// What to call the trip when nobody said. The place is a better
     /// answer than "Reise", and it is not invented — it is what the
@@ -56,8 +91,11 @@ struct TripNewPlanDraft: Equatable {
     var effectiveTitle: String? {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { return trimmed }
-        return anchor?.name
+        return routeLabel
     }
+
+    /// How long the whole trip lasts.
+    var totalDays: Int { legs.reduce(0) { $0 + $1.days } }
 
     /// Fold in what the model understood, without touching the anchor.
     ///
@@ -95,22 +133,29 @@ struct TripNewPlanDraft: Equatable {
     /// Returns nil for a draft with no anchor rather than sending one
     /// the server will reject.
     func createRequest() -> TripCreatePlanRequest? {
-        guard let anchor else { return nil }
+        guard isPlannable else { return nil }
+        let wire: [TripCreatePlanRequest.Leg] = legs.enumerated().compactMap { index, leg in
+            guard let place = leg.place else { return nil }
+            return TripCreatePlanRequest.Leg(
+                title: place.name,
+                anchor: .init(lat: place.latitude, lon: place.longitude),
+                mode: leg.mode.rawValue,
+                days: leg.days,
+                radiusM: leg.radiusM,
+                // Only the first leg carries a date: the server dates
+                // the rest in sequence, and two sources for the same
+                // fact is how they come to disagree.
+                startDate: index == 0 && isDated ? TripCalendar.isoDay(startDate) : nil,
+                // Nobody transfers into the start of a trip; how the
+                // travellers reached the first city is not this plan's
+                // business (§4.2).
+                transfer: index == 0 ? nil : leg.transfer,
+            )
+        }
+        guard wire.count == legs.count else { return nil }
         return TripCreatePlanRequest(
             title: effectiveTitle,
-            legs: [
-                TripCreatePlanRequest.Leg(
-                    title: anchor.name,
-                    anchor: .init(lat: anchor.latitude, lon: anchor.longitude),
-                    mode: mode.rawValue,
-                    days: days,
-                    radiusM: radiusM,
-                    // The date is what later lets the app know which day
-                    // of the trip today is — there is no "start trip"
-                    // button, and there should not be one.
-                    startDate: isDated ? TripCalendar.isoDay(startDate) : nil,
-                ),
-            ],
+            legs: wire,
             categories: categories.isEmpty ? nil : categories,
             interests: interests.isEmpty ? nil : interests,
             pace: pace.rawValue,
@@ -187,6 +232,7 @@ struct TripCreatePlanRequest: Encodable, Sendable {
         let days: Int
         let radiusM: Int
         let startDate: String?
+        let transfer: TripDraftTransfer?
     }
 
     struct Group: Encodable, Sendable {
@@ -205,4 +251,51 @@ struct TripCreatePlanRequest: Encodable, Sendable {
 
 struct TripCreatePlanResponse: Decodable, Sendable {
     let plan: TripPlan
+}
+
+/// One city of a trip being drafted (§4.2).
+///
+/// A leg is a place plus how long you stay and how you get around
+/// *there* — arriving by car does not mean driving around the old
+/// town, which is why the mode belongs here and not to the trip.
+struct TripDraftLeg: Identifiable, Equatable {
+    let id = UUID()
+    /// Nil until a coordinate was actually chosen. A name is not a
+    /// place: the planner has no forward geocoder and inventing one is
+    /// the confident guess §15.3 exists to forbid.
+    var place: TripPlace?
+    var days: Int = 3
+    var mode: TripTransportMode = .foot
+    var radiusM: Int = 3_000
+    /// When you leave the city before this one, as a time of day. Nil
+    /// when nobody knows yet — an unknown train is not a train at 00:00.
+    var departAt: Date?
+    /// When you reach this one.
+    var arriveAt: Date?
+
+    /// The journey into this leg, as the endpoint wants it, or nil when
+    /// neither end is known.
+    var transfer: TripDraftTransfer? {
+        guard departAt != nil || arriveAt != nil else { return nil }
+        return TripDraftTransfer(
+            departAt: departAt.map(TripDraftTransfer.time(_:)),
+            arriveAt: arriveAt.map(TripDraftTransfer.time(_:)),
+            label: place?.name.isEmpty == false ? "Weiterreise nach \(place!.name)" : nil,
+        )
+    }
+}
+
+/// The journey between two legs, on the wire.
+struct TripDraftTransfer: Encodable, Sendable, Equatable {
+    let departAt: String?
+    let arriveAt: String?
+    let label: String?
+
+    /// "HH:MM" in the traveller's own clock. A departure is a time on a
+    /// timetable, not an instant on a global one, so no timezone maths
+    /// happens here beyond reading the hour off the picker.
+    static func time(_ date: Date) -> String {
+        let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+        return String(format: "%02d:%02d", parts.hour ?? 0, parts.minute ?? 0)
+    }
 }
