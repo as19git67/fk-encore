@@ -2127,16 +2127,37 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    Kategorie: „sight" enthält Dome und Marktplätze gleichermaßen, und
    genau daran hängt die Entscheidung.
 
-   **Auch das Wetter ändert vorerst nichts am Plan.** Der Block sagt,
-   was der Himmel vorhat, und nennt den Faktor, um den das Budget
-   schrumpfen *wird* — angewandt wird er nicht. Umsortieren,
-   Budgetkürzung und der Tausch ganzer Regentage sind drei Eingriffe mit
-   je eigenen Fallstricken; sie als Nebenwirkung eines Abrufs
-   einzuführen wäre der schlechteste Zeitpunkt dafür.
+   **Dann der erste Eingriff: das Wetter darf den Tag umräumen — auf
+   Nachfrage.** `weather-shuffle.ts` ist bewusst ein *Tausch*, kein
+   Neuplanen: Jeder Spot, den der Himmel stört, sucht sich im Vorrat
+   oder in einem Block, den es weniger trifft, einen Platztausch;
+   verdrängte Spots gehen mit demselben Bonus wie in §5 zurück in den
+   Vorrat. Alles Übrige des Tages bleibt, wie es war — ein trockener
+   Nachmittag wird nicht bei der Gelegenheit aus dem Vorrat aufgefüllt,
+   das ist die Arbeit der Planung und nicht die des Wetters um acht Uhr
+   morgens. Dieselben Schutzregeln wie bei der Umverteilung: erledigt,
+   übersprungen oder angeheftet wird nicht angefasst, und ein Block ohne
+   Vorhersage bleibt unberührt.
+
+   Der geschrumpfte Budgetfaktor wird hier zum ersten Mal *angewandt*:
+   Was nach dem Kürzen nicht mehr hineinpasst, fällt heraus — und zwar
+   das am schlechtesten bewertete, also das, woran der Gruppe am
+   wenigsten lag (§6.1).
+
+   **Getrennt in zwei Aufrufe, und genau das ist das Feature.**
+   `POST …/weather/proposal` rechnet und speichert nichts, die App zeigt
+   die Züge in Worten; `POST …/weather/apply` tut es, nachdem gefragt
+   wurde. §7.1 ist da eindeutig — „ungefragt umzuräumen wäre
+   übergriffig" —, und eine Vorhersage ist ein noch schwächerer Grund,
+   in fremde Tage zu greifen, als am falschen Ort zur falschen Zeit zu
+   stehen. Der zweite Aufruf rechnet dabei **neu**, statt den Vorschlag
+   abzuspielen: Ein Vorschlag, über den zehn Minuten nachgedacht wurde,
+   handelt womöglich von einem Tag, der sich inzwischen geändert hat.
 
    **Noch offen in diesem Schritt:** Klimanormale, das Horizontprofil,
-   der Zeit-Regler und die planverändernden Wege — bei Licht wie bei
-   Wetter.
+   der Zeit-Regler, der Tausch ganzer Regentage (§7.2) sowie die
+   planverändernden Wege des Lichts — Reihenfolge im Block,
+   Ranking-Bonus und Abendblock-Vorschlag (§7.3).
 10. **Weitere Kontextsignale** — Dokumenten-Fixpunkte, Reisegruppe, dazu die
     **Reisebereitschafts-Prüfung** und die Packliste (§8.6), die beide nur
     vorhandene Zustände zusammentragen.
