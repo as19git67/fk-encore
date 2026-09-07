@@ -140,11 +140,7 @@ struct TripDayMapView: View {
             }
         }
         .padding()
-        .background {
-            Rectangle()
-                .fill(.bar)
-                .ignoresSafeArea(edges: .bottom)
-        }
+        .background(Color(uiColor: .systemBackground).ignoresSafeArea(edges: .bottom))
     }
 }
 
