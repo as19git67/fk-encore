@@ -13,6 +13,10 @@ import SwiftUI
 struct TripDayMapView: View {
     let day: TripDay
     let anchor: TripCoordinate
+    /// True when the leg's dates put today inside the trip — drives the
+    /// user-location puck. Passed in rather than computed here so the
+    /// view stays a pure function of its inputs.
+    let isRunning: Bool
 
     @State private var camera: MapCameraPosition = .automatic
     @State private var sliderMinutes: Double = 0
@@ -46,6 +50,9 @@ struct TripDayMapView: View {
 
     private var map: some View {
         Map(position: $camera) {
+            if isRunning {
+                UserAnnotation()
+            }
             // The anchor is where the day starts and ends. Shown as a
             // house rather than a number: it is not a stop.
             Annotation("Unterkunft", coordinate: anchor.clCoordinate) {
@@ -120,7 +127,11 @@ struct TripDayMapView: View {
             }
         }
         .padding()
-        .background(.bar)
+        .background {
+            Rectangle()
+                .fill(.bar)
+                .ignoresSafeArea(edges: .bottom)
+        }
     }
 }
 

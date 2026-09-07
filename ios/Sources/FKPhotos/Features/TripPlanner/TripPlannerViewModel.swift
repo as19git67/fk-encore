@@ -185,6 +185,7 @@ final class TripPlannerViewModel {
             let title: String
             let note: String
             let url: String
+            let dwellMinutes: Int
         }
         struct Response: Decodable {
             let spotNote: TripSpotNote?
@@ -193,7 +194,7 @@ final class TripPlannerViewModel {
             let _: Response = try await APIClient.shared.patch(
                 "/trip-planner/plans/\(planId)/legs/\(legIndex)/spot",
                 body: Body(osmRef: edit.osmRef, title: edit.title, note: edit.note,
-                           url: edit.url),
+                           url: edit.url, dwellMinutes: edit.dwellMinutes),
             )
             // The written note reaches the screens through the plan,
             // which carries it onto every copy of the spot at once —

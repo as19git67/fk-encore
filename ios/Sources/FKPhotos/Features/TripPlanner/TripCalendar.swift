@@ -168,6 +168,11 @@ enum TripScheduling {
 }
 
 extension TripLeg {
+    /// How this leg relates to today — running, upcoming, past, or undated.
+    func schedule(on today: Date, timeZone: TimeZone = .current) -> TripSchedule {
+        TripScheduling.schedule(startDate: startDate, dayCount: days.count, today: today, timeZone: timeZone)
+    }
+
     /// The day of this leg, as a short label ("Do, 17.9."), or nil when
     /// the trip has no dates.
     func date(ofDayIndex dayIndex: Int, timeZone: TimeZone = .current) -> String? {

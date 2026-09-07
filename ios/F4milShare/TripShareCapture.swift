@@ -1,92 +1,152 @@
+import MapKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The share extension's half of "einen Fund in den Vorrat" (§9.2).
+/// The share extension's picker + analysis flow (§9.2).
 ///
-/// Deliberately the smallest thing that works: read what was shared,
-/// put it in the App Group, say so. Everything that needs judgement —
-/// which trip, which leg, which of three cafés of that name, and
-/// whether the pin is really where you meant — happens in the app,
-/// where the screen for it lives and where the API client already is.
+/// The user selects a trip in the share sheet and the find goes straight
+/// into that trip's pool — no inbox detour, no "open the app first".
 ///
-/// An extension runs under a tight memory limit and cannot reliably
-/// open its host app, so the alternative would be building the whole
-/// confirmation flow a second time in here. That is how two versions of
-/// one feature start drifting apart.
+/// For Apple Maps shares the coordinates are already in the payload, so
+/// the API round trip is skipped and a synthetic proposal is shown. For
+/// URLs and selected text the backend analyses the content and returns
+/// one or more proposals, which the user confirms in `ShareProposalsView`.
 struct TripShareCaptureView: View {
     let extensionContext: NSExtensionContext
     let itemProviders: [NSItemProvider]
 
     @State private var payload: TripSharePayload?
+    /// Coordinates extracted from the payload URL (Apple Maps, Google Maps).
+    @State private var coordinate: (lat: Double, lon: Double, name: String?)?
     @State private var isReading = true
-    @State private var isDone = false
-    @State private var errorMessage: String?
+    @State private var readError: String?
+
+    // Picker state
+    @State private var plans: [SharePlanSummary] = []
+    @State private var isLoadingPlans = false
+    @State private var plansError: String?
+    @State private var selectedPlanId: Int?
+    @State private var titleText = ""
+    @State private var noteText = ""
+    @State private var dwellMinutes: Int = 45
+
+    // Save
+    @State private var isSaving = false
+    @State private var saveError: String?
 
     var body: some View {
         NavigationStack {
             Group {
-                if isReading {
-                    ProgressView("Wird gelesen…")
+                if isReading || (isLoadingPlans && plans.isEmpty) {
+                    ProgressView(isReading ? "Wird gelesen\u{2026}" : "L\u{00E4}dt Reisen\u{2026}")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if isDone {
-                    done
-                } else if let errorMessage {
-                    ContentUnavailableView("Nichts zu übernehmen", systemImage: "link.badge.plus",
-                                           description: Text(errorMessage))
+                } else if let error = readError {
+                    ContentUnavailableView(
+                        "Nichts zu \u{00FC}bernehmen", systemImage: "link.badge.plus",
+                        description: Text(error))
                 } else {
-                    preview
+                    pickerForm
                 }
             }
-            .navigationTitle("Für die Urlaubsplanung")
+            .navigationTitle("Ort \u{00FC}bernehmen")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") { close() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Merken") { save() }
-                        .disabled(payload == nil || isDone)
+                    Button {
+                        Task { await save() }
+                    } label: {
+                        if isSaving { ProgressView() } else { Text("Speichern") }
+                    }
+                    .disabled(selectedPlanId == nil || isSaving || isLoadingPlans)
                 }
             }
+
         }
-        .task { await read() }
+        .task {
+            await read()
+            await loadPlans()
+        }
     }
 
-    private var preview: some View {
+    // MARK: - Picker form
+
+    private var pickerForm: some View {
         Form {
+            // Source preview
+            if let url = payload?.url {
+                Section("Quelle") {
+                    if let title = payload?.title, !title.isEmpty {
+                        Text(title).font(.subheadline).fontWeight(.medium)
+                    }
+                    Text(url).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
+                }
+            } else if let text = payload?.text {
+                Section("Quelle") {
+                    Text(text).font(.footnote).foregroundStyle(.secondary).lineLimit(3)
+                }
+            }
+
             Section {
-                if let title = payload?.title, !title.isEmpty {
-                    Text(title).font(.headline)
-                }
-                if let url = payload?.url {
-                    Text(url).font(.footnote).foregroundStyle(.secondary).lineLimit(3)
-                }
-                if let text = payload?.text, !text.isEmpty {
-                    Text(text).font(.footnote).lineLimit(6)
-                }
+                TextField("Titel", text: $titleText)
+                TextField("Notiz", text: $noteText, axis: .vertical)
+                    .lineLimit(2...4)
+            } header: {
+                Text("Zum Ort")
             } footer: {
-                // Saying where it went matters: nothing has been added
-                // to any trip yet, and a message implying otherwise
-                // would be a small lie the traveller finds out later.
-                Text("Wird gemerkt und in F4mil unter „Urlaubsplanung“ zum Übernehmen angeboten.")
+                Text("Der Titel wird zum Namen im Vorrat. Die Notiz bleibt beim Eintrag.")
+            }
+
+            Section {
+                Stepper(value: $dwellMinutes, in: 5...480, step: 5) {
+                    Text("Aufenthalt: \(dwellMinutes) Min.")
+                }
+            } header: {
+                Text("Aufenthaltsdauer")
+            } footer: {
+                Text("Wie lange ihr voraussichtlich bleibt \u{2014} kann sp\u{00E4}ter noch angepasst werden.")
+            }
+
+            Section("Reise") {
+                if isLoadingPlans {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                        Text("L\u{00E4}dt Reisen\u{2026}").foregroundStyle(.secondary)
+                    }
+                } else if let error = plansError {
+                    Text(error).font(.footnote).foregroundStyle(.red)
+                    Button("Erneut versuchen") { Task { await loadPlans() } }
+                } else if plans.isEmpty {
+                    Text("Noch keine Reise angelegt.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                } else {
+                    ForEach(plans) { plan in
+                        Button {
+                            selectedPlanId = plan.id
+                        } label: {
+                            HStack {
+                                Text(plan.displayTitle).foregroundStyle(.primary)
+                                Spacer()
+                                if selectedPlanId == plan.id {
+                                    Image(systemName: "checkmark").foregroundStyle(.tint)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let error = saveError {
+                Section {
+                    Text(error).font(.footnote).foregroundStyle(.red)
+                }
             }
         }
     }
 
-    private var done: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 56))
-                .foregroundStyle(.green)
-            Text("Gemerkt").font(.headline)
-            Text("In F4mil unter „Urlaubsplanung“ bestätigen.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
+    // MARK: - Reading
 
     /// Read the attachments.
     ///
@@ -107,6 +167,18 @@ struct TripShareCaptureView: View {
 
         if let fromPage = await readOpenPage() {
             payload = fromPage
+            return
+        }
+
+        // When sharing a named place from Apple Maps the share sheet
+        // includes an MKMapItem — the fastest and most reliable source of
+        // coordinates, requiring no network call.
+        if let fromMap = await readMapItem() {
+            payload = fromMap
+            if let url = fromMap.url {
+                coordinate = Self.extractCoordinate(from: url)
+                titleText = fromMap.title ?? coordinate?.name ?? ""
+            }
             return
         }
 
@@ -137,10 +209,132 @@ struct TripShareCaptureView: View {
 
         let candidate = TripSharePayload(url: url, text: text, title: nil, capturedAt: Date())
         if candidate.isEmpty {
-            errorMessage = "Hier war weder ein Link noch Text dabei."
+            readError = "Hier war weder ein Link noch Text dabei."
             return
         }
         payload = candidate
+
+        if let urlString = url, let coord = Self.extractCoordinate(from: urlString) {
+            coordinate = coord
+            titleText = coord.name ?? ""
+        }
+    }
+
+    /// Pull `ll=lat,lon&q=name` out of a maps.apple.com or similar URL.
+    private static func extractCoordinate(
+        from urlString: String
+    ) -> (lat: Double, lon: Double, name: String?)? {
+        guard let url = URL(string: urlString),
+              let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+        else { return nil }
+        var params: [String: String] = [:]
+        for item in items { if let v = item.value { params[item.name] = v } }
+        guard let ll = params["ll"] else { return nil }
+        let parts = ll.split(separator: ",")
+        guard parts.count >= 2,
+              let lat = Double(parts[0].trimmingCharacters(in: .whitespaces)),
+              let lon = Double(parts[1].trimmingCharacters(in: .whitespaces)),
+              (-90...90).contains(lat), (-180...180).contains(lon)
+        else { return nil }
+        let name = params["q"].map { $0.replacingOccurrences(of: "+", with: " ") }
+        return (lat, lon, name)
+    }
+
+    // MARK: - Loading plans
+
+    private func loadPlans() async {
+        isLoadingPlans = true
+        defer { isLoadingPlans = false }
+        do {
+            plans = try await ShareExtensionAPI.fetchPlans()
+            if plans.count == 1 { selectedPlanId = plans.first?.id }
+        } catch {
+            plansError = error.localizedDescription
+        }
+    }
+
+    // MARK: - Save
+
+    private func save() async {
+        guard let planId = selectedPlanId else { return }
+        saveError = nil
+        isSaving = true
+        defer { isSaving = false }
+        let title = titleText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let note = noteText.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            if let coord = coordinate {
+                _ = try await ShareExtensionAPI.addFind(
+                    planId: planId, lat: coord.lat, lon: coord.lon,
+                    name: title.isEmpty ? coord.name : title,
+                    note: note.isEmpty ? nil : note,
+                    sourceUrl: payload?.url,
+                    legIndex: nil,
+                    dwellMinutes: dwellMinutes)
+            } else {
+                let response = try await ShareExtensionAPI.analyzeShare(
+                    planId: planId, url: payload?.url, text: payload?.text)
+                var added = 0
+                for proposal in response.proposals where proposal.canAdd {
+                    let pos = proposal.options.first.map {
+                        ShareProposal.Coordinate(lat: $0.lat, lon: $0.lon)
+                    } ?? proposal.position
+                    guard let pos else { continue }
+                    let name = title.isEmpty ? proposal.name : (added == 0 ? title : proposal.name)
+                    _ = try await ShareExtensionAPI.addFind(
+                        planId: planId, lat: pos.lat, lon: pos.lon,
+                        name: name, note: note.isEmpty ? nil : note,
+                        sourceUrl: response.sourceUrl,
+                        legIndex: proposal.options.first?.legIndex ?? proposal.legIndex,
+                        dwellMinutes: proposal.needsDuration ? dwellMinutes : nil)
+                    added += 1
+                }
+                if added == 0 {
+                    saveError = "Kein Ort gefunden, der \u{00FC}bernommen werden konnte."
+                    return
+                }
+            }
+            close()
+        } catch {
+            saveError = error.localizedDescription
+        }
+    }
+
+    // MARK: - Reading helpers
+
+    /// Extract a place from an MKMapItem provided by Apple Maps.
+    ///
+    /// When the user shares a named place from the Maps app, the share
+    /// sheet puts an MKMapItem in the attachment list alongside the
+    /// short-link URL. Loading it here gives us precise coordinates and
+    /// the canonical place name without any network round trip. The
+    /// result is encoded as a standard maps.apple.com/?ll= URL so the
+    /// coordinate extractor handles it without further network calls.
+    private func readMapItem() async -> TripSharePayload? {
+        for provider in itemProviders where provider.canLoadObject(ofClass: MKMapItem.self) {
+            let mapItem: MKMapItem? = await withCheckedContinuation { continuation in
+                provider.loadObject(ofClass: MKMapItem.self) { item, _ in
+                    continuation.resume(returning: item as? MKMapItem)
+                }
+            }
+            guard let mapItem else { continue }
+            let coord = mapItem.placemark.coordinate
+            // Guard against the 0,0 sentinel that means "no coordinate".
+            guard abs(coord.latitude) > 0.0001 || abs(coord.longitude) > 0.0001 else { continue }
+            let name = mapItem.name ?? mapItem.placemark.name ?? ""
+            var parts = URLComponents()
+            parts.scheme = "https"
+            parts.host = "maps.apple.com"
+            parts.path = "/"
+            parts.queryItems = [
+                URLQueryItem(name: "ll", value: "\(coord.latitude),\(coord.longitude)"),
+                name.isEmpty ? nil : URLQueryItem(name: "q", value: name),
+            ].compactMap { $0 }
+            guard let url = parts.url else { continue }
+            return TripSharePayload(url: url.absoluteString, text: nil,
+                                    title: name.isEmpty ? nil : name, capturedAt: Date())
+        }
+        return nil
     }
 
     /// The result of the page-reading script, if Safari ran one.
@@ -168,34 +362,11 @@ struct TripShareCaptureView: View {
     }
 
     private func firstURL(in text: String) -> String? {
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        guard let detector = try? NSDataDetector(
+            types: NSTextCheckingResult.CheckingType.link.rawValue)
         else { return nil }
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         return detector.firstMatch(in: text, range: range)?.url?.absoluteString
-    }
-
-    private func save() {
-        guard let payload else { return }
-        // Checked rather than assumed: without the entitlement the
-        // write below would succeed, reading it back here would
-        // succeed, this screen would say "Gemerkt", and the app would
-        // never see a thing (see `ShareConfig.appGroupReachable`).
-        // Claiming success is worse than failing.
-        guard ShareConfig.appGroupReachable,
-              let defaults = UserDefaults(suiteName: TripSharePayload.appGroupID) else {
-            errorMessage = "Der geteilte Speicher ist nicht erreichbar — der Fund kommt so "
-                + "nicht bei F4mil an. (App-Gruppe \(TripSharePayload.appGroupID))"
-            return
-        }
-        do {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            defaults.set(try encoder.encode(payload), forKey: TripSharePayload.defaultsKey)
-            isDone = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { close() }
-        } catch {
-            errorMessage = error.localizedDescription
-        }
     }
 
     private func close() {
@@ -224,6 +395,8 @@ enum ShareKind {
                 // A page Safari has already read for us (§9.3 stage 1)
                 // arrives as a property list and nothing else.
                 || $0.hasItemConformingToTypeIdentifier(UTType.propertyList.identifier)
+                // Apple Maps includes an MKMapItem alongside the short URL.
+                || $0.canLoadObject(ofClass: MKMapItem.self)
         }
         return hasLinkOrText ? .tripFind : .photos
     }

@@ -16,14 +16,17 @@ struct TripSpotEdit: Identifiable, Equatable, Sendable {
     var title: String
     var note: String
     var url: String
+    var dwellMinutes: Int
 
     var id: String { osmRef }
 
-    init(osmRef: String, title: String = "", note: String = "", url: String = "") {
+    init(osmRef: String, title: String = "", note: String = "", url: String = "",
+         dwellMinutes: Int = 45) {
         self.osmRef = osmRef
         self.title = title
         self.note = note
         self.url = url
+        self.dwellMinutes = dwellMinutes
     }
 
     /// What the sheet opens with: the spot's own title if the group
@@ -36,6 +39,7 @@ struct TripSpotEdit: Identifiable, Equatable, Sendable {
             title: spot.title ?? "",
             note: spot.note ?? "",
             url: spot.sourceUrl ?? "",
+            dwellMinutes: spot.dwellMinutes,
         )
     }
 
@@ -61,6 +65,7 @@ struct TripSpotEdit: Identifiable, Equatable, Sendable {
             title: title.trimmingCharacters(in: .whitespacesAndNewlines),
             note: note.trimmingCharacters(in: .whitespacesAndNewlines),
             url: url.trimmingCharacters(in: .whitespacesAndNewlines),
+            dwellMinutes: dwellMinutes,
         )
     }
 }
@@ -112,6 +117,16 @@ struct TripSpotEditView: View {
                 Text("Link")
             } footer: {
                 Text("Die offizielle Seite, die Buchung, der Blogeintrag.")
+            }
+
+            Section {
+                Stepper(value: $edit.dwellMinutes, in: 5...480, step: 5) {
+                    Text(TripClock.duration(edit.dwellMinutes))
+                }
+            } header: {
+                Text("Aufenthalt")
+            } footer: {
+                Text("Wie lange ihr voraussichtlich dort seid.")
             }
         }
         .navigationTitle("Notiz zum Spot")

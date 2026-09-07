@@ -11,9 +11,16 @@ import SwiftUI
 struct TripShareReviewView: View {
     @State private var model: TripShareReviewViewModel
     @Environment(\.dismiss) private var dismiss
+    /// Set to true the first time a proposal reaches the pool, so the caller
+    /// knows not to discard the inbox entry on dismiss.
+    @Binding var didAddAnything: Bool
 
-    init(planId: Int, payload: TripSharePayload) {
-        _model = State(initialValue: TripShareReviewViewModel(planId: planId, payload: payload))
+    init(planId: Int, payload: TripSharePayload,
+         userTitle: String = "", userNote: String = "",
+         didAddAnything: Binding<Bool>) {
+        _model = State(initialValue: TripShareReviewViewModel(
+            planId: planId, payload: payload, userTitle: userTitle, userNote: userNote))
+        _didAddAnything = didAddAnything
     }
 
     var body: some View {
@@ -37,6 +44,9 @@ struct TripShareReviewView: View {
             }
         }
         .task { await model.analyse() }
+        .onChange(of: model.added.count) { _, count in
+            if count > 0 { didAddAnything = true }
+        }
     }
 
     private func list(_ response: TripAnalyseShareResponse) -> some View {
@@ -109,7 +119,7 @@ struct TripShareReviewView: View {
             Stepper(value: Binding(
                 get: { model.dwellMinutes[proposal.id] ?? TripShareReviewViewModel.suggestedDwellMinutes },
                 set: { model.dwellMinutes[proposal.id] = $0 },
-            ), in: 10...480, step: 15) {
+            ), in: 5...480, step: 5) {
                 let minutes = model.dwellMinutes[proposal.id]
                     ?? TripShareReviewViewModel.suggestedDwellMinutes
                 Text("Aufenthalt: \(minutes) Min.")
