@@ -247,10 +247,22 @@ function resolveDwell(stated: number | undefined, category: string | null): numb
  * "Warum hier?" for a find is what the person said, not what the data
  * says. Where it came from is part of the answer.
  */
-function reasonsFor(note: string | null, _sourceUrl: string | undefined): string[] {
+function reasonsFor(note: string | null, sourceUrl: string | undefined): string[] {
   const reasons = ["selbst hinzugefügt"];
   if (note) reasons.push(note);
+  if (sourceUrl) {
+    const host = hostnameOf(sourceUrl);
+    if (host) reasons.push(`gefunden über ${host}`);
+  }
   return reasons;
+}
+
+function hostnameOf(url: string): string | null {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return null;
+  }
 }
 
 function requireUser(): number {
