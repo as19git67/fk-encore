@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
-import { DEFAULT_DWELL_MINUTES, toCandidates } from "./candidates";
+import { DEFAULT_DWELL_MINUTES, scoreForLight, toCandidates } from "./candidates";
 
 function spot(overrides: Partial<GeoPoiSearchSpot> = {}): GeoPoiSearchSpot {
   return {
@@ -32,6 +32,13 @@ function spot(overrides: Partial<GeoPoiSearchSpot> = {}): GeoPoiSearchSpot {
 }
 
 describe("toCandidates", () => {
+  it("adds a transparent bonus for a dated golden-light window", () => {
+    const [candidate] = toCandidates([spot({ facadeAzimuth: 180 })]);
+    const [scored] = scoreForLight([candidate], { date: "2026-06-21", utcOffsetMinutes: 120 });
+    expect(scored.score).toBeGreaterThan(candidate.score);
+    expect(scored.reasons).toContain("liegt am Reisetag im guten Licht");
+  });
+
   it("rewards prominence and explains why", () => {
     const [plain] = toCandidates([spot()]);
     const [known] = toCandidates([spot({ wikidataQid: "Q1", wikipedia: "de:X" })]);

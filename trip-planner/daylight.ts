@@ -21,7 +21,7 @@ import { requirePermission } from "../user/auth-handler";
 import { addDays } from "./leg-dates";
 import { spotLight, type FacadeLight } from "./light";
 import { loadPlan } from "./plan-store";
-import { lightWindows, type LightWindow } from "./sun";
+import { lightWindows, type HorizonProfile, type LightWindow } from "./sun";
 
 export interface DayLightRequest {
   planId: number;
@@ -36,6 +36,8 @@ export interface DayLightRequest {
    * longitude would be wrong across most of Europe and all of China.
    */
   utcOffsetMinutes?: number;
+  /** Optional precomputed terrain profile, sampled clockwise from north. */
+  horizon?: HorizonProfile;
 }
 
 export interface SpotLightHint {
@@ -81,7 +83,7 @@ export const dayLight = api(
     const date = leg.startDate === null ? null : addDays(leg.startDate, day.dayIndex);
     if (date === null) return { day: null, windows: [], spots: [] };
 
-    const windows = lightWindows(leg.anchor, date, offset);
+    const windows = lightWindows(leg.anchor, date, offset, req.horizon ?? []);
     const stops = day.blocks.flatMap((block) => block.stops);
 
     return {
@@ -91,7 +93,7 @@ export const dayLight = api(
         // Each spot gets the sun over *its* coordinate. Within a city
         // the difference is seconds, but it costs nothing and spares
         // the next reader wondering whether it was cheated.
-        const own = lightWindows(stop, date, offset);
+        const own = lightWindows(stop, date, offset, req.horizon ?? []);
         const [best] = spotLight(stop, own, stop.facadeAzimuth);
         return {
           osmRef: stop.osmRef,

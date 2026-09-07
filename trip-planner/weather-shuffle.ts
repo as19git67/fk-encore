@@ -69,6 +69,52 @@ export interface WeatherShuffleResult {
   unchanged: boolean;
 }
 
+export interface WeatherDay {
+  id: number;
+  blocks: readonly CurrentBlock[];
+}
+
+export interface WholeDaySwapRequest {
+  days: readonly WeatherDay[];
+  /** Average rain severity per day: 0 dry, 1 showers, 2 wet. */
+  weatherByDay: ReadonlyMap<number, number>;
+}
+
+export interface WholeDaySwapResult {
+  days: WeatherDay[];
+  fromDayId: number | null;
+  toDayId: number | null;
+}
+
+/** Move a wet day's schedule to the driest later day, without touching stops. */
+export function swapRainyDay(req: WholeDaySwapRequest): WholeDaySwapResult {
+  if (req.days.length < 2) return { days: req.days.map(copyDay), fromDayId: null, toDayId: null };
+  const score = (day: WeatherDay) => req.weatherByDay.get(day.id) ?? 0;
+  const rainy = [...req.days].sort((a, b) => score(b) - score(a))[0];
+  const dry = [...req.days].sort((a, b) => score(a) - score(b))[0];
+  if (rainy.id === dry.id || score(rainy) < 1 || score(rainy) <= score(dry)
+    || rainy.blocks.some((block) => block.stops.some((stop) => stop.status !== "planned" || stop.pinned))
+    || dry.blocks.some((block) => block.stops.some((stop) => stop.status !== "planned" || stop.pinned))) {
+    return { days: req.days.map(copyDay), fromDayId: null, toDayId: null };
+  }
+  const byId = new Map(req.days.map((day) => [day.id, copyDay(day)]));
+  const rainyDay = byId.get(rainy.id)!;
+  const dryDay = byId.get(dry.id)!;
+  const rainyBlocks = rainyDay.blocks.map((block) => ({ ...block, stops: [...block.stops] }));
+  const dryBlocks = dryDay.blocks.map((block) => ({ ...block, stops: [...block.stops] }));
+  byId.set(rainy.id, { ...rainyDay, blocks: dryBlocks });
+  byId.set(dry.id, { ...dryDay, blocks: rainyBlocks });
+  return {
+    days: req.days.map((day) => byId.get(day.id)!),
+    fromDayId: rainy.id,
+    toDayId: dry.id,
+  };
+}
+
+function copyDay(day: WeatherDay): WeatherDay {
+  return { ...day, blocks: day.blocks.map((block) => ({ ...block, stops: [...block.stops] })) };
+}
+
 /**
  * How badly a block wants shelter, from 0 (not at all) to 1.
  *

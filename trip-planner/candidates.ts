@@ -14,6 +14,8 @@ import { readableName } from "./readable-name";
 import { wikipediaUrl } from "./spot-links";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import type { Candidate } from "./solver";
+import { lightWindows } from "./sun";
+import { spotLight } from "./light";
 
 /**
  * How long people typically stay, per category, in minutes. Rough by
@@ -55,6 +57,29 @@ export interface ScoringOptions {
   interests?: readonly string[];
   /** Per-category overrides for the dwell defaults. */
   dwellMinutes?: Readonly<Record<string, number>>;
+}
+
+export interface LightScoringOptions {
+  date: string;
+  utcOffsetMinutes?: number;
+}
+
+/** Add a small, explainable bonus when a dated plan can use good light. */
+export function scoreForLight(
+  candidates: readonly ScoredCandidate[],
+  options: LightScoringOptions,
+): ScoredCandidate[] {
+  return candidates.map((candidate) => {
+    const windows = lightWindows(candidate, options.date, options.utcOffsetMinutes ?? 0);
+    const best = spotLight(candidate, windows, candidate.facadeAzimuth)[0];
+    if (!best || best.window.kind !== "golden") return candidate;
+    const bonus = best.facade === "frontal" ? 0.75 : best.facade === "raking" ? 0.4 : 0.2;
+    return {
+      ...candidate,
+      score: candidate.score + bonus,
+      reasons: [...candidate.reasons, "liegt am Reisetag im guten Licht"],
+    };
+  });
 }
 
 export function toCandidates(

@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import { DISPLACEMENT_BOOST, type CurrentBlock, type CurrentStop } from "./redistribute";
 import type { Candidate } from "./solver";
-import { shelterWanted, shuffleForWeather, weatheredBudget } from "./weather-shuffle";
+import { shelterWanted, shuffleForWeather, swapRainyDay, weatheredBudget } from "./weather-shuffle";
 import type { BlockWeather } from "./weather";
 
 const ANCHOR = { lat: 48.14, lon: 11.58 };
@@ -113,6 +113,21 @@ describe("what the weather leaves of a budget", () => {
 
   it("leaves it alone where nothing is known", () => {
     expect(weatheredBudget(block("x", [], 180), undefined)).toBe(180);
+  });
+});
+
+describe("whole-day weather swaps", () => {
+  it("exchanges a wet day with a later dry day", () => {
+    const result = swapRainyDay({
+      days: [
+        { id: 1, blocks: [block("morning", [stop(candidate("outdoor"))])] },
+        { id: 2, blocks: [block("morning", [stop(candidate("indoor"))])] },
+      ],
+      weatherByDay: new Map([[1, 2], [2, 0]]),
+    });
+    expect(result.fromDayId).toBe(1);
+    expect(result.toDayId).toBe(2);
+    expect(result.days[0].blocks[0].stops[0].kind).toBe("indoor");
   });
 });
 

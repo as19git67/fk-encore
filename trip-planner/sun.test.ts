@@ -1,11 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { lightWindows, solarPosition } from "./sun";
+import { horizonAltitude, lightWindows, solarPosition } from "./sun";
 
 const MUNICH = { lat: 48.14, lon: 11.58 };
 const TROMSO = { lat: 69.65, lon: 18.96 };
 const EQUATOR = { lat: 0, lon: 0 };
 
 describe("where the sun stands", () => {
+  it("interpolates a circular terrain horizon", () => {
+    expect(horizonAltitude([
+      { azimuth: 0, altitude: 10 },
+      { azimuth: 180, altitude: 20 },
+    ], 90)).toBeCloseTo(15);
+    expect(horizonAltitude([
+      { azimuth: 350, altitude: 10 },
+      { azimuth: 10, altitude: 20 },
+    ], 0)).toBeCloseTo(15);
+  });
+
   it("is highest at solar noon, due south, in the northern hemisphere", () => {
     // Munich on the solstice: 90 − 48.14 + 23.44 ≈ 65.3° — a figure
     // anybody can check without trusting this implementation.
