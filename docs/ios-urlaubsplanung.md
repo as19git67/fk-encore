@@ -1,7 +1,8 @@
 # Urlaubsplanung („Spots & Blöcke") – Konzept
 
-Stand: 2026-09-01 · Status: Ideensammlung / Vorentwurf (Leitentscheidungen in
-§2 gesetzt, sonst offen)
+Stand: 2026-09-07 · Status: Ideensammlung / Vorentwurf (Leitentscheidungen in
+§2 gesetzt, sonst offen) — Schritte 1–9 sind ganz oder teilweise gebaut; was
+in §13 unter „Umgesetzt" steht, existiert im Code, alles Übrige ist Entwurf.
 
 ## 1. Die Idee in einem Satz
 
@@ -501,6 +502,20 @@ Koordinate plus ein Datum. Das genügt für eine Stadtvorhersage und taugt nicht
 als Bewegungsprofil. Die Antwort wird pro Ort und Tag zwischengespeichert, ein
 Abruf pro Tag reicht.
 
+**Umgesetzt (Schritt 9):** Von den vier Wirkungen oben sind drei gebaut.
+Die Vorhersage selbst (`weather-client.ts`, `weather.ts`, Cache in Migration
+0172) und das Indoor/Outdoor-Attribut (`shelter.ts`, Migration 0173) liefern
+die Zahlen; `POST …/weather` sagt sie nur. Das Umsortieren und die
+Budgetkürzung tut `weather-shuffle.ts` — aber **auf Nachfrage**:
+`POST …/weather/proposal` rechnet und speichert nichts,
+`POST …/weather/apply` führt aus, nachdem gefragt wurde, und rechnet dabei
+neu statt den Vorschlag abzuspielen (§7.1: „ungefragt umzuräumen wäre
+übergriffig"). Es ist ein *Tausch*, kein Neuplanen: Der Rest des Tages
+bleibt, wie er war, und erledigte, übersprungene und angeheftete Stopps
+rührt es nie an. **Offen bleiben** der Tausch ganzer Regentage und die
+Klimanormalen jenseits von ~16 Tagen — bis die existieren, sagt der Planer
+dort nichts, statt einen Mittelwert zu erfinden.
+
 ### 7.3 Licht: wann die Fotos gut werden
 
 Der Teil, den nur eine Foto-App bauen würde — und der Grund, warum ein
@@ -564,6 +579,14 @@ Widerspruch zu Leitentscheidung 1: Es ist ein **Hinweis, kein Termin**. Eine
 Uhrzeit, die man verpassen kann, entsteht erst, wenn der Nutzer Vorschlag 3
 annimmt — und dann hat er sie selbst gewollt. Abschaltbar in einem Schalter, denn
 nicht jede Reise soll sich nach dem Sonnenstand richten.
+
+**Umgesetzt (Schritt 9):** Von den vier Wegen oben ist genau einer gebaut —
+Weg 4, der Hinweis auf der Spot-Karte (`sun.ts`, `light.ts`, `POST …/light`,
+Fassadenazimut in Migration 0171). Die drei anderen ändern, was der Planer
+*tut*, und bleiben zurückgestellt, **solange das Horizontprofil fehlt**: ein
+Versprechen auf eine Minute, die im Tal längst im Schatten liegt, wäre ein
+Fehler in genau die unangenehme Richtung. Die Karte sagt das auch — „ein
+Hinweis, kein Termin — und ohne Berücksichtigung von Bergen oder Häusern".
 
 ## 8. Wie sich das in der iOS-App anfühlt
 
