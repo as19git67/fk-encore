@@ -25,6 +25,9 @@ struct TripSpotDetailView<Actions: View>: View {
     /// more: it moves nothing, and it is absent for a trip with no
     /// dates, because there is no sun without a day.
     let light: TripSpotLight?
+    /// Whether this spot keeps the rain off (§7.2). Shown next to the
+    /// light, because both answer "when should we go".
+    let shelter: TripSpotShelter?
     @ViewBuilder var actions: () -> Actions
 
     @State private var routeChoice: TripMapsChoice?
@@ -37,12 +40,14 @@ struct TripSpotDetailView<Actions: View>: View {
         mode: TripTransportMode = .foot,
         onSave: ((TripSpotEdit) async -> Void)? = nil,
         light: TripSpotLight? = nil,
+        shelter: TripSpotShelter? = nil,
         @ViewBuilder actions: @escaping () -> Actions,
     ) {
         self.spot = spot
         self.mode = mode
         self.onSave = onSave
         self.light = light
+        self.shelter = shelter
         self.actions = actions
     }
 
@@ -83,6 +88,11 @@ struct TripSpotDetailView<Actions: View>: View {
                     LabeledContent("In OpenStreetMap", value: official)
                 }
                 LabeledContent("Art", value: TripCategory.label(spot.category))
+                if let shelter {
+                    LabeledContent("Bei Regen") {
+                        Label(shelter.label, systemImage: shelter.symbolName)
+                    }
+                }
                 LabeledContent("Aufenthalt", value: TripClock.duration(spot.dwellMinutes))
                 if spot.name == nil {
                     // Said rather than papered over: OpenStreetMap has no
@@ -253,8 +263,11 @@ extension TripSpotDetailView where Actions == EmptyView {
         mode: TripTransportMode = .foot,
         onSave: ((TripSpotEdit) async -> Void)? = nil,
         light: TripSpotLight? = nil,
+        shelter: TripSpotShelter? = nil,
     ) {
-        self.init(spot: spot, mode: mode, onSave: onSave, light: light) { EmptyView() }
+        self.init(spot: spot, mode: mode, onSave: onSave, light: light, shelter: shelter) {
+            EmptyView()
+        }
     }
 }
 

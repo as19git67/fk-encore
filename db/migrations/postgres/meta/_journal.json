@@ -1205,6 +1205,20 @@
       "when": 1786579200015,
       "tag": "0171_trip_spot_facade_azimuth",
       "breakpoints": true
+    },
+    {
+      "idx": 172,
+      "version": "7",
+      "when": 1786665600015,
+      "tag": "0172_weather_forecast_cache",
+      "breakpoints": true
+    },
+    {
+      "idx": 173,
+      "version": "7",
+      "when": 1786752000015,
+      "tag": "0173_trip_spot_kind",
+      "breakpoints": true
     }
   ]
 }

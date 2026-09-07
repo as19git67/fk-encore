@@ -126,6 +126,7 @@ export function toCandidates(
       // Which way it faces, for the light hint (§7.3). Computed once
       // at import time; here it is only carried along.
       facadeAzimuth: spot.facadeAzimuth,
+      kind: spot.kind,
       lat: spot.lat,
       lon: spot.lon,
       category,

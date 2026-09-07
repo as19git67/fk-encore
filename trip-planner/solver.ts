@@ -39,6 +39,12 @@ export interface Candidate extends Coordinate {
    * [0, 180) (§7.3). Null for every POI mapped as a node.
    */
   facadeAzimuth?: number | null;
+  /**
+   * The OSM tag behind the category ("building=church"), for the
+   * indoor/outdoor derivation (§7.2). Null for a find brought in by
+   * hand, which has no OSM entry behind it.
+   */
+  kind?: string | null;
   /** Category id from the geo search, e.g. "museum". */
   category: string;
   /** How long one typically stays, in minutes. */
@@ -56,6 +62,8 @@ export interface PlannedStop {
   wikipediaUrl?: string | null;
   /** See `Candidate.facadeAzimuth`. */
   facadeAzimuth?: number | null;
+  /** See `Candidate.kind`. */
+  kind?: string | null;
   lat: number;
   lon: number;
   category: string;
@@ -223,6 +231,7 @@ function fillBlock(args: FillArgs): PlannedBlock {
         localName: candidate.localName ?? null,
         wikipediaUrl: candidate.wikipediaUrl ?? null,
         facadeAzimuth: candidate.facadeAzimuth ?? null,
+        kind: candidate.kind ?? null,
         lat: candidate.lat,
         lon: candidate.lon,
         category: candidate.category,
