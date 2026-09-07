@@ -357,6 +357,113 @@ struct TripDayLight: Codable, Sendable {
     }
 }
 
+/// What the sky is expected to do over one block (§7.2).
+struct TripBlockWeather: Codable, Sendable, Equatable {
+    let precipitationMm: Double
+    /// dry | showers | wet.
+    let wetness: String
+    let cloudCover: Int
+    let temperatureC: Double
+    let feelsLikeC: Double
+    /// mild | warm | hot.
+    let heat: String
+    /// What the weather leaves of the block's budget, 0…1. Reported by
+    /// the server and applied nowhere yet.
+    let budgetFactor: Double
+
+    var wetnessLabel: String {
+        switch wetness {
+        case "wet": return "Nass"
+        case "showers": return "Etwas Regen"
+        default: return "Trocken"
+        }
+    }
+
+    var symbolName: String {
+        switch wetness {
+        case "wet": return "cloud.rain"
+        case "showers": return "cloud.drizzle"
+        default: return cloudCover >= 70 ? "cloud" : "sun.max"
+        }
+    }
+
+    /// "24° · trocken" — the one line a day card has room for. The felt
+    /// temperature is only named when it differs from the measured one,
+    /// because "28° (fühlt sich an wie 28°)" is noise.
+    var summary: String {
+        let degrees = "\(Int(temperatureC.rounded()))°"
+        let felt = Int(feelsLikeC.rounded()) > Int(temperatureC.rounded())
+            ? " (gefühlt \(Int(feelsLikeC.rounded()))°)"
+            : ""
+        return "\(degrees)\(felt) · \(wetnessLabel.lowercased())"
+    }
+
+    /// Said only when it changes how much fits in the block.
+    var budgetSentence: String? {
+        guard budgetFactor < 1 else { return nil }
+        let lost = Int(((1 - budgetFactor) * 100).rounded())
+        if heat == "hot" && wetness != "dry" {
+            return "Hitze und Nässe kosten Zeit — rund \(lost) % weniger schaffbar."
+        }
+        if heat == "hot" {
+            return "Bei der Hitze kommt man langsamer voran — rund \(lost) % weniger schaffbar."
+        }
+        return "Bei dem Wetter kommt man langsamer voran — rund \(lost) % weniger schaffbar."
+    }
+}
+
+/// The weather for one block of the day.
+struct TripBlockForecast: Codable, Sendable, Equatable {
+    let blockId: String
+    let label: String
+    /// Nil where the forecast does not reach, or the block has no place
+    /// on the clock.
+    let weather: TripBlockWeather?
+}
+
+/// Whether a spot keeps the rain off (§7.2).
+struct TripSpotShelter: Codable, Sendable, Equatable {
+    let osmRef: String
+    /// indoor | partly | outdoor.
+    let shelter: String
+
+    var label: String {
+        switch shelter {
+        case "indoor": return "Drinnen"
+        case "outdoor": return "Draußen"
+        default: return "Teils drinnen, teils draußen"
+        }
+    }
+
+    var symbolName: String {
+        switch shelter {
+        case "indoor": return "building.columns"
+        case "outdoor": return "tree"
+        default: return "building.2"
+        }
+    }
+}
+
+/// A day's weather, as the server answers it.
+struct TripDayForecast: Codable, Sendable {
+    let day: String?
+    /// False when there is no forecast at all — beyond the horizon, or
+    /// the service could not be reached. Never dressed up as fine
+    /// weather (§15.3).
+    let available: Bool
+    let overall: TripBlockWeather?
+    let blocks: [TripBlockForecast]
+    let spots: [TripSpotShelter]
+
+    func weather(forBlock blockId: String) -> TripBlockWeather? {
+        blocks.first { $0.blockId == blockId }?.weather
+    }
+
+    func shelter(for osmRef: String) -> TripSpotShelter? {
+        spots.first { $0.osmRef == osmRef }
+    }
+}
+
 /// What the group wrote about one spot, as the server answers it.
 struct TripSpotNote: Codable, Sendable {
     let osmRef: String

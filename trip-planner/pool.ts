@@ -95,6 +95,7 @@ export const placeFromPool = api(
           localName: candidate.localName ?? null,
           wikipediaUrl: candidate.wikipediaUrl ?? null,
           facadeAzimuth: candidate.facadeAzimuth ?? null,
+          kind: candidate.kind ?? null,
           lat: candidate.lat,
           lon: candidate.lon,
           category: candidate.category,

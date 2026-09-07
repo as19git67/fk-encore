@@ -33,6 +33,7 @@ struct TripTodayView: View {
         .task {
             await viewModel.load()
             await viewModel.loadLight()
+            await viewModel.loadForecast()
         }
         .confirmationDialog(
             "Navigation öffnen mit",
@@ -164,6 +165,7 @@ struct TripTodayView: View {
                     mode: leg.transportMode,
                     onSave: { await viewModel.saveNote($0) },
                     light: viewModel.light?.hint(for: stop.osmRef),
+                    shelter: viewModel.forecast?.shelter(for: stop.osmRef),
                 )
             } label: {
                 VStack(alignment: .leading, spacing: 2) {
