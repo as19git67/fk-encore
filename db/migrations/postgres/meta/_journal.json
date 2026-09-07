@@ -1198,6 +1198,13 @@
       "when": 1786492800015,
       "tag": "0170_trip_spot_notes",
       "breakpoints": true
+    },
+    {
+      "idx": 171,
+      "version": "7",
+      "when": 1786579200015,
+      "tag": "0171_trip_spot_facade_azimuth",
+      "breakpoints": true
     }
   ]
 }

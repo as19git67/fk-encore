@@ -118,10 +118,18 @@ struct TripPlanDayView: View {
         .task {
             await viewModel.load()
             watchStops()
+            await viewModel.loadLight()
         }
         .onDisappear { TripVisitMonitor.shared.stop() }
-        .onChange(of: viewModel.dayIndex) { _, _ in watchStops() }
-        .onChange(of: viewModel.legIndex) { _, _ in watchStops() }
+        .onChange(of: viewModel.dayIndex) { _, _ in
+            watchStops()
+            // A different day is a different sun.
+            Task { await viewModel.loadLight() }
+        }
+        .onChange(of: viewModel.legIndex) { _, _ in
+            watchStops()
+            Task { await viewModel.loadLight() }
+        }
     }
 
     /// Put geofences around the next stops of the day on screen (§7.1).
@@ -470,6 +478,7 @@ struct TripPlanDayView: View {
                         spot: TripSpotDetail(stop),
                         mode: viewModel.leg?.transportMode ?? .foot,
                         onSave: { await viewModel.saveNote($0) },
+                        light: viewModel.light?.hint(for: stop.osmRef),
                     )
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {

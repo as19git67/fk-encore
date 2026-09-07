@@ -33,6 +33,10 @@ final class TripPlannerViewModel {
     /// nicht da", which is a state rather than a fault.
     var fillBlockedReason: String?
     var errorMessage: String?
+    /// The day's light (§7.3), for the hint on a spot card. Nil until
+    /// it has been asked for, and empty for a trip with no dates —
+    /// there is no sun without a day.
+    private(set) var light: TripDayLight?
 
     /// Which leg and day are on screen. Both are positions within their
     /// parent, not row ids, because that is how the endpoints address
@@ -102,6 +106,38 @@ final class TripPlannerViewModel {
             apply(response)
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    /// The light for the day on screen (§7.3) — a hint, nothing more.
+    ///
+    /// One call per day rather than one per spot: the sun is the same
+    /// sky for all of them, and the difference between two stops in one
+    /// city is seconds. Failure is silent on purpose. A missing light
+    /// hint is a line that does not appear; an error banner over the
+    /// day plan because the sun could not be computed would be the
+    /// tail wagging the dog.
+    func loadLight() async {
+        guard let plan, plan.legs.indices.contains(legIndex) else { return }
+        struct Body: Encodable {
+            let legIndex: Int
+            let dayIndex: Int
+            let utcOffsetMinutes: Int
+        }
+        do {
+            light = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/light",
+                body: Body(
+                    legIndex: legIndex,
+                    dayIndex: dayIndex,
+                    // The clock the traveller is reading. Right where it
+                    // matters — standing there — and the honest best
+                    // guess when planning from home.
+                    utcOffsetMinutes: TimeZone.current.secondsFromGMT() / 60,
+                ),
+            )
+        } catch {
+            light = nil
         }
     }
 

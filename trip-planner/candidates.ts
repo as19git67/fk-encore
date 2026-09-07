@@ -123,6 +123,9 @@ export function toCandidates(
       name: names.display,
       localName: names.local,
       wikipediaUrl: wikipediaUrl(spot.wikipedia),
+      // Which way it faces, for the light hint (§7.3). Computed once
+      // at import time; here it is only carried along.
+      facadeAzimuth: spot.facadeAzimuth,
       lat: spot.lat,
       lon: spot.lon,
       category,

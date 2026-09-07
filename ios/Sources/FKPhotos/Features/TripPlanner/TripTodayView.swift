@@ -30,7 +30,10 @@ struct TripTodayView: View {
         }
         .navigationTitle("Unterwegs")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await viewModel.load() }
+        .task {
+            await viewModel.load()
+            await viewModel.loadLight()
+        }
         .confirmationDialog(
             "Navigation öffnen mit",
             isPresented: Binding(get: { mapsChoice != nil }, set: { if !$0 { mapsChoice = nil } }),
@@ -160,6 +163,7 @@ struct TripTodayView: View {
                     spot: TripSpotDetail(stop),
                     mode: leg.transportMode,
                     onSave: { await viewModel.saveNote($0) },
+                    light: viewModel.light?.hint(for: stop.osmRef),
                 )
             } label: {
                 VStack(alignment: .leading, spacing: 2) {

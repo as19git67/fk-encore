@@ -2800,6 +2800,9 @@ export const tripPlanStops = pgTable(
     // The Wikipedia article, where OSM knows of one — built once in
     // spot-links.ts so the pool, the day and the search agree.
     wikipedia_url: text("wikipedia_url"),
+    // Which way the building faces, in degrees clockwise from north in
+    // [0, 180) — see geo/src/facade-azimuth.ts. Null for node POIs.
+    facade_azimuth: real("facade_azimuth"),
   },
   (table) => [
     uniqueIndex("trip_plan_stops_block_position_key").on(table.block_id, table.position),
@@ -2888,6 +2891,8 @@ export const tripPlanPool = pgTable(
     local_name: text("local_name"),
     /** See `trip_plan_stops.wikipedia_url`. */
     wikipedia_url: text("wikipedia_url"),
+    /** See `trip_plan_stops.facade_azimuth`. */
+    facade_azimuth: real("facade_azimuth"),
   },
   (table) => [uniqueIndex("trip_plan_pool_leg_ref_key").on(table.leg_id, table.osm_ref)]
 );

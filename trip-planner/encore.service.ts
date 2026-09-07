@@ -26,6 +26,7 @@ import "./shares";
 import "./pool";
 import "./legs";
 import "./spot-notes";
+import "./daylight";
 
 import { everyMs, schedule, startLocalCron } from "../lib/local-cron";
 import { tickFillPending } from "./fill-pending";

@@ -290,6 +290,73 @@ struct TripCandidate: Codable, Identifiable, Sendable {
     var coordinate: TripCoordinate { TripCoordinate(lat: lat, lon: lon) }
 }
 
+/// One stretch of a day in which the light is worth a word (§7.3).
+struct TripLightWindow: Codable, Sendable, Equatable {
+    /// golden | blue | harsh.
+    let kind: String
+    /// Minutes past midnight in the destination's clock.
+    let fromMinutes: Int
+    let toMinutes: Int
+
+    var range: String { "\(TripClock.format(fromMinutes))–\(TripClock.format(toMinutes))" }
+
+    var label: String {
+        switch kind {
+        case "golden": return "Goldene Stunde"
+        case "blue": return "Blaue Stunde"
+        default: return "Hohe Mittagssonne"
+        }
+    }
+
+    var symbolName: String {
+        switch kind {
+        case "golden": return "sun.horizon"
+        case "blue": return "moon.stars"
+        default: return "sun.max"
+        }
+    }
+}
+
+/// The light hint for one spot on one day.
+struct TripSpotLight: Codable, Sendable, Equatable {
+    let osmRef: String
+    let best: TripLightWindow?
+    /// frontal | raking | edge_on, or nil when OpenStreetMap has no
+    /// outline for the building — most spots, and not a failure.
+    let facade: String?
+
+    /// What the sun does to the building then, in words. Never says
+    /// *which* of the two long faces is lit: an outline cannot tell
+    /// them apart, and the person standing there can (§7.3).
+    var facadeSentence: String? {
+        switch facade {
+        case "frontal":
+            return "Die Sonne steht dann quer zum Gebäude — eine der beiden Längsseiten "
+                + "liegt voll im Licht, die andere im Schatten."
+        case "raking":
+            return "Das Licht fällt dann schräg über die Fassade — das ist das Licht, "
+                + "das Struktur zeigt."
+        case "edge_on":
+            return "Die Sonne läuft dann an der Fassade entlang; frontal wird sie "
+                + "an diesem Tag nicht beleuchtet."
+        default:
+            return nil
+        }
+    }
+}
+
+/// A day's light, as the server answers it.
+struct TripDayLight: Codable, Sendable {
+    /// Null when the trip has no dates yet — then there is nothing to say.
+    let day: String?
+    let windows: [TripLightWindow]
+    let spots: [TripSpotLight]
+
+    func hint(for osmRef: String) -> TripSpotLight? {
+        spots.first { $0.osmRef == osmRef }
+    }
+}
+
 /// What the group wrote about one spot, as the server answers it.
 struct TripSpotNote: Codable, Sendable {
     let osmRef: String
