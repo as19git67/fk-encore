@@ -17,8 +17,11 @@ struct TripPlansListView: View {
     /// rather than taken, so leaving the screen without confirming does
     /// not lose it.
     @State private var pendingShare: TripSharePayload?
-    /// Which plan a pending share is being reviewed against.
-    @State private var reviewing: TripShareReview?
+    /// True while the share picker sheet is shown.
+    @State private var showingPicker = false
+    /// True when the current picker/review session added at least one find to the pool.
+    /// Cleared when the sheet is dismissed, so each review starts fresh.
+    @State private var reviewAddedAnything = false
     /// The trip a deletion is being confirmed for. Held as the summary
     /// rather than as a flag so the alert can say which one.
     @State private var deleting: TripPlanSummary?
@@ -54,9 +57,10 @@ struct TripPlansListView: View {
                 }
             }
         }
-        .sheet(item: $reviewing) { review in
-            NavigationStack {
-                TripShareReviewView(planId: review.planId, payload: review.payload)
+        .sheet(isPresented: $showingPicker) {
+            if let share = pendingShare {
+                TripSharePickerView(payload: share, plans: plans,
+                                    didAddAnything: $reviewAddedAnything)
             }
         }
         .navigationDestination(item: $openPlanId) { planId in
@@ -89,12 +93,17 @@ struct TripPlansListView: View {
             // not only in the screen that opened on top of it.
             if !nowCreating { Task { await load() } }
         }
-        .onChange(of: reviewing) { _, nowReviewing in
-            // Taken only once it has actually been offered: a find that
-            // was never reviewed should still be there next time.
-            if nowReviewing == nil {
-                _ = TripShareInbox.take()
-                pendingShare = nil
+        .onChange(of: showingPicker) { _, nowShowing in
+            // Only consume the inbox entry when something was actually added.
+            // If the analysis failed or the user just cancelled, the find stays
+            // put and the banner reappears, so nothing is lost to a transient
+            // problem or a mis-tap.
+            if !nowShowing {
+                if reviewAddedAnything {
+                    _ = TripShareInbox.take()
+                    pendingShare = nil
+                }
+                reviewAddedAnything = false
             }
         }
     }
@@ -140,15 +149,13 @@ struct TripPlansListView: View {
     }
 
     /// A find is waiting from the share sheet.
-    ///
-    /// It asks which trip rather than assuming the first one: a shared
-    /// café belongs to the trip you are planning, and with two trips
-    /// open there is nothing here that could know which.
     @ViewBuilder private func shareBanner(_ payload: TripSharePayload) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Ein geteilter Fund wartet", systemImage: "link.badge.plus")
                 .font(.subheadline.weight(.semibold))
-            if let url = payload.url {
+            if let title = payload.title, !title.isEmpty {
+                Text(title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            } else if let url = payload.url {
                 Text(url).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             } else if let text = payload.text {
                 Text(text).font(.caption).foregroundStyle(.secondary).lineLimit(2)
@@ -158,22 +165,10 @@ struct TripPlansListView: View {
                     Text("Erst eine Reise anlegen.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                } else if plans.count == 1, let only = plans.first {
-                    Button("Übernehmen") {
-                        reviewing = TripShareReview(planId: only.id, payload: payload)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
                 } else {
-                    Menu("Zu welcher Reise?") {
-                        ForEach(plans) { plan in
-                            Button(plan.displayTitle) {
-                                reviewing = TripShareReview(planId: plan.id, payload: payload)
-                            }
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
+                    Button("Übernehmen") { showingPicker = true }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
                 }
                 Spacer()
                 Button("Verwerfen") {
@@ -254,16 +249,6 @@ struct TripPlansListView: View {
             errorMessage = error.localizedDescription
         }
     }
-}
-
-/// A pending share plus the trip it is being reviewed against — one
-/// value, so the sheet can be driven by `item:` and cannot be presented
-/// without knowing both.
-struct TripShareReview: Identifiable, Equatable {
-    let planId: Int
-    let payload: TripSharePayload
-
-    var id: String { "\(planId)-\(payload.capturedAt.timeIntervalSince1970)" }
 }
 
 struct ListTripPlansResponse: Codable, Sendable {

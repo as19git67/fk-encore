@@ -1,4 +1,5 @@
 import MapKit
+import SafariServices
 import SwiftUI
 
 /// One spot, in full — whether it is planned or still in the pool.
@@ -24,6 +25,7 @@ struct TripSpotDetailView<Actions: View>: View {
 
     @State private var routeChoice: TripMapsChoice?
     @State private var editing: TripSpotEdit?
+    @State private var showingWikipedia = false
     @AppStorage(TripMapsPreference.key) private var mapsPreference: String = TripMapsApp.apple.rawValue
 
     init(
@@ -40,6 +42,14 @@ struct TripSpotDetailView<Actions: View>: View {
 
     var body: some View {
         List {
+            // Why it was saved beats what it is called, when you are
+            // deciding what to do with an afternoon (§9.2).
+            if let note = spot.note, !note.isEmpty {
+                Section("Notiz") {
+                    Text(note)
+                }
+            }
+
             Section {
                 Map(initialPosition: .region(MKCoordinateRegion(
                     center: CLLocationCoordinate2D(spot.coordinate),
@@ -83,24 +93,11 @@ struct TripSpotDetailView<Actions: View>: View {
                 }
             }
 
-            // Why it was saved beats what it is called, when you are
-            // deciding what to do with an afternoon (§9.2).
-            if let note = spot.note, !note.isEmpty {
-                Section("Notiz") {
-                    Text(note)
-                }
-            }
-            if let source = spot.sourceUrl, let url = URL(string: source) {
-                Section("Herkunft") {
-                    Link(destination: url) {
-                        Label(url.host() ?? source, systemImage: "link")
-                    }
-                }
-            }
-
-            if let article = spot.wikipediaUrl, let url = URL(string: article) {
+            if spot.wikipediaUrl != nil {
                 Section("Wikipedia") {
-                    Link(destination: url) {
+                    Button {
+                        showingWikipedia = true
+                    } label: {
                         Label("Artikel lesen", systemImage: "book")
                     }
                 }
@@ -115,6 +112,16 @@ struct TripSpotDetailView<Actions: View>: View {
             }
 
             Section {
+                // Only show a source link when it adds information: a maps
+                // URL from Apple or Google Maps opens the same place as
+                // "Auf der Karte zeigen" and is therefore redundant.
+                if let source = spot.sourceUrl,
+                   let url = URL(string: source),
+                   !Self.isMapsURL(url) {
+                    Link(destination: url) {
+                        Label(url.host() ?? source, systemImage: "link")
+                    }
+                }
                 Button {
                     TripMapsOpen.pin(spot.coordinate, name: spot.name, using: preference)
                 } label: {
@@ -134,8 +141,8 @@ struct TripSpotDetailView<Actions: View>: View {
                     Label("Route hierher", systemImage: "arrow.triangle.turn.up.right.circle")
                 }
             } footer: {
-                Text("„Auf der Karte zeigen“ folgt der App aus den Einstellungen; "
-                     + "die Route fragt, wenn dort „jedes Mal fragen“ steht.")
+                Text("„Auf der Karte zeigen\u{201D} folgt der App aus den Einstellungen; "
+                     + "die Route fragt, wenn dort „jedes Mal fragen\u{201D} steht.")
             }
 
             actions()
@@ -159,6 +166,12 @@ struct TripSpotDetailView<Actions: View>: View {
                 } onCancel: {
                     editing = nil
                 }
+            }
+        }
+        .sheet(isPresented: $showingWikipedia) {
+            if let article = spot.wikipediaUrl, let url = URL(string: article) {
+                SpotWikipediaSheet(url: url, isPresented: $showingWikipedia)
+                    .ignoresSafeArea()
             }
         }
         .confirmationDialog(
@@ -193,6 +206,13 @@ struct TripSpotDetailView<Actions: View>: View {
     private func open(_ choice: TripMapsChoice, with app: TripMapsApp) {
         routeChoice = nil
         TripMapsOpen.route(choice, using: app)
+    }
+
+    private static func isMapsURL(_ url: URL) -> Bool {
+        guard let host = url.host() else { return false }
+        return host == "maps.apple.com"
+            || host == "maps.google.com"
+            || host.hasSuffix(".google.com") && url.path.hasPrefix("/maps")
     }
 }
 
@@ -278,6 +298,31 @@ struct TripSpotDetail: Identifiable, Sendable {
         note = stop.note
         sourceUrl = stop.sourceUrl
         unmatched = false
+    }
+}
+
+/// SFSafariViewController wrapped for SwiftUI, with delegate wiring so
+/// the built-in Done button correctly dismisses the sheet.
+private struct SpotWikipediaSheet: UIViewControllerRepresentable {
+    let url: URL
+    @Binding var isPresented: Bool
+
+    func makeCoordinator() -> Coordinator { Coordinator(isPresented: $isPresented) }
+
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        let vc = SFSafariViewController(url: url)
+        vc.delegate = context.coordinator
+        return vc
+    }
+
+    func updateUIViewController(_ vc: SFSafariViewController, context: Context) {}
+
+    final class Coordinator: NSObject, SFSafariViewControllerDelegate {
+        @Binding var isPresented: Bool
+        init(isPresented: Binding<Bool>) { _isPresented = isPresented }
+        func safariViewControllerDidFinish(_ controller: SFSafariViewController) {
+            isPresented = false
+        }
     }
 }
 
