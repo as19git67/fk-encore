@@ -171,6 +171,7 @@ struct TripPlanDayView: View {
                     fixpointBand(day.fixpoints)
                 }
                 if day.detailed {
+                    weatherOfferCard(day)
                     ForEach(day.blocks) { block in
                         blockCard(block)
                     }
@@ -188,6 +189,135 @@ struct TripPlanDayView: View {
                 if (viewModel.plan?.legs.count ?? 1) > 1 { legPicker }
                 dayPicker(leg)
             }
+        }
+    }
+
+    // MARK: - Rearranging for the weather
+
+    /// The offer, and only when the weather gives a reason for one (§7.2).
+    ///
+    /// The button is shown when a block of the day is wet or hot enough
+    /// that the server would have something to say; whether it actually
+    /// has is decided by the server, and an offer of nothing is shown
+    /// as a sentence rather than as an empty sheet.
+    @ViewBuilder
+    private func weatherOfferCard(_ day: TripDay) -> some View {
+        if let forecast = viewModel.forecast, forecast.available, weatherIsAnArgument(forecast) {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Das Wetter spricht gegen diesen Tag, so wie er geplant ist.",
+                      systemImage: "cloud.rain")
+                    .font(.subheadline)
+                Text("Der Planer kann Spots unter Dach nach vorn holen und ausgesetzte "
+                     + "zurück in den Vorrat legen. Er zeigt vorher, was er täte.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Button {
+                    Task { await viewModel.proposeWeatherReplan() }
+                } label: {
+                    if viewModel.isWeatherReplanning {
+                        ProgressView().frame(maxWidth: .infinity)
+                    } else {
+                        Label("Vorschlag ansehen", systemImage: "arrow.triangle.2.circlepath")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(viewModel.isWeatherReplanning)
+
+                if !viewModel.weatherMoves.isEmpty {
+                    // What was actually done, by name. A day that
+                    // rearranges itself silently is a day nobody trusts.
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Ans Wetter angepasst:").font(.footnote.weight(.semibold))
+                        ForEach(viewModel.weatherMoves) { move in
+                            Text("· \(moveSentence(move, day: day))").font(.footnote)
+                        }
+                    }
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary.opacity(0.3), in: .rect(cornerRadius: 14))
+            .sheet(item: Binding(
+                get: { viewModel.weatherProposal.map { WeatherOffer(proposal: $0) } },
+                set: { if $0 == nil { viewModel.dismissWeatherProposal() } },
+            )) { offer in
+                weatherProposalSheet(offer.proposal, day: day)
+            }
+        }
+    }
+
+    /// Wrapper so the proposal can drive `.sheet(item:)` — it is data,
+    /// not an identity, and `Identifiable` on the model itself would be
+    /// a lie about what it is.
+    private struct WeatherOffer: Identifiable {
+        let proposal: TripWeatherProposal
+        var id: String { proposal.reason + proposal.moves.map(\.osmRef).joined(separator: "|") }
+    }
+
+    @ViewBuilder
+    private func weatherProposalSheet(_ proposal: TripWeatherProposal, day: TripDay) -> some View {
+        NavigationStack {
+            List {
+                if let sentence = proposal.blockedSentence {
+                    Section {
+                        Text(sentence).foregroundStyle(.secondary)
+                    }
+                } else {
+                    Section {
+                        ForEach(proposal.moves) { move in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(move.displayName)
+                                Text(moveSentence(move, day: day))
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    } header: {
+                        Text("Vorgeschlagen")
+                    } footer: {
+                        Text("Nichts davon ist gespeichert. Erst mit „Umräumen\" ändert sich der Tag.")
+                    }
+                }
+            }
+            .navigationTitle("Wetter")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Lassen") { viewModel.dismissWeatherProposal() }
+                }
+                if proposal.offered {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Umräumen") {
+                            Task { await viewModel.applyWeatherReplan() }
+                        }
+                        .disabled(viewModel.isWeatherReplanning)
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    /// "Aussichtspunkt → Vorrat", in the day's own block names.
+    private func moveSentence(_ move: TripWeatherMove, day: TripDay) -> String {
+        let from = day.blocks.first { $0.id == move.fromBlockId }?.label ?? move.fromBlockId
+        guard let toId = move.toBlockId else {
+            return move.reason == "budget"
+                ? "\(from) → Vorrat (der Tag wird bei dem Wetter kürzer)"
+                : "\(from) → Vorrat (zu ausgesetzt für das Wetter)"
+        }
+        let to = day.blocks.first { $0.id == toId }?.label ?? toId
+        return "\(from) → \(to)"
+    }
+
+    /// Whether the sky says enough to be worth an offer. The server
+    /// decides for real; this only keeps the button off a fine day.
+    private func weatherIsAnArgument(_ forecast: TripDayForecast) -> Bool {
+        forecast.blocks.contains { block in
+            guard let weather = block.weather else { return false }
+            return weather.wetness != "dry" || weather.heat == "hot"
         }
     }
 

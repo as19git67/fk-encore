@@ -40,6 +40,14 @@ final class TripPlannerViewModel {
     /// The day's weather (§7.2). Reported, never acted on: nothing in
     /// this build reorders a block because it rained.
     private(set) var forecast: TripDayForecast?
+    /// The weather's offer for this day, once it has been asked for
+    /// (§7.1). Nil means nothing is on offer and nothing is on screen.
+    var weatherProposal: TripWeatherProposal?
+    /// Set while the offer is being fetched or carried out.
+    private(set) var isWeatherReplanning = false
+    /// What the last accepted offer actually moved — the sentence to
+    /// show afterwards, so the day does not silently rearrange itself.
+    private(set) var weatherMoves: [TripWeatherMove] = []
 
     /// Which leg and day are on screen. Both are positions within their
     /// parent, not row ids, because that is how the endpoints address
@@ -170,6 +178,73 @@ final class TripPlannerViewModel {
         } catch {
             forecast = nil
         }
+    }
+
+    /// Ask what the weather would change about this day (§7.2, §7.1).
+    ///
+    /// Two calls, and the split is the whole feature: this one saves
+    /// nothing. The traveller reads the moves in plain words and
+    /// decides — "ungefragt umzuräumen wäre übergriffig" (§7.1), and a
+    /// forecast is a weaker reason to touch somebody's day than
+    /// standing in the wrong place at the wrong time.
+    ///
+    /// Loud on failure, unlike the forecast itself: this one was asked
+    /// for by tapping a button, and a button that silently does nothing
+    /// is worse than an error.
+    func proposeWeatherReplan() async {
+        guard let plan, plan.legs.contains(where: { $0.position == legIndex }) else { return }
+        isWeatherReplanning = true
+        defer { isWeatherReplanning = false }
+        do {
+            weatherProposal = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/weather/proposal",
+                body: WeatherReplanBody(
+                    legIndex: legIndex,
+                    dayIndex: dayIndex,
+                    utcOffsetMinutes: TimeZone.current.secondsFromGMT() / 60,
+                ),
+            )
+        } catch {
+            weatherProposal = nil
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Do it, having been asked (§7.2).
+    ///
+    /// The server recomputes rather than replaying the proposal, so
+    /// what comes back is what happened — not what was offered a
+    /// while ago to a day that may since have moved on.
+    func applyWeatherReplan() async {
+        guard let plan, plan.legs.contains(where: { $0.position == legIndex }) else { return }
+        isWeatherReplanning = true
+        defer { isWeatherReplanning = false }
+        do {
+            let response: TripWeatherApplyResponse = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/weather/apply",
+                body: WeatherReplanBody(
+                    legIndex: legIndex,
+                    dayIndex: dayIndex,
+                    utcOffsetMinutes: TimeZone.current.secondsFromGMT() / 60,
+                ),
+            )
+            apply(TripPlanResponse(plan: response.plan, droppedBlocks: nil))
+            weatherMoves = response.moves
+            weatherProposal = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Put the offer away without doing it. Declining is an answer.
+    func dismissWeatherProposal() {
+        weatherProposal = nil
+    }
+
+    private struct WeatherReplanBody: Encodable {
+        let legIndex: Int
+        let dayIndex: Int
+        let utcOffsetMinutes: Int
     }
 
     /// Bring the day on screen from trip resolution to day resolution

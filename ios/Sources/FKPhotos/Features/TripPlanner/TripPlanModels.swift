@@ -464,6 +464,49 @@ struct TripDayForecast: Codable, Sendable {
     }
 }
 
+/// One spot the weather would like to move, as the server proposes it.
+///
+/// Carries the block ids rather than block labels because the labels
+/// live on the day already; the screen looks them up so that a move
+/// never names a block the plan does not show.
+struct TripWeatherMove: Codable, Identifiable, Sendable {
+    let osmRef: String
+    let name: String?
+    let fromBlockId: String
+    /// Nil means the pool: out of the day, not out of the trip (§5).
+    let toBlockId: String?
+    /// wet | budget.
+    let reason: String
+
+    var id: String { osmRef }
+    var displayName: String { name ?? "Unbenannter Ort" }
+}
+
+/// A day rearranged for the weather, offered and not yet done (§7.1).
+struct TripWeatherProposal: Codable, Sendable {
+    /// False when there is nothing worth asking about. A prompt that
+    /// proposes nothing teaches people to dismiss prompts.
+    let offered: Bool
+    /// ok | no-dates | no-forecast | nothing-to-move.
+    let reason: String
+    let moves: [TripWeatherMove]
+
+    /// Why nothing is on offer, in a sentence — or nil when something is.
+    var blockedSentence: String? {
+        guard !offered else { return nil }
+        switch reason {
+        case "no-dates": return "Ohne Datum gibt es keine Vorhersage, nach der sich umräumen ließe."
+        case "no-forecast": return "Für diesen Tag liegt keine Vorhersage vor."
+        default: return "Am Wetter dieses Tages gibt es nichts umzuräumen."
+        }
+    }
+}
+
+struct TripWeatherApplyResponse: Codable, Sendable {
+    let plan: TripPlan
+    let moves: [TripWeatherMove]
+}
+
 /// What the group wrote about one spot, as the server answers it.
 struct TripSpotNote: Codable, Sendable {
     let osmRef: String

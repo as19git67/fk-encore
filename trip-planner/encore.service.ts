@@ -28,6 +28,7 @@ import "./legs";
 import "./spot-notes";
 import "./daylight";
 import "./forecast";
+import "./weather-replan";
 
 import { everyMs, schedule, startLocalCron } from "../lib/local-cron";
 import { tickFillPending } from "./fill-pending";
