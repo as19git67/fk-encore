@@ -148,7 +148,7 @@ final class TripShareReviewViewModel {
         switch proposal.missing {
         case .nothing: return true
         case .whichPlace: return chosenOption[proposal.id] != nil
-        case .howLong: return (dwellMinutes[proposal.id] ?? TripShareReviewViewModel.suggestedDwellMinutes) > 0
+        case .howLong: return (dwellMinutes[proposal.id] ?? 0) > 0
         }
     }
 
@@ -196,7 +196,7 @@ final class TripShareReviewViewModel {
         // A resolved place brings its own duration from OSM; sending
         // one anyway would override real data with a default.
         let needsDuration = chosen == nil && proposal.missing == .howLong
-        let dwell = dwellMinutes[proposal.id] ?? TripShareReviewViewModel.suggestedDwellMinutes
+        let dwell = dwellMinutes[proposal.id] ?? 0
         if needsDuration && dwell <= 0 { return nil }
 
         return TripAddFindRequest(
