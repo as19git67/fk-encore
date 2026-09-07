@@ -1219,6 +1219,13 @@
       "when": 1786752000015,
       "tag": "0173_trip_spot_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 174,
+      "version": "7",
+      "when": 1786838400015,
+      "tag": "0174_trip_spot_dwell_override",
+      "breakpoints": true
     }
   ]
 }

@@ -149,6 +149,18 @@ describe("writing something about a spot", () => {
     expect(written.sourceUrl).toBe("https://beispiel.test/museum");
   });
 
+  it("keeps a manual stay length with the spot", async () => {
+    const plan = await plannedTrip();
+    const osmRef = anyRef(plan);
+
+    await saveTripSpotNote({
+      planId: plan.id, legIndex: 0, osmRef, dwellMinutes: 120,
+    });
+
+    expect(find(await getTripPlan({ planId: plan.id }).then((r) => r.plan), osmRef).dwellMinutes)
+      .toBe(120);
+  });
+
   it("leaves alone the fields the caller did not mention", async () => {
     // A screen that edits only the note must not wipe the link.
     const plan = await plannedTrip();

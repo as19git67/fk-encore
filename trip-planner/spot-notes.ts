@@ -51,6 +51,8 @@ export interface SaveSpotNoteRequest {
   title?: string | null;
   note?: string | null;
   url?: string | null;
+  /** A manual stay-length override, in minutes. */
+  dwellMinutes?: number | null;
 }
 
 export interface SaveSpotNoteResponse {
@@ -92,6 +94,7 @@ export const saveTripSpotNote = api(
       title: resolve(req.title, existing?.title ?? null, MAX_TITLE_LENGTH, "title"),
       note: resolve(req.note, existing?.note ?? null, MAX_NOTE_LENGTH, "note"),
       url: validateUrl(resolve(req.url, existing?.url ?? null, MAX_URL_LENGTH, "url")),
+      dwellMinutes: resolveDwell(req.dwellMinutes, existing?.dwellMinutes ?? null),
     };
 
     await saveSpotNote(leg.id, osmRef, fields, userId);
@@ -155,6 +158,15 @@ function validateUrl(url: string | null): string | null {
     throw APIError.invalidArgument("url must be an http or https address");
   }
   return parsed.toString();
+}
+
+function resolveDwell(incoming: number | null | undefined, current: number | null): number | null {
+  if (incoming === undefined) return current;
+  if (incoming === null) return null;
+  if (!Number.isInteger(incoming) || incoming < 5 || incoming > 480) {
+    throw APIError.invalidArgument("dwellMinutes must be an integer between 5 and 480");
+  }
+  return incoming;
 }
 
 function requireUser(): number {

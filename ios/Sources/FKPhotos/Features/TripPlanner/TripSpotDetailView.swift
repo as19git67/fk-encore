@@ -89,8 +89,16 @@ struct TripSpotDetailView<Actions: View>: View {
                 }
                 LabeledContent("Art", value: TripCategory.label(spot.category))
                 if let shelter {
-                    LabeledContent("Bei Regen") {
-                        Label(shelter.label, systemImage: shelter.symbolName)
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text("Bei Regen")
+                        Spacer(minLength: 12)
+                        Label {
+                            Text(shelter.label)
+                                .multilineTextAlignment(.trailing)
+                        } icon: {
+                            Image(systemName: shelter.symbolName)
+                        }
+                        .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 LabeledContent("Aufenthalt", value: TripClock.duration(spot.dwellMinutes))

@@ -2925,6 +2925,7 @@ export const tripSpotNotes = pgTable(
     title: text("title"),
     note: text("note"),
     url: text("url"),
+    dwell_minutes: integer("dwell_minutes"),
     updated_by: integer("updated_by").references(() => users.id, { onDelete: "set null" }),
     updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
   },

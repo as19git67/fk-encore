@@ -173,6 +173,7 @@ export interface SpotNote {
   title: string | null;
   note: string | null;
   url: string | null;
+  dwellMinutes: number | null;
 }
 
 /** A fixpoint as it arrives, before it has a row. */
@@ -775,6 +776,7 @@ export async function loadPlan(
       title: row.title,
       note: row.note,
       url: row.url,
+      dwellMinutes: row.dwell_minutes,
     });
     notesByLeg.set(row.leg_id, byRef);
   }
@@ -831,7 +833,7 @@ export async function loadPlan(
       lat: row.lat,
       lon: row.lon,
       category: row.category,
-      dwellMinutes: row.dwell_minutes,
+      dwellMinutes: written?.dwellMinutes ?? row.dwell_minutes,
       score: 0,
       travelFromPrevious: {
         minutes: row.travel_minutes,
@@ -896,7 +898,7 @@ export async function loadPlan(
       lat: row.lat,
       lon: row.lon,
       category: row.category,
-      dwellMinutes: row.dwell_minutes,
+      dwellMinutes: written?.dwellMinutes ?? row.dwell_minutes,
       score: row.score,
       reasons: (row.reasons ?? []) as string[],
       origin: row.origin,
@@ -1209,11 +1211,17 @@ export async function removeFromPool(
 export async function saveSpotNote(
   legId: number,
   osmRef: string,
-  fields: { title: string | null; note: string | null; url: string | null },
+  fields: {
+    title: string | null;
+    note: string | null;
+    url: string | null;
+    dwellMinutes: number | null;
+  },
   userId: number,
   db: Db = dbDefault,
 ): Promise<void> {
-  const empty = fields.title === null && fields.note === null && fields.url === null;
+  const empty = fields.title === null && fields.note === null && fields.url === null
+    && fields.dwellMinutes === null;
   if (empty) {
     await db
       .delete(tripSpotNotes)
@@ -1229,6 +1237,7 @@ export async function saveSpotNote(
       title: fields.title,
       note: fields.note,
       url: fields.url,
+      dwell_minutes: fields.dwellMinutes,
       updated_by: userId,
     })
     .onConflictDoUpdate({
@@ -1237,6 +1246,7 @@ export async function saveSpotNote(
         title: fields.title,
         note: fields.note,
         url: fields.url,
+        dwell_minutes: fields.dwellMinutes,
         updated_by: userId,
         updated_at: new Date().toISOString(),
       },
@@ -1255,7 +1265,13 @@ export async function findSpotNote(
     .where(and(eq(tripSpotNotes.leg_id, legId), eq(tripSpotNotes.osm_ref, osmRef)))
     .limit(1);
   if (!row) return undefined;
-  return { osmRef: row.osm_ref, title: row.title, note: row.note, url: row.url };
+  return {
+    osmRef: row.osm_ref,
+    title: row.title,
+    note: row.note,
+    url: row.url,
+    dwellMinutes: row.dwell_minutes,
+  };
 }
 
 /** One pool entry, or undefined. */
