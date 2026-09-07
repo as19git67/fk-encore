@@ -94,6 +94,7 @@ export const placeFromPool = api(
           // the moment a spot loses what is known about it.
           localName: candidate.localName ?? null,
           wikipediaUrl: candidate.wikipediaUrl ?? null,
+          facadeAzimuth: candidate.facadeAzimuth ?? null,
           lat: candidate.lat,
           lon: candidate.lon,
           category: candidate.category,

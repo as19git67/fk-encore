@@ -156,6 +156,7 @@ function stopToCandidate(stop: CurrentStop): Candidate {
     name: stop.name,
     localName: stop.localName ?? null,
     wikipediaUrl: stop.wikipediaUrl ?? null,
+    facadeAzimuth: stop.facadeAzimuth ?? null,
     lat: stop.lat,
     lon: stop.lon,
     category: stop.category,
