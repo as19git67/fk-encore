@@ -9,18 +9,22 @@ import XCTest
 /// shown next to a plan that still holds the full one.
 final class TripWeatherTests: XCTestCase {
 
+    /// `feelsLikeC` defaults to the measured temperature, which is what
+    /// the server answers below 27 °C: the heat index is not defined
+    /// down there and humidity does not make 12 °C feel like 20 °C. A
+    /// fixed default here invented a reading the server cannot produce.
     private func weather(
         precipitationMm: Double = 0,
         wetness: String = "dry",
         cloudCover: Int = 20,
         temperatureC: Double = 20,
-        feelsLikeC: Double = 20,
+        feelsLikeC: Double? = nil,
         heat: String = "mild",
         budgetFactor: Double = 1,
     ) -> TripBlockWeather {
         TripBlockWeather(
             precipitationMm: precipitationMm, wetness: wetness, cloudCover: cloudCover,
-            temperatureC: temperatureC, feelsLikeC: feelsLikeC, heat: heat,
+            temperatureC: temperatureC, feelsLikeC: feelsLikeC ?? temperatureC, heat: heat,
             budgetFactor: budgetFactor)
     }
 
