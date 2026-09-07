@@ -115,6 +115,8 @@ export interface StoredCandidate extends ScoredCandidate {
   localName?: string | null;
   /** The Wikipedia article, where OpenStreetMap knows of one. */
   wikipediaUrl?: string | null;
+  /** Which way it faces, for the light hint (§7.3). */
+  facadeAzimuth?: number | null;
 }
 
 export interface StoredDay {
@@ -276,6 +278,7 @@ export async function insertLeg(
         name: c.name,
         local_name: c.localName ?? null,
         wikipedia_url: c.wikipediaUrl ?? null,
+        facade_azimuth: c.facadeAzimuth ?? null,
         lat: c.lat,
         lon: c.lon,
         category: c.category,
@@ -500,6 +503,7 @@ async function insertDays(
           travel_distance_m: stop.travelFromPrevious.distanceM,
           local_name: stop.localName ?? null,
           wikipedia_url: stop.wikipediaUrl ?? null,
+          facade_azimuth: stop.facadeAzimuth ?? null,
         });
       }
     }
@@ -691,6 +695,7 @@ export async function saveMovedDays(
           source_url: stop.sourceUrl ?? null,
           local_name: stop.localName ?? null,
           wikipedia_url: stop.wikipediaUrl ?? null,
+          facade_azimuth: stop.facadeAzimuth ?? null,
         });
       }
     }
@@ -816,6 +821,7 @@ export async function loadPlan(
       name: row.name,
       localName: row.local_name,
       wikipediaUrl: row.wikipedia_url,
+      facadeAzimuth: row.facade_azimuth,
       lat: row.lat,
       lon: row.lon,
       category: row.category,
@@ -879,6 +885,7 @@ export async function loadPlan(
       name: row.name,
       localName: row.local_name,
       wikipediaUrl: row.wikipedia_url,
+      facadeAzimuth: row.facade_azimuth,
       lat: row.lat,
       lon: row.lon,
       category: row.category,
@@ -985,6 +992,7 @@ async function rewriteDay(
         pinned: stop.pinned,
         local_name: stop.localName ?? null,
         wikipedia_url: stop.wikipediaUrl ?? null,
+        facade_azimuth: stop.facadeAzimuth ?? null,
       });
     }
   }
@@ -998,6 +1006,7 @@ async function rewriteDay(
         name: c.name,
         local_name: c.localName ?? null,
         wikipedia_url: c.wikipediaUrl ?? null,
+        facade_azimuth: c.facadeAzimuth ?? null,
         lat: c.lat,
         lon: c.lon,
         category: c.category,
@@ -1058,6 +1067,7 @@ export async function replanPlan(
           name: c.name,
           local_name: c.localName ?? null,
           wikipedia_url: c.wikipediaUrl ?? null,
+          facade_azimuth: c.facadeAzimuth ?? null,
           lat: c.lat,
           lon: c.lon,
           category: c.category,
@@ -1255,6 +1265,7 @@ export async function findInPool(
     name: row.name,
     localName: row.local_name,
     wikipediaUrl: row.wikipedia_url,
+    facadeAzimuth: row.facade_azimuth,
     lat: row.lat,
     lon: row.lon,
     category: row.category,

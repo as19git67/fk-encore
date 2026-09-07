@@ -34,6 +34,11 @@ export interface Candidate extends Coordinate {
   localName?: string | null;
   /** The Wikipedia article, where OpenStreetMap knows of one. */
   wikipediaUrl?: string | null;
+  /**
+   * Which way the building faces, in degrees clockwise from north in
+   * [0, 180) (§7.3). Null for every POI mapped as a node.
+   */
+  facadeAzimuth?: number | null;
   /** Category id from the geo search, e.g. "museum". */
   category: string;
   /** How long one typically stays, in minutes. */
@@ -49,6 +54,8 @@ export interface PlannedStop {
   localName?: string | null;
   /** See `Candidate.wikipediaUrl`. */
   wikipediaUrl?: string | null;
+  /** See `Candidate.facadeAzimuth`. */
+  facadeAzimuth?: number | null;
   lat: number;
   lon: number;
   category: string;
@@ -215,6 +222,7 @@ function fillBlock(args: FillArgs): PlannedBlock {
         name: candidate.name,
         localName: candidate.localName ?? null,
         wikipediaUrl: candidate.wikipediaUrl ?? null,
+        facadeAzimuth: candidate.facadeAzimuth ?? null,
         lat: candidate.lat,
         lon: candidate.lon,
         category: candidate.category,

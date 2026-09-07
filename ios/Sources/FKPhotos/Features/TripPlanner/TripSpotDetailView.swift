@@ -21,6 +21,10 @@ struct TripSpotDetailView<Actions: View>: View {
     /// looked up on the map belongs to no leg, and offering a pencil
     /// that saves nowhere is worse than not offering one.
     let onSave: ((TripSpotEdit) async -> Void)?
+    /// When the light is good here today (§7.3). A hint and nothing
+    /// more: it moves nothing, and it is absent for a trip with no
+    /// dates, because there is no sun without a day.
+    let light: TripSpotLight?
     @ViewBuilder var actions: () -> Actions
 
     @State private var routeChoice: TripMapsChoice?
@@ -32,11 +36,13 @@ struct TripSpotDetailView<Actions: View>: View {
         spot: TripSpotDetail,
         mode: TripTransportMode = .foot,
         onSave: ((TripSpotEdit) async -> Void)? = nil,
+        light: TripSpotLight? = nil,
         @ViewBuilder actions: @escaping () -> Actions,
     ) {
         self.spot = spot
         self.mode = mode
         self.onSave = onSave
+        self.light = light
         self.actions = actions
     }
 
@@ -100,6 +106,25 @@ struct TripSpotDetailView<Actions: View>: View {
                     } label: {
                         Label("Artikel lesen", systemImage: "book")
                     }
+                }
+            }
+
+            if let light, let window = light.best {
+                Section {
+                    LabeledContent(window.label, value: window.range)
+                    if let sentence = light.facadeSentence {
+                        Text(sentence)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Label("Licht", systemImage: window.symbolName)
+                } footer: {
+                    // Said once, plainly: the plan stays coarse, and a
+                    // minute-precise window inside it is only honest
+                    // while nobody treats it as an appointment (§7.3).
+                    Text("Ein Hinweis, kein Termin — und ohne Berücksichtigung von "
+                         + "Bergen oder Häusern in der Blickrichtung.")
                 }
             }
 
@@ -227,8 +252,9 @@ extension TripSpotDetailView where Actions == EmptyView {
         spot: TripSpotDetail,
         mode: TripTransportMode = .foot,
         onSave: ((TripSpotEdit) async -> Void)? = nil,
+        light: TripSpotLight? = nil,
     ) {
-        self.init(spot: spot, mode: mode, onSave: onSave) { EmptyView() }
+        self.init(spot: spot, mode: mode, onSave: onSave, light: light) { EmptyView() }
     }
 }
 

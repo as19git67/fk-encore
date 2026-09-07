@@ -2054,6 +2054,49 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    Sonnenstandsmodul, Lichthinweise, Abendblock-Vorschlag und der Zeit-Regler
    (§8.3). Das **Horizontprofil** aus dem Höhenmodell (§7.3) gehört hierher —
    ohne es ist die Lichtangabe in bergigem Gelände falsch, nicht bloß ungenau.
+
+   **Angefangen mit dem Licht, und dort mit dem Hinweis.** Zuerst gebaut ist der
+   Teil ohne jede Abhängigkeit: `sun.ts` rechnet Höhe und Azimut der Sonne aus
+   Koordinate und Zeitpunkt — reine Arithmetik, kein API-Schlüssel, dieselben
+   Zahlen auf Server und Gerät, und offline lauffähig (§3.9). Daraus die drei
+   Bänder aus §7.3: goldene Stunde (−4° bis +6°), blaue Stunde (−6° bis −4°),
+   harte Mittagssonne (über 50°).
+
+   Zwei Entscheidungen, die dabei fielen:
+
+   - **Bänder sind Höhen, keine Dauern.** Eine goldene Stunde dauert in Lissabon
+     zwanzig Minuten und in Tromsø einen halben Nachmittag, weil die Sonne dort
+     am Horizont entlangkriecht, statt ihn zu kreuzen. Die nördliche auf
+     mitteleuropäisches Maß zu kürzen hieße, einen Sonnenuntergang zu erfinden,
+     den es nicht gibt. Ebenso bekommt der Polarwinter keine harte Mittagssonne
+     — dort gibt es keine.
+   - **Die Zeitzone wird übergeben, nicht geraten.** Eine Koordinate trägt keine
+     Zeitzone, und sie aus dem Längengrad abzuleiten wäre in halb Europa und
+     ganz China falsch. Der Aufrufer nennt den Versatz; die App nimmt den des
+     Geräts, was vor Ort stimmt und beim Planen von zu Hause die ehrlichste
+     Schätzung ist.
+
+   **Aus der Allgemeinheit wird eine Aussage** über `light.ts` und den
+   Fassadenwinkel, den der Import längst je Umriss berechnet
+   (`geo/src/facade-azimuth.ts`): steht die Sonne quer zum Gebäude, liegt eine
+   der beiden Längsseiten im Licht und die andere im Schatten; läuft sie
+   entlang, wird keine frontal beleuchtet. **Welche** der beiden Seiten es ist,
+   sagt der Planer nicht: Der Winkel ist bewusst auf [0°, 180°) gefaltet, weil
+   ein Umriss die Vorderseite nicht kennt — und wer davorsteht, sieht es in
+   einer Sekunde (§15.3). Migration 0171 trägt den Winkel an Stopp und Vorrat
+   mit, damit der Hinweis ohne Rückfrage in die Regionsdatenbank auskommt.
+
+   **Von den vier Wegen, auf denen Licht laut §7.3 in den Plan darf, ist genau
+   einer gebaut: der Hinweis auf der Spot-Karte.** Reihenfolge im Block,
+   Ranking-Bonus und Abendblock-Vorschlag ändern, was der Planer *tut*; solange
+   das Horizontprofil fehlt, wäre das ein Versprechen auf eine Minute, die im
+   Tal längst im Schatten liegt. Die Karte sagt das auch: „ein Hinweis, kein
+   Termin — und ohne Berücksichtigung von Bergen oder Häusern".
+
+   **Noch offen in diesem Schritt:** das Wetter (§7.2) — es braucht
+   `open-meteo.com` in der Netzwerk-Policy der Umgebung —, Indoor/Outdoor,
+   Klimanormale, das Horizontprofil, der Zeit-Regler und die drei
+   planverändernden Wege.
 10. **Weitere Kontextsignale** — Dokumenten-Fixpunkte, Reisegruppe, dazu die
     **Reisebereitschafts-Prüfung** und die Packliste (§8.6), die beide nur
     vorhandene Zustände zusammentragen.
