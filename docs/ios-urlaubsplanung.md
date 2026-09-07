@@ -1,7 +1,8 @@
 # Urlaubsplanung („Spots & Blöcke") – Konzept
 
-Stand: 2026-09-01 · Status: Ideensammlung / Vorentwurf (Leitentscheidungen in
-§2 gesetzt, sonst offen)
+Stand: 2026-09-07 · Status: Ideensammlung / Vorentwurf (Leitentscheidungen in
+§2 gesetzt, sonst offen) — Schritte 1–9 sind ganz oder teilweise gebaut; was
+in §13 unter „Umgesetzt" steht, existiert im Code, alles Übrige ist Entwurf.
 
 ## 1. Die Idee in einem Satz
 
@@ -501,6 +502,20 @@ Koordinate plus ein Datum. Das genügt für eine Stadtvorhersage und taugt nicht
 als Bewegungsprofil. Die Antwort wird pro Ort und Tag zwischengespeichert, ein
 Abruf pro Tag reicht.
 
+**Umgesetzt (Schritt 9):** Von den vier Wirkungen oben sind drei gebaut.
+Die Vorhersage selbst (`weather-client.ts`, `weather.ts`, Cache in Migration
+0172) und das Indoor/Outdoor-Attribut (`shelter.ts`, Migration 0173) liefern
+die Zahlen; `POST …/weather` sagt sie nur. Das Umsortieren und die
+Budgetkürzung tut `weather-shuffle.ts` — aber **auf Nachfrage**:
+`POST …/weather/proposal` rechnet und speichert nichts,
+`POST …/weather/apply` führt aus, nachdem gefragt wurde, und rechnet dabei
+neu statt den Vorschlag abzuspielen (§7.1: „ungefragt umzuräumen wäre
+übergriffig"). Es ist ein *Tausch*, kein Neuplanen: Der Rest des Tages
+bleibt, wie er war, und erledigte, übersprungene und angeheftete Stopps
+rührt es nie an. **Offen bleiben** der Tausch ganzer Regentage und die
+Klimanormalen jenseits von ~16 Tagen — bis die existieren, sagt der Planer
+dort nichts, statt einen Mittelwert zu erfinden.
+
 ### 7.3 Licht: wann die Fotos gut werden
 
 Der Teil, den nur eine Foto-App bauen würde — und der Grund, warum ein
@@ -564,6 +579,14 @@ Widerspruch zu Leitentscheidung 1: Es ist ein **Hinweis, kein Termin**. Eine
 Uhrzeit, die man verpassen kann, entsteht erst, wenn der Nutzer Vorschlag 3
 annimmt — und dann hat er sie selbst gewollt. Abschaltbar in einem Schalter, denn
 nicht jede Reise soll sich nach dem Sonnenstand richten.
+
+**Umgesetzt (Schritt 9):** Von den vier Wegen oben ist genau einer gebaut —
+Weg 4, der Hinweis auf der Spot-Karte (`sun.ts`, `light.ts`, `POST …/light`,
+Fassadenazimut in Migration 0171). Die drei anderen ändern, was der Planer
+*tut*, und bleiben zurückgestellt, **solange das Horizontprofil fehlt**: ein
+Versprechen auf eine Minute, die im Tal längst im Schatten liegt, wäre ein
+Fehler in genau die unangenehme Richtung. Die Karte sagt das auch — „ein
+Hinweis, kein Termin — und ohne Berücksichtigung von Bergen oder Häusern".
 
 ## 8. Wie sich das in der iOS-App anfühlt
 
@@ -2127,16 +2150,37 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    Kategorie: „sight" enthält Dome und Marktplätze gleichermaßen, und
    genau daran hängt die Entscheidung.
 
-   **Auch das Wetter ändert vorerst nichts am Plan.** Der Block sagt,
-   was der Himmel vorhat, und nennt den Faktor, um den das Budget
-   schrumpfen *wird* — angewandt wird er nicht. Umsortieren,
-   Budgetkürzung und der Tausch ganzer Regentage sind drei Eingriffe mit
-   je eigenen Fallstricken; sie als Nebenwirkung eines Abrufs
-   einzuführen wäre der schlechteste Zeitpunkt dafür.
+   **Dann der erste Eingriff: das Wetter darf den Tag umräumen — auf
+   Nachfrage.** `weather-shuffle.ts` ist bewusst ein *Tausch*, kein
+   Neuplanen: Jeder Spot, den der Himmel stört, sucht sich im Vorrat
+   oder in einem Block, den es weniger trifft, einen Platztausch;
+   verdrängte Spots gehen mit demselben Bonus wie in §5 zurück in den
+   Vorrat. Alles Übrige des Tages bleibt, wie es war — ein trockener
+   Nachmittag wird nicht bei der Gelegenheit aus dem Vorrat aufgefüllt,
+   das ist die Arbeit der Planung und nicht die des Wetters um acht Uhr
+   morgens. Dieselben Schutzregeln wie bei der Umverteilung: erledigt,
+   übersprungen oder angeheftet wird nicht angefasst, und ein Block ohne
+   Vorhersage bleibt unberührt.
+
+   Der geschrumpfte Budgetfaktor wird hier zum ersten Mal *angewandt*:
+   Was nach dem Kürzen nicht mehr hineinpasst, fällt heraus — und zwar
+   das am schlechtesten bewertete, also das, woran der Gruppe am
+   wenigsten lag (§6.1).
+
+   **Getrennt in zwei Aufrufe, und genau das ist das Feature.**
+   `POST …/weather/proposal` rechnet und speichert nichts, die App zeigt
+   die Züge in Worten; `POST …/weather/apply` tut es, nachdem gefragt
+   wurde. §7.1 ist da eindeutig — „ungefragt umzuräumen wäre
+   übergriffig" —, und eine Vorhersage ist ein noch schwächerer Grund,
+   in fremde Tage zu greifen, als am falschen Ort zur falschen Zeit zu
+   stehen. Der zweite Aufruf rechnet dabei **neu**, statt den Vorschlag
+   abzuspielen: Ein Vorschlag, über den zehn Minuten nachgedacht wurde,
+   handelt womöglich von einem Tag, der sich inzwischen geändert hat.
 
    **Noch offen in diesem Schritt:** Klimanormale, das Horizontprofil,
-   der Zeit-Regler und die planverändernden Wege — bei Licht wie bei
-   Wetter.
+   der Zeit-Regler, der Tausch ganzer Regentage (§7.2) sowie die
+   planverändernden Wege des Lichts — Reihenfolge im Block,
+   Ranking-Bonus und Abendblock-Vorschlag (§7.3).
 10. **Weitere Kontextsignale** — Dokumenten-Fixpunkte, Reisegruppe, dazu die
     **Reisebereitschafts-Prüfung** und die Packliste (§8.6), die beide nur
     vorhandene Zustände zusammentragen.
