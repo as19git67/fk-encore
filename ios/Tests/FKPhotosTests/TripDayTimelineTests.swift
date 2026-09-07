@@ -203,4 +203,19 @@ final class TripDayTimelineTests: XCTestCase {
             TripDayTimeline.minutesOfDay(calendar.date(from: parts)!, calendar: calendar), 0,
         )
     }
+
+    func testLightWindowFollowsTheSelectedTime() {
+        let light = TripDayLight(
+            day: "2026-09-04",
+            windows: [
+                TripLightWindow(kind: "golden", fromMinutes: 18 * 60, toMinutes: 19 * 60),
+                TripLightWindow(kind: "blue", fromMinutes: 19 * 60, toMinutes: 20 * 60),
+            ],
+            spots: [],
+        )
+
+        XCTAssertEqual(TripDayTimeline.lightWindow(light, at: 18 * 60 + 30)?.kind, "golden")
+        XCTAssertEqual(TripDayTimeline.lightWindow(light, at: 19 * 60 + 30)?.kind, "blue")
+        XCTAssertNil(TripDayTimeline.lightWindow(light, at: 17 * 60 + 59))
+    }
 }

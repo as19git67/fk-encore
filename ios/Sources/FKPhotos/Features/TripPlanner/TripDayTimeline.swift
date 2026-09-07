@@ -90,6 +90,15 @@ enum TripDayTimeline {
         guard let first = starts.min(), let last = ends.max(), first < last else { return nil }
         return first...last
     }
+
+    /// The light window active at the slider's selected time, if any.
+    ///
+    /// Windows are deliberately not interpolated: outside a named window
+    /// the UI says so instead of inventing a precision the light service did
+    /// not return.
+    static func lightWindow(_ light: TripDayLight?, at minutes: Int) -> TripLightWindow? {
+        light?.windows.first { minutes >= $0.fromMinutes && minutes < $0.toMinutes }
+    }
 }
 
 /// Where the plan puts the travellers at one hour of the day.

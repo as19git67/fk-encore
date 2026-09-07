@@ -13,6 +13,7 @@ import SwiftUI
 struct TripDayMapView: View {
     let day: TripDay
     let anchor: TripCoordinate
+    let light: TripDayLight?
     /// True when the leg's dates put today inside the trip — drives the
     /// user-location puck. Passed in rather than computed here so the
     /// view stays a pure function of its inputs.
@@ -91,12 +92,18 @@ struct TripDayMapView: View {
     }
 
     private func timeSlider(_ span: ClosedRange<Int>) -> some View {
+        let lightWindow = TripDayTimeline.lightWindow(light, at: Int(sliderMinutes))
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(TripClock.format(Int(sliderMinutes)))
                     .font(.subheadline.weight(.semibold))
                     .monospacedDigit()
                 Spacer()
+                if let lightWindow {
+                    Label(lightWindow.label, systemImage: lightWindow.symbolName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 // What the plan says about that hour — or, honestly,
                 // nothing when the hour falls outside the day.
                 if let position = highlighted {
@@ -109,6 +116,12 @@ struct TripDayMapView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
+            }
+
+            if lightWindow == nil {
+                Label("Kein besonderes Lichtfenster", systemImage: "sun.max")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Slider(
