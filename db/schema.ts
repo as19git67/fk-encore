@@ -2803,6 +2803,10 @@ export const tripPlanStops = pgTable(
     // Which way the building faces, in degrees clockwise from north in
     // [0, 180) — see geo/src/facade-azimuth.ts. Null for node POIs.
     facade_azimuth: real("facade_azimuth"),
+    // The OSM tag behind the category ("building=church"), for the
+    // indoor/outdoor derivation (§7.2). Null for a find brought in by
+    // hand, which has no OSM entry.
+    kind: text("kind"),
   },
   (table) => [
     uniqueIndex("trip_plan_stops_block_position_key").on(table.block_id, table.position),
@@ -2893,6 +2897,8 @@ export const tripPlanPool = pgTable(
     wikipedia_url: text("wikipedia_url"),
     /** See `trip_plan_stops.facade_azimuth`. */
     facade_azimuth: real("facade_azimuth"),
+    /** See `trip_plan_stops.kind`. */
+    kind: text("kind"),
   },
   (table) => [uniqueIndex("trip_plan_pool_leg_ref_key").on(table.leg_id, table.osm_ref)]
 );
@@ -2923,4 +2929,34 @@ export const tripSpotNotes = pgTable(
     updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [uniqueIndex("trip_spot_notes_leg_ref_key").on(table.leg_id, table.osm_ref)]
+);
+
+/**
+ * The forecast, kept per place and day (§7.2).
+ *
+ * A city forecast does not change between two people opening the same
+ * trip, and re-asking for every screen would be rude to a service that
+ * charges neither a key nor a fee. The coordinate here is the
+ * **rounded** one — about five kilometres, the grid `weather-client.ts`
+ * snaps to before anything leaves the house — which is what makes the
+ * cache useful and what keeps this table from ever becoming a movement
+ * profile.
+ */
+export const weatherForecastCache = pgTable(
+  "weather_forecast_cache",
+  {
+    id: serial("id").primaryKey(),
+    lat: real("lat").notNull(),
+    lon: real("lon").notNull(),
+    day: date("day").notNull(),
+    /** The hours as fetched, already in the planner's shape. */
+    hours: jsonb("hours").notNull(),
+    fetched_at: timestamp("fetched_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("weather_forecast_cache_place_day_key").on(table.lat, table.lon, table.day),
+    index("weather_forecast_cache_day_idx").on(table.day),
+  ]
 );

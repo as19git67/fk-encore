@@ -37,6 +37,9 @@ final class TripPlannerViewModel {
     /// it has been asked for, and empty for a trip with no dates —
     /// there is no sun without a day.
     private(set) var light: TripDayLight?
+    /// The day's weather (§7.2). Reported, never acted on: nothing in
+    /// this build reorders a block because it rained.
+    private(set) var forecast: TripDayForecast?
 
     /// Which leg and day are on screen. Both are positions within their
     /// parent, not row ids, because that is how the endpoints address
@@ -138,6 +141,34 @@ final class TripPlannerViewModel {
             )
         } catch {
             light = nil
+        }
+    }
+
+    /// The weather for the day on screen (§7.2).
+    ///
+    /// Silent on failure, like the light: a plan is still a plan in the
+    /// rain, and an error banner over the day because a forecast
+    /// service is down would be the tail wagging the dog. The server
+    /// already distinguishes "no forecast" from "fine weather"; this
+    /// only has to not lose the distinction.
+    func loadForecast() async {
+        guard let plan, plan.legs.indices.contains(legIndex) else { return }
+        struct Body: Encodable {
+            let legIndex: Int
+            let dayIndex: Int
+            let utcOffsetMinutes: Int
+        }
+        do {
+            forecast = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/weather",
+                body: Body(
+                    legIndex: legIndex,
+                    dayIndex: dayIndex,
+                    utcOffsetMinutes: TimeZone.current.secondsFromGMT() / 60,
+                ),
+            )
+        } catch {
+            forecast = nil
         }
     }
 

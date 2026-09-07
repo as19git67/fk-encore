@@ -2093,10 +2093,50 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    Tal längst im Schatten liegt. Die Karte sagt das auch: „ein Hinweis, kein
    Termin — und ohne Berücksichtigung von Bergen oder Häusern".
 
-   **Noch offen in diesem Schritt:** das Wetter (§7.2) — es braucht
-   `open-meteo.com` in der Netzwerk-Policy der Umgebung —, Indoor/Outdoor,
-   Klimanormale, das Horizontprofil, der Zeit-Regler und die drei
-   planverändernden Wege.
+   **Dann das Wetter, nach derselben Regel: erst wissen, dann handeln.**
+   `weather-client.ts` holt bei Open-Meteo stündlich `precipitation`,
+   `cloud_cover`, `temperature_2m` und `relative_humidity_2m`;
+   `weather.ts` macht daraus drei Klassen — trocken / etwas Regen / nass —
+   plus Hitze über den Hitzeindex, denn §7.2 stellt 33 °C bei hoher
+   Luftfeuchte ausdrücklich neben den Regenguss.
+
+   Vier Entscheidungen:
+
+   - **Was das Haus verlässt, ist auf ~5 km gerundet.** Die Rundung
+     passiert an der einen Stelle, an der die Anfrage gebaut wird — und
+     sie ist zugleich der Cache-Schlüssel: Alle in derselben Stadt
+     stellen dieselbe Frage.
+   - **Ein Abruf pro Ort und Tag** (Migration 0172). Sechs Stunden gelten
+     als frisch, für *heute* eine — der Tag, in dem man steht, ist der,
+     der sich ändert.
+   - **Jenseits von ~16 Tagen gibt es nichts**, und das wird auch so
+     gesagt. §7.2 will dort Klimanormale; bis die existieren, ist
+     Schweigen richtiger als ein erfundener Mittelwert.
+   - **„Keine Vorhersage" ist nicht „schönes Wetter".** Ein Ausfall des
+     Dienstes kostet den Plan nichts: Ein Plan ist auch im Regen ein
+     Plan. Eine veraltete Vorhersage wird einer fehlenden vorgezogen,
+     und der Aufrufer erfährt, dass sie aus zweiter Hand ist.
+
+   **Indoor/Outdoor** (`shelter.ts`, Migration 0173) ist die Ableitung,
+   ohne die das Wetter nichts anfangen kann: Zu wissen, dass es regnet,
+   nützt erst etwas, wenn man weiß, welcher Spot das stört. Drei Werte,
+   nicht zwei — eine Markthalle, eine Burgruine, ein Kreuzgang *sind*
+   halb draußen, und sie in eine der beiden anderen Schubladen zu
+   zwingen schickt entweder eine Familie in den Regen oder verschenkt
+   die eine trockene Stunde drinnen. Der OSM-Tag schlägt dabei die
+   Kategorie: „sight" enthält Dome und Marktplätze gleichermaßen, und
+   genau daran hängt die Entscheidung.
+
+   **Auch das Wetter ändert vorerst nichts am Plan.** Der Block sagt,
+   was der Himmel vorhat, und nennt den Faktor, um den das Budget
+   schrumpfen *wird* — angewandt wird er nicht. Umsortieren,
+   Budgetkürzung und der Tausch ganzer Regentage sind drei Eingriffe mit
+   je eigenen Fallstricken; sie als Nebenwirkung eines Abrufs
+   einzuführen wäre der schlechteste Zeitpunkt dafür.
+
+   **Noch offen in diesem Schritt:** Klimanormale, das Horizontprofil,
+   der Zeit-Regler und die planverändernden Wege — bei Licht wie bei
+   Wetter.
 10. **Weitere Kontextsignale** — Dokumenten-Fixpunkte, Reisegruppe, dazu die
     **Reisebereitschafts-Prüfung** und die Packliste (§8.6), die beide nur
     vorhandene Zustände zusammentragen.

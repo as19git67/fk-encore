@@ -119,16 +119,23 @@ struct TripPlanDayView: View {
             await viewModel.load()
             watchStops()
             await viewModel.loadLight()
+            await viewModel.loadForecast()
         }
         .onDisappear { TripVisitMonitor.shared.stop() }
         .onChange(of: viewModel.dayIndex) { _, _ in
             watchStops()
-            // A different day is a different sun.
-            Task { await viewModel.loadLight() }
+            // A different day is a different sun, and a different sky.
+            Task {
+                await viewModel.loadLight()
+                await viewModel.loadForecast()
+            }
         }
         .onChange(of: viewModel.legIndex) { _, _ in
             watchStops()
-            Task { await viewModel.loadLight() }
+            Task {
+                await viewModel.loadLight()
+                await viewModel.loadForecast()
+            }
         }
     }
 
@@ -414,6 +421,24 @@ struct TripPlanDayView: View {
                 // to decide about (§8.4).
                 .tint(block.utilisation > 1 ? .red : .accentColor)
 
+            // What the sky is expected to do over this block (§7.2).
+            // Said, not acted on: nothing here reorders the block, and
+            // the budget bar above is the planned one, not a shrunken
+            // one — the app must not show a number the plan does not
+            // hold.
+            if let weather = viewModel.forecast?.weather(forBlock: block.id) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label(weather.summary, systemImage: weather.symbolName)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    if let sentence = weather.budgetSentence {
+                        Text(sentence)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
             if block.isMeal {
                 // A meal block holds time and a rough area, not a venue:
                 // the planner never picks a restaurant (§10.3).
@@ -479,6 +504,7 @@ struct TripPlanDayView: View {
                         mode: viewModel.leg?.transportMode ?? .foot,
                         onSave: { await viewModel.saveNote($0) },
                         light: viewModel.light?.hint(for: stop.osmRef),
+                        shelter: viewModel.forecast?.shelter(for: stop.osmRef),
                     )
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
