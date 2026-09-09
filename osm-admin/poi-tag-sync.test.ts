@@ -83,6 +83,12 @@ function parseLuaAllowlist(): Set<string> {
   return new Set(keys);
 }
 
+/** `poi_name_required` → the set of `key=value` kinds that need a name. */
+function parseLuaNameRequired(): Set<string> {
+  const body = luaTableBody("poi_name_required");
+  return new Set([...body.matchAll(/\['([\w:=]+)'\]\s*=\s*true/g)].map((m) => m[1]));
+}
+
 /** Tag keys the search categories rely on. */
 function parseCategoryKeys(): Set<string> {
   return new Set([...categoriesSource.matchAll(/\{\s*key:\s*"([\w:]+)"/g)].map((m) => m[1]));
@@ -165,6 +171,35 @@ describe("OSM tag knowledge stays in sync across packages", () => {
         `poi-categories.ts filters on '${key}', but osm2pgsql.lua does not keep it in ` +
           `poi_tag_allowlist — the category would silently match nothing`,
       ).toBe(true);
+    }
+  });
+
+  it("the name-required list only names kinds the import actually takes", () => {
+    // A stale entry here is invisible: it would simply never apply, and
+    // the pond it was meant to keep out would come back.
+    for (const kind of parseLuaNameRequired()) {
+      const [key, value] = kind.split("=");
+      const imported = luaFilters[key];
+      expect(imported, `poi_name_required mentions '${key}', which poi_filters ignores`)
+        .toBeDefined();
+      if (imported === "*") continue;
+      expect(
+        (imported as string[]).includes(value),
+        `poi_name_required mentions '${kind}', which the import never matches`,
+      ).toBe(true);
+    }
+  });
+
+  it("keeps the landscape and everyday additions out of the photo matcher", () => {
+    // Same asymmetry as above: these exist for the planner. A lake or a
+    // brewery among the photo candidates would push out a landmark.
+    const plannerOnly = ["peak", "water", "beach", "nature_reserve", "garden",
+                         "marketplace", "public_bath", "water_park", "winery", "brewery", "zoo"];
+    const matcherValues = new Set(
+      POI_TAG_FILTERS.flatMap((f) => (f.values === "*" ? [] : [...f.values])),
+    );
+    for (const value of plannerOnly) {
+      expect(matcherValues.has(value), `'${value}' must stay out of poi.config.ts`).toBe(false);
     }
   });
 

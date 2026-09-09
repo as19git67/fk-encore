@@ -38,6 +38,13 @@ export const DEFAULT_DWELL_MINUTES: Readonly<Record<string, number>> = {
   // Needed rather than admired: a stop, not a visit (§10.5).
   essentials: 10,
   outdoors: 45,
+  // A zoo is not a stop on the way past, and a bath is not twenty
+  // minutes: both take a block on their own. Getting these wrong is how
+  // an afternoon acquires three things it cannot fit.
+  zoo: 180,
+  bath: 120,
+  market: 40,
+  producers: 60,
 };
 
 const FALLBACK_DWELL_MINUTES = 30;
