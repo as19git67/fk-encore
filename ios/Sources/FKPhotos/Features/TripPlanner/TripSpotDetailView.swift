@@ -28,8 +28,16 @@ struct TripSpotDetailView<Actions: View>: View {
     /// Whether this spot keeps the rain off (§7.2). Shown next to the
     /// light, because both answer "when should we go".
     let shelter: TripSpotShelter?
-    @ViewBuilder var actions: () -> Actions
+    /// The extra actions, built with a way to close this screen.
+    ///
+    /// An action that removes the spot from the day — hiding it, putting
+    /// it back in the pool — leaves this screen describing something
+    /// that is no longer there. It has to be able to pop itself, and
+    /// only it can: `\.dismiss` read in the *caller* would dismiss the
+    /// caller's screen, not this one.
+    @ViewBuilder var actions: (@escaping () -> Void) -> Actions
 
+    @Environment(\.dismiss) private var dismiss
     @State private var routeChoice: TripMapsChoice?
     @State private var editing: TripSpotEdit?
     @State private var showingWikipedia = false
@@ -41,7 +49,7 @@ struct TripSpotDetailView<Actions: View>: View {
         onSave: ((TripSpotEdit) async -> Void)? = nil,
         light: TripSpotLight? = nil,
         shelter: TripSpotShelter? = nil,
-        @ViewBuilder actions: @escaping () -> Actions,
+        @ViewBuilder actions: @escaping (@escaping () -> Void) -> Actions,
     ) {
         self.spot = spot
         self.mode = mode
@@ -198,7 +206,7 @@ struct TripSpotDetailView<Actions: View>: View {
                      + "die Route fragt, wenn dort „jedes Mal fragen\u{201D} steht.")
             }
 
-            actions()
+            actions({ dismiss() })
         }
         .navigationTitle(spot.displayName)
         .navigationBarTitleDisplayMode(.inline)
@@ -283,7 +291,7 @@ extension TripSpotDetailView where Actions == EmptyView {
         light: TripSpotLight? = nil,
         shelter: TripSpotShelter? = nil,
     ) {
-        self.init(spot: spot, mode: mode, onSave: onSave, light: light, shelter: shelter) {
+        self.init(spot: spot, mode: mode, onSave: onSave, light: light, shelter: shelter) { _ in
             EmptyView()
         }
     }
