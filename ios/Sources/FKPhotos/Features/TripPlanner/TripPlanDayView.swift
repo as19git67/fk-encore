@@ -94,6 +94,13 @@ struct TripPlanDayView: View {
                         } label: {
                             Label("Mitreisende", systemImage: "person.2")
                         }
+                        // The evening before (§8.6): what is still
+                        // cheap to fix tonight, and what to pack.
+                        NavigationLink {
+                            TripReadinessView(viewModel: viewModel)
+                        } label: {
+                            Label("Reisebereit?", systemImage: "checklist")
+                        }
                         // Taking the plan along without a connection
                         // (§3.9) — asked for, never automatic.
                         NavigationLink {
@@ -854,7 +861,7 @@ struct TripPlanDayView: View {
                         onSave: { await viewModel.saveNote($0) },
                         light: viewModel.light?.hint(for: stop.osmRef),
                         shelter: viewModel.forecast?.shelter(for: stop.osmRef),
-                    ) {
+                    ) { closeDetail in
                         // The same section the pool shows: one
                         // decision, one way of making it.
                         Section {
@@ -873,7 +880,14 @@ struct TripPlanDayView: View {
                             // the day, back into the running.
                             if stop.stopStatus == .planned {
                                 Button {
-                                    Task { await viewModel.returnToPool(stop) }
+                                    // Back to the day afterwards: this
+                                    // screen would otherwise go on
+                                    // describing a stop that has just
+                                    // left it.
+                                    Task {
+                                        await viewModel.returnToPool(stop)
+                                        closeDetail()
+                                    }
                                 } label: {
                                     Label("Zurück in den Vorrat", systemImage: "tray.and.arrow.down")
                                 }
@@ -884,7 +898,10 @@ struct TripPlanDayView: View {
                             // wanted. Reversible under "Ausgeblendet"
                             // in the pool.
                             Button(role: .destructive) {
-                                Task { await viewModel.hide(osmRef: stop.osmRef) }
+                                Task {
+                                    await viewModel.hide(osmRef: stop.osmRef)
+                                    closeDetail()
+                                }
                             } label: {
                                 Label("Für diese Reise ausblenden", systemImage: "eye.slash")
                             }

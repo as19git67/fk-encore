@@ -42,19 +42,43 @@ struct TripDayShapeView: View {
             List {
                 Section {
                     ForEach($blocks) { $block in
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 10) {
                             TextField("Name des Blocks", text: $block.label)
-                            Stepper(value: $block.baseBudgetMinutes, in: 15...600, step: 15) {
+
+                            // Both controls get an explicit width of
+                            // their own: a Stepper and a Toggle each
+                            // claim the full row by default, and side
+                            // by side in one column the switch ran into
+                            // the minus.
+                            HStack {
+                                Text("Dauer")
+                                Spacer(minLength: 12)
                                 Text(TripClock.duration(block.baseBudgetMinutes))
                                     .foregroundStyle(.secondary)
+                                    .monospacedDigit()
+                                Stepper("", value: $block.baseBudgetMinutes,
+                                        in: 15...600, step: 15)
+                                    .labelsHidden()
                             }
-                            Toggle("Zeit fürs Essen", isOn: Binding(
+
+                            Toggle(isOn: Binding(
                                 get: { block.isMeal },
                                 set: { block.kind = $0 ? "meal" : "spots" },
-                            ))
-                            .font(.footnote)
+                            )) {
+                                // What the switch decides, not what it
+                                // results in: the planner either fills
+                                // this block with spots or keeps it
+                                // free (§10.3).
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text("Pause — der Planer füllt sie nicht")
+                                    Text("Hält nur Zeit frei. Unterwegs steht hier "
+                                         + "„Essen in der Nähe“ statt Stopps.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                         }
-                        .padding(.vertical, 2)
+                        .padding(.vertical, 4)
                     }
                     .onDelete { blocks.remove(atOffsets: $0) }
                     .onMove { blocks.move(fromOffsets: $0, toOffset: $1) }
@@ -70,9 +94,9 @@ struct TripDayShapeView: View {
                 } footer: {
                     // What it is and what it is not: a frame, not a
                     // timetable (§4.1).
-                    Text("Blöcke sind Etiketten mit einer Dauer, keine Uhrzeiten. Ein Block "
-                         + "„Zeit fürs Essen“ hält die Zeit frei — der Planer sucht kein Lokal "
-                         + "aus.\n\nSpeichern plant die Tage neu.")
+                    Text("Blöcke sind Etiketten mit einer Dauer, keine Uhrzeiten. Eine Pause "
+                         + "bleibt leer: der Planer sucht kein Lokal aus (§10.3), das entscheidet "
+                         + "ihr vor Ort.\n\nSpeichern plant die Tage neu.")
                 }
 
                 if let errorMessage {

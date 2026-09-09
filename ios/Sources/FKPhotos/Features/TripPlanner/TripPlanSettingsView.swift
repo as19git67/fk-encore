@@ -125,11 +125,11 @@ struct TripPlanSettingsView: View {
                         ))
                     }
                 } header: {
-                    Text("Wofür seid ihr hier?")
+                    Text("Was zählt auf dieser Reise?")
                 } footer: {
                     // Honest about both halves: what it does, and why
                     // the list is short (§4, interests.ts).
-                    Text("Was ihr hier ankreuzt, bewertet der Planer höher — es schließt "
+                    Text("Angekreuztes bewertet der Planer höher — es schließt "
                          + "nichts aus. Die Liste ist kurz, weil sie nur enthält, was "
                          + "OpenStreetMap wirklich unterscheidet: „Burgen“ kann die Karte "
                          + "beantworten, „Barock“ nicht.\n\nSpeichern plant die Tage neu.")
