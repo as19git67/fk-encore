@@ -2028,6 +2028,18 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    und erbt damit deren Regel, statt sie zu umgehen: eine kleine Region lädt
    sofort, eine große wartet auf Freigabe. Wer eine Reise plant, verpflichtet
    den Server nicht durch Eintippen eines Städtenamens zu fünfzig Gigabyte.
+
+   **Nachgereicht: „eine kleine Region lädt sofort" stimmte nicht.** Die Regel
+   war gebaut (`DEFAULT_AUTO_APPROVE_MAX_PBF_MB = 1500`), aber
+   `regionToSuggestion` setzte die Größe hart auf `null` — und `autoApprove`
+   verlangt eine bekannte Größe unterhalb der Schwelle. Also war es *immer*
+   falsch, und jede Region, auch ein Regierungsbezirk von 40 MB, wartete auf
+   einen Klick, den die Schwelle ihr ersparen sollte. Die Größe wird jetzt beim
+   Anlegen per HEAD ermittelt (`probePbfSizeMb`, existierte schon für den
+   Importer). Unbekannte Größe heißt weiterhin *fragen*: ein fehlgeschlagener
+   HEAD ist keine Erlaubnis, drei Gigabyte zu ziehen. Die Trip-Planung reicht
+   die schon ermittelte Größe an `createPending` weiter, statt ein zweites Mal
+   zu fragen.
    Die Antwort nennt unter `pendingRegions`, worauf welche Etappe wartet;
    `POST …/plans/:planId/plan` füllt sie später und lehnt ab, solange die
    Karten fehlen — „es lädt noch" ist etwas, worauf man warten kann, ein leerer

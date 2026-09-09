@@ -22,6 +22,7 @@ import { eq } from "drizzle-orm";
 import dbDefault from "../db/database";
 import { osmRegionImports } from "../db/schema";
 import { getGeoClient, type GeoClient } from "./geo-client";
+import { probePbfSizeMb } from "./pbf-probe";
 import {
   loadGeofabrikIndex,
   pickSmallestMatchingRegion,
@@ -45,6 +46,12 @@ export interface RegionDeps {
   loadIndex?: (opts?: LoadOptions) => Promise<GeofabrikIndex>;
   /** PBF-size cutoff for auto-approve (MB). Defaults to 1500. */
   autoApproveMaxPbfMb?: number;
+  /**
+   * How the size of a `.osm.pbf` is found out. Defaults to one HEAD
+   * request; tests inject a stub, and so does anything that already
+   * knows the number.
+   */
+  probeSize?: (url: string) => Promise<number | null>;
   now?: () => Date;
 }
 
@@ -91,15 +98,16 @@ export async function suggestForCoord(
   const status =
     existingStatus && isRegionStatus(existingStatus) ? existingStatus : null;
 
-  return regionToSuggestion(region, status, autoMax);
+  const probe = deps.probeSize ?? probePbfSizeMb;
+  return regionToSuggestion(region, status, autoMax, await probe(region.pbfUrl));
 }
 
 function regionToSuggestion(
   region: GeofabrikRegion,
   existingStatus: RegionStatus | null,
   autoApproveMaxPbfMb: number,
+  pbfSizeMb: number | null,
 ): RegionSuggestion {
-  const pbfSizeMb: number | null = null;
   return {
     slug: region.id,
     name: region.name,
@@ -149,7 +157,13 @@ export async function createPending(
     throw new Error(`unknown Geofabrik region: ${slug}`);
   }
 
-  const suggestion = regionToSuggestion(region, null, autoMax);
+  // The size decides whether this needs a person at all, so it is
+  // fetched here rather than left null. Until now it always was, which
+  // made `autoApprove` permanently false: every region — a 40 MB
+  // Regierungsbezirk included — waited for a click that the threshold
+  // was written to spare it.
+  const probe = deps.probeSize ?? probePbfSizeMb;
+  const suggestion = regionToSuggestion(region, null, autoMax, await probe(region.pbfUrl));
   const initialStatus: RegionStatus = suggestion.autoApprove
     ? "importing"
     : "pending_approval";
