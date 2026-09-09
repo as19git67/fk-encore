@@ -234,6 +234,18 @@ Fährabfahrt. Die Auflösung ist eine Arbeitsteilung:
 - **Blöcke sind relativ** und füllen den Raum dazwischen. Sie behalten ihre
   grobe Natur.
 
+**Umgesetzt:** `POST …/fixpoints` und `POST …/fixpoints/remove`. Feste Zeiten
+konnten bisher nur beim Anlegen einer Reise mitgegeben werden — der letzte Zug
+am letzten Tag also nur, wenn ihn jemand Monate vorher im Kopf hatte, und bis
+dahin versprach der Nachmittag Stunden, die die Gruppe auf dem Bahnsteig
+verbringt. Beide Aufrufe planen die Reise danach neu: Ein Fixpunkt ändert, wie
+viele Minuten die Blöcke des Tages haben, und ein Tag, dessen Rahmen sich
+bewegt hat, dessen Spots aber nicht, geht nicht mehr auf. Vorbehalten ist das
+der Organisatorin (§6.2) — „der letzte Zug geht um 17:45" ist der Rahmen in
+Reinform. In der App steht das Band der festen Zeiten jetzt immer über dem Tag,
+auch wenn es leer ist: Ein Band, das erst erscheint, wenn schon einer da ist,
+findet niemand.
+
 Ein Fixpunkt am Tagesende wird **rückwärts** gerechnet: Vom letzten Zug gehen
 der Weg zum Bahnhof und ein Sicherheitspuffer ab, der Rest ist das Budget des
 letzten Blocks. Je näher der Tag an diesen Rand kommt, desto härter greift das

@@ -51,6 +51,9 @@ final class TripPlannerViewModel {
     /// Spots this trip has turned down (§5), for the list that brings
     /// them back.
     private(set) var hiddenSpots: [TripHiddenSpot] = []
+    /// Set while a hard time is being written or removed (§4.4): both
+    /// re-plan the trip, which is not instant.
+    private(set) var isSavingFixpoint = false
 
     /// Which leg and day are on screen. Both are positions within their
     /// parent, not row ids, because that is how the endpoints address
@@ -416,6 +419,69 @@ final class TripPlannerViewModel {
             )
             plan = response.plan
             errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Put a hard time on the day on screen (§4.4).
+    ///
+    /// The frame, not the content: the server re-frames the day around
+    /// it and re-plans, so what comes back is a day whose blocks have
+    /// the minutes the train left them.
+    func addFixpoint(
+        label: String,
+        at minutesOfDay: Int,
+        kind: String,
+        travelMinutes: Int,
+        durationMinutes: Int,
+    ) async {
+        guard let plan, plan.legs.contains(where: { $0.position == legIndex }) else { return }
+        struct Body: Encodable {
+            let legIndex: Int
+            let dayIndex: Int
+            let label: String
+            let at: String
+            let kind: String
+            let travelMinutes: Int
+            let durationMinutes: Int
+        }
+        isSavingFixpoint = true
+        defer { isSavingFixpoint = false }
+        do {
+            let response: TripPlanResponse = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/fixpoints",
+                body: Body(
+                    legIndex: legIndex,
+                    dayIndex: dayIndex,
+                    label: label,
+                    at: TripClock.format(minutesOfDay),
+                    kind: kind,
+                    travelMinutes: travelMinutes,
+                    // A departure is an instant; only an appointment
+                    // occupies time (§4.4).
+                    durationMinutes: kind == "departure" ? 0 : durationMinutes,
+                ),
+            )
+            apply(response)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Take one off again. The day gets its minutes back, so the server
+    /// plans it again — a block still shortened for a train nobody
+    /// catches would be wrong in the quietest possible way.
+    func removeFixpoint(_ fixpoint: TripFixpoint) async {
+        struct Body: Encodable { let fixpointId: Int }
+        isSavingFixpoint = true
+        defer { isSavingFixpoint = false }
+        do {
+            let response: TripPlanResponse = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/fixpoints/remove",
+                body: Body(fixpointId: fixpoint.rowId),
+            )
+            apply(response)
         } catch {
             errorMessage = error.localizedDescription
         }

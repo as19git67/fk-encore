@@ -409,6 +409,22 @@ export const updateTripSettings = api(
 );
 
 /**
+ * Re-plan a trip after its frame changed (§4.4).
+ *
+ * The one thing a caller outside this module needs from the re-planner:
+ * a fixpoint was written or removed, and the days have to be framed
+ * again around it. Everything else — which spots, which pool — is the
+ * re-planner's own business, and it is the same business as a settings
+ * change, so it stays one implementation.
+ */
+export async function replanAfterFrameChange(
+  plan: StoredPlan,
+  userId: number,
+): Promise<PlanResponse> {
+  return await replanFromStoredSettings(plan, userId);
+}
+
+/**
  * Re-plan every leg of a trip from its stored settings.
  *
  * Shared by changing a setting and by filling in a trip that was saved
