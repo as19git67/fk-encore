@@ -18,6 +18,7 @@ import type {
 } from "../db/types";
 import { toUser, getRolesForUser, getPermissionsForUser } from "./user.service";
 import { checkRateLimit, resetRateLimit, getClientIp } from "./rateLimiter";
+import { passwordPolicyError } from "./password-policy";
 import { sendPasswordResetEmail } from "./mail";
 
 console.log("[boot] user/auth.service.ts: all imports resolved");
@@ -257,8 +258,11 @@ export async function resetPasswordLogic(req: ResetPasswordRequest): Promise<Res
     throw new Error("token and new_password are required");
   }
 
-  if (req.new_password.length < 6) {
-    throw new Error("password must be at least 6 characters");
+  // Plain Error rather than APIError: this runs in the logic layer and the
+  // endpoint already maps a message containing "at least" to invalidArgument.
+  const policyError = passwordPolicyError(req.new_password);
+  if (policyError) {
+    throw new Error(policyError);
   }
 
   const resetToken = await dbFirst<{ token: string; user_id: number; expires_at: string }>(
