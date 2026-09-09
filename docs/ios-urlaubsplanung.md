@@ -3132,6 +3132,39 @@ eigentliche Erweiterung des Konzepts, nicht die Liste selbst. Bisher plant
 dieses System Urlaube; das hier plant den Samstag, und es benutzt dafür jeden
 vorhandenen Baustein.
 
+**Umgesetzt:** `POST /trip-planner/ideas/nearby`, `POST …/ideas/dismiss` und
+`POST …/ideas/outing`.
+
+*Nähe.* Die Antwort ist nach Entfernung sortiert und nennt, wer den Eintrag
+hineingelegt hat — „der Biergarten, den Anna gemerkt hat" ist die Form, die §20
+verlangt. **Zurückgegeben zu werden ist gemeldet worden:** Der Zeitstempel wird
+beim Ausliefern gesetzt, nicht wenn eine App zurückmeldet, sie habe es
+angezeigt — eine App, die das vergisst, machte die Regel still wirkungslos.
+Danach ist eine Woche Ruhe (`QUIET_DAYS`). Wer nur die Liste nach Entfernung
+sehen will, schickt `markSuggested: false`; ein Bildschirm ist nicht dasselbe
+wie eine Meldung.
+
+*Weggewischt.* `dismiss` zählt hoch und lässt den Eintrag stehen. Nach drei
+„nicht jetzt" schweigt er — aber er ist weiter im Vorrat, denn „raus damit" hat
+niemand gesagt (§7.1 merkt sich ein Nein, statt es zu löschen).
+
+*Der Ausflug.* `…/ideas/outing` ist genau das, was §20.5 beschreibt: ein Aufruf
+von `solveDay` mit dem Standort als Anker, **einem** Block über das Zeitbudget
+und dem Vorrat als Kandidaten. Ein Ausflug ist ein Block, keine Vierteilung —
+die gehört zum Urlaub, nicht zum Samstagnachmittag. Was die Familie gemerkt
+hat, geht mit Startbonus in die Auswahl und steht damit vor dem, was die
+Regionssuche auffüllt; beides ist im Ergebnis markiert (`fromIdeas`).
+
+Zwei Dinge, die dabei entschieden wurden. Der **Beinlimit-Wert** des Planers
+(40 Minuten) ist ein *Fuß*-Budget: richtig innerhalb einer Stadt, falsch für
+einen Ausflug — eine halbe Stunde im Auto ist der Weg zum See, kein Umweg. Für
+Auto und ÖPNV gilt deshalb ein größeres Limit. Und **abgelaufene Termine**
+werden gar nicht erst betrachtet: eine Ausstellung, die am Sonntag zu Ende war,
+ist keine Idee mehr (§20.4).
+
+Was noch fehlt: die Übernahme eines angenommenen Vorschlags in eine echte
+eintägige Reise (§20.3) — der Weg dafür ist `POST …/finds`, und er existiert.
+
 ### 20.3 Wie er sich zur Reise verhält
 
 Kein zweiter Mechanismus, sondern eine Quelle mehr:
