@@ -133,6 +133,35 @@ function checkModule() {
 }
 
 /**
+ * Authorization gate for the raw photo-rendering endpoints. Raw handlers
+ * get no automatic error mapping, so instead of throwing we write the
+ * status ourselves and report whether the caller may proceed.
+ *
+ * Returns true when the caller holds the photos module and `photos.view`;
+ * otherwise writes 401/403 and returns false.
+ */
+function writeAuthorizedPhotoViewerOrRespond(res: {
+  statusCode: number;
+  end: (chunk?: string) => void;
+}): boolean {
+  const authData = getAuthData();
+  if (!authData) {
+    res.statusCode = 401;
+    res.end("Unauthorized");
+    return false;
+  }
+  try {
+    requirePermission(authData, "module.photos");
+    requirePermission(authData, "photos.view");
+  } catch {
+    res.statusCode = 403;
+    res.end("Forbidden");
+    return false;
+  }
+  return true;
+}
+
+/**
  * Upload a photo.
  * Expects the raw image data in the request body.
  * Filename should be provided in X-File-Name header.
@@ -910,13 +939,20 @@ const VALID_RATIOS: ReadonlySet<PhotoTransformAspectRatio> = new Set([
  *   user=<id>              — required for v=user; numeric user id
  *   w=…                    — target width in pixels; omit for full resolution
  *
- * `auth: false`: mirrors /photos/file/* — recipe coordinates and exposure
- * values leak no more than the public file endpoint already does.
+ * Requires authentication. This endpoint is addressed by the photo's
+ * sequential id, so leaving it open let anyone walk `id=1,2,3,…` and pull
+ * the whole library; `v=original` additionally answered with the photo's
+ * filename, handing out the one piece of information /photos/file/* relies
+ * on not being guessable. Browsers cannot set an Authorization header on
+ * an <img src>, so the frontend passes the access token as the `?token=`
+ * query parameter the gateway already accepts (same as the documents
+ * service); the iOS client sends a normal bearer header.
  */
 export const renderPhotoTransformed = api.raw(
-  { expose: true, method: "GET", path: "/photos/:id/render", auth: false },
+  { expose: true, method: "GET", path: "/photos/:id/render", auth: true },
   async (req, res) => {
     if (writeMaintenanceResponseIfActive(res)) return;
+    if (!writeAuthorizedPhotoViewerOrRespond(res)) return;
     try {
       const url = new URL(req.url || "", `http://${req.headers.host}`);
       // api.raw doesn't surface path params; parse `:id` from the URL.
@@ -1174,11 +1210,15 @@ export const computeAutoLevels = api(
  * /photos/:id/render but: no `w` parameter, no caching, sends
  * Content-Disposition: attachment so the browser saves the file. Used
  * for "Download with my edits" / share workflows.
+ *
+ * Requires authentication for the same reason as /photos/:id/render: it is
+ * addressed by the sequential photo id and returns full-resolution bytes.
  */
 export const exportPhotoTransformed = api.raw(
-  { expose: true, method: "GET", path: "/photos/:id/export", auth: false },
+  { expose: true, method: "GET", path: "/photos/:id/export", auth: true },
   async (req, res) => {
     if (writeMaintenanceResponseIfActive(res)) return;
+    if (!writeAuthorizedPhotoViewerOrRespond(res)) return;
     try {
       const url = new URL(req.url || "", `http://${req.headers.host}`);
       const match = url.pathname.match(/\/photos\/(\d+)\/export$/);
