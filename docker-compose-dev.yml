@@ -104,13 +104,17 @@ services:
   # ── PostgreSQL ─────────────────────────────────────────────────────────────
   postgres:
     image: pgvector/pgvector:pg18
-    container_name: fk-encore-db
+    container_name: fk-encore-db-test
     restart: unless-stopped
+    # Was "fk-encore-db" on "5432:5432", contradicting the header above and
+    # colliding with the production stack on the same host — the test stack
+    # could end up talking to prod's database, or refuse to start. Now the
+    # shifted port the header documents, on loopback like prod.
     ports:
-      - "5432:5432"
+      - "${DEPLOY_BIND_POSTGRES:-127.0.0.1}:${DEPLOY_HOST_PORT_POSTGRES:-15432}:5432"
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: encore          # primary database for the app
     volumes:
       - fk_pgdata:/var/lib/postgresql

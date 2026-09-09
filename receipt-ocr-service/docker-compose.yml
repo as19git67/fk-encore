@@ -12,8 +12,9 @@ services:
       LOG_LEVEL: INFO
     # Host port 8003 — distinct from the llm-service so both can run side by
     # side locally without colliding.
+    # Loopback only — the service has no authentication of its own.
     ports:
-      - "8003:8000"
+      - "127.0.0.1:8003:8000"
     volumes:
       - receipt_ocr_models:/models
 
