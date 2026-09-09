@@ -13,6 +13,7 @@ import DocumentFilterMenu from '../components/DocumentFilterMenu.vue'
 import DocumentScanQueuePanel from '../components/DocumentScanQueuePanel.vue'
 import DocumentThumbnail from '../components/DocumentThumbnail.vue'
 import AddToCollectionDialog from '../components/documents/AddToCollectionDialog.vue'
+import { listCollections, type DocumentCollection } from '../api/collections'
 import SortMenu from '../components/SortMenu.vue'
 import {
   listDocuments,
@@ -182,6 +183,57 @@ function clearSelection() {
   selectedIds.value = new Set()
 }
 
+/**
+ * Sammelmappen shown as their own rows above the documents.
+ *
+ * They are an additional layer, never a replacement: a document in a folder
+ * still appears below as itself, because a folder is a bundle for handing over
+ * rather than a filing location, and the same document may sit in several.
+ *
+ * The rows step aside while a document-facet filter (Kategorie, Absender,
+ * Steuer, Dokumentart, …) is active. A folder has none of those properties, so
+ * "matches if any member matches" would put a mostly unrelated folder at the
+ * top of a filtered view; the notice below the list says so rather than
+ * leaving the omission to be guessed.
+ */
+const collections = ref<DocumentCollection[]>([])
+
+/** Facets that describe a document and therefore cannot describe a folder. */
+function hasDocumentFacetFilter(): boolean {
+  const f = filter.applied.value
+  return Boolean(
+    f.category || (f.tags && f.tags.length > 0) || f.status || f.needs_review ||
+    f.unreviewed || f.sender || f.correspondent || f.dateFrom || f.dateTo ||
+    f.taxRelevant !== undefined || f.subjectPersonId || f.categorySource ||
+    f.documentType || f.collectionId || f.inCollection !== undefined,
+  )
+}
+
+const collectionFacetActive = computed(() => hasDocumentFacetFilter())
+const visibleCollections = computed(() =>
+  collectionFacetActive.value ? [] : collections.value,
+)
+
+async function loadCollections() {
+  try {
+    collections.value = (await listCollections(q.value.trim() || undefined)).items
+  } catch {
+    // The folder rows are an addition to the list, not a precondition for it:
+    // a failure here must not blank out the documents.
+    collections.value = []
+  }
+}
+
+function openCollection(id: number) {
+  router.push({ name: 'dokumente-mappe', params: { id } })
+}
+
+/** Jump from a chip straight into the folder-members view of the list. */
+function filterByCollection(id: number) {
+  filter.draft.value = { ...filter.applied.value, collectionId: id, inCollection: undefined }
+  filter.apply()
+}
+
 // "In Sammelmappe" gathers the checked documents into a folder that is later
 // handed over as a single PDF. Unlike the basket, membership is durable and a
 // document may sit in several folders at once.
@@ -306,6 +358,8 @@ function syncQueryParams() {
   if (fq.dateTo) query.dateTo = fq.dateTo
   if (fq.taxRelevant !== undefined) query.taxRelevant = String(fq.taxRelevant)
   if (fq.subjectPersonId) query.subjectPerson = String(fq.subjectPersonId)
+  if (fq.inCollection !== undefined) query.inCollection = String(fq.inCollection)
+  if (fq.collectionId) query.collection = String(fq.collectionId)
   const s = sort.applied.value
   if (s.field !== 'uploaded_at' || s.direction !== 'desc') {
     query.sortBy = s.field
@@ -349,12 +403,15 @@ function currentFilterParams() {
     subject_person_id: f.subjectPersonId,
     category_source: f.categorySource as any,
     document_type: f.documentType,
+    in_collection: f.inCollection,
+    collection_id: f.collectionId,
   }
 }
 
 async function load() {
   loading.value = true
   error.value = ''
+  void loadCollections()
   try {
     const filterParams = currentFilterParams()
     if (isSearchActive.value) {
@@ -774,6 +831,39 @@ onMounted(async () => {
       />
     </div>
 
+    <!-- Sammelmappen: an extra layer above the documents, never a replacement -->
+    <div v-if="!loading && visibleCollections.length > 0" class="collection-strip">
+      <button
+        v-for="c in visibleCollections"
+        :key="c.id"
+        type="button"
+        class="collection-row"
+        @click="openCollection(c.id)"
+      >
+        <span class="collection-icon"><i class="pi pi-folder" /></span>
+        <span class="collection-body">
+          <span class="collection-title">
+            {{ c.title }}
+            <Tag value="Sammelmappe" severity="secondary" />
+            <Tag v-if="c.visibility === 'group'" value="Gruppe" icon="pi pi-users" severity="info" />
+          </span>
+          <span v-if="c.summary" class="collection-summary">{{ c.summary }}</span>
+          <span class="collection-meta">
+            <i class="pi pi-file" />
+            {{ c.included_count }} von {{ c.item_count }}
+            {{ c.item_count === 1 ? 'Dokument' : 'Dokumenten' }} im PDF
+          </span>
+        </span>
+        <span class="collection-open"><i class="pi pi-angle-right" /></span>
+      </button>
+    </div>
+
+    <p v-else-if="!loading && collectionFacetActive && collections.length > 0" class="collection-hidden-note">
+      <i class="pi pi-info-circle" />
+      Sammelmappen werden bei aktivem Dokumentfilter nicht gezeigt — ein Filter fragt nach
+      Eigenschaften eines Dokuments, die eine Mappe nicht hat.
+    </p>
+
     <!-- List view -->
     <div v-if="!loading && items.length > 0 && viewMode === 'list'" class="document-list">
       <div
@@ -841,6 +931,18 @@ onMounted(async () => {
           <div v-if="doc.status === 'failed' && doc.last_error" class="document-error">
             <i class="pi pi-times-circle" /> {{ doc.last_error }}
           </div>
+          <div v-if="doc.collections.length > 0" class="document-collections">
+            <button
+              v-for="c in doc.collections"
+              :key="c.id"
+              type="button"
+              class="collection-chip"
+              v-tooltip.bottom="'Nur die Dokumente dieser Sammelmappe zeigen'"
+              @click.stop="filterByCollection(c.id)"
+            >
+              <i class="pi pi-folder" /> {{ c.title }}
+            </button>
+          </div>
           <div v-if="doc.tags.length > 0" class="document-tags">
             <Chip v-for="tag in doc.tags" :key="tag" :label="tag" />
           </div>
@@ -896,6 +998,10 @@ onMounted(async () => {
         <div v-if="doc.category_slug" class="grid-card-category">
           <i class="pi pi-folder" /> {{ doc.category_slug }}
         </div>
+        <div v-if="doc.collections.length > 0" class="grid-card-collections">
+          <i class="pi pi-folder" />
+          {{ doc.collections.map((c) => c.title).join(', ') }}
+        </div>
         <div v-if="doc.tags.length > 0" class="grid-card-tags">
           <Chip v-for="tag in doc.tags.slice(0, 3)" :key="tag" :label="tag" />
           <span v-if="doc.tags.length > 3" class="more-tags">+{{ doc.tags.length - 3 }}</span>
@@ -930,6 +1036,7 @@ onMounted(async () => {
       :known-tags="allKnownTags"
       :subject-people="subjectPeople"
       :correspondents="correspondents"
+      :collections="collections"
       @apply="applyFilterMenu"
       @reset="resetFilterMenu"
     />
@@ -945,6 +1052,107 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.collection-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.collection-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--p-content-border-color);
+  border-left: 3px solid var(--p-primary-color);
+  border-radius: 10px;
+  background: var(--p-content-background);
+  color: var(--p-text-color);
+  cursor: pointer;
+}
+.collection-row:hover {
+  background: var(--p-content-hover-background);
+}
+.collection-icon {
+  flex: 0 0 auto;
+  color: var(--p-primary-color);
+  font-size: 1.1rem;
+}
+.collection-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.collection-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+.collection-summary {
+  color: var(--p-text-muted-color);
+  font-size: 0.82rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.collection-meta {
+  color: var(--p-text-muted-color);
+  font-size: 0.78rem;
+}
+.collection-meta i {
+  margin-right: 3px;
+}
+.collection-open {
+  flex: 0 0 auto;
+  color: var(--p-text-muted-color);
+}
+.collection-hidden-note {
+  margin: 0 0 12px;
+  color: var(--p-text-muted-color);
+  font-size: 0.8rem;
+}
+.collection-hidden-note i {
+  margin-right: 4px;
+}
+.document-collections {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 4px;
+}
+.collection-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--p-content-border-color);
+  background: var(--p-content-hover-background);
+  color: var(--p-text-muted-color);
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+.collection-chip:hover {
+  color: var(--p-primary-color);
+  border-color: var(--p-primary-color);
+}
+.grid-card-collections {
+  color: var(--p-text-muted-color);
+  font-size: 0.74rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.grid-card-collections i {
+  margin-right: 3px;
+}
 .documents-view {
   display: flex;
   flex-direction: column;

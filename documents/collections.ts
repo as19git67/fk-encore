@@ -25,8 +25,8 @@
  */
 
 import fs from "fs";
-import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
-import { api, APIError } from "encore.dev/api";
+import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
+import { api, APIError, type Query } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import db from "../db/database";
@@ -384,9 +384,20 @@ async function loadItems(collectionId: number): Promise<CollectionItemDTO[]> {
 
 // ─── Endpoints ──────────────────────────────────────────────────────────────
 
+export interface ListCollectionsQuery {
+  /**
+   * Free-text filter over the folder's own words — title, note, generated
+   * summary. Deliberately not over the member documents: a folder that
+   * matched because one of forty documents mentions the term would be a
+   * result nobody can explain, and the document itself is already in the
+   * document results.
+   */
+  q?: Query<string>;
+}
+
 export const listCollections = api(
   { expose: true, method: "GET", path: "/document-collections", auth: true },
-  async (): Promise<ListCollectionsResponse> => {
+  async ({ q }: ListCollectionsQuery): Promise<ListCollectionsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -410,11 +421,22 @@ export const listCollections = api(
           )!
         : ownPrivate;
 
+    const term = (q ?? "").trim();
+    const textMatch = term
+      ? or(
+          ilike(documentCollections.title, `%${term}%`),
+          ilike(documentCollections.notes, `%${term}%`),
+          ilike(documentCollections.summary, `%${term}%`),
+        )!
+      : undefined;
+    const finalWhere =
+      where && textMatch ? and(where, textMatch)! : (textMatch ?? where);
+
     const rows = await dbAll<CollectionRow>(
       db
         .select()
         .from(documentCollections)
-        .where(where)
+        .where(finalWhere)
         .orderBy(desc(documentCollections.updated_at)),
     );
     const items = await Promise.all(rows.map((row) => toSummaryDTO(row, userId, isAdmin)));
@@ -881,6 +903,120 @@ export const listCollectionsForDocument = api(
     return { items: readable };
   },
 );
+
+// ─── Collections as seen from a document ────────────────────────────────────
+
+/** A folder as it appears next to a document in the list. */
+export interface DocumentCollectionBadge {
+  id: number;
+  title: string;
+  visibility: "private" | "group";
+}
+
+/**
+ * Which readable folders each of these documents sits in.
+ *
+ * Batched like `fetchTagsForDocuments`: the document list would otherwise ask
+ * once per row. Readability is applied here rather than left to the caller —
+ * a group folder somebody else made must not name itself on a document just
+ * because that document is visible.
+ */
+export async function fetchCollectionsForDocuments(
+  documentIds: number[],
+  userId: number,
+  groupIds: number[],
+  isAdmin = false,
+): Promise<Map<number, DocumentCollectionBadge[]>> {
+  const map = new Map<number, DocumentCollectionBadge[]>();
+  if (documentIds.length === 0) return map;
+
+  const readable = isAdmin
+    ? undefined
+    : groupIds.length > 0
+      ? or(
+          and(
+            eq(documentCollections.visibility, "private"),
+            eq(documentCollections.user_id, userId),
+          ),
+          and(
+            eq(documentCollections.visibility, "group"),
+            inArray(documentCollections.group_id, groupIds),
+          ),
+        )!
+      : and(
+          eq(documentCollections.visibility, "private"),
+          eq(documentCollections.user_id, userId),
+        )!;
+
+  const rows = await dbAll<{
+    document_id: number;
+    id: number;
+    title: string;
+    visibility: "private" | "group";
+  }>(
+    db
+      .select({
+        document_id: documentCollectionItems.document_id,
+        id: documentCollections.id,
+        title: documentCollections.title,
+        visibility: documentCollections.visibility,
+      })
+      .from(documentCollectionItems)
+      .innerJoin(
+        documentCollections,
+        eq(documentCollections.id, documentCollectionItems.collection_id),
+      )
+      .where(
+        readable
+          ? and(inArray(documentCollectionItems.document_id, documentIds), readable)
+          : inArray(documentCollectionItems.document_id, documentIds),
+      )
+      .orderBy(asc(documentCollections.title)),
+  );
+  for (const row of rows) {
+    const list = map.get(row.document_id) ?? [];
+    list.push({ id: row.id, title: row.title, visibility: row.visibility });
+    map.set(row.document_id, list);
+  }
+  return map;
+}
+
+/**
+ * WHERE fragment for the "In Sammelmappe" filter on the document list.
+ *
+ * The filter is explicit on purpose: documents in a folder are never hidden by
+ * themselves — a folder is a bundle for handing over, not a filing location,
+ * and a document may sit in several at once. Somebody who wants the list
+ * thinned out says so, sees the filter chip, and can take it back.
+ *
+ * `collection_id` wins over `in_collection` when both are given: naming a
+ * folder is the more specific request.
+ */
+export function collectionMembershipCondition(opts: {
+  in_collection?: boolean;
+  collection_id?: number;
+}): SQL | null {
+  if (opts.collection_id != null && Number.isFinite(opts.collection_id)) {
+    return sql`EXISTS (
+      SELECT 1 FROM document_collection_items dci
+      WHERE dci.document_id = ${documents.id}
+        AND dci.collection_id = ${opts.collection_id}
+    )`;
+  }
+  if (opts.in_collection === true) {
+    return sql`EXISTS (
+      SELECT 1 FROM document_collection_items dci
+      WHERE dci.document_id = ${documents.id}
+    )`;
+  }
+  if (opts.in_collection === false) {
+    return sql`NOT EXISTS (
+      SELECT 1 FROM document_collection_items dci
+      WHERE dci.document_id = ${documents.id}
+    )`;
+  }
+  return null;
+}
 
 // ─── Export ─────────────────────────────────────────────────────────────────
 
