@@ -221,6 +221,12 @@ function fillBlock(args: FillArgs): PlannedBlock {
         : (bestRoute(args.start, chosen, args.returnTo, args.mode)?.totalMinutes ?? 0);
       const cost = route.totalMinutes - currentCost;
       const value = candidate.score * args.diversityDecay ** countCategory(chosen, candidate.category);
+      // Room in the day is not a reason to go somewhere nobody wants to
+      // go. Every candidate the search produces starts positive
+      // (candidates.ts), so this excludes exactly one thing: a spot the
+      // group voted below zero (§6.1). It is still not a veto — enough
+      // "will ich" lifts it back over the line and it is placed again.
+      if (value <= 0) continue;
       // A zero-cost stop cannot happen (dwell is positive), but guard
       // anyway rather than divide by zero.
       const ratio = cost > 0 ? value / cost : value;

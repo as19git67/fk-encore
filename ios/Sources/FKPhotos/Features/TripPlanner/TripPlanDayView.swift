@@ -96,6 +96,16 @@ struct TripPlanDayView: View {
                         } label: {
                             Label("Wer plant mit", systemImage: "person.2")
                         }
+                        // Everybody rates, nobody is averaged away
+                        // (§6.1). Voting does not re-plan; the screen
+                        // has a button for that.
+                        NavigationLink {
+                            TripBallotView(planId: viewModel.planId) {
+                                Task { await viewModel.load() }
+                            }
+                        } label: {
+                            Label("Abstimmen", systemImage: "hand.thumbsup")
+                        }
                         // Who is actually coming (§3.5) — a child
                         // under ten makes the blocks shorter, so this
                         // re-plans the trip.
