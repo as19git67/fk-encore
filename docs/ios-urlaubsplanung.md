@@ -610,12 +610,24 @@ nicht jede Reise soll sich nach dem Sonnenstand richten.
   Hinweis am Zeit-Regler der Tageskarte (§8.3), der zu jeder Uhrzeit
   sagt, welches Fenster gerade läuft. Ohne Datum sagt er *nichts*, statt
   „kein besonderes Lichtfenster" zu behaupten.
-- **Weg 2, der kleine Ranking-Bonus** (`scoreForLight`) — bewusst eng
-  gefasst: nur wo die Ausrichtung tatsächlich bekannt ist (Fassadenazimut
-  aus dem Import) und nur, wenn die Sonne in einem goldenen Fenster
-  frontal oder streifend darauf steht. Ein als Knoten erfasster Spot
-  bekommt nichts; ein Bonus für alle wäre kein Vorzug, sondern Rauschen
-  mit Begründungstext.
+- **Weg 2, der kleine Ranking-Bonus** (`scoreForLight`) — und der gilt
+  **nur an Spots, die jemand als „Fotostopp" markiert hat**. Das ist
+  eine Korrektur an §7.3 aus der Erprobung: Die Route wird nach Wegen
+  geplant, Punkt; das Licht ist die Ausnahme, und eine Ausnahme, die
+  für alles gilt, ist keine. Ein Bonus für jeden Spot hebt ohnehin nur
+  das ganze Feld und ändert nichts außer der Arithmetik — eine Marke an
+  *einem* Ort dagegen ist eine Aussage, die jemand wirklich getroffen
+  hat.
+
+  Der Schalter sitzt am Spot (Vorrat wie Plan) und liegt neben der
+  Notiz in `trip_spot_notes` (Migration 0175) — aus demselben Grund wie
+  die Notiz: Eine Stoppzeile überlebt keine Neuplanung, „hierher gehen
+  wir wegen des Abendlichts" schon. Zwei Einschränkungen bleiben auch
+  am markierten Spot: Es braucht ein bekanntes **Fassadenazimut**, und
+  belohnt wird nur ein **goldenes** Fenster, frontal (+0,75) oder
+  streifend (+0,4). Ein als Knoten erfasster Spot bekommt nichts, auch
+  markiert nicht — über die Sonne an einem Umriss, den niemand kennt,
+  ist nichts zu sagen.
 
 **Weg 1 (Reihenfolge im Block) und Weg 3 (Abendblock-Vorschlag)** bleiben
 zurückgestellt: Beide versprechen eine *Minute*, und dafür fehlt das

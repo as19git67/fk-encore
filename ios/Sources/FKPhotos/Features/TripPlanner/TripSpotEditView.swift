@@ -17,16 +17,20 @@ struct TripSpotEdit: Identifiable, Equatable, Sendable {
     var note: String
     var url: String
     var dwellMinutes: Int
+    /// "We come here for the light" (§7.3) — the one thing that lets
+    /// the sun weigh in on where this spot lands.
+    var photoStop: Bool
 
     var id: String { osmRef }
 
     init(osmRef: String, title: String = "", note: String = "", url: String = "",
-         dwellMinutes: Int = 45) {
+         dwellMinutes: Int = 45, photoStop: Bool = false) {
         self.osmRef = osmRef
         self.title = title
         self.note = note
         self.url = url
         self.dwellMinutes = dwellMinutes
+        self.photoStop = photoStop
     }
 
     /// What the sheet opens with: the spot's own title if the group
@@ -40,6 +44,7 @@ struct TripSpotEdit: Identifiable, Equatable, Sendable {
             note: spot.note ?? "",
             url: spot.sourceUrl ?? "",
             dwellMinutes: spot.dwellMinutes,
+            photoStop: spot.photoStop,
         )
     }
 
@@ -127,6 +132,22 @@ struct TripSpotEditView: View {
                 Text("Aufenthalt")
             } footer: {
                 Text("Wie lange ihr voraussichtlich dort seid.")
+            }
+
+            Section {
+                Toggle(isOn: $edit.photoStop) {
+                    Label("Fotostopp", systemImage: "camera")
+                }
+            } header: {
+                Text("Licht")
+            } footer: {
+                // The switch says what it does and what it does not:
+                // the route is planned by distance, and this is the one
+                // exception — for this spot, not for the trip (§7.3).
+                Text("Der Planer geht nach Wegen, nicht nach Licht. Hier gesetzt, "
+                     + "bevorzugt er diesen Ort, wenn er am Reisetag im goldenen Licht "
+                     + "steht — ein Vorzug, kein Termin, und ohne Berücksichtigung von "
+                     + "Bergen oder Häusern.")
             }
         }
         .navigationTitle("Notiz zum Spot")

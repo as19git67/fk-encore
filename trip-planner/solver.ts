@@ -45,6 +45,12 @@ export interface Candidate extends Coordinate {
    * hand, which has no OSM entry behind it.
    */
   kind?: string | null;
+  /**
+   * Somebody marked this one as a photo stop (§7.3): the light may
+   * have a say here, and nowhere else. Absent for a candidate fresh
+   * out of the region search — the flag is written by hand.
+   */
+  photoStop?: boolean;
   /** Category id from the geo search, e.g. "museum". */
   category: string;
   /** How long one typically stays, in minutes. */
@@ -64,6 +70,8 @@ export interface PlannedStop {
   facadeAzimuth?: number | null;
   /** See `Candidate.kind`. */
   kind?: string | null;
+  /** See `Candidate.photoStop`. */
+  photoStop?: boolean;
   lat: number;
   lon: number;
   category: string;

@@ -192,6 +192,48 @@ describe("writing something about a spot", () => {
     expect(find(await getTripPlan({ planId: plan.id }).then((r) => r.plan), osmRef).note).toBeNull();
   });
 
+  it("marks a spot as one you come to for the light", async () => {
+    const plan = await plannedTrip();
+    const osmRef = anyRef(plan);
+
+    const { spotNote } = await saveTripSpotNote({
+      planId: plan.id, legIndex: 0, osmRef, photoStop: true,
+    });
+
+    expect(spotNote?.photoStop).toBe(true);
+    expect(find(await getTripPlan({ planId: plan.id }).then((r) => r.plan), osmRef).photoStop)
+      .toBe(true);
+  });
+
+  it("keeps the photo stop even when there is nothing written about the spot", async () => {
+    // An otherwise empty row would be deleted as "nothing to say" —
+    // but the mark *is* something to say.
+    const plan = await plannedTrip();
+    const osmRef = anyRef(plan);
+    await saveTripSpotNote({ planId: plan.id, legIndex: 0, osmRef, photoStop: true });
+
+    const { spotNote } = await saveTripSpotNote({
+      planId: plan.id, legIndex: 0, osmRef, note: "",
+    });
+
+    expect(spotNote?.photoStop).toBe(true);
+  });
+
+  it("takes the photo stop back off again", async () => {
+    const plan = await plannedTrip();
+    const osmRef = anyRef(plan);
+    await saveTripSpotNote({ planId: plan.id, legIndex: 0, osmRef, photoStop: true });
+
+    const { spotNote } = await saveTripSpotNote({
+      planId: plan.id, legIndex: 0, osmRef, photoStop: false,
+    });
+
+    // Nothing else was ever written here, so the row goes with it.
+    expect(spotNote).toBeNull();
+    expect(find(await getTripPlan({ planId: plan.id }).then((r) => r.plan), osmRef).photoStop)
+      .toBe(false);
+  });
+
   it("survives a re-plan", async () => {
     // Every settings change deletes the day's stops and writes them
     // again. A note kept on the row would last exactly until then.
@@ -205,6 +247,19 @@ describe("writing something about a spot", () => {
 
     const { plan: after } = await getTripPlan({ planId: plan.id });
     expect(find(after, osmRef).note).toBe("Eingang um die Ecke.");
+  });
+
+  it("keeps the photo stop across a re-plan too", async () => {
+    // The mark decides how the *next* plan is built, so losing it in
+    // the rebuild would make it useless exactly when it matters.
+    const plan = await plannedTrip();
+    const osmRef = anyRef(plan);
+    await saveTripSpotNote({ planId: plan.id, legIndex: 0, osmRef, photoStop: true });
+
+    await updateTripSettings({ planId: plan.id, pace: "relaxed" });
+
+    const { plan: after } = await getTripPlan({ planId: plan.id });
+    expect(find(after, osmRef).photoStop).toBe(true);
   });
 
   it("follows the spot from the pool onto a day", async () => {

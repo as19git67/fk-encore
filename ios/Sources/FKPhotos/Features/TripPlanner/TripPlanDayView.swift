@@ -641,6 +641,12 @@ struct TripPlanDayView: View {
                 if stop.pinned {
                     Image(systemName: "pin.fill").foregroundStyle(.orange)
                 }
+                if stop.isPhotoStop {
+                    Image(systemName: "camera.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Fotostopp")
+                }
                 // The same screen a pool candidate opens: "where is
                 // that, and why is it on the list" is one question, and
                 // answering it twice is how two screens drift apart.

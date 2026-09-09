@@ -2926,6 +2926,10 @@ export const tripSpotNotes = pgTable(
     note: text("note"),
     url: text("url"),
     dwell_minutes: integer("dwell_minutes"),
+    // "The light matters here" — set by hand, per spot (§7.3). The
+    // planner routes by distance; this is the exception that says the
+    // sun may have a say about this one place.
+    photo_stop: boolean("photo_stop").notNull().default(false),
     updated_by: integer("updated_by").references(() => users.id, { onDelete: "set null" }),
     updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
   },
