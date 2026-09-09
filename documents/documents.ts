@@ -110,6 +110,11 @@ import {
 import { DOCUMENT_TYPES, isValidDocumentTypeSlug } from "./document-types";
 import { retentionFor, retainUntilYear } from "./retention";
 import { isSuggestionVisible, recordUserCategoryProposal } from "./suggestion-writer";
+import {
+  collectionMembershipCondition,
+  fetchCollectionsForDocuments,
+  type DocumentCollectionBadge,
+} from "./collections";
 
 const _require = createRequire(import.meta.url);
 type HeicConvertFn = (opts: {
@@ -194,6 +199,13 @@ export interface DocumentSummary {
   attributes_reviewed: boolean;
   /** Who last set the category: 'ai' (local model), 'cloud' (Cloud Teacher), 'user' (human). */
   category_source: "ai" | "cloud" | "user";
+  /**
+   * Sammelmappen this document sits in, as far as the caller may see them.
+   * A document is never hidden from the list because it is in one — a folder
+   * is a bundle for handing over, not a filing location, and the same
+   * document may sit in several. Shown as a chip on the row instead.
+   */
+  collections: DocumentCollectionBadge[];
 }
 
 export interface DocumentTaxSectionDTO {
@@ -346,6 +358,14 @@ interface ListQuery {
   category_source?: Query<string>;
   /** Filter by document-type facet slug (Dokumentart), see migration 0139. */
   document_type?: Query<string>;
+  /**
+   * `in_collection=false` keeps only documents that are in no Sammelmappe —
+   * the explicit way to thin the list out. `true` keeps only the bundled
+   * ones. Omitted means: both, which is the default.
+   */
+  in_collection?: Query<boolean>;
+  /** Keep only the members of this one Sammelmappe. Wins over `in_collection`. */
+  collection_id?: Query<number>;
   sort_by?: Query<string>;
   sort_dir?: Query<string>;
   limit?: Query<number>;
@@ -370,6 +390,8 @@ interface DocumentFilterArgs {
   subject_person_id?: number;
   category_source?: string;
   document_type?: string;
+  in_collection?: boolean;
+  collection_id?: number;
 }
 
 /**
@@ -449,6 +471,12 @@ async function buildDocumentFilterConditions(
   if (f.document_type && isValidDocumentTypeSlug(f.document_type)) {
     conds.push(eq(documents.document_type, f.document_type));
   }
+
+  const collectionCond = collectionMembershipCondition({
+    in_collection: f.in_collection,
+    collection_id: f.collection_id,
+  });
+  if (collectionCond) conds.push(collectionCond);
 
   const tagList = f.tags
     ? f.tags.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean)
@@ -1133,7 +1161,7 @@ export function sortDocumentSummaries<T extends DocumentSummary>(
 
 export const listDocuments = api(
   { expose: true, method: "GET", path: "/documents", auth: true },
-  async ({ category, tags, q, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, sort_by, sort_dir, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
+  async ({ category, tags, q, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, in_collection, collection_id, sort_by, sort_dir, limit, offset }: ListQuery): Promise<ListDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -1148,7 +1176,7 @@ export const listDocuments = api(
       : [visibleDocumentsWhere(userId, groupIds)];
 
     const filterConds = await buildDocumentFilterConditions({
-      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type,
+      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, in_collection, collection_id,
     });
     if (filterConds === null) {
       // A requested tag doesn't exist — nothing can match.
@@ -1224,6 +1252,7 @@ export const listDocuments = api(
 
     const ids = rows.map((r) => r.id);
     const tagsByDoc = await fetchTagsForDocuments(ids);
+    const collectionsByDoc = await fetchCollectionsForDocuments(ids, userId, groupIds, isAdmin);
 
     const countWhere = conds.length > 0
       ? sql.join(conds.map((c) => sql`(${c})`), sql` AND `)
@@ -1235,7 +1264,9 @@ export const listDocuments = api(
     ).rows[0];
 
     return {
-      items: rows.map((r) => toSummary(r as any, r.cat_slug, tagsByDoc.get(r.id) ?? [])),
+      items: rows.map((r) =>
+        toSummary(r as any, r.cat_slug, tagsByDoc.get(r.id) ?? [], collectionsByDoc.get(r.id) ?? []),
+      ),
       total: parseInt(total?.count ?? "0", 10),
     };
   },
@@ -3249,9 +3280,17 @@ export const listTaxDocuments = api(
 
     const docIds = docRows.map((r) => r.id);
     const tagsByDoc = await fetchTagsForDocuments(docIds);
+    const collectionsByDoc = await fetchCollectionsForDocuments(
+      docIds,
+      userId,
+      await loadUserGroupIds(userId),
+    );
     const summaryById = new Map<number, DocumentSummary>();
     for (const r of docRows) {
-      summaryById.set(r.id, toSummary(r as any, r.cat_slug, tagsByDoc.get(r.id) ?? []));
+      summaryById.set(
+        r.id,
+        toSummary(r as any, r.cat_slug, tagsByDoc.get(r.id) ?? [], collectionsByDoc.get(r.id) ?? []),
+      );
     }
 
     const assignments = await dbAll<{
@@ -3398,6 +3437,9 @@ interface SearchQuery {
   subject_person_id?: Query<number>;
   category_source?: Query<string>;
   document_type?: Query<string>;
+  /** See `ListQuery` — the same Sammelmappen filter applies to search results. */
+  in_collection?: Query<boolean>;
+  collection_id?: Query<number>;
   // Optional override of the relevance ranking, mirrored from `ListQuery`
   // (otherwise a sort chosen in the list view was silently dropped once a
   // search term was active — sorting only ever worked on the plain list).
@@ -3418,7 +3460,7 @@ interface SearchQuery {
  */
 export const searchDocumentsEndpoint = api(
   { expose: true, method: "GET", path: "/documents/search", auth: true },
-  async ({ q, mode, limit, category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, sort_by, sort_dir }: SearchQuery): Promise<SearchDocumentsResponse> => {
+  async ({ q, mode, limit, category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, in_collection, collection_id, sort_by, sort_dir }: SearchQuery): Promise<SearchDocumentsResponse> => {
     checkModule();
     const authData = getAuthData()!;
     requirePermission(authData, "documents.view");
@@ -3433,7 +3475,7 @@ export const searchDocumentsEndpoint = api(
     }
 
     const filterConds = await buildDocumentFilterConditions({
-      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type,
+      category, tags, status, needs_review, unreviewed, sender, correspondent, date_from, date_to, tax_relevant, subject_person_id, category_source, document_type, in_collection, collection_id,
     });
     if (filterConds === null) {
       // A requested tag doesn't exist — nothing can match.
@@ -3496,6 +3538,7 @@ export const searchDocumentsEndpoint = api(
     for (const r of rows) byId.set(r.id, r);
 
     const tagsByDoc = await fetchTagsForDocuments(ids);
+    const collectionsByDoc = await fetchCollectionsForDocuments(ids, userId, groupIds);
 
     // Preserve the ranked order — Postgres' WHERE IN is unordered.
     const items = hits
@@ -3503,7 +3546,7 @@ export const searchDocumentsEndpoint = api(
         const r = byId.get(h.document_id);
         if (!r) return null;
         return {
-          ...toSummary(r as any, r.cat_slug, tagsByDoc.get(r.id) ?? []),
+          ...toSummary(r as any, r.cat_slug, tagsByDoc.get(r.id) ?? [], collectionsByDoc.get(r.id) ?? []),
           extracted_text_preview: documentTextPreview(r.summary ?? r.extracted_text),
         };
       })
@@ -4327,6 +4370,11 @@ async function loadDetail(userId: number, id: number, isAdmin = false): Promise<
       )
     : undefined;
   const tagsMap = await fetchTagsForDocuments([id]);
+  const collectionsMap = await fetchCollectionsForDocuments(
+    [id],
+    userId,
+    await loadUserGroupIds(userId),
+  );
   const taxSections = await fetchTaxSectionsForDocument(id);
   const subjectPersons = await fetchSubjectPersonsForDocument(id);
   const preview = (row.extracted_text ?? "").slice(0, 2000);
@@ -4336,7 +4384,7 @@ async function loadDetail(userId: number, id: number, isAdmin = false): Promise<
     taxRelevant: row.tax_relevant ?? false,
   });
   return {
-    ...toSummary(row, cat?.slug ?? null, tagsMap.get(id) ?? []),
+    ...toSummary(row, cat?.slug ?? null, tagsMap.get(id) ?? [], collectionsMap.get(id) ?? []),
     summary: row.summary,
     extracted_text_preview: preview.length > 0 ? preview : null,
     letterhead: toLetterheadDTO(row.letterhead),
@@ -4394,6 +4442,7 @@ export function toSummary(
   row: typeof documents.$inferSelect,
   categorySlug: string | null,
   tags: string[],
+  collections: DocumentCollectionBadge[] = [],
 ): DocumentSummary {
   return {
     id: row.id,
@@ -4421,6 +4470,7 @@ export function toSummary(
     notes: row.notes ?? null,
     attributes_reviewed: row.attributes_reviewed ?? false,
     category_source: row.category_source ?? "ai",
+    collections,
   };
 }
 

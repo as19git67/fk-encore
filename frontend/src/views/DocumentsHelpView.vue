@@ -267,6 +267,22 @@ function goBack() {
           nie gespeichert. Auf iOS öffnet „PDF teilen" das native Share-Sheet.
         </li>
         <li>
+          <strong>In der Dokumentenliste</strong> – Sammelmappen erscheinen als
+          eigene Zeilen über den Dokumenten, die Suche findet sie über Titel,
+          Notiz und Zusammenfassung. Dokumente in einer Mappe bleiben trotzdem
+          einzeln in der Liste: eine Mappe ist ein Bündel zur Weitergabe, kein
+          Ablageort, und dasselbe Dokument darf in mehreren liegen. Jede
+          Dokumentzeile zeigt ihre Mappen als anklickbaren Chip.
+        </li>
+        <li>
+          <strong>Filter „Sammelmappe"</strong> – „Nur ohne Sammelmappe"
+          blendet die gebündelten Dokumente aus, „Nur in einer Sammelmappe"
+          umgekehrt, und eine benannte Mappe zeigt genau deren Dokumente. Bei
+          aktivem Dokumentfilter treten die Mappen-Zeilen zurück, weil ein
+          Filter nach Eigenschaften fragt, die ein Dokument hat und eine Mappe
+          nicht.
+        </li>
+        <li>
           <strong>Sichtbarkeit</strong> – privat oder für eine Gruppe. Eine
           Gruppenmappe darf nur Dokumente enthalten, die mit derselben Gruppe
           geteilt sind; sonst stünden Titel und Zusammenfassung für Unterlagen,

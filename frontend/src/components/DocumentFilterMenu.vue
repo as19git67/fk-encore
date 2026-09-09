@@ -22,6 +22,8 @@ const props = defineProps<{
   knownTags: string[]
   subjectPeople: SubjectPerson[]
   correspondents: { slug: string; display: string; count: number }[]
+  /** Sammelmappen the caller can pick from, for the membership facet. */
+  collections: { id: number; title: string }[]
 }>()
 
 const emit = defineEmits<{
@@ -138,6 +140,35 @@ const subjectOptions = computed<Array<{ label: string; value: number | null }>>(
   { label: 'Alle', value: null },
   ...props.subjectPeople.map((p) => ({ label: p.full_name, value: p.id })),
 ])
+
+/**
+ * The Sammelmappen facet as one control: "alle" (no opinion), "keine" (only
+ * documents outside every folder — the way to thin the list out), or one named
+ * folder. A named folder supersedes the yes/no question, so they share a
+ * dropdown rather than fighting each other as two.
+ */
+const collectionOptions = computed<Array<{ label: string; value: string }>>(() => [
+  { label: 'Alle Dokumente', value: '' },
+  { label: 'Nur ohne Sammelmappe', value: 'none' },
+  { label: 'Nur in einer Sammelmappe', value: 'any' },
+  ...props.collections.map((c) => ({ label: c.title, value: `id:${c.id}` })),
+])
+
+function collectionSelection(f: DocumentFilter): string {
+  if (f.collectionId) return `id:${f.collectionId}`
+  if (f.inCollection === true) return 'any'
+  if (f.inCollection === false) return 'none'
+  return ''
+}
+
+function applyCollectionSelection(value: string): DocumentFilter {
+  if (value.startsWith('id:')) {
+    return { ...local.value, collectionId: Number(value.slice(3)), inCollection: undefined }
+  }
+  if (value === 'any') return { ...local.value, collectionId: undefined, inCollection: true }
+  if (value === 'none') return { ...local.value, collectionId: undefined, inCollection: false }
+  return { ...local.value, collectionId: undefined, inCollection: undefined }
+}
 
 const documentTypeOptions = computed<Array<{ label: string; value: string }>>(() => [
   { label: 'Alle', value: '' },
@@ -256,6 +287,18 @@ function handleReset() {
           option-value="value"
           filter
           @update:model-value="(v: string) => local = { ...local, documentType: v || undefined }"
+        />
+      </div>
+
+      <div class="filter-row">
+        <label class="filter-label">Sammelmappe</label>
+        <Select
+          :model-value="collectionSelection(local)"
+          :options="collectionOptions"
+          option-label="label"
+          option-value="value"
+          filter
+          @update:model-value="(v: string) => local = applyCollectionSelection(v)"
         />
       </div>
 

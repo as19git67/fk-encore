@@ -61,8 +61,16 @@ export interface DocumentCollectionRef {
   included: boolean
 }
 
-export function listCollections(): Promise<{ items: DocumentCollection[] }> {
-  return apiFetch<{ items: DocumentCollection[] }>('/document-collections')
+/**
+ * Every Sammelmappe the caller may read. `q` filters on the folder's own words
+ * — title, note, summary — never on the words of its member documents: a
+ * folder that matched because one of forty documents mentions the term would
+ * be a result nobody can explain, and the document itself is already in the
+ * document results.
+ */
+export function listCollections(q?: string): Promise<{ items: DocumentCollection[] }> {
+  const qs = q && q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''
+  return apiFetch<{ items: DocumentCollection[] }>(`/document-collections${qs}`)
 }
 
 export function getCollection(id: number): Promise<DocumentCollectionDetail> {
