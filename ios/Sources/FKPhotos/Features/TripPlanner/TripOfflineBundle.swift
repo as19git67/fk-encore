@@ -25,7 +25,7 @@ struct TripOfflineBundle: Codable, Sendable {
 
     /// The light of one day, or nil when the bundle has none for it —
     /// an undated trip, or a day still at trip resolution (§4.3).
-    func light(legIndex: Int, dayIndex: Int) -> TripDayLight? {
+    func lightOfDay(legIndex: Int, dayIndex: Int) -> TripDayLight? {
         light.first { $0.legIndex == legIndex && $0.dayIndex == dayIndex }?.light
     }
 }
@@ -108,7 +108,7 @@ struct TripOfflineStore: Sendable {
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         try? url.setResourceValues(values)
-        return storedAt(planId) ?? Date()
+        return storedAt(planId: planId) ?? Date()
     }
 
     func load(planId: Int) -> TripOfflineSnapshot? {
@@ -116,7 +116,7 @@ struct TripOfflineStore: Sendable {
         guard let data = try? Data(contentsOf: url),
               let bundle = try? JSONDecoder().decode(TripOfflineBundle.self, from: data)
         else { return nil }
-        return TripOfflineSnapshot(bundle: bundle, storedAt: storedAt(planId) ?? Date())
+        return TripOfflineSnapshot(bundle: bundle, storedAt: storedAt(planId: planId) ?? Date())
     }
 
     func has(planId: Int) -> Bool {

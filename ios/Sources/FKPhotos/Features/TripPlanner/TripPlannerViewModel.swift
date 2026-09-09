@@ -165,7 +165,7 @@ final class TripPlannerViewModel {
                 offlineSince = snapshot.storedAt
                 bundleStoredAt = snapshot.storedAt
                 errorMessage = nil
-                light = snapshot.bundle.light(legIndex: legIndex, dayIndex: dayIndex)
+                light = snapshot.bundle.lightOfDay(legIndex: legIndex, dayIndex: dayIndex)
             } else {
                 errorMessage = error.localizedDescription
             }
@@ -253,7 +253,7 @@ final class TripPlannerViewModel {
         } catch {
             // Offline the sun is still arithmetic somebody already did
             // — it travelled with the bundle (§7.3).
-            light = offlineBundle?.light(legIndex: legIndex, dayIndex: dayIndex)
+            light = offlineBundle?.lightOfDay(legIndex: legIndex, dayIndex: dayIndex)
         }
     }
 

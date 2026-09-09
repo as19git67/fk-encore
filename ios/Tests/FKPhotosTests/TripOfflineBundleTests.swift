@@ -86,9 +86,9 @@ final class TripOfflineBundleTests: XCTestCase {
     func testTheLightOfADayIsFoundByItsPosition() throws {
         let bundle = try bundle()
 
-        XCTAssertEqual(bundle.light(legIndex: 0, dayIndex: 0)?.day, "2026-06-18")
-        XCTAssertNil(bundle.light(legIndex: 0, dayIndex: 1))
-        XCTAssertNil(bundle.light(legIndex: 1, dayIndex: 0))
+        XCTAssertEqual(bundle.lightOfDay(legIndex: 0, dayIndex: 0)?.day, "2026-06-18")
+        XCTAssertNil(bundle.lightOfDay(legIndex: 0, dayIndex: 1))
+        XCTAssertNil(bundle.lightOfDay(legIndex: 1, dayIndex: 0))
     }
 
     func testItNamesWhatItLeavesOut() throws {
