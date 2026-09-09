@@ -1,6 +1,6 @@
 # Urlaubsplanung („Spots & Blöcke") – Konzept
 
-Stand: 2026-09-07 · Status: Ideensammlung / Vorentwurf (Leitentscheidungen in
+Stand: 2026-09-09 · Status: Ideensammlung / Vorentwurf (Leitentscheidungen in
 §2 gesetzt, sonst offen) — Schritte 1–9 sind ganz oder teilweise gebaut; was
 in §13 unter „Umgesetzt" steht, existiert im Code, alles Übrige ist Entwurf.
 
@@ -502,19 +502,42 @@ Koordinate plus ein Datum. Das genügt für eine Stadtvorhersage und taugt nicht
 als Bewegungsprofil. Die Antwort wird pro Ort und Tag zwischengespeichert, ein
 Abruf pro Tag reicht.
 
-**Umgesetzt (Schritt 9):** Von den vier Wirkungen oben sind drei gebaut.
-Die Vorhersage selbst (`weather-client.ts`, `weather.ts`, Cache in Migration
-0172) und das Indoor/Outdoor-Attribut (`shelter.ts`, Migration 0173) liefern
-die Zahlen; `POST …/weather` sagt sie nur. Das Umsortieren und die
-Budgetkürzung tut `weather-shuffle.ts` — aber **auf Nachfrage**:
-`POST …/weather/proposal` rechnet und speichert nichts,
-`POST …/weather/apply` führt aus, nachdem gefragt wurde, und rechnet dabei
-neu statt den Vorschlag abzuspielen (§7.1: „ungefragt umzuräumen wäre
-übergriffig"). Es ist ein *Tausch*, kein Neuplanen: Der Rest des Tages
-bleibt, wie er war, und erledigte, übersprungene und angeheftete Stopps
-rührt es nie an. **Offen bleiben** der Tausch ganzer Regentage und die
-Klimanormalen jenseits von ~16 Tagen — bis die existieren, sagt der Planer
-dort nichts, statt einen Mittelwert zu erfinden.
+**Umgesetzt (Schritt 9):** Alle vier Wirkungen oben sind gebaut.
+Die Vorhersage selbst (`weather-client.ts`, `weather.ts`, Cache in
+Migration 0172) und das Indoor/Outdoor-Attribut (`shelter.ts`, Migration
+0173) liefern die Zahlen; `POST …/weather` sagt sie nur. Das Umsortieren
+und die Budgetkürzung tut `weather-shuffle.ts`, den Tausch ganzer
+Regentage `swapRainyDay` samt `weather-day-swap.ts` — beides **auf
+Nachfrage**: je ein `…/proposal`, das rechnet und nichts speichert, und
+ein `…/apply`, das ausführt, nachdem gefragt wurde, und dabei neu
+rechnet statt den Vorschlag abzuspielen (§7.1: „ungefragt umzuräumen
+wäre übergriffig").
+
+Beides sind *Tausche*, keine Neuplanungen, und beide lassen etwas
+bewusst stehen:
+
+- Innerhalb eines Tages bleibt der Rest des Tages, wie er war; erledigte,
+  übersprungene und angeheftete Stopps rührt es nie an.
+- Beim Tagestausch bleibt **der Rahmen bei seinem Datum**: Der letzte Zug
+  fährt donnerstags um 17:45, egal was der Himmel tut (§4.4). Es wandern
+  nur die Spots, Block gegen gleichnamigen Block, und die Wege werden neu
+  gerechnet. Passen die beiden Tage nicht gleich zugeschnitten
+  zusammen, lehnt der Tausch ab, statt einen Spot herausfallen zu
+  lassen — das ist eine Entscheidung der Reisenden, keine Nebenwirkung
+  des Wetters.
+- Ein Tag **ohne** Vorhersage nimmt am Tausch nicht teil, weder als
+  nasser noch als Ziel. „Wir wissen es nicht" ist nicht „es wird trocken"
+  (§15.3).
+
+**Klimanormale** jenseits des Vorhersagehorizonts beantwortet
+`POST /trip-planner/climate-normal` aus `climate-api.open-meteo.com` —
+Mitteltemperatur, Monatsniederschlag und Regentage für Region und Monat.
+Zwei ehrliche Vorbehalte: Die Quelle liefert für 1991–2020 einen
+**Modell-Hindcast**, keine Messreihe (eine Beobachtungsreihe käme aus
+`archive-api.open-meteo.com` und bräuchte einen weiteren Host in der
+Netzwerk-Policy), und **noch zieht niemand Konsequenzen daraus** — die
+Vorkehrungen aus §7.2 (genug Indoor-Kandidaten im Vorrat, ein
+Puffertag je Etappe) sind offen.
 
 ### 7.3 Licht: wann die Fotos gut werden
 
@@ -580,13 +603,29 @@ Uhrzeit, die man verpassen kann, entsteht erst, wenn der Nutzer Vorschlag 3
 annimmt — und dann hat er sie selbst gewollt. Abschaltbar in einem Schalter, denn
 nicht jede Reise soll sich nach dem Sonnenstand richten.
 
-**Umgesetzt (Schritt 9):** Von den vier Wegen oben ist genau einer gebaut —
-Weg 4, der Hinweis auf der Spot-Karte (`sun.ts`, `light.ts`, `POST …/light`,
-Fassadenazimut in Migration 0171). Die drei anderen ändern, was der Planer
-*tut*, und bleiben zurückgestellt, **solange das Horizontprofil fehlt**: ein
-Versprechen auf eine Minute, die im Tal längst im Schatten liegt, wäre ein
-Fehler in genau die unangenehme Richtung. Die Karte sagt das auch — „ein
-Hinweis, kein Termin — und ohne Berücksichtigung von Bergen oder Häusern".
+**Umgesetzt (Schritt 9):** Von den vier Wegen oben sind zwei gebaut.
+
+- **Weg 4, der Hinweis auf der Spot-Karte** (`sun.ts`, `light.ts`,
+  `POST …/light`, Fassadenazimut in Migration 0171) — und derselbe
+  Hinweis am Zeit-Regler der Tageskarte (§8.3), der zu jeder Uhrzeit
+  sagt, welches Fenster gerade läuft. Ohne Datum sagt er *nichts*, statt
+  „kein besonderes Lichtfenster" zu behaupten.
+- **Weg 2, der kleine Ranking-Bonus** (`scoreForLight`) — bewusst eng
+  gefasst: nur wo die Ausrichtung tatsächlich bekannt ist (Fassadenazimut
+  aus dem Import) und nur, wenn die Sonne in einem goldenen Fenster
+  frontal oder streifend darauf steht. Ein als Knoten erfasster Spot
+  bekommt nichts; ein Bonus für alle wäre kein Vorzug, sondern Rauschen
+  mit Begründungstext.
+
+**Weg 1 (Reihenfolge im Block) und Weg 3 (Abendblock-Vorschlag)** bleiben
+zurückgestellt: Beide versprechen eine *Minute*, und dafür fehlt das
+Horizontprofil. Die Rechnung dafür existiert inzwischen
+(`horizonAltitude`, zirkular interpoliert, und `lightWindows` schneidet
+das Fenster damit ab) — **was fehlt, ist der Erzeuger**: Bis das Profil
+beim Import einmal je Spot aus einem Höhenmodell bestimmt wird, kommt es
+nur als optionaler Parameter herein, und ohne es liegt der
+Aussichtspunkt im Tal längst im Schatten, während der Plan noch goldenes
+Licht verspricht.
 
 ## 8. Wie sich das in der iOS-App anfühlt
 
@@ -2177,10 +2216,15 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    abzuspielen: Ein Vorschlag, über den zehn Minuten nachgedacht wurde,
    handelt womöglich von einem Tag, der sich inzwischen geändert hat.
 
-   **Noch offen in diesem Schritt:** Klimanormale, das Horizontprofil,
-   der Zeit-Regler, der Tausch ganzer Regentage (§7.2) sowie die
-   planverändernden Wege des Lichts — Reihenfolge im Block,
-   Ranking-Bonus und Abendblock-Vorschlag (§7.3).
+   **Dazugekommen:** der Tausch ganzer Regentage (§7.2), der Zeit-Regler
+   mit Lichtfenster (§8.3), der Ranking-Bonus des Lichts und ein
+   Endpunkt für Klimanormale.
+
+   **Noch offen in diesem Schritt:** der **Erzeuger** des Horizontprofils
+   (die Rechnung steht, das Profil kommt aus keinem Höhenmodell), die
+   **Folgen** aus den Klimanormalen — Indoor-Vorrat und Puffertag in der
+   Reiseauflösung —, sowie die beiden Licht-Wege, die eine Minute
+   versprechen: Reihenfolge im Block und Abendblock-Vorschlag (§7.3).
 10. **Weitere Kontextsignale** — Dokumenten-Fixpunkte, Reisegruppe, dazu die
     **Reisebereitschafts-Prüfung** und die Packliste (§8.6), die beide nur
     vorhandene Zustände zusammentragen.

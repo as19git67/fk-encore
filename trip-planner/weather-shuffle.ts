@@ -69,6 +69,139 @@ export interface WeatherShuffleResult {
   unchanged: boolean;
 }
 
+/** One day of a leg, as the whole-day swap sees it. */
+export interface WeatherDay {
+  /** The day's index within the leg — how the plan addresses it. */
+  id: number;
+  blocks: readonly CurrentBlock[];
+}
+
+export interface WholeDaySwapRequest {
+  days: readonly WeatherDay[];
+  /**
+   * Average rain severity per day: 0 dry, 1 showers, 2 wet. **A day
+   * missing from this map has no forecast** and takes no part in the
+   * exchange — neither as the wet day nor as the dry one it moves to.
+   * Treating an unknown day as dry is how a plan ends up moved onto a
+   * day nobody knows anything about (§15.3).
+   */
+  weatherByDay: ReadonlyMap<number, number>;
+  /** Where both days start and end — the leg's anchor. */
+  anchor: Coordinate;
+  mode?: TransportMode;
+}
+
+export type DaySwapReason =
+  | "ok"
+  | "no-forecast"
+  | "nothing-wet"
+  | "nothing-drier"
+  | "day-is-underway"
+  | "different-frames";
+
+export interface WholeDaySwapResult {
+  days: WeatherDay[];
+  fromDayId: number | null;
+  toDayId: number | null;
+  reason: DaySwapReason;
+}
+
+/**
+ * Trade a wet day's spots for a drier day's (§7.2).
+ *
+ * "Ein Regentag verschiebt sich als Ganzes: was heute nass wäre, wird
+ * auf einen trockenen Folgetag getauscht." The one thing that does
+ * **not** travel with the spots is the day's frame. A frame belongs to
+ * its date, not to its contents: the last train leaves on Thursday at
+ * 17:45 whatever the weather does, and a departure day that inherited
+ * Wednesday's full afternoon would describe hours nobody has (§4.4).
+ * So the blocks stay where they are and only their stops change
+ * places, matched by block, with the walks recomputed afterwards
+ * because the order of the day has changed.
+ *
+ * Refused rather than half-done when the two days are not shaped
+ * alike — a stop would have to be dropped to fit, and dropping it is a
+ * decision for the traveller, not a side effect of the weather.
+ *
+ * Like everything else here: this proposes, the caller asks (§7.1).
+ */
+export function swapRainyDay(req: WholeDaySwapRequest): WholeDaySwapResult {
+  const nothing = (reason: DaySwapReason): WholeDaySwapResult =>
+    ({ days: req.days.map(copyDay), fromDayId: null, toDayId: null, reason });
+
+  const known = req.days.filter((day) => req.weatherByDay.has(day.id));
+  if (known.length < 2) return nothing("no-forecast");
+
+  const score = (day: WeatherDay) => req.weatherByDay.get(day.id) ?? 0;
+  const byWeather = [...known].sort((a, b) => score(b) - score(a) || a.id - b.id);
+  const rainy = byWeather[0];
+  const dry = byWeather[byWeather.length - 1];
+
+  if (score(rainy) < 1) return nothing("nothing-wet");
+  // A full class drier, or the exchange is churn: moving a showery
+  // afternoon onto a slightly less showery one helps nobody.
+  if (score(rainy) - score(dry) < 1) return nothing("nothing-drier");
+  if (!allMovable(rainy) || !allMovable(dry)) return nothing("day-is-underway");
+  if (!sameShape(rainy, dry)) return nothing("different-frames");
+
+  const mode = req.mode ?? "foot";
+  const swapped = new Map<number, WeatherDay>();
+  const rainyCopy = copyDay(rainy);
+  const dryCopy = copyDay(dry);
+  const rainyStops = stopsByBlock(rainy);
+  const dryStops = stopsByBlock(dry);
+
+  fillFrom(rainyCopy, dryStops);
+  fillFrom(dryCopy, rainyStops);
+  recomputeDay(rainyCopy.blocks as CurrentBlock[], req.anchor, mode);
+  recomputeDay(dryCopy.blocks as CurrentBlock[], req.anchor, mode);
+  swapped.set(rainy.id, rainyCopy);
+  swapped.set(dry.id, dryCopy);
+
+  return {
+    days: req.days.map((day) => swapped.get(day.id) ?? copyDay(day)),
+    fromDayId: rainy.id,
+    toDayId: dry.id,
+    reason: "ok",
+  };
+}
+
+/** Nothing on the day is done, skipped or pinned (§4.4, §5). */
+function allMovable(day: WeatherDay): boolean {
+  return day.blocks.every((block) => block.stops.every(movable));
+}
+
+/**
+ * Both days hold their spots in blocks of the same name.
+ *
+ * Only blocks that actually carry stops have to match: a day with an
+ * empty evening block can still trade with one that has none.
+ */
+function sameShape(a: WeatherDay, b: WeatherDay): boolean {
+  const targets = (day: WeatherDay) => new Set(day.blocks.map((block) => block.id));
+  const occupied = (day: WeatherDay) =>
+    day.blocks.filter((block) => block.stops.length > 0).map((block) => block.id);
+  return occupied(a).every((id) => targets(b).has(id))
+    && occupied(b).every((id) => targets(a).has(id));
+}
+
+function stopsByBlock(day: WeatherDay): Map<string, CurrentStop[]> {
+  return new Map(day.blocks.map((block) => [block.id, block.stops.map((stop) => ({ ...stop }))]));
+}
+
+function fillFrom(day: WeatherDay, stops: ReadonlyMap<string, CurrentStop[]>): void {
+  for (const block of day.blocks as CurrentBlock[]) {
+    block.stops = stops.get(block.id)?.map((stop) => ({ ...stop })) ?? [];
+  }
+}
+
+function copyDay(day: WeatherDay): WeatherDay {
+  return {
+    ...day,
+    blocks: day.blocks.map((block) => ({ ...block, stops: block.stops.map((stop) => ({ ...stop })) })),
+  };
+}
+
 /**
  * How badly a block wants shelter, from 0 (not at all) to 1.
  *
