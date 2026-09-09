@@ -9,14 +9,16 @@
  * abroad and no ticket to hand, are both an evening's work to repair
  * and a catastrophe at the platform.
  *
- * Two of §8.6's four questions can be answered here today, and two
- * cannot. They are reported all the same, as `unknown` with the reason:
- * a check that quietly disappears is one nobody misses, and then
- * nobody notices that the app never looked. The two open ones are
- * tickets — documents are not linked to a trip yet (§3.4) — and votes,
- * which wait on the multi-user step (§6.1). The offline bundle (§3.9)
- * is answered by the device, because only the device knows what it has
- * stored; the app appends that row itself.
+ * Three of §8.6's four questions can be answered here today, and one
+ * cannot. It is reported all the same, as `unknown` with the reason: a
+ * check that quietly disappears is one nobody misses, and then nobody
+ * notices that the app never looked. The open one is votes, which wait
+ * on the multi-user step (§6.1). Tickets became answerable when
+ * documents learned to hang off a trip (§3.4) — with the honest limit
+ * that the app knows which papers are attached and not which ones
+ * *ought* to be, so "nothing attached" is a question and not a verdict.
+ * The offline bundle (§3.9) is answered by the device, because only the
+ * device knows what it has stored; the app appends that row itself.
  *
  * The packing list comes along in the same answer, since it is derived
  * from the same plan and the same forecast (`packing.ts`).
@@ -30,8 +32,9 @@ import { osmRegionImports } from "../db/schema";
 import { requirePermission } from "../user/auth-handler";
 import { lightOfDay, validateOffset } from "./daylight";
 import { addDays } from "./leg-dates";
+import { linkedDocuments, suggestionsFor } from "./documents";
 import { packingList, type PackingDay, type PackingItem } from "./packing";
-import { loadPlan, type StoredLeg } from "./plan-store";
+import { loadPlan, type StoredLeg, type StoredPlan } from "./plan-store";
 import { shelterOf } from "./shelter";
 import { hoursWithin, summarise } from "./weather";
 import { forecastFor } from "./weather-service";
@@ -94,14 +97,10 @@ export const tripReadiness = api(
     checks.push(await regionCheck(plan.legs));
     checks.push(detailCheck(plan.legs));
 
-    // The two §8.6 questions this build cannot answer. Said out loud
+    checks.push(await ticketCheck(plan, userId));
+
+    // The one §8.6 question this build cannot answer. Said out loud
     // rather than left out (§14, the bundle's `omits`).
-    checks.push({
-      id: "tickets",
-      state: "unknown",
-      sentence: "Tickets und Buchungen kann die App noch nicht prüfen: Dokumente hängen bisher "
-        + "an keiner Reise.",
-    });
     checks.push({
       id: "votes",
       state: "unknown",
@@ -154,6 +153,57 @@ async function regionCheck(legs: StoredLeg[]): Promise<ReadinessCheck> {
     id: "region",
     state: "attention",
     sentence: `Die Karten fehlen noch: ${waiting.join(", ")}. Vor Ort gibt es dort keinen Vorrat.`,
+  };
+}
+
+/**
+ * Are the tickets and bookings to hand as documents (§3.4, §8.6)?
+ *
+ * The honest shape of this answer matters more than the answer. The app
+ * knows which papers somebody attached; it cannot know which ones the
+ * trip *needs* — a weekend by car needs none, and there is no list of
+ * required paperwork anywhere. So attached documents are reported as
+ * `ok` and counted, and nothing attached is a question rather than a
+ * verdict: `attention` when the suggestion list has candidates (they
+ * exist, nobody linked them, and that is exactly the evening's cheap
+ * fix), `unknown` when it has none, because then the app genuinely
+ * does not know whether anything is missing.
+ *
+ * Documents nobody but their owner may read still count. The check
+ * says how many are attached, never what they are — the trip is
+ * shared, the paperwork is not.
+ */
+async function ticketCheck(plan: StoredPlan, userId: number): Promise<ReadinessCheck> {
+  const linked = await linkedDocuments(plan.id, userId);
+  if (linked.length > 0) {
+    const named = linked
+      .filter((doc) => doc.readable && doc.title)
+      .map((doc) => doc.title as string);
+    const what = named.length > 0 ? `: ${named.join(", ")}` : "";
+    return {
+      id: "tickets",
+      state: "ok",
+      sentence: linked.length === 1
+        ? `Ein Dokument hängt an dieser Reise${what}.`
+        : `${linked.length} Dokumente hängen an dieser Reise${what}.`,
+    };
+  }
+  const { suggestions } = await suggestionsFor(plan, userId);
+  if (suggestions.length > 0) {
+    return {
+      id: "tickets",
+      state: "attention",
+      sentence: suggestions.length === 1
+        ? "Ein Dokument sieht nach dieser Reise aus und hängt noch nicht dran."
+        : `${suggestions.length} Dokumente sehen nach dieser Reise aus und hängen noch nicht `
+          + "dran.",
+    };
+  }
+  return {
+    id: "tickets",
+    state: "unknown",
+    sentence: "An dieser Reise hängt kein Dokument. Ob eines fehlt, weiß die App nicht — "
+      + "sie kennt keine Liste dessen, was diese Reise braucht.",
   };
 }
 

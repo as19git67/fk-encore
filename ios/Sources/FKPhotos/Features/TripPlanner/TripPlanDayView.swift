@@ -94,6 +94,13 @@ struct TripPlanDayView: View {
                         } label: {
                             Label("Mitreisende", systemImage: "person.2")
                         }
+                        // The tickets and bookings this trip runs
+                        // on (§3.4) — suggested, never taken over.
+                        NavigationLink {
+                            TripDocumentsView(planId: viewModel.planId)
+                        } label: {
+                            Label("Dokumente", systemImage: "doc.text")
+                        }
                         // The evening before (§8.6): what is still
                         // cheap to fix tonight, and what to pack.
                         NavigationLink {
