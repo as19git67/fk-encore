@@ -19,6 +19,20 @@ export const MitDokumenten: Story = {
   name: 'Mit Dokumenten',
 }
 
+/**
+ * The split layout of issue #735: on a wide landscape screen the list keeps
+ * the left column (500–600px) and the current document is previewed beside
+ * it. The pinned viewport is what makes this story meaningful — the default
+ * 1280px screenshot size sits just below the threshold, so every other story
+ * still shows the single-column layout.
+ */
+export const GeteilteAnsicht: Story = {
+  name: 'Geteilte Ansicht (breiter Bildschirm)',
+  parameters: {
+    testViewport: { width: 1600, height: 900 },
+  },
+}
+
 export const LeereListe: Story = {
   name: 'Noch keine Dokumente',
   parameters: {
