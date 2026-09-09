@@ -2552,6 +2552,10 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
     zeigt ihren Rückblick). Valhalla und GTFS bleiben offen.
 13. **Der Ideenvorrat** (§20) — ein geteilter Vorrat ohne Reise, die Meldung
     bei Nähe, der Tourvorschlag aus mehreren Ideen und die Gebietssuche.
+    **Umgesetzt** (§20.1–20.3): der Vorrat samt Teilen, die Nähe-Meldung mit
+    Ruhezeit, der Ausflugsvorschlag über `solveDay` und die drei Wege zwischen
+    Vorrat und Reise. Offen bleiben Veranstaltungen (§20.4), die an einer
+    Quelle hängen, die es nicht gibt.
     Bewusst nach Schritt 8: Er lebt von der Standortschleife, und ohne sie
     wäre er eine Merkliste. Veranstaltungen (§20.4) hängen an einer Quelle,
     die es noch nicht gibt, und sind deshalb kein Teil dieses Schritts.
@@ -3180,6 +3184,38 @@ Kein zweiter Mechanismus, sondern eine Quelle mehr:
 - **Umgekehrt**: was auf einer Reise im Etappenvorrat übrig blieb und niemand
   gesehen hat, darf am Ende in den Ideenvorrat wandern. „Beim nächsten Mal" ist
   die ehrlichste Ablage für einen Spot, der es nicht in den Plan geschafft hat.
+
+**Umgesetzt:** `POST /trip-planner/ideas/outing/accept`,
+`GET /trip-planner/plans/:planId/ideas`, `POST …/plans/:planId/ideas/take` und
+`POST …/plans/:planId/pool/to-ideas` — alle drei Richtungen über vorhandene
+Wege, keine neue Mechanik.
+
+*Angenommener Ausflug.* Genau das, was §20.5 ansagt: eine ganz normale
+eintägige Reise mit einer Etappe und **einem** Block über das Zeitbudget. Der
+Tag wird bewusst erst ausgeplant, **nachdem** die angenommenen Ideen im Vorrat
+liegen — sonst plante er sich aus der Regionssuche und die Ideen kämen
+hinterher. Sie gehen mit erhöhter Bewertung hinein, damit sie vor dem stehen,
+was die Karte anbietet (§7.2). Die Antwort nennt getrennt, was auf dem Tag
+landete und was im Vorrat blieb: Ein Ausflug, der passt, ist kürzer als der,
+den jemand wollte.
+
+*Beim Anlegen einer Reise.* `GET …/plans/:planId/ideas` bietet an, was in einer
+Etappe liegt — sortiert nach Etappe und Entfernung, mit „wer hat's gemerkt".
+**Übernommen wird nichts von selbst**; dafür gibt es `…/ideas/take`, und das
+läuft über `POST …/finds` (§9.2): richtige Etappe nach Lage, Dubletten
+zusammengeführt, Herkunft erhalten.
+
+*Zurück in den Vorrat.* `…/pool/to-ideas` schiebt Übriggebliebenes in die
+Sammlung. Schon Gesammeltes ist dabei kein Fehler, sondern wird gezählt und
+gemeldet.
+
+**In allen drei Richtungen bleibt die Idee stehen.** §20.3 sagt es wörtlich:
+nicht verbraucht, nur benutzt. Ein Detail, das dabei auffiel: Ein Ort, den die
+Karte nicht kennt, bekommt als Fund eine **neue** `manual:`-Referenz — die
+eigene Referenz der Idee taugt danach nicht mehr zum Wiedererkennen. „Schon in
+der Reise" wird deshalb über dieselben 80 Meter entschieden, mit denen
+`finds.ts` zwei Einträge denselben Ort nennt; eine andere Zahl hier ließe
+denselben Biergarten gleichzeitig „schon dabei" und „Dublette" sein.
 
 ### 20.4 Veranstaltungen: interessant, aber ohne Quelle kein Feature
 
