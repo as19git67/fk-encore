@@ -12,6 +12,7 @@ import DocumentUploadDefaultsDialog from '../components/DocumentUploadDefaultsDi
 import DocumentFilterMenu from '../components/DocumentFilterMenu.vue'
 import DocumentScanQueuePanel from '../components/DocumentScanQueuePanel.vue'
 import DocumentThumbnail from '../components/DocumentThumbnail.vue'
+import AddToCollectionDialog from '../components/documents/AddToCollectionDialog.vue'
 import SortMenu from '../components/SortMenu.vue'
 import {
   listDocuments,
@@ -179,6 +180,16 @@ function toggleSelected(id: number, checked: boolean) {
 
 function clearSelection() {
   selectedIds.value = new Set()
+}
+
+// "In Sammelmappe" gathers the checked documents into a folder that is later
+// handed over as a single PDF. Unlike the basket, membership is durable and a
+// document may sit in several folders at once.
+const addToCollectionOpen = ref(false)
+
+function onAddedToCollection(payload: { title: string; count: number }) {
+  info.value = `${payload.count} Dokument${payload.count === 1 ? '' : 'e'} zu „${payload.title}" hinzugefügt.`
+  clearSelection()
 }
 
 // Known tags feed the filter panel's tag picker.
@@ -552,6 +563,14 @@ onMounted(async () => {
           @click="addSelectionToBasket"
         />
         <Button
+          label="In Sammelmappe"
+          icon="pi pi-folder"
+          size="small"
+          severity="secondary"
+          v-tooltip.bottom="'Auswahl in eine Sammelmappe legen — mehrere Dokumente als ein PDF weitergeben.'"
+          @click="addToCollectionOpen = true"
+        />
+        <Button
           label="Auswahl aufheben"
           icon="pi pi-times"
           size="small"
@@ -561,6 +580,12 @@ onMounted(async () => {
         />
       </div>
     </div>
+
+    <AddToCollectionDialog
+      v-model:visible="addToCollectionOpen"
+      :document-ids="[...selectedIds]"
+      @added="onAddedToCollection"
+    />
 
     <!-- Toolbar: search + filter/sort/view controls -->
     <div class="toolbar">

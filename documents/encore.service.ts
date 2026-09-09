@@ -19,6 +19,9 @@ import "./fsck";
 // and generates taxonomy/hint improvement suggestions.
 import "./hint-mining-cron";
 
+// Register the job that rewrites a Sammelmappe's summary after it changed.
+import "./collection-summary-cron";
+
 // Register the daily taxonomy cockpit snapshot that captures KPI metrics
 // for the admin dashboard (sonstiges-%, confidence, teacher queue, etc.).
 import "./taxonomy-cockpit";

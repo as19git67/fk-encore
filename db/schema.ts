@@ -1135,6 +1135,75 @@ export const documentTagLinks = pgTable(
   (table) => [primaryKey({ columns: [table.document_id, table.tag_id] })]
 );
 
+// ─── Sammelmappen (document collections, migration 0175) ────────────────────
+
+/**
+ * A named folder of documents that produces one PDF.
+ *
+ * Membership is N:M on purpose — the same document belongs in the tax folder
+ * and in the folder that goes to the insurer, and what is true of it differs
+ * between the two (its place in the order, which pages are left out). Those
+ * facts live on `documentCollectionItems`, never on the document.
+ */
+export const documentCollections = pgTable("document_collections", {
+  id: serial("id").primaryKey(),
+  user_id: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  /** Free-form covering note, printed under the title on the cover page. */
+  notes: text("notes"),
+  /**
+   * Summary across the member documents, written by the llm-service.
+   * `summary_stale` is set by every membership change and cleared by the
+   * background job, so the cover never carries a summary of a folder that has
+   * moved on since. `summary_error` keeps a permanently failing job
+   * distinguishable from a collection nobody has summarised yet.
+   */
+  summary: text("summary"),
+  summary_generated_at: timestamp("summary_generated_at", { mode: "string", withTimezone: true }),
+  summary_stale: boolean("summary_stale").notNull().default(true),
+  summary_error: text("summary_error"),
+  /** Which parts of the front matter the generated PDF carries. */
+  include_cover: boolean("include_cover").notNull().default(true),
+  include_toc: boolean("include_toc").notNull().default(true),
+  include_summary: boolean("include_summary").notNull().default(true),
+  /**
+   * Same access model as `documents` — private, or shared with one group
+   * (DB CHECK ties `group_id` to `visibility='group'`). The member documents
+   * keep their own visibility: a collection never widens access to what is
+   * inside it, and a member the reader may not see is skipped on export.
+   */
+  visibility: documentVisibilityEnum("visibility").notNull().default("private"),
+  group_id: integer("group_id").references(() => groups.id, { onDelete: "restrict" }),
+  created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+});
+
+export const documentCollectionItems = pgTable("document_collection_items", {
+  id: serial("id").primaryKey(),
+  collection_id: integer("collection_id")
+    .notNull()
+    .references(() => documentCollections.id, { onDelete: "cascade" }),
+  document_id: integer("document_id")
+    .notNull()
+    .references(() => documents.id, { onDelete: "cascade" }),
+  /** Dense, 0-based sort key — renumbered on every reorder. */
+  position: integer("position").notNull(),
+  /**
+   * Switched off means "still in the folder, not in the PDF". Kept as a flag
+   * rather than a deleted row so deselecting a document does not throw away
+   * the page selection made for it.
+   */
+  included: boolean("included").notNull().default(true),
+  /**
+   * 1-based page numbers left out of the PDF, ascending and deduplicated.
+   * `[]` is the whole document.
+   */
+  excluded_pages: jsonb("excluded_pages").$type<number[]>().notNull().default([]),
+  added_at: timestamp("added_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+});
+
 export const documentScanQueue = pgTable("document_scan_queue", {
   id: serial("id").primaryKey(),
   document_id: integer("document_id")

@@ -232,8 +232,51 @@ function goBack() {
       </p>
     </section>
 
+    <section class="help-section">
+      <h2><i class="pi pi-folder" /> 7. Sammelmappen</h2>
+      <p>
+        Eine Sammelmappe fasst mehrere Dokumente unter einem Titel zusammen und
+        gibt sie als <strong>ein einziges PDF</strong> weiter – etwa an
+        Steuerberatung, Versicherung oder Vermieter. Ein Dokument darf in
+        beliebig vielen Mappen liegen; was in der Mappe über es gilt
+        (Reihenfolge, ab-/angewählte Seiten), gehört zur Mappe, nicht zum
+        Dokument.
+      </p>
+      <ul>
+        <li>
+          <strong>Befüllen</strong> – über „In Sammelmappe" in der
+          Dokumentenliste, im Arbeitskorb oder in der Detailansicht.
+        </li>
+        <li>
+          <strong>Reihenfolge</strong> – bestimmt die Reihenfolge im PDF und
+          wird in der Mappe mit den Pfeiltasten gesetzt.
+        </li>
+        <li>
+          <strong>Abwählen</strong> – einzelne Dokumente per Häkchen, einzelne
+          Seiten über die Seitenvorschau. Beides bleibt erhalten, wenn das
+          Dokument nur vorübergehend aus dem PDF fliegt.
+        </li>
+        <li>
+          <strong>Zusammenfassung</strong> – wird nach jeder Änderung
+          automatisch von der lokalen KI über alle enthaltenen Dokumente
+          erzeugt und kann von Hand überschrieben werden.
+        </li>
+        <li>
+          <strong>PDF</strong> – wird beim Klick frisch gebaut (Deckblatt,
+          Zusammenfassung und Inhaltsverzeichnis sind einzeln abschaltbar) und
+          nie gespeichert. Auf iOS öffnet „PDF teilen" das native Share-Sheet.
+        </li>
+        <li>
+          <strong>Sichtbarkeit</strong> – privat oder für eine Gruppe. Eine
+          Gruppenmappe darf nur Dokumente enthalten, die mit derselben Gruppe
+          geteilt sind; sonst stünden Titel und Zusammenfassung für Unterlagen,
+          die die Gruppe gar nicht öffnen kann.
+        </li>
+      </ul>
+    </section>
+
     <section v-if="auth.hasPermission('documents.manage_taxonomy')" class="help-section">
-      <h2><i class="pi pi-folder-open" /> 7. Admin: Kategorien &amp; Steuer-Hints</h2>
+      <h2><i class="pi pi-folder-open" /> 8. Admin: Kategorien &amp; Steuer-Hints</h2>
       <p>Mit der Rolle <code>documents.manage_taxonomy</code> hast du Zugriff auf:</p>
       <ul>
         <li>
