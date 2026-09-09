@@ -31,7 +31,8 @@ final class TripOfflineBundleTests: XCTestCase {
                       { "rowId": 51, "osmRef": "node:1", "name": "Stadtmuseum",
                         "lat": 48.371, "lon": 10.901, "category": "museum",
                         "dwellMinutes": 90, "status": "planned", "pinned": false,
-                        "travelFromPrevious": null }
+                        "travelFromPrevious": { "minutes": 5, "distanceM": 390,
+                                                "travelClass": "short_walk" } }
                     ] }
                 ] }
             ],
