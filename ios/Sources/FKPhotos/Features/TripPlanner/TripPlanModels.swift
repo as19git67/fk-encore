@@ -515,6 +515,18 @@ struct TripWeatherApplyResponse: Codable, Sendable {
 }
 
 /// What the group wrote about one spot, as the server answers it.
+/// A spot this trip has turned down (§5).
+struct TripHiddenSpot: Codable, Identifiable, Sendable {
+    let osmRef: String
+    /// What it was called when it was hidden — the map will not be
+    /// asked again, so the name has to travel with the "no".
+    let name: String?
+    let hiddenAt: String
+
+    var id: String { osmRef }
+    var displayName: String { name ?? "Unbenannter Ort" }
+}
+
 struct TripSpotNote: Codable, Sendable {
     let osmRef: String
     let title: String?
