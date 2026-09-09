@@ -271,6 +271,27 @@ the app container's log:
 which works (`docker compose logs app | grep 'Invite link'`) but is not a
 flow to rely on. The same applies to password-reset mails.
 
+### Three permissions that are really "Admin"
+
+The permission list is finer-grained than the privileges behind it. Three
+entries hand over the whole application, which their names do not say, so
+grant them only to people you would make an administrator anyway:
+
+| Permission | Why it is admin-equivalent |
+| --- | --- |
+| `users.update` | `PUT /users/:id` may change **any** user's email and password, the administrator's included. Change the admin's password, log in as the admin. |
+| `roles.assign` | The holder can assign the Admin role — to themselves. |
+| `roles.update` | The holder can attach any permission, including the two above, to a role they already hold. |
+
+There is no protection against acting on a higher-privileged user or on
+the Admin role itself; the only guards are the "last administrator" checks
+that stop you deleting the final one. The role editor repeats this warning
+next to each of the three checkboxes.
+
+`users.create` is **not** in this group: an invitation creates a
+role-less account and the inviter cannot propose roles, so it is safe to
+give to whoever manages people day to day.
+
 ### Web Push notifications (optional)
 
 Push notifications for feed events (album shares, comments, new photos

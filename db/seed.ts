@@ -43,14 +43,14 @@ export async function seed(db: any): Promise<void> {
     { key: "users.list", description: "View user list" },
     { key: "users.read", description: "View user details" },
     { key: "users.create", description: "Create new users" },
-    { key: "users.update", description: "Update existing users" },
+    { key: "users.update", description: "Update existing users — ⚠ equals full admin: can change any user's password, including an administrator's" },
     { key: "users.delete", description: "Delete users" },
     { key: "roles.list", description: "View role list" },
     { key: "roles.read", description: "View role details" },
     { key: "roles.create", description: "Create new roles" },
-    { key: "roles.update", description: "Update existing roles" },
+    { key: "roles.update", description: "Update existing roles — ⚠ equals full admin: the holder can add any permission to a role they already hold" },
     { key: "roles.delete", description: "Delete roles" },
-    { key: "roles.assign", description: "Assign roles to users" },
+    { key: "roles.assign", description: "Assign roles to users — ⚠ equals full admin: the holder can assign themselves the Admin role" },
     { key: "roles.revoke", description: "Revoke roles from users" },
     { key: "module.photos", description: "Enable photos module" },
     { key: "photos.upload", description: "Upload photos" },
@@ -100,10 +100,17 @@ export async function seed(db: any): Promise<void> {
   ]);
 
   for (const perm of allPermissions) {
-    const existing = (await db.select({ id: schema.permissions.id }).from(schema.permissions).where(eq(schema.permissions.key, perm.key)))[0];
+    const existing = (await db.select({ id: schema.permissions.id, description: schema.permissions.description }).from(schema.permissions).where(eq(schema.permissions.key, perm.key)))[0];
     if (!existing) {
       await db.insert(schema.permissions).values(perm);
       console.log(`[seed] Created permission: ${perm.key}`);
+    } else if (existing.description !== perm.description) {
+      // Descriptions are what the role editor shows next to each checkbox,
+      // so they are the one place a warning actually reaches the person
+      // granting the permission. Insert-only would have left every existing
+      // deployment with the old text.
+      await db.update(schema.permissions).set({ description: perm.description }).where(eq(schema.permissions.id, existing.id));
+      console.log(`[seed] Updated description: ${perm.key}`);
     }
   }
 
