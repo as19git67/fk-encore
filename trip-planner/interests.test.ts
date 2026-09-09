@@ -51,6 +51,44 @@ describe("the interest vocabulary", () => {
     expect(matchesInterest(castle, ["churches"])).toBe(false);
   });
 
+  it("tells sculpture apart from war memorials", () => {
+    // The split: whoever ticks "Kunst im Freien" rarely means a
+    // memorial, and OSM distinguishes the two cleanly.
+    const sculpture = { kind: "tourism=artwork", category: "sight" };
+    const memorial = { kind: "historic=memorial", category: "sight" };
+
+    expect(matchesInterest(sculpture, ["art"])).toBe(true);
+    expect(matchesInterest(sculpture, ["monuments"])).toBe(false);
+    expect(matchesInterest(memorial, ["monuments"])).toBe(true);
+    expect(matchesInterest(memorial, ["art"])).toBe(false);
+  });
+
+  it("lets somebody ask for towers without asking for castles", () => {
+    expect(matchesInterest({ kind: "man_made=tower", category: "sight" }, ["towers"]))
+      .toBe(true);
+    expect(matchesInterest({ kind: "man_made=lighthouse", category: "sight" }, ["towers"]))
+      .toBe(true);
+    expect(matchesInterest({ kind: "historic=castle", category: "sight" }, ["towers"]))
+      .toBe(false);
+  });
+
+  it("covers what the widened import brought in", () => {
+    const cases: [string, string, string][] = [
+      ["natural=peak", "outdoors", "landscape"],
+      ["natural=beach", "outdoors", "landscape"],
+      ["leisure=nature_reserve", "outdoors", "landscape"],
+      ["leisure=garden", "outdoors", "nature"],
+      ["tourism=zoo", "zoo", "zoo"],
+      ["amenity=marketplace", "market", "market"],
+      ["leisure=water_park", "bath", "bath"],
+      ["craft=winery", "producers", "producers"],
+    ];
+    for (const [kind, category, interest] of cases) {
+      expect(matchesInterest({ kind, category }, [interest]), `${kind} → ${interest}`)
+        .toBe(true);
+    }
+  });
+
   it("still accepts a category id, because that is what old trips stored", () => {
     expect(matchesInterest({ kind: "tourism=museum", category: "museum" }, ["museum"]))
       .toBe(true);
