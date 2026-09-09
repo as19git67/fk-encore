@@ -53,6 +53,11 @@ import { useRealtimeEvent } from '../composables/useRealtime'
 import { useModuleBack } from '../composables/useModuleBack'
 import PdfViewer from '../components/PdfViewer.vue'
 import DocumentFollowUpDialog from '../components/DocumentFollowUpDialog.vue'
+import AddToCollectionDialog from '../components/documents/AddToCollectionDialog.vue'
+import {
+  listCollectionsForDocument,
+  type DocumentCollectionRef,
+} from '../api/collections'
 import { getDocumentTransactionLinks, unlinkTransactionDocument } from '../api/finance'
 
 const route = useRoute()
@@ -303,6 +308,21 @@ watch(selectedDocumentTypeOption, (v) => {
   form.value.document_type = v ? v.slug : null
 })
 
+// Sammelmappen this document is part of. A document may be in several at
+// once, so this is a list, not a field on the document.
+const documentCollections = ref<DocumentCollectionRef[]>([])
+const addToCollectionOpen = ref(false)
+
+async function reloadCollections() {
+  const id = docId.value
+  if (!Number.isFinite(id)) return
+  try {
+    documentCollections.value = (await listCollectionsForDocument(id)).items
+  } catch {
+    /* the card simply keeps what it had */
+  }
+}
+
 async function load() {
   const id = docId.value
   if (!Number.isFinite(id)) return
@@ -310,7 +330,8 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [detail, cats, docTypes, taxCats, houseItems, people, links] = await Promise.all([
+    const [detail, cats, docTypes, taxCats, houseItems, people, links, collections] =
+      await Promise.all([
       getDocument(id),
       listDocumentCategories(),
       listDocumentTypesCatalog(),
@@ -318,6 +339,7 @@ async function load() {
       listGroups(),
       listSubjectPersons(),
       getDocumentTransactionLinks(id).catch(() => []),
+      listCollectionsForDocument(id).catch(() => ({ items: [] })),
     ])
     doc.value = detail
     categories.value = cats.items
@@ -326,6 +348,7 @@ async function load() {
     groups.value = houseItems.items
     subjectPeople.value = people.items
     linkedTransactions.value = links
+    documentCollections.value = collections.items
     // Cached full text belongs to the previously shown document/state.
     fullText.value = null
     fullTextVisible.value = false
@@ -1183,6 +1206,34 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
+        <section class="collections-card">
+          <div class="collections-header">
+            <h2 class="collections-title"><i class="pi pi-folder" /> Sammelmappen</h2>
+            <Button
+              icon="pi pi-plus"
+              label="Hinzufügen"
+              text
+              size="small"
+              @click="addToCollectionOpen = true"
+            />
+          </div>
+          <div v-if="documentCollections.length > 0" class="collections-chips">
+            <button
+              v-for="c in documentCollections"
+              :key="c.id"
+              type="button"
+              class="collection-chip"
+              :class="{ 'collection-chip--off': !c.included }"
+              @click="router.push({ name: 'dokumente-mappe', params: { id: c.id } })"
+            >
+              <i class="pi pi-folder" /> {{ c.title }}
+            </button>
+          </div>
+          <p v-else class="collections-empty">
+            Noch in keiner Sammelmappe. Ein Dokument darf in mehreren liegen.
+          </p>
+        </section>
+
         <section class="tax-card">
           <div class="tax-card-header">
             <h2 class="tax-card-title">
@@ -1408,6 +1459,12 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
+
+    <AddToCollectionDialog
+      v-model:visible="addToCollectionOpen"
+      :document-ids="[docId]"
+      @added="reloadCollections"
+    />
 
     <DocumentFollowUpDialog
       v-if="doc"
@@ -1872,6 +1929,54 @@ onBeforeUnmount(() => {
   max-height: 60vh;
 }
 
+.collections-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.85rem 1rem;
+  background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 8px;
+}
+.collections-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.collections-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.collections-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.collection-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--p-content-border-color);
+  background: var(--p-content-hover-background);
+  color: var(--p-text-color);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.collection-chip--off {
+  opacity: 0.55;
+}
+.collections-empty {
+  margin: 0;
+  color: var(--p-text-muted-color);
+  font-size: 0.82rem;
+}
 .tax-card {
   display: flex;
   flex-direction: column;
