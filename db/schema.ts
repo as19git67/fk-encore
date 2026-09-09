@@ -3196,6 +3196,11 @@ export const tripPlanTravellers = pgTable(
     label: text("label").notNull(),
     birth_date: text("birth_date"),
     short_walks: boolean("short_walks").notNull().default(false),
+    // Set when this traveller is also one of the trip's planners
+    // (migration 0185), so an adult with a login is entered once
+    // rather than twice.
+    added_for_user_id: integer("added_for_user_id")
+      .references(() => users.id, { onDelete: "set null" }),
     added_by: integer("added_by").references(() => users.id, { onDelete: "set null" }),
     created_at: timestamp("created_at", { mode: "string", withTimezone: true })
       .notNull()

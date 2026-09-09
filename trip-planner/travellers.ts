@@ -23,11 +23,16 @@
 
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import db from "../db/database";
-import { tripPlanTravellers, userSubjectPersons, users } from "../db/schema";
+import {
+  tripPlanShares,
+  tripPlanTravellers,
+  userSubjectPersons,
+  users,
+} from "../db/schema";
 import { requirePermission } from "../user/auth-handler";
-import { requireOrganiser } from "./plan-access";
+import { isOnTrip, requireOrganiser } from "./plan-access";
 import { loadPlan, type StoredPlan } from "./plan-store";
 import { replanAfterFrameChange, type PlanResponse } from "./plans";
 import {
@@ -65,7 +70,16 @@ export interface TravellersResponse {
 }
 
 export interface TravellerSuggestion {
-  subjectPersonId: number;
+  /**
+   * The household entry, when this suggestion is one. Null for a
+   * participant of the trip who is not in the household list: an
+   * account is a person too, and having to type their name again
+   * because they happen to hold a login is the kind of gap that makes
+   * an app feel unfinished.
+   */
+  subjectPersonId: number | null;
+  /** The account, when the suggestion is a fellow planner (§6.2). */
+  userId: number | null;
   label: string;
   relation: string;
   birthDate: string | null;
@@ -80,6 +94,8 @@ export interface AddTravellerRequest {
   planId: number;
   /** One of the household, by its id. */
   subjectPersonId?: number;
+  /** Or somebody who plans this trip, by their account (§6.2). */
+  userId?: number;
   /** Or somebody who is not: their name, and optionally a birth date. */
   label?: string;
   birthDate?: string;
@@ -145,17 +161,56 @@ export const suggestTravellers = api(
       ))
       .orderBy(asc(userSubjectPersons.full_name));
 
+    // The people who plan this trip are people on it too (§6.2, §3.5).
+    // Leaving them out meant an adult with a login had to be entered
+    // twice — once by e-mail as a planner, once by hand as a traveller.
+    const planners = await db
+      .select({ id: users.id, name: users.name })
+      .from(users)
+      .where(inArray(users.id, [
+        plan.ownerId,
+        ...(await db
+          .select({ id: tripPlanShares.user_id })
+          .from(tripPlanShares)
+          .where(eq(tripPlanShares.plan_id, req.planId))).map((row) => row.id),
+      ]));
+    const alreadyByUser = new Set(
+      (await db
+        .select({ id: tripPlanTravellers.added_for_user_id })
+        .from(tripPlanTravellers)
+        .where(eq(tripPlanTravellers.plan_id, req.planId)))
+        .map((row) => row.id)
+        .filter((id): id is number => id !== null),
+    );
+    // A planner who is also in the household appears once, as the
+    // household entry: that one knows their birth date.
+    const householdNames = new Set(household.map((person) => person.name.toLowerCase()));
+
     const on = startOf(plan);
     return {
-      suggestions: household
-        .filter((person) => !already.has(person.id))
-        .map((person) => ({
-          subjectPersonId: person.id,
-          label: person.name,
-          relation: person.relation,
-          birthDate: person.birthDate,
-          ageAtStart: on === null ? null : ageOn(person.birthDate, on),
-        })),
+      suggestions: [
+        ...household
+          .filter((person) => !already.has(person.id))
+          .map((person) => ({
+            subjectPersonId: person.id,
+            userId: null,
+            label: person.name,
+            relation: person.relation,
+            birthDate: person.birthDate,
+            ageAtStart: on === null ? null : ageOn(person.birthDate, on),
+          })),
+        ...planners
+          .filter((person) => !alreadyByUser.has(person.id))
+          .filter((person) => !householdNames.has(person.name.toLowerCase()))
+          .map((person) => ({
+            subjectPersonId: null,
+            userId: person.id,
+            label: person.name,
+            relation: "plant mit",
+            birthDate: null,
+            ageAtStart: null,
+          })),
+      ],
     };
   },
 );
@@ -171,8 +226,39 @@ export const addTraveller = api(
     if (!plan) throw APIError.notFound("plan not found");
 
     const label = req.label?.trim();
-    if (req.subjectPersonId === undefined && !label) {
-      throw APIError.invalidArgument("entweder subjectPersonId oder ein Name");
+    if (req.subjectPersonId === undefined && req.userId === undefined && !label) {
+      throw APIError.invalidArgument("entweder subjectPersonId, userId oder ein Name");
+    }
+
+    if (req.userId !== undefined) {
+      // Only somebody who is actually on this trip: an account id from
+      // elsewhere must not turn into a name on somebody's travel list.
+      const [planner] = await db
+        .select({ id: users.id, name: users.name })
+        .from(users)
+        .where(eq(users.id, req.userId))
+        .limit(1);
+      if (!planner || !(await isOnTrip(req.planId, planner.id))) {
+        throw APIError.notFound("diese Person plant diese Reise nicht mit");
+      }
+      const [existing] = await db
+        .select({ id: tripPlanTravellers.id })
+        .from(tripPlanTravellers)
+        .where(and(
+          eq(tripPlanTravellers.plan_id, req.planId),
+          eq(tripPlanTravellers.added_for_user_id, planner.id),
+        ))
+        .limit(1);
+      if (existing) throw APIError.alreadyExists("diese Person fährt schon mit");
+
+      await db.insert(tripPlanTravellers).values({
+        plan_id: req.planId,
+        added_for_user_id: planner.id,
+        label: label || planner.name,
+        short_walks: req.shortWalks === true,
+        added_by: userId,
+      });
+      return await replanWithGroup(req.planId, userId);
     }
 
     if (req.subjectPersonId !== undefined) {

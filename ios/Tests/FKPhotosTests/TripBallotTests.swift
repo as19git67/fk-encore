@@ -13,10 +13,12 @@ final class TripBallotTests: XCTestCase {
     {
       "legIndex": 0,
       "entries": [
-        { "osmRef": "way:1", "name": "Aussichtsturm", "category": "viewpoint",
+        { "osmRef": "way:1", "name": "Aussichtsturm", "label": "Aussichtsturm",
+          "category": "viewpoint",
           "myVote": "want", "myHeart": false,
           "wants": ["Anna", "Papa"], "ratherNots": [], "hearts": [], "planned": true },
-        { "osmRef": "way:2", "name": "Höhlenweg", "category": "outdoors",
+        { "osmRef": "way:2", "name": "Höhlenweg", "label": "Höhlenweg",
+          "category": "outdoors",
           "myVote": null, "myHeart": false,
           "wants": [], "ratherNots": ["Anna"], "hearts": ["Kind A"], "planned": false }
       ],
@@ -55,10 +57,27 @@ final class TripBallotTests: XCTestCase {
         XCTAssertEqual(ballot.silent, ["Oma"])
     }
 
+    func testAnUnnamedSpotIsCalledWhatItIsRatherThanItsReference() throws {
+        // §15.3: never invent a name — say what the map knows and admit
+        // the rest. `way:3` on a row is a reference nobody can vote on.
+        let json = """
+        { "legIndex": 0, "heartsLeft": 2, "heartQuota": 2, "silent": [],
+          "entries": [ { "osmRef": "way:3", "name": null,
+            "label": "Kirche (ohne Namen)", "category": "worship",
+            "myVote": null, "myHeart": false, "wants": [], "ratherNots": [],
+            "hearts": [], "planned": false } ] }
+        """
+        let ballot = try JSONDecoder().decode(TripBallot.self, from: Data(json.utf8))
+
+        XCTAssertEqual(ballot.entries[0].label, "Kirche (ohne Namen)")
+        XCTAssertNil(ballot.entries[0].name)
+    }
+
     func testAnUndiscussedSpotShowsNothingRatherThanZeroes() throws {
         let json = """
         { "legIndex": 0, "heartsLeft": 2, "heartQuota": 2, "silent": [],
-          "entries": [ { "osmRef": "way:3", "name": null, "category": "sight",
+          "entries": [ { "osmRef": "way:3", "name": null,
+            "label": "Sehenswürdigkeit (ohne Namen)", "category": "sight",
             "myVote": null, "myHeart": false, "wants": [], "ratherNots": [],
             "hearts": [], "planned": false } ] }
         """

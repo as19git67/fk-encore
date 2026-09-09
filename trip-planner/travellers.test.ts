@@ -144,16 +144,18 @@ describe("the household is offered, not taken along", () => {
 
     const { suggestions } = await suggestTravellers({ planId: plan.id });
 
-    expect(suggestions).toHaveLength(1);
-    expect(suggestions[0].label).toBe("Kind A");
-    expect(suggestions[0].ageAtStart).toBe(7);
+    const fromHousehold = suggestions.filter((s) => s.subjectPersonId !== null);
+    expect(fromHousehold).toHaveLength(1);
+    expect(fromHousehold[0].label).toBe("Kind A");
+    expect(fromHousehold[0].ageAtStart).toBe(7);
   });
 
   it("leaves out somebody who does not live here", async () => {
     await household("Weit weg", "sonstige", "1970-01-01", false);
     const plan = await trip();
 
-    expect((await suggestTravellers({ planId: plan.id })).suggestions).toEqual([]);
+    const { suggestions } = await suggestTravellers({ planId: plan.id });
+    expect(suggestions.filter((s) => s.subjectPersonId !== null)).toEqual([]);
   });
 
   it("takes nobody along by itself", async () => {
@@ -165,12 +167,66 @@ describe("the household is offered, not taken along", () => {
     expect(travellers).toEqual([]);
   });
 
+  it("offers the people who plan the trip, so nobody is typed in twice", async () => {
+    // An adult with a login is a person on the trip too (§3.5, §6.2);
+    // having to enter them by e-mail and then again by hand was a gap,
+    // not a distinction.
+    const plan = await trip();
+    await db.insert(tripPlanShares).values({ plan_id: plan.id, user_id: otherId });
+
+    const { suggestions } = await suggestTravellers({ planId: plan.id });
+
+    const planner = suggestions.find((s) => s.userId === otherId);
+    expect(planner?.label).toBe("Mitreisender");
+    expect(planner?.relation).toBe("plant mit");
+    expect(suggestions.some((s) => s.userId === ownerId)).toBe(true);
+  });
+
+  it("takes a planner along, and stops offering them afterwards", async () => {
+    const plan = await trip();
+    await db.insert(tripPlanShares).values({ plan_id: plan.id, user_id: otherId });
+
+    await addTraveller({ planId: plan.id, userId: otherId });
+
+    const { travellers } = await planTravellers({ planId: plan.id });
+    expect(travellers.map((t) => t.label)).toContain("Mitreisender");
+    const { suggestions } = await suggestTravellers({ planId: plan.id });
+    expect(suggestions.some((s) => s.userId === otherId)).toBe(false);
+  });
+
+  it("does not offer the same person twice when they are also in the household", async () => {
+    await household("Planerin", "selbst", "1985-03-02");
+    const plan = await trip();
+
+    const { suggestions } = await suggestTravellers({ planId: plan.id });
+
+    expect(suggestions.filter((s) => s.label === "Planerin")).toHaveLength(1);
+    expect(suggestions.find((s) => s.label === "Planerin")?.subjectPersonId).not.toBeNull();
+  });
+
+  it("refuses an account that does not plan this trip", async () => {
+    const plan = await trip();
+
+    await expect(addTraveller({ planId: plan.id, userId: otherId }))
+      .rejects.toThrow(/plant diese Reise nicht mit/);
+  });
+
+  it("refuses the same account twice", async () => {
+    const plan = await trip();
+    await db.insert(tripPlanShares).values({ plan_id: plan.id, user_id: otherId });
+    await addTraveller({ planId: plan.id, userId: otherId });
+
+    await expect(addTraveller({ planId: plan.id, userId: otherId }))
+      .rejects.toThrow(/fährt schon mit/);
+  });
+
   it("stops offering somebody who is already coming", async () => {
     const child = await household("Kind A", "kind", "2020-06-15");
     const plan = await trip();
     await addTraveller({ planId: plan.id, subjectPersonId: child });
 
-    expect((await suggestTravellers({ planId: plan.id })).suggestions).toEqual([]);
+    const { suggestions } = await suggestTravellers({ planId: plan.id });
+    expect(suggestions.filter((s) => s.subjectPersonId !== null)).toEqual([]);
   });
 });
 
@@ -268,7 +324,7 @@ describe("who may say who comes", () => {
     const plan = await trip();
 
     await expect(addTraveller({ planId: plan.id }))
-      .rejects.toThrow(/subjectPersonId oder ein Name/);
+      .rejects.toThrow(/subjectPersonId, userId oder ein Name/);
   });
 
   it("refuses the same person twice", async () => {

@@ -93,7 +93,7 @@ struct TripBallotView: View {
     private func row(for entry: TripBallotEntry, heartsLeft: Int) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(entry.name ?? entry.osmRef)
+                Text(entry.label)
                 if entry.planned {
                     Text("im Plan")
                         .font(.caption2)
@@ -211,6 +211,10 @@ struct TripBallotEntry: Codable, Identifiable, Sendable {
     var id: String { osmRef }
     let osmRef: String
     let name: String?
+    /// What to put on the row — the name where the map has one, else
+    /// what it does know ("Kirche (ohne Namen)"). Never the reference:
+    /// nobody can vote on `way:213850482`.
+    let label: String
     let category: String
     let myVote: String?
     let myHeart: Bool
