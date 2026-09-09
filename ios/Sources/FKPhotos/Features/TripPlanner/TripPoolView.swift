@@ -121,7 +121,7 @@ struct TripPoolView: View {
                 spot: TripSpotDetail(candidate),
                 mode: leg.transportMode,
                 onSave: { await viewModel.saveNote($0) },
-            ) {
+            ) { closeDetail in
                 Section {
                     Button {
                         placing = candidate
@@ -133,13 +133,19 @@ struct TripPoolView: View {
                         // theirs to delete: it exists because a person
                         // added it, and nothing will propose it again.
                         Button(role: .destructive) {
-                            Task { await viewModel.drop(candidate) }
+                            Task {
+                                await viewModel.drop(candidate)
+                                closeDetail()
+                            }
                         } label: {
                             Label("Aus dem Vorrat entfernen", systemImage: "trash")
                         }
                     } else {
                         Button(role: .destructive) {
-                            Task { await viewModel.hide(osmRef: candidate.osmRef) }
+                            Task {
+                                await viewModel.hide(osmRef: candidate.osmRef)
+                                closeDetail()
+                            }
                         } label: {
                             Label("Für diese Reise ausblenden", systemImage: "eye.slash")
                         }

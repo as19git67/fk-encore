@@ -860,6 +860,34 @@ Fairness-Konto → Wechselsachen. Kein „zehn Dinge für Japan", sondern abgele
 aus **diesem** Plan, diesem Wetter und dieser Gruppe. Ausbau, nicht Kern — aber
 billig, weil alle Eingaben schon dastehen.
 
+**Umgesetzt:** `GET /trip-planner/plans/:planId/readiness` und der Bildschirm
+„Reisebereit?" (im Reisemenü). Beide Hälften in einer Antwort, weil sie aus
+denselben Zeilen und derselben Vorhersage stammen.
+
+Von den vier Fragen sind **zwei heute beantwortbar** — hat die Reise ein Datum,
+und sind die Regionsdatenbanken aller Etappen fertig (dazu, als dritte: ist der
+erste Tag überhaupt schon ausgeplant, §4.3). Die beiden anderen sind es nicht:
+Dokumente hängen bisher an keiner Reise (§3.4), und Abstimmungen kommen erst mit
+dem Mehrbenutzerbetrieb (§6.1). Sie werden trotzdem angezeigt, als `unknown`
+samt Grund — eine Prüfung, die still verschwindet, vermisst niemand, und dann
+merkt auch niemand, dass die App nie hingesehen hat. Auf dem Bildschirm sind sie
+grau, nicht gelb: eine Frage, die die App nicht beantworten kann, ist keine
+Warnung, und sie als eine darzustellen erzieht dazu, Warnungen zu übersehen.
+Die fünfte Zeile — **liegt das Offline-Bündel auf dem Gerät?** (§3.9) —
+beantwortet der Server gar nicht, sondern das Gerät: nur es weiß, was es
+gespeichert hat.
+
+**Die Packliste** ist ein reines Modul (`packing.ts`): Tage samt Wetter hinein,
+Gegenstände samt Begründung heraus — kein Netz, keine Uhr, keine Datenbank, also
+notfalls auch auf dem Gerät zu rechnen. Die Regeln sind genau die oben genannten,
+plus „unter 10 °C draußen → warme Jacke", und jede feuert **einmal** und nennt
+den Tag, der sie ausgelöst hat („Regenjacke — am 18.06. ist es draußen nass").
+Wichtiger als die Regeln ist, was die Liste verweigert: keine Regenjacke für
+einen verregneten Museumstag, kein Stativ für eine goldene Stunde, in der
+niemand stehen wollte (der Fotostopp-Schalter entscheidet, §7.3), und für einen
+Tag, den keine Vorhersage erreicht, gar nichts — eine kurze Liste ist besser als
+eine erfundene.
+
 ### 8.7 Danach
 Geplant gegen tatsächlich besucht, Fotos je Spot aus dem Trip-Album, Übergabe an
 den Recap.
@@ -2411,6 +2439,11 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
 10. **Weitere Kontextsignale** — Dokumenten-Fixpunkte, Reisegruppe, dazu die
     **Reisebereitschafts-Prüfung** und die Packliste (§8.6), die beide nur
     vorhandene Zustände zusammentragen.
+
+    **Davon umgesetzt: Reisebereitschaft und Packliste** (§8.6), soweit die
+    Zustände existieren — Datum, Regionsdatenbanken, Ausplanung des ersten Tages
+    und das Offline-Bündel; Tickets und Abstimmungen werden als offen ausgewiesen
+    statt als geprüft. Dokumenten-Fixpunkte fehlen weiterhin.
 11. **Mehrbenutzerbetrieb** (§6) — Beiträge und Stimmen je Person,
     Herzenswünsche und Fairness-Konto, Organisatorrolle, feingranulare
     Zusammenführung gleichzeitiger Änderungen, automatische Erledigt-Erkennung,
