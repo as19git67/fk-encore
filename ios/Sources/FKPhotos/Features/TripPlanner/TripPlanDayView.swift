@@ -88,11 +88,23 @@ struct TripPlanDayView: View {
                             Label("Etappen (\(viewModel.plan?.legs.count ?? 1))",
                                   systemImage: "point.topleft.down.to.point.bottomright.curvepath")
                         }
-                        // Who else is on the trip (§6.2).
+                        // Who else may plan this trip (§6.2) — a
+                        // different question from who is coming along
+                        // (§3.5, below), so a different word.
                         NavigationLink {
                             TripParticipantsView(planId: viewModel.planId)
                         } label: {
-                            Label("Mitreisende", systemImage: "person.2")
+                            Label("Wer plant mit", systemImage: "person.2")
+                        }
+                        // Who is actually coming (§3.5) — a child
+                        // under ten makes the blocks shorter, so this
+                        // re-plans the trip.
+                        NavigationLink {
+                            TripTravellersView(planId: viewModel.planId) {
+                                Task { await viewModel.load() }
+                            }
+                        } label: {
+                            Label("Wer fährt mit?", systemImage: "figure.2.and.child.holdinghands")
                         }
                         // The tickets and bookings this trip runs
                         // on (§3.4) — suggested, never taken over.
