@@ -3169,3 +3169,34 @@ export const tripPlanDocuments = pgTable(
     index("trip_plan_documents_document_idx").on(table.document_id),
   ]
 );
+
+/**
+ * Who is coming on a trip (§3.5, migration 0181).
+ *
+ * Most travellers are a reference to the household entry in
+ * `user_subject_persons`, so their birth date stays right when it is
+ * corrected there; `birth_date` here is only for people who are not in
+ * that table. `short_walks` is set by a person and never derived —
+ * age says how long a small child lasts, but "needs shorter distances"
+ * is a statement about somebody, not a conclusion from their birth year
+ * (see trip-planner/travel-group.ts).
+ */
+export const tripPlanTravellers = pgTable(
+  "trip_plan_travellers",
+  {
+    id: serial("id").primaryKey(),
+    plan_id: integer("plan_id")
+      .notNull()
+      .references(() => tripPlans.id, { onDelete: "cascade" }),
+    subject_person_id: integer("subject_person_id")
+      .references(() => userSubjectPersons.id, { onDelete: "set null" }),
+    label: text("label").notNull(),
+    birth_date: text("birth_date"),
+    short_walks: boolean("short_walks").notNull().default(false),
+    added_by: integer("added_by").references(() => users.id, { onDelete: "set null" }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("trip_plan_travellers_plan_idx").on(table.plan_id)]
+);

@@ -58,7 +58,7 @@ struct TripParticipantsView: View {
                 }
             }
         }
-        .navigationTitle("Mitreisende")
+        .navigationTitle("Wer plant mit")
         .navigationBarTitleDisplayMode(.inline)
         .task { await model.load() }
         .refreshable { await model.load() }

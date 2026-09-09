@@ -43,6 +43,7 @@ import "./ideas";
 import "./outing";
 import "./ideas-trip";
 import "./documents";
+import "./travellers";
 
 import { everyMs, schedule, startLocalCron } from "../lib/local-cron";
 import { tickFillPending } from "./fill-pending";
