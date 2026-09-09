@@ -188,6 +188,7 @@ jobs:
       # above because that is the only target platform we currently deploy
       # to on TrueNAS SCALE.
       - name: Build Encore application image (Stage A)
+        id: encore_build
         run: |
           encore build docker \
             --config=infra-config.json \
@@ -195,6 +196,20 @@ jobs:
             --os=linux \
             --arch=amd64 \
             fk-encore-raw:build
+
+      # `encore build docker` runs `npm install` in its own copy of the app
+      # and, when that fails, prints only "run 'npm install' manually to see
+      # the error" — which is exactly the one thing a CI runner cannot do
+      # afterwards. The install writes its reason into npm's debug log, so
+      # this hands it over rather than leaving the next person to guess.
+      - name: Show npm's own log when the build failed
+        if: failure() && steps.encore_build.outcome == 'failure'
+        run: |
+          for log in "$HOME"/.npm/_logs/*.log; do
+            [ -e "$log" ] || continue
+            echo "===== $log ====="
+            tail -n 200 "$log"
+          done
 
       # Stage B — thin runtime wrapper that adds the TrueNAS SCALE apps user
       # (568:568), bind-mount directories, the pre-built frontend SPA, and
