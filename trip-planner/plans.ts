@@ -1376,7 +1376,11 @@ async function requestRegion(anchor: { lat: number; lon: number }): Promise<Pend
         + "liegt er vielleicht auf dem Meer?",
     );
   }
-  const created = await createPending(suggestion.slug);
+  // The suggestion already carries the probed size, so the second HEAD
+  // request createPending would make is handed the answer instead.
+  const created = await createPending(suggestion.slug, {
+    probeSize: async () => suggestion.pbfSizeMb,
+  });
   return {
     slug: suggestion.slug,
     status: created.status,
