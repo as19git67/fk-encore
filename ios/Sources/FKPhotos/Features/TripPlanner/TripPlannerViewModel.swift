@@ -48,6 +48,9 @@ final class TripPlannerViewModel {
     /// What the last accepted offer actually moved — the sentence to
     /// show afterwards, so the day does not silently rearrange itself.
     private(set) var weatherMoves: [TripWeatherMove] = []
+    /// Spots this trip has turned down (§5), for the list that brings
+    /// them back.
+    private(set) var hiddenSpots: [TripHiddenSpot] = []
 
     /// Which leg and day are on screen. Both are positions within their
     /// parent, not row ids, because that is how the endpoints address
@@ -405,6 +408,60 @@ final class TripPlannerViewModel {
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Turn a spot down for the whole trip (§5, §20.5).
+    ///
+    /// Not the same gesture as putting one back in the pool: this one
+    /// says "and not next time either", which is the only way to stop
+    /// the search proposing a place that is simply not wanted. It is
+    /// reversible — `hiddenSpots` lists what a trip has turned down and
+    /// `unhide` brings one back.
+    func hide(osmRef: String) async {
+        struct Body: Encodable { let osmRef: String }
+        struct Response: Decodable {
+            let plan: TripPlan
+            let hidden: [TripHiddenSpot]
+            let wasPlanned: Bool
+        }
+        do {
+            let response: Response = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/spots/hide", body: Body(osmRef: osmRef))
+            plan = response.plan
+            hiddenSpots = response.hidden
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Take the "no" back. The spot may be proposed again from the next
+    /// re-plan on; nothing is put on a day here.
+    func unhide(osmRef: String) async {
+        struct Body: Encodable { let osmRef: String }
+        struct Response: Decodable { let hidden: [TripHiddenSpot] }
+        do {
+            let response: Response = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/spots/unhide", body: Body(osmRef: osmRef))
+            hiddenSpots = response.hidden
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// What this trip has turned down. Silent on failure: an empty list
+    /// is what the screen shows anyway, and a banner over a settings
+    /// page because a side list could not be fetched helps nobody.
+    func loadHiddenSpots() async {
+        struct Response: Decodable { let hidden: [TripHiddenSpot] }
+        do {
+            let response: Response = try await APIClient.shared.get(
+                "/trip-planner/plans/\(planId)/hidden")
+            hiddenSpots = response.hidden
+        } catch {
+            hiddenSpots = []
         }
     }
 

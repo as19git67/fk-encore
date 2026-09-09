@@ -277,6 +277,46 @@ fallen.
 *„Der Nachmittag wird knapp — E fällt raus und rutscht auf morgen Vormittag."*
 Mit Rückgängig-Knopf.
 
+### 5.1 „Diesen nicht — und beim nächsten Mal auch nicht"
+
+Die Regel oben — nichts wird gelöscht, alles wandert in den Vorrat — ist für
+den Fall richtig, für den sie geschrieben ist: *Der Nachmittag ist voll, dieser
+Spot wartet auf morgen.* Für den zweiten Fall ist sie falsch, und der ist aus
+der Erprobung gekommen: Die Suche schlägt einen Ort vor, den niemand will —
+ein als Sehenswürdigkeit erfasster Parkplatz, die vierte Kirche. In den Vorrat
+zurückgelegt begegnet er einem beim nächsten Neuplanen wieder, und beim
+übernächsten.
+
+**Die Zeile selbst lässt sich nicht löschen**: Sie gehört der Regionsdatenbank
+und kommt bei jeder Suche zurück. Behalten lässt sich nur die **Antwort** —
+genau die Mechanik, die §20.5 für den Ideenvorrat skizziert („merkt ein
+‚nein', statt es zu löschen"). Drei Festlegungen:
+
+- **Pro Reise, nicht pro Etappe.** Ein Ort, den die Familie in Lissabon nicht
+  wollte, ist am zweiten Lissabon-Tag auch nicht gewollt; die Reise ist die
+  Einheit, in der Menschen denken.
+- **Umkehrbar und sichtbar.** Ausgeblendete Spots stehen mit Namen in einer
+  Liste und kommen mit einem Tippen zurück. Ein „nein", das man nicht
+  zurücknehmen kann, ist eine Löschung mit freundlicherem Wort.
+- **Es gilt für den Planer, nicht für die Karte.** Die Suche nach einem Namen
+  und „was ist hier in der Nähe" finden den Ort weiterhin: Die beantworten
+  „was gibt es", das Ausblenden beantwortet „was soll vorgeschlagen werden".
+
+**Ein selbst hinzugefügter Fund braucht das nicht.** Er existiert, weil ihn
+jemand eingetragen hat — ihn aus dem Vorrat zu entfernen entfernt ihn
+endgültig, und ein gemerktes „nein" zu einem Ort, den die Suche nie vorschlagen
+wird, wäre eine Notiz ohne Adressat. Die App zeigt deshalb zwei verschiedene
+Gesten: *Entfernen* am eigenen Fund, *Ausblenden* am Fund der Maschine.
+
+**Umgesetzt:** `trip_hidden_spots` (Migration 0177), `POST …/spots/hide`,
+`POST …/spots/unhide`, `GET …/hidden`. Ausgeblendet wird der Spot aus jedem
+Vorrat und jedem Tag der Reise entfernt, und die Tage, die dabei eine Lücke
+bekommen, werden neu durchgerechnet — der Weg links und rechts der Lücke ist
+ein anderer geworden (§8.4). Beim Wiedereinblenden passiert bewusst **keine**
+Neuplanung: Einen Spot wieder ins Rennen zu nehmen ist nicht dasselbe, wie ihn
+auf einen Tag zu setzen, und fremde Tage als Nebenwirkung einer Korrektur
+umzubauen wäre die größere Überraschung (§7.1).
+
 ## 6. Zu mehreren unterwegs: Beiträge, Rollen, Splits
 
 Bis hierher liest sich das Konzept, als plante eine Person. Tatsächlich benutzen

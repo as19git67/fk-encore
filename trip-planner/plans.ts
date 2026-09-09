@@ -43,6 +43,7 @@ import {
 } from "./fixpoints";
 import {
   createPlan,
+  hiddenRefs,
   listPlans,
   loadPlan,
   saveMovedDays,
@@ -429,6 +430,10 @@ async function replanFromStoredSettings(
     const maxWalkMinutes = validateMaxWalk((constraints.maxWalkMinutes ?? undefined) as number | undefined);
     const shape = shapeDay(DEFAULT_DAY, pace, group);
 
+    // Read once for the whole trip: the answer is the same for every
+    // leg, and a re-plan that forgot it would hand back exactly the
+    // spots somebody turned down (§5).
+    const hidden = await hiddenRefs(plan.id);
     const perLeg: Array<{ legId: number; days: CreateDayInput[]; pool: ScoredCandidate[] }> = [];
     const awaiting: Array<{ legId: number; awaiting: boolean }> = [];
     const droppedBlocks: DroppedBlockReport[] = [];
@@ -447,6 +452,7 @@ async function replanFromStoredSettings(
           // How far a day is planned out stays as it was: re-planning
           // answers "what should we see", not "how far ahead".
           detailDays: leg.days.filter((d) => d.detailed).length,
+          hidden,
         },
       );
       perLeg.push({
@@ -606,6 +612,7 @@ export async function planLegForTrip(
     interests: (constraints.interests ?? undefined) as string[] | undefined,
     detailDays: options.detailDays,
     firstDayStartMinutes: options.firstDayStartMinutes,
+    hidden: await hiddenRefs(plan.id),
   });
 }
 
@@ -1153,6 +1160,13 @@ async function planLeg(
     firstDayStartMinutes?: number | null;
     /** How many of this leg's days to plan down to spots (§4.3). */
     detailDays?: number;
+    /**
+     * Spots this trip has turned down (§5). Filtered out before
+     * scoring rather than afterwards: a hidden spot that becomes a
+     * candidate first would still show up in the counts, in the pool
+     * and in somebody's "why here?".
+     */
+    hidden?: ReadonlySet<string>;
   },
 ): Promise<{
   leg: CreateLegInput;
@@ -1194,7 +1208,7 @@ async function planLeg(
     // is worth a block. A lookup ("what is near me") asks its own
     // question and keeps the ordinary.
     requireProminence: true,
-  });
+  }).filter((candidate) => !trip.hidden?.has(candidate.osmRef));
 
   let available = [...scored];
   const days: CreateDayInput[] = [];
