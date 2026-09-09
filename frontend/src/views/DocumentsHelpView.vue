@@ -284,6 +284,15 @@ function goBack() {
           die ein Dokument hat und eine Mappe nicht.
         </li>
         <li>
+          <strong>Geteilte Ansicht</strong> – auf breiten Bildschirmen im
+          Querformat (ab 1300&nbsp;px) steht links die Liste und rechts die
+          Vorschau des aktuellen Dokuments. Ein Klick auf einen Eintrag zeigt
+          ihn rechts, statt in die Detailansicht zu wechseln; mit ↑/↓ läuft man
+          durch die Liste und die Vorschau folgt. Zum Bearbeiten führt
+          „Öffnen" in die volle Detailansicht. Wird das Fenster schmaler,
+          bleibt die Liste und die Vorschau verschwindet.
+        </li>
+        <li>
           <strong>Chip an der Dokumentzeile</strong> – jedes Dokument zeigt
           seine Mappen an; ein Klick filtert die Liste auf genau diese Mappe.
           Ein Dokument darf in mehreren Mappen liegen, deshalb sind es
