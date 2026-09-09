@@ -218,4 +218,19 @@ final class TripDayTimelineTests: XCTestCase {
         XCTAssertEqual(TripDayTimeline.lightWindow(light, at: 19 * 60 + 30)?.kind, "blue")
         XCTAssertNil(TripDayTimeline.lightWindow(light, at: 17 * 60 + 59))
     }
+
+    func testAnUncomputedSunIsNotAnOrdinaryHour() {
+        // Three states, not two: a trip without dates has no sun at
+        // all, and saying "kein besonderes Lichtfenster" under it would
+        // claim knowledge nobody has (§15.3).
+        XCTAssertEqual(TripDayTimeline.light(nil, at: 12 * 60), .unknown)
+
+        let undated = TripDayLight(day: nil, windows: [], spots: [])
+        XCTAssertEqual(TripDayTimeline.light(undated, at: 12 * 60), .unknown)
+
+        let golden = TripLightWindow(kind: "golden", fromMinutes: 18 * 60, toMinutes: 19 * 60)
+        let dated = TripDayLight(day: "2026-09-04", windows: [golden], spots: [])
+        XCTAssertEqual(TripDayTimeline.light(dated, at: 18 * 60 + 30), .window(golden))
+        XCTAssertEqual(TripDayTimeline.light(dated, at: 12 * 60), .ordinary)
+    }
 }

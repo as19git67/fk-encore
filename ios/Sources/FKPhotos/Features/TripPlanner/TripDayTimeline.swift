@@ -99,6 +99,29 @@ enum TripDayTimeline {
     static func lightWindow(_ light: TripDayLight?, at minutes: Int) -> TripLightWindow? {
         light?.windows.first { minutes >= $0.fromMinutes && minutes < $0.toMinutes }
     }
+
+    /// What the slider may honestly say about the light at one minute.
+    ///
+    /// Three states, not two, for the same reason the weather has three
+    /// (§15.3): "we did not compute the sun for this day" and "the sun
+    /// is doing nothing special right now" are different answers, and a
+    /// trip without dates only ever has the first. Rendering them alike
+    /// would put "kein besonderes Lichtfenster" under a day nobody has
+    /// placed in the year yet.
+    enum LightAtTime: Equatable {
+        /// No light was computed — no dates, or the call has not
+        /// returned. The screen says nothing at all.
+        case unknown
+        /// Computed, and this minute falls outside every window.
+        case ordinary
+        case window(TripLightWindow)
+    }
+
+    static func light(_ light: TripDayLight?, at minutes: Int) -> LightAtTime {
+        guard let light, light.day != nil else { return .unknown }
+        if let window = lightWindow(light, at: minutes) { return .window(window) }
+        return .ordinary
+    }
 }
 
 /// Where the plan puts the travellers at one hour of the day.

@@ -92,18 +92,12 @@ struct TripDayMapView: View {
     }
 
     private func timeSlider(_ span: ClosedRange<Int>) -> some View {
-        let lightWindow = TripDayTimeline.lightWindow(light, at: Int(sliderMinutes))
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(TripClock.format(Int(sliderMinutes)))
                     .font(.subheadline.weight(.semibold))
                     .monospacedDigit()
                 Spacer()
-                if let lightWindow {
-                    Label(lightWindow.label, systemImage: lightWindow.symbolName)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
                 // What the plan says about that hour — or, honestly,
                 // nothing when the hour falls outside the day.
                 if let position = highlighted {
@@ -118,11 +112,7 @@ struct TripDayMapView: View {
                 }
             }
 
-            if lightWindow == nil {
-                Label("Kein besonderes Lichtfenster", systemImage: "sun.max")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            lightLine
 
             Slider(
                 value: $sliderMinutes,
@@ -141,6 +131,26 @@ struct TripDayMapView: View {
         }
         .padding()
         .background(Color(uiColor: .systemBackground).ignoresSafeArea(edges: .bottom))
+    }
+
+    /// What the sun is doing at the selected minute (§7.3) — and
+    /// nothing at all when nobody computed it. A day without dates has
+    /// no sun, and "kein besonderes Lichtfenster" under such a day
+    /// would be a claim rather than an answer.
+    @ViewBuilder
+    private var lightLine: some View {
+        switch TripDayTimeline.light(light, at: Int(sliderMinutes)) {
+        case .unknown:
+            EmptyView()
+        case .ordinary:
+            Label("Kein besonderes Lichtfenster", systemImage: "sun.max")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .window(let window):
+            Label("\(window.label) · \(window.range)", systemImage: window.symbolName)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 }
 
