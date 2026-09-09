@@ -182,7 +182,7 @@ describe("collections CRUD", () => {
   it("lists only what the caller may read", async () => {
     const mine = await createCollection({ title: "Meine Mappe" });
     auth(STRANGER_ID);
-    const seen = await listCollections();
+    const seen = await listCollections({});
     expect(seen.items.map((c) => c.id)).not.toContain(mine.id);
     await expect(getCollection({ id: mine.id })).rejects.toThrow(/not found/);
   });

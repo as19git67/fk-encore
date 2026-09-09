@@ -47,6 +47,18 @@ export interface DocumentSummary {
    */
   attributes_reviewed: boolean
   category_source: CategorySource
+  /**
+   * Sammelmappen this document sits in, as far as the caller may see them.
+   * A document in a folder still appears in the list — the folder is a bundle
+   * for handing over, not a filing location — and shows this as a chip.
+   */
+  collections: DocumentCollectionBadge[]
+}
+
+export interface DocumentCollectionBadge {
+  id: number
+  title: string
+  visibility: DocumentVisibility
 }
 
 export interface DocumentTaxSection {
@@ -179,6 +191,14 @@ export interface ListDocumentsQuery {
   category_source?: CategorySource
   /** Filter by document-type facet slug (Dokumentart). */
   document_type?: string
+  /**
+   * `false` keeps only documents that are in no Sammelmappe, `true` only the
+   * bundled ones. Omitted means both — documents in a folder are never hidden
+   * unless the user asks for it.
+   */
+  in_collection?: boolean
+  /** Keep only the members of this one Sammelmappe. Wins over `in_collection`. */
+  collection_id?: number
   sort_by?: string
   sort_dir?: 'asc' | 'desc'
   limit?: number
@@ -346,6 +366,8 @@ export type DocumentFilterParams = Pick<
   | 'subject_person_id'
   | 'category_source'
   | 'document_type'
+  | 'in_collection'
+  | 'collection_id'
 >
 
 export function searchDocuments(

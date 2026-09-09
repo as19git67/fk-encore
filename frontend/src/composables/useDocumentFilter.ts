@@ -6,7 +6,7 @@ import { replaceQuerySlice, updateRouteQuery } from '../utils/routeQueryUpdate'
 const STORAGE_KEY = 'documents.filter'
 export const DOCUMENT_FILTER_QUERY_KEYS = [
   'category', 'tags', 'status', 'review', 'neu', 'sender', 'correspondent', 'dateFrom', 'dateTo',
-  'taxRelevant', 'subjectPerson', 'categorySource', 'documentType',
+  'taxRelevant', 'subjectPerson', 'categorySource', 'documentType', 'inCollection', 'collection',
 ] as const
 
 export interface DocumentFilter {
@@ -27,6 +27,15 @@ export interface DocumentFilter {
   categorySource?: string
   /** Filter by document-type facet slug (Dokumentart). */
   documentType?: string
+  /**
+   * Sammelmappen membership. `false` keeps only documents that are in no
+   * folder — the explicit way to thin the list out; documents in a folder are
+   * never hidden on their own, because a folder is a bundle for handing over,
+   * not a filing location, and a document may sit in several at once.
+   */
+  inCollection?: boolean
+  /** Keep only the members of this one Sammelmappe. Wins over `inCollection`. */
+  collectionId?: number
 }
 
 function parseBool(v: unknown): boolean | undefined {
@@ -66,6 +75,12 @@ export function parseDocFilterFromQuery(q: Record<string, unknown>): DocumentFil
   }
   if (typeof q.categorySource === 'string' && q.categorySource) f.categorySource = q.categorySource
   if (typeof q.documentType === 'string' && q.documentType) f.documentType = q.documentType
+  const ic = parseBool(q.inCollection)
+  if (ic !== undefined) f.inCollection = ic
+  if (typeof q.collection === 'string' && q.collection) {
+    const n = Number(q.collection)
+    if (Number.isFinite(n)) f.collectionId = n
+  }
   return f
 }
 
@@ -84,6 +99,8 @@ export function docFilterToQuery(f: DocumentFilter): Record<string, string> {
   if (f.subjectPersonId) out.subjectPerson = String(f.subjectPersonId)
   if (f.categorySource) out.categorySource = f.categorySource
   if (f.documentType) out.documentType = f.documentType
+  if (f.inCollection !== undefined) out.inCollection = String(f.inCollection)
+  if (f.collectionId) out.collection = String(f.collectionId)
   return out
 }
 
@@ -101,6 +118,9 @@ export function countActiveDocFilters(f: DocumentFilter): number {
   if (f.subjectPersonId) n++
   if (f.categorySource) n++
   if (f.documentType) n++
+  // One facet: naming a folder supersedes the yes/no question, so counting
+  // both would show "2 Filter" for a single decision.
+  if (f.collectionId || f.inCollection !== undefined) n++
   return n
 }
 
