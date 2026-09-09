@@ -73,6 +73,37 @@ export const passwordResetTokens = pgTable("password_reset_tokens", {
   expires_at: timestamp("expires_at", { mode: "string" }).notNull(),
 });
 
+// ========== User Invites ==========
+//
+// Accounts are created by invitation only: somebody holding `users.create`
+// names an address, and the token mailed to that address is the sole way to
+// reach `POST /users`. Registration used to be open to the internet.
+//
+// The invite grants nothing but the right to exist — no roles are attached
+// here, deliberately. Otherwise `users.create` alone would be enough to mint
+// an admin; roles stay behind `roles.assign` as a separate, later step.
+
+export const userInvites = pgTable(
+  "user_invites",
+  {
+    id: serial("id").primaryKey(),
+    token: text("token").notNull().unique(),
+    // The account is created for this address, taken from here rather than
+    // from the request, so an invite cannot be redirected to another one.
+    email: text("email").notNull(),
+    // Kept for the audit trail; an invite outlives the account that sent it.
+    invited_by_user_id: integer("invited_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+    expires_at: timestamp("expires_at", { mode: "string" }).notNull(),
+    // Set when the invite is redeemed. The row stays so the admin list can
+    // show what happened, and so a token is never accepted twice.
+    accepted_at: timestamp("accepted_at", { mode: "string" }),
+  },
+  (table) => [index("user_invites_email_idx").on(table.email)]
+);
+
 // ========== Passkeys ==========
 
 export const passkeys = pgTable("passkeys", {

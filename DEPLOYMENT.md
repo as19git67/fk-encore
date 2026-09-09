@@ -242,6 +242,35 @@ RP_ORIGIN=https://photos.my-domain.com
 EMBEDDING_DB_PASSWORD=another-password
 ```
 
+### Accounts and invitations
+
+There is no open sign-up. `POST /users` used to accept anyone who could
+reach the app; it now requires an invitation token, and the only way to
+issue one is from **Benutzer → Einladen** in the app, which needs the
+`users.create` permission (the Admin role has it).
+
+The invited address gets a mail with a link that is valid for seven days
+and can be used once. The person sets their own name and password; the
+address comes from the invite, not from the form. An invitation grants
+**no roles** — assign those afterwards on the user's detail page, which
+needs `roles.assign`. That separation is deliberate: otherwise
+`users.create` alone would be enough to create an administrator.
+
+The first account still comes from `ADMIN_EMAIL` / `ADMIN_PASSWORD` at
+first start (see *Required variables*), and everything after it is an
+invitation.
+
+**This makes SMTP a requirement for onboarding.** With `SMTP_HOST` /
+`SMTP_USER` / `SMTP_PASS` unset, the invitation link is only written to
+the app container's log:
+
+```
+[Mail] SMTP not configured. Invite link for someone@example.com: https://…/app/register?token=…
+```
+
+which works (`docker compose logs app | grep 'Invite link'`) but is not a
+flow to rely on. The same applies to password-reset mails.
+
 ### Web Push notifications (optional)
 
 Push notifications for feed events (album shares, comments, new photos

@@ -1,7 +1,7 @@
 import { api, APIError } from "encore.dev/api";
 import type {
   UserWithRoles,
-  CreateUserRequest,
+  AcceptInviteRequest,
   UpdateUserRequest,
   ListUsersResponse,
   DeleteResponse,
@@ -19,41 +19,47 @@ import {
 import { requirePermission } from "./auth-handler";
 import { getAuthData } from "~encore/auth";
 import { passwordPolicyError } from "./password-policy";
-import { checkRateLimit, getClientIp } from "./rateLimiter";
+import { consumeInviteLogic } from "./invite.service";
 
 console.log("[boot] user/user.ts: all imports resolved");
 
 /**
- * Create a new user (Register) — no auth required.
+ * Redeem an invitation and create the account it was issued for.
  *
- * Registration is open: anyone who can reach the app can create an account.
- * New accounts get no roles, so this is not a privilege-escalation path, but
- * it is an account factory. Gating it behind an invite is a product decision
- * and is still open (#1159); what is enforced here meanwhile:
+ * Unauthenticated, because the person doing it has no account yet — but no
+ * longer open: this used to accept anyone who could reach the app, which
+ * made it an account factory and made every
+ * authenticated-but-unauthorized gap elsewhere anonymously reachable. The
+ * gate is the token, mailed by somebody holding `users.create`.
  *
- *   - the shared password policy, which registration had no check for at all
- *   - a per-IP ceiling, which only bites where the deployment has declared
- *     the proxy headers trustworthy (see getClientIp). Without a trusted
- *     address there is nothing to key a registration limit on — an attacker
- *     varies the email freely — so this is a speed bump, not the answer.
+ * The address is not taken from the request. It comes out of the invite
+ * row, so a token issued for one person cannot be used to register another.
+ * Redeeming is what marks the invite spent, in the same statement that
+ * reads it, so two submissions of the same link create one account.
+ *
+ * No roles are attached here, deliberately — see invite.service.ts.
  */
 export const createUser = api(
   { expose: true, method: "POST", path: "/users" },
-  async (req: CreateUserRequest): Promise<UserWithRoles> => {
-    const ip = getClientIp();
-    if (ip) {
-      checkRateLimit(`register-ip:${ip}`, {
-        maxAttempts: 5,
-        windowMs: 60 * 60 * 1000,
-        message: "Too many accounts created from this address.",
-      });
-    }
-
+  async (req: AcceptInviteRequest): Promise<UserWithRoles> => {
     const policyError = passwordPolicyError(req.password);
     if (policyError) throw APIError.invalidArgument(policyError);
 
+    if (!req.name?.trim()) {
+      throw APIError.invalidArgument("name is required");
+    }
+
+    let email: string;
     try {
-      return await createUserLogic(req);
+      ({ email } = await consumeInviteLogic(req.invite));
+    } catch {
+      throw APIError.permissionDenied(
+        "This invitation is invalid, already used, or expired.",
+      );
+    }
+
+    try {
+      return await createUserLogic({ email, name: req.name, password: req.password });
     } catch (err: any) {
       if (err.message?.includes("already exists")) {
         throw APIError.alreadyExists(err.message);

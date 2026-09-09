@@ -9,10 +9,11 @@ import { getAuthData } from "~encore/auth";
 import { eq } from "drizzle-orm";
 
 import db from "../db/database";
-import { users, sessions, passwordResetTokens } from "../db/schema";
+import { users, sessions, passwordResetTokens, userInvites } from "../db/schema";
 import { MIN_PASSWORD_LENGTH, passwordPolicyError } from "./password-policy";
 import { createUser, updateUser, changePassword } from "./user";
 import { createUserLogic } from "./user.service";
+import { createInviteLogic } from "./invite.service";
 import { resetPasswordLogic } from "./auth.service";
 import { __resetRateLimiterForTests } from "./rateLimiter";
 
@@ -22,6 +23,7 @@ const LONG_ENOUGH = "a".repeat(MIN_PASSWORD_LENGTH);
 beforeEach(async () => {
   __resetRateLimiterForTests();
   await db.delete(passwordResetTokens);
+  await db.delete(userInvites);
   await db.delete(sessions);
   await db.delete(users);
 });
@@ -50,64 +52,48 @@ describe("passwordPolicyError", () => {
 });
 
 describe("registration", () => {
+  async function inviteFor(email: string): Promise<string> {
+    const inviter = await createUserLogic({
+      email: `inviter-${email}`,
+      name: "Inviter",
+      password: LONG_ENOUGH,
+    });
+    await createInviteLogic(inviter.id, email);
+    const rows = await db.select().from(userInvites).where(eq(userInvites.email, email));
+    return rows[0]!.token;
+  }
+
   it("refuses a password below the policy", async () => {
+    const invite = await inviteFor("a@test.local");
+
     await expect(
-      (createUser as any)({ email: "a@test.local", name: "A", password: TOO_SHORT }),
+      (createUser as any)({ invite, name: "A", password: TOO_SHORT }),
     ).rejects.toThrow(/at least/);
 
     const rows = await db.select().from(users).where(eq(users.email, "a@test.local"));
     expect(rows).toHaveLength(0);
   });
 
-  it("accepts one that meets it", async () => {
-    const created = await (createUser as any)({
-      email: "b@test.local",
-      name: "B",
-      password: LONG_ENOUGH,
-    });
-    expect(created.email).toBe("b@test.local");
-    // New accounts carry no roles — registration is not a privilege path.
-    expect(created.roles).toHaveLength(0);
-  });
-
-  it("caps registrations per address once the proxy headers are trusted", async () => {
-    vi.stubEnv("TRUST_PROXY_HEADERS", "true");
-    vi.mocked(currentRequest).mockReturnValue({
-      type: "api-call",
-      headers: { "x-forwarded-for": "203.0.113.5" },
-    } as never);
-
-    for (let i = 0; i < 5; i++) {
-      await (createUser as any)({
-        email: `bulk${i}@test.local`,
-        name: "Bulk",
-        password: LONG_ENOUGH,
-      });
-    }
+  it("does not spend the invite on a password the policy rejects", async () => {
+    // The order matters: a fumbled password must not cost somebody their
+    // one-time link.
+    const invite = await inviteFor("a2@test.local");
 
     await expect(
-      (createUser as any)({ email: "bulk5@test.local", name: "Bulk", password: LONG_ENOUGH }),
-    ).rejects.toThrow(/Too many accounts/);
+      (createUser as any)({ invite, name: "A", password: TOO_SHORT }),
+    ).rejects.toThrow(/at least/);
+
+    const created = await (createUser as any)({ invite, name: "A", password: LONG_ENOUGH });
+    expect(created.email).toBe("a2@test.local");
   });
 
-  it("does not cap when there is no trustworthy address", async () => {
-    // The headers are ignored by default, so there is no key to limit on and
-    // the ceiling must not fall back to a shared bucket.
-    vi.mocked(currentRequest).mockReturnValue({
-      type: "api-call",
-      headers: { "x-forwarded-for": "203.0.113.5" },
-    } as never);
+  it("accepts one that meets it", async () => {
+    const invite = await inviteFor("b@test.local");
 
-    for (let i = 0; i < 8; i++) {
-      await (createUser as any)({
-        email: `nolimit${i}@test.local`,
-        name: "N",
-        password: LONG_ENOUGH,
-      });
-    }
-
-    const rows = await db.select().from(users);
-    expect(rows.length).toBeGreaterThanOrEqual(8);
+    const created = await (createUser as any)({ invite, name: "B", password: LONG_ENOUGH });
+    expect(created.email).toBe("b@test.local");
+    // New accounts carry no roles — an invite is not a privilege path.
+    expect(created.roles).toHaveLength(0);
   });
 });
 
