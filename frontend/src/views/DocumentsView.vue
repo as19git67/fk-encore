@@ -37,7 +37,12 @@ import { useDocSelectionStore } from '../stores/documents/selection'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import { useScrollRestore } from '../composables/useScrollRestore'
 import { useSort, type SortField } from '../composables/useSort'
-import { DOCUMENT_FILTER_QUERY_KEYS, useDocumentFilter } from '../composables/useDocumentFilter'
+import {
+  collectionQueryParams,
+  DOCUMENT_FILTER_QUERY_KEYS,
+  effectiveCollectionScope,
+  useDocumentFilter,
+} from '../composables/useDocumentFilter'
 import { replaceQuerySlice, updateRouteQuery, waitForPendingQueryUpdate } from '../utils/routeQueryUpdate'
 import {
   consumeListFocus,
@@ -199,21 +204,55 @@ function clearSelection() {
  */
 const collections = ref<DocumentCollection[]>([])
 
-/** Facets that describe a document and therefore cannot describe a folder. */
+/**
+ * Facets that describe a document and therefore cannot describe a folder.
+ *
+ * The Sammelmappen scope is deliberately not among them: it is a statement
+ * *about* folders, and in its default setting the folder rows are what stands
+ * in for the documents it leaves out — hiding both would leave a hole.
+ */
 function hasDocumentFacetFilter(): boolean {
   const f = filter.applied.value
   return Boolean(
     f.category || (f.tags && f.tags.length > 0) || f.status || f.needs_review ||
     f.unreviewed || f.sender || f.correspondent || f.dateFrom || f.dateTo ||
     f.taxRelevant !== undefined || f.subjectPersonId || f.categorySource ||
-    f.documentType || f.collectionId || f.inCollection !== undefined,
+    f.documentType,
   )
 }
 
 const collectionFacetActive = computed(() => hasDocumentFacetFilter())
-const visibleCollections = computed(() =>
-  collectionFacetActive.value ? [] : collections.value,
+
+/**
+ * The folder rows to show. When one folder is singled out, only that folder's
+ * row appears — it is the heading of what the list below is showing, and the
+ * other folders are not part of the question that was asked.
+ */
+const visibleCollections = computed(() => {
+  if (collectionFacetActive.value) return []
+  const pinned = filter.applied.value.collectionId
+  if (pinned) return collections.value.filter((c) => c.id === pinned)
+  return collections.value
+})
+
+/**
+ * True while the default is leaving bundled documents out and there is
+ * something to leave out. Drives the notice above the list: the omission has
+ * to be visible and undoable in one click, or it is indistinguishable from
+ * documents having gone missing.
+ */
+const bundledHidden = computed(
+  () =>
+    effectiveCollectionScope(filter.applied.value) === 'without' &&
+    !filter.applied.value.collectionId &&
+    collections.value.some((c) => c.item_count > 0),
 )
+
+/** "Auch anzeigen" from the notice — the flat list, without opening the menu. */
+function showBundledDocuments() {
+  filter.draft.value = { ...filter.applied.value, collectionScope: 'with', collectionId: undefined }
+  filter.apply()
+}
 
 async function loadCollections() {
   try {
@@ -237,7 +276,7 @@ async function openCollection(id: number) {
 
 /** Jump from a chip straight into the folder-members view of the list. */
 function filterByCollection(id: number) {
-  filter.draft.value = { ...filter.applied.value, collectionId: id, inCollection: undefined }
+  filter.draft.value = { ...filter.applied.value, collectionId: id, collectionScope: undefined }
   filter.apply()
 }
 
@@ -365,7 +404,9 @@ function syncQueryParams() {
   if (fq.dateTo) query.dateTo = fq.dateTo
   if (fq.taxRelevant !== undefined) query.taxRelevant = String(fq.taxRelevant)
   if (fq.subjectPersonId) query.subjectPerson = String(fq.subjectPersonId)
-  if (fq.inCollection !== undefined) query.inCollection = String(fq.inCollection)
+  if (fq.collectionScope && fq.collectionScope !== 'without') {
+    query.collectionScope = fq.collectionScope
+  }
   if (fq.collectionId) query.collection = String(fq.collectionId)
   const s = sort.applied.value
   if (s.field !== 'uploaded_at' || s.direction !== 'desc') {
@@ -410,8 +451,7 @@ function currentFilterParams() {
     subject_person_id: f.subjectPersonId,
     category_source: f.categorySource as any,
     document_type: f.documentType,
-    in_collection: f.inCollection,
-    collection_id: f.collectionId,
+    ...collectionQueryParams(f),
   }
 }
 
@@ -873,6 +913,14 @@ onMounted(async () => {
       </button>
     </div>
 
+    <p v-if="!loading && bundledHidden" class="collection-hidden-note">
+      <i class="pi pi-info-circle" />
+      Dokumente, die in einer Sammelmappe liegen, sind ausgeblendet — die Mappe steht oben für sie.
+      <button type="button" class="collection-note-action" @click="showBundledDocuments">
+        Auch anzeigen
+      </button>
+    </p>
+
     <p v-else-if="!loading && collectionFacetActive && collections.length > 0" class="collection-hidden-note">
       <i class="pi pi-info-circle" />
       Sammelmappen werden bei aktivem Dokumentfilter nicht gezeigt — ein Filter fragt nach
@@ -1146,6 +1194,16 @@ onMounted(async () => {
 }
 .collection-hidden-note i {
   margin-right: 4px;
+}
+.collection-note-action {
+  border: 0;
+  padding: 0;
+  margin-left: 6px;
+  background: none;
+  color: var(--p-primary-color);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
 }
 .document-collections {
   display: flex;
