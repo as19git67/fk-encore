@@ -1,5 +1,6 @@
 import { Header, Gateway, APIError, Query } from "encore.dev/api";
 import { authHandler } from "encore.dev/auth";
+import { currentRequest } from "encore.dev";
 import { validateToken } from "./auth.service";
 
 console.log("[boot] user/auth-handler.ts: all imports resolved");
@@ -20,11 +21,31 @@ interface AuthData {
   permissions: string[];
 }
 
-// Store the current token so logout can access it
-let currentToken: string | undefined;
-
+/**
+ * The bearer token of the request being handled, for the one caller that
+ * needs the raw value: logout, which revokes exactly this session.
+ *
+ * Read from the request rather than remembered in a module variable. The
+ * previous version stored it in a `let` that every authenticated request
+ * overwrote, so under concurrency logout could delete another user's
+ * session while leaving the caller's own intact — and still report success.
+ */
 export function getAuthToken(): string | undefined {
-  return currentToken;
+  const req = currentRequest();
+  if (req?.type !== "api-call") return undefined;
+
+  const rawHeader = req.headers["authorization"];
+  const header = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+  if (header) {
+    const parts = header.split(" ");
+    return parts.length === 2 && parts[0] === "Bearer" ? parts[1] : undefined;
+  }
+
+  // Mirror the gateway's WebSocket fallback below so a caller that
+  // authenticated via `?token=` can log out too.
+  const query = req.pathAndQuery?.split("?")[1];
+  if (!query) return undefined;
+  return new URLSearchParams(query).get("token") ?? undefined;
 }
 
 /** Check if the current auth data has a specific permission. Throws APIError.permissionDenied if not. */
@@ -55,8 +76,6 @@ export const auth = authHandler<AuthParams, AuthData>(async (params): Promise<Au
   if (!token) {
     throw APIError.unauthenticated("missing Authorization header");
   }
-
-  currentToken = token;
 
   try {
     return await validateToken(token);
