@@ -118,6 +118,10 @@ export const placeFromPool = api(
           // disappeared (migration 0167).
           note: candidate.note,
           sourceUrl: candidate.sourceUrl,
+          // And where it came from, for the same reason: a find that
+          // returns to the pool as a search result is one the next
+          // re-plan deletes.
+          origin: candidate.origin,
         },
         toBlockId: req.blockId,
         toPosition: req.position,

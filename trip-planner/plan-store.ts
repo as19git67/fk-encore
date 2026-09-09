@@ -516,6 +516,9 @@ async function insertDays(
           wikipedia_url: stop.wikipediaUrl ?? null,
           facade_azimuth: stop.facadeAzimuth ?? null,
           kind: stop.kind ?? null,
+          // Provenance travels with the spot (§9.2): the pool row that
+          // knew it is deleted the moment it lands on a day.
+          origin: stop.origin ?? "search",
         });
       }
     }
@@ -709,6 +712,9 @@ export async function saveMovedDays(
           wikipedia_url: stop.wikipediaUrl ?? null,
           facade_azimuth: stop.facadeAzimuth ?? null,
           kind: stop.kind ?? null,
+          // Provenance travels with the spot (§9.2): the pool row that
+          // knew it is deleted the moment it lands on a day.
+          origin: stop.origin ?? "search",
         });
       }
     }
@@ -843,6 +849,7 @@ export async function loadPlan(
       category: row.category,
       dwellMinutes: written?.dwellMinutes ?? row.dwell_minutes,
       photoStop: written?.photoStop ?? false,
+      origin: row.origin,
       score: 0,
       travelFromPrevious: {
         minutes: row.travel_minutes,
@@ -1013,28 +1020,55 @@ async function rewriteDay(
         wikipedia_url: stop.wikipediaUrl ?? null,
         facade_azimuth: stop.facadeAzimuth ?? null,
         kind: stop.kind ?? null,
+        origin: stop.origin ?? "search",
       });
     }
   }
 
+  // What the pool already knew about these places, before the rewrite
+  // takes it away.
+  //
+  // The pool is replaced wholesale because the redistribution decides
+  // what is in it, and that is right. What is *not* right is losing
+  // where an entry came from on the way: a find somebody brought in by
+  // hand (§9.2) came back as an ordinary search result, which meant the
+  // next settings change deleted it — `replanPlan` keeps exactly the
+  // rows whose origin is not "search" — and the app offered "hide" for
+  // a spot that was never the machine's suggestion. The note and the
+  // link the find arrived with went the same way.
+  const previous = await db
+    .select()
+    .from(tripPlanPool)
+    .where(eq(tripPlanPool.leg_id, legId));
+  const knownByRef = new Map(previous.map((row) => [row.osm_ref, row]));
+
   await db.delete(tripPlanPool).where(eq(tripPlanPool.leg_id, legId));
   if (pool.length > 0) {
     await db.insert(tripPlanPool).values(
-      pool.map((c) => ({
-        leg_id: legId,
-        osm_ref: c.osmRef,
-        name: c.name,
-        local_name: c.localName ?? null,
-        wikipedia_url: c.wikipediaUrl ?? null,
-        facade_azimuth: c.facadeAzimuth ?? null,
-        kind: c.kind ?? null,
-        lat: c.lat,
-        lon: c.lon,
-        category: c.category,
-        dwell_minutes: c.dwellMinutes,
-        score: c.score,
-        reasons: [],
-      })),
+      pool.map((c) => {
+        const known = knownByRef.get(c.osmRef);
+        return {
+          leg_id: legId,
+          osm_ref: c.osmRef,
+          name: c.name,
+          local_name: c.localName ?? null,
+          wikipedia_url: c.wikipediaUrl ?? null,
+          facade_azimuth: c.facadeAzimuth ?? null,
+          kind: c.kind ?? null,
+          lat: c.lat,
+          lon: c.lon,
+          category: c.category,
+          dwell_minutes: c.dwellMinutes,
+          score: c.score,
+          reasons: [],
+          // Provenance survives the rewrite, because it is not the
+          // redistribution's to decide (§9.2).
+          origin: known?.origin ?? c.origin ?? "search",
+          note: known?.note ?? null,
+          source_url: known?.source_url ?? null,
+          unmatched: known?.unmatched ?? false,
+        };
+      }),
     );
   }
 

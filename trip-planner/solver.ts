@@ -51,6 +51,11 @@ export interface Candidate extends Coordinate {
    * out of the region search — the flag is written by hand.
    */
   photoStop?: boolean;
+  /**
+   * "search" or "manual" (§9.2). Absent for a candidate straight out
+   * of the region search, which is the same thing as "search".
+   */
+  origin?: string;
   /** Category id from the geo search, e.g. "museum". */
   category: string;
   /** How long one typically stays, in minutes. */
@@ -72,6 +77,8 @@ export interface PlannedStop {
   kind?: string | null;
   /** See `Candidate.photoStop`. */
   photoStop?: boolean;
+  /** See `Candidate.origin`. */
+  origin?: string;
   lat: number;
   lon: number;
   category: string;

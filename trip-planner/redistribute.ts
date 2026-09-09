@@ -50,6 +50,14 @@ export interface CurrentStop extends PlannedStop {
    */
   note?: string | null;
   sourceUrl?: string | null;
+  /**
+   * "search" when the planner proposed it, "manual" when somebody
+   * brought it in themselves (§9.2). Carried on the stop because the
+   * pool row that knew it is deleted the moment the spot is planned —
+   * and a find that comes back as a search result is one a re-plan
+   * deletes.
+   */
+  origin?: string;
 }
 
 export interface CurrentBlock extends Omit<PlannedBlock, "stops"> {
@@ -161,6 +169,8 @@ function stopToCandidate(stop: CurrentStop): Candidate {
     // The flag travels with the spot: a redistribution must not turn a
     // photo stop back into an ordinary one on its way to the pool.
     photoStop: stop.photoStop ?? false,
+    // Nor a find into a suggestion (§9.2).
+    origin: stop.origin ?? "search",
     lat: stop.lat,
     lon: stop.lon,
     category: stop.category,
