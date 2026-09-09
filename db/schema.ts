@@ -1672,6 +1672,13 @@ export const guestSessions = pgTable("guest_sessions", {
     .notNull()
     .defaultNow(),
   expires_at: timestamp("expires_at", { mode: "string", withTimezone: true }).notNull(),
+  // Whether THIS session proved possession of the mailbox, as opposed to
+  // the guest having proved it once on some other device. register() hands
+  // out a session before the magic link is opened, so the two are not the
+  // same thing: keying the write gates on guests.verified_at let anyone
+  // holding the share link register a known address and inherit that
+  // guest's identity. Set only by verify(), on the session it issues.
+  verified_at: timestamp("verified_at", { mode: "string", withTimezone: true }),
 });
 
 // Per-browser Web Push subscriptions for guests. Mirrors pushSubscriptions

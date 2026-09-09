@@ -28,6 +28,7 @@ import {
 } from "../db/schema";
 import { dbFirst, dbExec, dbInsertReturning } from "../db/adapter";
 import { sendGuestVerifyEmail } from "../user/mail";
+import { checkRateLimit } from "../user/rateLimiter";
 import { GUEST_SESSION_COOKIE, GUEST_SESSION_TTL_MS, parseCookies } from "./http";
 
 type Guest = typeof guests.$inferSelect;
@@ -139,9 +140,27 @@ function generateToken(bytes = 32): string {
 }
 
 /**
+ * How often one share link may mint invitations, and how often a single
+ * address may be mailed. Both are needed: the link is the only key that is
+ * always present (the client IP is not — see getClientIp), while the
+ * per-address limit is what stops one person being mail-bombed through
+ * several links. Every call sends mail, so an unlimited endpoint is an
+ * amplifier pointed at your own sender reputation.
+ */
+const REGISTER_PER_LINK_MAX = 20;
+const REGISTER_PER_EMAIL_MAX = 3;
+const REGISTER_WINDOW_MS = 60 * 60 * 1000;
+
+/**
  * Register (or recognize) a guest on a public-link landing. Always
  * sends a magic-link mail — even for already-verified guests — so that
  * a device switch requires possession of the email account.
+ *
+ * That rule is enforced by the session, not the guest: the cookie handed
+ * out here is deliberately unverified, whatever `guests.verified_at` says
+ * about this person from an earlier device. Before, it inherited the
+ * guest's standing, which let anyone with the share link register a known
+ * address and take over that identity.
  */
 export async function register(params: RegisterParams): Promise<RegisterResult> {
   const email = normalizeEmail(params.email);
@@ -154,6 +173,17 @@ export async function register(params: RegisterParams): Promise<RegisterResult> 
   }
 
   const link = await loadActiveLink(params.linkToken);
+
+  checkRateLimit(`guest-register-link:${link.id}`, {
+    maxAttempts: REGISTER_PER_LINK_MAX,
+    windowMs: REGISTER_WINDOW_MS,
+    message: "Zu viele Anmeldungen über diesen Link. Bitte später erneut versuchen.",
+  });
+  checkRateLimit(`guest-register-email:${email}`, {
+    maxAttempts: REGISTER_PER_EMAIL_MAX,
+    windowMs: REGISTER_WINDOW_MS,
+    message: "Zu viele Bestätigungsmails an diese Adresse. Bitte später erneut versuchen.",
+  });
   const album = await dbFirst<typeof albums.$inferSelect>(
     db.select().from(albums).where(eq(albums.id, link.album_id))
   );
@@ -207,10 +237,12 @@ export async function register(params: RegisterParams): Promise<RegisterResult> 
       })
   );
 
-  // Create an unverified session cookie immediately so the landing
-  // page can render the "pending verification" state without a page
-  // reload. The session remains usable for read-only viewing; writes
-  // (comments, push-subscribe) must check guest.verified_at.
+  // Create an unverified session cookie immediately so the landing page
+  // can render the "pending verification" state without a page reload.
+  // `verified_at` stays NULL here no matter what the guest row says — that
+  // is the whole point: a session only becomes verified by opening the
+  // link that was just mailed. Reading is fine (the visitor already holds
+  // the share link); writes go through requireVerifiedSession.
   const sessionToken = generateToken();
   await dbExec(
     db.insert(guestSessions).values({
@@ -285,6 +317,8 @@ export async function verify(linkToken: string, verifyToken: string): Promise<Ve
       })
   );
 
+  // The one place a session is marked verified: this browser just proved
+  // it can read the mailbox.
   const sessionToken = generateToken();
   await dbExec(
     db.insert(guestSessions).values({
@@ -292,6 +326,7 @@ export async function verify(linkToken: string, verifyToken: string): Promise<Ve
       guest_id: guest.id,
       public_link_id: link.id,
       expires_at: new Date(Date.now() + GUEST_SESSION_TTL_MS).toISOString(),
+      verified_at: new Date().toISOString(),
     })
   );
 
@@ -313,14 +348,36 @@ export interface GuestSelf {
   notify_opt_in: boolean;
 }
 
-export function toGuestSelf(guest: Guest): GuestSelf {
+/**
+ * What the landing page shows. `verified` reports THIS session, so a
+ * browser that has not opened the magic link still sees the "please
+ * confirm" state even when the person verified elsewhere — which matches
+ * what it is actually allowed to do.
+ */
+export function toGuestSelf(guest: Guest, session: GuestSession): GuestSelf {
   return {
     id: guest.id,
     email: guest.email,
     display_name: guest.display_name,
-    verified: guest.verified_at !== null,
+    verified: session.verified_at !== null,
     notify_opt_in: guest.notify_opt_in,
   };
+}
+
+/**
+ * The gate for everything a guest writes — comments, push subscriptions.
+ *
+ * Keyed on the session rather than the guest: `guests.verified_at` says
+ * this person proved the address once, on some device. It says nothing
+ * about the browser making this request, and register() hands out a
+ * session for a known address without any proof at all.
+ */
+export function requireVerifiedSession(resolved: ResolvedGuest): void {
+  if (!resolved.session.verified_at) {
+    throw APIError.permissionDenied(
+      "E-Mail-Adresse bitte erst über den Bestätigungslink aus der Mail verifizieren.",
+    );
+  }
 }
 
 export async function touchLastSeen(guestId: number): Promise<void> {

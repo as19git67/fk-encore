@@ -16,7 +16,7 @@ import {
   writeError,
   writeJson,
 } from "./http";
-import { resolveGuest } from "./guests.service";
+import { requireVerifiedSession, resolveGuest } from "./guests.service";
 import * as reactions from "../photo/reactions.service";
 
 // GET /share/:token/photos/:photoId/comments
@@ -56,11 +56,7 @@ export const createGuestComment = api.raw(
       const { token, photoId } = extractShareAndPhotoId(req.url);
       const resolved = await resolveGuest(req, token);
       if (!resolved) throw APIError.unauthenticated("no guest session");
-      if (!resolved.guest.verified_at) {
-        throw APIError.permissionDenied(
-          "E-Mail-Adresse bitte erst über den Bestätigungslink aus der Mail verifizieren.",
-        );
-      }
+      requireVerifiedSession(resolved);
       const body = parseJsonBody<{ body?: string }>(await readBody(req));
       if (typeof body?.body !== "string") {
         throw APIError.invalidArgument("`body` (string) required");
@@ -92,9 +88,7 @@ export const updateGuestComment = api.raw(
       const { token, commentId } = extractShareAndCommentId(req.url);
       const resolved = await resolveGuest(req, token);
       if (!resolved) throw APIError.unauthenticated("no guest session");
-      if (!resolved.guest.verified_at) {
-        throw APIError.permissionDenied("guest not verified");
-      }
+      requireVerifiedSession(resolved);
       const body = parseJsonBody<{ body?: string }>(await readBody(req));
       if (typeof body?.body !== "string") {
         throw APIError.invalidArgument("`body` (string) required");
@@ -125,9 +119,7 @@ export const deleteGuestComment = api.raw(
       const { token, commentId } = extractShareAndCommentId(req.url);
       const resolved = await resolveGuest(req, token);
       if (!resolved) throw APIError.unauthenticated("no guest session");
-      if (!resolved.guest.verified_at) {
-        throw APIError.permissionDenied("guest not verified");
-      }
+      requireVerifiedSession(resolved);
       const result = await reactions.deleteCommentAsGuest(
         resolved.guest.id,
         commentId,
