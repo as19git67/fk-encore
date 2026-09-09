@@ -112,6 +112,18 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'documents.view' },
       },
       {
+        path: 'mappen',
+        name: 'dokumente-mappen',
+        component: () => import('../views/DocumentCollectionsView.vue'),
+        meta: { permission: 'documents.view' },
+      },
+      {
+        path: 'mappen/:id',
+        name: 'dokumente-mappe',
+        component: () => import('../views/DocumentCollectionDetailView.vue'),
+        meta: { permission: 'documents.view' },
+      },
+      {
         path: 'spaeter',
         name: 'dokumente-spaeter',
         component: () => import('../views/DocumentsLaterView.vue'),
@@ -176,6 +188,7 @@ export const modules: ModuleConfig[] = [
       { label: 'Alle Dokumente', icon: 'pi pi-copy', routeName: 'dokumente-list', permission: 'documents.view' },
       { label: 'Arbeitskorb', icon: 'pi pi-inbox', routeName: 'dokumente-korb', permission: 'documents.view' },
       { label: 'Später', icon: 'pi pi-clock', routeName: 'dokumente-spaeter', permission: 'documents.view' },
+      { label: 'Sammelmappen', icon: 'pi pi-folder', routeName: 'dokumente-mappen', permission: 'documents.view' },
       { label: 'Steuer', icon: 'pi pi-receipt', routeName: 'dokumente-steuer', permission: 'documents.view' },
       {
         label: 'Einstellungen',

@@ -15,6 +15,7 @@ import Tag from 'primevue/tag'
 import Message from 'primevue/message'
 import DocumentThumbnail from '../components/DocumentThumbnail.vue'
 import DocumentFollowUpDialog from '../components/DocumentFollowUpDialog.vue'
+import AddToCollectionDialog from '../components/documents/AddToCollectionDialog.vue'
 import { getDocumentBasket, type DocumentSummary } from '../api/documents'
 
 const router = useRouter()
@@ -25,6 +26,7 @@ const loading = ref(false)
 const loadError = ref('')
 const selected = ref<Set<number>>(new Set())
 const followUpOpen = ref(false)
+const addToCollectionOpen = ref(false)
 const info = ref('')
 
 const allSelected = computed(
@@ -71,6 +73,11 @@ function onFollowUpDone(payload: { scheduled: number }) {
   void load()
 }
 
+function onAddedToCollection(payload: { title: string; count: number }) {
+  info.value = `${payload.count} Dokument${payload.count === 1 ? '' : 'e'} zu „${payload.title}" hinzugefügt.`
+  selected.value = new Set()
+}
+
 function confidencePct(doc: DocumentSummary): number | null {
   if (doc.classification_confidence == null) return null
   return Math.round(doc.classification_confidence * 100)
@@ -104,6 +111,13 @@ onMounted(load)
           label="Wiedervorlage"
           :disabled="selectedIds.length === 0"
           @click="followUpOpen = true"
+        />
+        <Button
+          icon="pi pi-folder"
+          label="In Sammelmappe"
+          severity="secondary"
+          :disabled="selectedIds.length === 0"
+          @click="addToCollectionOpen = true"
         />
         <Button icon="pi pi-refresh" text rounded :loading="loading" @click="load" />
       </div>
@@ -170,6 +184,12 @@ onMounted(load)
       v-model:visible="followUpOpen"
       :document-ids="selectedIds"
       @done="onFollowUpDone"
+    />
+
+    <AddToCollectionDialog
+      v-model:visible="addToCollectionOpen"
+      :document-ids="selectedIds"
+      @added="onAddedToCollection"
     />
   </div>
 </template>

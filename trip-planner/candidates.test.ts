@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
-import { DEFAULT_DWELL_MINUTES, scoreForLight, toCandidates } from "./candidates";
+import {
+  DEFAULT_DWELL_MINUTES,
+  scoreForLight,
+  toCandidates,
+  type ScoredCandidate,
+} from "./candidates";
 
 function spot(overrides: Partial<GeoPoiSearchSpot> = {}): GeoPoiSearchSpot {
   return {
@@ -70,7 +75,7 @@ describe("toCandidates", () => {
     const south = photoStop({ osmRef: "way:2", facadeAzimuth: 180 });
     const west = photoStop({ osmRef: "way:3", facadeAzimuth: 285 });
     const scored = scoreForLight([south, west], { date: "2026-06-21", utcOffsetMinutes: 120 });
-    const bonus = (before: typeof south, after: typeof south) => after.score - before.score;
+    const bonus = (before: ScoredCandidate, after: ScoredCandidate) => after.score - before.score;
     expect(bonus(west, scored[1])).toBeGreaterThan(bonus(south, scored[0]));
   });
 

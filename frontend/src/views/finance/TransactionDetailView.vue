@@ -980,53 +980,6 @@ const extractedFields = computed(() => {
       </dl>
     </section>
 
-    <section v-if="tx" class="card">
-      <h2>Steuer</h2>
-      <label class="tax-toggle">
-        <Checkbox
-          :model-value="!!tx.is_tax_relevant"
-          binary
-          :disabled="taxSaving"
-          aria-label="Buchung ist steuerrelevant"
-          @update:model-value="setTaxRelevant($event)"
-        />
-        <span>Buchung ist steuerrelevant</span>
-      </label>
-      <p v-if="taxRelevantSplitCount > 0" class="hint">
-        {{ taxRelevantSplitCount === 1 ? 'Ein Teilbetrag ist' : `${taxRelevantSplitCount} Teilbeträge sind` }}
-        separat als steuerrelevant markiert.
-      </p>
-      <p class="hint">
-        Über den Filter „Nur steuerrelevante“ in der Buchungsliste findest du sowohl
-        markierte Buchungen als auch Buchungen mit markierten Teilbeträgen.
-      </p>
-    </section>
-
-    <section v-if="tx" class="card">
-      <div class="split-header">
-        <h2>Aufteilung</h2>
-        <Button
-          :label="transactionSplits.length ? 'Aufteilung bearbeiten' : 'Buchung aufteilen'"
-          icon="pi pi-sitemap"
-          size="small"
-          severity="secondary"
-          outlined
-          @click="openSplitDialog"
-        />
-      </div>
-      <ul v-if="transactionSplits.length" class="split-detail-list">
-        <li v-for="(split, index) in transactionSplits" :key="split.id ?? index">
-          <strong>{{ new Intl.NumberFormat('de-DE', { style: 'currency', currency: tx?.currency_code ?? 'EUR' }).format(Number(split.amount)) }}</strong>
-          <span>{{ split.tags.join(', ') || 'Ohne Tags' }}</span>
-          <span v-if="split.notice">{{ split.notice }}</span>
-          <Tag v-if="split.is_tax_relevant" value="Steuerrelevant" severity="info" />
-        </li>
-      </ul>
-      <p v-else class="hint">
-        Diese Buchung ist nicht aufgeteilt. Teile sie auf, um Teilbeträge einzeln zu taggen oder als steuerrelevant zu markieren.
-      </p>
-    </section>
-
     <!-- Tags + Notiz -->
     <section v-if="tx" class="card">
       <h2>Tags</h2>
@@ -1054,6 +1007,7 @@ const extractedFields = computed(() => {
           label="Tag hinzufügen"
           size="small"
           severity="secondary"
+          outlined
           :disabled="newTag.length === 0"
           @click="addUserTags"
         />
@@ -1120,6 +1074,53 @@ const extractedFields = computed(() => {
           </span>
         </li>
       </ul>
+    </section>
+
+    <section v-if="tx" class="card">
+      <h2>Steuer</h2>
+      <label class="tax-toggle">
+        <Checkbox
+          :model-value="!!tx.is_tax_relevant"
+          binary
+          :disabled="taxSaving"
+          aria-label="Buchung ist steuerrelevant"
+          @update:model-value="setTaxRelevant($event)"
+        />
+        <span>Buchung ist steuerrelevant</span>
+      </label>
+      <p v-if="taxRelevantSplitCount > 0" class="hint">
+        {{ taxRelevantSplitCount === 1 ? 'Ein Teilbetrag ist' : `${taxRelevantSplitCount} Teilbeträge sind` }}
+        separat als steuerrelevant markiert.
+      </p>
+      <p class="hint">
+        Über den Filter „Nur steuerrelevante“ in der Buchungsliste findest du sowohl
+        markierte Buchungen als auch Buchungen mit markierten Teilbeträgen.
+      </p>
+    </section>
+
+    <section v-if="tx" class="card">
+      <div class="split-header">
+        <h2>Aufteilung</h2>
+        <Button
+          :label="transactionSplits.length ? 'Aufteilung bearbeiten' : 'Buchung aufteilen'"
+          icon="pi pi-sitemap"
+          size="small"
+          severity="secondary"
+          outlined
+          @click="openSplitDialog"
+        />
+      </div>
+      <ul v-if="transactionSplits.length" class="split-detail-list">
+        <li v-for="(split, index) in transactionSplits" :key="split.id ?? index">
+          <strong>{{ new Intl.NumberFormat('de-DE', { style: 'currency', currency: tx?.currency_code ?? 'EUR' }).format(Number(split.amount)) }}</strong>
+          <span>{{ split.tags.join(', ') || 'Ohne Tags' }}</span>
+          <span v-if="split.notice">{{ split.notice }}</span>
+          <Tag v-if="split.is_tax_relevant" value="Steuerrelevant" severity="info" />
+        </li>
+      </ul>
+      <p v-else class="hint">
+        Diese Buchung ist nicht aufgeteilt. Teile sie auf, um Teilbeträge einzeln zu taggen oder als steuerrelevant zu markieren.
+      </p>
     </section>
 
     <!-- Extracted SEPA fields -->
