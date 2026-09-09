@@ -20,7 +20,7 @@ import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
 import { addDays } from "./leg-dates";
 import { spotLight, type FacadeLight } from "./light";
-import { loadPlan } from "./plan-store";
+import { loadPlan, type StoredLeg } from "./plan-store";
 import { lightWindows, type HorizonProfile, type LightWindow } from "./sun";
 
 export interface DayLightRequest {
@@ -79,31 +79,47 @@ export const dayLight = api(
     const day = leg.days.find((d) => d.dayIndex === req.dayIndex);
     if (!day) throw APIError.notFound(`day ${req.dayIndex} not found in leg ${legIndex}`);
 
-    const offset = validateOffset(req.utcOffsetMinutes);
-    const date = leg.startDate === null ? null : addDays(leg.startDate, day.dayIndex);
-    if (date === null) return { day: null, windows: [], spots: [] };
-
-    const windows = lightWindows(leg.anchor, date, offset, req.horizon ?? []);
-    const stops = day.blocks.flatMap((block) => block.stops);
-
-    return {
-      day: date,
-      windows,
-      spots: stops.map((stop) => {
-        // Each spot gets the sun over *its* coordinate. Within a city
-        // the difference is seconds, but it costs nothing and spares
-        // the next reader wondering whether it was cheated.
-        const own = lightWindows(stop, date, offset, req.horizon ?? []);
-        const [best] = spotLight(stop, own, stop.facadeAzimuth);
-        return {
-          osmRef: stop.osmRef,
-          best: best?.window ?? null,
-          facade: best?.facade ?? null,
-        };
-      }),
-    };
+    return lightOfDay(leg, day, validateOffset(req.utcOffsetMinutes), req.horizon ?? []);
   },
 );
+
+/**
+ * The same answer, computed from rows already in hand.
+ *
+ * Split out for the offline bundle (§3.9), which needs the light of
+ * every day at once and must not repeat the arithmetic in a second
+ * place — a hint that differs between the online screen and the
+ * offline one is worse than no hint.
+ */
+export function lightOfDay(
+  leg: StoredLeg,
+  day: StoredLeg["days"][number],
+  offsetMinutes: number,
+  horizon: HorizonProfile = [],
+): DayLightResponse {
+  const date = leg.startDate === null ? null : addDays(leg.startDate, day.dayIndex);
+  if (date === null) return { day: null, windows: [], spots: [] };
+
+  const windows = lightWindows(leg.anchor, date, offsetMinutes, horizon);
+  const stops = day.blocks.flatMap((block) => block.stops);
+
+  return {
+    day: date,
+    windows,
+    spots: stops.map((stop) => {
+      // Each spot gets the sun over *its* coordinate. Within a city
+      // the difference is seconds, but it costs nothing and spares
+      // the next reader wondering whether it was cheated.
+      const own = lightWindows(stop, date, offsetMinutes, horizon);
+      const [best] = spotLight(stop, own, stop.facadeAzimuth);
+      return {
+        osmRef: stop.osmRef,
+        best: best?.window ?? null,
+        facade: best?.facade ?? null,
+      };
+    }),
+  };
+}
 
 /**
  * A time-zone offset a clock could actually show.
@@ -112,7 +128,7 @@ export const dayLight = api(
  * sending seconds or milliseconds by mistake, and silently accepting
  * that would put the golden hour in the middle of the night.
  */
-function validateOffset(minutes: number | undefined): number {
+export function validateOffset(minutes: number | undefined): number {
   if (minutes === undefined) return 0;
   if (!Number.isFinite(minutes) || minutes < -12 * 60 || minutes > 14 * 60) {
     throw APIError.invalidArgument("utcOffsetMinutes must be between -720 and 840");

@@ -55,6 +55,20 @@ final class TripPlannerViewModel {
     /// re-plan the trip, which is not instant.
     private(set) var isSavingFixpoint = false
 
+    /// Set when what is on screen came from the stored bundle rather
+    /// than from the server (§3.9), with the moment it was stored. The
+    /// day plan says so: a plan that is quietly three days old is the
+    /// one way this feature could do harm.
+    private(set) var offlineSince: Date?
+    /// When this plan was last stored for offline use, whether or not
+    /// it is being shown from there. Nil means nothing is stored.
+    private(set) var bundleStoredAt: Date?
+    /// Set while the bundle is being fetched, for the button to say so.
+    private(set) var isDownloadingBundle = false
+    /// Where the bundle is kept. Injectable so tests do not write into
+    /// the real Application Support directory.
+    var offlineStore: TripOfflineStore = .shared
+
     /// Which leg and day are on screen. Both are positions within their
     /// parent, not row ids, because that is how the endpoints address
     /// them.
@@ -131,9 +145,82 @@ final class TripPlannerViewModel {
             let response: TripPlanResponse =
                 try await APIClient.shared.get("/trip-planner/plans/\(planId)")
             apply(response)
+            offlineSince = nil
+            bundleStoredAt = offlineStore.storedAt(planId: planId)
+            // Somebody who once asked for this trip to be available
+            // offline meant "keep it", not "keep that one afternoon".
+            // A plan changed at breakfast has to be the plan in the
+            // pocket by the time the wifi is gone.
+            if bundleStoredAt != nil {
+                Task { await refreshBundleQuietly() }
+            }
+        } catch {
+            // The plan from disk, but only when the server could not be
+            // asked (§3.9). A "not found" is an answer and has to reach
+            // the traveller as one.
+            if TripOfflineReach.meansUnreachable(error),
+               let snapshot = offlineStore.load(planId: planId) {
+                apply(TripPlanResponse(plan: snapshot.bundle.plan, droppedBlocks: nil))
+                offlineBundle = snapshot.bundle
+                offlineSince = snapshot.storedAt
+                bundleStoredAt = snapshot.storedAt
+                errorMessage = nil
+                light = snapshot.bundle.lightOfDay(legIndex: legIndex, dayIndex: dayIndex)
+            } else {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    /// The bundle currently being shown from disk, if any — the source
+    /// of the light hints while there is no network.
+    private var offlineBundle: TripOfflineBundle?
+
+    /// Fetch the whole plan and keep it (§3.9).
+    ///
+    /// Returns false when it could not be stored, so the screen can say
+    /// so instead of showing a stamp that means nothing.
+    @discardableResult
+    func downloadBundle() async -> Bool {
+        isDownloadingBundle = true
+        defer { isDownloadingBundle = false }
+        do {
+            let bundle = try await fetchBundle()
+            bundleStoredAt = try offlineStore.save(bundle, planId: planId)
+            offlineBundle = bundle
+            return true
         } catch {
             errorMessage = error.localizedDescription
+            return false
         }
+    }
+
+    /// Keeping an existing bundle current, without saying anything.
+    ///
+    /// Failure here is not worth a banner: the stored plan is still the
+    /// stored plan, and an error over the day screen because a refresh
+    /// did not go through would train people to ignore errors.
+    private func refreshBundleQuietly() async {
+        guard offlineStore.has(planId: planId) else { return }
+        guard let bundle = try? await fetchBundle() else { return }
+        bundleStoredAt = try? offlineStore.save(bundle, planId: planId)
+        offlineBundle = bundle
+    }
+
+    private func fetchBundle() async throws -> TripOfflineBundle {
+        try await APIClient.shared.get(
+            "/trip-planner/plans/\(planId)/bundle",
+            query: ["utcOffsetMinutes": String(TimeZone.current.secondsFromGMT() / 60)],
+        )
+    }
+
+    /// Forget the stored plan. Somebody who says so after a trip means
+    /// it, and a bundle nobody deletes is a plan that outlives the
+    /// holiday on a full phone.
+    func removeBundle() {
+        offlineStore.remove(planId: planId)
+        bundleStoredAt = nil
+        offlineBundle = nil
     }
 
     /// The light for the day on screen (§7.3) — a hint, nothing more.
@@ -164,7 +251,9 @@ final class TripPlannerViewModel {
                 ),
             )
         } catch {
-            light = nil
+            // Offline the sun is still arithmetic somebody already did
+            // — it travelled with the bundle (§7.3).
+            light = offlineBundle?.lightOfDay(legIndex: legIndex, dayIndex: dayIndex)
         }
     }
 
