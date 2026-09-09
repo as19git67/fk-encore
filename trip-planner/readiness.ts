@@ -9,11 +9,14 @@
  * abroad and no ticket to hand, are both an evening's work to repair
  * and a catastrophe at the platform.
  *
- * Three of §8.6's four questions can be answered here today, and one
- * cannot. It is reported all the same, as `unknown` with the reason: a
- * check that quietly disappears is one nobody misses, and then nobody
- * notices that the app never looked. The open one is votes, which wait
- * on the multi-user step (§6.1). Tickets became answerable when
+ * All four of §8.6's questions can be answered here now. The last one
+ * to arrive was the votes (§6.1), and it keeps the same honesty the
+ * others have: it reports who has not said anything yet rather than a
+ * percentage, because "haben alle abgestimmt" is a question about
+ * people, and a number would hide which one is missing. A check that
+ * cannot be answered is still reported as `unknown` with the reason —
+ * one that quietly disappears is one nobody misses, and then nobody
+ * notices that the app never looked. Tickets became answerable when
  * documents learned to hang off a trip (§3.4) — with the honest limit
  * that the app knows which papers are attached and not which ones
  * *ought* to be, so "nothing attached" is a question and not a verdict.
@@ -26,15 +29,21 @@
 
 import { api, APIError, type Query } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import db from "../db/database";
-import { osmRegionImports } from "../db/schema";
+import {
+  osmRegionImports,
+  tripPlanShares,
+  tripPlanTravellers,
+  users,
+} from "../db/schema";
 import { requirePermission } from "../user/auth-handler";
 import { lightOfDay, validateOffset } from "./daylight";
 import { addDays } from "./leg-dates";
 import { linkedDocuments, suggestionsFor } from "./documents";
 import { packingList, type PackingDay, type PackingItem } from "./packing";
 import { loadPlan, type StoredLeg, type StoredPlan } from "./plan-store";
+import { votesOfLeg } from "./vote-store";
 import { shelterOf } from "./shelter";
 import { hoursWithin, summarise } from "./weather";
 import { forecastFor } from "./weather-service";
@@ -98,15 +107,7 @@ export const tripReadiness = api(
     checks.push(detailCheck(plan.legs));
 
     checks.push(await ticketCheck(plan, userId));
-
-    // The one §8.6 question this build cannot answer. Said out loud
-    // rather than left out (§14, the bundle's `omits`).
-    checks.push({
-      id: "votes",
-      state: "unknown",
-      sentence: "Ob alle abgestimmt haben, kann die App noch nicht sagen — Abstimmungen kommen "
-        + "mit dem Mehrbenutzerbetrieb.",
-    });
+    checks.push(await voteCheck(plan));
 
     const { days, forecastUntil } = await packingDays(plan.legs, offset);
     const group = groupOf(plan.constraints);
@@ -204,6 +205,63 @@ async function ticketCheck(plan: StoredPlan, userId: number): Promise<ReadinessC
     state: "unknown",
     sentence: "An dieser Reise hängt kein Dokument. Ob eines fehlt, weiß die App nicht — "
       + "sie kennt keine Liste dessen, was diese Reise braucht.",
+  };
+}
+
+/**
+ * "Haben alle abgestimmt, oder plant ihr an jemandem vorbei?" (§8.6)
+ *
+ * Names the people who have not said anything rather than counting
+ * them: the point of the question is *who* is being planned past, and
+ * "3 von 5 haben abgestimmt" is precisely the form of that answer which
+ * nobody can act on.
+ *
+ * A trip nobody has voted on at all is not a warning — that is an
+ * ordinary trip one person is planning, and §6 is explicit that it must
+ * keep working. It becomes a question only once somebody has started:
+ * a half-finished vote is what plans past the person who is missing.
+ */
+async function voteCheck(plan: StoredPlan): Promise<ReadinessCheck> {
+  const votes = (await Promise.all(plan.legs.map((leg) => votesOfLeg(leg.id)))).flat();
+  if (votes.length === 0) {
+    return {
+      id: "votes",
+      state: "unknown",
+      sentence: "Für diese Reise hat noch niemand abgestimmt — dann entscheidet, wer plant.",
+    };
+  }
+
+  const spoke = new Set(votes.map((vote) => vote.voter));
+  const silent: string[] = [];
+  const participants = await db
+    .select({ id: users.id, name: users.name })
+    .from(users)
+    .where(inArray(users.id, [
+      plan.ownerId,
+      ...(await db
+        .select({ id: tripPlanShares.user_id })
+        .from(tripPlanShares)
+        .where(eq(tripPlanShares.plan_id, plan.id))).map((row) => row.id),
+    ]));
+  for (const person of participants) {
+    if (!spoke.has(`user:${person.id}`)) silent.push(person.name);
+  }
+  const travellers = await db
+    .select({ id: tripPlanTravellers.id, label: tripPlanTravellers.label })
+    .from(tripPlanTravellers)
+    .where(eq(tripPlanTravellers.plan_id, plan.id));
+  for (const traveller of travellers) {
+    if (!spoke.has(`traveller:${traveller.id}`)) silent.push(traveller.label);
+  }
+
+  if (silent.length === 0) {
+    return { id: "votes", state: "ok", sentence: "Alle haben abgestimmt." };
+  }
+  return {
+    id: "votes",
+    state: "attention",
+    sentence: `Von ${silent.join(", ")} liegt noch keine Stimme vor — heute Abend ist der `
+      + "Moment, danach zu fragen.",
   };
 }
 

@@ -248,6 +248,24 @@ describe("solveDay", () => {
     expect(unplaced).toEqual([]);
   });
 
+  it("leaves room in the day rather than filling it with what nobody wants", () => {
+    // Room is not a reason to go somewhere (§6.1). Every candidate the
+    // search produces starts positive, so this can only exclude a spot
+    // the group voted below zero — and it is still not a veto: enough
+    // "will ich" lifts it back over the line.
+    const { blocks } = solveDay({
+      anchor: ANCHOR,
+      blocks: blocksOf(),
+      candidates: [
+        candidate({ osmRef: "node:wanted", ...north(300), dwellMinutes: 20, score: 2 }),
+        candidate({ osmRef: "node:voted-down", ...north(400), dwellMinutes: 20, score: -1 }),
+      ],
+      maxWalkMinutes: 40,
+    });
+
+    expect(blocks[0].stops.map((stop) => stop.osmRef)).toEqual(["node:wanted"]);
+  });
+
   it("reports the walk from the previous stop, not from the anchor", () => {
     const { blocks } = solveDay({
       anchor: ANCHOR,

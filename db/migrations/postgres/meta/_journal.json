@@ -1275,6 +1275,13 @@
       "when": 1787443200015,
       "tag": "0181_trip_plan_travellers",
       "breakpoints": true
+    },
+    {
+      "idx": 182,
+      "version": "7",
+      "when": 1787529600015,
+      "tag": "0182_trip_plan_votes",
+      "breakpoints": true
     }
   ]
 }

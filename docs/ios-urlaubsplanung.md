@@ -484,6 +484,40 @@ Ein *lieber nicht* ist ein starkes Minus, aber kein Veto. Echte Ausschlüsse
 („keine Höhenwege") sind keine Stimmen, sondern Nebenbedingungen der Person
 (§3.5) und wirken auf den Solver, nicht auf das Ranking.
 
+**Umgesetzt:** `GET`/`POST /trip-planner/plans/:planId/votes`,
+`POST …/votes/apply`, `GET …/fairness` (Migration 0182) und der Bildschirm
+„Abstimmen". Die Aggregation steht in `votes.ts` und ist rein: Stimmen rein,
+Zuschläge und Sätze raus.
+
+- **Summe statt Mittelwert.** Zwei „will ich" schlagen eines, und drei
+  Achselzucken verdünnen eine Begeisterung nicht. Ein „lieber nicht" wiegt
+  schwerer als ein „will ich" (−3 gegen +2) — auf einem gemeinsamen Tag kostet
+  Unlust mehr als milde Zustimmung —, bleibt aber überstimmbar.
+- **Herzenswunsch mit Kontingent**, etwa zwei je drei Tage und mindestens einer.
+  Er wiegt so viel, dass keine plausible Summe gewöhnlicher Stimmen ihn kippt,
+  aber endlich: „solange er physisch möglich ist" heißt, der Solver muss ihn noch
+  unterbringen können.
+- **Das Fairness-Konto wird abgeleitet, nicht gebucht.** Wessen Wünsche auf einem
+  Tag gelandet sind, steht schon im Plan; ein zweiter Zähler daneben wäre eine
+  Kopie, die irgendwann abweicht. Wer am weitesten zurückliegt, bekommt bei
+  Gleichstand einen kleinen Zuschlag — klein genug, dass er nur Gleichstände
+  entscheidet — und der Satz dazu lautet „heute ist mal wieder X dran".
+- **Zwei Arten von Stimme.** Ein Konto oder eine stellvertretend geführte Stimme
+  (§6.1, kleine Kinder) — technisch die Mitfahrenden aus §3.5. Wer sie abgegeben
+  hat, wird mitgeschrieben; gezählt wird sie als die des Kindes.
+
+Zwei Dinge, die dabei bewusst *nicht* passieren: Abstimmen plant **nicht** neu
+(dreißig Wischer wären sonst dreißig verschiedene Reisen — der Bildschirm hat
+dafür einen Knopf), und ein Spot, über den niemand geredet hat, wird nicht
+abgewertet: Schweigen ist keine Ablehnung.
+
+**Dabei aufgefallen und mitgeändert:** Der Solver füllte einen Tag bis zur
+Budgetgrenze mit allem, was noch hineinpasste — auch mit einem Spot, dessen
+Bewertung unter null gefallen war. Platz im Tag ist aber kein Grund, irgendwohin
+zu gehen. Kandidaten aus der Suche starten immer positiv, also schließt die neue
+Regel genau einen Fall aus: den Spot, den die Gruppe unter null gestimmt hat. Ein
+Veto ist es trotzdem nicht — genug „will ich" heben ihn zurück über die Linie.
+
 ### 6.2 Braucht es einen Trip Leader?
 
 **Ja — aber als Organisator, nicht als Chef, und nur für die Vorbereitung.**
@@ -2620,6 +2654,16 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
     Zusammenführung gleichzeitiger Änderungen, automatische Erledigt-Erkennung,
     Splits mit Treffpunkt. Bewusst spät: Ein Trip, den eine Person plant, muss
     vorher vollständig funktionieren.
+
+    **Davon umgesetzt: die Bewertung** (§6.1) — Stimmen je Person und je
+    stellvertretend geführter Stimme, Herzenswünsche mit Kontingent je Etappe,
+    das abgeleitete Fairness-Konto samt Satz, und die Anwendung auf die Planung
+    als eigener Aufruf statt als Nebenwirkung jedes Wischers. Damit beantwortet
+    die Vorabendprüfung (§8.6) auch ihre vierte Frage — und zwar mit Namen statt
+    mit einer Quote: Wer noch nichts gesagt hat, wird genannt, denn genau darum
+    geht die Frage. Organisatorrolle und Erledigt-Erkennung standen schon
+    (§6.2, §6.4). Offen bleiben die feingranulare Zusammenführung gleichzeitiger
+    Änderungen (§6.3) und die Splits (§6.5).
 12. **Verfeinerung, optional** — Valhalla für echte Reisezeiten, GTFS pro
    Region, Offline-Bundle, Verknüpfung mit Trip-Album und Recap.
 

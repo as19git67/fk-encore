@@ -3200,3 +3200,39 @@ export const tripPlanTravellers = pgTable(
   },
   (table) => [index("trip_plan_travellers_plan_idx").on(table.plan_id)]
 );
+
+/**
+ * One person's rating of one spot on one leg (§6.1, migration 0182).
+ *
+ * Kept per person rather than averaged into the pool: a mean picks what
+ * everybody finds mediocre and deletes what one person cares a great
+ * deal about. The individual answers are what make the two correctives
+ * of §6.1 possible — heart wishes with a quota, and a fairness account.
+ *
+ * Exactly one of `user_id` and `traveller_id` is set: a vote is either
+ * an account's or a proxy voice held for somebody without one (a small
+ * child), which is what the §3.5 traveller rows are.
+ */
+export const tripPlanVotes = pgTable(
+  "trip_plan_votes",
+  {
+    id: serial("id").primaryKey(),
+    leg_id: integer("leg_id")
+      .notNull()
+      .references(() => tripPlanLegs.id, { onDelete: "cascade" }),
+    osm_ref: text("osm_ref").notNull(),
+    user_id: integer("user_id").references(() => users.id, { onDelete: "cascade" }),
+    traveller_id: integer("traveller_id")
+      .references(() => tripPlanTravellers.id, { onDelete: "cascade" }),
+    value: text("value").notNull().default("meh"),
+    heart: boolean("heart").notNull().default(false),
+    cast_by: integer("cast_by").references(() => users.id, { onDelete: "set null" }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("trip_plan_votes_leg_idx").on(table.leg_id)]
+);
