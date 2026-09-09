@@ -41,6 +41,7 @@ import "./readiness";
 import "./review";
 import "./ideas";
 import "./outing";
+import "./ideas-trip";
 
 import { everyMs, schedule, startLocalCron } from "../lib/local-cron";
 import { tickFillPending } from "./fill-pending";
