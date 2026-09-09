@@ -33,6 +33,7 @@ import "./weather-day-swap";
 import "./climate";
 import "./hidden-spots";
 import "./to-pool";
+import "./fixpoint-edit";
 
 import { everyMs, schedule, startLocalCron } from "../lib/local-cron";
 import { tickFillPending } from "./fill-pending";
