@@ -1178,52 +1178,16 @@ enum ShareAPIClient {
         }
     }
 
-    /// Performs the built request; on HTTP 401 it refreshes the shared access
-    /// token once and retries. The request is rebuilt for the retry so it picks
-    /// up the fresh token (and re-sends the body).
+    /// Performs the built request, renewing the session around it.
+    ///
+    /// One implementation for both halves of the extension (`ShareAuth`):
+    /// the photo path had a refresh and the trip path had none, which is
+    /// why sharing a picture kept working while sharing a spot asked for
+    /// a fresh login.
     private static func performWithRefresh(
         _ build: () throws -> URLRequest
     ) async throws -> (Data, HTTPURLResponse) {
-        let (data, response) = try await URLSession.shared.data(for: build())
-        guard let http = response as? HTTPURLResponse else { throw ShareAPIError.httpError(0) }
-        if http.statusCode != 401 { return (data, http) }
-        guard await refreshSharedToken() else { return (data, http) }
-        let (retryData, retryResponse) = try await URLSession.shared.data(for: build())
-        guard let retryHttp = retryResponse as? HTTPURLResponse else { throw ShareAPIError.httpError(0) }
-        return (retryData, retryHttp)
-    }
-
-    /// Refreshes the shared access token using the refresh token from the App
-    /// Group, writing the rotated tokens back so the next request — and the
-    /// main app — pick them up. Returns false when there is no refresh token or
-    /// the refresh failed; the user must then reopen the app and sign in.
-    private static func refreshSharedToken() async -> Bool {
-        guard let serverURL = ShareConfig.defaults.string(forKey: ShareConfig.serverURLKey),
-              let base = URL(string: serverURL),
-              let refreshToken = ShareConfig.defaults.string(forKey: ShareConfig.refreshTokenKey),
-              !refreshToken.isEmpty
-        else { return false }
-
-        var request = URLRequest(url: base.appendingPathComponent("/auth/refresh"), timeoutInterval: 30)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        struct Body: Encodable { let refreshToken: String }
-        struct TokenResponse: Decodable { let token: String; let refreshToken: String }
-        guard let httpBody = try? JSONEncoder().encode(Body(refreshToken: refreshToken)) else { return false }
-        request.httpBody = httpBody
-
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
-              let http = response as? HTTPURLResponse,
-              (200...299).contains(http.statusCode),
-              let decoded = try? JSONDecoder().decode(TokenResponse.self, from: data)
-        else {
-            print("[Share Auth] token refresh failed — extension needs a fresh login via the app")
-            return false
-        }
-        ShareConfig.defaults.set(decoded.token, forKey: ShareConfig.tokenKey)
-        ShareConfig.defaults.set(decoded.refreshToken, forKey: ShareConfig.refreshTokenKey)
-        print("[Share Auth] access token refreshed")
-        return true
+        try await ShareAuth.perform(build)
     }
 
     private static func percentEncode(_ value: String) -> String {

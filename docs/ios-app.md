@@ -31,6 +31,28 @@ Erweiterungen vorgeschlagen, die nur auf dem Gerät sinnvoll sind.
 - **App-Targets:** Haupt-App, **Share-Extension** (Code in `F4milShare/`, ihre
   `Info.plist` in `App/ShareExtension/`) zum Hochladen aus anderen Apps.
 
+### 1.1 Die Sitzung der Share-Extension
+
+Die Extension kommt nicht an den Keychain der App. Deshalb spiegelt die App
+Zugriffs- und Refresh-Token samt Ablaufzeitpunkt in die App-Group
+(`SharedStorage`), und die Extension liest sie von dort — über `ShareAuth`,
+das beides kann: **vorher erneuern**, wenn der gespeicherte Ablauf naht, und
+**einmal auf 401 erneuern** und die Anfrage wiederholen. Ein Zugriffstoken
+lebt 15 Minuten, ein Refresh-Token 30 Tage; ohne Erneuerung war die Extension
+also eine Viertelstunde nach dem letzten App-Start „nicht eingerichtet".
+
+Zwei Regeln, die dabei zusammenspielen müssen:
+
+- **Die Extension schreibt das rotierte Paar zurück in die App-Group**,
+  Ablaufzeitpunkt eingeschlossen. Nur so sieht die App, dass sich die Sitzung
+  bewegt hat.
+- **Die App überschreibt eine vorhandene Sitzung in der Group nicht**
+  (`SharedSession.shouldMirror`). Sie füllt sie, wenn keine da ist. Die
+  Rotation der Extension erreicht den Keychain nie — sie kann ihn nicht
+  schreiben —, und ein Spiegeln beim Start hätte die frisch rotierte Sitzung
+  durch die alte ersetzt. Nach den fünf Minuten Karenz, die der Server einem
+  rotierten Refresh-Token lässt, half dann nur noch neu anmelden.
+
 ---
 
 ## 2. Implementierte iOS-Features (Dokumentations-Nachzug)
