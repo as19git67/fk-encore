@@ -31,6 +31,8 @@ struct TripPlanDayView: View {
     /// The stop whose "which block?" sheet is open, with the block it
     /// stands in now.
     @State private var moving: TripStopMove?
+    /// Open while a hard time is being written (§4.4).
+    @State private var addingFixpoint = false
     @State var viewModel: TripPlannerViewModel
 
     var body: some View {
@@ -113,6 +115,15 @@ struct TripPlanDayView: View {
                 Button("Apple Karten") { openMaps(choice, with: .apple) }
                 Button("Google Maps") { openMaps(choice, with: .google) }
                 Button("Abbrechen", role: .cancel) {}
+            }
+        }
+        .sheet(isPresented: $addingFixpoint) {
+            TripFixpointSheet(
+                dayLabel: dayLabel(),
+            ) { label, minutes, kind, travelMinutes, durationMinutes in
+                await viewModel.addFixpoint(
+                    label: label, at: minutes, kind: kind,
+                    travelMinutes: travelMinutes, durationMinutes: durationMinutes)
             }
         }
         .sheet(item: $moving) { move in
@@ -199,9 +210,7 @@ struct TripPlanDayView: View {
                 if leg.isAwaitingRegion {
                     awaitingRegionCard(leg)
                 }
-                if !day.fixpoints.isEmpty {
-                    fixpointBand(day.fixpoints)
-                }
+                fixpointBand(day)
                 if day.detailed {
                     weatherOfferCard(day)
                     ForEach(day.blocks) { block in
@@ -512,21 +521,75 @@ struct TripPlanDayView: View {
 
     // MARK: - The frame
 
-    private func fixpointBand(_ fixpoints: [TripFixpoint]) -> some View {
+    /// The hard times of the day, and the way to say one (§4.4).
+    ///
+    /// Shown even when there are none: the last train was the thing
+    /// nobody could enter, and a band that only appears once a fixpoint
+    /// exists is a band nobody finds. Kept quiet in that case — one
+    /// line, no card.
+    private func fixpointBand(_ day: TripDay) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            ForEach(fixpoints) { fix in
+            ForEach(day.fixpoints) { fix in
                 HStack(spacing: 8) {
                     Image(systemName: fix.isDeparture ? "arrow.right.to.line" : "calendar.badge.clock")
                         .foregroundStyle(fix.isDeparture ? .orange : .secondary)
                     Text(fix.startsAt).monospacedDigit().font(.subheadline.weight(.semibold))
-                    Text(fix.label).font(.subheadline)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(fix.label).font(.subheadline)
+                        // What it costs the day, which is the reason a
+                        // block got shorter — said rather than left to
+                        // be discovered in the budget.
+                        if fix.travelMinutes > 0 || fix.durationMinutes > 0 {
+                            Text(costSentence(fix))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                     Spacer()
+                    Button(role: .destructive) {
+                        Task { await viewModel.removeFixpoint(fix) }
+                    } label: {
+                        Image(systemName: "xmark.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .disabled(viewModel.isSavingFixpoint)
+                    .accessibilityLabel("\(fix.label) entfernen")
                 }
             }
+
+            Button {
+                addingFixpoint = true
+            } label: {
+                Label(day.fixpoints.isEmpty ? "Feste Zeit eintragen" : "Weitere feste Zeit",
+                      systemImage: "clock.badge.exclamationmark")
+                    .font(.footnote)
+            }
+            .buttonStyle(.plain)
+            .disabled(viewModel.isSavingFixpoint)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.4), in: .rect(cornerRadius: 12))
+        .background(day.fixpoints.isEmpty
+                    ? AnyShapeStyle(.clear)
+                    : AnyShapeStyle(.quaternary.opacity(0.4)),
+                    in: .rect(cornerRadius: 12))
+    }
+
+    /// "Tag 3 · Fr, 18.9." — which day the sheet is writing to, so a
+    /// hard time never lands on a day nobody was looking at.
+    private func dayLabel() -> String {
+        let number = "Tag \(viewModel.dayIndex + 1)"
+        guard let date = viewModel.leg?.date(ofDayIndex: viewModel.dayIndex) else { return number }
+        return "\(number) · \(date)"
+    }
+
+    /// "Weg 15 min · dauert 1 h" — why a block is shorter than it was.
+    private func costSentence(_ fix: TripFixpoint) -> String {
+        var parts: [String] = []
+        if fix.travelMinutes > 0 { parts.append("Weg \(TripClock.duration(fix.travelMinutes))") }
+        if fix.durationMinutes > 0 { parts.append("dauert \(TripClock.duration(fix.durationMinutes))") }
+        return parts.joined(separator: " · ")
     }
 
     private func tripResolutionCard(_ day: TripDay) -> some View {

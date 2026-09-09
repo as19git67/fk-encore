@@ -1243,6 +1243,65 @@ export async function removeFromPool(
   return deleted.length > 0;
 }
 
+/**
+ * Write one hard time onto a day (§4.4).
+ *
+ * The frame, not the content: what this changes is how many minutes the
+ * blocks of that day have, and that recomputation belongs to the
+ * planner — so this writes the row and nothing else. The caller re-plans
+ * afterwards, which reads the fixpoints back and re-frames the day.
+ */
+export async function addFixpoint(
+  dayId: number,
+  fix: CreateFixpointInput,
+  db: Db = dbDefault,
+): Promise<number> {
+  const [row] = await db
+    .insert(tripPlanFixpoints)
+    .values({
+      day_id: dayId,
+      kind: fix.kind ?? "appointment",
+      label: fix.label,
+      start_minutes: fix.startMinutes,
+      duration_minutes: fix.durationMinutes ?? 0,
+      travel_minutes: fix.travelMinutes ?? 0,
+      buffer_minutes: fix.bufferMinutes ?? DEFAULT_BUFFER_MINUTES,
+      lat: fix.lat ?? null,
+      lon: fix.lon ?? null,
+    })
+    .returning({ id: tripPlanFixpoints.id });
+  return row.id;
+}
+
+/**
+ * Take a hard time off a day again. Answers false when it belongs to
+ * another plan — one statement rather than a load-then-check, so a
+ * fixpoint id from somebody else's trip simply matches nothing.
+ */
+export async function removeFixpoint(
+  planId: number,
+  ownerId: number,
+  fixpointId: number,
+  db: Db = dbDefault,
+): Promise<boolean> {
+  const [owned] = await db
+    .select({ id: tripPlanFixpoints.id })
+    .from(tripPlanFixpoints)
+    .innerJoin(tripPlanDays, eq(tripPlanFixpoints.day_id, tripPlanDays.id))
+    .innerJoin(tripPlanLegs, eq(tripPlanDays.leg_id, tripPlanLegs.id))
+    .innerJoin(tripPlans, eq(tripPlanLegs.plan_id, tripPlans.id))
+    .where(and(
+      eq(tripPlanFixpoints.id, fixpointId),
+      eq(tripPlans.id, planId),
+      visibleToUser(ownerId),
+    ))
+    .limit(1);
+  if (!owned) return false;
+
+  await db.delete(tripPlanFixpoints).where(eq(tripPlanFixpoints.id, fixpointId));
+  return true;
+}
+
 /** A spot this trip has turned down (§5). */
 export interface HiddenSpot {
   osmRef: string;
