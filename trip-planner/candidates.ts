@@ -14,6 +14,7 @@ import { readableName } from "./readable-name";
 import { wikipediaUrl } from "./spot-links";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import type { Candidate } from "./solver";
+import { matchedInterests } from "./interests";
 import { lightWindows } from "./sun";
 import type { Coordinate } from "./travel";
 import { spotLight } from "./light";
@@ -183,9 +184,15 @@ export function toCandidates(
     if (!spot.name) {
       reasons.push("unbenannt in OpenStreetMap");
     }
-    if (interests.has(category)) {
+    // Against the interest vocabulary rather than the category id: a
+    // category is one of nine, an interest is a theme, and comparing
+    // the two awarded this to nobody (see interests.ts).
+    const hits = matchedInterests({ kind: spot.kind, category }, interests);
+    if (hits.length > 0) {
       score += 2;
-      reasons.push("passt zu euren Interessen");
+      // Named, not "passt zu euren Interessen": which of them it
+      // answers is the part that makes the suggestion arguable (§8.3).
+      reasons.push(`ihr wolltet: ${hits.join(", ")}`);
     }
 
     // Nothing says this is worth a block. Keep it out of the pool a day

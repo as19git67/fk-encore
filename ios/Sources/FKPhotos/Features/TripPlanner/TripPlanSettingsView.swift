@@ -92,6 +92,29 @@ struct TripPlanSettingsView: View {
                      + "ist.")
             }
 
+            if !model.options.isEmpty {
+                Section {
+                    ForEach(model.options) { option in
+                        Toggle(option.label, isOn: Binding(
+                            get: { model.interests.contains(option.id) },
+                            set: { on in
+                                if on { model.interests.insert(option.id) }
+                                else { model.interests.remove(option.id) }
+                            },
+                        ))
+                    }
+                } header: {
+                    Text("Wofür seid ihr hier?")
+                } footer: {
+                    // Honest about both halves: what it does, and why
+                    // the list is short (§4, interests.ts).
+                    Text("Was ihr hier ankreuzt, bewertet der Planer höher — es schließt "
+                         + "nichts aus. Die Liste ist kurz, weil sie nur enthält, was "
+                         + "OpenStreetMap wirklich unterscheidet: „Burgen“ kann die Karte "
+                         + "beantworten, „Barock“ nicht.\n\nSpeichern plant die Tage neu.")
+                }
+            }
+
             if let blocked = model.blockedReason {
                 Section {
                     Label(blocked, systemImage: "exclamationmark.triangle")
@@ -111,6 +134,7 @@ struct TripPlanSettingsView: View {
         }
         .navigationTitle("Einstellungen")
         .navigationBarTitleDisplayMode(.inline)
+        .task { await model.loadInterests() }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Abbrechen") { dismiss() }
@@ -161,7 +185,16 @@ final class TripPlanSettingsViewModel {
 
     private let planId: Int
     private let categories: [String]?
-    private let interests: [String]?
+    /// What the trip is planned for (§4). Editable here now: the
+    /// setting existed from the start and had no screen, so the only
+    /// way to say "wir mögen Burgen" was the sentence when the trip was
+    /// created — and never afterwards.
+    var interests: Set<String>
+    /// The vocabulary the server can actually match, fetched rather
+    /// than copied: two lists would drift the first time a tag is added
+    /// to one of them, and the failure would be silent.
+    private(set) var options: [TripInterestOption] = []
+
     private let maxWalkMinutes: Int?
 
     /// What the trip's dates were when the screen opened, so a save
@@ -208,7 +241,12 @@ final class TripPlanSettingsViewModel {
         // stored values anyway — sending them back is belt and braces
         // against a future field being dropped by a round trip.
         self.categories = constraints?.categories
-        self.interests = constraints?.interests
+        // Everything stored stays in the set, including free text from
+        // the interpreter that this vocabulary has no toggle for
+        // ("barock"). It rides along untouched and goes back on save —
+        // a screen that quietly deleted an answer somebody gave would
+        // be worse than one that cannot show it.
+        self.interests = Set(constraints?.interests ?? [])
         self.maxWalkMinutes = constraints?.maxWalkMinutes
         self.firstLegTitle = firstLeg?.title ?? ""
         self.firstLegPosition = firstLeg?.position ?? 0
@@ -223,6 +261,22 @@ final class TripPlanSettingsViewModel {
         let wanted = isDated ? TripCalendar.isoDay(startDate) : nil
         if wanted == originalStartDate { return nil }
         return .some(wanted)
+    }
+
+    /// The interests the planner can match, from the server.
+    ///
+    /// Silent on failure: without the list the section shows nothing,
+    /// which is the same as before this screen existed — an error
+    /// banner over the settings because a side list could not be
+    /// fetched helps nobody.
+    func loadInterests() async {
+        struct Response: Decodable { let interests: [TripInterestOption] }
+        do {
+            let response: Response = try await APIClient.shared.get("/trip-planner/interests")
+            options = response.interests
+        } catch {
+            options = []
+        }
     }
 
     /// Answers true when the plan was saved (and, if the arrival changed,
@@ -272,7 +326,7 @@ final class TripPlanSettingsViewModel {
                     pace: pace.rawValue,
                     group: .init(withChildren: withChildren, limitedMobility: limitedMobility),
                     categories: categories,
-                    interests: interests,
+                    interests: Array(interests).sorted(),
                     maxWalkMinutes: maxWalkMinutes,
                     // Only when it actually changed: sending the mode
                     // unchanged would turn every save into a re-plan,
@@ -324,4 +378,10 @@ final class TripPlanSettingsViewModel {
 
         return true
     }
+}
+
+/// One entry of the interest vocabulary, as the server offers it.
+struct TripInterestOption: Codable, Identifiable, Sendable {
+    let id: String
+    let label: String
 }

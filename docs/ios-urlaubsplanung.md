@@ -1894,6 +1894,35 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    umzuschreiben. Dafür gibt es unterwegs „Umplanen" (§5, §8.5), und die
    Ablehnung sagt das.
 
+   **Nachgereicht: die Interessen — und der Grund, warum sie nie gewirkt
+   haben.** Der Bonus fragte `interests.has(category)`, und eine Kategorie ist
+   eine von neun (`sight`, `museum`, `viewpoint`, `worship`, `theatre`, `food`,
+   `cafe`, `essentials`, `outdoors`). Der Interpreter dagegen bekommt gesagt,
+   er solle *Themen* herausziehen — „barock", „Industriegeschichte". Ein Thema
+   ist nie eine Kategorie-ID, also bekam die +2 niemand, und die Einstellung
+   war Dekoration.
+
+   Statt Freitext gegen Wikipedia zu prüfen — der Kandidat trägt eine
+   Wikidata-ID und einen *Link*, nicht den Artikel — steht dort jetzt ein
+   **kleines Vokabular dessen, was OSM tatsächlich unterscheidet**
+   (`interests.ts`): Museen, Burgen und Schlösser, Kirchen und Klöster, Ruinen,
+   Technik und Industriegeschichte, Kunst im Freien, Aussicht, Natur, Theater.
+   Jeder Eintrag ist eine Menge von OSM-Tags, verglichen wird der Tag des
+   Spots. **Was die Daten nicht hergeben, wird nicht angeboten:** „Barock"
+   steht nicht in der Liste, weil die Karte nicht weiß, welche Kirche barock
+   ist — und ein Interesse, das still nichts trifft, ist schlimmer als eines,
+   das es nicht gibt.
+
+   Drei Dinge, die daran hängen: Die Begründung nennt jetzt das getroffene
+   Interesse („ihr wolltet: Burgen und Schlösser") statt „passt zu euren
+   Interessen"; alte Reisen, deren Interessen Kategorie-IDs sind, treffen
+   weiterhin; und Freitext, den der Interpreter einmal gespeichert hat, bleibt
+   erhalten und wird beim Speichern unverändert zurückgeschickt, statt vom
+   neuen Bildschirm stillschweigend gelöscht zu werden. Die Liste kommt über
+   `GET /trip-planner/interests` in die App — zwei Kopien wären beim ersten
+   zusätzlichen Tag auseinandergelaufen, und der Fehler wäre wieder ein
+   stummer gewesen.
+
    Dabei fiel auf, dass die Etappe ihren **Suchradius gar nicht speicherte**
    (ebenso wenig den Tagesbeginn). Ein Neuplanen hätte still auf die Vorgaben
    zurückgegriffen — ein anderes Gebiet als das gewählte. Migration 0165 legt
