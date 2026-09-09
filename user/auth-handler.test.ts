@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { currentRequest } from "encore.dev";
 import { requirePermission, getAuthToken } from "./auth-handler";
 import { APIError } from "encore.dev/api";
 
@@ -39,11 +40,65 @@ describe("requirePermission", () => {
   });
 });
 
+// getAuthToken reads the token off the request being handled. It used to
+// return a module-level variable that every authenticated request overwrote,
+// which let logout revoke a different user's session under concurrency.
 describe("getAuthToken", () => {
-  it("returns undefined when no token has been set", () => {
-    // Module-level state; in isolation it is undefined unless auth handler ran
-    // We only verify the return type is string | undefined
-    const token = getAuthToken();
-    expect(token === undefined || typeof token === "string").toBe(true);
+  function stubRequest(meta: Record<string, unknown> | undefined) {
+    vi.mocked(currentRequest).mockReturnValue(meta as never);
+  }
+
+  afterEach(() => {
+    vi.mocked(currentRequest).mockReturnValue({
+      type: "api-call",
+      headers: {},
+    } as never);
+  });
+
+  it("returns the bearer token of the current request", () => {
+    stubRequest({ type: "api-call", headers: { authorization: "Bearer tok-abc" } });
+    expect(getAuthToken()).toBe("tok-abc");
+  });
+
+  it("returns undefined when there is no Authorization header", () => {
+    stubRequest({ type: "api-call", headers: {} });
+    expect(getAuthToken()).toBeUndefined();
+  });
+
+  it("rejects a malformed Authorization header", () => {
+    stubRequest({ type: "api-call", headers: { authorization: "tok-abc" } });
+    expect(getAuthToken()).toBeUndefined();
+
+    stubRequest({ type: "api-call", headers: { authorization: "Basic dXNlcjpwdw==" } });
+    expect(getAuthToken()).toBeUndefined();
+  });
+
+  it("falls back to the ?token= query parameter used by WebSocket handshakes", () => {
+    stubRequest({
+      type: "api-call",
+      headers: {},
+      pathAndQuery: "/realtime/subscribe?token=tok-ws&channels=feed",
+    });
+    expect(getAuthToken()).toBe("tok-ws");
+  });
+
+  it("returns undefined outside an API call", () => {
+    stubRequest({ type: "pubsub-message" });
+    expect(getAuthToken()).toBeUndefined();
+    stubRequest(undefined);
+    expect(getAuthToken()).toBeUndefined();
+  });
+
+  it("tracks the request it is called for, not the last one authenticated", () => {
+    // The regression this guards: two concurrent requests, and the token the
+    // second one authenticated with must not leak into the first one's logout.
+    stubRequest({ type: "api-call", headers: { authorization: "Bearer alice" } });
+    const alice = getAuthToken();
+
+    stubRequest({ type: "api-call", headers: { authorization: "Bearer bob" } });
+    const bob = getAuthToken();
+
+    expect(alice).toBe("alice");
+    expect(bob).toBe("bob");
   });
 });
