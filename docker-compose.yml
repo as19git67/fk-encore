@@ -83,7 +83,7 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DATABASE: ${DEPLOY_PG_DATABASE:-encore}
       # PHOTO_UPLOAD_DIR / PHOTO_THUMBNAIL_DIR / PHOTO_LIBRARIES_ROOT / BACKUP_DIR
       # are hardcoded in the container as /mnt/data/photos, /mnt/data/thumbnails,
@@ -180,7 +180,10 @@ services:
       DOCUMENTS_FEWSHOT_ENABLED: ${DOCUMENTS_FEWSHOT_ENABLED:-false}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
       ADMIN_NAME: ${ADMIN_NAME:-Admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-changeme}   # override in .env!
+      # No default on purpose: the seed creates the initial admin only when
+      # this is set, so a stack brought up without an .env ends up with no
+      # admin account rather than one whose password is in this file.
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       RP_ID: ${DEPLOY_RP_ID:-localhost}
       RP_NAME: ${DEPLOY_RP_NAME:-F4MIL App}
       RP_ORIGIN: ${DEPLOY_RP_ORIGIN:-http://localhost:8080}
@@ -287,7 +290,10 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/${DEPLOY_PG_EMBEDDINGS_DATABASE:-embeddings}
+      # Password is interpolated into a URL, so a value containing @ : / ? #
+      # has to be percent-encoded here — see POSTGRES_PASSWORD in
+      # docker-compose.env.example.
+      DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${DEPLOY_PG_EMBEDDINGS_DATABASE:-embeddings}
       CLIP_MODEL_NAME: xlm-roberta-large-ViT-H-14
       CLIP_PRETRAINED: frozen_laion5b_s13b_b90k
       DINO_MODEL_NAME: facebook/dinov2-base
@@ -450,11 +456,17 @@ services:
     image: pgvector/pgvector:pg18
     container_name: fk-encore-db${DEPLOY_NAME_SUFFIX:-}
     restart: unless-stopped
+    # Published on loopback only: every in-stack consumer reaches this over
+    # the compose network by service name, and the host-side scripts run on
+    # the Docker host itself, so 127.0.0.1 covers them. Set
+    # DEPLOY_BIND_POSTGRES=0.0.0.0 if you genuinely need to reach the
+    # database from another machine — but then set POSTGRES_PASSWORD too,
+    # because the default below is public knowledge.
     ports:
-      - "${DEPLOY_HOST_PORT_POSTGRES:-5432}:5432"
+      - "${DEPLOY_BIND_POSTGRES:-127.0.0.1}:${DEPLOY_HOST_PORT_POSTGRES:-5432}:5432"
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${DEPLOY_PG_DATABASE:-encore}
     volumes:
       - pgdata:/var/lib/postgresql
@@ -540,7 +552,7 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DATABASE: ${DEPLOY_PG_DATABASE:-encore}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       AUDIT_MODEL: ${AUDIT_MODEL:-claude-opus-4-8}
