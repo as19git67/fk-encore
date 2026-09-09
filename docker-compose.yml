@@ -558,6 +558,19 @@ services:
   # ── Watchtower ────────────────────────────────────────────────────────────
   # Observes only containers carrying the configured scope label so two
   # deployments on the same host stay independent.
+  #
+  # SECURITY: this container mounts the Docker socket, so its HTTP update
+  # API is equivalent to root on the host. Two things guard it:
+  #
+  #   1. WATCHTOWER_TOKEN is mandatory (`:?` below). An empty token makes
+  #      Watchtower accept *unauthenticated* update calls, so the stack
+  #      refuses to start rather than come up unprotected. This is the one
+  #      variable that deliberately breaks `docker compose up` when unset.
+  #   2. DEPLOY_BIND_WATCHTOWER controls which host interface the API is
+  #      published on. It defaults to all interfaces because the release
+  #      pipeline triggers updates remotely (WATCHTOWER_URL_* in the CI
+  #      workflows). If you deploy some other way, set it to 127.0.0.1 (or
+  #      a VPN address) so the API is not reachable from the internet.
   watchtower:
     image: containrrr/watchtower
     container_name: fk-encore-watchtower${DEPLOY_NAME_SUFFIX:-}
@@ -566,7 +579,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       WATCHTOWER_HTTP_API_UPDATE: "true"
-      WATCHTOWER_HTTP_API_TOKEN: ${WATCHTOWER_TOKEN:-}
+      WATCHTOWER_HTTP_API_TOKEN: "${WATCHTOWER_TOKEN:?must be a non-empty secret — an empty token exposes the Docker-socket-backed update API without authentication. Generate one with `openssl rand -hex 32` and put it in .env}"
       WATCHTOWER_CLEANUP: "true"
       WATCHTOWER_SCOPE: ${DEPLOY_WATCHTOWER_SCOPE:-fkprod}
       WATCHTOWER_NO_STARTUP_MESSAGE: "true"
@@ -580,7 +593,7 @@ services:
       fk-encore-geo${DEPLOY_NAME_SUFFIX:-}
       fk-encore-taxonomy-tools${DEPLOY_NAME_SUFFIX:-}
     ports:
-      - "${DEPLOY_HOST_PORT_WATCHTOWER:-9000}:8080"
+      - "${DEPLOY_BIND_WATCHTOWER:-0.0.0.0}:${DEPLOY_HOST_PORT_WATCHTOWER:-9000}:8080"
 
 # ── Networks ──────────────────────────────────────────────────────────────────
 # Only the implicit compose `default` bridge network is needed; the geo
