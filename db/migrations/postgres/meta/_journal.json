@@ -1233,6 +1233,13 @@
       "when": 1786924800015,
       "tag": "0175_document_collections",
       "breakpoints": true
+    },
+    {
+      "idx": 176,
+      "version": "7",
+      "when": 1787011200015,
+      "tag": "0176_trip_spot_photo_stop",
+      "breakpoints": true
     }
   ]
 }

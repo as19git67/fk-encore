@@ -211,8 +211,12 @@ struct TripStop: Codable, Identifiable, Sendable {
     let localName: String?
     /// The Wikipedia article, where OpenStreetMap knows of one.
     let wikipediaUrl: String?
+    /// Marked as a spot you come to for the light (§7.3). Optional so a
+    /// response from an older server still decodes.
+    let photoStop: Bool?
 
     var id: Int { rowId }
+    var isPhotoStop: Bool { photoStop == true }
     var stopStatus: TripStopStatus { TripStopStatus(raw: status) }
     var coordinate: TripCoordinate { TripCoordinate(lat: lat, lon: lon) }
     /// What to show when OpenStreetMap has no name for the place. Never
@@ -283,8 +287,11 @@ struct TripCandidate: Codable, Identifiable, Sendable {
     let localName: String?
     /// See `TripStop.wikipediaUrl`.
     let wikipediaUrl: String?
+    /// See `TripStop.photoStop`.
+    let photoStop: Bool?
 
     var id: String { osmRef }
+    var isPhotoStop: Bool { photoStop == true }
     var isManual: Bool { origin == "manual" }
     var displayName: String { title ?? name ?? TripCategory.unnamed(category) }
     var coordinate: TripCoordinate { TripCoordinate(lat: lat, lon: lon) }
@@ -513,6 +520,9 @@ struct TripSpotNote: Codable, Sendable {
     let title: String?
     let note: String?
     let url: String?
+    /// "We come here for the light" (§7.3). Optional so a response from
+    /// an older server still decodes.
+    let photoStop: Bool?
 }
 
 struct TripCoordinate: Codable, Sendable, Equatable {

@@ -135,6 +135,16 @@ struct TripSpotDetailView<Actions: View>: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
+                    if spot.photoStop {
+                        // Marked, so the sun had a say in where this
+                        // spot landed — said out loud, because a plan
+                        // that quietly weighs something is a plan
+                        // nobody can argue with (§8.3).
+                        Label("Fotostopp — der Planer bevorzugt diesen Ort im guten Licht",
+                              systemImage: "camera")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 } header: {
                     Label("Licht", systemImage: window.symbolName)
                 } footer: {
@@ -302,6 +312,8 @@ struct TripSpotDetail: Identifiable, Sendable {
     let note: String?
     let sourceUrl: String?
     let unmatched: Bool
+    /// Marked as a spot you come to for the light (§7.3).
+    let photoStop: Bool
 
     var id: String { osmRef }
     /// A title the group gave it wins over the map's name: they chose
@@ -326,6 +338,7 @@ struct TripSpotDetail: Identifiable, Sendable {
         note = candidate.note
         sourceUrl = candidate.sourceUrl
         unmatched = candidate.unmatched ?? false
+        photoStop = candidate.isPhotoStop
     }
 
     init(_ stop: TripStop) {
@@ -345,6 +358,7 @@ struct TripSpotDetail: Identifiable, Sendable {
         note = stop.note
         sourceUrl = stop.sourceUrl
         unmatched = false
+        photoStop = stop.isPhotoStop
     }
 }
 

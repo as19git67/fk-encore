@@ -174,6 +174,12 @@ export interface SpotNote {
   note: string | null;
   url: string | null;
   dwellMinutes: number | null;
+  /**
+   * "We come here for the light" (§7.3). The planner routes by
+   * distance; this is the one thing that lets the sun weigh in, and
+   * only for the spot it is set on.
+   */
+  photoStop: boolean;
 }
 
 /** A fixpoint as it arrives, before it has a row. */
@@ -777,6 +783,7 @@ export async function loadPlan(
       note: row.note,
       url: row.url,
       dwellMinutes: row.dwell_minutes,
+      photoStop: row.photo_stop,
     });
     notesByLeg.set(row.leg_id, byRef);
   }
@@ -834,6 +841,7 @@ export async function loadPlan(
       lon: row.lon,
       category: row.category,
       dwellMinutes: written?.dwellMinutes ?? row.dwell_minutes,
+      photoStop: written?.photoStop ?? false,
       score: 0,
       travelFromPrevious: {
         minutes: row.travel_minutes,
@@ -899,6 +907,7 @@ export async function loadPlan(
       lon: row.lon,
       category: row.category,
       dwellMinutes: written?.dwellMinutes ?? row.dwell_minutes,
+      photoStop: written?.photoStop ?? false,
       score: row.score,
       reasons: (row.reasons ?? []) as string[],
       origin: row.origin,
@@ -1216,12 +1225,15 @@ export async function saveSpotNote(
     note: string | null;
     url: string | null;
     dwellMinutes: number | null;
+    photoStop: boolean;
   },
   userId: number,
   db: Db = dbDefault,
 ): Promise<void> {
+  // A row that says nothing is deleted — and a photo stop says
+  // something, so an otherwise empty row with the flag set stays.
   const empty = fields.title === null && fields.note === null && fields.url === null
-    && fields.dwellMinutes === null;
+    && fields.dwellMinutes === null && !fields.photoStop;
   if (empty) {
     await db
       .delete(tripSpotNotes)
@@ -1238,6 +1250,7 @@ export async function saveSpotNote(
       note: fields.note,
       url: fields.url,
       dwell_minutes: fields.dwellMinutes,
+      photo_stop: fields.photoStop,
       updated_by: userId,
     })
     .onConflictDoUpdate({
@@ -1247,6 +1260,7 @@ export async function saveSpotNote(
         note: fields.note,
         url: fields.url,
         dwell_minutes: fields.dwellMinutes,
+        photo_stop: fields.photoStop,
         updated_by: userId,
         updated_at: new Date().toISOString(),
       },
@@ -1271,6 +1285,7 @@ export async function findSpotNote(
     note: row.note,
     url: row.url,
     dwellMinutes: row.dwell_minutes,
+    photoStop: row.photo_stop,
   };
 }
 

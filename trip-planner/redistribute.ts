@@ -158,6 +158,9 @@ function stopToCandidate(stop: CurrentStop): Candidate {
     wikipediaUrl: stop.wikipediaUrl ?? null,
     facadeAzimuth: stop.facadeAzimuth ?? null,
     kind: stop.kind ?? null,
+    // The flag travels with the spot: a redistribution must not turn a
+    // photo stop back into an ordinary one on its way to the pool.
+    photoStop: stop.photoStop ?? false,
     lat: stop.lat,
     lon: stop.lon,
     category: stop.category,

@@ -19,7 +19,7 @@ import { requirePermission } from "../user/auth-handler";
 import { getGeoClient } from "../osm-admin/geo-client";
 import { pickRegion } from "../osm-admin/region-router";
 import { DEFAULT_DAY, shapeDay, type BlockTemplate, type GroupProfile, type Pace } from "./blocks";
-import { scoreForLight, toCandidates, type ScoredCandidate } from "./candidates";
+import { toCandidates, type ScoredCandidate } from "./candidates";
 import { solveDay, type PlannedBlock } from "./solver";
 import { DEFAULT_MAX_WALK_MINUTES } from "./travel";
 
@@ -46,8 +46,6 @@ export interface PlanDayRequest {
   maxWalkMinutes?: number;
   /** Per-category dwell overrides, in minutes. */
   dwellMinutes?: Record<string, number>;
-  lightDate?: string;
-  lightUtcOffsetMinutes?: number;
 }
 
 export interface PlanDayResponse {
@@ -84,14 +82,15 @@ export const planDay = api(
       limit: CANDIDATE_LIMIT,
     });
 
-    let candidates = toCandidates(page.spots, {
+    // No light here on purpose: this endpoint is stateless, its
+    // candidates come straight out of the region search, and nothing
+    // in them can carry the photo-stop mark a saved plan's spots do
+    // (§7.3). A light bonus would therefore either apply to everything
+    // or to nothing — and "everything" is exactly what the mark
+    // replaced.
+    const candidates = toCandidates(page.spots, {
       interests: req.interests,
       dwellMinutes: req.dwellMinutes,
-    });
-    if (req.lightDate) candidates = scoreForLight(candidates, {
-      date: req.lightDate,
-      utcOffsetMinutes: req.lightUtcOffsetMinutes,
-      at: anchor,
     });
 
     const solved = solveDay({
