@@ -107,6 +107,47 @@ Kinder unter zehn → kürzere Blöcke, Pausen, keine drei Museen am Stück;
 Großeltern dabei → Gehstrecke und Steigung als harte Nebenbedingung statt als
 Sternchen-Hinweis. Das wirkt direkt auf das Zeitbudget eines Blocks.
 
+**Umgesetzt:** `GET`/`POST /trip-planner/plans/:planId/travellers`,
+`GET …/travellers/suggestions`, `POST …/travellers/remove` und der Bildschirm
+„Wer fährt mit?".
+
+Die Wirkung gab es von Anfang an — `blocks.ts` schrumpft das Budget jedes Blocks
+bei `withChildren` und noch einmal bei `limitedMobility`, die Packliste liest
+dieselben zwei Flags. Was fehlte, war ihre **Herkunft**: Sie kamen aus einem Satz,
+den jemand einmal getippt hat. Das stimmt bei der ersten Reise und ist bei der
+nächsten falsch — ein Kind, das beim Beschreiben acht war, ist zwei Jahre später
+elf, und niemand hat es gemerkt.
+
+Jetzt stehen die **Personen** in der Reise, und die Flags sind eine Folgerung
+daraus, frisch gezogen für das Datum, an dem die Reise beginnt. Die Quelle liegt
+schon im Haus: `user_subject_persons` (die Bezugspersonen des Dokumentenmoduls)
+kennt Verwandtschaft und meistens ein Geburtsdatum. Wer dort nicht steht — ein
+befreundetes Kind, eine Oma ohne Papierkram hier — kommt mit eigenem Namen und
+optionalem Geburtsdatum dazu.
+
+Drei Entscheidungen:
+
+- **Das Alter wird abgeleitet, das „kürzere Wege" nie.** Wie lange ein kleines
+  Kind durchhält, ist eine Tatsache über kleine Kinder, und dafür sind
+  Geburtsdaten da. „Braucht kürzere Wege" ist dagegen eine Aussage über einen
+  Menschen und gehört dem, um den es geht — eine Siebzigjährige, die
+  fünfzehn Kilometer geht, wäre zu Recht beleidigt, wenn die App ihr still den
+  Tag halbiert. Das Feld wird also gesetzt, nicht geschlossen; §3.5s „Großeltern
+  dabei" ist ein Anlass zu fragen, keine Erlaubnis anzunehmen.
+- **Gerechnet wird auf den Reisebeginn, nicht auf heute.** Eine im Januar für
+  August geplante Reise ist eine Reise mit dem Kind, das im August schon
+  Geburtstag hatte.
+- **Vorgeschlagen, nicht mitgenommen.** Der Haushalt wird angeboten; eine Reise
+  ist nicht automatisch jeder, der hier wohnt.
+
+Eine Änderung an der Gruppe plant die Reise neu — die Blöcke haben danach andere
+Budgets, und ein Tag, dessen Budgets sich verschoben haben, dessen Spots aber
+nicht, geht nicht mehr auf. Aus demselben Grund ist es Sache der Organisatorin
+(§6.2, „Tempo und Begleitung"). Und es ist **nicht** die Gästeliste:
+`trip_plan_shares` sind die, die *planen* dürfen, `trip_plan_travellers` die, die
+*mitfahren* — ein Vierjähriger hat keinen Zugang und entscheidet trotzdem, wie
+lang der Nachmittag sein darf.
+
 ### 3.6 Familienabstimmung mit vorhandener Mechanik
 Das Album-Voting (Nutzer **und** KI stimmen über Fotos ab) ist eins zu eins auf
 Spot-Kandidaten übertragbar: Jeder wischt vor der Reise durch die Vorschläge,
@@ -2568,9 +2609,12 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
     vorgeschlagen mit Begründung, angehängt auf Zuruf, gelesene Zeiten als
     Vorschlag samt Belegzeile statt als geschriebener Fixpunkt. Damit ist die
     Ticketzeile der Vorabendprüfung beantwortbar geworden — mit der ehrlichen
-    Grenze, dass die App weiß, was hängt, nicht was fehlen könnte. Offen bleibt
-    von diesem Schritt die Reisegruppe aus der Personenerkennung (§3.5);
-    Abstimmungen werden weiter als offen ausgewiesen statt als geprüft.
+    Grenze, dass die App weiß, was hängt, nicht was fehlen könnte. Dazu die
+    **Reisegruppe** (§3.5): Wer mitfährt, steht jetzt als Personen an der Reise
+    statt als Satz in den Vorgaben, und `withChildren` wird für den Reisebeginn
+    aus den Geburtsdaten der Bezugspersonen gezogen — „kürzere Wege" dagegen nie,
+    das setzt ein Mensch. Damit ist Schritt 10 durch, bis auf die Abstimmungen,
+    die weiter als offen ausgewiesen werden statt als geprüft.
 11. **Mehrbenutzerbetrieb** (§6) — Beiträge und Stimmen je Person,
     Herzenswünsche und Fairness-Konto, Organisatorrolle, feingranulare
     Zusammenführung gleichzeitiger Änderungen, automatische Erledigt-Erkennung,
