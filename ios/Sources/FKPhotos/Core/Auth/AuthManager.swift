@@ -75,9 +75,24 @@ public final class AuthManager: @unchecked Sendable {
         }
         // Mirror the tokens to the App Group so the Share Extension works
         // immediately — and can refresh on its own — without a fresh login.
-        SharedStorage.defaults.set(token, forKey: SharedStorage.tokenKey)
-        if let rt = KeychainHelper.loadString(forKey: refreshTokenKey), !rt.isEmpty {
-            SharedStorage.defaults.set(rt, forKey: SharedStorage.refreshTokenKey)
+        //
+        // Only when the group has no session of its own. The extension
+        // refreshes too, and its rotation is written to the group and
+        // *not* back into the Keychain: overwriting it here would push a
+        // working extension back onto the pair the app last saw, and
+        // once the server's five-minute grace on the rotated refresh
+        // token runs out, nothing short of a fresh login helps. That is
+        // exactly the "share extension asks me to log in again" people
+        // reported.
+        let keychainRefresh = KeychainHelper.loadString(forKey: refreshTokenKey)
+        if SharedSession.shouldMirror(
+            groupToken: SharedStorage.defaults.string(forKey: SharedStorage.tokenKey),
+            groupRefreshToken: SharedStorage.defaults.string(forKey: SharedStorage.refreshTokenKey),
+        ) {
+            SharedStorage.defaults.set(token, forKey: SharedStorage.tokenKey)
+            if let rt = keychainRefresh, !rt.isEmpty {
+                SharedStorage.defaults.set(rt, forKey: SharedStorage.refreshTokenKey)
+            }
         }
         currentUser = user
         isAuthenticated = true
