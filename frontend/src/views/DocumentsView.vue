@@ -37,11 +37,17 @@ import { useDocSelectionStore } from '../stores/documents/selection'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import { useScrollRestore } from '../composables/useScrollRestore'
 import { useSort, type SortField } from '../composables/useSort'
-import { DOCUMENT_FILTER_QUERY_KEYS, useDocumentFilter } from '../composables/useDocumentFilter'
+import {
+  collectionQueryParams,
+  DOCUMENT_FILTER_QUERY_KEYS,
+  effectiveCollectionScope,
+  useDocumentFilter,
+} from '../composables/useDocumentFilter'
 import { replaceQuerySlice, updateRouteQuery, waitForPendingQueryUpdate } from '../utils/routeQueryUpdate'
 import {
-  consumeDocumentListFocus,
-  focusDocumentListItem,
+  consumeListFocus,
+  focusListItem,
+  rememberCollectionListFocus,
   rememberDocumentListFocus,
 } from '../utils/documentListFocus'
 
@@ -198,21 +204,55 @@ function clearSelection() {
  */
 const collections = ref<DocumentCollection[]>([])
 
-/** Facets that describe a document and therefore cannot describe a folder. */
+/**
+ * Facets that describe a document and therefore cannot describe a folder.
+ *
+ * The Sammelmappen scope is deliberately not among them: it is a statement
+ * *about* folders, and in its default setting the folder rows are what stands
+ * in for the documents it leaves out — hiding both would leave a hole.
+ */
 function hasDocumentFacetFilter(): boolean {
   const f = filter.applied.value
   return Boolean(
     f.category || (f.tags && f.tags.length > 0) || f.status || f.needs_review ||
     f.unreviewed || f.sender || f.correspondent || f.dateFrom || f.dateTo ||
     f.taxRelevant !== undefined || f.subjectPersonId || f.categorySource ||
-    f.documentType || f.collectionId || f.inCollection !== undefined,
+    f.documentType,
   )
 }
 
 const collectionFacetActive = computed(() => hasDocumentFacetFilter())
-const visibleCollections = computed(() =>
-  collectionFacetActive.value ? [] : collections.value,
+
+/**
+ * The folder rows to show. When one folder is singled out, only that folder's
+ * row appears — it is the heading of what the list below is showing, and the
+ * other folders are not part of the question that was asked.
+ */
+const visibleCollections = computed(() => {
+  if (collectionFacetActive.value) return []
+  const pinned = filter.applied.value.collectionId
+  if (pinned) return collections.value.filter((c) => c.id === pinned)
+  return collections.value
+})
+
+/**
+ * True while the default is leaving bundled documents out and there is
+ * something to leave out. Drives the notice above the list: the omission has
+ * to be visible and undoable in one click, or it is indistinguishable from
+ * documents having gone missing.
+ */
+const bundledHidden = computed(
+  () =>
+    effectiveCollectionScope(filter.applied.value) === 'without' &&
+    !filter.applied.value.collectionId &&
+    collections.value.some((c) => c.item_count > 0),
 )
+
+/** "Auch anzeigen" from the notice — the flat list, without opening the menu. */
+function showBundledDocuments() {
+  filter.draft.value = { ...filter.applied.value, collectionScope: 'with', collectionId: undefined }
+  filter.apply()
+}
 
 async function loadCollections() {
   try {
@@ -224,13 +264,19 @@ async function loadCollections() {
   }
 }
 
-function openCollection(id: number) {
+async function openCollection(id: number) {
+  // Same two steps as openDocument: remember the row so the way back lands on
+  // it, and let a still-pending filter/sort URL write settle first — a write
+  // that resolves after this push would overwrite the history entry the back
+  // arrow returns to, dropping the filter and the position with it.
+  rememberCollectionListFocus(id)
+  await waitForPendingQueryUpdate(router)
   router.push({ name: 'dokumente-mappe', params: { id } })
 }
 
 /** Jump from a chip straight into the folder-members view of the list. */
 function filterByCollection(id: number) {
-  filter.draft.value = { ...filter.applied.value, collectionId: id, inCollection: undefined }
+  filter.draft.value = { ...filter.applied.value, collectionId: id, collectionScope: undefined }
   filter.apply()
 }
 
@@ -358,7 +404,9 @@ function syncQueryParams() {
   if (fq.dateTo) query.dateTo = fq.dateTo
   if (fq.taxRelevant !== undefined) query.taxRelevant = String(fq.taxRelevant)
   if (fq.subjectPersonId) query.subjectPerson = String(fq.subjectPersonId)
-  if (fq.inCollection !== undefined) query.inCollection = String(fq.inCollection)
+  if (fq.collectionScope && fq.collectionScope !== 'without') {
+    query.collectionScope = fq.collectionScope
+  }
   if (fq.collectionId) query.collection = String(fq.collectionId)
   const s = sort.applied.value
   if (s.field !== 'uploaded_at' || s.direction !== 'desc') {
@@ -403,8 +451,7 @@ function currentFilterParams() {
     subject_person_id: f.subjectPersonId,
     category_source: f.categorySource as any,
     document_type: f.documentType,
-    in_collection: f.inCollection,
-    collection_id: f.collectionId,
+    ...collectionQueryParams(f),
   }
 }
 
@@ -517,15 +564,22 @@ async function openDocument(doc: DocumentSummary) {
   router.push({ name: 'dokumente-detail', params: { id: doc.id } })
 }
 
+/**
+ * Put the user back on the row they left from — a document or a Sammelmappe.
+ * Returns false when that row is not on screen (deleted, filtered away, on a
+ * page not loaded yet), and the caller falls back to the raw scroll offset.
+ */
 async function restoreFocusToLastOpened(): Promise<boolean> {
-  const id = consumeDocumentListFocus()
-  if (id == null) return false
+  const focus = consumeListFocus()
+  if (!focus) return false
   await nextTick()
   await nextTick()
-  const el = focusDocumentListItem(document, id)
+  const el = focusListItem(document, focus)
   if (!el) return false
-  el.classList.add('document-card--highlight')
-  setTimeout(() => el.classList.remove('document-card--highlight'), 1500)
+  const highlight =
+    focus.kind === 'collection' ? 'collection-row--highlight' : 'document-card--highlight'
+  el.classList.add(highlight)
+  setTimeout(() => el.classList.remove(highlight), 1500)
   return true
 }
 
@@ -836,6 +890,7 @@ onMounted(async () => {
       <button
         v-for="c in visibleCollections"
         :key="c.id"
+        :data-collection-id="c.id"
         type="button"
         class="collection-row"
         @click="openCollection(c.id)"
@@ -857,6 +912,14 @@ onMounted(async () => {
         <span class="collection-open"><i class="pi pi-angle-right" /></span>
       </button>
     </div>
+
+    <p v-if="!loading && bundledHidden" class="collection-hidden-note">
+      <i class="pi pi-info-circle" />
+      Dokumente, die in einer Sammelmappe liegen, sind ausgeblendet — die Mappe steht oben für sie.
+      <button type="button" class="collection-note-action" @click="showBundledDocuments">
+        Auch anzeigen
+      </button>
+    </p>
 
     <p v-else-if="!loading && collectionFacetActive && collections.length > 0" class="collection-hidden-note">
       <i class="pi pi-info-circle" />
@@ -1075,6 +1138,17 @@ onMounted(async () => {
 .collection-row:hover {
   background: var(--p-content-hover-background);
 }
+.collection-row--highlight {
+  animation: collection-row-flash 1.5s ease-out;
+}
+@keyframes collection-row-flash {
+  0% {
+    background: color-mix(in srgb, var(--p-primary-color) 22%, transparent);
+  }
+  100% {
+    background: var(--p-content-background);
+  }
+}
 .collection-icon {
   flex: 0 0 auto;
   color: var(--p-primary-color);
@@ -1120,6 +1194,16 @@ onMounted(async () => {
 }
 .collection-hidden-note i {
   margin-right: 4px;
+}
+.collection-note-action {
+  border: 0;
+  padding: 0;
+  margin-left: 6px;
+  background: none;
+  color: var(--p-primary-color);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
 }
 .document-collections {
   display: flex;

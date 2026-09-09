@@ -6,7 +6,7 @@ import { replaceQuerySlice, updateRouteQuery } from '../utils/routeQueryUpdate'
 const STORAGE_KEY = 'documents.filter'
 export const DOCUMENT_FILTER_QUERY_KEYS = [
   'category', 'tags', 'status', 'review', 'neu', 'sender', 'correspondent', 'dateFrom', 'dateTo',
-  'taxRelevant', 'subjectPerson', 'categorySource', 'documentType', 'inCollection', 'collection',
+  'taxRelevant', 'subjectPerson', 'categorySource', 'documentType', 'collectionScope', 'collection',
 ] as const
 
 export interface DocumentFilter {
@@ -28,14 +28,48 @@ export interface DocumentFilter {
   /** Filter by document-type facet slug (Dokumentart). */
   documentType?: string
   /**
-   * Sammelmappen membership. `false` keeps only documents that are in no
-   * folder — the explicit way to thin the list out; documents in a folder are
-   * never hidden on their own, because a folder is a bundle for handing over,
-   * not a filing location, and a document may sit in several at once.
+   * How the list treats Sammelmappen membership. Absent means `'without'`,
+   * the default: a document that is already bundled is represented by its
+   * folder row instead of appearing a second time on its own. `'with'` is the
+   * flat list of everything, `'only'` the inverse of the default.
    */
-  inCollection?: boolean
-  /** Keep only the members of this one Sammelmappe. Wins over `inCollection`. */
+  collectionScope?: DocumentCollectionScope
+  /** Keep only the members of this one Sammelmappe. Wins over `collectionScope`. */
   collectionId?: number
+}
+
+/**
+ * What the list does with documents that sit in a Sammelmappe.
+ *
+ * - `without` (the default) — leave them out, because the folder row above the
+ *   list already stands for them. Nothing is lost: the folder is one click
+ *   away, the chip on a document names its folders, and the setting is undone
+ *   in one click from the notice the list shows while it is in effect.
+ * - `with` — the flat list of every document, folder or not.
+ * - `only` — the complement of the default, for checking what is bundled.
+ */
+export type DocumentCollectionScope = 'without' | 'with' | 'only'
+
+/** The scope in force, resolving the absent-means-default rule in one place. */
+export function effectiveCollectionScope(f: DocumentFilter): DocumentCollectionScope {
+  return f.collectionScope ?? 'without'
+}
+
+/**
+ * The membership half of the backend query.
+ *
+ * A named folder supersedes the scope — asking for one folder's documents is
+ * the more specific request — and `'with'` sends nothing at all, because "no
+ * condition" is exactly what it means.
+ */
+export function collectionQueryParams(
+  f: DocumentFilter,
+): { in_collection?: boolean; collection_id?: number } {
+  if (f.collectionId) return { collection_id: f.collectionId }
+  const scope = effectiveCollectionScope(f)
+  if (scope === 'without') return { in_collection: false }
+  if (scope === 'only') return { in_collection: true }
+  return {}
 }
 
 function parseBool(v: unknown): boolean | undefined {
@@ -75,8 +109,11 @@ export function parseDocFilterFromQuery(q: Record<string, unknown>): DocumentFil
   }
   if (typeof q.categorySource === 'string' && q.categorySource) f.categorySource = q.categorySource
   if (typeof q.documentType === 'string' && q.documentType) f.documentType = q.documentType
-  const ic = parseBool(q.inCollection)
-  if (ic !== undefined) f.inCollection = ic
+  // Only the two non-default scopes are ever written, so anything else —
+  // absent, empty, a stale 'without', junk — resolves to the default.
+  if (q.collectionScope === 'with' || q.collectionScope === 'only') {
+    f.collectionScope = q.collectionScope
+  }
   if (typeof q.collection === 'string' && q.collection) {
     const n = Number(q.collection)
     if (Number.isFinite(n)) f.collectionId = n
@@ -99,7 +136,11 @@ export function docFilterToQuery(f: DocumentFilter): Record<string, string> {
   if (f.subjectPersonId) out.subjectPerson = String(f.subjectPersonId)
   if (f.categorySource) out.categorySource = f.categorySource
   if (f.documentType) out.documentType = f.documentType
-  if (f.inCollection !== undefined) out.inCollection = String(f.inCollection)
+  // The default stays out of the URL: a shared link should carry what the
+  // sender changed, not a restatement of what the list does anyway.
+  if (f.collectionScope && f.collectionScope !== 'without') {
+    out.collectionScope = f.collectionScope
+  }
   if (f.collectionId) out.collection = String(f.collectionId)
   return out
 }
@@ -118,9 +159,10 @@ export function countActiveDocFilters(f: DocumentFilter): number {
   if (f.subjectPersonId) n++
   if (f.categorySource) n++
   if (f.documentType) n++
-  // One facet: naming a folder supersedes the yes/no question, so counting
-  // both would show "2 Filter" for a single decision.
-  if (f.collectionId || f.inCollection !== undefined) n++
+  // One facet, and only when it departs from the default: naming a folder
+  // supersedes the scope, so counting both would show "2 Filter" for a single
+  // decision, and counting the default would show one for an untouched list.
+  if (f.collectionId || (f.collectionScope && f.collectionScope !== 'without')) n++
   return n
 }
 

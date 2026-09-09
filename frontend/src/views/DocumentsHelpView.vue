@@ -268,19 +268,26 @@ function goBack() {
         </li>
         <li>
           <strong>In der Dokumentenliste</strong> – Sammelmappen erscheinen als
-          eigene Zeilen über den Dokumenten, die Suche findet sie über Titel,
-          Notiz und Zusammenfassung. Dokumente in einer Mappe bleiben trotzdem
-          einzeln in der Liste: eine Mappe ist ein Bündel zur Weitergabe, kein
-          Ablageort, und dasselbe Dokument darf in mehreren liegen. Jede
-          Dokumentzeile zeigt ihre Mappen als anklickbaren Chip.
+          eigene Zeilen über den Dokumenten; die Suche findet sie über Titel,
+          Notiz und Zusammenfassung. <strong>Standardmäßig</strong> werden
+          Dokumente, die in einer Mappe liegen, nicht zusätzlich einzeln
+          aufgeführt – die Mappen-Zeile steht für sie. Ein Hinweis über der
+          Liste sagt das und schaltet es mit einem Klick wieder ab.
         </li>
         <li>
-          <strong>Filter „Sammelmappe"</strong> – „Nur ohne Sammelmappe"
-          blendet die gebündelten Dokumente aus, „Nur in einer Sammelmappe"
-          umgekehrt, und eine benannte Mappe zeigt genau deren Dokumente. Bei
-          aktivem Dokumentfilter treten die Mappen-Zeilen zurück, weil ein
-          Filter nach Eigenschaften fragt, die ein Dokument hat und eine Mappe
-          nicht.
+          <strong>Filter „Sammelmappe"</strong> – „Auch in Sammelmappen" zeigt
+          wieder alle Dokumente einzeln, „Nur in Sammelmappen" die Umkehrung
+          des Standards, und eine benannte Mappe genau deren Dokumente (dann
+          steht nur diese eine Mappen-Zeile darüber). Bei aktivem
+          Dokumentfilter – Kategorie, Absender, Steuer, Dokumentart … – treten
+          die Mappen-Zeilen zurück, weil ein Filter nach Eigenschaften fragt,
+          die ein Dokument hat und eine Mappe nicht.
+        </li>
+        <li>
+          <strong>Chip an der Dokumentzeile</strong> – jedes Dokument zeigt
+          seine Mappen an; ein Klick filtert die Liste auf genau diese Mappe.
+          Ein Dokument darf in mehreren Mappen liegen, deshalb sind es
+          mehrere Chips.
         </li>
         <li>
           <strong>Sichtbarkeit</strong> – privat oder für eine Gruppe. Eine

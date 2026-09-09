@@ -36,6 +36,7 @@ import {
   type DocumentCollectionItem,
 } from '../api/collections'
 import { canShareFiles, shareFile, triggerDownload } from '../utils/shareFile'
+import { useModuleBack } from '../composables/useModuleBack'
 
 const route = useRoute()
 const router = useRouter()
@@ -58,6 +59,16 @@ const exportFile = ref<File | null>(null)
 const exportUrl = ref<string | null>(null)
 const exportSkipped = ref(0)
 const exporting = ref(false)
+
+/**
+ * "Zurück" returns to wherever the folder was opened from — the document list
+ * at the row and scroll position it was left at, the Sammelmappen list, or a
+ * document detail. `useModuleBack` uses browser history whenever the previous
+ * entry is under `/dokumente`, so the list restores itself the way it already
+ * does for a document; only a deep link or a reload falls back to the folder
+ * list, so back never leaves the module.
+ */
+const { goBack } = useModuleBack('/dokumente', 'dokumente-mappen')
 
 const collectionId = computed(() => Number(route.params.id))
 const items = computed(() => collection.value?.items ?? [])
@@ -234,8 +245,8 @@ onMounted(load)
         icon="pi pi-arrow-left"
         text
         rounded
-        aria-label="Zurück zu den Sammelmappen"
-        @click="router.push({ name: 'dokumente-mappen' })"
+        aria-label="Zurück"
+        @click="goBack"
       />
       <InputText
         v-model="titleDraft"
