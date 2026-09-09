@@ -206,8 +206,6 @@ export interface CreatePlanRequest {
    * the lot, or 0 to plan none.
    */
   detailDays?: number;
-  /** Prefer candidates with a useful golden-light window when dates exist. */
-  lightAware?: boolean;
 }
 
 export interface PlanResponse {
@@ -266,7 +264,6 @@ export const createTripPlan = api(
         dwellMinutes: req.dwellMinutes,
         firstDayStartMinutes: leg.firstDayStartMinutes,
         detailDays: detailBudget,
-        lightAware: req.lightAware ?? true,
       });
       legs.push(planned.leg);
       detailBudget = Math.max(0, detailBudget - planned.leg.days.length);
@@ -289,7 +286,6 @@ export const createTripPlan = api(
         pace: req.pace ?? "normal",
         group: req.group ?? null,
         maxWalkMinutes,
-        lightAware: req.lightAware ?? true,
       },
       legs,
     });
@@ -448,7 +444,6 @@ async function replanFromStoredSettings(
           maxWalkMinutes,
           categories: (constraints.categories ?? undefined) as string[] | undefined,
           interests: (constraints.interests ?? undefined) as string[] | undefined,
-          lightAware: constraints.lightAware !== false,
           // How far a day is planned out stays as it was: re-planning
           // answers "what should we see", not "how far ahead".
           detailDays: leg.days.filter((d) => d.detailed).length,
@@ -575,7 +570,6 @@ function mergedConstraints(
     pace: req.pace ?? stored.pace ?? "normal",
     group: req.group ?? stored.group ?? null,
     maxWalkMinutes: req.maxWalkMinutes ?? stored.maxWalkMinutes ?? null,
-    lightAware: stored.lightAware !== false,
   };
 }
 
@@ -612,7 +606,6 @@ export async function planLegForTrip(
     interests: (constraints.interests ?? undefined) as string[] | undefined,
     detailDays: options.detailDays,
     firstDayStartMinutes: options.firstDayStartMinutes,
-    lightAware: constraints.lightAware !== false,
   });
 }
 
@@ -1160,7 +1153,6 @@ async function planLeg(
     firstDayStartMinutes?: number | null;
     /** How many of this leg's days to plan down to spots (§4.3). */
     detailDays?: number;
-    lightAware?: boolean;
   },
 ): Promise<{
   leg: CreateLegInput;
@@ -1247,9 +1239,10 @@ async function planLeg(
       continue;
     }
 
-    // The light can only prefer what the travellers already wanted, and
-    // only on a trip that has a date (§7.3).
-    const candidatesForDay = trip.lightAware && startDate
+    // The light speaks only for the spots somebody marked as a photo
+    // stop, and only on a trip that has a date (§7.3). With none
+    // marked this is a no-op, which is the ordinary case.
+    const candidatesForDay = startDate
       ? scoreForLight(available, { date: addDays(startDate, dayIndex), at: anchor })
       : available;
     const solved = solveDay({

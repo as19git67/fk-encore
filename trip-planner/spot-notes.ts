@@ -19,6 +19,11 @@
  *   - The **note** is why it matters, in their words.
  *   - The **URL** is the one link the group keeps with the spot.
  *
+ * Two switches travel with them, for the same reason: a stay length
+ * somebody corrected by hand, and the **photo stop** — "we come here
+ * for the light" (§7.3). Both are decisions about a place rather than
+ * about a stop row, and both have to survive the next re-plan.
+ *
  * Open to everybody on the trip, like the pool: §6.2 reserves three
  * rights to the organiser and none of them is this one.
  *
@@ -53,6 +58,11 @@ export interface SaveSpotNoteRequest {
   url?: string | null;
   /** A manual stay-length override, in minutes. */
   dwellMinutes?: number | null;
+  /**
+   * "The light matters here" (§7.3). Omitting it leaves the flag as it
+   * is, like every other field on this call.
+   */
+  photoStop?: boolean;
 }
 
 export interface SaveSpotNoteResponse {
@@ -95,6 +105,7 @@ export const saveTripSpotNote = api(
       note: resolve(req.note, existing?.note ?? null, MAX_NOTE_LENGTH, "note"),
       url: validateUrl(resolve(req.url, existing?.url ?? null, MAX_URL_LENGTH, "url")),
       dwellMinutes: resolveDwell(req.dwellMinutes, existing?.dwellMinutes ?? null),
+      photoStop: req.photoStop ?? existing?.photoStop ?? false,
     };
 
     await saveSpotNote(leg.id, osmRef, fields, userId);

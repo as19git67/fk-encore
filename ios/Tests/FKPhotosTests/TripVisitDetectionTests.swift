@@ -32,6 +32,7 @@ final class TripGeofencePlanTests: XCTestCase {
             title: nil,
             localName: nil,
             wikipediaUrl: nil,
+            photoStop: nil,
         )
     }
 

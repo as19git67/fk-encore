@@ -154,6 +154,12 @@ struct TripPoolView: View {
                     Image(systemName: TripCategory.symbol(candidate.category))
                         .foregroundStyle(.secondary)
                 }
+                if candidate.isPhotoStop {
+                    Image(systemName: "camera.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Fotostopp")
+                }
                 Spacer()
                 Text(TripClock.duration(candidate.dwellMinutes))
                     .font(.caption)

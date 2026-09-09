@@ -218,6 +218,12 @@ struct TripTodayView: View {
                                 .foregroundStyle(.orange)
                                 .accessibilityLabel("angeheftet")
                         }
+                        if stop.isPhotoStop {
+                            Image(systemName: "camera.fill")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .accessibilityLabel("Fotostopp")
+                        }
                         Text(stop.displayName)
                             .strikethrough(stop.stopStatus != .planned)
                             .foregroundStyle(stop.stopStatus == .planned ? .primary : .secondary)

@@ -40,6 +40,7 @@ final class TripSpotDetailTests: XCTestCase {
         title: String? = nil,
         localName: String? = nil,
         wikipediaUrl: String? = nil,
+        photoStop: Bool? = nil,
     ) -> TripCandidate {
         TripCandidate(
             osmRef: "node:1",
@@ -57,6 +58,7 @@ final class TripSpotDetailTests: XCTestCase {
             title: title,
             localName: localName,
             wikipediaUrl: wikipediaUrl,
+            photoStop: photoStop,
         )
     }
 
@@ -66,6 +68,7 @@ final class TripSpotDetailTests: XCTestCase {
         title: String? = nil,
         localName: String? = nil,
         wikipediaUrl: String? = nil,
+        photoStop: Bool? = nil,
     ) -> TripStop {
         TripStop(
             rowId: 7,
@@ -83,7 +86,20 @@ final class TripSpotDetailTests: XCTestCase {
             title: title,
             localName: localName,
             wikipediaUrl: wikipediaUrl,
+            photoStop: photoStop,
         )
+    }
+
+    func testThePhotoStopMarkTravelsToTheDetailScreen() {
+        // The mark decides whether the sun gets a say (§7.3), so the
+        // screen that shows the light has to know about it — from a
+        // pool candidate and from a planned stop alike.
+        XCTAssertTrue(TripSpotDetail(candidate(photoStop: true)).photoStop)
+        XCTAssertTrue(TripSpotDetail(stop(photoStop: true)).photoStop)
+        // Absent means no, not unknown: an older server that has never
+        // heard of the flag must not light the camera up everywhere.
+        XCTAssertFalse(TripSpotDetail(candidate()).photoStop)
+        XCTAssertFalse(TripSpotDetail(stop(photoStop: nil)).photoStop)
     }
 
     func testAPoolCandidateBringsItsNoteAndItsSource() {
@@ -191,12 +207,12 @@ final class TripSpotDetailTests: XCTestCase {
 /// The rules the edit sheet applies before anything is sent (§9.2).
 final class TripSpotEditTests: XCTestCase {
     private func detail(title: String? = nil, note: String? = nil,
-                        sourceUrl: String? = nil) -> TripSpotDetail {
+                        sourceUrl: String? = nil, photoStop: Bool? = nil) -> TripSpotDetail {
         TripSpotDetail(TripCandidate(
             osmRef: "node:1", name: "Museum Beispiel", lat: 48.37, lon: 10.9,
             category: "museum", dwellMinutes: 90, score: 3, reasons: [],
             origin: "search", note: note, sourceUrl: sourceUrl, unmatched: nil,
-            title: title, localName: nil, wikipediaUrl: nil,
+            title: title, localName: nil, wikipediaUrl: nil, photoStop: photoStop,
         ))
     }
 
@@ -212,6 +228,14 @@ final class TripSpotEditTests: XCTestCase {
         // Pre-filling "Museum Beispiel" would turn every save into a
         // rename nobody asked for.
         XCTAssertEqual(TripSpotEdit(detail()).title, "")
+    }
+
+    func testTheSheetOpensWithThePhotoStopAsItStands() {
+        // The switch is the one thing on this sheet that changes what
+        // the planner does (§7.3), so it must not quietly reset itself
+        // every time somebody edits a note.
+        XCTAssertTrue(TripSpotEdit(detail(photoStop: true)).photoStop)
+        XCTAssertFalse(TripSpotEdit(detail()).photoStop)
     }
 
     func testWhitespaceIsNotAValue() {

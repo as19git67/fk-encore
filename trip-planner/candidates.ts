@@ -74,37 +74,54 @@ export interface LightScoringOptions {
 }
 
 /**
- * A small, explainable preference for spots the light suits (§7.3,
- * way 2).
+ * The light's say in the plan — at the spots that asked for it (§7.3).
  *
- * Deliberately narrow. It applies **only where the orientation is
- * actually known** — a facade azimuth from the import — and only when
- * the sun stands square to it or grazes it during a golden window.
- * A spot mapped as a node has no facade, so it gets nothing, and the
- * bonus stays a statement about a building instead of a blanket
- * "the sun shines on this day" that would lift every candidate alike
- * and mean nothing.
+ * **The route is planned by distance.** That is the rule, and this is
+ * its single exception: a spot somebody marked as a *Fotostopp* may
+ * be preferred for standing in good light. Nothing else is: an
+ * unmarked spot scores exactly what it scored before, however
+ * photogenic the sun happens to be that evening.
  *
- * It also does not promise a minute: §7.3 keeps the evening-block
- * suggestion and the in-block ordering back until the horizon profile
+ * Why per spot rather than per trip: a bonus that applies to
+ * everything applies to nothing — it lifts the whole field and
+ * changes only the arithmetic. A mark on one place is a statement
+ * somebody actually made, and the plan can act on it without
+ * pretending to know which buildings anybody came to photograph.
+ *
+ * Two further narrowings, both kept from the blanket version:
+ *
+ *   - It needs a **known orientation** — a facade azimuth from the
+ *     import. Without one there is nothing to say about how the sun
+ *     meets the building, and a bonus would be a guess wearing a
+ *     sentence.
+ *   - It rewards only a **golden** window that stands square to the
+ *     facade or grazes it.
+ *
+ * And it still does not promise a minute: the in-block ordering and
+ * the evening-block suggestion stay back until the horizon profile
  * exists, because a valley is in shadow long before the sun sets. A
- * ranking preference survives that caveat — the worst it can do is
- * prefer a west-facing church to an equally interesting north-facing
- * one.
+ * ranking preference survives that caveat; a time on the plan would
+ * not.
  */
 export function scoreForLight(
   candidates: readonly ScoredCandidate[],
   options: LightScoringOptions,
 ): ScoredCandidate[] {
   if (candidates.length === 0) return [];
+  const marked = candidates.filter((candidate) => candidate.photoStop === true);
+  // Nobody asked the sun anything: the whole calculation is skipped,
+  // including the 1441 samples of a solar day.
+  if (marked.length === 0) return [...candidates];
+
   const windows = lightWindows(
-    options.at ?? candidates[0],
+    options.at ?? marked[0],
     options.date,
     options.utcOffsetMinutes ?? 0,
   );
   if (windows.length === 0) return [...candidates];
 
   return candidates.map((candidate) => {
+    if (candidate.photoStop !== true) return candidate;
     if (candidate.facadeAzimuth === null || candidate.facadeAzimuth === undefined) return candidate;
     const best = spotLight(candidate, windows, candidate.facadeAzimuth)[0];
     if (!best || best.window.kind !== "golden") return candidate;
@@ -116,8 +133,8 @@ export function scoreForLight(
       reasons: [
         ...candidate.reasons,
         best.facade === "frontal"
-          ? "steht am Reisetag im goldenen Licht"
-          : "bekommt am Reisetag streifendes goldenes Licht",
+          ? "Fotostopp: steht am Reisetag im goldenen Licht"
+          : "Fotostopp: bekommt am Reisetag streifendes goldenes Licht",
       ],
     };
   });
