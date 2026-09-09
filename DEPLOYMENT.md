@@ -208,6 +208,26 @@ Two things to know before changing the password on a stack that already ran:
 | `CLIP_PRETRAINED`         | `openai`                 | Pretrained weights |
 | `DINO_MODEL_NAME`         | `facebook/dinov2-base`   | DINOv2 model |
 | `EMBEDDING_DB_PASSWORD`   | `postgres`               | Password for the embedding database |
+| `TRUST_PROXY_HEADERS`     | _(off)_                  | Set to `true` only when a reverse proxy in front of this stack overwrites `X-Forwarded-For` / `X-Real-IP`. See [Forwarded client addresses](#forwarded-client-addresses). |
+| `BACKUP_TRUST_XFF`        | _(off)_                  | Same, for the `/internal/backup/*` CIDR allow-list. |
+
+#### Forwarded client addresses
+
+`X-Forwarded-For` and `X-Real-IP` say whatever the caller puts in them
+unless something in front of the app overwrites them. Both flags above are
+therefore off by default; turn them on only where that is actually the case.
+
+With them off:
+
+- **Login** is limited per account, keyed on the email being attempted. That
+  is the limit an attacker cannot sidestep, whether by rotating a header or
+  by reaching the app directly. The additional per-IP limit simply does not
+  apply while there is no trustworthy address. 20 attempts per account per
+  15 minutes; a successful login clears the count.
+- **The backup endpoints** fall back to the bearer token alone. The CIDR
+  allow-list was already inert for `api.raw` handlers, where Encore reports
+  the peer as `0.0.0.0`, so this changes little in practice — but it stops a
+  caller from naming its own source address to satisfy the check.
 
 ### Example: production setup behind a reverse proxy
 
