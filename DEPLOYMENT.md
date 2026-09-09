@@ -59,6 +59,7 @@ The full list of `DEPLOY_*` overrides:
 | `DEPLOY_HOST_PORT_APP` | `8080` | Must be unique per deployment. |
 | `DEPLOY_HOST_PORT_POSTGRES` | `5432` | dito. |
 | `DEPLOY_HOST_PORT_WATCHTOWER` | `9000` | dito. |
+| `DEPLOY_BIND_WATCHTOWER` | `0.0.0.0` | Host interface the Watchtower update API listens on. All interfaces by default because the release pipeline triggers updates remotely; set to `127.0.0.1` if you deploy another way. See [Watchtower update API](#watchtower-update-api). |
 | `DEPLOY_PG_DATABASE` | `encore` | Application's primary DB. |
 | `DEPLOY_PG_EMBEDDINGS_DATABASE` | `embeddings` | Embedding service's DB. |
 | `DEPLOY_RP_ID` / `DEPLOY_RP_NAME` / `DEPLOY_RP_ORIGIN` / `DEPLOY_APP_URL` | `localhost` / `F4mil App` / `http://localhost:8080` / `http://localhost:8080` | Passkey identity — don't change `RP_ID` after first user registers. |
@@ -123,9 +124,37 @@ internally and not exposed to the outside.
 
 ### Required variables
 
-| Variable          | Description |
-|-------------------|-------------|
-| `ADMIN_PASSWORD`  | Password for the initial admin account |
+| Variable           | Description |
+|--------------------|-------------|
+| `ADMIN_PASSWORD`   | Password for the initial admin account |
+| `WATCHTOWER_TOKEN` | Shared secret for the Watchtower update API. The stack refuses to start while this is empty — see [Watchtower update API](#watchtower-update-api). |
+
+#### Watchtower update API
+
+The `watchtower` container mounts the Docker socket, so anyone who can
+call its HTTP update API can start containers on the host — that is host
+root. Two settings guard it:
+
+- **`WATCHTOWER_TOKEN` is mandatory.** Watchtower accepts *unauthenticated*
+  update calls when its token is empty, so `docker-compose.yml` declares
+  the variable as `${WATCHTOWER_TOKEN:?…}`. An unset or empty value aborts
+  `docker compose up` with an explanatory message instead of bringing the
+  API up unprotected. This is the one variable that deliberately breaks
+  startup rather than defaulting to empty. Generate one with:
+
+  ```bash
+  openssl rand -hex 32
+  ```
+
+  The same value goes into the `WATCHTOWER_TOKEN` secret of whatever
+  triggers deploys (GitHub Actions / GitLab CI), which sends it as
+  `Authorization: Bearer <token>` to `${WATCHTOWER_URL}/v1/update`.
+
+- **`DEPLOY_BIND_WATCHTOWER` limits reachability.** It defaults to
+  `0.0.0.0` because the release pipeline calls the API over the internet.
+  If you deploy by other means (SSH, a runner on the host, a VPN), set it
+  to `127.0.0.1` or a private address so the port is not exposed publicly.
+  Restricting it here is preferable to relying on the token alone.
 
 ### Optional variables
 
