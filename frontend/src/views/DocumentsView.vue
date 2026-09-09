@@ -40,8 +40,9 @@ import { useSort, type SortField } from '../composables/useSort'
 import { DOCUMENT_FILTER_QUERY_KEYS, useDocumentFilter } from '../composables/useDocumentFilter'
 import { replaceQuerySlice, updateRouteQuery, waitForPendingQueryUpdate } from '../utils/routeQueryUpdate'
 import {
-  consumeDocumentListFocus,
-  focusDocumentListItem,
+  consumeListFocus,
+  focusListItem,
+  rememberCollectionListFocus,
   rememberDocumentListFocus,
 } from '../utils/documentListFocus'
 
@@ -224,7 +225,13 @@ async function loadCollections() {
   }
 }
 
-function openCollection(id: number) {
+async function openCollection(id: number) {
+  // Same two steps as openDocument: remember the row so the way back lands on
+  // it, and let a still-pending filter/sort URL write settle first — a write
+  // that resolves after this push would overwrite the history entry the back
+  // arrow returns to, dropping the filter and the position with it.
+  rememberCollectionListFocus(id)
+  await waitForPendingQueryUpdate(router)
   router.push({ name: 'dokumente-mappe', params: { id } })
 }
 
@@ -517,15 +524,22 @@ async function openDocument(doc: DocumentSummary) {
   router.push({ name: 'dokumente-detail', params: { id: doc.id } })
 }
 
+/**
+ * Put the user back on the row they left from — a document or a Sammelmappe.
+ * Returns false when that row is not on screen (deleted, filtered away, on a
+ * page not loaded yet), and the caller falls back to the raw scroll offset.
+ */
 async function restoreFocusToLastOpened(): Promise<boolean> {
-  const id = consumeDocumentListFocus()
-  if (id == null) return false
+  const focus = consumeListFocus()
+  if (!focus) return false
   await nextTick()
   await nextTick()
-  const el = focusDocumentListItem(document, id)
+  const el = focusListItem(document, focus)
   if (!el) return false
-  el.classList.add('document-card--highlight')
-  setTimeout(() => el.classList.remove('document-card--highlight'), 1500)
+  const highlight =
+    focus.kind === 'collection' ? 'collection-row--highlight' : 'document-card--highlight'
+  el.classList.add(highlight)
+  setTimeout(() => el.classList.remove(highlight), 1500)
   return true
 }
 
@@ -836,6 +850,7 @@ onMounted(async () => {
       <button
         v-for="c in visibleCollections"
         :key="c.id"
+        :data-collection-id="c.id"
         type="button"
         class="collection-row"
         @click="openCollection(c.id)"
@@ -1074,6 +1089,17 @@ onMounted(async () => {
 }
 .collection-row:hover {
   background: var(--p-content-hover-background);
+}
+.collection-row--highlight {
+  animation: collection-row-flash 1.5s ease-out;
+}
+@keyframes collection-row-flash {
+  0% {
+    background: color-mix(in srgb, var(--p-primary-color) 22%, transparent);
+  }
+  100% {
+    background: var(--p-content-background);
+  }
 }
 .collection-icon {
   flex: 0 0 auto;
