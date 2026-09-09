@@ -24,6 +24,8 @@ import { pickRegion } from "../osm-admin/region-router";
 import { DEFAULT_DAY, shapeDay, type BlockTemplate, type GroupProfile, type Pace } from "./blocks";
 import { dayShapeOf, validateDayShape } from "./day-shape";
 import { scoreForLight, toCandidates, type ScoredCandidate } from "./candidates";
+import { fairnessOfPlan, votesOfLeg } from "./vote-store";
+import { applyVotes, tally, type Tally } from "./votes";
 import { requireOrganiser } from "./plan-access";
 import {
   createPending,
@@ -460,6 +462,11 @@ async function replanFromStoredSettings(
     // leg, and a re-plan that forgot it would hand back exactly the
     // spots somebody turned down (§5).
     const hidden = await hiddenRefs(plan.id);
+    // The account is read once for the whole trip, before anything is
+    // re-planned: it is about who gave way *so far*, and computing it
+    // per leg from a plan that is half rewritten would let the first
+    // leg's outcome decide the second leg's tie-breaks (§6.1).
+    const fairness = await fairnessOfPlan(plan);
     const perLeg: Array<{ legId: number; days: CreateDayInput[]; pool: ScoredCandidate[] }> = [];
     const awaiting: Array<{ legId: number; awaiting: boolean }> = [];
     const droppedBlocks: DroppedBlockReport[] = [];
@@ -479,6 +486,7 @@ async function replanFromStoredSettings(
           // answers "what should we see", not "how far ahead".
           detailDays: leg.days.filter((d) => d.detailed).length,
           hidden,
+          votes: tally(await votesOfLeg(leg.id), fairness),
         },
       );
       perLeg.push({
@@ -643,6 +651,8 @@ export async function planLegForTrip(
     detailDays: options.detailDays,
     firstDayStartMinutes: options.firstDayStartMinutes,
     hidden: await hiddenRefs(plan.id),
+    // No votes: this plans a leg that does not exist yet, so nobody can
+    // have rated its candidates. They arrive with the next re-plan.
   });
 }
 
@@ -1197,6 +1207,13 @@ async function planLeg(
      * and in somebody's "why here?".
      */
     hidden?: ReadonlySet<string>;
+    /**
+     * What the family said about the candidates (§6.1). Applied after
+     * scoring rather than inside it, so what the search found and what
+     * the people want stay two distinguishable halves of the reason a
+     * spot is here.
+     */
+    votes?: Tally;
   },
 ): Promise<{
   leg: CreateLegInput;
@@ -1240,7 +1257,11 @@ async function planLeg(
     requireProminence: true,
   }).filter((candidate) => !trip.hidden?.has(candidate.osmRef));
 
-  let available = [...scored];
+  // A spot nobody voted on keeps the score the search gave it: silence
+  // is not rejection (§6.1).
+  const rated = trip.votes ? applyVotes(scored, trip.votes) : scored;
+
+  let available = [...rated];
   const days: CreateDayInput[] = [];
   const dropped: Array<DroppedBlock & { dayIndex: number }> = [];
 
