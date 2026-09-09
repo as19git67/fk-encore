@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { currentRequest } from "encore.dev";
-import { requirePermission, getAuthToken } from "./auth-handler";
+import { requirePermission, getAuthToken, MEDIA_SCOPE_PERMISSIONS } from "./auth-handler";
 import { APIError } from "encore.dev/api";
 
 // Note: The authHandler itself and Gateway require the Encore runtime and
@@ -37,6 +37,67 @@ describe("requirePermission", () => {
     expect(() => requirePermission(authData, "Users.Read")).toThrow();
     expect(() => requirePermission(authData, "USERS.READ")).toThrow();
     expect(() => requirePermission(authData, "users.read")).not.toThrow();
+  });
+});
+
+// A token passed as `?token=` is the same session token, but it travels
+// through access logs, browser history and any URL somebody pastes. It used
+// to be worth exactly as much as a bearer header — a leaked image URL was a
+// 15-minute run of the account. requirePermission is the choke point every
+// gated endpoint goes through, so the ceiling is applied there.
+describe("requirePermission — media scope", () => {
+  const adminViaUrl = {
+    userID: "1",
+    permissions: [
+      "module.photos",
+      "photos.view",
+      "photos.delete",
+      "module.documents",
+      "documents.view",
+      "documents.delete",
+      "users.delete",
+      "roles.assign",
+      "data.manage",
+    ],
+    scope: "media" as const,
+  };
+
+  it("still grants what the URL-bearing endpoints need", () => {
+    for (const p of ["module.photos", "photos.view", "module.documents", "documents.view"]) {
+      expect(() => requirePermission(adminViaUrl, p)).not.toThrow();
+    }
+  });
+
+  it("refuses everything else, even though the account holds it", () => {
+    for (const p of ["photos.delete", "documents.delete", "users.delete", "roles.assign", "data.manage"]) {
+      expect(() => requirePermission(adminViaUrl, p)).toThrow(/URL-borne/);
+    }
+  });
+
+  it("does not grant a permission the account lacks", () => {
+    const limited = { userID: "2", permissions: ["module.photos"], scope: "media" as const };
+    expect(() => requirePermission(limited, "photos.view")).toThrow(/missing permission/);
+  });
+
+  it("leaves a header-authenticated caller alone", () => {
+    const viaHeader = { ...adminViaUrl, scope: "full" as const };
+    expect(() => requirePermission(viaHeader, "users.delete")).not.toThrow();
+  });
+
+  it("treats an absent scope as full", () => {
+    const { scope: _dropped, ...noScope } = adminViaUrl;
+    expect(() => requirePermission(noScope, "users.delete")).not.toThrow();
+  });
+
+  it("keeps the media allowlist to read permissions only", () => {
+    // A write permission slipping into this set would quietly undo the
+    // whole thing, so pin the contents rather than only the behaviour.
+    expect([...MEDIA_SCOPE_PERMISSIONS].sort()).toEqual([
+      "documents.view",
+      "module.documents",
+      "module.photos",
+      "photos.view",
+    ]);
   });
 });
 
