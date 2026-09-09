@@ -27,6 +27,7 @@ import {
 import { generateRecapTitle, type RecapTitleContext } from "./recaps-llm-client";
 import { RECAP_THEMES, type RecapTheme } from "./recap-themes";
 import { repairMojibake } from "./text-encoding";
+import { loadPlannedTrips, plannedTitle, tripFor } from "./recaps.planned-trips";
 
 const MIN_PHOTOS_PER_RECAP = 4;
 const MAX_PHOTOS_PER_RECAP = 30;
@@ -1058,6 +1059,11 @@ async function buildTripRecaps(
   let built = 0;
   const builtKeys = new Set<string>();
 
+  // What the planner knows about these days, if anything (§8.7). Loaded
+  // once for the user rather than per cluster: it is one small query and
+  // most people have a handful of planned trips.
+  const planned = await loadPlannedTrips(userId);
+
   for (const cluster of clusters) {
     const { cover, rankedIds, reserveIds } = await curatePhotos(cluster.photos);
     const startIso = cluster.start.toISOString().slice(0, 10);
@@ -1076,20 +1082,27 @@ async function buildTripRecaps(
     );
     const score = 40 + Math.min(cluster.photos.length, 40) + durationDays;
     const fallbackSubtitle = tripSubtitle(cluster);
-    const resolved = await resolveTitle({
-      userId,
-      dedupKey,
-      fallback: { title: tripTitle(cluster), subtitle: fallbackSubtitle },
-      ctx: {
-        kind: "trip",
-        place_city: isGenericPlaceName(cluster.dominantCity)
-          ? null
-          : cluster.dominantCity,
-        place_country: cluster.dominantCountry,
-        date_range: fallbackSubtitle,
-        duration_days: durationDays,
-      },
-    });
+    // A trip somebody planned brings its own name, and a name somebody
+    // typed beats one a model invents — so the planned case skips the
+    // language model rather than asking it to improve on the answer.
+    const plan = tripFor(cluster, planned);
+    const fromPlan = plan ? plannedTitle(plan) : null;
+    const resolved = fromPlan !== null
+      ? { title: fromPlan, subtitle: fallbackSubtitle, llmUsed: false }
+      : await resolveTitle({
+        userId,
+        dedupKey,
+        fallback: { title: tripTitle(cluster), subtitle: fallbackSubtitle },
+        ctx: {
+          kind: "trip",
+          place_city: isGenericPlaceName(cluster.dominantCity)
+            ? null
+            : cluster.dominantCity,
+          place_country: cluster.dominantCountry,
+          date_range: fallbackSubtitle,
+          duration_days: durationDays,
+        },
+      });
 
     await upsertRecap({
       userId,
@@ -1110,6 +1123,9 @@ async function buildTripRecaps(
         // "von zuhause zum Ziel" map intro from these.
         ...(home ? { home_lat: home.lat, home_lon: home.lon } : {}),
         duration_days: durationDays,
+        // The way back from a memory to the plan it came from — the
+        // trip screen reads this to say "dieser Rückblick gehört dazu".
+        ...(plan ? { trip_plan_id: plan.planId } : {}),
         ...(resolved.llmUsed ? { llm_title: true } : {}),
       },
       photoIds: rankedIds,
