@@ -8,7 +8,11 @@ import InputText from 'primevue/inputtext'
 import ToggleSwitch from 'primevue/toggleswitch'
 import DateRangePresets from './DateRangePresets.vue'
 import { toLocalIsoDate, parseLocalDate } from '../utils/dateFormat'
-import type { DocumentFilter } from '../composables/useDocumentFilter'
+import {
+  effectiveCollectionScope,
+  type DocumentCollectionScope,
+  type DocumentFilter,
+} from '../composables/useDocumentFilter'
 import type { DocumentCategory, SubjectPerson } from '../api/documents'
 import { buildCategoryOptions, filterOptions, type SlugOption } from '../utils/categoryOptions'
 
@@ -142,32 +146,38 @@ const subjectOptions = computed<Array<{ label: string; value: number | null }>>(
 ])
 
 /**
- * The Sammelmappen facet as one control: "alle" (no opinion), "keine" (only
- * documents outside every folder — the way to thin the list out), or one named
- * folder. A named folder supersedes the yes/no question, so they share a
- * dropdown rather than fighting each other as two.
+ * The Sammelmappen facet as one control.
+ *
+ * The default leaves bundled documents out, because the folder row above the
+ * list already stands for them; this control is where that is turned off
+ * ("Auch in Sammelmappen") or inverted, and where one folder can be singled
+ * out. A named folder supersedes the scope, so they share one dropdown rather
+ * than fighting each other as two.
  */
 const collectionOptions = computed<Array<{ label: string; value: string }>>(() => [
-  { label: 'Alle Dokumente', value: '' },
-  { label: 'Nur ohne Sammelmappe', value: 'none' },
-  { label: 'Nur in einer Sammelmappe', value: 'any' },
-  ...props.collections.map((c) => ({ label: c.title, value: `id:${c.id}` })),
+  { label: 'Ohne Sammelmappen (Standard)', value: 'without' },
+  { label: 'Auch in Sammelmappen', value: 'with' },
+  { label: 'Nur in Sammelmappen', value: 'only' },
+  ...props.collections.map((c) => ({ label: `Mappe: ${c.title}`, value: `id:${c.id}` })),
 ])
 
 function collectionSelection(f: DocumentFilter): string {
   if (f.collectionId) return `id:${f.collectionId}`
-  if (f.inCollection === true) return 'any'
-  if (f.inCollection === false) return 'none'
-  return ''
+  return effectiveCollectionScope(f)
 }
 
 function applyCollectionSelection(value: string): DocumentFilter {
   if (value.startsWith('id:')) {
-    return { ...local.value, collectionId: Number(value.slice(3)), inCollection: undefined }
+    return { ...local.value, collectionId: Number(value.slice(3)), collectionScope: undefined }
   }
-  if (value === 'any') return { ...local.value, collectionId: undefined, inCollection: true }
-  if (value === 'none') return { ...local.value, collectionId: undefined, inCollection: false }
-  return { ...local.value, collectionId: undefined, inCollection: undefined }
+  const scope = value as DocumentCollectionScope
+  return {
+    ...local.value,
+    collectionId: undefined,
+    // The default is stored as "unset" so a filter that was never touched
+    // stays indistinguishable from one explicitly reset to it.
+    collectionScope: scope === 'without' ? undefined : scope,
+  }
 }
 
 const documentTypeOptions = computed<Array<{ label: string; value: string }>>(() => [
