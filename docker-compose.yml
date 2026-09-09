@@ -221,7 +221,11 @@ services:
       BACKUP_AUTO_STOP_MS: ${BACKUP_AUTO_STOP_MS:-1800000}
       BACKUP_TOKEN: ${BACKUP_TOKEN:-}
       BACKUP_ALLOW_CIDRS: ${BACKUP_ALLOW_CIDRS:-}
-      BACKUP_TRUST_XFF: ${BACKUP_TRUST_XFF:-true}
+      BACKUP_TRUST_XFF: ${BACKUP_TRUST_XFF:-}
+      # X-Forwarded-For / X-Real-IP are client-supplied unless a reverse proxy
+      # overwrites them, so the login rate limiter ignores them by default.
+      # Set to "true" only when this stack sits behind a proxy that does.
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-}
