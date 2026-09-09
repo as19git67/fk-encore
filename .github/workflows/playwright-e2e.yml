@@ -144,6 +144,18 @@ jobs:
       - name: Install frontend dependencies
         run: npm --prefix frontend install --legacy-peer-deps
 
+      # `--with-deps` runs `apt-get update` over every source the runner
+      # image has configured, and one of them is Google's Chrome repo —
+      # which periodically serves a Packages.gz that does not match the
+      # hashes in its own Release file. apt then fails the whole update
+      # ("Hash Sum mismatch"), Playwright reports "Failed to install
+      # browsers", and the job dies before a single test runs. We install
+      # chromium from Playwright's own download and its libraries from
+      # Ubuntu, so that source is not needed here at all; dropping it
+      # removes the dependency on a third party's index being consistent.
+      - name: Drop the Chrome apt source (not needed, served inconsistently)
+        run: sudo rm -f /etc/apt/sources.list.d/google-chrome.list
+
       # No pre-installed browser (see the "NOT running inside..." comment
       # above) — install chromium + OS deps matching the version pinned in
       # the frontend lockfile.

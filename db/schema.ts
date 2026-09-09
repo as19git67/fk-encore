@@ -3136,3 +3136,36 @@ export const ideaPoolShares = pgTable(
     index("idea_pool_shares_user_idx").on(table.user_id),
   ]
 );
+
+/**
+ * Which documents belong to which trip (§3.4, migration 0180).
+ *
+ * A link and nothing else: the document keeps living in the documents
+ * service under its own visibility rules, and this table stores no copy
+ * of its text, title or file. `role` is what the paper does for the
+ * trip — lodging | transport | rental | ticket — proposed by
+ * trip-planner/doc-hints.ts and correctable by hand.
+ */
+export const tripPlanDocuments = pgTable(
+  "trip_plan_documents",
+  {
+    id: serial("id").primaryKey(),
+    plan_id: integer("plan_id")
+      .notNull()
+      .references(() => tripPlans.id, { onDelete: "cascade" }),
+    document_id: integer("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    role: text("role").notNull().default("ticket"),
+    note: text("note"),
+    linked_by: integer("linked_by").references(() => users.id, { onDelete: "set null" }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("trip_plan_documents_plan_document_key").on(table.plan_id, table.document_id),
+    index("trip_plan_documents_plan_idx").on(table.plan_id),
+    index("trip_plan_documents_document_idx").on(table.document_id),
+  ]
+);
