@@ -24,9 +24,16 @@
  * because OSM does not know which church is baroque, and an interest
  * that silently matches nothing is worse than one that does not exist.
  *
- * The list is deliberately short. Nine choices somebody reads in ten
- * seconds beat forty that need study, and every entry earns its place
- * by being a decision that changes which spots a day gets.
+ * The list stays short on purpose: a handful of choices somebody reads
+ * in ten seconds beats forty that need study, and every entry earns its
+ * place by being a decision that changes which spots a day gets. It
+ * grew from nine to fifteen when the import was widened — landscape,
+ * gardens, zoos, markets, baths, wineries — and each of those came with
+ * its own tags rather than being carved out of an existing line, except
+ * for two that were: "Denkmäler und Gedenkorte" left "Kunst im Freien",
+ * because whoever ticks sculpture rarely means war memorials, and
+ * "Türme und Aussichtsbauten" is now sayable without ticking castles
+ * and industrial history for it.
  */
 
 export interface Interest {
@@ -90,7 +97,21 @@ export const INTERESTS: readonly Interest[] = [
   {
     id: "art",
     label: "Kunst im Freien",
-    kinds: ["tourism=artwork", "historic=monument", "historic=memorial", "man_made=obelisk"],
+    kinds: ["tourism=artwork"],
+    categories: [],
+  },
+  {
+    // Split out of "Kunst im Freien": whoever ticks sculpture rarely
+    // means war memorials, and the map tells the two apart cleanly.
+    id: "monuments",
+    label: "Denkmäler und Gedenkorte",
+    kinds: ["historic=monument", "historic=memorial", "man_made=obelisk"],
+    categories: [],
+  },
+  {
+    id: "towers",
+    label: "Türme und Aussichtsbauten",
+    kinds: ["man_made=tower", "historic=tower", "man_made=lighthouse"],
     categories: [],
   },
   {
@@ -101,9 +122,41 @@ export const INTERESTS: readonly Interest[] = [
   },
   {
     id: "nature",
-    label: "Natur und Parks",
-    kinds: ["leisure=park", "leisure=playground"],
+    label: "Parks und Gärten",
+    kinds: ["leisure=park", "leisure=playground", "leisure=garden"],
     categories: ["outdoors"],
+  },
+  {
+    // The landscape half of what the import now carries. Only named
+    // features reach the table, so this cannot fill a day with ponds.
+    id: "landscape",
+    label: "Berge, Seen und Strände",
+    kinds: ["natural=peak", "natural=water", "natural=beach", "leisure=nature_reserve"],
+    categories: [],
+  },
+  {
+    id: "zoo",
+    label: "Zoos und Tierparks",
+    kinds: ["tourism=zoo"],
+    categories: ["zoo"],
+  },
+  {
+    id: "market",
+    label: "Märkte",
+    kinds: ["amenity=marketplace"],
+    categories: ["market"],
+  },
+  {
+    id: "bath",
+    label: "Bäder und Thermen",
+    kinds: ["leisure=water_park", "amenity=public_bath"],
+    categories: ["bath"],
+  },
+  {
+    id: "producers",
+    label: "Weingüter und Brauereien",
+    kinds: ["craft=winery", "craft=brewery"],
+    categories: ["producers"],
   },
   {
     id: "stage",

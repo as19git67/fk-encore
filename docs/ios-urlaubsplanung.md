@@ -2000,6 +2000,39 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    zusätzlichen Tag auseinandergelaufen, und der Fehler wäre wieder ein
    stummer gewesen.
 
+   **Erweitert: von neun auf fünfzehn, davon sechs mit Neuimport.** Zwei
+   Einträge ließen sich sofort trennen, weil die Tags längst da waren:
+   „Denkmäler und Gedenkorte" (`historic=monument|memorial`, `man_made=obelisk`)
+   verlässt „Kunst im Freien" — wer Skulpturen ankreuzt, meint selten
+   Kriegerdenkmäler —, und „Türme und Aussichtsbauten" (`man_made=tower`,
+   `historic=tower`, `man_made=lighthouse`) ist jetzt sagbar, ohne dafür Burgen
+   und Industriegeschichte mit anzukreuzen.
+
+   Die übrigen vier — „Berge, Seen und Strände", „Zoos und Tierparks",
+   „Märkte", „Bäder und Thermen", „Weingüter und Brauereien", dazu Gärten in
+   „Parks und Gärten" — hingen an einer **Filtererweiterung**
+   (`geo/src/osm2pgsql.lua`): neu `natural=peak|water|beach`,
+   `craft=winery|brewery`, `leisure=garden|nature_reserve|water_park`,
+   `amenity=marketplace|public_bath`, `tourism=zoo`. Wie §13.0 verlangt, in
+   **einem** Zug — jede Filteränderung erzwingt einen Neuimport pro Region.
+
+   **Neu dabei ist eine Regel, die es vorher nicht brauchte: Name erforderlich.**
+   Die alten Filter nehmen alles, was sie treffen, benannt oder nicht, und das
+   ist für sie richtig — eine namenlose Kapelle ist immer noch ein Ziel.
+   Für Landschaft und Alltagsorte wäre es falsch: `natural=water` allein zöge
+   jeden Weiher Bayerns herein, und um keinen davon plant jemand einen
+   Nachmittag. `poi_name_required` gilt deshalb für alle neu aufgenommenen
+   Werte; ein Name ist der billigste verfügbare Beleg, dass ein Ort ein Ort
+   ist. Ein Drift-Test hält fest, dass dort nur Werte stehen, die der Import
+   auch wirklich trifft — ein veralteter Eintrag wäre unsichtbar.
+
+   Die neuen Kategorien tragen ihre eigene Verweildauer (`zoo` 180 Minuten,
+   `bath` 120, `producers` 60, `market` 40): Ein Zoo ist kein Zwischenstopp,
+   und eine Therme sind keine zwanzig Minuten — das falsch anzusetzen ist der
+   Weg, wie ein Nachmittag drei Dinge bekommt, die nicht hineinpassen. Der
+   Foto-Matcher sieht von alldem nichts (§10.2): Ein See unter den
+   Foto-Kandidaten verdrängt ein Wahrzeichen.
+
    Dabei fiel auf, dass die Etappe ihren **Suchradius gar nicht speicherte**
    (ebenso wenig den Tagesbeginn). Ein Neuplanen hätte still auf die Vorgaben
    zurückgegriffen — ein anderes Gebiet als das gewählte. Migration 0165 legt
