@@ -345,27 +345,29 @@ export async function seed(db: any): Promise<void> {
   const adminName = process.env.ADMIN_NAME || "Admin";
   const adminPassword = process.env.ADMIN_PASSWORD;
 
+  // Skipping the admin must not skip the rest of the seed: everything below
+  // is unrelated to it, and an early return here left a deployment without
+  // ADMIN_PASSWORD missing the AI system user too.
   if (!adminPassword) {
     console.warn(
       "[seed] ADMIN_PASSWORD not set — skipping initial admin user creation. " +
         "Make sure to set it in your .env file."
     );
-    return;
-  }
+  } else {
+    const existingUser = (await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.email, adminEmail)))[0];
 
-  const existingUser = (await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.email, adminEmail)))[0];
+    if (!existingUser) {
+      const passwordHash = hashSync(adminPassword, 10);
+      const result = (await db.insert(schema.users)
+        .values({ email: adminEmail, name: adminName, password_hash: passwordHash })
+        .returning({ id: schema.users.id }))[0] as { id: number } | undefined;
 
-  if (!existingUser) {
-    const passwordHash = hashSync(adminPassword, 10);
-    const result = (await db.insert(schema.users)
-      .values({ email: adminEmail, name: adminName, password_hash: passwordHash })
-      .returning({ id: schema.users.id }))[0] as { id: number } | undefined;
+      if (adminRole && result) {
+        await db.insert(schema.userRoles).values({ user_id: result.id, role_id: adminRole.id });
+      }
 
-    if (adminRole && result) {
-      await db.insert(schema.userRoles).values({ user_id: result.id, role_id: adminRole.id });
+      console.log(`[seed] Created admin user: ${adminEmail}`);
     }
-
-    console.log(`[seed] Created admin user: ${adminEmail}`);
   }
 
   // --- 8. AI system user (virtual participant for quality-based curation) ---
