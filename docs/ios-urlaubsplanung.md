@@ -3073,6 +3073,35 @@ Zwei Eigenschaften, die ihn von einer Merkliste unterscheiden:
   Liste ist, wird gelesen, bis sie zu lang ist, und danach nie wieder. Der
   Nutzen entsteht, wenn sie sich **von selbst meldet**.
 
+**Umgesetzt (der Vorrat selbst):** `POST /trip-planner/ideas`,
+`GET /trip-planner/ideas`, `POST …/ideas/remove` sowie `…/ideas/share` und
+`…/ideas/unshare`, dazu Migration 0179 (`idea_pool`, `idea_pool_shares`).
+
+Der Weg hinein ist **derselbe wie bei einem Fund** (§9.2) und nicht ein
+zweiter: Koordinate, optional Name, Notiz, Herkunft; der OSM-Eintrag wird
+gesucht, und wenn keiner passt, wird die eine erlaubte Frage gestellt (wie
+lange?), statt eine Dauer zu erfinden. Eine zweite Erwähnung desselben Orts
+wird zusammengeführt — und ergänzt nur, was sie mitbringt: Was beim ersten Mal
+jemand geschrieben hat, überschreibt sie nie.
+
+**Geteilt** heißt hier wörtlich eine Liste: `idea_pool_shares` hat dieselbe
+Form wie die Teilnehmerliste einer Reise (§6.2) — Personen, kein
+Rechte-Raster —, und jeder Eintrag trägt, wer ihn hineingelegt hat. Ein
+Vorrat, in den niemand hineingelassen wurde, existiert für Fremde nicht
+(`not_found`, nicht `permission_denied`): Was einem nicht gehört, ist auch
+nicht zu wissen, dass es das gibt.
+
+Die Spalten für die **Nähe-Regel** (`last_suggested_at`, `dismissed_count`)
+und das **Gültigkeitsfenster** für Termine (§20.4) liegen schon in der
+Tabelle, damit „einmal gemeldet" haltbar ist, wenn §20.2 gebaut wird —
+gemerkt statt gelöscht, wie §7.1 ein „nein" merkt.
+
+**Noch offen aus §20.2:** dass der Vorrat sich von selbst meldet, der
+Tourvorschlag aus mehreren nahen Einträgen und die Gebietssuche („such uns
+etwas im Umkreis von 50 km"). Das ist der Teil, der aus der Merkliste einen
+Tagesausflugsplaner macht — und er ruft `solveDay` mit dem Standort als Anker
+auf, statt etwas Neues zu erfinden.
+
 ### 20.2 Der eigentliche Mechanismus: der Vorrat meldet sich
 
 Die Maschinerie dafür steht bereits vollständig. §7.1 überwacht Regionen um die
