@@ -37,6 +37,7 @@ import "./fixpoint-edit";
 import "./interest-list";
 import "./day-blocks";
 import "./bundle";
+import "./readiness";
 
 import { everyMs, schedule, startLocalCron } from "../lib/local-cron";
 import { tickFillPending } from "./fill-pending";

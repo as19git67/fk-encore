@@ -94,6 +94,13 @@ struct TripPlanDayView: View {
                         } label: {
                             Label("Mitreisende", systemImage: "person.2")
                         }
+                        // The evening before (§8.6): what is still
+                        // cheap to fix tonight, and what to pack.
+                        NavigationLink {
+                            TripReadinessView(viewModel: viewModel)
+                        } label: {
+                            Label("Reisebereit?", systemImage: "checklist")
+                        }
                         // Taking the plan along without a connection
                         // (§3.9) — asked for, never automatic.
                         NavigationLink {
