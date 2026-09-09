@@ -18,12 +18,13 @@ struct TripView: View {
     @State private var errorMessage: String?
     @State private var showError = false
     /// A planned trip (§8.1) whose dates say it is happening today.
-    /// Loaded so the two halves of "Reise" can find each other: the one
-    /// you planned and the one your photos go into.
-    @State private var runningPlan: TripPlanSummary?
-    /// The planned trip the toolbar link should open, when the tap came
-    /// from the banner.
-    @State private var openPlans = false
+    /// Held centrally so the tab bar and this screen share one answer
+    /// (`TripRunningPlan`).
+    @State private var running = TripRunningPlan.shared
+    /// The running plan's day, opened once per launch — the day you are
+    /// standing in is what "Reise" means while it is happening (§8.5).
+    @State private var openPlanId: Int?
+    @State private var didOpenRunningPlan = false
 
     var body: some View {
         Group {
@@ -57,7 +58,9 @@ struct TripView: View {
         } message: {
             Text(errorMessage ?? "")
         }
-        .navigationDestination(isPresented: $openPlans) { TripPlansListView() }
+        .navigationDestination(item: $openPlanId) { planId in
+            TripPlanDayView(viewModel: TripPlannerViewModel(planId: planId))
+        }
         .onAppear { consumeStartSuggestionHandoff() }
         .task { await loadRunningPlan() }
         .onChange(of: scenePhase) { _, newPhase in
@@ -76,20 +79,13 @@ struct TripView: View {
     /// moment a flight moved.
     @MainActor
     private func loadRunningPlan() async {
-        guard !store.isActive else {
-            runningPlan = nil
-            return
-        }
-        do {
-            let response: ListTripPlansResponse =
-                try await APIClient.shared.get("/trip-planner/plans")
-            let today = Date()
-            runningPlan = response.plans.first { $0.schedule(on: today).isRunning }
-        } catch {
-            // Silent: this is an offer, not a feature. A planner that
-            // cannot be reached must not put an error on the trip tab.
-            runningPlan = nil
-        }
+        await running.refresh()
+        // Straight into the day it is. The plan screen is where the
+        // running trip actually happens now that "Unterwegs" is part of
+        // it — once per launch, so it never fights a tap.
+        guard !didOpenRunningPlan, let plan = running.plan else { return }
+        didOpenRunningPlan = true
+        openPlanId = plan.id
     }
 
     /// Opens the prefilled start sheet when the user chose "Trip starten" on
@@ -108,7 +104,7 @@ struct TripView: View {
             if let suggestion = autoStart.pendingSuggestion {
                 autoStartBanner(suggestion)
                 Divider()
-            } else if let runningPlan {
+            } else if let runningPlan = running.plan {
                 plannedTripBanner(runningPlan)
                 Divider()
             }
@@ -156,7 +152,7 @@ struct TripView: View {
                     showStartSheet = true
                 }
                 .buttonStyle(.borderedProminent)
-                Button("Plan öffnen") { openPlans = true }
+                Button("Plan öffnen") { openPlanId = plan.id }
                     .buttonStyle(.bordered)
                 Spacer()
             }

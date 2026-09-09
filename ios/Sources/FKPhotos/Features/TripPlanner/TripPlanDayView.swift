@@ -3,6 +3,17 @@ import SwiftUI
 /// One day of a plan: a card per block, spots as compact rows with the
 /// way between them, and a utilisation line underneath (§8.3).
 ///
+/// **The one screen for a day**, planning and walking alike. There used
+/// to be a second one — "Unterwegs" (§8.5) — and the split turned out
+/// to be the wrong seam: half the actions lived here and half there, so
+/// using the planner meant switching back and forth for tasks that
+/// belong to the same afternoon. §8.3 and §8.5 describe two *modes* of
+/// one day, not two screens with different abilities, so the day is one
+/// screen that knows whether you are standing in it: while a trip runs
+/// the current block is marked, carries "Umplanen", and every stop
+/// offers what you reach for on the spot — done, skipped, and the way
+/// there.
+///
 /// Three things the concept asks for and this screen keeps:
 ///
 ///   - a block is a label and a budget, never a timetable — the rows
@@ -13,6 +24,10 @@ import SwiftUI
 ///     interrogate is a plan nobody trusts (§3.8).
 struct TripPlanDayView: View {
     @State private var showSettings = false
+    /// Which map app gets the handoff, when the traveller has not
+    /// settled on one (§9.1).
+    @State private var mapsChoice: TripMapsChoice?
+    @AppStorage(TripMapsPreference.key) private var mapsPreference: String = TripMapsApp.apple.rawValue
     /// The stop whose "which block?" sheet is open, with the block it
     /// stands in now.
     @State private var moving: TripStopMove?
@@ -49,16 +64,6 @@ struct TripPlanDayView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        // Not "Heute": the screen is not a date, it is
-                        // the one you use while you are actually out —
-                        // the block you are in, what is left of it, and
-                        // the big "umplanen" (§8.5). A sun said nothing
-                        // about any of that.
-                        NavigationLink {
-                            TripTodayView(viewModel: viewModel)
-                        } label: {
-                            Label("Unterwegs", systemImage: "figure.walk")
-                        }
                         // Everything this leg could do, and why (§5).
                         NavigationLink {
                             TripPoolView(viewModel: viewModel, legIndex: leg.position)
@@ -97,6 +102,17 @@ struct TripPlanDayView: View {
                         Label("Mehr", systemImage: "ellipsis.circle")
                     }
                 }
+            }
+        }
+        .confirmationDialog(
+            "Navigation öffnen mit",
+            isPresented: Binding(get: { mapsChoice != nil }, set: { if !$0 { mapsChoice = nil } }),
+            titleVisibility: .visible,
+        ) {
+            if let choice = mapsChoice {
+                Button("Apple Karten") { openMaps(choice, with: .apple) }
+                Button("Google Maps") { openMaps(choice, with: .google) }
+                Button("Abbrechen", role: .cancel) {}
             }
         }
         .sheet(item: $moving) { move in
@@ -552,9 +568,19 @@ struct TripPlanDayView: View {
     // MARK: - Block cards
 
     private func blockCard(_ block: TripBlock) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let isCurrent = currentBlockId == block.id
+        return VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text(block.label).font(.headline)
+                if isCurrent {
+                    // Where the group is right now — the one thing
+                    // "Unterwegs" did that the day plan could not say.
+                    Text("jetzt")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.tint.opacity(0.15), in: .capsule)
+                }
                 Spacer()
                 Text("ca. \(TripClock.duration(block.usedMinutes)) von \(TripClock.duration(block.budgetMinutes))")
                     .font(.caption)
@@ -587,10 +613,23 @@ struct TripPlanDayView: View {
 
             if block.isMeal {
                 // A meal block holds time and a rough area, not a venue:
-                // the planner never picks a restaurant (§10.3).
-                Label("Zeit fürs Essen — der Planer sucht kein Lokal aus.", systemImage: "fork.knife")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                // the planner never picks a restaurant (§10.3). Finding
+                // somewhere is the second stage, and it happens on the
+                // spot rather than at the planning table.
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Zeit fürs Essen — der Planer sucht kein Lokal aus.",
+                          systemImage: "fork.knife")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    if let leg = viewModel.leg {
+                        NavigationLink {
+                            TripFoodListView(position: leg.anchor)
+                        } label: {
+                            Label("Essen in der Nähe", systemImage: "fork.knife.circle")
+                                .font(.footnote)
+                        }
+                    }
+                }
             } else if block.stops.isEmpty {
                 // "Nichts geplant" on its own is a dead end: the pool
                 // next door is full of things that would fit, and until
@@ -616,11 +655,72 @@ struct TripPlanDayView: View {
                     }
                     stopRow(stop, in: block)
                 }
+                if let leg = viewModel.leg {
+                    Button {
+                        // The whole block at once: Apple takes an array
+                        // of destinations and Google knows waypoints, so
+                        // the morning walks over in one piece rather
+                        // than a leg at a time.
+                        offerMaps(.block(block.stops.map(\.coordinate), mode: leg.transportMode))
+                    } label: {
+                        Label("Ganzen Block in Karten öffnen",
+                              systemImage: "arrow.triangle.turn.up.right.diamond")
+                            .font(.footnote)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
+
+            if isCurrent { replanRow() }
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.3), in: .rect(cornerRadius: 14))
+        .background(isCurrent ? AnyShapeStyle(.tint.opacity(0.08)) : AnyShapeStyle(.quaternary.opacity(0.3)),
+                    in: .rect(cornerRadius: 14))
+        .overlay {
+            if isCurrent {
+                RoundedRectangle(cornerRadius: 14).stroke(.tint.opacity(0.4), lineWidth: 1)
+            }
+        }
+    }
+
+    /// "Umplanen", where it belongs: on the block you are standing in
+    /// (§8.5). It was the big button of a screen of its own; the button
+    /// was never the point, the block was.
+    @ViewBuilder
+    private func replanRow() -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Divider()
+            Button {
+                Task { await viewModel.redistributeNow() }
+            } label: {
+                if viewModel.isRedistributing {
+                    ProgressView().frame(maxWidth: .infinity)
+                } else {
+                    Label("Ab hier umplanen", systemImage: "arrow.triangle.2.circlepath")
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.bordered)
+            .disabled(viewModel.isRedistributing)
+
+            if let reason = viewModel.redistributeBlockedReason {
+                // Why it did not run, in words that say what to do about
+                // it — never a silent no-op.
+                Text(reason).font(.footnote).foregroundStyle(.secondary)
+            }
+            if !viewModel.displaced.isEmpty {
+                // What lost its place. A count would not be reviewable;
+                // the names are (§5).
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Zurück in den Vorrat:").font(.footnote.weight(.semibold))
+                    ForEach(viewModel.displaced) { stop in
+                        Text("· \(stop.displayName)").font(.footnote)
+                    }
+                }
+                .foregroundStyle(.secondary)
+            }
+        }
     }
 
     private func travelRow(_ travel: TripTravel) -> some View {
@@ -658,8 +758,8 @@ struct TripPlanDayView: View {
                         light: viewModel.light?.hint(for: stop.osmRef),
                         shelter: viewModel.forecast?.shelter(for: stop.osmRef),
                     ) {
-                        // The same section "Unterwegs" and the pool
-                        // show: one decision, one way of making it.
+                        // The same section the pool shows: one
+                        // decision, one way of making it.
                         Section {
                             Button {
                                 moving = TripStopMove(stop: stop, blockId: block.id)
@@ -675,7 +775,8 @@ struct TripPlanDayView: View {
                             // "Not this one, and not next time either"
                             // (§5): the way to stop the search from
                             // proposing a place that is simply not
-                            // wanted. Reversible in the trip settings.
+                            // wanted. Reversible under "Ausgeblendet"
+                            // in the pool.
                             Button(role: .destructive) {
                                 Task { await viewModel.hide(osmRef: stop.osmRef) }
                             } label: {
@@ -701,6 +802,54 @@ struct TripPlanDayView: View {
                 if stop.stopStatus == .done {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                 }
+                // Routing somewhere is only useful once you are
+                // travelling. Planning at the kitchen table, the same
+                // tap should answer "where is that?" — a route from
+                // home to a café you will walk to next month is a
+                // number nobody wants.
+                Button {
+                    if isTravelling {
+                        offerMaps(.single(stop.coordinate,
+                                          mode: viewModel.leg?.transportMode ?? .foot))
+                    } else {
+                        TripMapsOpen.pin(stop.coordinate, name: stop.name,
+                                         using: TripMapsPreference.load())
+                    }
+                } label: {
+                    Image(systemName: isTravelling
+                          ? "arrow.triangle.turn.up.right.circle"
+                          : "mappin.circle")
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isTravelling
+                                    ? "Navigation zu \(stop.displayName)"
+                                    : "\(stop.displayName) auf der Karte zeigen")
+                // Ticking a spot off is the gesture of the day itself
+                // (§8.5) — a menu rather than a swipe, because these
+                // rows live in cards, not in a list.
+                Menu {
+                    Button {
+                        Task { await viewModel.mark(stop, as: .done) }
+                    } label: {
+                        Label("Erledigt", systemImage: "checkmark")
+                    }
+                    Button {
+                        Task { await viewModel.mark(stop, as: .skipped) }
+                    } label: {
+                        Label("Übersprungen", systemImage: "xmark")
+                    }
+                    if stop.stopStatus != .planned {
+                        Button {
+                            Task { await viewModel.mark(stop, as: .planned) }
+                        } label: {
+                            Label("Doch wieder offen", systemImage: "arrow.uturn.backward")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Was mit \(stop.displayName) ist")
                 if !reasons.isEmpty {
                     Button {
                         viewModel.toggleReasons(for: stop.osmRef)
@@ -725,5 +874,38 @@ struct TripPlanDayView: View {
             }
         }
         .animation(.easeInOut(duration: 0.15), value: viewModel.expandedReasons)
+    }
+
+    // MARK: - While you are out
+
+    /// Which block the clock says the group is in — marked only while a
+    /// trip is actually running.
+    ///
+    /// Trip mode is what knows whether you are travelling: it is the
+    /// thing that gets started when you set off. Guessing from dates
+    /// would light up "jetzt" on a Tuesday afternoon in the planning
+    /// month, which is exactly the claim §15.3 warns against.
+    private var currentBlockId: String? {
+        guard isTravelling, let day = viewModel.day, viewModel.isToday else { return nil }
+        return TripDayTimeline.block(in: day, at: TripDayTimeline.minutesOfDay(Date()))?.id
+    }
+
+    private var isTravelling: Bool { TripStore.shared.isActive }
+
+    private func offerMaps(_ choice: TripMapsChoice) {
+        let availability = TripMapsAvailability(
+            preference: TripMapsApp(rawValue: mapsPreference) ?? .apple,
+            googleAppInstalled: TripMapsOpen.googleInstalled,
+        )
+        if let app = availability.resolved {
+            TripMapsOpen.route(choice, using: app)
+        } else {
+            mapsChoice = choice
+        }
+    }
+
+    private func openMaps(_ choice: TripMapsChoice, with app: TripMapsApp) {
+        mapsChoice = nil
+        TripMapsOpen.route(choice, using: app)
     }
 }
