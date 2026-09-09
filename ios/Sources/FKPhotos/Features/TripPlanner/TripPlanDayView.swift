@@ -94,6 +94,13 @@ struct TripPlanDayView: View {
                         } label: {
                             Label("Mitreisende", systemImage: "person.2")
                         }
+                        // Taking the plan along without a connection
+                        // (§3.9) — asked for, never automatic.
+                        NavigationLink {
+                            TripOfflineView(viewModel: viewModel)
+                        } label: {
+                            Label("Unterwegs ohne Netz", systemImage: "wifi.slash")
+                        }
                         Divider()
                         Button {
                             showSettings = true
@@ -206,6 +213,7 @@ struct TripPlanDayView: View {
     private func content(day: TripDay, leg: TripLeg) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                offlineBanner
                 legHeader(leg)
                 if leg.isAwaitingRegion {
                     awaitingRegionCard(leg)
@@ -230,6 +238,32 @@ struct TripPlanDayView: View {
                 if (viewModel.plan?.legs.count ?? 1) > 1 { legPicker }
                 dayPicker(leg)
             }
+        }
+    }
+
+    // MARK: - Offline
+
+    /// What is on screen, and how old it is (§3.9).
+    ///
+    /// The plan itself needs no apology — a day made of blocks is as
+    /// true in a tunnel as it was in the hotel. What needs saying is
+    /// the age, and the two things that are not there: the map and the
+    /// weather (§14). Anything else would let somebody wait for a
+    /// forecast that is never coming.
+    @ViewBuilder
+    private var offlineBanner: some View {
+        if let since = viewModel.offlineSince {
+            VStack(alignment: .leading, spacing: 4) {
+                Label("Offline — \(TripOfflineWording.stamp(since))", systemImage: "wifi.slash")
+                    .font(.subheadline.weight(.semibold))
+                Text("Der Plan liegt auf dem Gerät. Karte und Wetter fehlen, und Änderungen "
+                     + "brauchen eine Verbindung.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary.opacity(0.3), in: .rect(cornerRadius: 14))
         }
     }
 

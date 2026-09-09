@@ -107,6 +107,37 @@ Weil grob geplant wird, ist auch der Offline-Plan vollwertig — es fehlen keine
 Minutenangaben, die es ohnehin nie gab. Google Maps Offline-Karten können
 navigieren, aber nicht planen.
 
+**Umgesetzt:** `GET /trip-planner/plans/:planId/bundle` liefert den ganzen Plan
+in **einer** Antwort — Etappen, Tage, Blöcke, Stopps, Vorrat und die
+Lichtfenster jedes ausgeplanten, datierten Tages. Eine Anfrage und nicht zwölf,
+weil ein aus zwölf Aufrufen zusammengesetztes Bündel halb geladen sein kann, und
+ein halb geladener Plan genau der Ausfall ist, gegen den das hier gebaut ist.
+Auf dem Gerät liegt es als Datei je Reise in Application Support (nicht in
+Caches: ein Plan, der verschwindet, weil das Telefon Platz brauchte,
+verschwindet genau dann, wenn das Telefon voller Urlaubsfotos ist).
+
+**Zwei Dinge fehlen bewusst.** Die Wettervorhersage (§7.2) ist der einzige Teil
+des Plans, der abgestanden wertlos ist — ein drei Tage altes „trocken" am
+Regenmorgen ist schlechter als gar keine Angabe, und der Bildschirm unterscheidet
+ohnehin „keine Vorhersage" von „trocken". Und die Karte (§14): Vektorkacheln aus
+den PBFs sind ein eigener Baustein; offline gibt es Blockliste, Spots und
+Wegbeschreibung. Das Licht dagegen gehört hinein — es ist Arithmetik auf Zeilen,
+die der Plan schon trägt, es altert nicht, und einmal gerechnet statt zweimal
+verschieden.
+
+**Das Bündel wird geholt, nicht heimlich angelegt** („Unterwegs ohne Netz" im
+Reisemenü). Der Grund ist derselbe wie bei jeder stillen Zwischenspeicherung:
+Ein Plan, der sich von selbst lädt, ist auch ein Plan, der von selbst angezeigt
+wird — und dann sieht niemand mehr, ob Dienstag oder heute auf dem Schirm steht.
+Gelesen wird er deshalb nur, wenn der Server *nicht erreichbar* war (kein Netz,
+Roaming aus, Zeitüberschreitung, 502/503/504); eine Antwort des Servers — 404,
+401 — bleibt eine Antwort und wird nicht überdeckt. Wird er gelesen, sagt der
+Tagesplan es mit Alter: „Offline — Stand von heute, 09:14", dazu der Hinweis,
+dass Karte und Wetter fehlen und Änderungen eine Verbindung brauchen. Wer das
+Bündel einmal geladen hat, bekommt es nach jedem erfolgreichen Laden still
+aufgefrischt — sonst läge der Plan vom Frühstück in der Tasche, während der Tag
+längst umgeräumt ist.
+
 ### 3.10 Nachrang: die eigene Fotohistorie
 Wo die Familie zufällig schon war, weiß der POI-Matcher (`poi-matcher.ts`,
 DINOv2 + OSM + Wikidata) bereits. Das ergibt eine nette Anzeige beim
@@ -2387,6 +2418,12 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
     vorher vollständig funktionieren.
 12. **Verfeinerung, optional** — Valhalla für echte Reisezeiten, GTFS pro
    Region, Offline-Bundle, Verknüpfung mit Trip-Album und Recap.
+
+    **Davon umgesetzt: das Offline-Bündel** (§3.9) — `GET …/plans/:planId/bundle`
+    und der Bildschirm „Unterwegs ohne Netz". Vorgezogen, weil es nichts
+    voraussetzt, was noch fehlt: Der Plan ist grob genug, um ohne Netz vollwertig
+    zu sein, und die Lichtrechnung lag schon vor. Valhalla, GTFS und die
+    Verknüpfung mit Album und Recap bleiben offen.
 13. **Der Ideenvorrat** (§20) — ein geteilter Vorrat ohne Reise, die Meldung
     bei Nähe, der Tourvorschlag aus mehreren Ideen und die Gebietssuche.
     Bewusst nach Schritt 8: Er lebt von der Standortschleife, und ohne sie
@@ -2452,7 +2489,10 @@ hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
   integriert werden (Region löschen = auch Kacheln löschen).
 - **Offline-Karten.** Vektorkacheln aus den PBFs (planetiler + MapLibre) wären
   ein eigener großer Baustein. Zunächst MapKit online; offline gibt es
-  Blockliste, Spots und Wegbeschreibung, aber keine Kartendarstellung.
+  Blockliste, Spots und Wegbeschreibung, aber keine Kartendarstellung. Das
+  Offline-Bündel (§3.9) benennt diese Lücke selbst (`omits`), damit der
+  Bildschirm sie aussprechen kann, statt sie jemanden in einer fremden Stadt
+  entdecken zu lassen.
 
 ## 15. Entschiedene Fragen
 
