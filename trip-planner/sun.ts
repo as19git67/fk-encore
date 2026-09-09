@@ -229,7 +229,13 @@ export function horizonAltitude(profile: HorizonProfile, azimuth: number): numbe
       break;
     }
   }
-  const beforeAzimuth = before.azimuth > after.azimuth ? before.azimuth - 360 : before.azimuth;
+  // Unwrap onto a line: the pair either brackets the bearing directly,
+  // or it straddles north, and then exactly one shift is needed — the
+  // later point moves forward a turn, and a bearing that sits after the
+  // wrap moves with it. Shifting both ends, as this did, stretched the
+  // gap between 350° and 10° into 380° and put the interpolation almost
+  // entirely at the near end.
+  const beforeAzimuth = before.azimuth;
   const afterAzimuth = after.azimuth < before.azimuth ? after.azimuth + 360 : after.azimuth;
   const target = bearing < beforeAzimuth ? bearing + 360 : bearing;
   const span = afterAzimuth - beforeAzimuth;

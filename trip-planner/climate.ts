@@ -1,6 +1,7 @@
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { requirePermission } from "../user/auth-handler";
+import type { ClimateNormal } from "./weather-client";
 import { climateNormalFor } from "./weather-service";
 
 export interface ClimateNormalRequest {
@@ -10,7 +11,7 @@ export interface ClimateNormalRequest {
 
 export const climateNormal = api(
   { expose: true, method: "POST", path: "/trip-planner/climate-normal", auth: true },
-  async (req: ClimateNormalRequest) => {
+  async (req: ClimateNormalRequest): Promise<ClimateNormal> => {
     requireUser();
     if (!req.anchor || !Number.isFinite(req.anchor.lat) || !Number.isFinite(req.anchor.lon)
       || req.anchor.lat < -90 || req.anchor.lat > 90 || req.anchor.lon < -180 || req.anchor.lon > 180) {

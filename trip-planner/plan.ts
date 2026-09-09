@@ -91,6 +91,7 @@ export const planDay = api(
     if (req.lightDate) candidates = scoreForLight(candidates, {
       date: req.lightDate,
       utcOffsetMinutes: req.lightUtcOffsetMinutes,
+      at: anchor,
     });
 
     const solved = solveDay({

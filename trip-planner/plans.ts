@@ -1247,8 +1247,10 @@ async function planLeg(
       continue;
     }
 
+    // The light can only prefer what the travellers already wanted, and
+    // only on a trip that has a date (§7.3).
     const candidatesForDay = trip.lightAware && startDate
-      ? scoreForLight(available, { date: addDays(startDate, dayIndex) })
+      ? scoreForLight(available, { date: addDays(startDate, dayIndex), at: anchor })
       : available;
     const solved = solveDay({
       anchor,
