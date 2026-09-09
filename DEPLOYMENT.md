@@ -59,6 +59,7 @@ The full list of `DEPLOY_*` overrides:
 | `DEPLOY_HOST_PORT_APP` | `8080` | Must be unique per deployment. |
 | `DEPLOY_HOST_PORT_POSTGRES` | `5432` | dito. |
 | `DEPLOY_HOST_PORT_WATCHTOWER` | `9000` | dito. |
+| `DEPLOY_BIND_POSTGRES` | `127.0.0.1` | Host interface the Postgres port is published on. Loopback by default — see [Database password and reachability](#database-password-and-reachability). |
 | `DEPLOY_BIND_WATCHTOWER` | `0.0.0.0` | Host interface the Watchtower update API listens on. All interfaces by default because the release pipeline triggers updates remotely; set to `127.0.0.1` if you deploy another way. See [Watchtower update API](#watchtower-update-api). |
 | `DEPLOY_PG_DATABASE` | `encore` | Application's primary DB. |
 | `DEPLOY_PG_EMBEDDINGS_DATABASE` | `embeddings` | Embedding service's DB. |
@@ -126,7 +127,7 @@ internally and not exposed to the outside.
 
 | Variable           | Description |
 |--------------------|-------------|
-| `ADMIN_PASSWORD`   | Password for the initial admin account |
+| `ADMIN_PASSWORD`   | Password for the initial admin account. No default — with it unset the seed creates no admin at all, rather than one whose password is published in the compose file. Set it before the first start. |
 | `WATCHTOWER_TOKEN` | Shared secret for the Watchtower update API. The stack refuses to start while this is empty — see [Watchtower update API](#watchtower-update-api). |
 
 #### Watchtower update API
@@ -155,6 +156,41 @@ root. Two settings guard it:
   If you deploy by other means (SSH, a runner on the host, a VPN), set it
   to `127.0.0.1` or a private address so the port is not exposed publicly.
   Restricting it here is preferable to relying on the token alone.
+
+#### Database password and reachability
+
+The Postgres superuser password still defaults to `postgres`, so existing
+deployments keep working without any change. What changed is that the value
+is no longer hardcoded in `docker-compose.yml`: `POSTGRES_PASSWORD` in `.env`
+now actually reaches the database, the app, the embedding service and the
+taxonomy sidecar. Previously the compose file pinned the literal, so setting
+the variable had no effect at all despite being documented as configurable.
+
+The port is published on `127.0.0.1` by default (`DEPLOY_BIND_POSTGRES`).
+Every in-stack consumer reaches the database over the compose network by
+service name, and the host-side scripts under `scripts/` run on the Docker
+host, so loopback covers them. Publishing a database that accepts a
+well-known password to the whole network is what this closes. If you do need
+to connect from another machine, set `DEPLOY_BIND_POSTGRES=0.0.0.0` **and**
+set a real `POSTGRES_PASSWORD`.
+
+Two things to know before changing the password on a stack that already ran:
+
+- **The database keeps its old password.** The postgres image only applies
+  `POSTGRES_PASSWORD` when it initialises an empty data directory; on an
+  existing volume it is ignored. Change it in the database in the same
+  maintenance window, otherwise the app can no longer log in:
+
+  ```bash
+  docker compose exec postgres \
+    psql -U postgres -c "ALTER USER postgres WITH PASSWORD 'new-password';"
+  docker compose up -d
+  ```
+
+- **Percent-encode URL metacharacters.** The embedding service receives the
+  password inside a connection URL, so a value containing `@ : / ? #` has to
+  be encoded there (`p@ss` → `p%40ss`). Picking a password without those
+  characters avoids the issue entirely.
 
 ### Optional variables
 
