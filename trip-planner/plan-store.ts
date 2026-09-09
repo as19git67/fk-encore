@@ -34,6 +34,7 @@ import type { Candidate, PlannedBlock } from "./solver";
 import type { CurrentBlock, CurrentStop, StopStatus } from "./redistribute";
 import type { ScoredCandidate } from "./candidates";
 import { travelClassFor, type TransportMode } from "./travel";
+import { loadBranches, type StoredBranch } from "./branch-store";
 import { DEFAULT_BUFFER_MINUTES, type Fixpoint, type FixpointKind } from "./fixpoints";
 
 type Db = typeof dbDefault;
@@ -146,6 +147,14 @@ export interface StoredFixpoint extends Fixpoint {
 export interface StoredBlock extends CurrentBlock {
   /** Database id, distinct from the template id used by the solver. */
   rowId: number;
+  /**
+   * The branches this block is split into (§6.5), empty when the group
+   * is together — which is the ordinary case and every block until
+   * somebody separates. The stops of a split block are also in `stops`,
+   * each carrying its branch, so a reader that knows nothing about
+   * splits still sees the day.
+   */
+  branches: StoredBranch[];
   /**
    * Where the block sits on the day's notional clock, in minutes past
    * midnight (§8.3). Null for plans written before the frame time was
@@ -868,6 +877,12 @@ export async function loadPlan(
     stopsByBlock.set(row.block_id, list);
   }
 
+  // Which blocks are split, and into what (§6.5). Read here so a client
+  // sees the branches on the block they belong to rather than having to
+  // ask a second time — and so a block that is *not* split reads
+  // exactly as it always did, with an empty list.
+  const branchesByBlock = await loadBranches(blockIds, db);
+
   const blocksByDay = new Map<number, StoredBlock[]>();
   for (const row of blockRows) {
     const stops = stopsByBlock.get(row.id) ?? [];
@@ -883,6 +898,7 @@ export async function loadPlan(
         .filter((s) => s.status === "planned")
         .reduce((sum, s) => sum + s.dwellMinutes + s.travelFromPrevious.minutes, 0),
       stops,
+      branches: branchesByBlock.get(row.id) ?? [],
     });
     blocksByDay.set(row.day_id, list);
   }

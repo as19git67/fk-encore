@@ -29,6 +29,7 @@ import db from "../db/database";
 import { tripPlanShares, tripPlanTravellers, tripPlanVotes, users } from "../db/schema";
 import { requirePermission } from "../user/auth-handler";
 import { isOnTrip } from "./plan-access";
+import { spotLabel } from "./spot-label";
 import { loadPlan, type StoredLeg, type StoredPlan } from "./plan-store";
 import { replanAfterFrameChange, type PlanResponse } from "./plans";
 import { fairnessOfPlan, votesOfLeg, type StoredVote } from "./vote-store";
@@ -48,6 +49,12 @@ export interface BallotRequest {
 export interface BallotEntry {
   osmRef: string;
   name: string | null;
+  /**
+   * What to put on the row. The name where the map has one, otherwise
+   * what it does know ("Kirche (ohne Namen)") — never the reference,
+   * which nobody can vote on (§15.3).
+   */
+  label: string;
   category: string;
   /** What the caller said, or null while they have not (§6.1). */
   myVote: VoteValue | null;
@@ -118,6 +125,7 @@ export const tripBallot = api(
       name: string | null,
       category: string,
       isPlanned: boolean,
+      kind?: string | null,
     ) => {
       if (seen.has(osmRef)) return;
       seen.add(osmRef);
@@ -125,6 +133,7 @@ export const tripBallot = api(
       entries.push({
         osmRef,
         name,
+        label: spotLabel({ osmRef, name, category, kind }),
         category,
         myVote: mine.get(osmRef)?.value ?? null,
         myHeart: mine.get(osmRef)?.heart ?? false,
@@ -138,11 +147,13 @@ export const tripBallot = api(
     // something about right now.
     for (const day of leg.days) {
       for (const block of day.blocks) {
-        for (const stop of block.stops) add(stop.osmRef, stop.name, stop.category, true);
+        for (const stop of block.stops) {
+          add(stop.osmRef, stop.name, stop.category, true, stop.kind);
+        }
       }
     }
     for (const candidate of leg.pool) {
-      add(candidate.osmRef, candidate.name, candidate.category, false);
+      add(candidate.osmRef, candidate.name, candidate.category, false, candidate.kind);
     }
 
     const quota = heartQuota(leg.days.length);

@@ -96,6 +96,15 @@ struct TripPlanDayView: View {
                         } label: {
                             Label("Wer plant mit", systemImage: "person.2")
                         }
+                        // Who changed what, and taking it back
+                        // (§6.3) — several devices, one trip.
+                        NavigationLink {
+                            TripJournalView(planId: viewModel.planId) {
+                                Task { await viewModel.load() }
+                            }
+                        } label: {
+                            Label("Änderungen", systemImage: "arrow.uturn.backward")
+                        }
                         // Everybody rates, nobody is averaged away
                         // (§6.1). Voting does not re-plan; the screen
                         // has a button for that.
@@ -707,6 +716,12 @@ struct TripPlanDayView: View {
 
     // MARK: - Block cards
 
+    /// Where this block sits on the day — what the split call names it
+    /// by, since a template id is not a position.
+    private func blockIndex(of block: TripBlock) -> Int? {
+        viewModel.day?.blocks.firstIndex { $0.id == block.id }
+    }
+
     private func blockCard(_ block: TripBlock) -> some View {
         let isCurrent = currentBlockId == block.id
         return VStack(alignment: .leading, spacing: 12) {
@@ -725,6 +740,41 @@ struct TripPlanDayView: View {
                 Text("ca. \(TripClock.duration(block.usedMinutes)) von \(TripClock.duration(block.budgetMinutes))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                // Separating and coming back together (§6.5). On the
+                // block, because that is what a split is an attribute
+                // of — not a second trip.
+                Menu {
+                    if block.isSplit {
+                        Button("Wieder zusammen") { Task { await viewModel.removeSplit(block) } }
+                    } else if let index = blockIndex(of: block) {
+                        NavigationLink("Trennen") {
+                            TripSplitView(
+                                planId: viewModel.planId,
+                                dayIndex: viewModel.dayIndex,
+                                blockIndex: index,
+                                blockLabel: block.label,
+                            ) { Task { await viewModel.load() } }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            // Who went where, when the group separated (§6.5).
+            if let branches = block.branches, !branches.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(branches) { branch in
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(branch.label).font(.subheadline)
+                            Text(branch.subtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
             }
 
             ProgressView(value: min(block.utilisation, 1))

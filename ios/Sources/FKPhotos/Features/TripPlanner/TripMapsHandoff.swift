@@ -143,21 +143,29 @@ enum TripMapsURL {
     /// photos, today's opening hours. The deliberate counterweight to
     /// what open data cannot give (§10).
     ///
-    /// The name is a hint, not an identifier: the coordinate is what
-    /// decides which place opens, so a wrong or missing name cannot send
-    /// the traveller somewhere else.
+    /// **The coordinate alone decides which place opens.**
+    ///
+    /// This used to send "Sankt-Marien-Kirche 54.137846,10.610387",
+    /// on the assumption that Google reads such a query as "this name,
+    /// near this point". It does not: it searches the text, and a
+    /// church whose name thousands of places share is then as likely to
+    /// open somewhere else entirely — which is the one failure a
+    /// handoff must not have, because the traveller is standing
+    /// somewhere and needs *this* building.
+    ///
+    /// Google's URL API has exactly one way to name a place reliably,
+    /// `query_place_id`, and we do not have Google's ids. So the name
+    /// stays on our own card, where it came from, and the link carries
+    /// the coordinate — which is what we actually know.
+    ///
+    /// `name` is kept in the signature: callers pass what they have,
+    /// and taking it away would only move the decision to each of them.
     static func googleLookup(_ place: TripCoordinate, name: String?) -> URL? {
+        _ = name
         var components = URLComponents(string: "https://www.google.com/maps/search/")
-        // Google resolves a "name near coordinate" query to the place
-        // itself; a bare coordinate lands on the point. Either way the
-        // coordinate is present, so a wrong name cannot send the
-        // traveller somewhere else — it only sharpens the match.
-        let query = (name?.isEmpty == false)
-            ? "\(name!) \(coordinate(place))"
-            : coordinate(place)
         components?.queryItems = [
             URLQueryItem(name: "api", value: "1"),
-            URLQueryItem(name: "query", value: query),
+            URLQueryItem(name: "query", value: coordinate(place)),
         ]
         return components?.url
     }
