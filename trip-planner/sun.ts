@@ -46,6 +46,14 @@ export interface SolarPosition {
   azimuth: number;
 }
 
+/** Terrain elevation above the mathematical horizon for a compass bearing. */
+export interface HorizonPoint {
+  azimuth: number;
+  altitude: number;
+}
+
+export type HorizonProfile = readonly HorizonPoint[];
+
 /**
  * The sun's position as seen from `at`, at `when`.
  *
@@ -142,6 +150,7 @@ export function lightWindows(
   at: Coordinate,
   isoDay: string,
   utcOffsetMinutes = 0,
+  horizon: HorizonProfile = [],
 ): LightWindow[] {
   const startOfLocalDay = Date.parse(`${isoDay}T00:00:00Z`) - utcOffsetMinutes * 60_000;
   if (!Number.isFinite(startOfLocalDay)) {
@@ -164,7 +173,11 @@ export function lightWindows(
   for (let minute = 0; minute <= 1440; minute++) {
     const altitude = minute === 1440
       ? Number.NaN
-      : solarPosition(at, new Date(startOfLocalDay + minute * 60_000)).altitude;
+      : adjustedAltitude(
+        at,
+        new Date(startOfLocalDay + minute * 60_000),
+        horizon,
+      );
 
     for (const kind of Object.keys(BANDS) as LightKind[]) {
       const band = BANDS[kind];
@@ -181,4 +194,52 @@ export function lightWindows(
   }
 
   return windows.sort((a, b) => a.fromMinutes - b.fromMinutes);
+}
+
+/** Subtract the terrain angle at the sun's bearing, interpolating circularly. */
+export function adjustedAltitude(
+  at: Coordinate,
+  when: Date,
+  horizon: HorizonProfile,
+): number {
+  const position = solarPosition(at, when);
+  return position.altitude - horizonAltitude(horizon, position.azimuth);
+}
+
+export function horizonAltitude(profile: HorizonProfile, azimuth: number): number {
+  if (profile.length === 0) return 0;
+  const points = [...profile]
+    .filter((point) => Number.isFinite(point.azimuth) && Number.isFinite(point.altitude))
+    .map((point) => ({
+      azimuth: ((point.azimuth % 360) + 360) % 360,
+      altitude: point.altitude,
+    }))
+    .sort((a, b) => a.azimuth - b.azimuth);
+  if (points.length === 0) return 0;
+  if (points.length === 1) return points[0].altitude;
+
+  const bearing = ((azimuth % 360) + 360) % 360;
+  let before = points[points.length - 1];
+  let after = points[0];
+  for (let index = 0; index < points.length; index += 1) {
+    const point = points[index];
+    if (point.azimuth <= bearing) before = point;
+    if (point.azimuth >= bearing) {
+      after = point;
+      break;
+    }
+  }
+  // Unwrap onto a line: the pair either brackets the bearing directly,
+  // or it straddles north, and then exactly one shift is needed — the
+  // later point moves forward a turn, and a bearing that sits after the
+  // wrap moves with it. Shifting both ends, as this did, stretched the
+  // gap between 350° and 10° into 380° and put the interpolation almost
+  // entirely at the near end.
+  const beforeAzimuth = before.azimuth;
+  const afterAzimuth = after.azimuth < before.azimuth ? after.azimuth + 360 : after.azimuth;
+  const target = bearing < beforeAzimuth ? bearing + 360 : bearing;
+  const span = afterAzimuth - beforeAzimuth;
+  if (span <= 0) return before.altitude;
+  const fraction = (target - beforeAzimuth) / span;
+  return before.altitude + (after.altitude - before.altitude) * fraction;
 }

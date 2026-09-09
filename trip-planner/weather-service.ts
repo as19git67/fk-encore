@@ -27,6 +27,7 @@ import { addDays, daysBetween, isCalendarDate } from "./leg-dates";
 import type { ForecastHour } from "./weather";
 import {
   FORECAST_HORIZON_DAYS,
+  getClimateClient,
   getWeatherClient,
   roundToGrid,
   WeatherUnavailableError,
@@ -146,4 +147,12 @@ function toIsoDay(when: Date): string {
 /** The days a leg covers, from its start date. */
 export function daysOfLeg(startDate: string, dayCount: number): string[] {
   return Array.from({ length: dayCount }, (_, i) => addDays(startDate, i));
+}
+
+/** Climate guidance for a trip that is still outside the forecast horizon. */
+export async function climateNormalFor(
+  at: { lat: number; lon: number },
+  month: number,
+) {
+  return getClimateClient().normal(roundToGrid(at.lat), roundToGrid(at.lon), month);
 }

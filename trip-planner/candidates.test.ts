@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
-import { DEFAULT_DWELL_MINUTES, toCandidates } from "./candidates";
+import { DEFAULT_DWELL_MINUTES, scoreForLight, toCandidates } from "./candidates";
 
 function spot(overrides: Partial<GeoPoiSearchSpot> = {}): GeoPoiSearchSpot {
   return {
@@ -32,6 +32,33 @@ function spot(overrides: Partial<GeoPoiSearchSpot> = {}): GeoPoiSearchSpot {
 }
 
 describe("toCandidates", () => {
+  it("adds a transparent bonus for a dated golden-light window", () => {
+    const [candidate] = toCandidates([spot({ facadeAzimuth: 180 })]);
+    const [scored] = scoreForLight([candidate], { date: "2026-06-21", utcOffsetMinutes: 120 });
+    expect(scored.score).toBeGreaterThan(candidate.score);
+    // The reason says which of the two it is, because "gutes Licht"
+    // for everything is the same as nothing (§8.3).
+    expect(scored.reasons.some((r) => r.includes("goldene"))).toBe(true);
+  });
+
+  it("says nothing about the light of a spot whose orientation is unknown", () => {
+    // Most POIs are nodes and have no facade at all. A bonus for those
+    // would lift every candidate alike — which is not a preference, it
+    // is noise with a sentence attached.
+    const [candidate] = toCandidates([spot({ facadeAzimuth: null })]);
+    const [scored] = scoreForLight([candidate], { date: "2026-06-21", utcOffsetMinutes: 120 });
+    expect(scored.score).toBe(candidate.score);
+    expect(scored.reasons).toEqual(candidate.reasons);
+  });
+
+  it("leaves a spot the sun grazes below one it lights square on", () => {
+    const [south] = toCandidates([spot({ osmRef: "way:2", facadeAzimuth: 180 })]);
+    const [west] = toCandidates([spot({ osmRef: "way:3", facadeAzimuth: 285 })]);
+    const scored = scoreForLight([south, west], { date: "2026-06-21", utcOffsetMinutes: 120 });
+    const bonus = (before: typeof south, after: typeof south) => after.score - before.score;
+    expect(bonus(west, scored[1])).toBeGreaterThan(bonus(south, scored[0]));
+  });
+
   it("rewards prominence and explains why", () => {
     const [plain] = toCandidates([spot()]);
     const [known] = toCandidates([spot({ wikidataQid: "Q1", wikipedia: "de:X" })]);

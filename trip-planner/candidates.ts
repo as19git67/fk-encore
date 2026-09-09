@@ -14,6 +14,9 @@ import { readableName } from "./readable-name";
 import { wikipediaUrl } from "./spot-links";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import type { Candidate } from "./solver";
+import { lightWindows } from "./sun";
+import type { Coordinate } from "./travel";
+import { spotLight } from "./light";
 
 /**
  * How long people typically stay, per category, in minutes. Rough by
@@ -55,6 +58,69 @@ export interface ScoringOptions {
   interests?: readonly string[];
   /** Per-category overrides for the dwell defaults. */
   dwellMinutes?: Readonly<Record<string, number>>;
+}
+
+export interface LightScoringOptions {
+  /** The day being planned, as YYYY-MM-DD. */
+  date: string;
+  utcOffsetMinutes?: number;
+  /**
+   * Where the day happens. The windows are computed once from here
+   * rather than per candidate: within a city the difference is
+   * seconds, and a solar day is 1441 samples — one per spot per day
+   * would be thousands of them for a difference nobody can perceive.
+   */
+  at?: Coordinate;
+}
+
+/**
+ * A small, explainable preference for spots the light suits (§7.3,
+ * way 2).
+ *
+ * Deliberately narrow. It applies **only where the orientation is
+ * actually known** — a facade azimuth from the import — and only when
+ * the sun stands square to it or grazes it during a golden window.
+ * A spot mapped as a node has no facade, so it gets nothing, and the
+ * bonus stays a statement about a building instead of a blanket
+ * "the sun shines on this day" that would lift every candidate alike
+ * and mean nothing.
+ *
+ * It also does not promise a minute: §7.3 keeps the evening-block
+ * suggestion and the in-block ordering back until the horizon profile
+ * exists, because a valley is in shadow long before the sun sets. A
+ * ranking preference survives that caveat — the worst it can do is
+ * prefer a west-facing church to an equally interesting north-facing
+ * one.
+ */
+export function scoreForLight(
+  candidates: readonly ScoredCandidate[],
+  options: LightScoringOptions,
+): ScoredCandidate[] {
+  if (candidates.length === 0) return [];
+  const windows = lightWindows(
+    options.at ?? candidates[0],
+    options.date,
+    options.utcOffsetMinutes ?? 0,
+  );
+  if (windows.length === 0) return [...candidates];
+
+  return candidates.map((candidate) => {
+    if (candidate.facadeAzimuth === null || candidate.facadeAzimuth === undefined) return candidate;
+    const best = spotLight(candidate, windows, candidate.facadeAzimuth)[0];
+    if (!best || best.window.kind !== "golden") return candidate;
+    const bonus = best.facade === "frontal" ? 0.75 : best.facade === "raking" ? 0.4 : 0;
+    if (bonus === 0) return candidate;
+    return {
+      ...candidate,
+      score: candidate.score + bonus,
+      reasons: [
+        ...candidate.reasons,
+        best.facade === "frontal"
+          ? "steht am Reisetag im goldenen Licht"
+          : "bekommt am Reisetag streifendes goldenes Licht",
+      ],
+    };
+  });
 }
 
 export function toCandidates(

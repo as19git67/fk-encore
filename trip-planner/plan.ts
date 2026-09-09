@@ -19,7 +19,7 @@ import { requirePermission } from "../user/auth-handler";
 import { getGeoClient } from "../osm-admin/geo-client";
 import { pickRegion } from "../osm-admin/region-router";
 import { DEFAULT_DAY, shapeDay, type BlockTemplate, type GroupProfile, type Pace } from "./blocks";
-import { toCandidates, type ScoredCandidate } from "./candidates";
+import { scoreForLight, toCandidates, type ScoredCandidate } from "./candidates";
 import { solveDay, type PlannedBlock } from "./solver";
 import { DEFAULT_MAX_WALK_MINUTES } from "./travel";
 
@@ -46,6 +46,8 @@ export interface PlanDayRequest {
   maxWalkMinutes?: number;
   /** Per-category dwell overrides, in minutes. */
   dwellMinutes?: Record<string, number>;
+  lightDate?: string;
+  lightUtcOffsetMinutes?: number;
 }
 
 export interface PlanDayResponse {
@@ -82,9 +84,14 @@ export const planDay = api(
       limit: CANDIDATE_LIMIT,
     });
 
-    const candidates = toCandidates(page.spots, {
+    let candidates = toCandidates(page.spots, {
       interests: req.interests,
       dwellMinutes: req.dwellMinutes,
+    });
+    if (req.lightDate) candidates = scoreForLight(candidates, {
+      date: req.lightDate,
+      utcOffsetMinutes: req.lightUtcOffsetMinutes,
+      at: anchor,
     });
 
     const solved = solveDay({

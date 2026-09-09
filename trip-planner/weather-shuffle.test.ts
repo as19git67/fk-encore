@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import { DISPLACEMENT_BOOST, type CurrentBlock, type CurrentStop } from "./redistribute";
 import type { Candidate } from "./solver";
-import { shelterWanted, shuffleForWeather, weatheredBudget } from "./weather-shuffle";
+import { shelterWanted, shuffleForWeather, swapRainyDay, weatheredBudget } from "./weather-shuffle";
 import type { BlockWeather } from "./weather";
 
 const ANCHOR = { lat: 48.14, lon: 11.58 };
@@ -113,6 +113,153 @@ describe("what the weather leaves of a budget", () => {
 
   it("leaves it alone where nothing is known", () => {
     expect(weatheredBudget(block("x", [], 180), undefined)).toBe(180);
+  });
+});
+
+describe("whole-day weather swaps", () => {
+  function day(id: number, blocks: CurrentBlock[]) {
+    return { id, blocks };
+  }
+
+  function swap(
+    days: { id: number; blocks: CurrentBlock[] }[],
+    weatherByDay: Map<number, number>,
+  ) {
+    return swapRainyDay({ days, weatherByDay, anchor: ANCHOR });
+  }
+
+  it("exchanges a wet day's spots with a drier day's", () => {
+    const wetDay = candidate("leisure=park");
+    const dryDay = candidate("tourism=museum");
+    const result = swap(
+      [
+        day(1, [block("morning", [stop(wetDay)])]),
+        day(2, [block("morning", [stop(dryDay)])]),
+      ],
+      new Map([[1, 2], [2, 0]]),
+    );
+
+    expect(result.reason).toBe("ok");
+    expect(result.fromDayId).toBe(1);
+    expect(result.toDayId).toBe(2);
+    expect(result.days[0].blocks[0].stops.map((s) => s.osmRef)).toEqual([dryDay.osmRef]);
+    expect(result.days[1].blocks[0].stops.map((s) => s.osmRef)).toEqual([wetDay.osmRef]);
+  });
+
+  it("leaves each day its own frame", () => {
+    // The last train leaves on Thursday at 17:45 whatever the weather
+    // does (§4.4): the hours belong to the date, only the spots travel.
+    const result = swap(
+      [
+        day(1, [block("morning", [stop(candidate("leisure=park"))], 240)]),
+        day(2, [block("morning", [stop(candidate("tourism=museum"))], 90)]),
+      ],
+      new Map([[1, 2], [2, 0]]),
+    );
+
+    expect(result.days.map((d) => d.blocks[0].budgetMinutes)).toEqual([240, 90]);
+  });
+
+  it("recomputes the walks it changed", () => {
+    // The stops are somewhere else now, so the minutes the day uses are
+    // not the ones that came in.
+    const far = candidate("leisure=park", { lat: ANCHOR.lat + 0.02, dwellMinutes: 90 });
+    const near = candidate("tourism=museum", { dwellMinutes: 30 });
+    const result = swap(
+      [
+        day(1, [block("morning", [stop(far)])]),
+        day(2, [block("morning", [stop(near)])]),
+      ],
+      new Map([[1, 2], [2, 0]]),
+    );
+
+    expect(result.days[0].blocks[0].usedMinutes).toBeLessThan(
+      result.days[1].blocks[0].usedMinutes,
+    );
+  });
+
+  it("will not move a day onto one it has no forecast for", () => {
+    // "We do not know" is not "it will be dry" (§15.3) — the unknown
+    // day is not a destination.
+    const result = swap(
+      [
+        day(1, [block("morning", [stop(candidate("leisure=park"))])]),
+        day(2, [block("morning", [stop(candidate("tourism=museum"))])]),
+      ],
+      new Map([[1, 2]]),
+    );
+
+    expect(result.reason).toBe("no-forecast");
+    expect(result.fromDayId).toBeNull();
+  });
+
+  it("offers nothing when no day is wet", () => {
+    const result = swap(
+      [
+        day(1, [block("morning", [stop(candidate("leisure=park"))])]),
+        day(2, [block("morning", [stop(candidate("tourism=museum"))])]),
+      ],
+      new Map([[1, 0], [2, 0]]),
+    );
+
+    expect(result.reason).toBe("nothing-wet");
+  });
+
+  it("offers nothing when the other day is barely drier", () => {
+    const result = swap(
+      [
+        day(1, [block("morning", [stop(candidate("leisure=park"))])]),
+        day(2, [block("morning", [stop(candidate("tourism=museum"))])]),
+      ],
+      new Map([[1, 1.5], [2, 1]]),
+    );
+
+    expect(result.reason).toBe("nothing-drier");
+  });
+
+  it("does not touch a day that is already underway", () => {
+    const result = swap(
+      [
+        day(1, [block("morning", [stop(candidate("leisure=park"), { status: "done" })])]),
+        day(2, [block("morning", [stop(candidate("tourism=museum"))])]),
+      ],
+      new Map([[1, 2], [2, 0]]),
+    );
+
+    expect(result.reason).toBe("day-is-underway");
+  });
+
+  it("refuses two days that are not shaped alike", () => {
+    // The wet day's afternoon has nowhere to go on a day that has no
+    // afternoon — and dropping the spots to make it fit is the
+    // traveller's decision, not the weather's.
+    const result = swap(
+      [
+        day(1, [
+          block("morning", [stop(candidate("leisure=park"))]),
+          block("afternoon", [stop(candidate("tourism=viewpoint"))]),
+        ]),
+        day(2, [block("morning", [stop(candidate("tourism=museum"))])]),
+      ],
+      new Map([[1, 2], [2, 0]]),
+    );
+
+    expect(result.reason).toBe("different-frames");
+    expect(result.days[0].blocks[1].stops).toHaveLength(1);
+  });
+
+  it("changes nothing on the days it did not pick", () => {
+    const untouched = candidate("tourism=gallery");
+    const result = swap(
+      [
+        day(1, [block("morning", [stop(candidate("leisure=park"))])]),
+        day(2, [block("morning", [stop(candidate("tourism=museum"))])]),
+        day(3, [block("morning", [stop(untouched)])]),
+      ],
+      new Map([[1, 2], [2, 0], [3, 1]]),
+    );
+
+    expect(result.days[2].blocks[0].stops.map((s) => s.osmRef)).toEqual([untouched.osmRef]);
   });
 });
 

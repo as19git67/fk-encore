@@ -43,6 +43,18 @@ export interface WeatherClient {
   forecast(lat: number, lon: number, from: string, to: string): Promise<Forecast>;
 }
 
+export interface ClimateNormal {
+  month: number;
+  meanTemperatureC: number;
+  precipitationMm: number;
+  wetDays: number;
+  source: "open-meteo-climate";
+}
+
+export interface ClimateClient {
+  normal(lat: number, lon: number, month: number): Promise<ClimateNormal>;
+}
+
 /**
  * Snap to the grid, and never send more precision than that.
  *
@@ -111,6 +123,63 @@ export class WeatherUnavailableError extends Error {
   }
 }
 
+export class OpenMeteoClimateClient implements ClimateClient {
+  async normal(lat: number, lon: number, month: number): Promise<ClimateNormal> {
+    if (!Number.isInteger(month) || month < 1 || month > 12) {
+      throw new WeatherUnavailableError("month must be between 1 and 12");
+    }
+    // Thirty years is the conventional climate-normal period and avoids
+    // treating a model projection as if it were an observed forecast.
+    const start = `1991-${String(month).padStart(2, "0")}-01`;
+    const end = `2020-${String(month).padStart(2, "0")}-${daysInMonth(month)}`;
+    const url = new URL("https://climate-api.open-meteo.com/v1/climate");
+    url.searchParams.set("latitude", roundToGrid(lat).toFixed(2));
+    url.searchParams.set("longitude", roundToGrid(lon).toFixed(2));
+    url.searchParams.set("start_date", start);
+    url.searchParams.set("end_date", end);
+    url.searchParams.set("models", "CMCC_CM2_VHR4,FGOALS_f3_H,HiRAM_SIT_HR,MRI_AGCM3_2_S,EC_Earth3P_HR,MPI_ESM1_2_XR,NICAM16_8S");
+    url.searchParams.set("daily", "temperature_2m_mean,precipitation_sum");
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FORECAST_TIMEOUT_MS);
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok) throw new WeatherUnavailableError(`open-meteo climate answered ${response.status}`);
+      return parseClimateNormal(await response.json(), month);
+    } catch (err) {
+      if (err instanceof WeatherUnavailableError) throw err;
+      throw new WeatherUnavailableError(err instanceof Error ? err.message : "climate normal unavailable");
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+}
+
+export function parseClimateNormal(body: unknown, month: number): ClimateNormal {
+  const daily = (body as { daily?: Record<string, unknown> } | null)?.daily;
+  const temperatures = numbers(daily?.temperature_2m_mean);
+  const precipitation = numbers(daily?.precipitation_sum);
+  const values = temperatures
+    .map((temperature, index) => ({ temperature, precipitation: precipitation[index] }))
+    .filter((value): value is { temperature: number; precipitation: number } =>
+      value.temperature !== null && value.precipitation !== null);
+  if (values.length === 0) throw new WeatherUnavailableError("climate response has no daily values");
+  return {
+    month,
+    meanTemperatureC: round(values.reduce((sum, value) => sum + value.temperature, 0) / values.length),
+    precipitationMm: round(values.reduce((sum, value) => sum + Math.max(0, value.precipitation), 0) / (values.length / daysInMonth(month))),
+    wetDays: Math.round(values.filter((value) => value.precipitation >= 2).length / (values.length / daysInMonth(month))),
+    source: "open-meteo-climate",
+  };
+}
+
+function daysInMonth(month: number): number {
+  return new Date(Date.UTC(2020, month, 0)).getUTCDate();
+}
+
+function round(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
 /**
  * Read the arrays Open-Meteo answers with.
  *
@@ -161,6 +230,7 @@ function numbers(column: unknown): (number | null)[] {
 }
 
 let active: WeatherClient = new OpenMeteoClient();
+let climateActive: ClimateClient = new OpenMeteoClimateClient();
 
 export function getWeatherClient(): WeatherClient {
   return active;
@@ -173,4 +243,13 @@ export function setWeatherClient(client: WeatherClient): void {
 
 export function resetWeatherClient(): void {
   active = new OpenMeteoClient();
+  climateActive = new OpenMeteoClimateClient();
+}
+
+export function getClimateClient(): ClimateClient {
+  return climateActive;
+}
+
+export function setClimateClient(client: ClimateClient): void {
+  climateActive = client;
 }
