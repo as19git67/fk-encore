@@ -38,6 +38,7 @@ struct TripPlanDayView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink {
                         TripDayMapView(day: day, anchor: leg.anchor,
+                                       light: viewModel.light,
                                        isRunning: leg.schedule(on: Date()).isRunning)
                     } label: {
                         Label("Karte", systemImage: "map")

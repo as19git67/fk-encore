@@ -13,6 +13,7 @@ import SwiftUI
 struct TripDayMapView: View {
     let day: TripDay
     let anchor: TripCoordinate
+    let light: TripDayLight?
     /// True when the leg's dates put today inside the trip — drives the
     /// user-location puck. Passed in rather than computed here so the
     /// view stays a pure function of its inputs.
@@ -111,6 +112,8 @@ struct TripDayMapView: View {
                 }
             }
 
+            lightLine
+
             Slider(
                 value: $sliderMinutes,
                 in: Double(span.lowerBound)...Double(span.upperBound),
@@ -127,10 +130,26 @@ struct TripDayMapView: View {
             }
         }
         .padding()
-        .background {
-            Rectangle()
-                .fill(.bar)
-                .ignoresSafeArea(edges: .bottom)
+        .background(Color(uiColor: .systemBackground).ignoresSafeArea(edges: .bottom))
+    }
+
+    /// What the sun is doing at the selected minute (§7.3) — and
+    /// nothing at all when nobody computed it. A day without dates has
+    /// no sun, and "kein besonderes Lichtfenster" under such a day
+    /// would be a claim rather than an answer.
+    @ViewBuilder
+    private var lightLine: some View {
+        switch TripDayTimeline.light(light, at: Int(sliderMinutes)) {
+        case .unknown:
+            EmptyView()
+        case .ordinary:
+            Label("Kein besonderes Lichtfenster", systemImage: "sun.max")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .window(let window):
+            Label("\(window.label) · \(window.range)", systemImage: window.symbolName)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 }
