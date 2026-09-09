@@ -89,6 +89,38 @@ export function withAuthTokenParam(url: string): string {
   return `${url}${separator}token=${encodeURIComponent(token)}`
 }
 
+/**
+ * The public-album token of the share link currently being viewed, or null
+ * outside that view. SharedAlbumView sets it while it is mounted.
+ *
+ * Deliberately not in localStorage: it is scoped to the page being looked
+ * at, not to the browser, and a token left behind after navigating away
+ * would keep authorizing image loads it has nothing to do with.
+ */
+let activeShareToken: string | null = null
+
+export function setActiveShareToken(token: string | null): void {
+  activeShareToken = token
+}
+
+/**
+ * Attach whatever credentials this browser has for reading photo bytes.
+ *
+ * `/photos/file/*` admits a signed-in photo viewer or a live share token,
+ * and an <img src> can carry neither in a header. Both are sent when both
+ * exist, because they are independent grants: an account that has no photo
+ * rights at all — someone who only uses the finance module — still has to
+ * be able to open a share link that was sent to them.
+ */
+export function withPhotoAccessParams(url: string): string {
+  let out = withAuthTokenParam(url)
+  if (activeShareToken) {
+    const separator = out.includes('?') ? '&' : '?'
+    out = `${out}${separator}share=${encodeURIComponent(activeShareToken)}`
+  }
+  return out
+}
+
 export interface ApiFetchOptions extends RequestInit {
   /**
    * Abort the request after this many milliseconds. Prevents hanging requests

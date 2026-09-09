@@ -9,6 +9,7 @@ import * as service from "./photo.service";
 import { writeCacheFileAtomically } from "./cache-file";
 import { UPLOAD_DIR, THUMBNAIL_DIR, thumbnailShardPath } from "./photo.service";
 import { PHOTO_LIBRARIES_ROOT } from "./libraries.service";
+import { denyPhotoFileRequest } from "./photo-file-access";
 import { eq } from "drizzle-orm";
 import db from "../db/database";
 import { dbFirst } from "../db/adapter";
@@ -708,10 +709,19 @@ export const batchUpdatePhotoDescriptions = api(
 );
 
 /**
+ * Cache policy for photo bytes: still a year and still immutable, because
+ * a filename never names different content — but `private`, not `public`.
+ * Access now depends on who is asking, and the credential travels in the
+ * query string for <img src>, so a shared cache in front of the app must
+ * not be allowed to hand one visitor's copy to the next caller.
+ */
+const PHOTO_CACHE_CONTROL = "private, max-age=31536000, immutable";
+
+/**
  * Serve a photo file.
  */
 /**
- * Resolve a public `/photos/file/*filename` URL to a real on-disk path.
+ * Resolve a `/photos/file/*filename` URL to a real on-disk path.
  *
  * Two layouts are supported:
  *   - Uploaded photos: filename is `YYYY/YYYY-MM/<name>.<ext>` and the file
@@ -765,6 +775,15 @@ export async function resolvePhotoFilePath(filename: string): Promise<string | n
   }
 }
 
+/**
+ * Serve a photo original (optionally resized / HEIC-converted).
+ *
+ * Stays `auth: false` because a public share link has to be able to point
+ * an <img> at it without an account, but it is no longer open: every
+ * request is checked by `denyPhotoFileRequest`, which admits a signed-in
+ * photo viewer or a live `?share=` token that actually covers this file.
+ * See photo-file-access.ts.
+ */
 export const getPhotoFile = api.raw(
   { expose: true, method: "GET", path: "/photos/file/*filename", auth: false },
   async (req, res) => {
@@ -775,6 +794,14 @@ export const getPhotoFile = api.raw(
       // filename, which is now of the form `YYYY/YYYY-MM/<name>.<ext>`.
       const rawPath = decodeURIComponent(url.pathname.replace(/^\/photos\/file\//, ""));
       const filename = rawPath.replace(/^\/+/, "");
+
+      const denial = await denyPhotoFileRequest(filename, url.searchParams.get("share"));
+      if (denial) {
+        res.statusCode = denial.status;
+        res.end(denial.body);
+        return;
+      }
+
       console.log("Serving photo file:", filename);
 
       const filePath = await resolvePhotoFilePath(filename);
@@ -819,7 +846,7 @@ export const getPhotoFile = api.raw(
         // Must still send cache-related headers on 304 per RFC 9111 § 4.3.4.
         res.statusCode = 304;
         res.setHeader("ETag", etag);
-        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        res.setHeader("Cache-Control", PHOTO_CACHE_CONTROL);
         res.end();
         return;
       }
@@ -850,7 +877,7 @@ export const getPhotoFile = api.raw(
               }
               if (cacheHit && !retryThumbnail) {
                   res.setHeader("Content-Type", "image/jpeg");
-                  res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+                  res.setHeader("Cache-Control", PHOTO_CACHE_CONTROL);
                   res.setHeader("ETag", etag);
                   fs.createReadStream(cachePath).pipe(res);
                   return;
@@ -875,7 +902,7 @@ export const getPhotoFile = api.raw(
                 .catch(err => console.error("Failed to write thumbnail cache:", err));
 
               res.setHeader("Content-Type", "image/jpeg");
-              res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+              res.setHeader("Cache-Control", PHOTO_CACHE_CONTROL);
               res.setHeader("ETag", etag);
               res.end(buffer);
               return;
@@ -886,7 +913,7 @@ export const getPhotoFile = api.raw(
       }
 
       res.setHeader("Content-Type", mimeType);
-      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      res.setHeader("Cache-Control", PHOTO_CACHE_CONTROL);
       res.setHeader("ETag", etag);
       fs.createReadStream(filePath).pipe(res);
     } catch (err: any) {
@@ -1045,13 +1072,13 @@ export const renderPhotoTransformed = api.raw(
       if (typeof ifNoneMatch === "string" && ifNoneMatch === result.etag) {
         res.statusCode = 304;
         res.setHeader("ETag", result.etag);
-        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        res.setHeader("Cache-Control", PHOTO_CACHE_CONTROL);
         res.end();
         return;
       }
 
       res.setHeader("Content-Type", "image/jpeg");
-      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      res.setHeader("Cache-Control", PHOTO_CACHE_CONTROL);
       res.setHeader("ETag", result.etag);
       res.setHeader("X-Cache", result.cacheHit ? "HIT" : "MISS");
       res.end(result.buffer);

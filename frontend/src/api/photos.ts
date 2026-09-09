@@ -1,4 +1,4 @@
-import { API_BASE_URL, apiFetch } from './client'
+import { API_BASE_URL, apiFetch, withPhotoAccessParams } from './client'
 
 export type CurationStatus = 'visible' | 'hidden' | 'favorite'
 
@@ -303,9 +303,15 @@ export function deletePhoto(id: number) {
   })
 }
 
+/**
+ * URL for a photo original (or a resized variant).
+ *
+ * `/photos/file/*` is no longer anonymous, so the caller's credential is
+ * attached here rather than at each of the dozen <img> tags that use this.
+ */
 export function getPhotoUrl(filename: string, width?: number) {
   const base = `${API_BASE_URL}/photos/file/${filename}`
-  return width ? `${base}?w=${width}` : base
+  return withPhotoAccessParams(width ? `${base}?w=${width}` : base)
 }
 
 export function getPhotosToRefreshMetadata() {
