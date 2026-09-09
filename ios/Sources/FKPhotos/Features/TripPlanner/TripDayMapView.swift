@@ -92,7 +92,7 @@ struct TripDayMapView: View {
     }
 
     private func timeSlider(_ span: ClosedRange<Int>) -> some View {
-        return VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(TripClock.format(Int(sliderMinutes)))
                     .font(.subheadline.weight(.semibold))
