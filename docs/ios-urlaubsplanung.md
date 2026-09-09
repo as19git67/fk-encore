@@ -73,6 +73,34 @@ gebaut: Hoteladresse als Tagesstart und -ende, Check-in-Zeit, Rückgabetermin
 des Mietwagens, gebuchtes Zeitfenster für die Sagrada Família. Das kann Google
 strukturell nicht, ohne dass man sein Postfach öffnet.
 
+**Umgesetzt:** `GET`/`POST /trip-planner/plans/:planId/documents`,
+`GET …/documents/suggestions`, `POST …/documents/remove` und der Bildschirm
+„Dokumente" im Reisemenü. Vier Entscheidungen stecken darin:
+
+- **Vorgeschlagen, nie übernommen.** §8.2 ist eindeutig: „Nichts wird
+  stillschweigend angenommen." Ein Dokument wird angeboten, samt dem Grund, aus
+  dem es angeboten wird — es nennt eines der Reisedaten, es nennt einen der
+  Orte, oder sein eigenes Datum liegt in der Reisezeit. Reisepapier muss es
+  immer sein: Eine Handyrechnung aus der Urlaubswoche nennt das Datum auch, und
+  wer sie einmal in der Liste sieht, liest die Liste nicht mehr.
+- **Eine Lesung ist kein Fixpunkt.** `doc-hints.ts` liest harte Zeiten aus dem
+  OCR-Text („Check-in ab 15:00", „Abfahrt 17:45") und gibt sie mit **der Zeile
+  zurück, aus der sie stammen**. Angelegt wird daraus nichts: OCR verwechselt
+  oft genug eine 7 mit einer 1, und eine maschinell geschriebene Abfahrt wäre
+  genau der Fehler, der nach §8.6 erst am Bahnsteig auffällt. Den Fixpunkt setzt
+  weiterhin ein Mensch über `POST …/fixpoints` (§4.4).
+- **Die Reise ist geteilt, die Papiere sind es nicht.** Ein angehängtes Dokument
+  bleibt unter der Sichtbarkeit des documents-Service. Wer es nicht sehen darf,
+  sieht in der Reise nur, *dass* eines hängt und wer es angehängt hat — nie
+  Titel, Absender oder Datei.
+- **Anhängen darf jeder Mitreisende.** Das eigene Ticket beizusteuern ist ein
+  Beitrag, keine Änderung am Rahmen; §6.2 hält nur Rahmen, Gästeliste und
+  Stichentscheid zurück.
+
+Die Rolle (`lodging` | `transport` | `rental` | `ticket`) ist das, was das Papier
+**für die Reise** tut — eine andere Frage als die Dokumentart der Taxonomie, und
+deshalb eine eigene Spalte statt einer Ableitung.
+
 ### 3.5 Mit wem gereist wird
 Die Personenerkennung kennt die Reisegruppe. „Wir" ist nicht generisch: zwei
 Kinder unter zehn → kürzere Blöcke, Pausen, keine drei Museen am Stück;
@@ -864,11 +892,18 @@ billig, weil alle Eingaben schon dastehen.
 „Reisebereit?" (im Reisemenü). Beide Hälften in einer Antwort, weil sie aus
 denselben Zeilen und derselben Vorhersage stammen.
 
-Von den vier Fragen sind **zwei heute beantwortbar** — hat die Reise ein Datum,
-und sind die Regionsdatenbanken aller Etappen fertig (dazu, als dritte: ist der
-erste Tag überhaupt schon ausgeplant, §4.3). Die beiden anderen sind es nicht:
-Dokumente hängen bisher an keiner Reise (§3.4), und Abstimmungen kommen erst mit
-dem Mehrbenutzerbetrieb (§6.1). Sie werden trotzdem angezeigt, als `unknown`
+Von den vier Fragen sind **drei heute beantwortbar** — hat die Reise ein Datum,
+sind die Regionsdatenbanken aller Etappen fertig (dazu, als dritte: ist der
+erste Tag überhaupt schon ausgeplant, §4.3), und liegen Tickets und Buchungen
+als Dokumente vor (§3.4). Die Ticketzeile hat dabei eine ehrliche Grenze: Die
+App weiß, **welche** Papiere hängen, nicht **welche gebraucht** würden — ein
+Wochenende mit dem Auto braucht keine, und eine Liste des Nötigen gibt es
+nirgends. Also: hängt etwas dran, ist die Zeile grün und zählt es auf; hängt
+nichts dran, obwohl der Vorschlag Kandidaten findet, ist sie gelb (das ist der
+billige Abendgriff: es existiert, nur angehängt hat es niemand); findet auch der
+Vorschlag nichts, bleibt sie grau — dann weiß die App es wirklich nicht. Die
+vierte Frage ist weiter offen: Abstimmungen kommen erst mit dem
+Mehrbenutzerbetrieb (§6.1). Sie wird trotzdem angezeigt, als `unknown`
 samt Grund — eine Prüfung, die still verschwindet, vermisst niemand, und dann
 merkt auch niemand, dass die App nie hingesehen hat. Auf dem Bildschirm sind sie
 grau, nicht gelb: eine Frage, die die App nicht beantworten kann, ist keine
@@ -2528,10 +2563,14 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
     **Reisebereitschafts-Prüfung** und die Packliste (§8.6), die beide nur
     vorhandene Zustände zusammentragen.
 
-    **Davon umgesetzt: Reisebereitschaft und Packliste** (§8.6), soweit die
-    Zustände existieren — Datum, Regionsdatenbanken, Ausplanung des ersten Tages
-    und das Offline-Bündel; Tickets und Abstimmungen werden als offen ausgewiesen
-    statt als geprüft. Dokumenten-Fixpunkte fehlen weiterhin.
+    **Davon umgesetzt: Reisebereitschaft und Packliste** (§8.6) sowie die
+    **Dokumenten-Fixpunkte** (§3.4). Dokumente hängen jetzt an einer Reise:
+    vorgeschlagen mit Begründung, angehängt auf Zuruf, gelesene Zeiten als
+    Vorschlag samt Belegzeile statt als geschriebener Fixpunkt. Damit ist die
+    Ticketzeile der Vorabendprüfung beantwortbar geworden — mit der ehrlichen
+    Grenze, dass die App weiß, was hängt, nicht was fehlen könnte. Offen bleibt
+    von diesem Schritt die Reisegruppe aus der Personenerkennung (§3.5);
+    Abstimmungen werden weiter als offen ausgewiesen statt als geprüft.
 11. **Mehrbenutzerbetrieb** (§6) — Beiträge und Stimmen je Person,
     Herzenswünsche und Fairness-Konto, Organisatorrolle, feingranulare
     Zusammenführung gleichzeitiger Änderungen, automatische Erledigt-Erkennung,

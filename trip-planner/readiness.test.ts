@@ -10,7 +10,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getAuthData } from "~encore/auth";
 import db from "../db/database";
-import { osmRegionImports, tripPlans, users, weatherForecastCache } from "../db/schema";
+import {
+  documents,
+  osmRegionImports,
+  tripPlanDocuments,
+  tripPlans,
+  users,
+  weatherForecastCache,
+} from "../db/schema";
 import { clearRouterCache } from "../osm-admin/region-router";
 import type { GeoPoiSearchSpot } from "../osm-admin/geo-client";
 import { resetGeoClient, setGeoClient } from "../osm-admin/geo-client";
@@ -22,6 +29,7 @@ import {
   type Forecast,
   type WeatherClient,
 } from "./weather-client";
+import { linkPlanDocument } from "./documents";
 import { createTripPlan } from "./plans";
 import { tripReadiness } from "./readiness";
 
@@ -80,7 +88,9 @@ function soon(offsetDays = 1): string {
 }
 
 beforeEach(async () => {
+  await db.delete(tripPlanDocuments);
   await db.delete(tripPlans);
+  await db.delete(documents);
   await db.delete(osmRegionImports);
   await db.delete(weatherForecastCache);
   clearRouterCache();
@@ -174,13 +184,65 @@ describe("the evening before", () => {
     expect(region.sentence).toContain("München");
   });
 
-  it("reports the two questions it cannot answer as open, not as fine", async () => {
+  it("reports the question it cannot answer as open, not as fine", async () => {
+    const plan = await trip();
+
+    const readiness = await tripReadiness({ planId: plan.id });
+
+    expect(check(readiness.checks, "votes").state).toBe("unknown");
+  });
+
+  it("does not pretend to know whether a paperless trip is missing paperwork", async () => {
+    // The app knows which documents are attached, never which ones this
+    // trip needs — a weekend by car needs none (§3.4).
     const plan = await trip();
 
     const readiness = await tripReadiness({ planId: plan.id });
 
     expect(check(readiness.checks, "tickets").state).toBe("unknown");
-    expect(check(readiness.checks, "votes").state).toBe("unknown");
+  });
+
+  it("counts the documents that hang on the trip", async () => {
+    const plan = await trip();
+    const [doc] = await db
+      .insert(documents)
+      .values({
+        user_id: ownerId,
+        sha256: `readiness-${Date.now()}-${Math.random()}`,
+        original_filename: "buchung.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 1024,
+        disk_path: "/tmp/buchung.pdf",
+        status: "ready",
+        title: "Hotelbuchung München",
+      })
+      .returning({ id: documents.id });
+    await linkPlanDocument({ planId: plan.id, documentId: doc.id });
+
+    const tickets = check((await tripReadiness({ planId: plan.id })).checks, "tickets");
+
+    expect(tickets.state).toBe("ok");
+    expect(tickets.sentence).toContain("Hotelbuchung München");
+  });
+
+  it("points at paperwork that looks like this trip's and hangs nowhere", async () => {
+    // The evening's cheapest fix: it exists, nobody attached it.
+    const plan = await trip();
+    await db.insert(documents).values({
+      user_id: ownerId,
+      sha256: `readiness-loose-${Date.now()}-${Math.random()}`,
+      original_filename: "hotel.pdf",
+      mime_type: "application/pdf",
+      size_bytes: 1024,
+      disk_path: "/tmp/hotel.pdf",
+      status: "ready",
+      title: "Hotelbuchung München",
+      summary: "Übernachtung mit Frühstück",
+    });
+
+    const tickets = check((await tripReadiness({ planId: plan.id })).checks, "tickets");
+
+    expect(tickets.state).toBe("attention");
   });
 
   it("leaves the offline bundle to the device", async () => {
