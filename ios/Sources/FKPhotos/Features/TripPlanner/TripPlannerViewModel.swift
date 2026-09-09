@@ -421,6 +421,29 @@ final class TripPlannerViewModel {
         }
     }
 
+    /// Take a planned spot off the day and put it back in the pool
+    /// (§8.4) — "nicht heute Nachmittag", as opposed to hiding, which
+    /// says "nicht auf dieser Reise".
+    ///
+    /// It comes back with the boost §5 gives a displaced spot, and the
+    /// day is not re-planned around the gap: taking one spot out is not
+    /// asking for the afternoon to be rearranged.
+    func returnToPool(_ stop: TripStop) async {
+        struct Body: Encodable { let stopId: Int }
+        struct Response: Decodable {
+            let plan: TripPlan
+            let name: String?
+        }
+        do {
+            let response: Response = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/stops/to-pool", body: Body(stopId: stop.rowId))
+            plan = response.plan
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     /// Turn a spot down for the whole trip (§5, §20.5).
     ///
     /// Not the same gesture as putting one back in the pool: this one

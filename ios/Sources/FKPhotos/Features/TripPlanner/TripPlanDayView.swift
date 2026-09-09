@@ -772,6 +772,15 @@ struct TripPlanDayView: View {
                                 Label(stop.pinned ? "Nicht mehr anheften" : "Anheften",
                                       systemImage: stop.pinned ? "pin.slash" : "pin")
                             }
+                            // "Nicht heute Nachmittag" (§8.4): out of
+                            // the day, back into the running.
+                            if stop.stopStatus == .planned {
+                                Button {
+                                    Task { await viewModel.returnToPool(stop) }
+                                } label: {
+                                    Label("Zurück in den Vorrat", systemImage: "tray.and.arrow.down")
+                                }
+                            }
                             // "Not this one, and not next time either"
                             // (§5): the way to stop the search from
                             // proposing a place that is simply not
@@ -783,9 +792,10 @@ struct TripPlanDayView: View {
                                 Label("Für diese Reise ausblenden", systemImage: "eye.slash")
                             }
                         } footer: {
-                            Text(stop.pinned
-                                 ? "Angeheftet heißt: bleibt liegen, auch wenn umgeplant wird."
-                                 : "Anheften hält den Spot an seinem Platz, wenn umgeplant wird.")
+                            // The two ways out, side by side, because
+                            // the difference is the whole point.
+                            Text("Zurück in den Vorrat heißt „nicht heute“ — er bleibt im "
+                                 + "Rennen. Ausblenden heißt „nicht auf dieser Reise“.")
                         }
                     }
                 } label: {

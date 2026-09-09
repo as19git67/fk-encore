@@ -718,6 +718,25 @@ laufen.
 ### 8.4 Verhandeln
 - Spot wischen → **ersetzen** (Alternativen aus dem Vorrat, die ins selbe
   Zeitbudget passen) oder **in den Vorrat zurück**.
+
+  **Umgesetzt:** `POST …/stops/to-pool`. Der Spot verlässt den Tag, der Tag
+  wird neu durchgerechnet, und der Spot kommt mit demselben Rückkehr-Bonus in
+  den Vorrat, den §5 einem verdrängten gibt. Die Lücke wird **nicht**
+  aufgefüllt — einen Spot herauszunehmen ist keine Bitte, den Nachmittag
+  umzubauen; das ist die Umverteilung, und die fragt man. Zusammen mit §5.1
+  stehen damit zwei verschiedene Sätze nebeneinander: „nicht heute" (zurück in
+  den Vorrat) und „nicht auf dieser Reise" (ausblenden). Was schon abgehakt
+  ist, geht nicht zurück: Erledigtes ist der Anfang des Reisetagebuchs.
+
+  **Dabei aufgefallen und mitbehoben:** Die Herkunft eines Spots („selbst
+  gefunden" vs. „vorgeschlagen", §9.2) lebte nur auf der Vorratszeile, und die
+  wird gelöscht, sobald der Spot in einem Tag landet. Jede Umverteilung schrieb
+  den Vorrat neu — und machte dabei aus jedem eigenen Fund einen
+  Suchtreffer. Folgen: Die nächste Einstellungsänderung löschte ihn (eine
+  Neuplanung behält genau die Zeilen, deren Herkunft *nicht* „search" ist), die
+  App bot „ausblenden" statt „entfernen" an, und Notiz und Link des Funds waren
+  weg. Die Herkunft steht jetzt am Stopp selbst (Migration 0178) und überlebt
+  den Weg durch den Tag.
 - Anheften (📌) → Fixpunkt.
 - Zwischen Blöcken und Tagen ziehen → Budgets rechnen sich sofort neu, ein
   überfüllter Block wird rot.
