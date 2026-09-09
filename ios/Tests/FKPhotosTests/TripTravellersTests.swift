@@ -72,13 +72,27 @@ final class TripTravellersTests: XCTestCase {
 
     func testASuggestionSaysHowItIsRelatedAndHowOld() throws {
         let json = """
-        { "suggestions": [ { "subjectPersonId": 7, "label": "Kind A", "relation": "kind",
-            "birthDate": "2020-06-15", "ageAtStart": 7 } ] }
+        { "suggestions": [ { "subjectPersonId": 7, "userId": null, "label": "Kind A",
+            "relation": "kind", "birthDate": "2020-06-15", "ageAtStart": 7 } ] }
         """
         let offered = try JSONDecoder()
             .decode(TripTravellerSuggestionsResponse.self, from: Data(json.utf8))
 
-        XCTAssertEqual(offered.suggestions[0].id, 7)
+        XCTAssertEqual(offered.suggestions[0].id, "person:7")
         XCTAssertEqual(offered.suggestions[0].subtitle, "kind · 7 bei Reisebeginn")
+    }
+
+    func testSomebodyWhoPlansTheTripIsOfferedToo() throws {
+        // An adult with a login is a person on the trip as well; being
+        // asked to type their name again would be a gap, not a rule.
+        let json = """
+        { "suggestions": [ { "subjectPersonId": null, "userId": 3, "label": "Papa",
+            "relation": "plant mit", "birthDate": null, "ageAtStart": null } ] }
+        """
+        let offered = try JSONDecoder()
+            .decode(TripTravellerSuggestionsResponse.self, from: Data(json.utf8))
+
+        XCTAssertEqual(offered.suggestions[0].id, "user:3")
+        XCTAssertEqual(offered.suggestions[0].subtitle, "plant mit")
     }
 }

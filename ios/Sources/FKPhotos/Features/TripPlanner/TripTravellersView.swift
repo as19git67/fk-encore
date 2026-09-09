@@ -25,6 +25,7 @@ struct TripTravellersView: View {
     @State private var startsOn: String?
     @State private var isLoading = true
     @State private var busyId: Int?
+    @State private var busyKey: String?
     @State private var errorMessage: String?
 
     var body: some View {
@@ -120,7 +121,7 @@ struct TripTravellersView: View {
             Button {
                 Task { await add(person) }
             } label: {
-                if busyId == person.subjectPersonId {
+                if busyKey == person.id {
                     ProgressView()
                 } else {
                     Image(systemName: "plus.circle")
@@ -150,12 +151,13 @@ struct TripTravellersView: View {
     }
 
     private func add(_ person: TripTravellerSuggestion) async {
-        busyId = person.subjectPersonId
-        defer { busyId = nil }
+        busyKey = person.id
+        defer { busyKey = nil }
         do {
             let _: TripPlanResponse = try await APIClient.shared.post(
                 "/trip-planner/plans/\(planId)/travellers",
-                body: TripAddTravellerRequest(subjectPersonId: person.subjectPersonId))
+                body: TripAddTravellerRequest(
+                    subjectPersonId: person.subjectPersonId, userId: person.userId))
             await load()
             onPlanChanged?()
         } catch {
@@ -190,7 +192,10 @@ struct TripTravellerSuggestionsResponse: Codable, Sendable {
 }
 
 struct TripAddTravellerRequest: Encodable, Sendable {
-    let subjectPersonId: Int
+    /// One of the household …
+    let subjectPersonId: Int?
+    /// … or somebody who plans this trip (§6.2). Exactly one is set.
+    let userId: Int?
 }
 
 struct TripRemoveTravellerRequest: Encodable, Sendable {
@@ -227,8 +232,15 @@ struct TripTraveller: Codable, Identifiable, Sendable {
 }
 
 struct TripTravellerSuggestion: Codable, Identifiable, Sendable {
-    var id: Int { subjectPersonId }
-    let subjectPersonId: Int
+    /// Household entries and accounts are numbered separately, so the
+    /// row id says which kind this is rather than colliding with it.
+    var id: String {
+        subjectPersonId.map { "person:\($0)" } ?? userId.map { "user:\($0)" } ?? label
+    }
+    /// The household entry, when this is one …
+    let subjectPersonId: Int?
+    /// … or the account of somebody who plans the trip (§6.2).
+    let userId: Int?
     let label: String
     let relation: String
     let birthDate: String?

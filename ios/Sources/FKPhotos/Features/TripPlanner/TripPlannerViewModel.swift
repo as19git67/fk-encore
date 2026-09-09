@@ -138,6 +138,22 @@ final class TripPlannerViewModel {
         day?.blocks.flatMap(\.stops) ?? []
     }
 
+    /// Put a split block back together (§6.5): the branches go, and the
+    /// block is planned once more as one, with the group in one place.
+    func removeSplit(_ block: TripBlock) async {
+        guard let index = day?.blocks.firstIndex(where: { $0.id == block.id }) else { return }
+        do {
+            struct Body: Encodable { let dayIndex: Int; let blockIndex: Int }
+            let response: TripPlanResponse = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/splits/remove",
+                body: Body(dayIndex: dayIndex, blockIndex: index))
+            plan = response.plan
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func load() async {
         isLoading = true
         defer { isLoading = false }

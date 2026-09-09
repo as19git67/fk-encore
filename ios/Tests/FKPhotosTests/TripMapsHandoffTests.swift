@@ -72,14 +72,19 @@ final class TripMapsHandoffTests: XCTestCase {
         XCTAssertNil(TripMapsURL.googleUniversal(through: [], mode: .walking))
     }
 
-    func testLookupAlwaysCarriesTheCoordinate() throws {
-        // The name sharpens the match; the coordinate decides. A wrong
-        // or missing name must not send the traveller elsewhere.
+    func testLookupCarriesTheCoordinateAndNothingElse() throws {
+        // Sending "Sankt-Marien-Kirche 54.137846,10.610387" made Google
+        // search the text and open a church of that name somewhere
+        // else. The coordinate is what we know; the name stays on our
+        // own card.
         let named = try XCTUnwrap(TripMapsURL.googleLookup(b, name: "Stadtmuseum Beispielstadt"))
-        XCTAssertTrue(named.absoluteString.contains("48.372500,10.900200"), named.absoluteString)
+        XCTAssertTrue(named.absoluteString.contains("query=48.372500,10.900200"),
+                      named.absoluteString)
+        XCTAssertFalse(named.absoluteString.lowercased().contains("stadtmuseum"),
+                       named.absoluteString)
 
         let unnamed = try XCTUnwrap(TripMapsURL.googleLookup(b, name: nil))
-        XCTAssertTrue(unnamed.absoluteString.contains("48.372500,10.900200"), unnamed.absoluteString)
+        XCTAssertEqual(unnamed.absoluteString, named.absoluteString)
     }
 
     func testCoordinatesAreFormattedIndependentlyOfLocale() {

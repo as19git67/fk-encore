@@ -555,6 +555,31 @@ Sichtbar bleibt, wer was geändert hat, mit Rückgängig-Möglichkeit. Push für
 Gruppe gibt es bereits (`push`, `sharedalbum`) — sinnvoll ist er sparsam: bei
 Streichungen, Splits und verschobenen Treffpunkten, nicht bei jeder Umsortierung.
 
+**Umgesetzt:** `POST`/`GET /trip-planner/plans/:planId/ops`, `POST …/ops/undo`
+(Migration 0183). Feingranular waren die Endpunkte von Anfang an — jeder ändert
+genau eine Sache. Dazugekommen ist, was ein Gerät ohne Verbindung braucht:
+
+- **Ein Stapel wird übergeben und der Reihe nach angewandt**, jeder Vorgang gegen
+  die Reise, wie sie *jetzt* ist. Zwei Leute, die verschiedene Spots ausgeblendet
+  haben, finden danach beide ausgeblendet vor — genau das, was verloren geht,
+  wenn man den Plan als Dokument speichert.
+- **Zweimal gesagt ist einmal getan.** Jeder Vorgang trägt eine auf dem Gerät
+  erzeugte Id; die abgerissene Verbindung mitten im Request ist der Fall, für den
+  das da ist. Der zweite Eingang wird als Dublette gemeldet, nicht angewandt.
+- **Ein misslungener Vorgang kippt den Stapel nicht.** Neun gute wegzuwerfen,
+  weil der zehnte sich auf einen Spot bezog, den inzwischen jemand entfernt hat,
+  wäre das Schlechteste aus beiden Welten. Ein *formal* falscher Stapel wird
+  dagegen vorher komplett abgelehnt — mittendrin abzubrechen hinterließe eine
+  Reise, die weder die alte noch die neue ist.
+- **Das Journal ist, was passiert ist.** Rückgängig schreibt einen neuen Eintrag,
+  löscht keinen. Der Name des Spots wird beim Anwenden mitgeschrieben, weil
+  Ausblenden ihn aus dem Vorrat nimmt — ein Journal, das hinterher nur noch
+  `way:34` sagen kann, ist ein Log.
+- **Nicht alles hat eine Umkehrung, und das wird gesagt.** Einen Stopp in den
+  Vorrat zurückzulegen rechnet den Tag um die Lücke herum neu; etwas Ähnliches in
+  ungefähr denselben Platz zu planen wäre eine neue Entscheidung im Gewand des
+  Wortes „rückgängig". Der Aufruf lehnt mit dieser Begründung ab.
+
 ### 6.4 Automatisch erkennen, dass ein Spot erledigt ist
 
 Drei Signale, von denen zwei ohne Zusatzaufwand anfallen:
@@ -625,6 +650,32 @@ Weiteres:
 - **Grenze:** Splits laufen innerhalb eines Blocks, höchstens über einen Tag.
   Wer sich für drei Tage trennt, plant zwei Trips — dafür braucht es keine
   Sonderlogik.
+
+**Umgesetzt:** `GET /trip-planner/plans/:planId/splits/suggestion`,
+`POST …/splits`, `POST …/splits/remove` (Migration 0184: `trip_plan_branches`,
+`trip_plan_branch_members`, `trip_plan_stops.branch_id`).
+
+Die Mechanik ist genau die oben beschriebene: Alle Zweige starten am Trennpunkt,
+enden am Treffpunkt, dessen Uhrzeit ein Fixpunkt im Sinne von §4.4 ist, und der
+vorhandene Solver läuft *n*-mal — mit dem Treffpunkt als Rückkehrpunkt, sodass
+jeder Zweig sein Budget vom Treffpunkt rückwärts bekommt und die zwei Zweige
+verschieden viel Zeit haben, wenn sie in verschiedene Richtungen gehen. Der
+Wunsch, um den es der Seite ging, geht mit Vorsprung in den Solver; den Rest
+füllt er wie jeden anderen Block.
+
+Drei Dinge, die der Dienst zusätzlich festlegt:
+
+- **Vorgeschlagen wird aus den Stimmen, entschieden von Hand** (§6.1 zahlt hier
+  ein). Vorgeschlagen wird nur das Paar, das die Gruppe *disjunkt* teilt — will
+  jemand beides, ist es ein Ranking-Problem und kein Split, und Trennen wäre
+  Mechanik um ihrer selbst willen. Stimmen alle überein, sagt der Planer nichts:
+  der Unterschied zwischen Vorschlag und Nörgelei.
+- **Niemand steht in zwei Zweigen**, und ein Split hat mindestens zwei davon.
+- **Unter einer halben Stunde lohnt sich das Trennen nicht** — dann sagt der
+  Aufruf das, statt einen Zweig zu planen, in dem nichts Platz hat.
+
+Ein Split verbraucht keine Herzenswunsch-Kontingente (§6.1) und darf von jedem
+eröffnet werden, der mitfährt (§6.2).
 
 ### 6.6 Was das am Datenmodell ändert
 
@@ -2662,8 +2713,11 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
     die Vorabendprüfung (§8.6) auch ihre vierte Frage — und zwar mit Namen statt
     mit einer Quote: Wer noch nichts gesagt hat, wird genannt, denn genau darum
     geht die Frage. Organisatorrolle und Erledigt-Erkennung standen schon
-    (§6.2, §6.4). Offen bleiben die feingranulare Zusammenführung gleichzeitiger
-    Änderungen (§6.3) und die Splits (§6.5).
+    (§6.2, §6.4). Dazu die **feingranulare Zusammenführung** (§6.3) — gepufferte
+    Vorgänge, idempotent nachgespielt, mit Journal und Rücknahme — und die
+    **Splits** (§6.5): Zweige an einem Block, Budget vom Treffpunkt rückwärts,
+    Vorschlag aus den Stimmen. Damit ist Schritt 11 inhaltlich durch; was auf der
+    iOS-Seite dazu noch fehlt, sind die Bildschirme für Journal und Split.
 12. **Verfeinerung, optional** — Valhalla für echte Reisezeiten, GTFS pro
    Region, Offline-Bundle, Verknüpfung mit Trip-Album und Recap.
 

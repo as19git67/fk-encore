@@ -11,7 +11,8 @@ final class TripBlockTargetsTests: XCTestCase {
     private func block(_ id: String, kind: String = "spots", budget: Int = 180, used: Int = 0) -> TripBlock {
         TripBlock(
             id: id, rowId: id.hashValue, label: id.capitalized, kind: kind,
-            budgetMinutes: budget, usedMinutes: used, startMinutes: nil, stops: [])
+            budgetMinutes: budget, usedMinutes: used, startMinutes: nil, stops: [],
+            branches: nil)
     }
 
     private func day(_ index: Int, detailed: Bool = true, blocks: [TripBlock]) -> TripDay {
