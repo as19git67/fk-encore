@@ -42,12 +42,13 @@ describe('moduleEntryPath', () => {
   })
 
   it('exposes document navigation as the active-module submenu', () => {
-    // The strip keeps the four working views; rarely used entries
+    // The strip keeps the working views; rarely used entries
     // (Kategorie-Vorschläge, Hilfe, …) live behind the Einstellungen gear.
     expect(dokumente.menuItems.map((item) => item.label)).toEqual([
       'Alle Dokumente',
       'Arbeitskorb',
       'Später',
+      'Sammelmappen',
       'Steuer',
       'Einstellungen',
     ])
