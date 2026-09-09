@@ -892,6 +892,33 @@ eine erfundene.
 Geplant gegen tatsächlich besucht, Fotos je Spot aus dem Trip-Album, Übergabe an
 den Recap.
 
+**Umgesetzt (zwei Drittel):** `GET /trip-planner/plans/:planId/review` und der
+Bildschirm „Danach" im Reisemenü.
+
+Die Hakenliste ist die leichte Hälfte. Aufgebaut ist der Bildschirm um die
+andere: **ungeplante Aufenthalte stehen oben, über dem Plan**, nicht unter ihm —
+das Reisetagebuch hält sie fest, weil sie laut §6.4 die wertvollere Hälfte sind,
+und eine reine Hakenliste würde genau sie wegwerfen. Ebenso getrennt bleiben
+zwei Dinge, die leicht zusammenfallen würden: *dort gewesen* (Tagebuch) und
+*abgehakt* (Tagesplan). Ein Stopp, an dem jemand stand, ohne ihn abzuhaken, sagt
+beides.
+
+**Fotos je Spot** sind ein Join, keine neue Pipeline: `photo_poi_matches` bindet
+ein Foto längst an eine OSM-Referenz, und dieselbe Referenz trägt der Stopp.
+Zwei Einschränkungen gehören dazu, sonst zählt die Zahl das Falsche — nur die
+eigenen Fotos, und nur solche aus dem Reisezeitraum. Ohne das Zeitfenster
+landete jeder frühere Besuch derselben Kirche im Konto dieser Reise.
+
+**Die Übergabe an den Recap fehlt** und wird als fehlend ausgewiesen (`omits`).
+Rückblicke entstehen bisher aus GPS-Clustern über die eigene Mediathek
+(`docs/recaps.md`) und wissen nichts davon, dass eine Reise geplant war. Eine
+Verknüpfung zu behaupten, die es nicht gibt, wäre schlechter als sie zu
+benennen.
+
+Der Ton ist bewusst kein Vorwurf: „Ausgelassen" wird grau und mit einem Minus
+gezeigt, nicht rot mit einem Kreuz. Ein Tag, der anders lief, ist der Regelfall,
+auf dem §5 überhaupt aufbaut.
+
 ## 9. Übergänge nach außen und von außen
 
 Die Arbeitsteilung aus §3 wird hier konkret: **fk-encore plant, Apple und Google
@@ -2500,8 +2527,13 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
     **Davon umgesetzt: das Offline-Bündel** (§3.9) — `GET …/plans/:planId/bundle`
     und der Bildschirm „Unterwegs ohne Netz". Vorgezogen, weil es nichts
     voraussetzt, was noch fehlt: Der Plan ist grob genug, um ohne Netz vollwertig
-    zu sein, und die Lichtrechnung lag schon vor. Valhalla, GTFS und die
-    Verknüpfung mit Album und Recap bleiben offen.
+    zu sein, und die Lichtrechnung lag schon vor.
+
+    **Und der Rückblick auf den Plan** (§8.7) — `GET …/plans/:planId/review` und
+    „Danach": geplant gegen tatsächlich besucht, ungeplante Aufenthalte, Fotos je
+    Spot über `photo_poi_matches`. Was davon offen bleibt, ist die Übergabe an den
+    Recap selbst; sie steht in der Antwort als fehlend. Valhalla und GTFS bleiben
+    ebenfalls offen.
 13. **Der Ideenvorrat** (§20) — ein geteilter Vorrat ohne Reise, die Meldung
     bei Nähe, der Tourvorschlag aus mehreren Ideen und die Gebietssuche.
     Bewusst nach Schritt 8: Er lebt von der Standortschleife, und ohne sie
