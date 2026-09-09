@@ -19,17 +19,17 @@
  * photos taken inside the trip's dates. A photograph of the same church
  * from a holiday three years ago is not a picture of this trip.
  *
- * The recap handover is **not** here. Recaps are built from GPS
- * clusters over a user's library (`docs/recaps.md`), and a planned trip
- * does not yet reach that pipeline; claiming a link that does not exist
- * would be worse than saying so, which the response does.
+ * The recap is linked rather than rebuilt: the recap builder stamps
+ * the plan's id into its seed when a photo cluster falls inside a
+ * planned trip, and this looks that up. Null while none exists — a
+ * recap is made of photographs, which arrive before it does.
  */
 
 import { api, APIError } from "encore.dev/api";
 import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { getAuthData } from "~encore/auth";
 import db from "../db/database";
-import { photoPoiMatches, photos } from "../db/schema";
+import { photoPoiMatches, photos, recaps } from "../db/schema";
 import { requirePermission } from "../user/auth-handler";
 import { addDays } from "./leg-dates";
 import { loadPlan, type StoredLeg } from "./plan-store";
@@ -77,11 +77,19 @@ export interface TripReviewResponse {
   unplanned: ReviewUnplanned[];
   totals: ReviewTotals;
   /**
-   * What this screen cannot do yet, so it can say so rather than let
-   * somebody look for it: the recap is built from photo clusters and
-   * has no idea this trip was planned (§8.7).
+   * The recap built from this trip's photos, once one exists. Null
+   * until the nightly build has seen the photographs — a recap is made
+   * of pictures, so there is nothing to link to before there are any.
    */
-  omits: string[];
+  recap: ReviewRecap | null;
+}
+
+export interface ReviewRecap {
+  id: number;
+  title: string;
+  subtitle: string | null;
+  /** How many photos it gathered. */
+  photos: number;
 }
 
 export const tripReview = api(
@@ -149,10 +157,41 @@ export const tripReview = api(
         photos: reviewStops.reduce((sum, stop) => sum + stop.photos, 0)
           + unplanned.reduce((sum, stay) => sum + stay.photos, 0),
       },
-      omits: ["recap"],
+      recap: await recapOf(planId, userId),
     };
   },
 );
+
+/**
+ * The recap that came out of this trip (§8.7).
+ *
+ * The link is written by the recap builder, not here: it stamps
+ * `trip_plan_id` into the seed when a photo cluster falls inside a
+ * planned trip (`photo/recaps.planned-trips.ts`). Reading it back is a
+ * lookup, and null is the ordinary answer during the trip — a recap is
+ * made of photographs, and they arrive before it does.
+ */
+async function recapOf(planId: number, userId: number): Promise<ReviewRecap | null> {
+  const [row] = await db
+    .select({
+      id: recaps.id,
+      title: recaps.title,
+      subtitle: recaps.subtitle,
+      photos: sql<number>`(
+        select count(*)::int from recap_photos where recap_photos.recap_id = ${recaps.id}
+      )`,
+    })
+    .from(recaps)
+    .where(
+      and(
+        eq(recaps.user_id, userId),
+        sql`${recaps.seed}->>'trip_plan_id' = ${String(planId)}`,
+      ),
+    )
+    .limit(1);
+  if (!row) return null;
+  return { id: row.id, title: row.title, subtitle: row.subtitle, photos: row.photos };
+}
 
 function isPlanned(
   visit: StoredVisit,

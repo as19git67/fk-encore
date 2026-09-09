@@ -79,13 +79,27 @@ struct TripReviewView: View {
                          + "Regelfall, nicht der Fehler.")
                 }
 
-                if review.omits.contains("recap") {
-                    Section {
-                        Text("Ein Rückblick entsteht bisher aus den Fotos selbst und weiß nichts "
-                             + "von dieser Reise. Die Verknüpfung fehlt noch.")
+                Section {
+                    if let recap = review.recap {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label(recap.title, systemImage: "sparkles.rectangle.stack")
+                            if let subtitle = recap.subtitle {
+                                Text(subtitle).font(.footnote).foregroundStyle(.secondary)
+                            }
+                            Text("\(recap.photos) Fotos")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        // Not a fault: a recap is made of photographs,
+                        // and they arrive before it does.
+                        Text("Noch kein Rückblick — er entsteht, sobald die Fotos der Reise "
+                             + "verarbeitet sind.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
+                } header: {
+                    Text("Rückblick")
                 }
             }
 
@@ -119,7 +133,8 @@ struct TripReview: Codable, Sendable {
     let stops: [TripReviewStop]
     let unplanned: [TripReviewStay]
     let totals: TripReviewTotals
-    let omits: [String]
+    /// The recap this trip produced, once one exists.
+    let recap: TripReviewRecap?
 
     /// "18.06. – 25.06." — or nothing to say for a trip without dates.
     var period: String {
@@ -127,6 +142,13 @@ struct TripReview: Codable, Sendable {
         guard let endsOn, endsOn != startsOn else { return startsOn }
         return "\(startsOn) – \(endsOn)"
     }
+}
+
+struct TripReviewRecap: Codable, Sendable {
+    let id: Int
+    let title: String
+    let subtitle: String?
+    let photos: Int
 }
 
 struct TripReviewTotals: Codable, Sendable {

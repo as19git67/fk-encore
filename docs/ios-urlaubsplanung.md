@@ -909,11 +909,27 @@ Zwei Einschränkungen gehören dazu, sonst zählt die Zahl das Falsche — nur d
 eigenen Fotos, und nur solche aus dem Reisezeitraum. Ohne das Zeitfenster
 landete jeder frühere Besuch derselben Kirche im Konto dieser Reise.
 
-**Die Übergabe an den Recap fehlt** und wird als fehlend ausgewiesen (`omits`).
-Rückblicke entstehen bisher aus GPS-Clustern über die eigene Mediathek
-(`docs/recaps.md`) und wissen nichts davon, dass eine Reise geplant war. Eine
-Verknüpfung zu behaupten, die es nicht gibt, wäre schlechter als sie zu
-benennen.
+**Nachgereicht: die Übergabe an den Rückblick.** Rückblicke entstehen aus
+GPS-Clustern über die eigene Mediathek (`docs/recaps.md`) und leiteten ihren
+Titel aus den Fotos ab — Stadtname, Zeitraum, im besten Fall ein Satz vom
+Sprachmodell. Das ist die richtige Methode, solange nichts anderes bekannt ist.
+Oft ist aber etwas bekannt: Eine hier geplante Reise hat einen Namen, den jemand
+gewählt hat, Daten, die jemand gesetzt hat, und benannte Etappen. Fällt ein
+Fotocluster in eine solche Reise, gewinnt deren Name — und das Sprachmodell wird
+für diesen Fall gar nicht erst gefragt: Ein getippter Name schlägt einen
+erfundenen.
+
+Bewusst schmal: **Der Plan liefert Titel, Untertitel und eine Rückverknüpfung,
+sonst nichts.** Welche Fotos zum Rückblick gehören, entscheiden weiterhin die
+Fotos — sie sind der ehrliche Beleg dafür, wo jemand wirklich war, während ein
+Plan eine Absichtserklärung ist, und genau um diesen Unterschied geht es in
+§8.7. Das Zeitfenster ist um einen Tag auf beiden Seiten großzügig: Die Anfahrt
+und der Morgen nach der Rückkehr werden mitfotografiert.
+
+Die Rückverknüpfung steht als `trip_plan_id` im `seed` des Rückblicks; „Danach"
+liest sie und zeigt den Rückblick, sobald es einen gibt. Vorher steht dort kein
+Mangel, sondern ein Satz: Ein Rückblick besteht aus Fotos, und die kommen vor
+ihm.
 
 Der Ton ist bewusst kein Vorwurf: „Ausgelassen" wird grau und mit einem Minus
 gezeigt, nicht rot mit einem Kreuz. Ein Tag, der anders lief, ist der Regelfall,
@@ -2531,9 +2547,9 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
 
     **Und der Rückblick auf den Plan** (§8.7) — `GET …/plans/:planId/review` und
     „Danach": geplant gegen tatsächlich besucht, ungeplante Aufenthalte, Fotos je
-    Spot über `photo_poi_matches`. Was davon offen bleibt, ist die Übergabe an den
-    Recap selbst; sie steht in der Antwort als fehlend. Valhalla und GTFS bleiben
-    ebenfalls offen.
+    Spot über `photo_poi_matches`, dazu die Verknüpfung mit dem Recap in beide
+    Richtungen (der Rückblick übernimmt den Namen der geplanten Reise, die Reise
+    zeigt ihren Rückblick). Valhalla und GTFS bleiben offen.
 13. **Der Ideenvorrat** (§20) — ein geteilter Vorrat ohne Reise, die Meldung
     bei Nähe, der Tourvorschlag aus mehreren Ideen und die Gebietssuche.
     Bewusst nach Schritt 8: Er lebt von der Standortschleife, und ohne sie

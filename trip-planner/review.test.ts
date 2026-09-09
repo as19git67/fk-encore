@@ -15,6 +15,7 @@ import {
   osmRegionImports,
   photoPoiMatches,
   photos,
+  recaps,
   tripPlans,
   users,
 } from "../db/schema";
@@ -103,6 +104,7 @@ async function photoOf(userId: number, osmRef: string, day: string) {
 }
 
 beforeEach(async () => {
+  await db.delete(recaps);
   await db.delete(photoPoiMatches);
   await db.delete(photos);
   await db.delete(tripPlans);
@@ -254,12 +256,50 @@ describe("looking back at a trip", () => {
     expect(review.stops.find((s) => s.osmRef === stop.osmRef)?.photos).toBe(0);
   });
 
-  it("says that the recap knows nothing of this trip yet", async () => {
+  it("has no recap while the trip has produced no memory yet", async () => {
+    // A recap is made of photographs, and they arrive before it does.
     const plan = await trip();
 
     const review = await tripReview({ planId: plan.id });
 
-    expect(review.omits).toEqual(["recap"]);
+    expect(review.recap).toBeNull();
+  });
+
+  it("names the recap once the builder has tied one to this plan", async () => {
+    const plan = await trip();
+    const [recap] = await db
+      .insert(recaps)
+      .values({
+        user_id: ownerId,
+        kind: "trip",
+        title: "Zwei Tage Weststadt",
+        subtitle: "18.–19. Juni",
+        dedup_key: `trip:weststadt:${START}:${START}`,
+        score: 50,
+        seed: { trip_plan_id: plan.id },
+      })
+      .returning({ id: recaps.id });
+
+    const review = await tripReview({ planId: plan.id });
+
+    expect(review.recap?.id).toBe(recap.id);
+    expect(review.recap?.title).toBe("Zwei Tage Weststadt");
+  });
+
+  it("does not claim somebody else\u2019s recap", async () => {
+    const plan = await trip();
+    await db.insert(recaps).values({
+      user_id: strangerId,
+      kind: "trip",
+      title: "Fremde Reise",
+      dedup_key: "trip:fremd:2026-06-18:2026-06-19",
+      score: 50,
+      seed: { trip_plan_id: plan.id },
+    });
+
+    const review = await tripReview({ planId: plan.id });
+
+    expect(review.recap).toBeNull();
   });
 
   it("does not hand a trip to somebody who is not on it", async () => {

@@ -93,6 +93,14 @@ All builders live in `photo/recaps.service.ts` and share a common helper,
 - Home centroid is computed from the densest spatial cluster in the
   user's own library.
 - Dedup key: `trip:YYYY-MM-DD:YYYY-MM-DD` (start…end).
+- **Planned trips win the title.** When the cluster's days fall inside a trip
+  planned in the trip planner (`photo/recaps.planned-trips.ts`), the recap takes
+  that trip's name — or its legs, "Tokio · Kyoto · Osaka" — instead of deriving
+  one, and the LLM is not asked at all: a name somebody typed beats one a model
+  invents. The plan contributes nothing else; which photos belong to the recap is
+  still decided by the photos. The plan's id is stamped into `seed.trip_plan_id`,
+  which is how the trip's "Danach" screen finds its recap (§8.7 of
+  `docs/ios-urlaubsplanung.md`).
 
 ### person
 
