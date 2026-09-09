@@ -12,7 +12,8 @@ final class TripReviewTests: XCTestCase {
     {
       "startsOn": "2026-06-18",
       "endsOn": "2026-06-20",
-      "omits": ["recap"],
+      "recap": { "id": 12, "title": "Zwei Tage Weststadt",
+                 "subtitle": "18.–19. Juni", "photos": 14 },
       "totals": { "planned": 6, "done": 3, "skipped": 1, "untouched": 2,
                   "unplanned": 1, "photos": 14 },
       "stops": [
@@ -38,6 +39,8 @@ final class TripReviewTests: XCTestCase {
     func testTheAnswerDecodes() throws {
         let review = try review()
 
+        XCTAssertEqual(review.recap?.title, "Zwei Tage Weststadt")
+
         XCTAssertEqual(review.stops.count, 3)
         XCTAssertEqual(review.unplanned.first?.displayName, "Buchladen um die Ecke")
         XCTAssertEqual(review.totals.photos, 14)
@@ -49,7 +52,7 @@ final class TripReviewTests: XCTestCase {
                                 stops: [], unplanned: [],
                                 totals: TripReviewTotals(planned: 0, done: 0, skipped: 0,
                                                          untouched: 0, unplanned: 0, photos: 0),
-                                omits: [])
+                                recap: nil)
         XCTAssertEqual(review.period, "2026-06-18")
     }
 
