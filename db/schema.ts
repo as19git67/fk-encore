@@ -3064,3 +3064,75 @@ export const weatherForecastCache = pgTable(
     index("weather_forecast_cache_day_idx").on(table.day),
   ]
 );
+
+/**
+ * The pool without a trip (§20).
+ *
+ * Everything else in the planner needs a trip. This is the list people
+ * *collect* rather than plan — the beer garden somebody mentioned, the
+ * exhibition in the next town — and it is the same scored list of
+ * possibilities as `trip_plan_pool`, minus the leg.
+ *
+ * Three columns exist here that a leg's pool does not need: who put it
+ * there (§20.1 — "Papa wollte da hin" is half the information), a
+ * validity window for something that ends (§20.4), and the bookkeeping
+ * that keeps "told you once" true (§20.5).
+ */
+export const ideaPool = pgTable(
+  "idea_pool",
+  {
+    id: serial("id").primaryKey(),
+    owner_id: integer("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    created_by: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+    osm_ref: text("osm_ref").notNull(),
+    name: text("name"),
+    title: text("title"),
+    local_name: text("local_name"),
+    lat: doublePrecision("lat").notNull(),
+    lon: doublePrecision("lon").notNull(),
+    category: text("category").notNull(),
+    kind: text("kind"),
+    dwell_minutes: integer("dwell_minutes").notNull(),
+    note: text("note"),
+    source_url: text("source_url"),
+    wikipedia_url: text("wikipedia_url"),
+    facade_azimuth: real("facade_azimuth"),
+    unmatched: boolean("unmatched").notNull().default(false),
+    photo_stop: boolean("photo_stop").notNull().default(false),
+    valid_from: date("valid_from"),
+    valid_to: date("valid_to"),
+    last_suggested_at: timestamp("last_suggested_at", { mode: "string", withTimezone: true }),
+    dismissed_count: integer("dismissed_count").notNull().default(0),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("idea_pool_owner_ref_key").on(table.owner_id, table.osm_ref),
+    index("idea_pool_owner_idx").on(table.owner_id),
+  ]
+);
+
+/** Who else writes into a collection — the same shape as a trip's shares (§6.2). */
+export const ideaPoolShares = pgTable(
+  "idea_pool_shares",
+  {
+    id: serial("id").primaryKey(),
+    owner_id: integer("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    invited_by: integer("invited_by").references(() => users.id, { onDelete: "set null" }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("idea_pool_shares_owner_user_key").on(table.owner_id, table.user_id),
+    index("idea_pool_shares_user_idx").on(table.user_id),
+  ]
+);
