@@ -731,6 +731,28 @@ schon selbst. Über dem Block ein schmales Band mit Regenrisiko und, wenn heute
 etwas im guten Licht liegt, dem Lichthinweis. Navigation per Deep-Link an Apple
 Maps.
 
+**Korrektur aus der Erprobung: „Heute" ist kein eigener Bildschirm, sondern
+ein Modus.** Als zweiter Screen neben dem Tagesplan (§8.3) gebaut, war die
+Naht an der falschen Stelle: Die eine Hälfte der Handlungen ging nur hier, die
+andere nur dort, und wer den Planer benutzte, sprang für Aufgaben desselben
+Nachmittags hin und her. §8.3 und §8.5 beschreiben aber **zwei Modi eines
+Tages**, nicht zwei Bildschirme mit verschiedenen Fähigkeiten.
+
+Deshalb: **ein Tagesbildschirm, der weiß, ob man in ihm steht.** Läuft eine
+Reise und ist der Tag auf dem Schirm der heutige, wird der laufende Block
+markiert („jetzt"), trägt „Ab hier umplanen" samt Begründung und der Liste
+dessen, was in den Vorrat zurückging, und jeder Spot bietet, wonach man
+unterwegs greift: erledigt, übersprungen, und den Weg dorthin. Ist keine Reise
+unterwegs, sieht derselbe Bildschirm aus wie vorher — die Route zum Spot wird
+dann zu „auf der Karte zeigen", weil eine Wegbeschreibung von zuhause zu einem
+Café in drei Wochen eine Zahl ist, die niemand will.
+
+**Und die App öffnet dort, wo man ist:** Läuft eine Reise — Trip-Modus an oder
+ein geplanter Tag, dessen Datum heute ist —, startet die App im Reise-Tab auf
+dem Tagesplan des laufenden Tages statt im Feed. Einmal beim Start, nicht
+später: Ein Bildschirm, der sich unter dem Daumen bewegt, ist schlimmer als
+einer, der falsch anfängt.
+
 ### 8.6 Der Vorabend: Reisebereitschaft und Packliste
 
 Zwischen „Plan steht" und „erster Reisetag" liegt ein Moment, in dem sich die
