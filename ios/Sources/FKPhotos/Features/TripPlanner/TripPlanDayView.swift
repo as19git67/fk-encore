@@ -101,6 +101,13 @@ struct TripPlanDayView: View {
                         } label: {
                             Label("Reisebereit?", systemImage: "checklist")
                         }
+                        // And afterwards (§8.7): planned against what
+                        // actually happened.
+                        NavigationLink {
+                            TripReviewView(planId: viewModel.planId)
+                        } label: {
+                            Label("Danach", systemImage: "clock.arrow.circlepath")
+                        }
                         // Taking the plan along without a connection
                         // (§3.9) — asked for, never automatic.
                         NavigationLink {
