@@ -69,6 +69,26 @@ export async function ensureFreshToken(): Promise<void> {
   }
 }
 
+/**
+ * Append the access token to a URL as the `token` query parameter.
+ *
+ * For URLs handed to `<img src>` / `<iframe src>`: the browser gives us no
+ * way to set an Authorization header there, so the gateway also accepts the
+ * token as a query parameter. Only use this for endpoints that need it —
+ * anything fetched through `apiFetch` gets a proper bearer header.
+ *
+ * The token is read at build time, so a URL kept around longer than the
+ * token's lifetime goes stale. That is fine for image tags, which are built
+ * fresh on each render and reloaded on cache-bust, but do not persist the
+ * result.
+ */
+export function withAuthTokenParam(url: string): string {
+  const token = localStorage.getItem('auth_token')
+  if (!token) return url
+  const separator = url.includes('?') ? '&' : '?'
+  return `${url}${separator}token=${encodeURIComponent(token)}`
+}
+
 export interface ApiFetchOptions extends RequestInit {
   /**
    * Abort the request after this many milliseconds. Prevents hanging requests
