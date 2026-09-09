@@ -14,6 +14,11 @@ final class TripLocationProvider: NSObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
     private var continuation: CheckedContinuation<CLLocation?, Never>?
     private var didResume = false
+    /// How often a transient "no fix yet" may be retried before giving
+    /// up. `requestLocation` delivers one answer and stops, so a
+    /// `locationUnknown` has to be asked again or nothing else arrives.
+    private static let retriesOnTransientFailure = 2
+    private var retriesLeft = 0
 
     /// - Parameter accuracy: kilometre-coarse by default, which is plenty for
     ///   a place name and a ~25 km geofence centre and returns a fix faster
@@ -28,13 +33,25 @@ final class TripLocationProvider: NSObject, CLLocationManagerDelegate {
 
     /// Returns the device's current location, or nil if permission is denied /
     /// no fix arrives within `timeout` seconds. Never throws.
+    ///
+    /// Answers from the manager's last known fix when that fix is still
+    /// worth trusting. A cold `requestLocation` regularly needs several
+    /// seconds, which is how "Umplanen" came to fail on the first press
+    /// and work on the second: by then a fix existed, it was simply
+    /// never asked for.
     func currentLocation(timeout: TimeInterval = 8) async -> CLLocation? {
         let status = manager.authorizationStatus
         if status == .denied || status == .restricted { return nil }
 
+        if let cached = manager.location,
+           TripLocationFreshness.isUsable(cached, now: Date()) {
+            return cached
+        }
+
         return await withCheckedContinuation { (cont: CheckedContinuation<CLLocation?, Never>) in
             self.continuation = cont
             self.didResume = false
+            self.retriesLeft = Self.retriesOnTransientFailure
 
             // Safety timeout so a missing fix can never hang the start flow.
             Task { @MainActor in
@@ -95,6 +112,18 @@ final class TripLocationProvider: NSObject, CLLocationManagerDelegate {
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        Task { @MainActor in self.resume(nil) }
+        Task { @MainActor in
+            // `kCLErrorLocationUnknown` means "not yet", not "no": the
+            // hardware is still looking, and Apple's own guidance is to
+            // keep waiting. Treating it as an answer is what made the
+            // first press of "Umplanen" say there was no location while
+            // the second worked.
+            if (error as? CLError)?.code == .locationUnknown, self.retriesLeft > 0 {
+                self.retriesLeft -= 1
+                self.manager.requestLocation()
+                return
+            }
+            self.resume(nil)
+        }
     }
 }

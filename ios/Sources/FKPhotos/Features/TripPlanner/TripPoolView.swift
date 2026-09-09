@@ -62,7 +62,7 @@ struct TripPoolView: View {
         .searchable(text: $query, prompt: "Im Vorrat suchen")
         .sheet(item: $placing) { candidate in
             NavigationStack {
-                TripPlacePickerView(leg: leg, candidate: candidate) { blockId, dayIndex in
+                TripBlockPickerView(title: candidate.displayName, leg: leg) { blockId, dayIndex in
                     await viewModel.place(candidate, inBlock: blockId, onDay: dayIndex)
                     placing = nil
                 }
@@ -183,67 +183,5 @@ struct TripPoolView: View {
             }
         }
         .padding(.vertical, 2)
-    }
-}
-
-/// Which day, and which block (§8.4).
-///
-/// Both questions are asked out loud because both have a consequence:
-/// the block is what gets a budget spent on it, and only a day that has
-/// actually been planned can take a spot at all — a day still at trip
-/// resolution has a frame and nothing in it (§4.3), and half-filling
-/// one behind the traveller's back is worse than saying so.
-struct TripPlacePickerView: View {
-    let leg: TripLeg?
-    let candidate: TripCandidate
-    let place: (String, Int) async -> Void
-
-    @State private var isPlacing = false
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        List {
-            ForEach(leg?.days ?? []) { day in
-                Section {
-                    if day.detailed {
-                        ForEach(day.blocks.filter { $0.kind == "spots" }) { block in
-                            Button {
-                                isPlacing = true
-                                Task {
-                                    await place(block.id, day.dayIndex)
-                                    isPlacing = false
-                                }
-                            } label: {
-                                HStack {
-                                    Text(block.label)
-                                    Spacer()
-                                    Text(TripClock.duration(block.budgetMinutes - block.usedMinutes)
-                                         + " frei")
-                                        .font(.caption)
-                                        // Over budget is shown, not
-                                        // prevented (§8.4).
-                                        .foregroundStyle(block.usedMinutes > block.budgetMinutes
-                                                         ? .red : .secondary)
-                                }
-                            }
-                            .disabled(isPlacing)
-                        }
-                    } else {
-                        Text("Dieser Tag ist noch nicht ausgeplant.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Text("Tag \(day.dayIndex + 1)")
-                }
-            }
-        }
-        .navigationTitle(candidate.displayName)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Abbrechen") { dismiss() }
-            }
-        }
     }
 }

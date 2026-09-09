@@ -12,6 +12,9 @@ import SwiftUI
 struct TripTodayView: View {
     @State var viewModel: TripPlannerViewModel
     @State private var mapsChoice: TripMapsChoice?
+    /// The stop whose "which block?" sheet is open, with the block it
+    /// stands in now — the same sheet the pool uses.
+    @State private var moving: TripStopMove?
     @AppStorage(TripMapsPreference.key) private var mapsPreference: String = TripMapsApp.apple.rawValue
 
     var body: some View {
@@ -34,6 +37,18 @@ struct TripTodayView: View {
             await viewModel.load()
             await viewModel.loadLight()
             await viewModel.loadForecast()
+        }
+        .sheet(item: $moving) { move in
+            NavigationStack {
+                TripBlockPickerView(
+                    title: move.stop.displayName,
+                    leg: viewModel.leg,
+                    current: (dayIndex: viewModel.dayIndex, blockId: move.blockId),
+                ) { blockId, dayIndex in
+                    await viewModel.move(move.stop, toDayIndex: dayIndex, toBlockId: blockId)
+                    moving = nil
+                }
+            }
         }
         .confirmationDialog(
             "Navigation öffnen mit",
@@ -106,7 +121,7 @@ struct TripTodayView: View {
                             .foregroundStyle(.secondary)
                     }
                     ForEach(block.stops) { stop in
-                        stopRow(stop, leg: leg)
+                        stopRow(stop, leg: leg, in: block)
                     }
                 } header: {
                     HStack {
@@ -153,7 +168,7 @@ struct TripTodayView: View {
         }
     }
 
-    private func stopRow(_ stop: TripStop, leg: TripLeg) -> some View {
+    private func stopRow(_ stop: TripStop, leg: TripLeg, in block: TripBlock) -> some View {
         HStack(spacing: 10) {
             // The same detail screen the pool and the day view open.
             NavigationLink {
@@ -166,12 +181,47 @@ struct TripTodayView: View {
                     onSave: { await viewModel.saveNote($0) },
                     light: viewModel.light?.hint(for: stop.osmRef),
                     shelter: viewModel.forecast?.shelter(for: stop.osmRef),
-                )
+                ) {
+                    // The pool's detail screen has always offered the
+                    // block; this one offered nothing, while the list
+                    // behind it offered a menu. One decision, one way
+                    // of making it.
+                    Section {
+                        Button {
+                            moving = TripStopMove(stop: stop, blockId: block.id)
+                        } label: {
+                            Label("In einen anderen Block", systemImage: "calendar")
+                        }
+                        Button {
+                            Task { await viewModel.setPinned(stop, !stop.pinned) }
+                        } label: {
+                            Label(stop.pinned ? "Nicht mehr anheften" : "Anheften",
+                                  systemImage: stop.pinned ? "pin.slash" : "pin")
+                        }
+                    } footer: {
+                        Text(stop.pinned
+                             ? "Angeheftet heißt: bleibt liegen, auch wenn umgeplant wird."
+                             : "Anheften hält den Spot an seinem Platz, wenn umgeplant wird.")
+                    }
+                }
             } label: {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(stop.displayName)
-                        .strikethrough(stop.stopStatus != .planned)
-                        .foregroundStyle(stop.stopStatus == .planned ? .primary : .secondary)
+                    HStack(spacing: 6) {
+                        // Pinned is a decision somebody made on purpose
+                        // (§4.4): the day plan has always shown it, and
+                        // here — where the swipe to unpin lives — it
+                        // was the one place you could only find out by
+                        // swiping.
+                        if stop.pinned {
+                            Image(systemName: "pin.fill")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                                .accessibilityLabel("angeheftet")
+                        }
+                        Text(stop.displayName)
+                            .strikethrough(stop.stopStatus != .planned)
+                            .foregroundStyle(stop.stopStatus == .planned ? .primary : .secondary)
+                    }
                     Text(TripClock.duration(stop.dwellMinutes))
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -219,18 +269,27 @@ struct TripTodayView: View {
             // what makes the same move reachable one-handed and with
             // VoiceOver — and it is the only way to reach another day.
             if let leg = viewModel.leg {
-                ForEach(leg.days.filter(\.detailed)) { target in
-                    Menu(target.dayIndex == viewModel.dayIndex
-                         ? "In diesem Tag verschieben"
-                         : "Auf Tag \(target.dayIndex + 1) verschieben") {
-                        ForEach(target.blocks.filter { !$0.isMeal }) { block in
-                            Button(block.label) {
-                                Task {
-                                    await viewModel.move(
-                                        stop,
-                                        toDayIndex: target.dayIndex,
-                                        toBlockId: block.id,
-                                    )
+                ForEach(leg.days.filter(\.detailed)) { day in
+                    // Never the block the stop already stands in: an
+                    // option that does nothing is a wrong answer to
+                    // "where else?".
+                    let targets = TripBlockTargets.ofDay(
+                        day.dayIndex, in: leg,
+                        excluding: (dayIndex: viewModel.dayIndex, blockId: block.id),
+                    )
+                    if !targets.isEmpty {
+                        Menu(day.dayIndex == viewModel.dayIndex
+                             ? "In diesem Tag verschieben"
+                             : "Auf Tag \(day.dayIndex + 1) verschieben") {
+                            ForEach(targets) { target in
+                                Button(target.label) {
+                                    Task {
+                                        await viewModel.move(
+                                            stop,
+                                            toDayIndex: target.dayIndex,
+                                            toBlockId: target.blockId,
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -307,4 +366,11 @@ enum TripMapsChoice: Identifiable {
         case let .single(_, mode), let .block(_, mode): return TripRouteMode(mode)
         }
     }
+}
+
+/// A stop on its way to another block, with where it stands now.
+struct TripStopMove: Identifiable {
+    let stop: TripStop
+    let blockId: String
+    var id: String { stop.osmRef }
 }

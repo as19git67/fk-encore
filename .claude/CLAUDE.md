@@ -1084,9 +1084,11 @@ For date-only values (no time component), always use the helpers from `frontend/
 - `d.toISOString().slice(0, 10)` — shifts the date for timezones east of UTC
 - `new Date("YYYY-MM-DD")` — parses as UTC midnight, may display the previous day locally
 
-## Language for git commit messages and PR descriptions
+## Language for everything written into GitHub
 
-Git commit messages and pull-request descriptions (title and body) must always be written in English, regardless of what language the conversation with the user is in.
+Git commit messages, pull-request descriptions (title and body), **issue titles and bodies, and every issue or PR comment** must always be written in English, regardless of what language the conversation with the user is in. This includes review comments, replies on review threads and edits to an existing issue body.
+
+The conversation with the user stays in whatever language the user is using — only what lands in the repository or on GitHub is English.
 
 ## Aktive Feature-Pläne
 

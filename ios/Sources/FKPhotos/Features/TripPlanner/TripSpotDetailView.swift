@@ -259,8 +259,8 @@ struct TripSpotDetailView<Actions: View>: View {
     }
 }
 
-/// Opened with no actions under it — a planned stop, where the day view
-/// already owns pinning and ticking off.
+/// Opened with no actions under it — a spot that belongs to no plan,
+/// such as one looked up on the map.
 ///
 /// A constrained extension rather than a default argument: a default
 /// value cannot tell the compiler what `Actions` is, so

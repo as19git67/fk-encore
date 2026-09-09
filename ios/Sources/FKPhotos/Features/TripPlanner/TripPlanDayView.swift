@@ -13,6 +13,9 @@ import SwiftUI
 ///     interrogate is a plan nobody trusts (§3.8).
 struct TripPlanDayView: View {
     @State private var showSettings = false
+    /// The stop whose "which block?" sheet is open, with the block it
+    /// stands in now.
+    @State private var moving: TripStopMove?
     @State var viewModel: TripPlannerViewModel
 
     var body: some View {
@@ -93,6 +96,18 @@ struct TripPlanDayView: View {
                     } label: {
                         Label("Mehr", systemImage: "ellipsis.circle")
                     }
+                }
+            }
+        }
+        .sheet(item: $moving) { move in
+            NavigationStack {
+                TripBlockPickerView(
+                    title: move.stop.displayName,
+                    leg: viewModel.leg,
+                    current: (dayIndex: viewModel.dayIndex, blockId: move.blockId),
+                ) { blockId, dayIndex in
+                    await viewModel.move(move.stop, toDayIndex: dayIndex, toBlockId: blockId)
+                    moving = nil
                 }
             }
         }
@@ -599,7 +614,7 @@ struct TripPlanDayView: View {
                     if index > 0 || stop.travelFromPrevious.minutes > 0 {
                         travelRow(stop.travelFromPrevious)
                     }
-                    stopRow(stop)
+                    stopRow(stop, in: block)
                 }
             }
         }
@@ -619,7 +634,7 @@ struct TripPlanDayView: View {
         .padding(.leading, 4)
     }
 
-    private func stopRow(_ stop: TripStop) -> some View {
+    private func stopRow(_ stop: TripStop, in block: TripBlock) -> some View {
         let reasons = viewModel.reasons(for: stop)
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
@@ -636,7 +651,27 @@ struct TripPlanDayView: View {
                         onSave: { await viewModel.saveNote($0) },
                         light: viewModel.light?.hint(for: stop.osmRef),
                         shelter: viewModel.forecast?.shelter(for: stop.osmRef),
-                    )
+                    ) {
+                        // The same section "Unterwegs" and the pool
+                        // show: one decision, one way of making it.
+                        Section {
+                            Button {
+                                moving = TripStopMove(stop: stop, blockId: block.id)
+                            } label: {
+                                Label("In einen anderen Block", systemImage: "calendar")
+                            }
+                            Button {
+                                Task { await viewModel.setPinned(stop, !stop.pinned) }
+                            } label: {
+                                Label(stop.pinned ? "Nicht mehr anheften" : "Anheften",
+                                      systemImage: stop.pinned ? "pin.slash" : "pin")
+                            }
+                        } footer: {
+                            Text(stop.pinned
+                                 ? "Angeheftet heißt: bleibt liegen, auch wenn umgeplant wird."
+                                 : "Anheften hält den Spot an seinem Platz, wenn umgeplant wird.")
+                        }
+                    }
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(stop.displayName)
