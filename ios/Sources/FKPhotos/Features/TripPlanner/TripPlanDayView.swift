@@ -672,6 +672,15 @@ struct TripPlanDayView: View {
                                 Label(stop.pinned ? "Nicht mehr anheften" : "Anheften",
                                       systemImage: stop.pinned ? "pin.slash" : "pin")
                             }
+                            // "Not this one, and not next time either"
+                            // (§5): the way to stop the search from
+                            // proposing a place that is simply not
+                            // wanted. Reversible in the trip settings.
+                            Button(role: .destructive) {
+                                Task { await viewModel.hide(osmRef: stop.osmRef) }
+                            } label: {
+                                Label("Für diese Reise ausblenden", systemImage: "eye.slash")
+                            }
                         } footer: {
                             Text(stop.pinned
                                  ? "Angeheftet heißt: bleibt liegen, auch wenn umgeplant wird."

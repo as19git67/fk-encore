@@ -2981,6 +2981,31 @@ export const tripPlanPool = pgTable(
  * pair (leg, place) is what a person means, and it holds whether the
  * place currently sits in the pool, on a day, or nowhere.
  */
+/**
+ * Spots this trip does not want to see again (§5, §20.5).
+ *
+ * A remembered "no" rather than a deletion: the row belongs to the
+ * region database and comes back from every search, so the only thing
+ * that can be kept is the answer. Per trip, because a place the family
+ * turned down in Lisbon is not wanted on the second Lisbon day either.
+ */
+export const tripHiddenSpots = pgTable(
+  "trip_hidden_spots",
+  {
+    id: serial("id").primaryKey(),
+    plan_id: integer("plan_id")
+      .notNull()
+      .references(() => tripPlans.id, { onDelete: "cascade" }),
+    osm_ref: text("osm_ref").notNull(),
+    // The name it had when it was hidden — the list has to say which
+    // place it is offering to bring back.
+    name: text("name"),
+    hidden_by: integer("hidden_by").references(() => users.id, { onDelete: "set null" }),
+    hidden_at: timestamp("hidden_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("trip_hidden_spots_plan_ref_key").on(table.plan_id, table.osm_ref)],
+);
+
 export const tripSpotNotes = pgTable(
   "trip_spot_notes",
   {

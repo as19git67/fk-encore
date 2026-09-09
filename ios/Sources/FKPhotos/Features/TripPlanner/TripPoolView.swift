@@ -56,6 +56,20 @@ struct TripPoolView: View {
         }
         .navigationTitle("Vorrat")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                // The anti-pool: what this trip has turned down. It
+                // belongs next to the pool rather than in the settings,
+                // because it is the same question — what may the
+                // planner offer? — with the opposite answer.
+                NavigationLink {
+                    TripHiddenSpotsView(viewModel: viewModel)
+                } label: {
+                    Label("Ausgeblendet", systemImage: "eye.slash")
+                }
+            }
+        }
+        .task { await viewModel.loadHiddenSpots() }
         // A pool of a hundred and fifty candidates is what the planner
         // routinely produces; scrolling it to find the one somebody
         // mentioned at breakfast is not a plan.
@@ -114,24 +128,46 @@ struct TripPoolView: View {
                     } label: {
                         Label("In einen Block setzen", systemImage: "calendar.badge.plus")
                     }
-                    Button(role: .destructive) {
-                        Task { await viewModel.drop(candidate) }
-                    } label: {
-                        Label("Aus dem Vorrat entfernen", systemImage: "trash")
+                    if candidate.isManual {
+                        // A find somebody brought in themselves is
+                        // theirs to delete: it exists because a person
+                        // added it, and nothing will propose it again.
+                        Button(role: .destructive) {
+                            Task { await viewModel.drop(candidate) }
+                        } label: {
+                            Label("Aus dem Vorrat entfernen", systemImage: "trash")
+                        }
+                    } else {
+                        Button(role: .destructive) {
+                            Task { await viewModel.hide(osmRef: candidate.osmRef) }
+                        } label: {
+                            Label("Für diese Reise ausblenden", systemImage: "eye.slash")
+                        }
                     }
                 } footer: {
-                    Text("Entfernen heißt „nicht dieser“. Beim nächsten Neuplanen kann der "
-                         + "Planer ihn wiederfinden — er liegt ja weiterhin in der Gegend.")
+                    Text(candidate.isManual
+                         ? "Selbst hinzugefügt — entfernen heißt hier wirklich weg."
+                         : "Ausblenden heißt „diesen nicht“: Der Planer schlägt ihn auf dieser "
+                           + "Reise nicht mehr vor, auch beim nächsten Neuplanen nicht. "
+                           + "Rückgängig oben unter „Ausgeblendet“.")
                 }
             }
         } label: {
             label(candidate, leg: leg)
         }
         .swipeActions(edge: .trailing) {
-            Button(role: .destructive) {
-                Task { await viewModel.drop(candidate) }
-            } label: {
-                Label("Entfernen", systemImage: "trash")
+            if candidate.isManual {
+                Button(role: .destructive) {
+                    Task { await viewModel.drop(candidate) }
+                } label: {
+                    Label("Entfernen", systemImage: "trash")
+                }
+            } else {
+                Button(role: .destructive) {
+                    Task { await viewModel.hide(osmRef: candidate.osmRef) }
+                } label: {
+                    Label("Ausblenden", systemImage: "eye.slash")
+                }
             }
         }
         .swipeActions(edge: .leading) {
@@ -189,5 +225,49 @@ struct TripPoolView: View {
             }
         }
         .padding(.vertical, 2)
+    }
+}
+
+/// What this trip has turned down, and the way back (§5).
+///
+/// A "no" you cannot take back is a deletion wearing a friendlier word,
+/// so the list exists for the same reason the hiding does: the spot is
+/// still out there, only the answer is kept.
+struct TripHiddenSpotsView: View {
+    @State var viewModel: TripPlannerViewModel
+
+    var body: some View {
+        List {
+            if viewModel.hiddenSpots.isEmpty {
+                ContentUnavailableView(
+                    "Nichts ausgeblendet",
+                    systemImage: "eye",
+                    description: Text("Was ihr für diese Reise ausblendet, steht hier — und "
+                                      + "lässt sich von hier aus wieder einblenden."),
+                )
+            } else {
+                Section {
+                    ForEach(viewModel.hiddenSpots) { hidden in
+                        HStack {
+                            Text(hidden.displayName)
+                            Spacer()
+                            Button("Einblenden") {
+                                Task { await viewModel.unhide(osmRef: hidden.osmRef) }
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                } footer: {
+                    // Said plainly, because "einblenden" could be read
+                    // as "put it back on Tuesday morning".
+                    Text("Eingeblendet heißt: Der Planer darf ihn wieder vorschlagen. Auf den "
+                         + "Plan kommt er dadurch nicht — das entscheidet die nächste Planung "
+                         + "oder ihr selbst.")
+                }
+            }
+        }
+        .navigationTitle("Ausgeblendet")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await viewModel.loadHiddenSpots() }
     }
 }

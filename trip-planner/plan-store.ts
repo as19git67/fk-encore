@@ -28,6 +28,7 @@ import {
   tripPlanStops,
   tripPlans,
   tripSpotNotes,
+  tripHiddenSpots,
 } from "../db/schema";
 import type { Candidate, PlannedBlock } from "./solver";
 import type { CurrentBlock, CurrentStop, StopStatus } from "./redistribute";
@@ -1206,6 +1207,144 @@ export async function removeFromPool(
     .where(and(eq(tripPlanPool.leg_id, legId), eq(tripPlanPool.osm_ref, osmRef)))
     .returning({ id: tripPlanPool.id });
   return deleted.length > 0;
+}
+
+/** A spot this trip has turned down (§5). */
+export interface HiddenSpot {
+  osmRef: string;
+  /** What it was called when it was hidden — the list has to name it. */
+  name: string | null;
+  hiddenAt: string;
+}
+
+/**
+ * Remember a "no" for the whole trip.
+ *
+ * The row itself belongs to the region database and comes back from
+ * every search, so the only thing that can be kept is the answer
+ * (§20.5 sketches the same mechanism for the idea pool). Per trip
+ * rather than per leg: a place the family turned down in Lisbon is not
+ * wanted on the second Lisbon day either.
+ */
+export async function hideSpot(
+  planId: number,
+  osmRef: string,
+  name: string | null,
+  userId: number,
+  db: Db = dbDefault,
+): Promise<void> {
+  await db
+    .insert(tripHiddenSpots)
+    .values({ plan_id: planId, osm_ref: osmRef, name, hidden_by: userId })
+    // Hiding twice is not an error, and the second answer is the same
+    // as the first.
+    .onConflictDoUpdate({
+      target: [tripHiddenSpots.plan_id, tripHiddenSpots.osm_ref],
+      set: { name, hidden_by: userId, hidden_at: new Date().toISOString() },
+    });
+}
+
+/** Take the "no" back. Answers false when there was none. */
+export async function unhideSpot(
+  planId: number,
+  osmRef: string,
+  db: Db = dbDefault,
+): Promise<boolean> {
+  const deleted = await db
+    .delete(tripHiddenSpots)
+    .where(and(eq(tripHiddenSpots.plan_id, planId), eq(tripHiddenSpots.osm_ref, osmRef)))
+    .returning({ id: tripHiddenSpots.id });
+  return deleted.length > 0;
+}
+
+/** What this trip has turned down, newest first. */
+export async function listHiddenSpots(
+  planId: number,
+  db: Db = dbDefault,
+): Promise<HiddenSpot[]> {
+  const rows = await db
+    .select()
+    .from(tripHiddenSpots)
+    .where(eq(tripHiddenSpots.plan_id, planId))
+    .orderBy(desc(tripHiddenSpots.hidden_at));
+  return rows.map((row) => ({
+    osmRef: row.osm_ref,
+    name: row.name,
+    hiddenAt: row.hidden_at,
+  }));
+}
+
+/**
+ * The references the planner must not propose again for this trip.
+ *
+ * Read once per planning run and handed to the candidate scoring, so a
+ * hidden spot never even becomes a candidate — filtering later would
+ * leave it in the reasons, in the counts and in the pool.
+ */
+export async function hiddenRefs(
+  planId: number,
+  db: Db = dbDefault,
+): Promise<Set<string>> {
+  const rows = await db
+    .select({ osmRef: tripHiddenSpots.osm_ref })
+    .from(tripHiddenSpots)
+    .where(eq(tripHiddenSpots.plan_id, planId));
+  return new Set(rows.map((r) => r.osmRef));
+}
+
+/**
+ * Take a spot out of every pool and every day of a trip.
+ *
+ * The counterpart to hiding: the answer is remembered, and what is
+ * already on the plan goes with it. Days that lost a stop are handed
+ * back so the caller can rewalk them — the walk either side of the gap
+ * has changed, and a day that still describes the old one is wrong in
+ * a way nobody would notice until they stood there (§8.4).
+ */
+export async function purgeSpot(
+  planId: number,
+  osmRef: string,
+  db: Db = dbDefault,
+): Promise<{ removedFromPool: boolean; dayIds: number[] }> {
+  const legs = await db
+    .select({ id: tripPlanLegs.id })
+    .from(tripPlanLegs)
+    .where(eq(tripPlanLegs.plan_id, planId));
+  const legIds = legs.map((l) => l.id);
+  if (legIds.length === 0) return { removedFromPool: false, dayIds: [] };
+
+  const removed = await db
+    .delete(tripPlanPool)
+    .where(and(inArray(tripPlanPool.leg_id, legIds), eq(tripPlanPool.osm_ref, osmRef)))
+    .returning({ id: tripPlanPool.id });
+
+  const days = await db
+    .select({ id: tripPlanDays.id })
+    .from(tripPlanDays)
+    .where(inArray(tripPlanDays.leg_id, legIds));
+  const dayIds = days.map((d) => d.id);
+  if (dayIds.length === 0) return { removedFromPool: removed.length > 0, dayIds: [] };
+
+  const blocks = await db
+    .select({ id: tripPlanBlocks.id, dayId: tripPlanBlocks.day_id })
+    .from(tripPlanBlocks)
+    .where(inArray(tripPlanBlocks.day_id, dayIds));
+  const dayByBlock = new Map(blocks.map((b) => [b.id, b.dayId]));
+
+  const deletedStops = await db
+    .delete(tripPlanStops)
+    .where(and(
+      inArray(tripPlanStops.block_id, [...dayByBlock.keys()]),
+      eq(tripPlanStops.osm_ref, osmRef),
+    ))
+    .returning({ blockId: tripPlanStops.block_id });
+
+  const touched = new Set<number>();
+  for (const stop of deletedStops) {
+    const dayId = dayByBlock.get(stop.blockId);
+    if (dayId !== undefined) touched.add(dayId);
+  }
+  return { removedFromPool: removed.length > 0, dayIds: [...touched] };
 }
 
 /**
