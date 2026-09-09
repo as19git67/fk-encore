@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, computed, watch, nextTick } from 'vue'
+import { onBeforeUnmount, onMounted, ref, computed, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
@@ -36,6 +36,9 @@ import { useAuthStore } from '../stores/auth'
 import { useDocSelectionStore } from '../stores/documents/selection'
 import { useRealtimeEvent } from '../composables/useRealtime'
 import { useScrollRestore } from '../composables/useScrollRestore'
+import { useSplitView } from '../composables/useSplitView'
+import { resolveActiveId, stepActiveId } from '../utils/activeListItem'
+import DocumentPreviewPane from '../components/documents/DocumentPreviewPane.vue'
 import { useSort, type SortField } from '../composables/useSort'
 import {
   collectionQueryParams,
@@ -459,6 +462,9 @@ async function load() {
   loading.value = true
   error.value = ''
   void loadCollections()
+  // Held so the current row can fall to whatever took its place when a reload
+  // drops it — deleted, filtered away, or narrowed out by a search.
+  const previousItems = items.value
   try {
     const filterParams = currentFilterParams()
     if (isSearchActive.value) {
@@ -487,6 +493,7 @@ async function load() {
     error.value = err.message || 'Fehler beim Laden der Dokumente'
   } finally {
     loading.value = false
+    syncActiveDoc(previousItems)
   }
 }
 
@@ -506,6 +513,9 @@ async function loadMore() {
     const known = new Set(items.value.map((d) => d.id))
     items.value = [...items.value, ...res.items.filter((d) => !known.has(d.id))]
     total.value = res.total
+    // Appending never moves the current row, but the first page may have been
+    // empty — then this is where it gets one.
+    syncActiveDoc()
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Nachladen der Dokumente'
   } finally {
@@ -554,7 +564,69 @@ async function loadCorrespondents() {
   }
 }
 
+// ─── Split view: list left, preview right (issue #735) ──────────────────────
+// Wide landscape screens read a document list by walking it, not by drilling
+// into each row and coming back. The pane on the right follows one *current*
+// row — a different thing from the checkbox selection above, which collects
+// documents for batch actions and may hold any number of them.
+
+const { isSplit } = useSplitView()
+const activeDocId = ref<number | null>(null)
+
+/**
+ * Hold the current row steady as the list changes, and pick one when there is
+ * none — the split view always has exactly one current row while the list has
+ * any. Outside the split nothing is current: the pane is not rendered, and a
+ * highlight without a pane is a promise the layout does not keep.
+ */
+function syncActiveDoc(previous: DocumentSummary[] = []) {
+  if (!isSplit.value) {
+    activeDocId.value = null
+    return
+  }
+  activeDocId.value = resolveActiveId(items.value, activeDocId.value, previous)
+}
+
+watch(isSplit, () => syncActiveDoc())
+
+/** Move the current row with the keyboard, bringing it into view. */
+function moveActiveDoc(delta: number) {
+  const next = stepActiveId(items.value, activeDocId.value, delta)
+  if (next == null || next === activeDocId.value) return
+  activeDocId.value = next
+  nextTick(() => {
+    document
+      .querySelector<HTMLElement>(`[data-doc-id="${next}"]`)
+      ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  })
+}
+
+/**
+ * ↑/↓ walk the list while the split is on. Ignored while the caret is in an
+ * input and while a modifier is held, so the search field and the browser's
+ * own shortcuts keep working.
+ */
+function onListKeydown(event: KeyboardEvent) {
+  if (!isSplit.value) return
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+  if (event.altKey || event.ctrlKey || event.metaKey) return
+  const tag = (event.target as HTMLElement | null)?.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+  event.preventDefault()
+  moveActiveDoc(event.key === 'ArrowDown' ? 1 : -1)
+}
+
+onMounted(() => window.addEventListener('keydown', onListKeydown))
+onBeforeUnmount(() => window.removeEventListener('keydown', onListKeydown))
+
 async function openDocument(doc: DocumentSummary) {
+  // In the split view the row's own click shows the document beside the list;
+  // the issue asks for no drill-down there. The pane's "Öffnen" still reaches
+  // the full editing view for anyone who wants it.
+  if (isSplit.value) {
+    activeDocId.value = doc.id
+    return
+  }
   rememberDocumentListFocus(doc.id)
   // Applying a filter/sort writes the URL asynchronously (fire-and-forget,
   // see routeQueryUpdate.ts) — wait for it to land first, otherwise a
@@ -868,6 +940,11 @@ onMounted(async () => {
       <template v-else>Noch keine Dokumente vorhanden.</template>
     </div>
 
+    <!-- List and, on a wide landscape screen, the preview beside it (#735).
+         The header and toolbar above stay full width: a filter panel squeezed
+         into a 600px column is worse than one that spans the page. -->
+    <div class="list-region" :class="{ 'list-region--split': isSplit }">
+      <div class="list-column">
     <!-- Result count + whole-result-list basket action -->
     <div v-if="!loading && items.length > 0" class="results-bar">
       <span class="results-count">
@@ -934,7 +1011,11 @@ onMounted(async () => {
         :key="doc.id"
         :data-doc-id="doc.id"
         class="document-card"
-        :class="{ 'document-card--selected': isSelected(doc.id) }"
+        :class="{
+          'document-card--selected': isSelected(doc.id),
+          'document-card--active': isSplit && activeDocId === doc.id,
+        }"
+        :aria-current="isSplit && activeDocId === doc.id ? 'true' : undefined"
       >
         <div class="document-header">
           <div class="document-checkbox" @click.stop>
@@ -1020,7 +1101,10 @@ onMounted(async () => {
         :key="doc.id"
         :data-doc-id="doc.id"
         class="grid-card"
-        :class="{ 'grid-card--selected': isSelected(doc.id) }"
+        :class="{
+          'grid-card--selected': isSelected(doc.id),
+          'grid-card--active': isSplit && activeDocId === doc.id,
+        }"
         tabindex="0"
         @click="openDocument(doc)"
         @keydown.enter="openDocument(doc)"
@@ -1084,6 +1168,11 @@ onMounted(async () => {
       />
     </div>
 
+      </div>
+
+      <DocumentPreviewPane v-if="isSplit" :document-id="activeDocId" class="detail-column" />
+    </div>
+
     <!-- Dialogs -->
     <DocumentUploadDefaultsDialog
       v-model:visible="defaultsDialogVisible"
@@ -1115,6 +1204,44 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+/* ── Split layout (issue #735) ──────────────────────────────────────────────
+   Single column by default; the two-column grid only exists once the media
+   query in useSplitView matches, so the stylesheet and the script cannot
+   disagree about whether the pane is there. */
+.list-region {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.list-region--split {
+  display: grid;
+  grid-template-columns: minmax(500px, 600px) 1fr;
+  align-items: start;
+  gap: 1rem;
+}
+.list-column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+}
+/* Sticky rather than a scroll container of its own: the page keeps its single
+   scrollbar (and with it the list's scroll restoration), while the pane stays
+   put as the list moves past it. */
+.list-region--split .detail-column {
+  position: sticky;
+  top: calc(var(--menubar-height, 3.5rem) + 0.75rem);
+  height: calc(100dvh - var(--menubar-height, 3.5rem) - 1.5rem);
+}
+.document-card--active {
+  border-color: var(--p-primary-color);
+  box-shadow: inset 3px 0 0 0 var(--p-primary-color);
+  background: color-mix(in srgb, var(--p-primary-color) 6%, var(--p-content-background));
+}
+.grid-card--active {
+  border-color: var(--p-primary-color);
+  box-shadow: 0 0 0 2px var(--p-primary-color);
+}
 .collection-strip {
   display: flex;
   flex-direction: column;
