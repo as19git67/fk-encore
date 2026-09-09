@@ -65,19 +65,13 @@ struct ShareAnalyzeResponse: Decodable, Sendable {
 /// The main app's `APIClient` lives inside the `FKPhotos` library, which the
 /// extension cannot import. Both the access token and the server URL are
 /// mirrored to the App Group by `AuthManager.saveTokens` — this reads them
-/// directly, without touching the Keychain.
+/// through `ShareAuth`, which also renews the session when the fifteen
+/// minutes of an access token have run out. Without that, sharing a spot in
+/// the afternoon failed as "not set up" for a session that was perfectly
+/// valid.
 enum ShareExtensionAPI {
-    private static let appGroupID = "group.de.f4mil.photos"
-    private static let tokenKey   = "shared.auth_token"
-    private static let serverKey  = "shared.serverURL"
-
-    private static var token: String? {
-        UserDefaults(suiteName: appGroupID)?.string(forKey: tokenKey)
-    }
-
     private static var baseURL: URL {
-        let stored = UserDefaults(suiteName: appGroupID)?.string(forKey: serverKey) ?? ""
-        return URL(string: stored) ?? URL(string: "http://localhost:4000")!
+        ShareAuth.serverURL ?? URL(string: "http://localhost:4000")!
     }
 
     private static func url(for path: String) -> URL {
@@ -86,15 +80,12 @@ enum ShareExtensionAPI {
     }
 
     private static func authorise(_ request: inout URLRequest) {
-        if let t = token {
+        if let t = ShareAuth.token {
             request.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization")
         }
     }
 
-    private static func check(_ response: URLResponse, data: Data) throws {
-        guard let http = response as? HTTPURLResponse else {
-            throw URLError(.badServerResponse)
-        }
+    private static func check(_ http: HTTPURLResponse, data: Data) throws {
         guard (200...299).contains(http.statusCode) else {
             struct Err: Decodable { let message: String? }
             let msg = (try? JSONDecoder().decode(Err.self, from: data))?.message
@@ -108,11 +99,13 @@ enum ShareExtensionAPI {
 
     static func fetchPlans() async throws -> [SharePlanSummary] {
         struct Response: Decodable { let plans: [SharePlanSummary] }
-        var request = URLRequest(url: url(for: "/trip-planner/plans"), timeoutInterval: 20)
-        request.httpMethod = "GET"
-        authorise(&request)
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try check(response, data: data)
+        let (data, http) = try await ShareAuth.perform {
+            var request = URLRequest(url: url(for: "/trip-planner/plans"), timeoutInterval: 20)
+            request.httpMethod = "GET"
+            authorise(&request)
+            return request
+        }
+        try check(http, data: data)
         return try JSONDecoder().decode(Response.self, from: data).plans
     }
 
@@ -121,14 +114,17 @@ enum ShareExtensionAPI {
     static func analyzeShare(planId: Int, url urlString: String?,
                              text: String?) async throws -> ShareAnalyzeResponse {
         struct Body: Encodable { let url: String?; let text: String? }
-        var request = URLRequest(url: url(for: "/trip-planner/plans/\(planId)/shares"),
-                                 timeoutInterval: 30)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(Body(url: urlString, text: text))
-        authorise(&request)
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try check(response, data: data)
+        let body = try JSONEncoder().encode(Body(url: urlString, text: text))
+        let (data, http) = try await ShareAuth.perform {
+            var request = URLRequest(url: url(for: "/trip-planner/plans/\(planId)/shares"),
+                                     timeoutInterval: 30)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+            authorise(&request)
+            return request
+        }
+        try check(http, data: data)
         return try JSONDecoder().decode(ShareAnalyzeResponse.self, from: data)
     }
 
@@ -161,20 +157,23 @@ enum ShareExtensionAPI {
             let legIndex: Int?; let dwellMinutes: Int?
         }
         struct Response: Decodable { let merged: Bool }
-        var request = URLRequest(url: url(for: "/trip-planner/plans/\(planId)/finds"),
-                                 timeoutInterval: 20)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(Body(
+        let body = try JSONEncoder().encode(Body(
             lat: lat, lon: lon,
             name: name?.isEmpty == false ? name : nil,
             note: note?.isEmpty == false ? note : nil,
             sourceUrl: sourceUrl,
             legIndex: legIndex,
             dwellMinutes: dwellMinutes))
-        authorise(&request)
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try check(response, data: data)
+        let (data, http) = try await ShareAuth.perform {
+            var request = URLRequest(url: url(for: "/trip-planner/plans/\(planId)/finds"),
+                                     timeoutInterval: 20)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+            authorise(&request)
+            return request
+        }
+        try check(http, data: data)
         return (try? JSONDecoder().decode(Response.self, from: data))?.merged ?? false
     }
 }
