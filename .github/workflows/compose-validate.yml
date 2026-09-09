@@ -22,14 +22,22 @@ jobs:
   validate:
     name: docker compose config
     runs-on: ubuntu-latest
+    # WATCHTOWER_TOKEN is declared `${WATCHTOWER_TOKEN:?…}` in the compose
+    # file so a real deployment cannot come up with an unauthenticated,
+    # Docker-socket-backed update API. That makes it mandatory for
+    # interpolation too, so supply a throwaway value here — a shell
+    # variable outranks the --env-file below, covering both invocations.
+    # This is a config-parse placeholder, not a credential.
+    env:
+      WATCHTOWER_TOKEN: compose-validation-placeholder
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
 
       # --quiet exits non-zero on any syntax / reference / volume-ref error,
-      # so this is a cheap guard against broken compose files. The prod file
-      # references unset env vars (WATCHTOWER_TOKEN etc.) which compose
-      # treats as empty strings — that is fine for a config check.
+      # so this is a cheap guard against broken compose files. The remaining
+      # unset env vars (SMTP_*, VAPID_*, …) are treated as empty strings by
+      # compose — that is fine for a config check.
 
       # Default (production) interpolation — no env-file, every DEPLOY_* uses
       # its baked-in default.
