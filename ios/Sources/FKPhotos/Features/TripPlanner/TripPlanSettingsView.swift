@@ -13,7 +13,13 @@ import SwiftUI
 /// everything anybody put in the pool by hand (§9.2).
 struct TripPlanSettingsView: View {
     @State private var model: TripPlanSettingsViewModel
+    @State private var editingDayShape = false
     @Environment(\.dismiss) private var dismiss
+
+    /// Kept beside the model because the day-shape editor is its own
+    /// screen with its own request — it does not go through the
+    /// settings save.
+    private let planId: Int
 
     /// Called after a successful save, so the day screen reloads.
     let onSaved: () -> Void
@@ -30,6 +36,7 @@ struct TripPlanSettingsView: View {
         _model = State(initialValue: TripPlanSettingsViewModel(
             planId: planId, constraints: constraints, title: title,
             mode: mode, startDate: startDate, firstLeg: firstLeg))
+        self.planId = planId
         self.onSaved = onSaved
     }
 
@@ -92,6 +99,20 @@ struct TripPlanSettingsView: View {
                      + "ist.")
             }
 
+            Section {
+                Button {
+                    editingDayShape = true
+                } label: {
+                    Label("Tagesablauf ändern", systemImage: "list.bullet.indent")
+                }
+            } footer: {
+                // §4.1: the four-part day is a default, not a fixed
+                // set — this is where it stops being fixed.
+                Text("Vormittag, Mittagspause, Nachmittag, Abend sind ein Vorschlag. "
+                     + "Blöcke lassen sich umbenennen, verlängern, verschieben und "
+                     + "streichen — die Mittagspause zum Beispiel.")
+            }
+
             if !model.options.isEmpty {
                 Section {
                     ForEach(model.options) { option in
@@ -135,6 +156,9 @@ struct TripPlanSettingsView: View {
         .navigationTitle("Einstellungen")
         .navigationBarTitleDisplayMode(.inline)
         .task { await model.loadInterests() }
+        .sheet(isPresented: $editingDayShape) {
+            TripDayShapeView(planId: planId, onSaved: onSaved)
+        }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Abbrechen") { dismiss() }

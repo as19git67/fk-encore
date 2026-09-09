@@ -22,6 +22,7 @@ import { requirePermission } from "../user/auth-handler";
 import { getGeoClient } from "../osm-admin/geo-client";
 import { pickRegion } from "../osm-admin/region-router";
 import { DEFAULT_DAY, shapeDay, type BlockTemplate, type GroupProfile, type Pace } from "./blocks";
+import { dayShapeOf, validateDayShape } from "./day-shape";
 import { scoreForLight, toCandidates, type ScoredCandidate } from "./candidates";
 import { requireOrganiser } from "./plan-access";
 import {
@@ -244,7 +245,11 @@ export const createTripPlan = api(
     const userId = requireUser();
     const legRequests = normalizeLegs(req);
     const maxWalkMinutes = validateMaxWalk(req.maxWalkMinutes);
-    const shape = shapeDay(req.blocks ?? DEFAULT_DAY, req.pace ?? "normal", req.group);
+    // Stored below when it is not the default: a re-plan has to build
+    // the same day, and DEFAULT_DAY at that point quietly turned a
+    // custom day back into the standard four (§4.1).
+    const dayShape = req.blocks ? validateDayShape(req.blocks) : null;
+    const shape = shapeDay(dayShape ?? DEFAULT_DAY, req.pace ?? "normal", req.group);
 
     const prepared = applyTransfers(legRequests);
     const detailDays = validateDetailDays(req.detailDays);
@@ -287,6 +292,10 @@ export const createTripPlan = api(
         pace: req.pace ?? "normal",
         group: req.group ?? null,
         maxWalkMinutes,
+        // Null means "the default four" rather than a copy of them:
+        // freezing today's numbers into every trip would make changing
+        // the defaults a change nobody sees.
+        blocks: dayShape,
       },
       legs,
     });
@@ -420,8 +429,9 @@ export const updateTripSettings = api(
 export async function replanAfterFrameChange(
   plan: StoredPlan,
   userId: number,
+  constraints?: Record<string, unknown>,
 ): Promise<PlanResponse> {
-  return await replanFromStoredSettings(plan, userId);
+  return await replanFromStoredSettings(plan, userId, constraints);
 }
 
 /**
@@ -444,7 +454,7 @@ async function replanFromStoredSettings(
         const pace = constraints.pace as Pace;
     const group = (constraints.group ?? undefined) as GroupProfile | undefined;
     const maxWalkMinutes = validateMaxWalk((constraints.maxWalkMinutes ?? undefined) as number | undefined);
-    const shape = shapeDay(DEFAULT_DAY, pace, group);
+    const shape = shapeDay(dayShapeOf(constraints), pace, group);
 
     // Read once for the whole trip: the answer is the same for every
     // leg, and a re-plan that forgot it would hand back exactly the
@@ -592,6 +602,10 @@ function mergedConstraints(
     pace: req.pace ?? stored.pace ?? "normal",
     group: req.group ?? stored.group ?? null,
     maxWalkMinutes: req.maxWalkMinutes ?? stored.maxWalkMinutes ?? null,
+    // The day's shape is not part of the settings screen, but it is
+    // part of the trip: dropping it here would reset a day somebody
+    // drew the next time they changed the pace.
+    blocks: stored.blocks ?? null,
   };
 }
 
@@ -616,7 +630,7 @@ export async function planLegForTrip(
 }> {
   const constraints = plan.constraints;
   const shape = shapeDay(
-    DEFAULT_DAY,
+    dayShapeOf(constraints),
     constraints.pace as Pace,
     (constraints.group ?? undefined) as GroupProfile | undefined,
   );

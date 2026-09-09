@@ -166,6 +166,24 @@ minutengenaue Angabe und passt exakt zur Blockeinteilung.
 Die Untergrenze der Genauigkeit ist bewusst gewählt: **lieber eine Aussage, die
 stimmt, als eine Uhrzeit, die nicht hält.**
 
+**Umgesetzt:** `GET`/`PATCH /trip-planner/plans/:planId/blocks` und der Bildschirm
+„Tagesablauf" (aus den Einstellungen). Die Blockliste wird als Ganzes ersetzt —
+ein Tag *ist* die geordnete Liste, und eine Folge von Einzel-Speicherungen ließe
+Zustände dazwischen, in denen der Tag keinen Sinn ergibt. Der Server prüft, was
+ein Tag mindestens braucht: mindestens ein Block, höchstens acht, eindeutige
+IDs, nicht-leere Namen (≤ 60 Zeichen), 15–600 Minuten je Block und mindestens
+ein Block, der Spots aufnimmt — ein Tag, der nur aus Pausen besteht, ist kein
+Tag. Ein neuer Block bekommt seine ID aus dem Namen, damit ein Umbenennen nicht
+stillschweigend alles abhängt, was auf die alte ID zeigte. Speichern plant die
+Tage neu (nur das; Etappen, Anker, Daten und der Pool bleiben).
+
+Dabei kam ein Fehler zum Vorschein, der ohne diesen Bildschirm nicht auffallen
+konnte: Beide Neuplanungs-Pfade bauten den Tag aus `DEFAULT_DAY` auf statt aus
+der gespeicherten Form — ein eigener Tagesablauf wäre bei der ersten
+Einstellungsänderung wortlos wieder zur Vierteilung geworden. Die Form wird
+jetzt aus den Constraints gelesen (`dayShapeOf`), `null` heißt weiterhin
+„Vorgabe".
+
 ### 4.2 Etappen: die Ebene über den Tagen
 
 Eine Reise ist selten ein Ort. „20 Tage Tokio, Osaka und Hakata" braucht
