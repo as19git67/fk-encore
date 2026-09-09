@@ -52,23 +52,30 @@ struct MainTabView: View {
     @State private var feedViewModel = FeedViewModel()
     @State private var tripStore = TripStore.shared
     @State private var autoStart = TripAutoStartMonitor.shared
+    @State private var running = TripRunningPlan.shared
+    /// Which tab is showing. Held rather than left to SwiftUI so the
+    /// app can open on the trip while one is actually happening.
+    @State private var selection: MainTab = .feed
+    /// The tab is chosen once, at launch. Re-deciding later would move
+    /// the screen under somebody's thumb.
+    @State private var didChooseTab = false
 
     var body: some View {
-        TabView {
-            Tab("Feed", systemImage: "house") {
+        TabView(selection: $selection) {
+            Tab("Feed", systemImage: "house", value: MainTab.feed) {
                 NavigationStack {
                     FeedView(viewModel: feedViewModel)
                 }
             }
             .badge(feedViewModel.unreadCount)
 
-            Tab("Alben", systemImage: "rectangle.stack") {
+            Tab("Alben", systemImage: "rectangle.stack", value: MainTab.albums) {
                 NavigationStack {
                     AlbumsListView()
                 }
             }
 
-            Tab("Trip", systemImage: tripStore.isActive ? "map.fill" : "map") {
+            Tab("Trip", systemImage: tripStore.isActive ? "map.fill" : "map", value: MainTab.trip) {
                 NavigationStack {
                     TripView()
                 }
@@ -83,13 +90,13 @@ struct MainTabView: View {
             // dot is what's left to say there is something waiting.
             .badge(tripStore.isActive || autoStart.pendingSuggestion != nil ? Text("●") : nil)
 
-            Tab("Suche", systemImage: "magnifyingglass") {
+            Tab("Suche", systemImage: "magnifyingglass", value: MainTab.search) {
                 NavigationStack {
                     SearchView()
                 }
             }
 
-            Tab("Einstellungen", systemImage: "gearshape") {
+            Tab("Einstellungen", systemImage: "gearshape", value: MainTab.settings) {
                 NavigationStack {
                     AdminView()
                 }
@@ -97,6 +104,19 @@ struct MainTabView: View {
         }
         .task {
             await feedViewModel.refreshUnreadCount()
+        }
+        .task {
+            // Where the app opens: on the trip, while there is one. The
+            // feed is the right answer for the other fifty weeks (§8.5).
+            await running.refresh()
+            guard !didChooseTab else { return }
+            didChooseTab = true
+            if TripLaunchRoute.opensOnTrip(
+                tripModeActive: tripStore.isActive,
+                planRunningToday: running.plan != nil,
+            ) {
+                selection = .trip
+            }
         }
         .task {
             // Cold-launch auto-resume: `applicationWillEnterForeground` only
@@ -113,4 +133,9 @@ struct MainTabView: View {
             BackgroundSyncManager.shared.handleForegroundResume()
         }
     }
+}
+
+/// The tabs of the app, so one of them can be chosen from code.
+enum MainTab: Hashable {
+    case feed, albums, trip, search, settings
 }

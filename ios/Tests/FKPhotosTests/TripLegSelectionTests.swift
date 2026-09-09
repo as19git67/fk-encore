@@ -36,6 +36,33 @@ final class TripLegSelectionTests: XCTestCase {
         return model
     }
 
+    func testTodayIsTheDayTheDatesSay() {
+        // The day plan marks the block you are standing in — but only
+        // on the day you are standing in it. On any other day of the
+        // trip, "jetzt" would be a claim about somebody's afternoon
+        // that happens to share a clock (§15.3).
+        let model = viewModel(today: "2026-09-18")
+        XCTAssertTrue(model.isToday)
+
+        model.dayIndex = 0
+        XCTAssertFalse(model.isToday)
+
+        model.select(leg: 1)
+        XCTAssertFalse(model.isToday, "another city is not today either")
+    }
+
+    func testATripWithoutDatesHasNoToday() {
+        let model = TripPlannerViewModel(planId: 2)
+        model.now = { TripCalendar.date(fromIsoDay: "2026-09-18")! }
+        model.replace(with: TripPlanResponse(
+            plan: TripPlan(
+                id: 2, ownerId: 1, title: "Irgendwann", constraints: nil,
+                legs: [leg(0, nil, days: 3)]),
+            droppedBlocks: nil))
+
+        XCTAssertFalse(model.isToday)
+    }
+
     func testSwitchingToACityYouAreNotInLandsOnItsFirstDay() {
         let model = viewModel(today: "2026-09-18")
         XCTAssertEqual(model.legIndex, 0)

@@ -2,11 +2,11 @@ import SwiftUI
 
 /// "Which block?" — the one screen that answers it (§8.4).
 ///
-/// Shared by the pool (placing a candidate), the day plan and
-/// "Unterwegs" (moving a planned stop), because these were three
-/// different gestures for one decision: the pool offered a picker, the
-/// day plan offered nothing, and the list offered a menu that included
-/// the block the stop was already in.
+/// Shared by the pool (placing a candidate) and the day plan (moving a
+/// planned stop), because these were three different gestures for one
+/// decision: the pool offered a picker, the day plan offered nothing,
+/// and the list on the since-merged "Unterwegs" screen offered a menu
+/// that included the block the stop was already in.
 ///
 /// Both questions — which day, which block — are asked out loud,
 /// because both have a consequence: the block is what gets a budget

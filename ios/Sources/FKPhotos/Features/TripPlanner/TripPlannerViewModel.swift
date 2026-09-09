@@ -105,6 +105,16 @@ final class TripPlannerViewModel {
         leg?.days.first { $0.dayIndex == dayIndex }
     }
 
+    /// Is the day on screen the day it is?
+    ///
+    /// Answered from the trip's dates, not from anything anybody
+    /// pressed — the same rule the leg picker follows. Nil dates mean
+    /// no: a trip nobody has placed in the year has no today.
+    var isToday: Bool {
+        guard let plan, let today = plan.position(on: now()) else { return false }
+        return today.legIndex == legIndex && today.dayIndex == dayIndex
+    }
+
     /// Every stop of the current day, in order across blocks — what the
     /// map numbers its pins by.
     var stopsOfDay: [TripStop] {
