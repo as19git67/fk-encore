@@ -87,6 +87,19 @@ function sortKeyExpr(field: GallerySortField) {
   }
 }
 
+/**
+ * ORDER BY that reproduces the caller's own `photoIds` order.
+ *
+ * The ids go in as bound parameters rather than through `sql.raw` — two
+ * lines away the same array is already passed safely via `inArray`, and the
+ * raw splice was the only thing standing between a future type change and
+ * an injectable ORDER BY.
+ */
+export function orderByGivenIds(photoIds: number[]) {
+  const ids = sql.join(photoIds.map((id) => sql`${id}`), sql`, `);
+  return [sql`array_position(ARRAY[${ids}]::int[], ${photos.id})`];
+}
+
 /** ORDER BY clauses for the grid query, with deterministic id tie-break. */
 function orderByClauses(field: GallerySortField, dir: GallerySortDir) {
   const key = sortKeyExpr(field);
@@ -241,7 +254,7 @@ export async function listGalleryGridLogic(
   // When a photoIds list is provided, preserve its order via array_position.
   // Otherwise, fall back to the requested column sort with id tie-break.
   const orderBy = pagination.photoIds && pagination.photoIds.length > 0
-    ? [sql`array_position(${sql.raw(`ARRAY[${pagination.photoIds.join(",")}]::int[]`)}, ${photos.id})`]
+    ? orderByGivenIds(pagination.photoIds)
     : orderByClauses(pagination.sortBy, pagination.sortDir);
 
   // total — always returned, drives the virtualizer's row count.
@@ -399,7 +412,7 @@ export async function listGalleryIdsLogic(
     ...(photoIdFilter ? [photoIdFilter] : []),
   );
   const orderBy = opts.photoIds && opts.photoIds.length > 0
-    ? [sql`array_position(${sql.raw(`ARRAY[${opts.photoIds.join(",")}]::int[]`)}, ${photos.id})`]
+    ? orderByGivenIds(opts.photoIds)
     : orderByClauses(opts.sortBy, opts.sortDir);
 
   const rows = await dbAll<{ id: number }>(

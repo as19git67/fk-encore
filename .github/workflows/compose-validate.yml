@@ -5,6 +5,7 @@ on:
     branches: [ "main" ]
     paths:
       - 'docker-compose.yml'
+      - 'docker-compose.volumes.yml'
       - 'docker-compose-dev.yml'
       - 'docker-compose.env.example'
       - 'docker-compose.env.test.example'
@@ -13,6 +14,7 @@ on:
     branches: [ "main" ]
     paths:
       - 'docker-compose.yml'
+      - 'docker-compose.volumes.yml'
       - 'docker-compose-dev.yml'
       - 'docker-compose.env.example'
       - 'docker-compose.env.test.example'
@@ -22,14 +24,24 @@ jobs:
   validate:
     name: docker compose config
     runs-on: ubuntu-latest
+    # Both variables are declared `${…:?}` in the compose files so a real
+    # deployment cannot come up with an unauthenticated, Docker-socket-backed
+    # update API (WATCHTOWER_TOKEN) or unauthenticated AI services
+    # (INTERNAL_SERVICE_SECRET). That makes them mandatory for interpolation
+    # too, so supply throwaway values here — a shell variable outranks the
+    # --env-file below, covering both invocations. These are config-parse
+    # placeholders, not credentials.
+    env:
+      WATCHTOWER_TOKEN: compose-validation-placeholder
+      INTERNAL_SERVICE_SECRET: compose-validation-placeholder
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
 
       # --quiet exits non-zero on any syntax / reference / volume-ref error,
-      # so this is a cheap guard against broken compose files. The prod file
-      # references unset env vars (WATCHTOWER_TOKEN etc.) which compose
-      # treats as empty strings — that is fine for a config check.
+      # so this is a cheap guard against broken compose files. The remaining
+      # unset env vars (SMTP_*, VAPID_*, …) are treated as empty strings by
+      # compose — that is fine for a config check.
 
       # Default (production) interpolation — no env-file, every DEPLOY_* uses
       # its baked-in default.

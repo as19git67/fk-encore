@@ -1,7 +1,7 @@
 import { api, APIError } from "encore.dev/api";
 import type {
   UserWithRoles,
-  CreateUserRequest,
+  AcceptInviteRequest,
   UpdateUserRequest,
   ListUsersResponse,
   DeleteResponse,
@@ -18,15 +18,48 @@ import {
 } from "./user.service";
 import { requirePermission } from "./auth-handler";
 import { getAuthData } from "~encore/auth";
+import { passwordPolicyError } from "./password-policy";
+import { consumeInviteLogic } from "./invite.service";
 
 console.log("[boot] user/user.ts: all imports resolved");
 
-/** Create a new user (Register) — no auth required */
+/**
+ * Redeem an invitation and create the account it was issued for.
+ *
+ * Unauthenticated, because the person doing it has no account yet — but no
+ * longer open: this used to accept anyone who could reach the app, which
+ * made it an account factory and made every
+ * authenticated-but-unauthorized gap elsewhere anonymously reachable. The
+ * gate is the token, mailed by somebody holding `users.create`.
+ *
+ * The address is not taken from the request. It comes out of the invite
+ * row, so a token issued for one person cannot be used to register another.
+ * Redeeming is what marks the invite spent, in the same statement that
+ * reads it, so two submissions of the same link create one account.
+ *
+ * No roles are attached here, deliberately — see invite.service.ts.
+ */
 export const createUser = api(
   { expose: true, method: "POST", path: "/users" },
-  async (req: CreateUserRequest): Promise<UserWithRoles> => {
+  async (req: AcceptInviteRequest): Promise<UserWithRoles> => {
+    const policyError = passwordPolicyError(req.password);
+    if (policyError) throw APIError.invalidArgument(policyError);
+
+    if (!req.name?.trim()) {
+      throw APIError.invalidArgument("name is required");
+    }
+
+    let email: string;
     try {
-      return await createUserLogic(req);
+      ({ email } = await consumeInviteLogic(req.invite));
+    } catch {
+      throw APIError.permissionDenied(
+        "This invitation is invalid, already used, or expired.",
+      );
+    }
+
+    try {
+      return await createUserLogic({ email, name: req.name, password: req.password });
     } catch (err: any) {
       if (err.message?.includes("already exists")) {
         throw APIError.alreadyExists(err.message);
@@ -69,6 +102,12 @@ export const updateUser = api(
   { expose: true, auth: true, method: "PUT", path: "/users/:id" },
   async (req: UpdateUserRequest): Promise<UserWithRoles> => {
     requirePermission(getAuthData()!, "users.update");
+    // A password is optional here; when one is supplied it sets somebody's
+    // credentials and takes the same floor as every other path.
+    if (req.password !== undefined) {
+      const policyError = passwordPolicyError(req.password);
+      if (policyError) throw APIError.invalidArgument(policyError);
+    }
     try {
       return await updateUserLogic(req);
     } catch (err: any) {
@@ -88,6 +127,8 @@ export const changePassword = api(
   { expose: true, auth: true, method: "POST", path: "/auth/password" },
   async (req: ChangePasswordRequest): Promise<{ success: boolean }> => {
     const authData = getAuthData()!;
+    const policyError = passwordPolicyError(req.new_password);
+    if (policyError) throw APIError.invalidArgument(policyError);
     try {
       await changePasswordLogic(Number(authData.userID), req.current_password, req.new_password);
       return { success: true };

@@ -29,6 +29,8 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+from .service_auth import install_service_auth
 from pillow_heif import register_heif_opener
 
 register_heif_opener()
@@ -126,6 +128,8 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+install_service_auth(app)
 
 app.add_middleware(
     CORSMiddleware,

@@ -65,6 +65,51 @@ export async function sendPasswordResetEmail(email: string, token: string): Prom
   });
 }
 
+/**
+ * Invitation to create an account. The token in this link is the only way
+ * to reach `POST /users` — registration is not otherwise open — so it goes
+ * to the invited address and nowhere else, not even back to the admin who
+ * sent it.
+ */
+export async function sendInviteEmail(email: string, token: string): Promise<void> {
+  const inviteLink = `${APP_URL}/app/register?token=${encodeURIComponent(token)}`;
+
+  if (!isSmtpConfigured()) {
+    console.warn(`[Mail] SMTP not configured. Invite link for ${email}: ${inviteLink}`);
+    return;
+  }
+
+  const html = `
+    <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+      <h2>${APP_NAME} – Einladung</h2>
+      <p>Du wurdest eingeladen, ein Konto bei <strong>${APP_NAME}</strong> anzulegen.</p>
+      <p>Klicke auf den folgenden Link, um deinen Namen und ein Passwort festzulegen:</p>
+      <p style="margin: 1.5em 0;">
+        <a href="${inviteLink}"
+           style="display: inline-block; padding: 0.75em 1.5em; background: #4f46e5; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600;">
+          Konto anlegen
+        </a>
+      </p>
+      <p style="font-size: 0.85em; color: #666;">
+        Dieser Link ist sieben Tage lang gültig und kann nur einmal verwendet werden.
+        Falls du damit nichts anfangen kannst, ignoriere diese E-Mail einfach.
+      </p>
+    </div>
+  `;
+
+  await getTransporter().sendMail({
+    from: SMTP_FROM,
+    to: email,
+    subject: `${APP_NAME} – Einladung`,
+    html,
+    text:
+      `${APP_NAME} – Einladung\n\n` +
+      `Du wurdest eingeladen, ein Konto bei ${APP_NAME} anzulegen. ` +
+      `Lege über diesen Link Name und Passwort fest:\n\n${inviteLink}\n\n` +
+      `Der Link ist sieben Tage gültig und kann nur einmal verwendet werden.`,
+  });
+}
+
 export interface GuestVerifyMailParams {
   email: string;
   displayName: string;

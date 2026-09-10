@@ -8,6 +8,9 @@ import { maintenanceMiddleware } from "../backup/maintenance";
 import { migrateStorageLayout } from "./storage-migration";
 import { startLocalCron } from "../lib/local-cron";
 import "../lib/scheduled-jobs-hooks";
+// Side-effect: attaches the shared secret to every outbound call to the
+// internal Python services. See lib/internal-service-auth.ts.
+import "../lib/internal-service-auth";
 
 console.log("[boot] photo/encore.service.ts: begin");
 

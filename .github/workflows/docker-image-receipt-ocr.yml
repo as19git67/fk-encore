@@ -38,7 +38,9 @@ jobs:
           python-version: "3.11"
 
       - name: Install test dependencies
-        run: pip install fastapi pydantic pytest python-multipart opencv-python-headless numpy
+        # httpx: starlette's TestClient needs it, and tests/test_service_auth.py
+        # exercises the shared-secret middleware through it.
+        run: pip install fastapi httpx pydantic pytest python-multipart opencv-python-headless numpy
         working-directory: receipt-ocr-service
 
       - name: Run tests

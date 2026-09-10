@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import { currentRequest } from "encore.dev";
 import {
   checkRateLimit,
   resetRateLimit,
   purgeExpiredEntries,
+  getClientIp,
   __resetRateLimiterForTests,
 } from "./rateLimiter";
 import { APIError } from "encore.dev/api";
@@ -218,5 +220,57 @@ describe("__resetRateLimiterForTests", () => {
 
     expect(() => checkRateLimit(a)).not.toThrow();
     expect(() => checkRateLimit(b)).not.toThrow();
+  });
+});
+
+// X-Forwarded-For / X-Real-IP are client-supplied unless a reverse proxy
+// overwrites them. Believing them unconditionally let anyone mint a fresh
+// bucket per request, and the "unknown" fallback put every header-less caller
+// into one bucket that a single attacker could exhaust for everybody.
+describe("getClientIp", () => {
+  function stubHeaders(headers: Record<string, string | string[]>) {
+    vi.mocked(currentRequest).mockReturnValue({
+      type: "api-call",
+      headers,
+    } as never);
+  }
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.mocked(currentRequest).mockReturnValue({
+      type: "api-call",
+      headers: {},
+    } as never);
+  });
+
+  it("ignores forwarding headers unless the deployment opts in", () => {
+    stubHeaders({ "x-forwarded-for": "9.9.9.9", "x-real-ip": "8.8.8.8" });
+    expect(getClientIp()).toBeNull();
+  });
+
+  it("never returns a shared placeholder when the client is unknown", () => {
+    vi.stubEnv("TRUST_PROXY_HEADERS", "true");
+    stubHeaders({});
+    expect(getClientIp()).toBeNull();
+  });
+
+  it("reads the left-most X-Forwarded-For entry when trusted", () => {
+    vi.stubEnv("TRUST_PROXY_HEADERS", "true");
+    stubHeaders({ "x-forwarded-for": "203.0.113.7, 10.0.0.1, 10.0.0.2" });
+    expect(getClientIp()).toBe("203.0.113.7");
+  });
+
+  it("falls back to X-Real-IP when trusted", () => {
+    vi.stubEnv("TRUST_PROXY_HEADERS", "true");
+    stubHeaders({ "x-real-ip": "203.0.113.9" });
+    expect(getClientIp()).toBe("203.0.113.9");
+  });
+
+  it("returns null outside an API call", () => {
+    vi.stubEnv("TRUST_PROXY_HEADERS", "true");
+    vi.mocked(currentRequest).mockReturnValue({ type: "pubsub-message" } as never);
+    expect(getClientIp()).toBeNull();
+    vi.mocked(currentRequest).mockReturnValue(undefined as never);
+    expect(getClientIp()).toBeNull();
   });
 });

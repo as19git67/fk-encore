@@ -4,7 +4,7 @@ import { sql, eq } from "drizzle-orm";
 
 import db from "../db/database";
 import { documents, documentCategories, documentCategorySuggestions, taxonomySnapshots } from "../db/schema";
-import { runTaxonomyCockpit, getTaxonomyCockpit } from "./taxonomy-cockpit";
+import { runTaxonomyCockpit, getTaxonomyCockpit, triggerSnapshot } from "./taxonomy-cockpit";
 
 const USER_ID = 990901;
 
@@ -113,5 +113,38 @@ describe("taxonomy cockpit snapshot", () => {
     const result = await getTaxonomyCockpit();
     expect(result.snapshots).toHaveLength(1);
     expect(result.recommendations).toBeInstanceOf(Array);
+  });
+});
+
+// Both endpoints report corpus-wide statistics across every user's documents
+// and trigger an unbounded job, so authentication alone is not enough —
+// registration is open, so any account could otherwise reach them.
+describe("taxonomy cockpit authorization", () => {
+  function setPermissions(permissions: string[]) {
+    vi.mocked(getAuthData).mockReturnValue({
+      userID: String(USER_ID),
+      permissions,
+    });
+  }
+
+  it("refuses to read the cockpit without data.manage", async () => {
+    setPermissions([]);
+    await expect(getTaxonomyCockpit()).rejects.toThrow(/data\.manage/);
+  });
+
+  it("refuses to trigger a snapshot without data.manage", async () => {
+    setPermissions([]);
+    await expect(triggerSnapshot()).rejects.toThrow(/data\.manage/);
+  });
+
+  it("does not accept an unrelated module permission instead", async () => {
+    setPermissions(["module.documents", "documents.view"]);
+    await expect(getTaxonomyCockpit()).rejects.toThrow(/data\.manage/);
+  });
+
+  it("allows a caller holding data.manage", async () => {
+    setPermissions(["data.manage"]);
+    await ensureSonstiges();
+    await expect(getTaxonomyCockpit()).resolves.toBeDefined();
   });
 });
