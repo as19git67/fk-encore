@@ -103,6 +103,20 @@ normal sind, hat nicht geraten, sondern dem Reisenden etwas in den Mund gelegt.
 freier Text, und „barock" gegen „Barockarchitektur" zu punkten misst
 Rechtschreibung.
 
+## Der erste Lauf (2026-09-10)
+
+`gemma-4-26B-A4B-it-qat` gegen `claude-opus-5` (niedriger Effort):
+
+| | richtig | erfunden | Median |
+| --- | --- | --- | --- |
+| lokal | **96 %** (26/27) | **0** | **1005 ms** |
+| Claude API | 93 % (25/27) | 1 | 2173 ms |
+
+Die Spur, die nichts kostet, hat gewonnen. Ein Feld Unterschied bei 27
+bewerteten Feldern ist Rauschen — die Aussage ist nicht „lokal ist besser",
+sondern **„es gibt keinen Rückstand einzukaufen"**. Details und Folgerungen in
+§11.0 des Konzepts.
+
 ## Die Fälle
 
 Zehn Sätze, alle frei erfunden (keine echten Personen, Adressen oder Reisen),

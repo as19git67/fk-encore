@@ -1630,9 +1630,45 @@ erfunden) und Fallen (eine Jahreszahl, die keine Tageszahl ist; ein Startort,
 der nicht das Ziel ist). Aufgerufen wird die Cloud-Spur dabei von nichts
 anderem: `claude-client.ts` hängt an keinem Endpunkt.
 
+**Das Ergebnis (Lauf vom 2026-09-10, `gemma-4-26B-A4B-it-qat` gegen
+`claude-opus-5`):**
+
+| | richtig | erfunden | Median |
+| --- | --- | --- | --- |
+| lokal | **96 %** (26/27) | **0** | **1005 ms** |
+| Claude API | 93 % (25/27) | 1 | 2173 ms |
+
+**Die Spur, die nichts kostet, hat gewonnen** — und §11.1s Einschätzung
+„brüchig" ist für diese Aufgabe damit widerlegt. Beide Spuren lasen die
+indirekten Fälle sauber („Kinderwagen" → Kind, „schlecht zu Fuß" →
+eingeschränkte Mobilität, „eine Woche" → sieben Tage), beide gingen der
+Startort-Falle nicht auf den Leim, und beide hielten sich bei „Wir wollen nach
+Passau." zurück, statt ein Tempo zu erfinden.
+
+Die zwei Abweichungen gehen beide zulasten der Cloud-Spur, und beide sind
+lehrreich: Sie schrieb bei „im Umkreis von zwei Kilometern um die Altstadt"
+`placeHint: "Ulm Altstadt"` statt `"Ulm"` — hilfreich gemeint, aber der
+`placeHint` ist ein Echo für die Bestätigung, kein Suchbegriff — und sie legte
+bei „viel zu Fuß, aber keine Gewaltmärsche" eine Gehstrecke von 30 Minuten fest,
+die niemand gesagt hatte. Genau die Sorte gut gemeinter Ergänzung, gegen die
+§13s Regel steht.
+
+Drei Einschränkungen, damit die Zahl nicht mehr trägt, als sie kann: **27
+bewertete Felder in einem Lauf** — ein Feld Unterschied ist Rauschen, nicht
+Rangfolge; die eine Falle, an der beide scheiterten („keine Gewaltmärsche" →
+`relaxed`), ist womöglich eher eine strittige Erwartung als ein Modellfehler;
+und gemessen ist die Cloud-Spur bei niedrigem Effort und ohne Structured
+Outputs, also nicht an ihrer Obergrenze.
+
+**Die Folge für §11:** Für das Anfrageverständnis wird nichts eingekauft. Das
+lokale Modell ist gleichauf, doppelt so schnell und kostenlos — und die
+Privatsphäre-Rechnung aus §11.5 muss dafür gar nicht erst aufgemacht werden.
+
 Die drei übrigen Aufgaben aus §11.1 — Kuration, Dokumente, Verhandlungs-Chat —
 sind damit **nicht** gemessen. Die Kuration ist der größte erwartete Sprung und
-braucht einen eigenen Aufbau.
+braucht einen eigenen Aufbau. Der Befund oben ist allerdings ein Hinweis darauf,
+wie die Messung ausgehen könnte: Die Einschätzungen in §11.1 stammen aus der
+7B-Zeit, und die erste, die nachgeprüft wurde, hielt nicht.
 
 ### 11.1 Die Trennlinie liegt schon im Konzept
 
@@ -1645,7 +1681,7 @@ Modellen:
 | | lokal | Opus 5 (online, opt-in) |
 |---|---|---|
 | Kandidaten kuratieren | Gewichtete Summe | **deutlich besser** |
-| Anfrage verstehen | brüchig | **deutlich besser** |
+| Anfrage verstehen | **gleichauf, und schneller** (gemessen) | gleichauf |
 | Dokumente auswerten | ordentlich | **deutlich besser** |
 | Verhandlungs-Chat vorab | knapp ausreichend | **deutlich besser** |
 | Tagebuch-/Recap-Texte | ordentlich | besser |
