@@ -105,7 +105,8 @@ def test_main_installs_the_gate():
     )
 
 
-def test_dockerfile_ships_the_module():
+@pytest.mark.parametrize("name", ["Dockerfile", "Dockerfile.gpu"])
+def test_dockerfile_ships_the_module(name):
     """The gate has to be *in the image*, not just in the repository.
 
     Four of the five Dockerfiles copy main.py by name rather than the whole
@@ -113,8 +114,12 @@ def test_dockerfile_ships_the_module():
     containers died at import with ModuleNotFoundError while every test here
     passed, because pytest runs against the source tree. This is the check
     that would have caught it.
+
+    Both of this service's Dockerfiles are checked, because the first fix
+    covered only the CPU one and left the CUDA image broken in exactly the
+    same way — a second COPY line is a second chance to forget.
     """
-    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+    dockerfile = Path(__file__).resolve().parents[1] / name
     source = dockerfile.read_text(encoding="utf-8")
     copied = [l for l in source.splitlines() if l.startswith("COPY")]
     assert any("service_auth.py" in l or MODULE_DIR_COPY in l for l in copied), (
