@@ -852,6 +852,40 @@ Allgemeinheit:
    von ca. 19:30 bis 20:10 im besten Licht — als Abendtermin einplanen?"*
 4. **Ein Hinweis auf der Spot-Karte**, sonst nichts.
 
+**Umgesetzt (alle vier Wege):** Der Ranking-Bonus (2) und der Hinweis auf der
+Spot-Karte (4) standen schon; dazu kommen jetzt die beiden übrigen.
+
+**Die Reihenfolge im Block** (1) rechnet `light-order.ts` — rein, und mit beiden
+Hälften von §7.3s Satz als Regel: Die **Auswahl bleibt unberührt** (nur die
+Folge darf sich ändern; was der Tag enthält, entscheidet der Ranking-Bonus im
+Vorrat), und es muss **umsonst** sein — ein neues Arrangement wird nur
+angenommen, wenn der Mehrweg in einem kleinen Budget bleibt und der Block
+weiterhin aufgeht. Gemessen wird stumpf: um wie viele Minuten die Mitte des
+Aufenthalts das Fenster verfehlt. Bis sechs Stopps exakt über alle
+Permutationen, darüber per Nachbartausch — dieselbe Grenze, die der Solver für
+die Route zieht.
+
+Zwei Feinheiten, die beim Bauen auffielen und beide in die unangenehme Richtung
+gingen: Das Fenster wird **je Block** gewählt, nicht je Tag (eine Westfassade
+leuchtet auch im Morgengrauen, und das global beste Fenster hätte einen
+Nachmittagsstopp Richtung fünf Uhr früh gezogen), und die Sonne wird in der
+**Ortszeit des Ziels** gerechnet: Blockzeiten sind die Uhr des Ziels (§4.4), und
+ein Vergleich gegen UTC hätte den Aussichtspunkt in München zwei Stunden zu früh
+einsortiert. Nennt der Aufrufer keinen Versatz, schätzt ihn die Länge — fünfzehn
+Grad je Stunde; ungenau an den Zonenrändern und ohne Sommerzeit, aber richtig in
+der Frage, auf die es hier ankommt: ob die goldene Stunde vor oder nach dem
+Nachmittag liegt.
+
+**Der Abendblock-Vorschlag** (3) ist `GET …/plans/:planId/light/evening` und der
+Bildschirm „Abendlicht": das beste Fenster **dieses Abends** — nicht des Tages —
+für einen als Fotostopp markierten Spot, und nur, wenn es nach dem geplanten Tag
+liegt und in Reichweite ist. Der Aufruf **schreibt nichts**: Angenommen wird per
+Tipp, und das legt einen gewöhnlichen Fixpunkt an (§4.4). Ein Abendtermin ist
+kein neuer Begriff, und ihm eine eigene Mechanik zu geben hieße, dieselbe Regel
+an zwei Stellen falsch machen zu können. Vorgeschlagen wird **einer**: Ein Abend
+trägt einen Ausflug, und eine Liste von fünf wäre eine Entscheidung statt eines
+Hinweises.
+
 Dass das Lichtfenster minutengenau ist, während der Plan grob bleibt, ist kein
 Widerspruch zu Leitentscheidung 1: Es ist ein **Hinweis, kein Termin**. Eine
 Uhrzeit, die man verpassen kann, entsteht erst, wenn der Nutzer Vorschlag 3
@@ -2680,11 +2714,14 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    mit Lichtfenster (§8.3), der Ranking-Bonus des Lichts und ein
    Endpunkt für Klimanormale.
 
+   **Dazugekommen: die beiden übrigen Licht-Wege** (§7.3) — die Reihenfolge im
+   Block, die nur umsonst zustande kommen darf, und der Abendblock-Vorschlag,
+   der nichts schreibt, bis jemand ihn annimmt.
+
    **Noch offen in diesem Schritt:** der **Erzeuger** des Horizontprofils
-   (die Rechnung steht, das Profil kommt aus keinem Höhenmodell), die
+   (die Rechnung steht, das Profil kommt aus keinem Höhenmodell) und die
    **Folgen** aus den Klimanormalen — Indoor-Vorrat und Puffertag in der
-   Reiseauflösung —, sowie die beiden Licht-Wege, die eine Minute
-   versprechen: Reihenfolge im Block und Abendblock-Vorschlag (§7.3).
+   Reiseauflösung.
 10. **Weitere Kontextsignale** — Dokumenten-Fixpunkte, Reisegruppe, dazu die
     **Reisebereitschafts-Prüfung** und die Packliste (§8.6), die beide nur
     vorhandene Zustände zusammentragen.

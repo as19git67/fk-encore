@@ -47,6 +47,7 @@ import "./travellers";
 import "./plan-votes";
 import "./plan-ops";
 import "./splits";
+import "./light-evening";
 
 import { everyMs, schedule, startLocalCron } from "../lib/local-cron";
 import { tickFillPending } from "./fill-pending";

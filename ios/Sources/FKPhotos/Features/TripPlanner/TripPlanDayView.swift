@@ -96,6 +96,18 @@ struct TripPlanDayView: View {
                         } label: {
                             Label("Wer plant mit", systemImage: "person.2")
                         }
+                        // When the light is good, after the planned
+                        // day is over (§7.3). A sentence until
+                        // somebody taps.
+                        NavigationLink {
+                            TripEveningLightView(
+                                planId: viewModel.planId,
+                                legIndex: viewModel.legIndex,
+                                dayIndex: viewModel.dayIndex,
+                            ) { Task { await viewModel.load() } }
+                        } label: {
+                            Label("Abendlicht", systemImage: "sun.horizon")
+                        }
                         // Who changed what, and taking it back
                         // (§6.3) — several devices, one trip.
                         NavigationLink {
