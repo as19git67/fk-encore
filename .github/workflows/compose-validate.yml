@@ -22,14 +22,16 @@ jobs:
   validate:
     name: docker compose config
     runs-on: ubuntu-latest
-    # WATCHTOWER_TOKEN is declared `${WATCHTOWER_TOKEN:?…}` in the compose
-    # file so a real deployment cannot come up with an unauthenticated,
-    # Docker-socket-backed update API. That makes it mandatory for
-    # interpolation too, so supply a throwaway value here — a shell
-    # variable outranks the --env-file below, covering both invocations.
-    # This is a config-parse placeholder, not a credential.
+    # Both variables are declared `${…:?}` in the compose files so a real
+    # deployment cannot come up with an unauthenticated, Docker-socket-backed
+    # update API (WATCHTOWER_TOKEN) or unauthenticated AI services
+    # (INTERNAL_SERVICE_SECRET). That makes them mandatory for interpolation
+    # too, so supply throwaway values here — a shell variable outranks the
+    # --env-file below, covering both invocations. These are config-parse
+    # placeholders, not credentials.
     env:
       WATCHTOWER_TOKEN: compose-validation-placeholder
+      INTERNAL_SERVICE_SECRET: compose-validation-placeholder
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6

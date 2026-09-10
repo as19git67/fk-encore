@@ -351,8 +351,15 @@ def test_healthz_stays_responsive_while_classify_is_blocked():
     try:
         async def _run():
             transport = httpx.ASGITransport(app=main.app)
-            async with httpx.AsyncClient(transport=transport,
-                                         base_url="http://test") as client:
+            # Built directly rather than through TestClient, so the default
+            # Authorization header conftest installs does not apply here.
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url="http://test",
+                headers={
+                    "authorization": f"Bearer {os.environ['INTERNAL_SERVICE_SECRET']}"
+                },
+            ) as client:
                 classify_task = asyncio.create_task(
                     client.post(
                         "/classify",

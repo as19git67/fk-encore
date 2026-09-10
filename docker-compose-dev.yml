@@ -22,6 +22,7 @@ services:
       com.centurylinklabs.watchtower.scope: fktest
     environment:
       ORT_LOGGING_LEVEL: "3"
+      INTERNAL_SERVICE_SECRET: "${INTERNAL_SERVICE_SECRET:?must be a non-empty secret — the internal AI services have no other authentication and refuse to start without one. Generate it with `openssl rand -hex 32` and put it in .env}"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
@@ -42,6 +43,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/embeddings_test
+      INTERNAL_SERVICE_SECRET: "${INTERNAL_SERVICE_SECRET:?must be a non-empty secret — the internal AI services have no other authentication and refuse to start without one. Generate it with `openssl rand -hex 32` and put it in .env}"
       CLIP_MODEL_NAME: xlm-roberta-large-ViT-H-14
       CLIP_PRETRAINED: frozen_laion5b_s13b_b90k
       DINO_MODEL_NAME: facebook/dinov2-base
@@ -88,6 +90,7 @@ services:
     environment:
       MODELS_DIR: /models
       LLM_MODEL_PATH: /models/qwen2.5-7b-instruct-q4_k_m.gguf
+      INTERNAL_SERVICE_SECRET: "${INTERNAL_SERVICE_SECRET:?must be a non-empty secret — the internal AI services have no other authentication and refuse to start without one. Generate it with `openssl rand -hex 32` and put it in .env}"
       EMBEDDING_MODEL: intfloat/multilingual-e5-base
       LLM_CTX: "8192"
       LLM_GPU_LAYERS: "0"

@@ -129,6 +129,35 @@ internally and not exposed to the outside.
 |--------------------|-------------|
 | `ADMIN_PASSWORD`   | Password for the initial admin account. No default — with it unset the seed creates no admin at all, rather than one whose password is published in the compose file. Set it before the first start. |
 | `WATCHTOWER_TOKEN` | Shared secret for the Watchtower update API. The stack refuses to start while this is empty — see [Watchtower update API](#watchtower-update-api). |
+| `INTERNAL_SERVICE_SECRET` | Shared secret between the app and the five internal AI services. The stack refuses to start while this is empty — see [Internal AI services](#internal-ai-services). |
+
+#### Internal AI services
+
+`llm_service`, `embedding_service`, `insightface`, `receipt_ocr_service`
+and `taxonomy_tools` each listen on port 8000 inside their container.
+They publish no host port, so nothing outside the compose network reaches
+them — but that was their *only* protection: any container on the same
+bridge network had full access to services that run models on request,
+and `taxonomy_tools` additionally spawns scripts and holds
+`ANTHROPIC_API_KEY`.
+
+They now require `Authorization: Bearer $INTERNAL_SERVICE_SECRET`, and
+**refuse to start without one**, so a misconfigured deployment fails
+loudly at boot instead of quietly serving whoever can route to it. The
+app sends the header on every outbound call automatically.
+
+```bash
+openssl rand -hex 32
+```
+
+Put the result in `.env` as `INTERNAL_SERVICE_SECRET`. One value for all
+six containers — the app and the five services read the same variable.
+Change it by editing `.env` and restarting the stack; there is nothing
+persisted that depends on the old value.
+
+The `/health` and `/healthz` endpoints stay open, so the container
+healthchecks remain a plain `curl` with no credentials in the compose
+file. They report liveness only.
 
 #### Watchtower update API
 

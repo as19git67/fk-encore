@@ -28,6 +28,7 @@ from typing import Any, AsyncIterator, Callable, TypeVar
 import cv2
 import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from service_auth import install_service_auth
 from pydantic import BaseModel, Field
 
 from receipt_amount import (
@@ -145,6 +146,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="receipt-ocr-service", version="1.0.0", lifespan=lifespan)
+install_service_auth(app)
 
 
 # ─── Blocking-call offload ───────────────────────────────────────────────────

@@ -27,6 +27,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
+from service_auth import install_service_auth
+
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
@@ -34,6 +36,7 @@ logging.basicConfig(
 log = logging.getLogger("taxonomy-tools")
 
 app = FastAPI(title="taxonomy-tools", version="1.0.0")
+install_service_auth(app)
 
 SCRIPTS_DIR = os.environ.get("SCRIPTS_DIR", "/app/scripts/taxonomy")
 TS_SOURCES_DIR = os.environ.get("TS_SOURCES_DIR", "/app/ts-sources")
