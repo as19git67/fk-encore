@@ -142,3 +142,14 @@ setClimateClient({
     throw new Error("no climate client installed in this test");
   },
 });
+
+// The height model behind the horizon profile (§7.3) is fetched the
+// same way and read in the same place — while a light window is being
+// answered. Inert here for the same reason: a test that asks for the
+// light of a day must not depend on a third party being up.
+const { setElevationClient } = await import("./trip-planner/elevation-client");
+setElevationClient({
+  elevations: async () => {
+    throw new Error("no elevation client installed in this test");
+  },
+});

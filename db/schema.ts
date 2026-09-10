@@ -3112,6 +3112,33 @@ export const weatherForecastCache = pgTable(
 );
 
 /**
+ * The terrain horizon, kept per place (§7.3).
+ *
+ * The light window assumes a free horizon; in a valley or behind a
+ * ridge the sun is gone long before astronomical sunset. Building a
+ * profile costs a few hundred points from a height model, so it is done
+ * once per place and shared — the ground does not move, which is also
+ * why there is no expiry here. The grid is about a hundred metres, fine
+ * enough that the ridge is the same ridge.
+ */
+export const horizonProfiles = pgTable(
+  "horizon_profiles",
+  {
+    id: serial("id").primaryKey(),
+    lat: real("lat").notNull(),
+    lon: real("lon").notNull(),
+    /** Ground height at the place itself; every angle is relative to it. */
+    elevation_m: real("elevation_m").notNull(),
+    /** `[{ azimuth, altitude }, …]`, clockwise from north. */
+    profile: jsonb("profile").notNull(),
+    computed_at: timestamp("computed_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [uniqueIndex("horizon_profiles_place_key").on(table.lat, table.lon)]
+);
+
+/**
  * The pool without a trip (§20).
  *
  * Everything else in the planner needs a trip. This is the list people

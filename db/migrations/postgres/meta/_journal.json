@@ -1324,6 +1324,13 @@
       "when": 1788048000015,
       "tag": "0188_trip_day_buffer",
       "breakpoints": true
+    },
+    {
+      "idx": 189,
+      "version": "7",
+      "when": 1788134400015,
+      "tag": "0189_horizon_profiles",
+      "breakpoints": true
     }
   ]
 }
