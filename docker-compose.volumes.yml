@@ -5,18 +5,17 @@
 # repository, unedited. Everything that differs per machine lives here:
 # where the data sits, and which external photo libraries are mounted in.
 #
-# `docker-compose.yml` pulls it in with a top-level `include:`, so no extra
-# `-f` flag is needed — `docker compose up -d` finds it as long as it sits
-# next to docker-compose.yml.
+# Combined with docker-compose.yml through COMPOSE_FILE in `.env`:
+#
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.volumes.yml
+#
+# so `docker compose up -d` needs no extra -f flag. Not a top-level
+# `include:` — that rejects a file which also adds mounts to `app`
+# ("services.app conflicts with imported resource") on Compose 2.x.
 #
 # The defaults below are the ones the repository ships with: every volume
 # binds into ${DEPLOY_DATA_ROOT}/<subdir>, so pointing a whole deployment
 # somewhere else is one variable in `.env` and needs no change here.
-#
-# What a deployment typically adds is at the bottom: external photo
-# libraries. Those need two things — a volume definition, and a mount on
-# the `app` service. Both can be declared here; compose merges the service
-# fragment into the one in docker-compose.yml rather than replacing it.
 
 volumes:
   photos:
@@ -111,22 +110,17 @@ volumes:
       device: ${DEPLOY_DATA_ROOT:-./data}/taxonomy-out
 
 # ── External photo libraries (per deployment) ─────────────────────────────────
-# Directories on the host you want to import photos from. Two steps, both
-# here:
+# Directories on the host you want to import photos from. Two entries, both
+# in this file:
 #
 #   1. a volume, bound to the host path
 #   2. a mount on `app` under /mnt/libraries/<name>
 #
-# Use `:ro` for libraries in link mode so the container can never modify the
-# originals. The example below is commented out; uncomment and adjust.
+# The multi-file merge appends these to the mounts docker-compose.yml
+# already declares — the standard eight stay. Use `:ro` for libraries in
+# link mode so the container can never modify the originals.
 #
-# services:
-#   app:
-#     volumes:
-#       - photo_archive:/mnt/libraries/archive:ro
-#       - photo_inbox:/mnt/libraries/inbox
-#
-# and add to the `volumes:` block above:
+# Add the volumes to the block above:
 #
 #   photo_archive:
 #     driver: local
@@ -134,9 +128,10 @@ volumes:
 #       type: none
 #       o: bind
 #       device: /mnt/host/path/to/archive
-#   photo_inbox:
-#     driver: local
-#     driver_opts:
-#       type: none
-#       o: bind
-#       device: ${DEPLOY_DATA_ROOT:-./data}/photo_import
+#
+# and the mounts here, uncommented:
+#
+# services:
+#   app:
+#     volumes:
+#       - photo_archive:/mnt/libraries/archive:ro

@@ -27,11 +27,18 @@ The app is then reachable at **http://localhost:8080**.
 ## Keeping your storage layout across upgrades
 
 `docker-compose.yml` carries no volume definitions of its own. They live in
-**`docker-compose.volumes.yml`** next to it, pulled in by a top-level
-`include:` — so `docker compose up -d` finds it with no extra `-f` flag.
+**`docker-compose.volumes.yml`** next to it, and the two are combined by
+`COMPOSE_FILE` in `.env`:
 
-The point of the split is that a deployment can keep its own copy of that
-one file and take every future `docker-compose.yml` from the repository
+```env
+COMPOSE_FILE=docker-compose.yml:docker-compose.volumes.yml
+```
+
+so `docker compose up -d` still needs no `-f` flags. Leave it out and
+compose stops with `volume "photos" is undefined`.
+
+The point of the split is that a deployment keeps its own copy of that one
+file and takes every future `docker-compose.yml` from the repository
 **unedited**. Everything machine-specific is on one side of the line:
 
 | Belongs in `docker-compose.volumes.yml` | Belongs in `.env` |
@@ -40,15 +47,16 @@ one file and take every future `docker-compose.yml` from the repository
 | External photo libraries mounted into `app` | anything else `DEPLOY_*` |
 
 Extra photo libraries need two entries, both in that file: a volume bound
-to the host path, and a mount on `app` under `/mnt/libraries/`. Compose
-**merges** the `app` fragment into the one in `docker-compose.yml` rather
-than replacing it, so listing only the extra mounts is enough — the
-standard ones stay. The file ships with a commented example.
+to the host path, and a mount on `app` under `/mnt/libraries/`. The
+multi-file merge **appends** those to the mounts `docker-compose.yml`
+already declares, so listing only the extra ones is enough — the standard
+eight stay. The file ships with a commented example.
 
-The file must exist, or compose stops with `open …/docker-compose.volumes.yml:
-no such file or directory`. The version in the repository is a working
-default (every volume under `${DEPLOY_DATA_ROOT}/…`, no external
-libraries), so a fresh checkout needs nothing.
+**Not a top-level `include:`.** That was the first attempt and it does not
+work: an included file that also adds mounts to `app` is rejected with
+`services.app conflicts with imported resource` on Compose 2.x, which is
+what deployments actually run. `COMPOSE_FILE` works on every version,
+including from `--env-file`, so the test stack is covered too.
 
 ## Multiple deployments on one host
 
@@ -116,8 +124,7 @@ LLM_GPU_COUNT=1
 Then recreate the service from the single compose file:
 
 ```bash
-docker compose --env-file .env -f docker-compose.yml \
-  up -d --pull always --force-recreate llm_service
+docker compose --env-file .env up -d --pull always --force-recreate llm_service
 ```
 
 These values select the separate amd64 CUDA image, Qwen3-14B Q4_K_M, all-layer
@@ -130,8 +137,7 @@ Return to the portable Qwen2.5-7B CPU profile by setting the `LLM_*` values
 back to the CPU defaults from `docker-compose.env.example` and recreating:
 
 ```bash
-docker compose --env-file .env -f docker-compose.yml \
-  up -d --force-recreate llm_service
+docker compose --env-file .env up -d --force-recreate llm_service
 ```
 
 ## Services
