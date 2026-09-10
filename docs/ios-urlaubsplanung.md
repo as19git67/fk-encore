@@ -2819,8 +2819,9 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
     bei Nähe, der Tourvorschlag aus mehreren Ideen und die Gebietssuche.
     **Umgesetzt** (§20.1–20.3): der Vorrat samt Teilen, die Nähe-Meldung mit
     Ruhezeit, der Ausflugsvorschlag über `solveDay` und die drei Wege zwischen
-    Vorrat und Reise. Offen bleiben Veranstaltungen (§20.4), die an einer
-    Quelle hängen, die es nicht gibt.
+    Vorrat und Reise. **Veranstaltungen (§20.4) werden vorerst nicht gebaut** —
+    sie hängen an einer Quelle, die es als offene Daten nicht gibt; die Mechanik
+    darum herum steht und nimmt sie auf, sobald eine da ist.
     Bewusst nach Schritt 8: Er lebt von der Standortschleife, und ohne sie
     wäre er eine Merkliste. Veranstaltungen (§20.4) hängen an einer Quelle,
     die es noch nicht gibt, und sind deshalb kein Teil dieses Schritts.
@@ -3517,6 +3518,15 @@ Was hier ausdrücklich **nicht** getan wird: Veranstaltungen aus Webseiten
 zusammenkratzen. Das ist der Punkt, an dem eine Erkennung ohne Beleg beginnt,
 und §9.3 hat dafür eine klare Antwort — ein Eintrag ohne wörtlichen Beleg fällt
 weg.
+
+**Stand: wird vorerst nicht gebaut.** Nicht, weil der Nutzen fehlt, sondern
+weil die Voraussetzung fehlt: Ohne Quelle gäbe es nur eine leere Liste mit
+Mechanik daran. Der Rest von §20 ist bewusst so gebaut, dass ein Termin später
+nichts umwirft — ein Ideenvorrat-Eintrag mit Gültigkeitsfenster, und Nähe,
+Tour und Übernahme in eine Reise gelten unverändert. Wieder aufgemacht wird
+das hier, sobald eine Quelle steht, die den Anspruch aushält; die realistische
+erste Form bleibt das iCal-Abonnement je Quelle, das der Haushalt selbst
+einträgt.
 
 ### 20.5 Was das an Daten braucht
 
