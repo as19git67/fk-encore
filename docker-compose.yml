@@ -42,12 +42,18 @@ services:
     container_name: fk-encore-chown-init${DEPLOY_NAME_SUFFIX:-}
     restart: "no"
     user: "0:0"
-    # Chown the directories themselves to the apps user (568:568) so
-    # the container can list / create files inside them. This does NOT
-    # chown files dropped later by other host users — for the finance
-    # dropbox the operator needs to land files as 568:568 (or g+r with
-    # the apps group set as primary on the dataset).
-    command: ["sh", "-c", "chown -R 568:568 /mnt/documents /mnt/documents-inbox /mnt/models /mnt/embedding-models /mnt/receipt-ocr-models /mnt/finance-import /mnt/finance-export /mnt/backup /mnt/geo /mnt/taxonomy-out /mnt/recap-music"]
+    # Chown the directories themselves to the apps user so the container
+    # can list / create files inside them. This does NOT chown files
+    # dropped later by other host users — for the finance dropbox the
+    # operator needs to land files as the same owner (or g+r with the apps
+    # group set as primary on the dataset).
+    #
+    # The owner is DEPLOY_DATA_UID:DEPLOY_DATA_GID, not the `user:` the
+    # services run as. The two are deliberately separate: every container
+    # runs as 568:568, but a host that wants its own group to reach the
+    # data as well sets DEPLOY_DATA_GID to that group — the files stay
+    # writable for uid 568 either way, because it owns them.
+    command: ["sh", "-c", "chown -R ${DEPLOY_DATA_UID:-568}:${DEPLOY_DATA_GID:-568} /mnt/documents /mnt/documents-inbox /mnt/models /mnt/embedding-models /mnt/receipt-ocr-models /mnt/finance-import /mnt/finance-export /mnt/backup /mnt/geo /mnt/taxonomy-out /mnt/recap-music"]
     volumes:
       - documents:/mnt/documents
       - documents_inbox:/mnt/documents-inbox

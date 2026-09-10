@@ -91,6 +91,7 @@ The full list of `DEPLOY_*` overrides:
 | `DEPLOY_PG_EMBEDDINGS_DATABASE` | `embeddings` | Embedding service's DB. |
 | `DEPLOY_RP_ID` / `DEPLOY_RP_NAME` / `DEPLOY_RP_ORIGIN` / `DEPLOY_APP_URL` | `localhost` / `F4mil App` / `http://localhost:8080` / `http://localhost:8080` | Passkey identity — don't change `RP_ID` after first user registers. |
 | `DEPLOY_DATA_ROOT` | `./data` | Bind-mount root for every persisted volume. |
+| `DEPLOY_DATA_UID` / `DEPLOY_DATA_GID` | `568` / `568` | Owner `chown-init` sets on the data directories. Not the same as the `user:` the services run as — that stays 568:568. Set `DEPLOY_DATA_GID` when a host group other than the apps group also needs to reach the data (files stay writable for uid 568 regardless, since it owns them). |
 | `DEPLOY_INSIGHTFACE_START_PERIOD` | `180s` | Healthcheck grace for insightface — covers cold buffalo_l load. |
 | `DEPLOY_EMBEDDING_START_PERIOD` | `600s` | Healthcheck grace for embedding_service — covers CLIP + DINOv2 first-time download. |
 | `DEPLOY_LLM_START_PERIOD` | `600s` | Healthcheck grace for llm_service — covers Llama GGUF + embedder load (and download on a cold volume). |
