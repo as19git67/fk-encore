@@ -26,7 +26,7 @@ RUN mkdir -p /home/apps/.insightface \
     && python -c "from insightface.app import FaceAnalysis; FaceAnalysis(name='buffalo_l', root='/home/apps/.insightface').prepare(ctx_id=-1)" \
     && chown -R 568:568 /home/apps/.insightface
 
-COPY main.py /app/main.py
+COPY main.py service_auth.py /app/
 WORKDIR /app
 RUN chown -R 568:568 /app
 
