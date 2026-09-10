@@ -49,6 +49,7 @@ final class TripDayTimelineTests: XCTestCase {
             usedMinutes: stops.reduce(0) { $0 + $1.dwellMinutes + $1.travelFromPrevious.minutes },
             startMinutes: start,
             stops: stops,
+            branches: nil,
         )
     }
 

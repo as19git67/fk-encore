@@ -80,7 +80,12 @@ local highway_values = {
 -- databases noticeably — gastronomy and everyday infrastructure are
 -- orders of magnitude more numerous than landmarks.
 local poi_filters = {
-  tourism  = { attraction = true, museum = true, artwork = true, viewpoint = true, gallery = true, monument = true },
+  tourism  = {
+    attraction = true, museum = true, artwork = true, viewpoint = true,
+    gallery = true, monument = true,
+    -- A day around one, not a stop on the way past:
+    zoo = true,
+  },
   historic = '*',
   amenity  = {
     -- Photographed:
@@ -88,13 +93,42 @@ local poi_filters = {
     -- Eaten at (§10.3):
     restaurant = true, cafe = true, fast_food = true, bar = true, pub = true,
     ice_cream = true, biergarten = true,
+    -- Visited for what happens there:
+    marketplace = true, public_bath = true,
     -- Needed rather than admired (§10.5):
     pharmacy = true, toilets = true, drinking_water = true, bank = true, atm = true,
   },
   shop     = { bakery = true, supermarket = true, convenience = true },
-  leisure  = { playground = true, park = true },
+  leisure  = {
+    playground = true, park = true,
+    garden = true, nature_reserve = true, water_park = true,
+  },
   building = { castle = true, cathedral = true, church = true, monastery = true, palace = true },
   man_made = { tower = true, lighthouse = true, bridge = true, obelisk = true },
+  -- Landscape. Every value here is in `poi_name_required` below: an
+  -- unnamed pond is not a destination, and there are tens of thousands
+  -- of them.
+  natural  = { peak = true, water = true, beach = true },
+  -- Places you visit for what they make.
+  craft    = { winery = true, brewery = true },
+}
+
+-- Kinds that only count when OpenStreetMap has a name for them.
+--
+-- The older filters take everything they match, named or not, and that
+-- is right for them: an unnamed church or castle is still a landmark
+-- somebody can be sent to. It is wrong for landscape and for the
+-- everyday places added later — `natural=water` alone would import
+-- every farm pond in Bavaria, none of which anyone plans an afternoon
+-- around. A name is the cheapest available evidence that a place is
+-- somewhere rather than something.
+local poi_name_required = {
+  ['natural=peak'] = true, ['natural=water'] = true, ['natural=beach'] = true,
+  ['leisure=garden'] = true, ['leisure=nature_reserve'] = true,
+  ['leisure=water_park'] = true,
+  ['amenity=marketplace'] = true, ['amenity=public_bath'] = true,
+  ['craft=winery'] = true, ['craft=brewery'] = true,
+  ['tourism=zoo'] = true,
 }
 
 -- Tag keys preserved in the jsonb `tags` column. The POI matcher
@@ -111,6 +145,7 @@ local poi_tag_allowlist = {
   ['tourism']  = true, ['historic'] = true, ['amenity'] = true,
   ['building'] = true, ['man_made'] = true,
   ['shop']     = true, ['leisure']  = true,
+  ['natural']  = true, ['craft']    = true,
   -- Planning attributes. Coarse on purpose: the plan asks "open in the
   -- morning?", not "open at 09:47" (§4.1).
   ['opening_hours'] = true, ['fee'] = true, ['website'] = true, ['phone'] = true,
@@ -125,8 +160,13 @@ local function matches_poi(tags)
   for key, allowed in pairs(poi_filters) do
     local v = tags[key]
     if v ~= nil and v ~= '' then
-      if allowed == '*' then return key, v end
-      if allowed[v] then return key, v end
+      local hit = (allowed == '*') or allowed[v]
+      if hit then
+        local named = tags.name ~= nil and tags.name ~= ''
+        if named or not poi_name_required[key .. '=' .. v] then
+          return key, v
+        end
+      end
     end
   end
   return nil, nil

@@ -40,6 +40,17 @@ import "./fixpoint-edit";
 import "./interest-list";
 import "./day-blocks";
 import "./bundle";
+import "./readiness";
+import "./review";
+import "./ideas";
+import "./outing";
+import "./ideas-trip";
+import "./documents";
+import "./travellers";
+import "./plan-votes";
+import "./plan-ops";
+import "./splits";
+import "./light-evening";
 
 import { everyMs, schedule, startLocalCron } from "../lib/local-cron";
 import { tickFillPending } from "./fill-pending";

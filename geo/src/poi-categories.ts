@@ -127,8 +127,42 @@ export const POI_CATEGORIES: readonly PoiCategory[] = [
   {
     id: "outdoors",
     purpose: "visit",
-    description: "Parks and playgrounds — where a block with children needs a pause",
-    rules: [{ key: "leisure", values: ["park", "playground"] }],
+    description:
+      "Parks, gardens, nature reserves and landscape — green where a block needs a pause, "
+      + "and the peaks, lakes and beaches a day can be built around",
+    rules: [
+      { key: "leisure", values: ["park", "playground", "garden", "nature_reserve"] },
+      // Only named ones reach the table (see osm2pgsql.lua): an unnamed
+      // pond is not a destination.
+      { key: "natural", values: ["peak", "water", "beach"] },
+    ],
+  },
+  {
+    id: "zoo",
+    purpose: "visit",
+    description: "Zoos and wildlife parks — half a day rather than a stop",
+    rules: [{ key: "tourism", values: ["zoo"] }],
+  },
+  {
+    id: "market",
+    purpose: "visit",
+    description: "Market squares and market halls — worth timing a morning around",
+    rules: [{ key: "amenity", values: ["marketplace"] }],
+  },
+  {
+    id: "bath",
+    purpose: "visit",
+    description: "Baths, spas and water parks — an afternoon, and a wet-weather answer",
+    rules: [
+      { key: "leisure", values: ["water_park"] },
+      { key: "amenity", values: ["public_bath"] },
+    ],
+  },
+  {
+    id: "producers",
+    purpose: "visit",
+    description: "Wineries and breweries — visited for what they make",
+    rules: [{ key: "craft", values: ["winery", "brewery"] }],
   },
 ] as const;
 

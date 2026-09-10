@@ -73,11 +73,80 @@ gebaut: Hoteladresse als Tagesstart und -ende, Check-in-Zeit, Rückgabetermin
 des Mietwagens, gebuchtes Zeitfenster für die Sagrada Família. Das kann Google
 strukturell nicht, ohne dass man sein Postfach öffnet.
 
+**Umgesetzt:** `GET`/`POST /trip-planner/plans/:planId/documents`,
+`GET …/documents/suggestions`, `POST …/documents/remove` und der Bildschirm
+„Dokumente" im Reisemenü. Vier Entscheidungen stecken darin:
+
+- **Vorgeschlagen, nie übernommen.** §8.2 ist eindeutig: „Nichts wird
+  stillschweigend angenommen." Ein Dokument wird angeboten, samt dem Grund, aus
+  dem es angeboten wird — es nennt eines der Reisedaten, es nennt einen der
+  Orte, oder sein eigenes Datum liegt in der Reisezeit. Reisepapier muss es
+  immer sein: Eine Handyrechnung aus der Urlaubswoche nennt das Datum auch, und
+  wer sie einmal in der Liste sieht, liest die Liste nicht mehr.
+- **Eine Lesung ist kein Fixpunkt.** `doc-hints.ts` liest harte Zeiten aus dem
+  OCR-Text („Check-in ab 15:00", „Abfahrt 17:45") und gibt sie mit **der Zeile
+  zurück, aus der sie stammen**. Angelegt wird daraus nichts: OCR verwechselt
+  oft genug eine 7 mit einer 1, und eine maschinell geschriebene Abfahrt wäre
+  genau der Fehler, der nach §8.6 erst am Bahnsteig auffällt. Den Fixpunkt setzt
+  weiterhin ein Mensch über `POST …/fixpoints` (§4.4).
+- **Die Reise ist geteilt, die Papiere sind es nicht.** Ein angehängtes Dokument
+  bleibt unter der Sichtbarkeit des documents-Service. Wer es nicht sehen darf,
+  sieht in der Reise nur, *dass* eines hängt und wer es angehängt hat — nie
+  Titel, Absender oder Datei.
+- **Anhängen darf jeder Mitreisende.** Das eigene Ticket beizusteuern ist ein
+  Beitrag, keine Änderung am Rahmen; §6.2 hält nur Rahmen, Gästeliste und
+  Stichentscheid zurück.
+
+Die Rolle (`lodging` | `transport` | `rental` | `ticket`) ist das, was das Papier
+**für die Reise** tut — eine andere Frage als die Dokumentart der Taxonomie, und
+deshalb eine eigene Spalte statt einer Ableitung.
+
 ### 3.5 Mit wem gereist wird
 Die Personenerkennung kennt die Reisegruppe. „Wir" ist nicht generisch: zwei
 Kinder unter zehn → kürzere Blöcke, Pausen, keine drei Museen am Stück;
 Großeltern dabei → Gehstrecke und Steigung als harte Nebenbedingung statt als
 Sternchen-Hinweis. Das wirkt direkt auf das Zeitbudget eines Blocks.
+
+**Umgesetzt:** `GET`/`POST /trip-planner/plans/:planId/travellers`,
+`GET …/travellers/suggestions`, `POST …/travellers/remove` und der Bildschirm
+„Wer fährt mit?".
+
+Die Wirkung gab es von Anfang an — `blocks.ts` schrumpft das Budget jedes Blocks
+bei `withChildren` und noch einmal bei `limitedMobility`, die Packliste liest
+dieselben zwei Flags. Was fehlte, war ihre **Herkunft**: Sie kamen aus einem Satz,
+den jemand einmal getippt hat. Das stimmt bei der ersten Reise und ist bei der
+nächsten falsch — ein Kind, das beim Beschreiben acht war, ist zwei Jahre später
+elf, und niemand hat es gemerkt.
+
+Jetzt stehen die **Personen** in der Reise, und die Flags sind eine Folgerung
+daraus, frisch gezogen für das Datum, an dem die Reise beginnt. Die Quelle liegt
+schon im Haus: `user_subject_persons` (die Bezugspersonen des Dokumentenmoduls)
+kennt Verwandtschaft und meistens ein Geburtsdatum. Wer dort nicht steht — ein
+befreundetes Kind, eine Oma ohne Papierkram hier — kommt mit eigenem Namen und
+optionalem Geburtsdatum dazu.
+
+Drei Entscheidungen:
+
+- **Das Alter wird abgeleitet, das „kürzere Wege" nie.** Wie lange ein kleines
+  Kind durchhält, ist eine Tatsache über kleine Kinder, und dafür sind
+  Geburtsdaten da. „Braucht kürzere Wege" ist dagegen eine Aussage über einen
+  Menschen und gehört dem, um den es geht — eine Siebzigjährige, die
+  fünfzehn Kilometer geht, wäre zu Recht beleidigt, wenn die App ihr still den
+  Tag halbiert. Das Feld wird also gesetzt, nicht geschlossen; §3.5s „Großeltern
+  dabei" ist ein Anlass zu fragen, keine Erlaubnis anzunehmen.
+- **Gerechnet wird auf den Reisebeginn, nicht auf heute.** Eine im Januar für
+  August geplante Reise ist eine Reise mit dem Kind, das im August schon
+  Geburtstag hatte.
+- **Vorgeschlagen, nicht mitgenommen.** Der Haushalt wird angeboten; eine Reise
+  ist nicht automatisch jeder, der hier wohnt.
+
+Eine Änderung an der Gruppe plant die Reise neu — die Blöcke haben danach andere
+Budgets, und ein Tag, dessen Budgets sich verschoben haben, dessen Spots aber
+nicht, geht nicht mehr auf. Aus demselben Grund ist es Sache der Organisatorin
+(§6.2, „Tempo und Begleitung"). Und es ist **nicht** die Gästeliste:
+`trip_plan_shares` sind die, die *planen* dürfen, `trip_plan_travellers` die, die
+*mitfahren* — ein Vierjähriger hat keinen Zugang und entscheidet trotzdem, wie
+lang der Nachmittag sein darf.
 
 ### 3.6 Familienabstimmung mit vorhandener Mechanik
 Das Album-Voting (Nutzer **und** KI stimmen über Fotos ab) ist eins zu eins auf
@@ -415,6 +484,40 @@ Ein *lieber nicht* ist ein starkes Minus, aber kein Veto. Echte Ausschlüsse
 („keine Höhenwege") sind keine Stimmen, sondern Nebenbedingungen der Person
 (§3.5) und wirken auf den Solver, nicht auf das Ranking.
 
+**Umgesetzt:** `GET`/`POST /trip-planner/plans/:planId/votes`,
+`POST …/votes/apply`, `GET …/fairness` (Migration 0182) und der Bildschirm
+„Abstimmen". Die Aggregation steht in `votes.ts` und ist rein: Stimmen rein,
+Zuschläge und Sätze raus.
+
+- **Summe statt Mittelwert.** Zwei „will ich" schlagen eines, und drei
+  Achselzucken verdünnen eine Begeisterung nicht. Ein „lieber nicht" wiegt
+  schwerer als ein „will ich" (−3 gegen +2) — auf einem gemeinsamen Tag kostet
+  Unlust mehr als milde Zustimmung —, bleibt aber überstimmbar.
+- **Herzenswunsch mit Kontingent**, etwa zwei je drei Tage und mindestens einer.
+  Er wiegt so viel, dass keine plausible Summe gewöhnlicher Stimmen ihn kippt,
+  aber endlich: „solange er physisch möglich ist" heißt, der Solver muss ihn noch
+  unterbringen können.
+- **Das Fairness-Konto wird abgeleitet, nicht gebucht.** Wessen Wünsche auf einem
+  Tag gelandet sind, steht schon im Plan; ein zweiter Zähler daneben wäre eine
+  Kopie, die irgendwann abweicht. Wer am weitesten zurückliegt, bekommt bei
+  Gleichstand einen kleinen Zuschlag — klein genug, dass er nur Gleichstände
+  entscheidet — und der Satz dazu lautet „heute ist mal wieder X dran".
+- **Zwei Arten von Stimme.** Ein Konto oder eine stellvertretend geführte Stimme
+  (§6.1, kleine Kinder) — technisch die Mitfahrenden aus §3.5. Wer sie abgegeben
+  hat, wird mitgeschrieben; gezählt wird sie als die des Kindes.
+
+Zwei Dinge, die dabei bewusst *nicht* passieren: Abstimmen plant **nicht** neu
+(dreißig Wischer wären sonst dreißig verschiedene Reisen — der Bildschirm hat
+dafür einen Knopf), und ein Spot, über den niemand geredet hat, wird nicht
+abgewertet: Schweigen ist keine Ablehnung.
+
+**Dabei aufgefallen und mitgeändert:** Der Solver füllte einen Tag bis zur
+Budgetgrenze mit allem, was noch hineinpasste — auch mit einem Spot, dessen
+Bewertung unter null gefallen war. Platz im Tag ist aber kein Grund, irgendwohin
+zu gehen. Kandidaten aus der Suche starten immer positiv, also schließt die neue
+Regel genau einen Fall aus: den Spot, den die Gruppe unter null gestimmt hat. Ein
+Veto ist es trotzdem nicht — genug „will ich" heben ihn zurück über die Linie.
+
 ### 6.2 Braucht es einen Trip Leader?
 
 **Ja — aber als Organisator, nicht als Chef, und nur für die Vorbereitung.**
@@ -451,6 +554,31 @@ regelmäßig die Änderungen der anderen.
 Sichtbar bleibt, wer was geändert hat, mit Rückgängig-Möglichkeit. Push für die
 Gruppe gibt es bereits (`push`, `sharedalbum`) — sinnvoll ist er sparsam: bei
 Streichungen, Splits und verschobenen Treffpunkten, nicht bei jeder Umsortierung.
+
+**Umgesetzt:** `POST`/`GET /trip-planner/plans/:planId/ops`, `POST …/ops/undo`
+(Migration 0183). Feingranular waren die Endpunkte von Anfang an — jeder ändert
+genau eine Sache. Dazugekommen ist, was ein Gerät ohne Verbindung braucht:
+
+- **Ein Stapel wird übergeben und der Reihe nach angewandt**, jeder Vorgang gegen
+  die Reise, wie sie *jetzt* ist. Zwei Leute, die verschiedene Spots ausgeblendet
+  haben, finden danach beide ausgeblendet vor — genau das, was verloren geht,
+  wenn man den Plan als Dokument speichert.
+- **Zweimal gesagt ist einmal getan.** Jeder Vorgang trägt eine auf dem Gerät
+  erzeugte Id; die abgerissene Verbindung mitten im Request ist der Fall, für den
+  das da ist. Der zweite Eingang wird als Dublette gemeldet, nicht angewandt.
+- **Ein misslungener Vorgang kippt den Stapel nicht.** Neun gute wegzuwerfen,
+  weil der zehnte sich auf einen Spot bezog, den inzwischen jemand entfernt hat,
+  wäre das Schlechteste aus beiden Welten. Ein *formal* falscher Stapel wird
+  dagegen vorher komplett abgelehnt — mittendrin abzubrechen hinterließe eine
+  Reise, die weder die alte noch die neue ist.
+- **Das Journal ist, was passiert ist.** Rückgängig schreibt einen neuen Eintrag,
+  löscht keinen. Der Name des Spots wird beim Anwenden mitgeschrieben, weil
+  Ausblenden ihn aus dem Vorrat nimmt — ein Journal, das hinterher nur noch
+  `way:34` sagen kann, ist ein Log.
+- **Nicht alles hat eine Umkehrung, und das wird gesagt.** Einen Stopp in den
+  Vorrat zurückzulegen rechnet den Tag um die Lücke herum neu; etwas Ähnliches in
+  ungefähr denselben Platz zu planen wäre eine neue Entscheidung im Gewand des
+  Wortes „rückgängig". Der Aufruf lehnt mit dieser Begründung ab.
 
 ### 6.4 Automatisch erkennen, dass ein Spot erledigt ist
 
@@ -522,6 +650,32 @@ Weiteres:
 - **Grenze:** Splits laufen innerhalb eines Blocks, höchstens über einen Tag.
   Wer sich für drei Tage trennt, plant zwei Trips — dafür braucht es keine
   Sonderlogik.
+
+**Umgesetzt:** `GET /trip-planner/plans/:planId/splits/suggestion`,
+`POST …/splits`, `POST …/splits/remove` (Migration 0184: `trip_plan_branches`,
+`trip_plan_branch_members`, `trip_plan_stops.branch_id`).
+
+Die Mechanik ist genau die oben beschriebene: Alle Zweige starten am Trennpunkt,
+enden am Treffpunkt, dessen Uhrzeit ein Fixpunkt im Sinne von §4.4 ist, und der
+vorhandene Solver läuft *n*-mal — mit dem Treffpunkt als Rückkehrpunkt, sodass
+jeder Zweig sein Budget vom Treffpunkt rückwärts bekommt und die zwei Zweige
+verschieden viel Zeit haben, wenn sie in verschiedene Richtungen gehen. Der
+Wunsch, um den es der Seite ging, geht mit Vorsprung in den Solver; den Rest
+füllt er wie jeden anderen Block.
+
+Drei Dinge, die der Dienst zusätzlich festlegt:
+
+- **Vorgeschlagen wird aus den Stimmen, entschieden von Hand** (§6.1 zahlt hier
+  ein). Vorgeschlagen wird nur das Paar, das die Gruppe *disjunkt* teilt — will
+  jemand beides, ist es ein Ranking-Problem und kein Split, und Trennen wäre
+  Mechanik um ihrer selbst willen. Stimmen alle überein, sagt der Planer nichts:
+  der Unterschied zwischen Vorschlag und Nörgelei.
+- **Niemand steht in zwei Zweigen**, und ein Split hat mindestens zwei davon.
+- **Unter einer halben Stunde lohnt sich das Trennen nicht** — dann sagt der
+  Aufruf das, statt einen Zweig zu planen, in dem nichts Platz hat.
+
+Ein Split verbraucht keine Herzenswunsch-Kontingente (§6.1) und darf von jedem
+eröffnet werden, der mitfährt (§6.2).
 
 ### 6.6 Was das am Datenmodell ändert
 
@@ -698,6 +852,40 @@ Allgemeinheit:
    von ca. 19:30 bis 20:10 im besten Licht — als Abendtermin einplanen?"*
 4. **Ein Hinweis auf der Spot-Karte**, sonst nichts.
 
+**Umgesetzt (alle vier Wege):** Der Ranking-Bonus (2) und der Hinweis auf der
+Spot-Karte (4) standen schon; dazu kommen jetzt die beiden übrigen.
+
+**Die Reihenfolge im Block** (1) rechnet `light-order.ts` — rein, und mit beiden
+Hälften von §7.3s Satz als Regel: Die **Auswahl bleibt unberührt** (nur die
+Folge darf sich ändern; was der Tag enthält, entscheidet der Ranking-Bonus im
+Vorrat), und es muss **umsonst** sein — ein neues Arrangement wird nur
+angenommen, wenn der Mehrweg in einem kleinen Budget bleibt und der Block
+weiterhin aufgeht. Gemessen wird stumpf: um wie viele Minuten die Mitte des
+Aufenthalts das Fenster verfehlt. Bis sechs Stopps exakt über alle
+Permutationen, darüber per Nachbartausch — dieselbe Grenze, die der Solver für
+die Route zieht.
+
+Zwei Feinheiten, die beim Bauen auffielen und beide in die unangenehme Richtung
+gingen: Das Fenster wird **je Block** gewählt, nicht je Tag (eine Westfassade
+leuchtet auch im Morgengrauen, und das global beste Fenster hätte einen
+Nachmittagsstopp Richtung fünf Uhr früh gezogen), und die Sonne wird in der
+**Ortszeit des Ziels** gerechnet: Blockzeiten sind die Uhr des Ziels (§4.4), und
+ein Vergleich gegen UTC hätte den Aussichtspunkt in München zwei Stunden zu früh
+einsortiert. Nennt der Aufrufer keinen Versatz, schätzt ihn die Länge — fünfzehn
+Grad je Stunde; ungenau an den Zonenrändern und ohne Sommerzeit, aber richtig in
+der Frage, auf die es hier ankommt: ob die goldene Stunde vor oder nach dem
+Nachmittag liegt.
+
+**Der Abendblock-Vorschlag** (3) ist `GET …/plans/:planId/light/evening` und der
+Bildschirm „Abendlicht": das beste Fenster **dieses Abends** — nicht des Tages —
+für einen als Fotostopp markierten Spot, und nur, wenn es nach dem geplanten Tag
+liegt und in Reichweite ist. Der Aufruf **schreibt nichts**: Angenommen wird per
+Tipp, und das legt einen gewöhnlichen Fixpunkt an (§4.4). Ein Abendtermin ist
+kein neuer Begriff, und ihm eine eigene Mechanik zu geben hieße, dieselbe Regel
+an zwei Stellen falsch machen zu können. Vorgeschlagen wird **einer**: Ein Abend
+trägt einen Ausflug, und eine Liste von fünf wäre eine Entscheidung statt eines
+Hinweises.
+
 Dass das Lichtfenster minutengenau ist, während der Plan grob bleibt, ist kein
 Widerspruch zu Leitentscheidung 1: Es ist ein **Hinweis, kein Termin**. Eine
 Uhrzeit, die man verpassen kann, entsteht erst, wenn der Nutzer Vorschlag 3
@@ -860,9 +1048,87 @@ Fairness-Konto → Wechselsachen. Kein „zehn Dinge für Japan", sondern abgele
 aus **diesem** Plan, diesem Wetter und dieser Gruppe. Ausbau, nicht Kern — aber
 billig, weil alle Eingaben schon dastehen.
 
+**Umgesetzt:** `GET /trip-planner/plans/:planId/readiness` und der Bildschirm
+„Reisebereit?" (im Reisemenü). Beide Hälften in einer Antwort, weil sie aus
+denselben Zeilen und derselben Vorhersage stammen.
+
+Von den vier Fragen sind **drei heute beantwortbar** — hat die Reise ein Datum,
+sind die Regionsdatenbanken aller Etappen fertig (dazu, als dritte: ist der
+erste Tag überhaupt schon ausgeplant, §4.3), und liegen Tickets und Buchungen
+als Dokumente vor (§3.4). Die Ticketzeile hat dabei eine ehrliche Grenze: Die
+App weiß, **welche** Papiere hängen, nicht **welche gebraucht** würden — ein
+Wochenende mit dem Auto braucht keine, und eine Liste des Nötigen gibt es
+nirgends. Also: hängt etwas dran, ist die Zeile grün und zählt es auf; hängt
+nichts dran, obwohl der Vorschlag Kandidaten findet, ist sie gelb (das ist der
+billige Abendgriff: es existiert, nur angehängt hat es niemand); findet auch der
+Vorschlag nichts, bleibt sie grau — dann weiß die App es wirklich nicht. Die
+vierte Frage ist weiter offen: Abstimmungen kommen erst mit dem
+Mehrbenutzerbetrieb (§6.1). Sie wird trotzdem angezeigt, als `unknown`
+samt Grund — eine Prüfung, die still verschwindet, vermisst niemand, und dann
+merkt auch niemand, dass die App nie hingesehen hat. Auf dem Bildschirm sind sie
+grau, nicht gelb: eine Frage, die die App nicht beantworten kann, ist keine
+Warnung, und sie als eine darzustellen erzieht dazu, Warnungen zu übersehen.
+Die fünfte Zeile — **liegt das Offline-Bündel auf dem Gerät?** (§3.9) —
+beantwortet der Server gar nicht, sondern das Gerät: nur es weiß, was es
+gespeichert hat.
+
+**Die Packliste** ist ein reines Modul (`packing.ts`): Tage samt Wetter hinein,
+Gegenstände samt Begründung heraus — kein Netz, keine Uhr, keine Datenbank, also
+notfalls auch auf dem Gerät zu rechnen. Die Regeln sind genau die oben genannten,
+plus „unter 10 °C draußen → warme Jacke", und jede feuert **einmal** und nennt
+den Tag, der sie ausgelöst hat („Regenjacke — am 18.06. ist es draußen nass").
+Wichtiger als die Regeln ist, was die Liste verweigert: keine Regenjacke für
+einen verregneten Museumstag, kein Stativ für eine goldene Stunde, in der
+niemand stehen wollte (der Fotostopp-Schalter entscheidet, §7.3), und für einen
+Tag, den keine Vorhersage erreicht, gar nichts — eine kurze Liste ist besser als
+eine erfundene.
+
 ### 8.7 Danach
 Geplant gegen tatsächlich besucht, Fotos je Spot aus dem Trip-Album, Übergabe an
 den Recap.
+
+**Umgesetzt (zwei Drittel):** `GET /trip-planner/plans/:planId/review` und der
+Bildschirm „Danach" im Reisemenü.
+
+Die Hakenliste ist die leichte Hälfte. Aufgebaut ist der Bildschirm um die
+andere: **ungeplante Aufenthalte stehen oben, über dem Plan**, nicht unter ihm —
+das Reisetagebuch hält sie fest, weil sie laut §6.4 die wertvollere Hälfte sind,
+und eine reine Hakenliste würde genau sie wegwerfen. Ebenso getrennt bleiben
+zwei Dinge, die leicht zusammenfallen würden: *dort gewesen* (Tagebuch) und
+*abgehakt* (Tagesplan). Ein Stopp, an dem jemand stand, ohne ihn abzuhaken, sagt
+beides.
+
+**Fotos je Spot** sind ein Join, keine neue Pipeline: `photo_poi_matches` bindet
+ein Foto längst an eine OSM-Referenz, und dieselbe Referenz trägt der Stopp.
+Zwei Einschränkungen gehören dazu, sonst zählt die Zahl das Falsche — nur die
+eigenen Fotos, und nur solche aus dem Reisezeitraum. Ohne das Zeitfenster
+landete jeder frühere Besuch derselben Kirche im Konto dieser Reise.
+
+**Nachgereicht: die Übergabe an den Rückblick.** Rückblicke entstehen aus
+GPS-Clustern über die eigene Mediathek (`docs/recaps.md`) und leiteten ihren
+Titel aus den Fotos ab — Stadtname, Zeitraum, im besten Fall ein Satz vom
+Sprachmodell. Das ist die richtige Methode, solange nichts anderes bekannt ist.
+Oft ist aber etwas bekannt: Eine hier geplante Reise hat einen Namen, den jemand
+gewählt hat, Daten, die jemand gesetzt hat, und benannte Etappen. Fällt ein
+Fotocluster in eine solche Reise, gewinnt deren Name — und das Sprachmodell wird
+für diesen Fall gar nicht erst gefragt: Ein getippter Name schlägt einen
+erfundenen.
+
+Bewusst schmal: **Der Plan liefert Titel, Untertitel und eine Rückverknüpfung,
+sonst nichts.** Welche Fotos zum Rückblick gehören, entscheiden weiterhin die
+Fotos — sie sind der ehrliche Beleg dafür, wo jemand wirklich war, während ein
+Plan eine Absichtserklärung ist, und genau um diesen Unterschied geht es in
+§8.7. Das Zeitfenster ist um einen Tag auf beiden Seiten großzügig: Die Anfahrt
+und der Morgen nach der Rückkehr werden mitfotografiert.
+
+Die Rückverknüpfung steht als `trip_plan_id` im `seed` des Rückblicks; „Danach"
+liest sie und zeigt den Rückblick, sobald es einen gibt. Vorher steht dort kein
+Mangel, sondern ein Satz: Ein Rückblick besteht aus Fotos, und die kommen vor
+ihm.
+
+Der Ton ist bewusst kein Vorwurf: „Ausgelassen" wird grau und mit einem Minus
+gezeigt, nicht rot mit einem Kreuz. Ein Tag, der anders lief, ist der Regelfall,
+auf dem §5 überhaupt aufbaut.
 
 ## 9. Übergänge nach außen und von außen
 
@@ -1972,6 +2238,39 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    zusätzlichen Tag auseinandergelaufen, und der Fehler wäre wieder ein
    stummer gewesen.
 
+   **Erweitert: von neun auf fünfzehn, davon sechs mit Neuimport.** Zwei
+   Einträge ließen sich sofort trennen, weil die Tags längst da waren:
+   „Denkmäler und Gedenkorte" (`historic=monument|memorial`, `man_made=obelisk`)
+   verlässt „Kunst im Freien" — wer Skulpturen ankreuzt, meint selten
+   Kriegerdenkmäler —, und „Türme und Aussichtsbauten" (`man_made=tower`,
+   `historic=tower`, `man_made=lighthouse`) ist jetzt sagbar, ohne dafür Burgen
+   und Industriegeschichte mit anzukreuzen.
+
+   Die übrigen vier — „Berge, Seen und Strände", „Zoos und Tierparks",
+   „Märkte", „Bäder und Thermen", „Weingüter und Brauereien", dazu Gärten in
+   „Parks und Gärten" — hingen an einer **Filtererweiterung**
+   (`geo/src/osm2pgsql.lua`): neu `natural=peak|water|beach`,
+   `craft=winery|brewery`, `leisure=garden|nature_reserve|water_park`,
+   `amenity=marketplace|public_bath`, `tourism=zoo`. Wie §13.0 verlangt, in
+   **einem** Zug — jede Filteränderung erzwingt einen Neuimport pro Region.
+
+   **Neu dabei ist eine Regel, die es vorher nicht brauchte: Name erforderlich.**
+   Die alten Filter nehmen alles, was sie treffen, benannt oder nicht, und das
+   ist für sie richtig — eine namenlose Kapelle ist immer noch ein Ziel.
+   Für Landschaft und Alltagsorte wäre es falsch: `natural=water` allein zöge
+   jeden Weiher Bayerns herein, und um keinen davon plant jemand einen
+   Nachmittag. `poi_name_required` gilt deshalb für alle neu aufgenommenen
+   Werte; ein Name ist der billigste verfügbare Beleg, dass ein Ort ein Ort
+   ist. Ein Drift-Test hält fest, dass dort nur Werte stehen, die der Import
+   auch wirklich trifft — ein veralteter Eintrag wäre unsichtbar.
+
+   Die neuen Kategorien tragen ihre eigene Verweildauer (`zoo` 180 Minuten,
+   `bath` 120, `producers` 60, `market` 40): Ein Zoo ist kein Zwischenstopp,
+   und eine Therme sind keine zwanzig Minuten — das falsch anzusetzen ist der
+   Weg, wie ein Nachmittag drei Dinge bekommt, die nicht hineinpassen. Der
+   Foto-Matcher sieht von alldem nichts (§10.2): Ein See unter den
+   Foto-Kandidaten verdrängt ein Wahrzeichen.
+
    Dabei fiel auf, dass die Etappe ihren **Suchradius gar nicht speicherte**
    (ebenso wenig den Tagesbeginn). Ein Neuplanen hätte still auf die Vorgaben
    zurückgegriffen — ein anderes Gebiet als das gewählte. Migration 0165 legt
@@ -2000,6 +2299,18 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    und erbt damit deren Regel, statt sie zu umgehen: eine kleine Region lädt
    sofort, eine große wartet auf Freigabe. Wer eine Reise plant, verpflichtet
    den Server nicht durch Eintippen eines Städtenamens zu fünfzig Gigabyte.
+
+   **Nachgereicht: „eine kleine Region lädt sofort" stimmte nicht.** Die Regel
+   war gebaut (`DEFAULT_AUTO_APPROVE_MAX_PBF_MB = 1500`), aber
+   `regionToSuggestion` setzte die Größe hart auf `null` — und `autoApprove`
+   verlangt eine bekannte Größe unterhalb der Schwelle. Also war es *immer*
+   falsch, und jede Region, auch ein Regierungsbezirk von 40 MB, wartete auf
+   einen Klick, den die Schwelle ihr ersparen sollte. Die Größe wird jetzt beim
+   Anlegen per HEAD ermittelt (`probePbfSizeMb`, existierte schon für den
+   Importer). Unbekannte Größe heißt weiterhin *fragen*: ein fehlgeschlagener
+   HEAD ist keine Erlaubnis, drei Gigabyte zu ziehen. Die Trip-Planung reicht
+   die schon ermittelte Größe an `createPending` weiter, statt ein zweites Mal
+   zu fragen.
    Die Antwort nennt unter `pendingRegions`, worauf welche Etappe wartet;
    `POST …/plans/:planId/plan` füllt sie später und lehnt ab, solange die
    Karten fehlen — „es lädt noch" ist etwas, worauf man warten kann, ein leerer
@@ -2403,29 +2714,66 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    mit Lichtfenster (§8.3), der Ranking-Bonus des Lichts und ein
    Endpunkt für Klimanormale.
 
+   **Dazugekommen: die beiden übrigen Licht-Wege** (§7.3) — die Reihenfolge im
+   Block, die nur umsonst zustande kommen darf, und der Abendblock-Vorschlag,
+   der nichts schreibt, bis jemand ihn annimmt.
+
    **Noch offen in diesem Schritt:** der **Erzeuger** des Horizontprofils
-   (die Rechnung steht, das Profil kommt aus keinem Höhenmodell), die
+   (die Rechnung steht, das Profil kommt aus keinem Höhenmodell) und die
    **Folgen** aus den Klimanormalen — Indoor-Vorrat und Puffertag in der
-   Reiseauflösung —, sowie die beiden Licht-Wege, die eine Minute
-   versprechen: Reihenfolge im Block und Abendblock-Vorschlag (§7.3).
+   Reiseauflösung.
 10. **Weitere Kontextsignale** — Dokumenten-Fixpunkte, Reisegruppe, dazu die
     **Reisebereitschafts-Prüfung** und die Packliste (§8.6), die beide nur
     vorhandene Zustände zusammentragen.
+
+    **Davon umgesetzt: Reisebereitschaft und Packliste** (§8.6) sowie die
+    **Dokumenten-Fixpunkte** (§3.4). Dokumente hängen jetzt an einer Reise:
+    vorgeschlagen mit Begründung, angehängt auf Zuruf, gelesene Zeiten als
+    Vorschlag samt Belegzeile statt als geschriebener Fixpunkt. Damit ist die
+    Ticketzeile der Vorabendprüfung beantwortbar geworden — mit der ehrlichen
+    Grenze, dass die App weiß, was hängt, nicht was fehlen könnte. Dazu die
+    **Reisegruppe** (§3.5): Wer mitfährt, steht jetzt als Personen an der Reise
+    statt als Satz in den Vorgaben, und `withChildren` wird für den Reisebeginn
+    aus den Geburtsdaten der Bezugspersonen gezogen — „kürzere Wege" dagegen nie,
+    das setzt ein Mensch. Damit ist Schritt 10 durch, bis auf die Abstimmungen,
+    die weiter als offen ausgewiesen werden statt als geprüft.
 11. **Mehrbenutzerbetrieb** (§6) — Beiträge und Stimmen je Person,
     Herzenswünsche und Fairness-Konto, Organisatorrolle, feingranulare
     Zusammenführung gleichzeitiger Änderungen, automatische Erledigt-Erkennung,
     Splits mit Treffpunkt. Bewusst spät: Ein Trip, den eine Person plant, muss
     vorher vollständig funktionieren.
+
+    **Davon umgesetzt: die Bewertung** (§6.1) — Stimmen je Person und je
+    stellvertretend geführter Stimme, Herzenswünsche mit Kontingent je Etappe,
+    das abgeleitete Fairness-Konto samt Satz, und die Anwendung auf die Planung
+    als eigener Aufruf statt als Nebenwirkung jedes Wischers. Damit beantwortet
+    die Vorabendprüfung (§8.6) auch ihre vierte Frage — und zwar mit Namen statt
+    mit einer Quote: Wer noch nichts gesagt hat, wird genannt, denn genau darum
+    geht die Frage. Organisatorrolle und Erledigt-Erkennung standen schon
+    (§6.2, §6.4). Dazu die **feingranulare Zusammenführung** (§6.3) — gepufferte
+    Vorgänge, idempotent nachgespielt, mit Journal und Rücknahme — und die
+    **Splits** (§6.5): Zweige an einem Block, Budget vom Treffpunkt rückwärts,
+    Vorschlag aus den Stimmen. Damit ist Schritt 11 inhaltlich durch; was auf der
+    iOS-Seite dazu noch fehlt, sind die Bildschirme für Journal und Split.
 12. **Verfeinerung, optional** — Valhalla für echte Reisezeiten, GTFS pro
    Region, Offline-Bundle, Verknüpfung mit Trip-Album und Recap.
 
     **Davon umgesetzt: das Offline-Bündel** (§3.9) — `GET …/plans/:planId/bundle`
     und der Bildschirm „Unterwegs ohne Netz". Vorgezogen, weil es nichts
     voraussetzt, was noch fehlt: Der Plan ist grob genug, um ohne Netz vollwertig
-    zu sein, und die Lichtrechnung lag schon vor. Valhalla, GTFS und die
-    Verknüpfung mit Album und Recap bleiben offen.
+    zu sein, und die Lichtrechnung lag schon vor.
+
+    **Und der Rückblick auf den Plan** (§8.7) — `GET …/plans/:planId/review` und
+    „Danach": geplant gegen tatsächlich besucht, ungeplante Aufenthalte, Fotos je
+    Spot über `photo_poi_matches`, dazu die Verknüpfung mit dem Recap in beide
+    Richtungen (der Rückblick übernimmt den Namen der geplanten Reise, die Reise
+    zeigt ihren Rückblick). Valhalla und GTFS bleiben offen.
 13. **Der Ideenvorrat** (§20) — ein geteilter Vorrat ohne Reise, die Meldung
     bei Nähe, der Tourvorschlag aus mehreren Ideen und die Gebietssuche.
+    **Umgesetzt** (§20.1–20.3): der Vorrat samt Teilen, die Nähe-Meldung mit
+    Ruhezeit, der Ausflugsvorschlag über `solveDay` und die drei Wege zwischen
+    Vorrat und Reise. Offen bleiben Veranstaltungen (§20.4), die an einer
+    Quelle hängen, die es nicht gibt.
     Bewusst nach Schritt 8: Er lebt von der Standortschleife, und ohne sie
     wäre er eine Merkliste. Veranstaltungen (§20.4) hängen an einer Quelle,
     die es noch nicht gibt, und sind deshalb kein Teil dieses Schritts.
@@ -2947,6 +3295,35 @@ Zwei Eigenschaften, die ihn von einer Merkliste unterscheiden:
   Liste ist, wird gelesen, bis sie zu lang ist, und danach nie wieder. Der
   Nutzen entsteht, wenn sie sich **von selbst meldet**.
 
+**Umgesetzt (der Vorrat selbst):** `POST /trip-planner/ideas`,
+`GET /trip-planner/ideas`, `POST …/ideas/remove` sowie `…/ideas/share` und
+`…/ideas/unshare`, dazu Migration 0179 (`idea_pool`, `idea_pool_shares`).
+
+Der Weg hinein ist **derselbe wie bei einem Fund** (§9.2) und nicht ein
+zweiter: Koordinate, optional Name, Notiz, Herkunft; der OSM-Eintrag wird
+gesucht, und wenn keiner passt, wird die eine erlaubte Frage gestellt (wie
+lange?), statt eine Dauer zu erfinden. Eine zweite Erwähnung desselben Orts
+wird zusammengeführt — und ergänzt nur, was sie mitbringt: Was beim ersten Mal
+jemand geschrieben hat, überschreibt sie nie.
+
+**Geteilt** heißt hier wörtlich eine Liste: `idea_pool_shares` hat dieselbe
+Form wie die Teilnehmerliste einer Reise (§6.2) — Personen, kein
+Rechte-Raster —, und jeder Eintrag trägt, wer ihn hineingelegt hat. Ein
+Vorrat, in den niemand hineingelassen wurde, existiert für Fremde nicht
+(`not_found`, nicht `permission_denied`): Was einem nicht gehört, ist auch
+nicht zu wissen, dass es das gibt.
+
+Die Spalten für die **Nähe-Regel** (`last_suggested_at`, `dismissed_count`)
+und das **Gültigkeitsfenster** für Termine (§20.4) liegen schon in der
+Tabelle, damit „einmal gemeldet" haltbar ist, wenn §20.2 gebaut wird —
+gemerkt statt gelöscht, wie §7.1 ein „nein" merkt.
+
+**Noch offen aus §20.2:** dass der Vorrat sich von selbst meldet, der
+Tourvorschlag aus mehreren nahen Einträgen und die Gebietssuche („such uns
+etwas im Umkreis von 50 km"). Das ist der Teil, der aus der Merkliste einen
+Tagesausflugsplaner macht — und er ruft `solveDay` mit dem Standort als Anker
+auf, statt etwas Neues zu erfinden.
+
 ### 20.2 Der eigentliche Mechanismus: der Vorrat meldet sich
 
 Die Maschinerie dafür steht bereits vollständig. §7.1 überwacht Regionen um die
@@ -2977,6 +3354,39 @@ eigentliche Erweiterung des Konzepts, nicht die Liste selbst. Bisher plant
 dieses System Urlaube; das hier plant den Samstag, und es benutzt dafür jeden
 vorhandenen Baustein.
 
+**Umgesetzt:** `POST /trip-planner/ideas/nearby`, `POST …/ideas/dismiss` und
+`POST …/ideas/outing`.
+
+*Nähe.* Die Antwort ist nach Entfernung sortiert und nennt, wer den Eintrag
+hineingelegt hat — „der Biergarten, den Anna gemerkt hat" ist die Form, die §20
+verlangt. **Zurückgegeben zu werden ist gemeldet worden:** Der Zeitstempel wird
+beim Ausliefern gesetzt, nicht wenn eine App zurückmeldet, sie habe es
+angezeigt — eine App, die das vergisst, machte die Regel still wirkungslos.
+Danach ist eine Woche Ruhe (`QUIET_DAYS`). Wer nur die Liste nach Entfernung
+sehen will, schickt `markSuggested: false`; ein Bildschirm ist nicht dasselbe
+wie eine Meldung.
+
+*Weggewischt.* `dismiss` zählt hoch und lässt den Eintrag stehen. Nach drei
+„nicht jetzt" schweigt er — aber er ist weiter im Vorrat, denn „raus damit" hat
+niemand gesagt (§7.1 merkt sich ein Nein, statt es zu löschen).
+
+*Der Ausflug.* `…/ideas/outing` ist genau das, was §20.5 beschreibt: ein Aufruf
+von `solveDay` mit dem Standort als Anker, **einem** Block über das Zeitbudget
+und dem Vorrat als Kandidaten. Ein Ausflug ist ein Block, keine Vierteilung —
+die gehört zum Urlaub, nicht zum Samstagnachmittag. Was die Familie gemerkt
+hat, geht mit Startbonus in die Auswahl und steht damit vor dem, was die
+Regionssuche auffüllt; beides ist im Ergebnis markiert (`fromIdeas`).
+
+Zwei Dinge, die dabei entschieden wurden. Der **Beinlimit-Wert** des Planers
+(40 Minuten) ist ein *Fuß*-Budget: richtig innerhalb einer Stadt, falsch für
+einen Ausflug — eine halbe Stunde im Auto ist der Weg zum See, kein Umweg. Für
+Auto und ÖPNV gilt deshalb ein größeres Limit. Und **abgelaufene Termine**
+werden gar nicht erst betrachtet: eine Ausstellung, die am Sonntag zu Ende war,
+ist keine Idee mehr (§20.4).
+
+Was noch fehlt: die Übernahme eines angenommenen Vorschlags in eine echte
+eintägige Reise (§20.3) — der Weg dafür ist `POST …/finds`, und er existiert.
+
 ### 20.3 Wie er sich zur Reise verhält
 
 Kein zweiter Mechanismus, sondern eine Quelle mehr:
@@ -2992,6 +3402,38 @@ Kein zweiter Mechanismus, sondern eine Quelle mehr:
 - **Umgekehrt**: was auf einer Reise im Etappenvorrat übrig blieb und niemand
   gesehen hat, darf am Ende in den Ideenvorrat wandern. „Beim nächsten Mal" ist
   die ehrlichste Ablage für einen Spot, der es nicht in den Plan geschafft hat.
+
+**Umgesetzt:** `POST /trip-planner/ideas/outing/accept`,
+`GET /trip-planner/plans/:planId/ideas`, `POST …/plans/:planId/ideas/take` und
+`POST …/plans/:planId/pool/to-ideas` — alle drei Richtungen über vorhandene
+Wege, keine neue Mechanik.
+
+*Angenommener Ausflug.* Genau das, was §20.5 ansagt: eine ganz normale
+eintägige Reise mit einer Etappe und **einem** Block über das Zeitbudget. Der
+Tag wird bewusst erst ausgeplant, **nachdem** die angenommenen Ideen im Vorrat
+liegen — sonst plante er sich aus der Regionssuche und die Ideen kämen
+hinterher. Sie gehen mit erhöhter Bewertung hinein, damit sie vor dem stehen,
+was die Karte anbietet (§7.2). Die Antwort nennt getrennt, was auf dem Tag
+landete und was im Vorrat blieb: Ein Ausflug, der passt, ist kürzer als der,
+den jemand wollte.
+
+*Beim Anlegen einer Reise.* `GET …/plans/:planId/ideas` bietet an, was in einer
+Etappe liegt — sortiert nach Etappe und Entfernung, mit „wer hat's gemerkt".
+**Übernommen wird nichts von selbst**; dafür gibt es `…/ideas/take`, und das
+läuft über `POST …/finds` (§9.2): richtige Etappe nach Lage, Dubletten
+zusammengeführt, Herkunft erhalten.
+
+*Zurück in den Vorrat.* `…/pool/to-ideas` schiebt Übriggebliebenes in die
+Sammlung. Schon Gesammeltes ist dabei kein Fehler, sondern wird gezählt und
+gemeldet.
+
+**In allen drei Richtungen bleibt die Idee stehen.** §20.3 sagt es wörtlich:
+nicht verbraucht, nur benutzt. Ein Detail, das dabei auffiel: Ein Ort, den die
+Karte nicht kennt, bekommt als Fund eine **neue** `manual:`-Referenz — die
+eigene Referenz der Idee taugt danach nicht mehr zum Wiedererkennen. „Schon in
+der Reise" wird deshalb über dieselben 80 Meter entschieden, mit denen
+`finds.ts` zwei Einträge denselben Ort nennt; eine andere Zahl hier ließe
+denselben Biergarten gleichzeitig „schon dabei" und „Dublette" sein.
 
 ### 20.4 Veranstaltungen: interessant, aber ohne Quelle kein Feature
 

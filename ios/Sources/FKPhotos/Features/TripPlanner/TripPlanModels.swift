@@ -119,9 +119,18 @@ struct TripBlock: Codable, Identifiable, Sendable {
     /// more honest than a guessed hour.
     let startMinutes: Int?
     let stops: [TripStop]
+    /// The branches this block is split into (§6.5). Empty whenever the
+    /// group is together, which is every block until somebody
+    /// separates — so a card that knows nothing about splits still
+    /// reads the day correctly.
+    var branches: [TripBranch]?
 
     /// A meal block holds time and a rough area, not a venue (§10.3).
     var isMeal: Bool { kind == "meal" }
+
+    /// True when this block's people are walking in more than one
+    /// direction (§6.5).
+    var isSplit: Bool { !(branches ?? []).isEmpty }
 
     /// When the block ends, if it has an hour at all.
     var endMinutes: Int? { startMinutes.map { $0 + budgetMinutes } }
@@ -365,6 +374,38 @@ struct TripDayLight: Codable, Sendable {
 }
 
 /// What the sky is expected to do over one block (§7.2).
+/// One branch of a split block (§6.5).
+///
+/// All branches of a block start where the group separates and end at
+/// the same meeting point, whose time is a real fixpoint (§4.4) — which
+/// is why the meeting is on the branch rather than on the block: each
+/// one reaches it by its own way, with its own budget.
+struct TripBranch: Codable, Identifiable, Sendable {
+    let id: Int
+    let position: Int
+    let label: String
+    let meetingLabel: String?
+    /// Minutes past midnight.
+    let meetingMinutes: Int
+    let budgetMinutes: Int
+    let members: [TripBranchMember]
+    let stops: [TripStop]
+
+    /// "Anna, Kind A · zurück um 13:00" — who, and when they are back.
+    var subtitle: String {
+        let who = members.map(\.name).joined(separator: ", ")
+        let back = "zurück um \(TripClock.format(meetingMinutes))"
+        return who.isEmpty ? back : "\(who) · \(back)"
+    }
+}
+
+struct TripBranchMember: Codable, Identifiable, Sendable {
+    /// "user:4" or "traveller:9" — the keys the votes use as well.
+    var id: String { key }
+    let key: String
+    let name: String
+}
+
 struct TripBlockWeather: Codable, Sendable, Equatable {
     let precipitationMm: Double
     /// dry | showers | wet.

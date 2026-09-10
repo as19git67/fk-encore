@@ -221,7 +221,7 @@ struct TripPlansListView: View {
     ///
     /// Only the person who created it may: it goes for everybody it was
     /// shared with, not only for whoever tapped. A companion who simply
-    /// wants out leaves through "Mitreisende" and needs nobody's
+    /// wants out leaves through "Wer plant mit" and needs nobody's
     /// permission — the server says as much, and the message is shown
     /// rather than swallowed.
     private func delete(_ plan: TripPlanSummary) async {

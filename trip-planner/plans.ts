@@ -24,6 +24,9 @@ import { pickRegion } from "../osm-admin/region-router";
 import { DEFAULT_DAY, shapeDay, type BlockTemplate, type GroupProfile, type Pace } from "./blocks";
 import { dayShapeOf, validateDayShape } from "./day-shape";
 import { scoreForLight, toCandidates, type ScoredCandidate } from "./candidates";
+import { fairnessOfPlan, votesOfLeg } from "./vote-store";
+import { orderBlocksForLight } from "./light-replan";
+import { applyVotes, tally, type Tally } from "./votes";
 import { requireOrganiser } from "./plan-access";
 import {
   createPending,
@@ -460,6 +463,11 @@ async function replanFromStoredSettings(
     // leg, and a re-plan that forgot it would hand back exactly the
     // spots somebody turned down (§5).
     const hidden = await hiddenRefs(plan.id);
+    // The account is read once for the whole trip, before anything is
+    // re-planned: it is about who gave way *so far*, and computing it
+    // per leg from a plan that is half rewritten would let the first
+    // leg's outcome decide the second leg's tie-breaks (§6.1).
+    const fairness = await fairnessOfPlan(plan);
     const perLeg: Array<{ legId: number; days: CreateDayInput[]; pool: ScoredCandidate[] }> = [];
     const awaiting: Array<{ legId: number; awaiting: boolean }> = [];
     const droppedBlocks: DroppedBlockReport[] = [];
@@ -479,6 +487,7 @@ async function replanFromStoredSettings(
           // answers "what should we see", not "how far ahead".
           detailDays: leg.days.filter((d) => d.detailed).length,
           hidden,
+          votes: tally(await votesOfLeg(leg.id), fairness),
         },
       );
       perLeg.push({
@@ -643,6 +652,8 @@ export async function planLegForTrip(
     detailDays: options.detailDays,
     firstDayStartMinutes: options.firstDayStartMinutes,
     hidden: await hiddenRefs(plan.id),
+    // No votes: this plans a leg that does not exist yet, so nobody can
+    // have rated its candidates. They arrive with the next re-plan.
   });
 }
 
@@ -793,11 +804,23 @@ export const detailTripDay = api(
     const placed = new Set(solved.blocks.flatMap((b) => b.stops.map((st) => st.osmRef)));
     const remaining = leg.pool.filter((c) => !placed.has(c.osmRef));
 
+    // The same ordering a day planned with the trip gets (§7.3): a day
+    // filled in later must not come out differently from one filled in
+    // at the start.
+    const lit = leg.startDate
+      ? orderBlocksForLight(solved.blocks, {
+        date: addDays(leg.startDate, day.dayIndex),
+        at: leg.anchor,
+        mode: leg.mode,
+        startMinutesByBlock: new Map(day.blocks.map((b) => [b.id, b.startMinutes])),
+      })
+      : solved.blocks;
+
     await saveDayDetail(
       plan.id,
       leg.id,
       day,
-      solved.blocks.map((b) => ({
+      lit.map((b) => ({
         ...b,
         stops: b.stops.map((st) => ({ ...st, status: "planned" as const, pinned: false })),
       })),
@@ -1197,6 +1220,13 @@ async function planLeg(
      * and in somebody's "why here?".
      */
     hidden?: ReadonlySet<string>;
+    /**
+     * What the family said about the candidates (§6.1). Applied after
+     * scoring rather than inside it, so what the search found and what
+     * the people want stay two distinguishable halves of the reason a
+     * spot is here.
+     */
+    votes?: Tally;
   },
 ): Promise<{
   leg: CreateLegInput;
@@ -1240,7 +1270,11 @@ async function planLeg(
     requireProminence: true,
   }).filter((candidate) => !trip.hidden?.has(candidate.osmRef));
 
-  let available = [...scored];
+  // A spot nobody voted on keeps the score the search gave it: silence
+  // is not rejection (§6.1).
+  const rated = trip.votes ? applyVotes(scored, trip.votes) : scored;
+
+  let available = [...rated];
   const days: CreateDayInput[] = [];
   const dropped: Array<DroppedBlock & { dayIndex: number }> = [];
 
@@ -1296,8 +1330,19 @@ async function planLeg(
       maxWalkMinutes: trip.maxWalkMinutes,
       mode,
     });
+    // The mildest of §7.3's four ways: the viewpoint moves to the end
+    // of the afternoon, the shaded alley to midday. Same spots, same
+    // budget — only the sequence, and only when it costs nothing.
+    const lit = startDate
+      ? orderBlocksForLight(solved.blocks, {
+        date: addDays(startDate, dayIndex),
+        at: anchor,
+        mode,
+        startMinutesByBlock: startsByBlock,
+      })
+      : solved.blocks;
     days.push({
-      blocks: solved.blocks.map((b) => ({ ...b, startMinutes: startsByBlock.get(b.id) })),
+      blocks: lit.map((b) => ({ ...b, startMinutes: startsByBlock.get(b.id) })),
       fixpoints: fixpoints.map((f) => f.stored),
       detailed: true,
     });
@@ -1376,7 +1421,11 @@ async function requestRegion(anchor: { lat: number; lon: number }): Promise<Pend
         + "liegt er vielleicht auf dem Meer?",
     );
   }
-  const created = await createPending(suggestion.slug);
+  // The suggestion already carries the probed size, so the second HEAD
+  // request createPending would make is handed the answer instead.
+  const created = await createPending(suggestion.slug, {
+    probeSize: async () => suggestion.pbfSizeMb,
+  });
   return {
     slug: suggestion.slug,
     status: created.status,

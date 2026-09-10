@@ -80,13 +80,21 @@ function fixture(): GeofabrikIndex {
 
 const loadIndex = async () => fixture();
 
+/**
+ * No HEAD requests from the suite. Size unknown is also the honest
+ * default for these tests: they are about the lifecycle, not about how
+ * big Bavaria is.
+ */
+const sizeUnknown = async () => null;
+const deps = { loadIndex, probeSize: sizeUnknown };
+
 beforeEach(async () => {
   await db.delete(osmRegionImports);
 });
 
 describe("suggestForCoord", () => {
   it("returns the smallest covering region with default-not-existing", async () => {
-    const s = await suggestForCoord(48.137, 11.575, { loadIndex });
+    const s = await suggestForCoord(48.137, 11.575, deps);
     expect(s).not.toBeNull();
     expect(s!.slug).toBe("europe/germany/bayern");
     expect(s!.existing).toBe(false);
@@ -95,21 +103,21 @@ describe("suggestForCoord", () => {
   });
 
   it("reports an existing region's persisted status", async () => {
-    await createPending("europe/germany/bayern", { loadIndex });
-    const s = await suggestForCoord(48.137, 11.575, { loadIndex });
+    await createPending("europe/germany/bayern", deps);
+    const s = await suggestForCoord(48.137, 11.575, deps);
     expect(s!.existing).toBe(true);
     expect(s!.existingStatus).toBe("pending_approval");
   });
 
   it("returns null when the point is outside every region", async () => {
-    const s = await suggestForCoord(25, -30, { loadIndex });
+    const s = await suggestForCoord(25, -30, deps);
     expect(s).toBeNull();
   });
 });
 
 describe("createPending", () => {
   it("inserts a new row in pending_approval", async () => {
-    const r = await createPending("europe/germany/bayern", { loadIndex });
+    const r = await createPending("europe/germany/bayern", deps);
     expect(r).toEqual({
       slug: "europe/germany/bayern",
       status: "pending_approval",
@@ -125,9 +133,9 @@ describe("createPending", () => {
   });
 
   it("is idempotent — second call leaves the status unchanged", async () => {
-    await createPending("europe/germany/bayern", { loadIndex });
+    await createPending("europe/germany/bayern", deps);
     await approve("europe/germany/bayern");
-    const second = await createPending("europe/germany/bayern", { loadIndex });
+    const second = await createPending("europe/germany/bayern", deps);
     expect(second).toEqual({
       slug: "europe/germany/bayern",
       status: "importing",
@@ -137,14 +145,56 @@ describe("createPending", () => {
 
   it("rejects an unknown slug", async () => {
     await expect(
-      createPending("unknown/region", { loadIndex }),
+      createPending("unknown/region", deps),
     ).rejects.toThrow(/unknown Geofabrik region: unknown\/region/);
+  });
+
+  it("skips the approval step for a region small enough to import", async () => {
+    // The threshold has existed all along; what was missing is the
+    // number it compares against. Nobody should have to click a 40 MB
+    // download through.
+    const r = await createPending("europe/germany/bayern", {
+      loadIndex,
+      probeSize: async () => 42,
+    });
+
+    expect(r.status).toBe("importing");
+    const rows = await db.select().from(osmRegionImports);
+    expect(rows[0].pbf_size_mb).toBe(42);
+  });
+
+  it("still asks a person about a region that is genuinely large", async () => {
+    const r = await createPending("europe/germany/bayern", {
+      loadIndex,
+      probeSize: async () => 4_200,
+    });
+
+    expect(r.status).toBe("pending_approval");
+    expect((await db.select().from(osmRegionImports))[0].pbf_size_mb).toBe(4_200);
+  });
+
+  it("asks a person when the size could not be found out", async () => {
+    // A HEAD that fails is not permission to download three gigabytes.
+    const r = await createPending("europe/germany/bayern", deps);
+
+    expect(r.status).toBe("pending_approval");
+    expect((await db.select().from(osmRegionImports))[0].pbf_size_mb).toBeNull();
+  });
+
+  it("honours a threshold set for this deployment", async () => {
+    const r = await createPending("europe/germany/bayern", {
+      loadIndex,
+      probeSize: async () => 900,
+      autoApproveMaxPbfMb: 500,
+    });
+
+    expect(r.status).toBe("pending_approval");
   });
 });
 
 describe("approve", () => {
   it("flips pending_approval → importing", async () => {
-    await createPending("europe/germany/bayern", { loadIndex });
+    await createPending("europe/germany/bayern", deps);
     const s = await approve("europe/germany/bayern");
     expect(s).toBe("importing");
 
@@ -153,14 +203,14 @@ describe("approve", () => {
   });
 
   it("is idempotent for already-importing rows", async () => {
-    await createPending("europe/germany/bayern", { loadIndex });
+    await createPending("europe/germany/bayern", deps);
     await approve("europe/germany/bayern");
     const s = await approve("europe/germany/bayern");
     expect(s).toBe("importing");
   });
 
   it("throws on illegal transitions", async () => {
-    await createPending("europe/germany/bayern", { loadIndex });
+    await createPending("europe/germany/bayern", deps);
     await db
       .update(osmRegionImports)
       .set({ status: "ready_running" });
@@ -176,7 +226,7 @@ describe("approve", () => {
 
 describe("remove", () => {
   it("deletes an existing row and asks the geo service to drop the postgres DB", async () => {
-    await createPending("europe/germany/bayern", { loadIndex });
+    await createPending("europe/germany/bayern", deps);
     const geo = new InMemoryGeoClient();
     const deleted = await remove("europe/germany/bayern", { geo });
     expect(deleted).toBe(true);
@@ -194,7 +244,7 @@ describe("remove", () => {
   });
 
   it("still drops the DB row when the geo drop fails (best-effort cleanup)", async () => {
-    await createPending("europe/germany/bayern", { loadIndex });
+    await createPending("europe/germany/bayern", deps);
     const geo = new InMemoryGeoClient();
     geo.dropRegion = async () => {
       throw new Error("geo down");

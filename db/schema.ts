@@ -2895,6 +2895,9 @@ export const tripPlanStops = pgTable(
     status: text("status").notNull().default("planned"),
     // Pinned stops are fixed points: never moved automatically (§5).
     pinned: boolean("pinned").notNull().default(false),
+    // Which branch of a split this stop belongs to (§6.5, migration
+    // 0184). NULL is the ordinary case: the group is together.
+    branch_id: integer("branch_id"),
     // Whether this place was the machine's suggestion or somebody's own
     // find (§9.2). Kept here so provenance survives the trip through a
     // day: the pool row is deleted when a spot is placed and rebuilt
@@ -3101,4 +3104,261 @@ export const weatherForecastCache = pgTable(
     uniqueIndex("weather_forecast_cache_place_day_key").on(table.lat, table.lon, table.day),
     index("weather_forecast_cache_day_idx").on(table.day),
   ]
+);
+
+/**
+ * The pool without a trip (§20).
+ *
+ * Everything else in the planner needs a trip. This is the list people
+ * *collect* rather than plan — the beer garden somebody mentioned, the
+ * exhibition in the next town — and it is the same scored list of
+ * possibilities as `trip_plan_pool`, minus the leg.
+ *
+ * Three columns exist here that a leg's pool does not need: who put it
+ * there (§20.1 — "Papa wollte da hin" is half the information), a
+ * validity window for something that ends (§20.4), and the bookkeeping
+ * that keeps "told you once" true (§20.5).
+ */
+export const ideaPool = pgTable(
+  "idea_pool",
+  {
+    id: serial("id").primaryKey(),
+    owner_id: integer("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    created_by: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+    osm_ref: text("osm_ref").notNull(),
+    name: text("name"),
+    title: text("title"),
+    local_name: text("local_name"),
+    lat: doublePrecision("lat").notNull(),
+    lon: doublePrecision("lon").notNull(),
+    category: text("category").notNull(),
+    kind: text("kind"),
+    dwell_minutes: integer("dwell_minutes").notNull(),
+    note: text("note"),
+    source_url: text("source_url"),
+    wikipedia_url: text("wikipedia_url"),
+    facade_azimuth: real("facade_azimuth"),
+    unmatched: boolean("unmatched").notNull().default(false),
+    photo_stop: boolean("photo_stop").notNull().default(false),
+    valid_from: date("valid_from"),
+    valid_to: date("valid_to"),
+    last_suggested_at: timestamp("last_suggested_at", { mode: "string", withTimezone: true }),
+    dismissed_count: integer("dismissed_count").notNull().default(0),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("idea_pool_owner_ref_key").on(table.owner_id, table.osm_ref),
+    index("idea_pool_owner_idx").on(table.owner_id),
+  ]
+);
+
+/** Who else writes into a collection — the same shape as a trip's shares (§6.2). */
+export const ideaPoolShares = pgTable(
+  "idea_pool_shares",
+  {
+    id: serial("id").primaryKey(),
+    owner_id: integer("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    user_id: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    invited_by: integer("invited_by").references(() => users.id, { onDelete: "set null" }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("idea_pool_shares_owner_user_key").on(table.owner_id, table.user_id),
+    index("idea_pool_shares_user_idx").on(table.user_id),
+  ]
+);
+
+/**
+ * Which documents belong to which trip (§3.4, migration 0180).
+ *
+ * A link and nothing else: the document keeps living in the documents
+ * service under its own visibility rules, and this table stores no copy
+ * of its text, title or file. `role` is what the paper does for the
+ * trip — lodging | transport | rental | ticket — proposed by
+ * trip-planner/doc-hints.ts and correctable by hand.
+ */
+export const tripPlanDocuments = pgTable(
+  "trip_plan_documents",
+  {
+    id: serial("id").primaryKey(),
+    plan_id: integer("plan_id")
+      .notNull()
+      .references(() => tripPlans.id, { onDelete: "cascade" }),
+    document_id: integer("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    role: text("role").notNull().default("ticket"),
+    note: text("note"),
+    linked_by: integer("linked_by").references(() => users.id, { onDelete: "set null" }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("trip_plan_documents_plan_document_key").on(table.plan_id, table.document_id),
+    index("trip_plan_documents_plan_idx").on(table.plan_id),
+    index("trip_plan_documents_document_idx").on(table.document_id),
+  ]
+);
+
+/**
+ * Who is coming on a trip (§3.5, migration 0181).
+ *
+ * Most travellers are a reference to the household entry in
+ * `user_subject_persons`, so their birth date stays right when it is
+ * corrected there; `birth_date` here is only for people who are not in
+ * that table. `short_walks` is set by a person and never derived —
+ * age says how long a small child lasts, but "needs shorter distances"
+ * is a statement about somebody, not a conclusion from their birth year
+ * (see trip-planner/travel-group.ts).
+ */
+export const tripPlanTravellers = pgTable(
+  "trip_plan_travellers",
+  {
+    id: serial("id").primaryKey(),
+    plan_id: integer("plan_id")
+      .notNull()
+      .references(() => tripPlans.id, { onDelete: "cascade" }),
+    subject_person_id: integer("subject_person_id")
+      .references(() => userSubjectPersons.id, { onDelete: "set null" }),
+    label: text("label").notNull(),
+    birth_date: text("birth_date"),
+    short_walks: boolean("short_walks").notNull().default(false),
+    // Set when this traveller is also one of the trip's planners
+    // (migration 0185), so an adult with a login is entered once
+    // rather than twice.
+    added_for_user_id: integer("added_for_user_id")
+      .references(() => users.id, { onDelete: "set null" }),
+    added_by: integer("added_by").references(() => users.id, { onDelete: "set null" }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("trip_plan_travellers_plan_idx").on(table.plan_id)]
+);
+
+/**
+ * One person's rating of one spot on one leg (§6.1, migration 0182).
+ *
+ * Kept per person rather than averaged into the pool: a mean picks what
+ * everybody finds mediocre and deletes what one person cares a great
+ * deal about. The individual answers are what make the two correctives
+ * of §6.1 possible — heart wishes with a quota, and a fairness account.
+ *
+ * Exactly one of `user_id` and `traveller_id` is set: a vote is either
+ * an account's or a proxy voice held for somebody without one (a small
+ * child), which is what the §3.5 traveller rows are.
+ */
+export const tripPlanVotes = pgTable(
+  "trip_plan_votes",
+  {
+    id: serial("id").primaryKey(),
+    leg_id: integer("leg_id")
+      .notNull()
+      .references(() => tripPlanLegs.id, { onDelete: "cascade" }),
+    osm_ref: text("osm_ref").notNull(),
+    user_id: integer("user_id").references(() => users.id, { onDelete: "cascade" }),
+    traveller_id: integer("traveller_id")
+      .references(() => tripPlanTravellers.id, { onDelete: "cascade" }),
+    value: text("value").notNull().default("meh"),
+    heart: boolean("heart").notNull().default(false),
+    cast_by: integer("cast_by").references(() => users.id, { onDelete: "set null" }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("trip_plan_votes_leg_idx").on(table.leg_id)]
+);
+
+/**
+ * One fine-grained change to a trip (§6.3, migration 0183).
+ *
+ * The plan is never written as a whole; these are what get written and
+ * merged. `client_op_id` makes a replayed offline batch idempotent, and
+ * `previous` holds what the operation replaced so an undo is a real
+ * inverse. Undoing writes a new row — the journal is what happened.
+ */
+export const tripPlanOps = pgTable(
+  "trip_plan_ops",
+  {
+    id: serial("id").primaryKey(),
+    plan_id: integer("plan_id")
+      .notNull()
+      .references(() => tripPlans.id, { onDelete: "cascade" }),
+    client_op_id: text("client_op_id").notNull(),
+    kind: text("kind").notNull(),
+    payload: jsonb("payload").notNull().default({}),
+    previous: jsonb("previous"),
+    actor_id: integer("actor_id").references(() => users.id, { onDelete: "set null" }),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    undone_at: timestamp("undone_at", { mode: "string", withTimezone: true }),
+    undone_by: integer("undone_by").references(() => users.id, { onDelete: "set null" }),
+  },
+  (table) => [
+    uniqueIndex("trip_plan_ops_plan_client_key").on(table.plan_id, table.client_op_id),
+    index("trip_plan_ops_plan_idx").on(table.plan_id, table.created_at),
+  ]
+);
+
+/**
+ * One branch of a split block (§6.5, migration 0184).
+ *
+ * A split is an attribute of a block, not a second trip: the block gets
+ * two or more branches, each with its own people, order and budget.
+ * All of them start where the group separates and end at the meeting
+ * point, which is a fixpoint with a clock time (§4.4) — the budget
+ * follows backwards from it, and the solver runs once per branch.
+ */
+export const tripPlanBranches = pgTable(
+  "trip_plan_branches",
+  {
+    id: serial("id").primaryKey(),
+    block_id: integer("block_id")
+      .notNull()
+      .references(() => tripPlanBlocks.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    label: text("label").notNull(),
+    meeting_label: text("meeting_label"),
+    meeting_lat: doublePrecision("meeting_lat"),
+    meeting_lon: doublePrecision("meeting_lon"),
+    meeting_minutes: integer("meeting_minutes").notNull(),
+    budget_minutes: integer("budget_minutes").notNull(),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("trip_plan_branches_block_position_key").on(table.block_id, table.position),
+    index("trip_plan_branches_block_idx").on(table.block_id),
+  ]
+);
+
+/** Who walks in which branch — an account or a traveller (§3.5, §6.1). */
+export const tripPlanBranchMembers = pgTable(
+  "trip_plan_branch_members",
+  {
+    id: serial("id").primaryKey(),
+    branch_id: integer("branch_id")
+      .notNull()
+      .references(() => tripPlanBranches.id, { onDelete: "cascade" }),
+    user_id: integer("user_id").references(() => users.id, { onDelete: "cascade" }),
+    traveller_id: integer("traveller_id")
+      .references(() => tripPlanTravellers.id, { onDelete: "cascade" }),
+  },
+  (table) => [index("trip_plan_branch_members_branch_idx").on(table.branch_id)]
 );

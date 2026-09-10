@@ -88,11 +88,75 @@ struct TripPlanDayView: View {
                             Label("Etappen (\(viewModel.plan?.legs.count ?? 1))",
                                   systemImage: "point.topleft.down.to.point.bottomright.curvepath")
                         }
-                        // Who else is on the trip (§6.2).
+                        // Who else may plan this trip (§6.2) — a
+                        // different question from who is coming along
+                        // (§3.5, below), so a different word.
                         NavigationLink {
                             TripParticipantsView(planId: viewModel.planId)
                         } label: {
-                            Label("Mitreisende", systemImage: "person.2")
+                            Label("Wer plant mit", systemImage: "person.2")
+                        }
+                        // When the light is good, after the planned
+                        // day is over (§7.3). A sentence until
+                        // somebody taps.
+                        NavigationLink {
+                            TripEveningLightView(
+                                planId: viewModel.planId,
+                                legIndex: viewModel.legIndex,
+                                dayIndex: viewModel.dayIndex,
+                            ) { Task { await viewModel.load() } }
+                        } label: {
+                            Label("Abendlicht", systemImage: "sun.horizon")
+                        }
+                        // Who changed what, and taking it back
+                        // (§6.3) — several devices, one trip.
+                        NavigationLink {
+                            TripJournalView(planId: viewModel.planId) {
+                                Task { await viewModel.load() }
+                            }
+                        } label: {
+                            Label("Änderungen", systemImage: "arrow.uturn.backward")
+                        }
+                        // Everybody rates, nobody is averaged away
+                        // (§6.1). Voting does not re-plan; the screen
+                        // has a button for that.
+                        NavigationLink {
+                            TripBallotView(planId: viewModel.planId) {
+                                Task { await viewModel.load() }
+                            }
+                        } label: {
+                            Label("Abstimmen", systemImage: "hand.thumbsup")
+                        }
+                        // Who is actually coming (§3.5) — a child
+                        // under ten makes the blocks shorter, so this
+                        // re-plans the trip.
+                        NavigationLink {
+                            TripTravellersView(planId: viewModel.planId) {
+                                Task { await viewModel.load() }
+                            }
+                        } label: {
+                            Label("Wer fährt mit?", systemImage: "figure.2.and.child.holdinghands")
+                        }
+                        // The tickets and bookings this trip runs
+                        // on (§3.4) — suggested, never taken over.
+                        NavigationLink {
+                            TripDocumentsView(planId: viewModel.planId)
+                        } label: {
+                            Label("Dokumente", systemImage: "doc.text")
+                        }
+                        // The evening before (§8.6): what is still
+                        // cheap to fix tonight, and what to pack.
+                        NavigationLink {
+                            TripReadinessView(viewModel: viewModel)
+                        } label: {
+                            Label("Reisebereit?", systemImage: "checklist")
+                        }
+                        // And afterwards (§8.7): planned against what
+                        // actually happened.
+                        NavigationLink {
+                            TripReviewView(planId: viewModel.planId)
+                        } label: {
+                            Label("Danach", systemImage: "clock.arrow.circlepath")
                         }
                         // Taking the plan along without a connection
                         // (§3.9) — asked for, never automatic.
@@ -664,6 +728,12 @@ struct TripPlanDayView: View {
 
     // MARK: - Block cards
 
+    /// Where this block sits on the day — what the split call names it
+    /// by, since a template id is not a position.
+    private func blockIndex(of block: TripBlock) -> Int? {
+        viewModel.day?.blocks.firstIndex { $0.id == block.id }
+    }
+
     private func blockCard(_ block: TripBlock) -> some View {
         let isCurrent = currentBlockId == block.id
         return VStack(alignment: .leading, spacing: 12) {
@@ -682,6 +752,41 @@ struct TripPlanDayView: View {
                 Text("ca. \(TripClock.duration(block.usedMinutes)) von \(TripClock.duration(block.budgetMinutes))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                // Separating and coming back together (§6.5). On the
+                // block, because that is what a split is an attribute
+                // of — not a second trip.
+                Menu {
+                    if block.isSplit {
+                        Button("Wieder zusammen") { Task { await viewModel.removeSplit(block) } }
+                    } else if let index = blockIndex(of: block) {
+                        NavigationLink("Trennen") {
+                            TripSplitView(
+                                planId: viewModel.planId,
+                                dayIndex: viewModel.dayIndex,
+                                blockIndex: index,
+                                blockLabel: block.label,
+                            ) { Task { await viewModel.load() } }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            // Who went where, when the group separated (§6.5).
+            if let branches = block.branches, !branches.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(branches) { branch in
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(branch.label).font(.subheadline)
+                            Text(branch.subtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
             }
 
             ProgressView(value: min(block.utilisation, 1))
@@ -854,7 +959,7 @@ struct TripPlanDayView: View {
                         onSave: { await viewModel.saveNote($0) },
                         light: viewModel.light?.hint(for: stop.osmRef),
                         shelter: viewModel.forecast?.shelter(for: stop.osmRef),
-                    ) {
+                    ) { closeDetail in
                         // The same section the pool shows: one
                         // decision, one way of making it.
                         Section {
@@ -873,7 +978,14 @@ struct TripPlanDayView: View {
                             // the day, back into the running.
                             if stop.stopStatus == .planned {
                                 Button {
-                                    Task { await viewModel.returnToPool(stop) }
+                                    // Back to the day afterwards: this
+                                    // screen would otherwise go on
+                                    // describing a stop that has just
+                                    // left it.
+                                    Task {
+                                        await viewModel.returnToPool(stop)
+                                        closeDetail()
+                                    }
                                 } label: {
                                     Label("Zurück in den Vorrat", systemImage: "tray.and.arrow.down")
                                 }
@@ -884,7 +996,10 @@ struct TripPlanDayView: View {
                             // wanted. Reversible under "Ausgeblendet"
                             // in the pool.
                             Button(role: .destructive) {
-                                Task { await viewModel.hide(osmRef: stop.osmRef) }
+                                Task {
+                                    await viewModel.hide(osmRef: stop.osmRef)
+                                    closeDetail()
+                                }
                             } label: {
                                 Label("Für diese Reise ausblenden", systemImage: "eye.slash")
                             }
