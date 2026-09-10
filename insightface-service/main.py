@@ -1,5 +1,6 @@
 import os
 from fastapi import FastAPI, UploadFile, File, HTTPException
+from service_auth import install_service_auth
 import numpy as np
 
 
@@ -65,6 +66,7 @@ from insightface.app import FaceAnalysis
 import cv2
 
 app = FastAPI()
+install_service_auth(app)
 
 # Explicit model root to avoid relying on $HOME expansion at runtime.
 # Defaults to the apps user's home; can be overridden via env var.

@@ -27,6 +27,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
+from service_auth import install_service_auth
+
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
@@ -34,6 +36,7 @@ logging.basicConfig(
 log = logging.getLogger("taxonomy-tools")
 
 app = FastAPI(title="taxonomy-tools", version="1.0.0")
+install_service_auth(app)
 
 SCRIPTS_DIR = os.environ.get("SCRIPTS_DIR", "/app/scripts/taxonomy")
 TS_SOURCES_DIR = os.environ.get("TS_SOURCES_DIR", "/app/ts-sources")
@@ -49,7 +52,11 @@ class ToolName(str, Enum):
 # The scoreboard's label ends up in a filename and reaches us from an admin
 # form, so pin it to characters that cannot walk out of out/ or confuse the
 # glob that finds snapshots again. Mirrors _LABEL_RE in model_scoreboard.py.
-LABEL_RE = re.compile(r"^[A-Za-z0-9._-]{1,40}$")
+# A leading "-" is excluded on purpose: the label is handed to a subprocess,
+# and a value starting with a dash reads as a flag rather than as a value.
+# The "--name=value" form below already covers that, so this is the second
+# lock rather than the only one.
+LABEL_RE = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._-]{0,39}$")
 
 
 class RunOptions(BaseModel):
@@ -134,9 +141,13 @@ def _build_command(tool: ToolName, opts: RunOptions) -> list[str]:
         # script validates it as such.
         if not opts.label:
             raise HTTPException(400, "scoreboard needs a label")
-        cmd = ["python3", f"{SCRIPTS_DIR}/model_scoreboard.py", "--label", opts.label]
+        # "--name=value", not "--name", "value": a value that begins with a
+        # dash would otherwise be read as the next flag rather than as this
+        # one's argument. List-form exec, so there was never a shell to
+        # inject into — but the argv itself was still steerable.
+        cmd = ["python3", f"{SCRIPTS_DIR}/model_scoreboard.py", f"--label={opts.label}"]
         if opts.compare_with:
-            cmd += ["--compare-with", opts.compare_with]
+            cmd += [f"--compare-with={opts.compare_with}"]
         return cmd
     raise ValueError(f"unknown tool: {tool}")
 

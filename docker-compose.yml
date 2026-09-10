@@ -22,6 +22,13 @@
 
 name: ${COMPOSE_PROJECT_NAME:-fk-encore}
 
+# Volume definitions live in their own file so a deployment can keep its
+# own copy of that one and take every future docker-compose.yml from the
+# repository unedited. It also carries whatever external photo libraries
+# that machine mounts. See docker-compose.volumes.yml.
+include:
+  - path: docker-compose.volumes.yml
+
 services:
   # ── Bind-mount permission fixer ────────────────────────────────────────────
   # Runs once as root before the app/llm_service start and ensures the
@@ -35,12 +42,18 @@ services:
     container_name: fk-encore-chown-init${DEPLOY_NAME_SUFFIX:-}
     restart: "no"
     user: "0:0"
-    # Chown the directories themselves to the apps user (568:568) so
-    # the container can list / create files inside them. This does NOT
-    # chown files dropped later by other host users — for the finance
-    # dropbox the operator needs to land files as 568:568 (or g+r with
-    # the apps group set as primary on the dataset).
-    command: ["sh", "-c", "chown -R 568:568 /mnt/documents /mnt/documents-inbox /mnt/models /mnt/embedding-models /mnt/receipt-ocr-models /mnt/finance-import /mnt/finance-export /mnt/backup /mnt/geo /mnt/taxonomy-out /mnt/recap-music"]
+    # Chown the directories themselves to the apps user so the container
+    # can list / create files inside them. This does NOT chown files
+    # dropped later by other host users — for the finance dropbox the
+    # operator needs to land files as the same owner (or g+r with the apps
+    # group set as primary on the dataset).
+    #
+    # The owner is DEPLOY_DATA_UID:DEPLOY_DATA_GID, not the `user:` the
+    # services run as. The two are deliberately separate: every container
+    # runs as 568:568, but a host that wants its own group to reach the
+    # data as well sets DEPLOY_DATA_GID to that group — the files stay
+    # writable for uid 568 either way, because it owns them.
+    command: ["sh", "-c", "chown -R ${DEPLOY_DATA_UID:-568}:${DEPLOY_DATA_GID:-568} /mnt/documents /mnt/documents-inbox /mnt/models /mnt/embedding-models /mnt/receipt-ocr-models /mnt/finance-import /mnt/finance-export /mnt/backup /mnt/geo /mnt/taxonomy-out /mnt/recap-music"]
     volumes:
       - documents:/mnt/documents
       - documents_inbox:/mnt/documents-inbox
@@ -83,7 +96,7 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DATABASE: ${DEPLOY_PG_DATABASE:-encore}
       # PHOTO_UPLOAD_DIR / PHOTO_THUMBNAIL_DIR / PHOTO_LIBRARIES_ROOT / BACKUP_DIR
       # are hardcoded in the container as /mnt/data/photos, /mnt/data/thumbnails,
@@ -180,7 +193,10 @@ services:
       DOCUMENTS_FEWSHOT_ENABLED: ${DOCUMENTS_FEWSHOT_ENABLED:-false}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
       ADMIN_NAME: ${ADMIN_NAME:-Admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-changeme}   # override in .env!
+      # No default on purpose: the seed creates the initial admin only when
+      # this is set, so a stack brought up without an .env ends up with no
+      # admin account rather than one whose password is in this file.
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       RP_ID: ${DEPLOY_RP_ID:-localhost}
       RP_NAME: ${DEPLOY_RP_NAME:-F4MIL App}
       RP_ORIGIN: ${DEPLOY_RP_ORIGIN:-http://localhost:8080}
@@ -197,6 +213,9 @@ services:
       LLM_SERVICE_TIMEOUT_MS: ${LLM_SERVICE_TIMEOUT_MS:-120000}
       RECEIPT_OCR_SERVICE_URL: http://receipt_ocr_service:8000
       TAXONOMY_TOOLS_SERVICE_URL: http://taxonomy_tools:8000
+      # Sent as a bearer token on every call to the five services above.
+      # They refuse to start without it; the app would only get 401s.
+      INTERNAL_SERVICE_SECRET: "${INTERNAL_SERVICE_SECRET:?must be a non-empty secret — the internal AI services have no other authentication and refuse to start without one. Generate it with `openssl rand -hex 32` and put it in .env}"
       # ENABLE_LANDMARKS retired (Epic #383) — use ENABLE_POI_DETECTION instead.
       ENABLE_POI_DETECTION: ${ENABLE_POI_DETECTION:-false}
       # Geo service (reverse geocoding + POI lookup). Talks to the geo
@@ -218,7 +237,11 @@ services:
       BACKUP_AUTO_STOP_MS: ${BACKUP_AUTO_STOP_MS:-1800000}
       BACKUP_TOKEN: ${BACKUP_TOKEN:-}
       BACKUP_ALLOW_CIDRS: ${BACKUP_ALLOW_CIDRS:-}
-      BACKUP_TRUST_XFF: ${BACKUP_TRUST_XFF:-true}
+      BACKUP_TRUST_XFF: ${BACKUP_TRUST_XFF:-}
+      # X-Forwarded-For / X-Real-IP are client-supplied unless a reverse proxy
+      # overwrites them, so the login rate limiter ignores them by default.
+      # Set to "true" only when this stack sits behind a proxy that does.
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-}
@@ -254,10 +277,17 @@ services:
       com.centurylinklabs.watchtower.scope: ${DEPLOY_WATCHTOWER_SCOPE:-fkprod}
     environment:
       ORT_LOGGING_LEVEL: "3"
+      INTERNAL_SERVICE_SECRET: "${INTERNAL_SERVICE_SECRET:?must be a non-empty secret — the internal AI services have no other authentication and refuse to start without one. Generate it with `openssl rand -hex 32` and put it in .env}"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 10s
-      timeout: 5s
+      # Polled rarely and given room to answer. This is a CPU-bound model
+      # server: a 10s/5s poll competes with the very work it is checking on,
+      # and a busy box then fails the probe and gets the container restarted
+      # mid-inference. Detecting a genuinely dead service two minutes later
+      # costs nothing here, because the only consumer is the app's
+      # `service_healthy` gate at startup.
+      interval: 2m
+      timeout: 10s
       retries: 5
       # buffalo_l loads from disk on first start (~1-2 min on a CPU-only
       # box). During start_period a failing curl doesn't count as an
@@ -287,7 +317,11 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/${DEPLOY_PG_EMBEDDINGS_DATABASE:-embeddings}
+      # Password is interpolated into a URL, so a value containing @ : / ? #
+      # has to be percent-encoded here — see POSTGRES_PASSWORD in
+      # docker-compose.env.example.
+      DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${DEPLOY_PG_EMBEDDINGS_DATABASE:-embeddings}
+      INTERNAL_SERVICE_SECRET: "${INTERNAL_SERVICE_SECRET:?must be a non-empty secret — the internal AI services have no other authentication and refuse to start without one. Generate it with `openssl rand -hex 32` and put it in .env}"
       CLIP_MODEL_NAME: xlm-roberta-large-ViT-H-14
       CLIP_PRETRAINED: frozen_laion5b_s13b_b90k
       DINO_MODEL_NAME: facebook/dinov2-base
@@ -298,8 +332,9 @@ services:
       - embedding_models:/models
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 10s
-      timeout: 5s
+      # Same reasoning as insightface above: rare polls, generous timeout.
+      interval: 2m
+      timeout: 10s
       retries: 5
       # ~5 min CLIP + DINOv2 first-time download on a cold volume; the
       # default covers that with margin. Override via env when both
@@ -327,6 +362,7 @@ services:
     environment:
       MODELS_DIR: /models
       LLM_MODEL_PATH: ${LLM_MODEL_PATH:-/models/qwen2.5-7b-instruct-q4_k_m.gguf}
+      INTERNAL_SERVICE_SECRET: "${INTERNAL_SERVICE_SECRET:?must be a non-empty secret — the internal AI services have no other authentication and refuse to start without one. Generate it with `openssl rand -hex 32` and put it in .env}"
       LLM_MODEL_URL: ${LLM_MODEL_URL:-https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf}
       LLM_MODEL_SHA256: ${LLM_MODEL_SHA256:-}
       # Further shards of a split GGUF (space-separated URLs); LLM_MODEL_PATH
@@ -428,6 +464,7 @@ services:
     environment:
       MODELS_DIR: /models
       LLM_MODEL_PATH: ${RECEIPT_OCR_LLM_MODEL_PATH:-/models/qwen2.5-3b-instruct-q4_k_m.gguf}
+      INTERNAL_SERVICE_SECRET: "${INTERNAL_SERVICE_SECRET:?must be a non-empty secret — the internal AI services have no other authentication and refuse to start without one. Generate it with `openssl rand -hex 32` and put it in .env}"
       LLM_MODEL_URL: ${RECEIPT_OCR_LLM_MODEL_URL:-https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf}
       LLM_CTX: ${RECEIPT_OCR_LLM_CTX:-4096}
       LLM_GPU_LAYERS: ${RECEIPT_OCR_LLM_GPU_LAYERS:-0}
@@ -450,11 +487,17 @@ services:
     image: pgvector/pgvector:pg18
     container_name: fk-encore-db${DEPLOY_NAME_SUFFIX:-}
     restart: unless-stopped
+    # Published on loopback only: every in-stack consumer reaches this over
+    # the compose network by service name, and the host-side scripts run on
+    # the Docker host itself, so 127.0.0.1 covers them. Set
+    # DEPLOY_BIND_POSTGRES=0.0.0.0 if you genuinely need to reach the
+    # database from another machine — but then set POSTGRES_PASSWORD too,
+    # because the default below is public knowledge.
     ports:
-      - "${DEPLOY_HOST_PORT_POSTGRES:-5432}:5432"
+      - "${DEPLOY_BIND_POSTGRES:-127.0.0.1}:${DEPLOY_HOST_PORT_POSTGRES:-5432}:5432"
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${DEPLOY_PG_DATABASE:-encore}
     volumes:
       - pgdata:/var/lib/postgresql
@@ -540,7 +583,8 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      INTERNAL_SERVICE_SECRET: "${INTERNAL_SERVICE_SECRET:?must be a non-empty secret — the internal AI services have no other authentication and refuse to start without one. Generate it with `openssl rand -hex 32` and put it in .env}"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DATABASE: ${DEPLOY_PG_DATABASE:-encore}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       AUDIT_MODEL: ${AUDIT_MODEL:-claude-opus-4-8}
@@ -558,6 +602,19 @@ services:
   # ── Watchtower ────────────────────────────────────────────────────────────
   # Observes only containers carrying the configured scope label so two
   # deployments on the same host stay independent.
+  #
+  # SECURITY: this container mounts the Docker socket, so its HTTP update
+  # API is equivalent to root on the host. Two things guard it:
+  #
+  #   1. WATCHTOWER_TOKEN is mandatory (`:?` below). An empty token makes
+  #      Watchtower accept *unauthenticated* update calls, so the stack
+  #      refuses to start rather than come up unprotected. This is the one
+  #      variable that deliberately breaks `docker compose up` when unset.
+  #   2. DEPLOY_BIND_WATCHTOWER controls which host interface the API is
+  #      published on. It defaults to all interfaces because the release
+  #      pipeline triggers updates remotely (WATCHTOWER_URL_* in the CI
+  #      workflows). If you deploy some other way, set it to 127.0.0.1 (or
+  #      a VPN address) so the API is not reachable from the internet.
   watchtower:
     image: containrrr/watchtower
     container_name: fk-encore-watchtower${DEPLOY_NAME_SUFFIX:-}
@@ -566,7 +623,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       WATCHTOWER_HTTP_API_UPDATE: "true"
-      WATCHTOWER_HTTP_API_TOKEN: ${WATCHTOWER_TOKEN:-}
+      WATCHTOWER_HTTP_API_TOKEN: "${WATCHTOWER_TOKEN:?must be a non-empty secret — an empty token exposes the Docker-socket-backed update API without authentication. Generate one with `openssl rand -hex 32` and put it in .env}"
       WATCHTOWER_CLEANUP: "true"
       WATCHTOWER_SCOPE: ${DEPLOY_WATCHTOWER_SCOPE:-fkprod}
       WATCHTOWER_NO_STARTUP_MESSAGE: "true"
@@ -580,104 +637,8 @@ services:
       fk-encore-geo${DEPLOY_NAME_SUFFIX:-}
       fk-encore-taxonomy-tools${DEPLOY_NAME_SUFFIX:-}
     ports:
-      - "${DEPLOY_HOST_PORT_WATCHTOWER:-9000}:8080"
+      - "${DEPLOY_BIND_WATCHTOWER:-0.0.0.0}:${DEPLOY_HOST_PORT_WATCHTOWER:-9000}:8080"
 
 # ── Networks ──────────────────────────────────────────────────────────────────
 # Only the implicit compose `default` bridge network is needed; the geo
 # service is reached over it by service name.
-
-# ── Volumes ───────────────────────────────────────────────────────────────────
-# Every persisted volume binds into ${DEPLOY_DATA_ROOT}/<subdir>. Override
-# DEPLOY_DATA_ROOT in `.env` per deployment so two stacks don't write into
-# each other's data.
-volumes:
-  photos:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/photos
-  thumbnails:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/thumbnails
-  pgdata:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/pgdata
-  backup:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/backup
-  llm_models:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/llm_models
-  embedding_models:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/embedding_models
-  documents:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/documents
-  documents_inbox:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/documents-inbox
-  finance_import:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/finance-import
-  finance_export:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/finance-export
-  geo_db_data:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/geo-db
-  receipt_ocr_models:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/receipt-ocr-models
-  geo_data:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/geo
-  recap-music:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/recap-music
-  taxonomy_out:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/taxonomy-out

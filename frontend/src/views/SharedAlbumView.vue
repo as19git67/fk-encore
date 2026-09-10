@@ -11,6 +11,7 @@ import GuestPhotoReactions from '../components/GuestPhotoReactions.vue'
 import PhotoMiniMap from '../components/PhotoMiniMap.vue'
 import VirtualPhotoGrid from '../components/VirtualPhotoGrid.vue'
 import { getPublicAlbum, type PhotoFilter, type PublicAlbumResponse, type PublicAlbumPhoto, type Photo } from '../api/photos'
+import { setActiveShareToken } from '../api/client'
 import { matchesPhotoFilter } from '../utils/photoFilter'
 import { countActiveFilters } from '../composables/useFilter'
 import { formatPhotoDate, formatLocationLabel } from '../utils/dateFormat'
@@ -26,6 +27,13 @@ const loading = ref(true)
 const error = ref('')
 
 const shareToken = computed(() => (route.params.token as string) ?? '')
+
+// `/photos/file/*` no longer serves anonymous callers, and a visitor here
+// usually has no account — the share token is their credential for the
+// album's images. Registered as long as this view is on screen, and taken
+// down again on the way out so it cannot authorize anything else.
+watch(shareToken, (token) => setActiveShareToken(token || null), { immediate: true })
+onUnmounted(() => setActiveShareToken(null))
 
 /**
  * `display_mode === 'map'` is now a "map enabled" flag rather than a

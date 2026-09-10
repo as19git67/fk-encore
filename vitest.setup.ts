@@ -74,6 +74,11 @@ vi.mock("encore.dev/api", () => {
     api,
     APIError,
     Gateway: class Gateway {},
+    // Services declare middleware at module scope (backup/maintenance.ts),
+    // so importing any service that pulls it in needs this to exist. Tests
+    // call handlers directly and never run the middleware chain, so hand
+    // back the handler like the api.* stubs above do.
+    middleware: (_options: any, handler: any) => handler,
   };
 });
 

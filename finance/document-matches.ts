@@ -1,6 +1,6 @@
 import { api, APIError } from 'encore.dev/api'
 import { getAuthData } from '~encore/auth'
-import { and, eq, inArray, isNotNull } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm'
 import db from '../db/database'
 import { documents, financeAccountAccess, financeDocumentMatchSuggestion, financeTransaction } from '../db/schema'
 import { decideSuggestion, createSuggestionsForTransaction, computeReceiptEnrichment } from './document-match.service'
@@ -110,7 +110,7 @@ export const transactionDocumentLinks = api({ expose: true, method: 'GET', path:
   const ids = await readableTransactionIds(Number(auth.userID), [transactionId])
   if (!ids.length) throw APIError.permissionDenied('Keine Berechtigung für diese Buchung')
   try {
-    const rows = await db.execute<{ document_id: number; title: string | null; original_filename: string }>(`SELECT d.id AS document_id, d.title, d.original_filename FROM finance_transaction_document l JOIN documents d ON d.id = l.document_id WHERE l.transaction_id = ${transactionId}`)
+    const rows = await db.execute<{ document_id: number; title: string | null; original_filename: string }>(sql`SELECT d.id AS document_id, d.title, d.original_filename FROM finance_transaction_document l JOIN documents d ON d.id = l.document_id WHERE l.transaction_id = ${transactionId}`)
     const visible = await Promise.all(rows.rows.map(async row => { try { await loadVisibleDocument(Number(auth.userID), row.document_id); return row } catch { return null } }))
     return { items: visible.filter((row): row is NonNullable<typeof row> => row !== null) }
   } catch (err: any) {
@@ -123,9 +123,14 @@ export const documentTransactionLinks = api({ expose: true, method: 'GET', path:
   const auth = getAuthData()!; requirePermission(auth, 'finance.view')
   await loadVisibleDocument(Number(auth.userID), documentId)
   let rows
-  try { rows = await db.execute<{ transaction_id: number; booking_date: string; amount: string; counterparty: string | null }>(`SELECT t.id AS transaction_id, t.booking_date, t.amount, t.counterparty FROM finance_transaction_document l JOIN finance_transaction t ON t.id = l.transaction_id WHERE l.document_id = ${documentId}`) } catch (err: any) { if (err?.code === '42P01' || err?.cause?.code === '42P01') return { items: [] }; throw err }
-  const allowed = await readableTransactionIds(Number(auth.userID), rows.rows.map(row => row.transaction_id))
-  return { items: rows.rows.filter(row => allowed.includes(row.transaction_id)) }
+  try { rows = await db.execute<{ transaction_id: number; booking_date: string; amount: string; counterparty: string | null }>(sql`SELECT t.id AS transaction_id, t.booking_date, t.amount, t.counterparty FROM finance_transaction_document l JOIN finance_transaction t ON t.id = l.transaction_id WHERE l.document_id = ${documentId}`) } catch (err: any) { if (err?.code === '42P01' || err?.cause?.code === '42P01') return { items: [] }; throw err }
+  // node-postgres hands back int8 as a string, and finance_transaction.id is
+  // a bigserial — so these arrive as "1", not 1. Without the coercion the
+  // `allowed` check below compared numbers against strings and this endpoint
+  // returned an empty list for every document.
+  const items = rows.rows.map(row => ({ ...row, transaction_id: Number(row.transaction_id) }))
+  const allowed = await readableTransactionIds(Number(auth.userID), items.map(row => row.transaction_id))
+  return { items: items.filter(row => allowed.includes(row.transaction_id)) }
 })
 
 export const linkDocuments = api({ expose: true, method: 'POST', path: '/finance/document-matches/link', auth: true }, async ({ transaction_ids, document_ids }: ManualLinkParams): Promise<LinkResponse> => {
@@ -133,7 +138,7 @@ export const linkDocuments = api({ expose: true, method: 'POST', path: '/finance
   const allowed = await readableTransactionIds(Number(auth.userID), transaction_ids)
   if (allowed.length !== transaction_ids.length) throw APIError.permissionDenied('Keine Berechtigung für eine oder mehrere Buchungen')
   await Promise.all(document_ids.map(id => loadVisibleDocument(Number(auth.userID), id)))
-  for (const transaction_id of allowed) for (const document_id of document_ids) await db.execute(`INSERT INTO finance_transaction_document (transaction_id, document_id) VALUES (${transaction_id}, ${document_id}) ON CONFLICT DO NOTHING`)
+  for (const transaction_id of allowed) for (const document_id of document_ids) await db.execute(sql`INSERT INTO finance_transaction_document (transaction_id, document_id) VALUES (${transaction_id}, ${document_id}) ON CONFLICT DO NOTHING`)
   return { linked: allowed.length * document_ids.length }
 })
 
@@ -141,7 +146,7 @@ export const unlinkDocument = api({ expose: true, method: 'POST', path: '/financ
   const auth = getAuthData()!; requirePermission(auth, 'finance.view')
   if (!(await readableTransactionIds(Number(auth.userID), [transaction_id])).length) throw APIError.permissionDenied('Keine Berechtigung für diese Buchung')
   await loadVisibleDocument(Number(auth.userID), document_id)
-  await db.execute(`DELETE FROM finance_transaction_document WHERE transaction_id = ${transaction_id} AND document_id = ${document_id}`)
+  await db.execute(sql`DELETE FROM finance_transaction_document WHERE transaction_id = ${transaction_id} AND document_id = ${document_id}`)
   return { ok: true }
 })
 

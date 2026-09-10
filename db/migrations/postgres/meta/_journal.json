@@ -1308,7 +1308,21 @@
       "idx": 186,
       "version": "7",
       "when": 1787875200015,
-      "tag": "0186_trip_day_buffer",
+      "tag": "0186_user_invites",
+      "breakpoints": true
+    },
+    {
+      "idx": 187,
+      "version": "7",
+      "when": 1787961600015,
+      "tag": "0187_guest_session_verified",
+      "breakpoints": true
+    },
+    {
+      "idx": 188,
+      "version": "7",
+      "when": 1788048000015,
+      "tag": "0188_trip_day_buffer",
       "breakpoints": true
     }
   ]
