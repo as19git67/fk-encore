@@ -54,7 +54,7 @@ final class TripDayTimelineTests: XCTestCase {
     }
 
     private func day(_ blocks: [TripBlock]) -> TripDay {
-        TripDay(id: 1, dayIndex: 0, detailed: true, blocks: blocks, fixpoints: [])
+        TripDay(id: 1, dayIndex: 0, detailed: true, bufferReason: nil, blocks: blocks, fixpoints: [])
     }
 
     /// 09:00 morning with two stops, 12:30 meal, 14:00 afternoon.

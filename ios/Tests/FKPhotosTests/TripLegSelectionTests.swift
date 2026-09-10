@@ -13,7 +13,7 @@ import XCTest
 final class TripLegSelectionTests: XCTestCase {
 
     private func day(_ index: Int) -> TripDay {
-        TripDay(id: 100 + index, dayIndex: index, detailed: true, blocks: [], fixpoints: [])
+        TripDay(id: 100 + index, dayIndex: index, detailed: true, bufferReason: nil, blocks: [], fixpoints: [])
     }
 
     private func leg(_ position: Int, _ start: String?, days: Int) -> TripLeg {

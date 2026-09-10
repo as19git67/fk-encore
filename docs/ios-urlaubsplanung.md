@@ -787,12 +787,37 @@ bewusst stehen:
 **Klimanormale** jenseits des Vorhersagehorizonts beantwortet
 `POST /trip-planner/climate-normal` aus `climate-api.open-meteo.com` —
 Mitteltemperatur, Monatsniederschlag und Regentage für Region und Monat.
-Zwei ehrliche Vorbehalte: Die Quelle liefert für 1991–2020 einen
+Ein ehrlicher Vorbehalt bleibt: Die Quelle liefert für 1991–2020 einen
 **Modell-Hindcast**, keine Messreihe (eine Beobachtungsreihe käme aus
 `archive-api.open-meteo.com` und bräuchte einen weiteren Host in der
-Netzwerk-Policy), und **noch zieht niemand Konsequenzen daraus** — die
-Vorkehrungen aus §7.2 (genug Indoor-Kandidaten im Vorrat, ein
-Puffertag je Etappe) sind offen.
+Netzwerk-Policy).
+
+**Umgesetzt: die Folgen** (`climate-plan.ts`, `climate-precautions.ts`,
+`GET /trip-planner/plans/:planId/climate`, Migration 0186). Beide Hälften des
+Satzes aus §7.2 sind dabei **Grenzen**, nicht Funktionen:
+
+- **Keine Tagespläne.** Ein Monatsmittel kann nicht sagen, was der Dienstag tut.
+  Nichts davon verschiebt einen Spot, kürzt ein Budget oder tauscht einen Tag —
+  das ist Sache der Vorhersage, und nur in den zwei Wochen, in denen es eine
+  gibt. Jenseits des Horizonts greift das Klima, innerhalb ausdrücklich nicht.
+- **Ein Puffertag je Etappe, nie zwei**, und nur wenn die Etappe drei Tage oder
+  mehr hat — sonst käme er aus dem einzigen Tag, den es gibt, und das sagt der
+  Aufruf dann auch. Er liegt in der **Mitte**: Der erste Tag ist meist Anreise,
+  der letzte Abreise, und ein Puffer dort ist keine freie Zeit, sondern der Tag,
+  der ohnehin halb weg war. Gespeichert wird die **Begründung**, kein Flag — ein
+  leerer Tag sieht sonst aus wie einer, den der Planer nicht gefüllt bekommen
+  hat, und nur der Satz unterscheidet die beiden.
+- **Genug Indoor-Kandidaten** wird gemessen und **gemeldet**, nicht erzwungen:
+  Wie viel des Vorrats bei Regen noch geht (teilweise überdacht zählt mit — ein
+  Kreuzgang ist genau das, was ein Schauer zur richtigen Idee macht), und wie
+  viele Spots fehlen. Eine Zahl, mit der man etwas anfangen kann, statt „zu
+  wenig".
+- **Fällt der Klimadienst aus, wird trotzdem geplant.** Ein Dreißigjahresmittel
+  ist eine Annehmlichkeit; eine Reise ist es nicht.
+
+Eine Etappe, die nichts vorzubereiten hat, sagt **nichts** — ein Bildschirm, der
+über jede Etappe „alles in Ordnung" meldet, erzieht dazu, ihn zu überspringen,
+und dann ist er nicht da, wenn es zählt (§8.6).
 
 ### 7.3 Licht: wann die Fotos gut werden
 
@@ -2718,10 +2743,13 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    Block, die nur umsonst zustande kommen darf, und der Abendblock-Vorschlag,
    der nichts schreibt, bis jemand ihn annimmt.
 
-   **Noch offen in diesem Schritt:** der **Erzeuger** des Horizontprofils
-   (die Rechnung steht, das Profil kommt aus keinem Höhenmodell) und die
-   **Folgen** aus den Klimanormalen — Indoor-Vorrat und Puffertag in der
-   Reiseauflösung.
+   **Dazugekommen: die Folgen aus den Klimanormalen** (§7.2) — der Puffertag in
+   der Mitte der Etappe, mit seiner Begründung statt eines Flags, und der
+   gemessene Indoor-Anteil des Vorrats samt fehlender Zahl.
+
+   **Noch offen in diesem Schritt:** nur noch der **Erzeuger** des
+   Horizontprofils — die Rechnung steht, das Profil kommt aus keinem
+   Höhenmodell.
 10. **Weitere Kontextsignale** — Dokumenten-Fixpunkte, Reisegruppe, dazu die
     **Reisebereitschafts-Prüfung** und die Packliste (§8.6), die beide nur
     vorhandene Zustände zusammentragen.

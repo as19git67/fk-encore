@@ -127,6 +127,12 @@ export interface StoredDay {
   id: number;
   dayIndex: number;
   /**
+   * Why this day is empty on purpose (§7.2's buffer day), or null for
+   * every ordinary day. A day that is simply empty looks like one the
+   * planner failed to fill; only the sentence tells them apart.
+   */
+  bufferReason?: string | null;
+  /**
    * False while the day is still only at trip resolution (§4.3): it has
    * its frame — blocks with budgets, fixpoints — but no stops yet.
    */
@@ -207,6 +213,11 @@ export interface CreateDayInput {
   fixpoints?: readonly CreateFixpointInput[];
   /** Defaults to true — a day written with stops is a detailed day. */
   detailed?: boolean;
+  /**
+   * Why this day was deliberately left empty (§7.2). Absent for every
+   * ordinary day, which is nearly all of them.
+   */
+  bufferReason?: string | null;
 }
 
 export interface CreateLegInput {
@@ -478,7 +489,12 @@ async function insertDays(
   for (const [dayIndex, dayInput] of days.entries()) {
     const [day] = await db
       .insert(tripPlanDays)
-      .values({ leg_id: legId, day_index: dayIndex, detailed: dayInput.detailed ?? true })
+      .values({
+        leg_id: legId,
+        day_index: dayIndex,
+        detailed: dayInput.detailed ?? true,
+        buffer_reason: dayInput.bufferReason ?? null,
+      })
       .returning({ id: tripPlanDays.id });
 
     for (const fix of dayInput.fixpoints ?? []) {
@@ -910,6 +926,7 @@ export async function loadPlan(
       id: row.id,
       dayIndex: row.day_index,
       detailed: row.detailed,
+      bufferReason: row.buffer_reason,
       blocks: blocksByDay.get(row.id) ?? [],
       fixpoints: fixpointsByDay.get(row.id) ?? [],
     });

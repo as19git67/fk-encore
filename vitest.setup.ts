@@ -129,3 +129,16 @@ vi.mock("~encore/clients", () => ({
     batchReclassify: vi.fn(() => Promise.resolve({ affected_documents: 0 })),
   },
 }));
+
+// Climate normals (§7.2) are fetched from a third party, and unlike the
+// forecast they are read *while a trip is being planned* — so any test
+// that plans a leg far enough ahead would otherwise pay a real network
+// round trip and blow the 5 s test timeout. An inert client makes the
+// planner fall back to "no precautions", which is exactly what it does
+// when the service is down; tests about climate install their own.
+const { setClimateClient } = await import("./trip-planner/weather-client");
+setClimateClient({
+  normal: async () => {
+    throw new Error("no climate client installed in this test");
+  },
+});
