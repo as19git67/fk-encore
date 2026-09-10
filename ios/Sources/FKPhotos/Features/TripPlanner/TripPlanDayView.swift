@@ -692,10 +692,17 @@ struct TripPlanDayView: View {
 
     private func tripResolutionCard(_ day: TripDay) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("Noch nicht im Detail geplant", systemImage: "circle.dashed")
+            // A buffer day is empty for the opposite reason to an
+            // unplanned one: not "too far away to plan" but "kept free
+            // on purpose" (§7.2). Saying the same thing about both
+            // would make the precaution look like a gap.
+            Label(day.isBuffer ? "Puffertag" : "Noch nicht im Detail geplant",
+                  systemImage: day.isBuffer ? "umbrella" : "circle.dashed")
                 .font(.headline)
-            Text("Der Rahmen steht — die Blöcke und ihre Zeiten. Die Spots kommen "
-                 + "üblicherweise am Vorabend dazu, wenn Wetter und Lust bekannt sind.")
+            Text(day.isBuffer
+                 ? (day.bufferReason ?? "")
+                 : "Der Rahmen steht — die Blöcke und ihre Zeiten. Die Spots kommen "
+                   + "üblicherweise am Vorabend dazu, wenn Wetter und Lust bekannt sind.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 

@@ -16,7 +16,7 @@ final class TripBlockTargetsTests: XCTestCase {
     }
 
     private func day(_ index: Int, detailed: Bool = true, blocks: [TripBlock]) -> TripDay {
-        TripDay(id: 100 + index, dayIndex: index, detailed: detailed, blocks: blocks, fixpoints: [])
+        TripDay(id: 100 + index, dayIndex: index, detailed: detailed, bufferReason: nil, blocks: blocks, fixpoints: [])
     }
 
     private func leg(_ days: [TripDay]) -> TripLeg {

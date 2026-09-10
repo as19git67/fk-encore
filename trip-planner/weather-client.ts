@@ -241,8 +241,19 @@ export function setWeatherClient(client: WeatherClient): void {
   active = client;
 }
 
+/**
+ * Restore the real forecast client.
+ *
+ * Deliberately *only* the forecast one: the climate client is replaced
+ * once for the whole test run (see `vitest.setup.ts`) so that no test
+ * reaches a third party by accident, and a reset here would quietly
+ * undo that for every file that calls it.
+ */
 export function resetWeatherClient(): void {
   active = new OpenMeteoClient();
+}
+
+export function resetClimateClient(): void {
   climateActive = new OpenMeteoClimateClient();
 }
 

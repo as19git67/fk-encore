@@ -99,8 +99,15 @@ struct TripDay: Codable, Identifiable, Sendable {
     /// False while the day is still only at trip resolution: it has its
     /// frame but no stops yet (§4.3).
     let detailed: Bool
+    /// Why this day is empty on purpose (§7.2's buffer day), or nil for
+    /// every ordinary day. A day that is simply empty looks like one
+    /// the planner failed to fill; only the sentence tells them apart.
+    var bufferReason: String?
     let blocks: [TripBlock]
     let fixpoints: [TripFixpoint]
+
+    /// True when the day was kept free rather than left unplanned.
+    var isBuffer: Bool { !(bufferReason ?? "").isEmpty }
 }
 
 struct TripBlock: Codable, Identifiable, Sendable {
@@ -362,6 +369,31 @@ struct TripSpotLight: Codable, Sendable, Equatable {
 }
 
 /// A day's light, as the server answers it.
+/// What a leg should prepare for, when a forecast is too far off
+/// (§7.2). Reported, never acted on: a monthly average is a reason to
+/// look, not a reason to rearrange somebody's holiday.
+struct TripClimateCheck: Codable, Sendable {
+    let legs: [TripLegClimate]
+}
+
+struct TripLegClimate: Codable, Identifiable, Sendable {
+    var id: Int { legIndex }
+    let legIndex: Int
+    let legTitle: String?
+    /// The month the normal was read for, or nil when none applies.
+    let month: Int?
+    /// Why this leg should prepare for something. Empty when it need not.
+    let reasons: [String]
+    /// Which day is deliberately empty, or nil.
+    let bufferDayIndex: Int?
+    let indoorShare: Double
+    let wantedIndoorShare: Double?
+    /// How many more sheltered candidates the pool would need.
+    let shortfall: Int
+    /// One sentence, or nil when there is nothing to say.
+    let sentence: String?
+}
+
 struct TripDayLight: Codable, Sendable {
     /// Null when the trip has no dates yet — then there is nothing to say.
     let day: String?

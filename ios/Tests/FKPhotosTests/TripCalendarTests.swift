@@ -95,7 +95,7 @@ final class TripCalendarTests: XCTestCase {
     /// Two legs, dated back to back: three days, then two.
     private func twoLegPlan(firstStart: String?, secondStart: String?) -> TripPlan {
         func day(_ index: Int) -> TripDay {
-            TripDay(id: 100 + index, dayIndex: index, detailed: true, blocks: [], fixpoints: [])
+            TripDay(id: 100 + index, dayIndex: index, detailed: true, bufferReason: nil, blocks: [], fixpoints: [])
         }
         func leg(_ position: Int, _ start: String?, _ days: Int) -> TripLeg {
             TripLeg(id: 10 + position, position: position, title: "Etappe \(position)",
