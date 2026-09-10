@@ -3330,6 +3330,9 @@ Konzept keinen Ort, obwohl der Baustein dafür längst existiert: der **Vorrat**
 (§5) ist genau eine bewertete Liste von Möglichkeiten — er hängt bloß an einer
 Etappe.
 
+> **Wie man es benutzt**, ohne dieses Kapitel zu lesen:
+> `docs/ideenvorrat.md` — Endpunkte, Datenmodell, Regeln und der Stand.
+
 ### 20.1 Was es ist
 
 Ein **Vorrat ohne Reise**, je Haushalt: eine Ideensammlung, in die alle
