@@ -40,7 +40,11 @@ try:
 
         _TestClient.__init__ = _init_with_auth
         _TestClient._fk_auth_default = True
-except ImportError:  # httpx not installed for this service's test deps
+except (ImportError, RuntimeError):
+    # No httpx for this service's test deps. Starlette raises RuntimeError
+    # rather than ImportError for that, so both are caught. The env var above
+    # is set either way; a service whose auth test needs TestClient will fail
+    # loudly on the import there, which is the right noise for a security test.
     pass
 
 
