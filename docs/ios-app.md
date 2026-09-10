@@ -177,6 +177,16 @@ dokumentiert**:
   Nicht-Admins und `write_share`-Delegierte teilen können; Delegierte können
   nur ihre eigenen Einladungen wieder entfernen. Erreichbar aus der
   Album-Detailansicht und direkt aus dem laufenden Trip.
+- **Die iPhone-Mediathek steht abseits** (#1115 §5). Sie lag als vierte Zeile
+  in der ersten Sektion, gleichauf mit „Alle Fotos", „Personen" und
+  „Gruppen-Review" — als wäre sie ein weiterer Ort *innerhalb* von f4mil.
+  Dahinter liegt aber nichts von f4mil, sondern die Mediathek des Geräts.
+  Jetzt: eigene Sektion „Vom iPhone" am Ende der Liste, deren Footer den
+  Unterschied ausspricht, und **modal** statt gepusht — ein Sheet mit eigenem
+  „Fertig" ist die Geste der Plattform für „Abstecher, du kommst zurück",
+  während ein Push „tiefer ins selbe Material" hieße. Der Zielscreen heißt
+  „iPhone-Mediathek" (nicht „iOS") und sagt oben selbst, wessen Alben er
+  zeigt.
 
 ### 2.5 Personen & Gesichter
 - Personen-Grid (`PersonsListView`), Umbenennen, Zusammenführen,
@@ -343,9 +353,18 @@ dokumentiert**:
   Maßgeblich ist das kleinere der beiden Gesichter — andersherum liefe das
   zweite aus seinem Ausschnitt heraus.
 - Ein Tipp auf ein **benanntes** Gesicht richtet beide Seiten auf dieselbe
-  Person aus; ohne Namen gibt es nichts zum Abgleichen, dann nimmt jede Seite
-  ihr eigenes Hauptgesicht. Ein Tipp ins Leere zoomt trotzdem auf das
-  Hauptgesicht, statt nichts zu tun.
+  Person aus; ohne Namen gibt es nichts zum Abgleichen, dann behält die
+  getippte Seite genau das getippte Gesicht und die andere nimmt ihr eigenes
+  Hauptgesicht (`PhotoCompare.anchoredBoxes`). Ein Tipp ins Leere zoomt
+  trotzdem auf das Hauptgesicht, statt nichts zu tun.
+- **Ein Tipp auf ein anderes Gesicht wechselt den Fokus direkt dorthin**
+  (#1115 §4). Vorher zoomte jeder zweite Tipp zurück aufs ganze Bild, ohne zu
+  prüfen, was unter dem Finger lag — von einem Gesicht zum nächsten waren es
+  zwei Tipps und ein Umweg. Nur ein Tipp auf das bereits fokussierte Gesicht
+  (oder ins Leere) zoomt jetzt noch heraus. Damit das im gezoomten Zustand
+  überhaupt getroffen werden kann, rechnet `PhotoCompare.unzoomed` den Tipp
+  erst auf das ungezoomte Bild zurück; unbenannte Gesichter werden über ihre
+  Position identifiziert, sonst wären zwei davon derselbe Fokus.
 - **Ist die Person nur auf einem der beiden Fotos, fällt der Abgleich auf das
   jeweilige Hauptgesicht zurück** (#1085 §2c). Vorher lieferte die andere Seite
   nichts, `syncedZooms` braucht aber beide Rahmen — also zoomte *keines* der
@@ -357,8 +376,23 @@ dokumentiert**:
   Rahmen in Ampelfarbe plus Prozentwert. Gemessen wird die Varianz des
   Laplace-Operators über den Gesichts-Crop, normiert gegen denselben
   Full-Scale-Wert wie im Embedding-Service — die Farben stimmen also mit den
-  daneben angezeigten KI-Qualitätswerten überein. Per Sucher-Symbol
-  abschaltbar.
+  daneben angezeigten KI-Qualitätswerten überein. Über das „…"-Menü
+  abschaltbar. Der Rahmen ist eine **Haarlinie** (`chromeScale`, also 1 pt
+  gegen den Zoom gerechnet): er liegt auf genau dem Detail, um das es beim
+  Vergleich geht, und 2 pt verdeckten davon zu viel (#1115 §3).
+- **Die Werkzeugleiste hat höchstens drei Einträge, und das Überlaufmenü ist
+  unseres** (#1115 §2). Fünf `.primaryAction`s passen nicht in eine
+  iPhone-Navigationsleiste, also faltete iOS den Rest in ein eigenes
+  „…"-Menü — was darin landete, hing von der Breite ab. Jetzt in der Leiste:
+  „Ganzes Bild" (nur solange gezoomt) und „Zur Auswahl"; im eigenen
+  `Menu`: Schärfe-Anzeige, Bewertung, Hilfe. „Zur Auswahl" hieß „Fertig",
+  was in einer Navigationsleiste „Bildschirm schließen" bedeutet — es beendet
+  aber nur die Paarvergleiche und springt zur Auswahl, wo noch nichts
+  gespeichert ist.
+- Die **Gesten-Legende** („?" bzw. „Hilfe") erscheint auf dem iPhone als
+  Sheet. Sie war per `presentationCompactAdaptation(.popover)` zu einem echten
+  Popover gezwungen, das an einem Knopf am oberen Rand hing und keinen Platz
+  hatte — lesbar war darin nichts (#1115 §1).
 - **Der Rand wird übersprungen, nicht umgeschlagen.** Der Embedding-Service
   nähert den Laplace mit `np.roll` an, das Nachbarn um die Ränder herumwickelt.
   Auf einem ganzen Foto harmlos; auf einem kleinen Gesichts-Crop macht es aus

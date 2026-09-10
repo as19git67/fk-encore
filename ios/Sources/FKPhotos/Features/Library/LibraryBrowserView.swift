@@ -1,9 +1,6 @@
 import SwiftUI
 import Photos
 
-/// Navigation value for pushing the library browser from the albums list.
-struct LibraryBrowserRef: Hashable {}
-
 struct LibraryBrowserView: View {
     @State private var viewModel = LibraryBrowserViewModel()
     @State private var searchText = ""
@@ -59,10 +56,25 @@ struct LibraryBrowserView: View {
                 ContentUnavailableView {
                     Label("Keine Alben", systemImage: "photo.on.rectangle.angled")
                 } description: {
-                    Text("Die iOS-Mediathek enthält keine Alben.")
+                    Text("Auf diesem iPhone gibt es keine Alben.")
                 }
                 .listRowSeparator(.hidden)
             } else {
+                // Says whose albums these are, on the screen that shows them.
+                // The entry point can only hint at the boundary; this is
+                // where it has to be unmistakable (#1115 §5).
+                Section {
+                    Label {
+                        Text("Diese Alben liegen auf dem iPhone, nicht in f4mil.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } icon: {
+                        Image(systemName: "iphone.gen3")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .listRowBackground(Color.clear)
+
                 if !syncedAlbums.isEmpty {
                     Section {
                         ForEach(syncedAlbums) { album in
@@ -114,7 +126,9 @@ struct LibraryBrowserView: View {
             }
         }
         .searchable(text: $searchText, prompt: "Album suchen")
-        .navigationTitle("iOS Mediathek")
+        // „iPhone" rather than „iOS": the point is that these albums live on
+        // this device, and the device is what the user recognises (#1115 §5).
+        .navigationTitle("iPhone-Mediathek")
         .navigationDestination(for: LibraryBrowserViewModel.IOSAlbum.self) { album in
             LibraryAlbumDetailView(album: album, viewModel: viewModel)
         }

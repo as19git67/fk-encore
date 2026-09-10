@@ -242,9 +242,16 @@ enum PhotoCompare {
     /// has tagged someone, that is who the photo is of. Among equals, the
     /// better-quality and larger face wins.
     static func primaryFace(in faces: [Candidate]) -> Candidate? {
-        let usable = faces.filter { !$0.ignored && $0.bbox.isUsable }
+        primaryFaceIndex(in: faces).map { faces[$0] }
+    }
+
+    /// `primaryFace`, as a position in the array as given — so a caller that
+    /// has to *remember* which face it picked can name it (see
+    /// `faceIndex(at:in:)`).
+    static func primaryFaceIndex(in faces: [Candidate]) -> Int? {
+        let usable = faces.indices.filter { !faces[$0].ignored && faces[$0].bbox.isUsable }
         guard !usable.isEmpty else { return nil }
-        return usable.max { lhs, rhs in score(lhs) < score(rhs) }
+        return usable.max { lhs, rhs in score(faces[lhs]) < score(faces[rhs]) }
     }
 
     private static func score(_ candidate: Candidate) -> Double {
@@ -273,28 +280,50 @@ enum PhotoCompare {
         in faces: [Candidate],
         nearRadius: Double = 0.15
     ) -> Candidate? {
-        let x = Double(point.x), y = Double(point.y)
-        guard x.isFinite, y.isFinite, (0...1).contains(x), (0...1).contains(y) else {
-            return primaryFace(in: faces)
-        }
-        let usable = faces.filter { !$0.ignored && $0.bbox.isUsable }
+        faceIndex(at: point, in: faces, nearRadius: nearRadius).map { faces[$0] }
+    }
+
+    /// The face a tap picks, as a position in the array as given.
+    ///
+    /// Two *unnamed* faces are otherwise indistinguishable — both are just
+    /// „the subject" — so tapping from one to the other read as a tap on the
+    /// same face and zoomed out instead of moving across (#1115 §4). A
+    /// position names them apart.
+    ///
+    /// `fallBackToPrimary` decides what a tap on empty background means. A
+    /// first tap should zoom to the subject from anywhere on the photo, so it
+    /// falls back; a tap while already zoomed means „back out", so it does
+    /// not and answers nil instead.
+    static func faceIndex(
+        at point: CGPoint,
+        in faces: [Candidate],
+        nearRadius: Double = 0.15,
+        fallBackToPrimary: Bool = true
+    ) -> Int? {
+        let usable = faces.indices.filter { !faces[$0].ignored && faces[$0].bbox.isUsable }
         guard !usable.isEmpty else { return nil }
 
-        let containing = usable.filter {
-            x >= $0.bbox.x && x <= $0.bbox.x + $0.bbox.width
-                && y >= $0.bbox.y && y <= $0.bbox.y + $0.bbox.height
+        let x = Double(point.x), y = Double(point.y)
+        guard x.isFinite, y.isFinite, (0...1).contains(x), (0...1).contains(y) else {
+            return fallBackToPrimary ? primaryFaceIndex(in: faces) : nil
         }
-        if let tightest = containing.min(by: { $0.bbox.area < $1.bbox.area }) {
+
+        let containing = usable.filter {
+            let bbox = faces[$0].bbox
+            return x >= bbox.x && x <= bbox.x + bbox.width
+                && y >= bbox.y && y <= bbox.y + bbox.height
+        }
+        if let tightest = containing.min(by: { faces[$0].bbox.area < faces[$1].bbox.area }) {
             return tightest
         }
 
         let nearest = usable.min {
-            distance(from: $0.bbox, to: x, y) < distance(from: $1.bbox, to: x, y)
+            distance(from: faces[$0].bbox, to: x, y) < distance(from: faces[$1].bbox, to: x, y)
         }
-        if let nearest, distance(from: nearest.bbox, to: x, y) <= nearRadius {
+        if let nearest, distance(from: faces[nearest].bbox, to: x, y) <= nearRadius {
             return nearest
         }
-        return primaryFace(in: faces)
+        return fallBackToPrimary ? primaryFaceIndex(in: faces) : nil
     }
 
     private static func distance(from bbox: BBox, to x: Double, _ y: Double) -> Double {
@@ -305,6 +334,35 @@ enum PhotoCompare {
     ///
     /// Nil when it landed on a letterbox stripe rather than the photo — there
     /// is no face there to have meant.
+    /// Undo a zoom, so a tap on the *displayed* pane can be read as a point
+    /// on the plainly fitted photo.
+    ///
+    /// A tap arrives in the pane's own coordinates, but while zoomed the
+    /// photo inside has been transformed — `.scaleEffect(zoom)` about the
+    /// pane centre, then `.offset(offset)`, which sends a fitted point `p`
+    /// to `c + (p − c) · zoom + offset`. Reading a zoomed tap with
+    /// `imageCoordinates(of:in:)` alone therefore lands somewhere else
+    /// entirely, which is why tapping a second face used to be impossible
+    /// while one was already focused (#1115 §4).
+    ///
+    /// Nil zoom means the photo is drawn at its plain fit, so the point
+    /// passes through unchanged.
+    static func unzoomed(
+        _ point: CGPoint,
+        by zoom: Zoom?,
+        in viewport: Viewport
+    ) -> CGPoint {
+        guard let zoom, zoom.zoom.isFinite, zoom.zoom > 0, viewport.isUsable else {
+            return point
+        }
+        let centerX = viewport.width / 2
+        let centerY = viewport.height / 2
+        return CGPoint(
+            x: centerX + (Double(point.x) - centerX - Double(zoom.offset.width)) / zoom.zoom,
+            y: centerY + (Double(point.y) - centerY - Double(zoom.offset.height)) / zoom.zoom
+        )
+    }
+
     static func imageCoordinates(
         of point: CGPoint,
         in viewport: Viewport
@@ -344,5 +402,29 @@ enum PhotoCompare {
             return nil
         }
         return (a.bbox, b.bbox)
+    }
+
+    /// The two boxes when the user pointed at one *particular* face rather
+    /// than at a person.
+    ///
+    /// An unnamed face cannot be looked up in the other photo, so only the
+    /// side it was tapped on can honour it exactly; the other lines up on its
+    /// own subject, as it does for a person who is not in both photos. This
+    /// is what lets a tap zoom to the face that was actually tapped instead
+    /// of to whichever face that pane considers its primary (#1115 §4).
+    ///
+    /// Nil when the other side has no usable face at all — a zoom on one pane
+    /// alone is not a comparison, which is the same answer `matchedBoxes`
+    /// gives in that case.
+    static func anchoredBoxes(
+        tapped: BBox,
+        tappedIsFirst: Bool,
+        first: [Candidate],
+        second: [Candidate]
+    ) -> (first: BBox, second: BBox)? {
+        guard tapped.isUsable,
+              let other = primaryFace(in: tappedIsFirst ? second : first)
+        else { return nil }
+        return tappedIsFirst ? (tapped, other.bbox) : (other.bbox, tapped)
     }
 }

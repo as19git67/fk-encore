@@ -385,4 +385,95 @@ final class PhotoCompareTests: XCTestCase {
         XCTAssertNil(PhotoCompare.matchedBoxes(personId: 7, first: left, second: right))
         XCTAssertNil(PhotoCompare.matchedBoxes(personId: nil, first: left, second: right))
     }
+
+    // MARK: - Naming one particular face (#1115 §4)
+
+    /// Two unnamed faces are „the subject" alike; only a position tells them
+    /// apart, which is what lets a tap move from one to the other.
+    func testTheTappedFaceIsIdentifiedByItsPosition() throws {
+        let faces = [
+            PhotoCompare.Candidate(bbox: bbox(x: 0.0, y: 0.0, w: 0.2, h: 0.2)),
+            PhotoCompare.Candidate(bbox: bbox(x: 0.7, y: 0.7, w: 0.2, h: 0.2)),
+        ]
+        XCTAssertEqual(PhotoCompare.faceIndex(at: CGPoint(x: 0.75, y: 0.75), in: faces), 1)
+        XCTAssertEqual(PhotoCompare.faceIndex(at: CGPoint(x: 0.05, y: 0.05), in: faces), 0)
+    }
+
+    /// The position counts the array as given, ignored faces included — the
+    /// caller indexes its own arrays with it.
+    func testThePositionCountsIgnoredFacesToo() throws {
+        let faces = [
+            PhotoCompare.Candidate(bbox: bbox(x: 0.0, y: 0.0, w: 0.2, h: 0.2), ignored: true),
+            PhotoCompare.Candidate(bbox: bbox(x: 0.7, y: 0.7, w: 0.2, h: 0.2)),
+        ]
+        XCTAssertEqual(PhotoCompare.faceIndex(at: CGPoint(x: 0.75, y: 0.75), in: faces), 1)
+    }
+
+    /// Zoomed in, a tap that hits nothing means „back out" — so it must be
+    /// able to answer „no face" rather than falling back to the subject.
+    func testAMissCanBeAMissRatherThanTheSubject() {
+        let faces = [PhotoCompare.Candidate(bbox: bbox(x: 0.0, y: 0.0, w: 0.1, h: 0.1))]
+        let far = CGPoint(x: 0.95, y: 0.95)
+        XCTAssertEqual(PhotoCompare.faceIndex(at: far, in: faces), 0)
+        XCTAssertNil(
+            PhotoCompare.faceIndex(at: far, in: faces, fallBackToPrimary: false)
+        )
+    }
+
+    /// The side that was tapped honours that exact face; the other has
+    /// nothing to match across and uses its own subject.
+    func testAnAnchoredTapKeepsTheTappedFaceAndPairsItWithTheOthersPrimary() throws {
+        let left = [PhotoCompare.Candidate(bbox: bbox(x: 0.1, y: 0.1, w: 0.1, h: 0.1))]
+        let right = [
+            PhotoCompare.Candidate(bbox: bbox(x: 0.2, y: 0.2, w: 0.1, h: 0.1), quality: 0.1),
+            PhotoCompare.Candidate(bbox: bbox(x: 0.6, y: 0.6, w: 0.3, h: 0.3), quality: 0.9),
+        ]
+        let tapped = bbox(x: 0.6, y: 0.6, w: 0.3, h: 0.3)
+        let anchored = try XCTUnwrap(
+            PhotoCompare.anchoredBoxes(
+                tapped: tapped, tappedIsFirst: false, first: left, second: right
+            )
+        )
+        XCTAssertEqual(anchored.second.x, 0.6)   // exactly what was tapped
+        XCTAssertEqual(anchored.first.x, 0.1)    // the other side's own subject
+    }
+
+    func testAnAnchoredTapNeedsAFaceOnTheOtherSideToo() {
+        let left = [PhotoCompare.Candidate(bbox: bbox())]
+        XCTAssertNil(
+            PhotoCompare.anchoredBoxes(
+                tapped: bbox(), tappedIsFirst: true, first: left, second: []
+            )
+        )
+    }
+
+    // MARK: - Undoing a zoom (#1115 §4)
+
+    /// A tap arrives in the pane's coordinates, but a zoomed photo has been
+    /// scaled about the centre and shifted — so the tap has to be put back on
+    /// the fitted photo before it means anything.
+    func testUndoingAZoomReturnsTheFittedPoint() throws {
+        let viewport = snugViewport()   // 400 × 300
+        let zoom = try XCTUnwrap(
+            PhotoCompare.zoom(to: bbox(x: 0.4, y: 0.4, w: 0.2, h: 0.2), in: viewport)
+        )
+        // Whatever the fitted point was, applying the zoom and undoing it
+        // has to come back to it.
+        let fitted = CGPoint(x: 123, y: 87)
+        let centerX = viewport.width / 2
+        let centerY = viewport.height / 2
+        let onScreen = CGPoint(
+            x: centerX + (Double(fitted.x) - centerX) * zoom.zoom + Double(zoom.offset.width),
+            y: centerY + (Double(fitted.y) - centerY) * zoom.zoom + Double(zoom.offset.height)
+        )
+        let undone = PhotoCompare.unzoomed(onScreen, by: zoom, in: viewport)
+        XCTAssertEqual(Double(undone.x), Double(fitted.x), accuracy: 0.0001)
+        XCTAssertEqual(Double(undone.y), Double(fitted.y), accuracy: 0.0001)
+    }
+
+    /// No zoom is the plain fit, and a point on it is already what it says.
+    func testUndoingNoZoomChangesNothing() {
+        let point = CGPoint(x: 42, y: 17)
+        XCTAssertEqual(PhotoCompare.unzoomed(point, by: nil, in: snugViewport()), point)
+    }
 }

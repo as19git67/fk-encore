@@ -35,7 +35,7 @@ struct SyncSettingsView: View {
             Section {
                 Toggle("Automatisch synchronisieren", isOn: $syncEnabled)
             } footer: {
-                Text("Verknüpfte Alben werden automatisch im Hintergrund synchronisiert. Welche Alben – und ob Kopieren, Synchronisieren oder Zwei-Wege – legst du in der iOS-Mediathek über „\(SyncWording.linkFromLibrary)“ fest.")
+                Text("Verknüpfte Alben werden automatisch im Hintergrund synchronisiert. Welche Alben – und ob Kopieren, Synchronisieren oder Zwei-Wege – legst du in der iPhone-Mediathek über „\(SyncWording.linkFromLibrary)“ fest.")
             }
 
             // ── Manual trigger ─────────────────────────────────────────

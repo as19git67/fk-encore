@@ -104,15 +104,15 @@ struct PhotoCompareView: View {
         /// The same person in both — the best case, and what a tap on a named
         /// face gives.
         case person(id: Int)
-        /// A tapped face with no person attached. There is nothing to match
-        /// across, so each side falls back to its own primary face.
-        case primary
-
-        /// The person to line both sides up on, if there is one.
-        var personId: Int? {
-            if case .person(let id) = self { return id }
-            return nil
-        }
+        /// One particular face with no person attached, named by the photo it
+        /// was tapped in and its position there.
+        ///
+        /// It used to be a single `primary` case, which made every unnamed
+        /// face the same focus: tapping from one to another read as tapping
+        /// the one already focused, and zoomed out instead of moving across
+        /// (#1115 §4). The other pane still has nothing to match to and lines
+        /// up on its own subject.
+        case face(photoId: Int, index: Int)
     }
 
     private var photoById: [Int: ReviewQueuePhoto] {
@@ -178,9 +178,19 @@ struct PhotoCompareView: View {
                     )
                 )
             }
+            // No `presentationCompactAdaptation(.popover)`: forcing a real
+            // popover on the iPhone anchored it to a toolbar button at the
+            // top edge, where it had no room to grow into and nothing in it
+            // was legible (#1115 §1). Four labelled rows and a footnote are
+            // sheet-shaped content, not a tooltip — so the default
+            // adaptation is what this wants: a sheet in compact width, a
+            // real popover on the iPad, where there is room beside the
+            // anchor. The detents apply to the adapted sheet and are ignored
+            // by the popover, so one call site covers both.
             .popover(isPresented: $showGestureHelp) {
                 GestureHelp(isPortrait: orientationIsPortrait)
-                    .presentationCompactAdaptation(.popover)
+                    .presentationDetents([.medium])
+                    .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showQuality) {
                 if let pair {
@@ -250,7 +260,7 @@ struct PhotoCompareView: View {
             qualityPercent: qualityPercent(for: photo),
             flungOffset: flung?.id == photo.id ? flung?.offset : nil,
             discardDisabled: flung != nil,
-            onTap: { handleTap(at: $0, photo: photo, paneSize: paneSize) },
+            onTap: { handleTap(at: $0, photo: photo, zoom: zoom, paneSize: paneSize) },
             onDrag: { handleFling(
                 $0, photo: photo, indexInPair: indexInPair,
                 isPortrait: isPortrait, screen: screen
@@ -477,43 +487,61 @@ struct PhotoCompareView: View {
         ToolbarItem(placement: .cancellationAction) {
             Button("Abbrechen") { dismiss() }
         }
+        // Three trailing items at most, and the overflow is ours.
+        //
+        // This used to declare five `.primaryAction`s, which does not fit an
+        // iPhone navigation bar — so the system folded the remainder into an
+        // overflow menu of its own making, whose contents depended on the
+        // available width. What landed in it was arbitrary, and on a device
+        // it was the single entry „Fertig" (#1115 §2).
         if pair != nil {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showPeaking.toggle()
-                } label: {
-                    Label(
-                        "Schärfe",
-                        systemImage: showPeaking ? "viewfinder.circle.fill" : "viewfinder.circle"
-                    )
-                }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showQuality = true
-                } label: {
-                    Label("Bewertung", systemImage: "chart.bar.doc.horizontal")
-                }
-            }
+            // Back out of a zoom: one tap, so it stays in the bar rather
+            // than behind a menu — and only while there is a zoom to leave.
             if focus != nil {
                 ToolbarItem(placement: .primaryAction) {
-                    Button("Ganzes Bild") { focus = nil }
-                }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                // The gestures are the fast path and completely invisible;
-                // without a legend somewhere they are not discoverable.
-                Button {
-                    showGestureHelp = true
-                } label: {
-                    Label("Hilfe", systemImage: "questionmark.circle")
+                    Button {
+                        focus = nil
+                    } label: {
+                        Label(
+                            "Ganzes Bild",
+                            systemImage: "arrow.down.right.and.arrow.up.left"
+                        )
+                    }
                 }
             }
             ToolbarItem(placement: .primaryAction) {
                 // Long groups need a way out that is not „compare all fifteen
-                // pairs": the scores so far are already an answer.
-                Button("Fertig") {
+                // pairs": the scores so far are already an answer. It was
+                // labelled „Fertig", which in a navigation bar is the word
+                // for „close this screen" — not what it does. It ends the
+                // pairwise half and goes to the selection, where nothing is
+                // committed yet and „Weiter vergleichen" leads back.
+                Button {
                     withAnimation { tournament.finishComparing() }
+                } label: {
+                    Label("Zur Auswahl", systemImage: "flag.checkered")
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Toggle(isOn: $showPeaking) {
+                        Label("Schärfe anzeigen", systemImage: "viewfinder.circle")
+                    }
+                    Button {
+                        showQuality = true
+                    } label: {
+                        Label("Bewertung", systemImage: "chart.bar.doc.horizontal")
+                    }
+                    // The gestures are the fast path and completely
+                    // invisible; without a legend somewhere they are not
+                    // discoverable.
+                    Button {
+                        showGestureHelp = true
+                    } label: {
+                        Label("Hilfe", systemImage: "questionmark.circle")
+                    }
+                } label: {
+                    Label("Mehr", systemImage: "ellipsis.circle")
                 }
             }
         }
@@ -555,13 +583,33 @@ struct PhotoCompareView: View {
     ) -> (first: PhotoCompare.Zoom?, second: PhotoCompare.Zoom?) {
         guard let focus,
               let firstImage = images[pair.first.id],
-              let secondImage = images[pair.second.id],
-              let boxes = PhotoCompare.matchedBoxes(
-                  personId: focus.personId,
-                  first: faces[pair.first.id] ?? [],
-                  second: faces[pair.second.id] ?? []
-              )
+              let secondImage = images[pair.second.id]
         else { return (nil, nil) }
+
+        let firstFaces = faces[pair.first.id] ?? []
+        let secondFaces = faces[pair.second.id] ?? []
+
+        let matched: (first: PhotoCompare.BBox, second: PhotoCompare.BBox)?
+        switch focus {
+        case .person(let id):
+            matched = PhotoCompare.matchedBoxes(
+                personId: id, first: firstFaces, second: secondFaces
+            )
+        case .face(let photoId, let index):
+            // An unnamed face is honoured exactly on the side it was tapped;
+            // the other pane has nothing to match across.
+            let tappedIsFirst = photoId == pair.first.id
+            guard tappedIsFirst || photoId == pair.second.id else { return (nil, nil) }
+            let tappedFaces = tappedIsFirst ? firstFaces : secondFaces
+            guard tappedFaces.indices.contains(index) else { return (nil, nil) }
+            matched = PhotoCompare.anchoredBoxes(
+                tapped: tappedFaces[index].bbox,
+                tappedIsFirst: tappedIsFirst,
+                first: firstFaces,
+                second: secondFaces
+            )
+        }
+        guard let boxes = matched else { return (nil, nil) }
 
         return PhotoCompare.syncedZoom(
             (bbox: boxes.first, viewport: viewport(paneSize: paneSize, image: firstImage)),
@@ -580,23 +628,46 @@ struct PhotoCompareView: View {
 
     // MARK: - Interaction
 
-    private func handleTap(at location: CGPoint, photo: ReviewQueuePhoto, paneSize: CGSize) {
-        // A second tap goes back to the whole picture.
-        if focus != nil {
+    /// A tap on a pane: focus the face under it, or leave the zoom.
+    ///
+    /// Every tap used to zoom straight back out while anything was focused,
+    /// without ever asking what was under the finger — so moving from one
+    /// face to another took two taps and a detour through the whole picture
+    /// (#1115 §4). Now the tap is hit-tested either way: a *different* face
+    /// takes the focus directly, and only the face already focused (or empty
+    /// picture) zooms out.
+    private func handleTap(
+        at location: CGPoint,
+        photo: ReviewQueuePhoto,
+        zoom: PhotoCompare.Zoom?,
+        paneSize: CGSize
+    ) {
+        guard let image = images[photo.id] else { return }
+        let port = viewport(paneSize: paneSize, image: image)
+        // While zoomed the photo inside the pane is scaled and shifted, so
+        // the tap has to be put back on the fitted photo before it can be
+        // read as a point on the image at all.
+        let fitted = PhotoCompare.unzoomed(location, by: zoom, in: port)
+        let candidates = faces[photo.id] ?? []
+        let isZoomed = focus != nil
+        guard let point = PhotoCompare.imageCoordinates(of: fitted, in: port),
+              let index = PhotoCompare.faceIndex(
+                  at: point,
+                  in: candidates,
+                  // Zoomed in, a tap that hits no face means „back out";
+                  // from the plain fit it means „zoom to the subject".
+                  fallBackToPrimary: !isZoomed
+              )
+        else {
             focus = nil
             return
         }
-        guard let image = images[photo.id] else { return }
-        guard let point = PhotoCompare.imageCoordinates(
-            of: location,
-            in: viewport(paneSize: paneSize, image: image)
-        ) else { return }
-        guard let candidate = PhotoCompare.face(at: point, in: faces[photo.id] ?? []) else {
-            return
-        }
+
         // Only a named face can be found in the other photo too; without one
-        // each side lines up on whatever it considers its subject.
-        focus = candidate.personId.map(Focus.person(id:)) ?? .primary
+        // the far pane lines up on whatever it considers its subject.
+        let tapped: Focus = candidates[index].personId
+            .map(Focus.person(id:)) ?? .face(photoId: photo.id, index: index)
+        focus = (focus == tapped) ? nil : tapped
     }
 
     /// A drag that ended: discard the photo if it was thrown decisively away
@@ -915,11 +986,17 @@ private struct PeakingFrame: View {
     }
 
     var body: some View {
+        // A hairline, not a stripe: this frame sits on the very detail being
+        // judged, and a 2 pt border covered enough of a face to get in the
+        // way of the comparison (#1115 §3). `chromeScale` still counters the
+        // zoom and clamps, so it cannot thin away to nothing.
         Rectangle()
-            .strokeBorder(color, lineWidth: 2 * chromeScale)
+            .strokeBorder(color, lineWidth: chromeScale)
             .overlay(alignment: .bottomLeading) {
+                // Lighter with the frame: against a hairline border a bold
+                // 11 pt block became the heaviest thing on the photo.
                 Text(FocusPeaking.label(score: score))
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.black)
                     .padding(.horizontal, 3)
                     .background(color)
