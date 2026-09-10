@@ -371,6 +371,71 @@ Budget — und desto eher schlägt die Neuverteilung (§5) vor, etwas zu streich
 Der Puffer ist verhandelbar, aber nie null: Einen Zug zu verpassen ist teurer
 als ein ausgelassener Spot.
 
+### 4.5 Standquartier mit Tagesausflügen (offen)
+
+Die Etappe aus §4.2 unterstellt, dass sich der Anker mit dem Quartier bewegt:
+Tokio, dann Osaka, dann Hakata — neues Hotel, neue Etappe, neuer Vorrat. Eine
+der häufigsten Urlaubsformen sieht aber anders aus:
+
+> Vier Tage Airbnb in San Gimignano. Einen Tag Ausflug nach Pisa, einen nach
+> Florenz, einen nach Lucca. Die freie Zeit in San Gimignano.
+
+Das ist **eine** Etappe — das Quartier wechselt nie, es gibt keinen
+Transfertag, das Gepäck bleibt liegen —, aber drei ihrer vier Tage finden
+fünfzig bis achtzig Kilometer entfernt statt. Heute lässt sich das nicht
+ausdrücken: Der Anker gehört der Etappe, jeder Tag erbt ihn, und der Vorrat
+kommt aus 2,5 Kilometern um San Gimignano. Florenz kommt darin nicht vor.
+
+Als drei Etappen zu modellieren wäre falsch und nicht nur unpraktisch: Eine
+Etappe verspricht ein eigenes Quartier, Transfertage und einen eigenen Vorrat,
+in den nichts hineinrutscht. Wer abends zurückfährt, hat nichts davon — und
+„was in Florenz ausfiel, rutscht nicht nach Pisa" wäre eine Regel, die genau
+das Gegenteil des Gemeinten sagt.
+
+**Vorgeschlagen: der Tagesanker.** Ein Tag darf optional einen eigenen Ort und
+Radius tragen. Fehlt er — der Normalfall und die freien Tage in San Gimignano —,
+gilt der Anker der Etappe, und nichts an der bisherigen Rechnung ändert sich.
+Vier Dinge hängen daran, und alle vier sind schon gebaut, nur an einen anderen
+Ort gehängt:
+
+- **Der Vorrat des Tages** kommt aus dem Umkreis des Tagesankers. Die
+  Regionsauswahl entscheidet ohnehin nach Koordinate (`region-router.ts`), ein
+  Ausflug über eine Regionsgrenze ist also kein Sonderfall.
+- **Hin und zurück kosten Zeit**, und zwar aus den Blöcken dieses Tages —
+  dieselbe Rechnung wie beim Anreisetag in §4.2 („kein voller
+  Vormittagsblock"). Eine Stunde nach Florenz und eine zurück heißt: Der Tag
+  hat sechs Stunden, nicht acht. Das ist der Grund, warum der Tagesanker eine
+  *Planungsangabe* ist und keine Anzeige.
+- **Wetter, Klima und Licht** gelten am Tagesanker, nicht am Quartier. Bei
+  achtzig Kilometern ist das gelegentlich ein anderer Tag.
+- **Die Rückfahrt ist ein Fixpunkt-Kandidat** (§4.4): Wer mit dem letzten Zug
+  aus Florenz zurückmuss, hat den Nachmittag rückwärts gerechnet.
+
+**Dazu gehört die zweite offene Sache, die dabei auffiel: der Suchradius kennt
+das Verkehrsmittel nicht.** `DEFAULT_SEARCH_RADIUS_M` ist 2 500 Meter, ob zu
+Fuß oder mit dem Auto. Das Auto ändert heute nur, *wie viel* aus demselben
+Kreis in einen Block passt (schneller je Hop, dafür sechs Minuten Fixkosten
+fürs Holen und Parken) — nicht, *wie weit* der Kreis reicht. Der Tagesausflug
+aus dem Ideenvorrat macht es bereits anders und begründet es auch: 25 km
+Standardradius, 90 statt 40 Minuten je Etappe für Auto und ÖPNV, weil „eine
+halbe Stunde im Auto der Weg zum See ist, kein Umweg" (§20.2). Was dort gilt,
+gilt für eine Autoreise genauso. Vorgeschlagen: **der Standardradius folgt dem
+Modus** — zu Fuß 2,5 km, Rad ~6 km, ÖPNV und Auto ~15 km —, ein ausdrücklich
+gesetzter Radius sticht ihn weiterhin, und die ehrliche Nebenwirkung ist mehr
+Last auf der Regionssuche und ein Korridorfilter, der weiter auf Luftlinien
+rechnet.
+
+**Und die dritte, die zwischen beiden liegt:** Im Freitext kommt das
+Verkehrsmittel gar nicht an. `NlConstraints` hat kein Feld dafür — „wir sind
+mit dem Auto unterwegs" fällt weg, und das ist heute richtig so, weil ein
+erfundenes Feld schlimmer wäre als ein fehlendes (§13). Mit dem Modus als
+Constraint bekäme der Satz die Wirkung, die der Sprecher meint — und dann auch
+der Radius, der daran hängt.
+
+Reihenfolge, falls es gebaut wird: erst der Modus-Radius (eine Zeile Logik,
+sofort spürbar), dann der Tagesanker (eine Spalte an `trip_plan_days`, ein Feld
+im Tagesrahmen, die Reisezeit aus den Blöcken), zuletzt der Modus im Freitext.
+
 ## 5. Umplanen als Kernmechanik
 
 Ein Plan besteht aus drei Schichten:
@@ -2978,6 +3043,12 @@ hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
   systematisch zu spät. Die Auflösung von 90 m sieht außerdem den Bergrücken,
   nicht das Haus gegenüber. Solange kein Profil vorliegt, gehört die Angabe
   als „bei freiem Horizont" gekennzeichnet.
+- **Ein Standquartier mit Tagesausflügen lässt sich nicht ausdrücken** (§4.5).
+  Der Anker gehört der Etappe, jeder Tag erbt ihn, und der Suchradius kennt das
+  Verkehrsmittel nicht — vier Tage in San Gimignano mit Ausflügen nach Florenz
+  und Pisa sind damit entweder drei Etappen, die etwas anderes versprechen, oder
+  ein Vorrat, in dem Florenz nicht vorkommt. Vorschlag und Reihenfolge stehen in
+  §4.5.
 - **Keine Echtzeit.** Verkehr, Streiks, spontane Schließungen sieht das System
   nicht — bewusste Übergabe an Apple/Google Maps für die Navigation.
 - **Speicherbedarf** eines späteren Routers (Valhalla-Kacheln zusätzlich zu den
