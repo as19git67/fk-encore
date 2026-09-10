@@ -14,7 +14,7 @@ import {
 import { dbInsertReturning } from "../db/adapter";
 import { createUserLogic } from "../user/user.service";
 import * as service from "./photo.service";
-import { listGalleryGridLogic } from "./gallery-grid.service";
+import { listGalleryGridLogic, orderByGivenIds } from "./gallery-grid.service";
 
 /**
  * Regression cover for the album-detail grid: a non-owner viewing a
@@ -242,5 +242,71 @@ describe("Gallery grid – album scope", () => {
     const after = await listGalleryGridLogic(owner.id, { albumScopeId: album.id }, opts);
     expect(after.photos.find((p) => p.id === pick)?.group).toBeUndefined();
     expect(after.photos.find((p) => p.id === dup)?.group).toBeUndefined();
+  });
+});
+
+/**
+ * `photoIds` used to be spliced into the ORDER BY as raw SQL
+ * (`sql.raw(ARRAY[${ids.join(",")}]::int[])`), two lines away from the same
+ * array being passed safely through `inArray`. Nothing exploitable while
+ * the request schema declares `number[]`, but the only thing standing
+ * between a future type change and an injectable ORDER BY was that
+ * declaration.
+ */
+describe("Gallery grid – caller-supplied ordering", () => {
+  let owner: any;
+  let ids: number[];
+
+  const opts = { limit: 50, sortBy: "taken_at" as const, sortDir: "desc" as const };
+
+  beforeEach(async () => {
+    await db.delete(photoComments);
+    await db.delete(photoGroupMembers);
+    await db.delete(photoGroups);
+    await db.delete(photoCuration);
+    await db.delete(albumPhotos);
+    await db.delete(albumShares);
+    await db.delete(albums);
+    await db.delete(photos);
+    await db.delete(users);
+
+    owner = await createUserLogic({ email: "order@test.local", name: "O", password: "pw" });
+    ids = [];
+    for (let i = 0; i < 4; i++) {
+      const p = await service.uploadPhotoLogic(owner.id, {
+        data: Buffer.from([i]),
+        name: `p${i}.jpg`,
+        mimeType: "image/jpeg",
+      });
+      ids.push(p.id);
+    }
+  });
+
+  it("returns the photos in exactly the order it was handed", async () => {
+    const wanted = [ids[2]!, ids[0]!, ids[3]!, ids[1]!];
+    const res = await listGalleryGridLogic(owner.id, {}, { ...opts, photoIds: wanted });
+    expect(res.photos.map((p) => p.id)).toEqual(wanted);
+  });
+
+  it("orders by a different permutation just as faithfully", async () => {
+    const wanted = [ids[1]!, ids[3]!];
+    const res = await listGalleryGridLogic(owner.id, {}, { ...opts, photoIds: wanted });
+    expect(res.photos.map((p) => p.id)).toEqual(wanted);
+  });
+
+  it("binds the ids as parameters instead of splicing them into the query", () => {
+    // The property, asserted directly rather than through an exploit: a
+    // malformed splice would only ever produce a syntax error, so "it threw"
+    // proves nothing. What matters is that the values never reach the query
+    // text at all.
+    const built = db
+      .select({ id: photos.id })
+      .from(photos)
+      .orderBy(...orderByGivenIds([4711, 4712]))
+      .toSQL();
+
+    expect(built.sql).not.toContain("4711");
+    expect(built.sql).not.toContain("4712");
+    expect(built.params).toEqual(expect.arrayContaining([4711, 4712]));
   });
 });

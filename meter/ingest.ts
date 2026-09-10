@@ -17,6 +17,7 @@ import { and, asc, desc, eq, gt, lt } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll } from "../db/adapter";
 import { meterReadings } from "../db/schema";
+import { createHash } from "node:crypto";
 import { resolveIngestKey, touchLastUsed } from "./api-keys.service";
 import { checkRateLimit } from "../user/rateLimiter";
 
@@ -121,7 +122,11 @@ export const ingestReading = api.raw(
     try {
       const token = extractBearer(req);
 
-      checkRateLimit(`ingest:${token.slice(0, 8)}`, {
+      // Keyed on the whole token, not its first 8 characters: with a prefix,
+      // two keys that happen to start alike shared one budget and throttled
+      // each other. Hashed so the bucket key never holds the raw credential.
+      const rateKey = createHash("sha256").update(token).digest("hex");
+      checkRateLimit(`ingest:${rateKey}`, {
         maxAttempts: 120,
         windowMs: 60_000,
         message: "Rate limit exceeded for this API key.",

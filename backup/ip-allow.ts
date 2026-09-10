@@ -11,13 +11,13 @@
  * Source-IP resolution:
  *   - Encore.ts' Rust HTTP layer proxies requests into Node, so inside an
  *     `api.raw` handler `req.socket.remoteAddress` is either unset or the
- *     internal proxy socket, never the real TCP peer. The verified peer
- *     IP is relayed via `X-Forwarded-For` (same mechanism the existing
- *     `user/rateLimiter.ts` relies on).
- *   - We therefore read the left-most `X-Forwarded-For` entry by default,
- *     and fall back to the socket address only when no XFF is present.
- *     Set `BACKUP_TRUST_XFF=false` to disable XFF use entirely (useful in
- *     test rigs that bypass Encore).
+ *     internal proxy socket, never the real TCP peer.
+ *   - `X-Forwarded-For` is only read when `BACKUP_TRUST_XFF=true`, because
+ *     that header is client-supplied unless a reverse proxy overwrites it:
+ *     honouring it unconditionally let a caller name its own source address
+ *     and satisfy the CIDR check outright. Otherwise the socket address is
+ *     used, and when that is a placeholder the check is skipped and the
+ *     bearer token carries the request on its own.
  *
  * Typical peer addresses inside Docker:
  *   - Host→container via the published port: the bridge gateway, e.g.
@@ -190,16 +190,18 @@ export function isPeerAddressUsable(addr: string | undefined | null): boolean {
  * endpoints. When that happens `isPeerAddressUsable(returned)` will be
  * false and the caller should skip the CIDR check.
  *
- * If an upstream reverse proxy (nginx, Caddy, Traefik, ...) *does*
- * populate `X-Forwarded-For` and Encore preserves it, we read the
- * left-most entry — matching `user/rateLimiter.ts`. Set
- * `BACKUP_TRUST_XFF=false` to disable that behaviour in test rigs.
+ * `X-Forwarded-For` is only read when `BACKUP_TRUST_XFF=true`, matching
+ * `user/rateLimiter.ts`. It used to be honoured by default, which let a
+ * caller name its own source address and walk straight through the CIDR
+ * allow-list; the bearer token still held, so this was defence-in-depth
+ * rather than a bypass, but the header is only meaningful where a proxy
+ * overwrites it. Turn it on where that is the case.
  */
 export function effectiveRemoteAddress(
   socketAddr: string | undefined | null,
   xForwardedFor: string | string[] | undefined,
 ): string | null {
-  const trustXff = process.env.BACKUP_TRUST_XFF !== "false";
+  const trustXff = process.env.BACKUP_TRUST_XFF === "true";
   if (trustXff && xForwardedFor) {
     const raw = Array.isArray(xForwardedFor) ? xForwardedFor[0] : xForwardedFor;
     const first = raw.split(",")[0]?.trim();

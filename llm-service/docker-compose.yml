@@ -10,8 +10,10 @@ services:
       LLM_CTX: 8192
       EMBEDDING_MODEL: intfloat/multilingual-e5-base
       LOG_LEVEL: INFO
+    # Loopback only — the service has no authentication of its own, and an
+    # inference endpoint published on 0.0.0.0 is an open one.
     ports:
-      - "8001:8000"
+      - "127.0.0.1:8001:8000"
     volumes:
       - llm_models:/models
 

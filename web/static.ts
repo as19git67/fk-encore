@@ -132,8 +132,12 @@ export const frontend = api.raw(
           ? `${album.description} — ${photoLabel}`
           : `Geteiltes Album — ${photoLabel}`;
 
+        // The share token has to ride along: /photos/file/* is no longer
+        // open, and a link-preview crawler (iMessage, Slack, WhatsApp) has
+        // no session to authenticate with. The token grants exactly this
+        // album's photos, which the crawler is already being shown.
         const imageUrl = album.cover_filename
-          ? `${origin}/photos/file/${album.cover_filename}?w=1200&convert=true`
+          ? `${origin}/photos/file/${album.cover_filename}?w=1200&convert=true&share=${encodeURIComponent(shareToken)}`
           : null;
 
         const ogTags = buildOgTags(album.name, desc, album.photo_count, imageUrl, pageUrl);

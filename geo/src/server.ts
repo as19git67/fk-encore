@@ -19,6 +19,7 @@
  * GEO_SHARED_SECRET when set — a simple Bearer check.
  */
 
+import { timingSafeEqual } from "node:crypto";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { adminPool, closeAllPools } from "./db.ts";
 import { reverseGeocode } from "./reverse.ts";
@@ -46,11 +47,26 @@ const SHARED_SECRET = process.env.GEO_SHARED_SECRET ?? "";
 const app = express();
 app.use(express.json({ limit: "256kb" }));
 
+/**
+ * Compare without leaking where the mismatch is.
+ *
+ * `!==` on strings returns as soon as two bytes differ, which over enough
+ * requests tells an attacker how long a shared prefix they have found.
+ * Lengths are compared first because timingSafeEqual throws on a mismatch,
+ * and the length of a secret is not the part worth hiding.
+ */
+function secretMatches(presented: string, expected: string): boolean {
+  const a = Buffer.from(presented);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
 if (SHARED_SECRET) {
   app.use((req, res, next) => {
     if (req.path === "/health") return next();
     const header = req.header("authorization") ?? "";
-    if (header !== `Bearer ${SHARED_SECRET}`) {
+    if (!secretMatches(header, `Bearer ${SHARED_SECRET}`)) {
       res.status(401).json({ error: "unauthorized" });
       return;
     }

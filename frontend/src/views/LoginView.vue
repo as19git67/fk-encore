@@ -99,8 +99,10 @@ async function handlePasskeyLogin() {
         <p class="link">
           <router-link to="/forgot-password">Passwort vergessen?</router-link>
         </p>
-        <p class="link">
-          Noch kein Konto? <router-link to="/register">Registrieren</router-link>
+        <!-- No "register" link any more: accounts are created from an
+             invitation link, so there is nothing here to send people to. -->
+        <p class="link muted">
+          Konten werden per Einladung angelegt.
         </p>
       </template>
     </Card>
@@ -140,6 +142,11 @@ async function handlePasskeyLogin() {
 .link {
   text-align: center;
   margin-top: 1rem;
+}
+
+.link.muted {
+  color: var(--p-text-muted-color);
+  font-size: 0.85rem;
 }
 
 .mb {

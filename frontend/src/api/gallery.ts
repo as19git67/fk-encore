@@ -7,7 +7,7 @@
  * library in memory — it builds a sparse array of length `total` and only
  * fills the slots that the user has scrolled near.
  */
-import { apiFetch } from './client'
+import { apiFetch, withPhotoAccessParams } from './client'
 import type { PhotoFilter } from './photos'
 
 export type GallerySortField =
@@ -160,5 +160,5 @@ export function getGalleryIds(
  */
 export function getThumbUrl(filename: string, width: number): string {
   const apiBase = import.meta.env.PROD ? '' : '/api'
-  return `${apiBase}/photos/file/${filename}?w=${width}`
+  return withPhotoAccessParams(`${apiBase}/photos/file/${filename}?w=${width}`)
 }

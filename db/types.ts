@@ -12,8 +12,19 @@ export interface UserRow extends User {
   password_hash: string;
 }
 
+/** What `createUserLogic` needs. The endpoint no longer takes this shape. */
 export interface CreateUserRequest {
   email: string;
+  name: string;
+  password: string;
+}
+
+/**
+ * What `POST /users` takes. There is no `email`: it comes from the invite
+ * row, so a token issued for one address cannot be redeemed for another.
+ */
+export interface AcceptInviteRequest {
+  invite: string;
   name: string;
   password: string;
 }

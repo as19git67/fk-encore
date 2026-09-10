@@ -16,6 +16,9 @@ import { startLocalCron } from "../lib/local-cron";
 // Side-effect: registers DB persistence + realtime fan-out hooks for
 // the scheduler before any startLocalCron() runs.
 import "../lib/scheduled-jobs-hooks";
+// Side-effect: attaches the shared secret to every outbound call to the
+// internal Python services. See lib/internal-service-auth.ts.
+import "../lib/internal-service-auth";
 
 console.log("[boot] finance/encore.service.ts: begin");
 

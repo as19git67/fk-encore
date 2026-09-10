@@ -8,6 +8,8 @@
  */
 
 import { api } from "encore.dev/api";
+import { getAuthData } from "~encore/auth";
+import { requirePermission } from "../user/auth-handler";
 import { eq, sql, desc, and, count as drizzleCount } from "drizzle-orm";
 import { dailyAtUtc, schedule } from "../lib/local-cron";
 import db from "../db/database";
@@ -18,7 +20,7 @@ import {
   taxonomySnapshots,
 } from "../db/schema";
 
-// ─── Snapshot capture ────────────────────────────────────────────────────────
+// ─── Snapshot capture ─────────────────────────────────────────────────────────────
 
 export interface TaxonomySnapshot {
   snapshot_date: string;
@@ -119,7 +121,7 @@ async function captureSnapshot(): Promise<TaxonomySnapshot> {
   return snapshot;
 }
 
-// ─── Cron endpoint ───────────────────────────────────────────────────────────
+// ─── Cron endpoint ──────────────────────────────────────────────────────────────────
 
 export const runTaxonomyCockpit = api(
   { expose: false, method: "POST", path: "/internal/documents/taxonomy-cockpit" },
@@ -138,7 +140,7 @@ schedule({
   run: () => runTaxonomyCockpit(),
 });
 
-// ─── Admin API ───────────────────────────────────────────────────────────────
+// ─── Admin API ─────────────────────────────────────────────────────────────────────
 
 export interface CockpitResponse {
   snapshots: TaxonomySnapshot[];
@@ -151,9 +153,17 @@ export interface Recommendation {
   reason: string;
 }
 
+/**
+ * Corpus-wide statistics across every user's documents, so it takes the same
+ * `data.manage` gate as the sibling taxonomy tools in user/taxonomy-tools.ts.
+ * `auth: true` alone was not enough: registration is open, so any account
+ * could read this.
+ */
 export const getTaxonomyCockpit = api(
   { expose: true, auth: true, method: "GET", path: "/admin/taxonomy-cockpit" },
   async (): Promise<CockpitResponse> => {
+    requirePermission(getAuthData()!, "data.manage");
+
     const rows = await db
       .select()
       .from(taxonomySnapshots)
@@ -178,14 +188,16 @@ export const getTaxonomyCockpit = api(
   },
 );
 
+/** Runs the snapshot job on demand — same gate as reading the cockpit. */
 export const triggerSnapshot = api(
   { expose: true, auth: true, method: "POST", path: "/admin/taxonomy-cockpit/snapshot" },
   async (): Promise<TaxonomySnapshot> => {
+    requirePermission(getAuthData()!, "data.manage");
     return await captureSnapshot();
   },
 );
 
-// ─── Recommendation engine ───────────────────────────────────────────────────
+// ─── Recommendation engine ─────────────────────────────────────────────────────────
 
 function computeRecommendations(snapshots: TaxonomySnapshot[]): Recommendation[] {
   if (snapshots.length === 0) return [];

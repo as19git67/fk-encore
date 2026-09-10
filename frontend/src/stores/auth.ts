@@ -92,10 +92,13 @@ export const useAuthStore = defineStore('auth', () => {
     setSession(response.token, response.refreshToken, response.user)
   }
 
-  async function register(email: string, name: string, password: string) {
-    await usersApi.register(email, name, password)
-    // Auto-login after registration
-    await login(email, password)
+  /**
+   * Redeem an invitation. The account's address comes back from the server
+   * — it lives on the invite, not in the form — and is what we log in with.
+   */
+  async function register(invite: string, name: string, password: string) {
+    const created = await usersApi.register(invite, name, password)
+    await login(created.email, password)
   }
 
   async function logout() {

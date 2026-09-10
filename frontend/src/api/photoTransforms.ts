@@ -8,7 +8,7 @@
 //   POST   /photos/:id/transforms/from-suggestion  → materialize AI
 //   POST   /photos/:id/transforms/adopt        → copy another user's recipe
 
-import { apiFetch } from './client'
+import { apiFetch, withAuthTokenParam } from './client'
 
 export type PhotoTransformAspectRatio =
   | '1:1'
@@ -156,7 +156,12 @@ function urlPrefix(): string {
   return import.meta.env.PROD ? '' : '/api'
 }
 
-/** Build the render URL for a server-rendered variant. */
+/**
+ * Build the render URL for a server-rendered variant.
+ *
+ * The endpoint requires authentication and is consumed by `<img src>`,
+ * which cannot carry an Authorization header — hence the token parameter.
+ */
 export function getRenderedPhotoUrl(
   photoId: number,
   opts:
@@ -167,10 +172,12 @@ export function getRenderedPhotoUrl(
   if (opts.variant === 'suggested') params.set('ratio', opts.ratio)
   if (opts.variant === 'user') params.set('user', String(opts.userId))
   if (opts.width) params.set('w', String(opts.width))
-  return `${urlPrefix()}/photos/${photoId}/render?${params.toString()}`
+  return withAuthTokenParam(
+    `${urlPrefix()}/photos/${photoId}/render?${params.toString()}`,
+  )
 }
 
-/** Build the full-resolution export URL. */
+/** Build the full-resolution export URL. Authenticated, see above. */
 export function getExportedPhotoUrl(
   photoId: number,
   opts:
@@ -180,5 +187,7 @@ export function getExportedPhotoUrl(
   const params = new URLSearchParams({ v: opts.variant })
   if (opts.variant === 'suggested') params.set('ratio', opts.ratio)
   if (opts.variant === 'user') params.set('user', String(opts.userId))
-  return `${urlPrefix()}/photos/${photoId}/export?${params.toString()}`
+  return withAuthTokenParam(
+    `${urlPrefix()}/photos/${photoId}/export?${params.toString()}`,
+  )
 }

@@ -20,7 +20,7 @@ import {
   writeError,
   writeJson,
 } from "./http";
-import { resolveGuest } from "./guests.service";
+import { requireVerifiedSession, resolveGuest } from "./guests.service";
 
 // ---------- Raw endpoints ----------
 
@@ -61,9 +61,7 @@ export const guestPushSubscribe = api.raw(
       const token = extractToken(req.url, "/subscribe");
       const resolved = await resolveGuest(req, token);
       if (!resolved) throw APIError.unauthenticated("no guest session");
-      if (!resolved.guest.verified_at) {
-        throw APIError.permissionDenied("guest not verified");
-      }
+      requireVerifiedSession(resolved);
       if (!pushEnabled()) {
         throw APIError.failedPrecondition("push notifications not configured");
       }

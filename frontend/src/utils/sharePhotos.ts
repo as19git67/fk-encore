@@ -5,10 +5,11 @@
  * are fetched as files and handed to `navigator.share({ files })`, with a
  * download fallback where file sharing is unavailable (most desktop browsers).
  *
- * The `/photos/file/*` endpoint is public (`auth: false`), so the originals
- * can be fetched by URL without auth headers. HEIC/HEIF originals are served
- * as JPEG via `?convert=true` for non-Safari user agents, matching the same
- * UA-detection used elsewhere in the app.
+ * The originals are fetched by URL rather than through `apiFetch`, so the
+ * credential comes from `getPhotoUrl` (a session token, or the share token
+ * while a share link is open) instead of an Authorization header. HEIC/HEIF
+ * originals are served as JPEG via `?convert=true` for non-Safari user
+ * agents, matching the same UA-detection used elsewhere in the app.
  */
 import { getPhotoUrl, getPhotoDetailsBatch } from '../api/photos'
 

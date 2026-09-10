@@ -15,23 +15,43 @@ const DEFAULT_MAX_ATTEMPTS = 10;
 const DEFAULT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 
 /**
- * Extract the client IP from the current Encore request context.
- * Reads X-Forwarded-For first (set by reverse proxies), then X-Real-IP.
+ * Whether X-Forwarded-For / X-Real-IP may be believed.
+ *
+ * These are client-supplied unless a reverse proxy overwrites them, so
+ * trusting them by default let anyone mint a fresh rate-limit bucket per
+ * request just by varying a header. Off unless the deployment states that it
+ * terminates behind a proxy that sets them.
  */
-export function getClientIp(): string {
+function trustsProxyHeaders(): boolean {
+  return process.env.TRUST_PROXY_HEADERS === "true";
+}
+
+/**
+ * Identify the calling client, or null when there is no trustworthy signal.
+ *
+ * Returning null rather than a placeholder is deliberate: a shared "unknown"
+ * bucket is worse than no bucket, because one caller exhausting it locks out
+ * everyone else. Callers should skip the IP-scoped limit when this is null
+ * and rely on a limit scoped to the thing being attacked (an account, a key)
+ * instead — see loginLogic.
+ */
+export function getClientIp(): string | null {
   const req = currentRequest();
-  if (req?.type === "api-call") {
-    const forwarded = req.headers["x-forwarded-for"];
-    if (forwarded) {
-      const val = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-      return val.split(",")[0].trim();
-    }
-    const realIp = req.headers["x-real-ip"];
-    if (realIp) {
-      return Array.isArray(realIp) ? realIp[0] : realIp;
-    }
+  if (req?.type !== "api-call" || !trustsProxyHeaders()) return null;
+
+  const forwarded = req.headers["x-forwarded-for"];
+  if (forwarded) {
+    const val = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+    // Left-most entry is the originating client; the rest are proxies.
+    const first = val.split(",")[0].trim();
+    if (first) return first;
   }
-  return "unknown";
+  const realIp = req.headers["x-real-ip"];
+  if (realIp) {
+    const val = Array.isArray(realIp) ? realIp[0] : realIp;
+    if (val.trim()) return val.trim();
+  }
+  return null;
 }
 
 export interface RateLimitOpts {

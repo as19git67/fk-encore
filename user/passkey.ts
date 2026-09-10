@@ -73,11 +73,15 @@ export const passkeyAuthOptions = api(
 export const passkeyAuthVerify = api(
   { expose: true, method: "POST", path: "/auth/passkey/login/verify" },
   async (req: PasskeyAuthVerifyRequest): Promise<LoginResponse> => {
+    // Only applies where the proxy headers are trusted (see getClientIp).
+    // Unlike the password path there is no second, account-scoped limit here:
+    // a passkey assertion has to carry a signature over a server-issued,
+    // single-use challenge, so there is nothing to guess by repetition.
     const ip = getClientIp();
-    checkRateLimit(ip);
+    if (ip) checkRateLimit(`passkey-ip:${ip}`);
     try {
       const result = await passkeyAuthVerifyLogic(req);
-      resetRateLimit(ip);
+      if (ip) resetRateLimit(`passkey-ip:${ip}`);
       return result;
     } catch (err: any) {
       if (err.message?.includes("invalid credentials")) {

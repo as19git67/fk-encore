@@ -34,11 +34,48 @@ export interface DeleteResponse {
   message: string
 }
 
-export function register(email: string, name: string, password: string) {
+export interface Invite {
+  id: number
+  email: string
+  invited_by_user_id: number | null
+  created_at: string
+  expires_at: string
+  accepted_at: string | null
+}
+
+/**
+ * Redeem an invitation. There is no email argument on purpose — the server
+ * takes the address from the invite, so a link issued for one person cannot
+ * be used to register another.
+ */
+export function register(invite: string, name: string, password: string) {
   return apiFetch<UserWithRoles>('/users', {
     method: 'POST',
-    body: JSON.stringify({ email, name, password }),
+    body: JSON.stringify({ invite, name, password }),
   })
+}
+
+/** Resolve an invite token to the address it was issued for. */
+export function checkInvite(token: string) {
+  return apiFetch<{ email: string }>(
+    `/users/invites/check?token=${encodeURIComponent(token)}`,
+  )
+}
+
+/** Invite somebody to create an account — requires users.create. */
+export function createInvite(email: string) {
+  return apiFetch<Invite>('/users/invites', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  })
+}
+
+export function listInvites() {
+  return apiFetch<{ invites: Invite[] }>('/users/invites')
+}
+
+export function revokeInvite(id: number) {
+  return apiFetch<{ success: boolean }>(`/users/invites/${id}`, { method: 'DELETE' })
 }
 
 export function login(email: string, password: string) {

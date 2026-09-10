@@ -4,10 +4,12 @@
  * `GET /recaps/music` listet alle verfuegbaren Tracks; das Streaming laeuft
  * ueber einen Raw-Endpoint mit Range-Support, damit sowohl das <audio>-
  * Element (Safari verlangt Range-Requests) als auch AVAudioPlayer sauber
- * abspielen koennen. Der Datei-Endpoint ist wie /photos/file/* nicht
- * authentifiziert — die Track-Pfade sind nicht erratbar-sensibel und die
- * Clients haengen die URL direkt in Audio-Elemente, die keine Header
- * mitschicken koennen.
+ * abspielen koennen. Der Datei-Endpoint ist nicht authentifiziert: er
+ * liefert ausschliesslich die mitgelieferte Soundtrack-Bibliothek, keine
+ * Nutzerdaten — und die Clients haengen die URL direkt in Audio-Elemente,
+ * die keine Header mitschicken koennen. (/photos/file/* war frueher aus
+ * demselben Grund offen, ist es aber nicht mehr: dort liegen fremde Fotos,
+ * siehe photo/photo-file-access.ts.)
  */
 
 import * as fs from "fs";

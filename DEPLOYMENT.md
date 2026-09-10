@@ -24,6 +24,32 @@ docker compose logs -f
 
 The app is then reachable at **http://localhost:8080**.
 
+## Keeping your storage layout across upgrades
+
+`docker-compose.yml` carries no volume definitions of its own. They live in
+**`docker-compose.volumes.yml`** next to it, pulled in by a top-level
+`include:` — so `docker compose up -d` finds it with no extra `-f` flag.
+
+The point of the split is that a deployment can keep its own copy of that
+one file and take every future `docker-compose.yml` from the repository
+**unedited**. Everything machine-specific is on one side of the line:
+
+| Belongs in `docker-compose.volumes.yml` | Belongs in `.env` |
+|---|---|
+| Where the data sits, when it is not one `DEPLOY_DATA_ROOT` | `DEPLOY_DATA_ROOT`, ports, image tag, passwords, timeouts |
+| External photo libraries mounted into `app` | anything else `DEPLOY_*` |
+
+Extra photo libraries need two entries, both in that file: a volume bound
+to the host path, and a mount on `app` under `/mnt/libraries/`. Compose
+**merges** the `app` fragment into the one in `docker-compose.yml` rather
+than replacing it, so listing only the extra mounts is enough — the
+standard ones stay. The file ships with a commented example.
+
+The file must exist, or compose stops with `open …/docker-compose.volumes.yml:
+no such file or directory`. The version in the repository is a working
+default (every volume under `${DEPLOY_DATA_ROOT}/…`, no external
+libraries), so a fresh checkout needs nothing.
+
 ## Multiple deployments on one host
 
 A single `docker-compose.yml` covers any number of deployments
@@ -59,10 +85,13 @@ The full list of `DEPLOY_*` overrides:
 | `DEPLOY_HOST_PORT_APP` | `8080` | Must be unique per deployment. |
 | `DEPLOY_HOST_PORT_POSTGRES` | `5432` | dito. |
 | `DEPLOY_HOST_PORT_WATCHTOWER` | `9000` | dito. |
+| `DEPLOY_BIND_POSTGRES` | `127.0.0.1` | Host interface the Postgres port is published on. Loopback by default — see [Database password and reachability](#database-password-and-reachability). |
+| `DEPLOY_BIND_WATCHTOWER` | `0.0.0.0` | Host interface the Watchtower update API listens on. All interfaces by default because the release pipeline triggers updates remotely; set to `127.0.0.1` if you deploy another way. See [Watchtower update API](#watchtower-update-api). |
 | `DEPLOY_PG_DATABASE` | `encore` | Application's primary DB. |
 | `DEPLOY_PG_EMBEDDINGS_DATABASE` | `embeddings` | Embedding service's DB. |
 | `DEPLOY_RP_ID` / `DEPLOY_RP_NAME` / `DEPLOY_RP_ORIGIN` / `DEPLOY_APP_URL` | `localhost` / `F4mil App` / `http://localhost:8080` / `http://localhost:8080` | Passkey identity — don't change `RP_ID` after first user registers. |
 | `DEPLOY_DATA_ROOT` | `./data` | Bind-mount root for every persisted volume. |
+| `DEPLOY_DATA_UID` / `DEPLOY_DATA_GID` | `568` / `568` | Owner `chown-init` sets on the data directories. Not the same as the `user:` the services run as — that stays 568:568. Set `DEPLOY_DATA_GID` when a host group other than the apps group also needs to reach the data (files stay writable for uid 568 regardless, since it owns them). |
 | `DEPLOY_INSIGHTFACE_START_PERIOD` | `180s` | Healthcheck grace for insightface — covers cold buffalo_l load. |
 | `DEPLOY_EMBEDDING_START_PERIOD` | `600s` | Healthcheck grace for embedding_service — covers CLIP + DINOv2 first-time download. |
 | `DEPLOY_LLM_START_PERIOD` | `600s` | Healthcheck grace for llm_service — covers Llama GGUF + embedder load (and download on a cold volume). |
@@ -123,9 +152,101 @@ internally and not exposed to the outside.
 
 ### Required variables
 
-| Variable          | Description |
-|-------------------|-------------|
-| `ADMIN_PASSWORD`  | Password for the initial admin account |
+| Variable           | Description |
+|--------------------|-------------|
+| `ADMIN_PASSWORD`   | Password for the initial admin account. No default — with it unset the seed creates no admin at all, rather than one whose password is published in the compose file. Set it before the first start. |
+| `WATCHTOWER_TOKEN` | Shared secret for the Watchtower update API. The stack refuses to start while this is empty — see [Watchtower update API](#watchtower-update-api). |
+| `INTERNAL_SERVICE_SECRET` | Shared secret between the app and the five internal AI services. The stack refuses to start while this is empty — see [Internal AI services](#internal-ai-services). |
+
+#### Internal AI services
+
+`llm_service`, `embedding_service`, `insightface`, `receipt_ocr_service`
+and `taxonomy_tools` each listen on port 8000 inside their container.
+They publish no host port, so nothing outside the compose network reaches
+them — but that was their *only* protection: any container on the same
+bridge network had full access to services that run models on request,
+and `taxonomy_tools` additionally spawns scripts and holds
+`ANTHROPIC_API_KEY`.
+
+They now require `Authorization: Bearer $INTERNAL_SERVICE_SECRET`, and
+**refuse to start without one**, so a misconfigured deployment fails
+loudly at boot instead of quietly serving whoever can route to it. The
+app sends the header on every outbound call automatically.
+
+```bash
+openssl rand -hex 32
+```
+
+Put the result in `.env` as `INTERNAL_SERVICE_SECRET`. One value for all
+six containers — the app and the five services read the same variable.
+Change it by editing `.env` and restarting the stack; there is nothing
+persisted that depends on the old value.
+
+The `/health` and `/healthz` endpoints stay open, so the container
+healthchecks remain a plain `curl` with no credentials in the compose
+file. They report liveness only.
+
+#### Watchtower update API
+
+The `watchtower` container mounts the Docker socket, so anyone who can
+call its HTTP update API can start containers on the host — that is host
+root. Two settings guard it:
+
+- **`WATCHTOWER_TOKEN` is mandatory.** Watchtower accepts *unauthenticated*
+  update calls when its token is empty, so `docker-compose.yml` declares
+  the variable as `${WATCHTOWER_TOKEN:?…}`. An unset or empty value aborts
+  `docker compose up` with an explanatory message instead of bringing the
+  API up unprotected. This is the one variable that deliberately breaks
+  startup rather than defaulting to empty. Generate one with:
+
+  ```bash
+  openssl rand -hex 32
+  ```
+
+  The same value goes into the `WATCHTOWER_TOKEN` secret of whatever
+  triggers deploys (GitHub Actions / GitLab CI), which sends it as
+  `Authorization: Bearer <token>` to `${WATCHTOWER_URL}/v1/update`.
+
+- **`DEPLOY_BIND_WATCHTOWER` limits reachability.** It defaults to
+  `0.0.0.0` because the release pipeline calls the API over the internet.
+  If you deploy by other means (SSH, a runner on the host, a VPN), set it
+  to `127.0.0.1` or a private address so the port is not exposed publicly.
+  Restricting it here is preferable to relying on the token alone.
+
+#### Database password and reachability
+
+The Postgres superuser password still defaults to `postgres`, so existing
+deployments keep working without any change. What changed is that the value
+is no longer hardcoded in `docker-compose.yml`: `POSTGRES_PASSWORD` in `.env`
+now actually reaches the database, the app, the embedding service and the
+taxonomy sidecar. Previously the compose file pinned the literal, so setting
+the variable had no effect at all despite being documented as configurable.
+
+The port is published on `127.0.0.1` by default (`DEPLOY_BIND_POSTGRES`).
+Every in-stack consumer reaches the database over the compose network by
+service name, and the host-side scripts under `scripts/` run on the Docker
+host, so loopback covers them. Publishing a database that accepts a
+well-known password to the whole network is what this closes. If you do need
+to connect from another machine, set `DEPLOY_BIND_POSTGRES=0.0.0.0` **and**
+set a real `POSTGRES_PASSWORD`.
+
+Two things to know before changing the password on a stack that already ran:
+
+- **The database keeps its old password.** The postgres image only applies
+  `POSTGRES_PASSWORD` when it initialises an empty data directory; on an
+  existing volume it is ignored. Change it in the database in the same
+  maintenance window, otherwise the app can no longer log in:
+
+  ```bash
+  docker compose exec postgres \
+    psql -U postgres -c "ALTER USER postgres WITH PASSWORD 'new-password';"
+  docker compose up -d
+  ```
+
+- **Percent-encode URL metacharacters.** The embedding service receives the
+  password inside a connection URL, so a value containing `@ : / ? #` has to
+  be encoded there (`p@ss` → `p%40ss`). Picking a password without those
+  characters avoids the issue entirely.
 
 ### Optional variables
 
@@ -143,6 +264,26 @@ internally and not exposed to the outside.
 | `CLIP_PRETRAINED`         | `openai`                 | Pretrained weights |
 | `DINO_MODEL_NAME`         | `facebook/dinov2-base`   | DINOv2 model |
 | `EMBEDDING_DB_PASSWORD`   | `postgres`               | Password for the embedding database |
+| `TRUST_PROXY_HEADERS`     | _(off)_                  | Set to `true` only when a reverse proxy in front of this stack overwrites `X-Forwarded-For` / `X-Real-IP`. See [Forwarded client addresses](#forwarded-client-addresses). |
+| `BACKUP_TRUST_XFF`        | _(off)_                  | Same, for the `/internal/backup/*` CIDR allow-list. |
+
+#### Forwarded client addresses
+
+`X-Forwarded-For` and `X-Real-IP` say whatever the caller puts in them
+unless something in front of the app overwrites them. Both flags above are
+therefore off by default; turn them on only where that is actually the case.
+
+With them off:
+
+- **Login** is limited per account, keyed on the email being attempted. That
+  is the limit an attacker cannot sidestep, whether by rotating a header or
+  by reaching the app directly. The additional per-IP limit simply does not
+  apply while there is no trustworthy address. 20 attempts per account per
+  15 minutes; a successful login clears the count.
+- **The backup endpoints** fall back to the bearer token alone. The CIDR
+  allow-list was already inert for `api.raw` handlers, where Encore reports
+  the peer as `0.0.0.0`, so this changes little in practice — but it stops a
+  caller from naming its own source address to satisfy the check.
 
 ### Example: production setup behind a reverse proxy
 
@@ -156,6 +297,56 @@ RP_NAME=Family Photos
 RP_ORIGIN=https://photos.my-domain.com
 EMBEDDING_DB_PASSWORD=another-password
 ```
+
+### Accounts and invitations
+
+There is no open sign-up. `POST /users` used to accept anyone who could
+reach the app; it now requires an invitation token, and the only way to
+issue one is from **Benutzer → Einladen** in the app, which needs the
+`users.create` permission (the Admin role has it).
+
+The invited address gets a mail with a link that is valid for seven days
+and can be used once. The person sets their own name and password; the
+address comes from the invite, not from the form. An invitation grants
+**no roles** — assign those afterwards on the user's detail page, which
+needs `roles.assign`. That separation is deliberate: otherwise
+`users.create` alone would be enough to create an administrator.
+
+The first account still comes from `ADMIN_EMAIL` / `ADMIN_PASSWORD` at
+first start (see *Required variables*), and everything after it is an
+invitation.
+
+**This makes SMTP a requirement for onboarding.** With `SMTP_HOST` /
+`SMTP_USER` / `SMTP_PASS` unset, the invitation link is only written to
+the app container's log:
+
+```
+[Mail] SMTP not configured. Invite link for someone@example.com: https://…/app/register?token=…
+```
+
+which works (`docker compose logs app | grep 'Invite link'`) but is not a
+flow to rely on. The same applies to password-reset mails.
+
+### Three permissions that are really "Admin"
+
+The permission list is finer-grained than the privileges behind it. Three
+entries hand over the whole application, which their names do not say, so
+grant them only to people you would make an administrator anyway:
+
+| Permission | Why it is admin-equivalent |
+| --- | --- |
+| `users.update` | `PUT /users/:id` may change **any** user's email and password, the administrator's included. Change the admin's password, log in as the admin. |
+| `roles.assign` | The holder can assign the Admin role — to themselves. |
+| `roles.update` | The holder can attach any permission, including the two above, to a role they already hold. |
+
+There is no protection against acting on a higher-privileged user or on
+the Admin role itself; the only guards are the "last administrator" checks
+that stop you deleting the final one. The role editor repeats this warning
+next to each of the three checkboxes.
+
+`users.create` is **not** in this group: an invitation creates a
+role-less account and the inviter cannot propose roles, so it is safe to
+give to whoever manages people day to day.
 
 ### Web Push notifications (optional)
 

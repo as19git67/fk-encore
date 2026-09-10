@@ -18,6 +18,7 @@ import type {
 } from "../db/types";
 import { toUser, getRolesForUser, getPermissionsForUser } from "./user.service";
 import { checkRateLimit, resetRateLimit, getClientIp } from "./rateLimiter";
+import { passwordPolicyError } from "./password-policy";
 import { sendPasswordResetEmail } from "./mail";
 
 console.log("[boot] user/auth.service.ts: all imports resolved");
@@ -76,13 +77,37 @@ export async function createSessionTokens(userId: number): Promise<{ token: stri
 
 // ---------- Business Logic ----------
 
-export async function loginLogic(req: LoginRequest): Promise<LoginResponse> {
-  const ip = getClientIp();
-  checkRateLimit(ip);
+/**
+ * Login attempts are limited along two independent dimensions.
+ *
+ * The account limit is the one that actually holds: it is keyed on the email
+ * being attempted, so an attacker who rotates X-Forwarded-For (or reaches the
+ * app directly, where there is no client IP at all) still runs out of attempts
+ * against a given account. Its ceiling is higher than the IP limit so a person
+ * fumbling their own password on several devices is not affected.
+ *
+ * The IP limit stays as a coarser second layer, and only applies where the
+ * deployment has declared the proxy headers trustworthy — see getClientIp.
+ */
+const LOGIN_ACCOUNT_MAX_ATTEMPTS = 20;
 
+function loginAccountKey(email: string): string {
+  return `login-account:${email.trim().toLowerCase()}`;
+}
+
+export async function loginLogic(req: LoginRequest): Promise<LoginResponse> {
   if (!req.email || !req.password) {
     throw new Error("email and password are required");
   }
+
+  const ip = getClientIp();
+  if (ip) checkRateLimit(`login-ip:${ip}`);
+
+  const accountKey = loginAccountKey(req.email);
+  checkRateLimit(accountKey, {
+    maxAttempts: LOGIN_ACCOUNT_MAX_ATTEMPTS,
+    message: "Too many login attempts for this account.",
+  });
 
   const row = await dbFirst<typeof users.$inferSelect>(
     db.select().from(users).where(eq(users.email, req.email))
@@ -97,7 +122,8 @@ export async function loginLogic(req: LoginRequest): Promise<LoginResponse> {
     throw new Error("invalid credentials");
   }
 
-  resetRateLimit(ip);
+  if (ip) resetRateLimit(`login-ip:${ip}`);
+  resetRateLimit(accountKey);
 
   // Cleanup expired tokens
   await cleanupExpiredSessions();
@@ -232,8 +258,11 @@ export async function resetPasswordLogic(req: ResetPasswordRequest): Promise<Res
     throw new Error("token and new_password are required");
   }
 
-  if (req.new_password.length < 6) {
-    throw new Error("password must be at least 6 characters");
+  // Plain Error rather than APIError: this runs in the logic layer and the
+  // endpoint already maps a message containing "at least" to invalidArgument.
+  const policyError = passwordPolicyError(req.new_password);
+  if (policyError) {
+    throw new Error(policyError);
   }
 
   const resetToken = await dbFirst<{ token: string; user_id: number; expires_at: string }>(

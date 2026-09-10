@@ -3,6 +3,7 @@ import db from "../db/database";
 import { sessions, refreshTokens, rolePermissions, userRoles, users, permissions, roles } from "../db/schema";
 import { loginLogic, logoutLogic, refreshTokenLogic, validateToken } from "./auth.service";
 import { createUserLogic, getPermissionsForUser } from "./user.service";
+import { __resetRateLimiterForTests } from "./rateLimiter";
 import { createRoleLogic } from "../role/role.service";
 import { assignRoleLogic } from "./user-roles.service";
 import { assignPermissionLogic } from "../role/role.service";
@@ -137,5 +138,81 @@ describe("Auth Logic", () => {
 
     expect(second.token).toBeDefined();
     expect(second.expiresAt).toBeDefined();
+  });
+});
+
+// The IP-scoped limit only applies where the deployment declares the proxy
+// headers trustworthy, and an attacker can reach the app without any usable
+// client identity at all. The account-scoped limit is what still holds there:
+// it is keyed on the email being attempted, so rotating headers buys nothing.
+describe("login rate limiting", () => {
+  const EMAIL = "ratelimit@test.com";
+
+  beforeEach(async () => {
+    __resetRateLimiterForTests();
+    await createUserLogic({ email: EMAIL, name: "User", password: "correct-horse" });
+  });
+
+  it("stops repeated failures against one account even with no client IP", async () => {
+    // 20 attempts are allowed, the 21st is refused.
+    for (let i = 0; i < 20; i++) {
+      await expect(
+        loginLogic({ email: EMAIL, password: "wrong" }),
+      ).rejects.toThrow(/invalid credentials/);
+    }
+
+    await expect(
+      loginLogic({ email: EMAIL, password: "wrong" }),
+    ).rejects.toThrow(/Too many login attempts for this account/);
+  });
+
+  it("keeps the budget per account, not global", async () => {
+    const other = "ratelimit-other@test.com";
+    await createUserLogic({ email: other, name: "Other", password: "correct-horse" });
+
+    for (let i = 0; i < 20; i++) {
+      await expect(
+        loginLogic({ email: EMAIL, password: "wrong" }),
+      ).rejects.toThrow(/invalid credentials/);
+    }
+
+    // The exhausted account is blocked; an unrelated one is unaffected.
+    await expect(loginLogic({ email: EMAIL, password: "wrong" })).rejects.toThrow(
+      /Too many login attempts/,
+    );
+    await expect(
+      loginLogic({ email: other, password: "wrong" }),
+    ).rejects.toThrow(/invalid credentials/);
+  });
+
+  it("treats the email case-insensitively so casing does not reset the budget", async () => {
+    for (let i = 0; i < 20; i++) {
+      await expect(
+        loginLogic({ email: EMAIL, password: "wrong" }),
+      ).rejects.toThrow(/invalid credentials/);
+    }
+
+    await expect(
+      loginLogic({ email: EMAIL.toUpperCase(), password: "wrong" }),
+    ).rejects.toThrow(/Too many login attempts/);
+  });
+
+  it("clears the account budget after a successful login", async () => {
+    for (let i = 0; i < 5; i++) {
+      await expect(
+        loginLogic({ email: EMAIL, password: "wrong" }),
+      ).rejects.toThrow(/invalid credentials/);
+    }
+
+    await expect(
+      loginLogic({ email: EMAIL, password: "correct-horse" }),
+    ).resolves.toBeDefined();
+
+    // Budget is back to full rather than 5 attempts in.
+    for (let i = 0; i < 20; i++) {
+      await expect(
+        loginLogic({ email: EMAIL, password: "wrong" }),
+      ).rejects.toThrow(/invalid credentials/);
+    }
   });
 });

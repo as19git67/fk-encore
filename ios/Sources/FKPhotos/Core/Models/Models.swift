@@ -45,12 +45,6 @@ struct LoginResponse: Codable, Sendable {
     let expiresAt: String?
 }
 
-struct RegisterRequest: Codable, Sendable {
-    let email: String
-    let name: String
-    let password: String
-}
-
 // MARK: - Role & Permission
 
 struct Role: Codable, Identifiable, Sendable {

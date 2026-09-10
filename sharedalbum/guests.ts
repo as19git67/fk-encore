@@ -110,7 +110,7 @@ export const me = api.raw(
         return;
       }
       await touchLastSeen(resolved.guest.id);
-      writeJson(res, 200, { guest: toGuestSelf(resolved.guest) });
+      writeJson(res, 200, { guest: toGuestSelf(resolved.guest, resolved.session) });
     } catch (err) {
       writeError(res, err);
     }

@@ -43,14 +43,14 @@ export async function seed(db: any): Promise<void> {
     { key: "users.list", description: "View user list" },
     { key: "users.read", description: "View user details" },
     { key: "users.create", description: "Create new users" },
-    { key: "users.update", description: "Update existing users" },
+    { key: "users.update", description: "Update existing users — ⚠ equals full admin: can change any user's password, including an administrator's" },
     { key: "users.delete", description: "Delete users" },
     { key: "roles.list", description: "View role list" },
     { key: "roles.read", description: "View role details" },
     { key: "roles.create", description: "Create new roles" },
-    { key: "roles.update", description: "Update existing roles" },
+    { key: "roles.update", description: "Update existing roles — ⚠ equals full admin: the holder can add any permission to a role they already hold" },
     { key: "roles.delete", description: "Delete roles" },
-    { key: "roles.assign", description: "Assign roles to users" },
+    { key: "roles.assign", description: "Assign roles to users — ⚠ equals full admin: the holder can assign themselves the Admin role" },
     { key: "roles.revoke", description: "Revoke roles from users" },
     { key: "module.photos", description: "Enable photos module" },
     { key: "photos.upload", description: "Upload photos" },
@@ -100,10 +100,17 @@ export async function seed(db: any): Promise<void> {
   ]);
 
   for (const perm of allPermissions) {
-    const existing = (await db.select({ id: schema.permissions.id }).from(schema.permissions).where(eq(schema.permissions.key, perm.key)))[0];
+    const existing = (await db.select({ id: schema.permissions.id, description: schema.permissions.description }).from(schema.permissions).where(eq(schema.permissions.key, perm.key)))[0];
     if (!existing) {
       await db.insert(schema.permissions).values(perm);
       console.log(`[seed] Created permission: ${perm.key}`);
+    } else if (existing.description !== perm.description) {
+      // Descriptions are what the role editor shows next to each checkbox,
+      // so they are the one place a warning actually reaches the person
+      // granting the permission. Insert-only would have left every existing
+      // deployment with the old text.
+      await db.update(schema.permissions).set({ description: perm.description }).where(eq(schema.permissions.id, existing.id));
+      console.log(`[seed] Updated description: ${perm.key}`);
     }
   }
 
@@ -345,27 +352,29 @@ export async function seed(db: any): Promise<void> {
   const adminName = process.env.ADMIN_NAME || "Admin";
   const adminPassword = process.env.ADMIN_PASSWORD;
 
+  // Skipping the admin must not skip the rest of the seed: everything below
+  // is unrelated to it, and an early return here left a deployment without
+  // ADMIN_PASSWORD missing the AI system user too.
   if (!adminPassword) {
     console.warn(
       "[seed] ADMIN_PASSWORD not set — skipping initial admin user creation. " +
         "Make sure to set it in your .env file."
     );
-    return;
-  }
+  } else {
+    const existingUser = (await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.email, adminEmail)))[0];
 
-  const existingUser = (await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.email, adminEmail)))[0];
+    if (!existingUser) {
+      const passwordHash = hashSync(adminPassword, 10);
+      const result = (await db.insert(schema.users)
+        .values({ email: adminEmail, name: adminName, password_hash: passwordHash })
+        .returning({ id: schema.users.id }))[0] as { id: number } | undefined;
 
-  if (!existingUser) {
-    const passwordHash = hashSync(adminPassword, 10);
-    const result = (await db.insert(schema.users)
-      .values({ email: adminEmail, name: adminName, password_hash: passwordHash })
-      .returning({ id: schema.users.id }))[0] as { id: number } | undefined;
+      if (adminRole && result) {
+        await db.insert(schema.userRoles).values({ user_id: result.id, role_id: adminRole.id });
+      }
 
-    if (adminRole && result) {
-      await db.insert(schema.userRoles).values({ user_id: result.id, role_id: adminRole.id });
+      console.log(`[seed] Created admin user: ${adminEmail}`);
     }
-
-    console.log(`[seed] Created admin user: ${adminEmail}`);
   }
 
   // --- 8. AI system user (virtual participant for quality-based curation) ---

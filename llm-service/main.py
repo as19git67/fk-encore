@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Callable, TypeVar
 
 from fastapi import FastAPI, HTTPException
+from service_auth import install_service_auth
 from pydantic import BaseModel, Field
 
 from llama_supervisor import LlamaServerProcess, terminate_own_process
@@ -721,6 +722,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="llm-service", version="1.0.0", lifespan=lifespan)
+install_service_auth(app)
 
 
 # ─── Blocking-call offload ─────────────────────────────────────────────────────

@@ -13,7 +13,7 @@
 // /photos/:id/render?v=user variant.
 
 import { computed, ref, watch, type Ref } from 'vue'
-import { API_BASE_URL } from '../api/client'
+import { API_BASE_URL, withAuthTokenParam } from '../api/client'
 import { getPhotoTransforms, type PhotoTransformRow } from '../api/photoTransforms'
 import {
   buildRecipeSvgFilter,
@@ -150,7 +150,11 @@ export function useUserPhotoTransform(photoIdRef: Ref<number | null | undefined>
     })
     if (width) params.set('w', String(width))
     if (r.updated_at) params.set('t', r.updated_at)
-    return `${API_BASE_URL}/photos/${id}/render?${params.toString()}`
+    // The render endpoint requires auth and this URL goes into <img src>,
+    // which cannot carry an Authorization header.
+    return withAuthTokenParam(
+      `${API_BASE_URL}/photos/${id}/render?${params.toString()}`,
+    )
   }
 
   return {

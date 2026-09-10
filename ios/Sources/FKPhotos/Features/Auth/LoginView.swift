@@ -3,7 +3,6 @@ import SwiftUI
 struct LoginView: View {
     @Environment(AuthManager.self) private var authManager
     @State private var viewModel = AuthViewModel()
-    @State private var showRegister = false
     @State private var showServerConfig = false
     @AppStorage(APIClient.serverURLKey) private var serverURL: String = "http://localhost:4000"
 
@@ -75,11 +74,11 @@ struct LoginView: View {
                 .disabled(viewModel.isLoading)
                 .padding(.horizontal)
 
-                // Register Link
-                Button("Noch kein Konto? Registrieren") {
-                    showRegister = true
-                }
-                .font(.footnote)
+                // No in-app registration: accounts are created from an
+                // invitation link that opens the web form in a browser.
+                Text("Konten werden per Einladung angelegt.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
 
                 Spacer()
             }
@@ -98,9 +97,6 @@ struct LoginView: View {
                     }
                     .foregroundStyle(.secondary)
                 }
-            }
-            .navigationDestination(isPresented: $showRegister) {
-                RegisterView()
             }
             .sheet(isPresented: $showServerConfig) {
                 NavigationStack {
