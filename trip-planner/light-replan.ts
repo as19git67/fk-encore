@@ -20,7 +20,7 @@
 
 import type { Coordinate } from "./travel";
 import { travelLeg, type TransportMode } from "./travel";
-import { lightWindows } from "./sun";
+import { lightWindows, type HorizonProfile } from "./sun";
 import { spotLight } from "./light";
 import type { PlannedBlock, PlannedStop } from "./solver";
 import { orderForLight, type LightOrderStop } from "./light-order";
@@ -36,6 +36,12 @@ export interface LightOrderContext {
    */
   utcOffsetMinutes?: number;
   mode?: TransportMode;
+  /**
+   * The terrain profile for the day's place, when one has been
+   * measured (§7.3). Without it the windows assume a free horizon,
+   * which is what this calculation did before the profile existed.
+   */
+  horizon?: HorizonProfile;
   /** When each block begins, by block id. Blocks without an hour are skipped. */
   startMinutesByBlock: ReadonlyMap<string, number | null>;
 }
@@ -53,7 +59,7 @@ export function orderBlocksForLight(
   const marked = blocks.some((block) => block.stops.some((stop) => stop.photoStop === true));
   if (!marked) return [...blocks];
 
-  const windows = lightWindows(context.at, context.date, offsetFor(context));
+  const windows = lightWindows(context.at, context.date, offsetFor(context), context.horizon ?? []);
   if (windows.length === 0) return [...blocks];
 
   return blocks.map((block) => {

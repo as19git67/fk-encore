@@ -25,6 +25,7 @@ import { DEFAULT_DAY, shapeDay, type BlockTemplate, type GroupProfile, type Pace
 import { dayShapeOf, validateDayShape } from "./day-shape";
 import { scoreForLight, toCandidates, type ScoredCandidate } from "./candidates";
 import { climateForLeg } from "./climate-precautions";
+import { storedHorizon } from "./horizon-store";
 import { fairnessOfPlan, votesOfLeg } from "./vote-store";
 import { orderBlocksForLight } from "./light-replan";
 import { applyVotes, tally, type Tally } from "./votes";
@@ -825,6 +826,7 @@ export const detailTripDay = api(
         date: addDays(leg.startDate, day.dayIndex),
         at: leg.anchor,
         mode: leg.mode,
+        horizon: await storedHorizon(leg.anchor),
         startMinutesByBlock: new Map(day.blocks.map((b) => [b.id, b.startMinutes])),
       })
       : solved.blocks;
@@ -1293,6 +1295,10 @@ async function planLeg(
   // is not rejection (§6.1).
   const rated = trip.votes ? applyVotes(scored, trip.votes) : scored;
 
+  // Read once for the leg, never computed here: ordering a block by
+  // the light is worth a lookup and not worth a wait (§7.3).
+  const horizon = await storedHorizon(anchor);
+
   let available = [...rated];
   const days: CreateDayInput[] = [];
   const dropped: Array<DroppedBlock & { dayIndex: number }> = [];
@@ -1364,6 +1370,7 @@ async function planLeg(
         date: addDays(startDate, dayIndex),
         at: anchor,
         mode,
+        horizon,
         startMinutesByBlock: startsByBlock,
       })
       : solved.blocks;

@@ -943,15 +943,33 @@ nicht jede Reise soll sich nach dem Sonnenstand richten.
   markiert nicht — über die Sonne an einem Umriss, den niemand kennt,
   ist nichts zu sagen.
 
-**Weg 1 (Reihenfolge im Block) und Weg 3 (Abendblock-Vorschlag)** bleiben
-zurückgestellt: Beide versprechen eine *Minute*, und dafür fehlt das
-Horizontprofil. Die Rechnung dafür existiert inzwischen
-(`horizonAltitude`, zirkular interpoliert, und `lightWindows` schneidet
-das Fenster damit ab) — **was fehlt, ist der Erzeuger**: Bis das Profil
-beim Import einmal je Spot aus einem Höhenmodell bestimmt wird, kommt es
-nur als optionaler Parameter herein, und ohne es liegt der
-Aussichtspunkt im Tal längst im Schatten, während der Plan noch goldenes
-Licht verspricht.
+**Weg 1 (Reihenfolge im Block) und Weg 3 (Abendblock-Vorschlag)** sind
+inzwischen gebaut — und mit ihnen der **Erzeuger des Horizontprofils**,
+der sie erst vertretbar macht. `horizon.ts` legt einen Fächer um den
+Ort: 24 Richtungen, elf Entfernungen von 100 m bis 22 km, und je
+Richtung bleibt der größte Winkel stehen, den irgendetwas einnimmt. Die
+Höhen kommen aus dem Copernicus-Höhenmodell über die Elevation-API von
+Open-Meteo (`api.open-meteo.com`, derselbe Host wie die Vorhersage —
+die Netzwerk-Policy braucht nichts Neues, und 90 m je Bildpunkt sind
+grob für eine Wand und richtig für einen Bergrücken).
+
+Zwei Korrekturen sind auf diese Entfernungen nicht optional: Die **Erde
+krümmt sich weg** (20 km entfernter ebener Boden liegt rund 30 m unter
+der Tangentialebene — ohne das läse sich jede Ebene als Höhenzug), und
+die **Luft bricht das Licht nach unten**, wofür die übliche Näherung
+eine um 7/6 vergrößerte Erde ist. Ein Loch im Höhenmodell wird
+übersprungen und nicht als Meereshöhe gelesen (§15.3); eine Richtung
+ohne jede Messung fehlt im Profil, und der Leser interpoliert über sie
+hinweg — geraten zwischen zwei Messungen statt frei erfunden.
+
+Wer wann rechnet, ist eine bewusste Trennung: Das Profil gehört zum
+**Ort**, nicht zur Reise, wird einmal je 100-Meter-Feld bestimmt und hat
+kein Verfallsdatum — der Boden bewegt sich nicht. Gerechnet wird beim
+**Lichtabruf** (Tageskarte, Abendlicht), mit 3 Sekunden Budget und
+freiem Horizont, falls es länger dauert; die **Planung liest nur**. Eine
+Familie, die das Tempo ihrer Reise verstellt, soll nicht auf ein
+Höhenmodell warten, damit zwei Stopps die Plätze tauschen — und weil die
+Tageskarte ohnehin geöffnet wird, ist das Profil meist längst da.
 
 ## 8. Wie sich das in der iOS-App anfühlt
 
@@ -2747,9 +2765,10 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
    der Mitte der Etappe, mit seiner Begründung statt eines Flags, und der
    gemessene Indoor-Anteil des Vorrats samt fehlender Zahl.
 
-   **Noch offen in diesem Schritt:** nur noch der **Erzeuger** des
-   Horizontprofils — die Rechnung steht, das Profil kommt aus keinem
-   Höhenmodell.
+   **Dazugekommen: der Erzeuger des Horizontprofils** (§7.3) — der
+   Fächer aus 24 Richtungen über ein freies Höhenmodell, je Ort einmal
+   und für immer gespeichert, mit Krümmung und Refraktion gerechnet.
+   Damit ist Schritt 9 durch.
 10. **Weitere Kontextsignale** — Dokumenten-Fixpunkte, Reisegruppe, dazu die
     **Reisebereitschafts-Prüfung** und die Packliste (§8.6), die beide nur
     vorhandene Zustände zusammentragen.
@@ -2854,10 +2873,14 @@ hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
   ist die automatische Erledigt-Erkennung (§6.4) in dichten Innenstädten und
   Innenräumen ungenau; deshalb Verweildauer statt Eintritt, zwei Signale für
   stummes Setzen und eine Wischgeste zum Korrigieren.
-- **Das Lichtmodell kennt kein Gelände**, solange das Horizontprofil (§7.3)
-  nicht vorberechnet ist. In Tälern und Hügelstädten — Lissabon, Prag, alles
-  Alpine — liegt es dann systematisch zu spät. Bis dahin gehört die Angabe als
-  „bei freiem Horizont" gekennzeichnet.
+- **Das Lichtmodell kennt das Gelände nur, wo es gemessen wurde.** Das
+  Horizontprofil (§7.3) wird beim ersten Lichtabruf für einen Ort gerechnet
+  und dann behalten; davor — und wo das Höhenmodell schweigt oder nicht
+  erreichbar ist — gilt weiter der freie Horizont, und in Tälern und
+  Hügelstädten (Lissabon, Prag, alles Alpine) liegt die Angabe dann
+  systematisch zu spät. Die Auflösung von 90 m sieht außerdem den Bergrücken,
+  nicht das Haus gegenüber. Solange kein Profil vorliegt, gehört die Angabe
+  als „bei freiem Horizont" gekennzeichnet.
 - **Keine Echtzeit.** Verkehr, Streiks, spontane Schließungen sieht das System
   nicht — bewusste Übergabe an Apple/Google Maps für die Navigation.
 - **Speicherbedarf** eines späteren Routers (Valhalla-Kacheln zusätzlich zu den
