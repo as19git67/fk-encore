@@ -535,7 +535,26 @@ dokumentiert**:
   eine siebenstellige, unlesbare Hex-Farbe; hier wird bei 255 geklemmt.
 
 ### 2.7 Feed (Aktivität, Kommentare, Reaktionen)
-- **Feed-Tab** mit Ungelesen-Badge (`FeedViewModel.unreadCount`).
+- **Feed-Tab** mit Ungelesen-Badge (`FeedViewModel.unreadCount`) — zählt jede
+  Art von Aktivität.
+- **Das Badge am Home-Bildschirm zählt etwas anderes: ungelesene Kommentare
+  anderer Leute** (`CommentBadge`, `GET /feed/unread-comment-count`). Vorher
+  stand dort die Zahl der offenen Ähnlichkeits-Gruppen, gesetzt von der
+  Review-Benachrichtigung. Die ging nie von allein weg — eine Aufräum-Warteschlange
+  ist nie *fertig* —, also trug das Icon dauerhaft eine rote Zahl für Arbeit,
+  die niemand heute erledigen muss; so hört ein Badge auf, etwas zu bedeuten.
+  Jetzt steht es für das Einzige, dem man vom Home-Bildschirm aus nachgehen
+  will: jemand hat dir etwas geschrieben. „Ungelesen" ist dabei das `seen_at`
+  des Feeds, das Badge verschwindet also genau dann, wenn der Feed-Tab seine
+  Einträge als gesehen markiert — kein zweiter Gelesen-Begriff, der auseinanderlaufen
+  könnte.
+- **Welche Fotos überhaupt im Foto-Feed auftauchen**, entscheiden vier
+  Handlungen und sonst nichts: in ein Album aufgenommen, favorisiert,
+  kommentiert, mit einer Beschreibung versehen. Ein korrigiertes
+  Aufnahmedatum bumpt nicht mehr (das ist Buchhaltung), ein Favorit dagegen
+  jetzt schon — er tat es früher nicht. Gelöschte Beschreibungen bumpen
+  ebenfalls nicht: es gibt nichts Neues zu lesen. Serverseitig in
+  `feed/content-feed.service.ts`.
 - **Reaktionen / Likes** und **Ausblenden** je Foto.
 - **Kommentare ansehen und schreiben** (`FeedCommentSection`).
 - **Doppel-Tap öffnet das Vollbild** (und damit Pinch-to-Zoom über
@@ -603,6 +622,9 @@ dokumentiert**:
     Installation (sonst würde ein Neuling mit einer bereits vorhandenen Liste
     begrüßt). **Keine Push-Infrastruktur** — der Server hat keinen APNs-Pfad;
     das ist eine rein lokale Prüfung nach dem ohnehin laufenden Sync.
+    Sie setzt **kein** Icon-Badge mehr (siehe §2.7): die Mitteilung selbst ist
+    der richtige Ort für „es sind neue Gruppen da", eine bleibende Zahl am
+    Icon war es nicht.
     Abschaltbar unter Einstellungen → „Hinweis auf neue Gruppen".
 
 ### 2.10 Einstellungen / Admin

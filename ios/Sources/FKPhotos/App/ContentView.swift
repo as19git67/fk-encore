@@ -29,12 +29,24 @@ public struct ContentView: View {
             // drop the set rather than carry it over.
             TransformedPhotosIndex.shared.configure(userId: authManager.currentUser?.id)
         }
+        .task(id: authManager.currentUser?.id) {
+            // The home-screen badge, read once at launch. Signed out there is
+            // nobody to have unread comments, and the icon should say so.
+            guard authManager.currentUser != nil else {
+                await CommentBadge.shared.clear()
+                return
+            }
+            await CommentBadge.shared.refresh()
+        }
         .onChange(of: scenePhase) { _, newPhase in
             // If the initial restore ran while the device was locked (background
             // launch / pre-first-unlock), recover the session when the user
             // brings the app forward — instead of showing the login screen.
             if newPhase == .active {
                 authManager.retryRestoreIfNeeded()
+                // Comments may have arrived while the app was away; the icon
+                // is the only place that can say so before it is opened.
+                Task { await CommentBadge.shared.refresh() }
             }
         }
         .onOpenURL { url in

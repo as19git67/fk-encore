@@ -19,7 +19,9 @@ import { createComment } from "../photo/reactions.service";
 /**
  * Etappe 2: content-feed fan-out / reconcile. Drives the real photo/album
  * mutations and asserts the materialized photo_feed_entries table stays in
- * sync — viewer-accurate (variant B), monotonic bumps, likes never bump.
+ * sync — viewer-accurate (variant B), monotonic bumps, and only the four acts
+ * that put a photo in the feed at all: an album, a favourite, a comment, a
+ * description.
  */
 describe("content feed: photo_feed_entries maintenance", () => {
   let owner: any;
@@ -111,7 +113,7 @@ describe("content feed: photo_feed_entries maintenance", () => {
     expect(new Date(await entryTs(friend.id, p.id) as string).getTime()).toBeGreaterThan(new Date("2000-01-01").getTime());
   });
 
-  it("bumps every viewer on a metadata edit", async () => {
+  it("bumps every viewer when a description is written", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
     const p = await uploadPhoto(owner.id, "a.jpg");
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
@@ -126,7 +128,43 @@ describe("content feed: photo_feed_entries maintenance", () => {
     expect(new Date(await entryTs(friend.id, p.id) as string).getTime()).toBeGreaterThan(new Date("2000-01-01").getTime());
   });
 
-  it("does NOT bump on like/favorite", async () => {
+  /// Clearing the text is not writing one: there is nothing new to read, and
+  /// re-floating a photo because its description was deleted reads as a bug.
+  it("does NOT bump when a description is cleared", async () => {
+    const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    const p = await uploadPhoto(owner.id, "a.jpg");
+    await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
+    await photo.updatePhotoDescriptionLogic(owner.id, p.id, "Weg damit");
+
+    const old = "2000-01-01T00:00:00.000Z";
+    await backdate(owner.id, p.id, old);
+
+    await photo.updatePhotoDescriptionLogic(owner.id, p.id, null);
+
+    expect(new Date(await entryTs(owner.id, p.id) as string).getTime()).toBe(new Date(old).getTime());
+  });
+
+  /// Only four acts put a photo in the feed — a favourite, a comment, a
+  /// description, an album. Correcting a capture date is bookkeeping.
+  it("does NOT bump on a corrected capture date", async () => {
+    const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    const p = await uploadPhoto(owner.id, "a.jpg");
+    await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
+    await photo.shareAlbumLogic(owner.id, { albumId: album.id, userId: friend.id, accessLevel: "read" });
+
+    const old = "2000-01-01T00:00:00.000Z";
+    await backdate(owner.id, p.id, old);
+    await backdate(friend.id, p.id, old);
+
+    await photo.updatePhotoDateLogic(owner.id, p.id, "1999-07-04T12:00:00.000Z");
+
+    expect(new Date(await entryTs(owner.id, p.id) as string).getTime()).toBe(new Date(old).getTime());
+    expect(new Date(await entryTs(friend.id, p.id) as string).getTime()).toBe(new Date(old).getTime());
+  });
+
+  /// A favourite is one of the four acts, so it bumps — it used not to,
+  /// back when the feed carried every album photo regardless.
+  it("bumps every viewer on a favourite", async () => {
     const album = await photo.createAlbumLogic(owner.id, { name: "A" });
     const p = await uploadPhoto(owner.id, "a.jpg");
     await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
@@ -138,9 +176,23 @@ describe("content feed: photo_feed_entries maintenance", () => {
 
     await photo.updatePhotoCurationLogic(friend.id, p.id, "favorite");
 
-    // Likes never reorder the feed — timestamps stay put.
+    expect(new Date(await entryTs(owner.id, p.id) as string).getTime()).toBeGreaterThan(new Date(old).getTime());
+    expect(new Date(await entryTs(friend.id, p.id) as string).getTime()).toBeGreaterThan(new Date(old).getTime());
+  });
+
+  /// Changing your mind must not re-float the photo a second time.
+  it("does NOT bump on un-favouriting", async () => {
+    const album = await photo.createAlbumLogic(owner.id, { name: "A" });
+    const p = await uploadPhoto(owner.id, "a.jpg");
+    await photo.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: p.id });
+    await photo.updatePhotoCurationLogic(owner.id, p.id, "favorite");
+
+    const old = "2000-01-01T00:00:00.000Z";
+    await backdate(owner.id, p.id, old);
+
+    await photo.updatePhotoCurationLogic(owner.id, p.id, "visible");
+
     expect(new Date(await entryTs(owner.id, p.id) as string).getTime()).toBe(new Date(old).getTime());
-    expect(new Date(await entryTs(friend.id, p.id) as string).getTime()).toBe(new Date(old).getTime());
   });
 
   it("bumps are monotonic — never lowered", async () => {
