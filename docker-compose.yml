@@ -230,10 +230,11 @@ services:
       # ENABLE_LANDMARKS retired (Epic #383) — use ENABLE_POI_DETECTION instead.
       ENABLE_POI_DETECTION: ${ENABLE_POI_DETECTION:-false}
       # Geo service (reverse geocoding + POI lookup). Talks to the geo
-      # container over the compose default network. GEO_SHARED_SECRET is
-      # optional but recommended in shared-host deployments.
+      # container over the compose default network. The shared secret is
+      # mandatory: geo publishes no host port, but a container on the same
+      # bridge network would otherwise reach the whole OSM database.
       GEO_SERVICE_URL: ${GEO_SERVICE_URL:-http://geo:8080}
-      GEO_SHARED_SECRET: ${GEO_SHARED_SECRET:-}
+      GEO_SHARED_SECRET: "${GEO_SHARED_SECRET:?must be a non-empty secret — the geo service has no other authentication and refuses to start without one. Generate it with `openssl rand -hex 32` and put it in .env}"
       # Label module — base URL of the CUPS server that exposes the label
       # printer (e.g. a Raspberry Pi with a DYMO LabelWriter 450). Set this
       # in your .env; if unset the backend falls back to localhost:631.
@@ -562,7 +563,7 @@ services:
       GEO_DB_USER: postgres
       GEO_DB_PASSWORD: ${GEO_DB_PASSWORD:-postgres}
       GEO_DB_ADMIN_DB: postgres
-      GEO_SHARED_SECRET: ${GEO_SHARED_SECRET:-}
+      GEO_SHARED_SECRET: "${GEO_SHARED_SECRET:?must be a non-empty secret — the geo service has no other authentication and refuses to start without one. Generate it with `openssl rand -hex 32` and put it in .env}"
       GEO_OSM2PGSQL_CACHE_MB: ${GEO_OSM2PGSQL_CACHE_MB:-2000}
       GEO_OSM2PGSQL_PROCS: ${GEO_OSM2PGSQL_PROCS:-2}
     volumes:

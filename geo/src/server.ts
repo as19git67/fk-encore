@@ -42,7 +42,25 @@ import {
 } from "./replication.ts";
 
 const PORT = parseInt(process.env.GEO_PORT ?? "8080", 10);
-const SHARED_SECRET = process.env.GEO_SHARED_SECRET ?? "";
+/**
+ * Mandatory, like the five Python services.
+ *
+ * This used to be optional: the check below was installed only when the
+ * variable happened to be set, so an empty value meant geo answered anybody
+ * who could route to it. It publishes no host port, but a container on the
+ * same bridge network reached the whole OSM database and the import
+ * endpoints. Refusing to start makes a misconfigured deployment fail loudly
+ * at boot instead of quietly serving.
+ */
+const SHARED_SECRET = (process.env.GEO_SHARED_SECRET ?? "").trim();
+if (!SHARED_SECRET) {
+  console.error(
+    "GEO_SHARED_SECRET is not set. This service has no other authentication, " +
+      "so it refuses to start rather than listen unprotected. Generate a value " +
+      "with `openssl rand -hex 32` and set it for both geo and the app.",
+  );
+  process.exit(1);
+}
 
 const app = express();
 app.use(express.json({ limit: "256kb" }));
@@ -62,17 +80,16 @@ function secretMatches(presented: string, expected: string): boolean {
   return timingSafeEqual(a, b);
 }
 
-if (SHARED_SECRET) {
-  app.use((req, res, next) => {
-    if (req.path === "/health") return next();
-    const header = req.header("authorization") ?? "";
-    if (!secretMatches(header, `Bearer ${SHARED_SECRET}`)) {
-      res.status(401).json({ error: "unauthorized" });
-      return;
-    }
-    next();
-  });
-}
+// Health stays open so the container healthcheck needs no credentials.
+app.use((req, res, next) => {
+  if (req.path === "/health") return next();
+  const header = req.header("authorization") ?? "";
+  if (!secretMatches(header, `Bearer ${SHARED_SECRET}`)) {
+    res.status(401).json({ error: "unauthorized" });
+    return;
+  }
+  next();
+});
 
 app.get("/health", async (_req, res) => {
   try {

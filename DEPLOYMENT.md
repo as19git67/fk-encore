@@ -163,6 +163,7 @@ internally and not exposed to the outside.
 | `ADMIN_PASSWORD`   | Password for the initial admin account. No default — with it unset the seed creates no admin at all, rather than one whose password is published in the compose file. Set it before the first start. |
 | `WATCHTOWER_TOKEN` | Shared secret for the Watchtower update API. The stack refuses to start while this is empty — see [Watchtower update API](#watchtower-update-api). |
 | `INTERNAL_SERVICE_SECRET` | Shared secret between the app and the five internal AI services. The stack refuses to start while this is empty — see [Internal AI services](#internal-ai-services). |
+| `GEO_SHARED_SECRET` | Shared secret between the app and the geo service. The stack refuses to start while this is empty — same reasoning as the AI services above. |
 
 #### Internal AI services
 
@@ -368,6 +369,24 @@ three checkboxes.
 `users.create` is **not** in this group: an invitation creates a
 role-less account and the inviter cannot propose roles, so it is safe to
 give to whoever manages people day to day.
+
+#### Geo service
+
+`geo` owns the imported OSM regions and the import endpoints, and it
+publishes no host port either — but that was its only protection, and its
+shared secret used to be optional: with the variable empty the service
+installed no check at all and answered anyone on the compose network.
+
+It now requires `Authorization: Bearer $GEO_SHARED_SECRET` and refuses to
+start without one, like the five AI services. One value for the `app` and
+`geo` containers:
+
+```bash
+openssl rand -hex 32
+```
+
+`/health` stays open for the container healthcheck. The comparison is
+constant-time, so a wrong secret does not leak how much of it was right.
 
 ### Web Push notifications (optional)
 
