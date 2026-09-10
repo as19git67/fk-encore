@@ -13,7 +13,12 @@
  *
  * All functions are best-effort: a feed-bookkeeping failure must never break
  * the underlying photo/album operation, mirroring `emitFeedItem`. Bumps are
- * monotonic (GREATEST) — likes/favorites never bump, by design.
+ * monotonic (GREATEST), so nothing ever moves back down the feed.
+ *
+ * Four acts put a photo in the feed and nothing else does: it was added to
+ * an album, favourited, commented on, or given a description. Anything else
+ * that touches a photo — a corrected capture date, a crop, a re-scan — is
+ * bookkeeping and stays out.
  */
 
 import db from "../db/database";
@@ -188,10 +193,16 @@ export async function onComment(
 }
 
 /**
- * Photo metadata (description, date, …) was edited → bump everyone who can
- * see the photo. Metadata is global to the photo, so every viewer "sees" it.
+ * A description was written for a photo → bump everyone who can see it. The
+ * description is global to the photo, so every viewer "sees" it.
+ *
+ * This used to be `onPhotoMetadataEdited` and fired for *any* metadata edit,
+ * a corrected capture date included. Correcting a date is bookkeeping, not
+ * something to show the household — the feed now carries only the four acts
+ * that say a photo is worth looking at again: a favourite, a comment, a
+ * description, and being put into an album.
  */
-export async function onPhotoMetadataEdited(
+export async function onDescriptionWritten(
   photoId: number,
   ts: string = nowIso(),
 ): Promise<void> {
@@ -199,7 +210,28 @@ export async function onPhotoMetadataEdited(
     const users = await feedViewersForPhoto(photoId);
     await bumpUsers(users, photoId, ts);
   } catch (err) {
-    console.warn(`${TAG} onPhotoMetadataEdited failed photo=${photoId}: ${(err as Error).message}`);
+    console.warn(`${TAG} onDescriptionWritten failed photo=${photoId}: ${(err as Error).message}`);
+  }
+}
+
+/**
+ * A photo was favourited → bump everyone who can see it.
+ *
+ * Favourites deliberately did not bump: with a like-counter under every
+ * photo, a bump per like would have kept re-floating the same photos. But a
+ * favourite is one of the four things that should put a photo in the feed at
+ * all, so it bumps now — once per photo per favourite, and never on
+ * un-favouriting, so nothing is re-floated by a change of mind.
+ */
+export async function onFavorite(
+  photoId: number,
+  ts: string = nowIso(),
+): Promise<void> {
+  try {
+    const users = await feedViewersForPhoto(photoId);
+    await bumpUsers(users, photoId, ts);
+  } catch (err) {
+    console.warn(`${TAG} onFavorite failed photo=${photoId}: ${(err as Error).message}`);
   }
 }
 

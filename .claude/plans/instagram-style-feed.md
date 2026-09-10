@@ -36,7 +36,13 @@ Sortierschlüssel = neuester der folgenden Ereignisse **pro Foto**:
 3. **Kommentar** erstellt/editiert (`photo_comments.created_at` / `edited_at`)
 
 → Verhalten = „zuletzt aktiv oben" (Bump), **kein** reines Erstell-Datum.
-→ **Kein** Ranking, kein Engagement-Gewicht. Likes bumpen **nicht**.
+→ **Kein** Ranking, kein Engagement-Gewicht.
+
+**Nachtrag:** In den Feed kommt ein Foto nur über vier Handlungen — es wurde
+in ein Album aufgenommen, favorisiert, kommentiert oder mit einer Beschreibung
+versehen. Alles andere, was ein Foto anfasst (korrigiertes Aufnahmedatum,
+Zuschnitt, Re-Scan), ist Buchhaltung und bumpt nicht. Favoriten bumpen seit
+dieser Änderung mit; sie taten es früher nicht.
 
 ### Betrachter-genau (Variante B)
 Aktivität bumpt ein Foto **nur** im Feed der User, die das auslösende Album
@@ -51,7 +57,8 @@ unmöglich. Reichweite der Ereignisse:
 |---|---|
 | Foto in Album X hinzugefügt | Teilnehmer von X |
 | Kommentar in Album X (erstellt/editiert) | Teilnehmer von X (`photo_comments.album_id`) |
-| Metadaten editiert | **alle**, die das Foto sehen (global – jeder Betrachter „sieht" es) |
+| Beschreibung geschrieben | **alle**, die das Foto sehen (global – jeder Betrachter „sieht" sie) |
+| Foto favorisiert | **alle**, die das Foto sehen |
 
 ### Likes = bestehende Favoriten (kein neues Konzept)
 `photo_curation` (PK `(user_id, photo_id)`, Status `visible|hidden|favorite`)
@@ -67,7 +74,9 @@ Der Feed-Like **ist** der Favorit-Toggle:
 - **Keine neue Tabelle, kein neuer Fan-out** — alles existiert schon.
 - `hidden` bleibt unangetastet (Like schaltet nur `favorite ↔ visible`).
 - XMP-Rückschreibung nur beim Eigentümer fürs eigene Foto (im Feed unkritisch).
-- Like **bumpt den Feed nicht** (gehört nicht zu den Sortier-Kriterien).
+- Like **bumpt den Feed** (eine der vier Handlungen, die ein Foto überhaupt in
+  den Feed bringen). Nur beim Setzen, nicht beim Zurücknehmen — ein
+  Meinungsumschwung soll nichts erneut nach oben spülen.
 
 ## Datenmodell
 
@@ -116,11 +125,13 @@ für den Benachrichtigungs-Feed aufrufen.
 | Foto aus Album X entfernt | `reconcilePhotoViewers(photo)` (löscht, wer es nirgendwo noch sieht — bleibt) |
 | Album X mit User U geteilt | Einträge für alle Fotos in X für U anlegen (Bump) |
 | Freigabe entzogen / `album_left` | `reconcilePhotoViewers` für alle Fotos in X |
-| Metadaten editiert | `bumpForAllViewers(photo, updated_at)` |
+| Beschreibung geschrieben | `onDescriptionWritten(photo)` (leeren bumpt nicht) |
+| Aufnahmedatum korrigiert | **kein** Bump |
 | Kommentar erstellt/editiert | `bumpForAlbumParticipants(photo, album_id, ts)` |
 | Foto gelöscht | DB-CASCADE |
 | Album gelöscht | `reconcilePhotoViewers` für betroffene Fotos |
-| Like/Unlike (Favorit) | **kein** Bump |
+| Favorit gesetzt | `onFavorite(photo)` |
+| Favorit zurückgenommen | **kein** Bump |
 
 Bei Familienarchiv-Größe (wenige Teilnehmer/Album) ist der Fan-out unkritisch.
 

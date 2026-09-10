@@ -3682,6 +3682,14 @@ export async function updatePhotoCurationLogic(
       }
     }
 
+    // A favourite is one of the four acts that put a photo in the content
+    // feed, so it bumps for everyone who can see it — including the actor,
+    // whose own feed should show what they just picked out. Only on the way
+    // *into* favourite: un-favouriting must not re-float anything.
+    if (status === "favorite") {
+      await contentFeed.onFavorite(photoId);
+    }
+
     // Push + feed only on the explicit "into favorite" transition so
     // un-favouriting doesn't spam recipients.
     if (status === "favorite" && recipients.length > 0) {
@@ -3884,8 +3892,9 @@ export async function updatePhotoDateLogic(
   // 1. Update database
   await dbExec(db.update(photos).set({ taken_at: takenAt }).where(eq(photos.id, photoId)));
 
-  // Content feed: a metadata edit bumps the photo for everyone who sees it.
-  await contentFeed.onPhotoMetadataEdited(photoId);
+  // Deliberately no content-feed bump: correcting a capture date is
+  // bookkeeping, not something the household wants shown again. Only a
+  // favourite, a comment, a description or an album put a photo in the feed.
 
   // 2. Update file metadata
   try {
@@ -3962,8 +3971,12 @@ export async function updatePhotoDescriptionLogic(
   // 1. Update database
   await dbExec(db.update(photos).set({ description: trimmed }).where(eq(photos.id, photoId)));
 
-  // Content feed: a metadata edit bumps the photo for everyone who sees it.
-  await contentFeed.onPhotoMetadataEdited(photoId);
+  // Content feed: a written description bumps the photo for everyone who
+  // sees it. Clearing one does not — there is nothing new to read, and
+  // re-floating a photo because its text was deleted reads as a mistake.
+  if (trimmed) {
+    await contentFeed.onDescriptionWritten(photoId);
+  }
 
   // 2. Write description into EXIF, IPTC and XMP. Keeping the three kept in
   //    sync makes the description survive third-party tooling that only reads
