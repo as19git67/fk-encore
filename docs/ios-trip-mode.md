@@ -396,8 +396,8 @@ Gesperrt am 2026-07-24.
   einen Trip-Tab ersetzt**. Reihenfolge dann: Feed, Alben, **Trip**, Suche,
   Einstellungen.
 - **Personen wandert in „Alben"** als spezielle Einstiegs-Zeile — analog zu den
-  bestehenden „Alle Fotos" (`AllPhotosRef`) und „iOS Mediathek"
-  (`LibraryBrowserRef`) oben in `AlbumsListView`. Neue Zeile „Personen" öffnet
+  bestehenden „Alle Fotos" (`AllPhotosRef`) und „Gruppen-Review"
+  (`GroupReviewRef`) oben in `AlbumsListView`. Neue Zeile „Personen" öffnet
   das bestehende Personen-Grid. (Eigener, klar abgrenzbarer Teil-Task des UI-
   Umbaus, unabhängig von der Trip-Logik.)
 - **Trip-Tab-Icon ist zustandsabhängig**: unterschiedliches Symbol bzw.

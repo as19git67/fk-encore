@@ -10,7 +10,7 @@ struct PersonRef: Hashable {
 }
 
 /// Navigation value that opens the Personen-Grid as a special "album" entry
-/// from `AlbumsListView` (alongside „Alle Fotos" and „iOS Mediathek").
+/// from `AlbumsListView` (alongside „Alle Fotos" and „Gruppen-Review").
 struct PersonsRef: Hashable {}
 
 struct PersonsListView: View {
