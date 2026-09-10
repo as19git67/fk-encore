@@ -13,7 +13,8 @@
  *   npx tsx trip-planner/llm-bench/run.ts --json=out.json  # also write the raw answers
  *
  * The local track needs `llm-service` reachable (`LLM_SERVICE_URL`,
- * default `http://localhost:8002`); the cloud track needs
+ * default `http://localhost:8002`) **and** `INTERNAL_SERVICE_SECRET`,
+ * which is what that service authenticates with; the cloud track needs
  * `ANTHROPIC_API_KEY`. A track whose prerequisite is missing is skipped
  * with a line saying so, rather than failing the run — half a
  * measurement is still worth having.
@@ -31,6 +32,13 @@
  * mean: anything else compares prompts, or compares a raw model against
  * a validated one.
  */
+
+// The llm-service refuses anything without `Authorization: Bearer
+// $INTERNAL_SERVICE_SECRET`, and the header is attached by patching
+// global fetch on import — the services get it from their
+// `encore.service.ts`. A script is not a service, so it has to say so
+// itself; without this line the local track collects ten 401s.
+import "../../lib/internal-service-auth";
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { getGeoClient } from "../../osm-admin/geo-client";
@@ -242,6 +250,16 @@ function valueArg(args: readonly string[], name: string): string | null {
 function missingPrerequisite(track: Track): string | null {
   if (track === "claude" && !process.env.ANTHROPIC_API_KEY) {
     return "ANTHROPIC_API_KEY ist nicht gesetzt";
+  }
+  // Not a skip: someone may be pointing LLM_SERVICE_URL at a bare
+  // llama.cpp server that never asked for a token. Against the service
+  // in the stack it is a guaranteed 401, so it is worth saying out loud
+  // before ten cases fail identically.
+  if (track === "local" && !process.env.INTERNAL_SERVICE_SECRET) {
+    console.log(
+      "Hinweis: INTERNAL_SERVICE_SECRET ist nicht gesetzt — der llm-service " +
+      "im Stack antwortet darauf mit 401.",
+    );
   }
   return null;
 }
