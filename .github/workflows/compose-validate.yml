@@ -26,14 +26,16 @@ jobs:
     runs-on: ubuntu-latest
     # Both variables are declared `${…:?}` in the compose files so a real
     # deployment cannot come up with an unauthenticated, Docker-socket-backed
-    # update API (WATCHTOWER_TOKEN) or unauthenticated AI services
-    # (INTERNAL_SERVICE_SECRET). That makes them mandatory for interpolation
+    # update API (WATCHTOWER_TOKEN), unauthenticated AI services
+    # (INTERNAL_SERVICE_SECRET) or an unauthenticated geo service
+    # (GEO_SHARED_SECRET). That makes them mandatory for interpolation
     # too, so supply throwaway values here — a shell variable outranks the
     # --env-file below, covering both invocations. These are config-parse
     # placeholders, not credentials.
     env:
       WATCHTOWER_TOKEN: compose-validation-placeholder
       INTERNAL_SERVICE_SECRET: compose-validation-placeholder
+      GEO_SHARED_SECRET: compose-validation-placeholder
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6

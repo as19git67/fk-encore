@@ -122,6 +122,30 @@ jobs:
             type=raw,value=test,enable=${{ github.event_name == 'pull_request' }}
             type=semver,pattern={{version}}
 
+      # Build the image once into the local daemon and prove it starts before
+      # anything is published, so a broken image never reaches the registry.
+      #
+      # CPU only. The CUDA image runs on a base that expects a GPU driver, and
+      # a check that is flaky for reasons unrelated to the image is worse than
+      # no check. Its own COPY line is covered by the Dockerfile test in
+      # tests/test_service_auth.py — which is the one that would have caught
+      # the CUDA image still missing service_auth.py after the CPU one was
+      # fixed.
+      - name: Build for the smoke test
+        if: matrix.variant == 'cpu'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./llm-service
+          file: ${{ matrix.dockerfile }}
+          load: true
+          platforms: linux/amd64
+          tags: fk-smoke-test:local
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.suffix }}:buildcache
+
+      - name: Smoke-test the built image
+        if: matrix.variant == 'cpu'
+        run: .github/scripts/smoke-test-image.sh fk-smoke-test:local
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:

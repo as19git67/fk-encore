@@ -79,6 +79,22 @@ jobs:
             type=raw,value=test,enable=${{ github.event_name == 'pull_request' }}
             type=semver,pattern={{version}}
 
+      # Build the amd64 image once into the local daemon and prove it starts
+      # before anything is published. A broken image then never reaches the
+      # registry — which is exactly what happened when service_auth.py was
+      # missing from four of these Dockerfiles. The push step below rebuilds
+      # multi-arch and reuses this layer cache.
+      - name: Build for the smoke test (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./taxonomy-tools
+          load: true
+          platforms: linux/amd64
+          tags: fk-smoke-test:local
+
+      - name: Smoke-test the built image
+        run: .github/scripts/smoke-test-image.sh fk-smoke-test:local
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
