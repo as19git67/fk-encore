@@ -25,6 +25,7 @@ import { DEFAULT_DAY, shapeDay, type BlockTemplate, type GroupProfile, type Pace
 import { dayShapeOf, validateDayShape } from "./day-shape";
 import { scoreForLight, toCandidates, type ScoredCandidate } from "./candidates";
 import { fairnessOfPlan, votesOfLeg } from "./vote-store";
+import { orderBlocksForLight } from "./light-replan";
 import { applyVotes, tally, type Tally } from "./votes";
 import { requireOrganiser } from "./plan-access";
 import {
@@ -803,11 +804,23 @@ export const detailTripDay = api(
     const placed = new Set(solved.blocks.flatMap((b) => b.stops.map((st) => st.osmRef)));
     const remaining = leg.pool.filter((c) => !placed.has(c.osmRef));
 
+    // The same ordering a day planned with the trip gets (§7.3): a day
+    // filled in later must not come out differently from one filled in
+    // at the start.
+    const lit = leg.startDate
+      ? orderBlocksForLight(solved.blocks, {
+        date: addDays(leg.startDate, day.dayIndex),
+        at: leg.anchor,
+        mode: leg.mode,
+        startMinutesByBlock: new Map(day.blocks.map((b) => [b.id, b.startMinutes])),
+      })
+      : solved.blocks;
+
     await saveDayDetail(
       plan.id,
       leg.id,
       day,
-      solved.blocks.map((b) => ({
+      lit.map((b) => ({
         ...b,
         stops: b.stops.map((st) => ({ ...st, status: "planned" as const, pinned: false })),
       })),
@@ -1317,8 +1330,19 @@ async function planLeg(
       maxWalkMinutes: trip.maxWalkMinutes,
       mode,
     });
+    // The mildest of §7.3's four ways: the viewpoint moves to the end
+    // of the afternoon, the shaded alley to midday. Same spots, same
+    // budget — only the sequence, and only when it costs nothing.
+    const lit = startDate
+      ? orderBlocksForLight(solved.blocks, {
+        date: addDays(startDate, dayIndex),
+        at: anchor,
+        mode,
+        startMinutesByBlock: startsByBlock,
+      })
+      : solved.blocks;
     days.push({
-      blocks: solved.blocks.map((b) => ({ ...b, startMinutes: startsByBlock.get(b.id) })),
+      blocks: lit.map((b) => ({ ...b, startMinutes: startsByBlock.get(b.id) })),
       fixpoints: fixpoints.map((f) => f.stored),
       detailed: true,
     });
