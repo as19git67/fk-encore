@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { CLUSTER_BUDGET, CURATION_POOL } from "./curation-cases";
+import { CLUSTER_BUDGET, CURATION_CASES, CURATION_POOL } from "./curation-cases";
 import { faultsOf, scoreCuration } from "./curation-score";
 
 const byName = (name: string) =>
@@ -82,6 +82,79 @@ describe("scoreCuration", () => {
       { osmRef: byName("Weinberg Sankt Ulrich") },
     ]);
     expect(score.poorForChildren).toEqual(["Weinberg Sankt Ulrich"]);
+  });
+});
+
+describe("theme coverage", () => {
+  it("counts how many picks serve each theme the sentence asked for", () => {
+    const score = scoreCuration(
+      CURATION_POOL,
+      [{ osmRef: byName("Burgruine Hohenwald") }, { osmRef: byName("Stadtpark Rosenau") }],
+      ["geschichte", "draussen"],
+    );
+    expect(score.themeCoverage).toEqual([
+      { theme: "geschichte", picks: 1 },
+      { theme: "draussen", picks: 2 },
+    ]);
+    expect(score.overheard).toEqual([]);
+  });
+
+  it("calls a wanted theme with nothing at all overheard, and counts it as a fault", () => {
+    // The failure the first run had no number for: the sentence said
+    // history, the selection had none, and no rule noticed.
+    const score = scoreCuration(
+      CURATION_POOL,
+      [{ osmRef: byName("Stadtpark Rosenau") }, { osmRef: byName("Naturbad Weiherfeld") }],
+      ["geschichte", "draussen"],
+    );
+    expect(score.overheard).toEqual(["geschichte"]);
+    expect(faultsOf(score)).toBe(1);
+  });
+
+  it("does not grade taste: thin coverage is reported, not punished", () => {
+    const score = scoreCuration(
+      CURATION_POOL,
+      [
+        { osmRef: byName("Burgruine Hohenwald") },
+        { osmRef: byName("Stadtpark Rosenau") },
+        { osmRef: byName("Naturbad Weiherfeld") },
+      ],
+      ["geschichte", "draussen"],
+    );
+    expect(score.themeCoverage[0]).toEqual({ theme: "geschichte", picks: 1 });
+    expect(faultsOf(score)).toBe(0);
+  });
+
+  it("wants nothing when the caller asks for nothing", () => {
+    const score = scoreCuration(CURATION_POOL, [{ osmRef: byName("Sparkasse am Marktplatz") }]);
+    expect(score.themeCoverage).toEqual([]);
+    expect(score.overheard).toEqual([]);
+  });
+});
+
+describe("the curation cases", () => {
+  it("ask for themes the pool can actually serve", () => {
+    // A case wanting something nothing carries would make every track
+    // fail identically and measure the fixture, not the model.
+    const available = new Set(CURATION_POOL.flatMap((entry) => entry.label.themes ?? []));
+    for (const benchCase of CURATION_CASES) {
+      for (const theme of benchCase.wants) {
+        expect(available.has(theme), `${benchCase.id}: ${theme}`).toBe(true);
+      }
+    }
+  });
+
+  it("give the weighted sum the interests it would really get", () => {
+    for (const benchCase of CURATION_CASES) {
+      expect(benchCase.interests.length, benchCase.id).toBeGreaterThan(0);
+    }
+  });
+
+  it("have unique ids and differ in what they ask for", () => {
+    const ids = CURATION_CASES.map((benchCase) => benchCase.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    const wants = CURATION_CASES.map((benchCase) => [...benchCase.wants].sort().join(","));
+    expect(new Set(wants).size).toBe(wants.length);
   });
 });
 

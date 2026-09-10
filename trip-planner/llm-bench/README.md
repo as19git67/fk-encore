@@ -142,11 +142,16 @@ Amtsinhaber kein Modell:
 
 | Spur | was sie ist |
 | --- | --- |
-| `scoring` | was der Planer heute tut: gewichtete Summe über OSM-Tags (`candidates.ts`), oben abgeschnitten |
+| `scoring` | was der Planer heute tut: gewichtete Summe über OSM-Tags (`candidates.ts`), oben abgeschnitten — **mit** den Interessen des Falls, sonst wäre es eine Strohpuppe |
 | `local` | dasselbe Prompt an das Modell im Haus |
 | `claude` | dasselbe Prompt an die Claude API |
 
-Aus einem Vorrat von 34 erfundenen Orten sollen 10 gewählt werden. Der Vorrat
+**Drei Anfragen über einen Vorrat** von 34 erfundenen Orten — 10, 8 und 5
+sollen gewählt werden. Ein Vorrat und drei Sätze statt drei Vorräte ist das
+Experiment, nicht die Abkürzung: Die Achse, an der sich die Modelle im ersten
+Lauf schieden, war nicht, welche Orte sie kennen, sondern **ob sie den Satz
+hören**. Dieselben 34 Orte haben drei verschiedene richtige Antworten — was
+beim Kind falsch ist (Weinberg, Theater), ist beim Kunst-Wochenende richtig. Der Vorrat
 ist um die vier Dinge gebaut, die eine Kuration falsch machen kann und die man
 **zählen** kann:
 
@@ -156,6 +161,16 @@ ist um die vier Dinge gebaut, die eine Kuration falsch machen kann und die man
 | **Alltag** | Dinge, die es gibt, statt Dinge, zu denen man geht — zwei davon mit Wikipedia-Artikel, genau dort ist die Tag-Summe blind |
 | **Einerlei** | mehr als zwei von sechs austauschbaren Dorfkirchen |
 | **nichts fürs Kind** | die Anfrage nennt ein siebenjähriges Kind |
+| **überhört** | ein Thema, das der Satz verlangt, bekommt **gar keinen** Ort |
+
+„Überhört" ist die eine geschmacksfreie Regel in diesem Bereich: „zu wenig
+Geschichte" ist ein Argument, „der Satz sagte Geschichte und die Auswahl hat
+keine" ist ein Versehen. Genau daran schieden sich die Spuren im ersten Lauf,
+ohne dass eine Zahl es bemerkte.
+
+Die Themenabdeckung je Wunsch wird daneben **berichtet** (`geschichte 5 ·
+draussen 5 · kinder 3`) und nicht bewertet — dünn ist ein Argument, nicht ein
+Fehler.
 
 Daneben zwei **beschreibende** Zahlen, ausdrücklich keine Noten: wie viele der
 offensichtlichen Ziele gefunden wurden und über wie viele Kategorien die Auswahl

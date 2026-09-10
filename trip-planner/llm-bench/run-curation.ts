@@ -5,8 +5,11 @@
  *
  *   - **scoring** — what the planner does today. `toCandidates()` gives
  *     every spot a weighted sum over its OSM tags, and the top of that
- *     list is the pool a day is built from. It cannot invent and it
- *     cannot notice that six of its picks are the same village church.
+ *     list is the pool a day is built from. It gets the case's
+ *     interests, so it hears the sentence as well as the interpreter
+ *     could tell it — anything less would be a straw man. What it
+ *     cannot do is notice that six of its picks are the same village
+ *     church.
  *   - **local** — the same prompt to the model in the house.
  *   - **claude** — the same prompt to the Claude API.
  *
@@ -29,13 +32,14 @@ import { toCandidates } from "../candidates";
 import { askClaudeForJson, BENCH_MODEL } from "../claude-client";
 import { askForJson } from "../llm-client";
 import { buildCuratePrompt, parseCuration } from "./curate";
-import { CURATION_POOL, CURATION_REQUEST } from "./curation-cases";
+import { CURATION_CASES, CURATION_POOL, type CurationCase } from "./curation-cases";
 import { faultsOf, scoreCuration, type CurationPick, type CurationScore } from "./curation-score";
 
 type Track = "scoring" | "local" | "claude";
 
 interface Attempt {
   track: Track;
+  caseId: string;
   picks: CurationPick[];
   score: CurationScore | null;
   millis: number;
@@ -56,10 +60,13 @@ const spots = CURATION_POOL.map((entry) => entry.spot);
  * before the ranking starts, and the two that carry one are exactly the
  * case the sum cannot see.
  */
-function scoringPicks(pool: readonly typeof spots[number][] = spots): CurationPick[] {
-  return toCandidates(pool, { requireProminence: true })
+function scoringPicks(
+  benchCase: CurationCase,
+  pool: readonly typeof spots[number][] = spots,
+): CurationPick[] {
+  return toCandidates(pool, { requireProminence: true, interests: benchCase.interests })
     .sort((a, b) => b.score - a.score)
-    .slice(0, CURATION_REQUEST.pick)
+    .slice(0, benchCase.pick)
     .map((candidate) => ({
       osmRef: candidate.osmRef,
       why: candidate.reasons.join(", "),
@@ -78,10 +85,10 @@ function scoringPicks(pool: readonly typeof spots[number][] = spots): CurationPi
  * Measured rather than asserted: the same ranking is run again over a
  * reversed pool. A different set coming out is the proof.
  */
-function tieDepth(): { tied: number; atScore: number } {
-  const ranked = toCandidates(spots, { requireProminence: true })
+function tieDepth(benchCase: CurationCase): { tied: number; atScore: number } {
+  const ranked = toCandidates(spots, { requireProminence: true, interests: benchCase.interests })
     .sort((a, b) => b.score - a.score);
-  const cut = ranked[CURATION_REQUEST.pick - 1];
+  const cut = ranked[benchCase.pick - 1];
   if (!cut) return { tied: 0, atScore: 0 };
   return {
     tied: ranked.filter((candidate) => candidate.score === cut.score).length,
@@ -89,20 +96,21 @@ function tieDepth(): { tied: number; atScore: number } {
   };
 }
 
-async function run(track: Track): Promise<Attempt> {
+async function run(track: Track, benchCase: CurationCase): Promise<Attempt> {
   const started = Date.now();
   if (track === "scoring") {
-    const picks = scoringPicks();
+    const picks = scoringPicks(benchCase);
     return {
       track,
+      caseId: benchCase.id,
       picks,
-      score: scoreCuration(CURATION_POOL, picks),
+      score: scoreCuration(CURATION_POOL, picks, benchCase.wants),
       millis: Date.now() - started,
       error: null,
     };
   }
 
-  const prompt = buildCuratePrompt(spots, CURATION_REQUEST);
+  const prompt = buildCuratePrompt(spots, benchCase);
   try {
     const answer = track === "local"
       ? { json: await askForJson(prompt), inputTokens: undefined, outputTokens: undefined }
@@ -110,8 +118,9 @@ async function run(track: Track): Promise<Attempt> {
     const parsed = parseCuration(answer.json);
     return {
       track,
+      caseId: benchCase.id,
       picks: parsed.picks,
-      score: scoreCuration(CURATION_POOL, parsed.picks),
+      score: scoreCuration(CURATION_POOL, parsed.picks, benchCase.wants),
       millis: Date.now() - started,
       error: null,
       inputTokens: answer.inputTokens,
@@ -121,6 +130,7 @@ async function run(track: Track): Promise<Attempt> {
   } catch (err) {
     return {
       track,
+      caseId: benchCase.id,
       picks: [],
       score: null,
       millis: Date.now() - started,
@@ -143,46 +153,62 @@ async function main(): Promise<void> {
     tracks.push(track);
   }
 
-  console.log(`Vorrat: ${spots.length} Orte · gesucht: ${CURATION_REQUEST.pick}`);
-  console.log(`Anfrage: „${CURATION_REQUEST.sentence}"`);
-
-  const attempts: Attempt[] = [];
-  for (const track of tracks) attempts.push(await run(track));
+  console.log(`Vorrat: ${spots.length} Orte · ${CURATION_CASES.length} Anfragen`);
 
   const byRef = new Map(CURATION_POOL.map((entry) => [entry.spot.osmRef, entry]));
-  for (const attempt of attempts) {
-    console.log(`\n── ${attempt.track} ${"─".repeat(Math.max(0, 30 - attempt.track.length))}`);
-    if (attempt.error !== null) {
-      console.log(`  FEHLER (${attempt.millis} ms): ${attempt.error}`);
-      continue;
+  const attempts: Attempt[] = [];
+
+  for (const benchCase of CURATION_CASES) {
+    console.log(`\n══ ${benchCase.id} · ${benchCase.pick} aus ${spots.length} ══`);
+    console.log(`  „${benchCase.sentence}"`);
+    console.log(`  gewünscht: ${benchCase.wants.join(", ")} — ${benchCase.note}`);
+
+    for (const track of tracks) {
+      const attempt = await run(track, benchCase);
+      attempts.push(attempt);
+      console.log(`\n  ── ${track}`);
+      if (attempt.error !== null) {
+        console.log(`     FEHLER (${attempt.millis} ms): ${attempt.error}`);
+        continue;
+      }
+      for (const pick of attempt.picks) {
+        const entry = byRef.get(pick.osmRef);
+        const marks = entry ? marksFor(entry.label) : " ⚠ nicht im Vorrat";
+        console.log(`     ${(entry?.spot.name ?? pick.osmRef).padEnd(34)}${marks}`);
+      }
+      console.log(`     ${summary(attempt)}`);
     }
-    for (const pick of attempt.picks) {
-      const entry = byRef.get(pick.osmRef);
-      const marks = entry ? marksFor(entry.label) : " ⚠ nicht im Vorrat";
-      console.log(`  ${(entry?.spot.name ?? pick.osmRef).padEnd(34)}${marks}`);
-    }
-    console.log(`  ${summary(attempt)}`);
   }
 
-  console.log("\n────────────────────────────────────────");
-  for (const attempt of attempts) {
-    if (attempt.score === null) continue;
-    console.log(`${attempt.track.padEnd(8)} Fehlgriffe ${faultsOf(attempt.score)}`);
+  console.log("\n════════════════════════════════════════");
+  for (const track of tracks) {
+    const mine = attempts.filter((attempt) => attempt.track === track);
+    const scored = mine.filter((attempt) => attempt.score !== null);
+    const faults = scored.reduce((total, attempt) => total + faultsOf(attempt.score!), 0);
+    const overheard = scored.reduce((total, attempt) => total + attempt.score!.overheard.length, 0);
+    const landmarks = scored.reduce((total, attempt) => total + attempt.score!.landmarksFound, 0);
+    const possible = scored.reduce((total, attempt) => total + attempt.score!.landmarksTotal, 0);
+    const median = medianOf(mine.map((attempt) => attempt.millis));
+    console.log(
+      `${track.padEnd(8)} Fehlgriffe ${faults} (davon überhört ${overheard}) · ` +
+      `★ ${landmarks}/${possible} · Median ${median} ms`,
+    );
   }
+  console.log(
+    "\nFehlgriffe = erfunden + Alltag + Einerlei über Budget + schlecht fürs Kind + überhörtes Thema",
+  );
 
   // What the incumbent's answer rests on, said out loud.
-  const tie = tieDepth();
-  const reversed = scoringPicks([...spots].reverse());
-  const overlap = new Set(scoringPicks().map((pick) => pick.osmRef));
+  const first = CURATION_CASES[0];
+  const tie = tieDepth(first);
+  const reversed = scoringPicks(first, [...spots].reverse());
+  const overlap = new Set(scoringPicks(first).map((pick) => pick.osmRef));
   const same = reversed.filter((pick) => overlap.has(pick.osmRef)).length;
   console.log(
-    `\nscoring: ${tie.tied} Kandidaten liegen bei ${tie.atScore} Punkten gleichauf — ` +
-    `die Auswahl entscheidet dort die Reihenfolge der Suche.\n` +
-    `Bei umgekehrter Vorratsreihenfolge bleiben ${same} von ${CURATION_REQUEST.pick} ` +
-    `Orten dieselben (Fehlgriffe dann ${faultsOf(scoreCuration(CURATION_POOL, reversed))}).`,
-  );
-  console.log(
-    "\nFehlgriffe = erfunden + Alltag + Einerlei über Budget + schlecht fürs Kind",
+    `\nscoring (${first.id}): ${tie.tied} Kandidaten liegen bei ${tie.atScore} Punkten ` +
+    `gleichauf — die Auswahl entscheidet dort die Reihenfolge der Suche.\n` +
+    `Bei umgekehrter Vorratsreihenfolge bleiben ${same} von ${first.pick} Orten dieselben ` +
+    `(Fehlgriffe dann ${faultsOf(scoreCuration(CURATION_POOL, reversed, first.wants))}).`,
   );
 
   if (jsonPath) {
@@ -200,14 +226,21 @@ function marksFor(label: { landmark?: boolean; everyday?: boolean; cluster?: str
   return marks.length === 0 ? "" : ` ${marks.join(" · ")}`;
 }
 
+function medianOf(values: readonly number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted.length === 0 ? 0 : sorted[Math.floor(sorted.length / 2)];
+}
+
 function summary(attempt: Attempt): string {
   const score = attempt.score!;
   const parts = [
     `${score.picked} gewählt`,
     `★ ${score.landmarksFound}/${score.landmarksTotal}`,
     `${score.categories.length} Kategorien`,
+    score.themeCoverage.map((entry) => `${entry.theme} ${entry.picks}`).join(" · "),
     `Fehlgriffe ${faultsOf(score)}`,
   ];
+  if (score.overheard.length > 0) parts.push(`überhört: ${score.overheard.join(", ")}`);
   if (score.invented.length > 0) parts.push(`erfunden ${score.invented.length}`);
   if (score.monotony.length > 0) {
     parts.push(...score.monotony.map((group) => `${group.cluster} ${group.taken}×`));

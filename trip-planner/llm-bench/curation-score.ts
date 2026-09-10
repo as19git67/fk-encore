@@ -15,6 +15,9 @@
  *     group. Six village churches is not a two-day trip.
  *   - **Kind** — entries marked as little for a seven-year-old, when
  *     the request says one is coming.
+ *   - **überhört** — a theme the sentence asked for that got no pick at
+ *     all. Not "too little of it", which would be grading taste — none
+ *     of it, which is not having read the sentence.
  *
  * And two descriptive figures, deliberately not "scores": how many of
  * the plain landmarks were found, and how many categories the selection
@@ -22,7 +25,7 @@
  * legitimately be six churches.
  */
 
-import { CLUSTER_BUDGET, type LabelledSpot } from "./curation-cases";
+import { CLUSTER_BUDGET, type LabelledSpot, type Theme } from "./curation-cases";
 
 export interface CurationPick {
   osmRef: string;
@@ -45,11 +48,23 @@ export interface CurationScore {
   categories: string[];
   /** Picks that came with a reason. §8.3 wants the "why" to be arguable. */
   withReason: number;
+  /** Per theme the sentence asked for, how many picks serve it. */
+  themeCoverage: Array<{ theme: Theme; picks: number }>;
+  /**
+   * Themes the sentence asked for that got **nothing**.
+   *
+   * The one taste-free fault in this area. "Too little history" is an
+   * argument; "the sentence said history and the selection has none" is
+   * an oversight, and it is what separated the two tracks in the first
+   * run without any number noticing.
+   */
+  overheard: Theme[];
 }
 
 export function scoreCuration(
   pool: readonly LabelledSpot[],
   picks: readonly CurationPick[],
+  wants: readonly Theme[] = [],
   clusterBudget: number = CLUSTER_BUDGET,
 ): CurationScore {
   const byRef = new Map(pool.map((entry) => [entry.spot.osmRef, entry]));
@@ -60,6 +75,7 @@ export function scoreCuration(
   const poorForChildren: string[] = [];
   const categories = new Set<string>();
   const perCluster = new Map<string, number>();
+  const perTheme = new Map<Theme, number>();
   let withReason = 0;
 
   for (const pick of picks) {
@@ -81,6 +97,9 @@ export function scoreCuration(
     if (entry.label.cluster) {
       perCluster.set(entry.label.cluster, (perCluster.get(entry.label.cluster) ?? 0) + 1);
     }
+    for (const theme of entry.label.themes ?? []) {
+      perTheme.set(theme, (perTheme.get(theme) ?? 0) + 1);
+    }
   }
 
   const monotony = [...perCluster.entries()]
@@ -98,6 +117,8 @@ export function scoreCuration(
     landmarksTotal: landmarks.length,
     categories: [...categories].sort(),
     withReason,
+    themeCoverage: wants.map((theme) => ({ theme, picks: perTheme.get(theme) ?? 0 })),
+    overheard: wants.filter((theme) => (perTheme.get(theme) ?? 0) === 0),
   };
 }
 
@@ -113,6 +134,7 @@ export function faultsOf(score: CurationScore): number {
   return score.invented.length
     + score.everyday.length
     + score.poorForChildren.length
+    + score.overheard.length
     + score.monotony.reduce((total, group) => total + (group.taken - group.budget), 0);
 }
 
