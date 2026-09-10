@@ -330,19 +330,34 @@ flow to rely on. The same applies to password-reset mails.
 ### Three permissions that are really "Admin"
 
 The permission list is finer-grained than the privileges behind it. Three
-entries hand over the whole application, which their names do not say, so
-grant them only to people you would make an administrator anyway:
+entries read like ordinary delegations and are not:
 
-| Permission | Why it is admin-equivalent |
+| Permission | What it reaches |
 | --- | --- |
-| `users.update` | `PUT /users/:id` may change **any** user's email and password, the administrator's included. Change the admin's password, log in as the admin. |
-| `roles.assign` | The holder can assign the Admin role — to themselves. |
-| `roles.update` | The holder can attach any permission, including the two above, to a role they already hold. |
+| `users.update` | `PUT /users/:id` may change **any** user's email and password. |
+| `roles.assign` | May hand out any role, to anyone. |
+| `roles.update` | May attach any permission to any role. |
 
-There is no protection against acting on a higher-privileged user or on
-the Admin role itself; the only guards are the "last administrator" checks
-that stop you deleting the final one. The role editor repeats this warning
-next to each of the three checkboxes.
+**The Admin role is fenced off.** Whatever those permissions allow in
+general, doing it to an administrator or to the Admin role additionally
+requires being one:
+
+- `users.update` / `users.delete` on someone holding Admin
+- `roles.assign` / `roles.revoke` of the Admin role
+- `roles.update` / `roles.delete` on the Admin role itself
+
+So a delegate can manage ordinary accounts and ordinary roles and cannot
+turn that into administrator access. Administrators are unaffected, and
+editing your own account is never blocked.
+
+**One gap stays open on purpose.** `roles.update` can still stack
+permissions onto some *other* role its holder has. The obvious rule for
+that — you may only grant what you hold yourself — would also stop
+administrators granting `photos.purge` and `finance.admin`, which the seed
+keeps off the Admin role deliberately. So `roles.update` remains
+admin-equivalent by nature: grant it only to someone you would make an
+administrator. The role editor repeats that warning next to each of the
+three checkboxes.
 
 `users.create` is **not** in this group: an invitation creates a
 role-less account and the inviter cannot propose roles, so it is safe to
