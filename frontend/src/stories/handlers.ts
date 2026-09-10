@@ -9,6 +9,7 @@ import {
   MOCK_DOCUMENTS, MOCK_DOCUMENT_CATEGORIES, MOCK_DOCUMENT_DETAIL,
   MOCK_DOCUMENT_QUEUE_IDLE,
 } from './mock-data'
+import { makeMultiPagePdf } from './mock-pdf'
 
 // Generates a deterministic placeholder SVG for a photo filename
 function placeholderSvg(filename: string): string {
@@ -306,11 +307,13 @@ export const defaultHandlers = [
   http.post('/api/documents/:id/reclassify', () => HttpResponse.json({ success: true })),
   http.post('/api/documents', () => HttpResponse.json(MOCK_DOCUMENTS[0]!)),
   http.get('/api/documents/:id/file', () => {
-    // Minimal valid PDF ("%PDF-…") so the iframe doesn't show a network error.
-    const pdf = '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n' +
-      '2 0 obj<</Type/Pages/Count 0/Kids[]>>endobj\n' +
-      'trailer<</Root 1 0 R>>\n%%EOF\n'
-    return new HttpResponse(pdf, { headers: { 'Content-Type': 'application/pdf' } })
+    // A real multi-page PDF, not a valid-but-empty one: the viewer's own
+    // scrolling only exists once there are pages to scroll, so an empty
+    // stand-in hides exactly the layout bugs a screenshot should catch.
+    const pdf = makeMultiPagePdf(6)
+    return new HttpResponse(pdf, {
+      headers: { 'Content-Type': 'application/pdf', 'Content-Length': String(pdf.length) },
+    })
   }),
 
   // ── System ─────────────────────────────────────────────────────────────────

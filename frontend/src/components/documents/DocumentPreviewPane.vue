@@ -190,6 +190,10 @@ function formatDate(value: string | null): string {
   flex-direction: column;
   gap: 0.5rem;
   min-height: 0;
+  /* Keep the card's rounded border the outer edge of everything in it: the
+     pane has a fixed height, and an unusually tall metadata block would
+     otherwise spill past it instead of shortening the viewer below. */
+  overflow: hidden;
   padding: 0.75rem 0.9rem;
   background: var(--p-content-background);
   border: 1px solid var(--p-content-border-color);
@@ -254,10 +258,18 @@ function formatDate(value: string | null): string {
   font-size: 0.74rem;
 }
 /* The viewer takes whatever height is left; `min-height: 0` keeps it from
-   pushing the metadata above it out of the pane. */
+   pushing the metadata above it out of the pane.
+   `display: flex` is what makes the pages scrollable: as a flex item the
+   viewer stretches to this box's definite height, and its own canvas-wrapper
+   becomes the scroll container (toolbar and pagination stay pinned). In a
+   plain block box the viewer would instead grow to the height of all its
+   pages, nothing inside it would overflow, and `overflow: hidden` here would
+   quietly clip every page after the first. */
 .pane-pdf {
+  display: flex;
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
   border-radius: 8px;
 }
