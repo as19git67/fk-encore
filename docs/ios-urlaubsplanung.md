@@ -1618,6 +1618,22 @@ entscheidet, ob ein ganzer Etappenvorrat für die Kuration hineinpasst) und die
 Antwortzeit auf der vorhandenen Hardware (sie entscheidet, ob das Modell im
 Verhandlungs-Chat überhaupt erträglich ist).
 
+**Für das Anfrageverständnis gibt es die Messung jetzt** —
+`trip-planner/llm-bench/` stellt beide Spuren mit **demselben** Prompt und
+derselben Validierung (`normalizeConstraints`) vor zehn erfundene Sätze und
+zählt vier Dinge getrennt: richtig, verpasst, falsch und **erfunden**. Die
+vierte Spalte geht bewusst in keine Gesamtnote ein: §13s Regel „ein fehlendes
+Feld ist besser als ein erfundenes" heißt, dass eine Spur, die mehr liest und
+mehr erfindet, nicht gewonnen hat. Die Sätze prüfen nicht nur den geraden Fall,
+sondern auch Zurückhaltung („Wir wollen nach Passau." — alles Weitere wäre
+erfunden) und Fallen (eine Jahreszahl, die keine Tageszahl ist; ein Startort,
+der nicht das Ziel ist). Aufgerufen wird die Cloud-Spur dabei von nichts
+anderem: `claude-client.ts` hängt an keinem Endpunkt.
+
+Die drei übrigen Aufgaben aus §11.1 — Kuration, Dokumente, Verhandlungs-Chat —
+sind damit **nicht** gemessen. Die Kuration ist der größte erwartete Sprung und
+braucht einen eigenen Aufbau.
+
 ### 11.1 Die Trennlinie liegt schon im Konzept
 
 Der Planer zerfällt ohnehin in zwei Welten (§4.3): die **Reiseauflösung**
