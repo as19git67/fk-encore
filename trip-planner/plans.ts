@@ -24,6 +24,7 @@ import { pickRegion } from "../osm-admin/region-router";
 import { DEFAULT_DAY, shapeDay, type BlockTemplate, type GroupProfile, type Pace } from "./blocks";
 import { dayShapeOf, validateDayShape } from "./day-shape";
 import { scoreForLight, toCandidates, type ScoredCandidate } from "./candidates";
+import { climateForLeg } from "./climate-precautions";
 import { fairnessOfPlan, votesOfLeg } from "./vote-store";
 import { orderBlocksForLight } from "./light-replan";
 import { applyVotes, tally, type Tally } from "./votes";
@@ -273,6 +274,15 @@ export const createTripPlan = api(
         dwellMinutes: req.dwellMinutes,
         firstDayStartMinutes: leg.firstDayStartMinutes,
         detailDays: detailBudget,
+        // Beyond the forecast horizon a monthly average takes over, and
+        // all it may produce is a precaution (§7.2).
+        bufferDay: (await climateForLeg(
+          {
+            anchor: leg.request.anchor,
+            startDate: leg.request.startDate ?? null,
+            days: leg.request.days ?? 1,
+          },
+        )).bufferDay,
       });
       legs.push(planned.leg);
       detailBudget = Math.max(0, detailBudget - planned.leg.days.length);
@@ -488,6 +498,9 @@ async function replanFromStoredSettings(
           detailDays: leg.days.filter((d) => d.detailed).length,
           hidden,
           votes: tally(await votesOfLeg(leg.id), fairness),
+          bufferDay: (await climateForLeg(
+            { anchor: leg.anchor, startDate: leg.startDate, days: leg.days.length },
+          )).bufferDay,
         },
       );
       perLeg.push({
@@ -1227,6 +1240,12 @@ async function planLeg(
      * spot is here.
      */
     votes?: Tally;
+    /**
+     * Which day of this leg to leave empty on purpose, and why (§7.2).
+     * Null for every trip inside the forecast horizon, which is where
+     * a real forecast exists and a monthly average has nothing to add.
+     */
+    bufferDay?: { dayIndex: number; reason: string } | null;
   },
 ): Promise<{
   leg: CreateLegInput;
@@ -1303,7 +1322,13 @@ async function planLeg(
     // Beyond the detail horizon the day keeps its frame and stays
     // empty: the pool *is* the plan at trip resolution (§4.3), and
     // filling day nineteen now would only be undone by the weather.
-    const detailed = dayIndex < (trip.detailDays ?? Number.POSITIVE_INFINITY);
+    //
+    // A buffer day is the same emptiness for the opposite reason: not
+    // "too far away to plan" but "deliberately kept free" (§7.2). It
+    // carries its sentence so the two never look alike.
+    const buffer = trip.bufferDay?.dayIndex === dayIndex ? trip.bufferDay : null;
+    const detailed = buffer === null
+      && dayIndex < (trip.detailDays ?? Number.POSITIVE_INFINITY);
     // The hour each block begins is part of the frame, so it is kept
     // whether or not the day has spots yet (§8.3).
     const startsByBlock = new Map(framed.blocks.map((b) => [b.id, b.startMinutes]));
@@ -1313,6 +1338,7 @@ async function planLeg(
         blocks: framed.blocks.map((b) => ({ ...b, usedMinutes: 0, stops: [] })),
         fixpoints: fixpoints.map((f) => f.stored),
         detailed: false,
+        bufferReason: buffer?.reason ?? null,
       });
       continue;
     }

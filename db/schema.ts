@@ -2782,6 +2782,11 @@ export const tripPlanDays = pgTable(
     // False while the day is still only at trip resolution: it has its
     // frame — blocks with budgets, fixpoints — but no stops yet (§4.3).
     detailed: boolean("detailed").notNull().default(true),
+    // Why this day was deliberately left empty (§7.2, migration 0186).
+    // NULL for every ordinary day. The reason rather than a flag: an
+    // empty day looks like a failure to fill one, and only the sentence
+    // tells the two apart.
+    buffer_reason: text("buffer_reason"),
   },
   (table) => [uniqueIndex("trip_plan_days_leg_index_key").on(table.leg_id, table.day_index)]
 );
