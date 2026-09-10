@@ -165,6 +165,13 @@ Das Prompt sagt bewusst **nicht**, worauf zu achten ist — kein „vermeide
 mehrere ähnliche Kirchen". Die Frage ist ja gerade, ob ein Modell das von
 selbst bemerkt; ein Prompt, das es vorsagt, misst Gehorsam.
 
+**Ergebnis des ersten Laufs (2026-09-10):** gewichtete Summe 1 Fehlgriff
+(7/8 Ziele, 6 Kategorien, 1 ms) · lokal **0** (5/8, 7 Kategorien, 15,6 s) ·
+Claude **0** (6/8, 8 Kategorien, 10,6 s). Beide Modelle ohne Fehlgriff; der
+Unterschied zwischen ihnen liegt dort, wo dieser Lauf **keine** Zahl hat — die
+lokale Spur ließ beide zentralen Geschichtsorte weg, obwohl die Anfrage
+„wir mögen Geschichte" sagte. Deutung in §11.0 des Konzepts.
+
 **Ein Befund fällt schon ohne Modell an:** Bei zehn gesuchten Orten liegen
 **18 Kandidaten punktgleich** auf 3,0 — die Punktzahl besteht aus einer
 Handvoll Halbpunkt-Signale, und alles mit Wikidata-Eintrag und Artikel landet

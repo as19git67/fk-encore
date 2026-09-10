@@ -1664,11 +1664,55 @@ Outputs, also nicht an ihrer Obergrenze.
 lokale Modell ist gleichauf, doppelt so schnell und kostenlos — und die
 Privatsphäre-Rechnung aus §11.5 muss dafür gar nicht erst aufgemacht werden.
 
-Die drei übrigen Aufgaben aus §11.1 — Kuration, Dokumente, Verhandlungs-Chat —
-sind damit **nicht** gemessen. Die Kuration ist der größte erwartete Sprung und
-braucht einen eigenen Aufbau. Der Befund oben ist allerdings ein Hinweis darauf,
-wie die Messung ausgehen könnte: Die Einschätzungen in §11.1 stammen aus der
-7B-Zeit, und die erste, die nachgeprüft wurde, hielt nicht.
+**Die zweite Messung: die Kuration** (`run-curation.ts`, 10 aus 34, drei
+Spuren — denn hier ist der Amtsinhaber kein Modell, sondern die gewichtete
+Summe aus `candidates.ts`):
+
+| | Fehlgriffe | Ziele | Kategorien | Dauer |
+| --- | --- | --- | --- | --- |
+| gewichtete Summe | 1 | 7/8 | 6 | 1 ms |
+| lokal | **0** | 5/8 | 7 | 15,6 s |
+| Claude API | **0** | 6/8 | 8 | 10,6 s |
+
+Drei Dinge stehen darin, und nur das erste ist eine Zahl.
+
+**Erstens: der Amtsinhaber ist in seiner unteren Hälfte gar keine Bewertung.**
+Bei zehn gesuchten Orten liegen **18 Kandidaten punktgleich** auf 3,0 — die
+Punktzahl besteht aus einer Handvoll Halbpunkt-Signale, und alles mit
+Wikidata-Eintrag und Artikel landet auf derselben Zahl. Wo der Schnitt in so
+einen Gleichstand fällt, entscheidet die Reihenfolge, in der die Regionssuche
+geantwortet hat. Gemessen: Bei umgekehrter Vorratsreihenfolge bleiben 8 von 10
+Orten dieselben, und die Fehlgriffe gehen von 1 auf 3. Das ist unabhängig von
+jedem Modell ein Befund über den eigenen Code.
+
+**Zweitens: beide Modelle machen keinen Fehlgriff.** Keines erfand eine
+Referenz, keines nahm eine Sparkasse, keines packte den Tag mit Dorfkirchen
+voll, keines wählte etwas, das die Anfrage für das siebenjährige Kind
+ausschließt. Die gewichtete Summe nahm den Kunstverein.
+
+**Drittens — und das ist keine gemessene Zahl, sondern ein Urteil:** Die beiden
+Auswahlen sind unterschiedlich *klug*. Die Anfrage nannte „wir mögen
+Geschichte" und „sind gern draußen". Die Cloud-Spur bediente beides (Burgruine,
+Freilichtmuseum, Stadtmuseum, Stiftskirche — dazu Tierpark, Aussichtsturm,
+Park, Skulpturenweg); die lokale Spur ließ **beide zentralen
+Geschichtsorte weg** und wählte überwiegend Draußen-Ziele. Kein Fehlgriff nach
+den Regeln oben — aber eine Reise, die die halbe Anfrage überhört.
+
+Und noch ein Unterschied, der nichts mit der Auswahl zu tun hat: Die
+Begründungen der gewichteten Summe lauten zehnmal „in Wikidata verzeichnet, hat
+einen Wikipedia-Artikel". Das ist kein Grund, das ist ein Datenbankzustand.
+§8.3 will ein „warum", über das man streiten kann, und das liefern beide
+Modelle.
+
+**Die Folge für §11:** Für die Kuration lohnt sich ein Modell — aber nicht
+notwendig ein bezahltes. Der ehrliche nächste Schritt ist nicht, die API
+einzukaufen, sondern **mehr als einen Fall zu messen**: Ein Vorrat, ein Lauf,
+und die entscheidende Beobachtung (die überhörte Hälfte der Anfrage) ist genau
+die, für die es noch keine Zahl gibt. Dafür fehlt der Kuration ein Maß für
+*Themenabdeckung* — wie gut die Auswahl das bedient, was der Satz verlangt hat.
+
+Die zwei übrigen Aufgaben aus §11.1 — Dokumente und Verhandlungs-Chat — sind
+weiterhin nicht gemessen.
 
 ### 11.1 Die Trennlinie liegt schon im Konzept
 
@@ -1680,7 +1724,7 @@ Modellen:
 
 | | lokal | Opus 5 (online, opt-in) |
 |---|---|---|
-| Kandidaten kuratieren | Gewichtete Summe | **deutlich besser** |
+| Kandidaten kuratieren | Gewichtete Summe — **in der unteren Hälfte Zufall** (gemessen) | **besser, aber lokal auch** |
 | Anfrage verstehen | **gleichauf, und schneller** (gemessen) | gleichauf |
 | Dokumente auswerten | ordentlich | **deutlich besser** |
 | Verhandlungs-Chat vorab | knapp ausreichend | **deutlich besser** |
