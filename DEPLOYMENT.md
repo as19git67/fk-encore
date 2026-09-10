@@ -24,6 +24,32 @@ docker compose logs -f
 
 The app is then reachable at **http://localhost:8080**.
 
+## Keeping your storage layout across upgrades
+
+`docker-compose.yml` carries no volume definitions of its own. They live in
+**`docker-compose.volumes.yml`** next to it, pulled in by a top-level
+`include:` — so `docker compose up -d` finds it with no extra `-f` flag.
+
+The point of the split is that a deployment can keep its own copy of that
+one file and take every future `docker-compose.yml` from the repository
+**unedited**. Everything machine-specific is on one side of the line:
+
+| Belongs in `docker-compose.volumes.yml` | Belongs in `.env` |
+|---|---|
+| Where the data sits, when it is not one `DEPLOY_DATA_ROOT` | `DEPLOY_DATA_ROOT`, ports, image tag, passwords, timeouts |
+| External photo libraries mounted into `app` | anything else `DEPLOY_*` |
+
+Extra photo libraries need two entries, both in that file: a volume bound
+to the host path, and a mount on `app` under `/mnt/libraries/`. Compose
+**merges** the `app` fragment into the one in `docker-compose.yml` rather
+than replacing it, so listing only the extra mounts is enough — the
+standard ones stay. The file ships with a commented example.
+
+The file must exist, or compose stops with `open …/docker-compose.volumes.yml:
+no such file or directory`. The version in the repository is a working
+default (every volume under `${DEPLOY_DATA_ROOT}/…`, no external
+libraries), so a fresh checkout needs nothing.
+
 ## Multiple deployments on one host
 
 A single `docker-compose.yml` covers any number of deployments

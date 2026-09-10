@@ -5,6 +5,7 @@ on:
     branches: [ "main" ]
     paths:
       - 'docker-compose.yml'
+      - 'docker-compose.volumes.yml'
       - 'docker-compose-dev.yml'
       - 'docker-compose.env.example'
       - 'docker-compose.env.test.example'
@@ -13,6 +14,7 @@ on:
     branches: [ "main" ]
     paths:
       - 'docker-compose.yml'
+      - 'docker-compose.volumes.yml'
       - 'docker-compose-dev.yml'
       - 'docker-compose.env.example'
       - 'docker-compose.env.test.example'

@@ -22,6 +22,13 @@
 
 name: ${COMPOSE_PROJECT_NAME:-fk-encore}
 
+# Volume definitions live in their own file so a deployment can keep its
+# own copy of that one and take every future docker-compose.yml from the
+# repository unedited. It also carries whatever external photo libraries
+# that machine mounts. See docker-compose.volumes.yml.
+include:
+  - path: docker-compose.volumes.yml
+
 services:
   # ── Bind-mount permission fixer ────────────────────────────────────────────
   # Runs once as root before the app/llm_service start and ensures the
@@ -267,8 +274,14 @@ services:
       INTERNAL_SERVICE_SECRET: "${INTERNAL_SERVICE_SECRET:?must be a non-empty secret — the internal AI services have no other authentication and refuse to start without one. Generate it with `openssl rand -hex 32` and put it in .env}"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 10s
-      timeout: 5s
+      # Polled rarely and given room to answer. This is a CPU-bound model
+      # server: a 10s/5s poll competes with the very work it is checking on,
+      # and a busy box then fails the probe and gets the container restarted
+      # mid-inference. Detecting a genuinely dead service two minutes later
+      # costs nothing here, because the only consumer is the app's
+      # `service_healthy` gate at startup.
+      interval: 2m
+      timeout: 10s
       retries: 5
       # buffalo_l loads from disk on first start (~1-2 min on a CPU-only
       # box). During start_period a failing curl doesn't count as an
@@ -313,8 +326,9 @@ services:
       - embedding_models:/models
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 10s
-      timeout: 5s
+      # Same reasoning as insightface above: rare polls, generous timeout.
+      interval: 2m
+      timeout: 10s
       retries: 5
       # ~5 min CLIP + DINOv2 first-time download on a cold volume; the
       # default covers that with margin. Override via env when both
@@ -622,99 +636,3 @@ services:
 # ── Networks ──────────────────────────────────────────────────────────────────
 # Only the implicit compose `default` bridge network is needed; the geo
 # service is reached over it by service name.
-
-# ── Volumes ───────────────────────────────────────────────────────────────────
-# Every persisted volume binds into ${DEPLOY_DATA_ROOT}/<subdir>. Override
-# DEPLOY_DATA_ROOT in `.env` per deployment so two stacks don't write into
-# each other's data.
-volumes:
-  photos:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/photos
-  thumbnails:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/thumbnails
-  pgdata:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/pgdata
-  backup:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/backup
-  llm_models:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/llm_models
-  embedding_models:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/embedding_models
-  documents:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/documents
-  documents_inbox:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/documents-inbox
-  finance_import:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/finance-import
-  finance_export:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/finance-export
-  geo_db_data:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/geo-db
-  receipt_ocr_models:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/receipt-ocr-models
-  geo_data:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/geo
-  recap-music:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/recap-music
-  taxonomy_out:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPLOY_DATA_ROOT:-./data}/taxonomy-out
