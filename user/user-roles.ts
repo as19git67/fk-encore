@@ -10,6 +10,7 @@ import {
   getUserRolesLogic,
 } from "./user-roles.service";
 import { requirePermission } from "./auth-handler";
+import { requireAdminToTouchAdminRole } from "./admin-guard";
 import { getAuthData } from "~encore/auth";
 
 console.log("[boot] user/user-roles.ts: all imports resolved");
@@ -18,7 +19,15 @@ console.log("[boot] user/user-roles.ts: all imports resolved");
 export const assignRole = api(
   { expose: true, auth: true, method: "POST", path: "/users/:userId/roles" },
   async (req: AssignRoleRequest): Promise<UserRolesResponse> => {
-    requirePermission(getAuthData()!, "roles.assign");
+    const authData = getAuthData()!;
+    requirePermission(authData, "roles.assign");
+    // roles.assign can hand out the Admin role — including to its own
+    // holder, which is the shortest path to becoming one.
+    await requireAdminToTouchAdminRole(
+      Number(authData.userID),
+      req.roleId,
+      "assign the Admin role",
+    );
     try {
       return await assignRoleLogic(req);
     } catch (err: any) {
@@ -37,7 +46,13 @@ export const assignRole = api(
 export const removeRole = api(
   { expose: true, auth: true, method: "DELETE", path: "/users/:userId/roles/:roleId" },
   async ({ userId, roleId }: { userId: number; roleId: number }): Promise<DeleteResponse> => {
-    requirePermission(getAuthData()!, "roles.revoke");
+    const authData = getAuthData()!;
+    requirePermission(authData, "roles.revoke");
+    await requireAdminToTouchAdminRole(
+      Number(authData.userID),
+      roleId,
+      "revoke the Admin role",
+    );
     try {
       return await removeRoleLogic(userId, roleId);
     } catch (err: any) {

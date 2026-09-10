@@ -22,6 +22,7 @@ import {
   revokePermissionLogic,
 } from "./role.service";
 import { requirePermission } from "../user/auth-handler";
+import { requireAdminToTouchAdminRole } from "../user/admin-guard";
 import { getAuthData } from "~encore/auth";
 
 /** Create a new role — requires roles.create */
@@ -72,7 +73,13 @@ export const listRoles = api(
 export const updateRole = api(
   { expose: true, auth: true, method: "PUT", path: "/roles/:id" },
   async (req: UpdateRoleRequest): Promise<Role> => {
-    requirePermission(getAuthData()!, "roles.update");
+    const authData = getAuthData()!;
+    requirePermission(authData, "roles.update");
+    await requireAdminToTouchAdminRole(
+      Number(authData.userID),
+      req.id,
+      "rename the Admin role",
+    );
     try {
       return await updateRoleLogic(req);
     } catch (err: any) {
@@ -91,7 +98,13 @@ export const updateRole = api(
 export const deleteRole = api(
   { expose: true, auth: true, method: "DELETE", path: "/roles/:id" },
   async ({ id }: { id: number }): Promise<DeleteResponse> => {
-    requirePermission(getAuthData()!, "roles.delete");
+    const authData = getAuthData()!;
+    requirePermission(authData, "roles.delete");
+    await requireAdminToTouchAdminRole(
+      Number(authData.userID),
+      id,
+      "delete the Admin role",
+    );
     try {
       return await deleteRoleLogic(id);
     } catch (err: any) {
@@ -119,7 +132,16 @@ export const listPermissions = api(
 export const assignPermission = api(
   { expose: true, auth: true, method: "POST", path: "/roles/:roleId/permissions" },
   async (req: AssignPermissionRequest): Promise<RolePermissionsResponse> => {
-    requirePermission(getAuthData()!, "roles.update");
+    const authData = getAuthData()!;
+    requirePermission(authData, "roles.update");
+    // Stacking permissions onto other roles stays possible — see
+    // admin-guard.ts on why that cannot be fixed by restriction. Editing
+    // the Admin role's own set is a different matter.
+    await requireAdminToTouchAdminRole(
+      Number(authData.userID),
+      req.roleId,
+      "change the Admin role's permissions",
+    );
     try {
       return await assignPermissionLogic(req.roleId, req.permissionId);
     } catch (err: any) {
@@ -138,7 +160,13 @@ export const assignPermission = api(
 export const revokePermission = api(
   { expose: true, auth: true, method: "DELETE", path: "/roles/:roleId/permissions/:permissionId" },
   async ({ roleId, permissionId }: { roleId: number; permissionId: number }): Promise<DeleteResponse> => {
-    requirePermission(getAuthData()!, "roles.update");
+    const authData = getAuthData()!;
+    requirePermission(authData, "roles.update");
+    await requireAdminToTouchAdminRole(
+      Number(authData.userID),
+      roleId,
+      "change the Admin role's permissions",
+    );
     try {
       return await revokePermissionLogic(roleId, permissionId);
     } catch (err: any) {

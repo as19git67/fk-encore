@@ -42,7 +42,7 @@ RUN npm install --omit=dev && chown -R 568:568 /app/node_modules
 COPY scripts/taxonomy/ /app/scripts/taxonomy/
 COPY ts-sources/documents/ /app/documents/
 
-COPY main.py ./
+COPY main.py service_auth.py ./
 
 RUN mkdir -p /app/scripts/taxonomy/out \
     && chown -R 568:568 /app

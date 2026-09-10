@@ -55,7 +55,7 @@ COPY --from=builder /install /usr/local
 # llama_server.py and llama_supervisor.py are inert under this image's
 # LLM_BACKEND=inproc default; they are copied so the CPU image can still be
 # pointed at an external llama-server.
-COPY main.py llama_server.py llama_supervisor.py llm_config.py model_downloads.py ./
+COPY main.py service_auth.py llama_server.py llama_supervisor.py llm_config.py model_downloads.py ./
 COPY download_model.sh /usr/local/bin/download_model.sh
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/download_model.sh /usr/local/bin/entrypoint.sh

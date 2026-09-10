@@ -17,6 +17,7 @@ import {
   getUserIdsWithPermission,
 } from "./user.service";
 import { requirePermission } from "./auth-handler";
+import { requireAdminToTouchAdminUser } from "./admin-guard";
 import { getAuthData } from "~encore/auth";
 import { passwordPolicyError } from "./password-policy";
 import { consumeInviteLogic } from "./invite.service";
@@ -101,7 +102,15 @@ export const listUsers = api(
 export const updateUser = api(
   { expose: true, auth: true, method: "PUT", path: "/users/:id" },
   async (req: UpdateUserRequest): Promise<UserWithRoles> => {
-    requirePermission(getAuthData()!, "users.update");
+    const authData = getAuthData()!;
+    requirePermission(authData, "users.update");
+    // users.update may set anyone's password, so on an administrator it is
+    // a way to become one. See admin-guard.ts.
+    await requireAdminToTouchAdminUser(
+      Number(authData.userID),
+      req.id,
+      "change an administrator's account",
+    );
     // A password is optional here; when one is supplied it sets somebody's
     // credentials and takes the same floor as every other path.
     if (req.password !== undefined) {
@@ -158,7 +167,13 @@ export const listUserIdsWithPermission = api(
 export const deleteUser = api(
   { expose: true, auth: true, method: "DELETE", path: "/users/:id" },
   async ({ id }: { id: number }): Promise<DeleteResponse> => {
-    requirePermission(getAuthData()!, "users.delete");
+    const authData = getAuthData()!;
+    requirePermission(authData, "users.delete");
+    await requireAdminToTouchAdminUser(
+      Number(authData.userID),
+      id,
+      "delete an administrator",
+    );
     try {
       return await deleteUserLogic(id);
     } catch (err: any) {

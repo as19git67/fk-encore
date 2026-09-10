@@ -19,6 +19,7 @@ from starlette.testclient import TestClient
 from app import service_auth
 
 SECRET = os.environ["INTERNAL_SERVICE_SECRET"]
+MODULE_DIR_COPY = "app/"
 MAIN_RELATIVE_PATH = "app/main.py"
 
 
@@ -101,4 +102,21 @@ def test_main_installs_the_gate():
     source = main_py.read_text(encoding="utf-8")
     assert "install_service_auth(app)" in source, (
         f"{main_py} does not install the shared-secret gate"
+    )
+
+
+def test_dockerfile_ships_the_module():
+    """The gate has to be *in the image*, not just in the repository.
+
+    Four of the five Dockerfiles copy main.py by name rather than the whole
+    directory, so adding service_auth.py next to it was not enough: the
+    containers died at import with ModuleNotFoundError while every test here
+    passed, because pytest runs against the source tree. This is the check
+    that would have caught it.
+    """
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+    source = dockerfile.read_text(encoding="utf-8")
+    copied = [l for l in source.splitlines() if l.startswith("COPY")]
+    assert any("service_auth.py" in l or MODULE_DIR_COPY in l for l in copied), (
+        f"{dockerfile} never copies service_auth.py into the image"
     )
