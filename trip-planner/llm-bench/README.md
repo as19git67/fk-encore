@@ -29,9 +29,43 @@ Voraussetzungen — eine fehlende Spur wird übersprungen, nicht zum Abbruch:
 
 | Spur | braucht |
 | --- | --- |
-| `local` | erreichbaren `llm-service` (`LLM_SERVICE_URL`, Default `http://localhost:8002`) |
+| `local` | erreichbaren `llm-service` (`LLM_SERVICE_URL`) **und** `INTERNAL_SERVICE_SECRET` |
 | `claude` | `ANTHROPIC_API_KEY` in der Umgebung |
 | beide | die Kategorienliste — aus dem geo-Dienst, oder `--categories=<datei.json>` |
+
+### Vom Entwicklungsrechner aus, wenn der Stack in Docker läuft
+
+`llm_service` veröffentlicht **keinen** Host-Port; im Compose-Netz hört er auf
+`llm_service:8000`. Von außen erreichbar wird er über eine
+`docker-compose.override.yml`:
+
+```yaml
+services:
+  llm_service:
+    ports:
+      - "127.0.0.1:8002:8000"
+```
+
+Danach `docker compose up -d llm_service`, und:
+
+```bash
+export LLM_SERVICE_URL=http://localhost:8002
+export INTERNAL_SERVICE_SECRET=…   # derselbe Wert wie in der .env des Stacks
+```
+
+Der Dienst weist jede Anfrage ohne `Authorization: Bearer
+$INTERNAL_SERVICE_SECRET` mit 401 ab (`llm-service/service_auth.py`). Der
+Header wird angehängt, indem `lib/internal-service-auth.ts` beim Import
+`fetch` überschreibt — die Encore-Dienste holen ihn sich über ihre
+`encore.service.ts`, der Bench importiert ihn selbst.
+
+Die Kategorienliste ohne laufenden geo-Dienst:
+
+```bash
+npx tsx -e "import {POI_CATEGORIES} from './geo/src/poi-categories.ts'; \
+  console.log(JSON.stringify(POI_CATEGORIES.map(c=>({id:c.id,description:c.description}))))" \
+  > /tmp/cats.json
+```
 
 Kosten der Cloud-Spur: zehn Sätze, je ein paar tausend Token Eingabe. Das ist
 ein Bruchteil eines Cent — die Messung ist billiger als die Entscheidung, sie
