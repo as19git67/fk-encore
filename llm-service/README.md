@@ -96,8 +96,7 @@ LLM_GPU_COUNT=1
 Then recreate the service from the single compose file:
 
 ```bash
-docker compose --env-file .env -f docker-compose.yml \
-  up -d --pull always --force-recreate llm_service
+docker compose --env-file .env up -d --pull always --force-recreate llm_service
 ```
 
 The first start downloads Qwen3-14B Q4_K_M into the existing `llm_models`
@@ -105,8 +104,7 @@ volume. To return to the CPU profile, set the `LLM_*` values back to the CPU
 defaults from `docker-compose.env.example` and recreate:
 
 ```bash
-docker compose --env-file .env -f docker-compose.yml \
-  up -d --force-recreate llm_service
+docker compose --env-file .env up -d --force-recreate llm_service
 ```
 
 The `-llm-gpu` image ships `LLM_BATCH=2048`, `LLM_UBATCH=512` and

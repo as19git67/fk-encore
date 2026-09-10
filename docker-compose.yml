@@ -22,12 +22,23 @@
 
 name: ${COMPOSE_PROJECT_NAME:-fk-encore}
 
-# Volume definitions live in their own file so a deployment can keep its
-# own copy of that one and take every future docker-compose.yml from the
-# repository unedited. It also carries whatever external photo libraries
-# that machine mounts. See docker-compose.volumes.yml.
-include:
-  - path: docker-compose.volumes.yml
+# Volume definitions live in docker-compose.volumes.yml, so a deployment can
+# keep its own copy of that one file and take every future
+# docker-compose.yml from the repository unedited. It also carries whatever
+# external photo libraries that machine mounts.
+#
+# The two files are combined by COMPOSE_FILE in `.env`:
+#
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.volumes.yml
+#
+# and NOT by a top-level `include:`. Include cannot do the job: an included
+# file that adds mounts to `app` is rejected as "services.app conflicts with
+# imported resource" on Compose 2.x, which is what deployments actually run.
+# The multi-file merge concatenates service volume lists and has done so
+# since Compose v1.
+#
+# Without COMPOSE_FILE the volumes are undefined and compose stops with
+# `volume "photos" is undefined` — see DEPLOYMENT.md.
 
 services:
   # ── Bind-mount permission fixer ────────────────────────────────────────────
