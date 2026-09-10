@@ -1618,6 +1618,22 @@ entscheidet, ob ein ganzer Etappenvorrat für die Kuration hineinpasst) und die
 Antwortzeit auf der vorhandenen Hardware (sie entscheidet, ob das Modell im
 Verhandlungs-Chat überhaupt erträglich ist).
 
+**Für das Anfrageverständnis gibt es die Messung jetzt** —
+`trip-planner/llm-bench/` stellt beide Spuren mit **demselben** Prompt und
+derselben Validierung (`normalizeConstraints`) vor zehn erfundene Sätze und
+zählt vier Dinge getrennt: richtig, verpasst, falsch und **erfunden**. Die
+vierte Spalte geht bewusst in keine Gesamtnote ein: §13s Regel „ein fehlendes
+Feld ist besser als ein erfundenes" heißt, dass eine Spur, die mehr liest und
+mehr erfindet, nicht gewonnen hat. Die Sätze prüfen nicht nur den geraden Fall,
+sondern auch Zurückhaltung („Wir wollen nach Passau." — alles Weitere wäre
+erfunden) und Fallen (eine Jahreszahl, die keine Tageszahl ist; ein Startort,
+der nicht das Ziel ist). Aufgerufen wird die Cloud-Spur dabei von nichts
+anderem: `claude-client.ts` hängt an keinem Endpunkt.
+
+Die drei übrigen Aufgaben aus §11.1 — Kuration, Dokumente, Verhandlungs-Chat —
+sind damit **nicht** gemessen. Die Kuration ist der größte erwartete Sprung und
+braucht einen eigenen Aufbau.
+
 ### 11.1 Die Trennlinie liegt schon im Konzept
 
 Der Planer zerfällt ohnehin in zwei Welten (§4.3): die **Reiseauflösung**
@@ -2819,8 +2835,9 @@ Vier Dinge, die keine Feature-Arbeit sind, aber sonst später teuer werden:
     bei Nähe, der Tourvorschlag aus mehreren Ideen und die Gebietssuche.
     **Umgesetzt** (§20.1–20.3): der Vorrat samt Teilen, die Nähe-Meldung mit
     Ruhezeit, der Ausflugsvorschlag über `solveDay` und die drei Wege zwischen
-    Vorrat und Reise. Offen bleiben Veranstaltungen (§20.4), die an einer
-    Quelle hängen, die es nicht gibt.
+    Vorrat und Reise. **Veranstaltungen (§20.4) werden vorerst nicht gebaut** —
+    sie hängen an einer Quelle, die es als offene Daten nicht gibt; die Mechanik
+    darum herum steht und nimmt sie auf, sobald eine da ist.
     Bewusst nach Schritt 8: Er lebt von der Standortschleife, und ohne sie
     wäre er eine Merkliste. Veranstaltungen (§20.4) hängen an einer Quelle,
     die es noch nicht gibt, und sind deshalb kein Teil dieses Schritts.
@@ -3329,6 +3346,9 @@ Konzept keinen Ort, obwohl der Baustein dafür längst existiert: der **Vorrat**
 (§5) ist genau eine bewertete Liste von Möglichkeiten — er hängt bloß an einer
 Etappe.
 
+> **Wie man es benutzt**, ohne dieses Kapitel zu lesen:
+> `docs/ideenvorrat.md` — Endpunkte, Datenmodell, Regeln und der Stand.
+
 ### 20.1 Was es ist
 
 Ein **Vorrat ohne Reise**, je Haushalt: eine Ideensammlung, in die alle
@@ -3517,6 +3537,15 @@ Was hier ausdrücklich **nicht** getan wird: Veranstaltungen aus Webseiten
 zusammenkratzen. Das ist der Punkt, an dem eine Erkennung ohne Beleg beginnt,
 und §9.3 hat dafür eine klare Antwort — ein Eintrag ohne wörtlichen Beleg fällt
 weg.
+
+**Stand: wird vorerst nicht gebaut.** Nicht, weil der Nutzen fehlt, sondern
+weil die Voraussetzung fehlt: Ohne Quelle gäbe es nur eine leere Liste mit
+Mechanik daran. Der Rest von §20 ist bewusst so gebaut, dass ein Termin später
+nichts umwirft — ein Ideenvorrat-Eintrag mit Gültigkeitsfenster, und Nähe,
+Tour und Übernahme in eine Reise gelten unverändert. Wieder aufgemacht wird
+das hier, sobald eine Quelle steht, die den Anspruch aushält; die realistische
+erste Form bleibt das iCal-Abonnement je Quelle, das der Haushalt selbst
+einträgt.
 
 ### 20.5 Was das an Daten braucht
 
