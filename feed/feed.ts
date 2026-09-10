@@ -78,6 +78,20 @@ export const feedUnreadCount = api(
   },
 );
 
+/**
+ * Unread comments by other people — the number the iOS app shows on its
+ * home-screen badge. Separate from `feedUnreadCount`, which counts every
+ * kind of activity and drives the in-app Feed tab badge.
+ */
+export const feedUnreadCommentCount = api(
+  { expose: true, method: "GET", path: "/feed/unread-comment-count", auth: true },
+  async (): Promise<UnreadCountResponse> => {
+    const userId = requireUserId();
+    const count = await feedService.countUnreadComments(userId);
+    return { count };
+  },
+);
+
 interface MarkSeenRequest {
   upToId: number;
 }

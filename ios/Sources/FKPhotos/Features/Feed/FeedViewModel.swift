@@ -90,10 +90,12 @@ final class FeedViewModel {
             )
             guard let newestId = response.items.first?.id else {
                 unreadCount = 0
+                await CommentBadge.shared.clear()
                 return
             }
             guard newestSeenFeedItemId != newestId || response.unreadCount > 0 else {
                 unreadCount = 0
+                await CommentBadge.shared.clear()
                 return
             }
             let _: MarkSeenResponse = try await APIClient.shared.post(
@@ -102,8 +104,12 @@ final class FeedViewModel {
             )
             newestSeenFeedItemId = newestId
             unreadCount = 0
+            // Marking the feed seen is what „read" means for a comment too,
+            // so the home-screen badge goes with it (#comment-badge).
+            await CommentBadge.shared.clear()
         } catch {
             await refreshUnreadCount()
+            await CommentBadge.shared.refresh()
         }
     }
 

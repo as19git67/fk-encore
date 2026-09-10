@@ -329,6 +329,36 @@ export async function countUnread(userId: number): Promise<number> {
   return row?.n ?? 0;
 }
 
+/**
+ * Unread comments *by other people* on photos this user can see — what the
+ * iOS app puts on its home-screen badge.
+ *
+ * A badge is the loudest thing an app owns: it survives every screen and
+ * every session, so it has to stand for something the user actually wants
+ * chased. Somebody talking to you qualifies; a maintenance queue does not,
+ * which is why the review-group count no longer sets it.
+ *
+ * A guest comment has no `actor_user_id` (public-link access), and it is
+ * still somebody else — so a null actor counts. Only the user's own comments
+ * are excluded.
+ */
+export async function countUnreadComments(userId: number): Promise<number> {
+  const row = await dbFirst<{ n: number }>(
+    db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(feedItems)
+      .where(
+        and(
+          eq(feedItems.user_id, userId),
+          isNull(feedItems.seen_at),
+          eq(feedItems.kind, "photo_commented"),
+          sql`(${feedItems.actor_user_id} IS NULL OR ${feedItems.actor_user_id} <> ${userId})`,
+        ),
+      ),
+  );
+  return row?.n ?? 0;
+}
+
 export interface MarkSeenRequest {
   /** Mark everything up to and including this feed-item id as seen. */
   upToId: number;

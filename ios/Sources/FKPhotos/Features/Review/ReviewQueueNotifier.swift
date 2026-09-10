@@ -61,7 +61,12 @@ enum ReviewQueueNotifier {
         content.title = "Fotos zum Aussortieren"
         content.body = ReviewQueueNotice.notificationBody(previous: previous, current: current)
         content.sound = .default
-        content.badge = NSNumber(value: current)
+        // Deliberately no `content.badge`. This notice used to put the number
+        // of unreviewed groups on the home-screen icon, where it stayed —
+        // a permanent red count for a maintenance queue nobody has to empty
+        // today. The badge now belongs to unread comments alone
+        // (`CommentBadge`): somebody talking to you is worth chasing, a
+        // tidy-up queue is not.
         content.categoryIdentifier = ReviewQueueNotice.notificationCategoryId
         // What a tap opens. A cold launch has no view to route to, so the
         // target travels as the deep link the notification carries.
