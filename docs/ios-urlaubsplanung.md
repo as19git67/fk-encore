@@ -436,6 +436,76 @@ Reihenfolge, falls es gebaut wird: erst der Modus-Radius (eine Zeile Logik,
 sofort spürbar), dann der Tagesanker (eine Spalte an `trip_plan_days`, ein Feld
 im Tagesrahmen, die Reisezeit aus den Blöcken), zuletzt der Modus im Freitext.
 
+### 4.6 Der Ausflug, den niemand verlangt hat (offen)
+
+§4.5 macht den Tagesausflug *ausdrückbar*. Der eigentliche Wunsch geht weiter:
+
+> Ich sage nur „vier Tage in San Gimignano" — und Florenz, Pisa und Lucca
+> sollen trotzdem im Plan vorkommen.
+
+Das ist berechtigt, und zwar aus dem Vorrat selbst heraus begründbar: Ein Ort
+mit siebentausend Einwohnern trägt keine vier Tage. Wer vier Tage bleibt, fährt
+weg — jeder Mensch, den man fragt, sagt „ihr seid eine Stunde von Florenz".
+Ein Planer, der das verschweigt, ist nicht zurückhaltend, sondern nutzlos.
+
+Und doch steht dem eine der härtesten Regeln dieses Konzepts entgegen: **Der
+Planer erfindet keine Termine** (§7.1). Sechzig Kilometer sind keine
+Nebenwirkung einer Ortssuche, sondern eine Entscheidung über den Tag. Die
+Auflösung ist dieselbe wie beim Abendlicht (§7.3) und beim Ausflugsvorschlag aus
+dem Ideenvorrat (§20.2): **vorschlagen, nicht planen.** Der Vorschlag schreibt
+nichts; angenommen wird er per Tipp, und dann setzt er den Tagesanker aus §4.5.
+
+**Der Auslöser wird gemessen, nicht geraten.** „Kleiner Ort" ist keine Größe,
+die im System existiert — die Dünne des Vorrats dagegen schon: Nach dem Bau des
+Etappenvorrats steht da, wie viele lohnende Spots (§10.5 `purpose: visit`, mit
+Prominenzsignal) auf wie viele Tage kommen. Reicht das nicht, um die Tage zu
+füllen, ohne sie mit Gewöhnlichem zu strecken, ist die Etappe **untervorrätig** —
+und genau das ist der Moment, in dem ein Mensch anfinge, über den Tellerrand zu
+schauen. Der Fall ist heute schon sichtbar: Der Solver lässt Blöcke leer, und
+die Neuverteilung meldet, dass nichts mehr da ist.
+
+**Woher die Kandidaten kommen, ohne Neuimport.** Eine Ortsdatenbank gibt es
+nicht — `place`-Knoten werden nicht importiert. Zwei Quellen liegen aber schon
+in jeder Regionsdatenbank:
+
+- `osm_admin` — benannte Verwaltungsflächen samt Ebene. Eine Gemeinde, in der
+  vierzig prominente Spots liegen, ist ein Tagesziel; eine mit zweien nicht.
+- Die **Dichte prominenter Spots** selbst, über ein grobes Raster gezählt.
+  Kommt ohne Verwaltungsgrenzen aus und findet auch das Ziel, das keine
+  eigene Gemeinde ist.
+
+Beides zählt dasselbe: **was ein Tag dort trüge**, gemessen an dem, was der
+Vorrat ohnehin bewertet. Dagegen steht die Fahrzeit im Modus dieser Etappe —
+und die ist heute eine Luftlinienschätzung (§12), eine Stunde kann also
+neunzig Minuten sein.
+
+**Wie der Vorschlag klingt, und was er nennt:**
+
+> „Vor Ort tragen die Vorschläge zwei eurer vier Tage. In einer Stunde Fahrt
+> liegt Florenz — genug für einen ganzen Tag. Einen Tag dorthin einplanen?"
+
+Drei Dinge stehen bewusst darin: **warum** überhaupt gefragt wird (der Vorrat
+trägt die Tage nicht), **was es kostet** (die Fahrzeit, hin und zurück, aus den
+Blöcken dieses Tages), und **einer** Vorschlag statt einer Liste von fünf — ein
+Abend trägt einen Ausflug, und fünf Vorschläge sind eine Entscheidung statt
+eines Hinweises (§20.2). Ein „nein" wird gemerkt und nicht wiederholt (§6.4,
+§7.1).
+
+**Was dabei nicht passieren darf:**
+
+- **Kein stiller Tagesanker.** Ein Plan, der ohne Zutun in Florenz stattfindet,
+  ist ein anderer Urlaub als der bestellte.
+- **Keine Reisebüro-Rangliste.** Der Vorschlag begründet sich aus dem eigenen
+  Vorrat, nicht aus Popularität, die niemand nachrechnen kann (§10.7).
+- **Kein Ausflug als Lückenfüller.** Untervorrätig heißt „die Tage tragen
+  nicht", nicht „ein Block ist kurz". Ein knapper Nachmittag ist kein Grund,
+  jemanden ins Auto zu setzen.
+
+Voraussetzung ist §4.5: Ohne Tagesanker gibt es nichts, worin ein angenommener
+Vorschlag landen könnte. In der Reihenfolge dort steht er hinter dem
+Tagesanker — und er ist der Teil, der aus „vier Tage in San Gimignano" das
+macht, was der Reisende eigentlich gemeint hat.
+
 ## 5. Umplanen als Kernmechanik
 
 Ein Plan besteht aus drei Schichten:
@@ -3048,7 +3118,8 @@ hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
   Verkehrsmittel nicht — vier Tage in San Gimignano mit Ausflügen nach Florenz
   und Pisa sind damit entweder drei Etappen, die etwas anderes versprechen, oder
   ein Vorrat, in dem Florenz nicht vorkommt. Vorschlag und Reihenfolge stehen in
-  §4.5.
+  §4.5 — und §4.6 dazu, wie aus „vier Tage in San Gimignano" der Ausflug von
+  selbst entstehen soll, ohne dass ihn jemand verlangt hat.
 - **Keine Echtzeit.** Verkehr, Streiks, spontane Schließungen sieht das System
   nicht — bewusste Übergabe an Apple/Google Maps für die Navigation.
 - **Speicherbedarf** eines späteren Routers (Valhalla-Kacheln zusätzlich zu den
