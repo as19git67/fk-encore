@@ -16,6 +16,8 @@ struct AlbumsListView: View {
     /// Album being linked to an iPhone album via "Mit iPhone verknüpfen…"
     /// (issue #812) — the mirror of the media library's "Mit f4mil verknüpfen…".
     @State private var syncLinkAlbum: Album?
+    /// The phone's own albums, shown modally (#1115 §5).
+    @State private var showLibraryBrowser = false
 
     private var filteredAlbums: [Album] {
         let filtered = viewModel.albums.filter { filterSort.appliedFilter.matches($0) }
@@ -72,27 +74,6 @@ struct AlbumsListView: View {
                                 Text("Alle Fotos")
                                     .font(.headline)
                                 Text("Gesamte Fotomediathek")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-
-                    NavigationLink(value: LibraryBrowserRef()) {
-                        HStack(spacing: 12) {
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.accentColor.opacity(0.15))
-                                .frame(width: 60, height: 60)
-                                .overlay {
-                                    Image(systemName: "photo.stack")
-                                        .font(.title2)
-                                        .foregroundStyle(Color.accentColor)
-                                }
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("iOS Mediathek")
-                                    .font(.headline)
-                                Text("Alben vom iPhone mit f4mil verknüpfen")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -217,18 +198,32 @@ struct AlbumsListView: View {
                         }
                     }
                 }
+
+                libraryBrowserSection
             }
         }
         .searchable(text: $searchText, prompt: "Album suchen")
         .navigationTitle("Alben")
+        // Modally, not pushed. A push says „deeper into the same material";
+        // these albums are the phone's, not F4mil's, and a sheet with its own
+        // „Fertig" is the platform's way of saying „side trip, you come back"
+        // (#1115 §5). It also keeps the album stack out of a browser that
+        // pushes destinations of its own.
+        .sheet(isPresented: $showLibraryBrowser) {
+            NavigationStack {
+                LibraryBrowserView()
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Fertig") { showLibraryBrowser = false }
+                        }
+                    }
+            }
+        }
         .navigationDestination(for: Int.self) { albumId in
             AlbumDetailView(albumId: albumId)
         }
         .navigationDestination(for: AllPhotosRef.self) { _ in
             PhotoTimelineView()
-        }
-        .navigationDestination(for: LibraryBrowserRef.self) { _ in
-            LibraryBrowserView()
         }
         .navigationDestination(for: PersonsRef.self) { _ in
             PersonsListView()
@@ -331,6 +326,53 @@ struct AlbumsListView: View {
             Button { editingAlbum = album } label: {
                 Label("Album-Einstellungen", systemImage: "gearshape")
             }
+        }
+    }
+
+    /// The way into the phone's own albums.
+    ///
+    /// It used to sit in the first section, among „Alle Fotos", „Personen"
+    /// and „Gruppen-Review" — as if it were a fourth place inside F4mil. It
+    /// is not: nothing behind it belongs to F4mil, it is the iPhone's library
+    /// shown so albums can be linked (#1115 §5). A section of its own at the
+    /// end reads as „and separately, there is this", and — unlike a row among
+    /// peers or a bare toolbar glyph — a footer can say so in words.
+    private var libraryBrowserSection: some View {
+        Section {
+            Button {
+                showLibraryBrowser = true
+            } label: {
+                HStack(spacing: 12) {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.secondary.opacity(0.15))
+                        .frame(width: 60, height: 60)
+                        .overlay {
+                            Image(systemName: "iphone.gen3")
+                                .font(.title2)
+                                .foregroundStyle(.secondary)
+                        }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("iPhone-Mediathek")
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                        Text("Alben vom iPhone mit f4mil verknüpfen")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    // Not a chevron: this opens a sheet, and a disclosure
+                    // arrow would promise a push deeper into the album list.
+                    Image(systemName: "arrow.up.forward.square")
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        } header: {
+            Text("Vom iPhone")
+        } footer: {
+            Text("Diese Alben liegen auf dem iPhone. F4mil zeigt sie nur an; verknüpfe ein Album, um Fotos zu übernehmen.")
         }
     }
 
