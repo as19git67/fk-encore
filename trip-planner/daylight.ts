@@ -21,6 +21,7 @@ import { requirePermission } from "../user/auth-handler";
 import { addDays } from "./leg-dates";
 import { spotLight, type FacadeLight } from "./light";
 import { loadPlan, type StoredLeg } from "./plan-store";
+import { horizonFor } from "./horizon-store";
 import { lightWindows, type HorizonProfile, type LightWindow } from "./sun";
 
 export interface DayLightRequest {
@@ -79,7 +80,11 @@ export const dayLight = api(
     const day = leg.days.find((d) => d.dayIndex === req.dayIndex);
     if (!day) throw APIError.notFound(`day ${req.dayIndex} not found in leg ${legIndex}`);
 
-    return lightOfDay(leg, day, validateOffset(req.utcOffsetMinutes), req.horizon ?? []);
+    // A caller may bring its own profile — the offline bundle does,
+    // because it has one per day already. Otherwise the stored one for
+    // this place, and a free horizon when nobody has measured it.
+    const horizon = req.horizon ?? (await horizonFor(leg.anchor));
+    return lightOfDay(leg, day, validateOffset(req.utcOffsetMinutes), horizon);
   },
 );
 

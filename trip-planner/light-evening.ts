@@ -31,6 +31,7 @@ import { loadPlan, type StoredLeg, type StoredPlan } from "./plan-store";
 import { spotLabel } from "./spot-label";
 import { lightWindows, type LightWindow } from "./sun";
 import { validateOffset } from "./daylight";
+import { horizonFor } from "./horizon-store";
 import type { Query } from "encore.dev/api";
 
 /**
@@ -95,7 +96,13 @@ export const eveningLight = api(
 
     const date = addDays(leg.startDate, dayIndex);
     const offset = validateOffset(req.utcOffsetMinutes);
-    const windows = lightWindows(leg.anchor, date, offset);
+    // The terrain, if anybody has measured it here (§7.3). A proposal
+    // is the one place the window becomes a time somebody can miss, so
+    // it is the one that least tolerates a ridge nobody accounted for:
+    // "from 19:30" for a terrace that went dark at 19:00 sends people
+    // out for nothing.
+    const horizon = await horizonFor(leg.anchor);
+    const windows = lightWindows(leg.anchor, date, offset, horizon);
     if (windows.length === 0) return { date, proposals: [] };
 
     // When the planned day is over. A day whose blocks carry no hour
