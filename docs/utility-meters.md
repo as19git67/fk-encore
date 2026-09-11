@@ -593,7 +593,12 @@ Quelle ausweist (`source`):
   verweist auf den Import.
 
 Frontend: `MeterHeatingWeatherPanel.vue` (Kacheln kWh/Kd aktuell/Vorjahr/
-Veränderung, Jahres- und Monatstabelle, darunter die Wohnort-Karte).
+Veränderung, Jahres- und Monatstabelle, darunter die Wohnort-Karte). Die
+Begriffe erklärt `MeterDegreeDaysHelpView.vue` (Route `zaehler-hilfe-gradtage`),
+verlinkt über „Was sind Gradtage?“ in der Panel-Überschrift: Definition und
+Einheit Kd, warum kWh/Kd die Witterung herausrechnet, die drei Quellen der
+Zahlen, Lesehilfe für Normalmonat/typisch/Abweichung sowie Konvention G20/15
+und ihre Grenzen.
 
 #### Gradtagzahlen aus dem Open-Meteo-Archiv
 
@@ -722,6 +727,7 @@ Neue Views unter `frontend/src/views/meters/`, Navigation gated auf
 | `MeterReadingEntryView.vue` (oder Dialog) | `meters.read_entry` | Wert + Datum/Zeit (Default jetzt), Foto-Button → OCR-Vorschlag mit Confidence, Bestätigen/Korrigieren |
 | `MetersAdminView.vue` | `meters.manage` | Zähler-CRUD, Gerät ersetzen (Wizard: Endstand alt → Startwert neu), API-Key-Verwaltung |
 | `MeterAnomaliesView.vue` | `meters.view` (Status setzen: `meters.read_entry`) | Auffälligkeiten-Postfach (§5.3), Badge im Modulmenü |
+| `MeterDegreeDaysHelpView.vue` | `meters.view` | Online-Hilfe zu Gradtagen und Witterungsbereinigung (§5.2.6), verlinkt aus dem Heizungs-Report (Muster: `finance/BankcontactsHelpView.vue`) |
 
 Design: nur semantische PrimeVue-CSS-Variablen (CSS-Style-Guide),
 Datums-Handling über `frontend/src/utils/dateFormat.ts`

@@ -987,7 +987,7 @@ export const ELECTRICITY_TARIFF_KIND_EXPLANATIONS: Record<ElectricityTariffKind,
   sewage_price:
     'Abwasserpreis pro m³ — wird meist auf dieselbe gemessene Wassermenge berechnet wie der Frischwasserpreis.',
   heating_degree_days:
-    'Gradtagzahl eines Monats in Kelvin-Tagen (z. B. nach VDI 2067 für eine nahe Wetterstation), „gültig ab“ = Monatserster. Damit rechnet der Heizungs-Report den Verbrauch witterungsbereinigt; am einfachsten als Reihe per Datei-Import einspielen.',
+    'Gradtagzahl eines Monats in Kelvin-Tagen (Kd, nach VDI 2067), „gültig ab“ = Monatserster. Damit rechnet der Heizungs-Report den Verbrauch witterungsbereinigt. Normalerweise nicht nötig: mit hinterlegtem Wohnort werden die Werte automatisch aus dem Wetter-Archiv geholt. Eigene Werte hier oder per Datei-Import bleiben erhalten. Erklärung unter „Was sind Gradtage?“ beim Heizungs-Report.',
 }
 
 export const ELECTRICITY_TARIFF_UNIT_LABELS: Record<ElectricityTariffUnit, string> = {
