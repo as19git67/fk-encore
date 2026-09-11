@@ -34,12 +34,23 @@ struct TripIdeasView: View {
             }
 
             if model.entries.isEmpty && !model.isLoading {
-                ContentUnavailableView(
-                    "Noch keine Ideen",
-                    systemImage: "lightbulb",
-                    description: Text("Was euch begegnet, sammelt sich hier — ohne dass es "
-                                      + "schon eine Reise dazu geben muss."),
-                )
+                // The empty state carries the way in rather than only
+                // describing one. A screen that says "nothing here yet"
+                // and leaves the reader to find the button is a screen
+                // that has explained its own uselessness.
+                ContentUnavailableView {
+                    Label("Noch keine Ideen", systemImage: "lightbulb")
+                } description: {
+                    Text("Was euch begegnet, sammelt sich hier — ohne dass es "
+                         + "schon eine Reise dazu geben muss.")
+                } actions: {
+                    Button {
+                        startAdding()
+                    } label: {
+                        Label("Das hier merken", systemImage: "mappin.and.ellipse")
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
             }
 
             ForEach(model.entries) { idea in
@@ -83,12 +94,15 @@ struct TripIdeasView: View {
                     Image(systemName: "ellipsis.circle")
                 }
             }
-            ToolbarItem(placement: .bottomBar) {
+            // Top bar, not `.bottomBar`: this screen lives inside the
+            // tab view, and a bottom toolbar item loses that argument
+            // with the tab bar — the button was in the code and on no
+            // screen.
+            ToolbarItem(placement: .primaryAction) {
                 Button {
-                    noteDraft = ""
-                    isAddingHere = true
+                    startAdding()
                 } label: {
-                    Label("Das hier merken", systemImage: "plus.circle.fill")
+                    Label("Das hier merken", systemImage: "plus")
                 }
                 .disabled(model.isAdding)
             }
@@ -121,6 +135,11 @@ struct TripIdeasView: View {
         } message: {
             Text("Wer eingeladen ist, schreibt in denselben Vorrat — eine Liste, keine Kopie.")
         }
+    }
+
+    private func startAdding() {
+        noteDraft = ""
+        isAddingHere = true
     }
 
     private func isCurrent(_ collection: TripIdeaCollection) -> Bool {
