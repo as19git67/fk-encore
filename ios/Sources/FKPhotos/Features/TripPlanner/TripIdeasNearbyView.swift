@@ -15,6 +15,9 @@ import SwiftUI
 /// still missing, and it is the half that needs the rule.
 struct TripIdeasNearbyView: View {
     @State var model: TripIdeasViewModel
+    /// Set when an accepted outing became a trip, so this screen can
+    /// open it — nobody makes a trip in order to look at a list.
+    @State private var openPlanId: Int?
 
     var body: some View {
         List {
@@ -51,6 +54,22 @@ struct TripIdeasNearbyView: View {
             if !model.nearby.isEmpty, let sentence = quietSentence {
                 Text(sentence).font(.footnote).foregroundStyle(.secondary)
             }
+        }
+        .toolbar {
+            // Offered where the several-things-close-together case is
+            // actually visible (§20.2): the nearby list is the moment
+            // somebody sees that there is more than one.
+            ToolbarItem(placement: .primaryAction) {
+                NavigationLink {
+                    TripIdeasOutingView(model: model, openPlanId: $openPlanId)
+                } label: {
+                    Label("Ausflug daraus", systemImage: "figure.walk.motion")
+                }
+                .disabled(model.nearby.isEmpty)
+            }
+        }
+        .navigationDestination(item: $openPlanId) { planId in
+            TripPlanDayView(viewModel: TripPlannerViewModel(planId: planId))
         }
         .navigationTitle("In der Nähe")
         .task { await model.loadNearby() }

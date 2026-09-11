@@ -156,3 +156,92 @@ struct TripIdeaNearbyResponse: Codable, Sendable {
     /// number is honest, the list would be noise (§20.2).
     let quiet: Int
 }
+
+/// One stop of a proposed outing (§20.2).
+struct TripOutingStop: Codable, Identifiable, Sendable {
+    let osmRef: String
+    let name: String?
+    let lat: Double
+    let lon: Double
+    let category: String
+    let dwellMinutes: Int
+    /// Minutes of travel from the previous stop — from the anchor, for the first.
+    let travelMinutes: Int
+    /// True for something the family collected, false for a fresh find.
+    let fromIdeas: Bool
+    let addedBy: String?
+
+    var id: String { osmRef }
+    var displayName: String {
+        if let name, !name.isEmpty { return name }
+        return "Unbenannter Ort"
+    }
+}
+
+/// „Soll ich daraus einen Nachmittag machen?" (§20.2)
+struct TripOutingProposal: Codable, Sendable {
+    /// True when there is anything worth proposing at all.
+    let offered: Bool
+    /// Why not, when not: ok | no-ideas | nothing-fits.
+    let reason: String
+    let stops: [TripOutingStop]
+    /// Minutes the proposal actually uses, travel included.
+    let usedMinutes: Int
+    let budgetMinutes: Int
+    /// Ideas considered but left out — the honest "was fällt weg".
+    let leftOut: Int
+
+    /// What to say when there is no proposal.
+    ///
+    /// The two refusals mean different things and a shared sentence
+    /// would hide which: nothing collected nearby is a full collection
+    /// somewhere else, nothing fitting is a budget too small for what
+    /// is here.
+    var refusal: String? {
+        guard !offered else { return nil }
+        switch reason {
+        case "no-ideas":
+            return "In der Nähe liegt nichts aus eurem Vorrat — und die Umgebung gibt auch nichts her."
+        case "nothing-fits":
+            return "Was hier liegt, passt nicht in die Zeit. Mit mehr Zeit sieht das anders aus."
+        default:
+            return "Daraus lässt sich gerade kein Ausflug machen."
+        }
+    }
+
+    /// "2 h 15" rather than "135 Minuten" — an afternoon is hours.
+    static func duration(_ minutes: Int) -> String {
+        let hours = minutes / 60
+        let rest = minutes % 60
+        if hours == 0 { return "\(rest) Min." }
+        if rest == 0 { return "\(hours) h" }
+        return "\(hours) h \(rest)"
+    }
+
+    /// The line under the proposal: what it uses, and what falls away.
+    var summary: String {
+        var sentence = "\(Self.duration(usedMinutes)) von \(Self.duration(budgetMinutes))"
+        if leftOut == 1 {
+            sentence += " · eine Idee bleibt liegen"
+        } else if leftOut > 1 {
+            sentence += " · \(leftOut) Ideen bleiben liegen"
+        }
+        return sentence
+    }
+}
+
+/// What accepting an outing produced (§20.3).
+///
+/// Only the id of the trip is read here: what the day looks like is the
+/// planner's screen to show, and decoding the whole plan twice would be
+/// two places to keep in step with the server.
+struct TripOutingAcceptResponse: Codable, Sendable {
+    struct PlanRef: Codable, Sendable { let id: Int }
+    let plan: PlanRef
+    /// Ideas that ended up on the day.
+    let planned: [Int]
+    /// Accepted but not on the day — they are in the trip\'s pool. Said
+    /// rather than silently dropped: the outing that fits is shorter
+    /// than the one somebody wanted (§5).
+    let inPool: [Int]
+}

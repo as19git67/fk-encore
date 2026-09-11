@@ -42,6 +42,14 @@ final class TripIdeasViewModel {
     private(set) var quietNearby = 0
     private(set) var isLoadingNearby = false
     var nearbyError: String?
+    /// The outing on offer, once somebody asked (§20.2).
+    private(set) var outing: TripOutingProposal?
+    /// Where it would start — kept so accepting uses the same anchor the
+    /// proposal was computed from, not wherever the phone is by then.
+    private(set) var outingAnchor: CLLocationCoordinate2D?
+    private(set) var isProposing = false
+    private(set) var isAcceptingOuting = false
+    var outingError: String?
 
     var collection: TripIdeaCollection? {
         guard let ownerId else { return collections.first(where: \.own) }
@@ -121,6 +129,124 @@ final class TripIdeasViewModel {
             nearby = before
             nearbyError = "Das ließ sich nicht merken."
         }
+    }
+
+    // MARK: - The outing (§20.2, §20.3)
+
+    /// How far an outing looks for ideas. A day-trip radius, not a walk.
+    static let outingRadiusM = 25_000
+    /// Half a day, which is what "ein Nachmittag" means.
+    static let outingBudgetMinutes = 240
+
+    /// „Soll ich daraus einen Nachmittag machen?"
+    ///
+    /// The call that turns the collection into a planner: a pool, an
+    /// anchor and a time budget *are* the planner's input, and the only
+    /// thing missing was the occasion. Nothing is written — the answer
+    /// is a proposal, and accepting it is a second, deliberate step.
+    func proposeOuting(locationProvider: TripLocationProvider? = nil) async {
+        isProposing = true
+        defer { isProposing = false }
+
+        let provider = locationProvider
+            ?? TripLocationProvider(accuracy: kCLLocationAccuracyHundredMeters)
+        guard let location = await provider.currentLocation() else {
+            outingError = "Ohne Standort lässt sich kein Ausflug vorschlagen."
+            return
+        }
+        outingAnchor = location.coordinate
+
+        struct Body: Encodable {
+            let lat: Double
+            let lon: Double
+            let radiusM: Int
+            let budgetMinutes: Int
+            let ownerId: Int?
+        }
+        do {
+            outing = try await APIClient.shared.post(
+                "/trip-planner/ideas/outing",
+                body: Body(
+                    lat: location.coordinate.latitude,
+                    lon: location.coordinate.longitude,
+                    radiusM: Self.outingRadiusM,
+                    budgetMinutes: Self.outingBudgetMinutes,
+                    ownerId: ownerId,
+                ),
+            )
+            outingError = nil
+        } catch {
+            outingError = "Der Ausflug ließ sich nicht berechnen."
+        }
+    }
+
+    /// Take the proposal, and get an ordinary one-day trip out of it (§20.3).
+    ///
+    /// Only the ideas from the collection are handed over: what the
+    /// region search filled up with is a suggestion for *this* day and
+    /// has no business being written into the collection on the way.
+    /// The trip is planned from them, and the answer says which made it
+    /// onto the day and which stayed in its pool.
+    func acceptOuting(date: String, title: String?) async -> Int? {
+        guard let outing, outing.offered, let anchor = outingAnchor else { return nil }
+        let ideaIds = collectedIds(in: outing)
+        guard !ideaIds.isEmpty else {
+            outingError = "Ohne eigene Ideen wird daraus keine Reise."
+            return nil
+        }
+
+        isAcceptingOuting = true
+        defer { isAcceptingOuting = false }
+
+        struct Body: Encodable {
+            let lat: Double
+            let lon: Double
+            let ideaIds: [Int]
+            let ownerId: Int?
+            let date: String
+            let title: String?
+            let budgetMinutes: Int
+        }
+        do {
+            let response: TripOutingAcceptResponse = try await APIClient.shared.post(
+                "/trip-planner/ideas/outing/accept",
+                body: Body(
+                    lat: anchor.latitude,
+                    lon: anchor.longitude,
+                    ideaIds: ideaIds,
+                    ownerId: ownerId,
+                    date: date,
+                    title: title?.isEmpty == true ? nil : title,
+                    budgetMinutes: Self.outingBudgetMinutes,
+                ),
+            )
+            outingError = nil
+            lastAddition = Self.acceptSentence(response)
+            return response.plan.id
+        } catch {
+            outingError = "Aus dem Vorschlag ließ sich keine Reise machen."
+            return nil
+        }
+    }
+
+    /// Which of the proposal's stops came out of the collection.
+    ///
+    /// Matched by reference against the entries on screen: the proposal
+    /// says `fromIdeas`, but not which id, and accepting needs the ids.
+    private func collectedIds(in outing: TripOutingProposal) -> [Int] {
+        let refs = Set(outing.stops.filter(\.fromIdeas).map(\.osmRef))
+        return entries.filter { refs.contains($0.osmRef) }.map(\.id)
+    }
+
+    /// What to say after accepting — pure, and honest about the shorter day.
+    static func acceptSentence(_ response: TripOutingAcceptResponse) -> String {
+        if response.inPool.isEmpty {
+            return "Der Ausflug steht als Reise."
+        }
+        let left = response.inPool.count == 1
+            ? "eine Idee liegt im Vorrat der Reise"
+            : "\(response.inPool.count) Ideen liegen im Vorrat der Reise"
+        return "Der Ausflug steht als Reise — \(left)."
     }
 
     /// Look whether the share sheet left something a link can be read from.

@@ -40,6 +40,7 @@ Zwei Eigenschaften unterscheiden ihn von einer Merkliste:
 | Bildschirm: Liste, Merken, Entfernen, Teilen | gebaut (`TripIdeasView`) |
 | Wege hinein: eigener Standort, geteilter Kartenlink | gebaut (`TripMapLink`) |
 | Bildschirm „In der Nähe" samt „nicht jetzt" | gebaut (`TripIdeasNearbyView`) |
+| Ausflugsvorschlag samt Übernahme als Reise | gebaut (`TripIdeasOutingView`) |
 | Die Meldung **von selbst** aus der Standortschleife (§7.1) | fehlt noch |
 | Bildschirme für Nähe, Ausflug und die Wege zur Reise | **fehlen noch** |
 
@@ -47,8 +48,9 @@ Der Einstieg steht seit Kurzem: In der Urlaubsplanung führt „Ideen" auf eine
 Liste je Sammlung — mit Notiz, mit „wer hat's gemerkt", mit Hinweis auf
 Einträge, die die Karte nicht kennt. Hinein kommen bisher **der Ort, an dem man
 gerade steht**, und ein **geteilter Kartenlink** (Apple Maps, auch als
-Kurzlink — der wird aufgelöst); Artikel und Suche aus §9.2 fehlen noch, ebenso der Ausflugsvorschlag und die drei Wege zwischen
-Vorrat und Reise. „In der Nähe" gibt es als **Frage** (ein Bildschirm, den man
+Kurzlink — der wird aufgelöst); Artikel und Suche aus §9.2 fehlen noch, ebenso die drei Wege zwischen Vorrat und
+Reise — bis auf einen: Ein angenommener **Ausflugsvorschlag** wird als
+eintägige Reise angelegt. „In der Nähe" gibt es als **Frage** (ein Bildschirm, den man
 öffnet) — was fehlt, ist die Meldung, die **von selbst** kommt. Diese Teile sind über die API
 vollständig benutzbar und haben keine Oberfläche.
 
@@ -211,8 +213,9 @@ andere Zahl hier ließe denselben Biergarten gleichzeitig „schon dabei" und
   einer Reise, §9.3), die
   Nähe-Meldung, die von selbst kommt — an der bestehenden Standortschleife
   (§7.1); der Bildschirm „In der Nähe" beantwortet bisher nur die gestellte
-  Frage. Dazu der Ausflugsvorschlag und die drei Wege zwischen Vorrat und
-  Reise.
+  Frage. Dazu die beiden übrigen Wege zwischen Vorrat und Reise (Angebot
+  beim Anlegen einer Reise, und Übriggebliebenes zurück in den Vorrat) —
+  der angenommene Ausflug ist gebaut.
 - **Veranstaltungen** (§20.4) — vorerst nicht gebaut, weil es keine Quelle
   gibt, die den Anspruch aushält. Die Spalten (`valid_from`, `valid_to`) und
   die Filterung abgelaufener Einträge stehen; ein Termin ist dann ein
