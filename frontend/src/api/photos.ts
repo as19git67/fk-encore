@@ -25,6 +25,11 @@ export interface Photo {
   description?: string
   /** IPTC Keywords / XMP dc:subject — tags imported from the file. Read-only in the UI. */
   keywords?: string[]
+  /**
+   * Photo is excluded from anonymous public-link views of its albums.
+   * Signed-in users and album collaborators still see it.
+   */
+  link_hidden?: boolean
 }
 
 export interface ListPhotosResponse {
@@ -553,6 +558,41 @@ export function ignorePersonFaces(personId: number) {
 
 export function getPhotoFaces(id: number) {
   return apiFetch<{ faces: Face[] }>(`/photos/${id}/faces`)
+}
+
+// ---------- Public link visibility ----------
+
+export interface UpdatePhotoLinkVisibilityResponse {
+  success: boolean
+  /** Number of photos whose flag actually changed. */
+  updated: number
+}
+
+export interface AutoHideKnownFacesResponse {
+  success: boolean
+  /** Photos that carry a known face and are now hidden from public links. */
+  updated: number
+  /** Photos that already had the flag set. */
+  alreadyHidden: number
+}
+
+/** Hide photos from — or show them again in — anonymous public-link views. */
+export function updatePhotoLinkVisibility(photoIds: number[], linkHidden: boolean) {
+  return apiFetch<UpdatePhotoLinkVisibilityResponse>('/photos/link-visibility', {
+    method: 'POST',
+    body: JSON.stringify({ photoIds, linkHidden })
+  })
+}
+
+/**
+ * Bulk pass: hide every photo showing a face assigned to a named person.
+ * Without `albumId` it covers the caller's whole library.
+ */
+export function autoHideKnownFaces(opts: { albumId?: number; personIds?: number[] } = {}) {
+  return apiFetch<AutoHideKnownFacesResponse>('/photos/link-visibility/known-faces', {
+    method: 'POST',
+    body: JSON.stringify(opts)
+  })
 }
 
 // ---------- Curation ----------

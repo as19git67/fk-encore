@@ -10,6 +10,11 @@ import { writeCacheFileAtomically } from "./cache-file";
 import { UPLOAD_DIR, THUMBNAIL_DIR, thumbnailShardPath } from "./photo.service";
 import { PHOTO_LIBRARIES_ROOT } from "./libraries.service";
 import { denyPhotoFileRequest } from "./photo-file-access";
+import {
+  autoHideKnownFacesLogic,
+  setPhotoLinkVisibilityLogic,
+  LinkVisibilityAccessError,
+} from "./link-visibility.service";
 import { eq } from "drizzle-orm";
 import db from "../db/database";
 import { dbFirst } from "../db/adapter";
@@ -45,6 +50,10 @@ import type {
   AlbumPublicLink,
   PublicAlbumResponse,
   PhotoLocationsResponse,
+  UpdatePhotoLinkVisibilityRequest,
+  UpdatePhotoLinkVisibilityResponse,
+  AutoHideKnownFacesRequest,
+  AutoHideKnownFacesResponse,
 } from "../db/types";
 import { Query } from "encore.dev/api";
 import { parsePhotoFilterQuery, type PhotoFilterQuery } from "./photo.filters";
@@ -609,6 +618,47 @@ export const updatePhotoCuration = api(
       }
       throw err;
     }
+  }
+);
+
+/**
+ * Hide photos from (or show them again in) anonymous public-link views.
+ *
+ * Unlike curation this is not per-user: the flag decides what every link
+ * visitor sees, so it requires write access to the photo (owner) or to an
+ * album containing it.
+ */
+export const updatePhotoLinkVisibility = api(
+  { expose: true, method: "POST", path: "/photos/link-visibility", auth: true },
+  async ({ photoIds, linkHidden }: UpdatePhotoLinkVisibilityRequest): Promise<UpdatePhotoLinkVisibilityResponse> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    try {
+      return await setPhotoLinkVisibilityLogic(userId, photoIds, linkHidden);
+    } catch (err: any) {
+      if (err instanceof LinkVisibilityAccessError) {
+        throw APIError.permissionDenied("Nicht berechtigt, die Link-Sichtbarkeit zu ändern.");
+      }
+      throw err;
+    }
+  }
+);
+
+/**
+ * Bulk pass: hide every photo showing a face assigned to a named person.
+ * Optionally scoped to a single album.
+ */
+export const autoHideKnownFaces = api(
+  { expose: true, method: "POST", path: "/photos/link-visibility/known-faces", auth: true },
+  async ({ albumId, personIds }: AutoHideKnownFacesRequest): Promise<AutoHideKnownFacesResponse> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    requirePermission(authData, "people.view");
+    return await autoHideKnownFacesLogic(userId, { albumId, personIds });
   }
 );
 

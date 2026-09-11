@@ -349,6 +349,43 @@ export interface Photo {
   description?: string;
   /** IPTC Keywords / XMP dc:subject — user-facing tags imported from the file. */
   keywords?: string[];
+  /**
+   * When true the photo is excluded from every anonymous public-link view of
+   * the albums it belongs to. Signed-in users and album collaborators still
+   * see it (issue: per-photo link visibility).
+   */
+  link_hidden?: boolean;
+}
+
+export interface UpdatePhotoLinkVisibilityRequest {
+  /** Photos to update. */
+  photoIds: number[];
+  /** true = hide from public links, false = show again. */
+  linkHidden: boolean;
+}
+
+export interface UpdatePhotoLinkVisibilityResponse {
+  success: boolean;
+  /** Number of photos whose flag actually changed. */
+  updated: number;
+}
+
+export interface AutoHideKnownFacesRequest {
+  /** Restrict the pass to a single album. Omit to cover the whole library. */
+  albumId?: number;
+  /**
+   * Only consider faces assigned to these persons. Omit to use every person
+   * the caller has named (i.e. every "known" face).
+   */
+  personIds?: number[];
+}
+
+export interface AutoHideKnownFacesResponse {
+  success: boolean;
+  /** Photos that carry a known face and are now hidden from public links. */
+  updated: number;
+  /** Photos that already had the flag set. */
+  alreadyHidden: number;
 }
 
 export interface FaceBBox { x: number; y: number; width: number; height: number; }

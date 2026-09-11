@@ -74,6 +74,8 @@ import {
   updateAlbum,
   updateAlbumUserSettings,
   updatePhotoCuration,
+  updatePhotoLinkVisibility,
+  autoHideKnownFaces,
   updatePhotoDate,
 } from '../api/photos'
 import { useAuthStore } from '../stores/auth'
@@ -394,6 +396,9 @@ const selectMode = ref(false)
 const selectedIds = ref<Set<number>>(new Set())
 const selectedCount = computed(() => selectedIds.value.size)
 const curationBusy = ref(false)
+const linkVisibilityBusy = ref(false)
+const autoHideBusy = ref(false)
+const autoHideResult = ref<string | null>(null)
 const removeBusy = ref(false)
 const deleteBusy = ref(false)
 const deleteSkipped = ref<BatchDeleteSkippedPhoto[]>([])
@@ -519,6 +524,47 @@ async function applyCurationToSelection(target: CurationStatus) {
   }
 }
 
+/**
+ * Batch-set the public-link opt-out on the current selection. Unlike curation
+ * this is not per-user — it changes what every link visitor sees — so the
+ * backend only accepts it from the photo owner or an album writer.
+ */
+async function applyLinkVisibilityToSelection(linkHidden: boolean) {
+  const ids = Array.from(selectedIds.value)
+  if (ids.length === 0) return
+  linkVisibilityBusy.value = true
+  try {
+    await updatePhotoLinkVisibility(ids, linkHidden)
+    await loadData()
+    await galleryRef.value?.reload()
+  } catch (err: any) {
+    error.value = err?.message ?? 'Die Link-Sichtbarkeit konnte nicht geändert werden.'
+  } finally {
+    linkVisibilityBusy.value = false
+    exitSelectMode()
+  }
+}
+
+/** Quick pass: hide every album photo showing a face of a named person. */
+async function hideKnownFacesFromLink() {
+  autoHideBusy.value = true
+  autoHideResult.value = null
+  try {
+    const res = await autoHideKnownFaces({ albumId: albumId.value })
+    autoHideResult.value = res.updated === 0
+      ? (res.alreadyHidden > 0
+        ? `Alle ${res.alreadyHidden} Fotos mit bekannten Gesichtern sind bereits ausgenommen.`
+        : 'Keine Fotos mit bekannten Gesichtern gefunden.')
+      : `${res.updated} ${res.updated === 1 ? 'Foto wird' : 'Fotos werden'} über den Link nicht mehr gezeigt.`
+    await loadData()
+    await galleryRef.value?.reload()
+  } catch (err: any) {
+    error.value = err?.message ?? 'Die Fotos konnten nicht ausgenommen werden.'
+  } finally {
+    autoHideBusy.value = false
+  }
+}
+
 function deleteFromSelection() {
   const ids = Array.from(selectedIds.value)
   if (ids.length === 0) return
@@ -606,6 +652,12 @@ const selectionMenuItems = computed(() => {
     items.push(
       { label: 'Als Favorit markieren', icon: 'pi pi-heart', disabled: curationBusy.value, command: () => void applyCurationToSelection('favorite') },
       { label: 'Ausblenden', icon: 'pi pi-thumbs-down-fill', disabled: curationBusy.value, command: () => void applyCurationToSelection('hidden') },
+    )
+  }
+  if (canWrite.value) {
+    items.push(
+      { label: 'Über Freigabe-Link nicht zeigen', icon: 'pi pi-eye-slash', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection(true) },
+      { label: 'Über Freigabe-Link wieder zeigen', icon: 'pi pi-link', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection(false) },
     )
   }
   if (canWrite.value) {
@@ -2809,6 +2861,21 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
             </div>
             <span class="share-hint">Jeder mit dem Link kann das Album ansehen.</span>
           </div>
+          <div class="link-privacy-block">
+            <Button
+              label="Fotos mit bekannten Gesichtern ausnehmen"
+              icon="pi pi-eye-slash"
+              size="small"
+              text
+              :loading="autoHideBusy"
+              @click="hideKnownFacesFromLink"
+            />
+            <span v-if="autoHideResult" class="share-hint">{{ autoHideResult }}</span>
+            <span v-else class="share-hint">
+              Nimmt alle Fotos, auf denen ein benanntes Gesicht erkannt wurde, von der Link-Ansicht aus.
+              Einzelne Fotos lassen sich jederzeit über das Foto-Detail umschalten.
+            </span>
+          </div>
         </div>
         <div class="share-section">
           <h4 class="share-section-title">Aktuelle Freigaben</h4>
@@ -2924,6 +2991,16 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 </template>
 
 <style scoped>
+.link-privacy-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  align-items: flex-start;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--p-content-border-color);
+}
+
 .album-detail-view {
   display: flex;
   flex-direction: column;

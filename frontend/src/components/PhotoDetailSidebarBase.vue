@@ -7,7 +7,7 @@ import PhotoLocationMenu from './PhotoLocationMenu.vue'
 import PhotoReactions from './PhotoReactions.vue'
 import PhotoAlbumDialog from './PhotoAlbumDialog.vue'
 import PhotoTransformEditor from './PhotoTransformEditor.vue'
-import { getPhotoUrl, getPhotosAlbums, updateAlbum, updateAlbumUserSettings, updatePhotoDescription } from '../api/photos'
+import { getPhotoUrl, getPhotosAlbums, updateAlbum, updateAlbumUserSettings, updatePhotoDescription, updatePhotoLinkVisibility } from '../api/photos'
 import { getAlbumCheckState as calculateAlbumCheckState } from '../utils/albumSelection'
 import type { Photo, Face, PoiMatchItem, Person, CurationStatus } from '../api/photos'
 import { useReferenceData } from '../composables/useReferenceData'
@@ -255,6 +255,30 @@ async function toggleCover() {
   }
 }
 
+// ── Public-link visibility ──────────────────────────────────────────────
+// Per-photo opt-out of link sharing: the photo stays visible to signed-in
+// users but disappears from every anonymous public-link view of its albums.
+// Unlike hiding, this is not a per-user setting, so it takes write access.
+const linkHidden = ref(!!props.photo.link_hidden)
+watch(() => props.photo.id, () => { linkHidden.value = !!props.photo.link_hidden })
+watch(() => props.photo.link_hidden, v => { linkHidden.value = !!v })
+
+const togglingLinkVisibility = ref(false)
+async function toggleLinkVisibility() {
+  if (togglingLinkVisibility.value) return
+  const next = !linkHidden.value
+  togglingLinkVisibility.value = true
+  try {
+    await updatePhotoLinkVisibility([props.photo.id], next)
+    linkHidden.value = next
+    emit('link-visibility-changed', props.photo.id, next)
+  } catch (err) {
+    console.error('Failed to update link visibility:', err)
+  } finally {
+    togglingLinkVisibility.value = false
+  }
+}
+
 onMounted(loadAlbums)
 
 const emit = defineEmits<{
@@ -270,6 +294,7 @@ const emit = defineEmits<{
   restore: [id: number]
   'navigate-to-photo': [id: number]
   'comment-count-change': [payload: { photoId: number; delta: number }]
+  'link-visibility-changed': [id: number, linkHidden: boolean]
 }>()
 
 function formatPhotoDateDisplay(photo: Photo) {
@@ -283,6 +308,18 @@ function formatPhotoDateDisplay(photo: Photo) {
 // the values read-only.
 const canEditPhotoMeta = computed(() =>
   detailPanelEditable(auth.user?.id != null && props.photo.user_id === auth.user.id, props.readOnly),
+)
+
+// The link-visibility flag affects every link visitor, so the backend only
+// accepts it from the photo's owner or someone with album write access.
+const canEditLinkVisibility = computed(() =>
+  detailPanelEditable(
+    (auth.user?.id != null && props.photo.user_id === auth.user.id)
+      || props.albumRole === 'owner'
+      || props.albumRole === 'admin'
+      || props.albumRole === 'contributor',
+    props.readOnly,
+  ),
 )
 
 // Resolve the display name for an assigned face. Prefer the name the backend
@@ -412,6 +449,16 @@ watch(() => props.readOnly, (ro) => {
           <Button :icon="photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'" v-tooltip.bottom="photo.curation_status === 'favorite' ? 'Kein Favorit' : 'Favorit'" @click="emit('toggle-favorite', photo.id, photo.curation_status)" :severity="photo.curation_status === 'favorite' ? 'warn' : 'secondary'" text rounded />
           <Button :icon="photo.curation_status === 'hidden' ? 'pi pi-thumbs-down-fill' : 'pi pi-thumbs-down'" v-tooltip.bottom="photo.curation_status === 'hidden' ? 'Wiederherstellen' : 'Ausblenden'" @click="photo.curation_status === 'hidden' ? emit('restore', photo.id) : emit('hide', photo.id)" :severity="photo.curation_status === 'hidden' ? 'danger' : 'secondary'" text rounded />
         </template>
+        <Button
+            v-if="canEditLinkVisibility"
+            :icon="linkHidden ? 'pi pi-eye-slash' : 'pi pi-link'"
+            v-tooltip.bottom="linkHidden ? 'Wird über Freigabe-Links nicht gezeigt — wieder freigeben' : 'Über Freigabe-Links nicht zeigen'"
+            :severity="linkHidden ? 'danger' : 'secondary'"
+            text
+            rounded
+            :loading="togglingLinkVisibility"
+            @click="toggleLinkVisibility"
+        />
         <template v-if="albumId" class="meta-row cover-action">
           <Button
               icon="pi pi-image"

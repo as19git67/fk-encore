@@ -97,6 +97,8 @@ import {
 import {
   listPhotoGroups,
   updatePhotoCuration,
+  updatePhotoLinkVisibility,
+  autoHideKnownFaces,
   computeFileHash,
   checkPhotoHash,
   uploadPhotoWithProgress,
@@ -396,6 +398,7 @@ async function shareSelectedPhotos() {
 // optimistic `updateEntry` before the network round-trip — instant UI,
 // reverts in-place on failure.
 const curationBusy = ref(false)
+const linkVisibilityBusy = ref(false)
 const galleryRef = ref<InstanceType<typeof VirtualGallery> | null>(null)
 
 async function applyCurationToSelection(target: 'favorite' | 'hidden' | 'visible') {
@@ -418,6 +421,35 @@ async function applyCurationToSelection(target: 'favorite' | 'hidden' | 'visible
     }
   } finally {
     curationBusy.value = false
+    exitSelectMode()
+  }
+}
+
+/**
+ * Batch-set the per-photo public-link opt-out. The flag is not per-user: it
+ * decides what anonymous link visitors see across every album the photo is in.
+ */
+async function applyLinkVisibilityToSelection(linkHidden: boolean) {
+  const ids = Array.from(selectedIds.value)
+  if (ids.length === 0) return
+  linkVisibilityBusy.value = true
+  try {
+    await updatePhotoLinkVisibility(ids, linkHidden)
+    await galleryRef.value?.reload()
+  } finally {
+    linkVisibilityBusy.value = false
+    exitSelectMode()
+  }
+}
+
+/** Quick pass over the whole library: hide every photo with a named face. */
+async function hideKnownFacesFromLinks() {
+  linkVisibilityBusy.value = true
+  try {
+    await autoHideKnownFaces({})
+    await galleryRef.value?.reload()
+  } finally {
+    linkVisibilityBusy.value = false
     exitSelectMode()
   }
 }
@@ -482,6 +514,9 @@ const selectionMenuItems = computed(() => {
     items.push(
       { label: 'Als Favorit markieren', icon: 'pi pi-heart', disabled: curationBusy.value, command: () => void applyCurationToSelection('favorite') },
       { label: 'Ausblenden', icon: 'pi pi-thumbs-down-fill', disabled: curationBusy.value, command: () => void applyCurationToSelection('hidden') },
+      { label: 'Über Freigabe-Link nicht zeigen', icon: 'pi pi-eye-slash', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection(true) },
+      { label: 'Über Freigabe-Link wieder zeigen', icon: 'pi pi-link', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection(false) },
+      { label: 'Alle Fotos mit bekannten Gesichtern von Links ausnehmen', icon: 'pi pi-users', disabled: linkVisibilityBusy.value, command: () => void hideKnownFacesFromLinks() },
     )
   }
   items.push({ label: 'Auswahl aufheben', icon: 'pi pi-replay', command: clearSelection })

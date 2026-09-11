@@ -234,6 +234,12 @@ export const photos = pgTable("photos", {
   // used as a fast-path dedup lookup on re-upload — gated on image_data_hash
   // equality so an actual content edit is still stored as a new photo (#432).
   device_asset_id: text("device_asset_id"),
+  // Per-photo opt-out of public link sharing. When true the photo stays
+  // visible to signed-in users (and to album collaborators) but is excluded
+  // from every anonymous public-link view of every album it belongs to —
+  // listing, cover and the raw file endpoint alike. Set manually per photo or
+  // in bulk via the "hide photos with known faces" action.
+  link_hidden: boolean("link_hidden").notNull().default(false),
 });
 
 // ========== Persons ==========

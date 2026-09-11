@@ -43,9 +43,10 @@ export interface PhotoFileDenial {
  * True when the share link is live and actually covers this file.
  *
  * The hidden-photo exclusion mirrors `getPublicAlbumLogic` exactly: a photo
- * any album participant has hidden is absent from the public listing, so it
- * must not be reachable by filename either — otherwise hiding a photo after
- * sharing the link would not take effect for anyone who noted the URL.
+ * any album participant has hidden — or that carries the per-photo
+ * `link_hidden` opt-out — is absent from the public listing, so it must not
+ * be reachable by filename either; otherwise hiding a photo after sharing the
+ * link would not take effect for anyone who noted the URL.
  */
 async function shareLinkCoversFile(token: string, filename: string): Promise<boolean> {
   const result = await db.execute(sql`
@@ -56,6 +57,9 @@ async function shareLinkCoversFile(token: string, filename: string): Promise<boo
     WHERE l.token = ${token}
       AND l.disabled_at IS NULL
       AND (l.expires_at IS NULL OR l.expires_at > NOW())
+      -- Photos the owner opted out of link sharing are absent from the
+      -- public listing, so they must not be reachable by filename either.
+      AND p.link_hidden = false
       AND (
         EXISTS (
           SELECT 1 FROM ${albumPhotos} ap
