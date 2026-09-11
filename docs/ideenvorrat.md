@@ -1,6 +1,7 @@
 # Ideenvorrat — die Sammlung ohne Reise
 
-Stand: 2026-09-10 · Status: Backend vollständig, ohne Client
+Stand: 2026-09-11 · Status: Backend vollständig, iOS-Oberfläche gebaut
+(zwei Wege hinein und die Veranstaltungen ausgenommen — §6)
 
 Ausführliche Begründung und Entwurf: `docs/ios-urlaubsplanung.md` §20.
 Dieses Dokument beschreibt, **was gebaut ist** — Endpunkte, Datenmodell,
@@ -43,19 +44,22 @@ Zwei Eigenschaften unterscheiden ihn von einer Merkliste:
 | Ausflugsvorschlag samt Übernahme als Reise | gebaut (`TripIdeasOutingView`) |
 | Angebot in der Reise + „für später merken" | gebaut (`TripPlanIdeasView`, Vorrat-Wischgeste) |
 | Die Meldung **von selbst** (Standortschleife) | gebaut (`TripIdeaNoticeMonitor`), **standardmäßig aus** |
-| Bildschirme für Nähe, Ausflug und die Wege zur Reise | **fehlen noch** |
+| Wege hinein: Artikel, Suche | **nicht gebaut** — brauchen eine Reise (§9.3), siehe §6 |
 
-Der Einstieg steht seit Kurzem: In der Urlaubsplanung führt „Ideen" auf eine
-Liste je Sammlung — mit Notiz, mit „wer hat's gemerkt", mit Hinweis auf
-Einträge, die die Karte nicht kennt. Hinein kommen bisher **der Ort, an dem man
-gerade steht**, und ein **geteilter Kartenlink** (Apple Maps, auch als
-Kurzlink — der wird aufgelöst); Artikel und Suche aus §9.2 fehlen noch, Die drei Wege zwischen Vorrat und Reise stehen alle: der angenommene
+Der Einstieg steht: In der Urlaubsplanung führt „Ideen" auf eine Liste je
+Sammlung — mit Notiz, mit „wer hat's gemerkt", mit Hinweis auf Einträge, die
+die Karte nicht kennt. Hinein kommen **der Ort, an dem man gerade steht**, und
+ein **geteilter Kartenlink** (Apple Maps, auch als Kurzlink — der wird
+aufgelöst); Artikel und Suche aus §9.2 fehlen und werden hier bewusst nicht
+gebaut (§6).
+
+Die drei Wege zwischen Vorrat und Reise stehen alle: der angenommene
 **Ausflugsvorschlag** als eintägige Reise, das **Angebot in der Reise**
 („Aus dem Vorrat" im Menü der Tageskarte) und **„für später merken"** als
-Wischgeste im Etappenvorrat. „In der Nähe" gibt es als **Frage** (ein Bildschirm, den man
-öffnet) und als **Meldung von selbst** — letztere ist ein Schalter im Menü und
-ist standardmäßig **aus**. Diese Teile sind über die API
-vollständig benutzbar und haben keine Oberfläche.
+Wischgeste im Etappenvorrat. „In der Nähe" gibt es als **Frage** (ein
+Bildschirm, den man öffnet, und der deshalb keine Ruhezeit verbraucht) und als
+**Meldung von selbst** — letztere ist ein Schalter im Menü und standardmäßig
+**aus**.
 
 ## 3. Datenmodell
 
