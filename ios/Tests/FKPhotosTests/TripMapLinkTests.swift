@@ -25,10 +25,18 @@ final class TripMapLinkTests: XCTestCase {
         XCTAssertEqual(place?.name, "Burg")
     }
 
-    func testTheMapsSchemeIsReadTheSameWay() {
-        let place = TripMapLink.place(from: "maps:q=Ort&ll=50.1,8.7")
-        XCTAssertEqual(place?.lat ?? 0, 50.1, accuracy: 0.00001)
-        XCTAssertEqual(place?.name, "Ort")
+    func testTheMapsSchemeIsReadInEveryShapeSendersUse() {
+        // `maps:` is an opaque URL: without a question mark everything
+        // sits in the path, where a query parser never looks. All three
+        // shapes turn up, and all three name the same place.
+        for link in ["maps:q=Ort&ll=50.1,8.7",
+                     "maps:?q=Ort&ll=50.1,8.7",
+                     "maps://?q=Ort&ll=50.1,8.7"] {
+            let place = TripMapLink.place(from: link)
+            XCTAssertEqual(place?.lat ?? 0, 50.1, accuracy: 0.00001, link)
+            XCTAssertEqual(place?.lon ?? 0, 8.7, accuracy: 0.00001, link)
+            XCTAssertEqual(place?.name, "Ort", link)
+        }
     }
 
     func testALinkWithoutANameIsStillAPlace() {

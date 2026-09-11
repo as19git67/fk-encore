@@ -37,10 +37,7 @@ enum TripMapLink {
     /// A short link (`maps.apple/p/…`) carries no coordinate at all and
     /// answers nil here until somebody has resolved it.
     static func place(from url: URL) -> Place? {
-        var params: [String: String] = [:]
-        if let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems {
-            for item in items where item.value != nil { params[item.name] = item.value }
-        }
+        let params = parameters(of: url)
         guard let ll = params["ll"] else { return nil }
         let parts = ll.split(separator: ",")
         guard parts.count >= 2,
@@ -55,6 +52,31 @@ enum TripMapLink {
             .replacingOccurrences(of: "+", with: " ")
             .trimmingCharacters(in: .whitespaces)
         return Place(lat: lat, lon: lon, name: name?.isEmpty == true ? nil : name)
+    }
+
+    /// The link's parameters, whichever shape the sender's app used.
+    ///
+    /// `https://maps.apple.com/?ll=…` is an ordinary URL and
+    /// `URLComponents` reads it. The `maps:` scheme is not: it is
+    /// opaque, and a sender that writes `maps:q=Ort&ll=…` — with no
+    /// question mark — leaves everything sitting in the path, where the
+    /// query parser never looks. Reading only the first shape silently
+    /// answered "no place here" for the second, which is the worst way
+    /// to be wrong about a link: it looks like a link that carried
+    /// nothing rather than one nobody read.
+    private static func parameters(of url: URL) -> [String: String] {
+        var items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        if items.isEmpty, let colon = url.absoluteString.firstIndex(of: ":") {
+            var rest = String(url.absoluteString[url.absoluteString.index(after: colon)...])
+            while rest.hasPrefix("/") { rest.removeFirst() }
+            if rest.hasPrefix("?") { rest.removeFirst() }
+            items = URLComponents(string: "?\(rest)")?.queryItems ?? []
+        }
+        var params: [String: String] = [:]
+        for item in items {
+            if let value = item.value { params[item.name] = value }
+        }
+        return params
     }
 
     static func place(from urlString: String) -> Place? {
