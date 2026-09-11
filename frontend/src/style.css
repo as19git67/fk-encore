@@ -79,3 +79,29 @@ a:hover {
    * beyond the visible page; options inside wrap to multiple lines. */
   max-width: min(calc(100vw - 1rem), 32rem);
 }
+
+/* ── Photos: "not shared via link" icon ──────────────────────────────────────
+ * PrimeIcons ships pi-link but no struck-through variant, so the slash is
+ * drawn as a pseudo-element over the link glyph. Defined globally because it
+ * is used from three places (album grid badge, detail sidebar, fullscreen
+ * toolbar) and PrimeVue's Button takes its icon as a bare class string.
+ * currentColor keeps it in step with whatever colour the icon inherits. */
+.pi-link-slash:before {
+  content: "\e9c1"; /* same glyph as .pi-link */
+}
+.pi-link-slash {
+  position: relative;
+}
+.pi-link-slash:after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1.15em;
+  height: 0.1em;
+  min-height: 1px;
+  background: currentColor;
+  border-radius: 1px;
+  transform: translate(-50%, -50%) rotate(-45deg);
+  pointer-events: none;
+}

@@ -1284,6 +1284,36 @@ async function applyCurationToPhoto(id: number, target: CurationStatus): Promise
 function onFullscreenToggleFavorite(id: number, currentStatus: CurationStatus) {
   void applyCurationToPhoto(id, currentStatus === 'favorite' ? 'visible' : 'favorite')
 }
+// ── Public-link visibility (fullscreen toolbar + detail sidebar) ───────────
+// The stored setting lives on the photo, so every fullscreen slot holding
+// this id has to follow. The gallery grid carries no link marker outside an
+// album (the server only sets it for a link-shared album), so there is
+// nothing to update there.
+function syncLinkVisibility(id: number, visibility: PhotoLinkVisibility) {
+  for (const r of [cursorPhoto, cursorPrev, cursorNext]) {
+    if (r.value && r.value.id === id) {
+      r.value = { ...r.value, link_visibility: visibility }
+    }
+  }
+}
+
+/** The sidebar already wrote the change; only mirror it into our own state. */
+function onLinkVisibilityChanged(id: number, visibility: PhotoLinkVisibility) {
+  syncLinkVisibility(id, visibility)
+}
+
+/** The overlay only reports intent, so the write is ours. */
+async function onFullscreenToggleLinkVisibility(id: number, visibility: PhotoLinkVisibility) {
+  const previous = cursorPhoto.value?.link_visibility
+  syncLinkVisibility(id, visibility)
+  try {
+    await updatePhotoLinkVisibility([id], visibility)
+  } catch {
+    if (previous !== undefined) syncLinkVisibility(id, previous)
+    if (cursorIndex.value !== null) await hydrateCursor(cursorIndex.value)
+  }
+}
+
 function onFullscreenHide(id: number) {
   void applyCurationToPhoto(id, 'hidden')
 }
@@ -1733,6 +1763,7 @@ void refreshReviewSequence()
           @cancel-edit-date="onSidebarCancelEditDate"
           @ignore-face="onSidebarIgnoreFace"
           @reindex="onSidebarReindex"
+          @link-visibility-changed="onLinkVisibilityChanged"
         />
       </aside>
     </div>
@@ -1774,6 +1805,7 @@ void refreshReviewSequence()
       @restore="onFullscreenRestore"
       @show-details="onShowDetails"
       @open-group-review="onFullscreenOpenGroupReview"
+      @toggle-link-visibility="onFullscreenToggleLinkVisibility"
     >
       <template #details-flyout="{ readOnly, detailsOpen, imageReady }">
         <PhotoDetailSidebar
@@ -1805,6 +1837,7 @@ void refreshReviewSequence()
           @cancel-edit-date="onSidebarCancelEditDate"
           @ignore-face="onSidebarIgnoreFace"
           @reindex="onSidebarReindex"
+          @link-visibility-changed="onLinkVisibilityChanged"
         />
       </template>
     </FullscreenOverlay>

@@ -5,7 +5,13 @@ import Select from 'primevue/select'
 import Menu from 'primevue/menu'
 import HeicImage from './HeicImage.vue'
 import PhotoTransformEditor from './PhotoTransformEditor.vue'
-import { getPhotoUrl, type Photo, type CurationStatus } from '../api/photos'
+import { getPhotoUrl, type Photo, type CurationStatus, type PhotoLinkVisibility } from '../api/photos'
+import {
+  isVisibleViaLink,
+  nextLinkVisibility,
+  linkVisibilityIcon as iconForLinkVisibility,
+  linkVisibilityTooltip as tooltipForLinkVisibility,
+} from '../utils/linkVisibility'
 import { useUserPhotoTransform, invalidateUserTransform } from '../composables/useUserPhotoTransform'
 import { photoThumbnailSrc } from '../composables/useTransformedPhotosIndex'
 import { useAuthStore } from '../stores/auth'
@@ -161,12 +167,24 @@ const emit = defineEmits<{
   'restore': [id: number]
   'show-details': []
   'toggle-cover': [id: number]
+  /** Requested public-link visibility for the current photo (see utils/linkVisibility). */
+  'toggle-link-visibility': [id: number, visibility: PhotoLinkVisibility]
   /** Fired when the user clicks the +N marker → parent opens review. */
   'open-group-review': []
   /** Fired once the current photo's image is actually decoded on screen, so
    *  the host can warm neighbour metadata without competing with the image. */
   'current-loaded': [id: number]
 }>()
+
+// ── Public-link visibility ──────────────────────────────────────────────
+// The overlay only reports the intent; the host owns the API call and the
+// grid/entry refresh, exactly as it does for favourite and hide.
+const shownViaLink = computed(() => isVisibleViaLink(props.photo))
+const linkVisibilityIcon = computed(() => iconForLinkVisibility(props.photo))
+const linkVisibilityTooltip = computed(() => tooltipForLinkVisibility(props.photo))
+function emitLinkVisibility() {
+  emit('toggle-link-visibility', props.photo.id, nextLinkVisibility(props.photo))
+}
 
 // Per-user photo recipe — applies the caller's exposure/contrast/gamma
 // to the fullscreen image via CSS filter. Crop is NOT applied here for
@@ -538,6 +556,13 @@ function handleKeydown(e: KeyboardEvent) {
     e.stopImmediatePropagation()
     e.preventDefault()
     emit('show-details')
+  } else if (e.key === 'l' || e.key === 'L') {
+    if (!props.canDelete || props.photo.link_visibility === undefined) return
+    const tag = (document.activeElement as HTMLElement | null)?.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return
+    e.stopImmediatePropagation()
+    e.preventDefault()
+    emitLinkVisibility()
   } else if (e.key === 'c' || e.key === 'C') {
     const tag = (document.activeElement as HTMLElement | null)?.tagName
     if (tag === 'INPUT' || tag === 'TEXTAREA') return
@@ -1127,6 +1152,18 @@ onUnmounted(() => {
               :severity="photo.curation_status === 'favorite' ? 'warn' : 'secondary'"
               @click="emit('toggle-favorite', photo.id, photo.curation_status)"
               v-tooltip.top="(photo.curation_status === 'favorite' ? 'Favorit entfernen' : 'Als Favorit markieren') + ' (F)'"
+            />
+            <!-- Same toggle as the detail sidebar, on the same icon: a plain
+                 link when a public-link visitor sees this photo, a struck-out
+                 one when it is withheld. Absent while the photo's link fields
+                 have not been hydrated yet, so it never shows a guessed state. -->
+            <Button
+              v-if="canDelete && photo.link_visibility !== undefined"
+              :icon="linkVisibilityIcon"
+              rounded text
+              :severity="shownViaLink ? 'secondary' : 'danger'"
+              @click="emitLinkVisibility"
+              v-tooltip.top="linkVisibilityTooltip + ' (L)'"
             />
             <Button
               v-if="canEditTransform"
