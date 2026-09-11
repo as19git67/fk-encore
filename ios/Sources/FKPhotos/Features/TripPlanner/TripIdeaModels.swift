@@ -78,4 +78,27 @@ struct TripIdeaAddResponse: Codable, Sendable {
     let matchedOsmRef: String?
     /// What is not known about it, in plain words (§15.3).
     let unknown: [String]
+
+    /// What to say afterwards.
+    ///
+    /// On the response rather than in the view model, for the same
+    /// reason `displayName` sits on the entry: it is a reading of what
+    /// came back, with no state and no clock behind it — and a pure
+    /// function has no business being bound to an actor.
+    ///
+    /// Two things it refuses to smooth over. A **merge** means the list
+    /// will not grow, which somebody who just tapped "merken" would
+    /// otherwise read as a failure. And what the map could **not** tell
+    /// us is named rather than passed off as data (§15.3).
+    var sentence: String {
+        var parts: [String] = [
+            merged
+                ? "\(entry.displayName) war schon im Vorrat — ergänzt."
+                : "\(entry.displayName) ist im Vorrat.",
+        ]
+        if !unknown.isEmpty {
+            parts.append("Unbekannt: \(unknown.joined(separator: ", ")).")
+        }
+        return parts.joined(separator: " ")
+    }
 }

@@ -85,29 +85,12 @@ final class TripIdeasViewModel {
                     note: note?.isEmpty == true ? nil : note,
                 ),
             )
-            lastAddition = Self.sentence(for: response)
+            lastAddition = response.sentence
             errorMessage = nil
             await load()
         } catch {
             errorMessage = "Das ließ sich nicht merken."
         }
-    }
-
-    /// What to say after an addition — pure, so the wording is testable.
-    static func sentence(for response: TripIdeaAddResponse) -> String {
-        var parts: [String] = []
-        parts.append(
-            response.merged
-                ? "\(response.entry.displayName) war schon im Vorrat — ergänzt."
-                : "\(response.entry.displayName) ist im Vorrat.",
-        )
-        if !response.unknown.isEmpty {
-            // Named rather than hidden: an entry the map does not know
-            // carries guesses, and a screen that keeps that to itself
-            // presents a guess as a fact (§15.3).
-            parts.append("Unbekannt: \(response.unknown.joined(separator: ", ")).")
-        }
-        return parts.joined(separator: " ")
     }
 
     func remove(_ idea: TripIdea) async {

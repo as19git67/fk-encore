@@ -86,20 +86,18 @@ final class TripIdeasTests: XCTestCase {
     func testAMergeIsSaidOutLoud() throws {
         // Otherwise the list does not grow and somebody who just tapped
         // "merken" reads that as a failure.
-        let sentence = TripIdeasViewModel.sentence(for: try response(merged: true, unknown: []))
+        let sentence = try response(merged: true, unknown: []).sentence
         XCTAssertTrue(sentence.contains("war schon im Vorrat"))
     }
 
     func testANewEntryIsNotDressedUpAsAMerge() throws {
-        let sentence = TripIdeasViewModel.sentence(for: try response(merged: false, unknown: []))
+        let sentence = try response(merged: false, unknown: []).sentence
         XCTAssertTrue(sentence.contains("ist im Vorrat"))
         XCTAssertFalse(sentence.contains("schon"))
     }
 
     func testWhatIsNotKnownIsNamedRatherThanHidden() throws {
-        let sentence = TripIdeasViewModel.sentence(
-            for: try response(merged: false, unknown: ["Öffnungszeiten", "Kategorie"]),
-        )
+        let sentence = try response(merged: false, unknown: ["Öffnungszeiten", "Kategorie"]).sentence
         XCTAssertTrue(sentence.contains("Unbekannt: Öffnungszeiten, Kategorie."))
     }
 
