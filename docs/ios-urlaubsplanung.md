@@ -1871,8 +1871,43 @@ das ist eine Geschmacksentscheidung, keine Qualitätsmessung. Für ein System,
 dessen Rückgratzusage „alles bleibt im Haus" lautet (§3), ist das kein Preis
 wert, solange nicht jemand die drei fehlenden Wahrzeichen vermisst.
 
-Die zwei übrigen Aufgaben aus §11.1 — Dokumente und Verhandlungs-Chat — sind
-weiterhin nicht gemessen.
+**Die dritte Messung: der Verhandlungs-Chat** (`run-chat.ts`, zehn Sätze an
+einem Plan, acht Werkzeuge plus „nachfragen" und „nichts tun"):
+
+| | getroffen | übergriffig | Median |
+| --- | --- | --- | --- |
+| lokal | **10/10** | **0** | 1,2 s |
+| Claude API | 9/10 | **0** | 2,8 s |
+
+**Das wichtigste Ergebnis ist die Null in der Mitte.** Kein Modell hat etwas
+getan, was der Satz nicht verlangte — niemand löschte Spots, weil jemand „zu
+viel Laufen" sagte, niemand plante etwas um, weil jemand sich bedankte. Genau
+davor hatte §7.1 Angst, und in zwanzig Antworten trat es nicht ein. Beide Spuren
+fragten auch zurück, statt zu raten, als der Satz „der Tag ist zu voll" lautete
+und drei Tage im Plan standen.
+
+Der eine Unterschied ist ein Temperamentsunterschied: Die Cloud-Spur **fragt,
+wo die lokale handelt.** Auf „das ist mir zu viel Laufen" antwortete sie mit
+einer Rückfrage statt mit der Vorgabe — vorsichtig, aber §11.3 nennt genau
+diesen Satz als das Beispiel, aus dem ein Werkzeugaufruf werden soll. Bei den
+drei Museen war ihre Rückfrage dagegen die *bessere* Antwort: Der Satz sagt
+„eins reicht", aber nicht welches.
+
+**Und wieder fand der Lauf einen Fehler in der Messung.** Der Fall „drei
+Museen" belohnte zunächst nur das Raten — die lokale Spur wählte willkürlich
+das Uhrenmuseum und bekam dafür einen Treffer, die Rückfrage der Cloud-Spur
+zählte als Verfehlung. Behoben: Beide Lesarten gelten. Zweitens sagte der
+Werkzeugkatalog nicht, dass `constraint_setzen` und `spot_verbergen` **selbst
+neu planen** (wie `updateSettings` und `hideTripSpot` es tun) — die
+„ungefragt dazu"-Spalte zählte deshalb Redundanz an, die der Katalog nicht
+ausgeschlossen hatte. Auch behoben; diese Spalte braucht einen neuen Lauf,
+bevor sie etwas bedeutet.
+
+Damit ist die vierte Zeile so beantwortet wie die ersten beiden: **kein
+Kaufgrund.** Die lokale Spur trifft alles, greift nirgends über und ist dreimal
+schneller. Die Dokumentenzeile ist entschieden (§11.3), die anderen drei sind
+gemessen — §11 ist damit beantwortet, und zwar mit Belegen statt mit einer
+Haltung.
 
 ### 11.1 Die Trennlinie liegt schon im Konzept
 
@@ -1886,7 +1921,7 @@ Modellen:
 |---|---|---|
 | Kandidaten kuratieren | Gewichtete Summe — **in der unteren Hälfte Zufall** (gemessen) | **besser, aber lokal auch** |
 | Anfrage verstehen | **gleichauf, und schneller** (gemessen) | gleichauf |
-| Dokumente auswerten | ordentlich | **deutlich besser** |
+| Dokumente auswerten | **bleibt lokal — entschieden, nicht offen** | kommt nicht in Frage |
 | Verhandlungs-Chat vorab | knapp ausreichend | **deutlich besser** |
 | Tagebuch-/Recap-Texte | ordentlich | besser |
 | Umplanen unterwegs | **zwingend lokal** | ungeeignet |
@@ -1927,11 +1962,21 @@ Netzaufruf ist dort keine Verbesserung, sondern ein Ausfall.
    Planer-API selbst bedienen (`vorrat_durchsuchen`, `constraint_setzen`,
    `anheften`, `neu_verteilen`), statt nur Constraints auszuwerfen. Aus „zu viel
    Laufen" wird ein Werkzeugaufruf mit sichtbarer Wirkung statt einer Umschreibung.
-4. **Dokumentenauswertung.** Fixpunkte aus OCR-Text zu ziehen — Flugzeiten,
-   Check-in-Regeln im Kleingedruckten, fremdsprachige Bestätigungen — ist genau
-   die Disziplin, in der ein Frontier-Modell ein lokales Modell klar schlägt.
-   Pro Dokument
-   einmal, cachebar, nicht zeitkritisch.
+4. ~~**Dokumentenauswertung.**~~ **Entschieden, und zwar dagegen.** Fixpunkte
+   aus OCR-Text zu ziehen — Flugzeiten, Check-in-Regeln im Kleingedruckten,
+   fremdsprachige Bestätigungen — wäre die Disziplin, in der ein
+   Frontier-Modell ein lokales klar schlägt. Es ist aber keine technische
+   Frage: §11.5 nimmt Dokumente ausdrücklich von allem aus, was das Haus
+   verlässt, und der „getrennte, eigenständig zuschaltbare Fall", als der das
+   hier vertagt war, ist verneint worden. Damit ist diese Zeile keine offene
+   Option mehr, sondern eine Festlegung — **lokal oder gar nicht**.
+
+   Was an ihrer Stelle hilft, ist nicht leer: bessere Textgewinnung *vor* dem
+   Modell, Prompts mit den Lehren aus echten Fehlern (das Dokumentenmodul
+   erklärt dem Klassifikator inzwischen, welches von fünf Daten in einem Brief
+   das maßgebliche ist), Few-Shot aus dem eigenen Bestand und die Lernschleife
+   aus Korrekturen. Nach den Messungen in §11.0 ist das kein offensichtlich
+   schlechterer Weg.
 5. **Texte im Reisetagebuch.** Geringes Risiko, sichtbarer Gewinn.
 
 ### 11.4 Kosten sind nicht das Hindernis
@@ -1966,8 +2011,18 @@ braucht:
 - **Keine Anker-Adressen.** Die Ankerzone genügt als Koordinatenschwerpunkt;
   die Hoteladresse muss nicht mit.
 - **Nichts aus Dokumenten, Fotos oder Finanzen** verlässt das Haus für die
-  Kuration — die Dokumentenauswertung (10.3.4) wäre ein getrennter,
-  eigenständig zuschaltbarer Fall.
+  Kuration. Der getrennte, eigenständig zuschaltbare Fall, als der die
+  Dokumentenauswertung hier vertagt war, ist inzwischen **verneint** (§11.3).
+
+  Eine bewusst gebaute Ausnahme gibt es dennoch, und sie gehört benannt statt
+  verschwiegen: `scripts/taxonomy/cloud_audit.py` schickt Dokumenttext an
+  Claude, um den lokalen Klassifikator stichprobenweise zu prüfen — **vorher
+  PII-bereinigt** (IBAN, E-Mail, Beträge, Daten, Telefonnummern, lange Nummern,
+  Adressen sowie Personennamen, Haushaltsmitglieder aus der Datenbank und
+  Dritte über Muster wie „Dr. med. …"). Es läuft offline, auf Zuruf, und sein
+  Ergebnis sind Regeln im Code, keine Laufzeitabhängigkeit. Das ist eine andere
+  Zusage als „gar nichts" — wer auch das nicht will, schaltet ein Skript ab und
+  baut nichts um.
 - **Pro Funktion zuschaltbar, nicht global.** Ein einzelner „KI besser machen"-Schalter
   wäre die falsche Granularität.
 
@@ -1981,13 +2036,29 @@ Entscheidung, nicht als Nebenwirkung eines Modellwechsels.
 
 ### 11.6 Fazit
 
-Opus 5 würde den Planer **klüger in der Vorbereitung** machen und am Verhalten
-unterwegs nichts ändern — was gut ist, denn unterwegs zählt Verlässlichkeit,
-nicht Klugheit. Die Architektur bliebe dieselbe, mit einem zusätzlichen,
-optionalen Kurationsschritt zwischen Kandidatensuche und Solver. Das ist
-bemerkenswert wenig Umbau für spürbar bessere Vorschläge — und ein Hinweis
-darauf, dass die Aufteilung „Modell versteht und formuliert, Rechenverfahren
-plant" unabhängig davon richtig ist, wie gut das Modell wird.
+**Stand nach den Messungen: keine der vier Zeilen ist noch ein Kaufgrund.**
+
+| Aufgabe | Stand |
+| --- | --- |
+| Anfrage verstehen | **gemessen** — lokal gleichauf und doppelt so schnell |
+| Kandidaten kuratieren | **gemessen** — ein Modell schlägt die Tag-Summe deutlich, das lokale ohne Fehlgriff |
+| Dokumente auswerten | **entschieden** — bleibt im Haus |
+| Verhandlungs-Chat | **gemessen** — lokal 10/10, kein Übergriff, dreimal schneller |
+
+Das ist ausdrücklich **kein** Prinzipienbeschluss gegen die Cloud, sondern ein
+Ergebnis aus Belegen: Drei Zeilen wurden nachgemessen und sagen „nicht nötig",
+die vierte ist eine Festlegung über Privatsphäre. Wäre die Messung anders
+ausgefallen, stünde hier etwas anderes.
+
+Die ursprüngliche Überlegung bleibt trotzdem richtig, nur mit anderem Vorzeichen:
+Ein besseres Modell würde den Planer **klüger in der Vorbereitung** machen und am
+Verhalten unterwegs nichts ändern — denn unterwegs zählt Verlässlichkeit, nicht
+Klugheit. Die Architektur bliebe dieselbe, mit einem optionalen Kurationsschritt
+zwischen Kandidatensuche und Solver. Dass dieser Schritt sich lohnt, hat die
+Messung bestätigt; dass er ein *bezahltes* Modell braucht, hat sie widerlegt.
+Die Aufteilung „Modell versteht und formuliert, Rechenverfahren plant" ist
+unabhängig davon richtig, wie gut das Modell wird — und das ist der eigentliche
+Befund dieses Kapitels.
 
 ## 12. Architektur-Skizze
 
