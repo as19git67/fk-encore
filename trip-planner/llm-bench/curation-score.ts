@@ -13,8 +13,10 @@
  *   - **Alltag** — things that exist rather than things you go and see.
  *   - **Einerlei** — more than `clusterBudget` from one interchangeable
  *     group. Six village churches is not a two-day trip.
- *   - **Kind** — entries marked as little for a seven-year-old, when
- *     the request says one is coming.
+ *   - **Kind** — entries marked as little for a seven-year-old, **and
+ *     only when the request says one is coming**. On a trip for two
+ *     without children the winery and the theatre are the right answer,
+ *     not a fault.
  *   - **überhört** — a theme the sentence asked for that got no pick at
  *     all. Not "too little of it", which would be grading taste — none
  *     of it, which is not having read the sentence.
@@ -61,12 +63,29 @@ export interface CurationScore {
   overheard: Theme[];
 }
 
+export interface ScoringContext {
+  /** The themes the sentence asked for. */
+  wants?: readonly Theme[];
+  /**
+   * Whether a child is actually coming.
+   *
+   * The correction the second run forced: "poor for a seven-year-old"
+   * is only a fault when a seven-year-old is there. The second case
+   * says *"zu zweit, ohne Kinder"*, and the winery and the theatre are
+   * then exactly right — counting them against a track measured the
+   * fixture's carelessness rather than the curation.
+   */
+  withChildren?: boolean;
+  clusterBudget?: number;
+}
+
 export function scoreCuration(
   pool: readonly LabelledSpot[],
   picks: readonly CurationPick[],
-  wants: readonly Theme[] = [],
-  clusterBudget: number = CLUSTER_BUDGET,
+  context: ScoringContext = {},
 ): CurationScore {
+  const wants = context.wants ?? [];
+  const clusterBudget = context.clusterBudget ?? CLUSTER_BUDGET;
   const byRef = new Map(pool.map((entry) => [entry.spot.osmRef, entry]));
   const seen = new Set<string>();
 
@@ -91,7 +110,7 @@ export function scoreCuration(
       continue;
     }
     if (entry.label.everyday) everyday.push(nameOf(entry));
-    if (entry.label.poorForChildren) poorForChildren.push(nameOf(entry));
+    if (entry.label.poorForChildren && context.withChildren) poorForChildren.push(nameOf(entry));
     const category = entry.spot.categories[0];
     if (category) categories.add(category);
     if (entry.label.cluster) {

@@ -96,6 +96,10 @@ function tieDepth(benchCase: CurationCase): { tied: number; atScore: number } {
   };
 }
 
+function contextOf(benchCase: CurationCase) {
+  return { wants: benchCase.wants, withChildren: benchCase.withChildren };
+}
+
 async function run(track: Track, benchCase: CurationCase): Promise<Attempt> {
   const started = Date.now();
   if (track === "scoring") {
@@ -104,7 +108,7 @@ async function run(track: Track, benchCase: CurationCase): Promise<Attempt> {
       track,
       caseId: benchCase.id,
       picks,
-      score: scoreCuration(CURATION_POOL, picks, benchCase.wants),
+      score: scoreCuration(CURATION_POOL, picks, contextOf(benchCase)),
       millis: Date.now() - started,
       error: null,
     };
@@ -120,7 +124,7 @@ async function run(track: Track, benchCase: CurationCase): Promise<Attempt> {
       track,
       caseId: benchCase.id,
       picks: parsed.picks,
-      score: scoreCuration(CURATION_POOL, parsed.picks, benchCase.wants),
+      score: scoreCuration(CURATION_POOL, parsed.picks, contextOf(benchCase)),
       millis: Date.now() - started,
       error: null,
       inputTokens: answer.inputTokens,
@@ -208,7 +212,7 @@ async function main(): Promise<void> {
     `\nscoring (${first.id}): ${tie.tied} Kandidaten liegen bei ${tie.atScore} Punkten ` +
     `gleichauf — die Auswahl entscheidet dort die Reihenfolge der Suche.\n` +
     `Bei umgekehrter Vorratsreihenfolge bleiben ${same} von ${first.pick} Orten dieselben ` +
-    `(Fehlgriffe dann ${faultsOf(scoreCuration(CURATION_POOL, reversed, first.wants))}).`,
+    `(Fehlgriffe dann ${faultsOf(scoreCuration(CURATION_POOL, reversed, contextOf(first)))}).`,
   );
 
   if (jsonPath) {

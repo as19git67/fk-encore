@@ -263,6 +263,8 @@ export interface CurationCase {
   pick: number;
   sentence: string;
   wants: readonly Theme[];
+  /** Whether a child is along — what makes `poorForChildren` count. */
+  withChildren: boolean;
   /**
    * The interest ids an interpreter would produce from this sentence
    * (`interests.ts`).
@@ -287,6 +289,7 @@ export const CURATION_CASES: readonly CurationCase[] = [
       "Zwei Tage Oberfeld, mit einem siebenjährigen Kind, wir mögen Geschichte "
       + "und sind gern draußen. Bitte nichts hetzen.",
     wants: ["geschichte", "draussen", "kinder"],
+    withChildren: true,
     interests: ["castles", "ruins", "museum", "monuments", "nature", "landscape", "views"],
     note: "Drei Wünsche gleichzeitig — der Fall, an dem sich die erste Messung schied.",
   },
@@ -299,6 +302,7 @@ export const CURATION_CASES: readonly CurationCase[] = [
       "Zwei Tage Oberfeld zu zweit, ohne Kinder. Uns interessiert vor allem "
       + "Kunst, und abends gern gut essen.",
     wants: ["kunst", "essen"],
+    withChildren: false,
     interests: ["art", "museum", "stage"],
     note: "Dasselbe Pool, anderer Satz: Was vorher falsch war (Theater, Weinberg), ist jetzt richtig.",
   },
@@ -311,6 +315,7 @@ export const CURATION_CASES: readonly CurationCase[] = [
       "Wir haben nur einen Tag in Oberfeld und wollen es ruhig angehen — "
       + "viel draußen, nichts Anstrengendes.",
     wants: ["ruhe", "draussen"],
+    withChildren: false,
     interests: ["nature", "landscape", "views"],
     note: "Fünf statt zehn: Wenig zu wählen zwingt zu einer Entscheidung.",
   },

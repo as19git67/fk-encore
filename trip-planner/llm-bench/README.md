@@ -180,12 +180,16 @@ Das Prompt sagt bewusst **nicht**, worauf zu achten ist — kein „vermeide
 mehrere ähnliche Kirchen". Die Frage ist ja gerade, ob ein Modell das von
 selbst bemerkt; ein Prompt, das es vorsagt, misst Gehorsam.
 
-**Ergebnis des ersten Laufs (2026-09-10):** gewichtete Summe 1 Fehlgriff
-(7/8 Ziele, 6 Kategorien, 1 ms) · lokal **0** (5/8, 7 Kategorien, 15,6 s) ·
-Claude **0** (6/8, 8 Kategorien, 10,6 s). Beide Modelle ohne Fehlgriff; der
-Unterschied zwischen ihnen liegt dort, wo dieser Lauf **keine** Zahl hat — die
-lokale Spur ließ beide zentralen Geschichtsorte weg, obwohl die Anfrage
-„wir mögen Geschichte" sagte. Deutung in §11.0 des Konzepts.
+**Ergebnis (2026-09-11, drei Anfragen):** gewichtete Summe **2** Fehlgriffe
+(13/24 Ziele, Median 1 ms) · lokal **0** (7/24, 5,3 s) · Claude **0** (10/24,
+7,4 s). Beide Modelle über alle drei Anfragen sauber; sie unterscheiden sich
+darin, wie viel vom Ort sie stehen lassen — die lokale Spur wählt das Passende
+und lässt das Bedeutende liegen. Deutung in §11.0 des Konzepts.
+
+**Und ein Fehler in dieser Messung, den der zweite Lauf fand:** „nichts fürs
+Kind" galt unbedingt — auch im Fall „zu zweit, ohne Kinder", wo Weinberg und
+Theater richtig sind. Die Regel greift jetzt nur, wenn ein Kind mitfährt. Vorher
+stand die lokale Spur mit 3 Fehlgriffen da, die sie nicht gemacht hatte.
 
 **Ein Befund fällt schon ohne Modell an:** Bei zehn gesuchten Orten liegen
 **18 Kandidaten punktgleich** auf 3,0 — die Punktzahl besteht aus einer

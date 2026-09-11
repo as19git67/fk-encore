@@ -57,7 +57,7 @@ describe("scoreCuration", () => {
     const score = scoreCuration(CURATION_POOL, [
       ...landmarks,
       { osmRef: byName("Supermarkt Talstraße") },
-    ]);
+    ], {});
     expect(score.landmarksFound).toBe(score.landmarksTotal);
     expect(faultsOf(score)).toBe(1);
   });
@@ -78,10 +78,24 @@ describe("scoreCuration", () => {
   });
 
   it("flags what the request said is wrong for the group", () => {
-    const score = scoreCuration(CURATION_POOL, [
-      { osmRef: byName("Weinberg Sankt Ulrich") },
-    ]);
+    const score = scoreCuration(
+      CURATION_POOL,
+      [{ osmRef: byName("Weinberg Sankt Ulrich") }],
+      { withChildren: true },
+    );
     expect(score.poorForChildren).toEqual(["Weinberg Sankt Ulrich"]);
+  });
+
+  it("says nothing about the child when no child is coming", () => {
+    // The correction the second run forced: case two is "zu zweit, ohne
+    // Kinder", and there the winery is the right answer.
+    const score = scoreCuration(
+      CURATION_POOL,
+      [{ osmRef: byName("Weinberg Sankt Ulrich") }],
+      { withChildren: false },
+    );
+    expect(score.poorForChildren).toEqual([]);
+    expect(faultsOf(score)).toBe(0);
   });
 });
 
@@ -90,7 +104,7 @@ describe("theme coverage", () => {
     const score = scoreCuration(
       CURATION_POOL,
       [{ osmRef: byName("Burgruine Hohenwald") }, { osmRef: byName("Stadtpark Rosenau") }],
-      ["geschichte", "draussen"],
+      { wants: ["geschichte", "draussen"] },
     );
     expect(score.themeCoverage).toEqual([
       { theme: "geschichte", picks: 1 },
@@ -105,7 +119,7 @@ describe("theme coverage", () => {
     const score = scoreCuration(
       CURATION_POOL,
       [{ osmRef: byName("Stadtpark Rosenau") }, { osmRef: byName("Naturbad Weiherfeld") }],
-      ["geschichte", "draussen"],
+      { wants: ["geschichte", "draussen"] },
     );
     expect(score.overheard).toEqual(["geschichte"]);
     expect(faultsOf(score)).toBe(1);
@@ -119,7 +133,7 @@ describe("theme coverage", () => {
         { osmRef: byName("Stadtpark Rosenau") },
         { osmRef: byName("Naturbad Weiherfeld") },
       ],
-      ["geschichte", "draussen"],
+      { wants: ["geschichte", "draussen"] },
     );
     expect(score.themeCoverage[0]).toEqual({ theme: "geschichte", picks: 1 });
     expect(faultsOf(score)).toBe(0);
@@ -142,6 +156,12 @@ describe("the curation cases", () => {
         expect(available.has(theme), `${benchCase.id}: ${theme}`).toBe(true);
       }
     }
+  });
+
+  it("say whether a child is along, so the child rule can apply", () => {
+    const withChild = CURATION_CASES.filter((benchCase) => benchCase.withChildren);
+    expect(withChild.length).toBeGreaterThan(0);
+    expect(withChild.length).toBeLessThan(CURATION_CASES.length);
   });
 
   it("give the weighted sum the interests it would really get", () => {

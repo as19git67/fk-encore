@@ -1799,15 +1799,24 @@ Outputs, also nicht an ihrer Obergrenze.
 lokale Modell ist gleichauf, doppelt so schnell und kostenlos — und die
 Privatsphäre-Rechnung aus §11.5 muss dafür gar nicht erst aufgemacht werden.
 
-**Die zweite Messung: die Kuration** (`run-curation.ts`, 10 aus 34, drei
-Spuren — denn hier ist der Amtsinhaber kein Modell, sondern die gewichtete
-Summe aus `candidates.ts`):
+**Die zweite Messung: die Kuration** (`run-curation.ts` — drei Anfragen über
+einen Vorrat von 34 Orten, drei Spuren, denn hier ist der Amtsinhaber kein
+Modell, sondern die gewichtete Summe aus `candidates.ts`):
 
-| | Fehlgriffe | Ziele | Kategorien | Dauer |
-| --- | --- | --- | --- | --- |
-| gewichtete Summe | 1 | 7/8 | 6 | 1 ms |
-| lokal | **0** | 5/8 | 7 | 15,6 s |
-| Claude API | **0** | 6/8 | 8 | 10,6 s |
+| | Fehlgriffe | Ziele | Median |
+| --- | --- | --- | --- |
+| gewichtete Summe | 2 | **13/24** | 1 ms |
+| lokal | **0** | 7/24 | 5,3 s |
+| Claude API | **0** | 10/24 | 7,4 s |
+
+**Ein Wort zur Zahl selbst, bevor sie gedeutet wird:** Der zweite Lauf legte
+einen Fehler *in der Messung* offen. Die Regel „nichts fürs Kind" galt
+unbedingt — auch im Fall „zu zweit, ohne Kinder", wo Weinberg und Theater
+genau richtig sind. Damit bestrafte sie beide Modelle für eine korrekte
+Auswahl und drehte das Ergebnis um (lokal stand mit 3 Fehlgriffen da statt mit
+0). Behoben: Die Regel greift nur, wenn ein Kind mitfährt. Die Tabelle oben ist
+die nachgerechnete Fassung derselben Rohdaten — was eine Messung wert ist,
+entscheidet sich daran, ob sie ihre eigenen Fehler findet.
 
 Drei Dinge stehen darin, und nur das erste ist eine Zahl.
 
@@ -1820,18 +1829,31 @@ geantwortet hat. Gemessen: Bei umgekehrter Vorratsreihenfolge bleiben 8 von 10
 Orten dieselben, und die Fehlgriffe gehen von 1 auf 3. Das ist unabhängig von
 jedem Modell ein Befund über den eigenen Code.
 
-**Zweitens: beide Modelle machen keinen Fehlgriff.** Keines erfand eine
-Referenz, keines nahm eine Sparkasse, keines packte den Tag mit Dorfkirchen
-voll, keines wählte etwas, das die Anfrage für das siebenjährige Kind
-ausschließt. Die gewichtete Summe nahm den Kunstverein.
+**Zweitens: beide Modelle machen über alle drei Anfragen keinen einzigen
+Fehlgriff.** Keines erfand eine Referenz, keines nahm eine Sparkasse, keines
+packte den Tag mit Dorfkirchen voll, keines wählte etwas, das die Anfrage für
+das Kind ausschließt. Die gewichtete Summe nahm den Kunstverein auf die
+Kinderreise — und lieferte beim Kunst-Wochenende **null Essen**, obwohl der
+Satz „abends gern gut essen" sagt. Das ist der Unterschied in Reinform: Der
+Interessen-Bonus kennt Museen und Theater, aber Essen ist kein Interesse,
+sondern ein Bedürfnis, und damit fällt es durch jedes Raster, das nur Themen
+kennt.
 
 **Drittens — und das ist keine gemessene Zahl, sondern ein Urteil:** Die beiden
-Auswahlen sind unterschiedlich *klug*. Die Anfrage nannte „wir mögen
-Geschichte" und „sind gern draußen". Die Cloud-Spur bediente beides (Burgruine,
-Freilichtmuseum, Stadtmuseum, Stiftskirche — dazu Tierpark, Aussichtsturm,
-Park, Skulpturenweg); die lokale Spur ließ **beide zentralen
-Geschichtsorte weg** und wählte überwiegend Draußen-Ziele. Kein Fehlgriff nach
-den Regeln oben — aber eine Reise, die die halbe Anfrage überhört.
+Modelle unterscheiden sich nicht in Fehlgriffen, sondern darin, **wie viel vom
+Ort sie stehen lassen**. Über drei Anfragen fand die Cloud-Spur 10 der 24
+offensichtlichen Ziele, die lokale 7 — und das Muster ist in jedem Fall
+dasselbe: Die lokale Spur wählt das Passende und lässt das Bedeutende liegen.
+Beim Kunst-Wochenende nahm sie Weinberg, Gasthaus und Café und ließ die
+Stiftskirche weg; beim ruhigen Tag blieb von acht Zielen genau eines übrig.
+Die Cloud-Spur bediente in denselben Fällen beides — Kunst *und* Abendessen,
+Ruhe *und* den Wochenmarkt, und bei der Kinderreise Geschichte (4 Orte) neben
+Draußen (8) und Kind (5).
+
+Ob das besser ist, ist eine Geschmacksfrage und bleibt eine: Ein ruhiger Tag
+aus Botanischem Garten, Park, Skulpturenweg und Biergarten ist eine ehrliche
+Antwort auf „nichts Anstrengendes", auch ohne Wahrzeichen. Nur ist es eben
+nicht dieselbe Reise.
 
 Und noch ein Unterschied, der nichts mit der Auswahl zu tun hat: Die
 Begründungen der gewichteten Summe lauten zehnmal „in Wikidata verzeichnet, hat
@@ -1839,12 +1861,15 @@ einen Wikipedia-Artikel". Das ist kein Grund, das ist ein Datenbankzustand.
 §8.3 will ein „warum", über das man streiten kann, und das liefern beide
 Modelle.
 
-**Die Folge für §11:** Für die Kuration lohnt sich ein Modell — aber nicht
-notwendig ein bezahltes. Der ehrliche nächste Schritt ist nicht, die API
-einzukaufen, sondern **mehr als einen Fall zu messen**: Ein Vorrat, ein Lauf,
-und die entscheidende Beobachtung (die überhörte Hälfte der Anfrage) ist genau
-die, für die es noch keine Zahl gibt. Dafür fehlt der Kuration ein Maß für
-*Themenabdeckung* — wie gut die Auswahl das bedient, was der Satz verlangt hat.
+**Die Folge für §11:** Für die Kuration lohnt sich ein Modell, und zwar
+deutlich — die gewichtete Summe überhört, was kein Interesse ist, und ihre
+Begründungen sind zehnmal derselbe Datenbankzustand. Zwischen den beiden
+Modellen entscheidet die Fehlgriffzahl **nicht**: Beide sind sauber. Wer die
+Cloud-Spur vorzieht, kauft damit nicht Fehlerfreiheit, sondern die
+Bereitschaft, neben dem Passenden auch das Bedeutende stehen zu lassen — und
+das ist eine Geschmacksentscheidung, keine Qualitätsmessung. Für ein System,
+dessen Rückgratzusage „alles bleibt im Haus" lautet (§3), ist das kein Preis
+wert, solange nicht jemand die drei fehlenden Wahrzeichen vermisst.
 
 Die zwei übrigen Aufgaben aus §11.1 — Dokumente und Verhandlungs-Chat — sind
 weiterhin nicht gemessen.
