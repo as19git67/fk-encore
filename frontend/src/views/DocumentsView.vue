@@ -57,7 +57,12 @@ import {
 const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
-const { restore: restoreScroll } = useScrollRestore('documents-list')
+// The list scrolls inside its own column now, so window.scrollY is always 0
+// and the offset has to be read from that element.
+const listColumn = ref<HTMLElement | null>(null)
+const { restore: restoreScroll } = useScrollRestore('documents-list', {
+  getScroller: () => listColumn.value,
+})
 
 const items = ref<DocumentSummary[]>([])
 const categories = ref<DocumentCategory[]>([])
@@ -696,6 +701,10 @@ onMounted(async () => {
 
 <template>
   <div class="documents-view">
+    <!-- Everything above the list stays put while the list scrolls, the way
+         Fotos does it: the view is exactly one viewport tall, this block does
+         not shrink, and the region below owns the scrollbar. -->
+    <div class="subheader">
     <div class="header">
       <h1 class="title">Dokumente</h1>
       <div class="header-actions">
@@ -763,12 +772,6 @@ onMounted(async () => {
         />
       </div>
     </div>
-
-    <AddToCollectionDialog
-      v-model:visible="addToCollectionOpen"
-      :document-ids="[...selectedIds]"
-      @added="onAddedToCollection"
-    />
 
     <!-- Toolbar: search + filter/sort/view controls -->
     <div class="toolbar">
@@ -931,6 +934,8 @@ onMounted(async () => {
       />
     </div>
 
+    </div>
+
     <!-- Loading / empty state -->
     <div v-if="loading" class="info-text">
       <i class="pi pi-spin pi-spinner" /> Dokumente werden geladen…
@@ -944,7 +949,7 @@ onMounted(async () => {
          The header and toolbar above stay full width: a filter panel squeezed
          into a 600px column is worse than one that spans the page. -->
     <div class="list-region" :class="{ 'list-region--split': isSplit }">
-      <div class="list-column">
+      <div ref="listColumn" class="list-column">
     <!-- Result count + whole-result-list basket action -->
     <div v-if="!loading && items.length > 0" class="results-bar">
       <span class="results-count">
@@ -1174,6 +1179,12 @@ onMounted(async () => {
     </div>
 
     <!-- Dialogs -->
+    <AddToCollectionDialog
+      v-model:visible="addToCollectionOpen"
+      :document-ids="[...selectedIds]"
+      @added="onAddedToCollection"
+    />
+
     <DocumentUploadDefaultsDialog
       v-model:visible="defaultsDialogVisible"
       :groups="groups"
@@ -1208,30 +1219,35 @@ onMounted(async () => {
    Single column by default; the two-column grid only exists once the media
    query in useSplitView matches, so the stylesheet and the script cannot
    disagree about whether the pane is there. */
+/* The only part of the view that scrolls. `min-height: 0` is what lets it
+   shrink below its content and hand the overflow to the columns inside. */
 .list-region {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-inline: 0.5em;
 }
 .list-region--split {
   display: grid;
   grid-template-columns: minmax(500px, 600px) 1fr;
-  align-items: start;
+  align-items: stretch;
   gap: 1rem;
 }
+/* Each column scrolls on its own, so reading the preview never moves the list
+   and vice versa. */
 .list-column {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding-block: 0.75rem;
 }
-/* Sticky rather than a scroll container of its own: the page keeps its single
-   scrollbar (and with it the list's scroll restoration), while the pane stays
-   put as the list moves past it. */
 .list-region--split .detail-column {
-  position: sticky;
-  top: calc(var(--menubar-height, 3.5rem) + 0.75rem);
-  height: calc(100dvh - var(--menubar-height, 3.5rem) - 1.5rem);
+  min-height: 0;
+  margin-block: 0.75rem;
 }
 .document-card--active {
   border-color: var(--p-primary-color);
@@ -1367,13 +1383,33 @@ onMounted(async () => {
 .documents-view {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
   width: 100%;
-  padding-inline: 0.5em;
+  /* Exactly one viewport below the app bar, so the subheader can stay put and
+     the region below owns the scrollbar — the arrangement the photo gallery
+     uses. `100dvh` follows the dynamic viewport (the iOS URL bar); `100vh`
+     resolves to the large viewport and would push the bottom out of reach.
+     The module's submenu strip sits inside the navbar, so `--menubar-height`
+     is the whole offset. */
+  height: calc(100dvh - var(--menubar-height, 3.5rem));
+  overflow: hidden;
+}
+
+/* The block that stays put: title, messages, queue panel, batch bar, toolbar
+   and the active filter chips. */
+.subheader {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem 0.5em;
+  background: var(--p-content-background);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  z-index: 1;
 }
 
 @media (min-width: 800px) {
-  .documents-view { padding-inline: 1em; }
+  .subheader { padding-inline: 1em; }
+  .list-region { padding-inline: 1em; }
 }
 
 .title {
@@ -1396,39 +1432,32 @@ onMounted(async () => {
 }
 
 /* ── Toolbar ────────────────────────────────────────────────────── */
-/* Sticks below the app navbar so the search/filter/sort controls stay
-   reachable while the list scrolls. The negative inline margin + matching
-   padding bleed the background across the container's inline padding so list
-   rows scroll cleanly underneath. (#651) */
+/* One row: the search on the left, the filter/sort/view controls on the
+   right. No longer sticky on its own — the whole subheader above the list is
+   fixed now, and a second sticky layer inside it would only fight the first
+   (#651 is served by the subheader). */
 .toolbar {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
   gap: 0.5rem;
-  position: sticky;
-  top: var(--menubar-height, 3.5rem);
-  z-index: 900;
-  background: var(--p-content-background);
-  margin-inline: -0.5em;
-  padding: 0.4rem 0.5em;
-  border-bottom: 1px solid var(--p-content-border-color);
-}
-
-@media (min-width: 800px) {
-  .toolbar {
-    margin-inline: -1em;
-    padding-inline: 1em;
-  }
 }
 
 .search-row {
   display: flex;
   gap: 0.4rem;
   align-items: center;
+  /* Grows to fill a narrow row, capped so it leaves the controls their space
+     on a wide one: a search field stretched across 1600px buys nothing. */
+  flex: 1 1 320px;
+  max-width: 460px;
 }
 
 .search-wrapper {
   flex: 1;
-  min-width: 180px;
+  min-width: 140px;
   position: relative;
 }
 .search-wrapper i {
