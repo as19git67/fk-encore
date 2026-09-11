@@ -49,6 +49,16 @@ struct TripPlansListView: View {
                     Label("Neue Reise", systemImage: "plus")
                 }
             }
+            // Next to the trips rather than inside one: the collection
+            // is the half that exists *without* a trip (§20), and
+            // hiding it inside a plan would make it the trip's list.
+            ToolbarItem(placement: .topBarLeading) {
+                NavigationLink {
+                    TripIdeasView()
+                } label: {
+                    Label("Ideen", systemImage: "lightbulb")
+                }
+            }
         }
         .sheet(isPresented: $isCreating) {
             NavigationStack {

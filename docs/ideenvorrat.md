@@ -37,11 +37,16 @@ Zwei Eigenschaften unterscheiden ihn von einer Merkliste:
 | Ausflugsvorschlag aus mehreren Ideen | gebaut (`trip-planner/outing.ts`) |
 | Die drei Wege zwischen Vorrat und Reise | gebaut (`trip-planner/ideas-trip.ts`) |
 | Veranstaltungen mit Gültigkeitsfenster | Spalten da, Quelle fehlt — §20.4, vorerst nicht gebaut |
-| **Bildschirme (iOS oder Web)** | **fehlen vollständig** |
+| Bildschirm: Liste, Merken, Entfernen, Teilen | gebaut (`TripIdeasView`) |
+| Bildschirme für Nähe, Ausflug und die Wege zur Reise | **fehlen noch** |
 
-Der letzte Punkt ist der wichtigste: Das Feature ist über die API vollständig
-benutzbar und hat **keine Oberfläche**. Wer es ausprobiert, tut das mit
-HTTP-Aufrufen.
+Der Einstieg steht seit Kurzem: In der Urlaubsplanung führt „Ideen" auf eine
+Liste je Sammlung — mit Notiz, mit „wer hat's gemerkt", mit Hinweis auf
+Einträge, die die Karte nicht kennt. Hinein kommt bisher **der Ort, an dem man
+gerade steht**; die übrigen drei Wege aus §9.2 (Kartenlink, Artikel, Suche)
+fehlen noch, ebenso die Bildschirme für die Nähe-Meldung, den Ausflugsvorschlag
+und die drei Wege zwischen Vorrat und Reise. Diese Teile sind über die API
+vollständig benutzbar und haben keine Oberfläche.
 
 ## 3. Datenmodell
 
@@ -196,10 +201,11 @@ andere Zahl hier ließe denselben Biergarten gleichzeitig „schon dabei" und
 
 ## 6. Was fehlt
 
-- **Die Oberfläche.** Kein iOS- und kein Web-Bildschirm greift auf diese
-  Endpunkte zu. Das ist die nächste sinnvolle Etappe: eine Liste je Sammlung,
-  der Weg hinein über dieselbe Erfassung wie ein Fund, und die Nähe-Meldung an
-  der bestehenden Standortschleife (§7.1).
+- **Der Rest der Oberfläche.** Die Liste steht (`TripIdeasView`), der Weg
+  hinein bisher nur über den eigenen Standort. Es fehlen: die übrigen Wege
+  hinein (Kartenlink, Artikel, Suche — dieselbe Erfassung wie ein Fund), die
+  Nähe-Meldung an der bestehenden Standortschleife (§7.1), der
+  Ausflugsvorschlag und die drei Wege zwischen Vorrat und Reise.
 - **Veranstaltungen** (§20.4) — vorerst nicht gebaut, weil es keine Quelle
   gibt, die den Anspruch aushält. Die Spalten (`valid_from`, `valid_to`) und
   die Filterung abgelaufener Einträge stehen; ein Termin ist dann ein
@@ -215,3 +221,4 @@ andere Zahl hier ließe denselben Biergarten gleichzeitig „schon dabei" und
 | `trip-planner/ideas-trip.ts` | die drei Wege zwischen Vorrat und Reise |
 | `db/migrations/postgres/0179_idea_pool.sql` | `idea_pool`, `idea_pool_shares` |
 | `trip-planner/ideas.test.ts`, `outing.test.ts`, `ideas-trip.test.ts` | Tests |
+| `ios/Sources/FKPhotos/Features/TripPlanner/TripIdea*.swift` | Liste, Modelle, ViewModel |
