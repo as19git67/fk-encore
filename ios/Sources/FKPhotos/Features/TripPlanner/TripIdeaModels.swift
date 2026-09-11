@@ -146,14 +146,7 @@ struct TripNearIdea: Codable, Identifiable, Sendable {
     }
 
     /// How far, in words somebody standing there would use.
-    ///
-    /// Metres below a kilometre and one decimal above it: "1.4 km" is a
-    /// walk you can picture, "1437 m" is a number you have to convert.
-    var distanceText: String {
-        if distanceM < 1000 { return "\(distanceM) m" }
-        let km = Double(distanceM) / 1000
-        return String(format: "%.1f km", km).replacingOccurrences(of: ".", with: ",")
-    }
+    var distanceText: String { TripDistance.text(distanceM) }
 
     /// The line under the name: who collected it, and the note if there is one.
     var subtitle: String? {
@@ -318,11 +311,7 @@ struct TripIdeaForPlan: Codable, Identifiable, Sendable {
         return parts.joined(separator: " · ")
     }
 
-    var distanceText: String {
-        if distanceM < 1000 { return "\(distanceM) m" }
-        return String(format: "%.1f km", Double(distanceM) / 1000)
-            .replacingOccurrences(of: ".", with: ",")
-    }
+    var distanceText: String { TripDistance.text(distanceM) }
 }
 
 struct TripIdeasForPlanResponse: Codable, Sendable {

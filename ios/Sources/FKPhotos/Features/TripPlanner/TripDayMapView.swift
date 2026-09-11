@@ -22,6 +22,17 @@ struct TripDayMapView: View {
     @State private var camera: MapCameraPosition = .automatic
     @State private var sliderMinutes: Double = 0
     @State private var sliderActive = false
+    @State private var selected: Selection?
+    @State private var showLegend = false
+
+    /// A tapped pin, kept whole: the sheet needs the number as much as
+    /// the stop, and re-deriving it from the stop would be the walking
+    /// order computed a second time.
+    private struct Selection: Identifiable {
+        let number: Int
+        let stop: TripStop
+        var id: Int { stop.rowId }
+    }
 
     private var span: ClosedRange<Int>? { TripDayTimeline.span(of: day) }
 
@@ -38,12 +49,30 @@ struct TripDayMapView: View {
     var body: some View {
         VStack(spacing: 0) {
             map
+            if showLegend { legend }
             if let span {
                 timeSlider(span)
             }
         }
         .navigationTitle("Karte")
         .navigationBarTitleDisplayMode(.inline)
+        // The map panel runs to the bottom edge of the screen. Left
+        // showing, the tab bar draws its own hairline across the slider
+        // and steals the row under it for tabs nobody can reach from a
+        // map anyway.
+        .toolbar(.hidden, for: .tabBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showLegend.toggle()
+                } label: {
+                    Label("Legende", systemImage: showLegend ? "info.circle.fill" : "info.circle")
+                }
+            }
+        }
+        .sheet(item: $selected) { pick in
+            TripPinDetailSheet(detail: TripPinDetail.of(pick.stop, number: pick.number, in: day))
+        }
         .onAppear {
             if let span, sliderMinutes == 0 { sliderMinutes = Double(span.lowerBound) }
         }
@@ -65,7 +94,13 @@ struct TripDayMapView: View {
 
             ForEach(numbered, id: \.stop.rowId) { entry in
                 Annotation(entry.stop.displayName, coordinate: entry.stop.coordinate.clCoordinate) {
-                    pin(entry.index, stop: entry.stop)
+                    Button {
+                        selected = Selection(number: entry.index, stop: entry.stop)
+                    } label: {
+                        pin(entry.index, stop: entry.stop)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(entry.index). \(entry.stop.displayName)")
                 }
             }
         }
@@ -83,8 +118,13 @@ struct TripDayMapView: View {
             .animation(.easeInOut(duration: 0.15), value: isHighlighted)
     }
 
-    private func pinColour(for stop: TripStop) -> Color {
-        switch stop.stopStatus {
+    private func pinColour(for stop: TripStop) -> Color { Self.colour(of: stop.stopStatus) }
+
+    /// One mapping for the pins and the legend both. Two would be one
+    /// too many: a legend that disagrees with the map is worse than no
+    /// legend.
+    static func colour(of status: TripStopStatus) -> Color {
+        switch status {
         case .done:    return .green
         case .skipped: return .secondary
         case .planned: return .accentColor
@@ -131,6 +171,32 @@ struct TripDayMapView: View {
         }
         .padding()
         .background(Color(uiColor: .systemBackground).ignoresSafeArea(edges: .bottom))
+    }
+
+    /// What the colours mean — shown on request rather than always.
+    ///
+    /// A map with three colours needs the key exactly once, and a strip
+    /// that is always there costs the map a row of itself every day
+    /// after that.
+    private var legend: some View {
+        HStack(spacing: 14) {
+            ForEach(TripStopStatus.legendOrder, id: \.self) { status in
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(Self.colour(of: status))
+                        .frame(width: 10, height: 10)
+                        .overlay(Circle().stroke(.white, lineWidth: 1))
+                    Text(status.label)
+                }
+            }
+            Spacer()
+            Text("Tippen für Details")
+                .foregroundStyle(.secondary)
+        }
+        .font(.caption)
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(Color(uiColor: .systemBackground))
     }
 
     /// What the sun is doing at the selected minute (§7.3) — and
