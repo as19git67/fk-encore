@@ -1886,7 +1886,7 @@ Modellen:
 |---|---|---|
 | Kandidaten kuratieren | Gewichtete Summe — **in der unteren Hälfte Zufall** (gemessen) | **besser, aber lokal auch** |
 | Anfrage verstehen | **gleichauf, und schneller** (gemessen) | gleichauf |
-| Dokumente auswerten | ordentlich | **deutlich besser** |
+| Dokumente auswerten | **bleibt lokal — entschieden, nicht offen** | kommt nicht in Frage |
 | Verhandlungs-Chat vorab | knapp ausreichend | **deutlich besser** |
 | Tagebuch-/Recap-Texte | ordentlich | besser |
 | Umplanen unterwegs | **zwingend lokal** | ungeeignet |
@@ -1927,11 +1927,21 @@ Netzaufruf ist dort keine Verbesserung, sondern ein Ausfall.
    Planer-API selbst bedienen (`vorrat_durchsuchen`, `constraint_setzen`,
    `anheften`, `neu_verteilen`), statt nur Constraints auszuwerfen. Aus „zu viel
    Laufen" wird ein Werkzeugaufruf mit sichtbarer Wirkung statt einer Umschreibung.
-4. **Dokumentenauswertung.** Fixpunkte aus OCR-Text zu ziehen — Flugzeiten,
-   Check-in-Regeln im Kleingedruckten, fremdsprachige Bestätigungen — ist genau
-   die Disziplin, in der ein Frontier-Modell ein lokales Modell klar schlägt.
-   Pro Dokument
-   einmal, cachebar, nicht zeitkritisch.
+4. ~~**Dokumentenauswertung.**~~ **Entschieden, und zwar dagegen.** Fixpunkte
+   aus OCR-Text zu ziehen — Flugzeiten, Check-in-Regeln im Kleingedruckten,
+   fremdsprachige Bestätigungen — wäre die Disziplin, in der ein
+   Frontier-Modell ein lokales klar schlägt. Es ist aber keine technische
+   Frage: §11.5 nimmt Dokumente ausdrücklich von allem aus, was das Haus
+   verlässt, und der „getrennte, eigenständig zuschaltbare Fall", als der das
+   hier vertagt war, ist verneint worden. Damit ist diese Zeile keine offene
+   Option mehr, sondern eine Festlegung — **lokal oder gar nicht**.
+
+   Was an ihrer Stelle hilft, ist nicht leer: bessere Textgewinnung *vor* dem
+   Modell, Prompts mit den Lehren aus echten Fehlern (das Dokumentenmodul
+   erklärt dem Klassifikator inzwischen, welches von fünf Daten in einem Brief
+   das maßgebliche ist), Few-Shot aus dem eigenen Bestand und die Lernschleife
+   aus Korrekturen. Nach den Messungen in §11.0 ist das kein offensichtlich
+   schlechterer Weg.
 5. **Texte im Reisetagebuch.** Geringes Risiko, sichtbarer Gewinn.
 
 ### 11.4 Kosten sind nicht das Hindernis
@@ -1966,8 +1976,18 @@ braucht:
 - **Keine Anker-Adressen.** Die Ankerzone genügt als Koordinatenschwerpunkt;
   die Hoteladresse muss nicht mit.
 - **Nichts aus Dokumenten, Fotos oder Finanzen** verlässt das Haus für die
-  Kuration — die Dokumentenauswertung (10.3.4) wäre ein getrennter,
-  eigenständig zuschaltbarer Fall.
+  Kuration. Der getrennte, eigenständig zuschaltbare Fall, als der die
+  Dokumentenauswertung hier vertagt war, ist inzwischen **verneint** (§11.3).
+
+  Eine bewusst gebaute Ausnahme gibt es dennoch, und sie gehört benannt statt
+  verschwiegen: `scripts/taxonomy/cloud_audit.py` schickt Dokumenttext an
+  Claude, um den lokalen Klassifikator stichprobenweise zu prüfen — **vorher
+  PII-bereinigt** (IBAN, E-Mail, Beträge, Daten, Telefonnummern, lange Nummern,
+  Adressen sowie Personennamen, Haushaltsmitglieder aus der Datenbank und
+  Dritte über Muster wie „Dr. med. …"). Es läuft offline, auf Zuruf, und sein
+  Ergebnis sind Regeln im Code, keine Laufzeitabhängigkeit. Das ist eine andere
+  Zusage als „gar nichts" — wer auch das nicht will, schaltet ein Skript ab und
+  baut nichts um.
 - **Pro Funktion zuschaltbar, nicht global.** Ein einzelner „KI besser machen"-Schalter
   wäre die falsche Granularität.
 
@@ -1981,13 +2001,29 @@ Entscheidung, nicht als Nebenwirkung eines Modellwechsels.
 
 ### 11.6 Fazit
 
-Opus 5 würde den Planer **klüger in der Vorbereitung** machen und am Verhalten
-unterwegs nichts ändern — was gut ist, denn unterwegs zählt Verlässlichkeit,
-nicht Klugheit. Die Architektur bliebe dieselbe, mit einem zusätzlichen,
-optionalen Kurationsschritt zwischen Kandidatensuche und Solver. Das ist
-bemerkenswert wenig Umbau für spürbar bessere Vorschläge — und ein Hinweis
-darauf, dass die Aufteilung „Modell versteht und formuliert, Rechenverfahren
-plant" unabhängig davon richtig ist, wie gut das Modell wird.
+**Stand nach den Messungen: keine der vier Zeilen ist noch ein Kaufgrund.**
+
+| Aufgabe | Stand |
+| --- | --- |
+| Anfrage verstehen | **gemessen** — lokal gleichauf und doppelt so schnell |
+| Kandidaten kuratieren | **gemessen** — ein Modell schlägt die Tag-Summe deutlich, das lokale ohne Fehlgriff |
+| Dokumente auswerten | **entschieden** — bleibt im Haus |
+| Verhandlungs-Chat | offen |
+
+Das ist ausdrücklich **kein** Prinzipienbeschluss gegen die Cloud, sondern ein
+Ergebnis aus Belegen: Zwei Zeilen wurden nachgemessen und sagen „nicht nötig",
+eine ist eine Festlegung über Privatsphäre, und die vierte trägt dieselbe Frage
+wie die Kuration — sie schickt Vorlieben und Gruppenzusammensetzung mit.
+
+Die ursprüngliche Überlegung bleibt trotzdem richtig, nur mit anderem Vorzeichen:
+Ein besseres Modell würde den Planer **klüger in der Vorbereitung** machen und am
+Verhalten unterwegs nichts ändern — denn unterwegs zählt Verlässlichkeit, nicht
+Klugheit. Die Architektur bliebe dieselbe, mit einem optionalen Kurationsschritt
+zwischen Kandidatensuche und Solver. Dass dieser Schritt sich lohnt, hat die
+Messung bestätigt; dass er ein *bezahltes* Modell braucht, hat sie widerlegt.
+Die Aufteilung „Modell versteht und formuliert, Rechenverfahren plant" ist
+unabhängig davon richtig, wie gut das Modell wird — und das ist der eigentliche
+Befund dieses Kapitels.
 
 ## 12. Architektur-Skizze
 

@@ -199,10 +199,51 @@ die **Reihenfolge, in der die Regionssuche geantwortet hat**. Der Lauf misst
 das mit: Bei umgekehrter Vorratsreihenfolge bleiben 8 von 10 Orten dieselben,
 und die Fehlgriffe steigen von 1 auf 3.
 
+## Die dritte Messung: der Verhandlungs-Chat (§11.3, Weg 3)
+
+```bash
+npx tsx trip-planner/llm-bench/run-chat.ts
+```
+
+§11.3 formuliert die Aufgabe selbst: *„Aus ‚zu viel Laufen' wird ein
+Werkzeugaufruf mit sichtbarer Wirkung statt einer Umschreibung."* Gemessen wird
+genau das — Plan plus ein Satz hinein, **welcher Aufruf folgt** heraus.
+
+Acht Werkzeuge, die vorhandenen Endpunkten entsprechen (`constraint_setzen`,
+`spot_entfernen`, `spot_verbergen`, `anheften`, `neu_verteilen`,
+`vorrat_durchsuchen`) — und zwei, die keine Aktion sind und den interessanten
+Teil ausmachen: **`rueckfrage`** (der Satz sagt nicht, worauf er sich bezieht)
+und **`nichts`** (der Satz verlangt keine Änderung).
+
+Zehn Sätze, darunter drei, bei denen Handeln falsch ist: „Der Tag ist zu voll"
+(drei Tage im Plan — raten ist der teure Fehler), „Wie wird das Wetter am
+Mittwoch?" und „Super, danke". Gezählt wird:
+
+| | |
+| --- | --- |
+| **getroffen** | der erwartete Aufruf, mit dem Argument, das ihn identifiziert |
+| **verfehlt** | fehlt oder falsches Subjekt — ein `ref` ist eine Identität, kein Formulierungsdetail |
+| **übergriffig** | ein Aufruf, den der Fall ausschließt |
+
+„Übergriffig" wird **getrennt** gezählt und nie durch einen Treffer aufgewogen:
+Ein Modell, das „das ist mir zu viel Laufen" beantwortet, indem es zusätzlich
+drei Spots löscht, hat hinter jemandes Rücken die Reise geändert (§7.1). Das
+kostet Vertrauen, nicht Zeit.
+
+**Hier gibt es keinen Amtsinhaber.** Einen Chat hat der Planer nicht;
+`interpretRequest` deckt vielleicht ein Drittel der Fälle ab und kann weder
+anheften noch neu verteilen. Die Frage ist deshalb nicht „besser als bisher",
+sondern **„gut genug, um an einen Plan gelassen zu werden"**.
+
+Eine Grenze dieses Laufs: Beide Spuren bekommen JSON-im-Prompt statt einer
+echten Tool-Use-Schnittstelle — der lokale Dienst hat keine, und einer Seite
+die bessere Schnittstelle zu geben hieße, Schnittstellen zu messen. Claudes
+natives Tool-Use ist robuster als JSON in Prosa.
+
 ## Was diese Messung nicht beantwortet
 
-- **Die übrigen zwei Aufgaben aus §11.1** — Dokumentenauswertung und
-  Verhandlungs-Chat.
+- **Die Dokumentenauswertung** — und die bleibt auch ungemessen: §11.3 hat sie
+  entschieden, und zwar dagegen. Dokumente verlassen das Haus nicht.
 - **Ob eine Kuration *gut* ist.** Der Lauf zählt Fehlgriffe, nicht Geschmack.
   Zwei Auswahlen ohne Fehlgriff können unterschiedlich klug sein, und das
   entscheidet ein Mensch, der die Liste liest.
