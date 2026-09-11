@@ -103,6 +103,20 @@ normal sind, hat nicht geraten, sondern dem Reisenden etwas in den Mund gelegt.
 freier Text, und „barock" gegen „Barockarchitektur" zu punkten misst
 Rechtschreibung.
 
+## Der erste Lauf (2026-09-10)
+
+`gemma-4-26B-A4B-it-qat` gegen `claude-opus-5` (niedriger Effort):
+
+| | richtig | erfunden | Median |
+| --- | --- | --- | --- |
+| lokal | **96 %** (26/27) | **0** | **1005 ms** |
+| Claude API | 93 % (25/27) | 1 | 2173 ms |
+
+Die Spur, die nichts kostet, hat gewonnen. Ein Feld Unterschied bei 27
+bewerteten Feldern ist Rauschen — die Aussage ist nicht „lokal ist besser",
+sondern **„es gibt keinen Rückstand einzukaufen"**. Details und Folgerungen in
+§11.0 des Konzepts.
+
 ## Die Fälle
 
 Zehn Sätze, alle frei erfunden (keine echten Personen, Adressen oder Reisen),
@@ -117,12 +131,81 @@ entlang der Achsen, an denen §11.1 einen Unterschied erwartet:
 - **trap** — etwas sieht aus wie ein Feld und ist keines: eine Jahreszahl, die
   keine Tageszahl ist; ein Startort, der nicht das Ziel ist.
 
+## Die zweite Messung: die Kuration (§11.3)
+
+```bash
+npx tsx trip-planner/llm-bench/run-curation.ts
+```
+
+Dieselben Voraussetzungen, **drei** Spuren statt zwei — denn hier ist der
+Amtsinhaber kein Modell:
+
+| Spur | was sie ist |
+| --- | --- |
+| `scoring` | was der Planer heute tut: gewichtete Summe über OSM-Tags (`candidates.ts`), oben abgeschnitten — **mit** den Interessen des Falls, sonst wäre es eine Strohpuppe |
+| `local` | dasselbe Prompt an das Modell im Haus |
+| `claude` | dasselbe Prompt an die Claude API |
+
+**Drei Anfragen über einen Vorrat** von 34 erfundenen Orten — 10, 8 und 5
+sollen gewählt werden. Ein Vorrat und drei Sätze statt drei Vorräte ist das
+Experiment, nicht die Abkürzung: Die Achse, an der sich die Modelle im ersten
+Lauf schieden, war nicht, welche Orte sie kennen, sondern **ob sie den Satz
+hören**. Dieselben 34 Orte haben drei verschiedene richtige Antworten — was
+beim Kind falsch ist (Weinberg, Theater), ist beim Kunst-Wochenende richtig. Der Vorrat
+ist um die vier Dinge gebaut, die eine Kuration falsch machen kann und die man
+**zählen** kann:
+
+| Fehlgriff | was er ist |
+| --- | --- |
+| **erfunden** | eine Referenz, die es im Vorrat nicht gibt (§10.4) |
+| **Alltag** | Dinge, die es gibt, statt Dinge, zu denen man geht — zwei davon mit Wikipedia-Artikel, genau dort ist die Tag-Summe blind |
+| **Einerlei** | mehr als zwei von sechs austauschbaren Dorfkirchen |
+| **nichts fürs Kind** | die Anfrage nennt ein siebenjähriges Kind |
+| **überhört** | ein Thema, das der Satz verlangt, bekommt **gar keinen** Ort |
+
+„Überhört" ist die eine geschmacksfreie Regel in diesem Bereich: „zu wenig
+Geschichte" ist ein Argument, „der Satz sagte Geschichte und die Auswahl hat
+keine" ist ein Versehen. Genau daran schieden sich die Spuren im ersten Lauf,
+ohne dass eine Zahl es bemerkte.
+
+Die Themenabdeckung je Wunsch wird daneben **berichtet** (`geschichte 5 ·
+draussen 5 · kinder 3`) und nicht bewertet — dünn ist ein Argument, nicht ein
+Fehler.
+
+Daneben zwei **beschreibende** Zahlen, ausdrücklich keine Noten: wie viele der
+offensichtlichen Ziele gefunden wurden und über wie viele Kategorien die Auswahl
+streut. Eine Auswahl darf ein Ziel auslassen; sie darf nicht sechs Kirchen sein.
+
+Das Prompt sagt bewusst **nicht**, worauf zu achten ist — kein „vermeide
+mehrere ähnliche Kirchen". Die Frage ist ja gerade, ob ein Modell das von
+selbst bemerkt; ein Prompt, das es vorsagt, misst Gehorsam.
+
+**Ergebnis (2026-09-11, drei Anfragen):** gewichtete Summe **2** Fehlgriffe
+(13/24 Ziele, Median 1 ms) · lokal **0** (7/24, 5,3 s) · Claude **0** (10/24,
+7,4 s). Beide Modelle über alle drei Anfragen sauber; sie unterscheiden sich
+darin, wie viel vom Ort sie stehen lassen — die lokale Spur wählt das Passende
+und lässt das Bedeutende liegen. Deutung in §11.0 des Konzepts.
+
+**Und ein Fehler in dieser Messung, den der zweite Lauf fand:** „nichts fürs
+Kind" galt unbedingt — auch im Fall „zu zweit, ohne Kinder", wo Weinberg und
+Theater richtig sind. Die Regel greift jetzt nur, wenn ein Kind mitfährt. Vorher
+stand die lokale Spur mit 3 Fehlgriffen da, die sie nicht gemacht hatte.
+
+**Ein Befund fällt schon ohne Modell an:** Bei zehn gesuchten Orten liegen
+**18 Kandidaten punktgleich** auf 3,0 — die Punktzahl besteht aus einer
+Handvoll Halbpunkt-Signale, und alles mit Wikidata-Eintrag und Artikel landet
+auf derselben Zahl. Wo der Schnitt in so einen Gleichstand fällt, entscheidet
+die **Reihenfolge, in der die Regionssuche geantwortet hat**. Der Lauf misst
+das mit: Bei umgekehrter Vorratsreihenfolge bleiben 8 von 10 Orten dieselben,
+und die Fehlgriffe steigen von 1 auf 3.
+
 ## Was diese Messung nicht beantwortet
 
-- **Die anderen drei Aufgaben aus §11.1** — Kandidatenkuration,
-  Dokumentenauswertung, Verhandlungs-Chat. Die Kuration ist laut §11.3 der
-  größte erwartete Sprung und braucht einen eigenen Aufbau (ganzer Stadtvorrat
-  in einer Anfrage).
+- **Die übrigen zwei Aufgaben aus §11.1** — Dokumentenauswertung und
+  Verhandlungs-Chat.
+- **Ob eine Kuration *gut* ist.** Der Lauf zählt Fehlgriffe, nicht Geschmack.
+  Zwei Auswahlen ohne Fehlgriff können unterschiedlich klug sein, und das
+  entscheidet ein Mensch, der die Liste liest.
 - **Ob die Cloud-Spur gebaut werden sollte.** Das ist die Frage aus §11.5, und
   sie ist keine technische: Ein Kurationsaufruf schickt Vorlieben und
   Gruppenzusammensetzung außer Haus. Diese Messung sagt nur, wie groß der
