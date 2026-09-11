@@ -1,25 +1,33 @@
 /**
- * Per-photo opt-out of public link sharing.
+ * What an anonymous public-link visitor gets to see, photo by photo.
  *
- * A photo flagged `link_hidden` stays fully visible to signed-in users and to
- * album collaborators, but is excluded from every anonymous public-link view
- * of every album it belongs to — the listing (`getPublicAlbumLogic`), the
- * album cover, and the raw file endpoint (`photo-file-access.ts`). The flag
- * lives on the photo itself rather than per album, because "don't show this
- * one to strangers" is a property of the picture, not of one sharing of it.
+ * The default is privacy-first: a photo carrying a face that an album
+ * participant has assigned to a named person stays out of every public-link
+ * view unless it is explicitly released. Pictures of people the household
+ * knows are exactly the ones nobody wants to hand to a link that may be
+ * forwarded, and requiring an opt-in for those is the only way that holds for
+ * photos imported later, too.
  *
- * Besides the manual per-photo toggle there is a bulk pass that sets the flag
- * on every photo carrying a face the caller has assigned to a named person —
- * the quick way to keep family faces off a link that goes out to a wider
- * circle.
+ * Per photo, `photos.link_visibility` says:
+ *   'auto'    (default) — shown unless a known face is on it
+ *   'visible'           — shown, known face or not (the explicit release)
+ *   'hidden'            — never shown, face or not
+ *
+ * "Known face" is evaluated over all album participants (owner + collaborators)
+ * rather than one user, because there is no current user on a link request and
+ * a face only one collaborator has named is still a named face.
+ *
+ * None of this touches signed-in users: they keep seeing every photo their
+ * account has access to.
  */
 
-import { and, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, or, sql, type SQL } from "drizzle-orm";
 import { APIError } from "encore.dev/api";
 import db from "../db/database";
 import { dbAll, dbFirst, dbExec } from "../db/adapter";
 import {
   albumPhotos,
+  albumPublicLinks,
   albumShares,
   albums,
   faces,
@@ -28,12 +36,15 @@ import {
   userFaceAssignments,
 } from "../db/schema";
 import type {
-  AutoHideKnownFacesResponse,
+  PhotoLinkVisibility,
+  SetKnownFaceLinkVisibilityResponse,
   UpdatePhotoLinkVisibilityResponse,
 } from "../db/types";
 
 /** Auto-created placeholder name for a person the user has not named yet. */
-const UNNAMED_PERSON = "Unbenannt";
+export const UNNAMED_PERSON = "Unbenannt";
+
+export const LINK_VISIBILITY_VALUES: PhotoLinkVisibility[] = ["auto", "visible", "hidden"];
 
 export class LinkVisibilityAccessError extends Error {
   constructor(message = "Photo not found or unauthorized") {
@@ -43,11 +54,76 @@ export class LinkVisibilityAccessError extends Error {
 }
 
 /**
- * Photo IDs out of `photoIds` the user may change the link flag on.
+ * SQL predicate: the photo aliased `photoAlias` carries a face one of
+ * `userIds` has assigned to a named person (and has not rejected).
+ */
+export function knownFaceExistsSql(photoAlias: SQL | string, userIds: number[]): SQL {
+  const photoId = typeof photoAlias === "string" ? sql.raw(`${photoAlias}.id`) : photoAlias;
+  if (userIds.length === 0) return sql`false`;
+  return sql`EXISTS (
+    SELECT 1
+    FROM faces f
+    JOIN user_face_assignments ufa
+      ON ufa.face_id = f.id
+     AND ufa.user_id = ANY(ARRAY[${sql.join(userIds.map(id => sql`${id}`), sql`, `)}]::int[])
+     AND ufa.ignored = false
+     AND ufa.person_id IS NOT NULL
+    JOIN persons pe ON pe.id = ufa.person_id AND pe.name <> ${UNNAMED_PERSON}
+    WHERE f.photo_id = ${photoId}
+  )`;
+}
+
+/**
+ * SQL predicate: the photo aliased `photoAlias` reaches a link visitor.
+ * Mirrors the doc comment at the top of this file.
+ */
+export function linkVisiblePhotoSql(photoAlias: SQL | string, participantIds: number[]): SQL {
+  const col = (name: string) =>
+    typeof photoAlias === "string" ? sql.raw(`${photoAlias}.${name}`) : sql`${photoAlias}.${sql.raw(name)}`;
+  return sql`(
+    ${col("link_visibility")} = 'visible'
+    OR (
+      ${col("link_visibility")} = 'auto'
+      AND NOT ${knownFaceExistsSql(photoAlias, participantIds)}
+    )
+  )`;
+}
+
+/** Owner plus everyone the album is shared with. */
+export async function albumParticipantIds(albumId: number): Promise<number[]> {
+  const rows = await dbAll<{ user_id: number }>(
+    db
+      .select({ user_id: albums.user_id })
+      .from(albums)
+      .where(eq(albums.id, albumId)),
+  );
+  const shareRows = await dbAll<{ user_id: number }>(
+    db.select({ user_id: albumShares.user_id }).from(albumShares).where(eq(albumShares.album_id, albumId)),
+  );
+  return [...new Set([...rows.map(r => r.user_id), ...shareRows.map(r => r.user_id)])];
+}
+
+/** True when the album currently has a live public link. */
+export async function albumHasActivePublicLink(albumId: number): Promise<boolean> {
+  const row = await dbFirst<{ id: number }>(
+    db
+      .select({ id: albumPublicLinks.id })
+      .from(albumPublicLinks)
+      .where(and(
+        eq(albumPublicLinks.album_id, albumId),
+        sql`${albumPublicLinks.disabled_at} IS NULL`,
+        sql`(${albumPublicLinks.expires_at} IS NULL OR ${albumPublicLinks.expires_at} > NOW())`,
+      )),
+  );
+  return !!row;
+}
+
+/**
+ * Photo IDs out of `photoIds` the user may change the link setting on.
  *
- * The flag is not per-user — flipping it changes what every link visitor
- * sees — so read-only collaborators must not set it. Allowed are the photo's
- * owner and anyone with write access to an album the photo sits in.
+ * The setting is not per-user — it changes what every link visitor sees — so
+ * read-only collaborators must not touch it. Allowed are the photo's owner and
+ * anyone with write access to an album the photo sits in.
  */
 async function writablePhotoIds(userId: number, photoIds: number[]): Promise<number[]> {
   if (photoIds.length === 0) return [];
@@ -76,12 +152,19 @@ async function writablePhotoIds(userId: number, photoIds: number[]): Promise<num
   return rows.map((r) => r.id);
 }
 
-/** Set (or clear) the public-link opt-out on one or more photos. */
+function assertVisibility(visibility: PhotoLinkVisibility): void {
+  if (!LINK_VISIBILITY_VALUES.includes(visibility)) {
+    throw APIError.invalidArgument(`Ungültige Link-Sichtbarkeit: ${visibility}`);
+  }
+}
+
+/** Set the public-link visibility of one or more photos. */
 export async function setPhotoLinkVisibilityLogic(
   userId: number,
   photoIds: number[],
-  linkHidden: boolean,
+  visibility: PhotoLinkVisibility,
 ): Promise<UpdatePhotoLinkVisibilityResponse> {
+  assertVisibility(visibility);
   const unique = [...new Set(photoIds)].filter((id) => Number.isInteger(id) && id > 0);
   if (unique.length === 0) return { success: true, updated: 0 };
 
@@ -91,8 +174,8 @@ export async function setPhotoLinkVisibilityLogic(
   const changed = await dbAll<{ id: number }>(
     db
       .update(photos)
-      .set({ link_hidden: linkHidden })
-      .where(and(inArray(photos.id, allowed), eq(photos.link_hidden, !linkHidden)))
+      .set({ link_visibility: visibility })
+      .where(and(inArray(photos.id, allowed), sql`${photos.link_visibility} <> ${visibility}`))
       .returning({ id: photos.id }),
   );
 
@@ -100,20 +183,17 @@ export async function setPhotoLinkVisibilityLogic(
 }
 
 /**
- * Flag every photo showing a face the caller assigned to a named person.
+ * Bulk pass over every photo showing a face the caller assigned to a named
+ * person: release them all to link visitors, or pin them shut.
  *
- * Faces are per-user data: the pass uses the caller's own assignments, skips
- * the auto-created "Unbenannt" placeholder persons (those are detections, not
- * recognitions) and skips faces the caller marked as ignored.
+ * 'auto' restores the default (hidden while the known face is on them), which
+ * is also how a release is undone.
  */
-export async function autoHideKnownFacesLogic(
+export async function setKnownFaceLinkVisibilityLogic(
   userId: number,
-  opts: { albumId?: number; personIds?: number[] } = {},
-): Promise<AutoHideKnownFacesResponse> {
-  const personFilter =
-    opts.personIds && opts.personIds.length > 0
-      ? inArray(persons.id, opts.personIds)
-      : sql`${persons.name} != ${UNNAMED_PERSON}`;
+  opts: { visibility: PhotoLinkVisibility; albumId?: number; personIds?: number[] },
+): Promise<SetKnownFaceLinkVisibilityResponse> {
+  assertVisibility(opts.visibility);
 
   if (opts.albumId !== undefined) {
     const album = await dbFirst<typeof albums.$inferSelect>(
@@ -133,9 +213,14 @@ export async function autoHideKnownFacesLogic(
     }
   }
 
-  const candidates = await dbAll<{ id: number; link_hidden: boolean }>(
+  const personFilter =
+    opts.personIds && opts.personIds.length > 0
+      ? inArray(persons.id, opts.personIds)
+      : sql`${persons.name} <> ${UNNAMED_PERSON}`;
+
+  const candidates = await dbAll<{ id: number; link_visibility: string }>(
     db
-      .selectDistinct({ id: photos.id, link_hidden: photos.link_hidden })
+      .selectDistinct({ id: photos.id, link_visibility: photos.link_visibility })
       .from(photos)
       .innerJoin(faces, eq(faces.photo_id, photos.id))
       .innerJoin(
@@ -162,13 +247,15 @@ export async function autoHideKnownFacesLogic(
       ),
   );
 
-  const toHide = candidates.filter((c) => !c.link_hidden).map((c) => c.id);
-  const alreadyHidden = candidates.length - toHide.length;
-  if (toHide.length === 0) return { success: true, updated: 0, alreadyHidden };
+  const toChange = candidates.filter((c) => c.link_visibility !== opts.visibility).map((c) => c.id);
+  const unchanged = candidates.length - toChange.length;
+  if (toChange.length === 0) return { success: true, updated: 0, unchanged };
 
-  // The album-scoped pass may cover photos owned by a collaborator; the album
+  // An album-scoped pass may cover photos owned by a collaborator; the album
   // write check above is what authorises those, so no per-photo filter here.
-  await dbExec(db.update(photos).set({ link_hidden: true }).where(inArray(photos.id, toHide)));
+  await dbExec(
+    db.update(photos).set({ link_visibility: opts.visibility }).where(inArray(photos.id, toChange)),
+  );
 
-  return { success: true, updated: toHide.length, alreadyHidden };
+  return { success: true, updated: toChange.length, unchanged };
 }

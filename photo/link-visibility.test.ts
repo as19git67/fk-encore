@@ -1,9 +1,10 @@
-// Per-photo opt-out of public link sharing.
+// What an anonymous public-link visitor gets to see, photo by photo.
 //
-// A photo flagged `link_hidden` must vanish from every anonymous view of the
-// albums it sits in — the listing, the cover, and the raw file endpoint —
-// while staying fully visible to signed-in users. These tests pin all three
-// exits plus the "hide everyone I know" bulk pass.
+// The default is privacy-first: a photo with a face assigned to a named
+// person stays off the link until it is explicitly released. These tests pin
+// that rule at all three exits a link visitor has — the listing, the album
+// cover (which feeds the Open Graph preview) and the raw file endpoint —
+// plus the explicit per-photo overrides in both directions.
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { eq } from "drizzle-orm";
@@ -26,11 +27,13 @@ import {
 import { createUserLogic } from "../user/user.service";
 import * as service from "./photo.service";
 import {
-  autoHideKnownFacesLogic,
+  setKnownFaceLinkVisibilityLogic,
   setPhotoLinkVisibilityLogic,
   LinkVisibilityAccessError,
 } from "./link-visibility.service";
 import { denyPhotoFileRequest } from "./photo-file-access";
+import type { GalleryGridEntry } from "../db/types";
+import { listGalleryGridLogic } from "./gallery-grid.service";
 
 async function addFace(photoId: number, userId: number, personName: string, ignored = false) {
   const [face] = await db
@@ -54,12 +57,16 @@ async function addFace(photoId: number, userId: number, personName: string, igno
   return { faceId: face.id, personId: person.id };
 }
 
+async function publicPhotoIds(token: string): Promise<number[]> {
+  return (await service.getPublicAlbumLogic(token)).photos.map(p => p.id);
+}
+
 describe("public link visibility", () => {
   let owner: any;
   let stranger: any;
   let album: any;
-  let visible: any;
-  let secret: any;
+  let scenery: any;
+  let portrait: any;
   let token: string;
 
   beforeEach(async () => {
@@ -79,18 +86,18 @@ describe("public link visibility", () => {
     stranger = await createUserLogic({ email: "stranger@test.local", name: "S", password: "pw" });
     album = await service.createAlbumLogic(owner.id, { name: "Urlaub" });
 
-    visible = await service.uploadPhotoLogic(owner.id, {
+    scenery = await service.uploadPhotoLogic(owner.id, {
       data: Buffer.from([1]),
       name: "beach.jpg",
       mimeType: "image/jpeg",
     });
-    secret = await service.uploadPhotoLogic(owner.id, {
+    portrait = await service.uploadPhotoLogic(owner.id, {
       data: Buffer.from([2]),
       name: "family.jpg",
       mimeType: "image/jpeg",
     });
-    await service.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: visible.id });
-    await service.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: secret.id });
+    await service.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: scenery.id });
+    await service.addPhotoToAlbumLogic(owner.id, { albumId: album.id, photoId: portrait.id });
 
     const link = await service.createAlbumPublicLinkLogic(owner.id, album.id);
     token = link.token;
@@ -98,116 +105,190 @@ describe("public link visibility", () => {
     vi.mocked(getAuthData).mockReturnValue(undefined as never);
   });
 
-  it("keeps a flagged photo out of the public listing but not out of the album", async () => {
-    const before = await service.getPublicAlbumLogic(token);
-    expect(before.photos.map(p => p.id).sort()).toEqual([visible.id, secret.id].sort());
+  describe("the default", () => {
+    it("withholds a photo with a known face and keeps the rest", async () => {
+      expect((await publicPhotoIds(token)).sort()).toEqual([scenery.id, portrait.id].sort());
 
-    await setPhotoLinkVisibilityLogic(owner.id, [secret.id], true);
+      await addFace(portrait.id, owner.id, "Alex Beispiel");
 
-    const after = await service.getPublicAlbumLogic(token);
-    expect(after.photos.map(p => p.id)).toEqual([visible.id]);
-    expect(after.photo_count).toBe(1);
+      const after = await service.getPublicAlbumLogic(token);
+      expect(after.photos.map(p => p.id)).toEqual([scenery.id]);
+      expect(after.photo_count).toBe(1);
+    });
 
-    const forOwner = await service.getAlbumLogic(owner.id, album.id, { includePhotos: true });
-    expect(forOwner.photos.map(p => p.id).sort()).toEqual([visible.id, secret.id].sort());
-    expect(forOwner.photos.find(p => p.id === secret.id)?.link_hidden).toBe(true);
-    expect(forOwner.photos.find(p => p.id === visible.id)?.link_hidden).toBe(false);
+    it("leaves the album itself untouched for signed-in users", async () => {
+      await addFace(portrait.id, owner.id, "Alex Beispiel");
+
+      const forOwner = await service.getAlbumLogic(owner.id, album.id, { includePhotos: true });
+      expect(forOwner.photos.map(p => p.id).sort()).toEqual([scenery.id, portrait.id].sort());
+      const hit = forOwner.photos.find(p => p.id === portrait.id)!;
+      expect(hit.link_visibility).toBe("auto");
+      expect(hit.has_known_face).toBe(true);
+      expect(forOwner.photos.find(p => p.id === scenery.id)?.has_known_face).toBe(false);
+    });
+
+    it("refuses the raw file for a photo the listing withholds", async () => {
+      expect(await denyPhotoFileRequest(portrait.filename, token)).toBeNull();
+
+      await addFace(portrait.id, owner.id, "Alex Beispiel");
+
+      expect(await denyPhotoFileRequest(portrait.filename, token)).toEqual({ status: 403, body: "Forbidden" });
+      expect(await denyPhotoFileRequest(scenery.filename, token)).toBeNull();
+    });
+
+    it("does not count an unnamed person as a known face", async () => {
+      await addFace(portrait.id, owner.id, "Unbenannt");
+      expect((await publicPhotoIds(token)).sort()).toEqual([scenery.id, portrait.id].sort());
+    });
+
+    it("does not count a face the user rejected", async () => {
+      await addFace(portrait.id, owner.id, "Alex Beispiel", true);
+      expect((await publicPhotoIds(token)).sort()).toEqual([scenery.id, portrait.id].sort());
+    });
+
+    it("counts a face named by a collaborator, not just by the owner", async () => {
+      await service.shareAlbumLogic(owner.id, { albumId: album.id, userId: stranger.id, accessLevel: "read" });
+      await addFace(portrait.id, stranger.id, "Alex Beispiel");
+
+      expect(await publicPhotoIds(token)).toEqual([scenery.id]);
+    });
   });
 
-  it("refuses the raw file to a link visitor once the photo is flagged", async () => {
-    expect(await denyPhotoFileRequest(secret.filename, token)).toBeNull();
+  describe("explicit overrides", () => {
+    it("releases a photo with a known face when set to visible", async () => {
+      await addFace(portrait.id, owner.id, "Alex Beispiel");
+      expect(await publicPhotoIds(token)).toEqual([scenery.id]);
 
-    await setPhotoLinkVisibilityLogic(owner.id, [secret.id], true);
+      const res = await setPhotoLinkVisibilityLogic(owner.id, [portrait.id], "visible");
+      expect(res.updated).toBe(1);
 
-    expect(await denyPhotoFileRequest(secret.filename, token)).toEqual({ status: 403, body: "Forbidden" });
-    expect(await denyPhotoFileRequest(visible.filename, token)).toBeNull();
+      expect((await publicPhotoIds(token)).sort()).toEqual([scenery.id, portrait.id].sort());
+      expect(await denyPhotoFileRequest(portrait.filename, token)).toBeNull();
+    });
+
+    it("withholds a photo without any face when set to hidden", async () => {
+      await setPhotoLinkVisibilityLogic(owner.id, [scenery.id], "hidden");
+
+      expect(await publicPhotoIds(token)).toEqual([portrait.id]);
+      expect(await denyPhotoFileRequest(scenery.filename, token)).toEqual({ status: 403, body: "Forbidden" });
+    });
+
+    it("returns to the default when set back to auto", async () => {
+      await addFace(portrait.id, owner.id, "Alex Beispiel");
+      await setPhotoLinkVisibilityLogic(owner.id, [portrait.id], "visible");
+      await setPhotoLinkVisibilityLogic(owner.id, [portrait.id], "auto");
+
+      expect(await publicPhotoIds(token)).toEqual([scenery.id]);
+    });
+
+    it("counts only photos whose setting actually changed", async () => {
+      const first = await setPhotoLinkVisibilityLogic(owner.id, [scenery.id, portrait.id], "hidden");
+      expect(first.updated).toBe(2);
+      const again = await setPhotoLinkVisibilityLogic(owner.id, [scenery.id, portrait.id], "hidden");
+      expect(again.updated).toBe(0);
+    });
+
+    it("rejects a user with no access to the photo", async () => {
+      await expect(setPhotoLinkVisibilityLogic(stranger.id, [portrait.id], "hidden"))
+        .rejects.toBeInstanceOf(LinkVisibilityAccessError);
+
+      const row = await db.select().from(photos).where(eq(photos.id, portrait.id));
+      expect(row[0].link_visibility).toBe("auto");
+    });
   });
 
-  it("restores the photo when the flag is cleared again", async () => {
-    await setPhotoLinkVisibilityLogic(owner.id, [secret.id], true);
-    const cleared = await setPhotoLinkVisibilityLogic(owner.id, [secret.id], false);
-    expect(cleared.updated).toBe(1);
+  describe("album cover", () => {
+    it("is not served to the link when the cover itself is withheld", async () => {
+      await service.updateAlbumLogic(owner.id, { id: album.id, coverPhotoId: portrait.id });
+      expect((await service.getPublicAlbumLogic(token)).cover_filename).toBe(portrait.filename);
 
-    const after = await service.getPublicAlbumLogic(token);
-    expect(after.photos.map(p => p.id).sort()).toEqual([visible.id, secret.id].sort());
-  });
+      await addFace(portrait.id, owner.id, "Alex Beispiel");
 
-  it("counts only photos whose flag actually changed", async () => {
-    const first = await setPhotoLinkVisibilityLogic(owner.id, [visible.id, secret.id], true);
-    expect(first.updated).toBe(2);
-    const again = await setPhotoLinkVisibilityLogic(owner.id, [visible.id, secret.id], true);
-    expect(again.updated).toBe(0);
-  });
-
-  it("does not serve a flagged cover to the public link", async () => {
-    await service.updateAlbumLogic(owner.id, { id: album.id, coverPhotoId: secret.id });
-    expect((await service.getPublicAlbumLogic(token)).cover_filename).toBe(secret.filename);
-
-    await setPhotoLinkVisibilityLogic(owner.id, [secret.id], true);
-
-    const after = await service.getPublicAlbumLogic(token);
-    expect(after.cover_filename).toBe(visible.filename);
-    expect(await denyPhotoFileRequest(secret.filename, token)).toEqual({ status: 403, body: "Forbidden" });
-  });
-
-  it("rejects a user with no access to the photo", async () => {
-    await expect(setPhotoLinkVisibilityLogic(stranger.id, [secret.id], true))
-      .rejects.toBeInstanceOf(LinkVisibilityAccessError);
-
-    const row = await db.select().from(photos).where(eq(photos.id, secret.id));
-    expect(row[0].link_hidden).toBe(false);
+      const after = await service.getPublicAlbumLogic(token);
+      expect(after.cover_filename).toBe(scenery.filename);
+      expect(await denyPhotoFileRequest(portrait.filename, token)).toEqual({ status: 403, body: "Forbidden" });
+    });
   });
 
   describe("known-faces bulk pass", () => {
-    it("flags photos with a named person and leaves the rest alone", async () => {
-      await addFace(secret.id, owner.id, "Alex Beispiel");
-      await addFace(visible.id, owner.id, "Unbenannt");
+    it("releases every photo with a known face in an album", async () => {
+      await addFace(portrait.id, owner.id, "Alex Beispiel");
 
-      const res = await autoHideKnownFacesLogic(owner.id, { albumId: album.id });
-      expect(res.updated).toBe(1);
-      expect(res.alreadyHidden).toBe(0);
-
-      const after = await service.getPublicAlbumLogic(token);
-      expect(after.photos.map(p => p.id)).toEqual([visible.id]);
+      const res = await setKnownFaceLinkVisibilityLogic(owner.id, { visibility: "visible", albumId: album.id });
+      expect(res).toMatchObject({ updated: 1, unchanged: 0 });
+      expect((await publicPhotoIds(token)).sort()).toEqual([scenery.id, portrait.id].sort());
     });
 
-    it("ignores faces the user rejected", async () => {
-      await addFace(secret.id, owner.id, "Alex Beispiel", true);
+    it("reports photos that already carried the setting", async () => {
+      await addFace(portrait.id, owner.id, "Alex Beispiel");
+      await setPhotoLinkVisibilityLogic(owner.id, [portrait.id], "visible");
 
-      const res = await autoHideKnownFacesLogic(owner.id, { albumId: album.id });
-      expect(res.updated).toBe(0);
-      expect((await service.getPublicAlbumLogic(token)).photos).toHaveLength(2);
-    });
-
-    it("reports photos that were already flagged", async () => {
-      await addFace(secret.id, owner.id, "Alex Beispiel");
-      await setPhotoLinkVisibilityLogic(owner.id, [secret.id], true);
-
-      const res = await autoHideKnownFacesLogic(owner.id, { albumId: album.id });
-      expect(res).toMatchObject({ updated: 0, alreadyHidden: 1 });
+      const res = await setKnownFaceLinkVisibilityLogic(owner.id, { visibility: "visible", albumId: album.id });
+      expect(res).toMatchObject({ updated: 0, unchanged: 1 });
     });
 
     it("can be limited to specific persons", async () => {
-      const alex = await addFace(secret.id, owner.id, "Alex Beispiel");
-      await addFace(visible.id, owner.id, "Kim Beispiel");
+      const alex = await addFace(portrait.id, owner.id, "Alex Beispiel");
+      await addFace(scenery.id, owner.id, "Kim Beispiel");
+      expect(await publicPhotoIds(token)).toEqual([]);
 
-      const res = await autoHideKnownFacesLogic(owner.id, { personIds: [alex.personId] });
+      const res = await setKnownFaceLinkVisibilityLogic(owner.id, {
+        visibility: "visible",
+        personIds: [alex.personId],
+      });
       expect(res.updated).toBe(1);
-      expect((await service.getPublicAlbumLogic(token)).photos.map(p => p.id)).toEqual([visible.id]);
+      expect(await publicPhotoIds(token)).toEqual([portrait.id]);
     });
 
     it("covers the whole library when no album is given", async () => {
-      await addFace(secret.id, owner.id, "Alex Beispiel");
-      await addFace(visible.id, owner.id, "Kim Beispiel");
+      await addFace(portrait.id, owner.id, "Alex Beispiel");
+      await addFace(scenery.id, owner.id, "Kim Beispiel");
 
-      const res = await autoHideKnownFacesLogic(owner.id, {});
+      const res = await setKnownFaceLinkVisibilityLogic(owner.id, { visibility: "visible" });
       expect(res.updated).toBe(2);
-      expect((await service.getPublicAlbumLogic(token)).photos).toHaveLength(0);
+      expect((await publicPhotoIds(token)).sort()).toEqual([scenery.id, portrait.id].sort());
     });
 
     it("refuses an album the caller cannot write", async () => {
-      await addFace(secret.id, owner.id, "Alex Beispiel");
-      await expect(autoHideKnownFacesLogic(stranger.id, { albumId: album.id })).rejects.toThrow();
+      await addFace(portrait.id, owner.id, "Alex Beispiel");
+      await expect(
+        setKnownFaceLinkVisibilityLogic(stranger.id, { visibility: "visible", albumId: album.id }),
+      ).rejects.toThrow();
+    });
+  });
+
+  describe("album grid marker", () => {
+    async function gridEntries(): Promise<GalleryGridEntry[]> {
+      const res = await listGalleryGridLogic(
+        owner.id,
+        { albumScopeId: album.id },
+        { limit: 50, sortBy: "taken_at", sortDir: "asc" },
+      );
+      return res.photos;
+    }
+
+    it("marks the photos the link does not show", async () => {
+      await addFace(portrait.id, owner.id, "Alex Beispiel");
+
+      const entries = await gridEntries();
+      expect(entries.find(e => e.id === portrait.id)?.link_hidden).toBe(true);
+      expect(entries.find(e => e.id === scenery.id)?.link_hidden).toBeUndefined();
+    });
+
+    it("stays silent once the photo is released", async () => {
+      await addFace(portrait.id, owner.id, "Alex Beispiel");
+      await setPhotoLinkVisibilityLogic(owner.id, [portrait.id], "visible");
+
+      const entries = await gridEntries();
+      expect(entries.every(e => e.link_hidden === undefined)).toBe(true);
+    });
+
+    it("stays silent while the album has no public link at all", async () => {
+      await service.deleteAlbumPublicLinkLogic(owner.id, album.id);
+      await addFace(portrait.id, owner.id, "Alex Beispiel");
+
+      const entries = await gridEntries();
+      expect(entries.every(e => e.link_hidden === undefined)).toBe(true);
     });
   });
 });

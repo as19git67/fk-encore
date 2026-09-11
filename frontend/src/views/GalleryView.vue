@@ -98,7 +98,7 @@ import {
   listPhotoGroups,
   updatePhotoCuration,
   updatePhotoLinkVisibility,
-  autoHideKnownFaces,
+  setKnownFaceLinkVisibility,
   computeFileHash,
   checkPhotoHash,
   uploadPhotoWithProgress,
@@ -112,6 +112,7 @@ import {
   type PhotoFilter,
   type PhotoGroup,
   type CurationStatus,
+  type PhotoLinkVisibility,
   type Face,
   type PoiMatchItem,
 } from '../api/photos'
@@ -426,15 +427,16 @@ async function applyCurationToSelection(target: 'favorite' | 'hidden' | 'visible
 }
 
 /**
- * Batch-set the per-photo public-link opt-out. The flag is not per-user: it
+ * Batch-set the per-photo public-link visibility. It is not per-user data: it
  * decides what anonymous link visitors see across every album the photo is in.
+ * The default ('auto') withholds photos with a known face on them.
  */
-async function applyLinkVisibilityToSelection(linkHidden: boolean) {
+async function applyLinkVisibilityToSelection(visibility: PhotoLinkVisibility) {
   const ids = Array.from(selectedIds.value)
   if (ids.length === 0) return
   linkVisibilityBusy.value = true
   try {
-    await updatePhotoLinkVisibility(ids, linkHidden)
+    await updatePhotoLinkVisibility(ids, visibility)
     await galleryRef.value?.reload()
   } finally {
     linkVisibilityBusy.value = false
@@ -442,11 +444,11 @@ async function applyLinkVisibilityToSelection(linkHidden: boolean) {
   }
 }
 
-/** Quick pass over the whole library: hide every photo with a named face. */
-async function hideKnownFacesFromLinks() {
+/** Quick pass over the whole library: release every photo with a named face. */
+async function applyKnownFaceLinkVisibility(visibility: PhotoLinkVisibility) {
   linkVisibilityBusy.value = true
   try {
-    await autoHideKnownFaces({})
+    await setKnownFaceLinkVisibility(visibility)
     await galleryRef.value?.reload()
   } finally {
     linkVisibilityBusy.value = false
@@ -514,9 +516,10 @@ const selectionMenuItems = computed(() => {
     items.push(
       { label: 'Als Favorit markieren', icon: 'pi pi-heart', disabled: curationBusy.value, command: () => void applyCurationToSelection('favorite') },
       { label: 'Ausblenden', icon: 'pi pi-thumbs-down-fill', disabled: curationBusy.value, command: () => void applyCurationToSelection('hidden') },
-      { label: 'Über Freigabe-Link nicht zeigen', icon: 'pi pi-eye-slash', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection(true) },
-      { label: 'Über Freigabe-Link wieder zeigen', icon: 'pi pi-link', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection(false) },
-      { label: 'Alle Fotos mit bekannten Gesichtern von Links ausnehmen', icon: 'pi pi-users', disabled: linkVisibilityBusy.value, command: () => void hideKnownFacesFromLinks() },
+      { label: 'Über Freigabe-Links freigeben', icon: 'pi pi-link', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('visible') },
+      { label: 'Von Freigabe-Links ausnehmen', icon: 'pi pi-eye-slash', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('hidden') },
+      { label: 'Link-Sichtbarkeit automatisch', icon: 'pi pi-sparkles', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('auto') },
+      { label: 'Alle Fotos mit bekannten Gesichtern freigeben', icon: 'pi pi-users', disabled: linkVisibilityBusy.value, command: () => void applyKnownFaceLinkVisibility('visible') },
     )
   }
   items.push({ label: 'Auswahl aufheben', icon: 'pi pi-replay', command: clearSelection })

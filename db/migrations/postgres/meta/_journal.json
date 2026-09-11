@@ -1336,7 +1336,7 @@
       "idx": 190,
       "version": "7",
       "when": 1788220800015,
-      "tag": "0190_photo_link_hidden",
+      "tag": "0190_photo_link_visibility",
       "breakpoints": true
     }
   ]

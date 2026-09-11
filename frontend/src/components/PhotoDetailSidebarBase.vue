@@ -7,9 +7,9 @@ import PhotoLocationMenu from './PhotoLocationMenu.vue'
 import PhotoReactions from './PhotoReactions.vue'
 import PhotoAlbumDialog from './PhotoAlbumDialog.vue'
 import PhotoTransformEditor from './PhotoTransformEditor.vue'
-import { getPhotoUrl, getPhotosAlbums, updateAlbum, updateAlbumUserSettings, updatePhotoDescription, updatePhotoLinkVisibility } from '../api/photos'
+import { getPhotoUrl, getPhotosAlbums, updateAlbum, updateAlbumUserSettings, updatePhotoDescription, updatePhotoLinkVisibility, isVisibleViaLink } from '../api/photos'
 import { getAlbumCheckState as calculateAlbumCheckState } from '../utils/albumSelection'
-import type { Photo, Face, PoiMatchItem, Person, CurationStatus } from '../api/photos'
+import type { Photo, Face, PoiMatchItem, Person, CurationStatus, PhotoLinkVisibility } from '../api/photos'
 import { useReferenceData } from '../composables/useReferenceData'
 import { useUserPhotoTransform } from '../composables/useUserPhotoTransform'
 import {
@@ -256,21 +256,43 @@ async function toggleCover() {
 }
 
 // ── Public-link visibility ──────────────────────────────────────────────
-// Per-photo opt-out of link sharing: the photo stays visible to signed-in
-// users but disappears from every anonymous public-link view of its albums.
-// Unlike hiding, this is not a per-user setting, so it takes write access.
-const linkHidden = ref(!!props.photo.link_hidden)
-watch(() => props.photo.id, () => { linkHidden.value = !!props.photo.link_hidden })
-watch(() => props.photo.link_hidden, v => { linkHidden.value = !!v })
+// Whether an anonymous link visitor sees this photo. The default ('auto')
+// withholds photos with a known face on them; 'visible' releases one anyway
+// and 'hidden' withholds one that has no face. Unlike hiding, this is not a
+// per-user setting, so it takes write access.
+const linkVisibility = ref<PhotoLinkVisibility>(props.photo.link_visibility ?? 'auto')
+watch(() => [props.photo.id, props.photo.link_visibility], () => {
+  linkVisibility.value = props.photo.link_visibility ?? 'auto'
+})
+
+const shownViaLink = computed(() =>
+  isVisibleViaLink({ link_visibility: linkVisibility.value, has_known_face: props.photo.has_known_face }),
+)
+
+const linkVisibilityTooltip = computed(() => {
+  if (shownViaLink.value) {
+    return linkVisibility.value === 'visible' && props.photo.has_known_face
+      ? 'Trotz bekanntem Gesicht über Freigabe-Links sichtbar — wieder ausnehmen'
+      : 'Über Freigabe-Links sichtbar — ausnehmen'
+  }
+  return props.photo.has_known_face && linkVisibility.value === 'auto'
+    ? 'Bekanntes Gesicht erkannt: über Freigabe-Links nicht sichtbar — trotzdem freigeben'
+    : 'Über Freigabe-Links nicht sichtbar — freigeben'
+})
 
 const togglingLinkVisibility = ref(false)
 async function toggleLinkVisibility() {
   if (togglingLinkVisibility.value) return
-  const next = !linkHidden.value
+  // Toggling walks the effective state, not the raw setting: releasing a
+  // photo the default withholds means 'visible', and taking one back out
+  // means 'auto' when the default already withholds it, 'hidden' otherwise.
+  const next: PhotoLinkVisibility = shownViaLink.value
+    ? (props.photo.has_known_face ? 'auto' : 'hidden')
+    : 'visible'
   togglingLinkVisibility.value = true
   try {
     await updatePhotoLinkVisibility([props.photo.id], next)
-    linkHidden.value = next
+    linkVisibility.value = next
     emit('link-visibility-changed', props.photo.id, next)
   } catch (err) {
     console.error('Failed to update link visibility:', err)
@@ -294,7 +316,7 @@ const emit = defineEmits<{
   restore: [id: number]
   'navigate-to-photo': [id: number]
   'comment-count-change': [payload: { photoId: number; delta: number }]
-  'link-visibility-changed': [id: number, linkHidden: boolean]
+  'link-visibility-changed': [id: number, visibility: PhotoLinkVisibility]
 }>()
 
 function formatPhotoDateDisplay(photo: Photo) {
@@ -451,9 +473,9 @@ watch(() => props.readOnly, (ro) => {
         </template>
         <Button
             v-if="canEditLinkVisibility"
-            :icon="linkHidden ? 'pi pi-eye-slash' : 'pi pi-link'"
-            v-tooltip.bottom="linkHidden ? 'Wird über Freigabe-Links nicht gezeigt — wieder freigeben' : 'Über Freigabe-Links nicht zeigen'"
-            :severity="linkHidden ? 'danger' : 'secondary'"
+            :icon="shownViaLink ? 'pi pi-link' : 'pi pi-eye-slash'"
+            v-tooltip.bottom="linkVisibilityTooltip"
+            :severity="shownViaLink ? 'secondary' : 'danger'"
             text
             rounded
             :loading="togglingLinkVisibility"

@@ -17,6 +17,11 @@ import { and, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import db from "../db/database";
 import { dbAll, dbFirst } from "../db/adapter";
 import {
+  albumHasActivePublicLink,
+  albumParticipantIds,
+  linkVisiblePhotoSql,
+} from "./link-visibility.service";
+import {
   photos,
   photoCuration,
   photoGroupMembers,
@@ -357,6 +362,13 @@ export async function listGalleryGridLogic(
     effectiveFilter.albumScopeId !== undefined
       ? await loadCommentCountsForPhotos(effectiveFilter.albumScopeId, photoIds)
       : null;
+  // Same reasoning for the "not in the public link" marker, plus: it only says
+  // something while the album is actually link-shared.
+  const linkHiddenPhotoIds =
+    effectiveFilter.albumScopeId !== undefined
+      && (await albumHasActivePublicLink(effectiveFilter.albumScopeId))
+      ? await loadLinkHiddenPhotoIds(effectiveFilter.albumScopeId, photoIds)
+      : null;
 
   const result: GalleryGridEntry[] = rows.map((r) => {
     const entry: GalleryGridEntry = {
@@ -369,6 +381,7 @@ export async function listGalleryGridLogic(
     if (g) entry.group = g;
     const c = commentCountByPhotoId?.get(r.id);
     if (c) entry.comment_count = c;
+    if (linkHiddenPhotoIds?.has(r.id)) entry.link_hidden = true;
     return entry;
   });
 
@@ -428,6 +441,36 @@ export async function listGalleryIdsLogic(
       .limit(MAX_SELECT_ALL),
   );
   return { ids: rows.map((r) => r.id) };
+}
+
+/**
+ * For a page of photo ids, return those the album's public link does NOT show.
+ *
+ * Only meaningful for an album that actually has a live link, which the caller
+ * checks first — the grid marker exists to tell the owner "this one is not in
+ * what I just shared", and there is nothing to tell without a link.
+ */
+async function loadLinkHiddenPhotoIds(
+  albumId: number,
+  photoIds: number[],
+): Promise<Set<number>> {
+  const out = new Set<number>();
+  if (photoIds.length === 0) return out;
+
+  const participantIds = await albumParticipantIds(albumId);
+  const rows = await dbAll<{ id: number }>(
+    db
+      .select({ id: photos.id })
+      .from(photos)
+      .where(
+        and(
+          inArray(photos.id, photoIds),
+          sql`NOT ${linkVisiblePhotoSql("photos", participantIds)}`,
+        ),
+      ),
+  );
+  for (const r of rows) out.add(r.id);
+  return out;
 }
 
 async function loadCommentCountsForPhotos(

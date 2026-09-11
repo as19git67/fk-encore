@@ -11,7 +11,7 @@ import { UPLOAD_DIR, THUMBNAIL_DIR, thumbnailShardPath } from "./photo.service";
 import { PHOTO_LIBRARIES_ROOT } from "./libraries.service";
 import { denyPhotoFileRequest } from "./photo-file-access";
 import {
-  autoHideKnownFacesLogic,
+  setKnownFaceLinkVisibilityLogic,
   setPhotoLinkVisibilityLogic,
   LinkVisibilityAccessError,
 } from "./link-visibility.service";
@@ -52,8 +52,8 @@ import type {
   PhotoLocationsResponse,
   UpdatePhotoLinkVisibilityRequest,
   UpdatePhotoLinkVisibilityResponse,
-  AutoHideKnownFacesRequest,
-  AutoHideKnownFacesResponse,
+  SetKnownFaceLinkVisibilityRequest,
+  SetKnownFaceLinkVisibilityResponse,
 } from "../db/types";
 import { Query } from "encore.dev/api";
 import { parsePhotoFilterQuery, type PhotoFilterQuery } from "./photo.filters";
@@ -622,21 +622,22 @@ export const updatePhotoCuration = api(
 );
 
 /**
- * Hide photos from (or show them again in) anonymous public-link views.
+ * Set how photos behave in anonymous public-link views: 'auto' (hidden while
+ * a known face is on them), 'visible' (released) or 'hidden'.
  *
- * Unlike curation this is not per-user: the flag decides what every link
- * visitor sees, so it requires write access to the photo (owner) or to an
- * album containing it.
+ * Unlike curation this is not per-user — it decides what every link visitor
+ * sees — so it requires write access to the photo (owner) or to an album
+ * containing it.
  */
 export const updatePhotoLinkVisibility = api(
   { expose: true, method: "POST", path: "/photos/link-visibility", auth: true },
-  async ({ photoIds, linkHidden }: UpdatePhotoLinkVisibilityRequest): Promise<UpdatePhotoLinkVisibilityResponse> => {
+  async ({ photoIds, visibility }: UpdatePhotoLinkVisibilityRequest): Promise<UpdatePhotoLinkVisibilityResponse> => {
     checkModule();
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "photos.view");
     try {
-      return await setPhotoLinkVisibilityLogic(userId, photoIds, linkHidden);
+      return await setPhotoLinkVisibilityLogic(userId, photoIds, visibility);
     } catch (err: any) {
       if (err instanceof LinkVisibilityAccessError) {
         throw APIError.permissionDenied("Nicht berechtigt, die Link-Sichtbarkeit zu ändern.");
@@ -647,18 +648,19 @@ export const updatePhotoLinkVisibility = api(
 );
 
 /**
- * Bulk pass: hide every photo showing a face assigned to a named person.
- * Optionally scoped to a single album.
+ * Bulk pass over every photo showing a face assigned to a named person:
+ * release them all to link visitors, pin them shut, or restore the default.
+ * Optionally scoped to a single album or to specific persons.
  */
-export const autoHideKnownFaces = api(
+export const setKnownFaceLinkVisibility = api(
   { expose: true, method: "POST", path: "/photos/link-visibility/known-faces", auth: true },
-  async ({ albumId, personIds }: AutoHideKnownFacesRequest): Promise<AutoHideKnownFacesResponse> => {
+  async ({ visibility, albumId, personIds }: SetKnownFaceLinkVisibilityRequest): Promise<SetKnownFaceLinkVisibilityResponse> => {
     checkModule();
     const userId = getUserId();
     const authData = getAuthData()!;
     requirePermission(authData, "photos.view");
     requirePermission(authData, "people.view");
-    return await autoHideKnownFacesLogic(userId, { albumId, personIds });
+    return await setKnownFaceLinkVisibilityLogic(userId, { visibility, albumId, personIds });
   }
 );
 
