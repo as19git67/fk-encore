@@ -25,6 +25,25 @@ export interface Photo {
   description?: string
   /** IPTC Keywords / XMP dc:subject — tags imported from the file. Read-only in the UI. */
   keywords?: string[]
+  /**
+   * How the photo behaves in anonymous public-link views of its albums:
+   * 'auto' (default) withholds it while a known face is on it, 'visible'
+   * releases it, 'hidden' never shows it. Signed-in users are unaffected.
+   */
+  link_visibility?: PhotoLinkVisibility
+  /** An album participant assigned one of this photo's faces to a named person. */
+  has_known_face?: boolean
+}
+
+/** Per-photo public-link visibility. */
+export type PhotoLinkVisibility = 'auto' | 'visible' | 'hidden'
+
+/** What a link visitor sees for this photo, from the two fields above. */
+export function isVisibleViaLink(photo: Pick<Photo, 'link_visibility' | 'has_known_face'>): boolean {
+  const visibility = photo.link_visibility ?? 'auto'
+  if (visibility === 'visible') return true
+  if (visibility === 'hidden') return false
+  return !photo.has_known_face
 }
 
 export interface ListPhotosResponse {
@@ -553,6 +572,44 @@ export function ignorePersonFaces(personId: number) {
 
 export function getPhotoFaces(id: number) {
   return apiFetch<{ faces: Face[] }>(`/photos/${id}/faces`)
+}
+
+// ---------- Public link visibility ----------
+
+export interface UpdatePhotoLinkVisibilityResponse {
+  success: boolean
+  /** Number of photos whose flag actually changed. */
+  updated: number
+}
+
+export interface SetKnownFaceLinkVisibilityResponse {
+  success: boolean
+  /** Photos whose setting was changed by this pass. */
+  updated: number
+  /** Photos that already carried the requested setting. */
+  unchanged: number
+}
+
+/** Set how photos behave in anonymous public-link views. */
+export function updatePhotoLinkVisibility(photoIds: number[], visibility: PhotoLinkVisibility) {
+  return apiFetch<UpdatePhotoLinkVisibilityResponse>('/photos/link-visibility', {
+    method: 'POST',
+    body: JSON.stringify({ photoIds, visibility })
+  })
+}
+
+/**
+ * Bulk pass over every photo showing a face assigned to a named person.
+ * Without `albumId` it covers the caller's whole library.
+ */
+export function setKnownFaceLinkVisibility(
+  visibility: PhotoLinkVisibility,
+  opts: { albumId?: number; personIds?: number[] } = {}
+) {
+  return apiFetch<SetKnownFaceLinkVisibilityResponse>('/photos/link-visibility/known-faces', {
+    method: 'POST',
+    body: JSON.stringify({ visibility, ...opts })
+  })
 }
 
 // ---------- Curation ----------

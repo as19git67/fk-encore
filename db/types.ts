@@ -349,6 +349,54 @@ export interface Photo {
   description?: string;
   /** IPTC Keywords / XMP dc:subject — user-facing tags imported from the file. */
   keywords?: string[];
+  /**
+   * How the photo behaves in anonymous public-link views of its albums:
+   * 'auto' (default) hides it when a known face is on it, 'visible' always
+   * shows it, 'hidden' never does. Signed-in users are unaffected.
+   */
+  link_visibility?: PhotoLinkVisibility;
+  /**
+   * True when an album participant has assigned one of the photo's faces to a
+   * named person. Together with `link_visibility` this yields what a link
+   * visitor sees, without a second round-trip.
+   */
+  has_known_face?: boolean;
+}
+
+/** Per-photo public-link visibility. See `photos.link_visibility`. */
+export type PhotoLinkVisibility = "auto" | "visible" | "hidden";
+
+export interface UpdatePhotoLinkVisibilityRequest {
+  /** Photos to update. */
+  photoIds: number[];
+  /** New visibility for all of them. */
+  visibility: PhotoLinkVisibility;
+}
+
+export interface UpdatePhotoLinkVisibilityResponse {
+  success: boolean;
+  /** Number of photos whose setting actually changed. */
+  updated: number;
+}
+
+export interface SetKnownFaceLinkVisibilityRequest {
+  /** New visibility for every photo carrying a known face. */
+  visibility: PhotoLinkVisibility;
+  /** Restrict the pass to a single album. Omit to cover the whole library. */
+  albumId?: number;
+  /**
+   * Only consider faces assigned to these persons. Omit to use every person
+   * the caller has named (i.e. every "known" face).
+   */
+  personIds?: number[];
+}
+
+export interface SetKnownFaceLinkVisibilityResponse {
+  success: boolean;
+  /** Photos whose setting was changed by this pass. */
+  updated: number;
+  /** Photos that already carried the requested setting. */
+  unchanged: number;
 }
 
 export interface FaceBBox { x: number; y: number; width: number; height: number; }
@@ -722,6 +770,13 @@ export interface GalleryGridEntry {
    * / 0 in the global gallery. Drives the album-only "has comments" badge.
    */
   comment_count?: number;
+  /**
+   * True when this photo is withheld from the album's public link — either
+   * explicitly, or (the default) because a known face is on it. Only set when
+   * the grid is scoped to an album that actually has a live public link; the
+   * marker is meaningless without one, so it is absent everywhere else.
+   */
+  link_hidden?: boolean;
 }
 
 /**

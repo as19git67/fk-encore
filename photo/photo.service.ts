@@ -109,6 +109,7 @@ import {
 } from "../db/schema";
 import type {
   Photo,
+  PhotoLinkVisibility,
   PhotoWithCuration,
   CurationStatus,
   Album,
@@ -165,6 +166,7 @@ import { isHighConfidenceDuplicateGroup, recommendDuplicatePhoto, selectDeletabl
 // `photo.service` (most notably `service.convertHeicToJpeg` in
 // photo.ts) keep working.
 import { convertHeicToJpeg } from "./heic-convert.service";
+import { knownFaceExistsSql, linkVisiblePhotoSql } from "./link-visibility.service";
 export { convertHeicToJpeg, isHeicBuffer } from "./heic-convert.service";
 import {
   loadGrayImage,
@@ -2955,6 +2957,8 @@ export async function listPhotosLogic(
     auto_crop: { x: number; y: number } | null;
     description: string | null;
     keywords: string[] | null;
+    link_visibility: string | null;
+    has_known_face: boolean | null;
   }>(
     db
       .select({
@@ -2979,6 +2983,8 @@ export async function listPhotosLogic(
         auto_crop: photos.auto_crop,
         description: photos.description,
         keywords: photos.keywords,
+        link_visibility: photos.link_visibility,
+        has_known_face: sql<boolean>`${knownFaceExistsSql(sql`${photos.id}`, [userId])}`,
       })
       .from(photos)
       .leftJoin(
@@ -3012,6 +3018,8 @@ export async function listPhotosLogic(
       auto_crop: r.auto_crop ?? undefined,
       description: r.description ?? undefined,
       keywords: r.keywords ?? [],
+      link_visibility: (r.link_visibility as PhotoLinkVisibility) ?? "auto",
+      has_known_face: !!r.has_known_face,
     })),
   };
 }
@@ -3214,6 +3222,8 @@ export async function getPhotoDetailsBatchLogic(
     auto_crop: { x: number; y: number } | null;
     description: string | null;
     keywords: string[] | null;
+    link_visibility: string | null;
+    has_known_face: boolean | null;
   }>(
     db
       .select({
@@ -3238,6 +3248,8 @@ export async function getPhotoDetailsBatchLogic(
         auto_crop: photos.auto_crop,
         description: photos.description,
         keywords: photos.keywords,
+        link_visibility: photos.link_visibility,
+        has_known_face: sql<boolean>`${knownFaceExistsSql(sql`${photos.id}`, [userId])}`,
       })
       .from(photos)
       .leftJoin(
@@ -3289,6 +3301,8 @@ export async function getPhotoDetailsBatchLogic(
       auto_crop: r.auto_crop ?? undefined,
       description: r.description ?? undefined,
       keywords: r.keywords ?? [],
+      link_visibility: (r.link_visibility as PhotoLinkVisibility) ?? "auto",
+      has_known_face: !!r.has_known_face,
     })),
   };
 }
@@ -4590,7 +4604,7 @@ export async function getAlbumLogic(
     ? sql`
     GROUP BY p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash, p.image_data_hash,
              p.taken_at, p.created_at, p.updated_at,
-             p.ai_quality_score, p.auto_crop, p.description,
+             p.ai_quality_score, p.auto_crop, p.description, p.link_visibility,
              p.latitude, p.longitude,
              p.location_name, p.location_city, p.location_country, p.location_short,
              ap.added_by_user_id, ap.added_at, my_pc.status`
@@ -4599,7 +4613,8 @@ export async function getAlbumLogic(
     SELECT
       p.id, p.user_id, p.filename, p.original_name, p.mime_type, p.size, p.hash, p.image_data_hash,
       p.taken_at, p.created_at, p.updated_at,
-      p.ai_quality_score, p.auto_crop, p.description,
+      p.ai_quality_score, p.auto_crop, p.description, p.link_visibility,
+      ${knownFaceExistsSql("p", participantIds)} AS has_known_face,
       p.latitude, p.longitude,
       p.location_name, p.location_city, p.location_country, p.location_short,
       ap.added_by_user_id, ap.added_at,
@@ -4685,6 +4700,8 @@ export async function getAlbumLogic(
       location_country: r.location_country ?? undefined,
       location_short: r.location_short ?? undefined,
       description: r.description ?? undefined,
+      link_visibility: (r.link_visibility as PhotoLinkVisibility) ?? "auto",
+      has_known_face: !!r.has_known_face,
       curation_stats: isShared ? {
         fav_count: Number(r.fav_count),
         hide_count: Number(r.hide_count),
@@ -5722,8 +5739,6 @@ export async function getPublicAlbumLogic(token: string): Promise<PublicAlbumRes
   );
   if (!album) throw new Error("Album not found");
 
-  const stats = await getAlbumStats(link.album_id);
-
   // A photo hidden by ANY album participant (owner or a shared collaborator)
   // must never reach an anonymous public-link visitor — there's no "current
   // user" to scope hiding to here, so we exclude at the SQL level rather than
@@ -5747,22 +5762,42 @@ export async function getPublicAlbumLogic(token: string): Promise<PublicAlbumRes
       ) AS is_highlight
     FROM photos p
     INNER JOIN album_photos ap ON ap.photo_id = p.id AND ap.album_id = ${link.album_id}
-    WHERE NOT EXISTS (
-      SELECT 1 FROM ${photoCuration} pc
-      WHERE pc.photo_id = p.id
-        AND pc.status = 'hidden'
-        AND pc.user_id = ANY(ARRAY[${sql.join(participantIds.map(id => sql`${id}`), sql`, `)}]::int[])
-    )
+    WHERE ${linkVisiblePhotoSql("p", participantIds)}
+      AND NOT EXISTS (
+        SELECT 1 FROM ${photoCuration} pc
+        WHERE pc.photo_id = p.id
+          AND pc.status = 'hidden'
+          AND pc.user_id = ANY(ARRAY[${sql.join(participantIds.map(id => sql`${id}`), sql`, `)}]::int[])
+      )
     ORDER BY p.taken_at ASC NULLS LAST, p.created_at ASC
   `)).rows;
 
-  // Determine cover
+  // A cover that link visitors may not see must not leak through the public
+  // listing (or the Open Graph preview built from it), so fall back to the
+  // newest photo that actually survived the filter above.
   let coverFilename: string | undefined;
   if (album.cover_photo_id) {
-    const cp = await dbFirst<any>(db.select({ filename: photos.filename }).from(photos).where(eq(photos.id, album.cover_photo_id)));
-    coverFilename = cp?.filename;
-  } else {
-    coverFilename = stats.newest_photo_filename;
+    const visibleIds = new Set((photoRows as any[]).map(r => r.id));
+    if (visibleIds.has(album.cover_photo_id)) {
+      const cp = await dbFirst<{ filename: string }>(
+        db.select({ filename: photos.filename }).from(photos).where(eq(photos.id, album.cover_photo_id))
+      );
+      coverFilename = cp?.filename;
+    }
+  }
+  if (!coverFilename) {
+    const visibleCover = photoRows[photoRows.length - 1] as any | undefined;
+    coverFilename = visibleCover?.filename ?? undefined;
+  }
+
+  // Timespan of what the visitor actually sees (rows are sorted ascending).
+  let publicNewest: string | undefined;
+  let publicOldest: string | undefined;
+  for (const r of photoRows as any[]) {
+    const d: string | undefined = r.taken_at || r.created_at || undefined;
+    if (!d) continue;
+    if (!publicNewest || d > publicNewest) publicNewest = d;
+    if (!publicOldest || d < publicOldest) publicOldest = d;
   }
 
   return {
@@ -5771,9 +5806,9 @@ export async function getPublicAlbumLogic(token: string): Promise<PublicAlbumRes
     description: album.description ?? undefined,
     display_mode: (album.display_mode as "grid" | "map") ?? "grid",
     cover_filename: coverFilename,
-    newest_photo_at: stats.newest_photo_at,
-    oldest_photo_at: stats.oldest_photo_at,
-    photo_count: stats.photo_count,
+    newest_photo_at: publicNewest,
+    oldest_photo_at: publicOldest,
+    photo_count: photoRows.length,
     photos: photoRows.map((r: any) => ({
       id: r.id,
       filename: r.filename,

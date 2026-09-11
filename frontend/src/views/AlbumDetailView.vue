@@ -40,6 +40,7 @@ const TripMap = defineAsyncComponent(() => import('../components/TripMap.vue'))
 import {
   type AlbumAccessLevel,
   type AlbumPublicLink,
+  type PhotoLinkVisibility,
   type AlbumShareWithUser,
   type AlbumWithPhotos,
   type BatchDeleteSkippedPhoto,
@@ -74,6 +75,8 @@ import {
   updateAlbum,
   updateAlbumUserSettings,
   updatePhotoCuration,
+  updatePhotoLinkVisibility,
+  setKnownFaceLinkVisibility,
   updatePhotoDate,
 } from '../api/photos'
 import { useAuthStore } from '../stores/auth'
@@ -394,6 +397,9 @@ const selectMode = ref(false)
 const selectedIds = ref<Set<number>>(new Set())
 const selectedCount = computed(() => selectedIds.value.size)
 const curationBusy = ref(false)
+const linkVisibilityBusy = ref(false)
+const knownFaceLinkBusy = ref(false)
+const knownFaceLinkResult = ref<string | null>(null)
 const removeBusy = ref(false)
 const deleteBusy = ref(false)
 const deleteSkipped = ref<BatchDeleteSkippedPhoto[]>([])
@@ -519,6 +525,58 @@ async function applyCurationToSelection(target: CurationStatus) {
   }
 }
 
+/**
+ * Batch-set the public-link visibility of the current selection. Unlike
+ * curation this is not per-user — it changes what every link visitor sees —
+ * so the backend only accepts it from the photo owner or an album writer.
+ */
+async function applyLinkVisibilityToSelection(visibility: PhotoLinkVisibility) {
+  const ids = Array.from(selectedIds.value)
+  if (ids.length === 0) return
+  linkVisibilityBusy.value = true
+  try {
+    await updatePhotoLinkVisibility(ids, visibility)
+    await loadData()
+    await galleryRef.value?.reload()
+  } catch (err: any) {
+    error.value = err?.message ?? 'Die Link-Sichtbarkeit konnte nicht geändert werden.'
+  } finally {
+    linkVisibilityBusy.value = false
+    exitSelectMode()
+  }
+}
+
+/**
+ * Quick pass over every album photo showing a face of a named person:
+ * release them all to link visitors, or take them back out.
+ */
+async function applyKnownFaceLinkVisibility(visibility: PhotoLinkVisibility) {
+  knownFaceLinkBusy.value = true
+  knownFaceLinkResult.value = null
+  try {
+    const res = await setKnownFaceLinkVisibility(visibility, { albumId: albumId.value })
+    const released = visibility === 'visible'
+    if (res.updated === 0) {
+      knownFaceLinkResult.value = res.unchanged > 0
+        ? (released
+          ? `Alle ${res.unchanged} Fotos mit bekannten Gesichtern sind bereits freigegeben.`
+          : `Alle ${res.unchanged} Fotos mit bekannten Gesichtern sind bereits ausgenommen.`)
+        : 'Keine Fotos mit bekannten Gesichtern in diesem Album.'
+    } else {
+      const noun = res.updated === 1 ? 'Foto ist' : 'Fotos sind'
+      knownFaceLinkResult.value = released
+        ? `${res.updated} ${noun} jetzt über den Link sichtbar.`
+        : `${res.updated} ${noun} jetzt vom Link ausgenommen.`
+    }
+    await loadData()
+    await galleryRef.value?.reload()
+  } catch (err: any) {
+    error.value = err?.message ?? 'Die Link-Sichtbarkeit konnte nicht geändert werden.'
+  } finally {
+    knownFaceLinkBusy.value = false
+  }
+}
+
 function deleteFromSelection() {
   const ids = Array.from(selectedIds.value)
   if (ids.length === 0) return
@@ -606,6 +664,13 @@ const selectionMenuItems = computed(() => {
     items.push(
       { label: 'Als Favorit markieren', icon: 'pi pi-heart', disabled: curationBusy.value, command: () => void applyCurationToSelection('favorite') },
       { label: 'Ausblenden', icon: 'pi pi-thumbs-down-fill', disabled: curationBusy.value, command: () => void applyCurationToSelection('hidden') },
+    )
+  }
+  if (canWrite.value) {
+    items.push(
+      { label: 'Über Freigabe-Link freigeben', icon: 'pi pi-link', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('visible') },
+      { label: 'Vom Freigabe-Link ausnehmen', icon: 'pi pi-eye-slash', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('hidden') },
+      { label: 'Link-Sichtbarkeit automatisch', icon: 'pi pi-sparkles', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('auto') },
     )
   }
   if (canWrite.value) {
@@ -2809,6 +2874,35 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
             </div>
             <span class="share-hint">Jeder mit dem Link kann das Album ansehen.</span>
           </div>
+          <div class="link-privacy-block">
+            <span class="share-hint">
+              <i class="pi pi-eye-slash" />
+              Fotos mit bekannten Gesichtern werden über den Link grundsätzlich nicht gezeigt.
+              Im Album sind sie mit
+              <i class="pi pi-eye-slash link-privacy-inline-icon" />
+              gekennzeichnet; einzelne Fotos lassen sich im Foto-Detail freigeben.
+            </span>
+            <div class="link-privacy-actions">
+              <Button
+                label="Alle mit bekannten Gesichtern freigeben"
+                icon="pi pi-link"
+                size="small"
+                text
+                :loading="knownFaceLinkBusy"
+                @click="applyKnownFaceLinkVisibility('visible')"
+              />
+              <Button
+                label="Freigaben zurücknehmen"
+                icon="pi pi-replay"
+                size="small"
+                text
+                severity="secondary"
+                :loading="knownFaceLinkBusy"
+                @click="applyKnownFaceLinkVisibility('auto')"
+              />
+            </div>
+            <span v-if="knownFaceLinkResult" class="share-hint">{{ knownFaceLinkResult }}</span>
+          </div>
         </div>
         <div class="share-section">
           <h4 class="share-section-title">Aktuelle Freigaben</h4>
@@ -2924,6 +3018,24 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
 </template>
 
 <style scoped>
+.link-privacy-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.link-privacy-inline-icon {
+  font-size: 0.75rem;
+}
+.link-privacy-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  align-items: flex-start;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--p-content-border-color);
+}
+
 .album-detail-view {
   display: flex;
   flex-direction: column;

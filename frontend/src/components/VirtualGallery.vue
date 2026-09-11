@@ -549,6 +549,18 @@ defineExpose({
             >
               <i class="pi pi-comment vg-comment-icon" />
             </span>
+            <!-- Album-only marker: this photo is not part of what the
+                 album's public link shows — either explicitly, or because a
+                 known face is on it (the default). The server only sets the
+                 field while the album actually has a live link, so the
+                 marker never appears for an album nobody shared. -->
+            <span
+              v-if="slot.link_hidden"
+              class="vg-link-hidden-badge"
+              title="Nicht im Freigabe-Link sichtbar"
+            >
+              <i class="pi pi-eye-slash vg-link-hidden-icon" />
+            </span>
             <i
               v-if="selectMode"
               class="pi vg-select-icon"
@@ -741,6 +753,21 @@ defineExpose({
   pointer-events: none;
 }
 .vg-comment-icon {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.95);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+}
+
+.vg-link-hidden-badge {
+  position: absolute;
+  bottom: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  pointer-events: none;
+}
+.vg-link-hidden-icon {
   font-size: 0.85rem;
   color: rgba(255, 255, 255, 0.95);
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);

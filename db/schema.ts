@@ -234,6 +234,12 @@ export const photos = pgTable("photos", {
   // used as a fast-path dedup lookup on re-upload — gated on image_data_hash
   // equality so an actual content edit is still stored as a new photo (#432).
   device_asset_id: text("device_asset_id"),
+  // Per-photo visibility in anonymous public-link views — 'auto' | 'visible'
+  // | 'hidden'. 'auto' (the default) shows the photo unless it carries a face
+  // an album participant assigned to a named person: pictures of people the
+  // household knows stay off a link unless they are explicitly released.
+  // Signed-in users and album collaborators are unaffected by this column.
+  link_visibility: text("link_visibility").notNull().default("auto"),
 });
 
 // ========== Persons ==========

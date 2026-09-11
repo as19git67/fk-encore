@@ -7,9 +7,9 @@ import PhotoLocationMenu from './PhotoLocationMenu.vue'
 import PhotoReactions from './PhotoReactions.vue'
 import PhotoAlbumDialog from './PhotoAlbumDialog.vue'
 import PhotoTransformEditor from './PhotoTransformEditor.vue'
-import { getPhotoUrl, getPhotosAlbums, updateAlbum, updateAlbumUserSettings, updatePhotoDescription } from '../api/photos'
+import { getPhotoUrl, getPhotosAlbums, updateAlbum, updateAlbumUserSettings, updatePhotoDescription, updatePhotoLinkVisibility, isVisibleViaLink } from '../api/photos'
 import { getAlbumCheckState as calculateAlbumCheckState } from '../utils/albumSelection'
-import type { Photo, Face, PoiMatchItem, Person, CurationStatus } from '../api/photos'
+import type { Photo, Face, PoiMatchItem, Person, CurationStatus, PhotoLinkVisibility } from '../api/photos'
 import { useReferenceData } from '../composables/useReferenceData'
 import { useUserPhotoTransform } from '../composables/useUserPhotoTransform'
 import {
@@ -255,6 +255,52 @@ async function toggleCover() {
   }
 }
 
+// ── Public-link visibility ──────────────────────────────────────────────
+// Whether an anonymous link visitor sees this photo. The default ('auto')
+// withholds photos with a known face on them; 'visible' releases one anyway
+// and 'hidden' withholds one that has no face. Unlike hiding, this is not a
+// per-user setting, so it takes write access.
+const linkVisibility = ref<PhotoLinkVisibility>(props.photo.link_visibility ?? 'auto')
+watch(() => [props.photo.id, props.photo.link_visibility], () => {
+  linkVisibility.value = props.photo.link_visibility ?? 'auto'
+})
+
+const shownViaLink = computed(() =>
+  isVisibleViaLink({ link_visibility: linkVisibility.value, has_known_face: props.photo.has_known_face }),
+)
+
+const linkVisibilityTooltip = computed(() => {
+  if (shownViaLink.value) {
+    return linkVisibility.value === 'visible' && props.photo.has_known_face
+      ? 'Trotz bekanntem Gesicht über Freigabe-Links sichtbar — wieder ausnehmen'
+      : 'Über Freigabe-Links sichtbar — ausnehmen'
+  }
+  return props.photo.has_known_face && linkVisibility.value === 'auto'
+    ? 'Bekanntes Gesicht erkannt: über Freigabe-Links nicht sichtbar — trotzdem freigeben'
+    : 'Über Freigabe-Links nicht sichtbar — freigeben'
+})
+
+const togglingLinkVisibility = ref(false)
+async function toggleLinkVisibility() {
+  if (togglingLinkVisibility.value) return
+  // Toggling walks the effective state, not the raw setting: releasing a
+  // photo the default withholds means 'visible', and taking one back out
+  // means 'auto' when the default already withholds it, 'hidden' otherwise.
+  const next: PhotoLinkVisibility = shownViaLink.value
+    ? (props.photo.has_known_face ? 'auto' : 'hidden')
+    : 'visible'
+  togglingLinkVisibility.value = true
+  try {
+    await updatePhotoLinkVisibility([props.photo.id], next)
+    linkVisibility.value = next
+    emit('link-visibility-changed', props.photo.id, next)
+  } catch (err) {
+    console.error('Failed to update link visibility:', err)
+  } finally {
+    togglingLinkVisibility.value = false
+  }
+}
+
 onMounted(loadAlbums)
 
 const emit = defineEmits<{
@@ -270,6 +316,7 @@ const emit = defineEmits<{
   restore: [id: number]
   'navigate-to-photo': [id: number]
   'comment-count-change': [payload: { photoId: number; delta: number }]
+  'link-visibility-changed': [id: number, visibility: PhotoLinkVisibility]
 }>()
 
 function formatPhotoDateDisplay(photo: Photo) {
@@ -283,6 +330,18 @@ function formatPhotoDateDisplay(photo: Photo) {
 // the values read-only.
 const canEditPhotoMeta = computed(() =>
   detailPanelEditable(auth.user?.id != null && props.photo.user_id === auth.user.id, props.readOnly),
+)
+
+// The link-visibility flag affects every link visitor, so the backend only
+// accepts it from the photo's owner or someone with album write access.
+const canEditLinkVisibility = computed(() =>
+  detailPanelEditable(
+    (auth.user?.id != null && props.photo.user_id === auth.user.id)
+      || props.albumRole === 'owner'
+      || props.albumRole === 'admin'
+      || props.albumRole === 'contributor',
+    props.readOnly,
+  ),
 )
 
 // Resolve the display name for an assigned face. Prefer the name the backend
@@ -412,6 +471,16 @@ watch(() => props.readOnly, (ro) => {
           <Button :icon="photo.curation_status === 'favorite' ? 'pi pi-heart-fill' : 'pi pi-heart'" v-tooltip.bottom="photo.curation_status === 'favorite' ? 'Kein Favorit' : 'Favorit'" @click="emit('toggle-favorite', photo.id, photo.curation_status)" :severity="photo.curation_status === 'favorite' ? 'warn' : 'secondary'" text rounded />
           <Button :icon="photo.curation_status === 'hidden' ? 'pi pi-thumbs-down-fill' : 'pi pi-thumbs-down'" v-tooltip.bottom="photo.curation_status === 'hidden' ? 'Wiederherstellen' : 'Ausblenden'" @click="photo.curation_status === 'hidden' ? emit('restore', photo.id) : emit('hide', photo.id)" :severity="photo.curation_status === 'hidden' ? 'danger' : 'secondary'" text rounded />
         </template>
+        <Button
+            v-if="canEditLinkVisibility"
+            :icon="shownViaLink ? 'pi pi-link' : 'pi pi-eye-slash'"
+            v-tooltip.bottom="linkVisibilityTooltip"
+            :severity="shownViaLink ? 'secondary' : 'danger'"
+            text
+            rounded
+            :loading="togglingLinkVisibility"
+            @click="toggleLinkVisibility"
+        />
         <template v-if="albumId" class="meta-row cover-action">
           <Button
               icon="pi pi-image"
