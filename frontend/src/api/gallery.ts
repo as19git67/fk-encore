@@ -50,9 +50,10 @@ export interface GalleryGridEntry {
    */
   comment_count?: number
   /**
-   * True when the album's public link does not show this photo — explicitly,
-   * or (the default) because a known face is on it. Only set when the grid is
-   * scoped to an album that actually has a live public link.
+   * Whether the album's public link withholds this photo — explicitly, or
+   * (the default) because a known face is on it. Set on every entry, true or
+   * false, while the album has a live public link; absent otherwise, and the
+   * grid then draws no link marker at all.
    */
   link_hidden?: boolean
 }

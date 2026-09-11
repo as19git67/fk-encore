@@ -549,17 +549,19 @@ defineExpose({
             >
               <i class="pi pi-comment vg-comment-icon" />
             </span>
-            <!-- Album-only marker: this photo is not part of what the
-                 album's public link shows — either explicitly, or because a
-                 known face is on it (the default). The server only sets the
-                 field while the album actually has a live link, so the
-                 marker never appears for an album nobody shared. -->
+            <!-- Album-only marker: does the album's public link show this
+                 photo? A plain link when it does, a struck-out one when it
+                 does not (explicitly, or because a known face is on it). The
+                 server only sets the field while the album actually has a
+                 live link, so neither marker appears for an album nobody
+                 shared. -->
             <span
-              v-if="slot.link_hidden"
-              class="vg-link-hidden-badge"
-              title="Nicht im Freigabe-Link sichtbar"
+              v-if="slot.link_hidden !== undefined"
+              class="vg-link-badge"
+              :class="{ 'vg-link-badge--hidden': slot.link_hidden }"
+              :title="slot.link_hidden ? 'Nicht im Freigabe-Link sichtbar' : 'Im Freigabe-Link sichtbar'"
             >
-              <i class="pi pi-eye-slash vg-link-hidden-icon" />
+              <i class="vg-link-icon" :class="slot.link_hidden ? 'pi pi-link-slash' : 'pi pi-link'" />
             </span>
             <i
               v-if="selectMode"
@@ -758,7 +760,7 @@ defineExpose({
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
 }
 
-.vg-link-hidden-badge {
+.vg-link-badge {
   position: absolute;
   bottom: 6px;
   left: 50%;
@@ -767,10 +769,15 @@ defineExpose({
   align-items: center;
   pointer-events: none;
 }
-.vg-link-hidden-icon {
+.vg-link-icon {
   font-size: 0.85rem;
-  color: rgba(255, 255, 255, 0.95);
+  /* The "is shared" case is the unremarkable one in a shared album, so it
+   * stays quiet; the withheld one is what the owner needs to spot. */
+  color: rgba(255, 255, 255, 0.6);
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+}
+.vg-link-badge--hidden .vg-link-icon {
+  color: rgba(255, 255, 255, 0.95);
 }
 
 .vg-select-icon {

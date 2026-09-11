@@ -7,7 +7,13 @@ import PhotoLocationMenu from './PhotoLocationMenu.vue'
 import PhotoReactions from './PhotoReactions.vue'
 import PhotoAlbumDialog from './PhotoAlbumDialog.vue'
 import PhotoTransformEditor from './PhotoTransformEditor.vue'
-import { getPhotoUrl, getPhotosAlbums, updateAlbum, updateAlbumUserSettings, updatePhotoDescription, updatePhotoLinkVisibility, isVisibleViaLink } from '../api/photos'
+import { getPhotoUrl, getPhotosAlbums, updateAlbum, updateAlbumUserSettings, updatePhotoDescription, updatePhotoLinkVisibility } from '../api/photos'
+import {
+  isVisibleViaLink,
+  nextLinkVisibility,
+  linkVisibilityIcon as iconForLinkVisibility,
+  linkVisibilityTooltip as tooltipForLinkVisibility,
+} from '../utils/linkVisibility'
 import { getAlbumCheckState as calculateAlbumCheckState } from '../utils/albumSelection'
 import type { Photo, Face, PoiMatchItem, Person, CurationStatus, PhotoLinkVisibility } from '../api/photos'
 import { useReferenceData } from '../composables/useReferenceData'
@@ -265,30 +271,20 @@ watch(() => [props.photo.id, props.photo.link_visibility], () => {
   linkVisibility.value = props.photo.link_visibility ?? 'auto'
 })
 
-const shownViaLink = computed(() =>
-  isVisibleViaLink({ link_visibility: linkVisibility.value, has_known_face: props.photo.has_known_face }),
-)
-
-const linkVisibilityTooltip = computed(() => {
-  if (shownViaLink.value) {
-    return linkVisibility.value === 'visible' && props.photo.has_known_face
-      ? 'Trotz bekanntem Gesicht über Freigabe-Links sichtbar — wieder ausnehmen'
-      : 'Über Freigabe-Links sichtbar — ausnehmen'
-  }
-  return props.photo.has_known_face && linkVisibility.value === 'auto'
-    ? 'Bekanntes Gesicht erkannt: über Freigabe-Links nicht sichtbar — trotzdem freigeben'
-    : 'Über Freigabe-Links nicht sichtbar — freigeben'
-})
+// The toggle walks the effective state, not the raw setting — see
+// utils/linkVisibility.ts, which the fullscreen toolbar shares.
+const linkVisibilityState = computed(() => ({
+  link_visibility: linkVisibility.value,
+  has_known_face: props.photo.has_known_face,
+}))
+const shownViaLink = computed(() => isVisibleViaLink(linkVisibilityState.value))
+const linkVisibilityIcon = computed(() => iconForLinkVisibility(linkVisibilityState.value))
+const linkVisibilityTooltip = computed(() => tooltipForLinkVisibility(linkVisibilityState.value))
 
 const togglingLinkVisibility = ref(false)
 async function toggleLinkVisibility() {
   if (togglingLinkVisibility.value) return
-  // Toggling walks the effective state, not the raw setting: releasing a
-  // photo the default withholds means 'visible', and taking one back out
-  // means 'auto' when the default already withholds it, 'hidden' otherwise.
-  const next: PhotoLinkVisibility = shownViaLink.value
-    ? (props.photo.has_known_face ? 'auto' : 'hidden')
-    : 'visible'
+  const next: PhotoLinkVisibility = nextLinkVisibility(linkVisibilityState.value)
   togglingLinkVisibility.value = true
   try {
     await updatePhotoLinkVisibility([props.photo.id], next)
@@ -473,7 +469,7 @@ watch(() => props.readOnly, (ro) => {
         </template>
         <Button
             v-if="canEditLinkVisibility"
-            :icon="shownViaLink ? 'pi pi-link' : 'pi pi-eye-slash'"
+            :icon="linkVisibilityIcon"
             v-tooltip.bottom="linkVisibilityTooltip"
             :severity="shownViaLink ? 'secondary' : 'danger'"
             text

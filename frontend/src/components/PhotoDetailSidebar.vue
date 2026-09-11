@@ -6,6 +6,7 @@ import {
   type CurationStatus,
   type Face,
   type Photo,
+  type PhotoLinkVisibility,
   type Person,
   type PoiMatchItem,
 } from '../api/photos'
@@ -57,6 +58,7 @@ const emit = defineEmits<{
   restore: [id: number]
   'navigate-to-photo': [id: number]
   'comment-count-change': [payload: { photoId: number; delta: number }]
+  'link-visibility-changed': [id: number, visibility: PhotoLinkVisibility]
 }>()
 
 // Gallery and album already pass hydrated photo records. Person detail can pass
@@ -174,6 +176,7 @@ const effectiveLoadingPoiMatches = computed(() => props.loadingPoiMatches ?? int
     @toggle-favorite="(id, status) => emit('toggle-favorite', id, status)"
     @hide="emit('hide', $event)"
     @restore="emit('restore', $event)"
+    @link-visibility-changed="(id, visibility) => emit('link-visibility-changed', id, visibility)"
     @navigate-to-photo="emit('navigate-to-photo', $event)"
     @comment-count-change="emit('comment-count-change', $event)"
   />

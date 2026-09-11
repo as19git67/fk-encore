@@ -77,6 +77,7 @@ import {
   updatePhotoCuration,
   updatePhotoLinkVisibility,
   setKnownFaceLinkVisibility,
+  isVisibleViaLink,
   updatePhotoDate,
 } from '../api/photos'
 import { useAuthStore } from '../stores/auth'
@@ -1314,6 +1315,50 @@ async function applyCurationToAlbumPhoto(id: number, target: CurationStatus): Pr
     await galleryRef.value?.reload()
     if (cursorIndex.value !== null) await hydrateCursor(cursorIndex.value)
     error.value = err.message || 'Fehler'
+  }
+}
+
+// ── Public-link visibility (fullscreen toolbar + detail sidebar) ───────────
+// The setting lives on the photo, so every slot holding this id follows, and
+// so does the grid marker — but only while the album has a live link, since
+// that is the only case in which the server sets `link_hidden` at all.
+function syncLinkVisibility(id: number, visibility: PhotoLinkVisibility) {
+  const known = [cursorPhoto, cursorPrev, cursorNext]
+    .find(r => r.value?.id === id)?.value?.has_known_face
+  for (const r of [cursorPhoto, cursorPrev, cursorNext]) {
+    if (r.value && r.value.id === id) {
+      r.value = { ...r.value, link_visibility: visibility }
+    }
+  }
+  const mfIdx = mapFullscreenPhotos.value.findIndex(p => p.id === id)
+  if (mfIdx >= 0) {
+    const next = mapFullscreenPhotos.value.slice()
+    next[mfIdx] = { ...next[mfIdx]!, link_visibility: visibility }
+    mapFullscreenPhotos.value = next
+  }
+  if (publicLink.value) {
+    const shown = isVisibleViaLink({ link_visibility: visibility, has_known_face: known })
+    galleryRef.value?.updateEntry(id, { link_hidden: !shown })
+  }
+}
+
+/** The sidebar already wrote the change; only mirror it into our own state. */
+function onLinkVisibilityChanged(id: number, visibility: PhotoLinkVisibility) {
+  syncLinkVisibility(id, visibility)
+}
+
+/** The overlay only reports intent, so the write is ours. */
+async function onFullscreenToggleLinkVisibility(id: number, visibility: PhotoLinkVisibility) {
+  const previous = [cursorPhoto, cursorPrev, cursorNext]
+    .find(r => r.value?.id === id)?.value?.link_visibility
+  syncLinkVisibility(id, visibility)
+  try {
+    await updatePhotoLinkVisibility([id], visibility)
+  } catch (err: any) {
+    if (previous !== undefined) syncLinkVisibility(id, previous)
+    await galleryRef.value?.reload()
+    if (cursorIndex.value !== null) await hydrateCursor(cursorIndex.value)
+    error.value = err.message || 'Die Link-Sichtbarkeit konnte nicht geändert werden.'
   }
 }
 
@@ -2606,6 +2651,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           @cancel-edit-date="isEditingDate = false"
           @ignore-face="handleIgnoreFaceInSidebar"
           @reindex="handleReindexPhoto"
+          @link-visibility-changed="onLinkVisibilityChanged"
         />
       </div>
     </div>
@@ -2677,6 +2723,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       @restore="handleRestorePhoto"
       @show-details="fullscreenDetailsOpen = !fullscreenDetailsOpen"
       @toggle-cover="handleSetMapCover"
+      @toggle-link-visibility="onFullscreenToggleLinkVisibility"
       @open-group-review="onFullscreenOpenGroupReview"
     >
       <template #actions-before>
@@ -2724,6 +2771,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           @cancel-edit-date="isEditingDate = false"
           @ignore-face="handleIgnoreFaceInSidebar"
           @reindex="handleReindexPhoto"
+          @link-visibility-changed="onLinkVisibilityChanged"
         />
       </template>
     </FullscreenOverlay>
@@ -2752,6 +2800,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
       @restore="handleRestorePhoto"
       @show-details="fullscreenDetailsOpen = !fullscreenDetailsOpen"
       @toggle-cover="handleSetMapCover"
+      @toggle-link-visibility="onFullscreenToggleLinkVisibility"
     >
       <template #actions-before>
         <Button
@@ -2797,6 +2846,7 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           @cancel-edit-date="isEditingDate = false"
           @ignore-face="handleIgnoreFaceInSidebar"
           @reindex="handleReindexPhoto"
+          @link-visibility-changed="onLinkVisibilityChanged"
         />
       </template>
     </FullscreenOverlay>
