@@ -45,6 +45,7 @@ struct AlbumsListView: View {
             } else if filteredAlbums.isEmpty && !viewModel.albums.isEmpty {
                 ContentUnavailableView.search(text: searchText)
                     .listRowSeparator(.hidden)
+                libraryBrowserSection
             } else if viewModel.albums.isEmpty {
                 ContentUnavailableView {
                     Label("Keine Alben", systemImage: "rectangle.stack")
@@ -57,6 +58,10 @@ struct AlbumsListView: View {
                     .buttonStyle(.borderedProminent)
                 }
                 .listRowSeparator(.hidden)
+                // Somebody with no albums yet is exactly who needs to link one
+                // from the phone — and this used to be the one screen where
+                // the way there did not exist at all.
+                libraryBrowserSection
             } else {
                 // "Alle Fotos" virtual album at the top
                 Section {
@@ -130,6 +135,8 @@ struct AlbumsListView: View {
                     .badge(reviewCount.pending ?? 0)
                 }
 
+                libraryBrowserSection
+
                 if !pinnedAlbums.isEmpty {
                     Section {
                         ForEach(pinnedAlbums) { album in
@@ -198,8 +205,6 @@ struct AlbumsListView: View {
                         }
                     }
                 }
-
-                libraryBrowserSection
             }
         }
         .searchable(text: $searchText, prompt: "Album suchen")
@@ -334,9 +339,16 @@ struct AlbumsListView: View {
     /// It used to sit in the first section, among „Alle Fotos", „Personen"
     /// and „Gruppen-Review" — as if it were a fourth place inside F4mil. It
     /// is not: nothing behind it belongs to F4mil, it is the iPhone's library
-    /// shown so albums can be linked (#1115 §5). A section of its own at the
-    /// end reads as „and separately, there is this", and — unlike a row among
-    /// peers or a bare toolbar glyph — a footer can say so in words.
+    /// shown so albums can be linked (#1115 §5). A section of its own — and,
+    /// unlike a row among peers or a bare toolbar glyph, a footer that says so
+    /// in words — keeps that distinction.
+    ///
+    /// It sat at the *end* of the list on that reasoning („and separately,
+    /// there is this"), which turned out to hide it: below a real album
+    /// collection it is a long scroll away, and in the two empty states it was
+    /// not rendered at all — so the person with no albums yet, the one who
+    /// most needs to link one, had no route to it. Now it follows the F4mil
+    /// places directly and exists in every state.
     private var libraryBrowserSection: some View {
         Section {
             Button {

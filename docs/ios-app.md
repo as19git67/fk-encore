@@ -181,12 +181,15 @@ dokumentiert**:
   in der ersten Sektion, gleichauf mit „Alle Fotos", „Personen" und
   „Gruppen-Review" — als wäre sie ein weiterer Ort *innerhalb* von f4mil.
   Dahinter liegt aber nichts von f4mil, sondern die Mediathek des Geräts.
-  Jetzt: eigene Sektion „Vom iPhone" am Ende der Liste, deren Footer den
-  Unterschied ausspricht, und **modal** statt gepusht — ein Sheet mit eigenem
+  Jetzt: eigene Sektion „Vom iPhone" **direkt hinter den f4mil-Orten**, deren
+  Footer den Unterschied ausspricht, und **modal** statt gepusht — ein Sheet mit eigenem
   „Fertig" ist die Geste der Plattform für „Abstecher, du kommst zurück",
   während ein Push „tiefer ins selbe Material" hieße. Der Zielscreen heißt
   „iPhone-Mediathek" (nicht „iOS") und sagt oben selbst, wessen Alben er
-  zeigt.
+  zeigt. Die Sektion stand zuerst am *Ende* der Liste — was sie versteckte:
+  unter einer echten Albensammlung ist sie einen langen Scroll weit weg, und
+  in den beiden Leer-Zuständen wurde sie gar nicht gerendert, sodass
+  ausgerechnet wer noch kein Album hat keinen Weg dorthin hatte.
 
 ### 2.5 Personen & Gesichter
 - Personen-Grid (`PersonsListView`), Umbenennen, Zusammenführen,
