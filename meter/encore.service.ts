@@ -19,6 +19,8 @@ import "./quick-entry";
 // Side-effect: registers the daily anomaly job (Etappe 7).
 import "./anomalies";
 import "./reading-transactions";
+// Side-effect: registers the daily degree-day fetch (#1023 follow-up).
+import "./home-location";
 
 // Arm the timers of the jobs registered above (Encore CronJobs do not fire
 // in the self-hosted setup — see lib/local-cron.ts).

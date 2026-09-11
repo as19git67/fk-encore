@@ -104,6 +104,7 @@ const meterHandlers = [
       latestKwhPerDegreeDay: null, previousKwhPerDegreeDay: null, changePercent: null, slopePerYear: null,
     }),
   ),
+  http.get('/api/meters/home-location', () => HttpResponse.json({ home: null })),
   http.get('/api/meters/reports/advance-payments', () => HttpResponse.json({ currency: 'EUR', meters: [] })),
   http.get('/api/meters/anomalies', () => HttpResponse.json({ anomalies: [], total: 0 })),
   http.get('/api/meters/:id', () => HttpResponse.json(MOCK_METER_DETAIL)),

@@ -1352,6 +1352,13 @@
       "when": 1788393600015,
       "tag": "0192_meter_heating_degree_days",
       "breakpoints": true
+    },
+    {
+      "idx": 193,
+      "version": "7",
+      "when": 1788480000015,
+      "tag": "0193_meter_home_locations",
+      "breakpoints": true
     }
   ]
 }

@@ -1201,3 +1201,53 @@ export function unlinkReadingTransaction(readingId: number, transactionId: numbe
     method: 'DELETE',
   })
 }
+
+// ── Home location + degree days from Open-Meteo (#1023 follow-up) ──────────
+
+export interface MeterHomeLocation {
+  label: string
+  lat: number
+  lon: number
+  source: 'geocoded' | 'manual'
+  updatedAt: string
+}
+
+export interface PlaceCandidate {
+  name: string
+  admin1: string | null
+  country: string | null
+  lat: number
+  lon: number
+}
+
+export interface DegreeDaysFillResult {
+  from: string | null
+  to: string | null
+  monthsMissing: number
+  monthsWritten: number
+  monthsIncomplete: number
+}
+
+export function getMeterHomeLocation() {
+  return apiFetch<{ home: MeterHomeLocation | null }>('/meters/home-location')
+}
+
+export function setMeterHomeLocation(req: { label: string; lat: number; lon: number; source?: 'geocoded' | 'manual' }) {
+  return apiFetch<{ home: MeterHomeLocation }>('/meters/home-location', {
+    method: 'PUT',
+    body: JSON.stringify(req),
+  })
+}
+
+export function deleteMeterHomeLocation() {
+  return apiFetch<{ deleted: boolean }>('/meters/home-location', { method: 'DELETE' })
+}
+
+export function searchMeterPlaces(q: string) {
+  const params = new URLSearchParams({ q })
+  return apiFetch<{ places: PlaceCandidate[] }>(`/meters/places?${params}`)
+}
+
+export function fetchDegreeDays() {
+  return apiFetch<DegreeDaysFillResult>('/meters/degree-days/fetch', { method: 'POST' })
+}

@@ -2719,6 +2719,19 @@ export const meterAnomalies = pgTable(
   ],
 );
 
+// Home coordinate of a household, rounded to the ~5 km grid, for fetching
+// heating degree days from the Open-Meteo archive (migration 0193).
+export const meterHomeLocations = pgTable("meter_home_locations", {
+  user_id: integer("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  label: text("label").notNull(),
+  lat: real("lat").notNull(),
+  lon: real("lon").notNull(),
+  source: text("source").$type<"geocoded" | "manual">().notNull().default("geocoded"),
+  updated_at: timestamp("updated_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+});
+
 // Time-versioned electricity prices and PV assumptions used by the energy report.
 // `kind` + `valid_from` forms a tariff timeline per user. Feed-in tariffs may
 // have multiple rows at the same date for different capacity tiers (`name` /

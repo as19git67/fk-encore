@@ -196,12 +196,13 @@ Getroffen:
    (§3.2). Umsetzung in 6d.
 3. **`granularity=day|week`** ist umgesetzt (#1024); ISO-Wochen, Montag
    bis Sonntag.
-4. **Gradtagzahlen** (C3) — beides: eine Gradtagzahl-Reihe wird als
-   Annahme `heating_degree_days` (Einheit `kd`, eine Zeile je Monat) über den
-   Datei-Import eingespielt und ist die bevorzugte Quelle; fehlt sie, schätzt
-   der Report den Referenzwinter aus den eigenen Daten und sagt das im
-   Frontend. Keine externe Live-Quelle — Gradtagzahlen ändern sich nicht,
-   ein jährlicher Import genügt.
+4. **Gradtagzahlen** (C3) — Standard ist der automatische Abruf aus dem
+   Open-Meteo-Archiv (ERA5-Tagesmittel für den hinterlegten Wohnort, VDI-2067-
+   Summe, täglicher Auffüll-Job); die Reihe liegt als Annahme
+   `heating_degree_days` (Einheit `kd`, eine Zeile je Monat) und kann
+   ebenso per Datei-Import oder von Hand gepflegt werden — vorhandene Zeilen
+   überschreibt der Abruf nie. Fehlt beides, schätzt der Report den
+   Referenzwinter aus den eigenen Daten und sagt das im Frontend.
 
 Umgesetzt wie vorgeschlagen: die **JAZ-Bandbreite** (± 0,5) statt eines
 Punktwerts bei B1.

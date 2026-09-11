@@ -1276,9 +1276,11 @@ onMounted(load)
       />
 
       <MeterHeatingWeatherPanel
-        v-if="loadingHeatingWeather || heatingWeather"
+        v-if="loadingHeatingWeather || heatingWeather || canManage"
         :report="heatingWeather"
         :loading="loadingHeatingWeather"
+        :can-manage="canManage"
+        @refresh="loadHeatingWeather"
       />
 
       <MeterAdvancePaymentsPanel

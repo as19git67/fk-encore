@@ -148,6 +148,7 @@ meter/
 ├── reports.service.ts       // generische Bucket-Logik + DB-Reportdaten
 ├── season-profile.service.ts   // Saisonprofil A3
 ├── heating-weather.service.ts  // Witterungsbereinigung C3
+├── open-meteo-client.ts / degree-days.service.ts / home-location.ts  // Gradtagzahlen aus dem Archiv
 ├── anomalies.ts / anomalies.service.ts          // Anomalie-Erkennung (Job + Endpunkte)
 ├── reading-transactions.ts / .service.ts        // Verknüpfung Ablesung ↔ finance_transaction
 ├── advance-payments.service.ts                  // Abschlagsvergleich E3
@@ -173,6 +174,9 @@ meter/
 | `GET /meters/reports/energy?granularity=day\|week\|month\|year&from=&to=` | `meters.view` | Strom-/PV-Gesamtreport (§5.2) |
 | `GET /meters/reports/season-profile?from=&to=` | `meters.view` | Saisonprofil Autarkie/Eigenverbrauch (§5.2.5) |
 | `GET /meters/reports/heating-weather?from=&to=` | `meters.view` | Heizung witterungsbereinigt (§5.2.6) |
+| `GET/PUT/DELETE /meters/home-location` | `meters.view` / `meters.manage` | Wohnort für den Gradtagzahl-Abruf (§5.2.6) |
+| `GET /meters/places?q=` | `meters.manage` | Ortssuche (Open-Meteo-Geocoding) |
+| `POST /meters/degree-days/fetch` | `meters.manage` | Fehlende Gradtagzahl-Monate aus dem Open-Meteo-Archiv holen |
 | `GET /meters/reports/advance-payments` | `meters.view` + `finance.view` | Abschläge vs. Ist-Kosten (§6.1) |
 | `GET /meters/anomalies?status=pending\|all` | `meters.view` | Auffälligkeiten sichtbarer Zähler (§5.3) |
 | `POST /meters/anomalies/:id/status` | `meters.read_entry` | `confirmed` / `dismissed` / `pending` |
@@ -571,8 +575,9 @@ Quelle ausweist (`source`):
 - **`degree_days`** — Gradtagzahlen als Annahme-Reihe in
   `meter_electricity_tariffs`: `kind = heating_degree_days`, `unit = kd`
   (Kelvin-Tage), eine Zeile je Monat mit `valid_from` = Monatserster
-  (Migration 0192). Gedacht für VDI-2067-Werte einer standortnahen Station,
-  eingespielt über den bestehenden Datei-Import. Je Monat entstehen
+  (Migration 0192). Standardweg ist der **automatische Abruf** aus dem
+  Open-Meteo-Archiv (siehe unten); alternativ eine VDI-2067-Reihe einer
+  standortnahen Station über den Datei-Import. Je Monat entstehen
   `kwhPerDegreeDay` und `adjustedKwh` (Verbrauch normiert auf einen
   *Normalmonat*: kWh/Kd × mehrjähriges Mittel der Gradtage dieses
   Kalendermonats). Jahreswerte sind das Verhältnis der Summen, nicht das
@@ -588,7 +593,42 @@ Quelle ausweist (`source`):
   verweist auf den Import.
 
 Frontend: `MeterHeatingWeatherPanel.vue` (Kacheln kWh/Kd aktuell/Vorjahr/
-Veränderung, Jahres- und Monatstabelle).
+Veränderung, Jahres- und Monatstabelle, darunter die Wohnort-Karte).
+
+#### Gradtagzahlen aus dem Open-Meteo-Archiv
+
+`meter/open-meteo-client.ts`, `meter/degree-days.service.ts`,
+`meter/home-location.ts` — damit niemand eine Tabelle importieren muss:
+
+- **Wohnort** (`meter_home_locations`, Migration 0193, ein Eintrag je
+  Nutzer): `label`, `lat`, `lon`, `source = geocoded | manual`. Die
+  Koordinate wird wie beim Reiseplaner auf das 0,05°-Raster (≈ 5 km)
+  gerundet gespeichert — mehr löst die Reanalyse ohnehin nicht auf, und
+  mehr verlässt das Haus nicht. Endpunkte `GET/PUT/DELETE
+  /meters/home-location` (`meters.view` / `meters.manage`).
+- **Ortssuche** `GET /meters/places?q=` (`meters.manage`) über
+  `geocoding-api.open-meteo.com` (Stadt/Gemeinde, kein Key). Fällt die
+  Suche aus, lassen sich Koordinaten direkt eingeben (`source = manual`).
+- **Abruf** `archive-api.open-meteo.com/v1/archive`, `daily =
+  temperature_2m_mean`, Zeitzone des Orts (`timezone=auto`), ERA5-Reanalyse
+  ab 1940, etwa fünf Tage hinter heute (`ARCHIVE_LAG_DAYS = 7`).
+  Gradtagzahl nach VDI 2067: Heiztag bei Tagesmittel < 15 °C, Beitrag
+  20 °C − Tagesmittel, monatlich summiert. Ein Monat mit mehr als zwei
+  fehlenden Tagen wird nicht geschrieben — eine Lücke darf nicht wie ein
+  milder Monat aussehen.
+- **Auffüllen** (`fillDegreeDaysForUser`): vom Monat der ersten Ablesung
+  des Heizungszählers bis zum letzten abgeschlossenen, archivierten Monat;
+  nur fehlende Monate, ein Archiv-Aufruf je Kalenderjahr mit Lücke. Bereits
+  vorhandene Zeilen (Import, Handeingabe, früherer Abruf) bleiben
+  unangetastet, die geschriebenen tragen `source.provider =
+  "open-meteo-archive"`. Idempotent.
+- **Job** `meter-degree-days`, täglich 04:00 UTC für alle Nutzer mit
+  Wohnort (ein No-op, solange kein neuer Monat im Archiv liegt); manuell
+  über `POST /meters/degree-days/fetch` („Gradtagzahlen abrufen“ in der
+  Wohnort-Karte, `meters.manage`). Ausfälle des Dienstes werden als
+  `unavailable` gemeldet, nicht als interner Fehler.
+- **Netzwerk-Policy**: `archive-api.open-meteo.com` und
+  `geocoding-api.open-meteo.com` müssen erreichbar sein.
 
 ### 5.3 Anomalie-Erkennung (Etappe 7, #1015)
 
@@ -732,3 +772,8 @@ jedem Push) und ist unabhängig deploybar.
   `linkedTransactions` in der Ablesungsliste, Abschlagsreport.
 - **Reports**: Day/Week-Buckets (ISO-Woche, Jahreswechsel, Tages-Split,
   Vorjahr), Saisonprofil-Pivot, Witterungsbereinigung in beiden Modi.
+- **Gradtagzahlen** (`degree-days.service.test.ts`): VDI-Summe und
+  Heizgrenze, Toleranz fehlender Tage, Archiv-Nachlauf, Parser, Wohnort
+  (Raster, Validierung, Rechte), Auffüllen mit Fake-Archiv (nur fehlende
+  Monate, Handeingabe bleibt, ein Aufruf je Jahr, idempotent,
+  unvollständige Monate), Ausfall → `unavailable`.

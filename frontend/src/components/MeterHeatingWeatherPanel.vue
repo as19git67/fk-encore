@@ -10,10 +10,17 @@ import { computed } from 'vue'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import type { HeatingWeatherReport } from '../api/meters'
+import MeterHomeLocationCard from './MeterHomeLocationCard.vue'
 
 const props = defineProps<{
   report: HeatingWeatherReport | null
   loading?: boolean
+  /** Shows the home-location card (meters.manage). */
+  canManage?: boolean
+}>()
+
+const emit = defineEmits<{
+  (e: 'refresh'): void
 }>()
 
 function fmt(value: number | null | undefined, decimals = 1) {
@@ -46,7 +53,7 @@ function riskClass(value: number | null | undefined) {
 </script>
 
 <template>
-  <section v-if="loading || hasData" class="heating-card">
+  <section v-if="loading || hasData || canManage" class="heating-card">
     <div class="heating-head">
       <h2><i class="pi pi-sun" /> Heizung witterungsbereinigt</h2>
       <p v-if="isDegreeDays">
@@ -54,13 +61,19 @@ function riskClass(value: number | null | undefined) {
         nicht den Winter: steigt er, wird mehr Strom für dieselbe Kälte gebraucht.
         Gradtagzahlen liegen für {{ report?.degreeDayMonths }} gemessene Monate vor.
       </p>
-      <p v-else>
+      <p v-else-if="hasData">
         Ohne Gradtagzahlen wird jeder Monat mit dem Durchschnitt desselben Kalendermonats
         aus {{ report?.referenceYears }} Jahren verglichen ({{ report?.meterName }}). Das zeigt
         die Abweichung vom eigenen Normalwert, kann aber einen kälteren Winter nicht herausrechnen —
-        dafür eine Gradtagzahl-Reihe unter „Tarife &amp; Annahmen“ importieren.
+        dafür unten den Wohnort hinterlegen, dann werden die Gradtagzahlen automatisch geholt.
+      </p>
+      <p v-else>
+        Sobald ein Heizungszähler (Rolle „Heizung gesamt“ oder „Wärmepumpe gesamt“) Ablesungen hat,
+        zeigt dieser Report den Heizverbrauch je Gradtag. Den Wohnort dafür jetzt schon hinterlegen.
       </p>
     </div>
+
+    <MeterHomeLocationCard v-if="canManage" :can-manage="canManage" @degree-days-changed="emit('refresh')" />
 
     <div v-if="loading" class="info info-compact">
       <i class="pi pi-spin pi-spinner" /> Witterungsbereinigung…
