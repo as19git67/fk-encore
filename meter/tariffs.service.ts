@@ -23,7 +23,9 @@ export type ElectricityTariffUnit =
   | "kg_per_kwh"
   | "kg_per_l"
   | "kw"
-  | "eur_per_m3";
+  | "eur_per_m3"
+  // Kelvin-days (heating degree days).
+  | "kd";
 
 export interface ElectricityTariff {
   id: number;
@@ -137,6 +139,7 @@ const TARIFF_KINDS: ElectricityTariffKind[] = [
   "water_price",
   "water_base_price",
   "sewage_price",
+  "heating_degree_days",
 ];
 
 const TARIFF_UNITS: ElectricityTariffUnit[] = [
@@ -151,6 +154,7 @@ const TARIFF_UNITS: ElectricityTariffUnit[] = [
   "kg_per_l",
   "kw",
   "eur_per_m3",
+  "kd",
 ];
 
 function parseValidFrom(value: string): string {

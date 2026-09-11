@@ -361,6 +361,12 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'meters.read_entry' },
       },
       {
+        path: 'auffaelligkeiten',
+        name: 'zaehler-anomalien',
+        component: () => import('../views/MeterAnomaliesView.vue'),
+        meta: { permission: 'meters.view' },
+      },
+      {
         path: ':id',
         name: 'zaehler-detail',
         component: () => import('../views/MeterDetailView.vue'),
@@ -370,6 +376,7 @@ export const modules: ModuleConfig[] = [
     menuItems: [
       { label: 'Zähler', icon: 'pi pi-gauge', routeName: 'zaehler-list', permission: 'meters.view' },
       { label: 'Schnellerfassung', icon: 'pi pi-list-check', routeName: 'zaehler-schnellerfassung', permission: 'meters.read_entry' },
+      { label: 'Auffälligkeiten', icon: 'pi pi-exclamation-triangle', routeName: 'zaehler-anomalien', permission: 'meters.view' },
     ],
   },
   {

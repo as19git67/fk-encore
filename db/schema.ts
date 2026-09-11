@@ -2539,7 +2539,17 @@ export type MeterElectricityTariffKind =
   | "pv_capacity_kwp"
   | "water_price"
   | "water_base_price"
-  | "sewage_price";
+  | "sewage_price"
+  // Monthly heating degree days for the weather-adjusted heating report
+  // (migration 0192): valid_from = first of the month, unit 'kd'.
+  | "heating_degree_days";
+
+export type MeterAnomalyType =
+  | "consumption_spike"
+  | "consumption_drop"
+  | "standstill"
+  | "negative_consumption";
+export type MeterAnomalyStatus = "pending" | "confirmed" | "dismissed";
 
 // Logical metering point. Persists across physical device swaps; visibility
 // is owner + members of group_id (same groups concept as documents).
@@ -2674,6 +2684,39 @@ export const meterReadingTransactions = pgTable(
     created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [primaryKey({ columns: [table.reading_id, table.transaction_id] })]
+);
+
+// Findings of the daily anomaly job (migration 0191). One row per flagged
+// reading interval; (meter_id, type, interval_end) keeps daily re-runs
+// idempotent. Worked through by the user: pending → confirmed | dismissed.
+export const meterAnomalies = pgTable(
+  "meter_anomalies",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    meter_id: integer("meter_id")
+      .notNull()
+      .references(() => meters.id, { onDelete: "cascade" }),
+    reading_id: bigint("reading_id", { mode: "number" }).references(() => meterReadings.id, {
+      onDelete: "set null",
+    }),
+    type: text("type").$type<MeterAnomalyType>().notNull(),
+    status: text("status").$type<MeterAnomalyStatus>().notNull().default("pending"),
+    score: numeric("score", { precision: 8, scale: 3 }),
+    interval_start: timestamp("interval_start", { mode: "string", withTimezone: true }).notNull(),
+    interval_end: timestamp("interval_end", { mode: "string", withTimezone: true }).notNull(),
+    details: jsonb("details").$type<Record<string, unknown>>().notNull().default({}),
+    created_at: timestamp("created_at", { mode: "string", withTimezone: true }).notNull().defaultNow(),
+    resolved_at: timestamp("resolved_at", { mode: "string", withTimezone: true }),
+    resolved_by: integer("resolved_by").references(() => users.id, { onDelete: "set null" }),
+  },
+  (table) => [
+    uniqueIndex("meter_anomalies_meter_type_end_key").on(
+      table.meter_id,
+      table.type,
+      table.interval_end,
+    ),
+    index("meter_anomalies_meter_status_idx").on(table.meter_id, table.status, table.created_at),
+  ],
 );
 
 // Time-versioned electricity prices and PV assumptions used by the energy report.

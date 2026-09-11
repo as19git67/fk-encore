@@ -390,3 +390,72 @@ describe("buildEnergyReportFromMeterReports", () => {
     });
   });
 });
+
+describe("buildMeterReportBuckets — day and week granularity (#1024)", () => {
+  it("buckets by ISO week, Monday to Sunday, with a KW label", () => {
+    // 2026-01-05 is a Monday (ISO week 2 of 2026).
+    const buckets = buildMeterReportBuckets(
+      [
+        { takenAt: "2026-01-05T00:00:00.000Z", value: 0 },
+        { takenAt: "2026-01-12T00:00:00.000Z", value: 70 },
+        { takenAt: "2026-01-19T00:00:00.000Z", value: 140 },
+      ],
+      "week",
+      { decimals: 0 },
+    );
+
+    expect(buckets.map((b) => [b.key, b.label, b.consumption, b.coverage])).toEqual([
+      ["2026-W02", "KW 02/2026", 70, 1],
+      ["2026-W03", "KW 03/2026", 70, 1],
+    ]);
+    expect(buckets[0].periodStart).toBe("2026-01-05T00:00:00.000Z");
+    expect(buckets[0].periodEnd).toBe("2026-01-12T00:00:00.000Z");
+  });
+
+  it("assigns the days around New Year to the ISO week-year they belong to", () => {
+    // 2025-12-29 (Monday) … 2026-01-04 (Sunday) is ISO week 1 of 2026.
+    const buckets = buildMeterReportBuckets(
+      [
+        { takenAt: "2025-12-29T00:00:00.000Z", value: 0 },
+        { takenAt: "2026-01-05T00:00:00.000Z", value: 7 },
+      ],
+      "week",
+      { decimals: 0 },
+    );
+    expect(buckets.map((b) => [b.key, b.consumption])).toEqual([["2026-W01", 7]]);
+  });
+
+  it("splits an interval across days, weighted by time", () => {
+    const buckets = buildMeterReportBuckets(
+      [
+        { takenAt: "2026-03-01T12:00:00.000Z", value: 0 },
+        { takenAt: "2026-03-03T12:00:00.000Z", value: 48 },
+      ],
+      "day",
+      { decimals: 0 },
+    );
+
+    expect(buckets.map((b) => [b.key, b.label, b.consumption, b.coverage])).toEqual([
+      ["2026-03-01", "01.03.2026", 12, 0.5],
+      ["2026-03-02", "02.03.2026", 24, 1],
+      ["2026-03-03", "03.03.2026", 12, 0.5],
+    ]);
+  });
+
+  it("compares a day with the same date a year earlier", () => {
+    const buckets = buildMeterReportBuckets(
+      [
+        { takenAt: "2025-06-01T00:00:00.000Z", value: 0 },
+        { takenAt: "2025-06-02T00:00:00.000Z", value: 10 },
+        { takenAt: "2026-06-01T00:00:00.000Z", value: 100 },
+        { takenAt: "2026-06-02T00:00:00.000Z", value: 112 },
+      ],
+      "day",
+      { decimals: 0 },
+    );
+    const today = buckets.find((b) => b.key === "2026-06-01")!;
+    expect(today.previousConsumption).toBe(10);
+    expect(today.deltaAbsolute).toBe(2);
+    expect(today.deltaPercent).toBe(0.2);
+  });
+});

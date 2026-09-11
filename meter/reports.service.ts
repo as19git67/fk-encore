@@ -10,7 +10,9 @@ import {
   type EnergyTariffCostResult,
 } from "./tariffs.service";
 
-export type ReportGranularity = "month" | "year";
+export type ReportGranularity = "day" | "week" | "month" | "year";
+
+export const REPORT_GRANULARITIES: readonly ReportGranularity[] = ["day", "week", "month", "year"];
 
 /**
  * How an interval between two readings is charged to report buckets.
@@ -159,50 +161,165 @@ export function parseReportBoundary(value: string | undefined, field: string): D
   return date;
 }
 
-function bucketKey(date: Date, granularity: ReportGranularity): string {
-  const year = date.getUTCFullYear();
-  if (granularity === "year") return String(year);
-  return `${year}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+const MS_PER_DAY = 86_400_000;
+
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
 }
 
-function bucketLabel(key: string, granularity: ReportGranularity): string {
-  if (granularity === "year") return key;
-  const [year, month] = key.split("-");
-  return `${month}.${year}`;
+/** ISO-8601 week-year and week number of a UTC date (weeks start on Monday). */
+function isoWeek(date: Date): { year: number; week: number } {
+  const probe = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  // Shift to the Thursday of the same week; its year is the ISO week-year.
+  const weekday = probe.getUTCDay() || 7;
+  probe.setUTCDate(probe.getUTCDate() + 4 - weekday);
+  const year = probe.getUTCFullYear();
+  const firstDay = Date.UTC(year, 0, 1);
+  const week = Math.ceil(((probe.getTime() - firstDay) / MS_PER_DAY + 1) / 7);
+  return { year, week };
+}
+
+/** Monday 00:00 UTC of ISO week `week` of ISO week-year `year`. */
+function isoWeekStart(year: number, week: number): Date {
+  // 4 January is always inside week 1.
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const weekday = jan4.getUTCDay() || 7;
+  const mondayOfWeek1 = new Date(jan4.getTime() - (weekday - 1) * MS_PER_DAY);
+  return new Date(mondayOfWeek1.getTime() + (week - 1) * 7 * MS_PER_DAY);
+}
+
+/**
+ * Bucket key of the period a timestamp falls into:
+ * `YYYY` / `YYYY-MM` / `YYYY-Www` (ISO week) / `YYYY-MM-DD`.
+ */
+export function bucketKey(date: Date, granularity: ReportGranularity): string {
+  const year = date.getUTCFullYear();
+  switch (granularity) {
+    case "year":
+      return String(year);
+    case "month":
+      return `${year}-${pad2(date.getUTCMonth() + 1)}`;
+    case "week": {
+      const iso = isoWeek(date);
+      return `${iso.year}-W${pad2(iso.week)}`;
+    }
+    case "day":
+      return `${year}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
+  }
+}
+
+export function bucketLabel(key: string, granularity: ReportGranularity): string {
+  switch (granularity) {
+    case "year":
+      return key;
+    case "month": {
+      const [year, month] = key.split("-");
+      return `${month}.${year}`;
+    }
+    case "week": {
+      const [year, week] = key.split("-W");
+      return `KW ${week}/${year}`;
+    }
+    case "day": {
+      const [year, month, day] = key.split("-");
+      return `${day}.${month}.${year}`;
+    }
+  }
 }
 
 /** Start of the bucket a timestamp falls into, as a UTC date. */
-function bucketStartDate(date: Date, granularity: ReportGranularity): Date {
-  if (granularity === "year") return new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
-}
-
-function nextBucketStart(bucketStart: Date, granularity: ReportGranularity): Date {
-  if (granularity === "year") return new Date(Date.UTC(bucketStart.getUTCFullYear() + 1, 0, 1));
-  return new Date(Date.UTC(bucketStart.getUTCFullYear(), bucketStart.getUTCMonth() + 1, 1));
-}
-
-/** Key of the same period one year earlier. */
-function previousYearKey(key: string, granularity: ReportGranularity): string {
-  if (granularity === "year") return String(Number(key) - 1);
-  const [year, month] = key.split("-");
-  return `${Number(year) - 1}-${month}`;
-}
-
-function bucketStartIso(key: string, granularity: ReportGranularity): string {
-  if (granularity === "year") return `${key}-01-01T00:00:00.000Z`;
-  return `${key}-01T00:00:00.000Z`;
-}
-
-function bucketEndIso(key: string, granularity: ReportGranularity): string {
-  if (granularity === "year") {
-    return `${Number(key) + 1}-01-01T00:00:00.000Z`;
+export function bucketStartDate(date: Date, granularity: ReportGranularity): Date {
+  switch (granularity) {
+    case "year":
+      return new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+    case "month":
+      return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
+    case "week": {
+      const iso = isoWeek(date);
+      return isoWeekStart(iso.year, iso.week);
+    }
+    case "day":
+      return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
   }
-  const [yearRaw, monthRaw] = key.split("-");
-  const year = Number(yearRaw);
-  const month = Number(monthRaw);
-  const next = month === 12 ? new Date(Date.UTC(year + 1, 0, 1)) : new Date(Date.UTC(year, month, 1));
-  return next.toISOString();
+}
+
+export function nextBucketStart(bucketStart: Date, granularity: ReportGranularity): Date {
+  switch (granularity) {
+    case "year":
+      return new Date(Date.UTC(bucketStart.getUTCFullYear() + 1, 0, 1));
+    case "month":
+      return new Date(Date.UTC(bucketStart.getUTCFullYear(), bucketStart.getUTCMonth() + 1, 1));
+    case "week":
+      return new Date(bucketStart.getTime() + 7 * MS_PER_DAY);
+    case "day":
+      return new Date(bucketStart.getTime() + MS_PER_DAY);
+  }
+}
+
+/**
+ * Key of the same period one year earlier. For weeks that is the same ISO
+ * week number of the previous week-year (a week 53 simply finds no match),
+ * for days the same calendar date.
+ */
+export function previousYearKey(key: string, granularity: ReportGranularity): string {
+  switch (granularity) {
+    case "year":
+      return String(Number(key) - 1);
+    case "month": {
+      const [year, month] = key.split("-");
+      return `${Number(year) - 1}-${month}`;
+    }
+    case "week": {
+      const [year, week] = key.split("-W");
+      return `${Number(year) - 1}-W${week}`;
+    }
+    case "day": {
+      const [year, month, day] = key.split("-");
+      return `${Number(year) - 1}-${month}-${day}`;
+    }
+  }
+}
+
+/** Start of the period a bucket key denotes, as a UTC date. */
+export function bucketStartFromKey(key: string, granularity: ReportGranularity): Date {
+  switch (granularity) {
+    case "year":
+      return new Date(Date.UTC(Number(key), 0, 1));
+    case "month": {
+      const [year, month] = key.split("-").map(Number);
+      return new Date(Date.UTC(year, month - 1, 1));
+    }
+    case "week": {
+      const [year, week] = key.split("-W").map(Number);
+      return isoWeekStart(year, week);
+    }
+    case "day": {
+      const [year, month, day] = key.split("-").map(Number);
+      return new Date(Date.UTC(year, month - 1, day));
+    }
+  }
+}
+
+export function bucketStartIso(key: string, granularity: ReportGranularity): string {
+  return bucketStartFromKey(key, granularity).toISOString();
+}
+
+export function bucketEndIso(key: string, granularity: ReportGranularity): string {
+  return nextBucketStart(bucketStartFromKey(key, granularity), granularity).toISOString();
+}
+
+/** Buckets per year, to express a per-bucket slope as a per-year change. */
+export function bucketsPerYear(granularity: ReportGranularity): number {
+  switch (granularity) {
+    case "year":
+      return 1;
+    case "month":
+      return 12;
+    case "week":
+      return 52;
+    case "day":
+      return 365;
+  }
 }
 
 export function roundReportValue(value: number, decimals: number): number {

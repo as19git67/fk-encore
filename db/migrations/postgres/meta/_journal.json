@@ -1338,6 +1338,20 @@
       "when": 1788220800015,
       "tag": "0190_photo_link_visibility",
       "breakpoints": true
+    },
+    {
+      "idx": 191,
+      "version": "7",
+      "when": 1788307200015,
+      "tag": "0191_meter_anomalies",
+      "breakpoints": true
+    },
+    {
+      "idx": 192,
+      "version": "7",
+      "when": 1788393600015,
+      "tag": "0192_meter_heating_degree_days",
+      "breakpoints": true
     }
   ]
 }

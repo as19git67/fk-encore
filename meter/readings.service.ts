@@ -19,6 +19,7 @@ import db from "../db/database";
 import { dbAll, dbFirst } from "../db/adapter";
 import { meterDevices, meterReadings } from "../db/schema";
 import { loadVisibleMeter } from "./meter.service";
+import { countLinkedTransactions } from "./reading-transactions.service";
 
 export interface ReadingDto {
   id: number;
@@ -31,6 +32,8 @@ export interface ReadingDto {
   enteredBy: number | null;
   /** Monotonic cumulative total of the metering point at this reading. */
   absoluteValue: number;
+  /** Finance transactions linked to this reading (Etappe 8). */
+  linkedTransactions: number;
 }
 
 export interface AddReadingInput {
@@ -229,6 +232,8 @@ export async function listReadings(
       .where(eq(meterDevices.meter_id, meterId)),
   );
 
+  const linkCounts = await countLinkedTransactions(rows.map((r) => Number(r.id)));
+
   const readings: ReadingDto[] = rows.map((r) => {
     const dev = offsets.get(r.device_id);
     const value = parseFloat(r.value);
@@ -243,6 +248,7 @@ export async function listReadings(
       notes: r.notes,
       enteredBy: r.entered_by,
       absoluteValue,
+      linkedTransactions: linkCounts.get(Number(r.id)) ?? 0,
     };
   });
 
