@@ -8,6 +8,7 @@ import TxBasketIndicator from './components/finance/TxBasketIndicator.vue'
 import DocBasketIndicator from './components/documents/DocBasketIndicator.vue'
 import { useAuthStore } from './stores/auth'
 import { useAnomalyStore } from './stores/finance/anomalies'
+import { useMeterAnomalyStore } from './stores/meterAnomalies'
 import { useFeedBadgeStore } from './stores/feedBadge'
 import { modules, detectModule, moduleEntryPath } from './config/modules'
 import type { ModuleConfig } from './config/modules'
@@ -17,6 +18,7 @@ import { albumMenuTarget, albumsViewQueryFromStorage, readRememberedAlbumId } fr
 
 const auth = useAuthStore()
 const anomalyStore = useAnomalyStore()
+const meterAnomalyStore = useMeterAnomalyStore()
 const feedBadgeStore = useFeedBadgeStore()
 const router = useRouter()
 const route = useRoute()
@@ -31,6 +33,9 @@ watch(
     if (authenticated && auth.hasPermission('finance.view')) {
       void anomalyStore.refresh()
     }
+    if (authenticated && auth.hasPermission('meters.view')) {
+      void meterAnomalyStore.refresh()
+    }
   },
   { immediate: true },
 )
@@ -40,6 +45,9 @@ watch(
   (_name, prev) => {
     if (prev === 'finance-anomalies' && auth.hasPermission('finance.view')) {
       void anomalyStore.refresh()
+    }
+    if (prev === 'zaehler-anomalien' && auth.hasPermission('meters.view')) {
+      void meterAnomalyStore.refresh()
     }
   },
 )
@@ -97,7 +105,9 @@ const subMenuItems = computed(() => {
             ? String(anomalyStore.count)
             : item.routeName === 'fotos-feed' && feedBadgeStore.count > 0
               ? String(feedBadgeStore.count)
-              : undefined,
+              : item.routeName === 'zaehler-anomalien' && meterAnomalyStore.count > 0
+                ? String(meterAnomalyStore.count)
+                : undefined,
       }
     })
     .filter((item) => item.routeName || item.children)

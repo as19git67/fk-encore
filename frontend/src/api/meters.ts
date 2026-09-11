@@ -156,6 +156,8 @@ export interface Reading {
   notes: string | null
   enteredBy: number | null
   absoluteValue: number
+  /** Finance transactions linked to this reading (Etappe 8). */
+  linkedTransactions: number
 }
 
 export interface AddReadingRequest {
@@ -222,7 +224,14 @@ export function saveQuickEntryConfig(meterIds: number[]) {
 
 // ── Reports (Etappe 6) ──────────────────────────────────────────────────────
 
-export type MeterReportGranularity = 'month' | 'year'
+export type MeterReportGranularity = 'day' | 'week' | 'month' | 'year'
+
+export const METER_REPORT_GRANULARITY_LABELS: Record<MeterReportGranularity, string> = {
+  day: 'Tag',
+  week: 'Woche',
+  month: 'Monat',
+  year: 'Jahr',
+}
 
 export interface MeterReportBucket {
   key: string
@@ -718,6 +727,7 @@ export type ElectricityTariffKind =
   | 'water_price'
   | 'water_base_price'
   | 'sewage_price'
+  | 'heating_degree_days'
 
 export type ElectricityTariffUnit =
   | 'eur_per_kwh'
@@ -731,6 +741,7 @@ export type ElectricityTariffUnit =
   | 'kg_per_l'
   | 'kw'
   | 'eur_per_m3'
+  | 'kd'
 
 export interface ElectricityTariff {
   id: number
@@ -944,6 +955,7 @@ export const ELECTRICITY_TARIFF_KIND_LABELS: Record<ElectricityTariffKind, strin
   water_price: 'Wasserpreis',
   water_base_price: 'Wasser-Grundgebühr',
   sewage_price: 'Abwasserpreis',
+  heating_degree_days: 'Gradtagzahl (Monat)',
 }
 
 /** Plain-language explanation of what the value means, shown under the tariff form. */
@@ -974,6 +986,8 @@ export const ELECTRICITY_TARIFF_KIND_EXPLANATIONS: Record<ElectricityTariffKind,
   water_base_price: 'Monatliche Grundgebühr des Wasseranschlusses.',
   sewage_price:
     'Abwasserpreis pro m³ — wird meist auf dieselbe gemessene Wassermenge berechnet wie der Frischwasserpreis.',
+  heating_degree_days:
+    'Gradtagzahl eines Monats in Kelvin-Tagen (z. B. nach VDI 2067 für eine nahe Wetterstation), „gültig ab“ = Monatserster. Damit rechnet der Heizungs-Report den Verbrauch witterungsbereinigt; am einfachsten als Reihe per Datei-Import einspielen.',
 }
 
 export const ELECTRICITY_TARIFF_UNIT_LABELS: Record<ElectricityTariffUnit, string> = {
@@ -988,4 +1002,252 @@ export const ELECTRICITY_TARIFF_UNIT_LABELS: Record<ElectricityTariffUnit, strin
   kg_per_l: 'kg CO₂/l',
   kw: 'kWp',
   eur_per_m3: '€/m³',
+  kd: 'Kd',
+}
+
+// ── Season profile (report A3) ─────────────────────────────────────────────
+
+export type SeasonProfileMetricKey = 'autarky' | 'selfConsumptionRate'
+
+export interface SeasonProfileYear {
+  year: number
+  /** Index 0 = January … 11 = December; null where the month is not fully measured. */
+  months: Array<number | null>
+  average: number | null
+  measuredMonths: number
+}
+
+export interface SeasonProfileMetric {
+  key: SeasonProfileMetricKey
+  label: string
+  years: SeasonProfileYear[]
+  monthAverages: Array<number | null>
+  min: number | null
+  max: number | null
+}
+
+export interface SeasonProfileReport {
+  metrics: SeasonProfileMetric[]
+  monthsMeasured: number
+}
+
+export function getSeasonProfile() {
+  return apiFetch<SeasonProfileReport>('/meters/reports/season-profile')
+}
+
+// ── Weather-adjusted heating (report C3) ───────────────────────────────────
+
+export type HeatingReferenceSource = 'degree_days' | 'estimated'
+
+export interface HeatingWeatherBucket {
+  key: string
+  label: string
+  periodStart: string
+  periodEnd: string
+  heatingKwh: number | null
+  degreeDays: number | null
+  kwhPerDegreeDay: number | null
+  /** Consumption normalised to a normal month; only with a degree-day series. */
+  adjustedKwh: number | null
+  typicalKwh: number | null
+  deviationPercent: number | null
+}
+
+export interface HeatingWeatherYear {
+  year: number
+  measuredMonths: number
+  heatingKwh: number | null
+  degreeDays: number | null
+  kwhPerDegreeDay: number | null
+  adjustedKwh: number | null
+}
+
+export interface HeatingWeatherReport {
+  meterId: number | null
+  meterName: string | null
+  unit: string
+  source: HeatingReferenceSource | null
+  degreeDayMonths: number
+  normalDegreeDays: Array<number | null>
+  typicalKwh: Array<number | null>
+  referenceYears: number
+  buckets: HeatingWeatherBucket[]
+  years: HeatingWeatherYear[]
+  latestKwhPerDegreeDay: number | null
+  previousKwhPerDegreeDay: number | null
+  changePercent: number | null
+  slopePerYear: number | null
+}
+
+export function getHeatingWeatherReport() {
+  return apiFetch<HeatingWeatherReport>('/meters/reports/heating-weather')
+}
+
+// ── Advance payments vs. actual cost (report E3) ───────────────────────────
+
+export interface AdvancePaymentYear {
+  year: number
+  paidEur: number
+  transactions: number
+  actualCostEur: number | null
+  /** paid − actual; positive means a refund is to be expected. */
+  expectedSettlementEur: number | null
+  partial: boolean
+}
+
+export interface AdvancePaymentMeter {
+  meterId: number
+  name: string
+  type: MeterType
+  years: AdvancePaymentYear[]
+}
+
+export interface AdvancePaymentsReport {
+  currency: 'EUR'
+  meters: AdvancePaymentMeter[]
+}
+
+export function getAdvancePaymentsReport() {
+  return apiFetch<AdvancePaymentsReport>('/meters/reports/advance-payments')
+}
+
+// ── Anomalies (Etappe 7) ───────────────────────────────────────────────────
+
+export type MeterAnomalyType =
+  | 'consumption_spike'
+  | 'consumption_drop'
+  | 'standstill'
+  | 'negative_consumption'
+export type MeterAnomalyStatus = 'pending' | 'confirmed' | 'dismissed'
+
+export interface MeterAnomalyItem {
+  id: number
+  meterId: number
+  meterName: string
+  meterType: MeterType
+  unit: string
+  decimals: number
+  type: MeterAnomalyType
+  status: MeterAnomalyStatus
+  score: number | null
+  intervalStart: string
+  intervalEnd: string
+  readingId: number | null
+  details: Record<string, unknown>
+  message: string
+  createdAt: string
+  resolvedAt: string | null
+}
+
+export const METER_ANOMALY_TYPE_LABELS: Record<MeterAnomalyType, string> = {
+  consumption_spike: 'Verbrauchssprung',
+  consumption_drop: 'Verbrauchseinbruch',
+  standstill: 'Stillstand',
+  negative_consumption: 'Rückläufiger Zählerstand',
+}
+
+export function listMeterAnomalies(status: 'pending' | 'all' = 'pending') {
+  const q = new URLSearchParams({ status })
+  return apiFetch<{ anomalies: MeterAnomalyItem[]; total: number }>(`/meters/anomalies?${q}`)
+}
+
+export function setMeterAnomalyStatus(id: number, status: MeterAnomalyStatus) {
+  return apiFetch<{ ok: boolean }>(`/meters/anomalies/${id}/status`, {
+    method: 'POST',
+    body: JSON.stringify({ status }),
+  })
+}
+
+export interface MeterAnomalyRunResult {
+  meters: number
+  anomaliesFound: number
+  anomaliesCreated: number
+  anomaliesWithdrawn: number
+}
+
+export function runMeterAnomalyDetection(reset = false) {
+  return apiFetch<MeterAnomalyRunResult>('/meters/anomalies/run', {
+    method: 'POST',
+    body: JSON.stringify({ reset }),
+  })
+}
+
+// ── Reading ↔ finance transaction links (Etappe 8) ─────────────────────────
+
+export interface LinkedTransaction {
+  transactionId: number
+  accountId: number
+  bookingDate: string
+  amount: number
+  currencyCode: string
+  counterparty: string | null
+  purpose: string | null
+  linkedAt: string
+}
+
+export function listReadingTransactions(readingId: number) {
+  return apiFetch<{ items: LinkedTransaction[] }>(`/meters/readings/${readingId}/transactions`)
+}
+
+export function linkReadingTransaction(readingId: number, transactionId: number) {
+  return apiFetch<{ linked: boolean }>(`/meters/readings/${readingId}/transactions`, {
+    method: 'POST',
+    body: JSON.stringify({ transactionId }),
+  })
+}
+
+export function unlinkReadingTransaction(readingId: number, transactionId: number) {
+  return apiFetch<{ ok: boolean }>(`/meters/readings/${readingId}/transactions/${transactionId}`, {
+    method: 'DELETE',
+  })
+}
+
+// ── Home location + degree days from Open-Meteo (#1023 follow-up) ──────────
+
+export interface MeterHomeLocation {
+  label: string
+  lat: number
+  lon: number
+  source: 'geocoded' | 'manual'
+  updatedAt: string
+}
+
+export interface PlaceCandidate {
+  name: string
+  admin1: string | null
+  country: string | null
+  lat: number
+  lon: number
+}
+
+export interface DegreeDaysFillResult {
+  from: string | null
+  to: string | null
+  monthsMissing: number
+  monthsWritten: number
+  monthsIncomplete: number
+}
+
+export function getMeterHomeLocation() {
+  return apiFetch<{ home: MeterHomeLocation | null }>('/meters/home-location')
+}
+
+export function setMeterHomeLocation(req: { label: string; lat: number; lon: number; source?: 'geocoded' | 'manual' }) {
+  return apiFetch<{ home: MeterHomeLocation }>('/meters/home-location', {
+    method: 'PUT',
+    body: JSON.stringify(req),
+  })
+}
+
+export function deleteMeterHomeLocation() {
+  return apiFetch<{ deleted: boolean }>('/meters/home-location', { method: 'DELETE' })
+}
+
+export function searchMeterPlaces(q: string) {
+  const params = new URLSearchParams({ q })
+  return apiFetch<{ places: PlaceCandidate[] }>(`/meters/places?${params}`)
+}
+
+export function fetchDegreeDays() {
+  return apiFetch<DegreeDaysFillResult>('/meters/degree-days/fetch', { method: 'POST' })
 }

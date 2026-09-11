@@ -5,7 +5,7 @@ Gas) sowie Betriebsstundenzählern (Pumpen, Kompressoren), inkl. Ablesung per
 Foto/OCR, automatischer Erfassung per API und Verknüpfung mit
 Finance-Transaktionen.
 
-Status: Feature-Plan (GitHub Issue #792), noch nicht umgesetzt.
+Status: Feature-Plan (GitHub Issue #792), Etappen 1–8 umgesetzt (Stand siehe §8).
 
 ---
 
@@ -146,8 +146,12 @@ meter/
 ├── api-keys.ts              // API-Key-Verwaltung
 ├── reports.ts               // Verbrauch/Zeit, Perioden-Vergleich
 ├── reports.service.ts       // generische Bucket-Logik + DB-Reportdaten
-├── anomaly.ts               // Anomalie-Erkennung (Cron)
-├── finance-link.ts          // Verknüpfung Ablesung ↔ finance_transaction
+├── season-profile.service.ts   // Saisonprofil A3
+├── heating-weather.service.ts  // Witterungsbereinigung C3
+├── open-meteo-client.ts / degree-days.service.ts / home-location.ts  // Gradtagzahlen aus dem Archiv
+├── anomalies.ts / anomalies.service.ts          // Anomalie-Erkennung (Job + Endpunkte)
+├── reading-transactions.ts / .service.ts        // Verknüpfung Ablesung ↔ finance_transaction
+├── advance-payments.service.ts                  // Abschlagsvergleich E3
 └── *.test.ts
 ```
 
@@ -166,12 +170,22 @@ meter/
 | `POST /meters/:id/readings/ocr` | `meters.read_entry` | Foto hochladen → `{ value, confidence, photoPath }` als Vorschlag; Speichern erfolgt erst mit Bestätigung über `POST readings` |
 | `GET/POST/DELETE /meters/:id/api-keys` | `meters.manage` | API-Keys; Klartext-Token nur in der Create-Response |
 | `POST /api/meters/ingest` | API-Key (kein User-Auth) | Externe Ablesung |
-| `GET /meters/:id/report?granularity=month\|year&from=&to=` | `meters.view` | Generische Verbrauchsreihen (§5) |
-| `GET /meters/reports/energy?granularity=month\|year&from=&to=` | `meters.view` | Strom-/PV-Gesamtreport (§5.2) |
+| `GET /meters/:id/report?granularity=day\|week\|month\|year&from=&to=` | `meters.view` | Generische Verbrauchsreihen (§5) |
+| `GET /meters/reports/energy?granularity=day\|week\|month\|year&from=&to=` | `meters.view` | Strom-/PV-Gesamtreport (§5.2) |
+| `GET /meters/reports/season-profile?from=&to=` | `meters.view` | Saisonprofil Autarkie/Eigenverbrauch (§5.2.5) |
+| `GET /meters/reports/heating-weather?from=&to=` | `meters.view` | Heizung witterungsbereinigt (§5.2.6) |
+| `GET/PUT/DELETE /meters/home-location` | `meters.view` / `meters.manage` | Wohnort für den Gradtagzahl-Abruf (§5.2.6) |
+| `GET /meters/places?q=` | `meters.manage` | Ortssuche (Open-Meteo-Geocoding) |
+| `POST /meters/degree-days/fetch` | `meters.manage` | Fehlende Gradtagzahl-Monate aus dem Open-Meteo-Archiv holen |
+| `GET /meters/reports/advance-payments` | `meters.view` + `finance.view` | Abschläge vs. Ist-Kosten (§6.1) |
+| `GET /meters/anomalies?status=pending\|all` | `meters.view` | Auffälligkeiten sichtbarer Zähler (§5.3) |
+| `POST /meters/anomalies/:id/status` | `meters.read_entry` | `confirmed` / `dismissed` / `pending` |
+| `POST /meters/anomalies/run` | `meters.manage` | Anomalie-Prüfung sofort ausführen (`reset` löscht offene Funde der eigenen Zähler) |
 | `GET/POST/PUT/DELETE /meters/tariffs/electricity` | `meters.view` / `meters.manage` | Strompreise und Einspeisevergütung verwalten (§5.2) |
 | `POST /meters/tariffs/import` | `meters.manage` | Preis-/Annahmereihen aus einer Datei importieren (§5.2.2) |
 | `POST /meters/import/electricity-prices` | `meters.manage` | Historische Strompreise aus der Excel-Grundlage importieren |
-| `GET/POST/DELETE /meters/readings/:id/transactions` | `meters.view` + `finance.view` | Finance-Verknüpfung |
+| `GET /meters/readings/:id/transactions` | `meters.view` + `finance.view` | Verknüpfte Zahlungen einer Ablesung (Finance-ACL-gefiltert, §6) |
+| `POST /meters/readings/:id/transactions` / `DELETE …/:transactionId` | `meters.read_entry` + `finance.view` | Zahlung verknüpfen / lösen (§6) |
 
 ### 3.2 Externe Ingestion
 
@@ -230,7 +244,7 @@ nötig, Haushalts-Scope reicht).
 
 ### 5.1 Verbrauchsreihen
 
-`GET /meters/:id/report?granularity=month|year&from=&to=`
+`GET /meters/:id/report?granularity=day|week|month|year&from=&to=`
 
 - Verbrauch pro Bucket = Differenz zwischen zwei aufeinanderfolgenden
   Absolutständen.
@@ -254,8 +268,18 @@ nötig, Haushalts-Scope reicht).
   dem `from`/`to`-Filter berechnet, damit ein Filter die Referenzperiode nicht
   entfernt.
 - Bei Betriebsstundenzählern identisch (Einheit h).
-- Noch offen: `day`/`week`-Granularität (zurückgestellt, siehe
-  `docs/utility-meters-reports.md` §3.1).
+- **`day`/`week`** (#1024): Tages-Buckets tragen den Schlüssel `YYYY-MM-DD`,
+  Wochen-Buckets die ISO-Woche `YYYY-Www` (Montag bis Sonntag, Wochenjahr
+  nach ISO 8601 — die Tage um den Jahreswechsel gehören zur Woche, nicht zum
+  Kalenderjahr). Interpolation, Coverage und Vorjahresvergleich funktionieren
+  unverändert; Vorjahr ist beim Tag dasselbe Datum, bei der Woche dieselbe
+  Wochennummer des Vorjahres (eine KW 53 findet dann keinen Partner). Alle
+  Bucket-Helfer (`bucketKey`, `bucketStartDate`, `nextBucketStart`,
+  `previousYearKey`, `bucketsPerYear`) sind aus `reports.service.ts`
+  exportiert und werden von den übrigen Report-Services wiederverwendet.
+  Nützlich wird das erst mit regelmäßiger API-Ingestion; die Detail-View
+  bietet die vier Stufen als Umschalter an und zeigt beim Tag die letzten 31,
+  bei der Woche die letzten 26 Perioden.
 
 ### 5.1.1 Verbrauchstrends
 
@@ -522,30 +546,165 @@ Menge berechnet (`water_price`, `sewage_price`), die Grundgebühr
 (`water_base_price`) anteilig über Monatsgrenzen. Ohne Wassertarife bleibt
 die Liste leer.
 
-### 5.3 Anomalie-Erkennung
+### 5.2.5 Saisonprofil Autarkie/Eigenverbrauch (A3, #1022)
 
-Muster von `finance/anomaly-detector.ts` übernehmen:
+`GET /meters/reports/season-profile?from=&to=`
 
-- Cron (täglich) berechnet je Zähler die Tagesverbrauchsrate der letzten
-  Ablesungsintervalle; Vergleich gegen rollierendes Mittel/Stddev
-  (z-Score) und Saisonalität (gleicher Monat Vorjahr).
-- Auffälligkeiten (Verbrauchssprung, Stillstand bei Betriebsstunden,
-  rückläufiger Wert durch Tippfehler) landen in einer
-  `meter_anomalies`-Tabelle mit Status `pending/confirmed/dismissed` und
-  erscheinen im Frontend (Badge + Liste, analog `AnomaliesView.vue`).
-- Optionale LLM-Bewertung (Begründungstext) erst in einer späteren Etappe.
+Heatmap Jahr × Monat für Autarkie und Eigenverbrauchsquote. Keine neuen
+Daten: `season-profile.service.ts` pivotiert die Monats-Buckets des
+Energie-Reports in ein Gitter je Kennzahl (`years[].months[0..11]`), ergänzt
+Zeilen- (`average`) und Spaltenmittel (`monthAverages`) sowie `min`/`max`.
+Nur vollständig gemessene Monate (`coverage ≥ 0,99`) füllen eine Zelle —
+ein halber Monat hätte eine verzerrte Quote. Frontend:
+`MeterSeasonProfilePanel.vue`, Farbskala fest 0..100 % (nicht min/max), damit
+eine Anlage mit 40 % Autarkie auch blass aussieht.
+
+### 5.2.6 Heizung witterungsbereinigt (C3, #1023)
+
+`GET /meters/reports/heating-weather?from=&to=`
+
+„Mehr Heizstrom als letztes Jahr“ ist meist nur „kälterer Winter“. Der
+Report teilt den monatlichen Heizverbrauch (Rolle `heat_heating_total`,
+Fallback `heat_pump_total`) durch die Gradtagzahl des Monats; der Rest —
+kWh je Gradtag — beschreibt Haus und Heizung statt des Wetters.
+
+Die offene Entscheidung Nr. 4 (`docs/utility-meters-reports.md` §5) ist so
+gelöst, dass **beide** Optionen existieren und der Report die verwendete
+Quelle ausweist (`source`):
+
+- **`degree_days`** — Gradtagzahlen als Annahme-Reihe in
+  `meter_electricity_tariffs`: `kind = heating_degree_days`, `unit = kd`
+  (Kelvin-Tage), eine Zeile je Monat mit `valid_from` = Monatserster
+  (Migration 0192). Standardweg ist der **automatische Abruf** aus dem
+  Open-Meteo-Archiv (siehe unten); alternativ eine VDI-2067-Reihe einer
+  standortnahen Station über den Datei-Import. Je Monat entstehen
+  `kwhPerDegreeDay` und `adjustedKwh` (Verbrauch normiert auf einen
+  *Normalmonat*: kWh/Kd × mehrjähriges Mittel der Gradtage dieses
+  Kalendermonats). Jahreswerte sind das Verhältnis der Summen, nicht das
+  Mittel der Monatsquotienten — Sommermonate mit einer Handvoll Gradtagen
+  würden sonst dominieren. `changePercent` vergleicht die kWh/Kd des letzten
+  vollständigen Jahres mit dem Jahr davor, `slopePerYear` ist die
+  Regression darüber.
+- **`estimated`** — ohne Gradtag-Zeilen wird der Referenzwinter aus den
+  eigenen Daten geschätzt: das mehrjährige Mittel jedes Kalendermonats
+  (mindestens zwei Jahre, sonst `null`). Das kann die Witterung nicht
+  herausrechnen, zeigt aber ehrlich die Abweichung vom hauseigenen
+  Normalmonat (`deviationPercent`). Das Frontend benennt den Modus und
+  verweist auf den Import.
+
+Frontend: `MeterHeatingWeatherPanel.vue` (Kacheln kWh/Kd aktuell/Vorjahr/
+Veränderung, Jahres- und Monatstabelle, darunter die Wohnort-Karte).
+
+#### Gradtagzahlen aus dem Open-Meteo-Archiv
+
+`meter/open-meteo-client.ts`, `meter/degree-days.service.ts`,
+`meter/home-location.ts` — damit niemand eine Tabelle importieren muss:
+
+- **Wohnort** (`meter_home_locations`, Migration 0193, ein Eintrag je
+  Nutzer): `label`, `lat`, `lon`, `source = geocoded | manual`. Die
+  Koordinate wird wie beim Reiseplaner auf das 0,05°-Raster (≈ 5 km)
+  gerundet gespeichert — mehr löst die Reanalyse ohnehin nicht auf, und
+  mehr verlässt das Haus nicht. Endpunkte `GET/PUT/DELETE
+  /meters/home-location` (`meters.view` / `meters.manage`).
+- **Ortssuche** `GET /meters/places?q=` (`meters.manage`) über
+  `geocoding-api.open-meteo.com` (Stadt/Gemeinde, kein Key). Fällt die
+  Suche aus, lassen sich Koordinaten direkt eingeben (`source = manual`).
+- **Abruf** `archive-api.open-meteo.com/v1/archive`, `daily =
+  temperature_2m_mean`, Zeitzone des Orts (`timezone=auto`), ERA5-Reanalyse
+  ab 1940, etwa fünf Tage hinter heute (`ARCHIVE_LAG_DAYS = 7`).
+  Gradtagzahl nach VDI 2067: Heiztag bei Tagesmittel < 15 °C, Beitrag
+  20 °C − Tagesmittel, monatlich summiert. Ein Monat mit mehr als zwei
+  fehlenden Tagen wird nicht geschrieben — eine Lücke darf nicht wie ein
+  milder Monat aussehen.
+- **Auffüllen** (`fillDegreeDaysForUser`): vom Monat der ersten Ablesung
+  des Heizungszählers bis zum letzten abgeschlossenen, archivierten Monat;
+  nur fehlende Monate, ein Archiv-Aufruf je Kalenderjahr mit Lücke. Bereits
+  vorhandene Zeilen (Import, Handeingabe, früherer Abruf) bleiben
+  unangetastet, die geschriebenen tragen `source.provider =
+  "open-meteo-archive"`. Idempotent.
+- **Job** `meter-degree-days`, täglich 04:00 UTC für alle Nutzer mit
+  Wohnort (ein No-op, solange kein neuer Monat im Archiv liegt); manuell
+  über `POST /meters/degree-days/fetch` („Gradtagzahlen abrufen“ in der
+  Wohnort-Karte, `meters.manage`). Ausfälle des Dienstes werden als
+  `unavailable` gemeldet, nicht als interner Fehler.
+- **Netzwerk-Policy**: `archive-api.open-meteo.com` und
+  `geocoding-api.open-meteo.com` müssen erreichbar sein.
+
+### 5.3 Anomalie-Erkennung (Etappe 7, #1015)
+
+Umgesetzt in `meter/anomalies.service.ts` (reiner Detektor + Job) und
+`meter/anomalies.ts` (Endpunkte + Job-Registrierung), Muster von
+`finance/anomaly-detector.ts`:
+
+- **Job** `meter-anomaly-detection`, täglich 10:30 UTC über
+  `lib/local-cron` (der Meter-Service ruft jetzt `startLocalCron()`), manuell
+  über `POST /meters/anomalies/run`. Er lädt je Messstelle die absolute
+  Ablesereihe (über Gerätewechsel hinweg) und bewertet nur Intervalle, die
+  in den letzten `ANOMALY_RECENCY_DAYS` (60) enden — ältere Intervalle
+  speisen nur Baseline und Saisonreferenz.
+- **Baseline**: gewichtetes Mittel und Standardabweichung der Tagesrate der
+  bis zu 12 vorangehenden Intervalle (mindestens 4), gewichtet nach
+  Intervalllänge. Die Standardabweichung hat einen Boden von 10 % des
+  Mittels — zwölf nahezu identische Monatsablesungen würden sonst jede
+  Schwankung zum Fünf-Sigma-Ereignis machen.
+- **Saisonalität**: Rate desselben Zeitraums ein Jahr früher (zeitanteilig
+  über die damaligen Intervalle). Liegt die aktuelle Rate innerhalb von
+  ±25 % davon, ist der Ausschlag saisonal und wird nicht gemeldet.
+- **Typen**: `consumption_spike` / `consumption_drop` (|z| ≥ 3 und mindestens
+  ±50 % gegenüber der Baseline), `standstill` (Betriebsstundenzähler ohne
+  Fortschritt über ≥ 7 Tage, obwohl er üblicherweise läuft),
+  `negative_consumption` (Absolutstand rückläufig — die Gerätevalidierung
+  fängt das innerhalb eines Geräts ab, nicht über einen falsch
+  konfigurierten Gerätewechsel hinweg).
+- **Tabelle `meter_anomalies`** (Migration 0191): Status
+  `pending → confirmed | dismissed`, `score` (z-Score), Intervallgrenzen,
+  `reading_id` der schließenden Ablesung, `details` (Rate, Baseline,
+  Saisonrate, Tage, Werte). `UNIQUE (meter_id, type, interval_end)` macht
+  den täglichen Lauf idempotent; offene Funde im Fenster, die nicht erneut
+  erkannt werden (die Ablesung wurde korrigiert), zieht der Lauf zurück —
+  bestätigte oder verworfene bleiben.
+- **Frontend**: `MeterAnomaliesView.vue` (Route `zaehler-anomalien`,
+  Menüpunkt „Auffälligkeiten“ mit Badge aus `stores/meterAnomalies.ts`),
+  Bestätigen/Verwerfen/Wieder öffnen, Filter nach Art und Status,
+  „Jetzt prüfen“ mit `meters.manage`.
+- Optionale LLM-Bewertung (Begründungstext) bleibt eine spätere Ausbaustufe.
 
 ---
 
-## 6. Finance-Verknüpfung
+## 6. Finance-Verknüpfung (Etappe 8, #1018)
 
 - Link-Tabelle `meter_reading_transactions` (§2.1), Muster
-  `finance_transaction_document`.
-- UI: an der Ablesung „Zahlung verknüpfen“ → Transaktionssuche
-  (bestehende Finance-Suche, ACL-gefiltert via `finance.view`).
+  `finance_transaction_document`. Endpunkte in
+  `meter/reading-transactions.ts`, Logik in
+  `reading-transactions.service.ts`: Die Ablesung muss auf einem sichtbaren
+  Zähler liegen, die Transaktion unter der Finance-ACL lesbar sein
+  (`finance_account_access`, `finance.admin` umgeht sie). Verknüpfen ist
+  idempotent; die Liste blendet Transaktionen aus, die der Aufrufer nicht
+  (mehr) lesen darf.
+- `GET /meters/:id/readings` liefert je Ablesung `linkedTransactions`
+  (Anzahl), damit die Tabelle den Zustand ohne Zusatzabfrage zeigt.
+- UI: Spalte „Zahlung“ in der Ablesungstabelle (nur mit `finance.view`) →
+  `MeterReadingTransactionsDialog.vue`: verknüpfte Buchungen (lösen mit
+  `meters.read_entry`) und die bestehende Finance-Suche; ohne Suchbegriff
+  werden die Buchungen ±45 Tage um die Ablesung angeboten.
 - Match-Vorschläge (Score aus Datum/Empfänger wie
-  `finance/document-matcher.ts`) sind eine spätere Etappe — zunächst rein
+  `finance/document-matcher.ts`) bleiben eine spätere Etappe — zunächst rein
   manuelle Verknüpfung.
+
+### 6.1 Abschläge vs. Ist-Kosten (Report E3)
+
+`GET /meters/reports/advance-payments` (`meters.view` + `finance.view`),
+`meter/advance-payments.service.ts`, Panel `MeterAdvancePaymentsPanel.vue`.
+
+Je Zähler mit verknüpften Zahlungen und Kalenderjahr: `paidEur` = Σ −Betrag
+der verknüpften Buchungen des Jahres (Zahlungen sind negative Buchungen; eine
+positiv gebuchte Erstattung mindert die Summe), `actualCostEur` = bei
+Stromzählern die Netto-Stromkosten des Energie-Reports (Jahres-Bucket), bei
+Wasserzählern die Wasserkosten aus dem Wirtschaftlichkeits-Report; Gas hat
+noch kein Kostenmodell (`null`). `expectedSettlementEur = paid − actual`,
+positiv = Erstattung zu erwarten. Kalenderjahr ist eine Näherung an das
+Abrechnungsjahr des Versorgers; das laufende Jahr ist als `partial`
+markiert.
 
 ---
 
@@ -562,6 +721,7 @@ Neue Views unter `frontend/src/views/meters/`, Navigation gated auf
 | `MeterQuickEntryConfigView.vue` | `meters.read_entry` | Persönliche Konfigurationsseite für Zählerauswahl/Reihenfolge (`meter_quick_entry_items`), erreichbar über das Zahnrad in der Schnell-Erfassung |
 | `MeterReadingEntryView.vue` (oder Dialog) | `meters.read_entry` | Wert + Datum/Zeit (Default jetzt), Foto-Button → OCR-Vorschlag mit Confidence, Bestätigen/Korrigieren |
 | `MetersAdminView.vue` | `meters.manage` | Zähler-CRUD, Gerät ersetzen (Wizard: Endstand alt → Startwert neu), API-Key-Verwaltung |
+| `MeterAnomaliesView.vue` | `meters.view` (Status setzen: `meters.read_entry`) | Auffälligkeiten-Postfach (§5.3), Badge im Modulmenü |
 
 Design: nur semantische PrimeVue-CSS-Variablen (CSS-Style-Guide),
 Datums-Handling über `frontend/src/utils/dateFormat.ts`
@@ -579,9 +739,9 @@ Storybook-Stories für Übersicht + Erfassungsdialog.
 | 3 | Manuelle Ablesungen | `readings.ts`, Absolutstand-Berechnung, Übersichts- + Detail-View, Erfassungsdialog | 2 |
 | 4 | Foto-OCR | `receipt-ocr-service`-Endpunkt `/meter-reading`, `readings-ocr.ts`, Foto-Ablage, Bestätigungs-UI | 3 |
 | 5 | API-Ingestion | `meter_api_keys`, `ingest.ts` (Bearer, Idempotenz, Rate-Limit), Key-Verwaltung in Admin-View | 3 |
-| 6 | Reports | Umgesetzt: `reports.ts`/`reports.service.ts`, Monats-/Jahres-Buckets, Chart + Tabelle in Detail-View, aggregierter Strom-/PV-Gesamtreport, explizite Zählerrollen (6a: Interpolation, Coverage, Vorjahresvergleich, `trends.service.ts`; 6b: Trend-Dashboard). Offen: Day/Week (zurückgestellt), PV-Ersparnis/Amortisation (6c), Gas-/Benzin-Vergleich (6d) — siehe `docs/utility-meters-reports.md` | 3 |
-| 7 | Anomalien | Cron + `meter_anomalies`, Badge/Liste im Frontend | 6 |
-| 8 | Finance-Link | Link-Tabelle, Endpunkte, UI an Ablesung/Transaktion | 3 (+ Finance) |
+| 6 | Reports | Umgesetzt (6a–6e, siehe `docs/utility-meters-reports.md`), inkl. Day/Week-Granularität (#1024), Saisonprofil A3 (#1022) und Witterungsbereinigung C3 (#1023) | 3 |
+| 7 | Anomalien | Umgesetzt: Job + `meter_anomalies` (Migration 0191), Postfach mit Badge (#1015) | 6 |
+| 8 | Finance-Link | Umgesetzt: Endpunkte, Dialog an der Ablesung, Report E3 Abschlagsvergleich (#1018) | 3 (+ Finance) |
 
 MVP = Etappen 1–3; jede Etappe wird einzeln getestet (`npm run test` vor
 jedem Push) und ist unabhängig deploybar.
@@ -602,3 +762,18 @@ jedem Push) und ist unabhängig deploybar.
   CRUD/Keys.
 - **OCR**: Client gemockt (Muster `documents/llm-client.test.ts`),
   Confidence-Weitergabe, kein Auto-Save.
+- **Anomalien** (`anomalies.service.test.ts`): reiner Detektor (Sprung,
+  Einbruch, saisonaler Anstieg wird nicht gemeldet, alte Intervalle nur
+  Baseline, Mindest-Baseline, Stillstand nur bei Betriebsstunden,
+  rückläufiger Stand, zu kurze Intervalle); Job idempotent, zieht korrigierte
+  Funde zurück, behält bestätigte; Endpunkte Sichtbarkeit + Rechte.
+- **Finance-Link** (`reading-transactions.test.ts`): verknüpfen/listen/lösen,
+  Idempotenz, Zähler-Sichtbarkeit, Finance-ACL inkl. `finance.admin`,
+  `linkedTransactions` in der Ablesungsliste, Abschlagsreport.
+- **Reports**: Day/Week-Buckets (ISO-Woche, Jahreswechsel, Tages-Split,
+  Vorjahr), Saisonprofil-Pivot, Witterungsbereinigung in beiden Modi.
+- **Gradtagzahlen** (`degree-days.service.test.ts`): VDI-Summe und
+  Heizgrenze, Toleranz fehlender Tage, Archiv-Nachlauf, Parser, Wohnort
+  (Raster, Validierung, Rechte), Auffüllen mit Fake-Archiv (nur fehlende
+  Monate, Handeingabe bleibt, ein Aufruf je Jahr, idempotent,
+  unvollständige Monate), Ausfall → `unavailable`.

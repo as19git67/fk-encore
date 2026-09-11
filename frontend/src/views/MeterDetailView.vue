@@ -40,11 +40,13 @@ import {
   type MeterRole,
   type MeterType,
   type Reading,
+  METER_REPORT_GRANULARITY_LABELS,
   type ApiKey,
   type MeterReport,
   type MeterReportGranularity,
 } from '../api/meters'
 import { listGroups, type GroupSummary } from '../api/documents'
+import MeterReadingTransactionsDialog from '../components/MeterReadingTransactionsDialog.vue'
 import { useAuthStore } from '../stores/auth'
 import { toLocalIsoDateTime } from '../utils/dateFormat'
 import { decimalInputPt } from '../utils/inputNumberPt'
@@ -146,13 +148,37 @@ const report = ref<MeterReport | null>(null)
 const loadingReport = ref(false)
 const reportGranularity = ref<MeterReportGranularity>('month')
 const reportGranularityOptions: Array<{ label: string; value: MeterReportGranularity }> = [
+  { label: 'Tag', value: 'day' },
+  { label: 'Woche', value: 'week' },
   { label: 'Monat', value: 'month' },
   { label: 'Jahr', value: 'year' },
 ]
 
+/** How many of the newest periods the chart and table show per granularity. */
+const RECENT_BUCKETS: Record<MeterReportGranularity, number | null> = {
+  day: 31,
+  week: 26,
+  month: 24,
+  year: null,
+}
+/** Periods feeding the trend line per granularity (about one year). */
+const TREND_BUCKETS: Record<MeterReportGranularity, number | null> = {
+  day: 30,
+  week: 26,
+  month: 12,
+  year: null,
+}
+const PERIOD_PLURAL: Record<MeterReportGranularity, string> = {
+  day: 'Tage',
+  week: 'Wochen',
+  month: 'Monate',
+  year: 'Jahre',
+}
+
 const recentReportBuckets = computed(() => {
   const buckets = report.value?.buckets ?? []
-  return reportGranularity.value === 'month' ? buckets.slice(-24) : buckets
+  const limit = RECENT_BUCKETS[reportGranularity.value]
+  return limit === null ? buckets : buckets.slice(-limit)
 })
 
 const reportTableBuckets = computed(() => {
@@ -162,9 +188,11 @@ const reportTableBuckets = computed(() => {
 
 type MeterReportBucket = MeterReport['buckets'][number]
 
-function isCurrentReportPeriod(bucket: MeterReportBucket, granularity: MeterReportGranularity, now = new Date()) {
-  if (granularity === 'year') return bucket.key === String(now.getFullYear())
-  return bucket.key === `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+function isCurrentReportPeriod(bucket: MeterReportBucket, _granularity: MeterReportGranularity, now = new Date()) {
+  // Periods are UTC-aligned on the backend; "current" means the one that contains now.
+  const start = new Date(bucket.periodStart).getTime()
+  const end = new Date(bucket.periodEnd).getTime()
+  return now.getTime() >= start && now.getTime() < end
 }
 
 function completedReportBuckets(buckets: MeterReportBucket[], granularity: MeterReportGranularity) {
@@ -190,7 +218,8 @@ function linearRegressionSlope(values: number[]): number | null {
 const reportAnalysis = computed(() => {
   const buckets = report.value?.buckets ?? []
   const completed = completedReportBuckets(buckets, reportGranularity.value)
-  const trendSource = reportGranularity.value === 'month' ? completed.slice(-12) : completed
+  const trendLimit = TREND_BUCKETS[reportGranularity.value]
+  const trendSource = trendLimit === null ? completed : completed.slice(-trendLimit)
   const avg =
     completed.length > 0
       ? completed.reduce((sum, bucket) => sum + bucket.consumption, 0) / completed.length
@@ -204,7 +233,7 @@ const reportAnalysis = computed(() => {
 })
 
 function reportTrendLabel() {
-  return reportGranularity.value === 'year' ? 'Trend/Jahr' : 'Trend/Monat'
+  return `Trend/${METER_REPORT_GRANULARITY_LABELS[reportGranularity.value]}`
 }
 
 function fmtReportTrend(value: number | null) {
@@ -608,6 +637,22 @@ async function handleDeleteReading(r: Reading) {
 
 // ── OCR photo capture ────────────────────────────────────────────────────────
 
+// ── Finance links (Etappe 8) ─────────────────────────────────────────────────
+
+const canSeeFinance = computed(() => auth.hasPermission('finance.view'))
+const showReadingTransactions = ref(false)
+const transactionsReading = ref<Reading | null>(null)
+
+function openReadingTransactions(r: Reading) {
+  transactionsReading.value = r
+  showReadingTransactions.value = true
+}
+
+function onReadingTransactionsChanged(readingId: number, count: number) {
+  const row = readings.value.find((r) => r.id === readingId)
+  if (row) row.linkedTransactions = count
+}
+
 const ocrLoading = ref(false)
 const ocrError = ref('')
 const ocrFileInput = ref<HTMLInputElement | null>(null)
@@ -770,13 +815,13 @@ watch(meterId, () => loadDetail())
           <span class="figure-label">Ø Verbrauch</span>
           <strong>{{ fmt(reportAnalysis.avgConsumption, detail.decimals) }} {{ detail.unit }}</strong>
           <span class="figure-sub">{{ fmtReportTrend(reportAnalysis.consumptionTrend) }}</span>
-          <span class="figure-sub">Basis: {{ reportAnalysis.count }} abgeschlossene {{ reportGranularity === 'month' ? 'Monate' : 'Jahre' }}, Trend: {{ reportAnalysis.trendPoints }} Werte</span>
+          <span class="figure-sub">Basis: {{ reportAnalysis.count }} abgeschlossene {{ PERIOD_PLURAL[reportGranularity] }}, Trend: {{ reportAnalysis.trendPoints }} Werte</span>
         </div>
         <div v-if="reportChartData" class="report-chart">
           <Chart type="bar" :data="reportChartData" :options="reportChartOptions" />
         </div>
         <DataTable :value="reportTableBuckets" size="small" class="report-table">
-          <Column field="label" :header="reportGranularity === 'month' ? 'Monat' : 'Jahr'">
+          <Column field="label" :header="METER_REPORT_GRANULARITY_LABELS[reportGranularity]">
             <template #body="{ data }">
               {{ data.label }}
               <i
@@ -883,6 +928,20 @@ watch(meterId, () => loadDetail())
         <Column field="notes" header="Notiz">
           <template #body="{ data }"><span class="notes-cell" :title="data.notes ?? ''">{{ data.notes ?? '' }}</span></template>
         </Column>
+        <Column v-if="canSeeFinance" header="Zahlung" style="width: 5rem">
+          <template #body="{ data }">
+            <Button
+              :icon="data.linkedTransactions > 0 ? 'pi pi-euro' : 'pi pi-link'"
+              :label="data.linkedTransactions > 0 ? String(data.linkedTransactions) : undefined"
+              text
+              rounded
+              size="small"
+              :severity="data.linkedTransactions > 0 ? 'primary' : 'secondary'"
+              v-tooltip.left="data.linkedTransactions > 0 ? 'Verknüpfte Zahlungen anzeigen' : 'Zahlung verknüpfen'"
+              @click="openReadingTransactions(data)"
+            />
+          </template>
+        </Column>
         <Column style="width: 6rem">
           <template #body="{ data }">
             <div class="reading-actions" v-if="canEditReading(data)">
@@ -923,6 +982,13 @@ watch(meterId, () => loadDetail())
       </template>
     </template>
     <div v-else class="info">Zähler nicht gefunden.</div>
+
+    <MeterReadingTransactionsDialog
+      v-model:visible="showReadingTransactions"
+      :reading="transactionsReading"
+      :can-edit="canEnter"
+      @changed="onReadingTransactionsChanged"
+    />
 
     <!-- Edit dialog -->
     <Dialog v-model:visible="showEdit" header="Zähler bearbeiten" modal :style="{ width: '32rem', maxWidth: '95vw' }">
