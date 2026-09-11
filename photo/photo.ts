@@ -10,6 +10,11 @@ import { writeCacheFileAtomically } from "./cache-file";
 import { UPLOAD_DIR, THUMBNAIL_DIR, thumbnailShardPath } from "./photo.service";
 import { PHOTO_LIBRARIES_ROOT } from "./libraries.service";
 import { denyPhotoFileRequest } from "./photo-file-access";
+import {
+  setKnownFaceLinkVisibilityLogic,
+  setPhotoLinkVisibilityLogic,
+  LinkVisibilityAccessError,
+} from "./link-visibility.service";
 import { eq } from "drizzle-orm";
 import db from "../db/database";
 import { dbFirst } from "../db/adapter";
@@ -45,6 +50,10 @@ import type {
   AlbumPublicLink,
   PublicAlbumResponse,
   PhotoLocationsResponse,
+  UpdatePhotoLinkVisibilityRequest,
+  UpdatePhotoLinkVisibilityResponse,
+  SetKnownFaceLinkVisibilityRequest,
+  SetKnownFaceLinkVisibilityResponse,
 } from "../db/types";
 import { Query } from "encore.dev/api";
 import { parsePhotoFilterQuery, type PhotoFilterQuery } from "./photo.filters";
@@ -609,6 +618,49 @@ export const updatePhotoCuration = api(
       }
       throw err;
     }
+  }
+);
+
+/**
+ * Set how photos behave in anonymous public-link views: 'auto' (hidden while
+ * a known face is on them), 'visible' (released) or 'hidden'.
+ *
+ * Unlike curation this is not per-user — it decides what every link visitor
+ * sees — so it requires write access to the photo (owner) or to an album
+ * containing it.
+ */
+export const updatePhotoLinkVisibility = api(
+  { expose: true, method: "POST", path: "/photos/link-visibility", auth: true },
+  async ({ photoIds, visibility }: UpdatePhotoLinkVisibilityRequest): Promise<UpdatePhotoLinkVisibilityResponse> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    try {
+      return await setPhotoLinkVisibilityLogic(userId, photoIds, visibility);
+    } catch (err: any) {
+      if (err instanceof LinkVisibilityAccessError) {
+        throw APIError.permissionDenied("Nicht berechtigt, die Link-Sichtbarkeit zu ändern.");
+      }
+      throw err;
+    }
+  }
+);
+
+/**
+ * Bulk pass over every photo showing a face assigned to a named person:
+ * release them all to link visitors, pin them shut, or restore the default.
+ * Optionally scoped to a single album or to specific persons.
+ */
+export const setKnownFaceLinkVisibility = api(
+  { expose: true, method: "POST", path: "/photos/link-visibility/known-faces", auth: true },
+  async ({ visibility, albumId, personIds }: SetKnownFaceLinkVisibilityRequest): Promise<SetKnownFaceLinkVisibilityResponse> => {
+    checkModule();
+    const userId = getUserId();
+    const authData = getAuthData()!;
+    requirePermission(authData, "photos.view");
+    requirePermission(authData, "people.view");
+    return await setKnownFaceLinkVisibilityLogic(userId, { visibility, albumId, personIds });
   }
 );
 

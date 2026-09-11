@@ -29,8 +29,11 @@ import {
   albumPhotos,
   albumShares,
   albums,
+  faces,
+  persons,
   photoCuration,
   photos,
+  userFaceAssignments,
 } from "../db/schema";
 
 /** What to answer with when a request may not have the file. */
@@ -42,10 +45,12 @@ export interface PhotoFileDenial {
 /**
  * True when the share link is live and actually covers this file.
  *
- * The hidden-photo exclusion mirrors `getPublicAlbumLogic` exactly: a photo
- * any album participant has hidden is absent from the public listing, so it
- * must not be reachable by filename either — otherwise hiding a photo after
- * sharing the link would not take effect for anyone who noted the URL.
+ * The exclusions mirror `getPublicAlbumLogic` exactly: a photo any album
+ * participant has hidden, one set to `link_visibility = 'hidden'`, and — by
+ * default — one carrying a face a participant assigned to a named person are
+ * all absent from the public listing, so none of them may be reachable by
+ * filename either; otherwise hiding a photo after sharing the link would not
+ * take effect for anyone who noted the URL.
  */
 async function shareLinkCoversFile(token: string, filename: string): Promise<boolean> {
   const result = await db.execute(sql`
@@ -56,6 +61,31 @@ async function shareLinkCoversFile(token: string, filename: string): Promise<boo
     WHERE l.token = ${token}
       AND l.disabled_at IS NULL
       AND (l.expires_at IS NULL OR l.expires_at > NOW())
+      -- Photos the link may not show — the per-photo opt-out, and by default
+      -- anything with a known face on it — are absent from the public
+      -- listing, so they must not be reachable by filename either.
+      AND (
+        p.link_visibility = 'visible'
+        OR (
+          p.link_visibility = 'auto'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM ${faces} f
+            JOIN ${userFaceAssignments} ufa
+              ON ufa.face_id = f.id
+             AND ufa.ignored = false
+             AND ufa.person_id IS NOT NULL
+             AND (
+               ufa.user_id = a.user_id
+               OR ufa.user_id IN (
+                 SELECT s.user_id FROM ${albumShares} s WHERE s.album_id = l.album_id
+               )
+             )
+            JOIN ${persons} pe ON pe.id = ufa.person_id AND pe.name <> 'Unbenannt'
+            WHERE f.photo_id = p.id
+          )
+        )
+      )
       AND (
         EXISTS (
           SELECT 1 FROM ${albumPhotos} ap

@@ -49,6 +49,12 @@ export interface GalleryGridEntry {
    * Drives the album-only "has comments" badge.
    */
   comment_count?: number
+  /**
+   * True when the album's public link does not show this photo — explicitly,
+   * or (the default) because a known face is on it. Only set when the grid is
+   * scoped to an album that actually has a live public link.
+   */
+  link_hidden?: boolean
 }
 
 export interface GalleryGridResponse {
