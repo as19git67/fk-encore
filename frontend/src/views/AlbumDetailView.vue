@@ -670,7 +670,7 @@ const selectionMenuItems = computed(() => {
   if (canWrite.value) {
     items.push(
       { label: 'Über Freigabe-Link freigeben', icon: 'pi pi-link', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('visible') },
-      { label: 'Vom Freigabe-Link ausnehmen', icon: 'pi pi-eye-slash', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('hidden') },
+      { label: 'Vom Freigabe-Link ausnehmen', icon: 'pi pi-link-slash', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('hidden') },
       { label: 'Link-Sichtbarkeit automatisch', icon: 'pi pi-sparkles', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('auto') },
     )
   }
@@ -2926,11 +2926,11 @@ onUnmounted(() => { if (scanRefreshTimer) clearTimeout(scanRefreshTimer) })
           </div>
           <div class="link-privacy-block">
             <span class="share-hint">
-              <i class="pi pi-eye-slash" />
+              <i class="pi pi-link-slash" />
               Fotos mit bekannten Gesichtern werden über den Link grundsätzlich nicht gezeigt.
               Im Album sind sie mit
-              <i class="pi pi-eye-slash link-privacy-inline-icon" />
-              gekennzeichnet; einzelne Fotos lassen sich im Foto-Detail freigeben.
+              <i class="pi pi-link-slash link-privacy-inline-icon" />
+              gekennzeichnet; einzelne Fotos lassen sich im Foto-Detail oder im Vollbild freigeben.
             </span>
             <div class="link-privacy-actions">
               <Button

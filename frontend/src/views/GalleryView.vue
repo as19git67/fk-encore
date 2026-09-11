@@ -517,7 +517,7 @@ const selectionMenuItems = computed(() => {
       { label: 'Als Favorit markieren', icon: 'pi pi-heart', disabled: curationBusy.value, command: () => void applyCurationToSelection('favorite') },
       { label: 'Ausblenden', icon: 'pi pi-thumbs-down-fill', disabled: curationBusy.value, command: () => void applyCurationToSelection('hidden') },
       { label: 'Über Freigabe-Links freigeben', icon: 'pi pi-link', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('visible') },
-      { label: 'Von Freigabe-Links ausnehmen', icon: 'pi pi-eye-slash', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('hidden') },
+      { label: 'Von Freigabe-Links ausnehmen', icon: 'pi pi-link-slash', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('hidden') },
       { label: 'Link-Sichtbarkeit automatisch', icon: 'pi pi-sparkles', disabled: linkVisibilityBusy.value, command: () => void applyLinkVisibilityToSelection('auto') },
       { label: 'Alle Fotos mit bekannten Gesichtern freigeben', icon: 'pi pi-users', disabled: linkVisibilityBusy.value, command: () => void applyKnownFaceLinkVisibility('visible') },
     )
