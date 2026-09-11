@@ -27,10 +27,113 @@ final class TripIdeasViewModel {
     var errorMessage: String?
     /// What the last addition did, in the server's own words.
     var lastAddition: String?
+    /// A shared link waiting to be collected (§9.2, way 1). Peeked
+    /// rather than taken, so leaving the screen does not lose it.
+    private(set) var pendingShare: TripSharePayload?
+    /// The place that link names, once it has been read. Nil while a
+    /// short link is still being resolved, and for a link that names
+    /// none — a share with no coordinate belongs to a trip's analysis,
+    /// not here.
+    private(set) var sharedPlace: TripMapLink.Place?
 
     var collection: TripIdeaCollection? {
         guard let ownerId else { return collections.first(where: \.own) }
         return collections.first { $0.ownerId == ownerId }
+    }
+
+    /// Look whether the share sheet left something a link can be read from.
+    ///
+    /// Only map links are picked up here. An article or a bare piece of
+    /// text needs the region search and the language model to become a
+    /// place, and that path belongs to a trip (§9.3) — offering it in a
+    /// collection with no trip behind it would promise a reading nobody
+    /// can do here.
+    func checkShare(_ payload: TripSharePayload? = TripShareInbox.peek()) async {
+        guard let payload, let url = payload.url else {
+            pendingShare = nil
+            sharedPlace = nil
+            return
+        }
+        if let place = TripMapLink.place(from: url) {
+            pendingShare = payload
+            sharedPlace = place
+            return
+        }
+        // A short link carries no coordinate until it has been followed.
+        if let resolved = await Self.resolve(url), let place = TripMapLink.place(from: resolved) {
+            pendingShare = payload
+            sharedPlace = place
+            return
+        }
+        pendingShare = nil
+        sharedPlace = nil
+    }
+
+    /// Follow a short link to the address it stands for.
+    ///
+    /// `nonisolated` and static: it is a network call with no state
+    /// behind it, and holding the main actor while a redirect chain
+    /// resolves would freeze the list for no reason.
+    nonisolated static func resolve(_ urlString: String) async -> String? {
+        guard let url = URL(string: urlString), TripMapLink.isMapLink(url) else { return nil }
+        let session = URLSession(configuration: .ephemeral)
+        do {
+            let (_, response) = try await session.data(from: url)
+            return response.url?.absoluteString
+        } catch {
+            return nil
+        }
+    }
+
+    /// Put the shared place into the collection.
+    ///
+    /// The name from the link is offered as the title rather than
+    /// written as the map's name: `q=` is what the sender's app called
+    /// it, which is often what *they* call it — and the server decides
+    /// separately whether an OSM entry sits within eighty metres.
+    func addShared(note: String?) async {
+        guard let place = sharedPlace, let payload = pendingShare else { return }
+        isAdding = true
+        defer { isAdding = false }
+
+        struct Body: Encodable {
+            let lat: Double
+            let lon: Double
+            let ownerId: Int?
+            let name: String?
+            let note: String?
+            let sourceUrl: String?
+        }
+        do {
+            let response: TripIdeaAddResponse = try await APIClient.shared.post(
+                "/trip-planner/ideas",
+                body: Body(
+                    lat: place.lat,
+                    lon: place.lon,
+                    ownerId: ownerId,
+                    name: place.name ?? payload.title,
+                    note: note?.isEmpty == true ? nil : note,
+                    sourceUrl: payload.url,
+                ),
+            )
+            lastAddition = response.sentence
+            errorMessage = nil
+            // Only now: a payload consumed before the server agreed
+            // would be gone after a failed request, and the link with it.
+            TripShareInbox.clear()
+            pendingShare = nil
+            sharedPlace = nil
+            await load()
+        } catch {
+            errorMessage = "Der geteilte Ort ließ sich nicht merken."
+        }
+    }
+
+    /// "Not into the collection" — the link stays in the inbox for the
+    /// trip picker, which is the other thing it could have meant.
+    func dismissShare() {
+        pendingShare = nil
+        sharedPlace = nil
     }
 
     func load() async {

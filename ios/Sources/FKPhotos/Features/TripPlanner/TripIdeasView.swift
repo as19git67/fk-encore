@@ -21,9 +21,16 @@ struct TripIdeasView: View {
     @State private var noteDraft = ""
     @State private var shareEmail = ""
     @State private var isSharing = false
+    /// True while the shared link is being turned into an entry.
+    @State private var isAddingShared = false
+    @State private var sharedNote = ""
 
     var body: some View {
         List {
+            if let place = model.sharedPlace {
+                sharedRow(place)
+            }
+
             if let message = model.lastAddition {
                 Text(message)
                     .font(.footnote)
@@ -107,7 +114,10 @@ struct TripIdeasView: View {
                 .disabled(model.isAdding)
             }
         }
-        .task { await model.load() }
+        .task {
+            await model.load()
+            await model.checkShare()
+        }
         .onChange(of: model.ownerId) { _, _ in
             Task { await model.load() }
         }
@@ -124,6 +134,15 @@ struct TripIdeasView: View {
             // the wrong place should know that is what gets stored.
             Text("Gespeichert wird, wo ihr gerade steht.")
         }
+        .alert("In den Vorrat", isPresented: $isAddingShared) {
+            TextField("Notiz (optional)", text: $sharedNote)
+            Button("Abbrechen", role: .cancel) {}
+            Button("Merken") {
+                Task { await model.addShared(note: sharedNote) }
+            }
+        } message: {
+            Text("Der Ort aus dem Link wird gemerkt — mit dem Link als Herkunft.")
+        }
         .alert("Mitschreiben lassen", isPresented: $isSharing) {
             TextField("E-Mail-Adresse", text: $shareEmail)
                 .textInputAutocapitalization(.never)
@@ -135,6 +154,35 @@ struct TripIdeasView: View {
         } message: {
             Text("Wer eingeladen ist, schreibt in denselben Vorrat — eine Liste, keine Kopie.")
         }
+    }
+
+    /// The banner for a link somebody shared into the app.
+    ///
+    /// A row rather than an alert: it is an offer, not a question, and
+    /// an offer that blocks the screen until it is answered turns a
+    /// share into an interruption. Ignoring it leaves the link in the
+    /// inbox for the trip picker, which is the other thing it may have
+    /// been meant for.
+    @ViewBuilder
+    private func sharedRow(_ place: TripMapLink.Place) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(place.name ?? "Geteilter Ort", systemImage: "square.and.arrow.down")
+                .font(.subheadline.weight(.medium))
+            Text("Aus einem geteilten Kartenlink.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            HStack {
+                Button("In den Vorrat") {
+                    sharedNote = ""
+                    isAddingShared = true
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isAdding)
+                Button("Später") { model.dismissShare() }
+                    .buttonStyle(.bordered)
+            }
+        }
+        .padding(.vertical, 4)
     }
 
     private func startAdding() {

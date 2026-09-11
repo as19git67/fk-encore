@@ -38,13 +38,14 @@ Zwei Eigenschaften unterscheiden ihn von einer Merkliste:
 | Die drei Wege zwischen Vorrat und Reise | gebaut (`trip-planner/ideas-trip.ts`) |
 | Veranstaltungen mit Gültigkeitsfenster | Spalten da, Quelle fehlt — §20.4, vorerst nicht gebaut |
 | Bildschirm: Liste, Merken, Entfernen, Teilen | gebaut (`TripIdeasView`) |
+| Wege hinein: eigener Standort, geteilter Kartenlink | gebaut (`TripMapLink`) |
 | Bildschirme für Nähe, Ausflug und die Wege zur Reise | **fehlen noch** |
 
 Der Einstieg steht seit Kurzem: In der Urlaubsplanung führt „Ideen" auf eine
 Liste je Sammlung — mit Notiz, mit „wer hat's gemerkt", mit Hinweis auf
-Einträge, die die Karte nicht kennt. Hinein kommt bisher **der Ort, an dem man
-gerade steht**; die übrigen drei Wege aus §9.2 (Kartenlink, Artikel, Suche)
-fehlen noch, ebenso die Bildschirme für die Nähe-Meldung, den Ausflugsvorschlag
+Einträge, die die Karte nicht kennt. Hinein kommen bisher **der Ort, an dem man
+gerade steht**, und ein **geteilter Kartenlink** (Apple Maps, auch als
+Kurzlink — der wird aufgelöst); Artikel und Suche aus §9.2 fehlen noch, ebenso die Bildschirme für die Nähe-Meldung, den Ausflugsvorschlag
 und die drei Wege zwischen Vorrat und Reise. Diese Teile sind über die API
 vollständig benutzbar und haben keine Oberfläche.
 
@@ -201,9 +202,10 @@ andere Zahl hier ließe denselben Biergarten gleichzeitig „schon dabei" und
 
 ## 6. Was fehlt
 
-- **Der Rest der Oberfläche.** Die Liste steht (`TripIdeasView`), der Weg
-  hinein bisher nur über den eigenen Standort. Es fehlen: die übrigen Wege
-  hinein (Kartenlink, Artikel, Suche — dieselbe Erfassung wie ein Fund), die
+- **Der Rest der Oberfläche.** Liste, eigener Standort und geteilter
+  Kartenlink stehen. Es fehlen: die übrigen Wege hinein (Artikel und Suche —
+  beide brauchen die Regionssuche bzw. das Sprachmodell und hängen deshalb an
+  einer Reise, §9.3), die
   Nähe-Meldung an der bestehenden Standortschleife (§7.1), der
   Ausflugsvorschlag und die drei Wege zwischen Vorrat und Reise.
 - **Veranstaltungen** (§20.4) — vorerst nicht gebaut, weil es keine Quelle
