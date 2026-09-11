@@ -98,33 +98,17 @@ final class TripShareReviewViewModel {
     }
 
     private func isAppleMapsUrl(_ url: URL) -> Bool {
-        url.host == "maps.apple.com" || url.host == "maps.apple" || url.scheme == "maps"
+        TripMapLink.isMapLink(url)
     }
 
-    /// Parse `ll=lat,lon` (and optionally `q=name`) from a URL.
-    ///
-    /// Apple Maps share URLs:
-    ///   https://maps.apple.com/?ll=48.3705,10.8978&q=Ort+Name&t=m
-    ///   https://maps.apple.com/place?auid=…&ll=48.3705,10.8978&q=…
-    ///   maps:q=Ort+Name&ll=48.3705,10.8978
+    /// The same reading the idea collection uses (`TripMapLink`), wrapped
+    /// in the proposal shape this screen speaks.
     private func coordinateResponse(from url: URL, sourceUrl: String) -> TripAnalyseShareResponse? {
-        var params: [String: String] = [:]
-        if let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems {
-            for item in items { if let v = item.value { params[item.name] = v } }
-        }
-        guard let ll = params["ll"] else { return nil }
-        let parts = ll.split(separator: ",")
-        guard parts.count >= 2,
-              let lat = Double(parts[0].trimmingCharacters(in: .whitespaces)),
-              let lon = Double(parts[1].trimmingCharacters(in: .whitespaces)),
-              (-90...90).contains(lat), (-180...180).contains(lon)
-        else { return nil }
-        // URLComponents percent-decodes query values; replace + just in case.
-        let name = params["q"].map { $0.replacingOccurrences(of: "+", with: " ") }
+        guard let place = TripMapLink.place(from: url) else { return nil }
         let proposal = TripShareProposal(
-            name: name,
+            name: place.name,
             verdict: TripShareProposal.Verdict.coordinate.rawValue,
-            position: .init(lat: lat, lon: lon),
+            position: .init(lat: place.lat, lon: place.lon),
             osmRef: nil, categories: [], legIndex: nil, options: [],
             quote: nil, placeHint: nil, kindHint: nil
         )

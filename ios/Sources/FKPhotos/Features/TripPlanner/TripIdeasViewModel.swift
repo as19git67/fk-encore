@@ -16,6 +16,11 @@ import SwiftUI
 /// means category and duration are guesses, and the second means the
 /// list will not grow, which somebody who just tapped "merken" would
 /// otherwise read as a failure.
+/// **Nothing pure lives here.** Constants belong on `TripIdeaDefaults`
+/// and wording on the response it reads — this class is `@MainActor`,
+/// so anything put on it becomes actor-isolated and unreachable from a
+/// test. Two red builds made that point; the third would be nobody's
+/// fault but this comment's.
 @Observable @MainActor
 final class TripIdeasViewModel {
     private(set) var entries: [TripIdea] = []
@@ -27,10 +32,301 @@ final class TripIdeasViewModel {
     var errorMessage: String?
     /// What the last addition did, in the server's own words.
     var lastAddition: String?
+    /// A shared link waiting to be collected (§9.2, way 1). Peeked
+    /// rather than taken, so leaving the screen does not lose it.
+    private(set) var pendingShare: TripSharePayload?
+    /// The place that link names, once it has been read. Nil while a
+    /// short link is still being resolved, and for a link that names
+    /// none — a share with no coordinate belongs to a trip's analysis,
+    /// not here.
+    private(set) var sharedPlace: TripMapLink.Place?
+    /// What is near here, once somebody asked (§20.2).
+    private(set) var nearby: [TripNearIdea] = []
+    /// In range but deliberately not offered — told recently, or waved
+    /// away often enough. A number, never a list.
+    private(set) var quietNearby = 0
+    private(set) var isLoadingNearby = false
+    var nearbyError: String?
+    /// The outing on offer, once somebody asked (§20.2).
+    private(set) var outing: TripOutingProposal?
+    /// Where it would start — kept so accepting uses the same anchor the
+    /// proposal was computed from, not wherever the phone is by then.
+    private(set) var outingAnchor: CLLocationCoordinate2D?
+    private(set) var isProposing = false
+    private(set) var isAcceptingOuting = false
+    var outingError: String?
 
     var collection: TripIdeaCollection? {
         guard let ownerId else { return collections.first(where: \.own) }
         return collections.first { $0.ownerId == ownerId }
+    }
+
+    // MARK: - What is near here (§20.2)
+
+    /// Ideas near the current position, and how many were held back.
+    ///
+    /// **Asked with `markSuggested: false`, and that is the whole
+    /// point.** §20.2 makes being returned the same as being told, and
+    /// then keeps quiet about that entry for a week. A screen somebody
+    /// opened is not a notification: spending the week's silence because
+    /// a person looked at a list would make the rule punish curiosity.
+    func loadNearby(locationProvider: TripLocationProvider? = nil) async {
+        isLoadingNearby = true
+        defer { isLoadingNearby = false }
+
+        let provider = locationProvider
+            ?? TripLocationProvider(accuracy: kCLLocationAccuracyHundredMeters)
+        guard let location = await provider.currentLocation() else {
+            nearbyError = "Ohne Standort lässt sich nicht sagen, was hier in der Nähe ist."
+            return
+        }
+
+        struct Body: Encodable {
+            let lat: Double
+            let lon: Double
+            let radiusM: Int
+            let ownerId: Int?
+            let markSuggested: Bool
+        }
+        do {
+            let response: TripIdeaNearbyResponse = try await APIClient.shared.post(
+                "/trip-planner/ideas/nearby",
+                body: Body(
+                    lat: location.coordinate.latitude,
+                    lon: location.coordinate.longitude,
+                    radiusM: TripIdeaDefaults.nearbyRadiusM,
+                    ownerId: ownerId,
+                    markSuggested: false,
+                ),
+            )
+            nearby = response.ideas
+            quietNearby = response.quiet
+            nearbyError = nil
+        } catch {
+            nearbyError = "Die Umgebung ließ sich nicht abfragen."
+        }
+    }
+
+    /// "Nicht jetzt."
+    ///
+    /// Counted, not acted on: the entry stays in the collection, and
+    /// after enough of these it simply stops speaking up (§20.2). So the
+    /// row goes off *this* screen — which is what the tap meant — and
+    /// the collection keeps it.
+    func dismissNearby(_ idea: TripNearIdea) async {
+        struct Body: Encodable {
+            let id: Int
+            let ownerId: Int?
+        }
+        let before = nearby
+        nearby.removeAll { $0.id == idea.id }
+        do {
+            let _: [String: Int] = try await APIClient.shared.post(
+                "/trip-planner/ideas/dismiss",
+                body: Body(id: idea.id, ownerId: ownerId),
+            )
+            nearbyError = nil
+        } catch {
+            nearby = before
+            nearbyError = "Das ließ sich nicht merken."
+        }
+    }
+
+    // MARK: - The outing (§20.2, §20.3)
+
+    /// „Soll ich daraus einen Nachmittag machen?"
+    ///
+    /// The call that turns the collection into a planner: a pool, an
+    /// anchor and a time budget *are* the planner's input, and the only
+    /// thing missing was the occasion. Nothing is written — the answer
+    /// is a proposal, and accepting it is a second, deliberate step.
+    func proposeOuting(locationProvider: TripLocationProvider? = nil) async {
+        isProposing = true
+        defer { isProposing = false }
+
+        let provider = locationProvider
+            ?? TripLocationProvider(accuracy: kCLLocationAccuracyHundredMeters)
+        guard let location = await provider.currentLocation() else {
+            outingError = "Ohne Standort lässt sich kein Ausflug vorschlagen."
+            return
+        }
+        outingAnchor = location.coordinate
+
+        struct Body: Encodable {
+            let lat: Double
+            let lon: Double
+            let radiusM: Int
+            let budgetMinutes: Int
+            let ownerId: Int?
+        }
+        do {
+            outing = try await APIClient.shared.post(
+                "/trip-planner/ideas/outing",
+                body: Body(
+                    lat: location.coordinate.latitude,
+                    lon: location.coordinate.longitude,
+                    radiusM: TripIdeaDefaults.outingRadiusM,
+                    budgetMinutes: TripIdeaDefaults.outingBudgetMinutes,
+                    ownerId: ownerId,
+                ),
+            )
+            outingError = nil
+        } catch {
+            outingError = "Der Ausflug ließ sich nicht berechnen."
+        }
+    }
+
+    /// Take the proposal, and get an ordinary one-day trip out of it (§20.3).
+    ///
+    /// Only the ideas from the collection are handed over: what the
+    /// region search filled up with is a suggestion for *this* day and
+    /// has no business being written into the collection on the way.
+    /// The trip is planned from them, and the answer says which made it
+    /// onto the day and which stayed in its pool.
+    func acceptOuting(date: String, title: String?) async -> Int? {
+        guard let outing, outing.offered, let anchor = outingAnchor else { return nil }
+        let ideaIds = collectedIds(in: outing)
+        guard !ideaIds.isEmpty else {
+            outingError = "Ohne eigene Ideen wird daraus keine Reise."
+            return nil
+        }
+
+        isAcceptingOuting = true
+        defer { isAcceptingOuting = false }
+
+        struct Body: Encodable {
+            let lat: Double
+            let lon: Double
+            let ideaIds: [Int]
+            let ownerId: Int?
+            let date: String
+            let title: String?
+            let budgetMinutes: Int
+        }
+        do {
+            let response: TripOutingAcceptResponse = try await APIClient.shared.post(
+                "/trip-planner/ideas/outing/accept",
+                body: Body(
+                    lat: anchor.latitude,
+                    lon: anchor.longitude,
+                    ideaIds: ideaIds,
+                    ownerId: ownerId,
+                    date: date,
+                    title: title?.isEmpty == true ? nil : title,
+                    budgetMinutes: TripIdeaDefaults.outingBudgetMinutes,
+                ),
+            )
+            outingError = nil
+            lastAddition = response.sentence
+            return response.plan.id
+        } catch {
+            outingError = "Aus dem Vorschlag ließ sich keine Reise machen."
+            return nil
+        }
+    }
+
+    /// Which of the proposal's stops came out of the collection.
+    ///
+    /// Matched by reference against the entries on screen: the proposal
+    /// says `fromIdeas`, but not which id, and accepting needs the ids.
+    private func collectedIds(in outing: TripOutingProposal) -> [Int] {
+        let refs = Set(outing.stops.filter(\.fromIdeas).map(\.osmRef))
+        return entries.filter { refs.contains($0.osmRef) }.map(\.id)
+    }
+
+    /// Look whether the share sheet left something a link can be read from.
+    ///
+    /// Only map links are picked up here. An article or a bare piece of
+    /// text needs the region search and the language model to become a
+    /// place, and that path belongs to a trip (§9.3) — offering it in a
+    /// collection with no trip behind it would promise a reading nobody
+    /// can do here.
+    func checkShare(_ payload: TripSharePayload? = TripShareInbox.peek()) async {
+        guard let payload, let url = payload.url else {
+            pendingShare = nil
+            sharedPlace = nil
+            return
+        }
+        if let place = TripMapLink.place(from: url) {
+            pendingShare = payload
+            sharedPlace = place
+            return
+        }
+        // A short link carries no coordinate until it has been followed.
+        if let resolved = await Self.resolve(url), let place = TripMapLink.place(from: resolved) {
+            pendingShare = payload
+            sharedPlace = place
+            return
+        }
+        pendingShare = nil
+        sharedPlace = nil
+    }
+
+    /// Follow a short link to the address it stands for.
+    ///
+    /// `nonisolated` and static: it is a network call with no state
+    /// behind it, and holding the main actor while a redirect chain
+    /// resolves would freeze the list for no reason.
+    nonisolated static func resolve(_ urlString: String) async -> String? {
+        guard let url = URL(string: urlString), TripMapLink.isMapLink(url) else { return nil }
+        let session = URLSession(configuration: .ephemeral)
+        do {
+            let (_, response) = try await session.data(from: url)
+            return response.url?.absoluteString
+        } catch {
+            return nil
+        }
+    }
+
+    /// Put the shared place into the collection.
+    ///
+    /// The name from the link is offered as the title rather than
+    /// written as the map's name: `q=` is what the sender's app called
+    /// it, which is often what *they* call it — and the server decides
+    /// separately whether an OSM entry sits within eighty metres.
+    func addShared(note: String?) async {
+        guard let place = sharedPlace, let payload = pendingShare else { return }
+        isAdding = true
+        defer { isAdding = false }
+
+        struct Body: Encodable {
+            let lat: Double
+            let lon: Double
+            let ownerId: Int?
+            let name: String?
+            let note: String?
+            let sourceUrl: String?
+        }
+        do {
+            let response: TripIdeaAddResponse = try await APIClient.shared.post(
+                "/trip-planner/ideas",
+                body: Body(
+                    lat: place.lat,
+                    lon: place.lon,
+                    ownerId: ownerId,
+                    name: place.name ?? payload.title,
+                    note: note?.isEmpty == true ? nil : note,
+                    sourceUrl: payload.url,
+                ),
+            )
+            lastAddition = response.sentence
+            errorMessage = nil
+            // Only now: a payload consumed before the server agreed
+            // would be gone after a failed request, and the link with it.
+            TripShareInbox.clear()
+            pendingShare = nil
+            sharedPlace = nil
+            await load()
+        } catch {
+            errorMessage = "Der geteilte Ort ließ sich nicht merken."
+        }
+    }
+
+    /// "Not into the collection" — the link stays in the inbox for the
+    /// trip picker, which is the other thing it could have meant.
+    func dismissShare() {
+        pendingShare = nil
+        sharedPlace = nil
     }
 
     func load() async {

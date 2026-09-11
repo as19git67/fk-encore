@@ -21,9 +21,18 @@ struct TripIdeasView: View {
     @State private var noteDraft = ""
     @State private var shareEmail = ""
     @State private var isSharing = false
+    /// True while the shared link is being turned into an entry.
+    @State private var isAddingShared = false
+    @State private var sharedNote = ""
+    /// Whether the collection may speak up on its own (§20.2).
+    @State private var noticesEnabled = TripIdeaNoticePreferences.isEnabled()
 
     var body: some View {
         List {
+            if let place = model.sharedPlace {
+                sharedRow(place)
+            }
+
             if let message = model.lastAddition {
                 Text(message)
                     .font(.footnote)
@@ -34,12 +43,23 @@ struct TripIdeasView: View {
             }
 
             if model.entries.isEmpty && !model.isLoading {
-                ContentUnavailableView(
-                    "Noch keine Ideen",
-                    systemImage: "lightbulb",
-                    description: Text("Was euch begegnet, sammelt sich hier — ohne dass es "
-                                      + "schon eine Reise dazu geben muss."),
-                )
+                // The empty state carries the way in rather than only
+                // describing one. A screen that says "nothing here yet"
+                // and leaves the reader to find the button is a screen
+                // that has explained its own uselessness.
+                ContentUnavailableView {
+                    Label("Noch keine Ideen", systemImage: "lightbulb")
+                } description: {
+                    Text("Was euch begegnet, sammelt sich hier — ohne dass es "
+                         + "schon eine Reise dazu geben muss.")
+                } actions: {
+                    Button {
+                        startAdding()
+                    } label: {
+                        Label("Das hier merken", systemImage: "mappin.and.ellipse")
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
             }
 
             ForEach(model.entries) { idea in
@@ -79,23 +99,55 @@ struct TripIdeasView: View {
                     } label: {
                         Label("Jemanden mitschreiben lassen", systemImage: "person.badge.plus")
                     }
+                    Divider()
+                    // §20.5 asks for it to be switchable, and the honest
+                    // reading of that is "off until somebody says so":
+                    // a collection that starts talking because an app
+                    // was updated was never given permission.
+                    Toggle(isOn: $noticesEnabled) {
+                        Label("Von selbst melden", systemImage: "bell")
+                    }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
             }
-            ToolbarItem(placement: .bottomBar) {
+            // Top bar, not `.bottomBar`: this screen lives inside the
+            // tab view, and a bottom toolbar item loses that argument
+            // with the tab bar — the button was in the code and on no
+            // screen.
+            ToolbarItem(placement: .primaryAction) {
                 Button {
-                    noteDraft = ""
-                    isAddingHere = true
+                    startAdding()
                 } label: {
-                    Label("Das hier merken", systemImage: "plus.circle.fill")
+                    Label("Das hier merken", systemImage: "plus")
                 }
                 .disabled(model.isAdding)
             }
+            // The question the collection exists for (§20.2), reachable
+            // from the list rather than buried in the menu: "ist hier
+            // etwas von uns?" is what somebody standing somewhere asks.
+            ToolbarItem(placement: .topBarLeading) {
+                NavigationLink {
+                    TripIdeasNearbyView(model: model)
+                } label: {
+                    Label("In der Nähe", systemImage: "location.magnifyingglass")
+                }
+            }
         }
-        .task { await model.load() }
+        .task {
+            await model.load()
+            await model.checkShare()
+        }
         .onChange(of: model.ownerId) { _, _ in
             Task { await model.load() }
+        }
+        .onChange(of: noticesEnabled) { _, enabled in
+            TripIdeaNoticePreferences.setEnabled(enabled)
+            if enabled {
+                TripIdeaNoticeMonitor.shared.startIfEnabled()
+            } else {
+                TripIdeaNoticeMonitor.shared.stop()
+            }
         }
         .refreshable { await model.load() }
         .alert("Das hier merken", isPresented: $isAddingHere) {
@@ -110,6 +162,15 @@ struct TripIdeasView: View {
             // the wrong place should know that is what gets stored.
             Text("Gespeichert wird, wo ihr gerade steht.")
         }
+        .alert("In den Vorrat", isPresented: $isAddingShared) {
+            TextField("Notiz (optional)", text: $sharedNote)
+            Button("Abbrechen", role: .cancel) {}
+            Button("Merken") {
+                Task { await model.addShared(note: sharedNote) }
+            }
+        } message: {
+            Text("Der Ort aus dem Link wird gemerkt — mit dem Link als Herkunft.")
+        }
         .alert("Mitschreiben lassen", isPresented: $isSharing) {
             TextField("E-Mail-Adresse", text: $shareEmail)
                 .textInputAutocapitalization(.never)
@@ -121,6 +182,40 @@ struct TripIdeasView: View {
         } message: {
             Text("Wer eingeladen ist, schreibt in denselben Vorrat — eine Liste, keine Kopie.")
         }
+    }
+
+    /// The banner for a link somebody shared into the app.
+    ///
+    /// A row rather than an alert: it is an offer, not a question, and
+    /// an offer that blocks the screen until it is answered turns a
+    /// share into an interruption. Ignoring it leaves the link in the
+    /// inbox for the trip picker, which is the other thing it may have
+    /// been meant for.
+    @ViewBuilder
+    private func sharedRow(_ place: TripMapLink.Place) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(place.name ?? "Geteilter Ort", systemImage: "square.and.arrow.down")
+                .font(.subheadline.weight(.medium))
+            Text("Aus einem geteilten Kartenlink.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            HStack {
+                Button("In den Vorrat") {
+                    sharedNote = ""
+                    isAddingShared = true
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isAdding)
+                Button("Später") { model.dismissShare() }
+                    .buttonStyle(.bordered)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func startAdding() {
+        noteDraft = ""
+        isAddingHere = true
     }
 
     private func isCurrent(_ collection: TripIdeaCollection) -> Bool {
