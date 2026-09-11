@@ -80,6 +80,16 @@ struct TripPlanDayView: View {
                         } label: {
                             Label("Ort suchen", systemImage: "magnifyingglass")
                         }
+                        // „Ihr habt vier Ideen für Lissabon gesammelt"
+                        // (§20.3) — offered here rather than pushed at
+                        // the traveller when the trip is created: an
+                        // idea from last year is not automatically the
+                        // wish of this trip.
+                        NavigationLink {
+                            TripPlanIdeasView(viewModel: viewModel)
+                        } label: {
+                            Label("Aus dem Vorrat", systemImage: "lightbulb")
+                        }
                         // The cities of the trip (§4.2) — add one,
                         // move an anchor, drop one that fell through.
                         NavigationLink {

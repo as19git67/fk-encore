@@ -82,6 +82,11 @@ public final class BackgroundSyncManager {
         Task { @MainActor in
             TripNotificationCategories.registerAll()
             TripAutoEndMonitor.shared.resumeIfTripActive()
+            // Same reason: the idea collection's notice (§20.2) is a
+            // per-device switch, and `isMonitoring` starts false every
+            // launch — without this the household turns it on once and
+            // it stops working after the next relaunch.
+            TripIdeaNoticeMonitor.shared.startIfEnabled()
         }
     }
 
