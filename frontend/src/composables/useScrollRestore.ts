@@ -12,11 +12,32 @@ const PREFIX = 'scroll_restore:'
  *   const { restore } = useScrollRestore('finance-anomalies')
  *   onMounted(async () => { await load(); restore() })
  */
-export function useScrollRestore(key: string) {
+/**
+ * Where the scroll position lives. A view whose content scrolls inside an
+ * element of its own — a list column beside a detail pane, say — leaves
+ * `window.scrollY` at 0 forever, so saving and restoring it would silently do
+ * nothing. Such a view passes a getter for its own scroller instead.
+ */
+export interface ScrollRestoreOptions {
+  getScroller?: () => HTMLElement | null | undefined
+}
+
+export function useScrollRestore(key: string, options: ScrollRestoreOptions = {}) {
   const storageKey = PREFIX + key
 
+  function currentTop(): number {
+    const el = options.getScroller?.()
+    return Math.round(el ? el.scrollTop : window.scrollY)
+  }
+
+  function scrollTo(top: number) {
+    const el = options.getScroller?.()
+    if (el) el.scrollTo({ top, behavior: 'instant' })
+    else window.scrollTo({ top, behavior: 'instant' })
+  }
+
   function save() {
-    sessionStorage.setItem(storageKey, String(Math.round(window.scrollY)))
+    sessionStorage.setItem(storageKey, String(currentTop()))
   }
 
   function restore() {
@@ -25,7 +46,7 @@ export function useScrollRestore(key: string) {
     const y = parseInt(raw, 10)
     if (isNaN(y) || y <= 0) return
     // Use requestAnimationFrame so the browser has painted the new content.
-    requestAnimationFrame(() => window.scrollTo({ top: y, behavior: 'instant' }))
+    requestAnimationFrame(() => scrollTo(y))
   }
 
   function clear() {

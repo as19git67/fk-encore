@@ -37,6 +37,15 @@ const props = defineProps<{
 
 const router = useRouter()
 
+/**
+ * The pane's own scroll container and the point the jump button aims at. The
+ * preview sits above the metadata — the same order the full detail view uses
+ * on a narrow screen — so a long PDF pushes the metadata far down; the button
+ * in the fixed header is what makes it reachable without a long drag.
+ */
+const paneBody = ref<HTMLElement | null>(null)
+const detailsAnchor = ref<HTMLElement | null>(null)
+
 const doc = ref<DocumentDetail | null>(null)
 const pdfData = ref<Uint8Array | null>(null)
 const loading = ref(false)
@@ -68,6 +77,9 @@ async function load(id: number | null) {
     const detail = await getDocument(id)
     if (inFlightFor !== id) return
     doc.value = detail
+    // A new document starts at the top of its own preview, not wherever the
+    // previous one was left.
+    paneBody.value?.scrollTo({ top: 0, behavior: 'instant' })
   } catch (err: any) {
     if (inFlightFor !== id) return
     error.value = err?.message ?? 'Dokument konnte nicht geladen werden.'
@@ -84,6 +96,14 @@ async function load(id: number | null) {
     // The metadata is still worth showing when only the file is unreadable.
     pdfError.value = err?.message ?? 'Vorschau konnte nicht geladen werden.'
   }
+}
+
+/** Scroll the pane down to the metadata under the preview. */
+function scrollToDetails() {
+  const body = paneBody.value
+  const anchor = detailsAnchor.value
+  if (!body || !anchor) return
+  body.scrollTo({ top: anchor.offsetTop - body.offsetTop, behavior: 'smooth' })
 }
 
 function openFullDetail() {
@@ -140,6 +160,15 @@ function formatDate(value: string | null): string {
         <h2 class="pane-title">{{ doc.title || doc.original_filename }}</h2>
         <Tag :severity="statusSeverity(doc.status)" :value="statusLabel(doc.status)" />
         <Button
+          icon="pi pi-angle-double-down"
+          label="Details"
+          size="small"
+          text
+          severity="secondary"
+          v-tooltip.bottom="'Zu den Angaben unter der Vorschau springen'"
+          @click="scrollToDetails"
+        />
+        <Button
           icon="pi pi-arrow-up-right"
           label="Öffnen"
           size="small"
@@ -149,38 +178,43 @@ function formatDate(value: string | null): string {
         />
       </header>
 
-      <div class="pane-meta">
-        <span v-if="doc.sender"><i class="pi pi-building" /> {{ doc.sender }}</span>
-        <span v-if="doc.doc_date"><i class="pi pi-calendar" /> {{ formatDate(doc.doc_date) }}</span>
-        <span v-if="doc.category_slug"><i class="pi pi-folder-open" /> {{ doc.category_slug }}</span>
-        <span v-if="doc.document_number"><i class="pi pi-hashtag" /> {{ doc.document_number }}</span>
-        <span v-if="doc.tax_relevant" class="pane-tax">
-          <i class="pi pi-calculator" /> Steuer{{ doc.tax_year ? ` ${doc.tax_year}` : '' }}
-        </span>
-      </div>
+      <div ref="paneBody" class="pane-body">
+        <div class="pane-pdf">
+          <PdfViewer :data="pdfData" :error-message="pdfError || null" />
+        </div>
 
-      <p v-if="doc.summary" class="pane-summary">{{ doc.summary }}</p>
+        <div ref="detailsAnchor" class="pane-details">
+          <div class="pane-meta">
+            <span v-if="doc.sender"><i class="pi pi-building" /> {{ doc.sender }}</span>
+            <span v-if="doc.doc_date"><i class="pi pi-calendar" /> {{ formatDate(doc.doc_date) }}</span>
+            <span v-if="doc.category_slug"><i class="pi pi-folder-open" /> {{ doc.category_slug }}</span>
+            <span v-if="doc.document_number"><i class="pi pi-hashtag" /> {{ doc.document_number }}</span>
+            <span v-if="doc.tax_relevant" class="pane-tax">
+              <i class="pi pi-calculator" /> Steuer{{ doc.tax_year ? ` ${doc.tax_year}` : '' }}
+            </span>
+          </div>
 
-      <div v-if="doc.collections.length > 0" class="pane-chips">
-        <Chip v-for="c in doc.collections" :key="`c${c.id}`" :label="c.title" icon="pi pi-folder" />
-      </div>
-      <div v-if="doc.tags.length > 0" class="pane-chips">
-        <Chip v-for="tag in doc.tags" :key="tag" :label="tag" />
-      </div>
+          <p v-if="doc.summary" class="pane-summary">{{ doc.summary }}</p>
 
-      <Message
-        v-if="doc.status === 'failed' && doc.last_error"
-        severity="error"
-        :closable="false"
-        icon="pi pi-times-circle"
-      >
-        {{ doc.last_error }}
-      </Message>
+          <div v-if="doc.collections.length > 0" class="pane-chips">
+            <Chip v-for="c in doc.collections" :key="`c${c.id}`" :label="c.title" icon="pi pi-folder" />
+          </div>
+          <div v-if="doc.tags.length > 0" class="pane-chips">
+            <Chip v-for="tag in doc.tags" :key="tag" :label="tag" />
+          </div>
 
-      <div class="pane-pdf">
-        <PdfViewer :data="pdfData" :error-message="pdfError || null" />
+          <Message
+            v-if="doc.status === 'failed' && doc.last_error"
+            severity="error"
+            :closable="false"
+            icon="pi pi-times-circle"
+          >
+            {{ doc.last_error }}
+          </Message>
+        </div>
       </div>
     </template>
+
   </aside>
 </template>
 
@@ -188,13 +222,10 @@ function formatDate(value: string | null): string {
 .preview-pane {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
   min-height: 0;
-  /* Keep the card's rounded border the outer edge of everything in it: the
-     pane has a fixed height, and an unusually tall metadata block would
-     otherwise spill past it instead of shortening the viewer below. */
+  /* The card's rounded border is the outer edge of everything in it; the body
+     inside scrolls rather than spilling past it. */
   overflow: hidden;
-  padding: 0.75rem 0.9rem;
   background: var(--p-content-background);
   border: 1px solid var(--p-content-border-color);
   border-radius: 10px;
@@ -211,10 +242,15 @@ function formatDate(value: string | null): string {
 .pane-empty .pi-file {
   font-size: 2rem;
 }
+/* Stays put while the body below it scrolls — that is what makes the jump
+   button worth having on a document of many pages. */
 .pane-head {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  padding: 0.6rem 0.9rem;
+  border-bottom: 1px solid var(--p-content-border-color);
 }
 .pane-title {
   flex: 1 1 auto;
@@ -225,6 +261,36 @@ function formatDate(value: string | null): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Preview first, metadata under it — the order the full detail view uses when
+   it has one column. The viewer therefore grows to its natural height and
+   this element, not the viewer, owns the scrollbar. */
+.pane-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.75rem 0.9rem;
+}
+.pane-pdf {
+  display: flex;
+  /* `flex: 0 0 auto` is load-bearing: as a shrinkable item in this column the
+     viewer would be squeezed into whatever height was left and its pages
+     compressed, instead of keeping its natural height and handing the
+     overflow to `.pane-body`. That overflow is the point — it is what the
+     metadata sits below and what the jump button skips. */
+  flex: 0 0 auto;
+  min-width: 0;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.pane-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 .pane-meta {
   display: flex;
@@ -243,11 +309,6 @@ function formatDate(value: string | null): string {
   margin: 0;
   font-size: 0.86rem;
   color: var(--p-text-color);
-  display: -webkit-box;
-  -webkit-line-clamp: 4;
-  line-clamp: 4;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
 }
 .pane-chips {
   display: flex;
@@ -256,21 +317,5 @@ function formatDate(value: string | null): string {
 }
 .pane-chips :deep(.p-chip) {
   font-size: 0.74rem;
-}
-/* The viewer takes whatever height is left; `min-height: 0` keeps it from
-   pushing the metadata above it out of the pane.
-   `display: flex` is what makes the pages scrollable: as a flex item the
-   viewer stretches to this box's definite height, and its own canvas-wrapper
-   becomes the scroll container (toolbar and pagination stay pinned). In a
-   plain block box the viewer would instead grow to the height of all its
-   pages, nothing inside it would overflow, and `overflow: hidden` here would
-   quietly clip every page after the first. */
-.pane-pdf {
-  display: flex;
-  flex: 1 1 auto;
-  min-height: 0;
-  min-width: 0;
-  overflow: hidden;
-  border-radius: 8px;
 }
 </style>
