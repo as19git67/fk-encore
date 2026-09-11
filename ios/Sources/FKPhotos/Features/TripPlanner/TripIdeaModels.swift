@@ -103,6 +103,24 @@ struct TripIdeaAddResponse: Codable, Sendable {
     }
 }
 
+/// What the collection asks for, when nobody says otherwise.
+///
+/// On a plain enum rather than on the view model, and that placement is
+/// the lesson of two red builds: the view model is `@MainActor`, so
+/// everything on it — a constant, a pure sentence — becomes
+/// actor-isolated and unreachable from a test. Numbers and wording have
+/// no state behind them and belong where anybody can read them.
+enum TripIdeaDefaults {
+    /// How far "in der Nähe" reaches. A walkable answer: "was ist hier"
+    /// means here, not "im Landkreis".
+    static let nearbyRadiusM = 5_000
+    /// How far an outing looks. Half an hour in the car is the way to
+    /// the lake, not a detour (§20.2) — so not the same number.
+    static let outingRadiusM = 25_000
+    /// Half a day, which is what "ein Nachmittag" means.
+    static let outingBudgetMinutes = 240
+}
+
 /// An idea near where you are standing (§20.2).
 ///
 /// Its own shape rather than `TripIdea` with a distance bolted on: the
@@ -240,8 +258,19 @@ struct TripOutingAcceptResponse: Codable, Sendable {
     let plan: PlanRef
     /// Ideas that ended up on the day.
     let planned: [Int]
-    /// Accepted but not on the day — they are in the trip\'s pool. Said
-    /// rather than silently dropped: the outing that fits is shorter
-    /// than the one somebody wanted (§5).
+    /// Accepted but not on the day — they are in the trip's pool.
     let inPool: [Int]
+
+    /// What to say afterwards.
+    ///
+    /// Said rather than silently dropped: the outing that fits is
+    /// shorter than the one somebody wanted (§5), and silence about the
+    /// difference is how an idea disappears without anybody noticing.
+    var sentence: String {
+        if inPool.isEmpty { return "Der Ausflug steht als Reise." }
+        let left = inPool.count == 1
+            ? "eine Idee liegt im Vorrat der Reise"
+            : "\(inPool.count) Ideen liegen im Vorrat der Reise"
+        return "Der Ausflug steht als Reise — \(left)."
+    }
 }

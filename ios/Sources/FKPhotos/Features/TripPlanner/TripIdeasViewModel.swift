@@ -16,6 +16,11 @@ import SwiftUI
 /// means category and duration are guesses, and the second means the
 /// list will not grow, which somebody who just tapped "merken" would
 /// otherwise read as a failure.
+/// **Nothing pure lives here.** Constants belong on `TripIdeaDefaults`
+/// and wording on the response it reads — this class is `@MainActor`,
+/// so anything put on it becomes actor-isolated and unreachable from a
+/// test. Two red builds made that point; the third would be nobody's
+/// fault but this comment's.
 @Observable @MainActor
 final class TripIdeasViewModel {
     private(set) var entries: [TripIdea] = []
@@ -58,10 +63,6 @@ final class TripIdeasViewModel {
 
     // MARK: - What is near here (§20.2)
 
-    /// The radius the screen asks with. A walkable answer by default —
-    /// "was ist hier" means here, not "im Landkreis".
-    static let nearbyRadiusM = 5_000
-
     /// Ideas near the current position, and how many were held back.
     ///
     /// **Asked with `markSuggested: false`, and that is the whole
@@ -93,7 +94,7 @@ final class TripIdeasViewModel {
                 body: Body(
                     lat: location.coordinate.latitude,
                     lon: location.coordinate.longitude,
-                    radiusM: Self.nearbyRadiusM,
+                    radiusM: TripIdeaDefaults.nearbyRadiusM,
                     ownerId: ownerId,
                     markSuggested: false,
                 ),
@@ -133,11 +134,6 @@ final class TripIdeasViewModel {
 
     // MARK: - The outing (§20.2, §20.3)
 
-    /// How far an outing looks for ideas. A day-trip radius, not a walk.
-    static let outingRadiusM = 25_000
-    /// Half a day, which is what "ein Nachmittag" means.
-    static let outingBudgetMinutes = 240
-
     /// „Soll ich daraus einen Nachmittag machen?"
     ///
     /// The call that turns the collection into a planner: a pool, an
@@ -169,8 +165,8 @@ final class TripIdeasViewModel {
                 body: Body(
                     lat: location.coordinate.latitude,
                     lon: location.coordinate.longitude,
-                    radiusM: Self.outingRadiusM,
-                    budgetMinutes: Self.outingBudgetMinutes,
+                    radiusM: TripIdeaDefaults.outingRadiusM,
+                    budgetMinutes: TripIdeaDefaults.outingBudgetMinutes,
                     ownerId: ownerId,
                 ),
             )
@@ -217,11 +213,11 @@ final class TripIdeasViewModel {
                     ownerId: ownerId,
                     date: date,
                     title: title?.isEmpty == true ? nil : title,
-                    budgetMinutes: Self.outingBudgetMinutes,
+                    budgetMinutes: TripIdeaDefaults.outingBudgetMinutes,
                 ),
             )
             outingError = nil
-            lastAddition = Self.acceptSentence(response)
+            lastAddition = response.sentence
             return response.plan.id
         } catch {
             outingError = "Aus dem Vorschlag ließ sich keine Reise machen."
@@ -236,17 +232,6 @@ final class TripIdeasViewModel {
     private func collectedIds(in outing: TripOutingProposal) -> [Int] {
         let refs = Set(outing.stops.filter(\.fromIdeas).map(\.osmRef))
         return entries.filter { refs.contains($0.osmRef) }.map(\.id)
-    }
-
-    /// What to say after accepting — pure, and honest about the shorter day.
-    static func acceptSentence(_ response: TripOutingAcceptResponse) -> String {
-        if response.inPool.isEmpty {
-            return "Der Ausflug steht als Reise."
-        }
-        let left = response.inPool.count == 1
-            ? "eine Idee liegt im Vorrat der Reise"
-            : "\(response.inPool.count) Ideen liegen im Vorrat der Reise"
-        return "Der Ausflug steht als Reise — \(left)."
     }
 
     /// Look whether the share sheet left something a link can be read from.

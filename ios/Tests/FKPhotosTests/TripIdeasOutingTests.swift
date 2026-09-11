@@ -91,7 +91,7 @@ final class TripIdeasOutingTests: XCTestCase {
 
     func testADayThatTookEverythingSaysSoPlainly() {
         XCTAssertEqual(
-            TripIdeasViewModel.acceptSentence(accepted(planned: [1, 2], inPool: [])),
+            accepted(planned: [1, 2], inPool: []).sentence,
             "Der Ausflug steht als Reise.",
         )
     }
@@ -101,11 +101,11 @@ final class TripIdeasOutingTests: XCTestCase {
         // wanted, and silence about the difference is how a plan loses
         // an idea without anybody noticing.
         XCTAssertEqual(
-            TripIdeasViewModel.acceptSentence(accepted(planned: [1], inPool: [2])),
+            accepted(planned: [1], inPool: [2]).sentence,
             "Der Ausflug steht als Reise — eine Idee liegt im Vorrat der Reise.",
         )
         XCTAssertEqual(
-            TripIdeasViewModel.acceptSentence(accepted(planned: [1], inPool: [2, 3])),
+            accepted(planned: [1], inPool: [2, 3]).sentence,
             "Der Ausflug steht als Reise — 2 Ideen liegen im Vorrat der Reise.",
         )
     }
@@ -126,7 +126,7 @@ final class TripIdeasOutingTests: XCTestCase {
     func testTheOutingAsksWithADayTripRadiusAndHalfADay() {
         // Half an hour in the car is the way to the lake, not a detour
         // (§20.2) — so this is not the 5 km the nearby screen uses.
-        XCTAssertEqual(TripIdeasViewModel.outingRadiusM, 25_000)
-        XCTAssertEqual(TripIdeasViewModel.outingBudgetMinutes, 240)
+        XCTAssertEqual(TripIdeaDefaults.outingRadiusM, 25_000)
+        XCTAssertEqual(TripIdeaDefaults.outingBudgetMinutes, 240)
     }
 }

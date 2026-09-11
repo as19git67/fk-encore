@@ -73,6 +73,6 @@ final class TripIdeasNearbyTests: XCTestCase {
     func testTheScreenAsksForFiveKilometres() {
         // "Was ist hier" means here. A radius that quietly covered the
         // county would answer a different question.
-        XCTAssertEqual(TripIdeasViewModel.nearbyRadiusM, 5_000)
+        XCTAssertEqual(TripIdeaDefaults.nearbyRadiusM, 5_000)
     }
 }
