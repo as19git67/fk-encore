@@ -102,3 +102,57 @@ struct TripIdeaAddResponse: Codable, Sendable {
         return parts.joined(separator: " ")
     }
 }
+
+/// An idea near where you are standing (§20.2).
+///
+/// Its own shape rather than `TripIdea` with a distance bolted on: the
+/// nearby answer is a different question with a different set of
+/// fields, and the distance is the whole point of it.
+struct TripNearIdea: Codable, Identifiable, Sendable {
+    let id: Int
+    let osmRef: String
+    let name: String?
+    let lat: Double
+    let lon: Double
+    let distanceM: Int
+    let category: String
+    let dwellMinutes: Int
+    let note: String?
+    /// Who put it there — "der Biergarten, den Anna gemerkt hat" (§20.1).
+    let addedBy: String?
+    let validTo: String?
+
+    var displayName: String {
+        if let name, !name.isEmpty { return name }
+        return "Unbenannter Ort"
+    }
+
+    /// How far, in words somebody standing there would use.
+    ///
+    /// Metres below a kilometre and one decimal above it: "1.4 km" is a
+    /// walk you can picture, "1437 m" is a number you have to convert.
+    var distanceText: String {
+        if distanceM < 1000 { return "\(distanceM) m" }
+        let km = Double(distanceM) / 1000
+        return String(format: "%.1f km", km).replacingOccurrences(of: ".", with: ",")
+    }
+
+    /// The line under the name: who collected it, and the note if there is one.
+    var subtitle: String? {
+        let note = note?.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch (note?.isEmpty == false ? note : nil, addedBy) {
+        case let (note?, by?): return "\(note) — von \(by)"
+        case let (note?, nil): return note
+        case let (nil, by?): return "von \(by)"
+        default: return nil
+        }
+    }
+}
+
+struct TripIdeaNearbyResponse: Codable, Sendable {
+    let ideas: [TripNearIdea]
+    /// Ideas in range that were deliberately not offered: told recently,
+    /// or waved away often enough. Counted rather than listed — the
+    /// number is honest, the list would be noise (§20.2).
+    let quiet: Int
+}

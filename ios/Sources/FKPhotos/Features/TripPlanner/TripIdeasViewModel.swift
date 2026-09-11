@@ -35,10 +35,92 @@ final class TripIdeasViewModel {
     /// none — a share with no coordinate belongs to a trip's analysis,
     /// not here.
     private(set) var sharedPlace: TripMapLink.Place?
+    /// What is near here, once somebody asked (§20.2).
+    private(set) var nearby: [TripNearIdea] = []
+    /// In range but deliberately not offered — told recently, or waved
+    /// away often enough. A number, never a list.
+    private(set) var quietNearby = 0
+    private(set) var isLoadingNearby = false
+    var nearbyError: String?
 
     var collection: TripIdeaCollection? {
         guard let ownerId else { return collections.first(where: \.own) }
         return collections.first { $0.ownerId == ownerId }
+    }
+
+    // MARK: - What is near here (§20.2)
+
+    /// The radius the screen asks with. A walkable answer by default —
+    /// "was ist hier" means here, not "im Landkreis".
+    static let nearbyRadiusM = 5_000
+
+    /// Ideas near the current position, and how many were held back.
+    ///
+    /// **Asked with `markSuggested: false`, and that is the whole
+    /// point.** §20.2 makes being returned the same as being told, and
+    /// then keeps quiet about that entry for a week. A screen somebody
+    /// opened is not a notification: spending the week's silence because
+    /// a person looked at a list would make the rule punish curiosity.
+    func loadNearby(locationProvider: TripLocationProvider? = nil) async {
+        isLoadingNearby = true
+        defer { isLoadingNearby = false }
+
+        let provider = locationProvider
+            ?? TripLocationProvider(accuracy: kCLLocationAccuracyHundredMeters)
+        guard let location = await provider.currentLocation() else {
+            nearbyError = "Ohne Standort lässt sich nicht sagen, was hier in der Nähe ist."
+            return
+        }
+
+        struct Body: Encodable {
+            let lat: Double
+            let lon: Double
+            let radiusM: Int
+            let ownerId: Int?
+            let markSuggested: Bool
+        }
+        do {
+            let response: TripIdeaNearbyResponse = try await APIClient.shared.post(
+                "/trip-planner/ideas/nearby",
+                body: Body(
+                    lat: location.coordinate.latitude,
+                    lon: location.coordinate.longitude,
+                    radiusM: Self.nearbyRadiusM,
+                    ownerId: ownerId,
+                    markSuggested: false,
+                ),
+            )
+            nearby = response.ideas
+            quietNearby = response.quiet
+            nearbyError = nil
+        } catch {
+            nearbyError = "Die Umgebung ließ sich nicht abfragen."
+        }
+    }
+
+    /// "Nicht jetzt."
+    ///
+    /// Counted, not acted on: the entry stays in the collection, and
+    /// after enough of these it simply stops speaking up (§20.2). So the
+    /// row goes off *this* screen — which is what the tap meant — and
+    /// the collection keeps it.
+    func dismissNearby(_ idea: TripNearIdea) async {
+        struct Body: Encodable {
+            let id: Int
+            let ownerId: Int?
+        }
+        let before = nearby
+        nearby.removeAll { $0.id == idea.id }
+        do {
+            let _: [String: Int] = try await APIClient.shared.post(
+                "/trip-planner/ideas/dismiss",
+                body: Body(id: idea.id, ownerId: ownerId),
+            )
+            nearbyError = nil
+        } catch {
+            nearby = before
+            nearbyError = "Das ließ sich nicht merken."
+        }
     }
 
     /// Look whether the share sheet left something a link can be read from.

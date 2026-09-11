@@ -113,6 +113,16 @@ struct TripIdeasView: View {
                 }
                 .disabled(model.isAdding)
             }
+            // The question the collection exists for (§20.2), reachable
+            // from the list rather than buried in the menu: "ist hier
+            // etwas von uns?" is what somebody standing somewhere asks.
+            ToolbarItem(placement: .topBarLeading) {
+                NavigationLink {
+                    TripIdeasNearbyView(model: model)
+                } label: {
+                    Label("In der Nähe", systemImage: "location.magnifyingglass")
+                }
+            }
         }
         .task {
             await model.load()
