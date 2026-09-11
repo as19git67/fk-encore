@@ -189,7 +189,7 @@ struct PhotoCompareView: View {
             // by the popover, so one call site covers both.
             .popover(isPresented: $showGestureHelp) {
                 GestureHelp(isPortrait: orientationIsPortrait)
-                    .presentationDetents([.medium])
+                    .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showQuality) {
@@ -804,6 +804,15 @@ private struct GestureHelp: View {
     let isPortrait: Bool
 
     var body: some View {
+        // Scrollable: the legend grew past what a medium detent shows on a
+        // small phone, and a control explained below the fold is explained
+        // nowhere.
+        ScrollView {
+            content
+        }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Bedienung")
                 .font(.headline)
@@ -811,13 +820,21 @@ private struct GestureHelp: View {
                 "hand.draw",
                 "Ein Foto wegwerfen",
                 isPortrait
-                    ? "Nach oben oder unten aus dem Bild schieben — jede Richtung außer der zum anderen Foto. Oder auf das Daumen-runter-Symbol auf dem Foto tippen."
-                    : "Nach links oder rechts aus dem Bild schieben — jede Richtung außer der zum anderen Foto. Oder auf das Daumen-runter-Symbol auf dem Foto tippen."
+                    ? "Nach oben oder unten aus dem Bild schieben — jede Richtung außer der zum anderen Foto."
+                    : "Nach links oder rechts aus dem Bild schieben — jede Richtung außer der zum anderen Foto."
+            )
+            // The button form of the fling. It was only a trailing sentence in
+            // the row above, where it went unfound — an icon on the photo
+            // needs its own icon in the legend.
+            row(
+                "hand.thumbsdown",
+                "…oder antippen statt wischen",
+                "Der Daumen nach unten in der Ecke jedes Fotos macht dasselbe wie das Wegschieben."
             )
             row(
                 "hand.tap",
                 "Gesichter vergleichen",
-                "Auf ein Gesicht tippen: beide Fotos zoomen gleich weit darauf. Nochmal tippen zeigt wieder das ganze Bild."
+                "Auf ein Gesicht tippen: beide Fotos zoomen gleich weit darauf. Ein anderes Gesicht antippen wechselt direkt dorthin, dasselbe nochmal zeigt wieder das ganze Bild."
             )
             row(
                 "equal.circle",
@@ -828,6 +845,11 @@ private struct GestureHelp: View {
                 "forward.fill",
                 "Später",
                 "Das Paar wird zurückgestellt und kommt am Ende wieder."
+            )
+            row(
+                "flag.checkered",
+                "Zur Auswahl",
+                "Beendet die Vergleiche vorzeitig und springt zur Auswahl — mit dem, was bis dahin entschieden wurde. Von dort führt „Weiter vergleichen“ zurück."
             )
             Divider()
             Text("Nichts wird ausgeblendet, solange die Auswahl am Ende nicht bestätigt ist.")
