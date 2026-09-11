@@ -26,7 +26,12 @@
  * that calls out. Installing twice is a no-op.
  */
 
-const SECRET = process.env.INTERNAL_SERVICE_SECRET ?? "";
+// Trimmed, because the Python side trims too (`service_auth.py` does
+// `os.environ.get(...).strip()`). A value that picked up a trailing
+// newline — read out of a file, pasted into a shell — would otherwise
+// make the two ends disagree about a secret they both hold, and the
+// symptom is a 401 that no amount of comparing the values explains.
+const SECRET = (process.env.INTERNAL_SERVICE_SECRET ?? "").trim();
 
 /**
  * Where those services live. Both the configured value and the fallback are

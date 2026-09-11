@@ -371,6 +371,141 @@ Budget — und desto eher schlägt die Neuverteilung (§5) vor, etwas zu streich
 Der Puffer ist verhandelbar, aber nie null: Einen Zug zu verpassen ist teurer
 als ein ausgelassener Spot.
 
+### 4.5 Standquartier mit Tagesausflügen (offen)
+
+Die Etappe aus §4.2 unterstellt, dass sich der Anker mit dem Quartier bewegt:
+Tokio, dann Osaka, dann Hakata — neues Hotel, neue Etappe, neuer Vorrat. Eine
+der häufigsten Urlaubsformen sieht aber anders aus:
+
+> Vier Tage Airbnb in San Gimignano. Einen Tag Ausflug nach Pisa, einen nach
+> Florenz, einen nach Lucca. Die freie Zeit in San Gimignano.
+
+Das ist **eine** Etappe — das Quartier wechselt nie, es gibt keinen
+Transfertag, das Gepäck bleibt liegen —, aber drei ihrer vier Tage finden
+fünfzig bis achtzig Kilometer entfernt statt. Heute lässt sich das nicht
+ausdrücken: Der Anker gehört der Etappe, jeder Tag erbt ihn, und der Vorrat
+kommt aus 2,5 Kilometern um San Gimignano. Florenz kommt darin nicht vor.
+
+Als drei Etappen zu modellieren wäre falsch und nicht nur unpraktisch: Eine
+Etappe verspricht ein eigenes Quartier, Transfertage und einen eigenen Vorrat,
+in den nichts hineinrutscht. Wer abends zurückfährt, hat nichts davon — und
+„was in Florenz ausfiel, rutscht nicht nach Pisa" wäre eine Regel, die genau
+das Gegenteil des Gemeinten sagt.
+
+**Vorgeschlagen: der Tagesanker.** Ein Tag darf optional einen eigenen Ort und
+Radius tragen. Fehlt er — der Normalfall und die freien Tage in San Gimignano —,
+gilt der Anker der Etappe, und nichts an der bisherigen Rechnung ändert sich.
+Vier Dinge hängen daran, und alle vier sind schon gebaut, nur an einen anderen
+Ort gehängt:
+
+- **Der Vorrat des Tages** kommt aus dem Umkreis des Tagesankers. Die
+  Regionsauswahl entscheidet ohnehin nach Koordinate (`region-router.ts`), ein
+  Ausflug über eine Regionsgrenze ist also kein Sonderfall.
+- **Hin und zurück kosten Zeit**, und zwar aus den Blöcken dieses Tages —
+  dieselbe Rechnung wie beim Anreisetag in §4.2 („kein voller
+  Vormittagsblock"). Eine Stunde nach Florenz und eine zurück heißt: Der Tag
+  hat sechs Stunden, nicht acht. Das ist der Grund, warum der Tagesanker eine
+  *Planungsangabe* ist und keine Anzeige.
+- **Wetter, Klima und Licht** gelten am Tagesanker, nicht am Quartier. Bei
+  achtzig Kilometern ist das gelegentlich ein anderer Tag.
+- **Die Rückfahrt ist ein Fixpunkt-Kandidat** (§4.4): Wer mit dem letzten Zug
+  aus Florenz zurückmuss, hat den Nachmittag rückwärts gerechnet.
+
+**Dazu gehört die zweite offene Sache, die dabei auffiel: der Suchradius kennt
+das Verkehrsmittel nicht.** `DEFAULT_SEARCH_RADIUS_M` ist 2 500 Meter, ob zu
+Fuß oder mit dem Auto. Das Auto ändert heute nur, *wie viel* aus demselben
+Kreis in einen Block passt (schneller je Hop, dafür sechs Minuten Fixkosten
+fürs Holen und Parken) — nicht, *wie weit* der Kreis reicht. Der Tagesausflug
+aus dem Ideenvorrat macht es bereits anders und begründet es auch: 25 km
+Standardradius, 90 statt 40 Minuten je Etappe für Auto und ÖPNV, weil „eine
+halbe Stunde im Auto der Weg zum See ist, kein Umweg" (§20.2). Was dort gilt,
+gilt für eine Autoreise genauso. Vorgeschlagen: **der Standardradius folgt dem
+Modus** — zu Fuß 2,5 km, Rad ~6 km, ÖPNV und Auto ~15 km —, ein ausdrücklich
+gesetzter Radius sticht ihn weiterhin, und die ehrliche Nebenwirkung ist mehr
+Last auf der Regionssuche und ein Korridorfilter, der weiter auf Luftlinien
+rechnet.
+
+**Und die dritte, die zwischen beiden liegt:** Im Freitext kommt das
+Verkehrsmittel gar nicht an. `NlConstraints` hat kein Feld dafür — „wir sind
+mit dem Auto unterwegs" fällt weg, und das ist heute richtig so, weil ein
+erfundenes Feld schlimmer wäre als ein fehlendes (§13). Mit dem Modus als
+Constraint bekäme der Satz die Wirkung, die der Sprecher meint — und dann auch
+der Radius, der daran hängt.
+
+Reihenfolge, falls es gebaut wird: erst der Modus-Radius (eine Zeile Logik,
+sofort spürbar), dann der Tagesanker (eine Spalte an `trip_plan_days`, ein Feld
+im Tagesrahmen, die Reisezeit aus den Blöcken), zuletzt der Modus im Freitext.
+
+### 4.6 Der Ausflug, den niemand verlangt hat (offen)
+
+§4.5 macht den Tagesausflug *ausdrückbar*. Der eigentliche Wunsch geht weiter:
+
+> Ich sage nur „vier Tage in San Gimignano" — und Florenz, Pisa und Lucca
+> sollen trotzdem im Plan vorkommen.
+
+Das ist berechtigt, und zwar aus dem Vorrat selbst heraus begründbar: Ein Ort
+mit siebentausend Einwohnern trägt keine vier Tage. Wer vier Tage bleibt, fährt
+weg — jeder Mensch, den man fragt, sagt „ihr seid eine Stunde von Florenz".
+Ein Planer, der das verschweigt, ist nicht zurückhaltend, sondern nutzlos.
+
+Und doch steht dem eine der härtesten Regeln dieses Konzepts entgegen: **Der
+Planer erfindet keine Termine** (§7.1). Sechzig Kilometer sind keine
+Nebenwirkung einer Ortssuche, sondern eine Entscheidung über den Tag. Die
+Auflösung ist dieselbe wie beim Abendlicht (§7.3) und beim Ausflugsvorschlag aus
+dem Ideenvorrat (§20.2): **vorschlagen, nicht planen.** Der Vorschlag schreibt
+nichts; angenommen wird er per Tipp, und dann setzt er den Tagesanker aus §4.5.
+
+**Der Auslöser wird gemessen, nicht geraten.** „Kleiner Ort" ist keine Größe,
+die im System existiert — die Dünne des Vorrats dagegen schon: Nach dem Bau des
+Etappenvorrats steht da, wie viele lohnende Spots (§10.5 `purpose: visit`, mit
+Prominenzsignal) auf wie viele Tage kommen. Reicht das nicht, um die Tage zu
+füllen, ohne sie mit Gewöhnlichem zu strecken, ist die Etappe **untervorrätig** —
+und genau das ist der Moment, in dem ein Mensch anfinge, über den Tellerrand zu
+schauen. Der Fall ist heute schon sichtbar: Der Solver lässt Blöcke leer, und
+die Neuverteilung meldet, dass nichts mehr da ist.
+
+**Woher die Kandidaten kommen, ohne Neuimport.** Eine Ortsdatenbank gibt es
+nicht — `place`-Knoten werden nicht importiert. Zwei Quellen liegen aber schon
+in jeder Regionsdatenbank:
+
+- `osm_admin` — benannte Verwaltungsflächen samt Ebene. Eine Gemeinde, in der
+  vierzig prominente Spots liegen, ist ein Tagesziel; eine mit zweien nicht.
+- Die **Dichte prominenter Spots** selbst, über ein grobes Raster gezählt.
+  Kommt ohne Verwaltungsgrenzen aus und findet auch das Ziel, das keine
+  eigene Gemeinde ist.
+
+Beides zählt dasselbe: **was ein Tag dort trüge**, gemessen an dem, was der
+Vorrat ohnehin bewertet. Dagegen steht die Fahrzeit im Modus dieser Etappe —
+und die ist heute eine Luftlinienschätzung (§12), eine Stunde kann also
+neunzig Minuten sein.
+
+**Wie der Vorschlag klingt, und was er nennt:**
+
+> „Vor Ort tragen die Vorschläge zwei eurer vier Tage. In einer Stunde Fahrt
+> liegt Florenz — genug für einen ganzen Tag. Einen Tag dorthin einplanen?"
+
+Drei Dinge stehen bewusst darin: **warum** überhaupt gefragt wird (der Vorrat
+trägt die Tage nicht), **was es kostet** (die Fahrzeit, hin und zurück, aus den
+Blöcken dieses Tages), und **einer** Vorschlag statt einer Liste von fünf — ein
+Abend trägt einen Ausflug, und fünf Vorschläge sind eine Entscheidung statt
+eines Hinweises (§20.2). Ein „nein" wird gemerkt und nicht wiederholt (§6.4,
+§7.1).
+
+**Was dabei nicht passieren darf:**
+
+- **Kein stiller Tagesanker.** Ein Plan, der ohne Zutun in Florenz stattfindet,
+  ist ein anderer Urlaub als der bestellte.
+- **Keine Reisebüro-Rangliste.** Der Vorschlag begründet sich aus dem eigenen
+  Vorrat, nicht aus Popularität, die niemand nachrechnen kann (§10.7).
+- **Kein Ausflug als Lückenfüller.** Untervorrätig heißt „die Tage tragen
+  nicht", nicht „ein Block ist kurz". Ein knapper Nachmittag ist kein Grund,
+  jemanden ins Auto zu setzen.
+
+Voraussetzung ist §4.5: Ohne Tagesanker gibt es nichts, worin ein angenommener
+Vorschlag landen könnte. In der Reihenfolge dort steht er hinter dem
+Tagesanker — und er ist der Teil, der aus „vier Tage in San Gimignano" das
+macht, was der Reisende eigentlich gemeint hat.
+
 ## 5. Umplanen als Kernmechanik
 
 Ein Plan besteht aus drei Schichten:
@@ -1630,9 +1765,114 @@ erfunden) und Fallen (eine Jahreszahl, die keine Tageszahl ist; ein Startort,
 der nicht das Ziel ist). Aufgerufen wird die Cloud-Spur dabei von nichts
 anderem: `claude-client.ts` hängt an keinem Endpunkt.
 
-Die drei übrigen Aufgaben aus §11.1 — Kuration, Dokumente, Verhandlungs-Chat —
-sind damit **nicht** gemessen. Die Kuration ist der größte erwartete Sprung und
-braucht einen eigenen Aufbau.
+**Das Ergebnis (Lauf vom 2026-09-10, `gemma-4-26B-A4B-it-qat` gegen
+`claude-opus-5`):**
+
+| | richtig | erfunden | Median |
+| --- | --- | --- | --- |
+| lokal | **96 %** (26/27) | **0** | **1005 ms** |
+| Claude API | 93 % (25/27) | 1 | 2173 ms |
+
+**Die Spur, die nichts kostet, hat gewonnen** — und §11.1s Einschätzung
+„brüchig" ist für diese Aufgabe damit widerlegt. Beide Spuren lasen die
+indirekten Fälle sauber („Kinderwagen" → Kind, „schlecht zu Fuß" →
+eingeschränkte Mobilität, „eine Woche" → sieben Tage), beide gingen der
+Startort-Falle nicht auf den Leim, und beide hielten sich bei „Wir wollen nach
+Passau." zurück, statt ein Tempo zu erfinden.
+
+Die zwei Abweichungen gehen beide zulasten der Cloud-Spur, und beide sind
+lehrreich: Sie schrieb bei „im Umkreis von zwei Kilometern um die Altstadt"
+`placeHint: "Ulm Altstadt"` statt `"Ulm"` — hilfreich gemeint, aber der
+`placeHint` ist ein Echo für die Bestätigung, kein Suchbegriff — und sie legte
+bei „viel zu Fuß, aber keine Gewaltmärsche" eine Gehstrecke von 30 Minuten fest,
+die niemand gesagt hatte. Genau die Sorte gut gemeinter Ergänzung, gegen die
+§13s Regel steht.
+
+Drei Einschränkungen, damit die Zahl nicht mehr trägt, als sie kann: **27
+bewertete Felder in einem Lauf** — ein Feld Unterschied ist Rauschen, nicht
+Rangfolge; die eine Falle, an der beide scheiterten („keine Gewaltmärsche" →
+`relaxed`), ist womöglich eher eine strittige Erwartung als ein Modellfehler;
+und gemessen ist die Cloud-Spur bei niedrigem Effort und ohne Structured
+Outputs, also nicht an ihrer Obergrenze.
+
+**Die Folge für §11:** Für das Anfrageverständnis wird nichts eingekauft. Das
+lokale Modell ist gleichauf, doppelt so schnell und kostenlos — und die
+Privatsphäre-Rechnung aus §11.5 muss dafür gar nicht erst aufgemacht werden.
+
+**Die zweite Messung: die Kuration** (`run-curation.ts` — drei Anfragen über
+einen Vorrat von 34 Orten, drei Spuren, denn hier ist der Amtsinhaber kein
+Modell, sondern die gewichtete Summe aus `candidates.ts`):
+
+| | Fehlgriffe | Ziele | Median |
+| --- | --- | --- | --- |
+| gewichtete Summe | 2 | **13/24** | 1 ms |
+| lokal | **0** | 7/24 | 5,3 s |
+| Claude API | **0** | 10/24 | 7,4 s |
+
+**Ein Wort zur Zahl selbst, bevor sie gedeutet wird:** Der zweite Lauf legte
+einen Fehler *in der Messung* offen. Die Regel „nichts fürs Kind" galt
+unbedingt — auch im Fall „zu zweit, ohne Kinder", wo Weinberg und Theater
+genau richtig sind. Damit bestrafte sie beide Modelle für eine korrekte
+Auswahl und drehte das Ergebnis um (lokal stand mit 3 Fehlgriffen da statt mit
+0). Behoben: Die Regel greift nur, wenn ein Kind mitfährt. Die Tabelle oben ist
+die nachgerechnete Fassung derselben Rohdaten — was eine Messung wert ist,
+entscheidet sich daran, ob sie ihre eigenen Fehler findet.
+
+Drei Dinge stehen darin, und nur das erste ist eine Zahl.
+
+**Erstens: der Amtsinhaber ist in seiner unteren Hälfte gar keine Bewertung.**
+Bei zehn gesuchten Orten liegen **18 Kandidaten punktgleich** auf 3,0 — die
+Punktzahl besteht aus einer Handvoll Halbpunkt-Signale, und alles mit
+Wikidata-Eintrag und Artikel landet auf derselben Zahl. Wo der Schnitt in so
+einen Gleichstand fällt, entscheidet die Reihenfolge, in der die Regionssuche
+geantwortet hat. Gemessen: Bei umgekehrter Vorratsreihenfolge bleiben 8 von 10
+Orten dieselben, und die Fehlgriffe gehen von 1 auf 3. Das ist unabhängig von
+jedem Modell ein Befund über den eigenen Code.
+
+**Zweitens: beide Modelle machen über alle drei Anfragen keinen einzigen
+Fehlgriff.** Keines erfand eine Referenz, keines nahm eine Sparkasse, keines
+packte den Tag mit Dorfkirchen voll, keines wählte etwas, das die Anfrage für
+das Kind ausschließt. Die gewichtete Summe nahm den Kunstverein auf die
+Kinderreise — und lieferte beim Kunst-Wochenende **null Essen**, obwohl der
+Satz „abends gern gut essen" sagt. Das ist der Unterschied in Reinform: Der
+Interessen-Bonus kennt Museen und Theater, aber Essen ist kein Interesse,
+sondern ein Bedürfnis, und damit fällt es durch jedes Raster, das nur Themen
+kennt.
+
+**Drittens — und das ist keine gemessene Zahl, sondern ein Urteil:** Die beiden
+Modelle unterscheiden sich nicht in Fehlgriffen, sondern darin, **wie viel vom
+Ort sie stehen lassen**. Über drei Anfragen fand die Cloud-Spur 10 der 24
+offensichtlichen Ziele, die lokale 7 — und das Muster ist in jedem Fall
+dasselbe: Die lokale Spur wählt das Passende und lässt das Bedeutende liegen.
+Beim Kunst-Wochenende nahm sie Weinberg, Gasthaus und Café und ließ die
+Stiftskirche weg; beim ruhigen Tag blieb von acht Zielen genau eines übrig.
+Die Cloud-Spur bediente in denselben Fällen beides — Kunst *und* Abendessen,
+Ruhe *und* den Wochenmarkt, und bei der Kinderreise Geschichte (4 Orte) neben
+Draußen (8) und Kind (5).
+
+Ob das besser ist, ist eine Geschmacksfrage und bleibt eine: Ein ruhiger Tag
+aus Botanischem Garten, Park, Skulpturenweg und Biergarten ist eine ehrliche
+Antwort auf „nichts Anstrengendes", auch ohne Wahrzeichen. Nur ist es eben
+nicht dieselbe Reise.
+
+Und noch ein Unterschied, der nichts mit der Auswahl zu tun hat: Die
+Begründungen der gewichteten Summe lauten zehnmal „in Wikidata verzeichnet, hat
+einen Wikipedia-Artikel". Das ist kein Grund, das ist ein Datenbankzustand.
+§8.3 will ein „warum", über das man streiten kann, und das liefern beide
+Modelle.
+
+**Die Folge für §11:** Für die Kuration lohnt sich ein Modell, und zwar
+deutlich — die gewichtete Summe überhört, was kein Interesse ist, und ihre
+Begründungen sind zehnmal derselbe Datenbankzustand. Zwischen den beiden
+Modellen entscheidet die Fehlgriffzahl **nicht**: Beide sind sauber. Wer die
+Cloud-Spur vorzieht, kauft damit nicht Fehlerfreiheit, sondern die
+Bereitschaft, neben dem Passenden auch das Bedeutende stehen zu lassen — und
+das ist eine Geschmacksentscheidung, keine Qualitätsmessung. Für ein System,
+dessen Rückgratzusage „alles bleibt im Haus" lautet (§3), ist das kein Preis
+wert, solange nicht jemand die drei fehlenden Wahrzeichen vermisst.
+
+Die zwei übrigen Aufgaben aus §11.1 — Dokumente und Verhandlungs-Chat — sind
+weiterhin nicht gemessen.
 
 ### 11.1 Die Trennlinie liegt schon im Konzept
 
@@ -1644,8 +1884,8 @@ Modellen:
 
 | | lokal | Opus 5 (online, opt-in) |
 |---|---|---|
-| Kandidaten kuratieren | Gewichtete Summe | **deutlich besser** |
-| Anfrage verstehen | brüchig | **deutlich besser** |
+| Kandidaten kuratieren | Gewichtete Summe — **in der unteren Hälfte Zufall** (gemessen) | **besser, aber lokal auch** |
+| Anfrage verstehen | **gleichauf, und schneller** (gemessen) | gleichauf |
 | Dokumente auswerten | ordentlich | **deutlich besser** |
 | Verhandlungs-Chat vorab | knapp ausreichend | **deutlich besser** |
 | Tagebuch-/Recap-Texte | ordentlich | besser |
@@ -2898,6 +3138,13 @@ hält sie stand, wenn der Tag anders läuft? Alles danach ist Ausbau.
   systematisch zu spät. Die Auflösung von 90 m sieht außerdem den Bergrücken,
   nicht das Haus gegenüber. Solange kein Profil vorliegt, gehört die Angabe
   als „bei freiem Horizont" gekennzeichnet.
+- **Ein Standquartier mit Tagesausflügen lässt sich nicht ausdrücken** (§4.5).
+  Der Anker gehört der Etappe, jeder Tag erbt ihn, und der Suchradius kennt das
+  Verkehrsmittel nicht — vier Tage in San Gimignano mit Ausflügen nach Florenz
+  und Pisa sind damit entweder drei Etappen, die etwas anderes versprechen, oder
+  ein Vorrat, in dem Florenz nicht vorkommt. Vorschlag und Reihenfolge stehen in
+  §4.5 — und §4.6 dazu, wie aus „vier Tage in San Gimignano" der Ausflug von
+  selbst entstehen soll, ohne dass ihn jemand verlangt hat.
 - **Keine Echtzeit.** Verkehr, Streiks, spontane Schließungen sieht das System
   nicht — bewusste Übergabe an Apple/Google Maps für die Navigation.
 - **Speicherbedarf** eines späteren Routers (Valhalla-Kacheln zusätzlich zu den
