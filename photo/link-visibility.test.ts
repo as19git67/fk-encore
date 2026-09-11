@@ -267,20 +267,20 @@ describe("public link visibility", () => {
       return res.photos;
     }
 
-    it("marks the photos the link does not show", async () => {
+    it("says of every photo whether the link shows it", async () => {
       await addFace(portrait.id, owner.id, "Alex Beispiel");
 
       const entries = await gridEntries();
       expect(entries.find(e => e.id === portrait.id)?.link_hidden).toBe(true);
-      expect(entries.find(e => e.id === scenery.id)?.link_hidden).toBeUndefined();
+      expect(entries.find(e => e.id === scenery.id)?.link_hidden).toBe(false);
     });
 
-    it("stays silent once the photo is released", async () => {
+    it("flips to shown once the photo is released", async () => {
       await addFace(portrait.id, owner.id, "Alex Beispiel");
       await setPhotoLinkVisibilityLogic(owner.id, [portrait.id], "visible");
 
       const entries = await gridEntries();
-      expect(entries.every(e => e.link_hidden === undefined)).toBe(true);
+      expect(entries.every(e => e.link_hidden === false)).toBe(true);
     });
 
     it("stays silent while the album has no public link at all", async () => {

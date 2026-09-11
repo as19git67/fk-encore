@@ -381,7 +381,7 @@ export async function listGalleryGridLogic(
     if (g) entry.group = g;
     const c = commentCountByPhotoId?.get(r.id);
     if (c) entry.comment_count = c;
-    if (linkHiddenPhotoIds?.has(r.id)) entry.link_hidden = true;
+    if (linkHiddenPhotoIds) entry.link_hidden = linkHiddenPhotoIds.has(r.id);
     return entry;
   });
 
