@@ -1871,8 +1871,43 @@ das ist eine Geschmacksentscheidung, keine Qualitätsmessung. Für ein System,
 dessen Rückgratzusage „alles bleibt im Haus" lautet (§3), ist das kein Preis
 wert, solange nicht jemand die drei fehlenden Wahrzeichen vermisst.
 
-Die zwei übrigen Aufgaben aus §11.1 — Dokumente und Verhandlungs-Chat — sind
-weiterhin nicht gemessen.
+**Die dritte Messung: der Verhandlungs-Chat** (`run-chat.ts`, zehn Sätze an
+einem Plan, acht Werkzeuge plus „nachfragen" und „nichts tun"):
+
+| | getroffen | übergriffig | Median |
+| --- | --- | --- | --- |
+| lokal | **10/10** | **0** | 1,2 s |
+| Claude API | 9/10 | **0** | 2,8 s |
+
+**Das wichtigste Ergebnis ist die Null in der Mitte.** Kein Modell hat etwas
+getan, was der Satz nicht verlangte — niemand löschte Spots, weil jemand „zu
+viel Laufen" sagte, niemand plante etwas um, weil jemand sich bedankte. Genau
+davor hatte §7.1 Angst, und in zwanzig Antworten trat es nicht ein. Beide Spuren
+fragten auch zurück, statt zu raten, als der Satz „der Tag ist zu voll" lautete
+und drei Tage im Plan standen.
+
+Der eine Unterschied ist ein Temperamentsunterschied: Die Cloud-Spur **fragt,
+wo die lokale handelt.** Auf „das ist mir zu viel Laufen" antwortete sie mit
+einer Rückfrage statt mit der Vorgabe — vorsichtig, aber §11.3 nennt genau
+diesen Satz als das Beispiel, aus dem ein Werkzeugaufruf werden soll. Bei den
+drei Museen war ihre Rückfrage dagegen die *bessere* Antwort: Der Satz sagt
+„eins reicht", aber nicht welches.
+
+**Und wieder fand der Lauf einen Fehler in der Messung.** Der Fall „drei
+Museen" belohnte zunächst nur das Raten — die lokale Spur wählte willkürlich
+das Uhrenmuseum und bekam dafür einen Treffer, die Rückfrage der Cloud-Spur
+zählte als Verfehlung. Behoben: Beide Lesarten gelten. Zweitens sagte der
+Werkzeugkatalog nicht, dass `constraint_setzen` und `spot_verbergen` **selbst
+neu planen** (wie `updateSettings` und `hideTripSpot` es tun) — die
+„ungefragt dazu"-Spalte zählte deshalb Redundanz an, die der Katalog nicht
+ausgeschlossen hatte. Auch behoben; diese Spalte braucht einen neuen Lauf,
+bevor sie etwas bedeutet.
+
+Damit ist die vierte Zeile so beantwortet wie die ersten beiden: **kein
+Kaufgrund.** Die lokale Spur trifft alles, greift nirgends über und ist dreimal
+schneller. Die Dokumentenzeile ist entschieden (§11.3), die anderen drei sind
+gemessen — §11 ist damit beantwortet, und zwar mit Belegen statt mit einer
+Haltung.
 
 ### 11.1 Die Trennlinie liegt schon im Konzept
 
@@ -2008,12 +2043,12 @@ Entscheidung, nicht als Nebenwirkung eines Modellwechsels.
 | Anfrage verstehen | **gemessen** — lokal gleichauf und doppelt so schnell |
 | Kandidaten kuratieren | **gemessen** — ein Modell schlägt die Tag-Summe deutlich, das lokale ohne Fehlgriff |
 | Dokumente auswerten | **entschieden** — bleibt im Haus |
-| Verhandlungs-Chat | offen |
+| Verhandlungs-Chat | **gemessen** — lokal 10/10, kein Übergriff, dreimal schneller |
 
 Das ist ausdrücklich **kein** Prinzipienbeschluss gegen die Cloud, sondern ein
-Ergebnis aus Belegen: Zwei Zeilen wurden nachgemessen und sagen „nicht nötig",
-eine ist eine Festlegung über Privatsphäre, und die vierte trägt dieselbe Frage
-wie die Kuration — sie schickt Vorlieben und Gruppenzusammensetzung mit.
+Ergebnis aus Belegen: Drei Zeilen wurden nachgemessen und sagen „nicht nötig",
+die vierte ist eine Festlegung über Privatsphäre. Wäre die Messung anders
+ausgefallen, stünde hier etwas anderes.
 
 Die ursprüngliche Überlegung bleibt trotzdem richtig, nur mit anderem Vorzeichen:
 Ein besseres Modell würde den Planer **klüger in der Vorbereitung** machen und am

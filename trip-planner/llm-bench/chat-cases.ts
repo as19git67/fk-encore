@@ -33,7 +33,8 @@ export const CHAT_TOOLS: readonly ToolSpec[] = [
     name: "constraint_setzen",
     description:
       "Eine Planungsvorgabe ändern: pace (relaxed|normal|packed), maxWalkMinutes "
-      + "(Zahl), withChildren/limitedMobility (true|false).",
+      + "(Zahl), withChildren/limitedMobility (true|false). Plant die betroffenen "
+      + "Tage selbst neu — neu_verteilen ist danach überflüssig.",
     args: { feld: "string", wert: "string | number | boolean" },
   },
   {
@@ -44,7 +45,9 @@ export const CHAT_TOOLS: readonly ToolSpec[] = [
   {
     name: "spot_verbergen",
     description:
-      "Einen Spot dauerhaft ausblenden, damit er bei neuer Planung nicht wiederkommt.",
+      "Einen Spot dauerhaft ausblenden, damit er bei neuer Planung nicht wiederkommt. "
+      + "Nimmt ihn zugleich aus dem Plan und rechnet den Tag neu — spot_entfernen "
+      + "und neu_verteilen sind danach überflüssig.",
     args: { ref: "osmRef" },
   },
   {
@@ -133,10 +136,18 @@ export interface ChatCase {
   utterance: string;
   /**
    * What should happen. Several entries mean several calls are right
-   * *together*; `oneOf` means any one of them is a fair reading.
+   * *together*.
    */
   expected: ExpectedCall[];
-  oneOf?: boolean;
+  /**
+   * A second answer that is just as defensible.
+   *
+   * The first run forced this: asked to drop two of three museums, the
+   * sentence never says *which* two. Picking one is a fair reading and
+   * so is asking — and a rule that rewarded only the first was
+   * rewarding a guess.
+   */
+  orElse?: ExpectedCall[];
   /**
    * Calls that would be wrong here even though they look helpful. The
    * failure §7.1 cares about: doing more than was asked.
@@ -164,7 +175,9 @@ export const CHAT_CASES: readonly ChatCase[] = [
     id: "drei-museen",
     utterance: "Am zweiten Tag sind mir drei Museen am Vormittag zu viel — eins reicht.",
     expected: [{ tool: "spot_entfernen" }, { tool: "neu_verteilen", args: { tag: 1 } }],
-    note: "Der Satz nennt den Tag und die Menge; entfernen und neu rechnen gehören zusammen.",
+    orElse: [{ tool: "rueckfrage" }],
+    note: "Der Satz nennt den Tag und die Menge — aber nicht, welches Museum bleibt. "
+      + "Eines wählen ist eine faire Lesart, nachfragen auch.",
   },
   {
     id: "zu-voll-welcher-tag",

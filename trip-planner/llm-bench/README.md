@@ -230,6 +230,19 @@ Ein Modell, das „das ist mir zu viel Laufen" beantwortet, indem es zusätzlich
 drei Spots löscht, hat hinter jemandes Rücken die Reise geändert (§7.1). Das
 kostet Vertrauen, nicht Zeit.
 
+**Ergebnis (2026-09-11):** lokal **10/10** getroffen, **0** übergriffig, Median
+1,2 s · Claude 9/10, **0** übergriffig, 2,8 s. Die Null ist das Ergebnis: Kein
+Modell tat etwas, was der Satz nicht verlangte. Die Cloud-Spur fragt, wo die
+lokale handelt — bei „zu viel Laufen" zu vorsichtig, bei den drei Museen
+treffender.
+
+**Zwei Fehler in dieser Messung, die der Lauf fand:** Der Fall „drei Museen"
+belohnte zunächst nur das Raten (der Satz sagt nicht, welches Museum bleibt) —
+jetzt gelten beide Lesarten. Und der Werkzeugkatalog verschwieg, dass
+`constraint_setzen` und `spot_verbergen` selbst neu planen; die Spalte
+„ungefragt dazu" zählte deshalb Redundanz an, die niemand ausgeschlossen hatte.
+Sie braucht einen neuen Lauf, bevor sie etwas bedeutet.
+
 **Hier gibt es keinen Amtsinhaber.** Einen Chat hat der Planer nicht;
 `interpretRequest` deckt vielleicht ein Drittel der Fälle ab und kann weder
 anheften noch neu verteilen. Die Frage ist deshalb nicht „besser als bisher",

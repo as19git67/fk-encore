@@ -40,10 +40,24 @@ describe("scoreChat", () => {
     expect(score.overreach).toEqual(["spot_entfernen"]);
   });
 
+  it("takes an equally defensible second reading", () => {
+    // "eins reicht" does not say which two museums go, so asking is as
+    // good an answer as picking — and the rule must not reward the guess
+    // alone.
+    const benchCase = caseOf("drei-museen");
+    const asked = scoreChat(benchCase, [
+      { tool: "rueckfrage", args: { frage: "Welches soll bleiben?" } },
+    ]);
+    expect(asked.hit).toBe(true);
+    expect(asked.missing).toEqual([]);
+    expect(asked.extra).toEqual([]);
+  });
+
   it("wants every expected call when several belong together", () => {
     const benchCase = caseOf("drei-museen");
     const half = scoreChat(benchCase, [{ tool: "spot_entfernen", args: { ref: "way:13" } }]);
     expect(half.hit).toBe(false);
+    expect(half.missing).toContain("neu_verteilen(tag=1)");
 
     const both = scoreChat(benchCase, [
       { tool: "spot_entfernen", args: { ref: "way:13" } },
@@ -142,7 +156,7 @@ describe("the chat cases", () => {
   it("only name refs that are in the plan", () => {
     // An expectation pointing at a spot the plan does not contain would
     // fail every track for a fault of the fixture's.
-    const refs = new Set(
+    const refs = new Set<string>(
       CHAT_PLAN.days.flatMap((day) => day.blocks.flatMap((block) => block.stops.map((s) => s.ref))),
     );
     for (const benchCase of CHAT_CASES) {

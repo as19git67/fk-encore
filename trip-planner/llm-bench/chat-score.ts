@@ -40,15 +40,17 @@ export function scoreChat(benchCase: ChatCase, calls: readonly ToolCall[]): Chat
   const matched = (expected: ExpectedCall) =>
     calls.some((call) => matches(expected, call));
 
-  const hits = benchCase.expected.filter(matched);
-  const hit = benchCase.oneOf
-    ? hits.length > 0
-    : hits.length === benchCase.expected.length;
+  const primaryHit = benchCase.expected.every(matched);
+  const alternativeHit = benchCase.orElse !== undefined && benchCase.orElse.every(matched);
+  const hit = primaryHit || alternativeHit;
 
-  const expectedNames = new Set(benchCase.expected.map((call) => call.tool));
+  // Whichever reading was answered decides what counts as "expected" —
+  // otherwise the alternative's own calls would show up as extras.
+  const answered = alternativeHit && !primaryHit ? benchCase.orElse! : benchCase.expected;
+  const expectedNames = new Set(answered.map((call) => call.tool));
   return {
     hit,
-    missing: benchCase.expected.filter((call) => !matched(call)).map(describe),
+    missing: hit ? [] : benchCase.expected.filter((call) => !matched(call)).map(describe),
     overreach: produced.filter((name) => forbidden.has(name)),
     extra: produced.filter((name) => !expectedNames.has(name) && !forbidden.has(name)),
     produced,
