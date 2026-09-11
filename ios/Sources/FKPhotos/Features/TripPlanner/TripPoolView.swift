@@ -28,6 +28,9 @@ struct TripPoolView: View {
 
     var body: some View {
         List {
+            if let kept = viewModel.keptForNextTime {
+                Text(kept).font(.footnote).foregroundStyle(.secondary)
+            }
             if let leg {
                 if leg.pool.isEmpty {
                     ContentUnavailableView(
@@ -183,6 +186,16 @@ struct TripPoolView: View {
                 Label("Einplanen", systemImage: "calendar.badge.plus")
             }
             .tint(.accentColor)
+            // "Beim nächsten Mal" is the honest place for a spot nobody
+            // got to (§20.3) — better than a pool that disappears with
+            // the trip it hung off. It keeps the spot here too: this is
+            // a copy into the collection, not a move out of the trip.
+            Button {
+                Task { await viewModel.keepForNextTime(osmRefs: [candidate.osmRef]) }
+            } label: {
+                Label("Für später merken", systemImage: "lightbulb")
+            }
+            .tint(.yellow)
         }
     }
 

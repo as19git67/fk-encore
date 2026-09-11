@@ -51,6 +51,12 @@ final class TripPlannerViewModel {
     /// Spots this trip has turned down (§5), for the list that brings
     /// them back.
     private(set) var hiddenSpots: [TripHiddenSpot] = []
+    /// Ideas from the collection that lie in one of this trip's legs
+    /// (§20.3). Offered, never taken over by themselves.
+    private(set) var planIdeas: [TripIdeaForPlan] = []
+    private(set) var isLoadingPlanIdeas = false
+    /// What the last "für später merken" did, in words.
+    var keptForNextTime: String?
     /// Set while a hard time is being written or removed (§4.4): both
     /// re-plan the trip, which is not instant.
     private(set) var isSavingFixpoint = false
@@ -637,6 +643,67 @@ final class TripPlannerViewModel {
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - The collection and this trip (§20.3)
+
+    /// „Ihr habt vier Ideen für Lissabon gesammelt."
+    ///
+    /// A question, not a handover. An idea from last year is not
+    /// automatically the wish of this trip, so this only asks what lies
+    /// in a leg — and what the trip already has is **marked** rather
+    /// than dropped from the list: seeing that it is there is the
+    /// answer to the same question.
+    func loadIdeasForPlan() async {
+        isLoadingPlanIdeas = true
+        defer { isLoadingPlanIdeas = false }
+        do {
+            let response: TripIdeasForPlanResponse = try await APIClient.shared.get(
+                "/trip-planner/plans/\(planId)/ideas")
+            planIdeas = response.ideas
+            errorMessage = nil
+        } catch {
+            errorMessage = "Der Ideenvorrat ließ sich nicht abfragen."
+        }
+    }
+
+    /// Take one idea into this trip's pool (§20.3).
+    ///
+    /// It goes the way a find goes (§9.2): right leg by position,
+    /// duplicates merged, provenance kept — so the five rules live in
+    /// one place rather than two. **The idea stays in the collection**:
+    /// it is not consumed, only used.
+    func takeIdea(_ idea: TripIdeaForPlan) async {
+        struct Body: Encodable { let id: Int }
+        do {
+            let _: [String: String?] = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/ideas/take", body: Body(id: idea.id))
+            errorMessage = nil
+            // Both lists moved: the trip has a pool entry more, and the
+            // idea is now marked as already here.
+            await load()
+            await loadIdeasForPlan()
+        } catch {
+            errorMessage = "\(idea.displayName) ließ sich nicht übernehmen."
+        }
+    }
+
+    /// „Beim nächsten Mal" — what this trip did not use goes back into
+    /// the collection (§20.3).
+    ///
+    /// The honest place for a spot nobody got to: better than a pool
+    /// that disappears with the trip it hung off.
+    func keepForNextTime(osmRefs: [String]) async {
+        guard !osmRefs.isEmpty else { return }
+        struct Body: Encodable { let osmRefs: [String] }
+        do {
+            let response: TripKeptForNextTimeResponse = try await APIClient.shared.post(
+                "/trip-planner/plans/\(planId)/pool/to-ideas", body: Body(osmRefs: osmRefs))
+            keptForNextTime = response.sentence
+            errorMessage = nil
+        } catch {
+            errorMessage = "Das ließ sich nicht für später merken."
         }
     }
 

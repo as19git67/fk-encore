@@ -274,3 +274,77 @@ struct TripOutingAcceptResponse: Codable, Sendable {
         return "Der Ausflug steht als Reise — \(left)."
     }
 }
+
+/// An idea that lies in one of a trip's legs (§20.3).
+///
+/// „Ihr habt vier Ideen für Lissabon gesammelt" — a question, not a
+/// handover: an idea from last year is not automatically the wish of
+/// this trip, so nothing is taken over by itself.
+struct TripIdeaForPlan: Codable, Identifiable, Sendable {
+    let id: Int
+    let name: String?
+    let lat: Double
+    let lon: Double
+    let category: String
+    let note: String?
+    let addedBy: String?
+    /// Which leg it lies in, and how far from that leg's anchor.
+    let legIndex: Int
+    let distanceM: Int
+    /// True when this trip already has it — planned or in the pool.
+    let alreadyInTrip: Bool
+
+    var displayName: String {
+        if let name, !name.isEmpty { return name }
+        return "Unbenannter Ort"
+    }
+
+    /// The line under the name.
+    ///
+    /// "Schon dabei" comes first when it applies: somebody scanning the
+    /// list for what to add needs to see what they can skip before they
+    /// read why it is interesting. Marked rather than hidden — a list
+    /// that quietly drops what is already there answers a question
+    /// nobody asked (§20.3).
+    var subtitle: String {
+        var parts: [String] = []
+        if alreadyInTrip { parts.append("schon dabei") }
+        parts.append(distanceText)
+        if let note, !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            parts.append(note)
+        } else if let addedBy, !addedBy.isEmpty {
+            parts.append("von \(addedBy)")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    var distanceText: String {
+        if distanceM < 1000 { return "\(distanceM) m" }
+        return String(format: "%.1f km", Double(distanceM) / 1000)
+            .replacingOccurrences(of: ".", with: ",")
+    }
+}
+
+struct TripIdeasForPlanResponse: Codable, Sendable {
+    let ideas: [TripIdeaForPlan]
+}
+
+/// What went back into the collection (§20.3).
+struct TripKeptForNextTimeResponse: Codable, Sendable {
+    let kept: Int
+    /// Already collected is not an error — it is counted and said.
+    let alreadyThere: Int
+
+    var sentence: String {
+        switch (kept, alreadyThere) {
+        case (0, let already) where already > 0:
+            return already == 1
+                ? "War schon im Vorrat."
+                : "Waren schon im Vorrat."
+        case (let kept, 0):
+            return kept == 1 ? "Im Vorrat gemerkt." : "\(kept) Spots im Vorrat gemerkt."
+        case (let kept, let already):
+            return "\(kept) gemerkt, \(already) waren schon da."
+        }
+    }
+}
