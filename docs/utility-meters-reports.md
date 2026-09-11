@@ -4,9 +4,11 @@ Ergänzung zu `docs/utility-meters.md` §5. Beschreibt, welche Auswertungen übe
 den bestehenden Report-MVP hinaus sinnvoll sind, was dafür an Daten und
 Annahmen fehlt, und in welcher Reihenfolge das umgesetzt werden sollte.
 
-Status: **Etappe 6 vollständig umgesetzt** (6a–6e). Offen bleibt nur die
-Witterungsbereinigung C3, die eine Gradtagzahl-Quelle voraussetzt, sowie E3
-(Abschlagsvergleich), das an Etappe 8 hängt.
+Status: **Etappe 6 vollständig umgesetzt** (6a–6e), ebenso die zunächst
+zurückgestellten Punkte: Saisonprofil A3 (#1022), Witterungsbereinigung C3
+(#1023), Abschlagsvergleich E3 (mit Etappe 8, #1018) und die
+Tages-/Wochen-Granularität (#1024). Details in `docs/utility-meters.md`
+§5.1, §5.2.5, §5.2.6, §6.1.
 
 ---
 
@@ -66,7 +68,7 @@ markiert.
 |---|---|---|---|
 | A1 ⭐ | **PV-Ersparnis kumuliert** | Kumulierte Kurve „Stromkosten mit PV“ vs. „hypothetische Kosten ohne PV“ seit Inbetriebnahme; Differenzfläche = Ersparnis. Je Bucket bereits als `netElectricityCostEur` / `noPvElectricityCostEur` vorhanden — es fehlt nur Kumulierung + Darstellung. | — |
 | A2 ⭐ | **Amortisation** | Invest (netto + MwSt.) minus kumulierter PV-Nutzen → Restbetrag, prognostiziertes Amortisationsdatum aus dem Mittel der letzten 12 Monate. Zweite Linie *inkl.* Opportunitätskosten: entgangene Rendite, zinseszinslich aus `expected_return_rate` gerechnet — nicht als fertiger Betrag gepflegt. | `pv_investment_*`, `expected_return_rate` |
-| A3 | **Saisonprofil Autarkie/Eigenverbrauch** | Heatmap Jahr × Monat für Autarkie und Eigenverbrauchsquote. Zeigt sofort, in welchen Monaten der Speicher/die Anlage trägt und ob sich das über die Jahre verbessert. | — |
+| A3 ✅ | **Saisonprofil Autarkie/Eigenverbrauch** | Heatmap Jahr × Monat für Autarkie und Eigenverbrauchsquote. Zeigt sofort, in welchen Monaten der Speicher/die Anlage trägt und ob sich das über die Jahre verbessert. `GET /meters/reports/season-profile` (#1022). | — |
 | A4 | **Ertrag je kWp / Performance-Ratio** | Jahresertrag pro kWp gegen Vorjahre — der einzige belastbare Frühindikator für Anlagendegradation oder verschmutzte Module. | Anlagenleistung kWp (neue Stammdatum-Annahme; wird ohnehin für die korrekte Einspeise-Leistungsstufe gebraucht, siehe `docs/utility-meters.md` §5.2) |
 
 ### B — Technologie-Vergleich (kontrafaktisch)
@@ -97,7 +99,7 @@ Wasser.
 |---|---|---|
 | C1 | **Trend-Dashboard** | Eine Kachel je Kennzahl: aktueller 12-Monats-Wert, Änderung ggü. den 12 Monaten davor (absolut + %), Richtungspfeil, Sparkline. Zusätzlich Steigung pro Jahr aus linearer Regression über die **rollierende 12-Monats-Summe** — dadurch ist die Saison herausgerechnet und der Trend tatsächlich lesbar. |
 | C2 | **Vorjahresvergleich je Bucket** | `compare=previous_year`: jeder Monat/Jahr bekommt `previousValue`, `deltaAbsolute`, `deltaPercent`. Im Chart als zweite, blassere Linie. Bereits als offener Punkt in `docs/utility-meters.md` §5.1 notiert. |
-| C3 | **Witterungsbereinigung Heizung** | Heizverbrauch ÷ Gradtagzahl des Monats. Ohne das ist „mehr Heizstrom als letztes Jahr“ meist nur „kälterer Winter“. Umsetzbar mit einer eingepflegten Gradtagzahl-Tabelle (VDI 2067, Standort-nah) oder — ohne externe Datenquelle — über einen aus den eigenen Daten geschätzten Referenzwinter. |
+| C3 ✅ | **Witterungsbereinigung Heizung** | Heizverbrauch ÷ Gradtagzahl des Monats. Ohne das ist „mehr Heizstrom als letztes Jahr“ meist nur „kälterer Winter“. Umgesetzt mit beiden Quellen: Gradtagzahl-Reihe als Annahme (`heating_degree_days`, Datei-Import) oder — ohne externe Daten — aus den eigenen Daten geschätzter Referenzwinter, jeweils ausgewiesen (`GET /meters/reports/heating-weather`, #1023). |
 | C4 | **Ausreißer-Kontext** | Im Trend-Chart die Buckets markieren, die auf ungewöhnlich langen/kurzen Ableseintervallen beruhen (< 20 oder > 40 Tage bei Monatsbuckets). Verhindert Fehlinterpretationen, bevor Etappe 7 (Anomalien) überhaupt existiert. |
 
 ### D — Betrieb & Anlagenzustand
@@ -114,7 +116,7 @@ Wasser.
 |---|---|---|
 | E1 | **Kosten je Anwendung** | Heizung, Warmwasser, Wallbox, Haushalt jeweils in € — PV-Anteil zum Eigenverbrauchswert, Netzanteil zum Arbeitspreis. Beantwortet „was kostet mich das Heizen wirklich“ direkt und ist die Grundlage für B1/B2. |
 | E2 | **Wasserkosten** | Analog Strom mit Wasser-/Abwassertarif (Arbeitspreis je m³ + Grundgebühr). |
-| E3 | **Abschlag vs. Ist** | Gezahlte Abschläge (Finance) gegen berechnete Ist-Kosten → erwartete Nachzahlung/Erstattung vor der Jahresabrechnung. Setzt Etappe 8 (Finance-Link) voraus. |
+| E3 ✅ | **Abschlag vs. Ist** | Gezahlte Abschläge (Finance, über Ablesungen verknüpft) gegen berechnete Ist-Kosten → erwartete Nachzahlung/Erstattung vor der Jahresabrechnung. `GET /meters/reports/advance-payments` (#1018). |
 
 ---
 
@@ -132,9 +134,9 @@ Wasser.
 - **Rollierende 12-Monats-Summe + Trendkennzahlen im Backend**, statt der
   Regression im Frontend. Ergebnis je Kennzahl: `rolling12`, `slopePerYear`,
   `changeVsPreviousYear`, `dataPoints`.
-- Optional `granularity=day|week` — für die Bestandsdaten (überwiegend
-  monatliche Ablesungen) wenig wert, erst relevant, wenn die
-  API-Ingestion regelmäßig liefert. **Empfehlung: zurückstellen.**
+- `granularity=day|week` — umgesetzt (#1024): Tages-Buckets `YYYY-MM-DD`,
+  ISO-Wochen `YYYY-Www`; für monatliche Handablesungen wenig aussagekräftig,
+  wertvoll sobald die API-Ingestion täglich liefert.
 
 ### 3.2 Annahmen-Stammdaten
 
@@ -175,8 +177,9 @@ anzeigen kann und die Zahl nachvollziehbar bleibt.
 | **6b** ✅ | Trend-Dashboard (C1, C2, C4) im Frontend | Der direkt gewünschte Nutzen, sobald 6a steht |
 | **6c** ✅ | PV-Ersparnis kumuliert + Amortisation (A1, A2), Kosten je Anwendung (E1) | Nutzt nur vorhandene Tarife, keine neuen Annahmen |
 | **6d** ✅ | Annahmen-Stammdaten + Gas- und Benzin-Vergleich (B1, B2), CO₂ (B3) | Braucht 6c (Kosten je Anwendung) als Vergleichsbasis |
-| **6e** ✅ | Anlagenzustand (D1–D3), Ertrag je kWp (A4), Wasserkosten (E2) — Saisonprofil (A3) zurückgestellt | Nice-to-have, unabhängig voneinander |
-| — | Witterungsbereinigung (C3), Abschlagsvergleich (E3) | C3 nur, wenn eine Gradtagzahl-Quelle akzeptiert wird; E3 hängt an Etappe 8 |
+| **6e** ✅ | Anlagenzustand (D1–D3), Ertrag je kWp (A4), Wasserkosten (E2) | Nice-to-have, unabhängig voneinander |
+| **6f** ✅ | Saisonprofil (A3), Witterungsbereinigung (C3), Tages-/Wochen-Granularität | Nachträge aus #1022, #1023, #1024 |
+| **8** ✅ | Finance-Link + Abschlagsvergleich (E3) | #1018 |
 
 Jede Etappe einzeln testbar und deploybar; `npm run test` vor jedem Push.
 
@@ -191,13 +194,15 @@ Getroffen:
 2. **Annahmen kommen in `meter_electricity_tariffs`** — die Tabelle wird um
    neue `kind`s und `unit`s erweitert statt eine zweite Tabelle anzulegen
    (§3.2). Umsetzung in 6d.
-3. **`granularity=day|week`** ist zurückgestellt, bis die API-Ingestion
-   regelmäßig Werte liefert.
-
-Noch offen:
-
-4. **Gradtagzahlen** (C3) — eingepflegte Tabelle, externe Quelle, oder aus den
-   eigenen Daten geschätzter Referenzwinter?
+3. **`granularity=day|week`** ist umgesetzt (#1024); ISO-Wochen, Montag
+   bis Sonntag.
+4. **Gradtagzahlen** (C3) — Standard ist der automatische Abruf aus dem
+   Open-Meteo-Archiv (ERA5-Tagesmittel für den hinterlegten Wohnort, VDI-2067-
+   Summe, täglicher Auffüll-Job); die Reihe liegt als Annahme
+   `heating_degree_days` (Einheit `kd`, eine Zeile je Monat) und kann
+   ebenso per Datei-Import oder von Hand gepflegt werden — vorhandene Zeilen
+   überschreibt der Abruf nie. Fehlt beides, schätzt der Report den
+   Referenzwinter aus den eigenen Daten und sagt das im Frontend.
 
 Umgesetzt wie vorgeschlagen: die **JAZ-Bandbreite** (± 0,5) statt eines
 Punktwerts bei B1.

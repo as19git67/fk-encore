@@ -17,8 +17,14 @@
 import { APIError } from "encore.dev/api";
 import { listMeters, type MeterListItem } from "./meter.service";
 import {
+  bucketEndIso,
+  bucketKey,
+  bucketLabel,
+  bucketStartIso,
+  bucketsPerYear,
   getMeterReportForUser,
   loadAbsoluteReadingSeries,
+  previousYearKey,
   COMPLETE_COVERAGE_THRESHOLD,
   type MeterReport,
   type MeterReportBucket,
@@ -39,11 +45,6 @@ function round(value: number | null, decimals = 2): number | null {
 function ratio(value: number | null): number | null {
   if (value === null || !Number.isFinite(value)) return null;
   return Math.round(value * 1000) / 1000;
-}
-
-/** Buckets per year, to express a per-bucket slope as a per-year change. */
-function bucketsPerYear(granularity: ReportGranularity): number {
-  return granularity === "year" ? 1 : 12;
 }
 
 function isComplete(bucket: { coverage: number }): boolean {
@@ -270,10 +271,7 @@ export function buildWaterBaselineBuckets(
     const consumption = readings[i + 1].value - readings[i].value;
     if (days <= 0 || !Number.isFinite(consumption) || consumption < 0) continue;
 
-    const key =
-      granularity === "year"
-        ? String(start.getUTCFullYear())
-        : `${start.getUTCFullYear()}-${String(start.getUTCMonth() + 1).padStart(2, "0")}`;
+    const key = bucketKey(start, granularity);
     const entry = byKey.get(key) ?? { rates: [], consumption: 0, days: 0 };
     entry.rates.push(consumption / days);
     entry.consumption += consumption;
@@ -284,20 +282,11 @@ export function buildWaterBaselineBuckets(
   return [...byKey.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, entry]): WaterBaselineBucket => {
-      const [year, month] = key.split("-").map(Number);
-      const periodStart =
-        granularity === "year"
-          ? new Date(Date.UTC(year, 0, 1))
-          : new Date(Date.UTC(year, month - 1, 1));
-      const periodEnd =
-        granularity === "year"
-          ? new Date(Date.UTC(year + 1, 0, 1))
-          : new Date(Date.UTC(year, month, 1));
       return {
         key,
-        label: granularity === "year" ? key : `${String(month).padStart(2, "0")}.${year}`,
-        periodStart: periodStart.toISOString(),
-        periodEnd: periodEnd.toISOString(),
+        label: bucketLabel(key, granularity),
+        periodStart: bucketStartIso(key, granularity),
+        periodEnd: bucketEndIso(key, granularity),
         minDailyRate: round(Math.min(...entry.rates), 4),
         averageDailyRate: entry.days > 0 ? round(entry.consumption / entry.days, 4) : null,
         intervals: entry.rates.length,
@@ -317,12 +306,7 @@ export function buildWaterBaseline(
   const slopePerBucket = linearRegressionSlope(series);
 
   const latest = buckets[buckets.length - 1] ?? null;
-  const previousKey =
-    latest === null
-      ? null
-      : granularity === "year"
-        ? String(Number(latest.key) - 1)
-        : `${Number(latest.key.split("-")[0]) - 1}-${latest.key.split("-")[1]}`;
+  const previousKey = latest === null ? null : previousYearKey(latest.key, granularity);
   const previous = previousKey === null ? null : buckets.find((b) => b.key === previousKey) ?? null;
 
   const latestRate = latest?.minDailyRate ?? null;

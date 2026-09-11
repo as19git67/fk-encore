@@ -44,6 +44,7 @@ const MOCK_READINGS = [
     source: 'api',
     notes: null,
     enteredBy: 1,
+    linkedTransactions: 0,
     absoluteValue: 6461.69,
   },
   {
@@ -55,6 +56,7 @@ const MOCK_READINGS = [
     source: 'manual',
     notes: 'Ablesung nach dem Urlaub kontrolliert',
     enteredBy: 1,
+    linkedTransactions: 0,
     absoluteValue: 6330.48,
   },
   {
@@ -66,6 +68,7 @@ const MOCK_READINGS = [
     source: 'ocr',
     notes: null,
     enteredBy: 1,
+    linkedTransactions: 0,
     absoluteValue: 6100.12,
   },
 ]
@@ -137,6 +140,7 @@ const meterHandlers = [
     HttpResponse.json({ readings: MOCK_READINGS, total: MOCK_READINGS.length }),
   ),
   http.get('/api/meters/:id/report', () => HttpResponse.json(MOCK_REPORT)),
+  http.get('/api/meters/readings/:readingId/transactions', () => HttpResponse.json({ items: [] })),
   http.get('/api/meters/:id/api-keys', () => HttpResponse.json({ keys: MOCK_API_KEYS })),
   http.get('/api/meters/:id', () => HttpResponse.json(MOCK_METER_DETAIL)),
   http.get('/api/groups', () => HttpResponse.json({ items: [] })),

@@ -22,6 +22,9 @@ import {
   getEconomicsReport,
   getComparisonsReport,
   getEquipmentReport,
+  getSeasonProfile,
+  getHeatingWeatherReport,
+  getAdvancePaymentsReport,
   listElectricityTariffs,
   createElectricityTariff,
   updateElectricityTariff,
@@ -40,6 +43,9 @@ import {
   type ConsumptionTrend,
   type ComparisonsReport,
   type EquipmentReport,
+  type SeasonProfileReport,
+  type HeatingWeatherReport,
+  type AdvancePaymentsReport,
   type EconomicsReport,
   type EnergyReport,
   type ElectricityTariff,
@@ -54,6 +60,9 @@ import MeterTrendDashboard from '../components/MeterTrendDashboard.vue'
 import MeterEconomicsPanel from '../components/MeterEconomicsPanel.vue'
 import MeterComparisonsPanel from '../components/MeterComparisonsPanel.vue'
 import MeterEquipmentPanel from '../components/MeterEquipmentPanel.vue'
+import MeterSeasonProfilePanel from '../components/MeterSeasonProfilePanel.vue'
+import MeterHeatingWeatherPanel from '../components/MeterHeatingWeatherPanel.vue'
+import MeterAdvancePaymentsPanel from '../components/MeterAdvancePaymentsPanel.vue'
 import { listGroups, type GroupSummary } from '../api/documents'
 import { ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
@@ -79,6 +88,13 @@ const comparisons = ref<ComparisonsReport | null>(null)
 const loadingComparisons = ref(false)
 const equipment = ref<EquipmentReport | null>(null)
 const loadingEquipment = ref(false)
+const seasonProfile = ref<SeasonProfileReport | null>(null)
+const loadingSeasonProfile = ref(false)
+const heatingWeather = ref<HeatingWeatherReport | null>(null)
+const loadingHeatingWeather = ref(false)
+const advancePayments = ref<AdvancePaymentsReport | null>(null)
+const loadingAdvancePayments = ref(false)
+const canSeeFinance = computed(() => auth.hasPermission('finance.view'))
 const loading = ref(false)
 const error = ref('')
 
@@ -119,11 +135,51 @@ async function load() {
       loadEconomics(),
       loadComparisons(),
       loadEquipment(),
+      loadSeasonProfile(),
+      loadHeatingWeather(),
+      loadAdvancePayments(),
     ])
   } catch (err: any) {
     error.value = err.message || 'Fehler beim Laden der Zähler'
   } finally {
     loading.value = false
+  }
+}
+
+async function loadSeasonProfile() {
+  loadingSeasonProfile.value = true
+  try {
+    seasonProfile.value = await getSeasonProfile()
+  } catch {
+    seasonProfile.value = null
+  } finally {
+    loadingSeasonProfile.value = false
+  }
+}
+
+async function loadHeatingWeather() {
+  loadingHeatingWeather.value = true
+  try {
+    heatingWeather.value = await getHeatingWeatherReport()
+  } catch {
+    heatingWeather.value = null
+  } finally {
+    loadingHeatingWeather.value = false
+  }
+}
+
+async function loadAdvancePayments() {
+  if (!canSeeFinance.value) {
+    advancePayments.value = null
+    return
+  }
+  loadingAdvancePayments.value = true
+  try {
+    advancePayments.value = await getAdvancePaymentsReport()
+  } catch {
+    advancePayments.value = null
+  } finally {
+    loadingAdvancePayments.value = false
   }
 }
 
@@ -167,6 +223,8 @@ async function reloadCostReports() {
     loadEconomics(),
     loadComparisons(),
     loadEquipment(),
+    loadHeatingWeather(),
+    loadAdvancePayments(),
   ])
 }
 
@@ -1209,6 +1267,26 @@ onMounted(load)
         v-if="loadingEquipment || equipment"
         :report="equipment"
         :loading="loadingEquipment"
+      />
+
+      <MeterSeasonProfilePanel
+        v-if="loadingSeasonProfile || seasonProfile"
+        :report="seasonProfile"
+        :loading="loadingSeasonProfile"
+      />
+
+      <MeterHeatingWeatherPanel
+        v-if="loadingHeatingWeather || heatingWeather || canManage"
+        :report="heatingWeather"
+        :loading="loadingHeatingWeather"
+        :can-manage="canManage"
+        @refresh="loadHeatingWeather"
+      />
+
+      <MeterAdvancePaymentsPanel
+        v-if="loadingAdvancePayments || advancePayments"
+        :report="advancePayments"
+        :loading="loadingAdvancePayments"
       />
 
       <div class="meter-grid">

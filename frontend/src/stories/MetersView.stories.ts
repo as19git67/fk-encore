@@ -94,6 +94,19 @@ const meterHandlers = [
   http.get('/api/meters/:id/readings', () =>
     HttpResponse.json({ readings: MOCK_READINGS, total: MOCK_READINGS.length }),
   ),
+  http.get('/api/meters/reports/season-profile', () =>
+    HttpResponse.json({ metrics: [], monthsMeasured: 0 }),
+  ),
+  http.get('/api/meters/reports/heating-weather', () =>
+    HttpResponse.json({
+      meterId: null, meterName: null, unit: 'kWh', source: null, degreeDayMonths: 0,
+      normalDegreeDays: [], typicalKwh: [], referenceYears: 0, buckets: [], years: [],
+      latestKwhPerDegreeDay: null, previousKwhPerDegreeDay: null, changePercent: null, slopePerYear: null,
+    }),
+  ),
+  http.get('/api/meters/home-location', () => HttpResponse.json({ home: null })),
+  http.get('/api/meters/reports/advance-payments', () => HttpResponse.json({ currency: 'EUR', meters: [] })),
+  http.get('/api/meters/anomalies', () => HttpResponse.json({ anomalies: [], total: 0 })),
   http.get('/api/meters/:id', () => HttpResponse.json(MOCK_METER_DETAIL)),
   http.post('/api/meters/import/water-history', () =>
     HttpResponse.json({ meterId: 99, devices: 4, readings: 222, alreadyImported: false }),
