@@ -42,7 +42,7 @@ Zwei Eigenschaften unterscheiden ihn von einer Merkliste:
 | Bildschirm „In der Nähe" samt „nicht jetzt" | gebaut (`TripIdeasNearbyView`) |
 | Ausflugsvorschlag samt Übernahme als Reise | gebaut (`TripIdeasOutingView`) |
 | Angebot in der Reise + „für später merken" | gebaut (`TripPlanIdeasView`, Vorrat-Wischgeste) |
-| Die Meldung **von selbst** aus der Standortschleife (§7.1) | fehlt noch |
+| Die Meldung **von selbst** (Standortschleife) | gebaut (`TripIdeaNoticeMonitor`), **standardmäßig aus** |
 | Bildschirme für Nähe, Ausflug und die Wege zur Reise | **fehlen noch** |
 
 Der Einstieg steht seit Kurzem: In der Urlaubsplanung führt „Ideen" auf eine
@@ -53,7 +53,8 @@ Kurzlink — der wird aufgelöst); Artikel und Suche aus §9.2 fehlen noch, Die 
 **Ausflugsvorschlag** als eintägige Reise, das **Angebot in der Reise**
 („Aus dem Vorrat" im Menü der Tageskarte) und **„für später merken"** als
 Wischgeste im Etappenvorrat. „In der Nähe" gibt es als **Frage** (ein Bildschirm, den man
-öffnet) — was fehlt, ist die Meldung, die **von selbst** kommt. Diese Teile sind über die API
+öffnet) und als **Meldung von selbst** — letztere ist ein Schalter im Menü und
+ist standardmäßig **aus**. Diese Teile sind über die API
 vollständig benutzbar und haben keine Oberfläche.
 
 ## 3. Datenmodell
@@ -209,13 +210,10 @@ andere Zahl hier ließe denselben Biergarten gleichzeitig „schon dabei" und
 
 ## 6. Was fehlt
 
-- **Der Rest der Oberfläche.** Liste, eigener Standort und geteilter
-  Kartenlink stehen. Es fehlen: die übrigen Wege hinein (Artikel und Suche —
-  beide brauchen die Regionssuche bzw. das Sprachmodell und hängen deshalb an
-  einer Reise, §9.3), die
-  Nähe-Meldung, die von selbst kommt — an der bestehenden Standortschleife
-  (§7.1); der Bildschirm „In der Nähe" beantwortet bisher nur die gestellte
-  Frage. Die drei Wege zwischen Vorrat und Reise sind gebaut.
+- **Zwei Wege hinein**: Artikel und Suche. Beide brauchen die Regionssuche
+  bzw. das Sprachmodell und hängen deshalb an einer Reise (§9.3) — im Vorrat
+  ohne Reise wären sie ein Versprechen auf eine Lesart, die hier niemand
+  leisten kann. Alles Übrige aus §20 steht.
 - **Veranstaltungen** (§20.4) — vorerst nicht gebaut, weil es keine Quelle
   gibt, die den Anspruch aushält. Die Spalten (`valid_from`, `valid_to`) und
   die Filterung abgelaufener Einträge stehen; ein Termin ist dann ein

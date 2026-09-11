@@ -24,6 +24,8 @@ struct TripIdeasView: View {
     /// True while the shared link is being turned into an entry.
     @State private var isAddingShared = false
     @State private var sharedNote = ""
+    /// Whether the collection may speak up on its own (§20.2).
+    @State private var noticesEnabled = TripIdeaNoticePreferences.isEnabled()
 
     var body: some View {
         List {
@@ -97,6 +99,14 @@ struct TripIdeasView: View {
                     } label: {
                         Label("Jemanden mitschreiben lassen", systemImage: "person.badge.plus")
                     }
+                    Divider()
+                    // §20.5 asks for it to be switchable, and the honest
+                    // reading of that is "off until somebody says so":
+                    // a collection that starts talking because an app
+                    // was updated was never given permission.
+                    Toggle(isOn: $noticesEnabled) {
+                        Label("Von selbst melden", systemImage: "bell")
+                    }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
@@ -130,6 +140,14 @@ struct TripIdeasView: View {
         }
         .onChange(of: model.ownerId) { _, _ in
             Task { await model.load() }
+        }
+        .onChange(of: noticesEnabled) { _, enabled in
+            TripIdeaNoticePreferences.setEnabled(enabled)
+            if enabled {
+                TripIdeaNoticeMonitor.shared.startIfEnabled()
+            } else {
+                TripIdeaNoticeMonitor.shared.stop()
+            }
         }
         .refreshable { await model.load() }
         .alert("Das hier merken", isPresented: $isAddingHere) {
