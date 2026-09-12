@@ -51,6 +51,19 @@ export interface AddFixpointRequest {
   travelMinutes?: number;
   /** Margin in front of it. Defaults to 20, never below 5. */
   bufferMinutes?: number;
+  /**
+   * Where it happens, when that is known — the station, the airport,
+   * the theatre (§4.4).
+   *
+   * More than a label: a fixpoint at one end of the day *moves* the
+   * day's route (`day-ends.ts`). An arrival is where the first block
+   * sets off from, a departure where the last one has to finish, so an
+   * evening before the last train ends at the platform instead of at a
+   * hotel nobody goes back to. Both are optional; without them the day
+   * begins and ends at the accommodation, as it always did.
+   */
+  lat?: number;
+  lon?: number;
 }
 
 export interface RemoveFixpointRequest {
@@ -91,6 +104,7 @@ export const addTripFixpoint = api(
       durationMinutes: kind === "departure" ? 0 : minutes(req.durationMinutes, "durationMinutes", 0),
       travelMinutes: minutes(req.travelMinutes, "travelMinutes", 0),
       bufferMinutes: buffer(req.bufferMinutes),
+      ...place(req.lat, req.lon),
     });
 
     // Re-planned from the trip as it is *now*: the re-planner reads each
@@ -129,6 +143,27 @@ export const removeTripFixpoint = api(
     return await replanAfterFrameChange(remaining, userId);
   },
 );
+
+/**
+ * The coordinate, or nothing at all.
+ *
+ * Half of one is refused rather than stored: a latitude without a
+ * longitude is not a place with a gap in it, it is a bug, and keeping
+ * it would put a day's start somewhere off the coast of Africa.
+ */
+function place(lat: number | undefined, lon: number | undefined): { lat: number; lon: number } | Record<string, never> {
+  if (lat === undefined && lon === undefined) return {};
+  if (lat === undefined || lon === undefined) {
+    throw APIError.invalidArgument("lat and lon must be given together");
+  }
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+    throw APIError.invalidArgument(`lat out of range: ${lat}`);
+  }
+  if (!Number.isFinite(lon) || lon < -180 || lon > 180) {
+    throw APIError.invalidArgument(`lon out of range: ${lon}`);
+  }
+  return { lat, lon };
+}
 
 /** "17:45" → 1065. Anything else is refused rather than guessed. */
 function parseTimeOfDay(value: string): number {

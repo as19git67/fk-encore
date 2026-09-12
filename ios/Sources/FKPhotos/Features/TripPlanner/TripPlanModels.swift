@@ -255,7 +255,7 @@ struct TripTravel: Codable, Sendable {
     }
 }
 
-struct TripFixpoint: Codable, Identifiable, Sendable {
+struct TripFixpoint: Codable, Identifiable, Sendable, Equatable {
     let rowId: Int
     let kind: String
     let label: String

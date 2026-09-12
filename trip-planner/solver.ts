@@ -112,6 +112,14 @@ export interface SolveOptions {
    * a day after a transfer would pass the station.
    */
   start?: Coordinate;
+  /**
+   * Where the last block has to finish. Defaults to the anchor, which
+   * is the ordinary evening; a day that ends at a departure ends at the
+   * platform instead (§4.4, `day-ends.ts`). After the last train the
+   * walk back to the hotel is a walk nobody makes, and planning it
+   * costs the evening a stop.
+   */
+  end?: Coordinate;
   blocks: readonly PlannedBlockShape[];
   candidates: readonly Candidate[];
   /** Legs longer than this are never proposed. */
@@ -141,8 +149,9 @@ export function solveDay(opts: SolveOptions): SolvedDay {
   const blocks: PlannedBlock[] = [];
 
   // Each block picks up where the previous one left off; only the last
-  // one pays for the walk back to the anchor, because that is the walk
-  // you actually make.
+  // one pays for the walk back, because that is the walk you actually
+  // make — back to the anchor on an ordinary day, to the station on the
+  // day the train leaves.
   let position = opts.start ?? opts.anchor;
   const lastSpotsBlockIndex = lastIndexOfSpotsBlock(opts.blocks);
 
@@ -161,7 +170,7 @@ export function solveDay(opts: SolveOptions): SolvedDay {
       maxWalkMinutes: opts.maxWalkMinutes,
       mode,
       diversityDecay: decay,
-      returnTo: returnToAnchor ? opts.anchor : null,
+      returnTo: returnToAnchor ? opts.end ?? opts.anchor : null,
     });
 
     for (const stop of filled.stops) remaining.delete(stop.osmRef);

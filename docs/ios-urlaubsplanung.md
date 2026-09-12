@@ -364,6 +364,28 @@ Reinform. In der App steht das Band der festen Zeiten jetzt immer über dem Tag,
 auch wenn es leer ist: Ein Band, das erst erscheint, wenn schon einer da ist,
 findet niemand.
 
+**Ein Fixpunkt kann außerdem einen Ort tragen — und dann verschiebt er die
+Route, nicht nur das Budget.** Zwei Tage jeder Reise sind keine gewöhnlichen,
+und es sind die zwei, an die sich alle erinnern: Am ersten kommt man mit
+Gepäck am Bahnhof an, am letzten fährt der Zug von dort ab. Beide wurden vom
+Anker aus geplant, also von der Unterkunft — das legte einen Weg in den Plan,
+den niemand geht, und ließ den weg, den alle gehen. Die Regel steht in
+`trip-planner/day-ends.ts` und ist bewusst auf die beiden Enden beschränkt:
+
+- Ein **verorteter Termin, der vor dem ersten Block endet** (die Ankunft),
+  wird zum **Start** des Tages — der erste Block läuft von dort los.
+- Eine **verortete Abfahrt** wird zum **Ziel** des Tages — der letzte Block
+  endet am Bahnsteig statt an einer Unterkunft, aus der man ausgecheckt hat.
+  Bei zwei Abfahrten gewinnt die frühere: Die zweite ist jemand, der sich
+  korrigiert.
+- Ein verorteter Termin **mitten am Tag** bewegt nichts. Er müsste einen Block
+  teilen, um die Route zu ändern, und ein Block, der heimlich zwei Blöcke ist,
+  ist schlimmer als ein Weg, der etwas zu lang ist. Er kostet seine Zeit wie
+  bisher.
+
+Ohne Ort bleibt alles wie zuvor: Der Tag beginnt und endet an der Unterkunft.
+Der Ort ist eine Ergänzung, nie eine Bedingung.
+
 Ein Fixpunkt am Tagesende wird **rückwärts** gerechnet: Vom letzten Zug gehen
 der Weg zum Bahnhof und ein Sicherheitspuffer ab, der Rest ist das Budget des
 letzten Blocks. Je näher der Tag an diesen Rand kommt, desto härter greift das
