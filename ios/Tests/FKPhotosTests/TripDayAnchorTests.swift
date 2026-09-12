@@ -106,4 +106,24 @@ final class TripDayAnchorTests: XCTestCase {
         XCTAssertNil(older.returnMinutes)
         XCTAssertEqual(older.summary, "Pisa · 2 h 44 hin und zurück")
     }
+
+    func testTheFrameBandSaysWhatTheOutingCosts() throws {
+        // Under the name in the day's frame band, where it reads like
+        // the hard times it sits beside — because it works like one.
+        XCTAssertEqual(try anchor(label: "Pisa", travelMinutes: 82).costLine,
+                       "Hin und zurück 2 h 44 (geschätzt)")
+        XCTAssertEqual(
+            try anchor(label: "Pisa", travelMinutes: 82,
+                       departMinutes: 8 * 60, returnMinutes: 17 * 60).costLine,
+            "08:00–17:00",
+        )
+    }
+
+    func testTheEstimateAdmitsItIsOne() throws {
+        // The whole reason the hours exist: a number that looks
+        // measured and is not is worse than one that says so.
+        XCTAssertTrue(try anchor(label: "Pisa", travelMinutes: 82).costLine.contains("geschätzt"))
+        XCTAssertFalse(try anchor(label: "Pisa", travelMinutes: 82, departMinutes: 8 * 60)
+            .costLine.contains("geschätzt"))
+    }
 }

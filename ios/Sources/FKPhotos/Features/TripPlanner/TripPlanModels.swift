@@ -174,6 +174,17 @@ struct TripDayAnchor: Codable, Sendable, Equatable {
         }
     }
 
+    /// What the outing costs the day, under its name in the frame band.
+    ///
+    /// The named hours when they exist, the estimated drive otherwise —
+    /// and the estimate says that it is one. A number that looks
+    /// measured and is not is the reason the hours exist at all.
+    var costLine: String {
+        if let hours = plannedHours { return hours }
+        guard travelMinutes > 0 else { return "Am Quartier" }
+        return "Hin und zurück \(TripClock.duration(travelMinutes * 2)) (geschätzt)"
+    }
+
     /// When the first block can begin: the departure plus the drive.
     ///
     /// Shown next to the hour the traveller typed so the remaining

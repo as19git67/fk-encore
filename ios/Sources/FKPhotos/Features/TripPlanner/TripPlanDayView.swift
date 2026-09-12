@@ -99,18 +99,6 @@ struct TripPlanDayView: View {
                             Label("Etappen (\(viewModel.plan?.legs.count ?? 1))",
                                   systemImage: "point.topleft.down.to.point.bottomright.curvepath")
                         }
-                        // A day that happens somewhere else (§4.5).
-                        // On the day's own menu rather than the leg's:
-                        // it is this Tuesday that goes to Pisa, not the
-                        // trip.
-                        Button {
-                            settingDayAnchor = true
-                        } label: {
-                            Label(viewModel.day?.anchor == nil
-                                  ? "Ausflug planen"
-                                  : "Ausflug ändern",
-                                  systemImage: "car")
-                        }
                         // Who else may plan this trip (§6.2) — a
                         // different question from who is coming along
                         // (§3.5, below), so a different word.
@@ -690,12 +678,19 @@ struct TripPlanDayView: View {
 
     // MARK: - The frame
 
-    /// The hard times of the day, and the way to say one (§4.4).
+    /// The frame of the day: the hard times (§4.4) and where it happens
+    /// (§4.5), with the way to say either.
     ///
-    /// Shown even when there are none: the last train was the thing
+    /// Shown even when there is neither: the last train was the thing
     /// nobody could enter, and a band that only appears once a fixpoint
-    /// exists is a band nobody finds. Kept quiet in that case — one
-    /// line, no card.
+    /// exists is a band nobody finds. Kept quiet in that case — two
+    /// lines, no card.
+    ///
+    /// The outing sits here rather than only in the day's menu for the
+    /// same reason. Both answer "what does this day have to work
+    /// around" before a single spot is picked, and a menu is where a
+    /// feature goes to be looked for by people who already know it is
+    /// there.
     private func fixpointBand(_ day: TripDay) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(day.fixpoints) { fix in
@@ -743,13 +738,58 @@ struct TripPlanDayView: View {
             }
             .buttonStyle(.plain)
             .disabled(viewModel.isSavingFixpoint)
+
+            outingRow(day)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(day.fixpoints.isEmpty
+        .background(day.fixpoints.isEmpty && day.anchor == nil
                     ? AnyShapeStyle(.clear)
                     : AnyShapeStyle(.quaternary.opacity(0.4)),
                     in: .rect(cornerRadius: 12))
+    }
+
+    /// Where the day happens, and the way to send it elsewhere (§4.5).
+    ///
+    /// The set outing reads like a fixpoint because it works like one:
+    /// it is a thing the day has to be planned around, it costs the day
+    /// time, and it can be taken back off. Removing it is the same one
+    /// tap as removing a hard time — going through the sheet for that
+    /// was two taps and a scroll.
+    @ViewBuilder
+    private func outingRow(_ day: TripDay) -> some View {
+        if let outing = day.anchor {
+            HStack(spacing: 8) {
+                Image(systemName: "car").foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(outing.displayName).font(.subheadline)
+                    Text(outing.costLine).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Ändern") { settingDayAnchor = true }
+                    .buttonStyle(.borderless)
+                    .font(.footnote)
+                    .disabled(viewModel.isSavingFixpoint)
+                Button(role: .destructive) {
+                    Task { await viewModel.setDayAnchor(nil) }
+                } label: {
+                    Image(systemName: "xmark.circle")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .disabled(viewModel.isSavingFixpoint)
+                .accessibilityLabel("Ausflug nach \(outing.displayName) entfernen")
+            }
+        } else {
+            Button {
+                settingDayAnchor = true
+            } label: {
+                Label("Ausflug planen", systemImage: "car")
+                    .font(.footnote)
+            }
+            .buttonStyle(.plain)
+            .disabled(viewModel.isSavingFixpoint)
+        }
     }
 
     /// What naming a place did to this day, or nothing when it did
