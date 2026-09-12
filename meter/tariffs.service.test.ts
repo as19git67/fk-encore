@@ -175,3 +175,183 @@ describe("importTariffEntries", () => {
     expect(await listElectricityTariffs(userId)).toHaveLength(0);
   });
 });
+
+// ── EnergyTariffTimeline (pure, no database) ─────────────────────────────────
+
+import { EnergyTariffTimeline, type ElectricityTariff } from "./tariffs.service";
+
+let tariffSeq = 0;
+function entry(
+  kind: ElectricityTariff["kind"],
+  validFrom: string,
+  amount: number,
+  extra: Partial<ElectricityTariff> = {},
+): ElectricityTariff {
+  return {
+    id: ++tariffSeq,
+    kind,
+    validFrom: `${validFrom}T00:00:00.000Z`,
+    amount,
+    unit: "eur_per_kwh",
+    taxStatus: null,
+    name: null,
+    capacityLimitKw: null,
+    source: null,
+    ...extra,
+  };
+}
+
+const JAN = { periodStart: "2026-01-01T00:00:00.000Z", periodEnd: "2026-02-01T00:00:00.000Z" };
+const YEAR_2026 = { periodStart: "2026-01-01T00:00:00.000Z", periodEnd: "2027-01-01T00:00:00.000Z" };
+
+describe("EnergyTariffTimeline — feed-in generations", () => {
+  it("lets a newer feed-in row without a capacity tier replace the older one", () => {
+    const timeline = new EnergyTariffTimeline([
+      entry("feed_in", "2021-07-01", 0.0792),
+      entry("feed_in", "2026-01-01", 0.05),
+    ]);
+    expect(timeline.pricesForPeriod(JAN.periodStart, JAN.periodEnd).feedInPricePerKwh).toBe(0.05);
+    expect(
+      timeline.pricesForPeriod("2025-06-01T00:00:00.000Z", "2025-07-01T00:00:00.000Z").feedInPricePerKwh,
+    ).toBe(0.0792);
+  });
+
+  it("picks the tier that applies to the installed capacity from the latest price list", () => {
+    const timeline = new EnergyTariffTimeline([
+      entry("feed_in", "2021-07-01", 0.0792, { capacityLimitKw: 10 }),
+      entry("feed_in", "2021-07-01", 0.077, { capacityLimitKw: 40 }),
+      entry("feed_in", "2026-01-01", 0.06, { capacityLimitKw: 10 }),
+      entry("feed_in", "2026-01-01", 0.058, { capacityLimitKw: 40 }),
+      entry("pv_capacity_kwp", "2021-07-01", 15, { unit: "kw" }),
+    ]);
+    // 15 kWp → the 40 kW tier of the 2026 list.
+    expect(timeline.pricesForPeriod(JAN.periodStart, JAN.periodEnd).feedInPricePerKwh).toBe(0.058);
+  });
+
+  it("falls back to the lowest tier without a known capacity", () => {
+    const timeline = new EnergyTariffTimeline([
+      entry("feed_in", "2021-07-01", 0.0792, { capacityLimitKw: 10 }),
+      entry("feed_in", "2021-07-01", 0.077, { capacityLimitKw: 40 }),
+    ]);
+    expect(timeline.pricesForPeriod(JAN.periodStart, JAN.periodEnd).feedInPricePerKwh).toBe(0.0792);
+  });
+});
+
+describe("EnergyTariffTimeline — periods the tariff only partly covers", () => {
+  it("prices a period whose tariff starts in the middle instead of dropping it", () => {
+    const timeline = new EnergyTariffTimeline([entry("grid_import", "2026-07-01", 0.4)]);
+    const costs = timeline.costsForBucket({
+      ...YEAR_2026,
+      gridImport: 1000,
+      gridExport: 0,
+      selfConsumption: 0,
+      totalConsumption: 1000,
+    });
+    expect(costs.gridImportCostEur).toBe(400);
+    expect(costs.netElectricityCostEur).toBe(400);
+  });
+
+  it("still yields nothing for a period entirely before the first tariff", () => {
+    const timeline = new EnergyTariffTimeline([entry("grid_import", "2026-07-01", 0.4)]);
+    const costs = timeline.costsForBucket({
+      ...JAN,
+      gridImport: 100,
+      gridExport: 0,
+      selfConsumption: 0,
+      totalConsumption: 100,
+    });
+    expect(costs.gridImportCostEur).toBeNull();
+    expect(costs.netElectricityCostEur).toBeNull();
+  });
+
+  it("weights a work-price change by days", () => {
+    const timeline = new EnergyTariffTimeline([
+      entry("grid_import", "2020-01-01", 0.3),
+      entry("grid_import", "2026-01-16", 0.4),
+    ]);
+    const price = timeline.pricesForPeriod(JAN.periodStart, JAN.periodEnd).gridImportPricePerKwh!;
+    expect(price).toBeCloseTo((0.3 * 15 + 0.4 * 16) / 31, 6);
+  });
+
+  it("splits a standing-charge change inside a month by days", () => {
+    const timeline = new EnergyTariffTimeline([
+      entry("base_price", "2020-01-01", 10, { unit: "eur_per_month" }),
+      entry("base_price", "2026-01-15", 20, { unit: "eur_per_month" }),
+    ]);
+    const base = timeline.pricesForPeriod(JAN.periodStart, JAN.periodEnd).baseCostEur!;
+    expect(base).toBeCloseTo((10 * 14 + 20 * 17) / 31, 6);
+  });
+
+  it("treats a missing standing charge as zero rather than dropping the bill", () => {
+    const timeline = new EnergyTariffTimeline([
+      entry("grid_import", "2020-01-01", 0.4),
+      entry("feed_in", "2020-01-01", 0.08),
+    ]);
+    const costs = timeline.costsForBucket({
+      ...JAN,
+      gridImport: 300,
+      gridExport: 500,
+      selfConsumption: 200,
+      totalConsumption: 500,
+    });
+    expect(costs.baseCostEur).toBeNull();
+    expect(costs.netElectricityCostEur).toBe(80); // 120 − 40
+    expect(costs.noPvElectricityCostEur).toBe(200);
+  });
+});
+
+describe("EnergyTariffTimeline — dated assumptions", () => {
+  it("does not let a future-dated value rewrite the past, but extends the first value backwards", () => {
+    const timeline = new EnergyTariffTimeline([
+      entry("heat_pump_scop", "2024-01-01", 3, { unit: "ratio" }),
+      entry("heat_pump_scop", "2030-01-01", 5, { unit: "ratio" }),
+    ]);
+    expect(timeline.amountAt("heat_pump_scop", "2026-06-01T00:00:00.000Z")).toBe(3);
+    expect(timeline.amountAt("heat_pump_scop", "2031-01-01T00:00:00.000Z")).toBe(5);
+    expect(timeline.amountAt("heat_pump_scop", "2020-01-01T00:00:00.000Z")).toBe(3);
+    expect(timeline.amountOf("heat_pump_scop")).toBe(3);
+  });
+
+  it("sums investments instead of keeping only the latest", () => {
+    const timeline = new EnergyTariffTimeline([
+      entry("pv_investment_net", "2021-07-01", 12000, { unit: "eur" }),
+      entry("pv_investment_net", "2024-05-01", 4000, { unit: "eur" }),
+    ]);
+    expect(timeline.sumUntil("pv_investment_net")).toBe(16000);
+    expect(timeline.sumUntil("pv_investment_net", new Date("2022-01-01T00:00:00Z"))).toBe(12000);
+  });
+
+  it("lists the entries a period actually drew on", () => {
+    const timeline = new EnergyTariffTimeline([
+      entry("gas_price", "2020-01-01", 0.1),
+      entry("gas_price", "2026-07-01", 0.2),
+      entry("gas_price", "2028-01-01", 0.3),
+    ]);
+    const used = timeline.entriesForPeriod("gas_price", YEAR_2026.periodStart, YEAR_2026.periodEnd);
+    expect(used.map((e) => e.amount)).toEqual([0.1, 0.2]);
+  });
+});
+
+describe("plausibility bounds", () => {
+  it("rejects a boiler efficiency typed as a percentage", async () => {
+    await expect(
+      createElectricityTariff(userId, {
+        kind: "boiler_efficiency",
+        validFrom: "2024-01-01",
+        amount: 90,
+        unit: "ratio",
+      }),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+  });
+
+  it("rejects a petrol consumption of zero", async () => {
+    await expect(
+      createElectricityTariff(userId, {
+        kind: "petrol_consumption",
+        validFrom: "2024-01-01",
+        amount: 0,
+        unit: "l_per_100km",
+      }),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+  });
+});

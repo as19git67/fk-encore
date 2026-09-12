@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { computeConsumptionTrend } from "./trends.service";
+import {
+  MIN_SLOPE_POINTS,
+  computeConsumptionTrend,
+  linearRegressionSlope,
+  linearRegressionSlopeOverTime,
+} from "./trends.service";
 
 /**
  * Monthly samples starting at `startYear`-01, `count` months long.
@@ -115,8 +120,27 @@ describe("computeConsumptionTrend", () => {
     expect(trend.current12).toBe(1200);
     expect(trend.previous12).toBeNull();
     expect(trend.changePercent).toBeNull();
-    // Direction still follows from the regression over the rolling series.
+    // Three rolling windows overlap by eleven months each — that is not yet
+    // a direction, so the trend stays unknown rather than pretending.
+    expect(trend.trendPoints).toBe(3);
+    expect(trend.direction).toBe("unknown");
+    expect(trend.directionBasis).toBe("none");
+  });
+
+  it("reads the direction from the regression once enough rolling points exist", () => {
+    const trend = trendOf(samples(2025, 11 + MIN_SLOPE_POINTS, () => 100));
+
+    expect(trend.previous12).toBeNull();
+    expect(trend.trendPoints).toBe(MIN_SLOPE_POINTS);
     expect(trend.direction).toBe("stable");
+    expect(trend.directionBasis).toBe("regression");
+  });
+
+  it("prefers the year-over-year comparison as the basis for the direction", () => {
+    const trend = trendOf(samples(2025, 24, (i) => (i < 12 ? 100 : 120)));
+
+    expect(trend.directionBasis).toBe("year_over_year");
+    expect(trend.direction).toBe("rising");
   });
 
   it("exposes the period the current window covers", () => {
@@ -124,5 +148,31 @@ describe("computeConsumptionTrend", () => {
 
     expect(trend.rangeStart).toBe("2026-01-01T00:00:00.000Z");
     expect(trend.rangeEnd).toBe("2027-01-01T00:00:00.000Z");
+  });
+});
+
+describe("linearRegressionSlopeOverTime", () => {
+  it("measures the slope over the time axis, not over list positions", () => {
+    // Two points a year apart and one three years later: 100 per year.
+    const slope = linearRegressionSlopeOverTime(
+      [
+        { x: 2020, y: 100 },
+        { x: 2021, y: 200 },
+        { x: 2024, y: 500 },
+      ],
+      3,
+    );
+
+    expect(slope).toBeCloseTo(100, 6);
+    // Over list positions the same values would look like 200 per step.
+    expect(linearRegressionSlope([100, 200, 500], 3)).toBeCloseTo(200, 6);
+  });
+
+  it("refuses a slope with fewer points than asked for", () => {
+    expect(linearRegressionSlopeOverTime([{ x: 1, y: 1 }, { x: 2, y: 2 }], 3)).toBeNull();
+  });
+
+  it("has no slope when every point sits on the same instant", () => {
+    expect(linearRegressionSlopeOverTime([{ x: 1, y: 1 }, { x: 1, y: 2 }, { x: 1, y: 3 }], 3)).toBeNull();
   });
 });

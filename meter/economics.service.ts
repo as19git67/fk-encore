@@ -46,6 +46,8 @@ export interface PvEconomicsBucket {
   pvBenefitEur: number | null;
   cumulativeSavingsEur: number | null;
   cumulativePvBenefitEur: number | null;
+  /** Fully measured period with the whole PV set; only these feed the amortisation. */
+  complete: boolean;
 }
 
 export interface PvAmortization {
@@ -54,7 +56,7 @@ export interface PvAmortization {
   investmentTotalEur: number | null;
   /** Return the money was expected to earn elsewhere, per year (0.05 = 5 %). */
   expectedReturnRate: number | null;
-  /** Return forgone so far, compounded at that rate over `yearsElapsed`. */
+  /** Return forgone over the measured months, as a flat yearly amount × `yearsElapsed`. */
   opportunityCostEur: number | null;
   /** PV benefit accumulated over the whole measured history. */
   cumulativePvBenefitEur: number;
@@ -62,8 +64,11 @@ export interface PvAmortization {
   remainingEur: number | null;
   /** Same, but counting the returns the invested money did not earn. */
   remainingWithOpportunityEur: number | null;
-  /** Benefit of the last twelve fully measured months. */
+  /** Benefit of the last twelve fully measured, consecutive months; null while there is a gap. */
   benefitLast12MonthsEur: number | null;
+  /** Fully measured months the benefit was accumulated over. */
+  measuredMonths: number;
+  /** `measuredMonths` / 12 — the time basis of both benefit and opportunity cost. */
   yearsElapsed: number;
   payoffReached: boolean;
   /** Extrapolated from the last twelve months; null if not projectable. */
@@ -85,6 +90,12 @@ export interface UsageCostBucket {
   periodEnd: string;
   heating: ApplicationCost;
   hotWater: ApplicationCost;
+  /**
+   * Heat pump consumption the sub-meters do not account for (whole-pump meter
+   * minus heating and hot water), or the whole pump where there are no
+   * sub-meters. Valued at the grid price — its PV share is not metered.
+   */
+  heatPumpRest: ApplicationCost;
   evCharger: ApplicationCost;
   household: ApplicationCost;
   /** Standing charge, which belongs to no single application. */
@@ -150,7 +161,9 @@ function applicationCost(
   if (totalKwh === null) return emptyApplicationCost();
   // Without a measured PV share the whole amount is valued at the grid price:
   // that is the conservative reading, not a claim that no PV was involved.
-  const pv = pvKwh ?? 0;
+  // A PV sub-meter reading above the total (overlapping reading days) is
+  // clamped — a share above one hundred percent prices kWh that were never used.
+  const pv = pvKwh === null ? 0 : Math.min(pvKwh, totalKwh);
   const grid = gridKwh ?? Math.max(0, totalKwh - pv);
   const costEur =
     gridPrice === null
@@ -158,8 +171,8 @@ function applicationCost(
       : pv * (selfPrice ?? gridPrice) + grid * gridPrice;
   return {
     totalKwh,
-    pvKwh,
-    gridKwh: gridKwh ?? (pvKwh === null ? null : grid),
+    pvKwh: pvKwh === null ? null : pv,
+    gridKwh: grid,
     costEur: roundMoney(costEur),
   };
 }
@@ -209,6 +222,24 @@ export function buildUsageCostBucket(
     gridPrice,
   );
 
+  // What the whole-pump meter shows beyond its sub-meters. Together with
+  // heating, hot water, the wallbox and the household this adds up to the
+  // total consumption again — the household figure subtracts the whole pump.
+  const subMeterKwh = [bucket.heatHeatingTotal, bucket.hotWaterTotal].filter(
+    (v): v is number => v !== null,
+  );
+  const heatPumpRestKwh =
+    bucket.heatPumpTotal === null
+      ? null
+      : Math.max(0, bucket.heatPumpTotal - subMeterKwh.reduce((a, b) => a + b, 0));
+  const heatPumpRest = applicationCost(
+    heatPumpRestKwh === null ? null : Math.round(heatPumpRestKwh * 1000) / 1000,
+    null,
+    null,
+    selfPrice,
+    gridPrice,
+  );
+
   const householdKwh = bucket.consumptionWithoutHeatPumpAndEv;
   const householdPv = householdKwh === null ? null : householdPvKwh(bucket, householdKwh);
   const household = applicationCost(
@@ -219,11 +250,16 @@ export function buildUsageCostBucket(
     gridPrice,
   );
 
-  const costs = [heating.costEur, hotWater.costEur, evCharger.costEur, household.costEur].filter(
-    (value): value is number => value !== null,
-  );
+  const costs = [
+    heating.costEur,
+    hotWater.costEur,
+    heatPumpRest.costEur,
+    evCharger.costEur,
+    household.costEur,
+  ].filter((value): value is number => value !== null);
+  // A period with only a standing charge still cost that standing charge.
   const totalCostEur =
-    costs.length === 0
+    costs.length === 0 && prices.baseCostEur === null
       ? null
       : roundMoney(costs.reduce((sum, value) => sum + value, 0) + (prices.baseCostEur ?? 0));
 
@@ -234,6 +270,7 @@ export function buildUsageCostBucket(
     periodEnd: bucket.periodEnd,
     heating,
     hotWater,
+    heatPumpRest,
     evCharger,
     household,
     baseCostEur: roundMoney(prices.baseCostEur),
@@ -273,8 +310,15 @@ export function buildPvEconomicsBuckets(buckets: EnergyReportBucket[]): PvEconom
       pvBenefitEur: benefit,
       cumulativeSavingsEur: sawSavings ? roundMoney(cumulativeSavings) : null,
       cumulativePvBenefitEur: sawBenefit ? roundMoney(cumulativeBenefit) : null,
+      complete: bucket.complete,
     };
   });
+}
+
+/** `YYYY-MM` → running month index. */
+function monthIndexOf(key: string): number {
+  const [year, month] = key.split("-").map(Number);
+  return year * 12 + (month - 1);
 }
 
 function addYears(from: Date, years: number): string {
@@ -305,34 +349,44 @@ export function buildAmortization(
   monthlyBuckets: PvEconomicsBucket[],
   timeline: EnergyTariffTimeline,
 ): PvAmortization | null {
-  const withBenefit = monthlyBuckets.filter((bucket) => bucket.pvBenefitEur !== null);
+  // Only fully measured months: the running month would understate the
+  // benefit, and a month with a gap in the readings is not a month.
+  const withBenefit = monthlyBuckets.filter(
+    (bucket) => bucket.pvBenefitEur !== null && bucket.complete,
+  );
   if (withBenefit.length === 0) return null;
 
-  const investmentNetEur = timeline.amountOf("pv_investment_net");
-  const investmentVatEur = timeline.amountOf("pv_investment_vat");
+  // Investments accumulate — the initial system plus a later extension are
+  // two rows and the household paid both.
+  const investmentNetEur = timeline.sumUntil("pv_investment_net");
+  const investmentVatEur = timeline.sumUntil("pv_investment_vat");
   const expectedReturnRate = timeline.amountOf("expected_return_rate");
   const investmentTotalEur =
     investmentNetEur === null && investmentVatEur === null
       ? null
       : roundMoney((investmentNetEur ?? 0) + (investmentVatEur ?? 0));
 
-  const cumulativePvBenefitEur =
-    withBenefit[withBenefit.length - 1].cumulativePvBenefitEur ?? 0;
+  const cumulativePvBenefitEur = withBenefit.reduce(
+    (sum, bucket) => sum + (bucket.pvBenefitEur ?? 0),
+    0,
+  );
 
-  const first = withBenefit[0];
   const last = withBenefit[withBenefit.length - 1];
-  const yearsElapsed =
-    (new Date(last.periodEnd).getTime() - new Date(first.periodStart).getTime()) /
-    (DAYS_PER_YEAR * 86_400_000);
+  // Benefit and opportunity cost share one time basis: the months that were
+  // actually measured. Counting the opportunity cost across a gap in the
+  // readings while the benefit of that gap is unknown would tilt the balance.
+  const measuredMonths = withBenefit.length;
+  const yearsElapsed = measuredMonths / 12;
 
-  const benefitLast12MonthsEur =
-    withBenefit.length >= 12
-      ? roundMoney(
-          withBenefit
-            .slice(-12)
-            .reduce((sum, bucket) => sum + (bucket.pvBenefitEur ?? 0), 0),
-        )
-      : null;
+  // The last twelve months must be consecutive — twelve measured months
+  // spread over three years are not a yearly benefit.
+  const lastTwelve = withBenefit.slice(-12);
+  const contiguous =
+    lastTwelve.length === 12 &&
+    monthIndexOf(lastTwelve[11].key) - monthIndexOf(lastTwelve[0].key) === 11;
+  const benefitLast12MonthsEur = contiguous
+    ? roundMoney(lastTwelve.reduce((sum, bucket) => sum + (bucket.pvBenefitEur ?? 0), 0))
+    : null;
 
   const remainingEur =
     investmentTotalEur === null ? null : roundMoney(investmentTotalEur - cumulativePvBenefitEur);
@@ -369,6 +423,7 @@ export function buildAmortization(
     remainingEur,
     remainingWithOpportunityEur,
     benefitLast12MonthsEur,
+    measuredMonths,
     yearsElapsed: Math.round(yearsElapsed * 100) / 100,
     payoffReached: remainingEur !== null && remainingEur <= 0,
     projectedPayoffDate: canProject
@@ -405,7 +460,8 @@ function sumApplication(buckets: UsageCostBucket[], pick: (b: UsageCostBucket) =
 /**
  * Water cost per period. Sewage is billed on the same metered volume as fresh
  * water, so both rates apply to it; the standing charge is prorated across
- * month boundaries like the electricity one.
+ * month boundaries like the electricity one. A garden meter gets neither
+ * sewage nor the standing charge (`options`).
  */
 export function buildWaterCostReport(
   meterId: number,
@@ -413,23 +469,22 @@ export function buildWaterCostReport(
   unit: string,
   buckets: MeterReportBucket[],
   timeline: EnergyTariffTimeline,
+  options: { standingCharge?: boolean; sewage?: boolean } = {},
 ): WaterCostReport {
+  const standingCharge = options.standingCharge ?? true;
+  const sewage = options.sewage ?? true;
   const costBuckets = buckets.map((bucket): WaterCostBucket => {
     const waterPrice = timeline.weightedAmountForPeriod(
       "water_price",
       bucket.periodStart,
       bucket.periodEnd,
     );
-    const sewagePrice = timeline.weightedAmountForPeriod(
-      "sewage_price",
-      bucket.periodStart,
-      bucket.periodEnd,
-    );
-    const baseCostEur = timeline.monthlyChargeForPeriod(
-      "water_base_price",
-      bucket.periodStart,
-      bucket.periodEnd,
-    );
+    const sewagePrice = sewage
+      ? timeline.weightedAmountForPeriod("sewage_price", bucket.periodStart, bucket.periodEnd)
+      : null;
+    const baseCostEur = standingCharge
+      ? timeline.monthlyChargeForPeriod("water_base_price", bucket.periodStart, bucket.periodEnd)
+      : null;
 
     const waterCostEur = waterPrice === null ? null : bucket.consumption * waterPrice;
     const sewageCostEur = sewagePrice === null ? null : bucket.consumption * sewagePrice;
@@ -484,6 +539,7 @@ export async function getEconomicsReportForUser(
   const hasTariffs = timeline.hasCostTariffs();
 
   const pvBuckets = buildPvEconomicsBuckets(report.buckets);
+  const completePvBuckets = pvBuckets.filter((bucket) => bucket.complete);
   const monthlyPvBuckets =
     monthlyReport === report ? pvBuckets : buildPvEconomicsBuckets(monthlyReport.buckets);
   const amortization = hasTariffs ? buildAmortization(monthlyPvBuckets, timeline) : null;
@@ -493,11 +549,20 @@ export async function getEconomicsReportForUser(
     : [];
 
   const hasWaterTariffs =
-    timeline.amountOf("water_price") !== null || timeline.amountOf("sewage_price") !== null;
+    timeline.amountOf("water_price") !== null ||
+    timeline.amountOf("sewage_price") !== null ||
+    timeline.amountOf("water_base_price") !== null;
   const water: WaterCostReport[] = [];
   if (hasWaterTariffs) {
-    for (const meter of await listMeters(userId)) {
-      if (meter.type !== "water") continue;
+    const waterMeters = (await listMeters(userId)).filter((meter) => meter.type === "water");
+    // The standing charge is billed once per connection: on the meter with
+    // the role `water_main`, or on the first water meter if no role is set.
+    // A garden meter (`water_garden`) pays neither the charge nor sewage.
+    const mainMeterId =
+      waterMeters.find((meter) => meter.role === "water_main")?.id ??
+      waterMeters.find((meter) => meter.role !== "water_garden")?.id ??
+      null;
+    for (const meter of waterMeters) {
       const meterReport = await getMeterReportForUser(
         userId,
         meter.id,
@@ -506,7 +571,10 @@ export async function getEconomicsReportForUser(
         toDate,
       );
       water.push(
-        buildWaterCostReport(meter.id, meter.name, meter.unit, meterReport.buckets, timeline),
+        buildWaterCostReport(meter.id, meter.name, meter.unit, meterReport.buckets, timeline, {
+          standingCharge: meter.id === mainMeterId,
+          sewage: meter.role !== "water_garden",
+        }),
       );
     }
   }
@@ -520,10 +588,14 @@ export async function getEconomicsReportForUser(
     hasInvestmentData: amortization?.investmentTotalEur !== null && amortization !== null,
     pv: {
       buckets: pvBuckets,
-      totalSavingsEur: sumOf(pvBuckets.map((bucket) => bucket.savingsEur)),
-      totalPvBenefitEur: sumOf(pvBuckets.map((bucket) => bucket.pvBenefitEur)),
-      totalNetElectricityCostEur: sumOf(pvBuckets.map((bucket) => bucket.netElectricityCostEur)),
-      totalNoPvElectricityCostEur: sumOf(pvBuckets.map((bucket) => bucket.noPvElectricityCostEur)),
+      // Like the energy report: only fully measured periods add up, a
+      // half-read month would otherwise pull the totals down.
+      totalSavingsEur: sumOf(completePvBuckets.map((bucket) => bucket.savingsEur)),
+      totalPvBenefitEur: sumOf(completePvBuckets.map((bucket) => bucket.pvBenefitEur)),
+      totalNetElectricityCostEur: sumOf(completePvBuckets.map((bucket) => bucket.netElectricityCostEur)),
+      totalNoPvElectricityCostEur: sumOf(
+        completePvBuckets.map((bucket) => bucket.noPvElectricityCostEur),
+      ),
       amortization,
     },
     usageCosts: {
@@ -531,6 +603,7 @@ export async function getEconomicsReportForUser(
       totals: {
         heating: sumApplication(usageBuckets, (bucket) => bucket.heating),
         hotWater: sumApplication(usageBuckets, (bucket) => bucket.hotWater),
+        heatPumpRest: sumApplication(usageBuckets, (bucket) => bucket.heatPumpRest),
         evCharger: sumApplication(usageBuckets, (bucket) => bucket.evCharger),
         household: sumApplication(usageBuckets, (bucket) => bucket.household),
         baseCostEur: sumOf(usageBuckets.map((bucket) => bucket.baseCostEur)),

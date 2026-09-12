@@ -8,10 +8,11 @@
  * **rolling 12-month sum**, in which the seasons cancel out.
  */
 
-import { listMeters, type MeterListItem } from "./meter.service";
+import { listMeters } from "./meter.service";
 import {
   buildEnergyReportFromMeterReports,
   getMeterReportForUser,
+  resolveRoleMeters,
   roundReportValue,
   COMPLETE_COVERAGE_THRESHOLD,
   type EnergyReportRole,
@@ -21,8 +22,16 @@ import {
 /** Relative change below which a trend counts as flat rather than a direction. */
 const STABLE_BAND = 0.02;
 
-/** Minimum rolling-12 points before a regression slope is meaningful. */
-const MIN_SLOPE_POINTS = 3;
+/**
+ * Minimum rolling-12 points before a regression slope is meaningful.
+ * Consecutive rolling windows overlap by eleven months, so three of them are
+ * almost one observation; six (17 months of data) is the least that can be
+ * called a direction.
+ */
+export const MIN_SLOPE_POINTS = 6;
+
+/** What the reported direction is based on. */
+export type TrendDirectionBasis = "year_over_year" | "regression" | "none";
 
 export type TrendDirection = "rising" | "falling" | "stable" | "unknown";
 
@@ -50,7 +59,11 @@ export interface ConsumptionTrend {
   changePercent: number | null;
   /** Change of the annual total per year, from a regression over rolling12. */
   slopePerYear: number | null;
+  /** Rolling-12 points the regression ran over. */
+  trendPoints: number;
   direction: TrendDirection;
+  /** Whether the direction compares two full years or reads the regression. */
+  directionBasis: TrendDirectionBasis;
   monthsAvailable: number;
   rangeStart: string | null;
   rangeEnd: string | null;
@@ -97,20 +110,44 @@ function monthEndIso(key: string): string {
   ).toISOString();
 }
 
-export function linearRegressionSlope(values: number[]): number | null {
-  if (values.length < MIN_SLOPE_POINTS) return null;
-  const n = values.length;
-  const meanX = (n - 1) / 2;
-  const meanY = values.reduce((sum, value) => sum + value, 0) / n;
+/**
+ * Least-squares slope of y over x. The caller chooses x: for a contiguous
+ * monthly series the index will do, for anything with gaps it has to be time —
+ * a regression over list positions squeezes a missing year out of the axis
+ * and overstates the slope.
+ */
+export function linearRegressionSlopeOverTime(
+  points: Array<{ x: number; y: number }>,
+  minPoints = MIN_SLOPE_POINTS,
+): number | null {
+  if (points.length < minPoints) return null;
+  const n = points.length;
+  const meanX = points.reduce((sum, p) => sum + p.x, 0) / n;
+  const meanY = points.reduce((sum, p) => sum + p.y, 0) / n;
   let numerator = 0;
   let denominator = 0;
-  values.forEach((value, index) => {
-    const dx = index - meanX;
-    numerator += dx * (value - meanY);
+  for (const point of points) {
+    const dx = point.x - meanX;
+    numerator += dx * (point.y - meanY);
     denominator += dx * dx;
-  });
+  }
   if (denominator === 0) return null;
   return numerator / denominator;
+}
+
+/** Slope per step of a contiguous, equally spaced series. */
+export function linearRegressionSlope(values: number[], minPoints = MIN_SLOPE_POINTS): number | null {
+  return linearRegressionSlopeOverTime(
+    values.map((y, x) => ({ x, y })),
+    minPoints,
+  );
+}
+
+const MS_PER_YEAR = 365.25 * 86_400_000;
+
+/** A period's position on a time axis measured in years, for regressions with gaps. */
+export function yearsAt(periodStart: string): number {
+  return new Date(periodStart).getTime() / MS_PER_YEAR;
 }
 
 export function computeConsumptionTrend(
@@ -139,7 +176,9 @@ export function computeConsumptionTrend(
     changeAbsolute: null,
     changePercent: null,
     slopePerYear: null,
+    trendPoints: 0,
     direction: "unknown",
+    directionBasis: "none",
     monthsAvailable: measured.size,
     rangeStart: null,
     rangeEnd: null,
@@ -205,6 +244,7 @@ export function computeConsumptionTrend(
       : null;
 
   let direction: TrendDirection = "unknown";
+  let directionBasis: TrendDirectionBasis = "none";
   const relative =
     changePercent ??
     (slopePerYear !== null && current12 !== null && current12 > 0
@@ -212,6 +252,7 @@ export function computeConsumptionTrend(
       : null);
   if (relative !== null) {
     direction = Math.abs(relative) < STABLE_BAND ? "stable" : relative > 0 ? "rising" : "falling";
+    directionBasis = changePercent !== null ? "year_over_year" : "regression";
   }
 
   const rangeStartPos = Math.max(0, lastRollingPos - 11);
@@ -226,7 +267,9 @@ export function computeConsumptionTrend(
     changeAbsolute,
     changePercent,
     slopePerYear,
+    trendPoints: tail.length,
     direction,
+    directionBasis,
     monthsAvailable: measured.size,
     rangeStart: monthStartIso(points[rangeStartPos].key),
     rangeEnd: monthEndIso(points[lastRollingPos].key),
@@ -255,15 +298,22 @@ export async function getConsumptionTrendsForUser(
   userId: number,
 ): Promise<ConsumptionTrendsReport> {
   const visibleMeters = await listMeters(userId);
+  const { roleMeters } = await resolveRoleMeters(userId);
 
-  const roleMeters = new Map<EnergyReportRole, MeterListItem>();
-  for (const meter of visibleMeters) {
-    if (meter.role && !roleMeters.has(meter.role)) roleMeters.set(meter.role, meter);
-  }
+  // One report per meter, whatever role or type asks for it.
+  const reportCache = new Map<number, Promise<MeterReport>>();
+  const reportFor = (meterId: number) => {
+    let pending = reportCache.get(meterId);
+    if (!pending) {
+      pending = getMeterReportForUser(userId, meterId, "month", null, null);
+      reportCache.set(meterId, pending);
+    }
+    return pending;
+  };
 
   const reports: Partial<Record<EnergyReportRole, MeterReport>> = {};
   for (const [role, meter] of roleMeters) {
-    reports[role] = await getMeterReportForUser(userId, meter.id, "month", null, null);
+    reports[role] = await reportFor(meter.id);
   }
 
   const trends: ConsumptionTrend[] = [];
@@ -290,10 +340,12 @@ export async function getConsumptionTrendsForUser(
     );
   }
 
+  const tiled = new Set<number>();
   for (const { role, key, label } of ROLE_TRENDS) {
     const report = reports[role];
     const meter = roleMeters.get(role);
     if (!report || !meter) continue;
+    tiled.add(meter.id);
     trends.push(
       computeConsumptionTrend(
         key,
@@ -306,10 +358,12 @@ export async function getConsumptionTrendsForUser(
     );
   }
 
-  // Water and gas have no roles — every visible meter gets its own tile.
+  // Water and gas meters get their own tile — unless a role already gave
+  // them one (a gas heating meter with the heating role).
   for (const meter of visibleMeters) {
     if (meter.type !== "water" && meter.type !== "gas") continue;
-    const report = await getMeterReportForUser(userId, meter.id, "month", null, null);
+    if (tiled.has(meter.id)) continue;
+    const report = await reportFor(meter.id);
     trends.push(
       computeConsumptionTrend(
         `meter:${meter.id}`,

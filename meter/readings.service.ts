@@ -18,7 +18,7 @@ import { APIError } from "encore.dev/api";
 import db from "../db/database";
 import { dbAll, dbFirst } from "../db/adapter";
 import { meterDevices, meterReadings } from "../db/schema";
-import { loadVisibleMeter } from "./meter.service";
+import { loadDeviceOffsets, loadVisibleMeter } from "./meter.service";
 import { countLinkedTransactions } from "./reading-transactions.service";
 
 export interface ReadingDto {
@@ -60,31 +60,11 @@ function toIso(value: string, field: string): string {
   return d.toISOString();
 }
 
-/**
- * Per-device base offset: the summed consumption of every device installed
- * before it. Only closed devices (end_value set) precede another device, so
- * the offset is deterministic without needing per-device readings.
- */
+/** Per-device base offset + serial, see `loadDeviceOffsets` in meter.service. */
 async function deviceBaseOffsets(
   meterId: number,
 ): Promise<Map<number, { baseOffset: number; startValue: number; serial: string | null }>> {
-  const devices = await dbAll<typeof meterDevices.$inferSelect>(
-    db
-      .select()
-      .from(meterDevices)
-      .where(eq(meterDevices.meter_id, meterId))
-      .orderBy(asc(meterDevices.installed_at), asc(meterDevices.id)),
-  );
-  const map = new Map<number, { baseOffset: number; startValue: number; serial: string | null }>();
-  let running = 0;
-  for (const d of devices) {
-    const startValue = parseFloat(d.start_value);
-    map.set(d.id, { baseOffset: running, startValue, serial: d.serial_number });
-    if (d.end_value !== null) {
-      running += parseFloat(d.end_value) - startValue;
-    }
-  }
-  return map;
+  return (await loadDeviceOffsets(meterId)).offsets;
 }
 
 /** Active (currently installed) device of a metering point, or throw. */
