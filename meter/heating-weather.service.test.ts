@@ -16,6 +16,7 @@ function month(key: string, consumption: number, coverage = 1): MeterReportBucke
     consumption,
     intervals: 1,
     coverage,
+    meanIntervalDays: 30,
     previousConsumption: null,
     deltaAbsolute: null,
     deltaPercent: null,

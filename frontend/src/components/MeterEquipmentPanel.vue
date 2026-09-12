@@ -9,7 +9,8 @@
 import { computed } from 'vue'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
-import type { EquipmentReport } from '../api/meters'
+import type { EquipmentReport, OperatingHoursMetric } from '../api/meters'
+import { METER_ROLE_LABELS } from '../api/meters'
 
 const props = defineProps<{
   report: EquipmentReport | null
@@ -42,6 +43,26 @@ const runtimeRows = computed(() =>
     .sort((a, b) => (b.averageRuntimeShare ?? 0) - (a.averageRuntimeShare ?? 0)),
 )
 
+/** Periods in which more hours were counted than there were. */
+function implausiblePeriods(metric: OperatingHoursMetric) {
+  return metric.buckets.filter((bucket) => bucket.implausible).map((bucket) => bucket.label)
+}
+
+const missingRoleLabels = computed(() =>
+  (props.report?.missingRoles ?? []).map((role) => METER_ROLE_LABELS[role]),
+)
+const duplicateRoleLabels = computed(() =>
+  (props.report?.duplicateRoles ?? []).map((role) => METER_ROLE_LABELS[role]),
+)
+
+/** Name of the period a key belongs to, for "in 2025" / "im 03.2026". */
+function periodName(key: string | null) {
+  if (!key) return ''
+  if (/^\d{4}$/.test(key)) return key
+  if (/^\d{4}-\d{2}$/.test(key)) return `${key.slice(5)}.${key.slice(0, 4)}`
+  return key
+}
+
 const hasAnything = computed(
   () =>
     compressor.value !== null ||
@@ -63,7 +84,12 @@ function riskClass(value: number | null | undefined) {
       <h2><i class="pi pi-wrench" /> Anlagenzustand</h2>
       <p>
         Frühindikatoren, die in den Verbrauchssummen untergehen. Teilweise abgelesene
-        Perioden bleiben unberücksichtigt.
+        Perioden bleiben unberücksichtigt; Vergleiche laufen immer gegen dieselbe Periode
+        des Vorjahres.
+      </p>
+      <p v-if="duplicateRoleLabels.length > 0" class="equipment-warn">
+        Mehrere Zähler tragen dieselbe Rolle ({{ duplicateRoleLabels.join(', ') }}) — verwendet
+        wird jeweils nur der erste.
       </p>
     </div>
 
@@ -79,12 +105,12 @@ function riskClass(value: number | null | undefined) {
           <div class="figure-tile">
             <span class="tile-label">Aktuell</span>
             <strong class="tile-value">{{ fmt(compressor.latestKwhPerHour, 2) }} kWh/h</strong>
-            <span class="tile-sub">letzte vollständig gemessene Periode</span>
+            <span class="tile-sub">{{ periodName(compressor.latestKey) }}, letzte vollständig gemessene Periode</span>
           </div>
           <div class="figure-tile">
-            <span class="tile-label">Zu Beginn</span>
-            <strong class="tile-value">{{ fmt(compressor.earliestKwhPerHour, 2) }} kWh/h</strong>
-            <span class="tile-sub">erste vollständig gemessene Periode</span>
+            <span class="tile-label">Vorjahr</span>
+            <strong class="tile-value">{{ fmt(compressor.previousYearKwhPerHour, 2) }} kWh/h</strong>
+            <span class="tile-sub">dieselbe Periode ein Jahr früher</span>
           </div>
           <div class="figure-tile">
             <span class="tile-label">Veränderung</span>
@@ -92,10 +118,18 @@ function riskClass(value: number | null | undefined) {
               {{ fmtPercent(compressor.changePercent, true) }}
             </strong>
             <span class="tile-sub">
-              steigend = mehr Strom für dieselbe Laufstunde
+              <template v-if="compressor.changePercent === null">noch kein Vorjahreswert</template>
+              <template v-else>steigend = mehr Strom für dieselbe Laufstunde</template>
+              <template v-if="compressor.slopePerYear !== null">
+                · Trend {{ fmt(compressor.slopePerYear, 3) }} kWh/h je Jahr
+              </template>
             </span>
           </div>
         </div>
+        <p class="equipment-note">
+          Perioden, in denen der Verdichter kaum lief (Sommer, nur Warmwasser), bleiben
+          außen vor — dort misst der Wert Stand-by und Anläufe, nicht den Zustand der Pumpe.
+        </p>
       </div>
 
       <!-- PV yield -->
@@ -103,23 +137,41 @@ function riskClass(value: number | null | undefined) {
         <h3>PV-Ertrag je kWp</h3>
         <div class="figures-row">
           <div class="figure-tile">
-            <span class="tile-label">Aktuell</span>
+            <span class="tile-label">Jahr {{ periodName(pvYield.latestKey) }}</span>
             <strong class="tile-value">{{ fmt(pvYield.latestYieldPerKwp, 0) }} kWh/kWp</strong>
-            <span class="tile-sub">bei {{ fmt(pvYield.capacityKwp, 1) }} kWp Anlagenleistung</span>
+            <span class="tile-sub">letztes vollständig gemessenes Kalenderjahr, {{ fmt(pvYield.capacityKwp, 1) }} kWp</span>
           </div>
           <div class="figure-tile">
-            <span class="tile-label">Bester Wert</span>
-            <strong class="tile-value">{{ fmt(pvYield.bestYieldPerKwp, 0) }} kWh/kWp</strong>
-            <span class="tile-sub">bisheriges Maximum</span>
-          </div>
-          <div class="figure-tile">
-            <span class="tile-label">Abstand zum Besten</span>
-            <strong class="tile-value" :class="riskClass(-(pvYield.changeVsBestPercent ?? 0))">
-              {{ fmtPercent(pvYield.changeVsBestPercent, true) }}
+            <span class="tile-label">Gegenüber Vorjahr</span>
+            <strong class="tile-value" :class="riskClass(-(pvYield.changeVsPreviousYearPercent ?? 0))">
+              {{ fmtPercent(pvYield.changeVsPreviousYearPercent, true) }}
             </strong>
-            <span class="tile-sub">deutlicher Abfall = Verschmutzung oder Degradation</span>
+            <span class="tile-sub">
+              <template v-if="pvYield.previousYearYieldPerKwp !== null">
+                Vorjahr {{ fmt(pvYield.previousYearYieldPerKwp, 0) }} kWh/kWp — enthält das Wetter beider Jahre
+              </template>
+              <template v-else>noch kein vollständiges Vorjahr</template>
+            </span>
+          </div>
+          <div class="figure-tile">
+            <span class="tile-label">Gegenüber Median</span>
+            <strong class="tile-value" :class="riskClass(-(pvYield.changeVsMedianPercent ?? 0))">
+              {{ fmtPercent(pvYield.changeVsMedianPercent, true) }}
+            </strong>
+            <span class="tile-sub">
+              <template v-if="pvYield.medianYieldPerKwp !== null">
+                Median der übrigen Jahre {{ fmt(pvYield.medianYieldPerKwp, 0) }} kWh/kWp,
+                bestes Jahr {{ fmt(pvYield.bestYieldPerKwp, 0) }}
+              </template>
+              <template v-else>erst ab zwei vollständigen Jahren</template>
+            </span>
           </div>
         </div>
+        <p class="equipment-note">
+          Immer je Kalenderjahr, damit ein sonniger Sommer nicht gegen einen Winter steht.
+          Ein deutlicher Abfall über mehrere Jahre deutet auf Verschmutzung oder Degradation;
+          ein einzelnes Jahr unter dem Median ist meist nur Wetter.
+        </p>
       </div>
 
       <!-- Water baseline -->
@@ -128,13 +180,20 @@ function riskClass(value: number | null | undefined) {
         <p class="equipment-note">
           Der kleinste Tagesverbrauch einer Periode. Steigt dieser Boden, während der
           Gesamtverbrauch gleich bleibt, deutet das auf einen laufenden Spülkasten oder
-          ein Leck hin.
+          ein Leck hin. Dafür müssen die Ablesungen höchstens eine Woche auseinanderliegen —
+          mit einer Ablesung pro Monat ist das Minimum der Durchschnitt und sagt nichts.
         </p>
         <DataTable :value="waterBaselines" size="small" class="equipment-table">
           <Column field="name" header="Zähler" />
           <Column header="Grundlast aktuell">
             <template #body="{ data }">
-              {{ fmt(data.latestMinDailyRate, 3) }} {{ data.unit }}/Tag
+              <template v-if="data.tooSparse">
+                <span class="muted">zu wenige Ablesungen</span>
+              </template>
+              <template v-else>
+                {{ fmt(data.latestMinDailyRate, 3) }} {{ data.unit }}/Tag
+                <span v-if="data.latestKey" class="muted">({{ periodName(data.latestKey) }})</span>
+              </template>
             </template>
           </Column>
           <Column header="Vorjahr">
@@ -149,6 +208,15 @@ function riskClass(value: number | null | undefined) {
               </span>
             </template>
           </Column>
+          <Column header="Ablesungen">
+            <template #body="{ data }">
+              <template v-if="data.buckets.length > 0">
+                {{ data.buckets[data.buckets.length - 1].intervals }} Intervalle,
+                kürzestes {{ fmt(data.buckets[data.buckets.length - 1].shortestIntervalDays, 0) }} Tage
+              </template>
+              <span v-else class="muted">–</span>
+            </template>
+          </Column>
         </DataTable>
       </div>
 
@@ -158,13 +226,25 @@ function riskClass(value: number | null | undefined) {
         <DataTable :value="runtimeRows" size="small" class="equipment-table">
           <Column field="name" header="Aggregat" />
           <Column header="Ø Laufzeitanteil">
-            <template #body="{ data }">{{ fmtPercent(data.averageRuntimeShare) }}</template>
+            <template #body="{ data }">
+              {{ fmtPercent(data.averageRuntimeShare) }}
+              <i
+                v-if="implausiblePeriods(data).length > 0"
+                class="pi pi-exclamation-triangle warning-marker"
+                v-tooltip.top="`Mehr Stunden gezählt, als der Zeitraum hat — vermutlich ein Ablesefehler: ${implausiblePeriods(data).join(', ')}`"
+              />
+            </template>
           </Column>
           <Column header="Betriebsstunden gesamt">
             <template #body="{ data }">{{ fmt(data.totalHours, 0) }} {{ data.unit }}</template>
           </Column>
         </DataTable>
+        <p class="equipment-note">Gewichtet nach Periodenlänge, nur vollständig gemessene Perioden.</p>
       </div>
+
+      <p v-if="missingRoleLabels.length > 0" class="equipment-note">
+        Für weitere Kennzahlen fehlen Zählerrollen: {{ missingRoleLabels.join(', ') }}.
+      </p>
     </template>
   </section>
 </template>
@@ -254,5 +334,19 @@ function riskClass(value: number | null | undefined) {
 
 .equipment-table {
   margin-top: 0.25rem;
+}
+
+.equipment-warn {
+  color: var(--p-tag-warn-color);
+}
+
+.warning-marker {
+  margin-left: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--p-tag-warn-color);
+}
+
+.muted {
+  color: var(--p-text-muted-color);
 }
 </style>

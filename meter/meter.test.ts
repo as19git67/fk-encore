@@ -442,3 +442,31 @@ describe("PUT/DELETE /meters/devices/:deviceId", () => {
     });
   });
 });
+
+describe("buildDeviceOffsets", () => {
+  it("chains a device closed without an end value through its latest reading", async () => {
+    const { buildDeviceOffsets } = await import("./meter.service");
+    const offsets = buildDeviceOffsets(
+      [
+        { id: 1, start_value: "102", end_value: null, removed_at: "2025-03-21T00:00:00Z", serial_number: "OLD" },
+        { id: 2, start_value: "3", end_value: null, removed_at: null, serial_number: "NEW" },
+      ],
+      new Map([[1, 734]]),
+    );
+    expect(offsets.get(2)).toMatchObject({ baseOffset: 632, startValue: 3 });
+  });
+
+  it("prefers the recorded end value and ignores readings of an active device", async () => {
+    const { buildDeviceOffsets } = await import("./meter.service");
+    const offsets = buildDeviceOffsets(
+      [
+        { id: 1, start_value: "0", end_value: "500", removed_at: "2025-01-01T00:00:00Z", serial_number: null },
+        { id: 2, start_value: "0", end_value: null, removed_at: null, serial_number: null },
+        { id: 3, start_value: "0", end_value: null, removed_at: null, serial_number: null },
+      ],
+      new Map([[1, 999], [2, 50]]),
+    );
+    expect(offsets.get(2)?.baseOffset).toBe(500);
+    expect(offsets.get(3)?.baseOffset).toBe(500);
+  });
+});

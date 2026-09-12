@@ -14,6 +14,7 @@ import type {
   ComparisonsReport,
   CostRange,
   ElectricityTariffUnit,
+  HeatSource,
 } from '../api/meters'
 import { ELECTRICITY_TARIFF_UNIT_LABELS } from '../api/meters'
 
@@ -46,10 +47,50 @@ function fmtRange(range: CostRange) {
   return `${fmtEur(range.low)} – ${fmtEur(range.high)}`
 }
 
-function fmtAssumption(assumption: ComparisonAssumption) {
+function fmtAmount(assumption: ComparisonAssumption) {
   const unit = ELECTRICITY_TARIFF_UNIT_LABELS[assumption.unit as ElectricityTariffUnit] ?? ''
   const decimals = assumption.amount < 1 ? 3 : 1
-  return `${assumption.label}: ${fmtNumber(assumption.amount, decimals)} ${unit}`.trim()
+  return `${fmtNumber(assumption.amount, decimals)} ${unit}`.trim()
+}
+
+function fmtMonth(iso: string) {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+  return date.toLocaleDateString('de-DE', { month: '2-digit', year: 'numeric' })
+}
+
+/** One line per assumption kind; a series of values lists each with its start. */
+interface AssumptionLine {
+  kind: string
+  label: string
+  text: string
+}
+
+function assumptionLines(assumptions: ComparisonAssumption[]): AssumptionLine[] {
+  const byKind = new Map<string, ComparisonAssumption[]>()
+  for (const assumption of assumptions) {
+    const list = byKind.get(assumption.kind) ?? []
+    list.push(assumption)
+    byKind.set(assumption.kind, list)
+  }
+  return [...byKind.entries()].map(([kind, entries]) => {
+    const sorted = [...entries].sort((a, b) => a.validFrom.localeCompare(b.validFrom))
+    const text =
+      sorted.length === 1
+        ? fmtAmount(sorted[0]!)
+        : sorted.map((entry) => `${fmtAmount(entry)} ab ${fmtMonth(entry.validFrom)}`).join(', ')
+    return { kind, label: sorted[0]!.label, text }
+  })
+}
+
+const HEAT_SOURCE_NOTES: Record<HeatSource, string | null> = {
+  sub_meters: null,
+  heat_pump_total:
+    'Grundlage ist der Zähler „Wärmepumpe gesamt“ ohne PV-Unterzähler — der gesamte Strom wird zum Netzpreis bewertet, die Stromkosten sind daher eher zu hoch.',
+  heating_only:
+    'Nur der Heizungs-Unterzähler ist vorhanden; das Warmwasser fehlt in beiden Seiten des Vergleichs.',
+  hot_water_only:
+    'Nur der Warmwasser-Unterzähler ist vorhanden; die Heizung fehlt in beiden Seiten des Vergleichs.',
 }
 
 /** "MM.YYYY – MM.YYYY", or a single month when start and end fall in the same one. */
@@ -69,16 +110,32 @@ function fmtPeriod(start: string | null, end: string | null) {
 const heating = computed(() => props.report?.heating ?? null)
 const car = computed(() => props.report?.car ?? null)
 
-const allAssumptions = computed(() => {
-  const seen = new Map<string, ComparisonAssumption>()
-  for (const assumption of [
-    ...(heating.value?.assumptions ?? []),
-    ...(car.value?.assumptions ?? []),
-  ]) {
-    seen.set(assumption.kind, assumption)
-  }
-  return [...seen.values()]
-})
+const allAssumptions = computed(() =>
+  assumptionLines([...(heating.value?.assumptions ?? []), ...(car.value?.assumptions ?? [])]),
+)
+
+const heatSourceNote = computed(() =>
+  heating.value?.heatSource ? HEAT_SOURCE_NOTES[heating.value.heatSource] : null,
+)
+
+/** "3 Monate" / "2 Jahre" — how many periods both sides were known for. */
+function comparedLabel(count: number) {
+  const unit =
+    props.report?.granularity === 'year'
+      ? count === 1 ? 'Jahr' : 'Jahre'
+      : props.report?.granularity === 'week'
+        ? count === 1 ? 'Woche' : 'Wochen'
+        : props.report?.granularity === 'day'
+          ? count === 1 ? 'Tag' : 'Tage'
+          : count === 1 ? 'Monat' : 'Monate'
+  return `${count} ${unit}`
+}
+
+function fmtCo2Range(range: CostRange) {
+  if (range.mid === null) return '–'
+  if (range.low === null || range.high === null) return `${fmtNumber(range.mid)} kg`
+  return `${fmtNumber(Math.min(range.low, range.high))} – ${fmtNumber(Math.max(range.low, range.high))} kg`
+}
 
 const nothingConfigured = computed(
   () => props.report !== null && heating.value === null && car.value === null,
@@ -97,7 +154,9 @@ function savingWord(value: number | null) {
       <h2><i class="pi pi-arrows-h" /> Vergleichsrechnungen</h2>
       <p>
         Modellrechnungen: nur die Stromseite ist gemessen, die Gegenrechnung beruht auf
-        Annahmen.
+        Annahmen. Der Netzanteil des Stroms zählt zum Arbeitspreis, der PV-Anteil zur
+        Einspeisevergütung, die er stattdessen gebracht hätte. Nur vollständig gemessene
+        Zeiträume, in denen beide Seiten bekannt sind, gehen in die Summen ein.
       </p>
     </div>
 
@@ -117,14 +176,15 @@ function savingWord(value: number | null) {
         <h3>
           Wärmepumpe statt Gasheizung
           <span v-if="fmtPeriod(heating.periodStart, heating.periodEnd)" class="comparison-period">
-            {{ fmtPeriod(heating.periodStart, heating.periodEnd) }}
+            {{ fmtPeriod(heating.periodStart, heating.periodEnd) }} ·
+            {{ comparedLabel(heating.comparedPeriods) }} verglichen
           </span>
         </h3>
         <div class="figures-row">
           <div class="figure-tile">
-            <span class="tile-label">Tatsächliche Stromkosten</span>
+            <span class="tile-label">Stromkosten Wärmepumpe</span>
             <strong class="tile-value">{{ fmtEur(heating.totalHeatPumpCostEur) }}</strong>
-            <span class="tile-sub">Heizung + Warmwasser</span>
+            <span class="tile-sub">{{ fmtNumber(heating.totalHeatPumpKwh) }} kWh · Netzanteil zum Arbeitspreis, PV-Anteil zur Einspeisevergütung</span>
           </div>
           <div class="figure-tile">
             <span class="tile-label">Gasheizung hätte gekostet</span>
@@ -145,9 +205,11 @@ function savingWord(value: number | null) {
             </span>
           </div>
         </div>
+        <p v-if="heatSourceNote" class="comparison-note">{{ heatSourceNote }}</p>
         <p v-if="heating.avoidedCo2Kg !== null" class="comparison-note">
-          Vermiedenes CO₂ gegenüber der Gasheizung:
-          {{ fmtNumber(heating.avoidedCo2Kg) }} kg (Netzanteil der Wärmepumpe gegengerechnet).
+          Vermiedenes CO₂ gegenüber der Gasheizung: {{ fmtCo2Range(heating.avoidedCo2Range) }}
+          (Bandbreite über die JAZ; nur der Netzanteil des Wärmepumpenstroms wird als
+          Emission gegengerechnet).
         </p>
       </div>
 
@@ -156,13 +218,14 @@ function savingWord(value: number | null) {
         <h3>
           E-Auto statt Benziner
           <span v-if="fmtPeriod(car.periodStart, car.periodEnd)" class="comparison-period">
-            {{ fmtPeriod(car.periodStart, car.periodEnd) }}
+            {{ fmtPeriod(car.periodStart, car.periodEnd) }} ·
+            {{ comparedLabel(car.comparedPeriods) }} verglichen
           </span>
         </h3>
         <div class="figures-row">
           <div class="figure-tile">
             <span class="tile-label">Ladekosten</span>
-            <strong class="tile-value">{{ fmtEur(car.totalEvCostWithOpportunityEur) }}</strong>
+            <strong class="tile-value">{{ fmtEur(car.totalEvCostEur) }}</strong>
             <span class="tile-sub">
               {{ fmtNumber(car.totalChargedKwh) }} kWh ·
               {{ fmtNumber(car.evCentsPerKm, 1) }} ct/km
@@ -187,14 +250,19 @@ function savingWord(value: number | null) {
             </span>
           </div>
         </div>
-        <p v-if="car.totalLostFeedInEur" class="comparison-note">
-          Enthält {{ fmtEur(car.totalEvCostEur) }} gemessene Stromkosten
-          plus {{ fmtEur(car.totalLostFeedInEur) }} entgangene Einspeisevergütung: der
-          PV-Anteil des Ladestroms hätte alternativ eingespeist werden können.
+        <p class="comparison-note">
+          <template v-if="car.chargingLoss > 0">
+            Kilometer aus den Wallbox-kWh abzüglich {{ fmtNumber(car.chargingLoss * 100) }} %
+            Ladeverluste.
+          </template>
+          <template v-else>
+            Kilometer direkt aus den Wallbox-kWh — ohne hinterlegte Ladeverluste werden sie
+            eher überschätzt (Annahme „Ladeverluste E-Auto“).
+          </template>
         </p>
         <p v-if="car.avoidedCo2Kg !== null" class="comparison-note">
           Vermiedenes CO₂ gegenüber dem Benziner: {{ fmtNumber(car.avoidedCo2Kg) }} kg
-          (Netzanteil des Ladestroms gegengerechnet).
+          (nur der Netzanteil des Ladestroms wird als Emission gegengerechnet).
         </p>
       </div>
 
@@ -206,13 +274,14 @@ function savingWord(value: number | null) {
         </button>
         <ul v-if="showAssumptions" class="assumptions-list">
           <li v-for="assumption in allAssumptions" :key="assumption.kind">
-            {{ fmtAssumption(assumption) }}
+            {{ assumption.label }}: {{ assumption.text }}
           </li>
         </ul>
         <Message v-if="showAssumptions" severity="info" :closable="false" class="assumptions-hint">
-          Die Zahlen sind nur so belastbar wie diese Annahmen. Ohne Wärmemengenzähler ist
-          die Jahresarbeitszahl geschätzt — deshalb wird die Gasrechnung als Bandbreite
-          statt als eine Zahl ausgewiesen.
+          Die Zahlen sind nur so belastbar wie diese Annahmen. Jeder Zeitraum rechnet mit
+          dem Wert, der damals galt. Ohne Wärmemengenzähler ist die Jahresarbeitszahl
+          geschätzt — deshalb wird die Gasrechnung als Bandbreite statt als eine Zahl
+          ausgewiesen.
         </Message>
       </div>
     </template>

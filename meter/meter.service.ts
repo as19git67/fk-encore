@@ -13,7 +13,7 @@
  * and, when `group_id` is set, to every member of that group.
  */
 
-import { and, count, desc, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
 import { APIError } from "encore.dev/api";
 import db from "../db/database";
 import { dbAll } from "../db/adapter";
@@ -32,6 +32,8 @@ export const METER_TYPES: readonly MeterType[] = [
   "gas",
   "operating_hours",
 ];
+/** Roles a water meter can take; the rest belong to the electricity picture. */
+export const WATER_METER_ROLES: readonly MeterRole[] = ["water_main", "water_garden"];
 export const METER_ROLES: readonly MeterRole[] = [
   "grid_import",
   "grid_export",
@@ -44,6 +46,8 @@ export const METER_ROLES: readonly MeterRole[] = [
   "ev_charger_total",
   "ev_charger_pv",
   "compressor_hours",
+  "water_main",
+  "water_garden",
 ];
 
 export interface DeviceState {
@@ -64,6 +68,71 @@ export function computeAbsoluteTotal(devices: DeviceState[]): number {
     total += current - d.startValue;
   }
   return total;
+}
+
+export interface DeviceOffset {
+  /** Consumption of every device installed before this one. */
+  baseOffset: number;
+  startValue: number;
+  serial: string | null;
+}
+
+/**
+ * Per-device base offset for the absolute (monotonic) series of a metering
+ * point. A closed device counts with its `end_value`; a device that was
+ * closed without one counts with its latest reading — the schema promises
+ * `end_value ?? latest reading`, and a swap entered by hand without an end
+ * value must not reset the absolute total to zero.
+ */
+export function buildDeviceOffsets(
+  devices: Array<{
+    id: number;
+    start_value: string;
+    end_value: string | null;
+    removed_at: string | null;
+    serial_number: string | null;
+  }>,
+  latestValueByDevice: Map<number, number>,
+): Map<number, DeviceOffset> {
+  const map = new Map<number, DeviceOffset>();
+  let running = 0;
+  for (const device of devices) {
+    const startValue = parseFloat(device.start_value);
+    map.set(device.id, { baseOffset: running, startValue, serial: device.serial_number });
+    if (device.removed_at === null) continue;
+    const endValue =
+      device.end_value !== null ? parseFloat(device.end_value) : latestValueByDevice.get(device.id);
+    if (endValue !== undefined && Number.isFinite(endValue)) running += endValue - startValue;
+  }
+  return map;
+}
+
+/** Devices of a metering point in installation order plus their base offsets. */
+export async function loadDeviceOffsets(
+  meterId: number,
+): Promise<{ devices: Array<typeof meterDevices.$inferSelect>; offsets: Map<number, DeviceOffset> }> {
+  const devices = await dbAll<typeof meterDevices.$inferSelect>(
+    db
+      .select()
+      .from(meterDevices)
+      .where(eq(meterDevices.meter_id, meterId))
+      .orderBy(asc(meterDevices.installed_at), asc(meterDevices.id)),
+  );
+  const latest = new Map<number, number>();
+  const needLatest = devices.filter((d) => d.removed_at !== null && d.end_value === null);
+  if (needLatest.length > 0) {
+    const rows = await dbAll<{ device_id: number; value: string }>(
+      db
+        .select({ device_id: meterReadings.device_id, value: meterReadings.value })
+        .from(meterReadings)
+        .where(inArray(meterReadings.device_id, needLatest.map((d) => d.id)))
+        .orderBy(desc(meterReadings.taken_at), desc(meterReadings.id)),
+    );
+    for (const row of rows) {
+      if (!latest.has(row.device_id)) latest.set(row.device_id, parseFloat(row.value));
+    }
+  }
+  return { devices, offsets: buildDeviceOffsets(devices, latest) };
 }
 
 /** Every group id the user belongs to (visibility scope). */

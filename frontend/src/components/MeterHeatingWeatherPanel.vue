@@ -7,10 +7,14 @@
  * the household's own typical month, clearly labelled as an estimate.
  */
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
+import Button from 'primevue/button'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import type { HeatingWeatherReport } from '../api/meters'
 import MeterHomeLocationCard from './MeterHomeLocationCard.vue'
+
+const router = useRouter()
 
 const props = defineProps<{
   report: HeatingWeatherReport | null
@@ -55,7 +59,17 @@ function riskClass(value: number | null | undefined) {
 <template>
   <section v-if="loading || hasData || canManage" class="heating-card">
     <div class="heating-head">
-      <h2><i class="pi pi-sun" /> Heizung witterungsbereinigt</h2>
+      <div class="heating-title">
+        <h2><i class="pi pi-sun" /> Heizung witterungsbereinigt</h2>
+        <Button
+          label="Was sind Gradtage?"
+          icon="pi pi-question-circle"
+          severity="secondary"
+          text
+          size="small"
+          @click="router.push({ name: 'zaehler-hilfe-gradtage' })"
+        />
+      </div>
       <p v-if="isDegreeDays">
         Heizverbrauch je Gradtag ({{ report?.meterName }}). Der Wert beschreibt Haus und Heizung,
         nicht den Winter: steigt er, wird mehr Strom für dieselbe Kälte gebraucht.
@@ -157,6 +171,13 @@ function riskClass(value: number | null | undefined) {
   border-radius: 12px;
   padding: 1rem 1.25rem 1.25rem;
   margin-bottom: 1.25rem;
+}
+.heating-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 .heating-head h2 {
   margin: 0;

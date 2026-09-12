@@ -3,6 +3,7 @@ import {
   buildAmortization,
   buildPvEconomicsBuckets,
   buildUsageCostBucket,
+  buildWaterCostReport,
 } from "./economics.service";
 import { EnergyTariffTimeline, type ElectricityTariff } from "./tariffs.service";
 import type { EnergyReportBucket } from "./reports.service";
@@ -44,6 +45,8 @@ function energyBucket(overrides: Partial<EnergyReportBucket> = {}): EnergyReport
     periodStart: "2026-01-01T00:00:00.000Z",
     periodEnd: "2026-02-01T00:00:00.000Z",
     coverage: 1,
+    complete: true,
+    warnings: [],
     gridImport: null,
     gridExport: null,
     production: null,
@@ -316,5 +319,127 @@ describe("buildAmortization", () => {
 
     expect(amortization.benefitLast12MonthsEur).toBeNull();
     expect(amortization.projectedPayoffDate).toBeNull();
+  });
+});
+
+describe("review follow-ups", () => {
+  function complete(buckets: EnergyReportBucket[], flags: boolean[]) {
+    return buckets.map((bucket, index) => ({ ...bucket, complete: flags[index] ?? true }));
+  }
+  function months(count: number, perMonth: number, start = 0) {
+    return Array.from({ length: count }, (_, i) => {
+      const index = start + i;
+      const year = 2024 + Math.floor(index / 12);
+      const month = (index % 12) + 1;
+      return pvBucket(`${year}-${String(month).padStart(2, "0")}`, 0, perMonth, perMonth);
+    });
+  }
+  const timeline = () =>
+    new EnergyTariffTimeline([
+      tariff("grid_import", 0.4, "eur_per_kwh"),
+      tariff("pv_investment_net", 20000, "eur"),
+      tariff("pv_investment_vat", 4000, "eur"),
+      tariff("expected_return_rate", 0.04, "ratio"),
+    ]);
+
+  it("leaves the running, partially measured month out of the last twelve", () => {
+    const buckets = buildPvEconomicsBuckets(
+      complete(months(25, 100), [...Array(24).fill(true), false]),
+    );
+    const amortization = buildAmortization(buckets, timeline())!;
+    expect(amortization.measuredMonths).toBe(24);
+    expect(amortization.benefitLast12MonthsEur).toBe(1200);
+    expect(amortization.cumulativePvBenefitEur).toBe(2400);
+  });
+
+  it("gives no yearly benefit while the last twelve measured months are not consecutive", () => {
+    const buckets = buildPvEconomicsBuckets([...months(6, 100, 0), ...months(6, 100, 18)]);
+    const amortization = buildAmortization(buckets, timeline())!;
+    expect(amortization.benefitLast12MonthsEur).toBeNull();
+    expect(amortization.projectedPayoffDate).toBeNull();
+  });
+
+  it("charges the forgone return over the measured months only", () => {
+    const buckets = buildPvEconomicsBuckets([...months(12, 100, 0), ...months(12, 100, 36)]);
+    const amortization = buildAmortization(buckets, timeline())!;
+    expect(amortization.yearsElapsed).toBe(2);
+    expect(amortization.opportunityCostEur).toBe(1920);
+  });
+
+  it("adds a later extension to the investment", () => {
+    const amortization = buildAmortization(
+      buildPvEconomicsBuckets(months(12, 100)),
+      new EnergyTariffTimeline([
+        tariff("grid_import", 0.4, "eur_per_kwh"),
+        tariff("pv_investment_net", 20000, "eur"),
+        { ...tariff("pv_investment_net", 5000, "eur"), id: 99, validFrom: "2024-06-01T00:00:00.000Z" },
+      ]),
+    )!;
+    expect(amortization.investmentTotalEur).toBe(25000);
+  });
+
+  it("assigns the heat pump consumption the sub-meters miss to its own row, so the rows add up", () => {
+    const costs = buildUsageCostBucket(
+      energyBucket({
+        totalConsumption: 1000,
+        consumptionWithoutHeatPumpAndEv: 500,
+        heatPumpTotal: 400,
+        heatHeatingTotal: 250,
+        hotWaterTotal: 100,
+        evChargerTotal: 100,
+      }),
+      standardTimeline(),
+    );
+    expect(costs.heatPumpRest).toMatchObject({ totalKwh: 50, pvKwh: null, gridKwh: 50, costEur: 20 });
+    const rows = [costs.heating, costs.hotWater, costs.heatPumpRest, costs.evCharger, costs.household];
+    expect(rows.reduce((sum, row) => sum + (row.totalKwh ?? 0), 0)).toBe(1000);
+  });
+
+  it("keeps the standing charge in the total even without application data", () => {
+    const costs = buildUsageCostBucket(energyBucket(), standardTimeline());
+    expect(costs.baseCostEur).toBe(12);
+    expect(costs.totalCostEur).toBe(12);
+  });
+
+  it("reports the grid share when the whole amount is priced at the grid rate", () => {
+    const costs = buildUsageCostBucket(energyBucket({ evChargerTotal: 50 }), standardTimeline());
+    expect(costs.evCharger).toMatchObject({ totalKwh: 50, pvKwh: null, gridKwh: 50, costEur: 20 });
+  });
+
+  it("clamps a PV sub-meter that exceeds its total", () => {
+    const costs = buildUsageCostBucket(
+      energyBucket({ heatHeatingTotal: 100, heatHeatingPv: 120 }),
+      standardTimeline(),
+    );
+    expect(costs.heating).toMatchObject({ totalKwh: 100, pvKwh: 100, gridKwh: 0, costEur: 20 });
+  });
+
+  it("bills neither sewage nor the standing charge on a garden meter", () => {
+    const water = new EnergyTariffTimeline([
+      tariff("water_price", 2, "eur_per_m3"),
+      tariff("sewage_price", 2.79, "eur_per_m3"),
+      tariff("water_base_price", 6, "eur_per_month"),
+    ]);
+    const bucket = {
+      key: "2026-01",
+      label: "01.2026",
+      periodStart: "2026-01-01T00:00:00.000Z",
+      periodEnd: "2026-02-01T00:00:00.000Z",
+      startReadingAt: "2026-01-01T00:00:00.000Z",
+      endReadingAt: "2026-02-01T00:00:00.000Z",
+      startValue: 0,
+      endValue: 10,
+      consumption: 10,
+      intervals: 1,
+      coverage: 1,
+      meanIntervalDays: 31,
+      previousConsumption: null,
+      deltaAbsolute: null,
+      deltaPercent: null,
+    };
+    const main = buildWaterCostReport(1, "Haus", "m³", [bucket], water, { standingCharge: true, sewage: true });
+    const garden = buildWaterCostReport(2, "Garten", "m³", [bucket], water, { standingCharge: false, sewage: false });
+    expect(main.totalCostEur).toBe(53.9);
+    expect(garden.buckets[0]).toMatchObject({ waterCostEur: 20, sewageCostEur: null, baseCostEur: null, totalCostEur: 20 });
   });
 });

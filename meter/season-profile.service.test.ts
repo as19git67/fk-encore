@@ -15,6 +15,8 @@ function bucket(
     periodStart: `${key}-01T00:00:00.000Z`,
     periodEnd: new Date(Date.UTC(year, month, 1)).toISOString(),
     coverage,
+    complete: coverage >= 0.99,
+    warnings: [],
     gridImport: 100,
     gridExport: 50,
     production: 200,

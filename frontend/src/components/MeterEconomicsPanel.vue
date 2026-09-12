@@ -146,6 +146,7 @@ const applicationRows = computed<ApplicationRow[]>(() => {
   const entries: Array<{ label: string; cost: ApplicationCost }> = [
     { label: 'Heizung', cost: totals.heating },
     { label: 'Warmwasser', cost: totals.hotWater },
+    { label: 'Wärmepumpe (Rest)', cost: totals.heatPumpRest },
     { label: 'E-Auto / Wallbox', cost: totals.evCharger },
     { label: 'Haushalt (übrig)', cost: totals.household },
   ]
@@ -173,6 +174,20 @@ function fmtRate(value: number | null) {
 }
 
 const hasPvData = computed(() => (props.report?.pv.buckets ?? []).some((b) => b.savingsEur !== null))
+
+/** Periods shown that do not count towards the PV totals. */
+const incompletePvBuckets = computed(
+  () => (props.report?.pv.buckets ?? []).filter((b) => b.savingsEur !== null && !b.complete).length,
+)
+
+const hasHeatPumpRest = computed(
+  () => (props.report?.usageCosts.totals.heatPumpRest.totalKwh ?? 0) > 0,
+)
+
+/** Application costs add up to the grid work price plus PV valuation, not to the bill. */
+const applicationSumEur = computed(() =>
+  applicationRows.value.reduce((sum, row) => sum + (row.costEur ?? 0), 0),
+)
 </script>
 
 <template>
@@ -201,7 +216,12 @@ const hasPvData = computed(() => (props.report?.pv.buckets ?? []).some((b) => b.
           <div class="figure-tile">
             <span class="tile-label">Ersparnis durch PV</span>
             <strong class="tile-value">{{ fmtEur(report.pv.totalSavingsEur) }}</strong>
-            <span class="tile-sub">im angezeigten Zeitraum</span>
+            <span class="tile-sub">
+              Summe der vollständig gemessenen Zeiträume
+              <template v-if="incompletePvBuckets > 0">
+                ({{ incompletePvBuckets }} unvollständige nicht enthalten)
+              </template>
+            </span>
           </div>
           <div class="figure-tile">
             <span class="tile-label">Stromkosten mit PV</span>
@@ -237,7 +257,10 @@ const hasPvData = computed(() => (props.report?.pv.buckets ?? []).some((b) => b.
           <div class="figure-tile">
             <span class="tile-label">Bereits erwirtschaftet</span>
             <strong class="tile-value">{{ fmtEur(amortization.cumulativePvBenefitEur) }}</strong>
-            <span class="tile-sub">in {{ fmtYears(amortization.yearsElapsed) }} Jahren</span>
+            <span class="tile-sub">
+              in {{ amortization.measuredMonths }} vollständig gemessenen Monaten
+              ({{ fmtYears(amortization.yearsElapsed) }} Jahre), unabhängig vom gewählten Zeitraum
+            </span>
           </div>
           <div class="figure-tile">
             <span class="tile-label">{{ amortization.payoffReached ? 'Überschuss' : 'Noch offen' }}</span>
@@ -260,7 +283,8 @@ const hasPvData = computed(() => (props.report?.pv.buckets ?? []).some((b) => b.
 
         <p v-if="amortization.expectedReturnRate !== null" class="economics-note">
           Bei {{ fmtRate(amortization.expectedReturnRate) }} erwarteter Rendite pro Jahr wären
-          bisher {{ fmtEur(amortization.opportunityCostEur) }} Zinsen entgangen:
+          über die {{ amortization.measuredMonths }} gemessenen Monate
+          {{ fmtEur(amortization.opportunityCostEur) }} Zinsen entgangen:
           damit noch {{ fmtEur(amortization.remainingWithOpportunityEur) }} offen,
           <template v-if="amortization.projectedPayoffDateWithOpportunity">
             voraussichtlich bezahlt {{ fmtDate(amortization.projectedPayoffDateWithOpportunity) }}.
@@ -269,8 +293,11 @@ const hasPvData = computed(() => (props.report?.pv.buckets ?? []).some((b) => b.
             beim aktuellen Ertrag rechnerisch nicht erreichbar.
           </template>
           <template v-if="amortization.benefitLast12MonthsEur !== null">
-            Hochrechnung auf Basis der letzten 12 Monate
+            Hochrechnung auf Basis der letzten 12 lückenlos gemessenen Monate
             ({{ fmtEur(amortization.benefitLast12MonthsEur) }}).
+          </template>
+          <template v-else>
+            Keine Hochrechnung, solange die letzten 12 Monate eine Messlücke haben.
           </template>
         </p>
       </div>
@@ -297,8 +324,15 @@ const hasPvData = computed(() => (props.report?.pv.buckets ?? []).some((b) => b.
           </Column>
         </DataTable>
         <p class="economics-note">
-          Grundpreis {{ fmtEur(report.usageCosts.totals.baseCostEur) }} ist keiner Anwendung
-          zugeordnet; Gesamtkosten {{ fmtEur(report.usageCosts.totals.totalCostEur) }}.
+          Die Anwendungen summieren sich auf {{ fmtEur(applicationSumEur) }}: Netzbezug zum
+          Arbeitspreis, eigenverbrauchte PV-kWh zum Eigenverbrauchswert — das ist der
+          Vergleichswert je Anwendung, nicht die Stromrechnung. Der Grundpreis
+          ({{ fmtEur(report.usageCosts.totals.baseCostEur) }}) ist keiner Anwendung zugeordnet.
+          <template v-if="hasHeatPumpRest">
+            „Wärmepumpe (Rest)“ ist der Anteil des Wärmepumpenzählers, den Heizung und
+            Warmwasser nicht abdecken; sein PV-Anteil ist nicht gemessen, er zählt daher zum
+            Netzpreis.
+          </template>
         </p>
       </div>
 
@@ -317,8 +351,10 @@ const hasPvData = computed(() => (props.report?.pv.buckets ?? []).some((b) => b.
           </Column>
         </DataTable>
         <p class="economics-note">
-          Frisch- und Abwasser werden beide auf die gemessene Menge berechnet; die
-          Grundgebühr ist anteilig enthalten.
+          Frisch- und Abwasser werden beide auf die gemessene Menge berechnet, die
+          Grundgebühr zählt beim Hausanschluss (Rolle „Wasser Hausanschluss“ oder erster
+          Zähler). Ein Gartenzähler (Rolle „Wasser Garten“) bekommt weder Abwasser noch
+          Grundgebühr.
         </p>
       </div>
     </template>

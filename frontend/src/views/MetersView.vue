@@ -37,6 +37,8 @@ import {
   METER_TYPE_LABELS,
   METER_TYPE_ICONS,
   METER_ROLE_LABELS,
+  ENERGY_BUCKET_WARNING_LABELS,
+  COMPLETE_COVERAGE_THRESHOLD,
   ELECTRICITY_TARIFF_KIND_EXPLANATIONS,
   ELECTRICITY_TARIFF_KIND_LABELS,
   ELECTRICITY_TARIFF_UNIT_LABELS,
@@ -319,6 +321,14 @@ const energyBuckets = computed(() => {
 })
 
 type EnergyBucket = EnergyReport['buckets'][number]
+
+/** Why a period does not count towards the totals. */
+function energyBucketPartialHint(bucket: EnergyBucket) {
+  if (bucket.coverage < COMPLETE_COVERAGE_THRESHOLD) {
+    return `Nur teilweise abgelesen (${Math.round(bucket.coverage * 100)} % des Zeitraums) — fließt nicht in die Summen ein`
+  }
+  return 'Nicht alle PV-Zähler haben Werte in diesem Zeitraum — fließt nicht in die Summen ein'
+}
 
 function isCurrentPeriod(bucket: EnergyBucket, granularity: MeterReportGranularity, now = new Date()) {
   if (granularity === 'year') {
@@ -733,7 +743,7 @@ const TARIFF_CATEGORIES: Array<{ key: string; label: string; kinds: ElectricityT
   {
     key: 'car',
     label: 'Fahrzeug (Vergleich)',
-    kinds: ['ev_consumption', 'petrol_consumption', 'petrol_price'],
+    kinds: ['ev_consumption', 'ev_charging_loss', 'petrol_consumption', 'petrol_price'],
   },
   {
     key: 'water',
@@ -839,6 +849,7 @@ const TARIFF_KIND_DEFAULT_UNIT: Partial<Record<ElectricityTariffKind, Electricit
   boiler_efficiency: 'ratio',
   heat_pump_scop: 'ratio',
   ev_consumption: 'kwh_per_100km',
+  ev_charging_loss: 'ratio',
   petrol_consumption: 'l_per_100km',
   petrol_price: 'eur_per_l',
   grid_co2: 'kg_per_kwh',
@@ -1109,6 +1120,11 @@ onMounted(load)
 
         <div v-if="loadingEnergyReport" class="info info-compact"><i class="pi pi-spin pi-spinner" /> Energie-Report…</div>
         <template v-else-if="energyBuckets.length > 0">
+          <Message v-if="energyReport.duplicateRoles.length > 0" severity="warn" :closable="false" class="energy-warning">
+            Mehrere Zähler tragen dieselbe Rolle
+            ({{ energyReport.duplicateRoles.map((role) => METER_ROLE_LABELS[role]).join(', ') }}) —
+            der Report verwendet jeweils nur den ersten. Bitte die Rollen der Zähler bereinigen.
+          </Message>
           <div class="energy-kpis">
             <div class="energy-kpi">
               <span class="figure-label">Ø Bezug</span>
@@ -1222,8 +1238,21 @@ onMounted(load)
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="bucket in energyBuckets" :key="bucket.key">
-                  <td>{{ bucket.label }}</td>
+                <tr v-for="bucket in energyBuckets" :key="bucket.key" :class="{ 'is-partial': !bucket.complete }">
+                  <td>
+                    {{ bucket.label }}
+                    <i
+                      v-if="!bucket.complete"
+                      class="pi pi-exclamation-circle partial-marker"
+                      v-tooltip.right="energyBucketPartialHint(bucket)"
+                    />
+                    <i
+                      v-for="warning in bucket.warnings"
+                      :key="warning"
+                      class="pi pi-exclamation-triangle warning-marker"
+                      v-tooltip.right="ENERGY_BUCKET_WARNING_LABELS[warning]"
+                    />
+                  </td>
                   <td>{{ fmt(bucket.gridImport, energyReport.decimals) }}</td>
                   <td>{{ fmt(bucket.gridExport, energyReport.decimals) }}</td>
                   <td>{{ fmt(bucket.production, energyReport.decimals) }}</td>
@@ -1680,6 +1709,21 @@ onMounted(load)
 .energy-table th:first-child,
 .energy-table td:first-child {
   text-align: left;
+}
+.energy-table tr.is-partial td {
+  color: var(--p-text-muted-color);
+}
+.energy-warning {
+  margin-bottom: 0.75rem;
+}
+.partial-marker,
+.warning-marker {
+  margin-left: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
+}
+.warning-marker {
+  color: var(--p-tag-warn-color);
 }
 .energy-help {
   color: var(--p-text-color);

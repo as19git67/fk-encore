@@ -2511,7 +2511,11 @@ export type MeterRole =
   | "ev_charger_total"
   | "ev_charger_pv"
   // Compressor hour meter, for the kWh-per-hour efficiency trend (0149).
-  | "compressor_hours";
+  | "compressor_hours"
+  // Water: the main meter carries the standing charge and sewage, a garden
+  // meter neither (migration 0194).
+  | "water_main"
+  | "water_garden";
 export type MeterReadingSource = "manual" | "ocr" | "api";
 export type MeterElectricityTariffKind =
   | "grid_import"
@@ -2542,7 +2546,10 @@ export type MeterElectricityTariffKind =
   | "sewage_price"
   // Monthly heating degree days for the weather-adjusted heating report
   // (migration 0192): valid_from = first of the month, unit 'kd'.
-  | "heating_degree_days";
+  | "heating_degree_days"
+  // Share of the wallbox reading lost between meter and battery (0.1 = 10 %),
+  // optional input of the petrol-car comparison (migration 0194).
+  | "ev_charging_loss";
 
 export type MeterAnomalyType =
   | "consumption_spike"

@@ -159,7 +159,12 @@ const hasTrends = computed(() => props.trends.length > 0)
             </span>
             <span class="trend-change-caption">ggü. Vorjahreszeitraum</span>
           </template>
-          <template v-else>{{ directionText[trend.direction] }}</template>
+          <template v-else>
+            {{ directionText[trend.direction] }}
+            <span v-if="trend.directionBasis === 'regression'" class="trend-change-caption">
+              aus dem Trend über {{ trend.trendPoints }} Rollwerte, noch kein volles Vorjahr
+            </span>
+          </template>
         </span>
 
         <span class="trend-spark">
@@ -177,7 +182,7 @@ const hasTrends = computed(() => props.trends.length > 0)
           <template v-if="trend.slopePerYear !== null">
             <br />
             <span
-              v-tooltip.top="'Langfristige Trendrichtung aus einer Regression über die rollierenden 12-Monats-Summen — geglättet, weicht daher vom Vorjahresvergleich oben ab'"
+              v-tooltip.top="`Regression über ${trend.trendPoints} rollierende 12-Monats-Summen — geglättet, weicht daher vom Vorjahresvergleich oben ab`"
             >
               Trend: {{ fmtSigned(trend.slopePerYear, trend.decimals) }} {{ trend.unit }}/Jahr
             </span>

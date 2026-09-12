@@ -367,6 +367,13 @@ export const modules: ModuleConfig[] = [
         meta: { permission: 'meters.view' },
       },
       {
+        // Must stay above ':id' — that route would otherwise swallow it.
+        path: 'hilfe/gradtage',
+        name: 'zaehler-hilfe-gradtage',
+        component: () => import('../views/MeterDegreeDaysHelpView.vue'),
+        meta: { permission: 'meters.view' },
+      },
+      {
         path: ':id',
         name: 'zaehler-detail',
         component: () => import('../views/MeterDetailView.vue'),

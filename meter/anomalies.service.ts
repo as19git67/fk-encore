@@ -31,12 +31,12 @@ import db from "../db/database";
 import { dbAll } from "../db/adapter";
 import {
   meterAnomalies,
-  meterDevices,
   meterReadings,
   meters,
   type MeterAnomalyType,
   type MeterType,
 } from "../db/schema";
+import { loadDeviceOffsets } from "./meter.service";
 
 // -----------------------------------------------------------------------
 // Tunables
@@ -233,22 +233,8 @@ export function detectMeterAnomalies(
 
 /** Absolute series of a metering point including reading ids (no visibility check — job use). */
 export async function loadSeriesForJob(meterId: number): Promise<SeriesPoint[]> {
-  const devices = await dbAll<typeof meterDevices.$inferSelect>(
-    db
-      .select()
-      .from(meterDevices)
-      .where(eq(meterDevices.meter_id, meterId))
-      .orderBy(asc(meterDevices.installed_at), asc(meterDevices.id)),
-  );
+  const { devices, offsets } = await loadDeviceOffsets(meterId);
   if (devices.length === 0) return [];
-
-  const baseByDevice = new Map<number, { base: number; start: number }>();
-  let running = 0;
-  for (const device of devices) {
-    const start = parseFloat(device.start_value);
-    baseByDevice.set(device.id, { base: running, start });
-    if (device.end_value !== null) running += parseFloat(device.end_value) - start;
-  }
 
   const rows = await dbAll<{ id: number; device_id: number; value: string; taken_at: string }>(
     db
@@ -263,12 +249,12 @@ export async function loadSeriesForJob(meterId: number): Promise<SeriesPoint[]> 
       .orderBy(asc(meterReadings.taken_at), asc(meterReadings.id)),
   );
   return rows.map((row) => {
-    const base = baseByDevice.get(row.device_id);
+    const offset = offsets.get(row.device_id);
     const raw = parseFloat(row.value);
     return {
       readingId: Number(row.id),
       takenAt: row.taken_at,
-      value: base ? base.base + raw - base.start : raw,
+      value: offset ? offset.baseOffset + raw - offset.startValue : raw,
     };
   });
 }

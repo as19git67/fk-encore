@@ -148,13 +148,14 @@ describe("importElectricityHistory", () => {
   // Guards the gap that left the wallbox out of the energy report for months:
   // the roles existed in the schema and the report read them, but the import
   // never assigned them, so every wallbox figure silently stayed null.
-  it("assigns every defined meter role", async () => {
+  it("assigns every defined electricity meter role", async () => {
     await importElectricityHistory(userId, DATA);
 
     const assigned = new Set(
       (await listMeters(userId)).map((meter) => meter.role).filter((role) => role !== null),
     );
-    expect([...assigned].sort()).toEqual([...METER_ROLES].sort());
+    const electricityRoles = METER_ROLES.filter((role) => !WATER_METER_ROLES.includes(role));
+    expect([...assigned].sort()).toEqual([...electricityRoles].sort());
   }, 120_000);
 
   it("creates 14 report-friendly meters with 19 devices and consolidated readings", async () => {
@@ -261,7 +262,7 @@ describe("importElectricityHistory", () => {
   });
 });
 
-import { listMeters, METER_ROLES } from "./meter.service";
+import { listMeters, METER_ROLES, WATER_METER_ROLES } from "./meter.service";
 async function findMeterByName(uid: number, name: string) {
   const meterList = await listMeters(uid);
   const m = meterList.find((m) => m.name === name);
