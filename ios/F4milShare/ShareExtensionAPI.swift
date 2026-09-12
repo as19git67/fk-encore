@@ -14,6 +14,19 @@ struct SharePlanSummary: Decodable, Identifiable {
     }
 }
 
+/// A collection the share may go into instead of a trip (§20).
+///
+/// The whole point of the idea pool is that it needs no trip, and until
+/// now the share sheet insisted on one: a map link somebody sent could
+/// only be saved into a journey that already existed.
+struct ShareIdeaCollection: Decodable, Identifiable {
+    let ownerId: Int
+    let label: String
+    let own: Bool
+
+    var id: Int { ownerId }
+}
+
 struct ShareProposal: Decodable, Identifiable, Sendable {
     let name: String?
     let verdict: String
@@ -107,6 +120,47 @@ enum ShareExtensionAPI {
         }
         try check(http, data: data)
         return try JSONDecoder().decode(Response.self, from: data).plans
+    }
+
+    // MARK: - Idea collections (§20)
+
+    static func fetchIdeaCollections() async throws -> [ShareIdeaCollection] {
+        struct Response: Decodable { let collections: [ShareIdeaCollection] }
+        let (data, http) = try await ShareAuth.perform {
+            var request = URLRequest(url: url(for: "/trip-planner/ideas"), timeoutInterval: 20)
+            request.httpMethod = "GET"
+            authorise(&request)
+            return request
+        }
+        try check(http, data: data)
+        return try JSONDecoder().decode(Response.self, from: data).collections
+    }
+
+    /// Put a place straight into a collection, with no trip in sight.
+    static func addIdea(ownerId: Int?, lat: Double, lon: Double,
+                        name: String?, note: String?, sourceUrl: String?,
+                        dwellMinutes: Int?) async throws {
+        struct Body: Encodable {
+            let lat: Double; let lon: Double
+            let ownerId: Int?
+            let name: String?; let note: String?; let sourceUrl: String?
+            let dwellMinutes: Int?
+        }
+        let body = try JSONEncoder().encode(Body(
+            lat: lat, lon: lon, ownerId: ownerId,
+            name: name?.isEmpty == false ? name : nil,
+            note: note?.isEmpty == false ? note : nil,
+            sourceUrl: sourceUrl,
+            dwellMinutes: dwellMinutes))
+        let (data, http) = try await ShareAuth.perform {
+            var request = URLRequest(url: url(for: "/trip-planner/ideas"), timeoutInterval: 20)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+            authorise(&request)
+            return request
+        }
+        try check(http, data: data)
     }
 
     // MARK: - Analyse

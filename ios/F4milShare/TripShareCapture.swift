@@ -25,7 +25,19 @@ struct TripShareCaptureView: View {
     @State private var plans: [SharePlanSummary] = []
     @State private var isLoadingPlans = false
     @State private var plansError: String?
-    @State private var selectedPlanId: Int?
+    @State private var collections: [ShareIdeaCollection] = []
+    @State private var destination: Destination?
+
+    /// Where the share is going.
+    ///
+    /// Until this existed the share sheet insisted on a trip, which is
+    /// exactly the thing the idea pool was built not to need: a map link
+    /// somebody sent could only be saved into a journey that already
+    /// existed (§20).
+    enum Destination: Hashable {
+        case plan(Int)
+        case ideas(ownerId: Int)
+    }
     @State private var titleText = ""
     @State private var noteText = ""
     @State private var dwellMinutes: Int = 45
@@ -60,7 +72,7 @@ struct TripShareCaptureView: View {
                     } label: {
                         if isSaving { ProgressView() } else { Text("Speichern") }
                     }
-                    .disabled(selectedPlanId == nil || isSaving || isLoadingPlans)
+                    .disabled(destination == nil || isSaving || isLoadingPlans)
                 }
             }
 
@@ -109,32 +121,40 @@ struct TripShareCaptureView: View {
                 Text("Wie lange ihr voraussichtlich bleibt \u{2014} kann sp\u{00E4}ter noch angepasst werden.")
             }
 
-            Section("Reise") {
+            Section {
                 if isLoadingPlans {
                     HStack(spacing: 8) {
                         ProgressView()
-                        Text("L\u{00E4}dt Reisen\u{2026}").foregroundStyle(.secondary)
+                        Text("L\u{00E4}dt\u{2026}").foregroundStyle(.secondary)
                     }
                 } else if let error = plansError {
                     Text(error).font(.footnote).foregroundStyle(.red)
                     Button("Erneut versuchen") { Task { await loadPlans() } }
-                } else if plans.isEmpty {
-                    Text("Noch keine Reise angelegt.")
-                        .font(.footnote).foregroundStyle(.secondary)
                 } else {
-                    ForEach(plans) { plan in
-                        Button {
-                            selectedPlanId = plan.id
-                        } label: {
-                            HStack {
-                                Text(plan.displayTitle).foregroundStyle(.primary)
-                                Spacer()
-                                if selectedPlanId == plan.id {
-                                    Image(systemName: "checkmark").foregroundStyle(.tint)
-                                }
-                            }
-                        }
+                    // The collection first: it is the destination that
+                    // needs nothing to exist yet, and the one somebody
+                    // sharing a link on a Tuesday usually means.
+                    ForEach(collections) { collection in
+                        choice(collection.own ? "Ideenvorrat" : collection.label,
+                               systemImage: "lightbulb",
+                               value: .ideas(ownerId: collection.ownerId))
                     }
+                    ForEach(plans) { plan in
+                        choice(plan.displayTitle, systemImage: "map", value: .plan(plan.id))
+                    }
+                    if plans.isEmpty && collections.isEmpty {
+                        Text("Noch keine Reise und kein Vorrat.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text("Wohin")
+            } footer: {
+                if collections.isEmpty && coordinate == nil && !plans.isEmpty {
+                    // An article has to be read before it is a place,
+                    // and that reading belongs to a trip (\u{00A7}9.3).
+                    Text("Ohne Koordinate im Link geht nur eine Reise \u{2014} dort wird der "
+                         + "Text ausgewertet.")
                 }
             }
 
@@ -224,9 +244,17 @@ struct TripShareCaptureView: View {
     private static func extractCoordinate(
         from urlString: String
     ) -> (lat: Double, lon: Double, name: String?)? {
-        guard let url = URL(string: urlString),
-              let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
-        else { return nil }
+        guard let url = URL(string: urlString) else { return nil }
+        // `maps:q=Ort&ll=…` is an opaque URL: with no question mark
+        // everything sits in the path, where the query parser never
+        // looks, and the link reads as one that carried nothing.
+        var items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        if items.isEmpty, let colon = urlString.firstIndex(of: ":") {
+            var rest = String(urlString[urlString.index(after: colon)...])
+            while rest.hasPrefix("/") { rest.removeFirst() }
+            if rest.hasPrefix("?") { rest.removeFirst() }
+            items = URLComponents(string: "?\(rest)")?.queryItems ?? []
+        }
         var params: [String: String] = [:]
         for item in items { if let v = item.value { params[item.name] = v } }
         guard let ll = params["ll"] else { return nil }
@@ -247,21 +275,74 @@ struct TripShareCaptureView: View {
         defer { isLoadingPlans = false }
         do {
             plans = try await ShareExtensionAPI.fetchPlans()
-            if plans.count == 1 { selectedPlanId = plans.first?.id }
+            // Only where the link already carries a coordinate: an
+            // article becomes a place through the region search and the
+            // language model, and that path hangs off a trip (§9.3).
+            // Offering the collection for one would promise a reading
+            // nobody can do there.
+            collections = coordinate == nil
+                ? []
+                : ((try? await ShareExtensionAPI.fetchIdeaCollections()) ?? [])
+            preselect()
         } catch {
             plansError = error.localizedDescription
+        }
+    }
+
+    /// Choose for them only when there is nothing to choose.
+    private func preselect() {
+        guard destination == nil else { return }
+        if let own = collections.first(where: \.own) {
+            destination = .ideas(ownerId: own.ownerId)
+        } else if plans.count == 1, let plan = plans.first {
+            destination = .plan(plan.id)
+        }
+    }
+
+    private func choice(_ label: String, systemImage: String,
+                        value: Destination) -> some View {
+        Button {
+            destination = value
+        } label: {
+            HStack {
+                Label(label, systemImage: systemImage).foregroundStyle(.primary)
+                Spacer()
+                if destination == value {
+                    Image(systemName: "checkmark").foregroundStyle(.tint)
+                }
+            }
         }
     }
 
     // MARK: - Save
 
     private func save() async {
-        guard let planId = selectedPlanId else { return }
+        guard let destination else { return }
         saveError = nil
         isSaving = true
         defer { isSaving = false }
         let title = titleText.trimmingCharacters(in: .whitespacesAndNewlines)
         let note = noteText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if case let .ideas(ownerId) = destination {
+            guard let coord = coordinate else {
+                saveError = "Ohne Koordinate im Link geht nur eine Reise."
+                return
+            }
+            do {
+                try await ShareExtensionAPI.addIdea(
+                    ownerId: ownerId, lat: coord.lat, lon: coord.lon,
+                    name: title.isEmpty ? coord.name : title,
+                    note: note.isEmpty ? nil : note,
+                    sourceUrl: payload?.url,
+                    dwellMinutes: dwellMinutes)
+                close()
+            } catch {
+                saveError = error.localizedDescription
+            }
+            return
+        }
+        guard case let .plan(planId) = destination else { return }
         do {
             if let coord = coordinate {
                 _ = try await ShareExtensionAPI.addFind(

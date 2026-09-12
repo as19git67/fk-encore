@@ -97,6 +97,30 @@ const OVERHEAD_MINUTES: Readonly<Record<TransportMode, number>> = {
  */
 export const DEFAULT_MAX_WALK_MINUTES = 40;
 
+/**
+ * The longest single hop a leg with a vehicle may propose.
+ *
+ * The forty minutes above are a *walking* budget, which is the right
+ * refusal inside a city and the wrong one everywhere else: half an hour
+ * in a car is how you get to the coast, not an unreasonable detour. The
+ * outing proposal learned this first (§20.2); the trip planner used the
+ * walking figure for every mode, so a day by car in San Francisco threw
+ * away the bridge, the park and Sausalito before it ever scored them.
+ */
+export const DRIVING_LEG_MINUTES = 90;
+
+/**
+ * How far one hop may take, for this mode.
+ *
+ * On foot and by bike the walking figure stands: it is what makes the
+ * planner refuse a two-hour march, and a bike is still a body.
+ */
+export function legLimitFor(mode: TransportMode | undefined): number {
+  return mode === undefined || mode === "foot" || mode === "bike"
+    ? DEFAULT_MAX_WALK_MINUTES
+    : DRIVING_LEG_MINUTES;
+}
+
 export interface Coordinate {
   lat: number;
   lon: number;

@@ -67,6 +67,22 @@ export interface PoiSearchOptions extends PoiSearchArea {
    * narrows, it does not resolve.
    */
   name?: string;
+  /**
+   * What the first page should hold when there are more matches than
+   * fit in it.
+   *
+   * `"distance"` (the default with a centre) answers "what is near
+   * here". `"prominence"` answers "what is this place known for" — the
+   * same area, ordered by the wikidata/wikipedia/name proxy the
+   * centreless search has always used.
+   *
+   * The distinction exists because a page cut by distance and then
+   * filtered by prominence keeps neither: in a dense city the nearest
+   * two hundred rows are two hundred ordinary ones, and the bridge
+   * everybody came for is row nine thousand. Which is a search that
+   * cannot find the Golden Gate Bridge from San Francisco.
+   */
+  rank?: "distance" | "prominence";
   /** Page size. Defaults to 200, capped at MAX_LIMIT. */
   limit?: number;
   /** Rows to skip, for paging. Defaults to 0. */
@@ -212,14 +228,18 @@ export async function searchPois(
   // east could sort behind a nearer one due north, and the list would
   // not match the metres shown beside it. Casting to geography makes the
   // operator measure on the spheroid, and it stays index-assisted.
-  const orderBy = opts.center
+  const prominenceOrder =
+    `((tags ? 'wikidata')::int + (tags ? 'wikipedia')::int + (tags ? 'name')::int) DESC, osm_id`;
+  const orderBy = opts.rank === "prominence"
+    ? prominenceOrder
+    : opts.center
     ? `geom::geography <-> ${centrePoint(opts.center)}::geography, osm_id`
     : opts.corridor
       // No index helps here: the detour is a sum of two distances, and
       // the ellipse clause has already cut the candidate set down to a
       // narrow band, so the sort runs over few rows.
       ? `${detourExpression(opts.corridor)}, osm_id`
-      : `((tags ? 'wikidata')::int + (tags ? 'wikipedia')::int + (tags ? 'name')::int) DESC, osm_id`;
+      : prominenceOrder;
 
   const sql = `
     SELECT

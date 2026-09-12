@@ -24,7 +24,11 @@ import type { GroupProfile, Pace } from "./blocks";
 /** Bounds mirror the typed endpoints in plan.ts / plans.ts. */
 export const MAX_DAYS = 14;
 export const MIN_RADIUS_M = 100;
-export const MAX_RADIUS_M = 20_000;
+/**
+ * Matches what the geo service will search at all (`search-reach.ts`).
+ * Twenty kilometres was a city; a leg with a car reaches past one.
+ */
+export const MAX_RADIUS_M = 50_000;
 export const MAX_WALK_MINUTES_LIMIT = 180;
 /** More interests than this is the model padding, not the traveller. */
 export const MAX_INTERESTS = 12;
