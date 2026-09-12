@@ -54,6 +54,16 @@ struct TripFixpointSheet: View {
         }
     }
 
+    /// True when the plan measures the way instead of taking a number.
+    ///
+    /// A located departure ends the day's route at that place, so the
+    /// walk is computed from the stop the day really ends at. Asking
+    /// for it as a stepper as well would subtract the same minutes a
+    /// second time — which is exactly what it did for one day.
+    private var routePaysTheWay: Bool {
+        kind == .departure && place != nil
+    }
+
     /// 17:45 — the shape of the case this exists for. A default of
     /// "now" would be a time nobody means.
     static var defaultTime: Date {
@@ -132,18 +142,31 @@ struct TripFixpointSheet: View {
                            + "wie bisher.")
                 }
 
-                Section {
-                    Stepper(value: $travelMinutes, in: 0...240, step: 5) {
-                        Text(TripClock.duration(travelMinutes))
+                if !routePaysTheWay {
+                    Section {
+                        Stepper(value: $travelMinutes, in: 0...240, step: 5) {
+                            Text(TripClock.duration(travelMinutes))
+                        }
+                    } header: {
+                        Text("Weg dorthin")
+                    } footer: {
+                        // The buffer is the server's business and never
+                        // zero (§4.4) — said here so nobody wonders
+                        // where the missing quarter hour went.
+                        Text("Vom Plan aus hin. Ein Puffer von 20 Minuten kommt automatisch "
+                             + "dazu — einen Zug zu verpassen kostet mehr als einen "
+                             + "ausgelassenen Spot.")
                     }
-                } header: {
-                    Text("Weg dorthin")
-                } footer: {
-                    // The buffer is the server's business and never
-                    // zero (§4.4) — said here so nobody wonders where
-                    // the missing quarter hour went.
-                    Text("Vom Plan aus hin. Ein Puffer von 20 Minuten kommt automatisch dazu — "
-                         + "einen Zug zu verpassen kostet mehr als einen ausgelassenen Spot.")
+                } else {
+                    Section {
+                        Label("Der Weg wird gerechnet", systemImage: "figure.walk")
+                            .foregroundStyle(.secondary)
+                    } footer: {
+                        // Asking for it as well would take the same
+                        // minutes off the day twice.
+                        Text("Vom letzten Stopp des Tages zum genannten Ort — dafür ist die "
+                             + "Adresse da. Der Puffer von 20 Minuten kommt weiterhin dazu.")
+                    }
                 }
             }
             .navigationTitle("Feste Zeit")
@@ -160,7 +183,7 @@ struct TripFixpointSheet: View {
                                 label: label.trimmingCharacters(in: .whitespacesAndNewlines),
                                 minutesOfDay: TripDayTimeline.minutesOfDay(time),
                                 kind: kind.rawValue,
-                                travelMinutes: travelMinutes,
+                                travelMinutes: routePaysTheWay ? 0 : travelMinutes,
                                 durationMinutes: durationMinutes,
                                 place: place,
                             ))
