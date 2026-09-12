@@ -97,6 +97,14 @@ export interface GeoPoiSearchQuery {
    * `trip-planner/resolve-place.ts`).
    */
   name?: string;
+  /**
+   * What the page holds when more matches exist than fit in it:
+   * `"distance"` (the default with a centre) the nearest, or
+   * `"prominence"` the ones the place is known for. See
+   * `geo/src/poi-search.ts` — a page cut by distance and then filtered
+   * by prominence keeps neither.
+   */
+  rank?: "distance" | "prominence";
   limit?: number;
   offset?: number;
 }
@@ -305,6 +313,7 @@ export class HttpGeoClient implements GeoClient {
       corridor: query.corridor,
       categories: query.categories,
       name: query.name,
+      rank: query.rank,
       limit: query.limit,
       offset: query.offset,
     });

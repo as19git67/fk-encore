@@ -387,6 +387,12 @@ function parseSearchBody(body: unknown): { database: string; options: PoiSearchO
     if (typeof b.name !== "string") throw new HttpError(400, "name must be a string");
     options.name = b.name;
   }
+  if (b.rank !== undefined && b.rank !== null) {
+    if (b.rank !== "distance" && b.rank !== "prominence") {
+      throw new HttpError(400, "rank must be 'distance' or 'prominence'");
+    }
+    options.rank = b.rank;
+  }
 
   return { database, options };
 }

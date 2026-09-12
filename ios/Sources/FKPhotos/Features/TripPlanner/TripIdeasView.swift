@@ -26,6 +26,7 @@ struct TripIdeasView: View {
     @State private var sharedNote = ""
     /// Whether the collection may speak up on its own (§20.2).
     @State private var noticesEnabled = TripIdeaNoticePreferences.isEnabled()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         List {
@@ -42,7 +43,23 @@ struct TripIdeasView: View {
                 Text(error).font(.footnote).foregroundStyle(.red)
             }
 
-            if model.entries.isEmpty && !model.isLoading {
+            ForEach(model.entries) { idea in
+                row(idea)
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) {
+                            Task { await model.remove(idea) }
+                        } label: {
+                            Label("Entfernen", systemImage: "trash")
+                        }
+                    }
+            }
+        }
+        // An overlay rather than a row. Inside the list the empty state
+        // got a row's width, and `ContentUnavailableView` answered by
+        // squeezing its button into a column of single letters — the
+        // one control the screen has, unreadable.
+        .overlay {
+            if isEmpty {
                 // The empty state carries the way in rather than only
                 // describing one. A screen that says "nothing here yet"
                 // and leaves the reader to find the button is a screen
@@ -60,17 +77,7 @@ struct TripIdeasView: View {
                     }
                     .buttonStyle(.borderedProminent)
                 }
-            }
-
-            ForEach(model.entries) { idea in
-                row(idea)
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            Task { await model.remove(idea) }
-                        } label: {
-                            Label("Entfernen", systemImage: "trash")
-                        }
-                    }
+                .background(Color(uiColor: .systemGroupedBackground))
             }
         }
         .navigationTitle(model.collection?.label ?? "Ideenvorrat")
@@ -140,6 +147,12 @@ struct TripIdeasView: View {
         }
         .onChange(of: model.ownerId) { _, _ in
             Task { await model.load() }
+        }
+        // A link shared while this screen was already open arrives in
+        // the inbox with nobody looking: `.task` ran long before the
+        // share did.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await model.checkShare() } }
         }
         .onChange(of: noticesEnabled) { _, enabled in
             TripIdeaNoticePreferences.setEnabled(enabled)
@@ -211,6 +224,13 @@ struct TripIdeasView: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    /// Nothing collected, nothing loading, and no shared link waiting —
+    /// the offer from a share is a row worth seeing, and an overlay
+    /// would cover it.
+    private var isEmpty: Bool {
+        model.entries.isEmpty && !model.isLoading && model.sharedPlace == nil
     }
 
     private func startAdding() {

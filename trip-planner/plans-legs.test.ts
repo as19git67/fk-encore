@@ -119,10 +119,19 @@ describe("POST /trip-planner/plans with legs", () => {
       ],
     });
 
+    // Two searches per leg, over the same disc — one for what is near
+    // and one for what the place is known for (see `search-reach.ts`).
     const calls = geo.getSearchCalls();
-    expect(calls.map((c) => c.postgresDb)).toEqual(["nom_europe_west", "nom_europe_east"]);
-    expect(calls[0].query.center).toEqual({ ...WEST, radiusM: 1_500 });
-    expect(calls[1].query.center).toEqual({ ...EAST, radiusM: 4_000 });
+    const west = calls.filter((c) => c.postgresDb === "nom_europe_west");
+    const east = calls.filter((c) => c.postgresDb === "nom_europe_east");
+    expect(west).toHaveLength(2);
+    expect(east).toHaveLength(2);
+    expect(west.every((c) => c.query.center?.radiusM === 1_500)).toBe(true);
+    expect(east.every((c) => c.query.center?.radiusM === 4_000)).toBe(true);
+    expect(new Set(west.map((c) => c.query.rank))).toEqual(new Set(["distance", "prominence"]));
+    // And in that order: the western leg is searched before the eastern.
+    expect(calls[0].postgresDb).toBe("nom_europe_west");
+    expect(calls.at(-1)?.postgresDb).toBe("nom_europe_east");
 
     expect(plan.legs.map((l) => l.title)).toEqual(["Weststadt", "Oststadt"]);
     expect(plan.legs.map((l) => l.regionDb)).toEqual(["nom_europe_west", "nom_europe_east"]);

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_MAX_WALK_MINUTES,
   DETOUR_FACTOR,
   WALKING_SPEED_M_PER_MIN,
   haversineMeters,
+  legLimitFor,
   travelLeg,
   walkingLeg,
 } from "./travel";
@@ -157,5 +159,25 @@ describe("transit means public transport and walking", () => {
         Math.round(leg.distanceM / (mode === "bike" ? 200 : 330)),
       );
     }
+  });
+});
+
+describe("legLimitFor", () => {
+  it("keeps the walking refusal for a body", () => {
+    // Forty minutes is what makes the planner refuse a two-hour march,
+    // and a bicycle is still a body.
+    expect(legLimitFor("foot")).toBe(DEFAULT_MAX_WALK_MINUTES);
+    expect(legLimitFor("bike")).toBe(DEFAULT_MAX_WALK_MINUTES);
+  });
+
+  it("lets a vehicle reach the far side of a bay", () => {
+    // The bug: a day by car in San Francisco threw away the bridge and
+    // Sausalito because a walking budget was applied to a drive.
+    expect(legLimitFor("car")).toBeGreaterThan(DEFAULT_MAX_WALK_MINUTES);
+    expect(legLimitFor("transit")).toBeGreaterThan(DEFAULT_MAX_WALK_MINUTES);
+  });
+
+  it("refuses the longer hop when nobody said how they travel", () => {
+    expect(legLimitFor(undefined)).toBe(DEFAULT_MAX_WALK_MINUTES);
   });
 });
