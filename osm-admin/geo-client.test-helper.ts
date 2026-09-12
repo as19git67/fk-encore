@@ -44,6 +44,8 @@ export class InMemoryGeoClient implements GeoClient {
   private poiCandidates = new Map<string, GeoPoiCandidate[]>();
   private searchSpots = new Map<string, GeoPoiSearchSpot[]>();
   private failingSearches = new Set<string>();
+  /** When set, only that half of the two-page search fails. */
+  private failingRank: "distance" | "prominence" | null = null;
   private categories: GeoPoiCategory[] = [];
   private storage = new Map<string, GeoRegionStorage>();
   private searchCalls: Array<{ postgresDb: string; query: GeoPoiSearchQuery }> = [];
@@ -157,8 +159,9 @@ export class InMemoryGeoClient implements GeoClient {
    * survive one of them being down, and there is no other way to put
    * it in that state.
    */
-  failSearchFor(postgresDb: string): void {
+  failSearchFor(postgresDb: string, only?: { rank: "distance" | "prominence" }): void {
     this.failingSearches.add(postgresDb);
+    if (only) this.failingRank = only.rank;
   }
 
   setSearchSpots(postgresDb: string, spots: GeoPoiSearchSpot[]): void {
@@ -190,7 +193,8 @@ export class InMemoryGeoClient implements GeoClient {
    */
   async searchPois(postgresDb: string, query: GeoPoiSearchQuery): Promise<GeoPoiSearchPage> {
     this.searchCalls.push({ postgresDb, query });
-    if (this.failingSearches.has(postgresDb)) {
+    if (this.failingSearches.has(postgresDb)
+        && (this.failingRank === null || this.failingRank === (query.rank ?? "distance"))) {
       throw new Error(`geo: POST /pois/search → connect ECONNREFUSED (${postgresDb})`);
     }
     const areas = [query.bbox, query.center, query.corridor].filter((a) => a !== undefined);
