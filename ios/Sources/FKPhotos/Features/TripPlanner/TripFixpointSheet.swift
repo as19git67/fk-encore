@@ -13,8 +13,27 @@ import SwiftUI
 /// promise nobody can keep.
 struct TripFixpointSheet: View {
     let dayLabel: String
-    let onSave: (String, Int, String, Int, Int) async -> Void
+    let onSave: (Draft) async -> Void
 
+    /// What the sheet hands back.
+    ///
+    /// A struct rather than six positional arguments: the place was the
+    /// sixth, and a sixth `Int` in a row nobody can read is how a
+    /// coordinate ends up in the buffer.
+    struct Draft {
+        let label: String
+        let minutesOfDay: Int
+        let kind: String
+        let travelMinutes: Int
+        let durationMinutes: Int
+        /// Where it happens, when somebody said (§4.4). Optional, and
+        /// the whole point of it: a located fixpoint at one end of the
+        /// day moves the day's route.
+        let place: TripPlace?
+    }
+
+    @State private var finder = TripPlaceFinderModel()
+    @State private var place: TripPlace?
     @State private var label = ""
     @State private var kind = Kind.departure
     @State private var time = Self.defaultTime
@@ -81,6 +100,39 @@ struct TripFixpointSheet: View {
                 }
 
                 Section {
+                    if let place {
+                        HStack {
+                            Label(place.name, systemImage: "mappin.circle.fill")
+                                .lineLimit(2)
+                            Spacer()
+                            Button("Ändern") { self.place = nil }
+                                .buttonStyle(.borderless)
+                                .font(.footnote)
+                        }
+                    } else {
+                        TripPlaceFinderRows(model: finder, picked: nil) { picked in
+                            place = picked
+                            if label.trimmingCharacters(in: .whitespaces).isEmpty {
+                                label = picked.name
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Wo")
+                } footer: {
+                    // This is the half that does something, so it says
+                    // what: the day is routed from or to this point
+                    // instead of from and to the accommodation.
+                    Text(kind == .departure
+                         ? "Bahnhof, Flughafen, Hafen. Mit einem Ort hier endet der letzte Block "
+                           + "dort statt an der Unterkunft — den Rückweg ins Hotel geht ja niemand "
+                           + "mehr."
+                         : "Wenn der Termin vor dem ersten Block liegt — die Ankunft —, startet "
+                           + "der Tag von hier statt von der Unterkunft. Ohne Ort bleibt alles "
+                           + "wie bisher.")
+                }
+
+                Section {
                     Stepper(value: $travelMinutes, in: 0...240, step: 5) {
                         Text(TripClock.duration(travelMinutes))
                     }
@@ -104,13 +156,14 @@ struct TripFixpointSheet: View {
                     Button {
                         saving = true
                         Task {
-                            await onSave(
-                                label.trimmingCharacters(in: .whitespacesAndNewlines),
-                                TripDayTimeline.minutesOfDay(time),
-                                kind.rawValue,
-                                travelMinutes,
-                                durationMinutes,
-                            )
+                            await onSave(Draft(
+                                label: label.trimmingCharacters(in: .whitespacesAndNewlines),
+                                minutesOfDay: TripDayTimeline.minutesOfDay(time),
+                                kind: kind.rawValue,
+                                travelMinutes: travelMinutes,
+                                durationMinutes: durationMinutes,
+                                place: place,
+                            ))
                             saving = false
                             dismiss()
                         }

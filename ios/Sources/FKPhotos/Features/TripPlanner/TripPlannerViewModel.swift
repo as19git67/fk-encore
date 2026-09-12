@@ -540,13 +540,7 @@ final class TripPlannerViewModel {
     /// The frame, not the content: the server re-frames the day around
     /// it and re-plans, so what comes back is a day whose blocks have
     /// the minutes the train left them.
-    func addFixpoint(
-        label: String,
-        at minutesOfDay: Int,
-        kind: String,
-        travelMinutes: Int,
-        durationMinutes: Int,
-    ) async {
+    func addFixpoint(_ draft: TripFixpointSheet.Draft) async {
         guard let plan, plan.legs.contains(where: { $0.position == legIndex }) else { return }
         struct Body: Encodable {
             let legIndex: Int
@@ -556,6 +550,11 @@ final class TripPlannerViewModel {
             let kind: String
             let travelMinutes: Int
             let durationMinutes: Int
+            /// Both or neither: the server refuses half a coordinate,
+            /// and rightly — a latitude alone is not a place with a gap
+            /// in it (§4.4).
+            let lat: Double?
+            let lon: Double?
         }
         isSavingFixpoint = true
         defer { isSavingFixpoint = false }
@@ -565,13 +564,15 @@ final class TripPlannerViewModel {
                 body: Body(
                     legIndex: legIndex,
                     dayIndex: dayIndex,
-                    label: label,
-                    at: TripClock.format(minutesOfDay),
-                    kind: kind,
-                    travelMinutes: travelMinutes,
+                    label: draft.label,
+                    at: TripClock.format(draft.minutesOfDay),
+                    kind: draft.kind,
+                    travelMinutes: draft.travelMinutes,
                     // A departure is an instant; only an appointment
                     // occupies time (§4.4).
-                    durationMinutes: kind == "departure" ? 0 : durationMinutes,
+                    durationMinutes: draft.kind == "departure" ? 0 : draft.durationMinutes,
+                    lat: draft.place?.latitude,
+                    lon: draft.place?.longitude,
                 ),
             )
             apply(response)

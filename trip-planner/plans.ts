@@ -26,6 +26,7 @@ import { DEFAULT_DAY, shapeDay, type BlockTemplate, type GroupProfile, type Pace
 import { dayShapeOf, validateDayShape } from "./day-shape";
 import { scoreForLight, toCandidates, type ScoredCandidate } from "./candidates";
 import { climateForLeg } from "./climate-precautions";
+import { dayEnds, type LocatedFixpoint } from "./day-ends";
 import {
   MAX_SEARCH_RADIUS_M,
   mergeByOsmRef,
@@ -72,6 +73,7 @@ import {
   type CreateDayInput,
   type CreateFixpointInput,
   type CreateLegInput,
+  type StoredFixpoint,
   type PlanSummary,
   type StoredPlan,
 } from "./plan-store";
@@ -810,9 +812,17 @@ export const detailTripDay = api(
         : legLimitFor(leg.mode as TransportMode);
 
     // The stored blocks already carry the budgets the fixpoints left
-    // them, so the frame does not have to be recomputed here.
+    // them, so the frame does not have to be recomputed here. The two
+    // ends do: a day filled in the evening before must come out the
+    // same as one filled with the trip (§4.4).
+    const ends = dayEnds(
+      locatedStoredFixpoints(day.fixpoints),
+      day.blocks.flatMap((b) => (b.startMinutes === null ? [] : [{ startMinutes: b.startMinutes }])),
+    );
     const solved = solveDay({
       anchor: leg.anchor,
+      start: ends.start ?? undefined,
+      end: ends.end ?? undefined,
       blocks: day.blocks.map((b) => ({
         id: b.id,
         label: b.label,
@@ -1374,8 +1384,15 @@ async function planLeg(
     const candidatesForDay = startDate
       ? scoreForLight(available, { date: addDays(startDate, dayIndex), at: anchor })
       : available;
+    // Where this day really begins and ends (§4.4). An arrival at a
+    // station is not the hotel, and after the last train nobody walks
+    // back to it — the two days everybody remembers were planned as if
+    // they were ordinary ones.
+    const ends = dayEnds(locatedFixpoints(framed.fixpoints, fixpoints), framed.blocks);
     const solved = solveDay({
       anchor,
+      start: ends.start ?? undefined,
+      end: ends.end ?? undefined,
       blocks: framed.blocks,
       candidates: candidatesForDay,
       maxWalkMinutes: trip.maxWalkMinutes ?? legLimitFor(mode),
@@ -1698,6 +1715,50 @@ function validateAnchor(anchor: { lat: number; lon: number } | undefined): { lat
     throw APIError.invalidArgument(`lon out of range: ${lon}`);
   }
   return { lat, lon };
+}
+
+/**
+ * The day's fixpoints with their times resolved *and* their places.
+ *
+ * The two halves live apart on purpose: `scheduleDay` is pure
+ * arithmetic over minutes and has never known what a map is, while the
+ * coordinate is stored beside the request. Joining them by id here
+ * keeps it that way — and the join is why the coordinate sat unused for
+ * as long as it did.
+ */
+function locatedFixpoints(
+  resolved: readonly (Fixpoint & { endMinutes: number; kind: FixpointKind })[],
+  requested: ReadonlyArray<{ stored: CreateFixpointInput }>,
+): LocatedFixpoint[] {
+  const places = new Map(requested.map((f) => [f.stored.id, f.stored]));
+  return resolved.map((f) => ({
+    label: f.label,
+    kind: f.kind,
+    startMinutes: f.startMinutes,
+    endMinutes: f.endMinutes,
+    lat: places.get(f.id)?.lat ?? null,
+    lon: places.get(f.id)?.lon ?? null,
+  }));
+}
+
+/**
+ * The same, for a day read back from the database.
+ *
+ * A stored fixpoint carries no `endMinutes` — it is the sum of its own
+ * time and how long it lasts, and recomputing it here is cheaper than a
+ * column that could disagree with the two it is made of.
+ */
+function locatedStoredFixpoints(
+  stored: readonly StoredFixpoint[],
+): LocatedFixpoint[] {
+  return stored.map((f) => ({
+    label: f.label,
+    kind: f.kind,
+    startMinutes: f.startMinutes,
+    endMinutes: f.startMinutes + (f.durationMinutes ?? 0),
+    lat: f.lat,
+    lon: f.lon,
+  }));
 }
 
 /**
