@@ -1302,14 +1302,37 @@ async function planLeg(
   //
   // Zero candidates is exactly a frame: the solver fills the budget it
   // is given, and given nothing it produces blocks with no stops.
-  const spots = region
-    ? mergeByOsmRef(
-        ...await Promise.all([
-          searchArea(region.postgresDb, anchor, radiusM, trip.categories, "distance"),
-          searchArea(region.postgresDb, anchor, radiusM, trip.categories, "prominence"),
-        ]),
-      )
+  const pages = region
+    ? await Promise.all([
+        searchArea(region.postgresDb, anchor, radiusM, trip.categories, "distance"),
+        searchArea(region.postgresDb, anchor, radiusM, trip.categories, "prominence"),
+      ])
     : [];
+  // Both searches down is not "this city has nothing". Saving that as a
+  // trip writes a lie into the plan and then hides it behind a day that
+  // looks merely empty — and a re-plan would wipe the spots a working
+  // search had already found. One of the two failing is survivable; the
+  // other page still plans the day.
+  if (pages.length > 0 && pages.every((page) => page.failure !== null)) {
+    throw APIError.unavailable(
+      `Die Umgebungssuche antwortet gerade nicht (${pages[0].failure}). `
+      + "Die Reise wurde nicht gespeichert — bitte später noch einmal versuchen.",
+    );
+  }
+  const spots = mergeByOsmRef(...pages.map((page) => page.spots));
+  // An empty answer from a working search is a fact about the region,
+  // not about the traveller — and the one line somebody needs when a
+  // trip to a city full of sights comes back with nothing. Worth a log
+  // entry precisely because it is rare.
+  if (region && spots.length === 0) {
+    log.warn("area search found nothing", {
+      postgresDb: region.postgresDb,
+      radiusM,
+      lat: anchor.lat,
+      lon: anchor.lon,
+      categories: trip.categories?.join(",") ?? "all",
+    });
+  }
 
   const scored = toCandidates(spots, {
     interests: trip.interests,
@@ -1772,6 +1795,12 @@ function locatedStoredFixpoints(
  * A failure of one of the two searches is not a failure of the trip:
  * the other page still plans a day, and a leg with half a pool beats a
  * refusal to save what somebody typed (§4.3).
+ *
+ * It reports the failure rather than only logging it, because the two
+ * empty answers mean opposite things. "This city has nothing" is a
+ * fact; "the search did not answer" is a fault — and swallowing the
+ * second into the first is how a trip to Florence came back with no
+ * spots and no explanation.
  */
 async function searchArea(
   postgresDb: string,
@@ -1779,7 +1808,7 @@ async function searchArea(
   radiusM: number,
   categories: string[] | undefined,
   rank: "distance" | "prominence",
-): Promise<GeoPoiSearchSpot[]> {
+): Promise<{ spots: GeoPoiSearchSpot[]; failure: string | null }> {
   try {
     const page = await getGeoClient().searchPois(postgresDb, {
       center: { lat: anchor.lat, lon: anchor.lon, radiusM },
@@ -1787,13 +1816,11 @@ async function searchArea(
       rank,
       limit: CANDIDATE_LIMIT,
     });
-    return page.spots;
+    return { spots: page.spots, failure: null };
   } catch (err) {
-    log.warn("area search failed, planning with what the other one found", {
-      rank,
-      reason: err instanceof Error ? err.message : String(err),
-    });
-    return [];
+    const reason = err instanceof Error ? err.message : String(err);
+    log.warn("area search failed", { rank, radiusM, postgresDb, reason });
+    return { spots: [], failure: reason };
   }
 }
 
