@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dayEnds, type LocatedFixpoint } from "./day-ends";
+import { dayEnds, travelPaidByRoute, type LocatedFixpoint } from "./day-ends";
 
 const STATION = { lat: 48.365, lon: 10.886 };
 const AIRPORT = { lat: 48.353, lon: 11.786 };
@@ -89,5 +89,41 @@ describe("dayEnds", () => {
     expect(dayEnds([fix({ lat: 48.3, lon: null })], MORNING)).toEqual({ start: null, end: null });
     expect(dayEnds([fix({ lat: Number.NaN, lon: 10.9 })], MORNING))
       .toEqual({ start: null, end: null });
+  });
+});
+
+describe("travelPaidByRoute", () => {
+  const SPOTS = [{ kind: "spots" }, { kind: "spots" }];
+  const train = { kind: "departure" as const, travelMinutes: 15, ...STATION };
+
+  it("stops the guard charging for a walk the route already pays", () => {
+    // Both at once made the day stop half an hour before the train and
+    // then spend the real walk out of what was left — conservative, and
+    // still a stop nobody had to give up.
+    expect(travelPaidByRoute([train], SPOTS)[0].travelMinutes).toBe(0);
+  });
+
+  it("leaves a departure without a place alone", () => {
+    const typed = { kind: "departure" as const, travelMinutes: 15 };
+    expect(travelPaidByRoute([typed], SPOTS)[0].travelMinutes).toBe(15);
+  });
+
+  it("leaves an appointment alone, placed or not", () => {
+    const tour = { kind: "appointment" as const, travelMinutes: 20, ...STATION };
+    expect(travelPaidByRoute([tour], SPOTS)[0].travelMinutes).toBe(20);
+  });
+
+  it("keeps the guard when a meal comes after the last spots block", () => {
+    // Then the route ends at the station before the dinner does, and
+    // the guard is the only thing between a long meal and a missed
+    // train.
+    const withMeal = [{ kind: "spots" }, { kind: "meal" }];
+    expect(travelPaidByRoute([train], withMeal)[0].travelMinutes).toBe(15);
+  });
+
+  it("changes nothing about the other fields", () => {
+    const [out] = travelPaidByRoute([{ ...train, label: "Zug" }], SPOTS);
+    expect(out.label).toBe("Zug");
+    expect(out.lat).toBe(STATION.lat);
   });
 });

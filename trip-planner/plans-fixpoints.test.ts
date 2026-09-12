@@ -250,4 +250,31 @@ describe("POST /trip-planner/plans with fixpoints", () => {
 
     expect(plan.legs[0].days[0].blocks.flatMap((b) => b.stops).length).toBeGreaterThan(0);
   });
+
+  it("does not charge the walk to the station twice", async () => {
+    // The guard cuts the last block by `travelMinutes`; the route now
+    // also ends at the platform. Both at once made the day stop half an
+    // hour before the train and then spend the real walk out of what
+    // was left — a stop nobody had to give up.
+    const station = { lat: ANCHOR.lat - 2_000 / 111_320, lon: ANCHOR.lon };
+    const departure = {
+      dayIndex: 0, label: "Zug 18:40", at: "18:40", kind: "departure" as const,
+      travelMinutes: 30,
+    };
+
+    const placed = await createTripPlan({
+      legs: [{ anchor: ANCHOR, fixpoints: [{ ...departure, ...station }] }],
+    });
+    const typedOnly = await createTripPlan({
+      legs: [{ anchor: ANCHOR, fixpoints: [departure] }],
+    });
+
+    const lastBudget = (plan: typeof placed) => {
+      const blocks = plan.plan.legs[0].days[0].blocks;
+      return blocks[blocks.length - 1].budgetMinutes;
+    };
+    // Same train, same buffer: the located one keeps the thirty minutes
+    // the route is about to spend for real.
+    expect(lastBudget(placed) - lastBudget(typedOnly)).toBe(30);
+  });
 });

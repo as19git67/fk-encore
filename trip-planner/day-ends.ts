@@ -93,7 +93,37 @@ export function dayEnds(
   return { start: toEnd(start), end: toEnd(end) };
 }
 
-function hasPlace(f: LocatedFixpoint): boolean {
+/**
+ * The fixpoints as the *schedule* should see them, once the route pays
+ * the way.
+ *
+ * Naming a place for the departure made the last block end at the
+ * platform — and left `travelMinutes` cutting the same block's budget
+ * for the same walk. The way to the station was paid twice: the day
+ * stopped planning half an hour before the train and then spent the
+ * real walk out of what was left. Conservative, and still wrong: it
+ * costs a stop nobody had to give up.
+ *
+ * So where the route pays it, the guard does not. The coordinate is the
+ * better of the two figures anyway — it measures from the stop the day
+ * actually ends at, rather than from wherever somebody imagined when
+ * they typed a number into a sheet.
+ *
+ * Only when the day's **last block is a spots block**, because that is
+ * the block the route ends in. With a meal after it, nothing here
+ * changes: the guard is then the only thing standing between a long
+ * dinner and a missed train.
+ */
+export function travelPaidByRoute<
+  T extends { kind?: FixpointKind; travelMinutes?: number; lat?: number | null; lon?: number | null },
+>(fixpoints: readonly T[], blocks: readonly { kind: string }[]): T[] {
+  const last = blocks[blocks.length - 1];
+  if (last?.kind !== "spots") return [...fixpoints];
+  return fixpoints.map((f) =>
+    f.kind === "departure" && hasPlace(f) ? { ...f, travelMinutes: 0 } : f);
+}
+
+function hasPlace(f: { lat?: number | null; lon?: number | null }): boolean {
   return typeof f.lat === "number" && typeof f.lon === "number"
     && Number.isFinite(f.lat) && Number.isFinite(f.lon);
 }

@@ -26,7 +26,7 @@ import { DEFAULT_DAY, shapeDay, type BlockTemplate, type GroupProfile, type Pace
 import { dayShapeOf, validateDayShape } from "./day-shape";
 import { scoreForLight, toCandidates, type ScoredCandidate } from "./candidates";
 import { climateForLeg } from "./climate-precautions";
-import { dayEnds, type LocatedFixpoint } from "./day-ends";
+import { dayEnds, travelPaidByRoute, type LocatedFixpoint } from "./day-ends";
 import {
   MAX_SEARCH_RADIUS_M,
   mergeByOsmRef,
@@ -1345,7 +1345,12 @@ async function planLeg(
       : dayStartMinutes;
     const framed = scheduleDay({
       blocks: trip.shape,
-      fixpoints: fixpoints.map((f) => f.fixpoint),
+      // Where the route pays the way to the station, the guard must
+      // not cut the same minutes a second time (`day-ends.ts`).
+      fixpoints: travelPaidByRoute(
+        fixpoints.map((f) => ({ ...f.fixpoint, lat: f.stored.lat, lon: f.stored.lon })),
+        trip.shape,
+      ),
       dayStartMinutes: startsAt ?? undefined,
       // Only an arrival makes the day begin later than the shape
       // assumes; a leg that simply starts at half past seven moves the
